@@ -50,7 +50,7 @@ async function setupKaliContainer(userId) {
             Cmd: ['/bin/bash'],
             Tty: true,
             OpenStdin: true,
-            Env: ['TERM=xterm-256color'],
+            Env: ['TERM=xterm-256color', 'LANG=pt_BR.UTF-8', 'LC_ALL=pt_BR.UTF-8'],
             HostConfig: {
                 Binds: [`${volumeName}:/root`], // Salva os arquivos no HD virtual
                 Memory: 2 * 1024 * 1024 * 1024, // 2GB de RAM
