@@ -15,21 +15,37 @@ const docker = new Docker(isWindows ? { socketPath: '\\\\.\\pipe\\docker_engine'
 async function setupKaliContainer(userId) {
     const volumeName = `kali_hd_${userId}`;
     const containerName = `cloudos_kali_${userId}`;
+    const imageName = 'kalilinux/kali-rolling:latest';
     
     // 1. Cria o HD virtual do usuário (ignora erro se já existir)
     try { 
         await docker.createVolume({ Name: volumeName }); 
     } catch (err) {}
 
+    // 2. Garante que a imagem do Kali Linux existe localmente (faz pull se necessário)
+    try {
+        await docker.getImage(imageName).inspect();
+    } catch (e) {
+        console.log(`Baixando imagem do Kali Linux (${imageName})...`);
+        await new Promise((resolve, reject) => {
+            docker.pull(imageName, (err, stream) => {
+                if (err) return reject(err);
+                docker.modem.followProgress(stream, (err, output) => {
+                    if (err) return reject(err);
+                    resolve(output);
+                });
+            });
+        });
+    }
+
     let container = docker.getContainer(containerName);
     try {
         const info = await container.inspect();
         if (!info.State.Running) await container.start();
     } catch (err) {
-        console.log("Baixando/Iniciando o Kali Linux no Docker...");
-        // 2. Cria o container com a imagem oficial do Kali Linux
+        console.log("Criando e iniciando o container Kali Linux no Docker...");
         container = await docker.createContainer({
-            Image: 'kalilinux/kali-rolling:latest',
+            Image: imageName,
             name: containerName,
             Cmd: ['/bin/bash'],
             Tty: true,
