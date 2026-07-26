@@ -9,63 +9,68 @@ export const TerminalApp = () => {
   useEffect(() => {
     if (!termRef.current) return;
 
-    const term = new Terminal({
-      cursorBlink: true,
-      fontSize: 14,
-      theme: { background: '#000000', foreground: '#ffffff' }
-    });
-    
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    
-    term.open(termRef.current);
+    let term;
+    let fit;
+    let ws;
+    let ro;
 
-    // 🚨 ATRASO CRÍTICO: Espera 100ms para garantir que a janela tem tamanho real
+    // 🚨 ATRASO TOTAL: Protege contra o React 18 Strict Mode que monta e desmonta rápido demais
     const initTimer = setTimeout(() => {
+      term = new Terminal({
+        cursorBlink: true,
+        fontSize: 14,
+        theme: { background: '#000000', foreground: '#ffffff' }
+      });
+      
+      fit = new FitAddon();
+      term.loadAddon(fit);
+      
+      term.open(termRef.current);
+      
       try { fit.fit(); } catch (e) {}
-    }, 100);
 
-    const ro = new ResizeObserver(() => {
-      try { 
-        if (term.element) fit.fit(); 
-      } catch (e) {}
-    });
-    ro.observe(termRef.current);
+      ro = new ResizeObserver(() => {
+        try { 
+          if (term && term.element) fit.fit(); 
+        } catch (e) {}
+      });
+      ro.observe(termRef.current);
 
-    const ws = new WebSocket('ws://localhost:8080?userId=user_001');
-    ws.binaryType = 'arraybuffer';
+      ws = new WebSocket('ws://localhost:8080?userId=user_001');
+      ws.binaryType = 'arraybuffer';
 
-    ws.onopen = () => {
-      term.write('\x1b[32mConectado ao CloudOS Kali Linux...\r\n\x1b[0m');
-    };
+      ws.onopen = () => {
+        term.write('\x1b[32mConectado ao CloudOS Kali Linux...\r\n\x1b[0m');
+      };
 
-    ws.onmessage = (e) => {
-      if (e.data instanceof ArrayBuffer) {
-        term.write(new Uint8Array(e.data));
-      } else {
-        term.write(e.data);
-      }
-    };
+      ws.onmessage = (e) => {
+        if (e.data instanceof ArrayBuffer) {
+          term.write(new Uint8Array(e.data));
+        } else {
+          term.write(e.data);
+        }
+      };
 
-    ws.onerror = () => {
-      term.write('\r\n\x1b[31m[ERRO] Falha na conexão com o backend. O servidor está rodando?\x1b[0m\r\n');
-    };
+      ws.onerror = () => {
+        term.write('\r\n\x1b[31m[ERRO] Falha na conexão com o backend. O servidor está rodando?\x1b[0m\r\n');
+      };
 
-    ws.onclose = () => {
-      term.write('\r\n\x1b[33m[DESCONECTADO] O container foi encerrado.\x1b[0m\r\n');
-    };
+      ws.onclose = () => {
+        term.write('\r\n\x1b[33m[DESCONECTADO] O container foi encerrado.\x1b[0m\r\n');
+      };
 
-    term.onData((d) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(d);
-      }
-    });
+      term.onData((d) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(d);
+        }
+      });
+    }, 150);
 
     return () => {
       clearTimeout(initTimer);
-      ws.close();
-      term.dispose();
-      ro.disconnect();
+      if (ws) ws.close();
+      if (term) term.dispose();
+      if (ro) ro.disconnect();
     };
   }, []);
 
