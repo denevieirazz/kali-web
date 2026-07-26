@@ -17,14 +17,28 @@ export default function App() {
 
   const openApp = (appId, title, icon, component) => {
     const existing = windows.find(w => w.appId === appId);
-    if (existing) return focusWindow(existing.id);
-    const newWin = { id: Date.now(), appId, title, icon, x: 150 + Math.random()*100, y: 80 + Math.random()*50, w: 700, h: 450, z: zIndex + 1, component };
+    if (existing) {
+      return focusWindow(existing.id);
+    }
+    const newWin = { 
+      id: Date.now(), 
+      appId, 
+      title, 
+      icon, 
+      x: 150 + Math.random()*100, 
+      y: 80 + Math.random()*50, 
+      w: 700, 
+      h: 450, 
+      z: zIndex + 1, 
+      component 
+    };
     setWindows([...windows, newWin]);
     setZIndex(zIndex + 1);
     setStartOpen(false);
   };
 
   const closeApp = (id) => setWindows(windows.filter(w => w.id !== id));
+  
   const focusWindow = (id) => {
     setWindows(windows.map(w => w.id === id ? { ...w, z: zIndex + 1 } : w));
     setZIndex(zIndex + 1);
@@ -37,11 +51,18 @@ export default function App() {
   ];
 
   return (
-    <div className="desktop" style={{ background: bg.startsWith('http') ? `url(${bg}) center/cover no-repeat` : bg }} onClick={() => startOpen && setStartOpen(false)}>
-      
+    <div 
+      className="desktop" 
+      style={{ background: bg.startsWith('http') ? `url(${bg}) center/cover no-repeat` : bg }} 
+      onClick={() => startOpen && setStartOpen(false)}
+    >
       <div className="desktop-icons">
         {apps.map(app => (
-          <div key={app.id} className="d-icon" onDoubleClick={() => openApp(app.id, app.title, app.icon, app.component)}>
+          <div 
+            key={app.id} 
+            className="d-icon" 
+            onDoubleClick={() => openApp(app.id, app.title, app.icon, app.component)}
+          >
             <app.icon size={42} color="white" />
             <span>{app.title}</span>
           </div>
@@ -59,7 +80,11 @@ export default function App() {
           <input className="start-search" placeholder="Pesquisar apps..." />
           <div className="start-grid">
             {apps.map(app => (
-              <div key={app.id} className="start-app" onClick={() => openApp(app.id, app.title, app.icon, app.component)}>
+              <div 
+                key={app.id} 
+                className="start-app" 
+                onClick={() => openApp(app.id, app.title, app.icon, app.component)}
+              >
                 <app.icon size={32} color="white" />
                 <span>{app.title}</span>
               </div>
@@ -70,11 +95,15 @@ export default function App() {
 
       <div className="taskbar">
         <div className="taskbar-app" onClick={(e) => { e.stopPropagation(); setStartOpen(!startOpen); }}>
-          <Search size={24} /> {/* Simulando o botão Iniciar do Win11 */}
+          <Search size={24} />
         </div>
         
         {apps.map(app => (
-          <div key={app.id} className={`taskbar-app ${windows.find(w => w.appId === app.id) ? 'active' : ''}`} onClick={() => openApp(app.id, app.title, app.icon, app.component)}>
+          <div 
+            key={app.id} 
+            className={`taskbar-app ${windows.find(w => w.appId === app.id) ? 'active' : ''}`} 
+            onClick={() => openApp(app.id, app.title, app.icon, app.component)}
+          >
             <app.icon size={22} />
           </div>
         ))}

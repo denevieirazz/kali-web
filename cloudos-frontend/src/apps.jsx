@@ -4,29 +4,64 @@ import { FitAddon } from 'xterm-addon-fit';
 
 export const TerminalApp = () => {
   const termRef = useRef(null);
+
   useEffect(() => {
-    const term = new Terminal({ cursorBlink: true, theme: { background: 'rgba(0,0,0,0)', foreground: '#fff' } });
+    const term = new Terminal({
+      cursorBlink: true,
+      fontSize: 14,
+      theme: { background: 'rgba(0,0,0,0.4)', foreground: '#fff' }
+    });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(termRef.current);
-    fit.fit();
+    
+    // Pequeno delay para garantir que o container tem tamanho antes do fit
+    setTimeout(() => fit.fit(), 100);
+
     const ro = new ResizeObserver(() => {
-      try {
-        fit.fit();
-      } catch (e) {}
+      try { fit.fit(); } catch (e) {}
     });
     ro.observe(termRef.current);
 
     const ws = new WebSocket('ws://localhost:8080?userId=user_001');
-    ws.onmessage = (e) => term.write(e.data);
+    
+    // 🚨 CRÍTICO: Força o recebimento como ArrayBuffer (Binário puro)
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => {
+      term.write('\x1b[32mConectado ao CloudOS Kali Linux...\r\n\x1b[0m');
+    };
+
+    ws.onmessage = (e) => {
+      // Converte o buffer do Docker para o formato do xterm
+      if (e.data instanceof ArrayBuffer) {
+        term.write(new Uint8Array(e.data));
+      } else {
+        term.write(e.data);
+      }
+    };
+
+    ws.onerror = () => {
+      term.write('\r\n\x1b[31m[ERRO] Falha na conexão com o backend.\x1b[0m\r\n');
+    };
+
+    ws.onclose = () => {
+      term.write('\r\n\x1b[33m[DESCONECTADO] O container foi encerrado.\x1b[0m\r\n');
+    };
+
     term.onData((d) => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(d);
       }
     });
 
-    return () => { ws.close(); term.dispose(); ro.disconnect(); };
+    return () => {
+      ws.close();
+      term.dispose();
+      ro.disconnect();
+    };
   }, []);
+
   return <div ref={termRef} className="terminal-container"></div>;
 };
 
