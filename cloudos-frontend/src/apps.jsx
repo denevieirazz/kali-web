@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
-import 'xterm/css/xterm.css'; // 🚨 LINHA CRÍTICA PARA NÃO FICAR BRANCO
+import 'xterm/css/xterm.css';
 
 export const TerminalApp = () => {
   const termRef = useRef(null);
@@ -12,21 +12,23 @@ export const TerminalApp = () => {
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 14,
-      theme: { background: '#000000', foreground: '#ffffff' } // Fundo preto sólido
+      theme: { background: '#000000', foreground: '#ffffff' }
     });
     
     const fit = new FitAddon();
     term.loadAddon(fit);
     
-    try {
-      term.open(termRef.current);
-      fit.fit();
-    } catch (e) {
-      console.error("Erro ao abrir terminal:", e);
-    }
+    term.open(termRef.current);
+
+    // 🚨 ATRASO CRÍTICO: Espera 100ms para garantir que a janela tem tamanho real
+    const initTimer = setTimeout(() => {
+      try { fit.fit(); } catch (e) {}
+    }, 100);
 
     const ro = new ResizeObserver(() => {
-      try { fit.fit(); } catch (e) {}
+      try { 
+        if (term.element) fit.fit(); 
+      } catch (e) {}
     });
     ro.observe(termRef.current);
 
@@ -46,7 +48,7 @@ export const TerminalApp = () => {
     };
 
     ws.onerror = () => {
-      term.write('\r\n\x1b[31m[ERRO] Falha na conexão com o backend.\x1b[0m\r\n');
+      term.write('\r\n\x1b[31m[ERRO] Falha na conexão com o backend. O servidor está rodando?\x1b[0m\r\n');
     };
 
     ws.onclose = () => {
@@ -60,13 +62,14 @@ export const TerminalApp = () => {
     });
 
     return () => {
+      clearTimeout(initTimer);
       ws.close();
       term.dispose();
       ro.disconnect();
     };
   }, []);
 
-  return <div ref={termRef} style={{ height: '100%', width: '100%', padding: '5px' }} />;
+  return <div ref={termRef} style={{ height: '100%', width: '100%', padding: '5px', overflow: 'hidden' }} />;
 };
 
 export const NotepadApp = () => {
