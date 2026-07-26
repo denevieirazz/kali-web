@@ -1,0 +1,6 @@
+node_modules/
+cloudos-backend/node_modules/
+cloudos-frontend/node_modules/
+cloudos-frontend/dist/
+.env
+*.log

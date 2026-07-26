@@ -1,0 +1,50 @@
+* { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+html, body, #root { width: 100vw; height: 100vh; overflow: hidden; }
+body { font-family: 'Segoe UI', system-ui, sans-serif; }
+
+.desktop {
+  width: 100vw; height: 100vh; position: relative; overflow: hidden;
+  background: url('https://images.unsplash.com/photo-1579546929518-9e396f3cc809?q=80&w=2070') center/cover no-repeat;
+}
+
+/* Desktop Icons */
+.desktop-icons { position: absolute; top: 20px; left: 20px; display: flex; flex-direction: column; gap: 10px; }
+.d-icon { width: 85px; padding: 10px; border-radius: 6px; display: flex; flex-direction: column; align-items: center; gap: 5px; cursor: pointer; transition: 0.2s; }
+.d-icon:hover { background: rgba(255,255,255,0.15); backdrop-filter: blur(5px); }
+.d-icon span { color: white; font-size: 12px; text-align: center; text-shadow: 1px 1px 3px rgba(0,0,0,0.9); }
+
+/* Windows (Janelas) */
+.window-wrapper { box-shadow: 0 20px 50px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; overflow: hidden; background: rgba(30,30,30,0.85); backdrop-filter: blur(20px); display: flex; flex-direction: column; }
+.window-header { height: 40px; background: rgba(0,0,0,0.2); display: flex; justify-content: space-between; align-items: center; padding-left: 15px; cursor: grab; }
+.window-header:active { cursor: grabbing; }
+.window-title { color: white; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.window-controls { display: flex; height: 100%; }
+.win-btn { width: 45px; border: none; background: transparent; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+.win-btn:hover { background: rgba(255,255,255,0.1); }
+.win-btn.close:hover { background: #e81123; }
+.window-body { flex: 1; overflow: hidden; background: rgba(0,0,0,0.4); }
+
+/* Taskbar */
+.taskbar { position: absolute; bottom: 0; width: 100%; height: 50px; background: rgba(20,20,20,0.75); backdrop-filter: blur(25px); border-top: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: center; align-items: center; gap: 10px; z-index: 99999; }
+.taskbar-app { width: 40px; height: 40px; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: white; cursor: pointer; transition: 0.2s; }
+.taskbar-app:hover { background: rgba(255,255,255,0.15); transform: translateY(-3px); }
+.taskbar-app.active { background: rgba(255,255,255,0.2); border-bottom: 2px solid #60a5fa; }
+.taskbar-tray { position: absolute; right: 15px; color: white; font-size: 12px; display: flex; gap: 15px; align-items: center; }
+
+/* Start Menu */
+.start-menu { position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%); width: 400px; height: 450px; background: rgba(30,30,30,0.9); backdrop-filter: blur(30px); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; z-index: 99998; box-shadow: 0 20px 50px rgba(0,0,0,0.5); padding: 20px; display: flex; flex-direction: column; gap: 20px; }
+.start-search { padding: 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.3); color: white; outline: none; }
+.start-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; }
+.start-app { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 10px; border-radius: 6px; cursor: pointer; }
+.start-app:hover { background: rgba(255,255,255,0.1); }
+.start-app span { color: white; font-size: 11px; }
+
+/* Terminal */
+.terminal-container { width: 100%; height: 100%; padding: 5px; }
+
+/* Notepad */
+.notepad-area { width: 100%; height: 100%; background: #1e1e1e; color: #d4d4d4; border: none; outline: none; resize: none; padding: 15px; font-family: monospace; font-size: 14px; }
+
+/* Settings */
+.settings-container { padding: 20px; color: white; }
+.settings-btn { padding: 10px 20px; background: #60a5fa; border: none; border-radius: 6px; color: black; font-weight: bold; cursor: pointer; margin-top: 10px; }
