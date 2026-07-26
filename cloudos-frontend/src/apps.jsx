@@ -13,7 +13,6 @@ export const TerminalApp = () => {
     let fit;
     let ws;
     let ro;
-    let handleClick;
 
     const initTimer = setTimeout(() => {
       term = new Terminal({
@@ -29,8 +28,11 @@ export const TerminalApp = () => {
       
       try { fit.fit(); } catch (e) {}
 
-      // 🚨 FORÇA O FOCO DO TECLADO AQUI
-      term.focus();
+      // 🚨 TRUQUE PARA FORÇAR O FOCO DO TECLADO NO NAVEGADOR
+      // Tenta focar a caixa de texto invisível do xterm
+      if (term.textarea) {
+        term.textarea.focus();
+      }
 
       ro = new ResizeObserver(() => {
         try { 
@@ -39,10 +41,13 @@ export const TerminalApp = () => {
       });
       ro.observe(termRef.current);
 
-      // 🚨 GARANTE QUE CLICAR NA TELA TRAZ O FOCO DE VOLTA
-      handleClick = () => term.focus();
+      // 🚨 AO CLICAR NA TELA PRETA, FORÇA O FOCO NOVAMENTE
       if (termRef.current) {
-        termRef.current.addEventListener('click', handleClick);
+        termRef.current.addEventListener('mousedown', () => {
+          if (term && term.textarea) {
+            term.textarea.focus();
+          }
+        });
       }
 
       ws = new WebSocket('ws://localhost:8080?userId=user_001');
@@ -80,7 +85,6 @@ export const TerminalApp = () => {
       if (ws) ws.close();
       if (term) term.dispose();
       if (ro) ro.disconnect();
-      if (termRef.current && handleClick) termRef.current.removeEventListener('click', handleClick);
     };
   }, []);
 
