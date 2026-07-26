@@ -8,7 +8,6 @@ app.use(cors());
 const server = require('http').createServer(app);
 const wss = new WebSocketServer({ server });
 
-// Conexão com Docker configurada para Windows e Linux/Mac
 const isWindows = process.platform === 'win32';
 const docker = new Docker(isWindows ? { socketPath: '\\\\.\\pipe\\docker_engine' } : undefined);
 
@@ -17,12 +16,9 @@ async function setupKaliContainer(userId) {
     const containerName = `cloudos_kali_${userId}`;
     const imageName = 'kalilinux/kali-rolling:latest';
     
-    // 1. Cria o HD virtual do usuário (ignora erro se já existir)
-    try { 
-        await docker.createVolume({ Name: volumeName }); 
-    } catch (err) {}
+    try { await docker.createVolume({ Name: volumeName }); } catch (err) {}
 
-    // 2. Garante que a imagem do Kali Linux existe localmente (faz pull se necessário)
+    // Garante que a imagem do Kali Linux existe localmente (faz pull se necessário)
     try {
         await docker.getImage(imageName).inspect();
     } catch (e) {
@@ -43,7 +39,7 @@ async function setupKaliContainer(userId) {
         const info = await container.inspect();
         if (!info.State.Running) await container.start();
     } catch (err) {
-        console.log("Criando e iniciando o container Kali Linux no Docker...");
+        console.log("Baixando/Iniciando o Kali Linux no Docker...");
         container = await docker.createContainer({
             Image: imageName,
             name: containerName,
@@ -52,9 +48,9 @@ async function setupKaliContainer(userId) {
             OpenStdin: true,
             Env: ['TERM=xterm-256color', 'LANG=pt_BR.UTF-8', 'LC_ALL=pt_BR.UTF-8'],
             HostConfig: {
-                Binds: [`${volumeName}:/root`], // Salva os arquivos no HD virtual
-                Memory: 2 * 1024 * 1024 * 1024, // 2GB de RAM
-                NanoCpus: 2000000000, // 2 núcleos de CPU
+                Binds: [`${volumeName}:/root`],
+                Memory: 2 * 1024 * 1024 * 1024,
+                NanoCpus: 2000000000,
                 NetworkMode: 'bridge'
             }
         });
@@ -64,7 +60,6 @@ async function setupKaliContainer(userId) {
     return container;
 }
 
-// 🔄 Sistema de Heartbeat (Ping/Pong) para detectar conexões mortas
 function heartbeat() {
     this.isAlive = true;
 }
@@ -75,23 +70,22 @@ const interval = setInterval(() => {
         ws.isAlive = false;
         ws.ping();
     });
-}, 30000); // Verifica a cada 30 segundos
+}, 30000);
 
 wss.on('connection', async (ws, req) => {
-    // Inicializa o heartbeat
     ws.isAlive = true;
     ws.on('pong', heartbeat);
 
-    // Parse seguro da URL
     const fullUrl = new URL(req.url, 'http://localhost');
     const userId = fullUrl.searchParams.get('userId') || 'kali_user';
 
     let stream;
     let container;
+    let exec;
 
     try {
         container = await setupKaliContainer(userId);
-        const exec = await container.exec({
+        exec = await container.exec({
             Cmd: ['/bin/bash'],
             AttachStdin: true, 
             AttachStdout: true, 
@@ -101,15 +95,12 @@ wss.on('connection', async (ws, req) => {
         });
         stream = await exec.start({ hijack: true, stdin: true });
 
-        // 📥 Dados do Docker para o Navegador
-        // Enviamos o Buffer puro para evitar quebra de caracteres UTF-8 no terminal
         stream.on('data', (chunk) => {
             if (ws.readyState === ws.OPEN) {
                 ws.send(chunk);
             }
         });
 
-        // Trata erros no stream do Docker (ex: container foi morto manualmente)
         stream.on('error', (err) => {
             console.error('Erro no stream do Docker:', err.message);
             if (ws.readyState === ws.OPEN) {
@@ -118,22 +109,31 @@ wss.on('connection', async (ws, req) => {
             }
         });
 
-        // ⌨️ Comandos do Navegador para o Docker
+        // 🚨 LÓGICA DE RESIZE E TECLADO AQUI
         ws.on('message', (msg) => {
-            if (stream.writable) {
-                stream.write(msg);
+            const strMsg = msg.toString();
+            
+            // Se for um comando especial de redimensionamento
+            if (strMsg.startsWith('{"type":"resize"')) {
+                try {
+                    const data = JSON.parse(strMsg);
+                    if (data.type === 'resize' && exec) {
+                        // Avisa o Docker para mudar o tamanho do terminal
+                        exec.resize({ h: data.rows, w: data.cols }, () => {});
+                    }
+                } catch (e) {}
+            } else {
+                // Senão, é texto normal do teclado
+                if (stream && stream.writable) stream.write(msg);
             }
         });
 
-        // 🚪 Ao fechar o navegador, para o container para economizar recursos
         ws.on('close', async () => {
             console.log(`Conexão fechada. Parando container do usuário ${userId}...`);
             try {
                 if (stream) stream.end();
-                if (container) await container.stop({ t: 2 }); // Espera 2s antes de matar (graceful shutdown)
-            } catch (e) {
-                // Ignora erro se o container já estiver parado
-            }
+                if (container) await container.stop({ t: 2 });
+            } catch (e) {}
         });
 
     } catch (error) {

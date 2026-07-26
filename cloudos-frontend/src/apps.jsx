@@ -28,25 +28,30 @@ export const TerminalApp = () => {
       
       try { fit.fit(); } catch (e) {}
 
-      // 🚨 TRUQUE PARA FORÇAR O FOCO DO TECLADO NO NAVEGADOR
-      // Tenta focar a caixa de texto invisível do xterm
       if (term.textarea) {
         term.textarea.focus();
       }
 
+      // 🚨 FUNÇÃO PARA ENVIAR O TAMANHO PRO BACKEND
+      const sendResize = () => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+        }
+      };
+
       ro = new ResizeObserver(() => {
         try { 
-          if (term && term.element) fit.fit(); 
+          if (term && term.element) {
+            fit.fit();
+            sendResize(); // Envia o novo tamanho sempre que a janela muda
+          } 
         } catch (e) {}
       });
       ro.observe(termRef.current);
 
-      // 🚨 AO CLICAR NA TELA PRETA, FORÇA O FOCO NOVAMENTE
       if (termRef.current) {
         termRef.current.addEventListener('mousedown', () => {
-          if (term && term.textarea) {
-            term.textarea.focus();
-          }
+          if (term && term.textarea) term.textarea.focus();
         });
       }
 
@@ -55,6 +60,8 @@ export const TerminalApp = () => {
 
       ws.onopen = () => {
         term.write('\x1b[32mConectado ao CloudOS Kali Linux...\r\n\x1b[0m');
+        // Envia o tamanho inicial assim que conecta
+        setTimeout(sendResize, 200);
       };
 
       ws.onmessage = (e) => {
@@ -66,7 +73,7 @@ export const TerminalApp = () => {
       };
 
       ws.onerror = () => {
-        term.write('\r\n\x1b[31m[ERRO] Falha na conexão com o backend. O servidor está rodando?\x1b[0m\r\n');
+        term.write('\r\n\x1b[31m[ERRO] Falha na conexão com o backend.\x1b[0m\r\n');
       };
 
       ws.onclose = () => {
