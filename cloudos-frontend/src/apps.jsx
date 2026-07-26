@@ -13,8 +13,8 @@ export const TerminalApp = () => {
     let fit;
     let ws;
     let ro;
+    let handleClick;
 
-    // 🚨 ATRASO TOTAL: Protege contra o React 18 Strict Mode que monta e desmonta rápido demais
     const initTimer = setTimeout(() => {
       term = new Terminal({
         cursorBlink: true,
@@ -29,12 +29,21 @@ export const TerminalApp = () => {
       
       try { fit.fit(); } catch (e) {}
 
+      // 🚨 FORÇA O FOCO DO TECLADO AQUI
+      term.focus();
+
       ro = new ResizeObserver(() => {
         try { 
           if (term && term.element) fit.fit(); 
         } catch (e) {}
       });
       ro.observe(termRef.current);
+
+      // 🚨 GARANTE QUE CLICAR NA TELA TRAZ O FOCO DE VOLTA
+      handleClick = () => term.focus();
+      if (termRef.current) {
+        termRef.current.addEventListener('click', handleClick);
+      }
 
       ws = new WebSocket('ws://localhost:8080?userId=user_001');
       ws.binaryType = 'arraybuffer';
@@ -71,10 +80,11 @@ export const TerminalApp = () => {
       if (ws) ws.close();
       if (term) term.dispose();
       if (ro) ro.disconnect();
+      if (termRef.current && handleClick) termRef.current.removeEventListener('click', handleClick);
     };
   }, []);
 
-  return <div ref={termRef} style={{ height: '100%', width: '100%', padding: '5px', overflow: 'hidden' }} />;
+  return <div ref={termRef} style={{ height: '100%', width: '100%', padding: '5px', overflow: 'hidden', cursor: 'text' }} />;
 };
 
 export const NotepadApp = () => {
