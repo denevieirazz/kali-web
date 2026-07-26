@@ -7,15 +7,13 @@ export default function Window({ win, onClose, onFocus, children }) {
 
   return (
     <Rnd
-      // Se maximizado, ocupa tudo. Se não, usa o tamanho inicial
-      size={maximized ? { width: '100%', height: '100%' } : { width: win.w, height: win.h }}
+      size={maximized ? { width: window.innerWidth, height: window.innerHeight - 50 } : { width: win.w, height: win.h }}
       position={maximized ? { x: 0, y: 0 } : { x: win.x, y: win.y }}
       minWidth={400} minHeight={250}
       bounds="parent"
       dragHandleClassName="window-header"
       onMouseDown={onFocus}
       style={{ zIndex: win.z, position: 'absolute' }}
-      // Desabilita arrasto e redimensionamento se estiver maximizado
       enableResizing={!maximized}
       disableDragging={maximized}
     >

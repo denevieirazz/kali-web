@@ -1,22 +1,29 @@
 import { useState, useRef, useEffect } from 'react';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
+import 'xterm/css/xterm.css'; // 🚨 LINHA CRÍTICA PARA NÃO FICAR BRANCO
 
 export const TerminalApp = () => {
   const termRef = useRef(null);
 
   useEffect(() => {
+    if (!termRef.current) return;
+
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 14,
-      theme: { background: 'rgba(0,0,0,0.4)', foreground: '#fff' }
+      theme: { background: '#000000', foreground: '#ffffff' } // Fundo preto sólido
     });
+    
     const fit = new FitAddon();
     term.loadAddon(fit);
-    term.open(termRef.current);
     
-    // Pequeno delay para garantir que o container tem tamanho antes do fit
-    setTimeout(() => fit.fit(), 100);
+    try {
+      term.open(termRef.current);
+      fit.fit();
+    } catch (e) {
+      console.error("Erro ao abrir terminal:", e);
+    }
 
     const ro = new ResizeObserver(() => {
       try { fit.fit(); } catch (e) {}
@@ -24,8 +31,6 @@ export const TerminalApp = () => {
     ro.observe(termRef.current);
 
     const ws = new WebSocket('ws://localhost:8080?userId=user_001');
-    
-    // 🚨 CRÍTICO: Força o recebimento como ArrayBuffer (Binário puro)
     ws.binaryType = 'arraybuffer';
 
     ws.onopen = () => {
@@ -33,7 +38,6 @@ export const TerminalApp = () => {
     };
 
     ws.onmessage = (e) => {
-      // Converte o buffer do Docker para o formato do xterm
       if (e.data instanceof ArrayBuffer) {
         term.write(new Uint8Array(e.data));
       } else {
@@ -62,7 +66,7 @@ export const TerminalApp = () => {
     };
   }, []);
 
-  return <div ref={termRef} className="terminal-container"></div>;
+  return <div ref={termRef} style={{ height: '100%', width: '100%', padding: '5px' }} />;
 };
 
 export const NotepadApp = () => {
