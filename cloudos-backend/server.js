@@ -16,8 +16,10 @@ async function setupKaliContainer(userId) {
     const volumeName = `kali_hd_${userId}`;
     const containerName = `cloudos_kali_${userId}`;
     
-    // 1. Cria o HD virtual do usuário
-    try { await docker.createVolume({ Name: volumeName }); } catch (err) {}
+    // 1. Cria o HD virtual do usuário (ignora erro se já existir)
+    try { 
+        await docker.createVolume({ Name: volumeName }); 
+    } catch (err) {}
 
     let container = docker.getContainer(containerName);
     try {
@@ -46,28 +48,84 @@ async function setupKaliContainer(userId) {
     return container;
 }
 
+// 🔄 Sistema de Heartbeat (Ping/Pong) para detectar conexões mortas
+function heartbeat() {
+    this.isAlive = true;
+}
+
+const interval = setInterval(() => {
+    wss.clients.forEach((ws) => {
+        if (ws.isAlive === false) return ws.terminate();
+        ws.isAlive = false;
+        ws.ping();
+    });
+}, 30000); // Verifica a cada 30 segundos
+
 wss.on('connection', async (ws, req) => {
-    const params = new URLSearchParams(req.url.split('?')[1]);
-    const userId = params.get('userId') || 'kali_user';
+    // Inicializa o heartbeat
+    ws.isAlive = true;
+    ws.on('pong', heartbeat);
+
+    // Parse seguro da URL
+    const fullUrl = new URL(req.url, 'http://localhost');
+    const userId = fullUrl.searchParams.get('userId') || 'kali_user';
+
+    let stream;
+    let container;
 
     try {
-        const container = await setupKaliContainer(userId);
+        container = await setupKaliContainer(userId);
         const exec = await container.exec({
             Cmd: ['/bin/bash'],
-            AttachStdin: true, AttachStdout: true, AttachStderr: true,
-            Tty: true, WorkingDir: '/root'
+            AttachStdin: true, 
+            AttachStdout: true, 
+            AttachStderr: true,
+            Tty: true, 
+            WorkingDir: '/root'
         });
-        const stream = await exec.start({ hijack: true, stdin: true });
+        stream = await exec.start({ hijack: true, stdin: true });
 
-        ws.on('message', (msg) => stream.write(msg));
-        stream.on('data', (chunk) => ws.send(chunk.toString('utf-8')));
+        // 📥 Dados do Docker para o Navegador
+        // Enviamos o Buffer puro para evitar quebra de caracteres UTF-8 no terminal
+        stream.on('data', (chunk) => {
+            if (ws.readyState === ws.OPEN) {
+                ws.send(chunk);
+            }
+        });
 
+        // Trata erros no stream do Docker (ex: container foi morto manualmente)
+        stream.on('error', (err) => {
+            console.error('Erro no stream do Docker:', err.message);
+            if (ws.readyState === ws.OPEN) {
+                ws.send(`\r\n\x1b[31m[ERRO] Conexão com o container perdida.\x1b[0m\r\n`);
+                ws.close();
+            }
+        });
+
+        // ⌨️ Comandos do Navegador para o Docker
+        ws.on('message', (msg) => {
+            if (stream.writable) {
+                stream.write(msg);
+            }
+        });
+
+        // 🚪 Ao fechar o navegador, para o container para economizar recursos
         ws.on('close', async () => {
-            try { await container.stop(); } catch (e) {}
+            console.log(`Conexão fechada. Parando container do usuário ${userId}...`);
+            try {
+                if (stream) stream.end();
+                if (container) await container.stop({ t: 2 }); // Espera 2s antes de matar (graceful shutdown)
+            } catch (e) {
+                // Ignora erro se o container já estiver parado
+            }
         });
+
     } catch (error) {
         console.error("ERRO NO DOCKER:", error.message);
-        ws.send("ERRO: O Docker Desktop precisa estar aberto e rodando no Windows (socket: \\\\.\\pipe\\docker_engine).\r\n");
+        if (ws.readyState === ws.OPEN) {
+            ws.send("ERRO: O Docker Desktop precisa estar aberto e rodando no Windows (socket: \\\\.\\pipe\\docker_engine).\r\n");
+            ws.close();
+        }
     }
 });
 
