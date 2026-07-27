@@ -22,16 +22,23 @@ export default function BootScreen({ onBootComplete }) {
   const [progress, setProgress] = useState(0);
   const [glitching, setGlitching] = useState(true);
   const completedRef = useRef(false);
+  const intervalRef = useRef(null);
 
   useEffect(() => {
     let i = 0;
-    const interval = setInterval(() => {
+    
+    if (intervalRef.current) clearInterval(intervalRef.current);
+
+    intervalRef.current = setInterval(() => {
       if (i < bootSequence.length) {
-        setLogs(prev => [...prev, bootSequence[i]]);
-        setProgress(Math.round(((i + 1) / bootSequence.length) * 100));
+        const currentLog = bootSequence[i];
+        if (currentLog) {
+          setLogs(prev => [...prev, currentLog]);
+          setProgress(Math.round(((i + 1) / bootSequence.length) * 100));
+        }
         i++;
       } else {
-        clearInterval(interval);
+        clearInterval(intervalRef.current);
         if (!completedRef.current) {
           completedRef.current = true;
           setGlitching(false);
@@ -39,7 +46,10 @@ export default function BootScreen({ onBootComplete }) {
         }
       }
     }, 220);
-    return () => clearInterval(interval);
+
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
   }, [onBootComplete]);
 
   return (
@@ -51,11 +61,18 @@ export default function BootScreen({ onBootComplete }) {
         </div>
         
         <div className="boot-terminal-cinema">
-          {logs.map((log, i) => (
-            <div key={i} className="boot-line-cinema" style={{ color: log.color, animationDelay: `${i * 0.05}s` }}>
-              <span className="boot-prompt">[{ String(i + 1).padStart(2, '0') }]</span> {log.text}
-            </div>
-          ))}
+          {logs.map((log, i) => {
+            if (!log) return null;
+            return (
+              <div 
+                key={i} 
+                className="boot-line-cinema" 
+                style={{ color: log.color || '#fff', animationDelay: `${i * 0.05}s` }}
+              >
+                <span className="boot-prompt">[{ String(i + 1).padStart(2, '0') }]</span> {log.text}
+              </div>
+            );
+          })}
         </div>
 
         <div className="boot-loader">
