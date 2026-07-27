@@ -26,24 +26,20 @@ Se você é um agente de IA ou desenvolvedor trabalhando neste repositório, con
 
 - **`cloudos-backend/`**: Servidor Node.js (Express + WebSocket + Node-PTY + JWT)
   - `server.js`:
-    - **SubsystemManager (Enterprise Layer)**: Classe orientada a objetos que encapsula todos os comandos WSL via Promises `async/await`, gerenciamento de sessões Tmux, controle de processos do sistema e leitura/escrita assíncrona.
+    - **SubsystemManager (Enterprise Security Layer)**:
+      - **Acesso Nativo ao Sistema de Arquivos (Node FS)**: Acesso direto ao sistema de arquivos do WSL2 via caminho UNC de rede (`\\\\wsl.localhost\\kali-linux\\home\\cloudos_users\\...`), eliminando concatenações de shell.
+      - **Proteção contra Path Traversal**: Validação estrita via `getSecurePath()` impedindo acessos fora do diretório do usuário.
+      - **Isolamento de Usuário Não-Root**: Execução dos comandos e sessões Tmux como usuário `cloudos` (não-root).
+      - **Mascaramento Automático de MAC**: Mascaramento por padrão de endereços físicos para proteção OpSec.
     - **Autenticação JWT & Bcrypt**: Autenticação com hash bcrypt e validação de tokens JWT para rotas REST e conexões WebSocket.
-    - **Leitura/Escrita de Arquivos**: APIs de listagem (`ls`), ações (`mv`, `mkdir`, `rename`, `delete` com suporte à lixeira `/root/.trash`), upload (`multer`) e leitura/salvamento do Code Editor.
-    - **Módulo Tático OpSec**: APIs `/api/tactical/anon` e `/api/tactical/status` para controle do serviço Tor, Privoxy e mascaramento de MAC (`macchanger`).
-    - **APIs de Gerenciamento do Subsistema**: Endpoints `/api/subsystem/restart` e `/api/subsystem/processes` para controle de sessão Tmux e monitor de tarefas.
-    - **Chaves de Inteligência OSINT**: Armazenamento seguro de chaves de API em `~/.config/cloudos_osint.json`.
-    - **Hardware Pass-through (USB)**: Integração com `usbipd-win` (`usbipd.exe`) para acoplar adaptadores Wi-Fi ou pendrives do Windows diretamente no Kali Linux.
+    - **APIs de Gerenciamento do Sistema**: Endpoints `/api/system/status` para métricas de disco, sessões WebSocket e log de erros em tempo real.
 - **`cloudos-frontend/`**: Aplicação Web React 18 + Vite + Monaco Editor
   - `src/main.jsx`: Ponto de entrada com polyfill `window.process`.
+  - `src/registry.jsx`: Registro centralizado de aplicativos (SaaS Registry Pattern).
   - `src/App.jsx`: Gerenciador da área de trabalho estilo Windows 11, alinhamento de ícones em grade (`grid`), seleção visual, efeito de atualização *flash* sem recarregar e controle de estado do login.
   - `src/LoginScreen.jsx`: Tela de bloqueio e login (Windows 11 Glassmorphism style) com autenticação JWT.
   - `src/BootScreen.jsx`: Tela de boot cinemática com efeito CRT Scanlines, Logo Glitch RGB e barra de progresso neon com proteção contra o *React 18 Strict Mode*.
-  - `src/apps.jsx`: 
-    - `TerminalApp`: Terminal interativo xterm.js conectado via WebSocket autenticado com suporte a redimensionamento de janela.
-    - `FileManagerApp`: Gerenciador de arquivos completo com visualização em grade/lista, migalhas de pão (*breadcrumbs*), upload, lixeira e menu de contexto teletransportado via React Portal (`document.body`).
-    - `CodeEditorApp`: Editor de código baseado no Monaco Editor com suporte a destaque de sintaxe e atalho `Ctrl+S`.
-    - `SettingsApp`: Centro de Controle Tático de 4 abas (Aparência, Anonimato OpSec em tempo real, OSINT APIs e Hardware USB).
-    - `NotepadApp`: Bloco de notas com salvamento local.
+  - `src/apps/SystemMonitorApp.jsx`: Monitor de métricas do sistema e subsistema WSL em tempo real.
   - `src/Window.jsx`: Componente de janela arrastável e maximizável baseado em `react-rnd` envolvido por um `WindowErrorBoundary`.
   - `src/index.css`: Sistema de design visual completo com glassmorphism, scanlines CRT, efeito de brilho neon e temas táticos.
 
