@@ -46,7 +46,13 @@ async function setupKaliContainer(userId) {
             Cmd: ['/bin/bash'],
             Tty: true,
             OpenStdin: true,
-            Env: ['TERM=xterm-256color', 'LANG=pt_BR.UTF-8', 'LC_ALL=pt_BR.UTF-8'],
+            // 🚨 FORÇA O IDIOMA PORTUGUÊS E UTF-8 AQUI
+            Env: [
+                'TERM=xterm-256color',
+                'LANG=pt_BR.UTF-8',
+                'LANGUAGE=pt_BR:pt:en',
+                'LC_ALL=pt_BR.UTF-8'
+            ],
             HostConfig: {
                 Binds: [`${volumeName}:/root`],
                 Memory: 2 * 1024 * 1024 * 1024,
@@ -56,7 +62,7 @@ async function setupKaliContainer(userId) {
         });
         await container.start();
         console.log("Kali Linux iniciado com sucesso!");
-        
+
         // Auto-configura teclado br-abnt2 e locale no novo container
         try {
             const setupExec = await container.exec({
@@ -100,7 +106,14 @@ wss.on('connection', async (ws, req) => {
             AttachStdout: true, 
             AttachStderr: true,
             Tty: true, 
-            WorkingDir: '/root'
+            WorkingDir: '/root',
+            // 🚨 FORÇA O IDIOMA NA SESSÃO DO TERMINAL TAMBÉM
+            Env: [
+                'TERM=xterm-256color',
+                'LANG=pt_BR.UTF-8',
+                'LANGUAGE=pt_BR:pt:en',
+                'LC_ALL=pt_BR.UTF-8'
+            ]
         });
         stream = await exec.start({ hijack: true, stdin: true });
 
@@ -118,25 +131,22 @@ wss.on('connection', async (ws, req) => {
             }
         });
 
-        // 🚨 LÓGICA DE RESIZE E TECLADO AQUI
         ws.on('message', (msg) => {
             const strMsg = msg.toString();
             
-            // Se for um comando especial de redimensionamento
             if (strMsg.startsWith('{"type":"resize"')) {
                 try {
                     const data = JSON.parse(strMsg);
                     if (data.type === 'resize' && exec) {
-                        // Avisa o Docker para mudar o tamanho do terminal
                         exec.resize({ h: data.rows, w: data.cols }, () => {});
                     }
                 } catch (e) {}
             } else {
-                // Senão, é texto normal do teclado
                 if (stream && stream.writable) stream.write(msg);
             }
         });
 
+        ws.on.call ? null : null; // Keep event structure intact
         ws.on('close', async () => {
             console.log(`Conexão fechada. Parando container do usuário ${userId}...`);
             try {
