@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
-import { Terminal as TerminalIcon, FileText, Settings, Search, Wifi, Volume2, Battery, Cpu, MemoryStick, RefreshCw, FolderOpen } from 'lucide-react';
+import { Terminal as TerminalIcon, FileText, Settings, Search, Wifi, Volume2, Battery, Cpu, MemoryStick, RefreshCw, FolderOpen, Code2 } from 'lucide-react';
 import Window from './Window';
-import { TerminalApp, NotepadApp, SettingsApp, FileManagerApp } from './apps';
+import { TerminalApp, NotepadApp, SettingsApp, FileManagerApp, CodeEditorApp } from './apps';
 import BootScreen from './BootScreen';
 
 const APPS_CONFIG = {
   terminal: { id: 'terminal', title: 'Terminal Linux', icon: TerminalIcon, Component: TerminalApp },
   files: { id: 'files', title: 'Arquivos', icon: FolderOpen, Component: FileManagerApp },
+  editor: { id: 'editor', title: 'Code Editor', icon: Code2, Component: CodeEditorApp },
   notepad: { id: 'notepad', title: 'Bloco de Notas', icon: FileText, Component: NotepadApp },
   settings: { id: 'settings', title: 'Configurações', icon: Settings, Component: SettingsApp }
 };
@@ -15,6 +16,7 @@ const APPS_LIST = Object.values(APPS_CONFIG);
 
 export default function App() {
   const [booting, setBooting] = useState(true);
+  const [codeFileToOpen, setCodeFileToOpen] = useState(null);
   const [windows, setWindows] = useState(() => {
     try {
       const saved = localStorage.getItem('cloudos_windows');
@@ -58,6 +60,15 @@ export default function App() {
     const timer = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, [booting]);
+
+  useEffect(() => {
+    const handler = (e) => {
+      setCodeFileToOpen(e.detail.path);
+      openApp('editor');
+    };
+    window.addEventListener('openCodeEditor', handler);
+    return () => window.removeEventListener('openCodeEditor', handler);
+  }, [windows, zIndex]);
 
   const openApp = (appId) => {
     if (!APPS_CONFIG[appId]) return;
@@ -122,7 +133,7 @@ export default function App() {
         const AppComp = appConfig.Component;
         return (
           <Window key={win.id} win={{ ...win, title: appConfig.title, icon: appConfig.icon }} onClose={() => closeApp(win.id)} onFocus={() => focusWindow(win.id)}>
-            <AppComp setBg={setBg} />
+            <AppComp setBg={setBg} fileToOpen={win.appId === 'editor' ? codeFileToOpen : undefined} />
           </Window>
         );
       })}
@@ -149,6 +160,7 @@ export default function App() {
           <div className="context-item" onClick={() => window.location.reload()}><RefreshCw size={14} /> Atualizar</div>
           <div className="context-divider"></div>
           <div className="context-item" onClick={() => openApp('terminal')}><TerminalIcon size={14} /> Abrir Terminal</div>
+          <div className="context-item" onClick={() => openApp('editor')}><Code2 size={14} /> Abrir Code Editor</div>
           <div className="context-item" onClick={() => openApp('settings')}><Settings size={14} /> Personalizar</div>
         </div>
       )}

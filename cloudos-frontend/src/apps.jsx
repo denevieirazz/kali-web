@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import 'xterm/css/xterm.css';
-import { Folder, FileCode, FileText, ChevronRight, Home, HardDrive, ArrowLeft, FolderPlus, Trash2, Pencil, FileArchive, Image as ImageIcon, File, Upload, LayoutGrid, List, ArrowUp, Clock, Star, Search, Usb, AlertTriangle, Shield, Eye, Key } from 'lucide-react';
+import { Folder, FileCode, FileText, ChevronRight, Home, HardDrive, ArrowLeft, FolderPlus, Trash2, Pencil, FileArchive, Image as ImageIcon, File, Upload, LayoutGrid, List, ArrowUp, Clock, Star, Search, Usb, AlertTriangle, Shield, Eye, Key, Code2, Save, File as FileIcon } from 'lucide-react';
+import Editor from '@monaco-editor/react';
 
 export const TerminalApp = () => {
   const termRef = useRef(null);
@@ -223,6 +224,92 @@ export const SettingsApp = ({ setBg }) => {
           )}
         </div>
       )}
+    </div>
+  );
+};
+
+export const CodeEditorApp = ({ fileToOpen }) => {
+  const [currentFile, setCurrentFile] = useState(null);
+  const [content, setContent] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [saved, setSaved] = useState(true);
+
+  const openFile = (filePath) => {
+    if (!filePath) return;
+    setLoading(true);
+    setSaved(true);
+    fetch(`http://localhost:8080/api/files/read?path=${encodeURIComponent(filePath)}`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.error) { alert(data.error); return; }
+        setCurrentFile(filePath);
+        setContent(data.content || '');
+      })
+      .catch(() => alert('Erro de conexão ao carregar arquivo.'))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    if (fileToOpen) {
+      openFile(fileToOpen);
+    }
+  }, [fileToOpen]);
+
+  const saveFile = () => {
+    if (!currentFile) return;
+    setLoading(true);
+    fetch('http://localhost:8080/api/files/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: currentFile, content })
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.error) alert(data.error);
+        else setSaved(true);
+      })
+      .catch(() => alert('Erro de conexão ao salvar arquivo.'))
+      .finally(() => setLoading(false));
+  };
+
+  const handleEditorChange = (value) => {
+    setContent(value || '');
+    setSaved(false);
+  };
+
+  return (
+    <div className="code-editor-app">
+      <div className="ce-toolbar">
+        <div className="ce-tab">
+          <FileIcon size={14} />
+          {currentFile ? currentFile.split('/').pop() : 'Nenhum arquivo'}
+          {!saved && <span className="ce-dot">*</span>}
+        </div>
+        <button className="ce-btn" onClick={saveFile} disabled={!currentFile || saved || loading}>
+          <Save size={14} /> {loading ? 'Salvando...' : 'Salvar (Ctrl+S)'}
+        </button>
+      </div>
+      
+      <div className="ce-main">
+        {currentFile ? (
+          <Editor
+            height="100%"
+            theme="vs-dark"
+            language={currentFile.split('.').pop() === 'sh' ? 'shell' : (currentFile.split('.').pop() === 'py' ? 'python' : (currentFile.split('.').pop() === 'js' ? 'javascript' : 'plaintext'))}
+            value={content}
+            onChange={handleEditorChange}
+            onMount={(editor, monaco) => {
+              editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, saveFile);
+            }}
+          />
+        ) : (
+          <div className="ce-empty">
+            <Code2 size={48} color="#3b82f6" />
+            <p>Nenhum arquivo aberto.</p>
+            <span>Use o Gerenciador de Arquivos e clique em "Editar Código" para abrir um arquivo aqui.</span>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
@@ -475,6 +562,14 @@ export const FileManagerApp = () => {
           {contextMenu.item ? (
             <>
               <div className="fmp-ctx-item" onClick={() => { contextMenu.item.type === 'folder' && fetchFiles(contextMenu.item.path); setContextMenu({...contextMenu, visible: false}); }}>Abrir</div>
+              {contextMenu.item.type === 'file' && (
+                <div className="fmp-ctx-item" onClick={() => { 
+                  window.dispatchEvent(new CustomEvent('openCodeEditor', { detail: { path: contextMenu.item.path } })); 
+                  setContextMenu({...contextMenu, visible: false});
+                }}>
+                  <Code2 size={14} /> Editar Código
+                </div>
+              )}
               <div className="fmp-ctx-item" onClick={() => handleAction('rename', contextMenu.item)}><Pencil size={14} /> Renomear</div>
               <div className="fmp-ctx-divider"></div>
               <div className="fmp-ctx-item danger" onClick={() => handleAction('delete', contextMenu.item)}><Trash2 size={14} /> Mover para Lixeira</div>

@@ -105,6 +105,27 @@ app.post('/api/files/upload', upload.array('files'), async (req, res) => {
     } catch (e) { res.status(500).json({ error: 'Falha no upload' }); }
 });
 
+// API PARA LER CONTEÚDO DE ARQUIVO (CODE EDITOR)
+app.get('/api/files/read', (req, res) => {
+    const filePath = req.query.path;
+    const cmd = `wsl -d kali-linux -u root -- cat ${wslPath(filePath)}`;
+    exec(cmd, { windowsHide: true }, (error, stdout, stderr) => {
+        if (error) return res.status(500).json({ error: 'Não foi possível ler o arquivo.' });
+        res.json({ content: stdout });
+    });
+});
+
+// API PARA SALVAR CONTEÚDO DE ARQUIVO (CODE EDITOR)
+app.post('/api/files/save', (req, res) => {
+    const { path: filePath, content } = req.body;
+    const escapedContent = content ? content.replace(/'/g, "'\\''") : '';
+    const cmd = `wsl -d kali-linux -u root -- bash -c "echo '${escapedContent}' > ${wslPath(filePath)}"`;
+    exec(cmd, { windowsHide: true }, (error, stdout, stderr) => {
+        if (error) return res.status(500).json({ error: 'Erro ao salvar no WSL.' });
+        res.json({ success: true });
+    });
+});
+
 function getUsbipdCmd() {
     const defaultPath = 'C:\\Program Files\\usbipd-win\\usbipd.exe';
     return fs.existsSync(defaultPath) ? `"${defaultPath}"` : 'usbipd';
