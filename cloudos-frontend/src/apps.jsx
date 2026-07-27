@@ -23,7 +23,6 @@ export const TerminalApp = () => {
       
       fit = new FitAddon();
       term.loadAddon(fit);
-      
       term.open(termRef.current);
       
       try { fit.fit(); } catch (e) {}
@@ -32,18 +31,18 @@ export const TerminalApp = () => {
         term.textarea.focus();
       }
 
-      // 🚨 FUNÇÃO PARA ENVIAR O TAMANHO PRO BACKEND
-      const sendResize = () => {
+      // 🚨 EVENTO OFICIAL DE RESIZE DO XTERM
+      // Sempre que o xterm mudar de tamanho, ele avisa o backend
+      term.onResize(({ cols, rows }) => {
         if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+          ws.send(JSON.stringify({ type: 'resize', cols, rows }));
         }
-      };
+      });
 
       ro = new ResizeObserver(() => {
         try { 
           if (term && term.element) {
-            fit.fit();
-            sendResize(); // Envia o novo tamanho sempre que a janela muda
+            fit.fit(); // O fit vai calcular o tamanho e disparar o onResize acima
           } 
         } catch (e) {}
       });
@@ -60,8 +59,8 @@ export const TerminalApp = () => {
 
       ws.onopen = () => {
         term.write('\x1b[32mConectado ao CloudOS Kali Linux...\r\n\x1b[0m');
-        // Envia o tamanho inicial assim que conecta
-        setTimeout(sendResize, 200);
+        // Força um fit assim que conecta para alinhar os tamanhos
+        try { fit.fit(); } catch(e) {}
       };
 
       ws.onmessage = (e) => {
