@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import 'xterm/css/xterm.css';
-import { Folder, FileCode, FileText, ChevronRight, Home, HardDrive, ArrowLeft, FolderPlus, Trash2, Pencil, FileArchive, Image as ImageIcon, File, Upload, LayoutGrid, List, ArrowUp, Clock, Star, Search, Usb, AlertTriangle, Shield, Eye, Key, Code2, Save, File as FileIcon } from 'lucide-react';
+import { Wifi, Folder, FileCode, FileText, ChevronRight, Home, HardDrive, ArrowLeft, FolderPlus, Trash2, Pencil, FileArchive, Image as ImageIcon, File, Upload, LayoutGrid, List, ArrowUp, Clock, Star, Search, Usb, AlertTriangle, Shield, Eye, Key, Code2, Save, File as FileIcon } from 'lucide-react';
 import Editor from '@monaco-editor/react';
 
 const getAuthHeaders = (extraHeaders = {}) => {
