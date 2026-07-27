@@ -6,6 +6,8 @@ const { exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 
 const app = express();
 app.use(cors());
@@ -15,7 +17,36 @@ const wss = new WebSocketServer({ server });
 
 const upload = multer({ dest: 'temp_uploads/' });
 
-// Função de segurança para paths com espaço no WSL (usa aspas duplas)
+const SECRET_KEY = 'CLOUDOS_JWT_SECRET_2024';
+
+const HASHED_PASSWORD = bcrypt.hashSync('admin123', 10);
+const ADMIN_USER = { id: 1, username: 'admin', password: HASHED_PASSWORD };
+
+function authenticateToken(req, res, next) {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    if (!token) return res.status(401).json({ error: 'Acesso negado. Token não fornecido.' });
+    
+    jwt.verify(token, SECRET_KEY, (err, user) => {
+        if (err) return res.status(403).json({ error: 'Token inválido ou expirado.' });
+        req.user = user;
+        next();
+    });
+}
+
+// API DE LOGIN
+app.post('/api/auth/login', (req, res) => {
+    const { username, password } = req.body;
+    if (username !== ADMIN_USER.username || !bcrypt.compareSync(password, ADMIN_USER.password)) {
+        return res.status(401).json({ error: 'Usuário ou senha inválidos.' });
+    }
+    const token = jwt.sign({ id: ADMIN_USER.id, username: ADMIN_USER.username }, SECRET_KEY, { expiresIn: '24h' });
+    res.json({ token, user: { username: ADMIN_USER.username } });
+});
+
+// A partir daqui, TODAS as rotas precisam de autenticação!
+app.use(authenticateToken);
+
 function wslPath(p) {
     if (!p) return '""';
     return `"${p}"`;
@@ -217,6 +248,25 @@ wss.on('connection', async (ws, req) => {
     ws.on('pong', heartbeat);
 
     const fullUrl = new URL(req.url, 'http://localhost');
+    const token = fullUrl.searchParams.get('token');
+    
+    if (!token) {
+        ws.send("ERRO: Token de autenticação não fornecido.\r\n");
+        return ws.close();
+    }
+    
+    let tokenValid = true;
+    jwt.verify(token, SECRET_KEY, (err) => {
+        if (err) {
+            tokenValid = false;
+        }
+    });
+
+    if (!tokenValid) {
+        ws.send("ERRO: Token inválido ou expirado.\r\n");
+        return ws.close();
+    }
+
     const userId = fullUrl.searchParams.get('userId') || 'kali_user';
     const sessionName = `cloudos_${userId}`;
 

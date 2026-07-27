@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Terminal as TerminalIcon, FileText, Settings, Search, Wifi, Volume2, Battery, Cpu, MemoryStick, RefreshCw, FolderOpen, Code2 } from 'lucide-react';
+import { Terminal as TerminalIcon, FileText, Settings, Search, Wifi, Volume2, Battery, Cpu, MemoryStick, RefreshCw, FolderOpen, Code2, LogOut } from 'lucide-react';
 import Window from './Window';
 import { TerminalApp, NotepadApp, SettingsApp, FileManagerApp, CodeEditorApp } from './apps';
 import BootScreen from './BootScreen';
+import LoginScreen from './LoginScreen';
 
 const APPS_CONFIG = {
   terminal: { id: 'terminal', title: 'Terminal Linux', icon: TerminalIcon, Component: TerminalApp },
@@ -16,6 +17,7 @@ const APPS_LIST = Object.values(APPS_CONFIG);
 
 export default function App() {
   const [booting, setBooting] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(() => !!localStorage.getItem('cloudos_token'));
   const [codeFileToOpen, setCodeFileToOpen] = useState(null);
   const [windows, setWindows] = useState(() => {
     try {
@@ -56,10 +58,10 @@ export default function App() {
   }, [bg]);
 
   useEffect(() => {
-    if (booting) return;
+    if (booting || !isAuthenticated) return;
     const timer = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(timer);
-  }, [booting]);
+  }, [booting, isAuthenticated]);
 
   useEffect(() => {
     const handler = (e) => {
@@ -92,11 +94,20 @@ export default function App() {
     setZIndex(prev => prev + 1);
   };
 
+  const handleLogout = () => {
+    localStorage.removeItem('cloudos_token');
+    setIsAuthenticated(false);
+  };
+
   const handleContextMenu = (e) => { e.preventDefault(); setContextMenu({ visible: true, x: e.clientX, y: e.clientY }); };
   const closeContextMenu = () => setContextMenu({ ...contextMenu, visible: false });
 
   if (booting) {
     return <BootScreen onBootComplete={() => setBooting(false)} />;
+  }
+
+  if (!isAuthenticated) {
+    return <LoginScreen onLogin={() => setIsAuthenticated(true)} />;
   }
 
   return (
@@ -162,6 +173,8 @@ export default function App() {
           <div className="context-item" onClick={() => openApp('terminal')}><TerminalIcon size={14} /> Abrir Terminal</div>
           <div className="context-item" onClick={() => openApp('editor')}><Code2 size={14} /> Abrir Code Editor</div>
           <div className="context-item" onClick={() => openApp('settings')}><Settings size={14} /> Personalizar</div>
+          <div className="context-divider"></div>
+          <div className="context-item" onClick={handleLogout} style={{ color: '#f87171' }}><LogOut size={14} /> Sair / Logout</div>
         </div>
       )}
 

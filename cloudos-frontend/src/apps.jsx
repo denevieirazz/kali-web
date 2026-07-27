@@ -6,6 +6,14 @@ import 'xterm/css/xterm.css';
 import { Folder, FileCode, FileText, ChevronRight, Home, HardDrive, ArrowLeft, FolderPlus, Trash2, Pencil, FileArchive, Image as ImageIcon, File, Upload, LayoutGrid, List, ArrowUp, Clock, Star, Search, Usb, AlertTriangle, Shield, Eye, Key, Code2, Save, File as FileIcon } from 'lucide-react';
 import Editor from '@monaco-editor/react';
 
+const getAuthHeaders = (extraHeaders = {}) => {
+  const token = localStorage.getItem('cloudos_token');
+  return {
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    ...extraHeaders
+  };
+};
+
 export const TerminalApp = () => {
   const termRef = useRef(null);
 
@@ -56,7 +64,8 @@ export const TerminalApp = () => {
           });
         }
 
-        ws = new WebSocket('ws://localhost:8080?userId=user_001');
+        const token = localStorage.getItem('cloudos_token');
+        ws = new WebSocket(`ws://localhost:8080?userId=user_001&token=${token}`);
         ws.binaryType = 'arraybuffer';
 
         ws.onopen = () => {
@@ -108,7 +117,7 @@ export const SettingsApp = ({ setBg }) => {
 
   const fetchDevices = () => {
     setLoadingDev(true);
-    fetch('http://localhost:8080/api/devices')
+    fetch('http://localhost:8080/api/devices', { headers: getAuthHeaders() })
       .then(res => res.json())
       .then(data => { if (data.error) setErrorDev(data.error); else setDevices(data.devices || []); })
       .catch(() => setErrorDev('Erro de conexão.'))
@@ -119,14 +128,14 @@ export const SettingsApp = ({ setBg }) => {
 
   const handleAttach = (busid, name) => {
     if (window.confirm(`Conectar "${name}" ao Kali Linux?`)) {
-      fetch('http://localhost:8080/api/devices/attach', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ busid }) })
+      fetch('http://localhost:8080/api/devices/attach', { method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ busid }) })
         .then(res => res.json()).then(data => { if (data.error) alert(data.error); else { alert('Conectado!'); fetchDevices(); } });
     }
   };
 
   const handleAnon = (action) => {
     setAnonStatus('Processando...');
-    fetch('http://localhost:8080/api/tactical/anon', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) })
+    fetch('http://localhost:8080/api/tactical/anon', { method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ action }) })
       .then(res => res.json()).then(data => {
         if (data.error) { setAnonStatus(`Erro: ${data.error}`); alert(data.error); }
         else { setAnonStatus(action === 'tor_on' ? 'Tor Ativado! Use proxychains no terminal.' : 'Comando executado com sucesso.'); }
@@ -134,7 +143,7 @@ export const SettingsApp = ({ setBg }) => {
   };
 
   const saveOsintKeys = () => {
-    fetch('http://localhost:8080/api/tactical/osint', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keys: osintKeys }) })
+    fetch('http://localhost:8080/api/tactical/osint', { method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ keys: osintKeys }) })
       .then(() => alert('Chaves de OSINT salvas no Kali Linux!'));
   };
 
@@ -238,7 +247,7 @@ export const CodeEditorApp = ({ fileToOpen }) => {
     if (!filePath) return;
     setLoading(true);
     setSaved(true);
-    fetch(`http://localhost:8080/api/files/read?path=${encodeURIComponent(filePath)}`)
+    fetch(`http://localhost:8080/api/files/read?path=${encodeURIComponent(filePath)}`, { headers: getAuthHeaders() })
       .then(res => res.json())
       .then(data => {
         if (data.error) { alert(data.error); return; }
@@ -260,7 +269,7 @@ export const CodeEditorApp = ({ fileToOpen }) => {
     setLoading(true);
     fetch('http://localhost:8080/api/files/save', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ path: currentFile, content })
     })
       .then(res => res.json())
@@ -328,7 +337,7 @@ export const FileManagerApp = () => {
     setLoading(true);
     setPath(newPath);
     setSelected([]);
-    fetch(`http://localhost:8080/api/files?path=${encodeURIComponent(newPath)}`)
+    fetch(`http://localhost:8080/api/files?path=${encodeURIComponent(newPath)}`, { headers: getAuthHeaders() })
       .then(res => res.json())
       .then(data => {
           let fetchedItems = data.items || [];
@@ -372,7 +381,7 @@ export const FileManagerApp = () => {
 
     fetch('http://localhost:8080/api/files/action', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ 
             action, 
             paths: targets, 
@@ -396,7 +405,7 @@ export const FileManagerApp = () => {
     for (let i = 0; i < files.length; i++) formData.append('files', files[i]);
     formData.append('path', path);
 
-    fetch('http://localhost:8080/api/files/upload', { method: 'POST', body: formData })
+    fetch('http://localhost:8080/api/files/upload', { method: 'POST', headers: getAuthHeaders(), body: formData })
       .then(() => fetchFiles(path));
   };
 
