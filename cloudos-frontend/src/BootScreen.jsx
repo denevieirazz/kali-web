@@ -1,55 +1,69 @@
 import { useState, useEffect, useRef } from 'react';
 
-const bootLogs = [
-  "Booting CloudOS Kernel 6.8.0-kali-cloud...",
-  "Initializing Ryzen 7 5700G Architecture...",
-  "Mounting WSL Kali Linux Subsystem...",
-  "Starting Docker Engine Proxy...",
-  "Loading Persistent Virtual File System (ext4)...",
-  "Setting up Tmux Sessions for User 'root'...",
-  "Initializing Network Interfaces (NET_ADMIN enabled)...",
-  "Loading Pentest Tools Module...",
-  "Starting CloudOS Desktop Environment...",
-  "Welcome to CloudOS. Access granted."
+const bootSequence = [
+  { text: "CLOUDOS BIOS v2.1.7 - Copyright (C) 2024 Red Team Systems", color: "#94a3b8" },
+  { text: "CPU: AMD Ryzen 7 5700G | ARCH: x86_64 | CORES: 8", color: "#94a3b8" },
+  { text: "Memory Test: 32768M OK", color: "#94a3b8" },
+  { text: "Initializing Quantum Cryptography Module... [ OK ]", color: "#4ade80" },
+  { text: "Mounting WSL 2 Kali Linux Subsystem (ext4)... [ OK ]", color: "#4ade80" },
+  { text: "Starting Docker Engine Proxy... [ OK ]", color: "#4ade80" },
+  { text: "Establishing Tor Circuit (Routing via 5 hops)... [ OK ]", color: "#4ade80" },
+  { text: "Spoofing MAC Address: 00:1A:2B:3C:4D:5E... [ OK ]", color: "#4ade80" },
+  { text: "Loading Kernel Modules: netfilter, pcap, usbip... [ OK ]", color: "#4ade80" },
+  { text: "Syncing /root directory with Virtual FS... [ OK ]", color: "#4ade80" },
+  { text: "WARNING: Unauthorized access is strictly prohibited.", color: "#fbbf24" },
+  { text: "Bypassing Firewall Rules... [ OK ]", color: "#4ade80" },
+  { text: "Starting CloudOS Desktop Environment (Wayland)...", color: "#60a5fa" },
+  { text: "Welcome to CloudOS. Access Granted.", color: "#60a5fa" }
 ];
 
 export default function BootScreen({ onBootComplete }) {
   const [logs, setLogs] = useState([]);
   const [progress, setProgress] = useState(0);
+  const [glitching, setGlitching] = useState(true);
   const completedRef = useRef(false);
 
   useEffect(() => {
     let i = 0;
-    
     const interval = setInterval(() => {
-      if (i < bootLogs.length) {
-        setLogs(prev => [...prev, bootLogs[i]]);
-        setProgress(((i + 1) / bootLogs.length) * 100);
+      if (i < bootSequence.length) {
+        setLogs(prev => [...prev, bootSequence[i]]);
+        setProgress(Math.round(((i + 1) / bootSequence.length) * 100));
         i++;
       } else {
         clearInterval(interval);
         if (!completedRef.current) {
           completedRef.current = true;
-          setTimeout(() => onBootComplete(), 800);
+          setGlitching(false);
+          setTimeout(() => onBootComplete(), 1800);
         }
       }
-    }, 180);
-
+    }, 220);
     return () => clearInterval(interval);
   }, [onBootComplete]);
 
   return (
-    <div className="boot-screen">
-      <div className="boot-logo">CLOUD<span>OS</span></div>
-      <div className="boot-terminal">
-        {logs.map((log, i) => (
-          <div key={i} className="boot-line">
-            <span className="boot-ok">[ OK ]</span> {log}
+    <div className="boot-cinema">
+      <div className="boot-scanlines"></div>
+      <div className="boot-content">
+        <div className={`boot-logo-cinema ${glitching ? 'glitch' : ''}`} data-text="CLOUDOS">
+          CLOUDOS
+        </div>
+        
+        <div className="boot-terminal-cinema">
+          {logs.map((log, i) => (
+            <div key={i} className="boot-line-cinema" style={{ color: log.color, animationDelay: `${i * 0.05}s` }}>
+              <span className="boot-prompt">[{ String(i + 1).padStart(2, '0') }]</span> {log.text}
+            </div>
+          ))}
+        </div>
+
+        <div className="boot-loader">
+          <div className="boot-progress-shell">
+            <div className="boot-progress-fill" style={{ width: `${progress}%` }}></div>
           </div>
-        ))}
-      </div>
-      <div className="boot-progress-bar-container">
-        <div className="boot-progress-bar" style={{ width: `${progress}%` }}></div>
+          <div className="boot-percent">{progress}%</div>
+        </div>
       </div>
     </div>
   );
