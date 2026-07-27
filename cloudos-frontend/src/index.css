@@ -250,6 +250,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; }
 
 /* CONFIGURAÇÕES TÁTICAS */
 .tactical-card { display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.05); padding: 12px 15px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 10px; }
+.tactical-card.tactical-active { border-color: rgba(74, 222, 128, 0.4) !important; background: rgba(74, 222, 128, 0.05) !important; }
 .tactical-info { display: flex; align-items: center; gap: 12px; }
 .device-btn-danger { padding: 6px 12px; background: rgba(239, 68, 68, 0.2); border: 1px solid #ef4444; color: #f87171; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; }
 .device-btn-danger:hover { background: #ef4444; color: white; }

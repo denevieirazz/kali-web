@@ -112,8 +112,25 @@ export const SettingsApp = ({ setBg }) => {
   const [devices, setDevices] = useState([]);
   const [loadingDev, setLoadingDev] = useState(false);
   const [errorDev, setErrorDev] = useState('');
+  
+  const [torActive, setTorActive] = useState(false);
+  const [currentMac, setCurrentMac] = useState('Carregando...');
   const [anonStatus, setAnonStatus] = useState('');
   const [osintKeys, setOsintKeys] = useState({ shodan: '', hunterio: '', virustotal: '' });
+
+  const fetchAnonStatus = () => {
+    fetch('http://localhost:8080/api/tactical/status', { headers: getAuthHeaders() })
+      .then(res => res.json())
+      .then(data => {
+        if (!data.error) {
+          setTorActive(data.torActive);
+          setCurrentMac(data.currentMac);
+        } else {
+          setCurrentMac('Erro ao ler');
+        }
+      })
+      .catch(() => setCurrentMac('Backend offline'));
+  };
 
   const fetchDevices = () => {
     setLoadingDev(true);
@@ -124,7 +141,10 @@ export const SettingsApp = ({ setBg }) => {
       .finally(() => setLoadingDev(false));
   };
 
-  useEffect(() => { if (tab === 'hardware') fetchDevices(); }, [tab]);
+  useEffect(() => { 
+    if (tab === 'hardware') fetchDevices(); 
+    if (tab === 'anon') fetchAnonStatus();
+  }, [tab]);
 
   const handleAttach = (busid, name) => {
     if (window.confirm(`Conectar "${name}" ao Kali Linux?`)) {
@@ -134,11 +154,16 @@ export const SettingsApp = ({ setBg }) => {
   };
 
   const handleAnon = (action) => {
-    setAnonStatus('Processando...');
+    setAnonStatus('Executando comando no Kali...');
     fetch('http://localhost:8080/api/tactical/anon', { method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ action }) })
-      .then(res => res.json()).then(data => {
-        if (data.error) { setAnonStatus(`Erro: ${data.error}`); alert(data.error); }
-        else { setAnonStatus(action === 'tor_on' ? 'Tor Ativado! Use proxychains no terminal.' : 'Comando executado com sucesso.'); }
+      .then(res => res.json())
+      .then(data => {
+        if (data.error) {
+          setAnonStatus(`Erro: ${data.error}`);
+        } else {
+          setAnonStatus('Comando finalizado. Atualizando status...');
+          setTimeout(fetchAnonStatus, 1500);
+        }
       });
   };
 
@@ -170,22 +195,41 @@ export const SettingsApp = ({ setBg }) => {
         </div>
       )}
 
-      {/* ABA ANONIMATO (OpSec) */}
+      {/* ABA ANONIMATO (AGORA EM TEMPO REAL) */}
       {tab === 'anon' && (
         <div className="settings-content">
           <h3>Operational Security (OpSec)</h3>
-          <p style={{ fontSize: '12px', color: '#888', marginBottom: '15px' }}>Configure o roteamento de tráfego e mascaramento de rede.</p>
+          <p style={{ fontSize: '12px', color: '#888', marginBottom: '15px' }}>Monitoramento em tempo real do Kali Linux.</p>
           
-          <div className="tactical-card">
-            <div className="tactical-info"><Shield size={20} color="#a78bfa" /><div><div className="device-name">Roteamento Tor (Proxychains)</div><div className="device-id">Força todo o tráfego do terminal pela rede Onion.</div></div></div>
-            <button className="device-btn" onClick={() => handleAnon('tor_on')}>Ativar</button>
+          {/* CARD DO TOR */}
+          <div className={`tactical-card ${torActive ? 'tactical-active' : ''}`}>
+            <div className="tactical-info">
+              <Shield size={20} color={torActive ? "#4ade80" : "#f87171"} />
+              <div>
+                <div className="device-name">Roteamento Tor</div>
+                <div className="device-id">
+                  Status: {torActive ? <span style={{ color: '#4ade80', fontWeight: 'bold' }}>ATIVADO</span> : <span style={{ color: '#f87171', fontWeight: 'bold' }}>DESATIVADO</span>}
+                </div>
+              </div>
+            </div>
+            {torActive ? (
+              <button className="device-btn-danger" onClick={() => handleAnon('tor_off')}>Desativar</button>
+            ) : (
+              <button className="device-btn" onClick={() => handleAnon('tor_on')}>Ativar</button>
+            )}
           </div>
+
+          {/* CARD DE MAC SPOOF */}
           <div className="tactical-card">
-            <div className="tactical-info"><Shield size={20} color="#f87171" /><div><div className="device-name">Desligar Tor</div><div className="device-id">Restaura a conexão padrão do WSL.</div></div></div>
-            <button className="device-btn-danger" onClick={() => handleAnon('tor_off')}>Desativar</button>
-          </div>
-          <div className="tactical-card">
-            <div className="tactical-info"><Wifi size={20} color="#4ade80" /><div><div className="device-name">Spoofar Endereço MAC</div><div className="device-id">Gera um MAC aleatório para a interface de rede.</div></div></div>
+            <div className="tactical-info">
+              <Wifi size={20} color="#60a5fa" />
+              <div>
+                <div className="device-name">Spoofar MAC Address</div>
+                <div className="device-id" style={{ fontFamily: 'monospace' }}>
+                  MAC Atual: {currentMac}
+                </div>
+              </div>
+            </div>
             <button className="device-btn" onClick={() => handleAnon('mac_spoof')}>Spoofar</button>
           </div>
 
@@ -197,8 +241,7 @@ export const SettingsApp = ({ setBg }) => {
       {tab === 'osint' && (
         <div className="settings-content">
           <h3>Chaves de API de Inteligência</h3>
-          <p style={{ fontSize: '12px', color: '#888', marginBottom: '15px' }}>Salve suas chaves de forma segura no sistema de arquivos do Kali. As ferramentas internas usarão estas chaves.</p>
-          
+          <p style={{ fontSize: '12px', color: '#888', marginBottom: '15px' }}>Salve suas chaves de forma segura no sistema de arquivos do Kali.</p>
           <div className="osint-input-group">
             <label>Shodan API Key</label>
             <input type="text" value={osintKeys.shodan} onChange={(e) => setOsintKeys({...osintKeys, shodan: e.target.value})} placeholder="SH-XXXXXXX..." />
@@ -211,7 +254,6 @@ export const SettingsApp = ({ setBg }) => {
             <label>VirusTotal API Key</label>
             <input type="text" value={osintKeys.virustotal} onChange={(e) => setOsintKeys({...osintKeys, virustotal: e.target.value})} placeholder="XXXXXXX..." />
           </div>
-          
           <button className="device-btn" style={{ marginTop: '10px', width: '100%' }} onClick={saveOsintKeys}>Salvar Chaves no Kali</button>
         </div>
       )}

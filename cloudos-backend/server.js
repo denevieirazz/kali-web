@@ -201,6 +201,21 @@ app.post('/api/devices/attach', (req, res) => {
     });
 });
 
+// --- API DE STATUS TÁTICO (TEMPERATURA REAL DO KALI) ---
+app.get('/api/tactical/status', (req, res) => {
+    const cmd = `wsl -d kali-linux -u root -- bash -c "service tor status | grep -q 'active (running)' && echo 'TOR:ACTIVE' || echo 'TOR:INACTIVE'; IFACE=$(ip route | grep default | awk '{print $5}' | head -n1); MAC=$(ip link show $IFACE | grep link/ether | awk '{print $2}'); echo 'MAC:'$MAC"`;
+    
+    exec(cmd, { windowsHide: true }, (error, stdout, stderr) => {
+        if (error) return res.status(500).json({ error: 'Falha ao ler status do WSL.' });
+        
+        const torActive = stdout.includes('TOR:ACTIVE');
+        const macMatch = stdout.match(/MAC:(..:..:..:..:..:..)/);
+        const currentMac = macMatch ? macMatch[1] : 'Indisponível';
+        
+        res.json({ torActive, currentMac });
+    });
+});
+
 // API DE CONFIGURAÇÕES TÁTICAS (ANONIMATO)
 app.post('/api/tactical/anon', (req, res) => {
     const { action } = req.body; // 'tor_on', 'tor_off', 'mac_spoof'
