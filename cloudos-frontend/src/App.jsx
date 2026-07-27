@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Terminal as TerminalIcon, FileText, Settings, Search, Wifi, Volume2, Battery, Cpu, MemoryStick, RefreshCw, FolderOpen, Code2, LogOut } from 'lucide-react';
+import { Terminal as TerminalIcon, FileText, Settings, Search, Wifi, Volume2, Battery, Cpu, MemoryStick, RefreshCw, FolderOpen, Code2, Power } from 'lucide-react';
 import Window from './Window';
 import { TerminalApp, NotepadApp, SettingsApp, FileManagerApp, CodeEditorApp } from './apps';
 import BootScreen from './BootScreen';
@@ -19,25 +19,19 @@ export default function App() {
   const [booting, setBooting] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!localStorage.getItem('cloudos_token'));
   const [codeFileToOpen, setCodeFileToOpen] = useState(null);
+  
   const [windows, setWindows] = useState(() => {
     try {
       const saved = localStorage.getItem('cloudos_windows');
       const parsed = saved ? JSON.parse(saved) : [];
       if (Array.isArray(parsed)) {
         return parsed.filter(w => w && APPS_CONFIG[w.appId]).map(w => ({
-          id: w.id || Date.now(),
-          appId: w.appId,
-          x: w.x || 50,
-          y: w.y || 50,
-          w: w.w || 600,
-          h: w.h || 400,
-          z: w.z || 100
+          id: w.id || Date.now(), appId: w.appId,
+          x: w.x || 50, y: w.y || 50, w: w.w || 600, h: w.h || 400, z: w.z || 100
         }));
       }
       return [];
-    } catch {
-      return [];
-    }
+    } catch { return []; }
   });
 
   const [zIndex, setZIndex] = useState(100);
@@ -45,6 +39,9 @@ export default function App() {
   const [time, setTime] = useState(new Date());
   const [bg, setBg] = useState(() => localStorage.getItem('cloudos_bg') || 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?q=80&w=2070');
   const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0 });
+  
+  const [selectedIcon, setSelectedIcon] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     try {
@@ -53,9 +50,7 @@ export default function App() {
     } catch (e) {}
   }, [windows]);
 
-  useEffect(() => {
-    try { localStorage.setItem('cloudos_bg', bg); } catch (e) {}
-  }, [bg]);
+  useEffect(() => { try { localStorage.setItem('cloudos_bg', bg); } catch (e) {} }, [bg]);
 
   useEffect(() => {
     if (booting || !isAuthenticated) return;
@@ -64,10 +59,7 @@ export default function App() {
   }, [booting, isAuthenticated]);
 
   useEffect(() => {
-    const handler = (e) => {
-      setCodeFileToOpen(e.detail.path);
-      openApp('editor');
-    };
+    const handler = (e) => { setCodeFileToOpen(e.detail.path); openApp('editor'); };
     window.addEventListener('openCodeEditor', handler);
     return () => window.removeEventListener('openCodeEditor', handler);
   }, [windows, zIndex]);
@@ -82,8 +74,7 @@ export default function App() {
     const x = Math.max(10, Math.random() * (window.innerWidth - w - 20));
     const y = Math.max(10, Math.random() * (window.innerHeight - h - 60));
     
-    const newWin = { id: Date.now(), appId, x, y, w, h, z: zIndex + 1 };
-    setWindows(prev => [...prev, newWin]);
+    setWindows(prev => [...prev, { id: Date.now(), appId, x, y, w, h, z: zIndex + 1 }]);
     setZIndex(prev => prev + 1);
     setStartOpen(false);
   };
@@ -94,27 +85,32 @@ export default function App() {
     setZIndex(prev => prev + 1);
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('cloudos_token');
-    setIsAuthenticated(false);
+  const handleContextMenu = (e) => {
+    e.preventDefault();
+    setContextMenu({ visible: true, x: e.clientX, y: e.clientY });
+    setSelectedIcon(null);
   };
 
-  const handleContextMenu = (e) => { e.preventDefault(); setContextMenu({ visible: true, x: e.clientX, y: e.clientY }); };
-  const closeContextMenu = () => setContextMenu({ ...contextMenu, visible: false });
+  const handleRefresh = () => {
+    setContextMenu({ ...contextMenu, visible: false });
+    setRefreshing(true);
+    setSelectedIcon(null);
+    setTimeout(() => setRefreshing(false), 300);
+  };
 
-  if (booting) {
-    return <BootScreen onBootComplete={() => setBooting(false)} />;
-  }
+  const handleLogout = () => {
+    localStorage.removeItem('cloudos_token');
+    window.location.reload();
+  };
 
-  if (!isAuthenticated) {
-    return <LoginScreen onLogin={() => setIsAuthenticated(true)} />;
-  }
+  if (booting) return <BootScreen onBootComplete={() => setBooting(false)} />;
+  if (!isAuthenticated) return <LoginScreen onLogin={() => setIsAuthenticated(true)} />;
 
   return (
     <div 
-      className="desktop" 
+      className={`desktop ${refreshing ? 'flash' : ''}`} 
       style={{ background: bg.startsWith('http') ? `url(${bg}) center/cover no-repeat` : bg }} 
-      onClick={() => { closeContextMenu(); startOpen && setStartOpen(false); }}
+      onClick={() => { setContextMenu({ ...contextMenu, visible: false }); setStartOpen(false); setSelectedIcon(null); }}
       onContextMenu={handleContextMenu}
     >
       <div className="desktop-widget">
@@ -126,11 +122,16 @@ export default function App() {
         </div>
       </div>
 
-      <div className="desktop-icons">
+      <div className="desktop-icons-grid">
         {APPS_LIST.map(app => {
           const Icon = app.icon;
           return (
-            <div key={app.id} className="d-icon" onDoubleClick={() => openApp(app.id)}>
+            <div 
+              key={app.id} 
+              className={`d-icon ${selectedIcon === app.id ? 'selected' : ''}`} 
+              onClick={(e) => { e.stopPropagation(); setSelectedIcon(app.id); }}
+              onDoubleClick={() => openApp(app.id)}
+            >
               <Icon size={42} color="white" />
               <span>{app.title}</span>
             </div>
@@ -168,13 +169,13 @@ export default function App() {
 
       {contextMenu.visible && (
         <div className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x }} onClick={(e) => e.stopPropagation()}>
-          <div className="context-item" onClick={() => window.location.reload()}><RefreshCw size={14} /> Atualizar</div>
+          <div className="context-item" onClick={handleRefresh}><RefreshCw size={14} /> Atualizar</div>
           <div className="context-divider"></div>
           <div className="context-item" onClick={() => openApp('terminal')}><TerminalIcon size={14} /> Abrir Terminal</div>
           <div className="context-item" onClick={() => openApp('editor')}><Code2 size={14} /> Abrir Code Editor</div>
           <div className="context-item" onClick={() => openApp('settings')}><Settings size={14} /> Personalizar</div>
           <div className="context-divider"></div>
-          <div className="context-item" onClick={handleLogout} style={{ color: '#f87171' }}><LogOut size={14} /> Sair / Logout</div>
+          <div className="context-item danger" onClick={handleLogout}><Power size={14} /> Sair / Logout</div>
         </div>
       )}
 
