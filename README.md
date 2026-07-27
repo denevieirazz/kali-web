@@ -1,45 +1,50 @@
-# 🛡️ CloudOS - Kali Linux Web Interface
+# 🛡️ CloudOS - Kali Linux Web Interface & Operating System
 
-**CloudOS** é um sistema operacional web minimalista que fornece uma interface gráfica interativa no navegador conectada diretamente a um container isolado do **Kali Linux** rodando via Docker no backend.
+**CloudOS** é um sistema operacional web completo e responsivo rodando no navegador, alimentado por um subsistema **Kali Linux** via WSL 2 no backend com suporte a ferramentas de Pentest, OpSec, gerenciamento de arquivos e editor de código.
 
 ---
 
 ## 🤖 Guia Completo para IAs e Desenvolvedores (Contexto & Arquitetura)
 
-Se você é um agente de IA ou desenvolvedor trabalhando neste repositório, consulte esta seção para entender a arquitetura técnica completa, o histórico de correções e o estado do sistema.
+Se você é um agente de IA ou desenvolvedor trabalhando neste repositório, consulte esta seção para entender a arquitetura técnica completa, os módulos implementados e o estado do sistema.
 
 ### 🏗️ Arquitetura do Sistema
 ```
-┌────────────────────────────────┐         WebSocket (ws://)         ┌──────────────────────────────────────┐
-│  cloudos-frontend (React/Vite) │ ─────────────────────────────────> │   cloudos-backend (Node.js/Express)  │
-│  Porta: 5173                   │                                   │   Porta: 8080                        │
-└────────────────────────────────┘                                   └──────────────────┬───────────────────┘
-                                                                                        │ Dockerode Named Pipe
-                                                                                        ▼
-                                                                     ┌──────────────────────────────────────┐
-                                                                     │     Docker Desktop (Windows Engine)  │
-                                                                     │  Container: kalilinux/kali-rolling   │
-                                                                     └──────────────────────────────────────┘
+┌────────────────────────────────┐         WebSocket (ws://) + JWT       ┌──────────────────────────────────────┐
+│  cloudos-frontend (React/Vite) │ ────────────────────────────────────> │   cloudos-backend (Node.js/Express)  │
+│  Porta: 5173                   │                                       │   Porta: 8080                        │
+└────────────────────────────────┘                                       └──────────────────┬───────────────────┘
+                                                                                            │ WSL Exec (-u root)
+                                                                                            ▼
+                                                                         ┌──────────────────────────────────────┐
+                                                                         │       WSL 2 (Kali Linux Kernel)      │
+                                                                         │  Tmux, Tor, Privoxy, Macchanger, Ext4│
+                                                                         └──────────────────────────────────────┘
 ```
 
 ### 📁 Estrutura de Arquivos e Componentes
 
-- **`cloudos-backend/`**: Servidor Node.js
-  - `server.js`: Servidor Express + WebSocketServer (`ws`). 
-    - Conecta ao Windows Named Pipe do Docker (`\\.\pipe\docker_engine`).
-    - Verifica a presença da imagem `kalilinux/kali-rolling:latest` localmente e faz o pull automático via `docker.pull()` se necessário.
-    - Cria volumes persistentes por usuário (`kali_hd_{userId}`) montados no diretório `/root`.
-    - Transmite buffers de terminal sem quebra de codificação UTF-8 (`stream.on('data')`).
-    - Implementa heartbeat de Ping/Pong (30s) para fechar sessões inativas e parar contêineres graciosamente (`container.stop({ t: 2 })`).
-- **`cloudos-frontend/`**: Aplicação Web React + Vite
-  - `src/main.jsx`: Define o polyfill `window.process` no topo da execução para evitar falhas do `react-rnd` no navegador.
-  - `src/apps.jsx`: Renderiza o terminal `xterm.js` com `ws.binaryType = 'arraybuffer'`, suporte a `Uint8Array` e temporizador de 150ms contra o ciclo de montagem dupla do *React 18 Strict Mode*.
-  - `src/Window.jsx`: Gerenciador de janelas arrastáveis e maximizáveis baseado em `react-rnd`.
-  - `src/App.jsx` & `src/index.css`: Gerenciador de desktop estilo Windows 11 com barra de tarefas, menu iniciar e estilos unificados.
-  - `vite.config.js`: Configurado com o bloco `define: { 'process.env': {} }`.
-- **`iniciar-cloudos.vbs`**: Script VBScript que inicializa backend e frontend **100% em segundo plano** chamando os executáveis diretos do Node.js.
-- **`iniciar-cloudos.bat`**: Atalho executável de um clique para invocar o `iniciar-cloudos.vbs` e abrir `http://localhost:5173`.
-- **`.agents/AGENTS.md`**: Regras de autonomia total para agentes de IA pair programming.
+- **`cloudos-backend/`**: Servidor Node.js (Express + WebSocket + Node-PTY + JWT)
+  - `server.js`:
+    - **Autenticação JWT & Bcrypt**: Autenticação com hash bcrypt e validação de tokens JWT para rotas REST e conexões WebSocket.
+    - **Leitura/Escrita de Arquivos**: APIs de listagem (`ls`), ações (`mv`, `mkdir`, `rename`, `delete` com suporte à lixeira `/root/.trash`), upload (`multer`) e leitura/salvamento do Code Editor.
+    - **Módulo Tático OpSec**: APIs `/api/tactical/anon` e `/api/tactical/status` para controle do serviço Tor, Privoxy e mascaramento de MAC (`macchanger`).
+    - **Chaves de Inteligência OSINT**: Armazenamento seguro de chaves de API em `~/.config/cloudos_osint.json`.
+    - **Hardware Pass-through (USB)**: Integração com `usbipd-win` (`usbipd.exe`) para acoplar adaptadores Wi-Fi ou pendrives do Windows diretamente no Kali Linux.
+    - **Terminal Persistente**: Gerenciamento de sessões Tmux via `node-pty` e `wsl.exe`.
+- **`cloudos-frontend/`**: Aplicação Web React 18 + Vite + Monaco Editor
+  - `src/main.jsx`: Ponto de entrada com polyfill `window.process`.
+  - `src/App.jsx`: Gerenciador da área de trabalho estilo Windows 11, alinhamento de ícones em grade (`grid`), seleção visual, efeito de atualização *flash* sem recarregar e controle de estado do login.
+  - `src/LoginScreen.jsx`: Tela de bloqueio e login (Windows 11 Glassmorphism style) com autenticação JWT.
+  - `src/BootScreen.jsx`: Tela de boot cinemática com efeito CRT Scanlines, Logo Glitch RGB e barra de progresso neon com proteção contra o *React 18 Strict Mode*.
+  - `src/apps.jsx`: 
+    - `TerminalApp`: Terminal interativo xterm.js conectado via WebSocket autenticado com suporte a redimensionamento de janela.
+    - `FileManagerApp`: Gerenciador de arquivos completo com visualização em grade/lista, migalhas de pão (*breadcrumbs*), upload, lixeira e menu de contexto teletransportado via React Portal (`document.body`).
+    - `CodeEditorApp`: Editor de código baseado no Monaco Editor com suporte a destaque de sintaxe e atalho `Ctrl+S`.
+    - `SettingsApp`: Centro de Controle Tático de 4 abas (Aparência, Anonimato OpSec em tempo real, OSINT APIs e Hardware USB).
+    - `NotepadApp`: Bloco de notas com salvamento local.
+  - `src/Window.jsx`: Componente de janela arrastável e maximizável baseado em `react-rnd` envolvido por um `WindowErrorBoundary`.
+  - `src/index.css`: Sistema de design visual completo com glassmorphism, scanlines CRT, efeito de brilho neon e temas táticos.
 
 ---
 
@@ -47,30 +52,31 @@ Se você é um agente de IA ou desenvolvedor trabalhando neste repositório, con
 
 Para rodar o projeto no Windows:
 
-1. **WSL 2 (Windows Subsystem for Linux)**
-   - Necessário para o suporte a contêineres Linux no Docker Desktop.
-   - Para instalar via PowerShell (Administrador):
+1. **WSL 2 (Windows Subsystem for Linux) com Kali Linux**
+   - Instale a distribuição Kali Linux via PowerShell (Administrador):
      ```powershell
-     wsl --install
+     wsl --install -d kali-linux
      ```
-   - Reinicie o computador após a instalação.
-
-2. **Docker Desktop**
-   - Baixe e instale o [Docker Desktop para Windows](https://www.docker.com/products/docker-desktop/).
-   - Certifique-se de que o Docker está aberto e rodando (`Engine running`).
-
-3. **Node.js (v18+)**
+2. **Pacotes OpSec no Kali Linux**
+   - Executados via terminal ou instalados automaticamente pelo backend:
+     ```bash
+     sudo apt update && sudo apt install -y tor privoxy macchanger
+     ```
+3. **usbipd-win (Opcional para Hardware USB)**
+   - Para compartilhar dispositivos USB do Windows com o WSL:
+     ```powershell
+     winget install usbipd
+     ```
+4. **Node.js (v18+)**
    - Baixe e instale o [Node.js](https://nodejs.org/).
 
 ---
 
 ## 🚀 Como Executar
 
-### Opção 1: Execução em 1 Clique (Silenciosa em Segundo Plano)
-Basta dar **duplo clique** no arquivo:
+### Opção 1: Execução Automática (Silenciosa em Segundo Plano)
+Basta dar **duplo clique** no atalho:
 👉 `iniciar-cloudos.bat`
-
-Isso iniciará o Backend e o Frontend silenciosamente (sem abrir janelas de terminal pretas) e abrirá automaticamente o navegador em `http://localhost:5173`.
 
 ---
 
@@ -85,7 +91,6 @@ node server.js
 *O backend estará rodando na porta `8080`.*
 
 #### 2. Iniciar o Frontend
-Em outro terminal:
 ```bash
 cd cloudos-frontend
 npm install
@@ -95,18 +100,22 @@ npm run dev
 
 ---
 
-## 🛠️ Histórico de Alterações e Melhorias Aplicadas
+## 🔑 Credenciais Padrão
+- **Usuário**: `admin`
+- **Senha**: `admin123`
 
-1. **Correção de Conexão com Docker no Windows**: Mapeamento do Named Pipe do Windows (`\\.\pipe\docker_engine`) no `dockerode`.
-2. **Download Automático de Imagens Docker**: Verificação proativa de imagens com `docker.getImage()` e pull automático da imagem `kalilinux/kali-rolling:latest`.
-3. **Tratamento de Caracteres e Buffers UTF-8**: Envio e leitura de `Buffer` bruto (`ArrayBuffer` / `Uint8Array`) no `xterm.js` para evitar corrupção de caracteres especiais e ANSI colors.
-4. **Gerenciamento de Ciclo de Vida e Recursos (Heartbeat)**: Sistema Ping/Pong a cada 30s e encerramento com *graceful shutdown* (`container.stop({ t: 2 })`) para evitar contêineres zumbis de RAM.
-5. **Polyfill `process.env` no Vite**: Injeção do `window.process` em `src/main.jsx` e `vite.config.js` resolvendo o erro `ReferenceError: process is not defined` no `react-rnd`.
-6. **Proteção contra React 18 Strict Mode**: Adicionado temporizador de 150ms no `src/apps.jsx` garantindo dimensões válidas do elemento de tela antes do `fitAddon.fit()`.
-7. **Modo Silencioso em Segundo Plano**: Script `iniciar-cloudos.vbs` com caminhos absolutos (`C:\Program Files\nodejs\node.exe`) ocultando totalmente os processos do terminal.
-8. **Regra de Autonomia de IA**: Diretório `.agents/AGENTS.md` instruindo assistentes de IA a realizarem tarefas diretamente sem repassar comandos manuais desnecessários ao usuário.
+---
+
+## 🛠️ Módulos e Histórico de Desenvolvimento
+
+1. **Autenticação JWT & Lock Screen**: Proteção de endpoints e sessões de WebSocket com tokens JWT e tela de bloqueio estilizada.
+2. **Centro de Controle Tático OpSec**: Leitura de temperatura do Kali em tempo real (Tor status e MAC real ativo).
+3. **Monaco Code Editor**: Editor de código integrado para scripts de pentest e configurações no Kali.
+4. **Boot Screen Cinemática**: Efeitos visuais CRT scanlines, logo glitch RGB e temporizador seguro contra re-renders.
+5. **Gerenciador de Arquivos SaaS**: Manipulação remota de arquivos no WSL com suporte a lixeira `/root/.trash` e upload.
+6. **Regra de Autonomia de IA**: Arquivo `.agents/AGENTS.md` definindo execução direta e autônoma de tarefas para agentes de IA.
 
 ---
 
 ## 📜 Licença
-Este projeto é de uso livre para fins educacionais e de estudo.
+Este projeto é de uso livre para fins educacionais, de pesquisa e de estudo.
