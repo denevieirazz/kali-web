@@ -56,6 +56,15 @@ async function setupKaliContainer(userId) {
         });
         await container.start();
         console.log("Kali Linux iniciado com sucesso!");
+        
+        // Auto-configura teclado br-abnt2 e locale no novo container
+        try {
+            const setupExec = await container.exec({
+                Cmd: ['/bin/bash', '-c', 'apt update && apt install -y kbd locales && echo "loadkeys br-abnt2 2>/dev/null" >> /root/.bashrc && echo "export LANG=pt_BR.UTF-8" >> /root/.bashrc'],
+                AttachStdout: true, AttachStderr: true
+            });
+            await setupExec.start({});
+        } catch (e) {}
     }
     return container;
 }
