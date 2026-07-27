@@ -1,15 +1,57 @@
-import { useState } from 'react';
+import { useState, useEffect, Component } from 'react';
 import { Rnd } from 'react-rnd';
 import { X, Minus, Square } from 'lucide-react';
 
+class WindowErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error("Erro na janela:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: '20px', color: '#ff6b6b', background: '#1e1e1e', height: '100%' }}>
+          <h4>Erro ao carregar o aplicativo.</h4>
+          <p style={{ fontSize: '12px', marginTop: '10px', opacity: 0.8 }}>
+            {this.state.error?.toString()}
+          </p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function Window({ win, onClose, onFocus, children }) {
   const [maximized, setMaximized] = useState(false);
+  const [maxW, setMaxW] = useState(window.innerWidth);
+  const [maxH, setMaxH] = useState(window.innerHeight - 50); // Desconta a taskbar
+
+  // Responsividade: Atualiza limites se a tela mudar de tamanho
+  useEffect(() => {
+    const handleResize = () => {
+      setMaxW(window.innerWidth);
+      setMaxH(window.innerHeight - 50);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   return (
     <Rnd
-      size={maximized ? { width: window.innerWidth, height: window.innerHeight - 50 } : { width: win.w, height: win.h }}
+      size={maximized ? { width: maxW, height: maxH } : { width: win.w, height: win.h }}
       position={maximized ? { x: 0, y: 0 } : { x: win.x, y: win.y }}
-      minWidth={400} minHeight={250}
+      minWidth={300} minHeight={200}
+      maxWidth={maxW} maxHeight={maxH} // Impede a janela de sair da tela
       bounds="parent"
       dragHandleClassName="window-header"
       onMouseDown={onFocus}
@@ -32,7 +74,9 @@ export default function Window({ win, onClose, onFocus, children }) {
           </div>
         </div>
         <div className="window-body">
-          {children}
+          <WindowErrorBoundary>
+            {children}
+          </WindowErrorBoundary>
         </div>
       </div>
     </Rnd>
