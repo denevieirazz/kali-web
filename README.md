@@ -26,12 +26,13 @@ Se você é um agente de IA ou desenvolvedor trabalhando neste repositório, con
 
 - **`cloudos-backend/`**: Servidor Node.js (Express + WebSocket + Node-PTY + JWT)
   - `server.js`:
+    - **SubsystemManager (Enterprise Layer)**: Classe orientada a objetos que encapsula todos os comandos WSL via Promises `async/await`, gerenciamento de sessões Tmux, controle de processos do sistema e leitura/escrita assíncrona.
     - **Autenticação JWT & Bcrypt**: Autenticação com hash bcrypt e validação de tokens JWT para rotas REST e conexões WebSocket.
     - **Leitura/Escrita de Arquivos**: APIs de listagem (`ls`), ações (`mv`, `mkdir`, `rename`, `delete` com suporte à lixeira `/root/.trash`), upload (`multer`) e leitura/salvamento do Code Editor.
     - **Módulo Tático OpSec**: APIs `/api/tactical/anon` e `/api/tactical/status` para controle do serviço Tor, Privoxy e mascaramento de MAC (`macchanger`).
+    - **APIs de Gerenciamento do Subsistema**: Endpoints `/api/subsystem/restart` e `/api/subsystem/processes` para controle de sessão Tmux e monitor de tarefas.
     - **Chaves de Inteligência OSINT**: Armazenamento seguro de chaves de API em `~/.config/cloudos_osint.json`.
     - **Hardware Pass-through (USB)**: Integração com `usbipd-win` (`usbipd.exe`) para acoplar adaptadores Wi-Fi ou pendrives do Windows diretamente no Kali Linux.
-    - **Terminal Persistente**: Gerenciamento de sessões Tmux via `node-pty` e `wsl.exe`.
 - **`cloudos-frontend/`**: Aplicação Web React 18 + Vite + Monaco Editor
   - `src/main.jsx`: Ponto de entrada com polyfill `window.process`.
   - `src/App.jsx`: Gerenciador da área de trabalho estilo Windows 11, alinhamento de ícones em grade (`grid`), seleção visual, efeito de atualização *flash* sem recarregar e controle de estado do login.
