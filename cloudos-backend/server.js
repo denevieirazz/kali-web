@@ -476,6 +476,40 @@ app.get('/api/kali/tools/:id/schema', (req, res) => {
     if (!schema) return res.status(404).json({ error: "Schema não encontrado para esta ferramenta." });
     res.json(schema);
 });
+
+// Rota: Executar Ferramenta com Streaming em Segundo Plano
+app.post('/api/kali/tools/:id/run', async (req, res) => {
+    const schema = TOOL_SCHEMAS[req.params.id];
+    if (!schema) return res.status(404).json({ error: "Ferramenta inválida." });
+
+    const options = req.body.options || {};
+    let cmd = schema.command;
+
+    // Monta o comando com base nas opções selecionadas na GUI
+    schema.fields.forEach(field => {
+        const val = options[field.id];
+        if (!val) return;
+        if (field.type === 'boolean' && val === true) cmd += ` ${field.flag}`;
+        else if ((field.type === 'text' || field.type === 'select') && val) {
+            cmd += field.flag ? ` ${field.flag} ${val}` : ` ${val}`;
+        }
+    });
+
+    logEvent(req.user.id, 'tool_execute', `Executou: ${cmd}`);
+    
+    // Configura headers para streaming (Sem buffer)
+    res.setHeader('Content-Type', 'text/plain');
+    res.setHeader('Transfer-Encoding', 'chunked');
+
+    // Executa no WSL
+    const toolProcess = exec(`wsl -d kali-linux -u cloudos -- bash -c "${cmd.replace(/"/g, '\\"')}"`, { windowsHide: true });
+    
+    // Envia o output ao vivo para o frontend
+    toolProcess.stdout.on('data', (data) => res.write(data));
+    toolProcess.stderr.on('data', (data) => res.write(data));
+    
+    toolProcess.on('close', () => res.end());
+});
 const KALI_CATALOG = [
     { id: "nmap", name: "Nmap", packageName: "nmap", command: "nmap", category: "recon", description: "Network discovery and security auditing tool.", icon: "Radar", tags: ["network", "discovery"], riskLevel: "medium" },
     { id: "wireshark", name: "Wireshark", packageName: "wireshark", command: "wireshark", category: "network", description: "Network protocol analyzer.", icon: "Activity", tags: ["network", "packets"], riskLevel: "safe" },

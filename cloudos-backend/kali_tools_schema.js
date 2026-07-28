@@ -1,39 +1,43 @@
-// Schema de Interface Dinâmica para Ferramentas Kali
+// cloudos-backend/kali_tools_schema.js
 const TOOL_SCHEMAS = {
     nmap: {
         name: "Nmap",
         command: "nmap",
         category: "recon",
-        description: "Network Mapper - Scanner de portas e rede.",
+        description: "Scanner de rede e portas.",
+        presets: [
+            { name: "Scan Rápido (Top 100)", vars: { p: "", sV: false, sS: true, T: "4" } },
+            { name: "Detectar Versões", vars: { p: "", sV: true, sS: false, T: "3" } }
+        ],
         fields: [
-            { id: "target", label: "Alvo (IP/Host)", type: "text", required: true, placeholder: "192.168.1.1 ou scanme.nmap.org" },
-            { id: "p", label: "Portas (ex: 80,443 ou 1-1000)", type: "text", flag: "-p" },
-            { id: "sV", label: "Detectar Versão do Serviço", type: "boolean", flag: "-sV" },
+            { id: "target", label: "Alvo (IP/Host)", type: "text", required: true, placeholder: "192.168.1.1" },
+            { id: "p", label: "Portas (ex: 80,443)", type: "text", flag: "-p" },
+            { id: "sV", label: "Detectar Versão", type: "boolean", flag: "-sV" },
             { id: "sS", label: "SYN Scan (Stealth)", type: "boolean", flag: "-sS" },
-            { id: "T", label: "Velocidade (Timing 0-5)", type: "select", flag: "-T", options: ["0", "1", "2", "3", "4", "5"] }
+            { id: "T", label: "Velocidade (0-5)", type: "select", flag: "-T", options: ["0", "1", "2", "3", "4", "5"] }
         ]
     },
     gobuster: {
         name: "Gobuster",
         command: "gobuster",
         category: "web",
-        description: "Brute-forcer de diretórios e arquivos web.",
+        description: "Brute-force de diretórios web.",
+        presets: [],
         fields: [
             { id: "mode", label: "Modo", type: "select", required: true, flag: "", options: ["dir", "dns", "vhost"] },
-            { id: "url", label: "URL Alvo", type: "text", required: true, flag: "-u", placeholder: "http://exemplo.com" },
-            { id: "wordlist", label: "Wordlist", type: "text", required: true, flag: "-w", placeholder: "/usr/share/wordlists/dirb/common.txt" },
-            { id: "x", label: "Extensões (ex: php,html)", type: "text", flag: "-x" }
+            { id: "url", label: "URL", type: "text", required: true, flag: "-u", placeholder: "http://alvo.com" },
+            { id: "wordlist", label: "Wordlist", type: "text", required: true, flag: "-w", placeholder: "/usr/share/wordlists/dirb/common.txt" }
         ]
     },
     nikto: {
         name: "Nikto",
         command: "nikto",
         category: "web",
-        description: "Scanner de vulnerabilidades em servidores web.",
+        description: "Scanner de vulnerabilidades Web.",
+        presets: [],
         fields: [
-            { id: "host", label: "Host Alvo", type: "text", required: true, flag: "-h", placeholder: "http://exemplo.com" },
-            { id: "port", label: "Porta", type: "text", flag: "-p" },
-            { id: "ssl", label: "Forçar SSL", type: "boolean", flag: "-ssl" }
+            { id: "host", label: "Host Alvo", type: "text", required: true, flag: "-h", placeholder: "http://alvo.com" },
+            { id: "port", label: "Porta", type: "text", flag: "-p" }
         ]
     },
     sqlmap: {
@@ -41,6 +45,7 @@ const TOOL_SCHEMAS = {
         command: "sqlmap",
         category: "web",
         description: "Ferramenta de teste de injeção de SQL e gerenciamento de banco de dados.",
+        presets: [],
         fields: [
             { id: "url", label: "URL Alvo", type: "text", required: true, flag: "-u", placeholder: "http://alvo.com/page.php?id=1" },
             { id: "dbs", label: "Enumerar Bancos de Dados", type: "boolean", flag: "--dbs" },
