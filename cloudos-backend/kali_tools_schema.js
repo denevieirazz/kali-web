@@ -56,9 +56,9 @@ const TOOL_SCHEMAS = {
     nikto: {
         name: "Nikto", command: "nikto", category: "web", installCmd: "sudo apt install nikto",
         description: "Scanner de vulnerabilidades Web.",
-        presets: [ { name: "Scan Padrão (Porta 80)", vars: { host: "http://localhost", port: "80", ssl: false, tuning: "x" } } ],
+        presets: [ { name: "Scan Padrão (Porta 80)", vars: { host: "127.0.0.1", port: "80", ssl: false, tuning: "x" } } ],
         fields: [
-            { id: "host", label: "Host Alvo", type: "text", required: true, flag: "-h", default: "http://localhost" },
+            { id: "host", label: "Host Alvo (sem http://)", type: "text", required: true, flag: "-h", default: "127.0.0.1" },
             { id: "port", label: "Porta", type: "text", flag: "-p", default: "80" },
             { id: "ssl", label: "Forçar SSL", type: "boolean", flag: "-ssl" },
             { id: "tuning", label: "Tuning (Tipos de teste)", type: "text", flag: "-Tuning", default: "x" }
