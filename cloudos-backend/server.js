@@ -451,6 +451,14 @@ app.post('/api/apps/uninstall', async (req, res) => {
 // =========================================================
 // 🛠️ KALI HUB - CATÁLOGO E ROTAS SEGURAS
 // =========================================================
+const TOOL_SCHEMAS = require('./kali_tools_schema');
+
+// Rota: Obter Schema da GUI de uma ferramenta
+app.get('/api/kali/tools/:id/schema', (req, res) => {
+    const schema = TOOL_SCHEMAS[req.params.id];
+    if (!schema) return res.status(404).json({ error: "Schema não encontrado para esta ferramenta." });
+    res.json(schema);
+});
 const KALI_CATALOG = [
     { id: "nmap", name: "Nmap", packageName: "nmap", command: "nmap", category: "recon", description: "Network discovery and security auditing tool.", icon: "Radar", tags: ["network", "discovery"], riskLevel: "medium" },
     { id: "wireshark", name: "Wireshark", packageName: "wireshark", command: "wireshark", category: "network", description: "Network protocol analyzer.", icon: "Activity", tags: ["network", "packets"], riskLevel: "safe" },

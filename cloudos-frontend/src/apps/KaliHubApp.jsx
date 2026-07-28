@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, Star, Activity, Bug, Database, Rocket, KeyRound, Hash, Wifi, Eye, FolderSearch, Terminal as TermIcon, AlertTriangle, CheckCircle, XCircle, Loader, ShieldAlert } from 'lucide-react';
+import { Search, Star, Activity, Bug, Database, Rocket, KeyRound, Hash, Wifi, Eye, FolderSearch, Terminal as TermIcon, AlertTriangle, CheckCircle, XCircle, Loader, ShieldAlert, LayoutGrid } from 'lucide-react';
 
 const API_BASE = 'http://localhost:8080';
 const token = () => localStorage.getItem('cloudos_token');
@@ -48,16 +48,17 @@ export const KaliHubApp = ({ openApp }) => {
     } catch (e) {}
   };
 
-  const handleOpen = async (tool) => {
+  const handleOpen = async (tool, useGui = false) => {
     try {
-      const res = await fetch(`${API_BASE}/api/kali/tools/${tool.id}/open`, {
+      fetch(`${API_BASE}/api/kali/tools/${tool.id}/open`, {
         method: 'POST', headers: { 'Authorization': `Bearer ${token()}` }
       });
-      const data = await res.json();
-      if (data.success && openApp) {
-        openApp('terminal', { tool: data.command });
-        setSelectedTool(null);
+      if (useGui) {
+        if (openApp) openApp('toolrunner', { toolId: tool.id });
+      } else {
+        if (openApp) openApp('terminal', { tool: tool.command });
       }
+      setSelectedTool(null);
     } catch (e) {}
   };
 
@@ -158,9 +159,14 @@ export const KaliHubApp = ({ openApp }) => {
               </div>
             )}
 
-            <button onClick={() => handleOpen(selectedTool)} style={{ width: '100%', background: '#1f6feb', color: 'white', border: 'none', padding: '10px 0', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>
-              Open in Terminal
-            </button>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button onClick={() => handleOpen(selectedTool, true)} style={{ flex: 1, background: '#8957e5', color: 'white', border: 'none', padding: '10px 0', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                <LayoutGrid size={16} /> Abrir GUI
+              </button>
+              <button onClick={() => handleOpen(selectedTool, false)} style={{ flex: 1, background: '#1f6feb', color: 'white', border: 'none', padding: '10px 0', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                <TermIcon size={16} /> Abrir Terminal
+              </button>
+            </div>
           </div>
         </div>
       )}
