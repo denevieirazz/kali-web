@@ -463,6 +463,10 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; }
 .fmp-progress-bar { position: absolute; left: 0; top: 0; height: 100%; background: linear-gradient(90deg, #1f6feb, #58a6ff); transition: width 0.2s; }
 .fmp-progress-text { position: relative; z-index: 2; font-size: 11px; color: #fff; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
 
+/* DANGER BUTTON */
+.fmp-btn-danger { display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: rgba(248, 81, 73, 0.1); border: 1px solid rgba(248, 81, 73, 0.3); border-radius: 6px; color: #f85149; cursor: pointer; font-size: 12px; font-weight: 500; transition: 0.15s; margin-left: auto; }
+.fmp-btn-danger:hover { background: rgba(248, 81, 73, 0.2); border-color: #f85149; }
+
 /* TASKBAR MOBILE */
 .taskbar.mobile-taskbar {
   padding: 0 10px;

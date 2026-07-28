@@ -167,9 +167,21 @@ class SubsystemManager {
 
     async deleteFile(userId, relPath) {
         const filePath = this.getSecurePath(userId, relPath);
-        const trashPath = this.getSecurePath(userId, '.trash');
-        await fs.promises.mkdir(trashPath, { recursive: true });
-        await fs.promises.rename(filePath, path.join(trashPath, path.basename(filePath)));
+        
+        // Se o arquivo JÁ ESTIVER na lixeira, deleta permanentemente do disco
+        if (relPath.startsWith('.trash')) {
+            const stats = await fs.promises.stat(filePath);
+            if (stats.isDirectory()) {
+                await fs.promises.rm(filePath, { recursive: true, force: true }); // Deleta pasta e conteúdo
+            } else {
+                await fs.promises.unlink(filePath); // Deleta arquivo
+            }
+        } else {
+            // Se for um arquivo normal, move para a lixeira
+            const trashPath = this.getSecurePath(userId, '.trash');
+            await fs.promises.mkdir(trashPath, { recursive: true });
+            await fs.promises.rename(filePath, path.join(trashPath, path.basename(filePath)));
+        }
     }
 
     startSession(userId, cwd = null) {

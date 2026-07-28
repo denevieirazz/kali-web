@@ -63,6 +63,15 @@ export const FileManagerApp = ({ openApp }) => {
     return <FileCode size={32} color="#e5e7eb" />;
   };
 
+  const emptyTrash = async () => {
+    if (!window.confirm("Tem certeza? Isso vai apagar TODOS os arquivos da lixeira permanentemente.")) return;
+    
+    for (const item of items) {
+      await action('delete', { path: item.path });
+    }
+    fetchFiles('.trash');
+  };
+
   return (
     <div className="file-manager-pro" onClick={() => setContextMenu({ visible: false })}>
       <input type="file" multiple ref={fileInputRef} style={{ display: 'none' }} onChange={handleUpload} />
@@ -101,6 +110,13 @@ export const FileManagerApp = ({ openApp }) => {
         <div className="fmp-action-bar">
           <button className="fmp-btn" onClick={triggerMkdir}><FolderPlus size={14} /> Nova Pasta</button>
           <button className="fmp-btn" onClick={() => fileInputRef.current.click()}><Upload size={14} /> Upload</button>
+          
+          {path === '.trash' && items.length > 0 && (
+            <button className="fmp-btn-danger" onClick={emptyTrash}>
+              <Trash2 size={14} /> Esvaziar Lixeira
+            </button>
+          )}
+
           {progress > 0 && (
             <div className="fmp-progress-container">
               <div className="fmp-progress-bar" style={{ width: `${progress}%` }}></div>
