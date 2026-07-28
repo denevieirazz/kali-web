@@ -462,3 +462,19 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; }
 .fmp-progress-container { position: relative; width: 150px; height: 24px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; overflow: hidden; margin-left: auto; display: flex; align-items: center; justify-content: center; }
 .fmp-progress-bar { position: absolute; left: 0; top: 0; height: 100%; background: linear-gradient(90deg, #1f6feb, #58a6ff); transition: width 0.2s; }
 .fmp-progress-text { position: relative; z-index: 2; font-size: 11px; color: #fff; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
+
+/* TASKBAR MOBILE */
+.taskbar.mobile-taskbar {
+  padding: 0 10px;
+  gap: 5px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.taskbar.mobile-taskbar::-webkit-scrollbar { display: none; }
+.taskbar.mobile-taskbar .taskbar-app {
+  width: 40px; height: 40px; flex-shrink: 0;
+}
+
+/* APP STORE GRID */
+.appstore-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 15px; }
+.appstore-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; align-items: center; text-align: center; }

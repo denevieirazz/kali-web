@@ -415,6 +415,38 @@ app.get('/api/files/favorites', async (req, res) => {
     } catch (e) { res.status(500).json({ error: 'Erro ao obter favoritos.' }); }
 });
 
+// =========================================================
+// 📦 APP STORE APIs
+// =========================================================
+app.get('/api/apps', async (req, res) => {
+    try {
+        const apps = await db.prepare('SELECT app_id, is_pinned FROM installed_apps WHERE user_id = ?').all(req.user.id);
+        res.json(apps || []);
+    } catch (e) { res.status(500).json({ error: 'Erro ao listar apps.' }); }
+});
+
+app.post('/api/apps/toggle', async (req, res) => {
+    const { app_id, is_pinned } = req.body;
+    try {
+        const pinnedVal = is_pinned ? 1 : 0;
+        const existing = await db.prepare('SELECT * FROM installed_apps WHERE user_id = ? AND app_id = ?').get(req.user.id, app_id);
+        if (existing) {
+            await db.prepare('UPDATE installed_apps SET is_pinned = ? WHERE user_id = ? AND app_id = ?').run(pinnedVal, req.user.id, app_id);
+        } else {
+            await db.prepare('INSERT INTO installed_apps (user_id, app_id, is_pinned) VALUES (?, ?, ?)').run(req.user.id, app_id, pinnedVal);
+        }
+        await logEvent(req.user.id, 'app_toggle', `App ${app_id} fixado: ${is_pinned}`);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: 'Erro ao alterar app.' }); }
+});
+
+app.post('/api/apps/uninstall', async (req, res) => {
+    try {
+        await db.prepare('DELETE FROM installed_apps WHERE user_id = ? AND app_id = ?').run(req.user.id, req.body.app_id);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: 'Erro ao desinstalar app.' }); }
+});
+
 // --- WebSocket (Terminal Seguro) ---
 wss.on('connection', (ws, req) => {
     const token = new URL(req.url, 'http://localhost').searchParams.get('token');

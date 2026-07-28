@@ -8,7 +8,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { CloudOSProvider, useCloudOS } from './store/CloudOSContext';
 
 function Desktop() {
-  const { settings, setBg, isLocked, lockSystem, notifications, fetchNotifications } = useCloudOS();
+  const { settings, setBg, isLocked, lockSystem, notifications, fetchNotifications, pinnedApps } = useCloudOS();
   const [booting, setBooting] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!localStorage.getItem('cloudos_token'));
   const [windows, setWindows] = useState([]);
@@ -19,6 +19,13 @@ function Desktop() {
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [showNotifs, setShowNotifs] = useState(false);
   const [selectedIcons, setSelectedIcons] = useState([]);
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
@@ -28,9 +35,9 @@ function Desktop() {
   const openApp = (appId, payload = null) => {
     const existing = windows.find(w => w.appId === appId);
     if (existing) return focusWindow(existing.id);
-    const w = Math.min(800, window.innerWidth - 100);
-    const h = Math.min(550, window.innerHeight - 100);
-    setWindows(prev => [...prev, { id: Date.now(), appId, x: 50 + Math.random()*50, y: 50, w, h, z: zIndex + 1, payload }]);
+    const w = isMobile ? window.innerWidth : Math.min(800, window.innerWidth - 100);
+    const h = isMobile ? window.innerHeight - 50 : Math.min(550, window.innerHeight - 100);
+    setWindows(prev => [...prev, { id: Date.now(), appId, x: isMobile ? 0 : 50 + Math.random()*50, y: isMobile ? 0 : 50, w, h, z: zIndex + 1, payload }]);
     setZIndex(prev => prev + 1);
     setStartOpen(false);
   };
@@ -47,6 +54,10 @@ function Desktop() {
   };
 
   const wallpaperUrl = settings?.wallpaper || 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?q=80&w=2070';
+
+  const visibleTaskbarApps = pinnedApps && pinnedApps.length > 0 
+    ? AppList.filter(a => pinnedApps.includes(a.id)) 
+    : AppList;
 
   if (booting) return <BootScreen onBootComplete={() => setBooting(false)} />;
   if (!isAuthenticated) return <LoginScreen onLogin={() => setIsAuthenticated(true)} />;
@@ -66,24 +77,26 @@ function Desktop() {
         actions={{ togglePalette: () => setIsPaletteOpen(!isPaletteOpen), lock: lockSystem }}
       />
 
-      {/* Desktop Icons */}
-      <div className="desktop-icons-container">
-        {AppList.map(app => {
-          const Icon = app.icon;
-          return (
-            <div 
-              key={app.id} 
-              className={`d-icon ${selectedIcons.includes(app.id) ? 'selected' : ''}`}
-              style={{ position: 'relative' }}
-              onClick={(e) => { e.stopPropagation(); setSelectedIcons([app.id]); }}
-              onDoubleClick={() => openApp(app.id)}
-            >
-              <Icon size={42} color="white" />
-              <span>{app.title}</span>
-            </div>
-          );
-        })}
-      </div>
+      {/* Desktop Icons - Oculta no Mobile */}
+      {!isMobile && (
+        <div className="desktop-icons-container">
+          {AppList.map(app => {
+            const Icon = app.icon;
+            return (
+              <div 
+                key={app.id} 
+                className={`d-icon ${selectedIcons.includes(app.id) ? 'selected' : ''}`}
+                style={{ position: 'relative' }}
+                onClick={(e) => { e.stopPropagation(); setSelectedIcons([app.id]); }}
+                onDoubleClick={() => openApp(app.id)}
+              >
+                <Icon size={42} color="white" />
+                <span>{app.title}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Windows */}
       {windows.map(win => {
@@ -91,7 +104,7 @@ function Desktop() {
         if (!appConfig) return null;
         const AppComp = appConfig.Component;
         return (
-          <Window key={win.id} win={{ ...win, title: appConfig.title, icon: appConfig.icon }} onClose={() => closeApp(win.id)} onFocus={() => focusWindow(win.id)}>
+          <Window key={win.id} win={{ ...win, title: appConfig.title, icon: appConfig.icon }} isMobile={isMobile} onClose={() => closeApp(win.id)} onFocus={() => focusWindow(win.id)}>
             <AppComp payload={win.payload} openApp={openApp} setBg={setBg} />
           </Window>
         );
@@ -115,12 +128,12 @@ function Desktop() {
         </div>
       )}
 
-      {/* Taskbar */}
-      <div className="taskbar" onClick={(e) => e.stopPropagation()}>
-        <div className="taskbar-app" onClick={() => setIsPaletteOpen(true)} title="Command Palette (Ctrl+Shift+P)"><Search size={24} /></div>
-        {AppList.map(app => (
+      {/* Taskbar Mobile / Desktop */}
+      <div className={`taskbar ${isMobile ? 'mobile-taskbar' : ''}`} onClick={(e) => e.stopPropagation()}>
+        <div className="taskbar-app" onClick={() => setIsPaletteOpen(true)} title="Command Palette (Ctrl+Shift+P)"><Search size={22} /></div>
+        {visibleTaskbarApps.map(app => (
           <div key={app.id} className={`taskbar-app ${windows.some(w => w.appId === app.id) ? 'active' : ''}`} onClick={() => openApp(app.id)}>
-            <app.icon size={22} />
+            <app.icon size={20} />
           </div>
         ))}
         <div className="taskbar-tray">
@@ -128,8 +141,10 @@ function Desktop() {
             <Bell size={16} />
             {notifications && notifications.length > 0 && <span className="notif-badge"></span>}
           </div>
-          <Wifi size={16} /><Volume2 size={16} /><Battery size={16} />
-          <span>{time.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+          <Wifi size={16} />
+          {!isMobile && <Volume2 size={16} />}
+          {!isMobile && <Battery size={16} />}
+          {!isMobile && <span>{time.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>}
         </div>
       </div>
 

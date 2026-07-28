@@ -6,4 +6,6 @@ export { NotepadApp } from './apps/NotepadApp';
 export { SystemMonitorApp } from './apps/SystemMonitorApp';
 export { OpSecCenterApp } from './apps/OpSecCenterApp';
 export { EventCenterApp } from './apps/EventCenterApp';
+export { AppStoreApp } from './apps/AppStoreApp';
+
 

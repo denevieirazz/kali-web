@@ -31,12 +31,11 @@ class WindowErrorBoundary extends Component {
   }
 }
 
-export default function Window({ win, onClose, onFocus, children }) {
+export default function Window({ win, onClose, onFocus, children, isMobile }) {
   const [maximized, setMaximized] = useState(false);
   const [maxW, setMaxW] = useState(window.innerWidth);
-  const [maxH, setMaxH] = useState(window.innerHeight - 50); // Desconta a taskbar
+  const [maxH, setMaxH] = useState(window.innerHeight - 50);
 
-  // Responsividade: Atualiza limites se a tela mudar de tamanho
   useEffect(() => {
     const handleResize = () => {
       setMaxW(window.innerWidth);
@@ -46,30 +45,35 @@ export default function Window({ win, onClose, onFocus, children }) {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  const isFull = isMobile || maximized;
+
   return (
     <Rnd
-      size={maximized ? { width: maxW, height: maxH } : { width: win.w, height: win.h }}
-      position={maximized ? { x: 0, y: 0 } : { x: win.x, y: win.y }}
-      minWidth={300} minHeight={200}
-      maxWidth={maxW} maxHeight={maxH} // Impede a janela de sair da tela
+      size={isFull ? { width: maxW, height: maxH } : { width: win.w, height: win.h }}
+      position={isFull ? { x: 0, y: 0 } : { x: win.x, y: win.y }}
+      minWidth={isMobile ? window.innerWidth : 300}
+      minHeight={isMobile ? window.innerHeight - 50 : 200}
+      maxWidth={maxW} maxHeight={maxH}
       bounds="parent"
       dragHandleClassName="window-header"
       onMouseDown={onFocus}
       style={{ zIndex: win.z, position: 'absolute' }}
-      enableResizing={!maximized}
-      disableDragging={maximized}
+      enableResizing={!isFull}
+      disableDragging={isFull}
     >
-      <div className="window-wrapper" style={{ height: '100%', width: '100%' }}>
+      <div className="window-wrapper" style={{ height: '100%', width: '100%', borderRadius: isMobile ? 0 : 8 }}>
         <div className="window-header">
           <div className="window-title">
             {win.icon && <win.icon size={16} />} 
             {win.title}
           </div>
           <div className="window-controls">
-            <button className="win-btn"><Minus size={14} /></button>
-            <button className="win-btn" onClick={() => setMaximized(!maximized)}>
-              <Square size={12} />
-            </button>
+            {!isMobile && <button className="win-btn"><Minus size={14} /></button>}
+            {!isMobile && (
+              <button className="win-btn" onClick={() => setMaximized(!maximized)}>
+                <Square size={12} />
+              </button>
+            )}
             <button className="win-btn close" onClick={onClose}><X size={16} /></button>
           </div>
         </div>
