@@ -26,14 +26,14 @@ Se você é um agente de IA ou desenvolvedor trabalhando neste repositório, con
 
 - **`cloudos-backend/`**: Servidor Node.js (Express + WebSocket + Node-PTY + JWT + SQLite)
   - `database.js`:
-    - **Camada de Banco de Dados (SQLite)**: Inicialização das tabelas `users`, `user_settings`, `desktop_state`, `notifications` e `system_events` com modo WAL e chaves estrangeiras.
+    - **Camada de Banco de Dados (SQLite)**: Tabelas `users`, `user_settings`, `desktop_state`, `workspaces`, `snapshots`, `system_events`, `file_metadata`, `installed_apps` e `notifications` em modo WAL.
   - `server.js`:
     - **SubsystemManager (Enterprise Security Layer)**:
       - **Acesso Nativo ao Sistema de Arquivos (Node FS)**: Acesso direto ao sistema de arquivos do WSL2 via caminho UNC de rede (`\\\\wsl.localhost\\kali-linux\\home\\cloudos_users\\...`), eliminando concatenações de shell.
       - **Proteção contra Path Traversal**: Validação estrita via `getSecurePath()` impedindo acessos fora do diretório do usuário.
       - **Isolamento de Usuário Não-Root**: Execução dos comandos e sessões Tmux como usuário `cloudos` (não-root).
       - **Mascaramento Automático de MAC**: Mascaramento por padrão de endereços físicos para proteção OpSec.
-    - **Persistência de Estado SaaS**: APIs `/api/user/state`, `/api/user/settings` e `/api/user/desktop` para salvamento e restauração da área de trabalho, janelas abertas e ícones por usuário.
+    - **Persistência de Estado SaaS & Workspaces**: APIs `/api/workspaces`, `/api/snapshots`, `/api/events` e `/api/files/favorites` para gestão de ambientes de pentest e auditoria em tempo real.
     - **Proteção e Compatibilidade de Token**: Middleware com resolução inteligente de IDs legados para os registros do banco de dados SQLite, eliminando erros 500 por tokens expirados/desincronizados.
     - **Streaming de Arquivos & ZIP**: APIs `/api/files/properties` para metadados e `/api/files/download` para geração e streaming de ZIP nativo via WSL sem sobrecarga de memória.
     - **Autenticação JWT & Registro**: Autenticação com hash bcrypt, registro de usuários (`/api/auth/register`) e validação de tokens JWT.
@@ -47,7 +47,8 @@ Se você é um agente de IA ou desenvolvedor trabalhando neste repositório, con
   - `src/LoginScreen.jsx`: Tela de bloqueio e login (Windows 11 Glassmorphism style) com autenticação JWT.
   - `src/BootScreen.jsx`: Tela de boot cinemática com efeito CRT Scanlines, Logo Glitch RGB e proteção contra re-renders assíncronos (`onBootCompleteRef`).
   - `src/apps/FileManagerApp.jsx`: Gerenciador de arquivos premium com layout de 2 colunas (sidebar VS Code Explorer + grid), status bar inferior com indicador WSL isolado, carregamento com spinner animated, XMLHttpRequest upload progress bar, download de pastas em ZIP via stream, menu contextual React Portal e lixeira nativa.
-  - `src/apps/SettingsApp.jsx`: Painel de configurações estilo Windows 11/macOS com abas (Aparência, Conta/Planos, Armazenamento WSL, Terminal, Sobre) integrado com o `CloudOSContext`.
+  - `src/apps/EventCenterApp.jsx`: Central de eventos e logs de auditoria do sistema em tempo real (`/api/events`).
+  - `src/apps/SettingsApp.jsx`: Control Center com abas (Aparência, Armazenamento WSL, Snapshots & Backups, Informações do Sistema, Sobre) integrado com o `CloudOSContext`.
 
 ---
 

@@ -337,6 +337,83 @@ app.post('/api/tactical/anon', async (req, res) => {
     try { await subsystem.execCommand(req.user.id, cmd); res.json({ success: true }); } 
     catch (e) { res.status(500).json({ error: 'Erro WSL.' }); }
 });
+// =========================================================
+// 📊 WORKSPACE & SNAPSHOT APIs
+// =========================================================
+async function logEvent(userId, type, details) {
+    try {
+        const id = 'e_' + crypto.randomBytes(4).toString('hex');
+        await db.prepare('INSERT INTO system_events (id, user_id, event_type, details) VALUES (?, ?, ?, ?)').run(id, userId, type, details);
+    } catch (e) { console.error('Erro ao salvar evento:', e); }
+}
+
+app.get('/api/workspaces', async (req, res) => {
+    try {
+        const workspaces = await db.prepare('SELECT * FROM workspaces WHERE user_id = ? ORDER BY created_at DESC').all(req.user.id);
+        res.json(workspaces || []);
+    } catch (e) { res.status(500).json({ error: 'Erro ao listar workspaces.' }); }
+});
+
+app.post('/api/workspaces/save', async (req, res) => {
+    const { name, state } = req.body;
+    const id = 'w_' + crypto.randomBytes(4).toString('hex');
+    try {
+        await db.prepare('INSERT INTO workspaces (id, user_id, name, state) VALUES (?, ?, ?, ?)').run(id, req.user.id, name, JSON.stringify(state || {}));
+        await logEvent(req.user.id, 'workspace_save', `Workspace '${name}' salvo.`);
+        res.json({ success: true, id });
+    } catch (e) { res.status(500).json({ error: 'Erro ao salvar workspace.' }); }
+});
+
+app.post('/api/snapshots/create', async (req, res) => {
+    const { name, state } = req.body;
+    const id = 's_' + crypto.randomBytes(4).toString('hex');
+    try {
+        await db.prepare('INSERT INTO snapshots (id, user_id, name, data) VALUES (?, ?, ?, ?)').run(id, req.user.id, name, JSON.stringify(state || {}));
+        await logEvent(req.user.id, 'snapshot_create', `Snapshot '${name}' criado.`);
+        res.json({ success: true, id });
+    } catch (e) { res.status(500).json({ error: 'Erro ao criar snapshot.' }); }
+});
+
+app.get('/api/snapshots', async (req, res) => {
+    try {
+        const snaps = await db.prepare('SELECT id, name, created_at FROM snapshots WHERE user_id = ? ORDER BY created_at DESC').all(req.user.id);
+        res.json(snaps || []);
+    } catch (e) { res.status(500).json({ error: 'Erro ao listar snapshots.' }); }
+});
+
+// =========================================================
+// 📜 EVENT CENTER APIs
+// =========================================================
+app.get('/api/events', async (req, res) => {
+    try {
+        const events = await db.prepare('SELECT * FROM system_events WHERE user_id = ? ORDER BY created_at DESC LIMIT 50').all(req.user.id);
+        res.json(events || []);
+    } catch (e) { res.status(500).json({ error: 'Erro ao listar eventos.' }); }
+});
+
+// =========================================================
+// 🗂️ FILE METADATA APIs (Favoritos, Tags)
+// =========================================================
+app.post('/api/files/favorite', async (req, res) => {
+    const { path: filePath, favorite } = req.body;
+    try {
+        const favVal = favorite ? 1 : 0;
+        const existing = await db.prepare('SELECT * FROM file_metadata WHERE user_id = ? AND file_path = ?').get(req.user.id, filePath);
+        if (existing) {
+            await db.prepare('UPDATE file_metadata SET is_favorite = ? WHERE user_id = ? AND file_path = ?').run(favVal, req.user.id, filePath);
+        } else {
+            await db.prepare('INSERT INTO file_metadata (user_id, file_path, is_favorite) VALUES (?, ?, ?)').run(req.user.id, filePath, favVal);
+        }
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: 'Erro ao atualizar favorito.' }); }
+});
+
+app.get('/api/files/favorites', async (req, res) => {
+    try {
+        const favs = await db.prepare('SELECT file_path FROM file_metadata WHERE user_id = ? AND is_favorite = 1').all(req.user.id);
+        res.json((favs || []).map(f => f.file_path));
+    } catch (e) { res.status(500).json({ error: 'Erro ao obter favoritos.' }); }
+});
 
 // --- WebSocket (Terminal Seguro) ---
 wss.on('connection', (ws, req) => {

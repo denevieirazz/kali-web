@@ -41,13 +41,22 @@ rawDb.serialize(() => {
     `);
 
     rawDb.run(`
-        CREATE TABLE IF NOT EXISTS notifications (
+        CREATE TABLE IF NOT EXISTS workspaces (
             id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL,
-            title TEXT NOT NULL,
-            message TEXT,
-            type TEXT DEFAULT 'info',
-            is_read INTEGER DEFAULT 0,
+            name TEXT NOT NULL,
+            state TEXT DEFAULT '{}',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+    `);
+
+    rawDb.run(`
+        CREATE TABLE IF NOT EXISTS snapshots (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            data TEXT NOT NULL,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
@@ -60,6 +69,39 @@ rawDb.serialize(() => {
             event_type TEXT NOT NULL,
             details TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
+
+    rawDb.run(`
+        CREATE TABLE IF NOT EXISTS file_metadata (
+            user_id TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            is_favorite INTEGER DEFAULT 0,
+            tags TEXT DEFAULT '[]',
+            last_opened DATETIME,
+            PRIMARY KEY (user_id, file_path)
+        );
+    `);
+
+    rawDb.run(`
+        CREATE TABLE IF NOT EXISTS installed_apps (
+            user_id TEXT NOT NULL,
+            app_id TEXT NOT NULL,
+            is_pinned INTEGER DEFAULT 0,
+            PRIMARY KEY (user_id, app_id)
+        );
+    `);
+
+    rawDb.run(`
+        CREATE TABLE IF NOT EXISTS notifications (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            message TEXT,
+            type TEXT DEFAULT 'info',
+            is_read INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
     `);
 });
