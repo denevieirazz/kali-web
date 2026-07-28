@@ -404,31 +404,66 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; }
 .fmp-progress-bar { position: absolute; left: 0; top: 0; height: 100%; background: #3b82f6; transition: width 0.2s; }
 .fmp-progress-text { position: relative; z-index: 2; font-size: 11px; color: white; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
 
-/* FILE MANAGER PRO PREMIUM */
-.file-manager-pro { display: flex; flex-direction: column; height: 100%; width: 100%; background: #121212; color: #e5e7eb; font-size: 13px; }
-.fmp-toolbar { height: 45px; display: flex; align-items: center; gap: 10px; padding: 0 15px; border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(0,0,0,0.2); }
-.fmp-btn-icon { background: transparent; border: none; color: #9ca3af; padding: 6px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; }
-.fmp-btn-icon:hover { background: rgba(255,255,255,0.1); color: white; }
-.fmp-breadcrumb { flex: 1; display: flex; align-items: center; gap: 8px; background: rgba(0,0,0,0.3); padding: 6px 12px; border-radius: 4px; font-family: monospace; font-size: 12px; }
-.fmp-breadcrumb span { color: #d1d5db; cursor: pointer; }
-.fmp-breadcrumb span:hover { color: white; }
+/* ==========================================
+   FILE MANAGER PRO PREMIUM (Enterprise UI)
+   ========================================== */
+.file-manager-pro { 
+  display: flex; height: 100%; width: 100%; background: #0d1117; color: #c9d1d9; font-size: 13px; overflow: hidden;
+}
 
-.fmp-action-bar { height: 45px; display: flex; align-items: center; gap: 10px; padding: 0 15px; border-bottom: 1px solid rgba(255,255,255,0.05); }
-.fmp-btn { display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; color: #d1d5db; cursor: pointer; font-size: 12px; transition: 0.2s; }
-.fmp-btn:hover { background: rgba(255,255,255,0.1); color: white; }
+/* SIDEBAR */
+.fmp-sidebar { width: 200px; background: #161b22; border-right: 1px solid #30363d; padding: 15px 0; display: flex; flex-direction: column; gap: 20px; }
+.fmp-sidebar-section { display: flex; flex-direction: column; gap: 2px; padding: 0 10px; }
+.fmp-sidebar-title { font-size: 10px; text-transform: uppercase; color: #6e7681; padding: 0 8px 8px 8px; letter-spacing: 0.5px; }
+.fmp-sidebar-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 6px; cursor: pointer; color: #8b949e; transition: 0.15s; font-size: 13px; }
+.fmp-sidebar-item:hover { background: rgba(255,255,255,0.05); color: #c9d1d9; }
+.fmp-sidebar-item.active { background: rgba(56, 139, 253, 0.15); color: #58a6ff; font-weight: 500; }
 
-.fmp-content { flex: 1; overflow-y: auto; padding: 15px; }
+/* ÁREA PRINCIPAL */
+.fmp-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+/* TOOLBAR */
+.fmp-toolbar { height: 45px; display: flex; align-items: center; gap: 10px; padding: 0 15px; border-bottom: 1px solid #21262d; background: #0d1117; }
+.fmp-btn-icon { background: transparent; border: none; color: #8b949e; padding: 6px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; transition: 0.15s; }
+.fmp-btn-icon:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.fmp-breadcrumb { flex: 1; display: flex; align-items: center; gap: 8px; background: #0d1117; border: 1px solid #30363d; padding: 6px 12px; border-radius: 6px; font-family: 'Consolas', monospace; font-size: 12px; }
+.fmp-breadcrumb span { color: #8b949e; }
+
+/* ACTION BAR */
+.fmp-action-bar { height: 45px; display: flex; align-items: center; gap: 10px; padding: 0 15px; border-bottom: 1px solid #21262d; background: #161b22; }
+.fmp-btn { display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; cursor: pointer; font-size: 12px; font-weight: 500; transition: 0.15s; }
+.fmp-btn:hover { background: #30363d; border-color: #8b949e; color: #fff; }
+
+/* CONTENT GRID */
+.fmp-content { flex: 1; overflow-y: auto; padding: 20px; background: #0d1117; }
 .fmp-content.grid-view { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 5px; align-content: start; }
-.fmp-item { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 15px 5px; border-radius: 6px; cursor: pointer; text-align: center; border: 1px solid transparent; }
-.fmp-item:hover { background: rgba(255,255,255,0.05); }
-.fmp-item.selected { background: rgba(96, 165, 250, 0.15); border-color: rgba(96, 165, 250, 0.4); }
-.fmp-item span { font-size: 11px; word-break: break-all; line-height: 1.3; }
+.fmp-item { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 15px 5px; border-radius: 6px; cursor: pointer; text-align: center; border: 1px solid transparent; transition: 0.15s; }
+.fmp-item:hover { background: rgba(56, 139, 253, 0.05); border-color: rgba(56, 139, 253, 0.2); }
+.fmp-item.selected { background: rgba(56, 139, 253, 0.15); border-color: rgba(56, 139, 253, 0.5); }
+.fmp-item-name { font-size: 11px; word-break: break-all; line-height: 1.3; color: #c9d1d9; max-width: 90px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 
-.fmp-loading, .fmp-empty { color: #6b7280; font-style: italic; grid-column: 1 / -1; text-align: center; padding-top: 40px; }
+/* ESTADOS VAZIO / LOADING */
+.fmp-state-message { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #484f58; gap: 10px; }
+.fmp-state-message span { font-size: 14px; font-weight: 500; }
+.fmp-state-message p { font-size: 12px; }
+.fmp-spinner { width: 24px; height: 24px; border: 3px solid #30363d; border-top-color: #58a6ff; border-radius: 50%; animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
-.fmp-context-menu { position: fixed; background: rgba(20, 20, 20, 0.98); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 5px; min-width: 180px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); z-index: 99999; }
-.fmp-ctx-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; color: #d1d5db; font-size: 12px; border-radius: 4px; cursor: pointer; }
-.fmp-ctx-item:hover { background: rgba(255,255,255,0.1); color: white; }
-.fmp-ctx-item.danger { color: #f87171; }
-.fmp-ctx-item.danger:hover { background: rgba(239, 68, 68, 0.2); }
-.fmp-ctx-divider { height: 1px; background: rgba(255,255,255,0.1); margin: 4px 0; }
+/* STATUS BAR */
+.fmp-statusbar { height: 28px; display: flex; align-items: center; gap: 15px; padding: 0 15px; border-top: 1px solid #21262d; background: #161b22; font-size: 11px; color: #6e7681; }
+.fmp-status-selected { color: #58a6ff; }
+.fmp-spacer { flex: 1; }
+.fmp-status-badge { background: rgba(56, 139, 253, 0.1); color: #58a6ff; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(56, 139, 253, 0.2); }
+
+/* CONTEXT MENU */
+.fmp-context-menu { position: fixed; background: rgba(22, 27, 34, 0.95); backdrop-filter: blur(20px); border: 1px solid #30363d; border-radius: 8px; padding: 5px; min-width: 180px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); z-index: 99999; }
+.fmp-ctx-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; color: #c9d1d9; font-size: 12px; border-radius: 4px; cursor: pointer; }
+.fmp-ctx-item:hover { background: rgba(56, 139, 253, 0.15); color: #fff; }
+.fmp-ctx-item.danger { color: #f85149; }
+.fmp-ctx-item.danger:hover { background: rgba(248, 81, 73, 0.15); }
+.fmp-ctx-divider { height: 1px; background: #30363d; margin: 4px 0; }
+
+/* PROGRESS BAR */
+.fmp-progress-container { position: relative; width: 150px; height: 24px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; overflow: hidden; margin-left: auto; display: flex; align-items: center; justify-content: center; }
+.fmp-progress-bar { position: absolute; left: 0; top: 0; height: 100%; background: linear-gradient(90deg, #1f6feb, #58a6ff); transition: width 0.2s; }
+.fmp-progress-text { position: relative; z-index: 2; font-size: 11px; color: #fff; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
