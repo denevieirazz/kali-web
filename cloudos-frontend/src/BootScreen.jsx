@@ -24,6 +24,9 @@ export default function BootScreen({ onBootComplete }) {
   const completedRef = useRef(false);
   const intervalRef = useRef(null);
 
+  const onBootCompleteRef = useRef(onBootComplete);
+  useEffect(() => { onBootCompleteRef.current = onBootComplete; }, [onBootComplete]);
+
   useEffect(() => {
     let i = 0;
     
@@ -42,7 +45,7 @@ export default function BootScreen({ onBootComplete }) {
         if (!completedRef.current) {
           completedRef.current = true;
           setGlitching(false);
-          setTimeout(() => onBootComplete(), 1800);
+          setTimeout(() => onBootCompleteRef.current && onBootCompleteRef.current(), 1800);
         }
       }
     }, 220);
@@ -50,7 +53,7 @@ export default function BootScreen({ onBootComplete }) {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [onBootComplete]);
+  }, []);
 
   return (
     <div className="boot-cinema">
