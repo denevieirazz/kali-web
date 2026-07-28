@@ -275,8 +275,13 @@ app.post('/api/files/save', async (req, res) => {
 });
 
 app.post('/api/files/mkdir', async (req, res) => {
-    try { await subsystem.createFolder(req.user.id, req.body.path, req.body.name); res.json({ success: true }); } 
-    catch (e) { res.status(500).json({ error: 'Erro ao criar pasta.' }); }
+    try { 
+        await subsystem.createFolder(req.user.id, req.body.path, req.body.name); 
+        res.json({ success: true }); 
+    } catch (e) {
+        console.error("ERRO REAL NO MKDIR:", e.message);
+        res.status(500).json({ error: 'Erro ao criar pasta.' }); 
+    }
 });
 
 app.post('/api/files/delete', async (req, res) => {
