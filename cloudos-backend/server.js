@@ -477,7 +477,15 @@ app.get('/api/kali/tools/:id/schema', (req, res) => {
     res.json(schema);
 });
 
-// Rota: Executar Ferramenta com Streaming em Segundo Plano
+// Mapa de processos rodando (para o botão Stop)
+const runningProcesses = new Map();
+
+// Função de Escape para evitar Injeção de Shell (Regra de Ouro)
+function escapeShellArg(arg) {
+    return `'${String(arg).replace(/'/g, "'\\''")}'`;
+}
+
+// Rota: Executar Ferramenta com Streaming
 app.post('/api/kali/tools/:id/run', async (req, res) => {
     const schema = TOOL_SCHEMAS[req.params.id];
     if (!schema) return res.status(404).json({ error: "Ferramenta inválida." });
@@ -485,30 +493,57 @@ app.post('/api/kali/tools/:id/run', async (req, res) => {
     const options = req.body.options || {};
     let cmd = schema.command;
 
-    // Monta o comando com base nas opções selecionadas na GUI
+    // Monta o comando de forma segura
     schema.fields.forEach(field => {
         const val = options[field.id];
         if (!val) return;
         if (field.type === 'boolean' && val === true) cmd += ` ${field.flag}`;
         else if ((field.type === 'text' || field.type === 'select') && val) {
-            cmd += field.flag ? ` ${field.flag} ${val}` : ` ${val}`;
+            cmd += field.flag ? ` ${field.flag} ${escapeShellArg(val)}` : ` ${escapeShellArg(val)}`;
         }
     });
 
+    // 1. PRE-CHECK: A ferramenta está instalada?
+    try {
+        await subsystem.execCommand(req.user.id, `command -v ${schema.command}`);
+    } catch (e) {
+        return res.status(400).json({ 
+            error: `A ferramenta '${schema.name}' não está instalada no WSL Kali.`,
+            installCmd: schema.installCmd 
+        });
+    }
+
     logEvent(req.user.id, 'tool_execute', `Executou: ${cmd}`);
     
-    // Configura headers para streaming (Sem buffer)
+    // Configura headers para streaming
+    const runId = 'r_' + crypto.randomBytes(4).toString('hex');
     res.setHeader('Content-Type', 'text/plain');
     res.setHeader('Transfer-Encoding', 'chunked');
+    res.setHeader('X-Run-Id', runId); // Envia o ID pro frontend
 
-    // Executa no WSL
+    // 2. EXECUÇÃO E STREAM
     const toolProcess = exec(`wsl -d kali-linux -u cloudos -- bash -c "${cmd.replace(/"/g, '\\"')}"`, { windowsHide: true });
+    runningProcesses.set(runId, toolProcess);
     
-    // Envia o output ao vivo para o frontend
     toolProcess.stdout.on('data', (data) => res.write(data));
     toolProcess.stderr.on('data', (data) => res.write(data));
     
-    toolProcess.on('close', () => res.end());
+    toolProcess.on('close', () => {
+        runningProcesses.delete(runId);
+        res.end();
+    });
+});
+
+// Rota: Interromper Scan
+app.post('/api/kali/tools/stop', (req, res) => {
+    const { runId } = req.body;
+    if (runningProcesses.has(runId)) {
+        runningProcesses.get(runId).kill('SIGKILL');
+        runningProcesses.delete(runId);
+        logEvent(req.user.id, 'tool_stop', `Scan ${runId} interrompido.`);
+        return res.json({ success: true });
+    }
+    res.status(404).json({ error: "Processo não encontrado." });
 });
 const KALI_CATALOG = [
     { id: "nmap", name: "Nmap", packageName: "nmap", command: "nmap", category: "recon", description: "Network discovery and security auditing tool.", icon: "Radar", tags: ["network", "discovery"], riskLevel: "medium" },

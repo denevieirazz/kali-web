@@ -1,14 +1,22 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, Loader, Terminal, Zap, LayoutGrid, ArrowLeft } from 'lucide-react';
+import { Play, Loader, Terminal, Zap, LayoutGrid, ArrowLeft, Square } from 'lucide-react';
 
 const API_BASE = 'http://localhost:8080';
 const token = () => localStorage.getItem('cloudos_token');
 
+// Atualizada com as novas ferramentas!
 const AVAILABLE_TOOLS = [
   { id: 'nmap', name: 'Nmap', desc: 'Scanner de rede e portas' },
-  { id: 'gobuster', name: 'Gobuster', desc: 'Brute-force de diretórios web' },
-  { id: 'nikto', name: 'Nikto', desc: 'Scanner de vulnerabilidades Web' },
-  { id: 'sqlmap', name: 'SQLMap', desc: 'Injeção de SQL e auditoria de BD' }
+  { id: 'masscan', name: 'Masscan', desc: 'Scanner ultra rápido' },
+  { id: 'gobuster', name: 'Gobuster', desc: 'Brute-force de diretórios' },
+  { id: 'ffuf', name: 'Ffuf', desc: 'Fuzzer web' },
+  { id: 'whatweb', name: 'WhatWeb', desc: 'Identifica tecnologias' },
+  { id: 'wpscan', name: 'WPScan', desc: 'Scanner de WordPress' },
+  { id: 'nikto', name: 'Nikto', desc: 'Scanner de vulns Web' },
+  { id: 'nuclei', name: 'Nuclei', desc: 'Scanner de templates' },
+  { id: 'hydra', name: 'Hydra', desc: 'Brute-force de logins' },
+  { id: 'sqlmap', name: 'SQLMap', desc: 'Injeção de SQL' },
+  { id: 'john', name: 'John', desc: 'Quebra de hashes' }
 ];
 
 export const ToolRunnerApp = ({ payload, setPayload }) => {
@@ -17,13 +25,13 @@ export const ToolRunnerApp = ({ payload, setPayload }) => {
   const [formValues, setFormValues] = useState({});
   const [output, setOutput] = useState('');
   const [isRunning, setIsRunning] = useState(false);
+  const [runId, setRunId] = useState(null);
   const outputRef = useRef(null);
   const currentToolId = payload?.toolId;
 
   useEffect(() => {
     if (currentToolId) {
       setLoading(true);
-      setSchema(null);
       fetch(`${API_BASE}/api/kali/tools/${currentToolId}/schema`, {
         headers: { 'Authorization': `Bearer ${token()}` }
       })
@@ -32,7 +40,6 @@ export const ToolRunnerApp = ({ payload, setPayload }) => {
           if (data.error) { setSchema(null); } 
           else {
             setSchema(data);
-            // Inicializa com Defaults do Schema
             const initialValues = {};
             data.fields.forEach(f => {
               if (f.type === 'boolean') initialValues[f.id] = f.default !== undefined ? f.default : false;
@@ -41,11 +48,8 @@ export const ToolRunnerApp = ({ payload, setPayload }) => {
             setFormValues(initialValues);
           }
           setLoading(false);
-        })
-        .catch(() => setLoading(false));
-    } else {
-      setLoading(false);
-    }
+        });
+    } else { setLoading(false); }
   }, [currentToolId]);
 
   useEffect(() => {
@@ -56,20 +60,11 @@ export const ToolRunnerApp = ({ payload, setPayload }) => {
     setFormValues(prev => ({ ...prev, [fieldId]: type === 'boolean' ? !prev[fieldId] : value }));
   };
 
-  const applyPreset = (presetVars) => {
-    setFormValues(prev => ({ ...prev, ...presetVars }));
-  };
+  const applyPreset = (presetVars) => setFormValues(prev => ({ ...prev, ...presetVars }));
 
-  // Validação: Verifica se todos os campos required estão preenchidos
   const isFormValid = () => {
     if (!schema) return false;
-    return schema.fields.every(field => {
-      if (field.required) {
-        const val = formValues[field.id];
-        return val !== '' && val !== undefined && val !== null;
-      }
-      return true;
-    });
+    return schema.fields.every(f => !f.required || (formValues[f.id] !== '' && formValues[f.id] !== undefined));
   };
 
   const buildCommandPreview = () => {
@@ -87,7 +82,7 @@ export const ToolRunnerApp = ({ payload, setPayload }) => {
   };
 
   const handleRun = async () => {
-    if (!isFormValid()) return; // Segurança extra
+    if (!isFormValid()) return;
     setOutput('');
     setIsRunning(true);
     try {
@@ -96,6 +91,17 @@ export const ToolRunnerApp = ({ payload, setPayload }) => {
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token()}` },
         body: JSON.stringify({ options: formValues })
       });
+
+      if (response.status === 400) {
+        const errData = await response.json();
+        setOutput(`[ERRO] ${errData.error}\n[DICA] Instale rodando no terminal: ${errData.installCmd}`);
+        setIsRunning(false);
+        return;
+      }
+
+      const id = response.headers.get('X-Run-Id');
+      if (id) setRunId(id);
+
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       while (true) {
@@ -105,18 +111,31 @@ export const ToolRunnerApp = ({ payload, setPayload }) => {
       }
     } catch (e) { setOutput("Erro ao conectar com o backend."); }
     setIsRunning(false);
+    setRunId(null);
+  };
+
+  const handleStop = async () => {
+    if (!runId) return;
+    await fetch(`${API_BASE}/api/kali/tools/stop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token()}` },
+      body: JSON.stringify({ runId })
+    });
+    setOutput(prev => prev + "\n\n[SCAN INTERROMPIDO PELO USUÁRIO]");
+    setIsRunning(false);
+    setRunId(null);
   };
 
   if (!currentToolId) {
     return (
       <div className="flex flex-col h-full bg-[#0d1117] text-gray-300 p-6" style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0d1117', color: '#c9d1d9', padding: '24px' }}>
         <h2 className="text-lg font-bold text-white flex items-center gap-2 mb-6" style={{ fontSize: '18px', fontWeight: 'bold', color: 'white', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '24px' }}><LayoutGrid size={18} /> Selecione uma Ferramenta</h2>
-        <div className="grid grid-cols-2 gap-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '16px' }}>
+        <div className="grid grid-cols-3 gap-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '16px' }}>
           {AVAILABLE_TOOLS.map(tool => (
-            <div key={tool.id} onClick={() => setPayload && setPayload({ toolId: tool.id })} 
+            <div key={tool.id} onClick={() => setPayload({ toolId: tool.id })} 
                  className="bg-[#161b22] border border-gray-800 rounded-lg p-4 cursor-pointer hover:border-blue-500 transition-colors"
                  style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '8px', padding: '16px', cursor: 'pointer' }}>
-              <h3 className="font-bold text-white" style={{ fontSize: '15px', fontWeight: 'bold', color: 'white', margin: 0 }}>{tool.name}</h3>
+              <h3 className="font-bold text-white text-sm" style={{ fontSize: '14px', fontWeight: 'bold', color: 'white', margin: 0 }}>{tool.name}</h3>
               <p className="text-xs text-gray-500 mt-1" style={{ fontSize: '12px', color: '#8b949e', marginTop: '4px', margin: 0 }}>{tool.desc}</p>
             </div>
           ))}
@@ -130,7 +149,7 @@ export const ToolRunnerApp = ({ payload, setPayload }) => {
   if (!schema) return (
     <div className="flex flex-col items-center justify-center h-full bg-[#0d1117] text-red-400 p-6" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', background: '#0d1117', color: '#f87171', padding: '24px' }}>
       <p className="mb-4" style={{ marginBottom: '16px' }}>Schema não encontrado para esta ferramenta.</p>
-      <button onClick={() => setPayload && setPayload(null)} className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded text-sm" style={{ background: '#30363d', color: 'white', padding: '8px 16px', borderRadius: '6px', fontSize: '14px', border: 'none', cursor: 'pointer' }}>Voltar</button>
+      <button onClick={() => setPayload(null)} className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded text-sm" style={{ background: '#30363d', color: 'white', padding: '8px 16px', borderRadius: '6px', fontSize: '14px', border: 'none', cursor: 'pointer' }}>Voltar</button>
     </div>
   );
 
@@ -138,9 +157,9 @@ export const ToolRunnerApp = ({ payload, setPayload }) => {
     <div className="flex flex-col h-full bg-[#0d1117] text-gray-300" style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0d1117', color: '#c9d1d9' }}>
       <div className="p-4 border-b border-gray-800 bg-[#161b22] flex justify-between items-center" style={{ padding: '16px', borderBottom: '1px solid #30363d', background: '#161b22', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div className="flex items-center gap-3" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <button onClick={() => setPayload && setPayload(null)} className="text-gray-500 hover:text-white" style={{ background: 'transparent', border: 'none', color: '#8b949e', cursor: 'pointer', display: 'flex', alignItems: 'center' }}><ArrowLeft size={18} /></button>
+          <button onClick={() => setPayload(null)} className="text-gray-500 hover:text-white" style={{ background: 'transparent', border: 'none', color: '#8b949e', cursor: 'pointer', display: 'flex', alignItems: 'center' }}><ArrowLeft size={18} /></button>
           <div>
-            <h2 className="text-lg font-bold text-white flex items-center gap-2" style={{ fontSize: '18px', fontWeight: 'bold', color: 'white', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}><Zap size={18} className="text-purple-400" color="#a78bfa" /> {schema.name} - Auto Runner</h2>
+            <h2 className="text-lg font-bold text-white flex items-center gap-2" style={{ fontSize: '18px', fontWeight: 'bold', color: 'white', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}><Zap size={18} className="text-purple-400" color="#a78bfa" /> {schema.name}</h2>
             <p className="text-xs text-gray-500" style={{ fontSize: '12px', color: '#8b949e', marginTop: '2px', margin: 0 }}>{schema.description}</p>
           </div>
         </div>
@@ -194,12 +213,22 @@ export const ToolRunnerApp = ({ payload, setPayload }) => {
             <span className="text-xs text-gray-500 font-mono flex items-center gap-1 truncate" style={{ fontSize: '12px', color: '#8b949e', fontFamily: 'monospace', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <Terminal size={12} /> {buildCommandPreview()}
             </span>
-            <button onClick={handleRun} disabled={isRunning || !isFormValid()} 
-                    className="bg-green-600 hover:bg-green-700 text-white px-4 py-1 rounded text-xs font-bold flex items-center gap-1 disabled:bg-gray-700 disabled:cursor-not-allowed ml-2"
-                    style={{ background: (isRunning || !isFormValid()) ? '#374151' : '#238636', color: 'white', padding: '6px 16px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', border: 'none', cursor: (isRunning || !isFormValid()) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '8px' }}>
-              {isRunning ? <Loader size={12} className="animate-spin" /> : <Play size={12} />} {isRunning ? 'Escaneando...' : 'Executar'}
-            </button>
+            
+            <div className="flex gap-2 ml-2" style={{ display: 'flex', gap: '8px', marginLeft: '8px' }}>
+              {isRunning && (
+                <button onClick={handleStop} className="bg-red-600 hover:bg-red-700 text-white px-4 py-1 rounded text-xs font-bold flex items-center gap-1"
+                        style={{ background: '#da3633', color: 'white', padding: '6px 16px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Square size={12} fill="white" /> Interromper
+                </button>
+              )}
+              <button onClick={handleRun} disabled={isRunning || !isFormValid()} 
+                      className="bg-green-600 hover:bg-green-700 text-white px-4 py-1 rounded text-xs font-bold flex items-center gap-1 disabled:bg-gray-700 disabled:cursor-not-allowed"
+                      style={{ background: (isRunning || !isFormValid()) ? '#374151' : '#238636', color: 'white', padding: '6px 16px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', border: 'none', cursor: (isRunning || !isFormValid()) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                {isRunning ? <Loader size={12} className="animate-spin" /> : <Play size={12} />} {isRunning ? 'Escaneando...' : 'Executar'}
+              </button>
+            </div>
           </div>
+          
           <div ref={outputRef} className="flex-1 p-4 overflow-y-auto font-mono text-xs text-green-400 whitespace-pre-wrap" style={{ flex: 1, padding: '16px', overflowY: 'auto', fontFamily: 'monospace', fontSize: '12px', color: '#4ade80', whiteSpace: 'pre-wrap' }}>
             {output || <span style={{ color: '#6e7681' }}>Clique em "Executar" para iniciar o scan em segundo plano...</span>}
           </div>

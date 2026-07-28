@@ -129,6 +129,7 @@ npm run dev
 12. **Kali Auto Runner (Streaming & Presets)**: Implementação de execução com streaming HTTP Chunked no backend (`POST /api/kali/tools/:id/run`), suporte a Presets de scan no `kali_tools_schema.js` e console virtual em tempo real integrado ao `ToolRunnerApp.jsx`.
 13. **Navegação & Hub Interno do Tool Runner**: Adicionada tela inicial de seleção de ferramentas no `ToolRunnerApp.jsx` quando aberto sem payload, botão de navegação "Voltar" e repasse da prop `setPayload` no `App.jsx`.
 14. **Validação & Preenchimento Automático para Iniciantes**: Adicionada validação de campos obrigatórios (`required`) com banner de aviso, preenchimento de valores padrão (`default`) em todas as ferramentas no `kali_tools_schema.js` e presets de 1-clique para Nmap, Gobuster, Nikto e SQLMap.
+15. **Blindagem de Shell, Botão Stop & Arsenal de 11 Ferramentas**: Adicionada sanitização `escapeShellArg` no backend para prevenir injeção de comandos, verificação prévia de instalação com dica de `apt install`, controle de processos com rota `/api/kali/tools/stop` e expansão do catálogo de GUIs para 11 ferramentas (`nmap`, `masscan`, `gobuster`, `ffuf`, `whatweb`, `wpscan`, `nikto`, `nuclei`, `hydra`, `sqlmap`, `john`).
 
 ---
 
