@@ -365,11 +365,12 @@ app.post('/api/workspaces/save', async (req, res) => {
 });
 
 app.post('/api/snapshots/create', async (req, res) => {
-    const { name, state } = req.body;
+    const { name, description, state } = req.body;
+    const snapName = name || description || `Snapshot ${new Date().toLocaleTimeString('pt-BR')}`;
     const id = 's_' + crypto.randomBytes(4).toString('hex');
     try {
-        await db.prepare('INSERT INTO snapshots (id, user_id, name, data) VALUES (?, ?, ?, ?)').run(id, req.user.id, name, JSON.stringify(state || {}));
-        await logEvent(req.user.id, 'snapshot_create', `Snapshot '${name}' criado.`);
+        await db.prepare('INSERT INTO snapshots (id, user_id, name, data) VALUES (?, ?, ?, ?)').run(id, req.user.id, snapName, JSON.stringify(state || {}));
+        await logEvent(req.user.id, 'snapshot_create', `Snapshot '${snapName}' criado.`);
         res.json({ success: true, id });
     } catch (e) { res.status(500).json({ error: 'Erro ao criar snapshot.' }); }
 });

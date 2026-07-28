@@ -65,7 +65,13 @@ export const TerminalApp = ({ payload }) => {
         };
 
         ws.onmessage = (event) => {
-          if (term) term.write(new Uint8Array(event.data));
+          if (term) {
+            if (typeof event.data === 'string') {
+              term.write(event.data);
+            } else {
+              term.write(new Uint8Array(event.data));
+            }
+          }
         };
 
         term.onData((data) => {
