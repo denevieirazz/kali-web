@@ -2,7 +2,7 @@ const express = require('express');
 const { WebSocketServer } = require('ws');
 const cors = require('cors');
 const pty = require('node-pty');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
@@ -485,23 +485,12 @@ function escapeShellArg(arg) {
     return `'${String(arg).replace(/'/g, "'\\''")}'`;
 }
 
-// Rota: Executar Ferramenta com Streaming
+// Rota: Executar Ferramenta com Streaming e Array Seguro
 app.post('/api/kali/tools/:id/run', async (req, res) => {
     const schema = TOOL_SCHEMAS[req.params.id];
     if (!schema) return res.status(404).json({ error: "Ferramenta inválida." });
 
     const options = req.body.options || {};
-    let cmd = schema.command;
-
-    // Monta o comando de forma segura
-    schema.fields.forEach(field => {
-        const val = options[field.id];
-        if (!val) return;
-        if (field.type === 'boolean' && val === true) cmd += ` ${field.flag}`;
-        else if ((field.type === 'text' || field.type === 'select') && val) {
-            cmd += field.flag ? ` ${field.flag} ${escapeShellArg(val)}` : ` ${escapeShellArg(val)}`;
-        }
-    });
 
     // 1. PRE-CHECK: A ferramenta está instalada?
     try {
@@ -513,16 +502,31 @@ app.post('/api/kali/tools/:id/run', async (req, res) => {
         });
     }
 
-    logEvent(req.user.id, 'tool_execute', `Executou: ${cmd}`);
+    // 2. MONTAGEM DO ARRAY DE ARGUMENTOS (BLINDAGEM TOTAL CONTRA INJEÇÃO)
+    const args = ['-d', 'kali-linux', '-u', 'cloudos', '--', schema.command];
+
+    schema.fields.forEach(field => {
+        const val = options[field.id];
+        if (!val) return;
+        
+        if (field.type === 'boolean' && val === true) {
+            if (field.flag) args.push(field.flag);
+        } else if ((field.type === 'text' || field.type === 'select') && val) {
+            if (field.flag) args.push(field.flag);
+            args.push(String(val)); // Adiciona o valor direto no array, sem shell
+        }
+    });
+
+    logEvent(req.user.id, 'tool_execute', `Executou: ${schema.command} (Blindado)`);
     
     // Configura headers para streaming
     const runId = 'r_' + crypto.randomBytes(4).toString('hex');
     res.setHeader('Content-Type', 'text/plain');
     res.setHeader('Transfer-Encoding', 'chunked');
-    res.setHeader('X-Run-Id', runId); // Envia o ID pro frontend
+    res.setHeader('X-Run-Id', runId);
 
-    // 2. EXECUÇÃO E STREAM
-    const toolProcess = exec(`wsl -d kali-linux -u cloudos -- bash -c "${cmd.replace(/"/g, '\\"')}"`, { windowsHide: true });
+    // 3. EXECUÇÃO COM SPAWN (SEM SHELL = SEM INJEÇÃO)
+    const toolProcess = spawn('wsl.exe', args, { windowsHide: true });
     runningProcesses.set(runId, toolProcess);
     
     toolProcess.stdout.on('data', (data) => res.write(data));

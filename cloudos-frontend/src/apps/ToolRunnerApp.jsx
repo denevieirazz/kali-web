@@ -4,19 +4,23 @@ import { Play, Loader, Terminal, Zap, LayoutGrid, ArrowLeft, Square } from 'luci
 const API_BASE = 'http://localhost:8080';
 const token = () => localStorage.getItem('cloudos_token');
 
-// Atualizada com as novas ferramentas!
 const AVAILABLE_TOOLS = [
-  { id: 'nmap', name: 'Nmap', desc: 'Scanner de rede e portas' },
-  { id: 'masscan', name: 'Masscan', desc: 'Scanner ultra rápido' },
+  // Recon & OSINT
+  { id: 'nmap', name: 'Nmap', desc: 'Scanner de rede e portas ativo' },
+  { id: 'subfinder', name: 'Subfinder', desc: 'Descoberta passiva de subdomínios' },
+  { id: 'httpx', name: 'Httpx', desc: 'Validador HTTP em massa' },
+  { id: 'theharvester', name: 'theHarvester', desc: 'Coleta de e-mails e IPs públicos' },
+  
+  // Web Vulnerability Scanning
   { id: 'gobuster', name: 'Gobuster', desc: 'Brute-force de diretórios' },
-  { id: 'ffuf', name: 'Ffuf', desc: 'Fuzzer web' },
-  { id: 'whatweb', name: 'WhatWeb', desc: 'Identifica tecnologias' },
-  { id: 'wpscan', name: 'WPScan', desc: 'Scanner de WordPress' },
   { id: 'nikto', name: 'Nikto', desc: 'Scanner de vulns Web' },
-  { id: 'nuclei', name: 'Nuclei', desc: 'Scanner de templates' },
-  { id: 'hydra', name: 'Hydra', desc: 'Brute-force de logins' },
+  { id: 'commix', name: 'Commix', desc: 'Teste de Command Injection' },
   { id: 'sqlmap', name: 'SQLMap', desc: 'Injeção de SQL' },
-  { id: 'john', name: 'John', desc: 'Quebra de hashes' }
+  
+  // Exploits & Cracking
+  { id: 'searchsploit', name: 'SearchSploit', desc: 'Busca local de Exploits' },
+  { id: 'john', name: 'John', desc: 'Quebra de hashes (CPU)' },
+  { id: 'hashcat', name: 'Hashcat', desc: 'Quebra de hashes (GPU/CPU)' }
 ];
 
 export const ToolRunnerApp = ({ payload, setPayload }) => {
@@ -130,7 +134,7 @@ export const ToolRunnerApp = ({ payload, setPayload }) => {
     return (
       <div className="flex flex-col h-full bg-[#0d1117] text-gray-300 p-6" style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0d1117', color: '#c9d1d9', padding: '24px' }}>
         <h2 className="text-lg font-bold text-white flex items-center gap-2 mb-6" style={{ fontSize: '18px', fontWeight: 'bold', color: 'white', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '24px' }}><LayoutGrid size={18} /> Selecione uma Ferramenta</h2>
-        <div className="grid grid-cols-3 gap-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '16px' }}>
+        <div className="grid grid-cols-3 gap-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '16px' }}>
           {AVAILABLE_TOOLS.map(tool => (
             <div key={tool.id} onClick={() => setPayload({ toolId: tool.id })} 
                  className="bg-[#161b22] border border-gray-800 rounded-lg p-4 cursor-pointer hover:border-blue-500 transition-colors"

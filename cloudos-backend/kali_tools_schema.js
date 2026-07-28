@@ -1,8 +1,9 @@
 // cloudos-backend/kali_tools_schema.js
 const TOOL_SCHEMAS = {
+    // --- RECON & OSINT ---
     nmap: {
         name: "Nmap", command: "nmap", installCmd: "sudo apt install nmap",
-        description: "Scanner de rede e portas.",
+        description: "Scanner de rede e portas ativo.",
         presets: [
             { name: "Scan Rápido (Top 100)", vars: { target: "scanme.nmap.org", p: "", sV: false, sS: true, T: "4" } },
             { name: "Detectar Versões", vars: { target: "scanme.nmap.org", p: "", sV: true, sS: false, T: "3" } }
@@ -15,16 +16,37 @@ const TOOL_SCHEMAS = {
             { id: "T", label: "Velocidade (0-5)", type: "select", flag: "-T", default: "4", options: ["0", "1", "2", "3", "4", "5"] }
         ]
     },
-    masscan: {
-        name: "Masscan", command: "masscan", installCmd: "sudo apt install masscan",
-        description: "Scanner de portas ultra rápido.",
-        presets: [ { name: "Scan Rápido Top 100", vars: { target: "10.0.0.0/24", ports: "1-1000", rate: "1000" } } ],
+    subfinder: {
+        name: "Subfinder", command: "subfinder", installCmd: "sudo apt install subfinder",
+        description: "Descoberta passiva de subdomínios (OSINT).",
+        presets: [ { name: "Scan Rápido", vars: { domain: "example.com", silent: true } } ],
         fields: [
-            { id: "target", label: "Alvo (IP/Rede)", type: "text", required: true, default: "10.0.0.0/24" },
-            { id: "ports", label: "Portas", type: "text", required: true, flag: "-p", default: "1-1000" },
-            { id: "rate", label: "Pacotes/seg", type: "text", required: true, flag: "--rate", default: "1000" }
+            { id: "domain", label: "Domínio Raiz", type: "text", required: true, flag: "-d", default: "example.com" },
+            { id: "silent", label: "Modo Silencioso (Apenas resultados)", type: "boolean", flag: "-silent", default: true }
         ]
     },
+    httpx: {
+        name: "Httpx", command: "httpx", installCmd: "sudo apt install httpx-toolkit",
+        description: "Validador HTTP em massa (Descobre hosts vivos).",
+        presets: [ { name: "Validar Hosts", vars: { input: "/tmp/hosts.txt", status: true, title: true, tech: true } } ],
+        fields: [
+            { id: "input", label: "Arquivo com Hosts", type: "text", required: true, flag: "-l", default: "/tmp/hosts.txt", placeholder: "/tmp/subdomains.txt" },
+            { id: "status", label: "Mostrar Status Code", type: "boolean", flag: "-status-code", default: true },
+            { id: "title", label: "Extrair Título da Página", type: "boolean", flag: "-title", default: true },
+            { id: "tech", label: "Detectar Tecnologias", type: "boolean", flag: "-tech-detect", default: true }
+        ]
+    },
+    theharvester: {
+        name: "theHarvester", command: "theHarvester", installCmd: "sudo apt install theharvester",
+        description: "Coleta de e-mails, subdomínios e IPs públicos.",
+        presets: [ { name: "Coleta Padrão", vars: { domain: "example.com", source: "all" } } ],
+        fields: [
+            { id: "domain", label: "Domínio", type: "text", required: true, flag: "-d", default: "example.com" },
+            { id: "source", label: "Fonte de Busca", type: "text", required: true, flag: "-b", default: "all" }
+        ]
+    },
+
+    // --- WEB VULN SCANNING ---
     gobuster: {
         name: "Gobuster", command: "gobuster", installCmd: "sudo apt install gobuster",
         description: "Brute-force de diretórios web.",
@@ -33,34 +55,6 @@ const TOOL_SCHEMAS = {
             { id: "mode", label: "Modo", type: "select", required: true, flag: "", default: "dir", options: ["dir", "dns", "vhost"] },
             { id: "url", label: "URL", type: "text", required: true, flag: "-u", default: "http://localhost" },
             { id: "wordlist", label: "Wordlist", type: "text", required: true, flag: "-w", default: "/usr/share/wordlists/dirb/common.txt" }
-        ]
-    },
-    ffuf: {
-        name: "Ffuf", command: "ffuf", installCmd: "sudo apt install ffuf",
-        description: "Fuzzer web rápido.",
-        presets: [ { name: "Fuzz Diretórios", vars: { url: "http://localhost/FUZZ", wordlist: "/usr/share/wordlists/dirb/common.txt" } } ],
-        fields: [
-            { id: "url", label: "URL (use FUZZ)", type: "text", required: true, flag: "-u", default: "http://localhost/FUZZ" },
-            { id: "wordlist", label: "Wordlist", type: "text", required: true, flag: "-w", default: "/usr/share/wordlists/dirb/common.txt" }
-        ]
-    },
-    whatweb: {
-        name: "WhatWeb", command: "whatweb", installCmd: "sudo apt install whatweb",
-        description: "Identifica tecnologias web.",
-        presets: [ { name: "Scan Agressivo", vars: { target: "http://localhost", a: true } } ],
-        fields: [
-            { id: "target", label: "URL Alvo", type: "text", required: true, default: "http://localhost" },
-            { id: "a", label: "Agressivo (Mais info)", type: "boolean", flag: "-a" }
-        ]
-    },
-    wpscan: {
-        name: "WPScan", command: "wpscan", installCmd: "sudo apt install wpscan",
-        description: "Scanner de WordPress.",
-        presets: [ { name: "Enumeração de Plugins", vars: { url: "http://localhost", enumerate: "p", force: true } } ],
-        fields: [
-            { id: "url", label: "URL do WP", type: "text", required: true, flag: "--url", default: "http://localhost" },
-            { id: "enumerate", label: "Enumerar (p,t,u)", type: "text", flag: "--enumerate", default: "p" },
-            { id: "force", label: "Forçar Scan", type: "boolean", flag: "--force" }
         ]
     },
     nikto: {
@@ -73,24 +67,13 @@ const TOOL_SCHEMAS = {
             { id: "ssl", label: "Forçar SSL", type: "boolean", flag: "-ssl" }
         ]
     },
-    nuclei: {
-        name: "Nuclei", command: "nuclei", installCmd: "sudo apt install nuclei",
-        description: "Scanner de vulns baseado em templates.",
-        presets: [ { name: "Scan Rápido", vars: { target: "http://localhost", severity: "low,medium,high" } } ],
+    commix: {
+        name: "Commix", command: "commix", installCmd: "sudo apt install commix",
+        description: "Teste de Command Injection (Injeção no SO).",
+        presets: [ { name: "Teste Automático", vars: { url: "http://localhost/cmd.php?cmd=test", batch: true } } ],
         fields: [
-            { id: "target", label: "URL Alvo", type: "text", required: true, flag: "-u", default: "http://localhost" },
-            { id: "severity", label: "Severidade", type: "text", flag: "-severity", default: "low,medium,high" }
-        ]
-    },
-    hydra: {
-        name: "Hydra", command: "hydra", installCmd: "sudo apt install hydra",
-        description: "Brute-force de logins.",
-        presets: [ { name: "Atacar SSH", vars: { target: "localhost", service: "ssh", user: "root", pass: "/usr/share/wordlists/rockyou.txt" } } ],
-        fields: [
-            { id: "target", label: "Alvo", type: "text", required: true, default: "localhost" },
-            { id: "service", label: "Serviço (ssh,ftp,...)", type: "text", required: true, default: "ssh" },
-            { id: "user", label: "Usuário", type: "text", required: true, flag: "-l", default: "root" },
-            { id: "pass", label: "Wordlist Senhas", type: "text", required: true, flag: "-P", default: "/usr/share/wordlists/rockyou.txt" }
+            { id: "url", label: "URL Alvo (com parâmetro)", type: "text", required: true, flag: "-u", default: "http://localhost/cmd.php?cmd=test" },
+            { id: "batch", label: "Modo Automático", type: "boolean", flag: "--batch", default: true }
         ]
     },
     sqlmap: {
@@ -103,6 +86,20 @@ const TOOL_SCHEMAS = {
             { id: "batch", label: "Modo Automático", type: "boolean", flag: "--batch", default: true }
         ]
     },
+
+    // --- EXPLOIT SEARCH ---
+    searchsploit: {
+        name: "SearchSploit", command: "searchsploit", installCmd: "sudo apt install exploitdb",
+        description: "Busca local no banco de dados Exploit-DB.",
+        presets: [ { name: "Busca Exata", vars: { query: "Apache 2.4", exact: true } } ],
+        fields: [
+            { id: "query", label: "Termo de Busca (ex: Apache 2.4)", type: "text", required: true, default: "Apache 2.4" },
+            { id: "exact", label: "Busca Exata", type: "boolean", flag: "--exact" },
+            { id: "json", label: "Retornar em JSON", type: "boolean", flag: "--json" }
+        ]
+    },
+
+    // --- PASSWORD CRACKING ---
     john: {
         name: "John the Ripper", command: "john", installCmd: "sudo apt install john",
         description: "Quebra de hashes de senha.",
@@ -112,6 +109,17 @@ const TOOL_SCHEMAS = {
             { id: "format", label: "Formato do Hash", type: "text", flag: "--format", default: "Raw-MD5" },
             { id: "wordlist", label: "Wordlist", type: "text", flag: "--wordlist", default: "/usr/share/wordlists/rockyou.txt" }
         ]
+    },
+    hashcat: {
+        name: "Hashcat", command: "hashcat", installCmd: "sudo apt install hashcat",
+        description: "Quebra de hashes com aceleração GPU/CPU.",
+        presets: [ { name: "Ataque MD5 com Rockyou", vars: { mode: "0", hashfile: "/tmp/hash.txt", wordlist: "/usr/share/wordlists/rockyou.txt" } } ],
+        fields: [
+            { id: "mode", label: "Tipo do Hash (0=MD5, 1000=NTLM)", type: "text", required: true, flag: "-m", default: "0" },
+            { id: "hashfile", label: "Arquivo de Hash", type: "text", required: true, default: "/tmp/hash.txt" },
+            { id: "wordlist", label: "Wordlist", type: "text", required: true, default: "/usr/share/wordlists/rockyou.txt" }
+        ]
     }
 };
+
 module.exports = TOOL_SCHEMAS;
