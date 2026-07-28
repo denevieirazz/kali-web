@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, Loader, Terminal, Zap, LayoutGrid, ArrowLeft } from 'lucide-react';
+import { Play, Loader, Terminal, Zap, LayoutGrid, ArrowLeft, AlertCircle } from 'lucide-react';
 
 const API_BASE = 'http://localhost:8080';
 const token = () => localStorage.getItem('cloudos_token');
@@ -18,6 +18,7 @@ export const ToolRunnerApp = ({ payload, setPayload }) => {
   const [formValues, setFormValues] = useState({});
   const [output, setOutput] = useState('');
   const [isRunning, setIsRunning] = useState(false);
+  const [validationError, setValidationError] = useState('');
   const outputRef = useRef(null);
   const currentToolId = payload?.toolId;
 
@@ -25,6 +26,7 @@ export const ToolRunnerApp = ({ payload, setPayload }) => {
     if (currentToolId) {
       setLoading(true);
       setSchema(null);
+      setValidationError('');
       fetch(`${API_BASE}/api/kali/tools/${currentToolId}/schema`, {
         headers: { 'Authorization': `Bearer ${token()}` }
       })
@@ -35,7 +37,9 @@ export const ToolRunnerApp = ({ payload, setPayload }) => {
             setSchema(data);
             const initialValues = {};
             if (data.fields) {
-              data.fields.forEach(f => initialValues[f.id] = f.type === 'boolean' ? false : '');
+              data.fields.forEach(f => {
+                initialValues[f.id] = f.default !== undefined ? f.default : (f.type === 'boolean' ? false : '');
+              });
             }
             setFormValues(initialValues);
           }
@@ -52,10 +56,12 @@ export const ToolRunnerApp = ({ payload, setPayload }) => {
   }, [output]);
 
   const handleInputChange = (fieldId, value, type) => {
+    setValidationError('');
     setFormValues(prev => ({ ...prev, [fieldId]: type === 'boolean' ? !prev[fieldId] : value }));
   };
 
   const applyPreset = (presetVars) => {
+    setValidationError('');
     setFormValues(prev => ({ ...prev, ...presetVars }));
   };
 
@@ -76,6 +82,16 @@ export const ToolRunnerApp = ({ payload, setPayload }) => {
   };
 
   const handleRun = async () => {
+    // Validar campos obrigatórios
+    if (schema && schema.fields) {
+      const missing = schema.fields.filter(f => f.required && (!formValues[f.id] || formValues[f.id] === ''));
+      if (missing.length > 0) {
+        setValidationError(`Por favor, preencha o campo obrigatório: ${missing.map(m => m.label).join(', ')}`);
+        return;
+      }
+    }
+
+    setValidationError('');
     setOutput('');
     setIsRunning(true);
     try {
@@ -154,6 +170,13 @@ export const ToolRunnerApp = ({ payload, setPayload }) => {
 
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden" style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         <div className="md:w-1/3 p-6 space-y-5 overflow-y-auto border-r border-gray-800" style={{ width: '320px', padding: '20px', overflowY: 'auto', borderRight: '1px solid #30363d', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {validationError && (
+            <div style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.4)', color: '#f87171', padding: '10px', borderRadius: '6px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <AlertCircle size={16} style={{ flexShrink: 0 }} />
+              <span>{validationError}</span>
+            </div>
+          )}
+
           {schema.fields && schema.fields.map(field => (
             <div key={field.id} className="flex flex-col gap-2" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               <label className="text-sm font-medium text-gray-400 flex items-center gap-2" style={{ fontSize: '13px', color: '#8b949e', display: 'flex', alignItems: 'center', gap: '6px' }}>

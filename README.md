@@ -128,6 +128,7 @@ npm run dev
 11. **Exclusão Permanente & Esvaziar Lixeira**: Método `deleteFile` no backend atualizado para apagar permanentemente arquivos/pastas dentro de `.trash`, botão "Esvaziar Lixeira" condicional adicionado ao `FileManagerApp.jsx` e estilo `.fmp-btn-danger` incorporado ao `index.css`.
 12. **Kali Auto Runner (Streaming & Presets)**: Implementação de execução com streaming HTTP Chunked no backend (`POST /api/kali/tools/:id/run`), suporte a Presets de scan no `kali_tools_schema.js` e console virtual em tempo real integrado ao `ToolRunnerApp.jsx`.
 13. **Navegação & Hub Interno do Tool Runner**: Adicionada tela inicial de seleção de ferramentas no `ToolRunnerApp.jsx` quando aberto sem payload, botão de navegação "Voltar" e repasse da prop `setPayload` no `App.jsx`.
+14. **Validação & Preenchimento Automático para Iniciantes**: Adicionada validação de campos obrigatórios (`required`) com banner de aviso, preenchimento de valores padrão (`default`) em todas as ferramentas no `kali_tools_schema.js` e presets de 1-clique para Nmap, Gobuster, Nikto e SQLMap.
 
 ---
 
