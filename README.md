@@ -123,6 +123,7 @@ npm run dev
 6. **Regra de Autonomia de IA**: Arquivo `.agents/AGENTS.md` definindo execução direta e autônoma de tarefas para agentes de IA.
 7. **Ajustes de Terminal & Validação de APIs**: Correção na renderização de dados UTF-8 no xterm WebSocket do `TerminalApp` e tratamentos defensivos no backend (`POST /api/snapshots/create`).
 8. **Kali Tool Runner (GUI Dinâmica)**: Arquitetura Enterprise baseada em Schemas JSON (`kali_tools_schema.js`), servindo rotas `/api/kali/tools/:id/schema`, renderizador de formulário automático (`ToolRunnerApp.jsx`) e integração com `KaliHubApp` para montagem e envio seguro de comandos para o terminal.
+9. **Favicon & Suporte Offline**: Criação dos arquivos `favicon.ico` e `favicon.svg` na pasta `public/` e substituição dos papéis de parede remotos por gradientes CSS nativos para suporte offline sem erros de DNS.
 
 ---
 

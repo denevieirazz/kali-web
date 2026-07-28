@@ -24,7 +24,7 @@ rawDb.serialize(() => {
         CREATE TABLE IF NOT EXISTS user_settings (
             user_id TEXT PRIMARY KEY,
             theme TEXT DEFAULT 'dark',
-            wallpaper TEXT DEFAULT 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?q=80&w=2070',
+            wallpaper TEXT DEFAULT 'linear-gradient(135deg, #0f0c29, #302b63, #24243e)',
             language TEXT DEFAULT 'pt-BR',
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );

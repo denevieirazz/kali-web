@@ -7,7 +7,7 @@ export const useCloudOS = () => useContext(CloudOSContext);
 
 export const CloudOSProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [settings, setSettings] = useState({ wallpaper: 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?q=80&w=2070' });
+  const [settings, setSettings] = useState({ wallpaper: 'linear-gradient(135deg, #0f0c29, #302b63, #24243e)' });
   const [desktopState, setDesktopState] = useState({ icon_positions: {}, open_windows: [], taskbar_pins: [] });
   const [notifications, setNotifications] = useState([]);
   const [pinnedApps, setPinnedApps] = useState([]);

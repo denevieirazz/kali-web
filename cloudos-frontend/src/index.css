@@ -9,7 +9,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; }
 
 .desktop {
   width: 100vw; height: 100vh; position: relative; overflow: hidden;
-  background: url('https://images.unsplash.com/photo-1579546929518-9e396f3cc809?q=80&w=2070') center/cover no-repeat;
+  background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
 }
 
 /* ÍCONES DA ÁREA DE TRABALHO (GRID REAL) */
@@ -298,7 +298,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; }
 /* TELA DE LOGIN / LOCK SCREEN */
 .login-screen {
   position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-  background: url('https://images.unsplash.com/photo-1579546929518-9e396f3cc809?q=80&w=2070') center/cover no-repeat;
+  background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   z-index: 999999; cursor: pointer; transition: backdrop-filter 0.3s;
 }

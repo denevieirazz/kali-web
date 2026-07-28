@@ -53,7 +53,7 @@ function Desktop() {
     window.location.reload();
   };
 
-  const wallpaperUrl = settings?.wallpaper || 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?q=80&w=2070';
+  const wallpaperUrl = settings?.wallpaper || 'linear-gradient(135deg, #0f0c29, #302b63, #24243e)';
 
   const visibleTaskbarApps = pinnedApps && pinnedApps.length > 0 
     ? AppList.filter(a => pinnedApps.includes(a.id)) 

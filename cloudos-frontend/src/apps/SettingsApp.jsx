@@ -7,9 +7,9 @@ export const SettingsApp = () => {
   const { settings, setSettings } = useCloudOS();
 
   const wallpapers = [
-    'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?q=80&w=2070',
-    'https://images.unsplash.com/photo-1620121692029-d088224ddc74?q=80&w=2070',
-    'linear-gradient(135deg, #0f0c29, #302b63, #24243e)'
+    'linear-gradient(135deg, #0f0c29, #302b63, #24243e)',
+    'linear-gradient(135deg, #141e30, #243b55)',
+    'linear-gradient(135deg, #000000, #434343)'
   ];
 
   return (
