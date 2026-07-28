@@ -8,6 +8,8 @@ const fs = require('fs');
 const multer = require('multer');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
+const db = require('./database');
 
 const app = express();
 app.use(cors());
@@ -17,11 +19,28 @@ const wss = new WebSocketServer({ server });
 const upload = multer({ dest: 'temp_uploads/' });
 
 const SECRET_KEY = 'CLOUDOS_JWT_SECRET_2024';
-const WSL_FS_ROOT = '\\\\wsl.localhost\\kali-linux'; // Acesso direto ao sistema de arquivos do WSL2 via Node FS
+const WSL_FS_ROOT = '\\\\wsl.localhost\\kali-linux';
 
-// Auth Setup (Simulando DB)
-const usersDb = [{ id: 'u_1001', username: 'admin', passwordHash: bcrypt.hashSync('admin123', 10) }];
+// Inicializar Usuário Admin Padrão (se não existir no DB)
+(async () => {
+    try {
+        const existingAdmin = await db.prepare('SELECT * FROM users WHERE username = ?').get('admin');
+        if (!existingAdmin) {
+            const adminId = 'u_1001';
+            const hash = bcrypt.hashSync('admin123', 10);
+            await db.prepare('INSERT INTO users (id, username, password_hash, tier) VALUES (?, ?, ?, ?)').run(adminId, 'admin', hash, 'pro');
+            await db.prepare('INSERT OR IGNORE INTO user_settings (user_id) VALUES (?)').run(adminId);
+            await db.prepare('INSERT OR IGNORE INTO desktop_state (user_id) VALUES (?)').run(adminId);
+            console.log('✅ Admin padrão (admin/admin123) criado no Banco SQLite.');
+        }
+    } catch (e) {
+        console.error('Erro ao verificar/criar admin:', e);
+    }
+})();
 
+// =========================================================
+// 🛡️ MIDDLEWARES E AUTH
+// =========================================================
 function authenticateToken(req, res, next) {
     const token = req.headers['authorization']?.split(' ')[1];
     if (!token) return res.status(401).json({ error: 'Acesso negado.' });
@@ -32,18 +51,44 @@ function authenticateToken(req, res, next) {
     });
 }
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
     const { username, password } = req.body;
-    const user = usersDb.find(u => u.username === username);
-    if (!user || !bcrypt.compareSync(password, user.passwordHash)) return res.status(401).json({ error: 'Credenciais inválidas.' });
-    const token = jwt.sign({ id: user.id, username: user.username }, SECRET_KEY, { expiresIn: '24h' });
-    res.json({ token, user: { username: user.username, id: user.id } });
+    try {
+        const user = await db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+        
+        if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+            return res.status(401).json({ error: 'Credenciais inválidas.' });
+        }
+        
+        const token = jwt.sign({ id: user.id, username: user.username, tier: user.tier }, SECRET_KEY, { expiresIn: '24h' });
+        res.json({ token, user: { username: user.username, id: user.id, tier: user.tier } });
+    } catch (e) {
+        res.status(500).json({ error: 'Erro no servidor de autenticação.' });
+    }
+});
+
+// Rota de Registro
+app.post('/api/auth/register', async (req, res) => {
+    const { username, password } = req.body;
+    if (!username || !password) return res.status(400).json({ error: 'Dados incompletos.' });
+    
+    const id = 'u_' + crypto.randomBytes(8).toString('hex');
+    const hash = bcrypt.hashSync(password, 10);
+    
+    try {
+        await db.prepare('INSERT INTO users (id, username, password_hash) VALUES (?, ?, ?)').run(id, username, hash);
+        await db.prepare('INSERT INTO user_settings (user_id) VALUES (?)').run(id);
+        await db.prepare('INSERT INTO desktop_state (user_id) VALUES (?)').run(id);
+        res.json({ success: true, message: 'Usuário criado.' });
+    } catch (e) {
+        res.status(400).json({ error: 'Usuário já existe.' });
+    }
 });
 
 app.use(authenticateToken);
 
 // =========================================================
-// 🛡️ SUBSYSTEM MANAGER (Camada de Segurança e Controle)
+// 🛡️ SUBSYSTEM MANAGER (WSL Controller)
 // =========================================================
 class SubsystemManager {
     constructor() {
@@ -55,29 +100,18 @@ class SubsystemManager {
         if (this.recentErrors.length > 10) this.recentErrors.pop();
     }
 
-    // Sanitiza e bloqueia Path Traversal
     getSecurePath(userId, requestedPath) {
         const safeUserId = String(userId).replace(/[^a-zA-Z0-9_]/g, '');
         const baseDir = path.join(WSL_FS_ROOT, 'home', 'cloudos_users', safeUserId);
-        
-        // Se requestedPath for vazio, retorna a base
         const resolved = path.resolve(baseDir, requestedPath || '');
-        
-        // BLOQUEIO DE PATH TRAVERSAL
-        if (!resolved.startsWith(baseDir)) {
-            throw new Error("Acesso negado: Path Traversal detectado.");
-        }
+        if (!resolved.startsWith(baseDir)) throw new Error("Path Traversal detectado.");
         return resolved;
     }
 
-    // Converte caminho Windows para caminho Linux (para comandos tmux/ps)
-    toLinuxPath(winPath) {
-        return winPath.replace(WSL_FS_ROOT, '').replace(/\\/g, '/');
-    }
+    toLinuxPath(winPath) { return winPath.replace(WSL_FS_ROOT, '').replace(/\\/g, '/'); }
 
     async execCommand(userId, command) {
         return new Promise((resolve, reject) => {
-            // Roda como usuário 'cloudos', nunca como root!
             exec(`wsl -d kali-linux -u cloudos -- bash -c "${command.replace(/"/g, '\\"')}"`, { windowsHide: true }, (error, stdout, stderr) => {
                 if (error) { this.logError(stderr || error.message); return reject(stderr || error.message); }
                 resolve(stdout);
@@ -85,7 +119,6 @@ class SubsystemManager {
         });
     }
 
-    // --- File System Operations (Usando Node FS Nativo = Seguro) ---
     async listFiles(userId, relPath) {
         const dirPath = this.getSecurePath(userId, relPath);
         const items = await fs.promises.readdir(dirPath, { withFileTypes: true });
@@ -114,30 +147,25 @@ class SubsystemManager {
 
     async deleteFile(userId, relPath) {
         const filePath = this.getSecurePath(userId, relPath);
-        // Em vez de deletar, mover para lixeira nativa do WSL
         const trashPath = this.getSecurePath(userId, '.trash');
         await fs.promises.mkdir(trashPath, { recursive: true });
         await fs.promises.rename(filePath, path.join(trashPath, path.basename(filePath)));
     }
 
-    // --- Terminal (Tmux) ---
     startSession(userId, cwd = null) {
         const sessionName = `cloudos_${userId}`;
         const linuxCwd = cwd ? this.toLinuxPath(this.getSecurePath(userId, cwd)) : '/home/cloudos_users/' + userId;
-        
         return pty.spawn('wsl.exe', ['-d', 'kali-linux', '-u', 'cloudos', 'tmux', 'new-session', '-A', '-s', sessionName, '-c', linuxCwd, '-x', '80', '-y', '30'], {
             name: 'xterm-256color', cols: 80, rows: 30, cwd: process.env.HOME, env: process.env, useConpty: false
         });
     }
 
-    // --- OpSec & System Monitor ---
     async getSystemStatus(userId) {
         try {
             const cmd = `service tor status | grep -q 'active' && echo 'TOR:ACTIVE' || echo 'TOR:INACTIVE'; IFACE=$(ip route | grep default | awk '{print $5}' | head -n1); MAC=$(ip link show $IFACE | grep link/ether | awk '{print $2}'); echo 'MAC:'$MAC; df -h / | tail -1 | awk '{print "DISK:"$3"/"$2}'`;
             const stdout = await this.execCommand(userId, cmd);
             
             let mac = stdout.match(/MAC:(..:..:..:..:..:..)/)?.[1] || 'Indisponível';
-            // REGRA: Mascarar MAC por padrão
             const maskedMac = mac.replace(/(..:..:..):(..:..:..)/, '$1:XX:XX:XX');
 
             return {
@@ -150,27 +178,70 @@ class SubsystemManager {
         } catch (e) { this.logError(e); throw e; }
     }
 }
-
 const subsystem = new SubsystemManager();
 
-// Garantir que o usuário do JWT tenha sua pasta home criada
+// Garante que o usuário tenha a pasta home no WSL e configs no DB
 app.use(async (req, res, next) => {
     try {
         const userHome = subsystem.getSecurePath(req.user.id, '');
         await fs.promises.mkdir(userHome, { recursive: true });
         await fs.promises.mkdir(path.join(userHome, '.trash'), { recursive: true });
+        
+        await db.prepare('INSERT OR IGNORE INTO user_settings (user_id) VALUES (?)').run(req.user.id);
+        await db.prepare('INSERT OR IGNORE INTO desktop_state (user_id) VALUES (?)').run(req.user.id);
         next();
-    } catch (e) { res.status(500).json({ error: "Erro ao inicializar home do usuário." }); }
+    } catch (e) { res.status(500).json({ error: "Erro ao inicializar ambiente." }); }
 });
 
 // =========================================================
 // 🌐 API ROUTES
 // =========================================================
 
-// FileManager APIs (Sem concatenação de shell, 100% Node FS)
+// --- User Settings & Desktop State Persistence ---
+app.get('/api/user/state', async (req, res) => {
+    try {
+        const settings = await db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(req.user.id);
+        const desktop = await db.prepare('SELECT * FROM desktop_state WHERE user_id = ?').get(req.user.id);
+        res.json({ settings, desktop });
+    } catch (e) { res.status(500).json({ error: 'Erro ao carregar estado do usuário.' }); }
+});
+
+app.post('/api/user/settings', async (req, res) => {
+    const { wallpaper, theme } = req.body;
+    try {
+        await db.prepare('UPDATE user_settings SET wallpaper = ?, theme = ? WHERE user_id = ?').run(wallpaper, theme, req.user.id);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: 'Erro ao salvar configurações.' }); }
+});
+
+app.post('/api/user/desktop', async (req, res) => {
+    const { icon_positions, open_windows, taskbar_pins } = req.body;
+    try {
+        await db.prepare('UPDATE desktop_state SET icon_positions = ?, open_windows = ?, taskbar_pins = ? WHERE user_id = ?')
+          .run(JSON.stringify(icon_positions || {}), JSON.stringify(open_windows || []), JSON.stringify(taskbar_pins || []), req.user.id);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: 'Erro ao salvar estado do desktop.' }); }
+});
+
+// --- Notifications ---
+app.get('/api/notifications', async (req, res) => {
+    try {
+        const notifs = await db.prepare('SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 20').all(req.user.id);
+        res.json(notifs);
+    } catch (e) { res.status(500).json({ error: 'Erro ao listar notificações.' }); }
+});
+
+app.post('/api/notifications/read', async (req, res) => {
+    try {
+        await db.prepare('UPDATE notifications SET is_read = 1 WHERE user_id = ?').run(req.user.id);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: 'Erro ao marcar notificações como lidas.' }); }
+});
+
+// --- File Manager APIs (Node FS Nativo) ---
 app.get('/api/files', async (req, res) => {
     try { res.json({ path: req.query.path || '', items: await subsystem.listFiles(req.user.id, req.query.path) }); } 
-    catch (e) { res.status(500).json({ error: 'Acesso negado ou pasta inexistente.' }); }
+    catch (e) { res.status(500).json({ error: 'Acesso negado.' }); }
 });
 
 app.get('/api/files/read', async (req, res) => {
@@ -204,7 +275,7 @@ app.post('/api/files/upload', upload.array('files'), async (req, res) => {
     } catch (e) { res.status(500).json({ error: 'Falha no upload.' }); }
 });
 
-// System Monitor & OpSec APIs
+// --- System & OpSec APIs ---
 app.get('/api/system/status', async (req, res) => {
     try { res.json(await subsystem.getSystemStatus(req.user.id)); } 
     catch (e) { res.status(500).json({ error: 'Erro ao ler sistema.' }); }
@@ -215,17 +286,16 @@ app.post('/api/tactical/anon', async (req, res) => {
     let cmd = action === 'tor_on' ? 'sudo service tor start' : action === 'tor_off' ? 'sudo service tor stop' : null;
     if (!cmd) return res.status(400).json({ error: 'Ação inválida' });
     try { await subsystem.execCommand(req.user.id, cmd); res.json({ success: true }); } 
-    catch (e) { res.status(500).json({ error: 'Erro WSL. Verifique permissões sudo do usuário cloudos.' }); }
+    catch (e) { res.status(500).json({ error: 'Erro WSL.' }); }
 });
 
-// --- WebSocket (Terminal Seguro com JWT) ---
+// --- WebSocket (Terminal Seguro) ---
 wss.on('connection', (ws, req) => {
     const token = new URL(req.url, 'http://localhost').searchParams.get('token');
     if (!token) return ws.close();
     
     jwt.verify(token, SECRET_KEY, (err, decoded) => {
         if (err) return ws.close();
-        
         try {
             const ptyProcess = subsystem.startSession(decoded.id);
             ptyProcess.onData(data => ws.readyState === ws.OPEN && ws.send(data));
@@ -240,4 +310,4 @@ wss.on('connection', (ws, req) => {
     });
 });
 
-server.listen(8080, () => console.log('🚀 CloudOS Enterprise Backend Rodando.'));
+server.listen(8080, () => console.log('🚀 CloudOS DB & SaaS Backend Rodando.'));

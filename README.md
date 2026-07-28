@@ -24,15 +24,17 @@ Se você é um agente de IA ou desenvolvedor trabalhando neste repositório, con
 
 ### 📁 Estrutura de Arquivos e Componentes
 
-- **`cloudos-backend/`**: Servidor Node.js (Express + WebSocket + Node-PTY + JWT)
+- **`cloudos-backend/`**: Servidor Node.js (Express + WebSocket + Node-PTY + JWT + SQLite)
+  - `database.js`:
+    - **Camada de Banco de Dados (SQLite)**: Inicialização das tabelas `users`, `user_settings`, `desktop_state`, `notifications` e `system_events` com modo WAL e chaves estrangeiras.
   - `server.js`:
     - **SubsystemManager (Enterprise Security Layer)**:
       - **Acesso Nativo ao Sistema de Arquivos (Node FS)**: Acesso direto ao sistema de arquivos do WSL2 via caminho UNC de rede (`\\\\wsl.localhost\\kali-linux\\home\\cloudos_users\\...`), eliminando concatenações de shell.
       - **Proteção contra Path Traversal**: Validação estrita via `getSecurePath()` impedindo acessos fora do diretório do usuário.
       - **Isolamento de Usuário Não-Root**: Execução dos comandos e sessões Tmux como usuário `cloudos` (não-root).
       - **Mascaramento Automático de MAC**: Mascaramento por padrão de endereços físicos para proteção OpSec.
-    - **Autenticação JWT & Bcrypt**: Autenticação com hash bcrypt e validação de tokens JWT para rotas REST e conexões WebSocket.
-    - **APIs de Gerenciamento do Sistema**: Endpoints `/api/system/status` para métricas de disco, sessões WebSocket e log de erros em tempo real.
+    - **Persistência de Estado SaaS**: APIs `/api/user/state`, `/api/user/settings` e `/api/user/desktop` para salvamento e restauração da área de trabalho, janelas abertas e ícones por usuário.
+    - **Autenticação JWT & Registro**: Autenticação com hash bcrypt, registro de usuários (`/api/auth/register`) e validação de tokens JWT.
 - **`cloudos-frontend/`**: Aplicação Web React 18 + Vite + Monaco Editor (Arquitetura SaaS Modular)
   - `src/main.jsx`: Ponto de entrada com polyfill `window.process`.
   - `src/registry.jsx`: Registro centralizado de aplicativos (`AppRegistry`).
