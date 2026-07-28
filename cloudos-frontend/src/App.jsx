@@ -1,80 +1,35 @@
-import { useState, useEffect } from 'react';
-import { Terminal as TerminalIcon, FileText, Settings, Search, Wifi, Volume2, Battery, Cpu, MemoryStick, RefreshCw, FolderOpen, Code2, Power } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Search, Wifi, Volume2, Battery, Cpu, MemoryStick, RefreshCw, Power } from 'lucide-react';
 import Window from './Window';
-import { TerminalApp, NotepadApp, SettingsApp, FileManagerApp, CodeEditorApp } from './apps';
+import { AppList, AppRegistry } from './registry';
 import BootScreen from './BootScreen';
 import LoginScreen from './LoginScreen';
-
-const APPS_CONFIG = {
-  terminal: { id: 'terminal', title: 'Terminal Linux', icon: TerminalIcon, Component: TerminalApp },
-  files: { id: 'files', title: 'Arquivos', icon: FolderOpen, Component: FileManagerApp },
-  editor: { id: 'editor', title: 'Code Editor', icon: Code2, Component: CodeEditorApp },
-  notepad: { id: 'notepad', title: 'Bloco de Notas', icon: FileText, Component: NotepadApp },
-  settings: { id: 'settings', title: 'Configurações', icon: Settings, Component: SettingsApp }
-};
-
-const APPS_LIST = Object.values(APPS_CONFIG);
 
 export default function App() {
   const [booting, setBooting] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!localStorage.getItem('cloudos_token'));
-  const [codeFileToOpen, setCodeFileToOpen] = useState(null);
-  
-  const [windows, setWindows] = useState(() => {
-    try {
-      const saved = localStorage.getItem('cloudos_windows');
-      const parsed = saved ? JSON.parse(saved) : [];
-      if (Array.isArray(parsed)) {
-        return parsed.filter(w => w && APPS_CONFIG[w.appId]).map(w => ({
-          id: w.id || Date.now(), appId: w.appId,
-          x: w.x || 50, y: w.y || 50, w: w.w || 600, h: w.h || 400, z: w.z || 100
-        }));
-      }
-      return [];
-    } catch { return []; }
-  });
-
+  const [windows, setWindows] = useState([]);
   const [zIndex, setZIndex] = useState(100);
   const [startOpen, setStartOpen] = useState(false);
   const [time, setTime] = useState(new Date());
   const [bg, setBg] = useState(() => localStorage.getItem('cloudos_bg') || 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?q=80&w=2070');
-  const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0 });
   
-  const [selectedIcon, setSelectedIcon] = useState(null);
-  const [refreshing, setRefreshing] = useState(false);
+  const [selectedIcons, setSelectedIcons] = useState([]);
+  const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0 });
+  const [iconPositions, setIconPositions] = useState(() => JSON.parse(localStorage.getItem('cloudos_icon_pos') || '{}'));
 
   useEffect(() => {
-    try {
-      const cleanWindows = windows.map(({ id, appId, x, y, w, h, z }) => ({ id, appId, x, y, w, h, z }));
-      localStorage.setItem('cloudos_windows', JSON.stringify(cleanWindows));
-    } catch (e) {}
-  }, [windows]);
-
-  useEffect(() => { try { localStorage.setItem('cloudos_bg', bg); } catch (e) {} }, [bg]);
-
-  useEffect(() => {
-    if (booting || !isAuthenticated) return;
     const timer = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(timer);
-  }, [booting, isAuthenticated]);
+  }, []);
 
-  useEffect(() => {
-    const handler = (e) => { setCodeFileToOpen(e.detail.path); openApp('editor'); };
-    window.addEventListener('openCodeEditor', handler);
-    return () => window.removeEventListener('openCodeEditor', handler);
-  }, [windows, zIndex]);
-
-  const openApp = (appId) => {
-    if (!APPS_CONFIG[appId]) return;
+  const openApp = (appId, payload = null) => {
     const existing = windows.find(w => w.appId === appId);
     if (existing) return focusWindow(existing.id);
     
-    const w = Math.min(700, window.innerWidth - 100);
-    const h = Math.min(450, window.innerHeight - 100);
-    const x = Math.max(10, Math.random() * (window.innerWidth - w - 20));
-    const y = Math.max(10, Math.random() * (window.innerHeight - h - 60));
-    
-    setWindows(prev => [...prev, { id: Date.now(), appId, x, y, w, h, z: zIndex + 1 }]);
+    const w = Math.min(800, window.innerWidth - 100);
+    const h = Math.min(550, window.innerHeight - 100);
+    setWindows(prev => [...prev, { id: Date.now(), appId, x: 50 + Math.random()*100, y: 50, w, h, z: zIndex + 1, payload }]);
     setZIndex(prev => prev + 1);
     setStartOpen(false);
   };
@@ -85,18 +40,26 @@ export default function App() {
     setZIndex(prev => prev + 1);
   };
 
+  const handleDesktopClick = (e) => {
+    if (e.target.classList.contains('desktop')) setSelectedIcons([]);
+    setContextMenu({ ...contextMenu, visible: false });
+    setStartOpen(false);
+  };
+
   const handleContextMenu = (e) => {
     e.preventDefault();
     setContextMenu({ visible: true, x: e.clientX, y: e.clientY });
-    setSelectedIcon(null);
   };
 
-  const handleRefresh = () => {
-    setContextMenu({ ...contextMenu, visible: false });
-    setRefreshing(true);
-    setSelectedIcon(null);
-    setTimeout(() => setRefreshing(false), 300);
-  };
+  // Atalhos do teclado (F2, Delete)
+  const handleKeyDown = useCallback((e) => {
+    if (e.key === 'F2' && selectedIcons.length === 1) {
+      alert('Renomear ícone (em implementação)');
+    }
+    if (e.key === 'Delete' && selectedIcons.length > 0) {
+      alert('Remover ícones selecionados (em implementação)');
+    }
+  }, [selectedIcons]);
 
   const handleLogout = () => {
     localStorage.removeItem('cloudos_token');
@@ -108,10 +71,12 @@ export default function App() {
 
   return (
     <div 
-      className={`desktop ${refreshing ? 'flash' : ''}`} 
+      className="desktop" 
       style={{ background: bg.startsWith('http') ? `url(${bg}) center/cover no-repeat` : bg }} 
-      onClick={() => { setContextMenu({ ...contextMenu, visible: false }); setStartOpen(false); setSelectedIcon(null); }}
+      onClick={handleDesktopClick}
       onContextMenu={handleContextMenu}
+      onKeyDown={handleKeyDown}
+      tabIndex={0}
     >
       <div className="desktop-widget">
         <div className="widget-clock">{time.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
@@ -122,14 +87,16 @@ export default function App() {
         </div>
       </div>
 
-      <div className="desktop-icons-grid">
-        {APPS_LIST.map(app => {
+      <div className="desktop-icons-container">
+        {AppList.map(app => {
           const Icon = app.icon;
+          const pos = iconPositions[app.id] || { x: 20, y: 20 };
           return (
             <div 
               key={app.id} 
-              className={`d-icon ${selectedIcon === app.id ? 'selected' : ''}`} 
-              onClick={(e) => { e.stopPropagation(); setSelectedIcon(app.id); }}
+              className={`d-icon ${selectedIcons.includes(app.id) ? 'selected' : ''}`}
+              style={{ position: 'relative' }}
+              onClick={(e) => { e.stopPropagation(); setSelectedIcons([app.id]); }}
               onDoubleClick={() => openApp(app.id)}
             >
               <Icon size={42} color="white" />
@@ -140,40 +107,19 @@ export default function App() {
       </div>
 
       {windows.map(win => {
-        const appConfig = APPS_CONFIG[win.appId];
+        const appConfig = AppRegistry[win.appId];
         if (!appConfig) return null;
         const AppComp = appConfig.Component;
         return (
           <Window key={win.id} win={{ ...win, title: appConfig.title, icon: appConfig.icon }} onClose={() => closeApp(win.id)} onFocus={() => focusWindow(win.id)}>
-            <AppComp setBg={setBg} fileToOpen={win.appId === 'editor' ? codeFileToOpen : undefined} />
+            <AppComp payload={win.payload} openApp={openApp} setBg={setBg} />
           </Window>
         );
       })}
 
-      {startOpen && (
-        <div className="start-menu" onClick={(e) => e.stopPropagation()}>
-          <input className="start-search" placeholder="Pesquisar apps..." />
-          <div className="start-grid">
-            {APPS_LIST.map(app => {
-              const Icon = app.icon;
-              return (
-                <div key={app.id} className="start-app" onClick={() => openApp(app.id)}>
-                  <Icon size={32} color="white" />
-                  <span>{app.title}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       {contextMenu.visible && (
         <div className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x }} onClick={(e) => e.stopPropagation()}>
-          <div className="context-item" onClick={handleRefresh}><RefreshCw size={14} /> Atualizar</div>
-          <div className="context-divider"></div>
-          <div className="context-item" onClick={() => openApp('terminal')}><TerminalIcon size={14} /> Abrir Terminal</div>
-          <div className="context-item" onClick={() => openApp('editor')}><Code2 size={14} /> Abrir Code Editor</div>
-          <div className="context-item" onClick={() => openApp('settings')}><Settings size={14} /> Personalizar</div>
+          <div className="context-item" onClick={() => window.location.reload()}><RefreshCw size={14} /> Atualizar</div>
           <div className="context-divider"></div>
           <div className="context-item danger" onClick={handleLogout}><Power size={14} /> Sair / Logout</div>
         </div>
@@ -181,7 +127,7 @@ export default function App() {
 
       <div className="taskbar" onClick={(e) => e.stopPropagation()}>
         <div className="taskbar-app" onClick={() => setStartOpen(!startOpen)}><Search size={24} /></div>
-        {APPS_LIST.map(app => {
+        {AppList.map(app => {
           const Icon = app.icon;
           return (
             <div key={app.id} className={`taskbar-app ${windows.some(w => w.appId === app.id) ? 'active' : ''}`} onClick={() => openApp(app.id)}>

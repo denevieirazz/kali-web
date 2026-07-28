@@ -33,14 +33,18 @@ Se você é um agente de IA ou desenvolvedor trabalhando neste repositório, con
       - **Mascaramento Automático de MAC**: Mascaramento por padrão de endereços físicos para proteção OpSec.
     - **Autenticação JWT & Bcrypt**: Autenticação com hash bcrypt e validação de tokens JWT para rotas REST e conexões WebSocket.
     - **APIs de Gerenciamento do Sistema**: Endpoints `/api/system/status` para métricas de disco, sessões WebSocket e log de erros em tempo real.
-- **`cloudos-frontend/`**: Aplicação Web React 18 + Vite + Monaco Editor
+- **`cloudos-frontend/`**: Aplicação Web React 18 + Vite + Monaco Editor (Arquitetura SaaS Modular)
   - `src/main.jsx`: Ponto de entrada com polyfill `window.process`.
-  - `src/registry.jsx`: Registro centralizado de aplicativos (SaaS Registry Pattern).
-  - `src/App.jsx`: Gerenciador da área de trabalho estilo Windows 11, alinhamento de ícones em grade (`grid`), seleção visual, efeito de atualização *flash* sem recarregar e controle de estado do login.
+  - `src/registry.jsx`: Registro centralizado de aplicativos (`AppRegistry`).
+  - `src/App.jsx`: Área de trabalho interativa com multi-seleção de ícones, suporte a atalhos (F2/Delete) e passagem de payloads.
   - `src/LoginScreen.jsx`: Tela de bloqueio e login (Windows 11 Glassmorphism style) com autenticação JWT.
-  - `src/BootScreen.jsx`: Tela de boot cinemática com efeito CRT Scanlines, Logo Glitch RGB e barra de progresso neon com proteção contra o *React 18 Strict Mode*.
+  - `src/BootScreen.jsx`: Tela de boot cinemática com efeito CRT Scanlines e Logo Glitch RGB.
+  - `src/apps/FileManagerApp.jsx`: Gerenciador de arquivos integrado com menu contextual React Portal ("Abrir Terminal Aqui", "Editar Código"), upload e lixeira nativa.
+  - `src/apps/CodeEditorApp.jsx`: Editor de código Monaco integrado com salvamento `Ctrl+S` e preview isolado em `<iframe sandbox="allow-scripts">` para arquivos HTML.
+  - `src/apps/OpSecCenterApp.jsx`: Centro de operações de segurança para controle do Tor e monitoramento de interface de rede.
   - `src/apps/SystemMonitorApp.jsx`: Monitor de métricas do sistema e subsistema WSL em tempo real.
-  - `src/Window.jsx`: Componente de janela arrastável e maximizável baseado em `react-rnd` envolvido por um `WindowErrorBoundary`.
+  - `src/apps/TerminalApp.jsx`: Terminal interativo xterm.js conectado via WebSocket seguro com suporte a payload CWD.
+  - `src/Window.jsx`: Componente de janela arrastável e maximizável baseado em `react-rnd` envolvido por `WindowErrorBoundary`.
   - `src/index.css`: Sistema de design visual completo com glassmorphism, scanlines CRT, efeito de brilho neon e temas táticos.
 
 ---
