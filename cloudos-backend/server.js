@@ -447,6 +447,76 @@ app.post('/api/apps/uninstall', async (req, res) => {
     } catch (e) { res.status(500).json({ error: 'Erro ao desinstalar app.' }); }
 });
 
+// =========================================================
+// 🛠️ KALI HUB - CATÁLOGO E ROTAS SEGURAS
+// =========================================================
+const KALI_CATALOG = [
+    { id: "nmap", name: "Nmap", packageName: "nmap", command: "nmap", category: "recon", description: "Network discovery and security auditing tool.", icon: "Radar", tags: ["network", "discovery"], riskLevel: "medium" },
+    { id: "wireshark", name: "Wireshark", packageName: "wireshark", command: "wireshark", category: "network", description: "Network protocol analyzer.", icon: "Activity", tags: ["network", "packets"], riskLevel: "safe" },
+    { id: "burpsuite", name: "Burp Suite", packageName: "burpsuite", command: "burpsuite", category: "web", description: "Web application security testing platform.", icon: "Bug", tags: ["web", "proxy"], riskLevel: "restricted" },
+    { id: "sqlmap", name: "SQLMap", packageName: "sqlmap", command: "sqlmap", category: "web", description: "Database security testing utility.", icon: "Database", tags: ["web", "database"], riskLevel: "restricted" },
+    { id: "metasploit", name: "Metasploit", packageName: "metasploit-framework", command: "msfconsole", category: "vuln", description: "Penetration testing framework.", icon: "Rocket", tags: ["exploit", "framework"], riskLevel: "restricted" },
+    { id: "john", name: "John the Ripper", packageName: "john", command: "john", category: "password", description: "Password audit and recovery tool.", icon: "KeyRound", tags: ["password", "audit"], riskLevel: "restricted" },
+    { id: "hashcat", name: "Hashcat", packageName: "hashcat", command: "hashcat", category: "password", description: "Password recovery and hash auditing.", icon: "Hash", tags: ["hash", "password"], riskLevel: "restricted" },
+    { id: "aircrack", name: "Aircrack-ng", packageName: "aircrack-ng", command: "aircrack-ng", category: "wireless", description: "WiFi security auditing tools.", icon: "Wifi", tags: ["wifi", "wireless"], riskLevel: "restricted" },
+    { id: "nikto", name: "Nikto", packageName: "nikto", command: "nikto", category: "web", description: "Web server scanner.", icon: "Eye", tags: ["web", "scanner"], riskLevel: "medium" },
+    { id: "gobuster", name: "Gobuster", packageName: "gobuster", command: "gobuster", category: "recon", description: "Directory/file/DNS brute-forcer.", icon: "FolderSearch", tags: ["web", "brute"], riskLevel: "medium" }
+];
+
+app.get('/api/kali/tools', (req, res) => {
+    res.json(KALI_CATALOG.map(t => ({ ...t, status: "checking" })));
+});
+
+app.get('/api/kali/tools/status', async (req, res) => {
+    try {
+        const cmds = KALI_CATALOG.map(t => `command -v ${t.command} >/dev/null 2>&1 && echo "${t.id}:installed" || echo "${t.id}:missing"`).join('; ');
+        const stdout = await subsystem.execCommand(req.user.id, cmds);
+        
+        const statuses = {};
+        (stdout || '').split('\n').forEach(line => {
+            const [id, status] = line.trim().split(':');
+            if (id && status) statuses[id] = status;
+        });
+        res.json(statuses);
+    } catch (e) { res.status(500).json({ error: "Erro ao checar ferramentas no WSL." }); }
+});
+
+app.get('/api/kali/tools/favorites', async (req, res) => {
+    try {
+        const favs = await db.prepare('SELECT tool_id FROM kali_tool_favorites WHERE user_id = ?').all(req.user.id);
+        res.json((favs || []).map(f => f.tool_id));
+    } catch (e) { res.status(500).json({ error: 'Erro ao listar favoritos.' }); }
+});
+
+app.post('/api/kali/tools/:id/favorite', async (req, res) => {
+    const toolId = req.params.id;
+    try {
+        const exists = await db.prepare('SELECT 1 FROM kali_tool_favorites WHERE user_id = ? AND tool_id = ?').get(req.user.id, toolId);
+        if (exists) {
+            await db.prepare('DELETE FROM kali_tool_favorites WHERE user_id = ? AND tool_id = ?').run(req.user.id, toolId);
+        } else {
+            await db.prepare('INSERT INTO kali_tool_favorites (user_id, tool_id) VALUES (?, ?)').run(req.user.id, toolId);
+        }
+        res.json({ success: true, isFavorite: !exists });
+    } catch (e) { res.status(500).json({ error: 'Erro ao favoritar.' }); }
+});
+
+app.post('/api/kali/tools/:id/open', async (req, res) => {
+    const tool = KALI_CATALOG.find(t => t.id === req.params.id);
+    if (!tool) return res.status(404).json({ error: "Ferramenta não encontrada no catálogo." });
+    
+    try {
+        const existing = await db.prepare('SELECT * FROM kali_tool_recent WHERE user_id = ? AND tool_id = ?').get(req.user.id, tool.id);
+        if (existing) {
+            await db.prepare('UPDATE kali_tool_recent SET opened_at = CURRENT_TIMESTAMP WHERE user_id = ? AND tool_id = ?').run(req.user.id, tool.id);
+        } else {
+            await db.prepare('INSERT INTO kali_tool_recent (user_id, tool_id) VALUES (?, ?)').run(req.user.id, tool.id);
+        }
+        await logEvent(req.user.id, 'kali_tool_open', `Ferramenta ${tool.name} selecionada para uso.`);
+        res.json({ success: true, command: tool.command });
+    } catch (e) { res.status(500).json({ error: 'Erro ao abrir ferramenta.' }); }
+});
+
 // --- WebSocket (Terminal Seguro) ---
 wss.on('connection', (ws, req) => {
     const token = new URL(req.url, 'http://localhost').searchParams.get('token');

@@ -55,6 +55,13 @@ export const TerminalApp = ({ payload }) => {
               }
             }, 300);
           }
+          if (payload?.tool) {
+            setTimeout(() => {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(`# Tool selected: ${payload.tool}\r\n`);
+              }
+            }, 500);
+          }
         };
 
         ws.onmessage = (event) => {

@@ -33,7 +33,7 @@ Se você é um agente de IA ou desenvolvedor trabalhando neste repositório, con
       - **Proteção contra Path Traversal**: Validação estrita via `getSecurePath()` impedindo acessos fora do diretório do usuário.
       - **Isolamento de Usuário Não-Root**: Execução dos comandos e sessões Tmux como usuário `cloudos` (não-root).
       - **Mascaramento Automático de MAC**: Mascaramento por padrão de endereços físicos para proteção OpSec.
-    - **Persistência de Estado SaaS & Workspaces**: APIs `/api/workspaces`, `/api/snapshots`, `/api/events`, `/api/files/favorites` e `/api/apps` para gestão de ambientes de pentest, fixação de apps e auditoria em tempo real.
+    - **Persistência de Estado SaaS & Workspaces**: APIs `/api/workspaces`, `/api/snapshots`, `/api/events`, `/api/files/favorites`, `/api/apps` e `/api/kali/tools` para gestão de ambientes de pentest, fixação de apps, catálogo tático e auditoria em tempo real.
     - **Proteção e Compatibilidade de Token**: Middleware com resolução inteligente de IDs legados para os registros do banco de dados SQLite, eliminando erros 500 por tokens expirados/desincronizados.
     - **Streaming de Arquivos & ZIP**: APIs `/api/files/properties` para metadados e `/api/files/download` para geração e streaming de ZIP nativo via WSL sem sobrecarga de memória.
     - **Autenticação JWT & Registro**: Autenticação com hash bcrypt, registro de usuários (`/api/auth/register`) e validação de tokens JWT.
@@ -47,6 +47,7 @@ Se você é um agente de IA ou desenvolvedor trabalhando neste repositório, con
   - `src/Window.jsx`: Componente de janela com suporte a telas cheias responsivas e limites adaptativos para smartphones/tablets.
   - `src/LoginScreen.jsx`: Tela de bloqueio e login (Windows 11 Glassmorphism style) com autenticação JWT.
   - `src/BootScreen.jsx`: Tela de boot cinemática com efeito CRT Scanlines, Logo Glitch RGB e proteção contra re-renders assíncronos (`onBootCompleteRef`).
+  - `src/apps/KaliHubApp.jsx`: Central de ferramentas Kali Linux com checagem de status no WSL em tempo real, busca por tags/categorias, gerenciamento de favoritos e lançamento seguro no Terminal.
   - `src/apps/FileManagerApp.jsx`: Gerenciador de arquivos premium com layout de 2 colunas (sidebar VS Code Explorer + grid), status bar inferior com indicador WSL isolado, carregamento com spinner animated, XMLHttpRequest upload progress bar, download de pastas em ZIP via stream, menu contextual React Portal e lixeira nativa.
   - `src/apps/AppStoreApp.jsx`: Loja interna de aplicativos com filtro de busca e opção de fixar/desfixar ferramentas na barra de tarefas.
   - `src/apps/EventCenterApp.jsx`: Central de eventos e logs de auditoria do sistema em tempo real (`/api/events`).

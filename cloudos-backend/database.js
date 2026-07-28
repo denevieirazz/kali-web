@@ -104,6 +104,23 @@ rawDb.serialize(() => {
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
     `);
+
+    rawDb.run(`
+        CREATE TABLE IF NOT EXISTS kali_tool_favorites (
+            user_id TEXT NOT NULL,
+            tool_id TEXT NOT NULL,
+            PRIMARY KEY (user_id, tool_id)
+        );
+    `);
+
+    rawDb.run(`
+        CREATE TABLE IF NOT EXISTS kali_tool_recent (
+            user_id TEXT NOT NULL,
+            tool_id TEXT NOT NULL,
+            opened_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, tool_id)
+        );
+    `);
 });
 
 const db = {
