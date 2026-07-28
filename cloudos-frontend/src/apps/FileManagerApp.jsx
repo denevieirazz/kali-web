@@ -40,22 +40,29 @@ export const FileManagerApp = ({ openApp }) => {
     setContextMenu({ visible: true, x: e.clientX, y: e.clientY, item });
   };
 
+  const goBack = () => {
+    const parts = path.split('/').filter(Boolean);
+    parts.pop();
+    fetchFiles(parts.join('/'));
+  };
+
   return (
     <div className="file-manager-pro" onClick={() => setContextMenu({ visible: false })}>
       <input type="file" multiple ref={fileInputRef} style={{ display: 'none' }} onChange={handleUpload} />
       
-      {/* Toolbar */}
       <div className="fmp-toolbar">
-        <button className="fmp-btn-icon" onClick={() => fetchFiles(path.split('/').slice(0, -1).join('/'))}><ArrowLeft size={16} /></button>
+        <button className="fmp-btn-icon" onClick={goBack}><ArrowLeft size={16} /></button>
         <div className="fmp-breadcrumb">
           <Home size={14} onClick={() => fetchFiles('')} />
-          <span>/ {path}</span>
+          <span>/ {path || 'Home'}</span>
         </div>
       </div>
 
-      {/* Action Bar com Upload Progress */}
       <div className="fmp-action-bar">
-        <button className="fmp-btn" onClick={() => { const name = prompt('Nome da pasta:'); if (name) action('mkdir', { path, name }).then(() => fetchFiles(path)); }}>
+        <button className="fmp-btn" onClick={() => {
+          const name = prompt('Nome da nova pasta:');
+          if (name) action('mkdir', { path, name }).then(() => fetchFiles(path));
+        }}>
           <FolderPlus size={14} /> Nova Pasta
         </button>
         <button className="fmp-btn" onClick={() => fileInputRef.current.click()}>
@@ -69,10 +76,9 @@ export const FileManagerApp = ({ openApp }) => {
         )}
       </div>
 
-      {/* Grid de Arquivos */}
       <div className="fmp-content grid-view" onContextMenu={(e) => handleContext(e)}>
-        {loading ? <div className="fmp-loading">Carregando...</div> : 
-         items.length === 0 ? <div className="fmp-empty">Pasta vazia</div> :
+        {loading ? <div className="fmp-loading">Carregando estrutura...</div> : 
+         items.length === 0 ? <div className="fmp-empty">Pasta vazia. Clique em Upload ou Nova Pasta.</div> :
           items.map((item, i) => (
             <div key={i} className={`fmp-item ${selected.includes(item.path) ? 'selected' : ''}`}
               onClick={(e) => { e.stopPropagation(); setSelected([item.path]); }}
@@ -85,31 +91,39 @@ export const FileManagerApp = ({ openApp }) => {
         }
       </div>
 
-      {/* Context Menu Portal */}
       {contextMenu.visible && createPortal(
-        <div className="fmp-context-menu" style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 9999 }}>
+        <div className="fmp-context-menu" style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 9999 }}
+             onClick={(e) => e.stopPropagation()}>
           {contextMenu.item ? (
             <>
               {contextMenu.item.type === 'file' && (
-                <div className="fmp-ctx-item" onClick={() => { if (openApp) openApp('editor', { path: contextMenu.item.path }); setContextMenu({ ...contextMenu, visible: false }); }}>
+                <div className="fmp-ctx-item" onClick={() => { if (openApp) openApp('editor', { path: contextMenu.item.path }); setContextMenu({ visible: false }); }}>
                   <Code2 size={14} /> Editar Código
                 </div>
               )}
-              <div className="fmp-ctx-item" onClick={() => { if (openApp) openApp('terminal', { cwd: contextMenu.item.path }); setContextMenu({ ...contextMenu, visible: false }); }}>
+              <div className="fmp-ctx-item" onClick={() => { if (openApp) openApp('terminal', { cwd: contextMenu.item.path }); setContextMenu({ visible: false }); }}>
                 <TermIcon size={14} /> Abrir Terminal Aqui
               </div>
-              <div className="fmp-ctx-item" onClick={() => { handleDownload(contextMenu.item); setContextMenu({ ...contextMenu, visible: false }); }}>
+              <div className="fmp-ctx-item" onClick={() => { handleDownload(contextMenu.item); setContextMenu({ visible: false }); }}>
                 <Download size={14} /> Baixar (ZIP)
               </div>
               <div className="fmp-ctx-divider"></div>
-              <div className="fmp-ctx-item danger" onClick={() => action('delete', { path: contextMenu.item.path }).then(() => fetchFiles(path))}>
+              <div className="fmp-ctx-item danger" onClick={() => { action('delete', { path: contextMenu.item.path }).then(() => fetchFiles(path)); setContextMenu({ visible: false }); }}>
                 <Trash2 size={14} /> Deletar
               </div>
             </>
           ) : (
             <>
-              <div className="fmp-ctx-item" onClick={() => { const name = prompt('Nome:'); if (name) action('mkdir', { path, name }).then(() => fetchFiles(path)); }}><FolderPlus size={14} /> Nova Pasta</div>
-              <div className="fmp-ctx-item" onClick={() => fileInputRef.current.click()}><Upload size={14} /> Upload aqui</div>
+              <div className="fmp-ctx-item" onClick={() => {
+                const name = prompt('Nome da nova pasta:');
+                if (name) action('mkdir', { path, name }).then(() => fetchFiles(path));
+                setContextMenu({ visible: false });
+              }}>
+                <FolderPlus size={14} /> Nova Pasta
+              </div>
+              <div className="fmp-ctx-item" onClick={() => { fileInputRef.current.click(); setContextMenu({ visible: false }); }}>
+                <Upload size={14} /> Upload aqui
+              </div>
             </>
           )}
         </div>, document.body

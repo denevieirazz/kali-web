@@ -46,7 +46,7 @@ Se você é um agente de IA ou desenvolvedor trabalhando neste repositório, con
   - `src/App.jsx`: Área de trabalho interativa conectada ao `CloudOSProvider`, com Command Palette, Notification Center lateral, bloqueio de tela e navegação.
   - `src/LoginScreen.jsx`: Tela de bloqueio e login (Windows 11 Glassmorphism style) com autenticação JWT.
   - `src/BootScreen.jsx`: Tela de boot cinemática com efeito CRT Scanlines, Logo Glitch RGB e proteção contra re-renders assíncronos (`onBootCompleteRef`).
-  - `src/apps/FileManagerApp.jsx`: Gerenciador de arquivos premium com XMLHttpRequest upload progress bar, download de pastas em ZIP via stream, menu contextual React Portal ("Abrir Terminal Aqui", "Editar Código", "Baixar ZIP") e lixeira nativa.
+  - `src/apps/FileManagerApp.jsx`: Gerenciador de arquivos premium com navegação segura `goBack`, breadcrumbs dinâmicos, XMLHttpRequest upload progress bar, download de pastas em ZIP via stream, menu contextual React Portal ("Abrir Terminal Aqui", "Editar Código", "Baixar ZIP") e lixeira nativa.
   - `src/apps/SettingsApp.jsx`: Painel de configurações estilo Windows 11/macOS com abas (Aparência, Conta/Planos, Armazenamento WSL, Terminal, Sobre) integrado com o `CloudOSContext`.
 
 ---
