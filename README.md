@@ -34,6 +34,7 @@ Se você é um agente de IA ou desenvolvedor trabalhando neste repositório, con
       - **Isolamento de Usuário Não-Root**: Execução dos comandos e sessões Tmux como usuário `cloudos` (não-root).
       - **Mascaramento Automático de MAC**: Mascaramento por padrão de endereços físicos para proteção OpSec.
     - **Persistência de Estado SaaS**: APIs `/api/user/state`, `/api/user/settings` e `/api/user/desktop` para salvamento e restauração da área de trabalho, janelas abertas e ícones por usuário.
+    - **Proteção e Compatibilidade de Token**: Middleware com resolução inteligente de IDs legados para os registros do banco de dados SQLite, eliminando erros 500 por tokens expirados/desincronizados.
     - **Streaming de Arquivos & ZIP**: APIs `/api/files/properties` para metadados e `/api/files/download` para geração e streaming de ZIP nativo via WSL sem sobrecarga de memória.
     - **Autenticação JWT & Registro**: Autenticação com hash bcrypt, registro de usuários (`/api/auth/register`) e validação de tokens JWT.
 - **`cloudos-frontend/`**: Aplicação Web React 18 + Vite + Monaco Editor (Arquitetura SaaS Enterprise)

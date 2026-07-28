@@ -4,6 +4,8 @@ const path = require('path');
 const dbPath = path.join(__dirname, 'cloudos.db');
 const rawDb = new sqlite3.Database(dbPath);
 
+console.log('🛡️ Inicializando Banco de Dados CloudOS (SQLite)...');
+
 rawDb.serialize(() => {
     rawDb.run("PRAGMA journal_mode = WAL");
     rawDb.run("PRAGMA foreign_keys = ON");
@@ -64,6 +66,14 @@ rawDb.serialize(() => {
 
 const db = {
     rawDb,
+    exec(sql) {
+        return new Promise((resolve, reject) => {
+            rawDb.exec(sql, (err) => {
+                if (err) reject(err);
+                else resolve();
+            });
+        });
+    },
     prepare(sql) {
         return {
             async get(...params) {

@@ -41,13 +41,33 @@ const WSL_FS_ROOT = '\\\\wsl.localhost\\kali-linux';
 // =========================================================
 // 🛡️ MIDDLEWARES E AUTH
 // =========================================================
-function authenticateToken(req, res, next) {
-    const token = req.headers['authorization']?.split(' ')[1];
-    if (!token) return res.status(401).json({ error: 'Acesso negado.' });
-    jwt.verify(token, SECRET_KEY, (err, user) => {
-        if (err) return res.status(403).json({ error: 'Token inválido.' });
-        req.user = user;
-        next();
+async function authenticateToken(req, res, next) {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    if (!token) return res.status(401).json({ error: 'Acesso negado. Token não fornecido.' });
+    
+    jwt.verify(token, SECRET_KEY, async (err, decoded) => {
+        if (err) return res.status(403).json({ error: 'Token inválido ou expirado.' });
+        
+        try {
+            // Suporte para tokens legados onde id era numérico (1) ou username era admin
+            let userId = decoded.id;
+            let dbUser = await db.prepare('SELECT * FROM users WHERE id = ?').get(String(userId));
+            
+            if (!dbUser && (decoded.username === 'admin' || String(userId) === '1')) {
+                dbUser = await db.prepare('SELECT * FROM users WHERE username = ?').get('admin');
+                if (dbUser) userId = dbUser.id;
+            }
+            
+            if (!dbUser) {
+                return res.status(401).json({ error: 'Sessão inválida. Faça login novamente.' });
+            }
+            
+            req.user = { id: dbUser.id, username: dbUser.username, tier: dbUser.tier };
+            next();
+        } catch (e) {
+            res.status(500).json({ error: 'Erro de validação de usuário.' });
+        }
     });
 }
 
@@ -190,7 +210,7 @@ app.use(async (req, res, next) => {
         await db.prepare('INSERT OR IGNORE INTO user_settings (user_id) VALUES (?)').run(req.user.id);
         await db.prepare('INSERT OR IGNORE INTO desktop_state (user_id) VALUES (?)').run(req.user.id);
         next();
-    } catch (e) { res.status(500).json({ error: "Erro ao inicializar ambiente." }); }
+    } catch (e) { res.status(500).json({ error: "Erro ao inicializar ambiente do usuário." }); }
 });
 
 // =========================================================
@@ -202,7 +222,7 @@ app.get('/api/user/state', async (req, res) => {
     try {
         const settings = await db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(req.user.id);
         const desktop = await db.prepare('SELECT * FROM desktop_state WHERE user_id = ?').get(req.user.id);
-        res.json({ settings, desktop });
+        res.json({ settings: settings || {}, desktop: desktop || {} });
     } catch (e) { res.status(500).json({ error: 'Erro ao carregar estado do usuário.' }); }
 });
 
@@ -227,7 +247,7 @@ app.post('/api/user/desktop', async (req, res) => {
 app.get('/api/notifications', async (req, res) => {
     try {
         const notifs = await db.prepare('SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 20').all(req.user.id);
-        res.json(notifs);
+        res.json(notifs || []);
     } catch (e) { res.status(500).json({ error: 'Erro ao listar notificações.' }); }
 });
 
@@ -323,10 +343,18 @@ wss.on('connection', (ws, req) => {
     const token = new URL(req.url, 'http://localhost').searchParams.get('token');
     if (!token) return ws.close();
     
-    jwt.verify(token, SECRET_KEY, (err, decoded) => {
+    jwt.verify(token, SECRET_KEY, async (err, decoded) => {
         if (err) return ws.close();
         try {
-            const ptyProcess = subsystem.startSession(decoded.id);
+            let userId = decoded.id;
+            let dbUser = await db.prepare('SELECT * FROM users WHERE id = ?').get(String(userId));
+            if (!dbUser && (decoded.username === 'admin' || String(userId) === '1')) {
+                dbUser = await db.prepare('SELECT * FROM users WHERE username = ?').get('admin');
+                if (dbUser) userId = dbUser.id;
+            }
+            if (!dbUser) return ws.close();
+
+            const ptyProcess = subsystem.startSession(userId);
             ptyProcess.onData(data => ws.readyState === ws.OPEN && ws.send(data));
             ws.on('message', msg => {
                 const str = msg.toString();
