@@ -380,3 +380,26 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; }
 
 /* BADGE DE NOTIFICAÇÃO */
 .notif-badge { position: absolute; top: 2px; right: 2px; width: 8px; height: 8px; background: #ef4444; border-radius: 50%; box-shadow: 0 0 5px #ef4444; }
+
+/* SETTINGS PREMIUM LAYOUT */
+.settings-container { display: flex; height: 100%; background: #121212; color: white; }
+.settings-sidebar { width: 220px; background: rgba(0,0,0,0.3); padding: 20px 10px; border-right: 1px solid rgba(255,255,255,0.05); }
+.settings-tab { display: flex; align-items: center; gap: 10px; padding: 12px 15px; border-radius: 6px; cursor: pointer; color: #9ca3af; font-size: 14px; margin-bottom: 5px; transition: 0.2s; }
+.settings-tab:hover { background: rgba(255,255,255,0.05); color: white; }
+.settings-tab.active { background: rgba(96, 165, 250, 0.15); color: #60a5fa; }
+.settings-content-area { flex: 1; padding: 30px; overflow-y: auto; }
+.settings-content-area h2 { font-size: 24px; margin-bottom: 20px; }
+.settings-card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 20px; border-radius: 8px; margin-bottom: 15px; }
+
+.wallpaper-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
+.wallpaper-thumb { height: 100px; border-radius: 6px; cursor: pointer; border: 2px solid transparent; transition: 0.2s; }
+.wallpaper-thumb:hover { transform: scale(1.02); }
+.wallpaper-thumb.selected { border-color: #60a5fa; box-shadow: 0 0 10px rgba(96, 165, 250, 0.5); }
+
+.settings-btn-primary { background: #3b82f6; color: white; padding: 10px 20px; border-radius: 6px; border: none; cursor: pointer; font-weight: bold; }
+.settings-btn-primary:hover { background: #2563eb; }
+
+/* UPLOAD PROGRESS BAR */
+.fmp-progress-container { position: relative; width: 150px; height: 24px; background: rgba(0,0,0,0.3); border-radius: 4px; overflow: hidden; margin-left: auto; }
+.fmp-progress-bar { height: 100%; background: #3b82f6; transition: width 0.2s; }
+.fmp-progress-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 11px; color: white; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }

@@ -34,22 +34,19 @@ Se você é um agente de IA ou desenvolvedor trabalhando neste repositório, con
       - **Isolamento de Usuário Não-Root**: Execução dos comandos e sessões Tmux como usuário `cloudos` (não-root).
       - **Mascaramento Automático de MAC**: Mascaramento por padrão de endereços físicos para proteção OpSec.
     - **Persistência de Estado SaaS**: APIs `/api/user/state`, `/api/user/settings` e `/api/user/desktop` para salvamento e restauração da área de trabalho, janelas abertas e ícones por usuário.
+    - **Streaming de Arquivos & ZIP**: APIs `/api/files/properties` para metadados e `/api/files/download` para geração e streaming de ZIP nativo via WSL sem sobrecarga de memória.
     - **Autenticação JWT & Registro**: Autenticação com hash bcrypt, registro de usuários (`/api/auth/register`) e validação de tokens JWT.
-- **`cloudos-frontend/`**: Aplicação Web React 18 + Vite + Monaco Editor (Arquitetura SaaS Modular)
+- **`cloudos-frontend/`**: Aplicação Web React 18 + Vite + Monaco Editor (Arquitetura SaaS Enterprise)
   - `src/main.jsx`: Ponto de entrada com polyfill `window.process`.
+  - `src/hooks/useCloudFS.js`: Custom Hook que isola a lógica de rede do gerenciador de arquivos (Single Responsibility Principle).
   - `src/store/CloudOSContext.jsx`: Provedor global de estado sincronizado com o banco SQLite (papel de parede, ícones, janelas e notificações).
   - `src/components/CommandPalette.jsx`: Overlay de busca e comandos instantâneos acionado pelo atalho `Ctrl+Shift+P`.
   - `src/registry.jsx`: Registro centralizado de aplicativos (`AppRegistry`).
   - `src/App.jsx`: Área de trabalho interativa conectada ao `CloudOSProvider`, com Command Palette, Notification Center lateral, bloqueio de tela e navegação.
   - `src/LoginScreen.jsx`: Tela de bloqueio e login (Windows 11 Glassmorphism style) com autenticação JWT.
   - `src/BootScreen.jsx`: Tela de boot cinemática com efeito CRT Scanlines e Logo Glitch RGB.
-  - `src/apps/FileManagerApp.jsx`: Gerenciador de arquivos integrado com menu contextual React Portal ("Abrir Terminal Aqui", "Editar Código"), upload e lixeira nativa.
-  - `src/apps/CodeEditorApp.jsx`: Editor de código Monaco integrado com salvamento `Ctrl+S` e preview isolado em `<iframe sandbox="allow-scripts">` para arquivos HTML.
-  - `src/apps/OpSecCenterApp.jsx`: Centro de operações de segurança para controle do Tor e monitoramento de interface de rede.
-  - `src/apps/SystemMonitorApp.jsx`: Monitor de métricas do sistema e subsistema WSL em tempo real.
-  - `src/apps/TerminalApp.jsx`: Terminal interativo xterm.js conectado via WebSocket seguro com suporte a payload CWD.
-  - `src/Window.jsx`: Componente de janela arrastável e maximizável baseado em `react-rnd` envolvido por `WindowErrorBoundary`.
-  - `src/index.css`: Sistema de design visual completo com glassmorphism, scanlines CRT, Command Palette, Notification Center e temas táticos.
+  - `src/apps/FileManagerApp.jsx`: Gerenciador de arquivos premium com XMLHttpRequest upload progress bar, download de pastas em ZIP via stream, menu contextual React Portal ("Abrir Terminal Aqui", "Editar Código", "Baixar ZIP") e lixeira nativa.
+  - `src/apps/SettingsApp.jsx`: Painel de configurações estilo Windows 11/macOS com abas (Aparência, Conta/Planos, Armazenamento WSL, Terminal, Sobre) integrado com o `CloudOSContext`.
 
 ---
 

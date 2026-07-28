@@ -264,6 +264,35 @@ app.post('/api/files/delete', async (req, res) => {
     catch (e) { res.status(500).json({ error: 'Erro ao mover para lixeira.' }); }
 });
 
+app.get('/api/files/properties', async (req, res) => {
+    try {
+        const winPath = subsystem.getSecurePath(req.user.id, req.query.path);
+        const stats = await fs.promises.stat(winPath);
+        res.json({
+            size: stats.size,
+            isDirectory: stats.isDirectory(),
+            modified: stats.mtime,
+            created: stats.birthtime
+        });
+    } catch (e) { res.status(500).json({ error: 'Erro ao ler propriedades.' }); }
+});
+
+app.get('/api/files/download', async (req, res) => {
+    try {
+        const relPath = req.query.path;
+        const winPath = subsystem.getSecurePath(req.user.id, relPath);
+        const linuxPath = subsystem.toLinuxPath(winPath);
+        
+        res.setHeader('Content-Disposition', `attachment; filename="${path.basename(relPath)}.zip"`);
+        res.setHeader('Content-Type', 'application/zip');
+        
+        const zipProcess = exec(`wsl -d kali-linux -u cloudos -- bash -c "cd '${path.dirname(linuxPath)}' && zip -r - '${path.basename(linuxPath)}'"`);
+        zipProcess.stdout.pipe(res);
+        zipProcess.stderr.on('data', (d) => console.error(d.toString()));
+        zipProcess.on('close', () => res.end());
+    } catch (e) { res.status(500).json({ error: 'Erro ao gerar ZIP.' }); }
+});
+
 app.post('/api/files/upload', upload.array('files'), async (req, res) => {
     try {
         const targetDir = subsystem.getSecurePath(req.user.id, req.body.path);

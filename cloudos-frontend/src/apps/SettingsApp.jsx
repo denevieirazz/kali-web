@@ -1,182 +1,101 @@
-import { useState, useEffect } from 'react';
-import { Image as ImageIcon, Shield, Eye, Usb, Wifi } from 'lucide-react';
+import { useState } from 'react';
+import { Palette, User, HardDrive, Info, Terminal as TermIcon } from 'lucide-react';
+import { useCloudOS } from '../store/CloudOSContext';
 
-const getAuthHeaders = (extraHeaders = {}) => {
-  const token = localStorage.getItem('cloudos_token');
-  return {
-    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-    ...extraHeaders
-  };
-};
-
-export const SettingsApp = ({ setBg }) => {
+export const SettingsApp = () => {
   const [tab, setTab] = useState('appearance');
-  const [devices, setDevices] = useState([]);
-  const [loadingDev, setLoadingDev] = useState(false);
-  const [errorDev, setErrorDev] = useState('');
-  
-  const [torActive, setTorActive] = useState(false);
-  const [currentMac, setCurrentMac] = useState('Carregando...');
-  const [anonStatus, setAnonStatus] = useState('');
-  const [osintKeys, setOsintKeys] = useState({ shodan: '', hunterio: '', virustotal: '' });
+  const { settings, setSettings } = useCloudOS();
 
-  const fetchAnonStatus = () => {
-    fetch('http://localhost:8080/api/system/status', { headers: getAuthHeaders() })
-      .then(res => res.json())
-      .then(data => {
-        if (!data.error) {
-          setTorActive(data.torActive);
-          setCurrentMac(data.currentMac);
-        } else {
-          setCurrentMac('Erro ao ler');
-        }
-      })
-      .catch(() => setCurrentMac('Backend offline'));
-  };
-
-  const fetchDevices = () => {
-    setLoadingDev(true);
-    fetch('http://localhost:8080/api/devices', { headers: getAuthHeaders() })
-      .then(res => res.json())
-      .then(data => { if (data.error) setErrorDev(data.error); else setDevices(data.devices || []); })
-      .catch(() => setErrorDev('Erro de conexão.'))
-      .finally(() => setLoadingDev(false));
-  };
-
-  useEffect(() => { 
-    if (tab === 'hardware') fetchDevices(); 
-    if (tab === 'anon') fetchAnonStatus();
-  }, [tab]);
-
-  const handleAttach = (busid, name) => {
-    if (window.confirm(`Conectar "${name}" ao Kali Linux?`)) {
-      fetch('http://localhost:8080/api/devices/attach', { method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ busid }) })
-        .then(res => res.json()).then(data => { if (data.error) alert(data.error); else { alert('Conectado!'); fetchDevices(); } });
-    }
-  };
-
-  const handleAnon = (action) => {
-    setAnonStatus('Executando comando no Kali...');
-    fetch('http://localhost:8080/api/tactical/anon', { method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ action }) })
-      .then(res => res.json())
-      .then(data => {
-        if (data.error) {
-          setAnonStatus(`Erro: ${data.error}`);
-        } else {
-          setAnonStatus('Comando finalizado. Atualizando status...');
-          setTimeout(fetchAnonStatus, 1500);
-        }
-      });
-  };
-
-  const saveOsintKeys = () => {
-    fetch('http://localhost:8080/api/tactical/osint', { method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ keys: osintKeys }) })
-      .then(() => alert('Chaves de OSINT salvas no Kali Linux!'));
-  };
+  const wallpapers = [
+    'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?q=80&w=2070',
+    'https://images.unsplash.com/photo-1620121692029-d088224ddc74?q=80&w=2070',
+    'linear-gradient(135deg, #0f0c29, #302b63, #24243e)'
+  ];
 
   return (
     <div className="settings-container">
-      <h2>Centro de Controle Tático</h2>
-      
-      <div className="settings-tabs">
-        <div className={`settings-tab ${tab === 'appearance' ? 'active' : ''}`} onClick={() => setTab('appearance')}><ImageIcon size={16} /> Aparência</div>
-        <div className={`settings-tab ${tab === 'anon' ? 'active' : ''}`} onClick={() => setTab('anon')}><Shield size={16} /> Anonimato</div>
-        <div className={`settings-tab ${tab === 'osint' ? 'active' : ''}`} onClick={() => setTab('osint')}><Eye size={16} /> OSINT APIs</div>
-        <div className={`settings-tab ${tab === 'hardware' ? 'active' : ''}`} onClick={() => setTab('hardware')}><Usb size={16} /> Hardware</div>
+      <div className="settings-sidebar">
+        <div className={`settings-tab ${tab === 'appearance' ? 'active' : ''}`} onClick={() => setTab('appearance')}>
+          <Palette size={16} /> Aparência
+        </div>
+        <div className={`settings-tab ${tab === 'account' ? 'active' : ''}`} onClick={() => setTab('account')}>
+          <User size={16} /> Conta
+        </div>
+        <div className={`settings-tab ${tab === 'storage' ? 'active' : ''}`} onClick={() => setTab('storage')}>
+          <HardDrive size={16} /> Armazenamento
+        </div>
+        <div className={`settings-tab ${tab === 'terminal' ? 'active' : ''}`} onClick={() => setTab('terminal')}>
+          <TermIcon size={16} /> Terminal
+        </div>
+        <div className={`settings-tab ${tab === 'about' ? 'active' : ''}`} onClick={() => setTab('about')}>
+          <Info size={16} /> Sobre
+        </div>
       </div>
 
-      {/* ABA APARÊNCIA */}
-      {tab === 'appearance' && (
-        <div className="settings-content">
-          <h3>Papel de Parede</h3>
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <div onClick={() => setBg && setBg('https://images.unsplash.com/photo-1579546929518-9e396f3cc809?q=80&w=2070')} style={{ width: 80, height: 50, background: 'url(https://images.unsplash.com/photo-1579546929518-9e396f3cc809?q=80&w=2070) center/cover', borderRadius: 4, cursor: 'pointer' }}></div>
-            <div onClick={() => setBg && setBg('https://images.unsplash.com/photo-1620121692029-d088224ddc74?q=80&w=2070')} style={{ width: 80, height: 50, background: 'url(https://images.unsplash.com/photo-1620121692029-d088224ddc74?q=80&w=2070) center/cover', borderRadius: 4, cursor: 'pointer' }}></div>
-            <div onClick={() => setBg && setBg('linear-gradient(135deg, #0f0c29, #302b63, #24243e)')} style={{ width: 80, height: 50, background: 'linear-gradient(135deg, #0f0c29, #302b63, #24243e)', borderRadius: 4, cursor: 'pointer' }}></div>
-          </div>
-        </div>
-      )}
-
-      {/* ABA ANONIMATO (AGORA EM TEMPO REAL) */}
-      {tab === 'anon' && (
-        <div className="settings-content">
-          <h3>Operational Security (OpSec)</h3>
-          <p style={{ fontSize: '12px', color: '#888', marginBottom: '15px' }}>Monitoramento em tempo real do Kali Linux.</p>
-          
-          {/* CARD DO TOR */}
-          <div className={`tactical-card ${torActive ? 'tactical-active' : ''}`}>
-            <div className="tactical-info">
-              <Shield size={20} color={torActive ? "#4ade80" : "#f87171"} />
-              <div>
-                <div className="device-name">Roteamento Tor</div>
-                <div className="device-id">
-                  Status: {torActive ? <span style={{ color: '#4ade80', fontWeight: 'bold' }}>ATIVADO</span> : <span style={{ color: '#f87171', fontWeight: 'bold' }}>DESATIVADO</span>}
-                </div>
-              </div>
-            </div>
-            {torActive ? (
-              <button className="device-btn-danger" onClick={() => handleAnon('tor_off')}>Desativar</button>
-            ) : (
-              <button className="device-btn" onClick={() => handleAnon('tor_on')}>Ativar</button>
-            )}
-          </div>
-
-          {/* CARD DE MAC SPOOF */}
-          <div className="tactical-card">
-            <div className="tactical-info">
-              <Wifi size={20} color="#60a5fa" />
-              <div>
-                <div className="device-name">Spoofar MAC Address</div>
-                <div className="device-id" style={{ fontFamily: 'monospace' }}>
-                  MAC Atual: {currentMac}
-                </div>
-              </div>
-            </div>
-            <button className="device-btn" onClick={() => handleAnon('mac_spoof')}>Spoofar</button>
-          </div>
-
-          {anonStatus && <div style={{ marginTop: '15px', fontSize: '12px', color: '#60a5fa' }}>{anonStatus}</div>}
-        </div>
-      )}
-
-      {/* ABA OSINT */}
-      {tab === 'osint' && (
-        <div className="settings-content">
-          <h3>Chaves de API de Inteligência</h3>
-          <p style={{ fontSize: '12px', color: '#888', marginBottom: '15px' }}>Salve suas chaves de forma segura no sistema de arquivos do Kali.</p>
-          <div className="osint-input-group">
-            <label>Shodan API Key</label>
-            <input type="text" value={osintKeys.shodan} onChange={(e) => setOsintKeys({...osintKeys, shodan: e.target.value})} placeholder="SH-XXXXXXX..." />
-          </div>
-          <div className="osint-input-group">
-            <label>Hunter.io API Key</label>
-            <input type="text" value={osintKeys.hunterio} onChange={(e) => setOsintKeys({...osintKeys, hunterio: e.target.value})} placeholder="XXXXXXX..." />
-          </div>
-          <div className="osint-input-group">
-            <label>VirusTotal API Key</label>
-            <input type="text" value={osintKeys.virustotal} onChange={(e) => setOsintKeys({...osintKeys, virustotal: e.target.value})} placeholder="XXXXXXX..." />
-          </div>
-          <button className="device-btn" style={{ marginTop: '10px', width: '100%' }} onClick={saveOsintKeys}>Salvar Chaves no Kali</button>
-        </div>
-      )}
-
-      {/* ABA HARDWARE */}
-      {tab === 'hardware' && (
-        <div className="settings-content">
-          <h3>Pass-through de Dispositivos (USB)</h3>
-          {errorDev && <div style={{ color: '#f87171', fontSize: '12px' }}>{errorDev}</div>}
-          {loadingDev ? <div className="settings-loading">Procurando...</div> : (
-            <div className="device-list">
-              {devices.map((dev, i) => (
-                <div key={i} className={`device-card ${dev.state === 'Attached' ? 'attached' : ''}`}>
-                  <div className="device-info"><Usb size={20} color={dev.state === 'Attached' ? '#4ade80' : '#94a3b8'} /><div><div className="device-name">{dev.name}</div><div className="device-id">BUSID: {dev.busid}</div></div></div>
-                  {dev.state !== 'Attached' && <button className="device-btn" onClick={() => handleAttach(dev.busid, dev.name)}>Plugar</button>}
-                </div>
+      <div className="settings-content-area">
+        {tab === 'appearance' && (
+          <div>
+            <h2>Personalização</h2>
+            <p className="text-gray-400 mb-4" style={{ color: '#9ca3af', marginBottom: '15px' }}>Escolha o papel de parede do seu desktop.</p>
+            <div className="wallpaper-grid">
+              {wallpapers.map(wp => (
+                <div key={wp} className={`wallpaper-thumb ${settings?.wallpaper === wp ? 'selected' : ''}`} 
+                  style={{ background: wp.startsWith('http') ? `url(${wp}) center/cover` : wp }}
+                  onClick={() => setSettings({ ...settings, wallpaper: wp })}
+                />
               ))}
             </div>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+        
+        {tab === 'account' && (
+          <div>
+            <h2>Conta e Plano</h2>
+            <div className="settings-card">
+              <h3>Plano Atual: <span style={{ color: '#60a5fa' }}>Pro Tier</span></h3>
+              <p style={{ fontSize: '13px', color: '#9ca3af', marginBottom: '15px' }}>Você tem acesso a armazenamento isolado no WSL2 com suporte a OpSec e Terminal Tmux.</p>
+              <button className="settings-btn-primary">Gerenciar Assinatura</button>
+            </div>
+          </div>
+        )}
+
+        {tab === 'storage' && (
+          <div>
+            <h2>Armazenamento WSL</h2>
+            <div className="settings-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+                <span>Disco Virtual (ext4)</span>
+                <span style={{ color: '#9ca3af' }}>45 GB usados de 100 GB</span>
+              </div>
+              <div style={{ width: '100%', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', height: '8px' }}>
+                <div style={{ width: '45%', background: '#3b82f6', height: '100%', borderRadius: '4px' }}></div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {tab === 'terminal' && (
+          <div>
+            <h2>Preferências do Terminal</h2>
+            <div className="settings-card">
+              <label style={{ display: 'block', fontSize: '13px', color: '#9ca3af', marginBottom: '10px' }}>Tamanho da Fonte</label>
+              <input type="range" min="12" max="24" defaultValue="14" style={{ width: '100%' }} />
+            </div>
+          </div>
+        )}
+
+        {tab === 'about' && (
+          <div>
+            <h2>Sobre o CloudOS</h2>
+            <div className="settings-card">
+              <h3>CloudOS Enterprise v2.0</h3>
+              <p style={{ fontSize: '13px', color: '#9ca3af' }}>Backend: Node.js + SQLite + WSL2 Kali Linux</p>
+              <p style={{ fontSize: '13px', color: '#9ca3af' }}>Frontend: React 18 + Vite + Monaco</p>
+              <p style={{ fontSize: '13px', color: '#9ca3af', marginTop: '10px' }}>Arquitetura SaaS isolada por usuário com Node FS Security, SQLite Persistence e JWT Authentication.</p>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
