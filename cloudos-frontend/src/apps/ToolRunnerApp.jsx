@@ -1,26 +1,26 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, Loader, Terminal, Zap, LayoutGrid, ArrowLeft, Square } from 'lucide-react';
+import { Play, Loader, Terminal, Zap, LayoutGrid, ArrowLeft, Square, Search, Radar, Globe, Bug, KeyRound } from 'lucide-react';
 
 const API_BASE = 'http://localhost:8080';
 const token = () => localStorage.getItem('cloudos_token');
 
+const CATEGORIES = [
+  { id: 'all', name: 'Todas', icon: LayoutGrid },
+  { id: 'recon', name: 'Recon & OSINT', icon: Radar },
+  { id: 'web', name: 'Web Scanning', icon: Globe },
+  { id: 'exploit', name: 'Exploits', icon: Bug },
+  { id: 'cracking', name: 'Cracking', icon: KeyRound }
+];
+
 const AVAILABLE_TOOLS = [
-  // Recon & OSINT
-  { id: 'nmap', name: 'Nmap', desc: 'Scanner de rede e portas ativo' },
-  { id: 'subfinder', name: 'Subfinder', desc: 'Descoberta passiva de subdomínios' },
-  { id: 'httpx', name: 'Httpx', desc: 'Validador HTTP em massa' },
-  { id: 'theharvester', name: 'theHarvester', desc: 'Coleta de e-mails e IPs públicos' },
-  
-  // Web Vulnerability Scanning
-  { id: 'gobuster', name: 'Gobuster', desc: 'Brute-force de diretórios' },
-  { id: 'nikto', name: 'Nikto', desc: 'Scanner de vulns Web' },
-  { id: 'commix', name: 'Commix', desc: 'Teste de Command Injection' },
-  { id: 'sqlmap', name: 'SQLMap', desc: 'Injeção de SQL' },
-  
-  // Exploits & Cracking
-  { id: 'searchsploit', name: 'SearchSploit', desc: 'Busca local de Exploits' },
-  { id: 'john', name: 'John', desc: 'Quebra de hashes (CPU)' },
-  { id: 'hashcat', name: 'Hashcat', desc: 'Quebra de hashes (GPU/CPU)' }
+  { id: 'nmap', name: 'Nmap', desc: 'Scanner de rede ativo', category: 'recon' },
+  { id: 'subfinder', name: 'Subfinder', desc: 'Subdomínios passivos', category: 'recon' },
+  { id: 'httpx', name: 'Httpx', desc: 'Validador HTTP em massa', category: 'recon' },
+  { id: 'gobuster', name: 'Gobuster', desc: 'Brute-force de diretórios', category: 'web' },
+  { id: 'nikto', name: 'Nikto', desc: 'Scanner de vulns Web', category: 'web' },
+  { id: 'sqlmap', name: 'SQLMap', desc: 'Injeção de SQL', category: 'web' },
+  { id: 'searchsploit', name: 'SearchSploit', desc: 'Busca de Exploits', category: 'exploit' },
+  { id: 'hashcat', name: 'Hashcat', desc: 'Quebra de hashes (GPU)', category: 'cracking' }
 ];
 
 export const ToolRunnerApp = ({ payload, setPayload }) => {
@@ -30,6 +30,8 @@ export const ToolRunnerApp = ({ payload, setPayload }) => {
   const [output, setOutput] = useState('');
   const [isRunning, setIsRunning] = useState(false);
   const [runId, setRunId] = useState(null);
+  const [activeCat, setActiveCat] = useState('all');
+  const [search, setSearch] = useState('');
   const outputRef = useRef(null);
   const currentToolId = payload?.toolId;
 
@@ -130,26 +132,57 @@ export const ToolRunnerApp = ({ payload, setPayload }) => {
     setRunId(null);
   };
 
+  // TELA DE SELEÇÃO COM CATEGORIAS
   if (!currentToolId) {
+    const filteredTools = AVAILABLE_TOOLS.filter(t => 
+      (activeCat === 'all' || t.category === activeCat) &&
+      (t.name.toLowerCase().includes(search.toLowerCase()) || t.desc.toLowerCase().includes(search.toLowerCase()))
+    );
+
     return (
-      <div className="flex flex-col h-full bg-[#0d1117] text-gray-300 p-6" style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0d1117', color: '#c9d1d9', padding: '24px' }}>
-        <h2 className="text-lg font-bold text-white flex items-center gap-2 mb-6" style={{ fontSize: '18px', fontWeight: 'bold', color: 'white', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '24px' }}><LayoutGrid size={18} /> Selecione uma Ferramenta</h2>
-        <div className="grid grid-cols-3 gap-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '16px' }}>
-          {AVAILABLE_TOOLS.map(tool => (
-            <div key={tool.id} onClick={() => setPayload({ toolId: tool.id })} 
-                 className="bg-[#161b22] border border-gray-800 rounded-lg p-4 cursor-pointer hover:border-blue-500 transition-colors"
-                 style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '8px', padding: '16px', cursor: 'pointer' }}>
-              <h3 className="font-bold text-white text-sm" style={{ fontSize: '14px', fontWeight: 'bold', color: 'white', margin: 0 }}>{tool.name}</h3>
-              <p className="text-xs text-gray-500 mt-1" style={{ fontSize: '12px', color: '#8b949e', marginTop: '4px', margin: 0 }}>{tool.desc}</p>
+      <div className="flex h-full bg-[#0d1117] text-gray-300" style={{ display: 'flex', height: '100%', background: '#0d1117', color: '#c9d1d9' }}>
+        {/* Sidebar de Categorias */}
+        <div className="w-56 bg-[#161b22] border-r border-gray-800 p-3 space-y-1" style={{ width: '200px', background: '#161b22', borderRight: '1px solid #30363d', padding: '12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <h2 className="text-xs uppercase text-gray-500 px-2 mb-2" style={{ fontSize: '11px', textTransform: 'uppercase', color: '#8b949e', padding: '0 8px', marginBottom: '8px' }}>Categorias</h2>
+          {CATEGORIES.map(cat => (
+            <div key={cat.id} onClick={() => setActiveCat(cat.id)} 
+                 className={`flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-sm ${activeCat === cat.id ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-gray-800'}`}
+                 style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', background: activeCat === cat.id ? 'rgba(59, 130, 246, 0.15)' : 'transparent', color: activeCat === cat.id ? '#60a5fa' : '#c9d1d9' }}>
+              <cat.icon size={14} /> {cat.name}
             </div>
           ))}
+        </div>
+
+        {/* Área Principal de Seleção */}
+        <div className="flex-1 flex flex-col p-6" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '24px' }}>
+          <div className="relative mb-6" style={{ position: 'relative', marginBottom: '24px' }}>
+            <Search size={16} className="absolute left-3 top-2.5 text-gray-500" style={{ position: 'absolute', left: '12px', top: '10px', color: '#8b949e' }} />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar ferramenta..." 
+                   className="w-full bg-[#161b22] border border-gray-700 rounded-md pl-9 pr-3 py-2 text-sm focus:border-blue-500 outline-none"
+                   style={{ width: '100%', background: '#161b22', border: '1px solid #30363d', borderRadius: '6px', padding: '8px 12px 8px 36px', fontSize: '13px', color: 'white', outline: 'none' }} />
+          </div>
+          
+          <div className="grid grid-cols-3 gap-4 flex-1 overflow-y-auto" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '16px', flex: 1, overflowY: 'auto' }}>
+            {filteredTools.map(tool => (
+              <div key={tool.id} onClick={() => setPayload({ toolId: tool.id })} 
+                   className="bg-[#161b22] border border-gray-800 rounded-lg p-4 cursor-pointer hover:border-blue-500 transition-colors flex flex-col"
+                   style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '8px', padding: '16px', cursor: 'pointer', display: 'flex', flexDirection: 'column' }}>
+                <h3 className="font-bold text-white text-sm" style={{ fontSize: '14px', fontWeight: 'bold', color: 'white', margin: 0 }}>{tool.name}</h3>
+                <p className="text-xs text-gray-500 mt-1 flex-1" style={{ fontSize: '12px', color: '#8b949e', marginTop: '4px', flex: 1, margin: '4px 0 0 0' }}>{tool.desc}</p>
+                <span className="mt-3 text-[10px] uppercase text-gray-600 bg-gray-800 w-fit px-2 py-0.5 rounded-full" style={{ marginTop: '12px', fontSize: '10px', textTransform: 'uppercase', color: '#8b949e', background: '#21262d', padding: '2px 8px', borderRadius: '12px', width: 'fit-content' }}>{tool.category}</span>
+              </div>
+            ))}
+            {filteredTools.length === 0 && <div className="col-span-3 text-center text-gray-600 mt-10" style={{ gridColumn: 'span 3', textAlign: 'center', color: '#6e7681', marginTop: '40px' }}>Nenhuma ferramenta encontrada.</div>}
+          </div>
         </div>
       </div>
     );
   }
 
+  // TELA DE CARREGAMENTO
   if (loading) return <div className="flex items-center justify-center h-full bg-[#0d1117] text-gray-400" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', background: '#0d1117', color: '#8b949e' }}><Loader className="animate-spin mr-2" size={16} /> Carregando...</div>;
   
+  // TELA DE ERRO
   if (!schema) return (
     <div className="flex flex-col items-center justify-center h-full bg-[#0d1117] text-red-400 p-6" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', background: '#0d1117', color: '#f87171', padding: '24px' }}>
       <p className="mb-4" style={{ marginBottom: '16px' }}>Schema não encontrado para esta ferramenta.</p>
@@ -157,6 +190,7 @@ export const ToolRunnerApp = ({ payload, setPayload }) => {
     </div>
   );
 
+  // TELA PRINCIPAL DA GUI
   return (
     <div className="flex flex-col h-full bg-[#0d1117] text-gray-300" style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0d1117', color: '#c9d1d9' }}>
       <div className="p-4 border-b border-gray-800 bg-[#161b22] flex justify-between items-center" style={{ padding: '16px', borderBottom: '1px solid #30363d', background: '#161b22', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
