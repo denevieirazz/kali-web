@@ -105,7 +105,12 @@ function Desktop() {
         const AppComp = appConfig.Component;
         return (
           <Window key={win.id} win={{ ...win, title: appConfig.title, icon: appConfig.icon }} isMobile={isMobile} onClose={() => closeApp(win.id)} onFocus={() => focusWindow(win.id)}>
-            <AppComp payload={win.payload} openApp={openApp} setBg={setBg} />
+            <AppComp 
+              payload={win.payload} 
+              setPayload={(newPayload) => setWindows(prev => prev.map(w => w.id === win.id ? { ...w, payload: newPayload } : w))} 
+              openApp={openApp} 
+              setBg={setBg} 
+            />
           </Window>
         );
       })}

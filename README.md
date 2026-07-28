@@ -127,6 +127,7 @@ npm run dev
 10. **Resiliência de Arquivos & Permissões WSL**: Atualização do endpoint `/api/files/mkdir` com log de diagnóstico, sanitização de valores legados `http://test/` no SQLite e concessão de permissões `777` em `/home/cloudos_users` no Kali Linux.
 11. **Exclusão Permanente & Esvaziar Lixeira**: Método `deleteFile` no backend atualizado para apagar permanentemente arquivos/pastas dentro de `.trash`, botão "Esvaziar Lixeira" condicional adicionado ao `FileManagerApp.jsx` e estilo `.fmp-btn-danger` incorporado ao `index.css`.
 12. **Kali Auto Runner (Streaming & Presets)**: Implementação de execução com streaming HTTP Chunked no backend (`POST /api/kali/tools/:id/run`), suporte a Presets de scan no `kali_tools_schema.js` e console virtual em tempo real integrado ao `ToolRunnerApp.jsx`.
+13. **Navegação & Hub Interno do Tool Runner**: Adicionada tela inicial de seleção de ferramentas no `ToolRunnerApp.jsx` quando aberto sem payload, botão de navegação "Voltar" e repasse da prop `setPayload` no `App.jsx`.
 
 ---
 
