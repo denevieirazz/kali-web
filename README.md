@@ -37,8 +37,10 @@ Se você é um agente de IA ou desenvolvedor trabalhando neste repositório, con
     - **Autenticação JWT & Registro**: Autenticação com hash bcrypt, registro de usuários (`/api/auth/register`) e validação de tokens JWT.
 - **`cloudos-frontend/`**: Aplicação Web React 18 + Vite + Monaco Editor (Arquitetura SaaS Modular)
   - `src/main.jsx`: Ponto de entrada com polyfill `window.process`.
+  - `src/store/CloudOSContext.jsx`: Provedor global de estado sincronizado com o banco SQLite (papel de parede, ícones, janelas e notificações).
+  - `src/components/CommandPalette.jsx`: Overlay de busca e comandos instantâneos acionado pelo atalho `Ctrl+Shift+P`.
   - `src/registry.jsx`: Registro centralizado de aplicativos (`AppRegistry`).
-  - `src/App.jsx`: Área de trabalho interativa com multi-seleção de ícones, suporte a atalhos (F2/Delete) e passagem de payloads.
+  - `src/App.jsx`: Área de trabalho interativa conectada ao `CloudOSProvider`, com Command Palette, Notification Center lateral, bloqueio de tela e navegação.
   - `src/LoginScreen.jsx`: Tela de bloqueio e login (Windows 11 Glassmorphism style) com autenticação JWT.
   - `src/BootScreen.jsx`: Tela de boot cinemática com efeito CRT Scanlines e Logo Glitch RGB.
   - `src/apps/FileManagerApp.jsx`: Gerenciador de arquivos integrado com menu contextual React Portal ("Abrir Terminal Aqui", "Editar Código"), upload e lixeira nativa.
@@ -47,7 +49,7 @@ Se você é um agente de IA ou desenvolvedor trabalhando neste repositório, con
   - `src/apps/SystemMonitorApp.jsx`: Monitor de métricas do sistema e subsistema WSL em tempo real.
   - `src/apps/TerminalApp.jsx`: Terminal interativo xterm.js conectado via WebSocket seguro com suporte a payload CWD.
   - `src/Window.jsx`: Componente de janela arrastável e maximizável baseado em `react-rnd` envolvido por `WindowErrorBoundary`.
-  - `src/index.css`: Sistema de design visual completo com glassmorphism, scanlines CRT, efeito de brilho neon e temas táticos.
+  - `src/index.css`: Sistema de design visual completo com glassmorphism, scanlines CRT, Command Palette, Notification Center e temas táticos.
 
 ---
 
