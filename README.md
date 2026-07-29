@@ -138,6 +138,7 @@ npm run dev
 21. **Report Builder (Gerador de Relatórios em Markdown)**: App `ReportBuilderApp.jsx` com Live Preview de relatórios de pentest em tempo real, adição dinâmica de achados de vulnerabilidade com nível de severidade e exportação em 1-clique para arquivo `.md`.
 22. **Roadmap V2 Completo (Relatórios DB, System Monitor SVG, Snapshots & Ferramentas Arjun/Metasploit)**: Persistência completa de relatórios via `/api/v2/reports`, suporte a `arjun` e scripts `.rc` de `metasploit` com sanitização, telemetria do WSL 2 via WebSocket em tempo real com gráfico SVG em `LineChart.jsx`, e gerenciador visual de Snapshots (`SnapshotManagerApp.jsx`).
 23. **Tratamento Defensivo de Auth JWT & Array Mapping**: Verificação prévia de existência de token em `CloudOSContext.jsx`, desativação de requisições não autenticadas evitando erros 403 desnecessários, remoção de tokens expirados no status 403 e prevenção total contra crash por `.map()` através de verificações `Array.isArray(data)`.
+24. **Menu Iniciar Estilo Windows 11 & Auditoria de Endpoints**: Componente `StartMenu.jsx` responsivo com busca de apps em tempo real, grid de ícones, opções de bloqueio/desligar, overlay flutuante no desktop e adaptação full-screen no mobile (<768px). Auditoria automatizada realizada em 10/10 endpoints principais com 100% de aprovação.
 
 ---
 

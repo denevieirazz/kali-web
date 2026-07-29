@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Search, Wifi, Volume2, Battery, Bell, Power, Lock } from 'lucide-react';
+import { Search, Wifi, Volume2, Battery, Bell, Power, Lock, LayoutGrid } from 'lucide-react';
 import Window from './Window';
 import { AppList, AppRegistry } from './registry';
 import BootScreen from './BootScreen';
 import LoginScreen from './LoginScreen';
 import { CommandPalette } from './components/CommandPalette';
+import StartMenu from './components/StartMenu';
 import { CloudOSProvider, useCloudOS } from './store/CloudOSContext';
 
 function Desktop() {
@@ -117,24 +118,20 @@ function Desktop() {
 
       {/* Start Menu */}
       {startOpen && (
-        <div className="start-menu" onClick={(e) => e.stopPropagation()}>
-          <input className="start-search" placeholder="Pesquisar apps..." />
-          <div className="start-grid">
-            {AppList.map(app => {
-              const Icon = app.icon;
-              return (
-                <div key={app.id} className="start-app" onClick={() => openApp(app.id)}>
-                  <Icon size={32} color="white" />
-                  <span>{app.title}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        <StartMenu 
+          apps={AppList} 
+          onOpenApp={openApp} 
+          onClose={() => setStartOpen(false)} 
+          onLogout={handleLogout} 
+          onLock={lockSystem} 
+        />
       )}
 
       {/* Taskbar Mobile / Desktop */}
       <div className={`taskbar ${isMobile ? 'mobile-taskbar' : ''}`} onClick={(e) => e.stopPropagation()}>
+        <div className={`taskbar-app ${startOpen ? 'active' : ''}`} onClick={() => setStartOpen(!startOpen)} title="Menu Iniciar">
+          <LayoutGrid size={22} color="#58a6ff" />
+        </div>
         <div className="taskbar-app" onClick={() => setIsPaletteOpen(true)} title="Command Palette (Ctrl+Shift+P)"><Search size={22} /></div>
         {visibleTaskbarApps.map(app => (
           <div key={app.id} className={`taskbar-app ${windows.some(w => w.appId === app.id) ? 'active' : ''}`} onClick={() => openApp(app.id)}>
