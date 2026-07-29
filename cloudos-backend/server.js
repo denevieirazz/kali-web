@@ -12,8 +12,12 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const db = require('./database');
+const systemMonitor = require('./services/systemMonitor');
+const reportsRouter = require('./routes/reports');
+const snapshotsRouter = require('./routes/snapshots');
 
 const app = express();
+app.set('db', db);
 app.use(cors());
 app.use(express.json());
 const server = require('http').createServer(app);
@@ -507,28 +511,39 @@ app.post('/api/kali/tools/:id/run', async (req, res) => {
     // 2. MONTAGEM DO ARRAY DE ARGUMENTOS (BLINDAGEM TOTAL CONTRA INJEÇÃO)
     const args = ['-d', 'kali-linux', '-u', 'cloudos', '--', schema.command];
 
-    for (const field of schema.fields) {
-        const val = options[field.id];
-        if (!val) continue;
+    if (schema.command === 'msfconsole') {
+        const tempDir = path.join(subsystem.getSecurePath(req.user.id, ''), '.cloudos_temp');
+        await fs.promises.mkdir(tempDir, { recursive: true });
+        const rcFileWin = path.join(tempDir, `msf_${Date.now()}.rc`);
+        const rawScript = options.resource_script || 'version\nexit\n';
+        const safeScript = rawScript.split('\n')
+            .map(l => l.trim())
+            .filter(l => l && !l.startsWith('!') && !/^shell\b/.test(l))
+            .join('\n') + '\nexit\n';
+        await fs.promises.writeFile(rcFileWin, safeScript);
+        const rcFileLinux = subsystem.toLinuxPath(rcFileWin);
+        args.push('-r', rcFileLinux);
+        if (options.quiet !== false) args.push('-q');
+    } else {
+        for (const field of schema.fields) {
+            const val = options[field.id];
+            if (!val) continue;
 
-        if (field.type === 'boolean' && val === true) {
-            if (field.flag) args.push(field.flag);
-        } else if (field.type === 'textarea' && val) {
-            // LÓGICA DO TEXTAREA: Salva em arquivo temporário isolado por usuário
-            const tempDir = path.join(subsystem.getSecurePath(req.user.id, ''), '.cloudos_temp');
-            await fs.promises.mkdir(tempDir, { recursive: true });
-            const tempFileWin = path.join(tempDir, `input_${Date.now()}.txt`);
-            
-            // Escreve o conteúdo do textarea no arquivo
-            await fs.promises.writeFile(tempFileWin, val);
-            
-            // Converte o caminho Windows para caminho Linux e passa pro args
-            const tempFileLinux = subsystem.toLinuxPath(tempFileWin);
-            if (field.flag) args.push(field.flag);
-            args.push(tempFileLinux);
-        } else if ((field.type === 'text' || field.type === 'select') && val) {
-            if (field.flag) args.push(field.flag);
-            args.push(String(val));
+            if (field.type === 'boolean' && val === true) {
+                if (field.flag) args.push(field.flag);
+            } else if (field.type === 'textarea' && val) {
+                const tempDir = path.join(subsystem.getSecurePath(req.user.id, ''), '.cloudos_temp');
+                await fs.promises.mkdir(tempDir, { recursive: true });
+                const tempFileWin = path.join(tempDir, `input_${Date.now()}.txt`);
+                
+                await fs.promises.writeFile(tempFileWin, val);
+                const tempFileLinux = subsystem.toLinuxPath(tempFileWin);
+                if (field.flag) args.push(field.flag);
+                args.push(tempFileLinux);
+            } else if ((field.type === 'text' || field.type === 'select') && val) {
+                if (field.flag) args.push(field.flag);
+                args.push(String(val));
+            }
         }
     }
 
@@ -780,7 +795,19 @@ app.post('/api/repeater/send', (req, res) => {
     } catch (e) { res.status(500).json({ error: "Formato HTTP inválido." }); }
 });
 
-// --- WebSocket (Terminal Seguro) ---
+app.use('/api/v2/reports', authenticateToken, reportsRouter);
+app.use('/api/snapshots', authenticateToken, snapshotsRouter);
+
+// --- WebSocket (Terminal Seguro & System Monitor) ---
+const sysmonClients = new Set();
+setInterval(() => {
+    if (sysmonClients.size === 0) return;
+    const data = JSON.stringify({ type: 'sysmon', payload: systemMonitor.snapshot() });
+    for (const client of sysmonClients) {
+        if (client.readyState === 1) client.send(data);
+    }
+}, 1500);
+
 wss.on('connection', (ws, req) => {
     const token = new URL(req.url, 'http://localhost').searchParams.get('token');
     if (!token) return ws.close();
@@ -802,9 +829,18 @@ wss.on('connection', (ws, req) => {
                 const str = msg.toString();
                 if (str.startsWith('{"type":"resize"')) {
                     try { const d = JSON.parse(str); ptyProcess.resize(d.cols, d.rows); } catch {}
+                } else if (str.includes('"channel":"sysmon"')) {
+                    try {
+                        const m = JSON.parse(str);
+                        if (m.type === 'subscribe') sysmonClients.add(ws);
+                        if (m.type === 'unsubscribe') sysmonClients.delete(ws);
+                    } catch {}
                 } else { ptyProcess.write(msg); }
             });
-            ws.on('close', () => ptyProcess.kill());
+            ws.on('close', () => {
+                sysmonClients.delete(ws);
+                ptyProcess.kill();
+            });
         } catch (e) { ws.close(); }
     });
 });

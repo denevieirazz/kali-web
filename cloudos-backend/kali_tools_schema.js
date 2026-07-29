@@ -101,6 +101,25 @@ const TOOL_SCHEMAS = {
             { id: "wordlist", label: "Wordlist", type: "text", required: true, default: "/usr/share/wordlists/rockyou.txt" },
             { id: "force", label: "Forçar uso de CPU (Sem GPU)", type: "boolean", flag: "--force" }
         ]
+    },
+    arjun: {
+        name: "Arjun", command: "arjun", category: "web", installCmd: "sudo apt install arjun",
+        description: "Descoberta de parâmetros HTTP ocultos.",
+        presets: [ { name: "Scan Rápido GET", vars: { url: "http://localhost/page.php", method: "GET", threads: "8" } } ],
+        fields: [
+            { id: "url", label: "URL Alvo", type: "text", required: true, flag: "-u", default: "http://localhost/page.php" },
+            { id: "method", label: "Método HTTP", type: "select", flag: "-m", default: "GET", options: ["GET", "POST", "JSON", "XML"] },
+            { id: "threads", label: "Threads (Velocidade)", type: "text", flag: "-t", default: "4" }
+        ]
+    },
+    metasploit: {
+        name: "Metasploit", command: "msfconsole", category: "exploit", installCmd: "sudo apt install metasploit-framework",
+        description: "Console do Metasploit Framework (Resource Script).",
+        presets: [ { name: "Portscan TCP", vars: { resource_script: "use auxiliary/scanner/portscan/tcp\nset RHOSTS 127.0.0.1\nset PORTS 1-1000\nrun\nexit", quiet: true } } ],
+        fields: [
+            { id: "resource_script", label: "Resource Script (.rc)", type: "textarea", required: true, flag: "-r", default: "use auxiliary/scanner/portscan/tcp\nset RHOSTS 127.0.0.1\nset PORTS 1-1000\nrun\nexit" },
+            { id: "quiet", label: "Modo Silencioso (-q)", type: "boolean", flag: "-q", default: true }
+        ]
     }
 };
 

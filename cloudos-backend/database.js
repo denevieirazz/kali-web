@@ -135,10 +135,12 @@ rawDb.serialize(() => {
     rawDb.run(`
         CREATE TABLE IF NOT EXISTS reports (
             id TEXT PRIMARY KEY,
-            project_id TEXT NOT NULL,
+            user_id TEXT,
+            project_id TEXT,
             title TEXT NOT NULL,
             content_md TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
     `);
 

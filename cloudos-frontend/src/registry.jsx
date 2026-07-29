@@ -1,4 +1,4 @@
-import { Terminal as TerminalIcon, FolderOpen, Code2, Activity, ShieldCheck, Settings as SettingsIcon, AlertTriangle, Download, Boxes, LayoutGrid, ArrowRightLeft, FolderArchive, Workflow, FileText } from 'lucide-react';
+import { Terminal as TerminalIcon, FolderOpen, Code2, Activity, ShieldCheck, Settings as SettingsIcon, AlertTriangle, Download, Boxes, LayoutGrid, ArrowRightLeft, FolderArchive, Workflow, FileText, Camera } from 'lucide-react';
 import { TerminalApp } from './apps/TerminalApp';
 import { FileManagerApp } from './apps/FileManagerApp';
 import { CodeEditorApp } from './apps/CodeEditorApp';
@@ -13,6 +13,7 @@ import { RepeaterApp } from './apps/RepeaterApp';
 import { ProjectsApp } from './apps/ProjectsApp';
 import { PipelineApp } from './apps/PipelineApp';
 import { ReportBuilderApp } from './apps/ReportBuilderApp';
+import { SnapshotManagerApp } from './apps/SnapshotManagerApp';
 
 export const AppRegistry = {
   terminal: { id: 'terminal', title: 'Terminal', icon: TerminalIcon, Component: TerminalApp },
@@ -22,6 +23,7 @@ export const AppRegistry = {
   projects: { id: 'projects', title: 'Projetos', icon: FolderArchive, Component: ProjectsApp },
   report: { id: 'report', title: 'Report Builder', icon: FileText, Component: ReportBuilderApp },
   repeater: { id: 'repeater', title: 'HTTP Repeater', icon: ArrowRightLeft, Component: RepeaterApp },
+  snapshots: { id: 'snapshots', title: 'Snapshots', icon: Camera, Component: SnapshotManagerApp },
   files: { id: 'files', title: 'File Manager', icon: FolderOpen, Component: FileManagerApp },
   editor: { id: 'editor', title: 'Code Editor', icon: Code2, Component: CodeEditorApp },
   monitor: { id: 'monitor', title: 'System Monitor', icon: Activity, Component: SystemMonitorApp },

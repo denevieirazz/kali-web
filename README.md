@@ -136,6 +136,7 @@ npm run dev
 19. **Fase 1 Enterprise (Escopos, Relatórios & HTTP Repeater)**: Novas tabelas SQLite (`projects`, `reports`, `repeater_history`), suporte a rotas `/api/projects` para escopo de testes e aplicativo visual `RepeaterApp.jsx` com proxy de requisições HTTP cruas e utilitários de decodificação CyberChef (`Base64`, `URL Encode/Decode`).
 20. **Fase 2 Enterprise (Chain Runner & App de Escopos)**: App de Automação Encadeada (`PipelineApp.jsx`), rotas `/api/pipeline/recon` (executa `subfinder` ➔ `httpx` ➔ `nmap` de 1-clique), App de Projetos (`ProjectsApp.jsx`) para gerenciar escopos ativos no CloudOS Context e endpoints de relatórios (`/api/reports`).
 21. **Report Builder (Gerador de Relatórios em Markdown)**: App `ReportBuilderApp.jsx` com Live Preview de relatórios de pentest em tempo real, adição dinâmica de achados de vulnerabilidade com nível de severidade e exportação em 1-clique para arquivo `.md`.
+22. **Roadmap V2 Completo (Relatórios DB, System Monitor SVG, Snapshots & Ferramentas Arjun/Metasploit)**: Persistência completa de relatórios via `/api/v2/reports`, suporte a `arjun` e scripts `.rc` de `metasploit` com sanitização, telemetria do WSL 2 via WebSocket em tempo real com gráfico SVG em `LineChart.jsx`, e gerenciador visual de Snapshots (`SnapshotManagerApp.jsx`).
 
 ---
 
