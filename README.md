@@ -140,6 +140,7 @@ npm run dev
 23. **Tratamento Defensivo de Auth JWT & Array Mapping**: Verificação prévia de existência de token em `CloudOSContext.jsx`, desativação de requisições não autenticadas evitando erros 403 desnecessários, remoção de tokens expirados no status 403 e prevenção total contra crash por `.map()` através de verificações `Array.isArray(data)`.
 24. **Menu Iniciar Estilo Windows 11 & Auditoria de Endpoints**: Componente `StartMenu.jsx` responsivo com busca de apps em tempo real, grid de ícones, opções de bloqueio/desligar, overlay flutuante no desktop e adaptação full-screen no mobile (<768px). Auditoria automatizada realizada em 10/10 endpoints principais com 100% de aprovação.
 25. **Interface Burp Suite & VS Code para Tool Runner (V2.1 + Catálogo Embutido)**: Atualização do `ToolRunnerApp.jsx` com busca automática de ferramentas em `GET /api/kali/tools` quando aberto sem `payload.toolId`, exibição em grid de cards interativos, navegação interna com botão "Voltar", layout flexbox puro e exports duplos.
+26. **Descrições de Campos & Schema Nmap em Português**: Atualizado o `FieldRenderer` do `ToolRunnerApp.jsx` para renderizar descrições explicativas táticas sob cada campo e reescrito o schema do `nmap` no `kali_tools_schema.js` com explicações em português para auxílio em Red Team.
 
 ---
 

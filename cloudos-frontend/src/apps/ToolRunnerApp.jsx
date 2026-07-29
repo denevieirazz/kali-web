@@ -254,23 +254,28 @@ export function ToolRunnerApp({ payload, setPayload, openApp, setBg }) {
 // ──────── RENDERER DE CAMPOS ────────
 function FieldRenderer({ field, value, onChange }) {
   const labelStyle = { display: 'block', fontSize: '11px', color: '#c9d1d9', marginBottom: '4px', fontWeight: '500' };
+  const descStyle = { fontSize: '11px', color: '#8b949e', marginTop: '2px', display: 'block' };
+  const descBlockStyle = { fontSize: '11px', color: '#8b949e', marginBottom: '6px', display: 'block' };
   const inputStyle = { width: '100%', background: '#161b22', border: '1px solid #30363d', borderRadius: '5px', padding: '6px 8px', color: '#c9d1d9', fontSize: '12px', outline: 'none', boxSizing: 'border-box' };
-  const rowStyle = { marginBottom: '12px' };
+  const rowStyle = { marginBottom: '14px' };
 
   if (field.type === 'checkbox') {
     return (
       <div style={rowStyle}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '12px' }} onClick={() => onChange(field.name, !value)}>
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', cursor: 'pointer', fontSize: '12px' }} onClick={() => onChange(field.name, !value)}>
           <div style={{
             width: '14px', height: '14px', borderRadius: '3px',
             border: value ? '1px solid #2ea043' : '1px solid #30363d',
             background: value ? '#238636' : '#161b22',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flexShrink: 0
+            flexShrink: 0, marginTop: '2px'
           }}>
             {value && <span style={{ color: '#fff', fontSize: 9 }}>✔</span>}
           </div>
-          {field.label}
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <span>{field.label}</span>
+            {field.description && <span style={descStyle}>{field.description}</span>}
+          </div>
         </label>
       </div>
     );
@@ -280,9 +285,20 @@ function FieldRenderer({ field, value, onChange }) {
     return (
       <div style={rowStyle}>
         <label style={labelStyle}>{field.label}</label>
+        {field.description && <span style={descBlockStyle}>{field.description}</span>}
         <select style={{ ...inputStyle, cursor: 'pointer' }} value={value || ''} onChange={e => onChange(field.name, e.target.value)}>
           {(field.options || []).map(opt => <option key={opt} value={opt}>{opt}</option>)}
         </select>
+      </div>
+    );
+  }
+
+  if (field.type === 'range') {
+    return (
+      <div style={rowStyle}>
+        <label style={labelStyle}>{field.label}: <span style={{color: '#58a6ff'}}>{value}</span></label>
+        {field.description && <span style={descBlockStyle}>{field.description}</span>}
+        <input type="range" min={field.min || 0} max={field.max || 5} value={value || 0} onChange={e => onChange(field.name, e.target.value)} style={{ width: '100%', accentColor: '#58a6ff', cursor: 'pointer' }} />
       </div>
     );
   }
@@ -291,6 +307,7 @@ function FieldRenderer({ field, value, onChange }) {
     return (
       <div style={rowStyle}>
         <label style={labelStyle}>{field.label}</label>
+        {field.description && <span style={descBlockStyle}>{field.description}</span>}
         <textarea style={{ ...inputStyle, fontFamily: 'monospace', minHeight: '60px', resize: 'vertical' }} placeholder={field.placeholder || ''} value={value || ''} onChange={e => onChange(field.name, e.target.value)} />
       </div>
     );
@@ -299,6 +316,7 @@ function FieldRenderer({ field, value, onChange }) {
   return (
     <div style={rowStyle}>
       <label style={labelStyle}>{field.label}</label>
+      {field.description && <span style={descBlockStyle}>{field.description}</span>}
       <input type="text" style={inputStyle} placeholder={field.placeholder || ''} value={value || ''} onChange={e => onChange(field.name, e.target.value)} />
     </div>
   );

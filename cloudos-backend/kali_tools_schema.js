@@ -2,19 +2,67 @@
 const TOOL_SCHEMAS = {
     // --- RECON & OSINT ---
     nmap: {
-        name: "Nmap", command: "nmap", category: "recon", installCmd: "sudo apt install nmap",
-        description: "Scanner de rede e portas ativo.",
-        presets: [
-            { name: "Scan Rápido (Top 100)", vars: { target: "scanme.nmap.org", p: "", sV: false, sS: true, T: "4", A: false } },
-            { name: "Agressivo (OS + Versão)", vars: { target: "scanme.nmap.org", p: "", sV: true, sS: false, T: "4", A: true } }
-        ],
+        name: 'Nmap',
+        command: 'nmap',
+        category: 'Reconhecimento',
+        description: 'O melhor scanner de portas e rede da atualidade.',
+        installCmd: 'sudo apt install -y nmap',
         fields: [
-            { id: "target", label: "Alvo (IP/Host)", type: "text", required: true, default: "scanme.nmap.org" },
-            { id: "p", label: "Portas (ex: 80,443 ou 1-1000)", type: "text", flag: "-p" },
-            { id: "sS", label: "SYN Scan (Stealth)", type: "boolean", flag: "-sS" },
-            { id: "sV", label: "Detectar Versão do Serviço", type: "boolean", flag: "-sV" },
-            { id: "A", label: "Agressivo (OS + Scripts + Trace)", type: "boolean", flag: "-A" },
-            { id: "T", label: "Velocidade (0-5)", type: "select", flag: "-T", default: "4", options: ["0", "1", "2", "3", "4", "5"] }
+            { 
+                id: 'target', 
+                type: 'text', 
+                label: 'Alvo (IP ou Domínio)', 
+                required: true, 
+                default: 'scanme.nmap.org',
+                placeholder: 'ex: scanme.nmap.org ou 192.168.0.1',
+                description: 'O endereço IP, site ou faixa de rede que você quer escanear.'
+            },
+            { 
+                id: 'ports', 
+                type: 'text', 
+                label: 'Portas', 
+                flag: '-p',
+                placeholder: 'ex: 80,443 ou 1-1000',
+                description: 'Especifique portas específicas. Deixe vazio para escanear as 1000 portas mais comuns.'
+            },
+            { 
+                id: 'syn_scan', 
+                type: 'boolean', 
+                label: 'SYN Scan (Stealth)', 
+                flag: '-sS',
+                default: true,
+                description: 'Escaneio silencioso e rápido (-sS). Não completa a conexão TCP. Requer privilégios de root.'
+            },
+            { 
+                id: 'service_version', 
+                type: 'boolean', 
+                label: 'Detectar Versão do Serviço', 
+                flag: '-sV',
+                default: true,
+                description: 'Tenta determinar a versão exata do software rodando na porta aberta (-sV).'
+            },
+            { 
+                id: 'aggressive', 
+                type: 'boolean', 
+                label: 'Modo Agressivo', 
+                flag: '-A',
+                default: false,
+                description: 'Ativa detecção de SO, traceroute e scripts padrão (-A). É barulhento e pode chamar atenção.'
+            },
+            { 
+                id: 'timing', 
+                type: 'select', 
+                label: 'Velocidade do Scan', 
+                flag: '-T',
+                options: ['0 (Paranóico)', '1 (Descolado)', '2 (Educado)', '3 (Normal)', '4 (Agressivo)', '5 (Insano)'], 
+                default: '3 (Normal)',
+                description: 'Controla o quão rápido os pacotes são enviados. 5 é muito rápido mas pula firewalls. 0 é invisível mas demora horas.'
+            }
+        ],
+        presets: [
+            { name: 'Scan Rápido (Top 100)', vars: { target: 'scanme.nmap.org', ports: '', syn_scan: true, service_version: false, aggressive: false, timing: '4 (Agressivo)' } },
+            { name: 'Agressivo (OS + Versão)', vars: { target: 'scanme.nmap.org', ports: '', syn_scan: true, service_version: true, aggressive: true, timing: '4 (Agressivo)' } },
+            { name: 'Furtivo (Lento)', vars: { target: 'scanme.nmap.org', ports: '', syn_scan: true, service_version: false, aggressive: false, timing: '1 (Descolado)' } }
         ]
     },
     subfinder: {
