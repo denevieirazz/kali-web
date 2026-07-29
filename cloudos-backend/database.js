@@ -121,6 +121,36 @@ rawDb.serialize(() => {
             PRIMARY KEY (user_id, tool_id)
         );
     `);
+
+    rawDb.run(`
+        CREATE TABLE IF NOT EXISTS projects (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            scope TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
+
+    rawDb.run(`
+        CREATE TABLE IF NOT EXISTS reports (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            content_md TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
+
+    rawDb.run(`
+        CREATE TABLE IF NOT EXISTS repeater_history (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            request_data TEXT,
+            response_data TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
 });
 
 const db = {

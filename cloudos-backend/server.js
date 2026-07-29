@@ -2,6 +2,8 @@ const express = require('express');
 const { WebSocketServer } = require('ws');
 const cors = require('cors');
 const pty = require('node-pty');
+const http = require('http');
+const https = require('https');
 const { exec, spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -627,6 +629,83 @@ app.post('/api/kali/tools/:id/open', async (req, res) => {
         await logEvent(req.user.id, 'kali_tool_open', `Ferramenta ${tool.name} selecionada para uso.`);
         res.json({ success: true, command: tool.command });
     } catch (e) { res.status(500).json({ error: 'Erro ao abrir ferramenta.' }); }
+});
+
+// =========================================================
+// 🎯 GESTÃO DE PROJETOS (SCOPE MANAGER)
+// =========================================================
+app.post('/api/projects', async (req, res) => {
+    const { name, scope } = req.body;
+    const id = 'p_' + crypto.randomBytes(4).toString('hex');
+    await db.prepare('INSERT INTO projects (id, user_id, name, scope) VALUES (?, ?, ?, ?)').run(id, req.user.id, name, scope || '');
+    res.json({ success: true, id });
+});
+
+app.get('/api/projects', async (req, res) => {
+    const projects = await db.prepare('SELECT * FROM projects WHERE user_id = ? ORDER BY created_at DESC').all(req.user.id);
+    res.json(projects);
+});
+
+// =========================================================
+// 🔄 HTTP REPEATER & DECODER
+// =========================================================
+app.post('/api/repeater/send', (req, res) => {
+    const { rawRequest } = req.body;
+    try {
+        const lines = rawRequest.split('\n');
+        const firstLine = lines[0].trim().split(' ');
+        const method = firstLine[0] || 'GET';
+        const pathStr = firstLine[1] || '/';
+        
+        const hostLine = lines.find(l => l.toLowerCase().startsWith('host:'));
+        let host = 'localhost';
+        let port = 80;
+        if (hostLine) {
+            const hostValue = hostLine.substring(hostLine.indexOf(':') + 1).trim();
+            if (hostValue.includes(':')) {
+                const parts = hostValue.split(':');
+                host = parts[0];
+                port = parseInt(parts[1], 10);
+            } else {
+                host = hostValue;
+            }
+        }
+        
+        const isHttps = rawRequest.toLowerCase().includes('https') || port === 443;
+        if (isHttps && port === 80) port = 443;
+
+        const options = {
+            hostname: host,
+            port: port,
+            path: pathStr,
+            method: method,
+            headers: {}
+        };
+
+        let bodyStart = false;
+        let body = '';
+        for (let i = 1; i < lines.length; i++) {
+            if (lines[i].trim() === '') { bodyStart = true; continue; }
+            if (bodyStart) { body += lines[i] + '\n'; }
+            else {
+                const [key, ...val] = lines[i].split(':');
+                if (key && val.length) options.headers[key.trim()] = val.join(':').trim();
+            }
+        }
+
+        const httpModule = isHttps ? https : http;
+        const proxyReq = httpModule.request(options, (proxyRes) => {
+            let responseData = `HTTP/1.1 ${proxyRes.statusCode} ${proxyRes.statusMessage}\n`;
+            Object.keys(proxyRes.headers).forEach(key => responseData += `${key}: ${proxyRes.headers[key]}\n`);
+            responseData += `\n`;
+            proxyRes.on('data', chunk => responseData += chunk.toString());
+            proxyRes.on('end', () => res.json({ success: true, response: responseData }));
+        });
+        
+        proxyReq.on('error', e => res.status(500).json({ error: e.message }));
+        if (body.trim()) proxyReq.write(body.trim());
+        proxyReq.end();
+    } catch (e) { res.status(500).json({ error: "Formato HTTP inválido." }); }
 });
 
 // --- WebSocket (Terminal Seguro) ---
