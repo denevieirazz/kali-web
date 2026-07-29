@@ -1,287 +1,432 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, Loader, Terminal, Zap, LayoutGrid, ArrowLeft, Square, Search, Radar, Globe, Bug, KeyRound } from 'lucide-react';
+import { Play, Square, Terminal, Settings2, Crosshair } from 'lucide-react';
 
-const API_BASE = 'http://localhost:8080';
-const token = () => localStorage.getItem('cloudos_token');
-
-const CATEGORIES = [
-  { id: 'all', name: 'Todas', icon: LayoutGrid },
-  { id: 'recon', name: 'Recon & OSINT', icon: Radar },
-  { id: 'web', name: 'Web Scanning', icon: Globe },
-  { id: 'exploit', name: 'Exploits', icon: Bug },
-  { id: 'cracking', name: 'Cracking', icon: KeyRound }
-];
-
-const AVAILABLE_TOOLS = [
-  { id: 'nmap', name: 'Nmap', desc: 'Scanner de rede ativo', category: 'recon' },
-  { id: 'subfinder', name: 'Subfinder', desc: 'Subdomínios passivos', category: 'recon' },
-  { id: 'httpx', name: 'Httpx', desc: 'Validador HTTP em massa', category: 'recon' },
-  { id: 'gobuster', name: 'Gobuster', desc: 'Brute-force de diretórios', category: 'web' },
-  { id: 'nikto', name: 'Nikto', desc: 'Scanner de vulns Web', category: 'web' },
-  { id: 'sqlmap', name: 'SQLMap', desc: 'Injeção de SQL', category: 'web' },
-  { id: 'searchsploit', name: 'SearchSploit', desc: 'Busca de Exploits', category: 'exploit' },
-  { id: 'hashcat', name: 'Hashcat', desc: 'Quebra de hashes (GPU)', category: 'cracking' }
-];
-
-export const ToolRunnerApp = ({ payload, setPayload }) => {
-  const [schema, setSchema] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [formValues, setFormValues] = useState({});
+export default function ToolRunnerApp({ toolSchema, activeProject }) {
+  // Estado inicial baseado no schema
+  const [fields, setFields] = useState({});
   const [output, setOutput] = useState('');
-  const [isRunning, setIsRunning] = useState(false);
-  const [runId, setRunId] = useState(null);
-  const [activeCat, setActiveCat] = useState('all');
-  const [search, setSearch] = useState('');
-  const outputRef = useRef(null);
-  const currentToolId = payload?.toolId;
+  const [running, setRunning] = useState(false);
+  const [activeTab, setActiveTab] = useState('options'); // 'options' | 'output'
+  const readerRef = useRef(null);
+  const outputEndRef = useRef(null);
 
   useEffect(() => {
-    if (currentToolId) {
-      setLoading(true);
-      fetch(`${API_BASE}/api/kali/tools/${currentToolId}/schema`, {
-        headers: { 'Authorization': `Bearer ${token()}` }
-      })
-        .then(res => res.json())
-        .then(data => {
-          if (data.error) { setSchema(null); } 
-          else {
-            setSchema(data);
-            const initialValues = {};
-            data.fields.forEach(f => {
-              if (f.type === 'boolean') initialValues[f.id] = f.default !== undefined ? f.default : false;
-              else initialValues[f.id] = f.default !== undefined ? f.default : '';
-            });
-            setFormValues(initialValues);
-          }
-          setLoading(false);
-        });
-    } else { setLoading(false); }
-  }, [currentToolId]);
+    // Inicializa fields com defaults do schema
+    const initial = {};
+    toolSchema.fields.forEach(f => {
+      initial[f.name] = f.default !== undefined ? f.default : (f.type === 'checkbox' ? false : '');
+    });
+    setFields(initial);
+    setOutput(`[+] ${toolSchema.name} carregado. Configure as opções e clique em Executar.\n`);
+  }, [toolSchema]);
 
   useEffect(() => {
-    if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
+    // Auto-scroll terminal
+    outputEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [output]);
 
-  const handleInputChange = (fieldId, value, type) => {
-    setFormValues(prev => ({ ...prev, [fieldId]: type === 'boolean' ? !prev[fieldId] : value }));
+  // Constrói o comando em tempo real para preview
+  const commandPreview = () => {
+    if (!toolSchema.buildCmd) return '';
+    const { cmd, args } = toolSchema.buildCmd(fields);
+    return `${cmd} ${args.join(' ')}`;
   };
 
-  const applyPreset = (presetVars) => setFormValues(prev => ({ ...prev, ...presetVars }));
-
-  const isFormValid = () => {
-    if (!schema) return false;
-    return schema.fields.every(f => !f.required || (formValues[f.id] !== '' && formValues[f.id] !== undefined));
+  const handleChange = (name, value) => {
+    setFields(prev => ({ ...prev, [name]: value }));
   };
 
-  const buildCommandPreview = () => {
-    if (!schema) return '';
-    let cmd = schema.command;
-    schema.fields.forEach(field => {
-      const val = formValues[field.id];
-      if (!val) return;
-      if (field.type === 'boolean' && val === true) cmd += ` ${field.flag}`;
-      else if ((field.type === 'text' || field.type === 'select') && val) {
-        cmd += field.flag ? ` ${field.flag} ${val}` : ` ${val}`;
-      }
-    });
-    return cmd;
-  };
+  const runTool = async () => {
+    if (running) return;
+    setRunning(true);
+    setOutput(prev => prev + `\n[▶] Iniciando execução...\n`);
+    setActiveTab('output');
 
-  const handleRun = async () => {
-    if (!isFormValid()) return;
-    setOutput('');
-    setIsRunning(true);
+    const token = localStorage.getItem('cloudos_token');
     try {
-      const response = await fetch(`${API_BASE}/api/kali/tools/${currentToolId}/run`, {
+      const response = await fetch('http://localhost:8080/api/tools/run', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token()}` },
-        body: JSON.stringify({ options: formValues })
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ toolId: toolSchema.id, fields })
       });
 
-      if (response.status === 400) {
-        const errData = await response.json();
-        setOutput(`[ERRO] ${errData.error}\n[DICA] Instale rodando no terminal: ${errData.installCmd}`);
-        setIsRunning(false);
-        return;
-      }
-
-      const id = response.headers.get('X-Run-Id');
-      if (id) setRunId(id);
+      if (!response.ok) throw new Error('Falha na requisição');
 
       const reader = response.body.getReader();
+      readerRef.current = reader;
       const decoder = new TextDecoder();
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        setOutput(prev => prev + decoder.decode(value));
+        setOutput(prev => prev + decoder.decode(value, { stream: true }));
       }
-    } catch (e) { setOutput("Erro ao conectar com o backend."); }
-    setIsRunning(false);
-    setRunId(null);
+      setOutput(prev => prev + `\n[✓] Execução finalizada.\n`);
+    } catch (err) {
+      setOutput(prev => prev + `\n[✗] Erro: ${err.message}\n`);
+    } finally {
+      setRunning(false);
+      readerRef.current = null;
+    }
   };
 
-  const handleStop = async () => {
-    if (!runId) return;
-    await fetch(`${API_BASE}/api/kali/tools/stop`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token()}` },
-      body: JSON.stringify({ runId })
-    });
-    setOutput(prev => prev + "\n\n[SCAN INTERROMPIDO PELO USUÁRIO]");
-    setIsRunning(false);
-    setRunId(null);
+  const stopTool = async () => {
+    if (readerRef.current) {
+      await readerRef.current.cancel();
+      readerRef.current = null;
+      setRunning(false);
+      setOutput(prev => prev + `\n[⛔] Execução interrompida pelo usuário.\n`);
+    }
   };
 
-  // TELA DE SELEÇÃO COM CATEGORIAS
-  if (!currentToolId) {
-    const filteredTools = AVAILABLE_TOOLS.filter(t => 
-      (activeCat === 'all' || t.category === activeCat) &&
-      (t.name.toLowerCase().includes(search.toLowerCase()) || t.desc.toLowerCase().includes(search.toLowerCase()))
-    );
-
-    return (
-      <div className="flex h-full bg-[#0d1117] text-gray-300" style={{ display: 'flex', height: '100%', background: '#0d1117', color: '#c9d1d9' }}>
-        {/* Sidebar de Categorias */}
-        <div className="w-56 bg-[#161b22] border-r border-gray-800 p-3 space-y-1" style={{ width: '200px', background: '#161b22', borderRight: '1px solid #30363d', padding: '12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          <h2 className="text-xs uppercase text-gray-500 px-2 mb-2" style={{ fontSize: '11px', textTransform: 'uppercase', color: '#8b949e', padding: '0 8px', marginBottom: '8px' }}>Categorias</h2>
-          {CATEGORIES.map(cat => (
-            <div key={cat.id} onClick={() => setActiveCat(cat.id)} 
-                 className={`flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-sm ${activeCat === cat.id ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-gray-800'}`}
-                 style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', background: activeCat === cat.id ? 'rgba(59, 130, 246, 0.15)' : 'transparent', color: activeCat === cat.id ? '#60a5fa' : '#c9d1d9' }}>
-              <cat.icon size={14} /> {cat.name}
-            </div>
-          ))}
+  return (
+    <div style={styles.container}>
+      {/* HEADER COM COMANDO E BOTÕES */}
+      <div style={styles.header}>
+        <div style={styles.cmdBox}>
+          <span style={styles.cmdPrefix}>$</span>
+          <code style={styles.cmdText}>{commandPreview()}</code>
         </div>
+        <div style={styles.actionBtns}>
+          {running ? (
+            <button style={{...styles.btn, ...styles.btnDanger}} onClick={stopTool}>
+              <Square size={14} fill="#fff" /> Parar
+            </button>
+          ) : (
+            <button style={{...styles.btn, ...styles.btnSuccess}} onClick={runTool}>
+              <Play size={14} fill="#fff" /> Executar
+            </button>
+          )}
+        </div>
+      </div>
 
-        {/* Área Principal de Seleção */}
-        <div className="flex-1 flex flex-col p-6" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '24px' }}>
-          <div className="relative mb-6" style={{ position: 'relative', marginBottom: '24px' }}>
-            <Search size={16} className="absolute left-3 top-2.5 text-gray-500" style={{ position: 'absolute', left: '12px', top: '10px', color: '#8b949e' }} />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar ferramenta..." 
-                   className="w-full bg-[#161b22] border border-gray-700 rounded-md pl-9 pr-3 py-2 text-sm focus:border-blue-500 outline-none"
-                   style={{ width: '100%', background: '#161b22', border: '1px solid #30363d', borderRadius: '6px', padding: '8px 12px 8px 36px', fontSize: '13px', color: 'white', outline: 'none' }} />
+      {/* CONTEÚDO DIVIDIDO */}
+      <div style={styles.contentWrapper}>
+        {/* PAINEL ESQUERDA - CONFIG */}
+        <div style={styles.configPanel}>
+          <div style={styles.panelHeader}>
+            <Settings2 size={14} /> Configurações
+          </div>
+          <div style={styles.fieldsContainer}>
+            {toolSchema.fields.map(field => (
+              <FieldRenderer key={field.name} field={field} value={fields[field.name]} onChange={handleChange} />
+            ))}
           </div>
           
-          <div className="grid grid-cols-3 gap-4 flex-1 overflow-y-auto" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '16px', flex: 1, overflowY: 'auto' }}>
-            {filteredTools.map(tool => (
-              <div key={tool.id} onClick={() => setPayload({ toolId: tool.id })} 
-                   className="bg-[#161b22] border border-gray-800 rounded-lg p-4 cursor-pointer hover:border-blue-500 transition-colors flex flex-col"
-                   style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '8px', padding: '16px', cursor: 'pointer', display: 'flex', flexDirection: 'column' }}>
-                <h3 className="font-bold text-white text-sm" style={{ fontSize: '14px', fontWeight: 'bold', color: 'white', margin: 0 }}>{tool.name}</h3>
-                <p className="text-xs text-gray-500 mt-1 flex-1" style={{ fontSize: '12px', color: '#8b949e', marginTop: '4px', flex: 1, margin: '4px 0 0 0' }}>{tool.desc}</p>
-                <span className="mt-3 text-[10px] uppercase text-gray-600 bg-gray-800 w-fit px-2 py-0.5 rounded-full" style={{ marginTop: '12px', fontSize: '10px', textTransform: 'uppercase', color: '#8b949e', background: '#21262d', padding: '2px 8px', borderRadius: '12px', width: 'fit-content' }}>{tool.category}</span>
-              </div>
-            ))}
-            {filteredTools.length === 0 && <div className="col-span-3 text-center text-gray-600 mt-10" style={{ gridColumn: 'span 3', textAlign: 'center', color: '#6e7681', marginTop: '40px' }}>Nenhuma ferramenta encontrada.</div>}
-          </div>
+          {toolSchema.presets && toolSchema.presets.length > 0 && (
+            <div style={styles.presetsContainer}>
+              <div style={styles.presetsTitle}>Presets Rápidos</div>
+              {toolSchema.presets.map(preset => (
+                <button 
+                  key={preset.name} 
+                  style={styles.presetBtn}
+                  onClick={() => setFields(prev => ({ ...prev, ...preset.args }))}
+                >
+                  {preset.name}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
+
+        {/* PAINEL DIREITA - OUTPUT */}
+        <div style={styles.outputPanel}>
+          <div style={styles.outputHeader}>
+            <Terminal size={14} color="#3fb950" /> Output
+            {running && <span style={styles.runningBadge}>● Rodando</span>}
+          </div>
+          <pre style={styles.terminal}>
+            {output}
+            <div ref={outputEndRef} />
+          </pre>
+        </div>
+      </div>
+
+      {/* CSS GLOBAL PARA RESPONSIVIDADE */}
+      <style>{`
+        @media (max-width: 768px) {
+          .tool-runner-content { flex-direction: column !important; }
+          .tool-runner-config { width: 100% !important; max-height: 40vh; border-right: none !important; border-bottom: 1px solid #30363d !important; }
+          .tool-runner-output { width: 100% !important; }
+          .tool-runner-header { flex-direction: column; gap: 8px; align-items: stretch !important; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// Componente para renderizar cada tipo de campo do schema
+function FieldRenderer({ field, value, onChange }) {
+  if (field.type === 'checkbox') {
+    return (
+      <div style={styles.fieldRow} onClick={() => onChange(field.name, !value)}>
+        <label style={styles.checkboxLabel}>
+          <input 
+            type="checkbox" 
+            checked={!!value} 
+            onChange={(e) => onChange(field.name, e.target.checked)}
+            style={{ display: 'none' }}
+          />
+          <div style={value ? styles.checkboxBoxChecked : styles.checkboxBox}>
+            {value && <span style={{ color: '#fff', fontSize: 10 }}>✔</span>}
+          </div>
+          {field.label}
+        </label>
       </div>
     );
   }
 
-  // TELA DE CARREGAMENTO
-  if (loading) return <div className="flex items-center justify-center h-full bg-[#0d1117] text-gray-400" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', background: '#0d1117', color: '#8b949e' }}><Loader className="animate-spin mr-2" size={16} /> Carregando...</div>;
-  
-  // TELA DE ERRO
-  if (!schema) return (
-    <div className="flex flex-col items-center justify-center h-full bg-[#0d1117] text-red-400 p-6" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', background: '#0d1117', color: '#f87171', padding: '24px' }}>
-      <p className="mb-4" style={{ marginBottom: '16px' }}>Schema não encontrado para esta ferramenta.</p>
-      <button onClick={() => setPayload(null)} className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded text-sm" style={{ background: '#30363d', color: 'white', padding: '8px 16px', borderRadius: '6px', fontSize: '14px', border: 'none', cursor: 'pointer' }}>Voltar</button>
-    </div>
-  );
+  if (field.type === 'select') {
+    return (
+      <div style={styles.fieldRow}>
+        <label style={styles.label}>{field.label}</label>
+        <select 
+          style={styles.select} 
+          value={value || ''} 
+          onChange={(e) => onChange(field.name, e.target.value)}
+        >
+          {field.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+        </select>
+      </div>
+    );
+  }
 
-  // TELA PRINCIPAL DA GUI
+  if (field.type === 'range') {
+    return (
+      <div style={styles.fieldRow}>
+        <label style={styles.label}>{field.label}: <span style={{color: '#58a6ff'}}>{value}</span></label>
+        <input 
+          type="range" 
+          min={field.min || 0} 
+          max={field.max || 5} 
+          value={value || 0} 
+          onChange={(e) => onChange(field.name, e.target.value)}
+          style={styles.rangeInput}
+        />
+      </div>
+    );
+  }
+
+  // default: text ou textarea
   return (
-    <div className="flex flex-col h-full bg-[#0d1117] text-gray-300" style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0d1117', color: '#c9d1d9' }}>
-      <div className="p-4 border-b border-gray-800 bg-[#161b22] flex justify-between items-center" style={{ padding: '16px', borderBottom: '1px solid #30363d', background: '#161b22', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div className="flex items-center gap-3" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <button onClick={() => setPayload(null)} className="text-gray-500 hover:text-white" style={{ background: 'transparent', border: 'none', color: '#8b949e', cursor: 'pointer', display: 'flex', alignItems: 'center' }}><ArrowLeft size={18} /></button>
-          <div>
-            <h2 className="text-lg font-bold text-white flex items-center gap-2" style={{ fontSize: '18px', fontWeight: 'bold', color: 'white', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}><Zap size={18} className="text-purple-400" color="#a78bfa" /> {schema.name}</h2>
-            <p className="text-xs text-gray-500" style={{ fontSize: '12px', color: '#8b949e', marginTop: '2px', margin: 0 }}>{schema.description}</p>
-          </div>
-        </div>
-        {schema.presets?.length > 0 && (
-          <div className="flex gap-2" style={{ display: 'flex', gap: '8px' }}>
-            {schema.presets.map((p, i) => (
-              <button key={i} onClick={() => applyPreset(p.vars)} className="px-3 py-1 bg-purple-600/20 text-purple-400 border border-purple-800 rounded text-xs hover:bg-purple-600/30"
-                      style={{ padding: '4px 12px', background: 'rgba(167, 139, 250, 0.15)', color: '#a78bfa', border: '1px solid rgba(167, 139, 250, 0.3)', borderRadius: '4px', fontSize: '12px', cursor: 'pointer' }}>
-                {p.name}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="flex-1 flex flex-col md:flex-row overflow-hidden" style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        <div className="md:w-1/3 p-6 space-y-5 overflow-y-auto border-r border-gray-800" style={{ width: '320px', padding: '20px', overflowY: 'auto', borderRight: '1px solid #30363d', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {schema.fields.map(field => {
-            const isInvalid = field.required && !formValues[field.id];
-            return (
-              <div key={field.id} className="flex flex-col gap-2" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label className="text-sm font-medium text-gray-400 flex items-center gap-2" style={{ fontSize: '13px', color: '#8b949e', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  {field.label} {field.required && <span className="text-red-400" style={{ color: '#f87171' }}>*</span>}
-                </label>
-                {field.type === 'text' && (
-                  <input type="text" placeholder={field.placeholder || ''} value={formValues[field.id] || ''} onChange={(e) => handleInputChange(field.id, e.target.value, 'text')}
-                    className={`bg-[#161b22] border rounded-md px-3 py-2 text-sm focus:border-blue-500 outline-none text-white ${isInvalid ? 'border-red-500' : 'border-gray-700'}`}
-                    style={{ background: '#161b22', border: isInvalid ? '1px solid #f87171' : '1px solid #30363d', borderRadius: '6px', padding: '8px 12px', fontSize: '13px', color: 'white', outline: 'none' }} />
-                )}
-                {field.type === 'textarea' && (
-                  <textarea 
-                    rows="6" 
-                    placeholder={field.placeholder || 'Cole um item por linha...'} 
-                    value={formValues[field.id] || ''} 
-                    onChange={(e) => handleInputChange(field.id, e.target.value, 'text')}
-                    className={`bg-[#161b22] border rounded-md px-3 py-2 text-sm focus:border-blue-500 outline-none text-white font-mono ${isInvalid ? 'border-red-500' : 'border-gray-700'}`} 
-                    style={{ background: '#161b22', border: isInvalid ? '1px solid #f87171' : '1px solid #30363d', borderRadius: '6px', padding: '8px 12px', fontSize: '13px', color: 'white', outline: 'none', fontFamily: 'monospace' }}
-                  />
-                )}
-                {field.type === 'select' && (
-                  <select value={formValues[field.id] || ''} onChange={(e) => handleInputChange(field.id, e.target.value, 'select')}
-                    className={`bg-[#161b22] border rounded-md px-3 py-2 text-sm focus:border-blue-500 outline-none text-white ${isInvalid ? 'border-red-500' : 'border-gray-700'}`}
-                    style={{ background: '#161b22', border: isInvalid ? '1px solid #f87171' : '1px solid #30363d', borderRadius: '6px', padding: '8px 12px', fontSize: '13px', color: 'white', outline: 'none' }}>
-                    <option value="">Selecione...</option>
-                    {field.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                  </select>
-                )}
-                {field.type === 'boolean' && (
-                  <label className="inline-flex items-center cursor-pointer" style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}>
-                    <input type="checkbox" checked={formValues[field.id] || false} onChange={(e) => handleInputChange(field.id, e.target.value, 'boolean')} style={{ width: '18px', height: '18px', cursor: 'pointer' }} />
-                    <span style={{ marginLeft: '8px', fontSize: '13px', color: '#c9d1d9' }}>{field.label}</span>
-                  </label>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="flex-1 flex flex-col bg-black/50" style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'rgba(0,0,0,0.5)' }}>
-          <div className="p-2 border-b border-gray-800 flex justify-between items-center bg-[#161b22]" style={{ padding: '10px 16px', borderBottom: '1px solid #30363d', background: '#161b22', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span className="text-xs text-gray-500 font-mono flex items-center gap-1 truncate" style={{ fontSize: '12px', color: '#8b949e', fontFamily: 'monospace', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Terminal size={12} /> {buildCommandPreview()}
-            </span>
-            
-            <div className="flex gap-2 ml-2" style={{ display: 'flex', gap: '8px', marginLeft: '8px' }}>
-              {isRunning && (
-                <button onClick={handleStop} className="bg-red-600 hover:bg-red-700 text-white px-4 py-1 rounded text-xs font-bold flex items-center gap-1"
-                        style={{ background: '#da3633', color: 'white', padding: '6px 16px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Square size={12} fill="white" /> Interromper
-                </button>
-              )}
-              <button onClick={handleRun} disabled={isRunning || !isFormValid()} 
-                      className="bg-green-600 hover:bg-green-700 text-white px-4 py-1 rounded text-xs font-bold flex items-center gap-1 disabled:bg-gray-700 disabled:cursor-not-allowed"
-                      style={{ background: (isRunning || !isFormValid()) ? '#374151' : '#238636', color: 'white', padding: '6px 16px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', border: 'none', cursor: (isRunning || !isFormValid()) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                {isRunning ? <Loader size={12} className="animate-spin" /> : <Play size={12} />} {isRunning ? 'Escaneando...' : 'Executar'}
-              </button>
-            </div>
-          </div>
-          
-          <div ref={outputRef} className="flex-1 p-4 overflow-y-auto font-mono text-xs text-green-400 whitespace-pre-wrap" style={{ flex: 1, padding: '16px', overflowY: 'auto', fontFamily: 'monospace', fontSize: '12px', color: '#4ade80', whiteSpace: 'pre-wrap' }}>
-            {output || <span style={{ color: '#6e7681' }}>Clique em "Executar" para iniciar o scan em segundo plano...</span>}
-          </div>
-        </div>
-      </div>
+    <div style={styles.fieldRow}>
+      <label style={styles.label}>{field.label}</label>
+      <input 
+        type="text" 
+        style={styles.textInput} 
+        placeholder={field.placeholder || ''} 
+        value={value || ''} 
+        onChange={(e) => onChange(field.name, e.target.value)}
+      />
     </div>
   );
+}
+
+// ESTILOS (GitHub Dark Theme)
+const styles = {
+  container: {
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    background: '#0d1117',
+    color: '#c9d1d9',
+    fontFamily: 'Inter, -apple-system, sans-serif',
+  },
+  header: {
+    padding: '12px 16px',
+    borderBottom: '1px solid #30363d',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: '16px',
+    background: '#161b22',
+  },
+  cmdBox: {
+    flex: 1,
+    background: '#010409',
+    border: '1px solid #30363d',
+    borderRadius: '6px',
+    padding: '8px 12px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    fontFamily: 'JetBrains Mono, monospace',
+    fontSize: '13px',
+    overflowX: 'auto',
+    whiteSpace: 'nowrap',
+  },
+  cmdPrefix: { color: '#3fb950', fontWeight: 'bold' },
+  cmdText: { color: '#58a6ff' },
+  actionBtns: { display: 'flex', gap: '8px' },
+  btn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '8px 16px',
+    border: '1px solid transparent',
+    borderRadius: '6px',
+    color: '#fff',
+    fontSize: '13px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'opacity 0.2s',
+  },
+  btnSuccess: { background: '#238636', borderColor: '#2ea043' },
+  btnDanger: { background: '#da3633', borderColor: '#f85149' },
+  
+  contentWrapper: {
+    flex: 1,
+    display: 'flex',
+    overflow: 'hidden',
+    className: 'tool-runner-content',
+  },
+  configPanel: {
+    width: '320px',
+    borderRight: '1px solid #30363d',
+    display: 'flex',
+    flexDirection: 'column',
+    background: '#0d1117',
+    className: 'tool-runner-config',
+  },
+  panelHeader: {
+    padding: '10px 16px',
+    fontSize: '12px',
+    fontWeight: '600',
+    color: '#8b949e',
+    borderBottom: '1px solid #21262d',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  fieldsContainer: {
+    padding: '16px',
+    overflowY: 'auto',
+    flex: 1,
+  },
+  fieldRow: {
+    marginBottom: '16px',
+  },
+  label: {
+    display: 'block',
+    fontSize: '12px',
+    color: '#c9d1d9',
+    marginBottom: '6px',
+    fontWeight: '500',
+  },
+  textInput: {
+    width: '100%',
+    background: '#161b22',
+    border: '1px solid #30363d',
+    borderRadius: '6px',
+    padding: '8px 10px',
+    color: '#c9d1d9',
+    fontSize: '13px',
+    outline: 'none',
+    boxSizing: 'border-box',
+  },
+  select: {
+    width: '100%',
+    background: '#161b22',
+    border: '1px solid #30363d',
+    borderRadius: '6px',
+    padding: '8px 10px',
+    color: '#c9d1d9',
+    fontSize: '13px',
+    outline: 'none',
+    cursor: 'pointer',
+  },
+  checkboxLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    cursor: 'pointer',
+    fontSize: '13px',
+  },
+  checkboxBox: {
+    width: '16px',
+    height: '16px',
+    borderRadius: '4px',
+    border: '1px solid #30363d',
+    background: '#161b22',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxBoxChecked: {
+    width: '16px',
+    height: '16px',
+    borderRadius: '4px',
+    border: '1px solid #2ea043',
+    background: '#238636',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rangeInput: {
+    width: '100%',
+    accentColor: '#58a6ff',
+    cursor: 'pointer',
+  },
+  
+  presetsContainer: {
+    padding: '16px',
+    borderTop: '1px solid #21262d',
+  },
+  presetsTitle: {
+    fontSize: '12px',
+    color: '#8b949e',
+    marginBottom: '8px',
+    fontWeight: '600',
+  },
+  presetBtn: {
+    background: '#21262d',
+    border: '1px solid #30363d',
+    color: '#c9d1d9',
+    padding: '6px 10px',
+    borderRadius: '6px',
+    fontSize: '12px',
+    cursor: 'pointer',
+    marginRight: '8px',
+    marginBottom: '8px',
+  },
+
+  outputPanel: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    background: '#010409',
+    className: 'tool-runner-output',
+  },
+  outputHeader: {
+    padding: '8px 16px',
+    background: '#0d1117',
+    borderBottom: '1px solid #21262d',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    fontSize: '12px',
+    color: '#8b949e',
+  },
+  runningBadge: {
+    color: '#3fb950',
+    fontWeight: '600',
+    animation: 'pulse 1.5s infinite',
+  },
+  terminal: {
+    flex: 1,
+    margin: '0',
+    padding: '16px',
+    color: '#c9d1d9',
+    fontFamily: 'JetBrains Mono, monospace',
+    fontSize: '13px',
+    lineHeight: '1.5',
+    overflowY: 'auto',
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+  },
 };
