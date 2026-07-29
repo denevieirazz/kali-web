@@ -5,22 +5,51 @@ import { useCloudOS } from '../store/CloudOSContext';
 export const ProjectsApp = () => {
   const { activeProject, setActiveProject } = useCloudOS();
   const [projects, setProjects] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [name, setName] = useState('');
   const [scope, setScope] = useState('');
 
-  const fetchProjects = () => {
-    fetch('http://localhost:8080/api/projects', { headers: { 'Authorization': `Bearer ${localStorage.getItem('cloudos_token')}` } })
-      .then(res => res.json()).then(setProjects).catch(() => {});
+  const fetchProjects = async () => {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('cloudos_token');
+      const res = await fetch('http://localhost:8080/api/projects', {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : ''
+        }
+      });
+      if (!res.ok) {
+        setProjects([]);
+        return;
+      }
+      const data = await res.json();
+      setProjects(Array.isArray(data) ? data : []);
+    } catch (e) {
+      setProjects([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { fetchProjects(); }, []);
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!name) return;
-    fetch('http://localhost:8080/api/projects', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('cloudos_token')}` },
-      body: JSON.stringify({ name, scope })
-    }).then(() => { setName(''); setScope(''); fetchProjects(); });
+    try {
+      const token = localStorage.getItem('cloudos_token');
+      await fetch('http://localhost:8080/api/projects', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : ''
+        },
+        body: JSON.stringify({ name, scope })
+      });
+      setName('');
+      setScope('');
+      fetchProjects();
+    } catch (e) {}
   };
 
   return (
@@ -34,7 +63,7 @@ export const ProjectsApp = () => {
       </div>
 
       <div className="flex-1 overflow-y-auto space-y-2" style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        {projects.map(p => (
+        {Array.isArray(projects) && projects.map(p => (
           <div key={p.id} onClick={() => setActiveProject(p)} 
                className={`flex items-center justify-between p-4 rounded-lg border cursor-pointer ${activeProject?.id === p.id ? 'bg-blue-600/20 border-blue-500' : 'bg-[#161b22] border-gray-800'}`}
                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px', borderRadius: '8px', border: activeProject?.id === p.id ? '1px solid #3b82f6' : '1px solid #30363d', background: activeProject?.id === p.id ? 'rgba(59, 130, 246, 0.15)' : '#161b22', cursor: 'pointer' }}>
@@ -48,7 +77,9 @@ export const ProjectsApp = () => {
             {activeProject?.id === p.id && <Check size={20} className="text-blue-400" style={{ color: '#60a5fa' }} />}
           </div>
         ))}
-        {projects.length === 0 && <div className="text-center text-gray-600 mt-10" style={{ textAlign: 'center', color: '#6e7681', marginTop: '40px' }}>Nenhum projeto cadastrado. Crie um acima.</div>}
+        {(!Array.isArray(projects) || projects.length === 0) && !loading && (
+          <div className="text-center text-gray-600 mt-10" style={{ textAlign: 'center', color: '#6e7681', marginTop: '40px' }}>Nenhum projeto cadastrado ou acesso negado.</div>
+        )}
       </div>
     </div>
   );

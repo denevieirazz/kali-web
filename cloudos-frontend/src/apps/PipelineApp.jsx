@@ -9,12 +9,31 @@ export const PipelineApp = () => {
 
   const handleRun = async () => {
     if (!domain) return;
+    const token = localStorage.getItem('cloudos_token');
     setOutput(''); setIsRunning(true);
     try {
       const response = await fetch('http://localhost:8080/api/pipeline/recon', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('cloudos_token')}` },
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : ''
+        },
         body: JSON.stringify({ domain })
       });
+
+      if (response.status === 403 || response.status === 401) {
+        setOutput("Sessão expirada ou não autorizada. Por favor, faça login novamente.");
+        setIsRunning(false);
+        return;
+      }
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        setOutput(`Erro (${response.status}): ${errorText}`);
+        setIsRunning(false);
+        return;
+      }
+
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       while (true) {
@@ -23,7 +42,9 @@ export const PipelineApp = () => {
         setOutput(prev => prev + decoder.decode(value));
         if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
       }
-    } catch (e) { setOutput("Erro ao executar pipeline."); }
+    } catch (e) {
+      setOutput("Erro ao conectar com o backend.");
+    }
     setIsRunning(false);
   };
 
