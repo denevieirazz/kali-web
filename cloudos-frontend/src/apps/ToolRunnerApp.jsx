@@ -227,6 +227,16 @@ export const ToolRunnerApp = ({ payload, setPayload }) => {
                     className={`bg-[#161b22] border rounded-md px-3 py-2 text-sm focus:border-blue-500 outline-none text-white ${isInvalid ? 'border-red-500' : 'border-gray-700'}`}
                     style={{ background: '#161b22', border: isInvalid ? '1px solid #f87171' : '1px solid #30363d', borderRadius: '6px', padding: '8px 12px', fontSize: '13px', color: 'white', outline: 'none' }} />
                 )}
+                {field.type === 'textarea' && (
+                  <textarea 
+                    rows="6" 
+                    placeholder={field.placeholder || 'Cole um item por linha...'} 
+                    value={formValues[field.id] || ''} 
+                    onChange={(e) => handleInputChange(field.id, e.target.value, 'text')}
+                    className={`bg-[#161b22] border rounded-md px-3 py-2 text-sm focus:border-blue-500 outline-none text-white font-mono ${isInvalid ? 'border-red-500' : 'border-gray-700'}`} 
+                    style={{ background: '#161b22', border: isInvalid ? '1px solid #f87171' : '1px solid #30363d', borderRadius: '6px', padding: '8px 12px', fontSize: '13px', color: 'white', outline: 'none', fontFamily: 'monospace' }}
+                  />
+                )}
                 {field.type === 'select' && (
                   <select value={formValues[field.id] || ''} onChange={(e) => handleInputChange(field.id, e.target.value, 'select')}
                     className={`bg-[#161b22] border rounded-md px-3 py-2 text-sm focus:border-blue-500 outline-none text-white ${isInvalid ? 'border-red-500' : 'border-gray-700'}`}

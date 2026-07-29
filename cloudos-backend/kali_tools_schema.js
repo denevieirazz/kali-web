@@ -28,11 +28,11 @@ const TOOL_SCHEMAS = {
         ]
     },
     httpx: {
-        name: "Httpx", command: "httpx", category: "recon", installCmd: "sudo apt install httpx-toolkit",
+        name: "Httpx", command: "httpx-toolkit", category: "recon", installCmd: "sudo apt install httpx-toolkit",
         description: "Validador HTTP em massa (Descobre hosts vivos).",
-        presets: [ { name: "Validar Hosts", vars: { input: "/tmp/hosts.txt", status: true, title: true, tech: true, follow: true } } ],
+        presets: [ { name: "Validar Hosts", vars: { input_text: "http://localhost\nhttp://127.0.0.1", status: true, title: true, tech: true, follow: true } } ],
         fields: [
-            { id: "input", label: "Arquivo com Hosts", type: "text", required: true, flag: "-l", default: "/tmp/hosts.txt" },
+            { id: "input_text", label: "Lista de Hosts (1 por linha)", type: "textarea", required: true, flag: "-l", default: "http://localhost\nhttp://127.0.0.1" },
             { id: "status", label: "Mostrar Status Code", type: "boolean", flag: "-status-code", default: true },
             { id: "title", label: "Extrair Título da Página", type: "boolean", flag: "-title", default: true },
             { id: "tech", label: "Detectar Tecnologias", type: "boolean", flag: "-tech-detect", default: true },

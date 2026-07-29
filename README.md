@@ -132,6 +132,7 @@ npm run dev
 15. **Blindagem de Shell, Botão Stop & Arsenal de 11 Ferramentas**: Adicionada sanitização `escapeShellArg` no backend para prevenir injeção de comandos, verificação prévia de instalação com dica de `apt install`, controle de processos com rota `/api/kali/tools/stop` e expansão do catálogo de GUIs para 11 ferramentas (`nmap`, `masscan`, `gobuster`, `ffuf`, `whatweb`, `wpscan`, `nikto`, `nuclei`, `hydra`, `sqlmap`, `john`).
 16. **Suíte Red Team & Execução Segura via Spawn Array**: Implementação da montagem de argumentos via Array no `spawn('wsl.exe', args)` anulando injeções RCE no shell e expansão do catálogo para o ciclo completo de pentesting com `subfinder`, `httpx`, `theHarvester`, `commix`, `searchsploit` e `hashcat`.
 17. **Sidebar de Categorias & Busca Dinâmica**: Adicionadas abas laterais de categorias (`Recon & OSINT`, `Web Scanning`, `Exploits`, `Cracking`), barra de pesquisa por nome/descrição e expansão de campos avançados (`-A`, `--os-shell`, `-x`, `-t`) no `ToolRunnerApp.jsx` e `kali_tools_schema.js`.
+18. **Campos Textarea & Geração Automática de Arquivos Temporários**: Suporte ao tipo `textarea` no `ToolRunnerApp.jsx` para colar listas (ex: múltiplos URLs no `Httpx`), com criação automática de arquivos temporários isolados por usuário em `.cloudos_temp` e conversão dinâmica de caminhos para o WSL Kali no backend.
 
 ---
 

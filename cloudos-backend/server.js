@@ -128,7 +128,7 @@ class SubsystemManager {
         return resolved;
     }
 
-    toLinuxPath(winPath) { return winPath.replace(WSL_FS_ROOT, '').replace(/\\/g, '/'); }
+    toLinuxPath(winPath) { return winPath.replace(/\\\\wsl\.localhost\\kali-linux/gi, '').replace(/\\/g, '/'); }
 
     async execCommand(userId, command) {
         return new Promise((resolve, reject) => {
@@ -505,17 +505,30 @@ app.post('/api/kali/tools/:id/run', async (req, res) => {
     // 2. MONTAGEM DO ARRAY DE ARGUMENTOS (BLINDAGEM TOTAL CONTRA INJEÇÃO)
     const args = ['-d', 'kali-linux', '-u', 'cloudos', '--', schema.command];
 
-    schema.fields.forEach(field => {
+    for (const field of schema.fields) {
         const val = options[field.id];
-        if (!val) return;
-        
+        if (!val) continue;
+
         if (field.type === 'boolean' && val === true) {
             if (field.flag) args.push(field.flag);
+        } else if (field.type === 'textarea' && val) {
+            // LÓGICA DO TEXTAREA: Salva em arquivo temporário isolado por usuário
+            const tempDir = path.join(subsystem.getSecurePath(req.user.id, ''), '.cloudos_temp');
+            await fs.promises.mkdir(tempDir, { recursive: true });
+            const tempFileWin = path.join(tempDir, `input_${Date.now()}.txt`);
+            
+            // Escreve o conteúdo do textarea no arquivo
+            await fs.promises.writeFile(tempFileWin, val);
+            
+            // Converte o caminho Windows para caminho Linux e passa pro args
+            const tempFileLinux = subsystem.toLinuxPath(tempFileWin);
+            if (field.flag) args.push(field.flag);
+            args.push(tempFileLinux);
         } else if ((field.type === 'text' || field.type === 'select') && val) {
             if (field.flag) args.push(field.flag);
-            args.push(String(val)); // Adiciona o valor direto no array, sem shell
+            args.push(String(val));
         }
-    });
+    }
 
     logEvent(req.user.id, 'tool_execute', `Executou: ${schema.command} (Blindado)`);
     
