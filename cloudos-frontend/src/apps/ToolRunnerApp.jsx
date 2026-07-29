@@ -1,7 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
 import { Play, Square, Terminal, Settings2, Crosshair } from 'lucide-react';
 
-export default function ToolRunnerApp({ toolSchema, activeProject }) {
+export function ToolRunnerApp({ toolSchema, activeProject }) {
+  // Garantir schema seguro caso toolSchema venha undefined ou nulo
+  const safeSchema = toolSchema || {
+    id: 'unknown',
+    name: 'Ferramenta',
+    fields: [],
+    buildCmd: () => ({ cmd: 'echo', args: ['Pronto'] })
+  };
+
   // Estado inicial baseado no schema
   const [fields, setFields] = useState({});
   const [output, setOutput] = useState('');
@@ -13,12 +21,14 @@ export default function ToolRunnerApp({ toolSchema, activeProject }) {
   useEffect(() => {
     // Inicializa fields com defaults do schema
     const initial = {};
-    toolSchema.fields.forEach(f => {
-      initial[f.name] = f.default !== undefined ? f.default : (f.type === 'checkbox' ? false : '');
-    });
+    if (safeSchema.fields) {
+      safeSchema.fields.forEach(f => {
+        initial[f.name] = f.default !== undefined ? f.default : (f.type === 'checkbox' ? false : '');
+      });
+    }
     setFields(initial);
-    setOutput(`[+] ${toolSchema.name} carregado. Configure as opções e clique em Executar.\n`);
-  }, [toolSchema]);
+    setOutput(`[+] ${safeSchema.name} carregado. Configure as opções e clique em Executar.\n`);
+  }, [safeSchema]);
 
   useEffect(() => {
     // Auto-scroll terminal
@@ -27,9 +37,13 @@ export default function ToolRunnerApp({ toolSchema, activeProject }) {
 
   // Constrói o comando em tempo real para preview
   const commandPreview = () => {
-    if (!toolSchema.buildCmd) return '';
-    const { cmd, args } = toolSchema.buildCmd(fields);
-    return `${cmd} ${args.join(' ')}`;
+    if (!safeSchema.buildCmd) return '';
+    try {
+      const { cmd, args } = safeSchema.buildCmd(fields);
+      return `${cmd} ${(args || []).join(' ')}`;
+    } catch (e) {
+      return '';
+    }
   };
 
   const handleChange = (name, value) => {
@@ -50,7 +64,7 @@ export default function ToolRunnerApp({ toolSchema, activeProject }) {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ toolId: toolSchema.id, fields })
+        body: JSON.stringify({ toolId: safeSchema.id, fields })
       });
 
       if (!response.ok) throw new Error('Falha na requisição');
@@ -111,15 +125,15 @@ export default function ToolRunnerApp({ toolSchema, activeProject }) {
             <Settings2 size={14} /> Configurações
           </div>
           <div style={styles.fieldsContainer}>
-            {toolSchema.fields.map(field => (
+            {safeSchema.fields && safeSchema.fields.map(field => (
               <FieldRenderer key={field.name} field={field} value={fields[field.name]} onChange={handleChange} />
             ))}
           </div>
           
-          {toolSchema.presets && toolSchema.presets.length > 0 && (
+          {safeSchema.presets && safeSchema.presets.length > 0 && (
             <div style={styles.presetsContainer}>
               <div style={styles.presetsTitle}>Presets Rápidos</div>
-              {toolSchema.presets.map(preset => (
+              {safeSchema.presets.map(preset => (
                 <button 
                   key={preset.name} 
                   style={styles.presetBtn}
@@ -430,3 +444,5 @@ const styles = {
     wordBreak: 'break-word',
   },
 };
+
+export default ToolRunnerApp;
