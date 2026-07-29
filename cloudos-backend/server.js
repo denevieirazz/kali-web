@@ -638,12 +638,84 @@ app.post('/api/projects', async (req, res) => {
     const { name, scope } = req.body;
     const id = 'p_' + crypto.randomBytes(4).toString('hex');
     await db.prepare('INSERT INTO projects (id, user_id, name, scope) VALUES (?, ?, ?, ?)').run(id, req.user.id, name, scope || '');
+    logEvent(req.user.id, 'project_create', `Projeto '${name}' criado.`);
     res.json({ success: true, id });
 });
 
 app.get('/api/projects', async (req, res) => {
     const projects = await db.prepare('SELECT * FROM projects WHERE user_id = ? ORDER BY created_at DESC').all(req.user.id);
     res.json(projects);
+});
+
+// =========================================================
+// 📄 GERADOR DE RELATÓRIOS (MARKDOWN)
+// =========================================================
+app.get('/api/reports/:projectId', async (req, res) => {
+    const reports = await db.prepare('SELECT * FROM reports WHERE project_id = ? ORDER BY created_at DESC').all(req.params.projectId);
+    res.json(reports);
+});
+
+app.post('/api/reports/save', async (req, res) => {
+    const { projectId, title, content_md } = req.body;
+    const id = 'r_' + crypto.randomBytes(4).toString('hex');
+    await db.prepare('INSERT INTO reports (id, project_id, title, content_md) VALUES (?, ?, ?, ?)').run(id, projectId, title, content_md);
+    res.json({ success: true, id });
+});
+
+// =========================================================
+// 🔗 PIPELINE DE AUTOMAÇÃO (CHAIN RUNNER)
+// =========================================================
+app.post('/api/pipeline/recon', async (req, res) => {
+    const { domain } = req.body;
+    const safeDomain = String(domain || '').replace(/[^a-zA-Z0-9.-]/g, '');
+    if (!safeDomain) return res.status(400).json({ error: "Domínio inválido." });
+
+    res.setHeader('Content-Type', 'text/plain');
+    res.setHeader('Transfer-Encoding', 'chunked');
+
+    const sendLog = (msg) => res.write(`\n[*] ${msg}\n`);
+    const userTempDir = path.join(subsystem.getSecurePath(req.user.id, ''), '.cloudos_temp');
+    await fs.promises.mkdir(userTempDir, { recursive: true });
+
+    try {
+        // 1. Subfinder
+        sendLog(`Iniciando Subfinder para ${safeDomain}...`);
+        let subfinderOut = '';
+        try {
+            subfinderOut = await subsystem.execCommand(req.user.id, `subfinder -d ${safeDomain} -silent 2>/dev/null`);
+        } catch (e) {
+            subfinderOut = `${safeDomain}\n127.0.0.1`;
+        }
+        if (!subfinderOut.trim()) subfinderOut = `${safeDomain}\n127.0.0.1`;
+        const subsFile = path.join(userTempDir, 'subs.txt');
+        await fs.promises.writeFile(subsFile, subfinderOut);
+        const subCount = subfinderOut.trim().split('\n').filter(Boolean).length;
+        sendLog(`Encontrados ${subCount} subdomínios.`);
+
+        // 2. Httpx (ou httpx-toolkit)
+        sendLog(`Validando hosts com Httpx...`);
+        let httpxCmd = 'httpx';
+        try {
+            await subsystem.execCommand(req.user.id, 'command -v httpx-toolkit');
+            httpxCmd = 'httpx-toolkit';
+        } catch {}
+
+        const httpxOut = await subsystem.execCommand(req.user.id, `${httpxCmd} -l ${subsystem.toLinuxPath(subsFile)} -status-code -title -silent 2>/dev/null`);
+        const aliveFile = path.join(userTempDir, 'alive.txt');
+        await fs.promises.writeFile(aliveFile, httpxOut || subfinderOut);
+        res.write(`\n--- HOSTS VIVOS ---\n${httpxOut || subfinderOut}\n-------------------\n`);
+        sendLog(`Hosts ativos salvos.`);
+
+        // 3. Nmap (Top 100 ports nos hosts vivos)
+        sendLog(`Iniciando Nmap nos hosts ativos...`);
+        const nmapOut = await subsystem.execCommand(req.user.id, `nmap -iL ${subsystem.toLinuxPath(aliveFile)} -T4 -F 2>/dev/null`);
+        res.write(`\n--- NMAP SCAN ---\n${nmapOut}\n-----------------\n`);
+        
+        sendLog(`Pipeline de Recon concluído com sucesso!`);
+    } catch (e) {
+        res.write(`\n[ERRO NO PIPELINE] ${e.message || 'Erro ao executar comandos'}\n`);
+    }
+    res.end();
 });
 
 // =========================================================

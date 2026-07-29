@@ -89,10 +89,13 @@ export const CloudOSProvider = ({ children }) => {
 
   const lockSystem = () => setIsLocked(true);
 
+  const [activeProject, setActiveProject] = useState(null);
+
   return (
     <CloudOSContext.Provider value={{ 
       user, settings, setSettings, desktopState, saveDesktopState, 
-      notifications, fetchNotifications, pinnedApps, togglePin, isLocked, lockSystem 
+      notifications, fetchNotifications, pinnedApps, togglePin, isLocked, lockSystem,
+      activeProject, setActiveProject
     }}>
       {children}
     </CloudOSContext.Provider>

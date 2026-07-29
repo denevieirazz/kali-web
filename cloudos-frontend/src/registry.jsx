@@ -1,4 +1,4 @@
-import { Terminal as TerminalIcon, FolderOpen, Code2, Activity, ShieldCheck, Settings as SettingsIcon, AlertTriangle, Download, Boxes, LayoutGrid, ArrowRightLeft } from 'lucide-react';
+import { Terminal as TerminalIcon, FolderOpen, Code2, Activity, ShieldCheck, Settings as SettingsIcon, AlertTriangle, Download, Boxes, LayoutGrid, ArrowRightLeft, FolderArchive, Workflow } from 'lucide-react';
 import { TerminalApp } from './apps/TerminalApp';
 import { FileManagerApp } from './apps/FileManagerApp';
 import { CodeEditorApp } from './apps/CodeEditorApp';
@@ -10,11 +10,15 @@ import { AppStoreApp } from './apps/AppStoreApp';
 import { KaliHubApp } from './apps/KaliHubApp';
 import { ToolRunnerApp } from './apps/ToolRunnerApp';
 import { RepeaterApp } from './apps/RepeaterApp';
+import { ProjectsApp } from './apps/ProjectsApp';
+import { PipelineApp } from './apps/PipelineApp';
 
 export const AppRegistry = {
   terminal: { id: 'terminal', title: 'Terminal', icon: TerminalIcon, Component: TerminalApp },
   kalihub: { id: 'kalihub', title: 'Kali Hub', icon: Boxes, Component: KaliHubApp },
   toolrunner: { id: 'toolrunner', title: 'Tool Runner', icon: LayoutGrid, Component: ToolRunnerApp },
+  pipeline: { id: 'pipeline', title: 'Automação', icon: Workflow, Component: PipelineApp },
+  projects: { id: 'projects', title: 'Projetos', icon: FolderArchive, Component: ProjectsApp },
   repeater: { id: 'repeater', title: 'HTTP Repeater', icon: ArrowRightLeft, Component: RepeaterApp },
   files: { id: 'files', title: 'File Manager', icon: FolderOpen, Component: FileManagerApp },
   editor: { id: 'editor', title: 'Code Editor', icon: Code2, Component: CodeEditorApp },
