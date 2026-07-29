@@ -7,61 +7,78 @@ export const useCloudOS = () => useContext(CloudOSContext);
 
 export const CloudOSProvider = ({ children }) => {
   const [user, setUser] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState({ wallpaper: 'linear-gradient(135deg, #0f0c29, #302b63, #24243e)' });
   const [desktopState, setDesktopState] = useState({ icon_positions: {}, open_windows: [], taskbar_pins: [] });
   const [notifications, setNotifications] = useState([]);
   const [pinnedApps, setPinnedApps] = useState([]);
   const [isLocked, setIsLocked] = useState(false);
+  const [activeProject, setActiveProject] = useState(null);
+
   const token = localStorage.getItem('cloudos_token');
 
-  const fetchState = useCallback(async () => {
-    if (!token) return;
-    try {
-      const res = await fetch(`${API_BASE}/api/user/state`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await res.json();
-      
-      if (data.settings) setSettings(data.settings);
-      if (data.desktop) {
-        setDesktopState({
-          icon_positions: JSON.parse(data.desktop.icon_positions || '{}'),
-          open_windows: JSON.parse(data.desktop.open_windows || '[]'),
-          taskbar_pins: JSON.parse(data.desktop.taskbar_pins || '[]')
-        });
-      }
-    } catch (e) { console.error("Erro ao buscar estado", e); }
-  }, [token]);
+  const fetchAll = useCallback(async () => {
+    if (!token) {
+      setLoading(false);
+      setIsAuthenticated(false);
+      return;
+    }
 
-  const fetchNotifications = useCallback(async () => {
-    if (!token) return;
-    try {
-      const res = await fetch(`${API_BASE}/api/notifications`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (Array.isArray(data)) setNotifications(data);
-    } catch (e) {}
-  }, [token]);
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    };
 
-  const fetchPinnedApps = useCallback(async () => {
-    if (!token) return;
     try {
-      const res = await fetch(`${API_BASE}/api/apps`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (Array.isArray(data)) {
-        setPinnedApps(data.filter(a => a.is_pinned).map(a => a.app_id));
+      // 1. Fetch State
+      const stateRes = await fetch(`${API_BASE}/api/user/state`, { headers });
+      if (stateRes.status === 403 || stateRes.status === 401) {
+        localStorage.removeItem('cloudos_token');
+        setIsAuthenticated(false);
+        setLoading(false);
+        return;
       }
-    } catch (e) {}
+
+      if (stateRes.ok) {
+        const data = await stateRes.json();
+        if (data.user) setUser(data.user);
+        if (data.settings) setSettings(data.settings);
+        if (data.desktop) {
+          setDesktopState({
+            icon_positions: JSON.parse(data.desktop.icon_positions || '{}'),
+            open_windows: JSON.parse(data.desktop.open_windows || '[]'),
+            taskbar_pins: JSON.parse(data.desktop.taskbar_pins || '[]')
+          });
+        }
+        setIsAuthenticated(true);
+      }
+
+      // 2. Fetch Notifications
+      const notifRes = await fetch(`${API_BASE}/api/notifications`, { headers });
+      if (notifRes.ok) {
+        const notifData = await notifRes.json();
+        setNotifications(Array.isArray(notifData) ? notifData : []);
+      }
+
+      // 3. Fetch Apps
+      const appsRes = await fetch(`${API_BASE}/api/apps`, { headers });
+      if (appsRes.ok) {
+        const appsData = await appsRes.json();
+        if (Array.isArray(appsData)) {
+          setPinnedApps(appsData.filter(a => a.is_pinned).map(a => a.app_id));
+        }
+      }
+    } catch (e) {
+      console.error("Erro ao carregar dados iniciais", e);
+    } finally {
+      setLoading(false);
+    }
   }, [token]);
 
   useEffect(() => {
-    fetchState();
-    fetchNotifications();
-    fetchPinnedApps();
-  }, [fetchState, fetchNotifications, fetchPinnedApps]);
+    fetchAll();
+  }, [fetchAll]);
 
   const togglePin = async (appId, isPinned) => {
     setPinnedApps(prev => isPinned ? [...prev, appId] : prev.filter(id => id !== appId));
@@ -89,12 +106,10 @@ export const CloudOSProvider = ({ children }) => {
 
   const lockSystem = () => setIsLocked(true);
 
-  const [activeProject, setActiveProject] = useState(null);
-
   return (
     <CloudOSContext.Provider value={{ 
-      user, settings, setSettings, desktopState, saveDesktopState, 
-      notifications, fetchNotifications, pinnedApps, togglePin, isLocked, lockSystem,
+      user, isAuthenticated, loading, settings, setSettings, desktopState, saveDesktopState, 
+      notifications, fetchNotifications: fetchAll, pinnedApps, togglePin, isLocked, lockSystem,
       activeProject, setActiveProject
     }}>
       {children}
