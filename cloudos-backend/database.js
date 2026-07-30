@@ -153,6 +153,58 @@ rawDb.serialize(() => {
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
     `);
+
+    rawDb.run(`
+        CREATE TABLE IF NOT EXISTS project_scopes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id TEXT NOT NULL,
+            target TEXT NOT NULL,
+            type TEXT NOT NULL,
+            is_authorized INTEGER DEFAULT 1,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+    `);
+
+    rawDb.run(`
+        CREATE TABLE IF NOT EXISTS jobs (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            project_id TEXT,
+            tool_id TEXT NOT NULL,
+            command TEXT NOT NULL,
+            status TEXT DEFAULT 'queued',
+            output_path TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            finished_at DATETIME
+        );
+    `);
+
+    rawDb.run(`
+        CREATE TABLE IF NOT EXISTS findings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            severity TEXT DEFAULT 'low',
+            status TEXT DEFAULT 'open',
+            description TEXT,
+            evidence_path TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
+
+    rawDb.run(`
+        CREATE TABLE IF NOT EXISTS evidence (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            source_tool TEXT,
+            hash TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
 });
 
 const db = {

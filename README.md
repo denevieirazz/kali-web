@@ -143,6 +143,11 @@ npm run dev
 26. **Descrições de Campos & Schema Nmap em Português**: Atualizado o `FieldRenderer` do `ToolRunnerApp.jsx` para renderizar descrições explicativas táticas sob cada campo e reescrito o schema do `nmap` no `kali_tools_schema.js` com explicações em português para auxílio em Red Team.
 27. **Adição de Schemas John & Aircrack-ng**: Incorporados os schemas e funções `buildCmd` de `john` (John the Ripper) e `aircrack` (Aircrack-ng) no `kali_tools_schema.js` com suporte a presets táticos e descrições detalhadas.
 28. **KaliHubApp Enterprise V3**: Reformulação visual do hub tático de ferramentas com CSS isolado (`KaliHubApp.css`), painel lateral deslizante de detalhes (`<aside>`), barreira de segurança (*Scope Guard*) para ferramentas de risco `restricted`, skeleton loading em grid, barra de status inferior em tempo real com indicador WSL e suporte a modo mobile adaptativo.
+29. **Fundação da Arquitetura V3 Enterprise**:
+    - **Tabelas V3 no DB**: Criadas as tabelas `project_scopes`, `jobs`, `findings` e `evidence` em modo WAL.
+    - **Scope Guard Backend**: Módulo `scopeGuard.js` para validação e bloqueio de alvos fora da lista branca de autorização.
+    - **ProjectContext Frontend**: Provedor global `ProjectContext.jsx` para compartilhamento do escopo ativo entre janelas.
+    - **Universal Search (`Ctrl+K`)**: Componente `UniversalSearch.jsx` para busca unificada estilo Spotlight em aplicativos, ferramentas Kali e projetos.
 
 ---
 
