@@ -11,29 +11,36 @@ export function TerminalPane({ tabId, isActive }) {
   const bufferRef = useRef([]);
   const [isInitialized, setIsInitialized] = useState(false);
 
-  // 1. Conexão WebSocket (Raw PTY)
+  // 1. Conexão WebSocket (Com atraso para ignorar o Strict Mode)
   useEffect(() => {
-    let isMounted = true;
-    const token = localStorage.getItem('cloudos_token');
-    const ws = new WebSocket(`ws://localhost:8080?token=${encodeURIComponent(token || '')}`);
-    wsRef.current = ws;
+    let ws = null;
+    
+    // Atrasa a conexão em 50ms. Se o React desmontar antes (Strict Mode), cancela.
+    const timer = setTimeout(() => {
+      const token = localStorage.getItem('cloudos_token');
+      ws = new WebSocket(`ws://localhost:8080?token=${encodeURIComponent(token || '')}`);
+      wsRef.current = ws;
 
-    ws.onmessage = (event) => {
-      if (termRef.current) {
-        if (typeof event.data === 'string') {
-          termRef.current.write(event.data);
+      ws.onmessage = (event) => {
+        if (termRef.current) {
+          if (typeof event.data === 'string') {
+            termRef.current.write(event.data);
+          } else {
+            termRef.current.write(new Uint8Array(event.data));
+          }
         } else {
-          termRef.current.write(new Uint8Array(event.data));
+          bufferRef.current.push(event.data);
         }
-      } else {
-        bufferRef.current.push(event.data);
-      }
-    };
+      };
+    }, 50);
 
     return () => {
-      isMounted = false;
-      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-        ws.close();
+      clearTimeout(timer); // Cancela a criação se desmontar rápido
+      if (ws) {
+        ws.onmessage = null; // Remove o listener para evitar memory leak
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+          ws.close();
+        }
       }
     };
   }, [tabId]);
@@ -97,11 +104,12 @@ export function TerminalPane({ tabId, isActive }) {
         onData.dispose();
         resizeObserver.disconnect();
       };
-    }, 50);
+    }, 100); // 100ms para garantir que o CSS aplicou o tamanho na div
 
     return () => clearTimeout(initTimer);
   }, [isActive, isInitialized]);
 
+  // 3. Reajustar o tamanho quando voltar a ser ativo
   useEffect(() => {
     if (isActive && isInitialized && fitRef.current && containerRef.current) {
       const resizeTimer = setTimeout(() => {

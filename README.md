@@ -186,9 +186,9 @@ npm run dev
 40. **CloudOS Terminal Pro Enterprise (`TerminalProApp.jsx`)**:
     - **Gestão de Sessões Isoladas (`terminalSessionManager.js`)**: Gerenciador backend com `node-pty` de sessões WSL2 Kali Linux via Map id-sessão com controle por token JWT.
     - **Túnel PTY Bruto Sem Poluição**: Remoção total do envio de JSON de controle via WebSocket pelo frontend. Apenas entradas de teclado reais e saídas ANSI puras transitam no socket.
+    - **Atraso Defensivo WebSocket (50ms em `TerminalPane.jsx`)**: Adiamento da criação do socket para absorver montagens rápidas em Strict Mode do React 18 sem emitir avisos de fechamento no console.
     - **Estética Glassmorphism Premium (`TerminalProApp.css`)**: Fundo semitransparente com desfoque de camada (`backdrop-filter: blur(12px)`), abas arredondadas e destaque em azul neon para a aba/painel ativo.
     - **Sidebar Tática Simplificada (`TerminalSidebar.jsx`)**: Interface limpa focada exclusivamente na visualização do histórico de comandos executados.
-    - **Otimização da API Kali Hub (`KaliHubApp.jsx`)**: Removida a requisição HTTP secundária para `/api/kali/tools/recent`, eliminando registros 404 de rede do navegador.
 
 ---
 
