@@ -35,6 +35,8 @@ export default function Window({ win, onClose, onFocus, children, isMobile }) {
   const [maximized, setMaximized] = useState(false);
   const [maxW, setMaxW] = useState(window.innerWidth);
   const [maxH, setMaxH] = useState(window.innerHeight - 50);
+  const [size, setSize] = useState({ width: win.w || 750, height: win.h || 500 });
+  const [pos, setPos] = useState({ x: win.x || 50, y: win.y || 50 });
 
   useEffect(() => {
     const handleResize = () => {
@@ -47,16 +49,36 @@ export default function Window({ win, onClose, onFocus, children, isMobile }) {
 
   const isFull = isMobile || maximized;
 
+  // Lógica de Window Snapping estilo Windows 11 (Split Screen)
+  const handleDragStop = (e, d) => {
+    if (d.x <= 10) {
+      // Snapping na Esquerda -> Ocupa metade esquerda da tela
+      setPos({ x: 0, y: 0 });
+      setSize({ width: Math.floor(window.innerWidth / 2), height: window.innerHeight - 48 });
+    } else if (d.x >= window.innerWidth - (win.w || 300) - 20) {
+      // Snapping na Direita -> Ocupa metade direita da tela
+      setPos({ x: Math.floor(window.innerWidth / 2), y: 0 });
+      setSize({ width: Math.floor(window.innerWidth / 2), height: window.innerHeight - 48 });
+    } else {
+      setPos({ x: d.x, y: d.y });
+    }
+  };
+
   return (
     <Rnd
-      size={isFull ? { width: maxW, height: maxH } : { width: win.w, height: win.h }}
-      position={isFull ? { x: 0, y: 0 } : { x: win.x, y: win.y }}
+      size={isFull ? { width: maxW, height: maxH } : size}
+      position={isFull ? { x: 0, y: 0 } : pos}
       minWidth={isMobile ? window.innerWidth : 300}
       minHeight={isMobile ? window.innerHeight - 50 : 200}
       maxWidth={maxW} maxHeight={maxH}
       bounds="parent"
       dragHandleClassName="window-header"
       onMouseDown={onFocus}
+      onDragStop={handleDragStop}
+      onResizeStop={(e, direction, ref, delta, position) => {
+        setSize({ width: parseInt(ref.style.width, 10), height: parseInt(ref.style.height, 10) });
+        setPos(position);
+      }}
       style={{ zIndex: win.z, position: 'absolute' }}
       enableResizing={!isFull}
       disableDragging={isFull}

@@ -95,8 +95,7 @@ function Desktop() {
     <div 
       className="desktop" 
       style={{ width: '100vw', height: '100vh', overflow: 'hidden', position: 'relative', background: wallpaperUrl.startsWith('http') ? `url(${wallpaperUrl}) center/cover no-repeat` : wallpaperUrl }} 
-      onClick={() => { setContextMenu({...contextMenu, visible: false}); setShowNotifs(false); setStartOpen(false); }}
-      onContextMenu={(e) => { e.preventDefault(); setContextMenu({ visible: true, x: e.clientX, y: e.clientY }); }}
+      onClick={() => { setShowNotifs(false); setStartOpen(false); }}
     >
       {/* 1. Área de Trabalho com Widgets e Atalhos Arrastáveis */}
       <DesktopArea apps={AppList} openWindows={windows} onOpenApp={openApp} />
@@ -133,32 +132,6 @@ function Desktop() {
         onTaskbarClick={handleTaskbarClick}
         onCloseWindow={closeApp}
       />
-
-      {/* Notification Center Dropdown */}
-      {showNotifs && (
-        <div className="notif-center" onClick={(e) => e.stopPropagation()}>
-          <h3>Notificações</h3>
-          {(!notifications || notifications.length === 0) ? <p style={{ color: '#9ca3af', fontSize: '13px' }}>Sem novidades.</p> : 
-            notifications.map(n => (
-              <div key={n.id} className={`notif-item ${n.type}`}>
-                <div className="notif-title">{n.title}</div>
-                <div className="notif-msg">{n.message}</div>
-                <div className="notif-time">{new Date(n.created_at).toLocaleTimeString()}</div>
-              </div>
-            ))
-          }
-        </div>
-      )}
-
-      {/* Context Menu */}
-      {contextMenu.visible && (
-        <div className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x }} onClick={(e) => e.stopPropagation()}>
-          <div className="context-item" onClick={() => { setIsPaletteOpen(true); setContextMenu({...contextMenu, visible: false}); }}><Search size={14} /> Buscar Apps (Ctrl+Shift+P)</div>
-          <div className="context-divider"></div>
-          <div className="context-item" onClick={() => { lockSystem(); setContextMenu({...contextMenu, visible: false}); }}><Lock size={14} /> Bloquear Tela</div>
-          <div className="context-item danger" onClick={handleLogout}><Power size={14} /> Sair / Logout</div>
-        </div>
-      )}
     </div>
   );
 }
