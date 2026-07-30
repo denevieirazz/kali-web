@@ -187,7 +187,7 @@ npm run dev
     - **Gestão de Sessões Isoladas (`terminalSessionManager.js`)**: Gerenciador backend com `node-pty` de sessões WSL2 Kali Linux via Map id-sessão com controle por token JWT.
     - **WebSocket Protocol Defensivo Híbrido**: Suporte transparente e silencioso tanto para pacotes de controle JSON (`session_created`, `output`) quanto para cadeias de caracteres e buffers ANSI brutos emitidos pelo PTY do terminal.
     - **Sidebar Tática Simplificada (`TerminalSidebar.jsx`)**: Interface limpa focada exclusivamente na visualização do histórico de comandos executados.
-    - **Soft Catch na API Kali Hub (`KaliHubApp.jsx`)**: Tratamento defensivo no carregamento de ferramentas recentes para prevenir erros no console em ambientes sem a rota secundária.
+    - **Otimização da API Kali Hub (`KaliHubApp.jsx`)**: Removida a requisição HTTP secundária para `/api/kali/tools/recent`, eliminando registros 404 de rede do navegador.
 
 ---
 

@@ -42,15 +42,13 @@ export function KaliHubApp({ payload, setPayload, openApp }) {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [toolsRes, favRes, recentRes] = await Promise.all([
+      const [toolsRes, favRes] = await Promise.all([
         fetch(`${API_BASE}/api/kali/tools`, { headers }).catch(() => null),
-        fetch(`${API_BASE}/api/kali/tools/favorites`, { headers }).catch(() => null),
-        fetch(`${API_BASE}/api/kali/tools/recent`, { headers }).catch(() => null)
+        fetch(`${API_BASE}/api/kali/tools/favorites`, { headers }).catch(() => null)
       ]);
 
       if (toolsRes && toolsRes.ok) setTools(await toolsRes.json());
       if (favRes && favRes.ok) setFavorites((await favRes.json()).map(t => t.id || t.tool_id));
-      if (recentRes && recentRes.ok) setRecent((await recentRes.json()).map(t => t.id || t.tool_id));
     } catch (e) {
       console.error("Erro ao carregar catálogo:", e);
     } finally {
