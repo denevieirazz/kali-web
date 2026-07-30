@@ -27,12 +27,14 @@ export function TerminalProApp({ payload, setPayload, openApp }) {
 
     ws.onmessage = (event) => {
       try {
+        if (typeof event.data !== 'string' || !event.data.startsWith('{')) return;
+        
         const msg = JSON.parse(event.data);
         if (msg.type === 'session_created') {
           setTabs(prev => [...prev, { id: msg.sessionId, title: `bash (${prev.length + 1})`, panes: [{ id: msg.sessionId, active: true }] }]);
           setActiveTabId(msg.sessionId);
         }
-      } catch (e) { console.error("WS Parse Error:", e); }
+      } catch(e) {}
     };
 
     const handleKey = (e) => {

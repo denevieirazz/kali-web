@@ -37,14 +37,18 @@ export function TerminalPane({ sessionId, ws, active }) {
       ws.send(JSON.stringify({ type: 'attach', sessionId }));
     }
 
-    // Listener de mensagens do WS (apenas para esta sessão)
+    // Listener de mensagens do WS
     const onWsMessage = (event) => {
       try {
-        const msg = JSON.parse(event.data);
-        if (msg.type === 'output' && msg.sessionId === sessionId) {
-          term.write(msg.data);
+        if (typeof event.data === 'string' && event.data.startsWith('{')) {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'output' && msg.sessionId === sessionId) {
+            term.write(msg.data);
+          }
+        } else {
+          term.write(event.data);
         }
-      } catch (e) {}
+      } catch(e) {}
     };
 
     ws.addEventListener('message', onWsMessage);
