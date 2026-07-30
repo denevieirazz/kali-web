@@ -1,0 +1,113 @@
+{
+  "version": 1,
+  "skills": {
+    "mantis-architecture": {
+      "source": "google/mantis",
+      "sourceType": "github",
+      "skillPath": "mantis-architecture/SKILL.md",
+      "computedHash": "4fedeabbc567c1c08178c84780a9e26d734a5bceb8ed78b3373cc0cc38e84be9"
+    },
+    "mantis-calibrate": {
+      "source": "google/mantis",
+      "sourceType": "github",
+      "skillPath": "mantis-calibrate/SKILL.md",
+      "computedHash": "89e277c1eea218660f602259f5ebe83abb135df31cf2a9cc535d44d206d62bb1"
+    },
+    "mantis-chain": {
+      "source": "google/mantis",
+      "sourceType": "github",
+      "skillPath": "mantis-chain/SKILL.md",
+      "computedHash": "b30ff7b8f2ffe33ac5f4a7b94d9d63eea8495126c879317526438dc515f0cce2"
+    },
+    "mantis-critic": {
+      "source": "google/mantis",
+      "sourceType": "github",
+      "skillPath": "mantis-critic/SKILL.md",
+      "computedHash": "094e12abbf3a11d7868bb7b753f4ef09ad25c0c072456ac28deeef1d485a2d28"
+    },
+    "mantis-dedupe": {
+      "source": "google/mantis",
+      "sourceType": "github",
+      "skillPath": "mantis-dedupe/SKILL.md",
+      "computedHash": "efc74a9a339a67c783a7ba7f67f693a67b3656a92c8b1b6d417ffb62f94149b0"
+    },
+    "mantis-history": {
+      "source": "google/mantis",
+      "sourceType": "github",
+      "skillPath": "mantis-history/SKILL.md",
+      "computedHash": "50d53375bd7ce1438e5dc933bef10640b8608802bf0ac4a241c6edf4e0158f5f"
+    },
+    "mantis-meta-agent": {
+      "source": "google/mantis",
+      "sourceType": "github",
+      "skillPath": "mantis-meta-agent/SKILL.md",
+      "computedHash": "37f9861759028d25c50d353a4ba86741c3a50d8803c4d4fc7d4ff97f7c14135a"
+    },
+    "mantis-patch": {
+      "source": "google/mantis",
+      "sourceType": "github",
+      "skillPath": "mantis-patch/SKILL.md",
+      "computedHash": "fe9bc65227238038adf762f3cf2f0e5b260c25a20a228c67a96c5422021284f6"
+    },
+    "mantis-pipeline-adapter": {
+      "source": "google/mantis",
+      "sourceType": "github",
+      "skillPath": "mantis-pipeline-adapter/SKILL.md",
+      "computedHash": "f85cb6566e68b74dac14556d0052fac5d9f9f7ad51bd925878f57afe3fcd9636"
+    },
+    "mantis-plan": {
+      "source": "google/mantis",
+      "sourceType": "github",
+      "skillPath": "mantis-plan/SKILL.md",
+      "computedHash": "92e29500231cbf61505a6d954b868f3d221ef204880633fb07820aba36984fd0"
+    },
+    "mantis-reflect": {
+      "source": "google/mantis",
+      "sourceType": "github",
+      "skillPath": "mantis-reflect/SKILL.md",
+      "computedHash": "da541a03b37c3bde5ba5513de670673490e0fd663acd53222a1233c454f90906"
+    },
+    "mantis-report": {
+      "source": "google/mantis",
+      "sourceType": "github",
+      "skillPath": "mantis-report/SKILL.md",
+      "computedHash": "63bde693b2a32fb0433f90be4ad081af33230f8de8a318daafcf7acefc836c1b"
+    },
+    "mantis-reproduce": {
+      "source": "google/mantis",
+      "sourceType": "github",
+      "skillPath": "mantis-reproduce/SKILL.md",
+      "computedHash": "2e1aeab5cbdd94bdcb706a43d4bb4dadc10c62d4d323fd53fa250070faa26a13"
+    },
+    "mantis-researcher": {
+      "source": "google/mantis",
+      "sourceType": "github",
+      "skillPath": "mantis-researcher/SKILL.md",
+      "computedHash": "f3cdb1717830031b6b430b2d0c978768087e2f7439094c645554bc29bef04bb0"
+    },
+    "mantis-review": {
+      "source": "google/mantis",
+      "sourceType": "github",
+      "skillPath": "mantis-review/SKILL.md",
+      "computedHash": "a787b7f1fd32f39e222dea4a23764e71a95cb19456cf7219da73b3b56be094cf"
+    },
+    "mantis-structural-index": {
+      "source": "google/mantis",
+      "sourceType": "github",
+      "skillPath": "mantis-structural-index/SKILL.md",
+      "computedHash": "73c8a8359f7cfc9b87a6fb3ccef7313ecfc99fcacbcc088ebb7d9e6bbcb17dac"
+    },
+    "mantis-summarize": {
+      "source": "google/mantis",
+      "sourceType": "github",
+      "skillPath": "mantis-summarize/SKILL.md",
+      "computedHash": "f7832eea5b15ee44d33ae56df94cac19024ee68a74ac4326c0bf4817d9bdaac6"
+    },
+    "mantis-threat-model": {
+      "source": "google/mantis",
+      "sourceType": "github",
+      "skillPath": "mantis-threat-model/SKILL.md",
+      "computedHash": "897fae4a6c427115005f849d86d472910105b41bb458ace7be53fc98109688b4"
+    }
+  }
+}

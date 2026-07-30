@@ -11,3 +11,4 @@ WScript.Sleep 4000
 
 ' Abre o navegador no endereço do CloudOS
 WshShell.Run "http://localhost:5173"
+

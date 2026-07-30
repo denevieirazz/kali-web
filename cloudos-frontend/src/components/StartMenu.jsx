@@ -1,11 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, Power, Lock, X } from 'lucide-react';
+import { Search, Power, X, LayoutGrid } from 'lucide-react';
 
-export default function StartMenu({ apps = [], onOpenApp, onClose, onLogout, onLock }) {
+export default function StartMenu({ apps, onOpenApp, onClose }) {
   const [search, setSearch] = useState('');
   const menuRef = useRef(null);
 
-  // Fecha o menu ao clicar fora (no desktop)
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (menuRef.current && !menuRef.current.contains(e.target)) {
@@ -16,77 +15,69 @@ export default function StartMenu({ apps = [], onOpenApp, onClose, onLogout, onL
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [onClose]);
 
-  const filteredApps = apps.filter(app => {
-    const name = app.title || app.name || '';
+  const filteredApps = (apps || []).filter(app => {
+    const name = app.name || app.title || app.id || '';
     return name.toLowerCase().includes(search.toLowerCase());
   });
 
-  const handleOpen = (appId) => {
-    onOpenApp(appId);
-    onClose();
-  };
-
   return (
-    <div style={styles.overlay} className="startmenu-overlay" onClick={(e) => e.stopPropagation()}>
-      <div ref={menuRef} style={styles.menuContainer} className="startmenu-container">
+    <div style={styles.overlay} onClick={onClose}>
+      <div ref={menuRef} style={styles.menuContainer} onClick={(e) => e.stopPropagation()}>
         
-        {/* Mobile Header */}
-        <div className="startmenu-mobile-header">
-          <span style={{ fontWeight: 600, fontSize: 16 }}>CloudOS</span>
-          <button onClick={onClose} style={styles.closeBtn}><X size={20} /></button>
-        </div>
-
-        {/* Search Bar */}
-        <div style={styles.searchContainer}>
+        <div style={styles.header}>
           <Search size={16} color="#8b949e" />
           <input
             type="text"
-            placeholder="Buscar apps..."
+            placeholder="Pesquisar aplicativos..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             style={styles.searchInput}
             autoFocus
           />
+          <button onClick={onClose} style={styles.closeBtn}><X size={16} /></button>
         </div>
 
-        {/* Apps Grid */}
-        <div style={styles.appsGrid}>
-          {filteredApps.length > 0 ? (
-            filteredApps.map(app => {
-              const Icon = app.icon;
-              return (
-                <button 
-                  key={app.id} 
-                  style={styles.appBtn} 
-                  onClick={() => handleOpen(app.id)}
-                  className="app-btn-hover"
-                >
-                  <Icon size={28} color="#58a6ff" />
-                  <span style={styles.appName}>{app.title || app.name}</span>
-                </button>
-              );
-            })
-          ) : (
-            <div style={{ padding: 20, color: '#8b949e', gridColumn: '1 / -1', textAlign: 'center' }}>
-              Nenhum app encontrado.
-            </div>
-          )}
+        <div style={styles.body}>
+          <h3 style={styles.sectionTitle}>Todos os Aplicativos</h3>
+          <div style={styles.grid}>
+            {filteredApps.length > 0 ? (
+              filteredApps.map(app => {
+                const Icon = app.icon || LayoutGrid;
+                const appName = app.name || app.title || app.id;
+                return (
+                  <button 
+                    key={app.id} 
+                    style={styles.appBtn} 
+                    onClick={() => onOpenApp(app.id)}
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('appId', app.id);
+                      e.dataTransfer.effectAllowed = 'move';
+                    }}
+                  >
+                    <div style={styles.appIconWrapper}>
+                      <Icon size={20} color="#58a6ff" />
+                    </div>
+                    <span style={styles.appName}>{appName}</span>
+                  </button>
+                );
+              })
+            ) : (
+              <div style={{ padding: 20, color: '#8b949e', textAlign: 'center', gridColumn: '1/-1' }}>
+                Nenhum app encontrado.
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Footer / Power Options */}
         <div style={styles.footer}>
           <div style={styles.userProfile}>
-            <div style={styles.avatar}>C</div>
-            <span style={{ fontSize: 13, fontWeight: 500 }}>CloudOS User</span>
+            <div style={styles.avatar}>A</div>
+            <span style={{ fontSize: 12, color: '#c9d1d9' }}>Admin (CloudOS)</span>
           </div>
-          <div style={styles.powerBtns}>
-            <button style={styles.iconBtn} title="Bloquear Tela" onClick={onLock}>
-              <Lock size={16} />
-            </button>
-            <button style={styles.iconBtn} title="Desligar / Logout" onClick={onLogout}>
-              <Power size={16} color="#f85149" />
-            </button>
-          </div>
+          <button style={styles.powerBtn} onClick={() => { localStorage.clear(); window.location.reload(); }} title="Sair / Shutdown">
+            <Power size={14} color="#f85149" />
+          </button>
         </div>
       </div>
     </div>
@@ -96,22 +87,21 @@ export default function StartMenu({ apps = [], onOpenApp, onClose, onLogout, onL
 const styles = {
   overlay: {
     position: 'absolute',
-    bottom: '60px',
+    bottom: '48px',
     left: 0,
     width: '100%',
-    height: 'calc(100% - 60px)',
+    height: 'calc(100% - 48px)',
     display: 'flex',
     justifyContent: 'center',
     alignItems: 'flex-end',
     zIndex: 9998,
-    pointerEvents: 'none',
+    background: 'transparent',
   },
   menuContainer: {
-    width: '100%',
-    maxWidth: '640px',
-    height: '100%',
-    maxHeight: '580px',
-    background: 'rgba(13, 17, 23, 0.88)',
+    width: '600px',
+    height: '80%',
+    maxHeight: '600px',
+    background: 'rgba(22, 27, 34, 0.95)',
     backdropFilter: 'blur(16px)',
     WebkitBackdropFilter: 'blur(16px)',
     border: '1px solid #30363d',
@@ -119,20 +109,15 @@ const styles = {
     boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
     display: 'flex',
     flexDirection: 'column',
-    padding: '24px',
     marginBottom: '8px',
-    pointerEvents: 'auto',
     overflow: 'hidden',
   },
-  searchContainer: {
+  header: {
     display: 'flex',
     alignItems: 'center',
-    gap: '8px',
-    background: '#0d1117',
-    border: '1px solid #30363d',
-    borderRadius: '8px',
-    padding: '10px 12px',
-    marginBottom: '20px',
+    gap: '10px',
+    padding: '16px 20px',
+    borderBottom: '1px solid #21262d',
   },
   searchInput: {
     flex: 1,
@@ -141,32 +126,55 @@ const styles = {
     outline: 'none',
     color: '#c9d1d9',
     fontSize: '14px',
-    fontFamily: 'inherit',
   },
-  appsGrid: {
+  closeBtn: {
+    background: 'transparent',
+    border: 'none',
+    color: '#8b949e',
+    cursor: 'pointer',
+  },
+  body: {
     flex: 1,
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))',
-    gap: '12px',
+    padding: '20px',
     overflowY: 'auto',
-    alignContent: 'start',
+  },
+  sectionTitle: {
+    fontSize: '12px',
+    color: '#8b949e',
+    margin: '0 0 16px 8px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+  },
+  grid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))',
+    gap: '12px',
   },
   appBtn: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    justifyContent: 'center',
     gap: '8px',
-    padding: '16px 8px',
+    padding: '12px 8px',
     background: 'transparent',
     border: '1px solid transparent',
     borderRadius: '8px',
     cursor: 'pointer',
     transition: 'all 0.2s',
   },
+  appIconWrapper: {
+    width: '32px',
+    height: '32px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: '#0d1117',
+    borderRadius: '6px',
+    border: '1px solid #30363d',
+  },
   appName: {
     color: '#c9d1d9',
-    fontSize: '12px',
+    fontSize: '11px',
     textAlign: 'center',
     whiteSpace: 'nowrap',
     overflow: 'hidden',
@@ -177,49 +185,32 @@ const styles = {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: '16px',
-    marginTop: '16px',
-    borderTop: '1px solid #30363d',
+    padding: '12px 20px',
+    borderTop: '1px solid #21262d',
+    background: '#0d1117',
   },
   userProfile: {
     display: 'flex',
     alignItems: 'center',
     gap: '10px',
-    color: '#c9d1d9',
   },
   avatar: {
-    width: '32px',
-    height: '32px',
+    width: '28px',
+    height: '28px',
     borderRadius: '50%',
-    background: '#58a6ff',
-    color: '#0d1117',
+    background: '#1f6feb',
+    color: '#fff',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+    fontSize: '12px',
     fontWeight: 'bold',
-    fontSize: '14px',
   },
-  powerBtns: {
-    display: 'flex',
-    gap: '8px',
-  },
-  iconBtn: {
-    background: '#21262d',
-    border: 'none',
-    color: '#c9d1d9',
-    width: '36px',
-    height: '36px',
-    borderRadius: '6px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-  },
-  closeBtn: {
+  powerBtn: {
     background: 'transparent',
     border: 'none',
-    color: '#c9d1d9',
     cursor: 'pointer',
-    padding: '4px',
-  }
+    padding: '8px',
+    borderRadius: '6px',
+  },
 };

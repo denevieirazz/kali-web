@@ -5,7 +5,8 @@ import { AppList, AppRegistry } from './registry';
 import BootScreen from './BootScreen';
 import LoginScreen from './LoginScreen';
 import { CommandPalette } from './components/CommandPalette';
-import StartMenu from './components/StartMenu';
+import Taskbar from './components/Taskbar';
+import DesktopArea from './components/Desktop';
 import { CloudOSProvider, useCloudOS } from './store/CloudOSContext';
 
 function Desktop() {
@@ -19,8 +20,8 @@ function Desktop() {
   const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0 });
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [showNotifs, setShowNotifs] = useState(false);
-  const [selectedIcons, setSelectedIcons] = useState([]);
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  const [activeWindowId, setActiveWindowId] = useState(null);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
@@ -38,15 +39,30 @@ function Desktop() {
     if (existing) return focusWindow(existing.id);
     const w = isMobile ? window.innerWidth : Math.min(800, window.innerWidth - 100);
     const h = isMobile ? window.innerHeight - 50 : Math.min(550, window.innerHeight - 100);
-    setWindows(prev => [...prev, { id: Date.now(), appId, x: isMobile ? 0 : 50 + Math.random()*50, y: isMobile ? 0 : 50, w, h, z: zIndex + 1, payload }]);
+    const newId = Date.now();
+    setWindows(prev => [...prev, { id: newId, appId, x: isMobile ? 0 : 50 + Math.random()*50, y: isMobile ? 0 : 50, w, h, z: zIndex + 1, payload }]);
+    setActiveWindowId(newId);
     setZIndex(prev => prev + 1);
     setStartOpen(false);
   };
 
-  const closeApp = (id) => setWindows(prev => prev.filter(w => w.id !== id));
+  const closeApp = (id) => {
+    setWindows(prev => prev.filter(w => w.id !== id));
+    if (activeWindowId === id) setActiveWindowId(null);
+  };
+
   const focusWindow = (id) => {
     setWindows(prev => prev.map(w => w.id === id ? { ...w, z: zIndex + 1 } : w));
+    setActiveWindowId(id);
     setZIndex(prev => prev + 1);
+  };
+
+  const handleTaskbarClick = (target) => {
+    if (typeof target === 'number') {
+      focusWindow(target);
+    } else if (typeof target === 'string') {
+      openApp(target);
+    }
   };
 
   const handleLogout = () => {
@@ -56,10 +72,6 @@ function Desktop() {
 
   const wallpaperUrl = settings?.wallpaper || 'linear-gradient(135deg, #0f0c29, #302b63, #24243e)';
 
-  const visibleTaskbarApps = pinnedApps && pinnedApps.length > 0 
-    ? AppList.filter(a => pinnedApps.includes(a.id)) 
-    : AppList;
-
   if (booting) return <BootScreen onBootComplete={() => setBooting(false)} />;
   if (!isAuthenticated) return <LoginScreen onLogin={() => setIsAuthenticated(true)} />;
   if (isLocked) return <LoginScreen onLogin={() => window.location.reload()} isLockScreen={true} />;
@@ -67,37 +79,19 @@ function Desktop() {
   return (
     <div 
       className="desktop" 
-      style={{ background: wallpaperUrl.startsWith('http') ? `url(${wallpaperUrl}) center/cover no-repeat` : wallpaperUrl }} 
-      onClick={() => { setContextMenu({...contextMenu, visible: false}); setShowNotifs(false); setStartOpen(false); setSelectedIcons([]); }}
+      style={{ width: '100vw', height: '100vh', overflow: 'hidden', position: 'relative', background: wallpaperUrl.startsWith('http') ? `url(${wallpaperUrl}) center/cover no-repeat` : wallpaperUrl }} 
+      onClick={() => { setContextMenu({...contextMenu, visible: false}); setShowNotifs(false); setStartOpen(false); }}
       onContextMenu={(e) => { e.preventDefault(); setContextMenu({ visible: true, x: e.clientX, y: e.clientY }); }}
     >
+      {/* 1. Área de Trabalho com Widgets e Atalhos Arrastáveis */}
+      <DesktopArea apps={AppList} openWindows={windows} onOpenApp={openApp} />
+
       <CommandPalette 
         isOpen={isPaletteOpen} 
         onClose={() => setIsPaletteOpen(false)} 
         openApp={openApp}
         actions={{ togglePalette: () => setIsPaletteOpen(!isPaletteOpen), lock: lockSystem }}
       />
-
-      {/* Desktop Icons - Oculta no Mobile */}
-      {!isMobile && (
-        <div className="desktop-icons-container">
-          {AppList.map(app => {
-            const Icon = app.icon;
-            return (
-              <div 
-                key={app.id} 
-                className={`d-icon ${selectedIcons.includes(app.id) ? 'selected' : ''}`}
-                style={{ position: 'relative' }}
-                onClick={(e) => { e.stopPropagation(); setSelectedIcons([app.id]); }}
-                onDoubleClick={() => openApp(app.id)}
-              >
-                <Icon size={42} color="white" />
-                <span>{app.title}</span>
-              </div>
-            );
-          })}
-        </div>
-      )}
 
       {/* Windows */}
       {windows.map(win => {
@@ -116,39 +110,14 @@ function Desktop() {
         );
       })}
 
-      {/* Start Menu */}
-      {startOpen && (
-        <StartMenu 
-          apps={AppList} 
-          onOpenApp={openApp} 
-          onClose={() => setStartOpen(false)} 
-          onLogout={handleLogout} 
-          onLock={lockSystem} 
-        />
-      )}
-
-      {/* Taskbar Mobile / Desktop */}
-      <div className={`taskbar ${isMobile ? 'mobile-taskbar' : ''}`} onClick={(e) => e.stopPropagation()}>
-        <div className={`taskbar-app ${startOpen ? 'active' : ''}`} onClick={() => setStartOpen(!startOpen)} title="Menu Iniciar">
-          <LayoutGrid size={22} color="#58a6ff" />
-        </div>
-        <div className="taskbar-app" onClick={() => setIsPaletteOpen(true)} title="Command Palette (Ctrl+Shift+P)"><Search size={22} /></div>
-        {visibleTaskbarApps.map(app => (
-          <div key={app.id} className={`taskbar-app ${windows.some(w => w.appId === app.id) ? 'active' : ''}`} onClick={() => openApp(app.id)}>
-            <app.icon size={20} />
-          </div>
-        ))}
-        <div className="taskbar-tray">
-          <div className="taskbar-app" style={{ position: 'relative', display: 'flex', alignItems: 'center' }} onClick={() => { setShowNotifs(!showNotifs); fetchNotifications(); }}>
-            <Bell size={16} />
-            {notifications && notifications.length > 0 && <span className="notif-badge"></span>}
-          </div>
-          <Wifi size={16} />
-          {!isMobile && <Volume2 size={16} />}
-          {!isMobile && <Battery size={16} />}
-          {!isMobile && <span>{time.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>}
-        </div>
-      </div>
+      {/* Taskbar Windows 11 */}
+      <Taskbar 
+        apps={AppList} 
+        openWindows={windows} 
+        activeWindowId={activeWindowId}
+        onTaskbarClick={handleTaskbarClick}
+        onCloseWindow={closeApp}
+      />
 
       {/* Notification Center Dropdown */}
       {showNotifs && (

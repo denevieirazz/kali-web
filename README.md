@@ -154,6 +154,15 @@ npm run dev
     - **PipelineBuilderApp.jsx**: Construtor visual interativo de fluxos de automação encadeados em tempo real.
     - **EvidenceVaultApp.jsx**: Armazenamento seguro de evidências com cálculo automático de hash SHA-256 no upload.
     - **EnvironmentDoctorApp.jsx**: Diagnóstico automatizado de saúde do ambiente (WSL2, Kali, SQLite, Auth JWT e Path Traversal).
+31. **Integração das 18 Skills de Segurança Google Mantis**:
+    - Adicionadas 18 habilidades táticas de segurança e auditoria defensiva do repositório `google/mantis` no diretório global do agente (`.gemini/config/skills/`) e no repositório (`.agents/skills/`), cobrindo modelagem de ameaças (`mantis-threat-model`), geração de patches (`mantis-patch`), análise de arquitetura (`mantis-architecture`), reprodução de crashes (`mantis-reproduce`), e mais.
+32. **Taskbar & StartMenu Estilo Windows 11 Premium**:
+    - **Taskbar.jsx**: Barra de tarefas centralizada estilo Windows 11 com separação entre apps fixados e apps abertos não-fixados, ponto de atividade dinâmico, relógio e tray de status.
+    - **StartMenu.jsx**: Menu Iniciar flutuante centralizado com busca de apps em tempo real, perfil de usuário Admin e suporte a arrastar ícones (`draggable`).
+33. **Área de Trabalho com Widgets macOS & Drag & Drop Nativo (HTML5)**:
+    - **Desktop.jsx**: Área de trabalho com widgets de vidro (Glassmorphism) para Relógio digital e Monitor de Sistema (CPU e RAM) no canto superior direito.
+    - **Drag & Drop**: Suporte nativo para arrastar ícones do Menu Iniciar e soltá-los na Área de Trabalho (criando atalhos persistentes) ou soltá-los na Barra de Tarefas (fixando os apps).
+    - **Persistência Local**: Atalhos do desktop e pins da barra de tarefas persistidos automaticamente no `localStorage`.
 
 ---
 
