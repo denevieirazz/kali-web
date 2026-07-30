@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import TerminalSidebar from './components/TerminalSidebar';
 import TerminalPane from './components/TerminalPane';
 import { Terminal, Plus, ChevronLeft, ChevronRight, X } from 'lucide-react';
@@ -8,6 +8,7 @@ export function TerminalProApp({ payload, setPayload, openApp }) {
   const [tabs, setTabs] = useState([]);
   const [activeTabId, setActiveTabId] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const tabCounter = useRef(0);
 
   // Cria a primeira aba automaticamente ao abrir o app
   useEffect(() => {
@@ -15,7 +16,10 @@ export function TerminalProApp({ payload, setPayload, openApp }) {
   }, []);
 
   const createTab = () => {
-    const newId = `tab_${Date.now()}`;
+    // Gerador de ID à prova de duplicação (Strict Mode safe)
+    tabCounter.current += 1;
+    const newId = `tab_${Date.now()}_${tabCounter.current}`;
+    
     setTabs(prev => [...prev, { id: newId, title: 'bash' }]);
     setActiveTabId(newId);
   };

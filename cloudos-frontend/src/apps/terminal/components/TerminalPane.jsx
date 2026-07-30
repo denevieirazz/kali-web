@@ -18,7 +18,6 @@ export function TerminalPane({ tabId, isActive }) {
     wsRef.current = ws;
 
     ws.onopen = () => {
-      // Se o terminal já existir, manda o tamanho inicial
       if (termRef.current) {
         try {
           ws.send(JSON.stringify({ type: 'resize', cols: termRef.current.cols, rows: termRef.current.rows }));
@@ -34,7 +33,6 @@ export function TerminalPane({ tabId, isActive }) {
           termRef.current.write(new Uint8Array(event.data));
         }
       } else {
-        // Se o xterm ainda não montou, guarda no buffer
         bufferRef.current.push(event.data);
       }
     };
@@ -46,79 +44,86 @@ export function TerminalPane({ tabId, isActive }) {
     };
   }, [tabId]);
 
-  // 2. Inicialização do xterm (SÓ RODA QUANDO A ABA ESTÁ ATIVA)
+  // 2. Inicialização do xterm (SÓ RODA QUANDO A ABA ESTÁ ATIVA E VISÍVEL)
   useEffect(() => {
-    if (!isActive || !containerRef.current || isInitialized) return;
+    if (!isActive || isInitialized) return;
 
-    const term = new Terminal({
-      theme: {
-        background: '#0d1117', foreground: '#c9d1d9', cursor: '#58a6ff',
-        black: '#0d1117', red: '#ff7b72', green: '#3fb950', yellow: '#d29922',
-        blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#c9d1d9'
-      },
-      fontFamily: 'Consolas, "Cascadia Code", "Fira Code", monospace',
-      fontSize: 14,
-      cursorBlink: true,
-      scrollback: 5000,
-      allowProposedApi: true
-    });
+    // Espera o DOM garantir que a div está visível e tem tamanho
+    const initTimer = setTimeout(() => {
+      if (!containerRef.current || containerRef.current.offsetWidth === 0) return;
 
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    
-    term.open(containerRef.current);
-    setTimeout(() => { try { fit.fit(); } catch (e) {} }, 50);
-
-    termRef.current = term;
-    fitRef.current = fit;
-    setIsInitialized(true);
-
-    // Despeja o buffer acumulado enquanto inativo
-    if (bufferRef.current.length > 0) {
-      bufferRef.current.forEach(data => {
-        if (typeof data === 'string') term.write(data);
-        else term.write(new Uint8Array(data));
+      const term = new Terminal({
+        theme: {
+          background: '#0d1117', foreground: '#c9d1d9', cursor: '#58a6ff',
+          black: '#0d1117', red: '#ff7b72', green: '#3fb950', yellow: '#d29922',
+          blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#c9d1d9'
+        },
+        fontFamily: 'Consolas, "Cascadia Code", "Fira Code", monospace',
+        fontSize: 14,
+        cursorBlink: true,
+        scrollback: 5000,
+        allowProposedApi: true
       });
-      bufferRef.current = [];
-    }
 
-    // Input do usuário
-    const onData = term.onData(data => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(data);
+      const fit = new FitAddon();
+      term.loadAddon(fit);
+      
+      term.open(containerRef.current);
+      
+      // Despeja o buffer no terminal
+      if (bufferRef.current.length > 0) {
+        bufferRef.current.forEach(data => {
+          if (typeof data === 'string') term.write(data);
+          else term.write(new Uint8Array(data));
+        });
+        bufferRef.current = [];
       }
-    });
 
-    // Resize
-    const resizeObserver = new ResizeObserver(() => {
-      if (containerRef.current && containerRef.current.offsetWidth > 0) {
-        try {
-          fit.fit();
-          if (wsRef.current?.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-          }
-        } catch (e) {}
-      }
-    });
-    resizeObserver.observe(containerRef.current);
+      termRef.current = term;
+      fitRef.current = fit;
+      setIsInitialized(true);
 
-    return () => {
-      onData.dispose();
-      resizeObserver.disconnect();
-      term.dispose();
-    };
+      // Faz o primeiro fit seguro
+      try { fit.fit(); } catch (e) {}
+
+      // Input do usuário
+      const onData = term.onData(data => {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(data);
+        }
+      });
+
+      // Resize Observer
+      const resizeObserver = new ResizeObserver(() => {
+        if (containerRef.current && containerRef.current.offsetWidth > 0) {
+          try {
+            fit.fit();
+            if (wsRef.current?.readyState === WebSocket.OPEN) {
+              wsRef.current.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+            }
+          } catch (e) {}
+        }
+      });
+      resizeObserver.observe(containerRef.current);
+
+      return () => {
+        onData.dispose();
+        resizeObserver.disconnect();
+      };
+    }, 50); // 50ms de delay para garantir o render visual da div
+
+    return () => clearTimeout(initTimer);
   }, [isActive, isInitialized]);
 
   // 3. Reajustar o tamanho quando voltar a ser ativo
   useEffect(() => {
     if (isActive && isInitialized && fitRef.current && containerRef.current) {
-      setTimeout(() => {
-        if (containerRef.current.offsetWidth > 0) {
-          try {
-            fitRef.current.fit();
-          } catch (e) {}
+      const resizeTimer = setTimeout(() => {
+        if (containerRef.current && containerRef.current.offsetWidth > 0) {
+          try { fitRef.current.fit(); } catch (e) {}
         }
       }, 50);
+      return () => clearTimeout(resizeTimer);
     }
   }, [isActive, isInitialized]);
 
