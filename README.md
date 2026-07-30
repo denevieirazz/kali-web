@@ -163,9 +163,11 @@ npm run dev
     - **Desktop.jsx**: Área de trabalho com widgets de vidro (Glassmorphism) para Relógio digital e Monitor de Sistema (CPU e RAM) no canto superior direito.
     - **Drag & Drop**: Suporte nativo para arrastar ícones do Menu Iniciar e soltá-los na Área de Trabalho (criando atalhos persistentes) ou soltá-los na Barra de Tarefas (fixando os apps).
     - **Persistência Local**: Atalhos do desktop e pins da barra de tarefas persistidos automaticamente no `localStorage`.
-34. **Menu Iniciar com Pastas Interativas estilo Windows 11**:
-    - Organização de aplicativos em categorias/pastas (*Segurança & Red Team*, *Sistema & Lab*, *Gestão & Projetos*).
-    - Exibição de mini-ícones internos nos cards de pastas e botão "Voltar" com suporte a busca global e retenção do recurso de arrastar e soltar (Drag & Drop).
+34. **Menu Iniciar Oficial Windows 11**:
+    - **Fixados & Todos os Apps**: Organização clara com seção de aplicativos principais no topo e rolagem de todos os apps abaixo, mantendo a caixa de busca universal.
+    - **Drag & Drop**: Atributo `draggable` mantido nos tiles para arrastar aplicativos diretamente para a Área de Trabalho ou para a Barra de Tarefas.
+35. **Menu de Contexto do Desktop (Clique com Botão Direito)**:
+    - **Menu Tático Flutuante**: Clique direito no fundo do desktop abre menu de contexto estilo Windows com atalhos para *Atualizar*, *Novo Projeto*, *Abrir Terminal*, *Trocar Wallpaper* e *Configurações/Saúde*.
 
 ---
 
