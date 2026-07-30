@@ -168,6 +168,79 @@ const TOOL_SCHEMAS = {
             { id: "resource_script", label: "Resource Script (.rc)", type: "textarea", required: true, flag: "-r", default: "use auxiliary/scanner/portscan/tcp\nset RHOSTS 127.0.0.1\nset PORTS 1-1000\nrun\nexit" },
             { id: "quiet", label: "Modo Silencioso (-q)", type: "boolean", flag: "-q", default: true }
         ]
+    },
+    john: {
+        name: 'John the Ripper',
+        command: 'john',
+        category: 'Cracking',
+        description: 'Quebrador de hashes e senhas offline muito rápido.',
+        installCmd: 'sudo apt install -y john',
+        fields: [
+            { 
+                id: 'hash_file', 
+                type: 'text', 
+                label: 'Caminho do arquivo de hashes', 
+                required: true, 
+                placeholder: '/home/cloudos_users/hashes.txt',
+                description: 'Arquivo de texto contendo os hashes que você quer quebrar.'
+            },
+            { 
+                id: 'wordlist', 
+                type: 'text', 
+                label: 'Wordlist', 
+                placeholder: '/usr/share/wordlists/rockyou.txt',
+                description: 'Lista de palavras que o John vai usar para tentar quebrar o hash.'
+            },
+            { 
+                id: 'format', 
+                type: 'text', 
+                label: 'Formato do Hash (opcional)', 
+                placeholder: 'ex: Raw-MD5, SHA-512',
+                description: 'Acelera o processo informando o tipo exato do hash.'
+            }
+        ],
+        presets: [
+            { name: 'Rockyou (MD5)', vars: { hash_file: '', wordlist: '/usr/share/wordlists/rockyou.txt', format: 'Raw-MD5' } },
+            { name: 'Auto-Detect', vars: { hash_file: '', wordlist: '/usr/share/wordlists/rockyou.txt', format: '' } }
+        ],
+        buildCmd: (f) => {
+            const args = [];
+            if (f.format) args.push(`--format=${f.format}`);
+            if (f.wordlist) args.push(`--wordlist=${f.wordlist}`);
+            args.push(f.hash_file);
+            return { cmd: 'john', args };
+        }
+    },
+    aircrack: {
+        name: 'Aircrack-ng',
+        command: 'aircrack-ng',
+        category: 'Wireless',
+        description: 'Suíte para auditoria de redes Wi-Fi (quebra de WEP/WPA).',
+        installCmd: 'sudo apt install -y aircrack-ng',
+        fields: [
+            { 
+                id: 'capture_file', 
+                type: 'text', 
+                label: 'Arquivo de captura (.cap)', 
+                required: true, 
+                placeholder: '/home/cloudos_users/captura.cap',
+                description: 'Arquivo de captura de pacotes da rede Wi-Fi alvo.'
+            },
+            { 
+                id: 'wordlist', 
+                type: 'text', 
+                label: 'Wordlist', 
+                placeholder: '/usr/share/wordlists/rockyou.txt',
+                description: 'Wordlist para tentar descobrir a senha do Wi-Fi.'
+            }
+        ],
+        presets: [
+            { name: 'Rockyou WPA', vars: { capture_file: '', wordlist: '/usr/share/wordlists/rockyou.txt' } }
+        ],
+        buildCmd: (f) => {
+            const args = ['-w', f.wordlist || '/usr/share/wordlists/rockyou.txt', f.capture_file];
+            return { cmd: 'aircrack-ng', args };
+        }
     }
 };
 
