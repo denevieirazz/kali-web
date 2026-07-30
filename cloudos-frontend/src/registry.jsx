@@ -14,12 +14,21 @@ import { ProjectsApp } from './apps/ProjectsApp';
 import { PipelineApp } from './apps/PipelineApp';
 import { ReportBuilderApp } from './apps/ReportBuilderApp';
 import { SnapshotManagerApp } from './apps/SnapshotManagerApp';
+import { FindingsManagerApp } from './apps/FindingsManagerApp';
+import { PipelineBuilderApp } from './apps/PipelineBuilderApp';
+import { EnvironmentDoctorApp } from './apps/EnvironmentDoctorApp';
+import { EvidenceVaultApp } from './apps/EvidenceVaultApp';
+import { Bug, Stethoscope, Vault } from 'lucide-react';
 
 export const AppRegistry = {
   terminal: { id: 'terminal', title: 'Terminal', icon: TerminalIcon, Component: TerminalApp },
   kalihub: { id: 'kalihub', title: 'Kali Hub', icon: Boxes, Component: KaliHubApp },
   toolrunner: { id: 'toolrunner', title: 'Tool Runner', icon: LayoutGrid, Component: ToolRunnerApp },
   pipeline: { id: 'pipeline', title: 'Automação', icon: Workflow, Component: PipelineApp },
+  visualpipeline: { id: 'visualpipeline', title: 'Visual Pipeline', icon: Workflow, Component: PipelineBuilderApp },
+  findings: { id: 'findings', title: 'Findings', icon: Bug, Component: FindingsManagerApp },
+  evidence: { id: 'evidence', title: 'Evidence Vault', icon: Vault, Component: EvidenceVaultApp },
+  doctor: { id: 'doctor', title: 'Doctor', icon: Stethoscope, Component: EnvironmentDoctorApp },
   projects: { id: 'projects', title: 'Projetos', icon: FolderArchive, Component: ProjectsApp },
   report: { id: 'report', title: 'Report Builder', icon: FileText, Component: ReportBuilderApp },
   repeater: { id: 'repeater', title: 'HTTP Repeater', icon: ArrowRightLeft, Component: RepeaterApp },

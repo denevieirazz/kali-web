@@ -148,6 +148,12 @@ npm run dev
     - **Scope Guard Backend**: Módulo `scopeGuard.js` para validação e bloqueio de alvos fora da lista branca de autorização.
     - **ProjectContext Frontend**: Provedor global `ProjectContext.jsx` para compartilhamento do escopo ativo entre janelas.
     - **Universal Search (`Ctrl+K`)**: Componente `UniversalSearch.jsx` para busca unificada estilo Spotlight em aplicativos, ferramentas Kali e projetos.
+30. **Suíte V3 Enterprise Integrada**:
+    - **Backend Unificado (`routes/v3.js`)**: Endpoints de alta velocidade para Findings, Cofre de Evidências com Hashing SHA-256, Fila de Jobs, Diagnóstico do Sistema e Motor de Streaming ND-JSON para o Pipeline.
+    - **FindingsManagerApp.jsx**: Gerenciador visual CRUD de achados de vulnerabilidades com severidades colorizadas.
+    - **PipelineBuilderApp.jsx**: Construtor visual interativo de fluxos de automação encadeados em tempo real.
+    - **EvidenceVaultApp.jsx**: Armazenamento seguro de evidências com cálculo automático de hash SHA-256 no upload.
+    - **EnvironmentDoctorApp.jsx**: Diagnóstico automatizado de saúde do ambiente (WSL2, Kali, SQLite, Auth JWT e Path Traversal).
 
 ---
 

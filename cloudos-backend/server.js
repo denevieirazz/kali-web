@@ -231,6 +231,9 @@ app.use(async (req, res, next) => {
     } catch (e) { res.status(500).json({ error: "Erro ao inicializar ambiente do usuário." }); }
 });
 
+// Registra rotas V3 Enterprise
+app.use('/api/v3', require('./routes/v3'));
+
 // =========================================================
 // 🌐 API ROUTES
 // =========================================================
