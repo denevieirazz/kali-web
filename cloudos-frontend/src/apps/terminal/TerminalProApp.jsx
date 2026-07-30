@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import TerminalTabs from './components/TerminalTabs';
 import TerminalSidebar from './components/TerminalSidebar';
 import TerminalPane from './components/TerminalPane';
 import { Terminal, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -9,26 +8,36 @@ export function TerminalProApp({ payload, setPayload, openApp }) {
   const [tabs, setTabs] = useState([]);
   const [activeTabId, setActiveTabId] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [wsStatus, setWsStatus] = useState('connecting'); // connecting, open, closed, error
   const wsRef = useRef(null);
 
   useEffect(() => {
     let ws = null;
     const token = localStorage.getItem('cloudos_token');
-    const wsUrl = `ws://localhost:8080?token=${encodeURIComponent(token || '')}`;
     
+    // Se o Tracking Prevention bloqueou o localStorage, avisa
+    if (!token) {
+      console.error("Token JWT não encontrado no localStorage. Desative a proteção de rastreamento do navegador.");
+      setWsStatus('error');
+      return;
+    }
+
+    const wsUrl = `ws://localhost:8080?token=${encodeURIComponent(token)}`;
     ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'create', cwd: payload?.cwd }));
-      }
+      setWsStatus('open');
+      // Cria a primeira sessão ao conectar se a lista estiver vazia
+      ws.send(JSON.stringify({ type: 'create', cwd: payload?.cwd }));
     };
+
+    ws.onerror = () => setWsStatus('error');
+    ws.onclose = () => setWsStatus('closed');
 
     ws.onmessage = (event) => {
       try {
         if (typeof event.data !== 'string' || !event.data.startsWith('{')) return;
-        
         const msg = JSON.parse(event.data);
         if (msg.type === 'session_created') {
           setTabs(prev => [...prev, { id: msg.sessionId, title: `bash (${prev.length + 1})`, panes: [{ id: msg.sessionId, active: true }] }]);
@@ -38,19 +47,15 @@ export function TerminalProApp({ payload, setPayload, openApp }) {
     };
 
     const handleKey = (e) => {
-      if (e.ctrlKey && e.shiftKey && e.key === 'P') { e.preventDefault(); createTab(); }
       if (e.ctrlKey && e.shiftKey && e.key === 'T') { e.preventDefault(); createTab(); }
     };
-    
     window.addEventListener('keydown', handleKey);
 
     return () => {
       window.removeEventListener('keydown', handleKey);
       if (ws) {
         ws.onmessage = null;
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.close();
-        }
+        if (ws.readyState === WebSocket.OPEN) ws.close();
       }
     };
   }, []);
@@ -58,6 +63,8 @@ export function TerminalProApp({ payload, setPayload, openApp }) {
   const createTab = () => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'create' }));
+    } else {
+      alert('Não foi possível conectar ao Backend do Terminal. Verifique se o servidor Node.js está rodando na porta 8080 e se o JWT é válido.');
     }
   };
 
@@ -65,11 +72,8 @@ export function TerminalProApp({ payload, setPayload, openApp }) {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'kill', sessionId: id }));
     }
-    const newTabs = tabs.filter(t => t.id !== id);
-    setTabs(newTabs);
-    if (activeTabId === id && newTabs.length > 0) {
-      setActiveTabId(newTabs[newTabs.length - 1].id);
-    }
+    setTabs(prev => prev.filter(t => t.id !== id));
+    if (activeTabId === id && tabs.length > 1) setActiveTabId(tabs[tabs.length - 1].id);
   };
 
   const activeTab = tabs.find(t => t.id === activeTabId);
@@ -82,15 +86,19 @@ export function TerminalProApp({ payload, setPayload, openApp }) {
           <button onClick={() => setSidebarOpen(!sidebarOpen)} className="t-icon-btn">
             {sidebarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
           </button>
-          <TerminalTabs 
-            tabs={tabs} 
-            activeId={activeTabId} 
-            onSelect={setActiveTabId} 
-            onClose={closeTab} 
-            onCreate={createTab} 
-          />
+          <div className="terminal-tabs-container">
+            {tabs.map(tab => (
+              <div key={tab.id} className={`terminal-tab ${activeTabId === tab.id ? 'active' : ''}`} onClick={() => setActiveTabId(tab.id)}>
+                <span className="dot"></span>
+                <span>{tab.title}</span>
+                <button className="close-btn" onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}>X</button>
+              </div>
+            ))}
+            <button className="terminal-tab-add" onClick={createTab}><Plus size={16} /></button>
+          </div>
           <div className="terminal-status-info">
-            <span className="status-dot online"></span> WSL Connected
+            <span className={`status-dot ${wsStatus}`}></span> 
+            {wsStatus === 'open' ? 'WSL Connected' : wsStatus === 'connecting' ? 'Connecting...' : 'Disconnected'}
           </div>
         </div>
 
@@ -103,7 +111,7 @@ export function TerminalProApp({ payload, setPayload, openApp }) {
             <div className="terminal-empty-state">
               <Terminal size={64} style={{ opacity: 0.2, marginBottom: '16px' }} />
               <h3 style={{ color: '#c9d1d9', margin: '0 0 8px 0' }}>CloudOS Terminal Pro</h3>
-              <p style={{ fontSize: '13px', margin: 0 }}>Sessão pronta no WSL Kali Linux.</p>
+              <p style={{ fontSize: '13px', margin: 0 }}>Sessão WSL Kali Linux pronta.</p>
               <button onClick={createTab} className="t-btn-primary">
                 <Plus size={16} style={{ marginRight: '8px' }} /> Nova Sessão
               </button>
@@ -114,8 +122,7 @@ export function TerminalProApp({ payload, setPayload, openApp }) {
         <div className="terminal-statusbar">
           <span><b>cloudos@kali</b></span>
           <span>Projeto: <b style={{ color: '#58a6ff' }}>Default</b></span>
-          <span>Escopo: <b style={{ color: '#3fb950' }}>Authorized</b></span>
-          <span style={{ marginLeft: 'auto' }}>UTF-8 | Bash</span>
+          <span style={{ marginLeft: 'auto' }}>UTF-8 | Bash | Status: {wsStatus}</span>
         </div>
       </div>
     </div>
