@@ -170,7 +170,10 @@ npm run dev
     - **Organização em 3 Camadas**: Seções *Fixados*, *Recomendados/Arquivos Recentes* e *Todos os Aplicativos* com busca universal instantânea.
 
 35. **Menu de Contexto do Desktop (Clique com Botão Direito)**:
-    - **Menu Tático Flutuante**: Clique direito no fundo do desktop abre menu de contexto estilo Windows com atalhos para *Atualizar*, *Novo Projeto*, *Abrir Terminal*, *Trocar Wallpaper* e *Configurações/Saúde*.
+    - **Menu Tático Flutuante**: Clique direito no fundo do desktop abre menu de contexto estilo Windows com atalhos para *Atualizar*, *Novo Projeto*, *Abrir Terminal*, *Trocar Wallpaper* e *Configurações de Tela*.
+    - **Proteção de Borda (Screen Bounds Guard)**: Ajuste dinâmico de coordenadas X e Y para impedir que o menu saia da tela ao clicar próximo às margens direita e inferior.
+36. **Atalho Global Universal Search (`Ctrl + K`)**:
+    - Listener global no `App.jsx` que permite acionar o Command Palette / Busca Universal com a combinação de teclas `Ctrl + K` (ou `Cmd + K` no macOS) em qualquer lugar do sistema.
 
 ---
 

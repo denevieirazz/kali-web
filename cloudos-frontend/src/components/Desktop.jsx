@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Cpu, Activity, RefreshCw, Image, Settings, Terminal, FolderPlus, X, LayoutGrid } from 'lucide-react';
+import { Cpu, RefreshCw, Image, Settings, Terminal, FolderPlus, X, MonitorSmartphone, LayoutGrid } from 'lucide-react';
 
 export default function Desktop({ apps, openWindows, onOpenApp }) {
   const [shortcuts, setShortcuts] = useState(() => {
@@ -9,7 +9,7 @@ export default function Desktop({ apps, openWindows, onOpenApp }) {
 
   const [time, setTime] = useState(new Date());
   const [sysInfo, setSysInfo] = useState({ cpu: 0, mem: 0 });
-  const [contextMenu, setContextMenu] = useState(null); // {x, y}
+  const [contextMenu, setContextMenu] = useState(null);
 
   useEffect(() => {
     const t = setInterval(() => setTime(new Date()), 1000);
@@ -23,7 +23,6 @@ export default function Desktop({ apps, openWindows, onOpenApp }) {
     return () => clearInterval(t);
   }, []);
 
-  // Fecha menu de contexto se clicar em qualquer lugar
   useEffect(() => {
     const closeMenu = () => setContextMenu(null);
     window.addEventListener('click', closeMenu);
@@ -46,10 +45,12 @@ export default function Desktop({ apps, openWindows, onOpenApp }) {
     localStorage.setItem('cloudos_desktop_shortcuts', JSON.stringify(newShortcuts));
   };
 
-  // Menu de contexto (Botão Direito)
   const handleContextMenu = (e) => {
     e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY });
+    // Ajusta posição para não sair da tela
+    const x = e.clientX > window.innerWidth - 200 ? e.clientX - 200 : e.clientX;
+    const y = e.clientY > window.innerHeight - 300 ? e.clientY - 300 : e.clientY;
+    setContextMenu({ x, y });
   };
 
   const contextMenuItems = [
@@ -57,7 +58,7 @@ export default function Desktop({ apps, openWindows, onOpenApp }) {
     { icon: FolderPlus, label: 'Novo Projeto', action: () => onOpenApp('projects') },
     { icon: Terminal, label: 'Abrir Terminal', action: () => onOpenApp('terminal') },
     { icon: Image, label: 'Trocar Wallpaper', action: () => alert('Personalização em breve!') },
-    { icon: Settings, label: 'Configurações / Saúde', action: () => onOpenApp('doctor') },
+    { icon: MonitorSmartphone, label: 'Configurações de Tela', action: () => onOpenApp('doctor') },
   ];
 
   return (
@@ -67,7 +68,6 @@ export default function Desktop({ apps, openWindows, onOpenApp }) {
       onDrop={handleDrop}
       onContextMenu={handleContextMenu}
     >
-      {/* MENU DE CONTEXTO (BOTÃO DIREITO) */}
       {contextMenu && (
         <div style={{ ...styles.contextMenu, top: contextMenu.y, left: contextMenu.x }} onClick={(e) => e.stopPropagation()}>
           {contextMenuItems.map((item, i) => (
@@ -79,7 +79,6 @@ export default function Desktop({ apps, openWindows, onOpenApp }) {
         </div>
       )}
 
-      {/* WIDGETS ESTILO MAC */}
       <div style={styles.widgetsContainer}>
         <div style={styles.widget}>
           <div style={styles.clockTime}>{time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
@@ -100,7 +99,6 @@ export default function Desktop({ apps, openWindows, onOpenApp }) {
         </div>
       </div>
 
-      {/* ATALHOS DA ÁREA DE TRABALHO */}
       <div style={styles.shortcutsContainer}>
         {shortcuts.map(id => {
           const app = (apps || []).find(a => a.id === id);
@@ -108,7 +106,7 @@ export default function Desktop({ apps, openWindows, onOpenApp }) {
           const Icon = app.icon || LayoutGrid;
           const appName = app.name || app.title || app.id;
           return (
-            <div key={id} style={styles.shortcutWrapper} onDoubleClick={() => onOpenApp && onOpenApp(id)}>
+            <div key={id} style={styles.shortcutWrapper} onDoubleClick={() => onOpenApp(id)}>
               <button style={styles.shortcutBtn} className="desktop-icon">
                 <Icon size={28} color="#c9d1d9" />
               </button>
@@ -132,7 +130,6 @@ const styles = {
   desktopBg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: '48px', background: 'linear-gradient(135deg, #0d1117 0%, #010409 100%)', overflow: 'hidden', zIndex: 0 },
   contextMenu: { position: 'absolute', background: 'rgba(22, 27, 34, 0.95)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid #30363d', borderRadius: '8px', padding: '4px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)', zIndex: 10000, minWidth: '180px' },
   ctxItem: { display: 'flex', alignItems: 'center', width: '100%', padding: '8px 12px', background: 'transparent', border: 'none', color: '#c9d1d9', fontSize: '13px', cursor: 'pointer', borderRadius: '4px', textAlign: 'left' },
-  
   widgetsContainer: { position: 'absolute', top: '16px', right: '16px', display: 'flex', flexDirection: 'column', gap: '12px', width: '220px', zIndex: 1 },
   widget: { background: 'rgba(22, 27, 34, 0.7)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid #30363d', borderRadius: '12px', padding: '12px 16px', color: '#c9d1d9', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' },
   clockTime: { fontSize: '32px', fontWeight: 700, textAlign: 'center', color: '#fff' },
@@ -143,10 +140,9 @@ const styles = {
   barBg: { flex: 1, height: '6px', background: '#0d1117', borderRadius: '3px', overflow: 'hidden' },
   barFill: { height: '100%', transition: 'width 0.5s ease' },
   metricVal: { fontSize: '10px', width: '30px', textAlign: 'right', color: '#c9d1d9' },
-
   shortcutsContainer: { position: 'absolute', top: '16px', left: '16px', display: 'flex', flexDirection: 'column', gap: '16px', zIndex: 1 },
   shortcutWrapper: { display: 'flex', flexDirection: 'column', alignItems: 'center', width: '80px', position: 'relative' },
-  shortcutBtn: { width: '48px', height: '48px', background: 'rgba(22, 27, 34, 0.6)', border: '1px solid #30363d', borderRadius: '10px', display: 'flex', alignItems: 'center', justify: 'center', cursor: 'pointer', transition: 'background 0.2s' },
+  shortcutBtn: { width: '48px', height: '48px', background: 'rgba(22, 27, 34, 0.6)', border: '1px solid #30363d', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', transition: 'background 0.2s' },
   shortcutName: { fontSize: '11px', color: '#c9d1d9', marginTop: '4px', textAlign: 'center', textShadow: '0 1px 2px rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', gap: '4px' },
   removeIcon: { cursor: 'pointer', color: '#f85149', background: 'rgba(0,0,0,0.5)', borderRadius: '50%', padding: '1px' },
 };

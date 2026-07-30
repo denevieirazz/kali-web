@@ -34,6 +34,21 @@ function Desktop() {
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    const handleKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setIsPaletteOpen(prev => !prev);
+      }
+      if (e.key === 'Escape') {
+        setIsPaletteOpen(false);
+        setStartOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, []);
+
   const openApp = (appId, payload = null) => {
     const existing = windows.find(w => w.appId === appId);
     if (existing) return focusWindow(existing.id);
