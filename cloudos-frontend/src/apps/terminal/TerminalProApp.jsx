@@ -12,29 +12,44 @@ export function TerminalProApp({ payload, setPayload, openApp }) {
   const wsRef = useRef(null);
 
   useEffect(() => {
+    let ws = null;
     const token = localStorage.getItem('cloudos_token');
     const wsUrl = `ws://localhost:8080?token=${encodeURIComponent(token || '')}`;
-    const ws = new WebSocket(wsUrl);
+    
+    ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
-      // Cria a primeira sessão ao conectar
-      ws.send(JSON.stringify({ type: 'create', cwd: payload?.cwd }));
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'create', cwd: payload?.cwd }));
+      }
     };
 
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
         if (msg.type === 'session_created') {
-          const newTab = { id: msg.sessionId, title: `bash (${tabs.length + 1})`, panes: [{ id: msg.sessionId, active: true }] };
-          setTabs(prev => [...prev, newTab]);
+          setTabs(prev => [...prev, { id: msg.sessionId, title: `bash (${prev.length + 1})`, panes: [{ id: msg.sessionId, active: true }] }]);
           setActiveTabId(msg.sessionId);
         }
-      } catch (e) {}
+      } catch (e) { console.error("WS Parse Error:", e); }
     };
 
+    const handleKey = (e) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'P') { e.preventDefault(); createTab(); }
+      if (e.ctrlKey && e.shiftKey && e.key === 'T') { e.preventDefault(); createTab(); }
+    };
+    
+    window.addEventListener('keydown', handleKey);
+
     return () => {
-      try { ws.close(); } catch (e) {}
+      window.removeEventListener('keydown', handleKey);
+      if (ws) {
+        ws.onmessage = null;
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.close();
+        }
+      }
     };
   }, []);
 
