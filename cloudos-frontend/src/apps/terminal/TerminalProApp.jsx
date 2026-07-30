@@ -9,40 +9,35 @@ export function TerminalProApp({ payload, setPayload, openApp }) {
   const [activeTabId, setActiveTabId] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  // Cria a primeira aba automaticamente ao montar
+  // Cria a primeira aba automaticamente ao abrir o app
   useEffect(() => {
     createTab();
   }, []);
 
   const createTab = () => {
-    const id = `tab_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
-    const newTab = { id, title: `bash (${tabs.length + 1})` };
-    setTabs(prev => {
-      const updated = [...prev, newTab];
-      return updated;
-    });
-    setActiveTabId(id);
+    const newId = `tab_${Date.now()}`;
+    setTabs(prev => [...prev, { id: newId, title: 'bash' }]);
+    setActiveTabId(newId);
   };
 
   const closeTab = (id) => {
     setTabs(prev => {
-      const updated = prev.filter(t => t.id !== id);
-      if (activeTabId === id && updated.length > 0) {
-        setActiveTabId(updated[updated.length - 1].id);
-      } else if (updated.length === 0) {
+      const filtered = prev.filter(t => t.id !== id);
+      if (activeTabId === id && filtered.length > 0) {
+        const closedIndex = prev.findIndex(t => t.id === id);
+        const newActive = prev[closedIndex - 1] || prev[closedIndex + 1];
+        if (newActive) setActiveTabId(newActive.id);
+      } else if (filtered.length === 0) {
         setActiveTabId(null);
       }
-      return updated;
+      return filtered;
     });
   };
-
-  const activeTab = tabs.find(t => t.id === activeTabId);
 
   return (
     <div className="terminal-pro-app">
       <TerminalSidebar isOpen={sidebarOpen} openApp={openApp} />
       <div className="terminal-pro-main">
-        {/* TOP BAR COM TABS */}
         <div className="terminal-topbar">
           <button onClick={() => setSidebarOpen(!sidebarOpen)} className="t-icon-btn">
             {sidebarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
@@ -61,38 +56,25 @@ export function TerminalProApp({ payload, setPayload, openApp }) {
                 </button>
               </div>
             ))}
-            <button className="terminal-tab-add" onClick={createTab} title="Nova Aba (Ctrl+Shift+T)">
-              <Plus size={16} />
-            </button>
+            <button className="terminal-tab-add" onClick={createTab}><Plus size={16} /></button>
           </div>
           <div className="terminal-status-info">
-            <span className="status-dot online"></span> Kali Terminal
+            <span className="status-dot online"></span> WSL Connected
           </div>
         </div>
 
-        {/* ÁREA DE CONTEÚDO: CADA ABA TEM SEU PRÓPRIO WEBSOCKET */}
         <div className="terminal-content-area">
           {tabs.length > 0 ? (
             tabs.map(tab => (
-              <div 
-                key={tab.id} 
-                style={{ 
-                  display: activeTabId === tab.id ? 'flex' : 'none', 
-                  width: '100%', height: '100%' 
-                }}
-              >
-                <TerminalPane 
-                  tabId={tab.id} 
-                  cwd={payload?.cwd} 
-                  active={activeTabId === tab.id} 
-                />
+              <div key={tab.id} style={{ display: activeTabId === tab.id ? 'block' : 'none', height: '100%', width: '100%' }}>
+                <TerminalPane tabId={tab.id} />
               </div>
             ))
           ) : (
             <div className="terminal-empty-state">
               <Terminal size={64} style={{ opacity: 0.2, marginBottom: '16px' }} />
-              <h3 style={{ color: '#c9d1d9', margin: '0 0 8px 0' }}>CloudOS Terminal Pro</h3>
-              <p style={{ fontSize: '13px', margin: 0 }}>Clique para iniciar uma sessão.</p>
+              <h3>CloudOS Terminal Pro</h3>
+              <p>Todas as sessões foram fechadas.</p>
               <button onClick={createTab} className="t-btn-primary">
                 <Plus size={16} style={{ marginRight: '8px' }} /> Nova Sessão
               </button>
@@ -100,11 +82,10 @@ export function TerminalProApp({ payload, setPayload, openApp }) {
           )}
         </div>
 
-        {/* STATUS BAR */}
         <div className="terminal-statusbar">
           <span><b>cloudos@kali</b></span>
           <span>Projeto: <b style={{ color: '#58a6ff' }}>Default</b></span>
-          <span style={{ marginLeft: 'auto' }}>UTF-8 | Bash | Abas: {tabs.length}</span>
+          <span style={{ marginLeft: 'auto' }}>UTF-8 | Bash</span>
         </div>
       </div>
     </div>
