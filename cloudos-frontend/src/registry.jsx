@@ -1,5 +1,6 @@
 import { Terminal as TerminalIcon, FolderOpen, Code2, Activity, ShieldCheck, Settings as SettingsIcon, AlertTriangle, Download, Boxes, LayoutGrid, ArrowRightLeft, FolderArchive, Workflow, FileText, Camera } from 'lucide-react';
 import { TerminalApp } from './apps/TerminalApp';
+import { TerminalProApp } from './apps/terminal/TerminalProApp';
 import { FileManagerApp } from './apps/FileManagerApp';
 import { CodeEditorApp } from './apps/CodeEditorApp';
 import { SystemMonitorApp } from './apps/SystemMonitorApp';
@@ -22,7 +23,7 @@ import { LabMissionsApp } from './apps/LabMissionsApp';
 import { Bug, Stethoscope, Vault, Trophy } from 'lucide-react';
 
 export const AppRegistry = {
-  terminal: { id: 'terminal', title: 'Terminal', icon: TerminalIcon, Component: TerminalApp },
+  terminal: { id: 'terminal', title: 'Terminal Pro', icon: TerminalIcon, Component: TerminalProApp },
   kalihub: { id: 'kalihub', title: 'Kali Hub', icon: Boxes, Component: KaliHubApp },
   toolrunner: { id: 'toolrunner', title: 'Tool Runner', icon: LayoutGrid, Component: ToolRunnerApp },
   pipeline: { id: 'pipeline', title: 'Automação', icon: Workflow, Component: PipelineApp },

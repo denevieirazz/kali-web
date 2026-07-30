@@ -183,6 +183,10 @@ npm run dev
     - Permite abrir e gerenciar múltiplas abas de bash independentes na mesma janela do Terminal, com conexões WebSocket e PTY isoladas.
 39. **Lab Missions Gamificado (`LabMissionsApp.jsx`)**:
     - Aplicativo de treinamento Red Team com missões de aprendizado (OSINT, Nmap, Findings), sistema de XP e barra de progresso visual.
+40. **CloudOS Terminal Pro Enterprise (`TerminalProApp.jsx`)**:
+    - **Gestão de Sessões Isoladas (`terminalSessionManager.js`)**: Gerenciador backend com `node-pty` de sessões WSL2 Kali Linux via Map id-sessão com controle por token JWT.
+    - **WebSocket Protocol**: Protocolo tipado de criação (`create`), reconexão (`attach`), ajuste dinâmico de tamanho (`resize`) e encerramento (`kill`).
+    - **Arquitetura de UI Panes & Sidebar**: Layout com sidebar tática (`TerminalSidebar.jsx`), tabs superiores (`TerminalTabs.jsx`) e renderização de instâncias `xterm` de alto desempenho (`TerminalPane.jsx`).
 
 ---
 
