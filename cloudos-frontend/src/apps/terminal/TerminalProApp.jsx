@@ -10,32 +10,26 @@ export function TerminalProApp({ payload, setPayload, openApp }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const tabCounter = useRef(0);
 
-  // Cria a primeira aba automaticamente ao abrir o app
   useEffect(() => {
     createTab();
   }, []);
 
   const createTab = () => {
-    // Gerador de ID à prova de duplicação (Strict Mode safe)
     tabCounter.current += 1;
     const newId = `tab_${Date.now()}_${tabCounter.current}`;
-    
     setTabs(prev => [...prev, { id: newId, title: 'bash' }]);
     setActiveTabId(newId);
   };
 
   const closeTab = (id) => {
-    setTabs(prev => {
-      const filtered = prev.filter(t => t.id !== id);
-      if (activeTabId === id && filtered.length > 0) {
-        const closedIndex = prev.findIndex(t => t.id === id);
-        const newActive = prev[closedIndex - 1] || prev[closedIndex + 1];
-        if (newActive) setActiveTabId(newActive.id);
-      } else if (filtered.length === 0) {
-        setActiveTabId(null);
-      }
-      return filtered;
-    });
+    setTabs(prev => prev.filter(t => t.id !== id));
+    if (activeTabId === id && tabs.length > 1) {
+      const closedIndex = tabs.findIndex(t => t.id === id);
+      const newActive = tabs[closedIndex - 1] || tabs[closedIndex + 1];
+      if (newActive) setActiveTabId(newActive.id);
+    } else if (tabs.length <= 1) {
+      setActiveTabId(null);
+    }
   };
 
   return (
@@ -78,11 +72,11 @@ export function TerminalProApp({ payload, setPayload, openApp }) {
             ))
           ) : (
             <div className="terminal-empty-state">
-              <Terminal size={64} style={{ opacity: 0.2, marginBottom: '16px' }} />
+              <Terminal size={64} className="opacity-20 mb-4" />
               <h3>CloudOS Terminal Pro</h3>
               <p>Todas as sessões foram fechadas.</p>
               <button onClick={createTab} className="t-btn-primary">
-                <Plus size={16} style={{ marginRight: '8px' }} /> Nova Sessão
+                <Plus size={16} className="mr-2" /> Nova Sessão
               </button>
             </div>
           )}
@@ -90,8 +84,8 @@ export function TerminalProApp({ payload, setPayload, openApp }) {
 
         <div className="terminal-statusbar">
           <span><b>cloudos@kali</b></span>
-          <span>Projeto: <b style={{ color: '#58a6ff' }}>Default</b></span>
-          <span style={{ marginLeft: 'auto' }}>UTF-8 | Bash</span>
+          <span>Projeto: <b className="text-blue-400">Default</b></span>
+          <span className="ml-auto">UTF-8 | Bash</span>
         </div>
       </div>
     </div>

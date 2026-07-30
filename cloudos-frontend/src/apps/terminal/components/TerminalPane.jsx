@@ -11,19 +11,12 @@ export function TerminalPane({ tabId, isActive }) {
   const bufferRef = useRef([]);
   const [isInitialized, setIsInitialized] = useState(false);
 
-  // 1. Conexão WebSocket (Roda independente de estar ativo ou não)
+  // 1. Conexão WebSocket (Raw PTY)
   useEffect(() => {
+    let isMounted = true;
     const token = localStorage.getItem('cloudos_token');
     const ws = new WebSocket(`ws://localhost:8080?token=${encodeURIComponent(token || '')}`);
     wsRef.current = ws;
-
-    ws.onopen = () => {
-      if (termRef.current) {
-        try {
-          ws.send(JSON.stringify({ type: 'resize', cols: termRef.current.cols, rows: termRef.current.rows }));
-        } catch (e) {}
-      }
-    };
 
     ws.onmessage = (event) => {
       if (termRef.current) {
@@ -38,27 +31,29 @@ export function TerminalPane({ tabId, isActive }) {
     };
 
     return () => {
+      isMounted = false;
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
         ws.close();
       }
     };
   }, [tabId]);
 
-  // 2. Inicialização do xterm (SÓ RODA QUANDO A ABA ESTÁ ATIVA E VISÍVEL)
+  // 2. Inicialização do xterm
   useEffect(() => {
     if (!isActive || isInitialized) return;
 
-    // Espera o DOM garantir que a div está visível e tem tamanho
     const initTimer = setTimeout(() => {
       if (!containerRef.current || containerRef.current.offsetWidth === 0) return;
 
       const term = new Terminal({
         theme: {
-          background: '#0d1117', foreground: '#c9d1d9', cursor: '#58a6ff',
+          background: '#0d111700', // Fundo transparente para pegar o CSS da div
+          foreground: '#c9d1d9',
+          cursor: '#58a6ff',
           black: '#0d1117', red: '#ff7b72', green: '#3fb950', yellow: '#d29922',
           blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#c9d1d9'
         },
-        fontFamily: 'Consolas, "Cascadia Code", "Fira Code", monospace',
+        fontFamily: '"Cascadia Code", "Fira Code", Menlo, monospace',
         fontSize: 14,
         cursorBlink: true,
         scrollback: 5000,
@@ -70,7 +65,6 @@ export function TerminalPane({ tabId, isActive }) {
       
       term.open(containerRef.current);
       
-      // Despeja o buffer no terminal
       if (bufferRef.current.length > 0) {
         bufferRef.current.forEach(data => {
           if (typeof data === 'string') term.write(data);
@@ -83,25 +77,18 @@ export function TerminalPane({ tabId, isActive }) {
       fitRef.current = fit;
       setIsInitialized(true);
 
-      // Faz o primeiro fit seguro
       try { fit.fit(); } catch (e) {}
 
-      // Input do usuário
+      // Manda apenas os dados puros das teclas (sem JSON)
       const onData = term.onData(data => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
           wsRef.current.send(data);
         }
       });
 
-      // Resize Observer
       const resizeObserver = new ResizeObserver(() => {
         if (containerRef.current && containerRef.current.offsetWidth > 0) {
-          try {
-            fit.fit();
-            if (wsRef.current?.readyState === WebSocket.OPEN) {
-              wsRef.current.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-            }
-          } catch (e) {}
+          try { fit.fit(); } catch (e) {}
         }
       });
       resizeObserver.observe(containerRef.current);
@@ -110,12 +97,11 @@ export function TerminalPane({ tabId, isActive }) {
         onData.dispose();
         resizeObserver.disconnect();
       };
-    }, 50); // 50ms de delay para garantir o render visual da div
+    }, 50);
 
     return () => clearTimeout(initTimer);
   }, [isActive, isInitialized]);
 
-  // 3. Reajustar o tamanho quando voltar a ser ativo
   useEffect(() => {
     if (isActive && isInitialized && fitRef.current && containerRef.current) {
       const resizeTimer = setTimeout(() => {
@@ -134,7 +120,6 @@ export function TerminalPane({ tabId, isActive }) {
       style={{ 
         height: '100%', 
         width: '100%', 
-        padding: '4px',
         display: isActive ? 'block' : 'none'
       }}
     />
