@@ -177,6 +177,13 @@ npm run dev
     - Arraste de janelas para a borda esquerda faz a janela se ajustar automaticamente para ocupar 50% da tela no lado esquerdo.
     - Arraste de janelas para a borda direita ajusta automaticamente a janela para ocupar 50% no lado direito.
 
+37. **Central de Notificações Lateral na Taskbar**:
+    - Botão de sino no System Tray que expande um painel flutuante estilizado no padrão Windows 11 para logs de tarefas e varreduras Nmap.
+38. **Terminal Kali com Suporte a Múltiplas Abas (`TerminalApp.jsx`)**:
+    - Permite abrir e gerenciar múltiplas abas de bash independentes na mesma janela do Terminal, com conexões WebSocket e PTY isoladas.
+39. **Lab Missions Gamificado (`LabMissionsApp.jsx`)**:
+    - Aplicativo de treinamento Red Team com missões de aprendizado (OSINT, Nmap, Findings), sistema de XP e barra de progresso visual.
+
 ---
 
 ## 📜 Licença

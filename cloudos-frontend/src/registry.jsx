@@ -18,7 +18,8 @@ import { FindingsManagerApp } from './apps/FindingsManagerApp';
 import { PipelineBuilderApp } from './apps/PipelineBuilderApp';
 import { EnvironmentDoctorApp } from './apps/EnvironmentDoctorApp';
 import { EvidenceVaultApp } from './apps/EvidenceVaultApp';
-import { Bug, Stethoscope, Vault } from 'lucide-react';
+import { LabMissionsApp } from './apps/LabMissionsApp';
+import { Bug, Stethoscope, Vault, Trophy } from 'lucide-react';
 
 export const AppRegistry = {
   terminal: { id: 'terminal', title: 'Terminal', icon: TerminalIcon, Component: TerminalApp },
@@ -26,6 +27,7 @@ export const AppRegistry = {
   toolrunner: { id: 'toolrunner', title: 'Tool Runner', icon: LayoutGrid, Component: ToolRunnerApp },
   pipeline: { id: 'pipeline', title: 'Automação', icon: Workflow, Component: PipelineApp },
   visualpipeline: { id: 'visualpipeline', title: 'Visual Pipeline', icon: Workflow, Component: PipelineBuilderApp },
+  missions: { id: 'missions', title: 'Lab Missions', icon: Trophy, Component: LabMissionsApp },
   findings: { id: 'findings', title: 'Findings', icon: Bug, Component: FindingsManagerApp },
   evidence: { id: 'evidence', title: 'Evidence Vault', icon: Vault, Component: EvidenceVaultApp },
   doctor: { id: 'doctor', title: 'Doctor', icon: Stethoscope, Component: EnvironmentDoctorApp },
