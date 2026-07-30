@@ -1,15 +1,54 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import 'xterm/css/xterm.css';
 
-export function TerminalPane({ tabId }) {
+export function TerminalPane({ tabId, isActive }) {
   const containerRef = useRef(null);
   const termRef = useRef(null);
+  const fitRef = useRef(null);
   const wsRef = useRef(null);
+  const bufferRef = useRef([]);
+  const [isInitialized, setIsInitialized] = useState(false);
 
+  // 1. Conexão WebSocket (Roda independente de estar ativo ou não)
   useEffect(() => {
-    if (!containerRef.current) return;
+    const token = localStorage.getItem('cloudos_token');
+    const ws = new WebSocket(`ws://localhost:8080?token=${encodeURIComponent(token || '')}`);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      // Se o terminal já existir, manda o tamanho inicial
+      if (termRef.current) {
+        try {
+          ws.send(JSON.stringify({ type: 'resize', cols: termRef.current.cols, rows: termRef.current.rows }));
+        } catch (e) {}
+      }
+    };
+
+    ws.onmessage = (event) => {
+      if (termRef.current) {
+        if (typeof event.data === 'string') {
+          termRef.current.write(event.data);
+        } else {
+          termRef.current.write(new Uint8Array(event.data));
+        }
+      } else {
+        // Se o xterm ainda não montou, guarda no buffer
+        bufferRef.current.push(event.data);
+      }
+    };
+
+    return () => {
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close();
+      }
+    };
+  }, [tabId]);
+
+  // 2. Inicialização do xterm (SÓ RODA QUANDO A ABA ESTÁ ATIVA)
+  useEffect(() => {
+    if (!isActive || !containerRef.current || isInitialized) return;
 
     const term = new Terminal({
       theme: {
@@ -26,59 +65,73 @@ export function TerminalPane({ tabId }) {
 
     const fit = new FitAddon();
     term.loadAddon(fit);
+    
     term.open(containerRef.current);
-    setTimeout(() => { try { fit.fit(); } catch(e) {} }, 100);
+    setTimeout(() => { try { fit.fit(); } catch (e) {} }, 50);
 
     termRef.current = term;
+    fitRef.current = fit;
+    setIsInitialized(true);
 
-    const token = localStorage.getItem('cloudos_token');
-    const ws = new WebSocket(`ws://localhost:8080?token=${encodeURIComponent(token || '')}`);
-    wsRef.current = ws;
+    // Despeja o buffer acumulado enquanto inativo
+    if (bufferRef.current.length > 0) {
+      bufferRef.current.forEach(data => {
+        if (typeof data === 'string') term.write(data);
+        else term.write(new Uint8Array(data));
+      });
+      bufferRef.current = [];
+    }
 
-    ws.onopen = () => {
-      try {
-        fit.fit();
-        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-      } catch(e) {}
-    };
-
-    ws.onmessage = (event) => {
-      if (typeof event.data === 'string') {
-        term.write(event.data);
-      } else {
-        term.write(new Uint8Array(event.data));
-      }
-    };
-
+    // Input do usuário
     const onData = term.onData(data => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(data);
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(data);
       }
     });
 
+    // Resize
     const resizeObserver = new ResizeObserver(() => {
-      try {
-        fit.fit();
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-        }
-      } catch(e) {}
+      if (containerRef.current && containerRef.current.offsetWidth > 0) {
+        try {
+          fit.fit();
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+          }
+        } catch (e) {}
+      }
     });
     resizeObserver.observe(containerRef.current);
 
     return () => {
       onData.dispose();
       resizeObserver.disconnect();
-      if (ws.readyState === WebSocket.OPEN) ws.close();
       term.dispose();
     };
-  }, [tabId]);
+  }, [isActive, isInitialized]);
+
+  // 3. Reajustar o tamanho quando voltar a ser ativo
+  useEffect(() => {
+    if (isActive && isInitialized && fitRef.current && containerRef.current) {
+      setTimeout(() => {
+        if (containerRef.current.offsetWidth > 0) {
+          try {
+            fitRef.current.fit();
+          } catch (e) {}
+        }
+      }, 50);
+    }
+  }, [isActive, isInitialized]);
 
   return (
     <div 
       ref={containerRef} 
-      className="terminal-pane-container active"
-      style={{ height: '100%', width: '100%', padding: '4px' }}
+      className={`terminal-pane-container ${isActive ? 'active' : ''}`}
+      style={{ 
+        height: '100%', 
+        width: '100%', 
+        padding: '4px',
+        display: isActive ? 'block' : 'none'
+      }}
     />
   );
 }

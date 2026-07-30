@@ -185,8 +185,7 @@ npm run dev
     - Aplicativo de treinamento Red Team com missões de aprendizado (OSINT, Nmap, Findings), sistema de XP e barra de progresso visual.
 40. **CloudOS Terminal Pro Enterprise (`TerminalProApp.jsx`)**:
     - **Gestão de Sessões Isoladas (`terminalSessionManager.js`)**: Gerenciador backend com `node-pty` de sessões WSL2 Kali Linux via Map id-sessão com controle por token JWT.
-    - **WebSocket Protocol Defensivo Híbrido**: Suporte transparente e silencioso tanto para pacotes de controle JSON (`session_created`, `output`) quanto para cadeias de caracteres e buffers ANSI brutos emitidos pelo PTY do terminal.
-    - **Indicador de Conexão em Tempo Real**: Monitor visual de status no cabeçalho (*Connecting...*, *WSL Connected*, *Disconnected*) com alerta explicativo em caso de falha de token JWT ou servidor inativo.
+    - **Inicialização Preguiçosa & Buffer de Output (`TerminalPane.jsx`)**: Adia a montagem do `xterm.js` até a aba se tornar ativa (evitando crashes de cálculo de dimensão em divs ocultas `display: none`) enquanto acumula a saída do PTY em `bufferRef`.
     - **Sidebar Tática Simplificada (`TerminalSidebar.jsx`)**: Interface limpa focada exclusivamente na visualização do histórico de comandos executados.
     - **Otimização da API Kali Hub (`KaliHubApp.jsx`)**: Removida a requisição HTTP secundária para `/api/kali/tools/recent`, eliminando registros 404 de rede do navegador.
 

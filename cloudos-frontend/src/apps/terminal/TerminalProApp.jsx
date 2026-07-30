@@ -66,9 +66,11 @@ export function TerminalProApp({ payload, setPayload, openApp }) {
         <div className="terminal-content-area">
           {tabs.length > 0 ? (
             tabs.map(tab => (
-              <div key={tab.id} style={{ display: activeTabId === tab.id ? 'block' : 'none', height: '100%', width: '100%' }}>
-                <TerminalPane tabId={tab.id} />
-              </div>
+              <TerminalPane 
+                key={tab.id} 
+                tabId={tab.id} 
+                isActive={activeTabId === tab.id} 
+              />
             ))
           ) : (
             <div className="terminal-empty-state">
