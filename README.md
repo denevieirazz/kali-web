@@ -163,9 +163,12 @@ npm run dev
     - **Desktop.jsx**: Área de trabalho com widgets de vidro (Glassmorphism) para Relógio digital e Monitor de Sistema (CPU e RAM) no canto superior direito.
     - **Drag & Drop**: Suporte nativo para arrastar ícones do Menu Iniciar e soltá-los na Área de Trabalho (criando atalhos persistentes) ou soltá-los na Barra de Tarefas (fixando os apps).
     - **Persistência Local**: Atalhos do desktop e pins da barra de tarefas persistidos automaticamente no `localStorage`.
-34. **Menu Iniciar Oficial Windows 11**:
-    - **Fixados & Todos os Apps**: Organização clara com seção de aplicativos principais no topo e rolagem de todos os apps abaixo, mantendo a caixa de busca universal.
-    - **Drag & Drop**: Atributo `draggable` mantido nos tiles para arrastar aplicativos diretamente para a Área de Trabalho ou para a Barra de Tarefas.
+34. **Menu Iniciar Oficial Windows 11 Premium**:
+    - **Navegação por Teclado**: Navegação pelas setas (`ArrowUp`/`ArrowDown`), `Enter` para abrir e `Esc` para fechar, com destaque tático em azul (`#58a6ff`).
+    - **Menu de Contexto dos Apps**: Clique direito em qualquer aplicativo abre opções rápidas (*Abrir*, *Fixar*, *Criar Atalho* e *Executar como Admin*).
+    - **Glassmorphism 20px & Slide-Up**: Animação fluida de surgimento `slideUpFade` e desfoque fosco real (`backdrop-filter: blur(20px)`).
+    - **Organização em 3 Camadas**: Seções *Fixados*, *Recomendados/Arquivos Recentes* e *Todos os Aplicativos* com busca universal instantânea.
+
 35. **Menu de Contexto do Desktop (Clique com Botão Direito)**:
     - **Menu Tático Flutuante**: Clique direito no fundo do desktop abre menu de contexto estilo Windows com atalhos para *Atualizar*, *Novo Projeto*, *Abrir Terminal*, *Trocar Wallpaper* e *Configurações/Saúde*.
 
