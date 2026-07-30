@@ -1,15 +1,29 @@
 import React, { useState, useEffect, useRef } from 'react';
 import TerminalSidebar from './components/TerminalSidebar';
+import TerminalTabs from './components/TerminalTabs';
 import TerminalPane from './components/TerminalPane';
-import { Terminal, Plus, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { Terminal, Plus, ChevronLeft, ChevronRight, Menu } from 'lucide-react';
 import './TerminalProApp.css';
 
-export function TerminalProApp({ payload, setPayload, openApp }) {
+export function TerminalProApp({ payload, setPayload, openApp, setBg }) {
   const [tabs, setTabs] = useState([]);
   const [activeTabId, setActiveTabId] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const tabCounter = useRef(0);
 
+  // Detecta resolução para ajustar mobile/desktop
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (!mobile) setSidebarOpen(true);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Cria primeira aba ao montar
   useEffect(() => {
     createTab();
   }, []);
@@ -17,12 +31,13 @@ export function TerminalProApp({ payload, setPayload, openApp }) {
   const createTab = () => {
     tabCounter.current += 1;
     const newId = `tab_${Date.now()}_${tabCounter.current}`;
-    setTabs(prev => [...prev, { id: newId, title: 'bash' }]);
+    setTabs(prev => Array.isArray(prev) ? [...prev, { id: newId, title: 'bash', status: 'online' }] : [{ id: newId, title: 'bash', status: 'online' }]);
     setActiveTabId(newId);
+    if (isMobile) setSidebarOpen(false);
   };
 
   const closeTab = (id) => {
-    setTabs(prev => prev.filter(t => t.id !== id));
+    setTabs(prev => (Array.isArray(prev) ? prev.filter(t => t.id !== id) : []));
     if (activeTabId === id && tabs.length > 1) {
       const closedIndex = tabs.findIndex(t => t.id === id);
       const newActive = tabs[closedIndex - 1] || tabs[closedIndex + 1];
@@ -33,31 +48,35 @@ export function TerminalProApp({ payload, setPayload, openApp }) {
   };
 
   return (
-    <div className="terminal-pro-app">
-      <TerminalSidebar isOpen={sidebarOpen} openApp={openApp} />
+    <div className={`terminal-pro-app ${isMobile ? 'mobile' : 'desktop'}`}>
+      {/* Overlay para fechar drawer no mobile */}
+      {isMobile && sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
+      
+      <TerminalSidebar isOpen={sidebarOpen} isMobile={isMobile} openApp={openApp} onClose={() => setSidebarOpen(false)} />
+      
       <div className="terminal-pro-main">
         <div className="terminal-topbar">
-          <button onClick={() => setSidebarOpen(!sidebarOpen)} className="t-icon-btn">
-            {sidebarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
-          </button>
-          <div className="terminal-tabs-container">
-            {tabs.map(tab => (
-              <div 
-                key={tab.id} 
-                className={`terminal-tab ${activeTabId === tab.id ? 'active' : ''}`} 
-                onClick={() => setActiveTabId(tab.id)}
-              >
-                <span className="dot"></span>
-                <span>{tab.title}</span>
-                <button className="close-btn" onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}>
-                  <X size={12} />
-                </button>
-              </div>
-            ))}
-            <button className="terminal-tab-add" onClick={createTab}><Plus size={16} /></button>
-          </div>
+          {isMobile && (
+            <button onClick={() => setSidebarOpen(true)} className="t-icon-btn mobile-menu-btn">
+              <Menu size={18} />
+            </button>
+          )}
+          {!isMobile && (
+            <button onClick={() => setSidebarOpen(!sidebarOpen)} className="t-icon-btn">
+              {sidebarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+            </button>
+          )}
+          
+          <TerminalTabs 
+            tabs={tabs} 
+            activeId={activeTabId} 
+            onSelect={setActiveTabId} 
+            onClose={closeTab} 
+            onCreate={createTab} 
+          />
+          
           <div className="terminal-status-info">
-            <span className="status-dot online"></span> WSL Connected
+            <span className="status-dot online"></span> WSL
           </div>
         </div>
 
@@ -72,11 +91,11 @@ export function TerminalProApp({ payload, setPayload, openApp }) {
             ))
           ) : (
             <div className="terminal-empty-state">
-              <Terminal size={64} className="opacity-20 mb-4" />
+              <Terminal size={64} style={{ opacity: 0.2, marginBottom: '16px' }} />
               <h3>CloudOS Terminal Pro</h3>
-              <p>Todas as sessões foram fechadas.</p>
+              <p>Sessões encerradas.</p>
               <button onClick={createTab} className="t-btn-primary">
-                <Plus size={16} className="mr-2" /> Nova Sessão
+                <Plus size={16} style={{ marginRight: '8px' }} /> Nova Sessão
               </button>
             </div>
           )}
@@ -84,8 +103,8 @@ export function TerminalProApp({ payload, setPayload, openApp }) {
 
         <div className="terminal-statusbar">
           <span><b>cloudos@kali</b></span>
-          <span>Projeto: <b className="text-blue-400">Default</b></span>
-          <span className="ml-auto">UTF-8 | Bash</span>
+          <span className="hide-mobile">Projeto: <b style={{ color: '#58a6ff' }}>Default</b></span>
+          <span className="ml-auto hide-mobile">UTF-8 | Bash</span>
         </div>
       </div>
     </div>

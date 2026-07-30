@@ -185,9 +185,9 @@ npm run dev
     - Aplicativo de treinamento Red Team com missões de aprendizado (OSINT, Nmap, Findings), sistema de XP e barra de progresso visual.
 40. **CloudOS Terminal Pro Enterprise (`TerminalProApp.jsx`)**:
     - **Gestão de Sessões Isoladas (`terminalSessionManager.js`)**: Gerenciador backend com `node-pty` de sessões WSL2 Kali Linux via Map id-sessão com controle por token JWT.
-    - **Túnel PTY Bruto Sem Poluição**: Remoção total do envio de JSON de controle via WebSocket pelo frontend. Apenas entradas de teclado reais e saídas ANSI puras transitam no socket.
+    - **Design System Warp/Wave & Mobile First**: Layout fluido com suporte a gaveta drawer para dispositivos móveis (`isMobile`), overlay responsivo e controle de overflow horizontal de abas.
+    - **Fontes Nerd Font & Desempenho (`TerminalPane.jsx`)**: Suporte a tipografias `CaskaydiaCove Nerd Font` e `JetBrains Mono` com renderização de alta velocidade em 60fps.
     - **Atraso Defensivo WebSocket (50ms em `TerminalPane.jsx`)**: Adiamento da criação do socket para absorver montagens rápidas em Strict Mode do React 18 sem emitir avisos de fechamento no console.
-    - **Estética Glassmorphism Premium (`TerminalProApp.css`)**: Fundo semitransparente com desfoque de camada (`backdrop-filter: blur(12px)`), abas arredondadas e destaque em azul neon para a aba/painel ativo.
     - **Sidebar Tática Simplificada (`TerminalSidebar.jsx`)**: Interface limpa focada exclusivamente na visualização do histórico de comandos executados.
 
 ---
