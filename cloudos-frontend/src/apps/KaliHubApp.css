@@ -1,0 +1,292 @@
+.kali-hub {
+  display: flex;
+  height: 100%;
+  width: 100%;
+  background: #0d1117;
+  color: #c9d1d9;
+  font-family: 'Inter', sans-serif;
+  overflow: hidden;
+}
+
+/* SIDEBAR */
+.kali-sidebar {
+  width: 240px;
+  background: #0d1117;
+  border-right: 1px solid #30363d;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+.kali-sidebar-header {
+  padding: 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid #21262d;
+}
+.kali-cat-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+.kali-cat-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  color: #c9d1d9;
+  font-size: 13px;
+  text-align: left;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-bottom: 2px;
+  transition: background 0.2s;
+}
+.kali-cat-btn:hover { background: #161b22; }
+.kali-cat-btn.active { background: #161b22; color: #58a6ff; }
+.kali-cat-count {
+  margin-left: auto;
+  font-size: 11px;
+  background: #21262d;
+  padding: 2px 6px;
+  border-radius: 10px;
+  color: #8b949e;
+}
+
+/* MAIN AREA */
+.kali-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.kali-topbar {
+  padding: 12px 16px;
+  border-bottom: 1px solid #30363d;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #161b22;
+}
+.kali-search {
+  flex: 1;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 8px 12px;
+  color: #c9d1d9;
+  font-size: 13px;
+  outline: none;
+}
+.kali-search:focus { border-color: #58a6ff; }
+.kali-btn-icon {
+  background: #21262d;
+  border: 1px solid #30363d;
+  color: #c9d1d9;
+  padding: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+.kali-btn-icon:hover { background: #30363d; }
+
+/* GRID */
+.kali-grid {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  align-content: start;
+}
+
+/* CARD */
+.kali-card {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color 0.2s;
+}
+.kali-card:hover { border-color: #58a6ff; }
+.kali-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.kali-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #c9d1d9;
+}
+.kali-card-desc {
+  font-size: 12px;
+  color: #8b949e;
+  line-height: 1.4;
+  flex: 1;
+}
+.kali-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  border-top: 1px solid #21262d;
+  padding-top: 8px;
+}
+.kali-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.kali-status-installed { color: #3fb950; background: rgba(63, 185, 80, 0.1); }
+.kali-status-missing { color: #f85149; background: rgba(248, 81, 73, 0.1); }
+.kali-status-checking { color: #d29922; background: rgba(210, 153, 34, 0.1); }
+.kali-risk-safe { color: #4ade80; background: rgba(34,197,94,.16); }
+.kali-risk-medium { color: #facc15; background: rgba(234,179,8,.16); }
+.kali-risk-restricted { color: #f87171; background: rgba(239,68,68,.16); }
+
+.kali-action-btn {
+  background: #238636;
+  color: #fff;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.kali-action-btn:hover { background: #2ea043; }
+.kali-action-btn.gui { background: #1f6feb; }
+.kali-action-btn.gui:hover { background: #388bfd; }
+.kali-action-btn.install { background: #d29922; color: #0d1117; }
+.kali-action-btn.install:hover { background: #e3b341; }
+
+.kali-fav-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: #8b949e;
+  padding: 0;
+}
+.kali-fav-btn.active { color: #d29922; }
+
+/* DETAILS PANEL */
+.kali-details-panel {
+  width: 340px;
+  background: #0d1117;
+  border-left: 1px solid #30363d;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  animation: slideIn 0.2s ease-out;
+}
+@keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+.kali-details-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid #30363d;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #161b22;
+}
+.kali-details-body {
+  padding: 16px;
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.kali-details-section h4 {
+  font-size: 11px;
+  color: #8b949e;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+.kali-details-section p {
+  font-size: 13px;
+  color: #c9d1d9;
+  line-height: 1.5;
+}
+.kali-warning-box {
+  background: rgba(248, 81, 73, 0.1);
+  border: 1px solid #f85149;
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 12px;
+  color: #f85149;
+}
+
+/* STATUSBAR */
+.kali-statusbar {
+  height: 28px;
+  background: #161b22;
+  border-top: 1px solid #30363d;
+  color: #8b949e;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 16px;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.kali-status-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* SKELETON & EMPTY */
+.kali-skeleton {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  height: 140px;
+  animation: pulse 1.5s infinite;
+}
+@keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+.kali-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: #8b949e;
+  padding: 40px;
+  font-size: 14px;
+}
+
+/* RESPONSIVE */
+@media (max-width: 768px) {
+  .kali-hub { flex-direction: column; }
+  .kali-sidebar {
+    width: 100%;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid #30363d;
+    flex-direction: row;
+    overflow-x: auto;
+  }
+  .kali-sidebar-header { display: none; }
+  .kali-cat-list { display: flex; flex-direction: row; padding: 8px; gap: 4px; }
+  .kali-cat-btn { white-space: nowrap; }
+  .kali-grid { grid-template-columns: 1fr; }
+  .kali-details-panel {
+    width: 100%;
+    height: 50vh;
+    position: absolute;
+    bottom: 0;
+    border-left: none;
+    border-top: 1px solid #30363d;
+  }
+}

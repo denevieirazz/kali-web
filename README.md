@@ -142,6 +142,7 @@ npm run dev
 25. **Interface Burp Suite & VS Code para Tool Runner (V2.1 + Catálogo Embutido)**: Atualização do `ToolRunnerApp.jsx` com busca automática de ferramentas em `GET /api/kali/tools` quando aberto sem `payload.toolId`, exibição em grid de cards interativos, navegação interna com botão "Voltar", layout flexbox puro e exports duplos.
 26. **Descrições de Campos & Schema Nmap em Português**: Atualizado o `FieldRenderer` do `ToolRunnerApp.jsx` para renderizar descrições explicativas táticas sob cada campo e reescrito o schema do `nmap` no `kali_tools_schema.js` com explicações em português para auxílio em Red Team.
 27. **Adição de Schemas John & Aircrack-ng**: Incorporados os schemas e funções `buildCmd` de `john` (John the Ripper) e `aircrack` (Aircrack-ng) no `kali_tools_schema.js` com suporte a presets táticos e descrições detalhadas.
+28. **KaliHubApp Enterprise V3**: Reformulação visual do hub tático de ferramentas com CSS isolado (`KaliHubApp.css`), painel lateral deslizante de detalhes (`<aside>`), barreira de segurança (*Scope Guard*) para ferramentas de risco `restricted`, skeleton loading em grid, barra de status inferior em tempo real com indicador WSL e suporte a modo mobile adaptativo.
 
 ---
 
