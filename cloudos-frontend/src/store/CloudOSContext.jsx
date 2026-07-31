@@ -16,10 +16,9 @@ export const CloudOSProvider = ({ children }) => {
   const [isLocked, setIsLocked] = useState(false);
   const [activeProject, setActiveProject] = useState(null);
 
-  const token = localStorage.getItem('cloudos_token');
-
   const fetchAll = useCallback(async () => {
-    if (!token) {
+    const currentToken = localStorage.getItem('cloudos_token');
+    if (!currentToken) {
       setLoading(false);
       setIsAuthenticated(false);
       return;
@@ -27,7 +26,7 @@ export const CloudOSProvider = ({ children }) => {
 
     const headers = {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
+      'Authorization': `Bearer ${currentToken}`
     };
 
     try {
@@ -82,6 +81,7 @@ export const CloudOSProvider = ({ children }) => {
 
   const togglePin = async (appId, isPinned) => {
     setPinnedApps(prev => isPinned ? [...prev, appId] : prev.filter(id => id !== appId));
+    const token = localStorage.getItem('cloudos_token');
     if (!token) return;
     try {
       await fetch(`${API_BASE}/api/apps/toggle`, {
@@ -94,6 +94,7 @@ export const CloudOSProvider = ({ children }) => {
 
   const saveDesktopState = async (newState) => {
     setDesktopState(newState);
+    const token = localStorage.getItem('cloudos_token');
     if (!token) return;
     try {
       await fetch(`${API_BASE}/api/user/desktop`, {
