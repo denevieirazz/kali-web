@@ -1,159 +1,179 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import TerminalPane from './components/TerminalPane';
-import { Plus, X, Terminal } from 'lucide-react';
-import './TerminalProApp.css';
+import TerminalTopbar from './TerminalTopbar';
+import TerminalTabs from './TerminalTabs';
+import TerminalSidebar from './TerminalSidebar';
+import TerminalPane from './TerminalPane';
+import TerminalStatusbar from './TerminalStatusbar';
+import TerminalDashboard from './TerminalDashboard';
+import TerminalThemePicker from './TerminalThemePicker';
+import '../TerminalProApp.css';
 
-export function TerminalProApp({ payload, setPayload, openApp }) {
-  const [tabs, setTabs] = useState([]);
-  const [activeTab, setActiveTab] = useState(null);
-  const tabCounter = useRef(1);
+const defaultTheme = {
+  name: 'GitHub Dark',
+  xterm: {
+    background: '#0d1117',
+    foreground: '#c9d1d9',
+    cursor: '#58a6ff',
+    selection: '#58a6ff40',
+    black: '#161b22',
+    red: '#f85149',
+    green: '#3fb950',
+    yellow: '#d2991d',
+    blue: '#58a6ff',
+    magenta: '#bc8cff',
+    cyan: '#39c5cf',
+    white: '#b1bac4',
+    brightBlack: '#6e7681',
+    brightRed: '#ff7b72',
+    brightGreen: '#56d364',
+    brightYellow: '#e3b341',
+    brightBlue: '#79c0ff',
+    brightMagenta: '#d2a8ff',
+    brightCyan: '#56d4dd',
+    brightWhite: '#f0f6fc',
+  },
+  colors: {
+    bg: '#0d1117',
+    panel: '#161b22',
+    border: '#30363d',
+    primary: '#58a6ff',
+    text: '#c9d1d9',
+    muted: '#8b949e',
+  },
+};
 
-  // Criar nova aba
-  const newTab = useCallback(() => {
-    const newId = `tab_${Date.now()}_${tabCounter.current++}`;
-    const token = localStorage.getItem('cloudos_token') || '';
-    const tab = {
-      id: newId,
-      title: `Term ${tabCounter.current - 1}`,
-      icon: '🐉',
-      wsToken: encodeURIComponent(token),
-    };
-    setTabs(prev => [...prev, tab]);
+export function TerminalProApp({ payload, setPayload, openApp, setBg }) {
+  const [tabs, setTabs] = useState(() => {
+    try {
+      const saved = localStorage.getItem('terminal_tabs');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [{ id: 'tab_1', title: 'Shell 1', wsToken: 'default' }];
+  });
+  const [activeTab, setActiveTab] = useState(tabs[0]?.id || null);
+  const [showDashboard, setShowDashboard] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [theme, setTheme] = useState(defaultTheme);
+  const tabCounter = useRef(tabs.length + 1);
+
+  useEffect(() => {
+    localStorage.setItem('terminal_tabs', JSON.stringify(tabs));
+  }, [tabs]);
+
+  const addTab = useCallback(() => {
+    const newId = `tab_${tabCounter.current++}`;
+    const newTab = { id: newId, title: `Shell ${tabCounter.current - 1}`, wsToken: 'default' };
+    setTabs(prev => [...prev, newTab]);
     setActiveTab(newId);
+    setShowDashboard(false);
   }, []);
 
-  // Inicializa uma aba padrão se não houver nenhuma
-  useEffect(() => {
-    if (tabs.length === 0) {
-      newTab();
-    }
-  }, [tabs.length, newTab]);
-
-  // Fechar aba
-  const closeTab = (id, e) => {
-    if (e) e.stopPropagation();
-    if (tabs.length <= 1) return; // manter ao menos uma
+  const closeTab = useCallback((id) => {
     setTabs(prev => {
+      if (prev.length <= 1) return prev;
       const filtered = prev.filter(t => t.id !== id);
       if (activeTab === id) {
         const idx = prev.findIndex(t => t.id === id);
         const newActive = filtered[Math.min(idx, filtered.length - 1)];
         setActiveTab(newActive?.id || null);
+        if (filtered.length === 0) {
+          setShowDashboard(true);
+          setActiveTab(null);
+        }
       }
       return filtered;
     });
-  };
+  }, [activeTab]);
 
-  // Navegação entre abas
-  const navigateTabs = useCallback((direction) => {
+  const navigateTab = useCallback((direction) => {
     const currentIdx = tabs.findIndex(t => t.id === activeTab);
     if (currentIdx === -1) return;
-    const newIdx = direction === 'next'
-      ? (currentIdx + 1) % tabs.length
-      : (currentIdx - 1 + tabs.length) % tabs.length;
+    const newIdx = (currentIdx + direction + tabs.length) % tabs.length;
     setActiveTab(tabs[newIdx].id);
   }, [tabs, activeTab]);
 
-  // Atalhos de teclado (Ctrl+T, Ctrl+W, Ctrl+Tab)
+  const renameTab = useCallback((id, newTitle) => {
+    setTabs(prev => prev.map(t => t.id === id ? { ...t, title: newTitle } : t));
+  }, []);
+
   useEffect(() => {
     const handler = (e) => {
-      if (e.ctrlKey && e.key === 't') {
+      if (e.ctrlKey && e.shiftKey && e.key === 'T') {
         e.preventDefault();
-        newTab();
-      } else if (e.ctrlKey && e.key === 'w') {
+        addTab();
+      }
+      if (e.ctrlKey && e.shiftKey && e.key === 'W') {
         e.preventDefault();
-        if (tabs.length > 1 && activeTab) {
+        if (tabs.length > 0 && activeTab) {
           closeTab(activeTab);
         }
-      } else if (e.ctrlKey && e.key === 'Tab') {
+      }
+      if (e.ctrlKey && e.key === 'Tab') {
         e.preventDefault();
-        navigateTabs(e.shiftKey ? 'prev' : 'next');
+        navigateTab(e.shiftKey ? -1 : 1);
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [tabs, activeTab, navigateTabs, newTab]);
+  }, [tabs, activeTab, addTab, closeTab, navigateTab]);
+
+  const toggleSidebar = () => setSidebarOpen(o => !o);
 
   return (
-    <div className="terminal-pro-app" style={{
-      display: 'flex', flexDirection: 'column', height: '100%',
-      background: '#0d1117',
-      borderRadius: '12px',
-      border: '1px solid #30363d',
-      boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-      overflow: 'hidden',
-    }}>
-      {/* Barra de título customizada */}
-      <div style={{
-        display: 'flex', alignItems: 'center', background: '#161b22',
-        padding: '0 8px', height: '40px', borderBottom: '1px solid #30363d',
-        userSelect: 'none',
-      }}>
-        {/* Abas */}
-        <div style={{ display: 'flex', flex: 1, overflowX: 'auto', gap: '4px' }}>
-          {tabs.map(tab => (
-            <div
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              style={{
-                display: 'flex', alignItems: 'center', padding: '0 12px',
-                height: '32px', borderRadius: '6px 6px 0 0',
-                background: activeTab === tab.id ? '#0d1117' : 'transparent',
-                border: activeTab === tab.id ? '1px solid #30363d' : '1px solid transparent',
-                borderBottom: 'none',
-                color: activeTab === tab.id ? '#58a6ff' : '#8b949e',
-                fontSize: '13px', fontWeight: 600,
-                cursor: 'pointer', transition: 'all 0.2s',
-                backdropFilter: activeTab === tab.id ? 'blur(12px)' : 'none',
-                textShadow: activeTab === tab.id ? '0 0 10px #58a6ff' : 'none',
-              }}
-            >
-              <span style={{ marginRight: 6 }}>{tab.icon}</span>
-              {tab.title}
-              {tabs.length > 1 && (
-                <span
-                  onClick={(e) => closeTab(tab.id, e)}
-                  style={{ marginLeft: 8, cursor: 'pointer', opacity: 0.7, display: 'flex', alignItems: 'center' }}
+    <div className="terminal-pro" style={{ '--theme-bg': theme.colors.bg, '--theme-panel': theme.colors.panel, '--theme-border': theme.colors.border, '--theme-primary': theme.colors.primary, '--theme-text': theme.colors.text, '--theme-muted': theme.colors.muted }}>
+      <TerminalTopbar
+        title="Terminal Pro"
+        onToggleSidebar={toggleSidebar}
+        sidebarOpen={sidebarOpen}
+      />
+      <div className="terminal-body">
+        <TerminalSidebar
+          open={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+          tabs={tabs}
+          activeTab={activeTab}
+          onSelectTab={setActiveTab}
+          onAddTab={addTab}
+        />
+        <div className="terminal-main">
+          <TerminalTabs
+            tabs={tabs}
+            activeTab={activeTab}
+            onSelectTab={(id) => { setActiveTab(id); setShowDashboard(false); }}
+            onCloseTab={closeTab}
+            onNewTab={addTab}
+            onRenameTab={renameTab}
+          />
+          <div className="terminal-workspace">
+            {showDashboard || tabs.length === 0 ? (
+              <TerminalDashboard onNewTab={addTab} theme={theme} />
+            ) : (
+              tabs.map(tab => (
+                <div
+                  key={tab.id}
+                  className={`terminal-pane-container ${tab.id === activeTab ? 'active' : ''}`}
+                  style={{ display: tab.id === activeTab ? 'flex' : 'none', height: '100%' }}
                 >
-                  <X size={14} />
-                </span>
-              )}
-            </div>
-          ))}
-        </div>
-        {/* Botão + */}
-        <button
-          onClick={newTab}
-          style={{
-            background: 'none', border: 'none', color: '#58a6ff',
-            cursor: 'pointer', padding: '6px', borderRadius: '4px',
-            marginLeft: '4px', transition: '0.2s',
-            display: 'flex', alignItems: 'center', justifyContent: 'center'
-          }}
-          title="Nova Aba (Ctrl+T)"
-        >
-          <Plus size={18} />
-        </button>
-      </div>
-
-      {/* Conteúdo da aba ativa */}
-      <div style={{ flex: 1, position: 'relative' }}>
-        {tabs.map(tab => (
-          <div
-            key={tab.id}
-            style={{
-              display: activeTab === tab.id ? 'block' : 'none',
-              height: '100%',
-              width: '100%',
-            }}
-          >
-            <TerminalPane
-              wsUrl={`ws://localhost:8080?token=${tab.wsToken}`}
-              isActive={activeTab === tab.id}
-            />
+                  <TerminalPane
+                    wsUrl={`ws://localhost:8080?token=${tab.wsToken}`}
+                    isActive={tab.id === activeTab}
+                    theme={theme}
+                  />
+                </div>
+              ))
+            )}
           </div>
-        ))}
+          <TerminalStatusbar
+            user="cloudos"
+            cwd="~"
+            project="Default"
+            shell="bash"
+            encoding="UTF-8"
+            jobs={0}
+          />
+        </div>
       </div>
+      <TerminalThemePicker current={theme} onChange={setTheme} />
     </div>
   );
 }

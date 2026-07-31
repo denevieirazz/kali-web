@@ -1,0 +1,137 @@
+/* TerminalProApp.css - Layout Grid Responsivo */
+.terminal-pro {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background-color: var(--theme-bg);
+  color: var(--theme-text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid var(--theme-border);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+
+.terminal-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Sidebar */
+.terminal-sidebar {
+  width: 260px;
+  background-color: var(--theme-panel);
+  border-right: 1px solid var(--theme-border);
+  transition: width 0.2s ease, transform 0.3s ease;
+  overflow-y: auto;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-sidebar.collapsed {
+  width: 0;
+  padding: 0;
+  border: none;
+  overflow: hidden;
+}
+
+.terminal-sidebar-mobile-overlay {
+  display: none;
+}
+
+/* Main area */
+.terminal-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background-color: var(--theme-bg);
+}
+
+/* Tabs bar */
+.terminal-tabs {
+  display: flex;
+  background-color: var(--theme-panel);
+  border-bottom: 1px solid var(--theme-border);
+  overflow-x: auto;
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding: 0 8px;
+  height: 40px;
+  align-items: flex-end;
+}
+
+/* Workspace (onde o xterm ou dashboard fica) */
+.terminal-workspace {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  position: relative;
+}
+
+.terminal-pane-container {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Statusbar */
+.terminal-statusbar {
+  height: 28px;
+  background-color: var(--theme-panel);
+  border-top: 1px solid var(--theme-border);
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: 12px;
+  color: var(--theme-muted);
+  flex-shrink: 0;
+}
+
+/* ---------- Responsivo ---------- */
+@media (max-width: 1199px) {
+  .terminal-sidebar {
+    width: 220px;
+  }
+}
+
+@media (max-width: 899px) {
+  .terminal-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 280px;
+    z-index: 1000;
+    transform: translateX(-100%);
+    box-shadow: 4px 0 12px rgba(0,0,0,0.5);
+  }
+  .terminal-sidebar.open {
+    transform: translateX(0);
+  }
+  .terminal-sidebar-mobile-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 999;
+  }
+}
+
+@media (max-width: 599px) {
+  .terminal-pro {
+    border-radius: 0;
+    border: none;
+  }
+  .terminal-tabs {
+    height: 36px;
+    font-size: 13px;
+  }
+  .terminal-statusbar {
+    height: 24px;
+    font-size: 10px;
+    padding: 0 8px;
+  }
+}

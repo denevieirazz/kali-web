@@ -185,13 +185,15 @@ npm run dev
     - Aplicativo de treinamento Red Team com missões de aprendizado (OSINT, Nmap, Findings), sistema de XP e barra de progresso visual.
 40. **CloudOS Terminal Pro Enterprise (`TerminalProApp.jsx`)**:
     - **Gestão de Sessões Isoladas (`terminalSessionManager.js`)**: Gerenciador backend com `node-pty` de sessões WSL2 Kali Linux via Map id-sessão com controle por token JWT.
-    - **Estética Tokyo Night Neon & Scanlines (`TerminalPane.jsx`)**: Tema escuro tático com brilho neon azul (`#58a6ff`), cursor tático em barras (`bar`), transparência Glassmorphism e filtro retro de scanlines.
-    - **Atalhos de Produtividade Globais**:
-      - `Ctrl + T`: Criação instantânea de nova aba.
-      - `Ctrl + W`: Fechamento rápido da aba ativa.
-      - `Ctrl + Tab` / `Ctrl + Shift + Tab`: Alternância fluida entre abas.
+    - **Fase 1 - Overhaul Visual & Layout Grid Responsivo**:
+      - `TerminalTopbar.jsx`: Barra superior com estatísticas do WSL2 e alternância de sidebar.
+      - `TerminalTabs.jsx`: Sistema de abas com suporte a edição de título em clique duplo (`onDoubleClick`).
+      - `TerminalSidebar.jsx`: Painel lateral colapsável com drawer responsivo para mobile (`@media max-width: 899px`).
+      - `TerminalPane.jsx`: Integração do `xterm.js` com `ResizeObserver` para manutenção do `FitAddon`.
+      - `TerminalStatusbar.jsx`: Barra de status inferior com usuário, escopo, projeto e encoding.
+      - `TerminalDashboard.jsx`: Cartões de acesso rápido (*Kali Hub*, *Missions*, *Snippets*).
+      - `TerminalThemePicker.jsx`: Seletor de temas (*GitHub Dark*, *Kali Neon*).
     - **Atraso Defensivo WebSocket (50ms em `TerminalPane.jsx`)**: Adiamento da criação do socket para absorver montagens rápidas em Strict Mode do React 18 sem emitir avisos de fechamento no console.
-    - **Otimização da API Kali Hub (`KaliHubApp.jsx`)**: Removida a requisição HTTP secundária para `/api/kali/tools/recent`, eliminando registros 404 de rede do navegador.
 
 ---
 
