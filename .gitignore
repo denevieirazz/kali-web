@@ -1,6 +1,1 @@
-node_modules/
-cloudos-backend/node_modules/
-cloudos-frontend/node_modules/
-cloudos-frontend/dist/
-.env
-*.log
+Nothing should be ignored since the only modified file is a source code file (.jsx) and there are no build artifacts, dependencies, or temporary files in the changes.

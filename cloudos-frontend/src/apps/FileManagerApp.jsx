@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Folder, FileCode, Home, ArrowLeft, FolderPlus, Trash2, Upload, Download, Terminal as TermIcon, Code2, HardDrive, Clock, Star, FileText } from 'lucide-react';
 import { useCloudFS } from '../hooks/useCloudFS';
@@ -10,66 +10,138 @@ export const FileManagerApp = ({ openApp }) => {
   const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, item: null });
   const fileInputRef = useRef(null);
 
+  // Fecha menu de contexto ao clicar fora ou pressionar ESC
+  useEffect(() => {
+    const handleClick = () => setContextMenu(prev => prev.visible ? { ...prev, visible: false } : prev);
+    const handleEsc = (e) => { if (e.key === 'Escape') setContextMenu(prev => ({ ...prev, visible: false })); };
+    
+    if (contextMenu.visible) {
+      document.addEventListener('click', handleClick);
+      document.addEventListener('keydown', handleEsc);
+      return () => {
+        document.removeEventListener('click', handleClick);
+        document.removeEventListener('keydown', handleEsc);
+      };
+    }
+  }, [contextMenu.visible]);
+
   const handleUpload = (e) => {
     const files = e.target.files;
     if (!files.length) return;
     
     const formData = new FormData();
     for (let file of files) formData.append('files', file);
-    formData.append('path', path);
+    formData.append('path', path || '.');
 
     const xhr = new XMLHttpRequest();
     xhr.upload.addEventListener('progress', (e) => {
       if (e.lengthComputable) setProgress(Math.round((e.loaded * 100) / e.total));
     });
-    xhr.addEventListener('load', () => { setProgress(0); fetchFiles(path); });
-    xhr.addEventListener('error', () => setProgress(0));
+    xhr.addEventListener('load', () => { 
+      setProgress(0); 
+      fetchFiles(path);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    });
+    xhr.addEventListener('error', () => { 
+      setProgress(0); 
+      alert('Erro no upload. Verifique sua conexão.');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    });
     
     xhr.open('POST', 'http://localhost:8080/api/files/upload');
     xhr.setRequestHeader('Authorization', `Bearer ${localStorage.getItem('cloudos_token')}`);
     xhr.send(formData);
   };
 
-  const handleDownload = (item) => {
-    window.location.href = `http://localhost:8080/api/files/download?path=${encodeURIComponent(item.path)}`;
+  const handleDownload = async (item) => {
+    try {
+      const encodedPath = encodeURIComponent(item.path);
+      window.location.href = `http://localhost:8080/api/files/download?path=${encodedPath}&token=${localStorage.getItem('cloudos_token')}`;
+    } catch (err) {
+      alert('Erro ao baixar arquivo: ' + err.message);
+    }
   };
 
   const handleContext = (e, item = null) => {
-    e.preventDefault(); e.stopPropagation();
-    if (item) setSelected([item.path]);
+    e.preventDefault(); 
+    e.stopPropagation();
+    if (item && !selected.includes(item.path)) {
+      setSelected([item.path]);
+    }
     setContextMenu({ visible: true, x: e.clientX, y: e.clientY, item });
   };
 
   const goBack = () => {
+    if (!path || path === '') return; // Já está na raiz
+    
     const parts = path.split('/').filter(Boolean);
-    parts.pop();
-    fetchFiles(parts.join('/'));
+    if (parts.length <= 1) {
+      fetchFiles('');
+    } else {
+      parts.pop();
+      fetchFiles(parts.join('/'));
+    }
   };
 
   const triggerMkdir = () => {
     const name = prompt('Nome da nova pasta:');
-    if (name) action('mkdir', { path, name }).then(() => fetchFiles(path));
+    if (name && name.trim()) {
+      action('mkdir', { path: path || '.', name: name.trim() })
+        .then(() => fetchFiles(path))
+        .catch(err => alert('Erro ao criar pasta: ' + err.message));
+    }
   };
 
   const triggerDelete = (itemPath) => {
-    action('delete', { path: itemPath }).then(() => fetchFiles(path));
-  };
-
-  const getFileIcon = (item) => {
-    if (item.type === 'folder') return <Folder size={32} color="#60a5fa" fill="#3b82f6" />;
-    const ext = item.name.split('.').pop().toLowerCase();
-    if (['sh', 'py', 'js', 'c', 'cpp'].includes(ext)) return <FileCode size={32} color="#4ade80" />;
-    if (['txt', 'md'].includes(ext)) return <FileText size={32} color="#9ca3af" />;
-    return <FileCode size={32} color="#e5e7eb" />;
+    if (!window.confirm('Tem certeza que deseja deletar este item?')) return;
+    action('delete', { path: itemPath })
+      .then(() => fetchFiles(path))
+      .catch(err => alert('Erro ao deletar: ' + err.message));
   };
 
   const emptyTrash = async () => {
     if (!window.confirm("Tem certeza? Isso vai apagar TODOS os arquivos da lixeira permanentemente.")) return;
     
-    for (const item of items) {
-      await action('delete', { path: item.path });
+    try {
+      // Deleta cada item da lixeira (o backend já detecta que está na .trash e deleta permanentemente)
+      for (const item of items) {
+        await action('delete', { path: item.path });
+      }
+      fetchFiles('.trash');
+    } catch (err) {
+      alert('Erro ao esvaziar lixeira: ' + err.message);
     }
-    fetchFiles('.trash');
+  };
+
+  const handleItemClick = (e, item) => {
+    e.stopPropagation();
+    
+    // Seleção múltipla com Ctrl/Cmd
+    if (e.ctrlKey || e.metaKey) {
+      setSelected(prev => 
+        prev.includes(item.path) 
+          ? prev.filter(p => p !== item.path)
+          : [...prev, item.path]
+      );
+    } else {
+      setSelected([item.path]);
+    }
+  };
+
+  const handleItemDoubleClick = (item) => {
+    if (item.type === 'folder') {
+      fetchFiles(item.path);
+    } else if (openApp) {
+      openApp('editor', { path: item.path });
+    }
+  };
+
+  const getFileIcon = (item) => {
+    if (item.type === 'folder') return <Folder size={32} color="#60a5fa" fill="#3b82f6" />;
+    const ext = item.name.split('.').pop().toLowerCase();
+    if (['sh', 'py', 'js', 'c', 'cpp', 'h', 'hpp'].includes(ext)) return <FileCode size={32} color="#4ade80" />;
+    if (['txt', 'md', 'log'].includes(ext)) return <FileText size={32} color="#9ca3af" />;
+    return <FileCode size={32} color="#e5e7eb" />;
   };
 
   return (
@@ -141,8 +213,8 @@ export const FileManagerApp = ({ openApp }) => {
           ) : (
             items.map((item, i) => (
               <div key={i} className={`fmp-item ${selected.includes(item.path) ? 'selected' : ''}`}
-                onClick={(e) => { e.stopPropagation(); setSelected([item.path]); }}
-                onDoubleClick={() => item.type === 'folder' ? fetchFiles(item.path) : (openApp && openApp('editor', { path: item.path }))}
+                onClick={(e) => handleItemClick(e, item)}
+                onDoubleClick={() => handleItemDoubleClick(item)}
                 onContextMenu={(e) => handleContext(e, item)}>
                 {getFileIcon(item)}
                 <span className="fmp-item-name">{item.name}</span>
