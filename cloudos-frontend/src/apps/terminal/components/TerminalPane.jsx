@@ -13,6 +13,9 @@ const TerminalPane = ({ wsUrl, isActive }) => {
   const initTerminal = useCallback(() => {
     if (terminal.current) return;
 
+    const el = termRef.current;
+    if (!el || el.offsetWidth === 0 || el.offsetHeight === 0) return;
+
     terminal.current = new Terminal({
       theme: {
         background: '#0d1117cc',
@@ -45,7 +48,7 @@ const TerminalPane = ({ wsUrl, isActive }) => {
     });
 
     terminal.current.loadAddon(fitAddon.current);
-    terminal.current.open(termRef.current);
+    terminal.current.open(el);
 
     setTimeout(() => {
       try { fitAddon.current.fit(); } catch (e) {}
@@ -56,7 +59,9 @@ const TerminalPane = ({ wsUrl, isActive }) => {
     };
     window.addEventListener('resize', onResize);
 
-    const socket = new WebSocket(wsUrl);
+    const token = localStorage.getItem('cloudos_token');
+    const safeWsUrl = wsUrl.replace('token=default', `token=${token || ''}`);
+    const socket = new WebSocket(safeWsUrl);
     socket.onopen = () => {
       if (bufferRef.current) {
         terminal.current.write(bufferRef.current);

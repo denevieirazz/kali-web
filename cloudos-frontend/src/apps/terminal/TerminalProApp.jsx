@@ -43,12 +43,14 @@ const defaultTheme = {
 };
 
 export function TerminalProApp({ payload, setPayload, openApp, setBg }) {
+  const getToken = () => localStorage.getItem('cloudos_token') || '';
+
   const [tabs, setTabs] = useState(() => {
     try {
       const saved = localStorage.getItem('terminal_tabs');
       if (saved) return JSON.parse(saved);
     } catch {}
-    return [{ id: 'tab_1', title: 'Shell 1', wsToken: 'default' }];
+    return [{ id: 'tab_1', title: 'Shell 1', wsToken: getToken() }];
   });
   const [activeTab, setActiveTab] = useState(tabs[0]?.id || null);
   const [showDashboard, setShowDashboard] = useState(false);
@@ -62,7 +64,7 @@ export function TerminalProApp({ payload, setPayload, openApp, setBg }) {
 
   const addTab = useCallback(() => {
     const newId = `tab_${tabCounter.current++}`;
-    const newTab = { id: newId, title: `Shell ${tabCounter.current - 1}`, wsToken: 'default' };
+    const newTab = { id: newId, title: `Shell ${tabCounter.current - 1}`, wsToken: getToken() };
     setTabs(prev => [...prev, newTab]);
     setActiveTab(newId);
     setShowDashboard(false);
