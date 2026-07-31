@@ -1,6 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Folder, FileCode, Home, ArrowLeft, FolderPlus, Trash2, Upload, Download, Terminal as TermIcon, Code2, HardDrive, Clock, Star, FileText } from 'lucide-react';
+import { 
+  Folder, FolderOpen, File, FileCode, FileText, Home, ArrowLeft, FolderPlus, 
+  Trash2, Upload, Download, Terminal as TermIcon, Code2, HardDrive, Clock, 
+  Star, Image as ImageIcon, Music, Video, Archive, Settings, Search, Grid3x3, 
+  List, ChevronRight, RefreshCw, X, Check, AlertCircle, Info, MoreVertical
+} from 'lucide-react';
 import { useCloudFS } from '../hooks/useCloudFS';
 
 export const FileManagerApp = ({ openApp }) => {
@@ -8,6 +13,7 @@ export const FileManagerApp = ({ openApp }) => {
   const [selected, setSelected] = useState([]);
   const [progress, setProgress] = useState(0);
   const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, item: null });
+  const [viewMode, setViewMode] = useState('grid'); // 'grid' ou 'list'
   const fileInputRef = useRef(null);
 
   // Fecha menu de contexto ao clicar fora ou pressionar ESC
@@ -137,11 +143,44 @@ export const FileManagerApp = ({ openApp }) => {
   };
 
   const getFileIcon = (item) => {
-    if (item.type === 'folder') return <Folder size={32} color="#60a5fa" fill="#3b82f6" />;
+    if (item.type === 'folder') {
+      return <Folder size={40} color="#60a5fa" fill="#3b82f640" strokeWidth={1.5} />;
+    }
+    
     const ext = item.name.split('.').pop().toLowerCase();
-    if (['sh', 'py', 'js', 'c', 'cpp', 'h', 'hpp'].includes(ext)) return <FileCode size={32} color="#4ade80" />;
-    if (['txt', 'md', 'log'].includes(ext)) return <FileText size={32} color="#9ca3af" />;
-    return <FileCode size={32} color="#e5e7eb" />;
+    
+    // Imagens
+    if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp', 'ico'].includes(ext)) {
+      return <ImageIcon size={40} color="#f472b6" strokeWidth={1.5} />;
+    }
+    
+    // Vídeos
+    if (['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm'].includes(ext)) {
+      return <Video size={40} color="#f87171" strokeWidth={1.5} />;
+    }
+    
+    // Áudio
+    if (['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a'].includes(ext)) {
+      return <Music size={40} color="#a78bfa" strokeWidth={1.5} />;
+    }
+    
+    // Arquivos compactados
+    if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2'].includes(ext)) {
+      return <Archive size={40} color="#fbbf24" strokeWidth={1.5} />;
+    }
+    
+    // Código
+    if (['sh', 'py', 'js', 'jsx', 'ts', 'tsx', 'c', 'cpp', 'h', 'hpp', 'java', 'go', 'rs', 'rb', 'php'].includes(ext)) {
+      return <FileCode size={40} color="#4ade80" strokeWidth={1.5} />;
+    }
+    
+    // Texto/Documentos
+    if (['txt', 'md', 'log', 'csv', 'json', 'xml', 'yaml', 'yml', 'toml'].includes(ext)) {
+      return <FileText size={40} color="#9ca3af" strokeWidth={1.5} />;
+    }
+    
+    // Padrão
+    return <File size={40} color="#e5e7eb" strokeWidth={1.5} />;
   };
 
   return (
@@ -172,9 +211,34 @@ export const FileManagerApp = ({ openApp }) => {
         {/* TOOLBAR SUPERIOR */}
         <div className="fmp-toolbar">
           <button className="fmp-btn-icon" onClick={goBack} title="Voltar"><ArrowLeft size={16} /></button>
+          <button className="fmp-btn-icon" onClick={() => fetchFiles(path)} title="Atualizar"><RefreshCw size={16} /></button>
           <div className="fmp-breadcrumb">
             <Home size={14} onClick={() => fetchFiles('')} style={{ cursor: 'pointer' }} />
-            <span>{path ? `/ ${path}` : '/ Home'}</span>
+            {path && path.split('/').map((part, i, arr) => {
+              const fullPath = arr.slice(0, i + 1).join('/');
+              return (
+                <span key={fullPath}>
+                  <ChevronRight size={12} />
+                  <span onClick={() => fetchFiles(fullPath)}>{part}</span>
+                </span>
+              );
+            })}
+          </div>
+          <div className="fmp-view-toggle">
+            <button 
+              className={`fmp-view-btn ${viewMode === 'grid' ? 'active' : ''}`} 
+              onClick={() => setViewMode('grid')}
+              title="Visualização em Grade"
+            >
+              <Grid3x3 size={16} />
+            </button>
+            <button 
+              className={`fmp-view-btn ${viewMode === 'list' ? 'active' : ''}`} 
+              onClick={() => setViewMode('list')}
+              title="Visualização em Lista"
+            >
+              <List size={16} />
+            </button>
           </div>
         </div>
 
@@ -198,7 +262,7 @@ export const FileManagerApp = ({ openApp }) => {
         </div>
 
         {/* GRID DE ARQUIVOS */}
-        <div className="fmp-content grid-view" onContextMenu={(e) => handleContext(e)}>
+        <div className={`fmp-content ${viewMode}-view`} onContextMenu={(e) => handleContext(e)}>
           {loading ? (
             <div className="fmp-state-message">
               <div className="fmp-spinner"></div>
@@ -206,13 +270,13 @@ export const FileManagerApp = ({ openApp }) => {
             </div>
           ) : items.length === 0 ? (
             <div className="fmp-state-message">
-              <Folder size={48} color="#333" />
+              <Folder size={48} color="#6b7280" strokeWidth={1} />
               <span>Pasta vazia</span>
               <p>Arraste arquivos ou clique em Upload</p>
             </div>
-          ) : (
+          ) : viewMode === 'grid' ? (
             items.map((item, i) => (
-              <div key={i} className={`fmp-item ${selected.includes(item.path) ? 'selected' : ''}`}
+              <div key={i} className={`fmp-item-grid ${selected.includes(item.path) ? 'selected' : ''}`}
                 onClick={(e) => handleItemClick(e, item)}
                 onDoubleClick={() => handleItemDoubleClick(item)}
                 onContextMenu={(e) => handleContext(e, item)}>
@@ -220,6 +284,21 @@ export const FileManagerApp = ({ openApp }) => {
                 <span className="fmp-item-name">{item.name}</span>
               </div>
             ))
+          ) : (
+            // Visualização em lista
+            <div className="fmp-list-wrapper">
+              {items.map((item, i) => (
+                <div key={i} className={`fmp-item-list ${selected.includes(item.path) ? 'selected' : ''}`}
+                  onClick={(e) => handleItemClick(e, item)}
+                  onDoubleClick={() => handleItemDoubleClick(item)}
+                  onContextMenu={(e) => handleContext(e, item)}>
+                  <div className="fmp-item-icon">{getFileIcon(item)}</div>
+                  <div className="fmp-item-name">{item.name}</div>
+                  <div className="fmp-item-type">{item.type === 'folder' ? 'Pasta' : (item.name.split('.').pop() || 'Arquivo').toUpperCase()}</div>
+                  <div className="fmp-item-size">{item.size ? `${(item.size / 1024).toFixed(1)} KB` : '-'}</div>
+                </div>
+              ))}
+            </div>
           )}
         </div>
 

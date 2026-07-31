@@ -1,1 +1,386 @@
-Nothing should be ignored since the only modified file is a source code file (.jsx) and there are no build artifacts, dependencies, or temporary files in the changes.
+```
+# Dependencies
+node_modules/
+
+# Build artifacts
+dist/
+build/
+target/
+
+# Environment variables
+.env
+.env.local
+.env.*
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Compressed files
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# Coverage reports
+coverage/
+htmlcov/
+
+# Package manager caches
+.npm/
+.yarn/
+.pnpm-store/
+
+# Runtime specific
+.DS_Store
+*.so
+*.dll
+*.dylib
+
+# Development tools
+.husky/
+.commitlintrc
+.eslintcache
+
+# Distribution / packaging
+*.tar.gz
+*.whl
+
+# Testing
+.pytest_cache/
+.mypy_cache/
+
+# System files
+*.swp
+*.swo
+
+# React / Frontend specific
+.next/
+public/build/
+out/
+
+# Java / JVM
+*.class
+*.jar
+*.war
+*.ear
+.gradle/
+build/
+
+# C/C++
+*.o
+*.a
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+*.ncb
+*.sdf
+*.opendb
+*.opensdf
+
+# Go
+*.out
+
+# Ruby
+*.gem
+.bundle/
+Gemfile.lock
+
+# Rust
+Cargo.lock
+target/
+
+# Zig
+zig-cache/
+zig-out/
+
+# Julia
+.julia/
+
+# Node.js
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Browsers
+*.css.map
+*.js.map
+
+# Vite
+.vite/
+
+# TypeScript
+*.tsbuildinfo
+
+# Electron
+release/
+dist_electron/
+
+# Docker
+.dockerignore
+
+# Kubernetes
+.kubeconfig
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfvars
+
+# Ansible
+*.retry
+
+# Vim
+*.un~
+Session.vim
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+
+# Sublime Text
+*.tmlanguage.cache
+*.tmPreferences.cache
+*.sublime-workspace
+
+# IntelliJ IDEA
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# NetBeans
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+# Visual Studio
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Visual Studio Code
+.vscode/tasks.json
+.vscode/launch.json
+
+# JetBrains
+*.iws
+*.iml
+*.ipr
+.idea/
+
+# Eclipse
+.metadata
+bin/
+tmp/
+*.tmp
+*.bak
+*.swp
+*~.nib
+local.properties
+.settings/
+.loadpath
+.recommenders
+
+# Android Studio
+*.iml
+*.ipr
+*.iws
+.idea/
+.gradle/
+local.properties
+.pro
+.cxx/
+.externalNativeBuild/
+.cmake/
+
+# Xcode
+*.xcodeproj
+*.xcworkspace
+*.pbxuser
+*.perspective
+*.perspectivev3
+*.mode1v3
+*.mode2v3
+*.sortedindex
+*.xcuserstate
+project.xcworkspace
+xcshareddata/
+xcuserdata/
+
+# Qt Creator
+*.pro.user
+*.pro.user.*
+*.qbs.user
+*.qbs.user.*
+*.moc
+*.moc.cpp
+*.qm
+*.prl
+
+# CodeLite
+*.project
+*.workspace
+*.user
+*.session
+
+# Subversion
+.svn/
+
+# CVS
+.cvsignore
+
+# Mercurial
+.hg/
+.hgignore
+
+# Bazaar
+.bzr/
+
+# Git
+.git/
+
+# Backup files
+*~
+
+# Configuration files for development tools
+.editorconfig
+.eslintrc
+.stylelintrc
+.prettierrc
+.hintrc
+.jshintrc
+.jscsrc
+.csscomb.json
+.csslintrc
+.tsconfig
+.jsconfig
+.babelrc
+.postcssrc
+.webpackrc
+
+# Database
+*.db
+*.db-journal
+
+# Certificates and keys
+*.crt
+*.key
+*.pem
+*.p12
+*.pfx
+*.cer
+*.der
+
+# Archive and backup
+*.bak
+*.backup
+*.old
+*.orig
+*.rej
+*.save
+*.tar.bz2
+*.tar.gz
+*.tar.xz
+*.tbz2
+*.tgz
+*.zip
+*.7z
+*.rar
+*.gz
+*.bz2
+*.xz
+*.lz
+*.lzma
+*.lzo
+*.z
+*.Z
+*.dz
+*.taz
+*.tbz
+*.tbz2
+*.tz
+*.txz
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.pkg.tar.xz
+*.pkg.tar.zst
+*.snap
+*.msi
+*.appx
+*.xap
+*.apk
+*.aab
+*.ipa
+*.iso
+*.img
+*.bin
+*.dat
+*.dump
+*.dmp
+*.log
+*.tmp
+*.temp
+*.cache
+*.lock
+*.pid
+*.sock
+*.socket
+*.db-shm
+*.db-wal
+*.DS_Store
+Thumbs.db
+ehthumbs.db
+Icon?
+desktop.ini
+```

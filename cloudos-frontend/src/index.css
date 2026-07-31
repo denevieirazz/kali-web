@@ -140,10 +140,13 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; }
 .fmp-toolbar { height: 45px; display: flex; align-items: center; gap: 5px; padding: 0 15px; border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(0,0,0,0.2); }
 .fmp-btn-icon { width: 32px; height: 32px; background: transparent; border: none; color: #d1d5db; cursor: pointer; border-radius: 4px; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
 .fmp-btn-icon:hover { background: rgba(255,255,255,0.1); color: white; }
-.fmp-breadcrumb { display: flex; align-items: center; gap: 2px; margin-left: 10px; background: rgba(0,0,0,0.3); padding: 6px 12px; border-radius: 4px; flex: 1; }
-.fmp-crumb { display: flex; align-items: center; gap: 2px; color: #9ca3af; }
-.fmp-crumb span { cursor: pointer; color: #d1d5db; padding: 2px 4px; border-radius: 3px; }
-.fmp-crumb span:hover { background: rgba(255,255,255,0.1); color: white; }
+.fmp-breadcrumb { display: flex; align-items: center; gap: 4px; margin-left: 10px; background: rgba(0,0,0,0.3); padding: 6px 12px; border-radius: 4px; flex: 1; overflow: hidden; }
+.fmp-breadcrumb span { cursor: pointer; color: #9ca3af; display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.fmp-breadcrumb span:hover { color: #60a5fa; }
+.fmp-view-toggle { display: flex; gap: 4px; margin-left: auto; }
+.fmp-view-btn { width: 32px; height: 32px; background: transparent; border: 1px solid rgba(255,255,255,0.1); color: #6b7280; cursor: pointer; border-radius: 4px; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
+.fmp-view-btn:hover { background: rgba(255,255,255,0.1); color: #d1d5db; }
+.fmp-view-btn.active { background: rgba(96, 165, 250, 0.2); border-color: #60a5fa; color: #60a5fa; }
 .fmp-search { display: flex; align-items: center; gap: 8px; background: rgba(0,0,0,0.3); padding: 6px 12px; border-radius: 4px; color: #6b7280; }
 .fmp-search input { background: transparent; border: none; outline: none; color: white; width: 150px; font-size: 13px; }
 
@@ -165,8 +168,10 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; }
 .fmp-item-list { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 4px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.03); }
 .fmp-item-list:hover { background: rgba(255,255,255,0.05); }
 .fmp-item-list.selected { background: rgba(96, 165, 250, 0.15); }
-.fmp-item-list .fmp-name { flex: 1; color: #e5e7eb; }
-.fmp-item-list .fmp-type { font-size: 11px; color: #6b7280; }
+.fmp-item-list .fmp-item-icon { width: 40px; display: flex; justify-content: center; }
+.fmp-item-list .fmp-item-name { flex: 1; color: #e5e7eb; font-size: 13px; }
+.fmp-item-list .fmp-item-type { width: 80px; color: #6b7280; font-size: 11px; text-align: right; }
+.fmp-item-list .fmp-item-size { width: 80px; color: #6b7280; font-size: 11px; text-align: right; }
 
 .fmp-loading, .fmp-empty { color: #6b7280; font-style: italic; grid-column: 1 / -1; text-align: center; padding-top: 40px; }
 .fmp-statusbar { height: 30px; display: flex; align-items: center; gap: 10px; padding: 0 15px; border-top: 1px solid rgba(255,255,255,0.05); background: rgba(0,0,0,0.3); font-size: 11px; color: #6b7280; }
