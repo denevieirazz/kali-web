@@ -7,141 +7,112 @@ export default function TerminalPane({ wsUrl, isActive }) {
   const terminalRef = useRef(null);
   const wsRef = useRef(null);
   const termRef = useRef(null);
-  const fitAddonRef = useRef(null);
-  const [isReady, setIsReady] = useState(false);
+  const [status, setStatus] = useState('Iniciando...');
 
   useEffect(() => {
-    if (!terminalRef.current) return;
+    let isDisposed = false;
+    let attempts = 0;
 
-    // 1. Inicializa o Terminal e o FitAddon
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 14,
       fontFamily: 'CaskaydiaCode Nerd Font, "Cascadia Code", "Fira Code", Menlo, monospace',
-      theme: {
-        background: '#0d1117cc',
-        foreground: '#c9d1d9',
-        cursor: '#58a6ff',
-        selection: '#58a6ff40',
-        black: '#161b22',
-        red: '#f85149',
-        green: '#3fb950',
-        yellow: '#d2991d',
-        blue: '#58a6ff',
-        magenta: '#bc8cff',
-        cyan: '#39c5cf',
-        white: '#b1bac4',
-        brightBlack: '#6e7681',
-        brightRed: '#ff7b72',
-        brightGreen: '#56d364',
-        brightYellow: '#e3b341',
-        brightBlue: '#79c0ff',
-        brightMagenta: '#d2a8ff',
-        brightCyan: '#56d4dd',
-        brightWhite: '#f0f6fc',
-      },
+      theme: { background: '#0d1117', foreground: '#c9d1d9', cursor: '#58a6ff' },
       scrollback: 5000,
       allowProposedApi: true,
     });
-    
+
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     termRef.current = term;
-    fitAddonRef.current = fitAddon;
 
-    // 2. CORREÇÃO DO ERRO DE DIMENSIONS:
-    let animFrameId;
-    const initWhenVisible = () => {
+    // Função inteligente que espera a DIV ficar pronta sem display:none
+    const tryOpenTerminal = () => {
+      if (isDisposed || !terminalRef.current) return;
+
       const el = terminalRef.current;
-      if (!el) return;
-
+      
+      // Se a div tem tamanho visível, abre o terminal
       if (el.offsetWidth > 0 && el.offsetHeight > 0) {
         try {
           term.open(el);
           fitAddon.fit();
           term.focus();
-          setIsReady(true);
+          setStatus('ready');
+          connectWebSocket();
         } catch (e) {
-          console.error('Erro ao renderizar terminal:', e);
+          console.error('Erro ao abrir xterm:', e);
+          setStatus('Erro ao renderizar terminal.');
         }
       } else {
-        animFrameId = requestAnimationFrame(initWhenVisible);
-      }
-    };
-
-    initWhenVisible();
-
-    // 3. CORREÇÃO DO WEBSOCKET:
-    const userToken = localStorage.getItem('cloudos_token') || '';
-    const safeWsUrl = wsUrl ? wsUrl.replace('token=default', `token=${userToken}`) : (userToken ? `ws://localhost:8080?token=${userToken}` : `ws://localhost:8080`);
-
-    const ws = new WebSocket(safeWsUrl);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      term.writeln('\x1b[32m[CloudOS]\x1b[0m Conexão estabelecida com o Kali WSL.');
-      term.writeln('');
-    };
-
-    ws.onmessage = (event) => {
-      term.write(event.data);
-    };
-
-    ws.onerror = (error) => {
-      term.writeln('\x1b[31m[CloudOS] Erro de conexão com o backend do terminal.\x1b[0m');
-    };
-
-    ws.onclose = () => {
-      term.writeln('\x1b[33m[CloudOS] Conexão fechada.\x1b[0m');
-    };
-
-    // 4. Captura o que o usuário digita e manda direto pro WSL
-    term.onData((data) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(data);
-      }
-    });
-
-    // 5. Resize listener
-    const handleResize = () => {
-      try {
-        if (fitAddonRef.current && terminalRef.current?.offsetWidth > 0) {
-          fitAddonRef.current.fit();
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-          }
+        // Se não tem tamanho, tenta novamente em 50ms (até 20 vezes)
+        attempts++;
+        if (attempts < 20) {
+          setTimeout(tryOpenTerminal, 50);
+        } else {
+          console.error('Falha ao encontrar dimensões da tela após 20 tentativas.');
         }
-      } catch (e) {}
+      }
     };
 
-    window.addEventListener('resize', handleResize);
+    const connectWebSocket = () => {
+      // Pega token limpo (o autoFix já garantiu que não é 'default')
+      const token = localStorage.getItem('cloudos_token') || '';
+      const safeWsUrl = wsUrl ? wsUrl.replace('token=default', `token=${token}`) : (token ? `ws://localhost:8080?token=${token}` : `ws://localhost:8080`);
 
-    // 6. Cleanup ao fechar a aba
+      const ws = new WebSocket(safeWsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        term.writeln('\x1b[32m[CloudOS]\x1b[0m Conexão estabelecida com Kali WSL.');
+        term.writeln('');
+      };
+      
+      ws.onmessage = (e) => term.write(e.data);
+      
+      ws.onerror = () => {
+        term.writeln('\x1b[31m[CloudOS] Erro: Backend offline ou conexão recusada.\x1b[0m');
+      };
+      
+      ws.onclose = () => {
+        term.writeln('\x1b[33m[CloudOS] Conexão fechada.\x1b[0m');
+      };
+
+      term.onData((data) => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(data);
+      });
+    };
+
+    // Inicia a tentativa de abertura
+    tryOpenTerminal();
+
     return () => {
-      if (animFrameId) cancelAnimationFrame(animFrameId);
-      window.removeEventListener('resize', handleResize);
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-      if (termRef.current) {
-        termRef.current.dispose();
-      }
+      isDisposed = true;
+      if (wsRef.current) wsRef.current.close();
+      if (termRef.current) termRef.current.dispose();
     };
   }, [wsUrl]);
 
   return (
-    <div style={{ width: '100%', height: '100%', background: '#0d1117', padding: '4px' }}>
+    <div style={{ width: '100%', height: '100%', background: '#0d1117', position: 'relative' }}>
+      {/* A div NUNCA usa display:none, garantindo que o xterm consiga medir ela */}
       <div 
         ref={terminalRef} 
         style={{ 
           width: '100%', 
           height: '100%', 
-          display: isReady ? 'block' : 'none'
+          opacity: status === 'ready' ? 1 : 0, 
+          transition: 'opacity 0.3s' 
         }} 
       />
-      {!isReady && (
-        <div style={{ padding: '20px', color: '#8b949e', fontFamily: 'monospace' }}>
-          Inicializando terminal tático...
+      {status !== 'ready' && (
+        <div style={{
+          position: 'absolute',
+          top: 0, left: 0, right: 0, bottom: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: '#8b949e', fontFamily: 'monospace', fontSize: '12px'
+        }}>
+          {status}
         </div>
       )}
     </div>
