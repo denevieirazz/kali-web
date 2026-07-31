@@ -91,8 +91,24 @@ const TerminalPane = ({ wsUrl, isActive }) => {
   }, [wsUrl, isActive]);
 
   useEffect(() => {
-    const timer = setTimeout(initTerminal, 100);
-    return () => clearTimeout(timer);
+    let animFrameId;
+
+    const initWhenVisible = () => {
+      const el = termRef.current;
+      if (!el) return;
+
+      if (el.offsetWidth > 0 && el.offsetHeight > 0) {
+        initTerminal();
+      } else {
+        animFrameId = requestAnimationFrame(initWhenVisible);
+      }
+    };
+
+    initWhenVisible();
+
+    return () => {
+      if (animFrameId) cancelAnimationFrame(animFrameId);
+    };
   }, [initTerminal]);
 
   useEffect(() => {
