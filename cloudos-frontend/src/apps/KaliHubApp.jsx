@@ -36,12 +36,13 @@ export function KaliHubApp({ payload, setPayload, openApp }) {
   const [loading, setLoading] = useState(true);
   const [selectedTool, setSelectedTool] = useState(null);
 
-  const token = () => localStorage.getItem('cloudos_token');
-  const headers = { 'Authorization': `Bearer ${token()}` };
+  const getToken = () => localStorage.getItem('cloudos_token');
+  const getHeaders = () => ({ 'Authorization': `Bearer ${getToken()}` });
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
+      const headers = getHeaders();
       const [toolsRes, favRes] = await Promise.all([
         fetch(`${API_BASE}/api/kali/tools`, { headers }).catch(() => null),
         fetch(`${API_BASE}/api/kali/tools/favorites`, { headers }).catch(() => null)
@@ -64,7 +65,7 @@ export function KaliHubApp({ payload, setPayload, openApp }) {
     });
 
     try {
-      const res = await fetch(`${API_BASE}/api/kali/tools/status`, { headers });
+      const res = await fetch(`${API_BASE}/api/kali/tools/status`, { headers: getHeaders() });
       if (res.ok) setStatuses(await res.json());
     } catch (e) {
       console.error("Erro ao checar status:", e);
@@ -105,7 +106,7 @@ export function KaliHubApp({ payload, setPayload, openApp }) {
     try {
       const res = await fetch(`${API_BASE}/api/kali/tools/${tool.id}/open`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...headers }
+        headers: { 'Content-Type': 'application/json', ...getHeaders() }
       });
 
       if (!res.ok) throw new Error('Falha ao preparar ferramenta no backend.');
@@ -135,7 +136,7 @@ export function KaliHubApp({ payload, setPayload, openApp }) {
     try {
       await fetch(`${API_BASE}/api/kali/tools/${toolId}/favorite`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...headers },
+        headers: { 'Content-Type': 'application/json', ...getHeaders() },
         body: JSON.stringify({ isFavorite: !isFav })
       });
     } catch (e) {
@@ -151,7 +152,7 @@ export function KaliHubApp({ payload, setPayload, openApp }) {
     try {
       const res = await fetch(`${API_BASE}/api/kali/tools/${tool.id}/install`, {
         method: 'POST',
-        headers
+        headers: getHeaders()
       });
       if (!res.ok) throw new Error('Falha na instalação');
       refreshStatus();
