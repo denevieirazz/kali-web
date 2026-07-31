@@ -1,129 +1,138 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import 'xterm/css/xterm.css';
 
-export function TerminalPane({ tabId, isActive }) {
-  const containerRef = useRef(null);
+const TerminalPane = ({ wsUrl, isActive }) => {
   const termRef = useRef(null);
-  const fitRef = useRef(null);
-  const wsRef = useRef(null);
-  const bufferRef = useRef([]);
-  const [isInitialized, setIsInitialized] = useState(false);
+  const terminal = useRef(null);
+  const ws = useRef(null);
+  const fitAddon = useRef(new FitAddon());
+  const bufferRef = useRef('');
 
-  // 1. Conexão WebSocket Raw
-  useEffect(() => {
-    let ws = null;
-    const timer = setTimeout(() => {
-      const token = localStorage.getItem('cloudos_token');
-      ws = new WebSocket(`ws://localhost:8080?token=${encodeURIComponent(token || '')}`);
-      wsRef.current = ws;
+  const initTerminal = useCallback(() => {
+    if (terminal.current) return;
 
-      ws.onmessage = (event) => {
-        if (termRef.current) {
-          if (typeof event.data === 'string') {
-            termRef.current.write(event.data);
-          } else {
-            termRef.current.write(new Uint8Array(event.data));
-          }
-        } else {
-          bufferRef.current.push(event.data);
-        }
-      };
+    terminal.current = new Terminal({
+      theme: {
+        background: '#0d1117cc',
+        foreground: '#c9d1d9',
+        cursor: '#58a6ff',
+        selection: '#58a6ff40',
+        black: '#161b22',
+        red: '#f85149',
+        green: '#3fb950',
+        yellow: '#d2991d',
+        blue: '#58a6ff',
+        magenta: '#bc8cff',
+        cyan: '#39c5cf',
+        white: '#b1bac4',
+        brightBlack: '#6e7681',
+        brightRed: '#ff7b72',
+        brightGreen: '#56d364',
+        brightYellow: '#e3b341',
+        brightBlue: '#79c0ff',
+        brightMagenta: '#d2a8ff',
+        brightCyan: '#56d4dd',
+        brightWhite: '#f0f6fc',
+      },
+      fontFamily: 'CaskaydiaCode Nerd Font, "Cascadia Code", "Fira Code", Menlo, monospace',
+      fontSize: 14,
+      cursorBlink: true,
+      cursorStyle: 'bar',
+      allowProposedApi: true,
+      scrollback: 5000,
+    });
+
+    terminal.current.loadAddon(fitAddon.current);
+    terminal.current.open(termRef.current);
+
+    setTimeout(() => {
+      try { fitAddon.current.fit(); } catch (e) {}
     }, 50);
 
-    return () => {
-      clearTimeout(timer);
-      if (ws) {
-        ws.onmessage = null;
-        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close();
+    const onResize = () => {
+      try { fitAddon.current.fit(); } catch (e) {}
+    };
+    window.addEventListener('resize', onResize);
+
+    const socket = new WebSocket(wsUrl);
+    socket.onopen = () => {
+      if (bufferRef.current) {
+        terminal.current.write(bufferRef.current);
+        bufferRef.current = '';
       }
     };
-  }, [tabId]);
-
-  // 2. Inicialização xterm Pro com GPU WebGL
-  useEffect(() => {
-    if (!isActive || isInitialized) return;
-
-    const initTimer = setTimeout(() => {
-      if (!containerRef.current || containerRef.current.offsetWidth === 0) return;
-
-      const term = new Terminal({
-        theme: {
-          background: '#0d111700', foreground: '#c9d1d9', cursor: '#58a6ff',
-          black: '#0d1117', red: '#ff7b72', green: '#3fb950', yellow: '#d29922',
-          blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#c9d1d9'
-        },
-        fontFamily: '"CaskaydiaCove Nerd Font", "JetBrains Mono", "Cascadia Code", Menlo, monospace',
-        fontSize: 15,
-        lineHeight: 1.25,
-        cursorBlink: true,
-        cursorStyle: 'bar',
-        scrollback: 10000,
-        convertEol: true,
-        allowProposedApi: true,
-        allowTransparency: true
-      });
-
-      const fit = new FitAddon();
-      term.loadAddon(fit);
-      
-      term.open(containerRef.current);
-      
-      if (bufferRef.current.length > 0) {
-        bufferRef.current.forEach(data => {
-          if (typeof data === 'string') term.write(data);
-          else term.write(new Uint8Array(data));
-        });
-        bufferRef.current = [];
+    socket.onmessage = (e) => {
+      if (isActive) {
+        terminal.current.write(e.data);
+      } else {
+        bufferRef.current += e.data;
       }
+    };
+    socket.onclose = () => terminal.current?.write('\r\n\r\n\x1b[31mDesconectado.\x1b[0m\r\n');
+    terminal.current.onData((data) => {
+      if (socket.readyState === WebSocket.OPEN) socket.send(data);
+    });
 
-      termRef.current = term;
-      fitRef.current = fit;
-      setIsInitialized(true);
+    ws.current = socket;
 
-      try { fit.fit(); } catch (e) {}
-
-      const onData = term.onData(data => {
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(data);
-        }
-      });
-
-      const resizeObserver = new ResizeObserver(() => {
-        if (containerRef.current && containerRef.current.offsetWidth > 0) {
-          try { fit.fit(); } catch (e) {}
-        }
-      });
-      resizeObserver.observe(containerRef.current);
-
-      return () => {
-        onData.dispose();
-        resizeObserver.disconnect();
-      };
-    }, 100);
-
-    return () => clearTimeout(initTimer);
-  }, [isActive, isInitialized]);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      socket.close();
+      terminal.current?.dispose();
+      terminal.current = null;
+    };
+  }, [wsUrl, isActive]);
 
   useEffect(() => {
-    if (isActive && isInitialized && fitRef.current && containerRef.current) {
-      const resizeTimer = setTimeout(() => {
-        if (containerRef.current && containerRef.current.offsetWidth > 0) {
-          try { fitRef.current.fit(); } catch (e) {}
-        }
+    const timer = setTimeout(initTerminal, 100);
+    return () => clearTimeout(timer);
+  }, [initTerminal]);
+
+  useEffect(() => {
+    if (isActive && terminal.current) {
+      setTimeout(() => {
+        try { fitAddon.current.fit(); } catch (e) {}
       }, 50);
-      return () => clearTimeout(resizeTimer);
     }
-  }, [isActive, isInitialized]);
+  }, [isActive]);
 
   return (
-    <div 
-      ref={containerRef} 
-      className={`terminal-pane-container ${isActive ? 'active' : ''}`}
-      style={{ height: '100%', width: '100%', display: isActive ? 'block' : 'none' }}
-    />
+    <div
+      className="terminal-pane-wrapper"
+      style={{
+        position: 'relative',
+        width: '100%',
+        height: '100%',
+        borderRadius: '0 0 8px 8px',
+        overflow: 'hidden',
+        background: 'rgba(13, 17, 23, 0.8)',
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
+        border: '1px solid #30363d',
+        boxShadow: '0 0 15px rgba(88, 166, 255, 0.2), inset 0 0 30px rgba(0,0,0,0.8)',
+      }}
+    >
+      <div className="scanlines" style={{
+        position: 'absolute',
+        top: 0, left: 0, right: 0, bottom: 0,
+        background: 'repeating-linear-gradient(0deg, rgba(0,0,0,0.15) 0px, rgba(0,0,0,0.15) 1px, transparent 1px, transparent 2px)',
+        pointerEvents: 'none',
+        zIndex: 1,
+        opacity: 0.3,
+      }} />
+      <div
+        ref={termRef}
+        style={{
+          width: '100%',
+          height: '100%',
+          position: 'relative',
+          zIndex: 2,
+        }}
+      />
+    </div>
   );
-}
+};
 
 export default TerminalPane;
