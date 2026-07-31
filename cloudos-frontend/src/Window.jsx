@@ -31,7 +31,7 @@ class WindowErrorBoundary extends Component {
   }
 }
 
-export default function Window({ win, onClose, onFocus, children, isMobile }) {
+export default function Window({ win, onClose, onFocus, onPositionChange, children, isMobile }) {
   const [maximized, setMaximized] = useState(false);
   const [maxW, setMaxW] = useState(window.innerWidth);
   const [maxH, setMaxH] = useState(window.innerHeight - 50);
@@ -74,10 +74,16 @@ export default function Window({ win, onClose, onFocus, children, isMobile }) {
       bounds="parent"
       dragHandleClassName="window-header"
       onMouseDown={onFocus}
-      onDragStop={handleDragStop}
+      onDragStop={(e, d) => {
+        handleDragStop(e, d);
+        onPositionChange?.({ x: d.x, y: d.y, w: size.width, h: size.height });
+      }}
       onResizeStop={(e, direction, ref, delta, position) => {
-        setSize({ width: parseInt(ref.style.width, 10), height: parseInt(ref.style.height, 10) });
+        const newW = parseInt(ref.style.width, 10);
+        const newH = parseInt(ref.style.height, 10);
+        setSize({ width: newW, height: newH });
         setPos(position);
+        onPositionChange?.({ x: position.x, y: position.y, w: newW, h: newH });
       }}
       style={{ zIndex: win.z, position: 'absolute' }}
       enableResizing={!isFull}

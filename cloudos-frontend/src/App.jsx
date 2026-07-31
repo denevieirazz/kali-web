@@ -8,6 +8,8 @@ import { CommandPalette } from './components/CommandPalette';
 import Taskbar from './components/Taskbar';
 import DesktopArea from './components/Desktop';
 import { CloudOSProvider, useCloudOS } from './store/CloudOSContext';
+import { useWindowPersistence } from './hooks/useWindowPersistence';
+import { initNotifications } from './services/notificationService';
 
 function Desktop() {
   const { settings, setBg, isLocked, lockSystem, notifications, fetchNotifications, pinnedApps } = useCloudOS();
@@ -15,6 +17,14 @@ function Desktop() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!localStorage.getItem('cloudos_token'));
   const [windows, setWindows] = useState([]);
   const [zIndex, setZIndex] = useState(100);
+
+  // Ativa a persistência de janelas salvas
+  useWindowPersistence(windows, setWindows);
+
+  // Inicializa serviço de notificações HTML5 do navegador
+  useEffect(() => {
+    initNotifications();
+  }, []);
   const [startOpen, setStartOpen] = useState(false);
   const [time, setTime] = useState(new Date());
   const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0 });
@@ -113,7 +123,16 @@ function Desktop() {
         if (!appConfig) return null;
         const AppComp = appConfig.Component;
         return (
-          <Window key={win.id} win={{ ...win, title: appConfig.title, icon: appConfig.icon }} isMobile={isMobile} onClose={() => closeApp(win.id)} onFocus={() => focusWindow(win.id)}>
+          <Window 
+            key={win.id} 
+            win={{ ...win, title: appConfig.title, icon: appConfig.icon }} 
+            isMobile={isMobile} 
+            onClose={() => closeApp(win.id)} 
+            onFocus={() => focusWindow(win.id)}
+            onPositionChange={(pos) => {
+              setWindows(prev => prev.map(w => w.id === win.id ? { ...w, ...pos } : w));
+            }}
+          >
             <AppComp 
               payload={win.payload} 
               setPayload={(newPayload) => setWindows(prev => prev.map(w => w.id === win.id ? { ...w, payload: newPayload } : w))} 
