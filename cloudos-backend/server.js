@@ -24,7 +24,7 @@ const server = require('http').createServer(app);
 const wss = new WebSocketServer({ server });
 const upload = multer({ dest: 'temp_uploads/' });
 
-const SECRET_KEY = 'CLOUDOS_JWT_SECRET_2024';
+const SECRET_KEY = process.env.JWT_SECRET || 'cloudos_super_secret_jwt_key_2026';
 const WSL_FS_ROOT = '\\\\wsl.localhost\\kali-linux';
 
 // Inicializar Usuário Admin Padrão (se não existir no DB)

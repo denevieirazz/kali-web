@@ -53,10 +53,14 @@ router.post('/projects/:id/evidence', authenticateToken, upload.single('file'), 
 });
 
 // --- 3. JOB QUEUE ---
-router.get('/jobs', authenticateToken, (req, res) => {
-  const db = req.app.get('db');
-  const rows = db.prepare('SELECT * FROM jobs WHERE user_id = ? ORDER BY created_at DESC LIMIT 20').all(req.user.id);
-  res.json(rows);
+router.get('/jobs', authenticateToken, async (req, res) => {
+  try {
+    const db = req.app.get('db');
+    const rows = await db.prepare('SELECT * FROM jobs WHERE user_id = ? ORDER BY created_at DESC LIMIT 20').all(req.user.id);
+    res.json(rows || []);
+  } catch (e) {
+    res.status(500).json({ error: 'Erro ao buscar jobs: ' + e.message });
+  }
 });
 
 // --- 4. ENVIRONMENT DOCTOR ---
@@ -74,7 +78,7 @@ router.get('/doctor', authenticateToken, (req, res) => {
   } catch { checks.push({ name: 'Kali Linux', status: 'fail' }); }
 
   try {
-    const dbPath = path.join(__dirname, '..', 'database.sqlite');
+    const dbPath = path.join(__dirname, '..', 'cloudos.db');
     fs.accessSync(dbPath, fs.constants.R_OK | fs.constants.W_OK);
     checks.push({ name: 'SQLite DB', status: 'ok' });
   } catch { checks.push({ name: 'SQLite DB', status: 'fail' }); }
