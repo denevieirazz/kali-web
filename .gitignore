@@ -1,1 +1,16 @@
-Nothing should be ignored since the only modified file is a source code file (.jsx) and there are no build artifacts, dependencies, or temporary files in the changes.
+# Node.js dependencies
+node_modules/
+cloudos-backend/node_modules/
+cloudos-frontend/node_modules/
+
+# Logs & Databases
+*.log
+cloudos-backend/*.db
+cloudos-backend/*.db-shm
+cloudos-backend/*.db-wal
+
+# Environment & Build artifacts
+.env
+dist/
+build/
+.DS_Store
