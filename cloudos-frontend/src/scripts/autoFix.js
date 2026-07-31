@@ -14,7 +14,14 @@ export const runAutoFix = () => {
       localStorage.removeItem('cloudos_token');
     }
 
-    // 2. Limpa estado de janelas corrompidas (se tiver tamanho 0)
+    // 2. Limpa estado do terminal corrompido com wsToken='default'
+    const terminalTabs = localStorage.getItem('terminal_tabs');
+    if (terminalTabs && terminalTabs.includes('"default"')) {
+      console.warn('[AutoFix] Abas do terminal com token default detectadas. Limpando...');
+      localStorage.removeItem('terminal_tabs');
+    }
+
+    // 3. Limpa estado de janelas corrompidas (se tiver tamanho 0)
     const windowsState = localStorage.getItem('cloudos_window_state');
     if (windowsState) {
       const parsed = JSON.parse(windowsState);
