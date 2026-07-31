@@ -195,7 +195,15 @@ npm run dev
       - `TerminalThemePicker.jsx`: Seletor de temas (*GitHub Dark*, *Kali Neon*).
     - **Atraso Defensivo WebSocket (50ms em `TerminalPane.jsx`)**: Adiamento da criação do socket para absorver montagens rápidas em Strict Mode do React 18 sem emitir avisos de fechamento no console.
 
+197. **Melhorias e Correções no Gerenciador de Arquivos (`FileManagerApp.jsx`)**:
+    - **Menu de Contexto Flutuante**: Correção no encerramento ao clicar fora do componente ou pressionar a tecla `ESC`.
+    - **Navegação & Tratamento de Erros**: Correção do fluxo de navegação ao tentar retornar da raiz do sistema de arquivos.
+    - **Upload & Download**: Limpeza do elemento `input` após upload com tratamento de falhas de rede e autenticação via Bearer Token.
+    - **Seleção Múltipla & Gestão**: Suporte à seleção simultânea de múltiplos arquivos com combinações Ctrl/Cmd e gestão aprimorada na lixeira.
+    - **Suporte Expandido a Extensões**: Ícones categorizados visualmente para diferentes formatos e tipos de código.
+
 ---
+
 
 ## 📜 Licença
 Este projeto é de uso livre para fins educacionais, de pesquisa e de estudo.
