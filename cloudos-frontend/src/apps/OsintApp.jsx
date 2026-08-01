@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { API_BASE } from '../config';
+import HistoryPanel from '../components/HistoryPanel';
 
 export function OsintApp() {
   const [target, setTarget] = useState('');
@@ -8,6 +9,7 @@ export function OsintApp() {
   const [results, setResults] = useState(null);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('structured');
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
   const getToken = () => localStorage.getItem('cloudos_token');
 
@@ -40,6 +42,21 @@ export function OsintApp() {
       const data = await res.json();
       if (data.success) {
         setResults(data);
+        
+        // SALVA NO HISTÓRICO
+        fetch(`${API_BASE}/api/history`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${getToken()}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            tool: 'osint',
+            target: target,
+            status: 'success',
+            result: data
+          })
+        }).catch(e => console.error('Erro ao salvar historico:', e));
       } else {
         setError(data.error || 'Erro desconhecido');
       }
@@ -75,6 +92,13 @@ export function OsintApp() {
           disabled={scanning}
         >
           {scanning ? '⏳ Coletando Dados...' : '🚀 Iniciar Coleta OSINT'}
+        </button>
+
+        <button 
+          style={{ ...styles.btnScan, background: '#21262d', borderColor: '#30363d' }}
+          onClick={() => setIsHistoryOpen(true)}
+        >
+          📂 Histórico
         </button>
       </div>
 
@@ -217,6 +241,13 @@ export function OsintApp() {
           )}
         </div>
       )}
+
+      <HistoryPanel 
+        toolName="osint" 
+        isOpen={isHistoryOpen} 
+        onClose={() => setIsHistoryOpen(false)} 
+        onLoadResult={(savedData) => setResults(savedData)} 
+      />
     </div>
   );
 }

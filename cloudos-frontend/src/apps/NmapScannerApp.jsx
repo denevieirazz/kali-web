@@ -1,11 +1,13 @@
 import React, { useState, useCallback } from 'react';
 import { API_BASE } from '../config';
+import HistoryPanel from '../components/HistoryPanel';
 
 export function NmapScannerApp() {
   const [target, setTarget] = useState('');
   const [scanning, setScanning] = useState(false);
   const [results, setResults] = useState(null);
   const [error, setError] = useState(null);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
   // Estado das opções avançadas
   const [opts, setOpts] = useState({
@@ -45,6 +47,21 @@ export function NmapScannerApp() {
       const data = await res.json();
       if (data.success) {
         setResults(data);
+
+        // SALVA NO HISTÓRICO
+        fetch(`${API_BASE}/api/history`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${getToken()}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            tool: 'nmap',
+            target: target,
+            status: 'success',
+            result: data
+          })
+        }).catch(e => console.error('Erro ao salvar historico:', e));
       } else {
         setError(data.error || 'Erro desconhecido');
       }
@@ -81,6 +98,13 @@ export function NmapScannerApp() {
           disabled={scanning}
         >
           {scanning ? '⏳ Escaneando...' : '🚀 Executar Varredura'}
+        </button>
+
+        <button 
+          style={{ ...styles.btnScan, background: '#21262d', borderColor: '#30363d' }}
+          onClick={() => setIsHistoryOpen(true)}
+        >
+          📂 Histórico
         </button>
       </div>
 
@@ -232,6 +256,13 @@ export function NmapScannerApp() {
           )}
         </div>
       </div>
+
+      <HistoryPanel 
+        toolName="nmap" 
+        isOpen={isHistoryOpen} 
+        onClose={() => setIsHistoryOpen(false)} 
+        onLoadResult={(savedData) => setResults(savedData)} 
+      />
     </div>
   );
 }
