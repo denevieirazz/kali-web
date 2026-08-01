@@ -10,38 +10,51 @@ router.use(authenticateToken);
 
 /**
  * POST /api/nmap/scan
- * Executa varredura Nmap baseada em perfis fáceis
+ * Monta o comando Nmap dinamicamente baseado nas opções visuais
  */
 router.post('/scan', async (req, res) => {
-  const { target, profile } = req.body;
+  const { target, options = {} } = req.body;
 
   if (!target) return res.status(400).json({ error: 'Alvo (IP/URL) é obrigatório' });
 
-  let command = '';
-  switch (profile) {
-    case 'fast':
-      command = `nmap -T4 -F ${target}`;
-      break;
-    case 'versions':
-      command = `nmap -sV -T4 ${target}`;
-      break;
-    case 'os':
-      command = `nmap -O ${target}`;
-      break;
-    case 'intense':
-      command = `nmap -A -T4 ${target}`;
-      break;
-    default:
-      command = `nmap ${target}`;
+  let cmdParts = ['nmap'];
+
+  // 1. Tipo de Varredura
+  if (options.scanType === 'ping') cmdParts.push('-sn');
+  else if (options.scanType === 'syn') cmdParts.push('-sS');
+  else if (options.scanType === 'connect') cmdParts.push('-sT');
+  else if (options.scanType === 'udp') cmdParts.push('-sU');
+  else if (options.scanType === 'ack') cmdParts.push('-sA');
+
+  // 2. Detecções
+  if (options.versionDetection) cmdParts.push('-sV');
+  if (options.osDetection) cmdParts.push('-O');
+  if (options.nseScripts) cmdParts.push('-sC');
+  if (options.aggressive) cmdParts.push('-A');
+
+  // 3. Configurações de Rede
+  if (options.skipPing) cmdParts.push('-Pn');
+  if (options.portRange && options.portRange.trim() !== '') {
+    cmdParts.push(`-p ${options.portRange.trim()}`);
   }
 
+  // 4. Timing Template (0 a 5)
+  if (options.timing !== undefined && options.timing >= 0 && options.timing <= 5) {
+    cmdParts.push(`-T${options.timing}`);
+  }
+
+  // 5. Adiciona o alvo (proteção básica contra injeção de comando)
+  const safeTarget = target.replace(/[;|&`$()]/g, '');
+  cmdParts.push(safeTarget);
+
+  const command = cmdParts.join(' ');
+  
   try {
     const wslCmd = `wsl -d kali-linux -u cloudos -- bash -c "${command} -oG - 2>/dev/null"`;
-    const { stdout } = await execAsync(wslCmd, { timeout: 120000, maxBuffer: 10 * 1024 * 1024 });
+    const { stdout } = await execAsync(wslCmd, { timeout: 300000, maxBuffer: 10 * 1024 * 1024 });
 
     const hosts = [];
     const lines = stdout.split('\n');
-    
     let currentHost = null;
 
     for (const line of lines) {
