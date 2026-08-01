@@ -33,7 +33,7 @@ async function testOsintManager() {
 
   console.log("\n=== 2. EXECUTANDO VARREDURA OSINT (WHOIS) ===");
   const osintData = await post('/api/osint/scan', {
-    domain: 'google.com',
+    target: 'google.com',
     module: 'whois'
   }, auth.token);
 

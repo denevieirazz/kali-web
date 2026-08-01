@@ -1,6 +1,5 @@
 const express = require('express');
 const router = express.Router();
-const jwt = require('jsonwebtoken');
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const { authenticateToken } = require('../middleware/auth');

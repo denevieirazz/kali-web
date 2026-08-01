@@ -1,18 +1,10 @@
 const express = require('express');
 const router = express.Router();
-const jwt = require('jsonwebtoken');
 const { spawn } = require('child_process');
 const { EventEmitter } = require('events');
+const { authenticateToken } = require('../middleware/auth');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'cloudos_secret_key';
-
-const authMiddleware = (req, res, next) => {
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  if (!token) return res.status(401).json({ error: 'Token não fornecido' });
-  try { jwt.verify(token, JWT_SECRET); next(); } catch (err) { return res.status(401).json({ error: 'Token inválido' }); }
-};
-
-router.use(authMiddleware);
+router.use(authenticateToken);
 
 const activeScans = {};
 

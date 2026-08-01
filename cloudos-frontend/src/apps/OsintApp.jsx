@@ -3,7 +3,7 @@ import React, { useState, useCallback } from 'react';
 const API_BASE = 'http://localhost:8080';
 
 export function OsintApp() {
-  const [domain, setDomain] = useState('');
+  const [target, setTarget] = useState('');
   const [module, setModule] = useState('whois');
   const [scanning, setScanning] = useState(false);
   const [results, setResults] = useState(null);
@@ -13,13 +13,16 @@ export function OsintApp() {
   const getToken = () => localStorage.getItem('cloudos_token');
 
   const modules = [
-    { id: 'whois', icon: '🌐', name: 'WHOIS Lookup', desc: 'Registros de domínio, contatos e servidores de nome' },
-    { id: 'theharvester', icon: '📧', name: 'theHarvester', desc: 'Coleta de e-mails, nomes e subdomínios em fontes abertas' },
-    { id: 'dnsenum', icon: '📡', name: 'DNSEnum', desc: 'Enumeração completa de registros DNS e zonas' }
+    { id: 'whois', icon: '🌐', name: 'WHOIS Lookup', targetLabel: 'Domínio Alvo', desc: 'Registros de domínio, contatos e servidores de nome' },
+    { id: 'theharvester', icon: '📧', name: 'theHarvester', targetLabel: 'Domínio Alvo', desc: 'Coleta de e-mails, nomes e subdomínios em fontes abertas' },
+    { id: 'dnsenum', icon: '📡', name: 'DNSEnum', targetLabel: 'Domínio Alvo', desc: 'Enumeração completa de registros DNS e zonas' },
+    { id: 'sherlock', icon: '🕵️', name: 'Sherlock', targetLabel: 'Username / Nick', desc: 'Rastreia contas de uma pessoa em 300+ redes sociais' }
   ];
 
+  const activeModule = modules.find(m => m.id === module) || modules[0];
+
   const handleScan = useCallback(async () => {
-    if (!domain) { setError('Digite um domínio alvo!'); return; }
+    if (!target) { setError(`Digite um ${activeModule.targetLabel}!`); return; }
     
     setScanning(true);
     setError(null);
@@ -32,7 +35,7 @@ export function OsintApp() {
           'Authorization': `Bearer ${getToken()}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ domain, module })
+        body: JSON.stringify({ target, module })
       });
       
       const data = await res.json();
@@ -46,23 +49,23 @@ export function OsintApp() {
     } finally {
       setScanning(false);
     }
-  }, [domain, module]);
+  }, [target, module, activeModule]);
 
   return (
     <div style={styles.container}>
       <div style={styles.header}>
         <h2 style={styles.title}>🕵️‍♂️ OSINT Intelligence Hub</h2>
-        <p style={styles.subtitle}>Reconhecimento de inteligência em fontes abertas via WHOIS, theHarvester e DNSEnum</p>
+        <p style={styles.subtitle}>Reconhecimento de inteligência em fontes abertas (Domínios e Pessoas)</p>
       </div>
 
       <div style={styles.controlPanel}>
         <div style={styles.inputGroup}>
-          <label style={styles.label}>🎯 Domínio Alvo</label>
+          <label style={styles.label}>🎯 {activeModule.targetLabel}</label>
           <input
             style={styles.input}
-            placeholder="Ex: exemplo.com.br"
-            value={domain}
-            onChange={(e) => setDomain(e.target.value)}
+            placeholder={module === 'sherlock' ? "Ex: johndoe" : "Ex: exemplo.com.br"}
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
             disabled={scanning}
           />
         </div>
@@ -127,23 +130,36 @@ export function OsintApp() {
 
           {activeTab === 'structured' ? (
             <div style={styles.structuredBody}>
-              {/* CARDS DE RESUMO */}
-              <div style={styles.summaryGrid}>
-                <div style={styles.summaryCard}>
-                  <div style={styles.summaryTitle}>📧 E-mails Extraídos</div>
-                  <div style={styles.summaryVal}>{results.data.emails.length}</div>
+              
+              {/* RESUMO - DOMINIO */}
+              {results.targetType === 'domain' && (
+                <div style={styles.summaryGrid}>
+                  <div style={styles.summaryCard}>
+                    <div style={styles.summaryTitle}>📧 E-mails</div>
+                    <div style={styles.summaryVal}>{results.data.emails.length}</div>
+                  </div>
+                  <div style={styles.summaryCard}>
+                    <div style={styles.summaryTitle}>🌐 Subdomínios</div>
+                    <div style={styles.summaryVal}>{results.data.subdomains.length}</div>
+                  </div>
+                  <div style={styles.summaryCard}>
+                    <div style={styles.summaryTitle}>🖥️ IPs</div>
+                    <div style={styles.summaryVal}>{results.data.ips.length}</div>
+                  </div>
                 </div>
-                <div style={styles.summaryCard}>
-                  <div style={styles.summaryTitle}>🌐 Subdomínios Mapeados</div>
-                  <div style={styles.summaryVal}>{results.data.subdomains.length}</div>
-                </div>
-                <div style={styles.summaryCard}>
-                  <div style={styles.summaryTitle}>🖥️ Endereços IP</div>
-                  <div style={styles.summaryVal}>{results.data.ips.length}</div>
-                </div>
-              </div>
+              )}
 
-              {/* LISTA DE E-MAILS */}
+              {/* RESUMO - PESSOA (SHERLOCK) */}
+              {results.targetType === 'username' && (
+                <div style={styles.summaryGrid}>
+                  <div style={styles.summaryCard}>
+                    <div style={styles.summaryTitle}>👤 Perfis Encontrados</div>
+                    <div style={styles.summaryVal}>{results.data.profiles.length}</div>
+                  </div>
+                </div>
+              )}
+
+              {/* LISTAGEM */}
               {results.data.emails.length > 0 && (
                 <div style={styles.section}>
                   <h3 style={styles.sectionTitle}>📧 E-mails Encontrados</h3>
@@ -155,7 +171,6 @@ export function OsintApp() {
                 </div>
               )}
 
-              {/* TABELA DE SUBDOMÍNIOS & IPS */}
               {results.data.subdomains.length > 0 && (
                 <div style={styles.section}>
                   <h3 style={styles.sectionTitle}>🌐 Subdomínios Mapeados</h3>
@@ -177,6 +192,26 @@ export function OsintApp() {
                   </div>
                 </div>
               )}
+
+              {results.data.profiles.length > 0 && (
+                <div style={styles.section}>
+                  <h3 style={styles.sectionTitle}>🕵️ Perfis de Redes Sociais Encontrados</h3>
+                  <div style={styles.tagGrid}>
+                    {results.data.profiles.map((url, i) => (
+                      <a 
+                        key={i} 
+                        href={url} 
+                        target="_blank" 
+                        rel="noreferrer" 
+                        style={styles.profileLink}
+                      >
+                        🔗 {url.replace('https://', '').replace('http://', '')}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
             </div>
           ) : (
             <pre style={styles.rawOutput}>{results.data.rawText}</pre>
@@ -224,6 +259,7 @@ const styles = {
   emailTag: { background: 'rgba(210, 153, 34, 0.2)', color: '#d29922', border: '1px solid #d29922', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', fontFamily: 'monospace' },
   subdomainTag: { background: 'rgba(88, 166, 255, 0.2)', color: '#58a6ff', border: '1px solid #58a6ff', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', fontFamily: 'monospace' },
   ipTag: { background: 'rgba(63, 185, 80, 0.2)', color: '#3fb950', border: '1px solid #3fb950', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', fontFamily: 'monospace' },
+  profileLink: { background: 'rgba(163, 113, 247, 0.2)', color: '#a371f7', border: '1px solid #a371f7', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', fontFamily: 'monospace', textDecoration: 'none', cursor: 'pointer' },
   rawOutput: { background: '#0d1117', border: '1px solid #30363d', borderRadius: '6px', padding: '12px', color: '#8b949e', fontSize: '11px', maxHeight: '400px', overflowY: 'auto', whiteSpace: 'pre-wrap', fontFamily: 'monospace', margin: 0 }
 };
 

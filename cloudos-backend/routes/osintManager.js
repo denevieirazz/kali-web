@@ -10,29 +10,36 @@ router.use(authenticateToken);
 
 /**
  * POST /api/osint/scan
- * Executa ferramentas de OSINT (whois, dnsenum, theHarvester) no Kali via WSL2
+ * Executa ferramentas de OSINT (whois, dnsenum, theHarvester, sherlock)
  */
 router.post('/scan', async (req, res) => {
-  const { domain, module: osintModule } = req.body;
+  const { target, module: osintModule } = req.body;
 
-  if (!domain) return res.status(400).json({ error: 'Domínio alvo é obrigatório' });
+  if (!target) return res.status(400).json({ error: 'Alvo é obrigatório' });
 
   // Limpeza básica para prevenir injeções de comando
-  const safeDomain = domain.replace(/[;|&`$()]/g, '').trim();
+  const safeTarget = target.replace(/[;|&`$()]/g, '').trim();
 
   let command = '';
+  let targetType = 'domain'; // default
+
   switch (osintModule) {
     case 'whois':
-      command = `whois ${safeDomain}`;
+      command = `whois ${safeTarget}`;
       break;
     case 'theharvester':
-      command = `theHarvester -d ${safeDomain} -b baidu,bing,duckduckgo -l 100`;
+      command = `theHarvester -d ${safeTarget} -b baidu,bing,duckduckgo -l 100`;
       break;
     case 'dnsenum':
-      command = `dnsenum --enum ${safeDomain} --noreverse`;
+      command = `dnsenum --enum ${safeTarget} --noreverse`;
+      break;
+    case 'sherlock':
+      targetType = 'username';
+      // --timeout 10 para não travar em sites lentos
+      command = `sherlock ${safeTarget} --timeout 10 --print --no-color`;
       break;
     default:
-      command = `whois ${safeDomain}`;
+      command = `whois ${safeTarget}`;
   }
 
   try {
@@ -43,38 +50,50 @@ router.post('/scan', async (req, res) => {
       emails: [],
       subdomains: [],
       ips: [],
+      profiles: [],
       rawText: stdout
     };
 
-    // Parsing inteligente de emails
+    // Parsing de e-mails
     const emailMatches = stdout.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g);
-    if (emailMatches) {
-      structuredData.emails = [...new Set(emailMatches)];
-    }
+    if (emailMatches) structuredData.emails = [...new Set(emailMatches)];
 
-    // Parsing inteligente de IPs
+    // Parsing de IPs
     const ipMatches = stdout.match(/\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b/g);
-    if (ipMatches) {
-      structuredData.ips = [...new Set(ipMatches)];
+    if (ipMatches) structuredData.ips = [...new Set(ipMatches)];
+
+    // Parsing de Subdomínios (apenas se for domínio)
+    if (targetType === 'domain') {
+      const domainRegex = new RegExp(`[a-zA-Z0-9.-]+\\.${safeTarget.replace('.', '\\.')}`, 'gi');
+      const subMatches = stdout.match(domainRegex);
+      if (subMatches) structuredData.subdomains = [...new Set(subMatches)];
     }
 
-    // Parsing de subdomínios vinculados ao domínio alvo
-    const domainRegex = new RegExp(`[a-zA-Z0-9.-]+\\.${safeDomain.replace('.', '\\.')}`, 'gi');
-    const subMatches = stdout.match(domainRegex);
-    if (subMatches) {
-      structuredData.subdomains = [...new Set(subMatches)];
+    // Parsing de Perfis (Sherlock)
+    if (targetType === 'username') {
+      const urlMatches = stdout.match(/https?:\/\/[^\s]+/gi);
+      if (urlMatches) structuredData.profiles = [...new Set(urlMatches)];
     }
 
     res.json({
       success: true,
-      domain: safeDomain,
+      target: safeTarget,
       module: osintModule,
+      targetType,
       rawCommand: command,
       data: structuredData
     });
 
   } catch (err) {
     console.error('[OsintManager] Erro:', err.message);
+    
+    if (err.message.includes('command not found') && osintModule === 'sherlock') {
+      return res.status(500).json({ 
+        error: 'Sherlock não está instalado no WSL Kali.', 
+        details: 'Abra o terminal e rode: sudo pip3 install sherlock-project' 
+      });
+    }
+    
     res.status(500).json({ error: 'Falha ao executar varredura OSINT', details: err.message.slice(-200) });
   }
 });
