@@ -21,11 +21,13 @@ import { EnvironmentDoctorApp } from './apps/EnvironmentDoctorApp';
 import { EvidenceVaultApp } from './apps/EvidenceVaultApp';
 import { LabMissionsApp } from './apps/LabMissionsApp';
 import TaskManagerApp from './apps/TaskManagerApp';
-import { Bug, Stethoscope, Vault, Trophy, Cpu } from 'lucide-react';
+import NetworkApp from './apps/NetworkApp';
+import { Bug, Stethoscope, Vault, Trophy, Cpu, Network } from 'lucide-react';
 
 export const AppRegistry = {
   terminal: { id: 'terminal', title: 'Terminal Pro', icon: TerminalIcon, Component: TerminalProApp },
   taskmanager: { id: 'taskmanager', title: 'Gerenciador de Tarefas', icon: Cpu, Component: TaskManagerApp },
+  networkmanager: { id: 'networkmanager', title: 'Rede & Serviços', icon: Network, Component: NetworkApp },
   kalihub: { id: 'kalihub', title: 'Kali Hub', icon: Boxes, Component: KaliHubApp },
   toolrunner: { id: 'toolrunner', title: 'Tool Runner', icon: LayoutGrid, Component: ToolRunnerApp },
   pipeline: { id: 'pipeline', title: 'Automação', icon: Workflow, Component: PipelineApp },
