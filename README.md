@@ -246,9 +246,10 @@ npm run dev
 219. **OSINT Intelligence Hub (`OsintApp`)**:
     - Módulo `osintManager.js` integrando `whois`, `theHarvester`, `dnsenum` e `Sherlock` no WSL2 Kali Linux.
     - Extração automática de e-mails, subdomínios, IPs e perfis de redes sociais com alternância entre *Visão Estruturada* e *Output Bruto*.
-220. **Scan History Manager (`historyManager.js`)**:
+220. **Scan History Manager (`historyManager.js` & `HistoryPanel.jsx`)**:
     - Gerenciador genérico de histórico de varreduras no SQLite (`scan_history`).
-    - Suporte a armazenamento de resultados em JSON, listagem com filtros por ferramenta (`/api/history?tool=...`), busca de detalhes e exclusão.
+    - Componente drawer lateral `HistoryPanel.jsx` integrado ao `OsintApp` e `NmapScannerApp`.
+    - Salvamento automático de resultados e restauração instantânea de scans passados sem reexecução CLI.
 
 ---
 
