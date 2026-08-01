@@ -28,10 +28,12 @@ import NmapScannerApp from './apps/NmapScannerApp';
 import SqlmapScannerApp from './apps/SqlmapScannerApp';
 import HashCrackerApp from './apps/HashCrackerApp';
 import MsfvenomApp from './apps/MsfvenomApp';
-import { Bug, Stethoscope, Vault, Trophy, Cpu, Network, Zap, LayoutDashboard, Radar, Database, KeyRound, FlaskConical } from 'lucide-react';
+import { OsintApp } from './apps/OsintApp';
+import { Bug, Stethoscope, Vault, Trophy, Cpu, Network, Zap, LayoutDashboard, Radar, Database, KeyRound, FlaskConical, Globe } from 'lucide-react';
 
 export const AppRegistry = {
   dashboard: { id: 'dashboard', title: 'Command Center', icon: LayoutDashboard, Component: DashboardApp },
+  osint: { id: 'osint', title: 'OSINT Hub', icon: Globe, Component: OsintApp },
   msfvenom: { id: 'msfvenom', title: 'Payload Gen', icon: FlaskConical, Component: MsfvenomApp },
   hashcracker: { id: 'hashcracker', title: 'Hash Cracker', icon: KeyRound, Component: HashCrackerApp },
   sqlmap: { id: 'sqlmap', title: 'Web Exploiter', icon: Database, Component: SqlmapScannerApp },
