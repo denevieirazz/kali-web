@@ -237,6 +237,9 @@ npm run dev
 216. **Hash Cracker Visual (`HashCrackerApp`)**:
     - Módulo `hashCrackerManager.js` integrando o John the Ripper com a wordlist `rockyou.txt` do Kali Linux.
     - Interface minimalista com suporte a formatos `MD5`, `SHA-1`, `SHA-256` e `NTLM (Windows)`, exibindo a senha decodificada em card de destaque verde.
+217. **Msfvenom Payload Generator (`MsfvenomApp`)**:
+    - Módulo `msfvenomManager.js` para geração de binários/exploits (`.exe`, `.raw`, `.py`, `.ps1`, `.jar`, `.war`, `.php`) com LHOST/LPORT customizáveis.
+    - Servidor de arquivos estáticos `/payloads` para download direto via navegador.
 
 ---
 
