@@ -255,6 +255,8 @@ npm run dev
     - Adicionados manipuladores de sinais `SIGINT`/`SIGTERM` no `server.js` para encerramento limpo e eliminação de processos filhos órfãos (`node-pty` e executáveis de segundo plano) prevenindo estoiros na memória virtual (VIRT/Pagefile).
 222. **Script de Correção de Desligamento do Windows (`corrigir_desligamento.bat`)**:
     - Criação de script automatizado de 1-clique para desativação da Inicialização Rápida (Fast Startup / Hiberboot) e desativação de reinício automático por falha de driver (`CrashControl/AutoReboot`).
+223. **Script de Otimização de Resposta da CPU / Launch Boost (`otimizar_desempenho.bat`)**:
+    - Script de 1-clique para ativação do modo CPU Launch Boost (estilo Linux/Android/macOS): desativação do Core Parking, alocação de 100% de prioridade de CPU para tarefas de primeiro plano (`SystemResponsiveness = 0`), eliminação do atraso de rampa de frequência e ativação do plano de Desempenho Máximo.
 
 ---
 
