@@ -9,7 +9,7 @@ export default function Taskbar({ apps, openWindows, activeWindowId, onTaskbarCl
   
   const [pinnedAppIds, setPinnedAppIds] = useState(() => {
     const saved = localStorage.getItem('cloudos_taskbar_pinned');
-    return saved ? JSON.parse(saved) : ['command-center', 'kali-hub', 'toolrunner', 'file-manager', 'terminal', 'report-builder', 'kalihub', 'files', 'editor', 'projects'];
+    return saved ? JSON.parse(saved) : ['dashboard', 'osint', 'nmap', 'sqlmap', 'hashcracker', 'msfvenom', 'metasploit', 'terminal', 'files', 'editor'];
   });
 
   useEffect(() => {

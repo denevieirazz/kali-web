@@ -4,7 +4,7 @@ import { Cpu, RefreshCw, Image, Settings, Terminal, FolderPlus, X, MonitorSmartp
 export default function Desktop({ apps, openWindows, onOpenApp }) {
   const [shortcuts, setShortcuts] = useState(() => {
     const saved = localStorage.getItem('cloudos_desktop_shortcuts');
-    return saved ? JSON.parse(saved) : ['command-center', 'kali-hub', 'file-manager', 'kalihub', 'files', 'terminal'];
+    return saved ? JSON.parse(saved) : ['dashboard', 'osint', 'nmap', 'sqlmap', 'hashcracker', 'msfvenom', 'metasploit', 'terminal', 'files', 'editor'];
   });
 
   const [time, setTime] = useState(new Date());
