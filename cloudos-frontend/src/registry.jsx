@@ -26,10 +26,12 @@ import DashboardApp from './apps/DashboardApp';
 import MetasploitApp from './apps/MetasploitApp';
 import NmapScannerApp from './apps/NmapScannerApp';
 import SqlmapScannerApp from './apps/SqlmapScannerApp';
-import { Bug, Stethoscope, Vault, Trophy, Cpu, Network, Zap, LayoutDashboard, Radar, Database } from 'lucide-react';
+import HashCrackerApp from './apps/HashCrackerApp';
+import { Bug, Stethoscope, Vault, Trophy, Cpu, Network, Zap, LayoutDashboard, Radar, Database, KeyRound } from 'lucide-react';
 
 export const AppRegistry = {
   dashboard: { id: 'dashboard', title: 'Command Center', icon: LayoutDashboard, Component: DashboardApp },
+  hashcracker: { id: 'hashcracker', title: 'Hash Cracker', icon: KeyRound, Component: HashCrackerApp },
   sqlmap: { id: 'sqlmap', title: 'Web Exploiter', icon: Database, Component: SqlmapScannerApp },
   nmap: { id: 'nmap', title: 'Network Scanner', icon: Radar, Component: NmapScannerApp },
   terminal: { id: 'terminal', title: 'Terminal Pro', icon: TerminalIcon, Component: TerminalProApp },
