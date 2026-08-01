@@ -10,7 +10,7 @@ router.use(authenticateToken);
 
 /**
  * POST /api/osint/scan
- * Executa ferramentas de OSINT (whois, dnsenum, theHarvester, sherlock)
+ * Executa ferramentas de OSINT (whois, dnsenum, theHarvester, sherlock, shodan, holehe)
  */
 router.post('/scan', async (req, res) => {
   const { target, module: osintModule } = req.body;
@@ -21,22 +21,32 @@ router.post('/scan', async (req, res) => {
   const safeTarget = target.replace(/[;|&`$()]/g, '').trim();
 
   let command = '';
-  let targetType = 'domain'; // default
+  let targetType = 'domain'; // domain, username, ip, email
 
   switch (osintModule) {
     case 'whois':
+      targetType = 'domain';
       command = `whois ${safeTarget}`;
       break;
     case 'theharvester':
+      targetType = 'domain';
       command = `theHarvester -d ${safeTarget} -b baidu,bing,duckduckgo -l 100`;
       break;
     case 'dnsenum':
+      targetType = 'domain';
       command = `dnsenum --enum ${safeTarget} --noreverse`;
       break;
     case 'sherlock':
       targetType = 'username';
-      // --timeout 10 para não travar em sites lentos
       command = `sherlock ${safeTarget} --timeout 10 --print --no-color`;
+      break;
+    case 'shodan':
+      targetType = 'ip';
+      command = `shodan host ${safeTarget}`;
+      break;
+    case 'holehe':
+      targetType = 'email';
+      command = `holehe ${safeTarget} --only-used --no-color`;
       break;
     default:
       command = `whois ${safeTarget}`;
@@ -51,6 +61,7 @@ router.post('/scan', async (req, res) => {
       subdomains: [],
       ips: [],
       profiles: [],
+      registeredServices: [],
       rawText: stdout
     };
 
@@ -62,7 +73,7 @@ router.post('/scan', async (req, res) => {
     const ipMatches = stdout.match(/\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b/g);
     if (ipMatches) structuredData.ips = [...new Set(ipMatches)];
 
-    // Parsing de Subdomínios (apenas se for domínio)
+    // Parsing de Subdomínios (se for domínio)
     if (targetType === 'domain') {
       const domainRegex = new RegExp(`[a-zA-Z0-9.-]+\\.${safeTarget.replace('.', '\\.')}`, 'gi');
       const subMatches = stdout.match(domainRegex);
@@ -73,6 +84,20 @@ router.post('/scan', async (req, res) => {
     if (targetType === 'username') {
       const urlMatches = stdout.match(/https?:\/\/[^\s]+/gi);
       if (urlMatches) structuredData.profiles = [...new Set(urlMatches)];
+    }
+
+    // Parsing de Serviços Registrados (Holehe)
+    if (targetType === 'email') {
+      // Holehe geralmente usa "[+]" para indicar serviços onde a conta existe
+      const lines = stdout.split('\n');
+      const services = [];
+      lines.forEach(line => {
+        if (line.includes('[+]') || line.includes('[x]')) {
+          const cleanLine = line.replace(/\[\+\]|\[x\]/g, '').trim();
+          if (cleanLine) services.push(cleanLine);
+        }
+      });
+      if (services.length > 0) structuredData.registeredServices = services;
     }
 
     res.json({
@@ -87,11 +112,25 @@ router.post('/scan', async (req, res) => {
   } catch (err) {
     console.error('[OsintManager] Erro:', err.message);
     
-    if (err.message.includes('command not found') && osintModule === 'sherlock') {
-      return res.status(500).json({ 
-        error: 'Sherlock não está instalado no WSL Kali.', 
-        details: 'Abra o terminal e rode: sudo pip3 install sherlock-project' 
-      });
+    if (err.message.includes('command not found')) {
+      if (osintModule === 'sherlock') {
+        return res.status(500).json({ 
+          error: 'Sherlock não está instalado no WSL Kali.', 
+          details: 'Abra o terminal e rode: sudo pip3 install sherlock-project' 
+        });
+      }
+      if (osintModule === 'shodan') {
+        return res.status(500).json({ 
+          error: 'CLI do Shodan não está instalada ou configurada.', 
+          details: 'Rode: sudo pip3 install shodan && shodan init YOUR_API_KEY' 
+        });
+      }
+      if (osintModule === 'holehe') {
+        return res.status(500).json({ 
+          error: 'Holehe não está instalado no WSL Kali.', 
+          details: 'Rode: sudo pip3 install holehe' 
+        });
+      }
     }
     
     res.status(500).json({ error: 'Falha ao executar varredura OSINT', details: err.message.slice(-200) });

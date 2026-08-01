@@ -14,10 +14,12 @@ export function OsintApp() {
   const getToken = () => localStorage.getItem('cloudos_token');
 
   const modules = [
-    { id: 'whois', icon: '🌐', name: 'WHOIS Lookup', targetLabel: 'Domínio Alvo', desc: 'Registros de domínio, contatos e servidores de nome' },
-    { id: 'theharvester', icon: '📧', name: 'theHarvester', targetLabel: 'Domínio Alvo', desc: 'Coleta de e-mails, nomes e subdomínios em fontes abertas' },
-    { id: 'dnsenum', icon: '📡', name: 'DNSEnum', targetLabel: 'Domínio Alvo', desc: 'Enumeração completa de registros DNS e zonas' },
-    { id: 'sherlock', icon: '🕵️', name: 'Sherlock', targetLabel: 'Username / Nick', desc: 'Rastreia contas de uma pessoa em 300+ redes sociais' }
+    { id: 'whois', icon: '🌐', name: 'WHOIS Lookup', targetLabel: 'Domínio Alvo', placeholder: 'Ex: exemplo.com.br', desc: 'Registros de domínio, contatos e servidores de nome' },
+    { id: 'theharvester', icon: '📧', name: 'theHarvester', targetLabel: 'Domínio Alvo', placeholder: 'Ex: exemplo.com.br', desc: 'Coleta de e-mails, nomes e subdomínios em fontes abertas' },
+    { id: 'dnsenum', icon: '📡', name: 'DNSEnum', targetLabel: 'Domínio Alvo', placeholder: 'Ex: exemplo.com.br', desc: 'Enumeração completa de registros DNS e zonas' },
+    { id: 'sherlock', icon: '🕵️', name: 'Sherlock', targetLabel: 'Username / Nick', placeholder: 'Ex: johndoe', desc: 'Rastreia contas de uma pessoa em 300+ redes sociais' },
+    { id: 'shodan', icon: '🔍', name: 'Shodan IP', targetLabel: 'Endereço IP', placeholder: 'Ex: 8.8.8.8', desc: 'Pesquisa portas, serviços e CVEs em um IP na Internet' },
+    { id: 'holehe', icon: '✉️', name: 'Holehe Email', targetLabel: 'Endereço de E-mail', placeholder: 'Ex: alvo@empresa.com', desc: 'Checa cadastro do e-mail em 120+ plataformas' }
   ];
 
   const activeModule = modules.find(m => m.id === module) || modules[0];
@@ -71,7 +73,7 @@ export function OsintApp() {
     <div style={styles.container}>
       <div style={styles.header}>
         <h2 style={styles.title}>🕵️‍♂️ OSINT Intelligence Hub</h2>
-        <p style={styles.subtitle}>Reconhecimento de inteligência em fontes abertas (Domínios e Pessoas)</p>
+        <p style={styles.subtitle}>Reconhecimento de inteligência em fontes abertas (Domínios, Pessoas, IPs e E-mails)</p>
       </div>
 
       <div style={styles.controlPanel}>
@@ -79,7 +81,7 @@ export function OsintApp() {
           <label style={styles.label}>🎯 {activeModule.targetLabel}</label>
           <input
             style={styles.input}
-            placeholder={module === 'sherlock' ? "Ex: johndoe" : "Ex: exemplo.com.br"}
+            placeholder={activeModule.placeholder}
             value={target}
             onChange={(e) => setTarget(e.target.value)}
             disabled={scanning}
@@ -111,7 +113,10 @@ export function OsintApp() {
               borderColor: module === m.id ? '#58a6ff' : '#30363d',
               background: module === m.id ? 'rgba(88, 166, 255, 0.1)' : 'transparent'
             }}
-            onClick={() => setModule(m.id)}
+            onClick={() => {
+              setModule(m.id);
+              setTarget('');
+            }}
           >
             <div style={{ fontSize: '24px', marginBottom: '6px' }}>{m.icon}</div>
             <div style={styles.moduleName}>{m.name}</div>
@@ -154,7 +159,7 @@ export function OsintApp() {
           {activeTab === 'structured' ? (
             <div style={styles.structuredBody}>
               
-              {/* RESUMO - DOMINIO */}
+              {/* RESUMO - DOMÍNIO */}
               {results.targetType === 'domain' && (
                 <div style={styles.summaryGrid}>
                   <div style={styles.summaryCard}>
@@ -172,7 +177,7 @@ export function OsintApp() {
                 </div>
               )}
 
-              {/* RESUMO - PESSOA (SHERLOCK) */}
+              {/* RESUMO - USERNAME (SHERLOCK) */}
               {results.targetType === 'username' && (
                 <div style={styles.summaryGrid}>
                   <div style={styles.summaryCard}>
@@ -182,8 +187,28 @@ export function OsintApp() {
                 </div>
               )}
 
-              {/* LISTAGEM */}
-              {results.data.emails.length > 0 && (
+              {/* RESUMO - EMAIL (HOLEHE) */}
+              {results.targetType === 'email' && (
+                <div style={styles.summaryGrid}>
+                  <div style={styles.summaryCard}>
+                    <div style={styles.summaryTitle}>✉️ Contas Registradas</div>
+                    <div style={styles.summaryVal}>{results.data.registeredServices ? results.data.registeredServices.length : 0}</div>
+                  </div>
+                </div>
+              )}
+
+              {/* RESUMO - IP (SHODAN) */}
+              {results.targetType === 'ip' && (
+                <div style={styles.summaryGrid}>
+                  <div style={styles.summaryCard}>
+                    <div style={styles.summaryTitle}>🌐 Host Consultado</div>
+                    <div style={{ color: '#3fb950', fontSize: '18px', fontWeight: 'bold' }}>{results.target}</div>
+                  </div>
+                </div>
+              )}
+
+              {/* LISTAGENS */}
+              {results.data.emails && results.data.emails.length > 0 && (
                 <div style={styles.section}>
                   <h3 style={styles.sectionTitle}>📧 E-mails Encontrados</h3>
                   <div style={styles.tagGrid}>
@@ -194,7 +219,7 @@ export function OsintApp() {
                 </div>
               )}
 
-              {results.data.subdomains.length > 0 && (
+              {results.data.subdomains && results.data.subdomains.length > 0 && (
                 <div style={styles.section}>
                   <h3 style={styles.sectionTitle}>🌐 Subdomínios Mapeados</h3>
                   <div style={styles.tagGrid}>
@@ -205,7 +230,7 @@ export function OsintApp() {
                 </div>
               )}
 
-              {results.data.ips.length > 0 && (
+              {results.data.ips && results.data.ips.length > 0 && (
                 <div style={styles.section}>
                   <h3 style={styles.sectionTitle}>🖥️ Endereços IP Identificados</h3>
                   <div style={styles.tagGrid}>
@@ -216,7 +241,7 @@ export function OsintApp() {
                 </div>
               )}
 
-              {results.data.profiles.length > 0 && (
+              {results.data.profiles && results.data.profiles.length > 0 && (
                 <div style={styles.section}>
                   <h3 style={styles.sectionTitle}>🕵️ Perfis de Redes Sociais Encontrados</h3>
                   <div style={styles.tagGrid}>
@@ -230,6 +255,17 @@ export function OsintApp() {
                       >
                         🔗 {url.replace('https://', '').replace('http://', '')}
                       </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {results.data.registeredServices && results.data.registeredServices.length > 0 && (
+                <div style={styles.section}>
+                  <h3 style={styles.sectionTitle}>✉️ Plataformas Onde Este E-mail Possui Conta</h3>
+                  <div style={styles.tagGrid}>
+                    {results.data.registeredServices.map((service, i) => (
+                      <span key={i} style={styles.serviceTag}>✅ {service}</span>
                     ))}
                   </div>
                 </div>
@@ -261,7 +297,7 @@ const styles = {
   inputGroup: { flex: 1 },
   label: { display: 'block', color: '#8b949e', fontSize: '12px', marginBottom: '6px', fontWeight: 'bold' },
   input: { width: '100%', padding: '10px', background: '#0d1117', border: '1px solid #30363d', borderRadius: '6px', color: '#c9d1d9', fontFamily: 'monospace', fontSize: '14px', boxSizing: 'border-box' },
-  btnScan: { padding: '10px 20px', background: '#238636', color: '#fff', border: '1px solid #2ea043', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px', whiteSpace: 'nowrap' },
+  btnScan: { padding: '10px 20px', background: '#238636', color: '#fff', border: '1px solid #2ea043', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px', whiteSpace: 'nowrap', height: '40px' },
   btnDisabled: { background: '#21262d', color: '#484f58', borderColor: '#30363d', cursor: 'not-allowed' },
   moduleGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px', marginBottom: '20px' },
   moduleCard: { padding: '16px', border: '1px solid', borderRadius: '8px', cursor: 'pointer', transition: 'all 0.2s' },
@@ -290,6 +326,7 @@ const styles = {
   subdomainTag: { background: 'rgba(88, 166, 255, 0.2)', color: '#58a6ff', border: '1px solid #58a6ff', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', fontFamily: 'monospace' },
   ipTag: { background: 'rgba(63, 185, 80, 0.2)', color: '#3fb950', border: '1px solid #3fb950', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', fontFamily: 'monospace' },
   profileLink: { background: 'rgba(163, 113, 247, 0.2)', color: '#a371f7', border: '1px solid #a371f7', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', fontFamily: 'monospace', textDecoration: 'none', cursor: 'pointer' },
+  serviceTag: { background: 'rgba(56, 139, 253, 0.2)', color: '#58a6ff', border: '1px solid #58a6ff', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', fontFamily: 'monospace' },
   rawOutput: { background: '#0d1117', border: '1px solid #30363d', borderRadius: '6px', padding: '12px', color: '#8b949e', fontSize: '11px', maxHeight: '400px', overflowY: 'auto', whiteSpace: 'pre-wrap', fontFamily: 'monospace', margin: 0 }
 };
 
