@@ -243,6 +243,9 @@ npm run dev
 218. **Spotlight Search & Command Palette (`SpotlightSearch.jsx`)**:
     - Overlay modal estilo macOS acionado via `Ctrl+Space` (ou `Ctrl+K`).
     - Busca universal por nome de aplicativos com navegação por setas (`↑` e `↓`) e inicialização imediata via `Enter`.
+219. **OSINT Intelligence Hub (`OsintApp`)**:
+    - Módulo `osintManager.js` integrando `whois`, `theHarvester` e `dnsenum` no WSL2 Kali Linux.
+    - Extração automática de e-mails, subdomínios e endereços IP com alternância entre *Visão Estruturada* (tags/cards) e *Output Bruto*.
 
 ---
 
