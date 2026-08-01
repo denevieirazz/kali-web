@@ -22,10 +22,12 @@ import { EvidenceVaultApp } from './apps/EvidenceVaultApp';
 import { LabMissionsApp } from './apps/LabMissionsApp';
 import TaskManagerApp from './apps/TaskManagerApp';
 import NetworkApp from './apps/NetworkApp';
+import DashboardApp from './apps/DashboardApp';
 import MetasploitApp from './apps/MetasploitApp';
-import { Bug, Stethoscope, Vault, Trophy, Cpu, Network, Zap } from 'lucide-react';
+import { Bug, Stethoscope, Vault, Trophy, Cpu, Network, Zap, LayoutDashboard } from 'lucide-react';
 
 export const AppRegistry = {
+  dashboard: { id: 'dashboard', title: 'Command Center', icon: LayoutDashboard, Component: DashboardApp },
   terminal: { id: 'terminal', title: 'Terminal Pro', icon: TerminalIcon, Component: TerminalProApp },
   taskmanager: { id: 'taskmanager', title: 'Gerenciador de Tarefas', icon: Cpu, Component: TaskManagerApp },
   networkmanager: { id: 'networkmanager', title: 'Rede & Serviços', icon: Network, Component: NetworkApp },
