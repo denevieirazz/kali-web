@@ -244,8 +244,11 @@ npm run dev
     - Overlay modal estilo macOS acionado via `Ctrl+Space` (ou `Ctrl+K`).
     - Busca universal por nome de aplicativos com navegação por setas (`↑` e `↓`) e inicialização imediata via `Enter`.
 219. **OSINT Intelligence Hub (`OsintApp`)**:
-    - Módulo `osintManager.js` integrando `whois`, `theHarvester` e `dnsenum` no WSL2 Kali Linux.
-    - Extração automática de e-mails, subdomínios e endereços IP com alternância entre *Visão Estruturada* (tags/cards) e *Output Bruto*.
+    - Módulo `osintManager.js` integrando `whois`, `theHarvester`, `dnsenum` e `Sherlock` no WSL2 Kali Linux.
+    - Extração automática de e-mails, subdomínios, IPs e perfis de redes sociais com alternância entre *Visão Estruturada* e *Output Bruto*.
+220. **Scan History Manager (`historyManager.js`)**:
+    - Gerenciador genérico de histórico de varreduras no SQLite (`scan_history`).
+    - Suporte a armazenamento de resultados em JSON, listagem com filtros por ferramenta (`/api/history?tool=...`), busca de detalhes e exclusão.
 
 ---
 
