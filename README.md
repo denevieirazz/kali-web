@@ -240,6 +240,9 @@ npm run dev
 217. **Msfvenom Payload Generator (`MsfvenomApp`)**:
     - Módulo `msfvenomManager.js` para geração de binários/exploits (`.exe`, `.raw`, `.py`, `.ps1`, `.jar`, `.war`, `.php`) com LHOST/LPORT customizáveis.
     - Servidor de arquivos estáticos `/payloads` para download direto via navegador.
+218. **Spotlight Search & Command Palette (`SpotlightSearch.jsx`)**:
+    - Overlay modal estilo macOS acionado via `Ctrl+Space` (ou `Ctrl+K`).
+    - Busca universal por nome de aplicativos com navegação por setas (`↑` e `↓`) e inicialização imediata via `Enter`.
 
 ---
 
