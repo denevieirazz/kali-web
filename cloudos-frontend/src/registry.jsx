@@ -27,10 +27,12 @@ import MetasploitApp from './apps/MetasploitApp';
 import NmapScannerApp from './apps/NmapScannerApp';
 import SqlmapScannerApp from './apps/SqlmapScannerApp';
 import HashCrackerApp from './apps/HashCrackerApp';
-import { Bug, Stethoscope, Vault, Trophy, Cpu, Network, Zap, LayoutDashboard, Radar, Database, KeyRound } from 'lucide-react';
+import MsfvenomApp from './apps/MsfvenomApp';
+import { Bug, Stethoscope, Vault, Trophy, Cpu, Network, Zap, LayoutDashboard, Radar, Database, KeyRound, FlaskConical } from 'lucide-react';
 
 export const AppRegistry = {
   dashboard: { id: 'dashboard', title: 'Command Center', icon: LayoutDashboard, Component: DashboardApp },
+  msfvenom: { id: 'msfvenom', title: 'Payload Gen', icon: FlaskConical, Component: MsfvenomApp },
   hashcracker: { id: 'hashcracker', title: 'Hash Cracker', icon: KeyRound, Component: HashCrackerApp },
   sqlmap: { id: 'sqlmap', title: 'Web Exploiter', icon: Database, Component: SqlmapScannerApp },
   nmap: { id: 'nmap', title: 'Network Scanner', icon: Radar, Component: NmapScannerApp },
