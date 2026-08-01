@@ -245,6 +245,7 @@ app.use('/api/sqlmap', require('./routes/sqlmapManager'));
 app.use('/api/hashcracker', require('./routes/hashCrackerManager'));
 app.use('/api/msfvenom', require('./routes/msfvenomManager'));
 app.use('/api/osint', require('./routes/osintManager'));
+app.use('/api/history', require('./routes/historyManager'));
 app.use('/payloads', express.static(path.join(__dirname, 'public', 'payloads')));
 
 // =========================================================
