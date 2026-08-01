@@ -234,6 +234,9 @@ npm run dev
     - Módulo `sqlmapManager.js` com streaming de logs em tempo real via Server-Sent Events (SSE) e captura de perguntas interativas.
     - Camada de tradução tática no backend (Português/Inglês) para prompts e mensagens do SQLmap.
     - Interface React com seletor de bandeirinhas (🇧🇷 / 🇺🇸), botões interativos (Sim/Não) e árvore visual de bancos de dados extraídos.
+216. **Hash Cracker Visual (`HashCrackerApp`)**:
+    - Módulo `hashCrackerManager.js` integrando o John the Ripper com a wordlist `rockyou.txt` do Kali Linux.
+    - Interface minimalista com suporte a formatos `MD5`, `SHA-1`, `SHA-256` e `NTLM (Windows)`, exibindo a senha decodificada em card de destaque verde.
 
 ---
 
