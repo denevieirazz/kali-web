@@ -195,12 +195,45 @@ npm run dev
       - `TerminalThemePicker.jsx`: Seletor de temas (*GitHub Dark*, *Kali Neon*).
     - **Atraso Defensivo WebSocket (50ms em `TerminalPane.jsx`)**: Adiamento da criação do socket para absorver montagens rápidas em Strict Mode do React 18 sem emitir avisos de fechamento no console.
 
-197. **Melhorias e Correções no Gerenciador de Arquivos (`FileManagerApp.jsx`)**:
-    - **Menu de Contexto Flutuante**: Correção no encerramento ao clicar fora do componente ou pressionar a tecla `ESC`.
-    - **Navegação & Tratamento de Erros**: Correção do fluxo de navegação ao tentar retornar da raiz do sistema de arquivos.
-    - **Upload & Download**: Limpeza do elemento `input` após upload com tratamento de falhas de rede e autenticação via Bearer Token.
-    - **Seleção Múltipla & Gestão**: Suporte à seleção simultânea de múltiplos arquivos com combinações Ctrl/Cmd e gestão aprimorada na lixeira.
-    - **Suporte Expandido a Extensões**: Ícones categorizados visualmente para diferentes formatos e tipos de código.
+204. **Terminal Pro PTY sem Censura**:
+    - PTY nativo interligado com WSL2 Kali Linux (`node-pty`).
+    - Resolução completa dos erros de `dimensions` no `xterm.js` usando `requestAnimationFrame` e renderização defensiva com `opacity: 0`.
+    - Limpeza automática de tokens inválidos via script `autoFix.js`.
+205. **Gerenciador de Tarefas do Kali (`TaskManagerApp`)**:
+    - Módulo `processManager.js` e interface React para listar e encerrar (`kill -9`) processos no WSL Kali em tempo real.
+206. **Persistência de Janelas & Notificações Nativas**:
+    - Salvamento automático de posições, dimensões e z-index das janelas no `localStorage` via `useWindowPersistence.js`.
+    - Notificações nativas HTML5 via `notificationService.js`.
+207. **Centro de Controle de Rede & Serviços Táticos (`NetworkApp`)**:
+    - Gerenciador de serviços táticos do Kali (`postgresql`, `apache2`, `ssh`, `tor`, `nginx`) via `sudo service`.
+    - Mapeador de portas e conexões ativas em escuta (`ss -tulpn`).
+208. **Monaco Editor Integrado (Motor do VS Code)**:
+    - Suporte multi-abas no `CodeEditorApp.jsx` com a biblioteca `@monaco-editor/react`.
+    - Tema tático GitHub Dark, autocompletar, minimapa, auto-save com debounce de 1.5s e botão de execução direta de scripts via terminal.
+209. **Gestão de Vulnerabilidades & Cofre de Evidências (`FindingsManagerApp`)**:
+    - Cadastro e categorização de vulnerabilidades por severidade (Crítica, Alta, Média, Baixa).
+    - Anexo de evidências em Base64 com **cálculo automático de Hash SHA256** para garantia de Cadeia de Custódia Forense.
+210. **Gerador de Relatórios Executivos (`ReportBuilderApp`)**:
+    - Módulo `reportsManager.js` para compilação automática dos achados e evidências salvas no SQLite.
+    - Geração e exportação instantânea de relatórios profissionais em **HTML com preview visual** e **Markdown (.md)**.
+211. **Environment Doctor (`EnvironmentDoctorApp`)**:
+    - Módulo `environmentDoctor.js` para verificação batch de 24 ferramentas táticas no WSL2 Kali Linux.
+    - Gauge circular de Health Score (marcou 96% no teste real com 23/24 ferramentas ativas).
+    - Diagnóstico em tempo real de CPU (16 cores), memória RAM (13.9GB total, 12.1GB livre) e disco virtual (1007GB total, 945GB livre).
+212. **Metasploit MSRPC Integration (`MetasploitApp`)**:
+    - Pacote `msgpack-lite` instalado e configurado no backend (`metasploitManager.js`).
+    - Cliente TCP MessagePack para comunicação direta com o daemon `msfrpcd` rodando no WSL2 (porta 55553).
+    - Interface visual no frontend para busca de exploits, carregamento de parâmetros obrigatórios (`RHOSTS`, `LHOST`, `LPORT`), execução de módulos e monitoramento de sessões ativas.
+213. **Dashboard Tático (`DashboardApp`)**:
+    - Módulo `dashboardManager.js` para consolidação em tempo real das métricas do banco de dados e uso de recursos do WSL2.
+    - Interface intuitiva com estilo Glassmorphism, cards de estatísticas e atalhos de 1-clique.
+214. **Nmap Visual Scanner (`NmapScannerApp`)**:
+    - Módulo `nmapManager.js` com suporte a parsing greppable de varreduras via WSL2 Kali Linux.
+    - Perfis de clique fácil (*Varredura Rápida*, *Detectar Versões*, *Detectar Sistema*, *Varredura Intensa*), tabela visual de portas/protocolos/serviços e caixa educacional exibindo o comando CLI correspondente.
+215. **SQLmap Web Exploiter Interativo com Tradução PT/EN (`SqlmapScannerApp`)**:
+    - Módulo `sqlmapManager.js` com streaming de logs em tempo real via Server-Sent Events (SSE) e captura de perguntas interativas.
+    - Camada de tradução tática no backend (Português/Inglês) para prompts e mensagens do SQLmap.
+    - Interface React com seletor de bandeirinhas (🇧🇷 / 🇺🇸), botões interativos (Sim/Não) e árvore visual de bancos de dados extraídos.
 
 ---
 
