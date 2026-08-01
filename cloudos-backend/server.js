@@ -231,12 +231,13 @@ app.use(async (req, res, next) => {
     } catch (e) { res.status(500).json({ error: "Erro ao inicializar ambiente do usuário." }); }
 });
 
-// Registra rotas V3 Enterprise, Process Manager, Network Manager, Findings Manager e Reports Manager
+// Registra rotas V3 Enterprise, Process Manager, Network Manager, Findings Manager, Reports Manager e Environment Doctor
 app.use('/api/v3', require('./routes/v3'));
 app.use('/api', require('./routes/processManager'));
 app.use('/api', require('./routes/networkManager'));
 app.use('/api', require('./routes/findingsManager'));
 app.use('/api', require('./routes/reportsManager'));
+app.use('/api/environment', require('./routes/environmentDoctor'));
 
 // =========================================================
 // 🌐 API ROUTES
