@@ -231,7 +231,7 @@ app.use(async (req, res, next) => {
     } catch (e) { res.status(500).json({ error: "Erro ao inicializar ambiente do usuário." }); }
 });
 
-// Registra rotas V3 Enterprise, Process Manager, Network Manager, Findings Manager, Reports Manager, Environment Doctor, Metasploit RPC, Dashboard e Nmap Scanner
+// Registra rotas V3 Enterprise, Process Manager, Network Manager, Findings Manager, Reports Manager, Environment Doctor, Metasploit RPC, Dashboard, Nmap Scanner e SQLmap
 app.use('/api/v3', require('./routes/v3'));
 app.use('/api', require('./routes/processManager'));
 app.use('/api', require('./routes/networkManager'));
@@ -241,6 +241,7 @@ app.use('/api/environment', require('./routes/environmentDoctor'));
 app.use('/api/metasploit', require('./routes/metasploitManager'));
 app.use('/api/dashboard', require('./routes/dashboardManager'));
 app.use('/api/nmap', require('./routes/nmapManager'));
+app.use('/api/sqlmap', require('./routes/sqlmapManager'));
 
 // =========================================================
 // 🌐 API ROUTES

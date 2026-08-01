@@ -25,10 +25,12 @@ import NetworkApp from './apps/NetworkApp';
 import DashboardApp from './apps/DashboardApp';
 import MetasploitApp from './apps/MetasploitApp';
 import NmapScannerApp from './apps/NmapScannerApp';
-import { Bug, Stethoscope, Vault, Trophy, Cpu, Network, Zap, LayoutDashboard, Radar } from 'lucide-react';
+import SqlmapScannerApp from './apps/SqlmapScannerApp';
+import { Bug, Stethoscope, Vault, Trophy, Cpu, Network, Zap, LayoutDashboard, Radar, Database } from 'lucide-react';
 
 export const AppRegistry = {
   dashboard: { id: 'dashboard', title: 'Command Center', icon: LayoutDashboard, Component: DashboardApp },
+  sqlmap: { id: 'sqlmap', title: 'Web Exploiter', icon: Database, Component: SqlmapScannerApp },
   nmap: { id: 'nmap', title: 'Network Scanner', icon: Radar, Component: NmapScannerApp },
   terminal: { id: 'terminal', title: 'Terminal Pro', icon: TerminalIcon, Component: TerminalProApp },
   taskmanager: { id: 'taskmanager', title: 'Gerenciador de Tarefas', icon: Cpu, Component: TaskManagerApp },
