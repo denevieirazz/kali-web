@@ -5,6 +5,7 @@ import { AppList, AppRegistry } from './registry';
 import BootScreen from './BootScreen';
 import LoginScreen from './LoginScreen';
 import { CommandPalette } from './components/CommandPalette';
+import SpotlightSearch from './components/SpotlightSearch';
 import Taskbar from './components/Taskbar';
 import DesktopArea from './components/Desktop';
 import { CloudOSProvider, useCloudOS } from './store/CloudOSContext';
@@ -47,6 +48,10 @@ function Desktop() {
   useEffect(() => {
     const handleKey = (e) => {
       if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setIsPaletteOpen(prev => !prev);
+      }
+      if (e.ctrlKey && e.code === 'Space') {
         e.preventDefault();
         setIsPaletteOpen(prev => !prev);
       }
@@ -115,6 +120,12 @@ function Desktop() {
         onClose={() => setIsPaletteOpen(false)} 
         openApp={openApp}
         actions={{ togglePalette: () => setIsPaletteOpen(!isPaletteOpen), lock: lockSystem }}
+      />
+
+      <SpotlightSearch
+        isOpen={isPaletteOpen}
+        onClose={() => setIsPaletteOpen(false)}
+        onLaunchApp={openApp}
       />
 
       {/* Windows */}

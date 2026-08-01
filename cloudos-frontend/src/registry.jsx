@@ -62,3 +62,4 @@ export const AppRegistry = {
 };
 
 export const AppList = Object.values(AppRegistry);
+export const appsRegistry = AppList;
