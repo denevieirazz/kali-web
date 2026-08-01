@@ -18,7 +18,7 @@ Se você é um agente de IA ou desenvolvedor trabalhando neste repositório, con
                                                                                             ▼
                                                                          ┌──────────────────────────────────────┐
                                                                          │       WSL 2 (Kali Linux Kernel)      │
-                                                                         │  Tmux, Tor, Privoxy, Macchanger, Ext4│
+                                                                         │  Memória Limitada a 3GB via .wslconfig
                                                                          └──────────────────────────────────────┘
 ```
 
@@ -250,6 +250,9 @@ npm run dev
     - Gerenciador genérico de histórico de varreduras no SQLite (`scan_history`).
     - Componente drawer lateral `HistoryPanel.jsx` integrado ao `OsintApp` e `NmapScannerApp`.
     - Salvamento automático de resultados e restauração instantânea de scans passados sem reexecução CLI.
+221. **Otimização de Memória & Encerramento Limpo de Processos (`server.js` & `package.json`)**:
+    - Limitação estrita do Heap do Node.js (`--max-old-space-size=2048`) nos scripts de inicialização do backend.
+    - Adicionados manipuladores de sinais `SIGINT`/`SIGTERM` no `server.js` para encerramento limpo e eliminação de processos filhos órfãos (`node-pty` e executáveis de segundo plano) prevenindo estoiros na memória virtual (VIRT/Pagefile).
 
 ---
 

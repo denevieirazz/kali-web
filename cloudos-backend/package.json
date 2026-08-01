@@ -4,7 +4,7 @@
   "description": "CloudOS Backend with Dockerode and WebSockets",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node --max-old-space-size=2048 server.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

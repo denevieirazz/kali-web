@@ -862,4 +862,15 @@ wss.on('connection', (ws, req) => {
     });
 });
 
+function cleanupProcesses() {
+    console.log('🧹 Limpando processos filhos antes de encerrar...');
+    for (const [id, proc] of runningProcesses.entries()) {
+        try { proc.kill('SIGKILL'); } catch {}
+    }
+    runningProcesses.clear();
+}
+
+process.on('SIGINT', () => { cleanupProcesses(); process.exit(0); });
+process.on('SIGTERM', () => { cleanupProcesses(); process.exit(0); });
+
 server.listen(8080, () => console.log('🚀 CloudOS DB & SaaS Backend Rodando.'));
