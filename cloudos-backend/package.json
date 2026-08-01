@@ -12,6 +12,7 @@
     "dockerode": "^4.0.2",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.3",
+    "msgpack-lite": "^0.1.26",
     "multer": "^2.2.0",
     "node-pty": "^1.1.0",
     "sqlite3": "^6.0.1",
