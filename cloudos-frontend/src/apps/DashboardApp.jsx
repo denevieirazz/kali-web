@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-
-const API_BASE = 'http://localhost:8080';
+import { API_BASE } from '../config';
 
 export function DashboardApp({ openApp }) {
   const [data, setData] = useState(null);

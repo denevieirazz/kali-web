@@ -1,6 +1,5 @@
 import React, { useState, useCallback } from 'react';
-
-const API_BASE = 'http://localhost:8080';
+import { API_BASE } from '../config';
 
 export function OsintApp() {
   const [target, setTarget] = useState('');

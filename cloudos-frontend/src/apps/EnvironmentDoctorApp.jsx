@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-
-const API_BASE = 'http://localhost:8080';
+import { API_BASE } from '../config';
 
 const CATEGORY_ICONS = {
   'Reconhecimento': '🛰️',

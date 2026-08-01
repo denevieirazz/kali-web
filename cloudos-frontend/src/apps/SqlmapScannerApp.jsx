@@ -1,6 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-
-const API_BASE = 'http://localhost:8080';
+import { API_BASE } from '../config';
 
 export function SqlmapScannerApp() {
   const [url, setUrl] = useState('');
