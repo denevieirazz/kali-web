@@ -56,11 +56,8 @@ router.get('/processes', authenticateToken, async (req, res) => {
 // GET /api/processes/stats/summary — Resumo de carga do sistema
 router.get('/processes/stats/summary', authenticateToken, async (req, res) => {
   try {
-    const [loadAvg, memInfo, uptime] = await Promise.all([
-      runWslCommand('cat /proc/loadavg'),
-      runWslCommand('free -m | grep Mem'),
-      runWslCommand('uptime -p')
-    ]);
+    const combinedOutput = await runWslCommand('cat /proc/loadavg && echo "---SPLIT---" && free -m | grep Mem && echo "---SPLIT---" && uptime -p');
+    const [loadAvg, memInfo, uptime] = combinedOutput.split('---SPLIT---').map(s => s.trim());
 
     const loadParts = loadAvg.split(/\s+/);
     const memParts = memInfo.split(/\s+/);

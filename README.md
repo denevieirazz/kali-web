@@ -253,6 +253,8 @@ npm run dev
 221. **Otimização de Memória & Encerramento Limpo de Processos (`server.js` & `package.json`)**:
     - Limitação estrita do Heap do Node.js (`--max-old-space-size=2048`) nos scripts de inicialização do backend.
     - Adicionados manipuladores de sinais `SIGINT`/`SIGTERM` no `server.js` para encerramento limpo e eliminação de processos filhos órfãos (`node-pty` e executáveis de segundo plano) prevenindo estoiros na memória virtual (VIRT/Pagefile).
+222. **Script de Correção de Desligamento do Windows (`corrigir_desligamento.bat`)**:
+    - Criação de script automatizado de 1-clique para desativação da Inicialização Rápida (Fast Startup / Hiberboot) e desativação de reinício automático por falha de driver (`CrashControl/AutoReboot`).
 
 ---
 
