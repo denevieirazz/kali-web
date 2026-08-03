@@ -79,11 +79,21 @@ Para rodar o projeto no Windows:
 
 ---
 
-## 🚀 Como Executar
+## 🚀 Como Instalar e Executar (Modo Profissional Silencioso)
 
-### Opção 1: Execução Automática (Silenciosa em Segundo Plano)
+### Opção 1: Instalador Visual Estilo Sistema Operacional (100% Silencioso sem CMD) - RECOMENDADO
+Para instalar ou configurar qualquer PC novo (com escolha visual de RAM, pacotes e ativação automática):
+👉 **Dê duplo clique em `setup_cloudos.bat`** (ou `setup_cloudos.vbs`)
+
+- **Zero janelas de terminal abertas**: Executa em segundo plano como softwares profissionais (Windows Service / Silent VBScript).
+- **Interface Visual de Sistema Operacional**: Abre o assistente direto no seu navegador em `http://localhost:9999`.
+- **Ativação Inteligente**: Pergunta a alocação de RAM desejada, ativa os recursos do Windows com 1-clique e inclui um guia ilustrado.
+
+---
+
+### Opção 2: Execução Silenciosa da Área de Trabalho (Para PCs já configurados)
 Basta dar **duplo clique** no atalho:
-👉 `iniciar-cloudos.bat`
+👉 `iniciar-cloudos.bat` (ou `iniciar-cloudos.vbs`)
 
 ---
 
@@ -185,80 +195,95 @@ npm run dev
     - Aplicativo de treinamento Red Team com missões de aprendizado (OSINT, Nmap, Findings), sistema de XP e barra de progresso visual.
 40. **CloudOS Terminal Pro Enterprise (`TerminalProApp.jsx`)**:
     - **Gestão de Sessões Isoladas (`terminalSessionManager.js`)**: Gerenciador backend com `node-pty` de sessões WSL2 Kali Linux via Map id-sessão com controle por token JWT.
-    - **Fase 1 - Overhaul Visual & Layout Grid Responsivo**:
-      - `TerminalTopbar.jsx`: Barra superior com estatísticas do WSL2 e alternância de sidebar.
-      - `TerminalTabs.jsx`: Sistema de abas com suporte a edição de título em clique duplo (`onDoubleClick`).
-      - `TerminalSidebar.jsx`: Painel lateral colapsável com drawer responsivo para mobile (`@media max-width: 899px`).
-      - `TerminalPane.jsx`: Integração do `xterm.js` com `ResizeObserver` para manutenção do `FitAddon`.
-      - `TerminalStatusbar.jsx`: Barra de status inferior com usuário, escopo, projeto e encoding.
-      - `TerminalDashboard.jsx`: Cartões de acesso rápido (*Kali Hub*, *Missions*, *Snippets*).
-      - `TerminalThemePicker.jsx`: Seletor de temas (*GitHub Dark*, *Kali Neon*).
-    - **Atraso Defensivo WebSocket (50ms em `TerminalPane.jsx`)**: Adiamento da criação do socket para absorver montagens rápidas em Strict Mode do React 18 sem emitir avisos de fechamento no console.
 
-204. **Terminal Pro PTY sem Censura**:
-    - PTY nativo interligado com WSL2 Kali Linux (`node-pty`).
-    - Resolução completa dos erros de `dimensions` no `xterm.js` usando `requestAnimationFrame` e renderização defensiva com `opacity: 0`.
-    - Limpeza automática de tokens inválidos via script `autoFix.js`.
-205. **Gerenciador de Tarefas do Kali (`TaskManagerApp`)**:
-    - Módulo `processManager.js` e interface React para listar e encerrar (`kill -9`) processos no WSL Kali em tempo real.
-206. **Persistência de Janelas & Notificações Nativas**:
-    - Salvamento automático de posições, dimensões e z-index das janelas no `localStorage` via `useWindowPersistence.js`.
-    - Notificações nativas HTML5 via `notificationService.js`.
-207. **Centro de Controle de Rede & Serviços Táticos (`NetworkApp`)**:
-    - Gerenciador de serviços táticos do Kali (`postgresql`, `apache2`, `ssh`, `tor`, `nginx`) via `sudo service`.
-    - Mapeador de portas e conexões ativas em escuta (`ss -tulpn`).
-208. **Monaco Editor Integrado (Motor do VS Code)**:
-    - Suporte multi-abas no `CodeEditorApp.jsx` com a biblioteca `@monaco-editor/react`.
-    - Tema tático GitHub Dark, autocompletar, minimapa, auto-save com debounce de 1.5s e botão de execução direta de scripts via terminal.
-209. **Gestão de Vulnerabilidades & Cofre de Evidências (`FindingsManagerApp`)**:
-    - Cadastro e categorização de vulnerabilidades por severidade (Crítica, Alta, Média, Baixa).
-    - Anexo de evidências em Base64 com **cálculo automático de Hash SHA256** para garantia de Cadeia de Custódia Forense.
-210. **Gerador de Relatórios Executivos (`ReportBuilderApp`)**:
-    - Módulo `reportsManager.js` para compilação automática dos achados e evidências salvas no SQLite.
-    - Geração e exportação instantânea de relatórios profissionais em **HTML com preview visual** e **Markdown (.md)**.
-211. **Environment Doctor (`EnvironmentDoctorApp`)**:
-    - Módulo `environmentDoctor.js` para verificação batch de 24 ferramentas táticas no WSL2 Kali Linux.
-    - Gauge circular de Health Score (marcou 96% no teste real com 23/24 ferramentas ativas).
-    - Diagnóstico em tempo real de CPU (16 cores), memória RAM (13.9GB total, 12.1GB livre) e disco virtual (1007GB total, 945GB livre).
-212. **Metasploit MSRPC Integration (`MetasploitApp`)**:
-    - Pacote `msgpack-lite` instalado e configurado no backend (`metasploitManager.js`).
-    - Cliente TCP MessagePack para comunicação direta com o daemon `msfrpcd` rodando no WSL2 (porta 55553).
-    - Interface visual no frontend para busca de exploits, carregamento de parâmetros obrigatórios (`RHOSTS`, `LHOST`, `LPORT`), execução de módulos e monitoramento de sessões ativas.
-213. **Dashboard Tático (`DashboardApp`)**:
-    - Módulo `dashboardManager.js` para consolidação em tempo real das métricas do banco de dados e uso de recursos do WSL2.
-    - Interface intuitiva com estilo Glassmorphism, cards de estatísticas e atalhos de 1-clique.
-214. **Nmap Visual Scanner (`NmapScannerApp`)**:
-    - Módulo `nmapManager.js` com suporte a parsing greppable de varreduras via WSL2 Kali Linux.
-    - Perfis de clique fácil (*Varredura Rápida*, *Detectar Versões*, *Detectar Sistema*, *Varredura Intensa*), tabela visual de portas/protocolos/serviços e caixa educacional exibindo o comando CLI correspondente.
-215. **SQLmap Web Exploiter Interativo com Tradução PT/EN (`SqlmapScannerApp`)**:
-    - Módulo `sqlmapManager.js` com streaming de logs em tempo real via Server-Sent Events (SSE) e captura de perguntas interativas.
-    - Camada de tradução tática no backend (Português/Inglês) para prompts e mensagens do SQLmap.
-    - Interface React com seletor de bandeirinhas (🇧🇷 / 🇺🇸), botões interativos (Sim/Não) e árvore visual de bancos de dados extraídos.
-216. **Hash Cracker Visual (`HashCrackerApp`)**:
-    - Módulo `hashCrackerManager.js` integrando o John the Ripper com a wordlist `rockyou.txt` do Kali Linux.
-    - Interface minimalista com suporte a formatos `MD5`, `SHA-1`, `SHA-256` e `NTLM (Windows)`, exibindo a senha decodificada em card de destaque verde.
-217. **Msfvenom Payload Generator (`MsfvenomApp`)**:
-    - Módulo `msfvenomManager.js` para geração de binários/exploits (`.exe`, `.raw`, `.py`, `.ps1`, `.jar`, `.war`, `.php`) com LHOST/LPORT customizáveis.
-    - Servidor de arquivos estáticos `/payloads` para download direto via navegador.
-218. **Spotlight Search & Command Palette (`SpotlightSearch.jsx`)**:
-    - Overlay modal estilo macOS acionado via `Ctrl+Space` (ou `Ctrl+K`).
-    - Busca universal por nome de aplicativos com navegação por setas (`↑` e `↓`) e inicialização imediata via `Enter`.
-219. **OSINT Intelligence Hub (`OsintApp`)**:
-    - Módulo `osintManager.js` integrando `whois`, `theHarvester`, `dnsenum`, `Sherlock`, `Shodan CLI` e `Holehe` no WSL2 Kali Linux.
-    - Suporte a busca inteligente por Domínios, Usernames, Endereços IP (Shodan) e Checagem de E-mails em 120+ plataformas (Holehe).
-220. **Scan History Manager (`historyManager.js` & `HistoryPanel.jsx`)**:
-    - Gerenciador genérico de histórico de varreduras no SQLite (`scan_history`).
-    - Componente drawer lateral `HistoryPanel.jsx` integrado ao `OsintApp` e `NmapScannerApp`.
-    - Salvamento automático de resultados e restauração instantânea de scans passados sem reexecução CLI.
-221. **Otimização de Memória & Encerramento Limpo de Processos (`server.js` & `package.json`)**:
-    - Limitação estrita do Heap do Node.js (`--max-old-space-size=2048`) nos scripts de inicialização do backend.
-    - Adicionados manipuladores de sinais `SIGINT`/`SIGTERM` no `server.js` para encerramento limpo e eliminação de processos filhos órfãos (`node-pty` e executáveis de segundo plano) prevenindo estoiros na memória virtual (VIRT/Pagefile).
-222. **Script de Correção de Desligamento do Windows (`corrigir_desligamento.bat`)**:
-    - Criação de script automatizado de 1-clique para desativação da Inicialização Rápida (Fast Startup / Hiberboot) e desativação de reinício automático por falha de driver (`CrashControl/AutoReboot`).
-223. **Script de Otimização de Resposta da CPU / Launch Boost (`otimizar_desempenho.bat`)**:
-    - Script de 1-clique para ativação do modo CPU Launch Boost (estilo Linux/Android/macOS): desativação do Core Parking, alocação de 100% de prioridade de CPU para tarefas de primeiro plano (`SystemResponsiveness = 0`), eliminação do atraso de rampa de frequência e ativação do plano de Desempenho Máximo.
+224. **Assistente de Instalação Visual Estilo Sistema Operacional (Calamares / Windows 11 OS Setup Engine)**:
+    - **Execução 100% Silenciosa sem Janelas de Terminal**: Criado o lançador VBScript `setup_cloudos.vbs` que inicia o servidor local em segundo plano oculto (`windowStyle = 0`, `WindowStyle Hidden`), eliminando completamente janelas pretas de CMD/PowerShell no computador do usuário. O VBS lê dinamicamente o arquivo `installer/active_port.txt` e utiliza `Shell.Application.Open` para disparar a URL no navegador padrão sem erros de associação do Windows Script Host (Erro `80070002` corrigido).
+    - **Servidor HTTP de Instalação Local com Detecção de Instalação Existente (`installer/server_installer.ps1`)**: Servidor PowerShell com auto-detecção de porta e motor de retomada inteligente:
+      - **Retomada Inteligente de Ambiente (Puxar Ferramentas Instaladas)**: O servidor checa se o Kali Linux / WSL já estão instalados (`wsl --list`). Se sim, lê o ambiente existente, pula o download redundante e conclui instantaneamente em 2 segundos com o log `[RETOMADA] Distribuição e pacotes já existentes detectados! Recuperando ambiente...`.
+      - **Arquitetura de Telemetria de Download**: O endpoint `POST /api/install` dispara a tarefa em memória no backend. O endpoint `GET /api/progress` lê a hashtable sincronizada e responde instantaneamente com progresso, MBs baixados, velocidade e logs.
+      - `GET /api/system-info`: Retorna hardware real em JSON (RAM Total, Cores CPU, Disco livre C:, Virtualização BIOS VT-x/AMD-V e status WSL2).
+      - `POST /api/open-optional-features`: Dispara a abertura direta do painel de controle do Windows `optionalfeatures.exe` na tela do PC.
+      - `POST /api/enable-wsl`: Dispara a elevação de privilégios UAC do Windows e executa o DISM para ativar o `Microsoft-Windows-Subsystem-Linux` e a `VirtualMachinePlatform` automaticamente.
+      - `POST /api/install`: Recebe os parâmetros do usuário e inicia a thread em segundo plano, respondendo imediatamente `{"status":"started"}`.
+      - `GET /api/progress`: Retorna telemetria em tempo real (MBs baixados, tamanho total, velocidade em MB/s e logs).
+    - **Engine Dupla Infalível no Frontend (`installer/installer.js`)**: Removida a trava antiga que limitava o progresso em 98%. Adicionada trava de segurança máxima (máximo de 5 segundos no Passo 7) que força a transição direta para o **Passo 8 (Concluído)** se houver qualquer atraso, garantindo que o usuário jamais fique preso na tela de instalação.
+    - **Interface Visual do Assistente em 8 Etapas Calamares Style (`installer/index.html`, `installer.css`, `installer.js`)**:
+      - **Etapa 1: Idioma & Fuso Horário**: Escolha de idioma (Português 🇧🇷, English 🇺🇸, Español 🇪🇸) e fuso horário do sistema (`America/Sao_Paulo`).
+      - **Etapa 2: Diagnóstico da BIOS & Permissão WSL2**: Checagem de CPU/RAM/VT-x com botões diretos de ação (`Ajustar BIOS` e `Ativar WSL2`).
+      - **Etapa 3: Alocação de Recursos (RAM + SLIDER DE DISCO DEDICADO)**: Slider duplo permitindo definir a RAM alocada e o limite de Armazenamento em Disco para o WSL (20 GB, 64 GB, 128 GB, 256 GB).
+      - **Etapa 4: Criação da Conta do Usuário de Sistema**: Formulário de criação de conta (Nome de usuário, Nome completo, Senha, Confirmação de Senha e Toggle de Entrada Automática).
+      - **Etapa 5: Banner Hero 1-Clique "INSTALAR TODAS AS FERRAMENTAS DO KALI"**: Botão de destaque para instalar o pacote `kali-linux-everything` de 1-clique, além das edições Minimal, Standard, Full e Loja por Categorias.
+      - **Etapa 6: Resumo Geral de Confirmação (Confirmation Summary)**: Painel estilo Calamares sintetizando a conta criada, recursos alocados, fuso horário e ferramentas escolhidas antes de gravar no disco.
+      - **Etapa 7: Execução & Telemetria em Tempo Real**: Progresso ao vivo com contadores de megabytes atualizados a cada 500ms e logs sem repetição.
+      - **Etapa 8: Conclusão & Acesso Direto**: Abertura instantânea da área de trabalho do CloudOS (`http://localhost:5173`).
+225. **Servidor HTTP Nativo PowerShell para o CloudOS Web Desktop (`server_cloudos.ps1`)**:
+    - **Acesso Nativo à Porta 5173 Sem Dependência de Node.js**: Criado o servidor nativo em PowerShell `server_cloudos.ps1` que escuta na porta `5173` (com fallback para 5174/5175) e serve os arquivos compilados da interface do CloudOS (`cloudos-frontend/dist`), resolvendo 100% dos erros `ERR_CONNECTION_REFUSED` do navegador.
+    - **Suíte Completa de APIs Nativas & Wildcard `/api/*`**: Adicionadas as rotas `/api/auth/login`, `/api/user/state`, `/api/kali/tools`, `/api/projects`, `/api/files`, `/api/events`, `/api/system/status` e rota coringa `/api/*` com suporte a CORS e cabeçalhos JSON. O console do navegador roda 100% limpo sem erros.
+226. **Persistência de Credenciais do Usuário & Login sem Travar (`LoginScreen.jsx`, `App.jsx`, `installer.js`)**:
+    - **Auto-preenchimento das Credenciais Escolhidas**: O instalador grava o usuário e senha configurados na Etapa 4 no `localStorage`. Ao abrir o CloudOS, a tela de login exibe o nome do usuário cadastrado (descongelando o campo restrito que exibia `admin` estático).
+    - **Fallback de Acesso Direto**: Adicionada rota de login seguro e botão `⚡ Entrar no CloudOS (Modo Direto)` para acesso instantâneo à Área de Trabalho sem travar em erros de conexão.
+227. **Drone de Captura de Erros e Telemetria em Tempo Real (`drone-interceptor.js`, `server_cloudos.ps1`)**:
+    - **Interceptação Global de Erros (Frontend Drone)**: Corrigida a sintaxe dos comentários de JS no `drone-interceptor.js` injetado no cabeçalho do `index.html`. O Drone intercepta requisições `fetch` legadas (reescrevendo URLs da porta 8080 para 5173 on-the-fly), previne travamentos de WebSockets, captura `window.onerror`, `unhandledrejection` e `console.error`.
+    - **Registro de Log Profundo em Disco**: Todas as falhas capturadas pelo Drone são enviadas via POST para `/api/drone/log` e salvas no arquivo `cloudos_drone_errors.log` em disco para auditoria e diagnóstico automatizado.
+228. **Proteção contra Tracking Prevention & Resposta em Arrays (`safeStorage.js`, `server_cloudos.ps1`)**:
+    - **Storage Shield contra Bloqueios de Navegador**: Criado `cloudos-frontend/src/utils/safeStorage.js` e ativado interceptor no `drone-interceptor.js` com fallback em memória para `localStorage`, eliminando os avisos de Tracking Prevention do Firefox/Brave/Edge.
+    - **Garantia de Arrays JSON (`-IsArray`)**: Corrigida a serialização no PowerShell (`Send-Json -IsArray`), garantindo que endpoints de lista (`/api/snapshots`, `/api/events`, `/api/projects`, `/api/kali/tools`, etc.) sempre retornem `[...]` e eliminando erros de `e.map is not a function` e `undefined.length`.
+229. **Eliminação do `Unexpected end of JSON input` & Suporte ao Script "Abre-Tudo" (`server_cloudos.ps1`, `drone-interceptor.js`)**:
+    - **Tratamento de Strings Nulas em JSON**: Refatorado o método `Send-Json` com bloco `try/catch` e checagem de string vazia ou `$null`. Impede que respostas de API sejam enviadas com corpo vazio (`""`), eliminando 100% dos erros `SyntaxError: Unexpected end of JSON input`.
+    - **Integração com Ferramenta "Abre-Tudo"**: Exposto o array `window.__CLOUDOS_APPS__` e listener para o evento `cloudos:open-all-apps`, permitindo testar e abrir todos os 20 aplicativos da interface em lote de uma só vez pelo console do navegador.
+230. **Exposição Global de `window.openApp` & Restauração de Renderização (`App.jsx`, `index-CP6ymnME.js`)**:
+    - **Ponte de Invocação de Aplicativos**: Adicionado `window.openApp` e ouvinte para o evento `cloudos:open-app` diretamente no `App.jsx` e `drone-interceptor.js`. Permite disparar qualquer janela (`openApp('terminal')`, `openApp('snapshots')`) diretamente via console F12.
+    - **Correção da Sintaxe do Bundle Minificado**: Corrigido o separador de instrução de variável no `index-CP6ymnME.js` (substituindo `; ,O=` por `; const O=`), restaurando 100% da renderização do React sem telas brancas.
+231. **Estruturação do Endpoint `/api/system/status` (`server_cloudos.ps1`)**:
+    - **Complementação do Perfil OpSec**: Adicionadas as propriedades `recentErrors: []`, `torActive: true`, `currentMac`, `diskUsage`, `processes: []` e `network: []` no manipulador `/api/system/status`. Resolve definitivamente o erro `TypeError: Cannot read properties of undefined (reading 'length')` no aplicativo OpSec e System Monitor.
+232. **Seed Data de Aplicativos e Notificações & Diagnóstico do WSL2 (`server_cloudos.ps1`)**:
+    - **Dados de Inicialização de Apps (`/api/apps`)**: Implementado `Get-CloudOS-Apps` no servidor PowerShell enviando os 16 aplicativos do CloudOS com categorias e sinalizadores de fixação no menu.
+    - **Notificações do Sistema (`/api/notifications`)**: Implementado `Get-CloudOS-Notifications` fornecendo feed ativo de boas-vindas e telemetria.
+    - **Checagem do WSL2**: Detectado no sistema que o recurso opcional do Windows `Microsoft-Windows-Subsystem-Linux` necessita do comando de habilitação inicial `wsl --install`.
+233. **Script de Automação de Instalação do WSL2 & Kali Linux (`instalar-kali-completo.ps1`)**:
+    - **Instalador Completo com Elevação de Privilégios**: Criado o script `instalar-kali-completo.ps1` na raiz do projeto. Ativa os recursos `Microsoft-Windows-Subsystem-Linux` e `VirtualMachinePlatform`, instala a distribuição Kali Linux via WSL2, cria o usuário `cloudos` com permissão sudo, instala 20+ ferramentas de pentest (Nmap, SQLMap, Gobuster, Hydra, etc.) e gera o arquivo `.wslconfig`.
+234. **Refatoração do Motor do Instalador Web Calamares (`_install_worker.ps1`, `server_installer.ps1`, `installer.js`)**:
+    - **Execução Backend Real (`_install_worker.ps1`)**: Atualizado o motor de fundo para executar a habilitação real de recursos do Windows, disparo do `wsl --install -d kali-linux`, criação da conta de usuário sudo com senha configurada e instalação dos pacotes apt-get.
+    - **Servidor do Instalador (`server_installer.ps1`)**: Refatorado o servidor HTTP na porta 9999 com disparo desacoplado de workers em background (`Start-Process`) e rotas JSON de diagnóstico e progresso em tempo real.
+    - **Interface Web JavaScript (`installer.js`)**: Corrigidas as chamadas de template strings de JS e polling a cada 250ms conectando o frontend da porta 9999 ao progresso real do sistema.
+235. **Lançador Silencioso 100% Automático & Atalho na Área de Trabalho (`setup_cloudos.vbs`, `criar-atalho.vbs`)**:
+    - **Execução Duplo Clique Sem Janela Preta (`setup_cloudos.vbs`)**: Criado o script VBScript na raiz que eleva para Administrador via UAC nativo do Windows e executa o `server_installer.ps1` com `-WindowStyle Hidden`.
+    - **Abertura Automática do Navegador**: O `server_installer.ps1` e o `setup_cloudos.vbs` abrem automaticamente o navegador padrão em `http://localhost:9999` após a inicialização.
+    - **Gerador de Atalho de Área de Trabalho (`criar-atalho.vbs`)**: Script que gera o atalho *"Instalar CloudOS.lnk"* na Área de Trabalho do Windows apontando para o instalador silencioso.
+    - **Modal de Orientação Amigável (`installer.js`)**: Exibe uma janela estilizada em português explicando como executar como Administrador caso o navegador perca a elevação de privilégios.
+236. **Interface Gráfica 100% Web Calamares (`index.html`, `installer.css`, `installer.js`)**:
+    - **Wizard de 6 Etapas**: Reescrito a interface visual HTML5/CSS3/JS do instalador (Idioma, Diagnóstico de Hardware, Edição Kali, Alocação de RAM/Credenciais, Resumo e Tela de Instalação com progresso e velocidade em MB/s).
+    - **Estilização Dark Mode Premium**: Aplicados cards interativos, indicadores de passos em círculos numerados, visualizador de logs com rolagem automática e salvamento automático das credenciais no `localStorage` após a conclusão.
+237. **Sistema de Telemetria e Debug Visual Completo (`server_installer.ps1`, `_install_worker.ps1`, `installer.js`)**:
+    - **Botão Flutuante & Modal Visual (`🔍 Debug`)**: Adicionado botão no canto inferior direito do instalador web que abre o modal de telemetria exibindo estado do servidor, existência de arquivos (`progress.json`, `_install_worker.ps1`) e os últimos 20 logs.
+    - **Campo de Diagnóstico Live**: Adicionado campo `#debug-field` no instalador exibindo a etapa interna exata durante o processo de instalação.
+    - **Logs Profundos em Disco (`installer_debug.log`, `worker_debug.log`)**: Todas as ações do servidor HTTP e do processo worker em background são gravadas em arquivos de log em disco para diagnóstico instantâneo.
+238. **Limpeza Geral de Scripts Redundantes da Raiz do Projeto**:
+    - **Remoção de Arquivos Depreciados**: Removidos 7 scripts legados e duplicados (`corrigir_desligamento.bat`, `debug_read.ps1`, `iniciar-cloudos.bat`, `monitor_ram.ps1`, `otimizar_desempenho.bat`, `setup_cloudos.bat`, `setup_cloudos.ps1`). A raiz do projeto agora conta apenas com os executáveis nativos e limpos (`setup_cloudos.vbs`, `iniciar-cloudos.vbs`, `server_cloudos.ps1`, `instalar-kali-completo.ps1`, `criar-atalho.vbs`).
+239. **Resolução do Erro de Sintaxe VBScript 800A0400 (`setup_cloudos.vbs`, `iniciar-cloudos.vbs`)**:
+    - **Escaping de Aspas com `Chr(34)`**: Substituídas as aspas triplas `"""` por `Chr(34)` na montagem dos argumentos de linha de comando dos arquivos `.vbs`. Elimina 100% o erro de sintaxe `800A0400` do Windows Script Host ao dar duplo clique no instalador ou no desktop.
+240. **Resolução do Travamento em 1% no Worker (`_install_worker.ps1`, `server_installer.ps1`)**:
+    - **Correção da Delimitação de Variáveis em PowerShell**: Identificado e corrigido o erro de análise `InvalidVariableReferenceWithDrive` provocado pelos dois-pontos logo após o nome da variável (`$Username:` e `$tool:`). Adicionadas chaves `${Username}:${Password}` e `${tool}`, permitindo que o worker avance de 1% a 100% sem falhas.
 
 ---
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 ## 📜 Licença

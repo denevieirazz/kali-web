@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CloudOS - Instalador</title>
+    <link rel="stylesheet" href="installer.css">
+</head>
+<body>
+    <div class="installer-container">
+        <!-- Header -->
+        <header class="installer-header">
+            <div class="logo">
+                <span class="logo-icon">🛡️</span>
+                <h1>CloudOS</h1>
+            </div>
+            <p class="subtitle">Sistema Operacional Web com Kali Linux</p>
+        </header>
+
+        <!-- Progress Bar Global -->
+        <div class="global-progress">
+            <div class="step-indicators">
+                <div class="step-dot active" data-step="1">1</div>
+                <div class="step-line"></div>
+                <div class="step-dot" data-step="2">2</div>
+                <div class="step-line"></div>
+                <div class="step-dot" data-step="3">3</div>
+                <div class="step-line"></div>
+                <div class="step-dot" data-step="4">4</div>
+                <div class="step-line"></div>
+                <div class="step-dot" data-step="5">5</div>
+                <div class="step-line"></div>
+                <div class="step-dot" data-step="6">6</div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <main class="installer-main">
+            <!-- STEP 1: Language -->
+            <section class="step active" id="step-1">
+                <h2>🌍 Escolha seu idioma</h2>
+                <p class="step-desc">Selecione o idioma da interface do CloudOS</p>
+                
+                <div class="language-grid">
+                    <div class="language-card selected" data-lang="pt-BR">
+                        <span class="flag">🇧🇷</span>
+                        <span class="lang-name">Português</span>
+                    </div>
+                    <div class="language-card" data-lang="en-US">
+                        <span class="flag">🇺🇸</span>
+                        <span class="lang-name">English</span>
+                    </div>
+                    <div class="language-card" data-lang="es-ES">
+                        <span class="flag">🇪🇸</span>
+                        <span class="lang-name">Español</span>
+                    </div>
+                </div>
+
+                <div class="timezone-section">
+                    <label>Fuso Horário:</label>
+                    <select id="timezone-select">
+                        <option value="America/Sao_Paulo">América/São Paulo (GMT-3)</option>
+                        <option value="America/New_York">América/Nova York (GMT-5)</option>
+                        <option value="Europe/London">Europa/Londres (GMT+0)</option>
+                        <option value="Asia/Tokyo">Ásia/Tóquio (GMT+9)</option>
+                    </select>
+                </div>
+            </section>
+
+            <!-- STEP 2: Diagnostics -->
+            <section class="step" id="step-2">
+                <h2>🖥️ Diagnóstico do Sistema</h2>
+                <p class="step-desc">Verificando se seu computador atende aos requisitos</p>
+                
+                <div class="diag-grid">
+                    <div class="diag-card" id="diag-ram">
+                        <div class="diag-icon">💾</div>
+                        <div class="diag-label">Memória RAM</div>
+                        <div class="diag-value">Verificando...</div>
+                    </div>
+                    <div class="diag-card" id="diag-cpu">
+                        <div class="diag-icon">⚡</div>
+                        <div class="diag-label">Processador</div>
+                        <div class="diag-value">Verificando...</div>
+                    </div>
+                    <div class="diag-card" id="diag-disk">
+                        <div class="diag-icon">💿</div>
+                        <div class="diag-label">Disco Livre</div>
+                        <div class="diag-value">Verificando...</div>
+                    </div>
+                    <div class="diag-card" id="diag-wsl">
+                        <div class="diag-icon">🐧</div>
+                        <div class="diag-label">WSL2</div>
+                        <div class="diag-value">Verificando...</div>
+                    </div>
+                </div>
+
+                <div class="diag-warning" id="wsl-warning" style="display:none;">
+                    <span class="warning-icon">⚠️</span>
+                    <span>WSL2 não está ativado. Será ativado automaticamente durante a instalação.</span>
+                </div>
+
+                <button class="btn-action" id="enable-wsl-btn" style="display:none;">
+                    🔧 Ativar WSL2 Agora
+                </button>
+            </section>
+
+            <!-- STEP 3: Kali Edition -->
+            <section class="step" id="step-3">
+                <h2>🛡️ Edição do Kali Linux</h2>
+                <p class="step-desc">Escolha quais ferramentas instalar</p>
+                
+                <div class="edition-grid">
+                    <div class="edition-card" data-edition="minimal">
+                        <div class="edition-icon">📦</div>
+                        <h3>Minimal</h3>
+                        <p class="edition-size">~2 GB</p>
+                        <p class="edition-desc">Apenas ferramentas essenciais (Nmap, SQLMap, Hydra)</p>
+                        <ul class="edition-tools">
+                            <li>✅ Nmap, Nikto, SQLMap</li>
+                            <li>✅ Hydra, John, Hashcat</li>
+                            <li>✅ Tor, Macchanger</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="edition-card selected" data-edition="standard">
+                        <div class="edition-badge">RECOMENDADO</div>
+                        <div class="edition-icon">🎯</div>
+                        <h3>Standard</h3>
+                        <p class="edition-size">~15 GB</p>
+                        <p class="edition-desc">Ideal para pentest profissional</p>
+                        <ul class="edition-tools">
+                            <li>✅ Tudo do Minimal</li>
+                            <li>✅ Gobuster, Dirb, Wfuzz</li>
+                            <li>✅ Python3, Git, Curl</li>
+                            <li>✅ Privoxy, Netcat</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="edition-card" data-edition="everything">
+                        <div class="edition-icon">🚀</div>
+                        <h3>Everything</h3>
+                        <p class="edition-size">~64 GB</p>
+                        <p class="edition-desc">Arsenal completo do Kali Linux</p>
+                        <ul class="edition-tools">
+                            <li>✅ TODAS as 600+ ferramentas</li>
+                            <li>✅ Metasploit, Burp Suite</li>
+                            <li>✅ Wireshark, Aircrack</li>
+                            <li>⏱️ Instalação: 30-60 min</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- STEP 4: Resources & Credentials -->
+            <section class="step" id="step-4">
+                <h2>⚙️ Recursos e Conta de Usuário</h2>
+                <p class="step-desc">Configure a memória e crie sua conta</p>
+                
+                <div class="resources-section">
+                    <h3>💾 Alocação de RAM</h3>
+                    <div class="slider-container">
+                        <input type="range" id="ram-slider" min="2" max="8" value="3" step="1">
+                        <div class="slider-labels">
+                            <span>2 GB</span>
+                            <span id="ram-value" class="ram-current">3 GB</span>
+                            <span>8 GB</span>
+                        </div>
+                    </div>
+                    <p class="hint">Recomendado: 3-4 GB para uso geral</p>
+                </div>
+
+                <div class="credentials-section">
+                    <h3>👤 Criar Conta de Usuário</h3>
+                    <div class="form-group">
+                        <label for="username-input">Nome de usuário:</label>
+                        <input type="text" id="username-input" value="cloudos" placeholder="cloudos">
+                    </div>
+                    <div class="form-group">
+                        <label for="password-input">Senha:</label>
+                        <input type="password" id="password-input" value="cloudos123" placeholder="••••••••">
+                    </div>
+                    <div class="form-group">
+                        <label for="confirm-password-input">Confirmar senha:</label>
+                        <input type="password" id="confirm-password-input" value="cloudos123" placeholder="••••••••">
+                    </div>
+                    <div class="form-check">
+                        <input type="checkbox" id="auto-login" checked>
+                        <label for="auto-login">Entrar automaticamente ao iniciar</label>
+                    </div>
+                </div>
+            </section>
+
+            <!-- STEP 5: Summary -->
+            <section class="step" id="step-5">
+                <h2>✅ Resumo da Instalação</h2>
+                <p class="step-desc">Confirme as configurações antes de instalar</p>
+                
+                <div class="summary-card">
+                    <div class="summary-row">
+                        <span class="summary-label">🌍 Idioma:</span>
+                        <span class="summary-value" id="sum-lang">Português (Brasil)</span>
+                    </div>
+                    <div class="summary-row">
+                        <span class="summary-label">🕐 Fuso Horário:</span>
+                        <span class="summary-value" id="sum-tz">America/Sao_Paulo</span>
+                    </div>
+                    <div class="summary-row">
+                        <span class="summary-label">🛡️ Edição Kali:</span>
+                        <span class="summary-value" id="sum-edition">Standard (~15 GB)</span>
+                    </div>
+                    <div class="summary-row">
+                        <span class="summary-label">💾 RAM Alocada:</span>
+                        <span class="summary-value" id="sum-ram">3 GB</span>
+                    </div>
+                    <div class="summary-row">
+                        <span class="summary-label">👤 Usuário:</span>
+                        <span class="summary-value" id="sum-user">cloudos</span>
+                    </div>
+                </div>
+
+                <div class="summary-warning">
+                    <span class="warning-icon">⚠️</span>
+                    <span>A instalação pode levar alguns minutos. Não desligue o computador.</span>
+                </div>
+            </section>
+
+            <!-- STEP 6: Installing -->
+            <section class="step" id="step-6">
+                <h2>🚀 Instalando CloudOS</h2>
+                <p class="step-desc">Aguarde enquanto configuramos seu sistema</p>
+                
+                <div class="install-progress">
+                    <div class="progress-bar-container">
+                        <div class="progress-bar" id="progress-bar"></div>
+                    </div>
+                    <div class="progress-text" id="progress-text">0% - Preparando...</div>
+                    <div class="progress-speed" id="progress-speed">0 MB/s</div>
+                </div>
+
+                <div class="install-log">
+                    <div class="log-header">📋 Log de Instalação</div>
+                    <pre class="log-content" id="progress-log"></pre>
+                </div>
+
+                <div class="install-complete" id="install-complete" style="display:none;">
+                    <div class="complete-icon">✅</div>
+                    <h3>Instalação Concluída!</h3>
+                    <p>Redirecionando para o CloudOS...</p>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer Navigation -->
+        <footer class="installer-footer">
+            <button class="btn btn-secondary" id="prev-btn" style="display:none;">
+                ← Voltar
+            </button>
+            <div class="footer-spacer"></div>
+            <button class="btn btn-primary" id="next-btn">
+                Próximo →
+            </button>
+            <button class="btn btn-install" id="install-btn" style="display:none;">
+                🚀 Instalar CloudOS
+            </button>
+        </footer>
+    </div>
+
+    <script src="installer.js"></script>
+</body>
+</html>

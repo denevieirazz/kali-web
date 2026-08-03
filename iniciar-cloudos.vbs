@@ -1,15 +1,42 @@
 Set WshShell = CreateObject("WScript.Shell")
+Set fso = CreateObject("Scripting.FileSystemObject")
+scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)
 
-' Executa o backend em background
-WshShell.Run "cmd /c cd /d ""c:\Users\dougl\Music\projeto\cloudos-backend"" && ""C:\Program Files\nodejs\node.exe"" server.js", 0, False
+serverScript = scriptDir & "\server_cloudos.ps1"
+portFile = scriptDir & "\cloudos_active_port.txt"
 
-' Executa o frontend em background
-WshShell.Run "cmd /c cd /d ""c:\Users\dougl\Music\projeto\cloudos-frontend"" && ""C:\Program Files\nodejs\npm.cmd"" run dev", 0, False
+' Limpar arquivo de porta anterior se existir
+If fso.FileExists(portFile) Then
+    On Error Resume Next
+    fso.DeleteFile portFile, True
+    On Error GoTo 0
+End If
 
-' Aguarda 5 segundos para garantir a inicializacao
-WScript.Sleep 5000
+' Inicia o servidor Web Desktop do CloudOS em segundo plano OCULTO (windowStyle = 0)
+cmd = "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File " & Chr(34) & serverScript & Chr(34)
+WshShell.Run cmd, 0, False
 
-' Abre o navegador no endereco do CloudOS
-WshShell.Run "http://localhost:5173"
+' Aguardar ate o servidor criar o arquivo cloudos_active_port.txt (max 8 segundos)
+Dim port
+port = "5173"
+Dim waitCount
+waitCount = 0
+Do While waitCount < 16
+    WScript.Sleep 500
+    waitCount = waitCount + 1
+    If fso.FileExists(portFile) Then
+        On Error Resume Next
+        Dim f
+        Set f = fso.OpenTextFile(portFile, 1)
+        If Not f.AtEndOfStream Then
+            port = Trim(f.ReadLine())
+        End If
+        f.Close
+        On Error GoTo 0
+        If port <> "" Then Exit Do
+    End If
+Loop
 
-
+' Abre a interface do CloudOS no navegador padrao via Shell.Application (evita erro 80070002)
+Set objShell = CreateObject("Shell.Application")
+objShell.Open "http://localhost:" & port

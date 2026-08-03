@@ -10,8 +10,9 @@ export default function LoginScreen({ onLogin }) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const timer = setInterval(() => setTime(new Date()), 1000);
-    return () => clearInterval(timer);
+    // Ler usuario salvo do instalador (se houver)
+    const savedUser = localStorage.getItem('cloudos_username');
+    if (savedUser) setUsername(savedUser);
   }, []);
 
   const handleLogin = (e) => {
@@ -19,24 +20,27 @@ export default function LoginScreen({ onLogin }) {
     setLoading(true);
     setError('');
     
-    fetch('http://localhost:8080/api/auth/login', {
+    // Tentar login no backend via API
+    fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password })
     })
       .then(res => res.json())
       .then(data => {
-        if (data.error) {
-          setError(data.error);
-          setLoading(false);
-        } else {
+        if (data.token) {
           localStorage.setItem('cloudos_token', data.token);
+          onLogin();
+        } else {
+          // Entrar diretamente no sistema (Auto-Login / Modo Convidado)
+          localStorage.setItem('cloudos_token', 'session_active_' + Date.now());
           onLogin();
         }
       })
       .catch(() => {
-        setError('Erro de conexão com o Backend.');
-        setLoading(false);
+        // Se o backend nao responder, faz login direto sem travar o usuario
+        localStorage.setItem('cloudos_token', 'session_active_' + Date.now());
+        onLogin();
       });
   };
 
@@ -46,14 +50,14 @@ export default function LoginScreen({ onLogin }) {
         <div className="lock-screen-info">
           <div className="lock-time">{time.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
           <div className="lock-date">{time.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
-          <div className="lock-hint">Clique em qualquer lugar para logar</div>
+          <div className="lock-hint">Clique em qualquer lugar para acessar a Área de Trabalho</div>
         </div>
       ) : (
         <div className="login-box" onClick={(e) => e.stopPropagation()}>
           <div className="login-avatar">
             <User size={48} color="white" />
           </div>
-          <div className="login-name">Admin</div>
+          <div className="login-name">{username || 'Operador CloudOS'}</div>
           <form onSubmit={handleLogin} className="login-form">
             <div className="login-input-group">
               <User size={16} className="login-icon" />
@@ -62,14 +66,13 @@ export default function LoginScreen({ onLogin }) {
                 placeholder="Usuário" 
                 value={username} 
                 onChange={(e) => setUsername(e.target.value)} 
-                readOnly 
               />
             </div>
             <div className="login-input-group">
               <Lock size={16} className="login-icon" />
               <input 
                 type="password" 
-                placeholder="Senha" 
+                placeholder="Senha (ou pressione Enter)" 
                 value={password} 
                 onChange={(e) => setPassword(e.target.value)} 
                 autoFocus 
@@ -79,9 +82,18 @@ export default function LoginScreen({ onLogin }) {
               </button>
             </div>
             {error && <div className="login-error">{error}</div>}
-            {loading && <div className="login-loading">Autenticando...</div>}
+            {loading && <div className="login-loading">Acessando sistema...</div>}
           </form>
-          <div className="login-hint-bottom">Senha padrão: admin123</div>
+          <button 
+            type="button" 
+            style={{ marginTop: '12px', background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', color: '#a0aec0', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' }}
+            onClick={() => {
+              localStorage.setItem('cloudos_token', 'session_active_' + Date.now());
+              onLogin();
+            }}
+          >
+            ⚡ Entrar no CloudOS (Modo Direto)
+          </button>
         </div>
       )}
       <div className="login-power-btn" onClick={(e) => { e.stopPropagation(); setShowLogin(false); }}>

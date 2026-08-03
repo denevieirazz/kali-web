@@ -76,6 +76,17 @@ function Desktop() {
     setStartOpen(false);
   };
 
+  // Expor openApp globalmente para o script Abre-Tudo do console
+  useEffect(() => {
+    window.openApp = openApp;
+    window.__CLOUDOS_OPEN_APP__ = openApp;
+    const handler = (e) => {
+      if (e.detail && e.detail.appId) openApp(e.detail.appId);
+    };
+    window.addEventListener('cloudos:open-app', handler);
+    return () => window.removeEventListener('cloudos:open-app', handler);
+  }, [openApp]);
+
   const closeApp = (id) => {
     setWindows(prev => prev.filter(w => w.id !== id));
     if (activeWindowId === id) setActiveWindowId(null);
