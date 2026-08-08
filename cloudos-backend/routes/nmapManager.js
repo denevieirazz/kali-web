@@ -1,57 +1,85 @@
 const express = require('express');
 const router = express.Router();
-const { exec } = require('child_process');
-const { promisify } = require('util');
+const { spawn } = require('child_process');
 const { authenticateToken } = require('../middleware/auth');
-
-const execAsync = promisify(exec);
+const { getProjectExecutionContext } = require('../services/scannerSecurity');
 
 router.use(authenticateToken);
 
 /**
  * POST /api/nmap/scan
- * Monta o comando Nmap dinamicamente baseado nas opções visuais
+ * Monta o comando Nmap dinamicamente baseado nas opções visuais e validação de escopo
  */
 router.post('/scan', async (req, res) => {
-  const { target, options = {} } = req.body;
+  const { target, options = {}, projectId } = req.body;
 
   if (!target) return res.status(400).json({ error: 'Alvo (IP/URL) é obrigatório' });
+  if (!projectId) return res.status(403).json({ error: 'Varredura Nmap exige um Projeto Ativo (projectId).' });
 
-  let cmdParts = ['nmap'];
+  // Validação centralizada de escopo e contexto do projeto
+  const contextCheck = await getProjectExecutionContext(req.user.id, projectId, target);
+  if (!contextCheck.allowed) {
+    return res.status(403).json({ error: contextCheck.reason });
+  }
+
+  const nmapArgs = [];
 
   // 1. Tipo de Varredura
-  if (options.scanType === 'ping') cmdParts.push('-sn');
-  else if (options.scanType === 'syn') cmdParts.push('-sS');
-  else if (options.scanType === 'connect') cmdParts.push('-sT');
-  else if (options.scanType === 'udp') cmdParts.push('-sU');
-  else if (options.scanType === 'ack') cmdParts.push('-sA');
+  if (options.scanType === 'ping') nmapArgs.push('-sn');
+  else if (options.scanType === 'syn') nmapArgs.push('-sS');
+  else if (options.scanType === 'connect') nmapArgs.push('-sT');
+  else if (options.scanType === 'udp') nmapArgs.push('-sU');
+  else if (options.scanType === 'ack') nmapArgs.push('-sA');
 
   // 2. Detecções
-  if (options.versionDetection) cmdParts.push('-sV');
-  if (options.osDetection) cmdParts.push('-O');
-  if (options.nseScripts) cmdParts.push('-sC');
-  if (options.aggressive) cmdParts.push('-A');
+  if (options.versionDetection) nmapArgs.push('-sV');
+  if (options.osDetection) nmapArgs.push('-O');
+  if (options.nseScripts) nmapArgs.push('-sC');
+  if (options.aggressive) nmapArgs.push('-A');
 
   // 3. Configurações de Rede
-  if (options.skipPing) cmdParts.push('-Pn');
+  if (options.skipPing) nmapArgs.push('-Pn');
   if (options.portRange && options.portRange.trim() !== '') {
-    cmdParts.push(`-p ${options.portRange.trim()}`);
+    const safePort = options.portRange.trim().replace(/[^0-9,-]/g, '');
+    if (safePort) {
+      nmapArgs.push('-p', safePort);
+    }
   }
 
   // 4. Timing Template (0 a 5)
   if (options.timing !== undefined && options.timing >= 0 && options.timing <= 5) {
-    cmdParts.push(`-T${options.timing}`);
+    nmapArgs.push(`-T${parseInt(options.timing, 10)}`);
   }
 
-  // 5. Adiciona o alvo (proteção básica contra injeção de comando)
-  const safeTarget = target.replace(/[;|&`$()]/g, '');
-  cmdParts.push(safeTarget);
+  // 5. Adiciona o alvo limpo
+  const safeTarget = target.replace(/[^a-zA-Z0-9.-]/g, '').trim();
+  if (!safeTarget) return res.status(400).json({ error: 'Alvo com formato inválido.' });
+  nmapArgs.push(safeTarget);
 
-  const command = cmdParts.join(' ');
-  
   try {
-    const wslCmd = `wsl -d kali-linux -u cloudos -- bash -c "${command} -oG - 2>/dev/null"`;
-    const { stdout } = await execAsync(wslCmd, { timeout: 300000, maxBuffer: 10 * 1024 * 1024 });
+    const args = ['-d', 'kali-linux', '-u', 'cloudos', '--', 'nmap', ...nmapArgs];
+    
+    const stdout = await new Promise((resolve, reject) => {
+      const p = spawn('wsl.exe', args);
+      let out = '';
+      let err = '';
+      const timer = setTimeout(() => {
+        try { p.kill('SIGKILL'); } catch {}
+        reject(new Error('Timeout na varredura Nmap (180s).'));
+      }, 180000);
+
+      p.stdout.on('data', (d) => { out += d.toString(); });
+      p.stderr.on('data', (d) => { err += d.toString(); });
+
+      p.on('close', () => {
+        clearTimeout(timer);
+        resolve(out + (err ? '\n' + err : ''));
+      });
+      p.on('error', (e) => {
+        clearTimeout(timer);
+        reject(e);
+      });
+    });
 
     const hosts = [];
     const lines = stdout.split('\n');

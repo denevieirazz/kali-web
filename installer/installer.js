@@ -106,16 +106,21 @@ async function loadDiagnostics() {
         const elDisk = document.querySelector('#diag-disk .diag-value');
         const elWsl = document.querySelector('#diag-wsl .diag-value');
         
-        if (elRam) elRam.textContent = `${data.ramTotalGB} GB`;
-        if (elCpu) elCpu.textContent = `${data.cpuCores} núcleos`;
-        if (elDisk) elDisk.textContent = `${data.diskFreeGB} GB livres`;
+        const ramVal = data.hardware ? data.hardware.totalMemGB : data.ramTotalGB;
+        const cpuVal = data.hardware ? data.hardware.cpuCount : data.cpuCores;
+        const diskVal = data.hardware ? data.hardware.diskFreeGB : data.diskFreeGB;
+        const wslVal = data.wsl ? data.wsl.installed : data.wslEnabled;
+
+        if (elRam) elRam.textContent = `${ramVal || 0} GB`;
+        if (elCpu) elCpu.textContent = `${cpuVal || 0} núcleos`;
+        if (elDisk) elDisk.textContent = `${diskVal || 0} GB livres`;
         
         if (elWsl) {
-            if (data.wslEnabled) {
-                elWsl.textContent = '✅ Ativado';
+            if (wslVal) {
+                elWsl.textContent = '✅ Ativado / Presente';
                 elWsl.style.color = '#3fb950';
             } else {
-                elWsl.textContent = '❌ Não ativado';
+                elWsl.textContent = '❌ Não instalado';
                 elWsl.style.color = '#f85149';
                 const wslWarn = document.getElementById('wsl-warning');
                 const enableBtn = document.getElementById('enable-wsl-btn');
@@ -136,10 +141,11 @@ if (enableWslBtn) {
         
         try {
             await fetch(`${API_BASE}/api/enable-wsl`, { method: 'POST' });
-            enableWslBtn.textContent = '✅ WSL2 Ativado!';
+            enableWslBtn.textContent = '✅ WSL Solicitado!';
             enableWslBtn.style.background = '#3fb950';
             const wslWarn = document.getElementById('wsl-warning');
             if (wslWarn) wslWarn.style.display = 'none';
+            setTimeout(loadDiagnostics, 2000);
         } catch (err) {
             enableWslBtn.textContent = '❌ Erro ao ativar';
             enableWslBtn.style.background = '#f85149';
@@ -288,8 +294,8 @@ function startPolling() {
             const data = await res.json();
             
             if (progressBar) {
-                progressBar.style.width = `${data.percent}%`;
-                progressBar.textContent = `${data.percent}%`;
+                progressBar.style.width = `${Math.max(0, data.percent)}%`;
+                progressBar.textContent = `${Math.max(0, data.percent)}%`;
             }
             if (progressText) progressText.textContent = `${data.percent}% - ${data.status}`;
             if (progressSpeed) progressSpeed.textContent = data.speed || '0 MB/s';
@@ -304,6 +310,35 @@ function startPolling() {
                 progressLog.textContent += `[${timestamp}] ${data.log}\n`;
                 progressLog.scrollTop = progressLog.scrollHeight;
             }
+
+            // Tratamento explícito de REBOOT_REQUIRED
+            if (data.status && data.status.includes('Reboot') || data.rebootRequired) {
+                clearInterval(pollInterval);
+                const rebootBox = document.createElement('div');
+                rebootBox.style.cssText = `
+                    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+                    background: rgba(22, 27, 34, 0.98); border: 2px solid #e3b341; padding: 25px;
+                    border-radius: 12px; text-align: center; color: #c9d1d9; z-index: 10000;
+                    box-shadow: 0 10px 40px rgba(0,0,0,0.8); max-width: 450px;
+                `;
+                rebootBox.innerHTML = `
+                    <h3 style="color: #e3b341; margin-bottom: 10px;">⚠️ Reinicialização Necessária</h3>
+                    <p style="font-size: 13px; line-height: 1.5; margin-bottom: 15px;">
+                        O Windows habilitou o Subsistema Linux. Para carregar os drivers do Hyper-V, 
+                        <strong>reinicie seu computador</strong> e abra o instalador novamente para concluir o Kali Linux.
+                    </p>
+                    <button onclick="this.parentElement.remove()" style="
+                        padding: 8px 20px; background: #e3b341; color: #000; font-weight: bold;
+                        border: none; border-radius: 6px; cursor: pointer;
+                    ">Entendi</button>
+                `;
+                document.body.appendChild(rebootBox);
+                if (installBtn) {
+                    installBtn.disabled = false;
+                    installBtn.textContent = '🔄 Continuar após Reiniciar';
+                }
+                return;
+            }
             
             if (data.percent >= 100) {
                 clearInterval(pollInterval);
@@ -311,16 +346,15 @@ function startPolling() {
                 if (completeBox) completeBox.style.display = 'block';
                 
                 localStorage.setItem('cloudos_username', installData.username);
-                localStorage.setItem('cloudos_password', installData.password);
                 
                 setTimeout(() => {
                     window.location.href = 'http://localhost:5173';
                 }, 3000);
             }
             
-            if (data.percent < 0) {
+            if (data.percent < 0 || (data.status && data.status.toLowerCase().includes('erro'))) {
                 clearInterval(pollInterval);
-                alert('Erro na instalação. Verifique os logs.');
+                alert('Aviso na instalação: ' + (data.log || 'Verifique o log de instalação.'));
                 if (installBtn) {
                     installBtn.disabled = false;
                     installBtn.textContent = '🔄 Tentar Novamente';
@@ -329,7 +363,7 @@ function startPolling() {
         } catch (err) {
             console.error('Erro ao ler progresso:', err);
         }
-    }, 250);
+    }, 500);
 }
 
 // =====================================================================

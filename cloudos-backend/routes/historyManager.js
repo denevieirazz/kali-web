@@ -10,6 +10,7 @@ db.rawDb.serialize(() => {
   db.rawDb.run(`
     CREATE TABLE IF NOT EXISTS scan_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT,
       tool TEXT NOT NULL,
       target TEXT NOT NULL,
       status TEXT NOT NULL,
@@ -17,6 +18,7 @@ db.rawDb.serialize(() => {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+  db.rawDb.run(`CREATE INDEX IF NOT EXISTS idx_scan_history_user ON scan_history(user_id)`);
 });
 
 // POST /api/history - Salvar novo scan
@@ -30,8 +32,8 @@ router.post('/', (req, res) => {
   const result_json = JSON.stringify(result);
   
   db.rawDb.run(
-    'INSERT INTO scan_history (tool, target, status, result_json) VALUES (?, ?, ?, ?)',
-    [tool, target, status || 'success', result_json],
+    'INSERT INTO scan_history (user_id, tool, target, status, result_json) VALUES (?, ?, ?, ?, ?)',
+    [req.user.id, tool, target, status || 'success', result_json],
     function(err) {
       if (err) {
         console.error('[HistoryManager] Erro ao salvar:', err.message);
@@ -45,11 +47,11 @@ router.post('/', (req, res) => {
 // GET /api/history - Listar histórico (com filtro opcional por ferramenta)
 router.get('/', (req, res) => {
   const { tool } = req.query;
-  let query = 'SELECT id, tool, target, status, created_at FROM scan_history';
-  let params = [];
+  let query = 'SELECT id, tool, target, status, created_at FROM scan_history WHERE user_id = ?';
+  let params = [req.user.id];
   
   if (tool) {
-    query += ' WHERE tool = ?';
+    query += ' AND tool = ?';
     params.push(tool);
   }
   
@@ -68,7 +70,7 @@ router.get('/', (req, res) => {
 router.get('/:id', (req, res) => {
   const { id } = req.params;
   
-  db.rawDb.get('SELECT * FROM scan_history WHERE id = ?', [id], (err, row) => {
+  db.rawDb.get('SELECT * FROM scan_history WHERE id = ? AND user_id = ?', [id, req.user.id], (err, row) => {
     if (err) {
       console.error('[HistoryManager] Erro ao buscar detalhe:', err.message);
       return res.status(500).json({ error: 'Falha ao buscar detalhe' });
@@ -91,7 +93,7 @@ router.get('/:id', (req, res) => {
 router.delete('/:id', (req, res) => {
   const { id } = req.params;
   
-  db.rawDb.run('DELETE FROM scan_history WHERE id = ?', [id], function(err) {
+  db.rawDb.run('DELETE FROM scan_history WHERE id = ? AND user_id = ?', [id, req.user.id], function(err) {
     if (err) {
       console.error('[HistoryManager] Erro ao deletar:', err.message);
       return res.status(500).json({ error: 'Falha ao deletar' });

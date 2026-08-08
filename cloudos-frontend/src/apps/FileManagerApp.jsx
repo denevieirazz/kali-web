@@ -27,7 +27,7 @@ export const FileManagerApp = ({ openApp }) => {
 
   const handleUpload = (e) => {
     const files = e.target.files;
-    if (!files.length) return;
+    if (!files || !files.length) return;
     
     const formData = new FormData();
     for (let file of files) formData.append('files', file);

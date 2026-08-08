@@ -60,7 +60,7 @@ export const OpSecCenterApp = () => {
 
       <div className="p-4 rounded-lg border border-gray-700 bg-gray-800">
         <div className="flex items-center gap-2 mb-2"><AlertTriangle className="text-yellow-400" /><span className="font-bold">Recent Errors</span></div>
-        {status.recentErrors.length === 0 ? <div className="text-sm text-gray-500">Nenhum erro recente. Sistema saudável!</div> : 
+        {(!status?.recentErrors || status.recentErrors.length === 0) ? <div className="text-sm text-gray-500">Nenhum erro recente. Sistema saudável!</div> : 
           status.recentErrors.map((err, i) => (
             <div key={i} className="text-xs bg-red-900/20 border border-red-800/40 p-2 rounded mt-2 text-red-300">
               {new Date(err.time).toLocaleTimeString()}: {err.msg}

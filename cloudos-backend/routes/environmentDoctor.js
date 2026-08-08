@@ -2,13 +2,14 @@ const express = require('express');
 const router = express.Router();
 const { exec } = require('child_process');
 const { promisify } = require('util');
+const crypto = require('crypto');
 
 const execAsync = promisify(exec);
 const { authenticateToken } = require('../middleware/auth');
 
 router.use(authenticateToken);
 
-// Catálogo de ferramentas táticas essenciais
+// Catálogo de ferramentas táticas essenciais autorizadas
 const TACTICAL_TOOLS = [
   { name: 'nmap',          package: 'nmap',                  category: 'Reconhecimento', description: 'Scanner de rede e portas' },
   { name: 'masscan',       package: 'masscan',               category: 'Reconhecimento', description: 'Scanner de portas ultra-rápido' },
@@ -36,12 +37,59 @@ const TACTICAL_TOOLS = [
   { name: 'ssh',           package: 'openssh-client',        category: 'Rede',           description: 'Cliente SSH' },
 ];
 
+let isInstalling = false;
+
+async function logAudit(db, userId, op, tool, result, err = null) {
+  try {
+    const id = 'ev_' + crypto.randomBytes(4).toString('hex');
+    const details = JSON.stringify({ operation: op, tool, result, error: err ? String(err) : null, timestamp: new Date().toISOString() });
+    await db.prepare('INSERT INTO system_events (id, user_id, event_type, details) VALUES (?, ?, ?, ?)').run(id, userId, 'environment_audit', details);
+  } catch (e) {
+    console.error('Falha ao registrar auditoria:', e.message);
+  }
+}
+
 /**
  * GET /api/environment/check
- * Executa diagnóstico completo do ambiente WSL2 Kali Linux
  */
 router.get('/check', async (req, res) => {
+  const wslManager = require('../services/wslManager');
   try {
+    const diag = await wslManager.getSystemDiagnostics();
+
+    // Se o WSL/Kali ainda não estiverem prontos, responde o estado real sem falha opaca
+    if (diag.overallStatus !== 'READY') {
+      return res.json({
+        tools: TACTICAL_TOOLS.map(t => ({ ...t, installed: false })),
+        system: {
+          distro: diag.wsl.kaliInstalled ? 'Kali Linux (Não configurado)' : 'WSL/Kali não instalado',
+          kernel: 'N/A',
+          uptime: 'N/A'
+        },
+        disk: {
+          filesystem: 'C:',
+          size: `${diag.hardware.diskTotalGB}G`,
+          available: `${diag.hardware.diskFreeGB}G`,
+          usePercent: '0%',
+          mount: '/'
+        },
+        memory: {
+          total: Math.round(diag.hardware.totalMemGB * 1024),
+          free: Math.round(diag.hardware.freeMemGB * 1024),
+          used: Math.round((diag.hardware.totalMemGB - diag.hardware.freeMemGB) * 1024),
+          available: Math.round(diag.hardware.freeMemGB * 1024)
+        },
+        wslState: diag,
+        summary: {
+          total: TACTICAL_TOOLS.length,
+          installed: 0,
+          missing: TACTICAL_TOOLS.length,
+          healthScore: 0,
+          message: 'Ambiente WSL/Kali ainda não inicializado. Acesse o Setup Wizard do CloudOS.'
+        }
+      });
+    }
+
     const toolNames = TACTICAL_TOOLS.map(t => t.name).join(' ');
 
     const script = `echo "===TOOLS==="
@@ -130,6 +178,7 @@ echo "===END==="`;
       system,
       disk,
       memory,
+      wslState: diag,
       summary: {
         total:      tools.length,
         installed:  installedCount,
@@ -145,18 +194,23 @@ echo "===END==="`;
 
 /**
  * POST /api/environment/install/:toolName
- * Instala uma ferramenta via apt-get no WSL2
  */
 router.post('/install/:toolName', async (req, res) => {
   const { toolName } = req.params;
   const tool = TACTICAL_TOOLS.find(t => t.name === toolName);
+  const db = req.app.get('db');
 
   if (!tool) {
     return res.status(404).json({ error: 'Ferramenta não catalogada' });
   }
 
+  if (isInstalling) {
+    return res.status(429).json({ error: 'Uma instalação já está em andamento. Aguarde.' });
+  }
+
+  isInstalling = true;
   try {
-    const installCmd = `wsl -d kali-linux -u cloudos -- bash -c "sudo apt-get install -y --fix-missing ${tool.package} 2>&1"`;
+    const installCmd = `wsl -d kali-linux -u cloudos -- bash -c "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --fix-missing ${tool.package} 2>&1"`;
     const { stdout } = await execAsync(installCmd, { timeout: 180000, maxBuffer: 10 * 1024 * 1024 });
 
     const checkCmd = `wsl -d kali-linux -u cloudos -- bash -c "command -v ${tool.name}"`;
@@ -167,6 +221,8 @@ router.post('/install/:toolName', async (req, res) => {
     } catch {
       installed = false;
     }
+
+    await logAudit(db, req.user.id, 'install_single', tool.name, installed ? 'SUCCESS' : 'FAILED');
 
     res.json({
       success: installed,
@@ -179,19 +235,27 @@ router.post('/install/:toolName', async (req, res) => {
     });
   } catch (err) {
     console.error(`[EnvironmentDoctor] Erro ao instalar ${toolName}:`, err.message);
+    await logAudit(db, req.user.id, 'install_single', tool.name, 'ERROR', err.message);
     res.status(500).json({
       success: false,
       error: `Falha ao instalar ${tool.name}`,
       details: err.message
     });
+  } finally {
+    isInstalling = false;
   }
 });
 
 /**
  * POST /api/environment/install-all-missing
- * Instala todas as ferramentas faltantes de uma vez
  */
 router.post('/install-all-missing', async (req, res) => {
+  const db = req.app.get('db');
+  if (isInstalling) {
+    return res.status(429).json({ error: 'Uma instalação já está em andamento.' });
+  }
+
+  isInstalling = true;
   try {
     const toolNames = TACTICAL_TOOLS.map(t => t.name).join(' ');
 
@@ -216,8 +280,10 @@ done`;
       .filter(Boolean)
       .join(' ');
 
-    const installCmd = `wsl -d kali-linux -u cloudos -- bash -c "sudo apt-get install -y --fix-missing ${packages} 2>&1"`;
+    const installCmd = `wsl -d kali-linux -u cloudos -- bash -c "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --fix-missing ${packages} 2>&1"`;
     const { stdout } = await execAsync(installCmd, { timeout: 600000, maxBuffer: 20 * 1024 * 1024 });
+
+    await logAudit(db, req.user.id, 'install_all_missing', packages, 'SUCCESS');
 
     res.json({
       success: true,
@@ -227,18 +293,28 @@ done`;
     });
   } catch (err) {
     console.error('[EnvironmentDoctor] Erro ao instalar todas:', err.message);
+    await logAudit(db, req.user.id, 'install_all_missing', 'multiple', 'ERROR', err.message);
     res.status(500).json({ success: false, error: err.message });
+  } finally {
+    isInstalling = false;
   }
 });
 
 /**
  * POST /api/environment/update
- * Atualiza sistema (apt-get update && upgrade)
  */
 router.post('/update', async (req, res) => {
+  const db = req.app.get('db');
+  if (isInstalling) {
+    return res.status(429).json({ error: 'Outro processo de atualização ou instalação já está em andamento.' });
+  }
+
+  isInstalling = true;
   try {
-    const updateCmd = `wsl -d kali-linux -u cloudos -- bash -c "sudo apt-get update -qq && sudo apt-get upgrade -y 2>&1"`;
+    const updateCmd = `wsl -d kali-linux -u cloudos -- bash -c "sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y 2>&1"`;
     const { stdout } = await execAsync(updateCmd, { timeout: 300000, maxBuffer: 20 * 1024 * 1024 });
+
+    await logAudit(db, req.user.id, 'apt_update_upgrade', 'system', 'SUCCESS');
 
     res.json({
       success: true,
@@ -247,12 +323,16 @@ router.post('/update', async (req, res) => {
     });
   } catch (err) {
     console.error('[EnvironmentDoctor] Erro ao atualizar:', err.message);
+    await logAudit(db, req.user.id, 'apt_update_upgrade', 'system', 'ERROR', err.message);
     res.status(500).json({
       success: false,
       error: 'Falha ao atualizar sistema',
       details: err.message
     });
+  } finally {
+    isInstalling = false;
   }
 });
 
 module.exports = router;
+

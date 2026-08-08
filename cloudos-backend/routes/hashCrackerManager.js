@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { exec } = require('child_process');
 const { promisify } = require('util');
+const crypto = require('crypto');
 const { authenticateToken } = require('../middleware/auth');
 
 const execAsync = promisify(exec);
@@ -24,10 +25,15 @@ router.post('/crack', async (req, res) => {
   if (!hash) return res.status(400).json({ error: 'Hash é obrigatório' });
   
   const johnFormat = FORMAT_MAP[format] || 'raw-md5';
-  const safeHash = hash.replace(/['"\\]/g, '');
+  const safeHash = String(hash).replace(/[^a-fA-F0-9$:]/g, '');
+
+  if (!safeHash) return res.status(400).json({ error: 'Formato de hash inválido.' });
+
+  const tempFileId = 'h_' + crypto.randomUUID();
+  const tmpFilePath = `/tmp/${tempFileId}.txt`;
 
   try {
-    const cmd = `wsl -d kali-linux -u cloudos -- bash -c "echo '${safeHash}' > /tmp/cloudos_hash.txt && john --format=${johnFormat} --wordlist=/usr/share/wordlists/rockyou.txt /tmp/cloudos_hash.txt 2>&1 ; john --show /tmp/cloudos_hash.txt 2>&1"`;
+    const cmd = `wsl -d kali-linux -u cloudos -- bash -c "echo '${safeHash}' > ${tmpFilePath} && john --format=${johnFormat} --wordlist=/usr/share/wordlists/rockyou.txt ${tmpFilePath} 2>&1 ; john --show ${tmpFilePath} 2>&1 ; rm -f ${tmpFilePath}"`;
     
     const { stdout } = await execAsync(cmd, { timeout: 120000, maxBuffer: 10 * 1024 * 1024 });
 

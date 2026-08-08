@@ -1,41 +1,47 @@
-const express = require('express');
-const router = express.Router();
-const { exec } = require('child_process');
-const { promisify } = require('util');
-const { authenticateToken } = require('../middleware/auth');
-
-const execAsync = promisify(exec);
+const { getProjectExecutionContext, isToolAllowed } = require('../services/scannerSecurity');
 
 router.use(authenticateToken);
 
 /**
  * POST /api/osint/scan
- * Executa ferramentas de OSINT (whois, dnsenum, theHarvester, sherlock, shodan, holehe)
+ * Executa ferramentas de OSINT protegidas pelo Scope Guard
  */
 router.post('/scan', async (req, res) => {
-  const { target, module: osintModule } = req.body;
+  const { target, module: osintModule, projectId } = req.body;
 
   if (!target) return res.status(400).json({ error: 'Alvo é obrigatório' });
+  if (!projectId) return res.status(403).json({ error: 'Operação de OSINT exige um Projeto Ativo (projectId).' });
 
-  // Limpeza básica para prevenir injeções de comando
-  const safeTarget = target.replace(/[;|&`$()]/g, '').trim();
+  // Validação centralizada de Contexto e Scope Guard
+  const contextCheck = await getProjectExecutionContext(req.user.id, projectId, target);
+  if (!contextCheck.allowed) {
+    return res.status(403).json({ error: contextCheck.reason });
+  }
 
-  let command = '';
-  let targetType = 'domain'; // domain, username, ip, email
+  // Limpeza estrita contra injeções
+  const safeTarget = target.replace(/[^a-zA-Z0-9.@_-]/g, '').trim();
+  if (!safeTarget) return res.status(400).json({ error: 'Alvo com formato inválido.' });
+
+  let toolName = 'whois';
+  let toolArgs = [];
 
   switch (osintModule) {
     case 'whois':
-      targetType = 'domain';
-      command = `whois ${safeTarget}`;
+      toolName = 'whois';
+      toolArgs = [safeTarget];
       break;
     case 'theharvester':
-      targetType = 'domain';
-      command = `theHarvester -d ${safeTarget} -b baidu,bing,duckduckgo -l 100`;
+      toolName = 'theHarvester';
+      toolArgs = ['-d', safeTarget, '-b', 'baidu,bing,duckduckgo', '-l', '100'];
       break;
     case 'dnsenum':
-      targetType = 'domain';
-      command = `dnsenum --enum ${safeTarget} --noreverse`;
+      toolName = 'dnsenum';
+      toolArgs = ['--enum', safeTarget, '--noreverse'];
       break;
+    default:
+      toolName = 'whois';
+      toolArgs = [safeTarget];
+  }
     case 'sherlock':
       targetType = 'username';
       command = `sherlock ${safeTarget} --timeout 10 --print --no-color`;
@@ -53,8 +59,29 @@ router.post('/scan', async (req, res) => {
   }
 
   try {
-    const wslCmd = `wsl -d kali-linux -u cloudos -- bash -c "${command} 2>&1"`;
-    const { stdout } = await execAsync(wslCmd, { timeout: 120000, maxBuffer: 10 * 1024 * 1024 });
+    const args = ['-d', 'kali-linux', '-u', 'cloudos', '--', toolName, ...toolArgs];
+    
+    const stdout = await new Promise((resolve, reject) => {
+      const p = spawn('wsl.exe', args);
+      let out = '';
+      let err = '';
+      const timer = setTimeout(() => {
+        try { p.kill('SIGKILL'); } catch {}
+        reject(new Error('Timeout de execução atingido.'));
+      }, 120000);
+
+      p.stdout.on('data', (d) => { out += d.toString(); });
+      p.stderr.on('data', (d) => { err += d.toString(); });
+
+      p.on('close', () => {
+        clearTimeout(timer);
+        resolve(out + (err ? '\n' + err : ''));
+      });
+      p.on('error', (e) => {
+        clearTimeout(timer);
+        reject(e);
+      });
+    });
 
     const structuredData = {
       emails: [],

@@ -1,106 +1,254 @@
-import { useState, useRef } from 'react';
-import { Play, Plus, Trash2, Workflow } from 'lucide-react';
+// cloudos-frontend/src/apps/PipelineBuilderApp.jsx
+import React, { useState, useCallback, useRef } from 'react';
+import './PipelineBuilderApp.css';
 
-export function PipelineBuilderApp({ activeProject }) {
-  const [steps, setSteps] = useState([
-    { tool: 'subfinder', args: ['-d', 'example.com'] },
-    { tool: 'httpx', args: ['-silent'] }
-  ]);
-  const [output, setOutput] = useState('');
-  const [running, setRunning] = useState(false);
-  const readerRef = useRef(null);
+const NODE_TYPES = [
+  { id: 'tool', label: 'Ferramenta Kali', icon: '🛠️', color: '#58a6ff' },
+  { id: 'script', label: 'Script Customizado', icon: '📜', color: '#3fb950' },
+  { id: 'condition', label: 'Condição (If/Else)', icon: '🔀', color: '#d29922' },
+  { id: 'parallel', label: 'Execução Paralela', icon: '⚡', color: '#a371f7' },
+];
 
-  const token = localStorage.getItem('cloudos_token');
+const PipelineBuilderApp = () => {
+  const [nodes, setNodes] = useState([]);
+  const [selectedNode, setSelectedNode] = useState(null);
+  const [pipelineName, setPipelineName] = useState('Novo Pipeline');
+  const [isRunning, setIsRunning] = useState(false);
+  const [logs, setLogs] = useState('');
+  const logRef = useRef(null);
 
-  const updateStep = (i, field, value) => {
-    const newSteps = [...steps];
-    newSteps[i] = { ...newSteps[i], [field]: field === 'args' ? value.split(' ') : value };
-    setSteps(newSteps);
+  // Adicionar novo nó
+  const addNode = useCallback((type) => {
+    const newNode = {
+      id: Date.now().toString(36),
+      type,
+      label: NODE_TYPES.find(n => n.id === type)?.label || type,
+      config: {
+        toolId: type === 'tool' ? 'nmap' : '',
+        script: type === 'script' ? '# Python/Bash code\nprint("Hello")' : '',
+        language: type === 'script' ? 'python' : '',
+        condition: type === 'condition' ? 'success' : '',
+        trueBranch: type === 'condition' ? [] : [],
+        falseBranch: type === 'condition' ? [] : [],
+        parallelNodes: type === 'parallel' ? [] : [],
+      },
+      x: 100 + nodes.length * 20,
+      y: 100 + nodes.length * 30,
+    };
+    setNodes(prev => [...prev, newNode]);
+    setSelectedNode(newNode.id);
+  }, [nodes]);
+
+  // Atualizar nó selecionado
+  const updateNodeConfig = (nodeId, config) => {
+    setNodes(prev => prev.map(n => n.id === nodeId ? { ...n, config: { ...n.config, ...config } } : n));
   };
 
-  const addStep = () => setSteps([...steps, { tool: 'nmap', args: ['-sV'] }]);
-  const removeStep = (i) => setSteps(steps.filter((_, idx) => idx !== i));
+  // Remover nó
+  const removeNode = (nodeId) => {
+    setNodes(prev => prev.filter(n => n.id !== nodeId));
+    if (selectedNode === nodeId) setSelectedNode(null);
+  };
 
-  const run = async () => {
-    setRunning(true);
-    setOutput('');
+  // Mover nó (drag)
+  const moveNode = (nodeId, x, y) => {
+    setNodes(prev => prev.map(n => n.id === nodeId ? { ...n, x, y } : n));
+  };
+
+  // Executar pipeline
+  const runPipeline = async () => {
+    setIsRunning(true);
+    setLogs(prev => prev + `\n🚀 Iniciando pipeline: ${pipelineName}\n` + '═'.repeat(40));
     try {
-      const res = await fetch('http://localhost:8080/api/v3/pipeline/run', {
+      const res = await fetch('/api/pipeline/run', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ steps, projectId: activeProject?.id })
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('cloudos_token') || ''}`
+        },
+        body: JSON.stringify({ name: pipelineName, nodes }),
       });
-
-      const reader = res.body.getReader();
-      readerRef.current = reader;
-      const decoder = new TextDecoder();
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const lines = decoder.decode(value).split('\n');
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const evt = JSON.parse(line);
-            if (evt.type === 'start') setOutput(o => o + `\n▶ [${evt.step}] Iniciando...\n`);
-            else if (evt.type === 'stdout') setOutput(o => o + evt.data);
-            else if (evt.type === 'error') setOutput(o => o + `\n✗ [${evt.step}] ERRO: ${evt.msg}\n`);
-          } catch {}
-        }
-      }
-      setOutput(o => o + '\n[✓] Pipeline finalizado.\n');
-    } catch (e) {
-      setOutput(o => o + `\n[✗] Falha: ${e.message}\n`);
+      if (!res.ok) throw new Error(`Erro HTTP ${res.status}`);
+      const data = await res.json();
+      setLogs(prev => prev + '\n' + (data.log || 'Pipeline concluído.') + '\n✅ Sucesso!');
+    } catch (err) {
+      setLogs(prev => prev + `\n❌ Erro: ${err.message}`);
     } finally {
-      setRunning(false);
+      setIsRunning(false);
     }
   };
 
+  // Exportar Pipeline como JSON
+  const exportJSON = () => {
+    const data = JSON.stringify({ name: pipelineName, nodes }, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${pipelineName.toLowerCase().replace(/\s+/g, '_')}_pipeline.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Importar Pipeline via JSON
+  const importJSON = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const parsed = JSON.parse(evt.target.result);
+        if (parsed.nodes && Array.isArray(parsed.nodes)) {
+          setNodes(parsed.nodes);
+          if (parsed.name) setPipelineName(parsed.name);
+          setLogs(prev => prev + '\n[PipelineBuilder] 📥 Pipeline carregado do arquivo JSON!');
+        }
+      } catch (err) {
+        setLogs(prev => prev + '\n[PipelineBuilder Error] ❌ Erro ao ler arquivo JSON: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const selected = (nodes || []).find(n => n.id === selectedNode);
+
   return (
-    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: '#0d1117', color: '#c9d1d9', fontFamily: 'Inter, sans-serif' }}>
-      <div style={{ padding: 12, borderBottom: '1px solid #30363d', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#161b22', flexShrink: 0 }}>
-        <h2 style={{ margin: 0, fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}><Workflow size={16} color="#58a6ff" /> Visual Pipeline</h2>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={addStep} style={styles.btnGhost}><Plus size={14} /> Step</button>
-          <button onClick={run} disabled={running} style={{...styles.btn, background: running ? '#21262d' : '#238636'}}>
-            <Play size={14} fill="#fff" /> {running ? 'Rodando...' : 'Executar'}
+    <div className="pipeline-container">
+      {/* Header */}
+      <div className="pipeline-header">
+        <input
+          type="text"
+          value={pipelineName}
+          onChange={e => setPipelineName(e.target.value)}
+          className="pipeline-name-input"
+          placeholder="Nome do Pipeline"
+        />
+        <div className="pipeline-actions">
+          <button className="pp-btn pp-btn-add" onClick={() => addNode('tool')}>＋ Ferramenta</button>
+          <button className="pp-btn pp-btn-script" onClick={() => addNode('script')}>📜 Script</button>
+          <button className="pp-btn pp-btn-cond" onClick={() => addNode('condition')}>🔀 Condição</button>
+          <button className="pp-btn pp-btn-parallel" onClick={() => addNode('parallel')}>⚡ Paralelo</button>
+          <button className="pp-btn pp-btn-export" onClick={exportJSON} title="Exportar como .json">
+            📥 JSON
+          </button>
+          <label className="pp-btn pp-btn-import" title="Importar arquivo .json">
+            📤 Importar
+            <input type="file" accept=".json" onChange={importJSON} style={{ display: 'none' }} />
+          </label>
+          <button
+            className="pp-btn pp-btn-run"
+            onClick={runPipeline}
+            disabled={isRunning || nodes.length === 0}
+          >
+            {isRunning ? '⏳ Rodando...' : '▶️ Executar'}
           </button>
         </div>
       </div>
 
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        {/* Painel Edição */}
-        <div style={{ width: 320, borderRight: '1px solid #30363d', padding: 16, overflowY: 'auto', flexShrink: 0 }}>
-          {steps.map((s, i) => (
-            <div key={i} style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 8, padding: 12, marginBottom: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: 12, color: '#8b949e' }}>
-                <strong>Step {i + 1}</strong>
-                <button onClick={() => removeStep(i)} style={{ background: 'transparent', border: 'none', color: '#f85149', cursor: 'pointer', display: 'flex', alignItems: 'center' }}><Trash2 size={14} /></button>
-              </div>
-              <input value={s.tool} onChange={e => updateStep(i, 'tool', e.target.value)} placeholder="ferramenta (ex: nmap)" style={styles.input} />
-              <input value={Array.isArray(s.args) ? s.args.join(' ') : s.args} onChange={e => updateStep(i, 'args', e.target.value)} placeholder="argumentos (ex: -sV -p 80)" style={{...styles.input, marginTop: 8}} />
-              {i < steps.length - 1 && <div style={{ textAlign: 'center', color: '#30363d', margin: '8px 0', fontSize: 16 }}>↓</div>}
+      {/* Área principal */}
+      <div className="pipeline-body">
+        {/* Canvas */}
+        <div className="pipeline-canvas" onClick={() => setSelectedNode(null)}>
+          {nodes.length === 0 && (
+            <div className="pipeline-empty">
+              <div className="empty-icon">🔗</div>
+              <p>Adicione nós para construir seu pipeline de ataque automatizado.</p>
+              <p className="empty-hint">Combine ferramentas, scripts customizados e lógica condicional.</p>
+            </div>
+          )}
+          {nodes.map(node => (
+            <div
+              key={node.id}
+              className={`pipeline-node ${node.type} ${selectedNode === node.id ? 'selected' : ''}`}
+              style={{ left: node.x, top: node.y, borderColor: NODE_TYPES.find(t => t.id === node.type)?.color }}
+              onClick={(e) => { e.stopPropagation(); setSelectedNode(node.id); }}
+              draggable
+              onDragEnd={(e) => moveNode(node.id, e.clientX - 50, e.clientY - 20)}
+            >
+              <span className="node-icon">{NODE_TYPES.find(t => t.id === node.type)?.icon}</span>
+              <span className="node-label">{node.label}</span>
+              <button className="node-remove" onClick={(e) => { e.stopPropagation(); removeNode(node.id); }}>✕</button>
             </div>
           ))}
         </div>
 
-        {/* Painel Output */}
-        <div style={{ flex: 1, background: '#010409', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-          <div style={{ padding: 8, borderBottom: '1px solid #21262d', fontSize: 12, color: '#8b949e', flexShrink: 0 }}>Console Output</div>
-          <pre style={{ flex: 1, margin: 0, padding: 16, color: '#c9d1d9', fontFamily: 'JetBrains Mono, monospace', fontSize: 13, overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            {output || 'Monte seu pipeline e clique em Executar.'}
-          </pre>
+        {/* Painel de configuração */}
+        {selected && (
+          <div className="pipeline-config">
+            <h4>⚙️ Configurar: {selected.label}</h4>
+            {selected.type === 'tool' && (
+              <div className="config-field">
+                <label>Ferramenta Kali</label>
+                <select
+                  value={selected.config.toolId}
+                  onChange={e => updateNodeConfig(selected.id, { toolId: e.target.value })}
+                >
+                  <option value="nmap">Nmap</option>
+                  <option value="gobuster">Gobuster</option>
+                  <option value="ffuf">FFuF</option>
+                  <option value="sqlmap">SQLMap</option>
+                  <option value="hydra">Hydra</option>
+                </select>
+              </div>
+            )}
+            {selected.type === 'script' && (
+              <>
+                <div className="config-field">
+                  <label>Linguagem</label>
+                  <select
+                    value={selected.config.language}
+                    onChange={e => updateNodeConfig(selected.id, { language: e.target.value })}
+                  >
+                    <option value="python">Python</option>
+                    <option value="bash">Bash</option>
+                    <option value="ruby">Ruby</option>
+                  </select>
+                </div>
+                <div className="config-field">
+                  <label>Código</label>
+                  <textarea
+                    value={selected.config.script}
+                    onChange={e => updateNodeConfig(selected.id, { script: e.target.value })}
+                    rows={6}
+                    placeholder="Seu código aqui..."
+                    style={{ fontFamily: 'monospace', fontSize: '12px' }}
+                  />
+                </div>
+              </>
+            )}
+            {selected.type === 'condition' && (
+              <div className="config-field">
+                <label>Condição</label>
+                <select
+                  value={selected.config.condition}
+                  onChange={e => updateNodeConfig(selected.id, { condition: e.target.value })}
+                >
+                  <option value="success">Se sucesso (exit 0)</option>
+                  <option value="failure">Se falha (exit ≠ 0)</option>
+                  <option value="contains">Se contiver texto</option>
+                </select>
+              </div>
+            )}
+            {selected.type === 'parallel' && (
+              <div className="config-field">
+                <label>Execução Paralela</label>
+                <p className="hint">Todos os nós filhos serão executados simultaneamente.</p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Logs */}
+      <div className="pipeline-logs">
+        <div className="logs-header">
+          <span>📟 Logs de Execução</span>
+          <button onClick={() => setLogs('')}>🧹 Limpar</button>
         </div>
+        <pre className="logs-content" ref={logRef}>{logs || 'Aguardando execução...'}</pre>
       </div>
     </div>
   );
-}
-
-const styles = {
-  input: { width: '100%', background: '#0d1117', border: '1px solid #30363d', borderRadius: 6, padding: '8px 10px', color: '#c9d1d9', fontSize: 13, outline: 'none', boxSizing: 'border-box' },
-  btn: { display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', border: '1px solid transparent', borderRadius: 6, color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
-  btnGhost: { background: '#21262d', border: '1px solid #30363d', color: '#c9d1d9', padding: '6px 12px', borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }
 };
 
 export default PipelineBuilderApp;

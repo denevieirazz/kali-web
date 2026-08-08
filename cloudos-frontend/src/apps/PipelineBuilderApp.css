@@ -1,0 +1,33 @@
+.pipeline-container { display: flex; flex-direction: column; height: 100%; background: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', system-ui, sans-serif; }
+.pipeline-header { display: flex; gap: 10px; padding: 12px; background: #161b22; border-bottom: 1px solid #30363d; align-items: center; flex-wrap: wrap; }
+.pipeline-name-input { background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; padding: 6px 12px; border-radius: 6px; font-size: 14px; font-weight: 600; width: 200px; }
+.pipeline-actions { display: flex; gap: 8px; margin-left: auto; }
+.pp-btn { padding: 6px 14px; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; transition: 0.2s; }
+.pp-btn-add { background: #1f6feb; color: #fff; }
+.pp-btn-script { background: #238636; color: #fff; }
+.pp-btn-cond { background: #d29922; color: #000; }
+.pp-btn-parallel { background: #a371f7; color: #fff; }
+.pp-btn-run { background: #da3633; color: #fff; }
+.pp-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.pipeline-body { display: flex; flex: 1; overflow: hidden; }
+.pipeline-canvas { flex: 1; position: relative; background: #0d1117; background-image: radial-gradient(#30363d 1px, transparent 1px); background-size: 20px 20px; min-height: 300px; }
+.pipeline-empty { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #8b949e; }
+.empty-icon { font-size: 48px; margin-bottom: 10px; }
+.empty-hint { font-size: 12px; color: #6e7681; }
+.pipeline-node { position: absolute; padding: 10px 14px; background: #161b22; border: 2px solid #30363d; border-radius: 8px; display: flex; align-items: center; gap: 8px; cursor: pointer; transition: 0.2s; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+.pipeline-node.selected { box-shadow: 0 0 12px rgba(88,166,255,0.5); border-color: #58a6ff !important; }
+.pipeline-node:hover { background: #1c2128; }
+.node-icon { font-size: 18px; }
+.node-label { font-size: 12px; font-weight: 600; }
+.node-remove { margin-left: auto; background: none; border: none; color: #8b949e; cursor: pointer; }
+.node-remove:hover { color: #f85149; }
+.pipeline-config { width: 280px; background: #161b22; border-left: 1px solid #30363d; padding: 14px; overflow-y: auto; }
+.pipeline-config h4 { margin: 0 0 12px 0; color: #58a6ff; font-size: 14px; }
+.config-field { margin-bottom: 12px; }
+.config-field label { display: block; font-size: 11px; font-weight: 600; color: #8b949e; margin-bottom: 4px; text-transform: uppercase; }
+.config-field select, .config-field textarea { width: 100%; padding: 8px; background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; border-radius: 6px; font-size: 13px; }
+.hint { font-size: 11px; color: #8b949e; margin: 0; }
+.pipeline-logs { height: 180px; background: #0d1117; border-top: 1px solid #30363d; display: flex; flex-direction: column; }
+.logs-header { display: flex; justify-content: space-between; padding: 6px 12px; background: #161b22; font-size: 12px; font-weight: 600; color: #8b949e; }
+.logs-header button { background: none; border: none; color: #58a6ff; cursor: pointer; font-size: 11px; }
+.logs-content { flex: 1; padding: 8px 12px; margin: 0; overflow-y: auto; font-family: 'Fira Code', monospace; font-size: 12px; white-space: pre-wrap; color: #7ee787; }

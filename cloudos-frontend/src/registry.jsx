@@ -28,11 +28,40 @@ import NmapScannerApp from './apps/NmapScannerApp';
 import SqlmapScannerApp from './apps/SqlmapScannerApp';
 import HashCrackerApp from './apps/HashCrackerApp';
 import MsfvenomApp from './apps/MsfvenomApp';
-import { OsintApp } from './apps/OsintApp';
-import { Bug, Stethoscope, Vault, Trophy, Cpu, Network, Zap, LayoutDashboard, Radar, Database, KeyRound, FlaskConical, Globe } from 'lucide-react';
+import ScriptLabApp from './apps/ScriptLabApp';
+import CyberDecoderApp from './apps/CyberDecoderApp';
+import KnowledgeBaseApp from './apps/KnowledgeBaseApp.jsx';
+import AttackGraphApp from './apps/AttackGraphApp.jsx';
+import ListenerManagerApp from './apps/ListenerManagerApp.jsx';
+import PythonRunnerApp from './apps/PythonRunnerApp.jsx';
+import ReportGeneratorApp from './apps/ReportGeneratorApp.jsx';
+import AutoPilotApp from './apps/AutoPilotApp.jsx';
+import AutoScannerApp from './apps/AutoScannerApp.jsx';
+import AutoAttackApp from './apps/AutoAttackApp.jsx';
+import AKBApp from './apps/AKBApp.jsx';
+import PayloadForgeApp from './apps/PayloadForgeApp.jsx';
+import PrivescHelperApp from './apps/PrivescHelperApp.jsx';
+import TerminalApp from './apps/TerminalApp.jsx';
+import OsintTrackerApp from './apps/OsintTrackerApp.jsx';
+import { Bug, Stethoscope, Vault, Trophy, Cpu, Network, Zap, LayoutDashboard, Radar, Database, KeyRound, FlaskConical, Globe, TerminalSquare, Binary, BrainCircuit, RadioTower, Code, FileCode, Rocket, Wrench, ShieldAlert, Target, Crosshair } from 'lucide-react';
 
 export const AppRegistry = {
   dashboard: { id: 'dashboard', title: 'Command Center', icon: LayoutDashboard, Component: DashboardApp },
+  auto_scanner: { id: 'auto_scanner', title: 'Auto-Scanner', icon: Radar, Component: AutoScannerApp },
+  auto_attack: { id: 'auto_attack', title: 'Auto-Attack', icon: Crosshair, Component: AutoAttackApp },
+  akb: { id: 'akb', title: 'AKB', icon: Database, Component: AKBApp },
+  osint_tracker: { id: 'osint_tracker', title: 'OSINT Tracker', icon: Target, Component: OsintTrackerApp },
+  web_terminal: { id: 'web_terminal', title: 'Web Terminal', icon: TerminalSquare, Component: TerminalApp },
+  privesc_helper: { id: 'privesc_helper', title: 'Privesc Helper', icon: ShieldAlert, Component: PrivescHelperApp },
+  payload_forge: { id: 'payload_forge', title: 'Payload Forge', icon: Wrench, Component: PayloadForgeApp },
+  autopilot: { id: 'autopilot', title: 'Recon Autopilot', icon: Rocket, Component: AutoPilotApp },
+  python_runner: { id: 'python_runner', title: 'Python Runner', icon: Code, Component: PythonRunnerApp },
+  report_gen: { id: 'report_gen', title: 'Report Generator', icon: FileCode, Component: ReportGeneratorApp },
+  attack_graph: { id: 'attack_graph', title: 'Attack Graph', icon: Network, Component: AttackGraphApp },
+  listeners: { id: 'listeners', title: 'Listeners', icon: RadioTower, Component: ListenerManagerApp },
+  knowledge_base: { id: 'knowledge_base', title: 'Knowledge Base', icon: BrainCircuit, Component: KnowledgeBaseApp },
+  cyberdecoder: { id: 'cyberdecoder', title: 'CyberDecoder PRO', icon: Binary, Component: CyberDecoderApp },
+  scriptlab: { id: 'scriptlab', title: 'Script Lab', icon: TerminalSquare, Component: ScriptLabApp },
   osint: { id: 'osint', title: 'OSINT Hub', icon: Globe, Component: OsintApp },
   msfvenom: { id: 'msfvenom', title: 'Payload Gen', icon: FlaskConical, Component: MsfvenomApp },
   hashcracker: { id: 'hashcracker', title: 'Hash Cracker', icon: KeyRound, Component: HashCrackerApp },

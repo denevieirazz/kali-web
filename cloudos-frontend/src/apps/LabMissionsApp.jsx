@@ -12,8 +12,8 @@ export function LabMissionsApp({ openApp }) {
     setMissions(missions.map(m => m.id === id ? { ...m, done: !m.done } : m));
   };
 
-  const totalXP = missions.filter(m => m.done).reduce((acc, m) => acc + m.xp, 0);
-  const progress = (missions.filter(m => m.done).length / missions.length) * 100;
+  const totalXP = (Array.isArray(missions) ? missions : []).filter(m => m.done).reduce((acc, m) => acc + m.xp, 0);
+  const progress = missions && missions.length > 0 ? ((missions.filter(m => m.done).length / missions.length) * 100) : 0;
 
   return (
     <div className="flex flex-col h-full bg-[#0d1117] text-gray-300 p-6 overflow-y-auto" style={{ padding: '24px', background: '#0d1117', height: '100%', overflowY: 'auto' }}>

@@ -264,8 +264,93 @@ npm run dev
     - **Escaping de Aspas com `Chr(34)`**: Substituídas as aspas triplas `"""` por `Chr(34)` na montagem dos argumentos de linha de comando dos arquivos `.vbs`. Elimina 100% o erro de sintaxe `800A0400` do Windows Script Host ao dar duplo clique no instalador ou no desktop.
 240. **Resolução do Travamento em 1% no Worker (`_install_worker.ps1`, `server_installer.ps1`)**:
     - **Correção da Delimitação de Variáveis em PowerShell**: Identificado e corrigido o erro de análise `InvalidVariableReferenceWithDrive` provocado pelos dois-pontos logo após o nome da variável (`$Username:` e `$tool:`). Adicionadas chaves `${Username}:${Password}` e `${tool}`, permitindo que o worker avance de 1% a 100% sem falhas.
+241. **Blindagem de Componentes React contra Crash por Array/Length Indefinido (`OpSecCenterApp.jsx`, `FileManagerApp.jsx`, `LabMissionsApp.jsx`)**:
+    - **Validação Defensiva**: Adicionados operadores de encadeamento opcional (`?.`), `Array.isArray()` e verificações nulas prévias antes de acessar a propriedade `.length` ou iterar com `.map()`, prevenindo telas brancas.
+242. **Arsenal Tático Completo de Ferramentas de Pentest (`cloudos-backend/kali_tools_schema.js`)**:
+    - **Expansão para 40+ Ferramentas Profissionais**: Atualizado o esquema de ferramentas cobrindo 8 categorias táticas (Recon & OSINT, Port Scanning, Web Scanning, Exploit, Cracking, Post-Exploit & AD, Cloud Security e Wireless/Forensics).
+    - **Schemas Ricos & Presets em Português**: Cada ferramenta possui descrições em português do Brasil, campos categorizados (`text`, `textarea`, `boolean`, `select`), instruções de instalação `apt-get` e presets táticos configurados para acionamento em 1-clique.
+243. **Criação do Aplicativo ScriptLab App (`src/apps/ScriptLabApp.jsx`, `ScriptLabApp.css`, `scriptLabTemplates.js`)**:
+    - **IDE de Scripts de Pentest Integrada**: Implementado editor Monaco avançado com suporte a sintaxe (Python, Bash, Ruby, PowerShell), terminal de saída com streaming via `ReadableStream`, download local, salvamento de scripts em workspace (`localStorage`) e biblioteca de templates táticos.
+    - **Registro no Sistema (`src/registry.jsx`)**: Registrado o aplicativo sob o ID `scriptlab` com o ícone `TerminalSquare`.
+244. **Atualização do ReportBuilder PRO com Exportação PDF Nativa (`src/apps/ReportBuilderApp.jsx`, `ReportBuilderApp.css`)**:
+    - **Geração de Relatórios Executivos em PDF**: Integrado `jsPDF` e `html2canvas` para conversão em tempo real de relatórios completos em formato PDF A4 com capa personalizada, metas de cliente, seções de escopo/metodologia/conclusão, gráfico dinâmico de severidade e achados de vulnerabilidades detalhados.
+245. **Atualização do PipelineBuilder PRO (`src/apps/PipelineBuilderApp.jsx`, `PipelineBuilderApp.css`)**:
+    - **Construtor Visual de Pipelines**: Implementada criação de fluxos automatizados com suporte a nós de Ferramenta Kali, Scripts Customizados (Python/Bash/Ruby), Condições (If/Else por exit code ou texto) e Execução Paralela.
+    - **Console de Execução Integrado**: Visualização em tempo real dos logs do pipeline com comunicação direta via API `/api/pipeline/run`.
+246. **Sistema de Design Dark Mode Tático Global (`src/index.css`)**:
+    - **Padronização Visual do Sistema**: Definidas variáveis CSS globais (`--bg-primary`, `--bg-secondary`, `--border-color`, `--accent-blue`, etc.), reset universal, barra de rolagem customizada em dark mode, widgets da área de trabalho com glassmorphism e animações fluídas (`fadeIn`, `slideUpFade`).
+247. **Persistência de Workspace ScriptLab em WSL (`server_cloudos.ps1`, `ScriptLabApp.jsx`)**:
+    - **Rota `/api/scriptlab/save-to-wsl`**: Criado botão "🐧 Salvar WSL" no ScriptLabApp e rota no PowerShell para salvar scripts no diretório `workspace_scripts/` e no subsistema `/home/kali/cloudos_workspace`, sobrevivendo à limpeza de cache do navegador.
+248. **Execução Real de ScriptLab e Pipelines (`server_cloudos.ps1`)**:
+    - **Handlers Backend `/api/scriptlab/run`, `/api/scriptlab/stop` e `/api/pipeline/run`**: Implementados executores nativos de processo no PowerShell para interpretar scripts Python, PowerShell e Bash no WSL com captura de `STDOUT`/`STDERR` e interrupção `Kill()`.
+249. **Compartilhamento de Pipelines em JSON (`PipelineBuilderApp.jsx`)**:
+    - **Export/Import JSON**: Adicionados botões "📥 JSON" e "📤 Importar" permitindo exportar e importar arquivos de fluxo de automação `.json`.
+250. **Fixação Automática no Menu Iniciar e Taskbar (`server_cloudos.ps1`, `registry.jsx`, `CloudOSContext.jsx`)**:
+    - **Registro & Taskbar**: Marcados `scriptlab`, `pipeline` e `report` como fixados por padrão (`is_pinned: $true`) e devidamente registrados na exportação de apps.
+251. **Criação da Suíte Tática CyberDecoder PRO (`src/apps/CyberDecoderApp.jsx`, `CyberDecoderApp.css`)**:
+    - **Decodificador e Conversor em Tempo Real**: Implementada ferramenta inspirada no CyberChef com suporte a 10+ codificações táticas (Base64 Encode/Decode, URL Encode/Decode, Hex Encode/Decode, HTML Entities, ROT13 Cipher e JWT Parser/Decoder com inspeção visual de Header e Payload).
+    - **Presets Táticos Incluídos**: Acesso rápido a payloads de shell reversa em Base64, XSS URL Encoded, Tokens JWT de teste e Shellcodes Hexadecimais.
+252. **Expansão de Ferramentas Globais (China, Rússia, EUA, Global) (`kali_tools_schema.js`)**:
+    - **Arsenal Expandido para 65+ Ferramentas**: Adicionados schemas e presets para ferramentas globais de análise e auditoria (Yakit, Afrog, Xray Community, OneForAll, Havoc C2, Donut Generator, BloodHound Python, Ligolo-ng, Kube-Hunter e ProjectDiscovery Chaos).
+253. **Integração Real do Terminal Kali Linux Pro (`TerminalPane.jsx`, `server_cloudos.ps1`)**:
+    - **Mecanismo Duplo WebSocket + HTTP Engine Direct**: Implementado suporte a `/api/terminal/exec` no servidor PowerShell para processar comandos Linux via `wsl bash -c` com fallback automático quando o servidor WebSocket não estiver ativo, garantindo execução em tempo real, formatação ANSI e navegação no terminal.
+254. **Implementação da Active Knowledge Base (AKB) (`src/apps/KnowledgeBaseApp.jsx`, `registry.jsx`, `server_cloudos.ps1`)**:
+    - **Gestão Centralizada de Alvos e Serviços**: Criado o aplicativo `KnowledgeBaseApp` para agregar hosts descobertos, portas ativas e serviços escaneados, com suporte a envio rápido com 1-clique de alvos para o `ToolRunner` (Nikto, Gobuster, Enum4Linux).
+255. **Visualizador de Mapeamento de Ataque (Attack Graph) (`src/apps/AttackGraphApp.jsx`, `registry.jsx`, `server_cloudos.ps1`)**:
+    - **Grafo Tático Interativo de Rede**: Implementado o `AttackGraphApp` que renderiza SVG interativo conectando os hosts da AKB às suas respectivas portas e serviços com conectores animados e painel inspetor de alvos com ações de 1-clique.
+256. **Gerenciador de Listeners de Shell Reversa (`src/apps/ListenerManagerApp.jsx`, `server_cloudos.ps1`)**:
+    - **Gestão Nativa no WSL2 (`/api/listeners/start`, `/api/listeners/stop`)**: Criado o `ListenerManagerApp` para orquestrar listeners `ncat` no subsistema Linux Kali, com console de conexões e controle de portas TCP/UDP.
+257. **Executador de Exploits e Scripts Python 3 (`src/apps/PythonRunnerApp.jsx`, `server_cloudos.ps1`)**:
+    - **Extensibilidade Python no WSL2 (`/api/python/execute`)**: Implementado o `PythonRunnerApp` com suporte a execução direta de código Python 3 no subsistema Linux Kali com captura de STDOUT e STDERR.
+258. **Gerador de Relatórios Inteligente (`src/apps/ReportGeneratorApp.jsx`, `server_cloudos.ps1`)**:
+    - **Compilação Automática de Relatórios Pentest (`/api/reports/generate`)**: Criado o `ReportGeneratorApp` que sintetiza em tempo real relatórios executivos em Markdown contendo sumário, ativos da AKB e recomendações táticas com download de arquivo `.md`.
+259. **Orquestrador de Reconhecimento Automático Recon Autopilot (`src/apps/AutoPilotApp.jsx`, `autopilotManager.js`, `server_cloudos.ps1`)**:
+    - **Automação Encadeada de Reconhecimento (`/api/autopilot/web`, `/api/autopilot/person`)**: Implementado o `AutoPilotApp` e backend `autopilotManager.js` para execução de WhatWeb, Nmap (com inserção automática de alvos na AKB), theHarvester e Sherlock OSINT com streaming de logs em tempo real.
+260. **Mecanismo Tático 1-Click Auto-Attack (`attackAutomator.js`, `KnowledgeBaseApp.jsx`, `server_cloudos.ps1`)**:
+    - **Orquestração Inteligente baseada em Portas (`/api/automate/attack/:hostId`)**: Implementado o botão `⚔️ 1-Click Auto-Attack` na Active Knowledge Base e o orquestrador `attackAutomator.js` que detecta serviços ativos (Web, SSH, SMB) e dispara automaticamente Nikto, Searchsploit e Enum4linux com console de logs.
+261. **Forja de Payloads e Auto-Listener (`payloadForge.js`, `PayloadForgeApp.jsx`, `server_cloudos.ps1`)**:
+    - **Geração 1-Clique com Auto-Cópia e Listener (`/api/payloads/generate`)**: Criado o `PayloadForgeApp` e `payloadForge.js` com templates para PHP, Python, Bash, Netcat e PowerShell, suporte a auto-cópia para o `Ctrl+C` e ativação imediata de listeners `ncat` no WSL2.
+262. **Assistente de Elevação de Privilégios Privesc Helper (`privescManager.js`, `PrivescHelperApp.jsx`, `server_cloudos.ps1`)**:
+    - **Orquestração de LinPEAS e Servidor HTTP (`/api/privesc/setup`)**: Criado o `PrivescHelperApp` e backend `privescManager.js` que baixa o LinPEAS, sobe servidor de transferência Python na porta 8000 no WSL2 e gera comandos em 1-clique (cURL, Wget, Sudo).
+263. **Gerenciador de Processos PTY Web Terminal (`webTerminalManager.js`, `TerminalPane.jsx`, `server_cloudos.ps1`)**:
+    - **Sessões Interativas Linux PTY WebSocket/HTTP**: Implementado o `webTerminalManager.js` no backend com suporte a alocação de shell interativa no WSL2 Kali Linux, controle de dimensões de tela e tratamento de entrada/saída em tempo real.
+264. **App Standalone Web Terminal & Error Diagnostics (`TerminalApp.jsx`, `webTerminalManager.js`, `server_cloudos.ps1`)**:
+    - **Renderização Tardia xterm.js com Fallback e Log (`web_terminal`)**: Criado o `TerminalApp.jsx` com `setTimeout` de fit para sincronia de layout, tratamento de erros `terminal_error` no WebSocket e fallback direto para `C:\Windows\System32\wsl.exe`.
+265. **Rastreamento de Pessoas e Sites OSINT Auto-Tracker (`OsintTrackerApp.jsx`, `server_cloudos.ps1`)**:
+    - **Varredura Automatizada (`/api/osint/track`)**: Criado o `OsintTrackerApp.jsx` e rota `/api/osint/track` no servidor PowerShell para execução com 1-clique do Sherlock (rastreio de pessoas) ou WhatWeb & Nmap (rastreio de sites) no WSL2.
+266. **Interceptador e Emulador de Terminal WebSocket (`drone-interceptor.js`)**:
+    - **Correção da Tela Preta no Terminal Pro (`ws://localhost:8080`)**: Adicionada emulação ativa de WebSocket no `drone-interceptor.js` que intercepta requisições legadas de terminal para a porta 8080, faz o buffer de digitação de teclas e redireciona os comandos para `/api/terminal/exec` via HTTP POST, renderizando o retorno do WSL2 Kali Linux no xterm.js sem necessitar de servidor Node-PTY isolado.
+267. **Integração dos Apps Frontend e Endpoints de Compatibilidade (`AKBApp.jsx`, `PayloadForgeApp.jsx`, `PrivescHelperApp.jsx`, `server_cloudos.ps1`)**:
+    - **Rotas de Suporte `/api/akb/add`, `/api/payload/forge`, `/api/privesc/linpeas`**: Criado o componente `AKBApp.jsx`, registrado o app `akb` e implementados os endpoints no servidor PowerShell nativo para cadastro de hosts/portas, forja de payloads com listeners em background e download do LinPEAS com servidor HTTP em 1-clique.
+268. **Módulos de Automação Massiva (`AutoScannerApp.jsx`, `AutoAttackApp.jsx`, `server_cloudos.ps1`)**:
+    - **Auto-Nmap Scanner & Auto-Attack Orchestrator (`/api/nmap/auto-scan`, `/api/auto-attack/run`)**: Criados os aplicativos `AutoScannerApp` e `AutoAttackApp` e adicionados os endpoints no PowerShell para parser XML automático de scans Nmap com atualização direta de `akb.json` e disparo tático em lote de Searchsploit e Nikto em 1-clique.
+269. **Módulo Report Generator & Conversor wkhtmltopdf (`ReportGeneratorApp.jsx`, `server_cloudos.ps1`)**:
+    - **Compilação de Relatórios PDF/HTML (`/api/report/generate`, `/api/report/list`, `/api/report/download`)**: Atualizado o `ReportGeneratorApp.jsx` com visualização prévia (iframe HTML) e download em 1-clique de relatórios em PDF com tema GitHub Dark/Glassmorphism compilados via `wkhtmltopdf` no WSL2 Kali Linux.
 
 ---
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

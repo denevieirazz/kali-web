@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { Play, Square, Terminal, Settings2, Crosshair, ArrowLeft, Box, AlertTriangle } from 'lucide-react';
+import { useCloudOS } from '../store/CloudOSContext';
 
 export function ToolRunnerApp({ payload, setPayload, openApp, setBg }) {
+  const { activeProject } = useCloudOS();
   const [toolSchema, setToolSchema] = useState(null);
   const [allTools, setAllTools] = useState([]);
   const [fields, setFields] = useState({});
@@ -110,7 +112,10 @@ export function ToolRunnerApp({ payload, setPayload, openApp, setBg }) {
       const response = await fetch(`http://localhost:8080/api/kali/tools/${toolSchema.id}/run`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ options: fields })
+        body: JSON.stringify({ 
+          options: fields,
+          projectId: activeProject?.id || null 
+        })
       });
 
       if (!response.ok) throw new Error('Falha na requisição de execução');

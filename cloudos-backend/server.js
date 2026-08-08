@@ -231,7 +231,31 @@ app.use(async (req, res, next) => {
     } catch (e) { res.status(500).json({ error: "Erro ao inicializar ambiente do usuário." }); }
 });
 
-// Registra rotas V3 Enterprise, Process Manager, Network Manager, Findings Manager, Reports Manager, Environment Doctor, Metasploit RPC, Dashboard, Nmap Scanner, SQLmap, Hash Cracker, Msfvenom e OSINT Hub
+// Rotas dedicadas do Instalador/WSL Manager (com controle de estado e streaming)
+const wslManager = require('./services/wslManager');
+
+app.get('/api/wsl/diagnostics', async (req, res) => {
+    try {
+        const diag = await wslManager.getSystemDiagnostics();
+        res.json(diag);
+    } catch (e) {
+        res.status(500).json({ error: 'Falha ao obter diagnóstico do sistema: ' + e.message });
+    }
+});
+
+app.post('/api/wsl/install', async (req, res) => {
+    try {
+        const result = await wslManager.startInstallation(req.body);
+        res.json(result);
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+
+app.get('/api/wsl/status', (req, res) => {
+    res.json(wslManager.getStatus());
+});
+
 app.use('/api/v3', require('./routes/v3'));
 app.use('/api', require('./routes/processManager'));
 app.use('/api', require('./routes/networkManager'));
@@ -508,12 +532,35 @@ function escapeShellArg(arg) {
     return `'${String(arg).replace(/'/g, "'\\''")}'`;
 }
 
-// Rota: Executar Ferramenta com Streaming e Array Seguro
+// Rota: Executar Ferramenta com Streaming e Array Seguro com Validação de Contexto de Projeto
+const { getProjectExecutionContext, isToolAllowed } = require('./services/scannerSecurity');
+
 app.post('/api/kali/tools/:id/run', async (req, res) => {
     const schema = TOOL_SCHEMAS[req.params.id];
     if (!schema) return res.status(404).json({ error: "Ferramenta inválida." });
 
-    const options = req.body.options || {};
+    if (!isToolAllowed(schema.command)) {
+        return res.status(403).json({ error: `Ferramenta '${schema.command}' não autorizada na allowlist.` });
+    }
+
+    const { options = {}, projectId, target } = req.body;
+
+    // FASE 2: SEM PROJECT CONTEXT = SEM EXECUÇÃO
+    if (!projectId) {
+        return res.status(403).json({ error: "A execução de ferramentas exige um Projeto Ativo (projectId)." });
+    }
+
+    // Extrai o alvo principal dos campos da ferramenta ou do body
+    const rawTarget = target || options.target || options.url || options.host || options.domain || options.ip;
+    if (!rawTarget) {
+        return res.status(400).json({ error: "Alvo não informado para a execução da ferramenta." });
+    }
+
+    // Valida permissão do usuário, projeto e Scope Guard
+    const contextCheck = await getProjectExecutionContext(req.user.id, projectId, rawTarget);
+    if (!contextCheck.allowed) {
+        return res.status(403).json({ error: contextCheck.reason });
+    }
 
     // 1. PRE-CHECK: A ferramenta está instalada?
     try {
@@ -559,12 +606,12 @@ app.post('/api/kali/tools/:id/run', async (req, res) => {
                 args.push(tempFileLinux);
             } else if ((field.type === 'text' || field.type === 'select') && val) {
                 if (field.flag) args.push(field.flag);
-                args.push(String(val));
+                args.push(String(val).trim());
             }
         }
     }
 
-    logEvent(req.user.id, 'tool_execute', `Executou: ${schema.command} (Blindado)`);
+    logEvent(req.user.id, 'tool_execute', `Executou: ${schema.command} no projeto ${projectId} com escopo validado.`);
     
     // Configura headers para streaming
     const runId = 'r_' + crypto.randomBytes(4).toString('hex');
@@ -593,8 +640,99 @@ app.post('/api/kali/tools/stop', (req, res) => {
         runningProcesses.delete(runId);
         logEvent(req.user.id, 'tool_stop', `Scan ${runId} interrompido.`);
         return res.json({ success: true });
+// =========================================================
+// 🧠 ACTIVE KNOWLEDGE BASE (AKB) - ISOLADO POR PROJETO E USUÁRIO
+// =========================================================
+app.get('/api/akb/hosts', async (req, res) => {
+    const { projectId } = req.query;
+    try {
+        let query = `
+            SELECT h.id, h.project_id, h.ip, h.hostname, h.os, h.status, h.last_scanned,
+                   p.id AS port_id, p.port, p.protocol, p.service, p.version
+            FROM akb_hosts h
+            LEFT JOIN akb_ports p ON h.id = p.host_id
+            JOIN projects pr ON h.project_id = pr.id
+            WHERE pr.user_id = ?
+        `;
+        const params = [req.user.id];
+
+        if (projectId) {
+            query += ' AND h.project_id = ?';
+            params.push(projectId);
+        }
+
+        query += ' ORDER BY h.last_scanned DESC';
+
+        const rows = await db.prepare(query).all(...params);
+        
+        // Agrupa portas por host
+        const hostsMap = new Map();
+        for (const r of (rows || [])) {
+            if (!hostsMap.has(r.ip)) {
+                hostsMap.set(r.ip, {
+                    id: r.id,
+                    project_id: r.project_id,
+                    ip: r.ip,
+                    host: r.ip,
+                    hostname: r.hostname,
+                    os: r.os,
+                    status: r.status,
+                    last_scanned: r.last_scanned,
+                    ports: []
+                });
+            }
+            if (r.port) {
+                hostsMap.get(r.ip).ports.push({
+                    port: r.port,
+                    protocol: r.protocol,
+                    service: r.service,
+                    version: r.version
+                });
+            }
+        }
+
+        res.json(Array.from(hostsMap.values()));
+    } catch (e) {
+        res.status(500).json({ error: 'Erro ao listar hosts da AKB: ' + e.message });
     }
-    res.status(404).json({ error: "Processo não encontrado." });
+});
+
+app.post('/api/akb/add', async (req, res) => {
+    const { host, port, service, projectId } = req.body;
+    if (!host) return res.status(400).json({ error: 'Host/IP é obrigatório.' });
+
+    try {
+        let targetProjectId = projectId;
+        if (!targetProjectId) {
+            // Se nenhum projeto for especificado, associa ao projeto mais recente do usuário
+            const lastProj = await db.prepare('SELECT id FROM projects WHERE user_id = ? ORDER BY created_at DESC LIMIT 1').get(req.user.id);
+            if (!lastProj) return res.status(400).json({ error: 'Crie um projeto antes de cadastrar ativos na AKB.' });
+            targetProjectId = lastProj.id;
+        } else {
+            // Valida propriedade do projeto
+            const valid = await db.prepare('SELECT id FROM projects WHERE id = ? AND user_id = ?').get(targetProjectId, req.user.id);
+            if (!valid) return res.status(403).json({ error: 'Projeto não encontrado ou não autorizado.' });
+        }
+
+        await db.prepare(`
+            INSERT INTO akb_hosts (project_id, ip, status)
+            VALUES (?, ?, 'discovered')
+            ON CONFLICT(project_id, ip) DO UPDATE SET last_scanned = CURRENT_TIMESTAMP
+        `).run(targetProjectId, host);
+
+        const hostRow = await db.prepare('SELECT id FROM akb_hosts WHERE project_id = ? AND ip = ?').get(targetProjectId, host);
+
+        if (port && hostRow) {
+            await db.prepare(`
+                INSERT INTO akb_ports (host_id, port, service, state)
+                VALUES (?, ?, ?, 'open')
+            `).run(hostRow.id, parseInt(port, 10), service || 'unknown');
+        }
+
+        res.json({ success: true, host, port, service, projectId: targetProjectId });
+    } catch (e) {
+        res.status(500).json({ error: 'Erro ao salvar na AKB: ' + e.message });
+    }
 });
 const KALI_CATALOG = [
     { id: "nmap", name: "Nmap", packageName: "nmap", command: "nmap", category: "recon", description: "Network discovery and security auditing tool.", icon: "Radar", tags: ["network", "discovery"], riskLevel: "medium" },
@@ -664,33 +802,132 @@ app.post('/api/kali/tools/:id/open', async (req, res) => {
 });
 
 // =========================================================
-// 🎯 GESTÃO DE PROJETOS (SCOPE MANAGER)
+// 🎯 GESTÃO DE PROJETOS (SCOPE & ASSET CONTEXT MANAGER)
 // =========================================================
 app.post('/api/projects', async (req, res) => {
-    const { name, scope } = req.body;
+    const { name, scope, scopes } = req.body;
+    if (!name) return res.status(400).json({ error: 'Nome do projeto é obrigatório.' });
     const id = 'p_' + crypto.randomBytes(4).toString('hex');
-    await db.prepare('INSERT INTO projects (id, user_id, name, scope) VALUES (?, ?, ?, ?)').run(id, req.user.id, name, scope || '');
-    logEvent(req.user.id, 'project_create', `Projeto '${name}' criado.`);
-    res.json({ success: true, id });
+    try {
+        await db.prepare('INSERT INTO projects (id, user_id, name, scope) VALUES (?, ?, ?, ?)').run(id, req.user.id, name, scope || '');
+        
+        // Se escopos forem enviados no payload (array de alvos)
+        const targetList = Array.isArray(scopes) ? scopes : (scope ? [scope] : []);
+        for (const item of targetList) {
+            const tgt = typeof item === 'string' ? item.trim() : item.target?.trim();
+            const type = typeof item === 'object' && item.type ? item.type : (tgt.includes('/') ? 'cidr' : (tgt.startsWith('*') ? 'wildcard' : (/^\d+\.\d+\.\d+\.\d+$/.test(tgt) ? 'ip' : 'domain')));
+            if (tgt) {
+                await db.prepare('INSERT INTO project_scopes (project_id, target, type) VALUES (?, ?, ?)').run(id, tgt, type);
+            }
+        }
+        
+        logEvent(req.user.id, 'project_create', `Projeto '${name}' criado com escopos autorizados.`);
+        res.json({ success: true, id, name, scope });
+    } catch (e) {
+        res.status(500).json({ error: 'Erro ao criar projeto: ' + e.message });
+    }
 });
 
 app.get('/api/projects', async (req, res) => {
-    const projects = await db.prepare('SELECT * FROM projects WHERE user_id = ? ORDER BY created_at DESC').all(req.user.id);
-    res.json(projects);
+    try {
+        const projects = await db.prepare('SELECT * FROM projects WHERE user_id = ? ORDER BY created_at DESC').all(req.user.id);
+        res.json(projects || []);
+    } catch (e) {
+        res.status(500).json({ error: 'Erro ao listar projetos.' });
+    }
+});
+
+app.get('/api/projects/:id', async (req, res) => {
+    try {
+        const project = await db.prepare('SELECT * FROM projects WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
+        if (!project) return res.status(404).json({ error: 'Projeto não encontrado ou não autorizado.' });
+        
+        const scopes = await db.prepare('SELECT * FROM project_scopes WHERE project_id = ?').all(req.params.id);
+        res.json({ ...project, scopes: scopes || [] });
+    } catch (e) {
+        res.status(500).json({ error: 'Erro ao buscar detalhes do projeto.' });
+    }
+});
+
+app.get('/api/projects/:id/scopes', async (req, res) => {
+    try {
+        // Valida propriedade do projeto antes de listar escopos
+        const project = await db.prepare('SELECT id FROM projects WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
+        if (!project) return res.status(404).json({ error: 'Projeto não encontrado ou não autorizado.' });
+
+        const scopes = await db.prepare('SELECT * FROM project_scopes WHERE project_id = ?').all(req.params.id);
+        res.json(scopes || []);
+    } catch (e) {
+        res.status(500).json({ error: 'Erro ao listar escopos.' });
+    }
+});
+
+app.post('/api/projects/:id/scopes', async (req, res) => {
+    const { target, type } = req.body;
+    if (!target) return res.status(400).json({ error: 'Alvo é obrigatório.' });
+
+    try {
+        const project = await db.prepare('SELECT id FROM projects WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
+        if (!project) return res.status(404).json({ error: 'Projeto não encontrado ou não autorizado.' });
+
+        const scopeType = type || (target.includes('/') ? 'cidr' : (target.startsWith('*') ? 'wildcard' : (/^\d+\.\d+\.\d+\.\d+$/.test(target) ? 'ip' : 'domain')));
+        const r = await db.prepare('INSERT INTO project_scopes (project_id, target, type) VALUES (?, ?, ?)').run(req.params.id, target.trim(), scopeType);
+        
+        res.json({ success: true, id: r.lastInsertRowid, target, type: scopeType });
+    } catch (e) {
+        res.status(500).json({ error: 'Erro ao adicionar escopo: ' + e.message });
+    }
+});
+
+app.delete('/api/projects/:id/scopes/:scopeId', async (req, res) => {
+    try {
+        const project = await db.prepare('SELECT id FROM projects WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
+        if (!project) return res.status(404).json({ error: 'Projeto não encontrado ou não autorizado.' });
+
+        await db.prepare('DELETE FROM project_scopes WHERE id = ? AND project_id = ?').run(req.params.scopeId, req.params.id);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: 'Erro ao remover escopo.' });
+    }
+});
+
+// Endpoint de Contexto Completo do Projeto para Scanners e Ferramentas (FASE 6)
+app.get('/api/projects/:id/context', async (req, res) => {
+    try {
+        const project = await db.prepare('SELECT * FROM projects WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
+        if (!project) return res.status(404).json({ error: 'Projeto não encontrado ou não autorizado.' });
+
+        const scopes = await db.prepare('SELECT * FROM project_scopes WHERE project_id = ?').all(req.params.id);
+        const hosts = await db.prepare('SELECT * FROM akb_hosts WHERE project_id = ?').all(req.params.id);
+        const findings = await db.prepare('SELECT * FROM findings WHERE project_id = ? AND user_id = ?').all(req.params.id, req.user.id);
+        const evidence = await db.prepare('SELECT * FROM evidence WHERE project_id = ? AND user_id = ?').all(req.params.id, req.user.id);
+
+        res.json({
+            project,
+            scopes: scopes || [],
+            akb: {
+                hosts: hosts || []
+            },
+            findings: findings || [],
+            evidence: evidence || []
+        });
+    } catch (e) {
+        res.status(500).json({ error: 'Erro ao obter contexto do projeto: ' + e.message });
+    }
 });
 
 // =========================================================
 // 📄 GERADOR DE RELATÓRIOS (MARKDOWN)
 // =========================================================
 app.get('/api/reports/:projectId', async (req, res) => {
-    const reports = await db.prepare('SELECT * FROM reports WHERE project_id = ? ORDER BY created_at DESC').all(req.params.projectId);
-    res.json(reports);
+    const reports = await db.prepare('SELECT * FROM reports WHERE project_id = ? AND user_id = ? ORDER BY created_at DESC').all(req.params.projectId, req.user.id);
+    res.json(reports || []);
 });
 
 app.post('/api/reports/save', async (req, res) => {
     const { projectId, title, content_md } = req.body;
     const id = 'r_' + crypto.randomBytes(4).toString('hex');
-    await db.prepare('INSERT INTO reports (id, project_id, title, content_md) VALUES (?, ?, ?, ?)').run(id, projectId, title, content_md);
+    await db.prepare('INSERT INTO reports (id, user_id, project_id, title, content_md) VALUES (?, ?, ?, ?, ?)').run(id, req.user.id, projectId, title, content_md);
     res.json({ success: true, id });
 });
 
@@ -751,10 +988,23 @@ app.post('/api/pipeline/recon', async (req, res) => {
 });
 
 // =========================================================
-// 🔄 HTTP REPEATER & DECODER
+// 🔄 HTTP REPEATER & DECODER (Protegido contra SSRF)
 // =========================================================
-app.post('/api/repeater/send', (req, res) => {
-    const { rawRequest } = req.body;
+const BLOCKED_HOST_PATTERNS = [
+    /^localhost$/i,
+    /^127\./,
+    /^0\./,
+    /^10\./,
+    /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
+    /^192\.168\./,
+    /^169\.254\./,
+    /^::1$/,
+    /^fc00:/i,
+    /^fe80:/i
+];
+
+app.post('/api/repeater/send', async (req, res) => {
+    const { rawRequest, allowInternal = false } = req.body;
     try {
         const lines = rawRequest.split('\n');
         const firstLine = lines[0].trim().split(' ');
@@ -762,7 +1012,7 @@ app.post('/api/repeater/send', (req, res) => {
         const pathStr = firstLine[1] || '/';
         
         const hostLine = lines.find(l => l.toLowerCase().startsWith('host:'));
-        let host = 'localhost';
+        let host = '';
         let port = 80;
         if (hostLine) {
             const hostValue = hostLine.substring(hostLine.indexOf(':') + 1).trim();
@@ -775,6 +1025,17 @@ app.post('/api/repeater/send', (req, res) => {
             }
         }
         
+        if (!host) return res.status(400).json({ error: "Host obrigatório no cabeçalho HTTP." });
+
+        // Validação estrita contra SSRF em infraestrutura interna
+        const isInternal = BLOCKED_HOST_PATTERNS.some(pattern => pattern.test(host));
+        if (isInternal && !allowInternal) {
+            return res.status(403).json({ 
+                error: "Acesso bloqueado: o destino aponta para loopback/rede interna (Proteção SSRF).",
+                target: host 
+            });
+        }
+
         const isHttps = rawRequest.toLowerCase().includes('https') || port === 443;
         if (isHttps && port === 80) port = 443;
 

@@ -205,6 +205,36 @@ rawDb.serialize(() => {
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
     `);
+
+    // Tabela de Hosts (AKB)
+    rawDb.run(`CREATE TABLE IF NOT EXISTS akb_hosts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER,
+        ip TEXT NOT NULL,
+        hostname TEXT,
+        os TEXT,
+        status TEXT,
+        last_scanned DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(project_id, ip)
+    )`);
+
+    // Tabela de Portas/Serviços (AKB)
+    rawDb.run(`CREATE TABLE IF NOT EXISTS akb_ports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        host_id INTEGER,
+        port INTEGER NOT NULL,
+        protocol TEXT,
+        state TEXT,
+        service TEXT,
+        version TEXT,
+    // Índices essenciais para isolamento e performance sem impacto destrutivo
+    rawDb.run(`CREATE INDEX IF NOT EXISTS idx_projects_user ON projects(user_id)`);
+    rawDb.run(`CREATE INDEX IF NOT EXISTS idx_findings_user_project ON findings(user_id, project_id)`);
+    rawDb.run(`CREATE INDEX IF NOT EXISTS idx_evidence_user_project ON evidence(user_id, project_id)`);
+    rawDb.run(`CREATE INDEX IF NOT EXISTS idx_reports_user ON reports(user_id)`);
+    rawDb.run(`CREATE INDEX IF NOT EXISTS idx_jobs_user ON jobs(user_id)`);
+    rawDb.run(`CREATE INDEX IF NOT EXISTS idx_scopes_project ON project_scopes(project_id)`);
+    rawDb.run(`CREATE INDEX IF NOT EXISTS idx_system_events_user ON system_events(user_id, created_at)`);
 });
 
 const db = {

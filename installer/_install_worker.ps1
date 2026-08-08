@@ -57,65 +57,64 @@ function Update-Progress {
 try {
     Write-WorkerLog "Iniciando processo de instalacao..."
     
-    # PASSO 1: Ativar WSL (10%)
+    # PASSO 1: Ativar WSL e Plataforma VM
     Update-Progress -Percent 5 -Status "Ativando WSL2..." -Log "Verificando recursos do Windows..." -Debug "Passo 1: WSL"
-    Start-Sleep -Seconds 2
+    Start-Sleep -Seconds 1
     
+    $rebootNeeded = $false
     try {
         $wsl = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -ErrorAction SilentlyContinue
         if ($null -ne $wsl -and $wsl.State -ne "Enabled") {
             Update-Progress -Percent 10 -Status "Ativando WSL..." -Log "Habilitando Microsoft-Windows-Subsystem-Linux..." -Debug "Ativando WSL"
             Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -NoRestart | Out-Null
-            Write-WorkerLog "WSL ativado"
-        } else {
-            Write-WorkerLog "WSL ja ativado"
+            Write-WorkerLog "WSL ativado (Reboot pode ser necessário)"
+            $rebootNeeded = $true
         }
         
         $vmp = Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -ErrorAction SilentlyContinue
         if ($null -ne $vmp -and $vmp.State -ne "Enabled") {
             Update-Progress -Percent 15 -Status "Ativando Plataforma VM..." -Log "Habilitando VirtualMachinePlatform..." -Debug "Ativando VM Platform"
             Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -NoRestart | Out-Null
-            Write-WorkerLog "VM Platform ativada"
-        } else {
-            Write-WorkerLog "VM Platform ja ativada"
+            Write-WorkerLog "VM Platform ativada (Reboot pode ser necessário)"
+            $rebootNeeded = $true
         }
     } catch {
-        Write-WorkerLog "Aviso WSL: $($_.Exception.Message)"
+        Write-WorkerLog "Aviso ao ativar recursos: $($_.Exception.Message)"
     }
     
-    # PASSO 2: Configurar WSL2 (20%)
+    # PASSO 2: Configurar WSL2
     Update-Progress -Percent 20 -Status "Configurando WSL2..." -Log "Executando wsl --update..." -Debug "Passo 2: Update WSL"
-    Start-Sleep -Seconds 2
+    Start-Sleep -Seconds 1
     
     try {
-        wsl --update 2>&1 | Out-Null
-        wsl --set-default-version 2 2>&1 | Out-Null
-        Write-WorkerLog "WSL2 configurado"
+        wsl.exe --update 2>&1 | Out-Null
+        wsl.exe --set-default-version 2 2>&1 | Out-Null
+        Write-WorkerLog "WSL2 atualizado com sucesso"
     } catch {
-        Write-WorkerLog "Aviso WSL2: $($_.Exception.Message)"
+        Write-WorkerLog "Aviso WSL2 update: $($_.Exception.Message)"
     }
     
     # PASSO 3: Instalar Kali Linux (30-50%)
-    Update-Progress -Percent 30 -Status "Verificando Kali Linux..." -Log "Checando se Kali ja esta instalado..." -Debug "Passo 3: Kali Linux"
-    Start-Sleep -Seconds 2
+    Update-Progress -Percent 30 -Status "Verificando Kali Linux..." -Log "Checando se Kali Linux ja esta instalado..." -Debug "Passo 3: Kali Linux"
+    Start-Sleep -Seconds 1
     
-    $distros = wsl --list --quiet 2>$null
+    $distros = wsl.exe --list --quiet 2>$null
     $kaliInstalled = $distros -match "kali"
     
     if (-not $kaliInstalled) {
-        Update-Progress -Percent 35 -Status "Instalando Kali Linux..." -Log "wsl --install -d kali-linux (pode demorar 5-10 min)..." -Speed "25 MB/s" -Debug "Baixando Kali"
+        Update-Progress -Percent 35 -Status "Instalando Kali Linux..." -Log "Executando wsl --install -d kali-linux (download oficial)..." -Speed "25 MB/s" -Debug "Baixando Kali"
         Write-WorkerLog "Instalando Kali Linux..."
         
         try {
-            wsl --install -d kali-linux
-            Write-WorkerLog "Kali Linux instalado"
+            wsl.exe --install -d kali-linux --no-launch
+            Write-WorkerLog "Kali Linux instalado com sucesso"
         } catch {
-            Write-WorkerLog "Erro ao instalar Kali: $($_.Exception.Message)"
+            Write-WorkerLog "Erro ao executar wsl --install: $($_.Exception.Message)"
         }
         
-        Update-Progress -Percent 50 -Status "Kali Linux instalado!" -Log "Distribuicao instalada com sucesso" -Debug "Kali OK"
+        Update-Progress -Percent 55 -Status "Kali Linux baixado!" -Log "Distribuicao instalada no subsistema" -Debug "Kali baixado"
     } else {
-        Update-Progress -Percent 50 -Status "Kali Linux ja instalado!" -Log "Pulando download (ja existe)" -Debug "Kali ja existe"
+        Update-Progress -Percent 55 -Status "Kali Linux ja instalado!" -Log "Distribuicao Kali encontrada no sistema" -Debug "Kali ja existe"
         Write-WorkerLog "Kali ja instalado"
     }
     

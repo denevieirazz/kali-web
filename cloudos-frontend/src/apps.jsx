@@ -8,6 +8,9 @@ export { OpSecCenterApp } from './apps/OpSecCenterApp';
 export { EventCenterApp } from './apps/EventCenterApp';
 export { AppStoreApp } from './apps/AppStoreApp';
 export { KaliHubApp } from './apps/KaliHubApp';
+export { default as ScriptLabApp } from './apps/ScriptLabApp';
+export { default as PipelineBuilderApp } from './apps/PipelineBuilderApp';
+export { default as CyberDecoderApp } from './apps/CyberDecoderApp';
 
 
 

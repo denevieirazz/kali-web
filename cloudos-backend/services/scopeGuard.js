@@ -1,25 +1,48 @@
 // Valida se o target do usuário está dentro dos escopos autorizados do projeto
+function ipToLong(ip) {
+  return ip.split('.').reduce((acc, octet) => ((acc << 8) + parseInt(octet, 10)) >>> 0, 0);
+}
+
+function isIpInCidr(ip, cidr) {
+  const [range, bits = 32] = cidr.split('/');
+  const mask = ~(2 ** (32 - parseInt(bits, 10)) - 1) >>> 0;
+  const ipLong = ipToLong(ip);
+  const rangeLong = ipToLong(range);
+  return (ipLong & mask) === (rangeLong & mask);
+}
+
 function validateTargetAgainstScope(target, scopes) {
   if (!target || typeof target !== 'string') return { allowed: false, reason: 'Target inválido.' };
+  if (!scopes || !Array.isArray(scopes) || scopes.length === 0) {
+    return { allowed: false, reason: 'Nenhum escopo autorizado configurado para o projeto.' };
+  }
+
+  const cleanTarget = target.trim().toLowerCase();
 
   for (const scope of scopes) {
-    if (scope.type === 'wildcard' && target.endsWith(scope.target.replace('*', ''))) {
-      return { allowed: true };
-    }
-    if (scope.type === 'domain' && target === scope.target) {
-      return { allowed: true };
-    }
-    if (scope.type === 'ip' && target === scope.target) {
-      return { allowed: true };
-    }
-    if (scope.type === 'cidr') {
+    if (!scope || !scope.target) continue;
+    const scopeTarget = scope.target.trim().toLowerCase();
+
+    if (scope.type === 'wildcard') {
+      const baseDomain = scopeTarget.replace(/^\*\.?/, '');
+      if (cleanTarget === baseDomain || cleanTarget.endsWith('.' + baseDomain)) {
+        return { allowed: true };
+      }
+    } else if (scope.type === 'domain') {
+      if (cleanTarget === scopeTarget) {
+        return { allowed: true };
+      }
+    } else if (scope.type === 'ip') {
+      if (cleanTarget === scopeTarget) {
+        return { allowed: true };
+      }
+    } else if (scope.type === 'cidr') {
       try {
-        // Validação simples de sub-rede se ipaddr-js não estiver instalado
-        if (target.startsWith(scope.target.split('/')[0].split('.').slice(0, 3).join('.'))) {
+        if (/^\d{1,3}(\.\d{1,3}){3}$/.test(cleanTarget) && isIpInCidr(cleanTarget, scopeTarget)) {
           return { allowed: true };
         }
       } catch (e) {
-        // Ignora erros de sintaxe
+        // Ignora erro de parsing
       }
     }
   }
@@ -27,3 +50,4 @@ function validateTargetAgainstScope(target, scopes) {
 }
 
 module.exports = { validateTargetAgainstScope };
+

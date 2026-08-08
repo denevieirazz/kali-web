@@ -1,0 +1,216 @@
+/* CyberDecoderApp.css - Dark Mode Tático */
+
+.cyber-decoder-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background-color: #0d1117;
+  color: #c9d1d9;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  overflow: hidden;
+}
+
+.cd-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background-color: #161b22;
+  border-bottom: 1px solid #30363d;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.cd-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cd-title h3 {
+  margin: 0;
+  font-size: 15px;
+  color: #58a6ff;
+}
+
+.cd-badge {
+  background: rgba(88, 166, 255, 0.15);
+  color: #58a6ff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(88, 166, 255, 0.3);
+}
+
+.cd-presets {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cd-preset-label {
+  font-size: 11px;
+  color: #8b949e;
+}
+
+.cd-btn-preset {
+  background: #21262d;
+  border: 1px solid #30363d;
+  color: #c9d1d9;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.cd-btn-preset:hover {
+  background: #30363d;
+  border-color: #58a6ff;
+  color: #58a6ff;
+}
+
+.cd-ops-bar {
+  display: flex;
+  gap: 6px;
+  padding: 8px 16px;
+  background: #161b22;
+  border-bottom: 1px solid #30363d;
+  overflow-x: auto;
+}
+
+.cd-op-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #8b949e;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: 0.2s;
+}
+
+.cd-op-btn:hover {
+  color: #c9d1d9;
+  border-color: #8b949e;
+}
+
+.cd-op-btn.active {
+  background: rgba(35, 134, 54, 0.2);
+  border-color: #2ea043;
+  color: #3fb950;
+  font-weight: 600;
+}
+
+.cd-main {
+  display: flex;
+  flex: 1;
+  padding: 12px;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.cd-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.cd-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #21262d;
+  border-bottom: 1px solid #30363d;
+  font-size: 12px;
+  font-weight: 600;
+  color: #8b949e;
+}
+
+.cd-btn-subtle {
+  background: transparent;
+  border: none;
+  color: #8b949e;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.cd-btn-subtle:hover {
+  color: #c9d1d9;
+  background: #30363d;
+}
+
+.cd-btn-copy {
+  color: #58a6ff;
+}
+
+.cd-textarea {
+  flex: 1;
+  width: 100%;
+  padding: 12px;
+  background: #0d1117;
+  border: none;
+  color: #7ee787;
+  font-family: 'Fira Code', 'Consolas', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+}
+
+.cd-textarea.cd-output {
+  color: #58a6ff;
+}
+
+.cd-mid-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cd-action-btn {
+  background: #21262d;
+  border: 1px solid #30363d;
+  color: #c9d1d9;
+  font-size: 16px;
+  padding: 8px;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.cd-action-btn:hover {
+  background: #30363d;
+  border-color: #58a6ff;
+  transform: scale(1.1);
+}
+
+.cd-statusbar {
+  display: flex;
+  gap: 16px;
+  padding: 6px 16px;
+  background: #161b22;
+  border-top: 1px solid #30363d;
+  font-size: 11px;
+  color: #8b949e;
+}
+
+.cd-status-msg {
+  color: #3fb950;
+  font-weight: 600;
+  margin-left: auto;
+}

@@ -1,0 +1,438 @@
+/* ScriptLabApp.css - CloudOS Dark Theme */
+
+.scriptlab-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background-color: #0d1117;
+  color: #c9d1d9;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  overflow: hidden;
+  outline: none;
+}
+
+/* Toolbar */
+.scriptlab-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background-color: #161b22;
+  border-bottom: 1px solid #30363d;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.scriptlab-toolbar-left,
+.scriptlab-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sl-separator {
+  width: 1px;
+  height: 20px;
+  background-color: #30363d;
+  margin: 0 4px;
+}
+
+.sl-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+  background-color: #21262d;
+  color: #c9d1d9;
+}
+
+.sl-btn:hover:not(:disabled) {
+  background-color: #30363d;
+  border-color: #8b949e;
+}
+
+.sl-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sl-btn-run {
+  background-color: #238636;
+  color: #ffffff;
+  border-color: #2ea043;
+}
+
+.sl-btn-run:hover:not(:disabled) {
+  background-color: #2ea043;
+  border-color: #3fb950;
+}
+
+.sl-btn-run.running {
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.6; }
+  100% { opacity: 1; }
+}
+
+.sl-btn-stop {
+  background-color: #da3633;
+  color: #ffffff;
+  border-color: #f85149;
+}
+
+.sl-btn-stop:hover:not(:disabled) {
+  background-color: #f85149;
+}
+
+.sl-language-selector {
+  display: flex;
+  align-items: center;
+  background-color: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+
+.sl-lang-icon {
+  font-size: 14px;
+  margin-right: 4px;
+}
+
+.sl-lang-select {
+  background: transparent;
+  color: #c9d1d9;
+  border: none;
+  font-size: 13px;
+  padding: 4px 0;
+  outline: none;
+  cursor: pointer;
+}
+
+.sl-lang-select option {
+  background-color: #161b22;
+  color: #c9d1d9;
+}
+
+.sl-filename-input {
+  background-color: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #58a6ff;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: monospace;
+  width: 180px;
+  outline: none;
+}
+
+.sl-filename-input:focus {
+  border-color: #58a6ff;
+}
+
+/* Main Area */
+.scriptlab-main {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Sidebar */
+.scriptlab-sidebar {
+  display: flex;
+  flex-direction: column;
+  background-color: #161b22;
+  border-right: 1px solid #30363d;
+  z-index: 10;
+}
+
+.sl-sidebar-section {
+  display: flex;
+  border-bottom: 1px solid #30363d;
+}
+
+.sl-sidebar-btn {
+  flex: 1;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  color: #8b949e;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-bottom: 2px solid transparent;
+}
+
+.sl-sidebar-btn:hover {
+  color: #c9d1d9;
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+.sl-sidebar-btn.active {
+  color: #58a6ff;
+  border-bottom-color: #58a6ff;
+  background-color: rgba(88, 166, 255, 0.05);
+}
+
+.sl-sidebar-panel {
+  width: 280px;
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  background-color: #0d1117;
+  border-right: 1px solid #30363d;
+}
+
+.sl-sidebar-panel h4 {
+  margin: 0 0 12px 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #8b949e;
+}
+
+.sl-template-item,
+.sl-saved-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 6px;
+  background-color: #161b22;
+  border: 1px solid #21262d;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.sl-template-item:hover,
+.sl-saved-item:hover {
+  border-color: #58a6ff;
+  background-color: #1c2128;
+  transform: translateX(2px);
+}
+
+.sl-template-icon,
+.sl-saved-icon {
+  font-size: 18px;
+  margin-top: 2px;
+}
+
+.sl-template-info,
+.sl-saved-info {
+  flex: 1;
+  overflow: hidden;
+}
+
+.sl-template-name,
+.sl-saved-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f0f6fc;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sl-template-desc {
+  font-size: 11px;
+  color: #8b949e;
+  line-height: 1.3;
+}
+
+.sl-saved-date {
+  font-size: 10px;
+  color: #6e7681;
+}
+
+.sl-saved-delete {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  opacity: 0.6;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.sl-saved-delete:hover {
+  opacity: 1;
+  background-color: rgba(248, 81, 73, 0.15);
+}
+
+.sl-empty {
+  color: #6e7681;
+  font-size: 12px;
+  text-align: center;
+  padding: 20px 0;
+  font-style: italic;
+}
+
+/* Content Area (Editor + Output) */
+.scriptlab-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+.scriptlab-editor {
+  flex: 1;
+  min-height: 200px;
+  position: relative;
+}
+
+.sl-editor-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 12px;
+  color: #8b949e;
+  font-size: 13px;
+}
+
+.sl-spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid #30363d;
+  border-top-color: #58a6ff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Output Area */
+.scriptlab-output {
+  height: 220px;
+  display: flex;
+  flex-direction: column;
+  background-color: #040d21;
+  border-top: 1px solid #30363d;
+}
+
+.sl-output-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 16px;
+  background-color: #0d1117;
+  border-bottom: 1px solid #21262d;
+}
+
+.sl-output-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #7ee787;
+}
+
+.sl-output-clear {
+  background: transparent;
+  border: none;
+  color: #8b949e;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.sl-output-clear:hover {
+  color: #c9d1d9;
+  background-color: #21262d;
+}
+
+.sl-output-content {
+  flex: 1;
+  padding: 12px 16px;
+  overflow-y: auto;
+  font-family: 'Fira Code', 'Consolas', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #7ee787;
+  position: relative;
+}
+
+.sl-output-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.sl-output-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #484f58;
+  gap: 8px;
+  text-align: center;
+}
+
+.sl-placeholder-icon {
+  font-size: 28px;
+  opacity: 0.4;
+}
+
+.sl-placeholder-hint {
+  font-size: 11px;
+  color: #30363d;
+}
+
+.sl-output-running {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #58a6ff;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.sl-spinner-small {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(88, 166, 255, 0.2);
+  border-top-color: #58a6ff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* Statusbar */
+.scriptlab-statusbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 4px 16px;
+  background-color: #161b22;
+  border-top: 1px solid #30363d;
+  font-size: 11px;
+  color: #8b949e;
+}
+
+.sl-status-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sl-status-running {
+  color: #3fb950;
+  font-weight: 600;
+  margin-left: auto;
+}

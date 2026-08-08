@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import './KaliHubApp.css';
 
-const API_BASE = 'http://localhost:8080';
+const API_BASE = '';
 
 const CATEGORIES = [
   { id: 'all', name: 'Todas', icon: Search },

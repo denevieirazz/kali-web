@@ -1,8 +1,4 @@
-const express = require('express');
-const router = express.Router();
-const { spawn } = require('child_process');
-const { EventEmitter } = require('events');
-const { authenticateToken } = require('../middleware/auth');
+const { getProjectExecutionContext } = require('../services/scannerSecurity');
 
 router.use(authenticateToken);
 
@@ -41,22 +37,31 @@ function translateText(text, lang) {
 /**
  * POST /api/sqlmap/scan
  */
-router.post('/scan', (req, res) => {
-  const { url, lang } = req.body;
+router.post('/scan', async (req, res) => {
+  const { url, lang, projectId } = req.body;
 
   if (!url) return res.status(400).json({ error: 'URL é obrigatória' });
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
     return res.status(400).json({ error: 'URL deve começar com http:// ou https://' });
   }
+  if (!projectId) {
+    return res.status(403).json({ error: 'Execução do SQLMap exige um Projeto Ativo (projectId).' });
+  }
+
+  // Validação centralizada de Escopo com getProjectExecutionContext
+  const contextCheck = await getProjectExecutionContext(req.user.id, projectId, url);
+  if (!contextCheck.allowed) {
+    return res.status(403).json({ error: contextCheck.reason });
+  }
 
   const safeUrl = url.replace(/'/g, `'"'"'`);
   const scanId = Date.now().toString();
   
-  const cmd = `sqlmap -u '${safeUrl}' --dbs --random-agent --flush-session`;
+  const cmd = `sqlmap -u '${safeUrl}' --batch --dbs --random-agent --flush-session`;
   const child = spawn('wsl', ['-d', 'kali-linux', '-u', 'cloudos', 'bash', '-c', cmd]);
 
   const emitter = new EventEmitter();
-  activeScans[scanId] = { child, emitter, buffer: '', fullOutput: '', lang: lang || 'pt' };
+  activeScans[scanId] = { child, emitter, buffer: '', fullOutput: '', lang: lang || 'pt', userId: req.user.id };
 
   res.json({ scanId, message: 'Scan iniciado.' });
 });
@@ -66,7 +71,7 @@ router.post('/scan', (req, res) => {
  */
 router.get('/events/:scanId', (req, res) => {
   const scan = activeScans[req.params.scanId];
-  if (!scan) return res.status(404).end();
+  if (!scan || scan.userId !== req.user.id) return res.status(404).end();
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -88,6 +93,10 @@ router.get('/events/:scanId', (req, res) => {
     scan.emitter.off('message', onMessage);
     scan.emitter.off('question', onQuestion);
     scan.emitter.off('done', onDone);
+    try {
+      scan.child.kill('SIGKILL');
+    } catch {}
+    delete activeScans[req.params.scanId];
   });
 
   scan.child.stdout.on('data', (chunk) => {
