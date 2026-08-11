@@ -1,7 +1,7 @@
 // ============================================
-// File Explorer App
+// File Explorer App — Fully Interactive
 // ============================================
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo } from 'react';
 import { useFileSystem } from '../../stores/fileSystem';
 import { useSystem } from '../../stores/systemStore';
 import { useWindowManager } from '../../stores/windowManager';
@@ -10,7 +10,20 @@ import { useContextMenuStore } from '../../stores/contextMenuStore';
 import { useAppRegistry } from '../../core/appRegistry';
 import { useRubberBand } from '../../hooks/useRubberBand';
 import kernel from '../../core/kernel';
+import type { FileSystemNode } from '../../types';
 import './FileExplorer.css';
+
+interface ExplorerClipboard {
+  node: FileSystemNode;
+  action: 'copy' | 'cut';
+}
+
+interface ExplorerDialog {
+  type: 'new-folder' | 'new-file' | 'rename' | 'properties' | 'confirm-delete' | null;
+  targetNode?: FileSystemNode;
+  title?: string;
+  initialValue?: string;
+}
 
 export default function FileExplorerApp({ windowId }: { windowId: string }) {
   const { currentUser } = useSystem();
@@ -20,12 +33,23 @@ export default function FileExplorerApp({ windowId }: { windowId: string }) {
   const [viewMode, setViewMode] = useState<'list' | 'grid' | 'details'>('details');
   const [pathInput, setPathInput] = useState(currentPath);
   const [isEditingPath, setIsEditingPath] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<'name' | 'size' | 'modified'>('name');
+
+  // Clipboard for Cut/Copy/Paste
+  const [clipboard, setClipboard] = useState<ExplorerClipboard | null>(null);
+
+  // Accessible Dialog state
+  const [dialog, setDialog] = useState<ExplorerDialog>({ type: null });
+  const [dialogInput, setDialogInput] = useState('');
+
   const itemRefs = useRef<Map<string, HTMLElement>>(new Map());
 
-  const { getNode, getChildren, deleteNode } = useFileSystem();
+  const { getNode, getChildren, deleteNode, createFile, createDirectory, renameNode, moveNode } =
+    useFileSystem();
   const { updateWindowTitle } = useWindowManager();
-  const openWindow = useWindowManager(s => s.openWindow);
-  const createProcess = useProcessManager(s => s.createProcess);
+  const openWindow = useWindowManager((s) => s.openWindow);
+  const createProcess = useProcessManager((s) => s.createProcess);
   const { openContextMenu } = useContextMenuStore();
   const apps = useAppRegistry((s: any) => s.apps);
 
@@ -43,19 +67,31 @@ export default function FileExplorerApp({ windowId }: { windowId: string }) {
   });
 
   const children = getChildren(currentPath);
-  const dirs = children.filter(c => c.type === 'directory').sort((a, b) => a.name.localeCompare(b.name));
-  const files = children.filter(c => c.type === 'file').sort((a, b) => a.name.localeCompare(b.name));
-  const sortedChildren = [...dirs, ...files];
 
-  const navigateTo = useCallback((path: string) => {
-    const node = getNode(path);
-    if (node && node.type === 'directory') {
-      setCurrentPath(path);
-      setPathInput(path);
-      setSelectedItems(new Set());
-      updateWindowTitle(windowId, `${node.name} - Explorador de Arquivos`);
-    }
-  }, [getNode, windowId, updateWindowTitle]);
+  // Filter & Sort
+  const sortedChildren = useMemo(() => {
+    return children
+      .filter((c) => c.name.toLowerCase().includes(searchQuery.toLowerCase()))
+      .sort((a, b) => {
+        if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+        if (sortBy === 'size') return (a.size || 0) - (b.size || 0);
+        if (sortBy === 'modified') return (b.modifiedAt || 0) - (a.modifiedAt || 0);
+        return a.name.localeCompare(b.name, 'pt-BR', { numeric: true });
+      });
+  }, [children, searchQuery, sortBy]);
+
+  const navigateTo = useCallback(
+    (path: string) => {
+      const node = getNode(path);
+      if (node && node.type === 'directory') {
+        setCurrentPath(path);
+        setPathInput(path);
+        setSelectedItems(new Set());
+        updateWindowTitle(windowId, `${node.name} - Explorador de Arquivos`);
+      }
+    },
+    [getNode, windowId, updateWindowTitle]
+  );
 
   const goUp = useCallback(() => {
     const parts = currentPath.split('\\');
@@ -64,22 +100,22 @@ export default function FileExplorerApp({ windowId }: { windowId: string }) {
     }
   }, [currentPath, navigateTo]);
 
-  const handleDoubleClick = (node: any) => {
+  const handleDoubleClick = (node: FileSystemNode) => {
     if (node.type === 'directory') {
       navigateTo(node.path);
     } else {
-      // Open file with associated app
       const ext = node.extension;
       let targetAppId = '';
       let titlePrefix = `${node.name} - `;
-      
+
       if (ext === 'exe') {
-        const isApp = node.metadata?.type === 'app_executable' || (node.content && node.content.startsWith('{'));
+        const isApp =
+          node.metadata?.type === 'app_executable' || (node.content && node.content.startsWith('{'));
         const isBinary = node.metadata?.type === 'binary_executable';
 
         if (isApp) {
           try {
-            const manifest = JSON.parse(node.content);
+            const manifest = JSON.parse(node.content || '{}');
             targetAppId = manifest.appId || 'notepad';
             titlePrefix = '';
           } catch (e) {
@@ -87,12 +123,9 @@ export default function FileExplorerApp({ windowId }: { windowId: string }) {
             return;
           }
         } else if (isBinary) {
-          // Distinguish real system PE binaries from SDK (JS) executables.
-          // makeSysExe content starts with "[name.obx]" — SDK code does not.
           const isSdkApp = node.content && !node.content.trimStart().startsWith('[');
 
           if (isSdkApp) {
-            // SDK app: open with SdkAppRunner
             const pid = createProcess('sdk-app-runner', node.name, '⚡');
             openWindow({
               title: node.name,
@@ -106,27 +139,33 @@ export default function FileExplorerApp({ windowId }: { windowId: string }) {
             return;
           }
 
-          // Real system binary (PE32+): run in Terminal
           const terminalApp = apps['terminal'];
           if (terminalApp) {
             const pid = createProcess(terminalApp.id, terminalApp.name, '💻');
             openWindow({
               title: `Executando ${node.name} - Terminal`,
-              icon: '💻', appId: 'terminal',
+              icon: '💻',
+              appId: 'terminal',
               processId: pid,
-              width: 700, height: 450,
-              params: { command: node.path }
+              width: 700,
+              height: 450,
+              params: { command: node.path },
             });
             return;
           }
         } else {
-           kernel.log('INFO', 'Explorer', `Cannot execute system driver or library: ${node.name}`);
-           return;
+          kernel.log('INFO', 'Explorer', `Cannot execute system driver or library: ${node.name}`);
+          return;
         }
       } else {
-        targetAppId = (ext === 'txt' || ext === 'ini' || ext === 'js' || ext === 'json') ? 'notepad' : 
-                      (ext === 'html' || ext === 'htm') ? 'browser' :
-                      (ext === 'webm' || ext === 'mp4') ? 'media-player' : '';
+        targetAppId =
+          ext === 'txt' || ext === 'ini' || ext === 'js' || ext === 'json'
+            ? 'notepad'
+            : ext === 'html' || ext === 'htm'
+            ? 'browser'
+            : ext === 'webm' || ext === 'mp4'
+            ? 'media-player'
+            : '';
       }
 
       if (!targetAppId) {
@@ -144,7 +183,7 @@ export default function FileExplorerApp({ windowId }: { windowId: string }) {
           width: app.defaultWidth,
           height: app.defaultHeight,
           processId: pid,
-          params: { filePath: node.path }
+          params: { filePath: node.path },
         });
       } else {
         kernel.log('ERROR', 'Explorer', `Application '${targetAppId}' not found in registry.`);
@@ -152,34 +191,53 @@ export default function FileExplorerApp({ windowId }: { windowId: string }) {
     }
   };
 
-  const getFileIcon = (node: any) => {
+  const getFileIcon = (node: FileSystemNode) => {
     if (node.type === 'directory') return '📁';
     const ext = node.extension;
     switch (ext) {
-      case 'txt': return '📝';
-      case 'js': return '📜';
-      case 'html': return '🌐';
-      case 'css': return '🎨';
-      case 'json': return '📋';
-      case 'ini': return '⚙️';
-      case 'png': case 'jpg': case 'gif': return '🖼️';
-      case 'mp3': case 'wav': return '🎵';
-      case 'mp4': case 'avi': case 'webm': return '🎬';
-      case 'exe': return '⚡';
-      case 'obx': return '⚡';
-      case 'osl': return '🔷';
-      case 'zip': case 'rar': return '📦';
-      default: return '📄';
+      case 'txt':
+        return '📝';
+      case 'js':
+        return '📜';
+      case 'html':
+        return '🌐';
+      case 'css':
+        return '🎨';
+      case 'json':
+        return '📋';
+      case 'ini':
+        return '⚙️';
+      case 'png':
+      case 'jpg':
+      case 'gif':
+        return '🖼️';
+      case 'mp3':
+      case 'wav':
+        return '🎵';
+      case 'mp4':
+      case 'avi':
+      case 'webm':
+        return '🎬';
+      case 'exe':
+      case 'obx':
+        return '⚡';
+      case 'osl':
+        return '🔷';
+      case 'zip':
+      case 'rar':
+        return '📦';
+      default:
+        return '📄';
     }
   };
 
-  // ── Drag from FileExplorer to Desktop ─────────────────────────────────────
-  const handleDragStart = useCallback((e: React.DragEvent, node: any) => {
+  const handleDragStart = useCallback((e: React.DragEvent, node: FileSystemNode) => {
     const icon = getFileIcon(node);
-    // Determine appId for executables
     let appId = '';
     if (node.metadata?.type === 'app_executable' && node.content?.startsWith('{')) {
-      try { appId = JSON.parse(node.content).appId || ''; } catch { /* ignore */ }
+      try {
+        appId = JSON.parse(node.content).appId || '';
+      } catch {}
     } else if (node.metadata?.type === 'binary_executable') {
       appId = `sdk:${node.name}`;
     }
@@ -194,14 +252,6 @@ export default function FileExplorerApp({ windowId }: { windowId: string }) {
     e.dataTransfer.setData('application/obsidianos-file', payload);
     e.dataTransfer.setData('text/plain', payload);
     e.dataTransfer.effectAllowed = 'copy';
-
-    // Ghost image
-    const ghost = document.createElement('div');
-    ghost.style.cssText = 'position:fixed;top:-200px;left:-200px;background:rgba(99,102,241,0.2);border:1px solid rgba(99,102,241,0.6);border-radius:6px;padding:6px 10px;color:#fff;font-size:13px;white-space:nowrap;backdrop-filter:blur(4px);';
-    ghost.textContent = `${icon} ${node.name}`;
-    document.body.appendChild(ghost);
-    e.dataTransfer.setDragImage(ghost, 0, 0);
-    setTimeout(() => document.body.removeChild(ghost), 0);
   }, []);
 
   const pathParts = currentPath.split('\\').filter(Boolean);
@@ -215,49 +265,189 @@ export default function FileExplorerApp({ windowId }: { windowId: string }) {
     { name: 'Vídeos', icon: '🎬', path: `${userHome}\\Videos` },
   ];
 
-  const handleItemContextMenu = (e: React.MouseEvent, node: any) => {
+  // Clipboard Paste Implementation
+  const handlePaste = useCallback(() => {
+    if (!clipboard) return;
+    const { node, action } = clipboard;
+    const targetPath = `${currentPath}\\${node.name}`;
+
+    if (action === 'cut') {
+      moveNode(node.path, targetPath);
+      setClipboard(null);
+    } else {
+      // Copy
+      if (node.type === 'file') {
+        createFile(currentPath, node.name, node.content, node.extension);
+      } else {
+        createDirectory(currentPath, node.name);
+      }
+    }
+  }, [clipboard, currentPath, moveNode, createFile, createDirectory]);
+
+  // Context Menu on File/Folder Item
+  const handleItemContextMenu = (e: React.MouseEvent, node: FileSystemNode) => {
     e.preventDefault();
     e.stopPropagation();
-    setSelectedItems(prev => new Set([...prev, node.path]));
+    setSelectedItems(new Set([node.path]));
+
     openContextMenu(e.clientX, e.clientY, [
       { id: 'open', label: 'Abrir', icon: '📂', onClick: () => handleDoubleClick(node) },
       { id: 'sep1', label: '', separator: true },
-      { id: 'cut', label: 'Recortar', icon: '✂️', onClick: () => {} },
-      { id: 'copy', label: 'Copiar', icon: '📄', onClick: () => {} },
-      { id: 'paste', label: 'Colar', disabled: true, icon: '📋', onClick: () => {} },
+      {
+        id: 'cut',
+        label: 'Recortar',
+        icon: '✂️',
+        onClick: () => setClipboard({ node, action: 'cut' }),
+      },
+      {
+        id: 'copy',
+        label: 'Copiar',
+        icon: '📄',
+        onClick: () => setClipboard({ node, action: 'copy' }),
+      },
+      {
+        id: 'paste',
+        label: 'Colar',
+        disabled: !clipboard,
+        icon: '📋',
+        onClick: handlePaste,
+      },
       { id: 'sep2', label: '', separator: true },
-      { id: 'rename', label: 'Renomear', icon: '📝', onClick: () => {} },
-      { id: 'delete', label: 'Excluir', icon: '🗑️', onClick: () => {
-        if (confirm(`Tem certeza que deseja excluir ${node.name}?`)) {
-          deleteNode(node.path);
-        }
-      }},
+      {
+        id: 'rename',
+        label: 'Renomear',
+        icon: '📝',
+        onClick: () => {
+          setDialogInput(node.name);
+          setDialog({
+            type: 'rename',
+            targetNode: node,
+            title: `Renomear ${node.type === 'directory' ? 'Pasta' : 'Arquivo'}`,
+            initialValue: node.name,
+          });
+        },
+      },
+      {
+        id: 'delete',
+        label: 'Excluir',
+        icon: '🗑️',
+        onClick: () => {
+          setDialog({
+            type: 'confirm-delete',
+            targetNode: node,
+            title: 'Excluir Item',
+          });
+        },
+      },
       { id: 'sep3', label: '', separator: true },
-      { id: 'props', label: 'Propriedades', onClick: () => {} },
+      {
+        id: 'props',
+        label: 'Propriedades',
+        icon: 'ℹ️',
+        onClick: () => {
+          setDialog({
+            type: 'properties',
+            targetNode: node,
+            title: `Propriedades de ${node.name}`,
+          });
+        },
+      },
     ]);
   };
 
+  // Context Menu on Background Canvas
   const handleContentContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     openContextMenu(e.clientX, e.clientY, [
-      { id: 'view', label: 'Exibir', children: [
-        { id: 'details', label: 'Detalhes', onClick: () => setViewMode('details') },
-        { id: 'grid', label: 'Ícones grandes', onClick: () => setViewMode('grid') },
-      ]},
-      { id: 'sort', label: 'Classificar por', children: [
-        { id: 'name', label: 'Nome', onClick: () => {} },
-        { id: 'size', label: 'Tamanho', onClick: () => {} },
-      ]},
+      {
+        id: 'view',
+        label: 'Exibir',
+        children: [
+          { id: 'details', label: 'Detalhes', onClick: () => setViewMode('details') },
+          { id: 'grid', label: 'Ícones grandes', onClick: () => setViewMode('grid') },
+        ],
+      },
+      {
+        id: 'sort',
+        label: 'Classificar por',
+        children: [
+          { id: 'name', label: 'Nome', onClick: () => setSortBy('name') },
+          { id: 'size', label: 'Tamanho', onClick: () => setSortBy('size') },
+          { id: 'modified', label: 'Data de Modificação', onClick: () => setSortBy('modified') },
+        ],
+      },
       { id: 'sep1', label: '', separator: true },
-      { id: 'refresh', label: 'Atualizar', onClick: () => {} },
+      {
+        id: 'paste',
+        label: 'Colar',
+        disabled: !clipboard,
+        icon: '📋',
+        onClick: handlePaste,
+      },
+      {
+        id: 'refresh',
+        label: 'Atualizar',
+        icon: '↻',
+        onClick: () => {
+          navigateTo(currentPath);
+        },
+      },
       { id: 'sep2', label: '', separator: true },
-      { id: 'new', label: 'Novo', children: [
-        { id: 'folder', label: 'Pasta', icon: '📁', onClick: () => {} },
-        { id: 'txt', label: 'Documento de Texto', icon: '📄', onClick: () => {} },
-      ]},
-      { id: 'sep3', label: '', separator: true },
-      { id: 'props', label: 'Propriedades', onClick: () => {} },
+      {
+        id: 'new',
+        label: 'Novo',
+        children: [
+          {
+            id: 'folder',
+            label: 'Pasta',
+            icon: '📁',
+            onClick: () => {
+              setDialogInput('Nova Pasta');
+              setDialog({
+                type: 'new-folder',
+                title: 'Criar Nova Pasta',
+                initialValue: 'Nova Pasta',
+              });
+            },
+          },
+          {
+            id: 'txt',
+            label: 'Documento de Texto',
+            icon: '📄',
+            onClick: () => {
+              setDialogInput('Novo Documento.txt');
+              setDialog({
+                type: 'new-file',
+                title: 'Criar Documento de Texto',
+                initialValue: 'Novo Documento.txt',
+              });
+            },
+          },
+        ],
+      },
     ]);
+  };
+
+  // Dialog Execution
+  const handleDialogSubmit = () => {
+    const { type, targetNode } = dialog;
+    if (!type) return;
+
+    const clean = dialogInput.trim();
+
+    if (type === 'new-folder' && clean) {
+      createDirectory(currentPath, clean);
+    } else if (type === 'new-file' && clean) {
+      const ext = clean.includes('.') ? clean.split('.').pop() || 'txt' : 'txt';
+      createFile(currentPath, clean, '', ext);
+    } else if (type === 'rename' && targetNode && clean) {
+      renameNode(targetNode.path, clean);
+    } else if (type === 'confirm-delete' && targetNode) {
+      deleteNode(targetNode.path);
+    }
+
+    setDialog({ type: null });
+    setDialogInput('');
   };
 
   return (
@@ -266,13 +456,47 @@ export default function FileExplorerApp({ windowId }: { windowId: string }) {
       <div className="explorer-toolbar">
         <div className="explorer-nav-buttons">
           <button className="explorer-nav-btn" onClick={goUp} title="Voltar">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+            >
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
           </button>
-          <button className="explorer-nav-btn" title="Avançar">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M9 18l6-6-6-6"/></svg>
+          <button
+            className="explorer-nav-btn"
+            onClick={() => navigateTo(currentPath)}
+            title="Atualizar"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path d="M23 4v6h-6" />
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+            </svg>
           </button>
           <button className="explorer-nav-btn" onClick={goUp} title="Pasta pai">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 15l-6-6-6 6"/></svg>
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+            >
+              <path d="M18 15l-6-6-6 6" />
+            </svg>
           </button>
         </div>
 
@@ -321,10 +545,25 @@ export default function FileExplorerApp({ windowId }: { windowId: string }) {
 
         {/* Search */}
         <div className="explorer-search">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          >
+            <circle cx="11" cy="11" r="7" />
+            <path d="M21 21l-4.35-4.35" />
           </svg>
-          <input type="text" placeholder="Pesquisar" className="explorer-search-input" />
+          <input
+            type="text"
+            placeholder="Pesquisar..."
+            className="explorer-search-input"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
         </div>
       </div>
 
@@ -333,7 +572,7 @@ export default function FileExplorerApp({ windowId }: { windowId: string }) {
         <div className="explorer-sidebar">
           <div className="sidebar-section">
             <div className="sidebar-title">Acesso Rápido</div>
-            {quickAccess.map(item => (
+            {quickAccess.map((item) => (
               <button
                 key={item.path}
                 className={`sidebar-item ${currentPath === item.path ? 'active' : ''}`}
@@ -346,7 +585,10 @@ export default function FileExplorerApp({ windowId }: { windowId: string }) {
           </div>
           <div className="sidebar-section">
             <div className="sidebar-title">Este Computador</div>
-            <button className="sidebar-item" onClick={() => navigateTo('C:')}>
+            <button
+              className={`sidebar-item ${currentPath === 'C:' ? 'active' : ''}`}
+              onClick={() => navigateTo('C:')}
+            >
               <span>💻</span>
               <span>Disco Local (C:)</span>
             </button>
@@ -356,7 +598,9 @@ export default function FileExplorerApp({ windowId }: { windowId: string }) {
         {/* Main Content */}
         <div
           className="explorer-content"
-          ref={el => { containerRef.current = el; }}
+          ref={(el) => {
+            containerRef.current = el;
+          }}
           onMouseDown={onMouseDown}
           onContextMenu={handleContentContextMenu}
         >
@@ -364,17 +608,20 @@ export default function FileExplorerApp({ windowId }: { windowId: string }) {
             <table className="explorer-table">
               <thead>
                 <tr>
-                  <th>Nome</th>
-                  <th>Data de modificação</th>
+                  <th onClick={() => setSortBy('name')}>Nome</th>
+                  <th onClick={() => setSortBy('modified')}>Data de modificação</th>
                   <th>Tipo</th>
-                  <th>Tamanho</th>
+                  <th onClick={() => setSortBy('size')}>Tamanho</th>
                 </tr>
               </thead>
               <tbody>
-                {sortedChildren.map(node => (
+                {sortedChildren.map((node) => (
                   <tr
                     key={node.path}
-                    ref={el => { if (el) itemRefs.current.set(node.path, el); else itemRefs.current.delete(node.path); }}
+                    ref={(el) => {
+                      if (el) itemRefs.current.set(node.path, el);
+                      else itemRefs.current.delete(node.path);
+                    }}
                     className={`explorer-row ${selectedItems.has(node.path) ? 'selected' : ''}`}
                     draggable
                     onDragStart={(e) => handleDragStart(e, node)}
@@ -387,18 +634,25 @@ export default function FileExplorerApp({ windowId }: { windowId: string }) {
                       {node.name}
                     </td>
                     <td>{new Date(node.modifiedAt).toLocaleString('pt-BR')}</td>
-                    <td>{node.type === 'directory' ? 'Pasta de arquivos' : `Arquivo ${node.extension?.toUpperCase()}`}</td>
-                    <td>{node.type === 'file' ? `${node.size} B` : ''}</td>
+                    <td>
+                      {node.type === 'directory'
+                        ? 'Pasta de arquivos'
+                        : `Arquivo ${node.extension?.toUpperCase()}`}
+                    </td>
+                    <td>{node.type === 'file' ? `${node.size || 0} B` : ''}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           ) : (
             <div className="explorer-grid">
-              {sortedChildren.map(node => (
+              {sortedChildren.map((node) => (
                 <div
                   key={node.path}
-                  ref={el => { if (el) itemRefs.current.set(node.path, el); else itemRefs.current.delete(node.path); }}
+                  ref={(el) => {
+                    if (el) itemRefs.current.set(node.path, el);
+                    else itemRefs.current.delete(node.path);
+                  }}
                   className={`explorer-grid-item ${selectedItems.has(node.path) ? 'selected' : ''}`}
                   draggable
                   onDragStart={(e) => handleDragStart(e, node)}
@@ -414,9 +668,7 @@ export default function FileExplorerApp({ windowId }: { windowId: string }) {
           )}
 
           {sortedChildren.length === 0 && (
-            <div className="explorer-empty">
-              Esta pasta está vazia.
-            </div>
+            <div className="explorer-empty">Esta pasta está vazia.</div>
           )}
 
           {/* Rubber band selection box */}
@@ -437,20 +689,105 @@ export default function FileExplorerApp({ windowId }: { windowId: string }) {
       {/* Status Bar */}
       <div className="explorer-statusbar">
         <span>{sortedChildren.length} itens</span>
-        {selectedItems.size > 0 && <span>{selectedItems.size} {selectedItems.size === 1 ? 'item selecionado' : 'itens selecionados'}</span>}
+        {selectedItems.size > 0 && (
+          <span>
+            {selectedItems.size}{' '}
+            {selectedItems.size === 1 ? 'item selecionado' : 'itens selecionados'}
+          </span>
+        )}
         <div className="explorer-view-toggle">
           <button
             className={viewMode === 'details' ? 'active' : ''}
             onClick={() => setViewMode('details')}
             title="Detalhes"
-          >≡</button>
+          >
+            ≡
+          </button>
           <button
             className={viewMode === 'grid' ? 'active' : ''}
             onClick={() => setViewMode('grid')}
             title="Grade"
-          >⊞</button>
+          >
+            ⊞
+          </button>
         </div>
       </div>
+
+      {/* Dialogs: Properties / Create / Rename / Delete */}
+      {dialog.type && (
+        <div className="cf-modal" role="dialog" aria-modal="true">
+          <div className="cf-dialog-box">
+            <h3 className="cf-dialog-title">{dialog.title}</h3>
+
+            {dialog.type === 'properties' && dialog.targetNode ? (
+              <div style={{ fontSize: '13px', color: '#cbd5e1', lineHeight: '1.8' }}>
+                <div>
+                  <b>Nome:</b> {dialog.targetNode.name}
+                </div>
+                <div>
+                  <b>Tipo:</b>{' '}
+                  {dialog.targetNode.type === 'directory'
+                    ? 'Pasta de Arquivos'
+                    : `Arquivo (${dialog.targetNode.extension || 'desconhecido'})`}
+                </div>
+                <div>
+                  <b>Caminho:</b> {dialog.targetNode.path}
+                </div>
+                <div>
+                  <b>Tamanho:</b> {dialog.targetNode.size || 0} bytes
+                </div>
+                <div>
+                  <b>Modificado em:</b>{' '}
+                  {new Date(dialog.targetNode.modifiedAt).toLocaleString('pt-BR')}
+                </div>
+              </div>
+            ) : dialog.type === 'confirm-delete' && dialog.targetNode ? (
+              <p className="cf-dialog-message">
+                Tem certeza que deseja excluir <b>{dialog.targetNode.name}</b>?
+              </p>
+            ) : (
+              <div className="cf-dialog-input-wrapper">
+                <input
+                  type="text"
+                  autoFocus
+                  className="cf-dialog-input"
+                  value={dialogInput}
+                  onChange={(e) => setDialogInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleDialogSubmit();
+                    if (e.key === 'Escape') setDialog({ type: null });
+                  }}
+                  placeholder="Digite o nome..."
+                />
+              </div>
+            )}
+
+            <div className="cf-dialog-actions">
+              <button
+                type="button"
+                className="cf-btn"
+                onClick={() => {
+                  setDialog({ type: null });
+                  setDialogInput('');
+                }}
+              >
+                {dialog.type === 'properties' ? 'Fechar' : 'Cancelar'}
+              </button>
+              {dialog.type !== 'properties' && (
+                <button
+                  type="button"
+                  className={`cf-btn ${
+                    dialog.type === 'confirm-delete' ? 'danger-btn' : 'primary-btn'
+                  }`}
+                  onClick={handleDialogSubmit}
+                >
+                  Confirmar
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

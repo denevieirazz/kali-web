@@ -1,11 +1,11 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import path from 'path';
 
 const WSL_EXE = 'C:\\Windows\\System32\\wsl.exe';
 
 export function getRawWslListOutput() {
   try {
-    const raw = execSync(`${WSL_EXE} --list --verbose`, { timeout: 3000 });
+    const raw = execFileSync(WSL_EXE, ['--list', '--verbose'], { timeout: 3000 });
     let text = raw.toString('utf16le');
     if (!text || text.includes('\0')) {
       text = raw.toString('utf8').replace(/\0/g, '');
