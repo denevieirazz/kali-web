@@ -39,7 +39,7 @@ export class PersistentDatabase {
   }
 
   #persist(nextState = this.state) {
-    const temporary = `${this.filePath}.${process.pid}.tmp`;
+    const temporary = `${this.filePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
     fs.writeFileSync(temporary, `${JSON.stringify(nextState, null, 2)}\n`, {
       encoding: 'utf8', mode: 0o600
     });

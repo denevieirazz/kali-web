@@ -1,7 +1,7 @@
 // ============================================
 // Central de Instalação CloudOS — Real Flow
 // ============================================
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { apiClient } from '../../services/apiClient';
 
 interface DiagnosticStep {
@@ -33,22 +33,28 @@ export default function InstallLinux({ windowId }: { windowId?: string }) {
     { id: 7, title: '7. Conclusão e Diagnóstico Final', status: 'pending', detail: 'Relatório de prontidão do ambiente' }
   ]);
 
+  const isMountedRef = useRef(true);
+
   const runDiagnostics = async () => {
+    if (!isMountedRef.current) return;
     setIsAnalyzing(true);
 
     const updateStep = (id: number, status: DiagnosticStep['status'], detail: string) => {
+      if (!isMountedRef.current) return;
       setSteps(prev => prev.map(s => s.id === id ? { ...s, status, detail } : s));
     };
 
     // Step 1: Windows Host
     updateStep(1, 'running', 'Analisando ambiente Windows...');
     await new Promise(r => setTimeout(r, 400));
+    if (!isMountedRef.current) return;
     updateStep(1, 'success', 'Windows Host Nativo (Node.js v22)');
 
     // Step 2: Verificar WSL API
     updateStep(2, 'running', 'Consultando endpoint /api/wsl/distributions...');
     try {
       const res = await apiClient<{ available: boolean; default: string; distributions: WslDistro[] }>('/api/wsl/distributions');
+      if (!isMountedRef.current) return;
       if (res && res.available) {
         updateStep(2, 'success', 'Serviço WSL ativo e respondendo');
         setDistrosList(res.distributions || []);
@@ -72,26 +78,35 @@ export default function InstallLinux({ windowId }: { windowId?: string }) {
         updateStep(4, 'warning', 'Kali Linux ausente');
       }
     } catch (e) {
+      if (!isMountedRef.current) return;
       updateStep(2, 'error', 'Falha ao conectar com o endpoint de diagnósticos WSL');
     }
 
     // Step 5: Validar Integração PTY
     updateStep(5, 'running', 'Verificando conector WebSocket do terminal...');
     await new Promise(r => setTimeout(r, 300));
+    if (!isMountedRef.current) return;
     updateStep(5, 'success', 'Canal WebSocket /ws/terminal validado e ativo');
 
     // Step 6: Ferramentas
     updateStep(6, 'running', 'Checando suporte a /bin/bash -l...');
     await new Promise(r => setTimeout(r, 300));
+    if (!isMountedRef.current) return;
     updateStep(6, 'success', 'Shell Bash e perfil interativo prontos');
 
     // Step 7: Conclusão
     updateStep(7, 'success', 'Ambiente verificado! Nenhuma instalação adicional necessária.');
-    setIsAnalyzing(false);
+    if (isMountedRef.current) {
+      setIsAnalyzing(false);
+    }
   };
 
   useEffect(() => {
+    isMountedRef.current = true;
     runDiagnostics();
+    return () => {
+      isMountedRef.current = false;
+    };
   }, []);
 
   return (

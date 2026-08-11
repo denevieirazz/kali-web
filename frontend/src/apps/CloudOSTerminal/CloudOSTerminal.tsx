@@ -22,6 +22,7 @@ export default function CloudOSTerminal({ windowId }: { windowId?: string }) {
   const termInstance = useRef<Terminal | null>(null);
   const wsInstance = useRef<WebSocket | null>(null);
   const isConnectingRef = useRef<boolean>(false);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
 
   // 1. Carregar distribuições WSL reais via API
   useEffect(() => {
@@ -175,8 +176,12 @@ export default function CloudOSTerminal({ windowId }: { windowId?: string }) {
       isConnectingRef.current = false;
     }
 
+    if (resizeObserverRef.current) {
+      resizeObserverRef.current.disconnect();
+    }
     const resizeObserver = new ResizeObserver(() => safeFit());
     if (terminalRef.current) resizeObserver.observe(terminalRef.current);
+    resizeObserverRef.current = resizeObserver;
   };
 
   // 3. Auto-iniciar com a distribuição preferida assim que carregada
@@ -190,9 +195,13 @@ export default function CloudOSTerminal({ windowId }: { windowId?: string }) {
     }
   }, [wslInfo]);
 
-  // Limpeza ao desmontar componente (encerra wsl.exe imediatamente)
+  // Limpeza ao desmontar componente (encerra wsl.exe e limpa observers)
   useEffect(() => {
     return () => {
+      if (resizeObserverRef.current) {
+        resizeObserverRef.current.disconnect();
+        resizeObserverRef.current = null;
+      }
       if (wsInstance.current) {
         try {
           wsInstance.current.send(JSON.stringify({ type: 'close' }));
