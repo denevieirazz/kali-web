@@ -1,0 +1,1 @@
+Substitua somente o arquivo Instalar Patch 03.ps1 na raiz do CloudOS-Unified e execute novamente Instalar Patch 03.cmd.

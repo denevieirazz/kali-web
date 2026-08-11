@@ -1,0 +1,178 @@
+/* ============================================ */
+/* Window Styles                                */
+/* ============================================ */
+
+.window {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  border-radius: var(--radius-window);
+  border: 1px solid var(--border-default);
+  box-shadow: var(--shadow-window);
+  overflow: hidden;
+  transition: box-shadow var(--transition-normal), border-color var(--transition-normal);
+  animation: windowOpen 0.25s var(--ease-out-expo);
+}
+
+@keyframes windowOpen {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.window.maximized {
+  border-radius: 0;
+  border: none;
+}
+
+.window.active {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-xl);
+}
+
+.window.frameless {
+  border-radius: 0;
+  border: none;
+  box-shadow: none !important;
+  background: transparent;
+  animation: none;
+  pointer-events: none; /* Let clicks pass through if needed, but the content will re-enable them */
+}
+
+.window.frameless .window-content {
+  background: transparent;
+  pointer-events: all;
+}
+
+.window:not(.active):not(.frameless):not(.system-window) {
+  opacity: 0.92;
+}
+
+/* Title Bar */
+.window-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  padding: 0 4px 0 12px;
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+  cursor: default;
+  -webkit-app-region: drag;
+}
+
+.window.maximized .window-titlebar {
+  border-radius: 0;
+}
+
+.window-titlebar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.window-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.window-title {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.window.active .window-title {
+  color: var(--text-primary);
+}
+
+/* Window Controls */
+.window-controls {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+
+.window-btn {
+  width: 46px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.window-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.window-btn.close:hover {
+  background: #e81123;
+  color: #ffffff;
+}
+
+.window-btn:active {
+  transform: scale(0.9);
+}
+
+/* Content */
+.window-content {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+  background: var(--bg-primary);
+}
+
+/* Resize Handles */
+.resize-handle {
+  position: absolute;
+  z-index: 10;
+}
+
+.resize-handle.n { top: -3px; left: 8px; right: 8px; height: 6px; cursor: n-resize; }
+.resize-handle.s { bottom: -3px; left: 8px; right: 8px; height: 6px; cursor: s-resize; }
+.resize-handle.e { right: -3px; top: 8px; bottom: 8px; width: 6px; cursor: e-resize; }
+.resize-handle.w { left: -3px; top: 8px; bottom: 8px; width: 6px; cursor: w-resize; }
+.resize-handle.ne { top: -3px; right: -3px; width: 12px; height: 12px; cursor: ne-resize; }
+.resize-handle.nw { top: -3px; left: -3px; width: 12px; height: 12px; cursor: nw-resize; }
+.resize-handle.se { bottom: -3px; right: -3px; width: 12px; height: 12px; cursor: se-resize; }
+.resize-handle.sw { bottom: -3px; left: -3px; width: 12px; height: 12px; cursor: sw-resize; }
+
+.window-loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 15px;
+  color: #888;
+  background: rgba(0,0,0,0.1);
+}
+
+.spinner {
+  width: 30px;
+  height: 30px;
+  border: 3px solid rgba(255,255,255,0.1);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

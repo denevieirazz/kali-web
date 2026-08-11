@@ -1,0 +1,21 @@
+/* Transparency controlled by the native settings store. */
+:root[data-cloudos-transparency="false"] .window,
+:root[data-cloudos-transparency="false"] .window-content,
+:root[data-cloudos-transparency="false"] .taskbar,
+:root[data-cloudos-transparency="false"] .start-menu,
+:root[data-cloudos-transparency="false"] .cloudos-start-menu,
+:root[data-cloudos-transparency="false"] .settings-card,
+:root[data-cloudos-transparency="false"] .settings-sidebar,
+:root[data-cloudos-transparency="false"] .context-menu,
+:root[data-cloudos-transparency="false"] .notification-center {
+  backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+  background-color: var(--bg-primary, #111118) !important;
+  background-image: none !important;
+}
+:root[data-cloudos-transparency="true"] .window,
+:root[data-cloudos-transparency="true"] .start-menu,
+:root[data-cloudos-transparency="true"] .cloudos-start-menu,
+:root[data-cloudos-transparency="true"] .taskbar {
+  backdrop-filter: blur(22px) saturate(145%); -webkit-backdrop-filter: blur(22px) saturate(145%);
+}
+.cloudos-running-head{display:flex;justify-content:space-between;align-items:center;padding:16px 20px}.cloudos-running-head>div{display:flex;gap:8px;align-items:baseline}.cloudos-running-head small{color:var(--text-tertiary)}.cloudos-running-head button{border:1px solid rgba(239,68,68,.35);background:rgba(239,68,68,.12);color:#fecaca;padding:7px 12px;border-radius:8px;cursor:pointer}.cloudos-running-head button:disabled{opacity:.4;cursor:default}.cloudos-running-list{padding:0 20px 20px;display:grid;gap:12px;max-height:310px;overflow:auto}.cloudos-running-group{border:1px solid var(--border-default);border-radius:12px;background:var(--bg-hover)}.cloudos-running-group header{display:flex;gap:9px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border-subtle)}.cloudos-running-group header strong{flex:1}.cloudos-running-group header b{font-size:11px;border-radius:999px;padding:2px 7px;background:var(--accent-subtle)}.cloudos-running-window{display:flex;align-items:center;padding:8px}.cloudos-window-focus{flex:1;text-align:left;border:0;background:transparent;color:var(--text-primary);cursor:pointer;display:flex;flex-direction:column}.cloudos-window-focus small{color:var(--text-tertiary)}.cloudos-window-actions{display:flex;gap:5px}.cloudos-window-actions button{width:30px;height:30px;border-radius:7px;border:1px solid var(--border-default);background:var(--bg-hover);color:var(--text-primary);cursor:pointer}.cloudos-window-actions button:hover{background:var(--accent-subtle)}.cloudos-window-actions .danger:hover{background:rgba(239,68,68,.2)}.cloudos-empty-running{min-height:220px;display:flex;flex-direction:column;justify-content:center;align-items:center;color:var(--text-tertiary)}.cloudos-empty-running span{font-size:42px;color:var(--accent)}.cloudos-all-grid{padding:12px 20px 20px;display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:7px}

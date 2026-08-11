@@ -1,0 +1,299 @@
+/* ============================================ */
+/* CloudOS Glassmorphism Browser Styles         */
+/* ============================================ */
+
+.cloudos-browser {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #090618;
+  color: #ede9fe;
+  font-family: Inter, system-ui, sans-serif;
+  overflow: hidden;
+}
+
+/* Toolbar */
+.browser-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(18, 13, 36, 0.9);
+  border-bottom: 1px solid rgba(168, 85, 247, 0.2);
+  backdrop-filter: blur(12px);
+}
+
+.browser-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #c4b5fd;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.browser-btn:hover:not(:disabled) {
+  background: rgba(168, 85, 247, 0.2);
+  border-color: #a855f7;
+  color: #ffffff;
+}
+
+.browser-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.browser-btn.highlight-external {
+  background: rgba(99, 102, 241, 0.2);
+  border-color: rgba(99, 102, 241, 0.4);
+  color: #818cf8;
+}
+
+.browser-btn.highlight-external:hover {
+  background: #6366f1;
+  color: #ffffff;
+}
+
+/* URL Input Bar */
+.browser-url-container {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.browser-url-container .search-icon {
+  position: absolute;
+  left: 12px;
+  color: #a78bfa;
+}
+
+.browser-url-input {
+  width: 100%;
+  height: 34px;
+  padding: 0 36px 0 36px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: #f8fafc;
+  font-size: 13px;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.browser-url-input:focus {
+  border-color: #a855f7;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.25);
+}
+
+.browser-spinner {
+  position: absolute;
+  right: 12px;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(168, 85, 247, 0.3);
+  border-top-color: #c084fc;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* Bookmarks Bar */
+.browser-bookmarks-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: rgba(13, 9, 28, 0.8);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+  overflow-x: auto;
+}
+
+.bar-label {
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.bookmark-chip {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #ddd6fe;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.bookmark-chip:hover {
+  background: rgba(168, 85, 247, 0.2);
+  color: #ffffff;
+}
+
+/* History Modal */
+.browser-history-modal {
+  position: absolute;
+  top: 50px;
+  right: 20px;
+  width: 320px;
+  max-height: 350px;
+  background: rgba(15, 10, 36, 0.95);
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  border-radius: 12px;
+  backdrop-filter: blur(16px);
+  z-index: 100;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.modal-header button {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+}
+
+.modal-body {
+  padding: 8px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.history-item:hover {
+  background: rgba(168, 85, 247, 0.15);
+}
+
+.history-item.active {
+  background: rgba(99, 102, 241, 0.25);
+  color: #a78bfa;
+}
+
+.history-url {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Content Area */
+.browser-content-area {
+  flex: 1;
+  position: relative;
+  background: #05030c;
+}
+
+.browser-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: #ffffff;
+}
+
+/* External Notice Card */
+.external-notice-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.notice-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.notice-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #f8fafc;
+  margin: 0 0 10px 0;
+}
+
+.notice-description {
+  font-size: 14px;
+  color: #94a3b8;
+  max-width: 480px;
+  line-height: 1.5;
+  margin: 0 0 24px 0;
+}
+
+.url-code {
+  color: #c084fc;
+  word-break: break-all;
+}
+
+.notice-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.btn-open-external {
+  background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+  color: #ffffff;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(147, 51, 234, 0.4);
+}
+
+.btn-open-external:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(147, 51, 234, 0.55);
+}
+
+.btn-fallback-home {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #e2e8f0;
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-weight: 500;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.btn-fallback-home:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

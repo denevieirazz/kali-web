@@ -1,0 +1,6 @@
+export const userFiles: [string, string, string, string, string, number][] = [
+  ['C:\\Users\\User\\Desktop\\readme.txt', 'readme.txt', 'C:\\Users\\User\\Desktop', 'txt', 'Welcome to ObsidianOS!\n\nThis is your new operating system, built entirely in the browser.\nExplore the Start Menu, open apps, and customize your experience.\n\n⚠ WARNING: Do not delete system files in C:\\ObsidianOS\\System32!\nDoing so WILL cause boot failure and BSOD on next restart.', 0],
+  ['C:\\Users\\User\\Documents\\notes.txt', 'notes.txt', 'C:\\Users\\User\\Documents', 'txt', 'My Notes\n========\n\n- Learn ObsidianOS\n- Customize desktop\n- Try the terminal\n- Open Task Manager to see real processes\n- Use "reg query" in terminal to browse registry', 0],
+  ['C:\\Users\\User\\Documents\\project.js', 'project.js', 'C:\\Users\\User\\Documents', 'js', '// ObsidianOS Project\nconsole.log("Hello from ObsidianOS!");\n\nfunction main() {\n  return "Welcome to ObsidianOS";\n}\n\nmain();', 0],
+  ['C:\\Users\\User\\Documents\\report.html', 'report.html', 'C:\\Users\\User\\Documents', 'html', '<!DOCTYPE html>\n<html>\n<head><title>Report</title></head>\n<body>\n<h1>ObsidianOS Report</h1>\n<p>System running smoothly.</p>\n</body>\n</html>', 0],
+];

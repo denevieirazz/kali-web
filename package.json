@@ -1,0 +1,19 @@
+{
+  "name": "cloudos-unified",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "CloudOS Unified Enterprise Web Operating System",
+  "workspaces": [
+    "backend",
+    "frontend",
+    "shared"
+  ],
+  "scripts": {
+    "dev": "powershell.exe -ExecutionPolicy Bypass -File scripts/start-dev.ps1",
+    "build": "npm --prefix frontend run build",
+    "lint": "npm --prefix backend run lint && npm --prefix frontend run lint",
+    "test": "npm --prefix backend test",
+    "test:e2e": "node --test tests/e2e/*.test.js"
+  }
+}

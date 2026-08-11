@@ -1,0 +1,84 @@
+/* BSOD Styles */
+.bsod-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: #0078D7; /* Classic Windows BSOD Blue */
+  color: white;
+  z-index: 10000;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10%;
+  box-sizing: border-box;
+  animation: bsodFadeIn 0.2s ease-out;
+}
+
+@keyframes bsodFadeIn {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+.bsod-content {
+  max-width: 1000px;
+  width: 100%;
+}
+
+.bsod-face {
+  font-size: 150px;
+  font-weight: 300;
+  margin-bottom: 20px;
+  line-height: 1;
+}
+
+.bsod-content h1 {
+  font-size: 32px;
+  font-weight: 400;
+  margin-bottom: 24px;
+  line-height: 1.3;
+}
+
+.bsod-collecting, .bsod-progress {
+  font-size: 24px;
+  margin-bottom: 30px;
+}
+
+.bsod-details-box {
+  display: flex;
+  gap: 30px;
+  margin-top: 40px;
+  align-items: flex-start;
+}
+
+.bsod-qr {
+  width: 120px;
+  height: 120px;
+  background: white;
+  padding: 10px;
+}
+
+.bsod-text-details {
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.bsod-stopcode, .bsod-failed {
+  font-family: 'Consolas', monospace;
+  font-size: 15px;
+  margin-top: 5px;
+}
+
+.bsod-tech-inner {
+  margin-top: 40px;
+  font-family: 'Consolas', monospace;
+  font-size: 14px;
+  opacity: 0.8;
+  border-top: 1px dashed rgba(255, 255, 255, 0.5);
+  padding-top: 20px;
+}
+.bsod-tech-inner p {
+  margin: 4px 0;
+}

@@ -1,0 +1,118 @@
+/* Native revision hotfix: layout scaling and complete contrast themes */
+html, body, #root { width: 100%; height: 100%; overflow: hidden; }
+.obsidianos-root { transform: none !important; transform-origin: top left; }
+
+/* Accent colors never become the general text color. */
+.settings-action,
+.start-nav button.active,
+.cloudos-start-nav button.active,
+.taskbar-start-button {
+  color: var(--cloudos-accent-foreground, #fff) !important;
+}
+.accent-option[style*="255, 255, 255"],
+.accent-option[style*="#ffffff"],
+.accent-option[title="#ffffff"] { box-shadow: inset 0 0 0 1px rgba(0,0,0,.4); }
+.accent-option[style*="0, 0, 0"],
+.accent-option[style*="#000000"],
+.accent-option[title="#000000"] { box-shadow: inset 0 0 0 1px rgba(255,255,255,.45); }
+
+/* Dark theme: explicit readable surfaces. */
+[data-theme="dark"] .start-menu,
+[data-theme="dark"] .cloudos-start-menu,
+[data-theme="dark"] .settings-app {
+  color: #f7f2ff !important;
+}
+[data-theme="dark"] .start-menu h1,
+[data-theme="dark"] .start-menu h2,
+[data-theme="dark"] .start-menu h3,
+[data-theme="dark"] .start-menu strong,
+[data-theme="dark"] .start-menu .app-name,
+[data-theme="dark"] .cloudos-start-menu strong { color: #f7f2ff !important; }
+[data-theme="dark"] .start-menu p,
+[data-theme="dark"] .start-menu small,
+[data-theme="dark"] .start-menu span,
+[data-theme="dark"] .cloudos-start-menu span { color: #bcb1cc; }
+
+/* Light theme: every major shell surface and control receives matching colors. */
+[data-theme="light"] {
+  --bg-solid: #f4f1f7;
+  --bg-primary: #f7f5fa;
+  --bg-secondary: #ece7f1;
+  --bg-tertiary: #dfd8e6;
+  --bg-elevated: #ffffff;
+  --bg-hover: rgba(43, 31, 55, .08);
+  --text-primary: #17121f;
+  --text-secondary: #554b61;
+  --text-tertiary: #756a81;
+  --border-default: rgba(40, 27, 53, .17);
+  --border-subtle: rgba(40, 27, 53, .09);
+  --mica: rgba(249,247,251,.94);
+  --acrylic: rgba(255,255,255,.88);
+}
+[data-theme="light"] .settings-app,
+[data-theme="light"] .settings-content {
+  background: linear-gradient(135deg,#f8f6fa,#eee9f3) !important;
+  color: #17121f !important;
+}
+[data-theme="light"] .settings-sidebar {
+  background: rgba(255,255,255,.86) !important;
+  border-color: rgba(40,27,53,.12) !important;
+}
+[data-theme="light"] .settings-card,
+[data-theme="light"] .settings-hero {
+  background: rgba(255,255,255,.82) !important;
+  color: #17121f !important;
+  border-color: rgba(40,27,53,.14) !important;
+  box-shadow: 0 10px 28px rgba(35,20,48,.10) !important;
+}
+[data-theme="light"] .settings-card h3,
+[data-theme="light"] .settings-content h2,
+[data-theme="light"] .settings-data-row strong,
+[data-theme="light"] .settings-label { color: #17121f !important; }
+[data-theme="light"] .settings-desc,
+[data-theme="light"] .settings-data-row span,
+[data-theme="light"] .settings-nav-item { color: #62576e !important; }
+[data-theme="light"] .settings-select {
+  background: #fff !important;
+  color: #17121f !important;
+  border-color: rgba(40,27,53,.20) !important;
+}
+[data-theme="light"] .start-menu,
+[data-theme="light"] .cloudos-start-menu {
+  background: linear-gradient(145deg,rgba(255,255,255,.96),rgba(239,233,245,.94)) !important;
+  color: #17121f !important;
+  border-color: rgba(80,50,100,.24) !important;
+  box-shadow: 0 24px 70px rgba(28,17,37,.28) !important;
+}
+[data-theme="light"] .start-menu *,
+[data-theme="light"] .cloudos-start-menu * { color: inherit; }
+[data-theme="light"] .start-menu h1,
+[data-theme="light"] .start-menu h2,
+[data-theme="light"] .start-menu h3,
+[data-theme="light"] .start-menu strong,
+[data-theme="light"] .cloudos-start-menu strong { color: #17121f !important; }
+[data-theme="light"] .start-menu p,
+[data-theme="light"] .start-menu small,
+[data-theme="light"] .start-menu span,
+[data-theme="light"] .cloudos-start-menu span { color: #62576e; }
+[data-theme="light"] .start-search,
+[data-theme="light"] .start-search input {
+  background: rgba(255,255,255,.80) !important;
+  color: #17121f !important;
+}
+[data-theme="light"] .cloudos-running-group,
+[data-theme="light"] .start-app-item {
+  background: rgba(255,255,255,.58) !important;
+  border-color: rgba(40,27,53,.13) !important;
+}
+
+/* Dragging: remove expensive effects only while a pointer is held. */
+body.cloudos-window-dragging .window,
+.react-draggable-dragging,
+.window.dragging {
+  transition: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: 0 8px 22px rgba(0,0,0,.28) !important;
+  will-change: transform;
+}

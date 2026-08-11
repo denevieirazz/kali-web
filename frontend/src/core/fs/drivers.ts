@@ -1,0 +1,15 @@
+export const driverFiles: [string, string, string, string][] = [
+  ['C:\\ObsidianOS\\System32\\drivers\\disk.sys', 'disk.sys', 'C:\\ObsidianOS\\System32\\drivers', 'Disk Driver'],
+  ['C:\\ObsidianOS\\System32\\drivers\\acpi.sys', 'acpi.sys', 'C:\\ObsidianOS\\System32\\drivers', 'ACPI Driver for NT'],
+  ['C:\\ObsidianOS\\System32\\drivers\\pci.sys', 'pci.sys', 'C:\\ObsidianOS\\System32\\drivers', 'PCI Bus Driver'],
+  ['C:\\ObsidianOS\\System32\\drivers\\display.sys', 'display.sys', 'C:\\ObsidianOS\\System32\\drivers', 'Display Driver'],
+  ['C:\\ObsidianOS\\System32\\drivers\\hid.sys', 'hid.sys', 'C:\\ObsidianOS\\System32\\drivers', 'Human Interface Device Driver'],
+  ['C:\\ObsidianOS\\System32\\drivers\\kbdclass.sys', 'kbdclass.sys', 'C:\\ObsidianOS\\System32\\drivers', 'Keyboard Class Driver'],
+  ['C:\\ObsidianOS\\System32\\drivers\\mouclass.sys', 'mouclass.sys', 'C:\\ObsidianOS\\System32\\drivers', 'Mouse Class Driver'],
+  ['C:\\ObsidianOS\\System32\\drivers\\netio.sys', 'netio.sys', 'C:\\ObsidianOS\\System32\\drivers', 'Network I/O Subsystem'],
+  ['C:\\ObsidianOS\\System32\\drivers\\tcpip.sys', 'tcpip.sys', 'C:\\ObsidianOS\\System32\\drivers', 'TCP/IP Protocol Driver'],
+  ['C:\\ObsidianOS\\System32\\drivers\\ndis.sys', 'ndis.sys', 'C:\\ObsidianOS\\System32\\drivers', 'NDIS System Driver'],
+  ['C:\\ObsidianOS\\System32\\drivers\\hdaudio.sys', 'hdaudio.sys', 'C:\\ObsidianOS\\System32\\drivers', 'High Definition Audio Driver'],
+  ['C:\\ObsidianOS\\System32\\drivers\\fltMgr.sys', 'fltMgr.sys', 'C:\\ObsidianOS\\System32\\drivers', 'Filter Manager Driver'],
+  ['C:\\ObsidianOS\\System32\\drivers\\Wdf01000.sys', 'Wdf01000.sys', 'C:\\ObsidianOS\\System32\\drivers', 'WDF Framework'],
+];

@@ -1,0 +1,33 @@
+.sdk-app-runner {
+  width: 100%;
+  height: 100%;
+  background: #000;
+  position: relative;
+  overflow: hidden;
+  color: #fff;
+  font-family: 'Consolas', monospace;
+}
+
+.sdk-terminal-overlay {
+  padding: 20px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #ef4444;
+  background: rgba(0,0,0,0.8);
+  height: 100%;
+}
+
+/* Common UI Elements created by Apps */
+.sdk-app-runner button {
+    background: #4f46e5;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+.sdk-app-runner button:hover {
+    background: #6366f1;
+}

@@ -1,0 +1,234 @@
+.regedit-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background-color: var(--window-bg, #ffffff);
+  color: var(--text-color, #000000);
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-size: 13px;
+  overflow: hidden;
+}
+
+[data-theme='dark'] .regedit-container {
+  background-color: #1e1e1e;
+  color: #d4d4d4;
+}
+
+.regedit-menu {
+  display: flex;
+  background-color: #f3f3f3;
+  border-bottom: 1px solid #d9d9d9;
+  padding: 0 4px;
+}
+
+[data-theme='dark'] .regedit-menu {
+  background-color: #2b2b2b;
+  border-bottom: 1px solid #3c3c3c;
+}
+
+.menu-item {
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.menu-item:hover {
+  background-color: #e5f3ff;
+}
+
+[data-theme='dark'] .menu-item:hover {
+  background-color: #404040;
+}
+
+.regedit-address-bar {
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  border-bottom: 1px solid #d9d9d9;
+  background-color: #f9f9f9;
+}
+
+[data-theme='dark'] .regedit-address-bar {
+  background-color: #2b2b2b;
+  border-bottom: 1px solid #3c3c3c;
+}
+
+.address-label {
+  margin-right: -4px;
+  padding-left: 8px;
+  color: #666;
+  z-index: 1;
+}
+
+.regedit-address-bar input {
+  flex: 1;
+  padding: 4px;
+  padding-left: 6px;
+  border: 1px solid #ccc;
+  outline: none;
+  font-family: inherit;
+  font-size: 13px;
+  background: transparent;
+  color: inherit;
+}
+
+[data-theme='dark'] .regedit-address-bar input {
+  border-color: #555;
+}
+
+.regedit-content {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.regedit-sidebar {
+  width: 30%;
+  min-width: 150px;
+  overflow: auto;
+  padding: 8px 4px;
+}
+
+.regedit-divider {
+  width: 4px;
+  background-color: #f0f0f0;
+  cursor: col-resize;
+  border-left: 1px solid #d9d9d9;
+  border-right: 1px solid #d9d9d9;
+}
+
+[data-theme='dark'] .regedit-divider {
+  background-color: #333;
+  border-color: #444;
+}
+
+.regedit-main {
+  flex: 1;
+  overflow: auto;
+  background: #ffffff;
+}
+
+[data-theme='dark'] .regedit-main {
+  background: #1e1e1e;
+}
+
+.reg-tree-node {
+  padding-left: 16px;
+}
+
+.reg-tree-label {
+  display: flex;
+  align-items: center;
+  padding: 2px 4px;
+  cursor: pointer;
+  user-select: none;
+  border: 1px solid transparent;
+}
+
+.reg-tree-label:hover {
+  background-color: #e5f3ff;
+}
+
+[data-theme='dark'] .reg-tree-label:hover {
+  background-color: #2a2d2e;
+}
+
+.reg-tree-label.selected {
+  background-color: #cce8ff;
+  border-color: #99d1ff;
+}
+
+[data-theme='dark'] .reg-tree-label.selected {
+  background-color: #37373d;
+  border-color: #4b4b4b;
+}
+
+.reg-tree-arrow {
+  width: 12px;
+  height: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  color: #666;
+  margin-right: 4px;
+}
+
+.reg-tree-icon {
+  margin-right: 6px;
+  font-size: 14px;
+}
+
+.reg-tree-text {
+  white-space: nowrap;
+}
+
+.reg-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.reg-table th {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid #d9d9d9;
+  border-right: 1px solid #d9d9d9;
+  font-weight: normal;
+  background: #f9f9f9;
+  position: sticky;
+  top: 0;
+}
+
+[data-theme='dark'] .reg-table th {
+  background: #2b2b2b;
+  border-color: #444;
+}
+
+.reg-table td {
+  padding: 4px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: default;
+}
+
+.reg-table tr:hover {
+  background-color: #e5f3ff;
+}
+
+[data-theme='dark'] .reg-table tr:hover {
+  background-color: #2a2d2e;
+}
+
+.reg-val-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.reg-icon-ab {
+  color: #0066cc;
+  font-weight: bold;
+  font-size: 11px;
+  vertical-align: middle;
+}
+
+.reg-icon-bin {
+  color: #228822;
+  font-weight: bold;
+  font-size: 11px;
+  vertical-align: middle;
+}
+
+.regedit-statusbar {
+  padding: 2px 8px;
+  background-color: #f3f3f3;
+  border-top: 1px solid #d9d9d9;
+  color: #333;
+}
+
+[data-theme='dark'] .regedit-statusbar {
+  background-color: #2b2b2b;
+  border-top: 1px solid #3c3c3c;
+  color: #ccc;
+}
