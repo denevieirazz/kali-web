@@ -1,0 +1,55 @@
+name: CloudOS CI Baseline
+
+on:
+  push:
+    branches:
+      - ci/cloudos-baseline
+      - sync/cloudos-current-state
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validate:
+    runs-on: windows-latest
+
+    steps:
+      - name: 1. Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 2. Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+
+      - name: 3. Install dependencies
+        run: npm ci
+
+      - name: 4. Run lint
+        run: npm.cmd run lint
+
+      - name: 5. Build frontend
+        run: npm.cmd run build
+
+      - name: 6. Run backend and integration tests
+        run: npm.cmd test
+
+      - name: 7. Run E2E tests
+        run: npm.cmd run test:e2e
+
+      - name: 8. Run frontend unit tests
+        run: node scripts/run-node-tests.js frontend/test
+
+      - name: 9. Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: 10. Build CloudOS.Host (.NET 8)
+        run: dotnet build desktop/CloudOS.Host/CloudOS.Host.csproj -c Release
+
+      - name: 11. Run Host Tests
+        run: |
+          dotnet run --project desktop/CloudOS.Host.Tests/CloudOS.Host.Tests.csproj -c Release
+          dotnet run --project desktop/CloudOS.Bootstrap.Tests/CloudOS.Bootstrap.Tests.csproj -c Release
