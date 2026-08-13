@@ -1,0 +1,161 @@
+using System.IO;
+using System.Windows;
+
+namespace CloudOS.Bootstrap;
+
+public partial class App : Application
+{
+    private static readonly TimeSpan ReadinessTimeout = TimeSpan.FromSeconds(45);
+    private static readonly TimeSpan StabilityPeriod = TimeSpan.FromSeconds(90);
+    private readonly CancellationTokenSource _lifetime = new();
+    private readonly CrashLoopPolicy _policy = new();
+    private BootstrapInstanceGuard? _instanceGuard;
+    private BootstrapSupervisor? _supervisor;
+    private BootStateStore? _store;
+
+    protected override async void OnStartup(StartupEventArgs e)
+    {
+        base.OnStartup(e);
+        _instanceGuard = new BootstrapInstanceGuard();
+        if (!_instanceGuard.TryAcquire())
+        {
+            Shutdown();
+            return;
+        }
+
+        BootstrapOptions options;
+        try
+        {
+            options = BootstrapOptions.Parse(e.Args);
+            _store = new BootStateStore();
+            _store.AppendLog($"Bootstrap iniciado. host={options.HostPath}");
+            await RunLoopAsync(options, _lifetime.Token);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+            Shutdown();
+        }
+        catch (Exception error)
+        {
+            try
+            {
+                _store ??= new BootStateStore();
+            }
+            catch (Exception storageError) when (storageError is IOException or UnauthorizedAccessException)
+            {
+                MessageBox.Show(
+                    $"O CloudOS não conseguiu preparar o diretório de recuperação: {storageError.Message}",
+                    "CloudOS",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                Shutdown(1);
+                return;
+            }
+            _store.AppendLog($"Falha do bootstrap: {error.GetType().Name}: {error.Message}");
+            var action = ShowRecovery(error.Message);
+            if (action == RecoveryAction.Retry)
+            {
+                // Parsing/path failures are deterministic; restart the bootstrap so the
+                // caller can correct its allowlisted arguments first.
+                MessageBox.Show("Revise o caminho do CloudOS.Host e inicie o bootstrap novamente.", "CloudOS", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            Shutdown(1);
+        }
+    }
+
+    private async Task RunLoopAsync(BootstrapOptions options, CancellationToken cancellationToken)
+    {
+        var forceOneAttempt = false;
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var state = _store!.Load();
+            if (_policy.ShouldEnterRecovery(state, DateTimeOffset.UtcNow) && !forceOneAttempt)
+            {
+                var action = ShowRecovery(state.LastFailure ?? "O CloudOS falhou repetidamente durante a inicialização.");
+                if (action != RecoveryAction.Retry)
+                {
+                    Shutdown();
+                    return;
+                }
+                forceOneAttempt = true;
+            }
+
+            _supervisor = new BootstrapSupervisor();
+            _supervisor.ReadinessReached += OnReadinessReached;
+            _supervisor.StabilityReached += OnStabilityReached;
+            _store.AppendLog("Iniciando CloudOS.Host sob supervisão.");
+
+            HostRunResult result;
+            try
+            {
+                result = await _supervisor.RunAsync(options, ReadinessTimeout, StabilityPeriod, cancellationToken);
+            }
+            finally
+            {
+                _supervisor.ReadinessReached -= OnReadinessReached;
+                _supervisor.StabilityReached -= OnStabilityReached;
+                await _supervisor.DisposeAsync();
+                _supervisor = null;
+            }
+
+            forceOneAttempt = false;
+            var now = DateTimeOffset.UtcNow;
+            state = _store.Load();
+            if (result.Ready && result.ExitCode == 0 && (result.Stable || options.AllowEarlyCleanExit))
+            {
+                _store.Save(_policy.RecordCleanExit(state, now, 0));
+                _store.AppendLog("CloudOS.Host encerrou normalmente.");
+                Shutdown();
+                return;
+            }
+
+            var reason = result.Failure ?? (result.Ready && result.ExitCode == 0
+                ? "CloudOS.Host encerrou antes do período mínimo de estabilidade."
+                : "CloudOS.Host encerrou inesperadamente.");
+            state = _policy.RecordFailure(state, now, result.ExitCode, reason);
+            _store.Save(state);
+            _store.AppendLog($"Falha do host. ready={result.Ready} stable={result.Stable} exit={result.ExitCode?.ToString() ?? "n/a"} detail={reason}");
+
+            if (_policy.ShouldEnterRecovery(state, now)) continue;
+            await Task.Delay(_policy.RestartDelay(state, now), cancellationToken);
+        }
+    }
+
+    private void OnReadinessReached(object? sender, EventArgs e)
+    {
+        var now = DateTimeOffset.UtcNow;
+        _store!.Save(_policy.RecordReady(_store.Load(), now));
+        _store.AppendLog("Handshake de prontidão confirmado.");
+    }
+
+    private void OnStabilityReached(object? sender, EventArgs e)
+    {
+        var now = DateTimeOffset.UtcNow;
+        _store!.Save(_policy.RecordStable(_store.Load(), now));
+        _store.AppendLog("Host permaneceu estável; contador de falhas foi zerado.");
+    }
+
+    private RecoveryAction ShowRecovery(string details)
+    {
+        var recovery = new RecoveryWindow(details, _store!.CurrentLogPath);
+        MainWindow = recovery;
+        recovery.ShowDialog();
+        MainWindow = null;
+        return recovery.SelectedAction;
+    }
+
+    protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
+    {
+        _lifetime.Cancel();
+        base.OnSessionEnding(e);
+        e.Cancel = false;
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        _lifetime.Cancel();
+        _instanceGuard?.Dispose();
+        _lifetime.Dispose();
+        base.OnExit(e);
+    }
+}

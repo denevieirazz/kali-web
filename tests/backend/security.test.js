@@ -51,6 +51,23 @@ test('Segurança 1: WebSocket sem token é rejeitado (fechamento 1008)', async (
   }
 });
 
+test('Segurança 1b: WebSocket rejeita porta loopback arbitrária', async () => {
+  const { server, port } = await startFullServer();
+  try {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/terminal`, ['token-invalido'], {
+      headers: { Origin: 'http://127.0.0.1:59999' }
+    });
+    const closed = await new Promise((resolve) => {
+      ws.on('close', (closeCode, reason) => resolve({ code: closeCode, reason: reason.toString('utf8') }));
+      ws.on('error', () => {});
+    });
+    assert.strictEqual(closed.code, 1008);
+    assert.match(closed.reason, /Origin/);
+  } finally {
+    server.close();
+  }
+});
+
 test('Segurança 2: Origin inválido é rejeitado pelo CORS', async () => {
   const { server, port } = await startFullServer();
   try {
@@ -58,7 +75,7 @@ test('Segurança 2: Origin inválido é rejeitado pelo CORS', async () => {
       path: '/api/health',
       headers: { 'Origin': 'http://evil-attacker-site.com' }
     });
-    assert.strictEqual(res.status, 500); // Bloqueado pelo CORS com erro
+    assert.strictEqual(res.status, 403);
   } finally {
     server.close();
   }

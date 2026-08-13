@@ -1,45 +1,70 @@
 import test from 'node:test';
-import assert from 'node:assert';
-import { listInstalled, getDefault, getPreferred, isInstalled, validateAllowlisted, parseWslListOutput } from '../src/wsl/distroService.js';
-import jwt from 'jsonwebtoken';
-import { config } from '../src/config/index.js';
+import assert from 'node:assert/strict';
+import {
+  classifyWslError,
+  createInstallArgs,
+  parseOnlineCatalogOutput,
+  parseWslListOutput,
+  parseWslVersionOutput,
+  safeChildEnvironment
+} from '../src/wsl/distroService.js';
 
-test('WSL 1: Parsing de saída do wsl --list --verbose', () => {
-  const sampleOutput = `
+test('WSL: interpreta distribuições, estado, versão e padrão sem consultar o host', () => {
+  const parsed = parseWslListOutput(`
   NAME          STATE           VERSION
 * kali-linux    Running         2
-  Ubuntu        Stopped         2
-`;
-  const parsed = parseWslListOutput(sampleOutput);
-  assert.strictEqual(parsed.length, 2);
-  assert.strictEqual(parsed[0].name, 'kali-linux');
-  assert.strictEqual(parsed[0].isDefault, true);
-  assert.strictEqual(parsed[0].state, 'Running');
-  assert.strictEqual(parsed[1].name, 'Ubuntu');
-  assert.strictEqual(parsed[1].isDefault, false);
+  Ubuntu Dev    Stopped         2
+`);
+  assert.deepEqual(parsed, [
+    { name: 'kali-linux', state: 'Running', version: 2, isDefault: true },
+    { name: 'Ubuntu Dev', state: 'Stopped', version: 2, isDefault: false }
+  ]);
 });
 
-test('WSL 2: Preferência seleciona Kali quando instalada', () => {
-  const preferred = getPreferred();
-  assert.ok(preferred !== null);
-  // Se kali-linux estiver instalada no host Windows, ela deve ser a preferida
-  if (isInstalled('kali-linux')) {
-    assert.strictEqual(preferred.toLowerCase(), 'kali-linux');
+test('WSL: interpreta catálogo online e ignora cabeçalhos', () => {
+  const parsed = parseOnlineCatalogOutput(`
+The following is a list of valid distributions that can be installed.
+Install using 'wsl.exe --install <Distro>'.
+
+NAME                            FRIENDLY NAME
+Ubuntu                          Ubuntu
+Debian                          Debian GNU/Linux
+kali-linux                      Kali Linux Rolling
+`);
+  assert.deepEqual(parsed, [
+    { id: 'Ubuntu', name: 'Ubuntu' },
+    { id: 'Debian', name: 'Debian GNU/Linux' },
+    { id: 'kali-linux', name: 'Kali Linux Rolling' }
+  ]);
+});
+
+test('WSL: interpreta versão localizada e WSLg', () => {
+  const parsed = parseWslVersionOutput('Versão do WSL: 2.7.11.0\r\nVersão do kernel: 6.6.87.2\r\nVersão do WSLg: 1.0.73');
+  assert.equal(parsed.wslVersion, '2.7.11.0');
+  assert.equal(parsed.kernelVersion, '6.6.87.2');
+  assert.equal(parsed.wslgVersion, '1.0.73');
+});
+
+test('WSL: classifica acesso negado sem confundir com instalação ausente', () => {
+  assert.equal(classifyWslError('Código de erro: Wsl/EnumerateDistros/Service/E_ACCESSDENIED'), 'WSL_ACCESS_DENIED');
+  assert.equal(classifyWslError('Acesso negado.'), 'WSL_ACCESS_DENIED');
+});
+
+test('WSL: builder aceita identificador simples e rejeita injeção', () => {
+  assert.deepEqual(createInstallArgs('kali-linux'), ['--install', '--distribution', 'kali-linux', '--no-launch']);
+  assert.throws(() => createInstallArgs('kali-linux; calc.exe'), /inválido/);
+  assert.throws(() => createInstallArgs('../../../cmd.exe'), /inválido/);
+});
+
+test('processos nativos não herdam segredos do agente', () => {
+  const previous = process.env.CLOUDOS_TEST_API_TOKEN;
+  process.env.CLOUDOS_TEST_API_TOKEN = 'nao-deve-vazar';
+  try {
+    const environment = safeChildEnvironment({ CLOUDOS: '1' });
+    assert.equal(environment.CLOUDOS_TEST_API_TOKEN, undefined);
+    assert.equal(environment.CLOUDOS, '1');
+  } finally {
+    if (previous === undefined) delete process.env.CLOUDOS_TEST_API_TOKEN;
+    else process.env.CLOUDOS_TEST_API_TOKEN = previous;
   }
-});
-
-test('WSL 3: Distribuição inexistente é rejeitada', () => {
-  const valid = validateAllowlisted('distro-fantasma-inexistente-12345');
-  assert.strictEqual(valid, false);
-});
-
-test('WSL 4: Injeção de caminho ou argumentos maliciosos é rejeitada', () => {
-  assert.strictEqual(validateAllowlisted('kali-linux; rm -rf /'), false);
-  assert.strictEqual(validateAllowlisted('../../../cmd.exe'), false);
-  assert.strictEqual(validateAllowlisted('kali-linux & echo hacket'), false);
-});
-
-test('WSL 5: Fallback correto quando distribuição solicitada não existe', () => {
-  const pref = getPreferred();
-  assert.ok(pref); // Retorna a distribuição padrão instalada ou primeira encontrada
 });

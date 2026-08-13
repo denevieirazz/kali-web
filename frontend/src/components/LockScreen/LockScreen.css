@@ -236,6 +236,31 @@
   cursor: not-allowed;
 }
 
+.form-input.no-icon { padding-left: 14px; }
+.form-input.monospace { font-family: "Cascadia Code", Consolas, monospace; letter-spacing: .05em; }
+.cloudos-glass-card.recovery-mode { width: min(570px, 92vw); max-height: 88vh; overflow-y: auto; align-items: stretch; }
+.recovery-mode .card-header { align-self: center; }
+.btn-recovery-link { align-self: center; border: 0; color: #bba6ec; background: transparent; cursor: pointer; font-size: 12px; }
+.btn-recovery-link:hover { color: #ddd1fa; text-decoration: underline; }
+.recovery-explanation { margin: 0; color: #9ca9bc; font-size: 11px; line-height: 1.5; }
+.recovery-password-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.recovery-password-hint { margin-top: -7px; color: #7f8ba0; font-size: 9px; }
+.lock-system-state { width: 100%; display: flex; align-items: center; gap: 12px; padding: 13px; border: 1px solid rgba(129, 140, 248, .22); border-radius: 10px; color: #dbe4f5; background: rgba(91, 83, 184, .1); box-sizing: border-box; }
+.lock-system-state strong { font-size: 11px; }
+.lock-system-state p { margin: 3px 0 0; color: #96a3b8; font-size: 9px; line-height: 1.45; }
+.lock-system-state.unavailable { border-color: rgba(245, 158, 11, .25); background: rgba(146, 89, 13, .1); }
+.lock-system-state button { margin-top: 8px; padding: 6px 9px; border: 1px solid rgba(255,255,255,.14); border-radius: 7px; color: #e8eef8; background: rgba(255,255,255,.05); cursor: pointer; }
+.recovery-result { width: 100%; display: flex; flex-direction: column; gap: 13px; }
+.recovery-result > p { margin: 0; color: #a4afc1; font-size: 11px; line-height: 1.55; }
+.lock-recovery-code { display: grid; grid-template-columns: 1fr auto; gap: 9px; align-items: center; padding: 12px; border: 1px solid rgba(129, 140, 248, .27); border-radius: 10px; background: rgba(2, 5, 12, .55); }
+.lock-recovery-code code { color: #f1f5ff; font: 700 14px/1.5 "Cascadia Code", Consolas, monospace; letter-spacing: .06em; overflow-wrap: anywhere; user-select: text; }
+.lock-recovery-code button { padding: 7px 9px; border: 1px solid rgba(255,255,255,.13); border-radius: 7px; color: #dce5f7; background: rgba(255,255,255,.05); cursor: pointer; }
+.recovery-result > label { display: grid; grid-template-columns: 18px 1fr; gap: 9px; align-items: start; padding: 11px; border: 1px solid rgba(148, 163, 184, .14); border-radius: 9px; cursor: pointer; }
+.recovery-result > label input { accent-color: #8b5cf6; }
+.recovery-result > label span { display: flex; flex-direction: column; gap: 3px; }
+.recovery-result > label strong { color: #e7edf8; font-size: 10px; }
+.recovery-result > label small { color: #8491a5; font-size: 9px; }
+
 /* Alert Boxes (Erro / Sucesso) */
 .alert-box {
   display: flex;
@@ -367,6 +392,34 @@
   color: #f87171;
 }
 
+.lock-recovery-unavailable {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(245, 158, 11, 0.24);
+  border-radius: 9px;
+  color: #fde7b0;
+  background: rgba(120, 53, 15, 0.2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.lock-recovery-unavailable.error {
+  border-color: rgba(248, 113, 113, 0.28);
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.2);
+}
+
+.lock-recovery-unavailable button {
+  justify-self: start;
+  padding: 5px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+}
+
 /* Animações */
 @keyframes spin {
   to { transform: rotate(360deg); }
@@ -412,4 +465,5 @@
   .lock-time {
     font-size: 72px;
   }
+  .recovery-password-grid { grid-template-columns: 1fr; }
 }

@@ -1,60 +1,69 @@
-# Plano de Empacotamento para Windows — CloudOS-Unified
+# Plano de empacotamento Windows
 
-## 1. Visão Geral
-Este documento estabelece o plano arquitetural para empacotar o **CloudOS-Unified** em um aplicativo desktop executável nativo do Windows (arquivo `.exe` / instalador `.msi` via Electron / NSIS), sem a necessidade de instalar o WSL automaticamente durante a instalação do software base.
+## Decisão
 
----
+O alvo recomendado é um host Windows em .NET 8 com WinUI 3 (ou WPF, caso a prioridade seja maturidade) e WebView2. Essa combinação preserva o frontend React e permite criar a ponte nativa necessária para janelas Windows/WSLg, UAC, reinício e integração de arquivos.
 
-## 2. Componentes da Arquitetura Desktop (Electron + Node.js Integrado)
+Electron continua sendo uma alternativa para uma embalagem rápida, mas não resolve sozinho rastreamento de HWND, captura, integridade/UIPI ou broker elevado. Também aumenta o tamanho do instalador ao incluir outro Chromium.
 
+## Componentes do pacote
+
+```text
+CloudOS-Setup.msix / .exe
+  ├── CloudOS.Bootstrap.exe     guardião e UI WPF de recuperação
+  ├── CloudOS.Host.exe          WebView2, shell e supervisor
+  ├── CloudOS.Broker.exe        pequeno, assinado, elevado sob demanda
+  ├── runtime/node.exe          runtime Node.js fixado
+  ├── agent/backend/            agente local
+  ├── web/                      build estático do frontend
+  └── assets/                   ícones e recursos
 ```
-[ Instalador CloudOS-Setup.exe (NSIS) ]
-          │
-          ├──> Instala em: %LOCALAPPDATA%\Programs\CloudOS-Unified\
-          ├──> Dados em:   %APPDATA%\CloudOS-Unified\
-          │
-          ├──> Inicia o Processo Desktop Host (Electron ElectronMain.js)
-          │       ├── Backend Node.js em background (PID isolado em 127.0.0.1)
-          │       └── Janela Principal Glassmorphism (Chromium Window)
-          │
-          └──> Atalho na Área de Trabalho e Menu Iniciar
-```
 
----
+Todo código executável dessa árvore, inclusive JavaScript do agente e do frontend,
+é coberto por um catálogo assinado de hashes. Binários ficam em uma área de
+instalação protegida. Dados mutáveis ficam em `%LOCALAPPDATA%\CloudOS\`:
 
-## 3. Estrutura do Instalador (NSIS / Electron Builder)
+- banco JSON v2, backups de recuperação e segredo JWT;
+- journal de operações;
+- logs com redação de segredos;
+- preferências e cache;
+- arquivos de runtime com PID, horário inicial e nonce.
 
-### A. Diretório de Instalação e Dados
-- **Binários e Código**: `%LOCALAPPDATA%\Programs\CloudOS-Unified\`
-- **Preservação de Dados do Usuário**: `%APPDATA%\CloudOS-Unified\`
-  - `runtime/backend-port.json`
-  - `database/cloudos.db` (banco de dados SQLite local)
-  - `user-preferences.json`
+## Inicialização
 
-### B. Inicialização Oculta do Backend
-- O processo backend será iniciado como um worker filho desanexado (`child_process.spawn`) pelo processo principal do Electron.
-- Nenhuma janela de console CMD ou terminal PowerShell será visível ao usuário durante a execução normal.
+1. O bootstrap garante uma instância por usuário e inicia somente o host esperado.
+2. O host valida arquivos e versão do runtime.
+3. O host inicia o agente em `127.0.0.1` e porta dinâmica.
+4. Host e agente autenticam uma lease privada; perder o host encerra o agente.
+5. O host aguarda health check autenticado do agente.
+6. O host mapeia o build React para `http://cloudos.localhost/` e injeta os endpoints efêmeros da API/WS antes do bundle.
+7. Depois que o bundle React monta, a ponte faz o handshake e o host sinaliza prontidão ao bootstrap; HTTP 200 ou navegação concluída não bastam.
+8. O bootstrap observa a saída e interrompe crash loops numa UI sem WebView2.
+9. O CloudOS reconcilia operações interrompidas e sessões nativas.
 
-### C. Atalhos no Sistema
-- **Área de Trabalho**: `CloudOS Unified.lnk` com ícone personalizado `.ico`.
-- **Menu Iniciar**: `CloudOS Unified` em `Programs\CloudOS Unified`.
+O host valida executável, horário de início e nonce antes de encerrar um PID registrado. Um arquivo de runtime obsoleto nunca é motivo suficiente para matar um processo.
 
-### D. Desinstalador Limpo (Uninstaller)
-- O desinstalador NSIS removerá apenas os executáveis em `%LOCALAPPDATA%\Programs\CloudOS-Unified\`.
-- **Preservação de Dados**: Pergunta ao usuário se deseja manter a pasta de dados `%APPDATA%\CloudOS-Unified\` para evitar perda acidental de configurações e arquivos virtuais.
+## Broker e elevação
 
----
+- Executado apenas para ações que realmente exigem administrador.
+- IPC por named pipe com ACL limitada ao SID da sessão atual.
+- Mensagens versionadas, nonce de uso único, expiração e verbos allowlisted.
+- Nenhum `command`, PowerShell ou argv arbitrário atravessa a ponte do frontend.
+- UAC negado volta como estado de operação recuperável.
 
-## 4. Detecção Prévia de Pré-requisitos (Runtime Inspector)
+## Instalação e atualização
 
-Antes da execução dos serviços, o verificador interno valida:
-1. **Node.js**: Detectado no pacote empacotado (Node runtime embutido no Electron).
-2. **Portas Dinâmicas**: Bind nativo em `127.0.0.1` entre portas 18080-18180 para backend e 15173-15200 para frontend.
-3. **Detecção do WSL**: Consulta não-destrutiva via `wsl.exe --list --verbose` para vincular o shell Linux caso a distribuição `kali-linux` esteja presente.
+- MSIX assinado quando possível; instalador `.exe` assinado como fallback.
+- WebView2 Evergreen bootstrapper ou requisito verificado no setup.
+- Atualização atômica com rollback.
+- Desinstalação preserva dados por padrão e pergunta antes de removê-los.
+- WSL e distribuições nunca são removidos junto com o CloudOS sem fluxo separado e confirmação explícita.
 
----
+## Estado da primeira POC
 
-## 5. Próximos Passos na Fase de Build Nativo
-1. Configuração do `electron-builder.json`.
-2. Criação do script de empacotamento `npm run package:win`.
-3. Geração do instalador único `CloudOS-Unified-Setup-1.0.0.exe`.
+- Implementado: abrir CloudOS em WebView2; iniciar/supervisionar o agente; origem local verificada; bridge restrita; fullscreen/kiosk; tracking por PID; focar, maximizar, minimizar, restaurar e fechar; espelhar sessões atribuídas na taskbar.
+- Implementado e disponível somente na prévia opt-in: bootstrap WPF independente, handshake de prontidão, backoff, journal por usuário e tela de recuperação após crash loop. Ele não altera o Registro nem substitui o shell atual; o atalho padrão continua direto no host.
+- Validado automaticamente: build Release sem avisos, frontend de produção, health autenticado, origem estável do documento, agente em porta efêmera e shutdown gracioso.
+- Pendente para produto: correlação de janelas de brokers StartApps/WSLg, mover/redimensionar pela taskbar, retomada após reboot, matriz DPI/multi-monitor, fixture gráfica e instalador assinado.
+
+Veja [NATIVE-HOST-ROADMAP.md](NATIVE-HOST-ROADMAP.md) para as fases completas.

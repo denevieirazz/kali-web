@@ -1,6 +1,6 @@
-import jwt from 'jsonwebtoken';
 import { config } from '../config/index.js';
-import { getPreferred, validateAllowlisted, isInstalled } from '../wsl/distroService.js';
+import { getWslSnapshot, normalizeName } from '../wsl/distroService.js';
+import { verifySessionToken } from '../middleware/auth.js';
 
 let pty = null;
 try {
@@ -12,11 +12,44 @@ try {
 const WSL_EXE = 'C:\\Windows\\System32\\wsl.exe';
 const POWERSHELL_EXE = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
 
+function buildTerminalEnvironment() {
+  const allowedKeys = [
+    'ALLUSERSPROFILE', 'APPDATA', 'CommonProgramFiles', 'CommonProgramFiles(x86)',
+    'CommonProgramW6432', 'COMPUTERNAME', 'ComSpec', 'HOMEDRIVE', 'HOMEPATH',
+    'LOCALAPPDATA', 'NUMBER_OF_PROCESSORS', 'OS', 'Path', 'PATHEXT',
+    'PROCESSOR_ARCHITECTURE', 'PROCESSOR_IDENTIFIER', 'PROCESSOR_LEVEL',
+    'PROCESSOR_REVISION', 'ProgramData', 'ProgramFiles', 'ProgramFiles(x86)',
+    'ProgramW6432', 'PSModulePath', 'PUBLIC', 'SystemDrive', 'SystemRoot',
+    'TEMP', 'TMP', 'USERDOMAIN', 'USERNAME', 'USERPROFILE', 'windir',
+    'LANG', 'LC_ALL', 'TERM', 'WSLENV'
+  ];
+  const environment = { CLOUDOS: '1', TERM: 'xterm-256color' };
+  for (const key of allowedKeys) {
+    if (typeof process.env[key] === 'string') environment[key] = process.env[key];
+  }
+  return environment;
+}
+
+function isAllowedWebSocketOrigin(origin, req) {
+  if (!origin) return true;
+  if (config.corsOrigins.includes(origin)) return true;
+  if (config.nativeShellOrigin && origin === config.nativeShellOrigin) return true;
+  try {
+    const parsed = new URL(origin);
+    const localPort = Number(req.socket?.localPort);
+    return parsed.protocol === 'http:'
+      && parsed.hostname === '127.0.0.1'
+      && Number(parsed.port) === localPort;
+  } catch {
+    return false;
+  }
+}
+
 export function setupTerminalWebSocket(wss) {
-  wss.on('connection', (ws, req) => {
+  wss.on('connection', async (ws, req) => {
     // Validação de Origin
     const origin = req.headers.origin;
-    if (origin && !config.corsOrigins.includes(origin) && !origin.startsWith('http://localhost:') && !origin.startsWith('http://127.0.0.1:')) {
+    if (!isAllowedWebSocketOrigin(origin, req)) {
       ws.close(1008, 'Origin não permitida');
       return;
     }
@@ -29,14 +62,15 @@ export function setupTerminalWebSocket(wss) {
     }
 
     try {
-      jwt.verify(protocol, config.jwtSecret);
+      await verifySessionToken(protocol);
     } catch (e) {
-      ws.close(1008, 'Token inválido');
+      ws.close(1008, 'Token inválido ou revogado');
       return;
     }
 
     let ptyProcess = null;
     let isInitialized = false;
+    let isInitializing = false;
 
     // Se node-pty não está disponível, modo emulador
     if (!pty) {
@@ -56,21 +90,23 @@ export function setupTerminalWebSocket(wss) {
       return;
     }
 
-    ws.on('message', (messageRaw) => {
+    ws.on('message', async (messageRaw) => {
       try {
         const msg = JSON.parse(messageRaw.toString());
 
         // Mensagem 1: "start" — Inicialização controlada
         if (msg.type === 'start') {
-          if (isInitialized) {
-            ws.send(JSON.stringify({ type: 'error', data: 'Sessão PTY já inicializada.' }));
+          if (isInitialized || isInitializing) {
+            ws.send(JSON.stringify({ type: 'error', data: 'Sessão PTY já inicializada ou em preparação.' }));
             return;
           }
+          isInitializing = true;
 
           // Bloqueio estrito de parâmetros inseguros do cliente
           if (msg.executable || msg.args || msg.cwd || msg.env || msg.command) {
             ws.send(JSON.stringify({ type: 'error', data: 'Parâmetros de execução arbitrários são rejeitados.' }));
             ws.close(1008, 'Tentativa de injeção de executável/argumentos');
+            isInitializing = false;
             return;
           }
 
@@ -82,16 +118,13 @@ export function setupTerminalWebSocket(wss) {
           let spawnArgs = ['-NoLogo'];
 
           if (requestedProfile === 'wsl') {
-            const requestedDistro = msg.distribution;
-            let targetDistro = null;
+            const requestedDistro = normalizeName(msg.distribution);
+            const snapshot = await getWslSnapshot();
+            const requested = snapshot.distributions.find((distro) => distro.name.toLowerCase() === requestedDistro.toLowerCase());
+            const preferred = snapshot.distributions.find((distro) => distro.name === snapshot.preferred);
+            const targetDistro = requested?.name || preferred?.name || snapshot.distributions[0]?.name || null;
 
-            if (requestedDistro && validateAllowlisted(requestedDistro)) {
-              targetDistro = requestedDistro;
-            } else {
-              targetDistro = getPreferred();
-            }
-
-            if (targetDistro && isInstalled(targetDistro)) {
+            if (snapshot.operational && targetDistro) {
               spawnExe = WSL_EXE;
               spawnArgs = ['-d', targetDistro, '--', '/bin/bash', '-l'];
             } else {
@@ -107,14 +140,16 @@ export function setupTerminalWebSocket(wss) {
               cols,
               rows,
               cwd: process.env.USERPROFILE || 'C:\\',
-              env: { ...process.env, CLOUDOS: '1' }
+              env: buildTerminalEnvironment()
             });
             isInitialized = true;
           } catch (err) {
             ws.send(JSON.stringify({ type: 'error', data: 'Falha ao iniciar PTY: ' + err.message }));
             ws.close(1011, err.message);
+            isInitializing = false;
             return;
           }
+          isInitializing = false;
 
           ptyProcess.onData((data) => {
             if (ws.readyState === ws.OPEN) {
@@ -157,6 +192,7 @@ export function setupTerminalWebSocket(wss) {
         }
 
       } catch (err) {
+        isInitializing = false;
         ws.send(JSON.stringify({ type: 'error', data: 'Mensagem inválida: ' + err.message }));
       }
     });

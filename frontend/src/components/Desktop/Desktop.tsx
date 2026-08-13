@@ -61,7 +61,7 @@ function buildDefaultIcons(): DesktopIconData[] {
     { id: 'cloudos-term', name: 'CloudOS Terminal', icon: '⚡', appId: 'cloudos-terminal' },
     { id: 'cloudos-files', name: 'CloudOS Files', icon: '☁️', appId: 'cloudos-files' },
     { id: 'sys-mon', name: 'System Monitor', icon: '📈', appId: 'system-monitor' },
-    { id: 'inst-linux', name: 'Central de Instalação', icon: '🐧', appId: 'install-linux' },
+    { id: 'inst-linux', name: 'Windows + Linux', icon: '◈', appId: 'install-linux' },
     { id: 'env-doc', name: 'Environment Doctor', icon: '🩺', appId: 'env-doctor' },
     { id: 'terminal', name: 'Terminal Offline', icon: '💻', appId: 'terminal' },
     { id: 'notepad', name: 'Bloco de Notas', icon: '📝', appId: 'notepad' },
@@ -80,7 +80,11 @@ const STORAGE_KEY = 'cloudos-unified-desktop-icons-v2';
 function loadIcons(): DesktopIconData[] {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      return (JSON.parse(saved) as DesktopIconData[]).map((icon) =>
+        icon.id === 'inst-linux' ? { ...icon, name: 'Windows + Linux', icon: '◈' } : icon
+      );
+    }
   } catch {}
   return buildDefaultIcons();
 }

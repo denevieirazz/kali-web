@@ -125,6 +125,20 @@ test('Setup e Auth: Teste completo de primeiro acesso e autenticação', async (
     });
     assert.strictEqual(logoutRes.status, 200);
 
+    // 10. Reset exige admin e revoga o token ao remover a conta correspondente
+    const resetRes = await makeRequest(port, {
+      path: '/api/setup/reset',
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${okLoginJson.token}`, 'Content-Type': 'application/json' }
+    }, JSON.stringify({ confirm: true }));
+    assert.strictEqual(resetRes.status, 200);
+
+    const revokedSession = await makeRequest(port, {
+      path: '/api/auth/session',
+      headers: { 'Authorization': `Bearer ${okLoginJson.token}` }
+    });
+    assert.strictEqual(revokedSession.status, 403);
+
   } finally {
     server.close();
   }

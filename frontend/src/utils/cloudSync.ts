@@ -1,5 +1,6 @@
 import kernel from '../core/kernel';
 import { useUserStore } from '../stores/userStore';
+import { getApiBase, getStoredToken, resolveApiUrl } from '../services/apiClient';
 
 /**
  * LiveMode Cloud Sync Utility
@@ -18,7 +19,7 @@ class CloudSync {
 
     // Se estiver em ambiente de produção unificado, usa a própria URL do site
     if (typeof window !== 'undefined') {
-      return window.location.origin;
+      return getApiBase();
     }
     
     return 'http://localhost:3000';
@@ -49,6 +50,7 @@ class CloudSync {
 
     this.isSyncing = true;
     const apiUrl = this.getApiUrl();
+    const isLocalRuntime = apiUrl.replace(/\/$/, '') === getApiBase();
 
     try {
       const themePath = 'HKEY_CURRENT_USER\\Software\\ObsidianOS\\Theme';
@@ -64,11 +66,11 @@ class CloudSync {
       };
 
       // CHAMADA REAL VIA FETCH
-      const response = await fetch(`${apiUrl}/api/v1/sync`, {
+      const response = await fetch(isLocalRuntime ? resolveApiUrl('/api/v1/sync') : `${apiUrl.replace(/\/$/, '')}/api/v1/sync`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${sessionStorage.getItem('obs_token')}`
+          'Authorization': `Bearer ${isLocalRuntime ? getStoredToken() || '' : sessionStorage.getItem('obs_token') || ''}`
         },
         body: JSON.stringify(syncPayload)
       });
@@ -90,8 +92,9 @@ class CloudSync {
    */
   public async loginCloud(username: string, password: string) {
     const apiUrl = this.getApiUrl();
+    const isLocalRuntime = apiUrl.replace(/\/$/, '') === getApiBase();
     try {
-      const response = await fetch(`${apiUrl}/api/v1/auth/login`, {
+      const response = await fetch(isLocalRuntime ? resolveApiUrl('/api/v1/auth/login') : `${apiUrl.replace(/\/$/, '')}/api/v1/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })

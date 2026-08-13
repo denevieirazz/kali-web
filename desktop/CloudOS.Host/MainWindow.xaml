@@ -1,0 +1,44 @@
+<Window x:Class="CloudOS.Host.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="CloudOS"
+        Width="1440"
+        Height="900"
+        MinWidth="960"
+        MinHeight="640"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource CloudOsBackground}"
+        Loaded="OnLoaded"
+        Closing="OnClosing"
+        PreviewKeyDown="OnPreviewKeyDown">
+  <Grid>
+    <wv2:WebView2 x:Name="ShellWebView"
+                  Visibility="Collapsed"
+                  DefaultBackgroundColor="#080D18" />
+
+    <Grid x:Name="BootPanel" Background="{StaticResource CloudOsBackground}">
+      <StackPanel Width="360" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <Border Width="54" Height="54" CornerRadius="16" Background="{StaticResource CloudOsAccent}" HorizontalAlignment="Center">
+          <TextBlock Text="C" Foreground="White" FontWeight="Bold" FontSize="28" HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Border>
+        <TextBlock Text="CloudOS" Margin="0,18,0,4" Foreground="White" FontSize="25" FontWeight="SemiBold" HorizontalAlignment="Center" />
+        <TextBlock x:Name="BootStatus" Text="Iniciando o agente local..." Foreground="#9AA9C3" FontSize="13" HorizontalAlignment="Center" />
+        <ProgressBar Width="280" Height="4" Margin="0,22,0,0" IsIndeterminate="True" Foreground="{StaticResource CloudOsAccent}" />
+      </StackPanel>
+    </Grid>
+
+    <Border x:Name="ErrorPanel" Width="570" Padding="34" Visibility="Collapsed"
+            HorizontalAlignment="Center" VerticalAlignment="Center"
+            Background="{StaticResource CloudOsPanel}" BorderBrush="#34507C" BorderThickness="1" CornerRadius="16">
+      <StackPanel>
+        <TextBlock x:Name="ErrorTitle" Text="O CloudOS não pôde iniciar" Foreground="White" FontSize="22" FontWeight="SemiBold" />
+        <TextBlock x:Name="ErrorMessage" Margin="0,12,0,24" TextWrapping="Wrap" Foreground="#B5C2D8" LineHeight="21" />
+        <WrapPanel>
+          <Button Content="Tentar novamente" Padding="18,9" Margin="0,0,9,0" Click="Retry_Click" />
+          <Button Content="Fechar" Padding="18,9" Click="Close_Click" />
+        </WrapPanel>
+      </StackPanel>
+    </Border>
+  </Grid>
+</Window>

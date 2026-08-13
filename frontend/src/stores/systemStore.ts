@@ -36,7 +36,6 @@ interface SystemState {
   // Funções
   setBootPhase: (phase: BootPhase) => void;
   setBootProgress: (progress: number) => void;
-  login: (password: string) => boolean;
   lock: () => void;
   unlock: () => void;
   toggleStartMenu: () => void;
@@ -109,7 +108,6 @@ export const useSystem = create<SystemState>((set) => {
     setBootProgress: (progress) => set({ bootProgress: progress }),
     
     // Auth
-    login: (password) => kernel.sysLogin(password),
     lock: () => kernel.sysLock(),
     unlock: () => kernel.sysUnlock(),
     

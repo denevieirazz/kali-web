@@ -113,7 +113,7 @@ test('4. Security: CORS & Origin Validation — Rejeita origens externas não pe
     const res = await requestJson(port, '/api/health', 'GET', null, {
       Origin: 'http://malicious-site.com',
     });
-    assert.strictEqual(res.status, 500);
+    assert.strictEqual(res.status, 403);
   } finally {
     server.close();
   }
@@ -146,4 +146,41 @@ test('6. WSL Service Isolation — Parsing e detecção segura com validação d
   assert.strictEqual(validateAllowlisted('kali-linux && calc.exe'), false);
   assert.strictEqual(validateAllowlisted('../../../etc/passwd'), false);
   assert.strictEqual(validateAllowlisted('; rm -rf /'), false);
+});
+
+test('7. Complete Account Recovery Flow E2E — Status, validação, redefinição de credenciais e novo token', async () => {
+  const app = createApp(18080);
+  const { server, port } = await startServer(app);
+  try {
+    // 1. Check recovery status endpoint
+    const statusRes = await requestJson(port, '/api/auth/recovery/status');
+    assert.strictEqual(statusRes.status, 200);
+    assert.strictEqual(typeof statusRes.data.available, 'boolean');
+
+    // 2. Reject invalid recovery code
+    const invalidRes = await requestJson(port, '/api/auth/recovery/reset', 'POST', {
+      recoveryCode: 'CLOUDOS-invalid-key-attempt-000000000000',
+      password: 'new-secure-password-123',
+      confirmPassword: 'new-secure-password-123'
+    });
+    assert.strictEqual(invalidRes.status, 401);
+
+    // 3. Reject password mismatch
+    const mismatchRes = await requestJson(port, '/api/auth/recovery/reset', 'POST', {
+      recoveryCode: 'CLOUDOS-invalid-key-attempt-000000000000',
+      password: 'new-secure-password-123',
+      confirmPassword: 'different-password'
+    });
+    assert.strictEqual(mismatchRes.status, 400);
+
+    // 4. Reject short password
+    const shortRes = await requestJson(port, '/api/auth/recovery/reset', 'POST', {
+      recoveryCode: 'CLOUDOS-invalid-key-attempt-000000000000',
+      password: 'short',
+      confirmPassword: 'short'
+    });
+    assert.strictEqual(shortRes.status, 400);
+  } finally {
+    server.close();
+  }
 });

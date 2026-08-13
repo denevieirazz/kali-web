@@ -1,16 +1,43 @@
 import http from 'http';
+import crypto from 'node:crypto';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer } from 'ws';
 import { createApp } from './app.js';
 import { getDb } from './database/index.js';
+import { connectHostLease, readHostLeaseConfig } from './runtime/hostLease.js';
 import { setupTerminalWebSocket } from './terminal/websocket.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const runtimeDir = path.resolve(__dirname, '../../runtime');
+const runtimeDir = path.resolve(process.env.CLOUDOS_RUNTIME_DIR || path.resolve(__dirname, '../../runtime'));
 const runtimeFile = path.join(runtimeDir, 'backend-port.json');
+const instanceId = crypto.randomUUID();
+
+function removeRuntimeFileIfOwned() {
+  if (!fs.existsSync(runtimeFile)) return;
+  try {
+    const current = JSON.parse(fs.readFileSync(runtimeFile, 'utf8'));
+    if (current.instanceId === instanceId) fs.unlinkSync(runtimeFile);
+  } catch {}
+}
+
+async function probeRuntime(candidate) {
+  if (!Number.isInteger(candidate?.pid) || !Number.isInteger(candidate?.backendPort) || typeof candidate?.instanceId !== 'string') return false;
+  if (candidate.host !== '127.0.0.1' || candidate.backendPort < 1024 || candidate.backendPort > 65535) return false;
+  try {
+    process.kill(candidate.pid, 0);
+    const response = await fetch(`http://127.0.0.1:${candidate.backendPort}/api/runtime`, {
+      signal: AbortSignal.timeout(1500)
+    });
+    if (!response.ok) return false;
+    const live = await response.json();
+    return live.instanceId === candidate.instanceId && live.backendPort === candidate.backendPort;
+  } catch {
+    return false;
+  }
+}
 
 // Bind approach: try each port by actually binding the HTTP server.
 // No find-then-release race condition.
@@ -30,7 +57,8 @@ async function listenOnFreePort(server, start, end, host) {
         server.once('listening', onListen);
         server.listen(port, host);
       });
-      return port;
+      const address = server.address();
+      return address && typeof address === 'object' ? address.port : port;
     } catch (e) {
       if (e.code !== 'EADDRINUSE') throw e;
       // Port in use, try next
@@ -44,16 +72,11 @@ async function startServer() {
   if (fs.existsSync(runtimeFile)) {
     try {
       const oldData = JSON.parse(fs.readFileSync(runtimeFile, 'utf-8'));
-      if (oldData.pid) {
-        try {
-          process.kill(oldData.pid, 0);
-          console.log(`Processo backend anterior (PID ${oldData.pid}) ainda ativo. Abortando duplicação.`);
-          process.exit(1);
-        } catch (e) {
-          // PID morto, limpar
-          fs.unlinkSync(runtimeFile);
-        }
+      if (await probeRuntime(oldData)) {
+        console.log(`Backend CloudOS anterior (PID ${oldData.pid}) ainda está ativo e autenticado pelo runtime. Abortando duplicação.`);
+        process.exit(1);
       }
+      fs.unlinkSync(runtimeFile);
     } catch (e) {
       try { fs.unlinkSync(runtimeFile); } catch (_) {}
     }
@@ -62,16 +85,38 @@ async function startServer() {
   // Inicializa banco de dados
   getDb();
 
+  let server = null;
+  let wss = null;
+  let hostLease = null;
+  let leaseLost = false;
+  let shutdownReady = false;
+  let shuttingDown = false;
+
+  const leaseConfig = readHostLeaseConfig();
+  if (leaseConfig) {
+    hostLease = await connectHostLease(leaseConfig, {
+      onLost: () => {
+        leaseLost = true;
+        if (shutdownReady) handleShutdown('HOST_LEASE_CLOSED');
+      }
+    });
+  }
+
   // Cria app sem porta (será definida após listen)
   const app = createApp(null);
-  const server = http.createServer(app);
+  app._cloudosInstanceId = instanceId;
+  server = http.createServer(app);
 
   // Bind real em 127.0.0.1 — sem race condition
   // WebSocketServer é criado DEPOIS do listen para não capturar erros de bind
-  const port = await listenOnFreePort(server, 18080, 18180, '127.0.0.1');
+  const configuredPort = Number.parseInt(process.env.PORT || '', 10);
+  const useEphemeralPort = process.env.CLOUDOS_NATIVE_HOST === '1' || configuredPort === 0;
+  const port = useEphemeralPort
+    ? await listenOnFreePort(server, 0, 0, '127.0.0.1')
+    : await listenOnFreePort(server, Number.isInteger(configuredPort) ? configuredPort : 18080, Number.isInteger(configuredPort) ? configuredPort : 18180, '127.0.0.1');
 
   // Agora que o server está escutando, anexar WebSocket
-  const wss = new WebSocketServer({ server, path: '/ws/terminal' });
+  wss = new WebSocketServer({ server, path: '/ws/terminal' });
   setupTerminalWebSocket(wss);
 
   // Atualiza a porta real no app
@@ -90,7 +135,13 @@ async function startServer() {
     apiBase: `http://127.0.0.1:${port}`,
     webSocketBase: `ws://127.0.0.1:${port}`,
     startedAt: new Date().toISOString(),
-    pid: process.pid
+    pid: process.pid,
+    instanceId,
+    runId: process.env.CLOUDOS_RUN_ID || null,
+    executablePath: process.execPath,
+    parentPid: Number.parseInt(process.env.CLOUDOS_PARENT_PID || '', 10) || null,
+    nativeHost: process.env.CLOUDOS_NATIVE_HOST === '1',
+    leaseProtocol: hostLease?.protocol || null
   };
 
   const tempFile = runtimeFile + '.tmp';
@@ -99,22 +150,45 @@ async function startServer() {
 
   // Encerramento limpo
   function handleShutdown(signal) {
+    if (shuttingDown) return;
+    shuttingDown = true;
     console.log(`\nRecebido ${signal}. Encerrando backend...`);
-    if (fs.existsSync(runtimeFile)) {
-      try { fs.unlinkSync(runtimeFile); } catch (e) {}
-    }
-    server.close(() => {
+    removeRuntimeFileIfOwned();
+
+    const forcedExit = setTimeout(() => {
+      hostLease?.close();
+      process.exit(0);
+    }, 8000);
+
+    for (const client of wss?.clients || []) client.terminate();
+    wss?.close();
+    const finish = () => {
       const db = getDb();
       if (db) {
-        db.close(() => process.exit(0));
+        db.close(() => {
+          clearTimeout(forcedExit);
+          hostLease?.close();
+          process.exit(0);
+        });
       } else {
+        clearTimeout(forcedExit);
+        hostLease?.close();
         process.exit(0);
       }
-    });
+    };
+
+    if (server?.listening) server.close(finish);
+    else finish();
   }
 
   process.on('SIGINT', () => handleShutdown('SIGINT'));
   process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+  app.on('cloudos:shutdown', () => handleShutdown('SUPERVISOR'));
+  process.on('message', (message) => {
+    if (message === 'shutdown') handleShutdown('IPC');
+  });
+  shutdownReady = true;
+  if (leaseLost) handleShutdown('HOST_LEASE_CLOSED');
 }
 
 startServer().catch((err) => {

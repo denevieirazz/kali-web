@@ -1,225 +1,173 @@
-import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { useUserStore } from '../../stores/userStore';
+import { useEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useSystem } from '../../stores/systemStore';
+import { useUserStore } from '../../stores/userStore';
+import { validateDisplayName, validateNewPassword, validateUsername } from '../../services/accountContract.js';
 import kernel from '../../core/kernel';
 import './SetupWizard.css';
 
-const steps = [
-  { id: 'welcome', title: 'Bem-vindo ao ObsidianOS' },
-  { id: 'user', title: 'Quem vai usar este PC?' },
-  { id: 'theme', title: 'Personalize seu estilo' },
-  { id: 'finalizing', title: 'Quase pronto...' },
-];
+type Step = 'welcome' | 'account' | 'theme' | 'recovery';
+const STEPS: Step[] = ['welcome', 'account', 'theme', 'recovery'];
 
 export default function SetupWizard() {
-  const [currentStep, setCurrentStep] = useState(0);
-  const { createProfile } = useUserStore();
-  const { setTheme } = useSystem();
-  
-  // Form State
+  const [step, setStep] = useState<Step>('welcome');
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [accentColor, setAccentColor] = useState('#6366f1');
+  const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
+  const [recoverySaved, setRecoverySaved] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const completedSetupHandoff = useRef(false);
+  const createdAccountInThisFlow = useRef(false);
+  const { setTheme } = useSystem();
+  const { createAdmin, checkSetupStatus, confirmRecoveryCodeSaved, setupStatus, setupStatusMessage } = useUserStore();
 
-  const nextStep = () => {
-    if (currentStep < steps.length - 1) {
-      setCurrentStep(currentStep + 1);
-      
-      // If moving to the final step, simulate processing and then finish
-      if (currentStep + 1 === steps.length - 1) {
-        handleFinish();
-      }
-    }
-  };
+  useEffect(() => {
+    if (setupStatus === 'checking') void checkSetupStatus();
+  }, [checkSetupStatus, setupStatus]);
 
-  const handleFinish = async () => {
-    // Simulate setup processing
-    await new Promise(r => setTimeout(r, 2500));
-    
-    // 1. Create the profile data
-    const newProfile = {
-      username: username || 'User',
-      displayName: displayName || username || 'Obsidian User',
-      password: password,
-      avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${username || 'Admin'}`,
-      isAdmin: true,
-      lastLogin: Date.now()
-    };
-
-    // 2. Create profile and set as current in store
-    createProfile(newProfile);
-    useUserStore.setState({ currentUser: newProfile, isAuthenticated: false });
-
-    // 3. Update Kernel's user state (This is critical for LockScreen to see the right user)
-    (kernel as any)._user = newProfile;
-    (kernel as any).sysCreateUserHome(username);
-    (kernel as any)._persistSystemState();
-
-    // 4. Set the chosen theme
-    setTheme({ accentColor });
-
-    // 5. Mark setup as completed — zero the registry flag so it never shows again
+  useEffect(() => {
+    if (setupStatus !== 'complete' || createdAccountInThisFlow.current || completedSetupHandoff.current) return;
+    completedSetupHandoff.current = true;
     kernel.regSetValue('HKEY_LOCAL_MACHINE\\SYSTEM\\Setup\\SetupInProgress', 'REG_DWORD', 0);
     kernel.regSetValue('HKEY_LOCAL_MACHINE\\SYSTEM\\Setup\\OOBEInProgress', 'REG_DWORD', 0);
     localStorage.setItem('obsidianos-setup-completed', 'true');
-    
-    // 6. Boot into login
-    (kernel as any).bootPhase = 'WINLOGON';
-  };
+    kernel.bootPhase = 'WINLOGON';
+  }, [setupStatus]);
 
-  const renderStep = () => {
-    switch (steps[currentStep].id) {
-      case 'welcome':
-        return (
-          <motion.div 
-            initial={{ opacity: 0, x: 20 }} 
-            animate={{ opacity: 1, x: 0 }} 
-            exit={{ opacity: 0, x: -20 }}
-            className="setup-step"
-          >
-            <h1 className="setup-title">Olá, vamos começar.</h1>
-            <p className="setup-description" style={{ color: 'var(--text-secondary)', marginBottom: '32px' }}>
-              Parabéns por escolher o ObsidianOS. Estamos felizes em ter você aqui.
-              Vamos configurar algumas coisas básicas para deixar o sistema pronto para você.
-            </p>
-            <div className="setup-illustration-small" style={{ fontSize: '48px' }}>✨</div>
-          </motion.div>
-        );
+  const currentIndex = STEPS.indexOf(step);
 
-      case 'user':
-        return (
-          <motion.div 
-            initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
-            className="setup-form"
-          >
-            <h1 className="setup-title">Sua Conta</h1>
-            <div className="setup-field">
-              <label>Nome Completo</label>
-              <input 
-                className="setup-input" 
-                placeholder="Ex: João da Silva" 
-                value={displayName}
-                onChange={e => setDisplayName(e.target.value)}
-              />
-            </div>
-            <div className="setup-field">
-              <label>Nome de Usuário</label>
-              <input 
-                className="setup-input" 
-                placeholder="Ex: joao123" 
-                value={username}
-                onChange={e => setUsername(e.target.value)}
-              />
-            </div>
-            <div className="setup-field">
-              <label>Senha (opcional)</label>
-              <input 
-                type="password" 
-                className="setup-input" 
-                placeholder="••••••••" 
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-              />
-            </div>
-          </motion.div>
-        );
-
-      case 'theme':
-        return (
-          <motion.div 
-            initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
-          >
-            <h1 className="setup-title">Escolha uma Cor</h1>
-            <div className="setup-themes">
-              {['#6366f1', '#f43f5e', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4'].map(color => (
-                <div 
-                  key={color}
-                  className={`theme-card ${accentColor === color ? 'selected' : ''}`}
-                  onClick={() => setAccentColor(color)}
-                >
-                  <div className="theme-preview" style={{ background: color }} />
-                  <span className="theme-name">{color}</span>
-                </div>
-              ))}
-            </div>
-          </motion.div>
-        );
-
-      case 'finalizing':
-        return (
-          <motion.div 
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-            className="finalizing-container"
-          >
-            <div className="loading-spinner" />
-            <h1 className="setup-title">Preparando tudo...</h1>
-            <p style={{ color: 'var(--text-secondary)' }}>Isso levará apenas alguns segundos. Não desligue o seu PC.</p>
-          </motion.div>
-        );
-
-      default:
-        return null;
+  function goNext() {
+    setError(null);
+    if (step === 'welcome') return setStep('account');
+    if (step === 'account') {
+      const validation = validateDisplayName(displayName) || validateUsername(username) || validateNewPassword(password, confirmPassword);
+      if (validation) return setError(validation);
+      return setStep('theme');
     }
-  };
+    if (step === 'theme') void createRealAccount();
+  }
+
+  async function createRealAccount() {
+    if (loading) return;
+    // Prevent the setup-status update produced by our own successful request
+    // from being mistaken for an administrator that existed before this OOBE.
+    createdAccountInThisFlow.current = true;
+    setLoading(true);
+    setError(null);
+    const result = await createAdmin(username.trim(), displayName.trim(), password, confirmPassword);
+    setPassword('');
+    setConfirmPassword('');
+    if (!result.success || !result.recoveryCode) {
+      createdAccountInThisFlow.current = false;
+      const refreshedStatus = await checkSetupStatus();
+      setLoading(false);
+      if (refreshedStatus !== 'complete') {
+        setError(result.message || 'Não foi possível criar a conta no agente local.');
+      }
+      return;
+    }
+    setLoading(false);
+    setTheme({ accentColor });
+    setRecoveryCode(result.recoveryCode);
+    setRecoverySaved(false);
+    setStep('recovery');
+  }
+
+  function finishSetup() {
+    if (!recoveryCode || !recoverySaved) return;
+    kernel.sysCreateUserHome(username.trim());
+    kernel.regSetValue('HKEY_LOCAL_MACHINE\\SYSTEM\\Setup\\SetupInProgress', 'REG_DWORD', 0);
+    kernel.regSetValue('HKEY_LOCAL_MACHINE\\SYSTEM\\Setup\\OOBEInProgress', 'REG_DWORD', 0);
+    localStorage.setItem('obsidianos-setup-completed', 'true');
+    confirmRecoveryCodeSaved();
+    setRecoveryCode(null);
+    setRecoverySaved(false);
+    useSystem.getState().unlock();
+  }
+
+  async function copyRecoveryCode() {
+    if (!recoveryCode) return;
+    try {
+      await navigator.clipboard.writeText(recoveryCode);
+    } catch {
+      setError('Não foi possível copiar. Selecione o código e salve-o manualmente.');
+    }
+  }
+
+  const unavailable = setupStatus === 'unavailable';
 
   return (
     <div className="setup-wizard">
       <div className="setup-bg-decorator" style={{ top: '-10%', right: '-10%' }} />
       <div className="setup-bg-decorator" style={{ bottom: '-10%', left: '-10%', background: 'radial-gradient(circle, var(--accent) 0%, transparent 70%)' }} />
-      
-      <motion.div 
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        className="setup-container"
-      >
-        <div className="setup-left">
-          <div className="setup-illustration">
-            {currentStep === 0 && '👋'}
-            {currentStep === 1 && '👤'}
-            {currentStep === 2 && '🎨'}
-            {currentStep === 3 && '🚀'}
-          </div>
-          <h2>Obsidian OS</h2>
-          <p>
-            {currentStep === 0 && 'Uma experiência fluida, moderna e poderosa direto no seu navegador.'}
-            {currentStep === 1 && 'Sua conta será usada para sincronizar arquivos e configurações com o LiveMode.'}
-            {currentStep === 2 && 'O sistema se adapta ao seu estilo. Escolha a cor que mais combina com você.'}
-            {currentStep === 3 && 'Estamos configurando seu perfil, registro de sistema e área de trabalho.'}
-          </p>
-        </div>
+      <motion.div initial={{ scale: .96, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="setup-container">
+        <aside className="setup-left">
+          <div className="setup-cloud-mark">C</div>
+          <h2>CloudOS</h2>
+          <p>{step === 'welcome' && 'Configure uma conta real protegida pelo agente local.'}{step === 'account' && 'Sua senha é enviada ao agente apenas para ser derivada e nunca é salva nesta interface.'}{step === 'theme' && 'Personalize o ambiente antes de concluir a criação.'}{step === 'recovery' && 'Este código é a única forma de recuperar a conta sem a senha.'}</p>
+          <div className="setup-security-note"><strong>Conta local real</strong><span>Credenciais não ficam no navegador, kernel ou sistema de arquivos virtual.</span></div>
+        </aside>
 
-        <div className="setup-right">
-          <div className="setup-step-indicator">
-            {steps.map((_, i) => (
-              <div key={i} className={`step-dot ${i === currentStep ? 'active' : ''}`} />
-            ))}
+        <main className="setup-right">
+          <div className="setup-step-indicator" aria-label={`Etapa ${currentIndex + 1} de ${STEPS.length}`}>
+            {STEPS.map((item) => <div key={item} className={`step-dot ${item === step ? 'active' : ''}`} />)}
           </div>
 
           <div className="setup-content">
             <AnimatePresence mode="wait">
-              {renderStep()}
+              {unavailable ? (
+                <motion.section key="unavailable" className="setup-step" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                  <span className="setup-kicker">AGENTE INDISPONÍVEL</span>
+                  <h1 className="setup-title">Não foi possível verificar a instalação</h1>
+                  <p className="setup-description">O CloudOS não vai presumir que o primeiro acesso está livre. Reconecte o agente local para consultar o estado real.</p>
+                  {setupStatusMessage && <div className="setup-alert error">{setupStatusMessage}</div>}
+                  <button className="setup-btn setup-btn-primary inline" onClick={() => checkSetupStatus()}>Tentar novamente</button>
+                </motion.section>
+              ) : step === 'welcome' ? (
+                <motion.section key="welcome" className="setup-step" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+                  <span className="setup-kicker">PRIMEIRO ACESSO</span>
+                  <h1 className="setup-title">Sua conta começa aqui.</h1>
+                  <p className="setup-description">Crie a conta administradora do CloudOS e receba uma chave de recuperação mostrada uma única vez.</p>
+                  <ul className="setup-feature-list"><li>Senha armazenada somente como hash no agente</li><li>Sessão autenticada para recursos do computador</li><li>Código rotacionado depois de cada recuperação</li></ul>
+                </motion.section>
+              ) : step === 'account' ? (
+                <motion.form key="account" className="setup-form" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} onSubmit={(event) => { event.preventDefault(); goNext(); }}>
+                  <span className="setup-kicker">CONTA ADMINISTRADORA</span>
+                  <h1 className="setup-title compact">Identifique-se</h1>
+                  <label className="setup-field">Nome de exibição<input className="setup-input" value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" maxLength={80} placeholder="Como você quer ser chamado" /></label>
+                  <label className="setup-field">Nome de usuário<input className="setup-input" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" maxLength={64} placeholder="exemplo.usuario" /></label>
+                  <div className="setup-password-grid">
+                    <label className="setup-field">Senha<input type="password" className="setup-input" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" maxLength={128} /></label>
+                    <label className="setup-field">Confirmar senha<input type="password" className="setup-input" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" maxLength={128} /></label>
+                  </div>
+                  <small className="setup-field-help">Use de 10 a 128 caracteres. Uma frase-senha longa também é aceita.</small>
+                  <button type="submit" hidden aria-hidden="true" />
+                </motion.form>
+              ) : step === 'theme' ? (
+                <motion.section key="theme" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+                  <span className="setup-kicker">APARÊNCIA</span><h1 className="setup-title compact">Escolha uma cor</h1><p className="setup-description">A conta será criada no agente quando você continuar.</p>
+                  <div className="setup-themes">{['#6366f1','#f43f5e','#10b981','#f59e0b','#8b5cf6','#06b6d4'].map((color) => <button type="button" aria-label={`Cor ${color}`} key={color} className={`theme-card ${accentColor === color ? 'selected' : ''}`} onClick={() => setAccentColor(color)}><span className="theme-preview" style={{ background: color }} /><span className="theme-name">{color}</span></button>)}</div>
+                </motion.section>
+              ) : (
+                <motion.section key="recovery" className="setup-step" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                  <span className="setup-kicker">MOSTRADO UMA ÚNICA VEZ</span><h1 className="setup-title compact">Salve seu código de recuperação</h1><p className="setup-description">Guarde-o fora deste computador. Depois de fechar esta tela, o CloudOS não conseguirá exibi-lo novamente.</p>
+                  <div className="setup-recovery-code"><code>{recoveryCode}</code><button type="button" onClick={copyRecoveryCode}>Copiar</button></div>
+                  <label className="setup-confirm-save"><input type="checkbox" checked={recoverySaved} onChange={(event) => setRecoverySaved(event.target.checked)} /><span><strong>Confirmei que salvei o código</strong><small>Sem ele, uma senha esquecida não poderá ser redefinida.</small></span></label>
+                </motion.section>
+              )}
             </AnimatePresence>
+            {error && <div className="setup-alert error" role="alert">{error}</div>}
           </div>
 
-          {currentStep < steps.length - 1 && (
-            <div className="setup-footer">
-              {currentStep > 0 && (
-                <button className="setup-btn setup-btn-secondary" onClick={() => setCurrentStep(s => s - 1)}>
-                  Voltar
-                </button>
-              )}
-              <button 
-                className="setup-btn setup-btn-primary" 
-                onClick={nextStep}
-                disabled={currentStep === 1 && !username}
-              >
-                Próximo
-              </button>
-            </div>
-          )}
-        </div>
+          {!unavailable && <footer className="setup-footer">
+            {currentIndex > 0 && step !== 'recovery' && <button className="setup-btn setup-btn-secondary" onClick={() => { setError(null); setStep(STEPS[currentIndex - 1]); }}>Voltar</button>}
+            {step !== 'recovery' ? <button className="setup-btn setup-btn-primary" onClick={goNext} disabled={loading}>{loading ? 'Criando conta…' : step === 'theme' ? 'Criar conta' : 'Continuar'}</button> : <button className="setup-btn setup-btn-primary" onClick={finishSetup} disabled={!recoverySaved}>Entrar no CloudOS</button>}
+          </footer>}
+        </main>
       </motion.div>
     </div>
   );

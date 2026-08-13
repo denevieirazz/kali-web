@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\CloudOS.Bootstrap\BootstrapState.cs" Link="BootstrapState.cs" />
+    <Compile Include="..\CloudOS.Bootstrap\CrashLoopPolicy.cs" Link="CrashLoopPolicy.cs" />
+    <Compile Include="..\CloudOS.Bootstrap\BootStateStore.cs" Link="BootStateStore.cs" />
+    <Compile Include="..\CloudOS.Bootstrap\BootstrapOptions.cs" Link="BootstrapOptions.cs" />
+  </ItemGroup>
+</Project>

@@ -1,6 +1,5 @@
-# Diretrizes de Segurança — CloudOS-Unified
+# Diretrizes de Segurança — CloudOS Unified
 
-- **CORS e Origin**: Requisições de WebSocket e HTTP são restritas exclusivamente a `localhost` e `127.0.0.1`.
-- **Validação de Tokens**: Tokens JWT não são trafegados via Query String de URL. O WebSocket utiliza handshake ou subprotocolo seguro.
-- **Proteção contra Path Traversal**: Caminhos de arquivos no backend e no OPFS são estritamente normalizados.
-- **Sem Exposição de Segredos**: Não há chaves de API, senhas ou tokens salvos em repositório. O `.env.example` serve de modelo sem credenciais.
+A política canônica, o modelo de confiança e os limites conhecidos estão em [`../SECURITY.md`](../SECURITY.md).
+
+No host nativo, a origem do documento aceita pelo agente é exatamente `http://cloudos.localhost`; a API e o WebSocket continuam em `127.0.0.1` numa porta efêmera. Origens de Vite/localhost só são aceitas quando configuradas para desenvolvimento. Tokens não são enviados em query string, credenciais e códigos de recuperação não pertencem ao repositório e caminhos expostos pelo agente devem ser normalizados e limitados a raízes concedidas.
