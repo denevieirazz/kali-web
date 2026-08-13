@@ -1,7 +1,6 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +14,7 @@ import { setupRouter } from './setup/routes.js';
 import { hostRouter } from './host/routes.js';
 import { appsRouter } from './apps/routes.js';
 import { readinessRouter } from './readiness/routes.js';
+import { createHostTrustPolicy, hasSupervisorTrust } from './auth/hostTrust.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const defaultFrontendDist = path.resolve(__dirname, '../../frontend/dist');
@@ -29,15 +29,6 @@ function normalizeOrigin(origin) {
   }
 }
 
-function hasSupervisorAccess(req) {
-  const expected = process.env.CLOUDOS_SUPERVISOR_TOKEN;
-  const provided = req.get('X-CloudOS-Supervisor-Token');
-  if (!expected || !provided) return false;
-  const expectedBytes = Buffer.from(expected);
-  const providedBytes = Buffer.from(provided);
-  return expectedBytes.length === providedBytes.length && crypto.timingSafeEqual(expectedBytes, providedBytes);
-}
-
 function hasTraversalPath(requestUrl) {
   let candidate = String(requestUrl || '').split(/[?#]/, 1)[0];
   try {
@@ -49,10 +40,16 @@ function hasTraversalPath(requestUrl) {
   return candidate.includes('\0') || candidate.split(/[\\/]/).includes('..');
 }
 
-export function createApp(initialPort) {
+export function createApp(initialPort, options = {}) {
   const app = express();
+  const environment = options.environment || process.env;
+  const hostTrustPolicy = createHostTrustPolicy(environment, options.testHooks);
+  const runtimeRunId = environment.CLOUDOS_RUN_ID || null;
+  const nativeHost = environment.CLOUDOS_NATIVE_HOST === '1';
+  const hostLeaseEnabled = Boolean(environment.CLOUDOS_HOST_LEASE_PIPE);
 
   app._cloudosPort = initialPort;
+  app.locals.cloudOsHostTrustPolicy = hostTrustPolicy;
 
   app.use((req, res, next) => {
     if (hasTraversalPath(req.originalUrl)) {
@@ -88,23 +85,23 @@ export function createApp(initialPort) {
   app.use(express.json({ limit: '5mb' }));
 
   app.get('/_cloudos/supervisor/health', (req, res) => {
-    if (!hasSupervisorAccess(req)) return res.sendStatus(404);
+    if (!hasSupervisorTrust(req, hostTrustPolicy)) return res.sendStatus(404);
     const port = app._cloudosPort || 0;
     res.json({
       protocol: 1,
       status: 'ready',
       component: 'backend',
-      runId: process.env.CLOUDOS_RUN_ID || null,
+      runId: runtimeRunId,
       instanceId: app._cloudosInstanceId || null,
       pid: process.pid,
       host: '127.0.0.1',
       port,
-      leaseProtocol: process.env.CLOUDOS_HOST_LEASE_PIPE ? 1 : 0
+      leaseProtocol: hostLeaseEnabled ? 1 : 0
     });
   });
 
   app.post('/_cloudos/supervisor/shutdown', (req, res) => {
-    if (!hasSupervisorAccess(req)) return res.sendStatus(404);
+    if (!hasSupervisorTrust(req, hostTrustPolicy)) return res.sendStatus(404);
     res.status(202).json({ status: 'stopping' });
     setImmediate(() => app.emit('cloudos:shutdown'));
   });
@@ -126,7 +123,7 @@ export function createApp(initialPort) {
       apiBase: `http://127.0.0.1:${port}`,
       webSocketBase: `ws://127.0.0.1:${port}`,
       instanceId: app._cloudosInstanceId || null,
-      nativeHost: process.env.CLOUDOS_NATIVE_HOST === '1'
+      nativeHost
     });
   });
 

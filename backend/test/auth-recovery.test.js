@@ -8,6 +8,13 @@ import { getDb, resetLocalDatabase } from '../src/database/index.js';
 import { hashPassword } from '../src/auth/security.js';
 import { resetLegacyTokensForTests } from '../src/auth/legacyTokenStore.js';
 
+function createTestHostApp() {
+  return createApp(0, {
+    environment: { NODE_ENV: 'test' },
+    testHooks: { allowTestHostHeader: true }
+  });
+}
+
 function startServer(app) {
   return new Promise((resolve, reject) => {
     const server = app.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port }));
@@ -354,7 +361,15 @@ test('recuperação legada: detecta admin sem recovery_code_hash e emite token s
     error => error ? reject(error) : resolve()
   ));
 
-  const { server, port } = await startServer(createApp(0));
+  const supervisorToken = 'supervisor-production-token-with-enough-entropy';
+  const hostLeaseToken = 'host-lease-production-token-with-enough-entropy';
+  const { server, port } = await startServer(createApp(0, {
+    environment: {
+      NODE_ENV: 'production',
+      CLOUDOS_SUPERVISOR_TOKEN: supervisorToken,
+      CLOUDOS_HOST_LEASE_TOKEN: hostLeaseToken
+    }
+  }));
   try {
     const statusRes = await makeRequest(port, { path: '/api/auth/recovery/status' });
     assert.equal(statusRes.status, 200);
@@ -365,7 +380,7 @@ test('recuperação legada: detecta admin sem recovery_code_hash e emite token s
     const unauthorizedIssue = await jsonRequest(port, '/api/auth/legacy-recovery/issue-token', {});
     assert.equal(unauthorizedIssue.status, 403);
 
-    const authorizedIssue = await makeRequest(port, {
+    const spoofedTestHost = await makeRequest(port, {
       path: '/api/auth/legacy-recovery/issue-token',
       method: 'POST',
       headers: {
@@ -373,10 +388,31 @@ test('recuperação legada: detecta admin sem recovery_code_hash e emite token s
         'X-CloudOS-Test-Host': '1'
       }
     }, '{}');
+    assert.equal(spoofedTestHost.status, 403);
+
+    const authorizedIssue = await makeRequest(port, {
+      path: '/api/auth/legacy-recovery/issue-token',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CloudOS-Supervisor-Token': supervisorToken
+      }
+    }, '{}');
     assert.equal(authorizedIssue.status, 200);
     const issued = JSON.parse(authorizedIssue.body);
     assert.match(issued.token, /^LEGACY-[A-F0-9]{24}$/);
     assert.equal(typeof issued.expiresIn, 'number');
+
+    const authorizedLeaseIssue = await makeRequest(port, {
+      path: '/api/auth/legacy-recovery/issue-token',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CloudOS-Host-Token': hostLeaseToken
+      }
+    }, '{}');
+    assert.equal(authorizedLeaseIssue.status, 200);
+    assert.match(JSON.parse(authorizedLeaseIssue.body).token, /^LEGACY-[A-F0-9]{24}$/);
   } finally {
     server.close();
     resetLocalDatabase();
@@ -394,7 +430,7 @@ test('recuperação legada: redefine credenciais com token único e gera primeir
     error => error ? reject(error) : resolve()
   ));
 
-  const { server, port } = await startServer(createApp(0));
+  const { server, port } = await startServer(createTestHostApp());
   try {
     const issueRes = await makeRequest(port, {
       path: '/api/auth/legacy-recovery/issue-token',
@@ -461,7 +497,7 @@ test('recuperação legada: rejeita reutilização de token e token expirado', a
     error => error ? reject(error) : resolve()
   ));
 
-  const { server, port } = await startServer(createApp(0));
+  const { server, port } = await startServer(createTestHostApp());
   try {
     const issueRes = await makeRequest(port, {
       path: '/api/auth/legacy-recovery/issue-token',
@@ -513,7 +549,6 @@ test('recuperação legada: rejeita reutilização de token e token expirado', a
 test('recuperação legada: bloqueia tentativas excessivas com rate limit e registra auditoria sem senhas', async () => {
   resetLocalDatabase();
   resetLegacyTokensForTests();
-  process.env.NODE_ENV = 'test';
   const passwordHash = await hashPassword('senha-legada-antiga');
   await new Promise((resolve, reject) => getDb().run(
     'INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, ?)',
@@ -521,7 +556,7 @@ test('recuperação legada: bloqueia tentativas excessivas com rate limit e regi
     error => error ? reject(error) : resolve()
   ));
 
-  const { server, port } = await startServer(createApp(0));
+  const { server, port } = await startServer(createTestHostApp());
   try {
     let rateLimited;
     for (let attempt = 0; attempt < config.recoveryMaxAttempts; attempt += 1) {

@@ -63,11 +63,15 @@ test('GET /api/runtime retorna configuração válida', async () => {
 });
 
 test('health do supervisor fica oculto e valida token/identidade da instância', async () => {
-  const previousToken = process.env.CLOUDOS_SUPERVISOR_TOKEN;
-  const previousRunId = process.env.CLOUDOS_RUN_ID;
-  process.env.CLOUDOS_SUPERVISOR_TOKEN = 'supervisor-test-token-with-enough-entropy';
-  process.env.CLOUDOS_RUN_ID = '4dbfc480-bf7d-4fa6-b10f-1390434603d2';
-  const app = createApp(23456);
+  const supervisorToken = 'supervisor-test-token-with-enough-entropy';
+  const runtimeRunId = '4dbfc480-bf7d-4fa6-b10f-1390434603d2';
+  const app = createApp(23456, {
+    environment: {
+      NODE_ENV: 'production',
+      CLOUDOS_SUPERVISOR_TOKEN: supervisorToken,
+      CLOUDOS_RUN_ID: runtimeRunId
+    }
+  });
   app._cloudosInstanceId = '8c96830d-5d46-4f06-b492-7f4e426a9da2';
   const { server, port } = await startServer(app);
   try {
@@ -75,20 +79,31 @@ test('health do supervisor fica oculto e valida token/identidade da instância',
     assert.strictEqual(hidden.status, 404);
     const valid = await makeRequest(port, {
       path: '/_cloudos/supervisor/health',
-      headers: { 'X-CloudOS-Supervisor-Token': process.env.CLOUDOS_SUPERVISOR_TOKEN }
+      headers: { 'X-CloudOS-Supervisor-Token': supervisorToken }
     });
     assert.strictEqual(valid.status, 200);
     const json = JSON.parse(valid.body);
     assert.strictEqual(json.protocol, 1);
     assert.strictEqual(json.port, 23456);
-    assert.strictEqual(json.runId, process.env.CLOUDOS_RUN_ID);
+    assert.strictEqual(json.runId, runtimeRunId);
     assert.strictEqual(json.instanceId, app._cloudosInstanceId);
+
+    const hiddenShutdown = await makeRequest(port, {
+      path: '/_cloudos/supervisor/shutdown',
+      method: 'POST'
+    });
+    assert.strictEqual(hiddenShutdown.status, 404);
+
+    const shutdownEvent = new Promise(resolve => app.once('cloudos:shutdown', resolve));
+    const acceptedShutdown = await makeRequest(port, {
+      path: '/_cloudos/supervisor/shutdown',
+      method: 'POST',
+      headers: { 'X-CloudOS-Supervisor-Token': supervisorToken }
+    });
+    assert.strictEqual(acceptedShutdown.status, 202);
+    await shutdownEvent;
   } finally {
     server.close();
-    if (previousToken === undefined) delete process.env.CLOUDOS_SUPERVISOR_TOKEN;
-    else process.env.CLOUDOS_SUPERVISOR_TOKEN = previousToken;
-    if (previousRunId === undefined) delete process.env.CLOUDOS_RUN_ID;
-    else process.env.CLOUDOS_RUN_ID = previousRunId;
   }
 });
 
