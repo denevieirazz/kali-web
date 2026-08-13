@@ -2,14 +2,18 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAppRegistry } from '../../core/appRegistry';
 import { useProcessManager } from '../../stores/processManager';
 import { useWindowManager } from '../../stores/windowManager';
+import { useNativeSessions } from '../../hooks/useNativeSessions';
+import { nativeSessionForLaunch } from '../../services/nativeWindowContract.js';
 import {
   systemHubClient,
   type DistroCatalogItem,
   type HostCapabilities,
   type NativeApp,
+  type NativeLaunchResult,
   type SystemOperation,
   type WslDistribution
 } from '../../services/systemHubClient';
+import NativeAppDock from './NativeAppDock';
 import SystemReadiness from './SystemReadiness';
 import './InstallLinux.css';
 
@@ -36,9 +40,16 @@ export default function InstallLinux() {
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: 'info' | 'success' | 'error'; text: string } | null>(null);
+  const [selectedNativeSessionId, setSelectedNativeSessionId] = useState<string | null>(null);
+  const [pendingNativeLaunch, setPendingNativeLaunch] = useState<{
+    appName: string;
+    launch: NativeLaunchResult;
+    startedAt: number;
+  } | null>(null);
 
   const createProcess = useProcessManager((state) => state.createProcess);
   const openWindow = useWindowManager((state) => state.openWindow);
+  const nativeSessions = useNativeSessions();
 
   const refresh = useCallback(async (forceApps = false) => {
     setLoading(true);
@@ -88,6 +99,36 @@ export default function InstallLinux() {
     }, 1600);
     return () => window.clearInterval(timer);
   }, [operations, refresh]);
+
+  useEffect(() => {
+    setSelectedNativeSessionId((current) => {
+      if (current && nativeSessions.some((session) => session.sessionId === current)) return current;
+      return nativeSessions[0]?.sessionId || null;
+    });
+  }, [nativeSessions]);
+
+  useEffect(() => {
+    if (!pendingNativeLaunch) return;
+    const session = nativeSessionForLaunch(nativeSessions, pendingNativeLaunch.launch);
+    if (session) {
+      setSelectedNativeSessionId(session.sessionId);
+      setPendingNativeLaunch(null);
+      setNotice({ tone: 'success', text: `${pendingNativeLaunch.appName} foi identificado e será fixado no Hub.` });
+      return;
+    }
+    const remaining = Math.max(0, 10_000 - (Date.now() - pendingNativeLaunch.startedAt));
+    const timer = window.setTimeout(() => {
+      setPendingNativeLaunch((current) => {
+        if (!current || current.startedAt !== pendingNativeLaunch.startedAt) return current;
+        setNotice({
+          tone: 'info',
+          text: `${current.appName} foi aberto, mas o Windows não expôs uma janela que o Hub possa fixar. Ele continuará disponível externamente.`
+        });
+        return null;
+      });
+    }, remaining);
+    return () => window.clearTimeout(timer);
+  }, [nativeSessions, pendingNativeLaunch]);
 
   const runAction = useCallback(async (key: string, action: () => Promise<unknown>, successMessage: string, refreshAfter = true) => {
     setBusyAction(key);
@@ -147,13 +188,16 @@ export default function InstallLinux() {
     setNotice(null);
     try {
       const launched = await systemHubClient.launchApp(app.id);
-      if (capabilities?.integration.managedNativeWindows && launched.managed === false) {
+      if (launched.managed) {
+        setPendingNativeLaunch({ appName: app.name, launch: launched, startedAt: Date.now() });
+        setNotice({ tone: 'info', text: `${app.name} foi iniciado. Aguardando a janela para fixá-la no Hub…` });
+      } else if (capabilities?.integration.managedNativeWindows && launched.managed === false) {
         setNotice({
           tone: 'info',
           text: `${app.name} foi aberto. ${launched.managementReason || 'O Windows entregou esta janela a um broker compartilhado, então ela permanece no fallback nativo.'}`
         });
       } else {
-        setNotice({ tone: 'success', text: `${app.name} foi aberto${launched.managed ? ' e integrado à taskbar CloudOS' : ' em uma janela nativa'}.` });
+        setNotice({ tone: 'success', text: `${app.name} foi aberto em uma janela nativa externa.` });
       }
     } catch (error) {
       setNotice({ tone: 'error', text: error instanceof Error ? error.message : 'O aplicativo não pôde ser aberto.' });
@@ -268,16 +312,26 @@ export default function InstallLinux() {
           </section>
         )}
 
-        {section === 'apps' && (
-          <section className="hub-section">
+        <section className="hub-section native-apps-section" hidden={section !== 'apps'}>
             <div className="app-toolbar"><div className="hub-search"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Pesquisar Windows, Linux ou distribuição…" /></div><div className="catalog-legend"><span><i className="windows" />Windows</span><span><i className="linux" />Linux/WSLg</span></div></div>
-            {!capabilities?.integration.managedNativeWindows && <div className="inline-note">Os aplicativos abaixo são iniciados pelo agente local e aparecem como janelas nativas do Windows. O CloudOS nunca recebe comandos ou caminhos livres da página.</div>}
-            <div className="native-app-grid">
-              {filteredApps.map((app) => <button className="native-app-card" key={app.id} disabled={busyAction === `app-${app.id}`} onClick={() => launchNativeApp(app)}><span className={`native-app-icon ${app.source}`}>{app.icon || (app.source === 'wsl' ? 'L' : 'W')}</span><span className="native-app-copy"><strong>{app.name}</strong><small>{app.source === 'wsl' ? app.distribution || 'Linux / WSLg' : 'Windows'}</small></span><span className="launch-arrow">↗</span></button>)}
-              {!filteredApps.length && <div className="empty-state"><strong>Nenhum aplicativo encontrado</strong><span>Atualize o inventário ou altere a pesquisa.</span></div>}
+            {!capabilities?.integration.managedNativeWindows && <div className="inline-note">Abra o CloudOS Desktop para prender aplicativos dentro do Hub. No navegador comum, eles continuam em janelas externas seguras.</div>}
+            <div className="native-apps-layout">
+              <div className="native-app-catalog">
+                <div className="native-app-grid">
+                  {filteredApps.map((app) => <button className="native-app-card" key={app.id} disabled={busyAction === `app-${app.id}`} onClick={() => launchNativeApp(app)}><span className={`native-app-icon ${app.source}`}>{app.icon || (app.source === 'wsl' ? 'L' : 'W')}</span><span className="native-app-copy"><strong>{app.name}</strong><small>{app.source === 'wsl' ? app.distribution || 'Linux / WSLg' : 'Windows'} <i className={app.windowMode === 'native-managed' ? 'managed' : 'external'}>{app.windowMode === 'native-managed' ? 'Fixável' : 'Externo'}</i></small></span><span className="launch-arrow">↗</span></button>)}
+                  {!filteredApps.length && <div className="empty-state"><strong>Nenhum aplicativo encontrado</strong><span>Atualize o inventário ou altere a pesquisa.</span></div>}
+                </div>
+              </div>
+              <NativeAppDock
+                active={section === 'apps'}
+                sessions={nativeSessions}
+                selectedSessionId={selectedNativeSessionId}
+                pendingAppName={pendingNativeLaunch?.appName || null}
+                onSelect={setSelectedNativeSessionId}
+                onNotice={setNotice}
+              />
             </div>
           </section>
-        )}
 
         {section === 'operations' && (
           <section className="hub-section operations-list">

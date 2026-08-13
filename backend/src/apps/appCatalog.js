@@ -7,6 +7,10 @@ import { POWERSHELL_EXE, WSL_EXE, getWslSnapshot, launchDetached, safeChildEnvir
 const execFileAsync = promisify(execFile);
 const WINDOWS_DIRECTORY = process.env.WINDIR || process.env.SystemRoot || 'C:\\Windows';
 const EXPLORER_EXE = path.join(WINDOWS_DIRECTORY, 'explorer.exe');
+const BLOCKED_SHORTCUT_TARGETS = new Set([
+  'cmd.exe', 'powershell.exe', 'pwsh.exe', 'wscript.exe', 'cscript.exe',
+  'mshta.exe', 'rundll32.exe', 'regsvr32.exe', 'schtasks.exe', 'wmic.exe'
+]);
 const catalogById = new Map();
 let cachedCatalog = [];
 let cacheTimestamp = 0;
@@ -37,6 +41,64 @@ function register(app) {
   cachedCatalog.push(publicApp(app));
 }
 
+function asArray(value) {
+  if (Array.isArray(value)) return value;
+  return value && typeof value === 'object' ? [value] : [];
+}
+
+function normalizedDisplayName(value) {
+  return String(value || '').trim().toLocaleLowerCase('pt-BR');
+}
+
+export function parseWindowsAppDiscovery(payload, curatedApps = []) {
+  const directTargets = new Set(curatedApps.map((app) => String(app.executable || '').toLowerCase()));
+  const directNames = new Set(curatedApps.map((app) => normalizedDisplayName(app.name)));
+  const shortcuts = [];
+
+  for (const row of asArray(payload?.Shortcuts).slice(0, 1200)) {
+    if (typeof row?.Name !== 'string' || typeof row?.ShortcutPath !== 'string' || typeof row?.TargetPath !== 'string') continue;
+    const name = row.Name.trim().slice(0, 160);
+    const shortcutPath = row.ShortcutPath.trim();
+    const targetPath = row.TargetPath.trim();
+    if (!name || name.includes('\0') || shortcutPath.includes('\0') || targetPath.includes('\0')) continue;
+    if (!path.win32.isAbsolute(shortcutPath) || path.win32.extname(shortcutPath).toLowerCase() !== '.lnk') continue;
+    if (!path.win32.isAbsolute(targetPath) || path.win32.extname(targetPath).toLowerCase() !== '.exe') continue;
+    if (BLOCKED_SHORTCUT_TARGETS.has(path.win32.basename(targetPath).toLowerCase())) continue;
+
+    const targetKey = targetPath.toLowerCase();
+    const nameKey = normalizedDisplayName(name);
+    if (directTargets.has(targetKey) || directNames.has(nameKey)) continue;
+    directTargets.add(targetKey);
+    directNames.add(nameKey);
+    shortcuts.push({
+      id: opaqueId('windows-shortcut', shortcutPath, targetPath),
+      name,
+      source: 'windows',
+      distribution: null,
+      icon: '\u25a6',
+      kind: 'windows-shortcut',
+      shortcutPath,
+      targetPath
+    });
+  }
+
+  const startApps = asArray(payload?.StartApps)
+    .filter((row) => typeof row?.Name === 'string' && typeof row?.AppID === 'string')
+    .slice(0, 600)
+    .filter((row) => !directNames.has(normalizedDisplayName(row.Name)))
+    .map((row) => ({
+      id: opaqueId('windows', row.AppID),
+      name: row.Name.trim().slice(0, 160),
+      source: /wsl|linux/i.test(row.AppID) ? 'wsl' : 'windows',
+      distribution: null,
+      icon: /wsl|linux/i.test(row.AppID) ? '\ud83d\udc27' : '\u25a6',
+      kind: 'windows-start-app',
+      appUserModelId: row.AppID
+    }));
+
+  return [...curatedApps, ...shortcuts, ...startApps];
+}
+
 async function getWindowsStartApps() {
   if (process.platform !== 'win32') return [];
   const fallbackApps = () => [
@@ -58,7 +120,12 @@ async function getWindowsStartApps() {
   const command = [
     '$ErrorActionPreference = "Stop"',
     '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
-    'Get-StartApps | Select-Object Name, AppID | ConvertTo-Json -Compress'
+    '$startApps = @(Get-StartApps | Select-Object Name, AppID)',
+    '$shortcutRoots = @([Environment]::GetFolderPath("CommonStartMenu"), [Environment]::GetFolderPath("StartMenu")) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }',
+    '$shortcuts = @()',
+    '$shell = New-Object -ComObject WScript.Shell',
+    'foreach ($root in $shortcutRoots) { Get-ChildItem -LiteralPath $root -Filter *.lnk -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 800 | ForEach-Object { try { $link = $shell.CreateShortcut($_.FullName); $target = [Environment]::ExpandEnvironmentVariables([string]$link.TargetPath); if ($target -and [IO.Path]::GetExtension($target) -ieq ".exe" -and (Test-Path -LiteralPath $target -PathType Leaf)) { $shortcuts += [PSCustomObject]@{ Name = $_.BaseName; ShortcutPath = $_.FullName; TargetPath = [IO.Path]::GetFullPath($target) } } } catch {} } }',
+    '[PSCustomObject]@{ StartApps = $startApps; Shortcuts = $shortcuts } | ConvertTo-Json -Depth 4 -Compress'
   ].join('; ');
   const encoded = Buffer.from(command, 'utf16le').toString('base64');
   try {
@@ -69,21 +136,8 @@ async function getWindowsStartApps() {
       windowsHide: true,
       maxBuffer: 4 * 1024 * 1024
     });
-    const parsed = JSON.parse(String(stdout || '[]').replace(/^\uFEFF/, ''));
-    const rows = Array.isArray(parsed) ? parsed : [parsed];
-    const apps = rows
-      .filter((row) => typeof row?.Name === 'string' && typeof row?.AppID === 'string')
-      .slice(0, 600)
-      .map((row) => ({
-        id: opaqueId('windows', row.AppID),
-        name: row.Name.trim(),
-        source: /wsl|linux/i.test(row.AppID) ? 'wsl' : 'windows',
-        distribution: null,
-        icon: /wsl|linux/i.test(row.AppID) ? '🐧' : '▦',
-        kind: 'windows-start-app',
-        appUserModelId: row.AppID
-      }));
-    return apps.length ? [...curatedApps, ...apps] : curatedApps;
+    const parsed = JSON.parse(String(stdout || '{}').replace(/^\uFEFF/, ''));
+    return parseWindowsAppDiscovery(parsed, curatedApps);
   } catch {
     return curatedApps;
   }
@@ -139,6 +193,42 @@ async function getLinuxDesktopApps(distribution) {
   }
 }
 
+async function launchWindowsShortcut(app) {
+  const command = [
+    '$ErrorActionPreference = "Stop"',
+    '$shortcutPath = [IO.Path]::GetFullPath($env:CLOUDOS_APP_SHORTCUT)',
+    '$expectedTarget = [IO.Path]::GetFullPath($env:CLOUDOS_APP_TARGET)',
+    '$shell = New-Object -ComObject WScript.Shell',
+    '$link = $shell.CreateShortcut($shortcutPath)',
+    '$actualTarget = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables([string]$link.TargetPath))',
+    'if (-not [StringComparer]::OrdinalIgnoreCase.Equals($actualTarget, $expectedTarget)) { throw "Shortcut target changed after catalog discovery." }',
+    '$process = Start-Process -FilePath $shortcutPath -PassThru',
+    'if ($null -eq $process -or $process.Id -le 0) { throw "The shortcut did not return a process." }',
+    '[Console]::Out.Write([string]$process.Id)'
+  ].join('; ');
+  const encoded = Buffer.from(command, 'utf16le').toString('base64');
+  try {
+    const { stdout } = await execFileAsync(POWERSHELL_EXE, ['-NoLogo', '-NoProfile', '-EncodedCommand', encoded], {
+      encoding: 'utf8',
+      env: safeChildEnvironment({
+        CLOUDOS_APP_SHORTCUT: app.shortcutPath,
+        CLOUDOS_APP_TARGET: app.targetPath
+      }),
+      timeout: 15_000,
+      windowsHide: true,
+      maxBuffer: 128 * 1024
+    });
+    const pid = Number.parseInt(String(stdout || '').trim(), 10);
+    if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('Invalid process identifier.');
+    return pid;
+  } catch (cause) {
+    throw Object.assign(new Error('O atalho do aplicativo não pôde ser iniciado.'), {
+      code: 'APP_SHORTCUT_LAUNCH_FAILED',
+      cause
+    });
+  }
+}
+
 export async function refreshAppCatalog(force = false) {
   if (!force && cachedCatalog.length && Date.now() - cacheTimestamp < CACHE_TTL_MS) return [...cachedCatalog];
   catalogById.clear();
@@ -165,6 +255,8 @@ export async function launchCatalogApp(id) {
   let pid;
   if (app.kind === 'windows-start-app') {
     pid = launchDetached(EXPLORER_EXE, [`shell:AppsFolder\\${app.appUserModelId}`]);
+  } else if (app.kind === 'windows-shortcut') {
+    pid = await launchWindowsShortcut(app);
   } else if (app.kind === 'windows-executable') {
     pid = launchDetached(app.executable, app.args || []);
   } else if (app.kind === 'wsl-desktop') {

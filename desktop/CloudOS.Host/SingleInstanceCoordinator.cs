@@ -25,9 +25,32 @@ public sealed class SingleInstanceCoordinator : IDisposable
 
     public bool TryAcquire()
     {
-        _mutex = new Mutex(true, _mutexName, out var createdNew);
-        _ownsMutex = createdNew;
-        return createdNew;
+        try
+        {
+            _mutex = new Mutex(true, _mutexName, out var createdNew);
+            if (createdNew)
+            {
+                _ownsMutex = true;
+                return true;
+            }
+
+            if (_mutex.WaitOne(0, false))
+            {
+                _ownsMutex = true;
+                return true;
+            }
+
+            return false;
+        }
+        catch (AbandonedMutexException)
+        {
+            _ownsMutex = true;
+            return true;
+        }
+        catch
+        {
+            return true;
+        }
     }
 
     public void StartListening() => _ = ListenAsync(_lifetime.Token);

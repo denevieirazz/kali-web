@@ -549,3 +549,4 @@ export function getDb() {
 }
 export function resetLocalDatabase() { getDb().reset(); }
 export function createDatabaseForTests(filePath) { return new PersistentDatabase(filePath); }
+export function setDbForTests(db) { dbInstance = db; }

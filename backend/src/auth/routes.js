@@ -324,7 +324,9 @@ authRouter.post('/legacy-recovery/reset', async (req, res, next) => {
       return recoveryFailureResponse(db, res);
     }
 
-    const legacyToken = typeof body.legacyToken === 'string' ? body.legacyToken.trim() : '';
+    const legacyToken = typeof body.legacyToken === 'string'
+      ? body.legacyToken.trim()
+      : (typeof body.token === 'string' ? body.token.trim() : '');
     const tokenValid = consumeLegacyToken(legacyToken);
     if (!tokenValid) {
       return recoveryFailureResponse(db, res);

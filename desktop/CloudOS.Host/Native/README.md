@@ -19,7 +19,11 @@ PID, and that the PID still has the same process start time and Windows session.
 The host process cannot be registered, and targets above the host's token integrity
 level are denied. Process and window counts are bounded.
 Close is a bounded `WM_CLOSE`; there is no forced termination, input injection,
-privilege elevation, or cross-process `SetParent`.
+privilege elevation, or cross-process `SetParent`. Hub containment is a reversible
+owned top-level overlay: CloudOS removes the frame, positions the window over a
+renderer-provided slot bounded to the WebView, and restores its original owner,
+styles, bounds and placement on detach or host disposal. Apps that reject those
+changes remain ordinary external windows.
 
 Events arrive on the manager's hook thread. A WinUI/WPF consumer must marshal UI
 work to its dispatcher.
@@ -54,6 +58,18 @@ Do not expose `Process.Start`, `TrackLaunchedProcess`, or a generic HWND adoptio
 operation through WebView2. Expose narrow commands such as `focusWindow(appId,
 windowId)` after resolving both IDs in the native host.
 
+The CloudOS bridge exposes containment only for opaque sessions already created by
+that trust flow:
+
+- `native.session.attach { sessionId, bounds, visible? }`
+- `native.session.layout { sessionId, bounds, visible }`
+- `native.session.detach { sessionId }`
+
+`bounds` are CSS viewport coordinates. The WPF host converts them to device pixels,
+intersects them with the WebView rectangle and recomputes them whenever its owner
+window moves, resizes or crosses monitors. Public snapshots report `contained`,
+`containmentMode` (`anchored-overlay` or `external`) and `visible`.
+
 ## Validation
 
 The source intentionally uses APIs available to both modern .NET for Windows and
@@ -69,8 +85,8 @@ the final WinUI host project:
 
 For a functional smoke test, launch a known non-elevated fixture such as Notepad
 from a small host console, register the exact returned `Process`, wait for an
-`Added` event, then invoke restore, maximize, minimize, focus, and close in that
-order. Also verify these negative cases:
+`Added` event, then invoke attach, layout, detach, restore, maximize, minimize,
+focus, and close in that order. Also verify these negative cases:
 
 - a random HWND is rejected;
 - the CloudOS host PID cannot be registered;

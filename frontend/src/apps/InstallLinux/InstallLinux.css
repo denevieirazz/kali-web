@@ -134,6 +134,8 @@
 .catalog-legend i { width: 7px; height: 7px; border-radius: 50%; background: var(--hub-blue); }
 .catalog-legend i.linux { background: var(--hub-cyan); }
 .inline-note { margin-bottom: 12px; padding: 9px 12px; border-left: 2px solid #4d85df; color: #9fb0ca; background: rgba(50, 91, 158, .08); font-size: 9px; line-height: 1.45; }
+.native-apps-layout { display: grid; grid-template-columns: minmax(220px, .68fr) minmax(380px, 1.32fr); gap: 12px; align-items: stretch; }
+.native-app-catalog { min-width: 0; max-height: 510px; padding-right: 3px; overflow: auto; scrollbar-color: #334155 transparent; }
 .native-app-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; }
 .native-app-card { display: grid; grid-template-columns: 37px 1fr 18px; gap: 10px; align-items: center; min-height: 65px; padding: 10px; border: 1px solid var(--hub-border); border-radius: 11px; color: var(--hub-text); background: rgba(18, 25, 39, .7); text-align: left; cursor: pointer; transition: .15s ease; }
 .native-app-card:hover { transform: translateY(-1px); border-color: rgba(91, 146, 238, .38); background: rgba(24, 35, 55, .86); }
@@ -142,7 +144,33 @@
 .native-app-copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .native-app-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
 .native-app-copy small { color: var(--hub-muted); font-size: 8px; }
+.native-app-copy small i { display: inline-block; margin-left: 4px; padding: 1px 5px; border-radius: 999px; color: #8ee5c5; background: rgba(53, 208, 152, .1); font-size: 7px; font-style: normal; font-weight: 800; }
+.native-app-copy small i.external { color: #d6b876; background: rgba(245, 185, 85, .1); }
 .launch-arrow { color: #7892bb; }
+
+.native-dock-panel { min-width: 0; padding: 12px; overflow: hidden; }
+.native-dock-toolbar { min-height: 45px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 1px 10px; }
+.native-dock-heading { display: grid; grid-template-columns: 9px minmax(0, 1fr); gap: 8px; align-items: center; min-width: 0; }
+.native-dock-heading > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.native-dock-heading strong, .native-dock-heading small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.native-dock-heading strong { font-size: 10px; }
+.native-dock-heading small { color: var(--hub-muted); font-size: 8px; }
+.native-dock-actions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
+.native-dock-actions label { display: flex; align-items: center; gap: 5px; color: var(--hub-muted); font-size: 8px; }
+.native-dock-actions select { max-width: 150px; padding: 5px 7px; border: 1px solid var(--hub-border); border-radius: 7px; color: var(--hub-text); background: #0d1420; font-size: 8px; }
+.native-dock-actions button { padding: 6px 8px; border: 1px solid var(--hub-border); border-radius: 7px; color: #dbe8fb; background: rgba(255,255,255,.045); font-size: 8px; cursor: pointer; }
+.native-dock-actions .primary-button { border-color: transparent; }
+.native-dock-surface { position: relative; min-height: clamp(290px, 46vh, 500px); border: 1px dashed rgba(112, 149, 211, .3); border-radius: 11px; background: radial-gradient(circle at 50% 35%, rgba(63, 111, 213, .12), transparent 50%), #090e17; overflow: hidden; }
+.native-dock-surface.docked { border-style: solid; border-color: rgba(68, 202, 161, .35); box-shadow: inset 0 0 0 1px rgba(68, 202, 161, .06); }
+.native-dock-surface.external { border-color: rgba(245, 185, 85, .28); }
+.native-dock-placeholder { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 28px; color: #8390a5; text-align: center; pointer-events: none; }
+.native-dock-placeholder > span { display: grid; place-items: center; width: 40px; height: 40px; margin-bottom: 10px; border: 1px solid rgba(111, 157, 233, .2); border-radius: 12px; color: #83aff1; background: rgba(71, 113, 188, .1); font-size: 20px; }
+.native-dock-placeholder strong { color: #cad5e5; font-size: 12px; }
+.native-dock-placeholder p { max-width: 410px; margin-top: 6px; font-size: 9px; }
+.native-dock-placeholder button { margin-top: 12px; pointer-events: auto; }
+.native-dock-placeholder.waiting > span { animation: hub-spin 1.4s linear infinite; }
+.native-dock-footnote { display: flex; justify-content: space-between; gap: 12px; padding: 9px 2px 0; color: #66758c; font-size: 7px; line-height: 1.4; }
+.native-dock-footnote span:last-child { text-align: right; }
 
 .operations-list { display: grid; gap: 9px; }
 .operation-card { position: relative; padding: 14px; border-radius: 12px; }
@@ -181,6 +209,8 @@
   .system-hub-mode { grid-template-columns: 1fr; justify-items: center; }
   .capability-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .distro-layout { grid-template-columns: 1fr; }
+  .native-apps-layout { grid-template-columns: 1fr; }
+  .native-app-catalog { max-height: 245px; }
   .install-panel { position: static; }
 }
 
@@ -194,4 +224,7 @@
   .distro-card { grid-template-columns: 42px 1fr; }
   .distro-actions { grid-column: 1 / -1; justify-content: flex-start; }
   .app-toolbar { align-items: stretch; flex-direction: column; }
+  .native-dock-toolbar, .native-dock-footnote { align-items: stretch; flex-direction: column; }
+  .native-dock-actions { justify-content: flex-start; flex-wrap: wrap; }
+  .native-dock-footnote span:last-child { text-align: left; }
 }

@@ -10,6 +10,22 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            var ex = args.ExceptionObject as Exception;
+            var logPath = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "CloudOS", "logs", $"host-{DateTime.UtcNow:yyyyMMdd}.log");
+            try { System.IO.File.AppendAllText(logPath, $"{DateTimeOffset.Now:O} [crash:domain] {ex}\n"); } catch {}
+        };
+        DispatcherUnhandledException += (_, args) =>
+        {
+            var logPath = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "CloudOS", "logs", $"host-{DateTime.UtcNow:yyyyMMdd}.log");
+            try { System.IO.File.AppendAllText(logPath, $"{DateTimeOffset.Now:O} [crash:dispatcher] {args.Exception}\n"); } catch {}
+        };
+
         HostOptions options;
         try
         {

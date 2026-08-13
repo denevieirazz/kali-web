@@ -8,11 +8,23 @@ type NativeRequestMethod =
   | 'host.requestLegacyRecoveryToken'
   | 'native.launchApp'
   | 'native.sessions.list'
+  | 'native.session.attach'
+  | 'native.session.layout'
+  | 'native.session.detach'
   | 'native.session.focus'
   | 'native.session.minimize'
   | 'native.session.maximize'
   | 'native.session.restore'
   | 'native.session.close';
+
+export interface NativeViewportBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export type NativeContainmentMode = 'anchored-overlay' | 'external';
 
 export interface NativeSession {
   sessionId: string;
@@ -20,7 +32,10 @@ export interface NativeSession {
   processId: number;
   minimized: boolean;
   maximized: boolean;
-  bounds: { x: number; y: number; width: number; height: number };
+  bounds: NativeViewportBounds;
+  contained?: boolean;
+  containmentMode?: NativeContainmentMode;
+  visible?: boolean;
 }
 
 export interface NativeHostState {
@@ -29,6 +44,7 @@ export interface NativeHostState {
   kiosk: boolean;
   managedWindows: boolean;
   embeddedNativeWindows: boolean;
+  nativeWindowContainment?: NativeContainmentMode;
   platform: string;
   version: string;
 }
@@ -104,6 +120,9 @@ class NativeHostBridge {
       windowMode: string;
       managed: boolean;
       managementReason: string | null;
+      sessionId?: string | null;
+      contained?: boolean;
+      containmentMode?: NativeContainmentMode;
     }>('native.launchApp', { appId, token }, 40_000);
   }
 
@@ -113,6 +132,34 @@ class NativeHostBridge {
 
   operate(method: 'focus' | 'minimize' | 'maximize' | 'restore' | 'close', sessionId: string) {
     return this.request(`native.session.${method}` as NativeRequestMethod, { sessionId });
+  }
+
+  attachSession(sessionId: string, bounds: NativeViewportBounds) {
+    return this.request<{
+      sessionId: string;
+      accepted: boolean;
+      contained?: boolean;
+      containmentMode?: NativeContainmentMode;
+    }>('native.session.attach', { sessionId, bounds });
+  }
+
+  layoutSession(sessionId: string, bounds: NativeViewportBounds, visible: boolean) {
+    return this.request<{
+      sessionId: string;
+      accepted: boolean;
+      contained?: boolean;
+      containmentMode?: NativeContainmentMode;
+      visible?: boolean;
+    }>('native.session.layout', { sessionId, bounds, visible });
+  }
+
+  detachSession(sessionId: string) {
+    return this.request<{
+      sessionId: string;
+      accepted: boolean;
+      contained?: boolean;
+      containmentMode?: NativeContainmentMode;
+    }>('native.session.detach', { sessionId });
   }
 
   onSessionsChanged(listener: (sessions: NativeSession[]) => void) {

@@ -37,6 +37,7 @@ export interface HostCapabilities {
     managedNativeWindows: boolean;
     embeddedNativeWindows: boolean;
     nativeHostRequired: boolean;
+    nativeWindowContainment?: 'anchored-overlay' | 'external';
   };
   limitations: string[];
 }
@@ -63,6 +64,9 @@ export interface NativeLaunchResult {
   windowMode: string;
   managed?: boolean;
   managementReason?: string | null;
+  sessionId?: string | null;
+  contained?: boolean;
+  containmentMode?: 'anchored-overlay' | 'external';
 }
 
 export interface SystemOperation {
@@ -82,7 +86,27 @@ export interface SystemOperation {
 }
 
 export const systemHubClient = {
-  capabilities: () => apiClient<HostCapabilities>('/api/host/capabilities'),
+  capabilities: async () => {
+    const capabilities = await apiClient<HostCapabilities>('/api/host/capabilities');
+    if (!nativeHostBridge.available) return capabilities;
+    try {
+      await nativeHostBridge.connect();
+      const host = await nativeHostBridge.getHostState();
+      return {
+        ...capabilities,
+        integration: {
+          ...capabilities.integration,
+          nativeHostActive: host.nativeHost,
+          managedNativeWindows: host.managedWindows,
+          embeddedNativeWindows: host.embeddedNativeWindows,
+          nativeWindowContainment: host.nativeWindowContainment,
+          windowMode: host.managedWindows ? 'native-managed' as const : capabilities.integration.windowMode
+        }
+      };
+    } catch {
+      return capabilities;
+    }
+  },
   distributions: () => apiClient<{
     available: boolean;
     installed: boolean;

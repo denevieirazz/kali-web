@@ -9,7 +9,7 @@ using CloudOS.Host.Security;
 
 namespace CloudOS.Host.Runtime;
 
-public sealed record RuntimeEndpoint(Uri BaseUri, string FrontendDirectory, int ProcessId, string InstanceId, string RunId);
+public sealed record RuntimeEndpoint(Uri BaseUri, string FrontendDirectory, int ProcessId, string InstanceId, string RunId, string SupervisorToken, string HostLeaseToken);
 
 public sealed class RuntimeExitedEventArgs(int exitCode) : EventArgs
 {
@@ -257,10 +257,10 @@ public sealed class CloudOsRuntimeSupervisor : IAsyncDisposable
             health.LeaseProtocol != RuntimeLeaseServer.ProtocolVersion)
             throw new InvalidOperationException("O health check não corresponde ao processo CloudOS iniciado.");
 
-        return new RuntimeEndpoint(origin, frontendDirectory, process.Id, health.InstanceId!, runId);
+        return new RuntimeEndpoint(origin, frontendDirectory, process.Id, health.InstanceId!, runId, _supervisorToken ?? string.Empty, _runtimeLease?.Token ?? string.Empty);
     }
 
-    private void AppendLog(string source, string? line)
+    internal void AppendLog(string source, string? line)
     {
         if (string.IsNullOrWhiteSpace(line) || _logPath is null) return;
         var safeLine = line.Length > 8_192 ? line[..8_192] : line;

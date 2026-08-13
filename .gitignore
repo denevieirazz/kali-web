@@ -2,7 +2,7 @@
 node_modules/
 **/node_modules/
 
-# Production build outputs
+# Production build outputs & published artifacts
 dist/
 **/dist/
 dist-ssr/
@@ -10,14 +10,24 @@ build/
 **/bin/
 **/obj/
 **/publish/
+desktop/publish/
+
+# Binaries, libraries and executables
+*.exe
+*.dll
+*.pdb
+*.so
+*.dylib
 
 # Test outputs & Coverage
 coverage/
 playwright-report/
 test-results/
 
-# Runtime dynamic files & ports
+# Runtime dynamic files, scratch & ports
 /runtime/
+runtime/
+scratch/
 *.tmp
 *.tsbuildinfo
 
@@ -32,6 +42,8 @@ test-results/
 npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
+logs/
+**/logs/
 
 # OS / Editor generated
 .DS_Store

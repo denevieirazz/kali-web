@@ -16,7 +16,7 @@ foreach (var test in tests)
 
 static void StableShellOriginIsExact()
 {
-    Assert(CloudOsOrigins.ShellOrigin == "http://cloudos.localhost", "The storage origin must not contain an ephemeral port.");
+    Assert(CloudOsOrigins.ShellOrigin == "https://cloudos.local", "The storage origin must not contain an ephemeral port.");
     Assert(CloudOsOrigins.ShellBaseUri.AbsolutePath == "/", "The shell origin must resolve to the mapped index root.");
     Assert(CloudOsOrigins.ShellBaseUri.IsDefaultPort, "The shell origin must use its default port.");
 }
@@ -24,12 +24,12 @@ static void StableShellOriginIsExact()
 static void NavigationPolicyRejectsOriginConfusion()
 {
     var trusted = CloudOsOrigins.ShellBaseUri;
-    Assert(NavigationPolicy.IsTrustedDocument(new Uri("http://cloudos.localhost/desktop?x=1#state"), trusted), "Same-origin paths must be accepted.");
-    Assert(!NavigationPolicy.IsTrustedDocument(new Uri("https://cloudos.localhost/"), trusted), "A scheme change must be rejected.");
-    Assert(!NavigationPolicy.IsTrustedDocument(new Uri("http://cloudos.localhost:8080/"), trusted), "A port change must be rejected.");
-    Assert(!NavigationPolicy.IsTrustedDocument(new Uri("http://cloudos.localhost.evil.example/"), trusted), "A suffix-confusion host must be rejected.");
-    Assert(!NavigationPolicy.IsTrustedDocument(new Uri("http://cloudos.localhost./"), trusted), "A trailing-dot host must not alias the shell.");
-    Assert(!NavigationPolicy.IsTrustedDocument(new Uri("http://user@cloudos.localhost/"), trusted), "User information must be rejected.");
+    Assert(NavigationPolicy.IsTrustedDocument(new Uri("https://cloudos.local/desktop?x=1#state"), trusted), "Same-origin paths must be accepted.");
+    Assert(!NavigationPolicy.IsTrustedDocument(new Uri("http://cloudos.local/"), trusted), "A scheme change must be rejected.");
+    Assert(!NavigationPolicy.IsTrustedDocument(new Uri("https://cloudos.local:8080/"), trusted), "A port change must be rejected.");
+    Assert(!NavigationPolicy.IsTrustedDocument(new Uri("https://cloudos.local.evil.example/"), trusted), "A suffix-confusion host must be rejected.");
+    Assert(!NavigationPolicy.IsTrustedDocument(new Uri("https://cloudos.local./"), trusted), "A trailing-dot host must not alias the shell.");
+    Assert(!NavigationPolicy.IsTrustedDocument(new Uri("https://user@cloudos.local/"), trusted), "User information must be rejected.");
     Assert(!NavigationPolicy.IsTrustedSource("not a uri", trusted), "Malformed bridge sources must be rejected.");
 }
 

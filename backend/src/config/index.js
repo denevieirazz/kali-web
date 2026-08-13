@@ -15,7 +15,7 @@ const defaultDataDir = isTest
 const dataDir = path.resolve(process.env.CLOUDOS_DATA_DIR || defaultDataDir);
 fs.mkdirSync(dataDir, { recursive: true });
 
-const expectedNativeShellOrigin = 'http://cloudos.localhost';
+const expectedNativeShellOrigin = 'https://cloudos.local';
 
 export function resolveNativeShellOrigin(environment = process.env) {
   return environment.CLOUDOS_NATIVE_HOST === '1'

@@ -3,6 +3,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Interop;
 using CloudOS.Host.Bridge;
 using CloudOS.Host.Native;
 using CloudOS.Host.Runtime;
@@ -39,6 +40,11 @@ public partial class MainWindow : Window
         _bootstrapReporter = new BootstrapReporter(options.BootstrapPipe);
         InitializeComponent();
         _supervisor.RuntimeExited += OnRuntimeExited;
+        LocationChanged += (_, _) => _bridge?.RelayoutAttachedWindows();
+        SizeChanged += (_, _) => _bridge?.RelayoutAttachedWindows();
+        StateChanged += (_, _) => _bridge?.RelayoutAttachedWindows();
+        DpiChanged += (_, _) => _bridge?.RelayoutAttachedWindows();
+        ShellWebView.SizeChanged += (_, _) => _bridge?.RelayoutAttachedWindows();
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -64,6 +70,9 @@ public partial class MainWindow : Window
                 ShellWebView,
                 _trustedDocumentOrigin,
                 endpoint.BaseUri,
+                endpoint.SupervisorToken,
+                endpoint.HostLeaseToken,
+                new WindowInteropHelper(this).Handle.ToInt64(),
                 _nativeWindows,
                 Dispatcher,
                 SetFullscreen,
@@ -74,7 +83,9 @@ public partial class MainWindow : Window
 
             // Always create a fresh document so the current agent endpoint and
             // bridge nonce are installed, while the storage origin stays fixed.
-            ShellWebView.CoreWebView2.Navigate(_trustedDocumentOrigin.AbsoluteUri);
+            var startUri = new Uri(_trustedDocumentOrigin, "index.html").AbsoluteUri;
+            _supervisor.AppendLog("host", $"Navigating to {startUri}");
+            ShellWebView.CoreWebView2.Navigate(startUri);
         }
         catch (WebView2RuntimeNotFoundException)
         {
@@ -124,15 +135,24 @@ public partial class MainWindow : Window
         {
             _bridge?.ResetDocument();
             var trustedOrigin = _trustedDocumentOrigin;
-            if (!Uri.TryCreate(eventArgs.Uri, UriKind.Absolute, out var candidate) ||
-                !NavigationPolicy.IsTrustedDocument(candidate, trustedOrigin))
+            var isTrusted = Uri.TryCreate(eventArgs.Uri, UriKind.Absolute, out var candidate) &&
+                NavigationPolicy.IsTrustedDocument(candidate, trustedOrigin);
+            _supervisor.AppendLog("webview", $"NavigationStarting uri={eventArgs.Uri} trusted={isTrusted}");
+            if (!isTrusted)
                 eventArgs.Cancel = true;
+        };
+        core.WebResourceResponseReceived += (_, eventArgs) =>
+        {
+            _supervisor.AppendLog("webview", $"Response uri={eventArgs.Request.Uri} status={eventArgs.Response?.StatusCode}");
         };
         core.NavigationCompleted += (_, eventArgs) =>
         {
             var trustedOrigin = _trustedDocumentOrigin;
-            if (eventArgs.IsSuccess && ShellWebView.Source is not null &&
-                NavigationPolicy.IsTrustedDocument(ShellWebView.Source, trustedOrigin))
+            var currentSource = Uri.TryCreate(core.Source, UriKind.Absolute, out var navUri) ? navUri : ShellWebView.Source;
+            var isTrusted = currentSource is not null &&
+                NavigationPolicy.IsTrustedDocument(currentSource, trustedOrigin);
+            _supervisor.AppendLog("webview", $"NavigationCompleted isSuccess={eventArgs.IsSuccess} errorStatus={eventArgs.WebErrorStatus} httpStatus={eventArgs.HttpStatusCode} trusted={isTrusted} source={core.Source}");
+            if (eventArgs.IsSuccess && isTrusted)
             {
                 BootPanel.Visibility = Visibility.Collapsed;
                 ErrorPanel.Visibility = Visibility.Collapsed;
@@ -148,6 +168,7 @@ public partial class MainWindow : Window
         core.DownloadStarting += (_, eventArgs) => eventArgs.Cancel = true;
         core.ProcessFailed += (_, _) => Dispatcher.Invoke(() =>
         {
+            _bridge?.ResetDocument();
             ShellWebView.Visibility = Visibility.Collapsed;
             ShowError("A interface gráfica foi interrompida", "O processo do WebView2 falhou. Reinicie o CloudOS para recriar a interface.");
         });
@@ -162,10 +183,12 @@ public partial class MainWindow : Window
         if (_shellMappingConfigured)
             core.ClearVirtualHostNameToFolderMapping(_trustedDocumentOrigin.Host);
 
+        _supervisor.AppendLog("host", $"Mapping host={_trustedDocumentOrigin.Host} dir={endpoint.FrontendDirectory} indexExists={File.Exists(Path.Combine(endpoint.FrontendDirectory, "index.html"))}");
+
         core.SetVirtualHostNameToFolderMapping(
             _trustedDocumentOrigin.Host,
             endpoint.FrontendDirectory,
-            CoreWebView2HostResourceAccessKind.Deny);
+            CoreWebView2HostResourceAccessKind.Allow);
         _shellMappingConfigured = true;
 
         _runtimeBootstrapScriptId = await core.AddScriptToExecuteOnDocumentCreatedAsync(
@@ -178,7 +201,8 @@ public partial class MainWindow : Window
         fullscreen = _fullscreen,
         kiosk = _options.Kiosk,
         managedWindows = true,
-        embeddedNativeWindows = false,
+        embeddedNativeWindows = true,
+        nativeWindowContainment = "anchored-overlay",
         platform = "windows",
         version = typeof(MainWindow).Assembly.GetName().Version?.ToString() ?? "1.0.0"
     };

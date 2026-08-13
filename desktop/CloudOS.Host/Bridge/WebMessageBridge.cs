@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Windows.Threading;
+using System.Windows.Media;
 using CloudOS.Host.Native;
 using CloudOS.Host.Security;
 using Microsoft.Web.WebView2.Core;
@@ -26,6 +27,9 @@ public sealed class WebMessageBridge : IDisposable
     private readonly WebView2 _webView;
     private readonly Uri _trustedDocumentOrigin;
     private readonly Uri _backendOrigin;
+    private readonly string? _supervisorToken;
+    private readonly string? _hostLeaseToken;
+    private readonly long _ownerWindowHandle;
     private readonly NativeWindowManager _windows;
     private readonly Dispatcher _dispatcher;
     private readonly Action<bool> _setFullscreen;
@@ -38,18 +42,23 @@ public sealed class WebMessageBridge : IDisposable
     };
     private readonly Dictionary<long, string> _sessionIdsByHandle = new();
     private readonly Dictionary<string, long> _handlesBySessionId = new(StringComparer.Ordinal);
+    private readonly Dictionary<long, AttachedSurfaceRequest> _surfacesByHandle = new();
     private readonly HashSet<Guid> _inFlight = new();
     private readonly Queue<DateTime> _recentMessages = new();
     private readonly DispatcherTimer _refreshTimer;
     private readonly string _nonce = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
     private bool _handshakeComplete;
     private bool _disposed;
+    private bool _relayoutPending;
     private string? _injectedScriptId;
 
     public WebMessageBridge(
         WebView2 webView,
         Uri trustedDocumentOrigin,
         Uri backendOrigin,
+        string? supervisorToken,
+        string? hostLeaseToken,
+        long ownerWindowHandle,
         NativeWindowManager windows,
         Dispatcher dispatcher,
         Action<bool> setFullscreen,
@@ -60,6 +69,9 @@ public sealed class WebMessageBridge : IDisposable
         _webView = webView;
         _trustedDocumentOrigin = trustedDocumentOrigin;
         _backendOrigin = backendOrigin;
+        _supervisorToken = supervisorToken;
+        _hostLeaseToken = hostLeaseToken;
+        _ownerWindowHandle = ownerWindowHandle;
         _windows = windows;
         _dispatcher = dispatcher;
         _setFullscreen = setFullscreen;
@@ -90,7 +102,15 @@ public sealed class WebMessageBridge : IDisposable
         _refreshTimer.Start();
     }
 
-    public void ResetDocument() => _handshakeComplete = false;
+    public void ResetDocument()
+    {
+        _handshakeComplete = false;
+        // A new/crashed renderer no longer owns the CSS slots that established
+        // containment. Restore apps externally instead of leaving stale overlays.
+        foreach (var handle in _surfacesByHandle.Keys.ToArray())
+            _windows.TryDetach(handle, out _);
+        _surfacesByHandle.Clear();
+    }
 
     private async void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs eventArgs)
     {
@@ -101,8 +121,9 @@ public sealed class WebMessageBridge : IDisposable
         {
             var raw = eventArgs.WebMessageAsJson;
             if (raw.Length > MaxMessageLength) throw new BridgeException("MESSAGE_TOO_LARGE", "Mensagem nativa excede o limite.");
+            var docUri = _webView.Source ?? (Uri.TryCreate(_webView.CoreWebView2?.Source, UriKind.Absolute, out var u) ? u : null);
             if (!NavigationPolicy.IsTrustedSource(eventArgs.Source, _trustedDocumentOrigin) ||
-                _webView.Source is null || !NavigationPolicy.IsTrustedDocument(_webView.Source, _trustedDocumentOrigin))
+                docUri is null || !NavigationPolicy.IsTrustedDocument(docUri, _trustedDocumentOrigin))
                 throw new BridgeException("UNTRUSTED_SOURCE", "Origem não confiável.");
             EnforceRateLimit();
 
@@ -171,6 +192,12 @@ public sealed class WebMessageBridge : IDisposable
                 return Operate(parameters, _windows.TryRestore);
             case "native.session.close":
                 return Operate(parameters, _windows.TryClose);
+            case "native.session.attach":
+                return Attach(parameters);
+            case "native.session.layout":
+                return Layout(parameters);
+            case "native.session.detach":
+                return Detach(parameters);
             case "host.requestLegacyRecoveryToken":
                 return await RequestLegacyRecoveryTokenAsync();
             default:
@@ -181,25 +208,16 @@ public sealed class WebMessageBridge : IDisposable
     private async Task<object> RequestLegacyRecoveryTokenAsync()
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(_backendOrigin, "/api/auth/legacy-recovery/issue-token"));
-        var supervisorToken = Environment.GetEnvironmentVariable("CLOUDOS_SUPERVISOR_TOKEN");
-        if (!string.IsNullOrEmpty(supervisorToken))
-        {
-            request.Headers.Add("X-CloudOS-Supervisor-Token", supervisorToken);
-        }
-        var leaseToken = Environment.GetEnvironmentVariable("CLOUDOS_HOST_LEASE_TOKEN");
-        if (!string.IsNullOrEmpty(leaseToken))
-        {
-            request.Headers.Add("X-CloudOS-Host-Token", leaseToken);
-        }
+        if (!string.IsNullOrEmpty(_supervisorToken))
+            request.Headers.Add("X-CloudOS-Supervisor-Token", _supervisorToken);
+        if (!string.IsNullOrEmpty(_hostLeaseToken))
+            request.Headers.Add("X-CloudOS-Host-Token", _hostLeaseToken);
         request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
         using var response = await _http.SendAsync(request);
         if (!response.IsSuccessStatusCode)
-        {
             throw new BridgeException("LEGACY_RECOVERY_DENIED", "O host nativo não pôde autorizar a recuperação local.");
-        }
         await using var body = await response.Content.ReadAsStreamAsync();
-        var result = await JsonSerializer.DeserializeAsync<JsonElement>(body);
-        return result;
+        return await JsonSerializer.DeserializeAsync<JsonElement>(body);
     }
 
     private async Task<object> LaunchAppAsync(JsonElement parameters)
@@ -257,8 +275,155 @@ public sealed class WebMessageBridge : IDisposable
             pid = launched.Pid,
             windowMode = managed ? "native-managed" : launched.WindowMode,
             managed,
-            managementReason
+            managementReason,
+            sessionId = launched.Pid > 0 ? GetSessionIdForProcess(launched.Pid) : null
         };
+    }
+
+    private object Attach(JsonElement parameters)
+    {
+        RequireObject(parameters);
+        RejectUnknownProperties(parameters, "sessionId", "bounds", "visible");
+        var sessionId = ReadString(parameters, "sessionId");
+        var handle = GetHandle(sessionId);
+        var surface = ReadSurfaceRequest(parameters);
+        var bounds = ConvertBounds(surface);
+        var visible = ReadOptionalBoolean(parameters, "visible", true);
+        if (!_windows.TryAttach(handle, _ownerWindowHandle, bounds, visible, out var error))
+            throw new BridgeException("WINDOW_CONTAINMENT_DENIED", error ?? "O aplicativo não aceita contenção visual.");
+        _surfacesByHandle[handle] = surface with { Visible = visible, LastNativeBounds = bounds };
+        return new { sessionId, accepted = true, contained = true, containmentMode = "anchored-overlay" };
+    }
+
+    private object Layout(JsonElement parameters)
+    {
+        RequireObject(parameters);
+        RejectUnknownProperties(parameters, "sessionId", "bounds", "visible");
+        var sessionId = ReadString(parameters, "sessionId");
+        var handle = GetHandle(sessionId);
+        var surface = ReadSurfaceRequest(parameters);
+        var bounds = ConvertBounds(surface);
+        var visible = ReadOptionalBoolean(parameters, "visible", true);
+        if (!_windows.TryUpdateAttachedLayout(handle, bounds, visible, out var error))
+        {
+            _surfacesByHandle.Remove(handle);
+            throw new BridgeException("WINDOW_LAYOUT_DENIED", error ?? "O Windows recusou a posição da janela.");
+        }
+        _surfacesByHandle[handle] = surface with { Visible = visible, LastNativeBounds = bounds };
+        return new { sessionId, accepted = true, contained = true, containmentMode = "anchored-overlay" };
+    }
+
+    private object Detach(JsonElement parameters)
+    {
+        RequireObject(parameters);
+        RejectUnknownProperties(parameters, "sessionId");
+        var sessionId = ReadString(parameters, "sessionId");
+        var handle = GetHandle(sessionId);
+        if (!_windows.TryDetach(handle, out var error))
+            throw new BridgeException("WINDOW_OPERATION_DENIED", error ?? "O Windows recusou a operação.");
+        _surfacesByHandle.Remove(handle);
+        return new { sessionId, accepted = true, contained = false, containmentMode = "external" };
+    }
+
+    /// <summary>
+    /// Recomputes absolute screen bounds after the WPF owner moves, resizes or
+    /// crosses monitors. Calls are coalesced to one render-priority dispatcher pass.
+    /// </summary>
+    public void RelayoutAttachedWindows()
+    {
+        if (_disposed || _relayoutPending || _surfacesByHandle.Count == 0) return;
+        _relayoutPending = true;
+        _ = _dispatcher.BeginInvoke(() =>
+        {
+            _relayoutPending = false;
+            if (_disposed) return;
+            foreach (var pair in _surfacesByHandle.ToArray())
+            {
+                if (!_windows.IsAttached(pair.Key))
+                {
+                    _surfacesByHandle.Remove(pair.Key);
+                    continue;
+                }
+
+                try
+                {
+                    var bounds = ConvertBounds(pair.Value);
+                    if (_windows.TryUpdateAttachedLayout(pair.Key, bounds, pair.Value.Visible, out _))
+                        _surfacesByHandle[pair.Key] = pair.Value with { LastNativeBounds = bounds };
+                    else
+                        _surfacesByHandle.Remove(pair.Key);
+                }
+                catch (Exception error) when (error is BridgeException or InvalidOperationException or OverflowException or ArithmeticException)
+                {
+                    // If the WebView or slot is temporarily unavailable (for example
+                    // while minimizing), keep the capability but hide the native HWND.
+                    _windows.TryUpdateAttachedLayout(pair.Key, pair.Value.LastNativeBounds, false, out _);
+                }
+            }
+        }, DispatcherPriority.Render);
+    }
+
+    private long GetHandle(string sessionId)
+    {
+        if (!_handlesBySessionId.TryGetValue(sessionId, out var handle))
+            throw new BridgeException("SESSION_NOT_FOUND", "Janela não encontrada.");
+        return handle;
+    }
+
+    private string? GetSessionIdForProcess(int processId)
+    {
+        _windows.Refresh();
+        var window = _windows.GetWindows(processId).OrderBy(item => item.ObservedAtUtc).FirstOrDefault();
+        if (window is null) return null;
+        if (!_sessionIdsByHandle.TryGetValue(window.Handle, out var sessionId))
+        {
+            sessionId = $"window-{Guid.NewGuid():N}";
+            _sessionIdsByHandle[window.Handle] = sessionId;
+            _handlesBySessionId[sessionId] = window.Handle;
+        }
+        return sessionId;
+    }
+
+    private static AttachedSurfaceRequest ReadSurfaceRequest(JsonElement parameters)
+    {
+        if (!parameters.TryGetProperty("bounds", out var bounds) || bounds.ValueKind != JsonValueKind.Object)
+            throw new BridgeException("INVALID_PARAMS", "Área da janela inválida.");
+        RejectUnknownProperties(bounds, "x", "y", "width", "height");
+        var x = ReadFiniteDouble(bounds, "x");
+        var y = ReadFiniteDouble(bounds, "y");
+        var width = ReadFiniteDouble(bounds, "width");
+        var height = ReadFiniteDouble(bounds, "height");
+        if (width < 32 || height < 32 || width > 32768 || height > 32768
+            || x < -131072 || x > 131072 || y < -131072 || y > 131072)
+            throw new BridgeException("INVALID_PARAMS", "A área do aplicativo é inválida.");
+
+        return new AttachedSurfaceRequest(x, y, width, height, true, default);
+    }
+
+    private NativeWindowBounds ConvertBounds(AttachedSurfaceRequest surface)
+    {
+        var dpiScale = VisualTreeHelper.GetDpi(_webView);
+        var topLeft = _webView.PointToScreen(new System.Windows.Point(surface.X, surface.Y));
+        var bottomRight = _webView.PointToScreen(new System.Windows.Point(surface.X + surface.Width, surface.Y + surface.Height));
+        var webTopLeft = _webView.PointToScreen(new System.Windows.Point(0, 0));
+        var webBottomRight = _webView.PointToScreen(new System.Windows.Point(_webView.ActualWidth, _webView.ActualHeight));
+
+        var left = Math.Max(topLeft.X, webTopLeft.X);
+        var top = Math.Max(topLeft.Y, webTopLeft.Y);
+        var right = Math.Min(bottomRight.X, webBottomRight.X);
+        var bottom = Math.Min(bottomRight.Y, webBottomRight.Y);
+        if (right - left < 32 || bottom - top < 32)
+            throw new BridgeException("INVALID_PARAMS", "A área do aplicativo está fora do Hub.");
+
+        // PointToScreen returns device pixels for WPF; keep the DPI read as an explicit
+        // validation that the visual is connected to a presentation source.
+        if (dpiScale.DpiScaleX <= 0 || dpiScale.DpiScaleY <= 0)
+            throw new BridgeException("HOST_NOT_READY", "A janela do CloudOS ainda não está pronta.");
+        return new NativeWindowBounds(
+            checked((int)Math.Round(left)),
+            checked((int)Math.Round(top)),
+            checked((int)Math.Round(right - left)),
+            checked((int)Math.Round(bottom - top)));
     }
 
     private object Operate(JsonElement parameters, NativeOperation operation)
@@ -281,6 +446,7 @@ public sealed class WebMessageBridge : IDisposable
             var handle = eventArgs.Window.Handle;
             if (eventArgs.Kind == NativeWindowChangeKind.Removed)
             {
+                _surfacesByHandle.Remove(handle);
                 if (_sessionIdsByHandle.Remove(handle, out var removed)) _handlesBySessionId.Remove(removed);
             }
             else if (!_sessionIdsByHandle.ContainsKey(handle))
@@ -312,6 +478,9 @@ public sealed class WebMessageBridge : IDisposable
                 processId = window.ProcessId,
                 minimized = window.IsMinimized,
                 maximized = window.IsMaximized,
+                contained = window.IsAttached,
+                containmentMode = window.IsAttached ? "anchored-overlay" : "external",
+                visible = window.IsVisible,
                 bounds = new { x = window.Bounds.X, y = window.Bounds.Y, width = window.Bounds.Width, height = window.Bounds.Height }
             });
         }
@@ -366,6 +535,22 @@ public sealed class WebMessageBridge : IDisposable
         return value.GetBoolean();
     }
 
+    private static bool ReadOptionalBoolean(JsonElement parameters, string property, bool fallback)
+    {
+        if (!parameters.TryGetProperty(property, out var value)) return fallback;
+        if (value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            throw new BridgeException("INVALID_PARAMS", $"Campo {property} inválido.");
+        return value.GetBoolean();
+    }
+
+    private static double ReadFiniteDouble(JsonElement element, string property)
+    {
+        if (!element.TryGetProperty(property, out var value) || !value.TryGetDouble(out var result)
+            || double.IsNaN(result) || double.IsInfinity(result))
+            throw new BridgeException("INVALID_PARAMS", $"Campo {property} inválido.");
+        return result;
+    }
+
     private static void RejectUnknownProperties(JsonElement element, params string[] allowed)
     {
         var names = new HashSet<string>(allowed, StringComparer.Ordinal);
@@ -400,6 +585,7 @@ public sealed class WebMessageBridge : IDisposable
         _recentMessages.Clear();
         _sessionIdsByHandle.Clear();
         _handlesBySessionId.Clear();
+        _surfacesByHandle.Clear();
         _http.Dispose();
     }
 
@@ -418,4 +604,12 @@ public sealed class WebMessageBridge : IDisposable
         [JsonPropertyName("pid")] public int Pid { get; init; }
         [JsonPropertyName("windowMode")] public string? WindowMode { get; init; }
     }
+
+    private sealed record AttachedSurfaceRequest(
+        double X,
+        double Y,
+        double Width,
+        double Height,
+        bool Visible,
+        NativeWindowBounds LastNativeBounds);
 }
