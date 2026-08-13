@@ -4,6 +4,7 @@ import { getDb } from '../database/index.js';
 import { config } from '../config/index.js';
 import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 import { issueLegacyToken, consumeLegacyToken } from './legacyTokenStore.js';
+import { hasNativeHostTrust } from './hostTrust.js';
 import {
   generateRecoveryCode,
   hashPassword,
@@ -156,24 +157,6 @@ authRouter.post('/logout', authenticateToken, (_req, res) => {
   res.json({ message: 'Sessão encerrada com sucesso.' });
 });
 
-function isTrustedHostRequest(req) {
-  const supervisorToken = process.env.CLOUDOS_SUPERVISOR_TOKEN;
-  const hostLeaseToken = process.env.CLOUDOS_HOST_LEASE_TOKEN;
-  const providedSupervisor = req.get('X-CloudOS-Supervisor-Token');
-  const providedHost = req.get('X-CloudOS-Host-Token');
-
-  if (supervisorToken && providedSupervisor && supervisorToken === providedSupervisor) {
-    return true;
-  }
-  if (hostLeaseToken && providedHost && hostLeaseToken === providedHost) {
-    return true;
-  }
-  if (req.get('X-CloudOS-Test-Host') === '1') {
-    return true;
-  }
-  return false;
-}
-
 // Informa apenas se a recuperação foi preparada, sem revelar identificação da conta.
 authRouter.get('/recovery/status', async (_req, res, next) => {
   try {
@@ -282,7 +265,7 @@ authRouter.post('/recovery/rotate', authenticateToken, requireAdmin, async (req,
 // Emite token de uso único para recuperação legada; exige autorização do host nativo.
 authRouter.post('/legacy-recovery/issue-token', async (req, res, next) => {
   try {
-    if (!isTrustedHostRequest(req)) {
+    if (!hasNativeHostTrust(req, req.app.locals.cloudOsHostTrustPolicy)) {
       return res.status(403).json({ error: 'Apenas o host nativo local pode solicitar o token de recuperação legada.' });
     }
 
