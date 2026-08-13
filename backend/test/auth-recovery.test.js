@@ -6,6 +6,7 @@ import { createApp } from '../src/app.js';
 import { config } from '../src/config/index.js';
 import { getDb, resetLocalDatabase } from '../src/database/index.js';
 import { hashPassword } from '../src/auth/security.js';
+import { resetLegacyTokensForTests } from '../src/auth/legacyTokenStore.js';
 
 function startServer(app) {
   return new Promise((resolve, reject) => {
@@ -75,7 +76,7 @@ test('recuperação troca credenciais, preserva identidade/dados e revoga sessõ
 
     const status = await makeRequest(port, { path: '/api/auth/recovery/status' });
     assert.equal(status.status, 200);
-    assert.deepEqual(JSON.parse(status.body), { available: true });
+    assert.deepEqual(JSON.parse(status.body), { available: true, legacyAdmin: false });
     assert.equal(status.body.includes('admin-original'), false);
 
     const rejected = await jsonRequest(port, '/api/auth/recovery/reset', {
@@ -340,5 +341,234 @@ test('recuperação sem alterar o username preserva o username original retornad
   } finally {
     server.close();
     resetLocalDatabase();
+  }
+});
+
+test('recuperação legada: detecta admin sem recovery_code_hash e emite token somente para host autorizado', async () => {
+  resetLocalDatabase();
+  resetLegacyTokensForTests();
+  const passwordHash = await hashPassword('senha-legada-antiga');
+  await new Promise((resolve, reject) => getDb().run(
+    'INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, ?)',
+    ['legacy-user-1', 'admin-legado', passwordHash, 'admin'],
+    error => error ? reject(error) : resolve()
+  ));
+
+  const { server, port } = await startServer(createApp(0));
+  try {
+    const statusRes = await makeRequest(port, { path: '/api/auth/recovery/status' });
+    assert.equal(statusRes.status, 200);
+    const status = JSON.parse(statusRes.body);
+    assert.equal(status.available, false);
+    assert.equal(status.legacyAdmin, true);
+
+    const unauthorizedIssue = await jsonRequest(port, '/api/auth/legacy-recovery/issue-token', {});
+    assert.equal(unauthorizedIssue.status, 403);
+
+    const authorizedIssue = await makeRequest(port, {
+      path: '/api/auth/legacy-recovery/issue-token',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CloudOS-Test-Host': '1'
+      }
+    }, '{}');
+    assert.equal(authorizedIssue.status, 200);
+    const issued = JSON.parse(authorizedIssue.body);
+    assert.match(issued.token, /^LEGACY-[A-F0-9]{24}$/);
+    assert.equal(typeof issued.expiresIn, 'number');
+  } finally {
+    server.close();
+    resetLocalDatabase();
+    resetLegacyTokensForTests();
+  }
+});
+
+test('recuperação legada: redefine credenciais com token único e gera primeiro recovery code', async () => {
+  resetLocalDatabase();
+  resetLegacyTokensForTests();
+  const passwordHash = await hashPassword('senha-legada-antiga');
+  await new Promise((resolve, reject) => getDb().run(
+    'INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, ?)',
+    ['legacy-user-2', 'admin-antigo', passwordHash, 'admin'],
+    error => error ? reject(error) : resolve()
+  ));
+
+  const { server, port } = await startServer(createApp(0));
+  try {
+    const issueRes = await makeRequest(port, {
+      path: '/api/auth/legacy-recovery/issue-token',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CloudOS-Test-Host': '1'
+      }
+    }, '{}');
+    const { token: legacyToken } = JSON.parse(issueRes.body);
+
+    const recoverRes = await jsonRequest(port, '/api/auth/legacy-recovery/reset', {
+      legacyToken,
+      password: 'nova-senha-segura-1234',
+      confirmPassword: 'nova-senha-segura-1234'
+    });
+    assert.equal(recoverRes.status, 200);
+    const recovered = JSON.parse(recoverRes.body);
+    assert.equal(recovered.user.username, 'admin-antigo');
+    assert.equal(recovered.user.id, 'legacy-user-2');
+    assert.match(recovered.recoveryCode, /^CLOUDOS-[A-Za-z0-9_-]{43}$/);
+    assert.equal(recovered.recoveryCodeShownOnce, true);
+
+    const statusRes = await makeRequest(port, { path: '/api/auth/recovery/status' });
+    const status = JSON.parse(statusRes.body);
+    assert.equal(status.available, true);
+    assert.equal(status.legacyAdmin, false);
+
+    const loginOk = await jsonRequest(port, '/api/auth/login', {
+      username: 'admin-antigo',
+      password: 'nova-senha-segura-1234'
+    });
+    assert.equal(loginOk.status, 200);
+
+    const loginOld = await jsonRequest(port, '/api/auth/login', {
+      username: 'admin-antigo',
+      password: 'senha-legada-antiga'
+    });
+    assert.equal(loginOld.status, 401);
+
+    const secondIssue = await makeRequest(port, {
+      path: '/api/auth/legacy-recovery/issue-token',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CloudOS-Test-Host': '1'
+      }
+    }, '{}');
+    assert.equal(secondIssue.status, 400);
+  } finally {
+    server.close();
+    resetLocalDatabase();
+    resetLegacyTokensForTests();
+  }
+});
+
+test('recuperação legada: rejeita reutilização de token e token expirado', async () => {
+  resetLocalDatabase();
+  resetLegacyTokensForTests();
+  const passwordHash = await hashPassword('senha-legada-antiga');
+  await new Promise((resolve, reject) => getDb().run(
+    'INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, ?)',
+    ['legacy-user-3', 'admin-reuse', passwordHash, 'admin'],
+    error => error ? reject(error) : resolve()
+  ));
+
+  const { server, port } = await startServer(createApp(0));
+  try {
+    const issueRes = await makeRequest(port, {
+      path: '/api/auth/legacy-recovery/issue-token',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CloudOS-Test-Host': '1'
+      }
+    }, '{}');
+    const { token: singleUseToken } = JSON.parse(issueRes.body);
+
+    const firstUse = await jsonRequest(port, '/api/auth/legacy-recovery/reset', {
+      legacyToken: singleUseToken,
+      password: 'senha-primeiro-uso-123',
+      confirmPassword: 'senha-primeiro-uso-123'
+    });
+    assert.equal(firstUse.status, 200);
+
+    const secondUse = await jsonRequest(port, '/api/auth/legacy-recovery/reset', {
+      legacyToken: singleUseToken,
+      password: 'senha-segundo-uso-123',
+      confirmPassword: 'senha-segundo-uso-123'
+    });
+    assert.equal(secondUse.status, 401);
+
+    resetLocalDatabase();
+    await new Promise((resolve, reject) => getDb().run(
+      'INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, ?)',
+      ['legacy-user-4', 'admin-expired', passwordHash, 'admin'],
+      error => error ? reject(error) : resolve()
+    ));
+
+    const { issueLegacyToken } = await import('../src/auth/legacyTokenStore.js');
+    const expiredTokenData = issueLegacyToken({ ttlMs: -1000 });
+
+    const expiredUse = await jsonRequest(port, '/api/auth/legacy-recovery/reset', {
+      legacyToken: expiredTokenData.token,
+      password: 'senha-expirada-123',
+      confirmPassword: 'senha-expirada-123'
+    });
+    assert.equal(expiredUse.status, 401);
+  } finally {
+    server.close();
+    resetLocalDatabase();
+    resetLegacyTokensForTests();
+  }
+});
+
+test('recuperação legada: bloqueia tentativas excessivas com rate limit e registra auditoria sem senhas', async () => {
+  resetLocalDatabase();
+  resetLegacyTokensForTests();
+  process.env.NODE_ENV = 'test';
+  const passwordHash = await hashPassword('senha-legada-antiga');
+  await new Promise((resolve, reject) => getDb().run(
+    'INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, ?)',
+    ['legacy-user-5', 'admin-rate', passwordHash, 'admin'],
+    error => error ? reject(error) : resolve()
+  ));
+
+  const { server, port } = await startServer(createApp(0));
+  try {
+    let rateLimited;
+    for (let attempt = 0; attempt < config.recoveryMaxAttempts; attempt += 1) {
+      rateLimited = await jsonRequest(port, '/api/auth/legacy-recovery/reset', {
+        legacyToken: `LEGACY-FORGED-TOKEN-${attempt}`,
+        password: 'senha-tentativa-invalida',
+        confirmPassword: 'senha-tentativa-invalida'
+      });
+    }
+    assert.equal(rateLimited.status, 429);
+    assert.ok(Number(rateLimited.headers['retry-after']) >= 1);
+
+    getDb().clearRecoveryThrottle();
+
+    const issueRes = await makeRequest(port, {
+      path: '/api/auth/legacy-recovery/issue-token',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CloudOS-Test-Host': '1'
+      }
+    }, '{}');
+    const { token: validToken } = JSON.parse(issueRes.body);
+
+    const successfulRecovery = await jsonRequest(port, '/api/auth/legacy-recovery/reset', {
+      legacyToken: validToken,
+      password: 'senha-auditada-sucesso',
+      confirmPassword: 'senha-auditada-sucesso'
+    });
+    assert.equal(successfulRecovery.status, 200);
+
+    const operations = await new Promise((resolve, reject) => getDb().all(
+      'SELECT * FROM operations WHERE type = ?',
+      ['legacy-account-recovery'],
+      (error, rows) => error ? reject(error) : resolve(rows)
+    ));
+    assert.ok(operations.length >= 1);
+    const op = operations[0];
+    assert.equal(op.target, 'admin-rate');
+    assert.equal(op.status, 'completed');
+    assert.equal('password' in op, false);
+    assert.equal('token' in op, false);
+    assert.equal('legacyToken' in op, false);
+    assert.equal('recoveryCode' in op, false);
+  } finally {
+    server.close();
+    resetLocalDatabase();
+    resetLegacyTokensForTests();
   }
 });

@@ -10,9 +10,11 @@ import {
   setUnauthorizedHandler
 } from '../services/apiClient';
 import {
+  ACCOUNT_LEGACY_RECOVERY_ENDPOINT,
   ACCOUNT_RECOVERY_ENDPOINT,
   canRestoreAuthenticatedSession,
   extractRecoveryCode,
+  legacyRecoveryRequestBody,
   normalizePublicUser,
   recoveryRequestBody,
   sanitizePersistedProfile
@@ -43,12 +45,14 @@ interface UserState {
   setupStatus: SetupStatus;
   setupStatusMessage: string | null;
   recoveryAvailable: boolean | null;
+  legacyAdminAvailable: boolean;
   recoveryStatusMessage: string | null;
   checkSetupStatus: () => Promise<SetupStatus>;
   checkRecoveryStatus: () => Promise<boolean | null>;
   login: (username: string, password: string) => Promise<ActionResult>;
   createAdmin: (username: string, displayName: string, password: string, confirmPassword: string) => Promise<RecoveryResult>;
   recoverAccount: (recoveryCode: string, newUsername: string, displayName: string, password: string, confirmPassword: string) => Promise<RecoveryResult>;
+  recoverLegacyAccount: (legacyToken: string, newUsername: string, displayName: string, password: string, confirmPassword: string) => Promise<RecoveryResult>;
   rotateRecoveryCode: () => Promise<RecoveryResult>;
   confirmRecoveryCodeSaved: () => void;
   logout: () => Promise<void>;
@@ -81,6 +85,7 @@ export const useUserStore = create<UserState>((set, get) => {
     setupStatus: 'checking',
     setupStatusMessage: null,
     recoveryAvailable: null,
+    legacyAdminAvailable: false,
     recoveryStatusMessage: null,
 
     checkSetupStatus: async () => {
@@ -97,6 +102,7 @@ export const useUserStore = create<UserState>((set, get) => {
           setupStatus: status,
           setupStatusMessage: null,
           recoveryAvailable: required ? false : state.recoveryAvailable,
+          legacyAdminAvailable: required ? false : state.legacyAdminAvailable,
           recoveryStatusMessage: required ? null : state.recoveryStatusMessage
         }));
         return status;
@@ -112,16 +118,21 @@ export const useUserStore = create<UserState>((set, get) => {
     checkRecoveryStatus: async () => {
       set({ recoveryAvailable: null, recoveryStatusMessage: null });
       try {
-        const response = await apiClient<{ available: boolean }>('/api/auth/recovery/status', {
+        const response = await apiClient<{ available: boolean; legacyAdmin?: boolean }>('/api/auth/recovery/status', {
           skipAuth: true,
           suppressUnauthorizedHandler: true
         });
         if (typeof response.available !== 'boolean') throw new Error('Resposta inválida do estado de recuperação.');
-        set({ recoveryAvailable: response.available, recoveryStatusMessage: null });
+        set({
+          recoveryAvailable: response.available,
+          legacyAdminAvailable: Boolean(response.legacyAdmin),
+          recoveryStatusMessage: null
+        });
         return response.available;
       } catch (error) {
         set({
           recoveryAvailable: null,
+          legacyAdminAvailable: false,
           recoveryStatusMessage: error instanceof Error ? error.message : 'Não foi possível verificar a recuperação.'
         });
         return null;
@@ -217,6 +228,36 @@ export const useUserStore = create<UserState>((set, get) => {
         return { success: true, recoveryCode: rotatedCode, username: profile.username };
       } catch (error) {
         return { success: false, message: error instanceof Error ? error.message : 'Não foi possível recuperar a conta.' };
+      }
+    },
+
+    recoverLegacyAccount: async (legacyToken, newUsername, displayName, password, confirmPassword) => {
+      try {
+        const response = await apiClient<{ token: string; user: unknown; recoveryCode?: string }>(ACCOUNT_LEGACY_RECOVERY_ENDPOINT, {
+          method: 'POST',
+          body: JSON.stringify(legacyRecoveryRequestBody({ legacyToken, username: newUsername, displayName, password, confirmPassword })),
+          skipAuth: true,
+          suppressUnauthorizedHandler: true
+        });
+        const profile = storeSession(response, { username: newUsername, displayName });
+        const rotatedCode = extractRecoveryCode(response);
+        markRecoveryConfirmationPending();
+        if (!profile || !rotatedCode) {
+          clearStoredAuth();
+          return { success: false, message: 'A recuperação legada terminou sem uma nova credencial válida.' };
+        }
+        set({
+          currentUser: profile,
+          isAuthenticated: true,
+          setupRequired: false,
+          setupStatus: 'complete',
+          recoveryAvailable: true,
+          legacyAdminAvailable: false,
+          recoveryStatusMessage: null
+        });
+        return { success: true, recoveryCode: rotatedCode, username: profile.username };
+      } catch (error) {
+        return { success: false, message: error instanceof Error ? error.message : 'Não foi possível recuperar a conta antiga.' };
       }
     },
 

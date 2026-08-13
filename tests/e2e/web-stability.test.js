@@ -184,3 +184,29 @@ test('7. Complete Account Recovery Flow E2E — Status, validação, redefiniç�
     server.close();
   }
 });
+
+test('8. Legacy Account Recovery Flow E2E — Status com legacyAdmin, emissao restrita de token e rejeicao sem posse local', async () => {
+  const app = createApp(18080);
+  const { server, port } = await startServer(app);
+  try {
+    // 1. Status endpoint includes legacyAdmin boolean
+    const statusRes = await requestJson(port, '/api/auth/recovery/status');
+    assert.strictEqual(statusRes.status, 200);
+    assert.strictEqual(typeof statusRes.data.available, 'boolean');
+    assert.strictEqual(typeof statusRes.data.legacyAdmin, 'boolean');
+
+    // 2. Reject legacy recovery issue-token without trusted host
+    const unauthIssue = await requestJson(port, '/api/auth/legacy-recovery/issue-token', 'POST', {});
+    assert.strictEqual(unauthIssue.status, 403);
+
+    // 3. Reject legacy recovery reset with fake/invalid token
+    const fakeReset = await requestJson(port, '/api/auth/legacy-recovery/reset', 'POST', {
+      legacyToken: 'LEGACY-FAKE-NONEXISTENT',
+      password: 'new-valid-password-123',
+      confirmPassword: 'new-valid-password-123'
+    });
+    assert.strictEqual(fakeReset.status, 401);
+  } finally {
+    server.close();
+  }
+});

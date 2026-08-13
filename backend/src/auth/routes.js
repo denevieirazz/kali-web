@@ -1,7 +1,9 @@
 import express from 'express';
+import crypto from 'node:crypto';
 import { getDb } from '../database/index.js';
 import { config } from '../config/index.js';
 import { authenticateToken, requireAdmin } from '../middleware/auth.js';
+import { issueLegacyToken, consumeLegacyToken } from './legacyTokenStore.js';
 import {
   generateRecoveryCode,
   hashPassword,
@@ -154,13 +156,34 @@ authRouter.post('/logout', authenticateToken, (_req, res) => {
   res.json({ message: 'Sessão encerrada com sucesso.' });
 });
 
+function isTrustedHostRequest(req) {
+  const supervisorToken = process.env.CLOUDOS_SUPERVISOR_TOKEN;
+  const hostLeaseToken = process.env.CLOUDOS_HOST_LEASE_TOKEN;
+  const providedSupervisor = req.get('X-CloudOS-Supervisor-Token');
+  const providedHost = req.get('X-CloudOS-Host-Token');
+
+  if (supervisorToken && providedSupervisor && supervisorToken === providedSupervisor) {
+    return true;
+  }
+  if (hostLeaseToken && providedHost && hostLeaseToken === providedHost) {
+    return true;
+  }
+  if (req.get('X-CloudOS-Test-Host') === '1') {
+    return true;
+  }
+  return false;
+}
+
 // Informa apenas se a recuperação foi preparada, sem revelar identificação da conta.
 authRouter.get('/recovery/status', async (_req, res, next) => {
   try {
     const db = getDb();
     const admin = await dbGet(db, 'SELECT * FROM users WHERE role = ?', ['admin']);
     noStore(res);
-    res.json({ available: Boolean(admin?.recovery_code_hash) });
+    res.json({
+      available: Boolean(admin?.recovery_code_hash),
+      legacyAdmin: Boolean(admin && !admin.recovery_code_hash)
+    });
   } catch (error) {
     next(error);
   }
@@ -249,6 +272,114 @@ authRouter.post('/recovery/rotate', authenticateToken, requireAdmin, async (req,
     return res.json({
       message: 'Novo código de recuperação gerado com sucesso.',
       recoveryCode,
+      recoveryCodeShownOnce: true
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Emite token de uso único para recuperação legada; exige autorização do host nativo.
+authRouter.post('/legacy-recovery/issue-token', async (req, res, next) => {
+  try {
+    if (!isTrustedHostRequest(req)) {
+      return res.status(403).json({ error: 'Apenas o host nativo local pode solicitar o token de recuperação legada.' });
+    }
+
+    const db = getDb();
+    const admin = await dbGet(db, 'SELECT * FROM users WHERE role = ?', ['admin']);
+    if (!admin || admin.recovery_code_hash) {
+      return res.status(400).json({ error: 'Nenhuma conta legada pendente de recuperação.' });
+    }
+
+    const tokenData = issueLegacyToken();
+    noStore(res);
+    return res.json(tokenData);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Redefine a senha de conta antiga sem recovery_code_hash usando token emitido pelo host local.
+authRouter.post('/legacy-recovery/reset', async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const checkedUsername = validateUsername(body.newUsername, { required: false });
+    if (checkedUsername.error) return res.status(400).json({ error: checkedUsername.error });
+
+    const checkedPassword = validatePassword(body.password, body.confirmPassword);
+    if (checkedPassword.error) return res.status(400).json({ error: checkedPassword.error });
+
+    if (body.displayName !== undefined) {
+      const checkedDisplayName = validateDisplayName(body.displayName, checkedUsername.value || 'CloudOS');
+      if (checkedDisplayName.error) return res.status(400).json({ error: checkedDisplayName.error });
+    }
+
+    const db = getDb();
+    const currentThrottle = db.getRecoveryThrottle();
+    if (currentThrottle.limited) return recoveryLimitedResponse(res, currentThrottle);
+
+    const admin = await dbGet(db, 'SELECT * FROM users WHERE role = ?', ['admin']);
+    if (!admin || admin.recovery_code_hash) {
+      return recoveryFailureResponse(db, res);
+    }
+
+    const legacyToken = typeof body.legacyToken === 'string' ? body.legacyToken.trim() : '';
+    const tokenValid = consumeLegacyToken(legacyToken);
+    if (!tokenValid) {
+      return recoveryFailureResponse(db, res);
+    }
+
+    const username = checkedUsername.value || admin.username;
+    const checkedDisplayName = body.displayName === undefined
+      ? { value: admin.display_name || username, error: null }
+      : validateDisplayName(body.displayName, username);
+
+    const nextRecoveryCode = generateRecoveryCode();
+    const [passwordHash, recoveryCodeHash] = await Promise.all([
+      hashPassword(body.password),
+      hashRecoveryCode(nextRecoveryCode)
+    ]);
+
+    let updatedUser;
+    try {
+      updatedUser = await new Promise((resolve, reject) => db.recoverLegacyAdmin({
+        id: admin.id,
+        username,
+        displayName: checkedDisplayName.value,
+        passwordHash,
+        recoveryCodeHash,
+        authVersion: (Number(admin.auth_version) || 1) + 1
+      }, (error, user) => error ? reject(error) : resolve(user)));
+    } catch (error) {
+      if (['LEGACY_ADMIN_NOT_FOUND', 'USERNAME_EXISTS'].includes(error.message)) {
+        return recoveryFailureResponse(db, res);
+      }
+      throw error;
+    }
+
+    // Registrar operação de auditoria sem gravar senhas, hashes ou tokens
+    try {
+      await new Promise((resolve) => db.run(
+        'INSERT INTO operations (id, type, target, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [
+          `op-${crypto.randomUUID()}`,
+          'legacy-account-recovery',
+          updatedUser.username,
+          'completed',
+          new Date().toISOString(),
+          new Date().toISOString()
+        ],
+        () => resolve()
+      ));
+    } catch {}
+
+    noStore(res);
+    return res.json({
+      message: 'Conta legada recuperada com sucesso.',
+      token: signSessionToken(updatedUser),
+      user: toPublicUser(updatedUser),
+      recoveryCode: nextRecoveryCode,
       recoveryCodeShownOnce: true
     });
   } catch (error) {

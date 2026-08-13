@@ -171,9 +171,35 @@ public sealed class WebMessageBridge : IDisposable
                 return Operate(parameters, _windows.TryRestore);
             case "native.session.close":
                 return Operate(parameters, _windows.TryClose);
+            case "host.requestLegacyRecoveryToken":
+                return await RequestLegacyRecoveryTokenAsync();
             default:
                 throw new BridgeException("METHOD_NOT_ALLOWED", "Método não permitido.");
         }
+    }
+
+    private async Task<object> RequestLegacyRecoveryTokenAsync()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(_backendOrigin, "/api/auth/legacy-recovery/issue-token"));
+        var supervisorToken = Environment.GetEnvironmentVariable("CLOUDOS_SUPERVISOR_TOKEN");
+        if (!string.IsNullOrEmpty(supervisorToken))
+        {
+            request.Headers.Add("X-CloudOS-Supervisor-Token", supervisorToken);
+        }
+        var leaseToken = Environment.GetEnvironmentVariable("CLOUDOS_HOST_LEASE_TOKEN");
+        if (!string.IsNullOrEmpty(leaseToken))
+        {
+            request.Headers.Add("X-CloudOS-Host-Token", leaseToken);
+        }
+        request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
+        using var response = await _http.SendAsync(request);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new BridgeException("LEGACY_RECOVERY_DENIED", "O host nativo não pôde autorizar a recuperação local.");
+        }
+        await using var body = await response.Content.ReadAsStreamAsync();
+        var result = await JsonSerializer.DeserializeAsync<JsonElement>(body);
+        return result;
     }
 
     private async Task<object> LaunchAppAsync(JsonElement parameters)

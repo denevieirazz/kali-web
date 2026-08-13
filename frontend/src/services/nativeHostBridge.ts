@@ -5,6 +5,7 @@ type NativeRequestMethod =
   | 'host.getState'
   | 'host.setFullscreen'
   | 'host.requestClose'
+  | 'host.requestLegacyRecoveryToken'
   | 'native.launchApp'
   | 'native.sessions.list'
   | 'native.session.focus'
@@ -84,6 +85,12 @@ class NativeHostBridge {
     if (!this.available) throw new Error('O host nativo do CloudOS não está ativo.');
     await this.connect();
     return this.request<NativeHostState>('host.getState', {});
+  }
+
+  async requestLegacyRecoveryToken() {
+    if (!this.available) throw new Error('O host nativo do CloudOS não está ativo.');
+    await this.connect();
+    return this.request<{ token: string; expiresIn: number }>('host.requestLegacyRecoveryToken', {});
   }
 
   async launchApp(appId: string) {

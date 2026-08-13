@@ -1,8 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  ACCOUNT_LEGACY_RECOVERY_ENDPOINT,
+  ACCOUNT_RECOVERY_ENDPOINT,
   canRestoreAuthenticatedSession,
   extractRecoveryCode,
+  legacyRecoveryRequestBody,
   normalizePublicUser,
   recoveryRequestBody,
   sanitizePersistedProfile,
@@ -71,4 +74,30 @@ test('recovery request omits newUsername and displayName when empty to preserve 
   assert.equal('displayName' in body, false);
   assert.equal(body.password, 'new-password-1');
   assert.equal(body.confirmPassword, 'new-password-1');
+});
+
+test('legacy recovery request formats payload with legacy token and omits empty optional fields', () => {
+  assert.equal(ACCOUNT_LEGACY_RECOVERY_ENDPOINT, '/api/auth/legacy-recovery/reset');
+  const body = legacyRecoveryRequestBody({
+    legacyToken: ' LEGACY-ABC123XYZ ',
+    username: '',
+    displayName: '',
+    password: 'new-safe-password-1',
+    confirmPassword: 'new-safe-password-1'
+  });
+  assert.equal(body.legacyToken, 'LEGACY-ABC123XYZ');
+  assert.equal('newUsername' in body, false);
+  assert.equal('displayName' in body, false);
+  assert.equal(body.password, 'new-safe-password-1');
+  assert.equal(body.confirmPassword, 'new-safe-password-1');
+
+  const withAliases = legacyRecoveryRequestBody({
+    legacyToken: 'LEGACY-999',
+    username: 'novo-admin',
+    displayName: 'Novo Admin',
+    password: 'password-123',
+    confirmPassword: 'password-123'
+  });
+  assert.equal(withAliases.newUsername, 'novo-admin');
+  assert.equal(withAliases.displayName, 'Novo Admin');
 });

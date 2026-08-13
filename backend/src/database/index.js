@@ -344,10 +344,17 @@ export class PersistentDatabase {
           }));
         });
       } else if (query.includes('INSERT INTO operations')) {
-        const [id, type, status = 'running', progress = 10, step = 'checking', message = 'Validando pre-requisitos do sistema...'] = params;
-        this.#change(state => state.operations.push({
-          id, type, status, progress, step, message, created_at: new Date().toISOString()
-        }));
+        if (query.includes('target')) {
+          const [id, type, target, status = 'completed'] = params;
+          this.#change(state => state.operations.push({
+            id, type, target, status, created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+          }));
+        } else {
+          const [id, type, status = 'running', progress = 10, step = 'checking', message = 'Validando pre-requisitos do sistema...'] = params;
+          this.#change(state => state.operations.push({
+            id, type, status, progress, step, message, created_at: new Date().toISOString()
+          }));
+        }
       } else {
         return callback(new Error('UNSUPPORTED_QUERY'));
       }
@@ -404,6 +411,13 @@ export class PersistentDatabase {
   clearLoginThrottle(callback = () => {}) {
     try {
       this.#change(state => this.#clearLoginThrottle(state));
+      callback(null);
+    } catch (error) { callback(error); }
+  }
+
+  clearRecoveryThrottle(callback = () => {}) {
+    try {
+      this.#change(state => this.#clearRecoveryThrottle(state));
       callback(null);
     } catch (error) { callback(error); }
   }
@@ -473,6 +487,33 @@ export class PersistentDatabase {
         const user = state.users.find(candidate => candidate.id === credentials.id && candidate.role === 'admin');
         if (!user || user.recovery_code_hash !== credentials.expectedRecoveryCodeHash) {
           throw new Error('RECOVERY_CODE_CHANGED');
+        }
+        const duplicate = state.users.some(candidate =>
+          candidate.id !== user.id && candidate.username.toLowerCase() === credentials.username.toLowerCase()
+        );
+        if (duplicate) throw new Error('USERNAME_EXISTS');
+
+        user.username = credentials.username;
+        user.display_name = credentials.displayName;
+        user.password_hash = credentials.passwordHash;
+        user.recovery_code_hash = credentials.recoveryCodeHash;
+        user.auth_version = credentials.authVersion;
+        user.updated_at = new Date().toISOString();
+        this.#clearLoginThrottle(state);
+        this.#clearRecoveryThrottle(state);
+        updatedUser = clone(user);
+      });
+      callback(null, updatedUser);
+    } catch (error) { callback(error); }
+  }
+
+  recoverLegacyAdmin(credentials, callback = () => {}) {
+    try {
+      let updatedUser;
+      this.#change((state) => {
+        const user = state.users.find(candidate => candidate.id === credentials.id && candidate.role === 'admin');
+        if (!user || user.recovery_code_hash) {
+          throw new Error('LEGACY_ADMIN_NOT_FOUND');
         }
         const duplicate = state.users.some(candidate =>
           candidate.id !== user.id && candidate.username.toLowerCase() === credentials.username.toLowerCase()

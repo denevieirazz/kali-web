@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useSystem } from '../../stores/systemStore';
 import { useUserStore } from '../../stores/userStore';
 import { validateDisplayName, validateNewPassword, validateUsername } from '../../services/accountContract.js';
+import { nativeHostBridge } from '../../services/nativeHostBridge';
 import kernel from '../../core/kernel';
 import './LockScreen.css';
 
-type PanelMode = 'login' | 'recovery' | 'recovery-code';
-type OneTimeCodeOrigin = 'legacy-login' | 'recovery-reset';
+type PanelMode = 'login' | 'recovery' | 'recovery-code' | 'legacy-recovery';
+type OneTimeCodeOrigin = 'legacy-login' | 'recovery-reset' | 'legacy-recovery';
 
 export default function LockScreen() {
   const { bootPhase, unlock } = useSystem();
@@ -15,9 +16,11 @@ export default function LockScreen() {
     setupStatus,
     setupStatusMessage,
     recoveryAvailable,
+    legacyAdminAvailable,
     recoveryStatusMessage,
     login,
     recoverAccount,
+    recoverLegacyAccount,
     checkSetupStatus,
     checkRecoveryStatus,
     confirmRecoveryCodeSaved,
@@ -30,6 +33,7 @@ export default function LockScreen() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [recoveryCode, setRecoveryCode] = useState('');
+  const [legacyToken, setLegacyToken] = useState<string | null>(null);
   const [rotatedCode, setRotatedCode] = useState<string | null>(null);
   const [recoveredUsername, setRecoveredUsername] = useState<string | null>(null);
   const [oneTimeCodeOrigin, setOneTimeCodeOrigin] = useState<OneTimeCodeOrigin>('recovery-reset');
@@ -107,8 +111,29 @@ export default function LockScreen() {
     setPassword('');
     setConfirmPassword('');
     setRecoveryCode('');
+    setLegacyToken(null);
     setRecoveredUsername(null);
     setMode('login');
+  }
+
+  async function startLegacyRecovery() {
+    resetMessages();
+    if (!nativeHostBridge.available) {
+      return setError('A recuperação de conta antiga sem código exige o aplicativo nativo CloudOS neste computador.');
+    }
+    setLoading(true);
+    try {
+      const result = await nativeHostBridge.requestLegacyRecoveryToken();
+      setLegacyToken(result.token);
+      setPassword('');
+      setConfirmPassword('');
+      setRecoveredUsername(null);
+      setMode('legacy-recovery');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'O host nativo não autorizou a recuperação local.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleLogin(event: React.FormEvent) {
@@ -153,6 +178,28 @@ export default function LockScreen() {
     setRecoveredUsername(result.username || useUserStore.getState().currentUser?.username || null);
     setOneTimeCodeOrigin('recovery-reset');
     setRecoverySaved(false);
+    setMode('recovery-code');
+  }
+
+  async function handleLegacyRecovery(event: React.FormEvent) {
+    event.preventDefault();
+    resetMessages();
+    if (!legacyToken) return setError('Token de posse local ausente ou expirado. Tente novamente.');
+    const validation = validateUsername(username, { required: false }) || validateDisplayName(displayName, { required: false }) || validateNewPassword(password, confirmPassword);
+    if (validation) return setError(validation);
+    setLoading(true);
+    const result = await recoverLegacyAccount(legacyToken, username.trim(), displayName.trim(), password, confirmPassword);
+    setLoading(false);
+    setPassword('');
+    setConfirmPassword('');
+    if (!result.success || !result.recoveryCode) {
+      return setError(result.message || 'Não foi possível recuperar a conta antiga.');
+    }
+    setRotatedCode(result.recoveryCode);
+    setRecoveredUsername(result.username || useUserStore.getState().currentUser?.username || null);
+    setOneTimeCodeOrigin('legacy-recovery');
+    setRecoverySaved(false);
+    setLegacyToken(null);
     setMode('recovery-code');
   }
 
@@ -202,8 +249,18 @@ export default function LockScreen() {
     void checkRecoveryStatus().finally(() => { recoveryCheckInFlight.current = false; });
   }
 
-  const title = mode === 'recovery' ? 'Recuperar conta' : mode === 'recovery-code' ? 'Novo código de recuperação' : 'Bem-vindo ao CloudOS';
-  const subtitle = mode === 'login' ? 'Entre com sua conta local' : mode === 'recovery' ? 'Redefina a conta com segurança' : 'Salve antes de continuar';
+  const title = mode === 'recovery'
+    ? 'Recuperar conta'
+    : mode === 'legacy-recovery'
+      ? 'Recuperar conta antiga'
+      : mode === 'recovery-code'
+        ? 'Novo código de recuperação'
+        : 'Bem-vindo ao CloudOS';
+  const subtitle = mode === 'login'
+    ? 'Entre com sua conta local'
+    : mode === 'recovery' || mode === 'legacy-recovery'
+      ? 'Redefina a conta com segurança'
+      : 'Salve antes de continuar';
 
   return (
     <div className={`cloudos-lock-screen ${isUnlocking ? 'unlocking' : ''}`} onClick={() => !showPanel && setShowPanel(true)}>
@@ -231,7 +288,21 @@ export default function LockScreen() {
             >
               {recoveryAvailable === null && !recoveryStatusMessage ? 'Verificando recuperação…' : 'Esqueci minha conta ou senha'}
             </button>
-            {recoveryAvailable === false && <div className="lock-recovery-unavailable" role="status">Esta conta antiga ainda não possui um código. Entre uma vez com a senha e salve o código que será mostrado antes de acessar o desktop.</div>}
+            {recoveryAvailable === false && !legacyAdminAvailable && <div className="lock-recovery-unavailable" role="status">Esta conta antiga ainda não possui um código. Entre uma vez com a senha e salve o código que será mostrado antes de acessar o desktop.</div>}
+            {recoveryAvailable === false && legacyAdminAvailable && (
+              nativeHostBridge.available ? (
+                <button
+                  type="button"
+                  className="btn-recovery-link"
+                  onClick={startLegacyRecovery}
+                  disabled={loading}
+                >
+                  Recuperar conta antiga neste computador
+                </button>
+              ) : (
+                <div className="lock-recovery-unavailable" role="status">Esta conta antiga ainda não possui um código. Abra o aplicativo nativo do CloudOS neste computador para recuperá-la.</div>
+              )
+            )}
             {recoveryStatusMessage && <div className="lock-recovery-unavailable error" role="alert"><span>Não foi possível verificar se a recuperação está disponível.</span><button type="button" onClick={refreshRecoveryStatus}>Tentar novamente</button></div>}
           </form>}
 
@@ -247,8 +318,19 @@ export default function LockScreen() {
             <button type="button" className="btn-recovery-link" onClick={switchToLogin}>Voltar para entrar</button>
           </form>}
 
+          {setupStatus === 'complete' && mode === 'legacy-recovery' && <form onSubmit={handleLegacyRecovery} className="card-form recovery-form" noValidate>
+            <p className="recovery-explanation">Posse local confirmada pelo aplicativo nativo. Defina uma nova senha para sua conta e o primeiro código de recuperação será gerado agora.</p>
+            <FormField id="legacy-username" label="Novo nome de usuário (opcional)" value={username} onChange={setUsername} autoComplete="username" />
+            <FormField id="legacy-display-name" label="Nome de exibição (opcional)" value={displayName} onChange={setDisplayName} autoComplete="name" />
+            <div className="recovery-password-grid"><FormField id="legacy-password" label="Nova senha" type="password" value={password} onChange={setPassword} autoComplete="new-password" /><FormField id="legacy-confirm" label="Confirmar senha" type="password" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" /></div>
+            <small className="recovery-password-hint">Use de 10 a 128 caracteres. Uma frase-senha longa também é aceita.</small>
+            {error && <Alert tone="error">{error}</Alert>}
+            <button type="submit" className="btn-primary-gradient" disabled={loading}>{loading ? 'Recuperando…' : 'Definir nova senha e recuperar'}</button>
+            <button type="button" className="btn-recovery-link" onClick={switchToLogin}>Voltar para entrar</button>
+          </form>}
+
           {mode === 'recovery-code' && <div className="recovery-result">
-            <p>{oneTimeCodeOrigin === 'legacy-login' ? 'A recuperação desta conta antiga foi ativada. Este código será mostrado somente agora.' : 'O código antigo foi invalidado. Este novo código será mostrado somente agora.'}</p>
+            <p>{oneTimeCodeOrigin === 'legacy-login' || oneTimeCodeOrigin === 'legacy-recovery' ? 'A recuperação desta conta antiga foi ativada. Este código será mostrado somente agora.' : 'O código antigo foi invalidado. Este novo código será mostrado somente agora.'}</p>
             <div className="lock-recovery-code"><code>{rotatedCode}</code><button type="button" onClick={copyRotatedCode}>{copiedCode ? 'Copiado!' : 'Copiar'}</button></div>
             <label><input type="checkbox" checked={recoverySaved} onChange={(event) => setRecoverySaved(event.target.checked)} /><span><strong>Confirmei que salvei o novo código</strong><small>Guarde-o fora deste computador.</small></span></label>
             {error && <Alert tone="error">{error}</Alert>}

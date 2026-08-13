@@ -1,4 +1,5 @@
 export const ACCOUNT_RECOVERY_ENDPOINT = '/api/auth/recovery/reset';
+export const ACCOUNT_LEGACY_RECOVERY_ENDPOINT = '/api/auth/legacy-recovery/reset';
 
 export function validateUsername(value, { required = true } = {}) {
   const username = typeof value === 'string' ? value.trim() : '';
@@ -72,6 +73,16 @@ export function sanitizePersistedProfile(value) {
 export function recoveryRequestBody({ recoveryCode, username, displayName, password, confirmPassword }) {
   return {
     recoveryCode: String(recoveryCode || '').trim(),
+    ...(String(username || '').trim() ? { newUsername: String(username).trim() } : {}),
+    ...(String(displayName || '').trim() ? { displayName: String(displayName).trim() } : {}),
+    password,
+    confirmPassword
+  };
+}
+
+export function legacyRecoveryRequestBody({ legacyToken, username, displayName, password, confirmPassword }) {
+  return {
+    legacyToken: String(legacyToken || '').trim(),
     ...(String(username || '').trim() ? { newUsername: String(username).trim() } : {}),
     ...(String(displayName || '').trim() ? { displayName: String(displayName).trim() } : {}),
     password,
