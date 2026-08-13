@@ -210,18 +210,88 @@ export function createInstallArgs(name) {
   return ['--install', '--distribution', norm, '--no-launch'];
 }
 
-export function launchDetached(executable, args, options = {}) {
-  const child = spawn(executable, args, {
-    cwd: options.cwd,
-    env: options.env || safeChildEnvironment(),
-    detached: true,
-    shell: false,
-    stdio: 'ignore',
-    windowsHide: false
-  });
-  child.unref();
-  return child.pid;
+function launchFailureReason(cause) {
+  if (cause?.code === 'ENOENT') return 'EXECUTABLE_NOT_FOUND';
+  if (cause?.code === 'EACCES' || cause?.code === 'EPERM') return 'ACCESS_DENIED';
+  return 'SPAWN_FAILED';
 }
+
+function createLaunchError(cause) {
+  return Object.assign(new Error('Não foi possível iniciar o processo solicitado.'), {
+    code: 'PROCESS_LAUNCH_FAILED',
+    reason: launchFailureReason(cause)
+  });
+}
+
+export function createDetachedLauncher(spawnProcess = spawn) {
+  if (typeof spawnProcess !== 'function') throw new TypeError('spawnProcess precisa ser uma função.');
+
+  // Confirma apenas que o SO criou um processo com PID; não comprova readiness nem janela no Hub.
+  return function launchProcessDetached(executable, args, options = {}) {
+    return new Promise((resolve, reject) => {
+      let child;
+      let spawned = false;
+      let settled = false;
+
+      const rejectBeforeSpawn = (cause) => {
+        if (spawned || settled) return;
+        settled = true;
+        reject(createLaunchError(cause));
+      };
+
+      try {
+        child = spawnProcess(executable, args, {
+          cwd: options.cwd,
+          env: options.env || safeChildEnvironment(),
+          detached: true,
+          shell: false,
+          stdio: 'ignore',
+          windowsHide: false
+        });
+      } catch (cause) {
+        rejectBeforeSpawn(cause);
+        return;
+      }
+
+      if (!child || typeof child.on !== 'function' || typeof child.once !== 'function') {
+        rejectBeforeSpawn();
+        return;
+      }
+
+      const onSpawn = () => {
+        if (settled) return;
+        spawned = true;
+
+        if (!Number.isSafeInteger(child.pid) || child.pid <= 0 || typeof child.unref !== 'function') {
+          settled = true;
+          reject(createLaunchError());
+          return;
+        }
+
+        try {
+          child.unref();
+        } catch (cause) {
+          settled = true;
+          reject(createLaunchError(cause));
+          return;
+        }
+
+        settled = true;
+        resolve(child.pid);
+      };
+
+      // O listener permanece após o spawn para que erros tardios nunca sejam eventos não tratados.
+      try {
+        child.on('error', rejectBeforeSpawn);
+        child.once('spawn', onSpawn);
+      } catch (cause) {
+        rejectBeforeSpawn(cause);
+      }
+    });
+  };
+}
+
+export const launchDetached = createDetachedLauncher();
 
 export async function startDistribution(name) {
   if (!await validateInstalledAsync(name)) throw Object.assign(new Error('Distribuição não instalada.'), { code: 'DISTRO_NOT_INSTALLED' });

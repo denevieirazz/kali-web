@@ -254,14 +254,14 @@ export async function launchCatalogApp(id) {
 
   let pid;
   if (app.kind === 'windows-start-app') {
-    pid = launchDetached(EXPLORER_EXE, [`shell:AppsFolder\\${app.appUserModelId}`]);
+    pid = await launchDetached(EXPLORER_EXE, [`shell:AppsFolder\\${app.appUserModelId}`]);
   } else if (app.kind === 'windows-shortcut') {
     pid = await launchWindowsShortcut(app);
   } else if (app.kind === 'windows-executable') {
-    pid = launchDetached(app.executable, app.args || []);
+    pid = await launchDetached(app.executable, app.args || []);
   } else if (app.kind === 'wsl-desktop') {
     const fixedLauncher = 'if command -v gtk-launch >/dev/null 2>&1; then exec gtk-launch "$1"; elif command -v gio >/dev/null 2>&1; then exec gio launch "$2"; else echo "gtk-launch ou gio não encontrado" >&2; exit 127; fi';
-    pid = launchDetached(WSL_EXE, [
+    pid = await launchDetached(WSL_EXE, [
       '--distribution', app.distribution, '--exec', '/bin/sh', '-lc',
       fixedLauncher, 'cloudos-launch', app.desktopId, app.desktopPath
     ]);
