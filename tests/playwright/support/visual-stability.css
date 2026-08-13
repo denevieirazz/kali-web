@@ -1,0 +1,12 @@
+*, *::before, *::after {
+  animation: none !important;
+  transition: none !important;
+  caret-color: transparent !important;
+}
+
+.taskbar-clock .clock-time,
+.taskbar-clock .clock-date,
+.lock-time,
+.lock-date {
+  visibility: hidden !important;
+}
