@@ -20,6 +20,8 @@ public sealed class BrowserManager : IDisposable
     private CoreWebView2Environment? _environment;
     private BrowserWindow? _window;
     private Task? _windowInitializationTask;
+    private DispatcherOperation? _initializationDispatchOperation;
+    private string? _queuedInitialUrl;
     private bool _shutdownRequested;
     private bool _disposed;
 
@@ -65,7 +67,7 @@ public sealed class BrowserManager : IDisposable
             if (_window is not null)
             {
                 RestoreAndFocus(_window);
-                _window.RequestOpen(initialUrl);
+                QueueOrForwardNavigation(_window, initialUrl);
                 return BrowserOpenResult.Success(reused: true, windowVisible: _window.IsVisible);
             }
 
@@ -89,12 +91,14 @@ public sealed class BrowserManager : IDisposable
                     throw new InvalidOperationException("BROWSER_WINDOW_NOT_VISIBLE");
 
                 _diagnostics("window_shown", "visible=true");
-                _windowInitializationTask = ObserveInitializationAsync(window, initialUrl);
+                _queuedInitialUrl = initialUrl;
+                ScheduleInitialization(window);
                 return BrowserOpenResult.Success(reused: false, windowVisible: true);
             }
             catch (Exception error) when (error is not OutOfMemoryException)
             {
                 _diagnostics("window_create_failed", $"type={error.GetType().Name}");
+                CancelQueuedInitialization();
                 if (window is not null)
                 {
                     window.Closed -= OnWindowClosed;
@@ -118,6 +122,45 @@ public sealed class BrowserManager : IDisposable
         {
             _openGate.Release();
         }
+    }
+
+    private void QueueOrForwardNavigation(BrowserWindow window, string? initialUrl)
+    {
+        if (_initializationDispatchOperation is { Status: DispatcherOperationStatus.Pending })
+        {
+            if (!string.IsNullOrWhiteSpace(initialUrl)) _queuedInitialUrl = initialUrl;
+            return;
+        }
+
+        window.RequestOpen(initialUrl);
+    }
+
+    private void ScheduleInitialization(BrowserWindow window)
+    {
+        CancelQueuedInitialization();
+        _initializationDispatchOperation = _dispatcher.BeginInvoke(
+            DispatcherPriority.Background,
+            new Action(() =>
+            {
+                _initializationDispatchOperation = null;
+                if (_shutdownRequested || _disposed || !ReferenceEquals(_window, window) || window.IsClosing)
+                {
+                    _queuedInitialUrl = null;
+                    return;
+                }
+
+                var initialUrl = _queuedInitialUrl;
+                _queuedInitialUrl = null;
+                _windowInitializationTask = ObserveInitializationAsync(window, initialUrl);
+            }));
+    }
+
+    private void CancelQueuedInitialization()
+    {
+        var operation = _initializationDispatchOperation;
+        _initializationDispatchOperation = null;
+        _queuedInitialUrl = null;
+        if (operation is { Status: DispatcherOperationStatus.Pending }) operation.Abort();
     }
 
     private async Task ObserveInitializationAsync(BrowserWindow window, string? initialUrl)
@@ -200,6 +243,7 @@ public sealed class BrowserManager : IDisposable
         }
 
         _shutdownRequested = true;
+        CancelQueuedInitialization();
         CloseWindowCore();
     }
 
@@ -207,6 +251,7 @@ public sealed class BrowserManager : IDisposable
     {
         var window = _window;
         if (window is null) return;
+        CancelQueuedInitialization();
         window.Closed -= OnWindowClosed;
         _window = null;
         window.CloseForHostShutdown();
@@ -215,7 +260,11 @@ public sealed class BrowserManager : IDisposable
     private void OnWindowClosed(object? sender, EventArgs e)
     {
         if (sender is BrowserWindow window) window.Closed -= OnWindowClosed;
-        if (ReferenceEquals(_window, sender)) _window = null;
+        if (ReferenceEquals(_window, sender))
+        {
+            CancelQueuedInitialization();
+            _window = null;
+        }
     }
 
     private static string FriendlyWindowCreationError(Exception error) => error switch
@@ -244,6 +293,7 @@ public sealed class BrowserManager : IDisposable
         }
 
         _shutdownRequested = true;
+        CancelQueuedInitialization();
         CloseWindowCore();
         _disposed = true;
     }
