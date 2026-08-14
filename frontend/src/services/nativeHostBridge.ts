@@ -6,6 +6,7 @@ type NativeRequestMethod =
   | 'host.setFullscreen'
   | 'host.requestClose'
   | 'host.requestLegacyRecoveryToken'
+  | 'browser.open'
   | 'native.launchApp'
   | 'native.sessions.list'
   | 'native.session.attach'
@@ -109,6 +110,12 @@ class NativeHostBridge {
     return this.request<{ token: string; expiresIn: number }>('host.requestLegacyRecoveryToken', {});
   }
 
+  async openBrowser(url?: string) {
+    if (!this.available) throw new Error('O Navegador CloudOS requer o Host nativo.');
+    await this.connect();
+    return this.request<{ opened: boolean; reused: boolean }>('browser.open', url ? { url } : {}, 30_000);
+  }
+
   async launchApp(appId: string) {
     const token = getStoredToken();
     if (!token) throw new Error('Entre no CloudOS para abrir aplicativos nativos.');
@@ -135,31 +142,15 @@ class NativeHostBridge {
   }
 
   attachSession(sessionId: string, bounds: NativeViewportBounds) {
-    return this.request<{
-      sessionId: string;
-      accepted: boolean;
-      contained?: boolean;
-      containmentMode?: NativeContainmentMode;
-    }>('native.session.attach', { sessionId, bounds });
+    return this.request<{ sessionId: string; accepted: boolean; contained?: boolean; containmentMode?: NativeContainmentMode }>('native.session.attach', { sessionId, bounds });
   }
 
   layoutSession(sessionId: string, bounds: NativeViewportBounds, visible: boolean) {
-    return this.request<{
-      sessionId: string;
-      accepted: boolean;
-      contained?: boolean;
-      containmentMode?: NativeContainmentMode;
-      visible?: boolean;
-    }>('native.session.layout', { sessionId, bounds, visible });
+    return this.request<{ sessionId: string; accepted: boolean; contained?: boolean; containmentMode?: NativeContainmentMode; visible?: boolean }>('native.session.layout', { sessionId, bounds, visible });
   }
 
   detachSession(sessionId: string) {
-    return this.request<{
-      sessionId: string;
-      accepted: boolean;
-      contained?: boolean;
-      containmentMode?: NativeContainmentMode;
-    }>('native.session.detach', { sessionId });
+    return this.request<{ sessionId: string; accepted: boolean; contained?: boolean; containmentMode?: NativeContainmentMode }>('native.session.detach', { sessionId });
   }
 
   onSessionsChanged(listener: (sessions: NativeSession[]) => void) {
@@ -177,14 +168,7 @@ class NativeHostBridge {
         reject(new Error('A operação nativa excedeu o tempo limite.'));
       }, timeoutMs);
       this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
-      this.transport!.postMessage({
-        v: 1,
-        id,
-        type: 'request',
-        method,
-        nonce: window.__cloudosNativeNonce,
-        params
-      });
+      this.transport!.postMessage({ v: 1, id, type: 'request', method, nonce: window.__cloudosNativeNonce, params });
     });
   }
 
