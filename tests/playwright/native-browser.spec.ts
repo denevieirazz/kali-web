@@ -97,8 +97,11 @@ test.describe('Navegador CloudOS — WebView2 real', () => {
     let teardownError: Error | undefined;
     try {
       if (browser?.isConnected()) {
-        try { await browser.close(); }
-        catch (error) { record(`CDP close failed ${error instanceof Error ? error.name : 'Error'}`); }
+        try {
+          await browser.close();
+        } catch (error) {
+          record(`CDP close failed ${error instanceof Error ? error.name : 'Error'}`);
+        }
       }
       await terminateOwnedHost();
       if (testServer) await testServer.close();
@@ -152,12 +155,12 @@ test.describe('Navegador CloudOS — WebView2 real', () => {
   test('redirect e fetch não alcançam origens CloudOS internas; websocket externo é rejeitado', async () => {
     const current = mustPage();
     await current.goto(`${testServer.origin}/probe`);
-    await current.goto(`${testServer.origin}/redirect-shell`).catch(() => undefined);
+    await navigateExpectingBlock(current, `${testServer.origin}/redirect-shell`, 'redirect shell');
     expect(current.url()).not.toContain('cloudos.local');
     record('redirect to shell blocked');
 
     const httpBeforeRedirect = testServer.getBackendHttpHits();
-    await current.goto(`${testServer.origin}/redirect-backend`).catch(() => undefined);
+    await navigateExpectingBlock(current, `${testServer.origin}/redirect-backend`, 'redirect backend');
     expect(testServer.getBackendHttpHits()).toBe(httpBeforeRedirect);
     record('redirect to backend blocked before request');
 
@@ -191,9 +194,9 @@ test.describe('Navegador CloudOS — WebView2 real', () => {
   test('file e CloudOS shell permanecem bloqueados por navegação', async () => {
     const current = mustPage();
     await current.goto(`${testServer.origin}/probe`);
-    await current.goto('file:///C:/Windows/win.ini').catch(() => undefined);
+    await navigateExpectingBlock(current, 'file:///C:/Windows/win.ini', 'file navigation');
     expect(current.url()).not.toMatch(/^file:/i);
-    await current.goto('https://cloudos.local/').catch(() => undefined);
+    await navigateExpectingBlock(current, 'https://cloudos.local/', 'shell navigation');
     expect(current.url()).not.toContain('cloudos.local');
     record('file and shell top-level blocked');
   });
@@ -220,16 +223,18 @@ test.describe('Navegador CloudOS — WebView2 real', () => {
     await current.goto(`${testServer.origin}/probe`);
     const logicalUrl = current.url();
     const session = await mustContext().newCDPSession(current);
-    await session.send('Page.crash').catch(() => undefined);
-    record('first renderer crash requested');
+    await requestRendererCrash(session, 'first renderer crash');
 
     await expect.poll(() => mustContext().pages().filter(candidate => !candidate.isClosed() && candidate.url() === logicalUrl).length).toBeGreaterThanOrEqual(1);
     const replacement = mustContext().pages().find(candidate => !candidate.isClosed() && candidate.url() === logicalUrl);
     if (!replacement) throw new Error('A primeira recuperação do renderer não criou uma aba utilizável.');
-    await replacement.waitForLoadState('domcontentloaded').catch(() => undefined);
+    try {
+      await replacement.waitForLoadState('domcontentloaded');
+    } catch (error) {
+      record(`replacement load state unavailable ${error instanceof Error ? error.name : 'Error'}`);
+    }
     const secondSession = await mustContext().newCDPSession(replacement);
-    await secondSession.send('Page.crash').catch(() => undefined);
-    record('second renderer crash requested');
+    await requestRendererCrash(secondSession, 'second renderer crash');
 
     await expect.poll(async () => (await readStatus()).activeErrorCode).toBe('RENDERER_CRASHED');
     record('crash loop stopped');
@@ -261,6 +266,24 @@ test.describe('Navegador CloudOS — WebView2 real', () => {
   function mustContext(): BrowserContext {
     if (!context) throw new Error('Contexto WebView2 indisponível.');
     return context;
+  }
+
+  async function navigateExpectingBlock(target: Page, url: string, label: string) {
+    try {
+      await target.goto(url);
+      record(`${label} returned without Playwright exception`);
+    } catch (error) {
+      record(`${label} rejected ${error instanceof Error ? error.name : 'Error'}`);
+    }
+  }
+
+  async function requestRendererCrash(session: Awaited<ReturnType<BrowserContext['newCDPSession']>>, label: string) {
+    try {
+      await session.send('Page.crash');
+      record(`${label} command completed`);
+    } catch (error) {
+      record(`${label} disconnected ${error instanceof Error ? error.name : 'Error'}`);
+    }
   }
 
   async function sendControl(command: string) {
@@ -305,18 +328,26 @@ test.describe('Navegador CloudOS — WebView2 real', () => {
     } catch (error) {
       if (host.exitCode === null)
         throw new Error(`Falha ao encerrar PID de teste ${host.pid}: ${error instanceof Error ? error.message : String(error)}`);
+      record(`taskkill raced with normal exit ${error instanceof Error ? error.name : 'Error'}`);
     }
     await waitForHostExit(10_000);
   }
 
   async function removeTempRoot() {
     if (!tempRoot) return;
+    let lastError: unknown;
     for (let attempt = 0; attempt < 8; attempt++) {
-      await rm(tempRoot, { recursive: true, force: true }).catch(() => undefined);
+      try {
+        await rm(tempRoot, { recursive: true, force: true });
+      } catch (error) {
+        lastError = error;
+        record(`temp cleanup attempt ${attempt + 1} failed ${error instanceof Error ? error.name : 'Error'}`);
+      }
       if (!existsSync(tempRoot)) return;
       await delay(250 * (attempt + 1));
     }
-    throw new Error('UDF temporário do Browser permaneceu bloqueado após o encerramento do TestHost.');
+    const suffix = lastError instanceof Error ? ` (${lastError.name})` : '';
+    throw new Error(`UDF temporário do Browser permaneceu bloqueado após o encerramento do TestHost${suffix}.`);
   }
 
   function sanitize(value: string): string {
@@ -329,8 +360,11 @@ test.describe('Navegador CloudOS — WebView2 real', () => {
   async function attachDiagnostics(testInfo: TestInfo, reason: string) {
     const sections = [`reason=${sanitize(reason)}`, ...traceSteps.map(sanitize)];
     if (logFile && existsSync(logFile)) {
-      try { sections.push('--- testhost ---', sanitize(await readFile(logFile, 'utf8'))); }
-      catch (error) { sections.push(`testhost-read-error=${error instanceof Error ? error.name : 'Error'}`); }
+      try {
+        sections.push('--- testhost ---', sanitize(await readFile(logFile, 'utf8')));
+      } catch (error) {
+        sections.push(`testhost-read-error=${error instanceof Error ? error.name : 'Error'}`);
+      }
     }
     if (stdout) sections.push('--- stdout ---', sanitize(stdout));
     if (stderr) sections.push('--- stderr ---', sanitize(stderr));
