@@ -37,6 +37,7 @@ public partial class BrowserWindow : Window
     private BrowserTab? _activeTab;
     private CancellationTokenSource? _initializationCancellation;
     private Task? _initializationTask;
+    private Task? _initializationCleanupTask;
     private string? _pendingOpenUrl;
     private string? _initializationErrorCode;
     private bool _webViewReady;
@@ -389,7 +390,7 @@ public partial class BrowserWindow : Window
             var popupTab = await CreateTabAsync(activate: false, popupTarget: true);
             if (popupTab is not null)
             {
-                Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () =>
+                _ = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () =>
                 {
                     if (!_closing && _tabs.Contains(popupTab)) ActivateTab(popupTab);
                 });
@@ -687,7 +688,7 @@ public partial class BrowserWindow : Window
     private void Downloads_StatusChanged(object? sender, BrowserDownloadStatus status)
     {
         if (_closing) return;
-        Dispatcher.BeginInvoke(() =>
+        _ = Dispatcher.BeginInvoke(() =>
         {
             if (_closing) return;
             var progress = status.TotalBytes is > 0
@@ -1082,7 +1083,7 @@ public partial class BrowserWindow : Window
         }
 
         if (_initializationTask is { IsCompleted: false } task)
-            _ = DisposeInitializationCancellationAsync(task, cancellation);
+            _initializationCleanupTask = DisposeInitializationCancellationAsync(task, cancellation);
         else
             cancellation.Dispose();
     }
