@@ -22,7 +22,9 @@ public sealed class BrowserTab : IDisposable
         Window promptOwner,
         BrowserPermissionController permissions,
         BrowserDownloadManager downloads,
-        Guid? logicalId = null)
+        Guid? logicalId = null,
+        bool isNewTabPage = false,
+        bool isPinned = false)
     {
         _environment = environment;
         _policy = policy;
@@ -32,6 +34,8 @@ public sealed class BrowserTab : IDisposable
         _downloads = downloads;
         Id = Guid.NewGuid();
         LogicalId = logicalId ?? Id;
+        IsNewTabPage = isNewTabPage;
+        IsPinned = isPinned;
         View = new WebView2CompositionControl();
     }
 
@@ -41,13 +45,18 @@ public sealed class BrowserTab : IDisposable
     public string Title { get; private set; } = "Nova aba";
     public Uri? CurrentUri { get; private set; }
     public bool IsLoading { get; private set; }
+    public bool IsNewTabPage { get; private set; }
+    public bool IsPinned { get; private set; }
     public bool CanGoBack => View.CoreWebView2?.CanGoBack == true;
     public bool CanGoForward => View.CoreWebView2?.CanGoForward == true;
+    public bool IsMuted => View.CoreWebView2?.IsMuted == true;
+    public bool IsPlayingAudio => View.CoreWebView2?.IsDocumentPlayingAudio == true;
+    public double ZoomFactor => View.ZoomFactor;
     public BrowserError? Error { get; private set; }
 
     public event EventHandler? StateChanged;
     public event EventHandler? RendererFailed;
-    public Func<string?, Task<CoreWebView2?>>? NewWindowFactory { get; set; }
+    public Func<Task<CoreWebView2?>>? NewWindowFactory { get; set; }
 
     public async Task InitializeAsync()
     {
@@ -71,6 +80,8 @@ public sealed class BrowserTab : IDisposable
         core.SourceChanged += OnSourceChanged;
         core.DocumentTitleChanged += OnDocumentTitleChanged;
         core.HistoryChanged += OnHistoryChanged;
+        core.IsDocumentPlayingAudioChanged += OnAudioStateChanged;
+        core.IsMutedChanged += OnAudioStateChanged;
         core.NewWindowRequested += OnNewWindowRequested;
         core.LaunchingExternalUriScheme += OnLaunchingExternalUriScheme;
         core.ServerCertificateErrorDetected += OnServerCertificateErrorDetected;
@@ -96,19 +107,68 @@ public sealed class BrowserTab : IDisposable
             return decision;
         }
 
+        IsNewTabPage = false;
         ClearError();
         View.CoreWebView2.Navigate(decision.Uri.AbsoluteUri);
         return decision;
     }
 
+    public void ShowNewTabPage()
+    {
+        ThrowIfDisposed();
+        IsNewTabPage = true;
+        Error = null;
+        Title = "Nova aba";
+        if (View.CoreWebView2 is not null &&
+            !View.CoreWebView2.Source.Equals("about:blank", StringComparison.OrdinalIgnoreCase))
+            View.CoreWebView2.Navigate("about:blank");
+        StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void SetPinned(bool pinned)
+    {
+        if (_disposed || IsPinned == pinned) return;
+        IsPinned = pinned;
+        StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void ToggleMuted()
+    {
+        if (_disposed || View.CoreWebView2 is null) return;
+        View.CoreWebView2.IsMuted = !View.CoreWebView2.IsMuted;
+    }
+
+    public void SetZoom(double factor)
+    {
+        if (_disposed) return;
+        View.ZoomFactor = Math.Clamp(factor, 0.25, 5.0);
+        StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void AdjustZoom(double delta) => SetZoom(ZoomFactor + delta);
+    public void ResetZoom() => SetZoom(1.0);
+
+    public void Print()
+    {
+        if (_disposed || View.CoreWebView2 is null || IsNewTabPage) return;
+        View.CoreWebView2.ShowPrintUI(CoreWebView2PrintDialogKind.System);
+    }
+
+    public async Task<CoreWebView2SaveAsUIResult?> SavePageAsync()
+    {
+        if (_disposed || View.CoreWebView2 is null || IsNewTabPage) return null;
+        return await View.CoreWebView2.ShowSaveAsUIAsync();
+    }
+
     public void GoBack() { if (!_disposed && CanGoBack) View.CoreWebView2.GoBack(); }
     public void GoForward() { if (!_disposed && CanGoForward) View.CoreWebView2.GoForward(); }
     public void Stop() { if (!_disposed && IsLoading) View.CoreWebView2.Stop(); }
-    public void Reload() { if (!_disposed && View.CoreWebView2 is not null) View.CoreWebView2.Reload(); }
+    public void Reload() { if (!_disposed && View.CoreWebView2 is not null && !IsNewTabPage) View.CoreWebView2.Reload(); }
 
     public void SetError(BrowserError error)
     {
         if (_disposed) return;
+        IsNewTabPage = false;
         Error = error;
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -138,6 +198,8 @@ public sealed class BrowserTab : IDisposable
                 e.Uri));
             return;
         }
+
+        if (!e.Uri.Equals("about:blank", StringComparison.OrdinalIgnoreCase)) IsNewTabPage = false;
         Error = null;
         IsLoading = true;
         StateChanged?.Invoke(this, EventArgs.Empty);
@@ -168,7 +230,7 @@ public sealed class BrowserTab : IDisposable
 
     private void OnDocumentTitleChanged(object? sender, object e)
     {
-        if (_disposed) return;
+        if (_disposed || IsNewTabPage) return;
         Title = string.IsNullOrWhiteSpace(View.CoreWebView2.DocumentTitle)
             ? CurrentUri?.Host ?? "Nova aba"
             : View.CoreWebView2.DocumentTitle;
@@ -176,6 +238,11 @@ public sealed class BrowserTab : IDisposable
     }
 
     private void OnHistoryChanged(object? sender, object e)
+    {
+        if (!_disposed) StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnAudioStateChanged(object? sender, object e)
     {
         if (!_disposed) StateChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -189,7 +256,7 @@ public sealed class BrowserTab : IDisposable
             if (_disposed) return;
             var decision = _policy.ValidateNavigation(e.Uri, allowAboutBlank: true);
             if (NewWindowFactory is null || !decision.Allowed) return;
-            var target = await NewWindowFactory(e.Uri);
+            var target = await NewWindowFactory();
             if (!_disposed && target is not null) e.NewWindow = target;
         }
         catch (Exception error) when (error is InvalidOperationException or ObjectDisposedException or OperationCanceledException)
@@ -319,6 +386,8 @@ public sealed class BrowserTab : IDisposable
             core.SourceChanged -= OnSourceChanged;
             core.DocumentTitleChanged -= OnDocumentTitleChanged;
             core.HistoryChanged -= OnHistoryChanged;
+            core.IsDocumentPlayingAudioChanged -= OnAudioStateChanged;
+            core.IsMutedChanged -= OnAudioStateChanged;
             core.NewWindowRequested -= OnNewWindowRequested;
             core.LaunchingExternalUriScheme -= OnLaunchingExternalUriScheme;
             core.ServerCertificateErrorDetected -= OnServerCertificateErrorDetected;
