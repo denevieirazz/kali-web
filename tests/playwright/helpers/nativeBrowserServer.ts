@@ -42,6 +42,8 @@ function closeServer(server: http.Server, sockets: Set<Socket>): Promise<void> {
 export async function startNativeBrowserServer() {
   let backendHttpHits = 0;
   let backendUpgradeHits = 0;
+  let startedDownloads = 0;
+  let abortedDownloads = 0;
   const backendSockets = new Set<Socket>();
   const backend = http.createServer((req, res) => {
     backendHttpHits++;
@@ -63,7 +65,8 @@ export async function startNativeBrowserServer() {
 
   const contentSockets = new Set<Socket>();
   const content = http.createServer((req, res) => {
-    const pathname = new URL(req.url || '/', 'http://127.0.0.1').pathname;
+    const requestUrl = new URL(req.url || '/', 'http://127.0.0.1');
+    const pathname = requestUrl.pathname;
     const html = (body: string, headers: Record<string, string> = {}) => {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', ...headers });
       res.end(`<!doctype html><meta charset="utf-8"><title>CloudOS Browser Test</title>${body}`);
@@ -89,6 +92,44 @@ export async function startNativeBrowserServer() {
         window.backendWsOrigin = ${JSON.stringify(backendWsOrigin)};
       </script><h1 id="network">network probe</h1>`);
     }
+    if (pathname === '/downloads') {
+      return html(`
+        <a id="download-one" href="/download-slow?name=one.bin">download one</a>
+        <a id="download-two" href="/download-slow?name=two.bin">download two</a>
+      `);
+    }
+    if (pathname === '/download-slow') {
+      startedDownloads++;
+      const requestedName = requestUrl.searchParams.get('name') || 'download.bin';
+      const safeName = requestedName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80) || 'download.bin';
+      const total = 32 * 1024 * 1024;
+      const chunk = Buffer.alloc(64 * 1024, 0x41);
+      let sent = 0;
+      let completed = false;
+      res.writeHead(200, {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': String(total),
+        'Content-Disposition': `attachment; filename="${safeName}"`,
+        'Cache-Control': 'no-store',
+      });
+      const timer = setInterval(() => {
+        if (res.destroyed || sent >= total) {
+          clearInterval(timer);
+          if (!res.destroyed && sent >= total) {
+            completed = true;
+            res.end();
+          }
+          return;
+        }
+        res.write(chunk);
+        sent += chunk.length;
+      }, 25);
+      res.once('close', () => {
+        clearInterval(timer);
+        if (!completed && sent < total) abortedDownloads++;
+      });
+      return;
+    }
     res.writeHead(404, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
     res.end('not found');
   });
@@ -106,6 +147,8 @@ export async function startNativeBrowserServer() {
     backendWsOrigin,
     getBackendHttpHits: () => backendHttpHits,
     getBackendUpgradeHits: () => backendUpgradeHits,
+    getStartedDownloads: () => startedDownloads,
+    getAbortedDownloads: () => abortedDownloads,
     close: async () => {
       await closeServer(content, contentSockets);
       await closeServer(backend, backendSockets);
