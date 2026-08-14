@@ -84,6 +84,7 @@ function Find-RuntimeManifest([int]$HostPid) {
             $manifest = Get-Content $file.FullName -Raw | ConvertFrom-Json
             if ([int]$manifest.parentPid -eq $HostPid) { return $manifest }
         } catch {
+            Write-Verbose "Manifest runtime ainda não pôde ser lido: $($_.Exception.GetType().Name)"
             continue
         }
     }
@@ -119,6 +120,31 @@ function Get-BrowserReadyCount {
         $count += @(Select-String -Path $file.FullName -Pattern ' webview_ready(?: |$)' -ErrorAction SilentlyContinue).Count
     }
     return $count
+}
+
+function Assert-BridgeReplyPrecedesInitialization {
+    $logRoot = Join-Path $cloudRoot 'logs'
+    $logPath = $null
+    Wait-Until {
+        $candidate = Get-ChildItem $logRoot -Filter 'browser-*.log' -File -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTimeUtc -Descending |
+            Select-Object -First 1
+        if ($null -eq $candidate) { return $false }
+        $script:browserLifecycleLog = $candidate.FullName
+        $text = Get-Content $candidate.FullName -Raw
+        return $text -match ' bridge_replied ok=true' -and $text -match ' webview_initialization_started(?: |$)'
+    } 10 'Lifecycle log não registrou resposta e início do WebView2.'
+    $logPath = $script:browserLifecycleLog
+    $lines = @(Get-Content $logPath)
+    $replyIndex = -1
+    $initializationIndex = -1
+    for ($index = 0; $index -lt $lines.Count; $index++) {
+        if ($replyIndex -lt 0 -and $lines[$index] -match ' bridge_replied ok=true') { $replyIndex = $index }
+        if ($initializationIndex -lt 0 -and $lines[$index] -match ' webview_initialization_started(?: |$)') { $initializationIndex = $index }
+    }
+    if ($replyIndex -lt 0 -or $initializationIndex -lt 0 -or $replyIndex -ge $initializationIndex) {
+        throw "browser.open não respondeu antes da inicialização WebView2. replyIndex=$replyIndex initIndex=$initializationIndex"
+    }
 }
 
 $debugPort = Get-FreePort
@@ -173,6 +199,7 @@ try {
     if (($reuseValues | Where-Object { $_ }).Count -ne 1 -or ($reuseValues | Where-Object { -not $_ }).Count -ne 1) {
         throw 'Duas chamadas concorrentes de browser.open não reutilizaram uma única BrowserWindow.'
     }
+    Assert-BridgeReplyPrecedesInitialization
 
     $firstBrowserHandle = [IntPtr]::Zero
     Wait-Until { $script:firstBrowserHandle = [CloudOSSmoke.WindowApi]::FindWindow($hostProcess.Id, 'Navegador CloudOS'); $script:firstBrowserHandle -ne [IntPtr]::Zero } 10 'BrowserWindow não apareceu após browser.open.'
