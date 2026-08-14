@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -68,13 +69,15 @@ public partial class BrowserWindow : Window
             return;
         }
 
-        if (_stateStore.RestoreLastSession && _stateStore.Session is { Tabs.Count: > 0 } session)
+        if (_stateStore.RestoreLastSession &&
+            _stateStore.Session is { } session &&
+            session.Tabs is { Count: > 0 } savedTabs)
         {
             var restored = new List<BrowserTab>();
-            foreach (var saved in session.Tabs.Take(MaxTabs))
+            foreach (var saved in savedTabs.Take(MaxTabs))
             {
-                var tab = await CreateTabAsync(saved.Url, activate: false, isPinned: saved.Pinned);
-                if (tab is not null) restored.Add(tab);
+                var restoredTab = await CreateTabAsync(saved.Url, activate: false, isPinned: saved.Pinned);
+                if (restoredTab is not null) restored.Add(restoredTab);
             }
             if (restored.Count > 0)
             {
@@ -83,8 +86,8 @@ public partial class BrowserWindow : Window
             }
         }
 
-        var tab = await CreateTabAsync(null, activate: true, isNewTabPage: true);
-        if (tab is null) throw new InvalidOperationException("Não foi possível criar a aba inicial do navegador.");
+        var initialTab = await CreateTabAsync(null, activate: true, isNewTabPage: true);
+        if (initialTab is null) throw new InvalidOperationException("Não foi possível criar a aba inicial do navegador.");
     }
 
     public Task NavigateActiveAsync(string raw)
