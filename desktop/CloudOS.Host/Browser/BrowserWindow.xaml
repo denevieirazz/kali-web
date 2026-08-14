@@ -1,0 +1,69 @@
+<Window x:Class="CloudOS.Host.Browser.BrowserWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Navegador CloudOS" Width="1180" Height="760" MinWidth="760" MinHeight="520"
+        WindowStartupLocation="CenterOwner" Background="{StaticResource CloudOsBackground}"
+        Closing="OnClosing">
+  <Grid Background="{StaticResource CloudOsBackground}">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="42" />
+      <RowDefinition Height="46" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="28" />
+    </Grid.RowDefinitions>
+
+    <DockPanel Grid.Row="0" LastChildFill="True" Background="#0D1525">
+      <Button DockPanel.Dock="Right" Width="42" Margin="4" Content="+" Click="NewTab_Click" ToolTip="Nova aba" />
+      <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+        <StackPanel x:Name="TabStrip" Orientation="Horizontal" Margin="6,5" />
+      </ScrollViewer>
+    </DockPanel>
+
+    <Grid Grid.Row="1" Margin="8,5">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="36" /><ColumnDefinition Width="36" /><ColumnDefinition Width="36" /><ColumnDefinition Width="36" />
+        <ColumnDefinition Width="*" /><ColumnDefinition Width="36" /><ColumnDefinition Width="36" /><ColumnDefinition Width="36" />
+      </Grid.ColumnDefinitions>
+      <Button x:Name="BackButton" Grid.Column="0" Content="←" Click="Back_Click" ToolTip="Voltar" />
+      <Button x:Name="ForwardButton" Grid.Column="1" Content="→" Click="Forward_Click" ToolTip="Avançar" />
+      <Button x:Name="ReloadStopButton" Grid.Column="2" Content="↻" Click="ReloadStop_Click" ToolTip="Recarregar" />
+      <Button Grid.Column="3" Content="⌂" Click="Home_Click" ToolTip="Início" />
+      <TextBox x:Name="AddressBox" Grid.Column="4" Margin="6,0" VerticalContentAlignment="Center"
+               KeyDown="AddressBox_KeyDown" GotKeyboardFocus="AddressBox_GotKeyboardFocus" />
+      <Button x:Name="FavoriteButton" Grid.Column="5" Content="☆" Click="Favorite_Click" ToolTip="Favoritar" />
+      <Button Grid.Column="6" Content="★" Click="Favorites_Click" ToolTip="Favoritos" />
+      <Button Grid.Column="7" Content="◴" Click="History_Click" ToolTip="Histórico" />
+    </Grid>
+
+    <Grid Grid.Row="2">
+      <Grid x:Name="WebViewHost" Background="#FFFFFF" />
+      <Border x:Name="ErrorPanel" Visibility="Collapsed" Background="#101827" Padding="32">
+        <StackPanel MaxWidth="620" HorizontalAlignment="Center" VerticalAlignment="Center">
+          <TextBlock Text="Não foi possível abrir esta página" Foreground="White" FontSize="24" FontWeight="SemiBold" HorizontalAlignment="Center" />
+          <TextBlock x:Name="ErrorCodeText" Margin="0,12,0,0" Foreground="#E9A0A0" FontFamily="Consolas" HorizontalAlignment="Center" />
+          <TextBlock x:Name="ErrorMessageText" Margin="0,12,0,18" Foreground="#BAC7DA" TextWrapping="Wrap" TextAlignment="Center" />
+          <WrapPanel HorizontalAlignment="Center">
+            <Button x:Name="RetryButton" Content="Recarregar" Padding="18,8" Margin="0,0,8,0" Click="Retry_Click" />
+            <Button Content="Voltar" Padding="18,8" Click="ErrorBack_Click" />
+          </WrapPanel>
+        </StackPanel>
+      </Border>
+
+      <Border x:Name="LibraryPanel" Visibility="Collapsed" Width="390" HorizontalAlignment="Right" Background="#F5111A2B" BorderBrush="#34507C" BorderThickness="1,0,0,0" Padding="12">
+        <Grid>
+          <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+          <DockPanel>
+            <TextBlock x:Name="LibraryTitle" Text="Favoritos" Foreground="White" FontSize="18" FontWeight="SemiBold" />
+            <Button DockPanel.Dock="Right" Content="×" Width="32" Click="CloseLibrary_Click" />
+          </DockPanel>
+          <ListBox x:Name="LibraryList" Grid.Row="1" Margin="0,10" MouseDoubleClick="LibraryList_DoubleClick" />
+          <Button x:Name="ClearHistoryButton" Grid.Row="2" Content="Limpar histórico" Visibility="Collapsed" Click="ClearHistory_Click" />
+        </Grid>
+      </Border>
+    </Grid>
+
+    <DockPanel Grid.Row="3" Background="#0D1525" LastChildFill="True">
+      <TextBlock x:Name="StatusText" Margin="10,5" Foreground="#8FA2BE" FontSize="11" Text="Pronto" />
+    </DockPanel>
+  </Grid>
+</Window>
