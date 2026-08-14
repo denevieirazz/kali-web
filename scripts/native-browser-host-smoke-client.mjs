@@ -37,6 +37,53 @@ try {
   }
   if (!page) throw new Error('Documento confiável do Shell não foi encontrado.');
 
+  if (action === 'open-via-start') {
+    const username = process.env.CLOUDOS_SMOKE_USERNAME;
+    const password = process.env.CLOUDOS_SMOKE_PASSWORD;
+    if (!username || !password) throw new Error('Credenciais efêmeras do smoke não foram fornecidas.');
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    const lock = page.locator('.cloudos-lock-screen');
+    await lock.waitFor({ state: 'visible', timeout: 30_000 });
+    const card = page.locator('.cloudos-glass-card');
+    if (!await card.isVisible()) await lock.click({ position: { x: 180, y: 180 } });
+    await card.waitFor({ state: 'visible', timeout: 5_000 });
+    await page.locator('#login-username').fill(username);
+    await page.locator('#login-password').fill(password);
+    await page.locator('button[type="submit"]').filter({ hasText: 'Entrar' }).click();
+    await page.locator('.desktop').waitFor({ state: 'visible', timeout: 20_000 });
+    await page.locator('.taskbar').waitFor({ state: 'visible', timeout: 10_000 });
+
+    await page.locator('button[title="Iniciar"]').click();
+    const startMenu = page.locator('.start-menu');
+    await startMenu.waitFor({ state: 'visible', timeout: 5_000 });
+    const search = page.locator('.start-search-input');
+    await search.fill('naveg');
+    const browserButton = page.locator('.start-app-btn').filter({ hasText: /Navegador|Browser/i }).first();
+    await browserButton.waitFor({ state: 'visible', timeout: 10_000 });
+    await browserButton.click();
+
+    const launcher = page.locator('.cloudos-browser-launcher');
+    await launcher.waitFor({ state: 'visible', timeout: 10_000 });
+    const launcherSeen = true;
+    try {
+      await launcher.waitFor({ state: 'detached', timeout: 15_000 });
+    } catch {
+      const code = await launcher.locator('.browser-launcher-error-code').textContent().catch(() => null);
+      const message = await launcher.locator('p').textContent().catch(() => null);
+      throw new Error(`Launcher permaneceu aberto. code=${code || 'none'} message=${message || 'none'}`);
+    }
+
+    process.stdout.write(JSON.stringify({
+      action,
+      desktopMounted: true,
+      launcherSeen,
+      launcherGone: true,
+    }));
+    process.exitCode = 0;
+    return;
+  }
+
   const result = await page.evaluate(async (requestedAction) => {
     const transport = window.chrome?.webview;
     const nonce = window.__cloudosNativeNonce;
@@ -54,7 +101,7 @@ try {
         window.clearTimeout(timer);
         transport.removeEventListener('message', onMessage);
         if (message.ok) resolve(message.result);
-        else reject(new Error(message.error?.code || 'NATIVE_REQUEST_FAILED'));
+        else reject(new Error(`${message.error?.code || 'NATIVE_REQUEST_FAILED'}:${message.error?.message || ''}`));
       }
       transport.addEventListener('message', onMessage);
       transport.postMessage({ v: 1, id, type: 'request', method, nonce, params });
@@ -67,6 +114,10 @@ try {
         request('browser.open', {}),
       ]);
       return { action: requestedAction, first, second };
+    }
+    if (requestedAction === 'open-once') {
+      const opened = await request('browser.open', {});
+      return { action: requestedAction, opened };
     }
     if (requestedAction === 'ping') {
       const host = await request('host.getState', {});
