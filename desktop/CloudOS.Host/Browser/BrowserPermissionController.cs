@@ -5,17 +5,30 @@ using Microsoft.Web.WebView2.Core;
 
 namespace CloudOS.Host.Browser;
 
-public sealed class BrowserPermissionController
+public sealed class BrowserPermissionController : IDisposable
 {
     private static readonly TimeSpan PromptTimeout = TimeSpan.FromSeconds(30);
+    private CancellationTokenSource _lifetime = new();
+    private bool _disposed;
 
     public static bool RequiresUserPrompt(CoreWebView2PermissionKind kind) =>
         BrowserSecurityPolicy.Permission(kind.ToString()) == BrowserPermissionDisposition.Prompt;
 
     public static bool IsDeniedByDefault(CoreWebView2PermissionKind kind) => !RequiresUserPrompt(kind);
 
-    public async Task HandleAsync(Window owner, CoreWebView2PermissionRequestedEventArgs args)
+    public async Task HandleAsync(
+        Window owner,
+        CoreWebView2PermissionRequestedEventArgs args,
+        Func<string?> currentSource)
     {
+        if (_disposed)
+        {
+            args.SavesInProfile = false;
+            args.State = CoreWebView2PermissionState.Deny;
+            args.Handled = true;
+            return;
+        }
+
         var deferral = args.GetDeferral();
         try
         {
@@ -27,6 +40,7 @@ public sealed class BrowserPermissionController
                 return;
             }
 
+            var requestedSource = args.Uri;
             var label = args.PermissionKind switch
             {
                 CoreWebView2PermissionKind.Camera => "sua câmera",
@@ -36,14 +50,57 @@ public sealed class BrowserPermissionController
                 CoreWebView2PermissionKind.MultipleAutomaticDownloads => "iniciar vários downloads automaticamente",
                 _ => "este recurso"
             };
-            var host = Uri.TryCreate(args.Uri, UriKind.Absolute, out var uri) ? uri.Host : args.Uri;
-            var allowed = await ShowTimedPromptAsync(owner, "Permissão do site", $"{host} deseja usar {label}.", "Permitir uma vez", "Bloquear", PromptTimeout);
-            args.State = allowed ? CoreWebView2PermissionState.Allow : CoreWebView2PermissionState.Deny;
+            var host = Uri.TryCreate(requestedSource, UriKind.Absolute, out var uri) ? uri.IdnHost : requestedSource;
+            var allowed = await ShowTimedPromptAsync(
+                owner,
+                "Permissão do site",
+                $"{host} deseja usar {label}.",
+                "Permitir uma vez",
+                "Bloquear",
+                PromptTimeout,
+                _lifetime.Token);
+
+            args.State = allowed && IsSameOrigin(requestedSource, currentSource())
+                ? CoreWebView2PermissionState.Allow
+                : CoreWebView2PermissionState.Deny;
         }
-        finally { deferral.Complete(); }
+        catch (OperationCanceledException)
+        {
+            args.State = CoreWebView2PermissionState.Deny;
+        }
+        finally
+        {
+            deferral.Complete();
+        }
     }
 
-    internal static Task<bool> ShowTimedPromptAsync(Window owner, string title, string message, string allowText, string denyText, TimeSpan timeout)
+    public static bool IsSameOrigin(string requestedSource, string? currentSource)
+    {
+        if (!Uri.TryCreate(requestedSource, UriKind.Absolute, out var requested) ||
+            !Uri.TryCreate(currentSource, UriKind.Absolute, out var current) ||
+            !string.IsNullOrEmpty(requested.UserInfo) ||
+            !string.IsNullOrEmpty(current.UserInfo))
+            return false;
+
+        return requested.Scheme.Equals(current.Scheme, StringComparison.OrdinalIgnoreCase) &&
+               requested.IdnHost.Equals(current.IdnHost, StringComparison.OrdinalIgnoreCase) &&
+               requested.Port == current.Port;
+    }
+
+    public void CancelAll()
+    {
+        if (_disposed || _lifetime.IsCancellationRequested) return;
+        _lifetime.Cancel();
+    }
+
+    internal static Task<bool> ShowTimedPromptAsync(
+        Window owner,
+        string title,
+        string message,
+        string allowText,
+        string denyText,
+        TimeSpan timeout,
+        CancellationToken cancellationToken = default)
     {
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var dialog = new Window
@@ -60,27 +117,65 @@ public sealed class BrowserPermissionController
         var grid = new Grid { Margin = new Thickness(22) };
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        grid.Children.Add(new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, FontSize = 15, Foreground = System.Windows.Media.Brushes.Black });
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 18, 0, 0) };
+        grid.Children.Add(new TextBlock
+        {
+            Text = message,
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 15,
+            Foreground = System.Windows.Media.Brushes.Black
+        });
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 18, 0, 0)
+        };
         Grid.SetRow(buttons, 1);
-        var deny = new Button { Content = denyText, MinWidth = 90, Padding = new Thickness(12, 7, 12, 7), Margin = new Thickness(0, 0, 8, 0) };
-        var allow = new Button { Content = allowText, MinWidth = 110, Padding = new Thickness(12, 7, 12, 7) };
-        buttons.Children.Add(deny); buttons.Children.Add(allow); grid.Children.Add(buttons);
+        var deny = new Button
+        {
+            Content = denyText,
+            MinWidth = 90,
+            Padding = new Thickness(12, 7, 12, 7),
+            Margin = new Thickness(0, 0, 8, 0)
+        };
+        var allow = new Button
+        {
+            Content = allowText,
+            MinWidth = 110,
+            Padding = new Thickness(12, 7, 12, 7)
+        };
+        buttons.Children.Add(deny);
+        buttons.Children.Add(allow);
+        grid.Children.Add(buttons);
         dialog.Content = grid;
 
         var timer = new DispatcherTimer { Interval = timeout };
+        CancellationTokenRegistration registration = default;
         void Complete(bool result)
         {
             if (!completion.TrySetResult(result)) return;
             timer.Stop();
-            dialog.Close();
+            registration.Dispose();
+            if (dialog.IsVisible) dialog.Close();
         }
+
         deny.Click += (_, _) => Complete(false);
         allow.Click += (_, _) => Complete(true);
-        dialog.Closed += (_, _) => completion.TrySetResult(false);
+        dialog.Closed += (_, _) => Complete(false);
         timer.Tick += (_, _) => Complete(false);
+        registration = cancellationToken.Register(() =>
+            owner.Dispatcher.BeginInvoke(() => Complete(false), DispatcherPriority.Send));
         timer.Start();
         dialog.Show();
+        if (cancellationToken.IsCancellationRequested) Complete(false);
         return completion.Task;
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        if (!_lifetime.IsCancellationRequested) _lifetime.Cancel();
+        _lifetime.Dispose();
     }
 }
