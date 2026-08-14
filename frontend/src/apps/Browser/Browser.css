@@ -51,6 +51,33 @@
   line-height: 1.45;
 }
 
+.browser-launcher-error-code {
+  display: inline-block;
+  margin: 0 0 12px;
+  padding: 5px 9px;
+  border-radius: 7px;
+  background: rgba(231, 112, 112, 0.12);
+  color: #f0a8a8;
+  font-size: 12px;
+}
+
+.browser-launcher-retry {
+  margin-top: 20px;
+  padding: 10px 18px;
+  border: 1px solid rgba(143, 181, 237, 0.45);
+  border-radius: 9px;
+  background: rgba(91, 146, 238, 0.18);
+  color: #eef5ff;
+  cursor: pointer;
+  font: inherit;
+}
+
+.browser-launcher-retry:hover,
+.browser-launcher-retry:focus-visible {
+  background: rgba(91, 146, 238, 0.3);
+  outline: none;
+}
+
 .browser-launcher-spinner {
   width: 26px;
   height: 26px;

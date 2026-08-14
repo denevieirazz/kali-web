@@ -18,6 +18,24 @@ type NativeRequestMethod =
   | 'native.session.restore'
   | 'native.session.close';
 
+export class NativeHostError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = 'NativeHostError';
+    this.code = code;
+  }
+}
+
+export interface NativeBrowserOpenResult {
+  opened: boolean;
+  reused?: boolean;
+  windowVisible?: boolean;
+  code?: string;
+  message?: string;
+}
+
 export interface NativeViewportBounds {
   x: number;
   y: number;
@@ -99,26 +117,39 @@ class NativeHostBridge {
   }
 
   async getHostState() {
-    if (!this.available) throw new Error('O host nativo do CloudOS não está ativo.');
+    if (!this.available) throw new NativeHostError('NATIVE_HOST_UNAVAILABLE', 'O host nativo do CloudOS não está ativo.');
     await this.connect();
     return this.request<NativeHostState>('host.getState', {});
   }
 
   async requestLegacyRecoveryToken() {
-    if (!this.available) throw new Error('O host nativo do CloudOS não está ativo.');
+    if (!this.available) throw new NativeHostError('NATIVE_HOST_UNAVAILABLE', 'O host nativo do CloudOS não está ativo.');
     await this.connect();
     return this.request<{ token: string; expiresIn: number }>('host.requestLegacyRecoveryToken', {});
   }
 
-  async openBrowser(url?: string) {
-    if (!this.available) throw new Error('O Navegador CloudOS requer o Host nativo.');
+  async openBrowser(url?: string): Promise<NativeBrowserOpenResult> {
+    if (!this.available) throw new NativeHostError('NATIVE_HOST_UNAVAILABLE', 'O Navegador CloudOS requer o Host nativo.');
     await this.connect();
-    return this.request<{ opened: boolean; reused: boolean }>('browser.open', url ? { url } : {}, 30_000);
+    const result = await this.request<NativeBrowserOpenResult>('browser.open', url ? { url } : {}, 30_000);
+    if (!result?.opened) {
+      throw new NativeHostError(
+        result?.code || 'BROWSER_OPEN_FAILED',
+        result?.message || 'A janela nativa do Navegador não pôde ser aberta.'
+      );
+    }
+    if (result.windowVisible !== true) {
+      throw new NativeHostError(
+        'BROWSER_WINDOW_NOT_VISIBLE',
+        'O Host respondeu, mas a janela nativa do Navegador não ficou visível.'
+      );
+    }
+    return result;
   }
 
   async launchApp(appId: string) {
     const token = getStoredToken();
-    if (!token) throw new Error('Entre no CloudOS para abrir aplicativos nativos.');
+    if (!token) throw new NativeHostError('AUTH_REQUIRED', 'Entre no CloudOS para abrir aplicativos nativos.');
     return this.request<{
       name: string;
       source: string;
@@ -159,13 +190,13 @@ class NativeHostBridge {
   }
 
   private request<T = unknown>(method: NativeRequestMethod, params: Record<string, unknown>, timeoutMs = 10_000): Promise<T> {
-    if (!this.available) return Promise.reject(new Error('O host nativo do CloudOS não está ativo.'));
+    if (!this.available) return Promise.reject(new NativeHostError('NATIVE_HOST_UNAVAILABLE', 'O host nativo do CloudOS não está ativo.'));
     this.ensureTransport();
     const id = crypto.randomUUID();
     return new Promise<T>((resolve, reject) => {
       const timer = window.setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error('A operação nativa excedeu o tempo limite.'));
+        reject(new NativeHostError('NATIVE_TIMEOUT', 'A operação nativa excedeu o tempo limite.'));
       }, timeoutMs);
       this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
       this.transport!.postMessage({ v: 1, id, type: 'request', method, nonce: window.__cloudosNativeNonce, params });
@@ -194,7 +225,10 @@ class NativeHostBridge {
     window.clearTimeout(pending.timer);
     this.pending.delete(message.id);
     if (message.ok) pending.resolve(message.result);
-    else pending.reject(new Error(message.error?.message || 'O host nativo recusou a operação.'));
+    else pending.reject(new NativeHostError(
+      message.error?.code || 'NATIVE_REQUEST_DENIED',
+      message.error?.message || 'O host nativo recusou a operação.'
+    ));
   };
 }
 
