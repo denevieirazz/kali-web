@@ -10,9 +10,9 @@ if ($env:CI -ne 'true' -and -not $AllowNonCi) {
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$hostDll = Join-Path $repoRoot 'desktop\CloudOS.Host\bin\Release\net8.0-windows\CloudOS.Host.dll'
+$hostDll = Join-Path $repoRoot 'desktop\CloudOS.Host\bin\Release\net8.0-windows10.0.19041.0\CloudOS.Host.dll'
 $clientScript = Join-Path $repoRoot 'scripts\native-browser-host-smoke-client.mjs'
-if (-not (Test-Path $hostDll)) { throw "CloudOS.Host não compilado: $hostDll" }
+if (-not (Test-Path $hostDll)) { throw "CloudOS.Host não compilado no target esperado: $hostDll" }
 if (-not (Test-Path $clientScript)) { throw "Cliente de smoke ausente: $clientScript" }
 
 $localAppData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
@@ -33,7 +33,6 @@ function Get-FreePort {
 if (-not ('CloudOSSmoke.WindowApi' -as [type])) {
     Add-Type @'
 using System;
-using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -112,6 +111,16 @@ function Get-DescendantPids([int]$RootPid) {
     return @($result)
 }
 
+function Get-BrowserReadyCount {
+    $logRoot = Join-Path $cloudRoot 'logs'
+    if (-not (Test-Path $logRoot)) { return 0 }
+    $count = 0
+    foreach ($file in Get-ChildItem $logRoot -Filter 'browser-*.log' -File -ErrorAction SilentlyContinue) {
+        $count += @(Select-String -Path $file.FullName -Pattern ' webview_ready(?: |$)' -ErrorAction SilentlyContinue).Count
+    }
+    return $count
+}
+
 $debugPort = Get-FreePort
 $dotnet = (Get-Command dotnet).Source
 $psi = [System.Diagnostics.ProcessStartInfo]::new()
@@ -129,6 +138,8 @@ $hostProcess.StartInfo = $psi
 $runtimeManifest = $null
 $backendPid = 0
 $ownedDescendants = @()
+$smokeUsername = 'cloudos.smoke'
+$smokePassword = 'CloudOS-Smoke-2026!'
 try {
     if (-not $hostProcess.Start()) { throw 'CloudOS.Host não iniciou.' }
     Write-Host "HOST_PID=$($hostProcess.Id)"
@@ -142,18 +153,65 @@ try {
     $healthBefore = Invoke-RestMethod -Uri "$apiBase/api/health" -Method Get -TimeoutSec 5
     if (-not $healthBefore) { throw 'Health inicial do backend falhou.' }
 
+    $adminBody = @{
+        displayName = 'CloudOS Smoke'
+        username = $smokeUsername
+        password = $smokePassword
+        confirmPassword = $smokePassword
+    } | ConvertTo-Json -Compress
+    $null = Invoke-RestMethod -Uri "$apiBase/api/setup/admin" -Method Post -ContentType 'application/json' -Body $adminBody -TimeoutSec 10
+
     $openRaw = & node $clientScript --port $debugPort --action open-twice
-    if ($LASTEXITCODE -ne 0) { throw 'Cliente CDP falhou ao abrir Browser.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Cliente CDP falhou ao abrir Browser concorrentemente.' }
     $open = $openRaw | ConvertFrom-Json
+    foreach ($result in @($open.first, $open.second)) {
+        if (-not [bool]$result.opened -or -not [bool]$result.windowVisible) {
+            throw 'browser.open não confirmou janela visível.'
+        }
+    }
     $reuseValues = @([bool]$open.first.reused, [bool]$open.second.reused)
     if (($reuseValues | Where-Object { $_ }).Count -ne 1 -or ($reuseValues | Where-Object { -not $_ }).Count -ne 1) {
         throw 'Duas chamadas concorrentes de browser.open não reutilizaram uma única BrowserWindow.'
     }
 
+    $firstBrowserHandle = [IntPtr]::Zero
+    Wait-Until { $script:firstBrowserHandle = [CloudOSSmoke.WindowApi]::FindWindow($hostProcess.Id, 'Navegador CloudOS'); $script:firstBrowserHandle -ne [IntPtr]::Zero } 10 'BrowserWindow não apareceu após browser.open.'
+    $firstBrowserHandle = $script:firstBrowserHandle
+    if (-not [CloudOSSmoke.WindowApi]::CloseWindow($firstBrowserHandle)) { throw 'WM_CLOSE da primeira BrowserWindow falhou.' }
+    Wait-Until { [CloudOSSmoke.WindowApi]::FindWindow($hostProcess.Id, 'Navegador CloudOS') -eq [IntPtr]::Zero } 15 'Primeira BrowserWindow não fechou.'
+
+    $readyBeforeUi = Get-BrowserReadyCount
+    $previousUser = $env:CLOUDOS_SMOKE_USERNAME
+    $previousPassword = $env:CLOUDOS_SMOKE_PASSWORD
+    try {
+        $env:CLOUDOS_SMOKE_USERNAME = $smokeUsername
+        $env:CLOUDOS_SMOKE_PASSWORD = $smokePassword
+        $uiRaw = & node $clientScript --port $debugPort --action open-via-start
+    } finally {
+        if ($null -eq $previousUser) { Remove-Item Env:CLOUDOS_SMOKE_USERNAME -ErrorAction SilentlyContinue } else { $env:CLOUDOS_SMOKE_USERNAME = $previousUser }
+        if ($null -eq $previousPassword) { Remove-Item Env:CLOUDOS_SMOKE_PASSWORD -ErrorAction SilentlyContinue } else { $env:CLOUDOS_SMOKE_PASSWORD = $previousPassword }
+    }
+    if ($LASTEXITCODE -ne 0) { throw 'Fluxo Menu Iniciar -> Browser falhou.' }
+    $ui = $uiRaw | ConvertFrom-Json
+    if (-not $ui.desktopMounted -or -not $ui.launcherSeen -or -not $ui.launcherGone) {
+        throw 'Shell/Menu Iniciar/launcher não completaram o fluxo esperado.'
+    }
+
     $browserHandle = [IntPtr]::Zero
-    Wait-Until { $script:browserHandle = [CloudOSSmoke.WindowApi]::FindWindow($hostProcess.Id, 'Navegador CloudOS'); $script:browserHandle -ne [IntPtr]::Zero } 20 'BrowserWindow não apareceu.'
+    Wait-Until { $script:browserHandle = [CloudOSSmoke.WindowApi]::FindWindow($hostProcess.Id, 'Navegador CloudOS'); $script:browserHandle -ne [IntPtr]::Zero } 10 'BrowserWindow aberta pelo Menu Iniciar não ficou visível.'
     $browserHandle = $script:browserHandle
-    if (-not [CloudOSSmoke.WindowApi]::CloseWindow($browserHandle)) { throw 'WM_CLOSE da BrowserWindow falhou.' }
+    Wait-Until { (Get-BrowserReadyCount) -gt $readyBeforeUi } 30 'WebView2 da BrowserWindow aberta pelo Menu Iniciar não ficou pronto.'
+
+    $reuseRaw = & node $clientScript --port $debugPort --action open-once
+    if ($LASTEXITCODE -ne 0) { throw 'browser.open após janela aberta falhou.' }
+    $reuse = $reuseRaw | ConvertFrom-Json
+    if (-not $reuse.opened.opened -or -not $reuse.opened.reused -or -not $reuse.opened.windowVisible) {
+        throw 'browser.open após janela aberta não restaurou/reutilizou a BrowserWindow.'
+    }
+    $handleAfterReuse = [CloudOSSmoke.WindowApi]::FindWindow($hostProcess.Id, 'Navegador CloudOS')
+    if ($handleAfterReuse -ne $browserHandle) { throw 'browser.open reutilizado criou/trocou o HWND inesperadamente.' }
+
+    if (-not [CloudOSSmoke.WindowApi]::CloseWindow($browserHandle)) { throw 'WM_CLOSE da BrowserWindow aberta pelo Menu Iniciar falhou.' }
     Wait-Until { [CloudOSSmoke.WindowApi]::FindWindow($hostProcess.Id, 'Navegador CloudOS') -eq [IntPtr]::Zero } 15 'BrowserWindow não fechou.'
 
     if ($hostProcess.HasExited) { throw 'Fechar Browser encerrou o Shell.' }
@@ -179,6 +237,8 @@ try {
 
     Write-Host 'PASS native browser host smoke'
 } finally {
+    Remove-Item Env:CLOUDOS_SMOKE_USERNAME -ErrorAction SilentlyContinue
+    Remove-Item Env:CLOUDOS_SMOKE_PASSWORD -ErrorAction SilentlyContinue
     if ($hostProcess -and -not $hostProcess.HasExited) {
         & taskkill /PID $hostProcess.Id /T /F | Out-Null
         $hostProcess.WaitForExit(10000) | Out-Null
