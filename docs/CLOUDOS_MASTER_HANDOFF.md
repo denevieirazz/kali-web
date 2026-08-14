@@ -1,128 +1,190 @@
 # CloudOS - Master Handoff & Estado Atual do Sistema
 
-## 1. Visão Geral e Arquitetura
+## 1. Visão geral
 
-O **CloudOS** é um ambiente de desktop híbrido unificado para Windows, combinando a flexibilidade visual de uma interface moderna em React com a potência nativa do ecossistema Windows (WPF/.NET 8 + WebView2) e Linux (WSL2 / WSLg).
+O CloudOS é um ambiente desktop híbrido para Windows que combina React 19/TypeScript com um Host WPF/.NET 8, Microsoft Edge WebView2, um agente Node/Express em loopback e integração Windows/WSL/WSLg.
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        CloudOS.Host (WPF / .NET 8)                     │
-│ ┌────────────────────────────────────────────────────────────────────┐ │
-│ │                  Microsoft Edge WebView2 (Frontend)                │ │
-│ │  React 19 + TypeScript + CSS Modules (Desktop UI, Window Manager)  │ │
-│ └───────────────────▲────────────────────────────▲───────────────────┘ │
-│                     │ PostMessage / JSON Bridge  │ REST / WebSockets   │
-│                     ▼                            ▼                     │
-│ ┌────────────────────────────────────┐ ┌─────────────────────────────┐ │
-│ │   Native Bridge & Hub Controller   │ │    CloudOS Backend (Node)   │ │
-│ │  - Win32 Process / HWND Manager    │ │  - Fastify / SQLite / JSON  │ │
-│ │  - Win32 Docking & Reparenting     │ │  - Auth & Account Recovery  │ │
-│ │  - WSL/WSLg Lifecycle & Windows    │ │  - PTY Terminal & App Catalog│ │
-│ └────────────────────────────────────┘ └─────────────────────────────┘ │
-└────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 2. Subsistemas e Recursos
-
-### 2.1. Frontend (React 19 + TypeScript)
-- **Window Management System**: Sistema de janelas com stacking order, minimização, maximização, snap e foco.
-- **NativeAppDock & Contract**: Contrato tipado (`nativeWindowContract.d.ts`, `nativeWindowContract.js`) para gerenciar ciclos de vida de janelas nativas dockadas no canvas web.
-- **Terminal Emulator**: Integração com XTerm.js conectado via WebSockets com pseudoterminais (pty) no backend.
-- **App Catalog & Store**: Central de aplicativos Linux e utilitários integrados.
-
-### 2.2. Backend (Node.js)
-- **Engine**: API REST e WebSockets usando Fastify.
-- **Autenticação e Recuperação de Conta**:
-  - Mecanismo seguro de migração e fallback de contas legadas.
-  - Validação estrita de credenciais com criptografia (bcrypt/argon2).
-  - Fluxo de recuperação de senha com perguntas de segurança / tokens de sessão sem sobreposição de estado inválido.
-- **App Catalog Service**: Validação e saneamento do catálogo de apps instaláveis no ambiente Linux.
-- **Configuração de Origens Seguras**: Restrição estrita de CORS e origens nativas permitidas (`http://127.0.0.1`, `http://localhost`, esquemas customizados do host).
-
-### 2.3. Host Desktop (WPF / .NET 8 / WebView2)
-- **Supervisor de Runtime (`CloudOsRuntimeSupervisor`)**:
-  - Inicialização orquestrada de backend, detecção de portas dinâmicas e monitoramento de saúde de processos.
-  - Coordenação de instância única (`SingleInstanceCoordinator`).
-- **Bridge Nativa (`WebMessageBridge`)**:
-  - Comunicação bidirecional assíncrona entre o JavaScript da WebView2 e o C# nativo via `window.chrome.webview.postMessage`.
-  - Tratamento de mensagens tipadas para janelas, shells e processos.
-- **Gerenciador Nativo Win32 & WSLg (`NativeWindowManager`)**:
-  - Gerenciamento de HWNDs e processos filhos.
-  - Docking de janelas nativas Win32 e janelas X11/Wayland (WSLg) dentro de áreas demarcadas pelo frontend (`NativeAppDock`).
-  - Suporte a monitoramento de foco, fechamento automático e restauração de posição.
-
----
-
-## 3. Estado do Banco de Dados e Isolamento
-- O banco de dados do usuário e configurações ativas residem em:
-  `%LOCALAPPDATA%\CloudOS\data\cloudos.json` (ou `.sqlite`).
-- **Isolamento**: O repositório git **nunca** versiona nem sobrescreve a pasta de dados reais de produção nem credenciais de instâncias locais.
-
----
-
-## 4. Branches Principais e Fluxo Git
-- `main`: Branch de release / produção.
-- `fix/forgot-account-password`: Branch de trabalho com as correções estruturais de autenticação, catalogação de apps e contrato de docking nativo.
-- `sync/cloudos-current-state`: Branch de consolidação e espelhamento do estado atual completo para revisão e integração.
-
----
-
-## 5. Instruções de Inicialização, Build e Testes
-
-### Instalação de Dependências
-```bash
-npm install
+```text
+CloudOS.Host (WPF / .NET 8)
+├── ShellWebView privilegiado
+│   ├── React 19 / TypeScript
+│   ├── origem https://cloudos.local/
+│   ├── WebMessageBridge JSON v1
+│   └── REST/WebSocket para agente local
+│
+├── BrowserManager
+│   └── BrowserWindow WPF
+│       └── WebView2CompositionControl por aba
+│           └── conteúdo externo não confiável
+│
+├── NativeWindowManager / HWND
+└── CloudOsRuntimeSupervisor
+    └── CloudOS Backend Node / Express
+        ├── Auth & Account Recovery
+        ├── PTY Terminal
+        ├── App Catalog
+        └── Windows / WSL / WSLg
 ```
 
-### Validação e Testes
-```bash
-# Análise estática
-npm run lint
+## 2. Frontend
 
-# Build de produção do frontend
-npm run build
+- Window Manager web com stacking, foco, minimizar, maximizar e snap.
+- NativeAppDock e contrato tipado para janelas Win32/WSLg gerenciadas pelo Host.
+- Terminal XTerm.js conectado ao PTY por WebSocket autenticado.
+- App Catalog/Store e Central Windows + Linux.
+- O aplicativo React `Browser` não renderiza mais sites: ele é somente o launcher do navegador WebView2 nativo.
 
-# Testes unitários / de integração
-npm test
+## 3. Backend
+
+O agente local usa Express em `127.0.0.1` com porta efêmera no modo Host. Ele fornece autenticação, recuperação, capacidades Windows/WSL, operações, catálogo de apps e PTY. A origem do Shell é allowlisted e o runtime do terminal não deve herdar segredos do processo backend.
+
+## 4. Host Desktop
+
+### Supervisor
+
+`CloudOsRuntimeSupervisor` inicia e conserva o objeto `Process` real do agente, usa manifesto/health autenticados e lease privada para manter o lifecycle do backend ligado ao Host.
+
+### WebMessageBridge
+
+A bridge do Shell valida origem, nonce, handshake, limite de mensagem e método allowlisted. Ela nunca aceita método, comando, argv ou caminho arbitrário. O navegador adiciona somente:
+
+```text
+browser.open
+```
+
+Parâmetro opcional:
+
+```json
+{ "url": "https://example.com" }
+```
+
+Não existem métodos de browser para executar script, ler DOM/cookies/headers/storage, abrir arquivo ou executar comando.
+
+### NativeWindowManager
+
+Gerencia janelas nativas atribuíveis por HWND/processo, foco, estados, fechamento gracioso e containment quando suportado.
+
+## 5. Navegador Nativo CloudOS
+
+O Browser é uma janela WPF separada nesta versão. `BrowserManager` mantém no máximo uma `BrowserWindow` por Host e reabrir o app restaura/foca a existente.
+
+Cada aba usa `WebView2CompositionControl`; o limite é 32 abas. Back/Forward/Stop/Reload usam as APIs nativas do WebView2. `window.open`/`NewWindowRequested` cria outra aba e não abre uma janela Edge externa.
+
+### Boundary de segurança
+
+Shell:
+
+```text
+%LOCALAPPDATA%\CloudOS\WebView2
+```
+
+Browser externo:
+
+```text
+%LOCALAPPDATA%\CloudOS\Browser\WebView2
+```
+
+Estado próprio do Browser:
+
+```text
+%LOCALAPPDATA%\CloudOS\Browser\browser-state.v1.json
+```
+
+O Browser verifica que seu UDF não coincide com o UDF do Shell. Conteúdo externo recebe:
+
+- `AreHostObjectsAllowed = false`;
+- `IsWebMessageEnabled = false`;
+- `IsPasswordAutosaveEnabled = false`;
+- `IsGeneralAutofillEnabled = false`;
+- nenhum RuntimeBootstrap;
+- nenhum nonce CloudOS;
+- nenhum JWT/token de supervisor/token de lease;
+- nenhum virtual-host mapping `cloudos.local`.
+
+`https://cloudos.local` e a origem efêmera atual do backend são bloqueadas pela policy do Browser.
+
+### URL policy
+
+- HTTP/HTTPS permitidos;
+- domínio sem esquema vira HTTPS;
+- `localhost`/loopback usam HTTP;
+- texto comum vira pesquisa DuckDuckGo;
+- IDN é normalizado para ASCII/punycode;
+- userinfo, CR/LF/NUL/controles e entradas >8192 são rejeitados;
+- `about:blank` somente interno;
+- `file:`, `ftp:`, `javascript:`, `vbscript:`, `shell:`, `cmd:`, `powershell:`, `ms-settings:`, `ms-appx:`, `edge:`, `chrome:`, `devtools:`, `view-source:` e esquemas desconhecidos são bloqueados;
+- não há `ShellExecute` para protocolos externos.
+
+### Downloads
+
+`DownloadStarting` é interceptado e exige `SaveFileDialog` WPF com confirmação de sobrescrita. Progresso/estado usam `CoreWebView2DownloadOperation`. Downloads nunca são executados/abertos automaticamente. Fechar o Browser com downloads ativos pede confirmação; shutdown do Host cancela sem prompt.
+
+### Permissões e credenciais
+
+Câmera, microfone, localização, notificações e múltiplos downloads automáticos recebem prompt WPF temporário. `SavesInProfile=false` sempre. Demais permissões são negadas por padrão; timeout de 30 s resulta em deny.
+
+Erro TLS usa sempre `Cancel`; não existe bypass. Certificado de cliente só é escolhido explicitamente dentre `MutuallyTrustedCertificates`. Basic/Digest/NTLM usam prompt próprio e a senha não é persistida.
+
+### Histórico/favoritos
+
+O JSON separado persiste somente URL, título, data e favoritos; limites de 5000/1000. Escrita é temporária/atômica com backup. Principal corrompido é colocado em quarentena e backup válido é recuperado quando disponível.
+
+### Erros/crash/lifecycle
+
+Erros são exibidos no chrome WPF, não por HTML privilegiado. Primeira falha do renderer recria a aba; segunda falha em até 30 s interrompe recuperação automática. Fechar aba remove handlers e chama `Dispose`; a última aba fecha a BrowserWindow. O Browser é encerrado durante teardown da bridge/Host e seu UDF não é apagado.
+
+## 6. Dados reais
+
+O banco real continua fora do Git:
+
+```text
+%LOCALAPPDATA%\CloudOS\data\cloudos.json
+```
+
+O navegador nativo não lê nem grava esse banco, não toca no OPFS e não altera WSL, autenticação ou recuperação.
+
+## 7. Build e testes
+
+```powershell
+npm.cmd run lint
+npm.cmd run build
+npm.cmd test
+npm.cmd run test:e2e
 node scripts/run-node-tests.js frontend/test
+npm.cmd run test:playwright
 
-# Testes de ponta a ponta
-npm run test:e2e
-```
-
-### Compilação do Host Desktop (.NET 8)
-```bash
 dotnet build desktop/CloudOS.Host/CloudOS.Host.csproj -c Release
+dotnet run --project desktop/CloudOS.Host.Tests/CloudOS.Host.Tests.csproj -c Release
+dotnet build desktop/CloudOS.Bootstrap/CloudOS.Bootstrap.csproj -c Release
+dotnet run --project desktop/CloudOS.Bootstrap.Tests/CloudOS.Bootstrap.Tests.csproj -c Release
+
+# Windows + WebView2 Runtime
+npm.cmd run test:browser:webview
 ```
 
----
+O test host `desktop/CloudOS.Browser.TestHost` existe somente para validar WebView2 real com UDF temporário e CDP explícito. Não faz parte do fluxo normal do Host.
 
-## 6. Recursos Experimentais vs. Estáveis
+## 8. Testes do Browser
 
-| Recurso | Status | Descrição |
-| :--- | :--- | :--- |
-| **Auth & Recuperação de Conta** | Estável | Fluxo completo de login, troca de senha e recuperação segura. |
-| **Terminal Web PTY** | Estável | Sessão interativa conectada ao backend e shell configurado. |
-| **Gerenciador de Janelas Web** | Estável | Renderização fluida, redimensionamento, foco e snapping. |
-| **Docking Win32 / WSLg** | Estável / Em Evolução | Embed de HWNDs externos em bounds definidos via React bridge. |
-| **Instalação Automática de Distros WSL** | Experimental | Script e UI para provisionamento assistido de Kali/Debian/Ubuntu. |
-| **Shell Mode Total (Windows Shell replacement)** | Em Planejamento | Modos de encapsulamento seguro descritos em `SHELL-MODE-PLAN.md`. |
+`CloudOS.Host.Tests` cobre URL/pesquisa, esquemas bloqueados, origem Shell/backend, IDN, layout/UDF isolado, policy de permissões, TLS fail-closed, crash-loop, histórico/favoritos, limites, arquivo corrompido e backup atômico.
 
----
+`tests/playwright/native-browser.spec.ts` usa WebView2 real para validar X-Frame-Options DENY, CSP `frame-ancestors 'none'`, ausência de bridge/nonce/runtime, popup→aba, cookies compartilhados dentro do profile Browser e bloqueios de `cloudos.local`/`file://`.
 
-## 7. Limitações e Bugs Conhecidos
-1. **DPI Scaling em Janelas WSLg Dockadas**:
-   - Em configurações multi-monitor com escalas DPI mistas (ex: 125% e 100%), o cálculo de retângulos absolutos pode sofrer pequenos desvios de subpixel.
-2. **Ciclo de Vida de Processos WSL com Encerramento Forçado**:
-   - Se o processo host for finalizado abruptamente via Task Manager, janelas WSLg desconectadas podem persistir abertas no compositor do WSLg até o timeout do daemon.
-3. **Modo Sandbox no WebView2**:
-   - Necessidade de flags específicas ao carregar origens externas não homologadas no catálogo de origens confiáveis (`CloudOsOrigins.cs`).
+## 9. Recursos estáveis/experimentais
 
----
+| Recurso | Estado |
+| --- | --- |
+| Auth e recuperação | Estável |
+| Terminal PTY | Estável |
+| Window Manager web | Estável |
+| Docking Win32/WSLg | Estável / em evolução |
+| Navegador WebView2 nativo | Feature em validação Windows |
+| Instalação automática de distros WSL | Experimental |
+| Windows Shell replacement | Planejamento |
 
-## 8. Próximos Passos Recomendados
-1. Finalizar a validação multi-monitor do `NativeWindowManager` para janelas Wayland de alta taxa de quadros.
-2. Expandir a suíte de testes de integração do `nativeWindowContract` com cenários de falha de comunicação IPC.
-3. Implementar empacotamento MSIX / InnoSetup automatizado via pipeline CI conforme `WINDOWS-PACKAGING-PLAN.md`.
+## 10. Limitações conhecidas da feature Browser
+
+- O Browser abre em janela WPF separada; ainda não participa do Window Manager React.
+- O chrome WPF precisa de smoke test manual Windows para prompts, SaveFileDialog e UX de tabs.
+- CDP é usado somente pelo test host; produção não o habilita por padrão.
+- O Browser não possui password manager próprio e desabilita autofill/password autosave do WebView2.
