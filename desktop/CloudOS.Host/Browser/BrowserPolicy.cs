@@ -134,7 +134,7 @@ public sealed class BrowserPolicy
     private static string? NormalizeHost(Uri uri)
     {
         var rawHost = uri.Host.Trim().TrimEnd('.');
-        if (rawHost.StartsWith('[', StringComparison.Ordinal) && rawHost.EndsWith(']', StringComparison.Ordinal))
+        if (rawHost.StartsWith("[", StringComparison.Ordinal) && rawHost.EndsWith("]", StringComparison.Ordinal))
             rawHost = rawHost[1..^1];
         if (IPAddress.TryParse(rawHost, out var ip)) return ip.ToString().ToLowerInvariant();
         try
@@ -166,9 +166,9 @@ public sealed class BrowserPolicy
             var host = candidate.Host.Trim('[', ']');
             var isLocalHost = host.Equals("localhost", StringComparison.OrdinalIgnoreCase);
             var isIp = IPAddress.TryParse(host, out var parsedIp);
-            var isDomain = host.Contains('.', StringComparison.Ordinal) &&
-                           !host.StartsWith('.', StringComparison.Ordinal) &&
-                           !host.EndsWith('.', StringComparison.Ordinal);
+            var isDomain = host.Contains(".", StringComparison.Ordinal) &&
+                           !host.StartsWith(".", StringComparison.Ordinal) &&
+                           !host.EndsWith(".", StringComparison.Ordinal);
             if (!isLocalHost && !isIp && !isDomain) continue;
 
             var desiredScheme = isLocalHost || isIp && parsedIp is not null && IPAddress.IsLoopback(parsedIp)
