@@ -6,7 +6,7 @@ namespace CloudOS.Host.Browser;
 public sealed record BrowserHistoryEntry(string Url, string Title, DateTimeOffset VisitedAt);
 public sealed record BrowserFavorite(string Id, string Url, string Title, DateTimeOffset CreatedAt);
 public sealed record BrowserSessionTab(string Url, bool Pinned);
-public sealed record BrowserSessionState(List<BrowserSessionTab> Tabs, int ActiveIndex, DateTimeOffset SavedAt);
+public sealed record BrowserSessionState(List<BrowserSessionTab>? Tabs, int ActiveIndex, DateTimeOffset SavedAt);
 public sealed record BrowserStateDocument(
     int SchemaVersion,
     List<BrowserHistoryEntry>? History,
@@ -181,7 +181,7 @@ public sealed class BrowserStateStore
         BrowserSessionState? session = null;
         if (parsed.Session is not null)
         {
-            var tabs = parsed.Session.Tabs
+            var tabs = (parsed.Session.Tabs ?? [])
                 .Take(SessionTabLimit)
                 .Select(tab => Uri.TryCreate(tab.Url, UriKind.Absolute, out var uri)
                     ? new BrowserSessionTab(SanitizePersistedUri(uri) ?? string.Empty, tab.Pinned)
