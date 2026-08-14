@@ -8,7 +8,7 @@ namespace CloudOS.Host.Browser;
 public sealed class BrowserPermissionController : IDisposable
 {
     private static readonly TimeSpan PromptTimeout = TimeSpan.FromSeconds(30);
-    private CancellationTokenSource _lifetime = new();
+    private CancellationTokenSource _promptLifetime = new();
     private bool _disposed;
 
     public static bool RequiresUserPrompt(CoreWebView2PermissionKind kind) =>
@@ -30,6 +30,7 @@ public sealed class BrowserPermissionController : IDisposable
         }
 
         var deferral = args.GetDeferral();
+        var token = _promptLifetime.Token;
         try
         {
             args.SavesInProfile = BrowserSecurityPolicy.SavesPermissionInProfile;
@@ -58,9 +59,9 @@ public sealed class BrowserPermissionController : IDisposable
                 "Permitir uma vez",
                 "Bloquear",
                 PromptTimeout,
-                _lifetime.Token);
+                token);
 
-            args.State = allowed && IsSameOrigin(requestedSource, currentSource())
+            args.State = allowed && BrowserSecurityPolicy.IsSameOrigin(requestedSource, currentSource())
                 ? CoreWebView2PermissionState.Allow
                 : CoreWebView2PermissionState.Deny;
         }
@@ -74,23 +75,13 @@ public sealed class BrowserPermissionController : IDisposable
         }
     }
 
-    public static bool IsSameOrigin(string requestedSource, string? currentSource)
-    {
-        if (!Uri.TryCreate(requestedSource, UriKind.Absolute, out var requested) ||
-            !Uri.TryCreate(currentSource, UriKind.Absolute, out var current) ||
-            !string.IsNullOrEmpty(requested.UserInfo) ||
-            !string.IsNullOrEmpty(current.UserInfo))
-            return false;
-
-        return requested.Scheme.Equals(current.Scheme, StringComparison.OrdinalIgnoreCase) &&
-               requested.IdnHost.Equals(current.IdnHost, StringComparison.OrdinalIgnoreCase) &&
-               requested.Port == current.Port;
-    }
-
     public void CancelAll()
     {
-        if (_disposed || _lifetime.IsCancellationRequested) return;
-        _lifetime.Cancel();
+        if (_disposed) return;
+        var previous = _promptLifetime;
+        _promptLifetime = new CancellationTokenSource();
+        previous.Cancel();
+        previous.Dispose();
     }
 
     internal static Task<bool> ShowTimedPromptAsync(
@@ -175,7 +166,8 @@ public sealed class BrowserPermissionController : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        if (!_lifetime.IsCancellationRequested) _lifetime.Cancel();
-        _lifetime.Dispose();
+        var lifetime = _promptLifetime;
+        if (!lifetime.IsCancellationRequested) lifetime.Cancel();
+        lifetime.Dispose();
     }
 }
