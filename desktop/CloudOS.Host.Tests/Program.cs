@@ -208,10 +208,14 @@ static void BrowserStateRestoresOptionalSession()
     }, 2);
     var reloaded = new BrowserStateStore(path);
     Assert(reloaded.RestoreLastSession, "Restore-session preference must persist.");
-    Assert(reloaded.Session?.Tabs.Count == 2, "Unsafe session URLs must be discarded.");
-    Assert(reloaded.Session!.Tabs[0].Pinned, "Pinned state must survive session persistence.");
-    Assert(!reloaded.Session.Tabs[0].Url.Contains("SECRET", StringComparison.Ordinal), "Session persistence must strip token-like values.");
-    Assert(reloaded.Session.ActiveIndex == 1, "Active index must be clamped after unsafe tabs are removed.");
+    var session = reloaded.Session;
+    if (session is null) throw new InvalidOperationException("A valid saved session must be restored.");
+    var tabs = session.Tabs;
+    if (tabs is null) throw new InvalidOperationException("Restored session tabs must be normalized to a non-null collection.");
+    Assert(tabs.Count == 2, "Unsafe session URLs must be discarded.");
+    Assert(tabs[0].Pinned, "Pinned state must survive session persistence.");
+    Assert(!tabs[0].Url.Contains("SECRET", StringComparison.Ordinal), "Session persistence must strip token-like values.");
+    Assert(session.ActiveIndex == 1, "Active index must be clamped after unsafe tabs are removed.");
 }
 
 static void BrowserStateRecoversFromCorruption()
