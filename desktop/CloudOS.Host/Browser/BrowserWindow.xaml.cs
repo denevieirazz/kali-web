@@ -13,13 +13,17 @@ public sealed record BrowserDiagnosticSnapshot(
     int ActiveDownloadCount,
     string? ActiveErrorCode,
     bool ActiveIsNewTab,
-    bool Closing);
+    bool Closing,
+    bool WindowVisible,
+    bool InitializationStarted,
+    bool WebViewReady,
+    string? InitializationErrorCode);
 
 public partial class BrowserWindow : Window
 {
     private const int MaxTabs = 32;
     private static readonly TimeSpan CrashWindow = TimeSpan.FromSeconds(30);
-    private readonly CoreWebView2Environment _environment;
+    private readonly Func<CancellationToken, Task<CoreWebView2Environment>> _environmentFactory;
     private readonly BrowserPolicy _policy;
     private readonly BrowserStateStore _stateStore;
     private readonly bool _developerMode;
@@ -28,7 +32,14 @@ public partial class BrowserWindow : Window
     private readonly List<BrowserTab> _tabs = [];
     private readonly Stack<ClosedTab> _closedTabs = new();
     private readonly Dictionary<Guid, DateTimeOffset> _lastCrashByLogicalTab = [];
+    private readonly Action<string, string?> _diagnostics;
+    private CoreWebView2Environment? _environment;
     private BrowserTab? _activeTab;
+    private CancellationTokenSource? _initializationCancellation;
+    private Task? _initializationTask;
+    private string? _pendingOpenUrl;
+    private string? _initializationErrorCode;
+    private bool _webViewReady;
     private bool _hostShutdown;
     private bool _closing;
     private bool _fullscreen;
@@ -38,27 +49,48 @@ public partial class BrowserWindow : Window
     private bool _previousTopmost;
 
     public BrowserWindow(
-        CoreWebView2Environment environment,
+        Func<CancellationToken, Task<CoreWebView2Environment>> environmentFactory,
         BrowserPolicy policy,
         BrowserStateStore stateStore,
         bool developerMode,
-        BrowserDownloadManager? downloadManager = null)
+        BrowserDownloadManager? downloadManager = null,
+        Action<string, string?>? diagnostics = null)
     {
-        _environment = environment;
+        _environmentFactory = environmentFactory;
         _policy = policy;
         _stateStore = stateStore;
         _developerMode = developerMode;
         _downloads = downloadManager ?? new BrowserDownloadManager();
+        _diagnostics = diagnostics ?? ((_, _) => { });
         InitializeComponent();
         _downloads.StatusChanged += Downloads_StatusChanged;
+        ShowInitializationLoading();
     }
+
+    public BrowserWindow(
+        CoreWebView2Environment environment,
+        BrowserPolicy policy,
+        BrowserStateStore stateStore,
+        bool developerMode,
+        BrowserDownloadManager? downloadManager = null,
+        Action<string, string?>? diagnostics = null)
+        : this(_ => Task.FromResult(environment), policy, stateStore, developerMode, downloadManager, diagnostics)
+    {
+    }
+
+    public bool IsClosing => _closing;
+    public bool IsWebViewReady => _webViewReady;
 
     public BrowserDiagnosticSnapshot GetDiagnosticSnapshot() => new(
         _tabs.Count,
         _downloads.ActiveCount,
         _activeTab?.Error?.Code,
         _activeTab?.IsNewTabPage == true,
-        _closing);
+        _closing,
+        IsVisible,
+        _initializationTask is not null,
+        _webViewReady,
+        _initializationErrorCode);
 
     public void TriggerRendererFailedForActiveTab()
     {
@@ -66,11 +98,125 @@ public partial class BrowserWindow : Window
             Tab_RendererFailed(_activeTab, EventArgs.Empty);
     }
 
-    public async Task InitializeAsync(string? initialUrl)
+    public Task InitializeAsync(string? initialUrl) => StartInitializationAsync(initialUrl);
+
+    public Task StartInitializationAsync(string? initialUrl = null)
     {
-        if (!string.IsNullOrWhiteSpace(initialUrl))
+        if (!Dispatcher.CheckAccess())
+            return Dispatcher.InvokeAsync(() => StartInitializationAsync(initialUrl)).Task.Unwrap();
+        if (_closing) return Task.CompletedTask;
+
+        if (!string.IsNullOrWhiteSpace(initialUrl)) _pendingOpenUrl = initialUrl;
+        if (_webViewReady)
         {
-            var explicitTab = await CreateTabAsync(initialUrl, activate: true);
+            if (!string.IsNullOrWhiteSpace(initialUrl)) _activeTab?.Navigate(initialUrl);
+            return Task.CompletedTask;
+        }
+        if (_initializationTask is { IsCompleted: false }) return _initializationTask;
+
+        _initializationCancellation?.Dispose();
+        _initializationCancellation = new CancellationTokenSource();
+        _initializationTask = InitializeCoreAsync(_initializationCancellation.Token);
+        return _initializationTask;
+    }
+
+    public void RequestOpen(string? initialUrl)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(() => RequestOpen(initialUrl));
+            return;
+        }
+        if (_closing) return;
+
+        if (!string.IsNullOrWhiteSpace(initialUrl)) _pendingOpenUrl = initialUrl;
+        if (_webViewReady)
+        {
+            if (!string.IsNullOrWhiteSpace(initialUrl)) _activeTab?.Navigate(initialUrl);
+            return;
+        }
+        if (_initializationTask is null || _initializationTask.IsCompleted)
+            _initializationTask = StartInitializationAsync(initialUrl);
+    }
+
+    public void ShowInitializationFailure(string code, string message)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(() => ShowInitializationFailure(code, message));
+            return;
+        }
+        if (_closing) return;
+
+        _webViewReady = false;
+        _initializationErrorCode = code;
+        LoadProgress.Visibility = Visibility.Collapsed;
+        NewTabPanel.Visibility = Visibility.Collapsed;
+        LibraryPanel.Visibility = Visibility.Collapsed;
+        RemoveAllTabs();
+        WebViewHost.Visibility = Visibility.Visible;
+        ErrorCodeText.Text = code;
+        ErrorMessageText.Text = message;
+        RetryButton.Content = "Tentar novamente";
+        RetryButton.Visibility = Visibility.Visible;
+        ErrorPanel.Visibility = Visibility.Visible;
+        StatusText.Text = message;
+    }
+
+    private async Task InitializeCoreAsync(CancellationToken cancellationToken)
+    {
+        _diagnostics("webview_initialization_started", null);
+        ShowInitializationLoading();
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _environment = await _environmentFactory(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_closing) return;
+
+            await InitializeTabsAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_closing) return;
+
+            _webViewReady = true;
+            _initializationErrorCode = null;
+            ErrorPanel.Visibility = Visibility.Collapsed;
+            LoadProgress.Visibility = Visibility.Collapsed;
+            if (_activeTab is not null) RefreshChrome();
+
+            if (!string.IsNullOrWhiteSpace(_pendingOpenUrl) && _activeTab is not null)
+            {
+                var queued = _pendingOpenUrl;
+                _pendingOpenUrl = null;
+                _activeTab.Navigate(queued);
+            }
+            _diagnostics("webview_ready", $"tabs={_tabs.Count}");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || _closing)
+        {
+            _diagnostics("webview_failed", "code=BROWSER_INITIALIZATION_CANCELLED");
+            if (!_closing)
+                ShowInitializationFailure(
+                    "BROWSER_INITIALIZATION_CANCELLED",
+                    "A inicialização do Navegador foi cancelada.");
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            _diagnostics("webview_failed", $"type={error.GetType().Name}");
+            if (!_closing)
+                ShowInitializationFailure(
+                    "BROWSER_WEBVIEW_INITIALIZATION_FAILED",
+                    FriendlyInitializationError(error));
+        }
+    }
+
+    private async Task InitializeTabsAsync(CancellationToken cancellationToken)
+    {
+        var requestedUrl = _pendingOpenUrl;
+        _pendingOpenUrl = null;
+        if (!string.IsNullOrWhiteSpace(requestedUrl))
+        {
+            var explicitTab = await CreateTabAsync(requestedUrl, activate: true, cancellationToken: cancellationToken);
             if (explicitTab is null) throw new InvalidOperationException("Não foi possível criar a aba inicial do navegador.");
             return;
         }
@@ -82,7 +228,12 @@ public partial class BrowserWindow : Window
             var restored = new List<BrowserTab>();
             foreach (var saved in savedTabs.Take(MaxTabs))
             {
-                var restoredTab = await CreateTabAsync(saved.Url, activate: false, isPinned: saved.Pinned);
+                cancellationToken.ThrowIfCancellationRequested();
+                var restoredTab = await CreateTabAsync(
+                    saved.Url,
+                    activate: false,
+                    isPinned: saved.Pinned,
+                    cancellationToken: cancellationToken);
                 if (restoredTab is not null) restored.Add(restoredTab);
             }
             if (restored.Count > 0)
@@ -92,21 +243,44 @@ public partial class BrowserWindow : Window
             }
         }
 
-        var initialTab = await CreateTabAsync(null, activate: true, isNewTabPage: true);
+        var initialTab = await CreateTabAsync(
+            null,
+            activate: true,
+            isNewTabPage: true,
+            cancellationToken: cancellationToken);
         if (initialTab is null) throw new InvalidOperationException("Não foi possível criar a aba inicial do navegador.");
     }
 
-    public Task NavigateActiveAsync(string raw)
+    private void ShowInitializationLoading()
     {
-        _activeTab?.Navigate(raw);
-        return Task.CompletedTask;
+        if (_closing) return;
+        _webViewReady = false;
+        _initializationErrorCode = null;
+        ErrorPanel.Visibility = Visibility.Collapsed;
+        NewTabPanel.Visibility = Visibility.Collapsed;
+        LibraryPanel.Visibility = Visibility.Collapsed;
+        WebViewHost.Visibility = Visibility.Visible;
+        LoadProgress.Visibility = Visibility.Visible;
+        StatusText.Text = "Inicializando WebView2…";
     }
+
+    private static string FriendlyInitializationError(Exception error) => error switch
+    {
+        WebView2RuntimeNotFoundException => "O Microsoft Edge WebView2 Runtime não está disponível.",
+        UnauthorizedAccessException => "O perfil isolado do Navegador não pôde ser acessado.",
+        InvalidOperationException when error.Message.Contains("BROWSER_UDF_ISOLATION_FAILED", StringComparison.Ordinal) =>
+            "O perfil do Navegador não pôde ser isolado com segurança.",
+        System.Runtime.InteropServices.COMException => "O WebView2 não pôde ser inicializado neste Windows.",
+        _ => "O conteúdo do Navegador não pôde ser inicializado."
+    };
 
     public int CancelDownloads() => _downloads.CancelAll();
 
     public void CloseForHostShutdown()
     {
+        if (_closing) return;
         _hostShutdown = true;
+        CancelInitialization();
         Close();
     }
 
@@ -116,9 +290,12 @@ public partial class BrowserWindow : Window
         Guid? logicalId = null,
         bool isNewTabPage = false,
         bool isPinned = false,
-        bool popupTarget = false)
+        bool popupTarget = false,
+        CancellationToken cancellationToken = default)
     {
         if (_closing) return null;
+        cancellationToken.ThrowIfCancellationRequested();
+        var environment = _environment ?? throw new InvalidOperationException("BROWSER_ENVIRONMENT_NOT_READY");
         if (_tabs.Count >= MaxTabs)
         {
             StatusText.Text = "Limite de 32 abas atingido.";
@@ -126,7 +303,7 @@ public partial class BrowserWindow : Window
         }
 
         var tab = new BrowserTab(
-            _environment,
+            environment,
             _policy,
             _developerMode,
             this,
@@ -145,12 +322,10 @@ public partial class BrowserWindow : Window
         try
         {
             await tab.InitializeAsync();
+            cancellationToken.ThrowIfCancellationRequested();
             if (_closing)
             {
-                WebViewHost.Children.Remove(tab.View);
-                _tabs.Remove(tab);
-                UnwireTab(tab);
-                tab.Dispose();
+                RemoveTabForFailedInitialization(tab);
                 return null;
             }
 
@@ -164,12 +339,32 @@ public partial class BrowserWindow : Window
         }
         catch
         {
-            WebViewHost.Children.Remove(tab.View);
-            _tabs.Remove(tab);
-            UnwireTab(tab);
-            tab.Dispose();
+            RemoveTabForFailedInitialization(tab);
             throw;
         }
+    }
+
+    private void RemoveTabForFailedInitialization(BrowserTab tab)
+    {
+        WebViewHost.Children.Remove(tab.View);
+        _tabs.Remove(tab);
+        if (ReferenceEquals(_activeTab, tab)) _activeTab = null;
+        UnwireTab(tab);
+        tab.Dispose();
+    }
+
+    private void RemoveAllTabs()
+    {
+        foreach (var tab in _tabs.ToArray())
+        {
+            UnwireTab(tab);
+            WebViewHost.Children.Remove(tab.View);
+            tab.Dispose();
+        }
+        _tabs.Clear();
+        _activeTab = null;
+        _lastCrashByLogicalTab.Clear();
+        RenderTabs();
     }
 
     private void InsertTab(BrowserTab tab)
@@ -190,7 +385,7 @@ public partial class BrowserWindow : Window
         tab.RendererFailed += Tab_RendererFailed;
         tab.NewWindowFactory = async () =>
         {
-            if (_closing) return null;
+            if (_closing || !_webViewReady) return null;
             var popupTab = await CreateTabAsync(activate: false, popupTarget: true);
             if (popupTab is not null)
             {
@@ -214,7 +409,9 @@ public partial class BrowserWindow : Window
     {
         if (_closing || !_tabs.Contains(tab)) return;
         foreach (var item in _tabs)
-            item.View.Visibility = ReferenceEquals(item, tab) ? Visibility.Visible : Visibility.Collapsed;
+            item.View.Visibility = ReferenceEquals(item, tab) && LibraryPanel.Visibility != Visibility.Visible
+                ? Visibility.Visible
+                : Visibility.Collapsed;
         _activeTab = tab;
         RenderTabs();
         RefreshChrome();
@@ -381,7 +578,7 @@ public partial class BrowserWindow : Window
 
         if (tab.Error is null)
         {
-            tab.View.Visibility = Visibility.Visible;
+            tab.View.Visibility = LibraryPanel.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
             if (!_downloads.HasActiveDownloads) StatusText.Text = tab.IsLoading ? "Carregando…" : "Pronto";
         }
         else
@@ -389,6 +586,7 @@ public partial class BrowserWindow : Window
             ErrorCodeText.Text = tab.Error.Code;
             ErrorMessageText.Text = tab.Error.Message +
                 (string.IsNullOrWhiteSpace(tab.Error.Uri) ? string.Empty : $"\n{tab.Error.Uri}");
+            RetryButton.Content = "Recarregar";
             RetryButton.Visibility = tab.Error.CanRetry ? Visibility.Visible : Visibility.Collapsed;
             ErrorPanel.Visibility = Visibility.Visible;
             tab.View.Visibility = Visibility.Collapsed;
@@ -414,7 +612,7 @@ public partial class BrowserWindow : Window
 
     private async void Tab_RendererFailed(object? sender, EventArgs e)
     {
-        if (_closing || sender is not BrowserTab failed) return;
+        if (_closing || sender is not BrowserTab failed || _environment is null) return;
         try
         {
             var current = failed.IsNewTabPage ? null : failed.CurrentUri?.AbsoluteUri;
@@ -465,10 +663,7 @@ public partial class BrowserWindow : Window
                 await replacement.InitializeAsync();
                 if (_closing)
                 {
-                    WebViewHost.Children.Remove(replacement.View);
-                    _tabs.Remove(replacement);
-                    UnwireTab(replacement);
-                    replacement.Dispose();
+                    RemoveTabForFailedInitialization(replacement);
                     return;
                 }
                 replacement.SetZoom(zoom);
@@ -479,14 +674,11 @@ public partial class BrowserWindow : Window
             }
             catch
             {
-                WebViewHost.Children.Remove(replacement.View);
-                _tabs.Remove(replacement);
-                UnwireTab(replacement);
-                replacement.Dispose();
+                RemoveTabForFailedInitialization(replacement);
                 throw;
             }
         }
-        catch (Exception error)
+        catch (Exception error) when (error is not OutOfMemoryException)
         {
             if (!_closing) StatusText.Text = $"Falha ao recuperar aba: {error.GetType().Name}";
         }
@@ -553,6 +745,7 @@ public partial class BrowserWindow : Window
 
     private void Favorites_Click(object sender, RoutedEventArgs e)
     {
+        if (_activeTab is not null) _activeTab.View.Visibility = Visibility.Collapsed;
         LibraryPanel.Visibility = Visibility.Visible;
         LibraryTitle.Text = "Favoritos";
         ClearHistoryButton.Visibility = Visibility.Collapsed;
@@ -562,6 +755,7 @@ public partial class BrowserWindow : Window
 
     private void History_Click(object sender, RoutedEventArgs e)
     {
+        if (_activeTab is not null) _activeTab.View.Visibility = Visibility.Collapsed;
         LibraryPanel.Visibility = Visibility.Visible;
         LibraryTitle.Text = "Histórico";
         ClearHistoryButton.Visibility = Visibility.Visible;
@@ -589,9 +783,14 @@ public partial class BrowserWindow : Window
         if (LibraryList.SelectedItem is not LibraryItem item || _activeTab is null) return;
         _activeTab.Navigate(item.Url);
         LibraryPanel.Visibility = Visibility.Collapsed;
+        RefreshChrome();
     }
 
-    private void CloseLibrary_Click(object sender, RoutedEventArgs e) => LibraryPanel.Visibility = Visibility.Collapsed;
+    private void CloseLibrary_Click(object sender, RoutedEventArgs e)
+    {
+        LibraryPanel.Visibility = Visibility.Collapsed;
+        if (_activeTab is not null) RefreshChrome();
+    }
 
     private void ClearHistory_Click(object sender, RoutedEventArgs e)
     {
@@ -601,9 +800,23 @@ public partial class BrowserWindow : Window
         PopulateHistory();
     }
 
-    private void Retry_Click(object sender, RoutedEventArgs e) => _activeTab?.Reload();
+    private async void Retry_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_webViewReady)
+        {
+            await RunUiActionAsync(() => StartInitializationAsync(_pendingOpenUrl));
+            return;
+        }
+        _activeTab?.Reload();
+    }
+
     private void ErrorBack_Click(object sender, RoutedEventArgs e)
     {
+        if (!_webViewReady)
+        {
+            Close();
+            return;
+        }
         if (_activeTab?.CanGoBack == true) _activeTab.GoBack();
         else _activeTab?.ShowNewTabPage();
     }
@@ -625,11 +838,11 @@ public partial class BrowserWindow : Window
     private ContextMenu BuildBrowserMenu()
     {
         var menu = new ContextMenu();
-        var newTab = new MenuItem { Header = "Nova aba\tCtrl+T" };
+        var newTab = new MenuItem { Header = "Nova aba\tCtrl+T", IsEnabled = _webViewReady };
         newTab.Click += async (_, _) => await RunUiActionAsync(() => CreateTabAsync(activate: true, isNewTabPage: true));
-        var reopen = new MenuItem { Header = "Reabrir aba fechada\tCtrl+Shift+T", IsEnabled = _closedTabs.Count > 0 };
+        var reopen = new MenuItem { Header = "Reabrir aba fechada\tCtrl+Shift+T", IsEnabled = _webViewReady && _closedTabs.Count > 0 };
         reopen.Click += async (_, _) => await RunUiActionAsync(ReopenClosedTabAsync);
-        var duplicate = new MenuItem { Header = "Duplicar aba", IsEnabled = _activeTab is not null };
+        var duplicate = new MenuItem { Header = "Duplicar aba", IsEnabled = _webViewReady && _activeTab is not null };
         duplicate.Click += async (_, _) => await RunUiActionAsync(() => _activeTab is null ? Task.CompletedTask : DuplicateTabAsync(_activeTab));
         menu.Items.Add(newTab);
         menu.Items.Add(reopen);
@@ -644,11 +857,11 @@ public partial class BrowserWindow : Window
         menu.Items.Add(mute);
         menu.Items.Add(new Separator());
 
-        var zoomOut = new MenuItem { Header = "Diminuir zoom" };
+        var zoomOut = new MenuItem { Header = "Diminuir zoom", IsEnabled = _activeTab is not null };
         zoomOut.Click += (_, _) => _activeTab?.AdjustZoom(-0.1);
-        var zoomReset = new MenuItem { Header = "Zoom 100%" };
+        var zoomReset = new MenuItem { Header = "Zoom 100%", IsEnabled = _activeTab is not null };
         zoomReset.Click += (_, _) => _activeTab?.ResetZoom();
-        var zoomIn = new MenuItem { Header = "Aumentar zoom" };
+        var zoomIn = new MenuItem { Header = "Aumentar zoom", IsEnabled = _activeTab is not null };
         zoomIn.Click += (_, _) => _activeTab?.AdjustZoom(0.1);
         menu.Items.Add(zoomOut);
         menu.Items.Add(zoomReset);
@@ -674,7 +887,7 @@ public partial class BrowserWindow : Window
             IsChecked = _stateStore.RestoreLastSession
         };
         restore.Click += (_, _) => TryPersist(() => _stateStore.SetRestoreLastSession(restore.IsChecked));
-        var clearData = new MenuItem { Header = "Limpar dados do navegador…" };
+        var clearData = new MenuItem { Header = "Limpar dados do navegador…", IsEnabled = _webViewReady };
         clearData.Click += async (_, _) => await ClearBrowserDataAsync();
         menu.Items.Add(restore);
         menu.Items.Add(clearData);
@@ -768,12 +981,12 @@ public partial class BrowserWindow : Window
             AddressBox.SelectAll();
             e.Handled = true;
         }
-        else if (control && e.Key == Key.T && !shift)
+        else if (control && e.Key == Key.T && !shift && _webViewReady)
         {
             await RunUiActionAsync(() => CreateTabAsync(activate: true, isNewTabPage: true));
             e.Handled = true;
         }
-        else if (control && shift && e.Key == Key.T)
+        else if (control && shift && e.Key == Key.T && _webViewReady)
         {
             await RunUiActionAsync(ReopenClosedTabAsync);
             e.Handled = true;
@@ -854,6 +1067,42 @@ public partial class BrowserWindow : Window
         }
     }
 
+    private void CancelInitialization()
+    {
+        var cancellation = _initializationCancellation;
+        if (cancellation is null) return;
+        _initializationCancellation = null;
+        try
+        {
+            cancellation.Cancel();
+        }
+        catch (ObjectDisposedException error)
+        {
+            _diagnostics("initialization_cancel_failed", $"type={error.GetType().Name}");
+        }
+
+        if (_initializationTask is { IsCompleted: false } task)
+            _ = DisposeInitializationCancellationAsync(task, cancellation);
+        else
+            cancellation.Dispose();
+    }
+
+    private async Task DisposeInitializationCancellationAsync(Task task, CancellationTokenSource cancellation)
+    {
+        try
+        {
+            await task;
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            _diagnostics("initialization_observer_failed", $"type={error.GetType().Name}");
+        }
+        finally
+        {
+            cancellation.Dispose();
+        }
+    }
+
     private void OnClosing(object? sender, CancelEventArgs e)
     {
         if (_closing) return;
@@ -873,18 +1122,11 @@ public partial class BrowserWindow : Window
         }
 
         _closing = true;
+        CancelInitialization();
         SaveSessionForExit();
         _permissions.CancelAll();
         _downloads.CancelAll();
-        foreach (var tab in _tabs.ToArray())
-        {
-            UnwireTab(tab);
-            WebViewHost.Children.Remove(tab.View);
-            tab.Dispose();
-        }
-        _tabs.Clear();
-        _activeTab = null;
-        _lastCrashByLogicalTab.Clear();
+        RemoveAllTabs();
         _downloads.StatusChanged -= Downloads_StatusChanged;
         _downloads.Dispose();
         _permissions.Dispose();
