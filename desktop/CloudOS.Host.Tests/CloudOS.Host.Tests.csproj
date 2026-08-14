@@ -10,5 +10,8 @@
     <Compile Include="..\CloudOS.Host\Security\CloudOsOrigins.cs" Link="Security\CloudOsOrigins.cs" />
     <Compile Include="..\CloudOS.Host\Security\NavigationPolicy.cs" Link="Security\NavigationPolicy.cs" />
     <Compile Include="..\CloudOS.Host\Security\RuntimeBootstrapScript.cs" Link="Security\RuntimeBootstrapScript.cs" />
+    <Compile Include="..\CloudOS.Host\Browser\BrowserPolicy.cs" Link="Browser\BrowserPolicy.cs" />
+    <Compile Include="..\CloudOS.Host\Browser\BrowserStateStore.cs" Link="Browser\BrowserStateStore.cs" />
+    <Compile Include="..\CloudOS.Host\Browser\BrowserError.cs" Link="Browser\BrowserError.cs" />
   </ItemGroup>
 </Project>
