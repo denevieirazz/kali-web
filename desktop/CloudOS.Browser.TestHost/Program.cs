@@ -1,6 +1,8 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Threading;
 using CloudOS.Host.Browser;
 using Microsoft.Web.WebView2.Core;
 
@@ -21,9 +23,13 @@ internal static class Program
             Path.Combine(Path.GetTempPath(), "cloudos-browser-test", Guid.NewGuid().ToString("N")));
         Directory.CreateDirectory(root);
         var udf = Path.Combine(root, "WebView2");
+        var downloadsRoot = Path.Combine(root, "downloads");
+        Directory.CreateDirectory(downloadsRoot);
         var statePath = Path.Combine(root, "browser-state.v1.json");
         var backendOrigin = new Uri(options.GetValueOrDefault("backend-origin") ?? "http://127.0.0.1:65534/");
         var readyFile = options.GetValueOrDefault("ready-file");
+        var controlFile = options.GetValueOrDefault("control-file");
+        var statusFile = options.GetValueOrDefault("status-file");
         var logFile = Path.GetFullPath(options.GetValueOrDefault("log-file") ?? Path.Combine(root, "testhost.log"));
 
         void Log(string code, string? detail = null)
@@ -57,6 +63,7 @@ internal static class Program
 
         app.Startup += async (_, _) =>
         {
+            DispatcherTimer? controlTimer = null;
             try
             {
                 Log("ENVIRONMENT_CREATE_BEGIN");
@@ -66,12 +73,87 @@ internal static class Program
 
                 var policy = new BrowserPolicy(new Uri("https://cloudos.local/"), backendOrigin);
                 var store = new BrowserStateStore(statePath);
-                var window = new BrowserWindow(environment, policy, store, developerMode: true);
-                window.Closed += (_, _) => Log("BROWSER_WINDOW_CLOSED");
+                var downloadManager = new BrowserDownloadManager((_, suggestedName) =>
+                    Path.Combine(downloadsRoot, UniqueSafeFileName(downloadsRoot, suggestedName)));
+                var window = new BrowserWindow(environment, policy, store, developerMode: true, downloadManager);
+
+                void WriteStatus(bool closed = false)
+                {
+                    if (string.IsNullOrWhiteSpace(statusFile)) return;
+                    try
+                    {
+                        var snapshot = window.GetDiagnosticSnapshot();
+                        var status = new
+                        {
+                            closed,
+                            snapshot.TabCount,
+                            snapshot.ActiveDownloadCount,
+                            snapshot.ActiveErrorCode,
+                            snapshot.ActiveIsNewTab,
+                            snapshot.Closing
+                        };
+                        Directory.CreateDirectory(Path.GetDirectoryName(statusFile) ?? root);
+                        File.WriteAllText(statusFile, JsonSerializer.Serialize(status));
+                    }
+                    catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException)
+                    {
+                        Log("STATUS_WRITE_FAILED", error.GetType().Name);
+                    }
+                }
+
+                window.Closed += (_, _) =>
+                {
+                    controlTimer?.Stop();
+                    WriteStatus(closed: true);
+                    Log("BROWSER_WINDOW_CLOSED");
+                };
                 await window.InitializeAsync(url);
                 window.Show();
                 window.Activate();
                 Log("BROWSER_WINDOW_READY");
+                WriteStatus();
+
+                if (!string.IsNullOrWhiteSpace(controlFile) || !string.IsNullOrWhiteSpace(statusFile))
+                {
+                    controlTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
+                    controlTimer.Tick += (_, _) =>
+                    {
+                        if (!window.IsLoaded) return;
+                        WriteStatus();
+                        if (string.IsNullOrWhiteSpace(controlFile) || !File.Exists(controlFile)) return;
+                        string command;
+                        try
+                        {
+                            command = File.ReadAllText(controlFile).Trim();
+                            File.Delete(controlFile);
+                        }
+                        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                        {
+                            Log("CONTROL_READ_FAILED", error.GetType().Name);
+                            return;
+                        }
+
+                        switch (command)
+                        {
+                            case "cancel-downloads":
+                                Log("CONTROL_CANCEL_DOWNLOADS", $"count={window.CancelDownloads()}");
+                                WriteStatus();
+                                break;
+                            case "close-browser":
+                                Log("CONTROL_CLOSE_BROWSER");
+                                window.CloseForHostShutdown();
+                                break;
+                            case "snapshot":
+                                Log("CONTROL_SNAPSHOT");
+                                WriteStatus();
+                                break;
+                            default:
+                                Log("CONTROL_UNKNOWN");
+                                break;
+                        }
+                    };
+                    controlTimer.Start();
+                }
 
                 if (!string.IsNullOrWhiteSpace(readyFile))
                 {
@@ -81,6 +163,7 @@ internal static class Program
             }
             catch (Exception error)
             {
+                controlTimer?.Stop();
                 var safe = Sanitize(error.ToString(), root);
                 Log("STARTUP_FAILED", safe);
                 if (!string.IsNullOrWhiteSpace(readyFile))
@@ -111,6 +194,24 @@ internal static class Program
                 values[key] = "1";
         }
         return values;
+    }
+
+    private static string UniqueSafeFileName(string directory, string suggestedName)
+    {
+        var invalid = Path.GetInvalidFileNameChars().ToHashSet();
+        var source = Path.GetFileName(suggestedName);
+        var safe = new string(source.Where(character => !invalid.Contains(character) && !char.IsControl(character)).ToArray()).Trim();
+        if (safe.Length == 0) safe = "download.bin";
+        if (safe.Length > 128) safe = safe[..128];
+        var candidate = safe;
+        var counter = 1;
+        while (File.Exists(Path.Combine(directory, candidate)))
+        {
+            var extension = Path.GetExtension(safe);
+            var stem = Path.GetFileNameWithoutExtension(safe);
+            candidate = $"{stem}-{counter++}{extension}";
+        }
+        return candidate;
     }
 
     private static string Sanitize(string? value, string root)
