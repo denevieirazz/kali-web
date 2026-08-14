@@ -1,11 +1,18 @@
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Windows;
 using Microsoft.Win32;
 using Microsoft.Web.WebView2.Core;
-using System.IO;
-using System.Windows;
 
 namespace CloudOS.Host.Browser;
 
-public sealed record BrowserDownloadStatus(string Id, string FileName, long BytesReceived, long? TotalBytes, string State, string? InterruptReason);
+public sealed record BrowserDownloadStatus(
+    string Id,
+    string FileName,
+    long BytesReceived,
+    long? TotalBytes,
+    string State,
+    string? InterruptReason);
 
 public sealed class BrowserDownloadManager : IDisposable
 {
@@ -18,7 +25,13 @@ public sealed class BrowserDownloadManager : IDisposable
 
     public void Handle(Window owner, CoreWebView2DownloadStartingEventArgs args)
     {
-        if (_disposed) { args.Cancel = true; return; }
+        if (_disposed)
+        {
+            args.Cancel = true;
+            args.Handled = true;
+            return;
+        }
+
         var deferral = args.GetDeferral();
         try
         {
@@ -38,17 +51,34 @@ public sealed class BrowserDownloadManager : IDisposable
                 args.Handled = true;
                 return;
             }
+
             args.ResultFilePath = dialog.FileName;
             args.Handled = true;
             Track(args.DownloadOperation, dialog.FileName);
         }
-        finally { deferral.Complete(); }
+        finally
+        {
+            deferral.Complete();
+        }
     }
 
-    public void CancelAll()
+    public int CancelAll()
     {
+        var requested = 0;
         foreach (var item in _active.Values.ToArray())
-            try { item.Operation.Cancel(); } catch { }
+        {
+            try
+            {
+                if (item.Operation.State != CoreWebView2DownloadState.InProgress) continue;
+                item.Operation.Cancel();
+                requested++;
+            }
+            catch (Exception error) when (error is InvalidOperationException or ObjectDisposedException or COMException)
+            {
+                PublishFailure(item, "CancelFailed", error.GetType().Name);
+            }
+        }
+        return requested;
     }
 
     private void Track(CoreWebView2DownloadOperation operation, string path)
@@ -59,8 +89,9 @@ public sealed class BrowserDownloadManager : IDisposable
         tracked.BytesHandler = (_, _) => Publish(tracked);
         tracked.StateHandler = (_, _) =>
         {
+            if (operation.State != CoreWebView2DownloadState.InProgress)
+                Untrack(tracked);
             Publish(tracked);
-            if (operation.State != CoreWebView2DownloadState.InProgress) Untrack(tracked);
         };
         operation.BytesReceivedChanged += tracked.BytesHandler;
         operation.StateChanged += tracked.StateHandler;
@@ -70,28 +101,46 @@ public sealed class BrowserDownloadManager : IDisposable
     private void Publish(TrackedDownload tracked)
     {
         long? total = null;
-        var expected = tracked.Operation.TotalBytesToReceive;
-        if (expected.HasValue && expected.Value <= long.MaxValue) total = (long)expected.Value;
         string? reason = null;
         try
         {
-            if (tracked.Operation.State == CoreWebView2DownloadState.Interrupted) reason = tracked.Operation.InterruptReason.ToString();
+            var expected = tracked.Operation.TotalBytesToReceive;
+            if (expected.HasValue && expected.Value <= long.MaxValue) total = (long)expected.Value;
+            if (tracked.Operation.State == CoreWebView2DownloadState.Interrupted)
+                reason = tracked.Operation.InterruptReason.ToString();
+
+            StatusChanged?.Invoke(this, new BrowserDownloadStatus(
+                tracked.Id,
+                Path.GetFileName(tracked.Path),
+                tracked.Operation.BytesReceived,
+                total,
+                tracked.Operation.State.ToString(),
+                reason));
         }
-        catch { }
+        catch (Exception error) when (error is InvalidOperationException or ObjectDisposedException or COMException)
+        {
+            PublishFailure(tracked, "Unavailable", error.GetType().Name);
+        }
+    }
+
+    private void PublishFailure(TrackedDownload tracked, string state, string reason)
+    {
         StatusChanged?.Invoke(this, new BrowserDownloadStatus(
             tracked.Id,
             Path.GetFileName(tracked.Path),
-            tracked.Operation.BytesReceived,
-            total,
-            tracked.Operation.State.ToString(),
+            0,
+            null,
+            state,
             reason));
     }
 
     private void Untrack(TrackedDownload tracked)
     {
         if (!_active.Remove(tracked.Id)) return;
-        if (tracked.BytesHandler is not null) tracked.Operation.BytesReceivedChanged -= tracked.BytesHandler;
-        if (tracked.StateHandler is not null) tracked.Operation.StateChanged -= tracked.StateHandler;
+        if (tracked.BytesHandler is not null)
+            tracked.Operation.BytesReceivedChanged -= tracked.BytesHandler;
+        if (tracked.StateHandler is not null)
+            tracked.Operation.StateChanged -= tracked.StateHandler;
     }
 
     public void Dispose()
@@ -99,7 +148,8 @@ public sealed class BrowserDownloadManager : IDisposable
         if (_disposed) return;
         _disposed = true;
         CancelAll();
-        foreach (var tracked in _active.Values.ToArray()) Untrack(tracked);
+        foreach (var tracked in _active.Values.ToArray())
+            Untrack(tracked);
     }
 
     private sealed class TrackedDownload(string id, string path, CoreWebView2DownloadOperation operation)
