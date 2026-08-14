@@ -17,7 +17,13 @@ public sealed record BrowserDownloadStatus(
 public sealed class BrowserDownloadManager : IDisposable
 {
     private readonly Dictionary<string, TrackedDownload> _active = new(StringComparer.Ordinal);
+    private readonly Func<Window, string, string?>? _destinationSelector;
     private bool _disposed;
+
+    public BrowserDownloadManager(Func<Window, string, string?>? destinationSelector = null)
+    {
+        _destinationSelector = destinationSelector;
+    }
 
     public event EventHandler<BrowserDownloadStatus>? StatusChanged;
     public bool HasActiveDownloads => _active.Count > 0;
@@ -37,24 +43,34 @@ public sealed class BrowserDownloadManager : IDisposable
         {
             var suggestedPath = args.ResultFilePath;
             var suggestedName = string.IsNullOrWhiteSpace(suggestedPath) ? "download" : Path.GetFileName(suggestedPath);
-            var dialog = new SaveFileDialog
-            {
-                Title = "Salvar download — Navegador CloudOS",
-                FileName = string.IsNullOrWhiteSpace(suggestedName) ? "download" : suggestedName,
-                OverwritePrompt = true,
-                CheckPathExists = true,
-                AddExtension = false
-            };
-            if (dialog.ShowDialog(owner) != true || string.IsNullOrWhiteSpace(dialog.FileName))
+            if (string.IsNullOrWhiteSpace(suggestedName)) suggestedName = "download";
+            var destination = _destinationSelector is null
+                ? SelectDestination(owner, suggestedName)
+                : _destinationSelector(owner, suggestedName);
+
+            if (string.IsNullOrWhiteSpace(destination) || !Path.IsPathFullyQualified(destination))
             {
                 args.Cancel = true;
                 args.Handled = true;
                 return;
             }
 
-            args.ResultFilePath = dialog.FileName;
+            var directory = Path.GetDirectoryName(destination);
+            if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+            {
+                args.Cancel = true;
+                args.Handled = true;
+                return;
+            }
+
+            args.ResultFilePath = destination;
             args.Handled = true;
-            Track(args.DownloadOperation, dialog.FileName);
+            Track(args.DownloadOperation, destination);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            args.Cancel = true;
+            args.Handled = true;
         }
         finally
         {
@@ -79,6 +95,21 @@ public sealed class BrowserDownloadManager : IDisposable
             }
         }
         return requested;
+    }
+
+    private static string? SelectDestination(Window owner, string suggestedName)
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = "Salvar download — Navegador CloudOS",
+            FileName = suggestedName,
+            OverwritePrompt = true,
+            CheckPathExists = true,
+            AddExtension = false
+        };
+        return dialog.ShowDialog(owner) == true && !string.IsNullOrWhiteSpace(dialog.FileName)
+            ? dialog.FileName
+            : null;
     }
 
     private void Track(CoreWebView2DownloadOperation operation, string path)
