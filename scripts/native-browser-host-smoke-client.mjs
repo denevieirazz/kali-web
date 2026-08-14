@@ -37,6 +37,7 @@ try {
   }
   if (!page) throw new Error('Documento confiável do Shell não foi encontrado.');
 
+  let output;
   if (action === 'open-via-start') {
     const username = process.env.CLOUDOS_SMOKE_USERNAME;
     const password = process.env.CLOUDOS_SMOKE_PASSWORD;
@@ -65,7 +66,6 @@ try {
 
     const launcher = page.locator('.cloudos-browser-launcher');
     await launcher.waitFor({ state: 'visible', timeout: 10_000 });
-    const launcherSeen = true;
     try {
       await launcher.waitFor({ state: 'detached', timeout: 15_000 });
     } catch {
@@ -74,63 +74,61 @@ try {
       throw new Error(`Launcher permaneceu aberto. code=${code || 'none'} message=${message || 'none'}`);
     }
 
-    process.stdout.write(JSON.stringify({
+    output = {
       action,
       desktopMounted: true,
-      launcherSeen,
+      launcherSeen: true,
       launcherGone: true,
-    }));
-    process.exitCode = 0;
-    return;
+    };
+  } else {
+    output = await page.evaluate(async (requestedAction) => {
+      const transport = window.chrome?.webview;
+      const nonce = window.__cloudosNativeNonce;
+      if (!transport || !nonce) throw new Error('Bridge nativa não está pronta.');
+
+      const request = (method, params = {}) => new Promise((resolve, reject) => {
+        const id = crypto.randomUUID();
+        const timer = window.setTimeout(() => {
+          transport.removeEventListener('message', onMessage);
+          reject(new Error(`Timeout em ${method}`));
+        }, 30_000);
+        function onMessage(event) {
+          const message = event.data;
+          if (!message || message.type !== 'response' || message.id !== id) return;
+          window.clearTimeout(timer);
+          transport.removeEventListener('message', onMessage);
+          if (message.ok) resolve(message.result);
+          else reject(new Error(`${message.error?.code || 'NATIVE_REQUEST_FAILED'}:${message.error?.message || ''}`));
+        }
+        transport.addEventListener('message', onMessage);
+        transport.postMessage({ v: 1, id, type: 'request', method, nonce, params });
+      });
+
+      await request('bridge.handshake');
+      if (requestedAction === 'open-twice') {
+        const [first, second] = await Promise.all([
+          request('browser.open', {}),
+          request('browser.open', {}),
+        ]);
+        return { action: requestedAction, first, second };
+      }
+      if (requestedAction === 'open-once') {
+        const opened = await request('browser.open', {});
+        return { action: requestedAction, opened };
+      }
+      if (requestedAction === 'ping') {
+        const host = await request('host.getState', {});
+        return {
+          action: requestedAction,
+          nativeHost: host?.nativeHost === true,
+          platform: host?.platform || null,
+        };
+      }
+      throw new Error('Ação de smoke desconhecida.');
+    }, action);
   }
 
-  const result = await page.evaluate(async (requestedAction) => {
-    const transport = window.chrome?.webview;
-    const nonce = window.__cloudosNativeNonce;
-    if (!transport || !nonce) throw new Error('Bridge nativa não está pronta.');
-
-    const request = (method, params = {}) => new Promise((resolve, reject) => {
-      const id = crypto.randomUUID();
-      const timer = window.setTimeout(() => {
-        transport.removeEventListener('message', onMessage);
-        reject(new Error(`Timeout em ${method}`));
-      }, 30_000);
-      function onMessage(event) {
-        const message = event.data;
-        if (!message || message.type !== 'response' || message.id !== id) return;
-        window.clearTimeout(timer);
-        transport.removeEventListener('message', onMessage);
-        if (message.ok) resolve(message.result);
-        else reject(new Error(`${message.error?.code || 'NATIVE_REQUEST_FAILED'}:${message.error?.message || ''}`));
-      }
-      transport.addEventListener('message', onMessage);
-      transport.postMessage({ v: 1, id, type: 'request', method, nonce, params });
-    });
-
-    await request('bridge.handshake');
-    if (requestedAction === 'open-twice') {
-      const [first, second] = await Promise.all([
-        request('browser.open', {}),
-        request('browser.open', {}),
-      ]);
-      return { action: requestedAction, first, second };
-    }
-    if (requestedAction === 'open-once') {
-      const opened = await request('browser.open', {});
-      return { action: requestedAction, opened };
-    }
-    if (requestedAction === 'ping') {
-      const host = await request('host.getState', {});
-      return {
-        action: requestedAction,
-        nativeHost: host?.nativeHost === true,
-        platform: host?.platform || null,
-      };
-    }
-    throw new Error('Ação de smoke desconhecida.');
-  }, action);
-
-  process.stdout.write(JSON.stringify(result));
+  process.stdout.write(JSON.stringify(output));
 } finally {
   if (browser?.isConnected()) {
     try {
