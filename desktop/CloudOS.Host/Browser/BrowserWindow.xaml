@@ -3,17 +3,17 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Navegador CloudOS" Width="1180" Height="760" MinWidth="760" MinHeight="520"
         WindowStartupLocation="CenterOwner" Background="{StaticResource CloudOsBackground}"
-        Closing="OnClosing">
+        Closing="OnClosing" PreviewKeyDown="OnPreviewKeyDown">
   <Grid Background="{StaticResource CloudOsBackground}">
     <Grid.RowDefinitions>
       <RowDefinition Height="42" />
       <RowDefinition Height="46" />
       <RowDefinition Height="*" />
-      <RowDefinition Height="28" />
+      <RowDefinition Height="32" />
     </Grid.RowDefinitions>
 
     <DockPanel Grid.Row="0" LastChildFill="True" Background="#0D1525">
-      <Button DockPanel.Dock="Right" Width="42" Margin="4" Content="+" Click="NewTab_Click" ToolTip="Nova aba" />
+      <Button DockPanel.Dock="Right" Width="42" Margin="4" Content="+" Click="NewTab_Click" ToolTip="Nova aba (Ctrl+T)" />
       <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
         <StackPanel x:Name="TabStrip" Orientation="Horizontal" Margin="6,5" />
       </ScrollViewer>
@@ -63,7 +63,9 @@
     </Grid>
 
     <DockPanel Grid.Row="3" Background="#0D1525" LastChildFill="True">
-      <TextBlock x:Name="StatusText" Margin="10,5" Foreground="#8FA2BE" FontSize="11" Text="Pronto" />
+      <Button x:Name="CancelDownloadsButton" DockPanel.Dock="Right" Margin="6,3" Padding="10,2"
+              Content="Cancelar downloads" Visibility="Collapsed" Click="CancelDownloads_Click" />
+      <TextBlock x:Name="StatusText" Margin="10,7" Foreground="#8FA2BE" FontSize="11" Text="Pronto" />
     </DockPanel>
   </Grid>
 </Window>
