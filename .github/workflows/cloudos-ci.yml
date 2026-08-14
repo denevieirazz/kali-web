@@ -15,7 +15,7 @@ on:
 jobs:
   validate:
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
 
     steps:
       - name: 1. Checkout repository
@@ -60,34 +60,53 @@ jobs:
       - name: 12. Run Host Tests
         run: dotnet run --project desktop/CloudOS.Host.Tests/CloudOS.Host.Tests.csproj -c Release
 
-      - name: 13. Build Bootstrap
+      - name: 13. Run Browser response contract tests
+        run: dotnet run --project desktop/CloudOS.Browser.Contracts.Tests/CloudOS.Browser.Contracts.Tests.csproj -c Release
+
+      - name: 14. Test source and published-host freshness policy
+        shell: pwsh
+        run: ./scripts/test-native-host-freshness.ps1
+
+      - name: 15. Build Bootstrap
         run: dotnet build desktop/CloudOS.Bootstrap/CloudOS.Bootstrap.csproj -c Release
 
-      - name: 14. Run Bootstrap Tests
+      - name: 16. Run Bootstrap Tests
         run: dotnet run --project desktop/CloudOS.Bootstrap.Tests/CloudOS.Bootstrap.Tests.csproj -c Release
 
-      - name: 15. Build Browser TestHost
+      - name: 17. Build Browser TestHost
         run: dotnet build desktop/CloudOS.Browser.TestHost/CloudOS.Browser.TestHost.csproj -c Release
 
-      - name: 16. Run existing Playwright characterization
-        run: npx playwright test --grep-invert "Navegador CloudOS — WebView2 real"
+      - name: 18. Run existing Playwright characterization
+        run: npx playwright test --grep-invert "Navegador CloudOS — WebView2 real|Navegador CloudOS — lifecycle Windows"
 
-      - name: 17. Run native Browser WebView2 tests
+      - name: 19. Run Browser opening lifecycle tests
+        run: npx playwright test tests/playwright/native-browser-lifecycle.spec.ts --output=test-results/native-browser-lifecycle --reporter=list
+
+      - name: 20. Run native Browser WebView2 tests
         run: npx playwright test tests/playwright/native-browser.spec.ts --output=test-results/native-browser --reporter=list
 
-      - name: 18. Smoke native Host Browser lifecycle
+      - name: 21. Smoke native Host Browser lifecycle
         if: github.ref == 'refs/heads/feature/cloudos-native-browser' || github.ref == 'refs/heads/fix/native-browser-windows-validation' || github.head_ref == 'feature/cloudos-native-browser' || github.head_ref == 'fix/native-browser-windows-validation'
         shell: pwsh
         run: ./scripts/test-native-browser-host-smoke.ps1
 
-      - name: 19. Check feature diff whitespace
+      - name: 22. Check feature diff whitespace
         if: github.ref == 'refs/heads/feature/cloudos-native-browser' || github.ref == 'refs/heads/fix/native-browser-windows-validation' || github.head_ref == 'feature/cloudos-native-browser' || github.head_ref == 'fix/native-browser-windows-validation'
         shell: pwsh
         run: |
           git fetch origin integration/cloudos-foundation --no-tags
           git diff --check origin/integration/cloudos-foundation...HEAD
 
-      - name: 20. Upload sanitized native Browser diagnostics on failure
+      - name: 23. Upload sanitized Browser lifecycle diagnostics on failure
+        if: failure() && hashFiles('test-results/native-browser-lifecycle/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudos-native-browser-lifecycle-failure-${{ github.run_id }}
+          path: test-results/native-browser-lifecycle/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: 24. Upload sanitized native Browser diagnostics on failure
         if: failure() && hashFiles('test-results/native-browser/**') != ''
         uses: actions/upload-artifact@v4
         with:
