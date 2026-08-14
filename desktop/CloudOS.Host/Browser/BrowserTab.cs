@@ -12,6 +12,7 @@ public sealed class BrowserTab : IDisposable
     private readonly Window _promptOwner;
     private readonly BrowserPermissionController _permissions;
     private readonly BrowserDownloadManager _downloads;
+    private readonly BrowserCredentialController _credentials = new();
     private bool _disposed;
 
     public BrowserTab(
@@ -183,8 +184,18 @@ public sealed class BrowserTab : IDisposable
 
     private void OnDownloadStarting(object? sender, CoreWebView2DownloadStartingEventArgs e) => _downloads.Handle(_promptOwner, e);
 
-    private void OnClientCertificateRequested(object? sender, CoreWebView2ClientCertificateRequestedEventArgs e) => e.Handled = true;
-    private void OnBasicAuthenticationRequested(object? sender, CoreWebView2BasicAuthenticationRequestedEventArgs e) => e.Cancel = true;
+    private async void OnClientCertificateRequested(object? sender, CoreWebView2ClientCertificateRequestedEventArgs e)
+    {
+        try { await _credentials.HandleClientCertificateAsync(_promptOwner, e); }
+        catch { e.Handled = true; }
+    }
+
+    private async void OnBasicAuthenticationRequested(object? sender, CoreWebView2BasicAuthenticationRequestedEventArgs e)
+    {
+        try { await _credentials.HandleBasicAuthenticationAsync(_promptOwner, e); }
+        catch { e.Cancel = true; }
+    }
+
     private void OnProcessFailed(object? sender, CoreWebView2ProcessFailedEventArgs e) => RendererFailed?.Invoke(this, EventArgs.Empty);
 
     private void OnWebResourceRequested(object? sender, CoreWebView2WebResourceRequestedEventArgs e)
