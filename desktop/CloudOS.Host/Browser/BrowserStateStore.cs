@@ -73,34 +73,65 @@ public sealed class BrowserStateStore
 
     private BrowserStateDocument Load()
     {
+        if (!File.Exists(_path)) return TryLoadBackup() ?? Empty();
         try
         {
-            if (!File.Exists(_path)) return Empty();
             return Normalize(JsonSerializer.Deserialize<BrowserStateDocument>(File.ReadAllText(_path), _json));
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
         {
             TryQuarantineCorruptFile();
+            var backup = TryLoadBackup();
+            if (backup is not null)
+            {
+                try { SaveDocument(backup); } catch { }
+                return backup;
+            }
             return Empty();
         }
     }
 
-    private void Save()
+    private BrowserStateDocument? TryLoadBackup()
+    {
+        var backupPath = _path + ".bak";
+        if (!File.Exists(backupPath)) return null;
+        try
+        {
+            return Normalize(JsonSerializer.Deserialize<BrowserStateDocument>(File.ReadAllText(backupPath), _json));
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
+        }
+    }
+
+    private void Save() => SaveDocument(_state);
+
+    private void SaveDocument(BrowserStateDocument document)
     {
         var directory = Path.GetDirectoryName(_path) ?? throw new InvalidOperationException("Diretório de estado inválido.");
         Directory.CreateDirectory(directory);
         var temp = _path + ".tmp";
         var backup = _path + ".bak";
-        File.WriteAllText(temp, JsonSerializer.Serialize(_state, _json));
+        File.WriteAllText(temp, JsonSerializer.Serialize(document, _json));
         if (File.Exists(_path))
         {
             try { File.Replace(temp, _path, backup, ignoreMetadataErrors: true); }
-            catch (PlatformNotSupportedException) { File.Move(temp, _path, overwrite: true); }
-            catch (IOException) { File.Move(temp, _path, overwrite: true); }
+            catch (PlatformNotSupportedException)
+            {
+                File.Copy(_path, backup, overwrite: true);
+                File.Move(temp, _path, overwrite: true);
+            }
+            catch (IOException)
+            {
+                File.Copy(_path, backup, overwrite: true);
+                File.Move(temp, _path, overwrite: true);
+            }
         }
         else
         {
             File.Move(temp, _path);
+            File.Copy(_path, backup, overwrite: true);
         }
     }
 

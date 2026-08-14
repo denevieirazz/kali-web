@@ -9,7 +9,6 @@ public sealed record BrowserOpenResult(bool Opened, bool Reused);
 
 public sealed class BrowserManager : IDisposable
 {
-    public const string BrowserStateFileName = "browser-state.v1.json";
     private readonly Dispatcher _dispatcher;
     private readonly bool _developerMode;
     private readonly BrowserPolicy _policy;
@@ -25,9 +24,13 @@ public sealed class BrowserManager : IDisposable
         _dispatcher = dispatcher;
         _developerMode = developerMode;
         _policy = new BrowserPolicy(shellOrigin, backendOrigin);
-        _browserRoot = GetBrowserRoot();
-        _userDataFolder = Path.Combine(_browserRoot, "WebView2");
-        _stateStore = new BrowserStateStore(Path.Combine(_browserRoot, BrowserStateFileName));
+        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        _browserRoot = BrowserStorageLayout.BrowserRoot(local);
+        _userDataFolder = BrowserStorageLayout.BrowserUserDataFolder(local);
+        var shellFolder = BrowserStorageLayout.ShellUserDataFolder(local);
+        if (!BrowserStorageLayout.AreIsolated(_userDataFolder, shellFolder))
+            throw new InvalidOperationException("BROWSER_UDF_ISOLATION_FAILED");
+        _stateStore = new BrowserStateStore(BrowserStorageLayout.BrowserStatePath(local));
     }
 
     public string UserDataFolder => _userDataFolder;
@@ -50,6 +53,8 @@ public sealed class BrowserManager : IDisposable
 
         Directory.CreateDirectory(_userDataFolder);
         _environment ??= await CoreWebView2Environment.CreateAsync(userDataFolder: _userDataFolder);
+        if (!BrowserStorageLayout.AreIsolated(_environment.UserDataFolder, BrowserStorageLayout.ShellUserDataFolder(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData))))
+            throw new InvalidOperationException("BROWSER_UDF_ISOLATION_FAILED");
         var actual = Path.GetFullPath(_environment.UserDataFolder).TrimEnd(Path.DirectorySeparatorChar);
         var expected = Path.GetFullPath(_userDataFolder).TrimEnd(Path.DirectorySeparatorChar);
         if (!actual.Equals(expected, StringComparison.OrdinalIgnoreCase))
@@ -78,18 +83,6 @@ public sealed class BrowserManager : IDisposable
             _window = null;
         }
     }
-
-    public static string GetBrowserRoot() => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "CloudOS", "Browser");
-
-    public static string GetShellUserDataFolder() => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "CloudOS", "WebView2");
-
-    public static bool AreUserDataFoldersIsolated(string browserFolder, string shellFolder) =>
-        !Path.GetFullPath(browserFolder).TrimEnd(Path.DirectorySeparatorChar)
-            .Equals(Path.GetFullPath(shellFolder).TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
 
     private void OnWindowClosed(object? sender, EventArgs e)
     {
