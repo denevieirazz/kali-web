@@ -32,6 +32,9 @@ internal static class Program
         var controlFile = options.GetValueOrDefault("control-file");
         var statusFile = options.GetValueOrDefault("status-file");
         var logFile = Path.GetFullPath(options.GetValueOrDefault("log-file") ?? Path.Combine(root, "testhost.log"));
+        var environmentDelayMs = ReadNonNegativeInt(options, "environment-delay-ms");
+        var failEnvironment = options.TryGetValue("environment-fail", out var failValue) &&
+            (failValue == "1" || failValue.Equals("true", StringComparison.OrdinalIgnoreCase));
 
         void Log(string code, string? detail = null)
         {
@@ -56,27 +59,43 @@ internal static class Program
         app.Resources["CloudOsAccent"] = new SolidColorBrush(Color.FromRgb(91, 146, 238));
         app.DispatcherUnhandledException += (_, eventArgs) =>
         {
-            Log("DISPATCHER_UNHANDLED", eventArgs.Exception.ToString());
+            Log("DISPATCHER_UNHANDLED", eventArgs.Exception.GetType().Name);
             eventArgs.Handled = true;
             app.Shutdown(3);
         };
         app.Exit += (_, eventArgs) => Log("EXIT", $"code={eventArgs.ApplicationExitCode}");
 
-        app.Startup += async (_, _) =>
+        app.Startup += (_, _) =>
         {
             DispatcherTimer? controlTimer = null;
+            Task? initializationObserver = null;
             try
             {
-                Log("ENVIRONMENT_CREATE_BEGIN");
-                var environmentOptions = new CoreWebView2EnvironmentOptions($"--remote-debugging-port={debugPort} --disable-popup-blocking");
-                var environment = await CoreWebView2Environment.CreateAsync(null, udf, environmentOptions);
-                Log("ENVIRONMENT_READY");
+                async Task<CoreWebView2Environment> CreateEnvironmentAsync(CancellationToken cancellationToken)
+                {
+                    Log("ENVIRONMENT_CREATE_BEGIN");
+                    if (environmentDelayMs > 0)
+                        await Task.Delay(environmentDelayMs, cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (failEnvironment)
+                        throw new InvalidOperationException("TEST_ENVIRONMENT_FAILURE");
+                    var environmentOptions = new CoreWebView2EnvironmentOptions($"--remote-debugging-port={debugPort} --disable-popup-blocking");
+                    var environment = await CoreWebView2Environment.CreateAsync(null, udf, environmentOptions);
+                    Log("ENVIRONMENT_READY");
+                    return environment;
+                }
 
                 var policy = new BrowserPolicy(new Uri("https://cloudos.local/"), backendOrigin);
                 var store = new BrowserStateStore(statePath);
                 var downloadManager = new BrowserDownloadManager((_, suggestedName) =>
                     Path.Combine(downloadsRoot, UniqueSafeFileName(downloadsRoot, suggestedName)));
-                var window = new BrowserWindow(environment, policy, store, developerMode: true, downloadManager);
+                var window = new BrowserWindow(
+                    CreateEnvironmentAsync,
+                    policy,
+                    store,
+                    developerMode: true,
+                    downloadManager,
+                    Log);
 
                 void WriteStatus(bool closed = false)
                 {
@@ -87,11 +106,15 @@ internal static class Program
                         var status = new
                         {
                             closed,
-                            snapshot.TabCount,
-                            snapshot.ActiveDownloadCount,
-                            snapshot.ActiveErrorCode,
-                            snapshot.ActiveIsNewTab,
-                            snapshot.Closing
+                            tabCount = snapshot.TabCount,
+                            activeDownloadCount = snapshot.ActiveDownloadCount,
+                            activeErrorCode = snapshot.ActiveErrorCode,
+                            activeIsNewTab = snapshot.ActiveIsNewTab,
+                            closing = snapshot.Closing,
+                            windowVisible = snapshot.WindowVisible,
+                            initializationStarted = snapshot.InitializationStarted,
+                            webViewReady = snapshot.WebViewReady,
+                            initializationErrorCode = snapshot.InitializationErrorCode
                         };
                         Directory.CreateDirectory(Path.GetDirectoryName(statusFile) ?? root);
                         File.WriteAllText(statusFile, JsonSerializer.Serialize(status));
@@ -108,11 +131,17 @@ internal static class Program
                     WriteStatus(closed: true);
                     Log("BROWSER_WINDOW_CLOSED");
                 };
+
                 window.Show();
                 window.Activate();
-                await window.InitializeAsync(url);
-                Log("BROWSER_WINDOW_READY");
+                Log("BROWSER_WINDOW_SHOWN", $"visible={window.IsVisible.ToString().ToLowerInvariant()}");
                 WriteStatus();
+
+                if (!string.IsNullOrWhiteSpace(readyFile))
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(readyFile) ?? root);
+                    File.WriteAllText(readyFile, "window-visible");
+                }
 
                 if (!string.IsNullOrWhiteSpace(controlFile) || !string.IsNullOrWhiteSpace(statusFile))
                 {
@@ -161,16 +190,38 @@ internal static class Program
                     controlTimer.Start();
                 }
 
-                if (!string.IsNullOrWhiteSpace(readyFile))
+                async Task ObserveInitializationAsync()
                 {
-                    Directory.CreateDirectory(Path.GetDirectoryName(readyFile) ?? root);
-                    File.WriteAllText(readyFile, "ready");
+                    try
+                    {
+                        await window.StartInitializationAsync(url);
+                        var snapshot = window.GetDiagnosticSnapshot();
+                        Log(snapshot.WebViewReady ? "BROWSER_WEBVIEW_READY" : "BROWSER_WEBVIEW_NOT_READY",
+                            snapshot.InitializationErrorCode is null ? null : $"code={snapshot.InitializationErrorCode}");
+                        WriteStatus();
+                    }
+                    catch (Exception error) when (error is not OutOfMemoryException)
+                    {
+                        Log("BROWSER_INITIALIZATION_OBSERVER_FAILED", error.GetType().Name);
+                        WriteStatus();
+                    }
                 }
+
+                initializationObserver = ObserveInitializationAsync();
+                _ = initializationObserver.ContinueWith(
+                    completed =>
+                    {
+                        if (completed.IsFaulted)
+                            Log("BROWSER_INITIALIZATION_TASK_FAULTED", completed.Exception?.GetBaseException().GetType().Name);
+                    },
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
             }
             catch (Exception error)
             {
                 controlTimer?.Stop();
-                var safe = Sanitize(error.ToString(), root);
+                var safe = Sanitize(error.GetType().Name, root);
                 Log("STARTUP_FAILED", safe);
                 if (!string.IsNullOrWhiteSpace(readyFile))
                 {
@@ -200,6 +251,14 @@ internal static class Program
                 values[key] = "1";
         }
         return values;
+    }
+
+    private static int ReadNonNegativeInt(IReadOnlyDictionary<string, string> options, string key)
+    {
+        if (!options.TryGetValue(key, out var raw)) return 0;
+        if (!int.TryParse(raw, out var value) || value < 0 || value > 120_000)
+            throw new ArgumentException($"--{key} inválido.");
+        return value;
     }
 
     private static string UniqueSafeFileName(string directory, string suggestedName)
