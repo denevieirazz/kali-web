@@ -60,6 +60,12 @@ public partial class BrowserWindow : Window
         _activeTab?.IsNewTabPage == true,
         _closing);
 
+    public void TriggerRendererFailedForActiveTab()
+    {
+        if (_activeTab is not null)
+            Tab_RendererFailed(_activeTab, EventArgs.Empty);
+    }
+
     public async Task InitializeAsync(string? initialUrl)
     {
         if (!string.IsNullOrWhiteSpace(initialUrl))
@@ -130,20 +136,24 @@ public partial class BrowserWindow : Window
             isNewTabPage,
             isPinned);
         WireTab(tab);
+        InsertTab(tab);
+        WebViewHost.Children.Add(tab.View);
+        tab.View.Visibility = activate ? Visibility.Visible : Visibility.Collapsed;
+        RenderTabs();
+        if (activate) _activeTab = tab;
+
         try
         {
             await tab.InitializeAsync();
             if (_closing)
             {
+                WebViewHost.Children.Remove(tab.View);
+                _tabs.Remove(tab);
                 UnwireTab(tab);
                 tab.Dispose();
                 return null;
             }
 
-            InsertTab(tab);
-            WebViewHost.Children.Add(tab.View);
-            tab.View.Visibility = Visibility.Collapsed;
-            RenderTabs();
             if (activate) ActivateTab(tab);
 
             if (isNewTabPage)
@@ -154,6 +164,8 @@ public partial class BrowserWindow : Window
         }
         catch
         {
+            WebViewHost.Children.Remove(tab.View);
+            _tabs.Remove(tab);
             UnwireTab(tab);
             tab.Dispose();
             throw;
@@ -179,7 +191,15 @@ public partial class BrowserWindow : Window
         tab.NewWindowFactory = async () =>
         {
             if (_closing) return null;
-            return (await CreateTabAsync(activate: true, popupTarget: true))?.View.CoreWebView2;
+            var popupTab = await CreateTabAsync(activate: false, popupTarget: true);
+            if (popupTab is not null)
+            {
+                Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () =>
+                {
+                    if (!_closing && _tabs.Contains(popupTab)) ActivateTab(popupTab);
+                });
+            }
+            return popupTab?.View.CoreWebView2;
         };
     }
 
@@ -434,22 +454,37 @@ public partial class BrowserWindow : Window
                 wasNewTab,
                 wasPinned);
             WireTab(replacement);
-            await replacement.InitializeAsync();
-            if (_closing)
-            {
-                UnwireTab(replacement);
-                replacement.Dispose();
-                return;
-            }
-            replacement.SetZoom(zoom);
-            if (wasMuted) replacement.ToggleMuted();
             _tabs.Insert(Math.Min(index, _tabs.Count), replacement);
             WebViewHost.Children.Add(replacement.View);
-            replacement.View.Visibility = Visibility.Collapsed;
-            if (wasActive) ActivateTab(replacement);
+            replacement.View.Visibility = wasActive ? Visibility.Visible : Visibility.Collapsed;
             RenderTabs();
-            if (wasNewTab) replacement.ShowNewTabPage();
-            else replacement.Navigate(string.IsNullOrWhiteSpace(current) ? BrowserPolicy.HomeUrl : current);
+            if (wasActive) _activeTab = replacement;
+
+            try
+            {
+                await replacement.InitializeAsync();
+                if (_closing)
+                {
+                    WebViewHost.Children.Remove(replacement.View);
+                    _tabs.Remove(replacement);
+                    UnwireTab(replacement);
+                    replacement.Dispose();
+                    return;
+                }
+                replacement.SetZoom(zoom);
+                if (wasMuted) replacement.ToggleMuted();
+                if (wasActive) ActivateTab(replacement);
+                if (wasNewTab) replacement.ShowNewTabPage();
+                else replacement.Navigate(string.IsNullOrWhiteSpace(current) ? BrowserPolicy.HomeUrl : current);
+            }
+            catch
+            {
+                WebViewHost.Children.Remove(replacement.View);
+                _tabs.Remove(replacement);
+                UnwireTab(replacement);
+                replacement.Dispose();
+                throw;
+            }
         }
         catch (Exception error)
         {

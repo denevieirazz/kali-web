@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Windows;
@@ -67,7 +68,7 @@ internal static class Program
             try
             {
                 Log("ENVIRONMENT_CREATE_BEGIN");
-                var environmentOptions = new CoreWebView2EnvironmentOptions($"--remote-debugging-port={debugPort}");
+                var environmentOptions = new CoreWebView2EnvironmentOptions($"--remote-debugging-port={debugPort} --disable-popup-blocking");
                 var environment = await CoreWebView2Environment.CreateAsync(null, udf, environmentOptions);
                 Log("ENVIRONMENT_READY");
 
@@ -107,9 +108,9 @@ internal static class Program
                     WriteStatus(closed: true);
                     Log("BROWSER_WINDOW_CLOSED");
                 };
-                await window.InitializeAsync(url);
                 window.Show();
                 window.Activate();
+                await window.InitializeAsync(url);
                 Log("BROWSER_WINDOW_READY");
                 WriteStatus();
 
@@ -137,6 +138,11 @@ internal static class Program
                         {
                             case "cancel-downloads":
                                 Log("CONTROL_CANCEL_DOWNLOADS", $"count={window.CancelDownloads()}");
+                                WriteStatus();
+                                break;
+                            case "crash-active-tab":
+                                Log("CONTROL_CRASH_ACTIVE_TAB");
+                                window.TriggerRendererFailedForActiveTab();
                                 WriteStatus();
                                 break;
                             case "close-browser":

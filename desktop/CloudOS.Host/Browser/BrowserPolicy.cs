@@ -68,6 +68,11 @@ public sealed class BrowserPolicy
 
     public BrowserNavigationDecision ValidateNavigation(string? rawUri, bool allowAboutBlank = false)
     {
+        if (allowAboutBlank && (string.IsNullOrWhiteSpace(rawUri) ||
+            rawUri.Equals("about:blank", StringComparison.OrdinalIgnoreCase) ||
+            rawUri.Equals("about:", StringComparison.OrdinalIgnoreCase)))
+            return BrowserNavigationDecision.Allow(new Uri("about:blank"));
+
         if (string.IsNullOrWhiteSpace(rawUri))
             return BrowserNavigationDecision.Block("INVALID_URL", "Endereço inválido.");
         if (rawUri.Length > MaxInputLength || ContainsControlCharacters(rawUri))

@@ -36,12 +36,12 @@ public sealed class BrowserTab : IDisposable
         LogicalId = logicalId ?? Id;
         IsNewTabPage = isNewTabPage;
         IsPinned = isPinned;
-        View = new WebView2CompositionControl();
+        View = new WebView2();
     }
 
     public Guid Id { get; }
     public Guid LogicalId { get; }
-    public WebView2CompositionControl View { get; }
+    public WebView2 View { get; }
     public string Title { get; private set; } = "Nova aba";
     public Uri? CurrentUri { get; private set; }
     public bool IsLoading { get; private set; }
@@ -249,18 +249,37 @@ public sealed class BrowserTab : IDisposable
 
     private async void OnNewWindowRequested(object? sender, CoreWebView2NewWindowRequestedEventArgs e)
     {
+        Console.Error.WriteLine($"[DEBUG_NEW_WINDOW] uri={e.Uri} disposed={_disposed} hasFactory={NewWindowFactory != null}");
         var deferral = e.GetDeferral();
         try
         {
-            e.Handled = true;
-            if (_disposed) return;
+            if (_disposed)
+            {
+                e.Handled = true;
+                return;
+            }
             var decision = _policy.ValidateNavigation(e.Uri, allowAboutBlank: true);
-            if (NewWindowFactory is null || !decision.Allowed) return;
+            Console.Error.WriteLine($"[DEBUG_NEW_WINDOW_DECISION] allowed={decision.Allowed} error={decision.ErrorCode}");
+            if (NewWindowFactory is null || !decision.Allowed)
+            {
+                e.Handled = true;
+                return;
+            }
             var target = await NewWindowFactory();
-            if (!_disposed && target is not null) e.NewWindow = target;
+            Console.Error.WriteLine($"[DEBUG_NEW_WINDOW_TARGET] targetNull={target == null}");
+            if (!_disposed && target is not null)
+            {
+                e.NewWindow = target;
+                e.Handled = true;
+            }
+            else
+            {
+                e.Handled = true;
+            }
         }
         catch (Exception error) when (error is InvalidOperationException or ObjectDisposedException or OperationCanceledException)
         {
+            e.Handled = true;
             SetError(BrowserError.Blocked("POPUP_BLOCKED", "A nova aba não pôde ser criada com segurança.", e.Uri));
         }
         finally
