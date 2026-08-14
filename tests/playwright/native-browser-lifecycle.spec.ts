@@ -38,6 +38,20 @@ test.describe('Navegador CloudOS — lifecycle Windows', () => {
     }
   });
 
+  test('shutdown do Host cancela inicialização pendente sem deixar TestHost vivo', async ({}, testInfo) => {
+    const harness = await startHarness(testInfo, ['--environment-delay-ms', '10000']);
+    try {
+      await harness.waitForStatus((status) => status.windowVisible && status.initializationStarted && !status.webViewReady);
+      const started = Date.now();
+      await harness.sendControl('shutdown-host');
+      await harness.waitForExit(5_000);
+      expect(Date.now() - started).toBeLessThan(5_000);
+      expect(harness.host.exitCode).toBe(0);
+    } finally {
+      await harness.dispose();
+    }
+  });
+
   test('falha do environment permanece visível na BrowserWindow e não encerra Host', async ({}, testInfo) => {
     const harness = await startHarness(testInfo, ['--environment-fail']);
     try {
