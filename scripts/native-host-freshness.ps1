@@ -5,12 +5,12 @@ function Get-CloudOsNewestWriteTimeUtc {
     )
 
     if (-not (Test-Path -LiteralPath $Path)) { return [DateTime]::MinValue }
-    $files = Get-ChildItem -LiteralPath $Path -Recurse -File -ErrorAction Stop
+    $files = @(Get-ChildItem -LiteralPath $Path -Recurse -File -ErrorAction Stop)
     if ($Extensions.Count -gt 0) {
         $normalized = @($Extensions | ForEach-Object { $_.ToLowerInvariant() })
         $files = @($files | Where-Object { $normalized -contains $_.Extension.ToLowerInvariant() })
     }
-    if (-not $files -or $files.Count -eq 0) { return [DateTime]::MinValue }
+    if ($files.Count -eq 0) { return [DateTime]::MinValue }
     return ($files | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1).LastWriteTimeUtc
 }
 
@@ -58,10 +58,10 @@ function Get-CloudOsPublishedHostState {
     }
 
     $stale = $false
-    if ($sourceExists -and $publishExists) {
+    if ($sourceExists -and (Test-Path -LiteralPath $hostDll)) {
         $sourceNewest = Get-CloudOsNewestWriteTimeUtc -Path $source -Extensions @('.cs', '.xaml', '.csproj', '.manifest')
-        $publishNewest = Get-CloudOsNewestWriteTimeUtc -Path $publish
-        $stale = $publishNewest -lt $sourceNewest
+        $hostAssemblyTime = (Get-Item -LiteralPath $hostDll).LastWriteTimeUtc
+        $stale = $hostAssemblyTime -lt $sourceNewest
     }
 
     [pscustomobject]@{
