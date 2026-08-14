@@ -81,5 +81,12 @@ try {
 
   process.stdout.write(JSON.stringify(result));
 } finally {
-  if (browser?.isConnected()) await browser.close().catch(() => undefined);
+  if (browser?.isConnected()) {
+    try {
+      await browser.close();
+    } catch (error) {
+      const name = error instanceof Error ? error.name : 'Error';
+      process.stderr.write(`WARN CDP disconnect failed: ${name}\n`);
+    }
+  }
 }
