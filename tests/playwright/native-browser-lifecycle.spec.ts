@@ -44,7 +44,7 @@ test.describe('Navegador CloudOS — lifecycle Windows', () => {
       const failed = await harness.waitForStatus((status) =>
         status.windowVisible && status.initializationErrorCode === 'BROWSER_WEBVIEW_INITIALIZATION_FAILED');
       expect(failed.webViewReady).toBe(false);
-      expect(harness.process.exitCode).toBeNull();
+      expect(harness.host.exitCode).toBeNull();
 
       await harness.sendControl('close-browser');
       await harness.waitForExit(5_000);
@@ -79,7 +79,7 @@ async function startHarness(testInfo: TestInfo, extraArgs: string[]) {
   const debugPort = await getFreePort();
   let stdout = '';
   let stderr = '';
-  const process = spawn('dotnet', [
+  const host = spawn('dotnet', [
     'run', '--project', 'desktop/CloudOS.Browser.TestHost/CloudOS.Browser.TestHost.csproj', '-c', 'Release', '--',
     '--debug-port', String(debugPort),
     '--root', tempRoot,
@@ -89,8 +89,8 @@ async function startHarness(testInfo: TestInfo, extraArgs: string[]) {
     '--log-file', logFile,
     ...extraArgs,
   ], { cwd: process.cwd(), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-  process.stdout?.on('data', (chunk) => { stdout += chunk.toString(); });
-  process.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
+  host.stdout?.on('data', (chunk) => { stdout += chunk.toString(); });
+  host.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
 
   const startupDeadline = Date.now() + 45_000;
   while (!existsSync(readyFile)) {
@@ -99,9 +99,9 @@ async function startHarness(testInfo: TestInfo, extraArgs: string[]) {
       await attachDiagnostics(testInfo, tempRoot, logFile, statusFile, stdout, stderr, `startup=${error}`);
       throw new Error(`Browser TestHost falhou antes de exibir a janela: ${error}`);
     }
-    if (process.exitCode !== null) {
-      await attachDiagnostics(testInfo, tempRoot, logFile, statusFile, stdout, stderr, `exit=${process.exitCode}`);
-      throw new Error(`Browser TestHost encerrou com código ${process.exitCode}.`);
+    if (host.exitCode !== null) {
+      await attachDiagnostics(testInfo, tempRoot, logFile, statusFile, stdout, stderr, `exit=${host.exitCode}`);
+      throw new Error(`Browser TestHost encerrou com código ${host.exitCode}.`);
     }
     if (Date.now() > startupDeadline) {
       await attachDiagnostics(testInfo, tempRoot, logFile, statusFile, stdout, stderr, 'startup=timeout');
@@ -134,7 +134,7 @@ async function startHarness(testInfo: TestInfo, extraArgs: string[]) {
     const deadline = Date.now() + timeoutMs;
     let last: Status | undefined;
     while (Date.now() < deadline) {
-      if (process.exitCode !== null) throw new Error(`TestHost encerrou antes do estado esperado: ${process.exitCode}.`);
+      if (host.exitCode !== null) throw new Error(`TestHost encerrou antes do estado esperado: ${host.exitCode}.`);
       last = await readStatus();
       if (predicate(last)) return last;
       await delay(100);
@@ -147,21 +147,21 @@ async function startHarness(testInfo: TestInfo, extraArgs: string[]) {
   }
 
   async function waitForExit(timeoutMs: number) {
-    if (process.exitCode !== null) return;
+    if (host.exitCode !== null) return;
     await Promise.race([
-      new Promise<void>((resolve) => process.once('exit', () => resolve())),
+      new Promise<void>((resolve) => host.once('exit', () => resolve())),
       delay(timeoutMs).then(() => { throw new Error('TestHost não encerrou no prazo esperado.'); }),
     ]);
   }
 
   async function terminateOwnedProcess() {
-    if (process.exitCode !== null) return;
-    if (!process.pid) throw new Error('PID criado pelo teste não está disponível.');
+    if (host.exitCode !== null) return;
+    if (!host.pid) throw new Error('PID criado pelo teste não está disponível.');
     try {
-      await execFileAsync('taskkill', ['/PID', String(process.pid), '/T', '/F'], { windowsHide: true });
+      await execFileAsync('taskkill', ['/PID', String(host.pid), '/T', '/F'], { windowsHide: true });
     } catch (error) {
-      if (process.exitCode === null)
-        throw new Error(`Falha ao encerrar o PID ${process.pid}: ${error instanceof Error ? error.message : String(error)}`);
+      if (host.exitCode === null)
+        throw new Error(`Falha ao encerrar o PID ${host.pid}: ${error instanceof Error ? error.message : String(error)}`);
     }
     await waitForExit(10_000);
   }
@@ -186,7 +186,7 @@ async function startHarness(testInfo: TestInfo, extraArgs: string[]) {
     }
   }
 
-  return { process, readStatus, waitForStatus, sendControl, waitForExit, dispose };
+  return { host, readStatus, waitForStatus, sendControl, waitForExit, dispose };
 }
 
 async function attachDiagnostics(
