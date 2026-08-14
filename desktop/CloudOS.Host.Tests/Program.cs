@@ -12,7 +12,7 @@ var tests = new (string Name, Action Run)[]
     ("browser policy blocks CloudOS origins", BrowserPolicyBlocksCloudOsOrigins),
     ("browser policy rejects control chars and userinfo", BrowserPolicyRejectsAmbiguousInput),
     ("browser state persists history and favorites", BrowserStatePersists),
-    ("browser state enforces limits", BrowserStateEnforcesLimits),
+    ("browser state normalization enforces limits", BrowserStateEnforcesLimits),
     ("browser state recovers from corruption", BrowserStateRecoversFromCorruption)
 };
 
@@ -116,15 +116,17 @@ static void BrowserStatePersists()
 
 static void BrowserStateEnforcesLimits()
 {
-    using var temp = new TempDirectory();
-    var path = Path.Combine(temp.Path, "browser-state.v1.json");
-    var store = new BrowserStateStore(path);
-    for (var i = 0; i < BrowserStateStore.HistoryLimit + 25; i++)
-        store.AddHistory(new Uri($"https://example.com/{i}"), $"Entry {i}");
-    Assert(store.History.Count == BrowserStateStore.HistoryLimit, "History limit must be enforced.");
-    for (var i = 0; i < BrowserStateStore.FavoritesLimit + 5; i++)
-        store.ToggleFavorite(new Uri($"https://favorite{i}.example/"), $"Favorite {i}");
-    Assert(store.Favorites.Count == BrowserStateStore.FavoritesLimit, "Favorite limit must be enforced.");
+    var history = Enumerable.Range(0, BrowserStateStore.HistoryLimit + 25)
+        .Select(i => new BrowserHistoryEntry($"https://example.com/{i}", $"Entry {i}", DateTimeOffset.UtcNow.AddSeconds(i)))
+        .ToList();
+    var favorites = Enumerable.Range(0, BrowserStateStore.FavoritesLimit + 5)
+        .Select(i => new BrowserFavorite(Guid.NewGuid().ToString("D"), $"https://favorite{i}.example/", $"Favorite {i}", DateTimeOffset.UtcNow.AddSeconds(i)))
+        .ToList();
+    var normalized = BrowserStateStore.Normalize(new BrowserStateDocument(1, history, favorites));
+    Assert(normalized.History.Count == BrowserStateStore.HistoryLimit, "History limit must be enforced.");
+    Assert(normalized.History[0].Url.EndsWith("/25", StringComparison.Ordinal), "Oldest history entries must be trimmed first.");
+    Assert(normalized.Favorites.Count == BrowserStateStore.FavoritesLimit, "Favorite limit must be enforced.");
+    Assert(normalized.Favorites[0].Url.Contains("favorite5.example", StringComparison.Ordinal), "Oldest favorites must be trimmed first.");
 }
 
 static void BrowserStateRecoversFromCorruption()

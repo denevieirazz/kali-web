@@ -28,8 +28,7 @@ public sealed class BrowserStateStore
         if (uri.Scheme is not ("http" or "https")) return;
         var entry = new BrowserHistoryEntry(uri.AbsoluteUri, string.IsNullOrWhiteSpace(title) ? uri.Host : title.Trim(), visitedAt ?? DateTimeOffset.UtcNow);
         _state.History.Add(entry);
-        if (_state.History.Count > HistoryLimit)
-            _state.History.RemoveRange(0, _state.History.Count - HistoryLimit);
+        TrimToLimit(_state.History, HistoryLimit);
         Save();
     }
 
@@ -42,8 +41,7 @@ public sealed class BrowserStateStore
             Save();
             return false;
         }
-        if (_state.Favorites.Count >= FavoritesLimit)
-            _state.Favorites.RemoveAt(0);
+        if (_state.Favorites.Count >= FavoritesLimit) _state.Favorites.RemoveAt(0);
         _state.Favorites.Add(new BrowserFavorite(Guid.NewGuid().ToString("D"), uri.AbsoluteUri, string.IsNullOrWhiteSpace(title) ? uri.Host : title.Trim(), DateTimeOffset.UtcNow));
         Save();
         return true;
@@ -63,18 +61,22 @@ public sealed class BrowserStateStore
         Save();
     }
 
+    internal static BrowserStateDocument Normalize(BrowserStateDocument? parsed)
+    {
+        if (parsed is null || parsed.SchemaVersion != 1) return Empty();
+        var history = parsed.History ?? [];
+        var favorites = parsed.Favorites ?? [];
+        TrimToLimit(history, HistoryLimit);
+        TrimToLimit(favorites, FavoritesLimit);
+        return new BrowserStateDocument(1, history, favorites);
+    }
+
     private BrowserStateDocument Load()
     {
         try
         {
             if (!File.Exists(_path)) return Empty();
-            var parsed = JsonSerializer.Deserialize<BrowserStateDocument>(File.ReadAllText(_path), _json);
-            if (parsed is null || parsed.SchemaVersion != 1) return Empty();
-            parsed.History ??= [];
-            parsed.Favorites ??= [];
-            if (parsed.History.Count > HistoryLimit) parsed.History.RemoveRange(0, parsed.History.Count - HistoryLimit);
-            if (parsed.Favorites.Count > FavoritesLimit) parsed.Favorites.RemoveRange(0, parsed.Favorites.Count - FavoritesLimit);
-            return parsed;
+            return Normalize(JsonSerializer.Deserialize<BrowserStateDocument>(File.ReadAllText(_path), _json));
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -107,10 +109,15 @@ public sealed class BrowserStateStore
         try
         {
             if (!File.Exists(_path)) return;
-            var corrupt = _path + $".corrupt-{DateTime.UtcNow:yyyyMMddHHmmss}";
+            var corrupt = _path + $".corrupt-{DateTime.UtcNow:yyyyMMddHHmmssfff}";
             File.Move(_path, corrupt, overwrite: false);
         }
         catch { }
+    }
+
+    private static void TrimToLimit<T>(List<T> items, int limit)
+    {
+        if (items.Count > limit) items.RemoveRange(0, items.Count - limit);
     }
 
     private static BrowserStateDocument Empty() => new(1, [], []);

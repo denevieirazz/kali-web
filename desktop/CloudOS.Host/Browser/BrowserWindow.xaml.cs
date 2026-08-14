@@ -2,7 +2,6 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using System.Windows.Media;
 using Microsoft.Web.WebView2.Core;
 
 namespace CloudOS.Host.Browser;
@@ -10,11 +9,13 @@ namespace CloudOS.Host.Browser;
 public partial class BrowserWindow : Window
 {
     private const int MaxTabs = 32;
+    private static readonly TimeSpan CrashWindow = TimeSpan.FromSeconds(30);
     private readonly CoreWebView2Environment _environment;
     private readonly BrowserPolicy _policy;
     private readonly BrowserStateStore _stateStore;
     private readonly bool _developerMode;
     private readonly List<BrowserTab> _tabs = [];
+    private readonly Dictionary<Guid, DateTimeOffset> _lastCrashByLogicalTab = [];
     private BrowserTab? _activeTab;
     private bool _hostShutdown;
     private bool _closing;
@@ -36,8 +37,7 @@ public partial class BrowserWindow : Window
 
     public Task NavigateActiveAsync(string raw)
     {
-        if (_activeTab is null) return Task.CompletedTask;
-        _activeTab.Navigate(raw);
+        _activeTab?.Navigate(raw);
         return Task.CompletedTask;
     }
 
@@ -47,7 +47,7 @@ public partial class BrowserWindow : Window
         Close();
     }
 
-    private async Task<BrowserTab?> CreateTabAsync(string? initialUrl = null, bool activate = true)
+    private async Task<BrowserTab?> CreateTabAsync(string? initialUrl = null, bool activate = true, Guid? logicalId = null)
     {
         if (_tabs.Count >= MaxTabs)
         {
@@ -55,17 +55,8 @@ public partial class BrowserWindow : Window
             return null;
         }
 
-        var tab = new BrowserTab(_environment, _policy, _developerMode);
-        tab.StateChanged += Tab_StateChanged;
-        tab.RendererFailed += Tab_RendererFailed;
-        tab.NewWindowFactory = async uri =>
-        {
-            var popup = await CreateTabAsync(null, activate: true);
-            if (popup is null) return null;
-            if (!string.IsNullOrWhiteSpace(uri) && !uri.Equals("about:blank", StringComparison.OrdinalIgnoreCase))
-                popup.Navigate(uri);
-            return popup.View.CoreWebView2;
-        };
+        var tab = new BrowserTab(_environment, _policy, _developerMode, logicalId);
+        WireTab(tab);
         await tab.InitializeAsync();
         _tabs.Add(tab);
         WebViewHost.Children.Add(tab.View);
@@ -74,6 +65,24 @@ public partial class BrowserWindow : Window
         if (activate) ActivateTab(tab);
         if (!string.IsNullOrWhiteSpace(initialUrl)) tab.Navigate(initialUrl);
         return tab;
+    }
+
+    private void WireTab(BrowserTab tab)
+    {
+        tab.StateChanged += Tab_StateChanged;
+        tab.RendererFailed += Tab_RendererFailed;
+        tab.NewWindowFactory = async _ =>
+        {
+            var popup = await CreateTabAsync(null, activate: true);
+            return popup?.View.CoreWebView2;
+        };
+    }
+
+    private void UnwireTab(BrowserTab tab)
+    {
+        tab.StateChanged -= Tab_StateChanged;
+        tab.RendererFailed -= Tab_RendererFailed;
+        tab.NewWindowFactory = null;
     }
 
     private void ActivateTab(BrowserTab tab)
@@ -90,10 +99,10 @@ public partial class BrowserWindow : Window
         var index = _tabs.IndexOf(tab);
         if (index < 0) return;
         var wasActive = ReferenceEquals(_activeTab, tab);
-        tab.StateChanged -= Tab_StateChanged;
-        tab.RendererFailed -= Tab_RendererFailed;
+        UnwireTab(tab);
         WebViewHost.Children.Remove(tab.View);
         _tabs.RemoveAt(index);
+        _lastCrashByLogicalTab.Remove(tab.LogicalId);
         tab.Dispose();
         if (_tabs.Count == 0)
         {
@@ -179,30 +188,30 @@ public partial class BrowserWindow : Window
         var current = failed.CurrentUri?.AbsoluteUri;
         var index = _tabs.IndexOf(failed);
         if (index < 0) return;
-        var key = failed.Id;
-        var crashCount = (int?)failed.View.Tag ?? 0;
-        if (crashCount >= 1)
+        var now = DateTimeOffset.UtcNow;
+        if (_lastCrashByLogicalTab.TryGetValue(failed.LogicalId, out var previous) && now - previous <= CrashWindow)
         {
-            failed.SetError(BrowserError.Navigation("RENDERER_CRASHED", "A aba falhou novamente e foi interrompida para evitar um loop de recuperação.", current, false));
+            failed.SetError(BrowserError.Navigation("RENDERER_CRASHED", "A aba falhou novamente em menos de 30 segundos e foi interrompida para evitar um loop de recuperação.", current, false));
             return;
         }
-        failed.View.Tag = crashCount + 1;
+        _lastCrashByLogicalTab[failed.LogicalId] = now;
         var wasActive = ReferenceEquals(_activeTab, failed);
-        failed.StateChanged -= Tab_StateChanged;
-        failed.RendererFailed -= Tab_RendererFailed;
+        UnwireTab(failed);
         WebViewHost.Children.Remove(failed.View);
         _tabs.RemoveAt(index);
+        var logicalId = failed.LogicalId;
         failed.Dispose();
-        var replacement = new BrowserTab(_environment, _policy, _developerMode) { NewWindowFactory = async uri => (await CreateTabAsync(uri, true))?.View.CoreWebView2 };
-        replacement.View.Tag = 1;
-        replacement.StateChanged += Tab_StateChanged;
-        replacement.RendererFailed += Tab_RendererFailed;
+
+        var replacement = new BrowserTab(_environment, _policy, _developerMode, logicalId);
+        WireTab(replacement);
         await replacement.InitializeAsync();
         _tabs.Insert(index, replacement);
         WebViewHost.Children.Add(replacement.View);
         replacement.View.Visibility = Visibility.Collapsed;
         if (wasActive) ActivateTab(replacement);
+        RenderTabs();
         if (!string.IsNullOrWhiteSpace(current)) replacement.Navigate(current);
+        else replacement.Navigate(BrowserPolicy.HomeUrl);
     }
 
     private async void NewTab_Click(object sender, RoutedEventArgs e) => await CreateTabAsync(BrowserPolicy.HomeUrl, true);
@@ -267,13 +276,13 @@ public partial class BrowserWindow : Window
         _closing = true;
         foreach (var tab in _tabs.ToArray())
         {
-            tab.StateChanged -= Tab_StateChanged;
-            tab.RendererFailed -= Tab_RendererFailed;
+            UnwireTab(tab);
             WebViewHost.Children.Remove(tab.View);
             tab.Dispose();
         }
         _tabs.Clear();
         _activeTab = null;
+        _lastCrashByLogicalTab.Clear();
     }
 
     private sealed record LibraryItem(string Title, string Url)

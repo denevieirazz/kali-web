@@ -10,16 +10,18 @@ public sealed class BrowserTab : IDisposable
     private readonly bool _developerMode;
     private bool _disposed;
 
-    public BrowserTab(CoreWebView2Environment environment, BrowserPolicy policy, bool developerMode)
+    public BrowserTab(CoreWebView2Environment environment, BrowserPolicy policy, bool developerMode, Guid? logicalId = null)
     {
         _environment = environment;
         _policy = policy;
         _developerMode = developerMode;
         Id = Guid.NewGuid();
+        LogicalId = logicalId ?? Id;
         View = new WebView2CompositionControl();
     }
 
     public Guid Id { get; }
+    public Guid LogicalId { get; }
     public WebView2CompositionControl View { get; }
     public string Title { get; private set; } = "Nova aba";
     public Uri? CurrentUri { get; private set; }
@@ -29,7 +31,6 @@ public sealed class BrowserTab : IDisposable
     public BrowserError? Error { get; private set; }
 
     public event EventHandler? StateChanged;
-    public event EventHandler? CloseRequested;
     public event EventHandler? RendererFailed;
     public Func<string?, Task<CoreWebView2?>>? NewWindowFactory { get; set; }
 
@@ -127,10 +128,7 @@ public sealed class BrowserTab : IDisposable
     {
         IsLoading = false;
         if (!e.IsSuccess)
-        {
-            var code = e.WebErrorStatus.ToString().ToUpperInvariant();
-            SetError(BrowserError.Navigation(code, FriendlyNavigationError(e.WebErrorStatus), CurrentUri?.AbsoluteUri));
-        }
+            SetError(BrowserError.Navigation(e.WebErrorStatus.ToString().ToUpperInvariant(), FriendlyNavigationError(e.WebErrorStatus), CurrentUri?.AbsoluteUri));
         else
         {
             Error = null;
@@ -146,9 +144,7 @@ public sealed class BrowserTab : IDisposable
 
     private void OnDocumentTitleChanged(object? sender, object e)
     {
-        Title = string.IsNullOrWhiteSpace(View.CoreWebView2.DocumentTitle)
-            ? CurrentUri?.Host ?? "Nova aba"
-            : View.CoreWebView2.DocumentTitle;
+        Title = string.IsNullOrWhiteSpace(View.CoreWebView2.DocumentTitle) ? CurrentUri?.Host ?? "Nova aba" : View.CoreWebView2.DocumentTitle;
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -159,32 +155,17 @@ public sealed class BrowserTab : IDisposable
         var deferral = e.GetDeferral();
         try
         {
-            if (NewWindowFactory is null)
-            {
-                e.Handled = true;
-                return;
-            }
             var decision = _policy.ValidateNavigation(e.Uri, allowAboutBlank: true);
-            if (!decision.Allowed)
+            if (NewWindowFactory is null || !decision.Allowed)
             {
                 e.Handled = true;
                 return;
             }
             var target = await NewWindowFactory(e.Uri);
-            if (target is not null)
-            {
-                e.NewWindow = target;
-                e.Handled = true;
-            }
-            else
-            {
-                e.Handled = true;
-            }
+            e.Handled = true;
+            if (target is not null) e.NewWindow = target;
         }
-        finally
-        {
-            deferral.Complete();
-        }
+        finally { deferral.Complete(); }
     }
 
     private void OnServerCertificateErrorDetected(object? sender, CoreWebView2ServerCertificateErrorDetectedEventArgs e)
@@ -200,17 +181,8 @@ public sealed class BrowserTab : IDisposable
     }
 
     private void OnDownloadStarting(object? sender, CoreWebView2DownloadStartingEventArgs e) => e.Cancel = true;
-
-    private void OnClientCertificateRequested(object? sender, CoreWebView2ClientCertificateRequestedEventArgs e)
-    {
-        e.Handled = true;
-    }
-
-    private void OnBasicAuthenticationRequested(object? sender, CoreWebView2BasicAuthenticationRequestedEventArgs e)
-    {
-        e.Cancel = true;
-    }
-
+    private void OnClientCertificateRequested(object? sender, CoreWebView2ClientCertificateRequestedEventArgs e) => e.Handled = true;
+    private void OnBasicAuthenticationRequested(object? sender, CoreWebView2BasicAuthenticationRequestedEventArgs e) => e.Cancel = true;
     private void OnProcessFailed(object? sender, CoreWebView2ProcessFailedEventArgs e) => RendererFailed?.Invoke(this, EventArgs.Empty);
 
     private void OnWebResourceRequested(object? sender, CoreWebView2WebResourceRequestedEventArgs e)
@@ -236,10 +208,7 @@ public sealed class BrowserTab : IDisposable
         _ => $"A página não pôde ser carregada ({status})."
     };
 
-    private void ThrowIfDisposed()
-    {
-        if (_disposed) throw new ObjectDisposedException(nameof(BrowserTab));
-    }
+    private void ThrowIfDisposed() { if (_disposed) throw new ObjectDisposedException(nameof(BrowserTab)); }
 
     public void Dispose()
     {
