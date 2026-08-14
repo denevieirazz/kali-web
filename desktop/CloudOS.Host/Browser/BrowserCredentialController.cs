@@ -68,7 +68,7 @@ public sealed class BrowserCredentialController : IDisposable
 
             var requestedUri = args.Uri;
             var result = await PromptCredentialsAsync(owner, requestedUri, args.Challenge, _lifetime.Token);
-            if (result is null || !BrowserPermissionController.IsSameOrigin(requestedUri, currentSource()))
+            if (result is null || !BrowserSecurityPolicy.IsSameOrigin(requestedUri, currentSource()))
             {
                 args.Cancel = true;
                 return;
