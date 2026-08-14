@@ -7,6 +7,13 @@ using Microsoft.Web.WebView2.Core;
 
 namespace CloudOS.Host.Browser;
 
+public sealed record BrowserDiagnosticSnapshot(
+    int TabCount,
+    int ActiveDownloadCount,
+    string? ActiveErrorCode,
+    bool ActiveIsNewTab,
+    bool Closing);
+
 public partial class BrowserWindow : Window
 {
     private const int MaxTabs = 32;
@@ -45,8 +52,12 @@ public partial class BrowserWindow : Window
         _downloads.StatusChanged += Downloads_StatusChanged;
     }
 
-    public int TabCount => _tabs.Count;
-    public int ActiveDownloadCount => _downloads.ActiveCount;
+    public BrowserDiagnosticSnapshot GetDiagnosticSnapshot() => new(
+        _tabs.Count,
+        _downloads.ActiveCount,
+        _activeTab?.Error?.Code,
+        _activeTab?.IsNewTabPage == true,
+        _closing);
 
     public async Task InitializeAsync(string? initialUrl)
     {
@@ -789,13 +800,15 @@ public partial class BrowserWindow : Window
                 return;
             }
 
-            var activeIndex = _activeTab is null ? 0 : Math.Max(0, _tabs.IndexOf(_activeTab));
-            var sessionTabs = _tabs.Select(tab =>
+            var persistedTabs = new List<BrowserSessionTab>();
+            var persistedActiveIndex = 0;
+            foreach (var tab in _tabs)
             {
-                var url = tab.IsNewTabPage ? string.Empty : tab.CurrentUri?.AbsoluteUri ?? string.Empty;
-                return new BrowserSessionTab(url, tab.IsPinned);
-            }).Where(tab => tab.Url.Length > 0).ToList();
-            _stateStore.SaveSession(sessionTabs, activeIndex);
+                if (tab.IsNewTabPage || tab.CurrentUri is not { Scheme: "http" or "https" } uri) continue;
+                if (ReferenceEquals(tab, _activeTab)) persistedActiveIndex = persistedTabs.Count;
+                persistedTabs.Add(new BrowserSessionTab(uri.AbsoluteUri, tab.IsPinned));
+            }
+            _stateStore.SaveSession(persistedTabs, persistedActiveIndex);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
