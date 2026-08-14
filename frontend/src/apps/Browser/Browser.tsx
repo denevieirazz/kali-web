@@ -2,14 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { NativeHostError, nativeHostBridge } from '../../services/nativeHostBridge';
 import { useProcessManager } from '../../stores/processManager';
 import { useWindowManager } from '../../stores/windowManager';
+import {
+  browserLauncherFailure,
+  browserLauncherOpening,
+  browserLauncherSuccess,
+} from './browserLauncherState.js';
 import './Browser.css';
 
-type LauncherState = 'opening' | 'unavailable' | 'error';
-
 export default function BrowserApp({ windowId }: { windowId: string }) {
-  const [state, setState] = useState<LauncherState>('opening');
-  const [message, setMessage] = useState('Abrindo o Navegador CloudOS…');
-  const [errorCode, setErrorCode] = useState<string | null>(null);
+  const [launcher, setLauncher] = useState(browserLauncherOpening);
   const started = useRef(false);
   const launching = useRef(false);
   const attempt = useRef(0);
@@ -27,28 +28,25 @@ export default function BrowserApp({ windowId }: { windowId: string }) {
     if (launching.current) return;
     launching.current = true;
     const currentAttempt = ++attempt.current;
-    setState('opening');
-    setMessage('Abrindo o Navegador CloudOS…');
-    setErrorCode(null);
+    setLauncher(browserLauncherOpening());
 
     if (!nativeHostBridge.available) {
       launching.current = false;
-      setState('unavailable');
-      setErrorCode('NATIVE_HOST_UNAVAILABLE');
-      setMessage('O Navegador CloudOS requer o Host nativo.');
+      setLauncher(browserLauncherFailure(
+        new NativeHostError('NATIVE_HOST_UNAVAILABLE', 'O Navegador CloudOS requer o Host nativo.')
+      ));
       return;
     }
 
     try {
       const result = await nativeHostBridge.openBrowser();
       if (currentAttempt !== attempt.current) return;
-      if (result.opened && result.windowVisible === true) closeLauncher();
+      const next = browserLauncherSuccess(result);
+      setLauncher(next);
+      if (next.shouldClose) closeLauncher();
     } catch (error: unknown) {
       if (currentAttempt !== attempt.current) return;
-      const nativeError = error instanceof NativeHostError ? error : null;
-      setState('error');
-      setErrorCode(nativeError?.code || 'BROWSER_OPEN_FAILED');
-      setMessage(error instanceof Error ? error.message : 'O navegador nativo não pôde ser aberto.');
+      setLauncher(browserLauncherFailure(error));
     } finally {
       if (currentAttempt === attempt.current) launching.current = false;
     }
@@ -65,15 +63,15 @@ export default function BrowserApp({ windowId }: { windowId: string }) {
       <div className="browser-launcher-card">
         <div className="browser-launcher-icon" aria-hidden="true">◎</div>
         <h2>Navegador CloudOS</h2>
-        {errorCode && <code className="browser-launcher-error-code">{errorCode}</code>}
-        <p>{message}</p>
-        {state === 'opening' && <div className="browser-launcher-spinner" aria-label="Abrindo" />}
-        {state === 'error' && (
+        {launcher.code && <code className="browser-launcher-error-code">{launcher.code}</code>}
+        <p>{launcher.message}</p>
+        {launcher.status === 'opening' && <div className="browser-launcher-spinner" aria-label="Abrindo" />}
+        {launcher.status === 'error' && (
           <button className="browser-launcher-retry" type="button" onClick={() => void launchBrowser()}>
             Tentar novamente
           </button>
         )}
-        {state !== 'opening' && (
+        {launcher.status !== 'opening' && (
           <small>
             Sites externos não são carregados por iframe nem enviados ao navegador padrão do Windows.
           </small>
