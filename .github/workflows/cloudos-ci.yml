@@ -14,7 +14,7 @@ on:
 jobs:
   validate:
     runs-on: windows-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
 
     steps:
       - name: 1. Checkout repository
@@ -74,14 +74,19 @@ jobs:
       - name: 17. Run native Browser WebView2 tests
         run: npx playwright test tests/playwright/native-browser.spec.ts --output=test-results/native-browser --reporter=list
 
-      - name: 18. Check feature diff whitespace
+      - name: 18. Smoke native Host Browser lifecycle
+        if: github.ref == 'refs/heads/feature/cloudos-native-browser' || github.head_ref == 'feature/cloudos-native-browser'
+        shell: pwsh
+        run: ./scripts/test-native-browser-host-smoke.ps1
+
+      - name: 19. Check feature diff whitespace
         if: github.ref == 'refs/heads/feature/cloudos-native-browser' || github.head_ref == 'feature/cloudos-native-browser'
         shell: pwsh
         run: |
           git fetch origin integration/cloudos-foundation --no-tags
           git diff --check origin/integration/cloudos-foundation...HEAD
 
-      - name: 19. Upload sanitized native Browser diagnostics on failure
+      - name: 20. Upload sanitized native Browser diagnostics on failure
         if: failure() && hashFiles('test-results/native-browser/**') != ''
         uses: actions/upload-artifact@v4
         with:
