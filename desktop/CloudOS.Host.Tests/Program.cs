@@ -11,9 +11,14 @@ var tests = new (string Name, Action Run)[]
     ("browser policy blocks privileged and dangerous schemes", BrowserPolicyBlocksDangerousSchemes),
     ("browser policy blocks CloudOS origins", BrowserPolicyBlocksCloudOsOrigins),
     ("browser policy rejects control chars and userinfo", BrowserPolicyRejectsAmbiguousInput),
+    ("browser storage isolates shell and browser UDF", BrowserStorageIsIsolated),
+    ("browser permission policy is fail closed", BrowserPermissionPolicyIsFailClosed),
+    ("browser TLS policy never allows invalid certificates", BrowserTlsPolicyIsFailClosed),
+    ("browser crash policy limits recovery loops", BrowserCrashPolicyLimitsRecovery),
     ("browser state persists history and favorites", BrowserStatePersists),
     ("browser state normalization enforces limits", BrowserStateEnforcesLimits),
-    ("browser state recovers from corruption", BrowserStateRecoversFromCorruption)
+    ("browser state recovers from corruption", BrowserStateRecoversFromCorruption),
+    ("browser state can recover from atomic backup", BrowserStateRecoversBackup)
 };
 
 foreach (var test in tests)
@@ -100,6 +105,35 @@ static void BrowserPolicyRejectsAmbiguousInput()
     Assert(!policy.ParseAddressInput(new string('a', BrowserPolicy.MaxInputLength + 1)).Allowed, "Oversized input must be rejected.");
 }
 
+static void BrowserStorageIsIsolated()
+{
+    var local = Path.Combine(Path.GetTempPath(), "cloudos-layout-test");
+    var browser = BrowserStorageLayout.BrowserUserDataFolder(local);
+    var shell = BrowserStorageLayout.ShellUserDataFolder(local);
+    Assert(BrowserStorageLayout.AreIsolated(browser, shell), "Browser and shell UDFs must be different.");
+    Assert(browser.EndsWith(Path.Combine("CloudOS", "Browser", "WebView2"), StringComparison.OrdinalIgnoreCase), "Browser UDF path is incorrect.");
+    Assert(shell.EndsWith(Path.Combine("CloudOS", "WebView2"), StringComparison.OrdinalIgnoreCase), "Shell UDF path is incorrect.");
+}
+
+static void BrowserPermissionPolicyIsFailClosed()
+{
+    foreach (var prompt in new[] { "Camera", "Microphone", "Geolocation", "Notifications", "MultipleAutomaticDownloads" })
+        Assert(BrowserSecurityPolicy.Permission(prompt) == BrowserPermissionDisposition.Prompt, $"{prompt} should prompt.");
+    foreach (var denied in new[] { "OtherSensors", "ClipboardRead", "UnknownPermission", "MidiSystemExclusiveMessages", "WindowManagement" })
+        Assert(BrowserSecurityPolicy.Permission(denied) == BrowserPermissionDisposition.Deny, $"{denied} should be denied.");
+    Assert(!BrowserSecurityPolicy.SavesPermissionInProfile, "Permission decisions must never persist in the profile.");
+}
+
+static void BrowserTlsPolicyIsFailClosed() => Assert(!BrowserSecurityPolicy.AllowsInvalidServerCertificate, "Invalid TLS certificates must never be allowed.");
+
+static void BrowserCrashPolicyLimitsRecovery()
+{
+    var now = DateTimeOffset.UtcNow;
+    Assert(BrowserCrashPolicy.ShouldRecover(null, now), "First renderer crash should be recoverable.");
+    Assert(!BrowserCrashPolicy.ShouldRecover(now.AddSeconds(-10), now), "Second crash within 30 seconds must stop recovery.");
+    Assert(BrowserCrashPolicy.ShouldRecover(now.AddSeconds(-31), now), "A later crash may be recovered once.");
+}
+
 static void BrowserStatePersists()
 {
     using var temp = new TempDirectory();
@@ -116,17 +150,11 @@ static void BrowserStatePersists()
 
 static void BrowserStateEnforcesLimits()
 {
-    var history = Enumerable.Range(0, BrowserStateStore.HistoryLimit + 25)
-        .Select(i => new BrowserHistoryEntry($"https://example.com/{i}", $"Entry {i}", DateTimeOffset.UtcNow.AddSeconds(i)))
-        .ToList();
-    var favorites = Enumerable.Range(0, BrowserStateStore.FavoritesLimit + 5)
-        .Select(i => new BrowserFavorite(Guid.NewGuid().ToString("D"), $"https://favorite{i}.example/", $"Favorite {i}", DateTimeOffset.UtcNow.AddSeconds(i)))
-        .ToList();
+    var history = Enumerable.Range(0, BrowserStateStore.HistoryLimit + 25).Select(i => new BrowserHistoryEntry($"https://example.com/{i}", $"Entry {i}", DateTimeOffset.UtcNow.AddSeconds(i))).ToList();
+    var favorites = Enumerable.Range(0, BrowserStateStore.FavoritesLimit + 5).Select(i => new BrowserFavorite(Guid.NewGuid().ToString("D"), $"https://favorite{i}.example/", $"Favorite {i}", DateTimeOffset.UtcNow.AddSeconds(i))).ToList();
     var normalized = BrowserStateStore.Normalize(new BrowserStateDocument(1, history, favorites));
-    Assert(normalized.History.Count == BrowserStateStore.HistoryLimit, "History limit must be enforced.");
-    Assert(normalized.History[0].Url.EndsWith("/25", StringComparison.Ordinal), "Oldest history entries must be trimmed first.");
-    Assert(normalized.Favorites.Count == BrowserStateStore.FavoritesLimit, "Favorite limit must be enforced.");
-    Assert(normalized.Favorites[0].Url.Contains("favorite5.example", StringComparison.Ordinal), "Oldest favorites must be trimmed first.");
+    Assert(normalized.History.Count == BrowserStateStore.HistoryLimit && normalized.History[0].Url.EndsWith("/25", StringComparison.Ordinal), "History must trim oldest entries.");
+    Assert(normalized.Favorites.Count == BrowserStateStore.FavoritesLimit && normalized.Favorites[0].Url.Contains("favorite5.example", StringComparison.Ordinal), "Favorites must trim oldest entries.");
 }
 
 static void BrowserStateRecoversFromCorruption()
@@ -135,21 +163,30 @@ static void BrowserStateRecoversFromCorruption()
     var path = Path.Combine(temp.Path, "browser-state.v1.json");
     File.WriteAllText(path, "{not-json");
     var store = new BrowserStateStore(path);
-    Assert(store.History.Count == 0 && store.Favorites.Count == 0, "Corrupt state must fail closed to an empty state.");
+    Assert(store.History.Count == 0 && store.Favorites.Count == 0, "Corrupt state without backup must fail closed.");
     Assert(Directory.GetFiles(temp.Path, "browser-state.v1.json.corrupt-*").Length == 1, "Corrupt state must be quarantined.");
+}
+
+static void BrowserStateRecoversBackup()
+{
+    using var temp = new TempDirectory();
+    var path = Path.Combine(temp.Path, "browser-state.v1.json");
+    var store = new BrowserStateStore(path);
+    store.AddHistory(new Uri("https://first.example/"), "First");
+    store.AddHistory(new Uri("https://second.example/"), "Second");
+    Assert(File.Exists(path + ".bak"), "Atomic backup must exist after state replacement.");
+    File.WriteAllText(path, "{corrupt");
+    var recovered = new BrowserStateStore(path);
+    Assert(recovered.History.Count >= 1, "A valid atomic backup must recover state after corruption.");
 }
 
 static void AssertThrows(Action action)
 {
-    try { action(); }
-    catch (ArgumentException) { return; }
+    try { action(); } catch (ArgumentException) { return; }
     throw new InvalidOperationException("An untrusted backend origin was accepted.");
 }
 
-static void Assert(bool condition, string message)
-{
-    if (!condition) throw new InvalidOperationException(message);
-}
+static void Assert(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
 
 sealed class TempDirectory : IDisposable
 {

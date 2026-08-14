@@ -20,6 +20,7 @@
     "test:e2e": "node scripts/run-node-tests.js tests/e2e",
     "test:playwright": "npm run build && playwright test",
     "test:playwright:update": "npm run build && playwright test --update-snapshots",
+    "test:browser:webview": "playwright test tests/playwright/native-browser.spec.ts",
     "shell:check": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-shell-readiness.ps1",
     "shell:gate": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-shell-readiness.ps1 -Json -FailOnBlocked",
     "preview:shell": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/run-shell-preview.ps1"

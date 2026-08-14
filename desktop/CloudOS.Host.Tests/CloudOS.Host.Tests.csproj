@@ -13,5 +13,7 @@
     <Compile Include="..\CloudOS.Host\Browser\BrowserPolicy.cs" Link="Browser\BrowserPolicy.cs" />
     <Compile Include="..\CloudOS.Host\Browser\BrowserStateStore.cs" Link="Browser\BrowserStateStore.cs" />
     <Compile Include="..\CloudOS.Host\Browser\BrowserError.cs" Link="Browser\BrowserError.cs" />
+    <Compile Include="..\CloudOS.Host\Browser\BrowserStorageLayout.cs" Link="Browser\BrowserStorageLayout.cs" />
+    <Compile Include="..\CloudOS.Host\Browser\BrowserSecurityPolicy.cs" Link="Browser\BrowserSecurityPolicy.cs" />
   </ItemGroup>
 </Project>
