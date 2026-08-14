@@ -18,12 +18,7 @@ public sealed class BrowserDownloadManager : IDisposable
 
     public void Handle(Window owner, CoreWebView2DownloadStartingEventArgs args)
     {
-        if (_disposed)
-        {
-            args.Cancel = true;
-            return;
-        }
-
+        if (_disposed) { args.Cancel = true; return; }
         var deferral = args.GetDeferral();
         try
         {
@@ -43,23 +38,17 @@ public sealed class BrowserDownloadManager : IDisposable
                 args.Handled = true;
                 return;
             }
-
             args.ResultFilePath = dialog.FileName;
             args.Handled = true;
             Track(args.DownloadOperation, dialog.FileName);
         }
-        finally
-        {
-            deferral.Complete();
-        }
+        finally { deferral.Complete(); }
     }
 
     public void CancelAll()
     {
         foreach (var item in _active.Values.ToArray())
-        {
             try { item.Operation.Cancel(); } catch { }
-        }
     }
 
     private void Track(CoreWebView2DownloadOperation operation, string path)
@@ -81,16 +70,12 @@ public sealed class BrowserDownloadManager : IDisposable
     private void Publish(TrackedDownload tracked)
     {
         long? total = null;
-        try
-        {
-            if (tracked.Operation.TotalBytesToReceive > 0) total = tracked.Operation.TotalBytesToReceive;
-        }
-        catch { }
+        var expected = tracked.Operation.TotalBytesToReceive;
+        if (expected.HasValue && expected.Value <= long.MaxValue) total = (long)expected.Value;
         string? reason = null;
         try
         {
-            if (tracked.Operation.State == CoreWebView2DownloadState.Interrupted)
-                reason = tracked.Operation.InterruptReason.ToString();
+            if (tracked.Operation.State == CoreWebView2DownloadState.Interrupted) reason = tracked.Operation.InterruptReason.ToString();
         }
         catch { }
         StatusChanged?.Invoke(this, new BrowserDownloadStatus(
