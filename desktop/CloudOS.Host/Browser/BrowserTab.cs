@@ -249,7 +249,6 @@ public sealed class BrowserTab : IDisposable
 
     private async void OnNewWindowRequested(object? sender, CoreWebView2NewWindowRequestedEventArgs e)
     {
-        Console.Error.WriteLine($"[DEBUG_NEW_WINDOW] uri={e.Uri} disposed={_disposed} hasFactory={NewWindowFactory != null}");
         var deferral = e.GetDeferral();
         try
         {
@@ -259,14 +258,13 @@ public sealed class BrowserTab : IDisposable
                 return;
             }
             var decision = _policy.ValidateNavigation(e.Uri, allowAboutBlank: true);
-            Console.Error.WriteLine($"[DEBUG_NEW_WINDOW_DECISION] allowed={decision.Allowed} error={decision.ErrorCode}");
             if (NewWindowFactory is null || !decision.Allowed)
             {
                 e.Handled = true;
+                BrowserDiagnostics.Write("popup_blocked", $"code={decision.ErrorCode ?? "NO_TARGET"}");
                 return;
             }
             var target = await NewWindowFactory();
-            Console.Error.WriteLine($"[DEBUG_NEW_WINDOW_TARGET] targetNull={target == null}");
             if (!_disposed && target is not null)
             {
                 e.NewWindow = target;
@@ -275,11 +273,13 @@ public sealed class BrowserTab : IDisposable
             else
             {
                 e.Handled = true;
+                BrowserDiagnostics.Write("popup_blocked", "code=TARGET_UNAVAILABLE");
             }
         }
         catch (Exception error) when (error is InvalidOperationException or ObjectDisposedException or OperationCanceledException)
         {
             e.Handled = true;
+            BrowserDiagnostics.Write("popup_failed", $"type={error.GetType().Name}");
             SetError(BrowserError.Blocked("POPUP_BLOCKED", "A nova aba não pôde ser criada com segurança.", e.Uri));
         }
         finally
@@ -314,6 +314,7 @@ public sealed class BrowserTab : IDisposable
         }
         catch (Exception error) when (error is InvalidOperationException or ObjectDisposedException)
         {
+            BrowserDiagnostics.Write("permission_prompt_failed", $"type={error.GetType().Name}");
             e.SavesInProfile = false;
             e.State = CoreWebView2PermissionState.Deny;
         }
@@ -338,6 +339,7 @@ public sealed class BrowserTab : IDisposable
         }
         catch (Exception error) when (error is InvalidOperationException or ObjectDisposedException)
         {
+            BrowserDiagnostics.Write("client_certificate_prompt_failed", $"type={error.GetType().Name}");
             e.Handled = true;
             e.Cancel = true;
         }
@@ -351,6 +353,7 @@ public sealed class BrowserTab : IDisposable
         }
         catch (Exception error) when (error is InvalidOperationException or ObjectDisposedException)
         {
+            BrowserDiagnostics.Write("basic_auth_prompt_failed", $"type={error.GetType().Name}");
             e.Cancel = true;
         }
     }

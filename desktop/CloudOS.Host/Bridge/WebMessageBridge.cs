@@ -81,11 +81,18 @@ public sealed class WebMessageBridge : IDisposable
         _getHostState = getHostState;
         _onHandshake = onHandshake;
         var browserDevTools = string.Equals(Environment.GetEnvironmentVariable("CLOUDOS_BROWSER_DEVTOOLS"), "1", StringComparison.Ordinal);
-        _browserManager = new BrowserManager(dispatcher, trustedDocumentOrigin, backendOrigin, browserDevTools);
+        _browserManager = new BrowserManager(dispatcher, trustedDocumentOrigin, backendOrigin, browserDevTools, BrowserDiagnostics.Write);
         _windows.WindowChanged += OnNativeWindowChanged;
         _refreshTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(1200), DispatcherPriority.Background, (_, _) =>
         {
-            try { _windows.Refresh(); } catch (ObjectDisposedException) { }
+            try
+            {
+                _windows.Refresh();
+            }
+            catch (ObjectDisposedException error)
+            {
+                BrowserDiagnostics.Write("bridge_refresh_stopped", $"type={error.GetType().Name}");
+            }
         }, dispatcher);
     }
 
@@ -117,6 +124,7 @@ public sealed class WebMessageBridge : IDisposable
     private async void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs eventArgs)
     {
         string? idText = null;
+        string? method = null;
         Guid requestId = default;
         var registered = false;
         try
@@ -141,22 +149,27 @@ public sealed class WebMessageBridge : IDisposable
             if (!_inFlight.Add(requestId)) throw new BridgeException("DUPLICATE_ID", "ID de requisição duplicado.");
             registered = true;
             if (ReadString(root, "nonce") != _nonce) throw new BridgeException("STALE_DOCUMENT", "Documento expirado.");
-            var method = ReadString(root, "method");
+            method = ReadString(root, "method");
             var parameters = root.TryGetProperty("params", out var value) ? value : default;
 
             if (!_handshakeComplete && method != "bridge.handshake")
                 throw new BridgeException("HANDSHAKE_REQUIRED", "A ponte ainda não foi inicializada.");
 
+            if (method == "browser.open") BrowserDiagnostics.Write("bridge_received", null);
             var result = await DispatchAsync(method, parameters);
             PostResponse(idText, true, result, null);
+            if (method == "browser.open") BrowserDiagnostics.Write("bridge_replied", "ok=true");
         }
         catch (BridgeException error)
         {
             if (idText is not null) PostResponse(idText, false, null, new { code = error.Code, message = error.Message });
+            if (method == "browser.open") BrowserDiagnostics.Write("bridge_replied", $"ok=false code={error.Code}");
         }
-        catch
+        catch (Exception error) when (error is not OutOfMemoryException)
         {
+            BrowserDiagnostics.Write("bridge_failed", $"type={error.GetType().Name}");
             if (idText is not null) PostResponse(idText, false, null, new { code = "INTERNAL_ERROR", message = "A operação nativa não pôde ser concluída." });
+            if (method == "browser.open") BrowserDiagnostics.Write("bridge_replied", "ok=false code=INTERNAL_ERROR");
         }
         finally
         {
@@ -209,7 +222,7 @@ public sealed class WebMessageBridge : IDisposable
         }
     }
 
-    private async Task<object> OpenBrowserAsync(JsonElement parameters)
+    private async Task<BrowserOpenResult> OpenBrowserAsync(JsonElement parameters)
     {
         RequireObject(parameters);
         RejectUnknownProperties(parameters, "url");
@@ -221,8 +234,7 @@ public sealed class WebMessageBridge : IDisposable
             if (url is not null && url.Length > BrowserPolicy.MaxInputLength)
                 throw new BridgeException("INVALID_PARAMS", "URL excede o limite permitido.");
         }
-        var opened = await _browserManager.OpenAsync(url);
-        return new { opened = opened.Opened, reused = opened.Reused };
+        return await _browserManager.OpenAsync(url);
     }
 
     private async Task<object> RequestLegacyRecoveryTokenAsync()
@@ -272,7 +284,11 @@ public sealed class WebMessageBridge : IDisposable
                 if (BrokerProcessNames.Contains(process.ProcessName)) managementReason = "A janela usa um broker compartilhado do Windows/WSLg.";
                 else { _windows.TrackLaunchedProcess(process); managed = true; }
             }
-            catch { managementReason = "O processo entregou a janela a outro componente do Windows."; }
+            catch (Exception error) when (error is ArgumentException or InvalidOperationException)
+            {
+                BrowserDiagnostics.Write("native_process_tracking_failed", $"type={error.GetType().Name}");
+                managementReason = "O processo entregou a janela a outro componente do Windows.";
+            }
         }
 
         return new
@@ -353,6 +369,7 @@ public sealed class WebMessageBridge : IDisposable
                 }
                 catch (Exception error) when (error is BridgeException or InvalidOperationException or OverflowException or ArithmeticException)
                 {
+                    BrowserDiagnostics.Write("native_relayout_failed", $"type={error.GetType().Name}");
                     _windows.TryUpdateAttachedLayout(pair.Key, pair.Value.LastNativeBounds, false, out _);
                 }
             }
@@ -550,7 +567,10 @@ public sealed class WebMessageBridge : IDisposable
                 if (_injectedScriptId is not null) core.RemoveScriptToExecuteOnDocumentCreated(_injectedScriptId);
             }
         }
-        catch (Exception error) when (error is InvalidOperationException or ObjectDisposedException or System.Runtime.InteropServices.COMException) { }
+        catch (Exception error) when (error is InvalidOperationException or ObjectDisposedException or System.Runtime.InteropServices.COMException)
+        {
+            BrowserDiagnostics.Write("bridge_cleanup_failed", $"type={error.GetType().Name}");
+        }
         _injectedScriptId = null;
         _handshakeComplete = false;
         _inFlight.Clear();

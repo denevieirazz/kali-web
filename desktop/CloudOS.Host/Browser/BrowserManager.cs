@@ -33,7 +33,7 @@ public sealed class BrowserManager : IDisposable
         _dispatcher = dispatcher;
         _developerMode = developerMode;
         _policy = new BrowserPolicy(shellOrigin, backendOrigin);
-        _diagnostics = diagnostics ?? ((_, _) => { });
+        _diagnostics = diagnostics ?? BrowserDiagnostics.Write;
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         _browserRoot = BrowserStorageLayout.BrowserRoot(local);
         _userDataFolder = BrowserStorageLayout.BrowserUserDataFolder(local);
