@@ -1,11 +1,14 @@
 using System.IO;
+using System.Text.Json.Serialization;
 using System.Windows;
 using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 
 namespace CloudOS.Host.Browser;
 
-public sealed record BrowserOpenResult(bool Opened, bool Reused);
+public sealed record BrowserOpenResult(
+    [property: JsonPropertyName("opened")] bool Opened,
+    [property: JsonPropertyName("reused")] bool Reused);
 
 public sealed class BrowserManager : IDisposable
 {
