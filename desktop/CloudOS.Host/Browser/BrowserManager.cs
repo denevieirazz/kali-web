@@ -137,7 +137,6 @@ public sealed class BrowserManager : IDisposable
 
     private void ScheduleInitialization(BrowserWindow window)
     {
-        CancelQueuedInitialization();
         _initializationDispatchOperation = _dispatcher.BeginInvoke(
             DispatcherPriority.Background,
             new Action(() =>
