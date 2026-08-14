@@ -178,6 +178,11 @@ internal static class Program
                                 Log("CONTROL_CLOSE_BROWSER");
                                 window.CloseForHostShutdown();
                                 break;
+                            case "shutdown-host":
+                                Log("CONTROL_SHUTDOWN_HOST");
+                                window.CloseForHostShutdown();
+                                app.Shutdown(0);
+                                break;
                             case "snapshot":
                                 Log("CONTROL_SNAPSHOT");
                                 WriteStatus();
