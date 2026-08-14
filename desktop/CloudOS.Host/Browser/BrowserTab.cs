@@ -1,3 +1,4 @@
+using System.Windows;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 
@@ -8,13 +9,26 @@ public sealed class BrowserTab : IDisposable
     private readonly CoreWebView2Environment _environment;
     private readonly BrowserPolicy _policy;
     private readonly bool _developerMode;
+    private readonly Window _promptOwner;
+    private readonly BrowserPermissionController _permissions;
+    private readonly BrowserDownloadManager _downloads;
     private bool _disposed;
 
-    public BrowserTab(CoreWebView2Environment environment, BrowserPolicy policy, bool developerMode, Guid? logicalId = null)
+    public BrowserTab(
+        CoreWebView2Environment environment,
+        BrowserPolicy policy,
+        bool developerMode,
+        Window promptOwner,
+        BrowserPermissionController permissions,
+        BrowserDownloadManager downloads,
+        Guid? logicalId = null)
     {
         _environment = environment;
         _policy = policy;
         _developerMode = developerMode;
+        _promptOwner = promptOwner;
+        _permissions = permissions;
+        _downloads = downloads;
         Id = Guid.NewGuid();
         LogicalId = logicalId ?? Id;
         View = new WebView2CompositionControl();
@@ -77,19 +91,6 @@ public sealed class BrowserTab : IDisposable
         ClearError();
         View.CoreWebView2.Navigate(decision.Uri.AbsoluteUri);
         return decision;
-    }
-
-    public void NavigateUri(Uri uri)
-    {
-        ThrowIfDisposed();
-        var decision = _policy.ValidateNavigation(uri.AbsoluteUri);
-        if (!decision.Allowed || decision.Uri is null)
-        {
-            SetError(BrowserError.Blocked(decision.ErrorCode ?? "NAVIGATION_BLOCKED", decision.Message ?? "Navegação bloqueada.", uri.AbsoluteUri));
-            return;
-        }
-        ClearError();
-        View.CoreWebView2.Navigate(decision.Uri.AbsoluteUri);
     }
 
     public void GoBack() { if (CanGoBack) View.CoreWebView2.GoBack(); }
@@ -174,13 +175,14 @@ public sealed class BrowserTab : IDisposable
         SetError(BrowserError.Blocked("TLS_CERTIFICATE_ERROR", "A conexão foi bloqueada porque o certificado TLS não pôde ser validado.", e.RequestUri));
     }
 
-    private void OnPermissionRequested(object? sender, CoreWebView2PermissionRequestedEventArgs e)
+    private async void OnPermissionRequested(object? sender, CoreWebView2PermissionRequestedEventArgs e)
     {
-        e.SavesInProfile = false;
-        e.State = CoreWebView2PermissionState.Deny;
+        try { await _permissions.HandleAsync(_promptOwner, e); }
+        catch { e.SavesInProfile = false; e.State = CoreWebView2PermissionState.Deny; }
     }
 
-    private void OnDownloadStarting(object? sender, CoreWebView2DownloadStartingEventArgs e) => e.Cancel = true;
+    private void OnDownloadStarting(object? sender, CoreWebView2DownloadStartingEventArgs e) => _downloads.Handle(_promptOwner, e);
+
     private void OnClientCertificateRequested(object? sender, CoreWebView2ClientCertificateRequestedEventArgs e) => e.Handled = true;
     private void OnBasicAuthenticationRequested(object? sender, CoreWebView2BasicAuthenticationRequestedEventArgs e) => e.Cancel = true;
     private void OnProcessFailed(object? sender, CoreWebView2ProcessFailedEventArgs e) => RendererFailed?.Invoke(this, EventArgs.Empty);
@@ -199,10 +201,8 @@ public sealed class BrowserTab : IDisposable
         CoreWebView2WebErrorStatus.ConnectionAborted => "A conexão foi encerrada.",
         CoreWebView2WebErrorStatus.ConnectionReset => "A conexão foi redefinida.",
         CoreWebView2WebErrorStatus.CannotConnect => "Não foi possível conectar ao servidor.",
-        CoreWebView2WebErrorStatus.CertificateCommonNameIsIncorrect or
-        CoreWebView2WebErrorStatus.CertificateExpired or
-        CoreWebView2WebErrorStatus.ClientCertificateContainsErrors or
-        CoreWebView2WebErrorStatus.CertificateRevoked or
+        CoreWebView2WebErrorStatus.CertificateCommonNameIsIncorrect or CoreWebView2WebErrorStatus.CertificateExpired or
+        CoreWebView2WebErrorStatus.ClientCertificateContainsErrors or CoreWebView2WebErrorStatus.CertificateRevoked or
         CoreWebView2WebErrorStatus.CertificateIsInvalid => "O certificado TLS não é confiável.",
         CoreWebView2WebErrorStatus.OperationCanceled => "A navegação foi cancelada.",
         _ => $"A página não pôde ser carregada ({status})."
