@@ -15,8 +15,10 @@ public sealed class BrowserManager : IDisposable
     private readonly string _browserRoot;
     private readonly string _userDataFolder;
     private readonly BrowserStateStore _stateStore;
+    private readonly SemaphoreSlim _openGate = new(1, 1);
     private CoreWebView2Environment? _environment;
     private BrowserWindow? _window;
+    private bool _shutdownRequested;
     private bool _disposed;
 
     public BrowserManager(Dispatcher dispatcher, Uri shellOrigin, Uri backendOrigin, bool developerMode)
@@ -35,6 +37,7 @@ public sealed class BrowserManager : IDisposable
 
     public string UserDataFolder => _userDataFolder;
     public string BrowserRoot => _browserRoot;
+    public bool IsOpen => _window is not null;
 
     public async Task<BrowserOpenResult> OpenAsync(string? initialUrl = null)
     {
@@ -42,31 +45,60 @@ public sealed class BrowserManager : IDisposable
         if (!_dispatcher.CheckAccess())
             return await _dispatcher.InvokeAsync(() => OpenAsync(initialUrl)).Task.Unwrap();
 
-        if (_window is not null)
+        await _openGate.WaitAsync();
+        try
         {
-            if (_window.WindowState == WindowState.Minimized) _window.WindowState = WindowState.Normal;
-            _window.Show();
-            _window.Activate();
-            if (!string.IsNullOrWhiteSpace(initialUrl)) await _window.NavigateActiveAsync(initialUrl);
-            return new BrowserOpenResult(true, true);
+            ThrowIfDisposed();
+            ThrowIfShuttingDown();
+
+            if (_window is not null)
+            {
+                if (_window.WindowState == WindowState.Minimized) _window.WindowState = WindowState.Normal;
+                _window.Show();
+                _window.Activate();
+                if (!string.IsNullOrWhiteSpace(initialUrl)) await _window.NavigateActiveAsync(initialUrl);
+                return new BrowserOpenResult(true, true);
+            }
+
+            Directory.CreateDirectory(_userDataFolder);
+            _environment ??= await CoreWebView2Environment.CreateAsync(userDataFolder: _userDataFolder);
+            ThrowIfDisposed();
+            ThrowIfShuttingDown();
+
+            var shellFolder = BrowserStorageLayout.ShellUserDataFolder(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+            if (!BrowserStorageLayout.AreIsolated(_environment.UserDataFolder, shellFolder))
+                throw new InvalidOperationException("BROWSER_UDF_ISOLATION_FAILED");
+
+            var actual = Path.GetFullPath(_environment.UserDataFolder).TrimEnd(Path.DirectorySeparatorChar);
+            var expected = Path.GetFullPath(_userDataFolder).TrimEnd(Path.DirectorySeparatorChar);
+            if (!actual.Equals(expected, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("BROWSER_UDF_ISOLATION_FAILED");
+
+            var window = new BrowserWindow(_environment, _policy, _stateStore, _developerMode);
+            window.Closed += OnWindowClosed;
+            _window = window;
+            try
+            {
+                await window.InitializeAsync(initialUrl);
+                ThrowIfDisposed();
+                ThrowIfShuttingDown();
+                window.Show();
+                window.Activate();
+                return new BrowserOpenResult(true, false);
+            }
+            catch
+            {
+                window.Closed -= OnWindowClosed;
+                if (ReferenceEquals(_window, window)) _window = null;
+                window.CloseForHostShutdown();
+                throw;
+            }
         }
-
-        Directory.CreateDirectory(_userDataFolder);
-        _environment ??= await CoreWebView2Environment.CreateAsync(userDataFolder: _userDataFolder);
-        if (!BrowserStorageLayout.AreIsolated(_environment.UserDataFolder, BrowserStorageLayout.ShellUserDataFolder(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData))))
-            throw new InvalidOperationException("BROWSER_UDF_ISOLATION_FAILED");
-        var actual = Path.GetFullPath(_environment.UserDataFolder).TrimEnd(Path.DirectorySeparatorChar);
-        var expected = Path.GetFullPath(_userDataFolder).TrimEnd(Path.DirectorySeparatorChar);
-        if (!actual.Equals(expected, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("BROWSER_UDF_ISOLATION_FAILED");
-
-        var window = new BrowserWindow(_environment, _policy, _stateStore, _developerMode);
-        window.Closed += OnWindowClosed;
-        _window = window;
-        window.Show();
-        await window.InitializeAsync(initialUrl);
-        window.Activate();
-        return new BrowserOpenResult(true, false);
+        finally
+        {
+            _openGate.Release();
+        }
     }
 
     public void CloseForHostShutdown()
@@ -77,11 +109,18 @@ public sealed class BrowserManager : IDisposable
             _dispatcher.Invoke(CloseForHostShutdown);
             return;
         }
-        if (_window is not null)
-        {
-            _window.CloseForHostShutdown();
-            _window = null;
-        }
+
+        _shutdownRequested = true;
+        CloseWindowCore();
+    }
+
+    private void CloseWindowCore()
+    {
+        var window = _window;
+        if (window is null) return;
+        window.Closed -= OnWindowClosed;
+        _window = null;
+        window.CloseForHostShutdown();
     }
 
     private void OnWindowClosed(object? sender, EventArgs e)
@@ -95,10 +134,22 @@ public sealed class BrowserManager : IDisposable
         if (_disposed) throw new ObjectDisposedException(nameof(BrowserManager));
     }
 
+    private void ThrowIfShuttingDown()
+    {
+        if (_shutdownRequested) throw new OperationCanceledException("O host está encerrando o Navegador CloudOS.");
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
-        CloseForHostShutdown();
+        if (!_dispatcher.CheckAccess())
+        {
+            _dispatcher.Invoke(Dispose);
+            return;
+        }
+
+        _shutdownRequested = true;
+        CloseWindowCore();
         _disposed = true;
     }
 }
