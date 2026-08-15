@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -117,7 +118,10 @@ public partial class MainWindow : Window
             "CloudOS",
             "WebView2");
         Directory.CreateDirectory(userData);
-        var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: userData);
+        var environment = await CoreWebView2Environment.CreateAsync(
+            browserExecutableFolder: null,
+            userDataFolder: userData,
+            options: CreateDeveloperShellEnvironmentOptions());
         await ShellWebView.EnsureCoreWebView2Async(environment);
 
         var core = ShellWebView.CoreWebView2;
@@ -173,6 +177,25 @@ public partial class MainWindow : Window
             ShowError("A interface gráfica foi interrompida", "O processo do WebView2 falhou. Reinicie o CloudOS para recriar a interface.");
         });
         _webViewInitialized = true;
+    }
+
+    private CoreWebView2EnvironmentOptions? CreateDeveloperShellEnvironmentOptions()
+    {
+        if (!_options.DeveloperMode || _options.Kiosk) return null;
+
+        var additionalArguments = Environment.GetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS");
+        if (string.IsNullOrWhiteSpace(additionalArguments)) return null;
+
+        var match = Regex.Match(
+            additionalArguments,
+            @"(?:^|\s)--remote-debugging-port=(?<port>\d{1,5})(?=\s|$)",
+            RegexOptions.CultureInvariant);
+        if (!match.Success ||
+            !int.TryParse(match.Groups["port"].Value, out var remoteDebuggingPort) ||
+            remoteDebuggingPort is < 1024 or > 65535)
+            return null;
+
+        return new CoreWebView2EnvironmentOptions($"--remote-debugging-port={remoteDebuggingPort}");
     }
 
     private async Task ConfigureShellDocumentAsync(RuntimeEndpoint endpoint)
