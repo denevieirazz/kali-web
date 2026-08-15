@@ -1,7 +1,7 @@
 $requiredPowerShellVersion = [Version]'7.2'
 $currentPowerShellVersion = $PSVersionTable.PSVersion
-$currentPowerShellEdition = if ($PSVersionTable.PSObject.Properties.Name -contains 'PSEdition') {
-    [string]$PSVersionTable.PSEdition
+$currentPowerShellEdition = if ($PSVersionTable.ContainsKey('PSEdition')) {
+    [string]$PSVersionTable['PSEdition']
 } else {
     'Desktop'
 }
