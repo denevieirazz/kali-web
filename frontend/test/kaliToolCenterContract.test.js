@@ -18,9 +18,14 @@ test('GUI launch continues through opaque catalog IDs', () => {
   assert.doesNotMatch(component, /app\.path|app\.command|app\.executable/);
 });
 
-test('Tool Center is registered as a CloudOS app', () => {
+test('Tool Center is registered without replacing one of the 12 pinned apps', () => {
   const registry = read('../src/core/appRegistry.ts');
   const apps = read('../src/core/fs/apps.ts');
   assert.match(registry, /'kali-tool-center'/);
   assert.match(apps, /kali-tool-center\.obx/);
+
+  const browserIndex = apps.indexOf('msedge.obx');
+  const kaliIndex = apps.indexOf('kali-tool-center.obx');
+  assert.ok(browserIndex >= 0, 'browser manifest must remain registered');
+  assert.ok(kaliIndex > browserIndex, 'Kali Tool Center must be registered after the existing pinned browser entry');
 });
