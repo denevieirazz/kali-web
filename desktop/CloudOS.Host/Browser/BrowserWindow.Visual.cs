@@ -14,6 +14,8 @@ public partial class BrowserWindow
     private BrowserThemeMode _browserThemeMode = BrowserThemeMode.System;
     private bool _visualChromeLoaded;
     private bool _visualChromeUpdating;
+    private bool? _lastLoadingVisualState;
+    private string? _lastSecurityVisualState;
 
     internal void SetChromeTheme(BrowserThemeMode mode)
     {
@@ -27,7 +29,7 @@ public partial class BrowserWindow
         ApplyChromeTheme();
         UpdateResponsiveChrome();
         NormalizeDynamicChrome();
-        StyleRenderedTabs();
+        StyleRenderedTabs(forceSizing: true);
     }
 
     private void BrowserWindowVisual_Activated(object? sender, EventArgs e)
@@ -40,7 +42,7 @@ public partial class BrowserWindow
     {
         if (!_visualChromeLoaded) return;
         UpdateResponsiveChrome();
-        StyleRenderedTabs();
+        StyleRenderedTabs(forceSizing: true);
     }
 
     private void BrowserWindowVisual_LayoutUpdated(object? sender, EventArgs e)
@@ -170,35 +172,47 @@ public partial class BrowserWindow
         if (!_visualChromeLoaded) return;
 
         var loading = _activeTab?.IsLoading == true;
-        LoadingStatusText.Visibility = loading ? Visibility.Visible : Visibility.Collapsed;
-        AddressShell.SetResourceReference(
-            Border.BorderBrushProperty,
-            loading ? "BrowserAccentBrush" : "BrowserBorderBrush");
+        if (_lastLoadingVisualState != loading || ReloadStopButton.Content is string)
+        {
+            _lastLoadingVisualState = loading;
+            LoadingStatusText.Visibility = loading ? Visibility.Visible : Visibility.Collapsed;
+            AddressShell.SetResourceReference(
+                Border.BorderBrushProperty,
+                loading ? "BrowserAccentBrush" : "BrowserBorderBrush");
+            ReloadStopButton.Content = loading ? CreateStopIcon() : CreateReloadIcon();
+            ReloadStopButton.ToolTip = loading ? "Parar carregamento (Esc)" : "Recarregar (Ctrl+R)";
+        }
 
-        ReloadStopButton.Content = loading ? CreateStopIcon() : CreateReloadIcon();
-        ReloadStopButton.ToolTip = loading ? "Parar carregamento (Esc)" : "Recarregar (Ctrl+R)";
+        if (FavoriteButton.Content is string favoriteContent && favoriteContent is "★" or "☆")
+        {
+            var isFavorite = favoriteContent == "★";
+            FavoriteButton.Tag = isFavorite;
+            FavoriteButton.Content = CreateFavoriteIcon(isFavorite);
+            FavoriteButton.ToolTip = isFavorite ? "Remover dos favoritos" : "Adicionar aos favoritos";
+        }
 
-        var favoriteContent = FavoriteButton.Content as string;
-        if (favoriteContent is "★" or "☆")
-            FavoriteButton.Tag = favoriteContent == "★";
-        var isFavorite = FavoriteButton.Tag is true;
-        FavoriteButton.Content = CreateFavoriteIcon(isFavorite);
-        FavoriteButton.ToolTip = isFavorite ? "Remover dos favoritos" : "Adicionar aos favoritos";
-
-        var secure = _activeTab?.CurrentUri?.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) == true;
-        SecurityIndicator.Text = secure ? "Seguro" : _activeTab?.CurrentUri is null ? "—" : "HTTP";
-        SecurityIndicator.SetResourceReference(
-            TextBlock.ForegroundProperty,
-            secure ? "BrowserSuccessBrush" : "BrowserTextMutedBrush");
-        SecurityIcon.Data = Geometry.Parse(secure
-            ? "M3,7 L3,4.8 A3,3 0 0 1 9,4.8 L9,7 M2,7 L10,7 L10,13 L2,13 Z M6,9.4 L6,11"
-            : "M4,7 L4,5 A3,3 0 0 1 9.8,4 M2,7 L10,7 L10,13 L2,13 Z M6,9.4 L6,11");
-        SecurityIcon.SetResourceReference(
-            Shape.StrokeProperty,
-            secure ? "BrowserSuccessBrush" : "BrowserTextMutedBrush");
+        var currentUri = _activeTab?.CurrentUri;
+        var secure = currentUri?.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) == true;
+        var securityState = currentUri is null ? "none" : secure ? "https" : "http";
+        var securityLabel = secure ? "Seguro" : currentUri is null ? "—" : "HTTP";
+        if (!string.Equals(_lastSecurityVisualState, securityState, StringComparison.Ordinal) ||
+            !string.Equals(SecurityIndicator.Text, securityLabel, StringComparison.Ordinal))
+        {
+            _lastSecurityVisualState = securityState;
+            SecurityIndicator.Text = securityLabel;
+            SecurityIndicator.SetResourceReference(
+                TextBlock.ForegroundProperty,
+                secure ? "BrowserSuccessBrush" : "BrowserTextMutedBrush");
+            SecurityIcon.Data = Geometry.Parse(secure
+                ? "M3,7 L3,4.8 A3,3 0 0 1 9,4.8 L9,7 M2,7 L10,7 L10,13 L2,13 Z M6,9.4 L6,11"
+                : "M4,7 L4,5 A3,3 0 0 1 9.8,4 M2,7 L10,7 L10,13 L2,13 Z M6,9.4 L6,11");
+            SecurityIcon.SetResourceReference(
+                Shape.StrokeProperty,
+                secure ? "BrowserSuccessBrush" : "BrowserTextMutedBrush");
+        }
     }
 
-    private void StyleRenderedTabs()
+    private void StyleRenderedTabs(bool forceSizing = false)
     {
         if (!_visualChromeLoaded || TabStrip.Children.Count == 0) return;
 
@@ -213,8 +227,10 @@ public partial class BrowserWindow
 
             var selectButton = buttons[0];
             var closeButton = buttons[1];
-            var active = ReferenceEquals(tab, _activeTab);
+            var needsVisual = selectButton.Content is not Grid { Tag: TabVisualMarker } || closeButton.Content is not Path;
+            if (!needsVisual && !forceSizing) continue;
 
+            var active = ReferenceEquals(tab, _activeTab);
             container.Margin = new Thickness(2, 0, 2, 0);
             container.VerticalAlignment = VerticalAlignment.Center;
 
@@ -242,14 +258,12 @@ public partial class BrowserWindow
                 Control.BorderBrushProperty,
                 active ? "BrowserAccentBrush" : "BrowserBorderBrush");
 
-            if (selectButton.Content is not Grid { Tag: TabVisualMarker })
+            if (needsVisual)
             {
                 selectButton.Content = CreateTabVisual(tab, active);
+                closeButton.Content = CreateCloseIcon();
                 if (active) selectButton.BringIntoView();
             }
-
-            if (closeButton.Content is not Path)
-                closeButton.Content = CreateCloseIcon();
         }
     }
 
