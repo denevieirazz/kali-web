@@ -3,9 +3,13 @@ Set-StrictMode -Version Latest
 
 $xamlPath = Join-Path $PSScriptRoot '..\desktop\CloudOS.Host\Browser\BrowserWindow.xaml'
 $probePath = Join-Path $PSScriptRoot '..\desktop\CloudOS.Browser.PhysicalProbe\Program.cs'
+$diagnosticsPath = Join-Path $PSScriptRoot '..\desktop\CloudOS.Browser.PhysicalProbe\PhysicalInputDiagnostics.cs'
+$reportingPath = Join-Path $PSScriptRoot '..\desktop\CloudOS.Browser.PhysicalProbe\ProbeReporting.cs'
 $probeProject = Join-Path $PSScriptRoot '..\desktop\CloudOS.Browser.PhysicalProbe\CloudOS.Browser.PhysicalProbe.csproj'
 $xaml = Get-Content -Raw -LiteralPath $xamlPath
 $probe = Get-Content -Raw -LiteralPath $probePath
+$diagnostics = Get-Content -Raw -LiteralPath $diagnosticsPath
+$reporting = Get-Content -Raw -LiteralPath $reportingPath
 
 function Assert-Contains([string]$pattern, [string]$message) {
     if ($xaml -notmatch $pattern) { throw "BROWSER_INPUT_CONTRACT_FAILED: $message" }
@@ -13,6 +17,14 @@ function Assert-Contains([string]$pattern, [string]$message) {
 
 function Assert-ProbeContains([string]$pattern, [string]$message) {
     if ($probe -notmatch $pattern) { throw "BROWSER_PHYSICAL_PROBE_CONTRACT_FAILED: $message" }
+}
+
+function Assert-DiagnosticsContains([string]$pattern, [string]$message) {
+    if ($diagnostics -notmatch $pattern) { throw "BROWSER_PHYSICAL_DIAGNOSTICS_CONTRACT_FAILED: $message" }
+}
+
+function Assert-ReportingContains([string]$pattern, [string]$message) {
+    if ($reporting -notmatch $pattern) { throw "BROWSER_PHYSICAL_REPORT_CONTRACT_FAILED: $message" }
 }
 
 Assert-Contains 'x:Name="AddressBox"' 'AddressBox ausente.'
@@ -34,14 +46,14 @@ if ($xaml -match '<ContextMenu') {
     throw 'BROWSER_INPUT_CONTRACT_FAILED: BrowserWindow.xaml voltou a usar ContextMenu legado.'
 }
 
-# Hosted CI does not have a reliable interactive input station, so SendInput itself remains
-# mandatory for the Windows physical probe. The non-interactive layout-only mode below still
-# executes the marshaller and prevents regressions such as INPUT shrinking back to 32 bytes on x64.
+# Hosted CI intentionally does not execute user32!SendInput. It can compile the probe,
+# execute ABI checks and exercise failure-report serialization, but only the physical Windows
+# run may satisfy the interactive desktop/input evidence requirement.
 Assert-ProbeContains 'ShortInput\s*=\s*"youtube\.com"' 'probe não testa youtube.com.'
 Assert-ProbeContains 'LongInput\s*=\s*"https://www\.youtube\.com/results\?search_query=' 'probe não testa URL longa.'
 Assert-ProbeContains 'SendInput\(' 'probe físico deixou de usar SendInput.'
 Assert-ProbeContains 'SetLastError\s*=\s*true' 'SendInput perdeu SetLastError=true.'
-Assert-ProbeContains 'Marshal\.GetLastWin32Error\(\)' 'falha de SendInput não registra código Win32 sanitizado.'
+Assert-ProbeContains 'Marshal\.GetLastPInvokeError\(\)' 'falha de SendInput não registra o último erro P/Invoke sanitizado.'
 Assert-ProbeContains 'InputSizeX64\s*=\s*40' 'contrato x64 de INPUT não exige 40 bytes.'
 Assert-ProbeContains 'InputSizeX86\s*=\s*28' 'contrato x86 de INPUT não exige 28 bytes.'
 Assert-ProbeContains '\[FieldOffset\(0\)\]\s*public MouseInput mouse' 'INPUT_UNION não contém MOUSEINPUT.'
@@ -49,6 +61,10 @@ Assert-ProbeContains '\[FieldOffset\(0\)\]\s*public KeyboardInput keyboard' 'INP
 Assert-ProbeContains '\[FieldOffset\(0\)\]\s*public HardwareInput hardware' 'INPUT_UNION não contém HARDWAREINPUT.'
 Assert-ProbeContains 'Marshal\.SizeOf<Input>\(\)' 'probe não mede sizeof(INPUT) gerenciado.'
 Assert-ProbeContains '--validate-input-layout-only' 'probe não oferece teste de layout nativo seguro para CI.'
+Assert-ProbeContains '--validate-diagnostics-contract-only' 'probe não oferece autoteste não-físico da serialização de falha.'
+Assert-ProbeContains 'PhysicalInputDiagnostics\.Capture' 'probe não captura contexto físico antes do SendInput.'
+Assert-ProbeContains 'PhysicalInputDiagnostics\.Evaluate' 'probe não bloqueia contexto físico incompatível antes do SendInput.'
+Assert-ProbeContains '00-failure-context\.png' 'probe não tenta capturar contexto visual em falha.'
 Assert-ProbeContains 'Chord\(VK_CONTROL, ''A''\)' 'probe não testa Ctrl+A.'
 Assert-ProbeContains 'Chord\(VK_CONTROL, ''C''\)' 'probe não testa Ctrl+C.'
 Assert-ProbeContains 'Chord\(VK_CONTROL, ''V''\)' 'probe não testa Ctrl+V.'
@@ -64,8 +80,35 @@ Assert-ProbeContains '12-menu-open\.png' 'evidência oficial do menu ausente.'
 Assert-ProbeContains '13-downloads-hub\.png' 'evidência oficial de Downloads ausente.'
 Assert-ProbeContains '14-settings-hub\.png' 'evidência oficial de Configurações ausente.'
 
-if ($probe -match 'address\.Text\s*=(?!=)') {
+Assert-DiagnosticsContains 'Environment\.UserInteractive' 'diagnóstico não registra modo interativo.'
+Assert-DiagnosticsContains 'SessionId' 'diagnóstico não registra sessão Windows.'
+Assert-DiagnosticsContains 'GetProcessWindowStation' 'diagnóstico não inspeciona window station.'
+Assert-DiagnosticsContains 'OpenInputDesktop' 'diagnóstico não abre o input desktop para comparação.'
+Assert-DiagnosticsContains 'UOI_IO\s*=\s*6' 'diagnóstico não verifica qual desktop recebe input.'
+Assert-DiagnosticsContains 'GetForegroundWindow' 'diagnóstico não verifica foreground real.'
+Assert-DiagnosticsContains 'GetWindowThreadProcessId' 'diagnóstico não correlaciona foreground com PID/TID.'
+Assert-DiagnosticsContains 'GetGUIThreadInfo' 'diagnóstico não verifica active/focus da GUI queue.'
+Assert-DiagnosticsContains 'TokenIntegrityLevel\s*=\s*25' 'diagnóstico não consulta integrity level.'
+Assert-DiagnosticsContains 'TokenElevation\s*=\s*20' 'diagnóstico não consulta elevação.'
+Assert-DiagnosticsContains 'TokenUIAccess\s*=\s*26' 'diagnóstico não registra UIAccess.'
+Assert-DiagnosticsContains 'ForegroundIntegrityHigher' 'diagnóstico não distingue foreground com integridade maior.'
+Assert-DiagnosticsContains 'foreground-input-queue-differs' 'diagnóstico não distingue fila de input diferente.'
+Assert-DiagnosticsContains 'native-keyboard-focus-mismatch' 'diagnóstico não distingue foco nativo incorreto.'
+
+Assert-ReportingContains 'validation\.json' 'relatório não grava validation.json.'
+Assert-ReportingContains 'PhysicalInputContext' 'relatório não preserva contexto físico seguro.'
+Assert-ReportingContains 'Artifacts' 'relatório não lista artefatos produzidos.'
+Assert-ReportingContains 'ProbeErrorReport' 'relatório não preserva erro sanitizado.'
+
+$combinedProbe = $probe + "`n" + $diagnostics
+if ($combinedProbe -match 'address\.Text\s*=(?!=)') {
     throw 'BROWSER_PHYSICAL_PROBE_CONTRACT_FAILED: entrada da omnibox não pode ser substituída por atribuição direta de Text.'
+}
+if ($combinedProbe -match 'SendKeys|AutomationPeer') {
+    throw 'BROWSER_PHYSICAL_PROBE_CONTRACT_FAILED: probe não pode substituir SendInput por SendKeys/AutomationPeer.'
+}
+if ($diagnostics -match 'AttachThreadInput') {
+    throw 'BROWSER_PHYSICAL_DIAGNOSTICS_CONTRACT_FAILED: diagnóstico não pode mascarar a fila de input anexando threads.'
 }
 
 & dotnet run --project $probeProject -c Release -- --validate-input-layout-only
@@ -73,4 +116,28 @@ if ($LASTEXITCODE -ne 0) {
     throw "BROWSER_PHYSICAL_PROBE_LAYOUT_FAILED: exit=$LASTEXITCODE"
 }
 
-Write-Host 'PASS native Browser input/menu/surface + physical probe contract'
+$diagnosticsOutput = Join-Path ([System.IO.Path]::GetTempPath()) ("cloudos-browser-probe-diagnostics-{0}" -f [Guid]::NewGuid().ToString('N'))
+try {
+    & dotnet run --project $probeProject -c Release -- --output $diagnosticsOutput --validate-diagnostics-contract-only
+    if ($LASTEXITCODE -ne 0) {
+        throw "BROWSER_PHYSICAL_DIAGNOSTICS_SELF_TEST_FAILED: exit=$LASTEXITCODE"
+    }
+
+    $diagnosticsReport = Join-Path $diagnosticsOutput 'validation.json'
+    if (-not (Test-Path -LiteralPath $diagnosticsReport)) {
+        throw 'BROWSER_PHYSICAL_DIAGNOSTICS_SELF_TEST_FAILED: validation.json ausente.'
+    }
+
+    $json = Get-Content -Raw -LiteralPath $diagnosticsReport | ConvertFrom-Json
+    if ($json.passed -ne $false -or $json.physicalValidation -ne $false) {
+        throw 'BROWSER_PHYSICAL_DIAGNOSTICS_SELF_TEST_FAILED: relatório CI não-físico declarou sucesso/validação física.'
+    }
+    if ($json.stage -ne 'diagnostics-contract-self-test' -or $json.error.code -ne 'SELF_TEST_FAILURE_REPORT') {
+        throw 'BROWSER_PHYSICAL_DIAGNOSTICS_SELF_TEST_FAILED: etapa/código de falha não foram serializados.'
+    }
+}
+finally {
+    Remove-Item -LiteralPath $diagnosticsOutput -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+Write-Host 'PASS native Browser input/diagnostics/menu/surface + physical probe contract'

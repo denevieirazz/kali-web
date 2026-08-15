@@ -79,7 +79,7 @@ jobs:
         shell: pwsh
         run: ./scripts/test-native-browser-physical-ui-boundary.ps1
 
-      - name: 12d. Validate native Browser input, surfaces and physical-probe contract
+      - name: 12d. Validate native Browser input, diagnostics, surfaces and physical-probe contract
         if: github.ref == 'refs/heads/fix/native-browser-physical-ui' || github.head_ref == 'fix/native-browser-physical-ui'
         shell: pwsh
         run: ./scripts/test-native-browser-input-contract.ps1
@@ -110,9 +110,9 @@ jobs:
         run: dotnet build desktop/CloudOS.Browser.PhysicalProbe/CloudOS.Browser.PhysicalProbe.csproj -c Release
 
       # Do not run user32!SendInput here. GitHub-hosted Windows runners do not provide
-      # a reliable interactive desktop/input station. The physical probe remains mandatory
-      # and is executed by validate-native-browser-physical-ui*.ps1 on the user's Windows PC.
-      - name: 17d. Verify physical input probe contract on hosted CI
+      # a reliable interactive desktop/input station. CI validates ABI, diagnostic coverage
+      # and failure-report serialization only. The interactive physical probe remains mandatory.
+      - name: 17d. Verify physical input and diagnostic-report contract on hosted CI without SendInput
         if: github.ref == 'refs/heads/fix/native-browser-physical-ui' || github.head_ref == 'fix/native-browser-physical-ui'
         shell: pwsh
         run: ./scripts/test-native-browser-input-contract.ps1
