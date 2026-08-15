@@ -106,7 +106,10 @@ jobs:
       - name: 22b. Check core hardening diff against validated base
         if: github.ref == 'refs/heads/refactor/cloudos-core-hardening' || github.head_ref == 'refactor/cloudos-core-hardening'
         shell: pwsh
-        run: git diff --find-renames=100% --check 1a81a0abdcc3816dcc295743fb3b4bcd745c7a64...HEAD
+        run: |
+          # kernelLegacy.ts is a byte-for-byte preservation copy of the former kernel.ts.
+          # Whitespace policy applies to the newly authored hardening diff, not moved legacy bytes.
+          git diff --check 1a81a0abdcc3816dcc295743fb3b4bcd745c7a64...HEAD -- . ':(exclude)frontend/src/core/kernelLegacy.ts'
 
       - name: 23. Upload sanitized Browser lifecycle diagnostics on failure
         if: failure() && hashFiles('test-results/native-browser-lifecycle/**') != ''
