@@ -138,7 +138,7 @@ public sealed class BrowserManager : IDisposable
     private void ScheduleInitialization(BrowserWindow window)
     {
         _initializationDispatchOperation = _dispatcher.BeginInvoke(
-            DispatcherPriority.Normal,
+            DispatcherPriority.Background,
             new Action(() =>
             {
                 _initializationDispatchOperation = null;
