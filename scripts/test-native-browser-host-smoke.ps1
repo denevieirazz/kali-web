@@ -30,6 +30,33 @@ function Get-FreePort {
     finally { $listener.Stop() }
 }
 
+function Get-SanitizedFailureDetail([System.Management.Automation.ErrorRecord]$Record, [string]$EphemeralPassword) {
+    $status = 'unknown'
+    try {
+        if ($null -ne $Record.Exception.Response -and $null -ne $Record.Exception.Response.StatusCode) {
+            $status = [string][int]$Record.Exception.Response.StatusCode
+        }
+    } catch {
+        $status = 'unknown'
+    }
+
+    $detail = if (-not [string]::IsNullOrWhiteSpace($Record.ErrorDetails.Message)) {
+        [string]$Record.ErrorDetails.Message
+    } else {
+        [string]$Record.Exception.Message
+    }
+    if (-not [string]::IsNullOrEmpty($EphemeralPassword)) {
+        $detail = $detail.Replace($EphemeralPassword, '<redacted>', [StringComparison]::Ordinal)
+    }
+    $detail = [regex]::Replace(
+        $detail,
+        '(?i)(authorization|bearer|jwt|token|password|passwd|secret|recovery[_-]?code|api[_-]?key)(\s*[:=]\s*|\s+)[^\s,;]+',
+        '$1=<redacted>')
+    $detail = $detail.Replace("`r", ' ').Replace("`n", ' ')
+    if ($detail.Length -gt 512) { $detail = $detail.Substring(0, 512) + '<truncated>' }
+    return "status=$status detail=$detail"
+}
+
 if (-not ('CloudOSSmoke.WindowApi' -as [type])) {
     Add-Type @'
 using System;
@@ -165,7 +192,8 @@ $runtimeManifest = $null
 $backendPid = 0
 $ownedDescendants = @()
 $smokeUsername = 'cloudos.smoke'
-$smokePassword = 'CloudOS-Smoke-2026!'
+$randomBytes = [System.Security.Cryptography.RandomNumberGenerator]::GetBytes(16)
+$smokePassword = 'Aa1!' + [Convert]::ToHexString($randomBytes) + '-z!'
 try {
     if (-not $hostProcess.Start()) { throw 'CloudOS.Host não iniciou.' }
     Write-Host "HOST_PID=$($hostProcess.Id)"
@@ -185,7 +213,12 @@ try {
         password = $smokePassword
         confirmPassword = $smokePassword
     } | ConvertTo-Json -Compress
-    $null = Invoke-RestMethod -Uri "$apiBase/api/setup/admin" -Method Post -ContentType 'application/json' -Body $adminBody -TimeoutSec 10
+    try {
+        $null = Invoke-RestMethod -Uri "$apiBase/api/setup/admin" -Method Post -ContentType 'application/json' -Body $adminBody -TimeoutSec 10
+    } catch {
+        $safeFailure = Get-SanitizedFailureDetail -Record $_ -EphemeralPassword $smokePassword
+        throw "SETUP_ADMIN_FAILED $safeFailure"
+    }
 
     $openRaw = & node $clientScript --port $debugPort --action open-twice
     if ($LASTEXITCODE -ne 0) { throw 'Cliente CDP falhou ao abrir Browser concorrentemente.' }
