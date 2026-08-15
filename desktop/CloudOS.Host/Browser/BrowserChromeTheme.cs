@@ -25,7 +25,8 @@ public sealed record BrowserChromePalette(
     string AccentHover,
     string Danger,
     string Success,
-    string Input);
+    string Input,
+    string Selection);
 
 public static class BrowserChromeTheme
 {
@@ -37,41 +38,43 @@ public static class BrowserChromeTheme
 
     public static BrowserChromePalette Dark { get; } = new(
         IsLight: false,
-        Window: "#08111F",
-        Chrome: "#0D1726",
-        Surface: "#142238",
-        SurfaceAlt: "#101B2D",
-        SurfaceHover: "#1B2C46",
-        SurfacePressed: "#223653",
-        ActiveTab: "#1A2A43",
-        InactiveTab: "#0D1726",
-        Border: "#263A56",
-        TextPrimary: "#F5F7FB",
-        TextSecondary: "#BAC8DA",
-        TextMuted: "#8092A8",
+        Window: "#171A1F",
+        Chrome: "#20242B",
+        Surface: "#2A3038",
+        SurfaceAlt: "#252A31",
+        SurfaceHover: "#343B45",
+        SurfacePressed: "#3E4652",
+        ActiveTab: "#252A31",
+        InactiveTab: "#20242B",
+        Border: "#3A424D",
+        TextPrimary: "#F3F5F7",
+        TextSecondary: "#C7CDD5",
+        TextMuted: "#9099A6",
         Accent: "#4C8DFF",
-        AccentHover: "#6DA2FF",
-        Danger: "#FF6B7A",
-        Success: "#5FD39B",
-        Input: "#0B1524");
+        AccentHover: "#6EA4FF",
+        Danger: "#FF6D7D",
+        Success: "#55D69E",
+        Input: "#171B21",
+        Selection: "#5B8DEF");
 
     public static BrowserChromePalette Light { get; } = new(
         IsLight: true,
-        Window: "#F2F5FA",
-        Chrome: "#E8EEF7",
+        Window: "#F7F8FA",
+        Chrome: "#E7E9ED",
         Surface: "#FFFFFF",
-        SurfaceAlt: "#F7F9FC",
-        SurfaceHover: "#E1E9F4",
-        SurfacePressed: "#D4E0EE",
+        SurfaceAlt: "#FFFFFF",
+        SurfaceHover: "#EEF1F5",
+        SurfacePressed: "#E1E6EC",
         ActiveTab: "#FFFFFF",
-        InactiveTab: "#E8EEF7",
-        Border: "#C8D4E3",
-        TextPrimary: "#182234",
-        TextSecondary: "#4B5E75",
-        TextMuted: "#6F8198",
+        InactiveTab: "#E7E9ED",
+        Border: "#D4D9E0",
+        TextPrimary: "#20242A",
+        TextSecondary: "#4F5965",
+        TextMuted: "#778290",
         Accent: "#2563EB",
         AccentHover: "#1D4ED8",
         Danger: "#D9465F",
-        Success: "#14865A",
-        Input: "#FFFFFF");
+        Success: "#16865A",
+        Input: "#F1F3F5",
+        Selection: "#7FA7F5");
 }
