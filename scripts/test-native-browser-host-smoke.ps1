@@ -222,7 +222,7 @@ try {
         }
     }
     $reuseValues = @([bool]$open.first.reused, [bool]$open.second.reused)
-    if (($reuseValues | Where-Object { $_ }).Count -ne 1 -or ($reuseValues | Where-Object { -not $_ }).Count -ne 1) {
+    if (@($reuseValues | Where-Object { $_ }).Count -ne 1 -or @($reuseValues | Where-Object { -not $_ }).Count -ne 1) {
         throw 'Duas chamadas concorrentes de browser.open não reutilizaram uma única BrowserWindow.'
     }
     Assert-BridgeReplyPrecedesInitialization
