@@ -1,874 +1,411 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import FilePreviewPanel from './FilePreviewPanel';
+import {
+  createEntry,
+  emptyTrash,
+  formatBytes,
+  listDirectory,
+  listTrash,
+  moveToTrash,
+  pasteEntry,
+  permanentlyDelete,
+  readFile,
+  renameEntry,
+  restoreFromTrash,
+  storageEstimate,
+  uploadFiles,
+  writeTextFile,
+  type ClipboardEntry,
+  type FileEntry,
+  type StorageInfo,
+} from './opfsFileService';
 import './CloudOSFiles.css';
 
-export type FileEntry = {
-  name: string;
-  kind: 'file' | 'directory';
-  size: number;
-  modified: number;
-  originalPath?: string[]; // for trash items
-};
+type ViewMode = 'files' | 'trash';
+type SortField = 'name' | 'modified' | 'size';
+type DialogType = 'create-file' | 'create-folder' | 'rename' | 'confirm-delete' | 'confirm-empty-trash' | null;
+type DialogState = { type: DialogType; title?: string; message?: string; entry?: FileEntry };
+type EditorState = { name: string; content: string } | null;
 
-type SortField = 'name' | 'size' | 'modified';
-
-interface ClipboardState {
-  entry: FileEntry;
-  action: 'copy' | 'cut';
-  sourcePath: string[];
+function isTypingTarget(target: EventTarget | null) {
+  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable);
 }
 
-interface DialogState {
-  type: 'create-file' | 'create-folder' | 'rename' | 'confirm-delete' | 'confirm-empty-trash' | null;
-  entry?: FileEntry;
-  initialValue?: string;
-  title?: string;
-  message?: string;
-}
-
-const ROOT_DIR = 'cloudos_files';
-const TRASH_DIR = '.trash';
-
-// OPFS directory traversal helper
-async function getOpfsRoot(): Promise<FileSystemDirectoryHandle> {
-  const root = await navigator.storage.getDirectory();
-  return root.getDirectoryHandle(ROOT_DIR, { create: true });
-}
-
-async function getTrashRoot(): Promise<FileSystemDirectoryHandle> {
-  const root = await navigator.storage.getDirectory();
-  return root.getDirectoryHandle(TRASH_DIR, { create: true });
-}
-
-async function getDirAt(pathParts: string[]): Promise<FileSystemDirectoryHandle> {
-  let dir = await getOpfsRoot();
-  for (const part of pathParts) {
-    dir = await dir.getDirectoryHandle(part, { create: false });
-  }
-  return dir;
-}
-
-// Helpers
-function sanitizeName(name: string): string {
-  return name.trim().replace(/[\\/:*?"<>|]/g, '-').slice(0, 120);
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes <= 0) return '0 B';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1048576).toFixed(1)} MB`;
-}
-
-// Safe recursive copy of directory in OPFS
-async function copyDirRecursive(
-  srcDir: FileSystemDirectoryHandle,
-  destParentDir: FileSystemDirectoryHandle,
-  newDirName: string
-): Promise<void> {
-  const newDir = await destParentDir.getDirectoryHandle(newDirName, { create: true });
-  for await (const [name, handle] of (srcDir as any).entries()) {
-    if (handle.kind === 'file') {
-      const file = await (handle as FileSystemFileHandle).getFile();
-      const destFileHandle = await newDir.getFileHandle(name, { create: true });
-      const writable = await (destFileHandle as any).createWritable();
-      await writable.write(file);
-      await writable.close();
-    } else if (handle.kind === 'directory') {
-      await copyDirRecursive(handle as FileSystemDirectoryHandle, newDir, name);
-    }
-  }
-}
-
-// Check and resolve name collisions
-async function getUniqueName(dir: FileSystemDirectoryHandle, baseName: string, isDir: boolean): Promise<string> {
-  let name = baseName;
-  let counter = 1;
-  const extMatch = baseName.match(/^(.*?)(\.[^.]*)?$/);
-  const nameNoExt = extMatch ? extMatch[1] : baseName;
-  const ext = extMatch && extMatch[2] ? extMatch[2] : '';
-
-  while (true) {
-    try {
-      if (isDir) {
-        await dir.getDirectoryHandle(name);
-      } else {
-        await dir.getFileHandle(name);
-      }
-      // If it didn't throw, the name exists: increment
-      name = isDir ? `${baseName} (${counter})` : `${nameNoExt} (${counter})${ext}`;
-      counter++;
-    } catch {
-      // Name is available
-      return name;
-    }
-  }
-}
-
-export default function CloudOSFiles({}: { windowId?: string }) {
-  const [currentPath, setCurrentPath] = useState<string[]>([]);
+export default function CloudOSFiles() {
   const [entries, setEntries] = useState<FileEntry[]>([]);
+  const [currentPath, setCurrentPath] = useState<string[]>([]);
+  const [viewMode, setViewMode] = useState<ViewMode>('files');
   const [selectedName, setSelectedName] = useState<string | null>(null);
+  const [previewFile, setPreviewFile] = useState<File | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('name');
-  const [isLoading, setIsLoading] = useState(false);
+  const [clipboard, setClipboard] = useState<ClipboardEntry | null>(null);
+  const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isDragging, setIsDragging] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const [storageInfo, setStorageInfo] = useState<{ used: number; quota: number } | null>(null);
-
-  // Views: 'files' | 'trash'
-  const [viewMode, setViewMode] = useState<'files' | 'trash'>('files');
-
-  // Clipboard for Copy / Cut / Paste
-  const [clipboard, setClipboard] = useState<ClipboardState | null>(null);
-
-  // Editor Modal
-  const [editor, setEditor] = useState<{ name: string; content: string } | null>(null);
-
-  // Modal Dialog state (replacing prompt/confirm/alert)
+  const [editor, setEditor] = useState<EditorState>(null);
   const [dialog, setDialog] = useState<DialogState>({ type: null });
   const [dialogInputValue, setDialogInputValue] = useState('');
-
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const directoryGeneration = useRef(0);
+  const previewGeneration = useRef(0);
 
-  // Update storage usage estimate
-  const updateStorageEstimate = useCallback(async () => {
-    if (navigator.storage && navigator.storage.estimate) {
-      try {
-        const estimate = await navigator.storage.estimate();
-        setStorageInfo({
-          used: estimate.usage || 0,
-          quota: estimate.quota || 0,
-        });
-      } catch {}
-    }
-  }, []);
+  const selectedEntry = useMemo(
+    () => entries.find(entry => entry.name === selectedName) ?? null,
+    [entries, selectedName],
+  );
 
-  // Load entries in current folder or trash
   const loadDirectory = useCallback(async () => {
+    const generation = ++directoryGeneration.current;
     setIsLoading(true);
     setErrorMessage('');
     try {
-      const list: FileEntry[] = [];
-
-      if (viewMode === 'trash') {
-        const trashDir = await getTrashRoot();
-        for await (const [name, handle] of (trashDir as any).entries()) {
-          if (handle.kind === 'file') {
-            const file = await (handle as FileSystemFileHandle).getFile();
-            list.push({
-              name,
-              kind: 'file',
-              size: file.size,
-              modified: file.lastModified,
-            });
-          } else {
-            list.push({
-              name,
-              kind: 'directory',
-              size: 0,
-              modified: 0,
-            });
-          }
-        }
-      } else {
-        const dir = await getDirAt(currentPath);
-        for await (const [name, handle] of (dir as any).entries()) {
-          if (name === TRASH_DIR) continue;
-          if (handle.kind === 'file') {
-            const file = await (handle as FileSystemFileHandle).getFile();
-            list.push({
-              name,
-              kind: 'file',
-              size: file.size,
-              modified: file.lastModified,
-            });
-          } else {
-            list.push({
-              name,
-              kind: 'directory',
-              size: 0,
-              modified: 0,
-            });
-          }
-        }
-      }
-
-      setEntries(list);
+      const [nextEntries, estimate] = await Promise.all([
+        viewMode === 'trash' ? listTrash() : listDirectory(currentPath),
+        storageEstimate(),
+      ]);
+      if (generation !== directoryGeneration.current) return;
+      setEntries(nextEntries);
+      setStorageInfo(estimate);
       setSelectedName(null);
-      await updateStorageEstimate();
-    } catch (err: any) {
-      setErrorMessage('Não foi possível ler o diretório selecionado.');
+      setPreviewFile(null);
+      setPreviewLoading(false);
+    } catch (error) {
+      if (generation !== directoryGeneration.current) return;
+      setEntries([]);
+      setErrorMessage(error instanceof Error ? error.message : 'Falha ao acessar o armazenamento OPFS.');
     } finally {
-      setIsLoading(false);
+      if (generation === directoryGeneration.current) setIsLoading(false);
     }
-  }, [currentPath, viewMode, updateStorageEstimate]);
+  }, [currentPath, viewMode]);
 
   useEffect(() => {
     void loadDirectory();
   }, [loadDirectory]);
 
-  // Filtered & Sorted Entries
   const visibleEntries = useMemo(() => {
+    const query = searchQuery.trim().toLocaleLowerCase();
     return entries
-      .filter((e) => e.name.toLowerCase().includes(searchQuery.toLowerCase()))
-      .sort((a, b) => {
-        if (a.kind !== b.kind) return a.kind === 'directory' ? -1 : 1;
-        if (sortField === 'size') return a.size - b.size;
-        if (sortField === 'modified') return b.modified - a.modified;
-        return a.name.localeCompare(b.name, 'pt-BR', { numeric: true });
+      .filter(entry => !query || (entry.originalName || entry.name).toLocaleLowerCase().includes(query))
+      .sort((left, right) => {
+        if (left.kind !== right.kind) return left.kind === 'directory' ? -1 : 1;
+        if (sortField === 'size') return right.size - left.size;
+        if (sortField === 'modified') return right.modified - left.modified;
+        return (left.originalName || left.name).localeCompare(right.originalName || right.name, undefined, { sensitivity: 'base' });
       });
   }, [entries, searchQuery, sortField]);
 
-  // Actions
-  const handleOpenEntry = async (entry: FileEntry) => {
-    if (viewMode === 'trash') return;
+  const selectEntry = useCallback(async (entry: FileEntry) => {
+    setSelectedName(entry.name);
+    const generation = ++previewGeneration.current;
+    setPreviewFile(null);
     if (entry.kind === 'directory') {
-      setCurrentPath((prev) => [...prev, entry.name]);
+      setPreviewLoading(false);
       return;
     }
-    // File
+    setPreviewLoading(true);
     try {
-      const dir = await getDirAt(currentPath);
-      const fileHandle = await dir.getFileHandle(entry.name);
-      const file = await fileHandle.getFile();
-      const isText =
-        file.type.startsWith('text/') ||
-        /\.(txt|md|json|js|ts|tsx|jsx|css|html|log|csv|svg|xml|yaml|yml)$/i.test(entry.name);
-
-      if (isText) {
-        const textContent = await file.text();
-        setEditor({ name: entry.name, content: textContent });
-      } else {
-        handleDownload(entry.name);
-      }
+      const file = await readFile(currentPath, entry.name, viewMode === 'trash');
+      if (generation === previewGeneration.current) setPreviewFile(file);
     } catch {
-      setErrorMessage('Erro ao abrir o arquivo.');
+      if (generation === previewGeneration.current) setErrorMessage('Não foi possível carregar o preview deste arquivo.');
+    } finally {
+      if (generation === previewGeneration.current) setPreviewLoading(false);
     }
-  };
+  }, [currentPath, viewMode]);
 
-  const handleSaveEditor = async () => {
+  const openEntry = useCallback(async (entry: FileEntry) => {
+    if (entry.kind === 'directory' && viewMode === 'files') {
+      setCurrentPath(path => [...path, entry.name]);
+      return;
+    }
+    await selectEntry(entry);
+  }, [selectEntry, viewMode]);
+
+  const downloadEntry = useCallback(async (entry: FileEntry) => {
+    if (entry.kind !== 'file') return;
+    try {
+      const file = await readFile(currentPath, entry.name, viewMode === 'trash');
+      const url = URL.createObjectURL(file);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = entry.originalName || entry.name;
+      anchor.rel = 'noopener';
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch {
+      setErrorMessage('Falha ao preparar o download do arquivo.');
+    }
+  }, [currentPath, viewMode]);
+
+  const openEditor = useCallback(async (entry: FileEntry) => {
+    if (entry.kind !== 'file' || viewMode === 'trash') return;
+    try {
+      const file = await readFile(currentPath, entry.name);
+      if (file.size > 2 * 1024 * 1024) throw new Error('Arquivo grande demais para o editor rápido.');
+      setEditor({ name: entry.name, content: await file.text() });
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Falha ao abrir o editor.');
+    }
+  }, [currentPath, viewMode]);
+
+  const saveEditor = useCallback(async () => {
     if (!editor) return;
     setIsLoading(true);
     try {
-      const dir = await getDirAt(currentPath);
-      const fileHandle = await dir.getFileHandle(editor.name, { create: true });
-      const writable = await (fileHandle as any).createWritable();
-      await writable.write(editor.content);
-      await writable.close();
+      await writeTextFile(currentPath, editor.name, editor.content);
       setEditor(null);
       await loadDirectory();
-    } catch {
-      setErrorMessage('Falha ao salvar as alterações no arquivo.');
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Falha ao salvar o arquivo.');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [currentPath, editor, loadDirectory]);
 
-  const handleDownload = async (fileName: string) => {
-    try {
-      const dir = viewMode === 'trash' ? await getTrashRoot() : await getDirAt(currentPath);
-      const fileHandle = await dir.getFileHandle(fileName);
-      const file = await fileHandle.getFile();
-      const url = URL.createObjectURL(file);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = fileName;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch {
-      setErrorMessage('Falha no download do arquivo.');
-    }
-  };
-
-  const handleUpload = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
+  const confirmDialog = useCallback(async () => {
+    if (!dialog.type) return;
     setIsLoading(true);
     setErrorMessage('');
     try {
-      const dir = await getDirAt(currentPath);
-      for (const file of Array.from(files)) {
-        const clean = sanitizeName(file.name);
-        if (!clean) continue;
-        const uniqueName = await getUniqueName(dir, clean, false);
-        const fileHandle = await dir.getFileHandle(uniqueName, { create: true });
-        const writable = await (fileHandle as any).createWritable();
-        await writable.write(file);
-        await writable.close();
+      if (dialog.type === 'create-file') {
+        await createEntry(currentPath, 'file', dialogInputValue);
+      } else if (dialog.type === 'create-folder') {
+        await createEntry(currentPath, 'directory', dialogInputValue);
+      } else if (dialog.type === 'rename' && dialog.entry) {
+        await renameEntry(currentPath, dialog.entry, dialogInputValue);
+      } else if (dialog.type === 'confirm-delete' && dialog.entry) {
+        if (viewMode === 'trash') await permanentlyDelete(dialog.entry);
+        else await moveToTrash(currentPath, dialog.entry);
+      } else if (dialog.type === 'confirm-empty-trash') {
+        await emptyTrash();
       }
-      await loadDirectory();
-    } catch {
-      setErrorMessage('Erro ao enviar arquivos para o armazenamento.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Dialog Submission (Create File/Folder, Rename, Delete, Empty Trash)
-  const handleDialogConfirm = async () => {
-    const { type, entry } = dialog;
-    if (!type) return;
-
-    setIsLoading(true);
-    setErrorMessage('');
-
-    try {
-      if (type === 'create-file') {
-        const clean = sanitizeName(dialogInputValue);
-        if (!clean) return;
-        const dir = await getDirAt(currentPath);
-        const uniqueName = await getUniqueName(dir, clean, false);
-        const fileHandle = await dir.getFileHandle(uniqueName, { create: true });
-        const writable = await (fileHandle as any).createWritable();
-        await writable.close();
-      } else if (type === 'create-folder') {
-        const clean = sanitizeName(dialogInputValue);
-        if (!clean) return;
-        const dir = await getDirAt(currentPath);
-        const uniqueName = await getUniqueName(dir, clean, true);
-        await dir.getDirectoryHandle(uniqueName, { create: true });
-      } else if (type === 'rename' && entry) {
-        const clean = sanitizeName(dialogInputValue);
-        if (!clean || clean === entry.name) {
-          setDialog({ type: null });
-          setIsLoading(false);
-          return;
-        }
-        const dir = await getDirAt(currentPath);
-        if (entry.kind === 'file') {
-          const oldHandle = await dir.getFileHandle(entry.name);
-          const oldFile = await oldHandle.getFile();
-          const uniqueName = await getUniqueName(dir, clean, false);
-          const newHandle = await dir.getFileHandle(uniqueName, { create: true });
-          const writable = await (newHandle as any).createWritable();
-          await writable.write(oldFile);
-          await writable.close();
-          await dir.removeEntry(entry.name);
-        } else {
-          // Folder rename with recursive copy
-          const srcDir = await dir.getDirectoryHandle(entry.name);
-          const uniqueName = await getUniqueName(dir, clean, true);
-          await copyDirRecursive(srcDir, dir, uniqueName);
-          await dir.removeEntry(entry.name, { recursive: true });
-        }
-      } else if (type === 'confirm-delete' && entry) {
-        if (viewMode === 'trash') {
-          // Permanent delete
-          const trashDir = await getTrashRoot();
-          await trashDir.removeEntry(entry.name, { recursive: entry.kind === 'directory' });
-        } else {
-          // Move to trash
-          const dir = await getDirAt(currentPath);
-          const trashDir = await getTrashRoot();
-          const uniqueTrashName = await getUniqueName(trashDir, entry.name, entry.kind === 'directory');
-
-          if (entry.kind === 'file') {
-            const srcHandle = await dir.getFileHandle(entry.name);
-            const file = await srcHandle.getFile();
-            const trashHandle = await trashDir.getFileHandle(uniqueTrashName, { create: true });
-            const writable = await (trashHandle as any).createWritable();
-            await writable.write(file);
-            await writable.close();
-            await dir.removeEntry(entry.name);
-          } else {
-            const srcDir = await dir.getDirectoryHandle(entry.name);
-            await copyDirRecursive(srcDir, trashDir, uniqueTrashName);
-            await dir.removeEntry(entry.name, { recursive: true });
-          }
-        }
-      } else if (type === 'confirm-empty-trash') {
-        const trashDir = await getTrashRoot();
-        for await (const [name, handle] of (trashDir as any).entries()) {
-          await trashDir.removeEntry(name, { recursive: handle.kind === 'directory' });
-        }
-      }
-
       setDialog({ type: null });
       setDialogInputValue('');
       await loadDirectory();
-    } catch (err: any) {
-      setErrorMessage(`Erro ao realizar a operação: ${err.message || 'Falha desconhecida'}`);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Falha ao realizar a operação.');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [currentPath, dialog, dialogInputValue, loadDirectory, viewMode]);
 
-  // Restore from Trash
-  const handleRestoreFromTrash = async (entry: FileEntry) => {
+  const restoreEntry = useCallback(async (entry: FileEntry) => {
     setIsLoading(true);
-    setErrorMessage('');
     try {
-      const trashDir = await getTrashRoot();
-      const rootDir = await getOpfsRoot();
-      const uniqueName = await getUniqueName(rootDir, entry.name, entry.kind === 'directory');
-
-      if (entry.kind === 'file') {
-        const srcHandle = await trashDir.getFileHandle(entry.name);
-        const file = await srcHandle.getFile();
-        const destHandle = await rootDir.getFileHandle(uniqueName, { create: true });
-        const writable = await (destHandle as any).createWritable();
-        await writable.write(file);
-        await writable.close();
-        await trashDir.removeEntry(entry.name);
-      } else {
-        const srcDir = await trashDir.getDirectoryHandle(entry.name);
-        await copyDirRecursive(srcDir, rootDir, uniqueName);
-        await trashDir.removeEntry(entry.name, { recursive: true });
-      }
-
+      await restoreFromTrash(entry);
       await loadDirectory();
-    } catch {
-      setErrorMessage('Falha ao restaurar o item.');
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Falha ao restaurar o item.');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [loadDirectory]);
 
-  // Clipboard operations
-  const handleCut = (entry: FileEntry) => {
-    setClipboard({ entry, action: 'cut', sourcePath: [...currentPath] });
-  };
-
-  const handleCopy = (entry: FileEntry) => {
-    setClipboard({ entry, action: 'copy', sourcePath: [...currentPath] });
-  };
-
-  const handlePaste = async () => {
-    if (!clipboard) return;
+  const pasteClipboard = useCallback(async () => {
+    if (!clipboard || viewMode !== 'files') return;
     setIsLoading(true);
-    setErrorMessage('');
     try {
-      const srcDir = await getDirAt(clipboard.sourcePath);
-      const destDir = await getDirAt(currentPath);
-      const { entry, action } = clipboard;
-
-      const uniqueName = await getUniqueName(destDir, entry.name, entry.kind === 'directory');
-
-      if (entry.kind === 'file') {
-        const srcHandle = await srcDir.getFileHandle(entry.name);
-        const file = await srcHandle.getFile();
-        const destHandle = await destDir.getFileHandle(uniqueName, { create: true });
-        const writable = await (destHandle as any).createWritable();
-        await writable.write(file);
-        await writable.close();
-
-        if (action === 'cut') {
-          await srcDir.removeEntry(entry.name);
-          setClipboard(null);
-        }
-      } else {
-        const srcSubDir = await srcDir.getDirectoryHandle(entry.name);
-        await copyDirRecursive(srcSubDir, destDir, uniqueName);
-
-        if (action === 'cut') {
-          await srcDir.removeEntry(entry.name, { recursive: true });
-          setClipboard(null);
-        }
-      }
-
+      const result = await pasteEntry(clipboard, currentPath);
+      if (clipboard.action === 'cut' && (result.moved || result.name === clipboard.entry.name)) setClipboard(null);
       await loadDirectory();
-    } catch {
-      setErrorMessage('Falha ao colar o item no destino.');
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Falha ao colar o item.');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [clipboard, currentPath, loadDirectory, viewMode]);
+
+  const handleUpload = useCallback(async (files: FileList | File[]) => {
+    if (viewMode !== 'files' || files.length === 0) return;
+    setIsLoading(true);
+    try {
+      await uploadFiles(currentPath, Array.from(files));
+      await loadDirectory();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Falha ao enviar arquivos.');
+    } finally {
+      setIsLoading(false);
+      if (uploadInputRef.current) uploadInputRef.current.value = '';
+    }
+  }, [currentPath, loadDirectory, viewMode]);
+
+  const requestRename = useCallback((entry: FileEntry) => {
+    if (viewMode !== 'files') return;
+    setDialogInputValue(entry.name);
+    setDialog({ type: 'rename', title: 'Renomear item', entry });
+  }, [viewMode]);
+
+  const requestDelete = useCallback((entry: FileEntry) => {
+    setDialog({
+      type: 'confirm-delete',
+      entry,
+      title: viewMode === 'trash' ? 'Excluir permanentemente' : 'Mover para a Lixeira',
+      message: viewMode === 'trash'
+        ? `Apagar definitivamente “${entry.originalName || entry.name}”? Esta ação não pode ser desfeita.`
+        : `Mover “${entry.name}” para a Lixeira?`,
+    });
+  }, [viewMode]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (isTypingTarget(event.target) || editor || dialog.type) return;
+      if (event.key === 'Escape') {
+        setSelectedName(null);
+        setPreviewFile(null);
+      } else if (event.key === 'Delete' && selectedEntry) {
+        event.preventDefault();
+        requestDelete(selectedEntry);
+      } else if (event.key === 'F2' && selectedEntry && viewMode === 'files') {
+        event.preventDefault();
+        requestRename(selectedEntry);
+      } else if (event.key === 'Enter' && selectedEntry) {
+        event.preventDefault();
+        void openEntry(selectedEntry);
+      } else if (event.ctrlKey && event.key.toLowerCase() === 'c' && selectedEntry && viewMode === 'files') {
+        event.preventDefault();
+        setClipboard({ entry: selectedEntry, action: 'copy', sourcePath: [...currentPath] });
+      } else if (event.ctrlKey && event.key.toLowerCase() === 'x' && selectedEntry && viewMode === 'files') {
+        event.preventDefault();
+        setClipboard({ entry: selectedEntry, action: 'cut', sourcePath: [...currentPath] });
+      } else if (event.ctrlKey && event.key.toLowerCase() === 'v' && clipboard && viewMode === 'files') {
+        event.preventDefault();
+        void pasteClipboard();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [clipboard, currentPath, dialog.type, editor, openEntry, pasteClipboard, requestDelete, requestRename, selectedEntry, viewMode]);
 
   return (
     <div className="cf-root">
-      {/* Main Toolbar */}
       <header className="cf-toolbar">
-        <button
-          className="cf-btn"
-          onClick={() => setCurrentPath((p) => p.slice(0, -1))}
-          disabled={!currentPath.length || viewMode === 'trash'}
-          title="Voltar pasta anterior"
-        >
-          ←
-        </button>
-        <button className="cf-btn" onClick={() => void loadDirectory()} title="Atualizar">
-          ↻
-        </button>
-
+        <button className="cf-btn" onClick={() => setCurrentPath(path => path.slice(0, -1))} disabled={!currentPath.length || viewMode === 'trash'} title="Pasta anterior">←</button>
+        <button className="cf-btn" onClick={() => void loadDirectory()} title="Atualizar">↻</button>
         <div className="cf-toolbar-divider" />
 
         {viewMode === 'files' ? (
           <>
-            <button
-              className="cf-btn primary-btn"
-              onClick={() => {
-                setDialogInputValue('Novo Documento.txt');
-                setDialog({
-                  type: 'create-file',
-                  title: 'Criar Novo Arquivo',
-                  initialValue: 'Novo Documento.txt',
-                });
-              }}
-            >
-              ＋ Arquivo
-            </button>
-            <button
-              className="cf-btn"
-              onClick={() => {
-                setDialogInputValue('Nova Pasta');
-                setDialog({
-                  type: 'create-folder',
-                  title: 'Criar Nova Pasta',
-                  initialValue: 'Nova Pasta',
-                });
-              }}
-            >
-              ＋ Pasta
-            </button>
-            <button className="cf-btn" onClick={() => uploadInputRef.current?.click()}>
-              ↑ Enviar
-            </button>
-            <input
-              ref={uploadInputRef}
-              hidden
-              multiple
-              type="file"
-              onChange={(e) => void handleUpload(e.target.files)}
-            />
-
-            {clipboard && (
-              <button className="cf-btn paste-btn" onClick={() => void handlePaste()}>
-                📋 Colar ({clipboard.entry.name})
-              </button>
-            )}
-
-            <button
-              className="cf-btn trash-toggle-btn"
-              onClick={() => {
-                setViewMode('trash');
-                setCurrentPath([]);
-              }}
-              title="Abrir Lixeira"
-            >
-              🗑️ Lixeira
-            </button>
+            <button className="cf-btn primary-btn" onClick={() => { setDialogInputValue('Novo Documento.txt'); setDialog({ type: 'create-file', title: 'Criar arquivo' }); }}>＋ Arquivo</button>
+            <button className="cf-btn" onClick={() => { setDialogInputValue('Nova Pasta'); setDialog({ type: 'create-folder', title: 'Criar pasta' }); }}>＋ Pasta</button>
+            <button className="cf-btn" onClick={() => uploadInputRef.current?.click()}>↑ Enviar</button>
+            <input ref={uploadInputRef} hidden multiple type="file" onChange={event => event.target.files && void handleUpload(event.target.files)} />
+            {clipboard && <button className="cf-btn paste-btn" onClick={() => void pasteClipboard()}>📋 Colar</button>}
+            <button className="cf-btn" onClick={() => { setViewMode('trash'); setCurrentPath([]); }}>🗑️ Lixeira</button>
           </>
         ) : (
           <>
-            <button
-              className="cf-btn primary-btn"
-              onClick={() => {
-                setViewMode('files');
-                setCurrentPath([]);
-              }}
-            >
-              📁 Meus Arquivos
-            </button>
-            <button
-              className="cf-btn danger-btn"
-              disabled={entries.length === 0}
-              onClick={() =>
-                setDialog({
-                  type: 'confirm-empty-trash',
-                  title: 'Esvaziar Lixeira',
-                  message: 'Tem certeza que deseja apagar permanentemente todos os itens da lixeira?',
-                })
-              }
-            >
-              🗑️ Esvaziar Lixeira
-            </button>
+            <button className="cf-btn primary-btn" onClick={() => { setViewMode('files'); setCurrentPath([]); }}>📁 Meus Arquivos</button>
+            <button className="cf-btn danger-btn" disabled={!entries.length} onClick={() => setDialog({ type: 'confirm-empty-trash', title: 'Esvaziar Lixeira', message: 'Apagar permanentemente todos os itens da Lixeira?' })}>🗑️ Esvaziar</button>
           </>
         )}
 
-        {/* Address Breadcrumbs */}
-        <nav className="cf-address" aria-label="Caminho de navegação">
-          <button
-            className={!currentPath.length && viewMode === 'files' ? 'active-breadcrumb' : ''}
-            onClick={() => {
-              setViewMode('files');
-              setCurrentPath([]);
-            }}
-          >
-            local:
-          </button>
-          {viewMode === 'trash' ? (
-            <button className="active-breadcrumb">/ 🗑️ lixeira</button>
-          ) : (
-            currentPath.map((part, i) => (
-              <button
-                key={`${part}-${i}`}
-                className={i === currentPath.length - 1 ? 'active-breadcrumb' : ''}
-                onClick={() => setCurrentPath(currentPath.slice(0, i + 1))}
-              >
-                / {part}
-              </button>
-            ))
-          )}
+        <nav className="cf-address" aria-label="Caminho">
+          <button className={!currentPath.length && viewMode === 'files' ? 'active-breadcrumb' : ''} onClick={() => { setViewMode('files'); setCurrentPath([]); }}>local:</button>
+          {viewMode === 'trash' ? <button className="active-breadcrumb">/ 🗑️ lixeira</button> : currentPath.map((part, index) => (
+            <button key={`${part}-${index}`} className={index === currentPath.length - 1 ? 'active-breadcrumb' : ''} onClick={() => setCurrentPath(currentPath.slice(0, index + 1))}>/ {part}</button>
+          ))}
         </nav>
 
-        {/* Search & Sort */}
-        <input
-          className="cf-search"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Pesquisar..."
-          aria-label="Pesquisar arquivos"
-        />
-
-        <select
-          className="cf-sort-select"
-          value={sortField}
-          onChange={(e) => setSortField(e.target.value as SortField)}
-          aria-label="Ordenar por"
-        >
-          <option value="name">Nome (A-Z)</option>
-          <option value="modified">Modificado</option>
-          <option value="size">Tamanho</option>
+        <input className="cf-search" value={searchQuery} onChange={event => setSearchQuery(event.target.value)} placeholder="Pesquisar…" aria-label="Pesquisar arquivos" />
+        <select className="cf-sort-select" value={sortField} onChange={event => setSortField(event.target.value as SortField)} aria-label="Ordenar por">
+          <option value="name">Nome</option><option value="modified">Modificado</option><option value="size">Tamanho</option>
         </select>
       </header>
 
-      {/* Error Alert Box */}
-      {errorMessage && (
-        <div className="cf-error" role="alert">
-          <span>⚠️ {errorMessage}</span>
-          <button onClick={() => setErrorMessage('')}>×</button>
-        </div>
-      )}
+      {errorMessage && <div className="cf-error" role="alert"><span>⚠️ {errorMessage}</span><button onClick={() => setErrorMessage('')}>×</button></div>}
 
-      {/* Content Area */}
-      <main className="cf-content">
-        {isLoading ? (
-          <div className="cf-empty">
-            <div className="cf-spinner" />
-            <span>Processando armazenamento...</span>
-          </div>
-        ) : visibleEntries.length ? (
-          <div className="cf-grid" role="list">
-            {visibleEntries.map((entry) => {
-              const isSelected = selectedName === entry.name;
-              return (
-                <article
-                  key={entry.name}
-                  className={`cf-item ${isSelected ? 'selected' : ''}`}
-                  onClick={() => setSelectedName(entry.name)}
-                  onDoubleClick={() => void handleOpenEntry(entry)}
-                  role="listitem"
-                  tabIndex={0}
-                >
-                  <div className="cf-icon">{entry.kind === 'directory' ? '📁' : '📄'}</div>
-                  <strong className="cf-name" title={entry.name}>
-                    {entry.name}
-                  </strong>
-                  <small className="cf-size">
-                    {entry.kind === 'directory' ? 'Pasta' : formatBytes(entry.size)}
-                  </small>
+      <div className="cf-workspace">
+        <main
+          className={`cf-content ${isDragging ? 'is-dragging' : ''}`}
+          onDragOver={event => { if (viewMode === 'files') { event.preventDefault(); setIsDragging(true); } }}
+          onDragLeave={() => setIsDragging(false)}
+          onDrop={event => { event.preventDefault(); setIsDragging(false); if (viewMode === 'files' && event.dataTransfer.files.length) void handleUpload(event.dataTransfer.files); }}
+        >
+          {isDragging && <div className="cf-drop-overlay">Solte os arquivos para enviar</div>}
+          {isLoading ? (
+            <div className="cf-empty"><div className="cf-spinner" /><span>Processando armazenamento…</span></div>
+          ) : visibleEntries.length ? (
+            <div className="cf-grid" role="list">
+              {visibleEntries.map(entry => {
+                const selected = selectedName === entry.name;
+                return (
+                  <article
+                    key={entry.name}
+                    className={`cf-item ${selected ? 'selected' : ''}`}
+                    onClick={() => void selectEntry(entry)}
+                    onDoubleClick={() => void openEntry(entry)}
+                    onKeyDown={event => { if (event.key === 'Enter') void openEntry(entry); }}
+                    role="listitem"
+                    tabIndex={0}
+                  >
+                    <div className="cf-icon">{entry.kind === 'directory' ? '📁' : '📄'}</div>
+                    <strong className="cf-name" title={entry.originalName || entry.name}>{entry.originalName || entry.name}</strong>
+                    <small className="cf-size">{entry.kind === 'directory' ? 'Pasta' : formatBytes(entry.size)}</small>
+                    <div className="cf-actions">
+                      {viewMode === 'files' ? (
+                        <>
+                          <button onClick={event => { event.stopPropagation(); void openEntry(entry); }}>{entry.kind === 'directory' ? 'Abrir' : 'Preview'}</button>
+                          {entry.kind === 'file' && <button onClick={event => { event.stopPropagation(); void downloadEntry(entry); }}>Baixar</button>}
+                          <button onClick={event => { event.stopPropagation(); setClipboard({ entry, action: 'copy', sourcePath: [...currentPath] }); }}>Copiar</button>
+                          <button onClick={event => { event.stopPropagation(); setClipboard({ entry, action: 'cut', sourcePath: [...currentPath] }); }}>Recortar</button>
+                          <button onClick={event => { event.stopPropagation(); requestRename(entry); }}>Renomear</button>
+                          <button className="danger" onClick={event => { event.stopPropagation(); requestDelete(entry); }}>Excluir</button>
+                        </>
+                      ) : (
+                        <>
+                          <button className="primary" onClick={event => { event.stopPropagation(); void restoreEntry(entry); }}>Restaurar</button>
+                          {entry.kind === 'file' && <button onClick={event => { event.stopPropagation(); void selectEntry(entry); }}>Preview</button>}
+                          <button className="danger" onClick={event => { event.stopPropagation(); requestDelete(entry); }}>Apagar</button>
+                        </>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="cf-empty"><span>{viewMode === 'trash' ? '🗑️' : '☁️'}</span><strong>{viewMode === 'trash' ? 'Lixeira vazia' : 'Pasta vazia'}</strong><small>{viewMode === 'trash' ? 'Nenhum item excluído.' : 'Crie, envie ou arraste arquivos para começar.'}</small></div>
+          )}
+        </main>
 
-                  {/* Actions inside selected card */}
-                  <div className="cf-actions">
-                    {viewMode === 'files' ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void handleOpenEntry(entry);
-                          }}
-                        >
-                          {entry.kind === 'directory' ? 'Abrir' : 'Editar'}
-                        </button>
-                        {entry.kind === 'file' && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void handleDownload(entry.name);
-                            }}
-                          >
-                            Baixar
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleCopy(entry);
-                          }}
-                        >
-                          Copiar
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleCut(entry);
-                          }}
-                        >
-                          Recortar
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDialogInputValue(entry.name);
-                            setDialog({
-                              type: 'rename',
-                              entry,
-                              title: `Renomear ${entry.kind === 'directory' ? 'Pasta' : 'Arquivo'}`,
-                              initialValue: entry.name,
-                            });
-                          }}
-                        >
-                          Renomear
-                        </button>
-                        <button
-                          type="button"
-                          className="danger"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDialog({
-                              type: 'confirm-delete',
-                              entry,
-                              title: 'Mover para a Lixeira',
-                              message: `Deseja mover “${entry.name}” para a lixeira?`,
-                            });
-                          }}
-                        >
-                          Excluir
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          className="primary"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void handleRestoreFromTrash(entry);
-                          }}
-                        >
-                          Restaurar
-                        </button>
-                        <button
-                          type="button"
-                          className="danger"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDialog({
-                              type: 'confirm-delete',
-                              entry,
-                              title: 'Excluir Permanentemente',
-                              message: `Deseja apagar definitivamente “${entry.name}”? Esta ação não pode ser desfeita.`,
-                            });
-                          }}
-                        >
-                          Apagar
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="cf-empty">
-            <span>{viewMode === 'trash' ? '🗑️' : '☁️'}</span>
-            <strong>{viewMode === 'trash' ? 'Lixeira Vazia' : 'Pasta Vazia'}</strong>
-            <small>
-              {viewMode === 'trash'
-                ? 'Nenhum item excluído recentemente.'
-                : 'Crie uma pasta ou envie arquivos para começar.'}
-            </small>
-          </div>
-        )}
-      </main>
+        <FilePreviewPanel
+          entry={selectedEntry}
+          file={previewFile}
+          loading={previewLoading}
+          onClose={() => { setSelectedName(null); setPreviewFile(null); }}
+          onEdit={() => selectedEntry && void openEditor(selectedEntry)}
+          onDownload={() => selectedEntry && void downloadEntry(selectedEntry)}
+        />
+      </div>
 
-      {/* Footer Status Bar */}
       <footer className="cf-status">
-        <span>{visibleEntries.length} item(ns)</span>
-        <span>
-          {storageInfo
-            ? `Armazenamento OPFS: ${formatBytes(storageInfo.used)} usados de ${formatBytes(storageInfo.quota)}`
-            : 'Armazenamento OPFS local e persistente'}
-        </span>
+        <span>{visibleEntries.length} item(ns){clipboard ? ` · ${clipboard.action === 'cut' ? 'recortado' : 'copiado'}: ${clipboard.entry.name}` : ''}</span>
+        <span>{storageInfo ? `OPFS ${formatBytes(storageInfo.used)} / ${formatBytes(storageInfo.quota)}` : 'Armazenamento OPFS local'}</span>
       </footer>
 
-      {/* Text Editor Modal */}
       {editor && (
         <div className="cf-modal" role="dialog" aria-modal="true" aria-labelledby="editor-title">
           <section className="cf-modal-card">
-            <header className="cf-modal-header">
-              <strong id="editor-title">📝 {editor.name}</strong>
-              <button className="cf-modal-close" onClick={() => setEditor(null)}>
-                ✕
-              </button>
-            </header>
-            <textarea
-              className="cf-modal-textarea"
-              value={editor.content}
-              onChange={(e) => setEditor({ ...editor, content: e.target.value })}
-              aria-label="Conteúdo do arquivo"
-            />
-            <footer className="cf-modal-footer">
-              <button className="cf-btn" onClick={() => setEditor(null)}>
-                Cancelar
-              </button>
-              <button className="cf-btn primary-btn" onClick={() => void handleSaveEditor()}>
-                Salvar Alterações
-              </button>
-            </footer>
+            <header className="cf-modal-header"><strong id="editor-title">📝 {editor.name}</strong><button className="cf-modal-close" onClick={() => setEditor(null)}>✕</button></header>
+            <textarea className="cf-modal-textarea" value={editor.content} onChange={event => setEditor({ ...editor, content: event.target.value })} aria-label="Conteúdo do arquivo" />
+            <footer className="cf-modal-footer"><button className="cf-btn" onClick={() => setEditor(null)}>Cancelar</button><button className="cf-btn primary-btn" onClick={() => void saveEditor()}>Salvar alterações</button></footer>
           </section>
         </div>
       )}
 
-      {/* Accessible React Prompt/Confirm Dialogs */}
       {dialog.type && (
         <div className="cf-modal" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
-          <div className="cf-dialog-box">
-            <h3 id="dialog-title" className="cf-dialog-title">
-              {dialog.title}
-            </h3>
-
+          <section className="cf-dialog-box">
+            <h2 className="cf-dialog-title" id="dialog-title">{dialog.title}</h2>
             {dialog.message && <p className="cf-dialog-message">{dialog.message}</p>}
-
-            {(dialog.type === 'create-file' ||
-              dialog.type === 'create-folder' ||
-              dialog.type === 'rename') && (
-              <div className="cf-dialog-input-wrapper">
-                <input
-                  type="text"
-                  autoFocus
-                  className="cf-dialog-input"
-                  value={dialogInputValue}
-                  onChange={(e) => setDialogInputValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') void handleDialogConfirm();
-                    if (e.key === 'Escape') setDialog({ type: null });
-                  }}
-                  placeholder="Digite o nome..."
-                />
-              </div>
+            {(dialog.type === 'create-file' || dialog.type === 'create-folder' || dialog.type === 'rename') && (
+              <input className="cf-dialog-input" autoFocus value={dialogInputValue} onChange={event => setDialogInputValue(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') void confirmDialog(); }} />
             )}
-
-            <div className="cf-dialog-actions">
-              <button
-                type="button"
-                className="cf-btn"
-                onClick={() => {
-                  setDialog({ type: null });
-                  setDialogInputValue('');
-                }}
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                className={`cf-btn ${
-                  dialog.type.includes('delete') || dialog.type.includes('empty')
-                    ? 'danger-btn'
-                    : 'primary-btn'
-                }`}
-                onClick={() => void handleDialogConfirm()}
-              >
-                Confirmar
-              </button>
-            </div>
-          </div>
+            <div className="cf-dialog-actions"><button className="cf-btn" onClick={() => { setDialog({ type: null }); setDialogInputValue(''); }}>Cancelar</button><button className={`cf-btn ${dialog.type?.includes('delete') || dialog.type === 'confirm-empty-trash' ? 'danger-btn' : 'primary-btn'}`} onClick={() => void confirmDialog()}>Confirmar</button></div>
+          </section>
         </div>
       )}
     </div>
