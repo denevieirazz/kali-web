@@ -32,6 +32,21 @@ public sealed class BrowserExtensionManager
     public static BrowserExtensionPackageInfo ValidatePackage(string sourceDirectory) =>
         BrowserExtensionPackageValidator.ValidatePackage(sourceDirectory);
 
+    public bool IsManagedExtension(string extensionId)
+    {
+        if (!TryGetManagedPackagePath(extensionId, out var managedPath) || !Directory.Exists(managedPath))
+            return false;
+        try
+        {
+            BrowserExtensionPackageValidator.EnsureDirectoryNotReparsePoint(managedPath);
+            return true;
+        }
+        catch (BrowserExtensionPackageException)
+        {
+            return false;
+        }
+    }
+
     public async Task<CoreWebView2BrowserExtension> InstallAsync(
         CoreWebView2Profile profile,
         string sourceDirectory,
@@ -106,6 +121,9 @@ public sealed class BrowserExtensionManager
     {
         ArgumentNullException.ThrowIfNull(extension);
         var id = extension.Id;
+        if (!TryGetManagedPackagePath(id, out var managedPath) || !IsManagedExtension(id))
+            throw new BrowserExtensionPackageException("EXTENSION_NOT_CLOUDOS_MANAGED");
+
         try
         {
             await extension.RemoveAsync();
@@ -115,8 +133,8 @@ public sealed class BrowserExtensionManager
             throw new BrowserExtensionPackageException("EXTENSION_WEBVIEW_REMOVE_FAILED");
         }
 
-        if (!_managedByExtensionId.Remove(id, out var managedPath))
-            return;
+        if (!_managedByExtensionId.Remove(id))
+            throw new BrowserExtensionPackageException("EXTENSION_NOT_CLOUDOS_MANAGED");
 
         try
         {
@@ -137,7 +155,7 @@ public sealed class BrowserExtensionManager
         var changed = false;
         foreach (var entry in _managedByExtensionId.ToArray())
         {
-            if (installed.Contains(entry.Key)) continue;
+            if (installed.Contains(entry.Key) && IsManagedExtension(entry.Key)) continue;
             _managedByExtensionId.Remove(entry.Key);
             TryDeleteManagedDirectory(entry.Value);
             changed = true;
@@ -145,6 +163,13 @@ public sealed class BrowserExtensionManager
 
         if (changed) SaveState();
     }
+
+    private bool TryGetManagedPackagePath(string extensionId, out string managedPath) =>
+        BrowserManagedExtensionOwnership.TryResolveManagedPackage(
+            _managedByExtensionId,
+            _managedRoot,
+            extensionId,
+            out managedPath);
 
     private static void CopyPackageTree(string sourceRoot, string destinationRoot, CancellationToken cancellationToken)
     {
@@ -198,7 +223,7 @@ public sealed class BrowserExtensionManager
                 .Where(pair =>
                     !string.IsNullOrWhiteSpace(pair.Key) &&
                     !string.IsNullOrWhiteSpace(pair.Value) &&
-                    BrowserExtensionPackageValidator.IsDescendantOrSame(pair.Value, _managedRoot))
+                    BrowserManagedExtensionOwnership.IsSafeManagedPackagePath(_managedRoot, pair.Value))
                 .ToDictionary(pair => pair.Key, pair => Path.GetFullPath(pair.Value), StringComparer.Ordinal);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
@@ -213,8 +238,14 @@ public sealed class BrowserExtensionManager
         {
             Directory.CreateDirectory(_managedRoot);
             BrowserExtensionPackageValidator.EnsureDirectoryNotReparsePoint(_managedRoot);
+            var safeState = _managedByExtensionId
+                .Where(pair => BrowserManagedExtensionOwnership.IsSafeManagedPackagePath(_managedRoot, pair.Value))
+                .ToDictionary(pair => pair.Key, pair => Path.GetFullPath(pair.Value), StringComparer.Ordinal);
+            if (safeState.Count != _managedByExtensionId.Count)
+                throw new BrowserExtensionPackageException("EXTENSION_STATE_WRITE_FAILED");
+
             var temp = _statePath + ".tmp-" + Guid.NewGuid().ToString("N");
-            File.WriteAllText(temp, JsonSerializer.Serialize(_managedByExtensionId, _json));
+            File.WriteAllText(temp, JsonSerializer.Serialize(safeState, _json));
             File.Move(temp, _statePath, overwrite: true);
         }
         catch (BrowserExtensionPackageException)
@@ -231,24 +262,14 @@ public sealed class BrowserExtensionManager
     {
         try
         {
-            if (!IsSafeManagedDirectory(path)) return;
-            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+            var safe = BrowserManagedExtensionOwnership.IsSafeManagedPackagePath(_managedRoot, path) ||
+                       BrowserManagedExtensionOwnership.IsSafeStagingPath(_managedRoot, path);
+            if (!safe || !Directory.Exists(path)) return;
+            BrowserExtensionPackageValidator.EnsureDirectoryNotReparsePoint(path);
+            Directory.Delete(path, recursive: true);
         }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException)
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or BrowserExtensionPackageException)
         {
         }
-    }
-
-    private bool IsSafeManagedDirectory(string path)
-    {
-        var full = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var root = Path.GetFullPath(_managedRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        if (full.Equals(root, StringComparison.OrdinalIgnoreCase) ||
-            !BrowserExtensionPackageValidator.IsDescendantOrSame(full, root))
-            return false;
-
-        var name = Path.GetFileName(full);
-        return name.StartsWith("package-", StringComparison.Ordinal) ||
-               name.StartsWith(".staging-", StringComparison.Ordinal);
     }
 }
