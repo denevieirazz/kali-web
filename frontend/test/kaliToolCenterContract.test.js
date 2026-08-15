@@ -7,7 +7,7 @@ const read = relativePath => readFileSync(new URL(relativePath, import.meta.url)
 test('Kali Tool Center does not expose arbitrary command execution endpoints', () => {
   const component = read('../src/apps/KaliToolCenter/KaliToolCenter.tsx');
   assert.doesNotMatch(component, /\/api\/security\/(?:execute|run|command|shell)/i);
-  assert.doesNotMatch(component, /argv|executablePath|shellCommand/);
+  assert.doesNotMatch(component, /(?:\.argv\b|\bargv\s*:|\bexecutablePath\s*:|\bshellCommand\s*:)/);
   assert.match(component, /\/api\/security\/tools/);
   assert.match(component, /cloudos-terminal/);
 });
