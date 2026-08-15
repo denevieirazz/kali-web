@@ -1,8 +1,10 @@
 name: CloudOS CI Baseline
 
 on:
+  workflow_dispatch:
   push:
     branches:
+      - feature/cloudos-terminal-workspace
       - ci/cloudos-baseline
       - sync/cloudos-current-state
       - main
@@ -13,10 +15,13 @@ on:
 jobs:
   validate:
     runs-on: windows-latest
+    timeout-minutes: 35
 
     steps:
       - name: 1. Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: 2. Setup Node.js
         uses: actions/setup-node@v4
@@ -53,3 +58,10 @@ jobs:
         run: |
           dotnet run --project desktop/CloudOS.Host.Tests/CloudOS.Host.Tests.csproj -c Release
           dotnet run --project desktop/CloudOS.Bootstrap.Tests/CloudOS.Bootstrap.Tests.csproj -c Release
+
+      - name: 12. Check Terminal Workspace diff
+        if: github.ref == 'refs/heads/feature/cloudos-terminal-workspace' || github.head_ref == 'feature/cloudos-terminal-workspace'
+        shell: pwsh
+        run: |
+          git fetch origin integration/cloudos-foundation --no-tags
+          git diff --check origin/integration/cloudos-foundation...HEAD
