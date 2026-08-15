@@ -23,8 +23,9 @@ internal static class BrowserSurfaceGeometryContract
             "Sampling grid contains a point outside the safe region.");
 
         var expected = new BrowserSurfaceRgb(25, 50, 74);
+        var unexpected = new BrowserSurfaceRgb(53, 139, 202);
         var mostlyExpected = Enumerable.Repeat(expected, 20)
-            .Concat(Enumerable.Repeat(new BrowserSurfaceRgb(40, 61, 84), 5))
+            .Concat(Enumerable.Repeat(unexpected, 5))
             .ToArray();
         var accepted = BrowserSurfaceGeometry.EvaluateColors(mostlyExpected, expected);
         Assert(Near(accepted.MatchRatio, 0.8), "Expected-color match ratio is incorrect.");
@@ -32,7 +33,7 @@ internal static class BrowserSurfaceGeometryContract
         Assert(!accepted.WhiteBackgroundDetected, "Non-white sentinel samples were misclassified as Host white background.");
 
         var tooManyUnexpected = Enumerable.Repeat(expected, 19)
-            .Concat(Enumerable.Repeat(new BrowserSurfaceRgb(53, 139, 202), 6))
+            .Concat(Enumerable.Repeat(unexpected, 6))
             .ToArray();
         Assert(!BrowserSurfaceGeometry.EvaluateColors(tooManyUnexpected, expected).MeetsExpectedColorRatio,
             "Unexpected rendered colors were accepted below the 80% minimum.");

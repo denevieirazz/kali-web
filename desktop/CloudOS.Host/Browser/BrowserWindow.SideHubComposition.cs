@@ -35,7 +35,7 @@ internal static class BrowserSideHubCompositionBootstrap
 
 public partial class BrowserWindow
 {
-    private void RouteCorrectedSideHubClick(Button button, RoutedEventArgs e)
+    internal void RouteCorrectedSideHubClick(Button button, RoutedEventArgs e)
     {
         switch (button.Name)
         {
