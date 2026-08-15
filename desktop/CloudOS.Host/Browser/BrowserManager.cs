@@ -215,7 +215,14 @@ public sealed class BrowserManager : IDisposable
     private async Task<CoreWebView2Environment> CreateEnvironmentCoreAsync()
     {
         Directory.CreateDirectory(_userDataFolder);
-        var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: _userDataFolder);
+        var options = new CoreWebView2EnvironmentOptions
+        {
+            AreBrowserExtensionsEnabled = true
+        };
+        var environment = await CoreWebView2Environment.CreateAsync(
+            browserExecutableFolder: null,
+            userDataFolder: _userDataFolder,
+            options: options);
 
         var shellFolder = BrowserStorageLayout.ShellUserDataFolder(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
