@@ -58,4 +58,6 @@ Assert-True ($validatorContent -notmatch '(?im)^\s*(?:&\s+)?pwsh(?:\.exe)?\s+-No
 Assert-True ($validatorContent -match '& \$freshnessScript') 'Freshness deve executar na sessão PowerShell atual.'
 Assert-True ($validatorContent -match '& \$smokeScript -AllowNonCi') 'Smoke deve executar na sessão PowerShell atual.'
 
+# The two intentional Windows PowerShell failures leave LASTEXITCODE=1; reset it after asserting them.
+$global:LASTEXITCODE = 0
 Write-Host 'PASS PowerShell 7 runtime requirement'
