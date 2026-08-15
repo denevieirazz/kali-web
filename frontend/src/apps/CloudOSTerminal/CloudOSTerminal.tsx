@@ -1,9 +1,24 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Terminal } from 'xterm';
-import { FitAddon } from 'xterm-addon-fit';
-import { apiClient, getStoredToken, resolveWebSocketUrl } from '../../services/apiClient';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  MAX_TERMINAL_TABS,
+  TERMINAL_WORKSPACE_STORAGE_KEY,
+  activateTerminalTab,
+  addTerminalTab,
+  closeTerminalTab,
+  createTerminalTab,
+  cycleTerminalTab,
+  normalizeTerminalWorkspace,
+  serializableTerminalWorkspace,
+  toggleTerminalSplit,
+  updateTerminalTab,
+  type TerminalProfile,
+  type TerminalWorkspaceState,
+} from '../../core/terminalWorkspaceState.js';
+import { apiClient } from '../../services/apiClient';
 import { useWindowManager } from '../../stores/windowManager';
+import { TerminalSession, type TerminalPaneStatus } from './TerminalSession';
 import 'xterm/css/xterm.css';
+import './CloudOSTerminal.css';
 
 interface WslInfo {
   available: boolean;
@@ -12,180 +27,210 @@ interface WslInfo {
   distributions: Array<{ name: string; version: number | null; state: string }>;
 }
 
-type TerminalProfile = 'wsl' | 'powershell';
+const DEFAULT_STATUS: TerminalPaneStatus = { state: 'connecting', label: 'Preparando sessão…' };
+
+function preferredDistribution(info: WslInfo | null) {
+  return info?.preferred || info?.default || info?.distributions[0]?.name || '';
+}
 
 export default function CloudOSTerminal({ windowId }: { windowId?: string }) {
-  const [windowParams] = useState(() => {
+  const [launchParams] = useState(() => {
     const win = windowId ? useWindowManager.getState().getWindow(windowId) : undefined;
-    const profile: TerminalProfile = win?.params?.profile === 'powershell' ? 'powershell' : 'wsl';
-    return { profile, distribution: typeof win?.params?.distribution === 'string' ? win.params.distribution : '' };
+    const rawProfile = win?.params?.profile;
+    const profile: TerminalProfile | null = rawProfile === 'powershell' || rawProfile === 'wsl' ? rawProfile : null;
+    return {
+      profile,
+      distribution: typeof win?.params?.distribution === 'string' ? win.params.distribution : '',
+      explicit: Boolean(profile || win?.params?.distribution),
+    };
   });
 
-  const terminalRef = useRef<HTMLDivElement>(null);
   const [wslInfo, setWslInfo] = useState<WslInfo | null>(null);
-  const [selectedProfile, setSelectedProfile] = useState<TerminalProfile>(windowParams.profile);
-  const [selectedDistro, setSelectedDistro] = useState(windowParams.distribution);
-  const [status, setStatus] = useState('Carregando perfis do host…');
-  const [sessionActive, setSessionActive] = useState(false);
+  const [workspace, setWorkspace] = useState<TerminalWorkspaceState | null>(null);
+  const [paneStatuses, setPaneStatuses] = useState<Record<string, TerminalPaneStatus>>({});
+  const [profileMessage, setProfileMessage] = useState('Carregando perfis do Host…');
 
-  const termInstance = useRef<Terminal | null>(null);
-  const wsInstance = useRef<WebSocket | null>(null);
-  const resizeObserverRef = useRef<ResizeObserver | null>(null);
-  const connectionGeneration = useRef(0);
-  const initialSessionStarted = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
 
-  const destroySession = useCallback((updateState = true) => {
-    connectionGeneration.current += 1;
-    resizeObserverRef.current?.disconnect();
-    resizeObserverRef.current = null;
-    const ws = wsInstance.current;
-    wsInstance.current = null;
-    if (ws) {
-      try {
-        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'close' }));
-        ws.close();
-      } catch {}
-    }
-    termInstance.current?.dispose();
-    termInstance.current = null;
-    if (updateState) setSessionActive(false);
+    void apiClient<WslInfo>('/api/wsl/distributions')
+      .then(info => {
+        if (cancelled) return;
+        setWslInfo(info);
+        const requestedExists = info.distributions.some(distro => distro.name === launchParams.distribution);
+        const distribution = requestedExists ? launchParams.distribution : preferredDistribution(info);
+        const profile: TerminalProfile = launchParams.profile ?? (info.available && distribution ? 'wsl' : 'powershell');
+        const fallbackTab = createTerminalTab(profile, distribution);
+
+        let restored: unknown = null;
+        if (!launchParams.explicit) {
+          try {
+            restored = JSON.parse(localStorage.getItem(TERMINAL_WORKSPACE_STORAGE_KEY) ?? 'null');
+          } catch {
+            localStorage.removeItem(TERMINAL_WORKSPACE_STORAGE_KEY);
+          }
+        }
+        setWorkspace(normalizeTerminalWorkspace(restored, fallbackTab));
+        setProfileMessage(info.available ? `${info.distributions.length} distribuição(ões) WSL disponível(is)` : 'WSL indisponível · usando PowerShell');
+      })
+      .catch(error => {
+        if (cancelled) return;
+        const fallbackTab = createTerminalTab('powershell');
+        setWslInfo({ available: false, default: null, preferred: null, distributions: [] });
+        setWorkspace(normalizeTerminalWorkspace(null, fallbackTab));
+        setProfileMessage(error instanceof Error ? error.message : 'WSL indisponível · PowerShell pronto');
+      });
+
+    return () => { cancelled = true; };
+  }, [launchParams.distribution, launchParams.explicit, launchParams.profile]);
+
+  useEffect(() => {
+    if (!workspace) return;
+    localStorage.setItem(TERMINAL_WORKSPACE_STORAGE_KEY, JSON.stringify(serializableTerminalWorkspace(workspace)));
+  }, [workspace]);
+
+  const handlePaneStatus = useCallback((tabId: string, status: TerminalPaneStatus) => {
+    setPaneStatuses(current => {
+      const previous = current[tabId];
+      if (previous?.state === status.state && previous.label === status.label) return current;
+      return { ...current, [tabId]: status };
+    });
   }, []);
 
-  const startSession = useCallback((profile: TerminalProfile, distroName = '') => {
-    if (!terminalRef.current) return;
-    destroySession();
-    const generation = ++connectionGeneration.current;
-    const targetDistro = distroName || selectedDistro;
-    setSelectedProfile(profile);
-    if (distroName) setSelectedDistro(distroName);
-    setStatus('Conectando ao agente local…');
+  const activeTab = useMemo(
+    () => workspace?.tabs.find(tab => tab.id === workspace.activeId) ?? null,
+    [workspace],
+  );
 
-    const term = new Terminal({
-      theme: { background: '#090713', foreground: '#ede9fe', cursor: '#67e8f9', selectionBackground: '#334a73' },
-      fontFamily: 'Cascadia Code, JetBrains Mono, Consolas, monospace',
-      fontSize: 13,
-      cursorBlink: true,
-      cols: 100,
-      rows: 28
+  const mutateWorkspace = useCallback((mutator: (current: TerminalWorkspaceState) => TerminalWorkspaceState) => {
+    setWorkspace(current => current ? mutator(current) : current);
+  }, []);
+
+  const openTab = useCallback((profile: TerminalProfile) => {
+    const distribution = profile === 'wsl' ? preferredDistribution(wslInfo) : '';
+    mutateWorkspace(current => addTerminalTab(current, createTerminalTab(profile, distribution)));
+  }, [mutateWorkspace, wslInfo]);
+
+  const closeTab = useCallback((tabId: string) => {
+    const fallbackProfile: TerminalProfile = wslInfo?.available && preferredDistribution(wslInfo) ? 'wsl' : 'powershell';
+    const fallback = createTerminalTab(fallbackProfile, preferredDistribution(wslInfo));
+    mutateWorkspace(current => closeTerminalTab(current, tabId, fallback));
+    setPaneStatuses(current => {
+      const next = { ...current };
+      delete next[tabId];
+      return next;
     });
-    const fitAddon = new FitAddon();
-    term.loadAddon(fitAddon);
-    term.open(terminalRef.current);
-    termInstance.current = term;
+  }, [mutateWorkspace, wslInfo]);
 
-    const safeFit = () => {
-      try {
-        if (terminalRef.current?.clientWidth && terminalRef.current?.clientHeight) fitAddon.fit();
-      } catch {}
-    };
-    requestAnimationFrame(() => window.setTimeout(safeFit, 80));
-    const observer = new ResizeObserver(safeFit);
-    observer.observe(terminalRef.current);
-    resizeObserverRef.current = observer;
-
-    const token = getStoredToken();
-    if (!token) {
-      term.writeln('\x1b[1;31m[Faça login no CloudOS para acessar o terminal real.]\x1b[0m');
-      setStatus('Autenticação necessária');
-      return;
-    }
-
-    const ws = new WebSocket(resolveWebSocketUrl('/ws/terminal'), [token]);
-    wsInstance.current = ws;
-
-    ws.onopen = () => {
-      if (generation !== connectionGeneration.current) return ws.close();
-      ws.send(JSON.stringify({
-        type: 'start',
-        profile,
-        distribution: profile === 'wsl' ? targetDistro : undefined,
-        cols: term.cols || 100,
-        rows: term.rows || 28
-      }));
-      setSessionActive(true);
-      setStatus(profile === 'wsl' ? `WSL · ${targetDistro}` : 'PowerShell do Windows');
-    };
-
-    ws.onmessage = (event) => {
-      if (generation !== connectionGeneration.current) return;
-      try {
-        const message = JSON.parse(event.data);
-        if (message.type === 'output') term.write(message.data);
-        else if (message.type === 'error') term.writeln(`\r\n\x1b[1;31m[${message.data}]\x1b[0m`);
-        else if (message.type === 'exit') {
-          term.writeln('\r\n\x1b[1;33m[Sessão encerrada]\x1b[0m');
-          setSessionActive(false);
-          setStatus('Sessão encerrada');
-        }
-      } catch {
-        term.write(event.data);
+  useEffect(() => {
+    if (!workspace) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 't') {
+        event.preventDefault();
+        openTab(activeTab?.profile ?? 'powershell');
+      } else if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'w') {
+        event.preventDefault();
+        closeTab(workspace.activeId);
+      } else if (event.ctrlKey && event.key === 'PageDown') {
+        event.preventDefault();
+        mutateWorkspace(current => cycleTerminalTab(current, 1));
+      } else if (event.ctrlKey && event.key === 'PageUp') {
+        event.preventDefault();
+        mutateWorkspace(current => cycleTerminalTab(current, -1));
+      } else if (event.altKey && event.shiftKey && event.key.toLowerCase() === 'd') {
+        event.preventDefault();
+        mutateWorkspace(toggleTerminalSplit);
       }
     };
 
-    term.onData((data) => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data }));
-    });
-    term.onResize(({ cols, rows }) => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'resize', cols, rows }));
-    });
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [activeTab?.profile, closeTab, mutateWorkspace, openTab, workspace]);
 
-    ws.onerror = () => {
-      if (generation !== connectionGeneration.current) return;
-      setSessionActive(false);
-      setStatus('Falha na conexão com o terminal');
-    };
-    ws.onclose = () => {
-      if (generation !== connectionGeneration.current) return;
-      setSessionActive(false);
-      setStatus('Conexão encerrada');
-    };
-  }, [destroySession, selectedDistro]);
+  if (!workspace || !activeTab) {
+    return (
+      <div className="terminal-workspace terminal-workspace--loading">
+        <span className="terminal-workspace__spinner" aria-hidden="true" />
+        <span>{profileMessage}</span>
+      </div>
+    );
+  }
 
-  useEffect(() => {
-    async function loadProfiles() {
-      try {
-        const info = await apiClient<WslInfo>('/api/wsl/distributions');
-        setWslInfo(info);
-        const requested = windowParams.distribution;
-        const requestedExists = info.distributions.some((distro) => distro.name === requested);
-        const distro = requestedExists ? requested : info.preferred || info.default || info.distributions[0]?.name || '';
-        setSelectedDistro(distro);
-        if (windowParams.profile === 'powershell' || !info.available) setSelectedProfile('powershell');
-      } catch {
-        setWslInfo({ available: false, default: null, preferred: null, distributions: [] });
-        setSelectedProfile('powershell');
-        setStatus('WSL indisponível; PowerShell pronto');
-      }
-    }
-    loadProfiles();
-  }, [windowParams.distribution, windowParams.profile]);
-
-  useEffect(() => {
-    if (!wslInfo || initialSessionStarted.current) return;
-    initialSessionStarted.current = true;
-    if (selectedProfile === 'wsl' && wslInfo.available && selectedDistro) startSession('wsl', selectedDistro);
-    else startSession('powershell');
-  }, [selectedDistro, selectedProfile, startSession, wslInfo]);
-
-  useEffect(() => () => destroySession(false), [destroySession]);
+  const activeStatus = paneStatuses[activeTab.id] ?? DEFAULT_STATUS;
+  const atLimit = workspace.tabs.length >= MAX_TERMINAL_TABS;
 
   return (
-    <div style={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column', background: '#090713' }}>
-      <div style={{ minHeight: 39, padding: '6px 12px', background: '#101725', borderBottom: '1px solid #29354a', fontSize: 12, display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', color: '#93a4bd' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-          <span style={{ width: 7, height: 7, flex: '0 0 auto', borderRadius: '50%', background: sessionActive ? '#35d098' : '#f5b955', boxShadow: sessionActive ? '0 0 10px #35d098' : 'none' }} />
-          <strong style={{ color: '#dce8fa', whiteSpace: 'nowrap' }}>{selectedProfile === 'wsl' ? `Linux · ${selectedDistro || 'WSL'}` : 'Windows · PowerShell'}</strong>
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 10 }}>{status}</span>
+    <div className="terminal-workspace">
+      <header className="terminal-workspace__chrome">
+        <div className="terminal-workspace__tabs" role="tablist" aria-label="Sessões do Terminal">
+          {workspace.tabs.map(tab => {
+            const status = paneStatuses[tab.id] ?? DEFAULT_STATUS;
+            const active = tab.id === workspace.activeId;
+            return (
+              <div className={`terminal-tab ${active ? 'is-active' : ''}`} key={tab.id} role="presentation">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => mutateWorkspace(current => activateTerminalTab(current, tab.id))}
+                  title={status.label}
+                >
+                  <span className={`terminal-tab__status terminal-tab__status--${status.state}`} />
+                  <span className="terminal-tab__title">{tab.profile === 'wsl' ? (tab.distribution || 'WSL') : 'PowerShell'}</span>
+                </button>
+                <button type="button" className="terminal-tab__close" onClick={() => closeTab(tab.id)} aria-label="Fechar aba">×</button>
+              </div>
+            );
+          })}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          {wslInfo?.available && wslInfo.distributions.length > 0 && <select aria-label="Distribuição WSL" value={selectedDistro} onChange={(event) => startSession('wsl', event.target.value)} style={{ maxWidth: 190, background: '#162033', color: '#e6eefb', border: '1px solid #344662', borderRadius: 6, padding: '3px 6px', fontSize: 10 }}>
-            {wslInfo.distributions.map((distro) => <option key={distro.name} value={distro.name}>{distro.name} · WSL {distro.version || '?'}</option>)}
-          </select>}
-          <button onClick={() => startSession('powershell')} style={{ background: selectedProfile === 'powershell' ? '#3e6fca' : '#162033', color: '#fff', border: '1px solid #344662', borderRadius: 6, padding: '4px 8px', fontSize: 10, cursor: 'pointer' }}>PowerShell</button>
-          <button onClick={() => startSession(selectedProfile, selectedDistro)} title="Reconectar" style={{ background: '#162033', color: '#bcd0eb', border: '1px solid #344662', borderRadius: 6, padding: '4px 7px', fontSize: 10, cursor: 'pointer' }}>↻</button>
+
+        <div className="terminal-workspace__toolbar">
+          <button type="button" onClick={() => openTab('powershell')} disabled={atLimit} title="Nova aba PowerShell">+ PowerShell</button>
+          <button type="button" onClick={() => openTab('wsl')} disabled={atLimit || !wslInfo?.available} title="Nova aba WSL">+ WSL</button>
+
+          {wslInfo?.available && wslInfo.distributions.length > 0 && (
+            <select
+              aria-label="Distribuição da aba ativa"
+              value={activeTab.profile === 'wsl' ? activeTab.distribution : ''}
+              onChange={event => mutateWorkspace(current => updateTerminalTab(current, current.activeId, { profile: 'wsl', distribution: event.target.value }))}
+            >
+              <option value="" disabled>Distribuição…</option>
+              {wslInfo.distributions.map(distro => (
+                <option key={distro.name} value={distro.name}>{distro.name} · WSL {distro.version ?? '?'}</option>
+              ))}
+            </select>
+          )}
+
+          <button
+            type="button"
+            className={workspace.splitId ? 'is-active' : ''}
+            onClick={() => mutateWorkspace(toggleTerminalSplit)}
+            disabled={workspace.tabs.length < 2}
+            title="Dividir workspace (Alt+Shift+D)"
+          >◫ Split</button>
+
+          <span className="terminal-workspace__summary">
+            <span className={`terminal-tab__status terminal-tab__status--${activeStatus.state}`} />
+            {activeStatus.label} · {workspace.tabs.length}/{MAX_TERMINAL_TABS}
+          </span>
         </div>
-      </div>
-      <div ref={terminalRef} style={{ flex: 1, padding: 8, overflow: 'hidden' }} />
+      </header>
+
+      <main className={`terminal-workspace__panes ${workspace.splitId ? 'terminal-workspace__panes--split' : ''}`}>
+        {workspace.tabs.map(tab => {
+          const visible = tab.id === workspace.activeId || tab.id === workspace.splitId;
+          return (
+            <div className={`terminal-workspace__pane-shell ${visible ? 'is-visible' : ''}`} key={tab.id}>
+              <TerminalSession tab={tab} visible={visible} onStatusChange={handlePaneStatus} />
+            </div>
+          );
+        })}
+      </main>
+
+      <footer className="terminal-workspace__statusbar">
+        <span>{profileMessage}</span>
+        <span>Ctrl+PgUp/PgDn alterna · Ctrl+Shift+T cria · Ctrl+Shift+W fecha · Alt+Shift+D divide</span>
+      </footer>
     </div>
   );
 }
