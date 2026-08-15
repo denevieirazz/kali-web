@@ -96,8 +96,8 @@ jobs:
         shell: pwsh
         run: ./scripts/test-native-browser-host-smoke.ps1
 
-      - name: 22. Check feature diff whitespace
-        if: github.ref == 'refs/heads/feature/cloudos-native-browser' || github.ref == 'refs/heads/fix/native-browser-windows-validation' || github.ref == 'refs/heads/fix/native-browser-powershell7-validation' || github.ref == 'refs/heads/refactor/cloudos-core-hardening' || github.head_ref == 'feature/cloudos-native-browser' || github.head_ref == 'fix/native-browser-windows-validation' || github.head_ref == 'fix/native-browser-powershell7-validation' || github.head_ref == 'refactor/cloudos-core-hardening'
+      - name: 22. Check Browser feature diff whitespace
+        if: github.ref == 'refs/heads/feature/cloudos-native-browser' || github.ref == 'refs/heads/fix/native-browser-windows-validation' || github.ref == 'refs/heads/fix/native-browser-powershell7-validation' || github.head_ref == 'feature/cloudos-native-browser' || github.head_ref == 'fix/native-browser-windows-validation' || github.head_ref == 'fix/native-browser-powershell7-validation'
         shell: pwsh
         run: |
           git fetch origin integration/cloudos-foundation --no-tags
