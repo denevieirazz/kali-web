@@ -60,17 +60,9 @@ O `apiClient` continua sendo a única camada HTTP do frontend. Ele agora:
 
 ## Design system
 
-O shell não depende mais de download de Google Fonts. A pilha tipográfica nativa do Windows evita atraso de rede e warnings CSP.
+A baseline visual escura permanece deliberadamente compatível com os snapshots Playwright existentes. A camada aditiva `cloudosEnhancements.css` acrescenta tema claro, seleção de texto, reduced motion e loading state sem alterar a geometria padrão durante esta refatoração.
 
-O design global oferece:
-
-- dark/light tokens;
-- accent dinâmico;
-- foco por teclado;
-- seleção de texto em inputs/editors;
-- reduced motion;
-- loading state padronizado;
-- materiais Mica/Acrylic existentes preservados.
+A importação legada de Google Fonts continua temporariamente em `index.css`. Ela não será removida por relaxamento de CSP nem por atualização cega dos snapshots; a troca para uma pilha local deve acontecer numa migração visual dedicada, com comparação e aprovação dos novos baselines.
 
 ## Diagnóstico
 

@@ -24,12 +24,12 @@ test('kernel facade installs one centralized hardening boundary', () => {
   assert.match(hardening, /SHELL_MEMORY_TARGETS/);
 });
 
-test('global design system has no network font dependency and supports reduced motion', () => {
-  const css = read('../src/index.css');
-  assert.doesNotMatch(css, /fonts\.googleapis\.com/);
+test('additive UX layer supports light theme and reduced motion without changing the dark visual baseline', () => {
+  const css = read('../src/cloudosEnhancements.css');
   assert.match(css, /prefers-reduced-motion/);
   assert.match(css, /data-theme='light'/);
   assert.match(css, /cloudos-window-loading/);
+  assert.doesNotMatch(css, /html,\s*body,\s*#root/);
 });
 
 test('window renderer isolates lazy application rerenders', () => {

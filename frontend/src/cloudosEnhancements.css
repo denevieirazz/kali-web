@@ -1,0 +1,64 @@
+/* Additive CloudOS UX/accessibility layer. Default dark-theme geometry and
+   visual baselines remain owned by index.css; this file avoids silently
+   invalidating Playwright reference images during core refactors. */
+
+.cloudos-root[data-theme='light'],
+.obsidianos-root[data-theme='light'] {
+  color-scheme: light;
+  --bg-solid: #eef1f7;
+  --bg-primary: #f7f8fb;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #edf0f6;
+  --bg-elevated: #ffffff;
+  --bg-hover: rgba(20, 24, 40, 0.055);
+  --bg-active: rgba(20, 24, 40, 0.085);
+  --bg-pressed: rgba(20, 24, 40, 0.045);
+  --mica: rgba(247, 248, 251, 0.86);
+  --mica-alt: rgba(255, 255, 255, 0.82);
+  --acrylic: rgba(247, 248, 251, 0.74);
+  --acrylic-alt: rgba(255, 255, 255, 0.68);
+  --smoke: rgba(27, 31, 45, 0.16);
+  --text-primary: #171923;
+  --text-secondary: #555b6f;
+  --text-tertiary: #7d8396;
+  --text-disabled: #aeb3c1;
+  --border-default: rgba(24, 29, 45, 0.10);
+  --border-subtle: rgba(24, 29, 45, 0.055);
+  --border-strong: rgba(24, 29, 45, 0.17);
+}
+
+input,
+textarea,
+[contenteditable='true'],
+.selectable {
+  user-select: text;
+}
+
+.cloudos-window-loading {
+  display: grid;
+  min-height: 150px;
+  place-content: center;
+  place-items: center;
+  gap: 10px;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  font-size: var(--font-size-sm);
+}
+
+.cloudos-window-loading-spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+}

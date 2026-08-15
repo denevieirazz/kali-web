@@ -1,14 +1,17 @@
-/* CloudOS global design system. No network font dependency: the native Windows
-   typography stack keeps startup deterministic and avoids CSP/font failures. */
+/* ============================================ */
+/* ObsidianOS - Global Design System            */
+/* ============================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
 :root {
-  color-scheme: dark;
-
+  /* Color System */
   --accent: #6366f1;
-  --accent-hover: color-mix(in srgb, var(--accent) 82%, white);
-  --accent-active: color-mix(in srgb, var(--accent) 82%, black);
-  --accent-subtle: color-mix(in srgb, var(--accent) 15%, transparent);
-
+  --accent-hover: #818cf8;
+  --accent-active: #4f46e5;
+  --accent-subtle: rgba(99, 102, 241, 0.15);
+  
+  /* Surface Colors - Dark Theme */
   --bg-solid: #0a0a0f;
   --bg-primary: #111118;
   --bg-secondary: #1a1a24;
@@ -17,38 +20,44 @@
   --bg-hover: rgba(255, 255, 255, 0.06);
   --bg-active: rgba(255, 255, 255, 0.08);
   --bg-pressed: rgba(255, 255, 255, 0.04);
-
+  
+  /* Mica & Acrylic Materials */
   --mica: rgba(17, 17, 24, 0.85);
   --mica-alt: rgba(26, 26, 36, 0.80);
   --acrylic: rgba(17, 17, 24, 0.72);
   --acrylic-alt: rgba(26, 26, 36, 0.65);
   --smoke: rgba(0, 0, 0, 0.30);
-
+  
+  /* Text */
   --text-primary: #f0f0f5;
   --text-secondary: #a0a0b8;
   --text-tertiary: #6b6b82;
   --text-disabled: #45455a;
-  --text-accent: var(--accent-hover);
+  --text-accent: #818cf8;
   --text-on-accent: #ffffff;
-
+  
+  /* Borders */
   --border-default: rgba(255, 255, 255, 0.08);
   --border-subtle: rgba(255, 255, 255, 0.04);
   --border-strong: rgba(255, 255, 255, 0.14);
   --border-accent: var(--accent);
-
+  
+  /* Shadows */
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5), 0 2px 4px rgba(0, 0, 0, 0.3);
   --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.6), 0 4px 8px rgba(0, 0, 0, 0.4);
   --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.7), 0 8px 16px rgba(0, 0, 0, 0.5);
   --shadow-window: 0 8px 40px rgba(0, 0, 0, 0.55), 0 0 1px rgba(255, 255, 255, 0.1);
   --shadow-flyout: 0 12px 48px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.06);
-
+  
+  /* Radii */
   --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-xl: 16px;
   --radius-window: 10px;
-
+  
+  /* Spacing */
   --space-xs: 4px;
   --space-sm: 8px;
   --space-md: 12px;
@@ -56,8 +65,9 @@
   --space-xl: 24px;
   --space-2xl: 32px;
   --space-3xl: 48px;
-
-  --font-family: 'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', Inter, system-ui, -apple-system, sans-serif;
+  
+  /* Typography */
+  --font-family: 'Inter', 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, sans-serif;
   --font-size-xs: 11px;
   --font-size-sm: 12px;
   --font-size-md: 13px;
@@ -67,13 +77,15 @@
   --font-size-2xl: 24px;
   --font-size-3xl: 32px;
   --font-size-4xl: 48px;
-
+  
+  /* Animation */
   --transition-fast: 120ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-normal: 200ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-slow: 350ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-spring: 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
-
+  
+  /* Z-Index Scale */
   --z-desktop: 1;
   --z-window: 100;
   --z-taskbar: 1000;
@@ -82,45 +94,37 @@
   --z-notification: 4000;
   --z-overlay: 5000;
   --z-boot: 9999;
-
+  
+  /* Taskbar */
   --taskbar-height: 48px;
 }
 
-.cloudos-root[data-theme='light'],
-.obsidianos-root[data-theme='light'] {
-  color-scheme: light;
-  --bg-solid: #eef1f7;
-  --bg-primary: #f7f8fb;
-  --bg-secondary: #ffffff;
-  --bg-tertiary: #edf0f6;
-  --bg-elevated: #ffffff;
-  --bg-hover: rgba(20, 24, 40, 0.055);
-  --bg-active: rgba(20, 24, 40, 0.085);
-  --bg-pressed: rgba(20, 24, 40, 0.045);
-  --mica: rgba(247, 248, 251, 0.86);
-  --mica-alt: rgba(255, 255, 255, 0.82);
-  --acrylic: rgba(247, 248, 251, 0.74);
-  --acrylic-alt: rgba(255, 255, 255, 0.68);
-  --smoke: rgba(27, 31, 45, 0.16);
-  --text-primary: #171923;
-  --text-secondary: #555b6f;
-  --text-tertiary: #7d8396;
-  --text-disabled: #aeb3c1;
-  --border-default: rgba(24, 29, 45, 0.10);
-  --border-subtle: rgba(24, 29, 45, 0.055);
-  --border-strong: rgba(24, 29, 45, 0.17);
-  --shadow-sm: 0 1px 3px rgba(37, 44, 72, 0.10), 0 1px 2px rgba(37, 44, 72, 0.08);
-  --shadow-md: 0 5px 16px rgba(37, 44, 72, 0.14), 0 2px 5px rgba(37, 44, 72, 0.08);
-  --shadow-lg: 0 12px 34px rgba(37, 44, 72, 0.17), 0 4px 9px rgba(37, 44, 72, 0.09);
-  --shadow-xl: 0 20px 52px rgba(37, 44, 72, 0.20), 0 8px 18px rgba(37, 44, 72, 0.10);
-  --shadow-window: 0 14px 42px rgba(37, 44, 72, 0.20), 0 0 0 1px rgba(24, 29, 45, 0.05);
-  --shadow-flyout: 0 16px 45px rgba(37, 44, 72, 0.18), 0 0 0 1px rgba(24, 29, 45, 0.07);
-}
-
+/* ============================================ */
+/* Reset & Base                                 */
+/* ============================================ */
 *, *::before, *::after {
-  box-sizing: border-box;
   margin: 0;
   padding: 0;
+  box-sizing: border-box;
+}
+
+/* Deep Realism: GDI32.dll Failure Corruption */
+.gdi-failure * {
+  filter: hue-rotate(90deg) contrast(300%) invert(20%) blur(1px) !important;
+  color: #ff00ff !important;
+  background-color: transparent !important;
+  border-color: #00ff00 !important;
+  box-shadow: none !important;
+  animation: gdi-glitch 0.2s infinite;
+}
+
+@keyframes gdi-glitch {
+  0% { transform: translate(0) skew(0deg); }
+  20% { transform: translate(-2px, 1px) skew(-2deg); }
+  40% { transform: translate(-1px, -1px) skew(2deg); }
+  60% { transform: translate(2px, 1px) skew(0deg); }
+  80% { transform: translate(1px, -1px) skew(-1deg); }
+  100% { transform: translate(0) skew(0deg); }
 }
 
 html, body, #root {
@@ -138,24 +142,34 @@ html, body, #root {
   cursor: default;
 }
 
-button, input, textarea, select { font: inherit; }
-input, textarea, [contenteditable='true'], .selectable { user-select: text; }
-
-:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 78%, white);
-  outline-offset: 2px;
-}
-
+/* Selection */
 ::selection {
-  color: var(--text-on-accent);
   background: var(--accent);
+  color: var(--text-on-accent);
 }
 
-::-webkit-scrollbar { width: 7px; height: 7px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { border-radius: 99px; background: color-mix(in srgb, var(--text-secondary) 28%, transparent); }
-::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--text-secondary) 42%, transparent); }
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
 
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* ============================================ */
+/* Utility Classes                              */
+/* ============================================ */
 .acrylic {
   background: var(--acrylic);
   backdrop-filter: blur(20px) saturate(180%);
@@ -169,71 +183,78 @@ input, textarea, [contenteditable='true'], .selectable { user-select: text; }
 }
 
 .glass {
-  border: 1px solid var(--border-default);
-  background: color-mix(in srgb, var(--bg-elevated) 8%, transparent);
+  background: rgba(255, 255, 255, 0.05);
   backdrop-filter: blur(40px) saturate(150%);
   -webkit-backdrop-filter: blur(40px) saturate(150%);
+  border: 1px solid var(--border-default);
 }
 
-.text-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.cloudos-window-loading {
-  display: grid;
-  min-height: 150px;
-  place-content: center;
-  place-items: center;
-  gap: 10px;
-  color: var(--text-secondary);
-  background: var(--bg-primary);
-  font-size: var(--font-size-sm);
+/* Text utilities */
+.text-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.cloudos-window-loading-spinner {
-  width: 24px;
-  height: 24px;
-  border: 2px solid var(--border-strong);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin .7s linear infinite;
+/* Animation */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
-/* Deep-realism failure state retained for the virtual GDI watchdog. */
-.gdi-failure * {
-  filter: hue-rotate(90deg) contrast(300%) invert(20%) blur(1px) !important;
-  color: #ff00ff !important;
-  background-color: transparent !important;
-  border-color: #00ff00 !important;
-  box-shadow: none !important;
-  animation: gdi-glitch .2s infinite;
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
 }
 
-@keyframes gdi-glitch {
-  0% { transform: translate(0) skew(0deg); }
-  20% { transform: translate(-2px, 1px) skew(-2deg); }
-  40% { transform: translate(-1px, -1px) skew(2deg); }
-  60% { transform: translate(2px, 1px) skew(0deg); }
-  80% { transform: translate(1px, -1px) skew(-1deg); }
-  100% { transform: translate(0) skew(0deg); }
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }
 
-@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-@keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
-@keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-@keyframes slideDown { from { transform: translateY(-10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-@keyframes scaleIn { from { transform: scale(.92); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-@keyframes scaleOut { from { transform: scale(1); opacity: 1; } to { transform: scale(.92); opacity: 0; } }
-@keyframes slideInFromBottom { from { transform: translateY(100%); } to { transform: translateY(0); } }
-@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
-@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
-@keyframes bootDots { 0%, 20% { opacity: .3; } 50% { opacity: 1; } 80%, 100% { opacity: .3; } }
-@keyframes bootSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes slideDown {
+  from { transform: translateY(-10px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
 
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    scroll-behavior: auto !important;
-    animation-duration: .001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: .001ms !important;
-  }
+@keyframes scaleIn {
+  from { transform: scale(0.92); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+@keyframes scaleOut {
+  from { transform: scale(1); opacity: 1; }
+  to { transform: scale(0.92); opacity: 0; }
+}
+
+@keyframes slideInFromBottom {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* Boot animation */
+@keyframes bootDots {
+  0%, 20% { opacity: 0.3; }
+  50% { opacity: 1; }
+  80%, 100% { opacity: 0.3; }
+}
+
+@keyframes bootSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }

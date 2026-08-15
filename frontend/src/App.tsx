@@ -27,6 +27,7 @@ import { useRegistry } from './stores/registry';
 import { useSystem } from './stores/systemStore';
 import { useUserStore } from './stores/userStore';
 import './index.css';
+import './cloudosEnhancements.css';
 
 export default function App() {
   const bootPhase = useSystem(state => state.bootPhase);
