@@ -311,8 +311,8 @@ try {
     if (-not $hostProcess.CloseMainWindow()) { throw 'MainWindow do Host recusou fechamento gracioso.' }
     Wait-Until { $hostProcess.Refresh(); $hostProcess.HasExited } 30 'Host não encerrou graciosamente.'
     Wait-Until {
-        foreach ($pid in $ownedDescendants) {
-            if (Get-Process -Id $pid -ErrorAction SilentlyContinue) { return $false }
+        foreach ($descendantPid in $ownedDescendants) {
+            if (Get-Process -Id $descendantPid -ErrorAction SilentlyContinue) { return $false }
         }
         return $true
     } 20 'Processos filhos do Host permaneceram após encerramento.'
