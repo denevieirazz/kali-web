@@ -5,6 +5,10 @@ function safeText(value, maxLength) {
   return typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, maxLength) : '';
 }
 
+function looksLikeIpv4(value) {
+  return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(value);
+}
+
 function validIpv4(value) {
   const parts = value.split('.');
   return parts.length === 4 && parts.every(part => /^\d{1,3}$/.test(part) && Number(part) <= 255);
@@ -15,6 +19,11 @@ function validHostname(value) {
   return value.split('.').every(label => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label));
 }
 
+function validHost(value) {
+  if (looksLikeIpv4(value)) return validIpv4(value);
+  return validHostname(value);
+}
+
 export function normalizeScopeAsset(value) {
   const input = safeText(value, 512);
   if (!input || /\s/.test(input)) return null;
@@ -23,7 +32,7 @@ export function normalizeScopeAsset(value) {
     try {
       const url = new URL(input);
       if (url.username || url.password || !['http:', 'https:'].includes(url.protocol)) return null;
-      if (!validHostname(url.hostname) && !validIpv4(url.hostname)) return null;
+      if (!validHost(url.hostname)) return null;
       url.hash = '';
       return url.href.slice(0, 512);
     } catch {
@@ -37,7 +46,8 @@ export function normalizeScopeAsset(value) {
     return prefix >= 0 && prefix <= 32 ? `${cidr[1]}/${prefix}` : null;
   }
 
-  if (validIpv4(input) || validHostname(input)) return input.toLowerCase();
+  if (looksLikeIpv4(input)) return validIpv4(input) ? input : null;
+  if (validHostname(input)) return input.toLowerCase();
   return null;
 }
 
