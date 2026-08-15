@@ -26,6 +26,7 @@ const components: Record<string, ReturnType<typeof lazy>> = {
   'system-monitor': lazy(() => import('../apps/SystemMonitor/SystemMonitor')),
   'install-linux': lazy(() => import('../apps/InstallLinux/InstallLinux')),
   'env-doctor': lazy(() => import('../apps/EnvDoctor/EnvDoctor')),
+  'kali-tool-center': lazy(() => import('../apps/KaliToolCenter/KaliToolCenter')),
   'taskbar': lazy(() => import('../components/Taskbar/Taskbar')),
   'desktop': lazy(() => import('../components/Desktop/Desktop')),
 };

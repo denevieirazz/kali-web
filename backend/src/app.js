@@ -14,6 +14,7 @@ import { setupRouter } from './setup/routes.js';
 import { hostRouter } from './host/routes.js';
 import { appsRouter } from './apps/routes.js';
 import { readinessRouter } from './readiness/routes.js';
+import { securityToolsRouter } from './security/routes.js';
 import { createHostTrustPolicy, hasSupervisorTrust } from './auth/hostTrust.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -137,6 +138,7 @@ export function createApp(initialPort, options = {}) {
   app.use('/api/host', hostRouter);
   app.use('/api/apps', appsRouter);
   app.use('/api/readiness', readinessRouter);
+  app.use('/api/security/tools', securityToolsRouter);
 
   app.get('/api/health', (req, res) => {
     res.json({

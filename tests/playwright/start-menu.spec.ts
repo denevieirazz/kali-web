@@ -20,7 +20,7 @@ test.describe('PW-02 — Menu Iniciar', () => {
     await expect(page).toHaveScreenshot('start-menu-home.png');
 
     await openAllApps(page);
-    for (const name of ['Calculadora', 'Bloco de Notas', 'Configurações', 'Explorador de Arquivos', 'Gerenciador de Tarefas']) {
+    for (const name of ['Calculadora', 'Bloco de Notas', 'Configurações', 'Explorador de Arquivos', 'Gerenciador de Tarefas', 'Kali Tool Center']) {
       await expect(page.locator('.start-app-btn', { hasText: name })).toBeVisible({ timeout: 5_000 });
     }
     expect(await page.locator('.start-app-btn').count()).toBeGreaterThanOrEqual(10);

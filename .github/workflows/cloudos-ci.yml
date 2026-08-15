@@ -134,3 +134,14 @@ jobs:
           path: test-results/native-browser/
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: 25. Upload reviewed visual diffs on characterization failure
+        if: failure() && (hashFiles('test-results/**/*-actual.png') != '' || hashFiles('test-results/**/*-diff.png') != '')
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudos-visual-diff-${{ github.run_id }}
+          path: |
+            test-results/**/*-actual.png
+            test-results/**/*-diff.png
+          if-no-files-found: ignore
+          retention-days: 7
