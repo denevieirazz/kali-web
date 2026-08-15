@@ -1,260 +1,274 @@
-import { useState, useEffect } from 'react';
-import { useProcessManager } from '../../stores/processManager';
+import { useEffect, useMemo, useState } from 'react';
 import kernel from '../../core/kernel';
+import {
+  appendHistory,
+  diskPercent,
+  healthSummary,
+  isSystemProcess,
+  memoryPercent,
+  sortProcesses,
+} from '../../core/systemCenterMetrics.js';
+import { useProcessManager } from '../../stores/processManager';
+import type { Process } from '../../types';
 import './TaskManager.css';
 
+type Tab = 'processes' | 'performance' | 'services' | 'drivers';
+type SortField = 'memory' | 'cpu' | 'pid' | 'name';
+
+const formatMemory = (value: number) => {
+  if (!Number.isFinite(value) || value <= 0) return '0 MB';
+  return value >= 1024 ? `${(value / 1024).toFixed(1)} GB` : `${Math.round(value)} MB`;
+};
+
+const formatDisk = (value: number) => {
+  if (!Number.isFinite(value) || value <= 0) return '0 GB';
+  return `${(value / 1024).toFixed(value < 10240 ? 1 : 0)} GB`;
+};
+
+function formatUptime(value: number) {
+  const seconds = Math.max(0, Math.floor(Number(value) || 0));
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (days) return `${days}d ${hours}h`;
+  if (hours) return `${hours}h ${minutes}min`;
+  return `${minutes}min ${seconds % 60}s`;
+}
+
+function Sparkline({ values, label }: { values: number[]; label: string }) {
+  const points = values.length > 1
+    ? values.map((value, index) => `${(index / (values.length - 1)) * 100},${100 - Math.max(0, Math.min(100, value))}`).join(' ')
+    : '0,100 100,100';
+
+  return (
+    <svg className="sys-sparkline" viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label={label}>
+      <polyline points={points} fill="none" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+
 export default function TaskManagerApp({}: { windowId: string }) {
-  const { processes, terminateProcess } = useProcessManager();
-  const [res, setRes] = useState(kernel.resources);
+  const [activeTab, setActiveTab] = useState<Tab>('processes');
   const [selectedPid, setSelectedPid] = useState<number | null>(null);
-  const [activeTab, setActiveTab] = useState<'processes' | 'performance' | 'details'>('processes');
-  const [cpuHistory, setCpuHistory] = useState<number[]>(new Array(60).fill(0));
-  const [memHistory, setMemHistory] = useState<number[]>(new Array(60).fill(0));
-  const [showWarning, setShowWarning] = useState<number | null>(null);
-  const [showRunTask, setShowRunTask] = useState(false);
-  const [runTaskCmd, setRunTaskCmd] = useState('');
+  const [sortField, setSortField] = useState<SortField>('memory');
+  const [query, setQuery] = useState('');
+  const [resources, setResources] = useState(() => ({ ...kernel.resources }));
+  const [services, setServices] = useState(() => kernel.getAllServices());
+  const [drivers, setDrivers] = useState(() => kernel.getAllDrivers());
+  const [cpuHistory, setCpuHistory] = useState<number[]>(() => [kernel.resources.cpuUsage]);
+  const [memoryHistory, setMemoryHistory] = useState<number[]>(() => [memoryPercent(kernel.resources)]);
 
-  // Performance Monitoring Loop — 1 sample/second para o histórico (60s de janela)
+  const processes = useProcessManager(state => state.processes);
+  const terminateProcess = useProcessManager(state => state.terminateProcess);
+
   useEffect(() => {
-    let lastCpuSample = 0;
-    let lastMemSample = 0;
+    const refresh = () => {
+      const next = { ...kernel.resources };
+      setResources(next);
+      setServices(kernel.getAllServices());
+      setDrivers(kernel.getAllDrivers());
+      setCpuHistory(history => appendHistory(history, next.cpuUsage));
+      setMemoryHistory(history => appendHistory(history, memoryPercent(next)));
+    };
 
-    const unsubCpu = kernel.on('cpuChange', (info) => {
-      setRes(prev => ({ ...prev, cpuUsage: info.cpuUsage }));
-      const now = Date.now();
-      if (now - lastCpuSample >= 1000) {
-        lastCpuSample = now;
-        setCpuHistory(prev => [...prev.slice(1), info.cpuUsage]);
-      }
-    });
-
-    const unsubMem = kernel.on('memoryChange', (info) => {
-      setRes(prev => ({ ...prev, usedMemory: info.usedMemory, totalMemory: info.totalMemory }));
-      const now = Date.now();
-      if (now - lastMemSample >= 1000) {
-        lastMemSample = now;
-        setMemHistory(prev => [...prev.slice(1), info.usedMemory]);
-      }
-    });
-
-    return () => { unsubCpu(); unsubMem(); };
+    refresh();
+    const timer = window.setInterval(refresh, 1000);
+    return () => window.clearInterval(timer);
   }, []);
 
-  const handleEndTask = (pid: number) => {
-    const proc = processes.find(p => p.pid === pid);
-    if (!proc) return;
+  const health = useMemo(
+    () => healthSummary({ processes, services, drivers, resources }),
+    [drivers, processes, resources, services],
+  );
 
-    if (pid < 10 && showWarning !== pid) {
-      setShowWarning(pid);
-      return;
-    }
+  const visibleProcesses = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase();
+    const filtered = needle
+      ? processes.filter(process => `${process.title} ${process.name} ${process.pid}`.toLocaleLowerCase().includes(needle))
+      : processes;
+    return sortProcesses(filtered, sortField) as Process[];
+  }, [processes, query, sortField]);
 
-    terminateProcess(pid);
+  const selectedProcess = processes.find(process => process.pid === selectedPid) ?? null;
+  const selectedIsSystem = selectedProcess ? isSystemProcess(selectedProcess) : false;
+  const memory = memoryPercent(resources);
+  const disk = diskPercent(resources);
+  const largestProcess = sortProcesses(processes, 'memory')[0] as Process | undefined;
+
+  const endSelectedTask = () => {
+    if (!selectedProcess || isSystemProcess(selectedProcess)) return;
+    terminateProcess(selectedProcess.pid);
     setSelectedPid(null);
-    setShowWarning(null);
-  };
-
-  const handleRunTask = () => {
-    if (!runTaskCmd) return;
-    // Command execution logic
-    const name = runTaskCmd.toLowerCase().trim();
-    if (name === 'explorer.obx' || name === 'explorer') {
-      useProcessManager.getState().createProcess('explorer.obx', 'Windows Explorer', '📁');
-    } else if (name === 'regedit' || name === 'regedit.obx') {
-       // Ideally we'd trigger the window opening here.
-       // For now, let's just create the process.
-       useProcessManager.getState().createProcess('regedit.obx', 'Editor do Registro', '🧊');
-    }
-    setRunTaskCmd('');
-    setShowRunTask(false);
-  };
-
-  const renderGraph = (data: number[], max: number, color: string) => {
-    const w = 300, h = 80;
-    const points = data.map((val, i) => {
-      const x = (i / (data.length - 1)) * w;
-      const y = h - (val / max) * h;
-      return `${x},${y}`;
-    }).join(' ');
-    
-    return (
-      <svg width={w} height={h} className="perf-graph">
-        <defs>
-          <linearGradient id={`grad-${color}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity="0.3"/>
-            <stop offset="100%" stopColor={color} stopOpacity="0.05"/>
-          </linearGradient>
-        </defs>
-        <rect width={w} height={h} fill="rgba(255,255,255,0.02)" rx="4"/>
-        {/* Grid */}
-        {[0.25, 0.5, 0.75].map(r => (
-          <line key={r} x1="0" y1={h * r} x2={w} y2={h * r} stroke="rgba(255,255,255,0.06)" strokeDasharray="2"/>
-        ))}
-        <polygon points={`0,${h} ${points} ${w},${h}`} fill={`url(#grad-${color})`}/>
-        <polyline points={points} fill="none" stroke={color} strokeWidth="1.5"/>
-      </svg>
-    );
   };
 
   return (
-    <div className="task-manager">
-      {/* Menu Bar */}
-      <div className="tm-menubar">
-        <button onClick={() => setShowRunTask(true)}>Arquivo</button>
-        <button>Opções</button>
-        <button>Exibir</button>
+    <div className="task-manager system-center">
+      <header className="sys-header">
+        <div className="sys-title">
+          <small>CloudOS Core</small>
+          <strong>System Center</strong>
+          <span>Processos, desempenho, serviços e drivers expostos pelo kernel virtual.</span>
+        </div>
+        <div className={`sys-health sys-health--${health.status}`}>
+          <span className="sys-health__dot" aria-hidden="true" />
+          <div>
+            <strong>{health.status === 'healthy' ? 'Sistema saudável' : 'Atenção necessária'}</strong>
+            <small>{health.alerts[0] ?? `${processes.length} processo(s) monitorado(s)`}</small>
+          </div>
+        </div>
+      </header>
+
+      <nav className="tm-tabs" aria-label="System Center">
+        {([
+          ['processes', 'Processos'],
+          ['performance', 'Desempenho'],
+          ['services', 'Serviços'],
+          ['drivers', 'Drivers'],
+        ] as Array<[Tab, string]>).map(([id, label]) => (
+          <button key={id} className={`tm-tab ${activeTab === id ? 'active' : ''}`} onClick={() => setActiveTab(id)}>
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      <div className="tm-content">
+        {activeTab === 'processes' && (
+          <section className="sys-processes">
+            <div className="sys-toolbar">
+              <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Pesquisar processo ou PID…" aria-label="Pesquisar processos" />
+              <select value={sortField} onChange={event => setSortField(event.target.value as SortField)} aria-label="Ordenar processos">
+                <option value="memory">Mais memória</option>
+                <option value="cpu">Mais CPU</option>
+                <option value="pid">PID</option>
+                <option value="name">Nome</option>
+              </select>
+              <span>{visibleProcesses.length} de {processes.length}</span>
+            </div>
+
+            <div className="sys-table-wrap">
+              <table className="tm-table">
+                <thead>
+                  <tr><th>Processo</th><th>PID</th><th>Status</th><th>CPU</th><th>Memória</th><th>Prioridade</th><th>PPID</th></tr>
+                </thead>
+                <tbody>
+                  {visibleProcesses.map(process => (
+                    <tr key={process.pid} className={`tm-row ${selectedPid === process.pid ? 'selected' : ''}`} onClick={() => setSelectedPid(process.pid)}>
+                      <td><span className="tm-proc-icon">{process.icon}</span>{process.title || process.name}{isSystemProcess(process) && <span className="p-sys-tag">SISTEMA</span>}</td>
+                      <td>{process.pid}</td>
+                      <td><span className={`tm-status ${process.status}`}>{process.status}</span></td>
+                      <td>{process.cpuUsage.toFixed(1)}%</td>
+                      <td>{formatMemory(process.memoryUsage)}</td>
+                      <td>{process.priority}</td>
+                      <td>{process.ppid}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <footer className="tm-footer sys-process-footer">
+              <div className="sys-selected-info">
+                {selectedProcess ? (
+                  <>
+                    <strong>{selectedProcess.title || selectedProcess.name}</strong>
+                    <span>PID {selectedProcess.pid} · ativo há {formatUptime((Date.now() - selectedProcess.startTime) / 1000)}{selectedIsSystem ? ' · protegido' : ''}</span>
+                  </>
+                ) : <span>Selecione um processo para ver as ações disponíveis.</span>}
+              </div>
+              <button className="tm-end-task" onClick={endSelectedTask} disabled={!selectedProcess || selectedIsSystem}>Finalizar tarefa</button>
+            </footer>
+          </section>
+        )}
+
+        {activeTab === 'performance' && (
+          <section className="tm-performance sys-performance">
+            <div className="sys-performance-grid">
+              <article className="perf-card sys-perf-card">
+                <div className="perf-header"><div><small>PROCESSADOR</small><div className="perf-label">CPU</div></div><div className="perf-value">{resources.cpuUsage.toFixed(1)}%</div></div>
+                <Sparkline values={cpuHistory} label="Histórico de CPU" />
+                <div className="perf-details">
+                  <div><span>Núcleos</span><span>{resources.cpuCores}</span></div>
+                  <div><span>Uptime</span><span>{formatUptime(resources.uptime)}</span></div>
+                  <div><span>Processos</span><span>{processes.length}</span></div>
+                  <div><span>Suspensos</span><span>{health.suspended}</span></div>
+                </div>
+              </article>
+
+              <article className="perf-card sys-perf-card">
+                <div className="perf-header"><div><small>MEMÓRIA</small><div className="perf-label">RAM</div></div><div className="perf-value">{memory.toFixed(1)}%</div></div>
+                <Sparkline values={memoryHistory} label="Histórico de memória" />
+                <div className="perf-details">
+                  <div><span>Em uso</span><span>{formatMemory(resources.usedMemory)}</span></div>
+                  <div><span>Total</span><span>{formatMemory(resources.totalMemory)}</span></div>
+                  <div><span>Livre</span><span>{formatMemory(Math.max(0, resources.totalMemory - resources.usedMemory))}</span></div>
+                  <div><span>Maior processo</span><span>{formatMemory(largestProcess?.memoryUsage ?? 0)}</span></div>
+                </div>
+              </article>
+
+              <article className="perf-card sys-perf-card sys-perf-card--compact">
+                <div className="perf-header"><div><small>ARMAZENAMENTO VIRTUAL</small><div className="perf-label">Disco</div></div><div className="perf-value">{disk.toFixed(1)}%</div></div>
+                <div className="sys-progress"><span style={{ width: `${disk}%` }} /></div>
+                <div className="perf-details">
+                  <div><span>Em uso</span><span>{formatDisk(resources.usedDisk)}</span></div>
+                  <div><span>Total</span><span>{formatDisk(resources.totalDisk)}</span></div>
+                  <div><span>Rede</span><span>{resources.networkUp ? 'Disponível' : 'Indisponível'}</span></div>
+                </div>
+              </article>
+
+              <article className={`perf-card sys-perf-card sys-health-card sys-health-card--${health.status}`}>
+                <small>INTEGRIDADE</small>
+                <strong>{health.status === 'healthy' ? 'Nenhuma condição crítica observável' : health.alerts.join(' · ')}</strong>
+                <div className="sys-health-grid">
+                  <span>Serviços com falha <b>{health.failedServices}</b></span>
+                  <span>Drivers com falha <b>{health.failedDrivers}</b></span>
+                </div>
+              </article>
+            </div>
+          </section>
+        )}
+
+        {activeTab === 'services' && (
+          <section className="sys-inventory">
+            <header><div><small>Service Control Manager virtual</small><strong>{services.length} serviço(s)</strong></div><span>{health.failedServices} com falha</span></header>
+            <div className="sys-table-wrap">
+              <table className="tm-table">
+                <thead><tr><th>Serviço</th><th>Descrição</th><th>Status</th><th>Inicialização</th><th>PID</th><th>Reinícios</th></tr></thead>
+                <tbody>{services.map(service => (
+                  <tr className="tm-row" key={service.name}>
+                    <td><strong>{service.displayName}</strong><small className="sys-secondary">{service.name}</small></td>
+                    <td>{service.description}</td>
+                    <td><span className={`sys-pill sys-pill--${service.status}`}>{service.status}</span></td>
+                    <td>{service.startType}</td>
+                    <td>{service.pid ?? '—'}</td>
+                    <td>{service.restartCount}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
+        {activeTab === 'drivers' && (
+          <section className="sys-inventory">
+            <header><div><small>Driver Manager virtual</small><strong>{drivers.length} driver(s)</strong></div><span>{health.failedDrivers} com problema</span></header>
+            <div className="sys-table-wrap">
+              <table className="tm-table">
+                <thead><tr><th>Driver</th><th>Status</th><th>Tipo</th><th>Ordem</th><th>Dependências</th><th>Arquivo</th></tr></thead>
+                <tbody>{drivers.map(driver => (
+                  <tr className="tm-row" key={driver.name}>
+                    <td><strong>{driver.name}</strong>{driver.errorMessage && <small className="sys-secondary">{driver.errorMessage}</small>}</td>
+                    <td><span className={`sys-pill sys-pill--${driver.status}`}>{driver.status}</span></td>
+                    <td>{driver.type}</td>
+                    <td>{driver.loadOrder}</td>
+                    <td>{driver.dependencies.length ? driver.dependencies.join(', ') : '—'}</td>
+                    <td><code>{driver.path}</code></td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          </section>
+        )}
       </div>
-
-      {/* Tabs */}
-      <div className="tm-tabs">
-        <button className={`tm-tab ${activeTab === 'processes' ? 'active' : ''}`} onClick={() => setActiveTab('processes')}>Processos</button>
-        <button className={`tm-tab ${activeTab === 'performance' ? 'active' : ''}`} onClick={() => setActiveTab('performance')}>Desempenho</button>
-        <button className={`tm-tab ${activeTab === 'details' ? 'active' : ''}`} onClick={() => setActiveTab('details')}>Detalhes</button>
-      </div>
-
-      {/* Content */}
-      {activeTab === 'processes' && (
-        <div className="tm-content">
-          <table className="tm-table">
-            <thead>
-              <tr>
-                <th>Nome</th>
-                <th>Status</th>
-                <th>CPU</th>
-                <th>Memória</th>
-              </tr>
-            </thead>
-            <tbody>
-              {processes.map(p => (
-                <tr
-                  key={p.pid}
-                  className={`tm-row ${selectedPid === p.pid ? 'selected' : ''}`}
-                  onClick={() => setSelectedPid(p.pid)}
-                >
-                  <td>
-                    <span className="tm-proc-icon">{p.icon}</span>
-                    <span className="proc-name-text">{p.name} {p.pid < 10 && <span className="p-sys-tag">Sistema</span>}</span>
-                  </td>
-                  <td>
-                    <span className={`tm-status ${p.status}`}>{p.status === 'running' ? 'Em execução' : p.status === 'suspended' ? 'Suspenso' : 'Parado'}</span>
-                  </td>
-                  <td>{p.cpuUsage.toFixed(1)}%</td>
-                  <td>{p.memoryUsage.toFixed(1)} MB</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          
-          <div className="tm-footer">
-            <button
-              className="tm-end-task"
-              disabled={selectedPid === null}
-              onClick={() => selectedPid !== null && handleEndTask(selectedPid)}
-            >
-              Finalizar tarefa
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Run Task Modal */}
-      {showRunTask && (
-        <div className="tm-modal-overlay">
-          <div className="tm-modal">
-            <div className="tm-modal-header">Criar nova tarefa</div>
-            <div className="tm-modal-body">
-              <p>Digite o nome do programa que você deseja abrir.</p>
-              <input 
-                type="text" 
-                autoFocus 
-                value={runTaskCmd} 
-                onChange={e => setRunTaskCmd(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleRunTask()}
-              />
-            </div>
-            <div className="tm-modal-footer">
-              <button onClick={handleRunTask}>OK</button>
-              <button onClick={() => setShowRunTask(false)}>Cancelar</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Warning Modal */}
-      {showWarning !== null && (
-        <div className="tm-modal-overlay">
-          <div className="tm-modal warning">
-            <div className="tm-modal-header">Deseja finalizar o processo de sistema?</div>
-            <div className="tm-modal-body">
-              <p>Finalizar o processo <b>{processes.find(p => p.pid === showWarning)?.name}</b> fará com que o sistema operacional se torne instável ou pare de funcionar, resultando em perda de dados não salvos.</p>
-              <p>Deseja continuar?</p>
-            </div>
-            <div className="tm-modal-footer">
-              <button className="danger" onClick={() => handleEndTask(showWarning!)}>Finalizar Processo</button>
-              <button onClick={() => setShowWarning(null)}>Cancelar</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'performance' && (
-        <div className="tm-performance">
-          <div className="perf-card">
-            <div className="perf-header">
-              <span className="perf-label">CPU</span>
-              <span className="perf-value">{res.cpuUsage.toFixed(1)}%</span>
-            </div>
-            {renderGraph(cpuHistory, 100, '#6366f1')}
-            <div className="perf-details">
-              <div><span>Utilização</span><span>{res.cpuUsage.toFixed(1)}%</span></div>
-              <div><span>Processos</span><span>{processes.length}</span></div>
-              <div><span>Threads</span><span>{processes.length * 4}</span></div>
-              <div><span>Velocidade</span><span>3.60 GHz</span></div>
-            </div>
-          </div>
-          
-          <div className="perf-card">
-            <div className="perf-header">
-              <span className="perf-label">Memória</span>
-              <span className="perf-value">{res.usedMemory.toFixed(0)} MB</span>
-            </div>
-            {renderGraph(memHistory, res.totalMemory, '#22c55e')}
-            <div className="perf-details">
-              <div><span>Em uso</span><span>{res.usedMemory.toFixed(0)} MB</span></div>
-              <div><span>Disponível</span><span>{(res.totalMemory - res.usedMemory).toFixed(0)} MB</span></div>
-              <div><span>Total</span><span>{res.totalMemory.toLocaleString()} MB</span></div>
-              <div><span>Commitada</span><span>{(res.usedMemory * 1.2).toFixed(0)} MB</span></div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'details' && (
-        <div className="tm-content">
-          <table className="tm-table">
-            <thead>
-              <tr>
-                <th>Nome</th>
-                <th>PID</th>
-                <th>Status</th>
-                <th>CPU</th>
-                <th>Memória</th>
-              </tr>
-            </thead>
-            <tbody>
-              {processes.map(p => (
-                <tr key={p.pid} className="tm-row">
-                  <td>{p.name}</td>
-                  <td>{p.pid}</td>
-                  <td>{p.status}</td>
-                  <td>{p.cpuUsage.toFixed(1)}%</td>
-                  <td>{p.memoryUsage.toFixed(1)} MB</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
     </div>
   );
 }
