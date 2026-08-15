@@ -129,7 +129,7 @@ internal static class OmniboxVisualDiagnostics
                 $"{stage}: {label} cortado embaixo ({content.Bottom:0.##} > {viewport.Bottom:0.##}).");
     }
 
-    private static bool IsTransparent(Brush brush) =>
+    private static bool IsTransparent(System.Windows.Media.Brush brush) =>
         brush is SolidColorBrush solid && solid.Color.A == 0;
 
     private static RectReport ToReport(Rect rect) => new(
