@@ -14,6 +14,7 @@ import { setupRouter } from './setup/routes.js';
 import { hostRouter } from './host/routes.js';
 import { appsRouter } from './apps/routes.js';
 import { readinessRouter } from './readiness/routes.js';
+import { securityToolsRouter } from './security/routes.js';
 import { createHostTrustPolicy, hasSupervisorTrust } from './auth/hostTrust.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -58,9 +59,7 @@ export function createApp(initialPort, options = {}) {
     next();
   });
 
-  app.use(helmet({
-    contentSecurityPolicy: false
-  }));
+  app.use(helmet({ contentSecurityPolicy: false }));
 
   app.use(cors({
     origin: (origin, callback) => {
@@ -106,15 +105,11 @@ export function createApp(initialPort, options = {}) {
     setImmediate(() => app.emit('cloudos:shutdown'));
   });
 
-  // Rejeitar payloads excessivos
   app.use((err, req, res, next) => {
-    if (err.type === 'entity.too.large') {
-      return res.status(413).json({ error: 'Payload excede o limite de 5MB.' });
-    }
+    if (err.type === 'entity.too.large') return res.status(413).json({ error: 'Payload excede o limite de 5MB.' });
     next(err);
   });
 
-  // Endpoint de Runtime Dinamico
   app.get('/api/runtime', (req, res) => {
     const port = app._cloudosPort || 18080;
     res.json({
@@ -127,7 +122,6 @@ export function createApp(initialPort, options = {}) {
     });
   });
 
-  // Rotas da API
   app.use('/api/auth', authRouter);
   app.use('/api/user', userRouter);
   app.use('/api/system', systemRouter);
@@ -137,6 +131,7 @@ export function createApp(initialPort, options = {}) {
   app.use('/api/host', hostRouter);
   app.use('/api/apps', appsRouter);
   app.use('/api/readiness', readinessRouter);
+  app.use('/api/security/tools', securityToolsRouter);
 
   app.get('/api/health', (req, res) => {
     res.json({
@@ -163,7 +158,6 @@ export function createApp(initialPort, options = {}) {
     });
   }
 
-  // Tratamento de erros centralizado
   app.use((err, req, res, next) => {
     const status = Number.isInteger(err.status) ? err.status : 500;
     if (status >= 500) console.error('Erro não tratado na API:', err.message);
