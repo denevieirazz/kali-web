@@ -1,3 +1,4 @@
+using System.IO;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Media;
@@ -89,7 +90,7 @@ internal static class Program
             window.Show();
             await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Loaded);
             ApplyTheme(window, theme);
-            await window.InitializeAsync();
+            await window.InitializeAsync(null);
             await window.Dispatcher.InvokeAsync(() => window.UpdateLayout(), DispatcherPriority.ApplicationIdle);
 
             CaptureWindow(window, outputPath);
