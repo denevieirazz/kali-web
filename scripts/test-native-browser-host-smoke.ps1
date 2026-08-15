@@ -30,21 +30,8 @@ function Get-FreePort {
     finally { $listener.Stop() }
 }
 
-function Get-SanitizedFailureDetail([System.Management.Automation.ErrorRecord]$Record, [string]$EphemeralPassword) {
-    $status = 'unknown'
-    try {
-        if ($null -ne $Record.Exception.Response -and $null -ne $Record.Exception.Response.StatusCode) {
-            $status = [string][int]$Record.Exception.Response.StatusCode
-        }
-    } catch {
-        $status = 'unknown'
-    }
-
-    $detail = if (-not [string]::IsNullOrWhiteSpace($Record.ErrorDetails.Message)) {
-        [string]$Record.ErrorDetails.Message
-    } else {
-        [string]$Record.Exception.Message
-    }
+function ConvertTo-SanitizedSmokeText([string]$Text, [string]$EphemeralPassword) {
+    $detail = if ($null -eq $Text) { '' } else { [string]$Text }
     if (-not [string]::IsNullOrEmpty($EphemeralPassword)) {
         $detail = $detail.Replace($EphemeralPassword, '<redacted>', [StringComparison]::Ordinal)
     }
@@ -54,7 +41,7 @@ function Get-SanitizedFailureDetail([System.Management.Automation.ErrorRecord]$R
         '$1=<redacted>')
     $detail = $detail.Replace("`r", ' ').Replace("`n", ' ')
     if ($detail.Length -gt 512) { $detail = $detail.Substring(0, 512) + '<truncated>' }
-    return "status=$status detail=$detail"
+    return $detail
 }
 
 if (-not ('CloudOSSmoke.WindowApi' -as [type])) {
@@ -213,11 +200,17 @@ try {
         password = $smokePassword
         confirmPassword = $smokePassword
     } | ConvertTo-Json -Compress
-    try {
-        $null = Invoke-RestMethod -Uri "$apiBase/api/setup/admin" -Method Post -ContentType 'application/json' -Body $adminBody -TimeoutSec 10
-    } catch {
-        $safeFailure = Get-SanitizedFailureDetail -Record $_ -EphemeralPassword $smokePassword
-        throw "SETUP_ADMIN_FAILED $safeFailure"
+    $setupResponse = Invoke-WebRequest `
+        -Uri "$apiBase/api/setup/admin" `
+        -Method Post `
+        -ContentType 'application/json; charset=utf-8' `
+        -Headers @{ Accept = 'application/json' } `
+        -Body $adminBody `
+        -SkipHttpErrorCheck `
+        -TimeoutSec 10
+    if ([int]$setupResponse.StatusCode -ne 201) {
+        $safeDetail = ConvertTo-SanitizedSmokeText -Text ([string]$setupResponse.Content) -EphemeralPassword $smokePassword
+        throw "SETUP_ADMIN_FAILED status=$([int]$setupResponse.StatusCode) detail=$safeDetail"
     }
 
     $openRaw = & node $clientScript --port $debugPort --action open-twice
