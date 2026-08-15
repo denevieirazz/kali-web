@@ -79,7 +79,7 @@ jobs:
         shell: pwsh
         run: ./scripts/test-native-browser-physical-ui-boundary.ps1
 
-      - name: 12d. Validate native Browser input and surfaces contract
+      - name: 12d. Validate native Browser input, surfaces and physical-probe contract
         if: github.ref == 'refs/heads/fix/native-browser-physical-ui' || github.head_ref == 'fix/native-browser-physical-ui'
         shell: pwsh
         run: ./scripts/test-native-browser-input-contract.ps1
@@ -109,9 +109,13 @@ jobs:
         if: github.ref == 'refs/heads/fix/native-browser-physical-ui' || github.head_ref == 'fix/native-browser-physical-ui'
         run: dotnet build desktop/CloudOS.Browser.PhysicalProbe/CloudOS.Browser.PhysicalProbe.csproj -c Release
 
-      - name: 17d. Run Browser functional input probe on CI Windows
+      # Do not run user32!SendInput here. GitHub-hosted Windows runners do not provide
+      # a reliable interactive desktop/input station. The physical probe remains mandatory
+      # and is executed by validate-native-browser-physical-ui*.ps1 on the user's Windows PC.
+      - name: 17d. Verify physical input probe contract on hosted CI
         if: github.ref == 'refs/heads/fix/native-browser-physical-ui' || github.head_ref == 'fix/native-browser-physical-ui'
-        run: dotnet run --project desktop/CloudOS.Browser.PhysicalProbe/CloudOS.Browser.PhysicalProbe.csproj -c Release -- --output test-results/native-browser-input-ci --no-navigation
+        shell: pwsh
+        run: ./scripts/test-native-browser-input-contract.ps1
 
       - name: 18. Run existing Playwright characterization
         run: npx playwright test --grep-invert "Navegador CloudOS — WebView2 real|Navegador CloudOS — lifecycle Windows"
@@ -190,14 +194,5 @@ jobs:
         with:
           name: cloudos-native-browser-visual-${{ github.run_id }}
           path: test-results/native-browser-visual/
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: 27. Upload Browser input probe evidence
-        if: always() && (github.ref == 'refs/heads/fix/native-browser-physical-ui' || github.head_ref == 'fix/native-browser-physical-ui') && hashFiles('test-results/native-browser-input-ci/**') != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: cloudos-native-browser-input-ci-${{ github.run_id }}
-          path: test-results/native-browser-input-ci/
           if-no-files-found: error
           retention-days: 14
