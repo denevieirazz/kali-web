@@ -104,6 +104,18 @@ internal sealed record NativeInputReport(
 
 internal sealed record RectReport(double X, double Y, double Width, double Height);
 internal sealed record RgbReport(int R, int G, int B);
+
+internal sealed record OmniboxVisualReport(
+    string Stage,
+    double TextBoxHeight,
+    double ContentViewportHeight,
+    RectReport ContentViewport,
+    RectReport RenderedText,
+    RectReport? Caret,
+    RectReport? Selection,
+    double FormattedTextHeight,
+    double ClipToleranceDip);
+
 internal sealed record SurfaceSamplePointReport(
     int X,
     int Y,
