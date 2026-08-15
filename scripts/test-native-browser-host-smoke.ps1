@@ -136,20 +136,47 @@ function Get-BrowserReadyCount {
     return $count
 }
 
+function Get-SanitizedBrowserLifecycleEvents([string[]]$Lines) {
+    $events = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in $Lines) {
+        if ($line -match '^(?<timestamp>\S+)\s+(?<event>[A-Za-z0-9_-]{1,64})(?:\s|$)') {
+            $events.Add("$($Matches.timestamp) $($Matches.event)")
+        }
+    }
+    return @($events)
+}
+
 function Assert-BridgeReplyPrecedesInitialization {
     $logRoot = Join-Path $cloudRoot 'logs'
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
     $logPath = $null
-    Wait-Until {
-        $candidate = Get-ChildItem $logRoot -Filter 'browser-*.log' -File -ErrorAction SilentlyContinue |
-            Sort-Object LastWriteTimeUtc -Descending |
-            Select-Object -First 1
-        if ($null -eq $candidate) { return $false }
-        $script:browserLifecycleLog = $candidate.FullName
-        $text = Get-Content $candidate.FullName -Raw
-        return $text -match ' bridge_replied ok=true' -and $text -match ' webview_initialization_started(?: |$)'
-    } 10 'Lifecycle log não registrou resposta e início do WebView2.'
-    $logPath = $script:browserLifecycleLog
-    $lines = @(Get-Content $logPath)
+    $lines = @()
+
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $candidates = @(Get-ChildItem $logRoot -Filter 'browser-*.log' -File -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTimeUtc -Descending)
+        foreach ($candidate in $candidates) {
+            $candidateLines = @(Get-Content $candidate.FullName -ErrorAction SilentlyContinue)
+            if (@($candidateLines | Where-Object { $_ -match ' bridge_received(?: |$)' }).Count -eq 0) { continue }
+            $logPath = $candidate.FullName
+            $lines = $candidateLines
+            if (($lines -join "`n") -match ' bridge_replied ok=true' -and
+                ($lines -join "`n") -match ' webview_initialization_started(?: |$)') {
+                break
+            }
+        }
+        if ($null -ne $logPath -and
+            ($lines -join "`n") -match ' bridge_replied ok=true' -and
+            ($lines -join "`n") -match ' webview_initialization_started(?: |$)') {
+            break
+        }
+        Start-Sleep -Milliseconds 250
+    }
+
+    if ($null -eq $logPath) {
+        throw 'Lifecycle Browser ausente: nenhum browser-*.log com bridge_received foi encontrado.'
+    }
+
     $replyIndex = -1
     $initializationIndex = -1
     for ($index = 0; $index -lt $lines.Count; $index++) {
@@ -157,7 +184,9 @@ function Assert-BridgeReplyPrecedesInitialization {
         if ($initializationIndex -lt 0 -and $lines[$index] -match ' webview_initialization_started(?: |$)') { $initializationIndex = $index }
     }
     if ($replyIndex -lt 0 -or $initializationIndex -lt 0 -or $replyIndex -ge $initializationIndex) {
-        throw "browser.open não respondeu antes da inicialização WebView2. replyIndex=$replyIndex initIndex=$initializationIndex"
+        $observed = @(Get-SanitizedBrowserLifecycleEvents $lines)
+        $summary = if ($observed.Count -eq 0) { '<none>' } else { $observed -join ' | ' }
+        throw "Lifecycle Browser inválido. replyIndex=$replyIndex initIndex=$initializationIndex events=$summary"
     }
 }
 
