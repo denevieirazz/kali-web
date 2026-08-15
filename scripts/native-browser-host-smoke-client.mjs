@@ -62,10 +62,29 @@ try {
     await search.fill('naveg');
     const browserButton = page.locator('.start-app-btn').filter({ hasText: /Navegador|Browser/i }).first();
     await browserButton.waitFor({ state: 'visible', timeout: 10_000 });
+
+    await page.evaluate(() => {
+      const previous = globalThis.__cloudosBrowserLauncherProbe;
+      previous?.observer?.disconnect?.();
+      const probe = { seen: false, observer: null };
+      const inspect = () => {
+        if (document.querySelector('.cloudos-browser-launcher')) probe.seen = true;
+      };
+      const observer = new MutationObserver(inspect);
+      probe.observer = observer;
+      globalThis.__cloudosBrowserLauncherProbe = probe;
+      inspect();
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+    });
+
     await browserButton.click();
+    await page.waitForFunction(
+      () => globalThis.__cloudosBrowserLauncherProbe?.seen === true,
+      undefined,
+      { timeout: 10_000 },
+    );
 
     const launcher = page.locator('.cloudos-browser-launcher');
-    await launcher.waitFor({ state: 'visible', timeout: 10_000 });
     try {
       await launcher.waitFor({ state: 'detached', timeout: 15_000 });
     } catch {
@@ -74,11 +93,17 @@ try {
       throw new Error(`Launcher permaneceu aberto. code=${code || 'none'} message=${message || 'none'}`);
     }
 
+    const launcherSeen = await page.evaluate(() => {
+      const probe = globalThis.__cloudosBrowserLauncherProbe;
+      probe?.observer?.disconnect?.();
+      return probe?.seen === true;
+    });
+
     output = {
       action,
       desktopMounted: true,
-      launcherSeen: true,
-      launcherGone: true,
+      launcherSeen,
+      launcherGone: await launcher.count() === 0,
     };
   } else {
     output = await page.evaluate(async (requestedAction) => {
