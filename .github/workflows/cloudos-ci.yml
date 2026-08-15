@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - feature/cloudos-native-browser
+      - feature/native-browser-visual-refresh
       - fix/native-browser-windows-validation
       - fix/native-browser-powershell7-validation
       - refactor/cloudos-core-hardening
@@ -67,6 +68,11 @@ jobs:
       - name: 12. Run Host Tests
         run: dotnet run --project desktop/CloudOS.Host.Tests/CloudOS.Host.Tests.csproj -c Release
 
+      - name: 12b. Validate native Browser visual isolation boundary
+        if: github.ref == 'refs/heads/feature/native-browser-visual-refresh' || github.head_ref == 'feature/native-browser-visual-refresh'
+        shell: pwsh
+        run: ./scripts/test-native-browser-visual-boundary.ps1
+
       - name: 13. Run Browser response contract tests
         run: dotnet run --project desktop/CloudOS.Browser.Contracts.Tests/CloudOS.Browser.Contracts.Tests.csproj -c Release
 
@@ -83,6 +89,11 @@ jobs:
       - name: 17. Build Browser TestHost
         run: dotnet build desktop/CloudOS.Browser.TestHost/CloudOS.Browser.TestHost.csproj -c Release
 
+      - name: 17b. Capture native Browser WPF before-after comparison
+        if: github.ref == 'refs/heads/feature/native-browser-visual-refresh' || github.head_ref == 'feature/native-browser-visual-refresh'
+        shell: pwsh
+        run: ./scripts/test-native-browser-visual.ps1
+
       - name: 18. Run existing Playwright characterization
         run: npx playwright test --grep-invert "Navegador CloudOS — WebView2 real|Navegador CloudOS — lifecycle Windows"
 
@@ -93,7 +104,7 @@ jobs:
         run: npx playwright test tests/playwright/native-browser.spec.ts --output=test-results/native-browser --reporter=list
 
       - name: 21. Smoke native Host Browser lifecycle
-        if: github.ref == 'refs/heads/feature/cloudos-native-browser' || github.ref == 'refs/heads/fix/native-browser-windows-validation' || github.ref == 'refs/heads/fix/native-browser-powershell7-validation' || github.ref == 'refs/heads/refactor/cloudos-core-hardening' || github.ref == 'refs/heads/integration/cloudos-validated-features' || github.head_ref == 'feature/cloudos-native-browser' || github.head_ref == 'fix/native-browser-windows-validation' || github.head_ref == 'fix/native-browser-powershell7-validation' || github.head_ref == 'refactor/cloudos-core-hardening' || github.head_ref == 'integration/cloudos-validated-features'
+        if: github.ref == 'refs/heads/feature/cloudos-native-browser' || github.ref == 'refs/heads/feature/native-browser-visual-refresh' || github.ref == 'refs/heads/fix/native-browser-windows-validation' || github.ref == 'refs/heads/fix/native-browser-powershell7-validation' || github.ref == 'refs/heads/refactor/cloudos-core-hardening' || github.ref == 'refs/heads/integration/cloudos-validated-features' || github.head_ref == 'feature/cloudos-native-browser' || github.head_ref == 'feature/native-browser-visual-refresh' || github.head_ref == 'fix/native-browser-windows-validation' || github.head_ref == 'fix/native-browser-powershell7-validation' || github.head_ref == 'refactor/cloudos-core-hardening' || github.head_ref == 'integration/cloudos-validated-features'
         shell: pwsh
         run: ./scripts/test-native-browser-host-smoke.ps1
 
@@ -116,6 +127,11 @@ jobs:
         if: github.ref == 'refs/heads/integration/cloudos-validated-features' || github.head_ref == 'integration/cloudos-validated-features'
         shell: pwsh
         run: git diff --check cb2033292d9bff691b6477a4872ca699ab0cbd13...HEAD
+
+      - name: 22d. Check native Browser visual diff
+        if: github.ref == 'refs/heads/feature/native-browser-visual-refresh' || github.head_ref == 'feature/native-browser-visual-refresh'
+        shell: pwsh
+        run: git diff --check f83a765061eb69df2f88a162c44ef0ec7dc60b90...HEAD
 
       - name: 23. Upload sanitized Browser lifecycle diagnostics on failure
         if: failure() && hashFiles('test-results/native-browser-lifecycle/**') != ''
@@ -145,3 +161,12 @@ jobs:
             test-results/**/*-diff.png
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: 26. Upload native Browser WPF visual comparison
+        if: always() && (github.ref == 'refs/heads/feature/native-browser-visual-refresh' || github.head_ref == 'feature/native-browser-visual-refresh') && hashFiles('test-results/native-browser-visual/*.png') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudos-native-browser-visual-${{ github.run_id }}
+          path: test-results/native-browser-visual/
+          if-no-files-found: error
+          retention-days: 14
