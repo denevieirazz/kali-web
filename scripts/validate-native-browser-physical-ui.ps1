@@ -19,7 +19,7 @@ New-Item -ItemType Directory -Force -Path $output | Out-Null
 Write-Host 'CloudOS Browser - validacao fisica obrigatoria' -ForegroundColor Cyan
 Write-Host "Escala esperada do Windows: $ExpectedScale%"
 Write-Host "Saida: $output"
-Write-Host "Configure $ExpectedScale% em Configuracoes > Sistema > Tela antes de continuar. O script nao muda a escala do sistema." -ForegroundColor Yellow
+Write-Host "Configure $ExpectedScale% em Configuracoes > Sistema > Tela antes de continuar. O script nao muda a escala." -ForegroundColor Yellow
 
 $project = Join-Path $repoRoot 'desktop\CloudOS.Browser.PhysicalProbe\CloudOS.Browser.PhysicalProbe.csproj'
 & dotnet run --project $project -c Release -- --output $output --expected-scale $ExpectedScale --theme $Theme --screen
@@ -48,21 +48,39 @@ if ($validation.passed -ne $true -or $validation.physicalValidation -ne $true) {
     throw 'BROWSER_PHYSICAL_UI_REPORT_INVALID: execução retornou sucesso sem validação física aprovada.'
 }
 
+$requiredChecks = @(
+    'rendered-text-content-viewport',
+    'top-bottom-clip-tolerance',
+    'caret-visible',
+    'selection-visible',
+    'omnibox-closeups',
+    'menu-complete',
+    'downloads-surface',
+    'extensions-surface'
+)
+foreach ($check in $requiredChecks) {
+    if ($validation.checks -notcontains $check) {
+        throw "BROWSER_PHYSICAL_UI_CHECK_MISSING: $check"
+    }
+}
+
 $requiredArtifacts = @(
-    '01-youtube-typed.png',
-    '02-youtube-selected.png',
-    '03-paste.png',
-    '04-long-url-home.png',
-    '05-long-url-end.png',
-    '06-after-navigation.png',
-    '07-compact.png',
-    '08-dark-normal.png',
-    '09-dark-compact.png',
-    '10-light-normal.png',
-    '11-light-compact.png',
-    '12-menu-open.png',
-    '13-downloads-hub.png',
-    '14-settings-hub.png'
+    '01-omnibox-empty-closeup.png',
+    '02-omnibox-typed-closeup.png',
+    '03-omnibox-selected-closeup.png',
+    '04-paste.png',
+    '05-long-url-home.png',
+    '06-long-url-end.png',
+    '07-after-navigation.png',
+    '08-compact.png',
+    '09-dark-normal.png',
+    '10-dark-compact.png',
+    '11-light-normal.png',
+    '12-light-compact.png',
+    '13-menu-complete.png',
+    '14-downloads.png',
+    '15-extensions.png',
+    '16-settings.png'
 )
 
 foreach ($artifact in $requiredArtifacts) {
@@ -75,6 +93,13 @@ foreach ($artifact in $requiredArtifacts) {
     }
 }
 
-Write-Host 'PASS funcional. Revise visualmente TODOS os PNGs antes de aprovar a branch.' -ForegroundColor Green
+if ($null -eq $validation.omniboxVisuals.typed -or
+    $null -eq $validation.omniboxVisuals.selected -or
+    $null -eq $validation.omniboxVisuals.'long-url-home' -or
+    $null -eq $validation.omniboxVisuals.'long-url-end') {
+    throw 'BROWSER_PHYSICAL_UI_OMNIBOX_METRICS_MISSING'
+}
+
+Write-Host 'PASS funcional. Aprovacao visual continua obrigatoriamente manual pelo usuario.' -ForegroundColor Green
 Write-Host "Sequencia: $output"
 Write-Host 'Este script NAO promove integration/cloudos-validated-features.' -ForegroundColor Yellow

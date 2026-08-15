@@ -137,6 +137,7 @@ internal static class Program
             Assert(root.GetProperty("stage").GetString() == "diagnostics-contract-self-test", "diagnostics contract perdeu a etapa.");
             Assert(root.GetProperty("error").GetProperty("code").GetString() == "SELF_TEST_FAILURE_REPORT", "diagnostics contract perdeu o código de erro.");
             Assert(root.TryGetProperty("artifacts", out _), "diagnostics contract perdeu a lista de artefatos.");
+            Assert(root.TryGetProperty("omniboxVisuals", out _), "diagnostics contract perdeu a seção de métricas visuais.");
             Console.WriteLine("PASS physical probe failure-report serialization contract (non-physical CI mode)");
             return 0;
         }
@@ -185,7 +186,7 @@ internal static class Program
 
             SetStage("browser-webview-initialize");
             await window.InitializeAsync(null);
-            await PumpAsync(450);
+            await PumpAsync(500);
 
             var scale = VisualTreeHelper.GetDpi(window).DpiScaleX * 100d;
             if (_report is not null) _report.ReportedScalePercent = Math.Round(scale, 2);
@@ -204,10 +205,21 @@ internal static class Program
             Assert(address.CaretBrush is not null, "AddressBox.CaretBrush ausente.");
             Assert(address.SelectionBrush is not null, "AddressBox.SelectionBrush ausente.");
             Assert(address.VerticalContentAlignment == VerticalAlignment.Center, "AddressBox não está centralizado verticalmente.");
-            Assert(address.ActualHeight >= 30, $"AddressBox muito baixo: {address.ActualHeight:0.##}.");
+            Assert(address.ActualHeight >= 38, $"AddressBox muito baixo: {address.ActualHeight:0.##}.");
+            Assert(shell.ActualHeight >= 43, $"AddressShell muito baixo: {shell.ActualHeight:0.##}.");
             Assert(shell.ActualWidth >= 320, $"Omnibox estreita em janela normal: {shell.ActualWidth:0.##}.");
+            Assert(address.Template.FindName("PART_ContentHost", address) is FrameworkElement,
+                "PART_ContentHost da omnibox ausente.");
 
+            SetStage("omnibox-empty");
             address.Clear();
+            System.Windows.Input.Keyboard.ClearFocus();
+            window.Focus();
+            await PumpAsync(100);
+            Assert(placeholder.Visibility == Visibility.Visible, "Placeholder vazio não está visível.");
+            RecordOmnibox("empty", MeasureOmnibox(address, "empty", requireCaret: false, requireSelection: false));
+            CaptureElement(window, shell, options, "01-omnibox-empty-closeup.png", 12);
+
             SetStage("preflight-physical-input");
             var beforeFocus = PhysicalInputDiagnostics.Capture(window, address, inputLayout.InputSize);
             var focusRequest = PhysicalInputDiagnostics.RequestFocus(window, address);
@@ -241,16 +253,17 @@ internal static class Program
 
             SetStage("sendinput-short-text");
             SendText(ShortInput);
-            await PumpAsync(100);
+            await PumpAsync(120);
             Assert(address.Text == ShortInput, $"Digitação curta divergente: '{address.Text}'.");
-            AssertVerticalBounds(address, "youtube.com");
-            Capture(window, options, "01-youtube-typed.png");
+            RecordOmnibox("typed", MeasureOmnibox(address, "typed", requireCaret: true, requireSelection: false));
+            CaptureElement(window, shell, options, "02-omnibox-typed-closeup.png", 12);
 
             SetStage("sendinput-ctrl-a");
             Chord(VK_CONTROL, 'A');
-            await PumpAsync(60);
+            await PumpAsync(80);
             Assert(address.SelectionLength == address.Text.Length, "Ctrl+A não selecionou tudo.");
-            Capture(window, options, "02-youtube-selected.png");
+            RecordOmnibox("selected", MeasureOmnibox(address, "selected", requireCaret: true, requireSelection: true));
+            CaptureElement(window, shell, options, "03-omnibox-selected-closeup.png", 12);
 
             SetStage("sendinput-clipboard");
             Chord(VK_CONTROL, 'C');
@@ -259,26 +272,27 @@ internal static class Program
             Clipboard.SetText(PasteInput);
             Chord(VK_CONTROL, 'A');
             Chord(VK_CONTROL, 'V');
-            await PumpAsync(80);
+            await PumpAsync(100);
             Assert(address.Text == PasteInput, "Ctrl+V falhou.");
-            AssertVerticalBounds(address, "paste");
-            Capture(window, options, "03-paste.png");
+            RecordOmnibox("paste", MeasureOmnibox(address, "paste", requireCaret: true, requireSelection: false));
+            Capture(window, options, "04-paste.png");
 
             SetStage("sendinput-long-url");
             Chord(VK_CONTROL, 'A');
             SendText(LongInput);
-            await PumpAsync(100);
+            await PumpAsync(120);
             Assert(address.Text == LongInput, "URL longa foi truncada ou alterada.");
-            AssertVerticalBounds(address, "long-url");
             PressKey(VK_HOME);
-            await PumpAsync(50);
+            await PumpAsync(70);
             Assert(address.CaretIndex == 0, $"Home falhou: {address.CaretIndex}.");
-            Capture(window, options, "04-long-url-home.png");
+            RecordOmnibox("long-url-home", MeasureOmnibox(address, "long-url-home", requireCaret: true, requireSelection: false));
+            Capture(window, options, "05-long-url-home.png");
+
             PressKey(VK_END);
-            await PumpAsync(50);
+            await PumpAsync(70);
             Assert(address.CaretIndex == address.Text.Length, $"End falhou: {address.CaretIndex}/{address.Text.Length}.");
-            AssertVerticalBounds(address, "long-url-end");
-            Capture(window, options, "05-long-url-end.png");
+            RecordOmnibox("long-url-end", MeasureOmnibox(address, "long-url-end", requireCaret: true, requireSelection: false));
+            Capture(window, options, "06-long-url-end.png");
 
             if (!options.NoNavigation)
             {
@@ -289,75 +303,106 @@ internal static class Program
                 await PumpAsync(2300);
                 Assert(address.Text.Contains("youtube.com", StringComparison.OrdinalIgnoreCase),
                     $"Enter não navegou para youtube.com: '{address.Text}'.");
-                Capture(window, options, "06-after-navigation.png");
+                Capture(window, options, "07-after-navigation.png");
             }
 
             SetStage("compact-layout");
             window.Width = 820;
             window.Height = 620;
-            await PumpAsync(180);
+            await PumpAsync(220);
             Assert(shell.ActualWidth >= 250, $"Omnibox estreita demais no modo compacto: {shell.ActualWidth:0.##}.");
-            Capture(window, options, "07-compact.png");
+            RecordOmnibox("compact", MeasureOmnibox(address, "compact", requireCaret: false, requireSelection: false));
+            Capture(window, options, "08-compact.png");
 
             SetStage("theme-layout-evidence");
             window.Width = 1280;
             window.Height = 800;
             SetTheme(window, BrowserThemeMode.Dark);
-            await PumpAsync(130);
-            Capture(window, options, "08-dark-normal.png");
+            await PumpAsync(150);
+            Capture(window, options, "09-dark-normal.png");
             window.Width = 820;
             window.Height = 620;
-            await PumpAsync(130);
-            Capture(window, options, "09-dark-compact.png");
+            await PumpAsync(150);
+            Capture(window, options, "10-dark-compact.png");
             window.Width = 1280;
             window.Height = 800;
             SetTheme(window, BrowserThemeMode.Light);
-            await PumpAsync(130);
-            Capture(window, options, "10-light-normal.png");
+            await PumpAsync(150);
+            Capture(window, options, "11-light-normal.png");
             window.Width = 820;
             window.Height = 620;
-            await PumpAsync(130);
-            Capture(window, options, "11-light-compact.png");
+            await PumpAsync(150);
+            Capture(window, options, "12-light-compact.png");
 
             SetStage("browser-surfaces");
             window.Width = 1280;
             window.Height = 800;
-            await PumpAsync(130);
+            SetTheme(window, options.Theme);
+            await PumpAsync(160);
+
             var menuButton = Require<Button>(window, "BrowserMenuButton");
             var menuPopup = Require<Popup>(window, "BrowserMenuPopup");
+            var menuDownloads = Require<Button>(window, "MenuDownloadsButton");
+            var menuExtensions = Require<Button>(window, "MenuExtensionsButton");
+            var menuSettings = Require<Button>(window, "MenuSettingsButton");
             var downloadsButton = Require<Button>(window, "DownloadsButton");
+            var extensionsButton = Require<Button>(window, "ExtensionsButton");
             var hubPanel = Require<Border>(window, "HubPanel");
             var hubTitle = Require<TextBlock>(window, "HubTitle");
+            var hubSubtitle = Require<TextBlock>(window, "HubSubtitle");
+            var hubContent = Require<StackPanel>(window, "HubContent");
 
             Focus(window, menuButton);
             PressKey(VK_SPACE);
-            await PumpAsync(100);
+            await PumpAsync(130);
             Assert(menuPopup.IsOpen, "Menu principal não abriu por entrada física.");
-            Capture(window, options, "12-menu-open.png");
+            var menuRoot = menuPopup.Child as FrameworkElement
+                ?? throw new ProbeFailure("Conteúdo visual do menu principal ausente.");
+            Assert(menuRoot.ActualWidth >= 340, $"Menu principal estreito: {menuRoot.ActualWidth:0.##}.");
+            Assert(menuRoot.ActualHeight >= 430, $"Menu principal incompleto: {menuRoot.ActualHeight:0.##}.");
+            Assert(menuDownloads.IsVisible && menuExtensions.IsVisible && menuSettings.IsVisible,
+                "Menu não expõe Downloads/Extensões/Configurações simultaneamente.");
+            Capture(window, options, "13-menu-complete.png");
             menuPopup.IsOpen = false;
-            await PumpAsync(60);
+            await PumpAsync(70);
 
             Focus(window, downloadsButton);
             PressKey(VK_SPACE);
-            await PumpAsync(120);
+            await PumpAsync(160);
             Assert(hubPanel.Visibility == Visibility.Visible, "Hub de Downloads não ficou visível.");
             Assert(string.Equals(hubTitle.Text, "Downloads", StringComparison.Ordinal),
                 $"Hub de Downloads divergente: '{hubTitle.Text}'.");
-            Capture(window, options, "13-downloads-hub.png");
+            Assert(
+                FindDescendantByName<FrameworkElement>(hubContent, "DownloadsEmptyState") is not null ||
+                hubContent.Children.Count > 0,
+                "Área de Downloads não possui estado visível.");
+            Capture(window, options, "14-downloads.png");
+
+            Focus(window, extensionsButton);
+            PressKey(VK_SPACE);
+            await PumpAsync(350);
+            Assert(hubPanel.Visibility == Visibility.Visible, "Hub de Extensões não ficou visível.");
+            Assert(string.Equals(hubTitle.Text, "Extensões", StringComparison.Ordinal),
+                $"Hub de Extensões divergente: '{hubTitle.Text}'.");
+            var extensionLoad = FindDescendantByName<Button>(hubContent, "ExtensionLoadButton");
+            Assert(extensionLoad is { IsVisible: true, IsEnabled: true },
+                "Área de Extensões não expõe carregamento local.");
+            Assert(!hubSubtitle.Text.Contains("não está disponível", StringComparison.OrdinalIgnoreCase),
+                $"API de Extensões indisponível na prova física: '{hubSubtitle.Text}'.");
+            Capture(window, options, "15-extensions.png");
 
             Focus(window, menuButton);
             PressKey(VK_SPACE);
-            await PumpAsync(100);
+            await PumpAsync(130);
             Assert(menuPopup.IsOpen, "Menu principal não reabriu para Configurações.");
-            var menuRoot = menuPopup.Child ?? throw new ProbeFailure("Conteúdo do menu principal ausente.");
-            var settingsButton = RequireButtonByContent(menuRoot, "Configurações");
-            Focus(window, settingsButton);
+            Assert(menuSettings.IsVisible, "Configurações ausente no menu.");
+            Focus(window, menuSettings);
             PressKey(VK_SPACE);
-            await PumpAsync(120);
+            await PumpAsync(150);
             Assert(hubPanel.Visibility == Visibility.Visible, "Hub de Configurações não ficou visível.");
             Assert(string.Equals(hubTitle.Text, "Configurações", StringComparison.Ordinal),
                 $"Hub de Configurações divergente: '{hubTitle.Text}'.");
-            Capture(window, options, "14-settings-hub.png");
+            Capture(window, options, "16-settings.png");
 
             if (_report is not null)
             {
@@ -371,6 +416,11 @@ internal static class Program
                     "foreground-window",
                     "thread-input-queue",
                     "wpf-native-focus",
+                    "rendered-text-content-viewport",
+                    "top-bottom-clip-tolerance",
+                    "caret-visible",
+                    "selection-visible",
+                    "omnibox-closeups",
                     "sendinput-unicode",
                     "typing",
                     "ctrl+a",
@@ -379,13 +429,13 @@ internal static class Program
                     "home",
                     "end",
                     "enter-navigation",
-                    "vertical-bounds",
                     "normal-width",
                     "compact-width",
                     "dark",
                     "light",
-                    "menu",
-                    "downloads",
+                    "menu-complete",
+                    "downloads-surface",
+                    "extensions-surface",
                     "settings"
                 ]);
                 await _report.WriteAsync(options.OutputDirectory);
@@ -407,6 +457,7 @@ internal static class Program
             catch
             {
             }
+
             await Dispatcher.CurrentDispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
             try
             {
@@ -416,6 +467,38 @@ internal static class Program
             {
             }
         }
+    }
+
+    private static OmniboxVisualReport MeasureOmnibox(
+        TextBox address,
+        string stage,
+        bool requireCaret,
+        bool requireSelection)
+    {
+        try
+        {
+            return OmniboxVisualDiagnostics.Measure(address, stage, requireCaret, requireSelection);
+        }
+        catch (InvalidOperationException error)
+        {
+            throw new ProbeFailure(
+                $"OMNIBOX_RENDER_BOUNDS_FAILED: stage={stage}; detail={SanitizeDiagnostic(error.Message)}",
+                $"omnibox:{stage}",
+                "OMNIBOX_RENDER_BOUNDS_FAILED",
+                null,
+                "rendered-text-or-caret-clipping");
+        }
+    }
+
+    private static void RecordOmnibox(string key, OmniboxVisualReport report)
+    {
+        if (_report is not null) _report.OmniboxVisuals[key] = report;
+    }
+
+    private static string SanitizeDiagnostic(string value)
+    {
+        var clean = new string(value.Where(ch => !char.IsControl(ch)).ToArray()).Trim();
+        return clean.Length <= 180 ? clean : clean[..180] + "…";
     }
 
     private static NativeInputReport ToReport(NativeInputLayout layout) => new(
@@ -489,29 +572,26 @@ internal static class Program
     private static T Require<T>(FrameworkElement root, string name) where T : class =>
         root.FindName(name) as T ?? throw new ProbeFailure($"Elemento WPF ausente: {name}.");
 
-    private static Button RequireButtonByContent(DependencyObject root, string content)
+    private static T? FindDescendantByName<T>(DependencyObject root, string name) where T : FrameworkElement
     {
-        var button = FindButtonByContent(root, content);
-        return button ?? throw new ProbeFailure($"Botão de menu ausente: {content}.");
-    }
-
-    private static Button? FindButtonByContent(DependencyObject root, string content)
-    {
-        if (root is Button button && string.Equals(button.Content as string, content, StringComparison.Ordinal))
-            return button;
+        if (root is T element && string.Equals(element.Name, name, StringComparison.Ordinal))
+            return element;
 
         var children = VisualTreeHelper.GetChildrenCount(root);
-        for (var i = 0; i < children; i++)
+        for (var index = 0; index < children; index++)
         {
-            var found = FindButtonByContent(VisualTreeHelper.GetChild(root, i), content);
+            var found = FindDescendantByName<T>(VisualTreeHelper.GetChild(root, index), name);
             if (found is not null) return found;
         }
+
         return null;
     }
 
     private static void SetTheme(BrowserWindow window, BrowserThemeMode mode)
     {
-        var method = typeof(BrowserWindow).GetMethod("SetChromeTheme", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+        var method = typeof(BrowserWindow).GetMethod(
+            "SetChromeTheme",
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
             ?? throw new ProbeFailure("SetChromeTheme não encontrado.");
         method.Invoke(window, [mode]);
     }
@@ -523,19 +603,6 @@ internal static class Program
         if (hwnd != IntPtr.Zero) SetForegroundWindow(hwnd);
         element.Focus();
         System.Windows.Input.Keyboard.Focus(element);
-    }
-
-    private static void AssertVerticalBounds(TextBox box, string stage)
-    {
-        if (box.Text.Length == 0) return;
-        var first = box.GetRectFromCharacterIndex(0, false);
-        var last = box.GetRectFromCharacterIndex(box.Text.Length - 1, true);
-        Assert(!first.IsEmpty && !last.IsEmpty, $"{stage}: bounds de texto ausentes.");
-        var top = Math.Min(first.Top, last.Top);
-        var bottom = Math.Max(first.Bottom, last.Bottom);
-        Assert(top >= -1.5, $"{stage}: texto cortado no topo ({top:0.##}).");
-        Assert(bottom <= box.ActualHeight + 1.5, $"{stage}: texto cortado embaixo ({bottom:0.##}/{box.ActualHeight:0.##}).");
-        Assert(first.Height > 4 && first.Height <= box.ActualHeight, $"{stage}: altura de glyph inválida ({first.Height:0.##}).");
     }
 
     private static async Task PumpAsync(int milliseconds)
@@ -551,7 +618,21 @@ internal static class Program
     private static void Capture(Window window, ProbeOptions options, string name)
     {
         var path = Path.Combine(options.OutputDirectory, name);
-        if (options.ScreenCapture) CaptureScreen(window, path); else CaptureWpf(window, path);
+        if (options.ScreenCapture) CaptureScreen(window, path);
+        else CaptureWpf(window, path);
+        RegisterArtifact(name);
+    }
+
+    private static void CaptureElement(Window window, FrameworkElement element, ProbeOptions options, string name, int paddingPixels)
+    {
+        var path = Path.Combine(options.OutputDirectory, name);
+        if (options.ScreenCapture) CaptureElementScreen(element, path, paddingPixels);
+        else CaptureElementWpf(element, path);
+        RegisterArtifact(name);
+    }
+
+    private static void RegisterArtifact(string name)
+    {
         if (_report is not null && !_report.Artifacts.Contains(name, StringComparer.Ordinal))
             _report.Artifacts.Add(name);
     }
@@ -585,6 +666,21 @@ internal static class Program
         encoder.Save(stream);
     }
 
+    private static void CaptureElementWpf(FrameworkElement element, string path)
+    {
+        element.UpdateLayout();
+        var source = PresentationSource.FromVisual(element);
+        var transform = source?.CompositionTarget?.TransformToDevice ?? Matrix.Identity;
+        var width = Math.Max(1, (int)Math.Round(element.ActualWidth * transform.M11));
+        var height = Math.Max(1, (int)Math.Round(element.ActualHeight * transform.M22));
+        var bitmap = new RenderTargetBitmap(width, height, 96d * transform.M11, 96d * transform.M22, PixelFormats.Pbgra32);
+        bitmap.Render(element);
+        using var stream = File.Create(path);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        encoder.Save(stream);
+    }
+
     private static void CaptureScreen(Window window, string path)
     {
         var hwnd = new WindowInteropHelper(window).Handle;
@@ -597,6 +693,24 @@ internal static class Program
         using var bitmap = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
         using (var graphics = Graphics.FromImage(bitmap))
             graphics.CopyFromScreen(rect.Left, rect.Top, 0, 0, new System.Drawing.Size(width, height), CopyPixelOperation.SourceCopy);
+        bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+    }
+
+    private static void CaptureElementScreen(FrameworkElement element, string path, int paddingPixels)
+    {
+        element.UpdateLayout();
+        var topLeft = element.PointToScreen(new Point(0, 0));
+        var bottomRight = element.PointToScreen(new Point(element.ActualWidth, element.ActualHeight));
+        var left = (int)Math.Floor(Math.Min(topLeft.X, bottomRight.X)) - paddingPixels;
+        var top = (int)Math.Floor(Math.Min(topLeft.Y, bottomRight.Y)) - paddingPixels;
+        var right = (int)Math.Ceiling(Math.Max(topLeft.X, bottomRight.X)) + paddingPixels;
+        var bottom = (int)Math.Ceiling(Math.Max(topLeft.Y, bottomRight.Y)) + paddingPixels;
+        var width = Math.Max(1, right - left);
+        var height = Math.Max(1, bottom - top);
+
+        using var bitmap = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (var graphics = Graphics.FromImage(bitmap))
+            graphics.CopyFromScreen(left, top, 0, 0, new System.Drawing.Size(width, height), CopyPixelOperation.SourceCopy);
         bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
     }
 
@@ -824,7 +938,10 @@ internal static class Program
     {
         public static ProbeOptions Parse(string[] args)
         {
-            var output = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "test-results", "native-browser-physical-ui"));
+            var output = Path.GetFullPath(Path.Combine(
+                Environment.CurrentDirectory,
+                "test-results",
+                "native-browser-physical-ui"));
             double? expected = null;
             var theme = BrowserThemeMode.Dark;
             var screen = false;
@@ -832,18 +949,18 @@ internal static class Program
             var validateInputLayoutOnly = false;
             var validateDiagnosticsContractOnly = false;
 
-            for (var i = 0; i < args.Length; i++)
+            for (var index = 0; index < args.Length; index++)
             {
-                switch (args[i])
+                switch (args[index])
                 {
-                    case "--output" when i + 1 < args.Length:
-                        output = Path.GetFullPath(args[++i]);
+                    case "--output" when index + 1 < args.Length:
+                        output = Path.GetFullPath(args[++index]);
                         break;
-                    case "--expected-scale" when i + 1 < args.Length:
-                        expected = double.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
+                    case "--expected-scale" when index + 1 < args.Length:
+                        expected = double.Parse(args[++index], System.Globalization.CultureInfo.InvariantCulture);
                         break;
-                    case "--theme" when i + 1 < args.Length:
-                        theme = args[++i].ToLowerInvariant() switch
+                    case "--theme" when index + 1 < args.Length:
+                        theme = args[++index].ToLowerInvariant() switch
                         {
                             "light" => BrowserThemeMode.Light,
                             "system" => BrowserThemeMode.System,

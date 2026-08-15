@@ -15,6 +15,7 @@ internal sealed class ProbeRunReport
     public int LongInputLength { get; init; }
     public NativeInputReport? NativeInput { get; set; }
     public PhysicalInputContext? PhysicalInputContext { get; set; }
+    public Dictionary<string, OmniboxVisualReport> OmniboxVisuals { get; } = new(StringComparer.Ordinal);
     public ProbeErrorReport? Error { get; set; }
     public List<string> Checks { get; } = [];
     public List<string> Artifacts { get; } = [];
@@ -39,6 +40,23 @@ internal sealed record NativeInputReport(
     int MouseInputSize,
     int KeyboardInputSize,
     int HardwareInputSize);
+
+internal sealed record RectReport(
+    double X,
+    double Y,
+    double Width,
+    double Height);
+
+internal sealed record OmniboxVisualReport(
+    string Stage,
+    double TextBoxHeight,
+    double ContentViewportHeight,
+    RectReport ContentViewport,
+    RectReport RenderedText,
+    RectReport? Caret,
+    RectReport? Selection,
+    double FormattedTextHeight,
+    double ClipToleranceDip);
 
 internal sealed record ProbeErrorReport(
     string Code,
