@@ -18,21 +18,21 @@ internal sealed class ProbeRunReport
     [JsonIgnore]
     internal string? PendingSurfaceClassification { get; set; }
 
-    internal bool Passed { get; set; }
-    internal string Mode { get; set; } = "physical";
-    internal bool PhysicalValidation { get; set; } = true;
-    internal string Stage { get; set; } = "startup";
-    internal bool PhysicalScreenCapture { get; set; }
-    internal double? ReportedScalePercent { get; set; }
-    internal double? ExpectedScalePercent { get; set; }
-    internal string ShortInput { get; set; } = string.Empty;
-    internal int LongInputLength { get; set; }
-    internal NativeInputReport? NativeInput { get; set; }
-    internal PhysicalInputContext? PhysicalInputContext { get; set; }
-    internal Dictionary<string, OmniboxVisualReport> OmniboxVisuals { get; } = new(StringComparer.Ordinal);
-    internal Dictionary<string, SurfaceVisualReport> SurfaceVisuals { get; } = new(StringComparer.Ordinal);
+    public bool Passed { get; set; }
+    public string Mode { get; set; } = "physical";
+    public bool PhysicalValidation { get; set; } = true;
+    public string Stage { get; set; } = "startup";
+    public bool PhysicalScreenCapture { get; set; }
+    public double? ReportedScalePercent { get; set; }
+    public double? ExpectedScalePercent { get; set; }
+    public string ShortInput { get; set; } = string.Empty;
+    public int LongInputLength { get; set; }
+    public NativeInputReport? NativeInput { get; set; }
+    public PhysicalInputContext? PhysicalInputContext { get; set; }
+    public Dictionary<string, OmniboxVisualReport> OmniboxVisuals { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, SurfaceVisualReport> SurfaceVisuals { get; } = new(StringComparer.Ordinal);
 
-    internal ProbeErrorReport? Error
+    public ProbeErrorReport? Error
     {
         get => _error;
         set
@@ -49,8 +49,8 @@ internal sealed class ProbeRunReport
         }
     }
 
-    internal List<string> Checks { get; } = [];
-    internal List<string> Artifacts { get; } = [];
+    public List<string> Checks { get; } = [];
+    public List<string> Artifacts { get; } = [];
 
     internal void RegisterSurface(string key, SurfaceVisualReport report, bool finalMeasurement)
     {
@@ -59,7 +59,7 @@ internal sealed class ProbeRunReport
             PendingSurfaceClassification = report.FailureClassification;
     }
 
-    internal async Task WriteAsync(string outputDirectory)
+    public async Task WriteAsync(string outputDirectory)
     {
         Directory.CreateDirectory(outputDirectory);
         var path = Path.Combine(outputDirectory, "validation.json");
@@ -126,24 +126,24 @@ internal sealed record SurfaceSamplePointReport(
 
 internal sealed record SurfaceVisualReport
 {
-    internal string Stage { get; init; } = string.Empty;
-    internal RectReport? WindowBounds { get; init; }
-    internal RectReport? HubBounds { get; init; }
-    internal RectReport? WebViewBoundsDip { get; init; }
-    internal RectReport? WebViewBoundsPixels { get; init; }
-    internal double DpiScale { get; init; }
-    internal bool NavigationCompleted { get; init; }
-    internal bool DocumentConfirmed { get; init; }
-    internal RectReport? SamplingRegion { get; init; }
-    internal IReadOnlyList<SurfaceSamplePointReport> SamplePoints { get; init; } = [];
-    internal RgbReport? ExpectedColor { get; init; }
-    internal IReadOnlyList<RgbReport> ObservedColors { get; init; } = [];
-    internal RgbReport? SampledWebViewPixel => ObservedColors.FirstOrDefault();
-    internal double MatchRatio { get; init; }
-    internal double WhitePixelRatio { get; init; }
-    internal double OverlapPixels { get; init; }
-    internal double SeparationPixels { get; init; }
-    internal bool WebViewVisible { get; init; }
-    internal string? FailureClassification { get; init; }
-    internal string? FailureDetail { get; init; }
+    public string Stage { get; init; } = string.Empty;
+    public RectReport? WindowBounds { get; init; }
+    public RectReport? HubBounds { get; init; }
+    public RectReport? WebViewBoundsDip { get; init; }
+    public RectReport? WebViewBoundsPixels { get; init; }
+    public double DpiScale { get; init; }
+    public bool NavigationCompleted { get; init; }
+    public bool DocumentConfirmed { get; init; }
+    public RectReport? SamplingRegion { get; init; }
+    public IReadOnlyList<SurfaceSamplePointReport> SamplePoints { get; init; } = [];
+    public RgbReport? ExpectedColor { get; init; }
+    public IReadOnlyList<RgbReport> ObservedColors { get; init; } = [];
+    public RgbReport? SampledWebViewPixel => ObservedColors.FirstOrDefault();
+    public double MatchRatio { get; init; }
+    public double WhitePixelRatio { get; init; }
+    public double OverlapPixels { get; init; }
+    public double SeparationPixels { get; init; }
+    public bool WebViewVisible { get; init; }
+    public string? FailureClassification { get; init; }
+    public string? FailureDetail { get; init; }
 }
