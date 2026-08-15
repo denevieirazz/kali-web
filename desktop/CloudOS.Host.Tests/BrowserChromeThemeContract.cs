@@ -18,16 +18,18 @@ internal static class BrowserChromeThemeContract
         Assert(systemDark == BrowserChromeTheme.Dark, "system mode follows Windows dark theme");
         Assert(dark.Window != light.Window && dark.Chrome != light.Chrome && dark.Input != light.Input,
             "light and dark chrome remain visually distinct");
-        Assert(Contrast(dark.TextPrimary, dark.Window) >= 7.0,
-            "dark primary text keeps strong contrast");
-        Assert(Contrast(light.TextPrimary, light.Window) >= 7.0,
-            "light primary text keeps strong contrast");
-        Assert(Contrast(dark.TextSecondary, dark.Chrome) >= 4.5,
-            "dark secondary chrome text meets WCAG AA contrast");
-        Assert(Contrast(light.TextSecondary, light.Chrome) >= 4.5,
-            "light secondary chrome text meets WCAG AA contrast");
+        Assert(dark.Selection != dark.Input && light.Selection != light.Input,
+            "selection remains distinct from the omnibox background");
+        Assert(Contrast(dark.TextPrimary, dark.Window) >= 7.0, "dark primary text keeps strong contrast");
+        Assert(Contrast(light.TextPrimary, light.Window) >= 7.0, "light primary text keeps strong contrast");
+        Assert(Contrast(dark.TextSecondary, dark.Chrome) >= 4.5, "dark secondary chrome text meets WCAG AA contrast");
+        Assert(Contrast(light.TextSecondary, light.Chrome) >= 4.5, "light secondary chrome text meets WCAG AA contrast");
+        Assert(Contrast(dark.TextPrimary, dark.Input) >= 7.0, "dark omnibox text keeps strong contrast");
+        Assert(Contrast(light.TextPrimary, light.Input) >= 7.0, "light omnibox text keeps strong contrast");
+        Assert(Contrast(dark.TextMuted, dark.Input) >= 3.0, "dark placeholder remains visible");
+        Assert(Contrast(light.TextMuted, light.Input) >= 3.0, "light placeholder remains visible");
 
-        Console.WriteLine("PASS browser chrome theme palettes and contrast");
+        Console.WriteLine("PASS browser chrome theme palettes input contrast and selection");
     }
 
     private static void Assert(bool condition, string message)
@@ -58,7 +60,5 @@ internal static class BrowserChromeThemeContract
         0.2126 * Linear(color.R) + 0.7152 * Linear(color.G) + 0.0722 * Linear(color.B);
 
     private static double Linear(double component) =>
-        component <= 0.03928
-            ? component / 12.92
-            : Math.Pow((component + 0.055) / 1.055, 2.4);
+        component <= 0.03928 ? component / 12.92 : Math.Pow((component + 0.055) / 1.055, 2.4);
 }
