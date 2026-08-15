@@ -134,7 +134,10 @@ public partial class BrowserWindow
                 _ => false
             };
         }
-        catch (Exception error) when (error is UnauthorizedAccessException or Security.SecurityException or IOException)
+        catch (Exception error) when (
+            error is UnauthorizedAccessException
+            or System.Security.SecurityException
+            or System.IO.IOException)
         {
             return false;
         }
