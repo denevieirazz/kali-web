@@ -22,7 +22,7 @@ internal static class BrowserExtensionPackageContract
             """{"manifest_version":3,"name":"CloudOS Test Extension","version":"1.0.0"}""");
         File.WriteAllText(Path.Combine(temp.Path, "background.js"), "console.log('cloudos');");
 
-        var package = BrowserExtensionManager.ValidatePackage(temp.Path);
+        var package = BrowserExtensionPackageValidator.ValidatePackage(temp.Path);
         Assert(package.Name == "CloudOS Test Extension", "Valid extension name was not preserved.");
         Assert(package.Version == "1.0.0", "Valid extension version was not preserved.");
         Assert(package.ManifestVersion == 3, "Manifest version was not validated.");
@@ -34,7 +34,7 @@ internal static class BrowserExtensionPackageContract
         using var temp = new ExtensionTempDirectory();
         File.WriteAllText(Path.Combine(temp.Path, "script.js"), "void 0;");
         AssertCode(
-            () => BrowserExtensionManager.ValidatePackage(temp.Path),
+            () => BrowserExtensionPackageValidator.ValidatePackage(temp.Path),
             "EXTENSION_MANIFEST_MISSING");
     }
 
@@ -43,7 +43,7 @@ internal static class BrowserExtensionPackageContract
         using var temp = new ExtensionTempDirectory();
         File.WriteAllText(Path.Combine(temp.Path, "manifest.json"), "{not-json");
         AssertCode(
-            () => BrowserExtensionManager.ValidatePackage(temp.Path),
+            () => BrowserExtensionPackageValidator.ValidatePackage(temp.Path),
             "EXTENSION_MANIFEST_INVALID");
     }
 
@@ -52,10 +52,10 @@ internal static class BrowserExtensionPackageContract
         using var temp = new ExtensionTempDirectory();
         File.WriteAllText(
             Path.Combine(temp.Path, "manifest.json"),
-            new string('x', BrowserExtensionManager.MaxManifestBytes + 1),
+            new string('x', BrowserExtensionPackageValidator.MaxManifestBytes + 1),
             Encoding.UTF8);
         AssertCode(
-            () => BrowserExtensionManager.ValidatePackage(temp.Path),
+            () => BrowserExtensionPackageValidator.ValidatePackage(temp.Path),
             "EXTENSION_MANIFEST_SIZE_INVALID");
     }
 

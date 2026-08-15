@@ -4,6 +4,7 @@ Set-StrictMode -Version Latest
 $xamlPath = Join-Path $PSScriptRoot '..\desktop\CloudOS.Host\Browser\BrowserWindow.xaml'
 $featuresPath = Join-Path $PSScriptRoot '..\desktop\CloudOS.Host\Browser\BrowserWindow.Features.cs'
 $extensionsPath = Join-Path $PSScriptRoot '..\desktop\CloudOS.Host\Browser\BrowserExtensionManager.cs'
+$extensionValidatorPath = Join-Path $PSScriptRoot '..\desktop\CloudOS.Host\Browser\BrowserExtensionPackageValidator.cs'
 $probePath = Join-Path $PSScriptRoot '..\desktop\CloudOS.Browser.PhysicalProbe\Program.cs'
 $omniboxDiagnosticsPath = Join-Path $PSScriptRoot '..\desktop\CloudOS.Browser.PhysicalProbe\OmniboxVisualDiagnostics.cs'
 $diagnosticsPath = Join-Path $PSScriptRoot '..\desktop\CloudOS.Browser.PhysicalProbe\PhysicalInputDiagnostics.cs'
@@ -13,6 +14,7 @@ $probeProject = Join-Path $PSScriptRoot '..\desktop\CloudOS.Browser.PhysicalProb
 $xaml = Get-Content -Raw -LiteralPath $xamlPath
 $features = Get-Content -Raw -LiteralPath $featuresPath
 $extensions = Get-Content -Raw -LiteralPath $extensionsPath
+$extensionValidator = Get-Content -Raw -LiteralPath $extensionValidatorPath
 $probe = Get-Content -Raw -LiteralPath $probePath
 $omniboxDiagnostics = Get-Content -Raw -LiteralPath $omniboxDiagnosticsPath
 $diagnostics = Get-Content -Raw -LiteralPath $diagnosticsPath
@@ -77,16 +79,20 @@ Assert-Contains $features 'EnableAsync\(' 'Extensões não permite ativar/desati
 Assert-Contains $features 'RemoveAsync\(extension\)' 'Extensões não permite remoção gerenciada.'
 Assert-Contains $features 'Chrome Web Store' 'UI não delimita a compatibilidade de extensões.'
 
+Assert-Contains $extensions 'BrowserExtensionPackageValidator\.ValidatePackage' 'gerente não delega para o validador de pacote compartilhado.'
 Assert-Contains $extensions 'AddBrowserExtensionAsync\(' 'gerente não instala extensão WebView2 real.'
-Assert-Contains $extensions 'manifest\.json' 'validação de manifest ausente.'
-Assert-Contains $extensions 'JsonDocument\.Parse' 'manifest não é analisado como JSON.'
-Assert-Contains $extensions 'FileAttributes\.ReparsePoint' 'reparse point/symlink não é bloqueado.'
-Assert-Contains $extensions 'EXTENSION_PATH_ESCAPE' 'escape de raiz não é tratado.'
-Assert-Contains $extensions 'MaxPackageFiles' 'limite de quantidade de arquivos ausente.'
-Assert-Contains $extensions 'MaxPackageBytes' 'limite de tamanho de pacote ausente.'
 Assert-Contains $extensions '"Extensions"' 'raiz gerenciada de extensões ausente.'
 Assert-Contains $extensions 'managed-extensions\.v1\.json' 'estado de pacotes gerenciados ausente.'
-Assert-Contains $extensions 'SanitizeLabel' 'metadados de extensão não são sanitizados.'
+Assert-Contains $extensions 'IsSafeManagedDirectory' 'remoção gerenciada não restringe diretórios apagáveis.'
+
+Assert-Contains $extensionValidator 'manifest\.json' 'validação de manifest ausente.'
+Assert-Contains $extensionValidator 'JsonDocument\.Parse' 'manifest não é analisado como JSON.'
+Assert-Contains $extensionValidator 'FileAttributes\.ReparsePoint' 'reparse point/symlink não é bloqueado.'
+Assert-Contains $extensionValidator 'EXTENSION_PATH_ESCAPE' 'escape de raiz não é tratado.'
+Assert-Contains $extensionValidator 'MaxPackageFiles' 'limite de quantidade de arquivos ausente.'
+Assert-Contains $extensionValidator 'MaxPackageBytes' 'limite de tamanho de pacote ausente.'
+Assert-Contains $extensionValidator 'SanitizeLabel' 'metadados de extensão não são sanitizados.'
+Assert-Contains $extensionValidator 'manifestVersion is not \(2 or 3\)' 'manifest_version não é validado explicitamente.'
 
 # Hosted CI intentionally does not execute user32!SendInput. It compiles the probe,
 # executes ABI checks, package validators and failure-report serialization. The real

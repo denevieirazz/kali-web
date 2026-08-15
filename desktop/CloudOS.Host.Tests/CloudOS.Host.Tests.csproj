@@ -16,5 +16,6 @@
     <Compile Include="..\CloudOS.Host\Browser\BrowserStorageLayout.cs" Link="Browser\BrowserStorageLayout.cs" />
     <Compile Include="..\CloudOS.Host\Browser\BrowserSecurityPolicy.cs" Link="Browser\BrowserSecurityPolicy.cs" />
     <Compile Include="..\CloudOS.Host\Browser\BrowserChromeTheme.cs" Link="Browser\BrowserChromeTheme.cs" />
+    <Compile Include="..\CloudOS.Host\Browser\BrowserExtensionPackageValidator.cs" Link="Browser\BrowserExtensionPackageValidator.cs" />
   </ItemGroup>
 </Project>
