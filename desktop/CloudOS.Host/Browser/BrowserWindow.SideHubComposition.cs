@@ -18,8 +18,17 @@ internal static class BrowserSideHubCompositionBootstrap
 
     private static void OnButtonClick(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button button || Window.GetWindow(button) is not BrowserWindow window)
-            return;
+        if (sender is not Button button) return;
+
+        var window = Window.GetWindow(button) as BrowserWindow;
+        if (window is null && Application.Current is not null && !string.IsNullOrWhiteSpace(button.Name))
+        {
+            window = Application.Current.Windows
+                .OfType<BrowserWindow>()
+                .FirstOrDefault(candidate => ReferenceEquals(candidate.FindName(button.Name), button));
+        }
+        if (window is null) return;
+
         window.RouteCorrectedSideHubClick(button, e);
     }
 }
@@ -90,9 +99,9 @@ public partial class BrowserWindow
         HubSubtitle.Text = subtitle;
         HubContent.Children.Clear();
 
-        // Side hubs are a physical second column. Never collapse a healthy active WebView2
-        // merely to open the hub: hiding its child HWND forces an unnecessary compositor
-        // detach/reattach exactly while the grid is being resized.
+        // A side hub owns a separate Grid column. A healthy active WebView2 must never be
+        // collapsed just to open that column: collapsing its child HWND forces an avoidable
+        // compositor detach/reattach while the viewport is resized.
         WebViewHost.Visibility = Visibility.Visible;
         if (_activeTab is { IsNewTabPage: true })
         {

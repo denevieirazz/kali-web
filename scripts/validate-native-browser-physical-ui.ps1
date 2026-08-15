@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet(100, 125, 150)]
+    [ValidateSet(100)]
     [int]$ExpectedScale,
     [ValidateSet('dark', 'light', 'system')]
     [string]$Theme = 'dark',
@@ -17,12 +17,12 @@ $output = Join-Path $repoRoot (Join-Path $OutputRoot ("scale-{0}-{1}" -f $Expect
 New-Item -ItemType Directory -Force -Path $output | Out-Null
 
 Write-Host 'CloudOS Browser - validacao fisica obrigatoria' -ForegroundColor Cyan
-Write-Host "Escala esperada do Windows: $ExpectedScale%"
+Write-Host 'Escala oficial desta candidata: 100%'
 Write-Host "Saida: $output"
-Write-Host "Configure $ExpectedScale% em Configuracoes > Sistema > Tela antes de continuar. O script nao muda a escala." -ForegroundColor Yellow
+Write-Host 'Configure 100% em Configuracoes > Sistema > Tela antes de continuar. O script nao muda a escala.' -ForegroundColor Yellow
 
 $project = Join-Path $repoRoot 'desktop\CloudOS.Browser.PhysicalProbe\CloudOS.Browser.PhysicalProbe.csproj'
-& dotnet run --project $project -c Release -- --output $output --expected-scale $ExpectedScale --theme $Theme --screen
+& dotnet run --project $project -c Release -- --output $output --expected-scale 100 --theme $Theme --screen
 $probeExitCode = $LASTEXITCODE
 
 $report = Join-Path $output 'validation.json'
@@ -40,6 +40,20 @@ if ($null -ne $validation.artifacts) {
     Write-Host ("Artefatos produzidos: {0}" -f (($validation.artifacts | ForEach-Object { [string]$_ }) -join ', '))
 }
 
+# Mesmo em falha, as superfícies alcançadas devem persistir diagnóstico antes da exceção.
+foreach ($surfaceName in @('downloads', 'extensions', 'settings')) {
+    $surface = $validation.surfaceVisuals.$surfaceName
+    if ($null -eq $surface) { continue }
+    foreach ($field in @(
+        'windowBounds','hubBounds','webViewBoundsDip','webViewBoundsPixels','dpiScale',
+        'navigationCompleted','documentConfirmed','samplingRegion','samplePoints','expectedColor',
+        'observedColors','matchRatio','whitePixelRatio','overlapPixels','separationPixels','webViewVisible')) {
+        if ($surface.PSObject.Properties.Name -notcontains $field) {
+            throw "BROWSER_PHYSICAL_UI_SURFACE_FIELD_MISSING: $surfaceName.$field"
+        }
+    }
+}
+
 if ($probeExitCode -ne 0) {
     throw "BROWSER_PHYSICAL_UI_FAILED exit=$probeExitCode report=$report"
 }
@@ -55,8 +69,10 @@ $requiredChecks = @(
     'selection-visible',
     'omnibox-closeups',
     'menu-complete',
+    'menu-within-browser-window',
     'downloads-surface',
-    'extensions-surface'
+    'extensions-surface',
+    'settings'
 )
 foreach ($check in $requiredChecks) {
     if ($validation.checks -notcontains $check) {
@@ -77,6 +93,7 @@ $requiredArtifacts = @(
     '10-dark-compact.png',
     '11-light-normal.png',
     '12-light-compact.png',
+    '13-menu-window.png',
     '13-menu-complete.png',
     '14-downloads.png',
     '15-extensions.png',
@@ -98,6 +115,17 @@ if ($null -eq $validation.omniboxVisuals.typed -or
     $null -eq $validation.omniboxVisuals.'long-url-home' -or
     $null -eq $validation.omniboxVisuals.'long-url-end') {
     throw 'BROWSER_PHYSICAL_UI_OMNIBOX_METRICS_MISSING'
+}
+
+foreach ($surfaceName in @('downloads','extensions','settings')) {
+    $surface = $validation.surfaceVisuals.$surfaceName
+    if ($null -eq $surface) { throw "BROWSER_PHYSICAL_UI_SURFACE_MISSING: $surfaceName" }
+    if ($surface.navigationCompleted -ne $true -or $surface.documentConfirmed -ne $true -or $surface.webViewVisible -ne $true) {
+        throw "BROWSER_PHYSICAL_UI_SURFACE_NOT_CONFIRMED: $surfaceName"
+    }
+    if ([double]$surface.matchRatio -lt 0.80 -or [double]$surface.whitePixelRatio -gt 0.10 -or [double]$surface.overlapPixels -gt 1.5) {
+        throw "BROWSER_PHYSICAL_UI_SURFACE_METRICS_FAILED: $surfaceName"
+    }
 }
 
 Write-Host 'PASS funcional. Aprovacao visual continua obrigatoriamente manual pelo usuario.' -ForegroundColor Green
