@@ -1,22 +1,33 @@
-// ============================================
-// System Store - Espelho do Kernel SystemState
-// ============================================
-// Este store reflete UserProfile, Theme, Hardware e UI states (notifications, modals).
-// As configurações lógicas habitam o `kernel` e vêm via event emitter.
-// ============================================
-
 import { create } from 'zustand';
 import kernel from '../core/kernel';
-import type { SystemTheme, UserProfile, NotificationData } from '../types';
+import type { NotificationData, SystemTheme, UserProfile } from '../types';
 
-type BootPhase = 'off' | 'bios' | 'loading' | 'setup' | 'login' | 'desktop';
+export type BootPhase = 'off' | 'bios' | 'loading' | 'setup' | 'login' | 'desktop';
+
+const MAX_NOTIFICATIONS = 100;
+
+function normalizeBootPhase(phase: unknown): BootPhase {
+  const value = String(phase ?? '').toLowerCase();
+  if (value === 'winlogon') return 'login';
+  if (value === 'oobe') return 'setup';
+  if (value === 'desktop_ready') return 'desktop';
+  if (value === 'off') return 'off';
+  if (value === 'bios' || value === 'loading' || value === 'setup' || value === 'login' || value === 'desktop') {
+    return value;
+  }
+  return 'loading';
+}
+
+function notificationId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  return `notification-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 interface SystemState {
   bootPhase: BootPhase;
   isBooting: boolean;
   bootProgress: number;
-  
-  // Refletidos do Kernel
+
   currentUser: UserProfile;
   isLocked: boolean;
   theme: SystemTheme;
@@ -26,14 +37,12 @@ interface SystemState {
   isWifiConnected: boolean;
   isBluetooth: boolean;
   batteryLevel: number;
-  
-  // UI states locais
+
   notifications: NotificationData[];
   showNotificationCenter: boolean;
   isStartMenuOpen: boolean;
   isSearchOpen: boolean;
-  
-  // Funções
+
   setBootPhase: (phase: BootPhase) => void;
   setBootProgress: (progress: number) => void;
   lock: () => void;
@@ -54,9 +63,9 @@ interface SystemState {
 }
 
 export const useSystem = create<SystemState>((set) => {
-  const initialSnap = kernel.sysGetSnapshot();
-  // Escutar atualizações do Kernel
-  kernel.on('system:snapshot', (state: any) => {
+  const initialSnapshot = kernel.sysGetSnapshot();
+
+  kernel.on('system:snapshot', (state: ReturnType<typeof kernel.sysGetSnapshot>) => {
     set({
       currentUser: state.user,
       isLocked: state.isLocked,
@@ -70,69 +79,67 @@ export const useSystem = create<SystemState>((set) => {
     });
   });
 
-  kernel.on('system:bootPhase', (phase: any) => {
-    // Mapeamento de Kernel (Caixa Alta) para UI (Minúsculo)
-    let uiPhase: any = phase;
-    if (phase === 'WINLOGON') uiPhase = 'login';
-    if (phase === 'OOBE') uiPhase = 'setup';
-    if (phase === 'DESKTOP_READY') uiPhase = 'desktop';
-    if (phase === 'OFF') uiPhase = 'off';
-    
-    set({ bootPhase: uiPhase.toLowerCase() });
+  kernel.on('system:bootPhase', (phase: unknown) => {
+    set({ bootPhase: normalizeBootPhase(phase) });
   });
 
   return {
     bootPhase: 'off',
     isBooting: false,
     bootProgress: 0,
-    
-    // States do Kernel
-    currentUser: initialSnap.user,
-    isLocked: initialSnap.isLocked,
-    theme: initialSnap.theme,
-    volume: initialSnap.hardware.volume,
-    isMuted: initialSnap.hardware.isMuted,
-    brightness: initialSnap.hardware.brightness,
-    isWifiConnected: initialSnap.hardware.isWifiConnected,
-    isBluetooth: initialSnap.hardware.isBluetooth,
-    batteryLevel: initialSnap.hardware.batteryLevel,
 
-    // UI states locais
+    currentUser: initialSnapshot.user,
+    isLocked: initialSnapshot.isLocked,
+    theme: initialSnapshot.theme,
+    volume: initialSnapshot.hardware.volume,
+    isMuted: initialSnapshot.hardware.isMuted,
+    brightness: initialSnapshot.hardware.brightness,
+    isWifiConnected: initialSnapshot.hardware.isWifiConnected,
+    isBluetooth: initialSnapshot.hardware.isBluetooth,
+    batteryLevel: initialSnapshot.hardware.batteryLevel,
+
     notifications: [],
     showNotificationCenter: false,
     isStartMenuOpen: false,
     isSearchOpen: false,
 
-    // Boot Control
     setBootPhase: (phase) => set({ bootPhase: phase }),
-    setBootProgress: (progress) => set({ bootProgress: progress }),
-    
-    // Auth
+    setBootProgress: (progress) => set({
+      bootProgress: Number.isFinite(progress) ? Math.max(0, Math.min(100, progress)) : 0,
+    }),
+
     lock: () => kernel.sysLock(),
     unlock: () => kernel.sysUnlock(),
-    
-    // UI Controls
-    toggleStartMenu: () => set(s => ({ isStartMenuOpen: !s.isStartMenuOpen, isSearchOpen: false })),
+
+    toggleStartMenu: () => set(state => ({
+      isStartMenuOpen: !state.isStartMenuOpen,
+      isSearchOpen: false,
+    })),
     closeStartMenu: () => set({ isStartMenuOpen: false }),
-    toggleSearch: () => set(s => ({ isSearchOpen: !s.isSearchOpen, isStartMenuOpen: false })),
-    
-    // Theme
+    toggleSearch: () => set(state => ({
+      isSearchOpen: !state.isSearchOpen,
+      isStartMenuOpen: false,
+    })),
+
     setTheme: (updates) => kernel.sysSetTheme(updates),
 
-    // Notifications
     addNotification: (notification) => {
-      const id = Math.random().toString(36).substr(2, 9);
-      set(s => ({
-        notifications: [{ ...notification, id, timestamp: Date.now(), read: false }, ...s.notifications],
-      }));
+      const next: NotificationData = {
+        ...notification,
+        id: notificationId(),
+        timestamp: Date.now(),
+        read: false,
+      };
+      set(state => ({ notifications: [next, ...state.notifications].slice(0, MAX_NOTIFICATIONS) }));
     },
-    dismissNotification: (id) => set(s => ({
-      notifications: s.notifications.filter(n => n.id !== id),
+    dismissNotification: (id) => set(state => ({
+      notifications: state.notifications.filter(notification => notification.id !== id),
     })),
     clearNotifications: () => set({ notifications: [] }),
-    toggleNotificationCenter: () => set(s => ({ showNotificationCenter: !s.showNotificationCenter })),
+    toggleNotificationCenter: () => set(state => ({
+      showNotificationCenter: !state.showNotificationCenter,
+    })),
 
-    // Hardware
     setVolume: (volume) => kernel.sysSetVolume(volume),
     toggleMute: () => kernel.sysToggleMute(),
     setBrightness: (brightness) => kernel.sysSetBrightness(brightness),

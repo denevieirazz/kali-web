@@ -1,8 +1,6 @@
-// ============================================
-// Centralized API Client — CloudOS-Unified
-// ============================================
+// Centralized HTTP/WebSocket client for the local CloudOS agent.
 
-interface RequestOptions extends RequestInit {
+export interface RequestOptions extends RequestInit {
   timeoutMs?: number;
   skipAuth?: boolean;
   suppressUnauthorizedHandler?: boolean;
@@ -21,6 +19,7 @@ declare global {
 
 const TOKEN_KEY = 'cloudos_jwt_token';
 const USER_KEY = 'cloudos_user_info';
+const PRIVATE_USER_FIELD = /(?:password|recovery|secret|token|credential)/i;
 
 let isHandlingUnauthorized = false;
 let onUnauthorizedCallback: (() => void) | null = null;
@@ -37,15 +36,23 @@ export function setStoredToken(token: string) {
   localStorage.setItem(TOKEN_KEY, token);
 }
 
-export function getStoredUser(): any | null {
+function sanitizeStoredUser(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const clean: Record<string, unknown> = {};
+  for (const [key, fieldValue] of Object.entries(value)) {
+    if (!PRIVATE_USER_FIELD.test(key)) clean[key] = fieldValue;
+  }
+  return clean;
+}
+
+export function getStoredUser(): Record<string, unknown> | null {
   try {
     const raw = localStorage.getItem(USER_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return null;
-    const clean = { ...parsed };
-    for (const key of Object.keys(clean)) {
-      if (/(?:password|recovery|secret|token|credential)/i.test(key)) delete clean[key];
+    const clean = sanitizeStoredUser(JSON.parse(raw));
+    if (!clean) {
+      localStorage.removeItem(USER_KEY);
+      return null;
     }
     localStorage.setItem(USER_KEY, JSON.stringify(clean));
     return clean;
@@ -55,14 +62,11 @@ export function getStoredUser(): any | null {
   }
 }
 
-export function setStoredUser(user: any) {
-  if (!user || typeof user !== 'object') {
+export function setStoredUser(user: unknown) {
+  const clean = sanitizeStoredUser(user);
+  if (!clean) {
     localStorage.removeItem(USER_KEY);
     return;
-  }
-  const clean = { ...user };
-  for (const key of Object.keys(clean)) {
-    if (/(?:password|recovery|secret|token|credential)/i.test(key)) delete clean[key];
   }
   localStorage.setItem(USER_KEY, JSON.stringify(clean));
 }
@@ -107,67 +111,85 @@ export function resolveWebSocketUrl(endpoint: string) {
   return `${getWebSocketBase()}${path}`;
 }
 
-export async function apiClient<T = any>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-  const { timeoutMs = 10000, skipAuth = false, suppressUnauthorizedHandler = false, headers: customHeaders, ...rest } = options;
+export async function apiClient<T = unknown>(endpoint: string, options: RequestOptions = {}): Promise<T> {
+  const {
+    timeoutMs = 10000,
+    skipAuth = false,
+    suppressUnauthorizedHandler = false,
+    headers: customHeaders,
+    signal: externalSignal,
+    ...request
+  } = options;
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  let timedOut = false;
+  const timeoutId = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, Math.max(1, timeoutMs));
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(customHeaders as Record<string, string>)
-  };
+  const forwardExternalAbort = () => controller.abort(externalSignal?.reason);
+  if (externalSignal?.aborted) {
+    forwardExternalAbort();
+  } else {
+    externalSignal?.addEventListener('abort', forwardExternalAbort, { once: true });
+  }
+
+  const headers = new Headers(customHeaders);
+  if (!headers.has('Accept')) headers.set('Accept', 'application/json');
+  if (request.body !== undefined && request.body !== null && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
 
   if (!skipAuth) {
     const token = getStoredToken();
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
+    if (token) headers.set('Authorization', `Bearer ${token}`);
   }
 
   try {
     const response = await fetch(resolveApiUrl(endpoint), {
-      ...rest,
+      ...request,
       headers,
-      signal: controller.signal
+      signal: controller.signal,
     });
-
-    clearTimeout(timeoutId);
 
     if ((response.status === 401 || response.status === 403) && !suppressUnauthorizedHandler) {
       if (!isHandlingUnauthorized) {
         isHandlingUnauthorized = true;
         clearStoredAuth();
-        if (onUnauthorizedCallback) {
-          onUnauthorizedCallback();
-        }
-        setTimeout(() => { isHandlingUnauthorized = false; }, 2000);
+        onUnauthorizedCallback?.();
+        window.setTimeout(() => { isHandlingUnauthorized = false; }, 2000);
       }
       throw new Error(`Sessão não autorizada ou expirada (${response.status}).`);
     }
 
     if (!response.ok) {
       const errorText = await response.text();
-      let errorMsg = `Erro ${response.status}: ${response.statusText}`;
+      let errorMessage = `Erro ${response.status}: ${response.statusText}`;
       try {
-        const errJson = JSON.parse(errorText);
-        if (errJson.error) errorMsg = errJson.error;
-        else if (errJson.message) errorMsg = errJson.message;
-      } catch {}
-      throw new Error(errorMsg);
+        const parsed = JSON.parse(errorText) as { error?: unknown; message?: unknown };
+        if (typeof parsed.error === 'string') errorMessage = parsed.error;
+        else if (typeof parsed.message === 'string') errorMessage = parsed.message;
+      } catch {
+        // Preserve the HTTP status when the body is not JSON.
+      }
+      throw new Error(errorMessage);
     }
 
-    const contentType = response.headers.get('content-type');
-    if (contentType && contentType.includes('application/json')) {
-      return await response.json();
-    }
-    return (await response.text()) as unknown as T;
-
-  } catch (error: any) {
-    clearTimeout(timeoutId);
-    if (error.name === 'AbortError') {
-      throw new Error(`Requisição para ${endpoint} excedeu o tempo limite de ${timeoutMs}ms.`);
+    if (response.status === 204) return undefined as T;
+    const contentType = response.headers.get('content-type') ?? '';
+    if (contentType.includes('application/json')) return await response.json() as T;
+    return await response.text() as T;
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      if (timedOut) {
+        throw new Error(`Requisição para ${endpoint} excedeu o tempo limite de ${timeoutMs}ms.`);
+      }
+      throw new Error(`Requisição para ${endpoint} foi cancelada.`);
     }
     throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+    externalSignal?.removeEventListener('abort', forwardExternalAbort);
   }
 }

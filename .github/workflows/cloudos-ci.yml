@@ -7,6 +7,7 @@ on:
       - feature/cloudos-native-browser
       - fix/native-browser-windows-validation
       - fix/native-browser-powershell7-validation
+      - refactor/cloudos-core-hardening
       - integration/cloudos-foundation
       - ci/cloudos-baseline
       - sync/cloudos-current-state
@@ -91,16 +92,21 @@ jobs:
         run: npx playwright test tests/playwright/native-browser.spec.ts --output=test-results/native-browser --reporter=list
 
       - name: 21. Smoke native Host Browser lifecycle
-        if: github.ref == 'refs/heads/feature/cloudos-native-browser' || github.ref == 'refs/heads/fix/native-browser-windows-validation' || github.ref == 'refs/heads/fix/native-browser-powershell7-validation' || github.head_ref == 'feature/cloudos-native-browser' || github.head_ref == 'fix/native-browser-windows-validation' || github.head_ref == 'fix/native-browser-powershell7-validation'
+        if: github.ref == 'refs/heads/feature/cloudos-native-browser' || github.ref == 'refs/heads/fix/native-browser-windows-validation' || github.ref == 'refs/heads/fix/native-browser-powershell7-validation' || github.ref == 'refs/heads/refactor/cloudos-core-hardening' || github.head_ref == 'feature/cloudos-native-browser' || github.head_ref == 'fix/native-browser-windows-validation' || github.head_ref == 'fix/native-browser-powershell7-validation' || github.head_ref == 'refactor/cloudos-core-hardening'
         shell: pwsh
         run: ./scripts/test-native-browser-host-smoke.ps1
 
       - name: 22. Check feature diff whitespace
-        if: github.ref == 'refs/heads/feature/cloudos-native-browser' || github.ref == 'refs/heads/fix/native-browser-windows-validation' || github.ref == 'refs/heads/fix/native-browser-powershell7-validation' || github.head_ref == 'feature/cloudos-native-browser' || github.head_ref == 'fix/native-browser-windows-validation' || github.head_ref == 'fix/native-browser-powershell7-validation'
+        if: github.ref == 'refs/heads/feature/cloudos-native-browser' || github.ref == 'refs/heads/fix/native-browser-windows-validation' || github.ref == 'refs/heads/fix/native-browser-powershell7-validation' || github.ref == 'refs/heads/refactor/cloudos-core-hardening' || github.head_ref == 'feature/cloudos-native-browser' || github.head_ref == 'fix/native-browser-windows-validation' || github.head_ref == 'fix/native-browser-powershell7-validation' || github.head_ref == 'refactor/cloudos-core-hardening'
         shell: pwsh
         run: |
           git fetch origin integration/cloudos-foundation --no-tags
           git diff --check origin/integration/cloudos-foundation...HEAD
+
+      - name: 22b. Check core hardening diff against validated base
+        if: github.ref == 'refs/heads/refactor/cloudos-core-hardening' || github.head_ref == 'refactor/cloudos-core-hardening'
+        shell: pwsh
+        run: git diff --check 1a81a0abdcc3816dcc295743fb3b4bcd745c7a64...HEAD
 
       - name: 23. Upload sanitized Browser lifecycle diagnostics on failure
         if: failure() && hashFiles('test-results/native-browser-lifecycle/**') != ''
