@@ -4,6 +4,7 @@
 
 | Área | Comando | Ambiente | Gate |
 |---|---|---|---|
+| PowerShell runtime guard | `./scripts/test-powershell7-requirement.ps1` | Windows / PowerShell 7.2+ + Windows PowerShell 5.1 instalado | obrigatório |
 | Lint | `npm.cmd run lint` | Windows/Node 22 | obrigatório |
 | Frontend build | `npm.cmd run build` | Windows/Node 22 | obrigatório |
 | Backend | `npm.cmd test` | Windows/Node 22 | obrigatório |
@@ -45,6 +46,20 @@
 | duas `browser.open` simultâneas | Host smoke | uma janela criada e a segunda chamada reutiliza |
 | fechar Browser | Host smoke | Shell e `/api/health` continuam ativos |
 | fechar Host | Host smoke | Browser/backend/filhos encerrados |
+| validador em Windows PowerShell 5.1 | runtime guard | falha imediata com `POWERSHELL_7_REQUIRED` antes de acessar `$IsWindows` |
+| smoke em Windows PowerShell 5.1 | runtime guard | falha imediata com `POWERSHELL_7_REQUIRED` antes das APIs modernas |
+
+### Validação Windows local oficial
+
+O validador completo e o smoke nativo exigem **PowerShell 7.2 ou superior (`pwsh.exe`)**. Windows PowerShell 5.1 (`powershell.exe`) não é um runtime suportado para esses scripts; a tentativa deve falhar imediatamente com `POWERSHELL_7_REQUIRED` e informar o runtime detectado.
+
+Comando oficial em Windows Sandbox/VM descartável e limpa:
+
+```powershell
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-native-browser-windows.ps1 -DisposableProfile
+```
+
+Depois que o validador já está em PowerShell 7, scripts PowerShell filhos são executados na **mesma sessão**, sem exigir que outro `pwsh` seja localizado no `PATH`.
 
 ### Comandos específicos
 
@@ -53,8 +68,8 @@
 dotnet build desktop/CloudOS.Browser.TestHost/CloudOS.Browser.TestHost.csproj -c Release
 npx playwright test tests/playwright/native-browser.spec.ts --output=test-results/native-browser --reporter=list
 
-# Smoke completo — somente CI ou VM/Sandbox descartável
-./scripts/test-native-browser-host-smoke.ps1
+# Smoke completo — somente CI ou VM/Sandbox descartável, sempre PowerShell 7.2+
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-native-browser-host-smoke.ps1 -AllowNonCi
 ```
 
 Fora do CI, o smoke exige `-AllowNonCi` e recusa execução quando já existe um perfil `%LOCALAPPDATA%\CloudOS`. Isso evita usar o banco real como fixture.
@@ -78,10 +93,11 @@ Nunca incluir em artifact:
 A feature não deve ser considerada pronta para integração enquanto o **HEAD final** não tiver:
 
 1. workflow Windows concluído com sucesso;
-2. Host/TestHost compilados;
-3. Host/Bootstrap/backend/frontend verdes;
-4. Playwright legado sem regressão;
-5. Playwright WebView2 real verde;
-6. smoke Host lifecycle verde;
-7. `git diff --check` verde;
-8. revisão de artifacts/segredos concluída.
+2. guard PowerShell 7.2+ validado contra `pwsh` e Windows PowerShell 5.1;
+3. Host/TestHost compilados;
+4. Host/Bootstrap/backend/frontend verdes;
+5. Playwright legado sem regressão;
+6. Playwright WebView2 real verde;
+7. smoke Host lifecycle verde;
+8. `git diff --check` verde;
+9. revisão de artifacts/segredos concluída.

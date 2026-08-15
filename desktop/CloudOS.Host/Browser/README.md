@@ -145,6 +145,19 @@ WebSocket não é tratado como uma requisição HTTP(S) normal pela proteção `
 - `CloudOS.Browser.TestHost`: WebView2 real com UDF temporário e CDP apenas de teste.
 - Playwright WebView2: XFO/CSP, bridge isolation, popup, cookies, redirect, fetch interno, WebSocket rejeitado, downloads, crash recovery e teardown.
 - Host smoke no CI Windows: Shell → Browser → fechamento do Browser → backend/Shell continuam → fechamento do Host → filhos encerram.
+- `test-powershell7-requirement.ps1`: aceita a sessão `pwsh` 7.2+ e executa os entrypoints com Windows PowerShell 5.1 para exigir falha imediata `POWERSHELL_7_REQUIRED`.
+
+### Validação Windows local
+
+O validador completo e o smoke nativo exigem **PowerShell 7.2 ou superior**. `powershell.exe` (Windows PowerShell 5.1) não é suportado para esses entrypoints e deve falhar no preflight antes de acessar `$IsWindows` ou APIs modernas do smoke.
+
+Comando oficial, somente em Windows Sandbox/VM descartável e sem `%LOCALAPPDATA%\CloudOS` existente:
+
+```powershell
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-native-browser-windows.ps1 -DisposableProfile
+```
+
+Quando o validador já está rodando em PowerShell 7, os scripts PowerShell filhos são chamados na mesma sessão; ele não precisa localizar outro `pwsh` no `PATH`.
 
 Nunca use `test:playwright:update` para validar esta feature sem uma mudança visual intencional e revisada.
 
@@ -154,6 +167,7 @@ Nunca use `test:playwright:update` para validar esta feature sem uma mudança vi
 - Cookies/cache do Browser são persistentes no UDF por design até limpeza explícita.
 - CDP do Browser existe somente no TestHost; produção não deve definir argumentos de remote debugging.
 - O smoke completo do Host deve ser executado em GitHub Actions Windows ou VM/Sandbox descartável. O script recusa perfil CloudOS existente fora de CI.
+- PowerShell 7.2+ é requisito formal para o validador/smoke; Windows PowerShell 5.1 é suportado apenas como alvo negativo do teste de preflight.
 - Nenhuma extensão ou sincronização em nuvem é implementada.
 
 ## Rollback
