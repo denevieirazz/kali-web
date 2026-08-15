@@ -16,6 +16,7 @@ internal sealed class ProbeRunReport
     public NativeInputReport? NativeInput { get; set; }
     public PhysicalInputContext? PhysicalInputContext { get; set; }
     public Dictionary<string, OmniboxVisualReport> OmniboxVisuals { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, SurfaceVisualReport> SurfaceVisuals { get; } = new(StringComparer.Ordinal);
     public ProbeErrorReport? Error { get; set; }
     public List<string> Checks { get; } = [];
     public List<string> Artifacts { get; } = [];
@@ -46,6 +47,18 @@ internal sealed record RectReport(
     double Y,
     double Width,
     double Height);
+
+internal sealed record RgbReport(byte R, byte G, byte B);
+
+internal sealed record SurfaceVisualReport(
+    string Stage,
+    RectReport WindowBounds,
+    RectReport SurfaceBounds,
+    RectReport? WebViewBounds,
+    RgbReport? SampledWebViewPixel,
+    bool WebViewVisible,
+    bool WhiteSurfaceDetected,
+    double? SeparationPixels);
 
 internal sealed record OmniboxVisualReport(
     string Stage,

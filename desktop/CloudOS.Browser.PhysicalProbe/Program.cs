@@ -11,6 +11,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using CloudOS.Host.Browser;
 using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.Wpf;
 
 namespace CloudOS.Browser.PhysicalProbe;
 
@@ -137,7 +138,8 @@ internal static class Program
             Assert(root.GetProperty("stage").GetString() == "diagnostics-contract-self-test", "diagnostics contract perdeu a etapa.");
             Assert(root.GetProperty("error").GetProperty("code").GetString() == "SELF_TEST_FAILURE_REPORT", "diagnostics contract perdeu o código de erro.");
             Assert(root.TryGetProperty("artifacts", out _), "diagnostics contract perdeu a lista de artefatos.");
-            Assert(root.TryGetProperty("omniboxVisuals", out _), "diagnostics contract perdeu a seção de métricas visuais.");
+            Assert(root.TryGetProperty("omniboxVisuals", out _), "diagnostics contract perdeu a seção de métricas da omnibox.");
+            Assert(root.TryGetProperty("surfaceVisuals", out _), "diagnostics contract perdeu a seção de métricas de superfícies.");
             Console.WriteLine("PASS physical probe failure-report serialization contract (non-physical CI mode)");
             return 0;
         }
@@ -155,6 +157,14 @@ internal static class Program
 
     private static async Task RunAsync(ProbeOptions options)
     {
+        if (options.ExpectedScale is null || Math.Abs(options.ExpectedScale.Value - 100d) > 0.01d)
+            throw new ProbeFailure(
+                "PHYSICAL_SCALE_CONTRACT_FAILED: esta candidata deve ser validada somente em escala 100%.",
+                "scale-contract",
+                "PHYSICAL_SCALE_CONTRACT_FAILED",
+                null,
+                "physical-scale-not-100");
+
         SetStage("native-input-layout");
         var inputLayout = ValidateNativeInputLayout();
         if (_report is not null) _report.NativeInput = ToReport(inputLayout);
@@ -162,6 +172,7 @@ internal static class Program
         var tempRoot = Path.Combine(Path.GetTempPath(), "CloudOS", "BrowserPhysicalProbe", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempRoot);
         BrowserWindow? window = null;
+        CoreWebView2BrowserExtension? unmanagedProbeExtension = null;
         try
         {
             SetStage("browser-environment");
@@ -190,9 +201,9 @@ internal static class Program
 
             var scale = VisualTreeHelper.GetDpi(window).DpiScaleX * 100d;
             if (_report is not null) _report.ReportedScalePercent = Math.Round(scale, 2);
-            if (options.ExpectedScale is not null && Math.Abs(scale - options.ExpectedScale.Value) > 2.5d)
+            if (Math.Abs(scale - 100d) > 2.5d)
                 throw new ProbeFailure(
-                    $"DPI_SCALE_MISMATCH: esperado {options.ExpectedScale:0}% e o Windows reportou {scale:0.##}%.",
+                    $"DPI_SCALE_MISMATCH: esperado 100% e o Windows reportou {scale:0.##}%.",
                     "dpi-scale",
                     "DPI_SCALE_MISMATCH",
                     null,
@@ -338,37 +349,76 @@ internal static class Program
             window.Width = 1280;
             window.Height = 800;
             SetTheme(window, options.Theme);
-            await PumpAsync(160);
+            await PumpAsync(220);
 
             var menuButton = Require<Button>(window, "BrowserMenuButton");
             var menuPopup = Require<Popup>(window, "BrowserMenuPopup");
+            var menuNewTab = Require<Button>(window, "MenuNewTabButton");
             var menuDownloads = Require<Button>(window, "MenuDownloadsButton");
             var menuExtensions = Require<Button>(window, "MenuExtensionsButton");
             var menuSettings = Require<Button>(window, "MenuSettingsButton");
+            var menuClearData = Require<Button>(window, "MenuClearDataButton");
             var downloadsButton = Require<Button>(window, "DownloadsButton");
             var extensionsButton = Require<Button>(window, "ExtensionsButton");
             var hubPanel = Require<Border>(window, "HubPanel");
             var hubTitle = Require<TextBlock>(window, "HubTitle");
             var hubSubtitle = Require<TextBlock>(window, "HubSubtitle");
             var hubContent = Require<StackPanel>(window, "HubContent");
+            var webViewHost = Require<Grid>(window, "WebViewHost");
+            var activeWebView = SurfaceVisualDiagnostics.FindDescendants<WebView2>(webViewHost)
+                .FirstOrDefault(view => view.Visibility == Visibility.Visible)
+                ?? throw new ProbeFailure("WebView2 ativo ausente antes da validação de superfícies.");
 
+            SetStage("menu-bounds-keyboard");
             Focus(window, menuButton);
             PressKey(VK_SPACE);
-            await PumpAsync(130);
+            await PumpAsync(180);
             Assert(menuPopup.IsOpen, "Menu principal não abriu por entrada física.");
             var menuRoot = menuPopup.Child as FrameworkElement
                 ?? throw new ProbeFailure("Conteúdo visual do menu principal ausente.");
             Assert(menuRoot.ActualWidth >= 340, $"Menu principal estreito: {menuRoot.ActualWidth:0.##}.");
-            Assert(menuRoot.ActualHeight >= 430, $"Menu principal incompleto: {menuRoot.ActualHeight:0.##}.");
+            Assert(menuRoot.ActualHeight >= 220, $"Menu principal sem altura útil: {menuRoot.ActualHeight:0.##}.");
             Assert(menuDownloads.IsVisible && menuExtensions.IsVisible && menuSettings.IsVisible,
-                "Menu não expõe Downloads/Extensões/Configurações simultaneamente.");
-            Capture(window, options, "13-menu-complete.png");
-            menuPopup.IsOpen = false;
-            await PumpAsync(70);
+                "Menu perdeu itens obrigatórios.");
+            RecordSurface("menu", MeasureSurface("menu", () => SurfaceVisualDiagnostics.EnsureMenuInsideWindow(window, menuRoot)));
+            var menuScroll = SurfaceVisualDiagnostics.FindDescendant<ScrollViewer>(menuRoot)
+                ?? throw new ProbeFailure("ScrollViewer interno do menu ausente.");
+            Assert(menuScroll.VerticalScrollBarVisibility == ScrollBarVisibility.Auto,
+                "Menu não habilita rolagem vertical interna automática.");
 
+            PressKey(VK_END);
+            await PumpAsync(110);
+            Assert(menuClearData.IsKeyboardFocusWithin, "End não alcançou o último item do menu por teclado.");
+            MeasureSurfaceAction("menu:end", () => SurfaceVisualDiagnostics.EnsureElementVisibleInScrollViewer(menuScroll, menuClearData, "menu:end"));
+            PressKey(VK_HOME);
+            await PumpAsync(110);
+            Assert(menuNewTab.IsKeyboardFocusWithin, "Home não retornou ao primeiro item do menu por teclado.");
+            MeasureSurfaceAction("menu:home", () => SurfaceVisualDiagnostics.EnsureElementVisibleInScrollViewer(menuScroll, menuNewTab, "menu:home"));
+            Capture(window, options, "13-menu-window.png");
+            CaptureElement(window, menuRoot, options, "13-menu-complete.png", 0);
+            menuPopup.IsOpen = false;
+            await PumpAsync(80);
+
+            SetStage("webview-surface-sentinel");
+            try
+            {
+                await SurfaceVisualDiagnostics.PrepareWebViewSentinelAsync(activeWebView);
+            }
+            catch (Exception error) when (error is InvalidOperationException or COMException)
+            {
+                throw new ProbeFailure(
+                    $"WEBVIEW_SENTINEL_FAILED: {SanitizeDiagnostic(error.Message)}",
+                    "webview-surface-sentinel",
+                    "WEBVIEW_SENTINEL_FAILED",
+                    null,
+                    "webview-physical-surface-unavailable");
+            }
+            await PumpAsync(180);
+
+            SetStage("downloads-surface");
             Focus(window, downloadsButton);
             PressKey(VK_SPACE);
-            await PumpAsync(160);
+            await PumpAsync(240);
             Assert(hubPanel.Visibility == Visibility.Visible, "Hub de Downloads não ficou visível.");
             Assert(string.Equals(hubTitle.Text, "Downloads", StringComparison.Ordinal),
                 $"Hub de Downloads divergente: '{hubTitle.Text}'.");
@@ -376,11 +426,30 @@ internal static class Program
                 FindDescendantByName<FrameworkElement>(hubContent, "DownloadsEmptyState") is not null ||
                 hubContent.Children.Count > 0,
                 "Área de Downloads não possui estado visível.");
+            RecordSurface("downloads", MeasureSurface("downloads", () => SurfaceVisualDiagnostics.EnsureHubAndWebView(window, hubPanel, activeWebView, "downloads")));
             Capture(window, options, "14-downloads.png");
 
+            SetStage("extensions-unmanaged-fixture");
+            var profile = activeWebView.CoreWebView2?.Profile
+                ?? throw new ProbeFailure("Perfil WebView2 ativo ausente para prova de ownership.");
+            try
+            {
+                unmanagedProbeExtension = await SurfaceVisualDiagnostics.AddUnmanagedProbeExtensionAsync(profile, tempRoot);
+            }
+            catch (Exception error) when (error is ArgumentException or InvalidOperationException or IOException or COMException)
+            {
+                throw new ProbeFailure(
+                    $"UNMANAGED_EXTENSION_FIXTURE_FAILED: {error.GetType().Name}",
+                    "extensions-unmanaged-fixture",
+                    "UNMANAGED_EXTENSION_FIXTURE_FAILED",
+                    null,
+                    "webview-extension-fixture-failed");
+            }
+
+            SetStage("extensions-surface");
             Focus(window, extensionsButton);
             PressKey(VK_SPACE);
-            await PumpAsync(350);
+            await PumpAsync(650);
             Assert(hubPanel.Visibility == Visibility.Visible, "Hub de Extensões não ficou visível.");
             Assert(string.Equals(hubTitle.Text, "Extensões", StringComparison.Ordinal),
                 $"Hub de Extensões divergente: '{hubTitle.Text}'.");
@@ -389,19 +458,58 @@ internal static class Program
                 "Área de Extensões não expõe carregamento local.");
             Assert(!hubSubtitle.Text.Contains("não está disponível", StringComparison.OrdinalIgnoreCase),
                 $"API de Extensões indisponível na prova física: '{hubSubtitle.Text}'.");
+
+            var ownershipManager = new BrowserExtensionManager(environment.UserDataFolder);
+            Assert(!ownershipManager.IsManagedExtension(unmanagedProbeExtension.Id),
+                "Fixture WebView2 externa foi classificada incorretamente como gerenciada pelo CloudOS.");
+            var extensionButtons = SurfaceVisualDiagnostics.FindDescendants<Button>(hubContent)
+                .Where(button => button.Tag is string id && id.Equals(unmanagedProbeExtension.Id, StringComparison.Ordinal))
+                .ToList();
+            Assert(extensionButtons.Count > 0, "Componente WebView2 não gerenciado não apareceu na lista de Extensões.");
+            Assert(!extensionButtons.Any(button => string.Equals(button.Content as string, "Remover", StringComparison.Ordinal)),
+                "Extensão interna/não gerenciada expõe ação Remover.");
+            var unmanagedMarker = SurfaceVisualDiagnostics.FindDescendants<TextBlock>(hubContent)
+                .FirstOrDefault(text => text.Text.Contains("não gerenciado pelo CloudOS", StringComparison.OrdinalIgnoreCase));
+            Assert(unmanagedMarker is { IsVisible: true },
+                "Extensão não gerenciada não possui diferenciação visual de ownership.");
+            foreach (var remove in SurfaceVisualDiagnostics.FindDescendants<Button>(hubContent)
+                         .Where(button => string.Equals(button.Content as string, "Remover", StringComparison.Ordinal)))
+            {
+                Assert(remove.Tag is string id && ownershipManager.IsManagedExtension(id),
+                    "Existe botão Remover associado a extensão fora de package-* controlado pelo Browser.");
+            }
+            RecordSurface("extensions", MeasureSurface("extensions", () => SurfaceVisualDiagnostics.EnsureHubAndWebView(window, hubPanel, activeWebView, "extensions")));
             Capture(window, options, "15-extensions.png");
 
+            try
+            {
+                await unmanagedProbeExtension.RemoveAsync();
+                unmanagedProbeExtension = null;
+            }
+            catch (Exception error) when (error is InvalidOperationException or COMException)
+            {
+                throw new ProbeFailure(
+                    $"UNMANAGED_EXTENSION_FIXTURE_CLEANUP_FAILED: {error.GetType().Name}",
+                    "extensions-unmanaged-fixture-cleanup",
+                    "UNMANAGED_EXTENSION_FIXTURE_CLEANUP_FAILED");
+            }
+
+            SetStage("settings-surface");
             Focus(window, menuButton);
             PressKey(VK_SPACE);
-            await PumpAsync(130);
+            await PumpAsync(170);
             Assert(menuPopup.IsOpen, "Menu principal não reabriu para Configurações.");
-            Assert(menuSettings.IsVisible, "Configurações ausente no menu.");
-            Focus(window, menuSettings);
+            PressKey(VK_END);
+            await PumpAsync(90);
+            PressKey(VK_UP);
+            await PumpAsync(90);
+            Assert(menuSettings.IsKeyboardFocusWithin, "Configurações não foi alcançada pelo teclado no menu rolável.");
             PressKey(VK_SPACE);
-            await PumpAsync(150);
+            await PumpAsync(260);
             Assert(hubPanel.Visibility == Visibility.Visible, "Hub de Configurações não ficou visível.");
             Assert(string.Equals(hubTitle.Text, "Configurações", StringComparison.Ordinal),
                 $"Hub de Configurações divergente: '{hubTitle.Text}'.");
+            RecordSurface("settings", MeasureSurface("settings", () => SurfaceVisualDiagnostics.EnsureHubAndWebView(window, hubPanel, activeWebView, "settings")));
             Capture(window, options, "16-settings.png");
 
             if (_report is not null)
@@ -429,14 +537,23 @@ internal static class Program
                     "home",
                     "end",
                     "enter-navigation",
+                    "scale-100-only",
                     "normal-width",
                     "compact-width",
                     "dark",
                     "light",
                     "menu-complete",
+                    "menu-within-browser-window",
+                    "menu-internal-scroll",
+                    "menu-keyboard-first-last",
                     "downloads-surface",
+                    "downloads-webview-visible-nonwhite",
                     "extensions-surface",
-                    "settings"
+                    "extensions-webview-visible-nonwhite",
+                    "extensions-unmanaged-no-remove",
+                    "extensions-remove-package-only",
+                    "settings",
+                    "settings-webview-visible-nonwhite"
                 ]);
                 await _report.WriteAsync(options.OutputDirectory);
             }
@@ -450,6 +567,11 @@ internal static class Program
         }
         finally
         {
+            if (unmanagedProbeExtension is not null)
+            {
+                try { await unmanagedProbeExtension.RemoveAsync(); } catch { }
+            }
+
             try
             {
                 if (window is { IsVisible: true }) window.CloseForHostShutdown();
@@ -490,9 +612,48 @@ internal static class Program
         }
     }
 
+    private static SurfaceVisualReport MeasureSurface(string stage, Func<SurfaceVisualReport> measure)
+    {
+        try
+        {
+            return measure();
+        }
+        catch (InvalidOperationException error)
+        {
+            throw new ProbeFailure(
+                $"SURFACE_VISUAL_FAILED: stage={stage}; detail={SanitizeDiagnostic(error.Message)}",
+                $"surface:{stage}",
+                "SURFACE_VISUAL_FAILED",
+                null,
+                "surface-bounds-visibility-or-white-regression");
+        }
+    }
+
+    private static void MeasureSurfaceAction(string stage, Action measure)
+    {
+        try
+        {
+            measure();
+        }
+        catch (InvalidOperationException error)
+        {
+            throw new ProbeFailure(
+                $"SURFACE_VISUAL_FAILED: stage={stage}; detail={SanitizeDiagnostic(error.Message)}",
+                $"surface:{stage}",
+                "SURFACE_VISUAL_FAILED",
+                null,
+                "surface-keyboard-scroll-regression");
+        }
+    }
+
     private static void RecordOmnibox(string key, OmniboxVisualReport report)
     {
         if (_report is not null) _report.OmniboxVisuals[key] = report;
+    }
+
+    private static void RecordSurface(string key, SurfaceVisualReport report)
+    {
+        if (_report is not null) _report.SurfaceVisuals[key] = report;
     }
 
     private static string SanitizeDiagnostic(string value)
@@ -800,6 +961,7 @@ internal static class Program
     }
 
     private const ushort VK_CONTROL = 0x11;
+    private const ushort VK_UP = 0x26;
     private const ushort VK_HOME = 0x24;
     private const ushort VK_END = 0x23;
     private const ushort VK_RETURN = 0x0D;
