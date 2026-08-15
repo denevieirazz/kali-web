@@ -10,47 +10,610 @@
         Loaded="BrowserWindowVisual_Loaded" Activated="BrowserWindowVisual_Activated"
         SizeChanged="BrowserWindowVisual_SizeChanged" LayoutUpdated="BrowserWindowVisual_LayoutUpdated">
   <Window.Resources>
-    <SolidColorBrush x:Key="BrowserWindowBrush" Color="#171A1F"/><SolidColorBrush x:Key="BrowserChromeBrush" Color="#20242B"/>
-    <SolidColorBrush x:Key="BrowserSurfaceBrush" Color="#2A3038"/><SolidColorBrush x:Key="BrowserSurfaceAltBrush" Color="#252A31"/>
-    <SolidColorBrush x:Key="BrowserSurfaceHoverBrush" Color="#343B45"/><SolidColorBrush x:Key="BrowserSurfacePressedBrush" Color="#3E4652"/>
-    <SolidColorBrush x:Key="BrowserActiveTabBrush" Color="#252A31"/><SolidColorBrush x:Key="BrowserInactiveTabBrush" Color="#20242B"/>
-    <SolidColorBrush x:Key="BrowserBorderBrush" Color="#3A424D"/><SolidColorBrush x:Key="BrowserTextPrimaryBrush" Color="#F3F5F7"/>
-    <SolidColorBrush x:Key="BrowserTextSecondaryBrush" Color="#C7CDD5"/><SolidColorBrush x:Key="BrowserTextMutedBrush" Color="#9099A6"/>
-    <SolidColorBrush x:Key="BrowserAccentBrush" Color="#4C8DFF"/><SolidColorBrush x:Key="BrowserAccentHoverBrush" Color="#6EA4FF"/>
-    <SolidColorBrush x:Key="BrowserDangerBrush" Color="#FF6D7D"/><SolidColorBrush x:Key="BrowserSuccessBrush" Color="#55D69E"/>
-    <SolidColorBrush x:Key="BrowserInputBrush" Color="#171B21"/><SolidColorBrush x:Key="BrowserSelectionBrush" Color="#5B8DEF"/>
+    <SolidColorBrush x:Key="BrowserWindowBrush" Color="#171A1F"/>
+    <SolidColorBrush x:Key="BrowserChromeBrush" Color="#20242B"/>
+    <SolidColorBrush x:Key="BrowserSurfaceBrush" Color="#2A3038"/>
+    <SolidColorBrush x:Key="BrowserSurfaceAltBrush" Color="#252A31"/>
+    <SolidColorBrush x:Key="BrowserSurfaceHoverBrush" Color="#343B45"/>
+    <SolidColorBrush x:Key="BrowserSurfacePressedBrush" Color="#3E4652"/>
+    <SolidColorBrush x:Key="BrowserActiveTabBrush" Color="#252A31"/>
+    <SolidColorBrush x:Key="BrowserInactiveTabBrush" Color="#20242B"/>
+    <SolidColorBrush x:Key="BrowserBorderBrush" Color="#3A424D"/>
+    <SolidColorBrush x:Key="BrowserTextPrimaryBrush" Color="#F3F5F7"/>
+    <SolidColorBrush x:Key="BrowserTextSecondaryBrush" Color="#C7CDD5"/>
+    <SolidColorBrush x:Key="BrowserTextMutedBrush" Color="#9099A6"/>
+    <SolidColorBrush x:Key="BrowserAccentBrush" Color="#4C8DFF"/>
+    <SolidColorBrush x:Key="BrowserAccentHoverBrush" Color="#6EA4FF"/>
+    <SolidColorBrush x:Key="BrowserDangerBrush" Color="#FF6D7D"/>
+    <SolidColorBrush x:Key="BrowserSuccessBrush" Color="#55D69E"/>
+    <SolidColorBrush x:Key="BrowserInputBrush" Color="#171B21"/>
+    <SolidColorBrush x:Key="BrowserSelectionBrush" Color="#5B8DEF"/>
 
-    <Style x:Key="IconButton" TargetType="Button"><Setter Property="Width" Value="34"/><Setter Property="Height" Value="34"/><Setter Property="Padding" Value="8"/><Setter Property="Margin" Value="1,0"/><Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource BrowserTextSecondaryBrush}"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{x:Null}"/><Setter Property="HorizontalContentAlignment" Value="Center"/><Setter Property="VerticalContentAlignment" Value="Center"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="B" Background="{TemplateBinding Background}" CornerRadius="6"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="B" Property="Background" Value="{DynamicResource BrowserSurfaceHoverBrush}"/><Setter Property="Foreground" Value="{DynamicResource BrowserTextPrimaryBrush}"/></Trigger><Trigger Property="IsPressed" Value="True"><Setter TargetName="B" Property="Background" Value="{DynamicResource BrowserSurfacePressedBrush}"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.34"/><Setter Property="Cursor" Value="Arrow"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
-    <Style x:Key="TextButton" TargetType="Button" BasedOn="{StaticResource IconButton}"><Setter Property="Width" Value="Auto"/><Setter Property="Padding" Value="10,6"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
-    <!-- Keep WPF's native TextBox template: caret, selection, IME and DPI are handled by the platform. -->
-    <Style x:Key="NativeInput" TargetType="TextBox"><Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource BrowserTextPrimaryBrush}"/><Setter Property="CaretBrush" Value="{DynamicResource BrowserTextPrimaryBrush}"/><Setter Property="SelectionBrush" Value="{DynamicResource BrowserSelectionBrush}"/><Setter Property="SelectionOpacity" Value="0.65"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="0"/><Setter Property="FontSize" Value="14"/><Setter Property="VerticalContentAlignment" Value="Center"/><Setter Property="TextWrapping" Value="NoWrap"/><Setter Property="AcceptsReturn" Value="False"/><Setter Property="HorizontalScrollBarVisibility" Value="Hidden"/><Setter Property="VerticalScrollBarVisibility" Value="Disabled"/><Setter Property="FocusVisualStyle" Value="{x:Null}"/><Setter Property="SpellCheck.IsEnabled" Value="False"/></Style>
-    <Style x:Key="SecondaryButton" TargetType="Button"><Setter Property="MinHeight" Value="34"/><Setter Property="Padding" Value="13,6"/><Setter Property="Background" Value="{DynamicResource BrowserSurfaceBrush}"/><Setter Property="Foreground" Value="{DynamicResource BrowserTextPrimaryBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource BrowserBorderBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Cursor" Value="Hand"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="B" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="7"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="B" Property="Background" Value="{DynamicResource BrowserSurfaceHoverBrush}"/></Trigger><Trigger Property="IsPressed" Value="True"><Setter TargetName="B" Property="Background" Value="{DynamicResource BrowserSurfacePressedBrush}"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
-    <Style x:Key="MenuButton" TargetType="Button"><Setter Property="Height" Value="38"/><Setter Property="Padding" Value="12,0"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource BrowserTextPrimaryBrush}"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Cursor" Value="Hand"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="B" Background="{TemplateBinding Background}" CornerRadius="6"><ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="B" Property="Background" Value="{DynamicResource BrowserSurfaceHoverBrush}"/></Trigger><Trigger Property="IsPressed" Value="True"><Setter TargetName="B" Property="Background" Value="{DynamicResource BrowserSurfacePressedBrush}"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.38"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
-    <Style x:Key="TabSelectButtonStyle" TargetType="Button"><Setter Property="Height" Value="35"/><Setter Property="MinWidth" Value="90"/><Setter Property="MaxWidth" Value="220"/><Setter Property="Padding" Value="11,0,31,0"/><Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource BrowserTextSecondaryBrush}"/><Setter Property="BorderThickness" Value="0"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Cursor" Value="Hand"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="B" Background="{TemplateBinding Background}" CornerRadius="8,8,0,0"><ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="B" Property="Background" Value="{DynamicResource BrowserSurfaceHoverBrush}"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
-    <Style x:Key="TabCloseButtonStyle" TargetType="Button" BasedOn="{StaticResource IconButton}"><Setter Property="Width" Value="27"/><Setter Property="Height" Value="27"/><Setter Property="Padding" Value="7"/><Setter Property="Margin" Value="-31,4,3,4"/><Setter Property="Panel.ZIndex" Value="2"/></Style>
-    <Style TargetType="ListBox"><Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource BrowserTextPrimaryBrush}"/><Setter Property="BorderThickness" Value="0"/></Style>
-    <Style TargetType="ListBoxItem"><Setter Property="Padding" Value="10,8"/><Setter Property="Margin" Value="0,2"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource BrowserTextPrimaryBrush}"/><Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{DynamicResource BrowserSurfaceHoverBrush}"/></Trigger><Trigger Property="IsSelected" Value="True"><Setter Property="Background" Value="{DynamicResource BrowserSurfacePressedBrush}"/></Trigger></Style.Triggers></Style>
+    <Style x:Key="IconButton" TargetType="Button">
+      <Setter Property="Width" Value="34"/>
+      <Setter Property="Height" Value="34"/>
+      <Setter Property="Padding" Value="8"/>
+      <Setter Property="Margin" Value="1,0"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="{DynamicResource BrowserTextSecondaryBrush}"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+      <Setter Property="HorizontalContentAlignment" Value="Center"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="ButtonChrome" Background="{TemplateBinding Background}" CornerRadius="8">
+              <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                Margin="{TemplateBinding Padding}"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="ButtonChrome" Property="Background" Value="{DynamicResource BrowserSurfaceHoverBrush}"/>
+                <Setter Property="Foreground" Value="{DynamicResource BrowserTextPrimaryBrush}"/>
+              </Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True">
+                <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="{DynamicResource BrowserAccentBrush}"/>
+                <Setter TargetName="ButtonChrome" Property="BorderThickness" Value="1"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="ButtonChrome" Property="Background" Value="{DynamicResource BrowserSurfacePressedBrush}"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.34"/>
+                <Setter Property="Cursor" Value="Arrow"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="ToolbarActionButton" TargetType="Button">
+      <Setter Property="Height" Value="34"/>
+      <Setter Property="MinWidth" Value="38"/>
+      <Setter Property="Padding" Value="9,0"/>
+      <Setter Property="Margin" Value="2,0"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="{DynamicResource BrowserTextSecondaryBrush}"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+      <Setter Property="HorizontalContentAlignment" Value="Center"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="ActionChrome" Background="{TemplateBinding Background}" CornerRadius="8"
+                    BorderBrush="Transparent" BorderThickness="1">
+              <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                Margin="{TemplateBinding Padding}"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="ActionChrome" Property="Background" Value="{DynamicResource BrowserSurfaceHoverBrush}"/>
+                <Setter Property="Foreground" Value="{DynamicResource BrowserTextPrimaryBrush}"/>
+              </Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True">
+                <Setter TargetName="ActionChrome" Property="BorderBrush" Value="{DynamicResource BrowserAccentBrush}"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="ActionChrome" Property="Background" Value="{DynamicResource BrowserSurfacePressedBrush}"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="TextButton" TargetType="Button" BasedOn="{StaticResource IconButton}">
+      <Setter Property="Width" Value="Auto"/>
+      <Setter Property="Padding" Value="10,6"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <!-- Explicit content host: its viewport is the physical clipping boundary tested by PhysicalProbe. -->
+    <Style x:Key="NativeInput" TargetType="TextBox">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="{DynamicResource BrowserTextPrimaryBrush}"/>
+      <Setter Property="CaretBrush" Value="{DynamicResource BrowserTextPrimaryBrush}"/>
+      <Setter Property="SelectionBrush" Value="{DynamicResource BrowserSelectionBrush}"/>
+      <Setter Property="SelectionOpacity" Value="0.62"/>
+      <Setter Property="BorderBrush" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Padding" Value="0,6,0,6"/>
+      <Setter Property="FontSize" Value="14"/>
+      <Setter Property="TextBlock.LineHeight" Value="20"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+      <Setter Property="TextWrapping" Value="NoWrap"/>
+      <Setter Property="AcceptsReturn" Value="False"/>
+      <Setter Property="HorizontalScrollBarVisibility" Value="Hidden"/>
+      <Setter Property="VerticalScrollBarVisibility" Value="Disabled"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+      <Setter Property="SpellCheck.IsEnabled" Value="False"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TextBox">
+            <Border x:Name="InputFrame"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    ClipToBounds="False"
+                    SnapsToDevicePixels="True">
+              <ScrollViewer x:Name="PART_ContentHost"
+                            Margin="0"
+                            Padding="{TemplateBinding Padding}"
+                            HorizontalScrollBarVisibility="Hidden"
+                            VerticalScrollBarVisibility="Disabled"
+                            VerticalAlignment="Stretch"
+                            Focusable="False"
+                            CanContentScroll="False"
+                            SnapsToDevicePixels="True"/>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="SecondaryButton" TargetType="Button">
+      <Setter Property="MinHeight" Value="34"/>
+      <Setter Property="Padding" Value="13,6"/>
+      <Setter Property="Background" Value="{DynamicResource BrowserSurfaceBrush}"/>
+      <Setter Property="Foreground" Value="{DynamicResource BrowserTextPrimaryBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource BrowserBorderBrush}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="SecondaryChrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="SecondaryChrome" Property="Background" Value="{DynamicResource BrowserSurfaceHoverBrush}"/>
+              </Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True">
+                <Setter TargetName="SecondaryChrome" Property="BorderBrush" Value="{DynamicResource BrowserAccentBrush}"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="SecondaryChrome" Property="Background" Value="{DynamicResource BrowserSurfacePressedBrush}"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.4"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="MenuRowButton" TargetType="Button">
+      <Setter Property="MinHeight" Value="42"/>
+      <Setter Property="Padding" Value="12,7"/>
+      <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="{DynamicResource BrowserTextPrimaryBrush}"/>
+      <Setter Property="BorderBrush" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="MenuRowChrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8">
+              <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                Margin="{TemplateBinding Padding}"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="MenuRowChrome" Property="Background" Value="{DynamicResource BrowserSurfaceHoverBrush}"/>
+              </Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True">
+                <Setter TargetName="MenuRowChrome" Property="Background" Value="{DynamicResource BrowserSurfaceHoverBrush}"/>
+                <Setter TargetName="MenuRowChrome" Property="BorderBrush" Value="{DynamicResource BrowserAccentBrush}"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="MenuRowChrome" Property="Background" Value="{DynamicResource BrowserSurfacePressedBrush}"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.38"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="MenuGroupLabel" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="10"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Foreground" Value="{DynamicResource BrowserTextMutedBrush}"/>
+      <Setter Property="Margin" Value="10,8,10,5"/>
+    </Style>
+
+    <Style x:Key="MenuGroupCard" TargetType="Border">
+      <Setter Property="Background" Value="{DynamicResource BrowserSurfaceBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource BrowserBorderBrush}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="10"/>
+      <Setter Property="Padding" Value="4"/>
+      <Setter Property="Margin" Value="0,0,0,8"/>
+    </Style>
+
+    <Style x:Key="TabSelectButtonStyle" TargetType="Button">
+      <Setter Property="Height" Value="35"/>
+      <Setter Property="MinWidth" Value="90"/>
+      <Setter Property="MaxWidth" Value="220"/>
+      <Setter Property="Padding" Value="11,0,31,0"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="{DynamicResource BrowserTextSecondaryBrush}"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="TabChrome" Background="{TemplateBinding Background}" CornerRadius="8,8,0,0">
+              <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="TabChrome" Property="Background" Value="{DynamicResource BrowserSurfaceHoverBrush}"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="TabCloseButtonStyle" TargetType="Button" BasedOn="{StaticResource IconButton}">
+      <Setter Property="Width" Value="27"/>
+      <Setter Property="Height" Value="27"/>
+      <Setter Property="Padding" Value="7"/>
+      <Setter Property="Margin" Value="-31,4,3,4"/>
+      <Setter Property="Panel.ZIndex" Value="2"/>
+    </Style>
+    <Style TargetType="ListBox">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="{DynamicResource BrowserTextPrimaryBrush}"/>
+      <Setter Property="BorderThickness" Value="0"/>
+    </Style>
+    <Style TargetType="ListBoxItem">
+      <Setter Property="Padding" Value="10,8"/>
+      <Setter Property="Margin" Value="0,2"/>
+      <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="{DynamicResource BrowserTextPrimaryBrush}"/>
+      <Style.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{DynamicResource BrowserSurfaceHoverBrush}"/></Trigger>
+        <Trigger Property="IsSelected" Value="True"><Setter Property="Background" Value="{DynamicResource BrowserSurfacePressedBrush}"/></Trigger>
+      </Style.Triggers>
+    </Style>
   </Window.Resources>
 
   <Grid Background="{DynamicResource BrowserWindowBrush}">
-    <Grid.RowDefinitions><RowDefinition Height="40"/><RowDefinition Height="50"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-    <Border Grid.Row="0" Background="{DynamicResource BrowserChromeBrush}" BorderBrush="{DynamicResource BrowserBorderBrush}" BorderThickness="0,0,0,1" Padding="8,4,8,0"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><ScrollViewer x:Name="TabScroll" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled" PreviewMouseWheel="TabScroll_PreviewMouseWheel"><StackPanel x:Name="TabStrip" Orientation="Horizontal" VerticalAlignment="Bottom"/></ScrollViewer><Button Grid.Column="1" Style="{StaticResource IconButton}" Width="31" Height="31" Margin="4,2,0,3" Click="NewTab_Click" ToolTip="Nova aba (Ctrl+T)"><Path Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.8" Data="M7,1 L7,13 M1,7 L13,7"/></Button></Grid></Border>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="40"/>
+      <RowDefinition Height="56"/>
+      <RowDefinition Height="*"/>
+    </Grid.RowDefinitions>
 
-    <Border Grid.Row="1" Background="{DynamicResource BrowserSurfaceAltBrush}" BorderBrush="{DynamicResource BrowserBorderBrush}" BorderThickness="0,0,0,1" Padding="8,6"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-      <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><Button x:Name="BackButton" Style="{StaticResource IconButton}" Click="Back_Click" ToolTip="Voltar (Alt+←)"><Path Width="15" Height="15" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M10.5,2 L4.5,8 L10.5,14 M5,8 L15,8"/></Button><Button x:Name="ForwardButton" Style="{StaticResource IconButton}" Click="Forward_Click" ToolTip="Avançar (Alt+→)"><Path Width="15" Height="15" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M5.5,2 L11.5,8 L5.5,14 M11,8 L1,8"/></Button><Button x:Name="ReloadStopButton" Style="{StaticResource IconButton}" Click="ReloadStop_Click" ToolTip="Recarregar (Ctrl+R)"><Path Width="16" Height="16" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M13.5,5.3 A6,6 0 1 0 14,10 M13.5,2.2 L13.5,5.4 L10.3,5.4"/></Button><Button x:Name="HomeButton" Style="{StaticResource IconButton}" Click="Home_Click" ToolTip="Página inicial"><Path Width="15" Height="15" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.65" StrokeLineJoin="Round" Data="M2,7.2 L8,2 L14,7.2 M4,6.2 L4,14 L12,14 L12,6.2 M6.5,14 L6.5,9.5 L9.5,9.5 L9.5,14"/></Button></StackPanel>
-      <Border x:Name="AddressShell" Grid.Column="1" Height="38" MinWidth="180" Margin="8,0" Padding="8,0,3,0" CornerRadius="9" Background="{DynamicResource BrowserInputBrush}" BorderBrush="{DynamicResource BrowserBorderBrush}" BorderThickness="1"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/><ColumnDefinition Width="31"/></Grid.ColumnDefinitions><Grid Grid.Column="0" ToolTip="Informações da conexão"><Path x:Name="SecurityIcon" Width="13" Height="13" HorizontalAlignment="Center" VerticalAlignment="Center" Stroke="{DynamicResource BrowserTextMutedBrush}" StrokeThickness="1.55" Data="M3,7 L3,4.8 A3,3 0 0 1 9,4.8 L9,7 M2,7 L10,7 L10,13 L2,13 Z M6,9.4 L6,11"/><TextBlock x:Name="SecurityIndicator" Visibility="Collapsed"/></Grid><Grid Grid.Column="1"><TextBox x:Name="AddressBox" Style="{StaticResource NativeInput}" Height="32" VerticalAlignment="Center" KeyDown="AddressBox_KeyDown" GotKeyboardFocus="AddressBoxVisual_GotKeyboardFocus" LostKeyboardFocus="BrowserInput_LostKeyboardFocus" TextChanged="BrowserInput_TextChanged"/><TextBlock x:Name="AddressPlaceholder" Text="Pesquisar ou digitar endereço" Foreground="{DynamicResource BrowserTextMutedBrush}" FontSize="14" VerticalAlignment="Center" IsHitTestVisible="False"/></Grid><Button x:Name="FavoriteButton" Grid.Column="2" Style="{StaticResource IconButton}" Width="29" Height="29" Click="Favorite_Click" ToolTip="Adicionar aos favoritos"><Path Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.5" StrokeLineJoin="Round" Data="M8,1.4 L10,5.3 L14.4,5.9 L11.2,9 L12,13.5 L8,11.4 L4,13.5 L4.8,9 L1.6,5.9 L6,5.3 Z"/></Button></Grid></Border>
-      <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center"><Button x:Name="DownloadsButton" Style="{StaticResource IconButton}" Click="ModernDownloads_Click" ToolTip="Downloads"><Grid Width="17" Height="17"><Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M8.5,1 L8.5,11 M4.5,7 L8.5,11 L12.5,7 M2,14 L15,14"/><Ellipse x:Name="DownloadActivityDot" Width="5" Height="5" HorizontalAlignment="Right" VerticalAlignment="Top" Fill="{DynamicResource BrowserAccentBrush}" Visibility="Collapsed"/></Grid></Button><Button x:Name="BrowserMenuButton" Style="{StaticResource IconButton}" Click="ModernBrowserMenu_Click" ToolTip="Configurações e mais"><StackPanel><Ellipse Width="3" Height="3" Margin="0,1" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/><Ellipse Width="3" Height="3" Margin="0,1" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/><Ellipse Width="3" Height="3" Margin="0,1" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/></StackPanel></Button></StackPanel>
-    </Grid></Border>
-    <ProgressBar x:Name="LoadProgress" Grid.Row="1" Height="2" VerticalAlignment="Bottom" IsIndeterminate="True" Foreground="{DynamicResource BrowserAccentBrush}" Background="Transparent" Visibility="Collapsed"/>
+    <Border Grid.Row="0" Background="{DynamicResource BrowserChromeBrush}" BorderBrush="{DynamicResource BrowserBorderBrush}"
+            BorderThickness="0,0,0,1" Padding="8,4,8,0">
+      <Grid>
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <ScrollViewer x:Name="TabScroll" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled"
+                      PreviewMouseWheel="TabScroll_PreviewMouseWheel">
+          <StackPanel x:Name="TabStrip" Orientation="Horizontal" VerticalAlignment="Bottom"/>
+        </ScrollViewer>
+        <Button Grid.Column="1" Style="{StaticResource IconButton}" Width="31" Height="31" Margin="4,2,0,3"
+                Click="NewTab_Click" ToolTip="Nova aba (Ctrl+T)">
+          <Path Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                StrokeThickness="1.8" Data="M7,1 L7,13 M1,7 L13,7"/>
+        </Button>
+      </Grid>
+    </Border>
 
-    <Grid Grid.Row="2" Background="{DynamicResource BrowserWindowBrush}"><Grid x:Name="WebViewHost" Background="White"/>
-      <Border x:Name="NewTabPanel" Visibility="Collapsed" Background="{DynamicResource BrowserWindowBrush}"><Grid Margin="24"><StackPanel x:Name="NewTabContent" MaxWidth="610" HorizontalAlignment="Center" VerticalAlignment="Center"><Border Width="42" Height="42" CornerRadius="11" Background="{DynamicResource BrowserAccentBrush}" HorizontalAlignment="Center"><TextBlock Text="C" Foreground="White" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Nova aba" Margin="0,15,0,4" FontSize="24" FontWeight="SemiBold" HorizontalAlignment="Center"/><TextBlock Text="Pesquise ou digite um endereço" Margin="0,0,0,18" Foreground="{DynamicResource BrowserTextMutedBrush}" HorizontalAlignment="Center"/><Border Height="44" Padding="13,0,9,0" CornerRadius="10" Background="{DynamicResource BrowserInputBrush}" BorderBrush="{DynamicResource BrowserBorderBrush}" BorderThickness="1"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Grid><TextBox x:Name="NewTabSearchBox" Style="{StaticResource NativeInput}" Height="38" VerticalAlignment="Center" KeyDown="NewTabSearchBox_KeyDown" GotKeyboardFocus="BrowserInput_GotKeyboardFocus" LostKeyboardFocus="BrowserInput_LostKeyboardFocus" TextChanged="BrowserInput_TextChanged"/><TextBlock x:Name="NewTabPlaceholder" Text="Pesquisar na web ou digitar endereço" Foreground="{DynamicResource BrowserTextMutedBrush}" FontSize="14" VerticalAlignment="Center" IsHitTestVisible="False"/></Grid><Button Grid.Column="1" Style="{StaticResource IconButton}" Width="31" Height="31" Click="NewTabGo_Click" ToolTip="Ir"><Path Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M2,7 L12,7 M8,3 L12,7 L8,11"/></Button></Grid></Border><WrapPanel HorizontalAlignment="Center" Margin="0,14,0,0"><Button Style="{StaticResource SecondaryButton}" Content="DuckDuckGo" Margin="3" Click="NewTabDuck_Click"/><Button Style="{StaticResource SecondaryButton}" Content="Histórico" Margin="3" Click="History_Click"/><Button Style="{StaticResource SecondaryButton}" Content="Favoritos" Margin="3" Click="Favorites_Click"/></WrapPanel></StackPanel></Grid></Border>
-      <Border x:Name="ErrorPanel" Visibility="Collapsed" Background="{DynamicResource BrowserWindowBrush}"><StackPanel MaxWidth="560" Margin="28" HorizontalAlignment="Center" VerticalAlignment="Center"><TextBlock Text="Não foi possível abrir esta página" FontSize="22" FontWeight="SemiBold" HorizontalAlignment="Center"/><TextBlock x:Name="ErrorCodeText" Margin="0,10,0,0" Foreground="{DynamicResource BrowserDangerBrush}" FontFamily="Consolas" HorizontalAlignment="Center"/><TextBlock x:Name="ErrorMessageText" Margin="0,10,0,18" Foreground="{DynamicResource BrowserTextSecondaryBrush}" TextWrapping="Wrap" TextAlignment="Center"/><WrapPanel HorizontalAlignment="Center"><Button x:Name="RetryButton" Style="{StaticResource SecondaryButton}" Content="Recarregar" Margin="3" Click="Retry_Click"/><Button Style="{StaticResource SecondaryButton}" Content="Voltar" Margin="3" Click="ErrorBack_Click"/></WrapPanel></StackPanel></Border>
-      <Border x:Name="LibraryPanel" Visibility="Collapsed" Width="390" MinWidth="300" MaxWidth="460" HorizontalAlignment="Right" Background="{DynamicResource BrowserSurfaceAltBrush}" BorderBrush="{DynamicResource BrowserBorderBrush}" BorderThickness="1,0,0,0" Padding="16"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock x:Name="LibraryTitle" Text="Favoritos" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"/><Button Grid.Column="1" Style="{StaticResource IconButton}" Width="30" Height="30" Click="CloseLibrary_Click"><Path Width="12" Height="12" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.8" Data="M2,2 L10,10 M10,2 L2,10"/></Button></Grid><Border Grid.Row="1" Height="38" Margin="0,13,0,8" Padding="10,0" CornerRadius="8" Background="{DynamicResource BrowserInputBrush}" BorderBrush="{DynamicResource BrowserBorderBrush}" BorderThickness="1"><TextBox x:Name="LibrarySearchBox" Style="{StaticResource NativeInput}" FontSize="13" TextChanged="LibrarySearchBox_TextChanged"/></Border><ListBox x:Name="LibraryList" Grid.Row="2" MouseDoubleClick="LibraryList_DoubleClick"/><Button x:Name="ClearHistoryButton" Grid.Row="3" Style="{StaticResource SecondaryButton}" Content="Limpar histórico" Visibility="Collapsed" Click="ClearHistory_Click"/></Grid></Border>
-      <Border x:Name="HubPanel" Visibility="Collapsed" Width="430" MinWidth="320" MaxWidth="520" HorizontalAlignment="Right" Background="{DynamicResource BrowserSurfaceAltBrush}" BorderBrush="{DynamicResource BrowserBorderBrush}" BorderThickness="1,0,0,0" Padding="16"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock x:Name="HubTitle" FontSize="18" FontWeight="SemiBold"/><TextBlock x:Name="HubSubtitle" Margin="0,3,12,0" Foreground="{DynamicResource BrowserTextMutedBrush}" FontSize="11" TextWrapping="Wrap"/></StackPanel><Button Grid.Column="1" Style="{StaticResource IconButton}" Width="30" Height="30" Click="CloseHub_Click"><Path Width="12" Height="12" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.8" Data="M2,2 L10,10 M10,2 L2,10"/></Button></Grid><ScrollViewer Grid.Row="1" Margin="0,14,0,0" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="HubContent"/></ScrollViewer></Grid></Border>
-      <StackPanel Visibility="Collapsed"><TextBlock x:Name="StatusText"/><TextBlock x:Name="LoadingStatusText"/><TextBlock x:Name="ZoomStatusText" Text="100%"/><Button x:Name="CancelDownloadsButton" Click="CancelDownloads_Click"/></StackPanel>
+    <Border Grid.Row="1" Background="{DynamicResource BrowserSurfaceAltBrush}" BorderBrush="{DynamicResource BrowserBorderBrush}"
+            BorderThickness="0,0,0,1" Padding="8,6">
+      <Grid>
+        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+          <Button x:Name="BackButton" Style="{StaticResource IconButton}" Click="Back_Click" ToolTip="Voltar (Alt+←)">
+            <Path Width="15" Height="15" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                  StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M10.5,2 L4.5,8 L10.5,14 M5,8 L15,8"/>
+          </Button>
+          <Button x:Name="ForwardButton" Style="{StaticResource IconButton}" Click="Forward_Click" ToolTip="Avançar (Alt+→)">
+            <Path Width="15" Height="15" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                  StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M5.5,2 L11.5,8 L5.5,14 M11,8 L1,8"/>
+          </Button>
+          <Button x:Name="ReloadStopButton" Style="{StaticResource IconButton}" Click="ReloadStop_Click" ToolTip="Recarregar (Ctrl+R)">
+            <Path Width="16" Height="16" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                  StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                  Data="M13.5,5.3 A6,6 0 1 0 14,10 M13.5,2.2 L13.5,5.4 L10.3,5.4"/>
+          </Button>
+          <Button x:Name="HomeButton" Style="{StaticResource IconButton}" Click="Home_Click" ToolTip="Página inicial">
+            <Path Width="15" Height="15" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                  StrokeThickness="1.65" StrokeLineJoin="Round"
+                  Data="M2,7.2 L8,2 L14,7.2 M4,6.2 L4,14 L12,14 L12,6.2 M6.5,14 L6.5,9.5 L9.5,9.5 L9.5,14"/>
+          </Button>
+        </StackPanel>
+
+        <Border x:Name="AddressShell" Grid.Column="1" Height="44" MinWidth="180" Margin="8,0" Padding="8,0,4,0"
+                CornerRadius="11" Background="{DynamicResource BrowserInputBrush}" BorderBrush="{DynamicResource BrowserBorderBrush}"
+                BorderThickness="1" ClipToBounds="False">
+          <Grid ClipToBounds="False">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/><ColumnDefinition Width="31"/></Grid.ColumnDefinitions>
+            <Grid Grid.Column="0" ToolTip="Informações da conexão">
+              <Path x:Name="SecurityIcon" Width="13" Height="13" HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Stroke="{DynamicResource BrowserTextMutedBrush}" StrokeThickness="1.55"
+                    Data="M3,7 L3,4.8 A3,3 0 0 1 9,4.8 L9,7 M2,7 L10,7 L10,13 L2,13 Z M6,9.4 L6,11"/>
+              <TextBlock x:Name="SecurityIndicator" Visibility="Collapsed"/>
+            </Grid>
+            <Grid Grid.Column="1" ClipToBounds="False">
+              <TextBox x:Name="AddressBox" Style="{StaticResource NativeInput}" Height="40" MinHeight="40"
+                       VerticalAlignment="Center" ClipToBounds="False"
+                       KeyDown="AddressBox_KeyDown" GotKeyboardFocus="AddressBoxVisual_GotKeyboardFocus"
+                       LostKeyboardFocus="BrowserInput_LostKeyboardFocus" TextChanged="BrowserInput_TextChanged"/>
+              <TextBlock x:Name="AddressPlaceholder" Text="Pesquisar ou digitar endereço"
+                         Foreground="{DynamicResource BrowserTextMutedBrush}" FontSize="14"
+                         TextBlock.LineHeight="20" Margin="0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+            </Grid>
+            <Button x:Name="FavoriteButton" Grid.Column="2" Style="{StaticResource IconButton}" Width="29" Height="29"
+                    Click="Favorite_Click" ToolTip="Adicionar aos favoritos">
+              <Path Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                    StrokeThickness="1.5" StrokeLineJoin="Round"
+                    Data="M8,1.4 L10,5.3 L14.4,5.9 L11.2,9 L12,13.5 L8,11.4 L4,13.5 L4.8,9 L1.6,5.9 L6,5.3 Z"/>
+            </Button>
+          </Grid>
+        </Border>
+
+        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+          <Button x:Name="DownloadsButton" Style="{StaticResource ToolbarActionButton}" Click="ModernDownloads_Click"
+                  ToolTip="Abrir Downloads" AutomationProperties.Name="Downloads">
+            <StackPanel Orientation="Horizontal">
+              <Grid Width="17" Height="17" VerticalAlignment="Center">
+                <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.7"
+                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      Data="M8.5,1 L8.5,11 M4.5,7 L8.5,11 L12.5,7 M2,14 L15,14"/>
+                <Ellipse x:Name="DownloadActivityDot" Width="5" Height="5" HorizontalAlignment="Right" VerticalAlignment="Top"
+                         Fill="{DynamicResource BrowserAccentBrush}" Visibility="Collapsed"/>
+              </Grid>
+              <TextBlock x:Name="DownloadsButtonLabel" Text="Downloads" Margin="7,0,0,0" VerticalAlignment="Center" FontSize="12"/>
+            </StackPanel>
+          </Button>
+          <Button x:Name="ExtensionsButton" Style="{StaticResource ToolbarActionButton}" Click="ModernExtensions_Click"
+                  ToolTip="Gerenciar extensões locais" AutomationProperties.Name="Extensões">
+            <StackPanel Orientation="Horizontal">
+              <Path Width="16" Height="16" Stretch="Uniform"
+                    Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                    StrokeThickness="1.55" StrokeLineJoin="Round"
+                    Data="M2,2 L7,2 L7,6 L11,6 L11,2 L15,2 L15,7 L11,7 L11,11 L15,11 L15,15 L10,15 L10,11 L6,11 L6,15 L2,15 L2,10 L6,10 L6,6 L2,6 Z"/>
+              <TextBlock x:Name="ExtensionsButtonLabel" Text="Extensões" Margin="7,0,0,0" VerticalAlignment="Center" FontSize="12"/>
+            </StackPanel>
+          </Button>
+          <Button x:Name="BrowserMenuButton" Style="{StaticResource IconButton}" Click="ModernBrowserMenu_Click"
+                  ToolTip="Configurações e mais" AutomationProperties.Name="Configurações e mais">
+            <StackPanel>
+              <Ellipse Width="3" Height="3" Margin="0,1" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+              <Ellipse Width="3" Height="3" Margin="0,1" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+              <Ellipse Width="3" Height="3" Margin="0,1" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+            </StackPanel>
+          </Button>
+        </StackPanel>
+      </Grid>
+    </Border>
+    <ProgressBar x:Name="LoadProgress" Grid.Row="1" Height="2" VerticalAlignment="Bottom" IsIndeterminate="True"
+                 Foreground="{DynamicResource BrowserAccentBrush}" Background="Transparent" Visibility="Collapsed"/>
+
+    <Grid Grid.Row="2" Background="{DynamicResource BrowserWindowBrush}">
+      <Grid x:Name="WebViewHost" Background="White"/>
+
+      <Border x:Name="NewTabPanel" Visibility="Collapsed" Background="{DynamicResource BrowserWindowBrush}">
+        <Grid Margin="24">
+          <StackPanel x:Name="NewTabContent" MaxWidth="610" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <Border Width="42" Height="42" CornerRadius="11" Background="{DynamicResource BrowserAccentBrush}" HorizontalAlignment="Center">
+              <TextBlock Text="C" Foreground="White" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <TextBlock Text="Nova aba" Margin="0,15,0,4" FontSize="24" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+            <TextBlock Text="Pesquise ou digite um endereço" Margin="0,0,0,18"
+                       Foreground="{DynamicResource BrowserTextMutedBrush}" HorizontalAlignment="Center"/>
+            <Border Height="46" Padding="13,0,9,0" CornerRadius="11" Background="{DynamicResource BrowserInputBrush}"
+                    BorderBrush="{DynamicResource BrowserBorderBrush}" BorderThickness="1" ClipToBounds="False">
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <Grid ClipToBounds="False">
+                  <TextBox x:Name="NewTabSearchBox" Style="{StaticResource NativeInput}" Height="40" VerticalAlignment="Center"
+                           KeyDown="NewTabSearchBox_KeyDown" GotKeyboardFocus="BrowserInput_GotKeyboardFocus"
+                           LostKeyboardFocus="BrowserInput_LostKeyboardFocus" TextChanged="BrowserInput_TextChanged"/>
+                  <TextBlock x:Name="NewTabPlaceholder" Text="Pesquisar na web ou digitar endereço"
+                             Foreground="{DynamicResource BrowserTextMutedBrush}" FontSize="14"
+                             TextBlock.LineHeight="20" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                </Grid>
+                <Button Grid.Column="1" Style="{StaticResource IconButton}" Width="31" Height="31" Click="NewTabGo_Click" ToolTip="Ir">
+                  <Path Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                        StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                        Data="M2,7 L12,7 M8,3 L12,7 L8,11"/>
+                </Button>
+              </Grid>
+            </Border>
+            <WrapPanel HorizontalAlignment="Center" Margin="0,14,0,0">
+              <Button Style="{StaticResource SecondaryButton}" Content="DuckDuckGo" Margin="3" Click="NewTabDuck_Click"/>
+              <Button Style="{StaticResource SecondaryButton}" Content="Histórico" Margin="3" Click="History_Click"/>
+              <Button Style="{StaticResource SecondaryButton}" Content="Favoritos" Margin="3" Click="Favorites_Click"/>
+            </WrapPanel>
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <Border x:Name="ErrorPanel" Visibility="Collapsed" Background="{DynamicResource BrowserWindowBrush}">
+        <StackPanel MaxWidth="560" Margin="28" HorizontalAlignment="Center" VerticalAlignment="Center">
+          <TextBlock Text="Não foi possível abrir esta página" FontSize="22" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+          <TextBlock x:Name="ErrorCodeText" Margin="0,10,0,0" Foreground="{DynamicResource BrowserDangerBrush}"
+                     FontFamily="Consolas" HorizontalAlignment="Center"/>
+          <TextBlock x:Name="ErrorMessageText" Margin="0,10,0,18" Foreground="{DynamicResource BrowserTextSecondaryBrush}"
+                     TextWrapping="Wrap" TextAlignment="Center"/>
+          <WrapPanel HorizontalAlignment="Center">
+            <Button x:Name="RetryButton" Style="{StaticResource SecondaryButton}" Content="Recarregar" Margin="3" Click="Retry_Click"/>
+            <Button Style="{StaticResource SecondaryButton}" Content="Voltar" Margin="3" Click="ErrorBack_Click"/>
+          </WrapPanel>
+        </StackPanel>
+      </Border>
+
+      <Border x:Name="LibraryPanel" Visibility="Collapsed" Width="390" MinWidth="300" MaxWidth="460"
+              HorizontalAlignment="Right" Background="{DynamicResource BrowserSurfaceAltBrush}"
+              BorderBrush="{DynamicResource BrowserBorderBrush}" BorderThickness="1,0,0,0" Padding="16">
+        <Grid>
+          <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+          <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <TextBlock x:Name="LibraryTitle" Text="Favoritos" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            <Button Grid.Column="1" Style="{StaticResource IconButton}" Width="30" Height="30" Click="CloseLibrary_Click">
+              <Path Width="12" Height="12" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                    StrokeThickness="1.8" Data="M2,2 L10,10 M10,2 L2,10"/>
+            </Button>
+          </Grid>
+          <Border Grid.Row="1" Height="42" Margin="0,13,0,8" Padding="10,0" CornerRadius="8"
+                  Background="{DynamicResource BrowserInputBrush}" BorderBrush="{DynamicResource BrowserBorderBrush}" BorderThickness="1">
+            <TextBox x:Name="LibrarySearchBox" Style="{StaticResource NativeInput}" FontSize="13" TextChanged="LibrarySearchBox_TextChanged"/>
+          </Border>
+          <ListBox x:Name="LibraryList" Grid.Row="2" MouseDoubleClick="LibraryList_DoubleClick"/>
+          <Button x:Name="ClearHistoryButton" Grid.Row="3" Style="{StaticResource SecondaryButton}" Content="Limpar histórico"
+                  Visibility="Collapsed" Click="ClearHistory_Click"/>
+        </Grid>
+      </Border>
+
+      <Border x:Name="HubPanel" Visibility="Collapsed" Width="460" MinWidth="340" MaxWidth="540"
+              HorizontalAlignment="Right" Background="{DynamicResource BrowserWindowBrush}"
+              BorderBrush="{DynamicResource BrowserBorderBrush}" BorderThickness="1,0,0,0">
+        <Grid>
+          <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+          <Border Background="{DynamicResource BrowserSurfaceAltBrush}" BorderBrush="{DynamicResource BrowserBorderBrush}"
+                  BorderThickness="0,0,0,1" Padding="18,16">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <Border Width="38" Height="38" CornerRadius="10" Background="{DynamicResource BrowserSurfaceBrush}" Margin="0,0,12,0">
+                <TextBlock x:Name="HubGlyph" Text="•" FontSize="19" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              </Border>
+              <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                <TextBlock x:Name="HubTitle" FontSize="20" FontWeight="SemiBold"/>
+                <TextBlock x:Name="HubSubtitle" Margin="0,3,12,0" Foreground="{DynamicResource BrowserTextMutedBrush}"
+                           FontSize="12" TextWrapping="Wrap"/>
+              </StackPanel>
+              <Button Grid.Column="2" Style="{StaticResource IconButton}" Width="30" Height="30" Click="CloseHub_Click"
+                      AutomationProperties.Name="Fechar painel">
+                <Path Width="12" Height="12" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                      StrokeThickness="1.8" Data="M2,2 L10,10 M10,2 L2,10"/>
+              </Button>
+            </Grid>
+          </Border>
+          <ScrollViewer Grid.Row="1" Padding="18,12,18,18" VerticalScrollBarVisibility="Auto">
+            <StackPanel x:Name="HubContent"/>
+          </ScrollViewer>
+        </Grid>
+      </Border>
+
+      <StackPanel Visibility="Collapsed">
+        <TextBlock x:Name="StatusText"/>
+        <TextBlock x:Name="LoadingStatusText"/>
+        <TextBlock x:Name="ZoomStatusText" Text="100%"/>
+        <Button x:Name="CancelDownloadsButton" Click="CancelDownloads_Click"/>
+      </StackPanel>
     </Grid>
 
-    <Popup x:Name="BrowserMenuPopup" PlacementTarget="{Binding ElementName=BrowserMenuButton}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade"><Border Width="310" Margin="0,6,8,8" Padding="7" CornerRadius="9" Background="{DynamicResource BrowserSurfaceAltBrush}" BorderBrush="{DynamicResource BrowserBorderBrush}" BorderThickness="1"><Border.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="4" Opacity="0.30"/></Border.Effect><ScrollViewer MaxHeight="650" VerticalScrollBarVisibility="Auto"><StackPanel><Button Style="{StaticResource MenuButton}" Click="MenuNewTab_Click"><Grid><TextBlock Text="Nova aba"/><TextBlock Text="Ctrl+T" Foreground="{DynamicResource BrowserTextMutedBrush}" HorizontalAlignment="Right"/></Grid></Button><Button x:Name="MenuReopenButton" Style="{StaticResource MenuButton}" Click="MenuReopen_Click"><Grid><TextBlock Text="Reabrir aba fechada"/><TextBlock Text="Ctrl+Shift+T" Foreground="{DynamicResource BrowserTextMutedBrush}" HorizontalAlignment="Right"/></Grid></Button><Button x:Name="MenuDuplicateButton" Style="{StaticResource MenuButton}" Click="MenuDuplicate_Click" Content="Duplicar aba"/><Separator Background="{DynamicResource BrowserBorderBrush}" Margin="6,5"/><Grid Margin="12,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="Zoom" VerticalAlignment="Center"/><StackPanel Grid.Column="1" Orientation="Horizontal"><Button Style="{StaticResource IconButton}" Width="30" Height="30" Content="−" Click="MenuZoomOut_Click"/><Button Style="{StaticResource TextButton}" Height="30" MinWidth="56" Click="MenuZoomReset_Click"><TextBlock x:Name="MenuZoomText" Text="100%"/></Button><Button Style="{StaticResource IconButton}" Width="30" Height="30" Content="+" Click="MenuZoomIn_Click"/></StackPanel></Grid><Button Style="{StaticResource MenuButton}" Click="MenuFullscreen_Click"><Grid><TextBlock x:Name="MenuFullscreenText" Text="Tela cheia"/><TextBlock Text="F11" Foreground="{DynamicResource BrowserTextMutedBrush}" HorizontalAlignment="Right"/></Grid></Button><Separator Background="{DynamicResource BrowserBorderBrush}" Margin="6,5"/><Button Style="{StaticResource MenuButton}" Content="Downloads" Click="MenuDownloads_Click"/><Button Style="{StaticResource MenuButton}" Content="Favoritos" Click="MenuFavorites_Click"/><Button Style="{StaticResource MenuButton}" Content="Histórico" Click="MenuHistory_Click"/><Button Style="{StaticResource MenuButton}" Content="Extensões" Click="MenuExtensions_Click"/><Button Style="{StaticResource MenuButton}" Content="Configurações" Click="MenuSettings_Click"/><Separator Background="{DynamicResource BrowserBorderBrush}" Margin="6,5"/><Button x:Name="MenuPrintButton" Style="{StaticResource MenuButton}" Content="Imprimir" Click="MenuPrint_Click"/><Button x:Name="MenuSaveButton" Style="{StaticResource MenuButton}" Content="Salvar página" Click="MenuSave_Click"/><Button Style="{StaticResource MenuButton}" Content="Limpar dados do navegador…" Click="MenuClearData_Click"/></StackPanel></ScrollViewer></Border></Popup>
+    <Popup x:Name="BrowserMenuPopup" PlacementTarget="{Binding ElementName=BrowserMenuButton}" Placement="Bottom"
+           StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+      <Border Width="356" Margin="0,8,8,8" Padding="10" CornerRadius="13"
+              Background="{DynamicResource BrowserSurfaceAltBrush}" BorderBrush="{DynamicResource BrowserBorderBrush}" BorderThickness="1">
+        <Border.Effect><DropShadowEffect BlurRadius="24" ShadowDepth="5" Opacity="0.34"/></Border.Effect>
+        <ScrollViewer MaxHeight="690" VerticalScrollBarVisibility="Auto">
+          <StackPanel>
+            <Grid Margin="7,3,7,10">
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <StackPanel>
+                <TextBlock Text="CloudOS Browser" FontSize="15" FontWeight="SemiBold"/>
+                <TextBlock Text="Ações rápidas e ferramentas" FontSize="11" Foreground="{DynamicResource BrowserTextMutedBrush}" Margin="0,2,0,0"/>
+              </StackPanel>
+              <TextBlock Grid.Column="1" Text="•••" Foreground="{DynamicResource BrowserTextMutedBrush}" VerticalAlignment="Center" FontSize="16"/>
+            </Grid>
+
+            <TextBlock Style="{StaticResource MenuGroupLabel}" Text="NAVEGAÇÃO"/>
+            <Border Style="{StaticResource MenuGroupCard}">
+              <StackPanel>
+                <Button x:Name="MenuNewTabButton" Style="{StaticResource MenuRowButton}" Click="MenuNewTab_Click">
+                  <Grid><TextBlock Text="Nova aba"/><TextBlock Text="Ctrl+T" Foreground="{DynamicResource BrowserTextMutedBrush}" HorizontalAlignment="Right"/></Grid>
+                </Button>
+                <Button x:Name="MenuReopenButton" Style="{StaticResource MenuRowButton}" Click="MenuReopen_Click">
+                  <Grid><TextBlock Text="Reabrir aba fechada"/><TextBlock Text="Ctrl+Shift+T" Foreground="{DynamicResource BrowserTextMutedBrush}" HorizontalAlignment="Right"/></Grid>
+                </Button>
+                <Button x:Name="MenuDuplicateButton" Style="{StaticResource MenuRowButton}" Click="MenuDuplicate_Click" Content="Duplicar aba"/>
+              </StackPanel>
+            </Border>
+
+            <TextBlock Style="{StaticResource MenuGroupLabel}" Text="PÁGINA"/>
+            <Border Style="{StaticResource MenuGroupCard}">
+              <StackPanel>
+                <Grid Margin="12,6">
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                  <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="Zoom"/>
+                    <TextBlock Text="Ajuste da página atual" FontSize="10" Foreground="{DynamicResource BrowserTextMutedBrush}"/>
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button Style="{StaticResource IconButton}" Width="30" Height="30" Content="−" Click="MenuZoomOut_Click"/>
+                    <Button Style="{StaticResource TextButton}" Height="30" MinWidth="56" Click="MenuZoomReset_Click"><TextBlock x:Name="MenuZoomText" Text="100%"/></Button>
+                    <Button Style="{StaticResource IconButton}" Width="30" Height="30" Content="+" Click="MenuZoomIn_Click"/>
+                  </StackPanel>
+                </Grid>
+                <Button x:Name="MenuFullscreenButton" Style="{StaticResource MenuRowButton}" Click="MenuFullscreen_Click">
+                  <Grid><TextBlock x:Name="MenuFullscreenText" Text="Tela cheia"/><TextBlock Text="F11" Foreground="{DynamicResource BrowserTextMutedBrush}" HorizontalAlignment="Right"/></Grid>
+                </Button>
+                <Button x:Name="MenuPrintButton" Style="{StaticResource MenuRowButton}" Content="Imprimir" Click="MenuPrint_Click"/>
+                <Button x:Name="MenuSaveButton" Style="{StaticResource MenuRowButton}" Content="Salvar página" Click="MenuSave_Click"/>
+              </StackPanel>
+            </Border>
+
+            <TextBlock Style="{StaticResource MenuGroupLabel}" Text="BIBLIOTECA E FERRAMENTAS"/>
+            <Border Style="{StaticResource MenuGroupCard}">
+              <StackPanel>
+                <Button x:Name="MenuDownloadsButton" Style="{StaticResource MenuRowButton}" Click="MenuDownloads_Click">
+                  <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <StackPanel><TextBlock Text="Downloads" FontWeight="SemiBold"/><TextBlock Text="Arquivos desta sessão" FontSize="10" Foreground="{DynamicResource BrowserTextMutedBrush}"/></StackPanel>
+                    <TextBlock Grid.Column="1" Text="↓" FontSize="17" VerticalAlignment="Center" Foreground="{DynamicResource BrowserAccentBrush}"/>
+                  </Grid>
+                </Button>
+                <Button Style="{StaticResource MenuRowButton}" Content="Favoritos" Click="MenuFavorites_Click"/>
+                <Button Style="{StaticResource MenuRowButton}" Content="Histórico" Click="MenuHistory_Click"/>
+                <Button x:Name="MenuExtensionsButton" Style="{StaticResource MenuRowButton}" Click="MenuExtensions_Click">
+                  <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <StackPanel><TextBlock Text="Extensões" FontWeight="SemiBold"/><TextBlock Text="Pacotes locais WebView2" FontSize="10" Foreground="{DynamicResource BrowserTextMutedBrush}"/></StackPanel>
+                    <TextBlock Grid.Column="1" Text="◇" FontSize="16" VerticalAlignment="Center" Foreground="{DynamicResource BrowserAccentBrush}"/>
+                  </Grid>
+                </Button>
+              </StackPanel>
+            </Border>
+
+            <TextBlock Style="{StaticResource MenuGroupLabel}" Text="BROWSER"/>
+            <Border Style="{StaticResource MenuGroupCard}" Margin="0">
+              <StackPanel>
+                <Button x:Name="MenuSettingsButton" Style="{StaticResource MenuRowButton}" Content="Configurações" Click="MenuSettings_Click"/>
+                <Button x:Name="MenuClearDataButton" Style="{StaticResource MenuRowButton}" Content="Limpar dados do navegador…" Click="MenuClearData_Click"/>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+      </Border>
+    </Popup>
   </Grid>
 </Window>
