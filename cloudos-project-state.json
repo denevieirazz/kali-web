@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-08-16",
+  "official": {
+    "branch": "integration/cloudos-validated-features",
+    "sha": "2d3380ba562d23e05947f81cc9581e8fe9bcfdbc"
+  },
+  "stabilization": {
+    "branch": "stabilization/cloudos-foundation-batch-1",
+    "baseSha": "2d3380ba562d23e05947f81cc9581e8fe9bcfdbc",
+    "promoteAutomatically": false
+  },
+  "modes": {
+    "Full": {
+      "launcher": "Iniciar CloudOS.cmd",
+      "nativeHost": true,
+      "browser": "expected",
+      "wsl": "when-enabled"
+    },
+    "WebOnly": {
+      "launcher": "Iniciar CloudOS.cmd WebOnly",
+      "nativeHost": false,
+      "browser": "unavailable-by-design",
+      "wsl": false
+    },
+    "Developer": {
+      "launcher": "Iniciar CloudOS.cmd Developer",
+      "nativeHost": false,
+      "browser": "unavailable-by-design",
+      "wsl": "optional"
+    },
+    "UXValidation": {
+      "launcher": "Iniciar CloudOS.cmd UXValidation",
+      "nativeHost": false,
+      "browser": "unavailable-by-design",
+      "wsl": false,
+      "temporaryData": true
+    },
+    "FilesValidation": {
+      "launcher": "Validar CloudOS.cmd files",
+      "nativeHost": false,
+      "browser": "not-tested",
+      "wsl": true,
+      "temporaryData": true
+    },
+    "BrowserValidation": {
+      "launcher": "Validar CloudOS.cmd browser",
+      "nativeHost": true,
+      "browser": "expected",
+      "wsl": false,
+      "temporaryData": true
+    },
+    "TerminalValidation": {
+      "launcher": "Validar CloudOS.cmd terminal",
+      "nativeHost": false,
+      "browser": "not-tested",
+      "wsl": true,
+      "temporaryData": true
+    }
+  },
+  "candidateBranches": {
+    "filesTransactional": {
+      "branch": "feature/cloudos-files-real-transactional",
+      "sha": "d213dd10b5137e882f323eb60853d54cc9d4568a",
+      "physicalValidation": false
+    },
+    "onboardingFilesUx": {
+      "branch": "feature/cloudos-onboarding-files-ux",
+      "sha": "e034e4be768c240ecb830a6442ece18039f24fc2",
+      "physicalValidation": false
+    },
+    "browserPhysical": {
+      "branch": "fix/native-browser-physical-ui",
+      "sha": "710a5da64e0645d2b874e2cc9eea35561b280798",
+      "promotionInBatch1": false
+    },
+    "systemCenterLinux": {
+      "branch": "feature/cloudos-linux-system-center-cgroups",
+      "sha": "14e125d77af9af0e4f84b039ea54f073c9ac38c2",
+      "promotionInBatch1": false
+    }
+  },
+  "validation": {
+    "resultRoot": "test-results/<area>/<sha>/<execution-id>",
+    "requiredFiles": [
+      "validation.json",
+      "commands.txt",
+      "environment.json",
+      "git.json",
+      "database-before.json",
+      "database-after.json",
+      "processes-before.json",
+      "processes-after.json",
+      "artifacts.json"
+    ],
+    "requiresUserVisualApproval": true,
+    "requiresRealDatabaseUnchanged": true,
+    "requiresZeroOrphans": true
+  }
+}
