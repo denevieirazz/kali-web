@@ -15,6 +15,7 @@ $temp=Join-Path $tempRoot "cloudos-dependency-worktree-$([guid]::NewGuid().ToStr
 $tempFull=[IO.Path]::GetFullPath($temp).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
 $added=$false
 $cleanupError=$null
+$primaryError=$null
 $trackedCleanBeforeCleanup=$false
 
 function Assert-OwnedTemporaryWorktree {
@@ -66,14 +67,18 @@ try{
   if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw "NODE_MODULES_JUNCTION_FORBIDDEN:$relative"}
  }
 
- $status=@(& git -C $temp status --porcelain --untracked-files=no)
- if($LASTEXITCODE -ne 0){throw "WORKTREE_STATUS_FAILED:$LASTEXITCODE"}
- if($status.Count -gt 0){throw "WORKTREE_TRACKED_FILES_CHANGED:$($status -join ',')"}
+ $trackedChanges=@(& git -C $temp diff --name-only HEAD --)
+ if($LASTEXITCODE -ne 0){throw "WORKTREE_TRACKED_DIFF_FAILED:$LASTEXITCODE"}
+ $trackedChanges|Set-Content -LiteralPath (Join-Path $EvidenceDirectory 'tracked-changes.txt') -Encoding UTF8
+ if($trackedChanges.Count -gt 0){throw "WORKTREE_TRACKED_FILES_CHANGED:$($trackedChanges -join ',')"}
  $trackedCleanBeforeCleanup=$true
 
  @{schemaVersion=1;head=$head;worktree=$temp;nodeModulesInitiallyAbsent=$true;rootInstallPerformed=$true;noNodeModulesJunction=$true;trackedCleanBeforeCleanup=$true;resolved=$result.resolved;versions=$result.versions;status='passed';timestamp=(Get-Date).ToUniversalTime().ToString('o')}|
   ConvertTo-Json -Depth 12|Set-Content -LiteralPath (Join-Path $EvidenceDirectory 'worktree-bootstrap-result.json') -Encoding UTF8
  Write-Host 'CLEAN_WORKTREE_DEPENDENCY_BOOTSTRAP_OK'
+}catch{
+ $primaryError=$_.Exception.Message
+ Set-Content -LiteralPath (Join-Path $EvidenceDirectory 'primary-error.txt') -Value $primaryError -Encoding UTF8
 }finally{
  if($added -and (Test-Path -LiteralPath $temp)){
   $cleanupLog=Join-Path $EvidenceDirectory 'worktree-cleanup.log'
@@ -106,5 +111,6 @@ try{
    Add-Content -LiteralPath $cleanupLog -Value $pruneOutput -Encoding UTF8 -ErrorAction SilentlyContinue
   }
  }
- if($cleanupError){throw $cleanupError}
 }
+if($primaryError){throw $primaryError}
+if($cleanupError){throw $cleanupError}
