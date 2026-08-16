@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/user"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -102,28 +103,30 @@ func NewManager() (*Manager, error) {
 	if err != nil || home == "" {
 		return nil, coded("FILES_ROOT_UNAVAILABLE")
 	}
-	root, err := os.Readlink("/proc/self/fd/" + fmt.Sprint(mustOpenRoot(home)))
-	if err != nil || root == "" {
-		root = home
+	name := "linux"
+	if current, currentErr := user.Current(); currentErr == nil && current.Username != "" {
+		name = current.Username
 	}
-	fd, err := syscall.Open(root, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+	return newManagerForRoot(home, name)
+}
+
+func NewManagerForRoot(root string) (*Manager, error) {
+	return newManagerForRoot(root, "test-user")
+}
+
+func newManagerForRoot(root, userName string) (*Manager, error) {
+	if !filepath.IsAbs(root) {
+		return nil, coded("FILES_ROOT_UNAVAILABLE")
+	}
+	canonical, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return nil, coded("FILES_ROOT_UNAVAILABLE")
 	}
-	name := "linux"
-	if current, err := user.Current(); err == nil && current.Username != "" {
-		name = current.Username
-	}
-	return &Manager{root: root, rootFD: fd, userName: name}, nil
-}
-
-func mustOpenRoot(path string) int {
-	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+	fd, err := syscall.Open(canonical, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
 	if err != nil {
-		return -1
+		return nil, coded("FILES_ROOT_UNAVAILABLE")
 	}
-	defer syscall.Close(fd)
-	return fd
+	return &Manager{root: canonical, rootFD: fd, userName: userName}, nil
 }
 
 func (m *Manager) Close() {
@@ -324,15 +327,7 @@ func (m *Manager) Read(parts []string, offset int64, limit int) (ReadResult, err
 	if readErr != nil {
 		return ReadResult{}, coded("FILES_READ_FAILED")
 	}
-	return ReadResult{
-		Data:       base64.StdEncoding.EncodeToString(buffer[:n]),
-		Offset:     offset,
-		Bytes:      n,
-		EOF:        offset+int64(n) >= stat.Size,
-		Size:       stat.Size,
-		Mode:       uint32(stat.Mode & 0o7777),
-		ModifiedAt: time.Unix(stat.Mtim.Sec, stat.Mtim.Nsec).UTC().Format(time.RFC3339Nano),
-	}, nil
+	return ReadResult{Data: base64.StdEncoding.EncodeToString(buffer[:n]), Offset: offset, Bytes: n, EOF: offset+int64(n) >= stat.Size, Size: stat.Size, Mode: uint32(stat.Mode & 0o7777), ModifiedAt: time.Unix(stat.Mtim.Sec, stat.Mtim.Nsec).UTC().Format(time.RFC3339Nano)}, nil
 }
 
 func (m *Manager) Write(parts []string, offset int64, dataBase64 string, truncate bool, mode uint32) (WriteResult, error) {
@@ -442,11 +437,24 @@ func (m *Manager) Rename(source, destination []string) error {
 }
 
 func copyFD(srcFD, dstFD int) (int64, error) {
-	source := os.NewFile(uintptr(srcFD), "cloudos-copy-src")
-	destination := os.NewFile(uintptr(dstFD), "cloudos-copy-dst")
-	if source == nil || destination == nil {
+	sourceDup, err := syscall.Dup(srcFD)
+	if err != nil {
 		return 0, coded("FILES_COPY_FAILED")
 	}
+	destinationDup, err := syscall.Dup(dstFD)
+	if err != nil {
+		_ = syscall.Close(sourceDup)
+		return 0, coded("FILES_COPY_FAILED")
+	}
+	source := os.NewFile(uintptr(sourceDup), "cloudos-copy-src")
+	destination := os.NewFile(uintptr(destinationDup), "cloudos-copy-dst")
+	if source == nil || destination == nil {
+		if source != nil { _ = source.Close() } else { _ = syscall.Close(sourceDup) }
+		if destination != nil { _ = destination.Close() } else { _ = syscall.Close(destinationDup) }
+		return 0, coded("FILES_COPY_FAILED")
+	}
+	defer source.Close()
+	defer destination.Close()
 	written, err := io.CopyBuffer(destination, source, make([]byte, 256*1024))
 	if err != nil {
 		return written, coded("FILES_COPY_FAILED")
@@ -501,8 +509,13 @@ func copyEntry(srcParentFD int, srcName string, dstParentFD int, dstName string,
 		return coded("FILES_COPY_FAILED")
 	}
 	defer syscall.Close(dstFD)
-	reader := os.NewFile(uintptr(syscall.Dup(srcFD)), "cloudos-copy-dir")
+	sourceDup, err := syscall.Dup(srcFD)
+	if err != nil {
+		return coded("FILES_COPY_FAILED")
+	}
+	reader := os.NewFile(uintptr(sourceDup), "cloudos-copy-dir")
 	if reader == nil {
+		_ = syscall.Close(sourceDup)
 		return coded("FILES_COPY_FAILED")
 	}
 	entries, readErr := reader.ReadDir(-1)
@@ -645,7 +658,7 @@ func readTrashMeta(trashFD int, id string) (TrashEntry, error) {
 		return TrashEntry{}, coded("FILES_METADATA_FAILED")
 	}
 	var meta TrashEntry
-	if json.Unmarshal(data, &meta) != nil || meta.ID != id || meta.StoredName == "" || validateSegments(meta.OriginalPath, false) != nil {
+	if json.Unmarshal(data, &meta) != nil || meta.ID != id || meta.StoredName == "" || len(meta.OriginalPath) == 0 || validateSegments(meta.OriginalPath, false) != nil {
 		return TrashEntry{}, coded("FILES_METADATA_FAILED")
 	}
 	return meta, nil
@@ -668,9 +681,11 @@ func (m *Manager) Trash(parts []string) (TrashEntry, error) {
 		return TrashEntry{}, err
 	}
 	defer syscall.Close(sourceFD)
-	if _, _, err := openChild(sourceFD, name); err != nil {
+	checkFD, _, err := openChild(sourceFD, name)
+	if err != nil {
 		return TrashEntry{}, err
 	}
+	_ = syscall.Close(checkFD)
 	trashFD, err := m.ensureTrash()
 	if err != nil {
 		return TrashEntry{}, err
@@ -718,8 +733,8 @@ func (m *Manager) ListTrash() ([]TrashEntry, error) {
 			continue
 		}
 		id := strings.TrimSuffix(strings.TrimPrefix(name, ".meta-"), ".json")
-		meta, err := readTrashMeta(trashFD, id)
-		if err == nil {
+		meta, metaErr := readTrashMeta(trashFD, id)
+		if metaErr == nil {
 			out = append(out, meta)
 		}
 	}
