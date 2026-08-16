@@ -28,7 +28,16 @@ if($update -notmatch 'UriSchemeHttps'){throw 'HTTPS_UPDATE_GUARD_MISSING'}
 $hostSource=Get-Content -LiteralPath (Join-Path $root 'desktop\CloudOS.Host\Runtime\CloudOsRuntimeSupervisor.cs') -Raw
 if($hostSource -notmatch 'CLOUDOS_LOCAL_ROOT'){throw 'PORTABLE_LOCAL_ROOT_NOT_HONORED'}
 $pack=Get-Content -LiteralPath (Join-Path $root 'scripts\productization\package-cloudos.ps1') -Raw
-foreach($required in @('meta\\manifest.json','meta\\components.json','meta\\checksums.sha256','unsigned-development','--noPortable')){if($pack -notmatch $required){throw "PACKAGE_CONTRACT_MISSING:$required"}}
+$packageAssertions=[ordered]@{
+    manifest="Join-Path\s+\$meta\s+'manifest\.json'"
+    components="Join-Path\s+\$meta\s+'components\.json'"
+    checksums="Join-Path\s+\$meta\s+'checksums\.sha256'"
+    unsigned='unsigned-development'
+    customPortable='--noPortable'
+}
+foreach($entry in $packageAssertions.GetEnumerator()){
+    if($pack -notmatch $entry.Value){throw "PACKAGE_CONTRACT_MISSING:$($entry.Key)"}
+}
 $workflowPath=Join-Path $root '.github\workflows\productization-batch2-ci.yml'
 if(Test-Path -LiteralPath $workflowPath){$workflow=Get-Content -LiteralPath $workflowPath -Raw;if($workflow -match 'release(s)?\s*:\s*write|gh\s+release|create-release|softprops/action-gh-release'){throw 'REAL_RELEASE_PUBLICATION_FORBIDDEN'}}
 Push-Location $root
