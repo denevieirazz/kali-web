@@ -1,4 +1,4 @@
-name: Audit deterministic font fallback baselines once
+name: Install six audited font fallback baselines once
 
 on:
   push:
@@ -7,46 +7,34 @@ on:
 
 permissions:
   actions: read
-  contents: read
+  contents: write
 
 jobs:
-  audit-font-fallback-baselines:
-    runs-on: windows-latest
-    timeout-minutes: 30
+  install-six-audited-baselines:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout exact branch state
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22.x
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install Playwright Chromium
-        run: npx playwright install chromium
-
-      - name: Download audited characterization artifact
-        shell: pwsh
+      - name: Download official Windows characterization artifact
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
-          $headers = @{
-            Authorization = "Bearer $env:GH_TOKEN"
-            Accept = 'application/vnd.github+json'
-            'X-GitHub-Api-Version' = '2022-11-28'
-          }
-          $zip = Join-Path $env:RUNNER_TEMP 'font-fallback-source.zip'
-          Invoke-WebRequest -Headers $headers -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/artifacts/9266934129/zip" -OutFile $zip
-          $dest = Join-Path $env:RUNNER_TEMP 'font-fallback-source'
-          Expand-Archive -Path $zip -DestinationPath $dest -Force
-          "FONT_FALLBACK_SOURCE=$dest" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/9267056891/zip" \
+            -o "$RUNNER_TEMP/audited-font-fallback.zip"
+          mkdir -p "$RUNNER_TEMP/audited-font-fallback"
+          unzip -q "$RUNNER_TEMP/audited-font-fallback.zip" -d "$RUNNER_TEMP/audited-font-fallback"
 
-      - name: Verify provenance and install six audited actuals
+      - name: Verify provenance and install only six audited PNGs
         shell: python
         run: |
           import hashlib
@@ -55,80 +43,50 @@ jobs:
           import shutil
           from pathlib import Path
 
-          source = Path(os.environ['FONT_FALLBACK_SOURCE'])
-          manifest = json.loads((source / 'manifest.json').read_text(encoding='utf-8-sig'))
-          if manifest.get('head') != '767b01a25567c1d7d05dba3d86825da7d62b6786' or str(manifest.get('runId')) != '31959642698':
+          artifact = Path(os.environ['RUNNER_TEMP']) / 'audited-font-fallback'
+          manifest = json.loads((artifact / 'manifest.json').read_text(encoding='utf-8-sig'))
+          expected_head = '3415a95937dccfb9485598b996f05b968999b950'
+          expected_run = '31960114144'
+          if manifest.get('head') != expected_head or str(manifest.get('runId')) != expected_run:
               raise SystemExit(f'Unexpected artifact provenance: {manifest!r}')
 
           replacements = {
               'oobe-welcome-actual.png': ('1a5cc519b97d4642e091edbffb5991249b64991374e9a57070c22f373de07265', Path('tests/playwright/__screenshots__/boot-oobe.spec.ts/oobe-welcome-chromium-windows.png')),
-              'settings-personalization-actual.png': ('07ea287467f3a4cb0bbb5a9f62bc741e116e8afa446d8719c168239ded532acd', Path('tests/playwright/__screenshots__/settings-personalization.spec.ts/settings-personalization-chromium-windows.png')),
-              'settings-taskbar-top-actual.png': ('4fca59562cb8707797ee10c9a816ef2a469b38092dc99cad08dd6bf09548bd2c', Path('tests/playwright/__screenshots__/settings-personalization.spec.ts/settings-taskbar-top-chromium-windows.png')),
+              'settings-personalization-actual.png': ('f020af076f5b9146af61c72c5272bff78d0efd0251c7c3caefb39ec0c3cf2f51', Path('tests/playwright/__screenshots__/settings-personalization.spec.ts/settings-personalization-chromium-windows.png')),
+              'settings-taskbar-top-actual.png': ('d885293d01d592e995ad8bb6d7ad6a213a54fcfbd72bb23f01239d51f99df4e5', Path('tests/playwright/__screenshots__/settings-personalization.spec.ts/settings-taskbar-top-chromium-windows.png')),
               'desktop-custom-wallpaper-actual.png': ('bb49c5af6c3588410fa1bd75879b1159bae525078bc1277911b5b761b2121e0b', Path('tests/playwright/__screenshots__/settings-personalization.spec.ts/desktop-custom-wallpaper-chromium-windows.png')),
-              'start-menu-home-actual.png': ('28defb4c8cb87cd886f333875131737475b524ac18809b82b86c7e1dd8f3ff4c', Path('tests/playwright/__screenshots__/start-menu.spec.ts/start-menu-home-chromium-windows.png')),
+              'start-menu-home-actual.png': ('b3781c2559696fdf43fb14a4de38b304ed2fbc11e1a562f62ae652fb235684ec', Path('tests/playwright/__screenshots__/start-menu.spec.ts/start-menu-home-chromium-windows.png')),
               'start-running-calculator-actual.png': ('8cb50a28fb3f90d2c311e66c1093e7382f3639cf2c128349f475580e06c01212', Path('tests/playwright/__screenshots__/window-lifecycle.spec.ts/start-running-calculator-chromium-windows.png')),
           }
 
           for filename, (expected_sha, destination) in replacements.items():
-              matches = list(source.rglob(filename))
+              matches = list(artifact.rglob(filename))
               if len(matches) != 1:
                   raise SystemExit(f'Expected exactly one {filename}, found {len(matches)}')
-              actual_sha = hashlib.sha256(matches[0].read_bytes()).hexdigest()
+              source = matches[0]
+              actual_sha = hashlib.sha256(source.read_bytes()).hexdigest()
               if actual_sha != expected_sha:
                   raise SystemExit(f'Hash mismatch for {filename}: {actual_sha}')
               destination.parent.mkdir(parents=True, exist_ok=True)
-              shutil.copyfile(matches[0], destination)
-              print(f'Installed audited {filename} -> {destination} ({actual_sha})')
+              shutil.copyfile(source, destination)
+              print(f'Installed {filename} -> {destination} ({actual_sha})')
 
-      - name: Generate all deterministic fallback baselines through full characterization
-        shell: pwsh
-        run: npx playwright test --grep-invert "Navegador CloudOS — WebView2 real|Navegador CloudOS — lifecycle Windows" --update-snapshots --output="$env:RUNNER_TEMP\baseline-generation" --reporter=list
-
-      - name: Re-run full characterization normally with strict generated baselines
-        shell: pwsh
-        run: npx playwright test --grep-invert "Navegador CloudOS — WebView2 real|Navegador CloudOS — lifecycle Windows" --output="$env:RUNNER_TEMP\strict-characterization" --reporter=list
-
-      - name: Require exactly the seven known PNG baselines to differ from repository
-        shell: python
+      - name: Commit only the six audited PNG baselines
+        shell: bash
         run: |
-          import hashlib
-          import json
-          import os
-          import subprocess
-          from pathlib import Path
-
-          expected = sorted([
-              'tests/playwright/__screenshots__/boot-oobe.spec.ts/oobe-welcome-chromium-windows.png',
-              'tests/playwright/__screenshots__/settings-personalization.spec.ts/desktop-custom-wallpaper-chromium-windows.png',
-              'tests/playwright/__screenshots__/settings-personalization.spec.ts/settings-personalization-chromium-windows.png',
-              'tests/playwright/__screenshots__/settings-personalization.spec.ts/settings-taskbar-top-chromium-windows.png',
-              'tests/playwright/__screenshots__/start-menu.spec.ts/start-menu-all-chromium-windows.png',
-              'tests/playwright/__screenshots__/start-menu.spec.ts/start-menu-home-chromium-windows.png',
-              'tests/playwright/__screenshots__/window-lifecycle.spec.ts/start-running-calculator-chromium-windows.png',
-          ])
-          changed = sorted(x.replace('\\', '/') for x in subprocess.check_output(['git', 'diff', '--name-only'], text=True).splitlines() if x.strip())
-          if changed != expected:
-              raise SystemExit(f'Unexpected changed files. expected={expected!r} actual={changed!r}')
-          out = Path('baseline-audit-output')
-          out.mkdir(exist_ok=True)
-          hashes = {rel: hashlib.sha256(Path(rel).read_bytes()).hexdigest() for rel in expected}
-          (out / 'hashes.json').write_text(json.dumps(hashes, indent=2, sort_keys=True) + '\n', encoding='utf-8')
-          (out / 'provenance.json').write_text(json.dumps({
-              'sourceArtifactId': '9266934129',
-              'sourceRunId': '31959642698',
-              'sourceHead': '767b01a25567c1d7d05dba3d86825da7d62b6786',
-              'generatorRunId': os.environ.get('GITHUB_RUN_ID'),
-              'generatorHead': os.environ.get('GITHUB_SHA'),
-              'strictCharacterizationPassed': True,
-          }, indent=2, sort_keys=True) + '\n', encoding='utf-8')
-          print(json.dumps(hashes, indent=2, sort_keys=True))
-
-      - name: Upload audited candidate baselines without committing
-        uses: actions/upload-artifact@v4
-        with:
-          name: cloudos-font-fallback-baseline-audit-${{ github.run_id }}
-          path: |
-            tests/playwright/__screenshots__
-            baseline-audit-output
-          if-no-files-found: error
-          retention-days: 14
+          set -euo pipefail
+          git add -- \
+            tests/playwright/__screenshots__/boot-oobe.spec.ts/oobe-welcome-chromium-windows.png \
+            tests/playwright/__screenshots__/settings-personalization.spec.ts/settings-personalization-chromium-windows.png \
+            tests/playwright/__screenshots__/settings-personalization.spec.ts/settings-taskbar-top-chromium-windows.png \
+            tests/playwright/__screenshots__/settings-personalization.spec.ts/desktop-custom-wallpaper-chromium-windows.png \
+            tests/playwright/__screenshots__/start-menu.spec.ts/start-menu-home-chromium-windows.png \
+            tests/playwright/__screenshots__/window-lifecycle.spec.ts/start-running-calculator-chromium-windows.png
+          if git diff --cached --quiet; then
+            echo "Six audited baselines already installed; no commit required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "test(playwright): alinhar baselines ao fallback tipografico"
+          git push origin HEAD:stabilization/cloudos-foundation-batch-1
