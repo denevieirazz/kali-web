@@ -1,0 +1,86 @@
+name: CloudOS Linux System Center Cgroups
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/cloudos-linux-system-center-cgroups]
+    paths:
+      - 'core/wsl/cloudos-core/**'
+      - 'backend/src/system/**'
+      - 'backend/test/linux-system-center-backend.test.js'
+      - 'frontend/src/apps/TaskManager/**'
+      - 'frontend/test/linuxSystemCenterModel.test.js'
+      - 'frontend/test/systemCenterComponentContract.test.js'
+      - 'scripts/*linux-system-center-cgroups*'
+      - 'scripts/probe-cgroup-control.mjs'
+      - 'docs/LINUX_SYSTEM_CENTER_CGROUPS.md'
+      - '.github/workflows/linux-system-center-cgroups.yml'
+  pull_request:
+    paths:
+      - 'core/wsl/cloudos-core/**'
+      - 'backend/src/system/**'
+      - 'frontend/src/apps/TaskManager/**'
+      - 'scripts/*linux-system-center-cgroups*'
+      - 'scripts/probe-cgroup-control.mjs'
+
+jobs:
+  linux-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: core/wsl/cloudos-core
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache-dependency-path: core/wsl/cloudos-core/go.sum
+      - name: Verify modules
+        run: go mod verify
+      - name: Test cloudos-core
+        run: go test ./...
+      - name: Build cloudos-core
+        run: go build -trimpath -o "${RUNNER_TEMP}/cloudos-core" ./cmd/cloudos-core
+
+  windows-contracts:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: npm
+      - name: Install workspace dependencies
+        run: npm ci
+      - name: Backend regression and contracts
+        run: npm test
+      - name: Frontend tests
+        run: npm --prefix frontend test
+      - name: Frontend TypeScript contract
+        run: npm --prefix frontend run lint
+      - name: Frontend production build
+        run: npm --prefix frontend run build
+      - name: Approved secure Terminal adapter regression
+        run: node --test backend/test/wsl-core-terminal.test.js
+      - name: Parse physical probes
+        run: |
+          node --check scripts/probe-linux-system-center-cgroups.mjs
+          node --check scripts/probe-cgroup-control.mjs
+      - name: Parse PowerShell contracts
+        shell: pwsh
+        run: |
+          foreach ($file in @('./scripts/validate-linux-system-center-cgroups.ps1','./scripts/test-linux-system-center-cgroups-contract.ps1')) {
+            $tokens=$null; $errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|ForEach-Object{Write-Error "$file : $($_.Message)"};exit 1}
+          }
+      - name: Safety boundary contract
+        shell: pwsh
+        run: ./scripts/test-linux-system-center-cgroups-contract.ps1
+      - name: Diff whitespace
+        shell: pwsh
+        run: git diff --check 2d3380ba562d23e05947f81cc9581e8fe9bcfdbc...HEAD
