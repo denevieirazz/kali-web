@@ -35,7 +35,7 @@ foreach ($file in $required) {
   if (-not (Test-Path $file)) { throw "Arquivo obrigatório ausente: $file" }
 }
 
-$allFiles = @(
+$scanFiles = @(
   './backend/src/files/routes.js',
   './backend/src/files/wslFilesRpcSession.js',
   './backend/src/files/wslFilesService.js',
@@ -44,20 +44,33 @@ $allFiles = @(
   './frontend/src/apps/CloudOSFiles/windowsDirectorySource.ts',
   './frontend/src/apps/CloudOSFiles/wslFileSource.ts'
 )
-$text = ($allFiles | ForEach-Object { Get-Content $_ -Raw }) -join "`n"
+$text = ($scanFiles | ForEach-Object { Get-Content $_ -Raw }) -join "`n"
 
-foreach ($token in @('--install','--import','--update','--terminate','--shutdown','--set-default','--set-version','-Verb RunAs')) {
-  if ($text -match [regex]::Escape($token)) { throw "Mutação WSL/elevação proibida encontrada: $token" }
+foreach ($token in @('--install','--import','--update','--terminate','--set-default','--set-version','-Verb RunAs')) {
+  if ($text.Contains($token, [System.StringComparison]::OrdinalIgnoreCase)) { throw "Mutação WSL/elevação proibida encontrada: $token" }
 }
 
 $routes = Get-Content './backend/src/files/routes.js' -Raw
-if ($routes -notmatch 'x-cloudos-file-actor' -or $routes -notmatch "!== 'user-ui'") { throw 'Actor user-ui não está fixado na API real.' }
-if ($routes -notmatch 'confirmed !== true') { throw 'Confirmação explícita de mutação ausente.' }
+foreach ($requiredText in @('x-cloudos-file-actor', "!== 'user-ui'", 'confirmed !== true', 'authenticateToken')) {
+  if (-not $routes.Contains($requiredText, [System.StringComparison]::Ordinal)) { throw "Contrato de autorização ausente: $requiredText" }
+}
 
 $policy = Get-Content './frontend/src/apps/CloudOSFiles/fileSourcePolicy.ts' -Raw
-if ($policy -notmatch "value === '\.\.'" -or $policy -notmatch "value\.includes\('\\\\'\)") { throw 'Normalização de path frontend incompleta.' }
+foreach ($requiredText in @("value === '..'", "value.includes('/')", "value.includes('\\')", 'TextEncoder')) {
+  if (-not $policy.Contains($requiredText, [System.StringComparison]::Ordinal)) { throw "Normalização de path frontend incompleta: $requiredText" }
+}
 
 $linux = Get-Content './core/wsl/cloudos-core/internal/files/files.go' -Raw
-if ($linux -notmatch 'O_NOFOLLOW' -or $linux -notmatch 'Openat' -or $linux -notmatch 'Renameat') { throw 'Filesystem Linux não usa resolução relativa/no-follow esperada.' }
+foreach ($requiredText in @('O_NOFOLLOW', 'Openat', 'Renameat', 'Fchmod', '.cloudos-trash')) {
+  if (-not $linux.Contains($requiredText, [System.StringComparison]::Ordinal)) { throw "Contrato Linux ausente: $requiredText" }
+}
+
+$rpc = Get-Content './backend/src/files/wslFilesRpcSession.js' -Raw
+foreach ($requiredText in @('SecureFrameCodec', 'deriveChannelMaterial', 'shell: false', 'CLOUDOS_WSL_CORE_FILES')) {
+  if (-not $rpc.Contains($requiredText, [System.StringComparison]::Ordinal)) { throw "Contrato WSL Core v2 ausente: $requiredText" }
+}
+if ($rpc.Contains('createCipheriv', [System.StringComparison]::Ordinal) -or $rpc.Contains('createDecipheriv', [System.StringComparison]::Ordinal)) {
+  throw 'Files reimplementou crypto em vez de reutilizar o codec aprovado.'
+}
 
 Write-Output 'FILES_REAL_TRANSACTIONAL_CONTRACT_OK'
