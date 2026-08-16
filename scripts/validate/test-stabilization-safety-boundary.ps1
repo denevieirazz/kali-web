@@ -95,7 +95,7 @@ $validationSources = @(
     (Get-Content -LiteralPath $MyInvocation.MyCommand.Path -Raw)
 ) -join "`n"
 
-$forbiddenGit = '(?im)\bgit(?:\.exe)?\s+(?:reset\b|rebase\b|merge\b|clean\s+[^\r\n]*-f|checkout\s+[^\r\n]*-f|push\s+[^\r\n]*(?:--force(?:-with-lease)?|-f\b))'
+$forbiddenGit = '(?im)\bgit(?:\.exe)?\s+(?:reset\b|rebase\b|merge(?=\s|$)|clean\s+[^\r\n]*-f|checkout\s+[^\r\n]*-f|push\s+[^\r\n]*(?:--force(?:-with-lease)?|-f\b))'
 if ($validationSources -match $forbiddenGit) { throw 'DESTRUCTIVE_GIT_COMMAND_FORBIDDEN' }
 
 $forbiddenWsl = '(?im)\bwsl(?:\.exe)?\s+(?:--install\b|--unregister\b|--shutdown\b|--set-default\b|--set-default-version\b|--set-version\b|--update\b|--import\b|--export\b)'
