@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, type ComponentType } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import type { IconType } from 'react-icons';
 import { FaFile, FaFileAlt, FaFileArchive, FaFileAudio, FaFileCode, FaFileImage, FaFilePdf, FaFileVideo, FaFolder, FaLink, FaMarkdown, FaMicrochip } from 'react-icons/fa';
 import { VscJson } from 'react-icons/vsc';
 import { canGenerateImageThumbnail, classifyFileVisual, fileVisualLabel, type FileVisualKind } from './fileVisualPolicy.js';
@@ -6,7 +7,7 @@ import { scheduleImageThumbnail, type ThumbnailResult } from './thumbnailManager
 import { readFile, type FileEntry } from './opfsFileService';
 import './CloudOSFiles.visual.css';
 
-const ICONS: Record<FileVisualKind, ComponentType<{ 'aria-hidden'?: boolean }>> = {
+const ICONS: Record<FileVisualKind, IconType> = {
   folder: FaFolder,
   text: FaFileAlt,
   markdown: FaMarkdown,
