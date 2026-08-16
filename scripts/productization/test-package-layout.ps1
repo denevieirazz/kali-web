@@ -27,9 +27,16 @@ Add-Type -AssemblyName System.IO.Compression
 $zip=[IO.Compression.ZipFile]::OpenRead([string]$result.portableZip)
 try{
     $entries=@($zip.Entries.FullName)
-    foreach($required in @('Iniciar CloudOS.cmd','app/CloudOS.Bootstrap.exe','app/app/host/CloudOS.Host.exe','runtime/node.exe','data-portable/','logs/')){
+    foreach($required in @('Iniciar CloudOS.cmd','app/CloudOS.Bootstrap.exe','app/app/host/CloudOS.Host.exe','runtime/node.exe')){
         if($entries -notcontains $required){throw "PORTABLE_ENTRY_MISSING:$required"}
     }
     if($entries | Where-Object {$_ -match '(^|/)node_modules/|(^|/)test-results/|\.env($|\.)|\.log$'}){throw 'PORTABLE_FORBIDDEN_CONTENT'}
+    $launcherEntry=$zip.GetEntry('Iniciar CloudOS.cmd')
+    if($null -eq $launcherEntry){throw 'PORTABLE_LAUNCHER_MISSING'}
+    $reader=[IO.StreamReader]::new($launcherEntry.Open())
+    try{$launcher=$reader.ReadToEnd()}finally{$reader.Dispose()}
+    foreach($required in @('mkdir "%~dp0data-portable"','mkdir "%~dp0logs"','CLOUDOS_LOCAL_ROOT=%~dp0data-portable','--node "%~dp0runtime\node.exe"')){
+        if($launcher.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "PORTABLE_LAUNCHER_CONTRACT_MISSING:$required"}
+    }
 }finally{$zip.Dispose()}
 Write-Host "PRODUCTIZATION_PACKAGE_LAYOUT_OK setup=$($result.setup) portable=$($result.portableZip)"
