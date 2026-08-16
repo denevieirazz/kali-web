@@ -13,7 +13,8 @@ if($bootstrap -notmatch [regex]::Escape('VelopackApp.Build().Run();')){throw 'VE
 if($bootstrapProject -notmatch 'PackageReference Include="Velopack" Version="1\.2\.0"'){throw 'VELOPACK_NUGET_VERSION_DRIFT'}
 if($bootstrapProject -notmatch 'ApplicationDefinition Remove="App\.xaml"' -or $bootstrapProject -notmatch 'Page Include="App\.xaml"'){throw 'VELOPACK_WPF_MAIN_CONTRACT_MISSING'}
 
-$allProductFiles=Get-ChildItem -LiteralPath (Join-Path $root 'scripts\productization') -File -Recurse
+$contractPath=[IO.Path]::GetFullPath($PSCommandPath)
+$allProductFiles=Get-ChildItem -LiteralPath (Join-Path $root 'scripts\productization') -File -Recurse | Where-Object {[IO.Path]::GetFullPath($_.FullName) -ne $contractPath}
 $text=($allProductFiles | ForEach-Object {Get-Content -LiteralPath $_.FullName -Raw}) -join "`n"
 foreach($forbidden in @('wsl.exe --update','wsl --update','wsl.exe --install','wsl --install','wsl.exe --unregister','wsl --unregister','Stop-Process -Name','taskkill /IM','gh release create')){
     if($text.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "FORBIDDEN_PRODUCTIZATION_OPERATION:$forbidden"}
