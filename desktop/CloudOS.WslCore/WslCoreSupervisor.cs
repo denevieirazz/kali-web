@@ -219,7 +219,7 @@ public sealed class WslCoreSupervisor : IAsyncDisposable
 
     internal static void ValidateLinuxPath(string path)
     {
-        if (string.IsNullOrWhiteSpace(path) || !path.StartsWith('/', StringComparison.Ordinal) || path.Length > 4096 || path.Contains('\0'))
+        if (string.IsNullOrWhiteSpace(path) || !path.StartsWith("/", StringComparison.Ordinal) || path.Length > 4096 || path.Contains('\0'))
             throw new ArgumentException("Invalid Linux cloudos-core path.", nameof(path));
     }
 
