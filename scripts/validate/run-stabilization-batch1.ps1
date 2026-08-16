@@ -142,7 +142,7 @@ try {
             Write-JsonFile (Join-Path $runDirectory 'commands.json') @($commandResults)
             if ($process.ExitCode -ne 0) {
                 $tail = (($stderr -split "`r?`n") | Select-Object -Last 20) -join ' | '
-                throw "COMMAND_FAILED:$Name:$($process.ExitCode):$tail"
+                throw "COMMAND_FAILED:${Name}:$($process.ExitCode):$tail"
             }
         } finally {
             $process.Dispose()
@@ -229,7 +229,7 @@ try {
             if (-not (Test-Path -LiteralPath $currentState)) { throw "SESSION_STATE_MISSING:$Mode" }
             $session = Get-Content -LiteralPath $currentState -Raw | ConvertFrom-Json
             if ($session.mode -ne $Mode -or $session.status -ne 'running') {
-                throw "SESSION_NOT_RUNNING:$Mode:$($session.status)"
+                throw "SESSION_NOT_RUNNING:${Mode}:$($session.status)"
             }
             if ($Mode -eq 'WebOnly') {
                 $components = @($session.processes | ForEach-Object { $_.component })

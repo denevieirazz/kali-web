@@ -26,6 +26,12 @@ $config = Read-RepoText 'backend/src/config/index.js'
 $entry = Read-RepoText 'Validar CloudOS.cmd'
 $runner = Read-RepoText 'scripts/validate/run-stabilization-batch1.ps1'
 
+$runnerPath = Join-Path $root 'scripts/validate/run-stabilization-batch1.ps1'
+$tokens = $null
+$parseErrors = $null
+[void][System.Management.Automation.Language.Parser]::ParseFile($runnerPath,[ref]$tokens,[ref]$parseErrors)
+if ($parseErrors.Count) { throw "PHYSICAL_RUNNER_PARSE_FAILED:$($parseErrors[0].Message)" }
+
 Assert-Contains $entry 'run-stabilization-batch1\.ps1' 'VALIDATION_ENTRYPOINT_TARGET_MISSING'
 Assert-Contains $runner 'stabilization-batch-1' 'CANONICAL_RESULTS_AREA_MISSING'
 Assert-Contains $runner 'CLOUDOS_DATA_DIR' 'ISOLATED_DATA_ENV_MISSING'
