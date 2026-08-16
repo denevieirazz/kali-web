@@ -35,7 +35,7 @@ function isTypingTarget(target: EventTarget | null) {
 }
 
 function isSymlinkEntry(entry: FileEntry) {
-  const candidate = entry as FileEntry & { kind: string; isSymlink?: boolean };
+  const candidate = entry as unknown as { kind?: string; isSymlink?: boolean };
   return candidate.kind === 'symlink' || candidate.isSymlink === true;
 }
 
