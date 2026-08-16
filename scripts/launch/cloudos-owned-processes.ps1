@@ -1,39 +1,38 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-function Get-CloudOSOwnedSessionManifest {
-    param([Parameter(Mandatory)]$Session)
-    if (-not $Session.id) { throw 'SESSION_OWNERSHIP_ID_MISSING' }
-    if (-not $Session.logDirectory) { throw 'SESSION_OWNERSHIP_LOG_DIRECTORY_MISSING' }
-    $manifestPath = Join-Path ([string]$Session.logDirectory) 'manifest.json'
-    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "SESSION_OWNERSHIP_MANIFEST_MISSING:$manifestPath" }
-    try { $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json }
-    catch { throw "SESSION_OWNERSHIP_MANIFEST_INVALID:${manifestPath}:$($_.Exception.Message)" }
-    if ([string]$manifest.id -ne [string]$Session.id) { throw "SESSION_OWNERSHIP_MANIFEST_ID_MISMATCH:expected=$($Session.id):actual=$($manifest.id)" }
-    if ([string]$manifest.logDirectory -ne [string]$Session.logDirectory) { throw 'SESSION_OWNERSHIP_MANIFEST_LOG_DIRECTORY_MISMATCH' }
-    return [ordered]@{ path=$manifestPath; manifest=$manifest }
-}
+# Ownership primitives live in cloudos-launcher-common.ps1 so the same identity
+# rules are used by launcher, runner and teardown. This file contains only the
+# higher-level assertions shared by stop/validation flows.
 
-function Stop-CloudOSRecordedProcesses {
-    param([Parameter(Mandatory)]$Session)
+function Assert-CloudOSSessionProcessesAlive {
+    param(
+        [Parameter(Mandatory)]$Session,
+        [string[]]$RequiredComponents=@()
+    )
     $ownership = Get-CloudOSOwnedSessionManifest $Session
     $manifest = $ownership.manifest
-    foreach ($record in @($manifest.processes) | Sort-Object { [int]$_.pid } -Descending) {
-        if (-not $record.pid -or -not $record.startedAt -or -not $record.component) { throw "SESSION_OWNERSHIP_RECORD_INCOMPLETE:$($ownership.path)" }
-        $process = Get-Process -Id ([int]$record.pid) -ErrorAction SilentlyContinue
-        if (-not $process) { continue }
-        try { $actualStart = $process.StartTime.ToUniversalTime().ToString('o') } catch [System.InvalidOperationException] { continue }
-        if ($actualStart -ne [string]$record.startedAt) {
-            Write-CloudOSLog $Session "PID $($record.pid) existe, mas StartTime nao pertence a sessao; processo preservado." 'WARN'
-            continue
+    foreach($component in $RequiredComponents){
+        $records=@($manifest.processes|Where-Object{[string]$_.component -eq $component})
+        if($records.Count -eq 0){throw "SESSION_COMPONENT_RECORD_MISSING:${component}:$($ownership.path)"}
+        foreach($record in $records){
+            $check=Test-CloudOSProcessOwnership $manifest $record
+            if(-not $check.running){throw "SESSION_PROCESS_EXITED:${component}:pid=$($record.pid)"}
+            if(-not $check.owned){throw "SESSION_PROCESS_OWNERSHIP_LOST:${component}:pid=$($record.pid):reason=$($check.reason)"}
         }
-        Write-CloudOSLog $Session "Encerrando processo pertencente a sessao component=$($record.component) pid=$($record.pid) manifest=$($ownership.path)."
-        try {
-            Stop-Process -Id $process.Id -ErrorAction Stop
-            if (-not $process.WaitForExit(5000)) {
-                Stop-Process -Id $process.Id -Force -ErrorAction Stop
-                if (-not $process.WaitForExit(3000)) { throw "OWNED_PROCESS_DID_NOT_EXIT:$($record.component):$($record.pid)" }
-            }
-        } catch { throw "SESSION_TEARDOWN_FAILED:$($record.component):$($record.pid):$($_.Exception.Message)" }
     }
+    return $manifest
+}
+
+function Assert-NoCloudOSOwnedProcessesRemain {
+    param([Parameter(Mandatory)]$Session)
+    $ownership=Get-CloudOSOwnedSessionManifest $Session
+    $manifest=$ownership.manifest
+    $remaining=[System.Collections.Generic.List[string]]::new()
+    foreach($record in @($manifest.processes)){
+        $check=Test-CloudOSProcessOwnership $manifest $record
+        if($check.running -and $check.owned){$remaining.Add("$($record.component):$($record.pid)")}
+    }
+    if($remaining.Count -gt 0){throw "ORPHAN_SESSION_PROCESS:$($remaining -join ',')"}
+    return $true
 }

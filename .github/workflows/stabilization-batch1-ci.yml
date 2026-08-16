@@ -181,7 +181,9 @@ jobs:
         run: npx playwright test tests/playwright/native-browser.spec.ts --output="${{ env.CLOUDOS_RESULT_DIR }}\native-browser" --reporter=list
       - name: Native Browser Host smoke and teardown
         shell: pwsh
-        run: ./scripts/test-native-browser-host-smoke.ps1
+        run: |
+          ./scripts/validate/test-launcher-runtime.ps1
+          ./scripts/test-native-browser-host-smoke.ps1
       - name: Check batch diff
         shell: pwsh
         run: git diff --check 2d3380ba562d23e05947f81cc9581e8fe9bcfdbc...HEAD
