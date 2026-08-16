@@ -36,7 +36,7 @@ try{
     $outTask=$process.StandardOutput.ReadToEndAsync();$errTask=$process.StandardError.ReadToEndAsync()
     $manifestPath=Join-Path $runtime 'backend-port.json';$deadline=[DateTime]::UtcNow.AddSeconds(30);$manifest=$null
     while([DateTime]::UtcNow -lt $deadline){
-        if($process.HasExited){$out=$outTask.GetAwaiter().GetResult();$err=$errTask.GetAwaiter().GetResult();throw "PACKAGED_NODE_BACKEND_EXITED:$($process.ExitCode):$err:$out"}
+        if($process.HasExited){$out=$outTask.GetAwaiter().GetResult();$err=$errTask.GetAwaiter().GetResult();throw "PACKAGED_NODE_BACKEND_EXITED:$($process.ExitCode):${err}:${out}"}
         if(Test-Path -LiteralPath $manifestPath){try{$manifest=Get-Content -LiteralPath $manifestPath -Raw|ConvertFrom-Json}catch{};if($manifest){break}}
         Start-Sleep -Milliseconds 120
     }
