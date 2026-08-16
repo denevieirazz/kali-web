@@ -28,6 +28,16 @@ jobs:
       - name: Prove clean detached worktree
         shell: pwsh
         run: ./scripts/productization/test-clean-worktree.ps1
+      - name: Parse all productization PowerShell scripts
+        shell: pwsh
+        run: |
+          $allErrors = @()
+          Get-ChildItem scripts/productization -Filter *.ps1 -File -Recurse | ForEach-Object {
+            $tokens = $null; $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$tokens,[ref]$errors) | Out-Null
+            if($errors){ $allErrors += $errors | ForEach-Object { "$($_.Extent.File):$($_.Extent.StartLineNumber): $($_.Message)" } }
+          }
+          if($allErrors){ throw ($allErrors -join "`n") }
       - name: Install root dependencies once
         run: npm ci --include=dev
       - name: Productization static contract
@@ -90,6 +100,16 @@ jobs:
       - name: Prove clean detached worktree
         shell: pwsh
         run: ./scripts/productization/test-clean-worktree.ps1
+      - name: Parse all productization PowerShell scripts
+        shell: pwsh
+        run: |
+          $allErrors = @()
+          Get-ChildItem scripts/productization -Filter *.ps1 -File -Recurse | ForEach-Object {
+            $tokens = $null; $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$tokens,[ref]$errors) | Out-Null
+            if($errors){ $allErrors += $errors | ForEach-Object { "$($_.Extent.File):$($_.Extent.StartLineNumber): $($_.Message)" } }
+          }
+          if($allErrors){ throw ($allErrors -join "`n") }
       - name: Productization static contract
         shell: pwsh
         run: ./scripts/productization/test-productization-contract.ps1
@@ -113,6 +133,18 @@ jobs:
       - name: Prove packaged Node without global Node
         shell: pwsh
         run: ./scripts/productization/test-packaged-node-runtime.ps1
+      - name: Build local update fixture
+        shell: pwsh
+        run: ./scripts/productization/new-update-fixture.ps1
+      - name: Velopack update engine tests
+        shell: pwsh
+        run: |
+          $fixture = Get-Content artifacts/update-fixture-result.json -Raw | ConvertFrom-Json
+          dotnet run --project desktop/CloudOS.Productization.Tests/CloudOS.Productization.Tests.csproj -c Release -- $fixture.directory $fixture.currentVersion $fixture.nextVersion
+          if($LASTEXITCODE -ne 0){ throw 'VELOPACK_UPDATE_ENGINE_TEST_FAILED' }
+      - name: Apply update, restart health and rollback
+        shell: pwsh
+        run: ./scripts/productization/test-update-rollback.ps1
       - name: Backup and restore contract
         shell: pwsh
         run: ./scripts/productization/test-backup-restore.ps1
@@ -139,10 +171,12 @@ jobs:
           path: |
             artifacts/releases/
             artifacts/portable/
+            artifacts/update-fixture/
             artifacts/manifest.json
             artifacts/checksums.sha256
             artifacts/components.json
             artifacts/licenses/
             artifacts/SBOM/
             artifacts/package-result.json
+            artifacts/update-fixture-result.json
             artifacts/tooling.json
