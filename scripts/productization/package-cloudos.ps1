@@ -10,6 +10,12 @@ $buildResultPath = Join-Path $paths.Build 'build-result.json'
 if (-not (Test-Path -LiteralPath $buildResultPath)) { throw 'BUILD_RESULT_MISSING:run Compilar CloudOS.cmd first' }
 $buildResult = Get-Content -LiteralPath $buildResultPath -Raw | ConvertFrom-Json
 if ($buildResult.head -ne $sha) { throw "BUILD_HEAD_MISMATCH:built=$($buildResult.head) current=$sha" }
+if ([string]$buildResult.corePackage -ne './cmd/cloudos-core') { throw "CLOUDOS_CORE_PACKAGE_MISMATCH:$($buildResult.corePackage)" }
+if ([string]$buildResult.coreGoos -ne 'linux' -or [string]$buildResult.coreGoarch -ne 'amd64') { throw "CLOUDOS_CORE_TARGET_MISMATCH:$($buildResult.coreGoos)/$($buildResult.coreGoarch)" }
+if ([string]$buildResult.coreSha256 -notmatch '^[0-9a-f]{64}$') { throw 'CLOUDOS_CORE_BUILD_HASH_INVALID' }
+if (-not (Test-Path -LiteralPath $buildResult.core -PathType Leaf)) { throw 'CLOUDOS_CORE_BUILD_OUTPUT_MISSING' }
+$coreBuildHash=(Get-FileHash -LiteralPath $buildResult.core -Algorithm SHA256).Hash.ToLowerInvariant()
+if($coreBuildHash -ne ([string]$buildResult.coreSha256).ToLowerInvariant()){throw 'CLOUDOS_CORE_BUILD_HASH_MISMATCH'}
 
 Remove-Item -LiteralPath $paths.Staging,$paths.Releases,$paths.Portable -Recurse -Force -ErrorAction SilentlyContinue
 $stage = Ensure-CloudOSDirectory $paths.Staging
@@ -27,7 +33,10 @@ $runtimeDir = Ensure-CloudOSDirectory (Join-Path $stage 'runtime')
 $nodeCache = Ensure-CloudOSNodeRuntime
 Copy-Item -LiteralPath (Join-Path $nodeCache 'node.exe') -Destination (Join-Path $runtimeDir 'node.exe') -Force
 if (Test-Path -LiteralPath (Join-Path $nodeCache 'LICENSE')) { Copy-Item -LiteralPath (Join-Path $nodeCache 'LICENSE') -Destination (Join-Path $runtimeDir 'NODE-LICENSE.txt') -Force }
-Copy-Item -LiteralPath $buildResult.core -Destination (Join-Path $runtimeDir 'cloudos-core') -Force
+$coreStagePath=Join-Path $runtimeDir 'cloudos-core'
+Copy-Item -LiteralPath $buildResult.core -Destination $coreStagePath -Force
+$coreStageHash=(Get-FileHash -LiteralPath $coreStagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+if($coreStageHash -ne ([string]$buildResult.coreSha256).ToLowerInvariant()){throw 'CLOUDOS_CORE_STAGING_HASH_MISMATCH'}
 
 $meta = Ensure-CloudOSDirectory (Join-Path $stage 'meta')
 $sbom = Ensure-CloudOSDirectory (Join-Path $meta 'SBOM')
@@ -65,14 +74,23 @@ $components=[ordered]@{
         [ordered]@{name='backend';kind='node-esm-bundle';runtime="Node $($config.nodeVersion)";path='agent/backend/src/server.js'},
         [ordered]@{name='frontend';kind='vite-production';path='web/index.html'},
         [ordered]@{name='node';kind='runtime';version=$config.nodeVersion;path='runtime/node.exe'},
-        [ordered]@{name='cloudos-core';kind='linux-amd64';path='runtime/cloudos-core'}
+        [ordered]@{name='cloudos-core';kind='linux-amd64';package='./cmd/cloudos-core';goos='linux';goarch='amd64';path='runtime/cloudos-core';sha256=$coreStageHash}
     )
 }
 Write-CloudOSJson $components (Join-Path $meta 'components.json')
 Assert-CloudOSStagingClean $stage
+$unexpectedGoSource=Get-ChildItem -LiteralPath $stage -File -Recurse | Where-Object {$_.Extension -eq '.go' -or $_.Name -in @('go.mod','go.sum')}
+if($unexpectedGoSource){throw "STAGING_GO_SOURCE_FORBIDDEN:$((@($unexpectedGoSource.FullName)-join ','))"}
+$coreFiles=@(Get-ChildItem -LiteralPath $runtimeDir -File | Where-Object {$_.Name -eq 'cloudos-core'})
+if($coreFiles.Count -ne 1){throw "STAGING_CLOUDOS_CORE_COUNT_INVALID:$($coreFiles.Count)"}
 
 $inventory = New-CloudOSFileInventory $stage
-$manifest=[ordered]@{ schemaVersion=1; product=$config.product; version=$config.version; head=$sha; channel=$config.channel; rid=$config.rid; signing=$config.signing; generatedAt=[DateTimeOffset]::UtcNow.ToString('O'); files=$inventory }
+$manifest=[ordered]@{
+    schemaVersion=1; product=$config.product; version=$config.version; head=$sha; channel=$config.channel; rid=$config.rid; signing=$config.signing;
+    generatedAt=[DateTimeOffset]::UtcNow.ToString('O');
+    core=[ordered]@{path='runtime/cloudos-core';package='./cmd/cloudos-core';goos='linux';goarch='amd64';sha256=$coreStageHash};
+    files=$inventory
+}
 Write-CloudOSJson $manifest (Join-Path $meta 'manifest.json') 40
 Write-CloudOSChecksums $stage (Join-Path $meta 'checksums.sha256') @('meta/checksums.sha256')
 
@@ -109,6 +127,6 @@ Invoke-CloudOSExternal $vpk @('pack','--packId',[string]$config.packId,'--packVe
 $setup = Get-ChildItem -LiteralPath $releaseDir -File -Filter '*Setup.exe' | Select-Object -First 1
 $full = Get-ChildItem -LiteralPath $releaseDir -File -Filter '*-full.nupkg' | Select-Object -First 1
 if (-not $setup -or -not $full) { throw 'VELOPACK_REQUIRED_OUTPUT_MISSING' }
-$result=[ordered]@{schemaVersion=1;head=$sha;version=$config.version;rid=$config.rid;signing=$config.signing;staging=$stage;portableZip=$portableZip;setup=$setup.FullName;fullPackage=$full.FullName;status='packaged'}
+$result=[ordered]@{schemaVersion=1;head=$sha;version=$config.version;rid=$config.rid;signing=$config.signing;staging=$stage;portableZip=$portableZip;setup=$setup.FullName;fullPackage=$full.FullName;coreSha256=$coreStageHash;status='packaged'}
 Write-CloudOSJson $result (Join-Path $paths.Artifacts 'package-result.json')
-Write-Host "CLOUDOS_PRODUCT_PACKAGED setup=$($setup.FullName) portable=$portableZip"
+Write-Host "CLOUDOS_PRODUCT_PACKAGED setup=$($setup.FullName) portable=$portableZip coreSha256=$coreStageHash"
