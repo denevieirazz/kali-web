@@ -15,7 +15,7 @@ test('browser unavailable without Native Host is explained as Full-mode capabili
 test('browser does not offer impossible retry when host cannot exist in session',()=>{
   assert.match(browser,/launcher\.status === 'error' && !hostUnavailable/);
   assert.match(browser,/hostUnavailable &&/);
-  assert.match(browser,/>Fechar</);
+  assert.match(browser,/\>\s*Fechar\s*</);
 });
 
 test('start menu marks and blocks Browser before creating process in no-host session',()=>{

@@ -34,7 +34,7 @@ test('recovery UX only saves after an explicit picker and offers copy save print
   assert.equal(recoveryActions.includes('localStorage'), false);
   assert.equal(recoveryActions.includes('indexedDB'), false);
   assert.equal(recoveryActions.includes('navigator.storage'), false);
-  for (const label of ['Copiar', 'Salvar .txt', 'Imprimir']) assert.ok(setup.includes(label));
+  for (const label of ['Copiar', 'Salvar arquivo de recuperação', 'Imprimir']) assert.ok(setup.includes(label));
   assert.ok(lock.includes('Selecionar arquivo .txt'));
   assert.ok(lock.includes('type="file"'));
   assert.ok(lock.includes('setRotatedCode(null)'));

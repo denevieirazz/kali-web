@@ -12,7 +12,7 @@ const transport = fs.readFileSync(path.join(root, 'src/apps/CloudOSTerminal/term
 
 test('Terminal visível preserva workspace existente e usa transporte lifecycle', () => {
   assert.match(workspace, /workspace\.tabs\.map/); assert.match(workspace, /workspace\.splitId/); assert.match(workspace, /closeTab\(/);
-  for (const token of [/createTerminalTransport/, /transport\.dispose\(\)/, /inputSubscription\.dispose\(\)/, /resizeSubscription\.dispose\(\)/, /resizeObserver\.disconnect\(\)/, /terminal\.dispose\(\)/]) assert.match(session, token);
+  for (const token of [/createTerminalTransport/, /transport\?\.dispose\(\)/, /inputSubscription\?\.dispose\(\)/, /resizeSubscription\?\.dispose\(\)/, /resizeObserver\?\.disconnect\(\)/, /terminal\.dispose\(\)/]) assert.match(session, token);
 });
 
 test('UI expõe somente distro modo e estado, nunca segredo porta ou PID', () => {
@@ -21,7 +21,7 @@ test('UI expõe somente distro modo e estado, nunca segredo porta ou PID', () =>
 });
 
 test('Terminal não adiciona Enter ao input e Ctrl+C é sinal explícito', () => {
-  assert.match(session, /transport\.input\(data\)/); assert.match(transport, /data === '\\x03'/); assert.match(transport, /type: 'signal', signal: 'interrupt'/);
+  assert.match(session, /transport\?\.input\(data\)/); assert.match(transport, /data === '\\x03'/); assert.match(transport, /type: 'signal', signal: 'interrupt'/);
   assert.doesNotMatch(session, /data\s*\+\s*['"`]\\r|data\s*\+\s*['"`]\\n/);
 });
 

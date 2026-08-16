@@ -31,7 +31,7 @@ test('visual errors are locally contained',()=>{
 
 test('terminal transport contract remains WSL Core v2 aware',()=>{
   assert.match(source,/WSL_CORE_MODE/);
-  assert.match(source,/transport\.resize/);
+  assert.match(source,/transport\?\.resize/);
   assert.match(source,/transport\?\.input/);
   assert.match(source,/transport\?\.dispose/);
 });
