@@ -127,8 +127,8 @@ internal sealed class WslCoreSecureChannel : IAsyncDisposable
             throw new WslCoreProtocolException("FRAME_SEQUENCE", "Protected frame sequence is invalid.");
 
         var cipherLength = protectedBody.Length - SequenceBytes - TagBytes;
-        var ciphertext = protectedBody.AsSpan(SequenceBytes, cipherLength);
-        var tag = protectedBody.AsSpan(SequenceBytes + cipherLength, TagBytes);
+        var ciphertext = protectedBody[SequenceBytes..(SequenceBytes + cipherLength)];
+        var tag = protectedBody[(SequenceBytes + cipherLength)..];
         var nonce = WslCoreProtocol.MakeNonce(_readPrefix, sequence);
         var aad = WslCoreProtocol.MakeAad(_readLabel, sequence);
         var plaintext = new byte[cipherLength];
