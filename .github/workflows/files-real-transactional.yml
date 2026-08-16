@@ -15,6 +15,7 @@ on:
       - 'core/wsl/cloudos-core/internal/files/**'
       - 'core/wsl/cloudos-core/internal/server/files_handler.go'
       - 'core/wsl/cloudos-core/internal/server/server.go'
+      - 'scripts/start-cloudos-files-real-transactional.ps1'
       - 'scripts/test-files-real-transactional-contract.ps1'
       - '.github/workflows/files-real-transactional.yml'
 
@@ -71,12 +72,14 @@ jobs:
         run: npm --prefix frontend run build
       - name: Approved secure Terminal adapter regression
         run: node --test backend/test/wsl-core-terminal.test.js
-      - name: Parse Files PowerShell contract
+      - name: Parse Files PowerShell scripts
         shell: pwsh
         run: |
-          $tokens=$null; $errors=$null
-          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path './scripts/test-files-real-transactional-contract.ps1'),[ref]$tokens,[ref]$errors)
-          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+          foreach($script in @('./scripts/start-cloudos-files-real-transactional.ps1','./scripts/test-files-real-transactional-contract.ps1')) {
+            $tokens=$null; $errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $script),[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|ForEach-Object{Write-Error "$script`: $($_.Message)"};exit 1}
+          }
       - name: Files safety boundary
         shell: pwsh
         run: ./scripts/test-files-real-transactional-contract.ps1
