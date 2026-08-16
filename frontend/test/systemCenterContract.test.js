@@ -17,7 +17,7 @@ test('System Center consumes public kernel resource, service and driver APIs', (
   assert.doesNotMatch(source, /kernel\._/);
 });
 
-test('destructive process action remains blocked for the reserved system PID range', () => {
-  assert.match(source, /isSystemProcess\(selectedProcess\)/);
-  assert.match(source, /terminateProcess\(selectedProcess\.pid\)/);
+test('destructive virtual process action remains blocked for the reserved system PID range', () => {
+  assert.match(source, /isSystemProcess\(selectedVirtual\)/);
+  assert.match(source, /terminateVirtual\(selectedVirtual\.pid\)/);
 });
