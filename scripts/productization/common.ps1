@@ -173,7 +173,7 @@ function Assert-CloudOSStagingClean {
     $badDirs = Get-ChildItem -LiteralPath $Root -Directory -Recurse | Where-Object { $forbiddenDirectories -contains $_.Name }
     if ($badDirs) { throw "STAGING_FORBIDDEN_DIRECTORY:$((@($badDirs.FullName) -join ','))" }
     $badFiles = Get-ChildItem -LiteralPath $Root -File -Recurse | Where-Object {
-        $_.Name -match '^\.env($|\.)|cloudos\.(json|db)$|\.(sqlite|sqlite3|db)$|\.log$' -or $_.Name -match '(secret|credential|private[_-]?key)' 
+        $_.Name -match '^\.env($|\.)|cloudos\.(json|db)$|\.(sqlite|sqlite3|db)$|\.log$' -or $_.Name -match '(secret|credential|private[_-]?key)'
     }
     if ($badFiles) { throw "STAGING_FORBIDDEN_FILE:$((@($badFiles.FullName) -join ','))" }
 }
