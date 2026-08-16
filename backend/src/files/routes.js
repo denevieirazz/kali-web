@@ -1,6 +1,7 @@
 import express from 'express';
 import { authenticateToken } from '../middleware/auth.js';
 import { wslFilesService } from './wslFilesService.js';
+import { startWslCopyTransaction } from './wslFileTransactions.js';
 
 export const filesRouter = express.Router();
 filesRouter.use(authenticateToken);
@@ -114,8 +115,8 @@ filesRouter.post('/copy', requireConfirmed, async (req, res) => {
   try {
     const source = pathSegments(req.body?.source, { allowEmpty: false });
     const destination = pathSegments(req.body?.destination, { allowEmpty: false });
-    const result = await wslFilesService.request('fs.copy', { source, destination }, 30000);
-    return res.json({ source: 'wsl', ...result });
+    const operation = startWslCopyTransaction(source, destination);
+    return res.status(202).json({ source: 'wsl', operation });
   } catch (error) { return sendError(res, error, error?.code === 'FILES_PATH_INVALID' ? 400 : 503); }
 });
 
