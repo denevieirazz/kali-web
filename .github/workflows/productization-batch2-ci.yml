@@ -82,6 +82,7 @@ jobs:
         run: git diff --check ffaa9fd302065fbfd7c7123896d19465c1cd3e8a...HEAD
 
   windows-product:
+    needs: linux-compatible
     runs-on: windows-2025
     steps:
       - name: Checkout exact productization branch
