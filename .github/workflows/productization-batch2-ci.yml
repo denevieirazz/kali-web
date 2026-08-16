@@ -43,6 +43,9 @@ jobs:
       - name: Productization static contract
         shell: pwsh
         run: ./scripts/productization/test-productization-contract.ps1
+      - name: Go executable package contract
+        shell: pwsh
+        run: ./scripts/productization/test-go-build-contract.ps1
       - name: Lint
         run: npm run lint
       - name: Backend regression
@@ -66,6 +69,9 @@ jobs:
       - name: Go core tests
         working-directory: core/wsl/cloudos-core
         run: go test ./...
+      - name: Build explicit Linux core package
+        working-directory: core/wsl/cloudos-core
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags=-buildid= -o "${RUNNER_TEMP}/cloudos-core-linux-amd64" ./cmd/cloudos-core
       - name: Backup and restore contract
         shell: pwsh
         run: ./scripts/productization/test-backup-restore.ps1
@@ -113,6 +119,9 @@ jobs:
       - name: Productization static contract
         shell: pwsh
         run: ./scripts/productization/test-productization-contract.ps1
+      - name: Go executable package contract
+        shell: pwsh
+        run: ./scripts/productization/test-go-build-contract.ps1
       - name: Prepare reproducible toolchain
         shell: pwsh
         run: ./scripts/productization/prepare-cloudos.ps1 -AllowDetached
@@ -130,6 +139,9 @@ jobs:
       - name: Validate package layout and supply chain
         shell: pwsh
         run: ./scripts/productization/test-package-layout.ps1
+      - name: Packaged WSL core smoke when existing WSL is available
+        shell: pwsh
+        run: ./scripts/productization/test-wsl-core-package-smoke.ps1 -SkipIfUnavailable
       - name: Prove packaged Node without global Node
         shell: pwsh
         run: ./scripts/productization/test-packaged-node-runtime.ps1
