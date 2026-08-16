@@ -9,6 +9,22 @@ param(
 . (Join-Path $PSScriptRoot 'cloudos-owned-processes.ps1')
 . (Join-Path $PSScriptRoot '..\validate\cloudos-node-dependencies.ps1')
 
+function Wait-NativeHostWindow {
+    param(
+        [Parameter(Mandatory)]$Session,
+        [Parameter(Mandatory)][System.Diagnostics.Process]$HostRuntime,
+        [int]$TimeoutSeconds=45
+    )
+    $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while([DateTime]::UtcNow -lt $deadline){
+        Assert-CloudOSProcessAlive $Session $HostRuntime 'host-runtime'
+        $HostRuntime.Refresh()
+        if($HostRuntime.MainWindowHandle -ne [IntPtr]::Zero){return $HostRuntime}
+        Start-Sleep -Milliseconds 150
+    }
+    throw "HOST_UI_READINESS_TIMEOUT:hostPid=$($HostRuntime.Id):log=$($Session.logDirectory)"
+}
+
 function Wait-NativeHostBackendRuntime {
     param(
         [Parameter(Mandatory)]$Session,
@@ -77,26 +93,31 @@ try {
 
     $readiness=$null
     if ($Mode -in @('Full','BrowserValidation')) {
-        Write-CloudOSLog $session 'Compilando frontend para o Host nativo.'
+        Write-CloudOSLog $session 'Compilando frontend e Host nativo antes do start desacoplado.'
+        $bootstrapLog=Join-Path $session.logDirectory 'bootstrap.log'
+        $hostProject=Join-Path $script:CloudOSRoot 'desktop\CloudOS.Host\CloudOS.Host.csproj'
         Push-Location $script:CloudOSRoot
         try {
-            & $pre.npm --prefix frontend run build *>> (Join-Path $session.logDirectory 'bootstrap.log')
-            if ($LASTEXITCODE -ne 0) { throw "FRONTEND_BUILD_FAILED:${LASTEXITCODE}:log=$(Join-Path $session.logDirectory 'bootstrap.log')" }
+            & $pre.npm --prefix frontend run build *>> $bootstrapLog
+            if ($LASTEXITCODE -ne 0) { throw "FRONTEND_BUILD_FAILED:${LASTEXITCODE}:log=$bootstrapLog" }
+            & $pre.dotnet build $hostProject -c Release *>> $bootstrapLog
+            if ($LASTEXITCODE -ne 0) { throw "HOST_BUILD_FAILED:${LASTEXITCODE}:log=$bootstrapLog" }
         } finally { Pop-Location }
 
+        $hostExe=Join-Path $script:CloudOSRoot 'desktop\CloudOS.Host\bin\Release\net8.0-windows10.0.19041.0\CloudOS.Host.exe'
+        if(-not(Test-Path -LiteralPath $hostExe -PathType Leaf)){throw "HOST_EXECUTABLE_MISSING_AFTER_BUILD:$hostExe"}
         $hostOut = Join-Path $session.logDirectory 'host.log'
         $hostErr = Join-Path $session.logDirectory 'host.stderr.log'
-        $hostScript = Join-Path $script:CloudOSRoot 'scripts\run-native-host.ps1'
-        $hostArgs = @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',$hostScript)
-        if ($Mode -eq 'BrowserValidation') { $hostArgs += '-DeveloperMode' }
-        $hostLauncher = Start-CloudOSLoggedProcess $session 'host' $pre.pwsh $hostArgs $hostOut $hostErr @{
+        $hostArgs = @('--root',$script:CloudOSRoot)
+        if ($Mode -eq 'BrowserValidation') { $hostArgs += '--developer-mode' }
+        $hostRuntime = Start-CloudOSLoggedProcess $session 'host-runtime' $hostExe $hostArgs $hostOut $hostErr @{
             CLOUDOS_LAUNCH_MODE=$Mode
             CLOUDOS_RUNTIME_DIR=$session.runtimeDirectory
             CLOUDOS_DATA_DIR=$session.dataDirectory
             CLOUDOS_SESSION_ID=$session.id
             CLOUDOS_SESSION_LOG_DIR=$session.logDirectory
         }
-        $hostRuntime=Wait-CloudOSHostRuntime -Session $session -HostLauncher $hostLauncher -TimeoutSeconds 45
+        [void](Wait-NativeHostWindow -Session $session -HostRuntime $hostRuntime -TimeoutSeconds 45)
         $nativeRuntime=Wait-NativeHostBackendRuntime -Session $session -HostRuntime $hostRuntime -TimeoutSeconds 30
         $backendPid=[int]$nativeRuntime.manifest.pid
         $backendProcess=Get-Process -Id $backendPid -ErrorAction SilentlyContinue
@@ -110,7 +131,7 @@ try {
             status='ready'
             mode=$Mode
             readyAt=(Get-Date).ToUniversalTime().ToString('o')
-            hostLauncherPid=$hostLauncher.Id
+            hostLauncherPid=$null
             hostRuntimePid=$hostRuntime.Id
             shellWindowReady=$true
             frontendIndex=$frontendIndex
