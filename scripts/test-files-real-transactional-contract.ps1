@@ -1,9 +1,11 @@
 $ErrorActionPreference = 'Stop'
 $base = '2d3380ba562d23e05947f81cc9581e8fe9bcfdbc'
 
-if (-not (git cat-file -e "$base^{commit}" 2>$null)) { throw "Base oficial $base não disponível no checkout." }
+& git rev-parse --verify "$($base)^{commit}" *> $null
+if ($LASTEXITCODE -ne 0) { throw "Base oficial $base não disponível no checkout." }
 
 $changed = @(git diff --name-only "$base...HEAD")
+if ($LASTEXITCODE -ne 0) { throw "Não foi possível comparar HEAD com a base oficial $base." }
 if (-not $changed.Count) { throw 'Nenhuma mudança detectada para Files real/transacional.' }
 
 $forbiddenPatterns = @(
