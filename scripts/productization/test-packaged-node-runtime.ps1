@@ -22,7 +22,9 @@ try{
     $system32=Join-Path $env:SystemRoot 'System32'
     $env:PATH=$system32
     & (Join-Path $system32 'where.exe') node.exe *> $null
-    if($LASTEXITCODE -eq 0){throw 'GLOBAL_NODE_STILL_DISCOVERABLE_IN_SANITIZED_PATH'}
+    $globalNodeExit=$LASTEXITCODE
+    $global:LASTEXITCODE=0
+    if($globalNodeExit -eq 0){throw 'GLOBAL_NODE_STILL_DISCOVERABLE_IN_SANITIZED_PATH'}
     $info=[Diagnostics.ProcessStartInfo]::new()
     $info.FileName=$node;$info.WorkingDirectory=$stage;$info.UseShellExecute=$false;$info.CreateNoWindow=$true
     $info.RedirectStandardOutput=$true;$info.RedirectStandardError=$true
@@ -47,9 +49,11 @@ try{
     Invoke-RestMethod -Uri "$api/_cloudos/supervisor/shutdown" -Method Post -Headers @{'X-CloudOS-Supervisor-Token'=$token} -TimeoutSec 4 | Out-Null
     if(-not $process.WaitForExit(10000)){throw 'PACKAGED_NODE_GRACEFUL_STOP_TIMEOUT'}
     if($process.ExitCode -ne 0){throw "PACKAGED_NODE_BACKEND_EXIT_NONZERO:$($process.ExitCode)"}
+    $global:LASTEXITCODE=0
     Write-Host "PRODUCTIZATION_PACKAGED_NODE_RUNTIME_OK pid=$($process.Id) globalNode=false staging=$stage"
 }finally{
     $env:PATH=$previousPath
     if($process){if(-not $process.HasExited){try{$process.Kill($false);$process.WaitForExit()}catch{}};$process.Dispose()}
     Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
 }
+$global:LASTEXITCODE=0
