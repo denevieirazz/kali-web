@@ -570,7 +570,7 @@ function Invoke-CloudOSGracefulStop {
         }else{
             $taskkill=(Get-Command taskkill.exe -ErrorAction SilentlyContinue)
             if($taskkill){
-                & $taskkill.Source /PID $Process.Id 1>> (Join-Path $Session.logDirectory 'teardown.log') 2>>&1
+                & $taskkill.Source /PID $Process.Id *>> (Join-Path $Session.logDirectory 'teardown.log')
             }else{
                 $method='graceful-unavailable'
             }
