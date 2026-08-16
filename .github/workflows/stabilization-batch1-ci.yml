@@ -55,17 +55,17 @@ jobs:
         run: npm test
         env:
           NODE_ENV: test
-          CLOUDOS_TEST_ROOT: ${{ runner.temp }}/cloudos-batch1
-          CLOUDOS_DATA_DIR: ${{ runner.temp }}/cloudos-batch1/data
-          DATABASE_PATH: ${{ runner.temp }}/cloudos-batch1/data/cloudos.json
+          CLOUDOS_TEST_ROOT: ${{ runner.temp }}/cloudos-batch1/backend-regression
+          CLOUDOS_DATA_DIR: ${{ runner.temp }}/cloudos-batch1/backend-regression/data
+          DATABASE_PATH: ${{ runner.temp }}/cloudos-batch1/backend-regression/data/cloudos.json
 
       - name: E2E regression
         run: npm run test:e2e
         env:
           NODE_ENV: test
-          CLOUDOS_TEST_ROOT: ${{ runner.temp }}/cloudos-batch1
-          CLOUDOS_DATA_DIR: ${{ runner.temp }}/cloudos-batch1/data
-          DATABASE_PATH: ${{ runner.temp }}/cloudos-batch1/data/cloudos.json
+          CLOUDOS_TEST_ROOT: ${{ runner.temp }}/cloudos-batch1/e2e-regression
+          CLOUDOS_DATA_DIR: ${{ runner.temp }}/cloudos-batch1/e2e-regression/data
+          DATABASE_PATH: ${{ runner.temp }}/cloudos-batch1/e2e-regression/data/cloudos.json
 
       - name: Frontend regression
         run: npm run test:frontend
@@ -156,17 +156,17 @@ jobs:
         run: npm.cmd test
         env:
           NODE_ENV: test
-          CLOUDOS_TEST_ROOT: ${{ runner.temp }}\cloudos-batch1
-          CLOUDOS_DATA_DIR: ${{ runner.temp }}\cloudos-batch1\data
-          DATABASE_PATH: ${{ runner.temp }}\cloudos-batch1\data\cloudos.json
+          CLOUDOS_TEST_ROOT: ${{ runner.temp }}\cloudos-batch1\backend-regression
+          CLOUDOS_DATA_DIR: ${{ runner.temp }}\cloudos-batch1\backend-regression\data
+          DATABASE_PATH: ${{ runner.temp }}\cloudos-batch1\backend-regression\data\cloudos.json
 
       - name: E2E regression
         run: npm.cmd run test:e2e
         env:
           NODE_ENV: test
-          CLOUDOS_TEST_ROOT: ${{ runner.temp }}\cloudos-batch1
-          CLOUDOS_DATA_DIR: ${{ runner.temp }}\cloudos-batch1\data
-          DATABASE_PATH: ${{ runner.temp }}\cloudos-batch1\data\cloudos.json
+          CLOUDOS_TEST_ROOT: ${{ runner.temp }}\cloudos-batch1\e2e-regression
+          CLOUDOS_DATA_DIR: ${{ runner.temp }}\cloudos-batch1\e2e-regression\data
+          DATABASE_PATH: ${{ runner.temp }}\cloudos-batch1\e2e-regression\data\cloudos.json
 
       - name: Frontend regression
         run: npm.cmd run test:frontend

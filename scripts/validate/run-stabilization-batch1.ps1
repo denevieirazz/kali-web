@@ -7,12 +7,8 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-if (-not $IsWindows) {
-    throw 'WINDOWS_PHYSICAL_VALIDATION_REQUIRED'
-}
-if ($PSVersionTable.PSVersion.Major -lt 7) {
-    throw 'POWERSHELL_7_REQUIRED'
-}
+if (-not $IsWindows) { throw 'WINDOWS_PHYSICAL_VALIDATION_REQUIRED' }
+if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'POWERSHELL_7_REQUIRED' }
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $expectedBranch = 'stabilization/cloudos-foundation-batch-1'
@@ -62,11 +58,26 @@ try {
         CLOUDOS_NATIVE_HOST = $env:CLOUDOS_NATIVE_HOST
     }
 
+    $baseDataDirectory = Join-Path $isolatedDataDirectory 'validation'
+    New-Item -ItemType Directory -Force -Path $baseDataDirectory | Out-Null
     $env:NODE_ENV = 'test'
-    $env:CLOUDOS_DATA_DIR = $isolatedDataDirectory
-    $env:CLOUDOS_TEST_ROOT = $isolatedDataDirectory
-    $env:DATABASE_PATH = Join-Path $isolatedDataDirectory 'cloudos.json'
+    $env:CLOUDOS_DATA_DIR = $baseDataDirectory
+    $env:CLOUDOS_TEST_ROOT = $baseDataDirectory
+    $env:DATABASE_PATH = Join-Path $baseDataDirectory 'cloudos.json'
     $env:CLOUDOS_NATIVE_HOST = '0'
+
+    function Get-IsolatedTestEnvironment {
+        param([Parameter(Mandatory)][string]$Scope)
+        $scopeDirectory = Join-Path $isolatedDataDirectory $Scope
+        New-Item -ItemType Directory -Force -Path $scopeDirectory | Out-Null
+        return @{
+            NODE_ENV = 'test'
+            CLOUDOS_DATA_DIR = $scopeDirectory
+            CLOUDOS_TEST_ROOT = $scopeDirectory
+            DATABASE_PATH = (Join-Path $scopeDirectory 'cloudos.json')
+            CLOUDOS_NATIVE_HOST = '0'
+        }
+    }
 
     Write-JsonFile (Join-Path $runDirectory 'git.json') ([ordered]@{
         branch = $branch
@@ -101,11 +112,11 @@ try {
         param(
             [Parameter(Mandatory)][string]$Name,
             [Parameter(Mandatory)][string]$FilePath,
-            [string[]]$Arguments = @()
+            [string[]]$Arguments = @(),
+            [hashtable]$Environment = @{}
         )
         $stdoutPath = Join-Path $commandsDirectory "$Name.stdout.log"
         $stderrPath = Join-Path $commandsDirectory "$Name.stderr.log"
-        $startedAt = (Get-Date).ToUniversalTime().ToString('o')
         Write-Host "[CloudOS Validate] $Name"
 
         $info = [System.Diagnostics.ProcessStartInfo]::new()
@@ -116,9 +127,11 @@ try {
         $info.RedirectStandardOutput = $true
         $info.RedirectStandardError = $true
         foreach ($argument in $Arguments) { [void]$info.ArgumentList.Add([string]$argument) }
+        foreach ($key in $Environment.Keys) { $info.Environment[$key] = [string]$Environment[$key] }
 
         $process = [System.Diagnostics.Process]::new()
         $process.StartInfo = $info
+        $startedAt = (Get-Date).ToUniversalTime().ToString('o')
         try {
             if (-not $process.Start()) { throw "COMMAND_START_FAILED:$Name" }
             $stdoutTask = $process.StandardOutput.ReadToEndAsync()
@@ -130,8 +143,6 @@ try {
             Set-Content -LiteralPath $stderrPath -Value $stderr -Encoding UTF8
             $record = [ordered]@{
                 name = $Name
-                file = $FilePath
-                arguments = @($Arguments)
                 exitCode = $process.ExitCode
                 startedAt = $startedAt
                 finishedAt = (Get-Date).ToUniversalTime().ToString('o')
@@ -179,12 +190,9 @@ try {
             $process = Get-Process -Id ([int]$record.pid) -ErrorAction SilentlyContinue
             if (-not $process) { continue }
             try {
-                if ($process.StartTime.ToUniversalTime().ToString('o') -eq [string]$record.startedAt) {
-                    throw "ORPHAN_SESSION_PROCESS:$($record.component):$($record.pid)"
-                }
-            } catch [System.InvalidOperationException] {
-                continue
-            }
+                $sameProcess = $process.StartTime.ToUniversalTime().ToString('o') -eq [string]$record.startedAt
+                if ($sameProcess) { throw "ORPHAN_SESSION_PROCESS:$($record.component):$($record.pid)" }
+            } catch [System.InvalidOperationException] { continue }
         }
     }
 
@@ -198,18 +206,15 @@ try {
             try {
                 $current = Get-Content -LiteralPath $currentState -Raw | ConvertFrom-Json
                 if ($current.status -in @('starting','running')) {
-                    $liveOwned = $false
                     foreach ($record in @($current.processes)) {
                         $process = Get-Process -Id ([int]$record.pid) -ErrorAction SilentlyContinue
                         if (-not $process) { continue }
                         try {
                             if ($process.StartTime.ToUniversalTime().ToString('o') -eq [string]$record.startedAt) {
-                                $liveOwned = $true
-                                break
+                                throw "ACTIVE_CLOUDOS_SESSION_DETECTED:$($current.id)"
                             }
-                        } catch { }
+                        } catch [System.InvalidOperationException] { }
                     }
-                    if ($liveOwned) { throw "ACTIVE_CLOUDOS_SESSION_DETECTED:$($current.id)" }
                 }
             } catch {
                 if ($_.Exception.Message -like 'ACTIVE_CLOUDOS_SESSION_DETECTED:*') { throw }
@@ -231,16 +236,11 @@ try {
             if ($session.mode -ne $Mode -or $session.status -ne 'running') {
                 throw "SESSION_NOT_RUNNING:${Mode}:$($session.status)"
             }
-            if ($Mode -eq 'WebOnly') {
-                $components = @($session.processes | ForEach-Object { $_.component })
-                if ($components -notcontains 'backend' -or $components -notcontains 'frontend') {
-                    throw 'WEBONLY_EXPECTED_COMPONENTS_MISSING'
-                }
+            $components = @($session.processes | ForEach-Object { $_.component })
+            if ($Mode -eq 'WebOnly' -and ($components -notcontains 'backend' -or $components -notcontains 'frontend')) {
+                throw 'WEBONLY_EXPECTED_COMPONENTS_MISSING'
             }
-            if ($Mode -eq 'Full') {
-                $components = @($session.processes | ForEach-Object { $_.component })
-                if ($components -notcontains 'host') { throw 'FULL_HOST_PROCESS_MISSING' }
-            }
+            if ($Mode -eq 'Full' -and $components -notcontains 'host') { throw 'FULL_HOST_PROCESS_MISSING' }
 
             $launcherSessions.Add([ordered]@{
                 mode = $Mode
@@ -294,8 +294,8 @@ try {
     }
     Invoke-CapturedCommand 'lint' $npm @('run','lint')
     Invoke-CapturedCommand 'build' $npm @('run','build')
-    Invoke-CapturedCommand 'backend-tests' $npm @('test')
-    Invoke-CapturedCommand 'e2e-tests' $npm @('run','test:e2e')
+    Invoke-CapturedCommand 'backend-tests' $npm @('test') (Get-IsolatedTestEnvironment 'backend-regression')
+    Invoke-CapturedCommand 'e2e-tests' $npm @('run','test:e2e') (Get-IsolatedTestEnvironment 'e2e-regression')
     Invoke-CapturedCommand 'frontend-tests' $npm @('run','test:frontend')
 
     Invoke-CapturedCommand 'host-build' $dotnet @('build','desktop/CloudOS.Host/CloudOS.Host.csproj','-c','Release')
@@ -325,13 +325,11 @@ try {
     )
     Invoke-CapturedCommand 'playwright-browser-lifecycle' $npx @(
         'playwright','test','tests/playwright/native-browser-lifecycle.spec.ts',
-        '--output', (Join-Path $runDirectory 'playwright-native-browser-lifecycle'),
-        '--reporter=list'
+        '--output',(Join-Path $runDirectory 'playwright-native-browser-lifecycle'),'--reporter=list'
     )
     Invoke-CapturedCommand 'playwright-browser' $npx @(
         'playwright','test','tests/playwright/native-browser.spec.ts',
-        '--output', (Join-Path $runDirectory 'playwright-native-browser'),
-        '--reporter=list'
+        '--output',(Join-Path $runDirectory 'playwright-native-browser'),'--reporter=list'
     )
 
     Invoke-LauncherSmoke -Mode 'WebOnly'
@@ -342,7 +340,6 @@ try {
 
     $beforeWsl = Get-Content -LiteralPath (Join-Path $safetyDirectory 'wsl-before.txt') -Raw
     $afterWsl = Get-Content -LiteralPath (Join-Path $safetyDirectory 'wsl-after.txt') -Raw
-    $wslSnapshotStable = $beforeWsl -eq $afterWsl
     Write-JsonFile (Join-Path $runDirectory 'summary.json') ([ordered]@{
         schemaVersion = 1
         status = 'passed'
@@ -351,10 +348,10 @@ try {
         base = $expectedBase
         commandCount = $commandResults.Count
         launcherModes = @($launcherSessions | ForEach-Object { $_.mode })
-        isolatedDatabase = $env:DATABASE_PATH
+        isolatedDataDirectory = $isolatedDataDirectory
         realDatabaseUsed = $false
         wslMutationCommandsExecuted = $false
-        wslReadOnlySnapshotStable = $wslSnapshotStable
+        wslReadOnlySnapshotStable = ($beforeWsl -eq $afterWsl)
         physicalAndVisualApproval = 'external-pending'
         finishedAt = (Get-Date).ToUniversalTime().ToString('o')
     })
@@ -390,11 +387,8 @@ try {
     if ($previousEnvironment) {
         foreach ($name in $previousEnvironment.Keys) {
             $value = $previousEnvironment[$name]
-            if ($null -eq $value) {
-                Remove-Item "Env:$name" -ErrorAction SilentlyContinue
-            } else {
-                [Environment]::SetEnvironmentVariable($name,[string]$value,'Process')
-            }
+            if ($null -eq $value) { Remove-Item "Env:$name" -ErrorAction SilentlyContinue }
+            else { [Environment]::SetEnvironmentVariable($name,[string]$value,'Process') }
         }
     }
     Pop-Location

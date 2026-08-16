@@ -21,7 +21,6 @@ function Assert-Contains {
 
 $common = Read-RepoText 'scripts/launch/cloudos-launcher-common.ps1'
 $start = Read-RepoText 'scripts/launch/start-cloudos.ps1'
-$stop = Read-RepoText 'scripts/launch/stop-cloudos.ps1'
 $config = Read-RepoText 'backend/src/config/index.js'
 $entry = Read-RepoText 'Validar CloudOS.cmd'
 $runner = Read-RepoText 'scripts/validate/run-stabilization-batch1.ps1'
@@ -36,6 +35,7 @@ Assert-Contains $entry 'run-stabilization-batch1\.ps1' 'VALIDATION_ENTRYPOINT_TA
 Assert-Contains $runner 'stabilization-batch-1' 'CANONICAL_RESULTS_AREA_MISSING'
 Assert-Contains $runner 'CLOUDOS_DATA_DIR' 'ISOLATED_DATA_ENV_MISSING'
 Assert-Contains $runner 'CLOUDOS_TEST_ROOT' 'ISOLATED_TEST_ROOT_MISSING'
+Assert-Contains $runner 'DATABASE_PATH' 'ISOLATED_DATABASE_ENV_MISSING'
 
 Assert-Contains $common 'dataDirectory=\(Join-Path \$sessionDir ''data''\)' 'SESSION_DATA_DIRECTORY_MISSING'
 Assert-Contains $start '\$env:CLOUDOS_DATA_DIR\s*=\s*\$session\.dataDirectory' 'LAUNCHER_DATA_ISOLATION_MISSING'
@@ -50,12 +50,11 @@ foreach ($marker in @(
     'frontend.stderr.log',
     'host.log',
     'bootstrap.log',
-    'processes-before.json',
-    'processes-after.json',
     'result.json'
 )) {
     Assert-Contains ($common + $start) ([regex]::Escape($marker)) "PERSISTENT_LOG_CONTRACT_MISSING:$marker"
 }
+Assert-Contains $common 'processes-\$When\.json' 'PERSISTENT_PROCESS_SNAPSHOT_CONTRACT_MISSING'
 
 Assert-Contains $common 'StartTime' 'PROCESS_IDENTITY_START_TIME_GATE_MISSING'
 Assert-Contains $common 'Stop-Process\s+-Id' 'RECORDED_PID_TEARDOWN_MISSING'
