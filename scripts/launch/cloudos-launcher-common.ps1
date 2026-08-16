@@ -433,11 +433,10 @@ function Get-CloudOSComponentErrorLog {
     switch -Regex ($Component) {
         '^backend' { return Join-Path $Session.logDirectory 'backend.stderr.log' }
         '^frontend' { return Join-Path $Session.logDirectory 'frontend.stderr.log' }
-        '^host' { return Join-Path $Session.logDirectory 'host.stderr.log' }
+        '^host-runtime$' { return Join-Path $Session.logDirectory 'host.stderr.log' }
         default { return Join-Path $Session.logDirectory 'launcher.log' }
     }
 }
-
 function Assert-CloudOSProcessAlive {
     param([Parameter(Mandatory)]$Session,[Parameter(Mandatory)][System.Diagnostics.Process]$Process,[Parameter(Mandatory)][string]$Component)
     $record = @($Session.processes | Where-Object { [int]$_.pid -eq $Process.Id -and [string]$_.component -eq $Component } | Select-Object -First 1)
@@ -506,27 +505,6 @@ function Get-CloudOSDescendantCimProcesses {
         foreach($child in $children[$current]){$result.Add($child);$queue.Enqueue([int]$child.ProcessId)}
     }
     return @($result)
-}
-
-function Wait-CloudOSHostRuntime {
-    param([Parameter(Mandatory)]$Session,[Parameter(Mandatory)][System.Diagnostics.Process]$HostLauncher,[int]$TimeoutSeconds=45)
-    $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
-    while([DateTime]::UtcNow -lt $deadline){
-        Assert-CloudOSProcessAlive $Session $HostLauncher 'host'
-        foreach($candidate in @(Get-CloudOSDescendantCimProcesses $HostLauncher.Id)){
-            $exe=[string]$candidate.ExecutablePath
-            $cmd=[string]$candidate.CommandLine
-            $looksLikeHost=($exe -match '(?i)CloudOS\.Host\.exe$') -or ($cmd -match '(?i)CloudOS\.Host(?:\.dll|\.csproj)')
-            if(-not $looksLikeHost){continue}
-            $p=Get-Process -Id ([int]$candidate.ProcessId) -ErrorAction SilentlyContinue
-            if(-not $p){continue}
-            if($p.MainWindowHandle -eq [IntPtr]::Zero){continue}
-            [void](Add-CloudOSProcessRecord -Session $Session -Process $p -Component 'host-runtime' -StdOut (Join-Path $Session.logDirectory 'host.log') -StdErr (Join-Path $Session.logDirectory 'host.stderr.log'))
-            return $p
-        }
-        Start-Sleep -Milliseconds 200
-    }
-    throw "HOST_UI_READINESS_TIMEOUT:launcherPid=$($HostLauncher.Id):log=$($Session.logDirectory)"
 }
 
 function Get-CloudOSOwnedSessionManifest {
@@ -600,7 +578,6 @@ function Stop-CloudOSRecordedProcesses {
             $component=[string]$_.component
             if($component -eq 'host-runtime'){0}
             elseif($component -in @('backend-hosted','backend','frontend')){1}
-            elseif($component -eq 'host'){2}
             elseif($component.StartsWith('descendant:')){3}
             else{2}
         }},
