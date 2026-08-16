@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "batch": "stabilization-batch-1",
+  "branch": "stabilization/cloudos-foundation-batch-1",
+  "base": "2d3380ba562d23e05947f81cc9581e8fe9bcfdbc",
+  "physicalEntryPoint": "Validar CloudOS.cmd",
+  "pathTemplate": "test-results/stabilization-batch-1/<sha>/<execution-id>/",
+  "ciPathTemplate": "test-results/stabilization-batch-1/<sha>/<github-run-id>-<os>/",
+  "requiredArtifacts": [
+    "manifest.json",
+    "summary.json",
+    "git.json",
+    "environment.json",
+    "commands.json",
+    "commands/*.stdout.log",
+    "commands/*.stderr.log",
+    "safety/processes-before.json",
+    "safety/processes-after.json",
+    "safety/wsl-before.txt",
+    "safety/wsl-after.txt",
+    "evidence/launcher-sessions.json"
+  ],
+  "safetyBoundary": {
+    "realDatabase": "forbidden; isolated-data only",
+    "wslMutation": "forbidden",
+    "destructiveGit": "forbidden",
+    "processTeardown": "session-owned PID + StartTime only",
+    "physicalVisualApproval": "external"
+  },
+  "ci": {
+    "workflow": ".github/workflows/stabilization-batch1-ci.yml",
+    "jobs": [
+      "linux-core-and-node",
+      "windows-full-regression"
+    ]
+  }
+}
