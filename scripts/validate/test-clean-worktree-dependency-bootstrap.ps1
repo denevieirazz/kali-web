@@ -67,7 +67,7 @@ try{
   if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw "NODE_MODULES_JUNCTION_FORBIDDEN:$relative"}
  }
 
- $trackedChanges=@(& git -C $temp diff --name-only HEAD --)
+ $trackedChanges=@(& git -C $temp diff --ignore-cr-at-eol --name-only HEAD --)
  if($LASTEXITCODE -ne 0){throw "WORKTREE_TRACKED_DIFF_FAILED:$LASTEXITCODE"}
  $trackedChanges|Set-Content -LiteralPath (Join-Path $EvidenceDirectory 'tracked-changes.txt') -Encoding UTF8
  if($trackedChanges.Count -gt 0){throw "WORKTREE_TRACKED_FILES_CHANGED:$($trackedChanges -join ',')"}
