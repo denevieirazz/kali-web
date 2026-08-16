@@ -7,9 +7,12 @@ try{
     Push-Location $root
     try{& git worktree add --detach $temp $head;if($LASTEXITCODE -ne 0){throw 'PRODUCT_WORKTREE_ADD_FAILED'}}finally{Pop-Location}
     if(Test-Path -LiteralPath (Join-Path $temp 'node_modules')){throw 'PRODUCT_WORKTREE_NOT_CLEAN_NODE_MODULES_PRESENT'}
-    $status=(& git -C $temp status --porcelain=v1 --untracked-files=all 2>&1 | Out-String).Trim()
-    if($LASTEXITCODE -ne 0){throw "PRODUCT_WORKTREE_STATUS_FAILED:$status"}
-    if($status){throw "PRODUCT_WORKTREE_INITIAL_DIRTY:$status"}
+    $trackedInitial=(& git -C $temp diff --ignore-cr-at-eol --name-only HEAD -- 2>&1 | Out-String).Trim()
+    if($LASTEXITCODE -ne 0){throw "PRODUCT_WORKTREE_INITIAL_DIFF_FAILED:$trackedInitial"}
+    if($trackedInitial){throw "PRODUCT_WORKTREE_INITIAL_TRACKED_DIRTY:$trackedInitial"}
+    $untrackedInitial=(& git -C $temp ls-files --others --exclude-standard 2>&1 | Out-String).Trim()
+    if($LASTEXITCODE -ne 0){throw "PRODUCT_WORKTREE_INITIAL_UNTRACKED_CHECK_FAILED:$untrackedInitial"}
+    if($untrackedInitial){throw "PRODUCT_WORKTREE_INITIAL_UNTRACKED:$untrackedInitial"}
     & (Get-Command pwsh).Source -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $temp 'scripts\productization\test-productization-contract.ps1')
     if($LASTEXITCODE -ne 0){throw 'PRODUCT_WORKTREE_CONTRACT_FAILED'}
     $tracked=(& git -C $temp diff --ignore-cr-at-eol --name-only HEAD -- 2>&1 | Out-String).Trim()
