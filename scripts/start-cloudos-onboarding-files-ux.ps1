@@ -66,6 +66,16 @@ try {
     CLOUDOS_FRONTEND_STRICT_PORT = '1'
     CORS_ORIGIN = "http://127.0.0.1:$frontPort"
     JWT_SECRET = "cloudos-onboarding-files-ux-$runId"
+    CLOUDOS_NATIVE_HOST = '0'
+    CLOUDOS_SUPERVISOR_TOKEN = ''
+    CLOUDOS_HOST_LEASE_PIPE = ''
+    CLOUDOS_HOST_LEASE_TOKEN = ''
+    CLOUDOS_RUN_ID = ''
+    CLOUDOS_PARENT_PID = ''
+    CLOUDOS_WSL_CORE_FOUNDATION = '0'
+    CLOUDOS_WSL_CORE_FILES = '0'
+    CLOUDOS_WSL_CORE_TERMINAL = '0'
+    CLOUDOS_WSL_CORE_TERMINAL_FALLBACK = '0'
   }
 
   $backend = Start-NodeChild -Script (Join-Path $root 'backend\src\server.js') -WorkingDirectory (Join-Path $root 'backend') -Environment $environment
