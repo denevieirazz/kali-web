@@ -28,14 +28,16 @@ if($build -notmatch [regex]::Escape("`$coreOutput = Join-Path `$paths.Build 'clo
 if($build -notmatch [regex]::Escape("`$env:GOOS='linux'")){throw 'CLOUDOS_CORE_GOOS_NOT_LINUX'}
 if($build -notmatch [regex]::Escape("`$env:GOARCH='amd64'")){throw 'CLOUDOS_CORE_GOARCH_NOT_AMD64'}
 if($build -notmatch [regex]::Escape("`$env:CGO_ENABLED='0'")){throw 'CLOUDOS_CORE_CGO_NOT_DISABLED'}
-if($build -notmatch '(?s)if\s*\(\s*-not\s+\$IsWindows\s*\)\s*\{.*?Invoke-CloudOSExternal\s+\$go\s+@\(''test'',''\.\/\.\.\.'''\)\s+\$coreRoot'){throw 'CLOUDOS_CORE_LINUX_HOST_TEST_MISSING'}
+$linuxGuard='if (-not $IsWindows) {'
+$testCall="Invoke-CloudOSExternal `$go @('test','./...') `$coreRoot"
+$linuxGuardIndex=$build.IndexOf($linuxGuard,[StringComparison]::Ordinal)
+$testIndex=$build.IndexOf($testCall,[StringComparison]::Ordinal)
+$targetIndex=$build.IndexOf("`$env:GOOS='linux'",[StringComparison]::Ordinal)
+if($linuxGuardIndex -lt 0 -or $testIndex -lt 0 -or $testIndex -lt $linuxGuardIndex){throw 'CLOUDOS_CORE_LINUX_HOST_TEST_MISSING'}
+if($targetIndex -lt 0 -or $testIndex -gt $targetIndex){throw 'CLOUDOS_CORE_TEST_MUST_PRECEDE_CROSS_BUILD'}
 if($build -notmatch [regex]::Escape("Invoke-CloudOSExternal `$go @('build','-trimpath','-ldflags=-buildid=','-o',`$coreOutput,`$corePackage) `$coreRoot")){throw 'CLOUDOS_CORE_BUILD_COMMAND_CHANGED'}
 if($workflow -notmatch '(?ms)linux-compatible:.*?- name: Go core tests\s+working-directory: core/wsl/cloudos-core\s+run: go test \.\/\.\.\.'){throw 'CLOUDOS_CORE_CI_LINUX_TEST_MISSING'}
 if($workflow -notmatch '(?ms)windows-product:\s+needs:\s+linux-compatible'){throw 'CLOUDOS_CORE_WINDOWS_MUST_DEPEND_ON_LINUX_TESTS'}
-
-$testIndex=$build.IndexOf("Invoke-CloudOSExternal `$go @('test','./...') `$coreRoot",[StringComparison]::Ordinal)
-$targetIndex=$build.IndexOf("`$env:GOOS='linux'",[StringComparison]::Ordinal)
-if($testIndex -lt 0 -or $targetIndex -lt 0 -or $testIndex -gt $targetIndex){throw 'CLOUDOS_CORE_TEST_MUST_PRECEDE_CROSS_BUILD'}
 
 $forbidden=@(
     "@('build','-trimpath','-ldflags=-buildid=','-o',`$coreOutput,'.')",
