@@ -1,0 +1,82 @@
+name: CloudOS Files Real Transactional
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/cloudos-files-real-transactional]
+  pull_request:
+    paths:
+      - 'frontend/src/apps/CloudOSFiles/**'
+      - 'frontend/test/filesRealTransactionalContract.test.js'
+      - 'backend/src/files/**'
+      - 'backend/src/operations/operationManager.js'
+      - 'backend/src/app.js'
+      - 'backend/test/files-real-transactional.test.js'
+      - 'core/wsl/cloudos-core/internal/files/**'
+      - 'core/wsl/cloudos-core/internal/server/files_handler.go'
+      - 'core/wsl/cloudos-core/internal/server/server.go'
+      - 'scripts/test-files-real-transactional-contract.ps1'
+      - '.github/workflows/files-real-transactional.yml'
+
+jobs:
+  linux-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: core/wsl/cloudos-core
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache-dependency-path: core/wsl/cloudos-core/go.sum
+      - name: Verify formatting
+        shell: bash
+        run: test -z "$(gofmt -l ./internal/files ./internal/server)"
+      - name: Verify modules
+        run: go mod verify
+      - name: Test cloudos-core
+        run: go test ./...
+      - name: Build cloudos-core
+        run: go build ./cmd/cloudos-core
+
+  windows-contracts:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: npm
+      - name: Install workspace dependencies
+        run: npm ci
+      - name: Files backend contracts
+        run: node --test backend/test/files-real-transactional.test.js
+      - name: Backend regression suite
+        run: npm --prefix backend test
+      - name: Files frontend contracts
+        run: node --test frontend/test/filesRealTransactionalContract.test.js
+      - name: Frontend unit tests
+        run: npm --prefix frontend test
+      - name: Frontend TypeScript contract
+        run: npm --prefix frontend run lint
+      - name: Frontend production build
+        run: npm --prefix frontend run build
+      - name: Approved secure Terminal adapter regression
+        run: node --test backend/test/wsl-core-terminal.test.js
+      - name: Parse Files PowerShell contract
+        shell: pwsh
+        run: |
+          $tokens=$null; $errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path './scripts/test-files-real-transactional-contract.ps1'),[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+      - name: Files safety boundary
+        shell: pwsh
+        run: ./scripts/test-files-real-transactional-contract.ps1
+      - name: Diff whitespace
+        shell: pwsh
+        run: git diff --check 2d3380ba562d23e05947f81cc9581e8fe9bcfdbc...HEAD
