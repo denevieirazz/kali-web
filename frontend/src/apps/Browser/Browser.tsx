@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { NativeHostError, nativeHostBridge } from '../../services/nativeHostBridge';
+import { nativeHostBridge } from '../../services/nativeHostBridge';
 import { useProcessManager } from '../../stores/processManager';
 import { useWindowManager } from '../../stores/windowManager';
 import {
@@ -8,6 +8,8 @@ import {
   browserLauncherSuccess,
 } from './browserLauncherState.js';
 import './Browser.css';
+
+const HOST_REQUIRED_CODE = 'NATIVE_HOST_UNAVAILABLE';
 
 export default function BrowserApp({ windowId }: { windowId: string }) {
   const [launcher, setLauncher] = useState(browserLauncherOpening);
@@ -32,9 +34,12 @@ export default function BrowserApp({ windowId }: { windowId: string }) {
 
     if (!nativeHostBridge.available) {
       launching.current = false;
-      setLauncher(browserLauncherFailure(
-        new NativeHostError('NATIVE_HOST_UNAVAILABLE', 'O Navegador CloudOS requer o Host nativo.')
-      ));
+      setLauncher({
+        status: 'error',
+        code: HOST_REQUIRED_CODE,
+        message: 'Este recurso exige o modo Full. Feche esta sessão e execute “Iniciar CloudOS.cmd Full”.',
+        shouldClose: false,
+      });
       return;
     }
 
@@ -58,17 +63,29 @@ export default function BrowserApp({ windowId }: { windowId: string }) {
     void launchBrowser();
   }, [launchBrowser]);
 
+  const hostUnavailable = launcher.code === HOST_REQUIRED_CODE;
+
   return (
-    <div className="cloudos-browser-launcher" role="status" aria-live="polite">
+    <div
+      className="cloudos-browser-launcher"
+      role="status"
+      aria-live="polite"
+      data-browser-capability={hostUnavailable ? 'requires-full' : launcher.status}
+      data-browser-error-code={launcher.code || ''}
+    >
       <div className="browser-launcher-card">
         <div className="browser-launcher-icon" aria-hidden="true">◎</div>
         <h2>Navegador CloudOS</h2>
-        {launcher.code && <code className="browser-launcher-error-code">{launcher.code}</code>}
         <p>{launcher.message}</p>
         {launcher.status === 'opening' && <div className="browser-launcher-spinner" aria-label="Abrindo" />}
-        {launcher.status === 'error' && (
+        {launcher.status === 'error' && !hostUnavailable && (
           <button className="browser-launcher-retry" type="button" onClick={() => void launchBrowser()}>
             Tentar novamente
+          </button>
+        )}
+        {hostUnavailable && (
+          <button className="browser-launcher-retry" type="button" onClick={closeLauncher}>
+            Fechar
           </button>
         )}
         {launcher.status !== 'opening' && (

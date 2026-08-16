@@ -4,6 +4,7 @@ import { useWindowManager } from '../../stores/windowManager';
 import { useProcessManager } from '../../stores/processManager';
 import { useContextMenuStore } from '../../stores/contextMenuStore';
 import { useAppRegistry } from '../../core/appRegistry';
+import { nativeHostBridge } from '../../services/nativeHostBridge';
 import './StartMenu.css';
 import './StartMenu.native.css';
 
@@ -20,6 +21,9 @@ type App = {
   binaryPath?: string;
 };
 
+const requiresNativeHost = (app: App) => app.id === 'browser';
+const appUnavailable = (app: App) => requiresNativeHost(app) && !nativeHostBridge.available;
+
 function StartMenu() {
   const { isStartMenuOpen, closeStartMenu, currentUser } = useSystem();
   const allWindows = useWindowManager((s) => s.windows);
@@ -35,6 +39,7 @@ function StartMenu() {
   const apps = useAppRegistry((s: any) => s.apps) as Record<string, App>;
   const [view, setView] = useState<View>('home');
   const [query, setQuery] = useState('');
+  const [capabilityNotice, setCapabilityNotice] = useState('');
   const menuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -48,6 +53,7 @@ function StartMenu() {
     if (!isStartMenuOpen) {
       setQuery('');
       setView('home');
+      setCapabilityNotice('');
       return;
     }
     requestAnimationFrame(() => inputRef.current?.focus());
@@ -73,6 +79,10 @@ function StartMenu() {
   }, [isStartMenuOpen, closeStartMenu]);
 
   const launch = (app: App) => {
+    if (appUnavailable(app)) {
+      setCapabilityNotice(`${app.name} exige o modo Full. Execute “Iniciar CloudOS.cmd Full” para usar o Host nativo.`);
+      return;
+    }
     const pid = createProcess(app.id, app.name, app.icon);
     openWindow({
       title: app.name,
@@ -102,6 +112,10 @@ function StartMenu() {
 
   const context = (event: React.MouseEvent, app: App) => {
     event.preventDefault();
+    if (appUnavailable(app)) {
+      setCapabilityNotice(`${app.name} está indisponível nesta sessão porque o Native Host não está ativo.`);
+      return;
+    }
     openContextMenu(event.clientX, event.clientY, [
       { id: 'open', label: 'Abrir', icon: '⚡', onClick: () => launch(app) },
     ]);
@@ -113,9 +127,7 @@ function StartMenu() {
     <div className="start-menu-overlay">
       <div ref={menuRef} className="start-menu acrylic" role="dialog" aria-label="Menu Iniciar">
         <div className="start-search">
-          <span className="start-search-icon" aria-hidden="true">
-            🔍
-          </span>
+          <span className="start-search-icon" aria-hidden="true">🔍</span>
           <input
             ref={inputRef}
             className="start-search-input"
@@ -125,14 +137,16 @@ function StartMenu() {
           />
         </div>
 
+        {capabilityNotice && (
+          <div className="start-capability-notice" role="status" data-native-host-required="true">
+            {capabilityNotice}
+          </div>
+        )}
+
         {!query && (
           <nav className="start-native-tabs" aria-label="Seções">
-            <button className={view === 'home' ? 'active' : ''} onClick={() => setView('home')}>
-              Início
-            </button>
-            <button className={view === 'all' ? 'active' : ''} onClick={() => setView('all')}>
-              Todos
-            </button>
+            <button className={view === 'home' ? 'active' : ''} onClick={() => setView('home')}>Início</button>
+            <button className={view === 'all' ? 'active' : ''} onClick={() => setView('all')}>Todos</button>
             <button className={view === 'running' ? 'active' : ''} onClick={() => setView('running')}>
               Abertos <b>{windows.length}</b>
             </button>
@@ -157,13 +171,9 @@ function StartMenu() {
               <header>
                 <div>
                   <strong>Aplicativos abertos</strong>
-                  <small>
-                    {windows.length} janela{windows.length === 1 ? '' : 's'}
-                  </small>
+                  <small>{windows.length} janela{windows.length === 1 ? '' : 's'}</small>
                 </div>
-                <button className="close-all" disabled={!windows.length} onClick={closeAll}>
-                  Fechar todas
-                </button>
+                <button className="close-all" disabled={!windows.length} onClick={closeAll}>Fechar todas</button>
               </header>
               {windows.length ? (
                 <div className="running-list">
@@ -173,29 +183,13 @@ function StartMenu() {
                         <span className="running-icon">{window.icon || '🗔'}</span>
                         <span>
                           <strong>{window.title || window.appId}</strong>
-                          <small>
-                            {window.isMinimized
-                              ? 'Minimizada'
-                              : window.isActive
-                              ? 'Ativa'
-                              : 'Em execução'}
-                          </small>
+                          <small>{window.isMinimized ? 'Minimizada' : window.isActive ? 'Ativa' : 'Em execução'}</small>
                         </span>
                       </button>
                       <div className="running-actions">
-                        <button onClick={() => minimizeWindow(window.id)} title="Minimizar">
-                          −
-                        </button>
-                        <button onClick={() => toggleMaximize(window)} title="Maximizar ou restaurar">
-                          □
-                        </button>
-                        <button
-                          className="danger"
-                          onClick={() => closeWindow(window.id)}
-                          title="Fechar"
-                        >
-                          ✕
-                        </button>
+                        <button onClick={() => minimizeWindow(window.id)} title="Minimizar">−</button>
+                        <button onClick={() => toggleMaximize(window)} title="Maximizar ou restaurar">□</button>
+                        <button className="danger" onClick={() => closeWindow(window.id)} title="Fechar">✕</button>
                       </div>
                     </article>
                   ))}
@@ -209,48 +203,41 @@ function StartMenu() {
 
         <footer className="start-bottom">
           <div className="start-user-btn">
-            <div className="start-user-avatar">
-              {currentUser?.avatar ? <img src={currentUser.avatar} alt="" /> : '●'}
-            </div>
-            <span className="start-user-name">
-              {currentUser?.displayName || currentUser?.username || 'Usuário'}
-            </span>
+            <div className="start-user-avatar">{currentUser?.avatar ? <img src={currentUser.avatar} alt="" /> : '●'}</div>
+            <span className="start-user-name">{currentUser?.displayName || currentUser?.username || 'Usuário'}</span>
           </div>
-          <button
-            className="start-power-btn"
-            onClick={() => closeAll()}
-            title="Fechar todas as janelas"
-          >
-            ⏻
-          </button>
+          <button className="start-power-btn" onClick={() => closeAll()} title="Fechar todas as janelas">⏻</button>
         </footer>
       </div>
     </div>
   );
 }
 
-const AppGrid = memo(function AppGrid({
-  apps,
-  launch,
-  context,
-}: {
+const AppGrid = memo(function AppGrid({ apps, launch, context }: {
   apps: App[];
   launch: (app: App) => void;
   context: (event: React.MouseEvent, app: App) => void;
 }) {
   return (
     <div className="start-pinned-grid">
-      {apps.map((app) => (
-        <button
-          key={app.id}
-          className="start-app-btn"
-          onClick={() => launch(app)}
-          onContextMenu={(event) => context(event, app)}
-        >
-          <span className="start-app-icon">{app.icon}</span>
-          <span className="start-app-name">{app.name}</span>
-        </button>
-      ))}
+      {apps.map((app) => {
+        const unavailable = appUnavailable(app);
+        return (
+          <button
+            key={app.id}
+            className="start-app-btn"
+            onClick={() => launch(app)}
+            onContextMenu={(event) => context(event, app)}
+            aria-disabled={unavailable}
+            data-app-capability={unavailable ? 'requires-full' : 'available'}
+            title={unavailable ? 'Exige o modo Full / Native Host' : app.name}
+          >
+            <span className="start-app-icon">{app.icon}</span>
+            <span className="start-app-name">{app.name}</span>
+            {unavailable && <small>Modo Full</small>}
+          </button>
+        );
+      })}
     </div>
   );
 });
