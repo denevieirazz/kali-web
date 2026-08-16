@@ -11,6 +11,7 @@ on:
       - 'frontend/src/apps/TaskManager/**'
       - 'frontend/test/linuxSystemCenterModel.test.js'
       - 'frontend/test/systemCenterComponentContract.test.js'
+      - 'frontend/test/systemCenterContract.test.js'
       - 'scripts/*linux-system-center-cgroups*'
       - 'scripts/probe-cgroup-control.mjs'
       - 'docs/LINUX_SYSTEM_CENTER_CGROUPS.md'
@@ -20,6 +21,7 @@ on:
       - 'core/wsl/cloudos-core/**'
       - 'backend/src/system/**'
       - 'frontend/src/apps/TaskManager/**'
+      - 'frontend/test/systemCenterContract.test.js'
       - 'scripts/*linux-system-center-cgroups*'
       - 'scripts/probe-cgroup-control.mjs'
 
