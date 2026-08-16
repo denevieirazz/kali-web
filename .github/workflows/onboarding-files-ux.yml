@@ -1,0 +1,68 @@
+name: CloudOS Onboarding Files UX
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/cloudos-onboarding-files-ux]
+  pull_request:
+    paths:
+      - 'frontend/src/components/Setup/**'
+      - 'frontend/src/components/LockScreen/**'
+      - 'frontend/src/services/accountContract.*'
+      - 'frontend/src/services/recoveryCodeActions.ts'
+      - 'frontend/src/apps/CloudOSFiles/**'
+      - 'frontend/test/accountContract.test.js'
+      - 'frontend/test/onboardingResponsiveContract.test.js'
+      - 'frontend/test/filesVisualUx.test.js'
+      - 'backend/src/auth/**'
+      - 'backend/test/onboarding-recovery-ux.test.js'
+      - 'tests/playwright/onboarding-responsive.spec.ts'
+      - 'scripts/test-onboarding-files-ux-contract.ps1'
+      - 'scripts/start-cloudos-onboarding-files-ux.ps1'
+      - '.github/workflows/onboarding-files-ux.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  ux-contracts:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Focused backend auth UX tests
+        run: node --test backend/test/onboarding-recovery-ux.test.js
+      - name: Backend regression suite
+        run: npm --prefix backend test
+      - name: Focused frontend UX tests
+        run: node --test frontend/test/accountContract.test.js frontend/test/onboardingResponsiveContract.test.js frontend/test/filesVisualUx.test.js
+      - name: Frontend regression suite
+        run: npm --prefix frontend test
+      - name: Frontend TypeScript
+        run: npm --prefix frontend run lint
+      - name: Frontend production build
+        run: npm --prefix frontend run build
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium
+      - name: Responsive OOBE browser tests
+        run: npx playwright test tests/playwright/onboarding-responsive.spec.ts --project=chromium-windows
+      - name: Parse PowerShell safety contract
+        shell: pwsh
+        run: |
+          $tokens=$null; $errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path './scripts/test-onboarding-files-ux-contract.ps1'),[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+      - name: Safety boundary
+        shell: pwsh
+        run: ./scripts/test-onboarding-files-ux-contract.ps1
+      - name: Diff whitespace
+        shell: pwsh
+        run: git diff --check 2d3380ba562d23e05947f81cc9581e8fe9bcfdbc...HEAD
