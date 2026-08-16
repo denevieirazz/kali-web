@@ -9,6 +9,7 @@ const css = fs.readFileSync(path.join(root, 'src/components/Setup/SetupWizard.cs
 const setup = fs.readFileSync(path.join(root, 'src/components/Setup/SetupWizard.tsx'), 'utf8');
 const lock = fs.readFileSync(path.join(root, 'src/components/LockScreen/LockScreen.tsx'), 'utf8');
 const recoveryActions = fs.readFileSync(path.join(root, 'src/services/recoveryCodeActions.ts'), 'utf8');
+const globalCss = fs.readFileSync(path.join(root, 'src/index.css'), 'utf8');
 
 test('onboarding prevents horizontal overflow and keeps focus geometry stable', () => {
   assert.match(css, /overflow-x:\s*hidden/);
@@ -19,6 +20,12 @@ test('onboarding prevents horizontal overflow and keeps focus geometry stable', 
   assert.match(css, /\.setup-input:focus-visible[\s\S]*?outline-color/);
   const focusBlock = css.match(/\.setup-input:focus-visible\s*\{([^}]+)\}/)?.[1] || '';
   assert.equal(/\bwidth\s*:|\bpadding\s*:|\bmargin\s*:|border-width\s*:/.test(focusBlock), false);
+});
+
+test('shell typography never depends on a remote font CDN', () => {
+  assert.doesNotMatch(globalCss, /fonts\.(?:googleapis|gstatic)\.com/i);
+  assert.doesNotMatch(globalCss, /@import\s+url\(\s*['"]?https?:\/\//i);
+  assert.match(globalCss, /--font-family:\s*'Inter',\s*'Segoe UI Variable',\s*'Segoe UI',\s*system-ui/);
 });
 
 test('password hints and controls expose the four-character policy consistently', () => {
