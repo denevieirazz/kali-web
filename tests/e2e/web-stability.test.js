@@ -173,11 +173,11 @@ test('7. Complete Account Recovery Flow E2E — Status, validação, redefiniç�
     });
     assert.strictEqual(mismatchRes.status, 400);
 
-    // 4. Reject short password
+    // 4. Reject password below the four-character minimum
     const shortRes = await requestJson(port, '/api/auth/recovery/reset', 'POST', {
       recoveryCode: 'CLOUDOS-invalid-key-attempt-000000000000',
-      password: 'short',
-      confirmPassword: 'short'
+      password: '123',
+      confirmPassword: '123'
     });
     assert.strictEqual(shortRes.status, 400);
   } finally {
