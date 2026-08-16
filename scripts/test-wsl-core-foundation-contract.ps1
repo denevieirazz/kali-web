@@ -37,7 +37,7 @@ Require ($implementationText -notmatch '(?i)(ext4\.vhdx|usbipd|weston|wayland|xw
 
 $supervisorText = Get-Content -LiteralPath (Join-Path $hostRoot 'WslCoreSupervisor.cs') -Raw
 foreach ($forbidden in @('--install','--import','--update','--terminate','--shutdown','--set-default','--set-version','RunAs','Verb =')) {
-  Require (-not $supervisorText.Contains($forbidden, [StringComparison]::OrdinalIgnoreCase)) "Supervisor contains forbidden WSL mutation/elevation token: $forbidden"
+  Require ($supervisorText.IndexOf($forbidden, [StringComparison]::OrdinalIgnoreCase) -lt 0) "Supervisor contains forbidden WSL mutation/elevation token: $forbidden"
 }
 Require ($supervisorText -match 'ArgumentList\.Add') 'Supervisor must use ProcessStartInfo.ArgumentList.'
 Require ($supervisorText -match 'UseShellExecute\s*=\s*false') 'Supervisor must disable shell execution.'
@@ -58,13 +58,22 @@ Require ($protocolText -match 'hmac\.New\(sha256\.New') 'HMAC mutual-auth primit
 
 $metricsText = Get-Content -LiteralPath (Join-Path $coreRoot 'internal\metrics\metrics.go') -Raw
 foreach ($required in @('/proc/uptime','/proc/loadavg','/proc/meminfo','/proc/self/cgroup','/sys/fs/cgroup')) {
-  Require ($metricsText.Contains($required, [StringComparison]::Ordinal)) "Real Linux metric source is missing: $required"
+  Require ($metricsText.IndexOf($required, [StringComparison]::Ordinal) -ge 0) "Real Linux metric source is missing: $required"
 }
 Require ($metricsText -notmatch '(?i)(WriteFile|Mkdir|Chmod|Chown).*cgroup') 'Metrics implementation appears to mutate cgroups.'
 
 $validationText = Get-Content -LiteralPath $validationScript -Raw
 foreach ($forbidden in @('--install','--import','--update','--terminate','--shutdown','--set-default','--set-version','Start-Process','-Verb RunAs')) {
-  Require (-not $validationText.Contains($forbidden, [StringComparison]::OrdinalIgnoreCase)) "Physical validation script contains forbidden mutation/elevation token: $forbidden"
+  Require ($validationText.IndexOf($forbidden, [StringComparison]::OrdinalIgnoreCase) -lt 0) "Physical validation script contains forbidden mutation/elevation token: $forbidden"
+}
+
+# Execução direta da normalização de saída crua do WSL (substituição de caracteres nulos)
+$sampleRaw = "*`0 `0k`0a`0l`0i`0-`0l`0i`0n`0u`0x`0 `0 `0 `0R`0u`0n`0n`0i`0n`0g`0 `0 `0 `02`0`r`0`n`0"
+try {
+  $normalized = ([string]$sampleRaw).Replace([string][char]0, [string]'').Trim()
+  Require ($normalized.StartsWith('*') -and $normalized.Contains('kali-linux') -and $normalized.EndsWith('2')) 'WSL raw output normalization failed.'
+} catch {
+  Require $false ("WSL string replacement threw an unexpected exception: " + $_.Exception.Message)
 }
 
 if (Test-Path -LiteralPath (Join-Path $root '.git')) {

@@ -12,7 +12,8 @@ $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $output = [IO.Path]::GetFullPath((Join-Path $root $OutputDirectory))
 New-Item -ItemType Directory -Force -Path $output | Out-Null
 $validation = Join-Path $output 'validation.json'
-$wsl = Join-Path ($env:WINDIR ?? 'C:\Windows') 'System32\wsl.exe'
+$winDir = if ($env:WINDIR) { $env:WINDIR } else { 'C:\Windows' }
+$wsl = Join-Path $winDir 'System32\wsl.exe'
 if (-not (Test-Path -LiteralPath $wsl)) { throw 'WSL_NOT_FOUND: wsl.exe is not available.' }
 
 $runId = [Guid]::NewGuid().ToString('N')
@@ -39,7 +40,7 @@ function Get-Wsl2Distributions {
   $result = Invoke-Wsl @('--list','--verbose')
   $items = [System.Collections.Generic.List[object]]::new()
   foreach ($raw in $result.Output) {
-    $line = ([string]$raw).Replace([char]0, '').Trim()
+    $line = ([string]$raw).Replace([string][char]0, [string]'').Trim()
     if (-not $line) { continue }
     $isDefault = $line.StartsWith('*')
     if ($isDefault) { $line = $line.Substring(1).TrimStart() }
