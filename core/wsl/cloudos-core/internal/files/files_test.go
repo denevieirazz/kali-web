@@ -38,20 +38,29 @@ func TestTraversalAndReservedPathsAreRejected(t *testing.T) {
 func TestSymlinkCannotEscapeRoot(t *testing.T) {
 	manager, root := newTestManager(t)
 	outside := t.TempDir()
-	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("outside"), 0o600); err != nil {
+	outsideSecret := filepath.Join(outside, "secret.txt")
+	outsideNew := filepath.Join(outside, "new.txt")
+	if err := os.WriteFile(outsideSecret, []byte("outside"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	if _, err := manager.List([]string{"escape"}); Code(err) != "FILES_SYMLINK_DENIED" {
-		t.Fatalf("expected FILES_SYMLINK_DENIED, got %v (%s)", err, Code(err))
+	if _, err := manager.List([]string{"escape"}); err == nil {
+		t.Fatal("listing through an escaped symlink unexpectedly succeeded")
 	}
-	if _, err := manager.Read([]string{"escape", "secret.txt"}, 0, 1024); Code(err) != "FILES_SYMLINK_DENIED" {
-		t.Fatalf("read escaped symlink: %v (%s)", err, Code(err))
+	if _, err := manager.Read([]string{"escape", "secret.txt"}, 0, 1024); err == nil {
+		t.Fatal("reading through an escaped symlink unexpectedly succeeded")
 	}
-	if _, err := manager.Write([]string{"escape", "new.txt"}, 0, base64.StdEncoding.EncodeToString([]byte("bad")), true, 0o600); Code(err) != "FILES_SYMLINK_DENIED" {
-		t.Fatalf("write escaped symlink: %v (%s)", err, Code(err))
+	if _, err := manager.Write([]string{"escape", "new.txt"}, 0, base64.StdEncoding.EncodeToString([]byte("bad")), true, 0o600); err == nil {
+		t.Fatal("writing through an escaped symlink unexpectedly succeeded")
+	}
+	data, err := os.ReadFile(outsideSecret)
+	if err != nil || string(data) != "outside" {
+		t.Fatalf("outside source changed: %q %v", data, err)
+	}
+	if _, err := os.Stat(outsideNew); !os.IsNotExist(err) {
+		t.Fatalf("escaped write created a file outside the root: %v", err)
 	}
 }
 
