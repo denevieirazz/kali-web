@@ -1,5 +1,7 @@
 export const ACCOUNT_RECOVERY_ENDPOINT = '/api/auth/recovery/reset';
 export const ACCOUNT_LEGACY_RECOVERY_ENDPOINT = '/api/auth/legacy-recovery/reset';
+export const MIN_PASSWORD_LENGTH = 4;
+export const MAX_PASSWORD_LENGTH = 128;
 
 export function validateUsername(value, { required = true } = {}) {
   const username = typeof value === 'string' ? value.trim() : '';
@@ -19,10 +21,30 @@ export function validateDisplayName(value, { required = true } = {}) {
 }
 
 export function validateNewPassword(password, confirmPassword) {
-  if (typeof password !== 'string' || password.length < 10) return 'A senha deve conter pelo menos 10 caracteres.';
-  if (password.length > 128) return 'A senha deve ter no máximo 128 caracteres.';
+  if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) return `A senha deve conter pelo menos ${MIN_PASSWORD_LENGTH} caracteres.`;
+  if (password.length > MAX_PASSWORD_LENGTH) return `A senha deve ter no máximo ${MAX_PASSWORD_LENGTH} caracteres.`;
   if (password !== confirmPassword) return 'A confirmação de senha não confere.';
   return null;
+}
+
+export function normalizeReadableRecoveryCode(value) {
+  const input = typeof value === 'string' ? value.trim() : '';
+  if (!input) return '';
+  const compact = input.toUpperCase().replace(/[\s-]+/g, '');
+  if (/^CLOUDOS[2-9A-HJ-NP-Z]{16}$/.test(compact)) {
+    const payload = compact.slice('CLOUDOS'.length);
+    return `CLOUDOS-${payload.slice(0, 4)}-${payload.slice(4, 8)}-${payload.slice(8, 12)}-${payload.slice(12, 16)}`;
+  }
+  return input;
+}
+
+export function extractRecoveryCodeFromText(value) {
+  const text = typeof value === 'string' ? value : '';
+  if (!text.trim()) return '';
+  const readable = text.match(/CLOUDOS(?:[\s-]*[2-9A-HJ-NP-Z]{4}){4}/i);
+  if (readable) return normalizeReadableRecoveryCode(readable[0]);
+  const legacy = text.match(/CLOUDOS-[A-Za-z0-9_-]{17,121}/);
+  return legacy ? legacy[0] : '';
 }
 
 export function normalizePublicUser(value, fallback = {}) {
@@ -57,7 +79,7 @@ export function extractRecoveryCode(value) {
     value.recovery?.code
   ];
   const code = candidates.find((candidate) => typeof candidate === 'string' && candidate.trim());
-  return typeof code === 'string' ? code.trim() : null;
+  return typeof code === 'string' ? normalizeReadableRecoveryCode(code) : null;
 }
 
 export function canRestoreAuthenticatedSession(authenticated, recoveryConfirmationPending) {
@@ -72,7 +94,7 @@ export function sanitizePersistedProfile(value) {
 
 export function recoveryRequestBody({ recoveryCode, username, displayName, password, confirmPassword }) {
   return {
-    recoveryCode: String(recoveryCode || '').trim(),
+    recoveryCode: normalizeReadableRecoveryCode(recoveryCode),
     ...(String(username || '').trim() ? { newUsername: String(username).trim() } : {}),
     ...(String(displayName || '').trim() ? { displayName: String(displayName).trim() } : {}),
     password,
