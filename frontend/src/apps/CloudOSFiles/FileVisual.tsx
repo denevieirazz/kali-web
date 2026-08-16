@@ -3,7 +3,7 @@ import { FaFile, FaFileAlt, FaFileArchive, FaFileAudio, FaFileCode, FaFileImage,
 import { VscJson } from 'react-icons/vsc';
 import { canGenerateImageThumbnail, classifyFileVisual, fileVisualLabel, type FileVisualKind } from './fileVisualPolicy.js';
 import { scheduleImageThumbnail, type ThumbnailResult } from './thumbnailManager.js';
-import type { FileEntry } from './opfsFileService';
+import { readFile, type FileEntry } from './opfsFileService';
 import './CloudOSFiles.visual.css';
 
 const ICONS: Record<FileVisualKind, ComponentType<{ 'aria-hidden'?: boolean }>> = {
@@ -22,18 +22,19 @@ const ICONS: Record<FileVisualKind, ComponentType<{ 'aria-hidden'?: boolean }>> 
   unknown: FaFile,
 };
 
-export default function FileVisual({ entry, loadFile, compact = false }: { entry: FileEntry; loadFile?: () => Promise<File>; compact?: boolean }) {
+export default function FileVisual({ entry, path, fromTrash = false, compact = false }: { entry: FileEntry; path: string[]; fromTrash?: boolean; compact?: boolean }) {
   const kind = useMemo(() => classifyFileVisual(entry), [entry]);
   const [thumbnail, setThumbnail] = useState<ThumbnailResult>(null);
   const Icon = ICONS[kind];
+  const pathKey = path.join('\u0000');
 
   useEffect(() => {
     const controller = new AbortController();
     let owned: ThumbnailResult = null;
     setThumbnail(null);
-    if (!loadFile || !canGenerateImageThumbnail(entry)) return () => controller.abort();
+    if (!canGenerateImageThumbnail(entry)) return () => controller.abort();
 
-    void scheduleImageThumbnail(loadFile, { signal: controller.signal }).then((result) => {
+    void scheduleImageThumbnail(() => readFile(path, entry.name, fromTrash), { signal: controller.signal }).then((result) => {
       if (controller.signal.aborted) {
         result?.revoke();
         return;
@@ -48,7 +49,8 @@ export default function FileVisual({ entry, loadFile, compact = false }: { entry
       controller.abort();
       owned?.revoke();
     };
-  }, [entry, loadFile]);
+  // pathKey is the stable identity of the OPFS location; path itself may be a new array after navigation.
+  }, [entry.kind, entry.name, entry.originalName, fromTrash, pathKey]);
 
   return (
     <div className={`cf-visual cf-visual-${kind}${compact ? ' compact' : ''}`} data-file-visual={kind} title={fileVisualLabel(kind)}>
