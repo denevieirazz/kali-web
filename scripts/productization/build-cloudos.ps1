@@ -49,13 +49,15 @@ $backendOutput = Join-Path $backendBuild 'src\server.js'
 Invoke-CloudOSExternal $npx @('--no-install','esbuild','backend/src/server.js','--bundle','--platform=node','--format=esm','--target=node22',"--outfile=$backendOutput",'--log-level=warning')
 Set-Content -LiteralPath (Join-Path $backendBuild 'package.json') -Value '{"type":"module","private":true}' -Encoding utf8
 
+$coreRoot = Join-Path $root 'core/wsl/cloudos-core'
 $coreOutput = Join-Path $paths.Build 'cloudos-core'
-if ($IsWindows) { $coreOutput += '' }
+if (-not $IsWindows) {
+    Invoke-CloudOSExternal $go @('test','./...') $coreRoot
+}
 $oldGoos=$env:GOOS; $oldGoarch=$env:GOARCH; $oldCgo=$env:CGO_ENABLED
 try {
     $env:GOOS='linux'; $env:GOARCH='amd64'; $env:CGO_ENABLED='0'
-    Invoke-CloudOSExternal $go @('test','./...') (Join-Path $root 'core/wsl/cloudos-core')
-    Invoke-CloudOSExternal $go @('build','-trimpath','-ldflags=-buildid=','-o',$coreOutput,'.') (Join-Path $root 'core/wsl/cloudos-core')
+    Invoke-CloudOSExternal $go @('build','-trimpath','-ldflags=-buildid=','-o',$coreOutput,'.') $coreRoot
 } finally { $env:GOOS=$oldGoos; $env:GOARCH=$oldGoarch; $env:CGO_ENABLED=$oldCgo }
 
 $result=[ordered]@{
