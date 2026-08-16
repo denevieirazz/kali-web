@@ -22,6 +22,7 @@ process.env.CLOUDOS_WSL_CORE_LINUX_PATH = core;
 let session = null;
 let outputText = '';
 let exitDetail = null;
+let bootstrapDiagnostic = null;
 const checks = [];
 try {
   session = await createWslCoreTerminalSession({
@@ -32,6 +33,13 @@ try {
     onOutput: (data) => { outputText += data; },
     onExit: (detail) => { exitDetail = detail; }
   });
+  bootstrapDiagnostic = session.bootstrapDiagnostic || null;
+  if (!bootstrapDiagnostic?.portAvailable || bootstrapDiagnostic?.stage !== 'ready' || !Number.isInteger(bootstrapDiagnostic?.connectAttempts) || bootstrapDiagnostic.connectAttempts < 1) {
+    throw new Error('BOOTSTRAP_DIAGNOSTIC_INCOMPLETE');
+  }
+  checks.push('node-bootstrap-endpoint-validated');
+  checks.push('node-loopback-readiness-confirmed');
+
   if (session.protocol !== 2 || session.protection !== 'aes-256-gcm-seq') throw new Error('CHANNEL_PROTECTION_MISMATCH');
   checks.push('backend-adapter-protected-channel-v2');
 
@@ -62,6 +70,7 @@ try {
     terminalPid: session.terminalPid,
     exitCode: exitDetail?.exitCode ?? null,
     signal: exitDetail?.signal || '',
+    bootstrapDiagnostic,
     checks,
     databaseTouched: false,
     wslMutated: false,
@@ -69,6 +78,7 @@ try {
   }, null, 2) + '\n');
   console.log(output);
 } catch (error) {
+  bootstrapDiagnostic = error?.diagnostic || bootstrapDiagnostic || session?.bootstrapDiagnostic || null;
   if (session) {
     try { await session.close(); } catch {}
   }
@@ -79,14 +89,18 @@ try {
     protocol: 2,
     protection: 'aes-256-gcm-seq',
     distribution,
-    corePid: session?.corePid || 0,
+    corePid: session?.corePid || bootstrapDiagnostic?.corePid || 0,
     terminalPid: session?.terminalPid || 0,
     checks,
     errorCode: error?.code || error?.message || error?.name || 'TERMINAL_PROBE_FAILED',
+    bootstrapDiagnostic,
     databaseTouched: false,
     wslMutated: false,
     elevationRequested: false
   }, null, 2) + '\n');
-  console.error(error?.code || error?.message || 'TERMINAL_PROBE_FAILED');
+  console.error(JSON.stringify({
+    errorCode: error?.code || error?.message || 'TERMINAL_PROBE_FAILED',
+    bootstrapDiagnostic
+  }));
   process.exit(1);
 }
