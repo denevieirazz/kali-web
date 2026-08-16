@@ -46,7 +46,8 @@ Invoke-CloudOSExternal $dotnet @('publish','desktop/CloudOS.Host/CloudOS.Host.cs
 Invoke-CloudOSExternal $dotnet @('publish','desktop/CloudOS.Bootstrap/CloudOS.Bootstrap.csproj','-c','Release','-r',[string]$config.rid,'--self-contained','true','-p:PublishSingleFile=false','-p:DebugType=None','-p:DebugSymbols=false','-o',$bootstrapPublish)
 
 $backendOutput = Join-Path $backendBuild 'src\server.js'
-Invoke-CloudOSExternal $npx @('--no-install','esbuild','backend/src/server.js','--bundle','--platform=node','--format=esm','--target=node22',"--outfile=$backendOutput",'--log-level=warning')
+$esmRequireBanner = "import { createRequire as __cloudosCreateRequire } from 'node:module'; const require = __cloudosCreateRequire(import.meta.url);"
+Invoke-CloudOSExternal $npx @('--no-install','esbuild','backend/src/server.js','--bundle','--platform=node','--format=esm','--target=node22',"--banner:js=$esmRequireBanner", "--outfile=$backendOutput",'--log-level=warning')
 Set-Content -LiteralPath (Join-Path $backendBuild 'package.json') -Value '{"type":"module","private":true}' -Encoding utf8
 
 $coreRoot = Join-Path $root 'core/wsl/cloudos-core'
