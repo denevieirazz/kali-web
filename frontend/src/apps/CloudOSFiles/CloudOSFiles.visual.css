@@ -1,0 +1,30 @@
+.cf-view-toggle { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid #343b4e; border-radius: 8px; background: #171b25; }
+.cf-view-toggle .cf-btn { min-width: 34px; padding-inline: 8px; }
+.cf-view-toggle .cf-btn.active { color: #fff; border-color: #53628c; background: #37405c; }
+
+.cf-grid.grid-view { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); align-content: start; }
+.cf-grid.list-view { display: flex; flex-direction: column; gap: 4px; padding: 8px; }
+.cf-grid.list-view .cf-item { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto minmax(240px, auto); align-items: center; gap: 10px; min-height: 52px; padding: 6px 10px; }
+.cf-grid.list-view .cf-name { text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cf-grid.list-view .cf-size { text-align: right; white-space: nowrap; }
+.cf-grid.list-view .cf-actions { justify-content: flex-end; }
+
+.cf-visual { position: relative; display: grid; place-items: center; width: 78px; height: 72px; margin: 0 auto 7px; border-radius: 10px; overflow: hidden; color: #b9c8e8; background: rgba(255,255,255,.025); font-size: 42px; }
+.cf-visual.compact { width: 36px; height: 36px; margin: 0; border-radius: 7px; font-size: 22px; }
+.cf-visual-folder { color: #f4c85a; }
+.cf-visual-markdown { color: #b8c5da; }
+.cf-visual-code { color: #6fd1e8; }
+.cf-visual-json { color: #e5c95f; }
+.cf-visual-pdf { color: #ef767a; }
+.cf-visual-image { color: #82d7a5; }
+.cf-visual-audio { color: #c79aec; }
+.cf-visual-video { color: #7cb4f4; }
+.cf-visual-archive { color: #e2a968; }
+.cf-visual-executable { color: #86a9ff; }
+.cf-visual-symlink { color: #aeb9ca; }
+.cf-thumbnail { display: block; width: 100%; height: 100%; object-fit: cover; background: #10141c; }
+
+@media (max-width: 760px) {
+  .cf-grid.list-view .cf-item { grid-template-columns: 38px minmax(0,1fr) auto; }
+  .cf-grid.list-view .cf-actions { grid-column: 1 / -1; justify-content: flex-start; }
+}
