@@ -6,10 +6,11 @@ import { config } from '../config/index.js';
 const USERNAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 const RECOVERY_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 const RECOVERY_PREFIX = 'CLOUDOS';
-const RECOVERY_GROUPS = 4;
-const RECOVERY_GROUP_LENGTH = 4;
-const RECOVERY_PAYLOAD_LENGTH = RECOVERY_GROUPS * RECOVERY_GROUP_LENGTH;
-const READABLE_RECOVERY_PATTERN = /^CLOUDOS(?:-[2-9A-HJ-NP-Z]{4}){4}$/;
+const RECOVERY_GROUP_LENGTHS = Object.freeze([3, 4, 4, 4, 4, 4, 4, 4, 4]);
+const RECOVERY_PAYLOAD_LENGTH = RECOVERY_GROUP_LENGTHS.reduce((total, length) => total + length, 0);
+const RECOVERY_RANDOM_BITS = RECOVERY_PAYLOAD_LENGTH * 5;
+const RECOVERY_MASK = (1n << BigInt(RECOVERY_RANDOM_BITS)) - 1n;
+const READABLE_RECOVERY_PATTERN = /^CLOUDOS-[2-9A-HJ-NP-Z]{3}(?:-[2-9A-HJ-NP-Z]{4}){8}$/;
 const dummyPasswordHash = bcrypt.hashSync('CloudOS-dummy-password-2026', config.passwordBcryptRounds);
 const dummyRecoveryHash = bcrypt.hashSync('CLOUDOS-dummy-recovery-code-2026', config.recoveryBcryptRounds);
 
@@ -55,11 +56,12 @@ export function validatePassword(password, confirmPassword) {
 }
 
 function encodeReadableRecoveryPayload(bytes) {
-  if (!bytes || bytes.length !== 10) throw new Error('RECOVERY_CODE_GENERATION_FAILED');
+  if (!bytes || bytes.length !== 22) throw new Error('RECOVERY_CODE_GENERATION_FAILED');
   let value = 0n;
   for (const byte of bytes) value = (value << 8n) | BigInt(byte);
+  value &= RECOVERY_MASK;
   let output = '';
-  for (let shift = 75n; shift >= 0n; shift -= 5n) {
+  for (let shift = BigInt(RECOVERY_RANDOM_BITS - 5); shift >= 0n; shift -= 5n) {
     output += RECOVERY_ALPHABET[Number((value >> shift) & 31n)];
   }
   if (output.length !== RECOVERY_PAYLOAD_LENGTH) throw new Error('RECOVERY_CODE_GENERATION_FAILED');
@@ -68,15 +70,17 @@ function encodeReadableRecoveryPayload(bytes) {
 
 function formatReadableRecoveryPayload(payload) {
   const groups = [];
-  for (let index = 0; index < payload.length; index += RECOVERY_GROUP_LENGTH) {
-    groups.push(payload.slice(index, index + RECOVERY_GROUP_LENGTH));
+  let offset = 0;
+  for (const groupLength of RECOVERY_GROUP_LENGTHS) {
+    groups.push(payload.slice(offset, offset + groupLength));
+    offset += groupLength;
   }
   return `${RECOVERY_PREFIX}-${groups.join('-')}`;
 }
 
 export function generateRecoveryCode() {
-  // 10 random bytes = 80 bits. Base32-style encoding keeps the UI readable without reducing entropy.
-  return formatReadableRecoveryPayload(encodeReadableRecoveryPayload(crypto.randomBytes(10)));
+  // 22 random bytes feed a 175-bit canonical code, encoded with an unambiguous 32-symbol alphabet.
+  return formatReadableRecoveryPayload(encodeReadableRecoveryPayload(crypto.randomBytes(22)));
 }
 
 export function normalizeRecoveryCodeInput(value) {
@@ -86,7 +90,7 @@ export function normalizeRecoveryCodeInput(value) {
   const compact = trimmed.toUpperCase().replace(/[\s-]+/g, '');
   if (compact.startsWith(RECOVERY_PREFIX) && compact.length === RECOVERY_PREFIX.length + RECOVERY_PAYLOAD_LENGTH) {
     const payload = compact.slice(RECOVERY_PREFIX.length);
-    if (/^[2-9A-HJ-NP-Z]{16}$/.test(payload)) return formatReadableRecoveryPayload(payload);
+    if (/^[2-9A-HJ-NP-Z]{35}$/.test(payload)) return formatReadableRecoveryPayload(payload);
   }
 
   // Existing installations may still have the former base64url recovery code hashed.
