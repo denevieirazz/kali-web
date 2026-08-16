@@ -55,16 +55,12 @@ export function validatePassword(password, confirmPassword) {
 }
 
 function encodeReadableRecoveryPayload(bytes) {
-  let buffer = 0;
-  let bits = 0;
+  if (!bytes || bytes.length !== 10) throw new Error('RECOVERY_CODE_GENERATION_FAILED');
+  let value = 0n;
+  for (const byte of bytes) value = (value << 8n) | BigInt(byte);
   let output = '';
-  for (const byte of bytes) {
-    buffer = (buffer << 8) | byte;
-    bits += 8;
-    while (bits >= 5 && output.length < RECOVERY_PAYLOAD_LENGTH) {
-      bits -= 5;
-      output += RECOVERY_ALPHABET[(buffer >>> bits) & 31];
-    }
+  for (let shift = 75n; shift >= 0n; shift -= 5n) {
+    output += RECOVERY_ALPHABET[Number((value >> shift) & 31n)];
   }
   if (output.length !== RECOVERY_PAYLOAD_LENGTH) throw new Error('RECOVERY_CODE_GENERATION_FAILED');
   return output;
