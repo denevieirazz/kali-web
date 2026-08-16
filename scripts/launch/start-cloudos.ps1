@@ -89,14 +89,14 @@ try {
         $hostScript = Join-Path $script:CloudOSRoot 'scripts\run-native-host.ps1'
         $hostArgs = @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',$hostScript)
         if ($Mode -eq 'BrowserValidation') { $hostArgs += '-DeveloperMode' }
-        $host = Start-CloudOSLoggedProcess $session 'host' $pre.pwsh $hostArgs $hostOut $hostErr @{
+        $hostLauncher = Start-CloudOSLoggedProcess $session 'host' $pre.pwsh $hostArgs $hostOut $hostErr @{
             CLOUDOS_LAUNCH_MODE=$Mode
             CLOUDOS_RUNTIME_DIR=$session.runtimeDirectory
             CLOUDOS_DATA_DIR=$session.dataDirectory
             CLOUDOS_SESSION_ID=$session.id
             CLOUDOS_SESSION_LOG_DIR=$session.logDirectory
         }
-        $hostRuntime=Wait-CloudOSHostRuntime -Session $session -HostLauncher $host -TimeoutSeconds 45
+        $hostRuntime=Wait-CloudOSHostRuntime -Session $session -HostLauncher $hostLauncher -TimeoutSeconds 45
         $nativeRuntime=Wait-NativeHostBackendRuntime -Session $session -HostRuntime $hostRuntime -TimeoutSeconds 30
         $backendPid=[int]$nativeRuntime.manifest.pid
         $backendProcess=Get-Process -Id $backendPid -ErrorAction SilentlyContinue
@@ -110,7 +110,7 @@ try {
             status='ready'
             mode=$Mode
             readyAt=(Get-Date).ToUniversalTime().ToString('o')
-            hostLauncherPid=$host.Id
+            hostLauncherPid=$hostLauncher.Id
             hostRuntimePid=$hostRuntime.Id
             shellWindowReady=$true
             frontendIndex=$frontendIndex
@@ -180,6 +180,8 @@ try {
     Write-Host "Para encerrar: .\Parar CloudOS.cmd"
     Write-Host "Para diagnosticar: .\Diagnosticar CloudOS.cmd"
     Write-Output ($launchResult | ConvertTo-Json -Depth 8 -Compress)
+    $global:LASTEXITCODE=0
+    exit 0
 } catch {
     $message = $_.Exception.Message
     Write-CloudOSLog $session $message 'ERROR'
