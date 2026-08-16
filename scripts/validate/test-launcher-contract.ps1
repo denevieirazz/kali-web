@@ -20,6 +20,55 @@ $owned=Get-Content (Join-Path $root 'scripts/launch/cloudos-owned-processes.ps1'
 $start=Get-Content (Join-Path $root 'scripts/launch/start-cloudos.ps1') -Raw
 $stop=Get-Content (Join-Path $root 'scripts/launch/stop-cloudos.ps1') -Raw
 $runner=Get-Content (Join-Path $root 'scripts/validate/run-stabilization-batch1.ps1') -Raw
+
+function Get-ComponentSetFromMatches {
+ param([Parameter(Mandatory)][string]$Text,[Parameter(Mandatory)][string[]]$Patterns)
+ $set=[System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+ foreach($pattern in $Patterns){
+  foreach($match in [regex]::Matches($Text,$pattern)){if($match.Groups.Count -gt 1 -and $match.Groups[1].Value){[void]$set.Add([string]$match.Groups[1].Value)}}
+ }
+ return $set
+}
+function Format-ComponentSet([System.Collections.Generic.HashSet[string]]$Set){return (@($Set)|Sort-Object)-join ','}
+
+# Component contract: launcher registrations are the source of truth. Runner and teardown may only consume those names.
+$launcherSession=[regex]::Escape('$session')
+$runnerSession=[regex]::Escape('$Session')
+$launcherComponents=Get-ComponentSetFromMatches $start @(
+ "Start-CloudOSLoggedProcess\s+$launcherSession\s+'([^']+)'",
+ "Add-CloudOSProcessRecord\b[^\r\n]*-Session\s+$launcherSession\b[^\r\n]*-Component\s+'([^']+)'"
+)
+$runnerComponents=Get-ComponentSetFromMatches $runner @(
+ "(?:Assert-RunnerOwnedProcessAlive|Wait-RunnerHttpReady)\s+$runnerSession\s+'([^']+)'"
+)
+$teardownMatch=[regex]::Match($common,'(?s)function Stop-CloudOSRecordedProcesses\s*\{.*?(?=\r?\nfunction Complete-CloudOSSession)')
+if(-not $teardownMatch.Success){throw 'COMPONENT_CONTRACT_TEARDOWN_FUNCTION_MISSING'}
+$teardownBlock=$teardownMatch.Value
+if($teardownBlock -notmatch '\$manifest\.processes'){throw 'COMPONENT_CONTRACT_TEARDOWN_NOT_MANIFEST_DRIVEN'}
+$componentExpr=[regex]::Escape('$component')
+$recordComponentExpr=[regex]::Escape('$record.component')
+$teardownComponents=Get-ComponentSetFromMatches $teardownBlock @(
+ "(?:$componentExpr|$recordComponentExpr)\s+-eq\s+'([^']+)'"
+)
+foreach($inMatch in [regex]::Matches($teardownBlock,"$componentExpr\s+-in\s+@\(([^)]*)\)")){
+ foreach($literal in [regex]::Matches($inMatch.Groups[1].Value,"'([^']+)'")){[void]$teardownComponents.Add([string]$literal.Groups[1].Value)}
+}
+if($launcherComponents.Count -eq 0){throw 'COMPONENT_CONTRACT_LAUNCHER_REGISTRATIONS_EMPTY'}
+if($runnerComponents.Count -eq 0){throw 'COMPONENT_CONTRACT_RUNNER_REQUIREMENTS_EMPTY'}
+if($teardownComponents.Count -eq 0){throw 'COMPONENT_CONTRACT_TEARDOWN_COMPONENTS_EMPTY'}
+$runnerMissing=@($runnerComponents|Where-Object{-not $launcherComponents.Contains($_)}|Sort-Object)
+if($runnerMissing.Count){throw "COMPONENT_CONTRACT_RUNNER_REQUIRES_UNREGISTERED:$($runnerMissing -join ','):launcher=$(Format-ComponentSet $launcherComponents)"}
+$teardownMissing=@($launcherComponents|Where-Object{-not $teardownComponents.Contains($_)}|Sort-Object)
+$teardownExtra=@($teardownComponents|Where-Object{-not $launcherComponents.Contains($_)}|Sort-Object)
+if($teardownMissing.Count -or $teardownExtra.Count){throw "COMPONENT_CONTRACT_TEARDOWN_SET_MISMATCH:missing=$($teardownMissing -join ','):extra=$($teardownExtra -join ','):launcher=$(Format-ComponentSet $launcherComponents):teardown=$(Format-ComponentSet $teardownComponents)"}
+$canonicalHost='host-runtime'
+$legacyHost=('ho'+'st')
+foreach($entry in @(@{name='launcher';set=$launcherComponents},@{name='runner';set=$runnerComponents},@{name='teardown';set=$teardownComponents})){
+ if(-not $entry.set.Contains($canonicalHost)){throw "COMPONENT_CONTRACT_CANONICAL_HOST_MISSING:$($entry.name):$canonicalHost"}
+ if($entry.set.Contains($legacyHost)){throw "COMPONENT_CONTRACT_LEGACY_HOST_PRESENT:$($entry.name)"}
+}
+Write-Host "LAUNCHER_COMPONENT_CONTRACT_OK launcher=$(Format-ComponentSet $launcherComponents) runner=$(Format-ComponentSet $runnerComponents) teardown=$(Format-ComponentSet $teardownComponents)"
+
 foreach($marker in @('backend.stdout.log','backend.stderr.log','frontend.stdout.log','frontend.stderr.log','host.log','bootstrap.log','wsl-core.log','result.json','teardown-result.json','launch-result.json')){
  if(($common+$start+$stop)-notmatch [regex]::Escape($marker)){throw "LOG_CONTRACT_MISSING:$marker"}
 }
