@@ -16,7 +16,9 @@ if($rootGoFiles.Count -ne 0){throw 'CLOUDOS_CORE_ROOT_UNEXPECTED_GO_FILES'}
 
 $go=Get-CloudOSCommandName 'go'
 $packageInfo=Invoke-CloudOSExternal $go @('list','-f','{{.Name}}|{{.ImportPath}}','./cmd/cloudos-core') $coreRoot -Capture
-if($packageInfo.Output -notmatch '^main\|github\.com/denevieirazz/kali-web/core/wsl/cloudos-core/cmd/cloudos-core$'){
+$packageLine=@($packageInfo.Output -split "`r?`n" | Where-Object {$_ -match '^main\|'}) | Select-Object -Last 1
+$expectedPackage='main|github.com/denevieirazz/kali-web/core/wsl/cloudos-core/cmd/cloudos-core'
+if([string]$packageLine -ne $expectedPackage){
     throw "CLOUDOS_CORE_MAIN_PACKAGE_UNEXPECTED:$($packageInfo.Output)"
 }
 
