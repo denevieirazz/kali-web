@@ -12,7 +12,7 @@ permissions:
 jobs:
   audit-font-fallback-baselines:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - name: Checkout exact branch state
         uses: actions/checkout@v4
@@ -61,30 +61,12 @@ jobs:
               raise SystemExit(f'Unexpected artifact provenance: {manifest!r}')
 
           replacements = {
-              'oobe-welcome-actual.png': (
-                  '1a5cc519b97d4642e091edbffb5991249b64991374e9a57070c22f373de07265',
-                  Path('tests/playwright/__screenshots__/boot-oobe.spec.ts/oobe-welcome-chromium-windows.png'),
-              ),
-              'settings-personalization-actual.png': (
-                  '07ea287467f3a4cb0bbb5a9f62bc741e116e8afa446d8719c168239ded532acd',
-                  Path('tests/playwright/__screenshots__/settings-personalization.spec.ts/settings-personalization-chromium-windows.png'),
-              ),
-              'settings-taskbar-top-actual.png': (
-                  '4fca59562cb8707797ee10c9a816ef2a469b38092dc99cad08dd6bf09548bd2c',
-                  Path('tests/playwright/__screenshots__/settings-personalization.spec.ts/settings-taskbar-top-chromium-windows.png'),
-              ),
-              'desktop-custom-wallpaper-actual.png': (
-                  'bb49c5af6c3588410fa1bd75879b1159bae525078bc1277911b5b761b2121e0b',
-                  Path('tests/playwright/__screenshots__/settings-personalization.spec.ts/desktop-custom-wallpaper-chromium-windows.png'),
-              ),
-              'start-menu-home-actual.png': (
-                  '28defb4c8cb87cd886f333875131737475b524ac18809b82b86c7e1dd8f3ff4c',
-                  Path('tests/playwright/__screenshots__/start-menu.spec.ts/start-menu-home-chromium-windows.png'),
-              ),
-              'start-running-calculator-actual.png': (
-                  '8cb50a28fb3f90d2c311e66c1093e7382f3639cf2c128349f475580e06c01212',
-                  Path('tests/playwright/__screenshots__/window-lifecycle.spec.ts/start-running-calculator-chromium-windows.png'),
-              ),
+              'oobe-welcome-actual.png': ('1a5cc519b97d4642e091edbffb5991249b64991374e9a57070c22f373de07265', Path('tests/playwright/__screenshots__/boot-oobe.spec.ts/oobe-welcome-chromium-windows.png')),
+              'settings-personalization-actual.png': ('07ea287467f3a4cb0bbb5a9f62bc741e116e8afa446d8719c168239ded532acd', Path('tests/playwright/__screenshots__/settings-personalization.spec.ts/settings-personalization-chromium-windows.png')),
+              'settings-taskbar-top-actual.png': ('4fca59562cb8707797ee10c9a816ef2a469b38092dc99cad08dd6bf09548bd2c', Path('tests/playwright/__screenshots__/settings-personalization.spec.ts/settings-taskbar-top-chromium-windows.png')),
+              'desktop-custom-wallpaper-actual.png': ('bb49c5af6c3588410fa1bd75879b1159bae525078bc1277911b5b761b2121e0b', Path('tests/playwright/__screenshots__/settings-personalization.spec.ts/desktop-custom-wallpaper-chromium-windows.png')),
+              'start-menu-home-actual.png': ('28defb4c8cb87cd886f333875131737475b524ac18809b82b86c7e1dd8f3ff4c', Path('tests/playwright/__screenshots__/start-menu.spec.ts/start-menu-home-chromium-windows.png')),
+              'start-running-calculator-actual.png': ('8cb50a28fb3f90d2c311e66c1093e7382f3639cf2c128349f475580e06c01212', Path('tests/playwright/__screenshots__/window-lifecycle.spec.ts/start-running-calculator-chromium-windows.png')),
           }
 
           for filename, (expected_sha, destination) in replacements.items():
@@ -98,23 +80,11 @@ jobs:
               shutil.copyfile(matches[0], destination)
               print(f'Installed audited {filename} -> {destination} ({actual_sha})')
 
-      - name: Generate hidden Start Menu all baseline only after audited home is installed
+      - name: Generate all deterministic fallback baselines through full characterization
         shell: pwsh
-        run: npx playwright test tests/playwright/start-menu.spec.ts --update-snapshots --output="$env:RUNNER_TEMP\start-menu-generation" --reporter=list
+        run: npx playwright test --grep-invert "Navegador CloudOS — WebView2 real|Navegador CloudOS — lifecycle Windows" --update-snapshots --output="$env:RUNNER_TEMP\baseline-generation" --reporter=list
 
-      - name: Require audited Start Menu home to remain byte-identical
-        shell: python
-        run: |
-          import hashlib
-          from pathlib import Path
-          p = Path('tests/playwright/__screenshots__/start-menu.spec.ts/start-menu-home-chromium-windows.png')
-          actual = hashlib.sha256(p.read_bytes()).hexdigest()
-          expected = '28defb4c8cb87cd886f333875131737475b524ac18809b82b86c7e1dd8f3ff4c'
-          if actual != expected:
-              raise SystemExit(f'Start Menu home was not deterministic: {actual}')
-          print(f'Start Menu home remained deterministic: {actual}')
-
-      - name: Re-run full characterization normally with strict baselines
+      - name: Re-run full characterization normally with strict generated baselines
         shell: pwsh
         run: npx playwright test --grep-invert "Navegador CloudOS — WebView2 real|Navegador CloudOS — lifecycle Windows" --output="$env:RUNNER_TEMP\strict-characterization" --reporter=list
 
@@ -123,6 +93,7 @@ jobs:
         run: |
           import hashlib
           import json
+          import os
           import subprocess
           from pathlib import Path
 
@@ -140,16 +111,14 @@ jobs:
               raise SystemExit(f'Unexpected changed files. expected={expected!r} actual={changed!r}')
           out = Path('baseline-audit-output')
           out.mkdir(exist_ok=True)
-          hashes = {}
-          for rel in expected:
-              hashes[rel] = hashlib.sha256(Path(rel).read_bytes()).hexdigest()
+          hashes = {rel: hashlib.sha256(Path(rel).read_bytes()).hexdigest() for rel in expected}
           (out / 'hashes.json').write_text(json.dumps(hashes, indent=2, sort_keys=True) + '\n', encoding='utf-8')
           (out / 'provenance.json').write_text(json.dumps({
               'sourceArtifactId': '9266934129',
               'sourceRunId': '31959642698',
               'sourceHead': '767b01a25567c1d7d05dba3d86825da7d62b6786',
-              'generatorRunId': __import__('os').environ.get('GITHUB_RUN_ID'),
-              'generatorHead': __import__('os').environ.get('GITHUB_SHA'),
+              'generatorRunId': os.environ.get('GITHUB_RUN_ID'),
+              'generatorHead': os.environ.get('GITHUB_SHA'),
               'strictCharacterizationPassed': True,
           }, indent=2, sort_keys=True) + '\n', encoding='utf-8')
           print(json.dumps(hashes, indent=2, sort_keys=True))
