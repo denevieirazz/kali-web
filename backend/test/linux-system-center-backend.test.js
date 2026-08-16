@@ -20,11 +20,10 @@ test('physical System Center probe verifies exact app identity and Linux source 
   assert.match(physicalProbe,/LINUX_SOURCE_ATTRIBUTE_NOT_APPLIED/);
 });
 
-test('physical probe persists pre-timeout screenshot, opened windows, visible state and safe API snapshots',()=>{
-  assert.match(physicalProbe,/system-center-diagnostic\.json/);
-  assert.match(physicalProbe,/system-center-opened\.png/);
-  assert.match(physicalProbe,/system-center-failure\.png/);
+test('physical probe persists opened, pre-timeout and final failure evidence independently',()=>{
+  for(const artifact of ['system-center-diagnostic.json','system-center-pretimeout-diagnostic.json','system-center-opened.png','system-center-pretimeout.png','system-center-failure.png']) assert.match(physicalProbe,new RegExp(artifact.replaceAll('.','\\.')));
   assert.match(physicalProbe,/linux-readiness-pending-before-timeout/);
+  assert.match(physicalProbe,/preTimeoutScreenshot, null, preTimeoutDiagnosticOutput/);
   assert.match(physicalProbe,/openWindows/);
   assert.match(physicalProbe,/systemCenters/);
   assert.match(physicalProbe,/safeApi:\s*\{\s*status:\s*apiStatus,\s*processes:\s*apiProcesses\s*\}/s);
