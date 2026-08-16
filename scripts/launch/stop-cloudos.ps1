@@ -18,6 +18,8 @@ try {
     [void](Assert-NoCloudOSOwnedProcessesRemain $session)
     Write-Host "Logs preservados em: $($session.logDirectory)"
     Write-Output (([ordered]@{status='stopped';sessionId=$session.id;logDirectory=$session.logDirectory;teardownResult=(Join-Path $session.logDirectory 'teardown-result.json')})|ConvertTo-Json -Compress)
+    $global:LASTEXITCODE=0
+    exit 0
 } catch {
     if(-not $teardown){
         $teardown=[pscustomobject][ordered]@{status='failed';stoppedProcesses=@();preservedProcesses=@();failures=@([ordered]@{component='teardown';pid=$null;error=$_.Exception.Message});finishedAt=(Get-Date).ToUniversalTime().ToString('o')}
