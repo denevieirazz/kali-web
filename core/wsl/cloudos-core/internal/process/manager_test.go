@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -15,27 +16,22 @@ func TestRejectsShellAndPreservesArgumentBoundaries(t *testing.T) {
 	if _, err := manager.Create("owner", CreateOptions{Executable: "/bin/sh", Args: []string{"-c", "echo unsafe"}}); Code(err) != "EXECUTABLE_DENIED" {
 		t.Fatalf("shell accepted: %v", err)
 	}
-	events := make(chan Event, 8)
-	manager = NewManager(func(e Event) { events <- e })
-	status, err := manager.Create("owner", CreateOptions{Executable: "/bin/echo", Args: []string{"alpha;uname", "$(id)"}})
+
+	sentinel := filepath.Join(t.TempDir(), "shell-injection-sentinel")
+	payload := "$(touch " + sentinel + ")"
+	status, err := manager.Create("owner", CreateOptions{Executable: "/bin/echo", Args: []string{"alpha;uname", payload}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := manager.Wait("owner", status.SessionID, 3*time.Second); err != nil {
+	exited, err := manager.Wait("owner", status.SessionID, 3*time.Second)
+	if err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.After(2 * time.Second)
-	var output strings.Builder
-	for !strings.Contains(output.String(), "alpha;uname $(id)") {
-		select {
-		case event := <-events:
-			if event.Type == "session.output" {
-				decoded, _ := base64.StdEncoding.DecodeString(event.Data)
-				output.Write(decoded)
-			}
-		case <-deadline:
-			t.Fatalf("argument boundary changed: %q", output.String())
-		}
+	if exited.ExitCode == nil || *exited.ExitCode != 0 {
+		t.Fatalf("direct argv execution failed: %+v", exited)
+	}
+	if _, err := os.Stat(sentinel); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("argument payload was interpreted instead of preserved as argv: sentinel=%s err=%v", sentinel, err)
 	}
 }
 
