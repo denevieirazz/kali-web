@@ -135,3 +135,39 @@ func TestPTYResizeInputAndExit(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestLimitsAreEnforced(t *testing.T) {
+	manager := NewManager(nil)
+	defer manager.CloseAll()
+	args := make([]string, MaxArgs+1)
+	if _, err := manager.Create("owner", CreateOptions{Executable: "/bin/echo", Args: args}); Code(err) != "ARGUMENT_LIMIT" {
+		t.Fatalf("argument limit not enforced: %v", err)
+	}
+	env := make(map[string]string, MaxEnvEntries+1)
+	for i := 0; i < MaxEnvEntries+1; i++ {
+		env["TERM"+strings.Repeat("X", i)] = "x"
+	}
+	if _, err := manager.Create("owner", CreateOptions{Executable: "/bin/echo", Env: env}); Code(err) != "ENV_LIMIT" {
+		t.Fatalf("environment limit not enforced: %v", err)
+	}
+
+	cat, err := manager.Create("owner", CreateOptions{Executable: "/bin/cat"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Input("owner", cat.SessionID, make([]byte, MaxIOBytes+1)); Code(err) != "IO_LIMIT" {
+		t.Fatalf("I/O limit not enforced: %v", err)
+	}
+	_ = manager.Signal("owner", cat.SessionID, "terminate")
+	_, _ = manager.Wait("owner", cat.SessionID, 3*time.Second)
+
+	for i := 0; i < MaxSessions; i++ {
+		if _, err := manager.Create("limit-owner", CreateOptions{Executable: "/bin/sleep", Args: []string{"30"}}); err != nil {
+			t.Fatalf("session %d should be allowed: %v", i, err)
+		}
+	}
+	if _, err := manager.Create("limit-owner", CreateOptions{Executable: "/bin/sleep", Args: []string{"30"}}); Code(err) != "SESSION_LIMIT" {
+		t.Fatalf("session limit not enforced: %v", err)
+	}
+	manager.CloseOwner("limit-owner")
+}
