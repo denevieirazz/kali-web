@@ -55,7 +55,7 @@ if ($routes -notmatch 'x-cloudos-file-actor' -or $routes -notmatch "!== 'user-ui
 if ($routes -notmatch 'confirmed !== true') { throw 'Confirmação explícita de mutação ausente.' }
 
 $policy = Get-Content './frontend/src/apps/CloudOSFiles/fileSourcePolicy.ts' -Raw
-if ($policy -notmatch "segment === '\.\.'" -or $policy -notmatch "value\.includes\('\\\\'\)") { throw 'Normalização de path frontend incompleta.' }
+if ($policy -notmatch "value === '\.\.'" -or $policy -notmatch "value\.includes\('\\\\'\)") { throw 'Normalização de path frontend incompleta.' }
 
 $linux = Get-Content './core/wsl/cloudos-core/internal/files/files.go' -Raw
 if ($linux -notmatch 'O_NOFOLLOW' -or $linux -notmatch 'Openat' -or $linux -notmatch 'Renameat') { throw 'Filesystem Linux não usa resolução relativa/no-follow esperada.' }
