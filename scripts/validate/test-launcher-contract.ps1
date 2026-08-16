@@ -7,8 +7,9 @@ $required=@(
 foreach($relative in $required){if(-not(Test-Path(Join-Path $root $relative))){throw "LAUNCHER_FILE_MISSING:$relative"}}
 $tokens=$null;$errors=$null
 foreach($relative in $required|Where-Object{$_.EndsWith('.ps1')}){
+ $tokens=$null;$errors=$null
  [void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path $root $relative),[ref]$tokens,[ref]$errors)
- if($errors.Count){throw "POWERSHELL_PARSE_FAILED:$relative:$($errors[0].Message)"}
+ if($errors.Count){throw "POWERSHELL_PARSE_FAILED:${relative}:$($errors[0].Message)"}
 }
 $common=Get-Content (Join-Path $root 'scripts/launch/cloudos-launcher-common.ps1') -Raw
 $start=Get-Content (Join-Path $root 'scripts/launch/start-cloudos.ps1') -Raw
