@@ -51,8 +51,11 @@ foreach($mode in @('WebOnly','Full')){
    if((Get-Item (Join-Path ([string]$session.logDirectory) 'backend.stdout.log')).Length -eq 0){throw 'BACKEND_STDOUT_EMPTY_AFTER_LAUNCHER_EXIT'}
    if((Get-Item (Join-Path ([string]$session.logDirectory) 'frontend.stdout.log')).Length -eq 0){throw 'FRONTEND_STDOUT_EMPTY_AFTER_LAUNCHER_EXIT'}
   }else{
-   [void](Assert-ComponentOwned $session 'host');$hostRuntime=Assert-ComponentOwned $session 'host-runtime';[void](Assert-ComponentOwned $session 'backend-hosted')
-   $hostProcess=Get-Process -Id ([int]$hostRuntime.pid) -ErrorAction Stop;if($hostProcess.MainWindowHandle -eq [IntPtr]::Zero){throw 'FULL_CHECKPOINT_SHELL_WINDOW_NOT_READY'}
+   $hostRuntime=Assert-ComponentOwned $session 'host-runtime';[void](Assert-ComponentOwned $session 'backend-hosted')
+   $hostProcess=Get-Process -Id ([int]$hostRuntime.pid) -ErrorAction Stop
+   if(-not ([string]$hostRuntime.executablePath -match '(?i)CloudOS\.Host\.exe$')){throw "FULL_HOST_RUNTIME_NOT_DIRECT_EXECUTABLE:$($hostRuntime.executablePath)"}
+   if($hostProcess.MainWindowHandle -eq [IntPtr]::Zero){throw 'FULL_CHECKPOINT_SHELL_WINDOW_NOT_READY'}
+   if($null -ne $session.readiness.hostLauncherPid){throw "FULL_WRAPPER_PID_SHOULD_BE_NULL:$($session.readiness.hostLauncherPid)"}
    Assert-Http "$($session.readiness.backendApiBase)/api/health"
    Set-Content -LiteralPath (Join-Path $evidenceRoot 'full-checkpoint.txt') -Value "FULL_CHECKPOINT_REACHED session=$($session.id) hostRuntimePid=$($hostRuntime.pid)" -Encoding UTF8
    Write-Host 'FULL_CHECKPOINT_REACHED'
