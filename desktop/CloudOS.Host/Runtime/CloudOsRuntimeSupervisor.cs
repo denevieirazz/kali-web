@@ -44,9 +44,7 @@ public sealed class CloudOsRuntimeSupervisor : IAsyncDisposable
 
         var layout = ResolveLayout(options.ProjectRoot);
         var nodePath = ResolveNodePath(options.NodePath, layout.Root);
-        var localRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "CloudOS");
+        var localRoot = ResolveLocalRoot();
         var runId = Guid.NewGuid().ToString("D");
         _runtimeDirectory = Path.Combine(localRoot, "runtime", runId);
         var dataDirectory = Path.Combine(localRoot, "data");
@@ -85,6 +83,7 @@ public sealed class CloudOsRuntimeSupervisor : IAsyncDisposable
         startInfo.Environment["CLOUDOS_NATIVE_HOST"] = "1";
         startInfo.Environment["CLOUDOS_RUN_ID"] = runId;
         startInfo.Environment["CLOUDOS_PARENT_PID"] = Environment.ProcessId.ToString();
+        startInfo.Environment["CLOUDOS_LOCAL_ROOT"] = localRoot;
         startInfo.Environment["CLOUDOS_RUNTIME_DIR"] = _runtimeDirectory;
         startInfo.Environment["CLOUDOS_DATA_DIR"] = dataDirectory;
         startInfo.Environment["CLOUDOS_FRONTEND_DIST"] = layout.FrontendDist;
@@ -279,6 +278,15 @@ public sealed class CloudOsRuntimeSupervisor : IAsyncDisposable
     private void ReleaseRuntimeLease()
     {
         Interlocked.Exchange(ref _runtimeLease, null)?.Dispose();
+    }
+
+    private static string ResolveLocalRoot()
+    {
+        var configured = Environment.GetEnvironmentVariable("CLOUDOS_LOCAL_ROOT");
+        if (!string.IsNullOrWhiteSpace(configured)) return Path.GetFullPath(configured);
+        return Path.GetFullPath(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "CloudOS"));
     }
 
     private static CloudOsLayout ResolveLayout(string? requestedRoot)
