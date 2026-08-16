@@ -84,39 +84,39 @@ func Run(stdin io.Reader, stdout, stderr io.Writer) error {
 }
 
 func (s *Server) serveConnection(conn net.Conn, stderr io.Writer) error {
-	owner, writer, err := s.authenticate(conn)
+	owner, channel, err := s.authenticate(conn)
 	if err != nil {
 		return err
 	}
 	manager := processcore.NewManager(func(event processcore.Event) {
-		_ = writer.Write(protocol.Envelope{Type: "event", Payload: protocol.Payload(event)})
+		_ = channel.Write(protocol.Envelope{Type: "event", Payload: protocol.Payload(event)})
 	})
 	defer manager.CloseOwner(owner)
 
 	for {
 		_ = conn.SetReadDeadline(time.Now().Add(90 * time.Second))
-		envelope, err := protocol.ReadFrame(conn)
+		envelope, err := channel.Read()
 		if err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
 				return nil
 			}
-			return errors.New("protocol read failed")
+			return errors.New("protected protocol read failed")
 		}
 		if envelope.Type == "ping" {
-			_ = writer.Write(protocol.Envelope{Type: "pong", ID: envelope.ID})
+			_ = channel.Write(protocol.Envelope{Type: "pong", ID: envelope.ID})
 			continue
 		}
 		if envelope.Type != "request" || envelope.ID == "" {
-			_ = writeError(writer, envelope.ID, "REQUEST_INVALID")
+			_ = writeError(channel, envelope.ID, "REQUEST_INVALID")
 			continue
 		}
-		shutdown, err := s.handleRequest(owner, manager, writer, envelope)
+		shutdown, err := s.handleRequest(owner, manager, channel, envelope)
 		if err != nil {
 			code := processcore.Code(err)
 			if code == "INTERNAL_ERROR" {
 				code = errorCode(err)
 			}
-			_ = writeError(writer, envelope.ID, code)
+			_ = writeError(channel, envelope.ID, code)
 		}
 		if shutdown {
 			manager.CloseOwner(owner)
@@ -125,7 +125,7 @@ func (s *Server) serveConnection(conn net.Conn, stderr io.Writer) error {
 	}
 }
 
-func (s *Server) authenticate(conn net.Conn) (string, *protocol.Writer, error) {
+func (s *Server) authenticate(conn net.Conn) (string, *protocol.SecureChannel, error) {
 	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
 	hello, err := protocol.ReadFrame(conn)
 	if err != nil || hello.Type != "hello" {
@@ -139,11 +139,12 @@ func (s *Server) authenticate(conn net.Conn) (string, *protocol.Writer, error) {
 	if err != nil {
 		return "", nil, errors.New("authentication failed")
 	}
+	defer zero(clientNonce)
 	serverNonce := make([]byte, protocol.NonceBytes)
 	if _, err := rand.Read(serverNonce); err != nil {
 		return "", nil, errors.New("authentication failed")
 	}
-	writer := protocol.NewWriter(conn)
+	defer zero(serverNonce)
 	challenge := struct {
 		ServerNonce string `json:"serverNonce"`
 		Proof       string `json:"proof"`
@@ -151,7 +152,7 @@ func (s *Server) authenticate(conn net.Conn) (string, *protocol.Writer, error) {
 		ServerNonce: base64.StdEncoding.EncodeToString(serverNonce),
 		Proof:       protocol.ProofBase64(s.secret, "server", clientNonce, serverNonce),
 	}
-	if err := writer.Write(protocol.Envelope{Type: "challenge", Payload: protocol.Payload(challenge)}); err != nil {
+	if err := protocol.WriteFrame(conn, protocol.Envelope{Type: "challenge", Payload: protocol.Payload(challenge)}); err != nil {
 		return "", nil, errors.New("authentication failed")
 	}
 	proof, err := protocol.ReadFrame(conn)
@@ -162,19 +163,28 @@ func (s *Server) authenticate(conn net.Conn) (string, *protocol.Writer, error) {
 	if json.Unmarshal(proof.Payload, &pp) != nil || !protocol.VerifyProof(s.secret, "client", clientNonce, serverNonce, pp.Proof) {
 		return "", nil, errors.New("authentication failed")
 	}
+	channel, err := protocol.NewSecureChannel(conn, conn, s.secret, clientNonce, serverNonce, true)
+	if err != nil {
+		return "", nil, errors.New("authentication failed")
+	}
 	ownerBytes := make([]byte, 16)
 	if _, err := rand.Read(ownerBytes); err != nil {
 		return "", nil, errors.New("authentication failed")
 	}
 	owner := base64.RawURLEncoding.EncodeToString(ownerBytes)
-	if err := writer.Write(protocol.Envelope{Type: "ready", Payload: protocol.Payload(map[string]any{"connectionId": owner, "protocol": protocol.Version})}); err != nil {
+	zero(ownerBytes)
+	if err := channel.Write(protocol.Envelope{Type: "ready", Payload: protocol.Payload(map[string]any{
+		"connectionId": owner,
+		"protocol":     protocol.Version,
+		"protection":   "aes-256-gcm-seq",
+	})}); err != nil {
 		return "", nil, errors.New("authentication failed")
 	}
 	_ = conn.SetDeadline(time.Time{})
-	return owner, writer, nil
+	return owner, channel, nil
 }
 
-func (s *Server) handleRequest(owner string, manager *processcore.Manager, writer *protocol.Writer, env protocol.Envelope) (bool, error) {
+func (s *Server) handleRequest(owner string, manager *processcore.Manager, writer *protocol.SecureChannel, env protocol.Envelope) (bool, error) {
 	var request struct {
 		Method string          `json:"method"`
 		Params json.RawMessage `json:"params,omitempty"`
@@ -186,7 +196,7 @@ func (s *Server) handleRequest(owner string, manager *processcore.Manager, write
 	case "health":
 		return false, writeOK(writer, env.ID, map[string]any{
 			"status": "ready", "protocol": protocol.Version, "pid": os.Getpid(),
-			"distro": s.distro, "activeSessions": manager.Active(),
+			"distro": s.distro, "activeSessions": manager.Active(), "protection": "aes-256-gcm-seq",
 		})
 	case "metrics.get":
 		snapshot, err := metrics.Read()
@@ -200,6 +210,19 @@ func (s *Server) handleRequest(owner string, manager *processcore.Manager, write
 			return false, coded("REQUEST_INVALID")
 		}
 		status, err := manager.Create(owner, options)
+		if err != nil {
+			return false, err
+		}
+		return false, writeOK(writer, env.ID, status)
+	case "terminal.create":
+		var terminal struct {
+			Rows int `json:"rows"`
+			Cols int `json:"cols"`
+		}
+		if len(request.Params) > 0 && string(request.Params) != "null" && json.Unmarshal(request.Params, &terminal) != nil {
+			return false, coded("REQUEST_INVALID")
+		}
+		status, err := manager.CreateTerminal(owner, terminal.Rows, terminal.Cols)
 		if err != nil {
 			return false, err
 		}
@@ -278,12 +301,12 @@ func (s *Server) handleRequest(owner string, manager *processcore.Manager, write
 	}
 }
 
-func writeOK(writer *protocol.Writer, id string, payload any) error {
+func writeOK(writer *protocol.SecureChannel, id string, payload any) error {
 	ok := true
 	return writer.Write(protocol.Envelope{Type: "response", ID: id, OK: &ok, Payload: protocol.Payload(payload)})
 }
 
-func writeError(writer *protocol.Writer, id, code string) error {
+func writeError(writer *protocol.SecureChannel, id, code string) error {
 	ok := false
 	return writer.Write(protocol.Envelope{Type: "response", ID: id, OK: &ok, Error: &protocol.ErrorBody{Code: code, Message: safeMessage(code)}})
 }
@@ -295,11 +318,12 @@ func safeMessage(code string) string {
 		"ARGUMENT_INVALID": "argument is invalid", "ENV_LIMIT": "environment limit exceeded",
 		"ENV_INVALID": "environment override is invalid", "USER_DENIED": "requested user is not allowed",
 		"CWD_INVALID": "working directory is invalid", "CWD_DENIED": "working directory is not allowed",
-		"SESSION_LIMIT": "session limit reached", "SESSION_NOT_FOUND": "session was not found",
-		"SESSION_NOT_OWNED": "session belongs to another connection", "SESSION_NOT_RUNNING": "session is not running",
-		"SESSION_NOT_PTY": "session does not have a pty", "PROCESS_START_FAILED": "process could not be started",
-		"IO_LIMIT": "input exceeds limit", "IO_INVALID": "input is invalid", "SIGNAL_INVALID": "signal is invalid",
-		"WAIT_TIMEOUT": "wait timed out", "METRICS_UNAVAILABLE": "kernel metrics are unavailable",
+		"SESSION_LIMIT": "session limit reached", "TERMINAL_SESSION_LIMIT": "only one terminal session is allowed per connection",
+		"SESSION_NOT_FOUND": "session was not found", "SESSION_NOT_OWNED": "session belongs to another connection",
+		"SESSION_NOT_RUNNING": "session is not running", "SESSION_NOT_PTY": "session does not have a pty",
+		"PROCESS_START_FAILED": "process could not be started", "IO_LIMIT": "input exceeds limit",
+		"IO_INVALID": "input is invalid", "SIGNAL_INVALID": "signal is invalid", "WAIT_TIMEOUT": "wait timed out",
+		"METRICS_UNAVAILABLE": "kernel metrics are unavailable",
 	}
 	if message := messages[code]; message != "" {
 		return message

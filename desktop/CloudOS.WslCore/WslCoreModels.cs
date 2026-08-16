@@ -18,6 +18,7 @@ public sealed class WslCoreHealth
     [JsonPropertyName("pid")] public int Pid { get; init; }
     [JsonPropertyName("distro")] public WslCoreDistroInfo? Distro { get; init; }
     [JsonPropertyName("activeSessions")] public int ActiveSessions { get; init; }
+    [JsonPropertyName("protection")] public string? Protection { get; init; }
 }
 
 public sealed class WslCoreMemoryMetrics

@@ -10,6 +10,7 @@ public sealed class WslCoreClient : IAsyncDisposable
     private readonly TcpClient _tcp;
     private readonly NetworkStream _stream;
     private readonly SemaphoreSlim _requestGate = new(1, 1);
+    private WslCoreSecureChannel? _secure;
     private bool _disposed;
 
     private WslCoreClient(TcpClient tcp)
@@ -46,6 +47,7 @@ public sealed class WslCoreClient : IAsyncDisposable
         timeout.CancelAfter(TimeSpan.FromSeconds(8));
         var clientNonce = RandomNumberGenerator.GetBytes(WslCoreProtocol.NonceBytes);
         byte[]? serverNonce = null;
+        WslCoreSecureChannel? secure = null;
         try
         {
             await WslCoreProtocol.WriteFrameAsync(_stream, new WireEnvelope
@@ -82,20 +84,30 @@ public sealed class WslCoreClient : IAsyncDisposable
                 Type = "proof",
                 Payload = WslCoreProtocol.Payload(new { proof = clientProof })
             }, timeout.Token);
-            var ready = await WslCoreProtocol.ReadFrameAsync(_stream, timeout.Token);
+
+            secure = WslCoreSecureChannel.Create(_stream, _stream, secret, clientNonce, serverNonce, serverSide: false);
+            var ready = await secure.ReadAsync(timeout.Token);
             if (ready.Type != "ready" || ready.Payload is null)
                 throw new WslCoreProtocolException("AUTH_FAILED", "Guest did not complete mutual authentication.");
             int protocol;
-            try { protocol = ready.Payload.Value.GetProperty("protocol").GetInt32(); }
+            string? protection;
+            try
+            {
+                protocol = ready.Payload.Value.GetProperty("protocol").GetInt32();
+                protection = ready.Payload.Value.GetProperty("protection").GetString();
+            }
             catch (Exception error) when (error is KeyNotFoundException or InvalidOperationException or FormatException)
             {
-                throw new WslCoreProtocolException("AUTH_FAILED", "Guest ready message is malformed.");
+                throw new WslCoreProtocolException("AUTH_FAILED", "Guest protected ready message is malformed.");
             }
-            if (protocol != WslCoreProtocol.Version)
-                throw new WslCoreProtocolException("AUTH_FAILED", "Guest protocol version changed during authentication.");
+            if (protocol != WslCoreProtocol.Version || protection != "aes-256-gcm-seq")
+                throw new WslCoreProtocolException("AUTH_FAILED", "Guest protected channel parameters are invalid.");
+            _secure = secure;
+            secure = null;
         }
         finally
         {
+            if (secure is not null) await secure.DisposeAsync();
             CryptographicOperations.ZeroMemory(clientNonce);
             if (serverNonce is not null) CryptographicOperations.ZeroMemory(serverNonce);
         }
@@ -119,6 +131,9 @@ public sealed class WslCoreClient : IAsyncDisposable
             cols = request.Cols,
             rows = request.Rows
         }, TimeSpan.FromSeconds(8), cancellationToken);
+
+    public Task<WslCoreSessionStatus> CreateTerminalAsync(int rows = 32, int cols = 120, CancellationToken cancellationToken = default) =>
+        RequestAsync<WslCoreSessionStatus>("terminal.create", new { rows, cols }, TimeSpan.FromSeconds(8), cancellationToken);
 
     public Task InputAsync(string sessionId, ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default) =>
         RequestNoResultAsync("session.input", new { sessionId, data = Convert.ToBase64String(data.Span) }, TimeSpan.FromSeconds(5), cancellationToken);
@@ -146,13 +161,14 @@ public sealed class WslCoreClient : IAsyncDisposable
     private async Task<T> RequestAsync<T>(string method, object? parameters, TimeSpan timeout, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        var secure = _secure ?? throw new WslCoreProtocolException("AUTH_REQUIRED", "Protected channel is not initialized.");
         await _requestGate.WaitAsync(cancellationToken);
         try
         {
             using var bounded = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             bounded.CancelAfter(timeout);
             var id = Guid.NewGuid().ToString("N");
-            await WslCoreProtocol.WriteFrameAsync(_stream, new WireEnvelope
+            await secure.WriteAsync(new WireEnvelope
             {
                 Version = WslCoreProtocol.Version,
                 Type = "request",
@@ -162,7 +178,7 @@ public sealed class WslCoreClient : IAsyncDisposable
 
             while (true)
             {
-                var envelope = await WslCoreProtocol.ReadFrameAsync(_stream, bounded.Token);
+                var envelope = await secure.ReadAsync(bounded.Token);
                 if (envelope.Type == "event")
                 {
                     DispatchEvent(envelope);
@@ -193,13 +209,17 @@ public sealed class WslCoreClient : IAsyncDisposable
         catch (JsonException) { }
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
-        if (_disposed) return ValueTask.CompletedTask;
+        if (_disposed) return;
         _disposed = true;
+        if (_secure is not null)
+        {
+            await _secure.DisposeAsync();
+            _secure = null;
+        }
         _stream.Dispose();
         _tcp.Dispose();
         _requestGate.Dispose();
-        return ValueTask.CompletedTask;
     }
 }

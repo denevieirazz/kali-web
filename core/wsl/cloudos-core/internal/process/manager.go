@@ -77,6 +77,7 @@ type Session struct {
 	mu       sync.RWMutex
 	id       string
 	owner    string
+	kind     string
 	cmd      *exec.Cmd
 	cancel   context.CancelFunc
 	stdin    io.WriteCloser
@@ -110,11 +111,28 @@ func (m *Manager) Active() int {
 }
 
 func (m *Manager) Create(owner string, options CreateOptions) (Status, error) {
-	if owner == "" {
-		return Status{}, coded("OWNER_INVALID")
-	}
 	if err := validateOptions(options); err != nil {
 		return Status{}, err
+	}
+	return m.create(owner, options, "generic")
+}
+
+// CreateTerminal is deliberately separate from the generic executable allowlist.
+// It creates one fixed interactive login shell per authenticated connection and
+// never accepts an executable, argv, cwd, user or environment from the client.
+func (m *Manager) CreateTerminal(owner string, rows, cols int) (Status, error) {
+	return m.create(owner, CreateOptions{
+		Executable: "/bin/bash",
+		Args:       []string{"-l"},
+		PTY:        true,
+		Rows:       rows,
+		Cols:       cols,
+	}, "terminal")
+}
+
+func (m *Manager) create(owner string, options CreateOptions, kind string) (Status, error) {
+	if owner == "" {
+		return Status{}, coded("OWNER_INVALID")
 	}
 	m.mu.Lock()
 	running := 0
@@ -122,6 +140,11 @@ func (m *Manager) Create(owner string, options CreateOptions) (Status, error) {
 		existing.mu.RLock()
 		if existing.state == "running" {
 			running++
+			if kind == "terminal" && existing.owner == owner && existing.kind == "terminal" {
+				existing.mu.RUnlock()
+				m.mu.Unlock()
+				return Status{}, coded("TERMINAL_SESSION_LIMIT")
+			}
 		}
 		existing.mu.RUnlock()
 	}
@@ -141,7 +164,7 @@ func (m *Manager) Create(owner string, options CreateOptions) (Status, error) {
 	cmd.Env = buildEnv(options.Env)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 
-	session := &Session{id: id, owner: owner, cmd: cmd, cancel: cancel, done: make(chan struct{}), state: "starting", isPTY: options.PTY}
+	session := &Session{id: id, owner: owner, kind: kind, cmd: cmd, cancel: cancel, done: make(chan struct{}), state: "starting", isPTY: options.PTY}
 	if options.PTY {
 		rows, cols := clampSize(options.Rows, options.Cols)
 		ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
@@ -286,11 +309,12 @@ func (m *Manager) Signal(owner, id, name string) error {
 	session.mu.RLock()
 	process := session.cmd.Process
 	running := session.state == "running"
+	isPTY := session.isPTY
 	session.mu.RUnlock()
 	if !running || process == nil {
 		return coded("SESSION_NOT_RUNNING")
 	}
-	if err := process.Signal(signal); err != nil {
+	if err := signalProcess(process, isPTY, signal); err != nil {
 		return coded("SIGNAL_FAILED")
 	}
 	return nil
@@ -351,12 +375,13 @@ func terminateSession(session *Session) {
 	running := session.state == "running"
 	process := session.cmd.Process
 	cancel := session.cancel
+	isPTY := session.isPTY
 	session.mu.RUnlock()
 	if !running {
 		return
 	}
 	if process != nil {
-		_ = process.Signal(syscall.SIGTERM)
+		_ = signalProcess(process, isPTY, syscall.SIGTERM)
 	}
 	select {
 	case <-session.done:
@@ -367,12 +392,25 @@ func terminateSession(session *Session) {
 		cancel()
 	}
 	if process != nil {
-		_ = process.Kill()
+		_ = signalProcess(process, isPTY, syscall.SIGKILL)
 	}
 	select {
 	case <-session.done:
 	case <-time.After(2 * time.Second):
 	}
+}
+
+func signalProcess(process *os.Process, isPTY bool, signal syscall.Signal) error {
+	if process == nil {
+		return errors.New("process is unavailable")
+	}
+	if isPTY {
+		// creack/pty starts the PTY child as a session leader. Signalling the
+		// process group reaches the shell and its foreground children, which is
+		// required for Ctrl+C/close semantics and orphan-free cleanup.
+		return syscall.Kill(-process.Pid, signal)
+	}
+	return process.Signal(signal)
 }
 
 func (m *Manager) get(owner, id string) (*Session, error) {
