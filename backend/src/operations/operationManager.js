@@ -6,6 +6,7 @@ import { config } from '../config/index.js';
 
 const operations = new Map();
 const activeProcesses = new Map();
+const activeManaged = new Map();
 const cancellationRequests = new Set();
 const MAX_LOG_LINES = 160;
 const JOURNAL_PATH = path.join(config.dataDir, 'operations.json');
@@ -55,10 +56,7 @@ hydrateOperations();
 
 function publicOperation(operation) {
   if (!operation) return null;
-  return {
-    ...operation,
-    output: [...operation.output]
-  };
+  return { ...operation, output: [...operation.output] };
 }
 
 export function createOperation(type, target, message = 'Preparando operação...') {
@@ -86,7 +84,12 @@ export function createOperation(type, target, message = 'Preparando operação..
 export function updateOperation(id, updates) {
   const current = operations.get(id);
   if (!current) return null;
-  Object.assign(current, updates, { updatedAt: new Date().toISOString() });
+  const next = { ...updates };
+  if (Object.hasOwn(next, 'progress')) {
+    const numeric = Number(next.progress);
+    next.progress = Number.isFinite(numeric) ? Math.max(0, Math.min(100, Math.round(numeric))) : current.progress;
+  }
+  Object.assign(current, next, { updatedAt: new Date().toISOString() });
   persistOperations();
   return publicOperation(current);
 }
@@ -100,16 +103,12 @@ export function appendOperationOutput(id, text) {
     .map((line) => line.trimEnd())
     .filter(Boolean);
   current.output.push(...cleanLines);
-  if (current.output.length > MAX_LOG_LINES) {
-    current.output.splice(0, current.output.length - MAX_LOG_LINES);
-  }
+  if (current.output.length > MAX_LOG_LINES) current.output.splice(0, current.output.length - MAX_LOG_LINES);
   const percentages = cleanLines
     .flatMap((line) => [...line.matchAll(/(\d{1,3}(?:[.,]\d+)?)\s*%/g)])
     .map((match) => Number.parseFloat(match[1].replace(',', '.')))
     .filter((value) => Number.isFinite(value) && value >= 0 && value <= 100);
-  if (percentages.length) {
-    current.progress = Math.max(current.progress, Math.min(95, Math.round(percentages.at(-1))));
-  }
+  if (percentages.length) current.progress = Math.max(current.progress, Math.min(95, Math.round(percentages.at(-1))));
   current.updatedAt = new Date().toISOString();
   persistOperations();
 }
@@ -167,11 +166,8 @@ export function runProcessOperation(operation, executable, args, options = {}) {
     });
   } catch (error) {
     updateOperation(id, {
-      status: 'failed',
-      step: 'failed',
-      message: error.message,
-      errorCode: error.code || 'SPAWN_FAILED',
-      finishedAt: new Date().toISOString()
+      status: 'failed', step: 'failed', message: error.message,
+      errorCode: error.code || 'SPAWN_FAILED', finishedAt: new Date().toISOString()
     });
     return publicOperation(operations.get(id));
   }
@@ -183,11 +179,8 @@ export function runProcessOperation(operation, executable, args, options = {}) {
   child.on('error', (error) => {
     activeProcesses.delete(id);
     updateOperation(id, {
-      status: 'failed',
-      step: 'failed',
-      message: error.message,
-      errorCode: error.code || 'PROCESS_ERROR',
-      finishedAt: new Date().toISOString()
+      status: 'failed', step: 'failed', message: error.message,
+      errorCode: error.code || 'PROCESS_ERROR', finishedAt: new Date().toISOString()
     });
   });
 
@@ -195,75 +188,148 @@ export function runProcessOperation(operation, executable, args, options = {}) {
     activeProcesses.delete(id);
     if (cancellationRequests.delete(id)) {
       updateOperation(id, {
-        status: 'cancelled',
-        step: 'cancelled',
-        message: 'Operação cancelada pelo usuário.',
-        exitCode,
-        progress: 0,
-        finishedAt: new Date().toISOString()
+        status: 'cancelled', step: 'cancelled', message: 'Operação cancelada pelo usuário.',
+        exitCode, progress: 0, finishedAt: new Date().toISOString()
       });
       return;
     }
-
     if (exitCode === 0) {
       try {
         await options.onSuccess?.();
         updateOperation(id, {
-          status: 'completed',
-          step: 'completed',
-          message: options.successMessage || 'Operação concluída com sucesso.',
-          progress: 100,
-          exitCode,
-          finishedAt: new Date().toISOString()
+          status: 'completed', step: 'completed', message: options.successMessage || 'Operação concluída com sucesso.',
+          progress: 100, exitCode, finishedAt: new Date().toISOString()
         });
       } catch (error) {
         updateOperation(id, {
-          status: 'failed',
-          step: 'verification_failed',
-          message: error.message,
-          errorCode: 'VERIFICATION_FAILED',
-          exitCode,
-          finishedAt: new Date().toISOString()
+          status: 'failed', step: 'verification_failed', message: error.message,
+          errorCode: 'VERIFICATION_FAILED', exitCode, finishedAt: new Date().toISOString()
         });
       }
       return;
     }
-
     const latest = operations.get(id);
     const lastLine = latest?.output.at(-1);
     updateOperation(id, {
-      status: 'failed',
-      step: 'failed',
+      status: 'failed', step: 'failed',
       message: lastLine || `O processo terminou com código ${exitCode ?? signal ?? 'desconhecido'}.`,
       errorCode: signal ? `SIGNAL_${signal}` : `EXIT_${exitCode}`,
-      exitCode,
-      finishedAt: new Date().toISOString()
+      exitCode, finishedAt: new Date().toISOString()
     });
   });
 
   return publicOperation(operations.get(id));
 }
 
+export function runManagedOperation(operation, executor, options = {}) {
+  const id = typeof operation === 'string' ? operation : operation.id;
+  const existing = operations.get(id);
+  if (!existing) throw new Error('Operação não encontrada.');
+  if (activeManaged.has(id) || activeProcesses.has(id)) throw new Error('Operação já está em execução.');
+
+  const controller = new AbortController();
+  activeManaged.set(id, controller);
+  updateOperation(id, {
+    status: 'running',
+    progress: Math.max(existing.progress, 1),
+    step: options.step || 'running',
+    message: options.message || 'Operação transacional em andamento...'
+  });
+
+  const context = {
+    signal: controller.signal,
+    update: (updates) => updateOperation(id, updates),
+    appendOutput: (text) => appendOperationOutput(id, text),
+    throwIfCancelled() {
+      if (controller.signal.aborted) throw Object.assign(new Error('Operação cancelada pelo usuário.'), { code: 'OPERATION_CANCELLED' });
+    }
+  };
+
+  const promise = Promise.resolve()
+    .then(() => executor(context))
+    .then(async (result) => {
+      if (controller.signal.aborted || cancellationRequests.delete(id)) {
+        await options.onCancelled?.(result);
+        updateOperation(id, {
+          status: 'cancelled', step: 'cancelled', message: 'Operação cancelada pelo usuário.',
+          progress: 0, errorCode: null, finishedAt: new Date().toISOString()
+        });
+        return result;
+      }
+      await options.onSuccess?.(result);
+      updateOperation(id, {
+        status: 'completed', step: 'completed',
+        message: options.successMessage || 'Operação concluída com sucesso.',
+        progress: 100, errorCode: null, finishedAt: new Date().toISOString()
+      });
+      return result;
+    })
+    .catch(async (error) => {
+      const cancelled = controller.signal.aborted || cancellationRequests.delete(id) || error?.code === 'OPERATION_CANCELLED' || error?.name === 'AbortError';
+      if (cancelled) {
+        try { await options.onCancelled?.(error); } catch {}
+        updateOperation(id, {
+          status: 'cancelled', step: 'cancelled', message: 'Operação cancelada pelo usuário.',
+          progress: 0, errorCode: null, finishedAt: new Date().toISOString()
+        });
+        return null;
+      }
+      try { await options.onFailure?.(error); } catch {}
+      updateOperation(id, {
+        status: 'failed', step: 'failed',
+        message: typeof error?.message === 'string' ? error.message.slice(0, 240) : 'A operação transacional falhou.',
+        errorCode: typeof error?.code === 'string' ? error.code.slice(0, 64) : 'MANAGED_OPERATION_FAILED',
+        finishedAt: new Date().toISOString()
+      });
+      return null;
+    })
+    .finally(() => {
+      activeManaged.delete(id);
+      cancellationRequests.delete(id);
+    });
+
+  return { operation: getOperation(id), promise };
+}
+
 export function cancelOperation(id) {
   const child = activeProcesses.get(id);
+  const managed = activeManaged.get(id);
   const operation = operations.get(id);
   if (!operation) return { found: false, cancelled: false };
-  if (!child || !['queued', 'running', 'cancelling'].includes(operation.status)) {
+  if (!['queued', 'running', 'cancelling'].includes(operation.status)) {
     return { found: true, cancelled: false, operation: publicOperation(operation) };
   }
-  cancellationRequests.add(id);
-  updateOperation(id, {
-    status: 'cancelling',
-    step: 'cancelling',
-    message: 'Solicitando cancelamento seguro...'
-  });
-  child.kill('SIGTERM');
-  return { found: true, cancelled: true, operation: getOperation(id) };
+
+  if (managed) {
+    cancellationRequests.add(id);
+    updateOperation(id, { status: 'cancelling', step: 'cancelling', message: 'Solicitando cancelamento e rollback seguro...' });
+    managed.abort();
+    return { found: true, cancelled: true, operation: getOperation(id) };
+  }
+
+  if (child) {
+    cancellationRequests.add(id);
+    updateOperation(id, { status: 'cancelling', step: 'cancelling', message: 'Solicitando cancelamento seguro...' });
+    child.kill('SIGTERM');
+    return { found: true, cancelled: true, operation: getOperation(id) };
+  }
+
+  if (operation.status === 'queued') {
+    updateOperation(id, {
+      status: 'cancelled', step: 'cancelled', message: 'Operação cancelada antes de iniciar.',
+      progress: 0, errorCode: null, finishedAt: new Date().toISOString()
+    });
+    return { found: true, cancelled: true, operation: getOperation(id) };
+  }
+
+  return { found: true, cancelled: false, operation: publicOperation(operation) };
 }
 
 export function resetOperationsForTests() {
   for (const child of activeProcesses.values()) child.kill('SIGTERM');
+  for (const controller of activeManaged.values()) controller.abort();
   activeProcesses.clear();
+  activeManaged.clear();
   cancellationRequests.clear();
   operations.clear();
   try { fs.unlinkSync(JOURNAL_PATH); } catch {}
