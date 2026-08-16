@@ -4,14 +4,26 @@ param(
 )
 
 . (Join-Path $PSScriptRoot 'cloudos-launcher-common.ps1')
+. (Join-Path $PSScriptRoot 'cloudos-owned-processes.ps1')
+. (Join-Path $PSScriptRoot '..\validate\cloudos-node-dependencies.ps1')
 
 $session = New-CloudOSSession -Mode $Mode
 Save-CloudOSProcessSnapshot $session 'before'
 
 try {
     Write-CloudOSLog $session "CloudOS Stabilization Batch 1 iniciando em modo $Mode."
+
+    $pwshResolution = Resolve-CloudOSPowerShell7
+    $pwshDirectory = Split-Path -Parent ([string]$pwshResolution.path)
+    $pathEntries = @([string]$env:PATH -split [IO.Path]::PathSeparator)
+    if ($pwshDirectory -and ($pathEntries -notcontains $pwshDirectory)) {
+        $env:PATH = "$pwshDirectory$([IO.Path]::PathSeparator)$env:PATH"
+    }
+
     $pre = Test-CloudOSPrerequisites $session
-    Install-CloudOSLocalDependencies $session
+    $dependencyEvidence = Join-Path $session.logDirectory 'dependencies'
+    $dependencyState = Ensure-CloudOSNodeDependencies -Root $script:CloudOSRoot -EvidenceDirectory $dependencyEvidence -AllowInstall
+    Write-CloudOSLog $session "Dependencias Node verificadas strategy=root-workspaces-single-install installPerformed=$($dependencyState.installPerformed)."
 
     $env:CLOUDOS_LAUNCH_MODE = $Mode
     $env:CLOUDOS_RUNTIME_DIR = $session.runtimeDirectory
@@ -40,8 +52,8 @@ try {
         Write-CloudOSLog $session 'Compilando frontend para o Host nativo.'
         Push-Location $script:CloudOSRoot
         try {
-            & npm --prefix frontend run build *>> (Join-Path $session.logDirectory 'bootstrap.log')
-            if ($LASTEXITCODE -ne 0) { throw "FRONTEND_BUILD_FAILED:$LASTEXITCODE" }
+            & $pre.npm --prefix frontend run build *>> (Join-Path $session.logDirectory 'bootstrap.log')
+            if ($LASTEXITCODE -ne 0) { throw "FRONTEND_BUILD_FAILED:$LASTEXITCODE:log=$(Join-Path $session.logDirectory 'bootstrap.log')" }
         } finally { Pop-Location }
 
         $hostErr = Join-Path $session.logDirectory 'host.stderr.log'
@@ -54,7 +66,10 @@ try {
         }
         Start-Sleep -Milliseconds 700
         $host.Refresh()
-        if ($host.HasExited) { throw "HOST_EXITED_EARLY:$($host.ExitCode):$(Join-Path $session.logDirectory 'host.log')" }
+        if ($host.HasExited) {
+            $tail = ((Get-Content -LiteralPath $hostErr -Tail 30 -ErrorAction SilentlyContinue) -join ' | ')
+            throw "HOST_EXITED_EARLY:$($host.ExitCode):log=$hostErr:error=$tail"
+        }
         Add-Content -LiteralPath (Join-Path $session.logDirectory 'backend.stdout.log') -Value 'Full mode: backend stream is supervised by CloudOS.Host; native host log is authoritative for this stage.'
         Add-Content -LiteralPath (Join-Path $session.logDirectory 'frontend.stdout.log') -Value 'Full mode: frontend is served from the production build by CloudOS.Host.'
     } else {

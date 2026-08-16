@@ -1,5 +1,6 @@
 param()
 . (Join-Path $PSScriptRoot 'cloudos-launcher-common.ps1')
+. (Join-Path $PSScriptRoot 'cloudos-owned-processes.ps1')
 $session = Read-CloudOSCurrentSession
 if (-not $session) { Write-Host 'Nenhuma sessão CloudOS registrada.'; exit 0 }
 Write-CloudOSLog $session "Encerrando sessão $($session.id)."

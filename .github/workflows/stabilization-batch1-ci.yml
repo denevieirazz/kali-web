@@ -22,18 +22,15 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22.x
-
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.23.x'
           cache-dependency-path: core/wsl/cloudos-core/go.sum
-
       - name: Prepare canonical result directory
         shell: bash
         run: |
@@ -41,16 +38,12 @@ jobs:
           mkdir -p "$RESULT_DIR"
           printf '{"schemaVersion":1,"status":"running","os":"linux","head":"%s","runId":"%s"}\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" > "$RESULT_DIR/manifest.json"
           echo "CLOUDOS_RESULT_DIR=$RESULT_DIR" >> "$GITHUB_ENV"
-
-      - name: Install dependencies
-        run: npm ci
-
+      - name: Install dependencies from root workspace lock
+        run: npm ci --include=dev
       - name: Lint
         run: npm run lint
-
       - name: Build frontend
         run: npm run build
-
       - name: Backend regression
         run: npm test
         env:
@@ -58,7 +51,6 @@ jobs:
           CLOUDOS_TEST_ROOT: ${{ runner.temp }}/cloudos-batch1/backend-regression
           CLOUDOS_DATA_DIR: ${{ runner.temp }}/cloudos-batch1/backend-regression/data
           DATABASE_PATH: ${{ runner.temp }}/cloudos-batch1/backend-regression/data/cloudos.json
-
       - name: E2E regression
         run: npm run test:e2e
         env:
@@ -66,31 +58,24 @@ jobs:
           CLOUDOS_TEST_ROOT: ${{ runner.temp }}/cloudos-batch1/e2e-regression
           CLOUDOS_DATA_DIR: ${{ runner.temp }}/cloudos-batch1/e2e-regression/data
           DATABASE_PATH: ${{ runner.temp }}/cloudos-batch1/e2e-regression/data/cloudos.json
-
       - name: Frontend regression
         run: npm run test:frontend
-
       - name: Verify Go module
         working-directory: core/wsl/cloudos-core
         run: go mod verify
-
       - name: Test Linux WSL core
         working-directory: core/wsl/cloudos-core
         run: go test ./...
-
       - name: Build Linux WSL core
         working-directory: core/wsl/cloudos-core
         run: go build -trimpath ./cmd/cloudos-core
-
       - name: Check batch diff
         run: git diff --check 2d3380ba562d23e05947f81cc9581e8fe9bcfdbc...HEAD
-
       - name: Finalize Linux manifest
         if: always()
         shell: bash
         run: |
           printf '{"schemaVersion":1,"os":"linux","head":"%s","runId":"%s","conclusion":"see-github-job"}\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" > "$CLOUDOS_RESULT_DIR/summary.json"
-
       - name: Upload Linux canonical results
         if: always()
         uses: actions/upload-artifact@v4
@@ -102,23 +87,20 @@ jobs:
 
   windows-full-regression:
     runs-on: windows-latest
-    timeout-minutes: 50
+    timeout-minutes: 60
     steps:
       - name: Checkout exact branch state
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22.x
-
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-
       - name: Prepare canonical result directory
         shell: pwsh
         run: |
@@ -127,31 +109,27 @@ jobs:
           @{ schemaVersion=1; status='running'; os='windows'; head=$env:GITHUB_SHA; runId=$env:GITHUB_RUN_ID } |
             ConvertTo-Json | Set-Content (Join-Path $result 'manifest.json') -Encoding utf8
           "CLOUDOS_RESULT_DIR=$result" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
       - name: Validate PowerShell 7
         shell: pwsh
         run: ./scripts/test-powershell7-requirement.ps1
-
       - name: Validate stabilization safety boundary
         shell: pwsh
         run: ./scripts/validate/test-stabilization-safety-boundary.ps1
-
       - name: Validate launcher contract
         shell: pwsh
         run: ./scripts/validate/test-launcher-contract.ps1
-
-      - name: Install dependencies
-        run: npm ci
-
+      - name: Prove dependency bootstrap in clean worktree
+        shell: pwsh
+        run: ./scripts/validate/test-clean-worktree-dependency-bootstrap.ps1 -EvidenceDirectory "$env:CLOUDOS_RESULT_DIR\dependency-worktree"
+      - name: Install dependencies with official root strategy
+        shell: pwsh
+        run: ./scripts/validate/install-cloudos-dependencies.ps1 -EvidenceDirectory "$env:CLOUDOS_RESULT_DIR\dependencies"
       - name: Install Playwright Chromium
         run: npx playwright install chromium
-
       - name: Lint
         run: npm.cmd run lint
-
       - name: Build frontend
         run: npm.cmd run build
-
       - name: Backend and integration regression
         run: npm.cmd test
         env:
@@ -159,7 +137,6 @@ jobs:
           CLOUDOS_TEST_ROOT: ${{ runner.temp }}\cloudos-batch1\backend-regression
           CLOUDOS_DATA_DIR: ${{ runner.temp }}\cloudos-batch1\backend-regression\data
           DATABASE_PATH: ${{ runner.temp }}\cloudos-batch1\backend-regression\data\cloudos.json
-
       - name: E2E regression
         run: npm.cmd run test:e2e
         env:
@@ -167,72 +144,53 @@ jobs:
           CLOUDOS_TEST_ROOT: ${{ runner.temp }}\cloudos-batch1\e2e-regression
           CLOUDOS_DATA_DIR: ${{ runner.temp }}\cloudos-batch1\e2e-regression\data
           DATABASE_PATH: ${{ runner.temp }}\cloudos-batch1\e2e-regression\data\cloudos.json
-
       - name: Frontend regression
         run: npm.cmd run test:frontend
-
       - name: Build Host
         run: dotnet build desktop/CloudOS.Host/CloudOS.Host.csproj -c Release
-
       - name: Host tests
         run: dotnet run --project desktop/CloudOS.Host.Tests/CloudOS.Host.Tests.csproj -c Release
-
       - name: Browser response contract tests
         run: dotnet run --project desktop/CloudOS.Browser.Contracts.Tests/CloudOS.Browser.Contracts.Tests.csproj -c Release
-
       - name: Native Host freshness
         shell: pwsh
         run: ./scripts/test-native-host-freshness.ps1
-
       - name: Build Bootstrap
         run: dotnet build desktop/CloudOS.Bootstrap/CloudOS.Bootstrap.csproj -c Release
-
       - name: Bootstrap tests
         run: dotnet run --project desktop/CloudOS.Bootstrap.Tests/CloudOS.Bootstrap.Tests.csproj -c Release
-
       - name: Build Browser TestHost
         run: dotnet build desktop/CloudOS.Browser.TestHost/CloudOS.Browser.TestHost.csproj -c Release
-
       - name: Build WSL core client
         run: dotnet build desktop/CloudOS.WslCore/CloudOS.WslCore.csproj -c Release
-
       - name: WSL core client tests
         run: dotnet run --project desktop/CloudOS.WslCore.Tests/CloudOS.WslCore.Tests.csproj -c Release
-
       - name: Build WSL core physical probe without running it
         run: dotnet build desktop/CloudOS.WslCore.Probe/CloudOS.WslCore.Probe.csproj -c Release
-
       - name: WSL core safety contracts
         shell: pwsh
         run: |
           ./scripts/test-wsl-core-foundation-contract.ps1
           ./scripts/test-wsl-core-secure-terminal-contract.ps1
           ./scripts/test-visible-terminal-wsl-core-contract.ps1
-
       - name: Playwright characterization
         run: npx playwright test --grep-invert "Navegador CloudOS — WebView2 real|Navegador CloudOS — lifecycle Windows" --output="${{ env.CLOUDOS_RESULT_DIR }}\playwright-characterization" --reporter=list
-
       - name: Browser opening lifecycle
         run: npx playwright test tests/playwright/native-browser-lifecycle.spec.ts --output="${{ env.CLOUDOS_RESULT_DIR }}\native-browser-lifecycle" --reporter=list
-
       - name: Native Browser WebView2
         run: npx playwright test tests/playwright/native-browser.spec.ts --output="${{ env.CLOUDOS_RESULT_DIR }}\native-browser" --reporter=list
-
       - name: Native Browser Host smoke and teardown
         shell: pwsh
         run: ./scripts/test-native-browser-host-smoke.ps1
-
       - name: Check batch diff
         shell: pwsh
         run: git diff --check 2d3380ba562d23e05947f81cc9581e8fe9bcfdbc...HEAD
-
       - name: Finalize Windows manifest
         if: always()
         shell: pwsh
         run: |
           @{ schemaVersion=1; os='windows'; head=$env:GITHUB_SHA; runId=$env:GITHUB_RUN_ID; conclusion='see-github-job' } |
             ConvertTo-Json | Set-Content (Join-Path $env:CLOUDOS_RESULT_DIR 'summary.json') -Encoding utf8
-
       - name: Upload Windows canonical results
         if: always()
         uses: actions/upload-artifact@v4

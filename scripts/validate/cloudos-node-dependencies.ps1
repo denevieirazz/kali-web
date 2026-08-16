@@ -1,0 +1,243 @@
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+function Write-CloudOSDependencyJson {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)]$Value)
+    $directory = Split-Path -Parent $Path
+    if ($directory) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
+    $Value | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $Path -Encoding UTF8
+}
+
+function Resolve-CloudOSPowerShell7 {
+    [CmdletBinding()]
+    param()
+    $attempts = [System.Collections.Generic.List[string]]::new()
+    $command = Get-Command pwsh -ErrorAction SilentlyContinue
+    $attempts.Add('Get-Command pwsh / PATH')
+    if ($command -and $command.Source -and (Test-Path -LiteralPath $command.Source)) {
+        return [ordered]@{ path=$command.Source; source='Get-Command'; attempts=@($attempts) }
+    }
+
+    if ($IsWindows) {
+        $conventional = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
+        $attempts.Add($conventional)
+        if (Test-Path -LiteralPath $conventional) {
+            return [ordered]@{ path=$conventional; source='ProgramFiles-PowerShell-7'; attempts=@($attempts) }
+        }
+
+        $supported = [System.Collections.Generic.List[string]]::new()
+        if ($env:LOCALAPPDATA) { $supported.Add((Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\pwsh.exe')) }
+        if ($PSHOME) { $supported.Add((Join-Path $PSHOME 'pwsh.exe')) }
+        $installRoots = [System.Collections.Generic.List[string]]::new()
+        if ($env:ProgramFiles) { $installRoots.Add((Join-Path $env:ProgramFiles 'PowerShell')) }
+        if ($env:LOCALAPPDATA) { $installRoots.Add((Join-Path $env:LOCALAPPDATA 'Programs\PowerShell')) }
+        foreach ($installRoot in $installRoots) {
+            if (-not (Test-Path -LiteralPath $installRoot)) { continue }
+            foreach ($candidate in Get-ChildItem -LiteralPath $installRoot -Directory -ErrorAction SilentlyContinue) {
+                $supported.Add((Join-Path $candidate.FullName 'pwsh.exe'))
+            }
+        }
+        try {
+            foreach ($package in @(Get-AppxPackage -Name Microsoft.PowerShell -ErrorAction SilentlyContinue)) {
+                if ($package.InstallLocation) { $supported.Add((Join-Path $package.InstallLocation 'pwsh.exe')) }
+            }
+        } catch { }
+        foreach ($candidate in $supported | Select-Object -Unique) {
+            $attempts.Add($candidate)
+            if (Test-Path -LiteralPath $candidate) {
+                return [ordered]@{ path=$candidate; source='supported-install-path'; attempts=@($attempts) }
+            }
+        }
+    } else {
+        foreach ($candidate in @('/usr/bin/pwsh','/usr/local/bin/pwsh','/opt/microsoft/powershell/7/pwsh')) {
+            $attempts.Add($candidate)
+            if (Test-Path -LiteralPath $candidate) {
+                return [ordered]@{ path=$candidate; source='supported-install-path'; attempts=@($attempts) }
+            }
+        }
+    }
+    throw "POWERSHELL_7_NOT_FOUND:checked=$($attempts -join ';')"
+}
+
+function Resolve-CloudOSCommandPath {
+    param([Parameter(Mandatory)][string[]]$Names)
+    foreach ($name in $Names) {
+        $command = Get-Command $name -ErrorAction SilentlyContinue
+        if ($command -and $command.Source) { return $command.Source }
+    }
+    throw "PRECONDITION_MISSING:$($Names -join '|')"
+}
+
+function Get-CloudOSLocalBinaryPath {
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][ValidateSet('frontend','backend')][string]$Workspace,
+        [Parameter(Mandatory)][string]$Name
+    )
+    $suffix = if ($IsWindows) { '.cmd' } else { '' }
+    foreach ($candidate in @(
+        (Join-Path $Root "node_modules\.bin\$Name$suffix"),
+        (Join-Path $Root "$Workspace\node_modules\.bin\$Name$suffix")
+    )) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return (Resolve-Path -LiteralPath $candidate).Path }
+    }
+    return $null
+}
+
+function Get-CloudOSBackendModuleResolution {
+    param([Parameter(Mandatory)][string]$Root,[Parameter(Mandatory)][string]$NodePath)
+    $backend = Join-Path $Root 'backend'
+    $script = @'
+const fs = require("fs");
+const path = require("path");
+const { createRequire } = require("module");
+const root = process.argv[1];
+const req = createRequire(path.join(root, "package.json"));
+for (const name of ["express","ws","dotenv"]) {
+  const entry = req.resolve(name);
+  let dir = path.dirname(entry);
+  let packageJson = null;
+  while (dir && dir !== path.dirname(dir)) {
+    const candidate = path.join(dir, "package.json");
+    if (fs.existsSync(candidate)) {
+      const pkg = JSON.parse(fs.readFileSync(candidate, "utf8"));
+      if (pkg.name === name) { packageJson = candidate; console.log(`${name}|${pkg.version}|${entry}`); break; }
+    }
+    dir = path.dirname(dir);
+  }
+  if (!packageJson) throw new Error(`PACKAGE_METADATA_NOT_FOUND:${name}:${entry}`);
+}
+'@
+    $output = & $NodePath -e $script $backend 2>&1
+    if ($LASTEXITCODE -ne 0) { return [ordered]@{ complete=$false; error=($output -join "`n"); modules=@{} } }
+    $modules = [ordered]@{}
+    foreach ($line in @($output)) {
+        $parts = ([string]$line).Split('|',3)
+        if ($parts.Count -eq 3) { $modules[$parts[0]] = [ordered]@{ version=$parts[1]; path=$parts[2] } }
+    }
+    $missingModules = @('express','ws','dotenv') | Where-Object { -not $modules.Contains($_) }
+    return [ordered]@{ complete=($missingModules.Count -eq 0); error=$null; modules=$modules }
+}
+
+function Get-CloudOSNodeDependencyState {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Root)
+    $root = (Resolve-Path -LiteralPath $Root).Path
+    $missing = [System.Collections.Generic.List[string]]::new()
+    $locks = [ordered]@{}
+    foreach ($relative in @('package-lock.json','frontend/package-lock.json','backend/package-lock.json')) {
+        $path = Join-Path $root $relative
+        $present = Test-Path -LiteralPath $path -PathType Leaf
+        $locks[$relative] = $present
+        if (-not $present) { $missing.Add("lock:$relative") }
+    }
+
+    $rootLockCoherent = $false
+    if ($locks['package-lock.json']) {
+        try {
+            $rootLock = Get-Content -LiteralPath (Join-Path $root 'package-lock.json') -Raw | ConvertFrom-Json
+            $packageKeys = @($rootLock.packages.PSObject.Properties.Name)
+            $missingWorkspaces = @('backend','frontend','shared') | Where-Object { $packageKeys -notcontains $_ }
+            $rootLockCoherent = ($missingWorkspaces.Count -eq 0)
+        } catch { $rootLockCoherent = $false }
+    }
+    if (-not $rootLockCoherent) { $missing.Add('lock:root-workspaces') }
+
+    $nodePath = $null
+    $npmPath = $null
+    try { $nodePath = Resolve-CloudOSCommandPath @('node.exe','node') } catch { $missing.Add('command:node') }
+    try { $npmPath = Resolve-CloudOSCommandPath @('npm.cmd','npm') } catch { $missing.Add('command:npm') }
+
+    $tsc = Get-CloudOSLocalBinaryPath -Root $root -Workspace frontend -Name 'tsc'
+    $vite = Get-CloudOSLocalBinaryPath -Root $root -Workspace frontend -Name 'vite'
+    if (-not $tsc) { $missing.Add('binary:tsc') }
+    if (-not $vite) { $missing.Add('binary:vite') }
+
+    $moduleResolution = [ordered]@{ complete=$false; error='node unavailable'; modules=@{} }
+    if ($nodePath) {
+        $moduleResolution = Get-CloudOSBackendModuleResolution -Root $root -NodePath $nodePath
+        if (-not $moduleResolution.complete) {
+            foreach ($module in @('express','ws','dotenv')) {
+                if (-not $moduleResolution.modules.Contains($module)) { $missing.Add("module:$module") }
+            }
+        }
+    }
+
+    $nodeModulesRoot = Join-Path $root 'node_modules'
+    $rootNodeModulesExists = Test-Path -LiteralPath $nodeModulesRoot
+    if (-not $rootNodeModulesExists) { $missing.Add('directory:node_modules') }
+    return [ordered]@{
+        complete=($missing.Count -eq 0); missing=@($missing | Select-Object -Unique); locks=$locks;
+        rootLockCoversWorkspaces=$rootLockCoherent; nodeModulesRoot=$nodeModulesRoot; nodeModulesRootExists=$rootNodeModulesExists;
+        node=$nodePath; npm=$npmPath; localBinaries=[ordered]@{tsc=$tsc;vite=$vite};
+        backendModules=$moduleResolution.modules; backendModuleResolutionError=$moduleResolution.error
+    }
+}
+
+function Invoke-CloudOSRootNpmCi {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Root,[Parameter(Mandatory)][string]$EvidenceDirectory)
+    $root = (Resolve-Path -LiteralPath $Root).Path
+    New-Item -ItemType Directory -Force -Path $EvidenceDirectory | Out-Null
+    $stdoutPath = Join-Path $EvidenceDirectory 'npm-ci.stdout.log'
+    $stderrPath = Join-Path $EvidenceDirectory 'npm-ci.stderr.log'
+    $npmPath = Resolve-CloudOSCommandPath @('npm.cmd','npm')
+    $nodePath = Resolve-CloudOSCommandPath @('node.exe','node')
+    $arguments = @('ci','--include=dev')
+    $startedAt = (Get-Date).ToUniversalTime().ToString('o')
+    Push-Location $root
+    try { & $npmPath @arguments 1> $stdoutPath 2> $stderrPath; $exitCode = $LASTEXITCODE } finally { Pop-Location }
+    $record = [ordered]@{
+        strategy='root-workspaces-single-install'; command="$npmPath $($arguments -join ' ')"; executable=$npmPath; arguments=$arguments;
+        workingDirectory=$root; affectedDirectories=@((Join-Path $root 'node_modules'),(Join-Path $root 'frontend'),(Join-Path $root 'backend'),(Join-Path $root 'shared'));
+        packageLockAuthority=(Join-Path $root 'package-lock.json'); localWorkspaceLocksVerified=@((Join-Path $root 'frontend/package-lock.json'),(Join-Path $root 'backend/package-lock.json'));
+        globalInstall=$false; junctionCreated=$false; startedAt=$startedAt; finishedAt=(Get-Date).ToUniversalTime().ToString('o'); exitCode=$exitCode;
+        stdout=$stdoutPath; stderr=$stderrPath; nodeVersion=(& $nodePath --version 2>$null | Select-Object -First 1); npmVersion=(& $npmPath --version 2>$null | Select-Object -First 1)
+    }
+    Write-CloudOSDependencyJson (Join-Path $EvidenceDirectory 'npm-install.json') $record
+    if ($exitCode -ne 0) {
+        $tail = if (Test-Path -LiteralPath $stderrPath) { (Get-Content -LiteralPath $stderrPath -Tail 30 -ErrorAction SilentlyContinue) -join ' | ' } else { '' }
+        throw "NPM_CI_FAILED:$exitCode:log=$stderrPath:error=$tail"
+    }
+    return $record
+}
+
+function Get-CloudOSDependencyVersions {
+    param([Parameter(Mandatory)]$State)
+    $versions = [ordered]@{ node=$null; npm=$null; tsc=$null; vite=$null; express=$null; ws=$null; dotenv=$null }
+    if ($State.node) { $versions.node = (& $State.node --version 2>$null | Select-Object -First 1) }
+    if ($State.npm) { $versions.npm = (& $State.npm --version 2>$null | Select-Object -First 1) }
+    if ($State.localBinaries.tsc) { $versions.tsc = (& $State.localBinaries.tsc --version 2>$null | Select-Object -First 1) }
+    if ($State.localBinaries.vite) { $versions.vite = (& $State.localBinaries.vite --version 2>$null | Select-Object -First 1) }
+    foreach ($module in @('express','ws','dotenv')) { if ($State.backendModules.Contains($module)) { $versions[$module] = $State.backendModules[$module].version } }
+    return $versions
+}
+
+function Ensure-CloudOSNodeDependencies {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Root,[Parameter(Mandatory)][string]$EvidenceDirectory,[switch]$AllowInstall)
+    $root = (Resolve-Path -LiteralPath $Root).Path
+    New-Item -ItemType Directory -Force -Path $EvidenceDirectory | Out-Null
+    $before = Get-CloudOSNodeDependencyState -Root $root
+    Write-CloudOSDependencyJson (Join-Path $EvidenceDirectory 'preflight-before.json') $before
+    $install = $null
+    if (-not $before.complete) {
+        if (-not $AllowInstall) { throw "DEPENDENCY_PREFLIGHT_INCOMPLETE:$($before.missing -join ','):install-disabled" }
+        $install = Invoke-CloudOSRootNpmCi -Root $root -EvidenceDirectory $EvidenceDirectory
+    }
+    $after = Get-CloudOSNodeDependencyState -Root $root
+    Write-CloudOSDependencyJson (Join-Path $EvidenceDirectory 'preflight-after.json') $after
+    if (-not $after.complete) { throw "DEPENDENCY_BOOTSTRAP_INCOMPLETE:$($after.missing -join ',')" }
+    $versions = Get-CloudOSDependencyVersions -State $after
+    $resolved = [ordered]@{
+        node=$after.node; npm=$after.npm; tsc=$after.localBinaries.tsc; vite=$after.localBinaries.vite;
+        express=$(if ($after.backendModules.Contains('express')) { $after.backendModules.express.path } else { $null });
+        ws=$(if ($after.backendModules.Contains('ws')) { $after.backendModules.ws.path } else { $null });
+        dotenv=$(if ($after.backendModules.Contains('dotenv')) { $after.backendModules.dotenv.path } else { $null })
+    }
+    Write-CloudOSDependencyJson (Join-Path $EvidenceDirectory 'resolved-binaries.json') ([ordered]@{
+        strategy='root-workspaces-single-install'; root=$root; packageLockAuthority=(Join-Path $root 'package-lock.json'); installPerformed=[bool]$install;
+        versions=$versions; resolved=$resolved; timestamp=(Get-Date).ToUniversalTime().ToString('o')
+    })
+    return [ordered]@{ complete=$true; installPerformed=[bool]$install; state=$after; versions=$versions; resolved=$resolved; evidenceDirectory=$EvidenceDirectory }
+}
