@@ -183,9 +183,9 @@ function Normalize-CloudOSExecutablePath {
 }
 
 function Get-CloudOSProcessIdentity {
-    param([Parameter(Mandatory)][int]$Pid)
-    $cim = Get-CimInstance Win32_Process -Filter "ProcessId = $Pid" -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $cim) { return [pscustomobject][ordered]@{ exists=$false; pid=$Pid } }
+    param([Parameter(Mandatory)][int]$ProcessId)
+    $cim = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $cim) { return [pscustomobject][ordered]@{ exists=$false; pid=$ProcessId } }
 
     $creation = $null
     try {
@@ -193,17 +193,17 @@ function Get-CloudOSProcessIdentity {
         elseif ($cim.CreationDate) { $creation = [System.Management.ManagementDateTimeConverter]::ToDateTime([string]$cim.CreationDate) }
     } catch { $creation = $null }
     if (-not $creation) {
-        try { $creation = (Get-Process -Id $Pid -ErrorAction Stop).StartTime } catch { $creation = $null }
+        try { $creation = (Get-Process -Id $ProcessId -ErrorAction Stop).StartTime } catch { $creation = $null }
     }
 
     $executable = Normalize-CloudOSExecutablePath ([string]$cim.ExecutablePath)
     if (-not $executable) {
-        try { $executable = Normalize-CloudOSExecutablePath ([string](Get-Process -Id $Pid -ErrorAction Stop).Path) } catch { $executable = $null }
+        try { $executable = Normalize-CloudOSExecutablePath ([string](Get-Process -Id $ProcessId -ErrorAction Stop).Path) } catch { $executable = $null }
     }
 
     return [pscustomobject][ordered]@{
         exists=$true
-        pid=$Pid
+        pid=$ProcessId
         parentPid=$(if($null -eq $cim.ParentProcessId){$null}else{[int]$cim.ParentProcessId})
         processName=[string]$cim.Name
         executablePath=$executable
@@ -264,7 +264,7 @@ function Test-CloudOSProcessOwnership {
 function Add-CloudOSProcessRecordByPid {
     param(
         [Parameter(Mandatory)]$Session,
-        [Parameter(Mandatory)][int]$Pid,
+        [Parameter(Mandatory)][int]$ProcessId,
         [Parameter(Mandatory)][string]$Component,
         [string]$StdOut='',
         [string]$StdErr=''
@@ -272,19 +272,19 @@ function Add-CloudOSProcessRecordByPid {
     $identity = $null
     $deadline = [DateTime]::UtcNow.AddSeconds(5)
     do {
-        $identity = Get-CloudOSProcessIdentity $Pid
+        $identity = Get-CloudOSProcessIdentity $ProcessId
         if ($identity.exists -and $identity.creationUtcTicks -and $identity.executablePath) { break }
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $deadline)
     if (-not $identity.exists -or -not $identity.creationUtcTicks -or -not $identity.executablePath) {
-        throw "PROCESS_IDENTITY_UNAVAILABLE:${Component}:pid=$Pid"
+        throw "PROCESS_IDENTITY_UNAVAILABLE:${Component}:pid=$ProcessId"
     }
 
-    $existing = @($Session.processes | Where-Object { [int]$_.pid -eq $Pid -and [string]$_.component -eq $Component })
+    $existing = @($Session.processes | Where-Object { [int]$_.pid -eq $ProcessId -and [string]$_.component -eq $Component })
     if ($existing.Count -gt 0) { return $existing[0] }
     $record = [pscustomobject][ordered]@{
         component=$Component
-        pid=$Pid
+        pid=$ProcessId
         parentPid=$identity.parentPid
         sessionId=[string]$Session.id
         logDirectory=[string]$Session.logDirectory
@@ -305,7 +305,7 @@ function Add-CloudOSProcessRecordByPid {
 
 function Add-CloudOSProcessRecord {
     param([Parameter(Mandatory)]$Session,[Parameter(Mandatory)][System.Diagnostics.Process]$Process,[Parameter(Mandatory)][string]$Component,[string]$StdOut='',[string]$StdErr='')
-    return Add-CloudOSProcessRecordByPid -Session $Session -Pid $Process.Id -Component $Component -StdOut $StdOut -StdErr $StdErr
+    return Add-CloudOSProcessRecordByPid -Session $Session -ProcessId $Process.Id -Component $Component -StdOut $StdOut -StdErr $StdErr
 }
 
 function Get-CloudOSDetachedBootstrapPath {
@@ -549,12 +549,12 @@ function Register-CloudOSOwnedDescendants {
     if(-not $rootOwnership.owned){return @()}
     $added=[System.Collections.Generic.List[object]]::new()
     foreach($item in @(Get-CloudOSDescendantCimProcesses ([int]$RootRecord.pid))){
-        $pid=[int]$item.ProcessId
-        if(@($Session.processes|Where-Object{[int]$_.pid -eq $pid}).Count -gt 0){continue}
+        $processId=[int]$item.ProcessId
+        if(@($Session.processes|Where-Object{[int]$_.pid -eq $processId}).Count -gt 0){continue}
         try{
-            $record=Add-CloudOSProcessRecordByPid -Session $Session -Pid $pid -Component "descendant:$([string]$item.Name)"
+            $record=Add-CloudOSProcessRecordByPid -Session $Session -ProcessId $processId -Component "descendant:$([string]$item.Name)"
             $added.Add($record)
-        }catch{Write-CloudOSLog $Session "Descendente pid=$pid não pôde ser registrado com identidade completa; será preservado. $($_.Exception.Message)" 'WARN'}
+        }catch{Write-CloudOSLog $Session "Descendente pid=$processId não pôde ser registrado com identidade completa; será preservado. $($_.Exception.Message)" 'WARN'}
     }
     return @($added)
 }
