@@ -15,7 +15,7 @@ $temp=Join-Path $tempRoot "cloudos-dependency-worktree-$([guid]::NewGuid().ToStr
 $tempFull=[IO.Path]::GetFullPath($temp).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
 $added=$false
 $cleanupError=$null
-$trackedClean=$false
+$trackedCleanBeforeCleanup=$false
 
 function Assert-OwnedTemporaryWorktree {
  param([Parameter(Mandatory)][string]$Path)
@@ -69,9 +69,9 @@ try{
  $status=@(& git -C $temp status --porcelain)
  if($LASTEXITCODE -ne 0){throw "WORKTREE_STATUS_FAILED:$LASTEXITCODE"}
  if($status.Count -gt 0){throw "WORKTREE_TRACKED_FILES_CHANGED:$($status -join ',')"}
- $trackedClean=$true
+ $trackedCleanBeforeCleanup=$true
 
- @{schemaVersion=1;head=$head;worktree=$temp;nodeModulesInitiallyAbsent=$true;rootInstallPerformed=$true;noNodeModulesJunction=$true;resolved=$result.resolved;versions=$result.versions;status='passed';timestamp=(Get-Date).ToUniversalTime().ToString('o')}|
+ @{schemaVersion=1;head=$head;worktree=$temp;nodeModulesInitiallyAbsent=$true;rootInstallPerformed=$true;noNodeModulesJunction=$true;trackedCleanBeforeCleanup=$true;resolved=$result.resolved;versions=$result.versions;status='passed';timestamp=(Get-Date).ToUniversalTime().ToString('o')}|
   ConvertTo-Json -Depth 12|Set-Content -LiteralPath (Join-Path $EvidenceDirectory 'worktree-bootstrap-result.json') -Encoding UTF8
  Write-Host 'CLEAN_WORKTREE_DEPENDENCY_BOOTSTRAP_OK'
 }finally{
@@ -84,13 +84,13 @@ try{
    @("normal-exit=$normalExit")+$normalOutput|Set-Content -LiteralPath $cleanupLog -Encoding UTF8
 
    if($normalExit -ne 0 -and (Test-Path -LiteralPath $temp)){
+    if(-not $trackedCleanBeforeCleanup){throw "WORKTREE_FORCE_REMOVE_REFUSED_NO_PRE_CLEAN_PROOF:log=$cleanupLog"}
     [void](Assert-OwnedTemporaryWorktree $temp)
-    $trackedStatus=@(& git -C $temp status --porcelain --untracked-files=no 2>&1)
-    $statusExit=$LASTEXITCODE
-    Add-Content -LiteralPath $cleanupLog -Value "tracked-status-exit=$statusExit" -Encoding UTF8
-    Add-Content -LiteralPath $cleanupLog -Value $trackedStatus -Encoding UTF8
-    if($statusExit -ne 0){throw "WORKTREE_CLEANUP_STATUS_FAILED:$statusExit:log=$cleanupLog"}
-    if($trackedStatus.Count -gt 0 -or -not $trackedClean){throw "WORKTREE_FORCE_REMOVE_REFUSED_TRACKED_CHANGES:log=$cleanupLog"}
+
+    $postNormalStatus=@(& git -C $temp status --porcelain --untracked-files=no 2>&1)
+    $postNormalStatusExit=$LASTEXITCODE
+    Add-Content -LiteralPath $cleanupLog -Value "post-normal-status-exit=$postNormalStatusExit" -Encoding UTF8
+    Add-Content -LiteralPath $cleanupLog -Value $postNormalStatus -Encoding UTF8
 
     Start-Sleep -Milliseconds 500
     $forceOutput=@(& git -C $root worktree remove --force $temp 2>&1)
