@@ -326,7 +326,7 @@ func safeMessage(code string) string {
 		"SESSION_NOT_RUNNING": "session is not running", "SESSION_NOT_PTY": "session does not have a pty",
 		"PROCESS_START_FAILED": "process could not be started", "IO_LIMIT": "input exceeds limit",
 		"IO_INVALID": "input is invalid", "SIGNAL_INVALID": "signal is invalid", "WAIT_TIMEOUT": "wait timed out",
-		"METRICS_UNAVAILABLE": "kernel metrics are unavailable",
+		"METRICS_UNAVAILABLE":    "kernel metrics are unavailable",
 		"FILES_ROOT_UNAVAILABLE": "filesystem root is unavailable", "FILES_PATH_INVALID": "filesystem path is invalid",
 		"FILES_PATH_LIMIT": "filesystem path exceeds limit", "FILES_PATH_RESERVED": "filesystem path is reserved",
 		"FILES_SYMLINK_DENIED": "symbolic link traversal is not allowed", "FILES_NOT_FOUND": "filesystem entry was not found",

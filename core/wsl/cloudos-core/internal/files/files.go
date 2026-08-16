@@ -449,8 +449,16 @@ func copyFD(srcFD, dstFD int) (int64, error) {
 	source := os.NewFile(uintptr(sourceDup), "cloudos-copy-src")
 	destination := os.NewFile(uintptr(destinationDup), "cloudos-copy-dst")
 	if source == nil || destination == nil {
-		if source != nil { _ = source.Close() } else { _ = syscall.Close(sourceDup) }
-		if destination != nil { _ = destination.Close() } else { _ = syscall.Close(destinationDup) }
+		if source != nil {
+			_ = source.Close()
+		} else {
+			_ = syscall.Close(sourceDup)
+		}
+		if destination != nil {
+			_ = destination.Close()
+		} else {
+			_ = syscall.Close(destinationDup)
+		}
 		return 0, coded("FILES_COPY_FAILED")
 	}
 	defer source.Close()
