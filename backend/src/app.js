@@ -15,6 +15,7 @@ import { hostRouter } from './host/routes.js';
 import { appsRouter } from './apps/routes.js';
 import { readinessRouter } from './readiness/routes.js';
 import { securityToolsRouter } from './security/routes.js';
+import { filesRouter } from './files/routes.js';
 import { createHostTrustPolicy, hasSupervisorTrust } from './auth/hostTrust.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -59,9 +60,7 @@ export function createApp(initialPort, options = {}) {
     next();
   });
 
-  app.use(helmet({
-    contentSecurityPolicy: false
-  }));
+  app.use(helmet({ contentSecurityPolicy: false }));
 
   app.use(cors({
     origin: (origin, callback) => {
@@ -72,9 +71,8 @@ export function createApp(initialPort, options = {}) {
         normalizeOrigin(config.nativeShellOrigin),
         ownOrigin
       ].filter(Boolean));
-      if (!origin || allowedOrigins.has(normalized)) {
-        callback(null, true);
-      } else {
+      if (!origin || allowedOrigins.has(normalized)) callback(null, true);
+      else {
         const error = new Error('Bloqueado pela política CORS');
         error.status = 403;
         callback(error);
@@ -89,14 +87,8 @@ export function createApp(initialPort, options = {}) {
     if (!hasSupervisorTrust(req, hostTrustPolicy)) return res.sendStatus(404);
     const port = app._cloudosPort || 0;
     res.json({
-      protocol: 1,
-      status: 'ready',
-      component: 'backend',
-      runId: runtimeRunId,
-      instanceId: app._cloudosInstanceId || null,
-      pid: process.pid,
-      host: '127.0.0.1',
-      port,
+      protocol: 1, status: 'ready', component: 'backend', runId: runtimeRunId,
+      instanceId: app._cloudosInstanceId || null, pid: process.pid, host: '127.0.0.1', port,
       leaseProtocol: hostLeaseEnabled ? 1 : 0
     });
   });
@@ -107,28 +99,19 @@ export function createApp(initialPort, options = {}) {
     setImmediate(() => app.emit('cloudos:shutdown'));
   });
 
-  // Rejeitar payloads excessivos
   app.use((err, req, res, next) => {
-    if (err.type === 'entity.too.large') {
-      return res.status(413).json({ error: 'Payload excede o limite de 5MB.' });
-    }
+    if (err.type === 'entity.too.large') return res.status(413).json({ error: 'Payload excede o limite de 5MB.' });
     next(err);
   });
 
-  // Endpoint de Runtime Dinamico
   app.get('/api/runtime', (req, res) => {
     const port = app._cloudosPort || 18080;
     res.json({
-      host: '127.0.0.1',
-      backendPort: port,
-      apiBase: `http://127.0.0.1:${port}`,
-      webSocketBase: `ws://127.0.0.1:${port}`,
-      instanceId: app._cloudosInstanceId || null,
-      nativeHost
+      host: '127.0.0.1', backendPort: port, apiBase: `http://127.0.0.1:${port}`,
+      webSocketBase: `ws://127.0.0.1:${port}`, instanceId: app._cloudosInstanceId || null, nativeHost
     });
   });
 
-  // Rotas da API
   app.use('/api/auth', authRouter);
   app.use('/api/user', userRouter);
   app.use('/api/system', systemRouter);
@@ -139,19 +122,13 @@ export function createApp(initialPort, options = {}) {
   app.use('/api/apps', appsRouter);
   app.use('/api/readiness', readinessRouter);
   app.use('/api/security/tools', securityToolsRouter);
+  app.use('/api/files/wsl', filesRouter);
 
   app.get('/api/health', (req, res) => {
-    res.json({
-      status: 'ok',
-      service: 'CloudOS-Unified Backend',
-      instanceId: app._cloudosInstanceId || null,
-      timestamp: new Date().toISOString()
-    });
+    res.json({ status: 'ok', service: 'CloudOS-Unified Backend', instanceId: app._cloudosInstanceId || null, timestamp: new Date().toISOString() });
   });
 
-  app.use('/api', (_req, res) => {
-    res.status(404).json({ error: 'Endpoint não encontrado.' });
-  });
+  app.use('/api', (_req, res) => res.status(404).json({ error: 'Endpoint não encontrado.' }));
 
   const frontendDist = path.resolve(process.env.CLOUDOS_FRONTEND_DIST || defaultFrontendDist);
   const frontendIndex = path.join(frontendDist, 'index.html');
@@ -160,12 +137,9 @@ export function createApp(initialPort, options = {}) {
     app.get('/', (_req, res) => res.sendFile(frontendIndex));
     app.use((_req, res) => res.status(404).json({ error: 'Recurso não encontrado.' }));
   } else {
-    app.get('/', (_req, res) => {
-      res.status(503).type('text/plain').send('Frontend CloudOS não compilado. Execute npm run build.');
-    });
+    app.get('/', (_req, res) => res.status(503).type('text/plain').send('Frontend CloudOS não compilado. Execute npm run build.'));
   }
 
-  // Tratamento de erros centralizado
   app.use((err, req, res, next) => {
     const status = Number.isInteger(err.status) ? err.status : 500;
     if (status >= 500) console.error('Erro não tratado na API:', err.message);
