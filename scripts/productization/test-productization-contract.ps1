@@ -29,9 +29,9 @@ $hostSource=Get-Content -LiteralPath (Join-Path $root 'desktop\CloudOS.Host\Runt
 if($hostSource -notmatch 'CLOUDOS_LOCAL_ROOT'){throw 'PORTABLE_LOCAL_ROOT_NOT_HONORED'}
 $pack=Get-Content -LiteralPath (Join-Path $root 'scripts\productization\package-cloudos.ps1') -Raw
 $packageAssertions=[ordered]@{
-    manifest="Join-Path\s+\$meta\s+'manifest\.json'"
-    components="Join-Path\s+\$meta\s+'components\.json'"
-    checksums="Join-Path\s+\$meta\s+'checksums\.sha256'"
+    manifest='Join-Path\s+\$meta\s+''manifest\.json'''
+    components='Join-Path\s+\$meta\s+''components\.json'''
+    checksums='Join-Path\s+\$meta\s+''checksums\.sha256'''
     unsigned='unsigned-development'
     customPortable='--noPortable'
 }
