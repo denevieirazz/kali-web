@@ -27,7 +27,8 @@ if($common -notmatch 'processes-\$When\.json'){throw 'LOG_CONTRACT_MISSING:proce
 foreach($mode in @('Full','WebOnly','Developer','UXValidation','FilesValidation','BrowserValidation','TerminalValidation')){if($common -notmatch [regex]::Escape($mode)){throw "MODE_MISSING:$mode"}}
 foreach($marker in @('creationUtcTicks','executablePath','commandLineSanitized','sessionId','logDirectory')){if($common -notmatch [regex]::Escape($marker)){throw "PROCESS_IDENTITY_FIELD_MISSING:$marker"}}
 if($common -notmatch 'detached-process-bootstrap\.cjs'){throw 'DETACHED_BOOTSTRAP_MISSING'}
-if($common -notmatch 'stdio:\s*\[stdinFd, stdoutFd, stderrFd\]'){throw 'DETACHED_DIRECT_FILE_STDIO_MISSING'}
+if($common -notmatch "stdio:\s*\['ignore',\s*stdoutFd,\s*stderrFd\]"){throw 'DETACHED_DIRECT_FILE_STDIO_MISSING'}
+if($common -match 'stdinFd'){throw 'DETACHED_STDIN_HANDLE_FORBIDDEN'}
 if($runner -notmatch 'Invoke-ShortLauncherCommand'){throw 'RUNNER_SHORT_LAUNCHER_GATE_MISSING'}
 if($runner -notmatch 'RUNNER_COMPONENT_READINESS_TIMEOUT'){throw 'RUNNER_COMPONENT_TIMEOUT_MISSING'}
 if($common -notmatch 'Test-CloudOSProcessOwnership'){throw 'PROCESS_OWNERSHIP_GATE_MISSING'}
