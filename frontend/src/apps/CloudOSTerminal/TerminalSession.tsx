@@ -3,11 +3,36 @@ import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import type { TerminalTabState } from '../../core/terminalWorkspaceState.js';
 import { getStoredToken, resolveWebSocketUrl } from '../../services/apiClient';
+import './CloudOSTerminal.transport.css';
+import {
+  createTerminalTransport,
+  EMULATOR_MODE,
+  LEGACY_MODE,
+  WSL_CORE_MODE,
+  type TerminalTransportStatus,
+} from './terminalSessionTransport.js';
 
-export type TerminalPaneStatus = {
-  state: 'connecting' | 'active' | 'closed' | 'error' | 'auth';
-  label: string;
-};
+export type TerminalPaneStatus = TerminalTransportStatus;
+
+const INITIAL_STATUS: TerminalPaneStatus = { state: 'connecting', label: 'Preparando sessão…', mode: null };
+
+function stateText(state: TerminalPaneStatus['state']) {
+  switch (state) {
+    case 'connecting': return 'conectando';
+    case 'connected': return 'conectado';
+    case 'closing': return 'encerrando';
+    case 'closed': return 'fechado';
+    case 'failed': return 'falhou';
+    case 'legacy-fallback': return 'fallback legado';
+  }
+}
+
+function transportText(status: TerminalPaneStatus, profile: TerminalTabState['profile']) {
+  if (status.mode === WSL_CORE_MODE) return 'WSL Core v2';
+  if (status.mode === LEGACY_MODE) return 'PTY legado';
+  if (status.mode === EMULATOR_MODE) return 'Emulador legado';
+  return profile === 'wsl' ? 'Aguardando backend' : 'PowerShell local';
+}
 
 export function TerminalSession({
   tab,
@@ -21,6 +46,8 @@ export function TerminalSession({
   const hostRef = useRef<HTMLDivElement>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const [restartGeneration, setRestartGeneration] = useState(0);
+  const [status, setStatus] = useState<TerminalPaneStatus>(INITIAL_STATUS);
+  const [dimensions, setDimensions] = useState({ cols: 100, rows: 28 });
 
   useEffect(() => {
     const host = hostRef.current;
@@ -47,9 +74,20 @@ export function TerminalSession({
     terminal.loadAddon(fitAddon);
     terminal.open(host);
 
+    const publishStatus = (next: TerminalPaneStatus) => {
+      if (disposed) return;
+      setStatus(next);
+      onStatusChange(tab.id, next);
+    };
+
     const safeFit = () => {
       if (disposed || host.clientWidth <= 0 || host.clientHeight <= 0) return;
-      try { fitAddon.fit(); } catch { /* layout ainda estabilizando */ }
+      try {
+        fitAddon.fit();
+        setDimensions({ cols: terminal.cols, rows: terminal.rows });
+      } catch {
+        // O layout pode estar transitório durante split/maximize/restore.
+      }
     };
 
     const resizeObserver = new ResizeObserver(safeFit);
@@ -59,7 +97,7 @@ export function TerminalSession({
     const token = getStoredToken();
     if (!token) {
       terminal.writeln('\x1b[1;31m[Faça login no CloudOS para abrir um terminal real.]\x1b[0m');
-      onStatusChange(tab.id, { state: 'auth', label: 'Autenticação necessária' });
+      publishStatus({ state: 'failed', label: 'Autenticação necessária', mode: null });
       return () => {
         disposed = true;
         resizeObserver.disconnect();
@@ -68,52 +106,35 @@ export function TerminalSession({
       };
     }
 
-    onStatusChange(tab.id, { state: 'connecting', label: 'Conectando ao agente local…' });
+    publishStatus({ state: 'connecting', label: 'Conectando ao Terminal…', mode: null });
     const socket = new WebSocket(resolveWebSocketUrl('/ws/terminal'), [token]);
+    const transport = createTerminalTransport({
+      socket,
+      profile: tab.profile,
+      distribution: tab.profile === 'wsl' ? tab.distribution : '',
+      initialCols: terminal.cols || 100,
+      initialRows: terminal.rows || 28,
+      onOutput: data => {
+        if (!disposed) terminal.write(data);
+      },
+      onStatus: publishStatus,
+      onExit: () => {
+        if (!disposed) terminal.writeln('\r\n\x1b[1;33m[Sessão encerrada]\x1b[0m');
+      },
+      onNotice: notice => {
+        if (disposed) return;
+        const color = notice.tone === 'error' ? '31' : '33';
+        terminal.writeln(`\r\n\x1b[1;${color}m[${notice.message}]\x1b[0m`);
+      },
+    });
+
     const inputSubscription = terminal.onData(data => {
-      if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'input', data }));
+      transport.input(data);
     });
     const resizeSubscription = terminal.onResize(({ cols, rows }) => {
-      if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'resize', cols, rows }));
+      setDimensions({ cols, rows });
+      transport.resize(cols, rows);
     });
-
-    socket.onopen = () => {
-      if (disposed) return socket.close();
-      safeFit();
-      socket.send(JSON.stringify({
-        type: 'start',
-        profile: tab.profile,
-        distribution: tab.profile === 'wsl' ? tab.distribution : undefined,
-        cols: terminal.cols || 100,
-        rows: terminal.rows || 28,
-      }));
-      onStatusChange(tab.id, {
-        state: 'active',
-        label: tab.profile === 'wsl' ? `WSL · ${tab.distribution || 'Linux'}` : 'PowerShell · Windows',
-      });
-    };
-
-    socket.onmessage = event => {
-      if (disposed) return;
-      try {
-        const message = JSON.parse(String(event.data)) as { type?: string; data?: unknown };
-        if (message.type === 'output') terminal.write(String(message.data ?? ''));
-        else if (message.type === 'error') terminal.writeln(`\r\n\x1b[1;31m[${String(message.data ?? 'Erro')}]\x1b[0m`);
-        else if (message.type === 'exit') {
-          terminal.writeln('\r\n\x1b[1;33m[Sessão encerrada]\x1b[0m');
-          onStatusChange(tab.id, { state: 'closed', label: 'Sessão encerrada' });
-        }
-      } catch {
-        terminal.write(String(event.data));
-      }
-    };
-
-    socket.onerror = () => {
-      if (!disposed) onStatusChange(tab.id, { state: 'error', label: 'Falha na conexão' });
-    };
-    socket.onclose = () => {
-      if (!disposed) onStatusChange(tab.id, { state: 'closed', label: 'Conexão encerrada' });
-    };
 
     return () => {
       disposed = true;
@@ -121,12 +142,7 @@ export function TerminalSession({
       inputSubscription.dispose();
       resizeSubscription.dispose();
       fitAddonRef.current = null;
-      try {
-        if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'close' }));
-        socket.close();
-      } catch {
-        // O backend também encerra o PTY quando o socket fecha.
-      }
+      transport.dispose();
       terminal.dispose();
     };
   }, [onStatusChange, restartGeneration, tab.distribution, tab.id, tab.profile]);
@@ -140,10 +156,21 @@ export function TerminalSession({
   }, [visible]);
 
   return (
-    <section className="terminal-pane">
+    <section
+      className="terminal-pane"
+      data-terminal-state={status.state}
+      data-backend-mode={status.mode || ''}
+      data-distribution={tab.profile === 'wsl' ? tab.distribution : ''}
+      data-cols={dimensions.cols}
+      data-rows={dimensions.rows}
+    >
       <div className="terminal-pane__host" ref={hostRef} />
-      <footer className="terminal-pane__footer">
-        <span>{tab.profile === 'wsl' ? `Linux · ${tab.distribution || 'WSL'}` : 'Windows · PowerShell'}</span>
+      <footer className="terminal-pane__footer" aria-live="polite">
+        <div className="terminal-pane__runtime">
+          <span>{tab.profile === 'wsl' ? `Linux: ${tab.distribution || 'WSL'}` : 'Sistema: Windows'}</span>
+          <span>Transporte: {transportText(status, tab.profile)}</span>
+          <span>Estado: {stateText(status.state)}</span>
+        </div>
         <button type="button" onClick={() => setRestartGeneration(value => value + 1)}>↻ Reconectar</button>
       </footer>
     </section>
