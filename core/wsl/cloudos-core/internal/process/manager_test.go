@@ -26,23 +26,16 @@ func TestRejectsShellAndPreservesArgumentBoundaries(t *testing.T) {
 	}
 	deadline := time.After(2 * time.Second)
 	var output strings.Builder
-loop:
-	for {
+	for !strings.Contains(output.String(), "alpha;uname $(id)") {
 		select {
 		case event := <-events:
 			if event.Type == "session.output" {
 				decoded, _ := base64.StdEncoding.DecodeString(event.Data)
 				output.Write(decoded)
 			}
-			if event.Type == "session.exit" {
-				break loop
-			}
 		case <-deadline:
-			break loop
+			t.Fatalf("argument boundary changed: %q", output.String())
 		}
-	}
-	if !strings.Contains(output.String(), "alpha;uname $(id)") {
-		t.Fatalf("argument boundary changed: %q", output.String())
 	}
 }
 
