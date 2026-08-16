@@ -66,7 +66,7 @@ Assert-Contains $start '\$env:CLOUDOS_NATIVE_HOST\s*=\s*if\s*\(\$Mode\s+-in\s+@\
 Assert-Contains $start '\$Mode\s+-in\s+@\(''Full'',''BrowserValidation''\)' 'FULL_HOST_MODE_MISSING'
 Assert-Contains $start 'CloudOS\.Host\\CloudOS\.Host\.csproj' 'FULL_NATIVE_HOST_PROJECT_BUILD_MISSING'
 Assert-Contains $start 'CloudOS\.Host\.exe' 'FULL_NATIVE_HOST_DIRECT_EXECUTABLE_MISSING'
-Assert-Contains $start "Start-CloudOSLoggedProcess\s+\$session\s+'host-runtime'" 'FULL_NATIVE_HOST_OWNERSHIP_RECORD_MISSING'
+Assert-Contains $start 'Start-CloudOSLoggedProcess\s+\$session\s+''host-runtime''' 'FULL_NATIVE_HOST_OWNERSHIP_RECORD_MISSING'
 Assert-Contains $start "CLOUDOS_NATIVE_HOST='0'" 'WEBONLY_NATIVE_HOST_DISABLE_MISSING'
 
 $requiredRegressionFiles = @(
