@@ -1,0 +1,84 @@
+.cf-source-select {
+  min-width: 190px;
+  font-weight: 650;
+}
+
+.cf-real-source-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 6px 12px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  background: rgba(10,16,28,.42);
+  font-size: 12px;
+}
+
+.cf-real-source-strip strong {
+  white-space: nowrap;
+}
+
+.cf-real-source-strip > span:not(.cf-real-badge) {
+  color: rgba(230,238,250,.7);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cf-real-badge {
+  margin-left: auto;
+  padding: 3px 8px;
+  border: 1px solid rgba(125,211,252,.28);
+  border-radius: 999px;
+  background: rgba(14,116,144,.14);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.cf-real-operation {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto;
+  gap: 6px 12px;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  background: rgba(30,41,59,.56);
+}
+
+.cf-real-operation > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.cf-real-operation strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cf-real-operation progress {
+  width: 100%;
+  height: 7px;
+  grid-column: 1;
+}
+
+.cf-real-operation > button {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.cf-item--symlink {
+  opacity: .82;
+}
+
+.cf-item--symlink .cf-icon {
+  filter: saturate(.7);
+}
+
+.cf-item button:disabled {
+  opacity: .42;
+  cursor: not-allowed;
+}
