@@ -25,8 +25,8 @@ if($probe -match '"--update"|"--install"|"--unregister"'){throw 'WSL_MUTATION_IN
 $update=Get-Content -LiteralPath (Join-Path $root 'desktop\CloudOS.Bootstrap\DistributionUpdateService.cs') -Raw
 if($update -notmatch 'AllowVersionDowngrade = false'){throw 'SILENT_DOWNGRADE_GUARD_MISSING'}
 if($update -notmatch 'UriSchemeHttps'){throw 'HTTPS_UPDATE_GUARD_MISSING'}
-$host=Get-Content -LiteralPath (Join-Path $root 'desktop\CloudOS.Host\Runtime\CloudOsRuntimeSupervisor.cs') -Raw
-if($host -notmatch 'CLOUDOS_LOCAL_ROOT'){throw 'PORTABLE_LOCAL_ROOT_NOT_HONORED'}
+$hostSource=Get-Content -LiteralPath (Join-Path $root 'desktop\CloudOS.Host\Runtime\CloudOsRuntimeSupervisor.cs') -Raw
+if($hostSource -notmatch 'CLOUDOS_LOCAL_ROOT'){throw 'PORTABLE_LOCAL_ROOT_NOT_HONORED'}
 $pack=Get-Content -LiteralPath (Join-Path $root 'scripts\productization\package-cloudos.ps1') -Raw
 foreach($required in @('meta\\manifest.json','meta\\components.json','meta\\checksums.sha256','unsigned-development','--noPortable')){if($pack -notmatch $required){throw "PACKAGE_CONTRACT_MISSING:$required"}}
 $workflowPath=Join-Path $root '.github\workflows\productization-batch2-ci.yml'
