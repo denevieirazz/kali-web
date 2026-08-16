@@ -103,4 +103,6 @@ try{
  Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+$global:LASTEXITCODE=0
 Write-Host 'LAUNCHER_CONTRACT_OK'
+exit 0
