@@ -13,7 +13,8 @@ foreach($relative in $required|Where-Object{$_.EndsWith('.ps1')}){
 }
 $common=Get-Content (Join-Path $root 'scripts/launch/cloudos-launcher-common.ps1') -Raw
 $start=Get-Content (Join-Path $root 'scripts/launch/start-cloudos.ps1') -Raw
-foreach($marker in @('backend.stdout.log','backend.stderr.log','frontend.stdout.log','frontend.stderr.log','host.log','bootstrap.log','wsl-core.log','processes-before.json','processes-after.json','result.json')){if(($common+$start)-notmatch [regex]::Escape($marker)){throw "LOG_CONTRACT_MISSING:$marker"}}
+foreach($marker in @('backend.stdout.log','backend.stderr.log','frontend.stdout.log','frontend.stderr.log','host.log','bootstrap.log','wsl-core.log','result.json')){if(($common+$start)-notmatch [regex]::Escape($marker)){throw "LOG_CONTRACT_MISSING:$marker"}}
+if($common -notmatch 'processes-\$When\.json'){throw 'LOG_CONTRACT_MISSING:processes-$When.json'}
 foreach($mode in @('Full','WebOnly','Developer','UXValidation','FilesValidation','BrowserValidation','TerminalValidation')){if($common -notmatch [regex]::Escape($mode)){throw "MODE_MISSING:$mode"}}
 if($common -notmatch 'HasExited'){throw 'EARLY_EXIT_GATE_MISSING'}
 if($common -notmatch 'StartTime'){throw 'PROCESS_IDENTITY_GATE_MISSING'}
