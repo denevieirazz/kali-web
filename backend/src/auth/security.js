@@ -4,6 +4,12 @@ import jwt from 'jsonwebtoken';
 import { config } from '../config/index.js';
 
 const USERNAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+const RECOVERY_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+const RECOVERY_PREFIX = 'CLOUDOS';
+const RECOVERY_GROUPS = 4;
+const RECOVERY_GROUP_LENGTH = 4;
+const RECOVERY_PAYLOAD_LENGTH = RECOVERY_GROUPS * RECOVERY_GROUP_LENGTH;
+const READABLE_RECOVERY_PATTERN = /^CLOUDOS(?:-[2-9A-HJ-NP-Z]{4}){4}$/;
 const dummyPasswordHash = bcrypt.hashSync('CloudOS-dummy-password-2026', config.passwordBcryptRounds);
 const dummyRecoveryHash = bcrypt.hashSync('CLOUDOS-dummy-recovery-code-2026', config.recoveryBcryptRounds);
 
@@ -39,8 +45,8 @@ export function validateDisplayName(value, fallback) {
 }
 
 export function validatePassword(password, confirmPassword) {
-  if (typeof password !== 'string' || password.length < 10 || password.length > 128) {
-    return { error: 'A senha deve conter entre 10 e 128 caracteres.' };
+  if (typeof password !== 'string' || password.length < 4 || password.length > 128) {
+    return { error: 'A senha deve conter entre 4 e 128 caracteres.' };
   }
   if (password !== confirmPassword) {
     return { error: 'A confirmação de senha não confere.' };
@@ -48,8 +54,49 @@ export function validatePassword(password, confirmPassword) {
   return { error: null };
 }
 
+function encodeReadableRecoveryPayload(bytes) {
+  let buffer = 0;
+  let bits = 0;
+  let output = '';
+  for (const byte of bytes) {
+    buffer = (buffer << 8) | byte;
+    bits += 8;
+    while (bits >= 5 && output.length < RECOVERY_PAYLOAD_LENGTH) {
+      bits -= 5;
+      output += RECOVERY_ALPHABET[(buffer >>> bits) & 31];
+    }
+  }
+  if (output.length !== RECOVERY_PAYLOAD_LENGTH) throw new Error('RECOVERY_CODE_GENERATION_FAILED');
+  return output;
+}
+
+function formatReadableRecoveryPayload(payload) {
+  const groups = [];
+  for (let index = 0; index < payload.length; index += RECOVERY_GROUP_LENGTH) {
+    groups.push(payload.slice(index, index + RECOVERY_GROUP_LENGTH));
+  }
+  return `${RECOVERY_PREFIX}-${groups.join('-')}`;
+}
+
 export function generateRecoveryCode() {
-  return `CLOUDOS-${crypto.randomBytes(32).toString('base64url')}`;
+  // 10 random bytes = 80 bits. Base32-style encoding keeps the UI readable without reducing entropy.
+  return formatReadableRecoveryPayload(encodeReadableRecoveryPayload(crypto.randomBytes(10)));
+}
+
+export function normalizeRecoveryCodeInput(value) {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  if (!trimmed || trimmed.length > 128) return '';
+
+  const compact = trimmed.toUpperCase().replace(/[\s-]+/g, '');
+  if (compact.startsWith(RECOVERY_PREFIX) && compact.length === RECOVERY_PREFIX.length + RECOVERY_PAYLOAD_LENGTH) {
+    const payload = compact.slice(RECOVERY_PREFIX.length);
+    if (/^[2-9A-HJ-NP-Z]{16}$/.test(payload)) return formatReadableRecoveryPayload(payload);
+  }
+
+  // Existing installations may still have the former base64url recovery code hashed.
+  // Keep exact legacy input semantics so those users are not locked out.
+  if (/^CLOUDOS-[A-Za-z0-9_-]{17,121}$/.test(trimmed)) return trimmed;
+  return '';
 }
 
 export function hashPassword(password) {
@@ -69,8 +116,8 @@ export function verifyRecoveryCode(recoveryCode, recoveryCodeHash) {
 }
 
 export function validRecoveryCodeInput(value) {
-  const trimmed = typeof value === 'string' ? value.trim() : '';
-  return trimmed.length >= 24 && trimmed.length <= 128;
+  const normalized = normalizeRecoveryCodeInput(value);
+  return Boolean(normalized && (READABLE_RECOVERY_PATTERN.test(normalized) || normalized.length >= 24));
 }
 
 export function toPublicUser(user) {
