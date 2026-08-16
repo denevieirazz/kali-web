@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useSystem } from '../../stores/systemStore';
 import { useUserStore } from '../../stores/userStore';
 import { validateDisplayName, validateNewPassword, validateUsername } from '../../services/accountContract.js';
+import { copyRecoveryCode, printRecoveryCode, readRecoveryCodeTextFile, saveRecoveryCodeAsText } from '../../services/recoveryCodeActions';
 import { nativeHostBridge } from '../../services/nativeHostBridge';
 import kernel from '../../core/kernel';
 import './LockScreen.css';
@@ -46,6 +47,7 @@ export default function LockScreen() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
   const copyTimerRef = useRef<number | null>(null);
+  const recoveryFileRef = useRef<HTMLInputElement>(null);
   const recoveryCheckInFlight = useRef(false);
   const isDevEnvironment = import.meta.env.DEV || import.meta.env.MODE === 'development';
 
@@ -53,16 +55,12 @@ export default function LockScreen() {
     const timer = window.setInterval(() => setTime(new Date()), 1000);
     return () => {
       window.clearInterval(timer);
-      if (copyTimerRef.current !== null) {
-        window.clearTimeout(copyTimerRef.current);
-      }
+      if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
     };
   }, []);
 
   useEffect(() => {
-    const handleKeyDown = () => {
-      if (!showPanel) setShowPanel(true);
-    };
+    const handleKeyDown = () => { if (!showPanel) setShowPanel(true); };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [showPanel]);
@@ -113,14 +111,13 @@ export default function LockScreen() {
     setRecoveryCode('');
     setLegacyToken(null);
     setRecoveredUsername(null);
+    if (recoveryFileRef.current) recoveryFileRef.current.value = '';
     setMode('login');
   }
 
   async function startLegacyRecovery() {
     resetMessages();
-    if (!nativeHostBridge.available) {
-      return setError('A recuperação de conta antiga sem código exige o aplicativo nativo CloudOS neste computador.');
-    }
+    if (!nativeHostBridge.available) return setError('A recuperação de conta antiga sem código exige o aplicativo nativo CloudOS neste computador.');
     setLoading(true);
     try {
       const result = await nativeHostBridge.requestLegacyRecoveryToken();
@@ -158,11 +155,26 @@ export default function LockScreen() {
     window.setTimeout(() => unlock(), 650);
   }
 
+  async function handleRecoveryFile(event: React.ChangeEvent<HTMLInputElement>) {
+    resetMessages();
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const code = await readRecoveryCodeTextFile(file);
+      setRecoveryCode(code);
+      setSuccessMsg('Código carregado do arquivo selecionado.');
+    } catch (fileError) {
+      setError(fileError instanceof Error ? fileError.message : 'Não foi possível ler o arquivo selecionado.');
+    } finally {
+      event.target.value = '';
+    }
+  }
+
   async function handleRecovery(event: React.FormEvent) {
     event.preventDefault();
     resetMessages();
     const code = recoveryCode.trim();
-    if (!code) return setError('Informe o código de recuperação.');
+    if (!code) return setError('Informe ou selecione o código de recuperação.');
     const validation = validateUsername(username, { required: false }) || validateDisplayName(displayName, { required: false }) || validateNewPassword(password, confirmPassword);
     if (validation) return setError(validation);
     setLoading(true);
@@ -170,9 +182,7 @@ export default function LockScreen() {
     setLoading(false);
     setPassword('');
     setConfirmPassword('');
-    if (!result.success || !result.recoveryCode) {
-      return setError(result.message || 'Não foi possível recuperar a conta.');
-    }
+    if (!result.success || !result.recoveryCode) return setError(result.message || 'Não foi possível recuperar a conta.');
     setRecoveryCode('');
     setRotatedCode(result.recoveryCode);
     setRecoveredUsername(result.username || useUserStore.getState().currentUser?.username || null);
@@ -192,9 +202,7 @@ export default function LockScreen() {
     setLoading(false);
     setPassword('');
     setConfirmPassword('');
-    if (!result.success || !result.recoveryCode) {
-      return setError(result.message || 'Não foi possível recuperar a conta antiga.');
-    }
+    if (!result.success || !result.recoveryCode) return setError(result.message || 'Não foi possível recuperar a conta antiga.');
     setRotatedCode(result.recoveryCode);
     setRecoveredUsername(result.username || useUserStore.getState().currentUser?.username || null);
     setOneTimeCodeOrigin('legacy-recovery');
@@ -206,32 +214,37 @@ export default function LockScreen() {
   function finishRecovery() {
     if (!recoverySaved) return;
     const finalUsername = recoveredUsername || useUserStore.getState().currentUser?.username;
-    if (finalUsername) {
-      kernel.sysCreateUserHome(finalUsername);
-    }
+    if (finalUsername) kernel.sysCreateUserHome(finalUsername);
     confirmRecoveryCodeSaved();
     setRotatedCode(null);
     setRecoveredUsername(null);
     setRecoverySaved(false);
+    setCopiedCode(false);
     setSuccessMsg('Conta recuperada. Abrindo o CloudOS…');
     setIsUnlocking(true);
     window.setTimeout(() => unlock(), 650);
   }
 
-  async function copyRotatedCode() {
+  async function runRotatedCodeAction(action: 'copy' | 'save' | 'print') {
     if (!rotatedCode) return;
+    setError(null);
     try {
-      await navigator.clipboard.writeText(rotatedCode);
-      setCopiedCode(true);
-      if (copyTimerRef.current !== null) {
-        window.clearTimeout(copyTimerRef.current);
+      if (action === 'copy') {
+        await copyRecoveryCode(rotatedCode);
+        setCopiedCode(true);
+        if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+        copyTimerRef.current = window.setTimeout(() => { setCopiedCode(false); copyTimerRef.current = null; }, 2000);
       }
-      copyTimerRef.current = window.setTimeout(() => {
-        setCopiedCode(false);
-        copyTimerRef.current = null;
-      }, 2000);
-    } catch {
-      setError('Selecione e salve o código manualmente.');
+      if (action === 'save') {
+        await saveRecoveryCodeAsText(rotatedCode);
+        setRecoverySaved(true);
+      }
+      if (action === 'print') {
+        printRecoveryCode(rotatedCode);
+        setRecoverySaved(true);
+      }
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : 'Não foi possível concluir esta ação.');
     }
   }
 
@@ -249,18 +262,8 @@ export default function LockScreen() {
     void checkRecoveryStatus().finally(() => { recoveryCheckInFlight.current = false; });
   }
 
-  const title = mode === 'recovery'
-    ? 'Recuperar conta'
-    : mode === 'legacy-recovery'
-      ? 'Recuperar conta antiga'
-      : mode === 'recovery-code'
-        ? 'Novo código de recuperação'
-        : 'Bem-vindo ao CloudOS';
-  const subtitle = mode === 'login'
-    ? 'Entre com sua conta local'
-    : mode === 'recovery' || mode === 'legacy-recovery'
-      ? 'Redefina a conta com segurança'
-      : 'Salve antes de continuar';
+  const title = mode === 'recovery' ? 'Recuperar conta' : mode === 'legacy-recovery' ? 'Recuperar conta antiga' : mode === 'recovery-code' ? 'Novo código de recuperação' : 'Bem-vindo ao CloudOS';
+  const subtitle = mode === 'login' ? 'Entre com sua conta local' : mode === 'recovery' || mode === 'legacy-recovery' ? 'Redefina a conta com segurança' : 'Salve antes de continuar';
 
   return (
     <div className={`cloudos-lock-screen ${isUnlocking ? 'unlocking' : ''}`} onClick={() => !showPanel && setShowPanel(true)}>
@@ -280,39 +283,23 @@ export default function LockScreen() {
             <FormField id="login-password" label="Senha" type="password" value={password} onChange={setPassword} autoComplete="current-password" />
             {error && <Alert tone="error">{error}</Alert>}{successMsg && <Alert tone="success">{successMsg}</Alert>}
             <button type="submit" className="btn-primary-gradient" disabled={loading}>{loading ? 'Entrando…' : 'Entrar'}</button>
-            <button
-              type="button"
-              className="btn-recovery-link"
-              disabled={recoveryAvailable === false}
-              onClick={switchToRecovery}
-            >
-              {recoveryAvailable === null && !recoveryStatusMessage ? 'Verificando recuperação…' : 'Esqueci minha conta ou senha'}
+            <button type="button" className="btn-recovery-link" disabled={recoveryAvailable === false} onClick={switchToRecovery}>
+              {recoveryAvailable === null && !recoveryStatusMessage ? 'Verificando recuperação…' : 'Esqueci minha senha'}
             </button>
             {recoveryAvailable === false && !legacyAdminAvailable && <div className="lock-recovery-unavailable" role="status">Esta conta antiga ainda não possui um código. Entre uma vez com a senha e salve o código que será mostrado antes de acessar o desktop.</div>}
-            {recoveryAvailable === false && legacyAdminAvailable && (
-              nativeHostBridge.available ? (
-                <button
-                  type="button"
-                  className="btn-recovery-link"
-                  onClick={startLegacyRecovery}
-                  disabled={loading}
-                >
-                  Recuperar conta antiga neste computador
-                </button>
-              ) : (
-                <div className="lock-recovery-unavailable" role="status">Esta conta antiga ainda não possui um código. Abra o aplicativo nativo do CloudOS neste computador para recuperá-la.</div>
-              )
-            )}
+            {recoveryAvailable === false && legacyAdminAvailable && (nativeHostBridge.available ? <button type="button" className="btn-recovery-link" onClick={startLegacyRecovery} disabled={loading}>Recuperar conta antiga neste computador</button> : <div className="lock-recovery-unavailable" role="status">Esta conta antiga ainda não possui um código. Abra o aplicativo nativo do CloudOS neste computador para recuperá-la.</div>)}
             {recoveryStatusMessage && <div className="lock-recovery-unavailable error" role="alert"><span>Não foi possível verificar se a recuperação está disponível.</span><button type="button" onClick={refreshRecoveryStatus}>Tentar novamente</button></div>}
           </form>}
 
           {setupStatus === 'complete' && mode === 'recovery' && <form onSubmit={handleRecovery} className="card-form recovery-form" noValidate>
-            <p className="recovery-explanation">Use o código salvo no primeiro acesso. Se ele for válido, a senha e o nome de usuário serão substituídos e um novo código será gerado.</p>
+            <p className="recovery-explanation">Digite o código salvo no primeiro acesso ou selecione o arquivo .txt que você salvou. O código antigo será invalidado depois de uma recuperação bem-sucedida.</p>
             <FormField id="recovery-code" label="Código de recuperação" value={recoveryCode} onChange={setRecoveryCode} autoComplete="off" monospace />
+            <div className="recovery-file-actions"><button type="button" className="btn-recovery-link" onClick={() => recoveryFileRef.current?.click()}>Selecionar arquivo .txt</button><input ref={recoveryFileRef} hidden type="file" accept=".txt,text/plain" onChange={(event) => void handleRecoveryFile(event)} /></div>
+            {successMsg && <Alert tone="success">{successMsg}</Alert>}
             <FormField id="recovery-username" label="Novo nome de usuário (opcional)" value={username} onChange={setUsername} autoComplete="username" />
             <FormField id="recovery-display-name" label="Nome de exibição (opcional)" value={displayName} onChange={setDisplayName} autoComplete="name" />
             <div className="recovery-password-grid"><FormField id="recovery-password" label="Nova senha" type="password" value={password} onChange={setPassword} autoComplete="new-password" /><FormField id="recovery-confirm" label="Confirmar senha" type="password" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" /></div>
-            <small className="recovery-password-hint">Use de 10 a 128 caracteres. Uma frase-senha longa também é aceita.</small>
+            <small className="recovery-password-hint">Mínimo de 4 caracteres. Espaços e frases-senha são aceitos.</small>
             {error && <Alert tone="error">{error}</Alert>}
             <button type="submit" className="btn-primary-gradient" disabled={loading}>{loading ? 'Recuperando…' : 'Recuperar conta'}</button>
             <button type="button" className="btn-recovery-link" onClick={switchToLogin}>Voltar para entrar</button>
@@ -323,7 +310,7 @@ export default function LockScreen() {
             <FormField id="legacy-username" label="Novo nome de usuário (opcional)" value={username} onChange={setUsername} autoComplete="username" />
             <FormField id="legacy-display-name" label="Nome de exibição (opcional)" value={displayName} onChange={setDisplayName} autoComplete="name" />
             <div className="recovery-password-grid"><FormField id="legacy-password" label="Nova senha" type="password" value={password} onChange={setPassword} autoComplete="new-password" /><FormField id="legacy-confirm" label="Confirmar senha" type="password" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" /></div>
-            <small className="recovery-password-hint">Use de 10 a 128 caracteres. Uma frase-senha longa também é aceita.</small>
+            <small className="recovery-password-hint">Mínimo de 4 caracteres. Espaços e frases-senha são aceitos.</small>
             {error && <Alert tone="error">{error}</Alert>}
             <button type="submit" className="btn-primary-gradient" disabled={loading}>{loading ? 'Recuperando…' : 'Definir nova senha e recuperar'}</button>
             <button type="button" className="btn-recovery-link" onClick={switchToLogin}>Voltar para entrar</button>
@@ -331,8 +318,9 @@ export default function LockScreen() {
 
           {mode === 'recovery-code' && <div className="recovery-result">
             <p>{oneTimeCodeOrigin === 'legacy-login' || oneTimeCodeOrigin === 'legacy-recovery' ? 'A recuperação desta conta antiga foi ativada. Este código será mostrado somente agora.' : 'O código antigo foi invalidado. Este novo código será mostrado somente agora.'}</p>
-            <div className="lock-recovery-code"><code>{rotatedCode}</code><button type="button" onClick={copyRotatedCode}>{copiedCode ? 'Copiado!' : 'Copiar'}</button></div>
-            <label><input type="checkbox" checked={recoverySaved} onChange={(event) => setRecoverySaved(event.target.checked)} /><span><strong>Confirmei que salvei o novo código</strong><small>Guarde-o fora deste computador.</small></span></label>
+            <div className="lock-recovery-code"><code>{rotatedCode}</code></div>
+            <div className="lock-recovery-actions"><button type="button" className="btn-recovery-link" onClick={() => void runRotatedCodeAction('copy')}>{copiedCode ? 'Copiado!' : 'Copiar'}</button><button type="button" className="btn-recovery-link" onClick={() => void runRotatedCodeAction('save')}>Salvar .txt</button><button type="button" className="btn-recovery-link" onClick={() => void runRotatedCodeAction('print')}>Imprimir</button></div>
+            <label><input type="checkbox" checked={recoverySaved} onChange={(event) => setRecoverySaved(event.target.checked)} /><span><strong>Confirmei que guardei o novo código</strong><small>Ele não será salvo automaticamente pelo CloudOS.</small></span></label>
             {error && <Alert tone="error">{error}</Alert>}
             <button type="button" className="btn-primary-gradient" disabled={!recoverySaved} onClick={finishRecovery}>Entrar no CloudOS</button>
           </div>}
@@ -346,7 +334,7 @@ export default function LockScreen() {
 }
 
 function FormField({ id, label, type = 'text', value, onChange, autoComplete, monospace = false }: { id: string; label: string; type?: string; value: string; onChange: (value: string) => void; autoComplete: string; monospace?: boolean }) {
-  return <label className="form-group" htmlFor={id}><span className="form-label">{label}</span><input id={id} className={`form-input no-icon${monospace ? ' monospace' : ''}`} type={type} value={value} onChange={(event) => onChange(event.target.value)} autoComplete={autoComplete} maxLength={type === 'password' ? 128 : 80} disabled={false} /></label>;
+  return <label className="form-group" htmlFor={id}><span className="form-label">{label}</span><input id={id} className={`form-input no-icon${monospace ? ' monospace' : ''}`} type={type} value={value} onChange={(event) => onChange(event.target.value)} autoComplete={autoComplete} maxLength={type === 'password' ? 128 : 128} disabled={false} /></label>;
 }
 
 function Alert({ tone, children }: { tone: 'error' | 'success'; children: React.ReactNode }) {

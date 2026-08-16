@@ -9,6 +9,7 @@ import {
   generateRecoveryCode,
   hashPassword,
   hashRecoveryCode,
+  normalizeRecoveryCodeInput,
   noStore,
   signSessionToken,
   toPublicUser,
@@ -192,8 +193,9 @@ authRouter.post('/recovery/reset', async (req, res, next) => {
     if (currentThrottle.limited) return recoveryLimitedResponse(res, currentThrottle);
 
     const admin = await dbGet(db, 'SELECT * FROM users WHERE role = ?', ['admin']);
-    const recoveryCode = typeof body.recoveryCode === 'string' ? body.recoveryCode.trim() : '';
-    const inputIsValid = validRecoveryCodeInput(recoveryCode);
+    const rawRecoveryCode = typeof body.recoveryCode === 'string' ? body.recoveryCode : '';
+    const recoveryCode = normalizeRecoveryCodeInput(rawRecoveryCode);
+    const inputIsValid = validRecoveryCodeInput(rawRecoveryCode);
     const recoveryMatches = await verifyRecoveryCode(
       inputIsValid ? recoveryCode : 'CLOUDOS-invalid-recovery-code',
       inputIsValid ? admin?.recovery_code_hash : null

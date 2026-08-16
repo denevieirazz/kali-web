@@ -5,8 +5,10 @@ import {
   ACCOUNT_RECOVERY_ENDPOINT,
   canRestoreAuthenticatedSession,
   extractRecoveryCode,
+  extractRecoveryCodeFromText,
   legacyRecoveryRequestBody,
   normalizePublicUser,
+  normalizeReadableRecoveryCode,
   recoveryRequestBody,
   sanitizePersistedProfile,
   validateDisplayName,
@@ -20,7 +22,7 @@ test('never restores a persisted session while a one-time recovery code still ne
   assert.equal(canRestoreAuthenticatedSession(false, false), false);
 });
 
-test('validates the real account form without accepting weak or mismatched credentials', () => {
+test('validates the real account form with a simple four-character minimum', () => {
   assert.equal(validateUsername('douglas.dev'), null);
   assert.equal(validateUsername('', { required: false }), null);
   assert.match(validateUsername('do'), /3 e 64/);
@@ -29,10 +31,19 @@ test('validates the real account form without accepting weak or mismatched crede
   assert.equal(validateDisplayName('Douglas'), null);
   assert.equal(validateDisplayName('', { required: false }), null);
   assert.match(validateDisplayName(''), /exibição/);
-  assert.equal(validateNewPassword('safe-password-1', 'safe-password-1'), null);
+  assert.equal(validateNewPassword('1234', '1234'), null);
+  assert.equal(validateNewPassword('a b ', 'a b '), null);
   assert.equal(validateNewPassword('correct horse battery staple', 'correct horse battery staple'), null);
-  assert.match(validateNewPassword('short', 'short'), /10 caracteres/);
+  assert.match(validateNewPassword('123', '123'), /4 caracteres/);
   assert.match(validateNewPassword('safe-password-1', 'different'), /não confere/);
+});
+
+test('normalizes readable grouped recovery codes from text files', () => {
+  const code = 'CLOUDOS-ABC-DEFG-HJKL-MNPQ-RSTU-VWXY-Z234-5678-9ABC';
+  const compact = 'cloudos abcdefghjklmnpqrstuvwxyz23456789abc';
+  assert.equal(normalizeReadableRecoveryCode(compact), code);
+  assert.equal(extractRecoveryCodeFromText(`CloudOS recovery\n${code}\nkeep safe`), code);
+  assert.equal(extractRecoveryCodeFromText('sem código'), '');
 });
 
 test('sanitizes legacy plaintext password and recovery material from persisted profiles', () => {
@@ -78,25 +89,26 @@ test('recovery request omits newUsername and displayName when empty to preserve 
 
 test('legacy recovery request formats payload with legacy token and omits empty optional fields', () => {
   assert.equal(ACCOUNT_LEGACY_RECOVERY_ENDPOINT, '/api/auth/legacy-recovery/reset');
+  assert.equal(ACCOUNT_RECOVERY_ENDPOINT, '/api/auth/recovery/reset');
   const body = legacyRecoveryRequestBody({
     legacyToken: ' LEGACY-ABC123XYZ ',
     username: '',
     displayName: '',
-    password: 'new-safe-password-1',
-    confirmPassword: 'new-safe-password-1'
+    password: 'new-password-1',
+    confirmPassword: 'new-password-1'
   });
   assert.equal(body.legacyToken, 'LEGACY-ABC123XYZ');
   assert.equal('newUsername' in body, false);
   assert.equal('displayName' in body, false);
-  assert.equal(body.password, 'new-safe-password-1');
-  assert.equal(body.confirmPassword, 'new-safe-password-1');
+  assert.equal(body.password, 'new-password-1');
+  assert.equal(body.confirmPassword, 'new-password-1');
 
   const withAliases = legacyRecoveryRequestBody({
     legacyToken: 'LEGACY-999',
     username: 'novo-admin',
     displayName: 'Novo Admin',
-    password: 'password-123',
-    confirmPassword: 'password-123'
+    password: 'pass',
+    confirmPassword: 'pass'
   });
   assert.equal(withAliases.newUsername, 'novo-admin');
   assert.equal(withAliases.displayName, 'Novo Admin');

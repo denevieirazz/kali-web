@@ -1,0 +1,22 @@
+.setup-password-strength {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 10px;
+  align-items: baseline;
+  width: 100%;
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid rgba(148,163,184,.16);
+  border-radius: 9px;
+  background: rgba(15,23,42,.28);
+  font-size: 10px;
+}
+.setup-password-strength strong { white-space: nowrap; }
+.setup-password-strength span { min-width: 0; color: #8e99ad; overflow-wrap: anywhere; }
+.setup-password-strength--invalid strong,.setup-password-strength--weak strong { color:#fca5a5; }
+.setup-password-strength--medium strong { color:#fde68a; }
+.setup-password-strength--strong strong { color:#86efac; }
+.setup-password-strength--empty strong { color:#94a3b8; }
+.setup-btn-link { align-self:flex-start; padding-inline:0; color:#9aa8bc; background:transparent; border:0; text-decoration:underline; text-underline-offset:3px; }
+.setup-btn-link:hover { color:#e2e8f0; }
+@media (max-width: 620px) { .setup-password-strength { grid-template-columns:minmax(0,1fr); } .setup-password-strength strong { white-space:normal; } }
