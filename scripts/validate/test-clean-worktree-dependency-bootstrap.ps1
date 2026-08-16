@@ -66,7 +66,7 @@ try{
   if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw "NODE_MODULES_JUNCTION_FORBIDDEN:$relative"}
  }
 
- $status=@(& git -C $temp status --porcelain)
+ $status=@(& git -C $temp status --porcelain --untracked-files=no)
  if($LASTEXITCODE -ne 0){throw "WORKTREE_STATUS_FAILED:$LASTEXITCODE"}
  if($status.Count -gt 0){throw "WORKTREE_TRACKED_FILES_CHANGED:$($status -join ',')"}
  $trackedCleanBeforeCleanup=$true
