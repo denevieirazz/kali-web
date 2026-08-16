@@ -25,6 +25,9 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.23.x'
+      - name: Prove clean detached worktree
+        shell: pwsh
+        run: ./scripts/productization/test-clean-worktree.ps1
       - name: Install root dependencies once
         run: npm ci --include=dev
       - name: Productization static contract
@@ -56,6 +59,9 @@ jobs:
       - name: Backup and restore contract
         shell: pwsh
         run: ./scripts/productization/test-backup-restore.ps1
+      - name: Data removal safety contract
+        shell: pwsh
+        run: ./scripts/productization/test-data-removal.ps1
       - name: Diff check
         run: git diff --check ffaa9fd302065fbfd7c7123896d19465c1cd3e8a...HEAD
 
@@ -81,6 +87,9 @@ jobs:
       - name: Validate PowerShell 7
         shell: pwsh
         run: if($PSVersionTable.PSVersion.Major -lt 7){throw 'PowerShell 7 required'}
+      - name: Prove clean detached worktree
+        shell: pwsh
+        run: ./scripts/productization/test-clean-worktree.ps1
       - name: Productization static contract
         shell: pwsh
         run: ./scripts/productization/test-productization-contract.ps1
@@ -101,9 +110,15 @@ jobs:
       - name: Validate package layout and supply chain
         shell: pwsh
         run: ./scripts/productization/test-package-layout.ps1
+      - name: Prove packaged Node without global Node
+        shell: pwsh
+        run: ./scripts/productization/test-packaged-node-runtime.ps1
       - name: Backup and restore contract
         shell: pwsh
         run: ./scripts/productization/test-backup-restore.ps1
+      - name: Data removal safety contract
+        shell: pwsh
+        run: ./scripts/productization/test-data-removal.ps1
       - name: Install and uninstall in directory with spaces
         shell: pwsh
         run: ./scripts/productization/test-installer.ps1
