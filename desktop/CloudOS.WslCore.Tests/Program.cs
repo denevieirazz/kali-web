@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using System.Diagnostics;
 using CloudOS.WslCore;
 
 var failures = new List<string>();
@@ -41,12 +40,12 @@ static async Task TestFramingAsync()
     var invalid = new byte[5];
     BinaryPrimitives.WriteUInt32BigEndian(invalid.AsSpan(0, 4), (uint)(WslCoreProtocol.MaxFrameBytes + 1));
     await using var invalidStream = new MemoryStream(invalid);
-    await AssertThrows<WslCoreProtocolException>(() => WslCoreProtocol.ReadFrameAsync(invalidStream, CancellationToken.None), "oversize accepted");
+    await AssertThrowsAsync<WslCoreProtocolException>(() => WslCoreProtocol.ReadFrameAsync(invalidStream, CancellationToken.None), "oversize accepted");
 
     await using var wrongVersion = new MemoryStream();
     await WslCoreProtocol.WriteFrameAsync(wrongVersion, new WireEnvelope { Version = 2, Type = "hello" }, CancellationToken.None);
     wrongVersion.Position = 0;
-    await AssertThrows<WslCoreProtocolException>(() => WslCoreProtocol.ReadFrameAsync(wrongVersion, CancellationToken.None), "version mismatch accepted");
+    await AssertThrowsAsync<WslCoreProtocolException>(() => WslCoreProtocol.ReadFrameAsync(wrongVersion, CancellationToken.None), "version mismatch accepted");
 }
 
 static Task TestProofAsync()
@@ -67,8 +66,8 @@ static Task TestBootstrapArgumentsAsync()
     Assert(!info.UseShellExecute, "shell execute enabled");
     Assert(info.ArgumentList.SequenceEqual(["--distribution", "kali-linux", "--exec", "/tmp/cloudos-core", "serve"]), "bootstrap arguments changed");
     Assert(!info.Environment.ContainsKey("JWT_SECRET"), "secret environment inherited");
-    AssertThrows<ArgumentException>(() => WslCoreSupervisor.BuildBootstrapStartInfo("wsl.exe", "kali-linux;whoami", "/tmp/core"), "distro injection accepted");
-    AssertThrows<ArgumentException>(() => WslCoreSupervisor.BuildBootstrapStartInfo("wsl.exe", "kali-linux", "relative/core"), "relative core path accepted");
+    AssertThrowsSync<ArgumentException>(() => WslCoreSupervisor.BuildBootstrapStartInfo("wsl.exe", "kali-linux;whoami", "/tmp/core"), "distro injection accepted");
+    AssertThrowsSync<ArgumentException>(() => WslCoreSupervisor.BuildBootstrapStartInfo("wsl.exe", "kali-linux", "relative/core"), "relative core path accepted");
     return Task.CompletedTask;
 }
 
@@ -93,7 +92,7 @@ static async Task TestDistroAndFallbackAsync()
 static async Task TestDisconnectAndTimeoutAsync()
 {
     await using var earlyEnd = new MemoryStream([0, 0]);
-    await AssertThrows<EndOfStreamException>(() => WslCoreProtocol.ReadFrameAsync(earlyEnd, CancellationToken.None), "early disconnect accepted");
+    await AssertThrowsAsync<EndOfStreamException>(() => WslCoreProtocol.ReadFrameAsync(earlyEnd, CancellationToken.None), "early disconnect accepted");
     await using var hanging = new HangingStream();
     using var timeout = new CancellationTokenSource(80);
     try
@@ -109,14 +108,14 @@ static void Assert(bool condition, string message)
     if (!condition) throw new Exception(message);
 }
 
-static void AssertThrows<T>(Action action, string message) where T : Exception
+static void AssertThrowsSync<T>(Action action, string message) where T : Exception
 {
     try { action(); }
     catch (T) { return; }
     throw new Exception(message);
 }
 
-static async Task AssertThrows<T>(Func<Task> action, string message) where T : Exception
+static async Task AssertThrowsAsync<T>(Func<Task> action, string message) where T : Exception
 {
     try { await action(); }
     catch (T) { return; }
