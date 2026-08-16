@@ -11,7 +11,7 @@ if (!arguments.TryGetValue("distro", out var distro) || !arguments.TryGetValue("
 }
 var outputDirectory = arguments.TryGetValue("output", out var requestedOutput)
     ? Path.GetFullPath(requestedOutput)
-    : Path.GetFullPath(Path.Combine("test-results", "wsl-core-foundation"));
+    : Path.GetFullPath(Path.Combine("test-results", "wsl-core-secure-terminal"));
 Directory.CreateDirectory(outputDirectory);
 var validationPath = Path.Combine(outputDirectory, "validation.json");
 var outputs = new ConcurrentDictionary<string, StringBuilder>(StringComparer.Ordinal);
@@ -25,7 +25,7 @@ try
 {
     Environment.SetEnvironmentVariable("CLOUDOS_WSL_CORE_FOUNDATION", "1");
     await using var supervisor = new WslCoreSupervisor();
-    using var overall = new CancellationTokenSource(TimeSpan.FromSeconds(55));
+    using var overall = new CancellationTokenSource(TimeSpan.FromSeconds(60));
     var client = await supervisor.StartAsync(new WslCoreSupervisorOptions(distro, corePath, AllowBootstrap: true), overall.Token);
     client.EventReceived += (_, evt) =>
     {
@@ -37,10 +37,11 @@ try
     };
 
     var health = await client.HealthAsync(overall.Token);
-    Require(health.Status == "ready" && health.Protocol == 1 && health.Pid > 0, "health");
+    Require(health.Status == "ready" && health.Protocol == 2 && health.Pid > 0 && health.Protection == "aes-256-gcm-seq", "health");
     corePid = health.Pid;
     distroId = health.Distro?.Id;
     checks.Add("authenticated-health");
+    checks.Add("protected-channel-v2");
 
     var echo = await client.CreateSessionAsync(new WslCoreCreateSession("/bin/echo", ["cloudos-wsl-core-ok", "literal;not-shell"]), overall.Token);
     Require(!string.IsNullOrWhiteSpace(echo.SessionId) && echo.Pid > 0, "echo-create");
@@ -49,7 +50,7 @@ try
     Require(echoExit.State == "exited" && echoExit.ExitCode == 0, "echo-exit");
     var echoOutput = ReadOutput(outputs, echo.SessionId!);
     Require(echoOutput.Contains("cloudos-wsl-core-ok literal;not-shell", StringComparison.Ordinal), "echo-output-boundary");
-    checks.Add("shell-free-process-and-output");
+    checks.Add("generic-allowlist-remains-shell-free");
 
     var metrics = await client.MetricsAsync(overall.Token);
     Require(metrics.UptimeSeconds > 0 && metrics.Memory?.TotalBytes > 0 && metrics.ProcessCount > 0, "proc-metrics");
@@ -64,17 +65,17 @@ try
     Require(sleeperExit.State == "exited", "signal-exit");
     checks.Add("signal-and-exit");
 
-    var terminal = await client.CreateSessionAsync(new WslCoreCreateSession("/bin/cat", Pty: true, Cols: 80, Rows: 24), overall.Token);
-    Require(!string.IsNullOrWhiteSpace(terminal.SessionId) && terminal.Pid > 0, "pty-create");
+    var terminal = await client.CreateTerminalAsync(rows: 24, cols: 80, cancellationToken: overall.Token);
+    Require(!string.IsNullOrWhiteSpace(terminal.SessionId) && terminal.Pid > 0 && terminal.Pty, "terminal-create");
     childPids.Add(terminal.Pid);
     await client.ResizeAsync(terminal.SessionId!, 36, 120, overall.Token);
-    await client.InputAsync(terminal.SessionId!, Encoding.UTF8.GetBytes("cloudos-pty-ok\n"), overall.Token);
-    var sawPty = await WaitForOutputAsync(client, outputs, terminal.SessionId!, "cloudos-pty-ok", overall.Token);
-    Require(sawPty, "pty-io");
-    await client.SignalAsync(terminal.SessionId!, "terminate", overall.Token);
+    await client.InputAsync(terminal.SessionId!, Encoding.UTF8.GetBytes("printf 'cloudos-terminal-core-v2-ok\\n'\n"), overall.Token);
+    var sawTerminal = await WaitForOutputAsync(client, outputs, terminal.SessionId!, "cloudos-terminal-core-v2-ok", overall.Token);
+    Require(sawTerminal, "terminal-io");
+    await client.SignalAsync(terminal.SessionId!, "hangup", overall.Token);
     var terminalExit = await client.WaitAsync(terminal.SessionId!, 5_000, overall.Token);
-    Require(terminalExit.State == "exited", "pty-exit");
-    checks.Add("pty-input-resize-signal");
+    Require(terminalExit.State == "exited", "terminal-exit");
+    checks.Add("fixed-terminal-input-output-resize-signal-exit");
 
     var finalHealth = await client.HealthAsync(overall.Token);
     Require(finalHealth.ActiveSessions == 0, "zero-active-sessions");
@@ -86,7 +87,8 @@ try
     {
         passed = true,
         physicalValidation = true,
-        protocol = 1,
+        protocol = 2,
+        protection = "aes-256-gcm-seq",
         distribution = distro,
         distroId,
         corePid,
@@ -107,7 +109,8 @@ catch (Exception error)
     {
         passed = false,
         physicalValidation = true,
-        protocol = 1,
+        protocol = 2,
+        protection = "aes-256-gcm-seq",
         distribution = distro,
         distroId,
         corePid,
@@ -124,7 +127,7 @@ catch (Exception error)
 
 static async Task<bool> WaitForOutputAsync(WslCoreClient client, ConcurrentDictionary<string, StringBuilder> outputs, string sessionId, string needle, CancellationToken cancellationToken)
 {
-    for (var attempt = 0; attempt < 30; attempt++)
+    for (var attempt = 0; attempt < 40; attempt++)
     {
         if (ReadOutput(outputs, sessionId).Contains(needle, StringComparison.Ordinal)) return true;
         _ = await client.StatusAsync(sessionId, cancellationToken);

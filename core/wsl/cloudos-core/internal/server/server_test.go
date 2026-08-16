@@ -26,7 +26,7 @@ func TestBootstrapSecretValidation(t *testing.T) {
 	}
 }
 
-func TestAuthenticationVersionAndProof(t *testing.T) {
+func TestAuthenticationProducesProtectedReady(t *testing.T) {
 	secret := bytes.Repeat([]byte{9}, protocol.SecretBytes)
 	serverSide, clientSide := net.Pipe()
 	defer serverSide.Close()
@@ -40,32 +40,9 @@ func TestAuthenticationVersionAndProof(t *testing.T) {
 		}
 		result <- err
 	}()
-	clientNonce := bytes.Repeat([]byte{4}, protocol.NonceBytes)
-	if err := protocol.WriteFrame(clientSide, protocol.Envelope{Type: "hello", Payload: protocol.Payload(map[string]string{"clientNonce": base64.StdEncoding.EncodeToString(clientNonce)})}); err != nil {
-		t.Fatal(err)
-	}
-	challenge, err := protocol.ReadFrame(clientSide)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var body struct {
-		ServerNonce string `json:"serverNonce"`
-		Proof       string `json:"proof"`
-	}
-	if json.Unmarshal(challenge.Payload, &body) != nil {
-		t.Fatal("challenge invalid")
-	}
-	serverNonce, _ := base64.StdEncoding.DecodeString(body.ServerNonce)
-	if !protocol.VerifyProof(secret, "server", clientNonce, serverNonce, body.Proof) {
-		t.Fatal("server proof invalid")
-	}
-	proof := protocol.ProofBase64(secret, "client", clientNonce, serverNonce)
-	if err := protocol.WriteFrame(clientSide, protocol.Envelope{Type: "proof", Payload: protocol.Payload(map[string]string{"proof": proof})}); err != nil {
-		t.Fatal(err)
-	}
-	ready, err := protocol.ReadFrame(clientSide)
-	if err != nil || ready.Type != "ready" {
-		t.Fatalf("ready failed: %v %+v", err, ready)
+	secure := authenticateTestClient(t, clientSide, secret)
+	if secure == nil {
+		t.Fatal("secure channel missing")
 	}
 	select {
 	case err := <-result:
@@ -87,12 +64,9 @@ func TestWrongAuthenticationProofFails(t *testing.T) {
 	go func() { _, _, err := srv.authenticate(serverSide); result <- err }()
 	nonce := bytes.Repeat([]byte{2}, protocol.NonceBytes)
 	_ = protocol.WriteFrame(clientSide, protocol.Envelope{Type: "hello", Payload: protocol.Payload(map[string]string{"clientNonce": base64.StdEncoding.EncodeToString(nonce)})})
-	challenge, err := protocol.ReadFrame(clientSide)
-	if err != nil {
+	if _, err := protocol.ReadFrame(clientSide); err != nil {
 		t.Fatal(err)
 	}
-	var body map[string]string
-	_ = json.Unmarshal(challenge.Payload, &body)
 	_ = protocol.WriteFrame(clientSide, protocol.Envelope{Type: "proof", Payload: protocol.Payload(map[string]string{"proof": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0}, 32))})})
 	select {
 	case err := <-result:
@@ -104,7 +78,7 @@ func TestWrongAuthenticationProofFails(t *testing.T) {
 	}
 }
 
-func authenticateTestClient(t *testing.T, conn net.Conn, secret []byte) {
+func authenticateTestClient(t *testing.T, conn net.Conn, secret []byte) *protocol.SecureChannel {
 	t.Helper()
 	clientNonce := bytes.Repeat([]byte{5}, protocol.NonceBytes)
 	if err := protocol.WriteFrame(conn, protocol.Envelope{Type: "hello", Payload: protocol.Payload(map[string]string{"clientNonce": base64.StdEncoding.EncodeToString(clientNonce)})}); err != nil {
@@ -129,19 +103,31 @@ func authenticateTestClient(t *testing.T, conn net.Conn, secret []byte) {
 	if err := protocol.WriteFrame(conn, protocol.Envelope{Type: "proof", Payload: protocol.Payload(map[string]string{"proof": clientProof})}); err != nil {
 		t.Fatal(err)
 	}
-	ready, err := protocol.ReadFrame(conn)
-	if err != nil || ready.Type != "ready" {
-		t.Fatalf("ready failed: %v", err)
+	secure, err := protocol.NewSecureChannel(conn, conn, secret, clientNonce, serverNonce, false)
+	if err != nil {
+		t.Fatal(err)
 	}
+	ready, err := secure.Read()
+	if err != nil || ready.Type != "ready" {
+		t.Fatalf("protected ready failed: %v", err)
+	}
+	var readyBody struct {
+		Protocol   int    `json:"protocol"`
+		Protection string `json:"protection"`
+	}
+	if json.Unmarshal(ready.Payload, &readyBody) != nil || readyBody.Protocol != protocol.Version || readyBody.Protection != "aes-256-gcm-seq" {
+		t.Fatalf("protected ready payload invalid: %+v", readyBody)
+	}
+	return secure
 }
 
-func requestTest(t *testing.T, conn net.Conn, id, method string, params any) protocol.Envelope {
+func requestTest(t *testing.T, secure *protocol.SecureChannel, id, method string, params any) protocol.Envelope {
 	t.Helper()
-	if err := protocol.WriteFrame(conn, protocol.Envelope{Type: "request", ID: id, Payload: protocol.Payload(map[string]any{"method": method, "params": params})}); err != nil {
+	if err := secure.Write(protocol.Envelope{Type: "request", ID: id, Payload: protocol.Payload(map[string]any{"method": method, "params": params})}); err != nil {
 		t.Fatal(err)
 	}
 	for {
-		response, err := protocol.ReadFrame(conn)
+		response, err := secure.Read()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -157,12 +143,19 @@ func TestServeConnectionHealthAndShutdown(t *testing.T) {
 	srv := &Server{secret: secret, distro: DistroInfo{ID: "test"}}
 	result := make(chan error, 1)
 	go func() { result <- srv.serveConnection(serverSide, io.Discard) }()
-	authenticateTestClient(t, clientSide, secret)
-	health := requestTest(t, clientSide, "health-1", "health", nil)
+	secure := authenticateTestClient(t, clientSide, secret)
+	health := requestTest(t, secure, "health-1", "health", nil)
 	if health.OK == nil || !*health.OK {
 		t.Fatalf("health failed: %+v", health.Error)
 	}
-	shutdown := requestTest(t, clientSide, "shutdown-1", "shutdown", nil)
+	var healthBody struct {
+		Protocol   int    `json:"protocol"`
+		Protection string `json:"protection"`
+	}
+	if json.Unmarshal(health.Payload, &healthBody) != nil || healthBody.Protocol != protocol.Version || healthBody.Protection != "aes-256-gcm-seq" {
+		t.Fatalf("health did not prove protected v2: %+v", healthBody)
+	}
+	shutdown := requestTest(t, secure, "shutdown-1", "shutdown", nil)
 	if shutdown.OK == nil || !*shutdown.OK {
 		t.Fatalf("shutdown failed: %+v", shutdown.Error)
 	}
@@ -177,14 +170,47 @@ func TestServeConnectionHealthAndShutdown(t *testing.T) {
 	}
 }
 
+func TestTerminalCreateIsFixedAndSinglePerConnection(t *testing.T) {
+	secret := bytes.Repeat([]byte{4}, protocol.SecretBytes)
+	serverSide, clientSide := net.Pipe()
+	srv := &Server{secret: secret, distro: DistroInfo{ID: "test"}}
+	result := make(chan error, 1)
+	go func() { result <- srv.serveConnection(serverSide, io.Discard) }()
+	secure := authenticateTestClient(t, clientSide, secret)
+	created := requestTest(t, secure, "terminal-1", "terminal.create", map[string]int{"rows": 24, "cols": 80})
+	if created.OK == nil || !*created.OK {
+		t.Fatalf("terminal create failed: %+v", created.Error)
+	}
+	var status struct {
+		SessionID string `json:"sessionId"`
+		PID       int    `json:"pid"`
+		PTY       bool   `json:"pty"`
+	}
+	if json.Unmarshal(created.Payload, &status) != nil || status.SessionID == "" || status.PID <= 0 || !status.PTY {
+		t.Fatalf("invalid terminal status: %+v", status)
+	}
+	second := requestTest(t, secure, "terminal-2", "terminal.create", map[string]int{"rows": 24, "cols": 80})
+	if second.OK == nil || *second.OK || second.Error == nil || second.Error.Code != "TERMINAL_SESSION_LIMIT" {
+		t.Fatalf("second terminal was not rejected: %+v", second)
+	}
+	_ = requestTest(t, secure, "terminal-signal", "session.signal", map[string]string{"sessionId": status.SessionID, "signal": "terminate"})
+	_ = requestTest(t, secure, "shutdown", "shutdown", nil)
+	_ = clientSide.Close()
+	select {
+	case <-result:
+	case <-time.After(3 * time.Second):
+		t.Fatal("terminal shutdown timed out")
+	}
+}
+
 func TestDisconnectCleansOwnedProcess(t *testing.T) {
 	secret := bytes.Repeat([]byte{6}, protocol.SecretBytes)
 	serverSide, clientSide := net.Pipe()
 	srv := &Server{secret: secret, distro: DistroInfo{ID: "test"}}
 	result := make(chan error, 1)
 	go func() { result <- srv.serveConnection(serverSide, io.Discard) }()
-	authenticateTestClient(t, clientSide, secret)
-	created := requestTest(t, clientSide, "create-1", "session.create", map[string]any{"executable": "/bin/sleep", "args": []string{"30"}})
+	secure := authenticateTestClient(t, clientSide, secret)
+	created := requestTest(t, secure, "create-1", "session.create", map[string]any{"executable": "/bin/sleep", "args": []string{"30"}})
 	if created.OK == nil || !*created.OK {
 		t.Fatalf("create failed: %+v", created.Error)
 	}

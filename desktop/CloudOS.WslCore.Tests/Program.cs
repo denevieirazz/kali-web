@@ -4,6 +4,7 @@ using CloudOS.WslCore;
 var failures = new List<string>();
 await Run("framing-partial-invalid-version", TestFramingAsync);
 await Run("mutual-auth-proof-role", TestProofAsync);
+await Run("protected-channel-integrity-replay-sequence", TestSecureChannelAsync);
 await Run("arguments-and-environment", TestBootstrapArgumentsAsync);
 await Run("distro-validation-and-fallback", TestDistroAndFallbackAsync);
 await Run("disconnect-and-timeout", TestDisconnectAndTimeoutAsync);
@@ -27,15 +28,15 @@ static async Task TestFramingAsync()
     await using var memory = new MemoryStream();
     await WslCoreProtocol.WriteFrameAsync(memory, new WireEnvelope
     {
-        Version = 1,
-        Type = "request",
+        Version = WslCoreProtocol.Version,
+        Type = "hello",
         Id = "abc",
         Payload = WslCoreProtocol.Payload(new { method = "health" })
     }, CancellationToken.None);
     memory.Position = 0;
     await using var chunked = new ChunkedReadStream(memory, 1);
     var decoded = await WslCoreProtocol.ReadFrameAsync(chunked, CancellationToken.None);
-    Assert(decoded.Type == "request" && decoded.Id == "abc", "partial frame changed");
+    Assert(decoded.Type == "hello" && decoded.Id == "abc", "partial frame changed");
 
     var invalid = new byte[5];
     BinaryPrimitives.WriteUInt32BigEndian(invalid.AsSpan(0, 4), (uint)(WslCoreProtocol.MaxFrameBytes + 1));
@@ -43,9 +44,9 @@ static async Task TestFramingAsync()
     await AssertThrowsAsync<WslCoreProtocolException>(() => WslCoreProtocol.ReadFrameAsync(invalidStream, CancellationToken.None), "oversize accepted");
 
     await using var wrongVersion = new MemoryStream();
-    await WslCoreProtocol.WriteFrameAsync(wrongVersion, new WireEnvelope { Version = 2, Type = "hello" }, CancellationToken.None);
+    await WslCoreProtocol.WriteLengthPrefixedAsync(wrongVersion, System.Text.Encoding.UTF8.GetBytes("{\"v\":1,\"type\":\"hello\"}"), CancellationToken.None);
     wrongVersion.Position = 0;
-    await AssertThrowsAsync<WslCoreProtocolException>(() => WslCoreProtocol.ReadFrameAsync(wrongVersion, CancellationToken.None), "version mismatch accepted");
+    await AssertThrowsCodeAsync(() => WslCoreProtocol.ReadFrameAsync(wrongVersion, CancellationToken.None), "PROTOCOL_VERSION", "version mismatch accepted");
 }
 
 static Task TestProofAsync()
@@ -57,6 +58,47 @@ static Task TestProofAsync()
     Assert(WslCoreProtocol.VerifyProof(secret, "server", client, server, serverProof), "valid proof rejected");
     Assert(!WslCoreProtocol.VerifyProof(secret, "client", client, server, serverProof), "role confusion accepted");
     return Task.CompletedTask;
+}
+
+static async Task TestSecureChannelAsync()
+{
+    var secret = Enumerable.Repeat((byte)7, 32).ToArray();
+    var clientNonce = Enumerable.Repeat((byte)8, 32).ToArray();
+    var serverNonce = Enumerable.Repeat((byte)9, 32).ToArray();
+    await using var wire = new MemoryStream();
+    await using (var client = WslCoreSecureChannel.Create(new MemoryStream(), wire, secret, clientNonce, serverNonce, serverSide: false))
+    {
+        await client.WriteAsync(new WireEnvelope { Version = 2, Type = "request", Id = "one", Payload = WslCoreProtocol.Payload(new { method = "health" }) }, CancellationToken.None);
+    }
+    var captured = wire.ToArray();
+    await using (var server = WslCoreSecureChannel.Create(new MemoryStream(captured), new MemoryStream(), secret, clientNonce, serverNonce, serverSide: true))
+    {
+        var decoded = await server.ReadAsync(CancellationToken.None);
+        Assert(decoded.Type == "request" && decoded.Id == "one", "protected roundtrip failed");
+    }
+
+    var tampered = captured.ToArray();
+    tampered[^1] ^= 0x40;
+    await using (var server = WslCoreSecureChannel.Create(new MemoryStream(tampered), new MemoryStream(), secret, clientNonce, serverNonce, serverSide: true))
+    {
+        await AssertThrowsCodeAsync(() => server.ReadAsync(CancellationToken.None), "FRAME_INTEGRITY", "tampered protected frame accepted");
+    }
+
+    var replay = new byte[captured.Length * 2];
+    captured.CopyTo(replay, 0);
+    captured.CopyTo(replay, captured.Length);
+    await using (var server = WslCoreSecureChannel.Create(new MemoryStream(replay), new MemoryStream(), secret, clientNonce, serverNonce, serverSide: true))
+    {
+        _ = await server.ReadAsync(CancellationToken.None);
+        await AssertThrowsCodeAsync(() => server.ReadAsync(CancellationToken.None), "FRAME_SEQUENCE", "replayed protected frame accepted");
+    }
+
+    var outOfOrder = captured.ToArray();
+    BinaryPrimitives.WriteUInt64BigEndian(outOfOrder.AsSpan(4, 8), 2);
+    await using (var server = WslCoreSecureChannel.Create(new MemoryStream(outOfOrder), new MemoryStream(), secret, clientNonce, serverNonce, serverSide: true))
+    {
+        await AssertThrowsCodeAsync(() => server.ReadAsync(CancellationToken.None), "FRAME_SEQUENCE", "out-of-order protected frame accepted");
+    }
 }
 
 static Task TestBootstrapArgumentsAsync()
@@ -119,6 +161,13 @@ static async Task AssertThrowsAsync<T>(Func<Task> action, string message) where 
 {
     try { await action(); }
     catch (T) { return; }
+    throw new Exception(message);
+}
+
+static async Task AssertThrowsCodeAsync(Func<Task> action, string code, string message)
+{
+    try { await action(); }
+    catch (WslCoreProtocolException error) when (error.Code == code) { return; }
     throw new Exception(message);
 }
 

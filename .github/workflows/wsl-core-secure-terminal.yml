@@ -1,0 +1,90 @@
+name: CloudOS WSL Core Secure Terminal
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/cloudos-wsl-core-secure-terminal
+    paths:
+      - 'core/wsl/cloudos-core/**'
+      - 'desktop/CloudOS.WslCore/**'
+      - 'desktop/CloudOS.WslCore.Probe/**'
+      - 'desktop/CloudOS.WslCore.Tests/**'
+      - 'backend/src/terminal/**'
+      - 'backend/test/wsl-core-terminal.test.js'
+      - 'scripts/*wsl-core-secure-terminal*.ps1'
+      - 'scripts/probe-wsl-core-terminal.mjs'
+      - 'docs/WSL_CORE_SECURE_TERMINAL.md'
+      - '.github/workflows/wsl-core-secure-terminal.yml'
+  pull_request:
+    paths:
+      - 'core/wsl/cloudos-core/**'
+      - 'desktop/CloudOS.WslCore/**'
+      - 'desktop/CloudOS.WslCore.Probe/**'
+      - 'desktop/CloudOS.WslCore.Tests/**'
+      - 'backend/src/terminal/**'
+      - 'backend/test/wsl-core-terminal.test.js'
+      - 'scripts/*wsl-core-secure-terminal*.ps1'
+      - 'scripts/probe-wsl-core-terminal.mjs'
+      - 'docs/WSL_CORE_SECURE_TERMINAL.md'
+      - '.github/workflows/wsl-core-secure-terminal.yml'
+
+jobs:
+  linux-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: core/wsl/cloudos-core
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache-dependency-path: core/wsl/cloudos-core/go.sum
+      - name: Verify module
+        run: go mod verify
+      - name: Run Linux protocol/process/server tests
+        run: go test ./...
+      - name: Build cloudos-core
+        run: go build -trimpath ./cmd/cloudos-core
+
+  windows-contracts:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build Windows WSL core client
+        run: dotnet build desktop/CloudOS.WslCore/CloudOS.WslCore.csproj -c Release
+      - name: Run Windows protocol contracts
+        run: dotnet run --project desktop/CloudOS.WslCore.Tests/CloudOS.WslCore.Tests.csproj -c Release
+      - name: Build physical probe without running it
+        run: dotnet build desktop/CloudOS.WslCore.Probe/CloudOS.WslCore.Probe.csproj -c Release
+      - name: Run Node secure Terminal adapter tests
+        run: node --test backend/test/wsl-core-terminal.test.js
+      - name: Parse Terminal WebSocket and physical Node probe
+        run: |
+          node --check backend/src/terminal/websocket.js
+          node --check backend/src/terminal/wslCoreAdapter.js
+          node --check scripts/probe-wsl-core-terminal.mjs
+      - name: Validate secure Terminal safety contract
+        shell: pwsh
+        run: ./scripts/test-wsl-core-secure-terminal-contract.ps1
+      - name: Parse physical validator
+        shell: pwsh
+        run: |
+          $tokens=$null; $errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path ./scripts/validate-wsl-core-secure-terminal.ps1), [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
+      - name: Check branch diff whitespace
+        shell: pwsh
+        run: git diff --check e72a1abe573bb0e41eea410b235cb78da53e8a26...HEAD
