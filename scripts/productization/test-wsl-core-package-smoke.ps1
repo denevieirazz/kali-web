@@ -19,7 +19,7 @@ if(-not $wsl){
 
 $list=& $wsl.Source --list --quiet 2>&1 | Out-String
 $listExit=$LASTEXITCODE
-$distros=@($list -split "`r?`n" | ForEach-Object {$_.Trim("`0 ","`t") } | Where-Object {-not [string]::IsNullOrWhiteSpace($_)})
+$distros=@($list -split "`r?`n" | ForEach-Object {(($_ -replace "`0",'').Trim())} | Where-Object {-not [string]::IsNullOrWhiteSpace($_)})
 if($listExit -ne 0 -or $distros.Count -eq 0){
     if($SkipIfUnavailable){Write-Host "PRODUCTIZATION_WSL_CORE_SMOKE_SKIPPED reason=no-existing-distro exit=$listExit";return}
     throw "WSL_CORE_SMOKE_DISTRO_UNAVAILABLE:exit=$listExit"
