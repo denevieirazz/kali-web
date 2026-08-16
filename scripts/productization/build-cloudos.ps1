@@ -52,7 +52,13 @@ Set-Content -LiteralPath (Join-Path $backendBuild 'package.json') -Value '{"type
 $coreRoot = Join-Path $root 'core/wsl/cloudos-core'
 $corePackage = './cmd/cloudos-core'
 $coreOutput = Join-Path $paths.Build 'cloudos-core-linux-amd64'
-Invoke-CloudOSExternal $go @('test','./...') $coreRoot
+$coreTestMode = 'linux-ci-prerequisite'
+if (-not $IsWindows) {
+    Invoke-CloudOSExternal $go @('test','./...') $coreRoot
+    $coreTestMode = 'executed-on-linux-host'
+} else {
+    Write-Host '[CloudOS] cloudos-core usa syscalls Linux; go test ./... é exigido no job Linux, que antecede o job Windows.'
+}
 $oldGoos=$env:GOOS; $oldGoarch=$env:GOARCH; $oldCgo=$env:CGO_ENABLED
 try {
     $env:GOOS='linux'; $env:GOARCH='amd64'; $env:CGO_ENABLED='0'
@@ -66,7 +72,7 @@ $coreSha256 = (Get-FileHash -LiteralPath $coreOutput -Algorithm SHA256).Hash.ToL
 $result=[ordered]@{
     schemaVersion=1; head=$sha; version=$config.version; rid=$config.rid; status='built';
     frontend=(Join-Path $root 'frontend/dist'); backend=$backendBuild; host=$hostPublish; bootstrap=$bootstrapPublish;
-    core=$coreOutput; corePackage=$corePackage; coreGoos='linux'; coreGoarch='amd64'; coreSha256=$coreSha256
+    core=$coreOutput; corePackage=$corePackage; coreGoos='linux'; coreGoarch='amd64'; coreSha256=$coreSha256; coreTestMode=$coreTestMode
 }
 Write-CloudOSJson $result (Join-Path $paths.Build 'build-result.json')
-Write-Host "CLOUDOS_PRODUCT_BUILT head=$sha version=$($config.version) core=$corePackage sha256=$coreSha256"
+Write-Host "CLOUDOS_PRODUCT_BUILT head=$sha version=$($config.version) core=$corePackage sha256=$coreSha256 testMode=$coreTestMode"
