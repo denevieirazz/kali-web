@@ -49,7 +49,7 @@ Não altera WSL, Kali, Registro, partições ou políticas do Windows automatica
 
 $npm = Get-CloudOSCommandName 'npm'; $dotnet=Get-CloudOSCommandName 'dotnet'; $go=Get-CloudOSCommandName 'go'
 $npmSbom = Invoke-CloudOSExternal $npm @('sbom','--omit=dev','--sbom-format=cyclonedx') -Capture -AllowFailure
-if ($npmSbom.ExitCode -eq 0) { Set-Content -LiteralPath (Join-Path $sbom 'npm.cyclonedx.json') -Value $npmSbom.Output -Encoding utf8 } else { Set-Content -LiteralPath (Join-Path $sbom 'npm-error.txt') -Value $npmSbom.Output -Encoding utf8 }
+if ($npmSbom.ExitCode -eq 0) { Set-Content -LiteralPath (Join-Path $sbom 'npm.cyclonedx.json') -Value $npmSbom.Output -Encoding utf8 } else { throw "NPM_SBOM_FAILED:$($npmSbom.Output)" }
 $nugetSbom = Invoke-CloudOSExternal $dotnet @('list','desktop/CloudOS.Host/CloudOS.Host.csproj','package','--include-transitive','--format','json') -Capture
 Set-Content -LiteralPath (Join-Path $sbom 'nuget-host.json') -Value $nugetSbom.Output -Encoding utf8
 $nugetBootstrap = Invoke-CloudOSExternal $dotnet @('list','desktop/CloudOS.Bootstrap/CloudOS.Bootstrap.csproj','package','--include-transitive','--format','json') -Capture
@@ -89,10 +89,11 @@ $appRoot = Ensure-CloudOSDirectory (Join-Path $portableRoot 'app')
 foreach($file in Get-ChildItem -LiteralPath $stage -File){ Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $appRoot $file.Name) -Force }
 foreach($name in @('app','agent','web','meta')){ if(Test-Path -LiteralPath (Join-Path $stage $name)){ Copy-Item -LiteralPath (Join-Path $stage $name) -Destination (Join-Path $appRoot $name) -Recurse -Force } }
 Copy-Item -LiteralPath (Join-Path $stage 'runtime') -Destination (Join-Path $portableRoot 'runtime') -Recurse -Force
-New-Item -ItemType Directory -Force -Path (Join-Path $portableRoot 'data-portable'),(Join-Path $portableRoot 'logs') | Out-Null
 @'
 @echo off
 setlocal
+if not exist "%~dp0data-portable" mkdir "%~dp0data-portable"
+if not exist "%~dp0logs" mkdir "%~dp0logs"
 set "CLOUDOS_LOCAL_ROOT=%~dp0data-portable"
 set "CLOUDOS_PORTABLE=1"
 "%~dp0app\CloudOS.Bootstrap.exe" --host "%~dp0app\app\host\CloudOS.Host.exe" --root "%~dp0app" --node "%~dp0runtime\node.exe"
