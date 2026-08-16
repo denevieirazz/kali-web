@@ -60,7 +60,7 @@ jobs:
           foreach($script in @('./scripts/test-onboarding-files-ux-contract.ps1','./scripts/start-cloudos-onboarding-files-ux.ps1')) {
             $tokens=$null; $errors=$null
             [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $script),[ref]$tokens,[ref]$errors)
-            if($errors.Count){$errors|ForEach-Object{Write-Error ("$script: " + $_.Message)};exit 1}
+            if($errors.Count){$errors|ForEach-Object{Write-Error ("${script}: " + $_.Message)};exit 1}
           }
       - name: Safety boundary
         shell: pwsh
