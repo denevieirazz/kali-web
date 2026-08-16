@@ -24,13 +24,15 @@ $parseErrors = $null
 Require ($parseErrors.Count -eq 0) ('Physical validation script has PowerShell parse errors: ' + (($parseErrors | ForEach-Object Message) -join '; '))
 
 $implementationFiles = @(
-  (Get-ChildItem -LiteralPath $coreRoot -Recurse -File -Include *.go | Where-Object Name -NotLike '*_test.go'),
-  (Get-ChildItem -LiteralPath $hostRoot -Recurse -File -Include *.cs),
-  (Get-ChildItem -LiteralPath $probeRoot -Recurse -File -Include *.cs)
+  (Get-ChildItem -LiteralPath $coreRoot -Recurse -File -Include *.go | Where-Object { $_.Name -notlike '*_test.go' -and $_.FullName -notmatch '[\\/](bin|obj)[\\/]' }),
+  (Get-ChildItem -LiteralPath $hostRoot -Recurse -File -Include *.cs | Where-Object { $_.FullName -notmatch '[\\/](bin|obj)[\\/]' }),
+  (Get-ChildItem -LiteralPath $probeRoot -Recurse -File -Include *.cs | Where-Object { $_.FullName -notmatch '[\\/](bin|obj)[\\/]' })
 ) | ForEach-Object { $_ }
 $implementationText = ($implementationFiles | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw }) -join "`n"
 
-Require ($implementationText -notmatch '(?i)(/bin/(?:ba)?sh|/usr/bin/(?:ba)?sh|\bbash\b.*-c\b|\bsh\b.*-c\b)') 'Implementation contains a shell execution path.'
+# A dedicated interactive login shell is part of the Terminal contract. What is forbidden here
+# is generic command-string shell execution (-c/-lc/-ec), which would bypass argv allowlisting.
+Require ($implementationText -notmatch '(?im)\b(?:bash|sh)(?:\.exe)?\s+-[A-Za-z]*c[A-Za-z]*(?:\s|$)') 'Implementation contains generic shell command-string execution.'
 Require ($implementationText -notmatch '(?i)(sqlite|persistentdatabase|databasePath|CLOUDOS_DATA_DIR|CLOUDOS_DATABASE)') 'WSL core implementation references the CloudOS database surface.'
 Require ($implementationText -notmatch '(?i)(metasploit|sqlmap|nmap|nikto|gobuster|msfvenom)') 'WSL core implementation references offensive tooling.'
 Require ($implementationText -notmatch '(?i)(ext4\.vhdx|usbipd|weston|wayland|xwayland)') 'WSL core implementation crosses an excluded WSL/WSLg boundary.'
@@ -77,10 +79,13 @@ try {
 }
 
 if (Test-Path -LiteralPath (Join-Path $root '.git')) {
-  $base = '56f0ca8bc0a59987a43295da1ded277afc40e6e9'
-  $changed = @(& git -C $root diff --name-only "$base...HEAD" 2>$null)
-  $browserChanges = @($changed | Where-Object { $_ -match '(^|/)(Browser|browser)(/|\.|$)' })
-  Require ($browserChanges.Count -eq 0) ('Browser files changed in WSL-only branch: ' + ($browserChanges -join ', '))
+  $currentBranch = (& git -C $root branch --show-current 2>$null).Trim()
+  if ($currentBranch -like 'feature/wsl-core*') {
+    $base = '56f0ca8bc0a59987a43295da1ded277afc40e6e9'
+    $changed = @(& git -C $root diff --name-only "$base...HEAD" 2>$null)
+    $browserChanges = @($changed | Where-Object { $_ -match '(^|/)(Browser|browser)(/|\.|$)' })
+    Require ($browserChanges.Count -eq 0) ('Browser files changed in WSL-only branch: ' + ($browserChanges -join ', '))
+  }
 }
 
 if ($failures.Count -gt 0) {

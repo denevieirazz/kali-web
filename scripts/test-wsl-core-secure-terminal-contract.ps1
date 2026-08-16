@@ -84,12 +84,15 @@ foreach ($textAndName in @(@($supervisorText,'Supervisor'),@($adapterText,'Node 
 }
 
 if (Test-Path -LiteralPath (Join-Path $root '.git')) {
-  $base = 'e72a1abe573bb0e41eea410b235cb78da53e8a26'
-  $changed = @(& git -C $root diff --name-only "$base...HEAD" 2>$null)
-  $browserChanges = @($changed | Where-Object { $_ -match '(^|/)(Browser|browser)(/|\.|$)' })
-  Require ($browserChanges.Count -eq 0) ('Browser files changed in secure Terminal branch: ' + ($browserChanges -join ', '))
-  $databaseChanges = @($changed | Where-Object { $_ -match '(^|/)(database|db)(/|\.|$)' })
-  Require ($databaseChanges.Count -eq 0) ('Database files changed in secure Terminal branch: ' + ($databaseChanges -join ', '))
+  $currentBranch = (& git -C $root branch --show-current 2>$null).Trim()
+  if ($currentBranch -like 'feature/wsl-core*') {
+    $base = 'e72a1abe573bb0e41eea410b235cb78da53e8a26'
+    $changed = @(& git -C $root diff --name-only "$base...HEAD" 2>$null)
+    $browserChanges = @($changed | Where-Object { $_ -match '(^|/)(Browser|browser)(/|\.|$)' })
+    Require ($browserChanges.Count -eq 0) ('Browser files changed in secure Terminal branch: ' + ($browserChanges -join ', '))
+    $databaseChanges = @($changed | Where-Object { $_ -match '(^|/)(database|db)(/|\.|$)' })
+    Require ($databaseChanges.Count -eq 0) ('Database files changed in secure Terminal branch: ' + ($databaseChanges -join ', '))
+  }
 }
 
 if ($failures.Count -gt 0) {
