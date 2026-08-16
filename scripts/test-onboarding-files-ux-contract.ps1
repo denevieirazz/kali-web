@@ -52,7 +52,7 @@ foreach ($forbidden in @('localStorage','indexedDB','navigator.storage.getDirect
 }
 
 $thumbnail = Get-Content './frontend/src/apps/CloudOSFiles/thumbnailManager.js' -Raw
-foreach ($required in @('MAX_THUMBNAIL_SOURCE_BYTES','THUMBNAIL_CONCURRENCY','AbortController','URL.revokeObjectURL','thumbnailEligible(file, maxBytes)')) {
+foreach ($required in @('MAX_THUMBNAIL_SOURCE_BYTES','THUMBNAIL_CONCURRENCY','signal?.aborted','URL.revokeObjectURL','thumbnailEligible(file, maxBytes)')) {
   if (-not $thumbnail.Contains($required, [System.StringComparison]::Ordinal)) { throw "Contrato de miniatura ausente: $required" }
 }
 foreach ($forbidden in @('.arrayBuffer(','file.text(')) {
