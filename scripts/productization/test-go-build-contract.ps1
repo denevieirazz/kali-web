@@ -28,7 +28,7 @@ if($build -notmatch [regex]::Escape("`$coreOutput = Join-Path `$paths.Build 'clo
 if($build -notmatch [regex]::Escape("`$env:GOOS='linux'")){throw 'CLOUDOS_CORE_GOOS_NOT_LINUX'}
 if($build -notmatch [regex]::Escape("`$env:GOARCH='amd64'")){throw 'CLOUDOS_CORE_GOARCH_NOT_AMD64'}
 if($build -notmatch [regex]::Escape("`$env:CGO_ENABLED='0'")){throw 'CLOUDOS_CORE_CGO_NOT_DISABLED'}
-if($build -notmatch [regex]::Escape("if (-not `$IsWindows) {`n    Invoke-CloudOSExternal `$go @('test','./...') `$coreRoot")){throw 'CLOUDOS_CORE_LINUX_HOST_TEST_MISSING'}
+if($build -notmatch '(?s)if\s*\(\s*-not\s+\$IsWindows\s*\)\s*\{.*?Invoke-CloudOSExternal\s+\$go\s+@\(''test'',''\.\/\.\.\.'''\)\s+\$coreRoot'){throw 'CLOUDOS_CORE_LINUX_HOST_TEST_MISSING'}
 if($build -notmatch [regex]::Escape("Invoke-CloudOSExternal `$go @('build','-trimpath','-ldflags=-buildid=','-o',`$coreOutput,`$corePackage) `$coreRoot")){throw 'CLOUDOS_CORE_BUILD_COMMAND_CHANGED'}
 if($workflow -notmatch '(?ms)linux-compatible:.*?- name: Go core tests\s+working-directory: core/wsl/cloudos-core\s+run: go test \.\/\.\.\.'){throw 'CLOUDOS_CORE_CI_LINUX_TEST_MISSING'}
 if($workflow -notmatch '(?ms)windows-product:\s+needs:\s+linux-compatible'){throw 'CLOUDOS_CORE_WINDOWS_MUST_DEPEND_ON_LINUX_TESTS'}
