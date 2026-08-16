@@ -16,6 +16,7 @@ import { appsRouter } from './apps/routes.js';
 import { readinessRouter } from './readiness/routes.js';
 import { securityToolsRouter } from './security/routes.js';
 import { filesRouter } from './files/routes.js';
+import { productRouter } from './product/routes.js';
 import { createHostTrustPolicy, hasSupervisorTrust } from './auth/hostTrust.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -123,6 +124,7 @@ export function createApp(initialPort, options = {}) {
   app.use('/api/readiness', readinessRouter);
   app.use('/api/security/tools', securityToolsRouter);
   app.use('/api/files/wsl', filesRouter);
+  app.use('/api/product', productRouter);
 
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', service: 'CloudOS-Unified Backend', instanceId: app._cloudosInstanceId || null, timestamp: new Date().toISOString() });
