@@ -126,7 +126,7 @@ export default function SetupWizard() {
           <div className="setup-content">
             <AnimatePresence mode="wait">
               {unavailable ? (
-                <motion.section key="unavailable" className="setup-step" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                <motion.section key="unavailable" className="setup-step" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                   <span className="setup-kicker">AGENTE INDISPONÍVEL</span>
                   <h1 className="setup-title">Não foi possível verificar a instalação</h1>
                   <p className="setup-description">O CloudOS não vai presumir que o primeiro acesso está livre. Reconecte o agente local para consultar o estado real.</p>
@@ -134,14 +134,14 @@ export default function SetupWizard() {
                   <button className="setup-btn setup-btn-primary inline" onClick={() => checkSetupStatus()}>Tentar novamente</button>
                 </motion.section>
               ) : step === 'welcome' ? (
-                <motion.section key="welcome" className="setup-step" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+                <motion.section key="welcome" className="setup-step" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                   <span className="setup-kicker">PRIMEIRO ACESSO</span>
                   <h1 className="setup-title">Sua conta começa aqui.</h1>
                   <p className="setup-description">Crie a conta administradora do CloudOS e receba um código de recuperação mostrado uma única vez.</p>
                   <ul className="setup-feature-list"><li>Senha armazenada somente como hash no agente</li><li>Sessão autenticada para recursos do computador</li><li>Código rotacionado depois de cada recuperação</li></ul>
                 </motion.section>
               ) : step === 'account' ? (
-                <motion.form key="account" className="setup-form" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} onSubmit={(event) => { event.preventDefault(); goNext(); }}>
+                <motion.form key="account" className="setup-form" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onSubmit={(event) => { event.preventDefault(); goNext(); }}>
                   <span className="setup-kicker">CONTA ADMINISTRADORA</span>
                   <h1 className="setup-title compact">Identifique-se</h1>
                   <label className="setup-field">Nome de exibição<input className="setup-input" value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" maxLength={80} placeholder="Como você quer ser chamado" /></label>
@@ -154,12 +154,12 @@ export default function SetupWizard() {
                   <button type="submit" hidden aria-hidden="true" />
                 </motion.form>
               ) : step === 'theme' ? (
-                <motion.section key="theme" className="setup-step" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+                <motion.section key="theme" className="setup-step" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                   <span className="setup-kicker">APARÊNCIA</span><h1 className="setup-title compact">Escolha uma cor</h1><p className="setup-description">A conta será criada no agente quando você continuar.</p>
                   <div className="setup-themes">{['#6366f1','#f43f5e','#10b981','#f59e0b','#8b5cf6','#06b6d4'].map((color) => <button type="button" aria-label={`Cor ${color}`} key={color} className={`theme-card ${accentColor === color ? 'selected' : ''}`} onClick={() => setAccentColor(color)}><span className="theme-preview" style={{ background: color }} /><span className="theme-name">{color}</span></button>)}</div>
                 </motion.section>
               ) : (
-                <motion.section key="recovery" className="setup-step" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                <motion.section key="recovery" className="setup-step" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                   <span className="setup-kicker">MOSTRADO UMA ÚNICA VEZ</span><h1 className="setup-title compact">Salve seu código de recuperação</h1><p className="setup-description">Guarde-o em um local escolhido por você. O CloudOS não salva esse código automaticamente e não poderá exibi-lo novamente depois desta etapa.</p>
                   <div className="setup-recovery-code"><code>{recoveryCode}</code></div>
                   <div className="setup-recovery-actions" aria-label="Ações para o código de recuperação">
