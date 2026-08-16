@@ -1,12 +1,17 @@
 import { config } from '../config/index.js';
 import { getWslSnapshot, normalizeName } from '../wsl/distroService.js';
 import { verifySessionToken } from '../middleware/auth.js';
+import {
+  createWslCoreTerminalSession,
+  wslCoreTerminalEnabled,
+  wslCoreTerminalFallbackEnabled
+} from './wslCoreAdapter.js';
 
 let pty = null;
 try {
   pty = (await import('node-pty')).default;
 } catch (e) {
-  console.warn('⚠️  node-pty não disponível — terminal usará emulador local.');
+  console.warn('⚠️  node-pty não disponível — terminal legado usará emulador local.');
 }
 
 const WSL_EXE = 'C:\\Windows\\System32\\wsl.exe';
@@ -45,6 +50,10 @@ export function isAllowedWebSocketOrigin(origin, req) {
   }
 }
 
+function sendJson(ws, value) {
+  if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(value));
+}
+
 export function setupTerminalWebSocket(wss) {
   wss.on('connection', async (ws, req) => {
     const origin = req.headers.origin;
@@ -67,24 +76,27 @@ export function setupTerminalWebSocket(wss) {
     }
 
     let ptyProcess = null;
+    let coreSession = null;
+    let backendMode = null;
     let isInitialized = false;
     let isInitializing = false;
+    let cleanupStarted = false;
 
-    if (!pty) {
-      ws.send(JSON.stringify({ type: 'output', data: 'CloudOS Terminal Emulador (node-pty indisponível)\r\n$ ' }));
-      ws.on('message', (msg) => {
-        try {
-          const parsed = JSON.parse(msg.toString());
-          if (parsed.type === 'input') {
-            if (parsed.data === '\r') ws.send(JSON.stringify({ type: 'output', data: '\r\n$ ' }));
-            else ws.send(JSON.stringify({ type: 'output', data: parsed.data }));
-          }
-        } catch (error) {
-          ws.send(JSON.stringify({ type: 'error', data: 'Mensagem inválida.' }));
-        }
-      });
-      return;
-    }
+    const cleanup = async () => {
+      if (cleanupStarted) return;
+      cleanupStarted = true;
+      const activeCore = coreSession;
+      coreSession = null;
+      if (activeCore) {
+        try { await activeCore.close(); }
+        catch (error) { console.warn(`WSL core terminal cleanup falhou: ${error?.code || error?.name || 'Error'}`); }
+      }
+      if (ptyProcess) {
+        try { ptyProcess.kill(); }
+        catch (error) { console.warn(`PTY cleanup falhou: ${error?.name || 'Error'}`); }
+        ptyProcess = null;
+      }
+    };
 
     ws.on('message', async (messageRaw) => {
       try {
@@ -92,13 +104,13 @@ export function setupTerminalWebSocket(wss) {
 
         if (msg.type === 'start') {
           if (isInitialized || isInitializing) {
-            ws.send(JSON.stringify({ type: 'error', data: 'Sessão PTY já inicializada ou em preparação.' }));
+            sendJson(ws, { type: 'error', data: 'Sessão PTY já inicializada ou em preparação.' });
             return;
           }
           isInitializing = true;
 
           if (msg.executable || msg.args || msg.cwd || msg.env || msg.command) {
-            ws.send(JSON.stringify({ type: 'error', data: 'Parâmetros de execução arbitrários são rejeitados.' }));
+            sendJson(ws, { type: 'error', data: 'Parâmetros de execução arbitrários são rejeitados.' });
             ws.close(1008, 'Tentativa de injeção de executável/argumentos');
             isInitializing = false;
             return;
@@ -107,24 +119,70 @@ export function setupTerminalWebSocket(wss) {
           const requestedProfile = (msg.profile || 'wsl').toLowerCase();
           const cols = Math.max(20, Math.min(300, parseInt(msg.cols || 120, 10)));
           const rows = Math.max(5, Math.min(120, parseInt(msg.rows || 32, 10)));
-
-          let spawnExe = POWERSHELL_EXE;
-          let spawnArgs = ['-NoLogo'];
+          let snapshot = null;
+          let targetDistro = null;
 
           if (requestedProfile === 'wsl') {
             const requestedDistro = normalizeName(msg.distribution);
-            const snapshot = await getWslSnapshot();
+            snapshot = await getWslSnapshot();
             const requested = snapshot.distributions.find((distro) => distro.name.toLowerCase() === requestedDistro.toLowerCase());
             const preferred = snapshot.distributions.find((distro) => distro.name === snapshot.preferred);
-            const targetDistro = requested?.name || preferred?.name || snapshot.distributions[0]?.name || null;
+            targetDistro = requested?.name || preferred?.name || snapshot.distributions[0]?.name || null;
+          }
 
-            if (snapshot.operational && targetDistro) {
-              spawnExe = WSL_EXE;
-              spawnArgs = ['-d', targetDistro, '--', '/bin/bash', '-l'];
+          if (requestedProfile === 'wsl' && wslCoreTerminalEnabled(process.env)) {
+            if (!snapshot?.operational || !targetDistro) {
+              if (!wslCoreTerminalFallbackEnabled(process.env)) {
+                sendJson(ws, { type: 'error', data: 'WSL Core indisponível: nenhuma distribuição WSL operacional.' });
+                ws.close(1011, 'WSL Core indisponível');
+                isInitializing = false;
+                return;
+              }
             } else {
-              spawnExe = POWERSHELL_EXE;
-              spawnArgs = ['-NoLogo'];
+              try {
+                coreSession = await createWslCoreTerminalSession({
+                  distribution: targetDistro,
+                  linuxCorePath: process.env.CLOUDOS_WSL_CORE_LINUX_PATH,
+                  cols,
+                  rows,
+                  onOutput: (data) => sendJson(ws, { type: 'output', data }),
+                  onExit: ({ exitCode, signal }) => {
+                    sendJson(ws, { type: 'exit', exitCode, signal });
+                    if (ws.readyState === ws.OPEN) ws.close();
+                  }
+                });
+                backendMode = 'wsl-core-v2';
+                isInitialized = true;
+                isInitializing = false;
+                sendJson(ws, { type: 'backend', mode: backendMode, protocol: coreSession.protocol, protection: coreSession.protection });
+                return;
+              } catch (error) {
+                coreSession = null;
+                if (!wslCoreTerminalFallbackEnabled(process.env)) {
+                  sendJson(ws, { type: 'error', data: `WSL Core falhou (${error?.code || 'CORE_START_FAILED'}).` });
+                  ws.close(1011, 'WSL Core falhou');
+                  isInitializing = false;
+                  return;
+                }
+                sendJson(ws, { type: 'warning', data: `WSL Core indisponível (${error?.code || 'CORE_START_FAILED'}); usando fallback legado explícito.` });
+              }
             }
+          }
+
+          if (!pty) {
+            backendMode = 'emulator';
+            isInitialized = true;
+            isInitializing = false;
+            sendJson(ws, { type: 'backend', mode: backendMode });
+            sendJson(ws, { type: 'output', data: 'CloudOS Terminal Emulador (node-pty indisponível)\r\n$ ' });
+            return;
+          }
+
+          let spawnExe = POWERSHELL_EXE;
+          let spawnArgs = ['-NoLogo'];
+          if (requestedProfile === 'wsl' && snapshot?.operational && targetDistro) {
+            spawnExe = WSL_EXE;
+            spawnArgs = ['-d', targetDistro, '--', '/bin/bash', '-l'];
           }
 
           try {
@@ -135,62 +193,64 @@ export function setupTerminalWebSocket(wss) {
               cwd: process.env.USERPROFILE || 'C:\\',
               env: buildTerminalEnvironment()
             });
+            backendMode = 'legacy-pty';
             isInitialized = true;
           } catch (err) {
-            ws.send(JSON.stringify({ type: 'error', data: 'Falha ao iniciar PTY: ' + err.message }));
-            ws.close(1011, err.message);
+            sendJson(ws, { type: 'error', data: 'Falha ao iniciar PTY legado.' });
+            ws.close(1011, 'Falha ao iniciar PTY');
             isInitializing = false;
             return;
           }
           isInitializing = false;
+          sendJson(ws, { type: 'backend', mode: backendMode });
 
-          ptyProcess.onData((data) => {
-            if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'output', data }));
-          });
-
+          ptyProcess.onData((data) => sendJson(ws, { type: 'output', data }));
           ptyProcess.onExit(({ exitCode, signal }) => {
-            if (ws.readyState === ws.OPEN) {
-              ws.send(JSON.stringify({ type: 'exit', exitCode, signal }));
-              ws.close();
-            }
+            sendJson(ws, { type: 'exit', exitCode, signal });
+            if (ws.readyState === ws.OPEN) ws.close();
           });
           return;
         }
 
-        if (!isInitialized || !ptyProcess) {
-          ws.send(JSON.stringify({ type: 'error', data: 'Envie a mensagem { type: "start" } antes de enviar comandos.' }));
+        if (!isInitialized) {
+          sendJson(ws, { type: 'error', data: 'Envie a mensagem { type: "start" } antes de enviar comandos.' });
           return;
         }
 
         if (msg.type === 'input') {
-          if (typeof msg.data === 'string') ptyProcess.write(msg.data);
+          if (typeof msg.data !== 'string') return;
+          if (backendMode === 'wsl-core-v2' && coreSession) await coreSession.input(msg.data);
+          else if (backendMode === 'legacy-pty' && ptyProcess) ptyProcess.write(msg.data);
+          else if (backendMode === 'emulator') {
+            if (msg.data === '\r') sendJson(ws, { type: 'output', data: '\r\n$ ' });
+            else sendJson(ws, { type: 'output', data: msg.data });
+          }
         } else if (msg.type === 'resize') {
           const cols = Math.max(20, Math.min(300, parseInt(msg.cols || 80, 10)));
           const rows = Math.max(5, Math.min(120, parseInt(msg.rows || 24, 10)));
-          ptyProcess.resize(cols, rows);
-        } else if (msg.type === 'close') {
-          if (ptyProcess) {
-            ptyProcess.kill();
-            ptyProcess = null;
+          if (backendMode === 'wsl-core-v2' && coreSession) await coreSession.resize(cols, rows);
+          else if (backendMode === 'legacy-pty' && ptyProcess) ptyProcess.resize(cols, rows);
+        } else if (msg.type === 'signal') {
+          const signal = String(msg.signal || '').toLowerCase();
+          if (!['interrupt', 'terminate', 'hangup'].includes(signal)) {
+            sendJson(ws, { type: 'error', data: 'Sinal de terminal inválido.' });
+            return;
           }
+          if (backendMode === 'wsl-core-v2' && coreSession) await coreSession.signal(signal);
+          else if (backendMode === 'legacy-pty' && ptyProcess) ptyProcess.kill();
+        } else if (msg.type === 'close') {
+          await cleanup();
           ws.close();
         } else if (msg.type === 'ping') {
-          ws.send(JSON.stringify({ type: 'pong' }));
+          sendJson(ws, { type: 'pong' });
         }
       } catch (err) {
         isInitializing = false;
-        ws.send(JSON.stringify({ type: 'error', data: 'Mensagem inválida: ' + err.message }));
+        sendJson(ws, { type: 'error', data: `Mensagem inválida ou sessão indisponível (${err?.code || 'TERMINAL_ERROR'}).` });
       }
     });
 
-    ws.on('close', () => {
-      if (!ptyProcess) return;
-      try {
-        ptyProcess.kill();
-      } catch (error) {
-        console.warn(`PTY cleanup falhou: ${error?.name || 'Error'}`);
-      }
-      ptyProcess = null;
-    });
+    ws.on('close', () => { void cleanup(); });
+    ws.on('error', () => { void cleanup(); });
   });
 }
