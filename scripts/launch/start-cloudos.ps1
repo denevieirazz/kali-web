@@ -53,7 +53,7 @@ try {
         Push-Location $script:CloudOSRoot
         try {
             & $pre.npm --prefix frontend run build *>> (Join-Path $session.logDirectory 'bootstrap.log')
-            if ($LASTEXITCODE -ne 0) { throw "FRONTEND_BUILD_FAILED:$LASTEXITCODE:log=$(Join-Path $session.logDirectory 'bootstrap.log')" }
+            if ($LASTEXITCODE -ne 0) { throw "FRONTEND_BUILD_FAILED:${LASTEXITCODE}:log=$(Join-Path $session.logDirectory 'bootstrap.log')" }
         } finally { Pop-Location }
 
         $hostErr = Join-Path $session.logDirectory 'host.stderr.log'
@@ -68,7 +68,7 @@ try {
         $host.Refresh()
         if ($host.HasExited) {
             $tail = ((Get-Content -LiteralPath $hostErr -Tail 30 -ErrorAction SilentlyContinue) -join ' | ')
-            throw "HOST_EXITED_EARLY:$($host.ExitCode):log=$hostErr:error=$tail"
+            throw "HOST_EXITED_EARLY:$($host.ExitCode):log=${hostErr}:error=$tail"
         }
         Add-Content -LiteralPath (Join-Path $session.logDirectory 'backend.stdout.log') -Value 'Full mode: backend stream is supervised by CloudOS.Host; native host log is authoritative for this stage.'
         Add-Content -LiteralPath (Join-Path $session.logDirectory 'frontend.stdout.log') -Value 'Full mode: frontend is served from the production build by CloudOS.Host.'
