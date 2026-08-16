@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { classifyPreview } from '../../core/filePreviewPolicy.js';
 import FilePreviewPanel from './FilePreviewPanel';
+import FileVisual from './FileVisual';
 import { formatBytes, type StorageInfo } from './opfsFileService';
 import {
   fileSourceFacade,
@@ -12,27 +13,56 @@ import { sourceLabel, type FileSourceKind } from './fileSourcePolicy';
 import type { FileOperation } from './wslFileSource';
 import './CloudOSFiles.css';
 import './CloudOSFiles.real.css';
+import './CloudOSFiles.visual.css';
 
 type ViewMode = 'files' | 'trash';
 type SortField = 'name' | 'modified' | 'size';
-type DialogType = 'create-file' | 'create-folder' | 'rename' | 'confirm-delete' | 'confirm-empty-trash' | null;
+type LayoutMode = 'grid' | 'list';
+type DialogType = 'create-file' | 'create-folder' | 'rename' | 'confirm-delete' | 'confirm-empty-trash' | 'workspace' | null;
 type DialogState = { type: DialogType; title?: string; message?: string; entry?: CloudFileEntry };
 type EditorState = { name: string; content: string; mode?: number } | null;
-type ActiveOperation = {
-  source: 'windows' | 'wsl';
-  id?: string;
-  status: string;
-  progress: number;
-  message: string;
-};
+type ActiveOperation = { source: 'windows' | 'wsl'; id?: string; status: string; progress: number; message: string };
+type WorkspaceDefinition = { id: string; name: string; description: string; provider: FileSourceKind; root: string[]; quotaBytes: number; createdAt: string };
 
 const MAX_DOWNLOAD_BYTES = 256 * 1024 * 1024;
+const WORKSPACES_KEY = 'cloudos.files.workspaces.v1';
+const delay = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms));
 
 function isTypingTarget(target: EventTarget | null) {
   return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable);
 }
 
-const delay = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms));
+function loadWorkspaces(): WorkspaceDefinition[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(WORKSPACES_KEY) || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(item => item && typeof item.id === 'string' && typeof item.name === 'string' && ['opfs', 'windows', 'wsl'].includes(item.provider));
+  } catch { return []; }
+}
+
+function storageDescription(source: FileSourceKind, runtime: SourceRuntime, storage: StorageInfo | null) {
+  if (source === 'opfs') return {
+    title: 'Armazenamento local do navegador',
+    type: 'OPFS privado do origin',
+    persistence: 'Persiste conforme a política de armazenamento do navegador/WebView',
+    permission: 'Privado do CloudOS; não é um HD nem VHDX',
+    capacity: storage ? `${formatBytes(storage.used)} usados de ${formatBytes(storage.quota)} de quota reportada` : 'Capacidade ainda não estimada',
+  };
+  if (source === 'windows') return {
+    title: 'Pasta Windows autorizada',
+    type: 'File System Access API',
+    persistence: 'Grant mantido somente durante esta sessão do Files',
+    permission: runtime.mounted ? 'Pasta escolhida explicitamente pelo usuário' : 'Sem pasta autorizada nesta sessão',
+    capacity: 'Capacidade física não inferida pelo CloudOS',
+  };
+  return {
+    title: 'Linux Home',
+    type: 'Filesystem POSIX via WSL Core v2',
+    persistence: 'Persiste dentro da distribuição WSL selecionada',
+    permission: runtime.available ? 'Raiz confinada ao Home do usuário do core' : 'Linux Files indisponível',
+    capacity: 'Capacidade física não inferida nesta fase',
+  };
+}
 
 export default function CloudOSFiles() {
   const [source, setSource] = useState<FileSourceKind>('opfs');
@@ -40,6 +70,7 @@ export default function CloudOSFiles() {
   const [entries, setEntries] = useState<CloudFileEntry[]>([]);
   const [currentPath, setCurrentPath] = useState<string[]>([]);
   const [viewMode, setViewMode] = useState<ViewMode>('files');
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>('grid');
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<File | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -53,6 +84,9 @@ export default function CloudOSFiles() {
   const [editor, setEditor] = useState<EditorState>(null);
   const [dialog, setDialog] = useState<DialogState>({ type: null });
   const [dialogInputValue, setDialogInputValue] = useState('');
+  const [workspaceDescription, setWorkspaceDescription] = useState('');
+  const [workspaceQuotaMb, setWorkspaceQuotaMb] = useState('1024');
+  const [workspaces, setWorkspaces] = useState<WorkspaceDefinition[]>(loadWorkspaces);
   const [activeOperation, setActiveOperation] = useState<ActiveOperation | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const directoryGeneration = useRef(0);
@@ -62,16 +96,8 @@ export default function CloudOSFiles() {
 
   useEffect(() => { activeOperationRef.current = activeOperation; }, [activeOperation]);
 
-  const selectedEntry = useMemo(
-    () => entries.find(entry => entry.name === selectedName) ?? null,
-    [entries, selectedName],
-  );
-
-  const refreshRuntime = useCallback(async () => {
-    const next = await fileSourceFacade.runtime(source);
-    setRuntime(next);
-    return next;
-  }, [source]);
+  const selectedEntry = useMemo(() => entries.find(entry => entry.name === selectedName) ?? null, [entries, selectedName]);
+  const storage = useMemo(() => storageDescription(source, runtime, storageInfo), [runtime, source, storageInfo]);
 
   const loadDirectory = useCallback(async () => {
     const generation = ++directoryGeneration.current;
@@ -119,23 +145,26 @@ export default function CloudOSFiles() {
   }, []);
 
   const changeSource = useCallback(async (next: FileSourceKind) => {
-    setErrorMessage('');
-    if (next === 'windows' && !runtime.mounted) {
-      try { await fileSourceFacade.mountWindows(); }
-      catch (error) {
+    if (next === source) return;
+    if (next === 'windows') {
+      try {
+        // Picker must be the first awaited browser API after the user gesture.
+        await fileSourceFacade.mountWindows();
+      } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : 'A seleção da pasta do Windows foi cancelada.');
         return;
       }
     }
     operationController.current?.abort();
     setActiveOperation(null);
+    setErrorMessage('');
     setSource(next);
     setCurrentPath([]);
     setViewMode('files');
     setSelectedName(null);
     setPreviewFile(null);
     setClipboard(null);
-  }, [runtime.mounted]);
+  }, [source]);
 
   const visibleEntries = useMemo(() => {
     const query = searchQuery.trim().toLocaleLowerCase();
@@ -158,15 +187,12 @@ export default function CloudOSFiles() {
     setSelectedName(entry.name);
     const generation = ++previewGeneration.current;
     setPreviewFile(null);
-    if (entry.kind !== 'file' || entry.symlink || viewMode === 'trash' && source !== 'opfs') {
+    if (entry.kind !== 'file' || entry.symlink || (viewMode === 'trash' && source !== 'opfs')) {
       setPreviewLoading(false);
       return;
     }
     const policy = classifyPreview({ name: entry.originalName || entry.name, size: entry.size });
-    if (!policy.allowed) {
-      setPreviewLoading(false);
-      return;
-    }
+    if (!policy.allowed) { setPreviewLoading(false); return; }
     setPreviewLoading(true);
     try {
       const file = await fileSourceFacade.readFile(source, currentPath, entry, policy.limit);
@@ -179,19 +205,13 @@ export default function CloudOSFiles() {
   }, [currentPath, source, viewMode]);
 
   const openEntry = useCallback(async (entry: CloudFileEntry) => {
-    if (entry.kind === 'symlink' || entry.symlink) {
-      await selectEntry(entry);
-      return;
-    }
-    if (entry.kind === 'directory' && viewMode === 'files') {
-      setCurrentPath(path => [...path, entry.name]);
-      return;
-    }
+    if (entry.kind === 'symlink' || entry.symlink) { await selectEntry(entry); return; }
+    if (entry.kind === 'directory' && viewMode === 'files') { setCurrentPath(path => [...path, entry.name]); return; }
     await selectEntry(entry);
   }, [selectEntry, viewMode]);
 
   const downloadEntry = useCallback(async (entry: CloudFileEntry) => {
-    if (entry.kind !== 'file' || entry.symlink || viewMode === 'trash' && source !== 'opfs') return;
+    if (entry.kind !== 'file' || entry.symlink || (viewMode === 'trash' && source !== 'opfs')) return;
     try {
       const file = await fileSourceFacade.readFile(source, currentPath, entry, MAX_DOWNLOAD_BYTES);
       const url = URL.createObjectURL(file);
@@ -201,9 +221,7 @@ export default function CloudOSFiles() {
       anchor.rel = 'noopener';
       anchor.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 0);
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Falha ao preparar a cópia para download.');
-    }
+    } catch (error) { setErrorMessage(error instanceof Error ? error.message : 'Falha ao preparar a cópia para download.'); }
   }, [currentPath, source, viewMode]);
 
   const openEditor = useCallback(async (entry: CloudFileEntry) => {
@@ -212,63 +230,16 @@ export default function CloudOSFiles() {
       if (entry.size > 2 * 1024 * 1024) throw new Error('Arquivo grande demais para o editor rápido.');
       const file = await fileSourceFacade.readFile(source, currentPath, entry, 2 * 1024 * 1024);
       setEditor({ name: entry.name, content: await file.text(), mode: entry.mode });
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Falha ao abrir o editor.');
-    }
+    } catch (error) { setErrorMessage(error instanceof Error ? error.message : 'Falha ao abrir o editor.'); }
   }, [currentPath, source, viewMode]);
 
   const saveEditor = useCallback(async () => {
     if (!editor) return;
     setIsLoading(true);
-    try {
-      await fileSourceFacade.writeText(source, currentPath, editor.name, editor.content, editor.mode);
-      setEditor(null);
-      await loadDirectory();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Falha ao salvar o arquivo.');
-    } finally {
-      setIsLoading(false);
-    }
+    try { await fileSourceFacade.writeText(source, currentPath, editor.name, editor.content, editor.mode); setEditor(null); await loadDirectory(); }
+    catch (error) { setErrorMessage(error instanceof Error ? error.message : 'Falha ao salvar o arquivo.'); }
+    finally { setIsLoading(false); }
   }, [currentPath, editor, loadDirectory, source]);
-
-  const confirmDialog = useCallback(async () => {
-    if (!dialog.type) return;
-    setIsLoading(true);
-    setErrorMessage('');
-    try {
-      if (dialog.type === 'create-file') {
-        await fileSourceFacade.create(source, currentPath, 'file', dialogInputValue);
-      } else if (dialog.type === 'create-folder') {
-        await fileSourceFacade.create(source, currentPath, 'directory', dialogInputValue);
-      } else if (dialog.type === 'rename' && dialog.entry) {
-        await fileSourceFacade.rename(source, currentPath, dialog.entry, dialogInputValue);
-      } else if (dialog.type === 'confirm-delete' && dialog.entry) {
-        if (viewMode === 'trash') await fileSourceFacade.deleteTrash(source, dialog.entry);
-        else await fileSourceFacade.trash(source, currentPath, dialog.entry);
-      } else if (dialog.type === 'confirm-empty-trash') {
-        await fileSourceFacade.emptyTrash(source);
-      }
-      setDialog({ type: null });
-      setDialogInputValue('');
-      await loadDirectory();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Falha ao realizar a operação.');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [currentPath, dialog, dialogInputValue, loadDirectory, source, viewMode]);
-
-  const restoreEntry = useCallback(async (entry: CloudFileEntry) => {
-    setIsLoading(true);
-    try {
-      await fileSourceFacade.restore(source, entry);
-      await loadDirectory();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Falha ao restaurar o item.');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [loadDirectory, source]);
 
   const monitorWslOperation = useCallback(async (operation: FileOperation) => {
     setActiveOperation({ source: 'wsl', id: operation.id, status: operation.status, progress: operation.progress, message: operation.message });
@@ -285,17 +256,15 @@ export default function CloudOSFiles() {
 
   const pasteClipboard = useCallback(async () => {
     if (!clipboard || viewMode !== 'files' || activeOperation) return;
-    setErrorMessage('');
     const controller = new AbortController();
     operationController.current = controller;
+    setErrorMessage('');
     if (source === 'windows') setActiveOperation({ source: 'windows', status: 'running', progress: 0, message: 'Preparando operação Windows...' });
     try {
       const result = await fileSourceFacade.paste(source, clipboard, currentPath, {
         signal: controller.signal,
         onProgress: value => {
-          const progress = value.totalBytes > 0
-            ? Math.round((value.copiedBytes / value.totalBytes) * 100)
-            : Math.round((value.entriesDone / Math.max(1, value.totalEntries)) * 100);
+          const progress = value.totalBytes > 0 ? Math.round((value.copiedBytes / value.totalBytes) * 100) : Math.round((value.entriesDone / Math.max(1, value.totalEntries)) * 100);
           setActiveOperation({ source: 'windows', status: 'running', progress: Math.max(0, Math.min(99, progress)), message: `Copiando ${value.current}...` });
         },
       });
@@ -304,11 +273,10 @@ export default function CloudOSFiles() {
       if (clipboard.action === 'cut' && result.moved) setClipboard(null);
       await loadDirectory();
     } catch (error) {
-      if (controller.signal.aborted) setErrorMessage('Operação cancelada e destino parcial revertido.');
-      else setErrorMessage(error instanceof Error ? error.message : 'Falha ao colar o item.');
+      setErrorMessage(controller.signal.aborted ? 'Operação cancelada e destino parcial revertido.' : error instanceof Error ? error.message : 'Falha ao colar o item.');
     } finally {
       operationController.current = null;
-      window.setTimeout(() => setActiveOperation(current => current?.status === 'completed' ? null : current?.status === 'cancelled' ? null : current), 700);
+      window.setTimeout(() => setActiveOperation(current => current?.status === 'completed' || current?.status === 'cancelled' ? null : current), 700);
     }
   }, [activeOperation, clipboard, currentPath, loadDirectory, monitorWslOperation, source, viewMode]);
 
@@ -324,63 +292,69 @@ export default function CloudOSFiles() {
   }, []);
 
   const handleUpload = useCallback(async (files: FileList | File[]) => {
-    if (source !== 'opfs') {
-      setErrorMessage('Envio direto está temporariamente restrito ao CloudOS local; origens reais usam operações da própria origem nesta etapa.');
-      return;
-    }
+    if (source !== 'opfs') { setErrorMessage('Envio direto continua restrito ao armazenamento local; transferência cross-provider permanece bloqueada.'); return; }
     if (viewMode !== 'files' || files.length === 0) return;
     setIsLoading(true);
-    try {
-      await fileSourceFacade.upload(source, currentPath, Array.from(files));
-      await loadDirectory();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Falha ao enviar arquivos.');
-    } finally {
-      setIsLoading(false);
-      if (uploadInputRef.current) uploadInputRef.current.value = '';
-    }
+    try { await fileSourceFacade.upload(source, currentPath, Array.from(files)); await loadDirectory(); }
+    catch (error) { setErrorMessage(error instanceof Error ? error.message : 'Falha ao enviar arquivos.'); }
+    finally { setIsLoading(false); if (uploadInputRef.current) uploadInputRef.current.value = ''; }
   }, [currentPath, loadDirectory, source, viewMode]);
 
   const requestRename = useCallback((entry: CloudFileEntry) => {
     if (viewMode !== 'files' || entry.symlink || entry.kind === 'symlink') return;
-    setDialogInputValue(entry.name);
-    setDialog({ type: 'rename', title: 'Renomear item', entry });
+    setDialogInputValue(entry.name); setDialog({ type: 'rename', title: 'Renomear item', entry });
   }, [viewMode]);
 
   const requestDelete = useCallback((entry: CloudFileEntry) => {
-    if (entry.symlink || entry.kind === 'symlink') {
-      setErrorMessage('Links simbólicos são somente visíveis nesta etapa; nenhuma operação segue ou altera o link.');
-      return;
-    }
-    setDialog({
-      type: 'confirm-delete',
-      entry,
-      title: viewMode === 'trash' ? 'Excluir permanentemente' : 'Mover para a Lixeira',
-      message: viewMode === 'trash'
-        ? `Apagar definitivamente “${entry.originalName || entry.name}”? Esta ação não pode ser desfeita.`
-        : `Mover “${entry.name}” para a lixeira transacional desta origem?`,
-    });
+    if (entry.symlink || entry.kind === 'symlink') { setErrorMessage('Links simbólicos são somente metadados; o CloudOS não segue nem altera o link.'); return; }
+    setDialog({ type: 'confirm-delete', entry, title: viewMode === 'trash' ? 'Excluir permanentemente' : 'Mover para a Lixeira', message: viewMode === 'trash' ? `Apagar definitivamente “${entry.originalName || entry.name}”?` : `Mover “${entry.name}” para a lixeira transacional desta origem?` });
   }, [viewMode]);
+
+  const restoreEntry = useCallback(async (entry: CloudFileEntry) => {
+    setIsLoading(true);
+    try { await fileSourceFacade.restore(source, entry); await loadDirectory(); }
+    catch (error) { setErrorMessage(error instanceof Error ? error.message : 'Falha ao restaurar o item.'); }
+    finally { setIsLoading(false); }
+  }, [loadDirectory, source]);
+
+  const saveWorkspace = useCallback(() => {
+    const name = dialogInputValue.trim();
+    const quotaMb = Number(workspaceQuotaMb);
+    if (!name) { setErrorMessage('Informe um nome para o workspace.'); return; }
+    if (!Number.isFinite(quotaMb) || quotaMb < 1 || quotaMb > 1024 * 1024) { setErrorMessage('Quota lógica inválida.'); return; }
+    const next: WorkspaceDefinition = { id: crypto.randomUUID(), name, description: workspaceDescription.trim().slice(0, 500), provider: source, root: [...currentPath], quotaBytes: Math.round(quotaMb * 1024 * 1024), createdAt: new Date().toISOString() };
+    const updated = [...workspaces, next].slice(-100);
+    localStorage.setItem(WORKSPACES_KEY, JSON.stringify(updated));
+    setWorkspaces(updated);
+    setDialog({ type: null }); setDialogInputValue(''); setWorkspaceDescription(''); setWorkspaceQuotaMb('1024');
+  }, [currentPath, dialogInputValue, source, workspaceDescription, workspaceQuotaMb, workspaces]);
+
+  const confirmDialog = useCallback(async () => {
+    if (!dialog.type) return;
+    if (dialog.type === 'workspace') { saveWorkspace(); return; }
+    setIsLoading(true); setErrorMessage('');
+    try {
+      if (dialog.type === 'create-file') await fileSourceFacade.create(source, currentPath, 'file', dialogInputValue);
+      else if (dialog.type === 'create-folder') await fileSourceFacade.create(source, currentPath, 'directory', dialogInputValue);
+      else if (dialog.type === 'rename' && dialog.entry) await fileSourceFacade.rename(source, currentPath, dialog.entry, dialogInputValue);
+      else if (dialog.type === 'confirm-delete' && dialog.entry) {
+        if (viewMode === 'trash') await fileSourceFacade.deleteTrash(source, dialog.entry); else await fileSourceFacade.trash(source, currentPath, dialog.entry);
+      } else if (dialog.type === 'confirm-empty-trash') await fileSourceFacade.emptyTrash(source);
+      setDialog({ type: null }); setDialogInputValue(''); await loadDirectory();
+    } catch (error) { setErrorMessage(error instanceof Error ? error.message : 'Falha ao realizar a operação.'); }
+    finally { setIsLoading(false); }
+  }, [currentPath, dialog, dialogInputValue, loadDirectory, saveWorkspace, source, viewMode]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (isTypingTarget(event.target) || editor || dialog.type) return;
-      if (event.key === 'Escape') {
-        setSelectedName(null);
-        setPreviewFile(null);
-      } else if (event.key === 'Delete' && selectedEntry) {
-        event.preventDefault(); requestDelete(selectedEntry);
-      } else if (event.key === 'F2' && selectedEntry && viewMode === 'files') {
-        event.preventDefault(); requestRename(selectedEntry);
-      } else if (event.key === 'Enter' && selectedEntry) {
-        event.preventDefault(); void openEntry(selectedEntry);
-      } else if (event.ctrlKey && event.key.toLowerCase() === 'c' && selectedEntry && viewMode === 'files' && !selectedEntry.symlink) {
-        event.preventDefault(); setClipboard({ entry: selectedEntry, action: 'copy', source, sourcePath: [...currentPath] });
-      } else if (event.ctrlKey && event.key.toLowerCase() === 'x' && selectedEntry && viewMode === 'files' && !selectedEntry.symlink) {
-        event.preventDefault(); setClipboard({ entry: selectedEntry, action: 'cut', source, sourcePath: [...currentPath] });
-      } else if (event.ctrlKey && event.key.toLowerCase() === 'v' && clipboard && viewMode === 'files') {
-        event.preventDefault(); void pasteClipboard();
-      }
+      if (event.key === 'Escape') { setSelectedName(null); setPreviewFile(null); }
+      else if (event.key === 'Delete' && selectedEntry) { event.preventDefault(); requestDelete(selectedEntry); }
+      else if (event.key === 'F2' && selectedEntry && viewMode === 'files') { event.preventDefault(); requestRename(selectedEntry); }
+      else if (event.key === 'Enter' && selectedEntry) { event.preventDefault(); void openEntry(selectedEntry); }
+      else if (event.ctrlKey && event.key.toLowerCase() === 'c' && selectedEntry && viewMode === 'files' && !selectedEntry.symlink) { event.preventDefault(); setClipboard({ entry: selectedEntry, action: 'copy', source, sourcePath: [...currentPath] }); }
+      else if (event.ctrlKey && event.key.toLowerCase() === 'x' && selectedEntry && viewMode === 'files' && !selectedEntry.symlink) { event.preventDefault(); setClipboard({ entry: selectedEntry, action: 'cut', source, sourcePath: [...currentPath] }); }
+      else if (event.ctrlKey && event.key.toLowerCase() === 'v' && clipboard && viewMode === 'files') { event.preventDefault(); void pasteClipboard(); }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -389,168 +363,83 @@ export default function CloudOSFiles() {
   const pathPrefix = source === 'opfs' ? 'local:' : source === 'windows' ? 'win:' : 'linux:';
 
   return (
-    <div className="cf-root" data-files-source={source} data-files-actor="user-ui">
+    <div className="cf-root" data-files-source={source} data-files-actor="user-ui" data-files-layout={layoutMode}>
       <header className="cf-toolbar">
-        <select
-          className="cf-sort-select cf-source-select"
-          value={source}
-          onChange={event => void changeSource(event.target.value as FileSourceKind)}
-          aria-label="Origem dos arquivos"
-        >
-          <option value="opfs">CloudOS local (OPFS)</option>
-          <option value="windows">Windows — selecionar pasta…</option>
-          <option value="wsl">Linux Home (WSL)</option>
+        <select className="cf-sort-select cf-source-select" value={source} onChange={event => void changeSource(event.target.value as FileSourceKind)} aria-label="Origem dos arquivos">
+          <option value="opfs">Armazenamento local do navegador</option>
+          <option value="windows">Pasta Windows autorizada…</option>
+          <option value="wsl">Linux Home</option>
         </select>
         <button className="cf-btn" onClick={() => setCurrentPath(path => path.slice(0, -1))} disabled={!currentPath.length || viewMode === 'trash'} title="Pasta anterior">←</button>
         <button className="cf-btn" onClick={() => void loadDirectory()} title="Atualizar">↻</button>
         <div className="cf-toolbar-divider" />
-
-        {viewMode === 'files' ? (
-          <>
-            <button className="cf-btn primary-btn" disabled={!runtime.mounted} onClick={() => { setDialogInputValue('Novo Documento.txt'); setDialog({ type: 'create-file', title: 'Criar arquivo' }); }}>＋ Arquivo</button>
-            <button className="cf-btn" disabled={!runtime.mounted} onClick={() => { setDialogInputValue('Nova Pasta'); setDialog({ type: 'create-folder', title: 'Criar pasta' }); }}>＋ Pasta</button>
-            <button className="cf-btn" disabled={source !== 'opfs'} onClick={() => uploadInputRef.current?.click()} title={source === 'opfs' ? 'Enviar arquivo ao OPFS' : 'Upload direto para origem real ainda não habilitado'}>↑ Enviar</button>
-            <input ref={uploadInputRef} hidden multiple type="file" onChange={event => event.target.files && void handleUpload(event.target.files)} />
-            {clipboard && <button className="cf-btn paste-btn" disabled={clipboard.source !== source || Boolean(activeOperation)} onClick={() => void pasteClipboard()}>📋 Colar</button>}
-            <button className="cf-btn" disabled={!runtime.mounted} onClick={() => { setViewMode('trash'); setCurrentPath([]); }}>🗑️ Lixeira</button>
-            {source === 'windows' && runtime.mounted && <button className="cf-btn" onClick={() => { fileSourceFacade.unmountWindows(); setSource('opfs'); setCurrentPath([]); setClipboard(null); }}>Desconectar Windows</button>}
-          </>
-        ) : (
-          <>
-            <button className="cf-btn primary-btn" onClick={() => { setViewMode('files'); setCurrentPath([]); }}>📁 Arquivos</button>
-            <button className="cf-btn danger-btn" disabled={!entries.length} onClick={() => setDialog({ type: 'confirm-empty-trash', title: 'Esvaziar Lixeira', message: 'Apagar permanentemente todos os itens da lixeira desta origem?' })}>🗑️ Esvaziar</button>
-          </>
-        )}
-
+        {viewMode === 'files' ? <>
+          <button className="cf-btn primary-btn" disabled={!runtime.mounted} onClick={() => { setDialogInputValue('Novo Documento.txt'); setDialog({ type: 'create-file', title: 'Criar arquivo' }); }}>＋ Arquivo</button>
+          <button className="cf-btn" disabled={!runtime.mounted} onClick={() => { setDialogInputValue('Nova Pasta'); setDialog({ type: 'create-folder', title: 'Criar pasta' }); }}>＋ Pasta</button>
+          <button className="cf-btn" disabled={source !== 'opfs'} onClick={() => uploadInputRef.current?.click()}>↑ Enviar</button>
+          <input ref={uploadInputRef} hidden multiple type="file" onChange={event => event.target.files && void handleUpload(event.target.files)} />
+          {clipboard && <button className="cf-btn paste-btn" disabled={clipboard.source !== source || Boolean(activeOperation)} onClick={() => void pasteClipboard()}>📋 Colar</button>}
+          <button className="cf-btn" disabled={!runtime.mounted} onClick={() => { setViewMode('trash'); setCurrentPath([]); }}>🗑️ Lixeira</button>
+          <button className="cf-btn" onClick={() => { setDialogInputValue('Meu workspace'); setDialog({ type: 'workspace', title: 'Criar workspace' }); }}>Workspace</button>
+          {source === 'windows' && runtime.mounted && <button className="cf-btn" onClick={() => { fileSourceFacade.unmountWindows(); setSource('opfs'); setCurrentPath([]); setClipboard(null); }}>Desconectar Windows</button>}
+        </> : <>
+          <button className="cf-btn primary-btn" onClick={() => { setViewMode('files'); setCurrentPath([]); }}>📁 Arquivos</button>
+          <button className="cf-btn danger-btn" disabled={!entries.length} onClick={() => setDialog({ type: 'confirm-empty-trash', title: 'Esvaziar Lixeira', message: 'Apagar permanentemente todos os itens da lixeira desta origem?' })}>🗑️ Esvaziar</button>
+        </>}
         <nav className="cf-address" aria-label="Caminho">
           <button className={!currentPath.length && viewMode === 'files' ? 'active-breadcrumb' : ''} onClick={() => { setViewMode('files'); setCurrentPath([]); }}>{pathPrefix}</button>
-          {viewMode === 'trash' ? <button className="active-breadcrumb">/ 🗑️ lixeira</button> : currentPath.map((part, index) => (
-            <button key={`${part}-${index}`} className={index === currentPath.length - 1 ? 'active-breadcrumb' : ''} onClick={() => setCurrentPath(currentPath.slice(0, index + 1))}>/ {part}</button>
-          ))}
+          {viewMode === 'trash' ? <button className="active-breadcrumb">/ 🗑️ lixeira</button> : currentPath.map((part, index) => <button key={`${part}-${index}`} className={index === currentPath.length - 1 ? 'active-breadcrumb' : ''} onClick={() => setCurrentPath(currentPath.slice(0, index + 1))}>/ {part}</button>)}
         </nav>
-
         <input className="cf-search" value={searchQuery} onChange={event => setSearchQuery(event.target.value)} placeholder="Pesquisar…" aria-label="Pesquisar arquivos" />
-        <select className="cf-sort-select" value={sortField} onChange={event => setSortField(event.target.value as SortField)} aria-label="Ordenar por">
-          <option value="name">Nome</option><option value="modified">Modificado</option><option value="size">Tamanho</option>
-        </select>
+        <select className="cf-sort-select" value={sortField} onChange={event => setSortField(event.target.value as SortField)} aria-label="Ordenar por"><option value="name">Nome</option><option value="modified">Modificado</option><option value="size">Tamanho</option></select>
+        <div className="cf-view-toggle" aria-label="Modo de visualização"><button className={layoutMode === 'grid' ? 'active' : ''} onClick={() => setLayoutMode('grid')} aria-label="Grade">▦</button><button className={layoutMode === 'list' ? 'active' : ''} onClick={() => setLayoutMode('list')} aria-label="Lista">☷</button></div>
       </header>
 
       {errorMessage && <div className="cf-error" role="alert"><span>⚠️ {errorMessage}</span><button onClick={() => setErrorMessage('')}>×</button></div>}
+      {activeOperation && <div className="cf-real-operation" data-operation-status={activeOperation.status}><div><strong>{activeOperation.message}</strong><span>{activeOperation.progress}%</span></div><progress max={100} value={activeOperation.progress} />{['queued', 'running', 'cancelling'].includes(activeOperation.status) && <button className="cf-btn danger-btn" disabled={activeOperation.status === 'cancelling'} onClick={() => void cancelActiveOperation()}>{activeOperation.status === 'cancelling' ? 'Revertendo…' : 'Cancelar'}</button>}</div>}
 
-      {activeOperation && (
-        <div className="cf-real-operation" data-operation-status={activeOperation.status}>
-          <div><strong>{activeOperation.message}</strong><span>{activeOperation.progress}%</span></div>
-          <progress max={100} value={activeOperation.progress} />
-          {['queued', 'running', 'cancelling'].includes(activeOperation.status) && (
-            <button className="cf-btn danger-btn" disabled={activeOperation.status === 'cancelling'} onClick={() => void cancelActiveOperation()}>{activeOperation.status === 'cancelling' ? 'Revertendo…' : 'Cancelar'}</button>
-          )}
-        </div>
-      )}
-
-      <div className="cf-real-source-strip">
-        <strong>{sourceLabel(source)}</strong>
-        <span>{runtime.detail}</span>
+      <section className="cf-storage-strip" data-storage-provider={source}>
+        <div><small>CloudOS Storage</small><strong>{storage.title}</strong></div>
+        <span><b>Tipo:</b> {storage.type}</span><span><b>Persistência:</b> {storage.persistence}</span><span><b>Permissão:</b> {storage.permission}</span><span><b>Capacidade:</b> {storage.capacity}</span>
         {source === 'windows' && !runtime.mounted && <button className="cf-btn primary-btn" onClick={() => void changeSource('windows')}>Selecionar pasta do Windows</button>}
         {source === 'wsl' && runtime.available && <span className="cf-real-badge">WSL Core v2</span>}
-        {source === 'opfs' && <span className="cf-real-badge">privado do origin</span>}
-      </div>
+      </section>
 
       <div className="cf-workspace">
-        <main
-          className={`cf-content ${isDragging ? 'is-dragging' : ''}`}
-          onDragOver={event => { if (viewMode === 'files' && source === 'opfs') { event.preventDefault(); setIsDragging(true); } }}
-          onDragLeave={() => setIsDragging(false)}
-          onDrop={event => { event.preventDefault(); setIsDragging(false); if (viewMode === 'files' && source === 'opfs' && event.dataTransfer.files.length) void handleUpload(event.dataTransfer.files); }}
-        >
-          {isDragging && <div className="cf-drop-overlay">Solte os arquivos para enviar ao CloudOS local</div>}
-          {isLoading ? (
-            <div className="cf-empty"><div className="cf-spinner" /><span>Processando {sourceLabel(source)}…</span></div>
-          ) : visibleEntries.length ? (
-            <div className="cf-grid" role="list">
+        <main className={`cf-content ${isDragging ? 'is-dragging' : ''}`} onDragOver={event => { if (viewMode === 'files' && source === 'opfs') { event.preventDefault(); setIsDragging(true); } }} onDragLeave={() => setIsDragging(false)} onDrop={event => { event.preventDefault(); setIsDragging(false); if (viewMode === 'files' && source === 'opfs' && event.dataTransfer.files.length) void handleUpload(event.dataTransfer.files); }}>
+          {isDragging && <div className="cf-drop-overlay">Solte os arquivos no armazenamento local do navegador</div>}
+          {isLoading ? <div className="cf-empty"><div className="cf-spinner" /><span>Processando {sourceLabel(source)}…</span></div> : visibleEntries.length ? (
+            <div className={layoutMode === 'grid' ? 'cf-grid cf-grid--visual' : 'cf-list'} role="list" data-files-view={layoutMode}>
               {visibleEntries.map(entry => {
                 const selected = selectedName === entry.name;
                 const symlink = entry.kind === 'symlink' || entry.symlink;
-                return (
-                  <article
-                    key={`${entry.name}-${entry.trashId || ''}`}
-                    className={`cf-item ${selected ? 'selected' : ''} ${symlink ? 'cf-item--symlink' : ''}`}
-                    onClick={() => void selectEntry(entry)}
-                    onDoubleClick={() => void openEntry(entry)}
-                    onKeyDown={event => { if (event.key === 'Enter') void openEntry(entry); }}
-                    role="listitem"
-                    tabIndex={0}
-                    data-file-kind={entry.kind}
-                  >
-                    <div className="cf-icon">{symlink ? '🔗' : entry.kind === 'directory' ? '📁' : '📄'}</div>
-                    <strong className="cf-name" title={entry.originalName || entry.name}>{entry.originalName || entry.name}</strong>
-                    <small className="cf-size">
-                      {symlink ? 'Link não seguido' : entry.kind === 'directory' ? 'Pasta' : formatBytes(entry.size)}
-                      {source === 'wsl' && entry.mode !== undefined ? ` · 0${entry.mode.toString(8)}` : ''}
-                    </small>
-                    <div className="cf-actions">
-                      {viewMode === 'files' ? (
-                        <>
-                          <button onClick={event => { event.stopPropagation(); void openEntry(entry); }}>{symlink ? 'Detalhes' : entry.kind === 'directory' ? 'Abrir' : 'Preview'}</button>
-                          {entry.kind === 'file' && !symlink && <button onClick={event => { event.stopPropagation(); void downloadEntry(entry); }}>Baixar</button>}
-                          <button disabled={Boolean(symlink)} onClick={event => { event.stopPropagation(); setClipboard({ entry, action: 'copy', source, sourcePath: [...currentPath] }); }}>Copiar</button>
-                          <button disabled={Boolean(symlink)} onClick={event => { event.stopPropagation(); setClipboard({ entry, action: 'cut', source, sourcePath: [...currentPath] }); }}>Recortar</button>
-                          <button disabled={Boolean(symlink)} onClick={event => { event.stopPropagation(); requestRename(entry); }}>Renomear</button>
-                          <button disabled={Boolean(symlink)} className="danger" onClick={event => { event.stopPropagation(); requestDelete(entry); }}>Excluir</button>
-                        </>
-                      ) : (
-                        <>
-                          <button className="primary" onClick={event => { event.stopPropagation(); void restoreEntry(entry); }}>Restaurar</button>
-                          {entry.kind === 'file' && source === 'opfs' && <button onClick={event => { event.stopPropagation(); void selectEntry(entry); }}>Preview</button>}
-                          <button className="danger" onClick={event => { event.stopPropagation(); requestDelete(entry); }}>Apagar</button>
-                        </>
-                      )}
-                    </div>
-                  </article>
-                );
+                return <article key={`${entry.name}-${entry.trashId || ''}`} className={`cf-item ${selected ? 'selected' : ''} ${symlink ? 'cf-item--symlink' : ''}`} onClick={() => void selectEntry(entry)} onDoubleClick={() => void openEntry(entry)} onKeyDown={event => { if (event.key === 'Enter') void openEntry(entry); }} role="listitem" tabIndex={0} data-file-kind={entry.kind}>
+                  <FileVisual entry={entry} source={source} path={currentPath} fromTrash={viewMode === 'trash'} compact={layoutMode === 'list'} />
+                  <div className="cf-item-main"><strong className="cf-name" title={entry.originalName || entry.name}>{entry.originalName || entry.name}</strong><small className="cf-size">{symlink ? 'Link não seguido' : entry.kind === 'directory' ? 'Pasta' : formatBytes(entry.size)}{source === 'wsl' && entry.mode !== undefined ? ` · 0${entry.mode.toString(8)}` : ''}</small></div>
+                  <div className="cf-actions">{viewMode === 'files' ? <>
+                    <button onClick={event => { event.stopPropagation(); void openEntry(entry); }}>{symlink ? 'Detalhes' : entry.kind === 'directory' ? 'Abrir' : 'Preview'}</button>
+                    {entry.kind === 'file' && !symlink && <button onClick={event => { event.stopPropagation(); void downloadEntry(entry); }}>Baixar</button>}
+                    <button disabled={Boolean(symlink)} onClick={event => { event.stopPropagation(); setClipboard({ entry, action: 'copy', source, sourcePath: [...currentPath] }); }}>Copiar</button>
+                    <button disabled={Boolean(symlink)} onClick={event => { event.stopPropagation(); setClipboard({ entry, action: 'cut', source, sourcePath: [...currentPath] }); }}>Recortar</button>
+                    <button disabled={Boolean(symlink)} onClick={event => { event.stopPropagation(); requestRename(entry); }}>Renomear</button>
+                    <button disabled={Boolean(symlink)} className="danger" onClick={event => { event.stopPropagation(); requestDelete(entry); }}>Excluir</button>
+                  </> : <><button className="primary" onClick={event => { event.stopPropagation(); void restoreEntry(entry); }}>Restaurar</button>{entry.kind === 'file' && source === 'opfs' && <button onClick={event => { event.stopPropagation(); void selectEntry(entry); }}>Preview</button>}<button className="danger" onClick={event => { event.stopPropagation(); requestDelete(entry); }}>Apagar</button></>}</div>
+                </article>;
               })}
             </div>
-          ) : (
-            <div className="cf-empty"><span>{viewMode === 'trash' ? '🗑️' : source === 'wsl' ? '🐧' : source === 'windows' ? '🪟' : '☁️'}</span><strong>{viewMode === 'trash' ? 'Lixeira vazia' : 'Pasta vazia'}</strong><small>{viewMode === 'trash' ? 'Nenhum item excluído.' : runtime.mounted ? 'Crie ou navegue pelos arquivos desta origem.' : 'Conceda acesso explícito para continuar.'}</small></div>
-          )}
+          ) : <div className="cf-empty"><strong>{viewMode === 'trash' ? 'Lixeira vazia' : 'Pasta vazia'}</strong><small>{runtime.mounted ? 'Nenhum item nesta origem.' : 'Conceda acesso explícito para continuar.'}</small></div>}
         </main>
-
-        <FilePreviewPanel
-          entry={selectedEntry}
-          file={previewFile}
-          loading={previewLoading}
-          onClose={() => { setSelectedName(null); setPreviewFile(null); }}
-          onEdit={() => selectedEntry && void openEditor(selectedEntry)}
-          onDownload={() => selectedEntry && void downloadEntry(selectedEntry)}
-        />
+        <FilePreviewPanel entry={selectedEntry} file={previewFile} loading={previewLoading} onClose={() => { setSelectedName(null); setPreviewFile(null); }} onEdit={() => selectedEntry && void openEditor(selectedEntry)} onDownload={() => selectedEntry && void downloadEntry(selectedEntry)} />
       </div>
 
-      <footer className="cf-status">
-        <span>{visibleEntries.length} item(ns){clipboard ? ` · ${clipboard.action === 'cut' ? 'recortado' : 'copiado'}: ${clipboard.entry.name}` : ''}</span>
-        <span>{source === 'opfs' && storageInfo ? `OPFS ${formatBytes(storageInfo.used)} / ${formatBytes(storageInfo.quota)}` : `${sourceLabel(source)} · ${runtime.mounted ? 'acesso ativo por ação do usuário' : 'sem grant ativo'}`}</span>
-      </footer>
+      <footer className="cf-status"><span>{visibleEntries.length} item(ns){clipboard ? ` · ${clipboard.action === 'cut' ? 'recortado' : 'copiado'}: ${clipboard.entry.name}` : ''}</span><span>{runtime.detail} · {workspaces.filter(item => item.provider === source).length} workspace(s)</span></footer>
 
-      {editor && (
-        <div className="cf-modal" role="dialog" aria-modal="true" aria-labelledby="editor-title">
-          <section className="cf-modal-card">
-            <header className="cf-modal-header"><strong id="editor-title">📝 {editor.name}</strong><button className="cf-modal-close" onClick={() => setEditor(null)}>✕</button></header>
-            <textarea className="cf-modal-textarea" value={editor.content} onChange={event => setEditor({ ...editor, content: event.target.value })} aria-label="Conteúdo do arquivo" />
-            <footer className="cf-modal-footer"><button className="cf-btn" onClick={() => setEditor(null)}>Cancelar</button><button className="cf-btn primary-btn" onClick={() => void saveEditor()}>Salvar alterações</button></footer>
-          </section>
-        </div>
-      )}
+      {editor && <div className="cf-modal" role="dialog" aria-modal="true" aria-labelledby="editor-title"><section className="cf-modal-card"><header className="cf-modal-header"><strong id="editor-title">📝 {editor.name}</strong><button className="cf-modal-close" onClick={() => setEditor(null)}>✕</button></header><textarea className="cf-modal-textarea" value={editor.content} onChange={event => setEditor({ ...editor, content: event.target.value })} aria-label="Conteúdo do arquivo" /><footer className="cf-modal-footer"><button className="cf-btn" onClick={() => setEditor(null)}>Cancelar</button><button className="cf-btn primary-btn" onClick={() => void saveEditor()}>Salvar alterações</button></footer></section></div>}
 
-      {dialog.type && (
-        <div className="cf-modal" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
-          <section className="cf-dialog-box">
-            <h2 className="cf-dialog-title" id="dialog-title">{dialog.title}</h2>
-            {dialog.message && <p className="cf-dialog-message">{dialog.message}</p>}
-            {(dialog.type === 'create-file' || dialog.type === 'create-folder' || dialog.type === 'rename') && (
-              <input className="cf-dialog-input" autoFocus value={dialogInputValue} onChange={event => setDialogInputValue(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') void confirmDialog(); }} />
-            )}
-            <div className="cf-dialog-actions"><button className="cf-btn" onClick={() => { setDialog({ type: null }); setDialogInputValue(''); }}>Cancelar</button><button className={`cf-btn ${dialog.type?.includes('delete') || dialog.type === 'confirm-empty-trash' ? 'danger-btn' : 'primary-btn'}`} onClick={() => void confirmDialog()}>Confirmar</button></div>
-          </section>
-        </div>
-      )}
+      {dialog.type && <div className="cf-modal" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><section className="cf-dialog-box"><h2 className="cf-dialog-title" id="dialog-title">{dialog.title}</h2>{dialog.message && <p className="cf-dialog-message">{dialog.message}</p>}
+        {(dialog.type === 'create-file' || dialog.type === 'create-folder' || dialog.type === 'rename' || dialog.type === 'workspace') && <input className="cf-dialog-input" autoFocus value={dialogInputValue} onChange={event => setDialogInputValue(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && dialog.type !== 'workspace') void confirmDialog(); }} placeholder={dialog.type === 'workspace' ? 'Nome do workspace' : undefined} />}
+        {dialog.type === 'workspace' && <><textarea className="cf-dialog-input" value={workspaceDescription} onChange={event => setWorkspaceDescription(event.target.value)} placeholder="Descrição" /><label>Quota lógica (MiB)<input className="cf-dialog-input" inputMode="numeric" value={workspaceQuotaMb} onChange={event => setWorkspaceQuotaMb(event.target.value)} /></label><p className="cf-dialog-message">Provider: {storage.title}. Raiz: {currentPath.join('/') || '/'}. A quota é lógica e não cria disco físico.</p></>}
+        <div className="cf-dialog-actions"><button className="cf-btn" onClick={() => { setDialog({ type: null }); setDialogInputValue(''); }}>Cancelar</button><button className={`cf-btn ${dialog.type?.includes('delete') || dialog.type === 'confirm-empty-trash' ? 'danger-btn' : 'primary-btn'}`} onClick={() => void confirmDialog()}>Confirmar</button></div></section></div>}
     </div>
   );
 }
