@@ -18,6 +18,11 @@ Require (Test-Path -LiteralPath $hostRoot) 'Windows WSL core client/supervisor i
 Require (Test-Path -LiteralPath $probeRoot) 'Windows/WSL physical probe is missing.'
 Require (Test-Path -LiteralPath $validationScript) 'Physical validation script is missing.'
 
+$tokens = $null
+$parseErrors = $null
+[void][System.Management.Automation.Language.Parser]::ParseFile($validationScript, [ref]$tokens, [ref]$parseErrors)
+Require ($parseErrors.Count -eq 0) ('Physical validation script has PowerShell parse errors: ' + (($parseErrors | ForEach-Object Message) -join '; '))
+
 $implementationFiles = @(
   (Get-ChildItem -LiteralPath $coreRoot -Recurse -File -Include *.go | Where-Object Name -NotLike '*_test.go'),
   (Get-ChildItem -LiteralPath $hostRoot -Recurse -File -Include *.cs),
