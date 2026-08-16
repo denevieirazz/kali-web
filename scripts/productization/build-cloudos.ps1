@@ -50,19 +50,23 @@ Invoke-CloudOSExternal $npx @('--no-install','esbuild','backend/src/server.js','
 Set-Content -LiteralPath (Join-Path $backendBuild 'package.json') -Value '{"type":"module","private":true}' -Encoding utf8
 
 $coreRoot = Join-Path $root 'core/wsl/cloudos-core'
-$coreOutput = Join-Path $paths.Build 'cloudos-core'
-if (-not $IsWindows) {
-    Invoke-CloudOSExternal $go @('test','./...') $coreRoot
-}
+$corePackage = './cmd/cloudos-core'
+$coreOutput = Join-Path $paths.Build 'cloudos-core-linux-amd64'
+Invoke-CloudOSExternal $go @('test','./...') $coreRoot
 $oldGoos=$env:GOOS; $oldGoarch=$env:GOARCH; $oldCgo=$env:CGO_ENABLED
 try {
     $env:GOOS='linux'; $env:GOARCH='amd64'; $env:CGO_ENABLED='0'
-    Invoke-CloudOSExternal $go @('build','-trimpath','-ldflags=-buildid=','-o',$coreOutput,'.') $coreRoot
+    Invoke-CloudOSExternal $go @('build','-trimpath','-ldflags=-buildid=','-o',$coreOutput,$corePackage) $coreRoot
 } finally { $env:GOOS=$oldGoos; $env:GOARCH=$oldGoarch; $env:CGO_ENABLED=$oldCgo }
+if (-not (Test-Path -LiteralPath $coreOutput -PathType Leaf)) { throw 'CLOUDOS_CORE_BUILD_OUTPUT_MISSING' }
+$coreFile = Get-Item -LiteralPath $coreOutput
+if ($coreFile.Length -le 0) { throw 'CLOUDOS_CORE_BUILD_OUTPUT_EMPTY' }
+$coreSha256 = (Get-FileHash -LiteralPath $coreOutput -Algorithm SHA256).Hash.ToLowerInvariant()
 
 $result=[ordered]@{
     schemaVersion=1; head=$sha; version=$config.version; rid=$config.rid; status='built';
-    frontend=(Join-Path $root 'frontend/dist'); backend=$backendBuild; host=$hostPublish; bootstrap=$bootstrapPublish; core=$coreOutput
+    frontend=(Join-Path $root 'frontend/dist'); backend=$backendBuild; host=$hostPublish; bootstrap=$bootstrapPublish;
+    core=$coreOutput; corePackage=$corePackage; coreGoos='linux'; coreGoarch='amd64'; coreSha256=$coreSha256
 }
 Write-CloudOSJson $result (Join-Path $paths.Build 'build-result.json')
-Write-Host "CLOUDOS_PRODUCT_BUILT head=$sha version=$($config.version)"
+Write-Host "CLOUDOS_PRODUCT_BUILT head=$sha version=$($config.version) core=$corePackage sha256=$coreSha256"
