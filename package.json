@@ -18,6 +18,7 @@
     "lint": "npm --prefix backend run lint && npm --prefix frontend run lint",
     "test": "npm --prefix backend test",
     "test:e2e": "node scripts/run-node-tests.js tests/e2e",
+    "test:frontend": "npm --prefix frontend test",
     "test:playwright": "npm run build && playwright test",
     "test:playwright:update": "npm run build && playwright test --update-snapshots",
     "test:browser:webview": "playwright test tests/playwright/native-browser.spec.ts",
