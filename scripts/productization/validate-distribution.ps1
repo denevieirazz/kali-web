@@ -23,7 +23,7 @@ try{
     & (Join-Path $PSScriptRoot 'new-update-fixture.ps1');$fixture=Get-Content -LiteralPath (Join-Path $paths.Artifacts 'update-fixture-result.json') -Raw|ConvertFrom-Json;$package=Get-Content -LiteralPath $packageResultPath -Raw|ConvertFrom-Json
     $installRoot=Join-Path $resultDir 'installed-app';$validationData=Join-Path $resultDir 'validation-data';New-Item -ItemType Directory -Force -Path $validationData|Out-Null;Set-Content -LiteralPath (Join-Path $validationData 'preservation-sentinel.txt') -Value $executionId -Encoding utf8
     $install=Start-Process -FilePath ([string]$package.setup) -ArgumentList @('--silent','--installto',$installRoot,'--log',(Join-Path $resultDir 'install.log')) -PassThru -Wait;if($install.ExitCode -ne 0){throw "PHYSICAL_INSTALL_FAILED:$($install.ExitCode)"};Record 1 'instalar pacote experimental' 'PASS' "installRoot=$installRoot"
-    $launcher=Join-Path $resultDir 'Launch Validation.cmd';@" 
+    $launcher=Join-Path $resultDir 'Launch Validation.cmd';@"
 @echo off
 setlocal
 set "CLOUDOS_LOCAL_ROOT=$validationData"
