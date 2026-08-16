@@ -108,6 +108,12 @@ function compareSemver(left, right) {
 function validateUpdateSource(rawSource, channel, environment = process.env) {
   const source = String(rawSource || '').trim();
   if (!source) return { kind: 'none' };
+  if (path.isAbsolute(source)) {
+    if (channel !== 'development') throw new Error('Fonte local é permitida somente no canal development.');
+    const directory = path.resolve(source);
+    if (!fs.existsSync(directory) || !fs.statSync(directory).isDirectory()) throw new Error('Diretório local de atualização não encontrado.');
+    return { kind: 'directory', base: directory };
+  }
   try {
     const url = new URL(source);
     if (url.username || url.password || url.search || url.hash) throw new Error('Fonte de atualização contém dados não permitidos.');
@@ -119,10 +125,7 @@ function validateUpdateSource(rawSource, channel, environment = process.env) {
     throw new Error('Feeds remotos exigem HTTPS. HTTP só é aceito para fixture loopback de development explicitamente habilitada.');
   } catch (error) {
     if (error instanceof TypeError) {
-      if (channel !== 'development') throw new Error('Fonte local é permitida somente no canal development.');
-      const directory = path.resolve(source);
-      if (!fs.existsSync(directory) || !fs.statSync(directory).isDirectory()) throw new Error('Diretório local de atualização não encontrado.');
-      return { kind: 'directory', base: directory };
+      throw new Error('Fonte de atualização inválida.');
     }
     throw error;
   }
