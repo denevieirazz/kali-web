@@ -27,7 +27,7 @@ test('Windows real access is only created by explicit directory picker and handl
 });
 
 test('frontend file paths are normalized as segments and reject traversal', () => {
-  assert.match(policy, /segment === '\.\.'/);
+  assert.match(policy, /value === '\.\.'/);
   assert.match(policy, /value\.includes\('\/'\)/);
   assert.match(policy, /value\.includes\('\\\\'\)/);
   assert.match(policy, /TextEncoder/);
