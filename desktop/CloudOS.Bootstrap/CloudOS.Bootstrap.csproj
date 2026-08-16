@@ -9,5 +9,16 @@
     <RootNamespace>CloudOS.Bootstrap</RootNamespace>
     <AssemblyName>CloudOS.Bootstrap</AssemblyName>
     <Platforms>AnyCPU;x64;ARM64</Platforms>
+    <StartupObject>CloudOS.Bootstrap.App</StartupObject>
   </PropertyGroup>
+
+  <ItemGroup>
+    <ApplicationDefinition Remove="App.xaml" />
+    <Page Include="App.xaml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Velopack" Version="1.2.0" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4078.44" />
+  </ItemGroup>
 </Project>

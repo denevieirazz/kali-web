@@ -1,5 +1,6 @@
 using System.IO;
 using System.Windows;
+using Velopack;
 
 namespace CloudOS.Bootstrap;
 
@@ -12,6 +13,15 @@ public partial class App : Application
     private BootstrapInstanceGuard? _instanceGuard;
     private BootstrapSupervisor? _supervisor;
     private BootStateStore? _store;
+
+    [STAThread]
+    private static void Main(string[] args)
+    {
+        VelopackApp.Build().Run();
+        var app = new App();
+        app.InitializeComponent();
+        app.Run();
+    }
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -27,8 +37,36 @@ public partial class App : Application
         try
         {
             options = BootstrapOptions.Parse(e.Args);
-            _store = new BootStateStore();
+            var localRoot = DistributionEnvironment.ResolveLocalRoot();
+            _store = new BootStateStore(localRoot);
             _store.AppendLog($"Bootstrap iniciado. host={options.HostPath}");
+
+            if (options.CheckUpdateOnly)
+            {
+                await ShowUpdateCheckAsync(options);
+                Shutdown();
+                return;
+            }
+
+            var requiresPrerequisites = options.ShowPrerequisites ||
+                (!options.SkipPrerequisites && !PrerequisiteStateStore.IsAccepted(localRoot));
+            if (requiresPrerequisites)
+            {
+                var action = await ShowPrerequisitesAsync(options);
+                if (action == PrerequisiteAction.Exit)
+                {
+                    Shutdown();
+                    return;
+                }
+                PrerequisiteStateStore.MarkAccepted(localRoot, action == PrerequisiteAction.Full ? "Full" : "WebOnly");
+                if (action == PrerequisiteAction.WebOnly)
+                {
+                    await RunWebOnlyAsync(options);
+                    Shutdown();
+                    return;
+                }
+            }
+
             await RunLoopAsync(options, _lifetime.Token);
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
@@ -39,7 +77,7 @@ public partial class App : Application
         {
             try
             {
-                _store ??= new BootStateStore();
+                _store ??= new BootStateStore(DistributionEnvironment.ResolveLocalRoot());
             }
             catch (Exception storageError) when (storageError is IOException or UnauthorizedAccessException)
             {
@@ -55,12 +93,48 @@ public partial class App : Application
             var action = ShowRecovery(error.Message);
             if (action == RecoveryAction.Retry)
             {
-                // Parsing/path failures are deterministic; restart the bootstrap so the
-                // caller can correct its allowlisted arguments first.
-                MessageBox.Show("Revise o caminho do CloudOS.Host e inicie o bootstrap novamente.", "CloudOS", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show("Revise os pré-requisitos e inicie o CloudOS novamente.", "CloudOS", MessageBoxButton.OK, MessageBoxImage.Information);
             }
             Shutdown(1);
         }
+    }
+
+    private async Task<PrerequisiteAction> ShowPrerequisitesAsync(BootstrapOptions options)
+    {
+        var report = await PrerequisiteProbe.RunAsync(options, _lifetime.Token);
+        var window = new PrerequisiteWindow(report, token => PrerequisiteProbe.RunAsync(options, token));
+        MainWindow = window;
+        window.ShowDialog();
+        MainWindow = null;
+        return window.SelectedAction;
+    }
+
+    private async Task RunWebOnlyAsync(BootstrapOptions options)
+    {
+        await using var session = new WebOnlySession();
+        var url = await session.StartAsync(options, _lifetime.Token);
+        session.OpenBrowser();
+        var window = new WebOnlySessionWindow(url, session.OpenBrowser);
+        MainWindow = window;
+        window.ShowDialog();
+        MainWindow = null;
+        await session.StopAsync(_lifetime.Token);
+    }
+
+    private async Task ShowUpdateCheckAsync(BootstrapOptions options)
+    {
+        var source = options.UpdateSource ?? Environment.GetEnvironmentVariable("CLOUDOS_UPDATE_SOURCE");
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            MessageBox.Show("Nenhuma fonte de atualização foi configurada.", "CloudOS Atualizações", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        var metadata = ProductMetadata.Load(DistributionEnvironment.ResolvePackageRoot(options));
+        var update = await DistributionUpdateService.CheckAsync(source, options.UpdateChannel, metadata);
+        var message = update is null
+            ? "Nenhuma atualização compatível foi encontrada."
+            : $"Atualização disponível: {update.Version}\nCanal: {update.Channel}\nSHA-256: {update.Sha256}";
+        MessageBox.Show(message, "CloudOS Atualizações", MessageBoxButton.OK, update is null ? MessageBoxImage.Information : MessageBoxImage.None);
     }
 
     private async Task RunLoopAsync(BootstrapOptions options, CancellationToken cancellationToken)
