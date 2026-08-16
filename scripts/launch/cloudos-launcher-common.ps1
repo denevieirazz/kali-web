@@ -320,17 +320,16 @@ if (!configPath) { console.error('CONFIG_PATH_REQUIRED'); process.exit(2); }
 const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 const stdoutFd = fs.openSync(config.stdout, 'a');
 const stderrFd = fs.openSync(config.stderr, 'a');
-const stdinFd = fs.openSync('NUL', 'r');
 let settled = false;
 const child = spawn(config.filePath, config.arguments || [], {
   cwd: config.workingDirectory,
   env: { ...process.env, ...(config.environment || {}) },
   detached: true,
   windowsHide: true,
-  stdio: [stdinFd, stdoutFd, stderrFd]
+  stdio: ['ignore', stdoutFd, stderrFd]
 });
 function closeBootstrapDescriptors() {
-  for (const fd of [stdinFd, stdoutFd, stderrFd]) { try { fs.closeSync(fd); } catch {} }
+  for (const fd of [stdoutFd, stderrFd]) { try { fs.closeSync(fd); } catch {} }
 }
 child.once('error', (error) => {
   if (settled) return;
