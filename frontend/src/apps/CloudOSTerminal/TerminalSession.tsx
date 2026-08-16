@@ -11,6 +11,12 @@ import {
   WSL_CORE_MODE,
   type TerminalTransportStatus,
 } from './terminalSessionTransport.js';
+import {
+  TerminalFrameScheduler,
+  hasUsableTerminalGeometry,
+  sanitizeTerminalLifecycleError,
+  waitForTerminalGeometry,
+} from './terminalVisualLifecycle.js';
 
 export type TerminalPaneStatus = TerminalTransportStatus;
 
@@ -34,6 +40,10 @@ function transportText(status: TerminalPaneStatus, profile: TerminalTabState['pr
   return profile === 'wsl' ? 'Aguardando backend' : 'PowerShell local';
 }
 
+function nextFrame() {
+  return new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+}
+
 export function TerminalSession({
   tab,
   visible,
@@ -44,16 +54,24 @@ export function TerminalSession({
   onStatusChange: (tabId: string, status: TerminalPaneStatus) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
+  const fitSchedulerRef = useRef<TerminalFrameScheduler | null>(null);
   const [restartGeneration, setRestartGeneration] = useState(0);
   const [status, setStatus] = useState<TerminalPaneStatus>(INITIAL_STATUS);
   const [dimensions, setDimensions] = useState({ cols: 100, rows: 28 });
+  const [visualError, setVisualError] = useState('');
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
 
     let disposed = false;
+    let disposeStarted = false;
+    let resizeObserver: ResizeObserver | null = null;
+    let inputSubscription: { dispose(): void } | null = null;
+    let resizeSubscription: { dispose(): void } | null = null;
+    let transport: ReturnType<typeof createTerminalTransport> | null = null;
+    let socket: WebSocket | null = null;
+
     const terminal = new Terminal({
       theme: {
         background: '#090b12',
@@ -70,9 +88,8 @@ export function TerminalSession({
       scrollback: 8000,
     });
     const fitAddon = new FitAddon();
-    fitAddonRef.current = fitAddon;
     terminal.loadAddon(fitAddon);
-    terminal.open(host);
+    setVisualError('');
 
     const publishStatus = (next: TerminalPaneStatus) => {
       if (disposed) return;
@@ -80,79 +97,120 @@ export function TerminalSession({
       onStatusChange(tab.id, next);
     };
 
-    const safeFit = () => {
-      if (disposed || host.clientWidth <= 0 || host.clientHeight <= 0) return;
-      try {
-        fitAddon.fit();
-        setDimensions({ cols: terminal.cols, rows: terminal.rows });
-      } catch {
-        // O layout pode estar transitório durante split/maximize/restore.
-      }
-    };
-
-    const resizeObserver = new ResizeObserver(safeFit);
-    resizeObserver.observe(host);
-    requestAnimationFrame(safeFit);
-
-    const token = getStoredToken();
-    if (!token) {
-      terminal.writeln('\x1b[1;31m[Faça login no CloudOS para abrir um terminal real.]\x1b[0m');
-      publishStatus({ state: 'failed', label: 'Autenticação necessária', mode: null });
-      return () => {
-        disposed = true;
-        resizeObserver.disconnect();
-        fitAddonRef.current = null;
-        terminal.dispose();
-      };
-    }
-
-    publishStatus({ state: 'connecting', label: 'Conectando ao Terminal…', mode: null });
-    const socket = new WebSocket(resolveWebSocketUrl('/ws/terminal'), [token]);
-    const transport = createTerminalTransport({
-      socket,
-      profile: tab.profile,
-      distribution: tab.profile === 'wsl' ? tab.distribution : '',
-      initialCols: terminal.cols || 100,
-      initialRows: terminal.rows || 28,
-      onOutput: data => {
-        if (!disposed) terminal.write(data);
-      },
-      onStatus: publishStatus,
-      onExit: () => {
-        if (!disposed) terminal.writeln('\r\n\x1b[1;33m[Sessão encerrada]\x1b[0m');
-      },
-      onNotice: notice => {
-        if (disposed) return;
-        const color = notice.tone === 'error' ? '31' : '33';
-        terminal.writeln(`\r\n\x1b[1;${color}m[${notice.message}]\x1b[0m`);
-      },
-    });
-
-    const inputSubscription = terminal.onData(data => {
-      transport.input(data);
-    });
-    const resizeSubscription = terminal.onResize(({ cols, rows }) => {
-      setDimensions({ cols, rows });
-      transport.resize(cols, rows);
-    });
-
-    return () => {
+    const disposeOnce = () => {
+      if (disposeStarted) return;
+      disposeStarted = true;
       disposed = true;
-      resizeObserver.disconnect();
-      inputSubscription.dispose();
-      resizeSubscription.dispose();
-      fitAddonRef.current = null;
-      transport.dispose();
-      terminal.dispose();
+      fitSchedulerRef.current?.dispose();
+      fitSchedulerRef.current = null;
+      resizeObserver?.disconnect();
+      resizeObserver = null;
+      inputSubscription?.dispose();
+      resizeSubscription?.dispose();
+      inputSubscription = null;
+      resizeSubscription = null;
+      try { transport?.dispose(); } catch { /* teardown local */ }
+      transport = null;
+      if (socket && socket.readyState < WebSocket.CLOSING) {
+        try { socket.close(1000, 'terminal-dispose'); } catch { /* teardown local */ }
+      }
+      socket = null;
+      try { terminal.dispose(); } catch { /* dispose idempotente no boundary local */ }
     };
+
+    const failVisual = (error: unknown, label = 'Falha visual do Terminal') => {
+      if (disposed) return;
+      const message = sanitizeTerminalLifecycleError(error);
+      setVisualError(message);
+      publishStatus({ state: 'failed', label, mode: null });
+    };
+
+    const initialise = async () => {
+      const geometryReady = await waitForTerminalGeometry(host, { cancelled: () => disposed });
+      if (disposed) return;
+      if (!geometryReady) {
+        failVisual(new Error('A janela do Terminal ainda não possui dimensões utilizáveis.'), 'Layout indisponível');
+        return;
+      }
+
+      try {
+        terminal.open(host);
+      } catch (error) {
+        failVisual(error, 'Renderer indisponível');
+        return;
+      }
+
+      // O renderer/viewport do xterm é criado por open(). Um frame posterior evita
+      // executar FitAddon enquanto as dimensões internas ainda estão indefinidas.
+      await nextFrame();
+      if (disposed || !hasUsableTerminalGeometry(host)) return;
+
+      const fitScheduler = new TerminalFrameScheduler({
+        task: () => {
+          if (disposed || !hasUsableTerminalGeometry(host) || !terminal.element?.isConnected) return;
+          try {
+            fitAddon.fit();
+            if (terminal.cols > 0 && terminal.rows > 0) {
+              setDimensions({ cols: terminal.cols, rows: terminal.rows });
+              setVisualError('');
+            }
+          } catch (error) {
+            // FitAddon pode observar um frame transitório durante minimize/restore.
+            // A exceção fica contida nesta pane e um próximo ResizeObserver tenta de novo.
+            if (!disposed) setVisualError(sanitizeTerminalLifecycleError(error));
+          }
+        },
+      });
+      fitSchedulerRef.current = fitScheduler;
+      resizeObserver = new ResizeObserver(() => fitScheduler.schedule());
+      resizeObserver.observe(host);
+      fitScheduler.schedule();
+
+      const token = getStoredToken();
+      if (!token) {
+        terminal.writeln('\x1b[1;31m[Faça login no CloudOS para abrir um terminal real.]\x1b[0m');
+        publishStatus({ state: 'failed', label: 'Autenticação necessária', mode: null });
+        return;
+      }
+
+      publishStatus({ state: 'connecting', label: 'Conectando ao Terminal…', mode: null });
+      socket = new WebSocket(resolveWebSocketUrl('/ws/terminal'), [token]);
+      transport = createTerminalTransport({
+        socket,
+        profile: tab.profile,
+        distribution: tab.profile === 'wsl' ? tab.distribution : '',
+        initialCols: terminal.cols > 0 ? terminal.cols : 100,
+        initialRows: terminal.rows > 0 ? terminal.rows : 28,
+        onOutput: data => {
+          if (!disposed) terminal.write(data);
+        },
+        onStatus: publishStatus,
+        onExit: () => {
+          if (!disposed) terminal.writeln('\r\n\x1b[1;33m[Sessão encerrada]\x1b[0m');
+        },
+        onNotice: notice => {
+          if (disposed) return;
+          const color = notice.tone === 'error' ? '31' : '33';
+          terminal.writeln(`\r\n\x1b[1;${color}m[${notice.message}]\x1b[0m`);
+        },
+      });
+
+      inputSubscription = terminal.onData(data => {
+        if (!disposed) transport?.input(data);
+      });
+      resizeSubscription = terminal.onResize(({ cols, rows }) => {
+        if (disposed || cols <= 0 || rows <= 0) return;
+        setDimensions({ cols, rows });
+        transport?.resize(cols, rows);
+      });
+    };
+
+    void initialise().catch(error => failVisual(error));
+    return disposeOnce;
   }, [onStatusChange, restartGeneration, tab.distribution, tab.id, tab.profile]);
 
   useEffect(() => {
-    if (!visible) return;
-    const frame = requestAnimationFrame(() => {
-      try { fitAddonRef.current?.fit(); } catch { /* dimensão transitória */ }
-    });
-    return () => cancelAnimationFrame(frame);
+    if (visible) fitSchedulerRef.current?.schedule();
   }, [visible]);
 
   return (
@@ -163,8 +221,14 @@ export function TerminalSession({
       data-distribution={tab.profile === 'wsl' ? tab.distribution : ''}
       data-cols={dimensions.cols}
       data-rows={dimensions.rows}
+      data-terminal-visual-error={visualError ? 'true' : 'false'}
     >
       <div className="terminal-pane__host" ref={hostRef} />
+      {visualError && (
+        <div className="terminal-pane__visual-error" role="status">
+          Layout do Terminal em recuperação. {visualError}
+        </div>
+      )}
       <footer className="terminal-pane__footer" aria-live="polite">
         <div className="terminal-pane__runtime">
           <span>{tab.profile === 'wsl' ? `Linux: ${tab.distribution || 'WSL'}` : 'Sistema: Windows'}</span>
