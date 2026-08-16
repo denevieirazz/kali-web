@@ -2,6 +2,8 @@ export const ACCOUNT_RECOVERY_ENDPOINT = '/api/auth/recovery/reset';
 export const ACCOUNT_LEGACY_RECOVERY_ENDPOINT = '/api/auth/legacy-recovery/reset';
 export const MIN_PASSWORD_LENGTH = 4;
 export const MAX_PASSWORD_LENGTH = 128;
+const RECOVERY_GROUP_LENGTHS = Object.freeze([3, 4, 4, 4, 4, 4, 4, 4, 4]);
+const RECOVERY_PAYLOAD_LENGTH = RECOVERY_GROUP_LENGTHS.reduce((total, length) => total + length, 0);
 
 export function validateUsername(value, { required = true } = {}) {
   const username = typeof value === 'string' ? value.trim() : '';
@@ -27,13 +29,23 @@ export function validateNewPassword(password, confirmPassword) {
   return null;
 }
 
+function formatReadablePayload(payload) {
+  const groups = [];
+  let offset = 0;
+  for (const length of RECOVERY_GROUP_LENGTHS) {
+    groups.push(payload.slice(offset, offset + length));
+    offset += length;
+  }
+  return `CLOUDOS-${groups.join('-')}`;
+}
+
 export function normalizeReadableRecoveryCode(value) {
   const input = typeof value === 'string' ? value.trim() : '';
   if (!input) return '';
   const compact = input.toUpperCase().replace(/[\s-]+/g, '');
-  if (/^CLOUDOS[2-9A-HJ-NP-Z]{16}$/.test(compact)) {
+  if (compact.startsWith('CLOUDOS')) {
     const payload = compact.slice('CLOUDOS'.length);
-    return `CLOUDOS-${payload.slice(0, 4)}-${payload.slice(4, 8)}-${payload.slice(8, 12)}-${payload.slice(12, 16)}`;
+    if (payload.length === RECOVERY_PAYLOAD_LENGTH && /^[2-9A-HJ-NP-Z]{35}$/.test(payload)) return formatReadablePayload(payload);
   }
   return input;
 }
@@ -41,7 +53,7 @@ export function normalizeReadableRecoveryCode(value) {
 export function extractRecoveryCodeFromText(value) {
   const text = typeof value === 'string' ? value : '';
   if (!text.trim()) return '';
-  const readable = text.match(/CLOUDOS(?:[\s-]*[2-9A-HJ-NP-Z]{4}){4}/i);
+  const readable = text.match(/CLOUDOS[\s-]*[2-9A-HJ-NP-Z]{3}(?:[\s-]*[2-9A-HJ-NP-Z]{4}){8}/i);
   if (readable) return normalizeReadableRecoveryCode(readable[0]);
   const legacy = text.match(/CLOUDOS-[A-Za-z0-9_-]{17,121}/);
   return legacy ? legacy[0] : '';
