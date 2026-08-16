@@ -27,7 +27,7 @@ function Get-ComponentSetFromMatches {
  foreach($pattern in $Patterns){
   foreach($match in [regex]::Matches($Text,$pattern)){if($match.Groups.Count -gt 1 -and $match.Groups[1].Value){[void]$set.Add([string]$match.Groups[1].Value)}}
  }
- return $set
+ return ,$set
 }
 function Format-ComponentSet([System.Collections.Generic.HashSet[string]]$Set){return (@($Set)|Sort-Object)-join ','}
 
