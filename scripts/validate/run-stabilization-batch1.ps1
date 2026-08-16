@@ -134,7 +134,7 @@ function Save-WslSnapshot {
 
 function Get-ComponentLogTail {
     param([Parameter(Mandatory)]$Session,[Parameter(Mandatory)][string]$Component)
-    $names=switch -Regex($Component){'^backend'{@('backend.stderr.log','backend.stdout.log')};'^frontend'{@('frontend.stderr.log','frontend.stdout.log')};'^host'{@('host.stderr.log','host.log')};default{@('launcher.log')}}
+    $names=switch -Regex($Component){'^backend'{@('backend.stderr.log','backend.stdout.log')};'^frontend'{@('frontend.stderr.log','frontend.stdout.log')};'^host-runtime$'{@('host.stderr.log','host.log')};default{@('launcher.log')}}
     foreach($name in $names){$path=Join-Path ([string]$Session.logDirectory) $name;if(Test-Path -LiteralPath $path){$tail=(Get-Content -LiteralPath $path -Tail 30 -ErrorAction SilentlyContinue)-join ' | ';if($tail){return [ordered]@{path=$path;tail=$tail}}}}
     return [ordered]@{path=[string]$Session.logDirectory;tail=''}
 }
@@ -201,7 +201,6 @@ function Wait-RunnerSessionReady {
         return
     }
 
-    [void](Assert-RunnerOwnedProcessAlive $Session 'host')
     $hostRuntime=Assert-RunnerOwnedProcessAlive $Session 'host-runtime'
     $backendHosted=Assert-RunnerOwnedProcessAlive $Session 'backend-hosted'
     $hostProcess=Get-Process -Id ([int]$hostRuntime.pid) -ErrorAction SilentlyContinue
