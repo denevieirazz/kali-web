@@ -210,7 +210,7 @@ jobs:
           ./scripts/test-visible-terminal-wsl-core-contract.ps1
 
       - name: Playwright characterization
-        run: npx playwright test --grep-invert "Navegador CloudOS — WebView2 real|Navegador CloudOS — lifecycle Windows" --reporter=list
+        run: npx playwright test --grep-invert "Navegador CloudOS — WebView2 real|Navegador CloudOS — lifecycle Windows" --output="${{ env.CLOUDOS_RESULT_DIR }}\playwright-characterization" --reporter=list
 
       - name: Browser opening lifecycle
         run: npx playwright test tests/playwright/native-browser-lifecycle.spec.ts --output="${{ env.CLOUDOS_RESULT_DIR }}\native-browser-lifecycle" --reporter=list
