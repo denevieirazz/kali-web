@@ -1,0 +1,8 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { LatestRequestGate, LINUX_SYSTEM_CENTER_MAX_ROWS, LINUX_SYSTEM_CENTER_POLL_MS, normalizeLinuxFilters, processMatches, safeSystemCenterError, sortLinuxProcesses } from '../src/apps/TaskManager/linuxSystemCenterModel.js';
+
+test('polling and row limits are conservative',()=>{assert.ok(LINUX_SYSTEM_CENTER_POLL_MS>=2000);assert.ok(LINUX_SYSTEM_CENTER_MAX_ROWS<=100);const f=normalizeLinuxFilters({pageSize:999,query:'x'.repeat(200)});assert.equal(f.pageSize,100);assert.equal(f.query.length,128);});
+test('latest request gate aborts stale request and disposal',()=>{const gate=new LatestRequestGate();const first=gate.next();const second=gate.next();assert.equal(first.signal.aborted,true);assert.equal(first.current(),false);assert.equal(second.current(),true);gate.dispose();assert.equal(second.signal.aborted,true);assert.equal(second.current(),false);});
+test('search filter and ordering do not mix process identity',()=>{const rows=[{pid:2,name:'sleep',user:'alice',uid:1000,state:'S',cpuPercent:1,rssBytes:200,args:['sleep','30']},{pid:1,name:'init',user:'root',uid:0,state:'S',cpuPercent:0,rssBytes:100,args:[]}];assert.equal(processMatches(rows[0],{query:'sleep 30',user:'1000',state:'S'}),true);assert.equal(processMatches(rows[1],{user:'alice'}),false);assert.equal(sortLinuxProcesses(rows,'memory','desc')[0].pid,2);});
+test('errors are bounded and redact obvious sensitive labels',()=>{const msg=safeSystemCenterError(new Error('token=abcdef secret:thing pid=123 port=9999'));assert.ok(msg.length<=240);assert.ok(!msg.includes('abcdef'));});
