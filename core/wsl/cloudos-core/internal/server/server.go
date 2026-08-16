@@ -192,6 +192,9 @@ func (s *Server) handleRequest(owner string, manager *processcore.Manager, write
 	if err := json.Unmarshal(env.Payload, &request); err != nil || request.Method == "" {
 		return false, coded("REQUEST_INVALID")
 	}
+	if handled, err := handleFilesRequest(request.Method, request.Params, writer, env.ID); handled {
+		return false, err
+	}
 	switch request.Method {
 	case "health":
 		return false, writeOK(writer, env.ID, map[string]any{
@@ -324,6 +327,17 @@ func safeMessage(code string) string {
 		"PROCESS_START_FAILED": "process could not be started", "IO_LIMIT": "input exceeds limit",
 		"IO_INVALID": "input is invalid", "SIGNAL_INVALID": "signal is invalid", "WAIT_TIMEOUT": "wait timed out",
 		"METRICS_UNAVAILABLE": "kernel metrics are unavailable",
+		"FILES_ROOT_UNAVAILABLE": "filesystem root is unavailable", "FILES_PATH_INVALID": "filesystem path is invalid",
+		"FILES_PATH_LIMIT": "filesystem path exceeds limit", "FILES_PATH_RESERVED": "filesystem path is reserved",
+		"FILES_SYMLINK_DENIED": "symbolic link traversal is not allowed", "FILES_NOT_FOUND": "filesystem entry was not found",
+		"FILES_PERMISSION_DENIED": "filesystem permission denied", "FILES_TYPE_DENIED": "filesystem entry type is not allowed",
+		"FILES_ALREADY_EXISTS": "filesystem destination already exists", "FILES_READ_FAILED": "filesystem read failed",
+		"FILES_WRITE_FAILED": "filesystem write failed", "FILES_COPY_FAILED": "filesystem copy failed",
+		"FILES_RENAME_FAILED": "filesystem rename failed", "FILES_TRASH_FAILED": "filesystem trash operation failed",
+		"FILES_RESTORE_FAILED": "filesystem restore failed", "FILES_DELETE_FAILED": "filesystem delete failed",
+		"FILES_METADATA_FAILED": "filesystem transaction metadata failed", "FILES_TRASH_UNAVAILABLE": "filesystem trash is unavailable",
+		"FILES_TRASH_ID_INVALID": "filesystem trash id is invalid", "FILES_IO_INVALID": "filesystem data is invalid",
+		"FILES_OFFSET_INVALID": "filesystem offset is invalid", "FILES_CROSS_DEVICE": "filesystem move crosses devices",
 	}
 	if message := messages[code]; message != "" {
 		return message
