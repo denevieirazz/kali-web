@@ -69,6 +69,26 @@ function normalizeEntry(raw: any): WslFileEntry | null {
   };
 }
 
+function normalizeTrashEntry(raw: any): WslFileEntry | null {
+  if (!raw || typeof raw.id !== 'string' || typeof raw.originalName !== 'string') return null;
+  const kind: WslFileEntry['kind'] = raw.kind === 'directory' ? 'directory' : 'file';
+  return {
+    name: typeof raw.storedName === 'string' && raw.storedName ? raw.storedName : raw.id,
+    kind,
+    size: Math.max(0, Number(raw.size) || 0),
+    mode: Number.isSafeInteger(Number(raw.mode)) ? Number(raw.mode) : 0,
+    modified: parseTime(raw.deletedAt),
+    uid: -1,
+    gid: -1,
+    symlink: false,
+    source: 'wsl',
+    trashId: raw.id,
+    originalPath: Array.isArray(raw.originalPath) ? raw.originalPath.map(String) : [],
+    originalName: raw.originalName,
+    deletedAt: parseTime(raw.deletedAt),
+  };
+}
+
 function bytesToBase64(bytes: Uint8Array) {
   let output = '';
   for (let offset = 0; offset < bytes.length; offset += 0x8000) {
@@ -90,7 +110,7 @@ export const wslFileSource = {
   async list(path: string[]): Promise<WslFileEntry[]> {
     const safePath = normalizeFilePath(path);
     const result = await apiClient<{ entries?: unknown[] }>('/api/files/wsl/list', jsonOptions({ path: safePath }));
-    return (result.entries || []).map(normalizeEntry).filter((entry): entry is WslFileEntry => Boolean(entry));
+    return (result.entries || []).map(normalizeEntry).filter((entry): entry is WslFileEntry => entry !== null);
   },
 
   async readFile(path: string[], name: string, maximumBytes: number): Promise<File> {
@@ -149,25 +169,13 @@ export const wslFileSource = {
   trash: (path: string[], name: string) => apiClient('/api/files/wsl/trash', jsonOptions({ confirmed: true, path: appendFilePath(path, name) })),
 
   async listTrash(): Promise<WslFileEntry[]> {
-    const result = await apiClient<{ entries?: any[] }>('/api/files/wsl/trash/list', jsonOptions({}));
-    return (result.entries || []).map(raw => {
-      if (!raw || typeof raw.id !== 'string' || typeof raw.originalName !== 'string') return null;
-      return {
-        name: raw.storedName || raw.id,
-        kind: raw.kind === 'directory' ? 'directory' : 'file',
-        size: Math.max(0, Number(raw.size) || 0),
-        mode: Number(raw.mode) || 0,
-        modified: parseTime(raw.deletedAt),
-        uid: -1,
-        gid: -1,
-        symlink: false,
-        source: 'wsl' as const,
-        trashId: raw.id,
-        originalPath: Array.isArray(raw.originalPath) ? raw.originalPath.map(String) : [],
-        originalName: raw.originalName,
-        deletedAt: parseTime(raw.deletedAt),
-      } satisfies WslFileEntry;
-    }).filter((entry): entry is WslFileEntry => Boolean(entry));
+    const result = await apiClient<{ entries?: unknown[] }>('/api/files/wsl/trash/list', jsonOptions({}));
+    const entries: WslFileEntry[] = [];
+    for (const raw of result.entries || []) {
+      const normalized = normalizeTrashEntry(raw);
+      if (normalized) entries.push(normalized);
+    }
+    return entries;
   },
 
   restoreTrash: (id: string) => apiClient('/api/files/wsl/trash/restore', jsonOptions({ confirmed: true, id })),
