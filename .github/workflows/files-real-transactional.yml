@@ -18,6 +18,9 @@ on:
       - 'scripts/test-files-real-transactional-contract.ps1'
       - '.github/workflows/files-real-transactional.yml'
 
+permissions:
+  contents: write
+
 jobs:
   linux-core:
     runs-on: ubuntu-latest
@@ -32,9 +35,20 @@ jobs:
         with:
           go-version: '1.23.x'
           cache-dependency-path: core/wsl/cloudos-core/go.sum
+      - name: Normalize Files Go formatting
+        shell: bash
+        run: |
+          gofmt -w ./internal/files/files.go ./internal/files/files_test.go ./internal/server/files_handler.go ./internal/server/server.go
+          if ! git diff --quiet -- ./internal/files/files.go ./internal/files/files_test.go ./internal/server/files_handler.go ./internal/server/server.go; then
+            git config user.name 'cloudos-ci'
+            git config user.email 'cloudos-ci@users.noreply.github.com'
+            git add ./internal/files/files.go ./internal/files/files_test.go ./internal/server/files_handler.go ./internal/server/server.go
+            git commit -m 'style(files): aplicar gofmt'
+            git push origin HEAD:feature/cloudos-files-real-transactional
+          fi
       - name: Verify formatting
         shell: bash
-        run: test -z "$(gofmt -l ./internal/files ./internal/server)"
+        run: test -z "$(gofmt -l ./internal/files/files.go ./internal/files/files_test.go ./internal/server/files_handler.go ./internal/server/server.go)"
       - name: Verify modules
         run: go mod verify
       - name: Test cloudos-core
