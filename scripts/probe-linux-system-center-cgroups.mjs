@@ -13,7 +13,9 @@ const password = args.get('password');
 const output = path.resolve(args.get('output') || 'test-results/linux-system-center-cgroups-physical/visible-validation.json');
 const outputDir = path.dirname(output);
 const diagnosticOutput = path.join(outputDir, 'system-center-diagnostic.json');
+const preTimeoutDiagnosticOutput = path.join(outputDir, 'system-center-pretimeout-diagnostic.json');
 const openedScreenshot = path.join(outputDir, 'system-center-opened.png');
+const preTimeoutScreenshot = path.join(outputDir, 'system-center-pretimeout.png');
 const failureScreenshot = path.join(outputDir, 'system-center-failure.png');
 const wslExe = `${process.env.WINDIR || 'C:\\Windows'}\\System32\\wsl.exe`;
 if (!url || !distribution || !corePath || !username || !password) { console.error('LINUX_SYSTEM_CENTER_PROBE_ARGS_INVALID'); process.exit(2); }
@@ -31,7 +33,7 @@ let latestDiagnostic = null;
 
 function safeText(value, limit = 320) {
   return String(value ?? '')
-    .replace(/(?:authorization|password|passwd|secret|token|credential|jwt|nonce)\s*[:=]\s*\S+/gi, '$1=[redacted]')
+    .replace(/((?:authorization|password|passwd|secret|token|credential|jwt|nonce))\s*[:=]\s*\S+/gi, '$1=[redacted]')
     .replace(/[A-Za-z0-9+/]{48,}={0,2}/g, '[redacted]')
     .replace(/[\u0000-\u001f\u007f]/g, ' ')
     .replace(/\s+/g, ' ')
@@ -51,7 +53,7 @@ function collectCoreTree() {
   return [...selected].sort((a,b)=>a-b);
 }
 async function writeReport(value){await fs.mkdir(outputDir,{recursive:true});await fs.writeFile(output,`${JSON.stringify(value,null,2)}\n`);}
-async function writeDiagnostic(value){await fs.mkdir(outputDir,{recursive:true});latestDiagnostic=value;await fs.writeFile(diagnosticOutput,`${JSON.stringify(value,null,2)}\n`);}
+async function writeDiagnostic(value, targetPath = diagnosticOutput){await fs.mkdir(outputDir,{recursive:true});if(targetPath===diagnosticOutput)latestDiagnostic=value;await fs.writeFile(targetPath,`${JSON.stringify(value,null,2)}\n`);}
 async function waitForTerminalOutput(pane, token, timeout=8000){await pane.locator('.xterm-rows').filter({hasText:token}).first().waitFor({state:'visible',timeout});}
 async function typeCommand(currentPage,pane,command,expect){const input=pane.locator('.xterm-helper-textarea');await input.focus();await currentPage.keyboard.type(command);await currentPage.keyboard.press('Enter');if(expect)await waitForTerminalOutput(pane,expect);}
 async function openStartApp(currentPage,name){await currentPage.getByTitle('Iniciar').click();const search=currentPage.locator('.start-search-input');await search.fill(name);const match=currentPage.locator('.start-app-btn').filter({hasText:name}).first();await match.waitFor({state:'visible',timeout:10000});await match.click();}
@@ -132,7 +134,7 @@ async function collectUiSnapshot(currentPage) {
   return { openWindows, systemCenterRootCount: rootCount, centers };
 }
 
-async function captureDiagnostics(currentPage, stage, screenshotPath, error = null) {
+async function captureDiagnostics(currentPage, stage, screenshotPath, error = null, diagnosticPath = diagnosticOutput) {
   const [ui, apiStatus, apiProcesses] = await Promise.all([
     collectUiSnapshot(currentPage),
     safeApiSnapshot(currentPage, '/api/system/linux/status'),
@@ -150,7 +152,7 @@ async function captureDiagnostics(currentPage, stage, screenshotPath, error = nu
     safeApi: { status: apiStatus, processes: apiProcesses },
     browser: { console: [...browserDiagnostics.console], pageErrors: [...browserDiagnostics.pageErrors] },
   };
-  await writeDiagnostic(diagnostic);
+  await writeDiagnostic(diagnostic, diagnosticPath);
   return diagnostic;
 }
 
@@ -170,7 +172,7 @@ async function waitForLinuxReadiness(currentPage, center, timeoutMs = 30000) {
       if (await successText.count() && await successText.first().isVisible().catch(() => false)) return { status: lastStatus, processes: processApi };
     }
     if (!preTimeoutCaptured && Date.now() - started >= Math.max(5000, timeoutMs - 10000)) {
-      await captureDiagnostics(currentPage, 'linux-readiness-pending-before-timeout', failureScreenshot);
+      await captureDiagnostics(currentPage, 'linux-readiness-pending-before-timeout', preTimeoutScreenshot, null, preTimeoutDiagnosticOutput);
       preTimeoutCaptured = true;
     }
     await currentPage.waitForTimeout(750);
@@ -247,9 +249,9 @@ try {
   const centerWindow=center.locator('xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " window ")][1]'); await centerWindow.locator('.window-btn.close').click(); await center.waitFor({state:'detached',timeout:10000}); checks.push('system-center-unmount');
   const terminalWindow=terminal.locator('xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " window ")][1]'); await terminalWindow.locator('.window-btn.close').click(); await terminal.waitFor({state:'detached',timeout:10000}); checks.push('terminal-cleanup-requested');
 
-  await writeReport({passed:true,physicalValidation:true,visibleSystemCenter:true,distribution,mode:'wsl-core-v2',protocol:2,protection:'aes-256-gcm-seq',checks,linuxPidInt,linuxPidTerm,cgroupReadOnlyValidated,cgroupV2Mounted,trackedGuestPids,diagnosticFile:path.basename(diagnosticOutput),openedScreenshot:path.basename(openedScreenshot)});
+  await writeReport({passed:true,physicalValidation:true,visibleSystemCenter:true,distribution,mode:'wsl-core-v2',protocol:2,protection:'aes-256-gcm-seq',checks,linuxPidInt,linuxPidTerm,cgroupReadOnlyValidated,cgroupV2Mounted,trackedGuestPids,diagnosticFile:path.basename(diagnosticOutput),preTimeoutDiagnosticFile:path.basename(preTimeoutDiagnosticOutput),openedScreenshot:path.basename(openedScreenshot),preTimeoutScreenshot:path.basename(preTimeoutScreenshot)});
 } catch(error) {
   if(page)await captureDiagnostics(page,'probe-failed',failureScreenshot,error).catch(()=>{});
-  await writeReport({passed:false,physicalValidation:true,visibleSystemCenter:Boolean(latestDiagnostic?.systemCenterRootCount),distribution,checks,linuxPidInt,linuxPidTerm,cgroupReadOnlyValidated,cgroupV2Mounted,trackedGuestPids,errorCode:safeText(error?.message||error?.name||'LINUX_SYSTEM_CENTER_PROBE_FAILED',180),diagnosticFile:path.basename(diagnosticOutput),failureScreenshot:path.basename(failureScreenshot)});
+  await writeReport({passed:false,physicalValidation:true,visibleSystemCenter:Boolean(latestDiagnostic?.systemCenterRootCount),distribution,checks,linuxPidInt,linuxPidTerm,cgroupReadOnlyValidated,cgroupV2Mounted,trackedGuestPids,errorCode:safeText(error?.message||error?.name||'LINUX_SYSTEM_CENTER_PROBE_FAILED',180),diagnosticFile:path.basename(diagnosticOutput),preTimeoutDiagnosticFile:path.basename(preTimeoutDiagnosticOutput),preTimeoutScreenshot:path.basename(preTimeoutScreenshot),failureScreenshot:path.basename(failureScreenshot)});
   console.error(error?.message||'LINUX_SYSTEM_CENTER_PROBE_FAILED'); process.exitCode=1;
 } finally { await browser?.close().catch(()=>{}); }
