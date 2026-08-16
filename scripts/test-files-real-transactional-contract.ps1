@@ -31,7 +31,8 @@ $required = @(
   'frontend/src/apps/CloudOSFiles/wslFileSource.ts',
   'backend/src/files/routes.js',
   'backend/src/files/wslFilesRpcSession.js',
-  'core/wsl/cloudos-core/internal/files/files.go'
+  'core/wsl/cloudos-core/internal/files/files.go',
+  'scripts/start-cloudos-files-real-transactional.ps1'
 )
 foreach ($file in $required) {
   if (-not (Test-Path $file)) { throw "Arquivo obrigatório ausente: $file" }
@@ -44,7 +45,8 @@ $scanFiles = @(
   './backend/src/files/wslFileTransactions.js',
   './frontend/src/apps/CloudOSFiles/fileSourcePolicy.ts',
   './frontend/src/apps/CloudOSFiles/windowsDirectorySource.ts',
-  './frontend/src/apps/CloudOSFiles/wslFileSource.ts'
+  './frontend/src/apps/CloudOSFiles/wslFileSource.ts',
+  './scripts/start-cloudos-files-real-transactional.ps1'
 )
 $text = ($scanFiles | ForEach-Object { Get-Content $_ -Raw }) -join "`n"
 
@@ -73,6 +75,11 @@ foreach ($requiredText in @('SecureFrameCodec', 'deriveChannelMaterial', 'shell:
 }
 if ($rpc.Contains('createCipheriv', [System.StringComparison]::Ordinal) -or $rpc.Contains('createDecipheriv', [System.StringComparison]::Ordinal)) {
   throw 'Files reimplementou crypto em vez de reutilizar o codec aprovado.'
+}
+
+$launcher = Get-Content './scripts/start-cloudos-files-real-transactional.ps1' -Raw
+foreach ($requiredText in @("CLOUDOS_WSL_CORE_FOUNDATION='1'", "CLOUDOS_WSL_CORE_FILES='1'", 'DATABASE_PATH=(Join-Path $data', 'Remove-CloudOSTemporaryCore', 'Stop-CloudOSOwnedProcess')) {
+  if (-not $launcher.Contains($requiredText, [System.StringComparison]::Ordinal)) { throw "Launcher físico não mantém isolamento esperado: $requiredText" }
 }
 
 Write-Output 'FILES_REAL_TRANSACTIONAL_CONTRACT_OK'
