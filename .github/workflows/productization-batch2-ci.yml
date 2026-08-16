@@ -1,0 +1,133 @@
+name: CloudOS Productization Batch 2 CI
+
+on:
+  push:
+    branches:
+      - productization/cloudos-distribution-batch-2
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-compatible:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact productization branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Node 22.23.2
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+      - name: Setup Go 1.23.x
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+      - name: Install root dependencies once
+        run: npm ci --include=dev
+      - name: Productization static contract
+        shell: pwsh
+        run: ./scripts/productization/test-productization-contract.ps1
+      - name: Lint
+        run: npm run lint
+      - name: Backend regression
+        run: npm test
+        env:
+          NODE_ENV: test
+          CLOUDOS_TEST_ROOT: ${{ runner.temp }}/cloudos-batch2/backend
+          CLOUDOS_DATA_DIR: ${{ runner.temp }}/cloudos-batch2/backend/data
+          DATABASE_PATH: ${{ runner.temp }}/cloudos-batch2/backend/data/cloudos.json
+      - name: E2E regression
+        run: npm run test:e2e
+        env:
+          NODE_ENV: test
+          CLOUDOS_TEST_ROOT: ${{ runner.temp }}/cloudos-batch2/e2e
+          CLOUDOS_DATA_DIR: ${{ runner.temp }}/cloudos-batch2/e2e/data
+          DATABASE_PATH: ${{ runner.temp }}/cloudos-batch2/e2e/data/cloudos.json
+      - name: Frontend regression
+        run: npm run test:frontend
+      - name: Frontend production build
+        run: npm run build
+      - name: Go core tests
+        working-directory: core/wsl/cloudos-core
+        run: go test ./...
+      - name: Backup and restore contract
+        shell: pwsh
+        run: ./scripts/productization/test-backup-restore.ps1
+      - name: Diff check
+        run: git diff --check ffaa9fd302065fbfd7c7123896d19465c1cd3e8a...HEAD
+
+  windows-product:
+    runs-on: windows-2025
+    steps:
+      - name: Checkout exact productization branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Node 22.23.2
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Setup Go 1.23.x
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+      - name: Validate PowerShell 7
+        shell: pwsh
+        run: if($PSVersionTable.PSVersion.Major -lt 7){throw 'PowerShell 7 required'}
+      - name: Productization static contract
+        shell: pwsh
+        run: ./scripts/productization/test-productization-contract.ps1
+      - name: Prepare reproducible toolchain
+        shell: pwsh
+        run: ./scripts/productization/prepare-cloudos.ps1 -AllowDetached
+      - name: Build all product components
+        shell: pwsh
+        env:
+          NODE_ENV: test
+          CLOUDOS_TEST_ROOT: ${{ runner.temp }}\cloudos-batch2\build
+          CLOUDOS_DATA_DIR: ${{ runner.temp }}\cloudos-batch2\build\data
+          DATABASE_PATH: ${{ runner.temp }}\cloudos-batch2\build\data\cloudos.json
+        run: ./scripts/productization/build-cloudos.ps1 -AllowDetached
+      - name: Package portable and installer
+        shell: pwsh
+        run: ./scripts/productization/package-cloudos.ps1 -AllowDetached
+      - name: Validate package layout and supply chain
+        shell: pwsh
+        run: ./scripts/productization/test-package-layout.ps1
+      - name: Backup and restore contract
+        shell: pwsh
+        run: ./scripts/productization/test-backup-restore.ps1
+      - name: Install and uninstall in directory with spaces
+        shell: pwsh
+        run: ./scripts/productization/test-installer.ps1
+      - name: Assert real database was not used
+        shell: pwsh
+        run: |
+          if($env:DATABASE_PATH -and $env:DATABASE_PATH -notlike "$env:RUNNER_TEMP*"){ throw 'REAL_DATABASE_PATH_LEAK' }
+          if(Test-Path "$env:LOCALAPPDATA\CloudOS\data\cloudos.json"){ Write-Host 'Local CloudOS database pre-existed on runner; CI did not target it.' }
+      - name: Diff check
+        shell: pwsh
+        run: git diff --check ffaa9fd302065fbfd7c7123896d19465c1cd3e8a...HEAD
+      - name: Upload unsigned experimental distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudos-productization-batch2-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            artifacts/releases/
+            artifacts/portable/
+            artifacts/manifest.json
+            artifacts/checksums.sha256
+            artifacts/components.json
+            artifacts/licenses/
+            artifacts/SBOM/
+            artifacts/package-result.json
+            artifacts/tooling.json
