@@ -5,19 +5,19 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const runtimeDir = path.resolve(__dirname, '../runtime');
+const runtimeDir = path.resolve(process.env.CLOUDOS_RUNTIME_DIR || path.resolve(__dirname, '../runtime'));
 
 export default defineConfig(() => {
   let backendPort = 18080;
-
   try {
     const bPortFile = path.join(runtimeDir, 'backend-port.json');
     if (fs.existsSync(bPortFile)) {
       const bData = JSON.parse(fs.readFileSync(bPortFile, 'utf-8'));
       if (bData.backendPort) backendPort = bData.backendPort;
     }
-  } catch (e) {}
-
+  } catch {}
+  const configuredFrontendPort = Number.parseInt(process.env.CLOUDOS_FRONTEND_PORT || '15173', 10);
+  const frontendPort = Number.isInteger(configuredFrontendPort) && configuredFrontendPort > 0 ? configuredFrontendPort : 15173;
   return {
     plugins: [
       react(),
@@ -27,16 +27,8 @@ export default defineConfig(() => {
           server.httpServer?.once('listening', () => {
             const addr = server.httpServer?.address();
             if (addr && typeof addr === 'object') {
-              if (!fs.existsSync(runtimeDir)) {
-                fs.mkdirSync(runtimeDir, { recursive: true });
-              }
-              const runtimeData = {
-                host: '127.0.0.1',
-                port: addr.port,
-                url: `http://127.0.0.1:${addr.port}`,
-                startedAt: new Date().toISOString(),
-                pid: process.pid
-              };
+              if (!fs.existsSync(runtimeDir)) fs.mkdirSync(runtimeDir, { recursive: true });
+              const runtimeData = { host: '127.0.0.1', port: addr.port, url: `http://127.0.0.1:${addr.port}`, startedAt: new Date().toISOString(), pid: process.pid };
               const tempFile = path.join(runtimeDir, 'frontend-port.json.tmp');
               const targetFile = path.join(runtimeDir, 'frontend-port.json');
               fs.writeFileSync(tempFile, JSON.stringify(runtimeData, null, 2), 'utf-8');
@@ -47,23 +39,14 @@ export default defineConfig(() => {
         }
       }
     ],
-    define: {
-      __CLOUDOS_BACKEND_PORT__: JSON.stringify(backendPort)
-    },
+    define: { __CLOUDOS_BACKEND_PORT__: JSON.stringify(backendPort) },
     server: {
-      port: 15173,
+      port: frontendPort,
       host: '127.0.0.1',
-      strictPort: false,
+      strictPort: process.env.CLOUDOS_FRONTEND_STRICT_PORT === '1',
       proxy: {
-        '/api': {
-          target: `http://127.0.0.1:${backendPort}`,
-          changeOrigin: false
-        },
-        '/ws': {
-          target: `ws://127.0.0.1:${backendPort}`,
-          ws: true,
-          changeOrigin: false
-        }
+        '/api': { target: `http://127.0.0.1:${backendPort}`, changeOrigin: false },
+        '/ws': { target: `ws://127.0.0.1:${backendPort}`, ws: true, changeOrigin: false }
       }
     }
   };
