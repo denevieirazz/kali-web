@@ -72,6 +72,8 @@ jobs:
         run: |
           node --check scripts/probe-linux-system-center-cgroups.mjs
           node --check scripts/probe-cgroup-control.mjs
+      - name: Physical probe diagnostic contract
+        run: node --test backend/test/linux-system-center-backend.test.js
       - name: Parse PowerShell contracts
         shell: pwsh
         run: |
