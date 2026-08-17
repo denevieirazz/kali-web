@@ -4,13 +4,11 @@ import { addFileToActiveWorkspaceEvidence } from '../../services/workflowWorkspa
 import { openTerminalHere, openTextFileInNotes } from '../../services/workflowLaunch';
 import './FilesWorkflowBridge.css';
 
-type FilesSelection = {
-  provider: WorkflowProvider;
-  path: string[];
+type FilesContext = { provider: WorkflowProvider; path: string[]; inTrash: boolean };
+type FilesSelection = FilesContext & {
   name: string;
   kind: 'file' | 'directory' | 'symlink';
   symlink: boolean;
-  inTrash: boolean;
 };
 
 function parseProvider(root: HTMLElement): WorkflowProvider | null {
@@ -24,24 +22,32 @@ function parsePath(root: HTMLElement) {
   return buttons.slice(1).map(button => (button.textContent || '').trim().replace(/^\/\s*/, '')).filter(Boolean);
 }
 
+function contextFromRoot(root: HTMLElement): FilesContext | null {
+  const provider = parseProvider(root);
+  if (!provider) return null;
+  return {
+    provider,
+    path: parsePath(root),
+    inTrash: /lixeira/i.test(root.querySelector('.cf-address')?.textContent || ''),
+  };
+}
+
 function selectionFromTarget(target: EventTarget | null): FilesSelection | null {
   if (!(target instanceof Element)) return null;
   const item = target.closest<HTMLElement>('.cf-item');
   const root = item?.closest<HTMLElement>('.cf-root');
   if (!item || !root) return null;
-  const provider = parseProvider(root);
-  if (!provider) return null;
+  const context = contextFromRoot(root);
+  if (!context) return null;
   const kindRaw = item.dataset.fileKind;
   const kind = kindRaw === 'directory' || kindRaw === 'symlink' ? kindRaw : 'file';
   const name = item.querySelector<HTMLElement>('.cf-name')?.textContent?.trim() || '';
   if (!name) return null;
   return {
-    provider,
-    path: parsePath(root),
+    ...context,
     name,
     kind,
     symlink: kind === 'symlink' || item.classList.contains('cf-item--symlink'),
-    inTrash: /lixeira/i.test(root.querySelector('.cf-address')?.textContent || ''),
   };
 }
 
@@ -57,17 +63,36 @@ function trashText(provider: WorkflowProvider) {
   return 'Lixeira transacional do OPFS privado do CloudOS, com restauração suportada pelo provider.';
 }
 
+function visibleFilesRoot() {
+  const roots = Array.from(document.querySelectorAll<HTMLElement>('.cf-root[data-files-source]'));
+  return [...roots].reverse().find(root => root.getClientRects().length > 0) || roots.at(-1) || null;
+}
+
 export default function FilesWorkflowBridge() {
+  const [context, setContext] = useState<FilesContext | null>(null);
   const [selection, setSelection] = useState<FilesSelection | null>(null);
   const [message, setMessage] = useState('');
 
   useEffect(() => {
+    const syncContext = (preferred?: HTMLElement | null) => {
+      const root = preferred || visibleFilesRoot();
+      const next = root ? contextFromRoot(root) : null;
+      setContext(current => current?.provider === next?.provider && current?.inTrash === next?.inTrash && JSON.stringify(current?.path || []) === JSON.stringify(next?.path || []) ? current : next);
+      if (!next) setSelection(null);
+    };
+    syncContext();
+    const observer = new MutationObserver(() => syncContext());
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-files-source'] });
+
     const onClick = (event: MouseEvent) => {
+      const element = event.target instanceof Element ? event.target : null;
+      const root = element?.closest<HTMLElement>('.cf-root');
+      if (root) syncContext(root);
       const next = selectionFromTarget(event.target);
       if (next) {
         setSelection(next);
         setMessage('');
-      } else if (event.target instanceof Element && !event.target.closest('.wf-files-bridge') && !event.target.closest('.cf-root')) {
+      } else if (element && !element.closest('.wf-files-bridge') && !root) {
         setSelection(null);
       }
     };
@@ -88,20 +113,22 @@ export default function FilesWorkflowBridge() {
     document.addEventListener('click', onClick, true);
     document.addEventListener('dblclick', onDoubleClick, true);
     return () => {
+      observer.disconnect();
       document.removeEventListener('click', onClick, true);
       document.removeEventListener('dblclick', onDoubleClick, true);
     };
   }, []);
 
+  const activeContext = selection || context;
   const openMode = useMemo(() => selection ? workflowFileOpenMode(selection.name, selection.kind, selection.symlink) : 'info', [selection]);
-  const terminal = useMemo(() => selection ? terminalHereCapability(selection.provider) : null, [selection]);
+  const terminal = useMemo(() => activeContext ? terminalHereCapability(activeContext.provider) : null, [activeContext]);
 
   const openTerminal = useCallback(() => {
-    if (!selection) return;
-    const path = selection.kind === 'directory' && !selection.symlink ? [...selection.path, selection.name] : selection.path;
-    try { openTerminalHere(selection.provider, path); }
+    if (!activeContext) return;
+    const path = selection?.kind === 'directory' && !selection.symlink ? [...selection.path, selection.name] : activeContext.path;
+    try { openTerminalHere(activeContext.provider, path); }
     catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Terminal indisponível nesta origem.'); }
-  }, [selection]);
+  }, [activeContext, selection]);
 
   const openNotes = useCallback(() => {
     if (!selection || openMode !== 'notes' || selection.inTrash) return;
@@ -119,18 +146,19 @@ export default function FilesWorkflowBridge() {
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Falha ao adicionar à Evidence.'); }
   }, [selection]);
 
-  if (!selection) return null;
+  if (!activeContext) return null;
 
-  return <aside className="wf-files-bridge" aria-label="Ações rápidas do Files">
+  const contextName = selection?.name || (activeContext.inTrash ? 'Lixeira' : activeContext.path.at(-1) || 'Raiz');
+  return <aside className="wf-files-bridge" aria-label="Contexto e ações rápidas do Files">
     <div className="wf-files-context">
-      <span className="wf-files-origin">{originLabel(selection.provider)}</span>
-      <div><strong>{selection.name}</strong><small>{selection.path.length ? `/${selection.path.join('/')}` : '/'} · {selection.inTrash ? 'Lixeira' : openMode === 'notes' ? 'Notes' : openMode === 'viewer' ? 'Viewer' : selection.kind === 'directory' ? 'Pasta' : 'Informações'}</small></div>
-      <button onClick={() => setSelection(null)} aria-label="Fechar ações rápidas">×</button>
+      <span className="wf-files-origin">{originLabel(activeContext.provider)}</span>
+      <div><strong>{contextName}</strong><small>{activeContext.path.length ? `/${activeContext.path.join('/')}` : '/'} · {activeContext.inTrash ? 'Lixeira' : selection ? openMode === 'notes' ? 'Notes' : openMode === 'viewer' ? 'Viewer' : selection.kind === 'directory' ? 'Pasta' : 'Informações' : 'Origem ativa'}</small></div>
+      {selection ? <button onClick={() => setSelection(null)} aria-label="Limpar seleção contextual">×</button> : <span />}
     </div>
-    {selection.inTrash ? <p className="wf-files-trash-note"><strong>{originLabel(selection.provider)}:</strong> {trashText(selection.provider)}</p> : <div className="wf-files-actions">
+    {activeContext.inTrash ? <p className="wf-files-trash-note"><strong>{originLabel(activeContext.provider)}:</strong> {trashText(activeContext.provider)}</p> : <div className="wf-files-actions">
       <button disabled={!terminal?.supported} title={terminal?.reason} onClick={openTerminal}>Abrir no Terminal</button>
-      <button disabled={openMode !== 'notes'} title={openMode !== 'notes' ? 'Apenas txt, md, json e log abrem no Notes.' : ''} onClick={openNotes}>Abrir em Notes</button>
-      <button disabled={selection.kind !== 'file' || selection.symlink} onClick={() => void addEvidence()}>Adicionar à Evidence</button>
+      <button disabled={!selection || openMode !== 'notes'} title={!selection || openMode !== 'notes' ? 'Selecione txt, md, json ou log para abrir no Notes.' : ''} onClick={openNotes}>Abrir em Notes</button>
+      <button disabled={!selection || selection.kind !== 'file' || selection.symlink} onClick={() => void addEvidence()}>Adicionar à Evidence</button>
     </div>}
     {message && <p className="wf-files-message">{message}</p>}
   </aside>;
