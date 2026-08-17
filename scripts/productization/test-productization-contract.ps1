@@ -1,6 +1,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+. (Join-Path $PSScriptRoot 'common.ps1')
 $config=Get-Content -LiteralPath (Join-Path $root 'productization\cloudos-product.json') -Raw | ConvertFrom-Json
 if($config.baseSha -ne 'ffaa9fd302065fbfd7c7123896d19465c1cd3e8a'){throw 'PRODUCTIZATION_BASE_CONTRACT_CHANGED'}
 if($config.officialBaseSha -ne '2d3380ba562d23e05947f81cc9581e8fe9bcfdbc'){throw 'OFFICIAL_BASE_CONTRACT_CHANGED'}
@@ -40,6 +41,19 @@ foreach($entry in $packageAssertions.GetEnumerator()){
 }
 $workflowPath=Join-Path $root '.github\workflows\productization-batch2-ci.yml'
 if(Test-Path -LiteralPath $workflowPath){$workflow=Get-Content -LiteralPath $workflowPath -Raw;if($workflow -match 'release(s)?\s*:\s*write|gh\s+release|create-release|softprops/action-gh-release'){throw 'REAL_RELEASE_PUBLICATION_FORBIDDEN'}}
-Push-Location $root
-try{& git merge-base --is-ancestor $config.baseSha HEAD;if($LASTEXITCODE -ne 0){throw 'BATCH1_BASE_NOT_ANCESTOR'};& git merge-base --is-ancestor $config.officialBaseSha HEAD;if($LASTEXITCODE -ne 0){throw 'OFFICIAL_BASE_NOT_ANCESTOR'}}finally{Pop-Location}
+
+$git=Get-CloudOSCommandName 'git'
+$global:LASTEXITCODE=0
+$gitVersion=Invoke-CloudOSExternal $git @('--version') $root -Capture
+if($gitVersion.ExitCode -ne 0 -or $gitVersion.Output -notmatch '^git version '){throw 'EXTERNAL_COMMAND_SUCCESS_CONTRACT_FAILED'}
+$missingRef='refs/heads/__cloudos_productization_contract_missing__'
+$global:LASTEXITCODE=0
+$gitFailure=Invoke-CloudOSExternal $git @('show-ref','--verify','--quiet',$missingRef) $root -Capture -AllowFailure
+if($gitFailure.ExitCode -eq 0){throw 'EXTERNAL_COMMAND_FAILURE_CONTRACT_FAILED'}
+if([int]$global:LASTEXITCODE -ne [int]$gitFailure.ExitCode){throw 'EXTERNAL_COMMAND_EXITCODE_NOT_STABLE'}
+
+$baseCheck=Invoke-CloudOSExternal $git @('merge-base','--is-ancestor',[string]$config.baseSha,'HEAD') $root -Capture -AllowFailure
+if($baseCheck.ExitCode -ne 0){throw 'BATCH1_BASE_NOT_ANCESTOR'}
+$officialCheck=Invoke-CloudOSExternal $git @('merge-base','--is-ancestor',[string]$config.officialBaseSha,'HEAD') $root -Capture -AllowFailure
+if($officialCheck.ExitCode -ne 0){throw 'OFFICIAL_BASE_NOT_ANCESTOR'}
 Write-Host 'PRODUCTIZATION_CONTRACT_OK'
