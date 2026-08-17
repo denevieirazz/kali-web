@@ -9,8 +9,7 @@ $root=Join-Path ([IO.Path]::GetTempPath()) "CloudOS Update Test $([Guid]::NewGui
 New-Item -ItemType Directory -Force -Path $root,$data|Out-Null;Set-Content -LiteralPath (Join-Path $data 'sentinel.txt') -Value 'preserve-through-update' -Encoding utf8
 function Invoke-UpdateExe([string]$Package){
     $updateExe=Join-Path $install 'Update.exe';if(-not(Test-Path -LiteralPath $updateExe)){throw 'UPDATE_EXE_MISSING'}
-    $p=Start-Process -FilePath $updateExe -ArgumentList @('apply','--package',$Package,'--norestart') -PassThru -Wait
-    if($p.ExitCode -ne 0){throw "UPDATE_EXE_APPLY_FAILED:$($p.ExitCode):$Package"}
+    Invoke-CloudOSExternal $updateExe @('apply','--package',$Package,'--norestart') $install | Out-Null
 }
 function Assert-Version([string]$Expected){
     $productPath=Join-Path $install 'current\meta\product.json';if(-not(Test-Path -LiteralPath $productPath)){throw 'INSTALLED_PRODUCT_METADATA_MISSING'}
@@ -23,13 +22,17 @@ function Assert-PrerequisiteWindow{
     try{$deadline=[DateTime]::UtcNow.AddSeconds(25);$visible=$false;while([DateTime]::UtcNow -lt $deadline -and -not $p.HasExited){$p.Refresh();if($p.MainWindowHandle -ne 0){$visible=$true;break};Start-Sleep -Milliseconds 150};if(-not $visible){throw 'UPDATED_PREREQUISITE_WINDOW_NOT_VISIBLE'};[void]$p.CloseMainWindow();if(-not $p.WaitForExit(10000)){$p.Refresh();if($p.StartTime.ToUniversalTime().Ticks -ne $expectedStart -or [IO.Path]::GetFullPath($p.MainModule.FileName) -ne [IO.Path]::GetFullPath($exe)){throw 'UPDATED_BOOTSTRAP_OWNERSHIP_LOST'};$p.Kill($false);$p.WaitForExit()}}finally{$p.Dispose()}
 }
 try{
-    $setup=Start-Process -FilePath ([string]$package.setup) -ArgumentList @('--silent','--installto',$install) -PassThru -Wait;if($setup.ExitCode -ne 0){throw "UPDATE_TEST_INSTALL_FAILED:$($setup.ExitCode)"}
+    Invoke-CloudOSExternal ([string]$package.setup) @('--silent','--installto',$install) $root | Out-Null
     Assert-Version ([string]$fixture.currentVersion)
     Invoke-UpdateExe ([string]$fixture.nextFullPackage);Assert-Version ([string]$fixture.nextVersion);Assert-PrerequisiteWindow
     & (Join-Path $PSScriptRoot 'test-packaged-node-runtime.ps1') -Staging (Join-Path $install 'current')
+    if($LASTEXITCODE -ne 0){throw "UPDATED_PACKAGED_NODE_HEALTH_FAILED:$LASTEXITCODE"}
     Invoke-UpdateExe ([string]$fixture.currentFullPackage);Assert-Version ([string]$fixture.currentVersion);Assert-PrerequisiteWindow
     if((Get-Content -LiteralPath (Join-Path $data 'sentinel.txt') -Raw).Trim() -ne 'preserve-through-update'){throw 'UPDATE_OR_ROLLBACK_REMOVED_DATA'}
-    $un=Start-Process -FilePath (Join-Path $install 'Update.exe') -ArgumentList @('uninstall','--silent') -PassThru -Wait;if($un.ExitCode -ne 0){throw "UPDATE_TEST_UNINSTALL_FAILED:$($un.ExitCode)"}
+    Invoke-CloudOSExternal (Join-Path $install 'Update.exe') @('uninstall','--silent') $install | Out-Null
     if(-not(Test-Path -LiteralPath (Join-Path $data 'sentinel.txt'))){throw 'UPDATE_TEST_UNINSTALL_REMOVED_DATA'}
     Write-Host 'PRODUCTIZATION_UPDATE_ROLLBACK_OK apply=true restart=true health=true rollback=true dataPreserved=true'
-}finally{if(Test-Path -LiteralPath (Join-Path $install 'Update.exe')){try{Start-Process -FilePath (Join-Path $install 'Update.exe') -ArgumentList @('uninstall','--silent') -Wait|Out-Null}catch{}};Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue}
+}finally{
+    if(Test-Path -LiteralPath (Join-Path $install 'Update.exe')){try{Invoke-CloudOSExternal (Join-Path $install 'Update.exe') @('uninstall','--silent') $install -AllowFailure | Out-Null}catch{}}
+    Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+}
