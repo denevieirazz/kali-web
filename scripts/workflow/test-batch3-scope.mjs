@@ -3,11 +3,13 @@ import { execFileSync } from 'node:child_process';
 const BASE = 'be36ba9d01f207f56b03c9f5e824e500b83b8e22';
 const allowed = [
   /^WORKFLOW_AUDIT\.md$/,
+  /^WORKFLOW_PRODUCTIVITY_REVIEW\.md$/,
   /^\.github\/workflows\/workflow-batch3-ci\.yml$/,
   /^scripts\/workflow\/test-batch3-scope\.mjs$/,
   /^frontend\/test\/workflow(?:Core|Contract)\.test\.js$/,
+  /^frontend\/test\/terminalWorkspaceState\.test\.js$/,
   /^frontend\/src\/core\/workflowCore\.(?:js|d\.ts)$/,
-  /^frontend\/src\/services\/workflow(?:Workspace|Clipboard|Launch|Window)\.ts$/,
+  /^frontend\/src\/services\/workflow(?:Workspace|WorkspaceTransfer|RecentFiles|Clipboard|Launch|Window)\.ts$/,
   /^frontend\/src\/apps\/WorkflowWorkspace\//,
   /^frontend\/src\/components\/Workflow\//,
   /^frontend\/src\/App\.tsx$/,
