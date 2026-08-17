@@ -71,7 +71,7 @@ export async function addClipboardText(text: string, source = 'CloudOS') {
   const next = [entry, ...existing];
   const overflow = next.slice(MAX_CLIPBOARD_ITEMS);
   save(next.slice(0, MAX_CLIPBOARD_ITEMS));
-  await Promise.all(overflow.filter(item => !item.favorite).map(item => removePayload(item.fileName)));
+  await Promise.all(overflow.map(item => removePayload(item.fileName)));
   return { stored: true as const, entry, reason: 'stored' as const };
 }
 
