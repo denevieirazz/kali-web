@@ -43,6 +43,9 @@ jobs:
       - name: Productization static contract
         shell: pwsh
         run: ./scripts/productization/test-productization-contract.ps1
+      - name: Channel matrix contract
+        shell: pwsh
+        run: ./scripts/productization/test-channels.ps1
       - name: Artifact policy negative tests
         shell: pwsh
         run: ./scripts/productization/test-artifact-policy.ps1
@@ -78,6 +81,9 @@ jobs:
       - name: Backup and restore contract
         shell: pwsh
         run: ./scripts/productization/test-backup-restore.ps1
+      - name: Recovery hardening negative tests
+        shell: pwsh
+        run: ./scripts/productization/test-recovery-hardening.ps1
       - name: Data removal safety contract
         shell: pwsh
         run: ./scripts/productization/test-data-removal.ps1
@@ -123,6 +129,9 @@ jobs:
       - name: Productization static contract
         shell: pwsh
         run: ./scripts/productization/test-productization-contract.ps1
+      - name: Channel matrix contract
+        shell: pwsh
+        run: ./scripts/productization/test-channels.ps1
       - name: Artifact policy negative tests
         shell: pwsh
         run: ./scripts/productization/test-artifact-policy.ps1
@@ -155,21 +164,24 @@ jobs:
       - name: Prove packaged Node without global Node
         shell: pwsh
         run: ./scripts/productization/test-packaged-node-runtime.ps1
-      - name: Build local update fixture
+      - name: Build sequential local update fixtures
         shell: pwsh
         run: ./scripts/productization/new-update-fixture.ps1
-      - name: Velopack update engine tests
+      - name: Velopack update engine and hardening tests
         shell: pwsh
         run: |
           $fixture = Get-Content artifacts/update-fixture-result.json -Raw | ConvertFrom-Json
-          dotnet run --project desktop/CloudOS.Productization.Tests/CloudOS.Productization.Tests.csproj -c Release -- $fixture.directory $fixture.currentVersion $fixture.nextVersion
+          dotnet run --project desktop/CloudOS.Productization.Tests/CloudOS.Productization.Tests.csproj -c Release -- $fixture.directory $fixture.currentVersion $fixture.nextVersion $fixture.followingDirectory $fixture.followingVersion
           if($LASTEXITCODE -ne 0){ throw 'VELOPACK_UPDATE_ENGINE_TEST_FAILED' }
-      - name: Apply update, restart health and rollback
+      - name: Apply update, interrupted restart, health rollback and sequential update
         shell: pwsh
         run: ./scripts/productization/test-update-rollback.ps1
       - name: Backup and restore contract
         shell: pwsh
         run: ./scripts/productization/test-backup-restore.ps1
+      - name: Recovery hardening negative tests
+        shell: pwsh
+        run: ./scripts/productization/test-recovery-hardening.ps1
       - name: Data removal safety contract
         shell: pwsh
         run: ./scripts/productization/test-data-removal.ps1

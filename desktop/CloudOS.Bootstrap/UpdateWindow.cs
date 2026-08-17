@@ -22,12 +22,13 @@ public sealed class UpdateWindow : Window
     {
         _source = source; _channel = channel; _metadata = metadata; _localRoot = localRoot;
         _stateStore = new DistributionStateStore(localRoot);
+        _stateStore.AssertPackageChannel(DistributionChannelPolicy.Load(metadata.Root), metadata.Channel);
         Title = "CloudOS — Atualizações";
         Width = 620; Height = 340; ResizeMode = ResizeMode.NoResize; WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Background = new SolidColorBrush(Color.FromRgb(8, 13, 24)); Foreground = Brushes.White;
         var body = new StackPanel { Margin = new Thickness(28) }; Content = body;
         body.Children.Add(new TextBlock { Text = "Atualização controlada", FontSize = 26, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0,0,0,8) });
-        body.Children.Add(new TextBlock { Text = "O CloudOS valida canal, versão e SHA-256 antes de preparar uma atualização. Stable permanece desativado neste lote.", Opacity=.78, TextWrapping=TextWrapping.Wrap, Margin=new Thickness(0,0,0,16) });
+        body.Children.Add(new TextBlock { Text = "O CloudOS valida canal, versão, origem e SHA-256 antes de preparar uma atualização. Preview/stable permanecem bloqueados enquanto assinatura e origens oficiais não estiverem configuradas.", Opacity=.78, TextWrapping=TextWrapping.Wrap, Margin=new Thickness(0,0,0,16) });
         body.Children.Add(_status); body.Children.Add(_progress);
         var row = new StackPanel { Orientation=Orientation.Horizontal, HorizontalAlignment=HorizontalAlignment.Right };
         var check = new Button { Content="Verificar", MinWidth=90, Margin=new Thickness(6) };
@@ -48,7 +49,7 @@ public sealed class UpdateWindow : Window
         _status.Text="Verificando feed...";
         try
         {
-            _prepared=await DistributionUpdateService.CheckAsync(_source,_channel,_metadata);
+            _prepared=await DistributionUpdateService.CheckAsync(_source,_channel,_metadata,_stateStore);
             if(_prepared is null){_status.Text="Nenhuma atualização disponível.";return;}
             _status.Text=$"Versão {_prepared.Version} disponível no canal {_prepared.Channel}.\nSHA-256: {_prepared.Sha256}";
             _download.IsEnabled=true;

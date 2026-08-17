@@ -10,6 +10,7 @@ public sealed class DistributionState
     public string? PendingVersion { get; set; }
     public string? PendingSource { get; set; }
     public string? PendingChannel { get; set; }
+    public string? ConfirmedChannel { get; set; }
     public string? HealthyVersion { get; set; }
     public DateTimeOffset? PreparedAtUtc { get; set; }
     public DateTimeOffset? HealthyAtUtc { get; set; }
@@ -48,6 +49,23 @@ public sealed class DistributionStateStore
         File.Move(temp, StatePath, true);
     }
 
+    public void AssertPackageChannel(DistributionChannelPolicy policy, string productChannel)
+    {
+        var normalized = policy.Normalize(productChannel);
+        var state = Load();
+        if (string.IsNullOrWhiteSpace(state.ConfirmedChannel))
+        {
+            state.ConfirmedChannel = normalized;
+            Save(state);
+            return;
+        }
+        var confirmed = policy.Normalize(state.ConfirmedChannel);
+        if (string.Equals(confirmed, normalized, StringComparison.OrdinalIgnoreCase)) return;
+        if (!string.IsNullOrWhiteSpace(state.PendingChannel) &&
+            string.Equals(policy.Normalize(state.PendingChannel), normalized, StringComparison.OrdinalIgnoreCase)) return;
+        throw new InvalidOperationException($"Troca silenciosa de canal detectada: {confirmed} -> {normalized}.");
+    }
+
     public void RecordPrepared(PreparedUpdate update)
     {
         var state = Load();
@@ -66,6 +84,7 @@ public sealed class DistributionStateStore
         var state = Load();
         if (!string.IsNullOrWhiteSpace(state.PendingVersion)) state.CurrentVersion = state.PendingVersion;
         else if (!string.IsNullOrWhiteSpace(version)) state.CurrentVersion = version;
+        if (!string.IsNullOrWhiteSpace(state.PendingChannel)) state.ConfirmedChannel = state.PendingChannel;
         state.HealthyVersion = state.CurrentVersion;
         state.PendingVersion = null;
         state.PendingSource = null;

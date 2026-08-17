@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "channels": {
+    "development": {
+      "requiresAuthenticode": false,
+      "allowLocalSource": true,
+      "approvedOrigins": []
+    },
+    "preview": {
+      "requiresAuthenticode": true,
+      "allowLocalSource": false,
+      "approvedOrigins": []
+    },
+    "stable": {
+      "requiresAuthenticode": true,
+      "allowLocalSource": false,
+      "approvedOrigins": []
+    }
+  },
+  "transitions": [
+    { "from": "development", "to": "development" },
+    { "from": "development", "to": "preview" },
+    { "from": "preview", "to": "preview" },
+    { "from": "preview", "to": "stable" },
+    { "from": "stable", "to": "stable" }
+  ]
+}

@@ -25,18 +25,13 @@ function Invoke-ExactWindowsExe{
     }finally{$process.Dispose()}
 }
 function Get-InstallDiagnostic{
-    $rootEntries='missing-root'
-    $updateFound='none'
-    $productFound='none'
+    $rootEntries='missing-root';$updateFound='none';$productFound='none'
     if(Test-Path -LiteralPath $root){
         $rootEntries=((Get-ChildItem -LiteralPath $root -Force -Recurse -ErrorAction SilentlyContinue | Select-Object -First 60 | ForEach-Object {[IO.Path]::GetRelativePath($root,$_.FullName).Replace('\','/')}) -join ',')
-        $updateFound=((Get-ChildItem -LiteralPath $root -Filter 'Update.exe' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 10 | ForEach-Object {[IO.Path]::GetRelativePath($root,$_.FullName).Replace('\','/')}) -join ',')
-        if([string]::IsNullOrWhiteSpace($updateFound)){$updateFound='none'}
-        $productFound=((Get-ChildItem -LiteralPath $root -Filter 'product.json' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 10 | ForEach-Object {[IO.Path]::GetRelativePath($root,$_.FullName).Replace('\','/')}) -join ',')
-        if([string]::IsNullOrWhiteSpace($productFound)){$productFound='none'}
+        $updateFound=((Get-ChildItem -LiteralPath $root -Filter 'Update.exe' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 10 | ForEach-Object {[IO.Path]::GetRelativePath($root,$_.FullName).Replace('\','/')}) -join ',');if([string]::IsNullOrWhiteSpace($updateFound)){$updateFound='none'}
+        $productFound=((Get-ChildItem -LiteralPath $root -Filter 'product.json' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 10 | ForEach-Object {[IO.Path]::GetRelativePath($root,$_.FullName).Replace('\','/')}) -join ',');if([string]::IsNullOrWhiteSpace($productFound)){$productFound='none'}
     }
-    $logTail='missing-log'
-    if(Test-Path -LiteralPath $setupLog){$logTail=((Get-Content -LiteralPath $setupLog -Tail 80 -ErrorAction SilentlyContinue) -join ' | ')}
+    $logTail='missing-log';if(Test-Path -LiteralPath $setupLog){$logTail=((Get-Content -LiteralPath $setupLog -Tail 80 -ErrorAction SilentlyContinue) -join ' | ')}
     return "install=$install installExists=$(Test-Path -LiteralPath $install) rootEntries=$rootEntries updateFound=$updateFound productFound=$productFound setupLog=$logTail"
 }
 function Invoke-UpdateExe([string]$Package){
@@ -48,22 +43,42 @@ function Assert-Version([string]$Expected){
     $actual=(Get-Content -LiteralPath $productPath -Raw|ConvertFrom-Json).version
     if([string]$actual -ne $Expected){throw "INSTALLED_VERSION_MISMATCH:expected=$Expected actual=$actual"}
 }
+function Assert-DataPreserved{
+    if((Get-Content -LiteralPath (Join-Path $data 'sentinel.txt') -Raw).Trim() -ne 'preserve-through-update'){throw 'UPDATE_OR_ROLLBACK_REMOVED_DATA'}
+}
 function Assert-PrerequisiteWindow{
     $exe=Join-Path $install 'current\CloudOS.Bootstrap.exe';$info=[Diagnostics.ProcessStartInfo]::new();$info.FileName=$exe;$info.UseShellExecute=$false;$info.ArgumentList.Add('--prerequisites');$info.Environment['CLOUDOS_LOCAL_ROOT']=$data
     $p=[Diagnostics.Process]::new();$p.StartInfo=$info;if(-not $p.Start()){throw 'UPDATED_BOOTSTRAP_RESTART_FAILED'};$expectedStart=$p.StartTime.ToUniversalTime().Ticks
     try{$deadline=[DateTime]::UtcNow.AddSeconds(25);$visible=$false;while([DateTime]::UtcNow -lt $deadline -and -not $p.HasExited){$p.Refresh();if($p.MainWindowHandle -ne 0){$visible=$true;break};Start-Sleep -Milliseconds 150};if(-not $visible){throw 'UPDATED_PREREQUISITE_WINDOW_NOT_VISIBLE'};[void]$p.CloseMainWindow();if(-not $p.WaitForExit(10000)){$p.Refresh();if($p.StartTime.ToUniversalTime().Ticks -ne $expectedStart -or [IO.Path]::GetFullPath($p.MainModule.FileName) -ne [IO.Path]::GetFullPath($exe)){throw 'UPDATED_BOOTSTRAP_OWNERSHIP_LOST'};$p.Kill($false);$p.WaitForExit()}}finally{$p.Dispose()}
 }
-try{
-    $setupRun=Invoke-ExactWindowsExe ([string]$package.setup) @('--silent','--installto',$install,'--log',$setupLog)
-    Assert-Version ([string]$fixture.currentVersion)
-    Invoke-UpdateExe ([string]$fixture.nextFullPackage);Assert-Version ([string]$fixture.nextVersion);Assert-PrerequisiteWindow
+function Assert-PackagedHealth{
     & (Join-Path $PSScriptRoot 'test-packaged-node-runtime.ps1') -Staging (Join-Path $install 'current')
     if($LASTEXITCODE -ne 0){throw "UPDATED_PACKAGED_NODE_HEALTH_FAILED:$LASTEXITCODE"}
-    Invoke-UpdateExe ([string]$fixture.currentFullPackage);Assert-Version ([string]$fixture.currentVersion);Assert-PrerequisiteWindow
-    if((Get-Content -LiteralPath (Join-Path $data 'sentinel.txt') -Raw).Trim() -ne 'preserve-through-update'){throw 'UPDATE_OR_ROLLBACK_REMOVED_DATA'}
+}
+try{
+    Invoke-ExactWindowsExe ([string]$package.setup) @('--silent','--installto',$install,'--log',$setupLog) | Out-Null
+    Assert-Version ([string]$fixture.currentVersion);Assert-DataPreserved
+
+    Invoke-UpdateExe ([string]$fixture.nextFullPackage);Assert-Version ([string]$fixture.nextVersion);Assert-DataPreserved
+    Invoke-UpdateExe ([string]$fixture.currentFullPackage);Assert-Version ([string]$fixture.currentVersion);Assert-DataPreserved
+    $restartInterruptedRollback=$true
+
+    Invoke-UpdateExe ([string]$fixture.nextFullPackage);Assert-Version ([string]$fixture.nextVersion);Assert-PrerequisiteWindow;Assert-PackagedHealth;Assert-DataPreserved
+
+    Invoke-UpdateExe ([string]$fixture.followingFullPackage);Assert-Version ([string]$fixture.followingVersion);Assert-DataPreserved
+    $node=Join-Path $install 'current\runtime\node.exe';$broken="$node.health-failure";Move-Item -LiteralPath $node -Destination $broken -Force
+    $healthFailed=$false
+    try{Assert-PackagedHealth}catch{$healthFailed=$true}
+    if(-not $healthFailed){throw 'UPDATE_HEALTH_FAILURE_NOT_DETECTED'}
+    Invoke-UpdateExe ([string]$fixture.nextFullPackage);Assert-Version ([string]$fixture.nextVersion);Assert-PrerequisiteWindow;Assert-PackagedHealth;Assert-DataPreserved
+    $healthFailureRollback=$true
+
+    Invoke-UpdateExe ([string]$fixture.followingFullPackage);Assert-Version ([string]$fixture.followingVersion);Assert-PrerequisiteWindow;Assert-PackagedHealth;Assert-DataPreserved
+    $sequential=$true
+
     Invoke-ExactWindowsExe (Join-Path $install 'Update.exe') @('uninstall','--silent') | Out-Null
     if(-not(Test-Path -LiteralPath (Join-Path $data 'sentinel.txt'))){throw 'UPDATE_TEST_UNINSTALL_REMOVED_DATA'}
-    Write-Host 'PRODUCTIZATION_UPDATE_ROLLBACK_OK apply=true restart=true health=true rollback=true dataPreserved=true exactArgv=true'
+    Write-Host "PRODUCTIZATION_UPDATE_ROLLBACK_OK apply=true restart=true health=true rollback=true dataPreserved=true exactArgv=true restartInterrupted=$restartInterruptedRollback healthFailureRollback=$healthFailureRollback sequential=$sequential"
 }finally{
     if(Test-Path -LiteralPath (Join-Path $install 'Update.exe')){try{Invoke-ExactWindowsExe (Join-Path $install 'Update.exe') @('uninstall','--silent') -AllowFailure | Out-Null}catch{}}
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue

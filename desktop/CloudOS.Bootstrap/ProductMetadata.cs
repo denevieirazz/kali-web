@@ -12,6 +12,7 @@ public sealed class ProductMetadata
     [JsonPropertyName("signing")] public string Signing { get; init; } = "unsigned-development";
     [JsonPropertyName("stableUpdatesEnabled")] public bool StableUpdatesEnabled { get; init; }
     [JsonPropertyName("baseSha")] public string BaseSha { get; init; } = string.Empty;
+    [JsonIgnore] public string Root { get; private set; } = AppContext.BaseDirectory;
 
     public static ProductMetadata Load(string? baseDirectory = null)
     {
@@ -27,11 +28,15 @@ public sealed class ProductMetadata
             {
                 if (!File.Exists(path)) continue;
                 var product = JsonSerializer.Deserialize<ProductMetadata>(File.ReadAllText(path));
-                if (product is { SchemaVersion: 1 }) return product;
+                if (product is { SchemaVersion: 1 })
+                {
+                    product.Root = root;
+                    return product;
+                }
             }
             catch (JsonException) { }
             catch (IOException) { }
         }
-        return new ProductMetadata();
+        return new ProductMetadata { Root = root };
     }
 }

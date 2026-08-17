@@ -26,16 +26,26 @@ public sealed class PreparedUpdate
 
 public static class DistributionUpdateService
 {
-    public static async Task<PreparedUpdate?> CheckAsync(string source, string? requestedChannel, ProductMetadata metadata)
+    public static async Task<PreparedUpdate?> CheckAsync(
+        string source,
+        string? requestedChannel,
+        ProductMetadata metadata,
+        DistributionStateStore? stateStore = null)
     {
-        var channel = NormalizeChannel(requestedChannel ?? metadata.Channel);
-        ValidateChannel(channel, metadata);
-        var safeSource = ValidateSource(source, channel);
+        var policy = DistributionChannelPolicy.Load(metadata.Root);
+        var persisted = stateStore?.Load();
+        var currentChannel = policy.Normalize(persisted?.ConfirmedChannel ?? metadata.Channel);
+        var channel = policy.Normalize(requestedChannel ?? metadata.Channel);
+        policy.AssertTransition(currentChannel, channel, !string.IsNullOrWhiteSpace(requestedChannel));
+        policy.AssertRuntimeReady(channel, metadata);
+        var safeSource = ValidateSource(source, channel, policy);
         var manager = new UpdateManager(safeSource, new UpdateOptions { ExplicitChannel = channel, AllowVersionDowngrade = false });
         if (!manager.IsInstalled)
             throw new InvalidOperationException("Atualizações só podem ser aplicadas à instalação gerenciada. O modo portátil permanece manual.");
         var info = await manager.CheckForUpdatesAsync();
         if (info is null) return null;
+        if (manager.CurrentVersion is not null)
+            policy.AssertVersionDirection(manager.CurrentVersion.ToString(), info.TargetFullRelease.Version.ToString(), false);
         if (info.IsDowngrade) throw new InvalidOperationException("Downgrade silencioso foi rejeitado.");
         AssertAsset(info.TargetFullRelease);
         return new PreparedUpdate(manager, info, safeSource, channel);
@@ -43,9 +53,10 @@ public static class DistributionUpdateService
 
     public static async Task<PreparedUpdate> PrepareSpecificVersionAsync(string source, string channel, string version, ProductMetadata metadata)
     {
-        channel = NormalizeChannel(channel);
-        ValidateChannel(channel, metadata, allowStableRollback: true);
-        var safeSource = ValidateSource(source, channel, allowLocalForRollback: true);
+        var policy = DistributionChannelPolicy.Load(metadata.Root);
+        channel = policy.Normalize(channel);
+        policy.AssertRuntimeReady(channel, metadata);
+        var safeSource = ValidateSource(source, channel, policy, allowLocalForRollback: true);
         IUpdateSource updateSource = Uri.TryCreate(safeSource, UriKind.Absolute, out var uri) && uri.Scheme.StartsWith("http", StringComparison.OrdinalIgnoreCase)
             ? new SimpleWebSource(safeSource)
             : new SimpleFileSource(new DirectoryInfo(safeSource));
@@ -58,6 +69,8 @@ public static class DistributionUpdateService
             .SingleOrDefault(asset => asset.Version == targetVersion)
             ?? throw new InvalidOperationException("A versão anterior conhecida não existe mais no feed configurado.");
         AssertAsset(target);
+        if (manager.CurrentVersion is not null)
+            policy.AssertVersionDirection(manager.CurrentVersion.ToString(), target.Version.ToString(), true);
         var isDowngrade = manager.CurrentVersion is not null && target.Version < manager.CurrentVersion;
         return new PreparedUpdate(manager, new UpdateInfo(target, isDowngrade), safeSource, channel);
     }
@@ -82,38 +95,36 @@ public static class DistributionUpdateService
             throw new InvalidOperationException("O feed forneceu metadados de pacote inválidos.");
     }
 
-    private static string NormalizeChannel(string channel)
-    {
-        var normalized = (channel ?? string.Empty).Trim().ToLowerInvariant();
-        return normalized is "stable" or "preview" or "development"
-            ? normalized
-            : throw new InvalidOperationException("Canal de atualização inválido.");
-    }
-
-    private static void ValidateChannel(string channel, ProductMetadata metadata, bool allowStableRollback = false)
-    {
-        if (channel == "stable" && !metadata.StableUpdatesEnabled && !allowStableRollback)
-            throw new InvalidOperationException("O canal stable permanece desativado neste lote experimental.");
-    }
-
-    private static string ValidateSource(string source, string channel, bool allowLocalForRollback = false)
+    private static string ValidateSource(
+        string source,
+        string channel,
+        DistributionChannelPolicy policy,
+        bool allowLocalForRollback = false)
     {
         if (string.IsNullOrWhiteSpace(source)) throw new InvalidOperationException("Fonte de atualização não configurada.");
         if (Uri.TryCreate(source, UriKind.Absolute, out var uri))
         {
             if (!string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
                 throw new InvalidOperationException("A fonte de atualização não pode conter credenciais, query string ou fragmento.");
-            if (uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)) return uri.ToString().TrimEnd('/');
+            if (uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+            {
+                policy.AssertRemoteOrigin(channel, uri);
+                return uri.ToString().TrimEnd('/');
+            }
             var localFixtureAllowed = channel == "development"
                 && Environment.GetEnvironmentVariable("CLOUDOS_ALLOW_LOCAL_UPDATE_FIXTURE") == "1"
                 && uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
                 && IPAddressIsLoopback(uri.Host);
             if (localFixtureAllowed) return uri.ToString().TrimEnd('/');
-            if (uri.IsFile && (channel == "development" || allowLocalForRollback)) return Path.GetFullPath(uri.LocalPath);
+            if (uri.IsFile)
+            {
+                if (!allowLocalForRollback) policy.AssertLocalSourceAllowed(channel);
+                return Path.GetFullPath(uri.LocalPath);
+            }
             throw new InvalidOperationException("Feeds remotos exigem HTTPS; HTTP é aceito apenas para fixture loopback de development explicitamente habilitada.");
         }
         var full = Path.GetFullPath(source);
-        if (channel != "development" && !allowLocalForRollback) throw new InvalidOperationException("Fonte local é permitida somente no canal development.");
+        if (!allowLocalForRollback) policy.AssertLocalSourceAllowed(channel);
         if (!Directory.Exists(full)) throw new DirectoryNotFoundException("Diretório local de atualização não encontrado.");
         return full;
     }
