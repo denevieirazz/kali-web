@@ -17,8 +17,10 @@ function Get-CloudOSProductConfig {
 function Get-CloudOSGitSha {
     Push-Location $script:CloudOSRepoRoot
     try {
+        $global:LASTEXITCODE = 0
         $sha = (& git rev-parse HEAD 2>&1 | Out-String).Trim()
-        if ($LASTEXITCODE -ne 0 -or $sha -notmatch '^[0-9a-f]{40}$') { throw "GIT_HEAD_UNAVAILABLE:$sha" }
+        $exitCode = [int]$global:LASTEXITCODE
+        if ($exitCode -ne 0 -or $sha -notmatch '^[0-9a-f]{40}$') { throw "GIT_HEAD_UNAVAILABLE:$sha" }
         return $sha
     } finally { Pop-Location }
 }
@@ -32,10 +34,12 @@ function Assert-CloudOSProductizationBranch {
         if (-not $AllowDetached -and $branch -ne 'productization/cloudos-distribution-batch-2') {
             throw "PRODUCTIZATION_BRANCH_REQUIRED:actual=$branch"
         }
+        $global:LASTEXITCODE = 0
         & git merge-base --is-ancestor $config.baseSha HEAD
-        if ($LASTEXITCODE -ne 0) { throw "PRODUCTIZATION_BASE_MISMATCH:required=$($config.baseSha)" }
+        if ([int]$global:LASTEXITCODE -ne 0) { throw "PRODUCTIZATION_BASE_MISMATCH:required=$($config.baseSha)" }
+        $global:LASTEXITCODE = 0
         & git merge-base --is-ancestor $config.officialBaseSha HEAD
-        if ($LASTEXITCODE -ne 0) { throw "OFFICIAL_BASE_NOT_ANCESTOR:required=$($config.officialBaseSha)" }
+        if ([int]$global:LASTEXITCODE -ne 0) { throw "OFFICIAL_BASE_NOT_ANCESTOR:required=$($config.officialBaseSha)" }
     } finally { Pop-Location }
 }
 
@@ -49,14 +53,15 @@ function Invoke-CloudOSExternal {
     )
     Push-Location $WorkingDirectory
     try {
+        $global:LASTEXITCODE = 0
         if ($Capture) {
             $output = & $FilePath @Arguments 2>&1 | Out-String
-            $exitCode = $LASTEXITCODE
+            $exitCode = [int]$global:LASTEXITCODE
             if (-not $AllowFailure -and $exitCode -ne 0) { throw "COMMAND_FAILED:$FilePath exit=$exitCode`n$output" }
             return [pscustomobject]@{ ExitCode = $exitCode; Output = $output.Trim() }
         }
         & $FilePath @Arguments
-        $exitCode = $LASTEXITCODE
+        $exitCode = [int]$global:LASTEXITCODE
         if (-not $AllowFailure -and $exitCode -ne 0) { throw "COMMAND_FAILED:$FilePath exit=$exitCode" }
         return $exitCode
     } finally { Pop-Location }
