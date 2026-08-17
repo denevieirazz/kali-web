@@ -16,11 +16,11 @@ try{
     $nodeVersion=(& (Join-Path $installRoot 'current\runtime\node.exe') --version 2>&1 | Out-String).Trim()
     if($nodeVersion -notmatch '^v22\.23\.2$'){throw "INSTALLED_NODE_INVALID:$nodeVersion"}
     $updateExe=Join-Path $installRoot 'Update.exe'
-    Invoke-CloudOSExternal $updateExe @('uninstall','--silent') $installRoot | Out-Null
+    Invoke-CloudOSExternal $updateExe @('uninstall','--silent') $testRoot | Out-Null
     Start-Sleep -Milliseconds 500
     if(-not(Test-Path -LiteralPath (Join-Path $dataRoot 'sentinel.txt'))){throw 'UNINSTALL_REMOVED_USER_DATA'}
     Write-Host "PRODUCTIZATION_INSTALLER_OK installRoot=$installRoot dataPreserved=true"
 }finally{
-    if(Test-Path -LiteralPath (Join-Path $installRoot 'Update.exe')){try{Invoke-CloudOSExternal (Join-Path $installRoot 'Update.exe') @('uninstall','--silent') $installRoot -AllowFailure | Out-Null}catch{}}
+    if(Test-Path -LiteralPath (Join-Path $installRoot 'Update.exe')){try{Invoke-CloudOSExternal (Join-Path $installRoot 'Update.exe') @('uninstall','--silent') $testRoot -AllowFailure | Out-Null}catch{}}
     Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
