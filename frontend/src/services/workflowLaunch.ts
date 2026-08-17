@@ -2,6 +2,7 @@ import { useAppRegistry } from '../core/appRegistry';
 import { terminalHereCapability, workflowFileOpenMode, type WorkflowProvider } from '../core/workflowCore.js';
 import { useProcessManager } from '../stores/processManager';
 import { useWindowManager } from '../stores/windowManager';
+import { nativeHostBridge } from './nativeHostBridge';
 import type { WorkspaceRecord } from './workflowWorkspace';
 
 export type WorkflowTextFileTarget = {
@@ -83,6 +84,7 @@ export function openWorkspaceTerminal(workspace: WorkspaceRecord) {
 }
 
 export function openExistingBrowser() {
+  if (!nativeHostBridge.available) throw new Error('Browser CloudOS disponível apenas no modo Full. Use o Launcher para abrir o navegador padrão nesta sessão WebOnly.');
   return launchWorkflowApp('browser');
 }
 
