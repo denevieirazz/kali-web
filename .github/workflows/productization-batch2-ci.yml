@@ -49,6 +49,12 @@ jobs:
       - name: Artifact policy negative tests
         shell: pwsh
         run: ./scripts/productization/test-artifact-policy.ps1
+      - name: Diagnostics privacy contract
+        shell: pwsh
+        run: ./scripts/productization/test-diagnostics.ps1
+      - name: Physical validator static contract only
+        shell: pwsh
+        run: ./scripts/productization/test-physical-validator-contract.ps1
       - name: Go executable package contract
         shell: pwsh
         run: ./scripts/productization/test-go-build-contract.ps1
@@ -135,6 +141,12 @@ jobs:
       - name: Artifact policy negative tests
         shell: pwsh
         run: ./scripts/productization/test-artifact-policy.ps1
+      - name: Diagnostics privacy contract
+        shell: pwsh
+        run: ./scripts/productization/test-diagnostics.ps1
+      - name: Physical validator static contract only
+        shell: pwsh
+        run: ./scripts/productization/test-physical-validator-contract.ps1
       - name: Go executable package contract
         shell: pwsh
         run: ./scripts/productization/test-go-build-contract.ps1
@@ -158,6 +170,17 @@ jobs:
       - name: Audit generated portable and installer artifacts
         shell: pwsh
         run: ./scripts/productization/audit-artifacts.ps1
+      - name: Supply chain hardening negative tests
+        shell: pwsh
+        run: ./scripts/productization/test-artifact-security-hardening.ps1
+      - name: Supply chain hardening gate
+        shell: pwsh
+        run: ./scripts/productization/audit-artifact-security.ps1
+      - name: Export sanitized diagnostics
+        shell: pwsh
+        env:
+          CLOUDOS_LOCAL_ROOT: ${{ runner.temp }}\cloudos-batch2\diagnostics-local
+        run: ./scripts/productization/export-diagnostics.ps1
       - name: Packaged WSL core smoke when existing WSL is available
         shell: pwsh
         run: ./scripts/productization/test-wsl-core-package-smoke.ps1 -SkipIfUnavailable
@@ -188,6 +211,9 @@ jobs:
       - name: Install and uninstall in directory with spaces
         shell: pwsh
         run: ./scripts/productization/test-installer.ps1
+      - name: Installer hardening complete
+        shell: pwsh
+        run: ./scripts/productization/test-installer-hardening.ps1
       - name: Assert real database was not used
         shell: pwsh
         run: |
@@ -213,6 +239,7 @@ jobs:
             artifacts/licenses/
             artifacts/SBOM/
             artifacts/audit/
+            artifacts/diagnostics/
             artifacts/package-result.json
             artifacts/update-fixture-result.json
             artifacts/tooling.json
