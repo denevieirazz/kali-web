@@ -35,6 +35,12 @@ import {
   type WorkspaceRecord,
 } from '../../services/workflowWorkspace';
 import {
+  downloadWorkspaceExport,
+  importWorkspaceFile,
+  moveWorkspaceSafely,
+  workspaceTransferLimits,
+} from '../../services/workflowWorkspaceTransfer';
+import {
   clearClipboardHistory,
   copyClipboardEntryToSystem,
   listClipboardEntries,
@@ -44,12 +50,16 @@ import {
 } from '../../services/workflowClipboard';
 import { openExistingBrowser, openFilesAt, openWorkspaceFiles, openWorkspaceTerminal } from '../../services/workflowLaunch';
 import './WorkflowWorkspace.css';
+import './WorkflowWorkspace36.css';
 
 type WorkspaceTab = 'overview' | 'notes' | 'evidence' | 'downloads' | 'clipboard';
 type EvidenceKind = 'note' | 'log' | 'link';
 type ExternalTextTarget = { provider: WorkflowProvider; path: string[]; name: string };
 type ExternalTextState = ExternalTextTarget & { content: string; savedContent: string; mode?: number };
 type WindowParams = { workspaceId?: string; noteFileName?: string; externalTextFile?: ExternalTextTarget };
+type TextHit = { fileName: string; start: number; end: number; snippet: string };
+
+const MAX_VISIBLE_SEARCH_HITS = 100;
 
 function MarkdownPreview({ value }: { value: string }) {
   const lines = value.split(/\r?\n/);
@@ -78,6 +88,12 @@ function workspaceOriginLabel(workspace: WorkspaceRecord) {
   return 'Linux · Home';
 }
 
+function providerLabel(provider: WorkflowProvider) {
+  if (provider === 'windows') return 'Windows · pasta autorizada';
+  if (provider === 'wsl') return 'Linux · Home';
+  return 'OPFS · CloudOS';
+}
+
 function validExternalTarget(value: unknown): value is ExternalTextTarget {
   if (!value || typeof value !== 'object') return false;
   const target = value as ExternalTextTarget;
@@ -88,6 +104,44 @@ function validExternalTarget(value: unknown): value is ExternalTextTarget {
     && workflowFileOpenMode(target.name, 'file', false) === 'notes';
 }
 
+function textHits(fileName: string, text: string, query: string, limit = MAX_VISIBLE_SEARCH_HITS): TextHit[] {
+  const needle = query.trim().toLocaleLowerCase('pt-BR');
+  if (!needle) return [];
+  const haystack = text.toLocaleLowerCase('pt-BR');
+  const hits: TextHit[] = [];
+  let offset = 0;
+  while (hits.length < limit) {
+    const start = haystack.indexOf(needle, offset);
+    if (start < 0) break;
+    const end = start + needle.length;
+    const snippetStart = Math.max(0, start - 45);
+    const snippetEnd = Math.min(text.length, end + 70);
+    hits.push({ fileName, start, end, snippet: text.slice(snippetStart, snippetEnd).replace(/\s+/g, ' ').trim() });
+    offset = Math.max(end, start + 1);
+  }
+  return hits;
+}
+
+function HighlightedText({ value, query }: { value: string; query: string }) {
+  const needle = query.trim();
+  if (!needle) return <>{value}</>;
+  const lower = value.toLocaleLowerCase('pt-BR');
+  const target = needle.toLocaleLowerCase('pt-BR');
+  const parts: Array<{ text: string; hit: boolean }> = [];
+  let offset = 0;
+  let count = 0;
+  while (offset < value.length && count < 20) {
+    const index = lower.indexOf(target, offset);
+    if (index < 0) break;
+    if (index > offset) parts.push({ text: value.slice(offset, index), hit: false });
+    parts.push({ text: value.slice(index, index + target.length), hit: true });
+    offset = index + target.length;
+    count += 1;
+  }
+  if (offset < value.length) parts.push({ text: value.slice(offset), hit: false });
+  return <>{parts.map((part, index) => part.hit ? <mark key={index}>{part.text}</mark> : <span key={index}>{part.text}</span>)}</>;
+}
+
 export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
   const params = useWindowManager(state => state.getWindow(windowId)?.params as WindowParams | undefined);
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>(listWorkspaces);
@@ -96,6 +150,7 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
   const [showArchived, setShowArchived] = useState(false);
   const [tab, setTab] = useState<WorkspaceTab>(params?.noteFileName || params?.externalTextFile ? 'notes' : 'overview');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
@@ -110,16 +165,21 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
   const [editDescription, setEditDescription] = useState('');
   const [editClient, setEditClient] = useState('');
   const [editTags, setEditTags] = useState('');
+  const [transferProvider, setTransferProvider] = useState<WorkflowProvider>('opfs');
 
   const [notes, setNotes] = useState<WorkflowNote[]>([]);
   const [activeNoteFile, setActiveNoteFile] = useState(params?.noteFileName || '');
   const [noteContent, setNoteContent] = useState('');
   const [noteSearch, setNoteSearch] = useState('');
+  const [noteHitIndex, setNoteHitIndex] = useState(0);
+  const [externalHitIndex, setExternalHitIndex] = useState(0);
   const [noteSaving, setNoteSaving] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [previewMarkdown, setPreviewMarkdown] = useState(false);
   const [externalFile, setExternalFile] = useState<ExternalTextState | null>(null);
   const savedNoteContent = useRef('');
   const noteSearchRef = useRef<HTMLInputElement>(null);
+  const noteEditorRef = useRef<HTMLTextAreaElement>(null);
+  const workspaceImportRef = useRef<HTMLInputElement>(null);
 
   const [evidence, setEvidence] = useState<any[]>([]);
   const [evidenceKind, setEvidenceKind] = useState<EvidenceKind>('note');
@@ -133,6 +193,18 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
   const activeNote = useMemo(() => notes.find(note => note.fileName === activeNoteFile) || null, [activeNoteFile, notes]);
   const visibleWorkspaces = useMemo(() => workspaces.filter(workspace => (showArchived || workspace.status !== 'archived') && matchesWorkflowQuery(workspaceSearchText(workspace), workspaceSearch)), [showArchived, workspaceSearch, workspaces]);
   const filteredNotes = useMemo(() => notes.filter(note => matchesWorkflowQuery(`${note.title}\n${note.content}`, noteSearch)), [noteSearch, notes]);
+  const noteHits = useMemo(() => {
+    if (!noteSearch.trim()) return [] as TextHit[];
+    const output: TextHit[] = [];
+    for (const note of filteredNotes) {
+      output.push(...textHits(note.fileName, note.content, noteSearch, MAX_VISIBLE_SEARCH_HITS - output.length));
+      if (output.length >= MAX_VISIBLE_SEARCH_HITS) break;
+    }
+    return output;
+  }, [filteredNotes, noteSearch]);
+  const externalHits = useMemo(() => externalFile ? textHits(externalFile.name, externalFile.content, noteSearch) : [], [externalFile, noteSearch]);
+  const externalDirty = Boolean(externalFile && externalFile.content !== externalFile.savedContent);
+  const transferLimits = useMemo(() => workspaceTransferLimits(), []);
 
   const refreshWorkspaces = useCallback(() => {
     const next = listWorkspaces();
@@ -141,7 +213,10 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
   }, []);
 
   useEffect(() => {
-    const changed = () => refreshWorkspaces();
+    const changed = () => {
+      refreshWorkspaces();
+      setDownloadDestinationState(getDownloadDestination());
+    };
     window.addEventListener('cloudos:workflow-changed', changed);
     return () => window.removeEventListener('cloudos:workflow-changed', changed);
   }, [refreshWorkspaces]);
@@ -167,18 +242,22 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
     let cancelled = false;
     setBusy(true);
     setError('');
+    setNotice('');
     void (async () => {
       try {
         const entries = await fileSourceFacade.list(raw.provider, raw.path, false);
         const entry = entries.find(item => item.name === raw.name);
         if (!entry || entry.kind !== 'file' || entry.symlink) throw new Error('Arquivo não encontrado ou não é um arquivo regular.');
-        if (entry.size > MAX_NOTE_BYTES) throw new Error('Arquivo excede o limite de 2 MiB do Notes rápido.');
+        if (entry.size > MAX_NOTE_BYTES) throw new Error('Arquivo excede o limite de 2 MiB do editor rápido.');
         const file = await fileSourceFacade.readFile(raw.provider, raw.path, entry, MAX_NOTE_BYTES);
         const content = await file.text();
         if (!cancelled) {
           setExternalFile({ ...raw, content, savedContent: content, mode: entry.mode });
           setTab('notes');
           setPreviewMarkdown(false);
+          setNoteSearch('');
+          setExternalHitIndex(0);
+          setNoteSaving('idle');
         }
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : 'Falha ao abrir o arquivo no Notes.');
@@ -188,6 +267,13 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
     })();
     return () => { cancelled = true; };
   }, [params?.externalTextFile?.name, params?.externalTextFile?.provider, JSON.stringify(params?.externalTextFile?.path || [])]);
+
+  useEffect(() => {
+    if (!externalDirty) return;
+    const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', beforeUnload);
+    return () => window.removeEventListener('beforeunload', beforeUnload);
+  }, [externalDirty]);
 
   const refreshWorkspaceContent = useCallback(async (workspace: WorkspaceRecord | null) => {
     if (!workspace) {
@@ -219,9 +305,10 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
   }, [activeNoteFile, params?.noteFileName]);
 
   useEffect(() => { void refreshWorkspaceContent(active); }, [active?.id]);
+  useEffect(() => { setNoteHitIndex(0); setExternalHitIndex(0); }, [noteSearch]);
 
   const selectWorkspace = useCallback(async (workspace: WorkspaceRecord) => {
-    setError('');
+    setError(''); setNotice('');
     setActiveId(workspace.id);
     if (workspace.status === 'archived') return;
     try { await activateWorkspace(workspace.id); }
@@ -229,23 +316,25 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
   }, []);
 
   const selectNote = useCallback((note: WorkflowNote) => {
+    if (externalDirty && !window.confirm(`Descartar alterações não salvas de “${externalFile?.name}”?`)) return;
     setExternalFile(null);
     setActiveNoteFile(note.fileName);
     setNoteContent(note.content);
     savedNoteContent.current = note.content;
     setNoteSaving('idle');
-  }, []);
+  }, [externalDirty, externalFile?.name]);
 
   const saveActiveNote = useCallback(async () => {
     if (externalFile) {
       if (externalFile.content === externalFile.savedContent) return;
       const bytes = new TextEncoder().encode(externalFile.content).byteLength;
-      if (bytes > MAX_NOTE_BYTES) { setError('Arquivo excede o limite de 2 MiB do Notes rápido.'); return; }
-      setNoteSaving('saving');
+      if (bytes > MAX_NOTE_BYTES) { setError('Arquivo excede o limite de 2 MiB do editor rápido.'); return; }
+      setNoteSaving('saving'); setError(''); setNotice('');
       try {
         await fileSourceFacade.writeText(externalFile.provider, externalFile.path, externalFile.name, externalFile.content, externalFile.mode);
         setExternalFile(current => current ? { ...current, savedContent: current.content } : current);
         setNoteSaving('saved');
+        setNotice(`“${externalFile.name}” salvo em ${providerLabel(externalFile.provider)}.`);
       } catch (cause) {
         setNoteSaving('error');
         setError(cause instanceof Error ? cause.message : 'Falha ao salvar o arquivo.');
@@ -265,17 +354,50 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
     }
   }, [active, activeNoteFile, externalFile, noteContent]);
 
+  const saveExternalAs = useCallback(async () => {
+    if (!externalFile) return;
+    const requested = window.prompt('Salvar como', externalFile.name);
+    if (requested === null) return;
+    const name = requested.normalize('NFKC').trim();
+    if (workflowFileOpenMode(name, 'file', false) !== 'notes') {
+      setError('Salvar Como aceita somente txt, md, json ou log. Scripts e executáveis continuam bloqueados.');
+      return;
+    }
+    const bytes = new TextEncoder().encode(externalFile.content).byteLength;
+    if (bytes > MAX_NOTE_BYTES) { setError('Arquivo excede o limite de 2 MiB do editor rápido.'); return; }
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const entries = await fileSourceFacade.list(externalFile.provider, externalFile.path, false);
+      if (entries.some(entry => entry.name.toLocaleLowerCase('pt-BR') === name.toLocaleLowerCase('pt-BR'))) throw new Error(`“${name}” já existe. Salvar Como não sobrescreve arquivos.`);
+      await fileSourceFacade.writeText(externalFile.provider, externalFile.path, name, externalFile.content, externalFile.mode);
+      setExternalFile(current => current ? { ...current, name, savedContent: current.content } : current);
+      setNoteSaving('saved');
+      setNotice(`Nova cópia salva como “${name}”.`);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Falha ao salvar nova cópia.'); }
+    finally { setBusy(false); }
+  }, [externalFile]);
+
+  const closeExternal = useCallback(() => {
+    if (!externalFile) return;
+    if (externalDirty && !window.confirm(`Fechar “${externalFile.name}” e descartar alterações não salvas?`)) return;
+    setExternalFile(null);
+    setNoteSaving('idle');
+    setNoteSearch('');
+  }, [externalDirty, externalFile]);
+
+  // Workspace Notes retain bounded autosave. External real files are deliberately excluded:
+  // they require explicit Save/Save As so a quick editor never silently changes a provider file.
   useEffect(() => {
-    const dirty = externalFile ? externalFile.content !== externalFile.savedContent : Boolean(active && activeNoteFile && noteContent !== savedNoteContent.current);
+    if (externalFile) return;
+    const dirty = Boolean(active && activeNoteFile && noteContent !== savedNoteContent.current);
     if (!dirty) return;
     const timer = window.setTimeout(() => { void saveActiveNote(); }, 650);
     return () => window.clearTimeout(timer);
-  }, [active?.id, activeNoteFile, externalFile?.content, noteContent, saveActiveNote]);
+  }, [active?.id, activeNoteFile, externalFile, noteContent, saveActiveNote]);
 
   const addNote = useCallback(async () => {
     if (!active || busy || active.status === 'archived') return;
-    setBusy(true);
-    setError('');
+    setBusy(true); setError(''); setNotice('');
     try {
       const note = await createWorkspaceNote(active);
       setNotes(current => [note, ...current]);
@@ -286,21 +408,56 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
     } finally { setBusy(false); }
   }, [active, busy, selectNote]);
 
+  const jumpToHit = useCallback((index: number) => {
+    if (!noteHits.length) return;
+    const normalized = (index + noteHits.length) % noteHits.length;
+    const hit = noteHits[normalized];
+    const note = notes.find(item => item.fileName === hit.fileName);
+    if (!note) return;
+    setNoteHitIndex(normalized);
+    setExternalFile(null);
+    setActiveNoteFile(note.fileName);
+    setNoteContent(note.content);
+    savedNoteContent.current = note.content;
+    setPreviewMarkdown(false);
+    window.requestAnimationFrame(() => {
+      noteEditorRef.current?.focus();
+      noteEditorRef.current?.setSelectionRange(hit.start, hit.end);
+    });
+  }, [noteHits, notes]);
+
+  const jumpExternalHit = useCallback((index: number) => {
+    if (!externalHits.length) return;
+    const normalized = (index + externalHits.length) % externalHits.length;
+    const hit = externalHits[normalized];
+    setExternalHitIndex(normalized);
+    window.requestAnimationFrame(() => {
+      noteEditorRef.current?.focus();
+      noteEditorRef.current?.setSelectionRange(hit.start, hit.end);
+    });
+  }, [externalHits]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (tab !== 'notes') return;
-      if (event.ctrlKey && event.key.toLowerCase() === 's') { event.preventDefault(); void saveActiveNote(); }
-      else if (event.ctrlKey && event.key.toLowerCase() === 'n' && active && !externalFile) { event.preventDefault(); void addNote(); }
-      else if (event.ctrlKey && event.key.toLowerCase() === 'f' && active && !externalFile) { event.preventDefault(); noteSearchRef.current?.focus(); }
+      const key = event.key.toLowerCase();
+      if (event.ctrlKey && event.shiftKey && key === 's' && externalFile) { event.preventDefault(); void saveExternalAs(); }
+      else if (event.ctrlKey && key === 's') { event.preventDefault(); void saveActiveNote(); }
+      else if (event.ctrlKey && key === 'n' && active && !externalFile) { event.preventDefault(); void addNote(); }
+      else if (event.ctrlKey && key === 'f') { event.preventDefault(); noteSearchRef.current?.focus(); }
+      else if (event.key === 'F3' && noteSearch.trim()) {
+        event.preventDefault();
+        if (externalFile) jumpExternalHit(externalHitIndex + (event.shiftKey ? -1 : 1));
+        else jumpToHit(noteHitIndex + (event.shiftKey ? -1 : 1));
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [active, addNote, externalFile, saveActiveNote, tab]);
+  }, [active, addNote, externalFile, externalHitIndex, jumpExternalHit, jumpToHit, noteHitIndex, noteSearch, saveActiveNote, saveExternalAs, tab]);
 
   const submitWorkspace = useCallback(async () => {
     if (!newName.trim()) { setError('Informe o nome do workspace.'); return; }
-    setBusy(true);
-    setError('');
+    setBusy(true); setError(''); setNotice('');
     try {
       if (newProvider === 'windows') await fileSourceFacade.mountWindows();
       const workspace = await createWorkspace({ type: newType, name: newName, description: newDescription, client: newClient, tags: newTags.split(','), provider: newProvider, originPath: [] });
@@ -308,6 +465,7 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
       setNewName(''); setNewDescription(''); setNewClient(''); setNewTags('');
       refreshWorkspaces();
       setActiveId(workspace.id);
+      setTransferProvider(workspace.provider);
       setTab('overview');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Falha ao criar workspace.');
@@ -326,12 +484,13 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
 
   const saveEdit = useCallback(async () => {
     if (!active || !editName.trim()) return;
-    setBusy(true); setError('');
+    setBusy(true); setError(''); setNotice('');
     try {
       const updated = await updateWorkspaceMetadata(active.id, { type: editType, name: editName, description: editDescription, client: editClient, tags: editTags.split(',') });
       setShowEdit(false);
       refreshWorkspaces();
       setActiveId(updated.id);
+      setNotice('Workspace atualizado. A pasta física não foi recriada.');
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Falha ao atualizar workspace.'); }
     finally { setBusy(false); }
   }, [active, editClient, editDescription, editName, editTags, editType, refreshWorkspaces]);
@@ -340,30 +499,81 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
     if (!active) return;
     const archiving = active.status !== 'archived';
     if (archiving && !window.confirm(`Arquivar “${active.name}”? Os arquivos não serão apagados.`)) return;
-    setBusy(true); setError('');
+    setBusy(true); setError(''); setNotice('');
     try {
       await archiveWorkspace(active.id, archiving);
       refreshWorkspaces();
       if (archiving) setShowArchived(true);
+      setNotice(archiving ? 'Workspace arquivado sem apagar arquivos.' : 'Workspace reativado.');
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Falha ao alterar status do workspace.'); }
     finally { setBusy(false); }
   }, [active, refreshWorkspaces]);
 
   const duplicateActive = useCallback(async () => {
     if (!active || !window.confirm(`Duplicar “${active.name}” na mesma origem? Links simbólicos e itens acima dos limites serão rejeitados.`)) return;
-    setBusy(true); setError('');
+    setBusy(true); setError(''); setNotice('');
     try {
       const duplicate = await duplicateWorkspace(active.id);
       refreshWorkspaces();
       setActiveId(duplicate.id);
+      setTransferProvider(duplicate.provider);
       setTab('overview');
+      setNotice('Workspace duplicado na mesma origem.');
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Falha ao duplicar workspace.'); }
     finally { setBusy(false); }
   }, [active, refreshWorkspaces]);
 
+  const prepareProvider = useCallback(async (provider: WorkflowProvider) => {
+    if (provider === 'windows') {
+      const runtime = await fileSourceFacade.runtime('windows');
+      if (!runtime.mounted) await fileSourceFacade.mountWindows();
+    }
+  }, []);
+
+  const exportActive = useCallback(async () => {
+    if (!active) return;
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const result = await downloadWorkspaceExport(active);
+      setNotice(`Workspace exportado: ${result.entries} item(ns), ${result.bytes} bytes no bundle JSON.`);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Falha ao exportar Workspace.'); }
+    finally { setBusy(false); }
+  }, [active]);
+
+  const importWorkspace = useCallback(async (file: File) => {
+    setBusy(true); setError(''); setNotice('');
+    try {
+      await prepareProvider(transferProvider);
+      const imported = await importWorkspaceFile(file, transferProvider);
+      refreshWorkspaces();
+      setActiveId(imported.id);
+      setTab('overview');
+      setNotice(`Workspace importado para ${providerLabel(imported.provider)}. Nenhum Workspace existente foi sobrescrito.`);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Falha ao importar Workspace.'); }
+    finally {
+      setBusy(false);
+      if (workspaceImportRef.current) workspaceImportRef.current.value = '';
+    }
+  }, [prepareProvider, refreshWorkspaces, transferProvider]);
+
+  const moveActive = useCallback(async () => {
+    if (!active || active.provider === transferProvider) return;
+    if (!window.confirm(`Mover “${active.name}” para ${providerLabel(transferProvider)}? O CloudOS criará e verificará a nova cópia e depois arquivará a origem antiga; a origem não será apagada.`)) return;
+    setBusy(true); setError(''); setNotice('');
+    try {
+      await prepareProvider(transferProvider);
+      const result = await moveWorkspaceSafely(active, transferProvider);
+      refreshWorkspaces();
+      setActiveId(result.workspace.id);
+      setTab('overview');
+      setNotice('Workspace movido com preservação: nova cópia ativa; origem antiga arquivada, não apagada.');
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Falha ao mover Workspace.'); }
+    finally { setBusy(false); }
+  }, [active, prepareProvider, refreshWorkspaces, transferProvider]);
+
   const addEvidenceText = useCallback(async () => {
     if (!active || !evidenceText.trim() || active.status === 'archived') return;
-    setBusy(true); setError('');
+    setBusy(true); setError(''); setNotice('');
     try {
       await saveWorkspaceEvidenceText(active, evidenceKind, evidenceText);
       setEvidenceText('');
@@ -374,7 +584,7 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
 
   const addEvidenceFiles = useCallback(async (files: FileList | File[]) => {
     if (!active || files.length === 0 || active.status === 'archived') return;
-    setBusy(true); setError('');
+    setBusy(true); setError(''); setNotice('');
     try {
       for (const file of Array.from(files)) await saveWorkspaceEvidenceFile(active, file);
       setEvidence(await listWorkspaceEvidence(active));
@@ -384,7 +594,7 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
 
   const pasteScreenshot = useCallback(async () => {
     if (!active || active.status === 'archived') return;
-    setBusy(true); setError('');
+    setBusy(true); setError(''); setNotice('');
     try {
       if (!navigator.clipboard?.read) throw new Error('Leitura de imagem do clipboard não está disponível nesta sessão.');
       const items = await navigator.clipboard.read();
@@ -411,6 +621,7 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
       if (!destination) throw new Error('Ative um workspace primeiro.');
       setDownloadDestination(destination);
       setDownloadDestinationState(destination);
+      setNotice(`Destino de workflow: ${downloadDestinationLabel(destination)}.`);
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Destino inválido.'); }
   }, [active]);
 
@@ -421,18 +632,38 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Falha no clipboard.'); }
   }, []);
 
-  const renderNotes = () => {
-    if (externalFile) return <div className="workflow-notes ww-notes ww-notes--external">
-      <section className="ww-note-editor">
-        <div className="ww-note-head"><strong>{externalFile.name}</strong><span>{externalFile.provider.toUpperCase()} · arquivo externo · {noteSaving === 'saving' ? 'Salvando…' : noteSaving === 'saved' ? 'Salvo' : 'Autosave'}</span><button onClick={() => setExternalFile(null)}>Fechar arquivo</button></div>
-        <textarea value={externalFile.content} onChange={event => setExternalFile(current => current ? { ...current, content: event.target.value } : current)} spellCheck={false} aria-label="Arquivo de texto no Notes" />
-        <div className="ww-note-limit">Abertura segura: txt, md, json e log. Limite: 2 MiB. Scripts, executáveis e symlinks nunca são executados pelo Notes.</div>
+  const renderExternalEditor = () => {
+    if (!externalFile) return null;
+    const hit = externalHits.length ? externalHits[Math.min(externalHitIndex, externalHits.length - 1)] : null;
+    return <div className="workflow-notes ww-notes ww-notes--external">
+      <section className="ww-note-editor ww-quick-editor">
+        <div className="ww-note-head ww-editor-toolbar">
+          <div><strong>{externalFile.name}</strong><span>{providerLabel(externalFile.provider)} · {externalDirty ? 'Arquivo modificado' : noteSaving === 'saving' ? 'Salvando…' : 'Salvo'}</span></div>
+          <div className="ww-editor-actions"><button disabled={!externalDirty || busy} onClick={() => void saveActiveNote()}>Salvar</button><button disabled={busy} onClick={() => void saveExternalAs()}>Salvar como</button><button onClick={closeExternal}>Fechar</button></div>
+        </div>
+        <div className="ww-editor-search"><input ref={noteSearchRef} value={noteSearch} onChange={event => setNoteSearch(event.target.value)} placeholder="Pesquisar neste arquivo…" /><span>{noteSearch ? `${externalHits.length}${externalHits.length >= MAX_VISIBLE_SEARCH_HITS ? '+' : ''} resultado(s)` : 'Ctrl+F pesquisar'}</span><button disabled={!externalHits.length} onClick={() => jumpExternalHit(externalHitIndex - 1)}>↑ Anterior</button><button disabled={!externalHits.length} onClick={() => jumpExternalHit(externalHitIndex + 1)}>↓ Próximo</button></div>
+        {hit && <button className="ww-current-hit" onClick={() => jumpExternalHit(externalHitIndex)}><HighlightedText value={hit.snippet} query={noteSearch} /></button>}
+        <textarea ref={noteEditorRef} value={externalFile.content} onChange={event => { setExternalFile(current => current ? { ...current, content: event.target.value } : current); setNoteSaving('idle'); }} spellCheck={false} aria-label="Arquivo de texto no Notes" />
+        <div className="ww-note-limit">Editor rápido: txt, md, json e log · máximo 2 MiB · Ctrl+S salva · Ctrl+Shift+S salva como · F3/Shift+F3 salta resultados. Arquivos reais não usam autosave; scripts, executáveis e symlinks não são abertos.</div>
       </section>
     </div>;
+  };
+
+  const renderNotes = () => {
+    if (externalFile) return renderExternalEditor();
     if (!active) return <div className="ww-empty-small">Abra um Workspace ou um arquivo de texto compatível.</div>;
     return <div className="workflow-notes ww-notes">
-      <aside><div className="ww-note-tools"><input ref={noteSearchRef} value={noteSearch} onChange={event => setNoteSearch(event.target.value)} placeholder="Pesquisar título e conteúdo…" /><button disabled={active.status === 'archived'} onClick={() => void addNote()}>＋</button></div><div className="ww-search-limit">Pesquisa instantânea no conteúdo carregado. Índice global: até {MAX_NOTE_INDEX_CONTENT_CHARS} caracteres por nota.</div>{filteredNotes.map(note => <button key={note.fileName} className={note.fileName === activeNoteFile ? 'active' : ''} onClick={() => selectNote(note)}><strong>{note.title}</strong><small>{new Date(note.modified).toLocaleString()}</small>{noteSearch && <em>{note.content.slice(0, 120).replace(/\s+/g, ' ')}</em>}</button>)}</aside>
-      <section className="ww-note-editor">{activeNote ? <><div className="ww-note-head"><strong>{activeNote.title}.md</strong><span>{noteSaving === 'saving' ? 'Salvando…' : noteSaving === 'saved' ? 'Salvo' : noteSaving === 'error' ? 'Falha ao salvar' : 'Autosave'}</span><button onClick={() => setPreviewMarkdown(value => !value)}>{previewMarkdown ? 'Editar' : 'Preview'}</button></div>{previewMarkdown ? <MarkdownPreview value={noteContent} /> : <textarea disabled={active.status === 'archived'} value={noteContent} onChange={event => setNoteContent(event.target.value)} spellCheck={false} aria-label="Nota Markdown" />}</> : <div className="ww-empty-small">Crie uma nota Markdown. Ctrl+N cria, Ctrl+S salva e Ctrl+F pesquisa.</div>}</section>
+      <aside>
+        <div className="ww-note-tools"><input ref={noteSearchRef} value={noteSearch} onChange={event => setNoteSearch(event.target.value)} placeholder="Pesquisar título e conteúdo…" /><button disabled={active.status === 'archived'} onClick={() => void addNote()}>＋</button></div>
+        <div className="ww-search-status"><span>{noteSearch ? `${filteredNotes.length} nota(s) · ${noteHits.length}${noteHits.length >= MAX_VISIBLE_SEARCH_HITS ? '+' : ''} ocorrência(s)` : 'Pesquisa em título e conteúdo carregado'}</span><div><button disabled={!noteHits.length} onClick={() => jumpToHit(noteHitIndex - 1)}>↑</button><button disabled={!noteHits.length} onClick={() => jumpToHit(noteHitIndex + 1)}>↓</button></div></div>
+        <div className="ww-search-limit">Resultados instantâneos no conteúdo real carregado. Saltos limitados a {MAX_VISIBLE_SEARCH_HITS} ocorrências por busca; índice global continua limitado a {MAX_NOTE_INDEX_CONTENT_CHARS} caracteres por nota.</div>
+        {filteredNotes.map(note => {
+          const first = textHits(note.fileName, note.content, noteSearch, 1)[0];
+          const snippet = first?.snippet || note.content.slice(0, 140).replace(/\s+/g, ' ');
+          return <button key={note.fileName} className={note.fileName === activeNoteFile ? 'active' : ''} onClick={() => selectNote(note)}><strong><HighlightedText value={note.title} query={noteSearch} /></strong><small>{new Date(note.modified).toLocaleString()}</small>{noteSearch && <em><HighlightedText value={snippet} query={noteSearch} /></em>}</button>;
+        })}
+      </aside>
+      <section className="ww-note-editor">{activeNote ? <><div className="ww-note-head"><strong>{activeNote.title}.md</strong><span>{noteSaving === 'saving' ? 'Salvando…' : noteSaving === 'saved' ? 'Salvo' : noteSaving === 'error' ? 'Falha ao salvar' : noteContent !== savedNoteContent.current ? 'Modificado · autosave da nota' : 'Salvo'}</span><button onClick={() => setPreviewMarkdown(value => !value)}>{previewMarkdown ? 'Editar' : 'Preview'}</button></div>{previewMarkdown ? <MarkdownPreview value={noteContent} /> : <textarea ref={noteEditorRef} disabled={active.status === 'archived'} value={noteContent} onChange={event => setNoteContent(event.target.value)} spellCheck={false} aria-label="Nota Markdown" />}</> : <div className="ww-empty-small">Crie uma nota Markdown. Ctrl+N cria, Ctrl+S salva e Ctrl+F pesquisa.</div>}</section>
     </div>;
   };
 
@@ -451,19 +682,27 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
 
     <section className="ww-main">
       {error && <div className="ww-error" role="alert"><span>{error}</span><button onClick={() => setError('')}>×</button></div>}
+      {notice && <div className="ww-notice" role="status"><span>{notice}</span><button onClick={() => setNotice('')}>×</button></div>}
       {!active && !externalFile ? <div className="ww-empty"><h2>Workspace</h2><p>Crie um workspace para concentrar Notes, Downloads, Evidence, Reports, Files, Terminal e Browser.</p><button onClick={() => setShowCreate(true)}>Criar workspace</button></div> : <>
         <header className="ww-header">
-          <div>{active ? <><small>{WORKSPACE_TYPES.find(item => item.id === active.type)?.label} · {active.status === 'archived' ? 'Arquivado' : 'Ativo'}</small><h2>{active.name}</h2><p>{active.description || 'Sem descrição.'}</p></> : <><small>Notes</small><h2>{externalFile?.name}</h2><p>Arquivo aberto diretamente do Files.</p></>}</div>
+          <div>{active ? <><small>{WORKSPACE_TYPES.find(item => item.id === active.type)?.label} · {active.status === 'archived' ? 'Arquivado' : 'Ativo'}</small><h2>{active.name}</h2><p>{active.description || 'Sem descrição.'}</p></> : <><small>Notes · editor rápido</small><h2>{externalFile?.name}</h2><p>Arquivo aberto diretamente do Files.</p></>}</div>
           {active && <div className="ww-quick-actions">
             <button onClick={beginEdit}>Renomear / editar</button>
             <button disabled={busy} onClick={() => void duplicateActive()}>Duplicar</button>
             <button disabled={busy} onClick={() => void toggleArchive()}>{active.status === 'archived' ? 'Reativar' : 'Arquivar'}</button>
+            <button disabled={busy} onClick={() => void exportActive()}>Exportar</button>
+            <select aria-label="Origem alvo para mover ou importar Workspace" value={transferProvider} onChange={event => setTransferProvider(event.target.value as WorkflowProvider)}><option value="opfs">OPFS</option><option value="windows">Windows</option><option value="wsl">Linux</option></select>
+            <button disabled={busy || active.provider === transferProvider} title={active.provider === transferProvider ? 'Escolha outra origem.' : 'Copia para a nova origem e arquiva a antiga; não apaga a origem.'} onClick={() => void moveActive()}>Mover</button>
+            <button disabled={busy} onClick={() => workspaceImportRef.current?.click()}>Importar</button>
+            <input ref={workspaceImportRef} hidden type="file" accept="application/json,.json" onChange={event => event.target.files?.[0] && void importWorkspace(event.target.files[0])} />
             <button onClick={() => openWorkspaceFiles(active, 'Files')}>Files</button>
             <button onClick={() => openFilesAt(active.provider, [...active.root, 'Reports'])}>Reports</button>
             <button disabled={!terminalHereCapability(active.provider).supported} title={terminalHereCapability(active.provider).reason} onClick={() => { try { openWorkspaceTerminal(active); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Terminal aqui indisponível.'); } }}>Terminal</button>
             <button onClick={() => openExistingBrowser()}>Browser</button>
           </div>}
         </header>
+
+        <div className="ww-permanent-destination"><small>Downloads do workflow</small><strong>{downloadDestinationLabel(downloadDestination)}</strong><span>O Browser nativo congelado não é redirecionado fisicamente por esta preferência.</span></div>
 
         <nav className="ww-tabs" aria-label="Workspace">
           {(['overview', 'notes', 'evidence', 'downloads', 'clipboard'] as WorkspaceTab[]).map(name => <button key={name} disabled={!active && name !== 'notes'} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name === 'overview' ? 'Visão geral' : name === 'notes' ? 'Notes' : name === 'evidence' ? 'Evidence' : name === 'downloads' ? 'Downloads' : 'Clipboard'}</button>)}
@@ -472,7 +711,7 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
         <div className="ww-body">
           {tab === 'overview' && active && <div className="ww-overview">
             <section><h3>Estrutura</h3><div className="ww-folder-grid">{WORKSPACE_FOLDERS.map(folder => <button key={folder} onClick={() => openFilesAt(active.provider, [...active.root, folder])}>📁 {folder}</button>)}</div></section>
-            <section className="ww-meta"><h3>workspace.json</h3><dl><dt>Nome</dt><dd>{active.name}</dd><dt>Cliente</dt><dd>{active.client || '—'}</dd><dt>Tipo</dt><dd>{WORKSPACE_TYPES.find(item => item.id === active.type)?.label}</dd><dt>Status</dt><dd>{active.status}</dd><dt>Tags</dt><dd>{active.tags.length ? active.tags.join(', ') : '—'}</dd><dt>Descrição</dt><dd>{active.description || '—'}</dd><dt>Data</dt><dd>{new Date(active.createdAt).toLocaleString()}</dd><dt>Último acesso</dt><dd>{new Date(active.lastAccessAt).toLocaleString()}</dd><dt>Última atividade</dt><dd>{new Date(active.lastActivityAt).toLocaleString()}</dd><dt>Origem</dt><dd>{workspaceOriginLabel(active)}</dd><dt>Pasta física</dt><dd>{active.root.join('/')}</dd></dl><p className="ww-note-limit">Renomear altera os metadados e o workspace.json; a raiz física permanece estável para não recriar nem mover a árvore.</p></section>
+            <section className="ww-meta"><h3>workspace.json</h3><dl><dt>Nome</dt><dd>{active.name}</dd><dt>Cliente</dt><dd>{active.client || '—'}</dd><dt>Tipo</dt><dd>{WORKSPACE_TYPES.find(item => item.id === active.type)?.label}</dd><dt>Status</dt><dd>{active.status}</dd><dt>Tags</dt><dd>{active.tags.length ? active.tags.join(', ') : '—'}</dd><dt>Descrição</dt><dd>{active.description || '—'}</dd><dt>Data</dt><dd>{new Date(active.createdAt).toLocaleString()}</dd><dt>Último acesso</dt><dd>{new Date(active.lastAccessAt).toLocaleString()}</dd><dt>Última atividade</dt><dd>{new Date(active.lastActivityAt).toLocaleString()}</dd><dt>Origem</dt><dd>{workspaceOriginLabel(active)}</dd><dt>Pasta física</dt><dd>{active.root.join('/')}</dd></dl><p className="ww-note-limit">Renomear altera metadados sem mover a raiz física. Mover entre origens usa cópia validada + arquivamento da origem; não promete operação atômica e não apaga a origem antiga.</p><p className="ww-note-limit">Export/Import portátil: até {transferLimits.entries} itens, {Math.round(transferLimits.bytes / 1024 / 1024)} MiB agregados e {Math.round(transferLimits.fileBytes / 1024 / 1024)} MiB por arquivo. Symlinks são rejeitados.</p></section>
           </div>}
 
           {tab === 'notes' && renderNotes()}
@@ -482,7 +721,7 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
             <div className="ww-evidence-list">{evidence.map(entry => <div key={entry.name}><span>{entry.kind === 'directory' ? '📁' : '📎'}</span><strong>{entry.name}</strong><small>{entry.kind === 'file' ? `${entry.size} bytes` : 'Pasta'}</small></div>)}{!evidence.length && <p>Nenhuma evidência neste workspace.</p>}</div>
           </div>}
 
-          {tab === 'downloads' && active && <div className="ww-downloads"><h3>Destino de downloads</h3><div className="ww-current-destination"><small>Destino atual</small><strong>{downloadDestinationLabel(downloadDestination)}</strong></div><p>Por padrão, quando não existe preferência salva, o destino é o Workspace ativo. A escolha abaixo é explícita e fica visível.</p><div className="ww-destination-grid"><button className={downloadDestination.kind === 'workspace' ? 'active' : ''} onClick={() => chooseDownloadDestination('workspace')}>Workspace atual</button><button className={downloadDestination.kind === 'opfs' ? 'active' : ''} onClick={() => chooseDownloadDestination('opfs')}>OPFS</button><button className={downloadDestination.kind === 'windows' ? 'active' : ''} onClick={() => chooseDownloadDestination('windows')}>Windows grant</button><button className={downloadDestination.kind === 'wsl' ? 'active' : ''} onClick={() => chooseDownloadDestination('wsl')}>Linux Home</button></div><div className="ww-limitation"><strong>Limite do Release Freeze:</strong> o Browser nativo está congelado. Esta preferência resolve a UX e o destino padrão no workflow, mas não intercepta nem redireciona downloads do processo nativo.</div></div>}
+          {tab === 'downloads' && active && <div className="ww-downloads"><h3>Destino de downloads</h3><div className="ww-current-destination"><small>Destino atual</small><strong>{downloadDestinationLabel(downloadDestination)}</strong></div><p>Por padrão, quando não existe preferência salva, o destino é o Workspace ativo. A escolha abaixo é explícita, persistida no workflow e exibida permanentemente acima das abas.</p><div className="ww-destination-grid"><button className={downloadDestination.kind === 'workspace' ? 'active' : ''} onClick={() => chooseDownloadDestination('workspace')}>Workspace atual</button><button className={downloadDestination.kind === 'opfs' ? 'active' : ''} onClick={() => chooseDownloadDestination('opfs')}>OPFS</button><button className={downloadDestination.kind === 'windows' ? 'active' : ''} onClick={() => chooseDownloadDestination('windows')}>Windows grant</button><button className={downloadDestination.kind === 'wsl' ? 'active' : ''} onClick={() => chooseDownloadDestination('wsl')}>Linux Home</button></div><div className="ww-limitation"><strong>Limite do Release Freeze:</strong> o Browser nativo está congelado. Esta preferência organiza o destino do workflow, mas não intercepta nem redireciona fisicamente downloads do processo nativo.</div></div>}
 
           {tab === 'clipboard' && active && <div className="ww-clipboard"><div className="ww-clipboard-head"><span>{clipboardEntries.length}/30 entradas</span><button onClick={() => void clearClipboardHistory()}>Limpar</button></div>{clipboardEntries.map(entry => <div key={entry.id} className="ww-clipboard-entry"><button className={entry.favorite ? 'favorite active' : 'favorite'} onClick={() => { toggleClipboardFavorite(entry.id); setClipboardEntries(listClipboardEntries()); }}>★</button><div><strong>{entry.source}</strong><p>{entry.preview}</p><small>{entry.bytes} bytes · {new Date(entry.createdAt).toLocaleString()}</small></div><button onClick={() => void clipboardAction(entry, 'copy')}>Copiar</button><button onClick={() => void clipboardAction(entry, 'paste')}>Colar</button></div>)}{!clipboardEntries.length && <p>O histórico ignora senhas, JWT e padrões de secrets.</p>}</div>}
         </div>
