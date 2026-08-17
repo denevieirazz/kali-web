@@ -74,18 +74,18 @@ public partial class App : Application
             try { _store ??= new BootStateStore(DistributionEnvironment.ResolveLocalRoot()); }
             catch (Exception storageError) when (storageError is IOException or UnauthorizedAccessException)
             {
-                MessageBox.Show($"O CloudOS não conseguiu preparar o diretório de recuperação: {storageError.Message}", "CloudOS", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show("O CloudOS não conseguiu preparar os arquivos de recuperação. Verifique o espaço disponível e as permissões da sua conta.", "CloudOS", MessageBoxButton.OK, MessageBoxImage.Error);
                 Shutdown(1); return;
             }
             _store.AppendLog($"Falha do bootstrap: {error.GetType().Name}: {error.Message}");
-            var action = ShowRecovery(error.Message);
+            var action = ShowRecovery("O CloudOS não conseguiu concluir a inicialização. Consulte os logs para ver os detalhes técnicos.");
             if (action == RecoveryAction.Rollback)
             {
                 try { await RollbackAsync(); return; }
                 catch (Exception rollbackError)
                 {
                     _store.AppendLog($"Rollback falhou: {rollbackError.GetType().Name}: {rollbackError.Message}");
-                    MessageBox.Show($"Não foi possível restaurar a versão anterior: {rollbackError.Message}", "CloudOS Recovery", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show("Não foi possível restaurar a versão anterior. Seus dados foram preservados; consulte os logs antes de tentar novamente.", "Recuperação do CloudOS", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
             else if (action == RecoveryAction.Retry)
@@ -119,7 +119,7 @@ public partial class App : Application
         var source = options.UpdateSource ?? Environment.GetEnvironmentVariable("CLOUDOS_UPDATE_SOURCE");
         if (string.IsNullOrWhiteSpace(source))
         {
-            MessageBox.Show("Nenhuma fonte de atualização foi configurada.", "CloudOS Atualizações", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show("Nenhuma origem de atualização foi configurada.", "CloudOS Atualizações", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
         var window = new UpdateWindow(source, options.UpdateChannel, _productMetadata, DistributionEnvironment.ResolveLocalRoot());
@@ -128,7 +128,7 @@ public partial class App : Application
 
     private async Task RollbackAsync()
     {
-        if (_distributionStateStore is null) throw new InvalidOperationException("Estado de distribuição indisponível.");
+        if (_distributionStateStore is null) throw new InvalidOperationException("As informações necessárias para a recuperação não estão disponíveis.");
         var state = _distributionStateStore.Load();
         if (string.IsNullOrWhiteSpace(state.PreviousVersion) || string.IsNullOrWhiteSpace(state.PendingSource) || string.IsNullOrWhiteSpace(state.PendingChannel))
             throw new InvalidOperationException("Nenhuma versão anterior conhecida está disponível.");
@@ -146,7 +146,7 @@ public partial class App : Application
             var state = _store!.Load();
             if (_policy.ShouldEnterRecovery(state, DateTimeOffset.UtcNow) && !forceOneAttempt)
             {
-                var action = ShowRecovery(state.LastFailure ?? "O CloudOS falhou repetidamente durante a inicialização.");
+                var action = ShowRecovery("O CloudOS falhou repetidamente durante a inicialização. Seus dados serão preservados.");
                 if (action == RecoveryAction.Rollback) { await RollbackAsync(); return; }
                 if (action != RecoveryAction.Retry) { Shutdown(); return; }
                 forceOneAttempt = true;

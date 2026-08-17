@@ -28,7 +28,7 @@ public sealed class UpdateWindow : Window
         Background = new SolidColorBrush(Color.FromRgb(8, 13, 24)); Foreground = Brushes.White;
         var body = new StackPanel { Margin = new Thickness(28) }; Content = body;
         body.Children.Add(new TextBlock { Text = "Atualização controlada", FontSize = 26, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0,0,0,8) });
-        body.Children.Add(new TextBlock { Text = "O CloudOS valida canal, versão, origem e SHA-256 antes de preparar uma atualização. Preview/stable permanecem bloqueados enquanto assinatura e origens oficiais não estiverem configuradas.", Opacity=.78, TextWrapping=TextWrapping.Wrap, Margin=new Thickness(0,0,0,16) });
+        body.Children.Add(new TextBlock { Text = "O CloudOS verifica a origem, a versão e a integridade do pacote antes de preparar uma atualização. Canais de distribuição que ainda não estão prontos permanecem bloqueados.", Opacity=.78, TextWrapping=TextWrapping.Wrap, Margin=new Thickness(0,0,0,16) });
         body.Children.Add(_status); body.Children.Add(_progress);
         var row = new StackPanel { Orientation=Orientation.Horizontal, HorizontalAlignment=HorizontalAlignment.Right };
         var check = new Button { Content="Verificar", MinWidth=90, Margin=new Thickness(6) };
@@ -46,29 +46,30 @@ public sealed class UpdateWindow : Window
     private async Task CheckAsync(Button check)
     {
         check.IsEnabled=false; _download.IsEnabled=false; _apply.IsEnabled=false; _prepared=null; _progress.Value=0;
-        _status.Text="Verificando feed...";
+        _status.Text="Verificando atualizações...";
         try
         {
             _prepared=await DistributionUpdateService.CheckAsync(_source,_channel,_metadata,_stateStore);
             if(_prepared is null){_status.Text="Nenhuma atualização disponível.";return;}
-            _status.Text=$"Versão {_prepared.Version} disponível no canal {_prepared.Channel}.\nSHA-256: {_prepared.Sha256}";
+            _status.Text=$"Versão {_prepared.Version} disponível.";
             _download.IsEnabled=true;
         }
-        catch(Exception error){_status.Text=$"Não foi possível verificar: {error.Message}";}
+        catch(InvalidOperationException error){_status.Text=$"Não foi possível verificar a atualização: {error.Message}";}
+        catch(Exception){_status.Text="Não foi possível verificar atualizações. Verifique a conexão e tente novamente.";}
         finally{check.IsEnabled=true;}
     }
 
     private async Task DownloadAsync()
     {
         if(_prepared is null)return;
-        _download.IsEnabled=false; _downloadCancellation?.Dispose(); _downloadCancellation=new CancellationTokenSource(); _status.Text="Baixando e validando pacote...";
+        _download.IsEnabled=false; _downloadCancellation?.Dispose(); _downloadCancellation=new CancellationTokenSource(); _status.Text="Baixando e verificando a atualização...";
         try
         {
             await DistributionUpdateService.DownloadAsync(_prepared, value => Dispatcher.Invoke(()=>_progress.Value=value), _downloadCancellation.Token);
-            _progress.Value=100; _status.Text=$"Pacote {_prepared.Version} baixado e validado. Reinicie para aplicar."; _apply.IsEnabled=true;
+            _progress.Value=100; _status.Text=$"Versão {_prepared.Version} pronta. Reinicie o CloudOS para aplicar."; _apply.IsEnabled=true;
         }
         catch(OperationCanceledException){_status.Text="Download cancelado. Nenhuma atualização foi aplicada.";_download.IsEnabled=true;}
-        catch(Exception error){_status.Text=$"Pacote rejeitado: {error.Message}";_download.IsEnabled=true;}
+        catch(Exception){_status.Text="A atualização baixada não pôde ser validada. Tente novamente.";_download.IsEnabled=true;}
     }
 
     private void Apply()

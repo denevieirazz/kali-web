@@ -14,16 +14,16 @@ public partial class RecoveryWindow : Window
     {
         _logPath = logPath;
         InitializeComponent();
-        FailureDetails.Text = string.IsNullOrWhiteSpace(details) ? "Falha de inicialização sem detalhes adicionais." : details;
+        FailureDetails.Text = string.IsNullOrWhiteSpace(details) ? "Não há detalhes adicionais disponíveis. Consulte os logs se o problema continuar." : details;
         RollbackButton.IsEnabled = canRollback;
-        RollbackButton.ToolTip = canRollback ? "Restaurar binários anteriores preservando dados." : "Nenhuma versão anterior conhecida está disponível para esta sessão.";
+        RollbackButton.ToolTip = canRollback ? "Restaurar a versão anterior preservando seus dados." : "Nenhuma versão anterior está disponível para esta sessão.";
     }
 
     public RecoveryAction SelectedAction { get; private set; } = RecoveryAction.Exit;
     private void Retry_Click(object sender, RoutedEventArgs e) { SelectedAction = RecoveryAction.Retry; Close(); }
     private void Rollback_Click(object sender, RoutedEventArgs e)
     {
-        if (MessageBox.Show("Restaurar a versão anterior conhecida? Seus dados serão preservados.", "CloudOS Recovery", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        if (MessageBox.Show("Restaurar a versão anterior? Seus dados serão preservados.", "Recuperação do CloudOS", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
         SelectedAction = RecoveryAction.Rollback; Close();
     }
 
@@ -31,12 +31,12 @@ public partial class RecoveryWindow : Window
     {
         try
         {
-            if (!File.Exists(_logPath)) { MessageBox.Show("O arquivo de log ainda não existe.", "CloudOS", MessageBoxButton.OK, MessageBoxImage.Information); return; }
+            if (!File.Exists(_logPath)) { MessageBox.Show("Ainda não há logs disponíveis para esta sessão.", "CloudOS", MessageBoxButton.OK, MessageBoxImage.Information); return; }
             var notepad = Path.Combine(Environment.SystemDirectory, "notepad.exe");
             Process.Start(new ProcessStartInfo { FileName = notepad, UseShellExecute = false, ArgumentList = { _logPath } });
         }
         catch (Exception error) when (error is System.ComponentModel.Win32Exception or InvalidOperationException)
-        { MessageBox.Show($"Não foi possível abrir o log: {error.Message}", "CloudOS", MessageBoxButton.OK, MessageBoxImage.Error); }
+        { MessageBox.Show("Não foi possível abrir os logs. Tente novamente ou abra a pasta de diagnósticos manualmente.", "CloudOS", MessageBoxButton.OK, MessageBoxImage.Error); }
     }
     private void Exit_Click(object sender, RoutedEventArgs e) { SelectedAction = RecoveryAction.Exit; Close(); }
 }

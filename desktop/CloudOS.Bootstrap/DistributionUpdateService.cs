@@ -41,12 +41,12 @@ public static class DistributionUpdateService
         var safeSource = ValidateSource(source, channel, policy);
         var manager = new UpdateManager(safeSource, new UpdateOptions { ExplicitChannel = channel, AllowVersionDowngrade = false });
         if (!manager.IsInstalled)
-            throw new InvalidOperationException("Atualizações só podem ser aplicadas à instalação gerenciada. O modo portátil permanece manual.");
+            throw new InvalidOperationException("Atualizações automáticas só estão disponíveis na instalação normal. No modo portátil, atualize manualmente.");
         var info = await manager.CheckForUpdatesAsync();
         if (info is null) return null;
         if (manager.CurrentVersion is not null)
             policy.AssertVersionDirection(manager.CurrentVersion.ToString(), info.TargetFullRelease.Version.ToString(), false);
-        if (info.IsDowngrade) throw new InvalidOperationException("Downgrade silencioso foi rejeitado.");
+        if (info.IsDowngrade) throw new InvalidOperationException("O CloudOS impediu uma volta automática para uma versão anterior.");
         AssertAsset(info.TargetFullRelease);
         return new PreparedUpdate(manager, info, safeSource, channel);
     }
@@ -61,13 +61,13 @@ public static class DistributionUpdateService
             ? new SimpleWebSource(safeSource)
             : new SimpleFileSource(new DirectoryInfo(safeSource));
         var manager = new UpdateManager(updateSource, new UpdateOptions { ExplicitChannel = channel, AllowVersionDowngrade = true });
-        if (!manager.IsInstalled) throw new InvalidOperationException("Rollback exige uma instalação gerenciada pelo Velopack.");
+        if (!manager.IsInstalled) throw new InvalidOperationException("A restauração de versão só está disponível na instalação normal do CloudOS.");
         var feed = await updateSource.GetReleaseFeed(NullVelopackLogger.Instance, manager.AppId, channel);
         var targetVersion = SemanticVersion.Parse(version);
         var target = feed.Assets
             .Where(asset => asset.Type == VelopackAssetType.Full)
             .SingleOrDefault(asset => asset.Version == targetVersion)
-            ?? throw new InvalidOperationException("A versão anterior conhecida não existe mais no feed configurado.");
+            ?? throw new InvalidOperationException("A versão anterior necessária para a restauração não está mais disponível.");
         AssertAsset(target);
         if (manager.CurrentVersion is not null)
             policy.AssertVersionDirection(manager.CurrentVersion.ToString(), target.Version.ToString(), true);
@@ -90,9 +90,9 @@ public static class DistributionUpdateService
     {
         var hash = asset.SHA256 ?? string.Empty;
         if (!Regex.IsMatch(hash, "^[0-9a-fA-F]{64}$"))
-            throw new InvalidOperationException("O feed não forneceu SHA-256 válido para o pacote alvo.");
+            throw new InvalidOperationException("O pacote de atualização não possui uma verificação de integridade válida.");
         if (asset.Size <= 0 || string.IsNullOrWhiteSpace(asset.FileName))
-            throw new InvalidOperationException("O feed forneceu metadados de pacote inválidos.");
+            throw new InvalidOperationException("As informações do pacote de atualização são inválidas.");
     }
 
     private static string ValidateSource(
@@ -101,11 +101,11 @@ public static class DistributionUpdateService
         DistributionChannelPolicy policy,
         bool allowLocalForRollback = false)
     {
-        if (string.IsNullOrWhiteSpace(source)) throw new InvalidOperationException("Fonte de atualização não configurada.");
+        if (string.IsNullOrWhiteSpace(source)) throw new InvalidOperationException("A origem de atualização não foi configurada.");
         if (Uri.TryCreate(source, UriKind.Absolute, out var uri))
         {
             if (!string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
-                throw new InvalidOperationException("A fonte de atualização não pode conter credenciais, query string ou fragmento.");
+                throw new InvalidOperationException("A origem de atualização contém informações que não são permitidas.");
             if (uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
             {
                 policy.AssertRemoteOrigin(channel, uri);
@@ -121,11 +121,11 @@ public static class DistributionUpdateService
                 if (!allowLocalForRollback) policy.AssertLocalSourceAllowed(channel);
                 return Path.GetFullPath(uri.LocalPath);
             }
-            throw new InvalidOperationException("Feeds remotos exigem HTTPS; HTTP é aceito apenas para fixture loopback de development explicitamente habilitada.");
+            throw new InvalidOperationException("A origem de atualização informada não é segura para este canal.");
         }
         var full = Path.GetFullPath(source);
         if (!allowLocalForRollback) policy.AssertLocalSourceAllowed(channel);
-        if (!Directory.Exists(full)) throw new DirectoryNotFoundException("Diretório local de atualização não encontrado.");
+        if (!Directory.Exists(full)) throw new DirectoryNotFoundException("A pasta local de atualização não foi encontrada.");
         return full;
     }
 

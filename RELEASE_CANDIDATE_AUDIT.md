@@ -7,13 +7,15 @@ Escopo: foundation e productization da branch `productization/cloudos-distributi
 - O produto permanece em `development` / `unsigned-development`, com publicação stable desabilitada.
 - O launcher de desenvolvimento possui os modos reais `Web` e `Full`. Neste relatório, `WebOnly` é apenas o nome de auditoria para `-Mode Web`; não existe um terceiro modo implícito.
 - `Full` delega ao launcher nativo existente; nenhuma nova superfície de produto foi adicionada no RC.
-- O shutdown agora observa somente processos CloudOS conhecidos, solicita encerramento de UI quando disponível e falha se os processos capturados não desaparecerem dentro do limite. Não há force-kill.
+- O shutdown observa somente processos CloudOS conhecidos, solicita encerramento da UI quando disponível e falha se os processos capturados não desaparecerem dentro do limite. Não há force-kill.
 - Updater, rollback, backup, restore, installer, portable, diagnostics e supply chain continuam nas implementações já existentes e passam pelos gates de productization.
 - O runtime distribuído leva `runtime/node.exe` e `runtime/cloudos-core`; Node/Go globais são toolchain de build, não dependências ocultas do runtime distribuído.
 - `manifest.json` de staging e `portable-manifest.json` não são redundantes: descrevem layouts diferentes. O mesmo vale para os checksums de staging e portable.
 - `docs/DISTRIBUTION.md` e `docs/DISTRIBUTION_AUDIT.md` têm papéis distintos: operação/distribuição versus política/evidência de auditoria.
 - Os workflows existentes foram mantidos quando o gatilho/objetivo é distinto; repetição de regressões entre linhas de estabilização e productization não foi tratada como duplicação funcional.
 - Os utilitários one-off `Reverter-Ultima-Correcao-Core-UI.ps1/.cmd` foram classificados como obsoletos: dependiam de `backup-core-ui-*`, não há backup correspondente no estado RC e não há referência operacional ativa.
+- As mensagens de startup, shutdown, updater e recovery foram revisadas para evitar nomes internos, hashes e exceções cruas na interface. Detalhes técnicos continuam destinados a logs/diagnósticos.
+- Installer e diagnostics não ganharam nova superfície: o instalador continua gerenciado pela stack existente e o diagnóstico continua sanitizado/fail-closed.
 
 ## CONFIRMADO EM TESTES
 
@@ -25,7 +27,8 @@ Escopo: foundation e productization da branch `productization/cloudos-distributi
 ## CONFIRMADO EM CI
 
 - A baseline anterior da mesma branch fechou Linux e Windows em verde na HEAD `811d5e41e403ecaf31a452648bccf13fd5d32241`.
-- A execução RC final deverá repetir Linux e Windows completos. Os números de tamanho serão gravados em `artifacts/audit/release-candidate-metrics.json` e só serão transcritos aqui depois de uma medição real da HEAD RC.
+- A CI RC repete Linux e Windows completos na HEAD candidata.
+- As métricas de artefato são medidas a cada execução Windows e gravadas em `artifacts/audit/release-candidate-metrics.json`; os valores não são hardcoded neste documento para não ficarem divergentes da HEAD que produziu os binários.
 
 ### Métricas RC
 
@@ -33,10 +36,7 @@ Escopo: foundation e productization da branch `productization/cloudos-distributi
 - Startup Full: **não medido** em CI hospedada. O caminho é nativo/interativo e não será usado como substituto de gate físico/visual.
 - Shutdown: **não medido** em CI hospedada enquanto não houver um ciclo completo e representativo de startup Full seguido de shutdown.
 - Memória dos principais componentes: **não medida** em CI hospedada; processos transitórios de build/teste não representam consumo de runtime.
-- Instalador: **aguardando medição da CI RC**.
-- Portátil: **aguardando medição da CI RC**.
-- Update full/delta: **aguardando medição da CI RC**.
-- Diagnósticos: **aguardando medição da CI RC**.
+- Instalador, portátil, update full/delta e diagnósticos: **medidos pela CI Windows** em `release-candidate-metrics.json`, incluindo bytes e SHA-256 de cada arquivo.
 
 ## CONFIRMADO EM VALIDAÇÃO FÍSICA
 

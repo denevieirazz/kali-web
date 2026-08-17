@@ -14,8 +14,8 @@
         <Border Width="54" Height="54" CornerRadius="16" Background="{StaticResource CloudOsAccent}" HorizontalAlignment="Left">
           <TextBlock Text="C" Foreground="White" FontWeight="Bold" FontSize="28" HorizontalAlignment="Center" VerticalAlignment="Center" />
         </Border>
-        <TextBlock Margin="0,20,0,8" Text="CloudOS Recovery" Foreground="White" FontSize="24" FontWeight="SemiBold" />
-        <TextBlock Text="O host não conseguiu permanecer ativo. Dados do usuário não serão apagados. A restauração usa somente um pacote anterior conhecido do feed configurado."
+        <TextBlock Margin="0,20,0,8" Text="Recuperação do CloudOS" Foreground="White" FontSize="24" FontWeight="SemiBold" />
+        <TextBlock Text="O CloudOS não conseguiu concluir a inicialização. Seus dados não serão apagados. Se uma versão anterior segura estiver disponível, você poderá restaurá-la daqui."
                    Foreground="#B5C2D8" FontSize="14" TextWrapping="Wrap" LineHeight="21" />
         <Border Margin="0,18,0,24" Padding="14" Background="#0B1322" CornerRadius="8">
           <TextBlock x:Name="FailureDetails" Foreground="#9AA9C3" FontSize="12" TextWrapping="Wrap" MaxHeight="90" />
