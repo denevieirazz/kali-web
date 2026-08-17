@@ -56,6 +56,16 @@ export type PasteResult = {
   operation?: FileOperation;
 };
 
+export type AssistedTransferResult = {
+  source: FileSourceKind;
+  destination: FileSourceKind;
+  destinationPath: string[];
+  name: string;
+  bytes: number;
+};
+
+export const MAX_ASSISTED_TRANSFER_BYTES = 256 * 1024 * 1024;
+
 function fromOpfs(entry: OpfsFileEntry): CloudFileEntry {
   return { ...entry, kind: entry.kind, source: 'opfs' };
 }
@@ -134,13 +144,48 @@ export const fileSourceFacade = {
     if (source === 'opfs') return opfsCreate(path, kind, name);
     if (source === 'windows') return windowsDirectorySource.create(path, kind, name);
     if (kind === 'directory') return wslFileSource.mkdir(path, name);
-    return wslFileSource.writeText(path, name, '');
+    await wslFileSource.writeText(path, name, '');
+    return normalizeFilePath([name])[0];
   },
 
   async writeText(source: FileSourceKind, path: string[], name: string, content: string, mode?: number) {
     if (source === 'opfs') return opfsWriteText(path, name, content);
     if (source === 'windows') return windowsDirectorySource.writeText(path, name, content);
     return wslFileSource.writeText(path, name, content, mode || 0o600);
+  },
+
+  async writeFile(source: FileSourceKind, path: string[], file: File, mode?: number) {
+    if (source === 'opfs') {
+      const before = await opfsList(path);
+      await opfsUpload(path, [file]);
+      const after = await opfsList(path);
+      const previousNames = new Set(before.map(item => item.name));
+      return after.find(item => !previousNames.has(item.name))?.name || file.name;
+    }
+    if (source === 'windows') return windowsDirectorySource.writeFile(path, file);
+    return wslFileSource.writeFile(path, file, mode || 0o600);
+  },
+
+  async copyAcrossProviders(
+    source: FileSourceKind,
+    sourcePath: string[],
+    entry: CloudFileEntry,
+    destination: FileSourceKind,
+    destinationPath: string[],
+    maximumBytes = MAX_ASSISTED_TRANSFER_BYTES,
+  ): Promise<AssistedTransferResult> {
+    if (source === destination) throw new Error('A ponte assistida é somente para origens diferentes; use copiar/colar normal na mesma origem.');
+    if (entry.kind !== 'file' || entry.symlink) throw new Error('A ponte assistida desta fase copia somente arquivos regulares.');
+    if (entry.size > maximumBytes) throw new Error(`Arquivo excede o limite da ponte assistida de ${maximumBytes} bytes.`);
+    const runtime = await this.runtime(destination);
+    if (!runtime.available || !runtime.mounted) throw new Error(`${runtime.label} não está disponível ou autorizado.`);
+    const existing = await this.list(destination, destinationPath, false);
+    if (existing.some(candidate => candidate.name === entry.name)) {
+      throw new Error(`O destino já contém “${entry.name}”. Nenhum arquivo foi sobrescrito.`);
+    }
+    const file = await this.readFile(source, sourcePath, entry, maximumBytes);
+    const name = await this.writeFile(destination, destinationPath, new File([file], entry.name, { type: file.type, lastModified: file.lastModified }), entry.mode);
+    return { source, destination, destinationPath: [...destinationPath], name, bytes: file.size };
   },
 
   async rename(source: FileSourceKind, path: string[], entry: CloudFileEntry, newName: string) {
