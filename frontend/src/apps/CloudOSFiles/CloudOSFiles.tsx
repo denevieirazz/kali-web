@@ -82,7 +82,7 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
     };
   });
   const initialSource = launchParams.workflowSource || 'opfs';
-  const [source, setSource] = useState<FileSourceKind>(initialSource);
+  const [source, setSource] = useState<FileSourceKind>('opfs');
   const [runtime, setRuntime] = useState<SourceRuntime>({ source: initialSource, label: sourceLabel(initialSource), mounted: initialSource === 'opfs', available: initialSource === 'opfs', detail: '' });
   const [entries, setEntries] = useState<CloudFileEntry[]>([]);
   const [currentPath, setCurrentPath] = useState<string[]>(launchParams.workflowPath || []);
@@ -111,7 +111,14 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
   const operationController = useRef<AbortController | null>(null);
   const activeOperationRef = useRef<ActiveOperation | null>(null);
   const pendingSelectRef = useRef(launchParams.workflowSelectName || '');
+  const launchAppliedRef = useRef(false);
   const { openContextMenu } = useContextMenuStore();
+
+  useEffect(() => {
+    if (launchAppliedRef.current) return;
+    launchAppliedRef.current = true;
+    if (launchParams.workflowSource && launchParams.workflowSource !== 'opfs') setSource(launchParams.workflowSource);
+  }, [launchParams.workflowSource]);
 
   useEffect(() => { activeOperationRef.current = activeOperation; }, [activeOperation]);
   useEffect(() => {
