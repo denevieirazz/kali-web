@@ -4,16 +4,22 @@ import fs from 'node:fs';
 
 const read = path => fs.readFileSync(new URL(path, import.meta.url), 'utf8');
 const audit = read('../../WORKFLOW_AUDIT.md');
+const review = read('../../WORKFLOW_PRODUCTIVITY_REVIEW.md');
 const files = read('../src/apps/CloudOSFiles/CloudOSFiles.tsx');
 const facade = read('../src/apps/CloudOSFiles/fileSourceFacade.ts');
 const preview = read('../src/apps/CloudOSFiles/FilePreviewPanel.tsx');
 const workspace = read('../src/apps/WorkflowWorkspace/WorkflowWorkspace.tsx');
 const workspaceService = read('../src/services/workflowWorkspace.ts');
+const workspaceTransfer = read('../src/services/workflowWorkspaceTransfer.ts');
+const recentFiles = read('../src/services/workflowRecentFiles.ts');
 const clipboard = read('../src/services/workflowClipboard.ts');
 const shell = read('../src/components/Workflow/WorkflowShell.tsx');
 const filesBridge = read('../src/components/Workflow/FilesWorkflowBridge.tsx');
+const terminalApp = read('../src/apps/CloudOSTerminal/CloudOSTerminal.tsx');
 const terminal = read('../src/apps/CloudOSTerminal/TerminalSession.tsx');
 const terminalTransport = read('../src/apps/CloudOSTerminal/terminalSessionTransport.js');
+const terminalWorkspace = read('../src/core/terminalWorkspaceState.js');
+const workflowCore = read('../src/core/workflowCore.js');
 const app = read('../src/App.tsx');
 const registry = read('../src/core/appRegistry.ts');
 
@@ -25,7 +31,7 @@ test('workspace hub exposes required daily-work surfaces without a database', ()
   for (const label of ['Notes', 'Downloads', 'Evidence', 'Reports', 'Files', 'Terminal', 'Browser']) has(workspace, new RegExp(label));
   has(workspaceService, /workspace\.json/);
   has(workspaceService, /WORKSPACE_FOLDERS/);
-  assert.doesNotMatch(workspaceService, /sqlite|database|indexedDB/i);
+  assert.doesNotMatch(`${workspaceService}\n${workspaceTransfer}`, /sqlite|indexedDB/i);
   has(registry, /'workflow-workspace'/);
   has(app, /<WorkflowShell \/>/);
 });
@@ -40,6 +46,26 @@ test('workspace 3.5 supports rename archive duplicate metadata and search withou
   for (const label of ['Última atividade', 'Status', 'Tags', 'Cliente', 'Tipo']) has(workspace, new RegExp(label, 'i'));
 });
 
+test('Batch 3.6 workspace can export import and move without pretending cross-provider atomicity', () => {
+  for (const token of ['downloadWorkspaceExport', 'importWorkspaceFile', 'moveWorkspaceSafely']) has(workspace, new RegExp(token));
+  has(workspaceTransfer, /cloudos-workspace-export\/v1/);
+  has(workspaceTransfer, /MAX_WORKSPACE_EXPORT_ENTRIES = 2000/);
+  has(workspaceTransfer, /MAX_WORKSPACE_EXPORT_BYTES = 64 \* 1024 \* 1024/);
+  has(workspaceTransfer, /MAX_WORKSPACE_EXPORT_FILE_BYTES = 16 \* 1024 \* 1024/);
+  has(workspaceTransfer, /link simbólico e não será seguido/);
+  has(workspaceTransfer, /await archiveWorkspace\(workspace\.id, true\)/);
+  has(workspaceTransfer, /sourceDeleted: false/);
+  has(workspace, /origem antiga arquivada, não apagada/);
+});
+
+test('file association remains OS-like but fail-closed for scripts executables and symlinks', () => {
+  has(workflowCore, /NOTES_EXTENSIONS = new Set\(\['txt', 'md', 'json', 'log'\]\)/);
+  has(workflowCore, /VIEWER_EXTENSIONS = new Set\(\['png', 'jpg', 'jpeg', 'webp', 'pdf'\]\)/);
+  has(workflowCore, /if \(symlink \|\| kind === 'symlink'\) return 'info'/);
+  has(workflowCore, /if \(kind === 'directory'\) return 'directory'/);
+  assert.doesNotMatch(workflowCore, /NOTES_EXTENSIONS[^\n]*(?:exe|bat|cmd|ps1|sh|js)/i);
+});
+
 test('Notes searches loaded content and keeps a bounded global text index', () => {
   has(workspace, /note\.title}\\n\$\{note\.content/);
   has(workspaceService, /MAX_NOTE_INDEX_CONTENT_CHARS = 8192/);
@@ -47,13 +73,46 @@ test('Notes searches loaded content and keeps a bounded global text index', () =
   has(shell, /searchText: note\.searchText/);
 });
 
-test('Files keeps cross-provider transfer assisted, confirmed and separate from normal paste', () => {
+test('Batch 3.6 Notes search exposes highlights results and bounded jumps in real loaded content', () => {
+  has(workspace, /MAX_VISIBLE_SEARCH_HITS = 100/);
+  has(workspace, /function textHits/);
+  has(workspace, /<mark key=/);
+  has(workspace, /setSelectionRange\(hit\.start, hit\.end\)/);
+  has(workspace, /resultado\(s\)/);
+  has(workspace, /F3\/Shift\+F3 salta resultados/);
+  assert.doesNotMatch(workspace, /embedding|vector|llm|openai/i);
+});
+
+test('Batch 3.6 external text editor has explicit save save-as close and dirty protection', () => {
+  for (const label of ['Salvar', 'Salvar como', 'Fechar', 'Arquivo modificado']) has(workspace, new RegExp(label, 'i'));
+  has(workspace, /const externalDirty = Boolean/);
+  has(workspace, /beforeunload/);
+  has(workspace, /Salvar Como aceita somente txt, md, json ou log/);
+  has(workspace, /Salvar Como não sobrescreve arquivos/);
+  has(workspace, /if \(externalFile\) return;\n\s*const dirty = Boolean\(active/);
+  has(workspace, /Ctrl\+Shift\+S salva como/);
+});
+
+test('Files keeps cross-provider transfer assisted confirmed and separate from normal paste', () => {
   for (const label of ['Abrir Terminal aqui', 'Enviar para Linux', 'Enviar para Windows', 'Copiar para Workspace']) has(files, new RegExp(label));
   has(files, /window\.confirm/);
   has(facade, /copyAcrossProviders/);
   has(facade, /O destino já contém/);
   has(facade, /entry\.kind !== 'file'/);
   has(facade, /clipboard\.source !== source/);
+});
+
+test('Files 3.6 records real opens and exposes one breadcrumb recent-documents and download context', () => {
+  has(filesBridge, /recordRecentFile/);
+  has(filesBridge, /listRecentFiles\('documents'\)/);
+  has(filesBridge, /wf-files-breadcrumbs/);
+  has(filesBridge, /Abrir recente/);
+  has(filesBridge, /Documentos recentes/);
+  has(filesBridge, /Destino atual de downloads/);
+  has(filesBridge, /Browser nativo congelado ainda não suporta redirecionamento físico/);
+  has(recentFiles, /MAX_RECENT_FILES = 30/);
+  has(recentFiles, /workflowFileOpenMode/);
+  assert.doesNotMatch(recentFiles, /sqlite|indexedDB|fetch\(/i);
 });
 
 test('Files 3.5 routes safe double-click text to Notes and exposes contextual productivity actions', () => {
@@ -71,6 +130,18 @@ test('image Viewer supports bounded zoom pan fit original-size and keyboard/whee
   has(preview, /event\.key === '\+'/);
   has(preview, /event\.key === '-'/);
   has(preview, /sandbox=""/);
+});
+
+test('Terminal tabs stay frontend-only and now support create rename close without protocol changes', () => {
+  has(terminalWorkspace, /renameTerminalTab/);
+  has(terminalWorkspace, /title: safeTitle/);
+  has(terminalWorkspace, /slice\(0, 60\)/);
+  has(terminalApp, /Renomear aba/);
+  has(terminalApp, /\+ PowerShell/);
+  has(terminalApp, /\+ WSL/);
+  has(terminalApp, /Fechar aba/);
+  has(terminalApp, /onDoubleClick=\{\(\) => renameTab\(tab\)\}/);
+  assert.doesNotMatch(terminalTransport, /\btitle\b|renameTerminalTab|cwd\s*:|command\s*:/);
 });
 
 test('Terminal here does not weaken terminal handshake with cwd or command injection', () => {
@@ -105,21 +176,30 @@ test('download destination defaults to active workspace in UX but native Browser
   has(workspace, /Por padrão, quando não existe preferência salva, o destino é o Workspace ativo/);
   has(workspace, /Browser nativo está congelado/);
   has(workspaceService, /active \? \{ kind: 'workspace', workspaceId: active\.id \} : \{ kind: 'opfs' \}/);
+  has(workspace, /ww-permanent-destination/);
   assert.doesNotMatch(files, /nativeHostBridge\.openBrowser/);
 });
 
-test('WebOnly launcher explains Browser Full-only capability and offers default browser without editing native Browser', () => {
+test('WebOnly launcher explains Browser Full-only capability without offering impossible native app result', () => {
   has(shell, /nativeHostBridge\.available/);
-  has(shell, /Browser disponível apenas em modo Full/);
+  has(shell, /filter\(app => nativeHostBridge\.available \|\| app\.id !== 'browser'\)/);
+  has(shell, /Browser disponível apenas no modo Full/);
   has(shell, /Abrir navegador padrão/);
+  has(shell, /não ativa o Browser do CloudOS, não muda o modo da sessão/);
   assert.doesNotMatch(shell, /\.\.\/\.\.\/apps\/Browser/);
 });
 
-test('Batch 3.5 audit keeps productivity metrics factual and explicitly unmeasured when no baseline exists', () => {
+test('Batch 3.6 productivity review remains factual and names the remaining system boundaries', () => {
+  for (const heading of ['O que ainda obriga abrir Windows', 'O que ainda obriga abrir Linux diretamente', 'O que ainda parece três sistemas diferentes', 'O que já parece um sistema único']) has(review, new RegExp(heading));
+  has(review, /Cliques removidos: \*\*não medido\*\*/);
+  has(review, /Tempo economizado por fluxo: \*\*não medido\*\*/);
+  has(review, /Validação física do Batch 3\.6: \*\*não executada/);
+  has(review, /não promove, não publica release e não altera a linha Productization RC/);
+});
+
+test('Batch 3.5 audit keeps historical productivity metrics factual', () => {
   has(audit, /# WORKFLOW AUDIT — CloudOS Batch 3\.5/);
   has(audit, /## Cliques removidos\r?\n\r?\n\*\*Não medido\.\*\*/);
   has(audit, /## Passos removidos\r?\n\r?\n\*\*Não medido como número agregado\.\*\*/);
-  has(audit, /contagem de \*\*fluxos de código\/UX alterados\*\*, não uma alegação/);
   has(audit, /Browser nativo continua congelado/);
-  has(audit, /Batch 3\.5 não promove, não publica release e não altera a linha RC/);
 });
