@@ -65,22 +65,15 @@ export default function WorkflowShell() {
   const allResults = useMemo<LauncherResult[]>(() => {
     void revision;
     const appResults: LauncherResult[] = Object.values(appMap)
+      .filter(app => nativeHostBridge.available || app.id !== 'browser')
       .map(app => ({
         key: `app:${app.id}`,
         type: app.id === 'settings' ? 'setting' : 'app',
-        title: app.id === 'browser' && !nativeHostBridge.available ? 'Browser — modo Full' : app.name,
-        detail: app.id === 'settings'
-          ? 'Configurações'
-          : app.id === 'browser' && !nativeHostBridge.available
-            ? 'Browser nativo disponível apenas em modo Full'
-            : 'Aplicativo',
+        title: app.name,
+        detail: app.id === 'settings' ? 'Configurações' : 'Aplicativo',
         searchText: app.id === 'browser' ? 'browser navegador web modo full' : '',
         icon: app.icon || '◻',
-        run: () => app.id === 'settings'
-          ? openSettings()
-          : app.id === 'browser' && !nativeHostBridge.available
-            ? openDefaultBrowser()
-            : launchWorkflowApp(app.id),
+        run: () => app.id === 'settings' ? openSettings() : launchWorkflowApp(app.id),
       }));
 
     const workspaces = listWorkspaces();
@@ -219,7 +212,7 @@ export default function WorkflowShell() {
     {launcherOpen && <div className="wf-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setLauncherOpen(false); }}>
       <section className="wf-launcher" role="dialog" aria-modal="true" aria-label="App Launcher">
         <header><span>⌕</span><input ref={inputRef} value={query} onChange={event => setQuery(event.target.value)} placeholder="Aplicações, arquivos, workspace, notas, configurações…" /></header>
-        {showWebOnlyBrowser && <div className="wf-webonly-browser" role="status"><div><strong>Browser disponível apenas em modo Full</strong><small>O Browser nativo não está disponível nesta sessão WebOnly. Você pode continuar no navegador padrão sem ativar tecnologia nova.</small></div><button onClick={() => { try { openDefaultBrowser(); setLauncherOpen(false); setQuery(''); } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Não foi possível abrir o navegador padrão.'); } }}>Abrir navegador padrão</button></div>}
+        {showWebOnlyBrowser && <div className="wf-webonly-browser" role="status"><div><strong>Browser disponível apenas no modo Full</strong><small>Esta sessão é WebOnly. Abrir o navegador padrão não ativa o Browser do CloudOS, não muda o modo da sessão e não cria integração nova.</small></div><button onClick={() => { try { openDefaultBrowser(); setLauncherOpen(false); setQuery(''); } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Não foi possível abrir o navegador padrão.'); } }}>Abrir navegador padrão</button></div>}
         {message && <div className="wf-message">{message}</div>}
         <div className="wf-results">{results.map((result, index) => <button key={result.key} className={index === selected ? 'selected' : ''} onMouseEnter={() => setSelected(index)} onClick={() => { try { result.run(); setLauncherOpen(false); setQuery(''); } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Falha ao abrir item.'); } }}><span className="wf-icon">{result.icon}</span><div><strong>{result.title}</strong><small>{result.detail}</small></div><span className="wf-kind">{result.type}</span></button>)}{!results.length && !showWebOnlyBrowser && <p>Nenhum resultado.</p>}</div>
         <footer><span>Alt+Espaço</span><span>fallback: Ctrl+Shift+P</span><span>↑↓ navegar · Enter abrir</span><span>Alt+Shift+←/→ organiza sem perder foco</span></footer>
