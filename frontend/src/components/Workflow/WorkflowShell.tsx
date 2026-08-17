@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAppRegistry } from '../../core/appRegistry';
 import { matchesWorkflowQuery } from '../../core/workflowCore.js';
+import { nativeHostBridge } from '../../services/nativeHostBridge';
 import {
   clearClipboardHistory,
   copyClipboardEntryToSystem,
@@ -10,9 +11,10 @@ import {
   toggleClipboardFavorite,
   type ClipboardMetadata,
 } from '../../services/workflowClipboard';
-import { launchWorkflowApp, openFilesAt, openSettings, openWorkspace } from '../../services/workflowLaunch';
+import { launchWorkflowApp, openDefaultBrowser, openFilesAt, openSettings, openWorkspace } from '../../services/workflowLaunch';
 import { listIndexedFiles, listNoteIndex, listWorkspaces } from '../../services/workflowWorkspace';
 import { activeWorkflowWindowId, maximizeWorkflowWindow, restoreWorkflowWindow, snapWorkflowWindow } from '../../services/workflowWindow';
+import FilesWorkflowBridge from './FilesWorkflowBridge';
 import './WorkflowShell.css';
 
 type LauncherResult = {
@@ -20,6 +22,7 @@ type LauncherResult = {
   type: 'app' | 'workspace' | 'note' | 'file' | 'setting';
   title: string;
   detail: string;
+  searchText?: string;
   icon: string;
   run: () => void;
 };
@@ -29,6 +32,10 @@ function typingTarget(target: EventTarget | null) {
     || target instanceof HTMLTextAreaElement
     || target instanceof HTMLSelectElement
     || (target instanceof HTMLElement && target.isContentEditable);
+}
+
+function browserIntent(query: string) {
+  return /browser|navegador|web/i.test(query.trim());
 }
 
 export default function WorkflowShell() {
@@ -61,18 +68,29 @@ export default function WorkflowShell() {
       .map(app => ({
         key: `app:${app.id}`,
         type: app.id === 'settings' ? 'setting' : 'app',
-        title: app.name,
-        detail: app.id === 'settings' ? 'Configurações' : 'Aplicativo',
+        title: app.id === 'browser' && !nativeHostBridge.available ? 'Browser — modo Full' : app.name,
+        detail: app.id === 'settings'
+          ? 'Configurações'
+          : app.id === 'browser' && !nativeHostBridge.available
+            ? 'Browser nativo disponível apenas em modo Full'
+            : 'Aplicativo',
+        searchText: app.id === 'browser' ? 'browser navegador web modo full' : '',
         icon: app.icon || '◻',
-        run: () => app.id === 'settings' ? openSettings() : launchWorkflowApp(app.id),
+        run: () => app.id === 'settings'
+          ? openSettings()
+          : app.id === 'browser' && !nativeHostBridge.available
+            ? openDefaultBrowser()
+            : launchWorkflowApp(app.id),
       }));
 
     const workspaces = listWorkspaces();
-    const workspaceResults: LauncherResult[] = workspaces.map(workspace => ({
+    const activeWorkspaces = workspaces.filter(workspace => workspace.status !== 'archived');
+    const workspaceResults: LauncherResult[] = activeWorkspaces.map(workspace => ({
       key: `workspace:${workspace.id}`,
       type: 'workspace',
       title: workspace.name,
-      detail: `Workspace · ${workspace.provider}`,
+      detail: `Workspace · ${workspace.client ? `${workspace.client} · ` : ''}${workspace.provider}`,
+      searchText: `${workspace.description} ${workspace.client} ${workspace.tags.join(' ')} ${workspace.type}`,
       icon: '▣',
       run: () => openWorkspace(workspace.id),
     }));
@@ -84,6 +102,7 @@ export default function WorkflowShell() {
         type: 'note',
         title: note.title,
         detail: `Nota${workspace ? ` · ${workspace.name}` : ''}`,
+        searchText: note.searchText,
         icon: '✎',
         run: () => openWorkspace(note.workspaceId, note.fileName),
       };
@@ -104,10 +123,12 @@ export default function WorkflowShell() {
   }, [appMap, revision]);
 
   const results = useMemo(() => {
-    const filtered = allResults.filter(result => matchesWorkflowQuery(`${result.title} ${result.detail} ${result.type}`, query));
+    const filtered = allResults.filter(result => matchesWorkflowQuery(`${result.title} ${result.detail} ${result.searchText || ''} ${result.type}`, query));
     const typeOrder: Record<LauncherResult['type'], number> = { workspace: 0, note: 1, app: 2, setting: 3, file: 4 };
     return filtered.sort((left, right) => typeOrder[left.type] - typeOrder[right.type] || left.title.localeCompare(right.title)).slice(0, 40);
   }, [allResults, query]);
+
+  const showWebOnlyBrowser = !nativeHostBridge.available && browserIntent(query);
 
   useEffect(() => { setSelected(0); }, [query]);
   useEffect(() => {
@@ -142,12 +163,32 @@ export default function WorkflowShell() {
         return;
       }
 
+      // Window shortcuts intentionally run before launcher navigation. This keeps
+      // Alt+Shift+Left/Right working while the launcher input owns focus.
+      const targetWindow = activeWorkflowWindowId();
+      const snapLeft = event.altKey && event.shiftKey && event.key === 'ArrowLeft';
+      const snapRight = event.altKey && event.shiftKey && event.key === 'ArrowRight';
+      const maximize = event.altKey && event.shiftKey && event.key === 'ArrowUp';
+      const restore = event.altKey && event.shiftKey && event.key === 'ArrowDown';
+      const metaLeft = event.metaKey && event.key === 'ArrowLeft';
+      const metaRight = event.metaKey && event.key === 'ArrowRight';
+      if (targetWindow && (snapLeft || snapRight || maximize || restore || metaLeft || metaRight)) {
+        event.preventDefault();
+        if (snapLeft || metaLeft) snapWorkflowWindow(targetWindow, 'left');
+        else if (snapRight || metaRight) snapWorkflowWindow(targetWindow, 'right');
+        else if (maximize) maximizeWorkflowWindow(targetWindow);
+        else restoreWorkflowWindow(targetWindow);
+        if (launcherOpen) window.requestAnimationFrame(() => inputRef.current?.focus());
+        return;
+      }
+
       if (launcherOpen) {
         if (event.key === 'ArrowDown') { event.preventDefault(); setSelected(value => Math.min(results.length - 1, value + 1)); }
         else if (event.key === 'ArrowUp') { event.preventDefault(); setSelected(value => Math.max(0, value - 1)); }
         else if (event.key === 'Enter' && results[selected]) {
           event.preventDefault();
-          results[selected].run();
+          try { results[selected].run(); }
+          catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Falha ao abrir item.'); }
           setLauncherOpen(false);
           setQuery('');
         }
@@ -155,16 +196,6 @@ export default function WorkflowShell() {
       }
 
       if (typingTarget(event.target)) return;
-      const targetWindow = activeWorkflowWindowId();
-      if (!targetWindow) return;
-      const snapLeft = (event.metaKey && event.key === 'ArrowLeft') || (event.altKey && event.shiftKey && event.key === 'ArrowLeft');
-      const snapRight = (event.metaKey && event.key === 'ArrowRight') || (event.altKey && event.shiftKey && event.key === 'ArrowRight');
-      const maximize = event.altKey && event.shiftKey && event.key === 'ArrowUp';
-      const restore = event.altKey && event.shiftKey && event.key === 'ArrowDown';
-      if (snapLeft) { event.preventDefault(); snapWorkflowWindow(targetWindow, 'left'); }
-      else if (snapRight) { event.preventDefault(); snapWorkflowWindow(targetWindow, 'right'); }
-      else if (maximize) { event.preventDefault(); maximizeWorkflowWindow(targetWindow); }
-      else if (restore) { event.preventDefault(); restoreWorkflowWindow(targetWindow); }
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
@@ -184,11 +215,14 @@ export default function WorkflowShell() {
   };
 
   return <>
+    <FilesWorkflowBridge />
     {launcherOpen && <div className="wf-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setLauncherOpen(false); }}>
       <section className="wf-launcher" role="dialog" aria-modal="true" aria-label="App Launcher">
         <header><span>⌕</span><input ref={inputRef} value={query} onChange={event => setQuery(event.target.value)} placeholder="Aplicações, arquivos, workspace, notas, configurações…" /></header>
-        <div className="wf-results">{results.map((result, index) => <button key={result.key} className={index === selected ? 'selected' : ''} onMouseEnter={() => setSelected(index)} onClick={() => { result.run(); setLauncherOpen(false); setQuery(''); }}><span className="wf-icon">{result.icon}</span><div><strong>{result.title}</strong><small>{result.detail}</small></div><span className="wf-kind">{result.type}</span></button>)}{!results.length && <p>Nenhum resultado.</p>}</div>
-        <footer><span>Alt+Espaço</span><span>fallback: Ctrl+Shift+P</span><span>↑↓ navegar · Enter abrir</span></footer>
+        {showWebOnlyBrowser && <div className="wf-webonly-browser" role="status"><div><strong>Browser disponível apenas em modo Full</strong><small>O Browser nativo não está disponível nesta sessão WebOnly. Você pode continuar no navegador padrão sem ativar tecnologia nova.</small></div><button onClick={() => { try { openDefaultBrowser(); setLauncherOpen(false); setQuery(''); } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Não foi possível abrir o navegador padrão.'); } }}>Abrir navegador padrão</button></div>}
+        {message && <div className="wf-message">{message}</div>}
+        <div className="wf-results">{results.map((result, index) => <button key={result.key} className={index === selected ? 'selected' : ''} onMouseEnter={() => setSelected(index)} onClick={() => { try { result.run(); setLauncherOpen(false); setQuery(''); } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Falha ao abrir item.'); } }}><span className="wf-icon">{result.icon}</span><div><strong>{result.title}</strong><small>{result.detail}</small></div><span className="wf-kind">{result.type}</span></button>)}{!results.length && !showWebOnlyBrowser && <p>Nenhum resultado.</p>}</div>
+        <footer><span>Alt+Espaço</span><span>fallback: Ctrl+Shift+P</span><span>↑↓ navegar · Enter abrir</span><span>Alt+Shift+←/→ organiza sem perder foco</span></footer>
       </section>
     </div>}
 

@@ -17,6 +17,7 @@ const allowed = [
   /^frontend\/src\/core\/terminalWorkspaceState\.(?:js|d\.ts)$/,
   /^frontend\/src\/apps\/CloudOSTerminal\/(?:CloudOSTerminal|TerminalSession)\.tsx$/,
   /^frontend\/src\/apps\/CloudOSFiles\/(?:CloudOSFiles|fileSourceFacade|windowsDirectorySource|wslFileSource)\.tsx?$/,
+  /^frontend\/src\/apps\/CloudOSFiles\/(?:FilePreviewPanel\.tsx|CloudOSFilesPreview\.css)$/,
 ];
 
 const output = execFileSync('git', ['diff', '--name-only', `${BASE}...HEAD`], { encoding: 'utf8' });

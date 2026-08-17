@@ -114,12 +114,21 @@
 
 .cf-preview__image {
   display: block;
-  width: 100%;
-  height: 100%;
-  max-height: 100%;
-  object-fit: contain;
-  padding: 10px;
+  user-select: none;
+  transform-origin: center center;
 }
+.cf-preview__image.is-fit { width: 100%; height: 100%; max-height: 100%; object-fit: contain; padding: 10px; }
+.cf-preview__image.is-manual { width: auto; height: auto; max-width: none; max-height: none; padding: 0; }
+
+.cf-image-viewer { display: grid; grid-template-rows: auto minmax(0,1fr) auto; width: 100%; height: 100%; min-height: 220px; overflow: hidden; }
+.cf-image-viewer__toolbar { display: flex; align-items: center; gap: 5px; padding: 7px 8px; border-bottom: 1px solid rgba(255,255,255,.08); background: rgba(8,5,20,.92); }
+.cf-image-viewer__toolbar button { min-width: 30px; height: 28px; border: 1px solid rgba(168,85,247,.34); border-radius: 6px; color: #ddd6fe; background: rgba(124,58,237,.14); cursor: pointer; }
+.cf-image-viewer__toolbar button:hover { border-color: #a855f7; background: rgba(168,85,247,.24); color: #fff; }
+.cf-image-viewer__toolbar span { min-width: 52px; text-align: center; color: #b8c3d2; font-size: 10px; font-variant-numeric: tabular-nums; }
+.cf-image-viewer__stage { position: relative; display: grid; place-items: center; min-width: 0; min-height: 0; overflow: hidden; outline: 0; touch-action: none; cursor: grab; }
+.cf-image-viewer__stage:focus-visible { box-shadow: inset 0 0 0 2px rgba(168,85,247,.55); }
+.cf-image-viewer__stage.is-dragging { cursor: grabbing; }
+.cf-image-viewer__hint { padding: 5px 8px; border-top: 1px solid rgba(255,255,255,.06); color: #718096; background: rgba(8,5,20,.9); font-size: 9px; text-align: center; }
 
 .cf-preview__media { width: calc(100% - 24px); margin: 24px 12px; }
 .cf-preview__video { display: block; width: 100%; height: 100%; object-fit: contain; background: #000; }

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { classifyPreview } from '../../core/filePreviewPolicy.js';
+import { normalizeViewerZoom, stepViewerZoom } from '../../core/workflowCore.js';
 import { formatBytes } from './opfsFileService';
 import './CloudOSFilesPreview.css';
 
@@ -31,9 +32,9 @@ function modeText(mode: number | undefined) {
 }
 
 function sourceText(source: FilePreviewEntry['source']) {
-  if (source === 'wsl') return 'Linux real (WSL)';
-  if (source === 'windows') return 'Windows selecionado';
-  return 'CloudOS local (OPFS)';
+  if (source === 'wsl') return 'Linux · Home';
+  if (source === 'windows') return 'Windows · pasta autorizada';
+  return 'OPFS · CloudOS';
 }
 
 export default function FilePreviewPanel({
@@ -55,6 +56,11 @@ export default function FilePreviewPanel({
   const [objectUrl, setObjectUrl] = useState('');
   const [hash, setHash] = useState('');
   const [previewError, setPreviewError] = useState('');
+  const [zoomMode, setZoomMode] = useState<'fit' | 'manual'>('fit');
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
 
   const preview = useMemo(
     () => file ? classifyPreview({ name: entry?.name ?? file.name, type: file.type, size: file.size }) : null,
@@ -68,6 +74,11 @@ export default function FilePreviewPanel({
     setObjectUrl('');
     setHash('');
     setPreviewError('');
+    setZoomMode('fit');
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+    setDragging(false);
+    dragRef.current = null;
 
     if (!file || !preview?.allowed) return;
 
@@ -94,11 +105,53 @@ export default function FilePreviewPanel({
     };
   }, [file, preview?.allowed, preview?.kind]);
 
+  const fitImage = useCallback(() => {
+    setZoomMode('fit');
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, []);
+
+  const originalImage = useCallback(() => {
+    setZoomMode('manual');
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, []);
+
+  const adjustZoom = useCallback((direction: number) => {
+    setZoomMode('manual');
+    setZoom(current => stepViewerZoom(current, direction));
+  }, []);
+
+  const onImageKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === '+' || event.key === '=') { event.preventDefault(); adjustZoom(1); }
+    else if (event.key === '-') { event.preventDefault(); adjustZoom(-1); }
+    else if (event.key === '0') { event.preventDefault(); fitImage(); }
+  }, [adjustZoom, fitImage]);
+
+  const onPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (zoomMode !== 'manual') return;
+    dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: pan.x, originY: pan.y };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDragging(true);
+  }, [pan.x, pan.y, zoomMode]);
+
+  const onPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    setPan({ x: drag.originX + event.clientX - drag.startX, y: drag.originY + event.clientY - drag.startY });
+  }, []);
+
+  const endPointer = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    setDragging(false);
+  }, []);
+
   if (!entry) {
     return (
-      <aside className="cf-preview cf-preview--empty" aria-label="Preview de arquivo">
+      <aside className="cf-preview cf-preview--empty" aria-label="Viewer de arquivo">
         <span>◫</span>
-        <strong>Preview</strong>
+        <strong>Viewer</strong>
         <small>Selecione um arquivo para visualizar conteúdo e propriedades.</small>
       </aside>
     );
@@ -108,32 +161,38 @@ export default function FilePreviewPanel({
   const isSymlink = entry.kind === 'symlink' || entry.symlink === true;
 
   return (
-    <aside className="cf-preview" aria-label={`Preview de ${displayName}`}>
+    <aside className="cf-preview" aria-label={`Viewer de ${displayName}`}>
       <header className="cf-preview__header">
         <div>
           <small>{isSymlink ? 'Link simbólico' : entry.kind === 'directory' ? 'Pasta' : 'Arquivo'}</small>
           <strong title={displayName}>{displayName}</strong>
         </div>
-        <button type="button" onClick={onClose} aria-label="Fechar preview">×</button>
+        <button type="button" onClick={onClose} aria-label="Fechar viewer">×</button>
       </header>
 
       <div className="cf-preview__surface">
         {loading ? (
-          <div className="cf-preview__placeholder"><span className="cf-spinner" />Carregando preview…</div>
+          <div className="cf-preview__placeholder"><span className="cf-spinner" />Carregando viewer…</div>
         ) : isSymlink ? (
-          <div className="cf-preview__placeholder"><span>🔗</span>Link simbólico não é seguido pelo CloudOS Files.</div>
+          <div className="cf-preview__placeholder"><span>🔗</span>Link simbólico não é seguido nem aberto pelo CloudOS Files.</div>
         ) : entry.kind === 'directory' ? (
           <div className="cf-preview__placeholder"><span className="cf-preview__folder">📁</span>Abra a pasta para visualizar seu conteúdo.</div>
         ) : !file ? (
-          <div className="cf-preview__placeholder">Não foi possível carregar o arquivo.</div>
+          <div className="cf-preview__placeholder"><span>ℹ️</span>Informações do arquivo. Abertura automática não é permitida para este tipo.</div>
         ) : !preview?.allowed ? (
-          <div className="cf-preview__placeholder"><span>📦</span>{preview?.reason || 'Preview indisponível.'}</div>
+          <div className="cf-preview__placeholder"><span>📦</span>{preview?.reason || 'Viewer indisponível.'}</div>
         ) : previewError ? (
           <div className="cf-preview__placeholder">⚠️ {previewError}</div>
         ) : preview.kind === 'text' ? (
           <pre className="cf-preview__text" tabIndex={0}>{text}</pre>
         ) : preview.kind === 'image' && objectUrl ? (
-          <img className="cf-preview__image" src={objectUrl} alt={displayName} />
+          <div className="cf-image-viewer">
+            <div className="cf-image-viewer__toolbar" aria-label="Controles de imagem"><button type="button" onClick={() => adjustZoom(-1)} aria-label="Diminuir zoom">−</button><span>{zoomMode === 'fit' ? 'Fit' : `${Math.round(normalizeViewerZoom(zoom) * 100)}%`}</span><button type="button" onClick={() => adjustZoom(1)} aria-label="Aumentar zoom">＋</button><button type="button" onClick={fitImage}>Fit</button><button type="button" onClick={originalImage}>1:1</button></div>
+            <div className={`cf-image-viewer__stage ${dragging ? 'is-dragging' : ''}`} tabIndex={0} onKeyDown={onImageKeyDown} onWheel={event => { event.preventDefault(); adjustZoom(event.deltaY > 0 ? -1 : 1); }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endPointer} onPointerCancel={endPointer}>
+              <img className={`cf-preview__image ${zoomMode === 'fit' ? 'is-fit' : 'is-manual'}`} src={objectUrl} alt={displayName} draggable={false} style={zoomMode === 'manual' ? { transform: `translate(${pan.x}px, ${pan.y}px) scale(${normalizeViewerZoom(zoom)})` } : undefined} />
+            </div>
+            <small className="cf-image-viewer__hint">Wheel ou +/−: zoom · arraste: pan · 0: Fit</small>
+          </div>
         ) : preview.kind === 'audio' && objectUrl ? (
           <audio className="cf-preview__media" src={objectUrl} controls preload="metadata" />
         ) : preview.kind === 'video' && objectUrl ? (
@@ -141,7 +200,7 @@ export default function FilePreviewPanel({
         ) : preview.kind === 'pdf' && objectUrl ? (
           <iframe className="cf-preview__pdf" src={objectUrl} title={`PDF ${displayName}`} sandbox="" />
         ) : (
-          <div className="cf-preview__placeholder">Preparando preview…</div>
+          <div className="cf-preview__placeholder">Preparando viewer…</div>
         )}
       </div>
 
