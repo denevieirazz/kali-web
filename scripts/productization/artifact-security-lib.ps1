@@ -21,10 +21,10 @@ function Find-CloudOSSecurityRepoRoot{
 function Get-CloudOSPrivateWorkspaceNames{
  param([string]$BuildResultPath)
  $names=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase);$repoRoot=Find-CloudOSSecurityRepoRoot $BuildResultPath
- if([string]::IsNullOrWhiteSpace($repoRoot)){return ,$names.ToArray()}
+ if([string]::IsNullOrWhiteSpace($repoRoot)){return @($names)}
  try{
   $rootPackage=Get-Content -LiteralPath (Join-Path $repoRoot 'package.json') -Raw|ConvertFrom-Json
-  if($rootPackage.private -ne $true){return ,$names.ToArray()}
+  if($rootPackage.private -ne $true){return @($names)}
   if(-not [string]::IsNullOrWhiteSpace([string]$rootPackage.name)){[void]$names.Add([string]$rootPackage.name)}
   $workspaceEntries=New-Object System.Collections.Generic.List[string];$workspacesProperty=$rootPackage.PSObject.Properties['workspaces']
   if($workspacesProperty){
@@ -40,8 +40,8 @@ function Get-CloudOSPrivateWorkspaceNames{
     $packagePath=Join-Path $directory.FullName 'package.json';if(-not(Test-Path -LiteralPath $packagePath -PathType Leaf)){continue};$package=Get-Content -LiteralPath $packagePath -Raw|ConvertFrom-Json;if($package.private -ne $true){continue};[void]$names.Add($directory.Name);if(-not [string]::IsNullOrWhiteSpace([string]$package.name)){[void]$names.Add([string]$package.name)}
    }
   }
- }catch{return ,$names.ToArray()}
- return ,$names.ToArray()
+ }catch{return @($names)}
+ return @($names)
 }
 function Test-CloudOSArtifactSecurity{
  param([string]$Staging,[string]$ManifestPath,[string]$ComponentsPath,[string]$SupplyChainPath,[string]$ArtifactAuditPath,[string]$BuildResultPath)
