@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const read = path => fs.readFileSync(new URL(path, import.meta.url), 'utf8');
+const audit = read('../../WORKFLOW_AUDIT.md');
 const files = read('../src/apps/CloudOSFiles/CloudOSFiles.tsx');
 const facade = read('../src/apps/CloudOSFiles/fileSourceFacade.ts');
 const preview = read('../src/apps/CloudOSFiles/FilePreviewPanel.tsx');
@@ -112,4 +113,13 @@ test('WebOnly launcher explains Browser Full-only capability and offers default 
   has(shell, /Browser disponível apenas em modo Full/);
   has(shell, /Abrir navegador padrão/);
   assert.doesNotMatch(shell, /\.\.\/\.\.\/apps\/Browser/);
+});
+
+test('Batch 3.5 audit keeps productivity metrics factual and explicitly unmeasured when no baseline exists', () => {
+  has(audit, /# WORKFLOW AUDIT — CloudOS Batch 3\.5/);
+  has(audit, /## Cliques removidos\s+\n\n\*\*Não medido\.\*\*/);
+  has(audit, /## Passos removidos\s+\n\n\*\*Não medido como número agregado\.\*\*/);
+  has(audit, /contagem de \*\*fluxos de código\/UX alterados\*\*, não uma alegação/);
+  has(audit, /Browser nativo continua congelado/);
+  has(audit, /Batch 3\.5 não promove, não publica release e não altera a linha RC/);
 });
