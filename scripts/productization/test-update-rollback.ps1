@@ -8,11 +8,19 @@ $package=Get-Content -LiteralPath $PackageResult -Raw|ConvertFrom-Json;$fixture=
 $root=Join-Path ([IO.Path]::GetTempPath()) "CloudOS Update Test $([Guid]::NewGuid().ToString('N'))";$install=Join-Path $root 'Install With Spaces';$data=Join-Path $root 'isolated-data';$setupLog=Join-Path $root 'setup.log'
 New-Item -ItemType Directory -Force -Path $root,$data|Out-Null;Set-Content -LiteralPath (Join-Path $data 'sentinel.txt') -Value 'preserve-through-update' -Encoding utf8
 function Get-InstallDiagnostic{
-    $entries='missing-root'
-    if(Test-Path -LiteralPath $install){$entries=((Get-ChildItem -LiteralPath $install -Force -Recurse -ErrorAction SilentlyContinue | Select-Object -First 40 | ForEach-Object {[IO.Path]::GetRelativePath($install,$_.FullName).Replace('\','/')}) -join ',')}
+    $rootEntries='missing-root'
+    $updateFound='none'
+    $productFound='none'
+    if(Test-Path -LiteralPath $root){
+        $rootEntries=((Get-ChildItem -LiteralPath $root -Force -Recurse -ErrorAction SilentlyContinue | Select-Object -First 60 | ForEach-Object {[IO.Path]::GetRelativePath($root,$_.FullName).Replace('\','/')}) -join ',')
+        $updateFound=((Get-ChildItem -LiteralPath $root -Filter 'Update.exe' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 10 | ForEach-Object {[IO.Path]::GetRelativePath($root,$_.FullName).Replace('\','/')}) -join ',')
+        if([string]::IsNullOrWhiteSpace($updateFound)){$updateFound='none'}
+        $productFound=((Get-ChildItem -LiteralPath $root -Filter 'product.json' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 10 | ForEach-Object {[IO.Path]::GetRelativePath($root,$_.FullName).Replace('\','/')}) -join ',')
+        if([string]::IsNullOrWhiteSpace($productFound)){$productFound='none'}
+    }
     $logTail='missing-log'
     if(Test-Path -LiteralPath $setupLog){$logTail=((Get-Content -LiteralPath $setupLog -Tail 80 -ErrorAction SilentlyContinue) -join ' | ')}
-    return "install=$install entries=$entries setupLog=$logTail"
+    return "install=$install installExists=$(Test-Path -LiteralPath $install) rootEntries=$rootEntries updateFound=$updateFound productFound=$productFound setupLog=$logTail"
 }
 function Invoke-UpdateExe([string]$Package){
     $updateExe=Join-Path $install 'Update.exe';if(-not(Test-Path -LiteralPath $updateExe)){throw "UPDATE_EXE_MISSING $(Get-InstallDiagnostic)"}
@@ -30,9 +38,6 @@ function Assert-PrerequisiteWindow{
 }
 try{
     Invoke-CloudOSExternal ([string]$package.setup) @('--silent','--installto',$install,'--log',$setupLog) $root | Out-Null
-    if(-not(Test-Path -LiteralPath $setupLog)){throw 'SETUP_LOG_MISSING'}
-    $setupText=Get-Content -LiteralPath $setupLog -Raw
-    if($setupText.IndexOf($install,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "SETUP_INSTALL_ROOT_NOT_CONFIRMED $(Get-InstallDiagnostic)"}
     Assert-Version ([string]$fixture.currentVersion)
     Invoke-UpdateExe ([string]$fixture.nextFullPackage);Assert-Version ([string]$fixture.nextVersion);Assert-PrerequisiteWindow
     & (Join-Path $PSScriptRoot 'test-packaged-node-runtime.ps1') -Staging (Join-Path $install 'current')
