@@ -43,6 +43,9 @@ jobs:
       - name: Productization static contract
         shell: pwsh
         run: ./scripts/productization/test-productization-contract.ps1
+      - name: Release candidate static audit
+        shell: pwsh
+        run: ./scripts/productization/test-release-candidate-audit.ps1
       - name: Channel matrix contract
         shell: pwsh
         run: ./scripts/productization/test-channels.ps1
@@ -135,6 +138,9 @@ jobs:
       - name: Productization static contract
         shell: pwsh
         run: ./scripts/productization/test-productization-contract.ps1
+      - name: Release candidate static audit
+        shell: pwsh
+        run: ./scripts/productization/test-release-candidate-audit.ps1
       - name: Channel matrix contract
         shell: pwsh
         run: ./scripts/productization/test-channels.ps1
@@ -214,6 +220,12 @@ jobs:
       - name: Installer hardening complete
         shell: pwsh
         run: ./scripts/productization/test-installer-hardening.ps1
+      - name: Release candidate orphan check
+        shell: pwsh
+        run: ./scripts/productization/test-release-candidate-orphans.ps1
+      - name: Measure release candidate evidence
+        shell: pwsh
+        run: ./scripts/productization/measure-release-candidate.ps1
       - name: Assert real database was not used
         shell: pwsh
         run: |
