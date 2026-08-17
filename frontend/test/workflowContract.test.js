@@ -12,6 +12,7 @@ const workspace = read('../src/apps/WorkflowWorkspace/WorkflowWorkspace.tsx');
 const workspaceService = read('../src/services/workflowWorkspace.ts');
 const workspaceTransfer = read('../src/services/workflowWorkspaceTransfer.ts');
 const recentFiles = read('../src/services/workflowRecentFiles.ts');
+const workflowLaunch = read('../src/services/workflowLaunch.ts');
 const clipboard = read('../src/services/workflowClipboard.ts');
 const shell = read('../src/components/Workflow/WorkflowShell.tsx');
 const filesBridge = read('../src/components/Workflow/FilesWorkflowBridge.tsx');
@@ -187,6 +188,15 @@ test('WebOnly launcher explains Browser Full-only capability without offering im
   has(shell, /Abrir navegador padrão/);
   has(shell, /não ativa o Browser do CloudOS, não muda o modo da sessão/);
   assert.doesNotMatch(shell, /\.\.\/\.\.\/apps\/Browser/);
+});
+
+test('WebOnly Browser fallback is also safe when launched from another workflow surface', () => {
+  has(workflowLaunch, /if \(!nativeHostBridge\.available\)/);
+  has(workflowLaunch, /Browser CloudOS disponível apenas no modo Full/);
+  has(workflowLaunch, /Abrir o navegador padrão nesta sessão WebOnly/);
+  has(workflowLaunch, /window\.confirm/);
+  has(workflowLaunch, /openDefault \? openDefaultBrowser\(\) : null/);
+  assert.doesNotMatch(workflowLaunch, /if \(!nativeHostBridge\.available\)[\s\S]{0,220}launchWorkflowApp\('browser'\)/);
 });
 
 test('Batch 3.6 productivity review remains factual and names the remaining system boundaries', () => {
