@@ -13,6 +13,12 @@ function safeDistribution(value) {
   return typeof value === 'string' ? value.trim().slice(0, 120) : '';
 }
 
+function safeTitle(value) {
+  return typeof value === 'string'
+    ? value.normalize('NFKC').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 60)
+    : '';
+}
+
 function safeInitialDirectory(value, profile) {
   if (profile !== 'wsl' || !value || typeof value !== 'object' || value.provider !== 'wsl' || !Array.isArray(value.path)) return undefined;
   const path = [];
@@ -29,12 +35,13 @@ function normalizeTab(value, fallback = {}) {
   const source = value && typeof value === 'object' ? value : {};
   const profile = VALID_PROFILES.has(source.profile) ? source.profile : (VALID_PROFILES.has(fallback.profile) ? fallback.profile : 'powershell');
   const distribution = profile === 'wsl' ? safeDistribution(source.distribution || fallback.distribution) : '';
+  const title = safeTitle(source.title ?? fallback.title);
   const initialDirectory = safeInitialDirectory(source.initialDirectory || fallback.initialDirectory, profile);
-  return { id: safeId(source.id), profile, distribution, ...(initialDirectory ? { initialDirectory } : {}) };
+  return { id: safeId(source.id), profile, distribution, title, ...(initialDirectory ? { initialDirectory } : {}) };
 }
 
-export function createTerminalTab(profile = 'powershell', distribution = '', id, initialDirectory) {
-  return normalizeTab({ id, profile, distribution, initialDirectory });
+export function createTerminalTab(profile = 'powershell', distribution = '', id, initialDirectory, title = '') {
+  return normalizeTab({ id, profile, distribution, initialDirectory, title });
 }
 
 export function normalizeTerminalWorkspace(value, fallbackTab = createTerminalTab()) {
@@ -72,6 +79,10 @@ export function updateTerminalTab(workspace, tabId, updates) {
     ...current,
     tabs: current.tabs.map(tab => tab.id === tabId ? normalizeTab({ ...tab, ...updates, id: tab.id }, tab) : tab),
   };
+}
+
+export function renameTerminalTab(workspace, tabId, title) {
+  return updateTerminalTab(workspace, tabId, { title: safeTitle(title) });
 }
 
 export function closeTerminalTab(workspace, tabId, fallbackTab = createTerminalTab()) {
@@ -115,7 +126,7 @@ export function cycleTerminalTab(workspace, direction = 1) {
 export function serializableTerminalWorkspace(workspace) {
   const current = normalizeTerminalWorkspace(workspace);
   return {
-    tabs: current.tabs.map(({ id, profile, distribution }) => ({ id, profile, distribution })),
+    tabs: current.tabs.map(({ id, profile, distribution, title }) => ({ id, profile, distribution, title })),
     activeId: current.activeId,
     splitId: current.splitId,
   };
