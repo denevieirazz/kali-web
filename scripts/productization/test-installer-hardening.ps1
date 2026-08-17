@@ -45,6 +45,17 @@ function Get-RestrictedPath{$system=@((Join-Path $env:SystemRoot 'System32'),$en
 function Assert-NoGlobalTool([string]$Name,[string]$RestrictedPath){$where=Invoke-ExactWindowsExe (Join-Path $env:SystemRoot 'System32\where.exe') @("$Name.exe") @{PATH=$RestrictedPath} -AllowFailure;if($where.ExitCode -eq 0){throw "INSTALLER_HARDENING_GLOBAL_TOOL_VISIBLE:$Name output=$($where.Output)"}}
 function Assert-LayoutIsolation{$appRoot=[IO.Path]::GetFullPath((Join-Path $installRoot 'current'));$roots=@($dataRoot,$cacheRoot,$logsRoot,$updatesRoot)|ForEach-Object{[IO.Path]::GetFullPath($_)};foreach($candidate in $roots){if($candidate.StartsWith($appRoot,[StringComparison]::OrdinalIgnoreCase)){throw "INSTALLER_HARDENING_STATE_INSIDE_APP:$candidate"}};foreach($name in @('data','cache','logs','updates')){if(Test-Path -LiteralPath (Join-Path $appRoot $name)){throw "INSTALLER_HARDENING_MUTABLE_DIR_INSIDE_APP:$name"}}}
 function Assert-LongPathCoverage{$deepPath=[IO.Path]::GetFullPath((Join-Path $installRoot 'current\meta\product.json'));if($deepPath.Length -le 260){throw "INSTALLER_HARDENING_LONG_PATH_TOO_SHORT:$($deepPath.Length)"};$updatePath=[IO.Path]::GetFullPath((Join-Path $installRoot 'Update.exe'));if($updatePath.Length -ge 260){throw "INSTALLER_HARDENING_UPDATER_LAUNCH_PATH_TOO_LONG:$($updatePath.Length)"}}
+function Assert-PackagedNodeIntegrity{
+    $packagedNode=Join-Path $installRoot 'current\runtime\node.exe'
+    if(-not(Test-Path -LiteralPath $packagedNode -PathType Leaf)){throw 'INSTALLER_HARDENING_PACKAGED_NODE_MISSING'}
+    $componentsPath=Join-Path $paths.Artifacts 'components.json'
+    if(-not(Test-Path -LiteralPath $componentsPath -PathType Leaf)){throw 'INSTALLER_HARDENING_COMPONENTS_MISSING'}
+    $components=Get-Content -LiteralPath $componentsPath -Raw|ConvertFrom-Json
+    $node=@($components.components|Where-Object{[string]$_.path -eq 'runtime/node.exe'})|Select-Object -First 1
+    if(-not $node -or [string]$node.sha256 -notmatch '^[0-9a-fA-F]{64}$'){throw 'INSTALLER_HARDENING_PACKAGED_NODE_EXPECTED_HASH_MISSING'}
+    $actual=(Get-FileHash -LiteralPath $packagedNode -Algorithm SHA256).Hash.ToLowerInvariant()
+    if($actual -ne ([string]$node.sha256).ToLowerInvariant()){throw 'INSTALLER_HARDENING_PACKAGED_NODE_HASH_MISMATCH'}
+}
 function Invoke-StandardUserInstall([hashtable]$Environment){
     $identity=[Security.Principal.WindowsIdentity]::GetCurrent();$principal=[Security.Principal.WindowsPrincipal]::new($identity);$currentIsAdmin=$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     if(-not $currentIsAdmin){Invoke-Installer $Environment;return}
@@ -77,6 +88,6 @@ try{
     Invoke-Installer $restrictedEnvironment;$reinstall=$true;$multiple=$true;Assert-InstalledVersion ([string]$fixture.currentVersion);Assert-DataPreserved
     Invoke-Update ([string]$fixture.nextFullPackage);$updated=$true;Assert-InstalledVersion ([string]$fixture.nextVersion);Assert-DataPreserved
     Invoke-Update ([string]$fixture.currentFullPackage);Assert-InstalledVersion ([string]$fixture.currentVersion);Assert-DataPreserved;Invoke-Installer $restrictedEnvironment;$rollbackThenInstall=$true;Assert-InstalledVersion ([string]$fixture.currentVersion);Assert-DataPreserved
-    $packagedNode=Join-Path $installRoot 'current\runtime\node.exe';$node=Invoke-ExactWindowsExe $packagedNode @('--version') @{PATH=$restrictedPath};if($node.Output.Trim() -ne 'v22.23.2'){throw "INSTALLER_HARDENING_PACKAGED_NODE_INVALID:$($node.Output)"}
-    Write-Host "PRODUCTIZATION_INSTALLER_HARDENING_OK existing=$existing reinstall=$reinstall afterRollback=$rollbackThenInstall longPath=true multiple=$multiple updateExisting=$updated noGlobalNode=true noGlobalGo=true standardUser=$standardUser layoutIsolation=true dataPreserved=true"
+    Assert-PackagedNodeIntegrity
+    Write-Host "PRODUCTIZATION_INSTALLER_HARDENING_OK existing=$existing reinstall=$reinstall afterRollback=$rollbackThenInstall longPath=true multiple=$multiple updateExisting=$updated noGlobalNode=true noGlobalGo=true standardUser=$standardUser layoutIsolation=true dataPreserved=true packagedNodeIntegrity=true"
 }finally{if(Test-Path -LiteralPath (Join-Path $installRoot 'Update.exe')){try{Invoke-ExactWindowsExe (Join-Path $installRoot 'Update.exe') @('uninstall','--silent') -AllowFailure|Out-Null}catch{}};Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue}
