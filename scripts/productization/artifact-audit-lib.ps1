@@ -48,7 +48,7 @@ function Assert-CloudOSArtifactDirectory {
     if(-not(Test-Path -LiteralPath $Root -PathType Container)){throw "ARTIFACT_DIRECTORY_MISSING:${Label}:$Root"}
     $files=@(Get-ChildItem -LiteralPath $Root -File -Recurse)
     $names=@($files|ForEach-Object{Get-CloudOSRelativePath $Root $_.FullName})
-    $violations=Get-CloudOSArtifactPolicyViolations -Names $names -Label $Label
+    $violations=@(Get-CloudOSArtifactPolicyViolations -Names $names -Label $Label)
     if($violations.Count -ne 0){throw "ARTIFACT_POLICY_VIOLATION:$($violations -join '|')"}
     foreach($file in $files){
         $relative=Get-CloudOSRelativePath $Root $file.FullName
@@ -68,7 +68,7 @@ function Assert-CloudOSZipArchive {
     try{
         $entries=@($zip.Entries|Where-Object{-not [string]::IsNullOrEmpty($_.Name)})
         $names=@($entries|ForEach-Object{$_.FullName})
-        $violations=Get-CloudOSArtifactPolicyViolations -Names $names -Label $Label
+        $violations=@(Get-CloudOSArtifactPolicyViolations -Names $names -Label $Label)
         if($violations.Count -ne 0){throw "ARTIFACT_POLICY_VIOLATION:$($violations -join '|')"}
         foreach($entry in $entries){
             if(-not(Test-CloudOSTextCandidate -Name $entry.FullName -Length $entry.Length)){continue}

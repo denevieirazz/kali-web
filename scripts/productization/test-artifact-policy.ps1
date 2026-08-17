@@ -9,7 +9,7 @@ $allowed=@(
     'runtime/node.exe',
     'meta/SBOM/npm.cyclonedx.json'
 )
-$allowedViolations=Get-CloudOSArtifactPolicyViolations -Names $allowed -Label 'allowed'
+$allowedViolations=@(Get-CloudOSArtifactPolicyViolations -Names $allowed -Label 'allowed')
 if($allowedViolations.Count -ne 0){throw "ARTIFACT_POLICY_FALSE_POSITIVE:$($allowedViolations -join '|')"}
 
 $cases=[ordered]@{
@@ -23,7 +23,7 @@ $cases=[ordered]@{
     traversal='../outside.txt'
 }
 foreach($entry in $cases.GetEnumerator()){
-    $violations=Get-CloudOSArtifactPolicyViolations -Names @([string]$entry.Value) -Label ([string]$entry.Key)
+    $violations=@(Get-CloudOSArtifactPolicyViolations -Names @([string]$entry.Value) -Label ([string]$entry.Key))
     if($violations.Count -eq 0){throw "ARTIFACT_POLICY_NEGATIVE_NOT_CAUGHT:$($entry.Key):$($entry.Value)"}
 }
 
