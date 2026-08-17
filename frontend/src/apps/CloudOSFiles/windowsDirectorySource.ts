@@ -208,6 +208,22 @@ export const windowsDirectorySource = {
     await writable.close();
   },
 
+  async writeFile(path: string[], file: File) {
+    const dir = await dirAt(path);
+    const name = await uniqueName(dir, file.name, false);
+    const handle = await dir.getFileHandle(name, { create: true });
+    const writable = await handle.createWritable();
+    try {
+      await writable.write(file);
+      await writable.close();
+      return name;
+    } catch (error) {
+      try { await writable.abort(); } catch {}
+      try { await dir.removeEntry(name); } catch {}
+      throw error;
+    }
+  },
+
   async create(path: string[], kind: 'file' | 'directory', requestedName: string) {
     const dir = await dirAt(path);
     const name = await uniqueName(dir, requestedName, kind === 'directory');
