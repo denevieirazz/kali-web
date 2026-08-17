@@ -2,14 +2,18 @@ import {
   WORKSPACE_FOLDERS,
   buildWorkspaceManifest,
   createWorkspaceRecord,
+  matchesWorkflowQuery,
   normalizeWorkspaceRecord,
   sanitizeWorkspaceName,
+  sanitizeWorkspaceTags,
   workspaceFolderName,
+  workspaceSearchText,
   type WorkspaceRecord,
+  type WorkspaceStatus,
   type WorkspaceType,
   type WorkflowProvider,
 } from '../core/workflowCore.js';
-import { fileSourceFacade, type CloudFileEntry } from '../apps/CloudOSFiles/fileSourceFacade';
+import { fileSourceFacade, MAX_ASSISTED_TRANSFER_BYTES, type CloudFileEntry } from '../apps/CloudOSFiles/fileSourceFacade';
 
 const WORKSPACES_KEY = 'cloudos.workflow.workspaces.v3';
 const ACTIVE_WORKSPACE_KEY = 'cloudos.workflow.active-workspace.v3';
@@ -17,10 +21,14 @@ const NOTES_INDEX_KEY = 'cloudos.workflow.notes-index.v3';
 const FILE_INDEX_KEY = 'cloudos.workflow.file-index.v3';
 const DOWNLOAD_DESTINATION_KEY = 'cloudos.workflow.download-destination.v3';
 const MAX_WORKSPACES = 100;
-const MAX_NOTE_BYTES = 2 * 1024 * 1024;
+export const MAX_NOTE_BYTES = 2 * 1024 * 1024;
+export const MAX_NOTE_INDEX_ENTRIES = 200;
+export const MAX_NOTE_INDEX_CONTENT_CHARS = 8192;
 const MAX_FILE_INDEX = 800;
+const MAX_DUPLICATE_ENTRIES = 2000;
+const MAX_DUPLICATE_BYTES = 1024 * 1024 * 1024;
 
-export type { WorkspaceRecord, WorkspaceType, WorkflowProvider };
+export type { WorkspaceRecord, WorkspaceStatus, WorkspaceType, WorkflowProvider };
 
 export type WorkflowNote = {
   workspaceId: string;
@@ -34,6 +42,7 @@ export type NoteIndexEntry = {
   workspaceId: string;
   fileName: string;
   title: string;
+  searchText: string;
   updatedAt: string;
 };
 
@@ -100,7 +109,11 @@ function persistedWorkspaces() {
 }
 
 export function listWorkspaces() {
-  return persistedWorkspaces().sort((left, right) => Date.parse(right.lastAccessAt) - Date.parse(left.lastAccessAt));
+  return persistedWorkspaces().sort((left, right) => Date.parse(right.lastActivityAt) - Date.parse(left.lastActivityAt) || Date.parse(right.lastAccessAt) - Date.parse(left.lastAccessAt));
+}
+
+export function searchWorkspaces(query: string, includeArchived = true) {
+  return listWorkspaces().filter(workspace => (includeArchived || workspace.status !== 'archived') && matchesWorkflowQuery(workspaceSearchText(workspace), query));
 }
 
 export function getWorkspace(id: string | null | undefined) {
@@ -110,7 +123,9 @@ export function getWorkspace(id: string | null | undefined) {
 
 export function getActiveWorkspace() {
   const id = storageAvailable() ? localStorage.getItem(ACTIVE_WORKSPACE_KEY) : null;
-  return getWorkspace(id) || listWorkspaces()[0] || null;
+  const indexed = getWorkspace(id);
+  if (indexed && indexed.status !== 'archived') return indexed;
+  return listWorkspaces().find(item => item.status !== 'archived') || null;
 }
 
 function saveWorkspaceList(items: WorkspaceRecord[]) {
@@ -118,20 +133,44 @@ function saveWorkspaceList(items: WorkspaceRecord[]) {
   emitChanged();
 }
 
+async function writeWorkspaceManifest(workspace: WorkspaceRecord) {
+  const runtime = await fileSourceFacade.runtime(workspace.provider);
+  if (!runtime.available || !runtime.mounted) throw new Error(`${runtime.label} não está disponível nesta sessão.`);
+  await fileSourceFacade.writeText(workspace.provider, workspace.root, 'workspace.json', JSON.stringify(buildWorkspaceManifest(workspace), null, 2));
+}
+
+async function persistWorkspaceRecord(workspace: WorkspaceRecord, writeManifest = true) {
+  const normalized = normalizeWorkspaceRecord(workspace);
+  if (!normalized) throw new Error('Metadados do workspace foram rejeitados.');
+  const items = persistedWorkspaces();
+  const index = items.findIndex(item => item.id === normalized.id);
+  if (index < 0) throw new Error('Workspace não encontrado.');
+  if (writeManifest) await writeWorkspaceManifest(normalized);
+  items[index] = normalized;
+  saveWorkspaceList(items);
+  return normalized;
+}
+
 export async function activateWorkspace(id: string) {
   const workspace = getWorkspace(id);
   if (!workspace) throw new Error('Workspace não encontrado.');
+  if (workspace.status === 'archived') throw new Error('Workspace arquivado. Reative-o antes de usar.');
   if (storageAvailable()) localStorage.setItem(ACTIVE_WORKSPACE_KEY, workspace.id);
-  await touchWorkspace(workspace.id);
+  await touchWorkspace(workspace.id, false);
   emitChanged();
   return getWorkspace(workspace.id) || workspace;
 }
 
-export async function touchWorkspace(id: string) {
+export async function touchWorkspace(id: string, activity = true) {
   const items = persistedWorkspaces();
   const index = items.findIndex(item => item.id === id);
   if (index < 0) return null;
-  const updated: WorkspaceRecord = { ...items[index], lastAccessAt: new Date().toISOString() };
+  const now = new Date().toISOString();
+  const updated: WorkspaceRecord = {
+    ...items[index],
+    lastAccessAt: now,
+    lastActivityAt: activity ? now : items[index].lastActivityAt,
+  };
   items[index] = updated;
   saveWorkspaceList(items);
   try {
@@ -149,6 +188,8 @@ export async function createWorkspace(input: {
   type: WorkspaceType;
   name: string;
   description?: string;
+  client?: string;
+  tags?: string[];
   provider: WorkflowProvider;
   originPath?: string[];
 }) {
@@ -175,6 +216,8 @@ export async function createWorkspace(input: {
       type: input.type,
       name,
       description: input.description || '',
+      client: input.client || '',
+      tags: sanitizeWorkspaceTags(input.tags || []),
       provider: input.provider,
       root,
       originPath,
@@ -193,6 +236,114 @@ export async function createWorkspace(input: {
       if (rootEntry) await fileSourceFacade.trash(input.provider, ['Workspaces'], rootEntry);
     } catch {
       // Preserve the original failure. A partial workspace remains visible for manual recovery if rollback fails.
+    }
+    throw error;
+  }
+}
+
+export async function updateWorkspaceMetadata(id: string, patch: {
+  name?: string;
+  description?: string;
+  client?: string;
+  tags?: string[];
+  type?: WorkspaceType;
+}) {
+  const current = getWorkspace(id);
+  if (!current) throw new Error('Workspace não encontrado.');
+  const now = new Date().toISOString();
+  const updated = normalizeWorkspaceRecord({
+    ...current,
+    ...(patch.name !== undefined ? { name: sanitizeWorkspaceName(patch.name) } : {}),
+    ...(patch.description !== undefined ? { description: patch.description } : {}),
+    ...(patch.client !== undefined ? { client: patch.client } : {}),
+    ...(patch.tags !== undefined ? { tags: sanitizeWorkspaceTags(patch.tags) } : {}),
+    ...(patch.type !== undefined ? { type: patch.type } : {}),
+    lastAccessAt: now,
+    lastActivityAt: now,
+  });
+  if (!updated) throw new Error('Metadados do workspace foram rejeitados.');
+  // Rename is metadata-only by design: the physical root remains stable and no tree is recreated.
+  return persistWorkspaceRecord(updated, true);
+}
+
+export async function renameWorkspace(id: string, name: string) {
+  return updateWorkspaceMetadata(id, { name });
+}
+
+export async function archiveWorkspace(id: string, archived = true) {
+  const current = getWorkspace(id);
+  if (!current) throw new Error('Workspace não encontrado.');
+  const now = new Date().toISOString();
+  const updated = normalizeWorkspaceRecord({
+    ...current,
+    status: archived ? 'archived' : 'active',
+    lastAccessAt: now,
+    lastActivityAt: now,
+  });
+  if (!updated) throw new Error('Metadados do workspace foram rejeitados.');
+  const saved = await persistWorkspaceRecord(updated, true);
+  if (storageAvailable() && archived && localStorage.getItem(ACTIVE_WORKSPACE_KEY) === id) {
+    localStorage.removeItem(ACTIVE_WORKSPACE_KEY);
+  }
+  emitChanged();
+  return saved;
+}
+
+async function copyWorkspaceTree(
+  source: WorkspaceRecord,
+  destination: WorkspaceRecord,
+  sourcePath: string[],
+  destinationPath: string[],
+  budget: { entries: number; bytes: number },
+) {
+  const entries = await fileSourceFacade.list(source.provider, sourcePath, false);
+  for (const entry of entries) {
+    if (entry.name === 'workspace.json' && sourcePath.length === source.root.length) continue;
+    if (entry.symlink || entry.kind === 'symlink') throw new Error(`Duplicação interrompida: “${entry.name}” é link simbólico e não será seguido.`);
+    budget.entries += 1;
+    if (budget.entries > MAX_DUPLICATE_ENTRIES) throw new Error(`Workspace excede o limite de duplicação de ${MAX_DUPLICATE_ENTRIES} itens.`);
+    if (entry.kind === 'directory') {
+      const created = await fileSourceFacade.create(destination.provider, destinationPath, 'directory', entry.name);
+      await copyWorkspaceTree(source, destination, [...sourcePath, entry.name], [...destinationPath, created], budget);
+      continue;
+    }
+    budget.bytes += entry.size;
+    if (entry.size > MAX_ASSISTED_TRANSFER_BYTES) throw new Error(`“${entry.name}” excede o limite de ${MAX_ASSISTED_TRANSFER_BYTES} bytes por arquivo.`);
+    if (budget.bytes > MAX_DUPLICATE_BYTES) throw new Error(`Workspace excede o limite de duplicação de ${MAX_DUPLICATE_BYTES} bytes.`);
+    const file = await fileSourceFacade.readFile(source.provider, sourcePath, entry, MAX_ASSISTED_TRANSFER_BYTES);
+    await fileSourceFacade.writeFile(destination.provider, destinationPath, new File([file], entry.name, { type: file.type, lastModified: file.lastModified }), entry.mode);
+  }
+}
+
+export async function duplicateWorkspace(id: string) {
+  const source = getWorkspace(id);
+  if (!source) throw new Error('Workspace não encontrado.');
+  const runtime = await fileSourceFacade.runtime(source.provider);
+  if (!runtime.available || !runtime.mounted) throw new Error(`${runtime.label} não está disponível para duplicação.`);
+  const destination = await createWorkspace({
+    type: source.type,
+    name: `${source.name} — cópia`,
+    description: source.description,
+    client: source.client,
+    tags: source.tags,
+    provider: source.provider,
+    originPath: source.originPath,
+  });
+  try {
+    const budget = { entries: 0, bytes: 0 };
+    for (const folder of WORKSPACE_FOLDERS) {
+      await copyWorkspaceTree(source, destination, [...source.root, folder], [...destination.root, folder], budget);
+    }
+    await touchWorkspace(destination.id, true);
+    return getWorkspace(destination.id) || destination;
+  } catch (error) {
+    removeWorkspaceFromIndex(destination.id);
+    try {
+      const parents = await fileSourceFacade.list(destination.provider, ['Workspaces'], false);
+      const rootEntry = parents.find(entry => entry.name === destination.root[destination.root.length - 1]);
+      if (rootEntry) await fileSourceFacade.trash(destination.provider, ['Workspaces'], rootEntry);
+    } catch {
+      // Fail closed: never hide the original error if cleanup cannot be completed.
     }
     throw error;
   }
@@ -246,7 +397,7 @@ export async function createWorkspaceNote(workspace: WorkspaceRecord, title = 'N
   await fileSourceFacade.writeText(workspace.provider, [...workspace.root, 'Notes'], fileName, content);
   const note: WorkflowNote = { workspaceId: workspace.id, fileName, title: noteTitle(fileName), content, modified: Date.now() };
   indexNotes([note]);
-  await touchWorkspace(workspace.id);
+  await touchWorkspace(workspace.id, true);
   return note;
 }
 
@@ -263,7 +414,7 @@ export async function saveWorkspaceNote(workspace: WorkspaceRecord, note: Pick<W
     modified: Date.now(),
   };
   indexNotes([indexed]);
-  await touchWorkspace(workspace.id);
+  await touchWorkspace(workspace.id, true);
   return indexed;
 }
 
@@ -275,12 +426,13 @@ function indexNotes(notes: WorkflowNote[]) {
       workspaceId: note.workspaceId,
       fileName: note.fileName,
       title: note.title,
+      searchText: note.content.slice(0, MAX_NOTE_INDEX_CONTENT_CHARS),
       updatedAt: new Date(note.modified || Date.now()).toISOString(),
     });
   }
   const next = [...byKey.values()]
     .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
-    .slice(0, 500);
+    .slice(0, MAX_NOTE_INDEX_ENTRIES);
   writeJson(NOTES_INDEX_KEY, next);
   emitChanged();
 }
@@ -293,8 +445,14 @@ export function listNoteIndex(): NoteIndexEntry[] {
       workspaceId: item.workspaceId,
       fileName: item.fileName,
       title: item.title.slice(0, 120),
+      searchText: String(item.searchText || '').slice(0, MAX_NOTE_INDEX_CONTENT_CHARS),
       updatedAt: Number.isFinite(Date.parse(item.updatedAt)) ? new Date(item.updatedAt).toISOString() : new Date(0).toISOString(),
-    }));
+    }))
+    .slice(0, MAX_NOTE_INDEX_ENTRIES);
+}
+
+export function searchNoteIndex(query: string) {
+  return listNoteIndex().filter(note => matchesWorkflowQuery(`${note.title}\n${note.searchText}`, query));
 }
 
 export async function listWorkspaceEvidence(workspace: WorkspaceRecord) {
@@ -314,14 +472,34 @@ export async function saveWorkspaceEvidenceText(workspace: WorkspaceRecord, kind
       ? `# Nota de evidência\n\n${text}\n`
       : text;
   await fileSourceFacade.writeText(workspace.provider, [...workspace.root, 'Evidence'], fileName, body);
-  await touchWorkspace(workspace.id);
+  await touchWorkspace(workspace.id, true);
   return fileName;
 }
 
 export async function saveWorkspaceEvidenceFile(workspace: WorkspaceRecord, file: File) {
   const result = await fileSourceFacade.writeFile(workspace.provider, [...workspace.root, 'Evidence'], file);
-  await touchWorkspace(workspace.id);
+  await touchWorkspace(workspace.id, true);
   return result;
+}
+
+export async function addFileToActiveWorkspaceEvidence(provider: WorkflowProvider, path: string[], name: string) {
+  const workspace = getActiveWorkspace();
+  if (!workspace) throw new Error('Ative um Workspace antes de adicionar evidência.');
+  const sourceEntries = await fileSourceFacade.list(provider, path, false);
+  const entry = sourceEntries.find(item => item.name === name);
+  if (!entry || entry.kind !== 'file' || entry.symlink) throw new Error('A evidência deve ser um arquivo regular visível nesta origem.');
+  if (entry.size > MAX_ASSISTED_TRANSFER_BYTES) throw new Error(`Arquivo excede o limite de evidência de ${MAX_ASSISTED_TRANSFER_BYTES} bytes.`);
+  const destinationPath = [...workspace.root, 'Evidence'];
+  const destinationEntries = await fileSourceFacade.list(workspace.provider, destinationPath, false);
+  if (destinationEntries.some(item => item.name === entry.name)) throw new Error(`Evidence já contém “${entry.name}”. Nenhum arquivo foi sobrescrito.`);
+  if (provider === workspace.provider) {
+    const file = await fileSourceFacade.readFile(provider, path, entry, MAX_ASSISTED_TRANSFER_BYTES);
+    await fileSourceFacade.writeFile(workspace.provider, destinationPath, new File([file], entry.name, { type: file.type, lastModified: file.lastModified }), entry.mode);
+  } else {
+    await fileSourceFacade.copyAcrossProviders(provider, path, entry, workspace.provider, destinationPath);
+  }
+  await touchWorkspace(workspace.id, true);
+  return { workspace, name: entry.name };
 }
 
 export function indexFiles(provider: WorkflowProvider, path: string[], entries: CloudFileEntry[]) {
@@ -365,10 +543,25 @@ export function setDownloadDestination(destination: DownloadDestination) {
 }
 
 export function getDownloadDestination(): DownloadDestination {
-  const raw = safeJson<any>(DOWNLOAD_DESTINATION_KEY, { kind: 'opfs' });
+  if (storageAvailable() && localStorage.getItem(DOWNLOAD_DESTINATION_KEY) === null) {
+    const active = getActiveWorkspace();
+    return active ? { kind: 'workspace', workspaceId: active.id } : { kind: 'opfs' };
+  }
+  const raw = safeJson<any>(DOWNLOAD_DESTINATION_KEY, null);
   if (raw?.kind === 'workspace' && typeof raw.workspaceId === 'string' && getWorkspace(raw.workspaceId)) return { kind: 'workspace', workspaceId: raw.workspaceId };
   if (['opfs', 'windows', 'wsl'].includes(raw?.kind)) return { kind: raw.kind } as DownloadDestination;
-  return { kind: 'opfs' };
+  const active = getActiveWorkspace();
+  return active ? { kind: 'workspace', workspaceId: active.id } : { kind: 'opfs' };
+}
+
+export function downloadDestinationLabel(destination: DownloadDestination) {
+  if (destination.kind === 'workspace') {
+    const workspace = getWorkspace(destination.workspaceId);
+    return workspace ? `Workspace “${workspace.name}” / Downloads` : 'Workspace indisponível';
+  }
+  if (destination.kind === 'windows') return 'Windows — pasta autorizada';
+  if (destination.kind === 'wsl') return 'Linux — Home';
+  return 'OPFS — CloudOS';
 }
 
 export function workspacePath(workspace: WorkspaceRecord, child: typeof WORKSPACE_FOLDERS[number]) {

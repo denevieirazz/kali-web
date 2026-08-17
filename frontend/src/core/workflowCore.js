@@ -19,9 +19,17 @@ export const WORKSPACE_FOLDERS = Object.freeze([
 export const MAX_CLIPBOARD_ITEMS = 30;
 export const MAX_CLIPBOARD_ITEM_BYTES = 5 * 1024 * 1024;
 export const MAX_WORKSPACE_DESCRIPTION = 1000;
+export const MAX_WORKSPACE_TAGS = 12;
+export const MAX_WORKSPACE_TAG_LENGTH = 32;
+export const MIN_VIEWER_ZOOM = 0.25;
+export const MAX_VIEWER_ZOOM = 4;
+export const VIEWER_ZOOM_STEP = 0.25;
 
 const VALID_WORKSPACE_TYPES = new Set(WORKSPACE_TYPES.map(item => item.id));
 const VALID_PROVIDERS = new Set(['opfs', 'windows', 'wsl']);
+const VALID_WORKSPACE_STATUS = new Set(['active', 'archived']);
+const NOTES_EXTENSIONS = new Set(['txt', 'md', 'json', 'log']);
+const VIEWER_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp', 'pdf']);
 const JWT = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/;
 const PEM = /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/i;
 const AUTH_BEARER = /\b(?:authorization\s*:\s*bearer|bearer)\s+[A-Za-z0-9._~+\/-]{12,}/i;
@@ -44,6 +52,26 @@ export function sanitizeWorkspaceName(value) {
   return text || 'Workspace';
 }
 
+export function sanitizeWorkspaceTags(value) {
+  const source = Array.isArray(value) ? value : String(value ?? '').split(',');
+  const output = [];
+  const seen = new Set();
+  for (const raw of source) {
+    const tag = String(raw ?? '')
+      .normalize('NFKC')
+      .trim()
+      .replace(/[\u0000-\u001f]/g, '')
+      .replace(/\s+/g, ' ')
+      .slice(0, MAX_WORKSPACE_TAG_LENGTH);
+    const key = tag.toLocaleLowerCase('pt-BR');
+    if (!tag || seen.has(key)) continue;
+    seen.add(key);
+    output.push(tag);
+    if (output.length >= MAX_WORKSPACE_TAGS) break;
+  }
+  return output;
+}
+
 export function workspaceFolderName(name, id) {
   const slug = sanitizeWorkspaceName(name)
     .toLocaleLowerCase('pt-BR')
@@ -64,21 +92,26 @@ export function normalizeWorkspaceRecord(value) {
   if (!provider || !id || root.length === 0) return null;
   const createdAt = Number.isFinite(Date.parse(value.createdAt)) ? new Date(value.createdAt).toISOString() : new Date(0).toISOString();
   const lastAccessAt = Number.isFinite(Date.parse(value.lastAccessAt)) ? new Date(value.lastAccessAt).toISOString() : createdAt;
+  const lastActivityAt = Number.isFinite(Date.parse(value.lastActivityAt)) ? new Date(value.lastActivityAt).toISOString() : lastAccessAt;
   return {
     id,
     type,
     name,
     description: String(value.description ?? '').trim().slice(0, MAX_WORKSPACE_DESCRIPTION),
+    client: String(value.client ?? '').normalize('NFKC').trim().replace(/[\u0000-\u001f]/g, '').slice(0, 120),
+    tags: sanitizeWorkspaceTags(value.tags),
+    status: VALID_WORKSPACE_STATUS.has(value.status) ? value.status : 'active',
     provider,
     root,
     originPath: Array.isArray(value.originPath) ? value.originPath.map(String).filter(Boolean).slice(0, 64) : [],
     createdAt,
     lastAccessAt,
+    lastActivityAt,
   };
 }
 
-export function createWorkspaceRecord({ id, type, name, description = '', provider, root, originPath = [], now = new Date().toISOString() }) {
-  return normalizeWorkspaceRecord({ id, type, name, description, provider, root, originPath, createdAt: now, lastAccessAt: now });
+export function createWorkspaceRecord({ id, type, name, description = '', client = '', tags = [], status = 'active', provider, root, originPath = [], now = new Date().toISOString() }) {
+  return normalizeWorkspaceRecord({ id, type, name, description, client, tags, status, provider, root, originPath, createdAt: now, lastAccessAt: now, lastActivityAt: now });
 }
 
 export function buildWorkspaceManifest(workspace) {
@@ -90,14 +123,55 @@ export function buildWorkspaceManifest(workspace) {
     tipo: workspaceTypeLabel(normalized.type),
     nome: normalized.name,
     descricao: normalized.description,
+    cliente: normalized.client,
+    tags: [...normalized.tags],
+    status: normalized.status,
     data: normalized.createdAt,
     ultimoAcesso: normalized.lastAccessAt,
+    ultimaAtividade: normalized.lastActivityAt,
     origem: {
       provider: normalized.provider,
       caminhoInicial: normalized.originPath,
     },
     estrutura: [...WORKSPACE_FOLDERS],
   };
+}
+
+export function workspaceSearchText(workspace) {
+  const normalized = normalizeWorkspaceRecord(workspace);
+  if (!normalized) return '';
+  return [
+    normalized.name,
+    normalized.description,
+    normalized.client,
+    normalized.type,
+    workspaceTypeLabel(normalized.type),
+    normalized.status,
+    normalized.provider,
+    ...normalized.tags,
+  ].join(' ');
+}
+
+export function workflowFileOpenMode(name, kind = 'file', symlink = false) {
+  if (symlink || kind === 'symlink') return 'info';
+  if (kind === 'directory') return 'directory';
+  if (kind !== 'file') return 'info';
+  const match = String(name ?? '').toLocaleLowerCase('pt-BR').match(/\.([^.]+)$/);
+  const extension = match?.[1] || '';
+  if (NOTES_EXTENSIONS.has(extension)) return 'notes';
+  if (VIEWER_EXTENSIONS.has(extension)) return 'viewer';
+  return 'info';
+}
+
+export function normalizeViewerZoom(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 1;
+  return Math.min(MAX_VIEWER_ZOOM, Math.max(MIN_VIEWER_ZOOM, Math.round(numeric * 100) / 100));
+}
+
+export function stepViewerZoom(current, direction) {
+  const delta = Number(direction) < 0 ? -VIEWER_ZOOM_STEP : VIEWER_ZOOM_STEP;
+  return normalizeViewerZoom(Number(current) + delta);
 }
 
 export function looksSensitiveText(value) {

@@ -3,13 +3,19 @@ import assert from 'node:assert/strict';
 import {
   MAX_CLIPBOARD_ITEM_BYTES,
   MAX_CLIPBOARD_ITEMS,
+  MAX_VIEWER_ZOOM,
+  MIN_VIEWER_ZOOM,
   WORKSPACE_FOLDERS,
   buildWorkspaceManifest,
   buildWslCdCommand,
   clipboardTextPolicy,
   createWorkspaceRecord,
+  normalizeViewerZoom,
   snapBounds,
+  stepViewerZoom,
   terminalHereCapability,
+  workflowFileOpenMode,
+  workspaceSearchText,
 } from '../src/core/workflowCore.js';
 
 test('workspace scaffold is fixed and manifest records the required metadata', () => {
@@ -19,6 +25,8 @@ test('workspace scaffold is fixed and manifest records the required metadata', (
     type: 'client',
     name: 'Cliente ACME',
     description: 'Ticket 42',
+    client: 'ACME',
+    tags: ['produção', 'urgente'],
     provider: 'opfs',
     root: ['Workspaces', 'cliente-acme-12345678'],
     originPath: ['Downloads'],
@@ -28,10 +36,32 @@ test('workspace scaffold is fixed and manifest records the required metadata', (
   const manifest = buildWorkspaceManifest(workspace);
   assert.equal(manifest.nome, 'Cliente ACME');
   assert.equal(manifest.descricao, 'Ticket 42');
+  assert.equal(manifest.cliente, 'ACME');
+  assert.deepEqual(manifest.tags, ['produção', 'urgente']);
+  assert.equal(manifest.status, 'active');
   assert.equal(manifest.data, '2026-08-17T20:00:00.000Z');
   assert.equal(manifest.ultimoAcesso, '2026-08-17T20:00:00.000Z');
+  assert.equal(manifest.ultimaAtividade, '2026-08-17T20:00:00.000Z');
   assert.deepEqual(manifest.origem, { provider: 'opfs', caminhoInicial: ['Downloads'] });
   assert.deepEqual(manifest.estrutura, [...WORKSPACE_FOLDERS]);
+  assert.match(workspaceSearchText(workspace), /ACME/);
+  assert.match(workspaceSearchText(workspace), /urgente/);
+});
+
+test('file opening is extension allowlisted and never treats scripts or symlinks as executable', () => {
+  for (const name of ['nota.txt', 'README.md', 'dados.json', 'scan.log']) assert.equal(workflowFileOpenMode(name), 'notes');
+  for (const name of ['foto.png', 'foto.jpg', 'foto.jpeg', 'foto.webp', 'manual.pdf']) assert.equal(workflowFileOpenMode(name), 'viewer');
+  for (const name of ['script.js', 'teste.ps1', 'run.sh', 'programa.exe', 'sem-extensao']) assert.equal(workflowFileOpenMode(name), 'info');
+  assert.equal(workflowFileOpenMode('pasta', 'directory'), 'directory');
+  assert.equal(workflowFileOpenMode('README.md', 'symlink', true), 'info');
+});
+
+test('image viewer zoom is bounded and deterministic', () => {
+  assert.equal(normalizeViewerZoom(0), MIN_VIEWER_ZOOM);
+  assert.equal(normalizeViewerZoom(99), MAX_VIEWER_ZOOM);
+  assert.equal(stepViewerZoom(1, 1), 1.25);
+  assert.equal(stepViewerZoom(1, -1), 0.75);
+  assert.equal(stepViewerZoom(MAX_VIEWER_ZOOM, 1), MAX_VIEWER_ZOOM);
 });
 
 test('clipboard enforces 30 entries, 5 MiB/item and rejects credential-shaped text', () => {

@@ -1,8 +1,14 @@
 import { useAppRegistry } from '../core/appRegistry';
-import { terminalHereCapability, type WorkflowProvider } from '../core/workflowCore.js';
+import { terminalHereCapability, workflowFileOpenMode, type WorkflowProvider } from '../core/workflowCore.js';
 import { useProcessManager } from '../stores/processManager';
 import { useWindowManager } from '../stores/windowManager';
 import type { WorkspaceRecord } from './workflowWorkspace';
+
+export type WorkflowTextFileTarget = {
+  provider: WorkflowProvider;
+  path: string[];
+  name: string;
+};
 
 export function launchWorkflowApp(appId: string, params?: Record<string, unknown>) {
   const app = useAppRegistry.getState().getApp(appId);
@@ -40,6 +46,17 @@ export function openWorkspace(workspaceId?: string, noteFileName?: string) {
   });
 }
 
+export function openTextFileInNotes(target: WorkflowTextFileTarget) {
+  if (workflowFileOpenMode(target.name, 'file', false) !== 'notes') throw new Error('Este tipo de arquivo não é aberto automaticamente no Notes.');
+  return launchWorkflowApp('workflow-workspace', {
+    externalTextFile: {
+      provider: target.provider,
+      path: [...target.path],
+      name: target.name,
+    },
+  });
+}
+
 export function openFilesAt(provider: WorkflowProvider, path: string[], selectName?: string) {
   return launchWorkflowApp('cloudos-files', {
     workflowSource: provider,
@@ -67,6 +84,12 @@ export function openWorkspaceTerminal(workspace: WorkspaceRecord) {
 
 export function openExistingBrowser() {
   return launchWorkflowApp('browser');
+}
+
+export function openDefaultBrowser() {
+  const opened = window.open('about:blank', '_blank', 'noopener,noreferrer');
+  if (!opened) throw new Error('O navegador bloqueou a nova guia. Permita pop-ups para abrir o navegador padrão.');
+  return opened;
 }
 
 export function openSettings() {
