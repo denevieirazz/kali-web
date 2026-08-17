@@ -58,7 +58,6 @@ export default function WorkflowShell() {
   const allResults = useMemo<LauncherResult[]>(() => {
     void revision;
     const appResults: LauncherResult[] = Object.values(appMap)
-      .filter(app => !app.isSystem)
       .map(app => ({
         key: `app:${app.id}`,
         type: app.id === 'settings' ? 'setting' : 'app',
