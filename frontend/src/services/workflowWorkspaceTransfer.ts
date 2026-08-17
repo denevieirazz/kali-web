@@ -1,5 +1,5 @@
 import { WORKSPACE_FOLDERS, type WorkflowProvider } from '../core/workflowCore.js';
-import { fileSourceFacade, type CloudFileEntry } from '../apps/CloudOSFiles/fileSourceFacade';
+import { fileSourceFacade } from '../apps/CloudOSFiles/fileSourceFacade';
 import {
   activateWorkspace,
   archiveWorkspace,
@@ -199,6 +199,14 @@ async function ensureDirectory(provider: WorkflowProvider, path: string[], name:
   return fileSourceFacade.create(provider, path, 'directory', name);
 }
 
+async function verifyWrittenFile(provider: WorkflowProvider, path: string[], name: string, expectedBytes: number) {
+  const entries = await fileSourceFacade.list(provider, path, false);
+  const written = entries.find(entry => entry.name === name);
+  if (!written || written.kind !== 'file' || written.symlink || written.size !== expectedBytes) {
+    throw new Error(`Verificação falhou para “${name}”: o arquivo gravado não corresponde ao tamanho esperado.`);
+  }
+}
+
 async function cleanupImportedWorkspace(workspace: WorkspaceRecord) {
   removeWorkspaceFromIndex(workspace.id);
   try {
@@ -240,6 +248,7 @@ export async function importWorkspaceBundle(bundleValue: unknown, provider: Work
       if (bytes.byteLength > MAX_WORKSPACE_EXPORT_FILE_BYTES) throw new Error(`“${name}” excede o limite por arquivo.`);
       const file = new File([bytes], name, { type: entry.type || '', lastModified: entry.modified || Date.now() });
       await fileSourceFacade.writeFile(provider, parent, file, entry.mode);
+      await verifyWrittenFile(provider, parent, name, bytes.byteLength);
     }
     await activateWorkspace(workspace.id);
     return workspace;
