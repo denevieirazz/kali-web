@@ -5,14 +5,21 @@ $paths=Get-CloudOSArtifactPaths
 if([string]::IsNullOrWhiteSpace($PackageResult)){$PackageResult=Join-Path $paths.Artifacts 'package-result.json'}
 if([string]::IsNullOrWhiteSpace($FixtureResult)){$FixtureResult=Join-Path $paths.Artifacts 'update-fixture-result.json'}
 $package=Get-Content -LiteralPath $PackageResult -Raw|ConvertFrom-Json;$fixture=Get-Content -LiteralPath $FixtureResult -Raw|ConvertFrom-Json
-$root=Join-Path ([IO.Path]::GetTempPath()) "CloudOS Update Test $([Guid]::NewGuid().ToString('N'))";$install=Join-Path $root 'Install With Spaces';$data=Join-Path $root 'isolated-data'
+$root=Join-Path ([IO.Path]::GetTempPath()) "CloudOS Update Test $([Guid]::NewGuid().ToString('N'))";$install=Join-Path $root 'Install With Spaces';$data=Join-Path $root 'isolated-data';$setupLog=Join-Path $root 'setup.log'
 New-Item -ItemType Directory -Force -Path $root,$data|Out-Null;Set-Content -LiteralPath (Join-Path $data 'sentinel.txt') -Value 'preserve-through-update' -Encoding utf8
+function Get-InstallDiagnostic{
+    $entries='missing-root'
+    if(Test-Path -LiteralPath $install){$entries=((Get-ChildItem -LiteralPath $install -Force -Recurse -ErrorAction SilentlyContinue | Select-Object -First 40 | ForEach-Object {[IO.Path]::GetRelativePath($install,$_.FullName).Replace('\','/')}) -join ',')}
+    $logTail='missing-log'
+    if(Test-Path -LiteralPath $setupLog){$logTail=((Get-Content -LiteralPath $setupLog -Tail 80 -ErrorAction SilentlyContinue) -join ' | ')}
+    return "install=$install entries=$entries setupLog=$logTail"
+}
 function Invoke-UpdateExe([string]$Package){
-    $updateExe=Join-Path $install 'Update.exe';if(-not(Test-Path -LiteralPath $updateExe)){throw 'UPDATE_EXE_MISSING'}
+    $updateExe=Join-Path $install 'Update.exe';if(-not(Test-Path -LiteralPath $updateExe)){throw "UPDATE_EXE_MISSING $(Get-InstallDiagnostic)"}
     Invoke-CloudOSExternal $updateExe @('apply','--package',$Package,'--norestart') $root | Out-Null
 }
 function Assert-Version([string]$Expected){
-    $productPath=Join-Path $install 'current\meta\product.json';if(-not(Test-Path -LiteralPath $productPath)){throw 'INSTALLED_PRODUCT_METADATA_MISSING'}
+    $productPath=Join-Path $install 'current\meta\product.json';if(-not(Test-Path -LiteralPath $productPath)){throw "INSTALLED_PRODUCT_METADATA_MISSING $(Get-InstallDiagnostic)"}
     $actual=(Get-Content -LiteralPath $productPath -Raw|ConvertFrom-Json).version
     if([string]$actual -ne $Expected){throw "INSTALLED_VERSION_MISMATCH:expected=$Expected actual=$actual"}
 }
@@ -22,7 +29,10 @@ function Assert-PrerequisiteWindow{
     try{$deadline=[DateTime]::UtcNow.AddSeconds(25);$visible=$false;while([DateTime]::UtcNow -lt $deadline -and -not $p.HasExited){$p.Refresh();if($p.MainWindowHandle -ne 0){$visible=$true;break};Start-Sleep -Milliseconds 150};if(-not $visible){throw 'UPDATED_PREREQUISITE_WINDOW_NOT_VISIBLE'};[void]$p.CloseMainWindow();if(-not $p.WaitForExit(10000)){$p.Refresh();if($p.StartTime.ToUniversalTime().Ticks -ne $expectedStart -or [IO.Path]::GetFullPath($p.MainModule.FileName) -ne [IO.Path]::GetFullPath($exe)){throw 'UPDATED_BOOTSTRAP_OWNERSHIP_LOST'};$p.Kill($false);$p.WaitForExit()}}finally{$p.Dispose()}
 }
 try{
-    Invoke-CloudOSExternal ([string]$package.setup) @('--silent','--installto',$install) $root | Out-Null
+    Invoke-CloudOSExternal ([string]$package.setup) @('--silent','--installto',$install,'--log',$setupLog) $root | Out-Null
+    if(-not(Test-Path -LiteralPath $setupLog)){throw 'SETUP_LOG_MISSING'}
+    $setupText=Get-Content -LiteralPath $setupLog -Raw
+    if($setupText.IndexOf($install,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "SETUP_INSTALL_ROOT_NOT_CONFIRMED $(Get-InstallDiagnostic)"}
     Assert-Version ([string]$fixture.currentVersion)
     Invoke-UpdateExe ([string]$fixture.nextFullPackage);Assert-Version ([string]$fixture.nextVersion);Assert-PrerequisiteWindow
     & (Join-Path $PSScriptRoot 'test-packaged-node-runtime.ps1') -Staging (Join-Path $install 'current')
