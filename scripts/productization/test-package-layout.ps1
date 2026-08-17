@@ -44,6 +44,18 @@ if(-not(Test-Path -LiteralPath $result.portableZip)){throw 'PACKAGE_PORTABLE_ZIP
 $signature=Get-AuthenticodeSignature -LiteralPath $result.setup
 if($signature.Status -eq 'Valid'){throw 'UNEXPECTED_SIGNED_SETUP_IN_UNSIGNED_BATCH'}
 Add-Type -AssemblyName System.IO.Compression
+
+$nupkg=[IO.Compression.ZipFile]::OpenRead([string]$result.fullPackage)
+try{
+    $nupkgEntries=@($nupkg.Entries.FullName | ForEach-Object {$_.Replace('\','/')})
+    foreach($suffix in @('/CloudOS.Bootstrap.exe','/meta/product.json','/meta/manifest.json','/meta/components.json','/runtime/node.exe','/runtime/cloudos-core')){
+        $matches=@($nupkgEntries | Where-Object {$_.EndsWith($suffix,[StringComparison]::OrdinalIgnoreCase)})
+        if($matches.Count -ne 1){throw "FULL_PACKAGE_ENTRY_COUNT_INVALID:suffix=$suffix count=$($matches.Count)"}
+    }
+    $nupkgGoSources=@($nupkgEntries | Where-Object {$_ -match '(^|/)go\.(mod|sum)$|\.go$'})
+    if($nupkgGoSources.Count -ne 0){throw "FULL_PACKAGE_GO_SOURCE_PRESENT:$($nupkgGoSources -join ',')"}
+}finally{$nupkg.Dispose()}
+
 $zip=[IO.Compression.ZipFile]::OpenRead([string]$result.portableZip)
 try{
     $entries=@($zip.Entries.FullName)
@@ -61,4 +73,4 @@ try{
         if($launcher.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "PORTABLE_LAUNCHER_CONTRACT_MISSING:$required"}
     }
 }finally{$zip.Dispose()}
-Write-Host "PRODUCTIZATION_PACKAGE_LAYOUT_OK setup=$($result.setup) portable=$($result.portableZip) coreSha256=$coreHash"
+Write-Host "PRODUCTIZATION_PACKAGE_LAYOUT_OK setup=$($result.setup) portable=$($result.portableZip) coreSha256=$coreHash fullPackageContent=true"
