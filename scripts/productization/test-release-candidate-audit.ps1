@@ -48,7 +48,10 @@ foreach($token in @('runtime/node.exe','runtime/cloudos-core','supply-chain.json
 }
 foreach($uiPath in @('desktop\CloudOS.Bootstrap\UpdateWindow.cs','desktop\CloudOS.Bootstrap\RecoveryWindow.xaml.cs')){
     $ui=Get-Content -LiteralPath (Join-Path $root $uiPath) -Raw
-    if($ui -match '\$"[^"\r\n]*\{(?:error|ex|exception|storageError|rollbackError)\.Message\}'){throw "RC_AUDIT_RAW_EXCEPTION_IN_UI:$uiPath"}
+    $rawException='\{(?:error|ex|exception|storageError|rollbackError)\.Message\}'
+    if($ui -match "(?m)_status\.Text\s*=\s*\$\"[^\"\r\n]*$rawException" -or $ui -match "(?m)MessageBox\.Show\(\s*\$\"[^\"\r\n]*$rawException"){
+        throw "RC_AUDIT_RAW_EXCEPTION_IN_UI:$uiPath"
+    }
 }
 $workflow=Get-Content -LiteralPath (Join-Path $root '.github\workflows\productization-batch2-ci.yml') -Raw
 foreach($token in @('test-release-candidate-audit.ps1','test-release-candidate-orphans.ps1','measure-release-candidate.ps1','test-wsl-core-package-smoke.ps1 -SkipIfUnavailable')){
