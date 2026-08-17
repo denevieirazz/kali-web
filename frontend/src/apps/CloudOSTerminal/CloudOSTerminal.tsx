@@ -8,11 +8,13 @@ import {
   createTerminalTab,
   cycleTerminalTab,
   normalizeTerminalWorkspace,
+  renameTerminalTab,
   serializableTerminalWorkspace,
   toggleTerminalSplit,
   updateTerminalTab,
   type TerminalInitialDirectory,
   type TerminalProfile,
+  type TerminalTabState,
   type TerminalWorkspaceState,
 } from '../../core/terminalWorkspaceState.js';
 import { apiClient } from '../../services/apiClient';
@@ -32,6 +34,10 @@ const DEFAULT_STATUS: TerminalPaneStatus = { state: 'connecting', label: 'Prepar
 
 function preferredDistribution(info: WslInfo | null) {
   return info?.preferred || info?.default || info?.distributions[0]?.name || '';
+}
+
+function tabDefaultTitle(tab: TerminalTabState) {
+  return tab.profile === 'wsl' ? (tab.distribution || 'WSL') : 'PowerShell';
 }
 
 export default function CloudOSTerminal({ windowId }: { windowId?: string }) {
@@ -128,6 +134,12 @@ export default function CloudOSTerminal({ windowId }: { windowId?: string }) {
     });
   }, [mutateWorkspace, wslInfo]);
 
+  const renameTab = useCallback((tab: TerminalTabState) => {
+    const requested = window.prompt('Nome da aba do Terminal', tab.title || tabDefaultTitle(tab));
+    if (requested === null) return;
+    mutateWorkspace(current => renameTerminalTab(current, tab.id, requested));
+  }, [mutateWorkspace]);
+
   useEffect(() => {
     if (!workspace) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -179,12 +191,13 @@ export default function CloudOSTerminal({ windowId }: { windowId?: string }) {
                   role="tab"
                   aria-selected={active}
                   onClick={() => mutateWorkspace(current => activateTerminalTab(current, tab.id))}
-                  title={status.label}
+                  onDoubleClick={() => renameTab(tab)}
+                  title={`${status.label} · duplo clique para renomear`}
                 >
                   <span className={`terminal-tab__status terminal-tab__status--${status.state}`} />
-                  <span className="terminal-tab__title">{tab.profile === 'wsl' ? (tab.distribution || 'WSL') : 'PowerShell'}</span>
+                  <span className="terminal-tab__title">{tab.title || tabDefaultTitle(tab)}</span>
                 </button>
-                <button type="button" className="terminal-tab__close" onClick={() => closeTab(tab.id)} aria-label="Fechar aba">×</button>
+                <button type="button" className="terminal-tab__close" onClick={() => closeTab(tab.id)} aria-label={`Fechar aba ${tab.title || tabDefaultTitle(tab)}`}>×</button>
               </div>
             );
           })}
@@ -193,6 +206,7 @@ export default function CloudOSTerminal({ windowId }: { windowId?: string }) {
         <div className="terminal-workspace__toolbar">
           <button type="button" onClick={() => openTab('powershell')} disabled={atLimit} title="Nova aba PowerShell">+ PowerShell</button>
           <button type="button" onClick={() => openTab('wsl')} disabled={atLimit || !wslInfo?.available} title="Nova aba WSL">+ WSL</button>
+          <button type="button" onClick={() => renameTab(activeTab)} title="Renomear a aba ativa">✎ Renomear aba</button>
 
           {wslInfo?.available && wslInfo.distributions.length > 0 && (
             <select
@@ -235,7 +249,7 @@ export default function CloudOSTerminal({ windowId }: { windowId?: string }) {
 
       <footer className="terminal-workspace__statusbar">
         <span>{profileMessage}</span>
-        <span>Ctrl+PgUp/PgDn alterna · Ctrl+Shift+T cria · Ctrl+Shift+W fecha · Alt+Shift+D divide</span>
+        <span>Ctrl+PgUp/PgDn alterna · Ctrl+Shift+T cria · Ctrl+Shift+W fecha · duplo clique renomeia · Alt+Shift+D divide</span>
       </footer>
     </div>
   );
