@@ -13,15 +13,28 @@ function safeDistribution(value) {
   return typeof value === 'string' ? value.trim().slice(0, 120) : '';
 }
 
+function safeInitialDirectory(value, profile) {
+  if (profile !== 'wsl' || !value || typeof value !== 'object' || value.provider !== 'wsl' || !Array.isArray(value.path)) return undefined;
+  const path = [];
+  for (const raw of value.path) {
+    if (path.length >= 64) break;
+    const segment = typeof raw === 'string' ? raw : '';
+    if (!segment || segment.length > 120 || /[\u0000\r\n]/.test(segment) || segment === '.' || segment === '..') return undefined;
+    path.push(segment);
+  }
+  return { provider: 'wsl', path };
+}
+
 function normalizeTab(value, fallback = {}) {
   const source = value && typeof value === 'object' ? value : {};
   const profile = VALID_PROFILES.has(source.profile) ? source.profile : (VALID_PROFILES.has(fallback.profile) ? fallback.profile : 'powershell');
   const distribution = profile === 'wsl' ? safeDistribution(source.distribution || fallback.distribution) : '';
-  return { id: safeId(source.id), profile, distribution };
+  const initialDirectory = safeInitialDirectory(source.initialDirectory || fallback.initialDirectory, profile);
+  return { id: safeId(source.id), profile, distribution, ...(initialDirectory ? { initialDirectory } : {}) };
 }
 
-export function createTerminalTab(profile = 'powershell', distribution = '', id) {
-  return normalizeTab({ id, profile, distribution });
+export function createTerminalTab(profile = 'powershell', distribution = '', id, initialDirectory) {
+  return normalizeTab({ id, profile, distribution, initialDirectory });
 }
 
 export function normalizeTerminalWorkspace(value, fallbackTab = createTerminalTab()) {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import type { TerminalTabState } from '../../core/terminalWorkspaceState.js';
+import { buildWslCdCommand } from '../../core/workflowCore.js';
 import { getStoredToken, resolveWebSocketUrl } from '../../services/apiClient';
 import './CloudOSTerminal.transport.css';
 import {
@@ -59,6 +60,7 @@ export function TerminalSession({
   const [status, setStatus] = useState<TerminalPaneStatus>(INITIAL_STATUS);
   const [dimensions, setDimensions] = useState({ cols: 100, rows: 28 });
   const [visualError, setVisualError] = useState('');
+  const initialDirectoryKey = tab.initialDirectory?.provider === 'wsl' ? tab.initialDirectory.path.join('\u0000') : '';
 
   useEffect(() => {
     const host = hostRef.current;
@@ -71,6 +73,7 @@ export function TerminalSession({
     let resizeSubscription: { dispose(): void } | null = null;
     let transport: ReturnType<typeof createTerminalTransport> | null = null;
     let socket: WebSocket | null = null;
+    let initialDirectoryApplied = false;
 
     const terminal = new Terminal({
       theme: {
@@ -95,6 +98,23 @@ export function TerminalSession({
       if (disposed) return;
       setStatus(next);
       onStatusChange(tab.id, next);
+    };
+
+    const applyInitialDirectory = () => {
+      if (initialDirectoryApplied || tab.profile !== 'wsl' || tab.initialDirectory?.provider !== 'wsl') return;
+      try {
+        const command = buildWslCdCommand(tab.initialDirectory.path);
+        transport?.input(`${command}\r`);
+        initialDirectoryApplied = true;
+      } catch {
+        initialDirectoryApplied = true;
+        terminal.writeln('\r\n\x1b[1;33m[O caminho inicial solicitado foi recusado.]\x1b[0m');
+      }
+    };
+
+    const publishTransportStatus = (next: TerminalPaneStatus) => {
+      publishStatus(next);
+      if (next.state === 'connected') applyInitialDirectory();
     };
 
     const disposeOnce = () => {
@@ -140,8 +160,6 @@ export function TerminalSession({
         return;
       }
 
-      // O renderer/viewport do xterm é criado por open(). Um frame posterior evita
-      // executar FitAddon enquanto as dimensões internas ainda estão indefinidas.
       await nextFrame();
       if (disposed || !hasUsableTerminalGeometry(host)) return;
 
@@ -155,8 +173,6 @@ export function TerminalSession({
               setVisualError('');
             }
           } catch (error) {
-            // FitAddon pode observar um frame transitório durante minimize/restore.
-            // A exceção fica contida nesta pane e um próximo ResizeObserver tenta de novo.
             if (!disposed) setVisualError(sanitizeTerminalLifecycleError(error));
           }
         },
@@ -184,7 +200,7 @@ export function TerminalSession({
         onOutput: data => {
           if (!disposed) terminal.write(data);
         },
-        onStatus: publishStatus,
+        onStatus: publishTransportStatus,
         onExit: () => {
           if (!disposed) terminal.writeln('\r\n\x1b[1;33m[Sessão encerrada]\x1b[0m');
         },
@@ -207,7 +223,7 @@ export function TerminalSession({
 
     void initialise().catch(error => failVisual(error));
     return disposeOnce;
-  }, [onStatusChange, restartGeneration, tab.distribution, tab.id, tab.profile]);
+  }, [initialDirectoryKey, onStatusChange, restartGeneration, tab.distribution, tab.id, tab.profile]);
 
   useEffect(() => {
     if (visible) fitSchedulerRef.current?.schedule();

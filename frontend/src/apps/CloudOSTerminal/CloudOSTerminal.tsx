@@ -11,6 +11,7 @@ import {
   serializableTerminalWorkspace,
   toggleTerminalSplit,
   updateTerminalTab,
+  type TerminalInitialDirectory,
   type TerminalProfile,
   type TerminalWorkspaceState,
 } from '../../core/terminalWorkspaceState.js';
@@ -38,10 +39,15 @@ export default function CloudOSTerminal({ windowId }: { windowId?: string }) {
     const win = windowId ? useWindowManager.getState().getWindow(windowId) : undefined;
     const rawProfile = win?.params?.profile;
     const profile: TerminalProfile | null = rawProfile === 'powershell' || rawProfile === 'wsl' ? rawProfile : null;
+    const rawDirectory = win?.params?.initialDirectory;
+    const initialDirectory: TerminalInitialDirectory | undefined = rawDirectory?.provider === 'wsl' && Array.isArray(rawDirectory.path)
+      ? { provider: 'wsl', path: rawDirectory.path.filter((part: unknown): part is string => typeof part === 'string') }
+      : undefined;
     return {
       profile,
       distribution: typeof win?.params?.distribution === 'string' ? win.params.distribution : '',
-      explicit: Boolean(profile || win?.params?.distribution),
+      initialDirectory,
+      explicit: Boolean(profile || win?.params?.distribution || initialDirectory),
     };
   });
 
@@ -60,7 +66,7 @@ export default function CloudOSTerminal({ windowId }: { windowId?: string }) {
         const requestedExists = info.distributions.some(distro => distro.name === launchParams.distribution);
         const distribution = requestedExists ? launchParams.distribution : preferredDistribution(info);
         const profile: TerminalProfile = launchParams.profile ?? (info.available && distribution ? 'wsl' : 'powershell');
-        const fallbackTab = createTerminalTab(profile, distribution);
+        const fallbackTab = createTerminalTab(profile, distribution, undefined, launchParams.initialDirectory);
 
         let restored: unknown = null;
         if (!launchParams.explicit) {
@@ -82,7 +88,7 @@ export default function CloudOSTerminal({ windowId }: { windowId?: string }) {
       });
 
     return () => { cancelled = true; };
-  }, [launchParams.distribution, launchParams.explicit, launchParams.profile]);
+  }, [launchParams.distribution, launchParams.explicit, launchParams.initialDirectory, launchParams.profile]);
 
   useEffect(() => {
     if (!workspace) return;

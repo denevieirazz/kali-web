@@ -1,8 +1,13 @@
 export type TerminalProfile = 'powershell' | 'wsl';
+export interface TerminalInitialDirectory {
+  provider: 'wsl';
+  path: string[];
+}
 export interface TerminalTabState {
   id: string;
   profile: TerminalProfile;
   distribution: string;
+  initialDirectory?: TerminalInitialDirectory;
 }
 export interface TerminalWorkspaceState {
   tabs: TerminalTabState[];
@@ -12,7 +17,7 @@ export interface TerminalWorkspaceState {
 
 export const MAX_TERMINAL_TABS: number;
 export const TERMINAL_WORKSPACE_STORAGE_KEY: string;
-export function createTerminalTab(profile?: TerminalProfile, distribution?: string, id?: string): TerminalTabState;
+export function createTerminalTab(profile?: TerminalProfile, distribution?: string, id?: string, initialDirectory?: TerminalInitialDirectory): TerminalTabState;
 export function normalizeTerminalWorkspace(value: unknown, fallbackTab?: TerminalTabState): TerminalWorkspaceState;
 export function addTerminalTab(workspace: TerminalWorkspaceState, tab: TerminalTabState): TerminalWorkspaceState;
 export function updateTerminalTab(workspace: TerminalWorkspaceState, tabId: string, updates: Partial<Omit<TerminalTabState, 'id'>>): TerminalWorkspaceState;
