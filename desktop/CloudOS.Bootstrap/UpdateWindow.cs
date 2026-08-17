@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -54,8 +55,16 @@ public sealed class UpdateWindow : Window
             _status.Text=$"Versão {_prepared.Version} disponível.";
             _download.IsEnabled=true;
         }
-        catch(InvalidOperationException error){_status.Text=$"Não foi possível verificar a atualização: {error.Message}";}
-        catch(Exception){_status.Text="Não foi possível verificar atualizações. Verifique a conexão e tente novamente.";}
+        catch(InvalidOperationException error)
+        {
+            Trace.TraceWarning($"Update check blocked: {error.GetType().Name}: {error.Message}");
+            _status.Text="Esta atualização não está disponível para o canal ou origem configurados.";
+        }
+        catch(Exception error)
+        {
+            Trace.TraceError($"Update check failed: {error.GetType().Name}: {error.Message}");
+            _status.Text="Não foi possível verificar atualizações. Verifique a conexão e tente novamente.";
+        }
         finally{check.IsEnabled=true;}
     }
 
@@ -69,14 +78,26 @@ public sealed class UpdateWindow : Window
             _progress.Value=100; _status.Text=$"Versão {_prepared.Version} pronta. Reinicie o CloudOS para aplicar."; _apply.IsEnabled=true;
         }
         catch(OperationCanceledException){_status.Text="Download cancelado. Nenhuma atualização foi aplicada.";_download.IsEnabled=true;}
-        catch(Exception){_status.Text="A atualização baixada não pôde ser validada. Tente novamente.";_download.IsEnabled=true;}
+        catch(Exception error)
+        {
+            Trace.TraceError($"Update download failed: {error.GetType().Name}: {error.Message}");
+            _status.Text="A atualização baixada não pôde ser validada. Tente novamente.";_download.IsEnabled=true;
+        }
     }
 
     private void Apply()
     {
         if(_prepared is null)return;
         if(MessageBox.Show("O CloudOS será reiniciado para aplicar a atualização. Continuar?","CloudOS",MessageBoxButton.YesNo,MessageBoxImage.Question)!=MessageBoxResult.Yes)return;
-        DistributionUpdateService.ApplyAndRestart(_prepared,_localRoot,_stateStore);
+        try
+        {
+            DistributionUpdateService.ApplyAndRestart(_prepared,_localRoot,_stateStore);
+        }
+        catch(Exception error)
+        {
+            Trace.TraceError($"Update apply failed: {error.GetType().Name}: {error.Message}");
+            _status.Text="Não foi possível aplicar a atualização. Seus dados foram preservados; tente novamente ou consulte os diagnósticos.";
+        }
     }
 
     protected override void OnClosed(EventArgs e){_downloadCancellation?.Cancel();_downloadCancellation?.Dispose();base.OnClosed(e);}
