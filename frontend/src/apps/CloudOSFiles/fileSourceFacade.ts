@@ -143,9 +143,10 @@ export const fileSourceFacade = {
   async create(source: FileSourceKind, path: string[], kind: 'file' | 'directory', name: string) {
     if (source === 'opfs') return opfsCreate(path, kind, name);
     if (source === 'windows') return windowsDirectorySource.create(path, kind, name);
-    if (kind === 'directory') return wslFileSource.mkdir(path, name);
-    await wslFileSource.writeText(path, name, '');
-    return normalizeFilePath([name])[0];
+    const safeName = normalizeFilePath([name])[0];
+    if (kind === 'directory') await wslFileSource.mkdir(path, safeName);
+    else await wslFileSource.writeText(path, safeName, '');
+    return safeName;
   },
 
   async writeText(source: FileSourceKind, path: string[], name: string, content: string, mode?: number) {
