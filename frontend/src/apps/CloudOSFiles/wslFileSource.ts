@@ -104,6 +104,20 @@ function base64ToBytes(value: string) {
   return bytes;
 }
 
+async function writeBytes(path: string[], name: string, bytes: Uint8Array, mode = 0o600) {
+  const fullPath = appendFilePath(path, name);
+  let offset = 0;
+  if (bytes.length === 0) {
+    await apiClient('/api/files/wsl/write', jsonOptions({ confirmed: true, path: fullPath, offset: 0, data: '', truncate: true, mode }));
+    return;
+  }
+  while (offset < bytes.length) {
+    const chunk = bytes.subarray(offset, Math.min(bytes.length, offset + 256 * 1024));
+    await apiClient('/api/files/wsl/write', jsonOptions({ confirmed: true, path: fullPath, offset, data: bytesToBase64(chunk), truncate: offset === 0, mode }, 20000));
+    offset += chunk.length;
+  }
+}
+
 export const wslFileSource = {
   status: () => apiClient<WslFilesStatus>('/api/files/wsl/status', jsonOptions()),
 
@@ -135,18 +149,14 @@ export const wslFileSource = {
   },
 
   async writeText(path: string[], name: string, content: string, mode = 0o600) {
-    const fullPath = appendFilePath(path, name);
-    const bytes = new TextEncoder().encode(content);
-    let offset = 0;
-    if (bytes.length === 0) {
-      await apiClient('/api/files/wsl/write', jsonOptions({ confirmed: true, path: fullPath, offset: 0, data: '', truncate: true, mode }));
-      return;
-    }
-    while (offset < bytes.length) {
-      const chunk = bytes.subarray(offset, Math.min(bytes.length, offset + 256 * 1024));
-      await apiClient('/api/files/wsl/write', jsonOptions({ confirmed: true, path: fullPath, offset, data: bytesToBase64(chunk), truncate: offset === 0, mode }, 20000));
-      offset += chunk.length;
-    }
+    await writeBytes(path, name, new TextEncoder().encode(content), mode);
+  },
+
+  async writeFile(path: string[], file: File, mode = 0o600) {
+    const safeName = normalizeFilePath([file.name])[0];
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    await writeBytes(path, safeName, bytes, mode);
+    return safeName;
   },
 
   mkdir: (path: string[], name: string) => apiClient('/api/files/wsl/mkdir', jsonOptions({ confirmed: true, path: appendFilePath(path, name), mode: 0o700 })),
