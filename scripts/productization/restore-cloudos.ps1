@@ -138,7 +138,8 @@ try{
     Write-Host "CLOUDOS_RESTORE_OK root=$root"
 }catch{
     foreach($path in $created){Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue}
-    foreach($entry in @($moved) | Select-Object -Reverse){
+    for($rollbackIndex=$moved.Count-1;$rollbackIndex -ge 0;$rollbackIndex--){
+        $entry=$moved[$rollbackIndex]
         Remove-Item -LiteralPath $entry.Destination -Force -ErrorAction SilentlyContinue
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $entry.Destination) | Out-Null
         if(Test-Path -LiteralPath $entry.Backup){Move-Item -LiteralPath $entry.Backup -Destination $entry.Destination -Force}
