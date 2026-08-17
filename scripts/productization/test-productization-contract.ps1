@@ -32,15 +32,28 @@ $pack=Get-Content -LiteralPath (Join-Path $root 'scripts\productization\package-
 $packageAssertions=[ordered]@{
     manifest='Join-Path\s+\$meta\s+''manifest\.json'''
     components='Join-Path\s+\$meta\s+''components\.json'''
+    supplyChain='Join-Path\s+\$meta\s+''supply-chain\.json'''
     checksums='Join-Path\s+\$meta\s+''checksums\.sha256'''
+    portableManifest='portable-manifest\.json'
+    portableChecksums='portable-checksums\.sha256'
+    componentOrigin='origin='
     unsigned='unsigned-development'
     customPortable='--noPortable'
 }
 foreach($entry in $packageAssertions.GetEnumerator()){
     if($pack -notmatch $entry.Value){throw "PACKAGE_CONTRACT_MISSING:$($entry.Key)"}
 }
+foreach($requiredScript in @('artifact-audit-lib.ps1','audit-artifacts.ps1','test-artifact-policy.ps1')){
+    if(-not(Test-Path -LiteralPath (Join-Path $PSScriptRoot $requiredScript) -PathType Leaf)){throw "ARTIFACT_AUDIT_SCRIPT_MISSING:$requiredScript"}
+}
 $workflowPath=Join-Path $root '.github\workflows\productization-batch2-ci.yml'
-if(Test-Path -LiteralPath $workflowPath){$workflow=Get-Content -LiteralPath $workflowPath -Raw;if($workflow -match 'release(s)?\s*:\s*write|gh\s+release|create-release|softprops/action-gh-release'){throw 'REAL_RELEASE_PUBLICATION_FORBIDDEN'}}
+if(Test-Path -LiteralPath $workflowPath){
+    $workflow=Get-Content -LiteralPath $workflowPath -Raw
+    if($workflow -match 'release(s)?\s*:\s*write|gh\s+release|create-release|softprops/action-gh-release'){throw 'REAL_RELEASE_PUBLICATION_FORBIDDEN'}
+    foreach($required in @('test-artifact-policy.ps1','audit-artifacts.ps1','artifacts/supply-chain.json','artifacts/audit/')){
+        if($workflow.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "ARTIFACT_AUDIT_CI_CONTRACT_MISSING:$required"}
+    }
+}
 
 $git=Get-CloudOSCommandName 'git'
 $global:LASTEXITCODE=0
@@ -56,4 +69,4 @@ $baseCheck=Invoke-CloudOSExternal $git @('merge-base','--is-ancestor',[string]$c
 if($baseCheck.ExitCode -ne 0){throw 'BATCH1_BASE_NOT_ANCESTOR'}
 $officialCheck=Invoke-CloudOSExternal $git @('merge-base','--is-ancestor',[string]$config.officialBaseSha,'HEAD') $root -Capture -AllowFailure
 if($officialCheck.ExitCode -ne 0){throw 'OFFICIAL_BASE_NOT_ANCESTOR'}
-Write-Host 'PRODUCTIZATION_CONTRACT_OK'
+Write-Host 'PRODUCTIZATION_CONTRACT_OK artifactAudit=true supplyChain=true'

@@ -43,6 +43,9 @@ jobs:
       - name: Productization static contract
         shell: pwsh
         run: ./scripts/productization/test-productization-contract.ps1
+      - name: Artifact policy negative tests
+        shell: pwsh
+        run: ./scripts/productization/test-artifact-policy.ps1
       - name: Go executable package contract
         shell: pwsh
         run: ./scripts/productization/test-go-build-contract.ps1
@@ -120,6 +123,9 @@ jobs:
       - name: Productization static contract
         shell: pwsh
         run: ./scripts/productization/test-productization-contract.ps1
+      - name: Artifact policy negative tests
+        shell: pwsh
+        run: ./scripts/productization/test-artifact-policy.ps1
       - name: Go executable package contract
         shell: pwsh
         run: ./scripts/productization/test-go-build-contract.ps1
@@ -140,6 +146,9 @@ jobs:
       - name: Validate package layout and supply chain
         shell: pwsh
         run: ./scripts/productization/test-package-layout.ps1
+      - name: Audit generated portable and installer artifacts
+        shell: pwsh
+        run: ./scripts/productization/audit-artifacts.ps1
       - name: Packaged WSL core smoke when existing WSL is available
         shell: pwsh
         run: ./scripts/productization/test-wsl-core-package-smoke.ps1 -SkipIfUnavailable
@@ -188,8 +197,10 @@ jobs:
             artifacts/manifest.json
             artifacts/checksums.sha256
             artifacts/components.json
+            artifacts/supply-chain.json
             artifacts/licenses/
             artifacts/SBOM/
+            artifacts/audit/
             artifacts/package-result.json
             artifacts/update-fixture-result.json
             artifacts/tooling.json
