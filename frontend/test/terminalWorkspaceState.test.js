@@ -8,6 +8,7 @@ import {
   createTerminalTab,
   cycleTerminalTab,
   normalizeTerminalWorkspace,
+  renameTerminalTab,
   serializableTerminalWorkspace,
   toggleTerminalSplit,
   updateTerminalTab,
@@ -18,11 +19,11 @@ const wsl = (id, distro = 'kali-linux') => createTerminalTab('wsl', distro, id);
 
 test('normalizes workspace without persisting arbitrary fields', () => {
   const workspace = normalizeTerminalWorkspace({
-    tabs: [{ id: 'safe', profile: 'wsl', distribution: 'kali-linux', command: 'ignored', token: 'ignored' }],
+    tabs: [{ id: 'safe', profile: 'wsl', distribution: 'kali-linux', title: 'Recon', command: 'ignored', token: 'ignored' }],
     activeId: 'safe',
     splitId: null,
   }, ps('fallback'));
-  assert.deepEqual(workspace.tabs, [{ id: 'safe', profile: 'wsl', distribution: 'kali-linux' }]);
+  assert.deepEqual(workspace.tabs, [{ id: 'safe', profile: 'wsl', distribution: 'kali-linux', title: 'Recon' }]);
   assert.deepEqual(serializableTerminalWorkspace(workspace), workspace);
 });
 
@@ -68,5 +69,15 @@ test('workspace enforces a bounded PTY count', () => {
 test('changing a tab profile never carries a distribution into PowerShell', () => {
   const workspace = normalizeTerminalWorkspace({ tabs: [wsl('one')], activeId: 'one' }, wsl('one'));
   const updated = updateTerminalTab(workspace, 'one', { profile: 'powershell', distribution: 'must-not-survive' });
-  assert.deepEqual(updated.tabs[0], { id: 'one', profile: 'powershell', distribution: '' });
+  assert.deepEqual(updated.tabs[0], { id: 'one', profile: 'powershell', distribution: '', title: '' });
+});
+
+test('renaming a tab is bounded sanitized and does not change terminal transport fields', () => {
+  const workspace = normalizeTerminalWorkspace({ tabs: [wsl('one')], activeId: 'one' }, wsl('one'));
+  const renamed = renameTerminalTab(workspace, 'one', `  Recon\u0000 ${'x'.repeat(80)}  `);
+  assert.equal(renamed.tabs[0].profile, 'wsl');
+  assert.equal(renamed.tabs[0].distribution, 'kali-linux');
+  assert.equal(renamed.tabs[0].title.includes('\u0000'), false);
+  assert.equal(renamed.tabs[0].title.length, 60);
+  assert.equal(renamed.tabs[0].id, 'one');
 });
