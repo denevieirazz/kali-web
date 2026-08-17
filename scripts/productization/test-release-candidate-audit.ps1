@@ -23,6 +23,7 @@ foreach($workflow in Get-ChildItem -LiteralPath (Join-Path $root '.github\workfl
 }
 if($broken.Count -gt 0){throw "RC_AUDIT_BROKEN_WORKFLOW_PATHS:$($broken -join ',')"}
 foreach($required in @(
+    'scripts\productization\artifact-audit-lib.ps1',
     'scripts\productization\test-installer-hardening.ps1',
     'scripts\productization\test-packaged-node-runtime.ps1',
     'scripts\productization\test-release-candidate-orphans.ps1',
@@ -39,9 +40,11 @@ $updater=Get-Content -LiteralPath (Join-Path $root 'desktop\CloudOS.Bootstrap\Di
 if($updater -notmatch 'AllowVersionDowngrade\s*=\s*false'){throw 'RC_AUDIT_DOWNGRADE_GUARD_MISSING'}
 if($updater -notmatch 'UriSchemeHttps'){throw 'RC_AUDIT_HTTPS_UPDATE_GUARD_MISSING'}
 $installer=Get-Content -LiteralPath (Join-Path $root 'scripts\productization\test-installer-hardening.ps1') -Raw
-foreach($token in @('noGlobalNode=true','noGlobalGo=true','noNodeModules=true')){
+foreach($token in @('noGlobalNode=true','noGlobalGo=true')){
     if($installer.IndexOf($token,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "RC_AUDIT_INSTALLER_ASSERTION_MISSING:$token"}
 }
+$artifactPolicy=Get-Content -LiteralPath (Join-Path $root 'scripts\productization\artifact-audit-lib.ps1') -Raw
+if($artifactPolicy -notmatch '\(\^\|/\)node_modules\(/\|\$\)'){throw 'RC_AUDIT_NODE_MODULES_POLICY_MISSING'}
 $package=Get-Content -LiteralPath (Join-Path $root 'scripts\productization\package-cloudos.ps1') -Raw
 foreach($token in @('runtime/node.exe','runtime/cloudos-core','supply-chain.json','portable-manifest.json','portable-checksums.sha256')){
     if($package.IndexOf($token,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "RC_AUDIT_PACKAGE_CONTRACT_MISSING:$token"}
@@ -57,4 +60,4 @@ $workflow=Get-Content -LiteralPath (Join-Path $root '.github\workflows\productiz
 foreach($token in @('test-release-candidate-audit.ps1','test-release-candidate-orphans.ps1','measure-release-candidate.ps1','test-wsl-core-package-smoke.ps1 -SkipIfUnavailable')){
     if($workflow.IndexOf($token,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "RC_AUDIT_CI_GATE_MISSING:$token"}
 }
-Write-Host 'PRODUCTIZATION_RC_AUDIT_OK brokenPaths=false obsoleteScripts=false physical=false visual=false globalNodeRuntime=false globalGoRuntime=false uiRawExceptions=false'
+Write-Host 'PRODUCTIZATION_RC_AUDIT_OK brokenPaths=false obsoleteScripts=false physical=false visual=false globalNodeRuntime=false globalGoRuntime=false nodeModules=false uiRawExceptions=false'
