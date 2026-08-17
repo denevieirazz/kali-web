@@ -5,6 +5,13 @@ import { useRef, useCallback, type ReactNode, Suspense } from 'react';
 import { useWindowManager } from '../../stores/windowManager';
 import { useContextMenuStore } from '../../stores/contextMenuStore';
 import { ProcessProvider } from '../../contexts/ProcessContext';
+import {
+  forgetWorkflowWindow,
+  isWorkflowWindowSnapped,
+  maximizeWorkflowWindow,
+  restoreWorkflowWindow,
+  snapWorkflowWindow,
+} from '../../services/workflowWindow';
 import './Window.css';
 
 interface Props {
@@ -107,6 +114,7 @@ export default function Window({ windowId, children }: Props) {
   const { openContextMenu } = useContextMenuStore();
 
   const handleClose = useCallback(() => {
+    forgetWorkflowWindow(windowId);
     // kernel.closeWindow() encerra o processo internamente
     closeWindow(windowId);
   }, [windowId, closeWindow]);
@@ -114,13 +122,17 @@ export default function Window({ windowId, children }: Props) {
   const handleWindowContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     if (!win) return;
+    const snapped = isWorkflowWindowSnapped(windowId);
 
     openContextMenu(e.clientX, e.clientY, [
-      { id: 'restore', label: 'Restaurar', disabled: !win.isMaximized, onClick: () => toggleMaximize(windowId) },
+      { id: 'restore', label: 'Restaurar', disabled: !win.isMaximized && !snapped, onClick: () => { if (!restoreWorkflowWindow(windowId) && win.isMaximized) toggleMaximize(windowId); } },
+      { id: 'left-half', label: 'Metade esquerda', disabled: !win.isResizable, shortcut: 'Alt+Shift+←', onClick: () => snapWorkflowWindow(windowId, 'left') },
+      { id: 'right-half', label: 'Metade direita', disabled: !win.isResizable, shortcut: 'Alt+Shift+→', onClick: () => snapWorkflowWindow(windowId, 'right') },
+      { id: 'sep-layout', label: '', separator: true },
       { id: 'move', label: 'Mover', disabled: win.isMaximized, onClick: () => {} },
       { id: 'size', label: 'Tamanho', disabled: !win.isResizable || win.isMaximized, onClick: () => {} },
       { id: 'min', label: 'Minimizar', onClick: () => minimizeWindow(windowId) },
-      { id: 'max', label: 'Maximizar', disabled: win.isMaximized, onClick: () => toggleMaximize(windowId) },
+      { id: 'max', label: 'Maximizar', disabled: win.isMaximized, shortcut: 'Alt+Shift+↑', onClick: () => maximizeWorkflowWindow(windowId) },
       { id: 'sep1', label: '', separator: true },
       { id: 'close', label: 'Fechar', shortcut: 'Alt+F4', onClick: handleClose }
     ]);

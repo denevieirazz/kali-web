@@ -4,6 +4,7 @@ export const appExes: [string, string, string, string, string, string, string][]
   ['C:\\Program Files\\ObsidianOS Apps\\cmd.obx', 'cmd.obx', 'C:\\Program Files\\ObsidianOS Apps', 'terminal', '💻', 'system', 'Terminal Offline'],
   ['C:\\Program Files\\ObsidianOS Apps\\cloudos-terminal.obx', 'cloudos-terminal.obx', 'C:\\Program Files\\ObsidianOS Apps', 'cloudos-terminal', '⚡', 'system', 'CloudOS Terminal'],
   ['C:\\Program Files\\ObsidianOS Apps\\cloudos-files.obx', 'cloudos-files.obx', 'C:\\Program Files\\ObsidianOS Apps', 'cloudos-files', '☁️', 'system', 'CloudOS Files'],
+  ['C:\\Program Files\\ObsidianOS Apps\\workflow-workspace.obx', 'workflow-workspace.obx', 'C:\\Program Files\\ObsidianOS Apps', 'workflow-workspace', '🗂️', 'productivity', 'Workspace'],
   ['C:\\Program Files\\ObsidianOS Apps\\sysmon.obx', 'sysmon.obx', 'C:\\Program Files\\ObsidianOS Apps', 'system-monitor', '📈', 'system', 'System Monitor'],
   ['C:\\Program Files\\ObsidianOS Apps\\install-linux.obx', 'install-linux.obx', 'C:\\Program Files\\ObsidianOS Apps', 'install-linux', '◈', 'system', 'Central Windows + Linux'],
   ['C:\\Program Files\\ObsidianOS Apps\\env-doctor.obx', 'env-doctor.obx', 'C:\\Program Files\\ObsidianOS Apps', 'env-doctor', '🩺', 'system', 'Environment Doctor'],

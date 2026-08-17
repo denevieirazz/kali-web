@@ -9,6 +9,7 @@ import { NotificationContainer } from './components/Notifications/NotificationCo
 import SetupWizard from './components/Setup/SetupWizard';
 import StartMenu from './components/StartMenu/StartMenu';
 import WindowRenderer from './components/Window/WindowRenderer';
+import WorkflowShell from './components/Workflow/WorkflowShell';
 import {
   useCriticalSubsystemWatchdog,
   useDocumentTheme,
@@ -85,6 +86,7 @@ export default function App() {
           {bootPhase === 'desktop' && (
             <>
               <WindowRenderer />
+              <WorkflowShell />
               {explorerPid !== null && <StartMenu />}
             </>
           )}

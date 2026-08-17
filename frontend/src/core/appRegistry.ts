@@ -23,6 +23,7 @@ const components: Record<string, ReturnType<typeof lazy>> = {
   'sdk-app-runner': lazy(() => import('../apps/SdkAppRunner/SdkAppRunner')),
   'cloudos-terminal': lazy(() => import('../apps/CloudOSTerminal/CloudOSTerminal')),
   'cloudos-files': lazy(() => import('../apps/CloudOSFiles/CloudOSFiles')),
+  'workflow-workspace': lazy(() => import('../apps/WorkflowWorkspace/WorkflowWorkspace')),
   'system-monitor': lazy(() => import('../apps/SystemMonitor/SystemMonitor')),
   'install-linux': lazy(() => import('../apps/InstallLinux/InstallLinux')),
   'env-doctor': lazy(() => import('../apps/EnvDoctor/EnvDoctor')),
@@ -61,5 +62,3 @@ export const getAppList = () => Object.values(useAppRegistry.getState().apps);
 // Initial empty registry (will be populated by Kernel)
 export const appRegistry: Record<string, AppDefinition> = {};
 export const appList: any[] = [];
-
-
