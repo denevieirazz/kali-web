@@ -9,7 +9,7 @@ $root=Join-Path ([IO.Path]::GetTempPath()) "CloudOS Update Test $([Guid]::NewGui
 New-Item -ItemType Directory -Force -Path $root,$data|Out-Null;Set-Content -LiteralPath (Join-Path $data 'sentinel.txt') -Value 'preserve-through-update' -Encoding utf8
 function Invoke-UpdateExe([string]$Package){
     $updateExe=Join-Path $install 'Update.exe';if(-not(Test-Path -LiteralPath $updateExe)){throw 'UPDATE_EXE_MISSING'}
-    Invoke-CloudOSExternal $updateExe @('apply','--package',$Package,'--norestart') $install | Out-Null
+    Invoke-CloudOSExternal $updateExe @('apply','--package',$Package,'--norestart') $root | Out-Null
 }
 function Assert-Version([string]$Expected){
     $productPath=Join-Path $install 'current\meta\product.json';if(-not(Test-Path -LiteralPath $productPath)){throw 'INSTALLED_PRODUCT_METADATA_MISSING'}
@@ -29,10 +29,10 @@ try{
     if($LASTEXITCODE -ne 0){throw "UPDATED_PACKAGED_NODE_HEALTH_FAILED:$LASTEXITCODE"}
     Invoke-UpdateExe ([string]$fixture.currentFullPackage);Assert-Version ([string]$fixture.currentVersion);Assert-PrerequisiteWindow
     if((Get-Content -LiteralPath (Join-Path $data 'sentinel.txt') -Raw).Trim() -ne 'preserve-through-update'){throw 'UPDATE_OR_ROLLBACK_REMOVED_DATA'}
-    Invoke-CloudOSExternal (Join-Path $install 'Update.exe') @('uninstall','--silent') $install | Out-Null
+    Invoke-CloudOSExternal (Join-Path $install 'Update.exe') @('uninstall','--silent') $root | Out-Null
     if(-not(Test-Path -LiteralPath (Join-Path $data 'sentinel.txt'))){throw 'UPDATE_TEST_UNINSTALL_REMOVED_DATA'}
     Write-Host 'PRODUCTIZATION_UPDATE_ROLLBACK_OK apply=true restart=true health=true rollback=true dataPreserved=true'
 }finally{
-    if(Test-Path -LiteralPath (Join-Path $install 'Update.exe')){try{Invoke-CloudOSExternal (Join-Path $install 'Update.exe') @('uninstall','--silent') $install -AllowFailure | Out-Null}catch{}}
+    if(Test-Path -LiteralPath (Join-Path $install 'Update.exe')){try{Invoke-CloudOSExternal (Join-Path $install 'Update.exe') @('uninstall','--silent') $root -AllowFailure | Out-Null}catch{}}
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
