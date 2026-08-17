@@ -7,6 +7,7 @@ export interface TerminalTabState {
   id: string;
   profile: TerminalProfile;
   distribution: string;
+  title: string;
   initialDirectory?: TerminalInitialDirectory;
 }
 export interface TerminalWorkspaceState {
@@ -17,10 +18,11 @@ export interface TerminalWorkspaceState {
 
 export const MAX_TERMINAL_TABS: number;
 export const TERMINAL_WORKSPACE_STORAGE_KEY: string;
-export function createTerminalTab(profile?: TerminalProfile, distribution?: string, id?: string, initialDirectory?: TerminalInitialDirectory): TerminalTabState;
+export function createTerminalTab(profile?: TerminalProfile, distribution?: string, id?: string, initialDirectory?: TerminalInitialDirectory, title?: string): TerminalTabState;
 export function normalizeTerminalWorkspace(value: unknown, fallbackTab?: TerminalTabState): TerminalWorkspaceState;
 export function addTerminalTab(workspace: TerminalWorkspaceState, tab: TerminalTabState): TerminalWorkspaceState;
 export function updateTerminalTab(workspace: TerminalWorkspaceState, tabId: string, updates: Partial<Omit<TerminalTabState, 'id'>>): TerminalWorkspaceState;
+export function renameTerminalTab(workspace: TerminalWorkspaceState, tabId: string, title: string): TerminalWorkspaceState;
 export function closeTerminalTab(workspace: TerminalWorkspaceState, tabId: string, fallbackTab?: TerminalTabState): TerminalWorkspaceState;
 export function activateTerminalTab(workspace: TerminalWorkspaceState, tabId: string): TerminalWorkspaceState;
 export function toggleTerminalSplit(workspace: TerminalWorkspaceState): TerminalWorkspaceState;
