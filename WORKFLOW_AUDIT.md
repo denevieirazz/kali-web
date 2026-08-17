@@ -1,132 +1,242 @@
-# WORKFLOW AUDIT — CloudOS Batch 3
+# WORKFLOW AUDIT — CloudOS Batch 3.5
 
-Base congelada: `be36ba9d01f207f56b03c9f5e824e500b83b8e22`
+Base do Batch 3.5: `3d8a80dda0193c3a02182c846ef49e4fcdc00a67`
 
-Escopo: produtividade diária entre CloudOS local (OPFS), grants Windows e Linux Home, sem alterar Browser nativo, WSL Core v2, instalador, updater, rollback, backup/restore ou pipelines de Productization RC.
+Base RC congelada preservada pelo gate de escopo: `be36ba9d01f207f56b03c9f5e824e500b83b8e22`
 
-## Dados confirmados no código
+Objetivo: eliminar atrito real de uso entre Workspace, Notes, Files, Viewer, Downloads, WebOnly e gerenciamento de janelas sem alterar Browser nativo, WSL Core v2, Productization, Installer, Update, Rollback, Backup/Restore, Supply Chain, System Center ou CI principal.
 
-### Workspace
+## Workspace real
 
-Uma criação de Workspace provisiona, na origem escolhida, uma raiz `Workspaces/<nome-id>` com sete diretórios fixos:
+O Workspace continua sem banco real. O índice local mantém apenas metadata e cada raiz conserva `workspace.json`.
 
-1. `Notes`
-2. `Downloads`
-3. `Evidence`
-4. `Reports`
-5. `Files`
-6. `Terminal`
-7. `Browser`
+Batch 3.5 acrescenta:
 
-Também grava `workspace.json` com nome, descrição, data, último acesso, origem e estrutura. O índice de Workspaces é metadata local; não usa o banco real do produto.
+- renomear Workspace;
+- arquivar e reativar Workspace sem apagar arquivos;
+- duplicar Workspace na mesma origem;
+- pesquisa por nome, descrição, cliente, tags, tipo, status e provider;
+- `cliente`;
+- `tags`;
+- `status` (`active` ou `archived`);
+- `ultimaAtividade` separada de `ultimoAcesso`;
+- tipo continua explícito.
 
-**Operações de setup automatizadas por Workspace:** 8 operações mínimas que antes precisariam ser realizadas individualmente para obter a mesma estrutura (7 diretórios + 1 manifesto). Isso é contagem de operações de filesystem, não contagem de cliques humanos.
+### Renomear
 
-### Terminal aqui
+Renomear é **metadata-only**. O nome no índice e no `workspace.json` muda, mas a raiz física `Workspaces/<slug-id>` permanece estável. Isso evita recriar ou mover a árvore inteira só para alterar o nome visível.
 
-- Linux Home: implementado dentro do CloudOS. O Files abre o CloudOS Terminal e, somente após a sessão WSL estar conectada, envia um `cd` validado relativo ao `$HOME`.
-- OPFS: não há path de sistema operacional; o Terminal real não pode receber um cwd correspondente sem criar outra tecnologia de bridge.
-- Windows grant: File System Access entrega um handle autorizado, não um path físico confiável para o PowerShell. O Release Freeze impede adicionar uma bridge nativa só para expor esse path.
+### Arquivar
 
-O backend continua rejeitando `cwd`, `command`, executável e argumentos arbitrários no handshake do Terminal.
+Arquivar não remove nem move a raiz. Um Workspace arquivado deixa de ser considerado Workspace ativo e fica somente leitura nas superfícies de Notes/Evidence do hub até ser reativado. Não existe exclusão disfarçada de arquivamento.
 
-### Pontes entre providers
+### Duplicar
 
-As ações `Enviar para Linux`, `Enviar para Windows` e `Copiar para Workspace` são assistidas:
+A duplicação usa o mesmo provider e as primitivas de arquivo já existentes. Não cria bridge nova.
 
-- exigem confirmação explícita;
-- não movem o arquivo de origem;
-- não sobrescrevem nome já existente no destino;
-- aceitam somente arquivo regular nesta fase;
-- rejeitam symlink;
-- têm limite de 256 MiB por transferência assistida;
-- exigem destino montado/disponível;
-- um Windows grant ausente exige seleção explícita do usuário.
+Limites explícitos:
 
-O paste normal continua bloqueando clipboard de provider diferente. Portanto a ponte não converte o Files em cross-provider automático.
+- até 2.000 entradas por duplicação;
+- até 1 GiB agregado;
+- até 256 MiB por arquivo;
+- symlink encerra a duplicação em fail-closed;
+- falha tenta remover a cópia parcial do índice e enviar a raiz parcial à lixeira gerenciada do mesmo provider;
+- a origem nunca é alterada.
 
-### Clipboard Global
+## Notes
 
-- limite: 30 entradas;
-- limite por entrada: 5 MiB;
-- payload textual armazenado no OPFS privado;
-- metadata limitada em localStorage;
-- password input não é capturado;
-- padrões de JWT, private key, Bearer auth, password/secret/api key/tokens/credentials e credenciais em URL são rejeitados;
-- copiar, colar, favoritar e limpar estão disponíveis;
-- fontes CloudOS DOM identificadas: Files, Terminal e Workspace Notes.
+A pesquisa do Workspace compara **título e conteúdo carregado**, não apenas o título.
 
-**Limite:** o Browser nativo roda fora da árvore DOM do frontend congelado. Seu clipboard não é observado pelo listener do Batch 3 sem alterar essa integração.
+O índice global usado pelo App Launcher é simples, local e limitado:
 
-### Notes
+- até 200 notas indexadas;
+- até 8.192 caracteres de conteúdo por nota no índice global;
+- cada nota continua limitada a 2 MiB para leitura/edição rápida;
+- sem embeddings;
+- sem IA;
+- sem banco novo.
 
-Notes usa Markdown simples em arquivos `.md` do Workspace. Há lista de notas como abas, autosave com debounce de 650 ms, pesquisa, preview simples e atalhos `Ctrl+N`, `Ctrl+S` e `Ctrl+F`. Não foi criado editor rico nem tecnologia nova.
+Arquivos `txt`, `md`, `json` e `log` podem ser abertos diretamente do Files no Notes. O arquivo permanece no provider e caminho original; o Notes não copia nem executa o conteúdo.
 
-### Downloads
+Scripts e executáveis não entram nessa allowlist.
 
-O Workflow registra um destino explícito entre Workspace atual, OPFS, Windows grant e Linux Home.
+## Abertura de arquivos
 
-**Não está conectado ao download do Browser nativo.** O Browser nativo está congelado e sua API atual não expõe ao frontend um callback de download com destino. A preferência não é apresentada como roteamento efetivo enquanto essa restrição existir.
+Política de abertura do Batch 3.5:
 
-### App Launcher
+| Tipo | Duplo clique |
+|---|---|
+| diretório regular | navega na pasta existente |
+| `txt`, `md`, `json`, `log` | Notes |
+| `png`, `jpg`, `jpeg`, `webp` | Viewer existente |
+| `pdf` | Viewer PDF sandboxed existente |
+| desconhecido / script / executável | informações/preview fail-closed |
+| symlink | somente informação; nunca seguido |
 
-`Alt+Espaço` abre busca para aplicações, Workspace, Notes, arquivos já indexados pelo Files e Configurações. `Ctrl+Shift+P` é fallback quando o host/SO intercepta `Alt+Espaço`.
+O roteamento de texto é feito por uma camada fina de UX sobre o Files já existente. O provider transacional, o backend e o WSL Core não foram reescritos.
 
-A indexação de arquivos é incremental: somente diretórios que o usuário já abriu no Files entram no índice local. Não existe crawler em background.
+## Viewer de imagem
 
-### Window management
+O Viewer de imagem existente ganhou somente controles de visualização:
 
-Metade esquerda, metade direita, maximizar e restaurar usam o Window Manager existente. Atalhos dentro do CloudOS:
+- zoom mínimo: 25%;
+- zoom máximo: 400%;
+- passo: 25%;
+- `+` / `=` aumenta;
+- `-` diminui;
+- `0` retorna ao Fit;
+- Wheel altera o zoom dentro do Viewer;
+- arrastar faz pan quando o modo manual está ativo;
+- `Fit` encaixa a imagem;
+- `1:1` usa tamanho original.
 
-- `Alt+Shift+Esquerda`
-- `Alt+Shift+Direita`
-- `Alt+Shift+Cima`
-- `Alt+Shift+Baixo`
+Não existe crop, desenho, filtro, gravação ou editor de imagem novo.
 
-`Meta/Win+Esquerda` e `Meta/Win+Direita` também são tratados quando o WebView recebe esses eventos; o Windows pode interceptá-los antes do CloudOS.
+PDF continua em iframe sandboxed e não recebe privilégio adicional.
 
-### Evidence
+## Downloads
 
-Evidence fica em `Evidence` por Workspace. O hub salva nota, log, link, arquivo e imagem do clipboard quando a permissão de clipboard de imagem está disponível.
+Quando não existe preferência salva, a UX de Downloads resolve o destino como:
 
-## Quantos cliques foram removidos?
+1. Workspace ativo `/Downloads`, se houver Workspace ativo;
+2. OPFS, caso contrário.
 
-**Não medido em uso físico.** Nenhum número de “cliques removidos” é declarado como resultado real antes de um estudo reproduzível do fluxo anterior e do Batch 3.
+O usuário ainda pode escolher explicitamente:
 
-Dado objetivo disponível sem inventar: a criação do Workspace automatiza 8 operações mínimas de filesystem; Terminal Aqui Linux elimina a digitação manual do `cd`; o launcher elimina a necessidade de navegar pelo Menu Iniciar para itens encontrados pelo índice. Converter isso em “cliques” depende da sequência usada pelo usuário e deve ser medido no gate de uso real.
+- Workspace atual;
+- OPFS;
+- Windows grant;
+- Linux Home.
 
-## Quantas telas foram evitadas?
+A tela mostra o destino atual em texto antes das opções.
 
-**Não medido em gate físico.** O código concentra Notes, Evidence, Downloads preference, Clipboard e atalhos do Workspace no mesmo hub e usa overlays para Launcher/Clipboard, mas não há telemetria que permita converter isso honestamente em um número de telas evitadas.
+**Limitação preservada:** o Browser nativo continua congelado. Batch 3.5 não intercepta o callback de download, não redireciona o processo nativo e não declara que a preferência já controla o destino físico do Browser.
 
-## Quantas mudanças entre Windows / CloudOS / Linux ainda existem?
+## Files — uma superfície, três origens
 
-Matriz confirmada:
+CloudOS Files continua sendo um único aplicativo para OPFS, Windows grant e Linux Home.
 
-| Fluxo | Saída da UI CloudOS necessária? | Estado |
-|---|---:|---|
-| Files OPFS → arquivo no Linux Home | Não | ponte assistida |
-| Files Linux Home → OPFS | Não, via `Copiar para Workspace` quando Workspace é OPFS | ponte assistida |
-| Files OPFS/Linux → Windows grant já montado | Não | ponte assistida |
-| Primeiro acesso a Windows grant | Sim, seletor de pasta do sistema | necessário para consentimento |
-| Files Linux → Terminal na mesma pasta | Não | implementado |
-| Files OPFS → Terminal real na mesma pasta | Sim / não representável como cwd | limitação estrutural |
-| Files Windows grant → Terminal real na mesma pasta | Sim / path físico não exposto pelo grant | limitação estrutural |
-| Browser nativo → destino inteligente de download | Integração não disponível no Batch 3 | congelado |
+O Batch 3.5 reforça o contexto com uma faixa de ação contextual que mostra a origem canônica:
 
-Não existe um único número agregado de “mudanças restantes” porque os fluxos têm condições diferentes. Há **três fronteiras ainda abertas** no escopo pedido: cwd real para OPFS, cwd real para Windows grant e roteamento de download do Browser nativo.
+- `OPFS`;
+- `Windows`;
+- `Linux`.
 
-## Quanto contexto continua exigindo sair do CloudOS?
+O breadcrumb e o provider existente continuam sendo a fonte do caminho. A faixa contextual acrescenta ações rápidas sem criar outro gerenciador de arquivos:
 
-Confirmado:
+- Abrir no Terminal;
+- Abrir em Notes;
+- Adicionar à Evidence.
 
-- seletor Windows para conceder/reconceder grant;
-- qualquer necessidade de abrir Terminal real exatamente no OPFS;
-- qualquer necessidade de abrir Terminal real exatamente no path físico escondido pelo Windows grant;
-- escolha efetiva do destino de download no Browser nativo enquanto sua integração permanecer congelada.
+`Abrir no Terminal` continua disponível literalmente apenas em Linux Home porque OPFS não tem cwd de sistema operacional e File System Access não expõe um caminho físico confiável do grant Windows.
 
-Não foi medida duração nem frequência dessas saídas. Portanto não há percentual de “contexto retido” declarado.
+`Adicionar à Evidence`:
 
-## Interpretação do Batch 3
+- exige Workspace ativo;
+- exige confirmação explícita;
+- aceita arquivo regular;
+- rejeita symlink;
+- preserva o original;
+- não sobrescreve nome já existente;
+- mantém limite de 256 MiB por arquivo.
 
-O Batch 3 reduz navegação interna e cria pontes explícitas usando primitivas já presentes. Ele **não elimina todas as fronteiras Windows ↔ CloudOS ↔ Linux** e não tenta escondê-las com automação implícita. Onde o Release Freeze impede cumprir o requisito literalmente, o estado é registrado como limitação em vez de ser marcado como concluído.
+## Lixeira por provider
+
+Não existe uma afirmação falsa de “Lixeira do sistema”. O comportamento mostrado ao usuário é:
+
+### OPFS
+
+Lixeira transacional privada do CloudOS. Restore é suportado pelo provider OPFS.
+
+### Windows grant
+
+Lixeira gerenciada pelo CloudOS **dentro da pasta explicitamente autorizada**, usando `.cloudos-trash` e metadata própria. Não é a Lixeira do Windows. Restore depende dessa metadata do CloudOS.
+
+### Linux Home
+
+Lixeira gerenciada pela integração Files/WSL existente. Restore só aparece quando o provider fornece o identificador de lixeira necessário.
+
+Symlinks continuam fora das operações destrutivas gerenciadas.
+
+## WebOnly UX
+
+Nenhum código do Browser nativo foi alterado.
+
+Quando o Native Host não está disponível e a pesquisa tem intenção de Browser/Web/Navegador, o App Launcher apresenta:
+
+- `Browser disponível apenas em modo Full`;
+- explicação de que o Browser nativo não existe na sessão WebOnly;
+- botão `Abrir navegador padrão`.
+
+O botão usa apenas a capacidade normal do navegador de abrir uma nova guia. Não cria Browser alternativo, bridge nativa nem fallback escondido.
+
+## Window UX
+
+Os atalhos existentes continuam usando o Window Manager atual:
+
+- `Alt+Shift+Esquerda`;
+- `Alt+Shift+Direita`;
+- `Alt+Shift+Cima`;
+- `Alt+Shift+Baixo`;
+- `Win/Meta+Esquerda` e `Win/Meta+Direita` quando o WebView entrega os eventos.
+
+No Batch 3.5, o gate desses atalhos roda **antes** da navegação do App Launcher. Assim, `Alt+Shift+Left/Right` pode organizar a janela mesmo quando o campo de pesquisa do Launcher está focado. Depois da ação, o foco retorna ao campo do Launcher.
+
+O Window Manager não foi reescrito.
+
+# Métricas de produtividade
+
+## Cliques removidos
+
+**Não medido.**
+
+O teste de uso forneceu dores qualitativas, mas não forneceu uma gravação/baseline quantitativa do número de cliques antes do Batch 3.5. Portanto nenhum número de cliques removidos é declarado.
+
+## Passos removidos
+
+**Não medido como número agregado.**
+
+Há reduções estruturais verificáveis no código, mas não há baseline reproduzível para convertê-las em um total humano de passos:
+
+- duplo clique em texto compatível encaminha diretamente ao Notes;
+- busca de Notes usa conteúdo no mesmo campo de pesquisa;
+- renomear Workspace não exige recriar/mover a árvore;
+- arquivar não exige apagar/recriar;
+- Files oferece Evidence/Notes/Terminal no contexto selecionado;
+- atalhos de janela funcionam mesmo com Launcher focado;
+- Browser em WebOnly apresenta uma ação útil em vez de depender de um estado vazio;
+- Downloads apresenta o destino atual e resolve Workspace ativo como default lógico quando nenhuma preferência existe.
+
+## Fluxos simplificados
+
+O Batch 3.5 modifica objetivamente estes fluxos de UX:
+
+1. Workspace → renomear;
+2. Workspace → arquivar/reativar;
+3. Workspace → duplicar;
+4. Workspace → pesquisar por metadata;
+5. Notes → pesquisar título + conteúdo;
+6. Files → texto compatível → Notes por duplo clique;
+7. Files → imagem → Viewer com zoom/pan;
+8. Files → Evidence por ação contextual;
+9. WebOnly → Browser indisponível → navegador padrão;
+10. Launcher focado → organizar janela sem abandonar o campo de pesquisa;
+11. Downloads → visualizar/selecionar destino.
+
+Essa lista é contagem de **fluxos de código/UX alterados**, não uma alegação de “11 passos economizados”.
+
+# Fronteiras que continuam abertas
+
+Continuam fora do Batch 3.5 por restrição arquitetural/freeze:
+
+- Terminal real com cwd de OPFS;
+- Terminal real no caminho físico oculto por Windows File System Access;
+- roteamento físico dos downloads iniciados pelo Browser nativo;
+- clipboard interno do Browser nativo fora da árvore DOM do frontend;
+- validação física/visual de ganho de produtividade em máquina real.
+
+# Release Freeze
+
+O gate de escopo continua comparando a linha de workflow com a base RC e bloqueia mudanças inesperadas/frozen, incluindo `desktop/`, `scripts/productization/`, `frontend/src/apps/Browser/` e os adaptadores/backend de WSL Core protegidos.
+
+Batch 3.5 não promove, não publica release e não altera a linha RC.
