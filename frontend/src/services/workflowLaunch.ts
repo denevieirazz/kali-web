@@ -84,7 +84,10 @@ export function openWorkspaceTerminal(workspace: WorkspaceRecord) {
 }
 
 export function openExistingBrowser() {
-  if (!nativeHostBridge.available) throw new Error('Browser CloudOS disponível apenas no modo Full. Use o Launcher para abrir o navegador padrão nesta sessão WebOnly.');
+  if (!nativeHostBridge.available) {
+    const openDefault = window.confirm('Browser CloudOS disponível apenas no modo Full. Abrir o navegador padrão nesta sessão WebOnly?');
+    return openDefault ? openDefaultBrowser() : null;
+  }
   return launchWorkflowApp('browser');
 }
 
