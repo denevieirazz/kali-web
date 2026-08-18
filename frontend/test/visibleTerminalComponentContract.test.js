@@ -6,13 +6,24 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
-const session = fs.readFileSync(path.join(root, 'src/apps/CloudOSTerminal/TerminalSession.tsx'), 'utf8');
-const workspace = fs.readFileSync(path.join(root, 'src/apps/CloudOSTerminal/CloudOSTerminal.tsx'), 'utf8');
-const transport = fs.readFileSync(path.join(root, 'src/apps/CloudOSTerminal/terminalSessionTransport.js'), 'utf8');
+const read = file => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n?/g, '\n');
+const session = read('src/apps/CloudOSTerminal/TerminalSession.tsx');
+const workspace = read('src/apps/CloudOSTerminal/CloudOSTerminal.tsx');
+const transport = read('src/apps/CloudOSTerminal/terminalSessionTransport.js');
 
-test('Terminal visível preserva workspace existente e usa transporte lifecycle', () => {
-  assert.match(workspace, /workspace\.tabs\.map/); assert.match(workspace, /workspace\.splitId/); assert.match(workspace, /closeTab\(/);
-  for (const token of [/createTerminalTransport/, /transport\?\.dispose\(\)/, /inputSubscription\?\.dispose\(\)/, /resizeSubscription\?\.dispose\(\)/, /resizeObserver\?\.disconnect\(\)/, /terminal\.dispose\(\)/]) assert.match(session, token);
+test('Terminal visível preserva workspace existente e usa transporte lifecycle com teardown visual drenado', () => {
+  assert.match(workspace, /workspace\.tabs\.map/);
+  assert.match(workspace, /workspace\.splitId/);
+  assert.match(workspace, /closeTab\(/);
+  for (const token of [
+    /createTerminalTransport/,
+    /transport\?\.dispose\(\)/,
+    /inputSubscription\?\.dispose\(\)/,
+    /resizeSubscription\?\.dispose\(\)/,
+    /resizeObserver\?\.disconnect\(\)/,
+    /disposeTerminalAfterViewportSettles\(terminal\)/,
+  ]) assert.match(session, token);
+  assert.doesNotMatch(session, /try \{ terminal\.dispose\(\); \} catch/, 'TerminalSession não pode voltar ao dispose visual imediato');
 });
 
 test('UI expõe somente distro modo e estado, nunca segredo porta ou PID', () => {
