@@ -18,6 +18,7 @@ const allowed = new Set([
   'frontend/test/workflowBatch4Stabilization.test.js',
   'playwright.human.config.ts',
   'tests/playwright/workflow-human-simulation.spec.ts',
+  'tests/playwright/workflow-human-simulation-v2.spec.ts',
   'scripts/workflow/test-batch4-stabilization-scope.mjs',
 ]);
 
