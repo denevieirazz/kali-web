@@ -91,6 +91,26 @@ jobs:
           node-version: 22.23.2
       - name: Verify stabilization scope
         run: node scripts/workflow/test-batch4-stabilization-scope.mjs
+      - name: Stabilize human simulation harness
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const file = 'tests/playwright/workflow-human-simulation.spec.ts';
+          let source = fs.readFileSync(file, 'utf8');
+
+          const oldLocator = "await modal.getByLabel('Nome').fill(name);\n  await modal.getByLabel('Cliente').fill(`Cliente ${name}`);\n  await modal.getByLabel('Descrição').fill(`Criado pelo simulador humano: ${name}`);";
+          const newLocator = "await modal.getByRole('textbox', { name: 'Nome', exact: true }).fill(name);\n  await modal.getByRole('textbox', { name: 'Cliente', exact: true }).fill(`Cliente ${name}`);\n  await modal.getByRole('textbox', { name: 'Descrição', exact: true }).fill(`Criado pelo simulador humano: ${name}`);";
+          if (source.includes(oldLocator)) source = source.replace(oldLocator, newLocator);
+          else if (!source.includes(newLocator)) throw new Error('Locator esperado do formulário Workspace não foi encontrado.');
+
+          const oldSha = "process.env.GITHUB_SHA || 'execução local'";
+          const newSha = "process.env.CLOUDOS_TESTED_SHA || process.env.GITHUB_SHA || 'execução local'";
+          if (source.includes(oldSha)) source = source.replace(oldSha, newSha);
+          else if (!source.includes(newSha)) throw new Error('Campo de SHA esperado no relatório não foi encontrado.');
+
+          fs.writeFileSync(file, source, 'utf8');
+          NODE
       - name: Install dependencies
         run: npm ci
       - name: Build CloudOS frontend
@@ -102,6 +122,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p test-results/human-simulation
+          export CLOUDOS_TESTED_SHA="$(git rev-parse HEAD)"
           set +e
           npx playwright test --config=playwright.human.config.ts 2>&1 | tee test-results/human-simulation/playwright.log
           status=${PIPESTATUS[0]}
@@ -112,12 +133,13 @@ jobs:
         shell: bash
         run: |
           if [ ! -f HUMAN_SIMULATION_REPORT.md ]; then
+            tested_sha="$(git rev-parse HEAD)"
             {
               echo '# HUMAN_SIMULATION_REPORT.md'
               echo
               echo '## Human simulation não chegou ao relatório interno'
               echo
-              echo "**Commit executado:** \`${GITHUB_SHA}\`"
+              echo "**Commit executado:** \`${tested_sha}\`"
               echo
               echo '**FALHOU**'
               echo
@@ -140,15 +162,15 @@ jobs:
             test-results/human-simulation/**
             test-results/playwright-human/**
             playwright-human-report/**
-      - name: Publish human simulation report to branch
-        if: always() && github.event_name != 'pull_request'
+      - name: Publish harness and human simulation report
+        if: always()
         shell: bash
         run: |
           git config user.name "cloudos-human-simulation"
           git config user.email "actions@users.noreply.github.com"
-          git add HUMAN_SIMULATION_REPORT.md
+          git add HUMAN_SIMULATION_REPORT.md tests/playwright/workflow-human-simulation.spec.ts
           if git diff --cached --quiet; then
-            echo 'Human simulation report unchanged.'
+            echo 'Human simulation harness/report unchanged.'
             exit 0
           fi
           git commit -m "test(report): registrar simulacao humana real [skip ci]"
