@@ -203,3 +203,10 @@ test('TERMINAL-XTERM TerminalSession usa teardown drenado em vez de dispose imed
   assert.match(terminal, /disposeTerminalAfterViewportSettles\(terminal\)/);
   assert.doesNotMatch(terminal, /try \{ terminal\.dispose\(\); \} catch/);
 });
+
+test('HARDENING-UX sidecar de contexto fica abaixo das janelas e nao cobre Exportar', () => {
+  const css = source('src/components/Workflow/WorkflowBatch4Shell.css');
+  assert.match(css, /\.wb4-context\s*\{[^}]*z-index:\s*95\s*;/s);
+  assert.match(css, /\.wb4-context\s*\{[^}]*pointer-events:\s*none\s*;/s);
+  assert.match(css, /\.wb4-context button\s*\{\s*pointer-events:\s*auto\s*;\s*\}/s);
+});
