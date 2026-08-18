@@ -12,7 +12,8 @@
   backdrop-filter: blur(14px);
 }
 
-.wb4-context { top: 74px; max-height: calc(100vh - 150px); overflow: auto; }
+.wb4-context { top: 74px; max-height: calc(100vh - 150px); overflow: auto; pointer-events: none; }
+.wb4-context button { pointer-events: auto; }
 .wb4-files { bottom: 58px; }
 
 .wb4-context header,
