@@ -29,6 +29,10 @@ export default defineConfig({
     launchOptions: {
       args: ['--enable-precise-memory-info'],
     },
-  },
+    // O fixture roda deliberadamente sem Native Host/WSL. O Drone continua
+    // responsável por pageerror/network; esta simulação não deve transformar
+    // o 503 esperado de /api/wsl/distributions em falha de missão.
+    browserDiagnosticsAssert: false,
+  } as any,
   projects: [{ name: 'chromium-human-simulation' }],
 });
