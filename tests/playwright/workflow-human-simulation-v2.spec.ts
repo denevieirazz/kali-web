@@ -35,6 +35,8 @@ const SHOTS = path.join(ROOT, 'screenshots');
 const RESULTS = path.join(ROOT, 'v2-results');
 const REPORT = path.join(ROOT, 'HUMAN_SIMULATION_REPORT.md');
 const RUN_TOKEN = 'HUMAN-V2-7B5D8F2B';
+const RUN_INSTANCE = `${process.env.GITHUB_RUN_ID || process.ppid}-${process.env.GITHUB_RUN_ATTEMPT || 'local'}`;
+const RUN_MARKER = path.join(ROOT, `.v2-run-${RUN_INSTANCE}`);
 
 function missionFile(id: number) { return path.join(RESULTS, `mission-${id}.json`); }
 function snapshotFile(id: number) { return path.join(RESULTS, `mission-${id}-snapshots.json`); }
@@ -254,11 +256,12 @@ function buildReport() {
   }
   const failed = results.filter(item => item.status === 'FALHOU').length;
   const alerted = results.filter(item => item.status === 'ALERTA').length;
+  const testedSha = process.env.EXPECTED_SHA || process.env.GITHUB_SHA || 'local';
   const lines = [
     '# HUMAN_SIMULATION_REPORT.md', '',
     '## CloudOS Workflow — Human User Simulation v2', '',
     '**Branch:** `stabilization/cloudos-workflow-batch-4`  ',
-    `**Commit executado:** \`${process.env.GITHUB_SHA || 'local'}\`  `,
+    `**Commit executado:** \`${testedSha}\`  `,
     `**Resultado:** ${failed ? `${failed} missão(ões) FALHOU` : alerted ? `${alerted} missão(ões) com ALERTA` : 'todas as missões PASSARAM'}`, '',
     '> Execução Playwright real contra frontend compilado + backend temporário CloudOS. Operações funcionais são UI/teclado; CDP/page.evaluate são usados somente para telemetria.', '',
     '| Missão | Status | Duração |', '|---|---|---:|',
@@ -281,7 +284,12 @@ function buildReport() {
 
 test.describe('Workflow Human User Simulation v2', () => {
   test.beforeAll(() => {
-    fs.rmSync(RESULTS, { recursive: true, force: true });
+    fs.mkdirSync(ROOT, { recursive: true });
+    if (!fs.existsSync(RUN_MARKER)) {
+      fs.rmSync(RESULTS, { recursive: true, force: true });
+      fs.rmSync(SHOTS, { recursive: true, force: true });
+      fs.writeFileSync(RUN_MARKER, RUN_INSTANCE, 'utf8');
+    }
     fs.mkdirSync(RESULTS, { recursive: true });
     fs.mkdirSync(SHOTS, { recursive: true });
   });
@@ -381,13 +389,20 @@ test.describe('Workflow Human User Simulation v2', () => {
       details.push('txt/md/json/log criados pela UI.');
       for (const name of ['cliente.txt', 'dados.json', 'registro.log', 'leia-me.md']) {
         const files = await ensureFiles(page);
-        await files.locator('.cf-item', { hasText: name }).first().dblclick();
+        const item = files.locator('.cf-item', { hasText: name }).first();
+        await item.dblclick();
+        const fileShelf = page.locator('.wb4-files');
+        await expect(fileShelf).toBeVisible({ timeout: 10_000 });
+        await expect(fileShelf).toContainText(name);
+        const openInNotes = fileShelf.getByRole('button', { name: 'Abrir em Notes', exact: true });
+        await expect(openInNotes).toBeVisible();
+        await openInNotes.click();
         const quick = page.locator('.ww-quick-editor').last();
         await expect(quick).toBeVisible({ timeout: 10_000 });
         await expect(quick.locator('.ww-note-head')).toContainText(name);
         await quick.getByRole('button', { name: 'Fechar', exact: true }).click();
       }
-      details.push('Associação de arquivo abriu os quatro tipos no Notes.');
+      details.push('Preview do Files + ação explícita Abrir em Notes validaram txt/md/json/log.');
       const files = await ensureFiles(page);
       const row = files.locator('.cf-item', { hasText: 'cliente.txt' }).first();
       await row.click();
