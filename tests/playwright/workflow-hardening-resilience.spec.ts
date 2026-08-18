@@ -128,7 +128,9 @@ test('Resiliência — fechamento, busca, export, evidence e restore preservam c
   await exportButton.click();
   await selectWorkspace(root, 'Resilience B');
   const download = await downloadEvent;
-  expect(download.suggestedFilename().toLowerCase()).toContain('resilience-a');
+  const exportName = download.suggestedFilename().toLowerCase();
+  expect(exportName).toBe('resilience a.cloudos-workspace.zip');
+  expect(exportName).not.toContain('resilience b');
   await expect(root.locator('.ww-header h2')).toHaveText('Resilience B');
 
   // Terminal durante restore: só comparar depois do loading terminar.
