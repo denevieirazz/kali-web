@@ -56,7 +56,7 @@ export function TerminalSession({
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const fitSchedulerRef = useRef<TerminalFrameScheduler | null>(null);
-  const previousVisibleRef = useRef(visible);
+  const layoutRecoveryRequestedRef = useRef(false);
   const [restartGeneration, setRestartGeneration] = useState(0);
   const [status, setStatus] = useState<TerminalPaneStatus>(INITIAL_STATUS);
   const [dimensions, setDimensions] = useState({ cols: 100, rows: 28 });
@@ -179,6 +179,7 @@ export function TerminalSession({
         },
       });
       fitSchedulerRef.current = fitScheduler;
+      layoutRecoveryRequestedRef.current = false;
       resizeObserver = new ResizeObserver(() => fitScheduler.schedule());
       resizeObserver.observe(host);
       fitScheduler.schedule();
@@ -227,14 +228,17 @@ export function TerminalSession({
   }, [initialDirectoryKey, onStatusChange, restartGeneration, tab.distribution, tab.id, tab.profile]);
 
   useEffect(() => {
-    const becameVisible = visible && !previousVisibleRef.current;
-    previousVisibleRef.current = visible;
-    if (!visible) return;
+    if (!visible) {
+      layoutRecoveryRequestedRef.current = false;
+      return;
+    }
     if (fitSchedulerRef.current) {
+      layoutRecoveryRequestedRef.current = false;
       fitSchedulerRef.current.schedule();
       return;
     }
-    if (becameVisible && status.state === 'failed' && status.label === 'Layout indisponível') {
+    if (status.state === 'failed' && status.label === 'Layout indisponível' && !layoutRecoveryRequestedRef.current) {
+      layoutRecoveryRequestedRef.current = true;
       setRestartGeneration(value => value + 1);
     }
   }, [status.label, status.state, visible]);
