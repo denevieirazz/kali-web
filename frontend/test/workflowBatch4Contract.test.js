@@ -43,14 +43,15 @@ test('atalhos de produtividade e Evidence rapida permanecem no workflow shell', 
   assert.match(shell, /captureClipboardToActiveEvidence/);
 });
 
-test('Workspace ZIP contem somente Notes Evidence e Metadata no export Batch 4', () => {
+test('Workspace ZIP coleta somente Notes Evidence e Metadata no export Batch 4', () => {
   const zip = source('src/services/workflowWorkspaceZip.ts');
   assert.match(zip, /Metadata\/workspace\.json/);
   assert.match(zip, /Metadata\/export\.json/);
-  assert.match(zip, /root !== 'Notes' && root !== 'Evidence'/);
+  assert.match(zip, /collectFolder\(current, \['Notes'\]/);
+  assert.match(zip, /collectFolder\(current, \['Evidence'\]/);
   assert.match(zip, /application\/zip/);
   assert.match(zip, /\.cloudos-workspace\.zip/);
-  assert.doesNotMatch(zip, /fetch\(|apiClient|upload\(/);
+  assert.doesNotMatch(zip, /buildWorkspaceExport|fetch\(|apiClient|upload\(/);
 });
 
 test('Favoritos e Fixados usam armazenamento local limitado', () => {
