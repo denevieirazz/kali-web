@@ -53,8 +53,10 @@ if (missing.length) {
 }
 
 const refName = process.env.GITHUB_REF_NAME;
-if (refName && refName !== EXPECTED_BRANCH) {
-  console.error(`BATCH4_STABILIZATION_WRONG_BRANCH: ${refName}`);
+const headRef = process.env.GITHUB_HEAD_REF;
+const branchMatches = refName === EXPECTED_BRANCH || headRef === EXPECTED_BRANCH;
+if ((refName || headRef) && !branchMatches) {
+  console.error(`BATCH4_STABILIZATION_WRONG_BRANCH: ref=${refName || '-'} head=${headRef || '-'}`);
   process.exit(1);
 }
 
