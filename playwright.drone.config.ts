@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests/playwright',
-  testMatch: /workflow-drone\.spec\.ts/,
+  testMatch: /workflow-(?:drone|hardening-resilience)\.spec\.ts/,
   outputDir: './test-results/playwright-drone',
   forbidOnly: Boolean(process.env.CI),
   fullyParallel: false,
