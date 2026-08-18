@@ -84,7 +84,14 @@ async function stopChildProcess(child: ChildProcess): Promise<void> {
   }
 }
 
-export const test = base.extend<{ cloudos: CloudOSFixture; browserDiagnostics: void }>({
+type CloudOSTestFixtures = {
+  cloudos: CloudOSFixture;
+  browserDiagnostics: void;
+  browserDiagnosticsAssert: boolean;
+};
+
+export const test = base.extend<CloudOSTestFixtures>({
+  browserDiagnosticsAssert: [true, { option: true }],
   cloudos: async ({}, use, testInfo) => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cloudos-pw-test-'));
     const runtimeDir = path.join(tempDir, 'runtime');
@@ -242,13 +249,13 @@ export const test = base.extend<{ cloudos: CloudOSFixture; browserDiagnostics: v
       if (cleanupError) throw cleanupError;
     }
   },
-  browserDiagnostics: [async ({ page, cloudos }, use) => {
+  browserDiagnostics: [async ({ page, cloudos, browserDiagnosticsAssert }, use) => {
     void cloudos;
     const guards = installBrowserErrorGuards(page);
     try {
       await use();
     } finally {
-      guards.assertNoErrors();
+      if (browserDiagnosticsAssert) guards.assertNoErrors();
     }
   }, { auto: true }]
 });
