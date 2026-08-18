@@ -86,9 +86,16 @@
   background: #64748b;
 }
 
-.terminal-tab__status--active { background: #34d399; box-shadow: 0 0 7px rgba(52, 211, 153, .55); }
+.terminal-tab__status--active,
+.terminal-tab__status--connected {
+  background: #34d399;
+  box-shadow: 0 0 7px rgba(52, 211, 153, .55);
+}
 .terminal-tab__status--connecting { background: #fbbf24; animation: pulse 1.1s infinite; }
-.terminal-tab__status--error { background: #fb7185; }
+.terminal-tab__status--legacy-fallback { background: #38bdf8; box-shadow: 0 0 7px rgba(56, 189, 248, .45); }
+.terminal-tab__status--error,
+.terminal-tab__status--failed { background: #fb7185; }
+.terminal-tab__status--closing { background: #f59e0b; animation: pulse 1.1s infinite; }
 .terminal-tab__status--closed { background: #64748b; }
 .terminal-tab__status--auth { background: #f59e0b; }
 
