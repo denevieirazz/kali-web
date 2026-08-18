@@ -433,6 +433,7 @@ function indexNotes(notes: WorkflowNote[]) {
   const next = [...byKey.values()]
     .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
     .slice(0, MAX_NOTE_INDEX_ENTRIES);
+  if (JSON.stringify(next) === JSON.stringify(existing)) return;
   writeJson(NOTES_INDEX_KEY, next);
   emitChanged();
 }
