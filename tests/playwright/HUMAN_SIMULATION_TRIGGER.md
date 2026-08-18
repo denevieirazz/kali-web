@@ -4,4 +4,4 @@ Branch temporária usada exclusivamente para disparar a execução observável d
 
 Nenhuma alteração de produto é executada a partir deste arquivo. Não mergear.
 
-Run solicitado: após correção isolada de Terminal tab restore quando o probe WSL retorna erro.
+Run solicitado: Terminal tab restore com scope gate atualizado para CloudOSTerminal.tsx.
