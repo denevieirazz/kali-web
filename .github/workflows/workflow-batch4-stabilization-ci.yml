@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - stabilization/cloudos-workflow-batch-4
+  pull_request:
+    branches:
+      - feature/cloudos-workflow-batch-4
   workflow_dispatch:
 
 permissions:
@@ -15,6 +18,7 @@ concurrency:
 
 jobs:
   linux-stabilization:
+    if: github.event_name != 'pull_request'
     name: Linux stabilization regression
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -43,6 +47,7 @@ jobs:
         run: npm run build
 
   windows-stabilization:
+    if: github.event_name != 'pull_request'
     name: Windows stabilization regression
     runs-on: windows-latest
     timeout-minutes: 30
@@ -78,6 +83,7 @@ jobs:
       - name: Checkout stabilization
         uses: actions/checkout@v4
         with:
+          ref: stabilization/cloudos-workflow-batch-4
           fetch-depth: 0
       - name: Setup Node 22
         uses: actions/setup-node@v4
@@ -135,7 +141,7 @@ jobs:
             test-results/playwright-human/**
             playwright-human-report/**
       - name: Publish human simulation report to branch
-        if: always()
+        if: always() && github.event_name != 'pull_request'
         shell: bash
         run: |
           git config user.name "cloudos-human-simulation"
