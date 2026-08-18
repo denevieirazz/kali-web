@@ -59,7 +59,8 @@ A causalidade foi verificada: manter apenas o teardown drenado e restaurar `disp
 - resiliência aguarda o dispatch real do clique de Export em A antes da troca A→B, evitando corrida artificial entre comandos Playwright;
 - Human Simulation reutiliza Files quando já ativo e só aciona o quick action depois de focar Workspace quando necessário; a regra está no próprio fonte da simulação;
 - Human Simulation não reprova pelo 503 WSL esperado;
-- relatório de Human Simulation passa a ser artifact/job summary, sem auto-commit pós-teste, preservando o HEAD auditado.
+- relatório de Human Simulation passa a ser artifact/job summary, sem auto-commit pós-teste, preservando o HEAD auditado;
+- o `globalSetup` do Drone executa `test:frontend`, backend `test`, `test:e2e` e `lint` antes da patrulha, garantindo que essas regressões pertençam ao mesmo checkout/HEAD; TypeScript e production build permanecem na etapa de build anterior do próprio job.
 
 # DEFEITOS REMANESCENTES
 
