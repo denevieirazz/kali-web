@@ -26,6 +26,7 @@ const allowed = new Set([
   'frontend/src/services/workflowQuickEvidence.ts',
   'frontend/src/services/workflowWorkspace.ts',
   'frontend/test/workflowBatch4Stabilization.test.js',
+  'frontend/test/workflowContract.test.js',
   'playwright.drone.config.ts',
   'playwright.human.config.ts',
   'scripts/workflow/render-drone-report.mjs',
