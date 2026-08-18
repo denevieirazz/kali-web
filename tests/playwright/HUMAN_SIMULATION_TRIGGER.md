@@ -4,4 +4,4 @@ Branch temporária usada exclusivamente para disparar execuções observáveis c
 
 Nenhuma alteração de produto é executada a partir deste arquivo. Não mergear.
 
-Run solicitado: primeira execução observável do Workflow Drone permanente.
+Run solicitado: Workflow Drone com checkout explicitamente fixado na estabilização auditada.
