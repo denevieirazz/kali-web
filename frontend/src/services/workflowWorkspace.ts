@@ -412,12 +412,36 @@ function validNoteEntry(entry: CloudFileEntry) {
     && entry.size <= MAX_NOTE_BYTES;
 }
 
+function indexNoteMetadata(notes: WorkflowNoteMeta[]) {
+  const existing = listNoteIndex();
+  const byKey = new Map(existing.map(item => [`${item.workspaceId}:${item.fileName}`, item]));
+  for (const note of notes) {
+    const key = `${note.workspaceId}:${note.fileName}`;
+    const current = byKey.get(key);
+    byKey.set(key, {
+      workspaceId: note.workspaceId,
+      fileName: note.fileName,
+      title: note.title,
+      searchText: current?.searchText || '',
+      updatedAt: new Date(note.modified || Date.now()).toISOString(),
+    });
+  }
+  const next = [...byKey.values()]
+    .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
+    .slice(0, MAX_NOTE_INDEX_ENTRIES);
+  if (JSON.stringify(next) === JSON.stringify(existing)) return;
+  writeJson(NOTES_INDEX_KEY, next);
+  emitChanged();
+}
+
 export async function listWorkspaceNotes(workspace: WorkspaceRecord): Promise<WorkflowNoteMeta[]> {
   const entries = await fileSourceFacade.list(workspace.provider, [...workspace.root, 'Notes'], false);
-  return entries
+  const notes = entries
     .filter(validNoteEntry)
     .map(entry => noteMeta(workspace, entry))
     .sort((left, right) => right.modified - left.modified || left.title.localeCompare(right.title));
+  indexNoteMetadata(notes);
+  return notes;
 }
 
 export async function loadWorkspaceNote(workspace: WorkspaceRecord, note: WorkflowNoteMeta | string): Promise<WorkflowNoteContent> {
@@ -476,7 +500,7 @@ export async function searchWorkspaceNotes(
   const matched = new Set<string>();
   const hits: WorkflowNoteSearchHit[] = [];
   const entries = await fileSourceFacade.list(workspace.provider, [...workspace.root, 'Notes'], false);
-  const byName = new Map(entries.filter(validNoteEntry).map(entry => [entry.name, entry]));
+  const byName = new Map(entries.filter(validNoteEntry).map(entry => [entry.name, entry] as const));
 
   for (const meta of notes) {
     if (cancelled()) break;
