@@ -12,7 +12,13 @@
   backdrop-filter: blur(14px);
 }
 
-.wb4-context { top: 74px; max-height: calc(100vh - 150px); overflow: auto; pointer-events: none; }
+/*
+ * O contexto é um sidecar não modal. Ele precisa permanecer abaixo das janelas
+ * de aplicação (z-index base >= 100) para nunca bloquear controles do Workspace.
+ * A parte que fica fora da janela continua visível e o conteúdo ativo mantém
+ * prioridade de interação.
+ */
+.wb4-context { top: 74px; z-index: 95; max-height: calc(100vh - 150px); overflow: auto; pointer-events: none; }
 .wb4-context button { pointer-events: auto; }
 .wb4-files { bottom: 58px; }
 
