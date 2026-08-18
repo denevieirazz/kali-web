@@ -152,14 +152,12 @@ async function createNote(page: import('@playwright/test').Page) {
 }
 
 async function ensureFiles(page: import('@playwright/test').Page) {
-  let files = page.locator('.cf-root').last();
-  if (!await files.isVisible().catch(() => false)) {
-    const workspace = await ensureWorkspace(page);
-    await workspace.locator('.ww-quick-actions').getByRole('button', { name: 'Files', exact: true }).click();
-    files = page.locator('.cf-root').last();
-    await expect(files).toBeVisible({ timeout: 15_000 });
-  }
-  await files.click({ position: { x: 700, y: 140 } }).catch(() => undefined);
+  const workspace = await ensureWorkspace(page);
+  await workspace.locator('.ww-quick-actions').getByRole('button', { name: 'Files', exact: true }).click();
+  const files = page.locator('.cf-root').last();
+  await expect(files).toBeVisible({ timeout: 15_000 });
+  const filesWindow = page.locator('.window:has(.cf-root)').last();
+  await expect(filesWindow).toHaveClass(/active/, { timeout: 10_000 });
   return files;
 }
 
