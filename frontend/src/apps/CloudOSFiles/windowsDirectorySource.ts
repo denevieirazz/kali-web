@@ -281,16 +281,23 @@ export const windowsDirectorySource = {
     const controller = new AbortController();
     await scan(source, controller.signal, totals);
     await copyHandle(source, trash, storedName, controller.signal, totals, { bytes: 0, entries: 0 });
-    const sourceDir = await dirAt(path);
+
+    const meta = await readTrashMeta();
+    meta.entries[id] = { id, storedName, originalPath: appendFilePath(path, entry.name), originalName: entry.name, kind: entry.kind, deletedAt: Date.now() };
     try {
-      await sourceDir.removeEntry(entry.name, { recursive: source.kind === 'directory' });
+      await writeTrashMeta(meta);
     } catch (error) {
       try { await trash.removeEntry(storedName, { recursive: source.kind === 'directory' }); } catch {}
       throw error;
     }
-    const meta = await readTrashMeta();
-    meta.entries[id] = { id, storedName, originalPath: appendFilePath(path, entry.name), originalName: entry.name, kind: entry.kind, deletedAt: Date.now() };
-    await writeTrashMeta(meta);
+
+    const sourceDir = await dirAt(path);
+    try {
+      await sourceDir.removeEntry(entry.name, { recursive: source.kind === 'directory' });
+    } catch (error) {
+      // Fail data-safe: source and the indexed trash copy remain recoverable.
+      throw error;
+    }
     return id;
   },
 
