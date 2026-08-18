@@ -150,6 +150,7 @@
 }
 
 .terminal-workspace__panes {
+  position: relative;
   display: grid;
   min-width: 0;
   min-height: 0;
@@ -159,14 +160,30 @@
 
 .terminal-workspace__panes--split { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
+/*
+ * xterm mantém renderer/viewport assíncronos por sessão. Remover uma pane do
+ * layout com display:none zera sua geometria enquanto callbacks internos ainda
+ * podem estar pendentes. Mantemos a pane inativa dimensionada, fora do fluxo do
+ * grid e sem interação; a pane ativa continua sendo o único item visual do grid.
+ */
 .terminal-workspace__pane-shell {
-  display: none;
+  position: absolute;
+  inset: 0;
+  display: block;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
 }
 
-.terminal-workspace__pane-shell.is-visible { display: block; }
+.terminal-workspace__pane-shell.is-visible {
+  position: relative;
+  inset: auto;
+  visibility: visible;
+  pointer-events: auto;
+}
+
 .terminal-workspace__panes--split .terminal-workspace__pane-shell.is-visible + .terminal-workspace__pane-shell.is-visible { border-left: 1px solid #29354a; }
 
 .terminal-pane {
