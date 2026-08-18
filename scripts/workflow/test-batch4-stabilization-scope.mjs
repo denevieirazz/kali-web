@@ -29,6 +29,7 @@ const allowed = new Set([
   'playwright.drone.config.ts',
   'playwright.human.config.ts',
   'scripts/workflow/render-drone-report.mjs',
+  'scripts/workflow/run-hardening-regressions.mjs',
   'scripts/workflow/test-batch4-stabilization-scope.mjs',
   'tests/playwright/fixtures/cloudos.fixture.ts',
   'tests/playwright/workflow-drone.spec.ts',
