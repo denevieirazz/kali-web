@@ -4,4 +4,4 @@ Branch temporária usada exclusivamente para disparar a execução observável d
 
 Nenhuma alteração de produto é executada a partir deste arquivo. Não mergear.
 
-Run solicitado: v3 observável, missões isoladas.
+Run solicitado: missões isoladas após confirmação do bloqueio de clique no Workspace.
