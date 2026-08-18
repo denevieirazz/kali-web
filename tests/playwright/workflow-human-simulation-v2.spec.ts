@@ -390,16 +390,19 @@ test.describe('Workflow Human User Simulation v2', () => {
       for (const name of ['cliente.txt', 'dados.json', 'registro.log', 'leia-me.md']) {
         const files = await ensureFiles(page);
         const item = files.locator('.cf-item', { hasText: name }).first();
-        await item.dblclick();
-        const quick = page.locator('.ww-quick-editor').last();
-        await expect(quick).toBeVisible({ timeout: 10_000 });
-        await expect(quick.locator('.ww-note-head')).toContainText(name);
+        await item.click();
         const bridge = page.locator('.wf-files-bridge');
         await expect(bridge).toBeVisible({ timeout: 10_000 });
         await expect(bridge).toContainText(name);
+        const openInNotes = bridge.getByRole('button', { name: 'Abrir em Notes', exact: true });
+        await expect(openInNotes).toBeEnabled();
+        await openInNotes.click();
+        const quick = page.locator('.ww-quick-editor').last();
+        await expect(quick).toBeVisible({ timeout: 10_000 });
+        await expect(quick.locator('.ww-note-head')).toContainText(name);
         await quick.getByRole('button', { name: 'Fechar', exact: true }).click();
       }
-      details.push('Double-click do Files abriu txt/md/json/log no Notes e preservou o contexto explícito do arquivo.');
+      details.push('txt/md/json/log selecionados no Files e abertos no Notes pela associação explícita do workflow.');
       const files = await ensureFiles(page);
       const row = files.locator('.cf-item', { hasText: 'cliente.txt' }).first();
       await row.click();
