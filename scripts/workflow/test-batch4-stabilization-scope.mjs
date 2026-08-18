@@ -11,6 +11,7 @@ const allowed = new Set([
   'WORKFLOW_STABILIZATION_AUDIT_2.md',
   'frontend/src/apps/CloudOSFiles/CloudOSFiles.tsx',
   'frontend/src/apps/CloudOSFiles/windowsDirectorySource.ts',
+  'frontend/src/apps/CloudOSTerminal/CloudOSTerminal.tsx',
   'frontend/src/apps/CloudOSTerminal/TerminalSession.tsx',
   'frontend/src/apps/CloudOSTerminal/terminalVisualLifecycle.js',
   'frontend/src/apps/WorkflowWorkspace/WorkflowWorkspace.tsx',
