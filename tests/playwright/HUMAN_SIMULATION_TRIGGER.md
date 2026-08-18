@@ -4,4 +4,4 @@ Branch temporária usada exclusivamente para disparar a execução observável d
 
 Nenhuma alteração de produto é executada a partir deste arquivo. Não mergear.
 
-Run solicitado: v4, bootstrap Chromium acelerado, missões isoladas.
+Run solicitado: pós-correção dos bugs reproduzidos de Workspace/Terminal e do harness Files.
