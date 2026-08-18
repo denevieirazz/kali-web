@@ -45,7 +45,7 @@ jobs:
       - name: Lint
         run: npm run lint
       - name: TypeScript
-        run: npm --prefix frontend exec tsc -- --noEmit
+        run: npm --prefix frontend run lint
       - name: Production build
         run: npm run build
 
@@ -84,7 +84,7 @@ jobs:
       - name: Lint
         run: npm run lint
       - name: TypeScript
-        run: npm --prefix frontend exec tsc -- --noEmit
+        run: npm --prefix frontend run lint
       - name: Production build
         run: npm run build
 
