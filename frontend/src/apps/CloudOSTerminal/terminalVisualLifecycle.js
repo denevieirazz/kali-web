@@ -3,6 +3,7 @@ export const TERMINAL_MIN_HOST_HEIGHT = 24;
 
 const defaultRequestFrame = callback => globalThis.requestAnimationFrame(callback);
 const defaultCancelFrame = frame => globalThis.cancelAnimationFrame(frame);
+const defaultScheduleTask = callback => globalThis.setTimeout(callback, 0);
 
 export function hasUsableTerminalGeometry(host) {
   if (!host || host.isConnected === false) return false;
@@ -41,6 +42,23 @@ export class TerminalFrameScheduler {
     if (this.frame !== null) this.cancelFrame(this.frame);
     this.frame = null;
   }
+}
+
+// xterm 5.x agenda trabalho do viewport em task + animation frame durante open/refresh.
+// Ao remover rapidamente uma aba, destruir o renderer no mesmo cleanup pode deixar
+// callbacks internos já enfileirados acessando um render service descartado. O
+// transporte/observers são encerrados imediatamente pelo caller; somente o dispose
+// visual é postergado por uma task e um frame para drenar o trabalho já pendente.
+export function disposeTerminalAfterViewportSettles(terminal, {
+  scheduleTask = defaultScheduleTask,
+  requestFrame = defaultRequestFrame,
+} = {}) {
+  if (!terminal || typeof terminal.dispose !== 'function') return;
+  scheduleTask(() => {
+    requestFrame(() => {
+      try { terminal.dispose(); } catch { /* boundary de teardown idempotente */ }
+    });
+  });
 }
 
 export function waitForTerminalGeometry(host, { requestFrame = defaultRequestFrame, maxFrames = 90, cancelled = () => false } = {}) {
