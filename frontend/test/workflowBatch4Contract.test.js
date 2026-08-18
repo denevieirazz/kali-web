@@ -50,6 +50,21 @@ test('contexto Batch 4 nao reage a revision produzida pela propria indexacao de 
   assert.doesNotMatch(shell, /\[activeWindow\?\.appId, activeWorkspace\?\.id, revision\]/);
 });
 
+test('Notes preserva buffer ao perder foco antes da navegacao', () => {
+  const shell = source('src/components/Workflow/WorkflowBatch4Shell.tsx');
+  assert.match(shell, /getAttribute\('aria-label'\) === 'Nota Markdown'/);
+  assert.match(shell, /document\.addEventListener\('blur', onBlur, true\)/);
+  assert.match(shell, /saveWorkspaceNote\(workspace/);
+});
+
+test('atalhos de Files em background nao alcancam listeners globais da janela inativa', () => {
+  const shell = source('src/components/Workflow/WorkflowBatch4Shell.tsx');
+  assert.match(shell, /function isFilesShortcut/);
+  assert.match(shell, /focused\?\.appId === 'cloudos-files'/);
+  assert.match(shell, /document\.addEventListener\('keydown', guardBackgroundFiles\)/);
+  assert.match(shell, /event\.stopPropagation\(\)/);
+});
+
 test('export e Evidence resolvem o Workspace exibido antes de persistir dados', () => {
   const shell = source('src/components/Workflow/WorkflowBatch4Shell.tsx');
   assert.match(shell, /function displayedWorkspace\(\)/);
@@ -63,6 +78,14 @@ test('Terminal adia bootstrap de aba oculta ate ela possuir contexto visual', ()
   assert.match(session, /startedRef = useRef\(false\)/);
   assert.match(session, /if \(!visible \|\| startedRef\.current\) return/);
   assert.match(session, /if \(startGeneration === 0\) return/);
+});
+
+test('lixeira Windows persiste metadata antes de remover a origem', () => {
+  const windows = source('src/apps/CloudOSFiles/windowsDirectorySource.ts');
+  const metaWrite = windows.indexOf('await writeTrashMeta(meta);', windows.indexOf('async trash'));
+  const sourceDelete = windows.indexOf('await sourceDir.removeEntry(entry.name', windows.indexOf('async trash'));
+  assert.ok(metaWrite >= 0 && sourceDelete >= 0 && metaWrite < sourceDelete);
+  assert.match(windows, /source and the indexed trash copy remain recoverable/);
 });
 
 test('Workspace ZIP coleta somente Notes Evidence e Metadata no export Batch 4', () => {
