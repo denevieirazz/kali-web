@@ -119,12 +119,14 @@ test('Resiliência — fechamento, busca, export, evidence e restore preservam c
   await root.locator('.ww-tabs').getByRole('button', { name: 'Evidence', exact: true }).click();
   await expect(root.locator('.ww-evidence-list strong', { hasText: evidenceName })).toBeVisible({ timeout: 15_000 });
 
-  // Export durante mudança de workspace: o ZIP iniciado em A deve continuar sendo de A.
+  // Export durante mudança de workspace: primeiro garante o dispatch do clique em A;
+  // o handler assíncrono captura A, e então a seleção muda para B enquanto o download
+  // pode continuar. Não criamos uma corrida artificial entre dois clicks do Playwright.
   await root.locator('.ww-tabs').getByRole('button', { name: 'Visão geral', exact: true }).click();
   const downloadEvent = page.waitForEvent('download', { timeout: 20_000 });
-  const exportClick = root.locator('.ww-quick-actions').getByRole('button', { name: 'Exportar', exact: true }).click();
+  const exportButton = root.locator('.ww-quick-actions').getByRole('button', { name: 'Exportar', exact: true });
+  await exportButton.click();
   await selectWorkspace(root, 'Resilience B');
-  await exportClick;
   const download = await downloadEvent;
   expect(download.suggestedFilename().toLowerCase()).toContain('resilience-a');
   await expect(root.locator('.ww-header h2')).toHaveText('Resilience B');
