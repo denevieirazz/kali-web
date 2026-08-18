@@ -100,19 +100,24 @@ test('Resiliência — fechamento, busca, export, evidence e restore preservam c
   editor = root.locator('textarea[aria-label="Nota Markdown"]');
   await expect(editor).toContainText(searchMarker, { timeout: 15_000 });
 
-  // Evidence durante troca de projeto.
+  // Evidence durante troca de projeto. A lista exibe metadata (nome/tamanho), não conteúdo.
   await root.locator('.ww-tabs').getByRole('button', { name: 'Evidence', exact: true }).click();
   const evidenceMarker = 'RESILIENCE-EVIDENCE-SWITCH-2026';
+  const evidenceRows = root.locator('.ww-evidence-list > div');
+  const evidenceBefore = await evidenceRows.count();
   const evidenceArea = root.locator('.ww-evidence textarea, .workflow-evidence textarea, textarea').last();
   await expect(evidenceArea).toBeVisible();
   await evidenceArea.fill(evidenceMarker);
   const evidenceButton = root.getByRole('button', { name: /salvar|adicionar/i }).last();
   await expect(evidenceButton).toBeVisible();
   await evidenceButton.click();
+  await expect(evidenceRows).toHaveCount(evidenceBefore + 1, { timeout: 15_000 });
+  const evidenceName = (await evidenceRows.last().locator('strong').textContent())?.trim() || '';
+  expect(evidenceName).toMatch(/^note-.*\.md$/);
   await selectWorkspace(root, 'Resilience B');
   await selectWorkspace(root, 'Resilience A');
   await root.locator('.ww-tabs').getByRole('button', { name: 'Evidence', exact: true }).click();
-  await expect(root).toContainText(evidenceMarker, { timeout: 15_000 });
+  await expect(root.locator('.ww-evidence-list strong', { hasText: evidenceName })).toBeVisible({ timeout: 15_000 });
 
   // Export durante mudança de workspace: o ZIP iniciado em A deve continuar sendo de A.
   await root.locator('.ww-tabs').getByRole('button', { name: 'Visão geral', exact: true }).click();
