@@ -56,6 +56,7 @@ export function TerminalSession({
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const fitSchedulerRef = useRef<TerminalFrameScheduler | null>(null);
+  const previousVisibleRef = useRef(visible);
   const [restartGeneration, setRestartGeneration] = useState(0);
   const [status, setStatus] = useState<TerminalPaneStatus>(INITIAL_STATUS);
   const [dimensions, setDimensions] = useState({ cols: 100, rows: 28 });
@@ -226,8 +227,17 @@ export function TerminalSession({
   }, [initialDirectoryKey, onStatusChange, restartGeneration, tab.distribution, tab.id, tab.profile]);
 
   useEffect(() => {
-    if (visible) fitSchedulerRef.current?.schedule();
-  }, [visible]);
+    const becameVisible = visible && !previousVisibleRef.current;
+    previousVisibleRef.current = visible;
+    if (!visible) return;
+    if (fitSchedulerRef.current) {
+      fitSchedulerRef.current.schedule();
+      return;
+    }
+    if (becameVisible && status.state === 'failed' && status.label === 'Layout indisponível') {
+      setRestartGeneration(value => value + 1);
+    }
+  }, [status.label, status.state, visible]);
 
   return (
     <section
