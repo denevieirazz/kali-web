@@ -4,4 +4,4 @@ Branch temporária usada exclusivamente para disparar execuções observáveis c
 
 Nenhuma alteração de produto é executada a partir deste arquivo. Não mergear.
 
-Run solicitado: Autonomous Hardening — Drone + auditoria E2E de resiliência com CSS original.
+Run solicitado: Autonomous Hardening — Drone final + resiliência com correção combinada do lifecycle xterm.
