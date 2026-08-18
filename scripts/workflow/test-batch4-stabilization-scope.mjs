@@ -18,6 +18,7 @@ const allowed = new Set([
   'frontend/src/apps/CloudOSTerminal/CloudOSTerminal.css',
   'frontend/src/apps/CloudOSTerminal/CloudOSTerminal.tsx',
   'frontend/src/apps/CloudOSTerminal/TerminalSession.tsx',
+  'frontend/src/apps/CloudOSTerminal/terminalVisualLifecycle.d.ts',
   'frontend/src/apps/CloudOSTerminal/terminalVisualLifecycle.js',
   'frontend/src/apps/WorkflowWorkspace/WorkflowWorkspace.tsx',
   'frontend/src/components/Workflow/WorkflowBatch4Shell.tsx',
