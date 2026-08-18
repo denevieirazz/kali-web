@@ -1,0 +1,164 @@
+name: CloudOS Hardening Gate Observer
+
+on:
+  pull_request:
+    branches:
+      - stabilization/cloudos-workflow-batch-4
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-final-head:
+    name: Linux final-head gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      EXPECTED_SHA: e49ff909cf2fef48e0d40b3bb8baa35145b9e53c
+    steps:
+      - name: Checkout exact stabilization HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: e49ff909cf2fef48e0d40b3bb8baa35145b9e53c
+          fetch-depth: 0
+      - name: Assert exact HEAD
+        shell: bash
+        run: |
+          actual="$(git rev-parse HEAD)"
+          echo "HARDENING_HEAD=$actual"
+          test "$actual" = "$EXPECTED_SHA"
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+      - name: Scope gate
+        run: node scripts/workflow/test-batch4-stabilization-scope.mjs
+      - name: Install dependencies
+        run: npm ci
+      - name: Frontend
+        run: npm run test:frontend
+      - name: Backend
+        run: npm test
+      - name: E2E
+        run: npm run test:e2e
+      - name: Lint
+        run: npm run lint
+      - name: TypeScript
+        run: npm --prefix frontend exec tsc -- --noEmit
+      - name: Production build
+        run: npm run build
+
+  windows-final-head:
+    name: Windows final-head gate
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      EXPECTED_SHA: e49ff909cf2fef48e0d40b3bb8baa35145b9e53c
+    steps:
+      - name: Checkout exact stabilization HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: e49ff909cf2fef48e0d40b3bb8baa35145b9e53c
+          fetch-depth: 0
+      - name: Assert exact HEAD
+        shell: pwsh
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          Write-Host "HARDENING_HEAD=$actual"
+          if ($actual -ne $env:EXPECTED_SHA) { throw "HEAD divergente: $actual" }
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+      - name: Scope gate
+        run: node scripts/workflow/test-batch4-stabilization-scope.mjs
+      - name: Install dependencies
+        run: npm ci
+      - name: Frontend
+        run: npm run test:frontend
+      - name: Backend
+        run: npm test
+      - name: E2E
+        run: npm run test:e2e
+      - name: Lint
+        run: npm run lint
+      - name: TypeScript
+        run: npm --prefix frontend exec tsc -- --noEmit
+      - name: Production build
+        run: npm run build
+
+  drone-final-head:
+    name: Drone final-head gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      EXPECTED_SHA: e49ff909cf2fef48e0d40b3bb8baa35145b9e53c
+    steps:
+      - name: Checkout exact stabilization HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: e49ff909cf2fef48e0d40b3bb8baa35145b9e53c
+          fetch-depth: 0
+      - name: Assert exact HEAD
+        shell: bash
+        run: |
+          actual="$(git rev-parse HEAD)"
+          echo "HARDENING_HEAD=$actual"
+          test "$actual" = "$EXPECTED_SHA"
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+      - name: Scope gate
+        run: node scripts/workflow/test-batch4-stabilization-scope.mjs
+      - name: Install dependencies
+        run: npm ci
+      - name: Production build prerequisite
+        run: npm run build
+      - name: Install Chromium
+        run: npx playwright install chromium
+      - name: Execute Drone and resilience
+        id: drone
+        continue-on-error: true
+        shell: bash
+        run: |
+          mkdir -p test-results/drone
+          export GITHUB_SHA="$EXPECTED_SHA"
+          npx playwright test --config=playwright.drone.config.ts 2>&1 | tee test-results/drone/playwright.log
+          exit ${PIPESTATUS[0]}
+      - name: Render Drone report
+        if: always()
+        shell: bash
+        run: |
+          export GITHUB_SHA="$EXPECTED_SHA"
+          node scripts/workflow/render-drone-report.mjs
+      - name: Verify findings.json exists
+        if: always()
+        shell: bash
+        run: |
+          test -f test-results/drone/findings.json
+          echo "FINDINGS_JSON=present bytes=$(wc -c < test-results/drone/findings.json)"
+          test -f test-results/drone/regressions.json
+      - name: Upload Drone evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hardening-drone-final-head
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            DRONE_REPORT.md
+            test-results/drone/**
+            test-results/playwright-drone/**
+            playwright-drone-report/**
+      - name: Fail-closed Drone gate
+        if: always()
+        shell: bash
+        run: |
+          export GITHUB_SHA="$EXPECTED_SHA"
+          node scripts/workflow/render-drone-report.mjs --gate
+          if [ "${{ steps.drone.outcome }}" != "success" ]; then
+            echo "Drone Playwright outcome=${{ steps.drone.outcome }}"
+            exit 1
+          fi
