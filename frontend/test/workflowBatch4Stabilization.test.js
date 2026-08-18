@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { disposeTerminalAfterViewportSettles } from '../src/apps/CloudOSTerminal/terminalVisualLifecycle.js';
 
 const source = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -175,4 +176,30 @@ test('TERMINAL-RESTORE preserva tabs persistidas quando o probe WSL falha', () =
   const catchBody = terminal.slice(catchStart, catchEnd);
   assert.match(catchBody, /setWorkspace\(normalizeTerminalWorkspace\(restored, fallbackTab\)\)/);
   assert.doesNotMatch(catchBody, /normalizeTerminalWorkspace\(null, fallbackTab\)/);
+});
+
+test('TERMINAL-XTERM dispose visual ocorre somente depois de task e frame pendentes', () => {
+  const tasks = [];
+  const frames = [];
+  let disposed = 0;
+  disposeTerminalAfterViewportSettles(
+    { dispose() { disposed += 1; } },
+    {
+      scheduleTask: callback => tasks.push(callback),
+      requestFrame: callback => frames.push(callback),
+    },
+  );
+  assert.equal(disposed, 0, 'dispose nao pode ser sincrono no cleanup');
+  assert.equal(tasks.length, 1, 'precisa aguardar uma task para drenar callbacks do viewport');
+  tasks.shift()();
+  assert.equal(disposed, 0, 'dispose nao pode ocorrer antes do animation frame seguinte');
+  assert.equal(frames.length, 1, 'precisa aguardar um frame apos a task');
+  frames.shift()();
+  assert.equal(disposed, 1, 'dispose ocorre uma unica vez depois da drenagem');
+});
+
+test('TERMINAL-XTERM TerminalSession usa teardown drenado em vez de dispose imediato', () => {
+  const terminal = source('src/apps/CloudOSTerminal/TerminalSession.tsx');
+  assert.match(terminal, /disposeTerminalAfterViewportSettles\(terminal\)/);
+  assert.doesNotMatch(terminal, /try \{ terminal\.dispose\(\); \} catch/);
 });
