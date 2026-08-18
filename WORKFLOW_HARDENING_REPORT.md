@@ -25,6 +25,7 @@ O sidecar de contexto do projeto usava `z-index:9800`. Apesar de o painel ser n�
 - restore do Terminal contado enquanto `.terminal-workspace--loading` ainda estava ativo;
 - modal de Workspace já aberto e harness tentando clicar em `Novo workspace` através dele;
 - Evidence validada procurando conteúdo em uma lista que, por contrato visual, mostra somente metadata;
+- cenário de Export iniciando `click()` sem esperar o dispatch e trocando de Workspace em corrida com a ação Playwright;
 - Human Simulation tentando acionar Files pelo Workspace quando a janela Files já estava ativa e cobrindo esse controle;
 - Human Simulation tratando o 503 WSL deliberadamente WebOnly como falha de missão;
 - CI de Human Simulation fazendo auto-commit de relatório depois de testar e, portanto, alterando o próprio HEAD validado.
@@ -55,7 +56,8 @@ A causalidade foi verificada: manter apenas o teardown drenado e restaurar `disp
 - 503 WSL esperado é classificado como ambiente/BAIXO;
 - resiliência reutiliza modal de criação já aberto ou fecha modal incompatível antes de continuar;
 - resiliência valida Evidence por identidade/contagem persistida;
-- Human Simulation reutiliza Files quando já ativo e só aciona o quick action depois de focar Workspace quando necessário;
+- resiliência aguarda o dispatch real do clique de Export em A antes da troca A→B, evitando corrida artificial entre comandos Playwright;
+- Human Simulation reutiliza Files quando já ativo e só aciona o quick action depois de focar Workspace quando necessário; a regra está no próprio fonte da simulação;
 - Human Simulation não reprova pelo 503 WSL esperado;
 - relatório de Human Simulation passa a ser artifact/job summary, sem auto-commit pós-teste, preservando o HEAD auditado.
 
@@ -92,11 +94,11 @@ A suíte cobre, em sequência real:
 
 1. dirty Note durante fechamento e reabertura;
 2. Notes durante busca + troca de Workspace;
-3. Evidence durante troca de projeto;
-4. Export iniciado em Workspace A enquanto a seleção muda para B;
+3. Evidence durante troca de projeto, validada pela entrada persistida;
+4. Export cujo clique é despachado em Workspace A e cuja seleção muda para B enquanto o fluxo assíncrono conclui;
 5. Terminal durante fechamento/restauração.
 
-O harness não usa `force` para atravessar modais e não considera conteúdo invisível da Evidence como requisito de DOM.
+O harness não usa `force` para atravessar modais, não considera conteúdo invisível da Evidence como requisito de DOM e não cria corrida entre comandos Playwright para simular concorrência.
 
 # RISCO ATUAL
 
