@@ -4,4 +4,4 @@ Branch temporária usada exclusivamente para disparar execuções observáveis c
 
 Nenhuma alteração de produto é executada a partir deste arquivo. Não mergear.
 
-Run solicitado: Autonomous Hardening — rerun após restaurar imports e declarar helper de teardown xterm.
+Run solicitado: Autonomous Hardening — provar teardown xterm com CSS original restaurado.
