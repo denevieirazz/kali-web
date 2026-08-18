@@ -10,6 +10,7 @@ import {
   listWorkspaces,
   listWorkspaceEvidence,
   listWorkspaceNotes,
+  saveWorkspaceNote,
   type IndexedFile,
   type WorkflowNote,
   type WorkspaceRecord,
@@ -102,6 +103,13 @@ function dispatchTerminalShortcut(key: string, shiftKey = false) {
   window.dispatchEvent(new KeyboardEvent('keydown', { key, ctrlKey: true, shiftKey, bubbles: true, cancelable: true }));
 }
 
+function isFilesShortcut(event: KeyboardEvent) {
+  const key = event.key.toLowerCase();
+  return event.key === 'Delete' || event.key === 'F2' || event.key === 'Enter'
+    || (event.ctrlKey && !event.altKey && ['c', 'x', 'v'].includes(key))
+    || (event.ctrlKey && event.altKey && key === 't');
+}
+
 export default function WorkflowBatch4Shell() {
   const windows = useWindowManager(state => state.windows);
   const activeWindowId = useWindowManager(state => state.activeWindowId);
@@ -129,6 +137,37 @@ export default function WorkflowBatch4Shell() {
     };
     document.addEventListener('click', onClick, true);
     return () => document.removeEventListener('click', onClick, true);
+  }, []);
+
+  useEffect(() => {
+    const onBlur = (event: FocusEvent) => {
+      const editor = event.target instanceof HTMLTextAreaElement && event.target.getAttribute('aria-label') === 'Nota Markdown' ? event.target : null;
+      if (!editor) return;
+      const workspace = displayedWorkspace();
+      const activeButton = document.querySelector<HTMLButtonElement>('.workflow-notes aside button.active');
+      const title = activeButton?.querySelector('strong')?.textContent?.trim() || '';
+      if (!workspace || !title || workspace.status === 'archived') return;
+      const capturedContent = editor.value;
+      void listWorkspaceNotes(workspace).then(notes => {
+        const matches = notes.filter(note => note.title === title);
+        if (matches.length !== 1 || matches[0].content === capturedContent) return;
+        return saveWorkspaceNote(workspace, { fileName: matches[0].fileName, content: capturedContent });
+      }).catch(cause => setMessage(cause instanceof Error ? cause.message : 'Falha ao preservar a nota antes da navegação.'));
+    };
+    document.addEventListener('blur', onBlur, true);
+    return () => document.removeEventListener('blur', onBlur, true);
+  }, []);
+
+  useEffect(() => {
+    const guardBackgroundFiles = (event: KeyboardEvent) => {
+      const manager = useWindowManager.getState();
+      const focused = manager.windows.find(item => item.id === manager.activeWindowId) || null;
+      if (focused?.appId === 'cloudos-files' || !isFilesShortcut(event)) return;
+      if (event.target instanceof Element && event.target.closest('.cf-root')) return;
+      event.stopPropagation();
+    };
+    document.addEventListener('keydown', guardBackgroundFiles);
+    return () => document.removeEventListener('keydown', guardBackgroundFiles);
   }, []);
 
   useEffect(() => {
