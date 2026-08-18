@@ -27,6 +27,7 @@ export const MAX_NOTE_INDEX_CONTENT_CHARS = 8192;
 const MAX_FILE_INDEX = 800;
 const MAX_DUPLICATE_ENTRIES = 2000;
 const MAX_DUPLICATE_BYTES = 1024 * 1024 * 1024;
+const noteSaveChains = new Map<string, Promise<void>>();
 
 export type { WorkspaceRecord, WorkspaceStatus, WorkspaceType, WorkflowProvider };
 
@@ -405,17 +406,31 @@ export async function saveWorkspaceNote(workspace: WorkspaceRecord, note: Pick<W
   if (!note.fileName.toLowerCase().endsWith('.md')) throw new Error('Notes aceita somente Markdown (.md).');
   const bytes = new TextEncoder().encode(note.content).byteLength;
   if (bytes > MAX_NOTE_BYTES) throw new Error('Nota excede o limite de 2 MiB.');
-  await fileSourceFacade.writeText(workspace.provider, [...workspace.root, 'Notes'], note.fileName, note.content);
-  const indexed: WorkflowNote = {
-    workspaceId: workspace.id,
-    fileName: note.fileName,
-    title: noteTitle(note.fileName),
-    content: note.content,
-    modified: Date.now(),
-  };
-  indexNotes([indexed]);
-  await touchWorkspace(workspace.id, true);
-  return indexed;
+
+  const key = `${workspace.id}:${note.fileName}`;
+  const previous = noteSaveChains.get(key) || Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const chain = previous.catch(() => undefined).then(() => gate);
+  noteSaveChains.set(key, chain);
+
+  await previous.catch(() => undefined);
+  try {
+    await fileSourceFacade.writeText(workspace.provider, [...workspace.root, 'Notes'], note.fileName, note.content);
+    const indexed: WorkflowNote = {
+      workspaceId: workspace.id,
+      fileName: note.fileName,
+      title: noteTitle(note.fileName),
+      content: note.content,
+      modified: Date.now(),
+    };
+    indexNotes([indexed]);
+    await touchWorkspace(workspace.id, true);
+    return indexed;
+  } finally {
+    release();
+    if (noteSaveChains.get(key) === chain) noteSaveChains.delete(key);
+  }
 }
 
 function indexNotes(notes: WorkflowNote[]) {
