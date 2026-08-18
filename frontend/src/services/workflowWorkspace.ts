@@ -20,7 +20,7 @@ const ACTIVE_WORKSPACE_KEY = 'cloudos.workflow.active-workspace.v3';
 const NOTES_INDEX_KEY = 'cloudos.workflow.notes-index.v3';
 const FILE_INDEX_KEY = 'cloudos.workflow.file-index.v3';
 const DOWNLOAD_DESTINATION_KEY = 'cloudos.workflow.download-destination.v3';
-const MAX_WORKSPACES = 100;
+export const MAX_WORKSPACES = 1000;
 export const MAX_NOTE_BYTES = 2 * 1024 * 1024;
 export const MAX_NOTE_INDEX_ENTRIES = 200;
 export const MAX_NOTE_INDEX_CONTENT_CHARS = 8192;
@@ -31,12 +31,31 @@ const noteSaveChains = new Map<string, Promise<void>>();
 
 export type { WorkspaceRecord, WorkspaceStatus, WorkspaceType, WorkflowProvider };
 
-export type WorkflowNote = {
+export type WorkflowNoteMeta = {
   workspaceId: string;
   fileName: string;
   title: string;
-  content: string;
   modified: number;
+  size: number;
+};
+
+export type WorkflowNoteContent = WorkflowNoteMeta & {
+  content: string;
+};
+
+// Compatibility name used by lightweight consumers that only need note metadata.
+export type WorkflowNote = WorkflowNoteMeta;
+
+export type WorkflowNoteSearchHit = {
+  fileName: string;
+  start: number;
+  end: number;
+  snippet: string;
+};
+
+export type WorkflowNoteSearchResult = {
+  fileNames: string[];
+  hits: WorkflowNoteSearchHit[];
 };
 
 export type NoteIndexEntry = {
@@ -104,7 +123,6 @@ function persistedWorkspaces() {
   for (const candidate of Array.isArray(raw) ? raw : []) {
     const normalized = normalizeWorkspaceRecord(candidate);
     if (normalized) output.push(normalized);
-    if (output.length >= MAX_WORKSPACES) break;
   }
   return output;
 }
@@ -130,8 +148,16 @@ export function getActiveWorkspace() {
 }
 
 function saveWorkspaceList(items: WorkspaceRecord[]) {
-  writeJson(WORKSPACES_KEY, items.slice(0, MAX_WORKSPACES));
+  // Never truncate an existing catalog. Capacity is enforced before admitting a new Workspace.
+  writeJson(WORKSPACES_KEY, items);
   emitChanged();
+}
+
+function assertWorkspaceCapacityForCreate() {
+  const count = persistedWorkspaces().length;
+  if (count >= MAX_WORKSPACES) {
+    throw new Error(`Limite de ${MAX_WORKSPACES} Workspaces atingido. Nenhum Workspace existente foi descartado.`);
+  }
 }
 
 async function writeWorkspaceManifest(workspace: WorkspaceRecord) {
@@ -194,6 +220,9 @@ export async function createWorkspace(input: {
   provider: WorkflowProvider;
   originPath?: string[];
 }) {
+  // Capacity is checked before any provider mount, directory or manifest is created.
+  assertWorkspaceCapacityForCreate();
+
   const runtime = await fileSourceFacade.runtime(input.provider);
   if (!runtime.available || !runtime.mounted) {
     throw new Error(input.provider === 'windows'
@@ -225,7 +254,10 @@ export async function createWorkspace(input: {
     });
     if (!workspace) throw new Error('Metadados do workspace foram rejeitados.');
     await fileSourceFacade.writeText(input.provider, root, 'workspace.json', JSON.stringify(buildWorkspaceManifest(workspace), null, 2));
-    const items = [workspace, ...persistedWorkspaces().filter(item => item.id !== workspace.id)].slice(0, MAX_WORKSPACES);
+    const items = [workspace, ...persistedWorkspaces().filter(item => item.id !== workspace.id)];
+    if (items.length > MAX_WORKSPACES) {
+      throw new Error(`Limite de ${MAX_WORKSPACES} Workspaces atingido durante a criação. Nenhum Workspace existente foi descartado.`);
+    }
     saveWorkspaceList(items);
     if (storageAvailable()) localStorage.setItem(ACTIVE_WORKSPACE_KEY, workspace.id);
     emitChanged();
@@ -363,27 +395,116 @@ function noteTitle(fileName: string) {
   return fileName.replace(/\.md$/i, '').replace(/[-_]+/g, ' ').trim() || 'Nota';
 }
 
-export async function listWorkspaceNotes(workspace: WorkspaceRecord): Promise<WorkflowNote[]> {
+function noteMeta(workspace: WorkspaceRecord, entry: CloudFileEntry): WorkflowNoteMeta {
+  return {
+    workspaceId: workspace.id,
+    fileName: entry.name,
+    title: noteTitle(entry.name),
+    modified: entry.modified,
+    size: entry.size,
+  };
+}
+
+function validNoteEntry(entry: CloudFileEntry) {
+  return entry.kind === 'file'
+    && !entry.symlink
+    && entry.name.toLowerCase().endsWith('.md')
+    && entry.size <= MAX_NOTE_BYTES;
+}
+
+export async function listWorkspaceNotes(workspace: WorkspaceRecord): Promise<WorkflowNoteMeta[]> {
   const entries = await fileSourceFacade.list(workspace.provider, [...workspace.root, 'Notes'], false);
-  const notes: WorkflowNote[] = [];
-  for (const entry of entries) {
-    if (entry.kind !== 'file' || entry.symlink || !entry.name.toLowerCase().endsWith('.md') || entry.size > MAX_NOTE_BYTES) continue;
-    try {
-      const file = await fileSourceFacade.readFile(workspace.provider, [...workspace.root, 'Notes'], entry, MAX_NOTE_BYTES);
-      notes.push({
-        workspaceId: workspace.id,
-        fileName: entry.name,
-        title: noteTitle(entry.name),
-        content: await file.text(),
-        modified: entry.modified,
-      });
-    } catch {
-      // One damaged note must not hide the rest of the workspace.
-    }
+  return entries
+    .filter(validNoteEntry)
+    .map(entry => noteMeta(workspace, entry))
+    .sort((left, right) => right.modified - left.modified || left.title.localeCompare(right.title));
+}
+
+export async function loadWorkspaceNote(workspace: WorkspaceRecord, note: WorkflowNoteMeta | string): Promise<WorkflowNoteContent> {
+  const fileName = typeof note === 'string' ? note : note.fileName;
+  const entries = await fileSourceFacade.list(workspace.provider, [...workspace.root, 'Notes'], false);
+  const entry = entries.find(item => item.name === fileName);
+  if (!entry || !validNoteEntry(entry)) throw new Error('Nota não encontrada, inválida ou acima do limite de 2 MiB.');
+  const file = await fileSourceFacade.readFile(workspace.provider, [...workspace.root, 'Notes'], entry, MAX_NOTE_BYTES);
+  const document: WorkflowNoteContent = {
+    ...noteMeta(workspace, entry),
+    content: await file.text(),
+  };
+  indexNotes([document]);
+  return document;
+}
+
+function collectTextHits(fileName: string, text: string, query: string, limit: number): WorkflowNoteSearchHit[] {
+  if (limit <= 0) return [];
+  const needle = query.trim().toLocaleLowerCase('pt-BR');
+  if (!needle) return [];
+  const haystack = text.toLocaleLowerCase('pt-BR');
+  const hits: WorkflowNoteSearchHit[] = [];
+  let offset = 0;
+  while (hits.length < limit) {
+    const start = haystack.indexOf(needle, offset);
+    if (start < 0) break;
+    const end = start + needle.length;
+    const snippetStart = Math.max(0, start - 45);
+    const snippetEnd = Math.min(text.length, end + 70);
+    hits.push({
+      fileName,
+      start,
+      end,
+      snippet: text.slice(snippetStart, snippetEnd).replace(/\s+/g, ' ').trim(),
+    });
+    offset = Math.max(end, start + 1);
   }
-  notes.sort((left, right) => right.modified - left.modified || left.title.localeCompare(right.title));
-  indexNotes(notes);
-  return notes;
+  return hits;
+}
+
+export async function searchWorkspaceNotes(
+  workspace: WorkspaceRecord,
+  notes: WorkflowNoteMeta[],
+  query: string,
+  options: {
+    limit?: number;
+    cancelled?: () => boolean;
+    activeDocument?: { fileName: string; content: string } | null;
+  } = {},
+): Promise<WorkflowNoteSearchResult> {
+  const needle = query.trim().toLocaleLowerCase('pt-BR');
+  if (!needle) return { fileNames: [], hits: [] };
+
+  const limit = Math.max(1, Math.min(1000, Math.floor(options.limit ?? 100)));
+  const cancelled = options.cancelled || (() => false);
+  const matched = new Set<string>();
+  const hits: WorkflowNoteSearchHit[] = [];
+  const entries = await fileSourceFacade.list(workspace.provider, [...workspace.root, 'Notes'], false);
+  const byName = new Map(entries.filter(validNoteEntry).map(entry => [entry.name, entry]));
+
+  for (const meta of notes) {
+    if (cancelled()) break;
+    const titleMatches = meta.title.toLocaleLowerCase('pt-BR').includes(needle);
+    const activeOverride = options.activeDocument?.fileName === meta.fileName ? options.activeDocument.content : null;
+    let content = activeOverride;
+
+    if (content === null) {
+      const entry = byName.get(meta.fileName);
+      if (!entry) {
+        if (titleMatches) matched.add(meta.fileName);
+        continue;
+      }
+      const file = await fileSourceFacade.readFile(workspace.provider, [...workspace.root, 'Notes'], entry, MAX_NOTE_BYTES);
+      if (cancelled()) break;
+      content = await file.text();
+    }
+
+    if (cancelled()) break;
+    const contentMatches = content.toLocaleLowerCase('pt-BR').includes(needle);
+    if (titleMatches || contentMatches) matched.add(meta.fileName);
+    if (contentMatches && hits.length < limit) {
+      hits.push(...collectTextHits(meta.fileName, content, query, limit - hits.length));
+    }
+    content = '';
+  }
+
+  return { fileNames: [...matched], hits };
 }
 
 function sanitizeNoteFileName(title: string) {
@@ -396,13 +517,20 @@ export async function createWorkspaceNote(workspace: WorkspaceRecord, title = 'N
   const fileName = await fileSourceFacade.create(workspace.provider, [...workspace.root, 'Notes'], 'file', requested);
   const content = `# ${noteTitle(fileName)}\n\n`;
   await fileSourceFacade.writeText(workspace.provider, [...workspace.root, 'Notes'], fileName, content);
-  const note: WorkflowNote = { workspaceId: workspace.id, fileName, title: noteTitle(fileName), content, modified: Date.now() };
+  const note: WorkflowNoteContent = {
+    workspaceId: workspace.id,
+    fileName,
+    title: noteTitle(fileName),
+    content,
+    modified: Date.now(),
+    size: new TextEncoder().encode(content).byteLength,
+  };
   indexNotes([note]);
   await touchWorkspace(workspace.id, true);
   return note;
 }
 
-export async function saveWorkspaceNote(workspace: WorkspaceRecord, note: Pick<WorkflowNote, 'fileName' | 'content'>) {
+export async function saveWorkspaceNote(workspace: WorkspaceRecord, note: Pick<WorkflowNoteContent, 'fileName' | 'content'>) {
   if (!note.fileName.toLowerCase().endsWith('.md')) throw new Error('Notes aceita somente Markdown (.md).');
   const bytes = new TextEncoder().encode(note.content).byteLength;
   if (bytes > MAX_NOTE_BYTES) throw new Error('Nota excede o limite de 2 MiB.');
@@ -417,12 +545,13 @@ export async function saveWorkspaceNote(workspace: WorkspaceRecord, note: Pick<W
   await previous.catch(() => undefined);
   try {
     await fileSourceFacade.writeText(workspace.provider, [...workspace.root, 'Notes'], note.fileName, note.content);
-    const indexed: WorkflowNote = {
+    const indexed: WorkflowNoteContent = {
       workspaceId: workspace.id,
       fileName: note.fileName,
       title: noteTitle(note.fileName),
       content: note.content,
       modified: Date.now(),
+      size: bytes,
     };
     indexNotes([indexed]);
     await touchWorkspace(workspace.id, true);
@@ -433,7 +562,7 @@ export async function saveWorkspaceNote(workspace: WorkspaceRecord, note: Pick<W
   }
 }
 
-function indexNotes(notes: WorkflowNote[]) {
+function indexNotes(notes: WorkflowNoteContent[]) {
   const existing = listNoteIndex();
   const byKey = new Map(existing.map(item => [`${item.workspaceId}:${item.fileName}`, item]));
   for (const note of notes) {
