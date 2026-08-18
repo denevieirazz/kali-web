@@ -89,3 +89,75 @@ test('A-06 lixeira Windows confirma metadata antes de remover a origem', () => {
   assert.ok(sourceDelete > metadataWrite, 'origem so pode ser removida depois da metadata');
   assert.match(windows, /Metadados da lixeira Windows estão corrompidos; nenhuma operação destrutiva foi executada/);
 });
+
+test('SCALE-01 catalogo aceita Workspace 101 sem truncar os existentes', () => {
+  const workspace = source('src/services/workflowWorkspace.ts');
+  assert.match(workspace, /export const MAX_WORKSPACES = 1000;/);
+  assert.doesNotMatch(workspace, /if \(output\.length >= MAX_WORKSPACES\) break;/);
+  assert.doesNotMatch(workspace, /writeJson\(WORKSPACES_KEY, items\.slice\(0, MAX_WORKSPACES\)\)/);
+  assert.doesNotMatch(workspace, /\[workspace, \.\.\.persistedWorkspaces\(\)[^\n]*\.slice\(0, MAX_WORKSPACES\)/);
+});
+
+test('SCALE-02 limite de Workspace rejeita antes de criar e nunca descarta catalogo', () => {
+  const workspace = source('src/services/workflowWorkspace.ts');
+  const createStart = workspace.indexOf('export async function createWorkspace');
+  const runtime = workspace.indexOf('const runtime = await fileSourceFacade.runtime(input.provider);', createStart);
+  const guard = workspace.indexOf('assertWorkspaceCapacityForCreate();', createStart);
+  assert.ok(guard > createStart && guard < runtime, 'capacidade precisa falhar antes de tocar provider');
+  assert.match(workspace, /if \(count >= MAX_WORKSPACES\)/);
+  assert.match(workspace, /Nenhum Workspace existente foi descartado/);
+  assert.match(workspace, /function saveWorkspaceList\(items: WorkspaceRecord\[\]\) \{\s*\/\/ Never truncate[\s\S]*?writeJson\(WORKSPACES_KEY, items\);/);
+});
+
+test('SCALE-03 listWorkspaceNotes retorna somente metadata sem ler conteudo', () => {
+  const workspace = source('src/services/workflowWorkspace.ts');
+  assert.match(workspace, /export type WorkflowNoteMeta = \{/);
+  assert.match(workspace, /export type WorkflowNoteContent = WorkflowNoteMeta & \{\s*content: string;/);
+  const start = workspace.indexOf('export async function listWorkspaceNotes');
+  const end = workspace.indexOf('\nexport async function loadWorkspaceNote', start);
+  const body = workspace.slice(start, end);
+  assert.match(body, /Promise<WorkflowNoteMeta\[\]>/);
+  assert.match(body, /\.map\(entry => noteMeta\(workspace, entry\)\)/);
+  assert.doesNotMatch(body, /readFile\(/);
+  assert.doesNotMatch(body, /\.text\(\)/);
+});
+
+test('SCALE-04 somente nota ativa e carregada sob demanda', () => {
+  const service = source('src/services/workflowWorkspace.ts');
+  const ui = source('src/apps/WorkflowWorkspace/WorkflowWorkspace.tsx');
+  const loadStart = service.indexOf('export async function loadWorkspaceNote');
+  const loadEnd = service.indexOf('\nfunction collectTextHits', loadStart);
+  const loadBody = service.slice(loadStart, loadEnd);
+  assert.match(loadBody, /fileSourceFacade\.readFile/);
+  assert.match(loadBody, /content: await file\.text\(\)/);
+  assert.match(ui, /useState<WorkflowNoteMeta\[\]>\(\[\]\)/);
+  assert.match(ui, /const loaded = chosen \? await loadWorkspaceNote\(workspace, chosen\) : null;/);
+  assert.match(ui, /const loaded = await loadWorkspaceNote\(active, note\);/);
+  assert.doesNotMatch(ui, /note\.content/);
+});
+
+test('SCALE-05 busca percorre Notes incrementalmente sem materializar todos documentos', () => {
+  const service = source('src/services/workflowWorkspace.ts');
+  const ui = source('src/apps/WorkflowWorkspace/WorkflowWorkspace.tsx');
+  const start = service.indexOf('export async function searchWorkspaceNotes');
+  const end = service.indexOf('\nfunction sanitizeNoteFileName', start);
+  const body = service.slice(start, end);
+  assert.match(body, /for \(const meta of notes\)/);
+  assert.match(body, /cancelled\(\)/);
+  assert.match(body, /activeDocument/);
+  assert.match(body, /await fileSourceFacade\.readFile/);
+  assert.doesNotMatch(body, /Promise\.all/);
+  assert.match(ui, /searchWorkspaceNotes\(active, notes, noteSearch/);
+  assert.match(ui, /activeDocument: activeNoteFile \? \{ fileName: activeNoteFile, content: noteContent \} : null/);
+  assert.match(ui, /setNoteSearchBusy\(true\)/);
+});
+
+test('SCALE-06 metadata lazy preserva indice global e regressao de save', () => {
+  const workspace = source('src/services/workflowWorkspace.ts');
+  assert.match(workspace, /function indexNoteMetadata\(notes: WorkflowNoteMeta\[\]\)/);
+  assert.match(workspace, /searchText: current\?\.searchText \|\| ''/);
+  assert.match(workspace, /indexNoteMetadata\(notes\);\s*return notes;/);
+  assert.match(workspace, /indexNotes\(\[document\]\);/);
+  assert.match(workspace, /indexNotes\(\[indexed\]\);/);
+  assert.match(workspace, /const noteSaveChains = new Map<string, Promise<void>>\(\)/);
+});
