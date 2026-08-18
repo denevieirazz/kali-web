@@ -4,6 +4,8 @@ const EXPECTED_BRANCH = 'stabilization/cloudos-workflow-batch-4';
 const FREEZE_HEAD = 'ae08460f8c813ed9264ca330ef918071c6f3c2aa';
 const allowed = new Set([
   '.github/workflows/workflow-batch4-stabilization-ci.yml',
+  '.github/workflows/workflow-drone-ci.yml',
+  'DRONE_REPORT.md',
   'HUMAN_SIMULATION_REPORT.md',
   'WORKFLOW_CAPACITY_AUDIT.md',
   'WORKFLOW_LONG_SESSION_AUDIT.md',
@@ -20,10 +22,13 @@ const allowed = new Set([
   'frontend/src/services/workflowQuickEvidence.ts',
   'frontend/src/services/workflowWorkspace.ts',
   'frontend/test/workflowBatch4Stabilization.test.js',
+  'playwright.drone.config.ts',
   'playwright.human.config.ts',
+  'scripts/workflow/render-drone-report.mjs',
+  'scripts/workflow/test-batch4-stabilization-scope.mjs',
+  'tests/playwright/workflow-drone.spec.ts',
   'tests/playwright/workflow-human-simulation.spec.ts',
   'tests/playwright/workflow-human-simulation-v2.spec.ts',
-  'scripts/workflow/test-batch4-stabilization-scope.mjs',
 ]);
 
 function git(...args) {
