@@ -4,6 +4,7 @@ const EXPECTED_BRANCH = 'stabilization/cloudos-workflow-batch-4';
 const FREEZE_HEAD = 'ae08460f8c813ed9264ca330ef918071c6f3c2aa';
 const allowed = new Set([
   '.github/workflows/workflow-batch4-stabilization-ci.yml',
+  'HUMAN_SIMULATION_REPORT.md',
   'WORKFLOW_CAPACITY_AUDIT.md',
   'WORKFLOW_LONG_SESSION_AUDIT.md',
   'WORKFLOW_SCALE_DESIGN.md',
