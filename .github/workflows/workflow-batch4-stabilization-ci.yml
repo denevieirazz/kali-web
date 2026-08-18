@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: cloudos-workflow-batch4-stabilization-${{ github.ref }}
@@ -103,28 +103,27 @@ jobs:
           } else if (!source.includes("test.describe('Workflow Human User Simulation v2'")) {
             throw new Error('Bloco describe esperado da simulação v2 não foi encontrado.');
           }
-          const oldEnsureFiles = `async function ensureFiles(page: import('@playwright/test').Page) {
+          const hardenedEnsureFiles = `async function ensureFiles(page: import('@playwright/test').Page) {
             let files = page.locator('.cf-root').last();
-            if (!await files.isVisible().catch(() => false)) {
-              const workspace = await ensureWorkspace(page);
-              await workspace.locator('.ww-quick-actions').getByRole('button', { name: 'Files', exact: true }).click();
-              files = page.locator('.cf-root').last();
-              await expect(files).toBeVisible({ timeout: 15_000 });
-            }
-            await files.click({ position: { x: 700, y: 140 } }).catch(() => undefined);
-            return files;
-          }`;
-          const newEnsureFiles = `async function ensureFiles(page: import('@playwright/test').Page) {
-            const workspace = await ensureWorkspace(page);
-            await workspace.locator('.ww-quick-actions').getByRole('button', { name: 'Files', exact: true }).click();
-            const files = page.locator('.cf-root').last();
-            await expect(files).toBeVisible({ timeout: 15_000 });
             const filesWindow = page.locator('.window:has(.cf-root)').last();
-            await expect(filesWindow).toHaveClass(/active/, { timeout: 10_000 });
+            if (await files.isVisible().catch(() => false) && await filesWindow.evaluate(element => element.classList.contains('active')).catch(() => false)) {
+              return files;
+            }
+            const workspace = await ensureWorkspace(page);
+            const workspaceWindow = page.locator('.window:has(.workflow-workspace)').last();
+            if (!await workspaceWindow.evaluate(element => element.classList.contains('active')).catch(() => false)) {
+              await page.keyboard.press('Control+Alt+1');
+              await expect(workspaceWindow).toHaveClass(/active/, { timeout: 10_000 });
+            }
+            await workspace.locator('.ww-quick-actions').getByRole('button', { name: 'Files', exact: true }).click();
+            files = page.locator('.cf-root').last();
+            await expect(files).toBeVisible({ timeout: 15_000 });
+            await expect(page.locator('.window:has(.cf-root)').last()).toHaveClass(/active/, { timeout: 10_000 });
             return files;
           }`;
-          if (source.includes(oldEnsureFiles)) source = source.replace(oldEnsureFiles, newEnsureFiles);
-          else if (!source.includes("const filesWindow = page.locator('.window:has(.cf-root)').last();")) throw new Error('Helper ensureFiles esperado não foi encontrado.');
+          const pattern = /async function ensureFiles\(page: import\('@playwright\/test'\)\.Page\) \{[\s\S]*?\n\}\n\nasync function createFile/;
+          if (!pattern.test(source)) throw new Error('Helper ensureFiles esperado não foi encontrado.');
+          source = source.replace(pattern, `${hardenedEnsureFiles}\n\nasync function createFile`);
           fs.writeFileSync(file, source, 'utf8');
           NODE
       - name: Install dependencies
@@ -178,16 +177,7 @@ jobs:
             test-results/human-simulation/**
             test-results/playwright-human/**
             playwright-human-report/**
-      - name: Publish v2 harness and report
+      - name: Publish report to job summary
         if: always()
         shell: bash
-        run: |
-          git config user.name "cloudos-human-simulation"
-          git config user.email "actions@users.noreply.github.com"
-          git add HUMAN_SIMULATION_REPORT.md tests/playwright/workflow-human-simulation-v2.spec.ts
-          if git diff --cached --quiet; then
-            echo 'Human simulation v2/report unchanged.'
-            exit 0
-          fi
-          git commit -m "test(report): registrar simulacao humana v2 [skip ci]"
-          git push origin HEAD:stabilization/cloudos-workflow-batch-4
+        run: cat HUMAN_SIMULATION_REPORT.md >> "$GITHUB_STEP_SUMMARY"
