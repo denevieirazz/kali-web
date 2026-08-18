@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { disposeTerminalAfterViewportSettles } from '../src/apps/CloudOSTerminal/terminalVisualLifecycle.js';
 
-const source = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
+const source = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8').replace(/\r\n?/g, '\n');
 
 test('C-01 Notes nao reemite workflow-changed quando o indice nao mudou', () => {
   const workspace = source('src/services/workflowWorkspace.ts');
@@ -132,9 +132,10 @@ test('SCALE-04 somente nota ativa e carregada sob demanda', () => {
   assert.match(loadBody, /fileSourceFacade\.readFile/);
   assert.match(loadBody, /content: await file\.text\(\)/);
   assert.match(ui, /useState<WorkflowNoteMeta\[\]>\(\[\]\)/);
+  assert.doesNotMatch(ui, /useState<WorkflowNoteContent\[\]>/, 'a coleção de Notes não pode materializar corpos completos');
   assert.match(ui, /const loaded = chosen \? await loadWorkspaceNote\(workspace, chosen\) : null;/);
   assert.match(ui, /const loaded = await loadWorkspaceNote\(active, note\);/);
-  assert.doesNotMatch(ui, /note\.content/);
+  assert.match(ui, /function noteMetadata\(note: WorkflowNoteContent\): WorkflowNoteMeta/);
 });
 
 test('SCALE-05 busca percorre Notes incrementalmente sem materializar todos documentos', () => {
