@@ -166,3 +166,13 @@ test('SCALE-06 metadata lazy preserva indice global e regressao de save', () => 
   assert.match(metadataBody, /note\.modified > 0 \? new Date\(note\.modified\)\.toISOString\(\) : \(current\?\.updatedAt \|\| new Date\(0\)\.toISOString\(\)\)/);
   assert.doesNotMatch(metadataBody, /note\.modified \|\| Date\.now\(\)/);
 });
+
+test('TERMINAL-RESTORE preserva tabs persistidas quando o probe WSL falha', () => {
+  const terminal = source('src/apps/CloudOSTerminal/CloudOSTerminal.tsx');
+  assert.match(terminal, /const restored = readPersistedTerminalWorkspace\(!launchParams\.explicit\);/);
+  const catchStart = terminal.indexOf('.catch(error => {');
+  const catchEnd = terminal.indexOf('\n      });', catchStart);
+  const catchBody = terminal.slice(catchStart, catchEnd);
+  assert.match(catchBody, /setWorkspace\(normalizeTerminalWorkspace\(restored, fallbackTab\)\)/);
+  assert.doesNotMatch(catchBody, /normalizeTerminalWorkspace\(null, fallbackTab\)/);
+});
