@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: cloudos-workflow-batch4-stabilization-${{ github.ref }}
@@ -92,7 +92,36 @@ jobs:
       - name: Install Chromium for Playwright
         run: npx playwright install --with-deps chromium
       - name: Execute human user simulation
-        run: npx playwright test --config=playwright.human.config.ts
+        id: human_simulation
+        shell: bash
+        run: |
+          mkdir -p test-results/human-simulation
+          set +e
+          npx playwright test --config=playwright.human.config.ts 2>&1 | tee test-results/human-simulation/playwright.log
+          status=${PIPESTATUS[0]}
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit "$status"
+      - name: Ensure report exists
+        if: always()
+        shell: bash
+        run: |
+          if [ ! -f HUMAN_SIMULATION_REPORT.md ]; then
+            {
+              echo '# HUMAN_SIMULATION_REPORT.md'
+              echo
+              echo '## Human simulation não chegou ao relatório interno'
+              echo
+              echo "**Commit executado:** \`${GITHUB_SHA}\`"
+              echo
+              echo '**FALHOU**'
+              echo
+              echo 'O runner iniciou a suíte real, mas ela terminou antes de o gerador de missões produzir o relatório. O log bruto do Playwright foi preservado no artifact.'
+              echo
+              echo '```text'
+              tail -n 250 test-results/human-simulation/playwright.log 2>/dev/null || true
+              echo '```'
+            } > HUMAN_SIMULATION_REPORT.md
+          fi
       - name: Upload human simulation evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -105,3 +134,16 @@ jobs:
             test-results/human-simulation/**
             test-results/playwright-human/**
             playwright-human-report/**
+      - name: Publish human simulation report to branch
+        if: always()
+        shell: bash
+        run: |
+          git config user.name "cloudos-human-simulation"
+          git config user.email "actions@users.noreply.github.com"
+          git add HUMAN_SIMULATION_REPORT.md
+          if git diff --cached --quiet; then
+            echo 'Human simulation report unchanged.'
+            exit 0
+          fi
+          git commit -m "test(report): registrar simulacao humana real [skip ci]"
+          git push origin HEAD:stabilization/cloudos-workflow-batch-4
