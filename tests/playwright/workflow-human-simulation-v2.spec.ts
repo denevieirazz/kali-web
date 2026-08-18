@@ -33,7 +33,7 @@ type RuntimeSnapshot = {
 const ROOT = path.resolve(process.cwd(), 'test-results/human-simulation');
 const SHOTS = path.join(ROOT, 'screenshots');
 const RESULTS = path.join(ROOT, 'v2-results');
-const REPORT = path.resolve(process.cwd(), 'HUMAN_SIMULATION_REPORT.md');
+const REPORT = path.join(ROOT, 'HUMAN_SIMULATION_REPORT.md');
 const RUN_TOKEN = 'HUMAN-V2-7B5D8F2B';
 
 function missionFile(id: number) { return path.join(RESULTS, `mission-${id}.json`); }
@@ -153,7 +153,7 @@ async function createNote(page: import('@playwright/test').Page) {
 
 async function ensureFiles(page: import('@playwright/test').Page) {
   let files = page.locator('.cf-root').last();
-  let filesWindow = page.locator('.window:has(.cf-root)').last();
+  const filesWindow = page.locator('.window:has(.cf-root)').last();
   if (await files.isVisible().catch(() => false) && await filesWindow.evaluate(element => element.classList.contains('active')).catch(() => false)) {
     return files;
   }
@@ -167,7 +167,6 @@ async function ensureFiles(page: import('@playwright/test').Page) {
 
   await workspace.locator('.ww-quick-actions').getByRole('button', { name: 'Files', exact: true }).click();
   files = page.locator('.cf-root').last();
-  filesWindow = page.locator('.window:has(.cf-root)').last();
   await expect(files).toBeVisible({ timeout: 15_000 });
   await expect(filesWindow).toHaveClass(/active/, { timeout: 10_000 });
   return files;
@@ -275,6 +274,7 @@ function buildReport() {
   }
   lines.push('## Telemetria', '', '| Missão/Ponto | Heap | DOM nodes | JS listeners | localStorage | timers | intervals | ResizeObserver | MutationObserver | janelas |', '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|');
   snapshots.forEach(item => lines.push(`| ${item.mission}/${item.label} | ${humanBytes(item.heapUsed)} | ${item.nodes ?? 'n/d'} | ${item.jsEventListeners ?? 'n/d'} | ${humanBytes(item.localStorageBytes)} | ${item.timeoutCount ?? 'n/d'} | ${item.intervalCount ?? 'n/d'} | ${item.resizeObservers ?? 'n/d'} | ${item.mutationObservers ?? 'n/d'} | ${item.windows} |`));
+  fs.mkdirSync(ROOT, { recursive: true });
   fs.writeFileSync(REPORT, lines.join('\n'), 'utf8');
   fs.writeFileSync(path.join(ROOT, 'human-simulation-v2.json'), JSON.stringify({ results, snapshots }, null, 2), 'utf8');
 }
