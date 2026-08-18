@@ -152,11 +152,23 @@ async function createNote(page: import('@playwright/test').Page) {
 }
 
 async function ensureFiles(page: import('@playwright/test').Page) {
+  let files = page.locator('.cf-root').last();
+  let filesWindow = page.locator('.window:has(.cf-root)').last();
+  if (await files.isVisible().catch(() => false) && await filesWindow.evaluate(element => element.classList.contains('active')).catch(() => false)) {
+    return files;
+  }
+
   const workspace = await ensureWorkspace(page);
+  const workspaceWindow = page.locator('.window:has(.workflow-workspace)').last();
+  if (!await workspaceWindow.evaluate(element => element.classList.contains('active')).catch(() => false)) {
+    await page.keyboard.press('Control+Alt+1');
+    await expect(workspaceWindow).toHaveClass(/active/, { timeout: 10_000 });
+  }
+
   await workspace.locator('.ww-quick-actions').getByRole('button', { name: 'Files', exact: true }).click();
-  const files = page.locator('.cf-root').last();
+  files = page.locator('.cf-root').last();
+  filesWindow = page.locator('.window:has(.cf-root)').last();
   await expect(files).toBeVisible({ timeout: 15_000 });
-  const filesWindow = page.locator('.window:has(.cf-root)').last();
   await expect(filesWindow).toHaveClass(/active/, { timeout: 10_000 });
   return files;
 }
