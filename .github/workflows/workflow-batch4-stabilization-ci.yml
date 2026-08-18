@@ -110,7 +110,7 @@ jobs:
       - name: Build CloudOS frontend
         run: npm run build
       - name: Install Chromium for Playwright
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
       - name: Execute human user simulation v2
         id: human_simulation
         shell: bash
