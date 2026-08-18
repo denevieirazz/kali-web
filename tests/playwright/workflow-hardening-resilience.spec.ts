@@ -17,14 +17,29 @@ async function workspaceRoot(page: import('@playwright/test').Page) {
 
 async function createWorkspace(page: import('@playwright/test').Page, name: string) {
   const root = await workspaceRoot(page);
-  await root.getByRole('button', { name: /Novo workspace/i }).click();
-  const modal = page.locator('.ww-modal').last();
+  let modal = page.locator('.ww-modal:visible').last();
+  const alreadyOpen = await modal.isVisible().catch(() => false);
+  if (alreadyOpen) {
+    const isCreateModal = await modal.getByRole('textbox', { name: 'Nome', exact: true }).isVisible().catch(() => false)
+      && await modal.getByRole('button', { name: /Criar workspace/i }).isVisible().catch(() => false);
+    if (!isCreateModal) {
+      const close = modal.getByRole('button', { name: /Cancelar|Fechar/i }).last();
+      if (await close.isVisible().catch(() => false)) await close.click();
+      else await page.keyboard.press('Escape');
+      await expect(page.locator('.ww-modal:visible')).toHaveCount(0, { timeout: 10_000 });
+      await root.getByRole('button', { name: /Novo workspace/i }).click();
+      modal = page.locator('.ww-modal:visible').last();
+    }
+  } else {
+    await root.getByRole('button', { name: /Novo workspace/i }).click();
+    modal = page.locator('.ww-modal:visible').last();
+  }
   await expect(modal).toBeVisible();
   await modal.getByRole('textbox', { name: 'Nome', exact: true }).fill(name);
   await modal.getByRole('textbox', { name: 'Cliente', exact: true }).fill(`Cliente ${name}`);
   await modal.getByRole('textbox', { name: 'Descrição', exact: true }).fill(`Resiliência ${name}`);
   await modal.getByRole('button', { name: /Criar workspace/i }).click();
-  await expect(modal).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.locator('.ww-modal:visible')).toHaveCount(0, { timeout: 15_000 });
   await expect(root.locator('.ww-header h2')).toHaveText(name, { timeout: 15_000 });
   return root;
 }
