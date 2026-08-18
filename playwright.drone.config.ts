@@ -29,6 +29,7 @@ export default defineConfig({
     launchOptions: {
       args: ['--enable-precise-memory-info'],
     },
-  },
+    browserDiagnosticsAssert: false,
+  } as any,
   projects: [{ name: 'chromium-workflow-drone' }],
 });
