@@ -26,12 +26,15 @@ import {
   listWorkspaces,
   listWorkspaceEvidence,
   listWorkspaceNotes,
+  loadWorkspaceNote,
   saveWorkspaceEvidenceFile,
   saveWorkspaceEvidenceText,
   saveWorkspaceNote,
+  searchWorkspaceNotes,
   setDownloadDestination,
   updateWorkspaceMetadata,
-  type WorkflowNote,
+  type WorkflowNoteContent,
+  type WorkflowNoteMeta,
   type WorkspaceRecord,
 } from '../../services/workflowWorkspace';
 import {
@@ -61,6 +64,11 @@ type TextHit = { fileName: string; start: number; end: number; snippet: string }
 type WorkspaceDraftSnapshot = { workspace: WorkspaceRecord; fileName: string; content: string; savedContent: string };
 
 const MAX_VISIBLE_SEARCH_HITS = 100;
+
+function noteMetadata(note: WorkflowNoteContent): WorkflowNoteMeta {
+  const { content: _content, ...meta } = note;
+  return meta;
+}
 
 function MarkdownPreview({ value }: { value: string }) {
   const lines = value.split(/\r?\n/);
@@ -168,10 +176,13 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
   const [editTags, setEditTags] = useState('');
   const [transferProvider, setTransferProvider] = useState<WorkflowProvider>('opfs');
 
-  const [notes, setNotes] = useState<WorkflowNote[]>([]);
+  const [notes, setNotes] = useState<WorkflowNoteMeta[]>([]);
   const [activeNoteFile, setActiveNoteFile] = useState(params?.noteFileName || '');
   const [noteContent, setNoteContent] = useState('');
   const [noteSearch, setNoteSearch] = useState('');
+  const [noteSearchFiles, setNoteSearchFiles] = useState<string[]>([]);
+  const [noteHits, setNoteHits] = useState<TextHit[]>([]);
+  const [noteSearchBusy, setNoteSearchBusy] = useState(false);
   const [noteHitIndex, setNoteHitIndex] = useState(0);
   const [externalHitIndex, setExternalHitIndex] = useState(0);
   const [noteSaving, setNoteSaving] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -179,6 +190,7 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
   const [externalFile, setExternalFile] = useState<ExternalTextState | null>(null);
   const savedNoteContent = useRef('');
   const workspaceDraftRef = useRef<WorkspaceDraftSnapshot | null>(null);
+  const noteLoadGenerationRef = useRef(0);
   const noteSearchRef = useRef<HTMLInputElement>(null);
   const noteEditorRef = useRef<HTMLTextAreaElement>(null);
   const workspaceImportRef = useRef<HTMLInputElement>(null);
@@ -194,16 +206,11 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
   const active = useMemo(() => workspaces.find(item => item.id === activeId) || null, [activeId, workspaces]);
   const activeNote = useMemo(() => notes.find(note => note.fileName === activeNoteFile) || null, [activeNoteFile, notes]);
   const visibleWorkspaces = useMemo(() => workspaces.filter(workspace => (showArchived || workspace.status !== 'archived') && matchesWorkflowQuery(workspaceSearchText(workspace), workspaceSearch)), [showArchived, workspaceSearch, workspaces]);
-  const filteredNotes = useMemo(() => notes.filter(note => matchesWorkflowQuery(`${note.title}\n${note.content}`, noteSearch)), [noteSearch, notes]);
-  const noteHits = useMemo(() => {
-    if (!noteSearch.trim()) return [] as TextHit[];
-    const output: TextHit[] = [];
-    for (const note of filteredNotes) {
-      output.push(...textHits(note.fileName, note.content, noteSearch, MAX_VISIBLE_SEARCH_HITS - output.length));
-      if (output.length >= MAX_VISIBLE_SEARCH_HITS) break;
-    }
-    return output;
-  }, [filteredNotes, noteSearch]);
+  const filteredNotes = useMemo(() => {
+    if (!noteSearch.trim()) return notes;
+    const matched = new Set(noteSearchFiles);
+    return notes.filter(note => matched.has(note.fileName));
+  }, [noteSearch, noteSearchFiles, notes]);
   const externalHits = useMemo(() => externalFile ? textHits(externalFile.name, externalFile.content, noteSearch) : [], [externalFile, noteSearch]);
   const externalDirty = Boolean(externalFile && externalFile.content !== externalFile.savedContent);
   const workspaceNoteDirty = Boolean(!externalFile && active && activeNoteFile && noteContent !== savedNoteContent.current);
@@ -253,6 +260,7 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
     const raw = params?.externalTextFile;
     if (!validExternalTarget(raw)) return;
     let cancelled = false;
+    noteLoadGenerationRef.current += 1;
     setBusy(true);
     setError('');
     setNotice('');
@@ -289,9 +297,13 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
   }, [externalDirty, workspaceNoteDirty]);
 
   const refreshWorkspaceContent = useCallback(async (workspace: WorkspaceRecord | null) => {
+    const generation = ++noteLoadGenerationRef.current;
     if (!workspace) {
       setNotes([]);
       setEvidence([]);
+      setActiveNoteFile('');
+      setNoteContent('');
+      savedNoteContent.current = '';
       return;
     }
     setBusy(true);
@@ -301,24 +313,60 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
         listWorkspaceNotes(workspace),
         listWorkspaceEvidence(workspace),
       ]);
-      setNotes(nextNotes);
-      setEvidence(nextEvidence);
       const requested = params?.noteFileName;
       const chosen = (requested && nextNotes.find(note => note.fileName === requested)) || nextNotes.find(note => note.fileName === activeNoteFile) || nextNotes[0] || null;
+      const loaded = chosen ? await loadWorkspaceNote(workspace, chosen) : null;
+      if (generation !== noteLoadGenerationRef.current) return;
+      setNotes(nextNotes);
+      setEvidence(nextEvidence);
       setActiveNoteFile(chosen?.fileName || '');
-      setNoteContent(chosen?.content || '');
-      savedNoteContent.current = chosen?.content || '';
+      setNoteContent(loaded?.content || '');
+      savedNoteContent.current = loaded?.content || '';
       setNoteSaving('idle');
       setDownloadDestinationState(getDownloadDestination());
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Falha ao abrir o workspace.');
+      if (generation === noteLoadGenerationRef.current) {
+        setError(cause instanceof Error ? cause.message : 'Falha ao abrir o workspace.');
+      }
     } finally {
-      setBusy(false);
+      if (generation === noteLoadGenerationRef.current) setBusy(false);
     }
   }, [activeNoteFile, params?.noteFileName]);
 
   useEffect(() => { void refreshWorkspaceContent(active); }, [active?.id]);
   useEffect(() => { setNoteHitIndex(0); setExternalHitIndex(0); }, [noteSearch]);
+
+  useEffect(() => {
+    if (externalFile || !active || !noteSearch.trim()) {
+      setNoteSearchFiles([]);
+      setNoteHits([]);
+      setNoteSearchBusy(false);
+      return;
+    }
+    let cancelled = false;
+    setNoteSearchFiles([]);
+    setNoteHits([]);
+    const timer = window.setTimeout(() => {
+      setNoteSearchBusy(true);
+      void searchWorkspaceNotes(active, notes, noteSearch, {
+        limit: MAX_VISIBLE_SEARCH_HITS,
+        cancelled: () => cancelled,
+        activeDocument: activeNoteFile ? { fileName: activeNoteFile, content: noteContent } : null,
+      }).then(result => {
+        if (cancelled) return;
+        setNoteSearchFiles(result.fileNames);
+        setNoteHits(result.hits);
+      }).catch(cause => {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : 'Falha ao pesquisar Notes.');
+      }).finally(() => {
+        if (!cancelled) setNoteSearchBusy(false);
+      });
+    }, 180);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [active?.id, activeNoteFile, externalFile, noteContent, noteSearch, notes]);
 
   const persistDirtyWorkspaceNote = useCallback(async () => {
     if (externalFile || !active || !activeNoteFile || noteContent === savedNoteContent.current) return true;
@@ -327,7 +375,8 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
     try {
       const saved = await saveWorkspaceNote(active, { fileName: activeNoteFile, content: noteContent });
       savedNoteContent.current = saved.content;
-      setNotes(current => current.map(note => note.fileName === saved.fileName ? saved : note));
+      const meta = noteMetadata(saved);
+      setNotes(current => current.map(note => note.fileName === saved.fileName ? meta : note));
       setNoteSaving('saved');
       return true;
     } catch (cause) {
@@ -346,16 +395,25 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Falha ao ativar o workspace.'); }
   }, [persistDirtyWorkspaceNote]);
 
-  const selectNote = useCallback(async (note: WorkflowNote) => {
+  const selectNote = useCallback(async (note: WorkflowNoteMeta) => {
     if (note.fileName === activeNoteFile && !externalFile) return;
+    if (!active) return;
     if (externalDirty && !window.confirm(`Descartar alterações não salvas de “${externalFile?.name}”?`)) return;
     if (!(await persistDirtyWorkspaceNote())) return;
-    setExternalFile(null);
-    setActiveNoteFile(note.fileName);
-    setNoteContent(note.content);
-    savedNoteContent.current = note.content;
-    setNoteSaving('idle');
-  }, [activeNoteFile, externalDirty, externalFile, persistDirtyWorkspaceNote]);
+    const generation = ++noteLoadGenerationRef.current;
+    setError('');
+    try {
+      const loaded = await loadWorkspaceNote(active, note);
+      if (generation !== noteLoadGenerationRef.current) return;
+      setExternalFile(null);
+      setActiveNoteFile(loaded.fileName);
+      setNoteContent(loaded.content);
+      savedNoteContent.current = loaded.content;
+      setNoteSaving('idle');
+    } catch (cause) {
+      if (generation === noteLoadGenerationRef.current) setError(cause instanceof Error ? cause.message : 'Falha ao carregar a nota.');
+    }
+  }, [active, activeNoteFile, externalDirty, externalFile, persistDirtyWorkspaceNote]);
 
   const saveActiveNote = useCallback(async () => {
     if (externalFile) {
@@ -424,34 +482,49 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
     setBusy(true); setError(''); setNotice('');
     try {
       const note = await createWorkspaceNote(active);
-      setNotes(current => [note, ...current]);
-      await selectNote(note);
+      noteLoadGenerationRef.current += 1;
+      const meta = noteMetadata(note);
+      setNotes(current => [meta, ...current.filter(item => item.fileName !== meta.fileName)]);
+      setExternalFile(null);
+      setActiveNoteFile(note.fileName);
+      setNoteContent(note.content);
+      savedNoteContent.current = note.content;
+      setNoteSaving('idle');
       setTab('notes');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Falha ao criar nota.');
     } finally { setBusy(false); }
-  }, [active, busy, persistDirtyWorkspaceNote, selectNote]);
+  }, [active, busy, persistDirtyWorkspaceNote]);
 
   const jumpToHit = useCallback(async (index: number) => {
-    if (!noteHits.length) return;
+    if (!noteHits.length || !active) return;
     const normalized = (index + noteHits.length) % noteHits.length;
     const hit = noteHits[normalized];
     const note = notes.find(item => item.fileName === hit.fileName);
     if (!note) return;
-    if (note.fileName !== activeNoteFile && !(await persistDirtyWorkspaceNote())) return;
-    setNoteHitIndex(normalized);
-    setExternalFile(null);
-    setActiveNoteFile(note.fileName);
     if (note.fileName !== activeNoteFile) {
-      setNoteContent(note.content);
-      savedNoteContent.current = note.content;
+      if (!(await persistDirtyWorkspaceNote())) return;
+      const generation = ++noteLoadGenerationRef.current;
+      try {
+        const loaded = await loadWorkspaceNote(active, note);
+        if (generation !== noteLoadGenerationRef.current) return;
+        setExternalFile(null);
+        setActiveNoteFile(loaded.fileName);
+        setNoteContent(loaded.content);
+        savedNoteContent.current = loaded.content;
+        setNoteSaving('idle');
+      } catch (cause) {
+        if (generation === noteLoadGenerationRef.current) setError(cause instanceof Error ? cause.message : 'Falha ao carregar resultado da pesquisa.');
+        return;
+      }
     }
+    setNoteHitIndex(normalized);
     setPreviewMarkdown(false);
     window.requestAnimationFrame(() => {
       noteEditorRef.current?.focus();
       noteEditorRef.current?.setSelectionRange(hit.start, hit.end);
     });
-  }, [activeNoteFile, noteHits, notes, persistDirtyWorkspaceNote]);
+  }, [active, activeNoteFile, noteHits, notes, persistDirtyWorkspaceNote]);
 
   const jumpExternalHit = useCallback((index: number) => {
     if (!externalHits.length) return;
@@ -688,12 +761,11 @@ export default function WorkflowWorkspace({ windowId }: { windowId: string }) {
     return <div className="workflow-notes ww-notes">
       <aside>
         <div className="ww-note-tools"><input ref={noteSearchRef} value={noteSearch} onChange={event => setNoteSearch(event.target.value)} placeholder="Pesquisar título e conteúdo…" /><button disabled={active.status === 'archived'} onClick={() => void addNote()}>＋</button></div>
-        <div className="ww-search-status"><span>{noteSearch ? `${filteredNotes.length} nota(s) · ${noteHits.length}${noteHits.length >= MAX_VISIBLE_SEARCH_HITS ? '+' : ''} ocorrência(s)` : 'Pesquisa em título e conteúdo carregado'}</span><div><button disabled={!noteHits.length} onClick={() => void jumpToHit(noteHitIndex - 1)}>↑</button><button disabled={!noteHits.length} onClick={() => void jumpToHit(noteHitIndex + 1)}>↓</button></div></div>
-        <div className="ww-search-limit">Resultados instantâneos no conteúdo real carregado. Saltos limitados a {MAX_VISIBLE_SEARCH_HITS} ocorrências por busca; índice global continua limitado a {MAX_NOTE_INDEX_CONTENT_CHARS} caracteres por nota.</div>
+        <div className="ww-search-status"><span>{noteSearch ? noteSearchBusy ? 'Pesquisando conteúdo sob demanda…' : `${filteredNotes.length} nota(s) · ${noteHits.length}${noteHits.length >= MAX_VISIBLE_SEARCH_HITS ? '+' : ''} ocorrência(s)` : 'Metadata carregada · conteúdo somente da nota ativa'}</span><div><button disabled={!noteHits.length} onClick={() => void jumpToHit(noteHitIndex - 1)}>↑</button><button disabled={!noteHits.length} onClick={() => void jumpToHit(noteHitIndex + 1)}>↓</button></div></div>
+        <div className="ww-search-limit">Pesquisa de conteúdo lê uma nota por vez e descarta o documento após extrair os resultados. Saltos limitados a {MAX_VISIBLE_SEARCH_HITS} ocorrências por busca; índice global continua limitado a {MAX_NOTE_INDEX_CONTENT_CHARS} caracteres por nota.</div>
         {filteredNotes.map(note => {
-          const first = textHits(note.fileName, note.content, noteSearch, 1)[0];
-          const snippet = first?.snippet || note.content.slice(0, 140).replace(/\s+/g, ' ');
-          return <button key={note.fileName} className={note.fileName === activeNoteFile ? 'active' : ''} onClick={() => void selectNote(note)}><strong><HighlightedText value={note.title} query={noteSearch} /></strong><small>{new Date(note.modified).toLocaleString()}</small>{noteSearch && <em><HighlightedText value={snippet} query={noteSearch} /></em>}</button>;
+          const first = noteSearch ? noteHits.find(hit => hit.fileName === note.fileName) : null;
+          return <button key={note.fileName} className={note.fileName === activeNoteFile ? 'active' : ''} onClick={() => void selectNote(note)}><strong><HighlightedText value={note.title} query={noteSearch} /></strong><small>{new Date(note.modified).toLocaleString()} · {note.size} bytes</small>{noteSearch && first && <em><HighlightedText value={first.snippet} query={noteSearch} /></em>}</button>;
         })}
       </aside>
       <section className="ww-note-editor">{activeNote ? <><div className="ww-note-head"><strong>{activeNote.title}.md</strong><span>{noteSaving === 'saving' ? 'Salvando…' : noteSaving === 'saved' ? 'Salvo' : noteSaving === 'error' ? 'Falha ao salvar' : noteContent !== savedNoteContent.current ? 'Modificado · autosave da nota' : 'Salvo'}</span><button onClick={() => setPreviewMarkdown(value => !value)}>{previewMarkdown ? 'Editar' : 'Preview'}</button></div>{previewMarkdown ? <MarkdownPreview value={noteContent} /> : <textarea ref={noteEditorRef} disabled={active.status === 'archived'} value={noteContent} onChange={event => setNoteContent(event.target.value)} spellCheck={false} aria-label="Nota Markdown" />}</> : <div className="ww-empty-small">Crie uma nota Markdown. Ctrl+N cria, Ctrl+S salva e Ctrl+F pesquisa.</div>}</section>
