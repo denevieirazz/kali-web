@@ -21,6 +21,8 @@ export default defineConfig({
     timezoneId: 'America/Sao_Paulo',
     colorScheme: 'dark',
     reducedMotion: 'reduce',
+    actionTimeout: 12_000,
+    navigationTimeout: 20_000,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
