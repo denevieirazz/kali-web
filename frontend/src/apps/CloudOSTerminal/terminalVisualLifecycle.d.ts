@@ -7,4 +7,11 @@ export class TerminalFrameScheduler {
   schedule(): void;
   dispose(): void;
 }
+export function disposeTerminalAfterViewportSettles(
+  terminal: { dispose(): void } | null | undefined,
+  options?: {
+    scheduleTask?: (cb: () => void) => unknown;
+    requestFrame?: (cb: FrameRequestCallback) => unknown;
+  },
+): void;
 export function waitForTerminalGeometry(host: HTMLElement, options?: { requestFrame?: (cb: FrameRequestCallback) => number; maxFrames?: number; cancelled?: () => boolean }): Promise<boolean>;
