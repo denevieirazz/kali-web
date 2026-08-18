@@ -6,6 +6,13 @@ import { buildWslCdCommand } from '../../core/workflowCore.js';
 import { getStoredToken, resolveWebSocketUrl } from '../../services/apiClient';
 import './CloudOSTerminal.transport.css';
 import {
+  createTerminalTransport,
+  EMULATOR_MODE,
+  LEGACY_MODE,
+  WSL_CORE_MODE,
+  type TerminalTransportStatus,
+} from './terminalSessionTransport.js';
+import {
   TerminalFrameScheduler,
   disposeTerminalAfterViewportSettles,
   hasUsableTerminalGeometry,
@@ -15,7 +22,7 @@ import {
 
 export type TerminalPaneStatus = TerminalTransportStatus;
 
-const INITIAL_STATUS: TerminalPaneStatus = { state: 'connecting', label: 'Preparando sessão…', mode: null };
+const INITIAL_STATUS: TerminalPaneStatus = { state: 'connecting', label: 'Preparando sessão…' };
 
 function stateText(state: TerminalPaneStatus['state']) {
   switch (state) {
@@ -137,7 +144,7 @@ export function TerminalSession({
       if (disposed) return;
       const message = sanitizeTerminalLifecycleError(error);
       setVisualError(message);
-      publishStatus({ state: 'failed', label, mode: null });
+      publishStatus({ state: 'failed', label });
     };
 
     const initialise = async () => {
@@ -181,11 +188,11 @@ export function TerminalSession({
       const token = getStoredToken();
       if (!token) {
         terminal.writeln('\x1b[1;31m[Faça login no CloudOS para abrir um terminal real.]\x1b[0m');
-        publishStatus({ state: 'failed', label: 'Autenticação necessária', mode: null });
+        publishStatus({ state: 'failed', label: 'Autenticação necessária' });
         return;
       }
 
-      publishStatus({ state: 'connecting', label: 'Conectando ao Terminal…', mode: null });
+      publishStatus({ state: 'connecting', label: 'Conectando ao Terminal…' });
       socket = new WebSocket(resolveWebSocketUrl('/ws/terminal'), [token]);
       transport = createTerminalTransport({
         socket,
