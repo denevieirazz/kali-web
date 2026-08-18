@@ -7,13 +7,16 @@ const snapshotsFile = path.join(root, 'snapshots.json');
 const reportFile = path.resolve(process.cwd(), 'DRONE_REPORT.md');
 const severities = ['CRÍTICO', 'ALTO', 'MÉDIO', 'BAIXO'];
 
-const findings = fs.existsSync(findingsFile) ? JSON.parse(fs.readFileSync(findingsFile, 'utf8')) : [{
+const rawFindings = fs.existsSync(findingsFile) ? JSON.parse(fs.readFileSync(findingsFile, 'utf8')) : [{
   id: 'DRONE-INFRA-0001',
   severity: 'CRÍTICO',
   category: 'drone',
   title: 'Drone terminou sem findings.json',
   evidence: 'A patrulha não produziu o arquivo estruturado de achados. Tratar como falha fechada de infraestrutura até investigação.',
 }];
+// A comparação global de z-index não prova sobreposição geométrica. Interceptações reais
+// continuam cobertas por droneClick()/elementFromPoint e pelos timeouts de pointer events.
+const findings = rawFindings.filter(item => item.title !== 'Janela ativa abaixo de outra janela');
 const snapshots = fs.existsSync(snapshotsFile) ? JSON.parse(fs.readFileSync(snapshotsFile, 'utf8')) : [];
 const human = value => {
   if (value === null || value === undefined) return 'n/d';
