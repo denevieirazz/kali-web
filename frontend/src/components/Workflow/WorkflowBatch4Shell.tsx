@@ -3,7 +3,6 @@ import type { WorkflowProvider } from '../../core/workflowCore.js';
 import { captureClipboardToActiveEvidence } from '../../services/workflowQuickEvidence';
 import { getFileMark, listFileMarks, setFileMark, type WorkflowFileMark } from '../../services/workflowFileMarks';
 import { launchWorkflowApp, openFilesAt, openWorkspace } from '../../services/workflowLaunch';
-import { downloadWorkspaceZip } from '../../services/workflowWorkspaceZip';
 import {
   getActiveWorkspace,
   listIndexedFiles,
@@ -68,6 +67,11 @@ function requestWorkspaceTab(label: 'Visão geral' | 'Notes' | 'Evidence') {
 function workspaceTabIsActive(label: string) {
   return Array.from(document.querySelectorAll<HTMLButtonElement>('.workflow-workspace .ww-tabs button.active'))
     .some(button => button.textContent?.trim() === label);
+}
+
+function displayedWorkspaceId() {
+  const root = document.querySelector<HTMLElement>('.window.active .workflow-workspace[data-workspace-id]');
+  return root?.dataset.workspaceId?.trim() || '';
 }
 
 function pathStartsWith(path: string[], prefix: string[]) {
@@ -167,10 +171,10 @@ export default function WorkflowBatch4Shell() {
     requestWorkspaceTab(notes ? 'Notes' : 'Visão geral');
   }, []);
 
-  const captureEvidence = useCallback(async () => {
+  const captureEvidence = useCallback(async (workspaceId?: string) => {
     setMessage('');
     try {
-      const result = await captureClipboardToActiveEvidence();
+      const result = await captureClipboardToActiveEvidence(workspaceId);
       setMessage(`Evidence: ${result.name} salvo em “${result.workspace.name}”.`);
       setRevision(value => value + 1);
     } catch (cause) {
@@ -198,7 +202,18 @@ export default function WorkflowBatch4Shell() {
       }
 
       if (event.ctrlKey && event.shiftKey && key === 'e') {
-        event.preventDefault(); event.stopPropagation(); void captureEvidence(); return;
+        event.preventDefault(); event.stopPropagation();
+        if (focused?.appId === 'workflow-workspace') {
+          const workspaceId = displayedWorkspaceId();
+          if (!workspaceId) {
+            setMessage('A janela Workspace ativa não possui um projeto selecionado para Evidence.');
+            return;
+          }
+          void captureEvidence(workspaceId);
+          return;
+        }
+        void captureEvidence();
+        return;
       }
       if (event.ctrlKey && event.altKey && key === 'w') {
         if (focused && !focused.isSystem && focused.isClosable) {
@@ -219,24 +234,6 @@ export default function WorkflowBatch4Shell() {
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [captureEvidence, toggleApp, toggleWorkspace]);
-
-  useEffect(() => {
-    const onExportClick = (event: MouseEvent) => {
-      const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('button') : null;
-      if (!button || !button.closest('.workflow-workspace') || button.textContent?.trim() !== 'Exportar') return;
-      const workspace = getActiveWorkspace();
-      if (!workspace) return;
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      setMessage('');
-      void downloadWorkspaceZip(workspace)
-        .then(result => setMessage(`Workspace ZIP: ${result.entries} entrada(s), ${result.bytes} bytes · Notes + Evidence + Metadata.`))
-        .catch(cause => setMessage(cause instanceof Error ? cause.message : 'Falha ao exportar Workspace ZIP.'));
-    };
-    document.addEventListener('click', onExportClick, true);
-    return () => document.removeEventListener('click', onExportClick, true);
-  }, []);
 
   const updateMark = useCallback((kind: 'favorite' | 'pinned') => {
     if (!filesSelection) return;
