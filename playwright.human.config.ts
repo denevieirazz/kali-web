@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests/playwright',
-  testMatch: /workflow-human-simulation\.spec\.ts/,
+  testMatch: /workflow-human-simulation-v2\.spec\.ts/,
   outputDir: './test-results/playwright-human',
   forbidOnly: Boolean(process.env.CI),
   fullyParallel: false,
