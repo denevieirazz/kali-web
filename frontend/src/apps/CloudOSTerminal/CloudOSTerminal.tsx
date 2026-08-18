@@ -40,6 +40,16 @@ function tabDefaultTitle(tab: TerminalTabState) {
   return tab.profile === 'wsl' ? (tab.distribution || 'WSL') : 'PowerShell';
 }
 
+function readPersistedTerminalWorkspace(enabled: boolean) {
+  if (!enabled) return null;
+  try {
+    return JSON.parse(localStorage.getItem(TERMINAL_WORKSPACE_STORAGE_KEY) ?? 'null');
+  } catch {
+    localStorage.removeItem(TERMINAL_WORKSPACE_STORAGE_KEY);
+    return null;
+  }
+}
+
 export default function CloudOSTerminal({ windowId }: { windowId?: string }) {
   const [launchParams] = useState(() => {
     const win = windowId ? useWindowManager.getState().getWindow(windowId) : undefined;
@@ -64,6 +74,7 @@ export default function CloudOSTerminal({ windowId }: { windowId?: string }) {
 
   useEffect(() => {
     let cancelled = false;
+    const restored = readPersistedTerminalWorkspace(!launchParams.explicit);
 
     void apiClient<WslInfo>('/api/wsl/distributions')
       .then(info => {
@@ -73,15 +84,6 @@ export default function CloudOSTerminal({ windowId }: { windowId?: string }) {
         const distribution = requestedExists ? launchParams.distribution : preferredDistribution(info);
         const profile: TerminalProfile = launchParams.profile ?? (info.available && distribution ? 'wsl' : 'powershell');
         const fallbackTab = createTerminalTab(profile, distribution, undefined, launchParams.initialDirectory);
-
-        let restored: unknown = null;
-        if (!launchParams.explicit) {
-          try {
-            restored = JSON.parse(localStorage.getItem(TERMINAL_WORKSPACE_STORAGE_KEY) ?? 'null');
-          } catch {
-            localStorage.removeItem(TERMINAL_WORKSPACE_STORAGE_KEY);
-          }
-        }
         setWorkspace(normalizeTerminalWorkspace(restored, fallbackTab));
         setProfileMessage(info.available ? `${info.distributions.length} distribuição(ões) WSL disponível(is)` : 'WSL indisponível · usando PowerShell');
       })
@@ -89,7 +91,7 @@ export default function CloudOSTerminal({ windowId }: { windowId?: string }) {
         if (cancelled) return;
         const fallbackTab = createTerminalTab('powershell');
         setWslInfo({ available: false, default: null, preferred: null, distributions: [] });
-        setWorkspace(normalizeTerminalWorkspace(null, fallbackTab));
+        setWorkspace(normalizeTerminalWorkspace(restored, fallbackTab));
         setProfileMessage(error instanceof Error ? error.message : 'WSL indisponível · PowerShell pronto');
       });
 
