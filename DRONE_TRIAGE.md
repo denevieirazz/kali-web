@@ -17,6 +17,7 @@ Autoridade: resultados reproduzidos pelo Workflow Drone. Nenhum achado baixo/mé
 | `Elemento coberto: Exportar Workspace` | ALTO | BUG DO PRODUTO | Sidecar Batch4 não modal deixou de ficar acima das janelas; regressão unitária + Drone. |
 | modal interceptando `Novo workspace` na resiliência | harness | BUG DO TESTE | Harness detecta modal já aberto e reutiliza create modal ou fecha modal incompatível. |
 | Evidence marker ausente no texto da lista | harness | BUG DO TESTE | UI lista metadata, não conteúdo; harness valida identidade/contagem persistida. |
+| Export aguardado sem garantir dispatch do clique em A | harness | BUG DO TESTE | O clique de Export agora é aguardado antes da troca A→B; a troca testa a closure assíncrona sem corrida entre ações Playwright. |
 | Files acionado através de janela Files já ativa | harness | BUG DO TESTE | Human Simulation reutiliza Files ativo; caso contrário foca Workspace antes de acionar Files. |
 
 # ROOT CAUSE
@@ -87,9 +88,10 @@ A suíte de resiliência foi corrigida sem alteração de produto para:
 - detectar modal `.ww-modal:visible` antes de clicar em `Novo workspace`;
 - reutilizar o modal de criação já aberto ou fechar um modal incompatível antes de continuar;
 - validar Evidence pela entrada persistida (nome/tamanho), pois a lista não renderiza o conteúdo do arquivo;
+- garantir que o clique em `Exportar` seja efetivamente despachado no Workspace A antes de trocar a seleção para B; o handler assíncrono captura A e o teste então valida o ZIP correspondente;
 - manter o restore do Terminal sincronizado pelo fim do loading.
 
-A Human Simulation foi endurecida para não clicar no Workspace através de uma janela Files ativa e para não converter o 503 WSL WebOnly esperado em falha de missão. O Drone continua sendo a autoridade de pageerror/network para ALTO.
+A Human Simulation foi endurecida no próprio fonte para não clicar no Workspace através de uma janela Files ativa: reutiliza Files quando já ativo e, caso contrário, foca Workspace antes de acionar Files. O 503 WSL WebOnly esperado também não reprova essa simulação; o Drone continua sendo a autoridade de pageerror/network para ALTO.
 
 A CI deixou de commitar `HUMAN_SIMULATION_REPORT.md` automaticamente depois dos testes; resultados são artifact + job summary. Isso impede que o próprio teste altere o HEAD que acabou de validar.
 
