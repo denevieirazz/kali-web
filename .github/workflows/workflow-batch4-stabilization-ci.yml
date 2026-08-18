@@ -1,0 +1,71 @@
+name: CloudOS Workflow Batch 4 Stabilization CI
+
+on:
+  push:
+    branches:
+      - stabilization/cloudos-workflow-batch-4
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudos-workflow-batch4-stabilization-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-stabilization:
+    name: Linux stabilization regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout stabilization
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+      - name: Verify stabilization scope
+        run: node scripts/workflow/test-batch4-stabilization-scope.mjs
+      - name: Install dependencies
+        run: npm ci
+      - name: Frontend tests
+        run: npm run test:frontend
+      - name: Backend regression
+        run: npm test
+      - name: E2E regression
+        run: npm run test:e2e
+      - name: Lint
+        run: npm run lint
+      - name: Production build
+        run: npm run build
+
+  windows-stabilization:
+    name: Windows stabilization regression
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout stabilization
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+      - name: Verify stabilization scope
+        run: node scripts/workflow/test-batch4-stabilization-scope.mjs
+      - name: Install dependencies
+        run: npm ci
+      - name: Frontend tests
+        run: npm run test:frontend
+      - name: Backend regression
+        run: npm test
+      - name: E2E regression
+        run: npm run test:e2e
+      - name: Lint
+        run: npm run lint
+      - name: Production build
+        run: npm run build
