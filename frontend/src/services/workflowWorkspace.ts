@@ -423,7 +423,7 @@ function indexNoteMetadata(notes: WorkflowNoteMeta[]) {
       fileName: note.fileName,
       title: note.title,
       searchText: current?.searchText || '',
-      updatedAt: new Date(note.modified || Date.now()).toISOString(),
+      updatedAt: note.modified > 0 ? new Date(note.modified).toISOString() : (current?.updatedAt || new Date(0).toISOString()),
     });
   }
   const next = [...byKey.values()]
