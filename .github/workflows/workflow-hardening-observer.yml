@@ -15,12 +15,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
-      EXPECTED_SHA: e49ff909cf2fef48e0d40b3bb8baa35145b9e53c
+      EXPECTED_SHA: e0940668672b414c2b8b1de80c8d4d9e402a9e11
     steps:
       - name: Checkout exact stabilization HEAD
         uses: actions/checkout@v4
         with:
-          ref: e49ff909cf2fef48e0d40b3bb8baa35145b9e53c
+          ref: e0940668672b414c2b8b1de80c8d4d9e402a9e11
           fetch-depth: 0
       - name: Assert exact HEAD
         shell: bash
@@ -54,12 +54,12 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 35
     env:
-      EXPECTED_SHA: e49ff909cf2fef48e0d40b3bb8baa35145b9e53c
+      EXPECTED_SHA: e0940668672b414c2b8b1de80c8d4d9e402a9e11
     steps:
       - name: Checkout exact stabilization HEAD
         uses: actions/checkout@v4
         with:
-          ref: e49ff909cf2fef48e0d40b3bb8baa35145b9e53c
+          ref: e0940668672b414c2b8b1de80c8d4d9e402a9e11
           fetch-depth: 0
       - name: Assert exact HEAD
         shell: pwsh
@@ -93,12 +93,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
-      EXPECTED_SHA: e49ff909cf2fef48e0d40b3bb8baa35145b9e53c
+      EXPECTED_SHA: e0940668672b414c2b8b1de80c8d4d9e402a9e11
     steps:
       - name: Checkout exact stabilization HEAD
         uses: actions/checkout@v4
         with:
-          ref: e49ff909cf2fef48e0d40b3bb8baa35145b9e53c
+          ref: e0940668672b414c2b8b1de80c8d4d9e402a9e11
           fetch-depth: 0
       - name: Assert exact HEAD
         shell: bash
