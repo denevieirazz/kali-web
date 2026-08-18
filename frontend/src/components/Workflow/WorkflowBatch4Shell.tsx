@@ -7,10 +7,12 @@ import { downloadWorkspaceZip } from '../../services/workflowWorkspaceZip';
 import {
   getActiveWorkspace,
   listIndexedFiles,
+  listWorkspaces,
   listWorkspaceEvidence,
   listWorkspaceNotes,
   type IndexedFile,
   type WorkflowNote,
+  type WorkspaceRecord,
 } from '../../services/workflowWorkspace';
 import { forgetWorkflowWindow } from '../../services/workflowWindow';
 import { useWindowManager } from '../../stores/windowManager';
@@ -68,6 +70,23 @@ function requestWorkspaceTab(label: 'Visão geral' | 'Notes' | 'Evidence') {
 function workspaceTabIsActive(label: string) {
   return Array.from(document.querySelectorAll<HTMLButtonElement>('.workflow-workspace .ww-tabs button.active'))
     .some(button => button.textContent?.trim() === label);
+}
+
+function providerMatchesLabel(workspace: WorkspaceRecord, label: string) {
+  if (workspace.provider === 'windows') return label.includes('Windows');
+  if (workspace.provider === 'wsl') return label.includes('Linux');
+  return label.includes('OPFS');
+}
+
+function displayedWorkspace(): WorkspaceRecord | null {
+  const root = document.querySelector<HTMLElement>('.workflow-workspace');
+  const selected = root?.querySelector<HTMLButtonElement>('.ww-workspace-list button.active');
+  if (!selected) return null;
+  const rawName = selected.querySelector('span')?.textContent?.trim() || '';
+  const name = rawName.replace(/\s+·\s+Arquivado$/, '').trim();
+  const label = Array.from(selected.querySelectorAll('small')).map(item => item.textContent || '').join(' ');
+  const matches = listWorkspaces().filter(workspace => workspace.name === name && providerMatchesLabel(workspace, label));
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function pathStartsWith(path: string[], prefix: string[]) {
@@ -132,7 +151,7 @@ export default function WorkflowBatch4Shell() {
       if (!cancelled) setWorkspaceContext({ notes: [], evidence: [], files: [] });
     });
     return () => { cancelled = true; };
-  }, [activeWindow?.appId, activeWorkspace?.id, revision]);
+  }, [activeWindow?.appId, activeWorkspace?.id, activeWorkspace?.lastActivityAt]);
 
   const toggleApp = useCallback((appId: string, opener: () => string | null | undefined) => {
     const manager = useWindowManager.getState();
@@ -170,7 +189,9 @@ export default function WorkflowBatch4Shell() {
   const captureEvidence = useCallback(async () => {
     setMessage('');
     try {
-      const result = await captureClipboardToActiveEvidence();
+      const workspace = displayedWorkspace();
+      if (!workspace) throw new Error('Não foi possível determinar com segurança o Workspace exibido. Ative um Workspace único antes de capturar Evidence.');
+      const result = await captureClipboardToActiveEvidence(workspace);
       setMessage(`Evidence: ${result.name} salvo em “${result.workspace.name}”.`);
       setRevision(value => value + 1);
     } catch (cause) {
@@ -198,6 +219,7 @@ export default function WorkflowBatch4Shell() {
       }
 
       if (event.ctrlKey && event.shiftKey && key === 'e') {
+        if (focused?.appId !== 'workflow-workspace') return;
         event.preventDefault(); event.stopPropagation(); void captureEvidence(); return;
       }
       if (event.ctrlKey && event.altKey && key === 'w') {
@@ -224,12 +246,15 @@ export default function WorkflowBatch4Shell() {
     const onExportClick = (event: MouseEvent) => {
       const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('button') : null;
       if (!button || !button.closest('.workflow-workspace') || button.textContent?.trim() !== 'Exportar') return;
-      const workspace = getActiveWorkspace();
-      if (!workspace) return;
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
+      const workspace = displayedWorkspace();
       setMessage('');
+      if (!workspace) {
+        setMessage('Exportação bloqueada: não foi possível determinar com segurança o Workspace exibido.');
+        return;
+      }
       void downloadWorkspaceZip(workspace)
         .then(result => setMessage(`Workspace ZIP: ${result.entries} entrada(s), ${result.bytes} bytes · Notes + Evidence + Metadata.`))
         .catch(cause => setMessage(cause instanceof Error ? cause.message : 'Falha ao exportar Workspace ZIP.'));
