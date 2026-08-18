@@ -4,89 +4,98 @@
 
 Branch: `stabilization/cloudos-workflow-batch-4`
 
-Base inicial: `DRONE_REPORT.md` do run válido #10, commit auditado `2225b42c1e0e9df9a0e0411ec4bcf901098680f8`.
-Validação após correções: Drone #23, commit auditado `6834fbace3a8a59bf0f551a7dff0eb1917400f7a`.
+Autoridade: resultados reproduzidos pelo Workflow Drone. Nenhum achado baixo/médio foi usado para expandir escopo de produto.
 
-## Resumo
+## Resumo dos defeitos reproduzidos
 
-| Achado | Severidade original | Classificação | Decisão/estado |
+| Achado | Severidade original | Classificação | Estado |
 |---|---|---|---|
-| `503 GET /api/wsl/distributions` | ALTO | BUG DO AMBIENTE/EXPECTATIVA DO DRONE | Runner WebOnly: reclassificado como BAIXO/environment; produto não alterado. |
-| `console.error` do mesmo 503 | MÉDIO | BUG DO AMBIENTE/duplicata | Não duplicar o 5xx já capturado por status/URL. |
-| `Cannot read properties of undefined (reading 'dimensions')` | ALTO | BUG DO PRODUTO | Corrigido no teardown do Terminal; Drone #23 não reproduziu. |
-| restore `esperado=3 recebido=0` | ALTO | BUG DO TESTE | Sincronização do Drone corrigida; aguarda fim do loading e contagem esperada. |
+| `503 GET /api/wsl/distributions` | ALTO | BUG DO AMBIENTE/EXPECTATIVA DO DRONE | Reclassificado BAIXO/environment; runner usa `CLOUDOS_NATIVE_HOST=0`; produto não alterado. |
+| `console.error` do mesmo 503 | MÉDIO | BUG DO AMBIENTE/duplicata | Não duplicar o 5xx já contextualizado. |
+| xterm `Cannot read properties of undefined (reading 'dimensions')` | ALTO | BUG DO PRODUTO | Corrigido por geometria estável de panes + teardown visual drenado; protegido por regressão. |
+| Terminal restore `esperado=3 recebido=0` | ALTO | BUG DO TESTE | Drone agora aguarda fim do loading e contagem restaurada. |
+| `Elemento coberto: Exportar Workspace` | ALTO | BUG DO PRODUTO | Sidecar Batch4 não modal deixou de ficar acima das janelas; regressão unitária + Drone. |
+| modal interceptando `Novo workspace` na resiliência | harness | BUG DO TESTE | Harness detecta modal já aberto e reutiliza create modal ou fecha modal incompatível. |
+| Evidence marker ausente no texto da lista | harness | BUG DO TESTE | UI lista metadata, não conteúdo; harness valida identidade/contagem persistida. |
+| Files acionado através de janela Files já ativa | harness | BUG DO TESTE | Human Simulation reutiliza Files ativo; caso contrário foca Workspace antes de acionar Files. |
 
 # ROOT CAUSE
 
-## WSL probe 503
+## 1. WSL probe 503
 
-### Caminho
+O fixture Playwright inicia o backend sem Native Host/WSL (`CLOUDOS_NATIVE_HOST=0`). O Terminal consulta `/api/wsl/distributions` para descobrir perfis e o endpoint pode responder 503 nesse ambiente deliberadamente WebOnly. O Drone inicialmente tratava qualquer 5xx como ALTO sem considerar a capacidade desativada pelo próprio fixture.
 
-O fixture Playwright inicia o backend com `CLOUDOS_NATIVE_HOST=0` e sem lease/token de Host. O Terminal consulta `/api/wsl/distributions` durante o bootstrap para descobrir perfis. Nesse ambiente deliberadamente WebOnly, o endpoint pode responder 503.
+**Classificação:** BUG DO AMBIENTE/EXPECTATIVA DO DRONE. Nenhum código de WSL/Core/backend foi alterado para satisfazer o runner.
 
-### Causa raiz
-
-O Drone tratava qualquer HTTP 5xx como defeito ALTO de produto sem considerar que o próprio fixture desabilitou a capacidade nativa necessária para WSL. O `console.error` era apenas outra manifestação do mesmo 503.
-
-### Impacto
-
-Falso bloqueio do severity gate em CI Linux.
-
-### Classificação
-
-**BUG DO AMBIENTE/EXPECTATIVA DO DRONE.** O backend/WSL não foi alterado para satisfazer o runner.
-
-## xterm `dimensions` undefined
+## 2. xterm `dimensions` undefined
 
 ### Caminho de execução
 
-1. `CloudOSTerminal` mantém um `TerminalSession` por aba para preservar contexto.
-2. `TerminalSession` executa `terminal.open(host)` e o xterm cria seu `Viewport`/renderer.
-3. O xterm 5.3 agenda trabalho interno assíncrono do viewport após `open()` (task e animation frame de refresh/sincronização).
-4. No fluxo rápido de tabs (`Ctrl+T`, alternância, `Ctrl+W`), o cleanup React era executado antes de todo esse trabalho interno já enfileirado terminar.
-5. O cleanup chamava `terminal.dispose()` imediatamente, destruindo o render service.
-6. Um callback interno do viewport já agendado executava depois do dispose e acessava `renderService.dimensions`, produzindo `TypeError: Cannot read properties of undefined (reading 'dimensions')` em `Viewport._innerRefresh`.
+1. `CloudOSTerminal` mantém um `TerminalSession` por aba.
+2. xterm abre renderer/viewport e agenda refresh interno assíncrono.
+3. Panes inativas originalmente saíam do layout com `display:none`, levando a geometria zero enquanto callbacks internos ainda podiam estar pendentes.
+4. Ao remover rapidamente uma tab, o cleanup também destruía o renderer com `terminal.dispose()` de forma síncrona.
+5. Um callback já enfileirado podia executar durante zero-layout ou depois da destruição do render service e acessar `renderService.dimensions`.
 
-### Causa raiz
+### Prova causal
 
-**Race de teardown entre o cleanup síncrono do `TerminalSession` e callbacks assíncronos já enfileirados pelo viewport do xterm.** Não era uma falha de transporte WSL e a alteração inicial de CSS para preservar geometria, isoladamente, não resolveu o erro.
+Adiar apenas `terminal.dispose()` não foi suficiente: ao restaurar o CSS original com `display:none`, o Drone voltou a reproduzir o ALTO. A correção exigida é combinada.
 
 ### Correção
 
-O cleanup continua encerrando imediatamente scheduler CloudOS, `ResizeObserver`, subscriptions, transporte e socket. Somente o `terminal.dispose()` visual é adiado por uma task e um animation frame (`disposeTerminalAfterViewportSettles`) para que callbacks de viewport que já estavam na fila sejam drenados antes da destruição do renderer.
+- pane xterm inativa permanece dimensionada, `visibility:hidden` e `pointer-events:none`, sem `display:none`;
+- scheduler CloudOS, observer, subscriptions, transporte e socket encerram imediatamente;
+- somente o dispose visual é drenado por uma task + animation frame antes de `terminal.dispose()`.
 
-A regressão verifica explicitamente que o dispose não acontece de forma síncrona, não acontece apenas após a task, e ocorre uma única vez após task + frame. O Drone #23 executou a sequência real de tabs/fechamento e não reproduziu o pageerror.
+A regressão verifica a ordem task/frame/dispose e o Drone executa a sequência real de tabs/close/restore.
 
-### Impacto anterior
+**Classificação:** BUG DO PRODUTO CORRIGIDO.
 
-`pageerror` ALTO, quebra potencial de lifecycle visual/foco/restore e falha da Human Simulation.
+## 3. Restore contado durante loading
 
-### Estado
+`.terminal-workspace--loading` compartilha a classe raiz `.terminal-workspace`. O teste usava apenas visibilidade como sinal de restore concluído e podia contar zero tabs transitórias.
 
-**BUG DO PRODUTO CORRIGIDO E NÃO REPRODUZIDO NO DRONE #23.**
+O Drone passou a aguardar remoção de `terminal-workspace--loading` e a contagem esperada.
 
-## Restore contado durante loading
+**Classificação:** BUG DO TESTE CORRIGIDO.
 
-### Caminho
+## 4. Export Workspace coberto pelo sidecar Batch4
 
-O Drone fechava o Terminal, reabria via atalho, esperava `.terminal-workspace` ficar visível e imediatamente contava `.terminal-tab`.
+### Caminho de execução
 
-### Causa raiz
+1. `WorkflowBatch4Shell.css` dava `z-index:9800` ao `.wb4-context`.
+2. O painel tinha `pointer-events:none`, mas seus botões reativavam `pointer-events:auto`.
+3. Quando o sidecar cruzava a região da janela Workspace, um botão do sidecar podia ocupar o centro físico do botão `Exportar`.
+4. `document.elementFromPoint()` do Drone confirmou `target=button`, `blocker=button`; a captura mostrou o painel `PROJETO ATUAL` sobre os quick actions.
 
-O estado de carregamento usa a mesma classe raiz `.terminal-workspace` junto de `.terminal-workspace--loading`. Logo `toBeVisible()` podia resolver antes do restore assíncrono produzir as tabs.
+### Impacto
 
-### Correção de teste
+Uma ação real da janela ativa ficava inacessível por ponteiro. Não era apenas estética.
 
-O Drone agora espera a remoção de `terminal-workspace--loading` e, para restauração, espera a contagem esperada de tabs antes de classificar divergência.
+### Correção
 
-### Estado
+O `.wb4-context`, que é sidecar não modal, recebeu `z-index:95`, abaixo da faixa das janelas de aplicação. Seus botões continuam interativos apenas na parte não coberta por uma janela. O produto não ganhou nova capacidade.
 
-**BUG DO TESTE CORRIGIDO.**
+Foi adicionada regressão em `workflowBatch4Stabilization.test.js`, e o rerun do Drone após a correção produziu `CRÍTICO=0 / ALTO=0 / MÉDIO=0 / BAIXO=1`.
 
-# RESULTADO DO CICLO
+**Classificação:** BUG DO PRODUTO CORRIGIDO.
 
-Drone inicial válido: **0 CRÍTICOS / 3 ALTOS / 1 MÉDIO**.
+# HARDENING DO HARNESS
 
-Drone #23 após triagem + hardening: **0 CRÍTICOS / 0 ALTOS / 0 MÉDIOS / 1 BAIXO**.
+A suíte de resiliência foi corrigida sem alteração de produto para:
 
-O único BAIXO é a indisponibilidade WSL esperada no runner WebOnly e não recebe correção de produto nesta fase.
+- detectar modal `.ww-modal:visible` antes de clicar em `Novo workspace`;
+- reutilizar o modal de criação já aberto ou fechar um modal incompatível antes de continuar;
+- validar Evidence pela entrada persistida (nome/tamanho), pois a lista não renderiza o conteúdo do arquivo;
+- manter o restore do Terminal sincronizado pelo fim do loading.
+
+A Human Simulation foi endurecida para não clicar no Workspace através de uma janela Files ativa e para não converter o 503 WSL WebOnly esperado em falha de missão. O Drone continua sendo a autoridade de pageerror/network para ALTO.
+
+A CI deixou de commitar `HUMAN_SIMULATION_REPORT.md` automaticamente depois dos testes; resultados são artifact + job summary. Isso impede que o próprio teste altere o HEAD que acabou de validar.
+
+# POLÍTICA DE FECHAMENTO
+
+- `CRÍTICO` e `ALTO` de produto: corrigir e proteger por regressão.
+- BAIXO WSL em WebOnly: registrar, não corrigir.
+- pressão de escala previamente classificada como alerta: registrar, não otimizar nesta fase.
+- nenhum Browser novo, IA, WSLg, Core, RC, Productization ou Batch 5 foi aberto.
