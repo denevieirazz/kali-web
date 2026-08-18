@@ -32,6 +32,7 @@ const allowed = new Set([
   'scripts/workflow/test-batch4-stabilization-scope.mjs',
   'tests/playwright/fixtures/cloudos.fixture.ts',
   'tests/playwright/workflow-drone.spec.ts',
+  'tests/playwright/workflow-hardening-resilience.spec.ts',
   'tests/playwright/workflow-human-simulation.spec.ts',
   'tests/playwright/workflow-human-simulation-v2.spec.ts',
 ]);
