@@ -4,4 +4,4 @@ Branch temporária usada exclusivamente para disparar execuções observáveis c
 
 Nenhuma alteração de produto é executada a partir deste arquivo. Não mergear.
 
-Run solicitado: Autonomous Hardening — validar xterm lifecycle, classificação WebOnly e restore sincronizado.
+Run solicitado: Autonomous Hardening — validar drenagem de callbacks xterm antes do dispose visual.
