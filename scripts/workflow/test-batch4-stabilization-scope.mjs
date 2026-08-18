@@ -16,6 +16,8 @@ const allowed = new Set([
   'frontend/src/services/workflowQuickEvidence.ts',
   'frontend/src/services/workflowWorkspace.ts',
   'frontend/test/workflowBatch4Stabilization.test.js',
+  'playwright.human.config.ts',
+  'tests/playwright/workflow-human-simulation.spec.ts',
   'scripts/workflow/test-batch4-stabilization-scope.mjs',
 ]);
 
