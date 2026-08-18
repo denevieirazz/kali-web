@@ -4,20 +4,67 @@ import path from 'node:path';
 const root = path.resolve(process.cwd(), 'test-results/drone');
 const findingsFile = path.join(root, 'findings.json');
 const snapshotsFile = path.join(root, 'snapshots.json');
+const regressionsFile = path.join(root, 'regressions.json');
 const reportFile = path.resolve(process.cwd(), 'DRONE_REPORT.md');
 const severities = ['CRÍTICO', 'ALTO', 'MÉDIO', 'BAIXO'];
 
-const rawFindings = fs.existsSync(findingsFile) ? JSON.parse(fs.readFileSync(findingsFile, 'utf8')) : [{
-  id: 'DRONE-INFRA-0001',
+function readJson(file) {
+  if (!fs.existsSync(file)) return { exists: false, value: null, error: null };
+  try {
+    return { exists: true, value: JSON.parse(fs.readFileSync(file, 'utf8')), error: null };
+  } catch (error) {
+    return { exists: true, value: null, error: error instanceof Error ? (error.stack || error.message) : String(error) };
+  }
+}
+
+const findingsState = readJson(findingsFile);
+const regressionState = readJson(regressionsFile);
+const snapshotState = readJson(snapshotsFile);
+
+const rawFindings = Array.isArray(findingsState.value) ? findingsState.value : [{
+  id: findingsState.error ? 'DRONE-INFRA-0002' : 'DRONE-INFRA-0001',
   severity: 'CRÍTICO',
   category: 'drone',
-  title: 'Drone terminou sem findings.json',
-  evidence: 'A patrulha não produziu o arquivo estruturado de achados. Tratar como falha fechada de infraestrutura até investigação.',
+  title: findingsState.error ? 'findings.json inválido' : 'Drone terminou sem findings.json',
+  evidence: findingsState.error || 'A patrulha não produziu o arquivo estruturado de achados. Tratar como falha fechada de infraestrutura até investigação.',
 }];
+
+const regressionFindings = [];
+if (regressionState.error) {
+  regressionFindings.push({
+    id: 'DRONE-REGRESSION-0002',
+    severity: 'CRÍTICO',
+    category: 'regression',
+    title: 'Status das regressões está inválido',
+    evidence: regressionState.error,
+  });
+} else if (!regressionState.exists || !regressionState.value || typeof regressionState.value !== 'object') {
+  regressionFindings.push({
+    id: 'DRONE-REGRESSION-0003',
+    severity: 'CRÍTICO',
+    category: 'regression',
+    title: 'Status das regressões não foi gerado',
+    evidence: 'regressions.json não foi produzido. O gate permanece fail-closed porque não há prova de que frontend, backend, E2E e lint passaram.',
+  });
+} else if (regressionState.value.ok !== true) {
+  const failed = Array.isArray(regressionState.value.results)
+    ? regressionState.value.results.filter(item => item?.ok !== true)
+    : [];
+  regressionFindings.push({
+    id: 'DRONE-REGRESSION-0001',
+    severity: 'CRÍTICO',
+    category: 'regression',
+    title: 'Hardening regressions falharam',
+    evidence: failed.length
+      ? failed.map(item => `${item.label || 'unknown'}: exit=${item.status ?? 'signal'}${item.error ? ` error=${item.error}` : ''}`).join('\n')
+      : JSON.stringify(regressionState.value),
+  });
+}
+
 // A comparação global de z-index não prova sobreposição geométrica. Interceptações reais
 // continuam cobertas por droneClick()/elementFromPoint e pelos timeouts de pointer events.
-const findings = rawFindings.filter(item => item.title !== 'Janela ativa abaixo de outra janela');
-const snapshots = fs.existsSync(snapshotsFile) ? JSON.parse(fs.readFileSync(snapshotsFile, 'utf8')) : [];
+const findings = [...rawFindings, ...regressionFindings].filter(item => item.title !== 'Janela ativa abaixo de outra janela');
+const snapshots = Array.isArray(snapshotState.value) ? snapshotState.value : [];
 const human = value => {
   if (value === null || value === undefined) return 'n/d';
   if (value < 1024) return `${value} B`;
@@ -27,12 +74,14 @@ const human = value => {
 const esc = value => String(value).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
 
 const counts = Object.fromEntries(severities.map(severity => [severity, findings.filter(item => item.severity === severity).length]));
+const regressionLabel = regressionState.value?.ok === true ? 'PASSOU' : 'FALHOU';
 const lines = [
   '# DRONE_REPORT.md', '',
   '## CloudOS Workflow Drone', '',
   `**Branch:** \`stabilization/cloudos-workflow-batch-4\`  `,
   `**Commit:** \`${process.env.GITHUB_SHA || 'local'}\`  `,
   `**Execução:** ${new Date().toISOString()}  `,
+  `**Regressões:** ${regressionLabel}  `,
   `**Achados:** ${findings.length} (${counts['CRÍTICO']} crítico, ${counts['ALTO']} alto, ${counts['MÉDIO']} médio, ${counts['BAIXO']} baixo)`, '',
   '> Drone de auditoria: caça defeitos de runtime, rede, UX, memória, Terminal e Workflow. Não implementa nem valida features novas.', '',
 ];
@@ -64,6 +113,7 @@ else lines.push('**PASSOU:** nenhum achado.');
 
 fs.writeFileSync(reportFile, `${lines.join('\n')}\n`, 'utf8');
 console.log(`DRONE_REPORT=${reportFile}`);
+console.log(`DRONE_REGRESSIONS ${regressionLabel}`);
 console.log(`DRONE_COUNTS critical=${counts['CRÍTICO']} high=${counts['ALTO']} medium=${counts['MÉDIO']} low=${counts['BAIXO']}`);
 
 if (process.argv.includes('--gate') && (counts['CRÍTICO'] || counts['ALTO'])) process.exit(1);
