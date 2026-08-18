@@ -144,6 +144,9 @@ function installNetworkCapture(page: Page, state: DroneState) {
   page.on('console', message => {
     if (message.type() !== 'error') return;
     const evidence = message.text();
+    // Falhas HTTP já são capturadas com URL/status no evento response. Não
+    // duplicar o mesmo 5xx como console.error sem contexto.
+    if (/Failed to load resource: the server responded with a status of 5\d\d/i.test(evidence)) return;
     if (unique(`console:${evidence}`)) void addFinding(state, page, 'MÉDIO', 'runtime', 'console.error', evidence);
   });
   page.on('requestfailed', request => {
@@ -155,6 +158,11 @@ function installNetworkCapture(page: Page, state: DroneState) {
   page.on('response', response => {
     if (response.status() < 500) return;
     const evidence = `${response.status()} ${response.request().method()} ${response.url()}`;
+    const url = new URL(response.url());
+    if (response.status() === 503 && url.pathname === '/api/wsl/distributions') {
+      if (unique(`environment:${evidence}`)) void addFinding(state, page, 'BAIXO', 'environment', 'WSL indisponível no runner WebOnly', evidence);
+      return;
+    }
     if (unique(`http:${evidence}`)) void addFinding(state, page, 'ALTO', 'network', 'HTTP 5xx', evidence);
   });
   page.on('websocket', (socket: WebSocket) => {
@@ -334,10 +342,20 @@ async function patrolWorkspace(page: Page, state: DroneState) {
   if (!await importInput.count()) await addFinding(state, page, 'BAIXO', 'workspace', 'Import input não localizado', 'A patrulha não encontrou input file no Workspace.');
 }
 
+async function waitForTerminalReady(terminal: Locator, expectedTabs?: number) {
+  await expect(terminal).toBeVisible({ timeout: 12_000 });
+  await expect(terminal).not.toHaveClass(/terminal-workspace--loading/, { timeout: 12_000 });
+  if (typeof expectedTabs === 'number') {
+    await expect(terminal.locator('.terminal-tab')).toHaveCount(expectedTabs, { timeout: 12_000 });
+  } else {
+    await expect.poll(() => terminal.locator('.terminal-tab').count(), { timeout: 12_000 }).toBeGreaterThan(0);
+  }
+}
+
 async function patrolTerminal(page: Page, state: DroneState) {
   await page.keyboard.press('Control+Alt+3');
   const terminal = page.locator('.terminal-workspace').last();
-  await expect(terminal).toBeVisible({ timeout: 12_000 });
+  await waitForTerminalReady(terminal);
   const terminalWindow = page.locator('.window:has(.terminal-workspace)').last();
   await terminalWindow.click({ position: { x: 500, y: 80 } }).catch(() => undefined);
   await auditWindowStack(page, state);
@@ -354,9 +372,12 @@ async function patrolTerminal(page: Page, state: DroneState) {
   await expect(terminal).toHaveCount(0, { timeout: 10_000 }).catch(() => undefined);
   await page.keyboard.press('Control+Alt+3');
   const restored = page.locator('.terminal-workspace').last();
-  await expect(restored).toBeVisible({ timeout: 12_000 });
-  const restoredCount = await restored.locator('.terminal-tab').count();
-  if (restoredCount !== beforeClose) await addFinding(state, page, 'ALTO', 'terminal', 'Terminal tab restore divergente', `esperado=${beforeClose} recebido=${restoredCount}`, true);
+  try {
+    await waitForTerminalReady(restored, beforeClose);
+  } catch (cause) {
+    const restoredCount = await restored.locator('.terminal-tab').count().catch(() => 0);
+    await addFinding(state, page, 'ALTO', 'terminal', 'Terminal tab restore divergente', `esperado=${beforeClose} recebido=${restoredCount}\n${textOf(cause)}`, true);
+  }
 }
 
 async function patrolUX(page: Page, state: DroneState) {
