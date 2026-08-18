@@ -9,6 +9,7 @@ import { NotificationContainer } from './components/Notifications/NotificationCo
 import SetupWizard from './components/Setup/SetupWizard';
 import StartMenu from './components/StartMenu/StartMenu';
 import WindowRenderer from './components/Window/WindowRenderer';
+import WorkflowBatch4Shell from './components/Workflow/WorkflowBatch4Shell';
 import WorkflowShell from './components/Workflow/WorkflowShell';
 import {
   useCriticalSubsystemWatchdog,
@@ -87,6 +88,7 @@ export default function App() {
             <>
               <WindowRenderer />
               <WorkflowShell />
+              <WorkflowBatch4Shell />
               {explorerPid !== null && <StartMenu />}
             </>
           )}
