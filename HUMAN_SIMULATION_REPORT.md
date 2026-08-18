@@ -1,131 +1,112 @@
 # HUMAN_SIMULATION_REPORT.md
 
-## CloudOS Workflow — Human User Simulation
+## CloudOS Workflow — Human User Simulation v2
 
 **Branch:** `stabilization/cloudos-workflow-batch-4`  
-**Commit executado:** `b2d152ce1c492930d86c820d1f4305eb381eeeb0`  
-**Início:** 2026-08-18T14:46:13.094Z  
-**Fim:** 2026-08-18T15:21:16.152Z  
+**Commit executado:** `b13297411f2ef333438ae618a90b8e3b9a31bdcf`  
 **Resultado:** 6 missão(ões) FALHOU
 
-> Esta suíte usa Playwright contra o frontend compilado servido pelo backend CloudOS temporário. As operações funcionais são executadas pela UI e por teclado real do browser automation. Apenas telemetria é coletada por CDP/page.evaluate.
-
-## Resumo
+> Execução Playwright real contra frontend compilado + backend temporário CloudOS. Operações funcionais são UI/teclado; CDP/page.evaluate são usados somente para telemetria.
 
 | Missão | Status | Duração |
 |---|---|---:|
-| 1. CLIENTE NOVO | **FALHOU** | 0.8 s |
-| 2. DIA DE TRABALHO | **FALHOU** | 2096.8 s |
-| 3. FILES | **FALHOU** | 0.0 s |
-| 4. TERMINAL | **FALHOU** | 0.0 s |
-| 5. LONG SESSION | **FALHOU** | 0.0 s |
-| 6. STRESS — 100 Workspaces / 500 / 1000 Notes | **FALHOU** | 0.0 s |
+| 1. CLIENTE NOVO | **FALHOU** | 14.2 s |
+| 2. MISSÃO 2 | **FALHOU** | 0.0 s |
+| 3. MISSÃO 3 | **FALHOU** | 0.0 s |
+| 4. MISSÃO 4 | **FALHOU** | 0.0 s |
+| 5. MISSÃO 5 | **FALHOU** | 0.0 s |
+| 6. MISSÃO 6 | **FALHOU** | 0.0 s |
 
 ## Missão 1 — CLIENTE NOVO
 
 **FALHOU**
 
+- Workspace criado pela UI.
+- Note criada, salva e editada.
+- Evidence criada.
+- Export ZIP real: Cliente Humano 001.cloudos-workspace.zip.
 
 ```text
-locator.fill: Error: strict mode violation: locator('.ww-modal').last().getByLabel('Cliente') resolved to 2 elements:
-    1) <select>…</select> aka getByLabel('TipoClienteProjetoTicketLaboratórioPersonalizado')
-    2) <input value=""/> aka getByRole('textbox', { name: 'Cliente' })
-
+locator.click: Timeout 12000ms exceeded.
 Call log:
-[2m  - waiting for locator('.ww-modal').last().getByLabel('Cliente')[22m
+[2m  - waiting for locator('.window:has(.workflow-workspace)').last().locator('button.window-btn.close')[22m
+[2m    - locator resolved to <button title="Fechar" class="window-btn close">…</button>[22m
+[2m  - attempting click action[22m
+[2m    2 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is visible, enabled and stable[22m
+[2m      - scrolling into view if needed[22m
+[2m      - done scrolling[22m
+[2m      - <div class="wb4-context-grid">…</div> from <aside class="wb4-context" aria-label="Contexto do projeto ativo">…</aside> subtree intercepts pointer events[22m
+[2m    - retrying click action[22m
+[2m    - waiting 20ms[22m
+[2m    2 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is visible, enabled and stable[22m
+[2m      - scrolling into view if needed[22m
+[2m      - done scrolling[22m
+[2m      - <div class="wb4-context-grid">…</div> from <aside class="wb4-context" aria-label="Contexto do projeto ativo">…</aside> subtree intercepts pointer events[22m
+[2m    - retrying click action[22m
+[2m      - waiting 100ms[22m
+[2m    23 × waiting for element to be visible, enabled and stable[22m
+[2m       - element is visible, enabled and stable[22m
+[2m       - scrolling into view if needed[22m
+[2m       - done scrolling[22m
+[2m       - <div class="wb4-context-grid">…</div> from <aside class="wb4-context" aria-label="Contexto do projeto ativo">…</aside> subtree intercepts pointer events[22m
+[2m     - retrying click action[22m
+[2m       - waiting 500ms[22m
 
-    at createWorkspaceViaUI (/home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation.spec.ts:188:37)
-    at /home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation.spec.ts:333:7
-    at mission (/home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation.spec.ts:319:9)
-    at /home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation.spec.ts:331:5
+    at /home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation-v2.spec.ts:305:104
+    at runMission (/home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation-v2.spec.ts:225:5)
+    at /home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation-v2.spec.ts:283:5
 ```
 
 Screenshot: `test-results/human-simulation/screenshots/mission-1-failure.png`
 
-## Missão 2 — DIA DE TRABALHO
+## Missão 2 — MISSÃO 2
 
 **FALHOU**
 
 
 ```text
-locator.click: Test timeout of 2100000ms exceeded.
-Call log:
-[2m  - waiting for locator('.workflow-workspace').last().locator('.ww-tabs').getByRole('button', { name: 'Evidence', exact: true })[22m
-
-    at /home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation.spec.ts:404:131
-    at mission (/home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation.spec.ts:319:9)
-    at /home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation.spec.ts:384:5
+A missão terminou sem produzir resultado (timeout/crash/aborto do runner).
 ```
 
-Screenshot: `test-results/human-simulation/screenshots/mission-2-failure.png`
-
-## Missão 3 — FILES
+## Missão 3 — MISSÃO 3
 
 **FALHOU**
 
 
 ```text
-keyboard.press: Target page, context or browser has been closed
-    at ensureWorkspace (/home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation.spec.ts:154:23)
-    at /home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation.spec.ts:420:7
-    at mission (/home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation.spec.ts:319:9)
-    at /home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation.spec.ts:419:5
+A missão terminou sem produzir resultado (timeout/crash/aborto do runner).
 ```
 
-Screenshot: `test-results/human-simulation/screenshots/mission-3-failure.png`
-
-## Missão 4 — TERMINAL
+## Missão 4 — MISSÃO 4
 
 **FALHOU**
 
 
 ```text
-keyboard.press: Target page, context or browser has been closed
-    at ensureTerminal (/home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation.spec.ts:177:23)
-    at /home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation.spec.ts:469:24
-    at mission (/home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation.spec.ts:319:9)
-    at /home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation.spec.ts:468:5
+A missão terminou sem produzir resultado (timeout/crash/aborto do runner).
 ```
 
-Screenshot: `test-results/human-simulation/screenshots/mission-4-failure.png`
-
-## Missão 5 — LONG SESSION
+## Missão 5 — MISSÃO 5
 
 **FALHOU**
 
 
 ```text
-page.evaluate: Target page, context or browser has been closed
-    at snapshotRuntime (/home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation.spec.ts:231:30)
-    at /home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation.spec.ts:498:22
-    at mission (/home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation.spec.ts:319:9)
-    at /home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation.spec.ts:497:5
+A missão terminou sem produzir resultado (timeout/crash/aborto do runner).
 ```
 
-Screenshot: `test-results/human-simulation/screenshots/mission-5-failure.png`
-
-## Missão 6 — STRESS — 100 Workspaces / 500 / 1000 Notes
+## Missão 6 — MISSÃO 6
 
 **FALHOU**
 
 
 ```text
-keyboard.press: Target page, context or browser has been closed
-    at ensureWorkspace (/home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation.spec.ts:154:23)
-    at /home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation.spec.ts:539:25
-    at mission (/home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation.spec.ts:319:9)
-    at /home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation.spec.ts:538:5
+A missão terminou sem produzir resultado (timeout/crash/aborto do runner).
 ```
 
-Screenshot: `test-results/human-simulation/screenshots/mission-6-failure.png`
+## Telemetria
 
-## Telemetria de sessão longa
-
-| Ponto | Heap usada | Heap total | DOM nodes | JS listeners | localStorage | timers | intervals | ResizeObserver | MutationObserver | janelas |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-
-## Critério
-
-- **PASSOU:** fluxo concluído e invariantes funcionais preservadas.
-- **ALERTA:** fluxo concluiu, mas foi observado comportamento de escala/stale/pressão que merece revisão.
-- **FALHOU:** operação real não concluiu, perdeu persistência/integridade ou gerou exceção impeditiva.
+| Missão/Ponto | Heap | DOM nodes | JS listeners | localStorage | timers | intervals | ResizeObserver | MutationObserver | janelas |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|

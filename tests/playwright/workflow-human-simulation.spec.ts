@@ -184,9 +184,9 @@ async function createWorkspaceViaUI(page: import('@playwright/test').Page, name:
   await workspace.getByRole('button', { name: /Novo workspace/i }).click();
   const modal = page.locator('.ww-modal').last();
   await expect(modal).toBeVisible();
-  await modal.getByLabel('Nome').fill(name);
-  await modal.getByLabel('Cliente').fill(`Cliente ${name}`);
-  await modal.getByLabel('Descrição').fill(`Criado pelo simulador humano: ${name}`);
+  await modal.getByRole('textbox', { name: 'Nome', exact: true }).fill(name);
+  await modal.getByRole('textbox', { name: 'Cliente', exact: true }).fill(`Cliente ${name}`);
+  await modal.getByRole('textbox', { name: 'Descrição', exact: true }).fill(`Criado pelo simulador humano: ${name}`);
   await modal.getByRole('button', { name: /Criar workspace/i }).click();
   await expect(modal).toHaveCount(0, { timeout: 15_000 });
   await expect(workspace.locator('.ww-header h2')).toHaveText(name, { timeout: 15_000 });
@@ -261,7 +261,7 @@ function renderReport(results: MissionResult[], snapshots: RuntimeSnapshot[], st
     '## CloudOS Workflow — Human User Simulation',
     '',
     `**Branch:** \`stabilization/cloudos-workflow-batch-4\`  `,
-    `**Commit executado:** \`${process.env.GITHUB_SHA || 'execução local'}\`  `,
+    `**Commit executado:** \`${process.env.CLOUDOS_TESTED_SHA || process.env.GITHUB_SHA || 'execução local'}\`  `,
     `**Início:** ${startedAt}  `,
     `**Fim:** ${finishedAt}  `,
     `**Resultado:** ${failed ? `${failed} missão(ões) FALHOU` : alerts ? `${alerts} missão(ões) com ALERTA; nenhuma falha fatal` : 'todas as missões PASSARAM'}`,
