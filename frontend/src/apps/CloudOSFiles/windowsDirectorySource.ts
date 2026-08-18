@@ -69,14 +69,24 @@ async function uniqueName(dir: FileSystemDirectoryHandle, requested: string, dir
 }
 
 async function readTrashMeta(): Promise<TrashMeta> {
+  const trash = await dirAt([TRASH_DIR], true, true);
+  let handle: FileSystemFileHandle;
   try {
-    const trash = await dirAt([TRASH_DIR], true, true);
-    const handle = await trash.getFileHandle(TRASH_META);
+    handle = await trash.getFileHandle(TRASH_META);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'NotFoundError') return { version: 1, entries: {} };
+    throw error;
+  }
+  try {
     const file = await handle.getFile();
     const parsed = JSON.parse(await file.text());
-    return parsed?.version === 1 && parsed.entries && typeof parsed.entries === 'object' ? parsed : { version: 1, entries: {} };
-  } catch {
-    return { version: 1, entries: {} };
+    if (parsed?.version !== 1 || !parsed.entries || typeof parsed.entries !== 'object' || Array.isArray(parsed.entries)) {
+      throw new Error('Metadados da lixeira Windows estão inválidos.');
+    }
+    return parsed as TrashMeta;
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Metadados da lixeira Windows estão inválidos.') throw error;
+    throw new Error('Metadados da lixeira Windows estão corrompidos; nenhuma operação destrutiva foi executada.', { cause: error });
   }
 }
 
@@ -84,8 +94,13 @@ async function writeTrashMeta(meta: TrashMeta) {
   const trash = await dirAt([TRASH_DIR], true, true);
   const handle = await trash.getFileHandle(TRASH_META, { create: true });
   const writable = await handle.createWritable();
-  await writable.write(JSON.stringify(meta));
-  await writable.close();
+  try {
+    await writable.write(JSON.stringify(meta));
+    await writable.close();
+  } catch (error) {
+    try { await writable.abort(); } catch {}
+    throw error;
+  }
 }
 
 async function statEntry(dir: FileSystemDirectoryHandle, name: string, handle: FileSystemHandle): Promise<WindowsFileEntry> {
@@ -281,16 +296,25 @@ export const windowsDirectorySource = {
     const controller = new AbortController();
     await scan(source, controller.signal, totals);
     await copyHandle(source, trash, storedName, controller.signal, totals, { bytes: 0, entries: 0 });
-    const sourceDir = await dirAt(path);
+
+    const meta = await readTrashMeta();
+    meta.entries[id] = { id, storedName, originalPath: appendFilePath(path, entry.name), originalName: entry.name, kind: entry.kind, deletedAt: Date.now() };
     try {
-      await sourceDir.removeEntry(entry.name, { recursive: source.kind === 'directory' });
+      await writeTrashMeta(meta);
     } catch (error) {
       try { await trash.removeEntry(storedName, { recursive: source.kind === 'directory' }); } catch {}
       throw error;
     }
-    const meta = await readTrashMeta();
-    meta.entries[id] = { id, storedName, originalPath: appendFilePath(path, entry.name), originalName: entry.name, kind: entry.kind, deletedAt: Date.now() };
-    await writeTrashMeta(meta);
+
+    const sourceDir = await dirAt(path);
+    try {
+      await sourceDir.removeEntry(entry.name, { recursive: source.kind === 'directory' });
+    } catch (error) {
+      delete meta.entries[id];
+      try { await writeTrashMeta(meta); } catch {}
+      try { await trash.removeEntry(storedName, { recursive: source.kind === 'directory' }); } catch {}
+      throw error;
+    }
     return id;
   },
 
@@ -342,9 +366,9 @@ export const windowsDirectorySource = {
 
   async emptyTrash() {
     const trash = await dirAt([TRASH_DIR], true, true);
-    for await (const [name, handle] of entriesOf(trash)) {
-      if (name === TRASH_META) continue;
-      await trash.removeEntry(name, { recursive: handle.kind === 'directory' });
+    const meta = await readTrashMeta();
+    for (const item of Object.values(meta.entries)) {
+      try { await trash.removeEntry(item.storedName, { recursive: item.kind === 'directory' }); } catch {}
     }
     await writeTrashMeta({ version: 1, entries: {} });
   },
