@@ -24,6 +24,23 @@ test('A-01 Notes persiste rascunho antes de trocar nota workspace ou resultado',
   assert.match(workspace, /workspaceDraftRef/);
 });
 
+test('A-01 final Notes serializa autosave e save-before-navigation por nota', () => {
+  const workspace = source('src/services/workflowWorkspace.ts');
+  assert.match(workspace, /const noteSaveChains = new Map<string, Promise<void>>\(\)/);
+  const saveStart = workspace.indexOf('export async function saveWorkspaceNote');
+  const saveEnd = workspace.indexOf('\nfunction indexNotes', saveStart);
+  const body = workspace.slice(saveStart, saveEnd);
+  const previous = body.indexOf('const previous = noteSaveChains.get(key) || Promise.resolve();');
+  const waitPrevious = body.indexOf('await previous.catch(() => undefined);');
+  const write = body.indexOf('await fileSourceFacade.writeText', waitPrevious);
+  const release = body.indexOf('release();', write);
+  assert.ok(previous >= 0, 'save precisa encadear pela nota');
+  assert.ok(waitPrevious > previous, 'save novo precisa aguardar o anterior');
+  assert.ok(write > waitPrevious, 'escrita so pode comecar depois do save anterior');
+  assert.ok(release > write, 'fila so pode liberar depois da escrita');
+  assert.match(body, /if \(noteSaveChains\.get\(key\) === chain\) noteSaveChains\.delete\(key\)/);
+});
+
 test('A-02 atalhos do Files so respondem na janela ativa', () => {
   const files = source('src/apps/CloudOSFiles/CloudOSFiles.tsx');
   assert.match(files, /if \(windowId && useWindowManager\.getState\(\)\.activeWindowId !== windowId\) return;/);
@@ -50,12 +67,15 @@ test('A-04 Evidence rapida aceita identidade explicita do Workspace exibido', ()
   assert.match(shell, /captureEvidence\(workspaceId\)/);
 });
 
-test('A-05 aba de Terminal invisivel reinicializa quando volta a ficar visivel', () => {
+test('A-05 final Terminal recupera layout mesmo se falha chegar depois de visible=true', () => {
   const terminal = source('src/apps/CloudOSTerminal/TerminalSession.tsx');
-  assert.match(terminal, /previousVisibleRef/);
-  assert.match(terminal, /const becameVisible = visible && !previousVisibleRef\.current/);
-  assert.match(terminal, /status\.label === 'Layout indisponível'/);
-  assert.match(terminal, /setRestartGeneration\(value => value \+ 1\)/);
+  assert.match(terminal, /layoutRecoveryRequestedRef/);
+  assert.doesNotMatch(terminal, /becameVisible/);
+  assert.doesNotMatch(terminal, /previousVisibleRef/);
+  assert.match(terminal, /if \(!visible\) \{\s*layoutRecoveryRequestedRef\.current = false;/);
+  assert.match(terminal, /status\.state === 'failed' && status\.label === 'Layout indisponível' && !layoutRecoveryRequestedRef\.current/);
+  assert.match(terminal, /layoutRecoveryRequestedRef\.current = true;\s*setRestartGeneration\(value => value \+ 1\)/);
+  assert.match(terminal, /fitSchedulerRef\.current = fitScheduler;\s*layoutRecoveryRequestedRef\.current = false;/);
 });
 
 test('A-06 lixeira Windows confirma metadata antes de remover a origem', () => {
