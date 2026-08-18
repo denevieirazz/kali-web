@@ -69,3 +69,39 @@ jobs:
         run: npm run lint
       - name: Production build
         run: npm run build
+
+  human-user-simulation:
+    name: Human user simulation
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout stabilization
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+      - name: Verify stabilization scope
+        run: node scripts/workflow/test-batch4-stabilization-scope.mjs
+      - name: Install dependencies
+        run: npm ci
+      - name: Build CloudOS frontend
+        run: npm run build
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+      - name: Execute human user simulation
+        run: npx playwright test --config=playwright.human.config.ts
+      - name: Upload human simulation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workflow-human-simulation-${{ github.sha }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            HUMAN_SIMULATION_REPORT.md
+            test-results/human-simulation/**
+            test-results/playwright-human/**
+            playwright-human-report/**
