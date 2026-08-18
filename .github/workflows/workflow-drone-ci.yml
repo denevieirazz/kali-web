@@ -22,9 +22,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Checkout
+      - name: Checkout stabilization under audit
         uses: actions/checkout@v4
         with:
+          ref: stabilization/cloudos-workflow-batch-4
           fetch-depth: 0
 
       - name: Setup Node 22
@@ -50,12 +51,16 @@ jobs:
         shell: bash
         run: |
           mkdir -p test-results/drone
+          export GITHUB_SHA="$(git rev-parse HEAD)"
           npx playwright test --config=playwright.drone.config.ts 2>&1 | tee test-results/drone/playwright.log
           exit ${PIPESTATUS[0]}
 
       - name: Render DRONE_REPORT.md
         if: always()
-        run: node scripts/workflow/render-drone-report.mjs
+        shell: bash
+        run: |
+          export GITHUB_SHA="$(git rev-parse HEAD)"
+          node scripts/workflow/render-drone-report.mjs
 
       - name: Publish report to job summary
         if: always()
@@ -79,6 +84,7 @@ jobs:
         if: always()
         shell: bash
         run: |
+          export GITHUB_SHA="$(git rev-parse HEAD)"
           node scripts/workflow/render-drone-report.mjs --gate
           if [ "${{ steps.drone.outcome }}" != "success" ]; then
             echo "Drone Playwright terminou com outcome=${{ steps.drone.outcome }}"
