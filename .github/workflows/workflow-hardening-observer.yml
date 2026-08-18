@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 env:
-  EXPECTED_SHA: aedf42a4d182e6242ef6597d7257106f811d8a99
+  EXPECTED_SHA: 968aa0d51d628611e30d8bfd39b0a16ae3d68826
 
 jobs:
   linux-final-head:
@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: aedf42a4d182e6242ef6597d7257106f811d8a99
+          ref: 968aa0d51d628611e30d8bfd39b0a16ae3d68826
           fetch-depth: 0
       - name: Assert exact HEAD
         shell: bash
@@ -55,7 +55,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: aedf42a4d182e6242ef6597d7257106f811d8a99
+          ref: 968aa0d51d628611e30d8bfd39b0a16ae3d68826
           fetch-depth: 0
       - name: Assert exact HEAD
         shell: pwsh
@@ -90,7 +90,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: aedf42a4d182e6242ef6597d7257106f811d8a99
+          ref: 968aa0d51d628611e30d8bfd39b0a16ae3d68826
           fetch-depth: 0
       - name: Assert exact HEAD
         shell: bash
@@ -158,7 +158,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: aedf42a4d182e6242ef6597d7257106f811d8a99
+          ref: 968aa0d51d628611e30d8bfd39b0a16ae3d68826
           fetch-depth: 0
       - name: Assert exact HEAD
         shell: bash
