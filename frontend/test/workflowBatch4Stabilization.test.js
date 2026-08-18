@@ -154,10 +154,15 @@ test('SCALE-05 busca percorre Notes incrementalmente sem materializar todos docu
 
 test('SCALE-06 metadata lazy preserva indice global e regressao de save', () => {
   const workspace = source('src/services/workflowWorkspace.ts');
+  const start = workspace.indexOf('function indexNoteMetadata');
+  const end = workspace.indexOf('\nexport async function listWorkspaceNotes', start);
+  const metadataBody = workspace.slice(start, end);
   assert.match(workspace, /function indexNoteMetadata\(notes: WorkflowNoteMeta\[\]\)/);
   assert.match(workspace, /searchText: current\?\.searchText \|\| ''/);
   assert.match(workspace, /indexNoteMetadata\(notes\);\s*return notes;/);
   assert.match(workspace, /indexNotes\(\[document\]\);/);
   assert.match(workspace, /indexNotes\(\[indexed\]\);/);
   assert.match(workspace, /const noteSaveChains = new Map<string, Promise<void>>\(\)/);
+  assert.match(metadataBody, /note\.modified > 0 \? new Date\(note\.modified\)\.toISOString\(\) : \(current\?\.updatedAt \|\| new Date\(0\)\.toISOString\(\)\)/);
+  assert.doesNotMatch(metadataBody, /note\.modified \|\| Date\.now\(\)/);
 });
