@@ -36,11 +36,33 @@ test('Terminal persiste a ultima aba ativa e Batch 4 traduz atalhos canonicos se
 test('atalhos de produtividade e Evidence rapida permanecem no workflow shell', () => {
   const shell = source('src/components/Workflow/WorkflowBatch4Shell.tsx');
   assert.match(shell, /event\.ctrlKey && event\.shiftKey && key === 'e'/);
+  assert.match(shell, /focused\?\.appId !== 'workflow-workspace'/);
+  assert.match(shell, /captureClipboardToActiveEvidence\(workspace\)/);
   assert.match(shell, /event\.ctrlKey && event\.altKey && key === 'w'/);
   assert.match(shell, /key === '1'/);
   assert.match(shell, /key === '2'/);
   assert.match(shell, /key === '3'/);
-  assert.match(shell, /captureClipboardToActiveEvidence/);
+});
+
+test('contexto Batch 4 nao reage a revision produzida pela propria indexacao de Notes', () => {
+  const shell = source('src/components/Workflow/WorkflowBatch4Shell.tsx');
+  assert.match(shell, /activeWorkspace\?\.lastActivityAt/);
+  assert.doesNotMatch(shell, /\[activeWindow\?\.appId, activeWorkspace\?\.id, revision\]/);
+});
+
+test('export e Evidence resolvem o Workspace exibido antes de persistir dados', () => {
+  const shell = source('src/components/Workflow/WorkflowBatch4Shell.tsx');
+  assert.match(shell, /function displayedWorkspace\(\)/);
+  assert.match(shell, /matches\.length === 1/);
+  assert.match(shell, /downloadWorkspaceZip\(workspace\)/);
+  assert.match(shell, /captureClipboardToActiveEvidence\(workspace\)/);
+});
+
+test('Terminal adia bootstrap de aba oculta ate ela possuir contexto visual', () => {
+  const session = source('src/apps/CloudOSTerminal/TerminalSession.tsx');
+  assert.match(session, /startedRef = useRef\(false\)/);
+  assert.match(session, /if \(!visible \|\| startedRef\.current\) return/);
+  assert.match(session, /if \(startGeneration === 0\) return/);
 });
 
 test('Workspace ZIP coleta somente Notes Evidence e Metadata no export Batch 4', () => {
