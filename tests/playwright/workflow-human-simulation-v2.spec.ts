@@ -269,7 +269,7 @@ function buildReport() {
   fs.writeFileSync(path.join(ROOT, 'human-simulation-v2.json'), JSON.stringify({ results, snapshots }, null, 2), 'utf8');
 }
 
-test.describe.serial('Workflow Human User Simulation v2', () => {
+test.describe('Workflow Human User Simulation v2', () => {
   test.beforeAll(() => {
     fs.rmSync(RESULTS, { recursive: true, force: true });
     fs.mkdirSync(RESULTS, { recursive: true });

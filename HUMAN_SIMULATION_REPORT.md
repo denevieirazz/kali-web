@@ -3,63 +3,28 @@
 ## CloudOS Workflow — Human User Simulation v2
 
 **Branch:** `stabilization/cloudos-workflow-batch-4`  
-**Commit executado:** `b13297411f2ef333438ae618a90b8e3b9a31bdcf`  
-**Resultado:** 6 missão(ões) FALHOU
+**Commit executado:** `edae584bad57d2da0162fadb728a957c44aa0584`  
+**Resultado:** 4 missão(ões) FALHOU
 
 > Execução Playwright real contra frontend compilado + backend temporário CloudOS. Operações funcionais são UI/teclado; CDP/page.evaluate são usados somente para telemetria.
 
 | Missão | Status | Duração |
 |---|---|---:|
-| 1. CLIENTE NOVO | **FALHOU** | 14.2 s |
+| 1. MISSÃO 1 | **FALHOU** | 0.0 s |
 | 2. MISSÃO 2 | **FALHOU** | 0.0 s |
 | 3. MISSÃO 3 | **FALHOU** | 0.0 s |
 | 4. MISSÃO 4 | **FALHOU** | 0.0 s |
-| 5. MISSÃO 5 | **FALHOU** | 0.0 s |
-| 6. MISSÃO 6 | **FALHOU** | 0.0 s |
+| 5. LONG SESSION | **PASSOU** | 257.8 s |
+| 6. STRESS — 100 Workspaces / 500 / 1000 Notes | **ALERTA** | 696.5 s |
 
-## Missão 1 — CLIENTE NOVO
+## Missão 1 — MISSÃO 1
 
 **FALHOU**
 
-- Workspace criado pela UI.
-- Note criada, salva e editada.
-- Evidence criada.
-- Export ZIP real: Cliente Humano 001.cloudos-workspace.zip.
 
 ```text
-locator.click: Timeout 12000ms exceeded.
-Call log:
-[2m  - waiting for locator('.window:has(.workflow-workspace)').last().locator('button.window-btn.close')[22m
-[2m    - locator resolved to <button title="Fechar" class="window-btn close">…</button>[22m
-[2m  - attempting click action[22m
-[2m    2 × waiting for element to be visible, enabled and stable[22m
-[2m      - element is visible, enabled and stable[22m
-[2m      - scrolling into view if needed[22m
-[2m      - done scrolling[22m
-[2m      - <div class="wb4-context-grid">…</div> from <aside class="wb4-context" aria-label="Contexto do projeto ativo">…</aside> subtree intercepts pointer events[22m
-[2m    - retrying click action[22m
-[2m    - waiting 20ms[22m
-[2m    2 × waiting for element to be visible, enabled and stable[22m
-[2m      - element is visible, enabled and stable[22m
-[2m      - scrolling into view if needed[22m
-[2m      - done scrolling[22m
-[2m      - <div class="wb4-context-grid">…</div> from <aside class="wb4-context" aria-label="Contexto do projeto ativo">…</aside> subtree intercepts pointer events[22m
-[2m    - retrying click action[22m
-[2m      - waiting 100ms[22m
-[2m    23 × waiting for element to be visible, enabled and stable[22m
-[2m       - element is visible, enabled and stable[22m
-[2m       - scrolling into view if needed[22m
-[2m       - done scrolling[22m
-[2m       - <div class="wb4-context-grid">…</div> from <aside class="wb4-context" aria-label="Contexto do projeto ativo">…</aside> subtree intercepts pointer events[22m
-[2m     - retrying click action[22m
-[2m       - waiting 500ms[22m
-
-    at /home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation-v2.spec.ts:305:104
-    at runMission (/home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation-v2.spec.ts:225:5)
-    at /home/runner/work/kali-web/kali-web/tests/playwright/workflow-human-simulation-v2.spec.ts:283:5
+A missão terminou sem produzir resultado (timeout/crash/aborto do runner).
 ```
-
-Screenshot: `test-results/human-simulation/screenshots/mission-1-failure.png`
 
 ## Missão 2 — MISSÃO 2
 
@@ -88,25 +53,35 @@ A missão terminou sem produzir resultado (timeout/crash/aborto do runner).
 A missão terminou sem produzir resultado (timeout/crash/aborto do runner).
 ```
 
-## Missão 5 — MISSÃO 5
+## Missão 5 — LONG SESSION
 
-**FALHOU**
+**PASSOU**
 
+- Horizontes 1h/2h/4h/8h simulados por 150/300/600/1200 operações determinísticas com snapshots de heap/listeners/timers/observers/localStorage.
 
-```text
-A missão terminou sem produzir resultado (timeout/crash/aborto do runner).
-```
+Screenshot: `test-results/human-simulation/screenshots/mission-5-pass.png`
 
-## Missão 6 — MISSÃO 6
+## Missão 6 — STRESS — 100 Workspaces / 500 / 1000 Notes
 
-**FALHOU**
+**ALERTA**
 
+- 100 Workspaces criados pela UI e todos preservados no catálogo visual.
+- 500 e 1000 Notes alcançadas pela UI; busca de conteúdo, troca, edição e export ZIP executados.
+- **ALERTA:** Heap após stress >8x baseline: 4.8 MiB → 61.4 MiB.
 
-```text
-A missão terminou sem produzir resultado (timeout/crash/aborto do runner).
-```
+Screenshot: `test-results/human-simulation/screenshots/mission-6-pass.png`
 
 ## Telemetria
 
 | Missão/Ponto | Heap | DOM nodes | JS listeners | localStorage | timers | intervals | ResizeObserver | MutationObserver | janelas |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 5/baseline | 4.9 MiB | 714 | 218 | 108.6 KiB | 3 | 5 | 1 | 2 | 3 |
+| 5/1h | 5.7 MiB | 714 | 218 | 108.6 KiB | 0 | 5 | 1 | 2 | 3 |
+| 5/2h | 5.9 MiB | 714 | 218 | 108.6 KiB | 0 | 5 | 1 | 2 | 3 |
+| 5/4h | 6.3 MiB | 714 | 218 | 108.6 KiB | 0 | 5 | 1 | 2 | 3 |
+| 5/8h | 6.3 MiB | 714 | 218 | 108.6 KiB | 0 | 5 | 1 | 2 | 3 |
+| 6/start | 4.8 MiB | 714 | 218 | 108.6 KiB | 3 | 5 | 1 | 2 | 3 |
+| 6/100-workspaces | 6.8 MiB | 1803 | 317 | 150.1 KiB | 0 | 5 | 1 | 2 | 3 |
+| 6/500-notes | 33.8 MiB | 6280 | 1441 | 187.1 KiB | 0 | 5 | 1 | 2 | 3 |
+| 6/1000-notes | 61.5 MiB | 10788 | 1320 | 187.1 KiB | 0 | 5 | 1 | 2 | 3 |
+| 6/after-export | 61.4 MiB | 10804 | 1321 | 187.1 KiB | 0 | 5 | 1 | 2 | 3 |
