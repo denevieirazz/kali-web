@@ -56,6 +56,8 @@ export function TerminalSession({
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const fitSchedulerRef = useRef<TerminalFrameScheduler | null>(null);
+  const startedRef = useRef(false);
+  const [startGeneration, setStartGeneration] = useState(0);
   const [restartGeneration, setRestartGeneration] = useState(0);
   const [status, setStatus] = useState<TerminalPaneStatus>(INITIAL_STATUS);
   const [dimensions, setDimensions] = useState({ cols: 100, rows: 28 });
@@ -63,6 +65,13 @@ export function TerminalSession({
   const initialDirectoryKey = tab.initialDirectory?.provider === 'wsl' ? tab.initialDirectory.path.join('\u0000') : '';
 
   useEffect(() => {
+    if (!visible || startedRef.current) return;
+    startedRef.current = true;
+    setStartGeneration(value => value + 1);
+  }, [visible]);
+
+  useEffect(() => {
+    if (startGeneration === 0) return;
     const host = hostRef.current;
     if (!host) return;
 
@@ -223,7 +232,7 @@ export function TerminalSession({
 
     void initialise().catch(error => failVisual(error));
     return disposeOnce;
-  }, [initialDirectoryKey, onStatusChange, restartGeneration, tab.distribution, tab.id, tab.profile]);
+  }, [initialDirectoryKey, onStatusChange, restartGeneration, startGeneration, tab.distribution, tab.id, tab.profile]);
 
   useEffect(() => {
     if (visible) fitSchedulerRef.current?.schedule();
