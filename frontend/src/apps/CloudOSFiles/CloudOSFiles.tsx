@@ -446,6 +446,7 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (windowId && useWindowManager.getState().activeWindowId !== windowId) return;
       if (isTypingTarget(event.target) || editor || dialog.type) return;
       if (event.key === 'Escape') { setSelectedName(null); setPreviewFile(null); }
       else if (event.ctrlKey && event.altKey && event.key.toLowerCase() === 't' && viewMode === 'files') { event.preventDefault(); launchTerminalAt(selectedEntry || undefined); }
@@ -458,7 +459,7 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [clipboard, currentPath, dialog.type, editor, launchTerminalAt, openEntry, pasteClipboard, rememberFileCopy, requestDelete, requestRename, selectedEntry, source, viewMode]);
+  }, [clipboard, currentPath, dialog.type, editor, launchTerminalAt, openEntry, pasteClipboard, rememberFileCopy, requestDelete, requestRename, selectedEntry, source, viewMode, windowId]);
 
   const pathPrefix = source === 'opfs' ? 'local:' : source === 'windows' ? 'win:' : 'linux:';
 
