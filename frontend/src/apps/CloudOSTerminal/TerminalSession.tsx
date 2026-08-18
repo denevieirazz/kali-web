@@ -6,14 +6,8 @@ import { buildWslCdCommand } from '../../core/workflowCore.js';
 import { getStoredToken, resolveWebSocketUrl } from '../../services/apiClient';
 import './CloudOSTerminal.transport.css';
 import {
-  createTerminalTransport,
-  EMULATOR_MODE,
-  LEGACY_MODE,
-  WSL_CORE_MODE,
-  type TerminalTransportStatus,
-} from './terminalSessionTransport.js';
-import {
   TerminalFrameScheduler,
+  disposeTerminalAfterViewportSettles,
   hasUsableTerminalGeometry,
   sanitizeTerminalLifecycleError,
   waitForTerminalGeometry,
@@ -136,7 +130,7 @@ export function TerminalSession({
         try { socket.close(1000, 'terminal-dispose'); } catch { /* teardown local */ }
       }
       socket = null;
-      try { terminal.dispose(); } catch { /* dispose idempotente no boundary local */ }
+      disposeTerminalAfterViewportSettles(terminal);
     };
 
     const failVisual = (error: unknown, label = 'Falha visual do Terminal') => {
