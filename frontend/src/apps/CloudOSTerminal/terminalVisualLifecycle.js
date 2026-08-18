@@ -1,6 +1,9 @@
 export const TERMINAL_MIN_HOST_WIDTH = 24;
 export const TERMINAL_MIN_HOST_HEIGHT = 24;
 
+const defaultRequestFrame = callback => globalThis.requestAnimationFrame(callback);
+const defaultCancelFrame = frame => globalThis.cancelAnimationFrame(frame);
+
 export function hasUsableTerminalGeometry(host) {
   if (!host || host.isConnected === false) return false;
   const width = Number(host.clientWidth || host.getBoundingClientRect?.().width || 0);
@@ -16,7 +19,7 @@ export function sanitizeTerminalLifecycleError(error) {
 }
 
 export class TerminalFrameScheduler {
-  constructor({ requestFrame = requestAnimationFrame, cancelFrame = cancelAnimationFrame, task }) {
+  constructor({ requestFrame = defaultRequestFrame, cancelFrame = defaultCancelFrame, task }) {
     this.requestFrame = requestFrame;
     this.cancelFrame = cancelFrame;
     this.task = task;
@@ -40,7 +43,7 @@ export class TerminalFrameScheduler {
   }
 }
 
-export function waitForTerminalGeometry(host, { requestFrame = requestAnimationFrame, maxFrames = 90, cancelled = () => false } = {}) {
+export function waitForTerminalGeometry(host, { requestFrame = defaultRequestFrame, maxFrames = 90, cancelled = () => false } = {}) {
   return new Promise(resolve => {
     let frames = 0;
     const check = () => {
