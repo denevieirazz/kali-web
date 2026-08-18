@@ -1,7 +1,7 @@
-import { getActiveWorkspace, saveWorkspaceEvidenceFile, saveWorkspaceEvidenceText } from './workflowWorkspace';
+import { getActiveWorkspace, saveWorkspaceEvidenceFile, saveWorkspaceEvidenceText, type WorkspaceRecord } from './workflowWorkspace';
 
-export async function captureClipboardToActiveEvidence() {
-  const workspace = getActiveWorkspace();
+export async function captureClipboardToActiveEvidence(workspaceOverride?: WorkspaceRecord | null) {
+  const workspace = workspaceOverride || getActiveWorkspace();
   if (!workspace) throw new Error('Ative um Workspace antes de capturar evidência.');
   if (workspace.status === 'archived') throw new Error('Workspace arquivado não aceita novas evidências.');
 
