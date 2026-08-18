@@ -391,18 +391,15 @@ test.describe('Workflow Human User Simulation v2', () => {
         const files = await ensureFiles(page);
         const item = files.locator('.cf-item', { hasText: name }).first();
         await item.dblclick();
-        const fileShelf = page.locator('.wb4-files');
-        await expect(fileShelf).toBeVisible({ timeout: 10_000 });
-        await expect(fileShelf).toContainText(name);
-        const openInNotes = fileShelf.getByRole('button', { name: 'Abrir em Notes', exact: true });
-        await expect(openInNotes).toBeVisible();
-        await openInNotes.click();
         const quick = page.locator('.ww-quick-editor').last();
         await expect(quick).toBeVisible({ timeout: 10_000 });
         await expect(quick.locator('.ww-note-head')).toContainText(name);
+        const bridge = page.locator('.wf-files-bridge');
+        await expect(bridge).toBeVisible({ timeout: 10_000 });
+        await expect(bridge).toContainText(name);
         await quick.getByRole('button', { name: 'Fechar', exact: true }).click();
       }
-      details.push('Preview do Files + ação explícita Abrir em Notes validaram txt/md/json/log.');
+      details.push('Double-click do Files abriu txt/md/json/log no Notes e preservou o contexto explícito do arquivo.');
       const files = await ensureFiles(page);
       const row = files.locator('.cf-item', { hasText: 'cliente.txt' }).first();
       await row.click();
