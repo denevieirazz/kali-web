@@ -4,4 +4,4 @@ Branch temporária usada exclusivamente para disparar a execução observável d
 
 Nenhuma alteração de produto é executada a partir deste arquivo. Não mergear.
 
-Run solicitado: pós-correção Workspace/Terminal/Files harness com scope gate atualizado.
+Run solicitado: após correção isolada de Terminal tab restore quando o probe WSL retorna erro.
