@@ -32,6 +32,7 @@ const allowed = new Set([
   'frontend/test/visibleTerminalComponentContract.test.js',
   'frontend/test/workflowBatch4Stabilization.test.js',
   'frontend/test/workflowContract.test.js',
+  'frontend/test/workflowDroneReport.test.js',
   'playwright.drone.config.ts',
   'playwright.human.config.ts',
   'scripts/workflow/render-drone-report.mjs',
