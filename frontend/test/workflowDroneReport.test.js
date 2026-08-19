@@ -50,12 +50,11 @@ test('Drone preserva observacoes brutas mas findings.json contem somente defeito
 
     const observations = JSON.parse(readFileSync(join(fixture.drone, 'observations.json'), 'utf8'));
     const findings = JSON.parse(readFileSync(join(fixture.drone, 'findings.json'), 'utf8'));
-    const report = readFileSync(join(fixture.root, 'DRONE_REPORT.md'), 'utf8');
 
     assert.equal(observations.length, 2, 'evidencia bruta precisa ser preservada');
     assert.equal(findings.length, 1, 'candidato sem prova geometrica nao pode permanecer como finding efetivo');
     assert.equal(findings[0].id, 'LOW-1');
-    assert.match(report, /0 critico, 0 alto, 0 medio, 1 baixo/i);
+    assert.match(run.stdout, /DRONE_COUNTS critical=0 high=0 medium=0 low=1/);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
