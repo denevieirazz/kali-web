@@ -143,11 +143,14 @@ jobs:
           status=${PIPESTATUS[0]}
           echo "exit_code=$status" >> "$GITHUB_OUTPUT"
           exit "$status"
-      - name: Ensure report exists
+      - name: Normalize human simulation report
         if: always()
         shell: bash
         run: |
-          if [ ! -f HUMAN_SIMULATION_REPORT.md ]; then
+          generated_report="test-results/human-simulation/HUMAN_SIMULATION_REPORT.md"
+          if [ -f "$generated_report" ]; then
+            cp "$generated_report" HUMAN_SIMULATION_REPORT.md
+          else
             tested_sha="$(git rev-parse HEAD)"
             {
               echo '# HUMAN_SIMULATION_REPORT.md'
