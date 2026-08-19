@@ -20,8 +20,8 @@ jobs:
         with:
           node-version: 22.23.2
       - run: npm ci
-      - name: Backend POC contract
-        run: node --test backend/test/linux-runtime-poc.test.js
+      - name: Backend POC contracts
+        run: node --test backend/test/linux-runtime-poc.test.js backend/test/linux-runtime-preflight.test.js
       - name: TypeScript and production build
         run: npm.cmd run build
       - name: Backend regression
@@ -68,12 +68,12 @@ jobs:
           }
 
           $distro = $distros[0]
-          $probe = & wsl.exe -d $distro -- sh -lc 'command -v xpra && (command -v xclock || command -v xeyes || command -v xterm || command -v gedit)' 2>&1
+          $probe = & wsl.exe -d $distro -- sh -lc 'command -v xpra && command -v xclock && (dpkg-query -W xpra-html5 xpra-x11 2>/dev/null || true)' 2>&1
           if ($LASTEXITCODE -ne 0) {
             $report.Add('**RESULTADO: BLOQUEADO**')
             $report.Add('')
             $report.Add("Distribuição detectada: ``$distro``.")
-            $report.Add('Xpra e/ou um dos aplicativos simples da allowlist não estão presentes. Nenhuma dependência foi instalada automaticamente.')
+            $report.Add('Xpra e/ou xclock não estão presentes. Nenhuma dependência foi instalada automaticamente.')
             $report.Add('')
             $report.Add('```text')
             $report.Add(($probe | Out-String).Trim())
@@ -83,10 +83,14 @@ jobs:
             exit 0
           }
 
-          $report.Add('**RESULTADO: PRÉ-REQUISITOS PRESENTES**')
+          $report.Add('**RESULTADO: PRÉ-REQUISITOS BÁSICOS PRESENTES**')
           $report.Add('')
           $report.Add("Distribuição detectada: ``$distro``.")
-          $report.Add('Xpra e aplicativo simples estão presentes. O próximo gate é a prova visual dentro da CloudOS Window.')
+          $report.Add('Xpra e xclock estão presentes. O preflight completo ainda deve ser executado dentro do CloudOS físico para validar HTML5/X11/proxy/iframe/post-conditions.')
+          $report.Add('')
+          $report.Add('```text')
+          $report.Add(($probe | Out-String).Trim())
+          $report.Add('```')
           $report | Set-Content POC1_RESULTS.md -Encoding UTF8
           "runtime_ready=true" >> $env:GITHUB_OUTPUT
 
