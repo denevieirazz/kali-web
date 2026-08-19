@@ -3,6 +3,7 @@ import path from 'node:path';
 
 const root = path.resolve(process.cwd(), 'test-results/drone');
 const findingsFile = path.join(root, 'findings.json');
+const observationsFile = path.join(root, 'observations.json');
 const snapshotsFile = path.join(root, 'snapshots.json');
 const regressionsFile = path.join(root, 'regressions.json');
 const reportFile = path.resolve(process.cwd(), 'DRONE_REPORT.md');
@@ -17,6 +18,8 @@ function readJson(file) {
   }
 }
 
+fs.mkdirSync(root, { recursive: true });
+
 const findingsState = readJson(findingsFile);
 const regressionState = readJson(regressionsFile);
 const snapshotState = readJson(snapshotsFile);
@@ -28,6 +31,10 @@ const rawFindings = Array.isArray(findingsState.value) ? findingsState.value : [
   title: findingsState.error ? 'findings.json inválido' : 'Drone terminou sem findings.json',
   evidence: findingsState.error || 'A patrulha não produziu o arquivo estruturado de achados. Tratar como falha fechada de infraestrutura até investigação.',
 }];
+
+if (!fs.existsSync(observationsFile)) {
+  fs.writeFileSync(observationsFile, `${JSON.stringify(rawFindings, null, 2)}\n`, 'utf8');
+}
 
 const regressionFindings = [];
 if (regressionState.error) {
@@ -63,7 +70,11 @@ if (regressionState.error) {
 
 // A comparação global de z-index não prova sobreposição geométrica. Interceptações reais
 // continuam cobertas por droneClick()/elementFromPoint e pelos timeouts de pointer events.
-const findings = [...rawFindings, ...regressionFindings].filter(item => item.title !== 'Janela ativa abaixo de outra janela');
+const suppressedObservations = rawFindings.filter(item => item.title === 'Janela ativa abaixo de outra janela');
+const effectiveRuntimeFindings = rawFindings.filter(item => item.title !== 'Janela ativa abaixo de outra janela');
+const findings = [...effectiveRuntimeFindings, ...regressionFindings];
+fs.writeFileSync(findingsFile, `${JSON.stringify(findings, null, 2)}\n`, 'utf8');
+
 const snapshots = Array.isArray(snapshotState.value) ? snapshotState.value : [];
 const human = value => {
   if (value === null || value === undefined) return 'n/d';
@@ -85,6 +96,10 @@ const lines = [
   `**Achados:** ${findings.length} (${counts['CRÍTICO']} crítico, ${counts['ALTO']} alto, ${counts['MÉDIO']} médio, ${counts['BAIXO']} baixo)`, '',
   '> Drone de auditoria: caça defeitos de runtime, rede, UX, memória, Terminal e Workflow. Não implementa nem valida features novas.', '',
 ];
+
+if (suppressedObservations.length) {
+  lines.push(`**Observações brutas não classificadas como defeito:** ${suppressedObservations.length}. Preservadas em \`test-results/drone/observations.json\`; comparação global de z-index sem sobreposição geométrica não bloqueia o gate.`, '');
+}
 
 if (!findings.length) lines.push('**Nenhum defeito reproduzível encontrado nesta patrulha.**', '');
 
@@ -115,5 +130,6 @@ fs.writeFileSync(reportFile, `${lines.join('\n')}\n`, 'utf8');
 console.log(`DRONE_REPORT=${reportFile}`);
 console.log(`DRONE_REGRESSIONS ${regressionLabel}`);
 console.log(`DRONE_COUNTS critical=${counts['CRÍTICO']} high=${counts['ALTO']} medium=${counts['MÉDIO']} low=${counts['BAIXO']}`);
+console.log(`DRONE_OBSERVATIONS raw=${rawFindings.length} suppressed=${suppressedObservations.length} effective=${findings.length}`);
 
 if (process.argv.includes('--gate') && (counts['CRÍTICO'] || counts['ALTO'])) process.exit(1);
