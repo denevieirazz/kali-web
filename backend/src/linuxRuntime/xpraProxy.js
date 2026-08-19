@@ -1,6 +1,7 @@
 import http from 'node:http';
 import net from 'node:net';
 import { recordXpraPocProxyEvent, resolveXpraPocProxySession } from './xpraPoc.js';
+import { recordXpraPreflightProxyEvent, resolveXpraPreflightProxySession } from './preflight.js';
 
 const PREFIX = '/__cloudos/linux-runtime/poc1/';
 
@@ -75,14 +76,23 @@ function writeProxyError(res, status, message) {
   res.status(status).type('text/plain').send(message);
 }
 
+function resolveProxySession(id, token) {
+  return resolveXpraPocProxySession(id, token) || resolveXpraPreflightProxySession(id, token);
+}
+
+function recordProxyEvent(session, event) {
+  if (session.preflight === true) recordXpraPreflightProxyEvent(session.id, event);
+  else recordXpraPocProxyEvent(session.id, event);
+}
+
 export function xpraHttpProxyMiddleware(req, res, next) {
   const parsed = parseProxyRequest(req.originalUrl || req.url);
   if (!parsed) return next();
   if (!['GET', 'HEAD'].includes(req.method)) return writeProxyError(res, 405, 'Método não permitido no surface proxy da POC 1.');
 
-  const session = resolveXpraPocProxySession(parsed.id, parsed.token);
+  const session = resolveProxySession(parsed.id, parsed.token);
   if (!session) return writeProxyError(res, 404, 'Surface Xpra indisponível ou capability expirada.');
-  recordXpraPocProxyEvent(session.id, 'http');
+  recordProxyEvent(session, 'http');
 
   const headers = { ...req.headers, host: `127.0.0.1:${session.port}` };
   delete headers.authorization;
@@ -139,12 +149,12 @@ function serializeUpgradeRequest(req, targetPath, session) {
 export function handleXpraProxyUpgrade(req, socket, head) {
   const parsed = parseProxyRequest(req.url || '');
   if (!parsed) return false;
-  const session = resolveXpraPocProxySession(parsed.id, parsed.token);
+  const session = resolveProxySession(parsed.id, parsed.token);
   if (!session) {
     sendUpgradeFailure(socket, '404', 'Not Found');
     return true;
   }
-  recordXpraPocProxyEvent(session.id, 'websocket');
+  recordProxyEvent(session, 'websocket');
 
   const upstream = net.createConnection({ host: '127.0.0.1', port: session.port });
   upstream.setTimeout(5000, () => upstream.destroy(new Error('Timeout no proxy WebSocket Xpra.')));
