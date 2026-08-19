@@ -6,6 +6,7 @@ import { WSL_EXE, getWslSnapshot, normalizeName, validateInstalledAsync } from '
 const execFileAsync = promisify(execFile);
 const PORT_START = 14500;
 const PORT_END = 14549;
+const DISPLAY_START = 100;
 const ALLOWED_APPS = Object.freeze({
   xclock: { command: 'xclock', title: 'XClock' },
   xeyes: { command: 'xeyes', title: 'XEyes' },
@@ -37,12 +38,17 @@ export function buildXpraProbeCommand(appCommand) {
   ].join('; ');
 }
 
+export function displayForPort(port) {
+  return DISPLAY_START + (port - PORT_START);
+}
+
 export function buildXpraStartCommand({ appCommand, port }) {
   if (!Number.isInteger(port) || port < PORT_START || port > PORT_END) throw new Error('Porta Xpra fora da faixa da POC.');
+  const display = displayForPort(port);
   return [
     'set -eu',
     'unset DISPLAY WAYLAND_DISPLAY PULSE_SERVER',
-    `exec xpra seamless --start-child=${shellQuote(appCommand)} --exit-with-children=yes --daemon=no --mdns=no --notifications=no --printing=no --file-transfer=no --bind=noabstract --bind-tcp=127.0.0.1:${port},auth=allow --html=on`,
+    `exec xpra seamless :${display} --start-child=${shellQuote(appCommand)} --exit-with-children=yes --daemon=no --mdns=no --notifications=no --printing=no --file-transfer=no --bind=noabstract --bind-tcp=127.0.0.1:${port},auth=allow --html=on`,
   ].join('; ');
 }
 
@@ -131,6 +137,7 @@ function publicSession(session) {
     title: session.title,
     distribution: session.distribution,
     port: session.port,
+    display: session.display,
     state: session.state,
     startedAt: session.startedAt,
     clientUrl: session.state === 'ready' ? `http://127.0.0.1:${session.port}/?clipboard=yes&keyboard=yes&floating_menu=no&reconnect=yes` : null,
@@ -162,6 +169,7 @@ export async function startXpraPoc({ app, distribution } = {}) {
   const definition = ALLOWED_APPS[appId];
   const preflight = await probe(selected, definition.command);
   const port = await reservePort();
+  const display = displayForPort(port);
   const id = `xpra-${Date.now().toString(36)}`;
   const session = activeSession = {
     id,
@@ -169,6 +177,7 @@ export async function startXpraPoc({ app, distribution } = {}) {
     title: definition.title,
     distribution: selected,
     port,
+    display,
     state: 'starting',
     startedAt: new Date().toISOString(),
     xpraVersion: preflight.version,
@@ -217,11 +226,11 @@ export async function stopXpraPoc() {
   const session = activeSession;
   session.state = 'stopping';
   try {
-    if (session.child && session.child.exitCode === null) session.child.kill();
-    await execFileAsync(WSL_EXE, ['-d', session.distribution, '--', 'sh', '-lc', `xpra stop :${session.port} >/dev/null 2>&1 || true`], {
+    await execFileAsync(WSL_EXE, ['-d', session.distribution, '--', 'sh', '-lc', `xpra stop :${session.display} >/dev/null 2>&1 || true`], {
       windowsHide: true,
       timeout: 5000,
     }).catch(() => undefined);
+    if (session.child && session.child.exitCode === null) session.child.kill();
   } finally {
     session.state = 'stopped';
     activeSession = null;
