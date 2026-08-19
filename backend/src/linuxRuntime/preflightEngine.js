@@ -1117,6 +1117,7 @@ export const __test = {
   decisionFor,
   evidenceRoot: EVIDENCE_ROOT,
   missingRequiredFlags,
+  proxySessions,
   redactSecret,
   requiredXpraFlags: REQUIRED_XPRA_FLAGS,
 };

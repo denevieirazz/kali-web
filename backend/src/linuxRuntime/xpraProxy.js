@@ -9,7 +9,16 @@ function rewriteCsp(value) { const directives = String(value || '').split(';').m
 function proxyBase(session) { return `${PREFIX}${session.id}/${session.proxyToken}`; }
 function rewriteLocation(value, session) { if (!value) return value; const base = proxyBase(session); try { const parsed = new URL(value, `http://127.0.0.1:${session.port}`); if (['127.0.0.1', 'localhost'].includes(parsed.hostname)) return `${base}${parsed.pathname}${parsed.search}${parsed.hash}`; } catch {} if (String(value).startsWith('/')) return `${base}${value}`; return value; }
 function buildResponseHeaders(headers, session) { const result = {}; for (const [name, value] of Object.entries(headers)) { const lower = name.toLowerCase(); if (['x-frame-options', 'content-length', 'set-cookie'].includes(lower)) continue; if (lower === 'content-security-policy') result[name] = rewriteCsp(value); else if (lower === 'location') result[name] = rewriteLocation(value, session); else result[name] = value; } if (!Object.keys(result).some(name => name.toLowerCase() === 'content-security-policy')) result['Content-Security-Policy'] = rewriteCsp(null); result['Cache-Control'] = 'no-store'; result['Referrer-Policy'] = 'no-referrer'; result['Cross-Origin-Resource-Policy'] = 'same-origin'; return result; }
-function writeProxyError(res, status, message) { if (res.headersSent) return res.end(); res.status(status).type('text/plain').send(message); }
+function writeProxyError(res, status, message) {
+  if (res.headersSent) return res.end();
+  if (typeof res.status === 'function') {
+    res.status(status).type('text/plain').send(message);
+  } else {
+    res.statusCode = status;
+    res.setHeader('Content-Type', 'text/plain');
+    res.end(message);
+  }
+}
 function resolveProxySession(id, token) { return resolveXpraPocProxySession(id, token) || resolveXpraPreflightProxySession(id, token); }
 function recordProxyEvent(session, event) { if (session.preflight === true) recordXpraPreflightProxyEvent(session.id, event); else recordXpraPocProxyEvent(session.id, event); }
 export function xpraHttpProxyMiddleware(req, res, next) {
@@ -32,7 +41,11 @@ export function xpraHttpProxyMiddleware(req, res, next) {
     headers,
     timeout: 5000,
   }, upstreamResponse => {
-    res.status(upstreamResponse.statusCode || 502);
+    if (typeof res.status === 'function') {
+      res.status(upstreamResponse.statusCode || 502);
+    } else {
+      res.statusCode = upstreamResponse.statusCode || 502;
+    }
     for (const [name, value] of Object.entries(buildResponseHeaders(upstreamResponse.headers, session))) {
       if (value !== undefined) res.setHeader(name, value);
     }
