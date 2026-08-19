@@ -18,6 +18,7 @@ import { securityToolsRouter } from './security/routes.js';
 import { filesRouter } from './files/routes.js';
 import { productRouter } from './product/routes.js';
 import { linuxRuntimeRouter } from './linuxRuntime/routes.js';
+import { xpraHttpProxyMiddleware } from './linuxRuntime/xpraProxy.js';
 import { createHostTrustPolicy, hasSupervisorTrust } from './auth/hostTrust.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -82,6 +83,10 @@ export function createApp(initialPort, options = {}) {
     },
     credentials: true
   }));
+
+  // Capability-scoped proxy: mantém Xpra HTTP/HTML5 dentro do origin CloudOS.
+  // O token é emitido apenas pela API autenticada da POC e nunca é encaminhado ao Xpra.
+  app.use(xpraHttpProxyMiddleware);
 
   app.use(express.json({ limit: '5mb' }));
 
