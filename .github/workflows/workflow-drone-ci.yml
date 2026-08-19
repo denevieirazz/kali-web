@@ -22,16 +22,29 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Checkout stabilization under audit
+      - name: Checkout target revision
         uses: actions/checkout@v4
         with:
-          ref: stabilization/cloudos-workflow-batch-4
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Setup Node 22
         uses: actions/setup-node@v4
         with:
           node-version: 22.23.2
+
+      - name: Verify checked out SHA integrity
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          TELEMETRY_OUTPUT_DIR: test-results/drone
+        run: node scripts/workflow/record-sha-telemetry.mjs --gate
+
+      - name: Unit test SHA telemetry gate
+        run: |
+          node scripts/workflow/test-record-sha-telemetry.mjs
+          node scripts/workflow/test-workflow-sha-contract.mjs
 
       - name: Verify stabilization scope
         run: node scripts/workflow/test-batch4-stabilization-scope.mjs
@@ -71,7 +84,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: workflow-drone-${{ github.sha }}
+          name: workflow-drone-${{ github.event.pull_request.head.sha || github.sha }}
           retention-days: 14
           if-no-files-found: warn
           path: |
