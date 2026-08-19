@@ -13,11 +13,21 @@ import {
   safeChildEnvironment,
   validateInstalledAsync,
 } from '../wsl/distroService.js';
+import {
+  XPRA_DISPLAY_END,
+  XPRA_DISPLAY_START,
+  XPRA_PORT_END,
+  XPRA_PORT_START,
+  chooseXpraPair,
+  displayForPort as displayForXpraPort,
+  validateLedgerPair,
+} from './xpraPairAllocator.js';
 
 const execFileAsync = promisify(execFile);
-const PORT_START = 14500;
-const PORT_END = 14549;
-const DISPLAY_START = 100;
+const PORT_START = XPRA_PORT_START;
+const PORT_END = XPRA_PORT_END;
+const DISPLAY_START = XPRA_DISPLAY_START;
+const DISPLAY_END = XPRA_DISPLAY_END;
 const MAX_ACTIVE_SESSIONS = 4;
 const START_TIMEOUT_MS = 25_000;
 const HEALTH_TIMEOUT_MS = 4_000;
@@ -137,7 +147,7 @@ export function buildXpraProbeCommand(appCommand) {
 }
 
 export function displayForPort(port) {
-  return DISPLAY_START + (port - PORT_START);
+  return displayForXpraPort(port);
 }
 
 export function buildXpraStartCommand({ appCommand, port, sessionId = 'cloudos-poc1' }) {
@@ -169,18 +179,42 @@ async function isPortFree(port) {
   });
 }
 
-async function findFreePort() {
-  for (let port = PORT_START; port <= PORT_END; port += 1) {
-    if (await isPortFree(port)) return port;
+async function scanOccupiedDisplays(distribution) {
+  const command = [
+    `for n in $(seq ${DISPLAY_START} ${DISPLAY_END}); do`,
+    'if [ -S "/tmp/.X11-unix/X$n" ] || [ -e "/tmp/.X$n-lock" ]; then echo "$n"; fi;',
+    'done',
+  ].join(' ');
+  try {
+    const { stdout } = await execWsl(distribution, command, 5000);
+    return String(stdout || '')
+      .split(/\r?\n/)
+      .map(value => Number(value.trim()))
+      .filter(display => Number.isInteger(display) && display >= DISPLAY_START && display <= DISPLAY_END);
+  } catch (cause) {
+    throw createPocError('XPRA_DISPLAY_SCAN_FAILED', `Não foi possível inspecionar DISPLAY ${DISPLAY_START}-${DISPLAY_END} em ${distribution}: ${cause.message}`);
   }
-  return null;
 }
 
-async function reservePort() {
-  const port = await findFreePort();
-  if (port === null) throw createPocError('XPRA_PORT_UNAVAILABLE', `Nenhuma porta localhost livre entre ${PORT_START}-${PORT_END}.`);
-  reservedPorts.add(port);
-  return port;
+async function findFreePair(distribution) {
+  const occupiedDisplays = await scanOccupiedDisplays(distribution);
+  const freePorts = [];
+  for (let port = PORT_START; port <= PORT_END; port += 1) {
+    if (await isPortFree(port)) freePorts.push(port);
+  }
+  return chooseXpraPair({ occupiedDisplays, freePorts });
+}
+
+async function reservePair(distribution) {
+  const pair = await findFreePair(distribution);
+  if (!pair) {
+    throw createPocError(
+      'XPRA_PAIR_UNAVAILABLE',
+      `Nenhum par DISPLAY/porta livre entre :${DISPLAY_START}-:${DISPLAY_END} e ${PORT_START}-${PORT_END}.`,
+    );
+  }
+  reservedPorts.add(pair.port);
+  return pair;
 }
 
 function releasePort(port) {
@@ -428,11 +462,17 @@ export async function checkXpraPocReadiness({ app = 'xclock', distribution } = {
     return { ready: false, errorCode: cause.code, error: cause.message, distribution: selected, checks, durationMs: elapsedMs(started) };
   }
 
-  const port = await findFreePort();
-  checks.port = port === null
-    ? { ok: false, error: `Faixa ${PORT_START}-${PORT_END} ocupada.` }
-    : { ok: true, candidate: port, range: `${PORT_START}-${PORT_END}` };
-  if (port === null) return { ready: false, errorCode: 'XPRA_PORT_UNAVAILABLE', error: 'Nenhuma porta da POC está livre.', distribution: selected, checks, durationMs: elapsedMs(started) };
+  let pair;
+  try {
+    pair = await findFreePair(selected);
+  } catch (cause) {
+    checks.port = { ok: false, error: cause.message };
+    return { ready: false, errorCode: cause.code || 'XPRA_PAIR_SCAN_FAILED', error: cause.message, distribution: selected, checks, durationMs: elapsedMs(started) };
+  }
+  checks.port = pair
+    ? { ok: true, candidate: pair.port, display: pair.display, range: `${PORT_START}-${PORT_END}` }
+    : { ok: false, error: `Nenhum par DISPLAY/porta livre em :${DISPLAY_START}-:${DISPLAY_END} / ${PORT_START}-${PORT_END}.` };
+  if (!pair) return { ready: false, errorCode: 'XPRA_PAIR_UNAVAILABLE', error: 'Nenhum par DISPLAY/porta da POC está livre.', distribution: selected, checks, durationMs: elapsedMs(started) };
 
   const orphans = await inspectOwnedOrphans({ distribution: selected });
   checks.orphans = { ok: orphans.length === 0, count: orphans.length, sessions: orphans };
@@ -456,6 +496,12 @@ async function inspectOwnedOrphans({ distribution = null } = {}) {
   const survivors = [];
   for (const entry of ledger) {
     if (sessions.has(entry.id)) {
+      survivors.push(entry);
+      continue;
+    }
+    const ledgerPair = validateLedgerPair(entry);
+    if (!ledgerPair.ok) {
+      orphans.push({ ...entry, classification: ledgerPair.code, pairEvidence: ledgerPair.evidence });
       survivors.push(entry);
       continue;
     }
@@ -541,8 +587,8 @@ export async function startXpraPoc({ app, distribution, ownerId } = {}) {
 
     const selected = readiness.distribution;
     const definition = ALLOWED_APPS[appId];
-    const port = await reservePort();
-    const display = displayForPort(port);
+    const pair = await reservePair(selected);
+    const { port, display } = pair;
     const id = `xpra-${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`;
     const session = {
       id,

@@ -17,6 +17,14 @@ import {
   validateInstalledAsync,
 } from '../wsl/distroService.js';
 import { getXpraPocSessions } from './xpraPoc.js';
+import {
+  XPRA_DISPLAY_END,
+  XPRA_DISPLAY_START,
+  XPRA_PORT_END,
+  XPRA_PORT_START,
+  chooseXpraPair,
+  validateLedgerPair,
+} from './xpraPairAllocator.js';
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -28,10 +36,10 @@ const TELEMETRY_DIR = path.join(EVIDENCE_ROOT, 'telemetry');
 const REPORT_FILE = path.join(EVIDENCE_ROOT, 'POC1_PREFLIGHT_REPORT.md');
 const WINDOW_BASELINE_FILE = path.join(EVIDENCE_ROOT, 'WINDOW_BASELINE.json');
 const RUNTIME_LEDGER_FILE = path.join(os.tmpdir(), 'cloudos-linux-runtime-poc1-sessions.json');
-const PORT_START = 14500;
-const PORT_END = 14549;
-const DISPLAY_START = 100;
-const DISPLAY_END = 149;
+const PORT_START = XPRA_PORT_START;
+const PORT_END = XPRA_PORT_END;
+const DISPLAY_START = XPRA_DISPLAY_START;
+const DISPLAY_END = XPRA_DISPLAY_END;
 const STATIC_TIMEOUT_MS = 15_000;
 const SERVER_TIMEOUT_MS = 25_000;
 const PROXY_TIMEOUT_MS = 5_000;
@@ -363,7 +371,7 @@ async function probeWebSocketUrl(url, origin, timeoutMs = 2500) {
 async function scanDisplays(distribution) {
   const started = Date.now();
   const command = [
-    'for n in $(seq 100 149); do',
+    `for n in $(seq ${DISPLAY_START} ${DISPLAY_END}); do`,
     'if [ -S "/tmp/.X11-unix/X$n" ] || [ -e "/tmp/.X$n-lock" ]; then echo "DISPLAY:$n"; fi;',
     'done;',
     'echo XPRA_LIST_BEGIN;',
@@ -412,8 +420,9 @@ async function inspectOrphans(distribution) {
   if (ledgerState.error) return { active, ledgerState, orphaned };
   for (const entry of ledgerState.sessions) {
     if (active.some(session => session.id === entry.id)) continue;
-    if (!entry.distribution || !Number.isInteger(Number(entry.display)) || !Number.isInteger(Number(entry.port))) {
-      orphaned.push({ ...entry, classification: 'LEDGER_ENTRY_INVALID' });
+    const pairValidation = validateLedgerPair(entry);
+    if (!entry.distribution || !pairValidation.ok) {
+      orphaned.push({ ...entry, classification: pairValidation.ok ? 'LEDGER_ENTRY_INVALID' : pairValidation.code, pairEvidence: pairValidation.evidence });
       continue;
     }
     if (distribution && entry.distribution !== distribution) {
@@ -433,13 +442,7 @@ async function inspectOrphans(distribution) {
 }
 
 function choosePair(displayScan, portScan) {
-  const occupiedDisplays = new Set(displayScan.occupied);
-  const freePorts = new Set(portScan.free);
-  for (let display = DISPLAY_END; display >= DISPLAY_START; display -= 1) {
-    const port = PORT_START + (display - DISPLAY_START);
-    if (!occupiedDisplays.has(display) && freePorts.has(port)) return { display, port };
-  }
-  return null;
+  return chooseXpraPair({ occupiedDisplays: displayScan.occupied, freePorts: portScan.free });
 }
 
 function missingRequiredFlags(helpText) {
@@ -842,7 +845,7 @@ async function validateStatic(run, requestedDistribution) {
       id: 'display-range', layer: 'XPRA', status: displayScan.occupied.length === 50 ? 'FAIL' : displayScan.occupied.length ? 'WARN' : 'PASS',
       code: displayScan.occupied.length === 50 ? 'XPRA_DISPLAY_RANGE_FULL' : displayScan.occupied.length ? 'XPRA_DISPLAY_RANGE_PARTIALLY_OCCUPIED' : 'XPRA_DISPLAY_RANGE_CLEAR',
       component: ':100..:149',
-      cause: displayScan.occupied.length ? 'Existem displays ocupados; o preflight só usará par confirmado livre.' : 'Nenhum socket/lock X11 foi encontrado na faixa.',
+      cause: displayScan.occupied.length ? 'Existem displays ocupados; o allocator compartilhado só usará par correspondente confirmado livre.' : 'Nenhum socket/lock X11 foi encontrado na faixa.',
       evidence: { occupied: displayScan.occupied, xpraList: displayScan.xpraList }, durationMs: displayScan.durationMs,
     });
   }
@@ -853,7 +856,7 @@ async function validateStatic(run, requestedDistribution) {
     id: 'port-range', layer: 'TRANSPORTE', status: portScan.free.length === 0 ? 'FAIL' : portScan.occupied.length ? 'WARN' : 'PASS',
     code: portScan.free.length === 0 ? 'XPRA_PORT_RANGE_FULL' : portScan.occupied.length ? 'XPRA_PORT_RANGE_PARTIALLY_OCCUPIED' : 'XPRA_PORT_RANGE_CLEAR',
     component: '127.0.0.1:14500..14549',
-    cause: portScan.free.length === 0 ? 'Nenhuma porta da faixa está disponível.' : portScan.occupied.length ? 'Algumas portas estão ocupadas; um par livre será selecionado.' : 'Toda a faixa está livre.',
+    cause: portScan.free.length === 0 ? 'Nenhuma porta da faixa está disponível.' : portScan.occupied.length ? 'Algumas portas estão ocupadas; o allocator compartilhado selecionará o primeiro par correspondente livre.' : 'Toda a faixa está livre.',
     evidence: { freeCount: portScan.free.length, occupied: portScan.occupied }, durationMs: portScan.durationMs,
   });
   const orphanStarted = Date.now();
@@ -894,7 +897,7 @@ async function validateStatic(run, requestedDistribution) {
   } else {
     addCheck(run, {
       id: 'dry-run-pair', layer: 'TRANSPORTE', status: 'PASS', code: 'PREFLIGHT_DISPLAY_PORT_PAIR_READY', component: 'display/port allocator',
-      cause: 'Par efêmero livre foi selecionado para o dry run.', evidence: `display=:${run.pair.display}; port=${run.pair.port}`,
+      cause: 'O mesmo allocator canônico do runtime selecionou o par efêmero para o dry run.', evidence: `display=:${run.pair.display}; port=${run.pair.port}`,
     });
   }
   run.metrics.staticPreflightMs = elapsedMs(staticStarted);
