@@ -63,9 +63,58 @@ type PocReadiness = {
   checks: Record<string, ReadinessCheck>;
 };
 
+type PreflightStatus = 'PASS' | 'WARN' | 'FAIL';
+type PreflightCheck = {
+  id: string;
+  layer: string;
+  status: PreflightStatus;
+  code: string;
+  component: string;
+  cause: string;
+  evidence: string;
+  durationMs: number | null;
+};
+type PreflightBoundary = {
+  status: PreflightStatus;
+  code: string;
+  component: string;
+  cause: string;
+  evidence: string;
+};
+type PhysicalPreflight = {
+  runId: string;
+  ownerId: string;
+  phase: 'static' | 'awaiting_iframe' | 'complete';
+  decision: 'GO' | 'NO_GO';
+  readyToClickXclock: boolean;
+  distribution: string | null;
+  display: number | null;
+  port: number | null;
+  clientUrl: string | null;
+  boundaries: Record<string, PreflightBoundary>;
+  checks: PreflightCheck[];
+  metrics: Record<string, number>;
+  artifacts: {
+    root: string;
+    report: string;
+    windowBaseline: string;
+    screenshots: string;
+    logs: string;
+    telemetry: string;
+    runLog: string | null;
+    runTelemetry: string | null;
+  };
+};
+type PendingPreflightIframe = {
+  runId: string;
+  clientUrl: string;
+  requestedAt: number;
+};
+
 type Props = { windowId: string };
 
 const pendingOwnerCleanup = new Map<string, number>();
+const PREFLIGHT_BOUNDARIES = ['WSL', 'DISTRO', 'XPRA', 'TRANSPORTE', 'PROXY', 'IFRAME'];
 
 function formatMs(value: number | null | undefined) {
   return value === null || value === undefined ? '—' : `${Math.round(value)} ms`;
@@ -76,15 +125,27 @@ function checkLabel(check: ReadinessCheck | undefined) {
   return check.ok ? 'OK' : 'FALHA';
 }
 
+function preflightDataOk(status: PreflightStatus | undefined) {
+  if (status === 'PASS') return 'true';
+  if (status === 'FAIL') return 'false';
+  return 'pending';
+}
+
 export default function LinuxRuntimePoc({ windowId }: Props) {
   const [status, setStatus] = useState<PocStatus | null>(null);
   const [readiness, setReadiness] = useState<PocReadiness | null>(null);
+  const [physicalPreflight, setPhysicalPreflight] = useState<PhysicalPreflight | null>(null);
+  const [pendingPreflightIframe, setPendingPreflightIframe] = useState<PendingPreflightIframe | null>(null);
   const [selectedApp, setSelectedApp] = useState('xclock');
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [preflightBusy, setPreflightBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const preflightIframeRef = useRef<HTMLIFrameElement | null>(null);
   const observerRef = useRef<MutationObserver | null>(null);
+  const preflightFinalizeRef = useRef(false);
+  const preflightConnectionTimerRef = useRef<number | null>(null);
   const actionStartedAt = useRef(new Map<string, number>());
   const frameRequestedAt = useRef(new Map<string, number>());
   const reconnectCounts = useRef(new Map<string, number>());
@@ -98,6 +159,10 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
     [selectedApp, status?.apps],
   );
   const appAlreadyRunning = sessions.some(session => session.app === selectedApp && ['starting', 'ready', 'degraded'].includes(session.state));
+  const controlsBusy = busy || preflightBusy;
+  const preflightProblem = physicalPreflight?.checks.find(check => check.status === 'FAIL')
+    ?? physicalPreflight?.checks.find(check => check.status === 'WARN')
+    ?? null;
 
   async function refresh() {
     const next = await apiClient<PocStatus>(`/api/linux-runtime/poc1?ownerId=${encodeURIComponent(windowId)}`);
@@ -124,6 +189,10 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
     });
     return () => {
       observerRef.current?.disconnect();
+      if (preflightConnectionTimerRef.current !== null) {
+        window.clearTimeout(preflightConnectionTimerRef.current);
+        preflightConnectionTimerRef.current = null;
+      }
       const timer = window.setTimeout(() => {
         pendingOwnerCleanup.delete(windowId);
         void apiClient('/api/linux-runtime/poc1/cleanup', {
@@ -180,6 +249,124 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
   useEffect(() => {
     if (activeSession?.id && readyUrl) frameRequestedAt.current.set(activeSession.id, performance.now());
   }, [activeSession?.id, readyUrl]);
+
+  async function runPhysicalPreflight() {
+    setPreflightBusy(true);
+    setError(null);
+    setPhysicalPreflight(null);
+    setPendingPreflightIframe(null);
+    preflightFinalizeRef.current = false;
+    if (preflightConnectionTimerRef.current !== null) {
+      window.clearTimeout(preflightConnectionTimerRef.current);
+      preflightConnectionTimerRef.current = null;
+    }
+    try {
+      const result = await apiClient<PhysicalPreflight>('/api/linux-runtime/poc1/preflight', {
+        method: 'POST',
+        body: JSON.stringify({ ownerId: windowId }),
+        timeoutMs: 90_000,
+      });
+      setPhysicalPreflight(result);
+      if (result.phase === 'awaiting_iframe' && result.clientUrl) {
+        setPendingPreflightIframe({
+          runId: result.runId,
+          clientUrl: result.clientUrl,
+          requestedAt: performance.now(),
+        });
+        return;
+      }
+      setPreflightBusy(false);
+    } catch (cause) {
+      setError(`POC1_PREFLIGHT_API_FAILED: ${cause instanceof Error ? cause.message : String(cause)}`);
+      setPreflightBusy(false);
+    }
+  }
+
+  async function finalizePreflightIframe(
+    pending: PendingPreflightIframe,
+    iframe: { status: 'PASS' | 'FAIL'; code?: string; cause?: string; evidence?: string; loadMs?: number; connectionMs?: number },
+  ) {
+    if (preflightFinalizeRef.current) return;
+    preflightFinalizeRef.current = true;
+    if (preflightConnectionTimerRef.current !== null) {
+      window.clearTimeout(preflightConnectionTimerRef.current);
+      preflightConnectionTimerRef.current = null;
+    }
+    try {
+      const result = await apiClient<PhysicalPreflight>(`/api/linux-runtime/poc1/preflight/${encodeURIComponent(pending.runId)}/finalize`, {
+        method: 'POST',
+        body: JSON.stringify({ ownerId: windowId, iframe }),
+        timeoutMs: 25_000,
+      });
+      setPhysicalPreflight(result);
+      setPendingPreflightIframe(null);
+      await Promise.all([refresh(), refreshReadiness(selectedApp)]).catch(() => undefined);
+    } catch (cause) {
+      setError(`POC1_PREFLIGHT_FINALIZE_FAILED: ${cause instanceof Error ? cause.message : String(cause)}`);
+      setPendingPreflightIframe(null);
+    } finally {
+      setPreflightBusy(false);
+    }
+  }
+
+  function onPreflightFrameLoad() {
+    const pending = pendingPreflightIframe;
+    const frame = preflightIframeRef.current;
+    if (!pending || !frame || preflightFinalizeRef.current) return;
+    const loadedAt = performance.now();
+    const loadMs = loadedAt - pending.requestedAt;
+    try {
+      const document = frame.contentDocument;
+      if (!document) {
+        void finalizePreflightIframe(pending, {
+          status: 'FAIL',
+          code: 'IFRAME_DOCUMENT_UNAVAILABLE',
+          cause: 'O iframe carregou, mas o documento HTML5 não ficou acessível para validar a conexão.',
+          evidence: 'contentDocument=null',
+          loadMs,
+        });
+        return;
+      }
+
+      const connected = () => {
+        void finalizePreflightIframe(pending, {
+          status: 'PASS',
+          loadMs,
+          connectionMs: performance.now() - pending.requestedAt,
+        });
+      };
+      const lost = () => {
+        void finalizePreflightIframe(pending, {
+          status: 'FAIL',
+          code: 'IFRAME_XPRA_CONNECTION_LOST',
+          cause: 'O cliente HTML5 perdeu a conexão antes de completar o dry run.',
+          evidence: 'document event=connection-lost',
+          loadMs,
+          connectionMs: performance.now() - pending.requestedAt,
+        });
+      };
+      document.addEventListener('connection-established', connected, { once: true });
+      document.addEventListener('connection-lost', lost, { once: true });
+      preflightConnectionTimerRef.current = window.setTimeout(() => {
+        void finalizePreflightIframe(pending, {
+          status: 'FAIL',
+          code: 'IFRAME_XPRA_CONNECTION_TIMEOUT',
+          cause: 'O HTML5 carregou, mas connection-established não foi observado dentro do limite.',
+          evidence: 'frontend timeout=15000ms',
+          loadMs,
+          connectionMs: performance.now() - pending.requestedAt,
+        });
+      }, 15_000);
+    } catch (cause) {
+      void finalizePreflightIframe(pending, {
+        status: 'FAIL',
+        code: 'IFRAME_ORIGIN_OR_SANDBOX_BLOCKED',
+        cause: 'O CloudOS não conseguiu inspecionar o iframe de preflight no mesmo origin/sandbox.',
+        evidence: cause instanceof Error ? cause.message : String(cause),
+        loadMs,
+      });
+    }
+  }
 
   async function start() {
     setBusy(true);
@@ -324,24 +511,53 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
           <span>{activeSession ? `${activeSession.distribution} · DISPLAY :${activeSession.display}` : 'Xpra HTML5 · CloudOS origin proxy'}</span>
         </div>
         <div className="linux-runtime-poc__controls">
+          <button type="button" onClick={runPhysicalPreflight} disabled={controlsBusy || sessions.length > 0}>
+            {preflightBusy ? 'Preflight em execução…' : 'Linux Runtime Preflight'}
+          </button>
           <select
             aria-label="Aplicativo Linux da POC"
             value={selectedApp}
-            disabled={busy}
+            disabled={controlsBusy}
             onChange={event => setSelectedApp(event.target.value)}
           >
             {(status?.apps ?? [{ id: 'xclock', command: 'xclock', title: 'XClock' }]).map(app => (
               <option key={app.id} value={app.id}>{app.title}</option>
             ))}
           </select>
-          <button type="button" onClick={start} disabled={busy || appAlreadyRunning || sessions.length >= (status?.maxAppsPerWindow ?? 4)}>
+          <button type="button" onClick={start} disabled={controlsBusy || appAlreadyRunning || sessions.length >= (status?.maxAppsPerWindow ?? 4)}>
             {busy ? 'Processando…' : appAlreadyRunning ? `${selectedTitle} ativo` : `Abrir ${selectedTitle}`}
           </button>
           {readiness?.errorCode === 'LINUX_POC_ORPHANED_SESSION' && (
-            <button type="button" onClick={cleanupOrphans} disabled={busy}>Limpar órfãos</button>
+            <button type="button" onClick={cleanupOrphans} disabled={controlsBusy}>Limpar órfãos</button>
           )}
         </div>
       </header>
+
+      <section className="linux-runtime-poc__readiness" aria-label="Physical Preflight POC 1">
+        <strong>
+          {!physicalPreflight
+            ? 'PHYSICAL PREFLIGHT NÃO EXECUTADO'
+            : physicalPreflight.phase === 'awaiting_iframe'
+              ? 'PHYSICAL PREFLIGHT VALIDANDO IFRAME'
+              : `PHYSICAL PREFLIGHT ${physicalPreflight.decision === 'GO' ? 'GO' : 'NO GO'}`}
+        </strong>
+        <div>
+          {PREFLIGHT_BOUNDARIES.map(name => (
+            <span key={name} data-ok={preflightDataOk(physicalPreflight?.boundaries?.[name]?.status)}>
+              {name}: {physicalPreflight?.boundaries?.[name]?.status ?? 'PENDENTE'}
+            </span>
+          ))}
+        </div>
+        {physicalPreflight && (
+          <small>
+            {physicalPreflight.readyToClickXclock
+              ? `PRONTO PARA ABRIR XCLOCK · report=${physicalPreflight.artifacts.report}`
+              : preflightProblem
+                ? `${preflightProblem.code} · ${preflightProblem.component} · ${preflightProblem.cause} · ${preflightProblem.evidence}`
+                : `run=${physicalPreflight.runId} · phase=${physicalPreflight.phase}`}
+          </small>
+        )}
+      </section>
 
       <section className="linux-runtime-poc__readiness" aria-label="Readiness POC 1">
         <strong>{readiness?.ready ? 'READINESS OK' : `READINESS ${readiness?.errorCode ?? 'VERIFICANDO'}`}</strong>
@@ -354,6 +570,21 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
         </div>
         {!readiness?.ready && readiness?.error && <small>{readiness.error}</small>}
       </section>
+
+      {pendingPreflightIframe && (
+        <iframe
+          ref={preflightIframeRef}
+          key={pendingPreflightIframe.runId}
+          title="CloudOS Linux Runtime Preflight — Xpra HTML5"
+          src={pendingPreflightIframe.clientUrl}
+          sandbox="allow-scripts allow-same-origin"
+          referrerPolicy="no-referrer"
+          onLoad={onPreflightFrameLoad}
+          aria-hidden="true"
+          tabIndex={-1}
+          style={{ position: 'fixed', left: '-10000px', top: 0, width: 640, height: 480, opacity: 0, pointerEvents: 'none' }}
+        />
+      )}
 
       {sessions.length > 0 && (
         <nav className="linux-runtime-poc__sessions" aria-label="Sessões Linux ativas">
@@ -390,7 +621,7 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
               {activeSession?.state === 'failed'
                 ? `${activeSession.errorCode ?? 'XPRA_START_FAILED'}: ${activeSession.error ?? 'Xpra não iniciou.'}`
                 : readiness?.ready
-                  ? 'Pré-requisitos presentes. Inicie xclock, xeyes, xterm ou gedit; nenhuma instalação será feita.'
+                  ? 'Pré-requisitos presentes. Execute Linux Runtime Preflight antes da primeira prova física; xclock não é iniciado pelo preflight.'
                   : readiness?.error ?? 'Validando WSL, distro, Xpra, app e portas.'}
             </p>
             {error && <pre>{error}</pre>}
@@ -406,12 +637,18 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
             <div><strong>Lifecycle</strong><span>restart {activeSession.metrics.restartCount}</span><span>reconnect {activeSession.metrics.reconnectCount}</span><span>falhas {activeSession.metrics.healthFailures}</span></div>
             <div><strong>Health</strong><span>{activeHealth?.healthy ? 'saudável' : activeHealth?.classification ?? activeSession.state}</span><span>TCP {activeHealth?.windowsTcp?.ok === false ? 'falha' : 'ok'}</span><span>WS {activeHealth?.websocket?.ok === false ? 'falha' : 'ok'}</span></div>
             <div className="linux-runtime-poc__session-actions">
-              <button type="button" onClick={() => restart(activeSession)} disabled={busy}>Restart</button>
-              <button type="button" onClick={() => stop(activeSession)} disabled={busy}>Stop</button>
+              <button type="button" onClick={() => restart(activeSession)} disabled={controlsBusy}>Restart</button>
+              <button type="button" onClick={() => stop(activeSession)} disabled={controlsBusy}>Stop</button>
             </div>
           </>
+        ) : physicalPreflight ? (
+          <>
+            <div><strong>Preflight</strong><span>{physicalPreflight.decision}</span><span>fase {physicalPreflight.phase}</span><span>xclock NÃO executado</span></div>
+            <div><strong>Dry Run</strong><span>DISPLAY {physicalPreflight.display === null ? '—' : `:${physicalPreflight.display}`}</span><span>porta {physicalPreflight.port ?? '—'}</span><span>iframe {formatMs(physicalPreflight.metrics.iframeConnectionMs)}</span></div>
+            <div><strong>Forensics</strong><span>baseline {physicalPreflight.artifacts.windowBaseline}</span><span>logs {physicalPreflight.artifacts.logs}</span></div>
+          </>
         ) : (
-          <span>Telemetria aguardando sessão real.</span>
+          <span>Telemetria aguardando preflight ou sessão real.</span>
         )}
       </aside>
 
