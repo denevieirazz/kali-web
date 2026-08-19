@@ -66,6 +66,15 @@ test('POC1 dev server forwards capability HTTP and WebSocket traffic to the back
   assert.match(viteConfig, /const backendHttpTarget = `http:\/\/127\.0\.0\.1:\$\{backendPort\}`/);
 });
 
+test('CloudOS minimize preserves mounted app lifecycle instead of closing Linux Runtime sessions', () => {
+  const windowSource = fs.readFileSync(path.join(repoRoot, 'frontend', 'src', 'components', 'Window', 'Window.tsx'), 'utf8');
+  assert.doesNotMatch(windowSource, /if\s*\(\s*!win\s*\|\|\s*win\.isMinimized\s*\)\s*return\s+null/);
+  assert.match(windowSource, /if\s*\(\s*!win\s*\)\s*return\s+null/);
+  assert.match(windowSource, /display:\s*win\.isMinimized\s*\?\s*['"]none['"]\s*:\s*undefined/);
+  assert.match(windowSource, /aria-hidden=\{win\.isMinimized\s*\|\|\s*undefined\}/);
+  assert.match(windowSource, /focusWindow\(windowId\)/);
+});
+
 test('POC1 proxy rewrites frame policy for contained same-origin embedding', () => {
   assert.equal(proxyTest.rewriteCsp("default-src 'self'; frame-ancestors 'none'"), "default-src 'self'; frame-ancestors 'self'");
   assert.equal(proxyTest.rewriteCsp(null), "frame-ancestors 'self'");
