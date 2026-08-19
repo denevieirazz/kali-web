@@ -452,9 +452,22 @@ function missingRequiredFlags(helpText) {
   });
 }
 
-export function buildPreflightDryRunCommand({ display, port, runId }) {
+function redactSecret(value, secret) {
+  if (!secret) return value;
+  if (typeof value === 'string') return value.replaceAll(secret, '[REDACTED_XPRA_PASSWORD]');
+  if (Array.isArray(value)) return value.map(v => redactSecret(v, secret));
+  if (value && typeof value === 'object') {
+    const copy = {};
+    for (const [k, v] of Object.entries(value)) copy[k] = redactSecret(v, secret);
+    return copy;
+  }
+  return value;
+}
+
+export function buildPreflightDryRunCommand({ display, port, runId, password = 'test-only-secret-preflight' }) {
   if (!Number.isInteger(display) || display < DISPLAY_START || display > DISPLAY_END) throw new Error('Display fora da faixa POC1.');
   if (!Number.isInteger(port) || port < PORT_START || port > PORT_END) throw new Error('Porta fora da faixa POC1.');
+  if (!password || String(password).length < 16) throw new Error('Capability Xpra inválida.');
   const options = [
     `--session-name=${shellQuote(`cloudos-poc1-preflight-${runId}`)}`,
     '--daemon=no',
@@ -464,12 +477,13 @@ export function buildPreflightDryRunCommand({ display, port, runId }) {
     '--file-transfer=no',
     '--start-new-commands=no',
     '--bind=noabstract',
-    `--bind-tcp=127.0.0.1:${port},auth=allow`,
+    `--bind-tcp=127.0.0.1:${port},auth=env`,
     '--html=on',
   ];
   return [
     'set -eu',
     'unset DISPLAY WAYLAND_DISPLAY PULSE_SERVER',
+    `export XPRA_PASSWORD=${shellQuote(password)}`,
     `exec xpra seamless :${display} ${options.join(' ')}`,
   ].join('; ');
 }
@@ -494,7 +508,10 @@ function proxyPath(session) {
 }
 
 function appendSessionLog(run, session, chunk, stream) {
-  const text = String(chunk || '');
+  let text = String(chunk || '');
+  if (session?.xpraPassword) {
+    text = text.replaceAll(session.xpraPassword, '[REDACTED_XPRA_PASSWORD]');
+  }
   session.logTail = `${session.logTail}${text}`.slice(-12_000);
   logRun(run, `XPRA_${stream.toUpperCase()} ${text.replace(/\r?\n/g, ' ').trim()}`);
 }
@@ -547,6 +564,7 @@ async function startDryRun(run, pair) {
   if (!await recheckPairBeforeSpawn(run, pair)) return false;
   installExitHook();
   const started = Date.now();
+  const xpraPassword = crypto.randomBytes(24).toString('hex');
   const session = {
     id: `preflight-${run.id}`,
     preflight: true,
@@ -554,6 +572,7 @@ async function startDryRun(run, pair) {
     distribution: run.distribution,
     display: pair.display,
     port: pair.port,
+    xpraPassword,
     state: 'starting',
     proxyToken: crypto.randomBytes(24).toString('hex'),
     child: null,
@@ -562,8 +581,8 @@ async function startDryRun(run, pair) {
   };
   run.session = session;
   proxySessions.set(session.id, session);
-  const command = buildPreflightDryRunCommand({ display: pair.display, port: pair.port, runId: run.id });
-  logRun(run, `DRY_RUN_COMMAND ${command}`);
+  const command = buildPreflightDryRunCommand({ display: pair.display, port: pair.port, runId: run.id, password: xpraPassword });
+  logRun(run, `DRY_RUN_COMMAND ${command.replaceAll(xpraPassword, '[REDACTED_XPRA_PASSWORD]')}`);
   const child = spawn(WSL_EXE, ['-d', session.distribution, '--', 'sh', '-lc', command], {
     windowsHide: true, env: safeChildEnvironment(), stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -593,7 +612,7 @@ async function startDryRun(run, pair) {
   addCheck(run, {
     id: 'dry-run-server', layer: 'XPRA', status: 'PASS', code: 'XPRA_DRY_RUN_SERVER_READY',
     component: `Xpra seamless :${session.display}`, cause: 'Servidor Xpra efêmero respondeu a xpra info sem iniciar xclock.',
-    evidence: `display=:${session.display}; port=${session.port}; startChild=false`, durationMs: server.durationMs,
+    evidence: `display=:${session.display}; port=${session.port}; auth=env; startChild=false`, durationMs: server.durationMs,
   });
   return true;
 }
@@ -668,7 +687,8 @@ async function writeArtifacts(run) {
   const context = await gitContext();
   run.git = context;
   const reportDecision = phaseDecision(run);
-  const telemetry = {
+  const secret = run.session?.xpraPassword;
+  const rawTelemetry = {
     version: 1, runId: run.id, ownerId: run.ownerId, phase: run.phase, startedAt: run.startedAt,
     completedAt: run.phase === 'complete' ? new Date().toISOString() : null,
     decision: reportDecision, readyToClickXclock: run.phase === 'complete' && decisionFor(run) === 'GO',
@@ -678,6 +698,7 @@ async function writeArtifacts(run) {
     proxy: run.session ? { httpRequests: run.session.metrics.proxyHttpRequests, webSocketConnections: run.session.metrics.proxyWebSocketConnections } : null,
     checks: run.checks,
   };
+  const telemetry = redactSecret(rawTelemetry, secret);
   if (run.telemetryFile) {
     try { fs.writeFileSync(run.telemetryFile, JSON.stringify(telemetry, null, 2), 'utf8'); } catch {}
   }
@@ -698,11 +719,11 @@ async function writeArtifacts(run) {
   const boundaries = boundarySummary(run);
   for (const layer of BOUNDARY_ORDER) {
     const item = boundaries[layer];
-    lines.push(`| ${layer} | **${item.status}** | \`${item.code}\` | ${escapeMd(item.component)} | ${escapeMd(item.cause)} | ${escapeMd(item.evidence)} |`);
+    lines.push(`| ${layer} | **${item.status}** | \`${item.code}\` | ${escapeMd(redactSecret(item.component, secret))} | ${escapeMd(redactSecret(item.cause, secret))} | ${escapeMd(redactSecret(item.evidence, secret))} |`);
   }
   lines.push('', '## Checks', '', '| Item | Layer | GO/NOGO | Status | Code | Cause | Evidence |', '|---|---|---|---|---|---|---|');
   for (const check of run.checks) {
-    lines.push(`| ${escapeMd(check.id)} | ${escapeMd(check.layer)} | ${check.status === 'FAIL' ? '**NO GO**' : '**GO**'} | **${check.status}** | \`${check.code}\` | ${escapeMd(check.cause)} | ${escapeMd(check.evidence)} |`);
+    lines.push(`| ${escapeMd(check.id)} | ${escapeMd(check.layer)} | ${check.status === 'FAIL' ? '**NO GO**' : '**GO**'} | **${check.status}** | \`${check.code}\` | ${escapeMd(redactSecret(check.cause, secret))} | ${escapeMd(redactSecret(check.evidence, secret))} |`);
   }
   lines.push(
     '', '## Metrics', '', '```json', JSON.stringify(run.metrics, null, 2), '```', '',
@@ -1003,10 +1024,10 @@ export async function startPhysicalPreflight({ ownerId, distribution, backendOri
       return finalizeEarly(run);
     }
     run.phase = 'awaiting_iframe';
-    run.clientUrl = `${proxyPath(run.session)}?clipboard=no&keyboard=no&printing=no&file_transfer=no&sound=no&floating_menu=no&reconnect=no`;
+    run.clientUrl = `${proxyPath(run.session)}?password=${encodeURIComponent(run.session.xpraPassword)}&clipboard=no&keyboard=no&printing=no&file_transfer=no&sound=no&floating_menu=no&reconnect=no`;
     addCheck(run, {
       id: 'iframe-boundary', layer: 'IFRAME', status: 'WARN', code: 'IFRAME_VALIDATION_PENDING', component: 'CloudOS hidden preflight iframe',
-      cause: 'Backend, proxy e WebSocket passaram; falta HTML5 do cliente CloudOS confirmar connection-established.', evidence: run.clientUrl,
+      cause: 'Backend, proxy e WebSocket passaram; falta HTML5 do cliente CloudOS confirmar connection-established.', evidence: run.clientUrl.replaceAll(run.session.xpraPassword, '[REDACTED_XPRA_PASSWORD]'),
     });
     await writeArtifacts(run);
     run.autoFinalizeTimer = setTimeout(() => {
@@ -1094,5 +1115,6 @@ export const __test = {
   decisionFor,
   evidenceRoot: EVIDENCE_ROOT,
   missingRequiredFlags,
+  redactSecret,
   requiredXpraFlags: REQUIRED_XPRA_FLAGS,
 };

@@ -8,21 +8,28 @@ import {
   validateLedgerPair,
 } from '../src/linuxRuntime/xpraPairAllocator.js';
 
-test('physical preflight dry run never launches xclock or any child application', () => {
+test('physical preflight dry run uses ephemeral auth=env and never launches xclock or any child application', () => {
   const command = __test.buildPreflightDryRunCommand({
     display: 149,
     port: 14549,
     runId: 'contract',
+    password: 'ephemeral-secret-test-2026',
   });
   assert.match(command, /xpra seamless :149/);
-  assert.match(command, /--bind-tcp=127\.0\.0\.1:14549,auth=allow/);
+  assert.match(command, /--bind-tcp=127\.0\.0\.1:14549,auth=env/);
+  assert.match(command, /export XPRA_PASSWORD='ephemeral-secret-test-2026'/);
   assert.match(command, /--html=on/);
   assert.match(command, /--start-new-commands=no/);
   assert.match(command, /unset DISPLAY WAYLAND_DISPLAY PULSE_SERVER/);
+  assert.doesNotMatch(command, /auth=allow/);
   assert.doesNotMatch(command, /--start-child/);
   assert.doesNotMatch(command, /--exit-with-children/);
   assert.doesNotMatch(command, /xclock|xeyes|xterm|gedit|firefox|gimp/i);
   assert.doesNotMatch(command, /0\.0\.0\.0/);
+
+  // Rejeita senhas curtas ou inválidas
+  assert.throws(() => __test.buildPreflightDryRunCommand({ display: 149, port: 14549, runId: 'c', password: 'short' }), /Capability Xpra inválida/);
+  assert.throws(() => __test.buildPreflightDryRunCommand({ display: 149, port: 14549, runId: 'c', password: '' }), /Capability Xpra inválida/);
 });
 
 test('shared allocator chooses the first matching free DISPLAY and localhost port pair', () => {
@@ -107,4 +114,19 @@ test('boundary summary marks downstream layers not reached after an exact upstre
 test('GO is impossible when any preflight check failed', () => {
   assert.equal(__test.decisionFor({ checks: [{ status: 'PASS' }, { status: 'WARN' }] }), 'GO');
   assert.equal(__test.decisionFor({ checks: [{ status: 'PASS' }, { status: 'FAIL' }] }), 'NO_GO');
+});
+
+test('redactSecret sanitizes strings, objects, arrays and nested structures', () => {
+  const secret = 'super-secret-token-123456';
+  assert.equal(__test.redactSecret(`connect to http://127.0.0.1?secret=${secret}`, secret), 'connect to http://127.0.0.1?secret=[REDACTED_XPRA_PASSWORD]');
+  assert.deepEqual(__test.redactSecret({ auth: secret, nested: { key: `val-${secret}` } }, secret), {
+    auth: '[REDACTED_XPRA_PASSWORD]',
+    nested: { key: 'val-[REDACTED_XPRA_PASSWORD]' },
+  });
+  assert.deepEqual(__test.redactSecret([secret, 'clean', { val: secret }], secret), [
+    '[REDACTED_XPRA_PASSWORD]',
+    'clean',
+    { val: '[REDACTED_XPRA_PASSWORD]' },
+  ]);
+  assert.equal(__test.redactSecret('no secret', null), 'no secret');
 });
