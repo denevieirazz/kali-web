@@ -10,6 +10,7 @@ import { connectHostLease, readHostLeaseConfig } from './runtime/hostLease.js';
 import { setupTerminalWebSocket } from './terminal/websocket.js';
 import { handleXpraProxyUpgrade } from './linuxRuntime/xpraProxy.js';
 import { shutdownXpraPocRuntime } from './linuxRuntime/xpraPoc.js';
+import { shutdownPhysicalPreflight } from './linuxRuntime/preflight.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -174,6 +175,7 @@ async function startServer() {
     for (const client of wss?.clients || []) client.terminate();
     wss?.close();
     const finish = async () => {
+      await shutdownPhysicalPreflight();
       await shutdownXpraPocRuntime();
       const db = getDb();
       if (db) {
