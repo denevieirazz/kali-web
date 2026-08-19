@@ -45,6 +45,7 @@ jobs:
       - name: Unit test SHA telemetry gate
         run: |
           node scripts/workflow/test-record-sha-telemetry.mjs
+          node scripts/workflow/test-verify-spec-integrity.mjs
           node scripts/workflow/test-workflow-sha-contract.mjs
       - name: Verify stabilization scope
         run: node scripts/workflow/test-batch4-stabilization-scope.mjs
@@ -141,41 +142,8 @@ jobs:
         run: node scripts/workflow/record-sha-telemetry.mjs --gate
       - name: Verify stabilization scope
         run: node scripts/workflow/test-batch4-stabilization-scope.mjs
-      - name: Prepare isolated human missions
-        shell: bash
-        run: |
-          node <<'NODE'
-          const fs = require('node:fs');
-          const file = 'tests/playwright/workflow-human-simulation-v2.spec.ts';
-          let source = fs.readFileSync(file, 'utf8');
-          if (source.includes("test.describe.serial('Workflow Human User Simulation v2'")) {
-            source = source.replace("test.describe.serial('Workflow Human User Simulation v2'", "test.describe('Workflow Human User Simulation v2'");
-          } else if (!source.includes("test.describe('Workflow Human User Simulation v2'")) {
-            throw new Error('Bloco describe esperado da simulação v2 não foi encontrado.');
-          }
-          const hardenedEnsureFiles = `async function ensureFiles(page: import('@playwright/test').Page) {
-            let files = page.locator('.cf-root').last();
-            const filesWindow = page.locator('.window:has(.cf-root)').last();
-            if (await files.isVisible().catch(() => false) && await filesWindow.evaluate(element => element.classList.contains('active')).catch(() => false)) {
-              return files;
-            }
-            const workspace = await ensureWorkspace(page);
-            const workspaceWindow = page.locator('.window:has(.workflow-workspace)').last();
-            if (!await workspaceWindow.evaluate(element => element.classList.contains('active')).catch(() => false)) {
-              await page.keyboard.press('Control+Alt+1');
-              await expect(workspaceWindow).toHaveClass(/active/, { timeout: 10_000 });
-            }
-            await workspace.locator('.ww-quick-actions').getByRole('button', { name: 'Files', exact: true }).click();
-            files = page.locator('.cf-root').last();
-            await expect(files).toBeVisible({ timeout: 15_000 });
-            await expect(page.locator('.window:has(.cf-root)').last()).toHaveClass(/active/, { timeout: 10_000 });
-            return files;
-          }`;
-          const pattern = /async function ensureFiles\(page: import\('@playwright\/test'\)\.Page\) \{[\s\S]*?\n\}\n\nasync function createFile/;
-          if (!pattern.test(source)) throw new Error('Helper ensureFiles esperado não foi encontrado.');
-          source = source.replace(pattern, `${hardenedEnsureFiles}\n\nasync function createFile`);
-          fs.writeFileSync(file, source, 'utf8');
-          NODE
+      - name: Verify untampered spec integrity
+        run: node scripts/workflow/verify-spec-integrity.mjs
       - name: Install dependencies
         run: npm ci
       - name: Build CloudOS frontend

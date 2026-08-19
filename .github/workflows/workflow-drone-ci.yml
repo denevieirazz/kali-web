@@ -44,6 +44,7 @@ jobs:
       - name: Unit test SHA telemetry gate
         run: |
           node scripts/workflow/test-record-sha-telemetry.mjs
+          node scripts/workflow/test-verify-spec-integrity.mjs
           node scripts/workflow/test-workflow-sha-contract.mjs
 
       - name: Verify stabilization scope
