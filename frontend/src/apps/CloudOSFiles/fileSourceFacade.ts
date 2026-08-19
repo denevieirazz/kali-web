@@ -18,6 +18,8 @@ import {
 import { type FileSourceKind, normalizeFilePath } from './fileSourcePolicy';
 import { windowsDirectorySource, type CopyProgress, type WindowsFileEntry } from './windowsDirectorySource';
 import { wslFileSource, type FileOperation, type WslFileEntry, type WslFilesStatus } from './wslFileSource';
+import { renameFileMarkReference } from '../../services/workflowFileMarks';
+import { renameRecentFileReference } from '../../services/workflowRecentFiles';
 
 export type CloudFileEntry = {
   name: string;
@@ -89,6 +91,12 @@ function toOpfs(entry: CloudFileEntry): OpfsFileEntry {
     originalPath: entry.originalPath,
     deletedAt: entry.deletedAt,
   };
+}
+
+function migrateRenameReferences(source: FileSourceKind, path: string[], oldName: string, newName: string) {
+  const target = { provider: source, path: [...path], name: oldName };
+  renameFileMarkReference(target, newName);
+  renameRecentFileReference(target, newName);
 }
 
 export const fileSourceFacade = {
@@ -191,9 +199,19 @@ export const fileSourceFacade = {
 
   async rename(source: FileSourceKind, path: string[], entry: CloudFileEntry, newName: string) {
     if (entry.symlink || entry.kind === 'symlink') throw new Error('Link simbólico não pode ser renomeado pelo CloudOS Files.');
-    if (source === 'opfs') return opfsRename(path, toOpfs(entry), newName);
-    if (source === 'windows') return windowsDirectorySource.rename(path, entry.name, newName);
-    return wslFileSource.move(path, entry.name, path, newName);
+    if (source === 'opfs') {
+      const result = await opfsRename(path, toOpfs(entry), newName);
+      migrateRenameReferences(source, path, entry.name, typeof result === 'string' ? result : newName);
+      return result;
+    }
+    if (source === 'windows') {
+      const result = await windowsDirectorySource.rename(path, entry.name, newName);
+      migrateRenameReferences(source, path, entry.name, typeof result === 'string' ? result : newName);
+      return result;
+    }
+    const result = await wslFileSource.move(path, entry.name, path, newName);
+    migrateRenameReferences(source, path, entry.name, typeof result === 'string' ? result : newName);
+    return result;
   },
 
   async trash(source: FileSourceKind, path: string[], entry: CloudFileEntry) {
