@@ -18,6 +18,7 @@ export default defineConfig(() => {
   } catch {}
   const configuredFrontendPort = Number.parseInt(process.env.CLOUDOS_FRONTEND_PORT || '15173', 10);
   const frontendPort = Number.isInteger(configuredFrontendPort) && configuredFrontendPort > 0 ? configuredFrontendPort : 15173;
+  const backendHttpTarget = `http://127.0.0.1:${backendPort}`;
   return {
     plugins: [
       react(),
@@ -45,8 +46,11 @@ export default defineConfig(() => {
       host: '127.0.0.1',
       strictPort: process.env.CLOUDOS_FRONTEND_STRICT_PORT === '1',
       proxy: {
-        '/api': { target: `http://127.0.0.1:${backendPort}`, changeOrigin: false },
-        '/ws': { target: `ws://127.0.0.1:${backendPort}`, ws: true, changeOrigin: false }
+        '/api': { target: backendHttpTarget, changeOrigin: false },
+        '/ws': { target: `ws://127.0.0.1:${backendPort}`, ws: true, changeOrigin: false },
+        // A surface Xpra usa URL relativa para permanecer same-origin com o CloudOS.
+        // No dev server, HTTP e Upgrade WebSocket precisam atravessar o mesmo backend capability proxy.
+        '/__cloudos': { target: backendHttpTarget, ws: true, changeOrigin: false }
       }
     }
   };

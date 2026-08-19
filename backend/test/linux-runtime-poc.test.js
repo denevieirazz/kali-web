@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   buildXpraProbeCommand,
   buildXpraStartCommand,
@@ -8,6 +11,9 @@ import {
   normalizePocApp,
 } from '../src/linuxRuntime/xpraPoc.js';
 import { __test as proxyTest } from '../src/linuxRuntime/xpraProxy.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(__dirname, '../..');
 
 test('POC1 allowlist remains intentionally small and blocks arbitrary commands', () => {
   assert.deepEqual(getAllowedLinuxPocApps().map(item => item.id), ['xclock', 'xeyes', 'xterm', 'gedit']);
@@ -52,6 +58,12 @@ test('POC1 CloudOS proxy strips capability prefix before forwarding to Xpra', ()
     targetPath: '/js/Client.js?x=1',
   });
   assert.equal(proxyTest.parseProxyRequest('/api/linux-runtime/poc1'), null);
+});
+
+test('POC1 dev server forwards capability HTTP and WebSocket traffic to the backend', () => {
+  const viteConfig = fs.readFileSync(path.join(repoRoot, 'frontend', 'vite.config.ts'), 'utf8');
+  assert.match(viteConfig, /['"]\/__cloudos['"]\s*:\s*\{[^}]*target:\s*backendHttpTarget[^}]*ws:\s*true[^}]*changeOrigin:\s*false/s);
+  assert.match(viteConfig, /const backendHttpTarget = `http:\/\/127\.0\.0\.1:\$\{backendPort\}`/);
 });
 
 test('POC1 proxy rewrites frame policy for contained same-origin embedding', () => {
