@@ -78,14 +78,26 @@ try {
   Require $false ("WSL string replacement threw an unexpected exception: " + $_.Exception.Message)
 }
 
-if (Test-Path -LiteralPath (Join-Path $root '.git')) {
-  $currentBranch = (& git -C $root branch --show-current 2>$null).Trim()
-  if ($currentBranch -like 'feature/wsl-core*') {
-    $base = '56f0ca8bc0a59987a43295da1ded277afc40e6e9'
-    $changed = @(& git -C $root diff --name-only "$base...HEAD" 2>$null)
-    $browserChanges = @($changed | Where-Object { $_ -match '(^|/)(Browser|browser)(/|\.|$)' })
-    Require ($browserChanges.Count -eq 0) ('Browser files changed in WSL-only branch: ' + ($browserChanges -join ', '))
+. (Join-Path $PSScriptRoot 'Get-GitContext.ps1')
+$base = '56f0ca8bc0a59987a43295da1ded277afc40e6e9'
+$gitContext = Get-CloudOSGitContext -RepoPath $root
+if (-not $gitContext.IsGit -or $null -ne $gitContext.GitError) {
+  Require $false "Git context resolution failed: $(if ($gitContext.GitError) { $gitContext.GitError } else { 'NOT_A_VALID_GIT_REPO' })"
+}
+if ($gitContext.IsKnownNonWslBranch) {
+  Write-Host "[GUARD_SKIPPED: KNOWN_NON_WSL_BRANCH (branch=$($gitContext.Branch), source=$($gitContext.ScopeSource), sha=$($gitContext.HeadSha.Substring(0,8)))]"
+} else {
+  $isWsl = (Get-Command wslpath -ErrorAction SilentlyContinue) -ne $null
+  $gitBin = if ($isWsl) { "git.exe" } else { "git" }
+  $targetRoot = if ($isWsl) { (& wslpath -w $root 2>$null).Trim() } else { $root }
+  $diffOut = & $gitBin -C $targetRoot diff --name-only "$base...HEAD" 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    Require $false "Git diff failed against base ${base}: $diffOut"
   }
+  $changed = @($diffOut | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+  $browserChanges = @($changed | Where-Object { $_ -match '(^|/)(Browser|browser)(/|\.|$)' })
+  Require ($browserChanges.Count -eq 0) ('Browser files changed in WSL-only branch: ' + ($browserChanges -join ', '))
+  Write-Host "[GUARD_EXECUTED: WSL_CORE_FOUNDATION_SCOPE_CHECK (branch=$($gitContext.Branch), detached=$($gitContext.IsDetached), source=$($gitContext.ScopeSource), changed=$($changed.Count), browserChanges=$($browserChanges.Count))]"
 }
 
 if ($failures.Count -gt 0) {

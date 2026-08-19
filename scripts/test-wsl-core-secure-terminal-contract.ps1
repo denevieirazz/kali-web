@@ -83,16 +83,28 @@ foreach ($textAndName in @(@($supervisorText,'Supervisor'),@($adapterText,'Node 
   }
 }
 
-if (Test-Path -LiteralPath (Join-Path $root '.git')) {
-  $currentBranch = (& git -C $root branch --show-current 2>$null).Trim()
-  if ($currentBranch -like 'feature/wsl-core*') {
-    $base = 'e72a1abe573bb0e41eea410b235cb78da53e8a26'
-    $changed = @(& git -C $root diff --name-only "$base...HEAD" 2>$null)
-    $browserChanges = @($changed | Where-Object { $_ -match '(^|/)(Browser|browser)(/|\.|$)' })
-    Require ($browserChanges.Count -eq 0) ('Browser files changed in secure Terminal branch: ' + ($browserChanges -join ', '))
-    $databaseChanges = @($changed | Where-Object { $_ -match '(^|/)(database|db)(/|\.|$)' })
-    Require ($databaseChanges.Count -eq 0) ('Database files changed in secure Terminal branch: ' + ($databaseChanges -join ', '))
+. (Join-Path $PSScriptRoot 'Get-GitContext.ps1')
+$base = 'e72a1abe573bb0e41eea410b235cb78da53e8a26'
+$gitContext = Get-CloudOSGitContext -RepoPath $root
+if (-not $gitContext.IsGit -or $null -ne $gitContext.GitError) {
+  Require $false "Git context resolution failed: $(if ($gitContext.GitError) { $gitContext.GitError } else { 'NOT_A_VALID_GIT_REPO' })"
+}
+if ($gitContext.IsKnownNonWslBranch) {
+  Write-Host "[GUARD_SKIPPED: KNOWN_NON_WSL_BRANCH (branch=$($gitContext.Branch), source=$($gitContext.ScopeSource), sha=$($gitContext.HeadSha.Substring(0,8)))]"
+} else {
+  $isWsl = (Get-Command wslpath -ErrorAction SilentlyContinue) -ne $null
+  $gitBin = if ($isWsl) { "git.exe" } else { "git" }
+  $targetRoot = if ($isWsl) { (& wslpath -w $root 2>$null).Trim() } else { $root }
+  $diffOut = & $gitBin -C $targetRoot diff --name-only "$base...HEAD" 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    Require $false "Git diff failed against base ${base}: $diffOut"
   }
+  $changed = @($diffOut | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+  $browserChanges = @($changed | Where-Object { $_ -match '(^|/)(Browser|browser)(/|\.|$)' })
+  Require ($browserChanges.Count -eq 0) ('Browser files changed in secure Terminal branch: ' + ($browserChanges -join ', '))
+  $databaseChanges = @($changed | Where-Object { $_ -match '(^|/)(database|db)(/|\.|$)' })
+  Require ($databaseChanges.Count -eq 0) ('Database files changed in secure Terminal branch: ' + ($databaseChanges -join ', '))
+  Write-Host "[GUARD_EXECUTED: WSL_CORE_SECURE_TERMINAL_SCOPE_CHECK (branch=$($gitContext.Branch), detached=$($gitContext.IsDetached), source=$($gitContext.ScopeSource), changed=$($changed.Count), browserChanges=$($browserChanges.Count), databaseChanges=$($databaseChanges.Count))]"
 }
 
 if ($failures.Count -gt 0) {

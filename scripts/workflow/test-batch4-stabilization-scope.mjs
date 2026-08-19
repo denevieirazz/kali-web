@@ -35,6 +35,8 @@ const allowed = new Set([
   'frontend/test/workflowDroneReport.test.js',
   'playwright.drone.config.ts',
   'playwright.human.config.ts',
+  'scripts/Get-GitContext.ps1',
+  'scripts/test-git-branch-resolution-contract.ps1',
   'scripts/workflow/record-sha-telemetry.mjs',
   'scripts/workflow/render-drone-report.mjs',
   'scripts/workflow/run-hardening-regressions.mjs',
