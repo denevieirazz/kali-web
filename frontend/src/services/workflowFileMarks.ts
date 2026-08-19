@@ -77,3 +77,30 @@ export function setFileMark(target: Pick<WorkflowFileMark, 'provider' | 'path' |
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('cloudos:workflow-changed'));
   return normalized;
 }
+
+export function renameFileMarkReference(target: Pick<WorkflowFileMark, 'provider' | 'path' | 'name'>, newName: string) {
+  if (!storageAvailable()) return null;
+  const safeName = safeSegment(newName);
+  if (!safeName) return null;
+  const marks = listFileMarks();
+  const oldKey = keyOf(target);
+  const current = marks.find(mark => keyOf(mark) === oldKey);
+  if (!current) return null;
+  const candidate = normalizeMark({ ...current, name: safeName, updatedAt: new Date().toISOString() });
+  if (!candidate) return null;
+  const newKey = keyOf(candidate);
+  const collision = marks.find(mark => keyOf(mark) === newKey && keyOf(mark) !== oldKey);
+  const renamed = normalizeMark({
+    ...candidate,
+    favorite: candidate.favorite || collision?.favorite || false,
+    pinned: candidate.pinned || collision?.pinned || false,
+  });
+  if (!renamed) return null;
+  const next = [renamed, ...marks.filter(mark => {
+    const key = keyOf(mark);
+    return key !== oldKey && key !== newKey;
+  })].filter(mark => mark.favorite || mark.pinned).slice(0, MAX_FILE_MARKS);
+  try { localStorage.setItem(FILE_MARKS_KEY, JSON.stringify(next)); } catch { return null; }
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('cloudos:workflow-changed'));
+  return renamed;
+}
