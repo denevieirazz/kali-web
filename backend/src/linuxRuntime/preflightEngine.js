@@ -627,6 +627,7 @@ async function stopDryRun(run) {
     try { session.child.kill(); } catch {}
   }
   session.state = 'stopped';
+  if (session.xpraPassword) session.xpraPassword = null;
   run.metrics.stopMs = elapsedMs(started);
   logRun(run, `DRY_RUN_STOP durationMs=${run.metrics.stopMs}; commandOk=${stop.ok}`);
 }
@@ -674,6 +675,7 @@ async function validatePostConditions(run) {
     evidence: ledgerState.error || (matching.length ? matching : `file=${RUNTIME_LEDGER_FILE}; matching=0`),
   });
   run.metrics.postConditionMs = elapsedMs(started);
+  if (session.xpraPassword) session.xpraPassword = null;
   proxySessions.delete(session.id);
   session.child = null;
 }
@@ -1024,10 +1026,10 @@ export async function startPhysicalPreflight({ ownerId, distribution, backendOri
       return finalizeEarly(run);
     }
     run.phase = 'awaiting_iframe';
-    run.clientUrl = `${proxyPath(run.session)}?password=${encodeURIComponent(run.session.xpraPassword)}&clipboard=no&keyboard=no&printing=no&file_transfer=no&sound=no&floating_menu=no&reconnect=no`;
+    run.clientUrl = `${proxyPath(run.session)}?clipboard=no&keyboard=no&printing=no&file_transfer=no&sound=no&floating_menu=no&reconnect=no`;
     addCheck(run, {
       id: 'iframe-boundary', layer: 'IFRAME', status: 'WARN', code: 'IFRAME_VALIDATION_PENDING', component: 'CloudOS hidden preflight iframe',
-      cause: 'Backend, proxy e WebSocket passaram; falta HTML5 do cliente CloudOS confirmar connection-established.', evidence: run.clientUrl.replaceAll(run.session.xpraPassword, '[REDACTED_XPRA_PASSWORD]'),
+      cause: 'Backend, proxy e WebSocket passaram; falta HTML5 do cliente CloudOS confirmar connection-established.', evidence: run.clientUrl,
     });
     await writeArtifacts(run);
     run.autoFinalizeTimer = setTimeout(() => {
