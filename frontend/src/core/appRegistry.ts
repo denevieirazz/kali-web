@@ -26,6 +26,7 @@ const components: Record<string, ReturnType<typeof lazy>> = {
   'workflow-workspace': lazy(() => import('../apps/WorkflowWorkspace/WorkflowWorkspace')),
   'system-monitor': lazy(() => import('../apps/SystemMonitor/SystemMonitor')),
   'install-linux': lazy(() => import('../apps/InstallLinux/InstallLinux')),
+  'linux-runtime-poc': lazy(() => import('../apps/LinuxRuntimePoc/LinuxRuntimePoc')),
   'env-doctor': lazy(() => import('../apps/EnvDoctor/EnvDoctor')),
   'kali-tool-center': lazy(() => import('../apps/KaliToolCenter/KaliToolCenter')),
   'taskbar': lazy(() => import('../components/Taskbar/Taskbar')),
