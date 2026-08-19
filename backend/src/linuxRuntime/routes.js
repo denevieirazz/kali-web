@@ -48,11 +48,11 @@ linuxRuntimeRouter.get('/poc1', (req, res) => {
 
 linuxRuntimeRouter.get('/poc1/readiness', async (req, res) => {
   try {
-    const readiness = await checkXpraPocReadiness({
+    // Readiness bloqueado é diagnóstico válido, não falha de transporte da API.
+    res.json(await checkXpraPocReadiness({
       app: req.query?.app || 'xclock',
       distribution: req.query?.distribution || undefined,
-    });
-    res.status(readiness.ready ? 200 : 503).json(readiness);
+    }));
   } catch (error) {
     sendError(res, error, 'LINUX_POC_READINESS_FAILED');
   }
@@ -73,8 +73,8 @@ linuxRuntimeRouter.post('/poc1/start', async (req, res) => {
 
 linuxRuntimeRouter.get('/poc1/sessions/:id/health', async (req, res) => {
   try {
-    const result = await healthXpraPocSession(req.params.id);
-    res.status(result.health.healthy ? 200 : 503).json(result);
+    // Sessão degradada continua retornando o payload de health completo.
+    res.json(await healthXpraPocSession(req.params.id));
   } catch (error) {
     sendError(res, error, 'LINUX_POC_HEALTH_FAILED');
   }
