@@ -313,9 +313,11 @@ Get-Process |
 Comparar:
 
 ```powershell
-Compare-Object \
-  (Import-Csv .\poc1-windows-before.csv | ForEach-Object { "$($_.ProcessName)|$($_.MainWindowTitle)" }) \
-  (Import-Csv .\poc1-windows-after.csv  | ForEach-Object { "$($_.ProcessName)|$($_.MainWindowTitle)" })
+$before = Import-Csv .\poc1-windows-before.csv |
+  ForEach-Object { "$($_.ProcessName)|$($_.MainWindowTitle)" }
+$after = Import-Csv .\poc1-windows-after.csv |
+  ForEach-Object { "$($_.ProcessName)|$($_.MainWindowTitle)" }
+Compare-Object $before $after
 ```
 
 A comparação é evidência auxiliar.
