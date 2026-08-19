@@ -1,0 +1,106 @@
+name: CloudOS Linux Runtime POC 1
+
+on:
+  pull_request:
+    branches:
+      - stabilization/cloudos-workflow-batch-4
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    name: POC1 contracts and build
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+      - run: npm ci
+      - name: Backend POC contract
+        run: node --test backend/test/linux-runtime-poc.test.js
+      - name: TypeScript and production build
+        run: npm.cmd run build
+      - name: Backend regression
+        run: npm.cmd test
+
+  physical-runtime:
+    name: Physical WSL + Xpra probe
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe WSL without installing anything
+        id: probe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $report = New-Object System.Collections.Generic.List[string]
+          $report.Add('# POC1_RESULTS.md')
+          $report.Add('')
+          $report.Add('## Physical runtime probe')
+          $report.Add('')
+          $report.Add("**Runner:** windows-latest")
+          $report.Add("**Commit:** ``$env:GITHUB_SHA``")
+          $report.Add('')
+
+          $wsl = Get-Command wsl.exe -ErrorAction SilentlyContinue
+          if (-not $wsl) {
+            $report.Add('**RESULTADO: BLOQUEADO**')
+            $report.Add('')
+            $report.Add('`wsl.exe` não existe no runner. Nenhuma prova física foi executada.')
+            $report | Set-Content POC1_RESULTS.md -Encoding UTF8
+            "runtime_ready=false" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+
+          $distros = @(& wsl.exe -l -q 2>$null | ForEach-Object { ($_ -replace "`0", '').Trim() } | Where-Object { $_ })
+          if ($LASTEXITCODE -ne 0 -or $distros.Count -eq 0) {
+            $report.Add('**RESULTADO: BLOQUEADO**')
+            $report.Add('')
+            $report.Add('O runner possui `wsl.exe`, mas não possui uma distribuição WSL operacional. Nenhuma instalação foi feita porque a POC é fail-closed.')
+            $report | Set-Content POC1_RESULTS.md -Encoding UTF8
+            "runtime_ready=false" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+
+          $distro = $distros[0]
+          $probe = & wsl.exe -d $distro -- sh -lc 'command -v xpra && (command -v xclock || command -v xeyes || command -v xterm || command -v gedit)' 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            $report.Add('**RESULTADO: BLOQUEADO**')
+            $report.Add('')
+            $report.Add("Distribuição detectada: ``$distro``.")
+            $report.Add('Xpra e/ou um dos aplicativos simples da allowlist não estão presentes. Nenhuma dependência foi instalada automaticamente.')
+            $report.Add('')
+            $report.Add('```text')
+            $report.Add(($probe | Out-String).Trim())
+            $report.Add('```')
+            $report | Set-Content POC1_RESULTS.md -Encoding UTF8
+            "runtime_ready=false" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+
+          $report.Add('**RESULTADO: PRÉ-REQUISITOS PRESENTES**')
+          $report.Add('')
+          $report.Add("Distribuição detectada: ``$distro``.")
+          $report.Add('Xpra e aplicativo simples estão presentes. O próximo gate é a prova visual dentro da CloudOS Window.')
+          $report | Set-Content POC1_RESULTS.md -Encoding UTF8
+          "runtime_ready=true" >> $env:GITHUB_OUTPUT
+
+      - name: Upload physical probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-runtime-poc1-physical-probe-${{ github.sha }}
+          path: POC1_RESULTS.md
+          retention-days: 14
+
+      - name: Physical runtime gate
+        if: steps.probe.outputs.runtime_ready != 'true'
+        shell: pwsh
+        run: |
+          Write-Error 'POC1_PHYSICAL_RUNTIME_BLOCKED: WSL/Xpra prerequisites are not available on this runner.'
+          exit 1
