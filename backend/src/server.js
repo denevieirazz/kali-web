@@ -8,6 +8,8 @@ import { createApp } from './app.js';
 import { getDb } from './database/index.js';
 import { connectHostLease, readHostLeaseConfig } from './runtime/hostLease.js';
 import { setupTerminalWebSocket } from './terminal/websocket.js';
+import { handleXpraProxyUpgrade } from './linuxRuntime/xpraProxy.js';
+import { shutdownXpraPocRuntime } from './linuxRuntime/xpraPoc.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -108,16 +110,25 @@ async function startServer() {
   server = http.createServer(app);
 
   // Bind real em 127.0.0.1 — sem race condition
-  // WebSocketServer é criado DEPOIS do listen para não capturar erros de bind
   const configuredPort = Number.parseInt(process.env.PORT || '', 10);
   const useEphemeralPort = process.env.CLOUDOS_NATIVE_HOST === '1' || configuredPort === 0;
   const port = useEphemeralPort
     ? await listenOnFreePort(server, 0, 0, '127.0.0.1')
     : await listenOnFreePort(server, Number.isInteger(configuredPort) ? configuredPort : 18080, Number.isInteger(configuredPort) ? configuredPort : 18180, '127.0.0.1');
 
-  // Agora que o server está escutando, anexar WebSocket
-  wss = new WebSocketServer({ server, path: '/ws/terminal' });
+  // Dispatcher único de upgrades: evita que o WebSocket do terminal rejeite o tunnel Xpra.
+  wss = new WebSocketServer({ noServer: true });
   setupTerminalWebSocket(wss);
+  server.on('upgrade', (request, socket, head) => {
+    let pathname = '';
+    try { pathname = new URL(request.url || '/', 'http://127.0.0.1').pathname; } catch {}
+    if (pathname === '/ws/terminal') {
+      wss.handleUpgrade(request, socket, head, client => wss.emit('connection', client, request));
+      return;
+    }
+    if (handleXpraProxyUpgrade(request, socket, head)) return;
+    socket.destroy();
+  });
 
   // Atualiza a porta real no app
   app._cloudosPort = port;
@@ -162,7 +173,8 @@ async function startServer() {
 
     for (const client of wss?.clients || []) client.terminate();
     wss?.close();
-    const finish = () => {
+    const finish = async () => {
+      await shutdownXpraPocRuntime();
       const db = getDb();
       if (db) {
         db.close(() => {
@@ -177,8 +189,8 @@ async function startServer() {
       }
     };
 
-    if (server?.listening) server.close(finish);
-    else finish();
+    if (server?.listening) server.close(() => { void finish(); });
+    else void finish();
   }
 
   process.on('SIGINT', () => handleShutdown('SIGINT'));
