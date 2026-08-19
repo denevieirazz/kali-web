@@ -299,7 +299,7 @@ export default function LockScreen() {
             <FormField id="recovery-username" label="Novo nome de usuário (opcional)" value={username} onChange={setUsername} autoComplete="username" />
             <FormField id="recovery-display-name" label="Nome de exibição (opcional)" value={displayName} onChange={setDisplayName} autoComplete="name" />
             <div className="recovery-password-grid"><FormField id="recovery-password" label="Nova senha" type="password" value={password} onChange={setPassword} autoComplete="new-password" /><FormField id="recovery-confirm" label="Confirmar senha" type="password" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" /></div>
-            <small className="recovery-password-hint">Mínimo de 4 caracteres. Espaços e frases-senha são aceitos.</small>
+            <small className="recovery-password-hint">Mínimo de 8 caracteres. Espaços e frases-senha são aceitos.</small>
             {error && <Alert tone="error">{error}</Alert>}
             <button type="submit" className="btn-primary-gradient" disabled={loading}>{loading ? 'Recuperando…' : 'Recuperar conta'}</button>
             <button type="button" className="btn-recovery-link" onClick={switchToLogin}>Voltar para entrar</button>
@@ -310,7 +310,7 @@ export default function LockScreen() {
             <FormField id="legacy-username" label="Novo nome de usuário (opcional)" value={username} onChange={setUsername} autoComplete="username" />
             <FormField id="legacy-display-name" label="Nome de exibição (opcional)" value={displayName} onChange={setDisplayName} autoComplete="name" />
             <div className="recovery-password-grid"><FormField id="legacy-password" label="Nova senha" type="password" value={password} onChange={setPassword} autoComplete="new-password" /><FormField id="legacy-confirm" label="Confirmar senha" type="password" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" /></div>
-            <small className="recovery-password-hint">Mínimo de 4 caracteres. Espaços e frases-senha são aceitos.</small>
+            <small className="recovery-password-hint">Mínimo de 8 caracteres. Espaços e frases-senha são aceitos.</small>
             {error && <Alert tone="error">{error}</Alert>}
             <button type="submit" className="btn-primary-gradient" disabled={loading}>{loading ? 'Recuperando…' : 'Definir nova senha e recuperar'}</button>
             <button type="button" className="btn-recovery-link" onClick={switchToLogin}>Voltar para entrar</button>

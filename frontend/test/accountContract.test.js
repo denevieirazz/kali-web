@@ -22,7 +22,7 @@ test('never restores a persisted session while a one-time recovery code still ne
   assert.equal(canRestoreAuthenticatedSession(false, false), false);
 });
 
-test('validates the real account form with a simple four-character minimum', () => {
+test('validates the real account form with an eight-character minimum', () => {
   assert.equal(validateUsername('douglas.dev'), null);
   assert.equal(validateUsername('', { required: false }), null);
   assert.match(validateUsername('do'), /3 e 64/);
@@ -31,10 +31,13 @@ test('validates the real account form with a simple four-character minimum', () 
   assert.equal(validateDisplayName('Douglas'), null);
   assert.equal(validateDisplayName('', { required: false }), null);
   assert.match(validateDisplayName(''), /exibição/);
-  assert.equal(validateNewPassword('1234', '1234'), null);
-  assert.equal(validateNewPassword('a b ', 'a b '), null);
+  assert.equal(validateNewPassword('12345678', '12345678'), null);
+  assert.equal(validateNewPassword('a b c d ', 'a b c d '), null);
   assert.equal(validateNewPassword('correct horse battery staple', 'correct horse battery staple'), null);
-  assert.match(validateNewPassword('123', '123'), /4 caracteres/);
+  assert.equal(validateNewPassword('CaféComPão#2026', 'CaféComPão#2026'), null);
+  assert.match(validateNewPassword('1234567', '1234567'), /8 caracteres/);
+  assert.match(validateNewPassword('123', '123'), /8 caracteres/);
+  assert.match(validateNewPassword('12345678\x00', '12345678\x00'), /caracteres de controle/);
   assert.match(validateNewPassword('safe-password-1', 'different'), /não confere/);
 });
 

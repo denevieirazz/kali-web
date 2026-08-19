@@ -6,9 +6,9 @@ const setup = fs.readFileSync(new URL('../src/components/Setup/SetupWizard.tsx',
 const lock = fs.readFileSync(new URL('../src/components/LockScreen/LockScreen.tsx', import.meta.url), 'utf8');
 const actions = fs.readFileSync(new URL('../src/services/recoveryCodeActions.ts', import.meta.url), 'utf8');
 
-test('four-character password stays allowed but short passwords receive a clear warning', () => {
-  assert.match(setup, /minLength=\{4\}/);
-  assert.match(setup, /Fraca, mas permitida/);
+test('eight-character password is required with clear guidance', () => {
+  assert.match(setup, /minLength=\{8\}/);
+  assert.match(setup, /Mínimo de 8 caracteres/);
   assert.match(setup, /Recomendamos uma frase maior/);
   assert.match(setup, /Não exigimos maiúsculas, números ou símbolos/);
 });
