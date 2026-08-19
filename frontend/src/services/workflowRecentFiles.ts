@@ -38,6 +38,10 @@ function normalizeRecent(value: unknown): WorkflowRecentFile | null {
   return { provider: raw.provider, path, name, openedAt, mode: mode === 'notes' || mode === 'viewer' ? mode : 'info' };
 }
 
+function keyOf(item: Pick<WorkflowRecentFile, 'provider' | 'path' | 'name'>) {
+  return `${item.provider}:${item.path.join('/')}:${item.name}`;
+}
+
 export function listRecentFiles(kind: 'all' | 'documents' = 'all') {
   if (!storageAvailable()) return [] as WorkflowRecentFile[];
   let raw: unknown = [];
@@ -51,10 +55,32 @@ export function recordRecentFile(input: { provider: WorkflowProvider; path: stri
   if (!storageAvailable()) return;
   const normalized = normalizeRecent({ ...input, openedAt: new Date().toISOString() });
   if (!normalized) return;
-  const key = `${normalized.provider}:${normalized.path.join('/')}:${normalized.name}`;
-  const next = [normalized, ...listRecentFiles('all').filter(item => `${item.provider}:${item.path.join('/')}:${item.name}` !== key)].slice(0, MAX_RECENT_FILES);
+  const key = keyOf(normalized);
+  const next = [normalized, ...listRecentFiles('all').filter(item => keyOf(item) !== key)].slice(0, MAX_RECENT_FILES);
   localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(next));
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('cloudos:workflow-changed'));
+}
+
+export function renameRecentFileReference(target: Pick<WorkflowRecentFile, 'provider' | 'path' | 'name'>, newName: string) {
+  if (!storageAvailable()) return null;
+  const safeName = safeSegment(newName);
+  if (!safeName) return null;
+  const items = listRecentFiles('all');
+  const oldKey = keyOf(target);
+  const current = items.find(item => keyOf(item) === oldKey);
+  if (!current) return null;
+  const newKey = keyOf({ ...current, name: safeName });
+  const collision = items.find(item => keyOf(item) === newKey && keyOf(item) !== oldKey);
+  const openedAt = collision && Date.parse(collision.openedAt) > Date.parse(current.openedAt) ? collision.openedAt : current.openedAt;
+  const renamed = normalizeRecent({ ...current, name: safeName, openedAt });
+  if (!renamed) return null;
+  const next = [renamed, ...items.filter(item => {
+    const key = keyOf(item);
+    return key !== oldKey && key !== newKey;
+  })].slice(0, MAX_RECENT_FILES);
+  try { localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(next)); } catch { return null; }
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('cloudos:workflow-changed'));
+  return renamed;
 }
 
 export function clearRecentFiles() {
