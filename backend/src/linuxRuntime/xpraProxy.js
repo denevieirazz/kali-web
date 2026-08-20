@@ -8,7 +8,24 @@ function parseProxyRequest(requestUrl) { let url; try { url = new URL(requestUrl
 function rewriteCsp(value) { const directives = String(value || '').split(';').map(v => v.trim()).filter(Boolean).filter(v => !/^(frame-ancestors|sandbox)\b/i.test(v)); directives.push("sandbox allow-scripts allow-forms allow-pointer-lock"); directives.push("frame-ancestors 'self'"); return directives.join('; '); }
 function proxyBase(session) { return `${PREFIX}${session.id}/${session.proxyToken}/`; }
 function rewriteLocation(value, session) { if (!value) return value; const base = proxyBase(session); try { const parsed = new URL(value, `http://127.0.0.1:${session.port}`); if (['127.0.0.1', 'localhost'].includes(parsed.hostname)) return `${base}${parsed.pathname.replace(/^\//, '')}${parsed.search}${parsed.hash}`; } catch {} if (String(value).startsWith('/')) return `${base}${value.replace(/^\//, '')}`; return value; }
-function buildResponseHeaders(headers, session) { const result = {}; for (const [name, value] of Object.entries(headers)) { const lower = name.toLowerCase(); if (['x-frame-options', 'content-length', 'set-cookie'].includes(lower)) continue; if (lower === 'content-security-policy') result[name] = rewriteCsp(value); else if (lower === 'location') result[name] = rewriteLocation(value, session); else result[name] = value; } if (!Object.keys(result).some(name => name.toLowerCase() === 'content-security-policy')) result['Content-Security-Policy'] = rewriteCsp(null); result['Cache-Control'] = 'no-store'; result['Referrer-Policy'] = 'no-referrer'; result['Cross-Origin-Resource-Policy'] = 'cross-origin'; return result; }
+function buildResponseHeaders(headers, session) {
+  const result = {};
+  for (const [name, value] of Object.entries(headers)) {
+    const lower = name.toLowerCase();
+    if (['x-frame-options', 'content-length', 'transfer-encoding', 'connection', 'set-cookie'].includes(lower)) continue;
+    if (lower === 'content-security-policy') result[name] = rewriteCsp(value);
+    else if (lower === 'location') result[name] = rewriteLocation(value, session);
+    else result[name] = value;
+  }
+  if (!Object.keys(result).some(name => name.toLowerCase() === 'content-security-policy')) result['Content-Security-Policy'] = rewriteCsp(null);
+  result['Cache-Control'] = 'no-store';
+  result['Referrer-Policy'] = 'no-referrer';
+  result['Cross-Origin-Resource-Policy'] = 'cross-origin';
+  result['Access-Control-Allow-Origin'] = '*';
+  result['Access-Control-Allow-Methods'] = 'GET, HEAD, OPTIONS';
+  result['Access-Control-Allow-Headers'] = '*';
+  return result;
+}
 function writeProxyError(res, status, message) {
   if (res.headersSent) return res.end();
   if (typeof res.status === 'function') {
@@ -21,6 +38,38 @@ function writeProxyError(res, status, message) {
 }
 function resolveProxySession(id, token) { return resolveXpraPocProxySession(id, token) || resolveXpraPreflightProxySession(id, token); }
 function recordProxyEvent(session, event) { if (session.preflight === true) recordXpraPreflightProxyEvent(session.id, event); else recordXpraPocProxyEvent(session.id, event); }
+const XPRA_OPAQUE_SHIM = `<script>
+try {
+  window.Worker = undefined;
+  window.addEventListener('load', function() {
+    var checkClient = setInterval(function() {
+      if (window.client) {
+        clearInterval(checkClient);
+        var origOnConnect = window.client.on_connect;
+        window.client.on_connect = function() {
+          try { window.parent.postMessage({ type: 'xpra-render-event', name: 'connected' }, '*'); } catch(e){}
+          if (origOnConnect) origOnConnect.apply(this, arguments);
+        };
+        var origProcessNewWindow = window.client._process_new_window;
+        if (origProcessNewWindow) {
+          window.client._process_new_window = function(packet) {
+            try { window.parent.postMessage({ type: 'xpra-render-event', name: 'window-created', wid: packet[1], width: packet[4], height: packet[5] }, '*'); } catch(e){}
+            return origProcessNewWindow.apply(this, arguments);
+          };
+        }
+        var origDoPaint = window.XpraWindow && window.XpraWindow.prototype.do_paint;
+        if (origDoPaint) {
+          window.XpraWindow.prototype.do_paint = function(packet) {
+            try { window.parent.postMessage({ type: 'xpra-render-event', name: 'frame-painted', wid: packet[1], width: packet[4], height: packet[5] }, '*'); } catch(e){}
+            return origDoPaint.apply(this, arguments);
+          };
+        }
+      }
+    }, 50);
+  });
+} catch(e) {}
+</script>`;
+
 export function xpraHttpProxyMiddleware(req, res, next) {
   const reqUrl = req.originalUrl || req.url || '';
   const parsed = parseProxyRequest(reqUrl);
@@ -49,12 +98,32 @@ export function xpraHttpProxyMiddleware(req, res, next) {
     headers,
     timeout: 5000,
   }, upstreamResponse => {
-    if (typeof res.status === 'function') {
-      res.status(upstreamResponse.statusCode || 502);
-    } else {
-      res.statusCode = upstreamResponse.statusCode || 502;
+    const statusCode = upstreamResponse.statusCode || 502;
+    const isHtml = String(upstreamResponse.headers['content-type'] || '').toLowerCase().includes('text/html');
+    const responseHeaders = buildResponseHeaders(upstreamResponse.headers, session);
+    if (isHtml) {
+      const chunks = [];
+      upstreamResponse.on('data', chunk => chunks.push(chunk));
+      upstreamResponse.on('end', () => {
+        let body = Buffer.concat(chunks).toString('utf8');
+        if (body.includes('</head>')) {
+          body = body.replace('</head>', `${XPRA_OPAQUE_SHIM}</head>`);
+        } else {
+          body = `${XPRA_OPAQUE_SHIM}${body}`;
+        }
+        responseHeaders['Content-Length'] = Buffer.byteLength(body);
+        if (typeof res.status === 'function') res.status(statusCode);
+        else res.statusCode = statusCode;
+        for (const [name, value] of Object.entries(responseHeaders)) {
+          if (value !== undefined) res.setHeader(name, value);
+        }
+        res.end(body);
+      });
+      return;
     }
-    for (const [name, value] of Object.entries(buildResponseHeaders(upstreamResponse.headers, session))) {
+    if (typeof res.status === 'function') res.status(statusCode);
+    else res.statusCode = statusCode;
+    for (const [name, value] of Object.entries(responseHeaders)) {
       if (value !== undefined) res.setHeader(name, value);
     }
     upstreamResponse.pipe(res);

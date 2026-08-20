@@ -469,46 +469,35 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
     }
   }
 
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type !== 'xpra-render-event') return;
+      const session = activeSession;
+      if (!session) return;
+      const actionStart = actionStartedAt.current.get(session.id) ?? performance.now();
+      if (event.data.name === 'window-created') {
+        void reportClientMetrics(session, {
+          firstRemoteWindowMs: performance.now() - actionStart,
+          canvasWidth: Number(event.data.width) || undefined,
+          canvasHeight: Number(event.data.height) || undefined,
+        });
+      } else if (event.data.name === 'frame-painted') {
+        void reportClientMetrics(session, {
+          firstFramePaintedMs: performance.now() - actionStart,
+          canvasWidth: Number(event.data.width) || undefined,
+          canvasHeight: Number(event.data.height) || undefined,
+        });
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [activeSession, windowId]);
+
   function onFrameLoad() {
     const session = activeSession;
-    const frame = iframeRef.current;
-    if (!session || !frame) return;
+    if (!session) return;
     const requested = frameRequestedAt.current.get(session.id) ?? performance.now();
     void reportClientMetrics(session, { iframeLoadMs: performance.now() - requested });
-
-    observerRef.current?.disconnect();
-    try {
-      const document = frame.contentDocument;
-      if (!document) return;
-      let windowMeasured = false;
-      const measureWindowAndFrame = () => {
-        const xpraWindow = document.querySelector('#screen .window');
-        if (!xpraWindow) return false;
-        const actionStart = actionStartedAt.current.get(session.id) ?? requested;
-        if (!windowMeasured) {
-          windowMeasured = true;
-          void reportClientMetrics(session, { firstRemoteWindowMs: performance.now() - actionStart });
-        }
-        const canvas = xpraWindow.querySelector('canvas') as HTMLCanvasElement | null;
-        if (canvas && canvas.width > 0 && canvas.height > 0) {
-          void reportClientMetrics(session, {
-            firstFramePaintedMs: performance.now() - actionStart,
-            canvasWidth: canvas.width,
-            canvasHeight: canvas.height,
-          });
-          observerRef.current?.disconnect();
-          return true;
-        }
-        return false;
-      };
-      if (measureWindowAndFrame()) return;
-      const screen = document.querySelector('#screen') ?? document.body;
-      const observer = new MutationObserver(() => { measureWindowAndFrame(); });
-      observer.observe(screen, { childList: true, subtree: true, attributes: true });
-      observerRef.current = observer;
-    } catch (cause) {
-      setError(`POC1_RENDER_TELEMETRY_UNAVAILABLE: ${cause instanceof Error ? cause.message : String(cause)}`);
-    }
   }
 
   const activeHealth = activeSession?.health;
@@ -615,7 +604,7 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
               className={session.id === activeSession?.id ? 'active' : ''}
               onClick={() => setActiveSessionId(session.id)}
             >
-              {session.title} <small>{session.state}</small>
+              {session.title} <small>{session.metrics.firstFramePaintedMs ? 'renderizado' : session.metrics.firstRemoteWindowMs ? 'desenhando' : 'iniciando'}</small>
             </button>
           ))}
         </nav>
@@ -629,7 +618,7 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
             title={`${activeSession.title} — Xpra HTML5`}
             src={readyUrl}
             className="linux-runtime-poc__frame"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-pointer-lock"
+            sandbox="allow-scripts allow-forms allow-pointer-lock"
             allow="clipboard-read; clipboard-write"
             referrerPolicy="no-referrer"
             onLoad={onFrameLoad}

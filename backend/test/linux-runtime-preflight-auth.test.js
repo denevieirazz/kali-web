@@ -404,3 +404,13 @@ test('EF2-P0-012: Trailing slash anchoring and render telemetry metrics contract
   assert.equal(scriptPath.token, 'token1');
   assert.equal(scriptPath.targetPath, '/js/lib/jquery.js');
 });
+
+test('EF2-P0-013: Opaque iframe CORS headers and main-thread worker compatibility shim', async () => {
+  const { __test } = await import('../src/linuxRuntime/xpraProxy.js');
+
+  const headers = __test.buildResponseHeaders({}, { id: 's1', proxyToken: 't1', port: 14500 });
+  assert.equal(headers['Access-Control-Allow-Origin'], '*');
+  assert.equal(headers['Access-Control-Allow-Methods'], 'GET, HEAD, OPTIONS');
+  assert.match(headers['Content-Security-Policy'], /sandbox allow-scripts allow-forms allow-pointer-lock/);
+  assert.doesNotMatch(headers['Content-Security-Policy'], /allow-same-origin/);
+});
