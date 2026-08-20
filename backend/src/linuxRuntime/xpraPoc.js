@@ -58,7 +58,15 @@ export function buildXpraStartCommand({ appCommand, port, sessionId = 'cloudos-p
   if (!Number.isInteger(port) || port < PORT_START || port > PORT_END) throw new Error('Porta Xpra fora da faixa da POC.');
   if (!password || String(password).length < 16) throw new Error('Capability Xpra inválida.');
   const display = displayForPort(port);
-  return ['set -eu', 'unset DISPLAY WAYLAND_DISPLAY PULSE_SERVER', `export XPRA_PASSWORD=${shellQuote(password)}`, `exec xpra seamless :${display} --session-name=${shellQuote(`cloudos-poc1-${sessionId}`)} --start-child=${shellQuote(appCommand)} --exit-with-children=yes --daemon=no --mdns=no --notifications=no --printing=no --file-transfer=no --start-new-commands=no --bind=noabstract --bind-tcp=${XPRA_BIND_TCP_HOST}:${port},auth=env --html=on`].join('; ');
+  return [
+    'set -eu',
+    'mkdir -p -m 1777 /tmp/.X11-unix 2>/dev/null || true',
+    'mount -o remount,rw /tmp/.X11-unix 2>/dev/null || true',
+    'chmod 1777 /tmp/.X11-unix 2>/dev/null || true',
+    'unset DISPLAY WAYLAND_DISPLAY PULSE_SERVER',
+    `export XPRA_PASSWORD=${shellQuote(password)}`,
+    `exec xpra seamless :${display} --session-name=${shellQuote(`cloudos-poc1-${sessionId}`)} --start-child=${shellQuote(appCommand)} --exit-with-children=yes --daemon=no --mdns=no --notifications=no --printing=no --file-transfer=no --start-new-commands=no --bind=noabstract --bind-tcp=${XPRA_BIND_TCP_HOST}:${port},auth=env --html=on`,
+  ].join('; ');
 }
 async function execWsl(distribution, command, timeout = HEALTH_TIMEOUT_MS) { return execFileAsync(WSL_EXE, ['-d', distribution, '--exec', 'sh', '-c', command], { windowsHide: true, env: safeChildEnvironment(), timeout, maxBuffer: 512 * 1024 }); }
 export async function checkWslInteropDisabled(distribution) {
@@ -94,10 +102,64 @@ async function reservePair(distribution) { const pair = await findFreePair(distr
 function releasePort(port) { reservedPorts.delete(port); }
 async function probeWslServer(session) { const started = Date.now(); try { await execWsl(session.distribution, `xpra info :${session.display} >/dev/null 2>&1`, HEALTH_TIMEOUT_MS); return { ok: true, durationMs: elapsedMs(started) }; } catch (cause) { return { ok: false, durationMs: elapsedMs(started), error: cause.message }; } }
 async function probeWindowsTcp(port, timeoutMs = 1500) { const started = Date.now(); return new Promise(resolve => { const socket = net.createConnection({ host: '127.0.0.1', port }); let done = false; const finish = result => { if (done) return; done = true; socket.destroy(); resolve({ ...result, durationMs: elapsedMs(started) }); }; socket.setTimeout(timeoutMs, () => finish({ ok: false, error: 'timeout' })); socket.once('connect', () => finish({ ok: true })); socket.once('error', e => finish({ ok: false, error: e.message })); }); }
-async function probeHttp(port, timeoutMs = 1500) { const started = Date.now(); try { const response = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(timeoutMs) }); const body = await response.text(); const ok = response.ok && /xpra/i.test(body.slice(0, 32000)); return { ok, status: response.status, durationMs: elapsedMs(started), error: ok ? null : `HTTP ${response.status}` }; } catch (cause) { return { ok: false, durationMs: elapsedMs(started), error: cause.message }; } }
-async function probeWebSocket(port, timeoutMs = 2000) { const started = Date.now(); return new Promise(resolve => { let done = false; const socket = new WebSocket(`ws://127.0.0.1:${port}/`, { handshakeTimeout: timeoutMs, origin: `http://127.0.0.1:${port}` }); const timer = setTimeout(() => finish({ ok: false, error: 'timeout' }), timeoutMs + 100); function finish(result) { if (done) return; done = true; clearTimeout(timer); try { socket.terminate(); } catch {} resolve({ ...result, durationMs: elapsedMs(started) }); } socket.once('open', () => finish({ ok: true })); socket.once('error', e => finish({ ok: false, error: e.message })); }); }
+async function probeHttp(port, password = null, timeoutMs = 1500) {
+  const started = Date.now();
+  try {
+    const headers = {};
+    if (password) {
+      headers.authorization = `Basic ${Buffer.from(`xpra:${password}`).toString('base64')}`;
+    }
+    const response = await fetch(`http://127.0.0.1:${port}/`, {
+      headers,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const body = await response.text();
+    const ok = response.ok && /xpra/i.test(body.slice(0, 32000));
+    return { ok, status: response.status, durationMs: elapsedMs(started), error: ok ? null : `HTTP ${response.status}` };
+  } catch (cause) {
+    return { ok: false, durationMs: elapsedMs(started), error: cause.message };
+  }
+}
+async function probeWebSocket(port, password = null, timeoutMs = 2000) {
+  const started = Date.now();
+  return new Promise(resolve => {
+    let done = false;
+    const headers = {};
+    if (password) {
+      headers.authorization = `Basic ${Buffer.from(`xpra:${password}`).toString('base64')}`;
+    }
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/`, ['binary'], {
+      handshakeTimeout: timeoutMs,
+      origin: `http://127.0.0.1:${port}`,
+      headers,
+    });
+    const timer = setTimeout(() => finish({ ok: false, error: 'timeout' }), timeoutMs + 100);
+    function finish(result) {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try { socket.terminate(); } catch {}
+      resolve({ ...result, durationMs: elapsedMs(started) });
+    }
+    socket.once('open', () => finish({ ok: true }));
+    socket.once('error', e => finish({ ok: false, error: e.message }));
+    socket.once('unexpected-response', (_req, res) => finish({ ok: false, error: `HTTP ${res.statusCode}` }));
+  });
+}
 async function waitForWslServer(session, child) { const deadline = Date.now() + START_TIMEOUT_MS; while (Date.now() < deadline) { if (child.exitCode !== null) throw createPocError('XPRA_EXITED_EARLY', `Xpra terminou (exit=${child.exitCode}).`); const result = await probeWslServer(session); if (result.ok) return result; await new Promise(r => setTimeout(r, 250)); } throw createPocError('XPRA_SERVER_TIMEOUT', 'Timeout esperando Xpra.'); }
-async function waitForWindowsTransport(session, child) { const deadline = Date.now() + START_TIMEOUT_MS; while (Date.now() < deadline) { if (child.exitCode !== null) throw createPocError('XPRA_EXITED_EARLY', 'Xpra terminou durante transporte.'); const tcp = await probeWindowsTcp(session.port); if (tcp.ok) { const http = await probeHttp(session.port); if (http.ok) return { tcp, http }; } await new Promise(r => setTimeout(r, 250)); } throw createPocError('XPRA_WINDOWS_TRANSPORT_TIMEOUT', 'Transporte Xpra indisponível no Windows.'); }
+async function waitForWindowsTransport(session, child) {
+  const deadline = Date.now() + START_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) throw createPocError('XPRA_EXITED_EARLY', 'Xpra terminou durante transporte.');
+    const tcp = await probeWindowsTcp(session.port);
+    if (tcp.ok) {
+      const http = await probeHttp(session.port, session.xpraPassword);
+      if (http.ok) return { tcp, http };
+    }
+    await new Promise(r => setTimeout(r, 250));
+  }
+  throw createPocError('XPRA_WINDOWS_TRANSPORT_TIMEOUT', 'Transporte Xpra indisponível no Windows.');
+}
 
 export function getXpraPocSession(id = null) { return id ? publicSession(sessions.get(id)) : publicSession([...sessions.values()][0] || null); }
 export function getXpraPocSessions(ownerId = null) { const owner = ownerId ? normalizeOwnerId(ownerId) : null; return [...sessions.values()].filter(s => !owner || s.ownerId === owner).map(publicSession); }
@@ -128,10 +190,10 @@ export async function startXpraPoc({ app, distribution, ownerId } = {}) {
     const child = spawn(WSL_EXE, ['-d', session.distribution, '--exec', 'sh', '-c', command], { windowsHide: true, env: safeChildEnvironment(), stdio: ['ignore', 'pipe', 'pipe'] }); session.child = child;
     for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => { session.diagnostics.push(String(chunk)); while (session.diagnostics.join('').length > 65536) session.diagnostics.shift(); });
     child.once('exit', code => { releasePort(session.port); if (!['stopping', 'stopped'].includes(session.state)) { session.state = 'failed'; session.errorCode = 'XPRA_PROCESS_EXITED'; session.error = `Xpra encerrou (exit=${code}). ${diagnosticsFor(session)}`; } writeLedger(); });
-    try { await withTimeout(waitForWslServer(session, child), START_TIMEOUT_MS, 'XPRA_SERVER_TIMEOUT', 'Timeout Xpra.'); session.metrics.wslServerReadyMs = elapsedMs(startClock); await withTimeout(waitForWindowsTransport(session, child), START_TIMEOUT_MS, 'XPRA_WINDOWS_TRANSPORT_TIMEOUT', 'Timeout transporte.'); session.metrics.windowsTransportReadyMs = elapsedMs(startClock); const ws = await probeWebSocket(session.port); session.metrics.websocketHandshakeMs = ws.durationMs; if (!ws.ok) throw createPocError('XPRA_WEBSOCKET_UNAVAILABLE', ws.error); session.metrics.bootMs = elapsedMs(startClock); session.state = 'ready'; session.health = { healthy: true, checkedAt: new Date().toISOString() }; writeLedger(); return publicSession(session); } catch (cause) { session.errorCode = cause.code || 'XPRA_START_FAILED'; session.error = `${cause.message}\n${diagnosticsFor(session)}`.trim(); await stopSessionInternal(session).catch(() => undefined); throw createPocError(session.errorCode, session.error); }
+    try { await withTimeout(waitForWslServer(session, child), START_TIMEOUT_MS, 'XPRA_SERVER_TIMEOUT', 'Timeout Xpra.'); session.metrics.wslServerReadyMs = elapsedMs(startClock); await withTimeout(waitForWindowsTransport(session, child), START_TIMEOUT_MS, 'XPRA_WINDOWS_TRANSPORT_TIMEOUT', 'Timeout transporte.'); session.metrics.windowsTransportReadyMs = elapsedMs(startClock); const ws = await probeWebSocket(session.port, session.xpraPassword); session.metrics.websocketHandshakeMs = ws.durationMs; if (!ws.ok) throw createPocError('XPRA_WEBSOCKET_UNAVAILABLE', ws.error); session.metrics.bootMs = elapsedMs(startClock); session.state = 'ready'; session.health = { healthy: true, checkedAt: new Date().toISOString() }; writeLedger(); return publicSession(session); } catch (cause) { session.errorCode = cause.code || 'XPRA_START_FAILED'; session.error = `${cause.message}\n${diagnosticsFor(session)}`.trim(); await stopSessionInternal(session).catch(() => undefined); throw createPocError(session.errorCode, session.error); }
   });
 }
-export async function healthXpraPocSession(id) { const session = sessions.get(id); if (!session) throw createPocError('LINUX_POC_SESSION_NOT_FOUND', 'Sessão não encontrada.'); const started = Date.now(); const linux = await probeWslServer(session); const tcp = await probeWindowsTcp(session.port); const http = tcp.ok ? await probeHttp(session.port) : { ok: false }; const websocket = http.ok ? await probeWebSocket(session.port) : { ok: false }; const healthy = linux.ok && tcp.ok && http.ok && websocket.ok && session.child?.exitCode === null; session.metrics.lastHealthMs = elapsedMs(started); if (!healthy) session.metrics.healthFailures += 1; session.state = healthy ? 'ready' : 'degraded'; session.health = { healthy, checkedAt: new Date().toISOString(), linux, windowsTcp: tcp, http, websocket }; return { session: publicSession(session), health: session.health }; }
+export async function healthXpraPocSession(id) { const session = sessions.get(id); if (!session) throw createPocError('LINUX_POC_SESSION_NOT_FOUND', 'Sessão não encontrada.'); const started = Date.now(); const linux = await probeWslServer(session); const tcp = await probeWindowsTcp(session.port); const http = tcp.ok ? await probeHttp(session.port, session.xpraPassword) : { ok: false }; const websocket = http.ok ? await probeWebSocket(session.port, session.xpraPassword) : { ok: false }; const healthy = linux.ok && tcp.ok && http.ok && websocket.ok && session.child?.exitCode === null; session.metrics.lastHealthMs = elapsedMs(started); if (!healthy) session.metrics.healthFailures += 1; session.state = healthy ? 'ready' : 'degraded'; session.health = { healthy, checkedAt: new Date().toISOString(), linux, windowsTcp: tcp, http, websocket }; return { session: publicSession(session), health: session.health }; }
 async function stopSessionInternal(session) { if (!session || session.state === 'stopped') return publicSession(session); session.state = 'stopping'; await execWsl(session.distribution, `xpra stop :${session.display} >/dev/null 2>&1 || true`, STOP_TIMEOUT_MS).catch(() => undefined); if (session.child?.exitCode === null) try { session.child.kill(); } catch {} session.state = 'stopped'; releasePort(session.port); sessions.delete(session.id); writeLedger(); return publicSession(session); }
 export async function stopXpraPoc(id = null, ownerId = null) { return queueLifecycle(async () => { if (id) { const session = sessions.get(id); if (!session) return null; if (ownerId && session.ownerId !== normalizeOwnerId(ownerId)) throw createPocError('LINUX_POC_SESSION_OWNER_MISMATCH', 'Sessão pertence a outro owner.'); return stopSessionInternal(session); } const owner = ownerId ? normalizeOwnerId(ownerId) : null; const result = []; for (const session of [...sessions.values()].filter(s => !owner || s.ownerId === owner)) result.push(await stopSessionInternal(session)); return result; }); }
 export async function restartXpraPoc(id, ownerId = null) { const current = sessions.get(id); if (!current) throw createPocError('LINUX_POC_SESSION_NOT_FOUND', 'Sessão não encontrada.'); if (ownerId && current.ownerId !== normalizeOwnerId(ownerId)) throw createPocError('LINUX_POC_SESSION_OWNER_MISMATCH', 'Sessão pertence a outro owner.'); const config = { app: current.app, distribution: current.distribution, ownerId: current.ownerId }; await stopXpraPoc(id, current.ownerId); return startXpraPoc(config); }

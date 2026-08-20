@@ -366,3 +366,24 @@ test('EF2-P0-009: Interop error classification differentiates timeout, enabled a
   assert.equal(timeoutRes.ok, false);
   assert.equal(timeoutRes.code, 'WSL_INTEROP_PROBE_TIMEOUT');
 });
+
+test('EF2-P0-011: Unified command and transport contract between preflight and runtime', async () => {
+  const { buildXpraStartCommand } = await import('../src/linuxRuntime/xpraPoc.js');
+  const secret = '1234567890abcdef12345678';
+  const dryRun = buildPreflightDryRunCommand({ display: 100, port: 14500, runId: 'test-1', password: secret });
+  const runtime = buildXpraStartCommand({ appCommand: 'xclock', port: 14500, sessionId: 'test-1', password: secret });
+
+  // Ambas preparam /tmp/.X11-unix com 1777 e remount rw
+  assert.match(dryRun, /chmod 1777 \/tmp\/\.X11-unix/);
+  assert.match(runtime, /chmod 1777 \/tmp\/\.X11-unix/);
+  assert.match(dryRun, /mount -o remount,rw \/tmp\/\.X11-unix/);
+  assert.match(runtime, /mount -o remount,rw \/tmp\/\.X11-unix/);
+
+  // Ambas utilizam auth=env e o bind 0.0.0.0
+  assert.match(dryRun, /--bind-tcp=0\.0\.0\.0:14500,auth=env/);
+  assert.match(runtime, /--bind-tcp=0\.0\.0\.0:14500,auth=env/);
+
+  // Runtime inclui --start-child='xclock' e preflight nao
+  assert.match(runtime, /--start-child='?xclock'?/);
+  assert.doesNotMatch(dryRun, /--start-child/);
+});

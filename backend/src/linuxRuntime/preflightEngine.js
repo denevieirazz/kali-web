@@ -476,6 +476,9 @@ export function buildPreflightDryRunCommand({ display, port, runId, password = '
   ];
   return [
     'set -eu',
+    'mkdir -p -m 1777 /tmp/.X11-unix 2>/dev/null || true',
+    'mount -o remount,rw /tmp/.X11-unix 2>/dev/null || true',
+    'chmod 1777 /tmp/.X11-unix 2>/dev/null || true',
     'unset DISPLAY WAYLAND_DISPLAY PULSE_SERVER',
     `export XPRA_PASSWORD=${shellQuote(password)}`,
     `exec xpra seamless :${display} ${options.join(' ')}`,
