@@ -94,6 +94,21 @@ function Write-CloudOSLog {
 
 function Get-CommandPathRequired {
     param([Parameter(Mandatory)][string]$Name,[Parameter(Mandatory)]$Session)
+    if ($Name -eq 'dotnet') {
+        $candidates = @()
+        if ($env:DOTNET_ROOT) { $candidates += (Join-Path $env:DOTNET_ROOT 'dotnet.exe') }
+        if ($env:LOCALAPPDATA) { $candidates += (Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet\dotnet.exe') }
+        foreach ($cand in $candidates) {
+            if ($cand -and (Test-Path $cand)) {
+                $sdks = & $cand --list-sdks 2>$null
+                if ($sdks) {
+                    $env:DOTNET_ROOT = Split-Path $cand -Parent
+                    $env:PATH = "$($env:DOTNET_ROOT);$env:PATH"
+                    return $cand
+                }
+            }
+        }
+    }
     $cmd = Get-Command $Name -ErrorAction SilentlyContinue
     if (-not $cmd) { Write-CloudOSLog $Session "Pré-requisito ausente: $Name" 'ERROR'; throw "PRECONDITION_MISSING:$Name" }
     return $cmd.Source
@@ -325,7 +340,7 @@ const child = spawn(config.filePath, config.arguments || [], {
   cwd: config.workingDirectory,
   env: { ...process.env, ...(config.environment || {}) },
   detached: true,
-  windowsHide: true,
+  windowsHide: Boolean(config.windowsHide),
   stdio: ['ignore', stdoutFd, stderrFd]
 });
 function closeBootstrapDescriptors() {
@@ -369,7 +384,8 @@ function Start-CloudOSLoggedProcess {
         [string[]]$ArgumentList=@(),
         [Parameter(Mandatory)][string]$StdOut,
         [Parameter(Mandatory)][string]$StdErr,
-        [hashtable]$Environment=@{}
+        [hashtable]$Environment=@{},
+        [switch]$WindowsHide
     )
     $nodeBootstrap = (Get-Command node -ErrorAction Stop).Source
     $bootstrapPath = Get-CloudOSDetachedBootstrapPath $Session
@@ -397,6 +413,7 @@ function Start-CloudOSLoggedProcess {
         resultPath=$resultPath
         sessionId=[string]$Session.id
         logDirectory=[string]$Session.logDirectory
+        windowsHide=$WindowsHide.IsPresent
     })
 
     $quotedBootstrap = '"' + $bootstrapPath + '"'

@@ -341,6 +341,60 @@ function Get-CloudOSFriendlyLaunchFailure {
     }
 }
 
+$existingSession = Read-CloudOSCurrentSession
+if ($existingSession -and $existingSession.status -eq 'running') {
+    $healthy = $false
+    $hostPid = 0
+    if ($existingSession.readiness -and $existingSession.readiness.hostRuntimePid) {
+        $hostPid = [int]$existingSession.readiness.hostRuntimePid
+    }
+    if ($hostPid -gt 0) {
+        $hostRecord = @($existingSession.processes | Where-Object { [int]$_.pid -eq $hostPid -and [string]$_.component -eq 'host-runtime' }) | Select-Object -First 1
+        if ($hostRecord) {
+            $ownership = Test-CloudOSProcessOwnership $existingSession $hostRecord
+            if ($ownership.owned -and $ownership.running) {
+                $apiBase = [string]$existingSession.readiness.backendApiBase
+                if ($apiBase) {
+                    try {
+                        $res = Invoke-WebRequest -Uri "$apiBase/api/health" -TimeoutSec 2 -SkipHttpErrorCheck -ErrorAction Stop
+                        if ([int]$res.StatusCode -ge 200 -and [int]$res.StatusCode -lt 400) {
+                            $healthy = $true
+                        }
+                    } catch {}
+                }
+            }
+        }
+    }
+
+    if ($healthy) {
+        Write-Host "CloudOS já está em execução (sessão $($existingSession.id)). Ativando janela existente..."
+        $hostExe = Join-Path $script:CloudOSRoot 'desktop\CloudOS.Host\bin\Release\net8.0-windows10.0.19041.0\CloudOS.Host.exe'
+        if (Test-Path -LiteralPath $hostExe) {
+            try {
+                $signalProc = Start-Process -FilePath $hostExe -ArgumentList @('--root', $script:CloudOSRoot) -WindowStyle Hidden -PassThru -ErrorAction SilentlyContinue
+                if ($signalProc) { [void]$signalProc.WaitForExit(5000) }
+            } catch {}
+        }
+        $launchResult = [pscustomobject][ordered]@{
+            schemaVersion = 2
+            status = 'already_running'
+            sessionId = [string]$existingSession.id
+            mode = [string]$existingSession.mode
+            manifest = (Join-Path $existingSession.logDirectory 'manifest.json')
+            logDirectory = [string]$existingSession.logDirectory
+            readiness = $existingSession.readiness
+            launcherPid = $PID
+            returnedAt = (Get-Date).ToUniversalTime().ToString('o')
+        }
+        Write-Output ($launchResult | ConvertTo-Json -Depth 8 -Compress)
+        exit 0
+    } else {
+        try {
+            [void](Stop-CloudOSRecordedProcesses $existingSession)
+        } catch {}
+    }
+}
+
 $session = New-CloudOSSession -Mode $Mode
 Save-CloudOSProcessSnapshot $session 'before'
 

@@ -56,6 +56,8 @@ public partial class App : Application
         });
         _singleInstance.StartListening();
         window.Show();
+        window.Activate();
+        window.Focus();
     }
 
     protected override void OnExit(ExitEventArgs e)
