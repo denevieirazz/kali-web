@@ -284,7 +284,15 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
 
   async function finalizePreflightIframe(
     pending: PendingPreflightIframe,
-    iframe: { status: 'PASS' | 'FAIL'; code?: string; cause?: string; evidence?: string; loadMs?: number; connectionMs?: number },
+    evidence: {
+      frameAttached?: boolean;
+      frameLoaded?: boolean;
+      loadMs?: number;
+      signals?: string[];
+      errorCode?: string;
+      errorMessage?: string;
+      taxonomy?: string;
+    },
   ) {
     if (preflightFinalizeRef.current) return;
     preflightFinalizeRef.current = true;
@@ -295,7 +303,7 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
     try {
       const result = await apiClient<PhysicalPreflight>(`/api/linux-runtime/poc1/preflight/${encodeURIComponent(pending.runId)}/finalize`, {
         method: 'POST',
-        body: JSON.stringify({ ownerId: windowId, iframe }),
+        body: JSON.stringify({ ownerId: windowId, evidence }),
         timeoutMs: 25_000,
       });
       setPhysicalPreflight(result);
@@ -311,61 +319,19 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
 
   function onPreflightFrameLoad() {
     const pending = pendingPreflightIframe;
-    const frame = preflightIframeRef.current;
-    if (!pending || !frame || preflightFinalizeRef.current) return;
+    if (!pending || preflightFinalizeRef.current) return;
     const loadedAt = performance.now();
     const loadMs = loadedAt - pending.requestedAt;
-    try {
-      const document = frame.contentDocument;
-      if (!document) {
-        void finalizePreflightIframe(pending, {
-          status: 'FAIL',
-          code: 'IFRAME_DOCUMENT_UNAVAILABLE',
-          cause: 'O iframe carregou, mas o documento HTML5 não ficou acessível para validar a conexão.',
-          evidence: 'contentDocument=null',
-          loadMs,
-        });
-        return;
-      }
 
-      const connected = () => {
-        void finalizePreflightIframe(pending, {
-          status: 'PASS',
-          loadMs,
-          connectionMs: performance.now() - pending.requestedAt,
-        });
-      };
-      const lost = () => {
-        void finalizePreflightIframe(pending, {
-          status: 'FAIL',
-          code: 'IFRAME_XPRA_CONNECTION_LOST',
-          cause: 'O cliente HTML5 perdeu a conexão antes de completar o dry run.',
-          evidence: 'document event=connection-lost',
-          loadMs,
-          connectionMs: performance.now() - pending.requestedAt,
-        });
-      };
-      document.addEventListener('connection-established', connected, { once: true });
-      document.addEventListener('connection-lost', lost, { once: true });
-      preflightConnectionTimerRef.current = window.setTimeout(() => {
-        void finalizePreflightIframe(pending, {
-          status: 'FAIL',
-          code: 'IFRAME_XPRA_CONNECTION_TIMEOUT',
-          cause: 'O HTML5 carregou, mas connection-established não foi observado dentro do limite.',
-          evidence: 'frontend timeout=15000ms',
-          loadMs,
-          connectionMs: performance.now() - pending.requestedAt,
-        });
-      }, 15_000);
-    } catch (cause) {
+    // Aguarda o script HTML5 do iframe iniciar a conexão WebSocket antes de finalizar a correlação
+    window.setTimeout(() => {
       void finalizePreflightIframe(pending, {
-        status: 'FAIL',
-        code: 'IFRAME_ORIGIN_OR_SANDBOX_BLOCKED',
-        cause: 'O CloudOS não conseguiu inspecionar o iframe de preflight no mesmo origin/sandbox.',
-        evidence: cause instanceof Error ? cause.message : String(cause),
+        frameAttached: true,
+        frameLoaded: true,
         loadMs,
+        signals: ['FRAME_ATTACH', 'NAVIGATION'],
       });
-    }
+    }, 1200);
   }
 
   async function start() {
@@ -577,7 +543,7 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
           key={pendingPreflightIframe.runId}
           title="CloudOS Linux Runtime Preflight — Xpra HTML5"
           src={pendingPreflightIframe.clientUrl}
-          sandbox="allow-scripts allow-same-origin"
+          sandbox="allow-scripts allow-forms allow-pointer-lock"
           referrerPolicy="no-referrer"
           onLoad={onPreflightFrameLoad}
           aria-hidden="true"

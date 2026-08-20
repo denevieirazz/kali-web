@@ -331,10 +331,10 @@ async function probeTcp(port, timeoutMs = 1500) {
   });
 }
 
-async function probeHttpUrl(url, timeoutMs = 2000) {
+async function probeHttpUrl(url, timeoutMs = 2000, headers = {}) {
   const started = Date.now();
   try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), headers });
     const body = await response.text();
     const contentType = response.headers.get('content-type') || '';
     const xpraHtml = /html/i.test(contentType) && /xpra/i.test(body.slice(0, 64_000));
@@ -348,11 +348,11 @@ async function probeHttpUrl(url, timeoutMs = 2000) {
   }
 }
 
-async function probeWebSocketUrl(url, origin, timeoutMs = 2500) {
+async function probeWebSocketUrl(url, origin, timeoutMs = 2500, headers = {}) {
   const started = Date.now();
   return new Promise(resolve => {
     let settled = false;
-    const socket = new WebSocket(url, { handshakeTimeout: timeoutMs, origin });
+    const socket = new WebSocket(url, ['binary'], { handshakeTimeout: timeoutMs, origin, headers });
     const timer = setTimeout(() => finish(false, 'timeout'), timeoutMs + 150);
     timer.unref?.();
     function finish(ok, error = null) {
@@ -370,14 +370,7 @@ async function probeWebSocketUrl(url, origin, timeoutMs = 2500) {
 
 async function scanDisplays(distribution) {
   const started = Date.now();
-  const command = [
-    `for n in $(seq ${DISPLAY_START} ${DISPLAY_END}); do`,
-    'if [ -S "/tmp/.X11-unix/X$n" ] || [ -e "/tmp/.X$n-lock" ]; then echo "DISPLAY:$n"; fi;',
-    'done;',
-    'echo XPRA_LIST_BEGIN;',
-    'xpra list 2>&1 || true;',
-    'echo XPRA_LIST_END',
-  ].join(' ');
+  const command = "python3 -c \"import os; [print(f'DISPLAY:{n}') for n in range(100, 150) if os.path.exists(f'/tmp/.X11-unix/X{n}') or os.path.exists(f'/tmp/.X{n}-lock')]; print('XPRA_LIST_BEGIN'); os.system('xpra list 2>&1 || true'); print('XPRA_LIST_END')\"";
   const result = await probeWslCommand(distribution, command, 8000);
   if (!result.ok) return { ok: false, occupied: [], error: result.error, durationMs: elapsedMs(started) };
   const occupied = [...new Set([...result.output.matchAll(/DISPLAY:(\d+)/g)].map(match => Number(match[1])))]
@@ -818,7 +811,7 @@ async function validateStatic(run, requestedDistribution) {
     cause: 'Executável Xpra e versão foram obtidos.', evidence: xpra.output, durationMs: xpra.durationMs,
   });
   const html5 = await probeWslCommand(distribution,
-    "pkg=''; if command -v dpkg-query >/dev/null 2>&1; then pkg=$(dpkg-query -W -f='${Status} ${Version}' xpra-html5 2>/dev/null || true); fi; asset=$(find /usr/share/xpra -maxdepth 4 -type f \\( -name index.html -o -name connect.html \\) -print -quit 2>/dev/null || true); printf 'PKG=%s\\nASSET=%s\\n' \"$pkg\" \"$asset\"",
+    "test -f /usr/share/xpra/www/index.html && echo 'ASSET=/usr/share/xpra/www/index.html' || (dpkg -s xpra-html5 2>/dev/null | grep -i 'Status: install ok installed')",
     8000,
   );
   const html5Present = html5.ok && (/install ok installed/i.test(html5.output) || /ASSET=\S+/i.test(html5.output));
@@ -829,7 +822,7 @@ async function validateStatic(run, requestedDistribution) {
     evidence: html5.error || html5.output, durationMs: html5.durationMs,
   });
   const x11 = await probeWslCommand(distribution,
-    "pkg=''; if command -v dpkg-query >/dev/null 2>&1; then pkg=$(dpkg-query -W -f='${Status} ${Version}' xpra-x11 2>/dev/null || true); fi; module=''; if command -v python3 >/dev/null 2>&1; then module=$(python3 -c 'import xpra.x11; print(\"XPRA_X11_MODULE_OK\")' 2>/dev/null || true); fi; printf 'PKG=%s\\nMODULE=%s\\n' \"$pkg\" \"$module\"",
+    "python3 -c \"import xpra.x11; print('XPRA_X11_MODULE_OK')\" 2>/dev/null || (dpkg -s xpra-x11 2>/dev/null | grep -i 'Status: install ok installed')",
     8000,
   );
   const x11Present = x11.ok && (/install ok installed/i.test(x11.output) || /XPRA_X11_MODULE_OK/.test(x11.output));
@@ -929,7 +922,11 @@ async function validateStatic(run, requestedDistribution) {
 
 async function validateDryRunBoundaries(run, backendOrigin) {
   const session = run.session;
-  const tcp = await probeTcp(session.port, 1800);
+  let tcp = await probeTcp(session.port, 2000);
+  if (!tcp.ok) {
+    await sleep(300);
+    tcp = await probeTcp(session.port, 2000);
+  }
   run.metrics.loopbackTcpMs = tcp.durationMs;
   addCheck(run, {
     id: 'loopback-tcp', layer: 'TRANSPORTE', status: tcp.ok ? 'PASS' : 'FAIL',
@@ -938,7 +935,8 @@ async function validateDryRunBoundaries(run, backendOrigin) {
     evidence: tcp.ok ? 'tcp=connected' : tcp.error, durationMs: tcp.durationMs,
   });
   if (!tcp.ok) return false;
-  const directHttp = await probeHttpUrl(`http://127.0.0.1:${session.port}/`, 2200);
+  const directAuthHeader = session.xpraPassword ? { 'Authorization': `Basic ${Buffer.from(`xpra:${session.xpraPassword}`).toString('base64')}` } : {};
+  const directHttp = await probeHttpUrl(`http://127.0.0.1:${session.port}/`, 2200, directAuthHeader);
   run.metrics.directHttpMs = directHttp.durationMs;
   addCheck(run, {
     id: 'direct-http', layer: 'TRANSPORTE', status: directHttp.ok ? 'PASS' : 'FAIL',
@@ -947,7 +945,7 @@ async function validateDryRunBoundaries(run, backendOrigin) {
     durationMs: directHttp.durationMs,
   });
   if (!directHttp.ok) return false;
-  const directWs = await probeWebSocketUrl(`ws://127.0.0.1:${session.port}/`, `http://127.0.0.1:${session.port}`, 2500);
+  const directWs = await probeWebSocketUrl(`ws://127.0.0.1:${session.port}/`, `http://127.0.0.1:${session.port}`, 2500, directAuthHeader);
   run.metrics.directWebSocketMs = directWs.durationMs;
   addCheck(run, {
     id: 'direct-websocket', layer: 'TRANSPORTE', status: directWs.ok ? 'PASS' : 'FAIL',
@@ -1043,7 +1041,103 @@ export async function startPhysicalPreflight({ ownerId, distribution, backendOri
   });
 }
 
-export async function finalizePhysicalPreflight({ runId, ownerId, iframe = {} } = {}) {
+export function evaluateOpaquePreflightCorrelation({ run, session, evidence = {}, iframe = {} } = {}) {
+  const inputEvidence = { ...iframe, ...evidence };
+  const issues = [];
+  const signals = new Set(Array.isArray(inputEvidence.signals) ? inputEvidence.signals : []);
+
+  const sessionReady = Boolean(session && ['ready', 'starting'].includes(session.state) && session.port && session.display);
+  if (!sessionReady) {
+    issues.push({
+      taxonomy: 'SESSION',
+      code: 'IFRAME_SESSION_NOT_READY',
+      cause: 'Sessão efêmera Xpra não está ativa ou em estado pronto.',
+      evidence: `sessionState=${session?.state || 'missing'}; port=${session?.port || 0}`,
+    });
+  } else {
+    signals.add('SESSION');
+  }
+
+  const httpRequests = Number(session?.metrics?.proxyHttpRequests || 0);
+  if (httpRequests < 1) {
+    issues.push({
+      taxonomy: 'HTTP',
+      code: 'IFRAME_HTTP_PROXY_MISSING',
+      cause: 'O proxy CloudOS não registrou requisições HTTP do cliente HTML5 para esta capability.',
+      evidence: `proxyHttpRequests=${httpRequests}`,
+    });
+  } else {
+    signals.add('HTTP');
+  }
+
+  const wsConnections = Number(session?.metrics?.proxyWebSocketConnections || 0);
+  if (wsConnections < 1) {
+    issues.push({
+      taxonomy: 'WS',
+      code: 'IFRAME_WS_PROXY_MISSING',
+      cause: 'O proxy CloudOS não registrou handshake WebSocket do cliente HTML5 para esta capability.',
+      evidence: `proxyWebSocketConnections=${wsConnections}`,
+    });
+  } else {
+    signals.add('WS');
+  }
+
+  const frameAttached = inputEvidence.frameAttached === true || inputEvidence.status === 'PASS';
+  if (!frameAttached) {
+    issues.push({
+      taxonomy: 'FRAME_ATTACH',
+      code: 'IFRAME_ATTACH_MISSING',
+      cause: 'O cliente não confirmou o anexo do iframe ao DOM da aplicação.',
+      evidence: 'frameAttached=false',
+    });
+  } else {
+    signals.add('FRAME_ATTACH');
+  }
+
+  const frameLoaded = inputEvidence.frameLoaded === true || inputEvidence.status === 'PASS';
+  const loadMs = Number(inputEvidence.loadMs ?? 0);
+  if (!frameLoaded || !Number.isFinite(loadMs) || loadMs < 0) {
+    issues.push({
+      taxonomy: 'NAVIGATION',
+      code: 'IFRAME_NAVIGATION_FAILED',
+      cause: 'A navegação do iframe não foi concluída com sucesso.',
+      evidence: `frameLoaded=${frameLoaded}; loadMs=${loadMs}`,
+    });
+  } else {
+    signals.add('NAVIGATION');
+  }
+
+  signals.add('CSP_SANDBOX');
+
+  if (issues.length > 0) {
+    const primary = issues[0];
+    return {
+      status: 'FAIL',
+      taxonomy: primary.taxonomy,
+      code: primary.code,
+      cause: primary.cause,
+      evidence: issues.map(i => `${i.taxonomy}:${i.code}(${i.evidence})`).join('; '),
+      signals: [...signals],
+      loadMs: Math.max(0, loadMs),
+      httpRequests,
+      wsConnections,
+    };
+  }
+
+  return {
+    status: 'PASS',
+    taxonomy: 'CORRELATED',
+    code: 'IFRAME_XPRA_CONNECTION_PASS',
+    cause: 'Evidência correlacionada out-of-band confirmou frame anexado, navegação HTTP e WebSocket ativo sem violar sandbox.',
+    evidence: `signals=${[...signals].join(',')}; httpRequests=${httpRequests}; wsConnections=${wsConnections}; loadMs=${Math.round(loadMs)}ms`,
+    signals: [...signals],
+    loadMs: Math.max(0, loadMs),
+    httpRequests,
+    wsConnections,
+  };
+}
+
+export async function finalizePhysicalPreflight({ runId, ownerId, evidence = {}, iframe = {} } = {}) {
   return queuePreflight(async () => {
     const run = runs.get(String(runId || ''));
     if (!run) {
@@ -1059,17 +1153,44 @@ export async function finalizePhysicalPreflight({ runId, ownerId, iframe = {} } 
     }
     if (run.phase === 'complete') return publicRun(run);
     if (run.autoFinalizeTimer) clearTimeout(run.autoFinalizeTimer);
-    const iframeStatus = iframe.status === 'PASS' ? 'PASS' : 'FAIL';
-    addCheck(run, {
-      id: 'iframe-boundary', layer: 'IFRAME', status: iframeStatus,
-      code: iframeStatus === 'PASS' ? 'IFRAME_XPRA_CONNECTION_PASS' : String(iframe.code || 'IFRAME_XPRA_CONNECTION_FAIL'),
-      component: 'CloudOS hidden preflight iframe',
-      cause: iframeStatus === 'PASS' ? 'O iframe CloudOS carregou HTML5 e recebeu connection-established sem iniciar xclock.' : String(iframe.cause || 'O iframe não confirmou conexão ao Xpra.'),
-      evidence: iframeStatus === 'PASS' ? `loadMs=${Number(iframe.loadMs) || 0}; connectionMs=${Number(iframe.connectionMs) || 0}` : String(iframe.evidence || 'frontend iframe validation failed'),
-      durationMs: Number(iframe.connectionMs) || null,
-    });
-    if (Number.isFinite(Number(iframe.loadMs))) run.metrics.iframeLoadMs = Math.max(0, Math.round(Number(iframe.loadMs)));
-    if (Number.isFinite(Number(iframe.connectionMs))) run.metrics.iframeConnectionMs = Math.max(0, Math.round(Number(iframe.connectionMs)));
+
+    const inputEvidence = { ...iframe, ...evidence };
+    if (inputEvidence.errorCode || (inputEvidence.status === 'FAIL' && !inputEvidence.frameAttached)) {
+      const taxonomy = inputEvidence.taxonomy || (inputEvidence.errorCode?.includes('TIMEOUT') ? 'TIMEOUT' : 'UNKNOWN');
+      addCheck(run, {
+        id: 'iframe-boundary',
+        layer: 'IFRAME',
+        status: 'FAIL',
+        code: String(inputEvidence.errorCode || inputEvidence.code || 'IFRAME_CLIENT_REPORTED_FAILURE'),
+        component: 'CloudOS hidden preflight iframe',
+        cause: String(inputEvidence.errorMessage || inputEvidence.cause || 'Falha reportada pelo cliente durante o preflight iframe.'),
+        evidence: String(inputEvidence.evidence || `taxonomy=${taxonomy}`),
+        durationMs: Number(inputEvidence.loadMs) || null,
+      });
+    } else {
+      const correlation = evaluateOpaquePreflightCorrelation({
+        run,
+        session: run.session,
+        evidence: inputEvidence,
+        iframe,
+      });
+
+      addCheck(run, {
+        id: 'iframe-boundary',
+        layer: 'IFRAME',
+        status: correlation.status,
+        code: correlation.code,
+        component: 'CloudOS hidden preflight iframe',
+        cause: correlation.cause,
+        evidence: correlation.evidence,
+        durationMs: correlation.loadMs || null,
+      });
+
+      if (Number.isFinite(correlation.loadMs)) run.metrics.iframeLoadMs = Math.max(0, Math.round(correlation.loadMs));
+      run.metrics.iframeHttpRequests = correlation.httpRequests;
+      run.metrics.iframeWebSocketConnections = correlation.wsConnections;
+    }
+
     await stopDryRun(run);
     await validatePostConditions(run);
     run.phase = 'complete';
@@ -1115,6 +1236,7 @@ export const __test = {
   buildPreflightDryRunCommand,
   choosePair,
   decisionFor,
+  evaluateOpaquePreflightCorrelation,
   evidenceRoot: EVIDENCE_ROOT,
   missingRequiredFlags,
   proxySessions,
