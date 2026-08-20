@@ -48,6 +48,31 @@ public partial class MainWindow : Window
         ShellWebView.SizeChanged += (_, _) => _bridge?.RelayoutAttachedWindows();
     }
 
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle != IntPtr.Zero)
+        {
+            var workArea = SystemParameters.WorkArea;
+            if (workArea.Width > 0 && workArea.Height > 0)
+            {
+                if (Width > workArea.Width) Width = Math.Max(960, workArea.Width * 0.9);
+                if (Height > workArea.Height) Height = Math.Max(640, workArea.Height * 0.9);
+                Left = workArea.Left + Math.Max(0, (workArea.Width - Width) / 2.0);
+                Top = workArea.Top + Math.Max(0, (workArea.Height - Height) / 2.0);
+            }
+
+            WindowState = WindowState.Normal;
+            Visibility = Visibility.Visible;
+            ShowInTaskbar = true;
+
+            NativeMethods.SetWindowPos(handle, IntPtr.Zero, (int)Left, (int)Top, (int)Width, (int)Height, 0x0040 | 0x0020);
+            NativeMethods.ShowWindowAsync(handle, 1);
+            NativeMethods.SetForegroundWindow(handle);
+        }
+    }
+
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         if (_options.Fullscreen) SetFullscreen(true);

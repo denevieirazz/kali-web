@@ -42,7 +42,7 @@ public partial class App : Application
         if (!_singleInstance.TryAcquire())
         {
             _singleInstance.SignalExistingAsync().GetAwaiter().GetResult();
-            Shutdown();
+            Environment.Exit(0);
             return;
         }
 
@@ -53,6 +53,12 @@ public partial class App : Application
             if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
             window.Show();
             window.Activate();
+            var handle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+            if (handle != IntPtr.Zero)
+            {
+                Native.NativeMethods.ShowWindowAsync(handle, 9);
+                Native.NativeMethods.SetForegroundWindow(handle);
+            }
         });
         _singleInstance.StartListening();
         window.Show();
