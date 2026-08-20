@@ -387,3 +387,20 @@ test('EF2-P0-011: Unified command and transport contract between preflight and r
   assert.match(runtime, /--start-child='?xclock'?/);
   assert.doesNotMatch(dryRun, /--start-child/);
 });
+
+test('EF2-P0-012: Trailing slash anchoring and render telemetry metrics contract', async () => {
+  const { __test, xpraHttpProxyMiddleware } = await import('../src/linuxRuntime/xpraProxy.js');
+  const { recordXpraPocClientMetrics } = await import('../src/linuxRuntime/xpraPoc.js');
+
+  // parseProxyRequest lida com trailing slash
+  const withSlash = __test.parseProxyRequest('/__cloudos/linux-runtime/poc1/session1/token1/?query=1');
+  assert.equal(withSlash.id, 'session1');
+  assert.equal(withSlash.token, 'token1');
+  assert.equal(withSlash.targetPath, '/?query=1');
+
+  // subpath relativo tem ancoragem no token
+  const scriptPath = __test.parseProxyRequest('/__cloudos/linux-runtime/poc1/session1/token1/js/lib/jquery.js');
+  assert.equal(scriptPath.id, 'session1');
+  assert.equal(scriptPath.token, 'token1');
+  assert.equal(scriptPath.targetPath, '/js/lib/jquery.js');
+});

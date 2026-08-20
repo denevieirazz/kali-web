@@ -6,8 +6,8 @@ import { recordXpraPreflightProxyEvent, resolveXpraPreflightProxySession } from 
 const PREFIX = '/__cloudos/linux-runtime/poc1/';
 function parseProxyRequest(requestUrl) { let url; try { url = new URL(requestUrl, 'http://127.0.0.1'); } catch { return null; } if (!url.pathname.startsWith(PREFIX)) return null; const parts = url.pathname.slice(PREFIX.length).split('/'); const id = parts.shift() || ''; const token = parts.shift() || ''; const targetPath = `/${parts.join('/')}` || '/'; return { id, token, targetPath: `${targetPath}${url.search}` }; }
 function rewriteCsp(value) { const directives = String(value || '').split(';').map(v => v.trim()).filter(Boolean).filter(v => !/^(frame-ancestors|sandbox)\b/i.test(v)); directives.push("sandbox allow-scripts allow-forms allow-pointer-lock"); directives.push("frame-ancestors 'self'"); return directives.join('; '); }
-function proxyBase(session) { return `${PREFIX}${session.id}/${session.proxyToken}`; }
-function rewriteLocation(value, session) { if (!value) return value; const base = proxyBase(session); try { const parsed = new URL(value, `http://127.0.0.1:${session.port}`); if (['127.0.0.1', 'localhost'].includes(parsed.hostname)) return `${base}${parsed.pathname}${parsed.search}${parsed.hash}`; } catch {} if (String(value).startsWith('/')) return `${base}${value}`; return value; }
+function proxyBase(session) { return `${PREFIX}${session.id}/${session.proxyToken}/`; }
+function rewriteLocation(value, session) { if (!value) return value; const base = proxyBase(session); try { const parsed = new URL(value, `http://127.0.0.1:${session.port}`); if (['127.0.0.1', 'localhost'].includes(parsed.hostname)) return `${base}${parsed.pathname.replace(/^\//, '')}${parsed.search}${parsed.hash}`; } catch {} if (String(value).startsWith('/')) return `${base}${value.replace(/^\//, '')}`; return value; }
 function buildResponseHeaders(headers, session) { const result = {}; for (const [name, value] of Object.entries(headers)) { const lower = name.toLowerCase(); if (['x-frame-options', 'content-length', 'set-cookie'].includes(lower)) continue; if (lower === 'content-security-policy') result[name] = rewriteCsp(value); else if (lower === 'location') result[name] = rewriteLocation(value, session); else result[name] = value; } if (!Object.keys(result).some(name => name.toLowerCase() === 'content-security-policy')) result['Content-Security-Policy'] = rewriteCsp(null); result['Cache-Control'] = 'no-store'; result['Referrer-Policy'] = 'no-referrer'; result['Cross-Origin-Resource-Policy'] = 'cross-origin'; return result; }
 function writeProxyError(res, status, message) {
   if (res.headersSent) return res.end();
@@ -22,11 +22,19 @@ function writeProxyError(res, status, message) {
 function resolveProxySession(id, token) { return resolveXpraPocProxySession(id, token) || resolveXpraPreflightProxySession(id, token); }
 function recordProxyEvent(session, event) { if (session.preflight === true) recordXpraPreflightProxyEvent(session.id, event); else recordXpraPocProxyEvent(session.id, event); }
 export function xpraHttpProxyMiddleware(req, res, next) {
-  const parsed = parseProxyRequest(req.originalUrl || req.url);
+  const reqUrl = req.originalUrl || req.url || '';
+  const parsed = parseProxyRequest(reqUrl);
   if (!parsed) return next();
   if (!['GET', 'HEAD'].includes(req.method)) return writeProxyError(res, 405, 'Método não permitido.');
   const session = resolveProxySession(parsed.id, parsed.token);
   if (!session) return writeProxyError(res, 404, 'Surface Xpra indisponível ou capability expirada.');
+  const pathname = reqUrl.split('?')[0];
+  if (pathname === `${PREFIX}${parsed.id}/${parsed.token}`) {
+    const search = reqUrl.includes('?') ? `?${reqUrl.split('?')[1]}` : '';
+    res.statusCode = 307;
+    res.setHeader('Location', `${PREFIX}${parsed.id}/${parsed.token}/${search}`);
+    return res.end();
+  }
   recordProxyEvent(session, 'http');
   const headers = { ...req.headers, host: `127.0.0.1:${session.port}` };
   for (const name of ['authorization', 'cookie', 'referer', 'origin']) delete headers[name];

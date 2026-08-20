@@ -12,6 +12,9 @@ type PocMetrics = {
   lastHealthMs: number | null;
   iframeLoadMs: number | null;
   firstRemoteWindowMs: number | null;
+  firstFramePaintedMs: number | null;
+  canvasWidth: number | null;
+  canvasHeight: number | null;
   reconnectCount: number;
   restartCount: number;
   healthFailures: number;
@@ -449,7 +452,7 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
     }
   }
 
-  async function reportClientMetrics(session: PocSession, values: { iframeLoadMs?: number; firstRemoteWindowMs?: number }) {
+  async function reportClientMetrics(session: PocSession, values: { iframeLoadMs?: number; firstRemoteWindowMs?: number; firstFramePaintedMs?: number; canvasWidth?: number; canvasHeight?: number }) {
     const reconnectCount = reconnectCounts.current.get(session.id) ?? 0;
     try {
       const result = await apiClient<{ session: PocSession }>(`/api/linux-runtime/poc1/sessions/${encodeURIComponent(session.id)}/client-metrics`, {
@@ -477,18 +480,31 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
     try {
       const document = frame.contentDocument;
       if (!document) return;
-      const measureFirstWindow = () => {
+      let windowMeasured = false;
+      const measureWindowAndFrame = () => {
         const xpraWindow = document.querySelector('#screen .window');
         if (!xpraWindow) return false;
         const actionStart = actionStartedAt.current.get(session.id) ?? requested;
-        void reportClientMetrics(session, { firstRemoteWindowMs: performance.now() - actionStart });
-        observerRef.current?.disconnect();
-        return true;
+        if (!windowMeasured) {
+          windowMeasured = true;
+          void reportClientMetrics(session, { firstRemoteWindowMs: performance.now() - actionStart });
+        }
+        const canvas = xpraWindow.querySelector('canvas') as HTMLCanvasElement | null;
+        if (canvas && canvas.width > 0 && canvas.height > 0) {
+          void reportClientMetrics(session, {
+            firstFramePaintedMs: performance.now() - actionStart,
+            canvasWidth: canvas.width,
+            canvasHeight: canvas.height,
+          });
+          observerRef.current?.disconnect();
+          return true;
+        }
+        return false;
       };
-      if (measureFirstWindow()) return;
+      if (measureWindowAndFrame()) return;
       const screen = document.querySelector('#screen') ?? document.body;
-      const observer = new MutationObserver(() => { measureFirstWindow(); });
-      observer.observe(screen, { childList: true, subtree: true });
+      const observer = new MutationObserver(() => { measureWindowAndFrame(); });
+      observer.observe(screen, { childList: true, subtree: true, attributes: true });
       observerRef.current = observer;
     } catch (cause) {
       setError(`POC1_RENDER_TELEMETRY_UNAVAILABLE: ${cause instanceof Error ? cause.message : String(cause)}`);
@@ -637,7 +653,7 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
         {activeSession ? (
           <>
             <div><strong>Runtime</strong><span>boot {formatMs(activeSession.metrics.bootMs)}</span><span>WS {formatMs(activeSession.metrics.websocketHandshakeMs)}</span><span>health {formatMs(activeSession.metrics.lastHealthMs)}</span></div>
-            <div><strong>Render</strong><span>iframe {formatMs(activeSession.metrics.iframeLoadMs)}</span><span>1ª janela {formatMs(activeSession.metrics.firstRemoteWindowMs)}</span></div>
+            <div><strong>Render</strong><span>iframe {formatMs(activeSession.metrics.iframeLoadMs)}</span><span>1ª janela {formatMs(activeSession.metrics.firstRemoteWindowMs)}</span><span>pintado {formatMs(activeSession.metrics.firstFramePaintedMs)}</span><span>canvas {activeSession.metrics.canvasWidth ? `${activeSession.metrics.canvasWidth}x${activeSession.metrics.canvasHeight}` : '—'}</span></div>
             <div><strong>Lifecycle</strong><span>restart {activeSession.metrics.restartCount}</span><span>reconnect {activeSession.metrics.reconnectCount}</span><span>falhas {activeSession.metrics.healthFailures}</span></div>
             <div><strong>Health</strong><span>{activeHealth?.healthy ? 'saudável' : activeHealth?.classification ?? activeSession.state}</span><span>TCP {activeHealth?.windowsTcp?.ok === false ? 'falha' : 'ok'}</span><span>WS {activeHealth?.websocket?.ok === false ? 'falha' : 'ok'}</span></div>
             <div className="linux-runtime-poc__session-actions">
