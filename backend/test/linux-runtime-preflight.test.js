@@ -16,7 +16,7 @@ test('physical preflight dry run uses ephemeral auth=env and never launches xclo
     password: 'ephemeral-secret-test-2026',
   });
   assert.match(command, /xpra seamless :149/);
-  assert.match(command, /--bind-tcp=127\.0\.0\.1:14549,auth=env/);
+  assert.match(command, /--bind-tcp=0\.0\.0\.0:14549,auth=env/);
   assert.match(command, /export XPRA_PASSWORD='ephemeral-secret-test-2026'/);
   assert.match(command, /--html=on/);
   assert.match(command, /--start-new-commands=no/);
@@ -25,7 +25,6 @@ test('physical preflight dry run uses ephemeral auth=env and never launches xclo
   assert.doesNotMatch(command, /--start-child/);
   assert.doesNotMatch(command, /--exit-with-children/);
   assert.doesNotMatch(command, /xclock|xeyes|xterm|gedit|firefox|gimp/i);
-  assert.doesNotMatch(command, /0\.0\.0\.0/);
 
   // Rejeita senhas curtas ou inválidas
   assert.throws(() => __test.buildPreflightDryRunCommand({ display: 149, port: 14549, runId: 'c', password: 'short' }), /Capability Xpra inválida/);

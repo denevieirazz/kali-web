@@ -18,6 +18,7 @@ import {
 } from '../wsl/distroService.js';
 import { getXpraPocSessions } from './xpraPoc.js';
 import {
+  XPRA_BIND_TCP_HOST,
   XPRA_DISPLAY_END,
   XPRA_DISPLAY_START,
   XPRA_PORT_END,
@@ -470,7 +471,7 @@ export function buildPreflightDryRunCommand({ display, port, runId, password = '
     '--file-transfer=no',
     '--start-new-commands=no',
     '--bind=noabstract',
-    `--bind-tcp=127.0.0.1:${port},auth=env`,
+    `--bind-tcp=${XPRA_BIND_TCP_HOST}:${port},auth=env`,
     '--html=on',
   ];
   return [

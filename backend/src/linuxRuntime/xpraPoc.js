@@ -7,7 +7,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { WebSocket } from 'ws';
 import { WSL_EXE, getWslSnapshot, normalizeName, safeChildEnvironment, validateInstalledAsync } from '../wsl/distroService.js';
-import { XPRA_DISPLAY_END, XPRA_DISPLAY_START, XPRA_PORT_END, XPRA_PORT_START, chooseXpraPair, displayForPort as displayForXpraPort, validateLedgerPair } from './xpraPairAllocator.js';
+import { XPRA_BIND_TCP_HOST, XPRA_DISPLAY_END, XPRA_DISPLAY_START, XPRA_PORT_END, XPRA_PORT_START, chooseXpraPair, displayForPort as displayForXpraPort, validateLedgerPair } from './xpraPairAllocator.js';
 
 const execFileAsync = promisify(execFile);
 const PORT_START = XPRA_PORT_START;
@@ -58,7 +58,7 @@ export function buildXpraStartCommand({ appCommand, port, sessionId = 'cloudos-p
   if (!Number.isInteger(port) || port < PORT_START || port > PORT_END) throw new Error('Porta Xpra fora da faixa da POC.');
   if (!password || String(password).length < 16) throw new Error('Capability Xpra inválida.');
   const display = displayForPort(port);
-  return ['set -eu', 'unset DISPLAY WAYLAND_DISPLAY PULSE_SERVER', `export XPRA_PASSWORD=${shellQuote(password)}`, `exec xpra seamless :${display} --session-name=${shellQuote(`cloudos-poc1-${sessionId}`)} --start-child=${shellQuote(appCommand)} --exit-with-children=yes --daemon=no --mdns=no --notifications=no --printing=no --file-transfer=no --start-new-commands=no --bind=noabstract --bind-tcp=127.0.0.1:${port},auth=env --html=on`].join('; ');
+  return ['set -eu', 'unset DISPLAY WAYLAND_DISPLAY PULSE_SERVER', `export XPRA_PASSWORD=${shellQuote(password)}`, `exec xpra seamless :${display} --session-name=${shellQuote(`cloudos-poc1-${sessionId}`)} --start-child=${shellQuote(appCommand)} --exit-with-children=yes --daemon=no --mdns=no --notifications=no --printing=no --file-transfer=no --start-new-commands=no --bind=noabstract --bind-tcp=${XPRA_BIND_TCP_HOST}:${port},auth=env --html=on`].join('; ');
 }
 async function execWsl(distribution, command, timeout = HEALTH_TIMEOUT_MS) { return execFileAsync(WSL_EXE, ['-d', distribution, '--', 'sh', '-lc', command], { windowsHide: true, env: safeChildEnvironment(), timeout, maxBuffer: 512 * 1024 }); }
 export async function checkWslInteropDisabled(distribution) {

@@ -2,6 +2,7 @@ export const XPRA_PORT_START = 14500;
 export const XPRA_PORT_END = 14549;
 export const XPRA_DISPLAY_START = 100;
 export const XPRA_DISPLAY_END = 149;
+export const XPRA_BIND_TCP_HOST = '0.0.0.0';
 
 export function displayForPort(port) {
   const numeric = Number(port);

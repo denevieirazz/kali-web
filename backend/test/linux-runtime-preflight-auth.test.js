@@ -29,7 +29,7 @@ test('EF2-P0-006: Preflight dry-run requires ephemeral auth=env and never uses a
   });
 
   assert.match(command, new RegExp(`export XPRA_PASSWORD='${secret}'`));
-  assert.match(command, /--bind-tcp=127\.0\.0\.1:14500,auth=env/);
+  assert.match(command, /--bind-tcp=0\.0\.0\.0:14500,auth=env/);
   assert.doesNotMatch(command, /auth=allow/);
   assert.doesNotMatch(command, /--start-child/);
   assert.doesNotMatch(command, /xclock/i);
@@ -328,4 +328,14 @@ test('EF2-P0-006: Secret diversity and complete cleanup nullification', () => {
 
   assert.equal(session.xpraPassword, null);
   assert.equal(preflightTest.proxySessions.has(session.id), false);
+});
+
+test('EF2-P0-007: XPRA_BIND_TCP_HOST is 0.0.0.0 for WSL Hyper-V NAT bridge and requires auth=env', async () => {
+  const { XPRA_BIND_TCP_HOST } = await import('../src/linuxRuntime/xpraPairAllocator.js');
+  assert.equal(XPRA_BIND_TCP_HOST, '0.0.0.0');
+
+  const { buildXpraStartCommand } = await import('../src/linuxRuntime/xpraPoc.js');
+  const pocCmd = buildXpraStartCommand({ appCommand: 'xclock', port: 14500, password: 'strong-secret-password-123' });
+  assert.match(pocCmd, /--bind-tcp=0\.0\.0\.0:14500,auth=env/);
+  assert.doesNotMatch(pocCmd, /auth=allow/);
 });
