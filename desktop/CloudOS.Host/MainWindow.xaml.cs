@@ -46,6 +46,19 @@ public partial class MainWindow : Window
         StateChanged += (_, _) => _bridge?.RelayoutAttachedWindows();
         DpiChanged += (_, _) => _bridge?.RelayoutAttachedWindows();
         ShellWebView.SizeChanged += (_, _) => _bridge?.RelayoutAttachedWindows();
+
+        var handle = new WindowInteropHelper(this).EnsureHandle();
+        if (handle != IntPtr.Zero)
+        {
+            var workArea = SystemParameters.WorkArea;
+            if (workArea.Width > 0 && workArea.Height > 0)
+            {
+                if (Width > workArea.Width) Width = Math.Max(960, workArea.Width * 0.9);
+                if (Height > workArea.Height) Height = Math.Max(640, workArea.Height * 0.9);
+                Left = workArea.Left + Math.Max(0, (workArea.Width - Width) / 2.0);
+                Top = workArea.Top + Math.Max(0, (workArea.Height - Height) / 2.0);
+            }
+        }
     }
 
     protected override void OnSourceInitialized(EventArgs e)
