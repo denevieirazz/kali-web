@@ -120,9 +120,38 @@ function formatMs(value: number | null | undefined) {
   return value === null || value === undefined ? '—' : `${Math.round(value)} ms`;
 }
 
-function checkLabel(check: ReadinessCheck | undefined) {
-  if (!check || check.ok === null) return 'PENDENTE';
-  return check.ok ? 'OK' : 'FALHA';
+export function getReconciledReadinessItem(
+  name: string,
+  readinessCheck: ReadinessCheck | undefined,
+  physicalPreflight: PhysicalPreflight | null,
+  preflightBusy: boolean,
+): { label: 'PASS' | 'FAIL' | 'TESTANDO' | 'NÃO TESTADO'; dataOk: 'true' | 'false' | 'testing' | 'untested' } {
+  if (preflightBusy && ['windowsLoopback', 'websocket'].includes(name)) {
+    return { label: 'TESTANDO', dataOk: 'testing' };
+  }
+
+  if (physicalPreflight) {
+    if (name === 'windowsLoopback') {
+      const check = physicalPreflight.checks.find(c => c.id === 'loopback-tcp');
+      if (check?.status === 'PASS') return { label: 'PASS', dataOk: 'true' };
+      if (check?.status === 'FAIL') return { label: 'FAIL', dataOk: 'false' };
+      if (physicalPreflight.decision === 'NO_GO' && !check) return { label: 'NÃO TESTADO', dataOk: 'untested' };
+    }
+    if (name === 'websocket') {
+      const check = physicalPreflight.checks.find(c => c.id === 'direct-websocket');
+      if (check?.status === 'PASS') return { label: 'PASS', dataOk: 'true' };
+      if (check?.status === 'FAIL') return { label: 'FAIL', dataOk: 'false' };
+      if (physicalPreflight.decision === 'NO_GO' && !check) return { label: 'NÃO TESTADO', dataOk: 'untested' };
+    }
+  }
+
+  if (!readinessCheck || readinessCheck.ok === null) {
+    return { label: 'NÃO TESTADO', dataOk: 'untested' };
+  }
+  if (readinessCheck.ok === true) {
+    return { label: 'PASS', dataOk: 'true' };
+  }
+  return { label: 'FAIL', dataOk: 'false' };
 }
 
 function preflightDataOk(status: PreflightStatus | undefined) {
@@ -526,13 +555,22 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
       </section>
 
       <section className="linux-runtime-poc__readiness" aria-label="Readiness POC 1">
-        <strong>{readiness?.ready ? 'READINESS OK' : `READINESS ${readiness?.errorCode ?? 'VERIFICANDO'}`}</strong>
+        <strong>
+          {physicalPreflight?.decision === 'GO'
+            ? 'READINESS OK · PREFLIGHT GO'
+            : readiness?.ready
+              ? 'READINESS OK'
+              : `READINESS ${readiness?.errorCode ?? 'VERIFICANDO'}`}
+        </strong>
         <div>
-          {readinessOrder.map(name => (
-            <span key={name} data-ok={String(readiness?.checks?.[name]?.ok ?? 'pending')}>
-              {name}: {checkLabel(readiness?.checks?.[name])}
-            </span>
-          ))}
+          {readinessOrder.map(name => {
+            const item = getReconciledReadinessItem(name, readiness?.checks?.[name], physicalPreflight, preflightBusy);
+            return (
+              <span key={name} data-ok={item.dataOk}>
+                {name}: {item.label}
+              </span>
+            );
+          })}
         </div>
         {!readiness?.ready && readiness?.error && <small>{readiness.error}</small>}
       </section>

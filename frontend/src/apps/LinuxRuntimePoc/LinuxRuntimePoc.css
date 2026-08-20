@@ -77,10 +77,23 @@
 
 .linux-runtime-poc__readiness span[data-ok="true"] {
   border-color: rgba(126, 220, 142, 0.5);
+  color: #7edc8e;
 }
 
 .linux-runtime-poc__readiness span[data-ok="false"] {
   border-color: rgba(255, 128, 128, 0.6);
+  color: #ff8080;
+}
+
+.linux-runtime-poc__readiness span[data-ok="testing"] {
+  border-color: rgba(255, 204, 0, 0.5);
+  color: #ffcc00;
+}
+
+.linux-runtime-poc__readiness span[data-ok="untested"],
+.linux-runtime-poc__readiness span[data-ok="pending"] {
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #9aa0a6;
 }
 
 .linux-runtime-poc__readiness small {
