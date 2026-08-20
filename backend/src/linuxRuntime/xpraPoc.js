@@ -60,13 +60,30 @@ export function buildXpraStartCommand({ appCommand, port, sessionId = 'cloudos-p
   const display = displayForPort(port);
   return ['set -eu', 'unset DISPLAY WAYLAND_DISPLAY PULSE_SERVER', `export XPRA_PASSWORD=${shellQuote(password)}`, `exec xpra seamless :${display} --session-name=${shellQuote(`cloudos-poc1-${sessionId}`)} --start-child=${shellQuote(appCommand)} --exit-with-children=yes --daemon=no --mdns=no --notifications=no --printing=no --file-transfer=no --start-new-commands=no --bind=noabstract --bind-tcp=${XPRA_BIND_TCP_HOST}:${port},auth=env --html=on`].join('; ');
 }
-async function execWsl(distribution, command, timeout = HEALTH_TIMEOUT_MS) { return execFileAsync(WSL_EXE, ['-d', distribution, '--', 'sh', '-lc', command], { windowsHide: true, env: safeChildEnvironment(), timeout, maxBuffer: 512 * 1024 }); }
+async function execWsl(distribution, command, timeout = HEALTH_TIMEOUT_MS) { return execFileAsync(WSL_EXE, ['-d', distribution, '--exec', 'sh', '-c', command], { windowsHide: true, env: safeChildEnvironment(), timeout, maxBuffer: 512 * 1024 }); }
 export async function checkWslInteropDisabled(distribution) {
+  const started = Date.now();
   try {
-    const { stdout } = await execWsl(distribution, "if [ -e /proc/sys/fs/binfmt_misc/WSLInterop ]; then cat /proc/sys/fs/binfmt_misc/WSLInterop; else echo DISABLED; fi", 5000);
+    const { stdout } = await execWsl(distribution, "if [ -e /proc/sys/fs/binfmt_misc/WSLInterop ]; then cat /proc/sys/fs/binfmt_misc/WSLInterop; else echo DISABLED; fi", 15000);
     const evidence = String(stdout || '').trim();
-    return { ok: evidence === 'DISABLED' || /disabled/i.test(evidence), evidence };
-  } catch (cause) { return { ok: false, evidence: cause.message }; }
+    const disabled = evidence === 'DISABLED' || /disabled/i.test(evidence);
+    return {
+      ok: disabled,
+      code: disabled ? 'WSL_INTEROP_DISABLED' : 'WSL_INTEROP_ENABLED',
+      error: disabled ? null : 'POC1 exige WSL interoperability desabilitado e reinício da distro antes de iniciar.',
+      evidence,
+      durationMs: elapsedMs(started),
+    };
+  } catch (cause) {
+    const isTimeout = cause.killed || cause.signal === 'SIGTERM' || cause.code === 'ETIMEDOUT' || /timeout/i.test(cause.message);
+    return {
+      ok: false,
+      code: isTimeout ? 'WSL_INTEROP_PROBE_TIMEOUT' : 'WSL_INTEROP_PROBE_FAILED',
+      error: isTimeout ? 'A verificação de interoperabilidade do WSL excedeu o tempo limite (cold boot).' : `Falha ao verificar status de interoperabilidade: ${cause.message}`,
+      evidence: cause.message,
+      durationMs: elapsedMs(started),
+    };
+  }
 }
 async function chooseDistribution(requested, snapshot = null) { if (requested) { const distribution = normalizeName(requested); if (!await validateInstalledAsync(distribution)) throw createPocError('WSL_DISTRO_NOT_INSTALLED', `Distribuição WSL não instalada: ${distribution || '(vazia)'}`); return distribution; } const current = snapshot || await getWslSnapshot(); if (!current.installed) throw createPocError('WSL_NOT_FOUND', current.error || 'WSL ausente.'); if (!current.operational) throw createPocError(current.errorCode || 'WSL_UNAVAILABLE', current.error || 'WSL indisponível.'); if (!current.distributions.length) throw createPocError('WSL_DISTRO_MISSING', 'Nenhuma distribuição WSL instalada.'); return current.preferred || current.default || current.distributions[0].name; }
 async function probe(distribution, appCommand) { const started = Date.now(); try { const { stdout, stderr } = await execWsl(distribution, buildXpraProbeCommand(appCommand), 15000); return { ok: true, durationMs: elapsedMs(started), version: String(stdout || stderr || '').trim().split(/\r?\n/).filter(Boolean).at(-1) || 'xpra' }; } catch (cause) { const text = `${cause.stdout || ''}\n${cause.stderr || ''}`; if (text.includes('XPRA_MISSING')) throw createPocError('XPRA_MISSING', `Xpra não está instalado em ${distribution}.`); if (text.includes('APP_MISSING:')) throw createPocError('LINUX_POC_APP_MISSING', `${appCommand} não está instalado em ${distribution}.`); throw createPocError('XPRA_PROBE_FAILED', cause.message); } }
@@ -89,7 +106,7 @@ export async function checkXpraPocReadiness({ app = 'xclock', distribution } = {
   if (!appId) return { ready: false, errorCode: 'LINUX_POC_APP_NOT_ALLOWED', error: 'Aplicativo não permitido.', checks, durationMs: elapsedMs(started) };
   const snapshot = await getWslSnapshot(); checks.wsl = { ok: snapshot.installed && snapshot.operational }; if (!checks.wsl.ok) return { ready: false, errorCode: snapshot.errorCode || 'WSL_UNAVAILABLE', error: snapshot.error || 'WSL indisponível.', checks, durationMs: elapsedMs(started) };
   const selected = await chooseDistribution(distribution, snapshot); checks.distribution = { ok: true, name: selected };
-  const interop = await checkWslInteropDisabled(selected); checks.interop = interop; if (!interop.ok) return { ready: false, errorCode: 'WSL_INTEROP_ENABLED', error: 'POC1 exige WSL interoperability desabilitado e reinício da distro antes de iniciar.', distribution: selected, checks, durationMs: elapsedMs(started) };
+  const interop = await checkWslInteropDisabled(selected); checks.interop = interop; if (!interop.ok) return { ready: false, errorCode: interop.code || 'WSL_INTEROP_ENABLED', error: interop.error || 'POC1 exige WSL interoperability desabilitado e reinício da distro antes de iniciar.', distribution: selected, checks, durationMs: elapsedMs(started) };
   try { const result = await probe(selected, ALLOWED_APPS[appId].command); checks.xpra = { ok: true, version: result.version }; checks.app = { ok: true, command: ALLOWED_APPS[appId].command }; } catch (cause) { return { ready: false, errorCode: cause.code, error: cause.message, distribution: selected, checks, durationMs: elapsedMs(started) }; }
   const pair = await findFreePair(selected); checks.port = { ok: Boolean(pair), candidate: pair?.port, display: pair?.display }; if (!pair) return { ready: false, errorCode: 'XPRA_PAIR_UNAVAILABLE', error: 'Nenhum par livre.', distribution: selected, checks, durationMs: elapsedMs(started) };
   const orphans = await inspectOwnedOrphans({ distribution: selected }); checks.orphans = { ok: !orphans.length, count: orphans.length, sessions: orphans }; if (orphans.length) return { ready: false, errorCode: 'LINUX_POC_ORPHANED_SESSION', error: 'Sessão órfã detectada.', distribution: selected, checks, durationMs: elapsedMs(started) };
@@ -108,7 +125,7 @@ export async function startXpraPoc({ app, distribution, ownerId } = {}) {
     const definition = ALLOWED_APPS[appId]; const pair = await reservePair(readiness.distribution); const id = `xpra-${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`;
     const session = { id, ownerId: owner, proxyToken: crypto.randomBytes(24).toString('hex'), xpraPassword: crypto.randomBytes(32).toString('base64url'), app: appId, title: definition.title, distribution: readiness.distribution, port: pair.port, display: pair.display, state: 'starting', startedAt: new Date().toISOString(), xpraVersion: readiness.checks.xpra.version, child: null, diagnostics: [], metrics: { preflightMs: readiness.durationMs, restartCount: 0, reconnectCount: 0, healthFailures: 0, proxyHttpRequests: 0, proxyWebSocketConnections: 0 } };
     sessions.set(id, session); writeLedger(); const startClock = Date.now(); const command = buildXpraStartCommand({ appCommand: definition.command, port: pair.port, sessionId: id, password: session.xpraPassword });
-    const child = spawn(WSL_EXE, ['-d', session.distribution, '--', 'sh', '-lc', command], { windowsHide: true, env: safeChildEnvironment(), stdio: ['ignore', 'pipe', 'pipe'] }); session.child = child;
+    const child = spawn(WSL_EXE, ['-d', session.distribution, '--exec', 'sh', '-c', command], { windowsHide: true, env: safeChildEnvironment(), stdio: ['ignore', 'pipe', 'pipe'] }); session.child = child;
     for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => { session.diagnostics.push(String(chunk)); while (session.diagnostics.join('').length > 65536) session.diagnostics.shift(); });
     child.once('exit', code => { releasePort(session.port); if (!['stopping', 'stopped'].includes(session.state)) { session.state = 'failed'; session.errorCode = 'XPRA_PROCESS_EXITED'; session.error = `Xpra encerrou (exit=${code}). ${diagnosticsFor(session)}`; } writeLedger(); });
     try { await withTimeout(waitForWslServer(session, child), START_TIMEOUT_MS, 'XPRA_SERVER_TIMEOUT', 'Timeout Xpra.'); session.metrics.wslServerReadyMs = elapsedMs(startClock); await withTimeout(waitForWindowsTransport(session, child), START_TIMEOUT_MS, 'XPRA_WINDOWS_TRANSPORT_TIMEOUT', 'Timeout transporte.'); session.metrics.windowsTransportReadyMs = elapsedMs(startClock); const ws = await probeWebSocket(session.port); session.metrics.websocketHandshakeMs = ws.durationMs; if (!ws.ok) throw createPocError('XPRA_WEBSOCKET_UNAVAILABLE', ws.error); session.metrics.bootMs = elapsedMs(startClock); session.state = 'ready'; session.health = { healthy: true, checkedAt: new Date().toISOString() }; writeLedger(); return publicSession(session); } catch (cause) { session.errorCode = cause.code || 'XPRA_START_FAILED'; session.error = `${cause.message}\n${diagnosticsFor(session)}`.trim(); await stopSessionInternal(session).catch(() => undefined); throw createPocError(session.errorCode, session.error); }

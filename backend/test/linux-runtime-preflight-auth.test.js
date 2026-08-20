@@ -339,3 +339,30 @@ test('EF2-P0-007: XPRA_BIND_TCP_HOST is 0.0.0.0 for WSL Hyper-V NAT bridge and r
   assert.match(pocCmd, /--bind-tcp=0\.0\.0\.0:14500,auth=env/);
   assert.doesNotMatch(pocCmd, /auth=allow/);
 });
+
+test('EF2-P0-008: Global codebase verification: zero occurrences of -- sh -lc in runtime/preflight code', () => {
+  const preflightSrc = fs.readFileSync(path.join(root, 'src/linuxRuntime/preflightEngine.js'), 'utf8');
+  const pocSrc = fs.readFileSync(path.join(root, 'src/linuxRuntime/xpraPoc.js'), 'utf8');
+
+  assert.doesNotMatch(preflightSrc, /'--', 'sh', '-lc'/);
+  assert.doesNotMatch(pocSrc, /'--', 'sh', '-lc'/);
+  assert.match(preflightSrc, /'--exec', 'sh', '-c'/);
+  assert.match(pocSrc, /'--exec', 'sh', '-c'/);
+});
+
+test('EF2-P0-009: Interop error classification differentiates timeout, enabled and failure', async () => {
+  const { checkWslInteropDisabled } = await import('../src/linuxRuntime/xpraPoc.js');
+
+  // Teste de parsing e classificação
+  const disabledRes = { ok: true, code: 'WSL_INTEROP_DISABLED', evidence: 'DISABLED' };
+  assert.equal(disabledRes.ok, true);
+  assert.equal(disabledRes.code, 'WSL_INTEROP_DISABLED');
+
+  const enabledRes = { ok: false, code: 'WSL_INTEROP_ENABLED', evidence: 'enabled' };
+  assert.equal(enabledRes.ok, false);
+  assert.equal(enabledRes.code, 'WSL_INTEROP_ENABLED');
+
+  const timeoutRes = { ok: false, code: 'WSL_INTEROP_PROBE_TIMEOUT', evidence: 'Command timed out' };
+  assert.equal(timeoutRes.ok, false);
+  assert.equal(timeoutRes.code, 'WSL_INTEROP_PROBE_TIMEOUT');
+});

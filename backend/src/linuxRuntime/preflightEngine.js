@@ -291,7 +291,7 @@ async function captureWindowBaseline(run) {
 async function probeWslCommand(distribution, command, timeout = STATIC_TIMEOUT_MS) {
   const started = Date.now();
   try {
-    const output = await runWsl(['-d', distribution, '--', 'sh', '-lc', command], timeout);
+    const output = await runWsl(['-d', distribution, '--exec', 'sh', '-c', command], timeout);
     return { ok: true, output: String(output || '').trim(), durationMs: elapsedMs(started) };
   } catch (cause) {
     return { ok: false, error: cause.message, code: cause.code || 'WSL_COMMAND_FAILED', durationMs: elapsedMs(started) };
@@ -516,7 +516,7 @@ function installExitHook() {
   process.on('exit', () => {
     for (const session of proxySessions.values()) {
       try {
-        execFileSync(WSL_EXE, ['-d', session.distribution, '--', 'sh', '-lc', `xpra stop :${session.display} >/dev/null 2>&1 || true`], {
+        execFileSync(WSL_EXE, ['-d', session.distribution, '--exec', 'sh', '-c', `xpra stop :${session.display} >/dev/null 2>&1 || true`], {
           windowsHide: true, timeout: 2500, stdio: 'ignore', env: safeChildEnvironment(),
         });
       } catch {}
@@ -577,7 +577,7 @@ async function startDryRun(run, pair) {
   proxySessions.set(session.id, session);
   const command = buildPreflightDryRunCommand({ display: pair.display, port: pair.port, runId: run.id, password: xpraPassword });
   logRun(run, `DRY_RUN_COMMAND ${command.replaceAll(xpraPassword, '[REDACTED_XPRA_PASSWORD]')}`);
-  const child = spawn(WSL_EXE, ['-d', session.distribution, '--', 'sh', '-lc', command], {
+  const child = spawn(WSL_EXE, ['-d', session.distribution, '--exec', 'sh', '-c', command], {
     windowsHide: true, env: safeChildEnvironment(), stdio: ['ignore', 'pipe', 'pipe'],
   });
   session.child = child;
