@@ -1,5 +1,6 @@
 import http from 'node:http';
 import net from 'node:net';
+import zlib from 'node:zlib';
 import { recordXpraPocProxyEvent, resolveXpraPocProxySession } from './xpraPoc.js';
 import { recordXpraPreflightProxyEvent, resolveXpraPreflightProxySession } from './preflight.js';
 
@@ -8,11 +9,12 @@ function parseProxyRequest(requestUrl) { let url; try { url = new URL(requestUrl
 function rewriteCsp(value) { const directives = String(value || '').split(';').map(v => v.trim()).filter(Boolean).filter(v => !/^(frame-ancestors|sandbox)\b/i.test(v)); directives.push("sandbox allow-scripts allow-forms allow-pointer-lock"); directives.push("frame-ancestors 'self'"); return directives.join('; '); }
 function proxyBase(session) { return `${PREFIX}${session.id}/${session.proxyToken}/`; }
 function rewriteLocation(value, session) { if (!value) return value; const base = proxyBase(session); try { const parsed = new URL(value, `http://127.0.0.1:${session.port}`); if (['127.0.0.1', 'localhost'].includes(parsed.hostname)) return `${base}${parsed.pathname.replace(/^\//, '')}${parsed.search}${parsed.hash}`; } catch {} if (String(value).startsWith('/')) return `${base}${value.replace(/^\//, '')}`; return value; }
-function buildResponseHeaders(headers, session) {
+function buildResponseHeaders(headers, session, isTransformedHtml = false) {
   const result = {};
   for (const [name, value] of Object.entries(headers)) {
     const lower = name.toLowerCase();
     if (['x-frame-options', 'content-length', 'transfer-encoding', 'connection', 'set-cookie'].includes(lower)) continue;
+    if (isTransformedHtml && lower === 'content-encoding') continue;
     if (lower === 'content-security-policy') result[name] = rewriteCsp(value);
     else if (lower === 'location') result[name] = rewriteLocation(value, session);
     else result[name] = value;
@@ -38,7 +40,19 @@ function writeProxyError(res, status, message) {
 }
 function resolveProxySession(id, token) { return resolveXpraPocProxySession(id, token) || resolveXpraPreflightProxySession(id, token); }
 function recordProxyEvent(session, event) { if (session.preflight === true) recordXpraPreflightProxyEvent(session.id, event); else recordXpraPocProxyEvent(session.id, event); }
-const XPRA_OPAQUE_SHIM = `<script>
+function decompressBuffer(buffer, encoding) {
+  if (!encoding || !buffer?.length) return buffer;
+  const enc = String(encoding).toLowerCase().trim();
+  try {
+    if (enc === 'gzip') return zlib.gunzipSync(buffer);
+    if (enc === 'deflate') return zlib.inflateSync(buffer);
+    if (enc === 'br') return zlib.brotliDecompressSync(buffer);
+  } catch {}
+  return buffer;
+}
+function createOpaqueShim(sessionId) {
+  const safeSessionId = JSON.stringify(String(sessionId || ''));
+  return `<script>
 try {
   window.Worker = undefined;
   window.addEventListener('load', function() {
@@ -47,20 +61,20 @@ try {
         clearInterval(checkClient);
         var origOnConnect = window.client.on_connect;
         window.client.on_connect = function() {
-          try { window.parent.postMessage({ type: 'xpra-render-event', name: 'connected' }, '*'); } catch(e){}
+          try { window.parent.postMessage({ type: 'xpra-render-event', sessionId: ${safeSessionId}, name: 'connected' }, '*'); } catch(e){}
           if (origOnConnect) origOnConnect.apply(this, arguments);
         };
         var origProcessNewWindow = window.client._process_new_window;
         if (origProcessNewWindow) {
           window.client._process_new_window = function(packet) {
-            try { window.parent.postMessage({ type: 'xpra-render-event', name: 'window-created', wid: packet[1], width: packet[4], height: packet[5] }, '*'); } catch(e){}
+            try { window.parent.postMessage({ type: 'xpra-render-event', sessionId: ${safeSessionId}, name: 'window-created', wid: packet[1], width: packet[4], height: packet[5] }, '*'); } catch(e){}
             return origProcessNewWindow.apply(this, arguments);
           };
         }
         var origDoPaint = window.XpraWindow && window.XpraWindow.prototype.do_paint;
         if (origDoPaint) {
           window.XpraWindow.prototype.do_paint = function(packet) {
-            try { window.parent.postMessage({ type: 'xpra-render-event', name: 'frame-painted', wid: packet[1], width: packet[4], height: packet[5] }, '*'); } catch(e){}
+            try { window.parent.postMessage({ type: 'xpra-render-event', sessionId: ${safeSessionId}, name: 'frame-painted', wid: packet[1], width: packet[4], height: packet[5] }, '*'); } catch(e){}
             return origDoPaint.apply(this, arguments);
           };
         }
@@ -69,6 +83,7 @@ try {
   });
 } catch(e) {}
 </script>`;
+}
 
 export function xpraHttpProxyMiddleware(req, res, next) {
   const reqUrl = req.originalUrl || req.url || '';
@@ -87,6 +102,7 @@ export function xpraHttpProxyMiddleware(req, res, next) {
   recordProxyEvent(session, 'http');
   const headers = { ...req.headers, host: `127.0.0.1:${session.port}` };
   for (const name of ['authorization', 'cookie', 'referer', 'origin']) delete headers[name];
+  headers['accept-encoding'] = 'identity';
   if (session.xpraPassword) {
     headers.authorization = `Basic ${Buffer.from(`xpra:${session.xpraPassword}`).toString('base64')}`;
   }
@@ -99,19 +115,22 @@ export function xpraHttpProxyMiddleware(req, res, next) {
     timeout: 5000,
   }, upstreamResponse => {
     const statusCode = upstreamResponse.statusCode || 502;
-    const isHtml = String(upstreamResponse.headers['content-type'] || '').toLowerCase().includes('text/html');
-    const responseHeaders = buildResponseHeaders(upstreamResponse.headers, session);
+    const isHtml = statusCode === 200 && String(upstreamResponse.headers['content-type'] || '').toLowerCase().includes('text/html');
     if (isHtml) {
       const chunks = [];
       upstreamResponse.on('data', chunk => chunks.push(chunk));
       upstreamResponse.on('end', () => {
-        let body = Buffer.concat(chunks).toString('utf8');
+        const rawBuffer = Buffer.concat(chunks);
+        const decompressed = decompressBuffer(rawBuffer, upstreamResponse.headers['content-encoding']);
+        let body = decompressed.toString('utf8');
+        const shim = createOpaqueShim(session.id);
         if (body.includes('</head>')) {
-          body = body.replace('</head>', `${XPRA_OPAQUE_SHIM}</head>`);
+          body = body.replace('</head>', `${shim}</head>`);
         } else {
-          body = `${XPRA_OPAQUE_SHIM}${body}`;
+          body = `${shim}${body}`;
         }
-        responseHeaders['Content-Length'] = Buffer.byteLength(body);
+        const responseHeaders = buildResponseHeaders(upstreamResponse.headers, session, true);
+        responseHeaders['Content-Length'] = Buffer.byteLength(body, 'utf8');
         if (typeof res.status === 'function') res.status(statusCode);
         else res.statusCode = statusCode;
         for (const [name, value] of Object.entries(responseHeaders)) {
@@ -121,6 +140,7 @@ export function xpraHttpProxyMiddleware(req, res, next) {
       });
       return;
     }
+    const responseHeaders = buildResponseHeaders(upstreamResponse.headers, session, false);
     if (typeof res.status === 'function') res.status(statusCode);
     else res.statusCode = statusCode;
     for (const [name, value] of Object.entries(responseHeaders)) {

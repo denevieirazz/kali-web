@@ -414,3 +414,70 @@ test('EF2-P0-013: Opaque iframe CORS headers and main-thread worker compatibilit
   assert.match(headers['Content-Security-Policy'], /sandbox allow-scripts allow-forms allow-pointer-lock/);
   assert.doesNotMatch(headers['Content-Security-Policy'], /allow-same-origin/);
 });
+
+test('EF2-P0-014: Gzipped and uncompressed HTML proxying without terminated errors', async () => {
+  const { xpraHttpProxyMiddleware } = await import('../src/linuxRuntime/xpraProxy.js');
+  const { __test: preflightTest } = await import('../src/linuxRuntime/preflight.js');
+  const zlib = await import('node:zlib');
+
+  const expectedSecret = 'xpra-auth-secret-1234567890abcdef';
+  const expectedBasic = `Basic ${Buffer.from(`xpra:${expectedSecret}`).toString('base64')}`;
+
+  const upstreamServer = http.createServer((req, res) => {
+    if (req.url.endsWith('index.html')) {
+      const html = '<html><head><title>Xpra HTML5</title></head><body>Xpra Direct OK</body></html>';
+      const gzipped = zlib.gzipSync(Buffer.from(html));
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=UTF-8', 'Content-Encoding': 'gzip' });
+      res.end(gzipped);
+    } else if (req.url.endsWith('script.js')) {
+      res.writeHead(200, { 'Content-Type': 'application/javascript' });
+      res.end('console.log("script ok");');
+    } else {
+      res.writeHead(404);
+      res.end('Not Found');
+    }
+  });
+  await new Promise(r => upstreamServer.listen(0, '127.0.0.1', r));
+  const upstreamPort = upstreamServer.address().port;
+
+  const mockSession = {
+    id: 'test-gzip-session-14',
+    port: upstreamPort,
+    proxyToken: 'valid-token-gzip-1234567890',
+    xpraPassword: expectedSecret,
+    state: 'ready',
+    preflight: true,
+    metrics: { proxyHttpRequests: 0, proxyWebSocketConnections: 0 },
+  };
+  preflightTest.proxySessions.set(mockSession.id, mockSession);
+
+  const proxyServer = http.createServer((req, res) => {
+    xpraHttpProxyMiddleware(req, res, () => {
+      res.writeHead(404);
+      res.end('Not Found');
+    });
+  });
+  await new Promise(r => proxyServer.listen(0, '127.0.0.1', r));
+  const proxyPort = proxyServer.address().port;
+
+  try {
+    // 1. Fetch de index.html com upstream gzippado: deve retornar 200, shim injetado e descompressão correta sem 'terminated'
+    const htmlUrl = `http://127.0.0.1:${proxyPort}/__cloudos/linux-runtime/poc1/${mockSession.id}/${mockSession.proxyToken}/index.html`;
+    const htmlResp = await fetch(htmlUrl);
+    assert.equal(htmlResp.status, 200);
+    const htmlBody = await htmlResp.text();
+    assert.match(htmlBody, /Xpra Direct OK/);
+    assert.match(htmlBody, /xpra-render-event/);
+    assert.match(htmlBody, /window\.Worker = undefined/);
+
+    // 2. Fetch de asset JavaScript: não deve sofrer injeção de HTML
+    const jsUrl = `http://127.0.0.1:${proxyPort}/__cloudos/linux-runtime/poc1/${mockSession.id}/${mockSession.proxyToken}/script.js`;
+    const jsResp = await fetch(jsUrl);
+    assert.equal(jsResp.status, 200);
+    const jsBody = await jsResp.text();
+    assert.equal(jsBody, 'console.log("script ok");');
+  } finally {
+    upstreamServer.close();
+    proxyServer.close();
+  }
+});

@@ -473,19 +473,24 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.type !== 'xpra-render-event') return;
       const session = activeSession;
-      if (!session) return;
+      if (!session || event.data.sessionId !== session.id) return;
+      if (iframeRef.current && event.source !== iframeRef.current.contentWindow) return;
       const actionStart = actionStartedAt.current.get(session.id) ?? performance.now();
+      const width = Number(event.data.width);
+      const height = Number(event.data.height);
+      const validWidth = Number.isFinite(width) && width > 0 ? width : undefined;
+      const validHeight = Number.isFinite(height) && height > 0 ? height : undefined;
       if (event.data.name === 'window-created') {
         void reportClientMetrics(session, {
           firstRemoteWindowMs: performance.now() - actionStart,
-          canvasWidth: Number(event.data.width) || undefined,
-          canvasHeight: Number(event.data.height) || undefined,
+          canvasWidth: validWidth,
+          canvasHeight: validHeight,
         });
       } else if (event.data.name === 'frame-painted') {
         void reportClientMetrics(session, {
           firstFramePaintedMs: performance.now() - actionStart,
-          canvasWidth: Number(event.data.width) || undefined,
-          canvasHeight: Number(event.data.height) || undefined,
+          canvasWidth: validWidth,
+          canvasHeight: validHeight,
         });
       }
     };
