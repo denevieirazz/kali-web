@@ -8,6 +8,7 @@ import { useProcessManager } from '../../stores/processManager';
 import { useContextMenuStore } from '../../stores/contextMenuStore';
 import { useAppRegistry } from '../../core/appRegistry';
 import { useRubberBand } from '../../hooks/useRubberBand';
+import { getUserStorageKey } from '../../services/userScope.js';
 import defaultWallpaper from '../../assets/wallpapers/default.png';
 import './Desktop.css';
 
@@ -77,9 +78,13 @@ function buildDefaultIcons(): DesktopIconData[] {
 
 const STORAGE_KEY = 'cloudos-unified-desktop-icons-v2';
 
+function getDesktopStorageKey(): string {
+  return getUserStorageKey(STORAGE_KEY);
+}
+
 function loadIcons(): DesktopIconData[] {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = localStorage.getItem(getDesktopStorageKey());
     if (saved) {
       return (JSON.parse(saved) as DesktopIconData[]).map((icon) =>
         icon.id === 'inst-linux' ? { ...icon, name: 'Windows + Linux', icon: '◈' } : icon
@@ -90,7 +95,7 @@ function loadIcons(): DesktopIconData[] {
 }
 
 function saveIcons(icons: DesktopIconData[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(icons));
+  localStorage.setItem(getDesktopStorageKey(), JSON.stringify(icons));
 }
 
 export default function Desktop() {

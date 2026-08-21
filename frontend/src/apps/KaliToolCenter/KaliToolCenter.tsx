@@ -10,6 +10,7 @@ import {
 import { apiClient } from '../../services/apiClient';
 import { useProcessManager } from '../../stores/processManager';
 import { useWindowManager } from '../../stores/windowManager';
+import { getUserStorageKey } from '../../services/userScope.js';
 import './KaliToolCenter.css';
 
 type SecurityTool = {
@@ -73,11 +74,16 @@ function findGuiApp(tool: SecurityTool, apps: NativeApp[], distribution: string)
   }) ?? null;
 }
 
+function getWorkspaceStorageKey(): string {
+  return getUserStorageKey(SECURITY_WORKSPACE_STORAGE_KEY);
+}
+
 function loadWorkspace(): SecurityWorkspaceState {
+  const key = getWorkspaceStorageKey();
   try {
-    return normalizeSecurityWorkspace(JSON.parse(localStorage.getItem(SECURITY_WORKSPACE_STORAGE_KEY) ?? 'null'));
+    return normalizeSecurityWorkspace(JSON.parse(localStorage.getItem(key) ?? 'null'));
   } catch {
-    localStorage.removeItem(SECURITY_WORKSPACE_STORAGE_KEY);
+    localStorage.removeItem(key);
     return normalizeSecurityWorkspace(null);
   }
 }
@@ -101,7 +107,7 @@ export default function KaliToolCenter() {
   const openWindow = useWindowManager(state => state.openWindow);
 
   useEffect(() => {
-    localStorage.setItem(SECURITY_WORKSPACE_STORAGE_KEY, JSON.stringify(workspace));
+    localStorage.setItem(getWorkspaceStorageKey(), JSON.stringify(workspace));
   }, [workspace]);
 
   useEffect(() => {

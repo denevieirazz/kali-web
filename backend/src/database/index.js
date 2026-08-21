@@ -453,7 +453,7 @@ export class PersistentDatabase {
   rotateRecoveryCode(userId, recoveryCodeHash, callback = () => {}) {
     try {
       this.#change((state) => {
-        const user = state.users.find(candidate => candidate.id === userId && candidate.role === 'admin');
+        const user = state.users.find(candidate => candidate.id === userId);
         if (!user) throw new Error('USER_NOT_FOUND');
         user.recovery_code_hash = recoveryCodeHash;
         user.updated_at = new Date().toISOString();
@@ -480,11 +480,11 @@ export class PersistentDatabase {
     } catch (error) { callback(error); }
   }
 
-  recoverAdmin(credentials, callback = () => {}) {
+  recoverUser(credentials, callback = () => {}) {
     try {
       let updatedUser;
       this.#change((state) => {
-        const user = state.users.find(candidate => candidate.id === credentials.id && candidate.role === 'admin');
+        const user = state.users.find(candidate => candidate.id === credentials.id);
         if (!user || user.recovery_code_hash !== credentials.expectedRecoveryCodeHash) {
           throw new Error('RECOVERY_CODE_CHANGED');
         }
@@ -505,6 +505,10 @@ export class PersistentDatabase {
       });
       callback(null, updatedUser);
     } catch (error) { callback(error); }
+  }
+
+  recoverAdmin(credentials, callback = () => {}) {
+    return this.recoverUser(credentials, callback);
   }
 
   recoverLegacyAdmin(credentials, callback = () => {}) {

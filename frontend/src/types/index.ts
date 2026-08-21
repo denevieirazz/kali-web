@@ -251,10 +251,13 @@ export interface SystemTheme {
 }
 
 export interface UserProfile {
+  id?: string;
+  userId?: string;
   username: string;
   displayName: string;
   avatar: string;
   isAdmin: boolean;
+  role?: string;
   lastLogin: number;
 }
 

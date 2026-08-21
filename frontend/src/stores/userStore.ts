@@ -19,6 +19,7 @@ import {
   recoveryRequestBody,
   sanitizePersistedProfile
 } from '../services/accountContract.js';
+import { setActiveScopedUser } from '../services/userScope.js';
 
 export type SetupStatus = 'checking' | 'required' | 'complete' | 'unavailable';
 type ActionResult = { success: boolean; message?: string; recoveryCode?: string; username?: string };
@@ -51,6 +52,7 @@ interface UserState {
   checkRecoveryStatus: () => Promise<boolean | null>;
   login: (username: string, password: string) => Promise<ActionResult>;
   createAdmin: (username: string, displayName: string, password: string, confirmPassword: string) => Promise<RecoveryResult>;
+  createAccount: (username: string, displayName: string, password: string, confirmPassword: string) => Promise<RecoveryResult>;
   recoverAccount: (recoveryCode: string, newUsername: string, displayName: string, password: string, confirmPassword: string) => Promise<RecoveryResult>;
   recoverLegacyAccount: (legacyToken: string, newUsername: string, displayName: string, password: string, confirmPassword: string) => Promise<RecoveryResult>;
   rotateRecoveryCode: () => Promise<RecoveryResult>;
@@ -66,11 +68,15 @@ function storeSession(response: { token?: unknown; user?: unknown }, fallback?: 
   if (!profile.username) return null;
   setStoredToken(response.token);
   setStoredUser(profile);
+  setActiveScopedUser(profile);
   return profile;
 }
 
 const persistedProfile = sanitizePersistedProfile(getStoredUser());
-if (persistedProfile) setStoredUser(persistedProfile);
+if (persistedProfile) {
+  setStoredUser(persistedProfile);
+  setActiveScopedUser(persistedProfile);
+}
 
 export const useUserStore = create<UserState>((set, get) => {
   setUnauthorizedHandler(() => {
@@ -166,6 +172,25 @@ export const useUserStore = create<UserState>((set, get) => {
         return { success: true, recoveryCode };
       } catch (error) {
         return { success: false, message: error instanceof Error ? error.message : 'Falha ao criar a conta administradora.' };
+      }
+    },
+
+    createAccount: async (username, displayName, password, confirmPassword) => {
+      try {
+        const response = await apiClient<{ user: unknown; recoveryCode?: string }>('/api/auth/accounts', {
+          method: 'POST',
+          body: JSON.stringify({ username, displayName, password, confirmPassword }),
+          skipAuth: true,
+          suppressUnauthorizedHandler: true
+        });
+        const recoveryCode = extractRecoveryCode(response);
+        const profile = normalizePublicUser(response.user, { username, displayName });
+        if (!recoveryCode || !profile.username) {
+          return { success: false, message: 'O servidor não retornou os dados da conta criada.' };
+        }
+        return { success: true, recoveryCode, username: profile.username };
+      } catch (error) {
+        return { success: false, message: error instanceof Error ? error.message : 'Falha ao criar a conta.' };
       }
     },
 
@@ -298,11 +323,13 @@ export const useUserStore = create<UserState>((set, get) => {
           const profile = normalizePublicUser(response.user);
           if (!profile.username) throw new Error('Sessão sem usuário válido.');
           setStoredUser(profile);
+          setActiveScopedUser(profile);
           set({ currentUser: profile, isAuthenticated: true, isCheckingSession: false, setupRequired: false, setupStatus: 'complete' });
           return true;
         }
       } catch {
         clearStoredAuth();
+        setActiveScopedUser(null);
         set({ currentUser: null, isAuthenticated: false, isCheckingSession: false });
       }
       await get().checkSetupStatus();
@@ -315,6 +342,7 @@ export const useUserStore = create<UserState>((set, get) => {
       } catch {
       } finally {
         clearStoredAuth();
+        setActiveScopedUser(null);
         set({ currentUser: null, isAuthenticated: false });
         await get().checkSetupStatus();
       }
@@ -325,6 +353,7 @@ export const useUserStore = create<UserState>((set, get) => {
         await apiClient('/api/setup/reset', { method: 'POST', body: JSON.stringify({ confirm: true }) });
         clearStoredAuth();
         clearRecoveryConfirmationPending();
+        setActiveScopedUser(null);
         set({
           currentUser: null,
           isAuthenticated: false,

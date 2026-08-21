@@ -19,6 +19,7 @@ import {
 } from '../../core/terminalWorkspaceState.js';
 import { apiClient } from '../../services/apiClient';
 import { useWindowManager } from '../../stores/windowManager';
+import { getUserStorageKey } from '../../services/userScope.js';
 import { TerminalSession, type TerminalPaneStatus } from './TerminalSession';
 import 'xterm/css/xterm.css';
 import './CloudOSTerminal.css';
@@ -40,12 +41,17 @@ function tabDefaultTitle(tab: TerminalTabState) {
   return tab.profile === 'wsl' ? (tab.distribution || 'WSL') : 'PowerShell';
 }
 
+function getTerminalWorkspaceStorageKey(): string {
+  return getUserStorageKey(TERMINAL_WORKSPACE_STORAGE_KEY);
+}
+
 function readPersistedTerminalWorkspace(enabled: boolean) {
   if (!enabled) return null;
+  const key = getTerminalWorkspaceStorageKey();
   try {
-    return JSON.parse(localStorage.getItem(TERMINAL_WORKSPACE_STORAGE_KEY) ?? 'null');
+    return JSON.parse(localStorage.getItem(key) ?? 'null');
   } catch {
-    localStorage.removeItem(TERMINAL_WORKSPACE_STORAGE_KEY);
+    localStorage.removeItem(key);
     return null;
   }
 }
@@ -100,7 +106,7 @@ export default function CloudOSTerminal({ windowId }: { windowId?: string }) {
 
   useEffect(() => {
     if (!workspace) return;
-    localStorage.setItem(TERMINAL_WORKSPACE_STORAGE_KEY, JSON.stringify(serializableTerminalWorkspace(workspace)));
+    localStorage.setItem(getTerminalWorkspaceStorageKey(), JSON.stringify(serializableTerminalWorkspace(workspace)));
   }, [workspace]);
 
   const handlePaneStatus = useCallback((tabId: string, status: TerminalPaneStatus) => {
