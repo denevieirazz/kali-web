@@ -124,7 +124,9 @@ export function xpraHttpProxyMiddleware(req, res, next) {
         const decompressed = decompressBuffer(rawBuffer, upstreamResponse.headers['content-encoding']);
         let body = decompressed.toString('utf8');
         const shim = createOpaqueShim(session.id);
-        if (body.includes('</head>')) {
+        if (body.includes('<head>')) {
+          body = body.replace('<head>', `<head>${shim}`);
+        } else if (body.includes('</head>')) {
           body = body.replace('</head>', `${shim}</head>`);
         } else {
           body = `${shim}${body}`;
