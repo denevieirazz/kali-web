@@ -595,7 +595,7 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
           key={pendingPreflightIframe.runId}
           title="CloudOS Linux Runtime Preflight — Xpra HTML5"
           src={pendingPreflightIframe.clientUrl}
-          sandbox="allow-scripts allow-forms allow-pointer-lock"
+          sandbox="allow-scripts allow-forms allow-pointer-lock allow-same-origin"
           referrerPolicy="no-referrer"
           onLoad={onPreflightFrameLoad}
           aria-hidden="true"

@@ -9,7 +9,7 @@ export const CURATED_LINUX_APPS = Object.freeze([
     id: 'firefox',
     name: 'Firefox ESR',
     packageName: 'firefox-esr',
-    command: 'firefox-esr --no-remote',
+    command: 'firefox-esr --no-remote --profile /tmp/cloudos-firefox-poc',
     category: 'internet',
     description: 'Navegador web moderno, rápido e seguro da Mozilla.',
     icon: '🦊',

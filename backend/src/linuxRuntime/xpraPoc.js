@@ -69,7 +69,7 @@ function publicSession(session) {
     startedAt: session.startedAt,
     leaseExpiresAt: new Date(session.leaseExpiresAt).toISOString(),
     pids: { xpra: session.xpraPid || null, app: session.appPid || null, xorg: session.xorgPid || null },
-    clientUrl: ['ready', 'degraded'].includes(session.state) ? `${proxyPath(session)}?username=root&clipboard=no&keyboard=yes&printing=no&file_transfer=no&floating_menu=no&reconnect=no` : null,
+    clientUrl: ['ready', 'degraded'].includes(session.state) ? `${proxyPath(session)}?username=root&clipboard=no&keyboard=no&printing=no&file_transfer=no&floating_menu=no&reconnect=no` : null,
     xpraVersion: session.xpraVersion,
     error: session.error || null,
     errorCode: session.errorCode || null,
