@@ -4,6 +4,7 @@ import { authenticateToken } from '../middleware/auth.js';
 import { checkXpraPocReadiness, cleanupXpraPoc, getAllowedLinuxPocApps, getXpraPocSessions, healthXpraPocSession, recordXpraPocClientMetrics, restartXpraPoc, startXpraPoc, stopXpraPoc } from './xpraPoc.js';
 import { finalizePhysicalPreflight, startPhysicalPreflight } from './preflight.js';
 import { installLinuxPackage, listLinuxPackages, searchLinuxPackages, uninstallLinuxPackage } from './packageManager.js';
+import { launchFastLinuxApp } from './warmPoolManager.js';
 
 export const linuxRuntimeRouter = express.Router();
 linuxRuntimeRouter.use(authenticateToken);
@@ -65,3 +66,13 @@ linuxRuntimeRouter.post('/poc1/sessions/:id/stop', async (req, res) => { try { c
 linuxRuntimeRouter.post('/poc1/sessions/:id/client-metrics', (req, res) => { try { const owner = ownerFor(req, req.body?.ownerId); assertOwnedSession(req.params.id, owner); res.json({ session: recordXpraPocClientMetrics(req.params.id, owner, req.body || {}) }); } catch (error) { sendError(res, error, 'LINUX_POC_METRICS_FAILED'); } });
 linuxRuntimeRouter.post('/poc1/cleanup', async (req, res) => { try { res.json(await cleanupXpraPoc({ ownerId: ownerFor(req, req.body?.ownerId), orphansOnly: req.body?.orphansOnly === true })); } catch (error) { sendError(res, error, 'LINUX_POC_CLEANUP_FAILED'); } });
 linuxRuntimeRouter.post('/poc1/stop', async (req, res) => { try { const owner = ownerFor(req, req.body?.ownerId); res.json({ status: 'stopped', sessions: await stopXpraPoc(null, owner) }); } catch (error) { sendError(res, error, 'LINUX_POC_STOP_FAILED'); } });
+
+linuxRuntimeRouter.post('/launch', async (req, res) => {
+  try {
+    const owner = ownerFor(req, req.body?.ownerId);
+    const session = await startXpraPoc({ app: req.body?.appId || req.body?.app || 'firefox', ownerId: owner });
+    res.status(201).json({ session });
+  } catch (error) {
+    sendError(res, error, 'LINUX_FAST_LAUNCH_FAILED');
+  }
+});

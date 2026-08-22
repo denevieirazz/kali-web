@@ -3,6 +3,7 @@ import net from 'node:net';
 import zlib from 'node:zlib';
 import { recordXpraPocProxyEvent, resolveXpraPocProxySession } from './xpraPoc.js';
 import { recordXpraPreflightProxyEvent, resolveXpraPreflightProxySession } from './preflight.js';
+import { resolveWarmSession } from './warmPoolManager.js';
 
 const PREFIX = '/__cloudos/linux-runtime/poc1/';
 function parseProxyRequest(requestUrl) { let url; try { url = new URL(requestUrl, 'http://127.0.0.1'); } catch { return null; } if (!url.pathname.startsWith(PREFIX)) return null; const parts = url.pathname.slice(PREFIX.length).split('/'); const id = parts.shift() || ''; const token = parts.shift() || ''; const targetPath = `/${parts.join('/')}` || '/'; return { id, token, targetPath: `${targetPath}${url.search}` }; }
@@ -40,7 +41,7 @@ function writeProxyError(res, status, message) {
     res.end(message);
   }
 }
-function resolveProxySession(id, token) { return resolveXpraPocProxySession(id, token) || resolveXpraPreflightProxySession(id, token); }
+function resolveProxySession(id, token) { return resolveWarmSession(id, token) || resolveXpraPocProxySession(id, token) || resolveXpraPreflightProxySession(id, token); }
 function recordProxyEvent(session, event) { if (session.preflight === true) recordXpraPreflightProxyEvent(session.id, event); else recordXpraPocProxyEvent(session.id, event); }
 function decompressBuffer(buffer, encoding) {
   if (!encoding || !buffer?.length) return buffer;
@@ -93,6 +94,22 @@ try {
     }, 20);
     setTimeout(function() { clearInterval(secretInterval); }, 5000);
   }
+  var autoConnect = function() {
+    try {
+      if (typeof window.do_connect === 'function') {
+        window.do_connect();
+      } else {
+        var btns = Array.from(document.querySelectorAll('button, input[type="button"], a, div'));
+        var btn = btns.find(b => (b.textContent || b.value || '').trim() === 'Connect');
+        if (btn) btn.click();
+      }
+    } catch(e) {}
+  };
+  window.addEventListener('load', function() {
+    setTimeout(autoConnect, 100);
+    setTimeout(autoConnect, 400);
+    setTimeout(autoConnect, 1000);
+  });
   window.addEventListener('load', function() {
     var checkClient = setInterval(function() {
       if (window.client) {

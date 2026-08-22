@@ -123,18 +123,18 @@ function StartMenu() {
     }
 
     if (app.isLinux && app.linuxAppId) {
-      const pid = createProcess('linux-runtime-poc', app.name, app.icon);
+      const pid = createProcess('linux-app-runner', app.name, app.icon);
       openWindow({
-        title: `${app.name} (Linux)`,
+        title: app.name,
         icon: app.icon,
-        appId: 'linux-runtime-poc',
-        width: 960,
-        height: 640,
-        minWidth: 400,
-        minHeight: 300,
+        appId: 'linux-app-runner',
+        width: 1020,
+        height: 680,
+        minWidth: 480,
+        minHeight: 320,
         isResizable: true,
         processId: pid,
-        params: { app: app.linuxAppId, title: app.name },
+        params: { appId: app.linuxAppId, app: app.linuxAppId, title: app.name, icon: app.icon },
       });
       closeStartMenu();
       return;

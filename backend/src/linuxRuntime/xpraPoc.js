@@ -191,33 +191,44 @@ async function probeWebSocket(port, password = null, timeoutMs = 2000) {
     socket.once('unexpected-response', (_req, res) => finish({ ok: false, error: `HTTP ${res.statusCode}` }));
   });
 }
-async function waitForWslServer(session, child) { const deadline = Date.now() + START_TIMEOUT_MS; while (Date.now() < deadline) { if (child.exitCode !== null) throw createPocError('XPRA_EXITED_EARLY', `Xpra terminou (exit=${child.exitCode}).`); const result = await probeWslServer(session); if (result.ok) return result; await new Promise(r => setTimeout(r, 250)); } throw createPocError('XPRA_SERVER_TIMEOUT', 'Timeout esperando Xpra.'); }
+async function waitForWslServer(session, child) { const deadline = Date.now() + START_TIMEOUT_MS; while (Date.now() < deadline) { if (child.exitCode !== null) throw createPocError('XPRA_EXITED_EARLY', `Xpra terminou (exit=${child.exitCode}).`); const result = await probeWslServer(session); if (result.ok) return result; await new Promise(r => setTimeout(r, 80)); } throw createPocError('XPRA_SERVER_TIMEOUT', 'Timeout esperando Xpra.'); }
 async function waitForWindowsTransport(session, child) {
   const deadline = Date.now() + START_TIMEOUT_MS;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw createPocError('XPRA_EXITED_EARLY', 'Xpra terminou durante transporte.');
-    const tcp = await probeWindowsTcp(session.port);
+    const tcp = await probeWindowsTcp(session.port, 300);
     if (tcp.ok) {
-      const http = await probeHttp(session.port, session.xpraPassword);
+      const http = await probeHttp(session.port, session.xpraPassword, 300);
       if (http.ok) return { tcp, http };
     }
-    await new Promise(r => setTimeout(r, 250));
+    await new Promise(r => setTimeout(r, 80));
   }
   throw createPocError('XPRA_WINDOWS_TRANSPORT_TIMEOUT', 'Transporte Xpra indisponível no Windows.');
 }
 
+const readinessCache = new Map();
+
 export function getXpraPocSession(id = null) { return id ? publicSession(sessions.get(id)) : publicSession([...sessions.values()][0] || null); }
 export function getXpraPocSessions(ownerId = null) { const owner = ownerId ? normalizeOwnerId(ownerId) : null; return [...sessions.values()].filter(s => !owner || s.ownerId === owner).map(publicSession); }
-export async function checkXpraPocReadiness({ app = 'xclock', distribution } = {}) {
+export async function checkXpraPocReadiness({ app = 'xclock', distribution, force = false } = {}) {
   const started = Date.now(); const appId = normalizePocApp(app); const checks = { wsl: { ok: false }, distribution: { ok: false }, interop: { ok: false }, xpra: { ok: false }, app: { ok: false }, port: { ok: false }, windowsLoopback: { ok: null }, websocket: { ok: null }, orphans: { ok: true, count: 0 } };
   if (!appId) return { ready: false, errorCode: 'LINUX_POC_APP_NOT_ALLOWED', error: 'Aplicativo não permitido.', checks, durationMs: elapsedMs(started) };
+
+  const cacheKey = `${appId}:${distribution || 'default'}`;
+  const cached = readinessCache.get(cacheKey);
+  if (!force && cached && (Date.now() - cached.time < 300_000)) {
+    return { ...cached.data, durationMs: 0 };
+  }
+
   const snapshot = await getWslSnapshot(); checks.wsl = { ok: snapshot.installed && snapshot.operational }; if (!checks.wsl.ok) return { ready: false, errorCode: snapshot.errorCode || 'WSL_UNAVAILABLE', error: snapshot.error || 'WSL indisponível.', checks, durationMs: elapsedMs(started) };
   const selected = await chooseDistribution(distribution, snapshot); checks.distribution = { ok: true, name: selected };
   const interop = await checkWslInteropDisabled(selected); checks.interop = interop; if (!interop.ok) return { ready: false, errorCode: interop.code || 'WSL_INTEROP_ENABLED', error: interop.error || 'POC1 exige WSL interoperability desabilitado e reinício da distro antes de iniciar.', distribution: selected, checks, durationMs: elapsedMs(started) };
   try { const result = await probe(selected, ALLOWED_APPS[appId].command); checks.xpra = { ok: true, version: result.version }; checks.app = { ok: true, command: ALLOWED_APPS[appId].command }; } catch (cause) { return { ready: false, errorCode: cause.code, error: cause.message, distribution: selected, checks, durationMs: elapsedMs(started) }; }
   const pair = await findFreePair(selected); checks.port = { ok: Boolean(pair), candidate: pair?.port, display: pair?.display }; if (!pair) return { ready: false, errorCode: 'XPRA_PAIR_UNAVAILABLE', error: 'Nenhum par livre.', distribution: selected, checks, durationMs: elapsedMs(started) };
   const orphans = await inspectOwnedOrphans({ distribution: selected }); checks.orphans = { ok: !orphans.length, count: orphans.length, sessions: orphans }; if (orphans.length) return { ready: false, errorCode: 'LINUX_POC_ORPHANED_SESSION', error: 'Sessão órfã detectada.', distribution: selected, checks, durationMs: elapsedMs(started) };
-  return { ready: true, app: appId, distribution: selected, checks, durationMs: elapsedMs(started) };
+  const result = { ready: true, app: appId, distribution: selected, checks, durationMs: elapsedMs(started) };
+  readinessCache.set(cacheKey, { time: Date.now(), data: result });
+  return result;
 }
 async function inspectOwnedOrphans({ distribution = null } = {}) { const ledger = readLedger(); const orphans = []; for (const entry of ledger) { if (sessions.has(entry.id)) continue; const pair = validateLedgerPair(entry); if (!pair.ok) { orphans.push({ ...entry, classification: pair.code }); continue; } if (distribution && entry.distribution !== distribution) continue; if (!await validateInstalledAsync(entry.distribution)) continue; const linux = await probeWslServer({ distribution: entry.distribution, display: entry.display }); const tcp = await probeWindowsTcp(entry.port, 500); if (linux.ok || tcp.ok) orphans.push({ ...entry, linuxAlive: linux.ok, windowsPortAlive: tcp.ok }); } return orphans; }
 async function stopLedgerEntry(entry) { if (await validateInstalledAsync(entry.distribution)) await execWsl(entry.distribution, `xpra stop :${Number(entry.display)} >/dev/null 2>&1 || true`, STOP_TIMEOUT_MS).catch(() => undefined); }

@@ -129,18 +129,18 @@ export default function ObsidianStore() {
   };
 
   const handleLaunch = (pkg: LinuxPackage) => {
-    const pid = createProcess('linux-runtime-poc', pkg.name, pkg.icon);
+    const pid = createProcess('linux-app-runner', pkg.name, pkg.icon);
     openWindow({
-      title: `${pkg.name} (Linux Runtime)`,
+      title: pkg.name,
       icon: pkg.icon,
-      appId: 'linux-runtime-poc',
-      width: 960,
-      height: 640,
-      minWidth: 400,
-      minHeight: 300,
+      appId: 'linux-app-runner',
+      width: 1020,
+      height: 680,
+      minWidth: 480,
+      minHeight: 320,
       isResizable: true,
       processId: pid,
-      params: { app: pkg.id, title: pkg.name },
+      params: { appId: pkg.id, app: pkg.id, title: pkg.name, icon: pkg.icon },
     });
   };
 
