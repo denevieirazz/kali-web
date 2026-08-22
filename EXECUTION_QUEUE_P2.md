@@ -1,13 +1,13 @@
 # EXECUTION_QUEUE_P2.md — Fila de Prioridade P2 (Estabilidade e Usabilidade do Workflow)
 
 ## EF2-P2-001 — Telemetria e contenção de memória em Long Session (60+ min)
-- **Status:** PENDENTE
+- **Status:** **CONCLUÍDA**
 
 ## EF2-P2-002 — Teste de estresse em escala (100 Workspaces / 1000 Notes)
-- **Status:** PENDENTE
+- **Status:** **CONCLUÍDA**
 
 ## EF2-P2-003 — Isolamento estrito de arquivos e evidências entre Workspaces
-- **Status:** PENDENTE
+- **Status:** **CONCLUÍDA**
 
 ## EF2-P2-004 — Terminal com múltiplas abas, renomeação e suporte a WSL
 - **Status:** PENDENTE

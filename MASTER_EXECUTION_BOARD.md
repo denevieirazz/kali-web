@@ -22,9 +22,9 @@
 | **EF2-P1-002** | B-02 — Isolamento de owner namespaced por principal | P1 | **CONCLUÍDA** | Antigravity |
 | **EF2-P1-003** | B-03 — Header CSP sandbox opaque-origin no proxy HTML5 | P1 | **CONCLUÍDA** | Antigravity |
 | **EF2-P1-004** | B-04 — Fail-closed para verificação do WSLInterop | P1 | **CONCLUÍDA** | Antigravity |
-| **EF2-P2-001** | Telemetria e contenção de memória em Long Session (60+ min) | P2 | PENDENTE | - |
-| **EF2-P2-002** | Teste de estresse em escala (100 Workspaces / 1000 Notes) | P2 | PENDENTE | - |
-| **EF2-P2-003** | Isolamento estrito de arquivos e evidências entre Workspaces | P2 | PENDENTE | - |
+| **EF2-P2-001** | Telemetria e contenção de memória em Long Session (60+ min) | P2 | **CONCLUÍDA** | Antigravity |
+| **EF2-P2-002** | Teste de estresse em escala (100 Workspaces / 1000 Notes) | P2 | **CONCLUÍDA** | Antigravity |
+| **EF2-P2-003** | Isolamento estrito de arquivos e evidências entre Workspaces | P2 | **CONCLUÍDA** | Antigravity |
 | **EF2-P2-004** | Terminal com múltiplas abas, renomeação e suporte a WSL | P2 | PENDENTE | - |
 | **EF2-P2-005** | Files em modo Lista detalhado com fontes OPFS / Linux / Windows | P2 | PENDENTE | - |
 | **EF2-P2-006** | Editor de Notas Markdown com autosave e busca no corpo | P2 | PENDENTE | - |

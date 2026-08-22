@@ -14,12 +14,14 @@ import {
   type WorkflowProvider,
 } from '../core/workflowCore.js';
 import { fileSourceFacade, MAX_ASSISTED_TRANSFER_BYTES, type CloudFileEntry } from '../apps/CloudOSFiles/fileSourceFacade';
+import { getUserStorageKey } from './userScope.js';
 
 const WORKSPACES_KEY = 'cloudos.workflow.workspaces.v3';
 const ACTIVE_WORKSPACE_KEY = 'cloudos.workflow.active-workspace.v3';
 const NOTES_INDEX_KEY = 'cloudos.workflow.notes-index.v3';
 const FILE_INDEX_KEY = 'cloudos.workflow.file-index.v3';
 const DOWNLOAD_DESTINATION_KEY = 'cloudos.workflow.download-destination.v3';
+
 export const MAX_WORKSPACES = 1000;
 export const MAX_NOTE_BYTES = 2 * 1024 * 1024;
 export const MAX_NOTE_INDEX_ENTRIES = 200;
@@ -91,7 +93,8 @@ function emitChanged() {
 function safeJson<T>(key: string, fallback: T): T {
   if (!storageAvailable()) return fallback;
   try {
-    const parsed = JSON.parse(localStorage.getItem(key) || 'null');
+    const scopedKey = getUserStorageKey(key);
+    const parsed = JSON.parse(localStorage.getItem(scopedKey) || 'null');
     return parsed ?? fallback;
   } catch {
     return fallback;
@@ -100,7 +103,8 @@ function safeJson<T>(key: string, fallback: T): T {
 
 function writeJson(key: string, value: unknown) {
   if (!storageAvailable()) return;
-  localStorage.setItem(key, JSON.stringify(value));
+  const scopedKey = getUserStorageKey(key);
+  localStorage.setItem(scopedKey, JSON.stringify(value));
 }
 
 function samePath(left: string[], right: string[]) {
@@ -141,7 +145,7 @@ export function getWorkspace(id: string | null | undefined) {
 }
 
 export function getActiveWorkspace() {
-  const id = storageAvailable() ? localStorage.getItem(ACTIVE_WORKSPACE_KEY) : null;
+  const id = storageAvailable() ? localStorage.getItem(getUserStorageKey(ACTIVE_WORKSPACE_KEY)) : null;
   const indexed = getWorkspace(id);
   if (indexed && indexed.status !== 'archived') return indexed;
   return listWorkspaces().find(item => item.status !== 'archived') || null;
@@ -182,7 +186,7 @@ export async function activateWorkspace(id: string) {
   const workspace = getWorkspace(id);
   if (!workspace) throw new Error('Workspace não encontrado.');
   if (workspace.status === 'archived') throw new Error('Workspace arquivado. Reative-o antes de usar.');
-  if (storageAvailable()) localStorage.setItem(ACTIVE_WORKSPACE_KEY, workspace.id);
+  if (storageAvailable()) localStorage.setItem(getActiveWorkspaceKey(), workspace.id);
   await touchWorkspace(workspace.id, false);
   emitChanged();
   return getWorkspace(workspace.id) || workspace;
@@ -259,7 +263,7 @@ export async function createWorkspace(input: {
       throw new Error(`Limite de ${MAX_WORKSPACES} Workspaces atingido durante a criação. Nenhum Workspace existente foi descartado.`);
     }
     saveWorkspaceList(items);
-    if (storageAvailable()) localStorage.setItem(ACTIVE_WORKSPACE_KEY, workspace.id);
+    if (storageAvailable()) localStorage.setItem(getUserStorageKey(ACTIVE_WORKSPACE_KEY), workspace.id);
     emitChanged();
     return workspace;
   } catch (error) {
@@ -315,8 +319,8 @@ export async function archiveWorkspace(id: string, archived = true) {
   });
   if (!updated) throw new Error('Metadados do workspace foram rejeitados.');
   const saved = await persistWorkspaceRecord(updated, true);
-  if (storageAvailable() && archived && localStorage.getItem(ACTIVE_WORKSPACE_KEY) === id) {
-    localStorage.removeItem(ACTIVE_WORKSPACE_KEY);
+  if (storageAvailable() && archived && localStorage.getItem(getUserStorageKey(ACTIVE_WORKSPACE_KEY)) === id) {
+    localStorage.removeItem(getUserStorageKey(ACTIVE_WORKSPACE_KEY));
   }
   emitChanged();
   return saved;
@@ -385,7 +389,7 @@ export async function duplicateWorkspace(id: string) {
 export function removeWorkspaceFromIndex(id: string) {
   const items = persistedWorkspaces().filter(item => item.id !== id);
   saveWorkspaceList(items);
-  if (storageAvailable() && localStorage.getItem(ACTIVE_WORKSPACE_KEY) === id) localStorage.removeItem(ACTIVE_WORKSPACE_KEY);
+  if (storageAvailable() && localStorage.getItem(getUserStorageKey(ACTIVE_WORKSPACE_KEY)) === id) localStorage.removeItem(getUserStorageKey(ACTIVE_WORKSPACE_KEY));
   const notes = listNoteIndex().filter(item => item.workspaceId !== id);
   writeJson(NOTES_INDEX_KEY, notes);
   emitChanged();
@@ -430,7 +434,7 @@ function indexNoteMetadata(notes: WorkflowNoteMeta[]) {
     .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
     .slice(0, MAX_NOTE_INDEX_ENTRIES);
   if (JSON.stringify(next) === JSON.stringify(existing)) return;
-  writeJson(NOTES_INDEX_KEY, next);
+  writeJson(getNotesIndexKey(), next);
   emitChanged();
 }
 
@@ -712,7 +716,7 @@ export function setDownloadDestination(destination: DownloadDestination) {
 }
 
 export function getDownloadDestination(): DownloadDestination {
-  if (storageAvailable() && localStorage.getItem(DOWNLOAD_DESTINATION_KEY) === null) {
+  if (storageAvailable() && localStorage.getItem(getUserStorageKey(DOWNLOAD_DESTINATION_KEY)) === null) {
     const active = getActiveWorkspace();
     return active ? { kind: 'workspace', workspaceId: active.id } : { kind: 'opfs' };
   }
