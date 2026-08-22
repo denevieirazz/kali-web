@@ -371,7 +371,7 @@ async function probeWebSocketUrl(url, origin, timeoutMs = 2500, headers = {}) {
 
 async function scanDisplays(distribution) {
   const started = Date.now();
-  const command = "python3 -c \"import os; [print(f'DISPLAY:{n}') for n in range(100, 150) if os.path.exists(f'/tmp/.X11-unix/X{n}') or os.path.exists(f'/tmp/.X{n}-lock')]; print('XPRA_LIST_BEGIN'); os.system('xpra list 2>&1 || true'); print('XPRA_LIST_END')\"";
+  const command = "for n in $(seq 100 149); do if [ -e /tmp/.X11-unix/X$n ] || [ -e /tmp/.X$n-lock ]; then echo DISPLAY:$n; fi; done; echo XPRA_LIST_BEGIN; echo XPRA_LIST_END; exit 0";
   const result = await probeWslCommand(distribution, command, 8000);
   if (!result.ok) return { ok: false, occupied: [], error: result.error, durationMs: elapsedMs(started) };
   const occupied = [...new Set([...result.output.matchAll(/DISPLAY:(\d+)/g)].map(match => Number(match[1])))]

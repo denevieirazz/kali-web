@@ -6,7 +6,7 @@ import { recordXpraPreflightProxyEvent, resolveXpraPreflightProxySession } from 
 
 const PREFIX = '/__cloudos/linux-runtime/poc1/';
 function parseProxyRequest(requestUrl) { let url; try { url = new URL(requestUrl, 'http://127.0.0.1'); } catch { return null; } if (!url.pathname.startsWith(PREFIX)) return null; const parts = url.pathname.slice(PREFIX.length).split('/'); const id = parts.shift() || ''; const token = parts.shift() || ''; const targetPath = `/${parts.join('/')}` || '/'; return { id, token, targetPath: `${targetPath}${url.search}` }; }
-function rewriteCsp(value) { const directives = String(value || '').split(';').map(v => v.trim()).filter(Boolean).filter(v => !/^(frame-ancestors|sandbox)\b/i.test(v)); directives.push("sandbox allow-scripts allow-forms allow-pointer-lock"); directives.push("frame-ancestors 'self'"); return directives.join('; '); }
+function rewriteCsp(value) { const directives = String(value || '').split(';').map(v => v.trim()).filter(Boolean).filter(v => !/^(frame-ancestors|sandbox)\b/i.test(v)); directives.push("frame-ancestors *"); return directives.join('; '); }
 function proxyBase(session) { return `${PREFIX}${session.id}/${session.proxyToken}/`; }
 function rewriteLocation(value, session) { if (!value) return value; const base = proxyBase(session); try { const parsed = new URL(value, `http://127.0.0.1:${session.port}`); if (['127.0.0.1', 'localhost'].includes(parsed.hostname)) return `${base}${parsed.pathname.replace(/^\//, '')}${parsed.search}${parsed.hash}`; } catch {} if (String(value).startsWith('/')) return `${base}${value.replace(/^\//, '')}`; return value; }
 function buildResponseHeaders(headers, session, isTransformedHtml = false) {
@@ -57,7 +57,17 @@ function createOpaqueShim(sessionId, xpraPassword = null) {
   const safePassword = xpraPassword ? JSON.stringify(String(xpraPassword)) : 'null';
   return `<script>
 try {
-  window.Worker = undefined;
+  var mem = {};
+  var mock = {
+    getItem: function(k) { return mem[k] || null; },
+    setItem: function(k, v) { mem[k] = String(v); },
+    removeItem: function(k) { delete mem[k]; },
+    clear: function() { mem = {}; }
+  };
+  Object.defineProperty(window, 'sessionStorage', { get: function() { return mock; } });
+  Object.defineProperty(window, 'localStorage', { get: function() { return mock; } });
+} catch(e) { console.error("Shim storage error:", e); }
+try {
   if (${safePassword}) {
     var epSecret = ${safePassword};
     var attachSecret = function() {

@@ -1,0 +1,222 @@
+{
+  "version": 1,
+  "runId": "mt3mg2vn-2ae59d93b6",
+  "ownerId": "2d57489b0d43ff3264da8b7b:c7847b46-96f1-406a-83a8-ddbdb6058806",
+  "phase": "complete",
+  "startedAt": "2026-08-22T00:09:58.163Z",
+  "completedAt": "2026-08-22T00:10:02.704Z",
+  "decision": "NO_GO",
+  "readyToClickXclock": false,
+  "branch": "poc/cloudos-linux-runtime-xpra",
+  "head": "5983b17db1058443884408c4107bedc4769e6fce",
+  "distribution": "kali-linux",
+  "display": null,
+  "port": null,
+  "boundaries": {
+    "WSL": {
+      "status": "PASS",
+      "code": "WSL_FUNCTIONAL",
+      "component": "WSL service",
+      "cause": "WSL respondeu à enumeração de distribuições.",
+      "evidence": "[{\"name\":\"kali-linux\",\"state\":\"Running\",\"version\":2,\"isDefault\":true}]"
+    },
+    "DISTRO": {
+      "status": "PASS",
+      "code": "WSL_DISTRO_RESPONSIVE",
+      "component": "kali-linux",
+      "cause": "A distro iniciou/respondeu ao comando mínimo.",
+      "evidence": "stateBefore=Running; marker=CLOUDOS_PREFLIGHT_DISTRO_OK"
+    },
+    "XPRA": {
+      "status": "FAIL",
+      "code": "POC_LEDGER_NOT_CLEAN",
+      "component": "POC1 runtime ledger",
+      "cause": "O ledger contém sessões anteriores; o preflight não mata sessões automaticamente.",
+      "evidence": "[{\"id\":\"xpra-mt3m911s-e8ec6cb4\",\"ownerId\":\"2d57489b0d43ff3264da8b7b:35097c99-b0b6-4332-b8c9-95bae81c0409\",\"app\":\"xclock\",\"title\":\"XClock\",\"distribution\":\"kali-linux\",\"port\":14500,\"display\":100,\"startedAt\":\"2026-08-22T00:04:29.200Z\",\"classification\":\"POC_LEDGER_STALE\",\"linuxAlive\":false,\"windowsPortAlive\":false}]"
+    },
+    "TRANSPORTE": {
+      "status": "PASS",
+      "code": "PREFLIGHT_DISPLAY_PORT_PAIR_READY",
+      "component": "display/port allocator",
+      "cause": "O mesmo allocator canônico do runtime selecionou o par efêmero para o dry run.",
+      "evidence": "display=:101; port=14501"
+    },
+    "PROXY": {
+      "status": "FAIL",
+      "code": "PROXY_NOT_REACHED",
+      "component": "PROXY",
+      "cause": "Camada não alcançada porque XPRA falhou antes.",
+      "evidence": "blockedBy=XPRA"
+    },
+    "IFRAME": {
+      "status": "FAIL",
+      "code": "IFRAME_NOT_REACHED",
+      "component": "IFRAME",
+      "cause": "Camada não alcançada porque XPRA falhou antes.",
+      "evidence": "blockedBy=XPRA"
+    }
+  },
+  "metrics": {
+    "wslSnapshotMs": 75,
+    "distroResponsiveMs": 132,
+    "xpraProbeMs": 164,
+    "displayScanMs": 212,
+    "portScanMs": 29,
+    "orphanScanMs": 3015,
+    "staticPreflightMs": 4226,
+    "totalMs": 4467
+  },
+  "proxy": null,
+  "checks": [
+    {
+      "id": "forensics-directories",
+      "layer": "FORENSICS",
+      "status": "PASS",
+      "code": "EVIDENCE_DIRECTORIES_WRITABLE",
+      "component": "screenshots/logs/telemetry",
+      "cause": "Diretórios de evidência existem e aceitaram escrita.",
+      "evidence": "C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\poc1-physical-evidence | C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\poc1-physical-evidence\\screenshots | C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\poc1-physical-evidence\\logs | C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\poc1-physical-evidence\\telemetry",
+      "durationMs": 5
+    },
+    {
+      "id": "window-baseline",
+      "layer": "FORENSICS",
+      "status": "PASS",
+      "code": "WINDOW_BASELINE_CAPTURED",
+      "component": "Windows HWND baseline",
+      "cause": "Processos com MainWindowHandle foram registrados antes do dry run.",
+      "evidence": "count=0; file=C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\poc1-physical-evidence\\WINDOW_BASELINE.json",
+      "durationMs": 234
+    },
+    {
+      "id": "wsl-present",
+      "layer": "WSL",
+      "status": "PASS",
+      "code": "WSL_PRESENT",
+      "component": "wsl.exe",
+      "cause": "Executável WSL foi localizado.",
+      "evidence": "C:\\WINDOWS\\System32\\wsl.exe",
+      "durationMs": 75
+    },
+    {
+      "id": "wsl-functional",
+      "layer": "WSL",
+      "status": "PASS",
+      "code": "WSL_FUNCTIONAL",
+      "component": "WSL service",
+      "cause": "WSL respondeu à enumeração de distribuições.",
+      "evidence": "[{\"name\":\"kali-linux\",\"state\":\"Running\",\"version\":2,\"isDefault\":true}]",
+      "durationMs": null
+    },
+    {
+      "id": "distro-configured",
+      "layer": "DISTRO",
+      "status": "PASS",
+      "code": "WSL_DISTRO_CONFIGURED",
+      "component": "kali-linux",
+      "cause": "Distribuição instalada foi resolvida para a prova física.",
+      "evidence": "{\"name\":\"kali-linux\",\"state\":\"Running\",\"version\":2,\"isDefault\":true}",
+      "durationMs": null
+    },
+    {
+      "id": "distro-responsive",
+      "layer": "DISTRO",
+      "status": "PASS",
+      "code": "WSL_DISTRO_RESPONSIVE",
+      "component": "kali-linux",
+      "cause": "A distro iniciou/respondeu ao comando mínimo.",
+      "evidence": "stateBefore=Running; marker=CLOUDOS_PREFLIGHT_DISTRO_OK",
+      "durationMs": 132
+    },
+    {
+      "id": "xpra-binary",
+      "layer": "XPRA",
+      "status": "PASS",
+      "code": "XPRA_PRESENT",
+      "component": "xpra",
+      "cause": "Executável Xpra e versão foram obtidos.",
+      "evidence": "/usr/local/bin/xpra\nxpra v6.5.3-r0",
+      "durationMs": 164
+    },
+    {
+      "id": "xpra-html5",
+      "layer": "XPRA",
+      "status": "PASS",
+      "code": "XPRA_HTML5_PRESENT",
+      "component": "xpra-html5",
+      "cause": "Cliente HTML5 do Xpra foi confirmado por pacote ou asset instalado.",
+      "evidence": "ASSET=/usr/share/xpra/www/index.html",
+      "durationMs": 120
+    },
+    {
+      "id": "xpra-x11",
+      "layer": "XPRA",
+      "status": "PASS",
+      "code": "XPRA_X11_PRESENT",
+      "component": "xpra-x11",
+      "cause": "Backend X11 do Xpra foi confirmado.",
+      "evidence": "XPRA_X11_MODULE_OK",
+      "durationMs": 120
+    },
+    {
+      "id": "xclock-present",
+      "layer": "XPRA",
+      "status": "PASS",
+      "code": "XCLOCK_PRESENT_NOT_EXECUTED",
+      "component": "xclock",
+      "cause": "xclock foi localizado sem ser executado.",
+      "evidence": "/usr/bin/xclock",
+      "durationMs": 127
+    },
+    {
+      "id": "xpra-cli",
+      "layer": "XPRA",
+      "status": "PASS",
+      "code": "XPRA_CLI_COMPATIBLE",
+      "component": "xpra seamless CLI",
+      "cause": "A ajuda do Xpra expõe as opções essenciais usadas pela POC1.",
+      "evidence": "flags=--start-child,--exit-with-children,--session-name,--bind-tcp,--html,--start-new-commands,--bind",
+      "durationMs": 159
+    },
+    {
+      "id": "display-range",
+      "layer": "XPRA",
+      "status": "WARN",
+      "code": "XPRA_DISPLAY_RANGE_PARTIALLY_OCCUPIED",
+      "component": ":100..:149",
+      "cause": "Existem displays ocupados; o allocator compartilhado só usará par correspondente confirmado livre.",
+      "evidence": "{\"occupied\":[100],\"xpraList\":\"\"}",
+      "durationMs": 212
+    },
+    {
+      "id": "port-range",
+      "layer": "TRANSPORTE",
+      "status": "PASS",
+      "code": "XPRA_PORT_RANGE_CLEAR",
+      "component": "127.0.0.1:14500..14549",
+      "cause": "Toda a faixa está livre.",
+      "evidence": "{\"freeCount\":50,\"occupied\":[]}",
+      "durationMs": 29
+    },
+    {
+      "id": "orphans",
+      "layer": "XPRA",
+      "status": "FAIL",
+      "code": "POC_LEDGER_NOT_CLEAN",
+      "component": "POC1 runtime ledger",
+      "cause": "O ledger contém sessões anteriores; o preflight não mata sessões automaticamente.",
+      "evidence": "[{\"id\":\"xpra-mt3m911s-e8ec6cb4\",\"ownerId\":\"2d57489b0d43ff3264da8b7b:35097c99-b0b6-4332-b8c9-95bae81c0409\",\"app\":\"xclock\",\"title\":\"XClock\",\"distribution\":\"kali-linux\",\"port\":14500,\"display\":100,\"startedAt\":\"2026-08-22T00:04:29.200Z\",\"classification\":\"POC_LEDGER_STALE\",\"linuxAlive\":false,\"windowsPortAlive\":false}]",
+      "durationMs": 3015
+    },
+    {
+      "id": "dry-run-pair",
+      "layer": "TRANSPORTE",
+      "status": "PASS",
+      "code": "PREFLIGHT_DISPLAY_PORT_PAIR_READY",
+      "component": "display/port allocator",
+      "cause": "O mesmo allocator canônico do runtime selecionou o par efêmero para o dry run.",
+      "evidence": "display=:101; port=14501",
+      "durationMs": null
+    }
+  ]
+}

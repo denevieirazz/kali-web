@@ -1,270 +1,359 @@
-import { useState, useEffect } from 'react';
-import { useFileSystem } from '../../stores/fileSystem';
-import kernel from '../../core/kernel';
-import { FiSearch, FiCheck, FiStar, FiShield } from 'react-icons/fi';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useWindowManager } from '../../stores/windowManager';
+import { useProcessManager } from '../../stores/processManager';
+import { apiClient } from '../../services/apiClient';
+import { FiSearch, FiCheck, FiStar, FiDownload, FiTrash2, FiPlay, FiRefreshCw, FiAlertCircle } from 'react-icons/fi';
 import './ObsidianStore.css';
 
-interface StoreApp {
+export interface LinuxPackage {
   id: string;
   name: string;
-  developer: string;
+  packageName: string;
+  command: string;
+  category: string;
   description: string;
   icon: string;
-  category: string;
-  price: string;
-  rating: string;
-  isOfficial?: boolean;
-  code: string; 
+  isPopular: boolean;
+  desktopId: string;
+  installed: boolean;
 }
 
-const OFFICIAL_APPS: StoreApp[] = [
-  {
-    id: 'snake',
-    name: 'Obsidian Snake',
-    developer: 'Obsidian Studio',
-    description: 'O clássico jogo da cobrinha remasterizado. Use as setas para jogar.',
-    icon: '🐍',
-    category: 'Jogos',
-    price: 'Grátis',
-    rating: '4.9',
-    isOfficial: true,
-    code: `
-      print("Iniciando Obsidian Snake...");
-      OS.User32.CreateElement('div', 'game-board', { 
-        style: { width: '400px', height: '400px', background: '#111', margin: '20px auto', position: 'relative', border: '2px solid #333' } 
-      });
-      OS.User32.CreateElement('div', 'score', { 
-        innerText: 'Score: 0',
-        style: { textAlign: 'center', fontSize: '20px', padding: '10px' } 
-      });
-
-      let snake = [{x: 10, y: 10}];
-      let food = {x: 15, y: 15};
-      let dx = 1;
-      let dy = 0;
-      let score = 0;
-
-      // Render cells
-      const render = () => {
-        const board = document.getElementById('game-board');
-        if (!board) return;
-        board.innerHTML = '';
-        
-        // Render snake
-        snake.forEach(p => {
-           const el = document.createElement('div');
-           el.style.position = 'absolute';
-           el.style.width = '18px';
-           el.style.height = '18px';
-           el.style.background = '#4ade80';
-           el.style.left = (p.x * 20) + 'px';
-           el.style.top = (p.y * 20) + 'px';
-           el.style.borderRadius = '4px';
-           board.appendChild(el);
-        });
-
-        // Render food
-        const f = document.createElement('div');
-        f.style.position = 'absolute';
-        f.style.width = '18px';
-        f.style.height = '18px';
-        f.style.background = '#ef4444';
-        f.style.left = (food.x * 20) + 'px';
-        f.style.top = (food.y * 20) + 'px';
-        f.style.borderRadius = '50%';
-        board.appendChild(f);
-      };
-
-      OS.User32.AddEventListener('keydown', (e) => {
-        if (e.key === 'ArrowUp' && dy === 0) { dx = 0; dy = -1; }
-        if (e.key === 'ArrowDown' && dy === 0) { dx = 0; dy = 1; }
-        if (e.key === 'ArrowLeft' && dx === 0) { dx = -1; dy = 0; }
-        if (e.key === 'ArrowRight' && dx === 0) { dx = 1; dy = 0; }
-      });
-
-      const gameLoop = setInterval(() => {
-        const board = document.getElementById('game-board');
-        if (!board) { clearInterval(gameLoop); return; }
-
-        const head = { x: snake[0].x + dx, y: snake[0].y + dy };
-        
-        // Wall collision
-        if (head.x < 0 || head.x >= 20 || head.y < 0 || head.y >= 20) {
-           clearInterval(gameLoop);
-           alert('Game Over! Score: ' + score);
-           return;
-        }
-
-        snake.unshift(head);
-
-        if (head.x === food.x && head.y === food.y) {
-           score += 10;
-           OS.User32.SetText('score', 'Score: ' + score);
-           food = { x: Math.floor(Math.random()*20), y: Math.floor(Math.random()*20) };
-        } else {
-           snake.pop();
-        }
-        render();
-      }, 150);
-
-      render();
-    `
-  },
-  {
-      id: 'task-pro',
-      name: 'Task Pro',
-      developer: 'Obsidian Studio',
-      description: 'Gerenciador de tarefas avançado com suporte a categorias.',
-      icon: '✅',
-      category: 'Produtividade',
-      price: 'Grátis',
-      rating: '4.7',
-      isOfficial: true,
-      code: `
-        print("Task Pro carregando...");
-        OS.User32.CreateElement('div', 'container', { style: { padding: '20px' } });
-        OS.User32.CreateElement('h2', 'title', { innerText: 'Minhas Tarefas' });
-        OS.User32.CreateElement('input', 'task-input', { 
-            style: { width: '70%', padding: '10px', background: '#222', border: '1px solid #444', color: '#fff' } 
-        });
-        OS.User32.CreateElement('button', 'add-btn', { innerText: 'Adicionar', style: { marginLeft: '10px', padding: '10px', background: '#4f46e5', color: '#fff', border: 'none', borderRadius: '4px' } });
-        OS.User32.CreateElement('ul', 'list', { style: { marginTop: '20px', listStyle: 'none', padding: 0 } });
-
-        OS.User32.OnMessage('add-btn', 'click', () => {
-            const input = document.getElementById('task-input');
-            const list = document.getElementById('list');
-            if (input && input.value) {
-                const li = document.createElement('li');
-                li.innerText = '• ' + input.value;
-                li.style.padding = '8px 0';
-                li.style.borderBottom = '1px solid #333';
-                list.appendChild(li);
-                input.value = '';
-            }
-        });
-      `
-  }
+const CATEGORIES = [
+  { id: 'all', label: 'Todos os Apps' },
+  { id: 'popular', label: '★ Destaques' },
+  { id: 'installed', label: '✓ Instalados' },
+  { id: 'favorites', label: '♥ Favoritos' },
+  { id: 'internet', label: 'Internet' },
+  { id: 'development', label: 'Desenvolvimento' },
+  { id: 'graphics', label: 'Gráficos' },
+  { id: 'multimedia', label: 'Multimídia' },
+  { id: 'office', label: 'Escritório' },
+  { id: 'utilities', label: 'Utilitários' },
+  { id: 'security', label: 'Segurança' },
 ];
 
 export default function ObsidianStore() {
-  const [search, setSearch] = useState('');
-  const [category, setCategory] = useState('Todos');
-  const [installedApps, setInstalledApps] = useState<Set<string>>(new Set());
-  
-  const { nodes } = useFileSystem();
+  const [packages, setPackages] = useState<LinuxPackage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [query, setQuery] = useState('');
+  const [installingId, setInstallingId] = useState<string | null>(null);
+  const [uninstallingId, setUninstallingId] = useState<string | null>(null);
+  const [actionLog, setActionLog] = useState<{ id: string; name: string; status: string; log?: string } | null>(null);
+
+  const [favorites, setFavorites] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem('cloudos.store.favorites');
+      return stored ? new Set(JSON.parse(stored)) : new Set(['firefox', 'code']);
+    } catch {
+      return new Set(['firefox', 'code']);
+    }
+  });
+
+  const openWindow = useWindowManager((s) => s.openWindow);
+  const createProcess = useProcessManager((s) => s.createProcess);
+
+  const fetchPackages = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await apiClient<{ packages: LinuxPackage[]; operational: boolean; error?: string }>('/api/linux-runtime/packages');
+      if (res?.packages) {
+        setPackages(res.packages);
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Erro ao carregar catálogo de aplicativos Linux.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const installed = new Set<string>();
-    Object.values(nodes).forEach(node => {
-        if (node.path.includes('ObsidianOS Apps')) {
-            const appId = node.metadata?.appId;
-            if (appId) installed.add(appId);
-        }
+    fetchPackages();
+  }, [fetchPackages]);
+
+  const toggleFavorite = (id: string) => {
+    setFavorites((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      try {
+        localStorage.setItem('cloudos.store.favorites', JSON.stringify([...next]));
+      } catch {}
+      return next;
     });
-    setInstalledApps(installed);
-  }, [nodes]);
-
-  const handleInstall = (app: StoreApp) => {
-    const installPath = 'C:\\Program Files\\ObsidianOS Apps';
-    const fileName = `${app.id}.obx`;
-    
-    // O conteúdo é o código JS puro. O SdkAppRunner vai ler isso.
-    const content = `/* ObsidianOS App: ${app.name} */\n${app.code}`;
-
-    kernel.fsCreateFile(installPath, fileName, content, 'exe');
-    
-    const node = kernel.fsGetNode(`${installPath}\\${fileName}`);
-    if (node) {
-        if(!node.metadata) node.metadata = {};
-        node.metadata.type = 'binary_executable';
-        node.metadata.appId = app.id;
-        kernel.emit('fs:snapshot', kernel.fsGetSnapshot());
-    }
-
-    kernel.log('INFO', 'Store', `Instalado: ${app.name}`);
-    alert(`${app.name} instalado com sucesso em Program Files!`);
   };
 
-  const categories = ['Todos', 'Jogos', 'Utilidades', 'Produtividade', 'Personalização'];
+  const handleInstall = async (pkg: LinuxPackage) => {
+    setInstallingId(pkg.id);
+    setActionLog({ id: pkg.id, name: pkg.name, status: 'Instalando via repositórios oficiais...' });
+    try {
+      const res = await apiClient<{ success: boolean; log: string }>(`/api/linux-runtime/packages/${pkg.id}/install`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      setActionLog({ id: pkg.id, name: pkg.name, status: 'Instalação concluída com sucesso!', log: res?.log });
+      await fetchPackages();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('cloudos:apps-changed'));
+      }
+    } catch (err: any) {
+      const msg = err?.message || 'Falha ao instalar pacote.';
+      setActionLog({ id: pkg.id, name: pkg.name, status: `Erro na instalação: ${msg}` });
+    } finally {
+      setInstallingId(null);
+    }
+  };
 
-  const filteredApps = OFFICIAL_APPS.filter(app => {
-    const matchesSearch = app.name.toLowerCase().includes(search.toLowerCase());
-    const matchesCategory = category === 'Todos' || app.category === category;
-    return matchesSearch && matchesCategory;
-  });
+  const handleUninstall = async (pkg: LinuxPackage) => {
+    if (!confirm(`Tem certeza que deseja remover ${pkg.name}?`)) return;
+    setUninstallingId(pkg.id);
+    setActionLog({ id: pkg.id, name: pkg.name, status: 'Removendo pacote...' });
+    try {
+      const res = await apiClient<{ success: boolean; log: string }>(`/api/linux-runtime/packages/${pkg.id}/uninstall`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      setActionLog({ id: pkg.id, name: pkg.name, status: 'Aplicativo removido.', log: res?.log });
+      await fetchPackages();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('cloudos:apps-changed'));
+      }
+    } catch (err: any) {
+      const msg = err?.message || 'Falha ao remover pacote.';
+      setActionLog({ id: pkg.id, name: pkg.name, status: `Erro ao remover: ${msg}` });
+    } finally {
+      setUninstallingId(null);
+    }
+  };
+
+  const handleLaunch = (pkg: LinuxPackage) => {
+    const pid = createProcess('linux-runtime-poc', pkg.name, pkg.icon);
+    openWindow({
+      title: `${pkg.name} (Linux Runtime)`,
+      icon: pkg.icon,
+      appId: 'linux-runtime-poc',
+      width: 960,
+      height: 640,
+      minWidth: 400,
+      minHeight: 300,
+      isResizable: true,
+      processId: pid,
+      params: { app: pkg.id, title: pkg.name },
+    });
+  };
+
+  const filteredPackages = useMemo(() => {
+    return packages.filter((pkg) => {
+      // Category filter
+      if (selectedCategory === 'popular' && !pkg.isPopular) return false;
+      if (selectedCategory === 'installed' && !pkg.installed) return false;
+      if (selectedCategory === 'favorites' && !favorites.has(pkg.id)) return false;
+      if (!['all', 'popular', 'installed', 'favorites'].includes(selectedCategory) && pkg.category !== selectedCategory) {
+        return false;
+      }
+      // Query filter
+      if (query.trim()) {
+        const q = query.trim().toLowerCase();
+        const matchesName = pkg.name.toLowerCase().includes(q);
+        const matchesPkg = pkg.packageName.toLowerCase().includes(q);
+        const matchesDesc = pkg.description.toLowerCase().includes(q);
+        if (!matchesName && !matchesPkg && !matchesDesc) return false;
+      }
+      return true;
+    });
+  }, [packages, selectedCategory, favorites, query]);
 
   return (
     <div className="obsidian-store">
       <div className="store-header">
-        <h1 className="store-title">Obsidian Store</h1>
-        <p style={{ color: '#888' }}>Aplicativos oficiais e da comunidade.</p>
-        
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <div className="store-title">Linux App Center</div>
+            <div style={{ color: '#94a3b8', fontSize: '14px' }}>
+              Instale, gerencie e execute aplicativos gráficos nativos Linux no CloudOS.
+            </div>
+          </div>
+          <button
+            onClick={fetchPackages}
+            disabled={loading}
+            style={{
+              background: 'rgba(255,255,255,0.08)',
+              border: '1px solid rgba(255,255,255,0.15)',
+              color: '#fff',
+              padding: '8px 14px',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '13px'
+            }}
+          >
+            <FiRefreshCw className={loading ? 'spin' : ''} /> Atualizar Catálogo
+          </button>
+        </div>
+
         <div className="store-search-container">
           <FiSearch className="store-search-icon" />
           <input
             type="text"
             className="store-search-input"
-            placeholder="Pesquisar..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Pesquisar aplicativos (ex: Firefox, VS Code, GIMP, VLC)..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
           />
         </div>
       </div>
 
       <div className="store-categories">
-        {categories.map(cat => (
-          <div
-            key={cat}
-            className={`category-pill ${category === cat ? 'active' : ''}`}
-            onClick={() => setCategory(cat)}
+        {CATEGORIES.map((cat) => (
+          <button
+            key={cat.id}
+            className={`category-pill ${selectedCategory === cat.id ? 'active' : ''}`}
+            onClick={() => setSelectedCategory(cat.id)}
           >
-            {cat}
-          </div>
+            {cat.label}
+          </button>
         ))}
       </div>
 
+      {actionLog && (
+        <div style={{ margin: '0 32px 16px 32px', padding: '12px 16px', background: 'rgba(99, 102, 241, 0.15)', border: '1px solid rgba(99, 102, 241, 0.3)', borderRadius: '8px', fontSize: '13px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span><strong>{actionLog.name}:</strong> {actionLog.status}</span>
+            <button onClick={() => setActionLog(null)} style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer' }}>✕</button>
+          </div>
+        </div>
+      )}
+
       <div className="store-content">
-        <div className="app-grid">
-          {filteredApps.map(app => (
-            <div key={app.id} className="app-card">
-              {app.isOfficial && (
-                <div className="official-badge" title="App Verificado">
-                  <FiShield size={12} /> Oficial
-                </div>
-              )}
-              <div className="app-card-header">
-                <div className="app-card-icon">{app.icon}</div>
-                <div className="app-card-info">
-                  <span className="app-name">{app.name}</span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span className="app-developer">{app.developer}</span>
-                    <span style={{ fontSize: '12px', color: '#fbbf24', display: 'flex', alignItems: 'center', gap: '2px' }}>
-                      <FiStar size={10} fill="#fbbf24" /> {app.rating}
-                    </span>
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>
+            <FiRefreshCw className="spin" style={{ fontSize: '28px', marginBottom: '12px' }} />
+            <div>Consultando status de pacotes na distribuição Linux...</div>
+          </div>
+        ) : error ? (
+          <div style={{ textAlign: 'center', padding: '40px', color: '#f87171' }}>
+            <FiAlertCircle style={{ fontSize: '32px', marginBottom: '8px' }} />
+            <div>{error}</div>
+            <button onClick={fetchPackages} style={{ marginTop: '16px', padding: '8px 16px', borderRadius: '6px', background: '#4f46e5', color: '#fff', border: 'none', cursor: 'pointer' }}>Tentar Novamente</button>
+          </div>
+        ) : filteredPackages.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>
+            Nenhum aplicativo encontrado para os filtros selecionados.
+          </div>
+        ) : (
+          <div className="app-grid">
+            {filteredPackages.map((pkg) => {
+              const isFav = favorites.has(pkg.id);
+              const isBusy = installingId === pkg.id || uninstallingId === pkg.id;
+
+              return (
+                <div key={pkg.id} className="app-card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
+                      <div style={{ fontSize: '32px', width: '48px', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.06)', borderRadius: '12px' }}>
+                        {pkg.icon}
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '16px', color: '#fff' }}>{pkg.name}</div>
+                        <div style={{ fontSize: '12px', color: '#94a3b8' }}>{pkg.packageName}</div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => toggleFavorite(pkg.id)}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: isFav ? '#fbbf24' : '#64748b',
+                        cursor: 'pointer',
+                        fontSize: '18px',
+                        padding: '4px'
+                      }}
+                      title={isFav ? 'Remover dos favoritos' : 'Adicionar aos favoritos'}
+                    >
+                      <FiStar fill={isFav ? '#fbbf24' : 'none'} />
+                    </button>
+                  </div>
+
+                  <div style={{ fontSize: '13px', color: '#cbd5e1', lineHeight: '1.4', minHeight: '36px' }}>
+                    {pkg.description}
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: pkg.installed ? '#4ade80' : '#94a3b8' }}>
+                      {pkg.installed ? <><FiCheck /> Instalado</> : <span>Disponível</span>}
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      {pkg.installed ? (
+                        <>
+                          <button
+                            className="store-btn-launch"
+                            onClick={() => handleLaunch(pkg)}
+                            style={{
+                              background: '#22c55e',
+                              color: '#000',
+                              fontWeight: 600,
+                              border: 'none',
+                              padding: '6px 14px',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              fontSize: '13px'
+                            }}
+                          >
+                            <FiPlay /> Abrir
+                          </button>
+                          <button
+                            disabled={isBusy}
+                            onClick={() => handleUninstall(pkg)}
+                            style={{
+                              background: 'rgba(239, 68, 68, 0.15)',
+                              color: '#f87171',
+                              border: '1px solid rgba(239, 68, 68, 0.3)',
+                              padding: '6px 10px',
+                              borderRadius: '6px',
+                              cursor: isBusy ? 'wait' : 'pointer',
+                              fontSize: '13px'
+                            }}
+                            title="Desinstalar pacote"
+                          >
+                            <FiTrash2 />
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          disabled={isBusy}
+                          onClick={() => handleInstall(pkg)}
+                          style={{
+                            background: '#4f46e5',
+                            color: '#fff',
+                            fontWeight: 600,
+                            border: 'none',
+                            padding: '6px 14px',
+                            borderRadius: '6px',
+                            cursor: isBusy ? 'wait' : 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            fontSize: '13px'
+                          }}
+                        >
+                          <FiDownload /> {installingId === pkg.id ? 'Instalando...' : 'Instalar'}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-
-              <div className="app-description">
-                {app.description}
-              </div>
-
-              <div className="app-card-footer">
-                <span className="app-price free">{app.price}</span>
-                
-                {installedApps.has(app.id) ? (
-                  <button className="app-install-btn installed">
-                    <FiCheck /> Instalado
-                  </button>
-                ) : (
-                  <button className="app-install-btn" onClick={() => handleInstall(app)}>
-                    Instalar
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -186,7 +186,7 @@ export async function activateWorkspace(id: string) {
   const workspace = getWorkspace(id);
   if (!workspace) throw new Error('Workspace não encontrado.');
   if (workspace.status === 'archived') throw new Error('Workspace arquivado. Reative-o antes de usar.');
-  if (storageAvailable()) localStorage.setItem(getActiveWorkspaceKey(), workspace.id);
+  if (storageAvailable()) localStorage.setItem(getUserStorageKey(ACTIVE_WORKSPACE_KEY), workspace.id);
   await touchWorkspace(workspace.id, false);
   emitChanged();
   return getWorkspace(workspace.id) || workspace;
@@ -434,7 +434,7 @@ function indexNoteMetadata(notes: WorkflowNoteMeta[]) {
     .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
     .slice(0, MAX_NOTE_INDEX_ENTRIES);
   if (JSON.stringify(next) === JSON.stringify(existing)) return;
-  writeJson(getNotesIndexKey(), next);
+  writeJson(NOTES_INDEX_KEY, next);
   emitChanged();
 }
 

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useWindowManager } from '../../stores/windowManager';
 import { apiClient } from '../../services/apiClient';
 import './LinuxRuntimePoc.css';
 
@@ -168,7 +169,10 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
   const [readiness, setReadiness] = useState<PocReadiness | null>(null);
   const [physicalPreflight, setPhysicalPreflight] = useState<PhysicalPreflight | null>(null);
   const [pendingPreflightIframe, setPendingPreflightIframe] = useState<PendingPreflightIframe | null>(null);
-  const [selectedApp, setSelectedApp] = useState('xclock');
+  const [selectedApp, setSelectedApp] = useState(() => {
+    const win = useWindowManager.getState().getWindow(windowId);
+    return typeof win?.params?.app === 'string' ? win.params.app : 'xclock';
+  });
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [preflightBusy, setPreflightBusy] = useState(false);
@@ -623,7 +627,7 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
             title={`${activeSession.title} — Xpra HTML5`}
             src={readyUrl}
             className="linux-runtime-poc__frame"
-            sandbox="allow-scripts allow-forms allow-pointer-lock"
+            sandbox="allow-scripts allow-forms allow-pointer-lock allow-same-origin"
             allow="clipboard-read; clipboard-write"
             referrerPolicy="no-referrer"
             onLoad={onFrameLoad}

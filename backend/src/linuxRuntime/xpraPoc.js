@@ -20,13 +20,24 @@ const HEALTH_TIMEOUT_MS = 4_000;
 const STOP_TIMEOUT_MS = 6_000;
 const LEASE_TTL_MS = 120_000;
 const LEDGER_FILE = path.join(os.tmpdir(), 'cloudos-linux-runtime-poc1-sessions.json');
-const OWNER_ID = /^[a-zA-Z0-9._:-]{1,256}$/;
 const ALLOWED_APPS = Object.freeze({
   xclock: { command: 'xclock', title: 'XClock' },
   xeyes: { command: 'xeyes', title: 'XEyes' },
   xterm: { command: 'xterm', title: 'XTerm' },
   gedit: { command: 'gedit', title: 'Gedit' },
+  firefox: { command: 'firefox-esr', title: 'Firefox ESR' },
+  chromium: { command: 'chromium', title: 'Chromium' },
+  code: { command: 'code', title: 'Visual Studio Code' },
+  gimp: { command: 'gimp', title: 'GIMP' },
+  vlc: { command: 'vlc', title: 'VLC Media Player' },
+  libreoffice: { command: 'libreoffice', title: 'LibreOffice' },
+  filezilla: { command: 'filezilla', title: 'FileZilla' },
+  wireshark: { command: 'wireshark', title: 'Wireshark' },
+  galculator: { command: 'galculator', title: 'Calculadora' },
+  htop: { command: 'xterm -e htop', title: 'Htop Monitor' },
+  mousepad: { command: 'mousepad', title: 'Mousepad' },
 });
+const OWNER_ID = /^[a-zA-Z0-9._:-]{1,128}$/;
 const sessions = new Map();
 const reservedPorts = new Set();
 let lifecycleQueue = Promise.resolve();
@@ -99,7 +110,7 @@ export function buildXpraStartCommand({ appCommand, port, sessionId = 'cloudos-p
     'chmod 1777 /tmp/.X11-unix 2>/dev/null || true',
     'unset DISPLAY WAYLAND_DISPLAY PULSE_SERVER',
     `export XPRA_PASSWORD=${shellQuote(password)}`,
-    `exec xpra seamless :${display} --session-name=${shellQuote(`cloudos-poc1-${sessionId}`)} --start-child=${shellQuote(appCommand)} --exit-with-children=yes --daemon=no --clipboard=no --printing=no --file-transfer=no --webcam=no --audio=no --speaker=no --microphone=no --notifications=no --mdns=no --dbus-launch=no --dbus-control=no --start-new-commands=no --bind=noabstract --bind-tcp=${XPRA_BIND_TCP_HOST}:${port},auth=env --html=on`,
+    `exec xpra seamless :${display} --session-name=${shellQuote(`cloudos-poc1-${sessionId}`)} --start-child=${shellQuote(appCommand)} --exit-with-children=yes --daemon=no --clipboard=no --printing=no --file-transfer=no --webcam=no --audio=no --speaker=no --microphone=no --notifications=no --mdns=no --dbus-launch=no --dbus-control=no --start-new-commands=no --bind=noabstract --bind-tcp=${XPRA_BIND_TCP_HOST}:${port},auth=env --video=no --html=on`,
   ].join('; ');
 }
 async function execWsl(distribution, command, timeout = HEALTH_TIMEOUT_MS) { return execFileAsync(WSL_EXE, ['-d', distribution, '--exec', 'sh', '-c', command], { windowsHide: true, env: safeChildEnvironment(), timeout, maxBuffer: 512 * 1024 }); }

@@ -1,0 +1,62 @@
+{
+  "capturedAt": "2026-08-22T03:56:34.287Z",
+  "hostname": "DESKTOP-65BUITP",
+  "platform": "win32",
+  "windows": [
+    {
+      "Id": 17464,
+      "ProcessName": "Antigravity",
+      "MainWindowTitle": "Chrome DevTools MCP verif...",
+      "MainWindowHandle": "7276498"
+    },
+    {
+      "Id": 2008,
+      "ProcessName": "ApplicationFrameHost",
+      "MainWindowTitle": "",
+      "MainWindowHandle": "2360530"
+    },
+    {
+      "Id": 30052,
+      "ProcessName": "ChatGPT Classic",
+      "MainWindowTitle": "ChatGPT Classic",
+      "MainWindowHandle": "197860"
+    },
+    {
+      "Id": 30048,
+      "ProcessName": "CloudOS.Host",
+      "MainWindowTitle": "CloudOS",
+      "MainWindowHandle": "5901508"
+    },
+    {
+      "Id": 7384,
+      "ProcessName": "explorer",
+      "MainWindowTitle": "",
+      "MainWindowHandle": "1442510"
+    },
+    {
+      "Id": 16996,
+      "ProcessName": "M365Copilot",
+      "MainWindowTitle": "Microsoft 365 Copilot",
+      "MainWindowHandle": "132810"
+    },
+    {
+      "Id": 21156,
+      "ProcessName": "msedge",
+      "MainWindowTitle": "SUPER XAND�O REAGINDO - ARIANA GRANDE EXP�E COMO � FEITO O RITUAL DA ELITE em NOVO CLIPE? - YouTube - Pessoal - Microsoft? Edge",
+      "MainWindowHandle": "1117228"
+    },
+    {
+      "Id": 1860,
+      "ProcessName": "SystemSettings",
+      "MainWindowTitle": "Configura��es",
+      "MainWindowHandle": "263368"
+    },
+    {
+      "Id": 8752,
+      "ProcessName": "TextInputHost",
+      "MainWindowTitle": "Experi�ncia de Entrada do Windows",
+      "MainWindowHandle": "132780"
+    }
+  ],
+  "count": 9
+}

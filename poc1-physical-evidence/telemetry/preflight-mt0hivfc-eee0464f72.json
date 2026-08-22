@@ -1,0 +1,138 @@
+{
+  "version": 1,
+  "runId": "mt0hivfc-eee0464f72",
+  "ownerId": "079c65357d8e3f2ae3e26b26:a1c5254e-5ddf-44d1-8acd-b09e0d17fdd8",
+  "phase": "complete",
+  "startedAt": "2026-08-19T19:28:51.864Z",
+  "completedAt": "2026-08-19T19:28:55.628Z",
+  "decision": "NO_GO",
+  "readyToClickXclock": false,
+  "branch": "poc/cloudos-linux-runtime-xpra",
+  "head": "fa4e4443c7a5dbe809a59449f32d9e2b50ddcfb0",
+  "distribution": "kali-linux",
+  "display": null,
+  "port": null,
+  "boundaries": {
+    "WSL": {
+      "status": "PASS",
+      "code": "WSL_FUNCTIONAL",
+      "component": "WSL service",
+      "cause": "WSL respondeu à enumeração de distribuições.",
+      "evidence": "[{\"name\":\"kali-linux\",\"state\":\"Running\",\"version\":2,\"isDefault\":true}]"
+    },
+    "DISTRO": {
+      "status": "PASS",
+      "code": "WSL_DISTRO_RESPONSIVE",
+      "component": "kali-linux",
+      "cause": "A distro iniciou/respondeu ao comando mínimo.",
+      "evidence": "stateBefore=Running; marker=CLOUDOS_PREFLIGHT_DISTRO_OK"
+    },
+    "XPRA": {
+      "status": "FAIL",
+      "code": "XPRA_MISSING",
+      "component": "xpra",
+      "cause": "Executável Xpra não foi localizado na distro.",
+      "evidence": "Command failed: C:\\WINDOWS\\System32\\wsl.exe -d kali-linux -- sh -lc command -v xpra && xpra --version"
+    },
+    "TRANSPORTE": {
+      "status": "FAIL",
+      "code": "TRANSPORTE_NOT_REACHED",
+      "component": "TRANSPORTE",
+      "cause": "Camada não alcançada porque XPRA falhou antes.",
+      "evidence": "blockedBy=XPRA"
+    },
+    "PROXY": {
+      "status": "FAIL",
+      "code": "PROXY_NOT_REACHED",
+      "component": "PROXY",
+      "cause": "Camada não alcançada porque XPRA falhou antes.",
+      "evidence": "blockedBy=XPRA"
+    },
+    "IFRAME": {
+      "status": "FAIL",
+      "code": "IFRAME_NOT_REACHED",
+      "component": "IFRAME",
+      "cause": "Camada não alcançada porque XPRA falhou antes.",
+      "evidence": "blockedBy=XPRA"
+    }
+  },
+  "metrics": {
+    "wslSnapshotMs": 73,
+    "distroResponsiveMs": 2697,
+    "xpraProbeMs": 146,
+    "totalMs": 3697
+  },
+  "proxy": null,
+  "checks": [
+    {
+      "id": "forensics-directories",
+      "layer": "FORENSICS",
+      "status": "PASS",
+      "code": "EVIDENCE_DIRECTORIES_WRITABLE",
+      "component": "screenshots/logs/telemetry",
+      "cause": "Diretórios de evidência existem e aceitaram escrita.",
+      "evidence": "C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\poc1-physical-evidence | C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\poc1-physical-evidence\\screenshots | C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\poc1-physical-evidence\\logs | C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\poc1-physical-evidence\\telemetry",
+      "durationMs": 6
+    },
+    {
+      "id": "window-baseline",
+      "layer": "FORENSICS",
+      "status": "PASS",
+      "code": "WINDOW_BASELINE_CAPTURED",
+      "component": "Windows HWND baseline",
+      "cause": "Processos com MainWindowHandle foram registrados antes do dry run.",
+      "evidence": "count=0; file=C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\poc1-physical-evidence\\WINDOW_BASELINE.json",
+      "durationMs": 702
+    },
+    {
+      "id": "wsl-present",
+      "layer": "WSL",
+      "status": "PASS",
+      "code": "WSL_PRESENT",
+      "component": "wsl.exe",
+      "cause": "Executável WSL foi localizado.",
+      "evidence": "C:\\WINDOWS\\System32\\wsl.exe",
+      "durationMs": 73
+    },
+    {
+      "id": "wsl-functional",
+      "layer": "WSL",
+      "status": "PASS",
+      "code": "WSL_FUNCTIONAL",
+      "component": "WSL service",
+      "cause": "WSL respondeu à enumeração de distribuições.",
+      "evidence": "[{\"name\":\"kali-linux\",\"state\":\"Running\",\"version\":2,\"isDefault\":true}]",
+      "durationMs": null
+    },
+    {
+      "id": "distro-configured",
+      "layer": "DISTRO",
+      "status": "PASS",
+      "code": "WSL_DISTRO_CONFIGURED",
+      "component": "kali-linux",
+      "cause": "Distribuição instalada foi resolvida para a prova física.",
+      "evidence": "{\"name\":\"kali-linux\",\"state\":\"Running\",\"version\":2,\"isDefault\":true}",
+      "durationMs": null
+    },
+    {
+      "id": "distro-responsive",
+      "layer": "DISTRO",
+      "status": "PASS",
+      "code": "WSL_DISTRO_RESPONSIVE",
+      "component": "kali-linux",
+      "cause": "A distro iniciou/respondeu ao comando mínimo.",
+      "evidence": "stateBefore=Running; marker=CLOUDOS_PREFLIGHT_DISTRO_OK",
+      "durationMs": 2697
+    },
+    {
+      "id": "xpra-binary",
+      "layer": "XPRA",
+      "status": "FAIL",
+      "code": "XPRA_MISSING",
+      "component": "xpra",
+      "cause": "Executável Xpra não foi localizado na distro.",
+      "evidence": "Command failed: C:\\WINDOWS\\System32\\wsl.exe -d kali-linux -- sh -lc command -v xpra && xpra --version",
+      "durationMs": 146
+    }
+  ]
+}

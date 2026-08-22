@@ -1,14 +1,15 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useSystem } from '../../stores/systemStore';
 import { useWindowManager } from '../../stores/windowManager';
 import { useProcessManager } from '../../stores/processManager';
 import { useContextMenuStore } from '../../stores/contextMenuStore';
 import { useAppRegistry } from '../../core/appRegistry';
 import { nativeHostBridge } from '../../services/nativeHostBridge';
+import { apiClient } from '../../services/apiClient';
 import './StartMenu.css';
 import './StartMenu.native.css';
 
-type View = 'home' | 'all' | 'running';
+type View = 'home' | 'all' | 'linux' | 'running';
 type App = {
   id: string;
   name: string;
@@ -19,6 +20,8 @@ type App = {
   minHeight?: number;
   isResizable?: boolean;
   binaryPath?: string;
+  isLinux?: boolean;
+  linuxAppId?: string;
 };
 
 const requiresNativeHost = (app: App) => app.id === 'browser';
@@ -40,10 +43,44 @@ function StartMenu() {
   const [view, setView] = useState<View>('home');
   const [query, setQuery] = useState('');
   const [capabilityNotice, setCapabilityNotice] = useState('');
+  const [linuxApps, setLinuxApps] = useState<App[]>([]);
   const menuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const appList = useMemo(() => Object.values(apps), [apps]);
+  const fetchLinuxApps = useCallback(async () => {
+    try {
+      const res = await apiClient<{ packages: Array<{ id: string; name: string; icon: string; installed: boolean; command: string }> }>('/api/linux-runtime/packages');
+      if (res?.packages) {
+        const installed = res.packages
+          .filter((pkg: { installed: boolean }) => pkg.installed)
+          .map((pkg: { id: string; name: string; icon: string }) => ({
+            id: `linux-app-${pkg.id}`,
+            name: `${pkg.name}`,
+            icon: pkg.icon || '🐧',
+            defaultWidth: 960,
+            defaultHeight: 640,
+            isLinux: true,
+            linuxAppId: pkg.id,
+          }));
+        setLinuxApps(installed);
+      }
+    } catch {
+      // Graceful fallback if backend runtime is starting up
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchLinuxApps();
+    const handleAppsChanged = () => fetchLinuxApps();
+    window.addEventListener('cloudos:apps-changed', handleAppsChanged);
+    return () => window.removeEventListener('cloudos:apps-changed', handleAppsChanged);
+  }, [fetchLinuxApps]);
+
+  const appList = useMemo(() => {
+    const base = Object.values(apps);
+    return [...base, ...linuxApps];
+  }, [apps, linuxApps]);
+
   const filtered = useMemo(() => {
     const value = query.trim().toLocaleLowerCase('pt-BR');
     return value ? appList.filter((app) => app.name.toLocaleLowerCase('pt-BR').includes(value)) : appList;
@@ -56,6 +93,7 @@ function StartMenu() {
       setCapabilityNotice('');
       return;
     }
+    fetchLinuxApps();
     requestAnimationFrame(() => inputRef.current?.focus());
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') closeStartMenu();
@@ -76,13 +114,32 @@ function StartMenu() {
       document.removeEventListener('keydown', onKey);
       document.removeEventListener('pointerdown', onPointer);
     };
-  }, [isStartMenuOpen, closeStartMenu]);
+  }, [isStartMenuOpen, closeStartMenu, fetchLinuxApps]);
 
   const launch = (app: App) => {
     if (appUnavailable(app)) {
       setCapabilityNotice(`${app.name} exige o modo Full. Execute “Iniciar CloudOS.cmd Full” para usar o Host nativo.`);
       return;
     }
+
+    if (app.isLinux && app.linuxAppId) {
+      const pid = createProcess('linux-runtime-poc', app.name, app.icon);
+      openWindow({
+        title: `${app.name} (Linux)`,
+        icon: app.icon,
+        appId: 'linux-runtime-poc',
+        width: 960,
+        height: 640,
+        minWidth: 400,
+        minHeight: 300,
+        isResizable: true,
+        processId: pid,
+        params: { app: app.linuxAppId, title: app.name },
+      });
+      closeStartMenu();
+      return;
+    }
+
     const pid = createProcess(app.id, app.name, app.icon);
     openWindow({
       title: app.name,
@@ -147,6 +204,9 @@ function StartMenu() {
           <nav className="start-native-tabs" aria-label="Seções">
             <button className={view === 'home' ? 'active' : ''} onClick={() => setView('home')}>Início</button>
             <button className={view === 'all' ? 'active' : ''} onClick={() => setView('all')}>Todos</button>
+            <button className={view === 'linux' ? 'active' : ''} onClick={() => setView('linux')}>
+              🐧 Linux <b>{linuxApps.length}</b>
+            </button>
             <button className={view === 'running' ? 'active' : ''} onClick={() => setView('running')}>
               Abertos <b>{windows.length}</b>
             </button>
@@ -163,6 +223,18 @@ function StartMenu() {
                 <button onClick={() => setView('all')}>Todos os apps →</button>
               </div>
               <AppGrid apps={appList.slice(0, 12)} launch={launch} context={context} />
+            </>
+          ) : view === 'linux' ? (
+            <>
+              <div className="start-section-header">
+                <strong>Aplicativos Linux Instalados</strong>
+                <small style={{ color: '#94a3b8' }}>Execução gráfica nativa via Xpra</small>
+              </div>
+              {linuxApps.length ? (
+                <AppGrid apps={linuxApps} launch={launch} context={context} />
+              ) : (
+                <div className="start-empty">Nenhum aplicativo Linux instalado ainda. Abra o Linux App Center para instalar.</div>
+              )}
             </>
           ) : view === 'all' ? (
             <AppGrid apps={appList} launch={launch} context={context} />
