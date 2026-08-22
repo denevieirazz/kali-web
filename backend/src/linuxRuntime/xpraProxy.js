@@ -20,7 +20,9 @@ function buildResponseHeaders(headers, session, isTransformedHtml = false) {
     else result[name] = value;
   }
   if (!Object.keys(result).some(name => name.toLowerCase() === 'content-security-policy')) result['Content-Security-Policy'] = rewriteCsp(null);
-  result['Cache-Control'] = 'no-store';
+  result['Cache-Control'] = 'no-store, no-cache, must-revalidate, private';
+  result['Pragma'] = 'no-cache';
+  result['Expires'] = '0';
   result['Referrer-Policy'] = 'no-referrer';
   result['Cross-Origin-Resource-Policy'] = 'cross-origin';
   result['Access-Control-Allow-Origin'] = '*';
