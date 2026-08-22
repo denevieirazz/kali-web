@@ -15,7 +15,7 @@ test('CURATED_LINUX_APPS contains mandatory desktop applications', () => {
 });
 
 test('parsePackageStatuses parses raw output deterministically', () => {
-  const rawOutput = 'firefox-esr\x1f1\nchromium\x1f0\ncode\x1f1\n';
+  const rawOutput = 'firefox-esr --no-remote\x1f1\nchromium --no-sandbox --user-data-dir=/tmp/chromium-poc\x1f0\ncode\x1f1\n';
   const result = parsePackageStatuses(rawOutput);
   const ff = result.find(a => a.id === 'firefox');
   const chrome = result.find(a => a.id === 'chromium');
