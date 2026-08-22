@@ -168,6 +168,22 @@ export default function Desktop() {
       if (!appId) return;
       const app = useAppRegistry.getState().apps[appId];
       if (!app) return;
+      if (app.isLinux && app.linuxAppId) {
+        const pid = createProcess('linux-app-runner', app.name, app.icon);
+        openWindow({
+          title: app.name,
+          icon: app.icon,
+          appId: 'linux-app-runner',
+          width: 1020,
+          height: 680,
+          minWidth: 480,
+          minHeight: 320,
+          isResizable: true,
+          processId: pid,
+          params: { appId: app.linuxAppId, app: app.linuxAppId, title: app.name, icon: app.icon },
+        });
+        return;
+      }
       const pid = createProcess(app.id, app.name, app.icon);
       openWindow({
         title: app.name,

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { apiClient } from '../../services/apiClient';
 import './LinuxAppWindow.css';
 
+import { useWindowManager } from '../../stores/windowManager';
+
 interface LinuxAppWindowProps {
   windowId: string;
   appId?: string;
@@ -23,9 +25,11 @@ interface LaunchSession {
 }
 
 export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps) {
-  const targetAppId = params?.appId || params?.app || 'firefox';
-  const targetTitle = params?.title || 'Aplicativo Linux';
-  const targetIcon = params?.icon || '🐧';
+  const win = useWindowManager(s => s.windows.find(w => w.id === windowId));
+  const effectiveParams = params || win?.params as any;
+  const targetAppId = effectiveParams?.appId || effectiveParams?.app || 'firefox';
+  const targetTitle = effectiveParams?.title || win?.title || 'Aplicativo Linux';
+  const targetIcon = effectiveParams?.icon || win?.icon || '🐧';
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

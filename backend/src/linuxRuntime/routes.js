@@ -9,7 +9,11 @@ import { launchFastLinuxApp } from './warmPoolManager.js';
 export const linuxRuntimeRouter = express.Router();
 linuxRuntimeRouter.use(authenticateToken);
 function statusForCode(code) { if (['LINUX_POC_APP_NOT_ALLOWED', 'LINUX_POC_OWNER_INVALID', 'PREFLIGHT_OWNER_INVALID', 'PACKAGE_NOT_FOUND'].includes(code)) return 400; if (['LINUX_POC_SESSION_ACTIVE', 'LINUX_POC_SESSION_LIMIT', 'LINUX_POC_ORPHANED_SESSION', 'LINUX_POC_SESSION_OWNER_MISMATCH', 'PREFLIGHT_OWNER_MISMATCH'].includes(code)) return 409; if (['LINUX_POC_SESSION_NOT_FOUND', 'PREFLIGHT_RUN_NOT_FOUND'].includes(code)) return 404; return 503; }
-function sendError(res, error, fallback) { const code = error.code || fallback; res.status(statusForCode(code)).json({ error: error.message, errorCode: code, details: error.details || null }); }
+function sendError(res, error, fallback) {
+  console.error('[LinuxRuntimeRouter ERROR]', fallback, error?.code || error?.message, error);
+  const code = error.code || fallback;
+  res.status(statusForCode(code)).json({ error: error.message, errorCode: code, details: error.details || null });
+}
 function rawOwner(value) { const owner = String(value || '').trim(); if (!/^[a-zA-Z0-9._:-]{1,128}$/.test(owner)) { const error = new Error('Identificador da CloudOS Window inválido.'); error.code = 'LINUX_POC_OWNER_INVALID'; throw error; } return owner; }
 function principal(req) { return String(req.user?.id || req.user?.userId || req.user?.username || 'anonymous'); }
 function principalPrefix(req) { return `${crypto.createHash('sha256').update(principal(req)).digest('hex').slice(0, 24)}:`; }

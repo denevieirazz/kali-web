@@ -23,18 +23,18 @@ const LEDGER_FILE = path.join(os.tmpdir(), 'cloudos-linux-runtime-poc1-sessions.
 const ALLOWED_APPS = Object.freeze({
   xclock: { command: 'xclock', title: 'XClock' },
   xeyes: { command: 'xeyes', title: 'XEyes' },
-  xterm: { command: 'xterm', title: 'XTerm' },
+  xterm: { command: "xterm -fa 'Monospace' -fs 11 -bg black -fg white", title: 'XTerm' },
   gedit: { command: 'gedit', title: 'Gedit' },
-  firefox: { command: 'firefox-esr', title: 'Firefox ESR' },
-  chromium: { command: 'chromium', title: 'Chromium' },
-  code: { command: 'code', title: 'Visual Studio Code' },
+  firefox: { command: 'firefox-esr --no-remote', title: 'Firefox ESR' },
+  chromium: { command: 'chromium --no-sandbox --disable-gpu', title: 'Chromium' },
+  code: { command: 'code --no-sandbox', title: 'Visual Studio Code' },
   gimp: { command: 'gimp', title: 'GIMP' },
   vlc: { command: 'vlc', title: 'VLC Media Player' },
   libreoffice: { command: 'libreoffice', title: 'LibreOffice' },
   filezilla: { command: 'filezilla', title: 'FileZilla' },
   wireshark: { command: 'wireshark', title: 'Wireshark' },
   galculator: { command: 'galculator', title: 'Calculadora' },
-  htop: { command: 'xterm -e htop', title: 'Htop Monitor' },
+  htop: { command: "xterm -fa 'Monospace' -fs 11 -e htop", title: 'Htop Monitor' },
   mousepad: { command: 'mousepad', title: 'Mousepad' },
 });
 const OWNER_ID = /^[a-zA-Z0-9._:-]{1,128}$/;
@@ -98,7 +98,10 @@ function writeLedger() { const live = [...sessions.values()].filter(s => !['stop
 export function getAllowedLinuxPocApps() { return Object.entries(ALLOWED_APPS).map(([id, value]) => ({ id, ...value })); }
 export function normalizePocApp(value) { const id = String(value || '').trim().toLowerCase(); return ALLOWED_APPS[id] ? id : null; }
 export function displayForPort(port) { return displayForXpraPort(port); }
-export function buildXpraProbeCommand(appCommand) { return ['set -eu', 'command -v xpra >/dev/null 2>&1 || { echo XPRA_MISSING; exit 41; }', `command -v ${shellQuote(appCommand)} >/dev/null 2>&1 || { echo APP_MISSING:${appCommand}; exit 42; }`, 'xpra --version'].join('; '); }
+export function buildXpraProbeCommand(appCommand) {
+  const binary = String(appCommand || '').trim().split(/\s+/)[0];
+  return ['set -eu', 'command -v xpra >/dev/null 2>&1 || { echo XPRA_MISSING; exit 41; }', `command -v ${shellQuote(binary)} >/dev/null 2>&1 || { echo APP_MISSING:${binary}; exit 42; }`, 'xpra --version'].join('; ');
+}
 export function buildXpraStartCommand({ appCommand, port, sessionId = 'cloudos-poc1', password = 'test-only-secret' }) {
   if (!Number.isInteger(port) || port < PORT_START || port > PORT_END) throw new Error('Porta Xpra fora da faixa da POC.');
   if (!password || String(password).length < 16) throw new Error('Capability Xpra inválida.');
@@ -108,6 +111,7 @@ export function buildXpraStartCommand({ appCommand, port, sessionId = 'cloudos-p
     'mkdir -p -m 1777 /tmp/.X11-unix 2>/dev/null || true',
     'mount -o remount,rw /tmp/.X11-unix 2>/dev/null || true',
     'chmod 1777 /tmp/.X11-unix 2>/dev/null || true',
+    'rm -f /tmp/cloudos-*-poc/.parentlock /tmp/cloudos-*-poc/lock /tmp/cloudos-*-poc/SingletonLock 2>/dev/null || true',
     'unset DISPLAY WAYLAND_DISPLAY PULSE_SERVER',
     `export XPRA_PASSWORD=${shellQuote(password)}`,
     `exec xpra seamless :${display} --session-name=${shellQuote(`cloudos-poc1-${sessionId}`)} --start-child=${shellQuote(appCommand)} --exit-with-children=yes --daemon=no --clipboard=no --printing=no --file-transfer=no --webcam=no --audio=no --speaker=no --microphone=no --notifications=no --mdns=no --dbus-launch=no --dbus-control=no --start-new-commands=no --bind=noabstract --bind-tcp=${XPRA_BIND_TCP_HOST}:${port},auth=env --video=no --html=on`,
@@ -288,10 +292,12 @@ export async function startXpraPoc({ app, distribution, ownerId, generation = 1 
       const ws = await probeWebSocket(session.port, session.xpraPassword);
       session.metrics.websocketHandshakeMs = ws.durationMs;
       if (!ws.ok) throw createPocError('XPRA_WEBSOCKET_UNAVAILABLE', ws.error);
-      const pids = await inspectSessionPids(session.distribution, session.display, definition.command);
-      session.xpraPid = pids.xpra;
-      session.appPid = pids.app;
-      session.xorgPid = pids.xorg;
+      inspectSessionPids(session.distribution, session.display, definition.command).then(pids => {
+        session.xpraPid = pids.xpra;
+        session.appPid = pids.app;
+        session.xorgPid = pids.xorg;
+        writeLedger();
+      }).catch(() => undefined);
       session.metrics.bootMs = elapsedMs(startClock);
       session.state = 'ready';
       session.health = { healthy: true, checkedAt: new Date().toISOString() };

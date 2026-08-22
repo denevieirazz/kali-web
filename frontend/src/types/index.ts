@@ -286,4 +286,6 @@ export interface AppDefinition {
   hasFrame?: boolean;
   category: 'system' | 'productivity' | 'utilities' | 'entertainment';
   binaryPath?: string;
+  isLinux?: boolean;
+  linuxAppId?: string;
 }
