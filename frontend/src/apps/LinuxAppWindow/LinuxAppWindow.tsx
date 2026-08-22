@@ -82,10 +82,10 @@ export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps
   }, []);
 
   const handleFrameLoad = () => {
-    // If frame-painted doesn't fire, auto-reveal after iframe load + short buffer
+    // Safety fallback only if frame-painted event is delayed
     setTimeout(() => {
       setLoading(false);
-    }, 1500);
+    }, 500);
   };
 
   return (

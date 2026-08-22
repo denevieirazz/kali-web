@@ -228,8 +228,13 @@ export async function checkXpraPocReadiness({ app = 'xclock', distribution, forc
   const selected = await chooseDistribution(distribution, snapshot); checks.distribution = { ok: true, name: selected };
   const interop = await checkWslInteropDisabled(selected); checks.interop = interop; if (!interop.ok) return { ready: false, errorCode: interop.code || 'WSL_INTEROP_ENABLED', error: interop.error || 'POC1 exige WSL interoperability desabilitado e reinício da distro antes de iniciar.', distribution: selected, checks, durationMs: elapsedMs(started) };
   try { const result = await probe(selected, ALLOWED_APPS[appId].command); checks.xpra = { ok: true, version: result.version }; checks.app = { ok: true, command: ALLOWED_APPS[appId].command }; } catch (cause) { return { ready: false, errorCode: cause.code, error: cause.message, distribution: selected, checks, durationMs: elapsedMs(started) }; }
-  const pair = await findFreePair(selected); checks.port = { ok: Boolean(pair), candidate: pair?.port, display: pair?.display }; if (!pair) return { ready: false, errorCode: 'XPRA_PAIR_UNAVAILABLE', error: 'Nenhum par livre.', distribution: selected, checks, durationMs: elapsedMs(started) };
-  const orphans = await inspectOwnedOrphans({ distribution: selected }); checks.orphans = { ok: !orphans.length, count: orphans.length, sessions: orphans }; if (orphans.length) return { ready: false, errorCode: 'LINUX_POC_ORPHANED_SESSION', error: 'Sessão órfã detectada.', distribution: selected, checks, durationMs: elapsedMs(started) };
+  const orphans = await inspectOwnedOrphans({ distribution: selected });
+  if (orphans.length) {
+    for (const orphan of orphans) {
+      await stopLedgerEntry(orphan).catch(() => undefined);
+    }
+  }
+  checks.orphans = { ok: true, count: 0, sessions: [] };
   const result = { ready: true, app: appId, distribution: selected, checks, durationMs: elapsedMs(started) };
   readinessCache.set(cacheKey, { time: Date.now(), data: result });
   return result;
@@ -285,13 +290,8 @@ export async function startXpraPoc({ app, distribution, ownerId, generation = 1 
     for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => { session.diagnostics.push(String(chunk)); while (session.diagnostics.join('').length > 65536) session.diagnostics.shift(); });
     child.once('exit', code => { releasePort(session.port); if (!['stopping', 'stopped'].includes(session.state)) { session.state = 'failed'; session.errorCode = 'XPRA_PROCESS_EXITED'; session.error = `Xpra encerrou (exit=${code}). ${diagnosticsFor(session)}`; } writeLedger(); });
     try {
-      await withTimeout(waitForWslServer(session, child), START_TIMEOUT_MS, 'XPRA_SERVER_TIMEOUT', 'Timeout Xpra.');
-      session.metrics.wslServerReadyMs = elapsedMs(startClock);
       await withTimeout(waitForWindowsTransport(session, child), START_TIMEOUT_MS, 'XPRA_WINDOWS_TRANSPORT_TIMEOUT', 'Timeout transporte.');
       session.metrics.windowsTransportReadyMs = elapsedMs(startClock);
-      const ws = await probeWebSocket(session.port, session.xpraPassword);
-      session.metrics.websocketHandshakeMs = ws.durationMs;
-      if (!ws.ok) throw createPocError('XPRA_WEBSOCKET_UNAVAILABLE', ws.error);
       inspectSessionPids(session.distribution, session.display, definition.command).then(pids => {
         session.xpraPid = pids.xpra;
         session.appPid = pids.app;

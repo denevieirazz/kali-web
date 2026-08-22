@@ -10,7 +10,7 @@ function parseProxyRequest(requestUrl) { let url; try { url = new URL(requestUrl
 function rewriteCsp(value) { const directives = String(value || '').split(';').map(v => v.trim()).filter(Boolean).filter(v => !/^(frame-ancestors|sandbox)\b/i.test(v)); directives.push("frame-ancestors *"); return directives.join('; '); }
 function proxyBase(session) { return `${PREFIX}${session.id}/${session.proxyToken}/`; }
 function rewriteLocation(value, session) { if (!value) return value; const base = proxyBase(session); try { const parsed = new URL(value, `http://127.0.0.1:${session.port}`); if (['127.0.0.1', 'localhost'].includes(parsed.hostname)) return `${base}${parsed.pathname.replace(/^\//, '')}${parsed.search}${parsed.hash}`; } catch {} if (String(value).startsWith('/')) return `${base}${value.replace(/^\//, '')}`; return value; }
-function buildResponseHeaders(headers, session, isTransformedHtml = false) {
+function buildResponseHeaders(headers, session, isTransformedHtml = false, targetPath = '') {
   const result = {};
   for (const [name, value] of Object.entries(headers)) {
     const lower = name.toLowerCase();
@@ -21,9 +21,13 @@ function buildResponseHeaders(headers, session, isTransformedHtml = false) {
     else result[name] = value;
   }
   if (!Object.keys(result).some(name => name.toLowerCase() === 'content-security-policy')) result['Content-Security-Policy'] = rewriteCsp(null);
-  result['Cache-Control'] = 'no-store, no-cache, must-revalidate, private';
-  result['Pragma'] = 'no-cache';
-  result['Expires'] = '0';
+  if (!isTransformedHtml && (/\.(js|css|png|jpg|wasm|svg|woff2|ico)$/i.test(targetPath) || /javascript|css|image|font/i.test(String(headers['content-type'] || '')))) {
+    result['Cache-Control'] = 'public, max-age=86400';
+  } else {
+    result['Cache-Control'] = 'no-store, no-cache, must-revalidate, private';
+    result['Pragma'] = 'no-cache';
+    result['Expires'] = '0';
+  }
   result['Referrer-Policy'] = 'no-referrer';
   result['Cross-Origin-Resource-Policy'] = 'cross-origin';
   result['Access-Control-Allow-Origin'] = '*';
@@ -110,32 +114,53 @@ try {
     setTimeout(autoConnect, 400);
     setTimeout(autoConnect, 1000);
   });
-  window.addEventListener('load', function() {
-    var checkClient = setInterval(function() {
-      if (window.client) {
-        clearInterval(checkClient);
-        var origOnConnect = window.client.on_connect;
-        window.client.on_connect = function() {
-          try { window.parent.postMessage({ type: 'xpra-render-event', sessionId: ${safeSessionId}, name: 'connected' }, '*'); } catch(e){}
-          if (origOnConnect) origOnConnect.apply(this, arguments);
+  (function() {
+    var _client = undefined;
+    var hookClient = function(c) {
+      if (!c || c._hooked) return;
+      c._hooked = true;
+      var notifyRender = function(name, extra) {
+        try { window.parent.postMessage(Object.assign({ type: 'xpra-render-event', sessionId: ${safeSessionId}, name: name }, extra || {}), '*'); } catch(e){}
+      };
+      var origOnConnect = c.on_connect;
+      c.on_connect = function() {
+        notifyRender('connected');
+        if (origOnConnect) origOnConnect.apply(this, arguments);
+      };
+      var origProcessNewWindow = c._process_new_window;
+      if (origProcessNewWindow) {
+        c._process_new_window = function(packet) {
+          notifyRender('frame-painted', { wid: packet && packet[1] });
+          return origProcessNewWindow.apply(this, arguments);
         };
-        var origProcessNewWindow = window.client._process_new_window;
-        if (origProcessNewWindow) {
-          window.client._process_new_window = function(packet) {
-            try { window.parent.postMessage({ type: 'xpra-render-event', sessionId: ${safeSessionId}, name: 'window-created', wid: packet[1], width: packet[4], height: packet[5] }, '*'); } catch(e){}
-            return origProcessNewWindow.apply(this, arguments);
-          };
-        }
-        var origDoPaint = window.XpraWindow && window.XpraWindow.prototype.do_paint;
-        if (origDoPaint) {
-          window.XpraWindow.prototype.do_paint = function(packet) {
-            try { window.parent.postMessage({ type: 'xpra-render-event', sessionId: ${safeSessionId}, name: 'frame-painted', wid: packet[1], width: packet[4], height: packet[5] }, '*'); } catch(e){}
-            return origDoPaint.apply(this, arguments);
-          };
-        }
       }
-    }, 50);
-  });
+      var origProcessDraw = c._process_draw;
+      if (origProcessDraw) {
+        c._process_draw = function(packet) {
+          notifyRender('frame-painted', { wid: packet && packet[1] });
+          return origProcessDraw.apply(this, arguments);
+        };
+      }
+      var origProcessOR = c._process_new_override_redirect;
+      if (origProcessOR) {
+        c._process_new_override_redirect = function(packet) {
+          notifyRender('frame-painted', { wid: packet && packet[1] });
+          return origProcessOR.apply(this, arguments);
+        };
+      }
+    };
+    try {
+      Object.defineProperty(window, 'client', {
+        configurable: true,
+        enumerable: true,
+        get: function() { return _client; },
+        set: function(v) {
+          _client = v;
+          hookClient(v);
+        }
+      });
+    } catch(e) {}
+  })();
 } catch(e) {}
 </script>`;
 }
@@ -186,7 +211,7 @@ export function xpraHttpProxyMiddleware(req, res, next) {
         } else {
           body = `${shim}${body}`;
         }
-        const responseHeaders = buildResponseHeaders(upstreamResponse.headers, session, true);
+        const responseHeaders = buildResponseHeaders(upstreamResponse.headers, session, true, parsed.targetPath);
         responseHeaders['Content-Length'] = Buffer.byteLength(body, 'utf8');
         if (typeof res.status === 'function') res.status(statusCode);
         else res.statusCode = statusCode;
@@ -197,7 +222,7 @@ export function xpraHttpProxyMiddleware(req, res, next) {
       });
       return;
     }
-    const responseHeaders = buildResponseHeaders(upstreamResponse.headers, session, false);
+    const responseHeaders = buildResponseHeaders(upstreamResponse.headers, session, false, parsed.targetPath);
     if (typeof res.status === 'function') res.status(statusCode);
     else res.statusCode = statusCode;
     for (const [name, value] of Object.entries(responseHeaders)) {
