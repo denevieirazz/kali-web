@@ -931,8 +931,8 @@ async function validateStatic(run, requestedDistribution) {
 async function validateDryRunBoundaries(run, backendOrigin) {
   const session = run.session;
   let tcp = await probeTcp(session.port, 2000);
-  if (!tcp.ok) {
-    await sleep(300);
+  for (let attempt = 0; attempt < 4 && !tcp.ok; attempt++) {
+    await sleep(350);
     tcp = await probeTcp(session.port, 2000);
   }
   run.metrics.loopbackTcpMs = tcp.durationMs;

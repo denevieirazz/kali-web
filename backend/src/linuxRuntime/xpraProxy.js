@@ -50,11 +50,37 @@ function decompressBuffer(buffer, encoding) {
   } catch {}
   return buffer;
 }
-function createOpaqueShim(sessionId) {
+function createOpaqueShim(sessionId, xpraPassword = null) {
   const safeSessionId = JSON.stringify(String(sessionId || ''));
+  const safePassword = xpraPassword ? JSON.stringify(String(xpraPassword)) : 'null';
   return `<script>
 try {
   window.Worker = undefined;
+  if (${safePassword}) {
+    var epSecret = ${safePassword};
+    var attachSecret = function() {
+      if (window.client) {
+        window.client.passwords = [epSecret];
+        var origPrompt = window.client.password_prompt_fn;
+        window.client.password_prompt_fn = function(heading, cb) {
+          if (epSecret) {
+            var pwd = epSecret;
+            epSecret = null;
+            return cb(pwd);
+          }
+          if (origPrompt) return origPrompt.apply(this, arguments);
+        };
+      }
+    };
+    attachSecret();
+    var secretInterval = setInterval(function() {
+      if (window.client) {
+        attachSecret();
+        clearInterval(secretInterval);
+      }
+    }, 20);
+    setTimeout(function() { clearInterval(secretInterval); }, 5000);
+  }
   window.addEventListener('load', function() {
     var checkClient = setInterval(function() {
       if (window.client) {
@@ -123,7 +149,7 @@ export function xpraHttpProxyMiddleware(req, res, next) {
         const rawBuffer = Buffer.concat(chunks);
         const decompressed = decompressBuffer(rawBuffer, upstreamResponse.headers['content-encoding']);
         let body = decompressed.toString('utf8');
-        const shim = createOpaqueShim(session.id);
+        const shim = createOpaqueShim(session.id, session.xpraPassword);
         if (body.includes('<head>')) {
           body = body.replace('<head>', `<head>${shim}`);
         } else if (body.includes('</head>')) {
