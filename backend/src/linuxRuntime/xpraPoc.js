@@ -194,7 +194,25 @@ export async function startXpraPoc({ app, distribution, ownerId } = {}) {
   });
 }
 export async function healthXpraPocSession(id) { const session = sessions.get(id); if (!session) throw createPocError('LINUX_POC_SESSION_NOT_FOUND', 'Sessão não encontrada.'); const started = Date.now(); const linux = await probeWslServer(session); const tcp = await probeWindowsTcp(session.port); const http = tcp.ok ? await probeHttp(session.port, session.xpraPassword) : { ok: false }; const websocket = http.ok ? await probeWebSocket(session.port, session.xpraPassword) : { ok: false }; const healthy = linux.ok && tcp.ok && http.ok && websocket.ok && session.child?.exitCode === null; session.metrics.lastHealthMs = elapsedMs(started); if (!healthy) session.metrics.healthFailures += 1; session.state = healthy ? 'ready' : 'degraded'; session.health = { healthy, checkedAt: new Date().toISOString(), linux, windowsTcp: tcp, http, websocket }; return { session: publicSession(session), health: session.health }; }
-async function stopSessionInternal(session) { if (!session || session.state === 'stopped') return publicSession(session); session.state = 'stopping'; await execWsl(session.distribution, `xpra stop :${session.display} >/dev/null 2>&1 || true`, STOP_TIMEOUT_MS).catch(() => undefined); if (session.child?.exitCode === null) try { session.child.kill(); } catch {} session.state = 'stopped'; releasePort(session.port); sessions.delete(session.id); writeLedger(); return publicSession(session); }
+async function stopSessionInternal(session) {
+  if (!session || session.state === 'stopped') return publicSession(session);
+  session.state = 'stopping';
+  await execWsl(session.distribution, `xpra stop :${session.display} >/dev/null 2>&1 || true`, STOP_TIMEOUT_MS).catch(() => undefined);
+  if (session.child && session.child.exitCode === null) {
+    try { session.child.kill('SIGTERM'); } catch {}
+    await new Promise(r => setTimeout(r, 400));
+    if (session.child.exitCode === null) {
+      try { session.child.kill('SIGKILL'); } catch {}
+    }
+  }
+  await execWsl(session.distribution, `rm -f /tmp/.X11-unix/X${session.display} /tmp/.X${session.display}-lock >/dev/null 2>&1 || true`, 2000).catch(() => undefined);
+  session.state = 'stopped';
+  if (session.xpraPassword) session.xpraPassword = null;
+  releasePort(session.port);
+  sessions.delete(session.id);
+  writeLedger();
+  return publicSession(session);
+}
 export async function stopXpraPoc(id = null, ownerId = null) { return queueLifecycle(async () => { if (id) { const session = sessions.get(id); if (!session) return null; if (ownerId && session.ownerId !== normalizeOwnerId(ownerId)) throw createPocError('LINUX_POC_SESSION_OWNER_MISMATCH', 'Sessão pertence a outro owner.'); return stopSessionInternal(session); } const owner = ownerId ? normalizeOwnerId(ownerId) : null; const result = []; for (const session of [...sessions.values()].filter(s => !owner || s.ownerId === owner)) result.push(await stopSessionInternal(session)); return result; }); }
 export async function restartXpraPoc(id, ownerId = null) { const current = sessions.get(id); if (!current) throw createPocError('LINUX_POC_SESSION_NOT_FOUND', 'Sessão não encontrada.'); if (ownerId && current.ownerId !== normalizeOwnerId(ownerId)) throw createPocError('LINUX_POC_SESSION_OWNER_MISMATCH', 'Sessão pertence a outro owner.'); const config = { app: current.app, distribution: current.distribution, ownerId: current.ownerId }; await stopXpraPoc(id, current.ownerId); return startXpraPoc(config); }
 export function recordXpraPocClientMetrics(id, ownerId, values = {}) { const session = sessions.get(id); if (!session) throw createPocError('LINUX_POC_SESSION_NOT_FOUND', 'Sessão não encontrada.'); if (session.ownerId !== normalizeOwnerId(ownerId)) throw createPocError('LINUX_POC_SESSION_OWNER_MISMATCH', 'Sessão pertence a outro owner.'); for (const key of ['iframeLoadMs', 'firstRemoteWindowMs', 'firstFramePaintedMs', 'canvasWidth', 'canvasHeight']) { const value = Number(values[key]); if (Number.isFinite(value) && value >= 0 && value <= 300000) session.metrics[key] = Math.round(value); } return publicSession(session); }
