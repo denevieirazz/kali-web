@@ -156,30 +156,25 @@ test('EF2-P0-006: HTTP proxy integration with authenticated upstream fixture', a
   const proxyPort = proxyServer.address().port;
 
   try {
-    // 1. Requisição direta ao upstream sem credencial -> 401
     const directNoAuth = await fetch(`http://127.0.0.1:${upstreamPort}/`);
     assert.equal(directNoAuth.status, 401);
 
-    // 2. Requisição direta ao upstream com credencial errada -> 401
     const directWrongAuth = await fetch(`http://127.0.0.1:${upstreamPort}/`, {
       headers: { Authorization: 'Basic d3Jvbmc6cGFzc3dvcmQ=' },
     });
     assert.equal(directWrongAuth.status, 401);
 
-    // 3. Requisição direta ao upstream com credencial correta -> 200
     const directGoodAuth = await fetch(`http://127.0.0.1:${upstreamPort}/`, {
       headers: { Authorization: expectedBasic },
     });
     assert.equal(directGoodAuth.status, 200);
 
-    // 4. Requisição via Proxy com capability válida (sem credencial enviada pelo cliente) -> 200 OK
     const proxyGood = await fetch(`http://127.0.0.1:${proxyPort}/__cloudos/linux-runtime/poc1/${mockSession.id}/${mockSession.proxyToken}/index.html`);
     assert.equal(proxyGood.status, 200);
     const body = await proxyGood.text();
     assert.match(body, /Xpra Upstream OK/);
     assert.equal(upstreamReceivedHeaders.authorization, expectedBasic);
 
-    // 5. Proxy descarta headers sensíveis do cliente (cookie/authorization arbitrária) e usa a credencial da sessão
     const proxyWithClientHeaders = await fetch(`http://127.0.0.1:${proxyPort}/__cloudos/linux-runtime/poc1/${mockSession.id}/${mockSession.proxyToken}/index.html`, {
       headers: {
         Cookie: 'user-session=secret-cookie',
@@ -190,11 +185,9 @@ test('EF2-P0-006: HTTP proxy integration with authenticated upstream fixture', a
     assert.equal(upstreamReceivedHeaders.cookie, undefined);
     assert.equal(upstreamReceivedHeaders.authorization, expectedBasic);
 
-    // 6. Capability inválida ou incorreta é rejeitada com 404 antes de chegar no upstream
     const proxyInvalidToken = await fetch(`http://127.0.0.1:${proxyPort}/__cloudos/linux-runtime/poc1/${mockSession.id}/invalid-token/index.html`);
     assert.equal(proxyInvalidToken.status, 404);
 
-    // 7. Sessão encerrada (removida do mapa) é rejeitada com 404
     preflightTest.proxySessions.delete(mockSession.id);
     const proxyStoppedSession = await fetch(`http://127.0.0.1:${proxyPort}/__cloudos/linux-runtime/poc1/${mockSession.id}/${mockSession.proxyToken}/index.html`);
     assert.equal(proxyStoppedSession.status, 404);
@@ -261,7 +254,6 @@ test('EF2-P0-006: WebSocket proxy integration with authenticated upstream fixtur
   const proxyPort = proxyServer.address().port;
 
   try {
-    // 1. Conexão direta ao upstream sem autorização é rejeitada
     const directFail = await new Promise(resolve => {
       const ws = new WebSocket(`ws://127.0.0.1:${upstreamPort}/`);
       ws.on('open', () => { ws.close(); resolve('opened'); });
@@ -269,7 +261,6 @@ test('EF2-P0-006: WebSocket proxy integration with authenticated upstream fixtur
     });
     assert.equal(directFail, 'error');
 
-    // 2. Conexão direta ao upstream com autorização correta completa upgrade
     const directSuccess = await new Promise(resolve => {
       const ws = new WebSocket(`ws://127.0.0.1:${upstreamPort}/`, {
         headers: { Authorization: expectedBasic },
@@ -282,7 +273,6 @@ test('EF2-P0-006: WebSocket proxy integration with authenticated upstream fixtur
     });
     assert.equal(directSuccess, 'xpra-authenticated-frame');
 
-    // 3. Conexão via Proxy com capability válida estabelece túnel e recebe mensagem autenticada
     const proxySuccess = await new Promise(resolve => {
       const ws = new WebSocket(`ws://127.0.0.1:${proxyPort}/__cloudos/linux-runtime/poc1/${mockSession.id}/${mockSession.proxyToken}/`);
       ws.on('message', data => {
@@ -293,7 +283,6 @@ test('EF2-P0-006: WebSocket proxy integration with authenticated upstream fixtur
     });
     assert.equal(proxySuccess, 'xpra-authenticated-frame');
 
-    // 4. Conexão via Proxy com capability inválida é rejeitada
     const proxyFail = await new Promise(resolve => {
       const ws = new WebSocket(`ws://127.0.0.1:${proxyPort}/__cloudos/linux-runtime/poc1/${mockSession.id}/invalid-token/`);
       ws.on('open', () => { ws.close(); resolve('opened'); });
@@ -322,7 +311,6 @@ test('EF2-P0-006: Secret diversity and complete cleanup nullification', () => {
   preflightTest.proxySessions.set(session.id, session);
   assert.equal(preflightTest.proxySessions.has(session.id), true);
 
-  // Simula cleanup
   session.xpraPassword = null;
   preflightTest.proxySessions.delete(session.id);
 
@@ -353,7 +341,6 @@ test('EF2-P0-008: Global codebase verification: zero occurrences of -- sh -lc in
 test('EF2-P0-009: Interop error classification differentiates timeout, enabled and failure', async () => {
   const { checkWslInteropDisabled } = await import('../src/linuxRuntime/xpraPoc.js');
 
-  // Teste de parsing e classificação
   const disabledRes = { ok: true, code: 'WSL_INTEROP_DISABLED', evidence: 'DISABLED' };
   assert.equal(disabledRes.ok, true);
   assert.equal(disabledRes.code, 'WSL_INTEROP_DISABLED');
@@ -373,46 +360,40 @@ test('EF2-P0-011: Unified command and transport contract between preflight and r
   const dryRun = buildPreflightDryRunCommand({ display: 100, port: 14500, runId: 'test-1', password: secret });
   const runtime = buildXpraStartCommand({ appCommand: 'xclock', port: 14500, sessionId: 'test-1', password: secret });
 
-  // Ambas preparam /tmp/.X11-unix com 1777 e remount rw
   assert.match(dryRun, /chmod 1777 \/tmp\/\.X11-unix/);
   assert.match(runtime, /chmod 1777 \/tmp\/\.X11-unix/);
   assert.match(dryRun, /mount -o remount,rw \/tmp\/\.X11-unix/);
   assert.match(runtime, /mount -o remount,rw \/tmp\/\.X11-unix/);
 
-  // Ambas utilizam auth=env e o bind 0.0.0.0
   assert.match(dryRun, /--bind-tcp=0\.0\.0\.0:14500,auth=env/);
   assert.match(runtime, /--bind-tcp=0\.0\.0\.0:14500,auth=env/);
 
-  // Runtime inclui --start-child='xclock' e preflight nao
   assert.match(runtime, /--start-child='?xclock'?/);
   assert.doesNotMatch(dryRun, /--start-child/);
 });
 
 test('EF2-P0-012: Trailing slash anchoring and render telemetry metrics contract', async () => {
-  const { __test, xpraHttpProxyMiddleware } = await import('../src/linuxRuntime/xpraProxy.js');
-  const { recordXpraPocClientMetrics } = await import('../src/linuxRuntime/xpraPoc.js');
+  const { __test } = await import('../src/linuxRuntime/xpraProxy.js');
 
-  // parseProxyRequest lida com trailing slash
   const withSlash = __test.parseProxyRequest('/__cloudos/linux-runtime/poc1/session1/token1/?query=1');
   assert.equal(withSlash.id, 'session1');
   assert.equal(withSlash.token, 'token1');
   assert.equal(withSlash.targetPath, '/?query=1');
 
-  // subpath relativo tem ancoragem no token
   const scriptPath = __test.parseProxyRequest('/__cloudos/linux-runtime/poc1/session1/token1/js/lib/jquery.js');
   assert.equal(scriptPath.id, 'session1');
   assert.equal(scriptPath.token, 'token1');
   assert.equal(scriptPath.targetPath, '/js/lib/jquery.js');
 });
 
-test('EF2-P0-013: Opaque iframe CORS headers and main-thread worker compatibility shim', async () => {
+test('EF2-P0-013: Xpra proxy headers permit CloudOS embedding without reintroducing an upstream CSP sandbox', async () => {
   const { __test } = await import('../src/linuxRuntime/xpraProxy.js');
 
   const headers = __test.buildResponseHeaders({}, { id: 's1', proxyToken: 't1', port: 14500 });
   assert.equal(headers['Access-Control-Allow-Origin'], '*');
   assert.equal(headers['Access-Control-Allow-Methods'], 'GET, HEAD, OPTIONS');
-  assert.match(headers['Content-Security-Policy'], /sandbox allow-scripts allow-forms allow-pointer-lock/);
-  assert.doesNotMatch(headers['Content-Security-Policy'], /allow-same-origin/);
+  assert.match(headers['Content-Security-Policy'], /frame-ancestors \*/);
+  assert.doesNotMatch(headers['Content-Security-Policy'], /(?:^|;)\s*sandbox\b/);
 });
 
 test('EF2-P0-014: Gzipped and uncompressed HTML proxying without terminated errors', async () => {
@@ -421,7 +402,6 @@ test('EF2-P0-014: Gzipped and uncompressed HTML proxying without terminated erro
   const zlib = await import('node:zlib');
 
   const expectedSecret = 'xpra-auth-secret-1234567890abcdef';
-  const expectedBasic = `Basic ${Buffer.from(`xpra:${expectedSecret}`).toString('base64')}`;
 
   const upstreamServer = http.createServer((req, res) => {
     if (req.url.endsWith('index.html')) {
@@ -461,23 +441,23 @@ test('EF2-P0-014: Gzipped and uncompressed HTML proxying without terminated erro
   const proxyPort = proxyServer.address().port;
 
   try {
-    // 1. Fetch de index.html com upstream gzippado: deve retornar 200, shim injetado e descompressão correta sem 'terminated'
     const htmlUrl = `http://127.0.0.1:${proxyPort}/__cloudos/linux-runtime/poc1/${mockSession.id}/${mockSession.proxyToken}/index.html`;
     const htmlResp = await fetch(htmlUrl);
     assert.equal(htmlResp.status, 200);
     const htmlBody = await htmlResp.text();
     assert.match(htmlBody, /Xpra Direct OK/);
     assert.match(htmlBody, /xpra-render-event/);
-    assert.match(htmlBody, /window\.Worker = undefined/);
+    assert.match(htmlBody, /Object\.defineProperty\(window, 'sessionStorage'/);
+    assert.match(htmlBody, /Object\.defineProperty\(window, 'localStorage'/);
+    assert.doesNotMatch(htmlBody, /window\.Worker = undefined/);
 
-    // 2. Fetch de asset JavaScript: não deve sofrer injeção de HTML
     const jsUrl = `http://127.0.0.1:${proxyPort}/__cloudos/linux-runtime/poc1/${mockSession.id}/${mockSession.proxyToken}/script.js`;
     const jsResp = await fetch(jsUrl);
     assert.equal(jsResp.status, 200);
     const jsBody = await jsResp.text();
     assert.equal(jsBody, 'console.log("script ok");');
   } finally {
-    upstreamServer.close();
-    proxyServer.close();
+    await new Promise(resolve => upstreamServer.close(resolve));
+    await new Promise(resolve => proxyServer.close(resolve));
   }
 });
