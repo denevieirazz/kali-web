@@ -10,16 +10,16 @@
 - **Status:** **CONCLUÍDA**
 
 ## EF2-P2-004 — Terminal com múltiplas abas, renomeação e suporte a WSL
-- **Status:** PENDENTE
+- **Status:** **CONCLUÍDA**
 
 ## EF2-P2-005 — Files em modo Lista detalhado com fontes OPFS / Linux / Windows
-- **Status:** PENDENTE
+- **Status:** **CONCLUÍDA**
 
 ## EF2-P2-006 — Editor de Notas Markdown com autosave e busca no corpo
-- **Status:** PENDENTE
+- **Status:** **CONCLUÍDA**
 
 ## EF2-P2-007 — Fallback seguro do Navegador Web em sessões WebOnly
-- **Status:** PENDENTE
+- **Status:** **CONCLUÍDA**
 
 ## EF2-P2-008 — Conformidade do Launcher nativo Full e dependências de build
-- **Status:** PENDENTE
+- **Status:** **CONCLUÍDA**
