@@ -31,7 +31,7 @@ function errorMessage(error: unknown) {
   return 'O aplicativo do Windows não pôde ser contido pelo CloudOS.';
 }
 
-export default function NativeAppWindow({ windowId }: { windowId: string }) {
+export default function NativeAppWindow({ windowId }: { windowId: string; params?: any }) {
   const win = useWindowManager((state) => state.windows.find((item) => item.id === windowId));
   const closeWindow = useWindowManager((state) => state.closeWindow);
   const updateWindowTitle = useWindowManager((state) => state.updateWindowTitle);
