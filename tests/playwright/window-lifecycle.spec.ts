@@ -28,12 +28,17 @@ test.describe('PW-03 — Ciclo de Vida de Janela', () => {
 
     await runningItem.locator('button[title="Minimizar"]').click();
     await expect(taskbarButton).toHaveClass(/minimized/);
-    await expect(calculatorWindow).toHaveCount(0);
+    // Minimize intentionally preserves the mounted app lifecycle. The window remains
+    // in the DOM but is hidden so terminal/runtime-backed apps are not torn down.
+    await expect(calculatorWindow).toHaveCount(1);
+    await expect(calculatorWindow).toBeHidden();
+    await expect(calculatorWindow).toHaveAttribute('aria-hidden', 'true');
 
     await runningItem.locator('.running-main').click();
     await expect(page.locator('.start-menu')).toHaveCount(0);
     await expect(taskbarButton).not.toHaveClass(/minimized/);
     await expect(calculatorWindow).toBeVisible();
+    await expect(calculatorWindow).not.toHaveAttribute('aria-hidden', 'true');
 
     await calculatorWindow.locator('button.window-btn.close').click();
     await expect(calculatorWindow).toHaveCount(0);
