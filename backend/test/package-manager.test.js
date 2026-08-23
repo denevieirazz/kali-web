@@ -57,4 +57,3 @@ test('getCuratedAppsForDistro customizes app details for Ubuntu vs Debian', () =
   assert.equal(kaliFf?.name, 'Firefox ESR');
   assert.ok(kaliFf?.command.startsWith('firefox-esr '));
 });
-
