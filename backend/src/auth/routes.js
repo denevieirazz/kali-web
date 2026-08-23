@@ -102,9 +102,9 @@ function recoveryFailureResponse(db, res) {
 // Login
 authRouter.post('/login', async (req, res, next) => {
   try {
-    const { username, password } = req.body || {};
-    if (typeof username !== 'string' || !username.trim() || typeof password !== 'string' || !password) {
-      return res.status(400).json({ error: 'Usuário e senha são obrigatórios.' });
+    const { username, password = '' } = req.body || {};
+    if (typeof username !== 'string' || !username.trim() || typeof password !== 'string') {
+      return res.status(400).json({ error: 'Usuário é obrigatório.' });
     }
 
     const db = getDb();

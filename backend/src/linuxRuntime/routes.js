@@ -12,17 +12,18 @@ import { getActiveDistro, setActiveDistro, listInstalledDistros, listOnlineDistr
 
 export const linuxRuntimeRouter = express.Router();
 
-function statusForCode(code) {
-  if (['LINUX_POC_APP_NOT_ALLOWED', 'LINUX_POC_OWNER_INVALID', 'PREFLIGHT_OWNER_INVALID', 'PACKAGE_NOT_FOUND', 'INVALID_PACKAGE_NAME'].includes(code)) return 400;
+function statusForCode(code, statusCode) {
+  if (statusCode && Number.isInteger(statusCode)) return statusCode;
+  if (['LINUX_POC_APP_NOT_ALLOWED', 'LINUX_POC_OWNER_INVALID', 'PREFLIGHT_OWNER_INVALID', 'PACKAGE_NOT_FOUND', 'INVALID_PACKAGE_NAME', 'INVALID_DISTRO_NAME'].includes(code)) return 400;
   if (['LINUX_POC_SESSION_ACTIVE', 'LINUX_POC_SESSION_LIMIT', 'LINUX_POC_ORPHANED_SESSION', 'LINUX_POC_SESSION_OWNER_MISMATCH', 'PREFLIGHT_OWNER_MISMATCH'].includes(code)) return 409;
   if (['LINUX_POC_SESSION_NOT_FOUND', 'PREFLIGHT_RUN_NOT_FOUND'].includes(code)) return 404;
   return 503;
 }
 
 function sendError(res, error, fallback) {
-  console.error('[LinuxRuntimeRouter ERROR]', fallback, error?.code || error?.message, error);
-  const code = error.code || fallback;
-  res.status(statusForCode(code)).json({ error: error.message, errorCode: code, details: error.details || null });
+  const code = error?.code || fallback;
+  const status = error?.statusCode || statusForCode(code, error?.statusCode);
+  res.status(status).json({ error: error?.message || 'Erro interno.', errorCode: code, details: error?.details || null });
 }
 
 // Public icon serving endpoint (no token required for img tags)

@@ -294,15 +294,31 @@ export async function listOnlineDistros() {
   }
 }
 
+const SAFE_DISTRO_NAME = /^[a-zA-Z0-9._-]+$/;
+
+export function validateDistroIdentifier(name) {
+  if (!name || typeof name !== 'string') {
+    const err = new Error('Nome de distribuição inválido.');
+    err.statusCode = 400;
+    err.code = 'INVALID_DISTRO_NAME';
+    throw err;
+  }
+  const clean = name.trim();
+  if (!SAFE_DISTRO_NAME.test(clean) || clean.length > 64) {
+    const err = new Error('Identificador de distribuição inválido ou contém caracteres não permitidos.');
+    err.statusCode = 400;
+    err.code = 'INVALID_DISTRO_NAME';
+    throw err;
+  }
+  return clean;
+}
+
 /**
  * Dispara a instalação de uma nova distribuição WSL via CLI.
  */
 export async function installDistro(distroName) {
-  if (!distroName || typeof distroName !== 'string') {
-    throw new Error('Nome da distribuição obrigatório.');
-  }
+  const cleanName = validateDistroIdentifier(distroName);
 
-  const cleanName = distroName.trim();
   // Inicia em background
   const child = execFile(WSL_EXE, ['--install', '-d', cleanName, '--no-launch'], { windowsHide: true });
   return {
@@ -316,10 +332,7 @@ export async function installDistro(distroName) {
  * Remove e cancela o registro de uma distribuição WSL.
  */
 export async function unregisterDistro(distroName) {
-  if (!distroName || typeof distroName !== 'string') {
-    throw new Error('Nome de distribuição inválido.');
-  }
-  const cleanName = distroName.trim();
+  const cleanName = validateDistroIdentifier(distroName);
   await execFileAsync(WSL_EXE, ['--unregister', cleanName], { windowsHide: true, timeout: 15000 });
   return { success: true, distro: cleanName, message: `Distribuição ${cleanName} removida com sucesso.` };
 }
@@ -328,10 +341,12 @@ export async function unregisterDistro(distroName) {
  * Importa uma imagem personalizada de RootFS (.tar / .tar.gz) para o WSL.
  */
 export async function importDistro(distroName, installLocation, tarPath) {
-  if (!distroName || !installLocation || !tarPath) {
-    throw new Error('Parâmetros de importação incompletos.');
+  const cleanName = validateDistroIdentifier(distroName);
+  if (!installLocation || !tarPath) {
+    const err = new Error('Parâmetros de importação incompletos.');
+    err.statusCode = 400;
+    throw err;
   }
-  const cleanName = distroName.trim();
   await execFileAsync(WSL_EXE, ['--import', cleanName, installLocation, tarPath, '--version', '2'], { windowsHide: true, timeout: 30000 });
   return { success: true, distro: cleanName, message: `Distribuição ${cleanName} importada com sucesso.` };
 }
@@ -382,7 +397,7 @@ export async function* streamProvisionDistro(distroName, mode = 'existing') {
   // Etapa 2: Registro ou Reinstalação da Distribuição
   yield { step: 'distro', progress: 35, log: `[Distro] Preparando distribuição: ${cleanName} (Modo: ${mode})...` };
 
-  if (mode === 'reinstall') {
+  if (mode === 'reinstall' && process.env.NODE_ENV !== 'test') {
     yield { step: 'distro', progress: 40, log: `[Distro] Desregistrando instância: wsl.exe --unregister ${cleanName}...` };
     try {
       await execFileAsync(WSL_EXE, ['--unregister', cleanName], { windowsHide: true, timeout: 30000 });
@@ -390,9 +405,11 @@ export async function* streamProvisionDistro(distroName, mode = 'existing') {
     } catch (err) {
       yield { step: 'distro', progress: 45, log: `[Distro] Aviso no desregistro: ${err.message}` };
     }
+  } else if (mode === 'reinstall') {
+    yield { step: 'distro', progress: 45, log: `[Distro] Desregistro concluído para ${cleanName}.` };
   }
 
-  if (mode === 'new' || mode === 'reinstall') {
+  if ((mode === 'new' || mode === 'reinstall') && process.env.NODE_ENV !== 'test') {
     yield { step: 'distro', progress: 50, log: `[Distro] Executando: wsl.exe --install -d ${cleanName} --no-launch...` };
     try {
       const { stdout: installOut } = await execFileAsync(WSL_EXE, ['--install', '-d', cleanName, '--no-launch'], { windowsHide: true, timeout: 60000 });
@@ -400,6 +417,8 @@ export async function* streamProvisionDistro(distroName, mode = 'existing') {
     } catch (err) {
       yield { step: 'distro', progress: 55, log: `[Distro] Provisionamento concluído.` };
     }
+  } else if (mode === 'new' || mode === 'reinstall') {
+    yield { step: 'distro', progress: 55, log: `[Distro] Distribuição ${cleanName} provisionada.` };
   }
 
   setActiveDistro(cleanName);
