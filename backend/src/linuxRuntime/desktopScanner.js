@@ -3,6 +3,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { WSL_EXE, getWslSnapshot, safeChildEnvironment, validateInstalledAsync } from '../wsl/distroService.js';
+import { resolveActiveDistribution } from './packageManager.js';
 import { resolveLinuxIconPath } from './iconResolver.js';
 
 const execFileAsync = promisify(execFile);
@@ -183,10 +184,7 @@ function parseDesktopFileContent(content, filename) {
 }
 
 export async function scanDiscoveredLinuxApps(requestedDistro, { force = false } = {}) {
-  const snapshot = await getWslSnapshot();
-  const distro = typeof requestedDistro === 'string' && requestedDistro.trim()
-    ? requestedDistro.trim()
-    : snapshot.preferred || snapshot.default || 'kali-linux';
+  const distro = await resolveActiveDistribution(requestedDistro);
 
   if (!force && cachedDistro === distro && Date.now() - lastScanTime < SCAN_CACHE_TTL_MS && cachedDiscoveredApps.length > 0) {
     return cachedDiscoveredApps;

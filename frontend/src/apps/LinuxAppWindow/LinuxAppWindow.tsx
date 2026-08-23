@@ -121,15 +121,15 @@ export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps
   }, [targetAppId, windowId, targetFilePath, recoveryGeneration, stopSessionBestEffort]);
 
   useEffect(() => {
-    if (!session?.id) return undefined;
+    if (!session?.id || session?.native) return undefined;
     const sessionId = session.id;
     return () => {
       void stopSessionBestEffort(sessionId);
     };
-  }, [session?.id, stopSessionBestEffort]);
+  }, [session?.id, session?.native, stopSessionBestEffort]);
 
   useEffect(() => {
-    if (!session?.id) return undefined;
+    if (!session?.id || session?.native) return undefined;
     let disposed = false;
     let failures = 0;
     let timer: ReturnType<typeof window.setTimeout> | null = null;
@@ -167,7 +167,7 @@ export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps
       disposed = true;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [session?.id]);
+  }, [session?.id, session?.native]);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {

@@ -727,6 +727,14 @@ export async function healthXpraPocSession(id) {
   if (!session) throw createPocError('LINUX_POC_SESSION_NOT_FOUND', 'Sessão não encontrada.');
   const started = Date.now();
   session.leaseExpiresAt = Date.now() + LEASE_TTL_MS;
+
+  if (session.mode === 'wslg') {
+    session.metrics.lastHealthMs = elapsedMs(started);
+    session.state = 'ready';
+    session.health = { healthy: true, checkedAt: new Date().toISOString(), mode: 'wslg' };
+    return { session: publicSession(session), health: session.health };
+  }
+
   const linux = await probeWslServer(session);
   const tcp = await probeWindowsTcp(session.port);
   const http = tcp.ok ? await probeHttp(session.port, session.xpraPassword) : { ok: false };
@@ -742,18 +750,20 @@ export async function healthXpraPocSession(id) {
 async function stopSessionInternal(session) {
   if (!session || session.state === 'stopped') return publicSession(session);
   session.state = 'stopping';
-  await execWsl(session.distribution, `xpra stop :${session.display} >/dev/null 2>&1 || true`, STOP_TIMEOUT_MS).catch(() => undefined);
-  if (session.child && session.child.exitCode === null) {
-    try { session.child.kill('SIGTERM'); } catch {}
-    await new Promise(r => setTimeout(r, 400));
-    if (session.child.exitCode === null) {
-      try { session.child.kill('SIGKILL'); } catch {}
+  if (session.mode !== 'wslg') {
+    await execWsl(session.distribution, `xpra stop :${session.display} >/dev/null 2>&1 || true`, STOP_TIMEOUT_MS).catch(() => undefined);
+    if (session.child && session.child.exitCode === null) {
+      try { session.child.kill('SIGTERM'); } catch {}
+      await new Promise(r => setTimeout(r, 400));
+      if (session.child.exitCode === null) {
+        try { session.child.kill('SIGKILL'); } catch {}
+      }
     }
+    await execWsl(session.distribution, `rm -f /tmp/.X11-unix/X${session.display} /tmp/.X${session.display}-lock /tmp/${session.display}/*.pid >/dev/null 2>&1 || true`, 2000).catch(() => undefined);
   }
-  await execWsl(session.distribution, `rm -f /tmp/.X11-unix/X${session.display} /tmp/.X${session.display}-lock /tmp/${session.display}/*.pid >/dev/null 2>&1 || true`, 2000).catch(() => undefined);
   session.state = 'stopped';
   if (session.xpraPassword) session.xpraPassword = null;
-  releasePort(session.port);
+  if (session.port > 0) releasePort(session.port);
   sessions.delete(session.id);
   writeLedger();
   return publicSession(session);
