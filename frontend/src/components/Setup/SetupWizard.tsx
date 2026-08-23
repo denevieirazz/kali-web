@@ -154,7 +154,7 @@ export default function SetupWizard() {
         if (typeof data.progress === 'number') {
           setProvisionProgress(Math.max(0, Math.min(100, data.progress)));
         }
-        if (data.step && data.step !== 'done') {
+        if (data.step && data.step !== 'done' && data.stepDone === true) {
           setProvisionSteps(prev => prev.map(s => s.id === data.step ? { ...s, done: true } : s));
         }
         if (data.done === true) {
@@ -362,9 +362,6 @@ export default function SetupWizard() {
                   <button className="setup-btn setup-btn-primary inline" onClick={() => checkSetupStatus()}>Tentar novamente</button>
                 </motion.section>
               ) : step === 'welcome' ? (
-                /* ==================================================
-                   TELA 1: BEM-VINDO AO CLOUDOS
-                   ================================================== */
                 <motion.section key="welcome" className="setup-step" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                   <span className="setup-kicker">FIRST BOOT EXPERIENCE</span>
                   <h1 className="setup-title">Bem-vindo ao CloudOS</h1>
@@ -376,9 +373,6 @@ export default function SetupWizard() {
                   </ul>
                 </motion.section>
               ) : step === 'distro-select' ? (
-                /* ==================================================
-                   TELA 2: ESCOLHA SEU SISTEMA (COM DETECÇÃO CASO 1 E 2)
-                   ================================================== */
                 <motion.section key="distro-select" className="setup-step" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                   <span className="setup-kicker">SISTEMA OPERACIONAL</span>
                   <h1 className="setup-title compact">
@@ -471,9 +465,6 @@ export default function SetupWizard() {
                   )}
                 </motion.section>
               ) : step === 'installing-runtime' ? (
-                /* ==================================================
-                   TELA 3: PREPARANDO SISTEMA (PROGRESSO REAL)
-                   ================================================== */
                 <motion.section key="installing-runtime" className="setup-step" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                   <span className="setup-kicker">PROVISIONAMENTO</span>
                   <h1 className="setup-title compact">Preparando Sistema...</h1>
@@ -500,7 +491,6 @@ export default function SetupWizard() {
                     ))}
                   </div>
 
-                  {/* Terminal de Saída Real do Provisionamento */}
                   <div className="setup-live-console" aria-label="Console de instalação em tempo real">
                     {realLogs.map((logLine, idx) => (
                       <div key={idx} className="setup-live-log-line">{logLine}</div>
@@ -510,9 +500,6 @@ export default function SetupWizard() {
                   {provisionError && <div className="setup-alert error" role="alert">{provisionError}</div>}
                 </motion.section>
               ) : step === 'account' ? (
-                /* ==================================================
-                   TELA 4: SUA CONTA (NOME, SENHA, AVATAR/COR)
-                   ================================================== */
                 <motion.form key="account" className="setup-form" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onSubmit={event => { event.preventDefault(); void goNext(); }}>
                   <span className="setup-kicker">SUA CONTA</span>
                   <h1 className="setup-title compact">Criar Usuário Administrador</h1>
@@ -564,9 +551,6 @@ export default function SetupWizard() {
                   <button type="submit" hidden aria-hidden="true" />
                 </motion.form>
               ) : (
-                /* ==================================================
-                   TELA 5: FINALIZAÇÃO (SEU CLOUDOS ESTÁ PRONTO)
-                   ================================================== */
                 <motion.section key="ready" className="setup-step" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                   <span className="setup-kicker">CONFIGURAÇÃO CONCLUÍDA</span>
                   <h1 className="setup-title compact">Seu CloudOS está pronto!</h1>
