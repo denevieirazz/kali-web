@@ -13,7 +13,7 @@ async function main() {
     localStorage.removeItem('cloudos-oobe-completed');
     localStorage.removeItem('obsidianos-setup-completed');
   });
-  
+
   // Recarrega para simular primeiro boot
   await page.reload();
 
