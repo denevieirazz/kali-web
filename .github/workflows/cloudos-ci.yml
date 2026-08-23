@@ -94,8 +94,11 @@ jobs:
         shell: pwsh
         run: ./scripts/test-native-browser-visual.ps1
 
-      - name: 18. Run existing Playwright characterization
-        run: npx playwright test --grep-invert "Navegador CloudOS — WebView2 real|Navegador CloudOS — lifecycle Windows"
+      - name: 18. Run baseline Playwright characterization
+        # Workflow Drone and Batch 4 human/hardening suites have dedicated configs and
+        # workflows. Keeping them out of the generic Windows characterization prevents
+        # duplicate ownership, conflicting runtime assumptions, and CI timeout noise.
+        run: npx playwright test tests/playwright/boot-oobe.spec.ts tests/playwright/onboarding-responsive.spec.ts tests/playwright/settings-personalization.spec.ts tests/playwright/start-menu.spec.ts tests/playwright/window-lifecycle.spec.ts --reporter=list
 
       - name: 19. Run Browser opening lifecycle tests
         run: npx playwright test tests/playwright/native-browser-lifecycle.spec.ts --output=test-results/native-browser-lifecycle --reporter=list
