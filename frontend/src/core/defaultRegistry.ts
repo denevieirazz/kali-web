@@ -82,8 +82,8 @@ export const defaultRegistry: Record<string, Record<string, RegistryEntry>> = {
     LastSync: { type: 'REG_SZ', value: '' },
   },
   'HKEY_LOCAL_MACHINE\\SYSTEM\\Setup': {
-    SetupInProgress: { type: 'REG_DWORD', value: typeof window !== 'undefined' && localStorage.getItem('obsidianos-setup-completed') === 'true' ? 0 : 1 },
-    OOBEInProgress:  { type: 'REG_DWORD', value: typeof window !== 'undefined' && localStorage.getItem('obsidianos-setup-completed') === 'true' ? 0 : 1 },
+    SetupInProgress: { type: 'REG_DWORD', value: typeof window !== 'undefined' && localStorage.getItem('cloudos-oobe-completed') === 'true' ? 0 : 1 },
+    OOBEInProgress:  { type: 'REG_DWORD', value: typeof window !== 'undefined' && localStorage.getItem('cloudos-oobe-completed') === 'true' ? 0 : 1 },
   },
 };
 

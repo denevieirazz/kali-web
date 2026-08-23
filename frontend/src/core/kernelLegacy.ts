@@ -335,10 +335,10 @@ class Kernel {
       this._resources.usedMemory += 48;
     }
 
-    // Check OOBE flag — if SetupInProgress is set, go to setup wizard first
-    const setupInProgress = this.regGetValue('HKEY_LOCAL_MACHINE\\SYSTEM\\Setup\\SetupInProgress');
-    if (setupInProgress === 1) {
-      this.log('INFO', 'Kernel', 'OOBE detected — launching Setup Wizard');
+    // Check OOBE flag — if First Boot OOBE is not completed, go to setup wizard first
+    const oobeCompleted = typeof window !== 'undefined' && localStorage.getItem('cloudos-oobe-completed') === 'true';
+    if (!oobeCompleted) {
+      this.log('INFO', 'Kernel', 'First Boot OOBE detected — launching CloudOS Setup Wizard');
       this.bootPhase = 'OOBE';
     } else {
       // Normal boot — hand off to Winlogon (LockScreen handles auth in React)
@@ -498,10 +498,7 @@ class Kernel {
     }
 
     // ── Setup flag correction ──────────────────────────────────────────────
-    // If setup was already completed (localStorage flag), ensure the registry
-    // reflects that — even if the saved registry still has SetupInProgress = 1
-    // (e.g. from a previous session before this fix was applied).
-    if (localStorage.getItem('obsidianos-setup-completed') === 'true') {
+    if (localStorage.getItem('cloudos-oobe-completed') === 'true') {
       const setupKey = 'HKEY_LOCAL_MACHINE\\SYSTEM\\Setup';
       if (!this._registry[setupKey]) this._registry[setupKey] = {};
       this._registry[setupKey]['SetupInProgress'] = { type: 'REG_DWORD', value: 0 };

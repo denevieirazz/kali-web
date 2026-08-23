@@ -93,15 +93,6 @@ export default function SetupWizard() {
     }
   }
 
-  useEffect(() => {
-    if (setupStatus !== 'complete' || createdAccountInThisFlow.current || completedSetupHandoff.current) return;
-    completedSetupHandoff.current = true;
-    kernel.regSetValue('HKEY_LOCAL_MACHINE\\SYSTEM\\Setup\\SetupInProgress', 'REG_DWORD', 0);
-    kernel.regSetValue('HKEY_LOCAL_MACHINE\\SYSTEM\\Setup\\OOBEInProgress', 'REG_DWORD', 0);
-    localStorage.setItem('obsidianos-setup-completed', 'true');
-    kernel.bootPhase = 'WINLOGON';
-  }, [setupStatus]);
-
   const currentIndex = STEPS.indexOf(step);
 
   async function startProvisioning() {
@@ -156,6 +147,10 @@ export default function SetupWizard() {
       return void startProvisioning();
     }
     if (step === 'account') {
+      if (setupStatus === 'complete' && !password && !username) {
+        // Mantém conta de administrador existente
+        return setStep('ready');
+      }
       const validation = validateDisplayName(displayName) || validateUsername(username) || validateNewPassword(password, confirmPassword);
       if (validation) return setError(validation);
       return void createRealAccount();
@@ -188,14 +183,24 @@ export default function SetupWizard() {
   }
 
   function completeSetup() {
-    kernel.sysCreateUserHome(username.trim());
+    if (username.trim()) {
+      kernel.sysCreateUserHome(username.trim());
+    }
     kernel.regSetValue('HKEY_LOCAL_MACHINE\\SYSTEM\\Setup\\SetupInProgress', 'REG_DWORD', 0);
     kernel.regSetValue('HKEY_LOCAL_MACHINE\\SYSTEM\\Setup\\OOBEInProgress', 'REG_DWORD', 0);
-    localStorage.setItem('obsidianos-setup-completed', 'true');
+    localStorage.setItem('cloudos-oobe-completed', 'true');
     confirmRecoveryCodeSaved();
     setRecoveryCode(null);
     setRecoverySaved(false);
     useSystem.getState().unlock();
+    const isAuth = useUserStore.getState().isAuthenticated;
+    if (isAuth) {
+      useSystem.getState().setBootPhase('desktop');
+      kernel.bootPhase = 'DESKTOP_READY';
+    } else {
+      useSystem.getState().setBootPhase('login');
+      kernel.bootPhase = 'WINLOGON';
+    }
   }
 
   const unavailable = setupStatus === 'unavailable';
@@ -367,6 +372,11 @@ export default function SetupWizard() {
                 <motion.form key="account" className="setup-form" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onSubmit={event => { event.preventDefault(); void goNext(); }}>
                   <span className="setup-kicker">SUA CONTA</span>
                   <h1 className="setup-title compact">Criar Usuário Administrador</h1>
+                  {setupStatus === 'complete' && (
+                    <div className="setup-alert" style={{ background: 'rgba(59, 130, 246, 0.15)', borderColor: '#3b82f6', color: '#93c5fd', marginBottom: 12 }}>
+                      ℹ️ Conta administradora já existente detectada. Você pode manter sua conta atual (basta continuar) ou definir novas credenciais abaixo.
+                    </div>
+                  )}
                   
                   <label className="setup-field">
                     Nome de exibição

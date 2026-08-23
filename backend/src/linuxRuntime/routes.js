@@ -8,7 +8,22 @@ import { installLinuxPackage, listLinuxPackages, searchLinuxPackages, uninstallL
 import { scanDiscoveredLinuxApps } from './desktopScanner.js';
 import { resolveLinuxIconPath, getMimeTypeForIcon } from './iconResolver.js';
 
+import { getActiveDistro, setActiveDistro, listInstalledDistros, listOnlineDistros, installDistro, unregisterDistro, importDistro, provisionDistro, getCloudOSHome } from './distroManager.js';
+
 export const linuxRuntimeRouter = express.Router();
+
+function statusForCode(code) {
+  if (['LINUX_POC_APP_NOT_ALLOWED', 'LINUX_POC_OWNER_INVALID', 'PREFLIGHT_OWNER_INVALID', 'PACKAGE_NOT_FOUND', 'INVALID_PACKAGE_NAME'].includes(code)) return 400;
+  if (['LINUX_POC_SESSION_ACTIVE', 'LINUX_POC_SESSION_LIMIT', 'LINUX_POC_ORPHANED_SESSION', 'LINUX_POC_SESSION_OWNER_MISMATCH', 'PREFLIGHT_OWNER_MISMATCH'].includes(code)) return 409;
+  if (['LINUX_POC_SESSION_NOT_FOUND', 'PREFLIGHT_RUN_NOT_FOUND'].includes(code)) return 404;
+  return 503;
+}
+
+function sendError(res, error, fallback) {
+  console.error('[LinuxRuntimeRouter ERROR]', fallback, error?.code || error?.message, error);
+  const code = error.code || fallback;
+  res.status(statusForCode(code)).json({ error: error.message, errorCode: code, details: error.details || null });
+}
 
 // Public icon serving endpoint (no token required for img tags)
 linuxRuntimeRouter.get('/icons/:id', (req, res) => {
@@ -28,20 +43,78 @@ linuxRuntimeRouter.get('/icons/:id', (req, res) => {
   }
 });
 
+// Public distro lifecycle routes for First Boot Setup & OOBE
+linuxRuntimeRouter.get('/distros', async (req, res) => {
+  try {
+    const active = getActiveDistro();
+    const installed = await listInstalledDistros();
+    const online = await listOnlineDistros();
+    res.json({ active, installed, online });
+  } catch (error) {
+    sendError(res, error, 'DISTRO_LIST_FAILED');
+  }
+});
+
+linuxRuntimeRouter.post('/distros/active', (req, res) => {
+  try {
+    const distro = req.body?.distro;
+    const config = setActiveDistro(distro);
+    res.json({ success: true, config });
+  } catch (error) {
+    sendError(res, error, 'DISTRO_SET_ACTIVE_FAILED');
+  }
+});
+
+linuxRuntimeRouter.post('/distros/install', async (req, res) => {
+  try {
+    const distro = req.body?.distro;
+    const result = await installDistro(distro);
+    res.json(result);
+  } catch (error) {
+    sendError(res, error, 'DISTRO_INSTALL_FAILED');
+  }
+});
+
+linuxRuntimeRouter.post('/distros/unregister', async (req, res) => {
+  try {
+    const distro = req.body?.distro;
+    const result = await unregisterDistro(distro);
+    res.json(result);
+  } catch (error) {
+    sendError(res, error, 'DISTRO_UNREGISTER_FAILED');
+  }
+});
+
+linuxRuntimeRouter.post('/distros/import', async (req, res) => {
+  try {
+    const { distro, location, tarPath } = req.body || {};
+    const result = await importDistro(distro, location, tarPath);
+    res.json(result);
+  } catch (error) {
+    sendError(res, error, 'DISTRO_IMPORT_FAILED');
+  }
+});
+
+linuxRuntimeRouter.post('/distros/provision', async (req, res) => {
+  try {
+    const distro = req.body?.distro;
+    const result = await provisionDistro(distro);
+    res.json(result);
+  } catch (error) {
+    sendError(res, error, 'DISTRO_PROVISION_FAILED');
+  }
+});
+
+linuxRuntimeRouter.get('/home', (req, res) => {
+  try {
+    res.json({ home: getCloudOSHome() });
+  } catch (error) {
+    sendError(res, error, 'CLOUDOS_HOME_FAILED');
+  }
+});
+
 linuxRuntimeRouter.use(authenticateToken);
 
-function statusForCode(code) {
-  if (['LINUX_POC_APP_NOT_ALLOWED', 'LINUX_POC_OWNER_INVALID', 'PREFLIGHT_OWNER_INVALID', 'PACKAGE_NOT_FOUND', 'INVALID_PACKAGE_NAME'].includes(code)) return 400;
-  if (['LINUX_POC_SESSION_ACTIVE', 'LINUX_POC_SESSION_LIMIT', 'LINUX_POC_ORPHANED_SESSION', 'LINUX_POC_SESSION_OWNER_MISMATCH', 'PREFLIGHT_OWNER_MISMATCH'].includes(code)) return 409;
-  if (['LINUX_POC_SESSION_NOT_FOUND', 'PREFLIGHT_RUN_NOT_FOUND'].includes(code)) return 404;
-  return 503;
-}
-
-function sendError(res, error, fallback) {
-  console.error('[LinuxRuntimeRouter ERROR]', fallback, error?.code || error?.message, error);
-  const code = error.code || fallback;
-  res.status(statusForCode(code)).json({ error: error.message, errorCode: code, details: error.details || null });
-}
 
 function rawOwner(value) {
   const owner = String(value || '').trim();
@@ -231,77 +304,5 @@ linuxRuntimeRouter.post('/launch', async (req, res) => {
   }
 });
 
-// ============================================
-// Multi-Distro & CloudOS Home Management Routes
-// ============================================
-import { getActiveDistro, setActiveDistro, listInstalledDistros, listOnlineDistros, installDistro, unregisterDistro, importDistro, provisionDistro, getCloudOSHome } from './distroManager.js';
 
-linuxRuntimeRouter.get('/distros', async (req, res) => {
-  try {
-    const active = getActiveDistro();
-    const installed = await listInstalledDistros();
-    const online = await listOnlineDistros();
-    res.json({ active, installed, online });
-  } catch (error) {
-    sendError(res, error, 'DISTRO_LIST_FAILED');
-  }
-});
-
-linuxRuntimeRouter.post('/distros/active', (req, res) => {
-  try {
-    const distro = req.body?.distro;
-    const config = setActiveDistro(distro);
-    res.json({ success: true, config });
-  } catch (error) {
-    sendError(res, error, 'DISTRO_SET_ACTIVE_FAILED');
-  }
-});
-
-linuxRuntimeRouter.post('/distros/install', async (req, res) => {
-  try {
-    const distro = req.body?.distro;
-    const result = await installDistro(distro);
-    res.json(result);
-  } catch (error) {
-    sendError(res, error, 'DISTRO_INSTALL_FAILED');
-  }
-});
-
-linuxRuntimeRouter.post('/distros/unregister', async (req, res) => {
-  try {
-    const distro = req.body?.distro;
-    const result = await unregisterDistro(distro);
-    res.json(result);
-  } catch (error) {
-    sendError(res, error, 'DISTRO_UNREGISTER_FAILED');
-  }
-});
-
-linuxRuntimeRouter.post('/distros/import', async (req, res) => {
-  try {
-    const { distro, location, tarPath } = req.body || {};
-    const result = await importDistro(distro, location, tarPath);
-    res.json(result);
-  } catch (error) {
-    sendError(res, error, 'DISTRO_IMPORT_FAILED');
-  }
-});
-
-linuxRuntimeRouter.post('/distros/provision', async (req, res) => {
-  try {
-    const distro = req.body?.distro;
-    const result = await provisionDistro(distro);
-    res.json(result);
-  } catch (error) {
-    sendError(res, error, 'DISTRO_PROVISION_FAILED');
-  }
-});
-
-linuxRuntimeRouter.get('/home', (req, res) => {
-  try {
-    res.json({ home: getCloudOSHome() });
-  } catch (error) {
-    sendError(res, error, 'CLOUDOS_HOME_FAILED');
-  }
-});
 

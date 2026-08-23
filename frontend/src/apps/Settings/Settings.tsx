@@ -150,6 +150,19 @@ export default function SettingsApp({}: { windowId: string }) {
           ))}
         </div>
       </div>
+
+      <div className="settings-card">
+        <h3>Experiência de Primeiro Boot (OOBE)</h3>
+        <p className="settings-desc">Deseja reiniciar a configuração inicial do CloudOS (seleção de distro, provisionamento e criação de perfil)?</p>
+        <button className="settings-secondary" onClick={() => {
+          if (!window.confirm('Deseja reiniciar a experiência de Primeiro Boot (OOBE)?')) return;
+          localStorage.removeItem('cloudos-oobe-completed');
+          localStorage.removeItem('obsidianos-setup-completed');
+          useSystem.getState().setBootPhase('setup');
+        }}>
+          Executar Primeiro Boot (OOBE)
+        </button>
+      </div>
     </>;
     case 'privacy': return <><h2>Privacidade</h2><div className="settings-card"><Toggle label="Métricas locais" desc="Permitir gráficos e diagnóstico no dispositivo" on={privacy.metrics} onChange={()=>setPrivacyValue('metrics',!privacy.metrics)}/></div><div className="settings-card"><Toggle label="Acesso ao terminal" desc="Permitir integração com terminal local" on={privacy.terminal} onChange={()=>setPrivacyValue('terminal',!privacy.terminal)}/></div><div className="settings-card"><Toggle label="Sistema de arquivos" desc="Permitir armazenamento virtual persistente" on={privacy.files} onChange={()=>setPrivacyValue('files',!privacy.files)}/></div></>;
     case 'update': return <><h2>Atualizações</h2><div className="settings-hero"><div className="settings-hero-icon">↻</div><div><h3>Atualização controlada</h3><p>A verificação é somente leitura. Aplicação e rollback pertencem ao Bootstrap.</p></div></div><div className="settings-card"><Row label="Versão" value={product?.version||'Consultando…'}/><Row label="Canal" value={product?.channel||'Consultando…'}/><Row label="Estado" value={updateStatus}/>{update?.sha256&&<Row label="SHA-256 do pacote" value={`${update.sha256.slice(0,12)}…${update.sha256.slice(-12)}`}/>}<button className="settings-action" onClick={checkProductUpdate}>Verificar atualização</button><p className="settings-desc">Stable permanece desativado até existir release aprovada. Atualizações não são aplicadas durante uma sessão crítica.</p></div></>;
