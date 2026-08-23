@@ -489,7 +489,7 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [clipboard, currentPath, dialog.type, editor, launchTerminalAt, openEntry, pasteClipboard, rememberFileCopy, requestDelete, requestRename, selectedEntry, source, viewMode, windowId]);
 
-  const pathPrefix = source === 'opfs' ? 'local:' : source === 'windows' ? 'win:' : 'linux:';
+  const pathPrefix = source === 'opfs' ? '🏠 ~/' : source === 'windows' ? '🪟 /mnt/c' : '🐧 /';
 
   return (
     <div className="cf-root" data-files-source={source} data-files-actor="user-ui" data-files-layout={layoutMode}>
@@ -518,7 +518,7 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
         </>}
         <nav className="cf-address" aria-label="Caminho">
           <button className={!currentPath.length && viewMode === 'files' ? 'active-breadcrumb' : ''} onClick={() => { setViewMode('files'); setCurrentPath([]); }}>{pathPrefix}</button>
-          {viewMode === 'trash' ? <button className="active-breadcrumb">/ 🗑️ lixeira</button> : currentPath.map((part, index) => <button key={`${part}-${index}`} className={index === currentPath.length - 1 ? 'active-breadcrumb' : ''} onClick={() => setCurrentPath(currentPath.slice(0, index + 1))}>/ {part}</button>)}
+          {viewMode === 'trash' ? <button className="active-breadcrumb">/ 🗑️ Lixeira</button> : currentPath.map((part, index) => <button key={`${part}-${index}`} className={index === currentPath.length - 1 ? 'active-breadcrumb' : ''} onClick={() => setCurrentPath(currentPath.slice(0, index + 1))}>/ {part}</button>)}
         </nav>
         <input className="cf-search" value={searchQuery} onChange={event => setSearchQuery(event.target.value)} placeholder="Pesquisar…" aria-label="Pesquisar arquivos" />
         <select className="cf-sort-select" value={sortField} onChange={event => setSortField(event.target.value as SortField)} aria-label="Ordenar por"><option value="name">Nome</option><option value="modified">Modificado</option><option value="size">Tamanho</option></select>

@@ -7,10 +7,12 @@ import { useFileSystem } from '../../stores/fileSystem';
 import { useProcess } from '../../contexts/ProcessContext';
 import './Notepad.css';
 
+import { writeTextFile } from '../CloudOSFiles/opfsFileService';
+
 export default function NotepadApp({ windowId }: { windowId: string }) {
   const { pid } = useProcess();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { getWindow, updateWindowTitle } = useWindowManager();
+  const { getWindow, updateWindowTitle, closeWindow } = useWindowManager();
   const { getNode, updateFileContent } = useFileSystem();
 
   const [content, setContent] = useState('');
@@ -21,7 +23,8 @@ export default function NotepadApp({ windowId }: { windowId: string }) {
   const [showStatusBar] = useState(true);
   const [cursorLine, setCursorLine] = useState(1);
   const [cursorCol, setCursorCol] = useState(1);
-  const [wordWrap] = useState(true);
+  const [wordWrap, setWordWrap] = useState(true);
+  const [showFileMenu, setShowFileMenu] = useState(false);
 
   // Initialize from window params (file path)
   useEffect(() => {
@@ -58,7 +61,7 @@ export default function NotepadApp({ windowId }: { windowId: string }) {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.ctrlKey && e.key === 's') {
       e.preventDefault();
-      handleSave();
+      void handleSave();
     }
     if (e.key === 'Tab') {
       e.preventDefault();
@@ -74,25 +77,102 @@ export default function NotepadApp({ windowId }: { windowId: string }) {
     }
   };
 
-  const handleSave = () => {
-    if (filePath) {
+  const handleSave = async () => {
+    if (filePath && !filePath.startsWith('~/')) {
       updateFileContent(filePath, content);
       setIsModified(false);
+    } else if (filePath && filePath.startsWith('~/')) {
+      const parts = filePath.replace(/^~\//, '').split('/');
+      const name = parts.pop() || fileName;
+      await writeTextFile(parts, name, content);
+      setIsModified(false);
+    } else {
+      await handleSaveAs();
     }
+  };
+
+  const handleSaveAs = async () => {
+    const name = window.prompt('Salvar arquivo em CloudOS Home (~/Documents):', fileName.endsWith('.txt') ? fileName : `${fileName}.txt`);
+    if (!name) return;
+    const cleanName = name.trim();
+    try {
+      await writeTextFile(['Documents'], cleanName, content);
+      setFileName(cleanName);
+      setFilePath(`~/Documents/${cleanName}`);
+      setIsModified(false);
+    } catch (err: any) {
+      alert(`Erro ao salvar no CloudOS Home: ${err.message}`);
+    }
+  };
+
+  const handleNew = () => {
+    if (isModified && !window.confirm('Descartar alterações não salvas?')) return;
+    setContent('');
+    setFileName('Sem título');
+    setFilePath('');
+    setIsModified(false);
   };
 
   const lineCount = content.split('\n').length;
   const charCount = content.length;
 
   return (
-    <div className="notepad">
+    <div className="notepad" onClick={() => setShowFileMenu(false)}>
       {/* Menu Bar */}
-      <div className="notepad-menubar">
-        <button className="notepad-menu-item">Arquivo</button>
-        <button className="notepad-menu-item">Editar</button>
-        <button className="notepad-menu-item">Formatar</button>
-        <button className="notepad-menu-item">Exibir</button>
-        <button className="notepad-menu-item">Ajuda</button>
+      <div className="notepad-menubar" style={{ position: 'relative' }}>
+        <div style={{ position: 'relative', display: 'inline-block' }}>
+          <button
+            className="notepad-menu-item"
+            onClick={(e) => { e.stopPropagation(); setShowFileMenu(v => !v); }}
+          >
+            Arquivo
+          </button>
+          {showFileMenu && (
+            <div style={{
+              position: 'absolute',
+              top: '100%',
+              left: 0,
+              background: 'var(--surface-dropdown, #1f1f23)',
+              border: '1px solid var(--border-subtle, #333)',
+              borderRadius: 4,
+              boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+              padding: 4,
+              zIndex: 100,
+              minWidth: 160,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 2
+            }}>
+              <button
+                style={{ background: 'transparent', border: 'none', color: '#eee', padding: '6px 12px', textAlign: 'left', cursor: 'pointer', borderRadius: 4 }}
+                onClick={() => { setShowFileMenu(false); handleNew(); }}
+              >
+                📄 Novo
+              </button>
+              <button
+                style={{ background: 'transparent', border: 'none', color: '#eee', padding: '6px 12px', textAlign: 'left', cursor: 'pointer', borderRadius: 4 }}
+                onClick={() => { setShowFileMenu(false); void handleSave(); }}
+              >
+                💾 Salvar (Ctrl+S)
+              </button>
+              <button
+                style={{ background: 'transparent', border: 'none', color: '#eee', padding: '6px 12px', textAlign: 'left', cursor: 'pointer', borderRadius: 4 }}
+                onClick={() => { setShowFileMenu(false); void handleSaveAs(); }}
+              >
+                💾 Salvar Como...
+              </button>
+              <div style={{ height: 1, background: '#333', margin: '4px 0' }} />
+              <button
+                style={{ background: 'transparent', border: 'none', color: '#eee', padding: '6px 12px', textAlign: 'left', cursor: 'pointer', borderRadius: 4 }}
+                onClick={() => { setShowFileMenu(false); closeWindow(windowId); }}
+              >
+                ✕ Sair
+              </button>
+            </div>
+          )}
+        </div>
+        <button className="notepad-menu-item" onClick={() => setWordWrap(w => !w)}>Quebra de Linha: {wordWrap ? 'Ligada' : 'Desligada'}</button>
+        <button className="notepad-menu-item" onClick={() => setFontSize(s => s === 14 ? 18 : 14)}>Tamanho da Fonte</button>
       </div>
 
       {/* Editor */}
