@@ -2,13 +2,14 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import express from 'express';
 import { authenticateToken } from '../middleware/auth.js';
+import { validateInstalledAsync } from '../wsl/distroService.js';
 import { checkXpraPocReadiness, cleanupXpraPoc, getAllowedLinuxPocApps, getXpraPocSessions, healthXpraPocSession, recordXpraPocClientMetrics, restartXpraPoc, startXpraPoc, stopXpraPoc } from './xpraPoc.js';
 import { finalizePhysicalPreflight, startPhysicalPreflight } from './preflight.js';
 import { installLinuxPackage, listLinuxPackages, searchLinuxPackages, uninstallLinuxPackage } from './packageManager.js';
 import { scanDiscoveredLinuxApps } from './desktopScanner.js';
 import { resolveLinuxIconPath, getMimeTypeForIcon } from './iconResolver.js';
 
-import { getActiveDistro, setActiveDistro, listInstalledDistros, listOnlineDistros, installDistro, unregisterDistro, importDistro, provisionDistro, streamProvisionDistro, getCloudOSHome } from './distroManager.js';
+import { getActiveDistro, setActiveDistro, listInstalledDistros, listOnlineDistros, installDistro, unregisterDistro, importDistro, provisionDistro, streamProvisionDistro, getCloudOSHome, validateDistroIdentifier } from './distroManager.js';
 
 export const linuxRuntimeRouter = express.Router();
 
@@ -112,15 +113,41 @@ linuxRuntimeRouter.get('/distros/provision/stream', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders?.();
 
-  const distro = String(req.query?.distro || '').trim();
+  const previousActiveDistro = getActiveDistro();
+  let distro = String(req.query?.distro || previousActiveDistro).trim();
   const mode = String(req.query?.mode || 'existing').trim();
+  let successConfirmed = false;
 
   try {
+    distro = validateDistroIdentifier(distro);
+    if (!['existing', 'reinstall', 'new', 'custom'].includes(mode)) {
+      const invalidMode = new Error('Modo de provisionamento inválido.');
+      invalidMode.code = 'INVALID_PROVISION_MODE';
+      throw invalidMode;
+    }
+
     for await (const event of streamProvisionDistro(distro, mode)) {
+      if (event?.error) throw new Error(String(event.error));
+      if (event?.done === true) {
+        const installed = await listInstalledDistros();
+        const registered = installed.find(item => String(item.id || '').toLowerCase() === distro.toLowerCase());
+        const installing = /install|instalando|uninstall|desinstalando/i.test(String(registered?.state || ''));
+        const installedByCore = await validateInstalledAsync(distro);
+        if (!registered || installing || !installedByCore) {
+          const notReady = new Error(`A distribuição WSL "${distro}" não confirmou registro concluído. O setup não será finalizado.`);
+          notReady.code = 'DISTRO_PROVISION_NOT_READY';
+          throw notReady;
+        }
+        setActiveDistro(distro);
+        successConfirmed = true;
+      }
       res.write(`data: ${JSON.stringify(event)}\n\n`);
     }
   } catch (error) {
-    res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+    if (!successConfirmed && previousActiveDistro && previousActiveDistro !== distro) {
+      try { setActiveDistro(previousActiveDistro); } catch {}
+    }
+    res.write(`data: ${JSON.stringify({ error: error?.message || 'Falha no provisionamento da distribuição.' })}\n\n`);
   } finally {
     res.end();
   }
@@ -135,7 +162,6 @@ linuxRuntimeRouter.get('/home', (req, res) => {
 });
 
 linuxRuntimeRouter.use(authenticateToken);
-
 
 function rawOwner(value) {
   const owner = String(value || '').trim();
@@ -329,6 +355,3 @@ linuxRuntimeRouter.post('/launch', async (req, res) => {
     sendError(res, error, 'LINUX_FAST_LAUNCH_FAILED');
   }
 });
-
-
-
