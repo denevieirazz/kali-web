@@ -10,10 +10,17 @@ import './StartMenu.css';
 import './StartMenu.native.css';
 
 type View = 'home' | 'all' | 'linux' | 'running';
+
 type App = {
   id: string;
   name: string;
+  genericName?: string;
+  comment?: string;
+  category?: string;
+  categories?: string[];
   icon: string;
+  iconUrl?: string | null;
+  emojiFallback?: string;
   defaultWidth?: number;
   defaultHeight?: number;
   minWidth?: number;
@@ -26,6 +33,17 @@ type App = {
 
 const requiresNativeHost = (app: App) => app.id === 'browser';
 const appUnavailable = (app: App) => requiresNativeHost(app) && !nativeHostBridge.available;
+
+const LINUX_CATEGORY_LABELS: Record<string, string> = {
+  all: 'Todos',
+  internet: 'Internet',
+  development: 'Desenvolvimento',
+  utilities: 'Utilitários',
+  graphics: 'Gráficos',
+  multimedia: 'Multimídia',
+  office: 'Escritório',
+  security: 'Segurança',
+};
 
 function StartMenu() {
   const { isStartMenuOpen, closeStartMenu, currentUser } = useSystem();
@@ -41,6 +59,7 @@ function StartMenu() {
   const openContextMenu = useContextMenuStore((s) => s.openContextMenu);
   const apps = useAppRegistry((s: any) => s.apps) as Record<string, App>;
   const [view, setView] = useState<View>('home');
+  const [linuxCategoryFilter, setLinuxCategoryFilter] = useState<string>('all');
   const [query, setQuery] = useState('');
   const [capabilityNotice, setCapabilityNotice] = useState('');
   const [linuxApps, setLinuxApps] = useState<App[]>([]);
@@ -49,14 +68,20 @@ function StartMenu() {
 
   const fetchLinuxApps = useCallback(async () => {
     try {
-      const res = await apiClient<{ packages: Array<{ id: string; name: string; icon: string; installed: boolean; command: string }> }>('/api/linux-runtime/packages');
+      const res = await apiClient<{ packages: Array<any> }>('/api/linux-runtime/packages');
       if (res?.packages) {
         const installed = res.packages
-          .filter((pkg: { installed: boolean }) => pkg.installed)
-          .map((pkg: { id: string; name: string; icon: string }) => ({
+          .filter((pkg: any) => pkg.installed)
+          .map((pkg: any) => ({
             id: `linux-app-${pkg.id}`,
             name: `${pkg.name}`,
-            icon: pkg.icon || '🐧',
+            genericName: pkg.genericName || '',
+            comment: pkg.description || pkg.comment || '',
+            category: pkg.category || 'utilities',
+            categories: pkg.categories || [],
+            icon: pkg.iconUrl || pkg.icon || pkg.emojiFallback || '🐧',
+            iconUrl: pkg.iconUrl || null,
+            emojiFallback: pkg.emojiFallback || '🐧',
             defaultWidth: 960,
             defaultHeight: 640,
             isLinux: true,
@@ -83,13 +108,34 @@ function StartMenu() {
 
   const filtered = useMemo(() => {
     const value = query.trim().toLocaleLowerCase('pt-BR');
-    return value ? appList.filter((app) => app.name.toLocaleLowerCase('pt-BR').includes(value)) : appList;
+    if (!value) return appList;
+    return appList.filter((app) => 
+      app.name.toLocaleLowerCase('pt-BR').includes(value) ||
+      (app.genericName && app.genericName.toLocaleLowerCase('pt-BR').includes(value)) ||
+      (app.comment && app.comment.toLocaleLowerCase('pt-BR').includes(value)) ||
+      (app.category && app.category.toLocaleLowerCase('pt-BR').includes(value)) ||
+      (app.linuxAppId && app.linuxAppId.toLocaleLowerCase('pt-BR').includes(value))
+    );
   }, [appList, query]);
+
+  const filteredLinuxApps = useMemo(() => {
+    if (linuxCategoryFilter === 'all') return linuxApps;
+    return linuxApps.filter(app => app.category === linuxCategoryFilter);
+  }, [linuxApps, linuxCategoryFilter]);
+
+  const availableLinuxCategories = useMemo(() => {
+    const cats = new Set<string>(['all']);
+    for (const app of linuxApps) {
+      if (app.category) cats.add(app.category);
+    }
+    return Array.from(cats);
+  }, [linuxApps]);
 
   useEffect(() => {
     if (!isStartMenuOpen) {
       setQuery('');
       setView('home');
+      setLinuxCategoryFilter('all');
       setCapabilityNotice('');
       return;
     }
@@ -226,14 +272,37 @@ function StartMenu() {
             </>
           ) : view === 'linux' ? (
             <>
-              <div className="start-section-header">
-                <strong>Aplicativos Linux Instalados</strong>
-                <small style={{ color: '#94a3b8' }}>Execução gráfica nativa via Xpra</small>
+              <div className="start-section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <strong>Aplicativos Linux ({filteredLinuxApps.length})</strong>
+                  <small style={{ color: '#94a3b8', display: 'block', fontSize: '11px' }}>Descoberta automática de .desktop no WSL</small>
+                </div>
+                {availableLinuxCategories.length > 1 && (
+                  <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                    {availableLinuxCategories.map(cat => (
+                      <button
+                        key={cat}
+                        onClick={() => setLinuxCategoryFilter(cat)}
+                        style={{
+                          background: linuxCategoryFilter === cat ? 'rgba(59, 130, 246, 0.4)' : 'rgba(255, 255, 255, 0.08)',
+                          border: linuxCategoryFilter === cat ? '1px solid #3b82f6' : '1px solid rgba(255, 255, 255, 0.1)',
+                          color: '#fff',
+                          padding: '2px 8px',
+                          borderRadius: '12px',
+                          fontSize: '11px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {LINUX_CATEGORY_LABELS[cat] || cat}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-              {linuxApps.length ? (
-                <AppGrid apps={linuxApps} launch={launch} context={context} />
+              {filteredLinuxApps.length ? (
+                <AppGrid apps={filteredLinuxApps} launch={launch} context={context} />
               ) : (
-                <div className="start-empty">Nenhum aplicativo Linux instalado ainda. Abra o Linux App Center para instalar.</div>
+                <div className="start-empty">Nenhum aplicativo Linux encontrado nesta categoria.</div>
               )}
             </>
           ) : view === 'all' ? (
@@ -252,7 +321,13 @@ function StartMenu() {
                   {windows.map((window) => (
                     <article className="running-item" key={window.id}>
                       <button className="running-main" onClick={() => activate(window.id)}>
-                        <span className="running-icon">{window.icon || '🗔'}</span>
+                        <span className="running-icon">
+                          {typeof window.icon === 'string' && (window.icon.startsWith('/') || window.icon.startsWith('http')) ? (
+                            <img src={window.icon} alt="" style={{ width: '20px', height: '20px', objectFit: 'contain' }} />
+                          ) : (
+                            window.icon || '🗔'
+                          )}
+                        </span>
                         <span>
                           <strong>{window.title || window.appId}</strong>
                           <small>{window.isMinimized ? 'Minimizada' : window.isActive ? 'Ativa' : 'Em execução'}</small>
@@ -294,6 +369,7 @@ const AppGrid = memo(function AppGrid({ apps, launch, context }: {
     <div className="start-pinned-grid">
       {apps.map((app) => {
         const unavailable = appUnavailable(app);
+        const isIconUrl = typeof app.icon === 'string' && (app.icon.startsWith('/') || app.icon.startsWith('http'));
         return (
           <button
             key={app.id}
@@ -302,9 +378,25 @@ const AppGrid = memo(function AppGrid({ apps, launch, context }: {
             onContextMenu={(event) => context(event, app)}
             aria-disabled={unavailable}
             data-app-capability={unavailable ? 'requires-full' : 'available'}
-            title={unavailable ? 'Exige o modo Full / Native Host' : app.name}
+            title={unavailable ? 'Exige o modo Full / Native Host' : (app.comment || app.genericName || app.name)}
           >
-            <span className="start-app-icon">{app.icon}</span>
+            <span className="start-app-icon">
+              {isIconUrl ? (
+                <img
+                  src={app.icon}
+                  alt=""
+                  style={{ width: '32px', height: '32px', objectFit: 'contain' }}
+                  onError={(e) => {
+                    (e.target as HTMLElement).style.display = 'none';
+                    if ((e.target as HTMLElement).parentElement) {
+                      (e.target as HTMLElement).parentElement!.innerText = app.emojiFallback || '🐧';
+                    }
+                  }}
+                />
+              ) : (
+                app.icon || '📦'
+              )}
+            </span>
             <span className="start-app-name">{app.name}</span>
             {unavailable && <small>Modo Full</small>}
           </button>

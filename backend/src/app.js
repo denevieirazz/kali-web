@@ -19,6 +19,7 @@ import { filesRouter } from './files/routes.js';
 import { productRouter } from './product/routes.js';
 import { linuxRuntimeRouter } from './linuxRuntime/routes.js';
 import { xpraHttpProxyMiddleware } from './linuxRuntime/xpraProxy.js';
+import { resolveLinuxIconPath, getMimeTypeForIcon } from './linuxRuntime/iconResolver.js';
 import { createHostTrustPolicy, hasSupervisorTrust } from './auth/hostTrust.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -87,6 +88,24 @@ export function createApp(initialPort, options = {}) {
   // Capability-scoped proxy: mantém Xpra HTTP/HTML5 dentro do origin CloudOS.
   // O token é emitido apenas pela API autenticada da POC e nunca é encaminhado ao Xpra.
   app.use(xpraHttpProxyMiddleware);
+
+  // Public Linux app icon endpoint for <img> tags
+  app.get('/__cloudos/linux-runtime/icons/:id', (req, res) => {
+    try {
+      const distro = req.query?.distro || 'kali-linux';
+      const iconId = req.params.id;
+      const filePath = resolveLinuxIconPath(distro, iconId);
+      if (!filePath || !fs.existsSync(filePath)) {
+        return res.status(404).send('Icon not found');
+      }
+      const mime = getMimeTypeForIcon(filePath);
+      res.setHeader('Content-Type', mime);
+      res.setHeader('Cache-Control', 'public, max-age=604800');
+      res.sendFile(filePath);
+    } catch {
+      res.status(404).send('Icon error');
+    }
+  });
 
   app.use(express.json({ limit: '5mb' }));
 

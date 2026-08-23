@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useWindowManager } from '../../stores/windowManager';
-import { apiClient } from '../../services/apiClient';
+import { apiClient, resolveApiUrl } from '../../services/apiClient';
 import './LinuxRuntimePoc.css';
 
 type PocApp = { id: string; command: string; title: string };
@@ -189,7 +189,9 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
 
   const sessions = status?.sessions ?? [];
   const activeSession = sessions.find(session => session.id === activeSessionId) ?? sessions[0] ?? null;
-  const readyUrl = activeSession && ['ready', 'degraded'].includes(activeSession.state) ? activeSession.clientUrl : null;
+  const readyUrl = activeSession && ['ready', 'degraded'].includes(activeSession.state) && activeSession.clientUrl
+    ? resolveApiUrl(activeSession.clientUrl)
+    : null;
   const selectedTitle = useMemo(
     () => status?.apps.find(app => app.id === selectedApp)?.title ?? selectedApp,
     [selectedApp, status?.apps],
@@ -595,7 +597,7 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
           key={pendingPreflightIframe.runId}
           title="CloudOS Linux Runtime Preflight — Xpra HTML5"
           src={pendingPreflightIframe.clientUrl}
-          sandbox="allow-scripts allow-forms allow-pointer-lock allow-same-origin"
+          sandbox="allow-scripts allow-forms allow-pointer-lock"
           referrerPolicy="no-referrer"
           onLoad={onPreflightFrameLoad}
           aria-hidden="true"

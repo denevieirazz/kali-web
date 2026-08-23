@@ -368,7 +368,7 @@ test('EF2-P0-011: Unified command and transport contract between preflight and r
   assert.match(dryRun, /--bind-tcp=0\.0\.0\.0:14500,auth=env/);
   assert.match(runtime, /--bind-tcp=0\.0\.0\.0:14500,auth=env/);
 
-  assert.match(runtime, /--start-child='?xclock'?/);
+  assert.match(runtime, /--start-child='?(?:dbus-run-session -- )?xclock'?/);
   assert.doesNotMatch(dryRun, /--start-child/);
 });
 

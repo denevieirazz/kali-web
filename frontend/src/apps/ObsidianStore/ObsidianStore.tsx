@@ -254,8 +254,12 @@ export default function ObsidianStore() {
                 <div key={pkg.id} className="app-card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
-                      <div style={{ fontSize: '32px', width: '48px', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.06)', borderRadius: '12px' }}>
-                        {pkg.icon}
+                      <div style={{ fontSize: '32px', width: '48px', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.06)', borderRadius: '12px', overflow: 'hidden' }}>
+                        {typeof pkg.icon === 'string' && (pkg.icon.startsWith('/') || pkg.icon.startsWith('http')) ? (
+                          <img src={pkg.icon} alt="" style={{ width: '32px', height: '32px', objectFit: 'contain' }} onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }} />
+                        ) : (
+                          pkg.icon || '📦'
+                        )}
                       </div>
                       <div>
                         <div style={{ fontWeight: 600, fontSize: '16px', color: '#fff' }}>{pkg.name}</div>

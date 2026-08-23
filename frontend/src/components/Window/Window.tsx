@@ -161,7 +161,13 @@ export default function Window({ windowId, children }: Props) {
       {win.hasFrame && (
         <div className="window-titlebar" onMouseDown={handleTitleMouseDown} onDoubleClick={() => toggleMaximize(windowId)} onContextMenu={handleWindowContextMenu}>
           <div className="window-titlebar-left">
-            <span className="window-icon">{win.icon}</span>
+            <span className="window-icon">
+              {typeof win.icon === 'string' && (win.icon.startsWith('/') || win.icon.startsWith('http')) ? (
+                <img src={win.icon} alt="" style={{ width: '16px', height: '16px', objectFit: 'contain' }} onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }} />
+              ) : (
+                win.icon || '🗔'
+              )}
+            </span>
             <span className="window-title text-ellipsis">{win.title}</span>
           </div>
           <div className="window-controls">

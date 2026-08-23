@@ -251,6 +251,11 @@ export async function launchCatalogApp(id) {
   if (!catalogById.has(id)) await refreshAppCatalog(false);
   const app = catalogById.get(id);
   if (!app) throw Object.assign(new Error('Aplicativo não encontrado no catálogo atual.'), { code: 'APP_NOT_FOUND' });
+  if (app.source === 'wsl' || app.kind === 'wsl-desktop') {
+    throw Object.assign(new Error('Aplicativos Linux só podem ser iniciados pela superfície Xpra contida do CloudOS.'), {
+      code: 'LINUX_CONTAINMENT_REQUIRED'
+    });
+  }
 
   let pid;
   if (app.kind === 'windows-start-app') {
@@ -259,12 +264,6 @@ export async function launchCatalogApp(id) {
     pid = await launchWindowsShortcut(app);
   } else if (app.kind === 'windows-executable') {
     pid = await launchDetached(app.executable, app.args || []);
-  } else if (app.kind === 'wsl-desktop') {
-    const fixedLauncher = 'if command -v gtk-launch >/dev/null 2>&1; then exec gtk-launch "$1"; elif command -v gio >/dev/null 2>&1; then exec gio launch "$2"; else echo "gtk-launch ou gio não encontrado" >&2; exit 127; fi';
-    pid = await launchDetached(WSL_EXE, [
-      '--distribution', app.distribution, '--exec', '/bin/sh', '-lc',
-      fixedLauncher, 'cloudos-launch', app.desktopId, app.desktopPath
-    ]);
   } else {
     throw Object.assign(new Error('Tipo de aplicativo não suportado.'), { code: 'APP_KIND_UNSUPPORTED' });
   }

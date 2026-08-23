@@ -3,7 +3,6 @@ import net from 'node:net';
 import zlib from 'node:zlib';
 import { recordXpraPocProxyEvent, resolveXpraPocProxySession } from './xpraPoc.js';
 import { recordXpraPreflightProxyEvent, resolveXpraPreflightProxySession } from './preflight.js';
-import { resolveWarmSession } from './warmPoolManager.js';
 
 const PREFIX = '/__cloudos/linux-runtime/poc1/';
 function parseProxyRequest(requestUrl) { let url; try { url = new URL(requestUrl, 'http://127.0.0.1'); } catch { return null; } if (!url.pathname.startsWith(PREFIX)) return null; const parts = url.pathname.slice(PREFIX.length).split('/'); const id = parts.shift() || ''; const token = parts.shift() || ''; const targetPath = `/${parts.join('/')}` || '/'; return { id, token, targetPath: `${targetPath}${url.search}` }; }
@@ -45,7 +44,7 @@ function writeProxyError(res, status, message) {
     res.end(message);
   }
 }
-function resolveProxySession(id, token) { return resolveWarmSession(id, token) || resolveXpraPocProxySession(id, token) || resolveXpraPreflightProxySession(id, token); }
+function resolveProxySession(id, token) { return resolveXpraPocProxySession(id, token) || resolveXpraPreflightProxySession(id, token); }
 function recordProxyEvent(session, event) { if (session.preflight === true) recordXpraPreflightProxyEvent(session.id, event); else recordXpraPocProxyEvent(session.id, event); }
 function decompressBuffer(buffer, encoding) {
   if (!encoding || !buffer?.length) return buffer;
@@ -73,6 +72,15 @@ try {
   Object.defineProperty(window, 'localStorage', { get: function() { return mock; } });
 } catch(e) { console.error("Shim storage error:", e); }
 try {
+  window.addEventListener('pointerdown', function() {
+    try { window.focus(); } catch(e) {}
+    try {
+      window.parent.postMessage({
+        type: 'xpra-focus-request',
+        sessionId: ${safeSessionId}
+      }, '*');
+    } catch(e) {}
+  }, true);
   if (${safePassword}) {
     var epSecret = ${safePassword};
     var attachSecret = function() {
@@ -116,12 +124,43 @@ try {
   });
   (function() {
     var _client = undefined;
+    var paintNotified = false;
+    var notifyRender = function(name, extra) {
+      try { window.parent.postMessage(Object.assign({ type: 'xpra-render-event', sessionId: ${safeSessionId}, name: name }, extra || {}), '*'); } catch(e){}
+    };
+    var notifyPaintedCanvas = function() {
+      if (paintNotified) return;
+      var canvas = Array.from(document.querySelectorAll('canvas')).find(function(candidate) {
+        var rect = candidate.getBoundingClientRect();
+        return candidate.width >= 64 && candidate.height >= 64 && rect.width >= 64 && rect.height >= 64;
+      });
+      if (!canvas) return;
+      paintNotified = true;
+      requestAnimationFrame(function() {
+        requestAnimationFrame(function() {
+          notifyRender('frame-painted', {
+            source: 'xpra-canvas',
+            canvasWidth: canvas.width,
+            canvasHeight: canvas.height
+          });
+        });
+      });
+    };
+    var observer = new MutationObserver(notifyPaintedCanvas);
+    observer.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['width', 'height', 'style', 'class']
+    });
+    window.addEventListener('load', function() {
+      notifyPaintedCanvas();
+      var paintProbe = setInterval(notifyPaintedCanvas, 100);
+      setTimeout(function() { clearInterval(paintProbe); observer.disconnect(); }, 30000);
+    });
     var hookClient = function(c) {
       if (!c || c._hooked) return;
       c._hooked = true;
-      var notifyRender = function(name, extra) {
-        try { window.parent.postMessage(Object.assign({ type: 'xpra-render-event', sessionId: ${safeSessionId}, name: name }, extra || {}), '*'); } catch(e){}
-      };
       var origOnConnect = c.on_connect;
       c.on_connect = function() {
         notifyRender('connected');
@@ -130,22 +169,25 @@ try {
       var origProcessNewWindow = c._process_new_window;
       if (origProcessNewWindow) {
         c._process_new_window = function(packet) {
-          notifyRender('frame-painted', { wid: packet && packet[1] });
-          return origProcessNewWindow.apply(this, arguments);
+          var result = origProcessNewWindow.apply(this, arguments);
+          notifyPaintedCanvas();
+          return result;
         };
       }
       var origProcessDraw = c._process_draw;
       if (origProcessDraw) {
         c._process_draw = function(packet) {
-          notifyRender('frame-painted', { wid: packet && packet[1] });
-          return origProcessDraw.apply(this, arguments);
+          var result = origProcessDraw.apply(this, arguments);
+          notifyPaintedCanvas();
+          return result;
         };
       }
       var origProcessOR = c._process_new_override_redirect;
       if (origProcessOR) {
         c._process_new_override_redirect = function(packet) {
-          notifyRender('frame-painted', { wid: packet && packet[1] });
-          return origProcessOR.apply(this, arguments);
+          var result = origProcessOR.apply(this, arguments);
+          notifyPaintedCanvas();
+          return result;
         };
       }
     };
@@ -253,4 +295,4 @@ function serializeUpgradeRequest(req, targetPath, session) {
   return lines.join('\r\n');
 }
 export function handleXpraProxyUpgrade(req, socket, head) { const parsed = parseProxyRequest(req.url || ''); if (!parsed) return false; const session = resolveProxySession(parsed.id, parsed.token); if (!session) { sendUpgradeFailure(socket, '404', 'Not Found'); return true; } recordProxyEvent(session, 'websocket'); const upstream = net.createConnection({ host: '127.0.0.1', port: session.port }); upstream.setTimeout(5000, () => upstream.destroy(new Error('Timeout no proxy WebSocket Xpra.'))); upstream.once('connect', () => { upstream.setTimeout(0); upstream.write(serializeUpgradeRequest(req, parsed.targetPath, session)); if (head?.length) upstream.write(head); socket.pipe(upstream).pipe(socket); }); upstream.once('error', () => { if (!socket.destroyed) sendUpgradeFailure(socket, '502', 'Bad Gateway'); }); socket.once('error', () => upstream.destroy()); socket.once('close', () => upstream.destroy()); return true; }
-export const __test = { parseProxyRequest, rewriteCsp, rewriteLocation, buildResponseHeaders, serializeUpgradeRequest };
+export const __test = { parseProxyRequest, rewriteCsp, rewriteLocation, buildResponseHeaders, serializeUpgradeRequest, createOpaqueShim };

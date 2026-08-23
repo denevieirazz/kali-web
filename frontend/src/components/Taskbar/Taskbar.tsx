@@ -117,7 +117,13 @@ export default function Taskbar() {
             onClick={() => handleTaskbarItemClick(win.id)}
             title={win.title}
           >
-            <span className="taskbar-app-icon">{win.icon}</span>
+            <span className="taskbar-app-icon">
+              {typeof win.icon === 'string' && (win.icon.startsWith('/') || win.icon.startsWith('http')) ? (
+                <img src={win.icon} alt="" style={{ width: '20px', height: '20px', objectFit: 'contain' }} onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }} />
+              ) : (
+                win.icon || '🗔'
+              )}
+            </span>
             <div className="taskbar-app-indicator" />
           </button>
         ))}

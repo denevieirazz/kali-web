@@ -182,7 +182,17 @@ export function setupTerminalWebSocket(wss) {
           let spawnArgs = ['-NoLogo'];
           if (requestedProfile === 'wsl' && snapshot?.operational && targetDistro) {
             spawnExe = WSL_EXE;
-            spawnArgs = ['-d', targetDistro, '--', '/bin/bash', '-l'];
+            spawnArgs = [
+              '-d', targetDistro, '--exec', '/usr/bin/env',
+              '-u', 'DISPLAY',
+              '-u', 'WAYLAND_DISPLAY',
+              '-u', 'WAYLAND_SOCKET',
+              '-u', 'PULSE_SERVER',
+              'GDK_BACKEND=x11',
+              'QT_QPA_PLATFORM=xcb',
+              'MOZ_ENABLE_WAYLAND=0',
+              '/bin/bash', '-l'
+            ];
           }
 
           try {
