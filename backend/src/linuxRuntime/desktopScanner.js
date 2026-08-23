@@ -20,31 +20,73 @@ const SEARCH_SUBDIRS = [
   'var/lib/flatpak/exports/share/applications'
 ];
 
+const TECHNICAL_NOISE_IDS = new Set([
+  'debian-xterm',
+  'debian-uxterm',
+  'xterm',
+  'uxterm',
+  'xpra-gui',
+  'display-im7.q16',
+  'display-im6.q16',
+  'display-im7',
+  'display-im6',
+  'lstopo',
+  'hxtopo',
+  'zenmap-root',
+  'texdoctk',
+  'org.gnome.yelp',
+  'yad-icon-browser',
+  'avahi-discover',
+  'bssh',
+  'bvnc',
+  'qv4l2',
+  'qvidcap',
+  'software-properties-gtk',
+  'software-properties-drivers',
+  'gcr-viewer',
+  'gcr-prompter',
+  'info',
+  'im-config',
+  'org.freedesktop.ibus.setup'
+]);
+
 function cleanExec(raw) {
   if (!raw) return '';
   // Strip field codes: %f, %F, %u, %U, %d, %D, %n, %N, %i, %c, %k, %v, %m
   return String(raw).replace(/%[fFuUdDnNickvm]/g, '').trim();
 }
 
-function mapCategory(cats) {
+function mapCategory(cats, name = '', id = '') {
   const catSet = new Set(cats.map(c => c.toLowerCase()));
-  if ([...catSet].some(c => ['development', 'programming', 'ide', 'debugger', 'building'].includes(c))) {
+  const idLower = id.toLowerCase();
+  
+  if (catSet.has('development') || catSet.has('programming') || catSet.has('ide') || catSet.has('debugger') || catSet.has('building') ||
+      ['geany', 'code', 'cutter', 're.rizin.cutter', 'edb', 'dbeaver', 'sqlitebrowser', 'imhex', 'hexwalk', 'groovyconsole', 'io.github.horsicq.detect-it-easy'].includes(idLower)) {
     return 'development';
   }
-  if ([...catSet].some(c => ['network', 'webbrowser', 'email', 'chat', 'feed', 'filetransfer', 'remoteaccess'].includes(c))) {
+  if (catSet.has('network') || catSet.has('webbrowser') || catSet.has('email') || catSet.has('chat') || catSet.has('filetransfer') ||
+      ['firefox-esr', 'firefox', 'chromium', 'wireshark', 'org.wireshark.wireshark', 'caido', 'zenmap', 'ettercap', 'fwbuilder', 'minicom', 'routerkeygen', 'xfreerdp', 'hydra-gtk', 'xsser', 'driftnet'].includes(idLower)) {
     return 'internet';
   }
-  if ([...catSet].some(c => ['graphics', '2dgraphics', 'rastergraphics', 'vectorgraphics', 'photography', 'viewer', 'image'].includes(c))) {
-    return 'graphics';
-  }
-  if ([...catSet].some(c => ['audiovideo', 'audio', 'video', 'player', 'recorder', 'music', 'midi'].includes(c))) {
-    return 'multimedia';
-  }
-  if ([...catSet].some(c => ['office', 'wordprocessor', 'spreadsheet', 'presentation', 'publishing', 'finance', 'projectmanagement'].includes(c))) {
+  if (catSet.has('office') || catSet.has('wordprocessor') || catSet.has('spreadsheet') || catSet.has('presentation') || catSet.has('publishing') || catSet.has('texteditor') ||
+      ['obsidian', 'cherrytree', 'zim', 'org.zim_wiki.zim', 'joplin', 'mousepad', 'org.xfce.mousepad', 'libreoffice', 'mcedit', 'gvim'].includes(idLower)) {
     return 'office';
   }
-  if ([...catSet].some(c => ['security', 'networksecurity', 'forensics', 'kali', 'penetrationtesting', 'vulnerability'].includes(c))) {
+  if (catSet.has('audiovideo') || catSet.has('audio') || catSet.has('video') || catSet.has('player') || catSet.has('recorder') || catSet.has('music') ||
+      ['vlc', 'gqrx', 'dk.gqrx.gqrx'].includes(idLower)) {
+    return 'multimedia';
+  }
+  if (catSet.has('graphics') || catSet.has('2dgraphics') || catSet.has('rastergraphics') || catSet.has('vectorgraphics') || catSet.has('photography') || catSet.has('viewer') ||
+      ['gimp', 'inkscape', 'stegosuite', 'org.stegosuite', 'display-im7.q16', 'display-im6.q16'].includes(idLower)) {
+    return 'graphics';
+  }
+  if (catSet.has('security') || catSet.has('networksecurity') || catSet.has('forensics') || catSet.has('kali') || catSet.has('penetrationtesting') || catSet.has('audit') ||
+      ['gtkhash', 'org.gtkhash.gtkhash', 'ophcrack', 'guymager', 'rfdump', 'chirp', 'cutecom', 'lynis', 'tiger', 'kali-autopilot'].includes(idLower)) {
     return 'security';
+  }
+  if (catSet.has('system') || catSet.has('settings') || catSet.has('hardware') || catSet.has('packagemanager') || catSet.has('filesystem') ||
+      ['gparted', 'galculator', 'system-config-printer', 'org.gnome.terminal', 'mc', 'lstopo'].includes(idLower)) {
+    return 'system';
   }
   return 'utilities';
 }
@@ -53,21 +95,22 @@ function getEmojiFallback(category, name) {
   const nameLower = String(name || '').toLowerCase();
   if (nameLower.includes('terminal') || nameLower.includes('uxterm') || nameLower.includes('xterm')) return '🖥️';
   if (nameLower.includes('calc')) return '🧮';
-  if (nameLower.includes('edit') || nameLower.includes('pad') || nameLower.includes('vim') || nameLower.includes('note')) return '📝';
+  if (nameLower.includes('edit') || nameLower.includes('pad') || nameLower.includes('vim') || nameLower.includes('note') || nameLower.includes('geany')) return '📝';
   if (nameLower.includes('browser') || nameLower.includes('web') || nameLower.includes('fox') || nameLower.includes('chrome')) return '🌐';
   if (nameLower.includes('view') || nameLower.includes('image') || nameLower.includes('photo') || nameLower.includes('paint') || nameLower.includes('gimp')) return '🎨';
   if (nameLower.includes('play') || nameLower.includes('media') || nameLower.includes('music') || nameLower.includes('audio') || nameLower.includes('vlc')) return '🎬';
   if (nameLower.includes('parted') || nameLower.includes('disk') || nameLower.includes('file')) return '📁';
-  if (nameLower.includes('shark') || nameLower.includes('sniff') || nameLower.includes('scan') || nameLower.includes('nmap')) return '🛡️';
+  if (nameLower.includes('shark') || nameLower.includes('sniff') || nameLower.includes('scan') || nameLower.includes('nmap') || nameLower.includes('hash')) return '🛡️';
 
   const fallbacks = {
     development: '💻',
     internet: '🌐',
-    graphics: '🎨',
-    multimedia: '🎬',
     office: '📄',
+    multimedia: '🎬',
+    graphics: '🎨',
     security: '🛡️',
-    utilities: '⚙️'
+    system: '⚙️',
+    utilities: '🔧'
   };
   return fallbacks[category] || '📦';
 }
@@ -105,9 +148,15 @@ function parseDesktopFileContent(content, filename) {
   const terminal = ['true', '1'].includes(String(props.Terminal || '').toLowerCase());
   const catsRaw = props.Categories || '';
   const categories = catsRaw.split(';').map(c => c.trim()).filter(Boolean);
-  const category = mapCategory(categories);
+  const category = mapCategory(categories, name, baseId);
   const emojiFallback = getEmojiFallback(category, name);
   const command = cleanExec(rawExec);
+
+  const isTechnical = TECHNICAL_NOISE_IDS.has(baseId) ||
+                      ['su-to-root', 'exec-in-shell'].some(prefix => rawExec.includes(prefix)) ||
+                      (terminal && !['vim', 'mc', 'mcedit'].includes(baseId));
+
+  const isUserApp = !isTechnical;
 
   return {
     id: baseId,
@@ -124,7 +173,9 @@ function parseDesktopFileContent(content, filename) {
     terminal,
     desktopFile: filename,
     installed: true,
-    isDiscovered: true
+    isDiscovered: true,
+    isUserApp,
+    isTechnical
   };
 }
 
