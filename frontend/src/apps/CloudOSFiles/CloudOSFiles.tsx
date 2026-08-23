@@ -512,10 +512,56 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
     }
   }, [selectedName, selectEntry, visibleEntries]);
 
+  const handleDragStart = useCallback((event: React.DragEvent, entry: CloudFileEntry) => {
+    if (viewMode !== 'files' || entry.symlink || entry.kind === 'symlink') return;
+    const items = selectedNames.has(entry.name) && selectedNames.size > 0
+      ? Array.from(selectedNames)
+      : [entry.name];
+    event.dataTransfer.setData('application/json', JSON.stringify({
+      items,
+      source,
+      sourcePath: currentPath,
+    }));
+    event.dataTransfer.effectAllowed = 'move';
+  }, [currentPath, selectedNames, source, viewMode]);
+
   const handleDropOnFolder = useCallback(async (event: React.DragEvent, targetFolder: CloudFileEntry) => {
     if (targetFolder.kind !== 'directory' || source !== 'opfs') return;
     event.preventDefault();
     event.stopPropagation();
+
+    // 1. Internal item drag & drop move
+    const rawData = event.dataTransfer.getData('application/json');
+    if (rawData) {
+      try {
+        const payload = JSON.parse(rawData);
+        if (payload && Array.isArray(payload.items) && payload.source === source) {
+          if (payload.items.includes(targetFolder.name)) return;
+          setIsLoading(true);
+          const destPath = [...currentPath, targetFolder.name];
+          for (const itemName of payload.items) {
+            const itemEntry = visibleEntries.find(e => e.name === itemName);
+            if (!itemEntry) continue;
+            await fileSourceFacade.paste(source, {
+              entry: itemEntry,
+              action: 'cut',
+              source,
+              sourcePath: payload.sourcePath || currentPath,
+            }, destPath, { signal: new AbortController().signal });
+          }
+          setSelectedNames(new Set());
+          setSelectedName(null);
+          await loadDirectory();
+          return;
+        }
+      } catch (err: any) {
+        setErrorMessage(err.message || 'Falha ao mover itens para a subpasta.');
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    // 2. External host files upload drop
     if (event.dataTransfer.files.length) {
       setIsLoading(true);
       try {
@@ -527,7 +573,7 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
         setIsLoading(false);
       }
     }
-  }, [currentPath, loadDirectory, source]);
+  }, [currentPath, loadDirectory, source, visibleEntries]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -630,6 +676,8 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
                 return <article
                   key={`${entry.name}-${entry.trashId || ''}`}
                   className={`cf-item ${selected ? 'selected' : ''} ${symlink ? 'cf-item--symlink' : ''}`}
+                  draggable={viewMode === 'files' && !symlink}
+                  onDragStart={event => handleDragStart(event, entry)}
                   onClick={event => handleClickEntry(event, entry)}
                   onDoubleClick={() => void openEntry(entry)}
                   onContextMenu={event => openEntryContextMenu(event, entry)}
