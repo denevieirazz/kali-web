@@ -222,7 +222,8 @@ linuxRuntimeRouter.post('/launch', async (req, res) => {
       app: req.body?.appId || req.body?.app || 'firefox',
       ownerId: owner,
       distribution: req.body?.distribution,
-      filePath: req.body?.filePath
+      filePath: req.body?.filePath,
+      reuseExisting: req.body?.reuseExisting === true,
     });
     res.status(201).json({ session });
   } catch (error) {

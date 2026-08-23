@@ -96,43 +96,39 @@ function serializeLedgerSession(session) {
   };
 }
 function readLedger() { try { const parsed = JSON.parse(fs.readFileSync(LEDGER_FILE, 'utf8')); return Array.isArray(parsed?.sessions) ? parsed.sessions : []; } catch { return []; } }
-function writeLedger() { const live = [...sessions.values()].filter(s => !['stopped', 'failed'].includes(s.state)).map(serializeLedgerSession); try { if (!live.length) return fs.rmSync(LEDGER_FILE, { force: true }); const temp = `${LEDGER_FILE}.tmp`; fs.writeFileSync(temp, JSON.stringify({ version: 1, sessions: live }, null, 2), 'utf8'); fs.renameSync(temp, LEDGER_FILE); } catch {} }
+function writeLedgerEntries(entries) { try { if (!entries.length) return fs.rmSync(LEDGER_FILE, { force: true }); const temp = `${LEDGER_FILE}.tmp`; fs.writeFileSync(temp, JSON.stringify({ version: 1, sessions: entries }, null, 2), 'utf8'); fs.renameSync(temp, LEDGER_FILE); } catch {} }
+function writeLedger() { const live = [...sessions.values()].filter(s => !['stopped', 'failed'].includes(s.state)).map(serializeLedgerSession); writeLedgerEntries(live); }
 
 export async function restoreSessionsFromLedger() {
-  const ledger = readLedger();
-  if (!ledger.length) return;
-  for (const s of ledger) {
-    if (!s.port || !s.id) continue;
-    try {
-      const tcp = await probeWindowsTcp(s.port, 250);
-      if (tcp.ok) {
-        const restored = {
-          id: s.id,
-          generation: s.generation || 1,
-          ownerId: s.ownerId,
-          proxyToken: crypto.randomBytes(24).toString('hex'),
-          xpraPassword: 'test-only-secret',
-          app: s.app,
-          title: s.title || s.app,
-          distribution: s.distribution || 'kali-linux',
-          port: s.port,
-          display: s.display,
-          state: 'ready',
-          startedAt: s.startedAt || new Date().toISOString(),
-          leaseExpiresAt: Date.now() + LEASE_TTL_MS,
-          xpraPid: s.pids?.xpra || null,
-          appPid: s.pids?.app || null,
-          xorgPid: s.pids?.xorg || null,
-          xpraVersion: 'Xpra',
-          child: null,
-          diagnostics: [],
-          metrics: { preflightMs: 0, restartCount: 0, reconnectCount: 0, healthFailures: 0, proxyHttpRequests: 0, proxyWebSocketConnections: 0 }
-        };
-        sessions.set(s.id, restored);
-        reservedPorts.add(s.port);
+  return queueLifecycle(async () => {
+    const ledger = readLedger();
+    if (!ledger.length) return { cleaned: [], remaining: [] };
+    const cleaned = [];
+    const remaining = [];
+
+    for (const entry of ledger) {
+      const pair = validateLedgerPair(entry);
+      if (!pair.ok || !entry.id || !entry.distribution) continue;
+      try {
+        if (!await validateInstalledAsync(entry.distribution)) {
+          remaining.push(entry);
+          continue;
+        }
+        await stopLedgerEntry(entry);
+        const [linux, tcp] = await Promise.all([
+          probeWslServer({ distribution: entry.distribution, display: entry.display }),
+          probeWindowsTcp(entry.port, 500),
+        ]);
+        if (linux.ok || tcp.ok) remaining.push(entry);
+        else cleaned.push(entry.id);
+      } catch {
+        remaining.push(entry);
       }
-    } catch {}
-  }
+    }
+
+    writeLedgerEntries(remaining);
+    return { cleaned, remaining: remaining.map(entry => entry.id) };
+  });
 }
 
 export async function resolvePocApp(appId, distro = 'kali-linux') {
@@ -153,7 +149,6 @@ export async function resolvePocApp(appId, distro = 'kali-linux') {
       isDiscovered: true
     };
   }
-  // Generic fallback if clean binary name
   const cleanBinary = cleanId.replace(/[^a-zA-Z0-9._+-]/g, '');
   if (cleanBinary) {
     return {
@@ -256,11 +251,14 @@ export async function checkWslInteropDisabled(distribution) {
       return interopCache;
     }
     return { ok: false, code: 'WSL_INTEROP_ENABLED', error: 'WSL interop está habilitado. A POC 1 exige interop desabilitado.', evidence: 'ENABLED', durationMs: elapsedMs(started) };
-  } catch (error) {
-    if (interopCache) return interopCache;
-    interopCache = { ok: true, code: 'WSL_INTEROP_ASSUMED_VALID', error: null, evidence: 'FALLBACK', durationMs: elapsedMs(started) };
-    interopCacheTime = Date.now();
-    return interopCache;
+  } catch {
+    return {
+      ok: false,
+      code: 'WSL_INTEROP_CHECK_FAILED',
+      error: 'Não foi possível confirmar que o WSL interop está desabilitado.',
+      evidence: 'CHECK_FAILED',
+      durationMs: elapsedMs(started),
+    };
   }
 }
 
@@ -467,7 +465,7 @@ function releasePort(port) {
   reservedPorts.delete(port);
 }
 
-export async function startXpraPoc({ app, distribution, ownerId, generation = 1, filePath = null } = {}) {
+export async function startXpraPoc({ app, distribution, ownerId, generation = 1, filePath = null, reuseExisting = false } = {}) {
   return queueLifecycle(async () => {
     const snapshot = await getWslSnapshot();
     const distro = typeof distribution === 'string' && distribution.trim() ? distribution.trim() : snapshot.preferred || snapshot.default || 'kali-linux';
@@ -475,8 +473,21 @@ export async function startXpraPoc({ app, distribution, ownerId, generation = 1,
     if (!appDef) throw createPocError('LINUX_POC_APP_NOT_ALLOWED', 'Aplicativo não permitido.');
     const appId = appDef.id;
     const owner = normalizeOwnerId(ownerId);
+    const requestedFilePath = typeof filePath === 'string' && filePath.trim() ? filePath.trim() : null;
 
-    // Multiwindow: each launch from a new window instance gets its own independent session
+    if (reuseExisting) {
+      const existing = [...sessions.values()].find(s =>
+        s.ownerId === owner &&
+        s.app === appId &&
+        (s.requestedFilePath || null) === requestedFilePath &&
+        ['starting', 'ready', 'degraded'].includes(s.state)
+      );
+      if (existing) {
+        existing.leaseExpiresAt = Date.now() + LEASE_TTL_MS;
+        return publicSession(existing);
+      }
+    }
+
     if (generation === 0 && ownerId === 'test-reuse') {
       const existing = [...sessions.values()].find(s => s.ownerId === owner && s.app === appId && ['starting', 'ready', 'degraded'].includes(s.state));
       if (existing) return publicSession(existing);
@@ -508,6 +519,7 @@ export async function startXpraPoc({ app, distribution, ownerId, generation = 1,
       state: 'starting',
       startedAt,
       leaseExpiresAt,
+      requestedFilePath,
       xpraPid: null,
       appPid: null,
       xorgPid: null,
@@ -518,8 +530,8 @@ export async function startXpraPoc({ app, distribution, ownerId, generation = 1,
     };
 
     let appCommand = appDef.command.replaceAll('{sessionId}', id);
-    if (filePath && typeof filePath === 'string' && filePath.trim()) {
-      let linuxPath = filePath.trim();
+    if (requestedFilePath) {
+      let linuxPath = requestedFilePath;
       if (/^[a-zA-Z]:[\\/]/.test(linuxPath)) {
         const drive = linuxPath.charAt(0).toLowerCase();
         linuxPath = `/mnt/${drive}/${linuxPath.slice(3).replace(/\\/g, '/')}`;
@@ -640,7 +652,7 @@ export async function restartXpraPoc(id, ownerId = null) {
   if (!current) throw createPocError('LINUX_POC_SESSION_NOT_FOUND', 'Sessão não encontrada.');
   if (ownerId && current.ownerId !== normalizeOwnerId(ownerId)) throw createPocError('LINUX_POC_SESSION_OWNER_MISMATCH', 'Sessão pertence a outro owner.');
   const nextGeneration = (current.generation || 1) + 1;
-  const config = { app: current.app, distribution: current.distribution, ownerId: current.ownerId, generation: nextGeneration };
+  const config = { app: current.app, distribution: current.distribution, ownerId: current.ownerId, generation: nextGeneration, filePath: current.requestedFilePath };
   await stopXpraPoc(id, current.ownerId);
   return startXpraPoc(config);
 }

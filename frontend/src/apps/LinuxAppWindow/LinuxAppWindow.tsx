@@ -36,6 +36,8 @@ export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [session, setSession] = useState<LaunchSession | null>(null);
+  const [reconnectAttempt, setReconnectAttempt] = useState(0);
+  const [recoveryGeneration, setRecoveryGeneration] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const focusWindow = useWindowManager(state => state.focusWindow);
 
@@ -45,14 +47,23 @@ export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps
     iframe?.contentWindow?.focus();
   }, []);
 
-  const [reconnectAttempt, setReconnectAttempt] = useState(0);
+  const stopSessionBestEffort = useCallback((sessionId: string) => {
+    return apiClient(`/api/linux-runtime/poc1/sessions/${encodeURIComponent(sessionId)}/stop`, {
+      method: 'POST',
+      body: JSON.stringify({ ownerId: windowId }),
+      timeoutMs: 4000,
+      keepalive: true,
+      suppressUnauthorizedHandler: true,
+    }).catch(() => undefined);
+  }, [windowId]);
 
   useEffect(() => {
     let cancelled = false;
-    let retryTimer: any = null;
+    let retryTimer: ReturnType<typeof window.setTimeout> | null = null;
+    let attempt = 0;
 
     async function startApp() {
-      if (reconnectAttempt === 0) setLoading(true);
+      if (attempt === 0) setLoading(true);
       setError(null);
       try {
         const res = await apiClient<{ session: LaunchSession }>('/api/linux-runtime/launch', {
@@ -60,31 +71,37 @@ export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps
           body: JSON.stringify({
             appId: targetAppId,
             ownerId: windowId,
-            filePath: targetFilePath
+            filePath: targetFilePath,
+            reuseExisting: true,
           }),
           timeoutMs: 45_000,
         });
 
-        if (cancelled) return;
-        if (res?.session?.clientUrl) {
-          setSession(res.session);
-          setReconnectAttempt(0);
-        } else {
+        if (!res?.session?.clientUrl) {
           throw new Error('Não foi possível inicializar a superfície do aplicativo.');
         }
+
+        if (cancelled) {
+          void stopSessionBestEffort(res.session.id);
+          return;
+        }
+
+        setSession(res.session);
+        setReconnectAttempt(0);
       } catch (err) {
-        if (!cancelled) {
-          const msg = err instanceof Error ? err.message : String(err);
-          // Se for erro de rede/transporte, entra em modo de reconexão automática
-          if (reconnectAttempt < 30) {
-            setError(`Conexão interrompida. Tentando reconectar automaticamente (${reconnectAttempt + 1})...`);
-            retryTimer = setTimeout(() => {
-              if (!cancelled) setReconnectAttempt(prev => prev + 1);
-            }, 2000);
-          } else {
-            setError(msg);
-            setLoading(false);
-          }
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        if (attempt < 30) {
+          attempt += 1;
+          setReconnectAttempt(attempt);
+          setError(`Conexão interrompida. Tentando reconectar automaticamente (${attempt})...`);
+          retryTimer = window.setTimeout(() => {
+            retryTimer = null;
+            if (!cancelled) void startApp();
+          }, 2000);
+        } else {
+          setError(msg);
+          setLoading(false);
         }
       }
     }
@@ -93,9 +110,58 @@ export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps
 
     return () => {
       cancelled = true;
-      if (retryTimer) clearTimeout(retryTimer);
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
     };
-  }, [targetAppId, windowId, targetFilePath, reconnectAttempt]);
+  }, [targetAppId, windowId, targetFilePath, recoveryGeneration, stopSessionBestEffort]);
+
+  useEffect(() => {
+    if (!session?.id) return undefined;
+    const sessionId = session.id;
+    return () => {
+      void stopSessionBestEffort(sessionId);
+    };
+  }, [session?.id, stopSessionBestEffort]);
+
+  useEffect(() => {
+    if (!session?.id) return undefined;
+    let disposed = false;
+    let failures = 0;
+    let timer: ReturnType<typeof window.setTimeout> | null = null;
+    const sessionId = session.id;
+
+    const schedule = () => {
+      timer = window.setTimeout(() => { void poll(); }, 5000);
+    };
+
+    const poll = async () => {
+      try {
+        const result = await apiClient<{ health?: { healthy?: boolean } }>(
+          `/api/linux-runtime/poc1/sessions/${encodeURIComponent(sessionId)}/health`,
+          { timeoutMs: 5000, suppressUnauthorizedHandler: true },
+        );
+        if (disposed) return;
+        failures = result?.health?.healthy ? 0 : failures + 1;
+      } catch {
+        if (disposed) return;
+        failures += 1;
+      }
+
+      if (failures >= 2) {
+        setError('Conexão com o runtime Linux foi perdida. Restaurando a sessão automaticamente...');
+        setLoading(true);
+        setSession(null);
+        setRecoveryGeneration(value => value + 1);
+        return;
+      }
+      schedule();
+    };
+
+    schedule();
+    return () => {
+      disposed = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [session?.id]);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -142,6 +208,7 @@ export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps
           </div>
           <div className="linux-app-window__spinner" />
           <span className="linux-app-window__title">Iniciando {targetTitle}…</span>
+          {reconnectAttempt > 0 && <small>Tentativa de reconexão {reconnectAttempt}</small>}
         </div>
       )}
 
