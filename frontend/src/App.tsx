@@ -13,6 +13,7 @@ import WorkflowBatch4Shell from './components/Workflow/WorkflowBatch4Shell';
 import WorkflowShell from './components/Workflow/WorkflowShell';
 import OpenWithModal from './components/OpenWithModal/OpenWithModal';
 import DownloadManagerModal from './components/DownloadManager/DownloadManagerModal';
+import kernel from './core/kernel';
 import {
   useCriticalSubsystemWatchdog,
   useDocumentTheme,
@@ -37,8 +38,11 @@ import './cloudosEnhancements.css';
 
 export default function App() {
   const bootPhase = useSystem(state => state.bootPhase);
+  const setBootPhase = useSystem(state => state.setBootPhase);
   const theme = useSystem(state => state.theme);
   const currentUser = useUserStore(state => state.currentUser);
+  const isAuthenticated = useUserStore(state => state.isAuthenticated);
+  const setupStatus = useUserStore(state => state.setupStatus);
   const validateSession = useUserStore(state => state.validateSession);
   const getRegistryValue = useRegistry(state => state.getValue);
 
@@ -55,6 +59,18 @@ export default function App() {
       openFile,
     };
   }, [validateSession]);
+
+  // The backend is the source of truth for whether first-boot setup still exists.
+  // If the browser-local OOBE marker was lost but an administrator already exists,
+  // hand off to Winlogon instead of mounting a second setup wizard. Do not perform
+  // this handoff while the current OOBE has already authenticated/created its user,
+  // because that flow still needs to finish its one-time recovery-code step.
+  useEffect(() => {
+    if (bootPhase !== 'setup' || setupStatus !== 'complete' || isAuthenticated || currentUser) return;
+    localStorage.setItem('cloudos-oobe-completed', 'true');
+    setBootPhase('login');
+    kernel.bootPhase = 'WINLOGON';
+  }, [bootPhase, currentUser, isAuthenticated, setBootPhase, setupStatus]);
 
   useNativeHostHandshake();
   useKernelIdentitySync(currentUser);
