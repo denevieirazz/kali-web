@@ -339,7 +339,7 @@ export async function checkXpraPocReadiness({ app = 'xclock', distribution, forc
   const snapshot = await getWslSnapshot();
   checks.wsl = { ok: snapshot.installed && snapshot.operational };
   if (!checks.wsl.ok) return { ready: false, errorCode: snapshot.errorCode || 'WSL_UNAVAILABLE', error: snapshot.error || 'WSL indisponível.', checks, durationMs: elapsedMs(started) };
-  
+
   const selected = typeof distribution === 'string' && distribution.trim() ? distribution.trim() : snapshot.preferred || snapshot.default || 'kali-linux';
   checks.distribution = { ok: true, name: selected };
 

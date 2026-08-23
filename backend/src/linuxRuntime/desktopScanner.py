@@ -63,7 +63,7 @@ def get_emoji_fallback(category, name):
         return '💾'
     if 'shark' in name_lower or 'sniff' in name_lower or 'scan' in name_lower:
         return '🦈'
-    
+
     fallbacks = {
         'development': '💻',
         'internet': '🌐',

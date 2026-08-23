@@ -163,6 +163,38 @@ const PACKAGE_STATUS_SCRIPT = [
   'done'
 ].join('\n');
 
+function commandBinary(command) {
+  return String(command || '').trim().split(/\s+/)[0].split('/').pop() || '';
+}
+
+function normalizedCatalogKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function discoveryKeys(app) {
+  return [app?.id, app?.desktopId, app?.packageName, commandBinary(app?.command)]
+    .map(normalizedCatalogKey)
+    .filter(Boolean);
+}
+
+function buildDiscoveryIndex(discovered) {
+  const index = new Map();
+  for (const app of discovered) {
+    for (const key of discoveryKeys(app)) {
+      if (!index.has(key)) index.set(key, app);
+    }
+  }
+  return index;
+}
+
+function findDiscoveredForCurated(app, discoveryIndex) {
+  for (const key of discoveryKeys(app)) {
+    const discovered = discoveryIndex.get(key);
+    if (discovered) return discovered;
+  }
+  return null;
+}
+
 export function parsePackageStatuses(output, catalog = CURATED_LINUX_APPS) {
   const statusByCommand = new Map();
   const statusByBinary = new Map();
@@ -171,11 +203,11 @@ export function parsePackageStatuses(output, catalog = CURATED_LINUX_APPS) {
     if (!cmd) continue;
     const isInstalled = rawInstalled === '1';
     statusByCommand.set(cmd, isInstalled);
-    const bin = cmd.trim().split(/\s+/)[0];
+    const bin = commandBinary(cmd);
     if (bin) statusByBinary.set(bin, isInstalled);
   }
   return catalog.map((app) => {
-    const bin = app.command.trim().split(/\s+/)[0];
+    const bin = commandBinary(app.command);
     const installed = statusByCommand.has(app.command)
       ? statusByCommand.get(app.command) === true
       : (statusByBinary.get(bin) === true);
@@ -194,8 +226,73 @@ export function parsePackageStatuses(output, catalog = CURATED_LINUX_APPS) {
   });
 }
 
-export async function listLinuxPackages(requestedDistribution) {
-  const snapshot = await getWslSnapshot();
+export function mergeLinuxPackageCatalog(discovered = [], statusMap = new Map()) {
+  const safeDiscovered = Array.isArray(discovered) ? discovered : [];
+  const discoveryIndex = buildDiscoveryIndex(safeDiscovered);
+
+  const curatedWithStatus = CURATED_LINUX_APPS.map(app => {
+    const bin = commandBinary(app.command);
+    const disc = findDiscoveredForCurated(app, discoveryIndex);
+    const isInstalled = statusMap.get(bin) === true || Boolean(disc);
+    return {
+      id: app.id,
+      name: app.name,
+      packageName: app.packageName,
+      command: app.command,
+      category: app.category,
+      description: app.description,
+      icon: disc?.iconUrl || app.icon,
+      iconName: disc?.iconName || null,
+      iconUrl: disc?.iconUrl || null,
+      emojiFallback: app.icon,
+      isPopular: Boolean(app.isPopular),
+      desktopId: app.desktopId || app.id,
+      mimeTypes: Array.isArray(disc?.mimeTypes) ? disc.mimeTypes : [],
+      installed: isInstalled,
+      isCurated: true,
+      isUserApp: true,
+      isTechnical: false
+    };
+  });
+
+  const curatedKeys = new Set();
+  for (const app of CURATED_LINUX_APPS) {
+    for (const key of discoveryKeys(app)) curatedKeys.add(key);
+  }
+
+  const additionalDiscovered = safeDiscovered.filter(app => {
+    return !discoveryKeys(app).some(key => curatedKeys.has(key));
+  }).map(app => ({
+    id: app.id,
+    name: app.name,
+    genericName: app.genericName,
+    packageName: app.packageName || app.id,
+    command: app.command,
+    category: app.category,
+    categories: app.categories,
+    description: app.comment || app.genericName || `${app.name} para Linux`,
+    icon: app.iconUrl || app.emojiFallback,
+    iconName: app.iconName,
+    iconUrl: app.iconUrl,
+    emojiFallback: app.emojiFallback,
+    isPopular: false,
+    desktopId: app.desktopId || app.id,
+    terminal: app.terminal,
+    mimeTypes: Array.isArray(app.mimeTypes) ? app.mimeTypes : [],
+    installed: true,
+    isDiscovered: true,
+    isUserApp: app.isUserApp !== false,
+    isTechnical: app.isTechnical === true
+  }));
+
+  return [...curatedWithStatus, ...additionalDiscovered];
+}
+
+export async function listLinuxPackages(requestedDistribution, dependencies = {}) {
+  const getSnapshot = dependencies.getWslSnapshot || getWslSnapshot;
+  const scanApps = dependencies.scanDiscoveredLinuxApps || scanDiscoveredLinuxApps;
+  const runExecFile = dependencies.execFileAsync || execFileAsync;
+  const snapshot = await getSnapshot();
   const distribution = typeof requestedDistribution === 'string' && requestedDistribution.trim()
     ? requestedDistribution.trim()
     : snapshot.preferred || snapshot.default || 'kali-linux';
@@ -210,22 +307,12 @@ export async function listLinuxPackages(requestedDistribution) {
     };
   }
 
-  // 1. Scan discovered .desktop apps
-  const discovered = await scanDiscoveredLinuxApps(distribution);
-  const discoveredByBaseId = new Map();
-  for (const d of discovered) {
-    discoveredByBaseId.set(d.id, d);
-    // Also index by simple binary name
-    const binName = d.command.split(' ')[0].split('/').pop();
-    if (binName) discoveredByBaseId.set(binName, d);
-  }
+  const discovered = await scanApps(distribution);
+  const queryItems = CURATED_LINUX_APPS.map(app => `${commandBinary(app.command)}:${app.packageName}`);
+  const statusMap = new Map();
 
-  // 2. Query installed statuses for curated items
-  const queryItems = CURATED_LINUX_APPS.map(app => `${app.command.split(' ')[0]}:${app.packageName}`);
-
-  let curatedWithStatus = [];
   try {
-    const { stdout } = await execFileAsync(WSL_EXE, [
+    const { stdout } = await runExecFile(WSL_EXE, [
       '--distribution', distribution,
       '--exec', '/bin/sh', '-c', PACKAGE_STATUS_SCRIPT,
       'cloudos-pkg-status',
@@ -238,77 +325,15 @@ export async function listLinuxPackages(requestedDistribution) {
       maxBuffer: 256 * 1024
     });
 
-    const statusMap = new Map();
     for (const rawLine of String(stdout || '').split(/\r?\n/)) {
       const [cmd, rawInstalled] = rawLine.split('\x1f');
-      if (cmd) statusMap.set(cmd, rawInstalled === '1');
+      if (cmd) statusMap.set(commandBinary(cmd), rawInstalled === '1');
     }
-
-    curatedWithStatus = CURATED_LINUX_APPS.map(app => {
-      const bin = app.command.split(' ')[0];
-      const isInstalled = statusMap.get(bin) === true || Boolean(discoveredByBaseId.get(app.id));
-      const disc = discoveredByBaseId.get(app.id);
-      return {
-        id: app.id,
-        name: app.name,
-        packageName: app.packageName,
-        command: app.command,
-        category: app.category,
-        description: app.description,
-        icon: disc?.iconUrl || app.icon,
-        iconName: disc?.iconName || null,
-        iconUrl: disc?.iconUrl || null,
-        emojiFallback: app.icon,
-        isPopular: Boolean(app.isPopular),
-        desktopId: app.desktopId || app.id,
-        mimeTypes: disc?.mimeTypes || [],
-        installed: isInstalled,
-        isCurated: true,
-        isUserApp: true,
-        isTechnical: false
-      };
-    });
-  } catch (err) {
-    curatedWithStatus = CURATED_LINUX_APPS.map(app => ({ ...app, installed: false, isCurated: true, isUserApp: true, isTechnical: false, mimeTypes: [] }));
+  } catch {
+    // Discovery remains useful even when the status probe is temporarily unavailable.
   }
 
-  // 3. Merge discovered apps that are NOT curated (deduplicating by id, desktopId, packageName and binary name)
-  const curatedIds = new Set();
-  for (const a of CURATED_LINUX_APPS) {
-    if (a.id) curatedIds.add(a.id.toLowerCase());
-    if (a.desktopId) curatedIds.add(a.desktopId.toLowerCase());
-    if (a.packageName) curatedIds.add(a.packageName.toLowerCase());
-  }
-  const additionalDiscovered = discovered.filter(d => {
-    if (curatedIds.has(d.id?.toLowerCase())) return false;
-    if (d.desktopId && curatedIds.has(d.desktopId.toLowerCase())) return false;
-    const bin = d.command?.split(' ')[0].split('/').pop()?.toLowerCase();
-    if (bin && curatedIds.has(bin)) return false;
-    return true;
-  }).map(d => ({
-    id: d.id,
-    name: d.name,
-    genericName: d.genericName,
-    packageName: d.id,
-    command: d.command,
-    category: d.category,
-    categories: d.categories,
-    description: d.comment || d.genericName || `${d.name} para Linux`,
-    icon: d.iconUrl || d.emojiFallback,
-    iconName: d.iconName,
-    iconUrl: d.iconUrl,
-    emojiFallback: d.emojiFallback,
-    isPopular: false,
-    desktopId: d.id,
-    terminal: d.terminal,
-    mimeTypes: d.mimeTypes || [],
-    installed: true,
-    isDiscovered: true,
-    isUserApp: d.isUserApp !== false,
-    isTechnical: d.isTechnical === true
-  }));
-
-  const allPackages = [...curatedWithStatus, ...additionalDiscovered];
+  const allPackages = mergeLinuxPackageCatalog(discovered, statusMap);
 
   return {
     operational: true,
@@ -332,7 +357,6 @@ export async function installLinuxPackage(requestedDistribution, packageId) {
     throw error;
   }
 
-  // Find target in curated or use raw packageId sanitized
   const curated = CURATED_LINUX_APPS.find(app => app.id === packageId || app.packageName === packageId);
   const rawPkg = curated ? curated.packageName : packageId;
   const sanitizedPkg = rawPkg.replace(/[^a-zA-Z0-9._+-]/g, '');

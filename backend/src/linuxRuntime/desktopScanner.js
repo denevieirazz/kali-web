@@ -59,7 +59,7 @@ function cleanExec(raw) {
 function mapCategory(cats, name = '', id = '') {
   const catSet = new Set(cats.map(c => c.toLowerCase()));
   const idLower = id.toLowerCase();
-  
+
   if (catSet.has('development') || catSet.has('programming') || catSet.has('ide') || catSet.has('debugger') || catSet.has('building') ||
       ['geany', 'code', 'cutter', 're.rizin.cutter', 'edb', 'dbeaver', 'sqlitebrowser', 'imhex', 'hexwalk', 'groovyconsole', 'io.github.horsicq.detect-it-easy'].includes(idLower)) {
     return 'development';

@@ -185,7 +185,7 @@ function StartMenu() {
   const filtered = useMemo(() => {
     const value = query.trim().toLocaleLowerCase('pt-BR');
     if (!value) return appList;
-    return appList.filter((app) => 
+    return appList.filter((app) =>
       app.name.toLocaleLowerCase('pt-BR').includes(value) ||
       (app.genericName && app.genericName.toLocaleLowerCase('pt-BR').includes(value)) ||
       (app.comment && app.comment.toLocaleLowerCase('pt-BR').includes(value)) ||
