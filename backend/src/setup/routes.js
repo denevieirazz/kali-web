@@ -25,6 +25,16 @@ function dbRun(db, query, params) {
   return new Promise((resolve, reject) => db.run(query, params, error => error ? reject(error) : resolve()));
 }
 
+async function requireAdminForExistingSetup(req, res, next) {
+  try {
+    const existingAdmin = await dbGet(getDb(), 'SELECT id FROM users WHERE role = ? LIMIT 1', ['admin']);
+    if (!existingAdmin) return next();
+    return authenticateToken(req, res, () => requireAdmin(req, res, next));
+  } catch (error) {
+    return next(error);
+  }
+}
+
 // GET /api/setup/status
 setupRouter.get('/status', async (_req, res, next) => {
   try {
@@ -37,7 +47,9 @@ setupRouter.get('/status', async (_req, res, next) => {
 });
 
 // POST /api/setup/admin
-setupRouter.post('/admin', async (req, res, next) => {
+// First-boot creation is public only while no administrator exists. Any later replacement
+// requires the currently authenticated CloudOS administrator.
+setupRouter.post('/admin', requireAdminForExistingSetup, async (req, res, next) => {
   try {
     const db = getDb();
     const { username, displayName, password = '', confirmPassword = '' } = req.body || {};
