@@ -9,6 +9,7 @@ import { WebSocket } from 'ws';
 import { WSL_EXE, getWslSnapshot, normalizeName, safeChildEnvironment, validateInstalledAsync } from '../wsl/distroService.js';
 import { XPRA_BIND_TCP_HOST, XPRA_DISPLAY_END, XPRA_DISPLAY_START, XPRA_PORT_END, XPRA_PORT_START, chooseXpraPair, displayForPort as displayForXpraPort, validateLedgerPair } from './xpraPairAllocator.js';
 import { scanDiscoveredLinuxApps } from './desktopScanner.js';
+import { getActiveDistro } from './distroManager.js';
 
 const execFileAsync = promisify(execFile);
 const PORT_START = XPRA_PORT_START;
@@ -209,7 +210,7 @@ export function buildXpraStartCommand({ appCommand, port, sessionId = 'cloudos-p
     `if xpra info :${display} >/dev/null 2>&1; then echo XPRA_DISPLAY_BUSY >&2; exit 43; fi`,
     `rm -rf /run/xpra/${display} /run/user/0/xpra/${display} /tmp/.X11-unix/X${display} /tmp/.X${display}-lock /run/xpra/*-${display} /root/.xpra/*-${display} 2>/dev/null || true`,
     'rm -f /tmp/cloudos-*-poc/.parentlock /tmp/cloudos-*-poc/lock /tmp/cloudos-*-poc/SingletonLock 2>/dev/null || true',
-    'if [ -d /mnt/c/Users ]; then WIN_USER=$(ls -d /mnt/c/Users/* 2>/dev/null | grep -vE "Default|Public|All Users|desktop.ini" | head -n1 || true); if [ -n "$WIN_USER" ]; then mkdir -p /root/.config/gtk-3.0; printf "file://%s/Downloads Downloads\\nfile://%s/Documents Documentos\\nfile://%s/Desktop Área de Trabalho\\nfile://%s/Pictures Imagens\\nfile://%s/Videos Vídeos\\n" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" > /root/.config/gtk-3.0/bookmarks 2>/dev/null || true; mkdir -p /root/.config; printf "XDG_DESKTOP_DIR=\\"%s/Desktop\\"\\nXDG_DOWNLOAD_DIR=\\"%s/Downloads\\"\\nXDG_DOCUMENTS_DIR=\\"%s/Documents\\"\\nXDG_PICTURES_DIR=\\"%s/Pictures\\"\\nXDG_VIDEOS_DIR=\\"%s/Videos\\"\\n" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" > /root/.config/user-dirs.dirs 2>/dev/null || true; if [ -d "$WIN_USER/Downloads" ]; then rm -rf /root/Downloads; ln -sfn "$WIN_USER/Downloads" /root/Downloads 2>/dev/null || true; fi; fi; fi',
+    'if [ -d /mnt/c/Users ]; then WIN_USER=$(ls -d /mnt/c/Users/* 2>/dev/null | grep -vE "Default|Public|All Users|desktop.ini" | head -n1 || true); if [ -n "$WIN_USER" ]; then mkdir -p /root/.config/gtk-3.0 "$WIN_USER/CloudOS/Downloads" "$WIN_USER/CloudOS/Documents" "$WIN_USER/CloudOS/Desktop" "$WIN_USER/CloudOS/Projects" "$WIN_USER/CloudOS/Workspace" 2>/dev/null || true; printf "file://%s/CloudOS/Downloads Downloads\\nfile://%s/CloudOS/Documents Documentos\\nfile://%s/CloudOS/Desktop Área de Trabalho\\nfile://%s/CloudOS/Projects Projetos\\nfile://%s/CloudOS/Workspace Workspace\\nfile://%s/Downloads Windows Downloads\\n" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" > /root/.config/gtk-3.0/bookmarks 2>/dev/null || true; mkdir -p /root/.config; printf "XDG_DESKTOP_DIR=\\"%s/CloudOS/Desktop\\"\\nXDG_DOWNLOAD_DIR=\\"%s/CloudOS/Downloads\\"\\nXDG_DOCUMENTS_DIR=\\"%s/CloudOS/Documents\\"\\nXDG_PICTURES_DIR=\\"%s/CloudOS/Pictures\\"\\nXDG_VIDEOS_DIR=\\"%s/CloudOS/Videos\\"\\n" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" > /root/.config/user-dirs.dirs 2>/dev/null || true; if [ -d "$WIN_USER/CloudOS/Downloads" ]; then rm -rf /root/Downloads; ln -sfn "$WIN_USER/CloudOS/Downloads" /root/Downloads 2>/dev/null || true; fi; fi; fi',
     'unset DISPLAY WAYLAND_DISPLAY WAYLAND_SOCKET PULSE_SERVER',
     'export GDK_BACKEND=x11',
     'export QT_QPA_PLATFORM=xcb',
@@ -469,7 +470,7 @@ function releasePort(port) {
 export async function startXpraPoc({ app, distribution, ownerId, generation = 1, filePath = null, reuseExisting = false } = {}) {
   return queueLifecycle(async () => {
     const snapshot = await getWslSnapshot();
-    const distro = typeof distribution === 'string' && distribution.trim() ? distribution.trim() : snapshot.preferred || snapshot.default || 'kali-linux';
+    const distro = typeof distribution === 'string' && distribution.trim() ? distribution.trim() : (getActiveDistro() || snapshot.preferred || snapshot.default || 'kali-linux');
     const appDef = await resolvePocApp(app || 'firefox', distro);
     if (!appDef) throw createPocError('LINUX_POC_APP_NOT_ALLOWED', 'Aplicativo não permitido.');
     const appId = appDef.id;

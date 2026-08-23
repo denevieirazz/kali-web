@@ -20,18 +20,25 @@ export function applyMotw(filePath) {
 
 export function startMotwWatcher() {
   if (process.platform !== 'win32') return;
-  const downloadsDir = path.join(os.homedir(), 'Downloads');
-  if (!fs.existsSync(downloadsDir)) return;
+  const dirs = [
+    path.join(os.homedir(), 'Downloads'),
+    path.join(os.homedir(), 'CloudOS', 'Downloads')
+  ];
 
-  try {
-    fs.watch(downloadsDir, (eventType, filename) => {
-      if (!filename || filename.includes(':') || filename.endsWith('.tmp') || filename.startsWith('.')) return;
-      const fullPath = path.join(downloadsDir, filename);
-      setTimeout(() => {
-        applyMotw(fullPath);
-      }, 500);
-    });
-  } catch (err) {
-    console.warn('[MotwWatcher] Não foi possível iniciar o watcher:', err.message);
+  for (const downloadsDir of dirs) {
+    if (!fs.existsSync(downloadsDir)) {
+      try { fs.mkdirSync(downloadsDir, { recursive: true }); } catch {}
+    }
+    try {
+      fs.watch(downloadsDir, (eventType, filename) => {
+        if (!filename || filename.includes(':') || filename.endsWith('.tmp') || filename.startsWith('.')) return;
+        const fullPath = path.join(downloadsDir, filename);
+        setTimeout(() => {
+          applyMotw(fullPath);
+        }, 500);
+      });
+    } catch (err) {
+      console.warn('[MotwWatcher] Não foi possível iniciar o watcher:', downloadsDir, err.message);
+    }
   }
 }

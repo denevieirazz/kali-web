@@ -52,7 +52,12 @@ async function storageRoot() {
 }
 
 export async function getOpfsRoot(): Promise<FileSystemDirectoryHandle> {
-  return (await storageRoot()).getDirectoryHandle(ROOT_DIR, { create: true });
+  const root = await (await storageRoot()).getDirectoryHandle(ROOT_DIR, { create: true });
+  const defaultFolders = ['Downloads', 'Documents', 'Desktop', 'Pictures', 'Videos', 'Projects', 'Workspace'];
+  for (const folder of defaultFolders) {
+    try { await root.getDirectoryHandle(folder, { create: true }); } catch {}
+  }
+  return root;
 }
 
 export async function getTrashRoot(): Promise<FileSystemDirectoryHandle> {

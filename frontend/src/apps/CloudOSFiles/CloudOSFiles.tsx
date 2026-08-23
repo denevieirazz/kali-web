@@ -51,11 +51,11 @@ function validSource(value: unknown): value is FileSourceKind {
 
 function storageDescription(source: FileSourceKind, runtime: SourceRuntime, storage: StorageInfo | null) {
   if (source === 'opfs') return {
-    title: 'Armazenamento local do navegador',
-    type: 'OPFS privado do origin',
-    persistence: 'Persiste conforme a política de armazenamento do navegador/WebView',
-    permission: 'Privado do CloudOS; não é um HD nem VHDX',
-    capacity: storage ? `${formatBytes(storage.used)} usados de ${formatBytes(storage.quota)} de quota reportada` : 'Capacidade ainda não estimada',
+    title: 'CloudOS Home (Início)',
+    type: 'Armazenamento Híbrido Unificado (Downloads, Documentos, Projetos, Workspace)',
+    persistence: 'Persiste no CloudOS Home',
+    permission: 'Acesso padrão e integrado para todos os aplicativos',
+    capacity: storage ? `${formatBytes(storage.used)} usados de ${formatBytes(storage.quota)} de quota reportada` : 'Capacidade dinâmica do CloudOS',
   };
   if (source === 'windows') return {
     title: 'Pasta Windows autorizada',
@@ -495,9 +495,9 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
     <div className="cf-root" data-files-source={source} data-files-actor="user-ui" data-files-layout={layoutMode}>
       <header className="cf-toolbar">
         <select className="cf-sort-select cf-source-select" value={source} onChange={event => void changeSource(event.target.value as FileSourceKind)} aria-label="Origem dos arquivos">
-          <option value="opfs">Armazenamento local do navegador</option>
-          <option value="windows">Pasta Windows autorizada…</option>
-          <option value="wsl">Linux Home</option>
+          <option value="opfs">📁 CloudOS Home (Início: Downloads, Documentos, Projetos)</option>
+          <option value="windows">🪟 Pasta do Windows autorizada…</option>
+          <option value="wsl">🐧 Linux Home (Distribuição Ativa)</option>
         </select>
         <button className="cf-btn" onClick={() => setCurrentPath(path => path.slice(0, -1))} disabled={!currentPath.length || viewMode === 'trash'} title="Pasta anterior">←</button>
         <button className="cf-btn" onClick={() => void loadDirectory()} title="Atualizar">↻</button>

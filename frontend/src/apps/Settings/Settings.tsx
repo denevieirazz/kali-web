@@ -11,11 +11,13 @@ type Section = 'system'|'display'|'personalization'|'storage'|'network'|'apps'|'
 type Health = { api: 'checking'|'online'|'offline'; latency?: number; runtime?: Record<string, unknown> };
 type ProductStatus = {schemaVersion:number;product:string;version:string;sha:string|null;channel:string;signing:string;stableUpdatesEnabled:boolean;mode:'Full'|'WebOnly';nativeHost:boolean;wslCorePayload:boolean;protocolVersion:number;dataDirectory:string;logDirectory:string;updateConfigured:boolean};
 type UpdateStatus = {configured:boolean;channel:string;state:string;currentVersion?:string;latestVersion?:string;sha256?:string;size?:number};
+type DistroInfo = { id: string; name: string; icon: string; category: string; description: string; state?: string; version?: string; isInstalled?: boolean; isWslDefault?: boolean; isActiveInCloudOS?: boolean; sizeEstimateMB?: number };
+
 const sections: { id: Section; label: string; icon: string }[] = [
   {id:'system',label:'Geral',icon:'💻'},{id:'display',label:'Aparência',icon:'🖥️'},
   {id:'personalization',label:'Personalização',icon:'🎨'},{id:'storage',label:'Armazenamento',icon:'💾'},
   {id:'network',label:'Rede e Internet',icon:'🌐'},{id:'apps',label:'Aplicativos',icon:'📦'},
-  {id:'accounts',label:'Contas',icon:'👤'},{id:'linux',label:'Linux / WSL',icon:'⌨️'},
+  {id:'accounts',label:'Contas',icon:'👤'},{id:'linux',label:'Sistemas / Multi-Distro',icon:'🐧'},
   {id:'privacy',label:'Privacidade',icon:'🔒'},{id:'update',label:'Atualizações',icon:'🔄'},
   {id:'diagnostics',label:'Diagnóstico',icon:'🩺'},{id:'about',label:'Sobre',icon:'ℹ️'}
 ];
@@ -28,6 +30,9 @@ export default function SettingsApp({}: { windowId: string }) {
   const [health,setHealth]=useState<Health>({api:'checking'});
   const [product,setProduct]=useState<ProductStatus|null>(null);
   const [productNotice,setProductNotice]=useState<string|null>(null);
+  const [distroData,setDistroData]=useState<{active:string;installed:DistroInfo[];online:DistroInfo[]}|null>(null);
+  const [distroLoading,setDistroLoading]=useState(false);
+  const [distroNotice,setDistroNotice]=useState<string|null>(null);
   const [update,setUpdate]=useState<UpdateStatus|null>(null);
   const [updateStatus,setUpdateStatus]=useState('Pronto para verificar');
   const [storageEstimate,setStorageEstimate]=useState<{usage:number;quota:number}|null>(null);
@@ -50,7 +55,11 @@ export default function SettingsApp({}: { windowId: string }) {
   useEffect(()=>{const id=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(id)},[]);
   useEffect(()=>{if(active!=='accounts'){rotatedRecoveryCodeRef.current=null;setRotatedRecoveryCode(null);setRecoveryCodeSaved(false);setAccountNotice(null)}},[active]);
   useEffect(()=>()=>{rotatedRecoveryCodeRef.current=null},[]);
-  useEffect(()=>{if(['system','storage','linux','update','diagnostics','about'].includes(active))void loadProduct();if(active==='network'||active==='diagnostics')void checkHealth();if(active==='storage')void loadStorageEstimate()},[active]);
+  useEffect(()=>{if(['system','storage','update','diagnostics','about'].includes(active))void loadProduct();if(active==='linux')void loadDistros();if(active==='network'||active==='diagnostics')void checkHealth();if(active==='storage')void loadStorageEstimate()},[active]);
+
+  async function loadDistros(){setDistroLoading(true);try{const data=await apiClient<{active:string;installed:DistroInfo[];online:DistroInfo[]}>('/api/linux-runtime/distros');setDistroData(data);setDistroNotice(null)}catch{setDistroNotice('Catálogo de sistemas WSL indisponível nesta sessão.')}finally{setDistroLoading(false)}}
+  async function switchActiveDistro(distroId:string){try{await apiClient('/api/linux-runtime/distros/active',{method:'POST',body:JSON.stringify({distro:distroId})});setDistroNotice(`Sistema ativo definido como: ${distroId}.`);await loadDistros()}catch(err:any){setDistroNotice(err.message||'Falha ao alterar sistema ativo.')}}
+  async function triggerInstallDistro(distroId:string){try{await apiClient('/api/linux-runtime/distros/install',{method:'POST',body:JSON.stringify({distro:distroId})});setDistroNotice(`Instalação de ${distroId} iniciada em segundo plano via WSL.`);await loadDistros()}catch(err:any){setDistroNotice(err.message||'Falha ao iniciar instalação da distribuição.')}}
 
   async function rotateAccountRecoveryCode(){
     if(rotatingRecoveryCode)return;
@@ -87,7 +96,61 @@ export default function SettingsApp({}: { windowId: string }) {
     case 'network': return <><h2>Rede e Internet</h2><div className="settings-hero"><div className="settings-hero-icon">◎</div><div><h3>Backend local</h3><p>Diagnóstico real da API do CloudOS.</p></div><span className={`status-pill ${health.api==='online'?'ok':health.api==='offline'?'bad':''}`}>{health.api==='checking'?'Verificando':health.api==='online'?'Conectado':'Indisponível'}</span></div><div className="settings-card"><Row label="Origem da API" value={getApiBase()}/><Row label="Latência local" value={health.latency!==undefined?`${health.latency} ms`:'-'}/><Row label="Online no navegador" value={navigator.onLine?'Sim':'Não'}/><button className="settings-action" onClick={checkHealth}>Verificar novamente</button></div></>;
     case 'apps': return <><h2>Aplicativos</h2><div className="settings-card"><Row label="Aplicativos com janela" value={apps.length}/><Row label="Janelas abertas" value={windows.length}/></div><div className="settings-app-list">{apps.length?apps.map(app=><div className="settings-app-row" key={app.appId}><span className="app-icon">{app.icon||'▣'}</span><div><strong>{app.title}</strong><small>{windows.filter(w=>w.appId===app.appId).length} janela(s)</small></div><button onClick={()=>kernel.focusWindow(app.id)}>Abrir</button><button className="danger" onClick={()=>windows.filter(w=>w.appId===app.appId).forEach(w=>kernel.closeWindow(w.id))}>Fechar</button></div>):<div className="settings-empty">Nenhum aplicativo aberto.</div>}</div></>;
     case 'accounts': return <><h2>Contas</h2><div className="settings-hero"><div className="settings-avatar">{String(currentUser?.displayName||currentUser?.username||'U').slice(0,1).toUpperCase()}</div><div><h3>{currentUser?.displayName||currentUser?.username||'Usuário local'}</h3><p>{currentUser?.role==='admin'?'Conta administrativa local do CloudOS':'Conta de usuário padrão do CloudOS'}</p></div></div><div className="settings-card"><Row label="Nome de usuário" value={currentUser?.username||'-'}/><Row label="Tipo" value={currentUser?.role==='admin'?'Administrador local':'Usuário padrão'}/><button className="settings-secondary" onClick={()=>kernel.sysLock()}>Bloquear sessão</button></div><div className="settings-card"><h3>Código de recuperação</h3><p className="settings-recovery-description">Gere um código novo se a conta foi criada antes deste recurso ou se o código anterior não está mais seguro. O código antigo será invalidado.</p>{accountNotice&&<div className="settings-recovery-notice">{accountNotice}</div>}{rotatedRecoveryCode?<div className="settings-recovery-result"><strong>Mostrado uma única vez</strong><div><code>{rotatedRecoveryCode}</code><button className="settings-secondary" onClick={copyAccountRecoveryCode}>Copiar</button></div><label><input type="checkbox" checked={recoveryCodeSaved} onChange={e=>setRecoveryCodeSaved(e.target.checked)}/><span>Confirmei que salvei o novo código</span></label><button className="settings-action" disabled={!recoveryCodeSaved} onClick={()=>{confirmRecoveryCodeSaved();rotatedRecoveryCodeRef.current=null;setRotatedRecoveryCode(null);setRecoveryCodeSaved(false);setAccountNotice('Código salvo. Ele não ficará armazenado nesta interface.')}}>Fechar código</button></div>:<button className="settings-action" disabled={rotatingRecoveryCode} onClick={rotateAccountRecoveryCode}>{rotatingRecoveryCode?'Gerando…':'Gerar novo código'}</button>}</div></>;
-    case 'linux': return <><h2>Linux / WSL</h2><div className="settings-card"><h3>Capacidades</h3><Row label="WSL Core no pacote" value={product?.wslCorePayload?'Disponível':'Indisponível'}/><Row label="Modo atual" value={product?.mode||'Consultando…'}/><p className="settings-desc">Esta tela não instala, atualiza ou remove WSL ou Kali. Use a Central de Pré-requisitos para verificar o ambiente e copiar instruções quando necessário.</p></div></>;
+    case 'linux': return <>
+      <h2>Sistemas Operacionais & Distribuições (Multi-Distro)</h2>
+      <div className="settings-hero">
+        <div className="settings-hero-icon">🐧</div>
+        <div>
+          <h3>Gerenciador de Sistemas Híbrido</h3>
+          <p>Alterne ou instale novas distribuições Linux (Ubuntu, Kali, Debian, Arch, Fedora, Alpine) no CloudOS.</p>
+        </div>
+        <span className="status-pill ok">Ativo: {distroData?.active || 'kali-linux'}</span>
+      </div>
+      {distroNotice && <div className="settings-recovery-notice">{distroNotice}</div>}
+      
+      <div className="settings-card">
+        <h3>Sistemas Instalados no Dispositivo</h3>
+        {distroLoading && <p>Consultando distribuições WSL registradas...</p>}
+        {distroData?.installed?.length ? (
+          <div className="settings-app-list">
+            {distroData.installed.map(d => (
+              <div className="settings-app-row" key={d.id}>
+                <span className="app-icon" style={{ fontSize: '1.4rem' }}>{d.icon || '🐧'}</span>
+                <div>
+                  <strong>{d.name} {d.isActiveInCloudOS && <span className="status-pill ok" style={{ marginLeft: 8, fontSize: '0.75rem' }}>Ativo</span>}</strong>
+                  <small>{d.category} · Estado: {d.state || 'Instalado'} · WSL {d.version || '2'}</small>
+                </div>
+                {!d.isActiveInCloudOS && (
+                  <button className="settings-action" onClick={() => switchActiveDistro(d.id)}>
+                    Definir como Ativo
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="settings-desc">Nenhum sistema adicional detectado.</p>
+        )}
+      </div>
+
+      <div className="settings-card">
+        <h3>Catálogo de Sistemas Disponíveis (Microsoft Store / CloudOS)</h3>
+        <div className="settings-app-list">
+          {distroData?.online?.filter(o => !distroData.installed.some(i => i.id.toLowerCase() === o.id.toLowerCase())).map(o => (
+            <div className="settings-app-row" key={o.id}>
+              <span className="app-icon" style={{ fontSize: '1.4rem' }}>{o.icon || '📦'}</span>
+              <div>
+                <strong>{o.name}</strong>
+                <small>{o.category} · Tamanho estimado: {o.sizeEstimateMB} MB · {o.description}</small>
+              </div>
+              <button className="settings-secondary" onClick={() => triggerInstallDistro(o.id)}>
+                Instalar Sistema
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>;
     case 'privacy': return <><h2>Privacidade</h2><div className="settings-card"><Toggle label="Métricas locais" desc="Permitir gráficos e diagnóstico no dispositivo" on={privacy.metrics} onChange={()=>setPrivacyValue('metrics',!privacy.metrics)}/></div><div className="settings-card"><Toggle label="Acesso ao terminal" desc="Permitir integração com terminal local" on={privacy.terminal} onChange={()=>setPrivacyValue('terminal',!privacy.terminal)}/></div><div className="settings-card"><Toggle label="Sistema de arquivos" desc="Permitir armazenamento virtual persistente" on={privacy.files} onChange={()=>setPrivacyValue('files',!privacy.files)}/></div></>;
     case 'update': return <><h2>Atualizações</h2><div className="settings-hero"><div className="settings-hero-icon">↻</div><div><h3>Atualização controlada</h3><p>A verificação é somente leitura. Aplicação e rollback pertencem ao Bootstrap.</p></div></div><div className="settings-card"><Row label="Versão" value={product?.version||'Consultando…'}/><Row label="Canal" value={product?.channel||'Consultando…'}/><Row label="Estado" value={updateStatus}/>{update?.sha256&&<Row label="SHA-256 do pacote" value={`${update.sha256.slice(0,12)}…${update.sha256.slice(-12)}`}/>}<button className="settings-action" onClick={checkProductUpdate}>Verificar atualização</button><p className="settings-desc">Stable permanece desativado até existir release aprovada. Atualizações não são aplicadas durante uma sessão crítica.</p></div></>;
     case 'diagnostics': return <><h2>Diagnóstico</h2>{productNotice&&<div className="settings-recovery-notice">{productNotice}</div>}<div className="settings-card"><h3>Saúde dos componentes</h3><Row label="Backend" value={health.api==='online'?`Online${health.latency!==undefined?` · ${health.latency} ms`:''}`:health.api==='checking'?'Verificando':'Indisponível'}/><Row label="Native Host" value={product?.nativeHost?'Disponível':'Indisponível'}/><Row label="WSL Core" value={product?.wslCorePayload?'Payload disponível':'Payload indisponível'}/><Row label="Protocolo" value={product?.protocolVersion??'-'}/><Row label="Logs" value={product?.logDirectory||'-'}/><div><button className="settings-action" onClick={()=>productAction('/api/product/diagnostics/export','Diagnóstico exportado')}>Exportar diagnóstico</button><button className="settings-secondary" onClick={()=>productAction('/api/product/folder/logs/open','Pasta de logs aberta')}>Abrir logs</button><button className="settings-secondary" onClick={()=>productAction('/api/product/cache/clear','Cache temporário limpo')}>Limpar cache temporário</button><button className="settings-secondary" onClick={checkHealth}>Verificar novamente</button></div></div></>;

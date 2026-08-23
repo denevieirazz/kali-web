@@ -230,3 +230,48 @@ linuxRuntimeRouter.post('/launch', async (req, res) => {
     sendError(res, error, 'LINUX_FAST_LAUNCH_FAILED');
   }
 });
+
+// ============================================
+// Multi-Distro & CloudOS Home Management Routes
+// ============================================
+import { getActiveDistro, setActiveDistro, listInstalledDistros, listOnlineDistros, installDistro, getCloudOSHome } from './distroManager.js';
+
+linuxRuntimeRouter.get('/distros', async (req, res) => {
+  try {
+    const active = getActiveDistro();
+    const installed = await listInstalledDistros();
+    const online = await listOnlineDistros();
+    res.json({ active, installed, online });
+  } catch (error) {
+    sendError(res, error, 'DISTRO_LIST_FAILED');
+  }
+});
+
+linuxRuntimeRouter.post('/distros/active', (req, res) => {
+  try {
+    const distro = req.body?.distro;
+    const config = setActiveDistro(distro);
+    res.json({ success: true, config });
+  } catch (error) {
+    sendError(res, error, 'DISTRO_SET_ACTIVE_FAILED');
+  }
+});
+
+linuxRuntimeRouter.post('/distros/install', async (req, res) => {
+  try {
+    const distro = req.body?.distro;
+    const result = await installDistro(distro);
+    res.json(result);
+  } catch (error) {
+    sendError(res, error, 'DISTRO_INSTALL_FAILED');
+  }
+});
+
+linuxRuntimeRouter.get('/home', (req, res) => {
+  try {
+    res.json({ home: getCloudOSHome() });
+  } catch (error) {
+    sendError(res, error, 'CLOUDOS_HOME_FAILED');
+  }
+});
+
