@@ -38,9 +38,8 @@ const PROVISION_STEPS_BASE: ProvisionStep[] = [
 ];
 
 function passwordStrength(password: string) {
-  if (!password) return { level: 'empty', label: 'Sem senha (Opcional)', detail: 'Acesso direto habilitado. Você pode definir uma senha depois.' };
-  if (password.length < 4) return { level: 'invalid', label: 'Muito curta', detail: 'O mínimo é 4 caracteres ou deixe em branco.' };
-  if (password.length < 8) return { level: 'weak', label: 'Senha curta', detail: 'Válida. Recomendamos uma senha maior para segurança em rede.' };
+  if (!password) return { level: 'invalid', label: 'Senha obrigatória', detail: 'Mínimo de 8 caracteres.' };
+  if (password.length < 8) return { level: 'invalid', label: 'Muito curta', detail: 'Mínimo de 8 caracteres.' };
   if (password.length < 14) return { level: 'medium', label: 'Boa', detail: 'Senha adequada para proteção padrão.' };
   return { level: 'strong', label: 'Forte', detail: 'Excelente nível de segurança.' };
 }
@@ -54,6 +53,7 @@ export default function SetupWizard() {
   const [accentColor, setAccentColor] = useState('#6366f1');
   const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
   const [recoverySaved, setRecoverySaved] = useState(false);
+  const [recoveryActionMessage, setRecoveryActionMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -65,13 +65,15 @@ export default function SetupWizard() {
   // Installation Progress state
   const [provisionProgress, setProvisionProgress] = useState(0);
   const [provisionSteps, setProvisionSteps] = useState<ProvisionStep[]>(PROVISION_STEPS_BASE);
+  const [provisionError, setProvisionError] = useState<string | null>(null);
+  const [provisionComplete, setProvisionComplete] = useState(false);
   const [realLogs, setRealLogs] = useState<string[]>([]);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   const completedSetupHandoff = useRef(false);
   const createdAccountInThisFlow = useRef(false);
   const { setTheme } = useSystem();
-  const { createAdmin, checkSetupStatus, confirmRecoveryCodeSaved, setupStatus, setupStatusMessage } = useUserStore();
+  const { createAdmin, checkSetupStatus, confirmRecoveryCodeSaved, currentUser, setupStatus, setupStatusMessage } = useUserStore();
   const strength = useMemo(() => passwordStrength(password), [password]);
 
   useEffect(() => {
@@ -84,15 +86,6 @@ export default function SetupWizard() {
       logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [realLogs]);
-
-  useEffect(() => {
-    if (step === 'installing-runtime' && provisionProgress >= 100) {
-      const timer = setTimeout(() => {
-        setStep('account');
-      }, 600);
-      return () => clearTimeout(timer);
-    }
-  }, [step, provisionProgress]);
 
   async function loadDistros() {
     try {
@@ -113,6 +106,9 @@ export default function SetupWizard() {
   const currentIndex = STEPS.indexOf(step);
 
   function startProvisioning() {
+    setError(null);
+    setProvisionError(null);
+    setProvisionComplete(false);
     setStep('installing-runtime');
     setProvisionProgress(5);
     setRealLogs(['> Iniciando motor de provisionamento do CloudOS...']);
@@ -126,6 +122,8 @@ export default function SetupWizard() {
       if (completed) return;
       completed = true;
       try { eventSource.close(); } catch {}
+      setProvisionError(null);
+      setProvisionComplete(true);
       setProvisionProgress(100);
       setProvisionSteps(prev => prev.map(s => ({ ...s, done: true })));
       setTimeout(() => {
@@ -133,31 +131,44 @@ export default function SetupWizard() {
       }, 500);
     };
 
+    const failStep = (message: string) => {
+      if (completed) return;
+      completed = true;
+      try { eventSource.close(); } catch {}
+      const failure = message || 'O provisionamento foi interrompido antes da conclusão.';
+      setProvisionComplete(false);
+      setProvisionError(failure);
+      setRealLogs(prev => [...prev.slice(-40), `[Erro] ${failure}`]);
+    };
+
     eventSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        if (data.error) {
+          failStep(String(data.error));
+          return;
+        }
         if (data.log) {
           setRealLogs(prev => [...prev.slice(-40), data.log]);
         }
         if (typeof data.progress === 'number') {
-          setProvisionProgress(data.progress);
+          setProvisionProgress(Math.max(0, Math.min(100, data.progress)));
         }
-        if (data.step) {
+        if (data.step && data.step !== 'done') {
           setProvisionSteps(prev => prev.map(s => s.id === data.step ? { ...s, done: true } : s));
         }
-        if (data.done || data.progress >= 100) {
+        if (data.done === true) {
           finishStep();
         }
-      } catch (e: any) {
-        setRealLogs(prev => [...prev, `[Erro] ${e.message}`]);
+      } catch (eventError: any) {
+        failStep(eventError?.message || 'Resposta inválida recebida durante o provisionamento.');
       }
     };
 
     eventSource.onerror = () => {
-      finishStep();
+      failStep('Conexão com o provisionamento foi interrompida antes da confirmação de sucesso.');
     };
   }
-
 
   async function handleRemoveDistro(distroId: string) {
     if (!window.confirm(`Tem certeza que deseja EXCLUIR permanentemente a distribuição "${distroId}" do WSL?\n\nIsso executará "wsl.exe --unregister ${distroId}" e removerá todos os arquivos internos.`)) {
@@ -189,14 +200,14 @@ export default function SetupWizard() {
       return void startProvisioning();
     }
     if (step === 'account') {
-      if (setupStatus === 'complete' && !username.trim() && !password) {
-        // Mantém conta de administrador existente e avança diretamente
+      if (setupStatus === 'complete' && !username.trim() && !displayName.trim() && !password && !confirmPassword) {
+        // Mantém conta de administrador existente e avança diretamente sem regravar credenciais.
         setStep('ready');
         return;
       }
-      const cleanUser = username.trim() || 'admin';
-      const cleanDisplay = displayName.trim() || cleanUser;
-      const validation = validateUsername(cleanUser) || validateDisplayName(cleanDisplay) || validateNewPassword(password || '', confirmPassword || '');
+      const cleanUser = username.trim() || currentUser?.username || 'admin';
+      const cleanDisplay = displayName.trim() || currentUser?.displayName || cleanUser;
+      const validation = validateUsername(cleanUser) || validateDisplayName(cleanDisplay) || validateNewPassword(password, confirmPassword);
       if (validation) return setError(validation);
       return void createRealAccount(cleanUser, cleanDisplay);
     }
@@ -208,7 +219,7 @@ export default function SetupWizard() {
     setLoading(true);
     setError(null);
 
-    const result = await createAdmin(cleanUser, cleanDisplay, password || '', confirmPassword || '');
+    const result = await createAdmin(cleanUser, cleanDisplay, password, confirmPassword);
     setPassword('');
     setConfirmPassword('');
 
@@ -223,11 +234,52 @@ export default function SetupWizard() {
     setTheme({ accentColor });
     setRecoveryCode(result.recoveryCode);
     setRecoverySaved(false);
+    setRecoveryActionMessage(null);
     setStep('ready');
   }
 
-  function completeSetup() {
-    const finalUser = username.trim() || 'admin';
+  async function handleCopyRecoveryCode() {
+    if (!recoveryCode) return;
+    setError(null);
+    try {
+      await copyRecoveryCode(recoveryCode);
+      setRecoveryActionMessage('Código copiado. Ainda recomendamos salvar o arquivo de recuperação.');
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : 'Não foi possível copiar o código de recuperação.');
+    }
+  }
+
+  async function handleSaveRecoveryCode() {
+    if (!recoveryCode) return;
+    setError(null);
+    try {
+      await saveRecoveryCodeAsText(recoveryCode);
+      setRecoverySaved(true);
+      setRecoveryActionMessage('Arquivo de recuperação salvo com sucesso.');
+    } catch (actionError: any) {
+      if (actionError?.name === 'AbortError') {
+        setRecoveryActionMessage('Salvamento cancelado. O código continua disponível nesta tela.');
+        return;
+      }
+      setError(actionError instanceof Error ? actionError.message : 'Não foi possível salvar o arquivo de recuperação.');
+    }
+  }
+
+  function handlePrintRecoveryCode() {
+    if (!recoveryCode) return;
+    setError(null);
+    try {
+      printRecoveryCode(recoveryCode);
+      setRecoveryActionMessage('Janela de impressão aberta. O arquivo ainda não foi marcado como salvo.');
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : 'Não foi possível imprimir o código de recuperação.');
+    }
+  }
+
+  function finalizeSetup() {
+    if (completedSetupHandoff.current) return;
+    completedSetupHandoff.current = true;
+    const finalUser = username.trim() || currentUser?.username || 'admin';
     kernel.sysCreateUserHome(finalUser);
     kernel.regSetValue('HKEY_LOCAL_MACHINE\\SYSTEM\\Setup\\SetupInProgress', 'REG_DWORD', 0);
     kernel.regSetValue('HKEY_LOCAL_MACHINE\\SYSTEM\\Setup\\OOBEInProgress', 'REG_DWORD', 0);
@@ -246,13 +298,33 @@ export default function SetupWizard() {
     }
   }
 
+  function completeSetup() {
+    if (recoveryCode && !recoverySaved) {
+      setError('Salve o arquivo de recuperação antes de entrar ou escolha Continuar sem salvar e confirme o aviso.');
+      return;
+    }
+    finalizeSetup();
+  }
+
+  function continueWithoutSavingRecovery() {
+    if (!recoveryCode) {
+      finalizeSetup();
+      return;
+    }
+    const confirmed = window.confirm('Continuar sem salvar o código de recuperação? Sem esse código, você pode perder o acesso à conta caso esqueça a senha.');
+    if (!confirmed) return;
+    setRecoveryCode(null);
+    setRecoverySaved(false);
+    finalizeSetup();
+  }
+
   const unavailable = setupStatus === 'unavailable';
 
   return (
     <div className="setup-wizard">
       <div className="setup-bg-decorator" style={{ top: '-10%', right: '-10%' }} />
       <div className="setup-bg-decorator" style={{ bottom: '-10%', left: '-10%', background: 'radial-gradient(circle, var(--accent) 0%, transparent 70%)' }} />
-      
+
       <motion.div initial={{ scale: 0.96, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="setup-container">
         {/* Painel Esquerdo com Identidade Visual */}
         <aside className="setup-left">
@@ -361,7 +433,7 @@ export default function SetupWizard() {
                                   type="button"
                                   title={`Excluir ${d.name} do WSL`}
                                   style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.4)', borderRadius: 4, color: '#f87171', padding: '2px 6px', fontSize: 10, cursor: 'pointer' }}
-                                  onClick={(e) => { e.stopPropagation(); void handleRemoveDistro(d.id); }}
+                                  onClick={(event) => { event.stopPropagation(); void handleRemoveDistro(d.id); }}
                                 >
                                   🗑️ Excluir
                                 </button>
@@ -409,7 +481,7 @@ export default function SetupWizard() {
 
                   <div style={{ marginTop: 18, marginBottom: 20 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: 13 }}>
-                      <strong>Instalação em andamento</strong>
+                      <strong>{provisionError ? 'Instalação interrompida' : provisionComplete ? 'Instalação concluída' : 'Instalação em andamento'}</strong>
                       <strong>{provisionProgress}%</strong>
                     </div>
                     <div style={{ width: '100%', height: 8, borderRadius: 4, background: 'rgba(255, 255, 255, 0.1)', overflow: 'hidden' }}>
@@ -435,6 +507,7 @@ export default function SetupWizard() {
                     ))}
                     <div ref={logsEndRef} />
                   </div>
+                  {provisionError && <div className="setup-alert error" role="alert">{provisionError}</div>}
                 </motion.section>
               ) : step === 'account' ? (
                 /* ==================================================
@@ -448,7 +521,7 @@ export default function SetupWizard() {
                       ℹ️ Conta administradora já existente detectada. Você pode manter sua conta atual (basta continuar) ou definir novas credenciais abaixo.
                     </div>
                   )}
-                  
+
                   <label className="setup-field">
                     Nome de exibição
                     <input className="setup-input" value={displayName} onChange={event => setDisplayName(event.target.value)} autoComplete="name" maxLength={80} placeholder="Ex: Douglas Vieira" />
@@ -462,24 +535,21 @@ export default function SetupWizard() {
                   <div className="setup-password-grid">
                     <label className="setup-field">
                       Senha
-                      <input type="password" className="setup-input" value={password} onChange={event => setPassword(event.target.value)} autoComplete="new-password" maxLength={128} placeholder="Opcional (mínimo 4 caracteres)" />
+                      <input type="password" className="setup-input" value={password} onChange={event => setPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} placeholder="Mínimo de 8 caracteres" />
                     </label>
                     <label className="setup-field">
                       Confirmar senha
-                      <input type="password" className="setup-input" value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} autoComplete="new-password" maxLength={128} placeholder="Confirmar senha" />
+                      <input type="password" className="setup-input" value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} placeholder="Confirmar senha" />
                     </label>
                   </div>
 
-                  {!password ? (
-                    <div style={{ fontSize: 11, color: '#fbbf24', marginTop: 2 }}>
-                      ⚠️ Aviso de segurança: Conta sem senha (acesso direto). Recomendado para desenvolvimento e testes rápidos.
-                    </div>
-                  ) : (
-                    <div className={`setup-password-strength setup-password-strength--${strength.level}`} data-password-strength={strength.level}>
-                      <strong>{strength.label}</strong>
-                      <span>{strength.detail}</span>
-                    </div>
-                  )}
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
+                    Mínimo de 8 caracteres. Recomendamos uma frase maior. Não exigimos maiúsculas, números ou símbolos.
+                  </div>
+                  <div className={`setup-password-strength setup-password-strength--${strength.level}`} data-password-strength={strength.level}>
+                    <strong>{strength.label}</strong>
+                    <span>{strength.detail}</span>
+                  </div>
 
                   <div style={{ marginTop: 12 }}>
                     <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Cor de destaque pessoal</span>
@@ -513,13 +583,35 @@ export default function SetupWizard() {
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0' }}>
                       <span style={{ color: 'var(--text-secondary)' }}>Usuário Ativo:</span>
-                      <strong>{displayName || username || 'admin'}</strong>
+                      <strong>{displayName || username || currentUser?.displayName || currentUser?.username || 'admin'}</strong>
                     </div>
                   </div>
 
                   {recoveryCode && (
-                    <div style={{ marginTop: 14, fontSize: 12, color: 'var(--text-secondary)' }}>
-                      Chave de recuperação gerada: <code>{recoveryCode.slice(0, 8)}...</code>
+                    <div style={{ marginTop: 14, padding: 14, border: '1px solid var(--border-subtle)', borderRadius: 10 }}>
+                      <span className="setup-kicker">PROTEJA SUA CONTA</span>
+                      <p className="setup-description" style={{ marginTop: 6 }}>
+                        Este arquivo permite criar uma nova senha se você perder o acesso. Guarde-o fora deste computador, em local seguro.
+                      </p>
+                      <code style={{ display: 'block', overflowWrap: 'anywhere', margin: '10px 0', fontSize: 12 }}>{recoveryCode}</code>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                        <button type="button" className="setup-btn setup-btn-secondary" onClick={() => void handleCopyRecoveryCode()}>
+                          Copiar
+                        </button>
+                        <button type="button" className="setup-btn setup-btn-primary" onClick={() => void handleSaveRecoveryCode()}>
+                          Salvar arquivo de recuperação
+                        </button>
+                        <button type="button" className="setup-btn setup-btn-secondary" onClick={() => handlePrintRecoveryCode()}>
+                          Imprimir
+                        </button>
+                      </div>
+                      {recoveryActionMessage && <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-secondary)' }}>{recoveryActionMessage}</div>}
+                      {recoverySaved && <div style={{ marginTop: 8, fontSize: 11, color: '#4ade80' }}>✓ Arquivo de recuperação confirmado como salvo.</div>}
+                      {!recoverySaved && (
+                        <button type="button" className="setup-btn setup-btn-secondary" style={{ marginTop: 10 }} onClick={() => continueWithoutSavingRecovery()}>
+                          Continuar sem salvar
+                        </button>
+                      )}
                     </div>
                   )}
                 </motion.section>
@@ -559,19 +651,26 @@ export default function SetupWizard() {
                 )
               )}
               {step === 'installing-runtime' && (
-                <button
-                  className="setup-btn setup-btn-primary"
-                  onClick={() => setStep('account')}
-                  disabled={provisionProgress < 100}
-                >
-                  {provisionProgress >= 100 ? 'Continuar para Criar Conta →' : 'Instalando...'}
-                </button>
+                provisionError ? (
+                  <>
+                    <button className="setup-btn setup-btn-secondary" onClick={() => setStep('distro-select')}>Voltar</button>
+                    <button className="setup-btn setup-btn-primary" onClick={() => void startProvisioning()}>Tentar novamente</button>
+                  </>
+                ) : (
+                  <button
+                    className="setup-btn setup-btn-primary"
+                    onClick={() => setStep('account')}
+                    disabled={!provisionComplete}
+                  >
+                    {provisionComplete ? 'Continuar para Criar Conta →' : 'Instalando...'}
+                  </button>
+                )
               )}
               {step === 'account' && (
                 <button className="setup-btn setup-btn-primary" onClick={() => void goNext()} disabled={loading}>
                   {loading
                     ? 'Processando…'
-                    : setupStatus === 'complete' && !username.trim() && !password
+                    : setupStatus === 'complete' && !username.trim() && !displayName.trim() && !password && !confirmPassword
                     ? 'Manter Administrador e Continuar →'
                     : setupStatus === 'complete'
                     ? 'Atualizar Administrador e Finalizar →'
@@ -579,8 +678,8 @@ export default function SetupWizard() {
                 </button>
               )}
               {step === 'ready' && (
-                <button className="setup-btn setup-btn-primary" onClick={() => completeSetup()}>
-                  Entrar no CloudOS 🚀
+                <button className="setup-btn setup-btn-primary" onClick={() => completeSetup()} disabled={Boolean(recoveryCode && !recoverySaved)}>
+                  {recoveryCode && !recoverySaved ? 'Salve a recuperação para continuar' : 'Entrar no CloudOS 🚀'}
                 </button>
               )}
             </footer>
