@@ -242,15 +242,26 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
     }
   }, [currentPath, source, viewMode]);
 
-  const handleLaunchFile = useCallback((entry: CloudFileEntry, openWith = false) => {
+  const handleLaunchFile = useCallback(async (entry: CloudFileEntry, openWith = false) => {
     if (entry.kind !== 'file' || entry.symlink) return;
-    const fullPath = source === 'wsl'
-      ? `/root/${currentPath.length ? `${currentPath.join('/')}/` : ''}${entry.name}`
-      : `C:\\Users\\User\\${currentPath.length ? `${currentPath.join('\\')}\\` : ''}${entry.name}`;
+    const fullPath = source === 'opfs'
+      ? `~/${currentPath.length ? `${currentPath.join('/')}/` : ''}${entry.name}`
+      : source === 'wsl'
+      ? `/${currentPath.length ? `${currentPath.join('/')}/` : ''}${entry.name}`
+      : `/mnt/c/${currentPath.length ? `${currentPath.join('/')}/` : ''}${entry.name}`;
+
+    let fileContent: string | undefined;
+    if (source === 'opfs' && entry.size < 4 * 1024 * 1024) {
+      try {
+        const file = await fileSourceFacade.readFile(source, currentPath, entry, 4 * 1024 * 1024);
+        fileContent = await file.text();
+      } catch {}
+    }
 
     openFile({
       filePath: fullPath,
       fileName: entry.name,
+      fileContent,
       openWith,
     });
   }, [currentPath, source]);
@@ -259,7 +270,7 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
     if (entry.kind === 'symlink' || entry.symlink) { await selectEntry(entry); return; }
     if (entry.kind === 'directory' && viewMode === 'files') { setCurrentPath(path => [...path, entry.name]); return; }
     await selectEntry(entry);
-    handleLaunchFile(entry, false);
+    await handleLaunchFile(entry, false);
   }, [handleLaunchFile, selectEntry, viewMode]);
 
   const downloadEntry = useCallback(async (entry: CloudFileEntry) => {

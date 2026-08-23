@@ -7,7 +7,7 @@ import { useFileSystem } from '../../stores/fileSystem';
 import { useProcess } from '../../contexts/ProcessContext';
 import './Notepad.css';
 
-import { writeTextFile } from '../CloudOSFiles/opfsFileService';
+import { readFile, writeTextFile, listDirectory } from '../CloudOSFiles/opfsFileService';
 
 export default function NotepadApp({ windowId }: { windowId: string }) {
   const { pid } = useProcess();
@@ -26,17 +26,38 @@ export default function NotepadApp({ windowId }: { windowId: string }) {
   const [wordWrap, setWordWrap] = useState(true);
   const [showFileMenu, setShowFileMenu] = useState(false);
 
-  // Initialize from window params (file path)
+  // Initialize from window params (file path or content)
   useEffect(() => {
     const win = getWindow(windowId);
+    if (win?.params?.content !== undefined || win?.params?.fileContent !== undefined) {
+      setContent(win.params.fileContent ?? win.params.content ?? '');
+      if (win.params.fileName) setFileName(win.params.fileName);
+      if (win.params.filePath) setFilePath(win.params.filePath);
+      setIsModified(false);
+      return;
+    }
     if (win?.params?.filePath) {
       const path = win.params.filePath;
-      const node = getNode(path);
-      if (node && node.type === 'file') {
-        setContent(node.content || '');
-        setFileName(node.name);
+      if (path.startsWith('~/')) {
+        const parts = path.replace(/^~\//, '').split('/');
+        const name = parts.pop() || 'Documento.txt';
+        setFileName(name);
         setFilePath(path);
-        setIsModified(false);
+        void readFile(parts, name).then(file => file.text()).then(text => {
+          setContent(text);
+          setIsModified(false);
+        }).catch(() => {
+          setContent('');
+          setIsModified(false);
+        });
+      } else {
+        const node = getNode(path);
+        if (node && node.type === 'file') {
+          setContent(node.content || '');
+          setFileName(node.name);
+          setFilePath(path);
+          setIsModified(false);
+        }
       }
     }
   }, [windowId, getWindow, getNode]);
@@ -105,6 +126,29 @@ export default function NotepadApp({ windowId }: { windowId: string }) {
     }
   };
 
+  const handleOpen = async () => {
+    try {
+      const files = await listDirectory(['Documents']);
+      const txtFiles = files.filter(f => f.kind === 'file');
+      if (txtFiles.length === 0) {
+        alert('Nenhum arquivo encontrado em ~/Documents.');
+        return;
+      }
+      const names = txtFiles.map(f => f.name).join('\n');
+      const chosen = window.prompt(`Arquivos disponíveis em ~/Documents:\n${names}\n\nDigite o nome do arquivo para abrir:`, txtFiles[0].name);
+      if (!chosen) return;
+      const cleanChosen = chosen.trim();
+      const file = await readFile(['Documents'], cleanChosen);
+      const text = await file.text();
+      setContent(text);
+      setFileName(cleanChosen);
+      setFilePath(`~/Documents/${cleanChosen}`);
+      setIsModified(false);
+    } catch (err: any) {
+      alert(`Falha ao abrir arquivo: ${err.message}`);
+    }
+  };
+
   const handleNew = () => {
     if (isModified && !window.confirm('Descartar alterações não salvas?')) return;
     setContent('');
@@ -148,6 +192,12 @@ export default function NotepadApp({ windowId }: { windowId: string }) {
                 onClick={() => { setShowFileMenu(false); handleNew(); }}
               >
                 📄 Novo
+              </button>
+              <button
+                style={{ background: 'transparent', border: 'none', color: '#eee', padding: '6px 12px', textAlign: 'left', cursor: 'pointer', borderRadius: 4 }}
+                onClick={() => { setShowFileMenu(false); void handleOpen(); }}
+              >
+                📂 Abrir...
               </button>
               <button
                 style={{ background: 'transparent', border: 'none', color: '#eee', padding: '6px 12px', textAlign: 'left', cursor: 'pointer', borderRadius: 4 }}
