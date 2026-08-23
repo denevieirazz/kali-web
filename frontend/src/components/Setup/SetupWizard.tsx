@@ -4,7 +4,7 @@ import { useSystem } from '../../stores/systemStore';
 import { useUserStore } from '../../stores/userStore';
 import { validateDisplayName, validateNewPassword, validateUsername } from '../../services/accountContract.js';
 import { copyRecoveryCode, printRecoveryCode, saveRecoveryCodeAsText } from '../../services/recoveryCodeActions';
-import { apiClient } from '../../services/apiClient';
+import { apiClient, streamApiEvents } from '../../services/apiClient';
 import kernel from '../../core/kernel';
 import './SetupWizard.css';
 
@@ -27,6 +27,15 @@ type ProvisionStep = {
   id: string;
   label: string;
   done: boolean;
+};
+
+type ProvisionEvent = {
+  error?: unknown;
+  log?: string;
+  progress?: number;
+  step?: string;
+  stepDone?: boolean;
+  done?: boolean;
 };
 
 const PROVISION_STEPS_BASE: ProvisionStep[] = [
@@ -69,6 +78,7 @@ export default function SetupWizard() {
   const [provisionComplete, setProvisionComplete] = useState(false);
   const [realLogs, setRealLogs] = useState<string[]>([]);
   const logsEndRef = useRef<HTMLDivElement>(null);
+  const provisioningControllerRef = useRef<AbortController | null>(null);
 
   const completedSetupHandoff = useRef(false);
   const createdAccountInThisFlow = useRef(false);
@@ -86,6 +96,11 @@ export default function SetupWizard() {
       logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [realLogs]);
+
+  useEffect(() => () => {
+    provisioningControllerRef.current?.abort();
+    provisioningControllerRef.current = null;
+  }, []);
 
   async function loadDistros() {
     try {
@@ -106,6 +121,10 @@ export default function SetupWizard() {
   const currentIndex = STEPS.indexOf(step);
 
   function startProvisioning() {
+    provisioningControllerRef.current?.abort();
+    const controller = new AbortController();
+    provisioningControllerRef.current = controller;
+
     setError(null);
     setProvisionError(null);
     setProvisionComplete(false);
@@ -115,13 +134,17 @@ export default function SetupWizard() {
     setProvisionSteps(PROVISION_STEPS_BASE.map(s => ({ ...s, done: false })));
 
     const streamUrl = `/api/linux-runtime/distros/provision/stream?distro=${encodeURIComponent(selectedDistro)}&mode=${encodeURIComponent(distroChoiceMode)}`;
-    const eventSource = new EventSource(streamUrl);
-
     let completed = false;
+
+    const releaseController = () => {
+      if (provisioningControllerRef.current === controller) provisioningControllerRef.current = null;
+    };
+
     const finishStep = () => {
       if (completed) return;
       completed = true;
-      try { eventSource.close(); } catch {}
+      controller.abort();
+      releaseController();
       setProvisionError(null);
       setProvisionComplete(true);
       setProvisionProgress(100);
@@ -134,22 +157,23 @@ export default function SetupWizard() {
     const failStep = (message: string) => {
       if (completed) return;
       completed = true;
-      try { eventSource.close(); } catch {}
+      controller.abort();
+      releaseController();
       const failure = message || 'O provisionamento foi interrompido antes da conclusão.';
       setProvisionComplete(false);
       setProvisionError(failure);
       setRealLogs(prev => [...prev.slice(-40), `[Erro] ${failure}`]);
     };
 
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
+    void streamApiEvents<ProvisionEvent>(streamUrl, {
+      signal: controller.signal,
+      onEvent: (data) => {
         if (data.error) {
           failStep(String(data.error));
           return;
         }
         if (data.log) {
-          setRealLogs(prev => [...prev.slice(-40), data.log]);
+          setRealLogs(prev => [...prev.slice(-40), data.log!]);
         }
         if (typeof data.progress === 'number') {
           setProvisionProgress(Math.max(0, Math.min(100, data.progress)));
@@ -160,14 +184,17 @@ export default function SetupWizard() {
         if (data.done === true) {
           finishStep();
         }
-      } catch (eventError: any) {
-        failStep(eventError?.message || 'Resposta inválida recebida durante o provisionamento.');
+      },
+    }).then(() => {
+      if (!completed && !controller.signal.aborted) {
+        failStep('Conexão com o provisionamento terminou antes da confirmação de sucesso.');
       }
-    };
-
-    eventSource.onerror = () => {
-      failStep('Conexão com o provisionamento foi interrompida antes da confirmação de sucesso.');
-    };
+    }).catch((streamError: unknown) => {
+      if (completed || controller.signal.aborted) return;
+      failStep(streamError instanceof Error
+        ? streamError.message
+        : 'Conexão com o provisionamento foi interrompida antes da confirmação de sucesso.');
+    });
   }
 
   async function handleRemoveDistro(distroId: string) {
@@ -179,7 +206,8 @@ export default function SetupWizard() {
       setError(null);
       await apiClient('/api/linux-runtime/distros/unregister', {
         method: 'POST',
-        body: JSON.stringify({ distro: distroId })
+        body: JSON.stringify({ distro: distroId }),
+        timeoutMs: 60_000,
       });
       await loadDistros();
       setDistroChoiceMode('new');
