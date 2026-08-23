@@ -149,7 +149,7 @@ export const useUserStore = create<UserState>((set, get) => {
       try {
         const response = await apiClient<{ token: string; user: unknown; recoveryCode?: string }>('/api/setup/admin', {
           method: 'POST',
-          body: JSON.stringify({ username, displayName, password, confirmPassword }),
+          body: JSON.stringify({ username, displayName, password, confirmPassword, allowUpdate: true }),
           skipAuth: true,
           suppressUnauthorizedHandler: true
         });

@@ -171,6 +171,7 @@ export default function SetupWizard() {
         body: JSON.stringify({ distro: distroId })
       });
       await loadDistros();
+      setDistroChoiceMode('new');
       setLoading(false);
     } catch (err: any) {
       setLoading(false);
@@ -188,9 +189,10 @@ export default function SetupWizard() {
       return void startProvisioning();
     }
     if (step === 'account') {
-      if (setupStatus === 'complete' && !username && !password) {
-        // Mantém conta de administrador existente
-        return setStep('ready');
+      if (setupStatus === 'complete' && !username.trim() && !password) {
+        // Mantém conta de administrador existente e avança diretamente
+        setStep('ready');
+        return;
       }
       const cleanUser = username.trim() || 'admin';
       const cleanDisplay = displayName.trim() || cleanUser;
@@ -552,7 +554,7 @@ export default function SetupWizard() {
                   </button>
                 ) : (
                   <button className="setup-btn setup-btn-primary" onClick={() => void startProvisioning()}>
-                    Instalar Sistema →
+                    {distroChoiceMode === 'existing' ? 'Utilizar Sistema Selecionado →' : 'Instalar Sistema →'}
                   </button>
                 )
               )}
@@ -567,7 +569,13 @@ export default function SetupWizard() {
               )}
               {step === 'account' && (
                 <button className="setup-btn setup-btn-primary" onClick={() => void goNext()} disabled={loading}>
-                  {loading ? 'Criando conta…' : 'Criar Conta e Finalizar →'}
+                  {loading
+                    ? 'Processando…'
+                    : setupStatus === 'complete' && !username.trim() && !password
+                    ? 'Manter Administrador e Continuar →'
+                    : setupStatus === 'complete'
+                    ? 'Atualizar Administrador e Finalizar →'
+                    : 'Criar Conta e Finalizar →'}
                 </button>
               )}
               {step === 'ready' && (

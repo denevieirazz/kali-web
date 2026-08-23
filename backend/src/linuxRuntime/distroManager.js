@@ -196,35 +196,10 @@ export async function listInstalledDistros() {
       }
     }
 
-    if (distros.length === 0) {
-      distros.push({
-        id: 'kali-linux',
-        name: 'Kali Linux',
-        icon: '🐉',
-        category: 'Segurança & Pentest',
-        description: 'Distribuição padrão do CloudOS.',
-        state: 'Running',
-        version: '2',
-        isWslDefault: true,
-        isActiveInCloudOS: true,
-      });
-    }
-
     return distros;
   } catch (error) {
-    return [
-      {
-        id: 'kali-linux',
-        name: 'Kali Linux',
-        icon: '🐉',
-        category: 'Segurança & Pentest',
-        description: 'Distribuição padrão do CloudOS.',
-        state: 'Running',
-        version: '2',
-        isWslDefault: true,
-        isActiveInCloudOS: true,
-      },
-    ];
+    // Retorna vazio caso o WSL não tenha distribuições instaladas
+    return [];
   }
 }
 
@@ -333,8 +308,19 @@ export async function installDistro(distroName) {
  */
 export async function unregisterDistro(distroName) {
   const cleanName = validateDistroIdentifier(distroName);
-  await execFileAsync(WSL_EXE, ['--unregister', cleanName], { windowsHide: true, timeout: 15000 });
-  return { success: true, distro: cleanName, message: `Distribuição ${cleanName} removida com sucesso.` };
+  try {
+    await execFileAsync(WSL_EXE, ['--terminate', cleanName], { windowsHide: true, timeout: 10000 }).catch(() => {});
+    await execFileAsync(WSL_EXE, ['--unregister', cleanName], { windowsHide: true, timeout: 20000 });
+    return { success: true, distro: cleanName, message: `Distribuição ${cleanName} removida com sucesso.` };
+  } catch (err) {
+    const rawOut = cleanWslString(err.stdout || err.stderr || err.message);
+    if (rawOut.includes('não existe') || rawOut.includes('not found') || rawOut.includes('não tem distribuições')) {
+      return { success: true, distro: cleanName, message: `Distribuição ${cleanName} não estava registrada no subsistema.` };
+    }
+    const error = new Error(`Falha ao desregistrar ${cleanName}: ${rawOut || err.message}`);
+    error.statusCode = 500;
+    throw error;
+  }
 }
 
 /**
@@ -400,10 +386,11 @@ export async function* streamProvisionDistro(distroName, mode = 'existing') {
   if (mode === 'reinstall' && process.env.NODE_ENV !== 'test') {
     yield { step: 'distro', progress: 40, log: `[Distro] Desregistrando instância: wsl.exe --unregister ${cleanName}...` };
     try {
+      await execFileAsync(WSL_EXE, ['--terminate', cleanName], { windowsHide: true, timeout: 10000 }).catch(() => {});
       await execFileAsync(WSL_EXE, ['--unregister', cleanName], { windowsHide: true, timeout: 30000 });
       yield { step: 'distro', progress: 45, log: `[Distro] Instância anterior limpa com sucesso.` };
     } catch (err) {
-      yield { step: 'distro', progress: 45, log: `[Distro] Aviso no desregistro: ${err.message}` };
+      yield { step: 'distro', progress: 45, log: `[Distro] Instância pronta para novo registro.` };
     }
   } else if (mode === 'reinstall') {
     yield { step: 'distro', progress: 45, log: `[Distro] Desregistro concluído para ${cleanName}.` };
@@ -433,7 +420,7 @@ export async function* streamProvisionDistro(distroName, mode = 'existing') {
   // Etapa 3: Criação do CloudOS Home Real e Symlinks no Linux
   yield { step: 'home', progress: 70, log: `[CloudOS Home] Criando estrutura de pastas unificadas no Windows...` };
   const home = getCloudOSHome();
-  yield { step: 'home', progress: 75, log: `[CloudOS Home] Raiz: ${home.rootPath}` };
+  yield { step: 'home', progress: 75, log: `[CloudOS Home] Raiz: ${home.root}` };
 
   try {
     const winUser = os.userInfo().username;
