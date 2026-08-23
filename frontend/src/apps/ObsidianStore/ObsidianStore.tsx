@@ -32,6 +32,10 @@ const CATEGORIES = [
   { id: 'security', label: 'Segurança' },
 ];
 
+// Package installation includes repository refresh + download + dpkg/rpm work.
+// Keep this above the backend package-manager ceiling so the browser never aborts first.
+const PACKAGE_INSTALL_TIMEOUT_MS = 180_000;
+
 export default function ObsidianStore() {
   const [packages, setPackages] = useState<LinuxPackage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,14 +90,17 @@ export default function ObsidianStore() {
   };
 
   const handleInstall = async (pkg: LinuxPackage) => {
+    const startedAt = Date.now();
     setInstallingId(pkg.id);
     setActionLog({ id: pkg.id, name: pkg.name, status: 'Instalando via repositórios oficiais...' });
     try {
       const res = await apiClient<{ success: boolean; log: string }>(`/api/linux-runtime/packages/${pkg.id}/install`, {
         method: 'POST',
         body: JSON.stringify({}),
+        timeoutMs: PACKAGE_INSTALL_TIMEOUT_MS,
       });
-      setActionLog({ id: pkg.id, name: pkg.name, status: 'Instalação concluída com sucesso!', log: res?.log });
+      const elapsedSeconds = ((Date.now() - startedAt) / 1000).toFixed(1);
+      setActionLog({ id: pkg.id, name: pkg.name, status: `Instalação concluída com sucesso em ${elapsedSeconds}s!`, log: res?.log });
       await fetchPackages();
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('cloudos:apps-changed'));
