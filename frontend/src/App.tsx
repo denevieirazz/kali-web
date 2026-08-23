@@ -14,6 +14,7 @@ import WorkflowShell from './components/Workflow/WorkflowShell';
 import OpenWithModal from './components/OpenWithModal/OpenWithModal';
 import DownloadManagerModal from './components/DownloadManager/DownloadManagerModal';
 import kernel from './core/kernel';
+import { useAppRegistry } from './core/appRegistry';
 import {
   useCriticalSubsystemWatchdog,
   useDocumentTheme,
@@ -32,7 +33,10 @@ import { useRegistry } from './stores/registry';
 import { useSystem } from './stores/systemStore';
 import { useUserStore } from './stores/userStore';
 import { useDownloadManager } from './stores/downloadManager';
+import { apiClient } from './services/apiClient';
 import { openFile } from './services/fileLauncher';
+import { nativeHostBridge } from './services/nativeHostBridge';
+import { mapWindowsCatalogApps } from './services/windowsAppCatalog.js';
 import './index.css';
 import './cloudosEnhancements.css';
 
@@ -45,6 +49,7 @@ export default function App() {
   const setupStatus = useUserStore(state => state.setupStatus);
   const validateSession = useUserStore(state => state.validateSession);
   const getRegistryValue = useRegistry(state => state.getValue);
+  const registerApp = useAppRegistry(state => state.registerApp);
 
   const [isRecovery] = useState(() => {
     const crashCount = Number.parseInt(localStorage.getItem('obsidianos_crash_count') ?? '0', 10);
@@ -59,6 +64,28 @@ export default function App() {
       openFile,
     };
   }, [validateSession]);
+
+  // Publish the trusted Windows Start-menu catalog into the same registry consumed by
+  // CloudOS Start. Only opaque native-* IDs cross into React; executable paths stay in
+  // the authenticated backend/native-host trust boundary.
+  useEffect(() => {
+    if (bootPhase !== 'desktop' || !isAuthenticated || !nativeHostBridge.available) return undefined;
+    let cancelled = false;
+
+    void apiClient<{ apps: unknown[] }>('/api/apps?refresh=true')
+      .then((payload) => {
+        if (cancelled) return;
+        for (const app of mapWindowsCatalogApps(payload)) registerApp(app);
+      })
+      .catch(() => {
+        // The native catalog is an additive capability. Shell boot must remain usable
+        // while the local agent is still warming up or when running browser-only mode.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bootPhase, isAuthenticated, registerApp]);
 
   // The backend is the source of truth for whether first-boot setup still exists.
   // If the browser-local OOBE marker was lost but an administrator already exists,

@@ -37,6 +37,8 @@ const components: Record<string, ReturnType<typeof lazy>> = {
 
 // O novo Motor de Renderização Gráfica intercepta scripts puros que querem desenhar tela
 const HwndRenderer = lazy(() => import('../components/Window/HwndRenderer'));
+// Aplicativos reais do catálogo do Windows usam a ponte nativa, nunca o renderer JS legado.
+const NativeAppWindow = lazy(() => import('../apps/NativeAppWindow/NativeAppWindow'));
 
 interface AppRegistryState {
   apps: Record<string, AppDefinition>;
@@ -56,8 +58,9 @@ export const useAppRegistry = create<AppRegistryState>((set, get) => ({
   setReady: (ready) => set({ isReady: ready }),
 }));
 
-// Helper to get component by ID — falls back to HwndRenderer for Pure-JS executables
-export const getAppComponent = (id: string) => components[id] ?? HwndRenderer;
+// Helper to get component by ID. Opaque native-* IDs are host-owned Windows apps.
+// Unknown non-native IDs keep the Pure-JS HwndRenderer compatibility path.
+export const getAppComponent = (id: string) => id.startsWith('native-') ? NativeAppWindow : (components[id] ?? HwndRenderer);
 
 // Backward compatibility or for things that need a list
 export const getAppList = () => Object.values(useAppRegistry.getState().apps);

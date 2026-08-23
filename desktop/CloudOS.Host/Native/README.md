@@ -70,6 +70,21 @@ intersects them with the WebView rectangle and recomputes them whenever its owne
 window moves, resizes or crosses monitors. Public snapshots report `contained`,
 `containmentMode` (`anchored-overlay` or `external`) and `visible`.
 
+## CloudOS Start integration
+
+When the authenticated desktop is running inside `CloudOS.Host`, the frontend reads
+`GET /api/apps?refresh=true` and publishes only `source: windows` entries with valid
+opaque `native-*` IDs into the normal CloudOS application registry. No executable,
+shortcut target, PID, or arbitrary HWND is copied into the Start-menu definition.
+
+Opening one of those entries routes it to `NativeAppWindow`. That component launches
+the opaque ID through `native.launchApp`, waits for the host-created session, attaches
+the real top-level window to the CloudOS content slot, and keeps layout/visibility in
+sync while the CloudOS window moves, resizes, minimizes, restores, or loses focus.
+Closing the CloudOS window sends the bounded native close operation. If a process is
+handed to a shared Windows broker and cannot be attributed safely, the surface fails
+closed instead of adopting an unrelated broker HWND.
+
 ## Validation
 
 The source intentionally uses APIs available to both modern .NET for Windows and

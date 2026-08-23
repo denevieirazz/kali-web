@@ -1,0 +1,207 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { nativeHostBridge, NativeHostError, type NativeSession, type NativeViewportBounds } from '../../services/nativeHostBridge';
+import { nativeSessionForLaunch, nativeViewportBounds } from '../../services/nativeWindowContract.js';
+import { useSystem } from '../../stores/systemStore';
+import { useWindowManager } from '../../stores/windowManager';
+import './NativeAppWindow.css';
+
+type NativeSurfaceStatus = 'launching' | 'waiting' | 'attaching' | 'contained' | 'error';
+type NativeLaunch = Awaited<ReturnType<typeof nativeHostBridge.launchApp>>;
+
+const SESSION_ATTEMPTS = 32;
+const SESSION_RETRY_MS = 125;
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function waitForSession(launch: NativeLaunch, cancelled: () => boolean): Promise<NativeSession | null> {
+  for (let attempt = 0; attempt < SESSION_ATTEMPTS && !cancelled(); attempt += 1) {
+    const result = await nativeHostBridge.listSessions();
+    const session = nativeSessionForLaunch(result.sessions, launch);
+    if (session) return session;
+    await sleep(SESSION_RETRY_MS);
+  }
+  return null;
+}
+
+function errorMessage(error: unknown) {
+  if (error instanceof NativeHostError) return error.message;
+  if (error instanceof Error) return error.message;
+  return 'O aplicativo do Windows não pôde ser contido pelo CloudOS.';
+}
+
+export default function NativeAppWindow({ windowId }: { windowId: string }) {
+  const win = useWindowManager((state) => state.windows.find((item) => item.id === windowId));
+  const closeWindow = useWindowManager((state) => state.closeWindow);
+  const updateWindowTitle = useWindowManager((state) => state.updateWindowTitle);
+  const isStartMenuOpen = useSystem((state) => state.isStartMenuOpen);
+  const surfaceRef = useRef<HTMLDivElement>(null);
+  const sessionIdRef = useRef<string | null>(null);
+  const attachedRef = useRef(false);
+  const lastBoundsRef = useRef<NativeViewportBounds | null>(null);
+  const disposedRef = useRef(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [status, setStatus] = useState<NativeSurfaceStatus>('launching');
+  const [error, setError] = useState('');
+
+  const appId = win?.appId || '';
+  const visible = Boolean(win && !win.isMinimized && win.isActive && !isStartMenuOpen && document.visibilityState === 'visible');
+
+  const syncSurface = useCallback(async (attach = false) => {
+    const currentSessionId = sessionIdRef.current;
+    if (!currentSessionId || disposedRef.current) return;
+
+    const rect = surfaceRef.current?.getBoundingClientRect();
+    const measured = rect
+      ? nativeViewportBounds(rect, { width: window.innerWidth, height: window.innerHeight })
+      : null;
+    if (measured) lastBoundsRef.current = measured;
+    const bounds = measured || lastBoundsRef.current;
+    if (!bounds) return;
+
+    if (attach && !attachedRef.current) {
+      setStatus('attaching');
+      await nativeHostBridge.attachSession(currentSessionId, bounds);
+      attachedRef.current = true;
+      setStatus('contained');
+      return;
+    }
+
+    if (attachedRef.current) {
+      await nativeHostBridge.layoutSession(currentSessionId, bounds, visible);
+    }
+  }, [visible]);
+
+  useEffect(() => {
+    if (!appId.startsWith('native-')) {
+      setStatus('error');
+      setError('Identificador nativo inválido.');
+      return undefined;
+    }
+
+    let cancelled = false;
+    disposedRef.current = false;
+
+    void (async () => {
+      try {
+        setStatus('launching');
+        await nativeHostBridge.connect();
+        if (cancelled) return;
+
+        const launch = await nativeHostBridge.launchApp(appId);
+        if (cancelled) return;
+        if (launch.name) updateWindowTitle(windowId, launch.name);
+        if (!launch.managed) {
+          throw new NativeHostError(
+            'WINDOW_NOT_MANAGED',
+            launch.managementReason || 'O Windows entregou este aplicativo a um broker que não pode ser contido com segurança.'
+          );
+        }
+
+        setStatus('waiting');
+        const session = await waitForSession(launch, () => cancelled);
+        if (cancelled) return;
+        if (!session) {
+          throw new NativeHostError('NATIVE_WINDOW_NOT_FOUND', 'A janela do aplicativo não apareceu a tempo para ser encaixada no CloudOS.');
+        }
+
+        sessionIdRef.current = session.sessionId;
+        setSessionId(session.sessionId);
+      } catch (launchError) {
+        if (cancelled) return;
+        setStatus('error');
+        setError(errorMessage(launchError));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      disposedRef.current = true;
+      const currentSessionId = sessionIdRef.current;
+      const bounds = lastBoundsRef.current;
+      if (!currentSessionId) return;
+      void (async () => {
+        if (attachedRef.current && bounds) {
+          try {
+            await nativeHostBridge.layoutSession(currentSessionId, bounds, false);
+          } catch {}
+        }
+        try {
+          await nativeHostBridge.operate('close', currentSessionId);
+        } catch {}
+      })();
+    };
+  }, [appId, updateWindowTitle, windowId]);
+
+  useEffect(() => {
+    if (!sessionId) return undefined;
+    let frame = 0;
+    const scheduleSync = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        void syncSurface(!attachedRef.current).catch((layoutError) => {
+          if (disposedRef.current) return;
+          setStatus('error');
+          setError(errorMessage(layoutError));
+        });
+      });
+    };
+
+    scheduleSync();
+    const observer = new ResizeObserver(scheduleSync);
+    if (surfaceRef.current) observer.observe(surfaceRef.current);
+    window.addEventListener('resize', scheduleSync);
+    window.addEventListener('scroll', scheduleSync, true);
+    document.addEventListener('visibilitychange', scheduleSync);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener('resize', scheduleSync);
+      window.removeEventListener('scroll', scheduleSync, true);
+      document.removeEventListener('visibilitychange', scheduleSync);
+    };
+  }, [sessionId, syncSurface]);
+
+  useEffect(() => {
+    if (!sessionId || !attachedRef.current) return;
+    const frame = window.requestAnimationFrame(() => {
+      void syncSurface(false).catch(() => undefined);
+      if (visible) void nativeHostBridge.operate('focus', sessionId).catch(() => undefined);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [sessionId, syncSurface, visible, win?.x, win?.y, win?.width, win?.height, win?.isMaximized, win?.isMinimized]);
+
+  useEffect(() => {
+    if (!sessionId) return undefined;
+    return nativeHostBridge.onSessionsChanged((sessions) => {
+      if (disposedRef.current) return;
+      const current = sessions.find((session) => session.sessionId === sessionId);
+      if (!current) {
+        closeWindow(windowId);
+        return;
+      }
+      if (current.title && current.title !== win?.title) updateWindowTitle(windowId, current.title);
+    });
+  }, [closeWindow, sessionId, updateWindowTitle, win?.title, windowId]);
+
+  return (
+    <div ref={surfaceRef} className="native-app-surface" data-status={status} data-session-id={sessionId || undefined}>
+      <div className="native-app-placeholder" role={status === 'error' ? 'alert' : 'status'} aria-live="polite">
+        <span className="native-app-placeholder-icon" aria-hidden="true">▦</span>
+        {status === 'error' ? (
+          <>
+            <strong>Não foi possível encaixar este aplicativo do Windows</strong>
+            <span>{error}</span>
+          </>
+        ) : (
+          <>
+            <strong>{status === 'launching' ? 'Abrindo aplicativo do Windows…' : status === 'waiting' ? 'Localizando a janela nativa…' : 'Encaixando no CloudOS…'}</strong>
+            <span>A janela real ficará presa a esta superfície.</span>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
