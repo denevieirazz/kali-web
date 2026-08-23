@@ -147,11 +147,18 @@ export const useUserStore = create<UserState>((set, get) => {
 
     createAdmin: async (username, displayName, password, confirmPassword) => {
       try {
+        const updatingExistingAdmin = get().setupStatus === 'complete';
         const response = await apiClient<{ token: string; user: unknown; recoveryCode?: string }>('/api/setup/admin', {
           method: 'POST',
-          body: JSON.stringify({ username, displayName, password, confirmPassword, allowUpdate: true }),
-          skipAuth: true,
-          suppressUnauthorizedHandler: true
+          body: JSON.stringify({
+            username,
+            displayName,
+            password,
+            confirmPassword,
+            ...(updatingExistingAdmin ? { allowUpdate: true } : {})
+          }),
+          skipAuth: !updatingExistingAdmin,
+          suppressUnauthorizedHandler: !updatingExistingAdmin
         });
         const profile = storeSession(response, { username, displayName });
         const recoveryCode = extractRecoveryCode(response);
