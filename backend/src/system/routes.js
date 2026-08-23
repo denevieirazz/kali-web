@@ -4,26 +4,31 @@ import { authenticateToken } from '../middleware/auth.js';
 
 export const systemRouter = express.Router();
 
-let prevCpuInfo = null;
-
-function getCpuLoad() {
+function readCpuTimes() {
   const cpus = os.cpus();
-  if (!cpus || cpus.length === 0) return -1;
+  if (!cpus || cpus.length === 0) return null;
   let totalIdle = 0;
   let totalTick = 0;
   for (const cpu of cpus) {
-    for (const type of Object.keys(cpu.times)) {
-      totalTick += cpu.times[type];
-    }
+    for (const type of Object.keys(cpu.times)) totalTick += cpu.times[type];
     totalIdle += cpu.times.idle;
   }
+  return { totalIdle, totalTick };
+}
+
+// Seed at module load so the first API request reports a real delta rather than a made-up percentage.
+let prevCpuInfo = readCpuTimes();
+
+function getCpuLoad() {
+  const current = readCpuTimes();
+  if (!current) return -1;
   if (!prevCpuInfo) {
-    prevCpuInfo = { totalIdle, totalTick };
-    return 15; // Initial estimation
+    prevCpuInfo = current;
+    return 0;
   }
-  const idleDiff = totalIdle - prevCpuInfo.totalIdle;
-  const totalDiff = totalTick - prevCpuInfo.totalTick;
-  prevCpuInfo = { totalIdle, totalTick };
+  const idleDiff = current.totalIdle - prevCpuInfo.totalIdle;
+  const totalDiff = current.totalTick - prevCpuInfo.totalTick;
+  prevCpuInfo = current;
   if (totalDiff <= 0) return 0;
   const load = 100 - Math.round((100 * idleDiff) / totalDiff);
   return Math.max(0, Math.min(100, load));
@@ -48,7 +53,7 @@ systemRouter.get('/metrics', authenticateToken, async (req, res) => {
         total: totalMem,
         free: freeMem,
         used: usedMem,
-        usagePercentage: Math.round((usedMem / totalMem) * 100)
+        usagePercentage: totalMem > 0 ? Math.round((usedMem / totalMem) * 100) : 0
       },
       os: {
         platform: os.platform(),
