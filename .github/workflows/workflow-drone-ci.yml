@@ -46,6 +46,7 @@ jobs:
           node scripts/workflow/test-record-sha-telemetry.mjs
           node scripts/workflow/test-verify-spec-integrity.mjs
           node scripts/workflow/test-workflow-sha-contract.mjs
+          node scripts/workflow/test-batch4-stabilization-scope-contract.mjs
 
       - name: Verify stabilization scope
         run: node scripts/workflow/test-batch4-stabilization-scope.mjs

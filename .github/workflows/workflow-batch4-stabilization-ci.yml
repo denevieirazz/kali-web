@@ -47,6 +47,7 @@ jobs:
           node scripts/workflow/test-record-sha-telemetry.mjs
           node scripts/workflow/test-verify-spec-integrity.mjs
           node scripts/workflow/test-workflow-sha-contract.mjs
+          node scripts/workflow/test-batch4-stabilization-scope-contract.mjs
       - name: Verify stabilization scope
         run: node scripts/workflow/test-batch4-stabilization-scope.mjs
       - name: Install dependencies
@@ -140,6 +141,8 @@ jobs:
           EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           TELEMETRY_OUTPUT_DIR: test-results/human-simulation
         run: node scripts/workflow/record-sha-telemetry.mjs --gate
+      - name: Unit test stabilization scope resolution
+        run: node scripts/workflow/test-batch4-stabilization-scope-contract.mjs
       - name: Verify stabilization scope
         run: node scripts/workflow/test-batch4-stabilization-scope.mjs
       - name: Verify untampered spec integrity
