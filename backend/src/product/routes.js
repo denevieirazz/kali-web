@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 
 function readProductMetadata(environment = process.env, cwd = process.cwd()) {
   const candidates = [
@@ -225,13 +225,13 @@ export function createProductRouter({ environment = process.env, cwd = process.c
     catch (error) { return next(error); }
     finally { clearTimeout(timer); }
   });
-  router.post('/cache/clear', (_req, res, next) => {
+  router.post('/cache/clear', requireAdmin, (_req, res, next) => {
     try { clearCache(environment); return res.json({ ok: true }); } catch (error) { return next(error); }
   });
-  router.post('/diagnostics/export', (_req, res, next) => {
+  router.post('/diagnostics/export', requireAdmin, (_req, res, next) => {
     try { return res.json({ ok: true, fileName: exportDiagnostics(environment, cwd) }); } catch (error) { return next(error); }
   });
-  router.post('/folder/:kind/open', (req, res, next) => {
+  router.post('/folder/:kind/open', requireAdmin, (req, res, next) => {
     try { openKnownDirectory(String(req.params.kind || ''), environment); return res.json({ ok: true }); } catch (error) { return next(error); }
   });
   return router;
