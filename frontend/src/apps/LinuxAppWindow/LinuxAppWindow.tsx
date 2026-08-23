@@ -14,6 +14,7 @@ interface LinuxAppWindowProps {
     appId?: string;
     title?: string;
     icon?: string;
+    filePath?: string;
   };
 }
 
@@ -30,6 +31,7 @@ export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps
   const targetAppId = effectiveParams?.appId || effectiveParams?.app || 'firefox';
   const targetTitle = effectiveParams?.title || win?.title || 'Aplicativo Linux';
   const targetIcon = effectiveParams?.icon || win?.icon || '🐧';
+  const targetFilePath = effectiveParams?.filePath || null;
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -52,7 +54,11 @@ export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps
       try {
         const res = await apiClient<{ session: LaunchSession }>('/api/linux-runtime/launch', {
           method: 'POST',
-          body: JSON.stringify({ appId: targetAppId, ownerId: windowId }),
+          body: JSON.stringify({
+            appId: targetAppId,
+            ownerId: windowId,
+            filePath: targetFilePath
+          }),
           timeoutMs: 45_000,
         });
 

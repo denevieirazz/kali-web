@@ -218,7 +218,12 @@ linuxRuntimeRouter.post('/poc1/stop', async (req, res) => {
 linuxRuntimeRouter.post('/launch', async (req, res) => {
   try {
     const owner = ownerFor(req, req.body?.ownerId);
-    const session = await startXpraPoc({ app: req.body?.appId || req.body?.app || 'firefox', ownerId: owner, distribution: req.body?.distribution });
+    const session = await startXpraPoc({
+      app: req.body?.appId || req.body?.app || 'firefox',
+      ownerId: owner,
+      distribution: req.body?.distribution,
+      filePath: req.body?.filePath
+    });
     res.status(201).json({ session });
   } catch (error) {
     sendError(res, error, 'LINUX_FAST_LAUNCH_FAILED');

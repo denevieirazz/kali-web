@@ -157,6 +157,8 @@ function parseDesktopFileContent(content, filename) {
                       (terminal && !['vim', 'mc', 'mcedit'].includes(baseId));
 
   const isUserApp = !isTechnical;
+  const mimeTypesRaw = props.MimeType || '';
+  const mimeTypes = mimeTypesRaw.split(';').map(m => m.trim().toLowerCase()).filter(Boolean);
 
   return {
     id: baseId,
@@ -170,6 +172,7 @@ function parseDesktopFileContent(content, filename) {
     emojiFallback,
     categories,
     category,
+    mimeTypes,
     terminal,
     desktopFile: filename,
     installed: true,

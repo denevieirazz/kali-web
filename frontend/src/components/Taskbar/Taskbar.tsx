@@ -8,6 +8,7 @@ import { useProcessManager } from '../../stores/processManager';
 import { useContextMenuStore } from '../../stores/contextMenuStore';
 import { useRegistry } from '../../stores/registry';
 import { useNativeSessions } from '../../hooks/useNativeSessions';
+import { useDownloadManager } from '../../stores/downloadManager';
 import { nativeHostBridge, type NativeSession } from '../../services/nativeHostBridge';
 import './Taskbar.css';
 
@@ -21,6 +22,10 @@ export default function Taskbar() {
 
   const position = String(useRegistry(s => s.hives['HKEY_CURRENT_USER\\Software\\ObsidianOS\\Taskbar']?.Position?.value || 'bottom'));
   const alignment = String(useRegistry(s => s.hives['HKEY_CURRENT_USER\\Software\\ObsidianOS\\Taskbar']?.Alignment?.value || 'center'));
+
+  const downloads = useDownloadManager(s => s.downloads);
+  const openDownloadModal = useDownloadManager(s => s.openDownloadModal);
+  const activeDownloadsCount = downloads.filter(d => d.status === 'downloading').length;
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
@@ -146,6 +151,27 @@ export default function Taskbar() {
       <div className="taskbar-right">
         {/* System tray icons */}
         <div className="system-tray">
+          <button
+            className="tray-btn"
+            onClick={openDownloadModal}
+            title={`Downloads (${downloads.length})`}
+            style={{ position: 'relative' }}
+          >
+            <span style={{ fontSize: '13px' }}>⬇️</span>
+            {activeDownloadsCount > 0 && (
+              <span style={{
+                position: 'absolute',
+                top: '3px',
+                right: '3px',
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                background: '#818cf8',
+                boxShadow: '0 0 6px #818cf8'
+              }} />
+            )}
+          </button>
+
           <button className="tray-btn" title={isWifiConnected ? 'Wi-Fi conectado' : 'Wi-Fi desconectado'}>
             {isWifiConnected ? (
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg>

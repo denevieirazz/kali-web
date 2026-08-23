@@ -410,7 +410,7 @@ function releasePort(port) {
   reservedPorts.delete(port);
 }
 
-export async function startXpraPoc({ app, distribution, ownerId, generation = 1 } = {}) {
+export async function startXpraPoc({ app, distribution, ownerId, generation = 1, filePath = null } = {}) {
   return queueLifecycle(async () => {
     const snapshot = await getWslSnapshot();
     const distro = typeof distribution === 'string' && distribution.trim() ? distribution.trim() : snapshot.preferred || snapshot.default || 'kali-linux';
@@ -457,7 +457,20 @@ export async function startXpraPoc({ app, distribution, ownerId, generation = 1 
       metrics: { preflightMs: readiness.durationMs, restartCount: 0, reconnectCount: 0, healthFailures: 0, proxyHttpRequests: 0, proxyWebSocketConnections: 0 }
     };
 
-    const appCommand = appDef.command.replaceAll('{sessionId}', id);
+    let appCommand = appDef.command.replaceAll('{sessionId}', id);
+    if (filePath && typeof filePath === 'string' && filePath.trim()) {
+      let linuxPath = filePath.trim();
+      if (/^[a-zA-Z]:[\\/]/.test(linuxPath)) {
+        const drive = linuxPath.charAt(0).toLowerCase();
+        linuxPath = `/mnt/${drive}/${linuxPath.slice(3).replace(/\\/g, '/')}`;
+      }
+      if (/%[fFuU]/.test(appCommand)) {
+        appCommand = appCommand.replace(/%[fFuU]/g, shellQuote(linuxPath));
+      } else {
+        appCommand = `${appCommand} ${shellQuote(linuxPath)}`;
+      }
+    }
+
     sessions.set(id, session);
     writeLedger();
     const startClock = Date.now();

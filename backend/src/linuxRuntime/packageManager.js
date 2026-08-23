@@ -261,6 +261,7 @@ export async function listLinuxPackages(requestedDistribution) {
         emojiFallback: app.icon,
         isPopular: Boolean(app.isPopular),
         desktopId: app.desktopId || app.id,
+        mimeTypes: disc?.mimeTypes || [],
         installed: isInstalled,
         isCurated: true,
         isUserApp: true,
@@ -268,7 +269,7 @@ export async function listLinuxPackages(requestedDistribution) {
       };
     });
   } catch (err) {
-    curatedWithStatus = CURATED_LINUX_APPS.map(app => ({ ...app, installed: false, isCurated: true, isUserApp: true, isTechnical: false }));
+    curatedWithStatus = CURATED_LINUX_APPS.map(app => ({ ...app, installed: false, isCurated: true, isUserApp: true, isTechnical: false, mimeTypes: [] }));
   }
 
   // 3. Merge discovered apps that are NOT curated
@@ -294,6 +295,7 @@ export async function listLinuxPackages(requestedDistribution) {
     isPopular: false,
     desktopId: d.id,
     terminal: d.terminal,
+    mimeTypes: d.mimeTypes || [],
     installed: true,
     isDiscovered: true,
     isUserApp: d.isUserApp !== false,

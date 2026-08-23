@@ -5,6 +5,8 @@ import { useContextMenuStore } from '../../stores/contextMenuStore';
 import { useWindowManager } from '../../stores/windowManager';
 import { addClipboardText } from '../../services/workflowClipboard';
 import { openTerminalHere, openWorkspace } from '../../services/workflowLaunch';
+import { openFile } from '../../services/fileLauncher';
+import { getFileIconForExtension } from '../../services/mimeRegistry';
 import {
   createWorkspace,
   getActiveWorkspace,
@@ -240,11 +242,25 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
     }
   }, [currentPath, source, viewMode]);
 
+  const handleLaunchFile = useCallback((entry: CloudFileEntry, openWith = false) => {
+    if (entry.kind !== 'file' || entry.symlink) return;
+    const fullPath = source === 'wsl'
+      ? `/root/${currentPath.length ? `${currentPath.join('/')}/` : ''}${entry.name}`
+      : `C:\\Users\\User\\${currentPath.length ? `${currentPath.join('\\')}\\` : ''}${entry.name}`;
+
+    openFile({
+      filePath: fullPath,
+      fileName: entry.name,
+      openWith,
+    });
+  }, [currentPath, source]);
+
   const openEntry = useCallback(async (entry: CloudFileEntry) => {
     if (entry.kind === 'symlink' || entry.symlink) { await selectEntry(entry); return; }
     if (entry.kind === 'directory' && viewMode === 'files') { setCurrentPath(path => [...path, entry.name]); return; }
     await selectEntry(entry);
-  }, [selectEntry, viewMode]);
+    handleLaunchFile(entry, false);
+  }, [handleLaunchFile, selectEntry, viewMode]);
 
   const downloadEntry = useCallback(async (entry: CloudFileEntry) => {
     if (entry.kind !== 'file' || entry.symlink || (viewMode === 'trash' && source !== 'opfs')) return;
@@ -431,7 +447,19 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
     setSelectedName(entry.name);
     const symlink = entry.kind === 'symlink' || entry.symlink;
     openContextMenu(event.clientX, event.clientY, [
-      { id: 'open', label: symlink ? 'Detalhes' : entry.kind === 'directory' ? 'Abrir' : 'Preview', onClick: () => void openEntry(entry) },
+      {
+        id: 'open',
+        label: symlink ? 'Detalhes' : entry.kind === 'directory' ? 'Abrir pasta' : 'Abrir',
+        icon: '⚡',
+        onClick: () => {
+          if (entry.kind === 'directory') void openEntry(entry);
+          else handleLaunchFile(entry, false);
+        }
+      },
+      ...(entry.kind === 'file' && !symlink ? [
+        { id: 'open-with', label: 'Abrir com...', icon: '🗂️', onClick: () => handleLaunchFile(entry, true) },
+        { id: 'preview-pane', label: 'Visualizar (Preview)', icon: '👁️', onClick: () => void selectEntry(entry) },
+      ] : []),
       { id: 'terminal-here', label: 'Abrir Terminal aqui', shortcut: 'Ctrl+Alt+T', onClick: () => launchTerminalAt(entry) },
       { id: 'sep-workflow', label: '', separator: true },
       { id: 'send-linux', label: 'Enviar para Linux', disabled: source === 'wsl' || entry.kind !== 'file' || Boolean(symlink), onClick: () => void sendToLinux(entry) },
@@ -442,7 +470,7 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
       { id: 'rename', label: 'Renomear', shortcut: 'F2', disabled: Boolean(symlink), onClick: () => requestRename(entry) },
       { id: 'delete', label: 'Excluir', shortcut: 'Delete', disabled: Boolean(symlink), onClick: () => requestDelete(entry) },
     ]);
-  }, [copyToWorkspace, currentPath, launchTerminalAt, openContextMenu, openEntry, rememberFileCopy, requestDelete, requestRename, sendToLinux, sendToWindows, source]);
+  }, [copyToWorkspace, currentPath, handleLaunchFile, launchTerminalAt, openContextMenu, openEntry, rememberFileCopy, requestDelete, requestRename, selectEntry, sendToLinux, sendToWindows, source]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

@@ -11,6 +11,8 @@ import StartMenu from './components/StartMenu/StartMenu';
 import WindowRenderer from './components/Window/WindowRenderer';
 import WorkflowBatch4Shell from './components/Workflow/WorkflowBatch4Shell';
 import WorkflowShell from './components/Workflow/WorkflowShell';
+import OpenWithModal from './components/OpenWithModal/OpenWithModal';
+import DownloadManagerModal from './components/DownloadManager/DownloadManagerModal';
 import {
   useCriticalSubsystemWatchdog,
   useDocumentTheme,
@@ -28,6 +30,8 @@ import { useProcessManager } from './stores/processManager';
 import { useRegistry } from './stores/registry';
 import { useSystem } from './stores/systemStore';
 import { useUserStore } from './stores/userStore';
+import { useDownloadManager } from './stores/downloadManager';
+import { openFile } from './services/fileLauncher';
 import './index.css';
 import './cloudosEnhancements.css';
 
@@ -45,6 +49,11 @@ export default function App() {
 
   useEffect(() => {
     void validateSession();
+    (window as any).__CLOUDOS_DEBUG__ = {
+      useFileSystem,
+      useDownloadManager,
+      openFile,
+    };
   }, [validateSession]);
 
   useNativeHostHandshake();
@@ -97,6 +106,8 @@ export default function App() {
 
           <NotificationContainer />
           <NotificationCenter />
+          <OpenWithModal />
+          <DownloadManagerModal />
 
           {contextMenuOpen && (
             <ContextMenu
