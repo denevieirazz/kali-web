@@ -11,6 +11,7 @@ import { setupTerminalWebSocket } from './terminal/websocket.js';
 import { handleXpraProxyUpgrade } from './linuxRuntime/xpraProxy.js';
 import { restoreSessionsFromLedger, shutdownXpraPocRuntime } from './linuxRuntime/xpraPoc.js';
 import { shutdownPhysicalPreflight } from './linuxRuntime/preflight.js';
+import { startMotwWatcher } from './files/motwService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -138,6 +139,9 @@ async function startServer() {
 
   // Re-hidrata sessões ativas do Linux Runtime
   restoreSessionsFromLedger().catch(() => undefined);
+
+  // Inicia o watcher de Mark of the Web (Zone.Identifier) para arquivos baixados
+  startMotwWatcher();
 
   // Gravação atômica do arquivo de runtime — APÓS listen efetivo
   if (!fs.existsSync(runtimeDir)) {

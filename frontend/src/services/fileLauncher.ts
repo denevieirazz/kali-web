@@ -90,15 +90,22 @@ export function openFile(options: OpenFileOptions): void {
 
   const richOfficeExtensions = ['docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp'];
   const ext = getFileExtension(fileName);
-  if (richOfficeExtensions.includes(ext) && appId === 'notepad' && !targetAppId) {
-    const compatible = getCompatibleApps(fileName, linuxApps);
-    openOpenWithModal({
-      fileName,
-      filePath,
-      fileContent,
-      compatibleApps: compatible,
-      onSelectApp: (chosenId) => {
-        openFile({ ...options, openWith: false, targetAppId: chosenId });
+  if (appId === 'office-viewer' || (richOfficeExtensions.includes(ext) && !targetAppId)) {
+    const pid = createProcess('office-viewer', selectedApp.name || 'Visualizador Office', selectedApp.icon || '📄');
+    openWindow({
+      title,
+      icon: selectedApp.icon || '📄',
+      appId: 'office-viewer',
+      width: 960,
+      height: 640,
+      minWidth: 480,
+      minHeight: 320,
+      isResizable: true,
+      processId: pid,
+      params: {
+        filePath,
+        fileName,
+        fileContent
       }
     });
     return;

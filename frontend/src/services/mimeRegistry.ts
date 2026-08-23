@@ -57,8 +57,8 @@ export const MIME_DEFINITIONS: MimeDefinition[] = [
     category: 'documents',
     icon: '📘',
     label: 'Documento Word / Texto Formatado',
-    defaultAppId: 'notepad',
-    compatibleAppIds: ['notepad', 'linux-app-geany', 'linux-app-mousepad', 'linux-app-obsidian']
+    defaultAppId: 'office-viewer',
+    compatibleAppIds: ['office-viewer', 'notepad', 'linux-app-geany', 'linux-app-mousepad']
   },
   {
     mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -66,8 +66,17 @@ export const MIME_DEFINITIONS: MimeDefinition[] = [
     category: 'spreadsheets',
     icon: '📗',
     label: 'Planilha / Tabela de Dados',
-    defaultAppId: 'notepad',
-    compatibleAppIds: ['notepad', 'linux-app-geany', 'cloudos-files']
+    defaultAppId: 'office-viewer',
+    compatibleAppIds: ['office-viewer', 'notepad', 'cloudos-files']
+  },
+  {
+    mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    extensions: ['pptx', 'ppt', 'odp'],
+    category: 'presentations',
+    icon: '📙',
+    label: 'Apresentação de Slides',
+    defaultAppId: 'office-viewer',
+    compatibleAppIds: ['office-viewer', 'notepad']
   },
   {
     mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',

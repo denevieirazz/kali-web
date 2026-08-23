@@ -150,6 +150,41 @@ export default function Desktop() {
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    const handleGlobalShortcuts = (e: KeyboardEvent) => {
+      // 1. Meta / Win Key -> Toggle Start Menu
+      if (e.key === 'Meta' || e.key === 'OS') {
+        e.preventDefault();
+        useSystem.getState().toggleStartMenu();
+        return;
+      }
+      // 2. Alt + Tab -> Window Switcher
+      if (e.altKey && e.key === 'Tab') {
+        e.preventDefault();
+        const { windows, activeWindowId, focusWindow } = useWindowManager.getState();
+        const nonMinimized = windows.filter(w => !w.isMinimized);
+        if (nonMinimized.length > 1) {
+          const currentIndex = nonMinimized.findIndex(w => w.id === activeWindowId);
+          const nextIndex = (currentIndex + 1) % nonMinimized.length;
+          focusWindow(nonMinimized[nextIndex].id);
+        }
+        return;
+      }
+      // 3. Alt + F4 -> Close Active Window
+      if (e.altKey && e.key === 'F4') {
+        e.preventDefault();
+        const { activeWindowId, closeWindow } = useWindowManager.getState();
+        if (activeWindowId) {
+          closeWindow(activeWindowId);
+        }
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalShortcuts, { capture: true });
+    return () => window.removeEventListener('keydown', handleGlobalShortcuts, { capture: true });
+  }, []);
+
   const getItemRects = useCallback(() => {
     const map = new Map<string, DOMRect>();
     iconRefs.current.forEach((el, key) => {

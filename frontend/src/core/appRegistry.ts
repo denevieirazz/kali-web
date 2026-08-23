@@ -30,6 +30,7 @@ const components: Record<string, ReturnType<typeof lazy>> = {
   'linux-app-runner': lazy(() => import('../apps/LinuxAppWindow/LinuxAppWindow')),
   'env-doctor': lazy(() => import('../apps/EnvDoctor/EnvDoctor')),
   'kali-tool-center': lazy(() => import('../apps/KaliToolCenter/KaliToolCenter')),
+  'office-viewer': lazy(() => import('../apps/OfficeViewer/OfficeViewer')),
   'taskbar': lazy(() => import('../components/Taskbar/Taskbar')),
   'desktop': lazy(() => import('../components/Desktop/Desktop')),
 };
