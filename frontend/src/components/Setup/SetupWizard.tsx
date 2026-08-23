@@ -85,6 +85,15 @@ export default function SetupWizard() {
     }
   }, [realLogs]);
 
+  useEffect(() => {
+    if (step === 'installing-runtime' && provisionProgress >= 100) {
+      const timer = setTimeout(() => {
+        setStep('account');
+      }, 600);
+      return () => clearTimeout(timer);
+    }
+  }, [step, provisionProgress]);
+
   async function loadDistros() {
     try {
       const data = await apiClient<{ active: string; installed: DistroOption[]; online: DistroOption[] }>('/api/linux-runtime/distros');
@@ -112,6 +121,18 @@ export default function SetupWizard() {
     const streamUrl = `/api/linux-runtime/distros/provision/stream?distro=${encodeURIComponent(selectedDistro)}&mode=${encodeURIComponent(distroChoiceMode)}`;
     const eventSource = new EventSource(streamUrl);
 
+    let completed = false;
+    const finishStep = () => {
+      if (completed) return;
+      completed = true;
+      try { eventSource.close(); } catch {}
+      setProvisionProgress(100);
+      setProvisionSteps(prev => prev.map(s => ({ ...s, done: true })));
+      setTimeout(() => {
+        setStep('account');
+      }, 500);
+    };
+
     eventSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
@@ -124,11 +145,8 @@ export default function SetupWizard() {
         if (data.step) {
           setProvisionSteps(prev => prev.map(s => s.id === data.step ? { ...s, done: true } : s));
         }
-        if (data.done) {
-          eventSource.close();
-          setTimeout(() => {
-            setStep('account');
-          }, 1200);
+        if (data.done || data.progress >= 100) {
+          finishStep();
         }
       } catch (e: any) {
         setRealLogs(prev => [...prev, `[Erro] ${e.message}`]);
@@ -136,11 +154,7 @@ export default function SetupWizard() {
     };
 
     eventSource.onerror = () => {
-      eventSource.close();
-      // Em caso de desconexão inesperada da stream, avança de forma segura
-      setProvisionProgress(100);
-      setProvisionSteps(prev => prev.map(s => ({ ...s, done: true })));
-      setTimeout(() => setStep('account'), 1000);
+      finishStep();
     };
   }
 
@@ -534,6 +548,15 @@ export default function SetupWizard() {
                     Instalar Sistema →
                   </button>
                 )
+              )}
+              {step === 'installing-runtime' && (
+                <button
+                  className="setup-btn setup-btn-primary"
+                  onClick={() => setStep('account')}
+                  disabled={provisionProgress < 100}
+                >
+                  {provisionProgress >= 100 ? 'Continuar para Criar Conta →' : 'Instalando...'}
+                </button>
               )}
               {step === 'account' && (
                 <button className="setup-btn setup-btn-primary" onClick={() => void goNext()} disabled={loading}>
