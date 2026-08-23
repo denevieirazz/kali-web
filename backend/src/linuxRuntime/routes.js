@@ -234,7 +234,7 @@ linuxRuntimeRouter.post('/launch', async (req, res) => {
 // ============================================
 // Multi-Distro & CloudOS Home Management Routes
 // ============================================
-import { getActiveDistro, setActiveDistro, listInstalledDistros, listOnlineDistros, installDistro, unregisterDistro, importDistro, getCloudOSHome } from './distroManager.js';
+import { getActiveDistro, setActiveDistro, listInstalledDistros, listOnlineDistros, installDistro, unregisterDistro, importDistro, provisionDistro, getCloudOSHome } from './distroManager.js';
 
 linuxRuntimeRouter.get('/distros', async (req, res) => {
   try {
@@ -284,6 +284,16 @@ linuxRuntimeRouter.post('/distros/import', async (req, res) => {
     res.json(result);
   } catch (error) {
     sendError(res, error, 'DISTRO_IMPORT_FAILED');
+  }
+});
+
+linuxRuntimeRouter.post('/distros/provision', async (req, res) => {
+  try {
+    const distro = req.body?.distro;
+    const result = await provisionDistro(distro);
+    res.json(result);
+  } catch (error) {
+    sendError(res, error, 'DISTRO_PROVISION_FAILED');
   }
 });
 
