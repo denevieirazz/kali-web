@@ -174,6 +174,8 @@ export function buildXpraStartCommand({ appCommand, port, sessionId = 'cloudos-p
     'mkdir -p -m 1777 /tmp/.X11-unix /run/xpra 2>/dev/null || true',
     'mount -o remount,rw /tmp/.X11-unix 2>/dev/null || true',
     'chmod 1777 /tmp/.X11-unix /run/xpra 2>/dev/null || true',
+    `rm -rf /run/xpra/${display} /run/user/0/xpra/${display} /tmp/.X11-unix/X${display} /run/xpra/*-${display} /root/.xpra/*-${display} 2>/dev/null || true`,
+    `xpra stop :${display} >/dev/null 2>&1 || true`,
     'rm -f /tmp/cloudos-*-poc/.parentlock /tmp/cloudos-*-poc/lock /tmp/cloudos-*-poc/SingletonLock 2>/dev/null || true',
     'if [ -d /mnt/c/Users ]; then WIN_USER=$(ls -d /mnt/c/Users/* 2>/dev/null | grep -vE "Default|Public|All Users|desktop.ini" | head -n1 || true); if [ -n "$WIN_USER" ]; then mkdir -p /root/.config/gtk-3.0; printf "file://%s/Downloads Downloads\\nfile://%s/Documents Documentos\\nfile://%s/Desktop Área de Trabalho\\nfile://%s/Pictures Imagens\\nfile://%s/Videos Vídeos\\n" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" > /root/.config/gtk-3.0/bookmarks 2>/dev/null || true; mkdir -p /root/.config; printf "XDG_DESKTOP_DIR=\\"%s/Desktop\\"\\nXDG_DOWNLOAD_DIR=\\"%s/Downloads\\"\\nXDG_DOCUMENTS_DIR=\\"%s/Documents\\"\\nXDG_PICTURES_DIR=\\"%s/Pictures\\"\\nXDG_VIDEOS_DIR=\\"%s/Videos\\"\\n" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" > /root/.config/user-dirs.dirs 2>/dev/null || true; if [ -d "$WIN_USER/Downloads" ]; then rm -rf /root/Downloads; ln -sfn "$WIN_USER/Downloads" /root/Downloads 2>/dev/null || true; fi; fi; fi',
     'unset DISPLAY WAYLAND_DISPLAY WAYLAND_SOCKET PULSE_SERVER',
