@@ -48,8 +48,8 @@ export const MIME_DEFINITIONS: MimeDefinition[] = [
     category: 'documents',
     icon: '📕',
     label: 'Documento PDF',
-    defaultAppId: 'browser',
-    compatibleAppIds: ['browser', 'linux-app-firefox-esr', 'linux-app-firefox']
+    defaultAppId: 'office-viewer',
+    compatibleAppIds: ['office-viewer', 'browser', 'linux-app-firefox-esr', 'linux-app-firefox']
   },
   {
     mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',

@@ -6,6 +6,8 @@ import { useContextMenuStore } from '../../stores/contextMenuStore';
 import { useAppRegistry } from '../../core/appRegistry';
 import { nativeHostBridge } from '../../services/nativeHostBridge';
 import { apiClient } from '../../services/apiClient';
+import { useUserStore } from '../../stores/userStore';
+import kernel from '../../core/kernel';
 import './StartMenu.css';
 import './StartMenu.native.css';
 
@@ -101,6 +103,8 @@ function StartMenu() {
   const [linuxApps, setLinuxApps] = useState<App[]>([]);
   const [favorites, setFavorites] = useState<string[]>(getStoredFavorites);
   const [recentAppIds, setRecentAppIds] = useState<string[]>(getStoredRecent);
+  const [showPowerMenu, setShowPowerMenu] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -530,12 +534,82 @@ function StartMenu() {
           )}
         </main>
 
-        <footer className="start-bottom">
-          <div className="start-user-btn">
+        <footer className="start-bottom" style={{ position: 'relative' }}>
+          {showUserMenu && (
+            <div style={{
+              position: 'absolute',
+              bottom: '100%',
+              left: 16,
+              marginBottom: 8,
+              background: 'rgba(24, 24, 27, 0.95)',
+              border: '1px solid rgba(255, 255, 255, 0.15)',
+              borderRadius: 8,
+              padding: 6,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+              boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
+              zIndex: 100,
+              minWidth: 160
+            }}>
+              <button
+                style={{ background: 'transparent', border: 'none', color: '#fff', padding: '8px 12px', textAlign: 'left', borderRadius: 4, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
+                onClick={() => { setShowUserMenu(false); closeStartMenu(); kernel.sysLock(); }}
+              >
+                🔒 Bloquear Sessão
+              </button>
+              <button
+                style={{ background: 'transparent', border: 'none', color: '#fff', padding: '8px 12px', textAlign: 'left', borderRadius: 4, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
+                onClick={() => { setShowUserMenu(false); closeStartMenu(); void useUserStore.getState().logout(); }}
+              >
+                🚪 Sair da Conta (Logout)
+              </button>
+            </div>
+          )}
+
+          {showPowerMenu && (
+            <div style={{
+              position: 'absolute',
+              bottom: '100%',
+              right: 16,
+              marginBottom: 8,
+              background: 'rgba(24, 24, 27, 0.95)',
+              border: '1px solid rgba(255, 255, 255, 0.15)',
+              borderRadius: 8,
+              padding: 6,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+              boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
+              zIndex: 100,
+              minWidth: 160
+            }}>
+              <button
+                style={{ background: 'transparent', border: 'none', color: '#fff', padding: '8px 12px', textAlign: 'left', borderRadius: 4, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
+                onClick={() => { setShowPowerMenu(false); closeStartMenu(); void useUserStore.getState().logout(); }}
+              >
+                🚪 Sair da Conta (Logout)
+              </button>
+              <button
+                style={{ background: 'transparent', border: 'none', color: '#fff', padding: '8px 12px', textAlign: 'left', borderRadius: 4, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
+                onClick={() => { setShowPowerMenu(false); closeStartMenu(); kernel.sysLock(); }}
+              >
+                🔒 Bloquear
+              </button>
+              <button
+                style={{ background: 'transparent', border: 'none', color: '#fff', padding: '8px 12px', textAlign: 'left', borderRadius: 4, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
+                onClick={() => { setShowPowerMenu(false); closeStartMenu(); closeAll(); }}
+              >
+                🗔 Fechar todas as janelas
+              </button>
+            </div>
+          )}
+
+          <div className="start-user-btn" onClick={() => { setShowUserMenu(v => !v); setShowPowerMenu(false); }} style={{ cursor: 'pointer' }}>
             <div className="start-user-avatar">{currentUser?.avatar ? <img src={currentUser.avatar} alt="" /> : '●'}</div>
             <span className="start-user-name">{currentUser?.displayName || currentUser?.username || 'Usuário'}</span>
           </div>
-          <button className="start-power-btn" onClick={() => closeAll()} title="Fechar todas as janelas">⏻</button>
+          <button className="start-power-btn" onClick={() => { setShowPowerMenu(v => !v); setShowUserMenu(false); }} title="Opções de Energia e Sessão">⏻</button>
         </footer>
       </div>
     </div>

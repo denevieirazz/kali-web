@@ -529,7 +529,14 @@ export default function SetupWizard() {
           {!unavailable && (
             <footer className="setup-footer">
               {currentIndex > 0 && step !== 'installing-runtime' && step !== 'ready' && (
-                <button className="setup-btn setup-btn-secondary" onClick={() => { setError(null); setStep(STEPS[currentIndex - 1]); }}>
+                <button className="setup-btn setup-btn-secondary" onClick={() => {
+                  setError(null);
+                  if (step === 'account') {
+                    setStep('distro-select');
+                  } else {
+                    setStep(STEPS[currentIndex - 1]);
+                  }
+                }}>
                   Voltar
                 </button>
               )}

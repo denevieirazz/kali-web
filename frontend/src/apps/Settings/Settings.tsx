@@ -60,6 +60,10 @@ export default function SettingsApp({}: { windowId: string }) {
   async function loadDistros(){setDistroLoading(true);try{const data=await apiClient<{active:string;installed:DistroInfo[];online:DistroInfo[]}>('/api/linux-runtime/distros');setDistroData(data);setDistroNotice(null)}catch{setDistroNotice('Catálogo de sistemas WSL indisponível nesta sessão.')}finally{setDistroLoading(false)}}
   async function switchActiveDistro(distroId:string){try{await apiClient('/api/linux-runtime/distros/active',{method:'POST',body:JSON.stringify({distro:distroId})});setDistroNotice(`Sistema ativo definido como: ${distroId}.`);await loadDistros()}catch(err:any){setDistroNotice(err.message||'Falha ao alterar sistema ativo.')}}
   async function triggerInstallDistro(distroId:string){try{await apiClient('/api/linux-runtime/distros/install',{method:'POST',body:JSON.stringify({distro:distroId})});setDistroNotice(`Instalação de ${distroId} iniciada em segundo plano via WSL.`);await loadDistros()}catch(err:any){setDistroNotice(err.message||'Falha ao iniciar instalação da distribuição.')}}
+  async function triggerUnregisterDistro(distroId:string){
+    if(!window.confirm(`Tem certeza que deseja excluir a distribuição ${distroId}?`))return;
+    try{await apiClient('/api/linux-runtime/distros/unregister',{method:'POST',body:JSON.stringify({distro:distroId})});setDistroNotice(`Distribuição ${distroId} removida com sucesso.`);await loadDistros()}catch(err:any){setDistroNotice(err.message||'Falha ao remover distribuição.')}
+  }
 
   async function rotateAccountRecoveryCode(){
     if(rotatingRecoveryCode)return;
@@ -121,9 +125,14 @@ export default function SettingsApp({}: { windowId: string }) {
                   <small>{d.category} · Estado: {d.state || 'Instalado'} · WSL {d.version || '2'}</small>
                 </div>
                 {!d.isActiveInCloudOS && (
-                  <button className="settings-action" onClick={() => switchActiveDistro(d.id)}>
-                    Definir como Ativo
-                  </button>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button className="settings-action" onClick={() => switchActiveDistro(d.id)}>
+                      Definir como Ativo
+                    </button>
+                    <button className="settings-secondary" style={{ color: '#ef4444' }} onClick={() => triggerUnregisterDistro(d.id)}>
+                      Excluir
+                    </button>
+                  </div>
                 )}
               </div>
             ))}

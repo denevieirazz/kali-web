@@ -172,7 +172,7 @@ export default function LockScreen() {
     event.preventDefault();
     resetMessages();
     const usernameError = validateUsername(username);
-    if (usernameError || !password) return setError(usernameError || 'Informe a senha.');
+    if (usernameError) return setError(usernameError);
     setLoading(true);
     const result = await login(username.trim(), password);
     setLoading(false);
