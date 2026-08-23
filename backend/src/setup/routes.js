@@ -25,6 +25,25 @@ function dbRun(db, query, params) {
   return new Promise((resolve, reject) => db.run(query, params, error => error ? reject(error) : resolve()));
 }
 
+function validateSetupAdminInput(req, res, next) {
+  const { username, displayName, password = '', confirmPassword = '' } = req.body || {};
+  const checkedUsername = validateUsername(username);
+  if (checkedUsername.error) return res.status(400).json({ error: checkedUsername.error });
+
+  const checkedDisplayName = validateDisplayName(displayName, checkedUsername.value);
+  if (checkedDisplayName.error) return res.status(400).json({ error: checkedDisplayName.error });
+
+  const checkedPassword = validatePassword(password, confirmPassword);
+  if (checkedPassword.error) return res.status(400).json({ error: checkedPassword.error });
+
+  req.setupAdminInput = {
+    username: checkedUsername.value,
+    displayName: checkedDisplayName.value,
+    password
+  };
+  return next();
+}
+
 async function guardExistingAdminSetup(req, res, next) {
   try {
     const existingAdmin = await dbGet(getDb(), 'SELECT id FROM users WHERE role = ? LIMIT 1', ['admin']);
@@ -54,23 +73,14 @@ setupRouter.get('/status', async (_req, res, next) => {
 });
 
 // POST /api/setup/admin
-// First-boot creation is public only while no administrator exists. A second creation
-// remains a 409 conflict; only explicit replacement requires the current administrator.
-setupRouter.post('/admin', guardExistingAdminSetup, async (req, res, next) => {
+// Validate the payload before deciding whether this is a first-boot creation,
+// a conflicting second creation, or an authenticated administrator replacement.
+setupRouter.post('/admin', validateSetupAdminInput, guardExistingAdminSetup, async (req, res, next) => {
   try {
     const db = getDb();
-    const { username, displayName, password = '', confirmPassword = '' } = req.body || {};
-    const checkedUsername = validateUsername(username);
-    if (checkedUsername.error) return res.status(400).json({ error: checkedUsername.error });
-
-    const checkedDisplayName = validateDisplayName(displayName, checkedUsername.value);
-    if (checkedDisplayName.error) return res.status(400).json({ error: checkedDisplayName.error });
-
-    const checkedPassword = validatePassword(password, confirmPassword);
-    if (checkedPassword.error) return res.status(400).json({ error: checkedPassword.error });
-
+    const { username, displayName, password } = req.setupAdminInput;
     const existingAdmin = await dbGet(db, 'SELECT * FROM users WHERE role = ?', ['admin']);
-    if (existingAdmin && !req.body?.allowUpdate) {
+    if (existingAdmin && req.body?.allowUpdate !== true) {
       return res.status(409).json({ error: 'Um administrador já foi configurado no sistema.' });
     }
 
@@ -85,20 +95,20 @@ setupRouter.post('/admin', guardExistingAdminSetup, async (req, res, next) => {
       await dbRun(
         db,
         'UPDATE users SET username = ?, display_name = ?, password_hash = ?, recovery_code_hash = ?, auth_version = auth_version + 1 WHERE id = ?',
-        [checkedUsername.value, checkedDisplayName.value, passwordHash, recoveryCodeHash, userId]
+        [username, displayName, passwordHash, recoveryCodeHash, userId]
       );
     } else {
       await dbRun(
         db,
         'INSERT INTO users (id, username, display_name, password_hash, recovery_code_hash, auth_version, role) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [userId, checkedUsername.value, checkedDisplayName.value, passwordHash, recoveryCodeHash, 1, 'admin']
+        [userId, username, displayName, passwordHash, recoveryCodeHash, 1, 'admin']
       );
     }
 
     const user = {
       id: userId,
-      username: checkedUsername.value,
-      display_name: checkedDisplayName.value,
+      username,
+      display_name: displayName,
       role: 'admin',
       auth_version: (existingAdmin?.auth_version || 0) + 1
     };
