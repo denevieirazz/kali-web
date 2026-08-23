@@ -11,6 +11,12 @@ export interface CloudOSRuntimeConfig {
   webSocketBase?: string;
 }
 
+export interface ApiEventStreamOptions<T> {
+  signal?: AbortSignal;
+  skipAuth?: boolean;
+  onEvent: (event: T) => void | Promise<void>;
+}
+
 declare global {
   interface Window {
     __CLOUDOS_RUNTIME__?: CloudOSRuntimeConfig;
@@ -111,6 +117,80 @@ export function resolveWebSocketUrl(endpoint: string) {
   return `${getWebSocketBase()}${path}`;
 }
 
+function handleUnauthorizedStatus(status: number) {
+  if (!isHandlingUnauthorized) {
+    isHandlingUnauthorized = true;
+    clearStoredAuth();
+    onUnauthorizedCallback?.();
+    window.setTimeout(() => { isHandlingUnauthorized = false; }, 2000);
+  }
+  throw new Error(`Sessão não autorizada ou expirada (${status}).`);
+}
+
+async function responseError(response: Response) {
+  const errorText = await response.text();
+  let errorMessage = `Erro ${response.status}: ${response.statusText}`;
+  try {
+    const parsed = JSON.parse(errorText) as { error?: unknown; message?: unknown };
+    if (typeof parsed.error === 'string') errorMessage = parsed.error;
+    else if (typeof parsed.message === 'string') errorMessage = parsed.message;
+  } catch {
+    // Preserve the HTTP status when the body is not JSON.
+  }
+  return new Error(errorMessage);
+}
+
+export async function streamApiEvents<T = unknown>(endpoint: string, options: ApiEventStreamOptions<T>): Promise<void> {
+  const headers = new Headers({ Accept: 'text/event-stream' });
+  if (!options.skipAuth) {
+    const token = getStoredToken();
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  const response = await fetch(resolveApiUrl(endpoint), {
+    method: 'GET',
+    headers,
+    signal: options.signal,
+  });
+
+  if (response.status === 401 || response.status === 403) handleUnauthorizedStatus(response.status);
+  if (!response.ok) throw await responseError(response);
+  if (!response.body) throw new Error('O servidor não forneceu o stream de provisionamento.');
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  const consumeFrame = async (frame: string) => {
+    const dataLines = frame
+      .split(/\r?\n/)
+      .filter(line => line.startsWith('data:'))
+      .map(line => line.slice(5).trimStart());
+    if (dataLines.length === 0) return;
+    const payload = dataLines.join('\n');
+    await options.onEvent(JSON.parse(payload) as T);
+  };
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      let boundary = buffer.search(/\r?\n\r?\n/);
+      while (boundary >= 0) {
+        const frame = buffer.slice(0, boundary);
+        const separator = buffer.slice(boundary).match(/^\r?\n\r?\n/)?.[0] || '\n\n';
+        buffer = buffer.slice(boundary + separator.length);
+        await consumeFrame(frame);
+        boundary = buffer.search(/\r?\n\r?\n/);
+      }
+      if (done) break;
+    }
+    if (buffer.trim()) await consumeFrame(buffer);
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export async function apiClient<T = unknown>(endpoint: string, options: RequestOptions = {}): Promise<T> {
   const {
     timeoutMs = 10000,
@@ -154,27 +234,10 @@ export async function apiClient<T = unknown>(endpoint: string, options: RequestO
     });
 
     if ((response.status === 401 || response.status === 403) && !suppressUnauthorizedHandler) {
-      if (!isHandlingUnauthorized) {
-        isHandlingUnauthorized = true;
-        clearStoredAuth();
-        onUnauthorizedCallback?.();
-        window.setTimeout(() => { isHandlingUnauthorized = false; }, 2000);
-      }
-      throw new Error(`Sessão não autorizada ou expirada (${response.status}).`);
+      handleUnauthorizedStatus(response.status);
     }
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      let errorMessage = `Erro ${response.status}: ${response.statusText}`;
-      try {
-        const parsed = JSON.parse(errorText) as { error?: unknown; message?: unknown };
-        if (typeof parsed.error === 'string') errorMessage = parsed.error;
-        else if (typeof parsed.message === 'string') errorMessage = parsed.message;
-      } catch {
-        // Preserve the HTTP status when the body is not JSON.
-      }
-      throw new Error(errorMessage);
-    }
+    if (!response.ok) throw await responseError(response);
 
     if (response.status === 204) return undefined as T;
     const contentType = response.headers.get('content-type') ?? '';
