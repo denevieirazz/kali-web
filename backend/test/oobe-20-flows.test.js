@@ -2,10 +2,81 @@ process.env.NODE_ENV = 'test';
 import test from 'node:test';
 import assert from 'node:assert';
 import http from 'http';
-import { createApp } from '../src/app.js';
-import { resetLocalDatabase } from '../src/database/index.js';
-import { streamProvisionDistro, getActiveDistro, setActiveDistro } from '../src/linuxRuntime/distroManager.js';
-import { buildInstallCommand } from '../src/linuxRuntime/packageManager.js';
+import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+import { promisify } from 'node:util';
+
+let forcedWslStatusError = null;
+
+function deterministicWslResult(args = []) {
+  if (args[0] === '--status') {
+    if (forcedWslStatusError) throw forcedWslStatusError;
+    return {
+      stdout: 'Default Distribution: kali-linux\nDefault Version: 2\n',
+      stderr: '',
+    };
+  }
+
+  if (args[0] === '-l' && args[1] === '-v') {
+    return {
+      stdout: '  NAME            STATE           VERSION\n* kali-linux      Running         2\n',
+      stderr: '',
+    };
+  }
+
+  if (args[0] === '--list' && args[1] === '--online') {
+    return {
+      stdout: [
+        'The following is a list of valid distributions that can be installed.',
+        'NAME                 FRIENDLY NAME',
+        'kali-linux           Kali Linux',
+        'Ubuntu               Ubuntu',
+        'Ubuntu-24.04         Ubuntu 24.04 LTS',
+        'Debian               Debian GNU/Linux',
+        'Alpine               Alpine Linux',
+      ].join('\n'),
+      stderr: '',
+    };
+  }
+
+  throw new Error(`Unexpected physical WSL command in OOBE contract test: ${args.join(' ')}`);
+}
+
+function deterministicExecFile(_file, args, options, callback) {
+  if (typeof options === 'function') callback = options;
+  queueMicrotask(() => {
+    try {
+      const result = deterministicWslResult(args);
+      callback?.(null, result.stdout, result.stderr);
+    } catch (error) {
+      callback?.(error, '', '');
+    }
+  });
+  return {
+    once() { return this; },
+    unref() {},
+  };
+}
+
+deterministicExecFile[promisify.custom] = async (_file, args) => deterministicWslResult(args);
+
+// OOBE CI validates the provisioning contract, not the physical Windows/WSL host.
+// Load only distroManager with a deterministic WSL command boundary, then restore
+// the builtin immediately so the rest of the backend keeps its normal dependencies.
+const originalExecFile = childProcess.execFile;
+childProcess.execFile = deterministicExecFile;
+syncBuiltinESMExports();
+const distroManager = await import('../src/linuxRuntime/distroManager.js');
+childProcess.execFile = originalExecFile;
+syncBuiltinESMExports();
+
+const [{ createApp }, { resetLocalDatabase }, { buildInstallCommand }] = await Promise.all([
+  import('../src/app.js'),
+  import('../src/database/index.js'),
+  import('../src/linuxRuntime/packageManager.js'),
+]);
+
+const { streamProvisionDistro, getActiveDistro, setActiveDistro } = distroManager;
 
 function startServer(app) {
   return new Promise((resolve, reject) => {
@@ -35,7 +106,7 @@ function makeRequest(port, options, body) {
   });
 }
 
-test('OOBE E2E: 20 fluxos completos de validação física e lógica', async () => {
+test('OOBE E2E: 20 fluxos completos de validação lógica com fronteira WSL determinística', { concurrency: false }, async () => {
   resetLocalDatabase();
   const app = createApp(0, { environment: { NODE_ENV: 'test' } });
   const { server, port } = await startServer(app);
@@ -184,5 +255,26 @@ test('OOBE E2E: 20 fluxos completos de validação física e lógica', async () 
     assert.ok(JSON.parse(res20.body).token, 'Flow 20: Sessão autenticada');
   } finally {
     server.close();
+  }
+});
+
+test('OOBE provisioning permanece fail-closed quando o probe WSL falha', { concurrency: false }, async () => {
+  forcedWslStatusError = new Error('simulated WSL unavailable');
+  try {
+    await assert.rejects(
+      async () => {
+        for await (const _event of streamProvisionDistro('kali-linux', 'existing')) {
+          // Consume until the deterministic status probe fails.
+        }
+      },
+      (error) => {
+        assert.strictEqual(error.code, 'WSL_STATUS_FAILED');
+        assert.strictEqual(error.statusCode, 503);
+        assert.match(error.message, /WSL 2/);
+        return true;
+      }
+    );
+  } finally {
+    forcedWslStatusError = null;
   }
 });
