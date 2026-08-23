@@ -153,7 +153,7 @@ export async function streamApiEvents<T = unknown>(endpoint: string, options: Ap
     signal: options.signal,
   });
 
-  if (response.status === 401 || response.status === 403) handleUnauthorizedStatus(response.status);
+  if (response.status === 401) handleUnauthorizedStatus(response.status);
   if (!response.ok) throw await responseError(response);
   if (!response.body) throw new Error('O servidor não forneceu o stream de provisionamento.');
 
@@ -233,7 +233,7 @@ export async function apiClient<T = unknown>(endpoint: string, options: RequestO
       signal: controller.signal,
     });
 
-    if ((response.status === 401 || response.status === 403) && !suppressUnauthorizedHandler) {
+    if (response.status === 401 && !suppressUnauthorizedHandler) {
       handleUnauthorizedStatus(response.status);
     }
 
