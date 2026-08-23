@@ -152,11 +152,115 @@ export const CURATED_LINUX_APPS = Object.freeze([
   }
 ]);
 
+export function getDistroFamily(distroName = '') {
+  const norm = String(distroName || '').toLowerCase();
+  if (norm.includes('ubuntu')) return 'ubuntu';
+  if (norm.includes('kali') || norm.includes('debian')) return 'debian';
+  if (norm.includes('fedora') || norm.includes('rhel') || norm.includes('alma') || norm.includes('centos') || norm.includes('rocky') || norm.includes('oracle')) return 'fedora';
+  if (norm.includes('arch')) return 'arch';
+  if (norm.includes('suse')) return 'suse';
+  if (norm.includes('alpine')) return 'alpine';
+  return 'debian';
+}
+
+export const DISTRO_PACKAGE_MAP = Object.freeze({
+  firefox: {
+    ubuntu: 'firefox',
+    debian: 'firefox-esr',
+    kali: 'firefox-esr',
+    fedora: 'firefox',
+    arch: 'firefox',
+    suse: 'MozillaFirefox',
+    alpine: 'firefox-esr',
+    default: 'firefox-esr'
+  },
+  chromium: {
+    ubuntu: 'chromium-browser',
+    debian: 'chromium',
+    kali: 'chromium',
+    fedora: 'chromium',
+    arch: 'chromium',
+    suse: 'chromium',
+    alpine: 'chromium',
+    default: 'chromium'
+  },
+  xclock: {
+    ubuntu: 'x11-apps',
+    debian: 'x11-apps',
+    kali: 'x11-apps',
+    fedora: 'xorg-x11-apps',
+    arch: 'xorg-xclock',
+    suse: 'xclock',
+    alpine: 'xclock',
+    default: 'x11-apps'
+  },
+  xeyes: {
+    ubuntu: 'x11-apps',
+    debian: 'x11-apps',
+    kali: 'x11-apps',
+    fedora: 'xorg-x11-apps',
+    arch: 'xorg-xeyes',
+    suse: 'xeyes',
+    alpine: 'xeyes',
+    default: 'x11-apps'
+  }
+});
+
+export function resolvePackageNameForDistro(appIdOrPackageName, distroName) {
+  const normKey = String(appIdOrPackageName || '').toLowerCase().trim();
+  const family = getDistroFamily(distroName);
+
+  const curated = CURATED_LINUX_APPS.find(a => a.id.toLowerCase() === normKey || a.packageName.toLowerCase() === normKey);
+  const targetId = curated ? curated.id : normKey;
+
+  const overrides = DISTRO_PACKAGE_MAP[targetId];
+  if (overrides) {
+    if (overrides[family]) return overrides[family];
+    if (overrides.default) return overrides.default;
+  }
+
+  return curated ? curated.packageName : appIdOrPackageName;
+}
+
+export function getCuratedAppsForDistro(distroName) {
+  const family = getDistroFamily(distroName);
+  return CURATED_LINUX_APPS.map(app => {
+    const pkg = resolvePackageNameForDistro(app.id, distroName);
+    let command = app.command;
+    let name = app.name;
+    let desktopId = app.desktopId;
+
+    if (app.id === 'firefox') {
+      if (family === 'ubuntu' || family === 'fedora' || family === 'arch') {
+        name = 'Mozilla Firefox';
+        command = 'firefox --no-remote -profile /tmp/cloudos-ff-{sessionId}';
+        desktopId = 'firefox';
+      } else {
+        name = 'Firefox ESR';
+        command = 'firefox-esr --no-remote -profile /tmp/cloudos-ff-{sessionId}';
+        desktopId = 'firefox-esr';
+      }
+    }
+
+    return {
+      ...app,
+      name,
+      packageName: pkg,
+      command,
+      desktopId
+    };
+  });
+}
+
 const PACKAGE_STATUS_SCRIPT = [
   'for item in "$@"; do',
   '  cmd="${item%%:*}"',
   '  pkg="${item##*:}"',
   '  if command -v "$cmd" >/dev/null 2>&1; then',
+  '    printf "%s\\0371\\n" "$cmd"',
+  '  elif [ "$cmd" = "firefox-esr" ] && command -v firefox >/dev/null 2>&1; then',
+  '    printf "%s\\0371\\n" "$cmd"',
+  '  elif [ "$cmd" = "firefox" ] && command -v firefox-esr >/dev/null 2>&1; then',
   '    printf "%s\\0371\\n" "$cmd"',
   '  elif command -v dpkg >/dev/null 2>&1 && dpkg -s "$pkg" 2>/dev/null | grep -q "Status: install ok installed"; then',
   '    printf "%s\\0371\\n" "$cmd"',
@@ -235,14 +339,15 @@ export function parsePackageStatuses(output, catalog = CURATED_LINUX_APPS) {
   });
 }
 
-export function mergeLinuxPackageCatalog(discovered = [], statusMap = new Map()) {
+export function mergeLinuxPackageCatalog(discovered = [], statusMap = new Map(), distroName = '') {
   const safeDiscovered = Array.isArray(discovered) ? discovered : [];
   const discoveryIndex = buildDiscoveryIndex(safeDiscovered);
+  const curatedApps = getCuratedAppsForDistro(distroName);
 
-  const curatedWithStatus = CURATED_LINUX_APPS.map(app => {
+  const curatedWithStatus = curatedApps.map(app => {
     const bin = commandBinary(app.command);
     const disc = findDiscoveredForCurated(app, discoveryIndex);
-    const isInstalled = statusMap.get(bin) === true || Boolean(disc);
+    const isInstalled = statusMap.get(bin) === true || (app.id === 'firefox' && (statusMap.get('firefox') === true || statusMap.get('firefox-esr') === true)) || Boolean(disc);
     return {
       id: app.id,
       name: app.name,
@@ -265,7 +370,7 @@ export function mergeLinuxPackageCatalog(discovered = [], statusMap = new Map())
   });
 
   const curatedKeys = new Set();
-  for (const app of CURATED_LINUX_APPS) {
+  for (const app of curatedApps) {
     for (const key of discoveryKeys(app)) curatedKeys.add(key);
   }
 
@@ -324,6 +429,7 @@ export async function listLinuxPackages(requestedDistribution, dependencies = {}
   const runExecFile = dependencies.execFileAsync || execFileAsync;
   const snapshot = await getSnapshot();
   const distribution = await resolveActiveDistribution(requestedDistribution, getSnapshot);
+  const curatedApps = getCuratedAppsForDistro(distribution);
 
   if (!snapshot.operational) {
     return {
@@ -331,12 +437,12 @@ export async function listLinuxPackages(requestedDistribution, dependencies = {}
       distribution: null,
       errorCode: snapshot.errorCode || 'WSL_NOT_OPERATIONAL',
       error: snapshot.error || 'WSL não está operacional.',
-      packages: CURATED_LINUX_APPS.map(app => ({ ...app, installed: false }))
+      packages: curatedApps.map(app => ({ ...app, installed: false }))
     };
   }
 
   const discovered = await scanApps(distribution);
-  const queryItems = CURATED_LINUX_APPS.map(app => `${commandBinary(app.command)}:${app.packageName}`);
+  const queryItems = curatedApps.map(app => `${commandBinary(app.command)}:${app.packageName}`);
   const statusMap = new Map();
 
   try {
@@ -361,7 +467,7 @@ export async function listLinuxPackages(requestedDistribution, dependencies = {}
     // Discovery remains useful even when the status probe is temporarily unavailable.
   }
 
-  const allPackages = mergeLinuxPackageCatalog(discovered, statusMap);
+  const allPackages = mergeLinuxPackageCatalog(discovered, statusMap, distribution);
 
   return {
     operational: true,
@@ -459,8 +565,7 @@ export async function installLinuxPackage(requestedDistribution, packageId) {
     throw error;
   }
 
-  const curated = CURATED_LINUX_APPS.find(app => app.id === packageId || app.packageName === packageId);
-  const rawPkg = curated ? curated.packageName : packageId;
+  const rawPkg = resolvePackageNameForDistro(packageId, distribution);
   const sanitizedPkg = rawPkg.replace(/[^a-zA-Z0-9._+-]/g, '');
 
   if (!sanitizedPkg) {
@@ -511,8 +616,7 @@ export async function uninstallLinuxPackage(requestedDistribution, packageId) {
     throw error;
   }
 
-  const curated = CURATED_LINUX_APPS.find(app => app.id === packageId || app.packageName === packageId);
-  const rawPkg = curated ? curated.packageName : packageId;
+  const rawPkg = resolvePackageNameForDistro(packageId, distribution);
   const sanitizedPkg = rawPkg.replace(/[^a-zA-Z0-9._+-]/g, '');
 
   const pm = await detectDistroPackageManager(distribution);

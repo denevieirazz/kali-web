@@ -135,6 +135,15 @@ export async function restoreSessionsFromLedger() {
 export async function resolvePocApp(appId, distro = 'kali-linux') {
   if (!appId) return null;
   const cleanId = String(appId).trim().toLowerCase();
+  if (cleanId === 'firefox') {
+    const isUbuntuOrFedora = /ubuntu|fedora|arch/i.test(String(distro || ''));
+    const binary = isUbuntuOrFedora ? 'firefox' : 'firefox-esr';
+    return {
+      id: 'firefox',
+      command: `${binary} --no-remote --profile /tmp/cloudos-firefox-poc-{sessionId}`,
+      title: isUbuntuOrFedora ? 'Mozilla Firefox' : 'Firefox ESR'
+    };
+  }
   if (ALLOWED_APPS[cleanId]) {
     return { id: cleanId, ...ALLOWED_APPS[cleanId] };
   }
@@ -193,7 +202,10 @@ export function displayForPort(port) { return displayForXpraPort(port); }
 
 export function buildXpraProbeCommand(appCommand) {
   const binary = String(appCommand || '').trim().split(/\s+/)[0];
-  return ['set -eu', 'command -v xpra >/dev/null 2>&1 || { echo XPRA_MISSING; exit 41; }', `command -v ${shellQuote(binary)} >/dev/null 2>&1 || { echo APP_MISSING:${binary}; exit 42; }`, 'xpra --version'].join('; ');
+  const binaryCheck = (binary === 'firefox' || binary === 'firefox-esr')
+    ? `(command -v firefox >/dev/null 2>&1 || command -v firefox-esr >/dev/null 2>&1) || { echo APP_MISSING:${binary}; exit 42; }`
+    : `command -v ${shellQuote(binary)} >/dev/null 2>&1 || { echo APP_MISSING:${binary}; exit 42; }`;
+  return ['set -eu', 'command -v xpra >/dev/null 2>&1 || { echo XPRA_MISSING; exit 41; }', binaryCheck, 'xpra --version'].join('; ');
 }
 
 export function buildXpraStartCommand({ appCommand, port, sessionId = 'cloudos-poc1', password = 'test-only-secret' }) {

@@ -158,7 +158,8 @@ function assertPrincipalSession(req, id) { if (!getXpraPocSessions().some(sessio
 // Dynamic Package & Discovery Endpoints
 linuxRuntimeRouter.get('/packages', async (req, res) => {
   try {
-    const result = await listLinuxPackages(req.query?.distribution);
+    const distro = req.query?.distribution || req.query?.distro;
+    const result = await listLinuxPackages(distro);
     res.json(result);
   } catch (error) {
     sendError(res, error, 'PACKAGES_LIST_FAILED');
@@ -167,7 +168,8 @@ linuxRuntimeRouter.get('/packages', async (req, res) => {
 
 linuxRuntimeRouter.get('/discovered', async (req, res) => {
   try {
-    const apps = await scanDiscoveredLinuxApps(req.query?.distribution, { force: req.query?.force === 'true' });
+    const distro = req.query?.distribution || req.query?.distro;
+    const apps = await scanDiscoveredLinuxApps(distro, { force: req.query?.force === 'true' });
     res.json({ apps, count: apps.length });
   } catch (error) {
     sendError(res, error, 'DISCOVERY_SCAN_FAILED');
@@ -176,7 +178,8 @@ linuxRuntimeRouter.get('/discovered', async (req, res) => {
 
 linuxRuntimeRouter.post('/packages/:id/install', async (req, res) => {
   try {
-    const result = await installLinuxPackage(req.body?.distribution, req.params.id);
+    const distro = req.body?.distribution || req.body?.distro;
+    const result = await installLinuxPackage(distro, req.params.id);
     res.status(200).json(result);
   } catch (error) {
     sendError(res, error, 'PACKAGE_INSTALL_FAILED');
@@ -185,7 +188,8 @@ linuxRuntimeRouter.post('/packages/:id/install', async (req, res) => {
 
 linuxRuntimeRouter.post('/packages/:id/uninstall', async (req, res) => {
   try {
-    const result = await uninstallLinuxPackage(req.body?.distribution, req.params.id);
+    const distro = req.body?.distribution || req.body?.distro;
+    const result = await uninstallLinuxPackage(distro, req.params.id);
     res.status(200).json(result);
   } catch (error) {
     sendError(res, error, 'PACKAGE_UNINSTALL_FAILED');
@@ -194,7 +198,8 @@ linuxRuntimeRouter.post('/packages/:id/uninstall', async (req, res) => {
 
 linuxRuntimeRouter.get('/packages/search', async (req, res) => {
   try {
-    const result = await searchLinuxPackages(req.query?.distribution, req.query?.q);
+    const distro = req.query?.distribution || req.query?.distro;
+    const result = await searchLinuxPackages(distro, req.query?.q);
     res.json(result);
   } catch (error) {
     sendError(res, error, 'PACKAGE_SEARCH_FAILED');
