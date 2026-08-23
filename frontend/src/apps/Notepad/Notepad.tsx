@@ -131,22 +131,22 @@ export default function NotepadApp({ windowId }: { windowId: string }) {
   };
 
   const handleOpen = async () => {
+    const input = window.prompt(
+      'Abrir arquivo de CloudOS Home:\n(Ex: ~/Documents/nota.txt, ~/Desktop/teste.txt ou ~/Projects/App/readme.md)',
+      filePath || '~/Documents/'
+    );
+    if (!input) return;
+    const normalized = input.trim().replace(/^~\//, '');
+    const segments = normalized.split(/[\/\\]+/).filter(Boolean);
+    if (segments.length === 0) return;
+    const targetName = segments.pop()!;
+    const folderParts = segments;
     try {
-      const files = await listDirectory(['Documents']);
-      const txtFiles = files.filter(f => f.kind === 'file');
-      if (txtFiles.length === 0) {
-        alert('Nenhum arquivo encontrado em ~/Documents.');
-        return;
-      }
-      const names = txtFiles.map(f => f.name).join('\n');
-      const chosen = window.prompt(`Arquivos disponíveis em ~/Documents:\n${names}\n\nDigite o nome do arquivo para abrir:`, txtFiles[0].name);
-      if (!chosen) return;
-      const cleanChosen = chosen.trim();
-      const file = await readFile(['Documents'], cleanChosen);
+      const file = await readFile(folderParts, targetName);
       const text = await file.text();
       setContent(text);
-      setFileName(cleanChosen);
-      setFilePath(`~/Documents/${cleanChosen}`);
+      setFileName(targetName);
+      setFilePath(`~/${[...folderParts, targetName].join('/')}`);
       setIsModified(false);
     } catch (err: any) {
       alert(`Falha ao abrir arquivo: ${err.message}`);
