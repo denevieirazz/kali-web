@@ -106,15 +106,31 @@ export function getWebSocketBase() {
 }
 
 export function resolveApiUrl(endpoint: string) {
-  if (/^https?:\/\//i.test(endpoint)) return endpoint;
+  const base = getApiBase();
+  if (/^https?:\/\//i.test(endpoint)) {
+    const requested = new URL(endpoint);
+    const trusted = new URL(base);
+    if (requested.origin !== trusted.origin) {
+      throw new Error('O cliente da API local recusou um endpoint HTTP de outra origem.');
+    }
+    return requested.href;
+  }
   const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-  return `${getApiBase()}${path}`;
+  return `${base}${path}`;
 }
 
 export function resolveWebSocketUrl(endpoint: string) {
-  if (/^wss?:\/\//i.test(endpoint)) return endpoint;
+  const base = getWebSocketBase();
+  if (/^wss?:\/\//i.test(endpoint)) {
+    const requested = new URL(endpoint);
+    const trusted = new URL(base);
+    if (requested.origin !== trusted.origin) {
+      throw new Error('O cliente WebSocket local recusou um endpoint de outra origem.');
+    }
+    return requested.href;
+  }
   const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-  return `${getWebSocketBase()}${path}`;
+  return `${base}${path}`;
 }
 
 function handleUnauthorizedStatus(status: number) {
