@@ -174,6 +174,11 @@ export function createApp(initialPort, options = {}) {
   // changes the machine's trust boundary, so it always requires the current administrator.
   app.post('/api/auth/accounts', authenticateToken, requireAdmin);
 
+  // Package install/remove changes the shared Linux runtime, not only the caller's profile.
+  // Keep catalog/search available to signed-in users while restricting system mutations.
+  app.post('/api/linux-runtime/packages/:id/install', authenticateToken, requireAdmin);
+  app.post('/api/linux-runtime/packages/:id/uninstall', authenticateToken, requireAdmin);
+
   app.use('/api/auth', authRouter);
   app.use('/api/user', userRouter);
   app.use('/api/system', systemRouter);
