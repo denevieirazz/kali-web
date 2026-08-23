@@ -165,7 +165,7 @@ export default function NativeAppWindow({ windowId }: { windowId: string }) {
   }, [sessionId, syncSurface]);
 
   useEffect(() => {
-    if (!sessionId || !attachedRef.current) return;
+    if (!sessionId || !attachedRef.current) return undefined;
     const frame = window.requestAnimationFrame(() => {
       void syncSurface(false).catch(() => undefined);
       if (visible) void nativeHostBridge.operate('focus', sessionId).catch(() => undefined);
@@ -175,7 +175,7 @@ export default function NativeAppWindow({ windowId }: { windowId: string }) {
 
   useEffect(() => {
     if (!sessionId) return undefined;
-    return nativeHostBridge.onSessionsChanged((sessions) => {
+    const unsubscribe = nativeHostBridge.onSessionsChanged((sessions) => {
       if (disposedRef.current) return;
       const current = sessions.find((session) => session.sessionId === sessionId);
       if (!current) {
@@ -184,6 +184,9 @@ export default function NativeAppWindow({ windowId }: { windowId: string }) {
       }
       if (current.title && current.title !== win?.title) updateWindowTitle(windowId, current.title);
     });
+    return () => {
+      unsubscribe();
+    };
   }, [closeWindow, sessionId, updateWindowTitle, win?.title, windowId]);
 
   return (
