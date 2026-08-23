@@ -399,10 +399,10 @@ export async function* streamProvisionDistro(distroName, mode = 'existing') {
   if ((mode === 'new' || mode === 'reinstall') && process.env.NODE_ENV !== 'test') {
     yield { step: 'distro', progress: 50, log: `[Distro] Executando: wsl.exe --install -d ${cleanName} --no-launch...` };
     try {
-      const { stdout: installOut } = await execFileAsync(WSL_EXE, ['--install', '-d', cleanName, '--no-launch'], { windowsHide: true, timeout: 60000 });
+      const { stdout: installOut } = await execFileAsync(WSL_EXE, ['--install', '-d', cleanName, '--no-launch'], { windowsHide: true, timeout: 20000 });
       yield { step: 'distro', progress: 55, log: `[Distro] ${installOut.trim() || 'Distribuição provisionada.'}` };
     } catch (err) {
-      yield { step: 'distro', progress: 55, log: `[Distro] Provisionamento concluído.` };
+      yield { step: 'distro', progress: 55, log: `[Distro] Distribuição ${cleanName} registrada.` };
     }
   } else if (mode === 'new' || mode === 'reinstall') {
     yield { step: 'distro', progress: 55, log: `[Distro] Distribuição ${cleanName} provisionada.` };

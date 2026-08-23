@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { WSL_EXE, getWslSnapshot, safeChildEnvironment, validateInstalledAsync } from '../wsl/distroService.js';
 import { scanDiscoveredLinuxApps, invalidateDiscoveryCache } from './desktopScanner.js';
+import { getActiveDistro } from './distroManager.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -296,14 +297,33 @@ export function mergeLinuxPackageCatalog(discovered = [], statusMap = new Map())
   return [...curatedWithStatus, ...additionalDiscovered];
 }
 
+export async function resolveActiveDistribution(requestedDistribution, getSnapshot = getWslSnapshot) {
+  if (typeof requestedDistribution === 'string' && requestedDistribution.trim()) {
+    return requestedDistribution.trim();
+  }
+  const active = getActiveDistro();
+  if (active && await validateInstalledAsync(active)) {
+    return active;
+  }
+  const snapshot = await getSnapshot();
+  if (snapshot.preferred && await validateInstalledAsync(snapshot.preferred)) {
+    return snapshot.preferred;
+  }
+  if (snapshot.default && await validateInstalledAsync(snapshot.default)) {
+    return snapshot.default;
+  }
+  if (Array.isArray(snapshot.distributions) && snapshot.distributions.length > 0) {
+    return snapshot.distributions[0].name;
+  }
+  return active || 'kali-linux';
+}
+
 export async function listLinuxPackages(requestedDistribution, dependencies = {}) {
   const getSnapshot = dependencies.getWslSnapshot || getWslSnapshot;
   const scanApps = dependencies.scanDiscoveredLinuxApps || scanDiscoveredLinuxApps;
   const runExecFile = dependencies.execFileAsync || execFileAsync;
   const snapshot = await getSnapshot();
-  const distribution = typeof requestedDistribution === 'string' && requestedDistribution.trim()
-    ? requestedDistribution.trim()
-    : snapshot.preferred || snapshot.default || 'kali-linux';
+  const distribution = await resolveActiveDistribution(requestedDistribution, getSnapshot);
 
   if (!snapshot.operational) {
     return {
@@ -423,13 +443,18 @@ export function buildSearchCommand(pm, query) {
 }
 
 export async function installLinuxPackage(requestedDistribution, packageId) {
-  const snapshot = await getWslSnapshot();
-  const distribution = typeof requestedDistribution === 'string' && requestedDistribution.trim()
-    ? requestedDistribution.trim()
-    : snapshot.preferred || snapshot.default || 'kali-linux';
+  const distribution = await resolveActiveDistribution(requestedDistribution);
+  let isInstalled = await validateInstalledAsync(distribution);
 
-  if (!distribution || !await validateInstalledAsync(distribution)) {
-    const error = new Error('Distribuição WSL não encontrada.');
+  if (!isInstalled && process.platform === 'win32' && process.env.NODE_ENV !== 'test') {
+    try {
+      await execFileAsync(WSL_EXE, ['--install', '-d', distribution, '--no-launch'], { windowsHide: true, timeout: 60000 });
+      isInstalled = await validateInstalledAsync(distribution);
+    } catch {}
+  }
+
+  if (!distribution || !isInstalled) {
+    const error = new Error(`Distribuição WSL "${distribution}" não encontrada ou não instalada.`);
     error.code = 'DISTRO_NOT_INSTALLED';
     throw error;
   }
@@ -478,13 +503,10 @@ export async function installLinuxPackage(requestedDistribution, packageId) {
 }
 
 export async function uninstallLinuxPackage(requestedDistribution, packageId) {
-  const snapshot = await getWslSnapshot();
-  const distribution = typeof requestedDistribution === 'string' && requestedDistribution.trim()
-    ? requestedDistribution.trim()
-    : snapshot.preferred || snapshot.default || 'kali-linux';
+  const distribution = await resolveActiveDistribution(requestedDistribution);
 
   if (!distribution || !await validateInstalledAsync(distribution)) {
-    const error = new Error('Distribuição WSL não encontrada.');
+    const error = new Error(`Distribuição WSL "${distribution}" não encontrada ou não instalada.`);
     error.code = 'DISTRO_NOT_INSTALLED';
     throw error;
   }
@@ -530,13 +552,10 @@ export async function searchLinuxPackages(requestedDistribution, query) {
   const cleanQuery = String(query || '').trim().replace(/[^a-zA-Z0-9._+-]/g, '').slice(0, 50);
   if (!cleanQuery) return { results: [] };
 
-  const snapshot = await getWslSnapshot();
-  const distribution = typeof requestedDistribution === 'string' && requestedDistribution.trim()
-    ? requestedDistribution.trim()
-    : snapshot.preferred || snapshot.default || 'kali-linux';
+  const distribution = await resolveActiveDistribution(requestedDistribution);
 
   if (!distribution || !await validateInstalledAsync(distribution)) {
-    return { results: [], error: 'Distribuição não instalada.' };
+    return { results: [], error: `Distribuição "${distribution}" não instalada.` };
   }
 
   const pm = await detectDistroPackageManager(distribution);

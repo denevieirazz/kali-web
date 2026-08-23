@@ -152,6 +152,10 @@ export async function getWslSnapshot() {
     const preferred = distributions.find((distro) => distro.name.toLowerCase() === 'kali-linux')?.name || defaultDistro;
     return { installed: true, operational: true, errorCode: null, error: null, distributions, default: defaultDistro, preferred };
   } catch (error) {
+    const msg = String(error?.message || '').toLowerCase();
+    if (msg.includes('não tem distribuições') || msg.includes('no installed distributions') || msg.includes('has no installed')) {
+      return { installed: true, operational: true, errorCode: null, error: null, distributions: [], default: null, preferred: null };
+    }
     return { installed: true, operational: false, errorCode: error.code, error: error.message, distributions: [], default: null, preferred: null };
   }
 }
