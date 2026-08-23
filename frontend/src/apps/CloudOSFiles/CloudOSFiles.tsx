@@ -91,6 +91,7 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
   const [viewMode, setViewMode] = useState<ViewMode>('files');
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('grid');
   const [selectedName, setSelectedName] = useState<string | null>(launchParams.workflowSelectName || null);
+  const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set(launchParams.workflowSelectName ? [launchParams.workflowSelectName] : []));
   const [previewFile, setPreviewFile] = useState<File | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -483,13 +484,82 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
     ]);
   }, [copyToWorkspace, currentPath, handleLaunchFile, launchTerminalAt, openContextMenu, openEntry, rememberFileCopy, requestDelete, requestRename, selectEntry, sendToLinux, sendToWindows, source]);
 
+  const handleClickEntry = useCallback((event: React.MouseEvent, entry: CloudFileEntry) => {
+    if (event.ctrlKey || event.metaKey) {
+      setSelectedNames(prev => {
+        const next = new Set(prev);
+        if (next.has(entry.name)) next.delete(entry.name);
+        else next.add(entry.name);
+        return next;
+      });
+      setSelectedName(entry.name);
+      void selectEntry(entry);
+    } else if (event.shiftKey && selectedName) {
+      const idx1 = visibleEntries.findIndex(e => e.name === selectedName);
+      const idx2 = visibleEntries.findIndex(e => e.name === entry.name);
+      if (idx1 !== -1 && idx2 !== -1) {
+        const start = Math.min(idx1, idx2);
+        const end = Math.max(idx1, idx2);
+        const range = visibleEntries.slice(start, end + 1).map(e => e.name);
+        setSelectedNames(new Set(range));
+        setSelectedName(entry.name);
+        void selectEntry(entry);
+      }
+    } else {
+      setSelectedNames(new Set([entry.name]));
+      setSelectedName(entry.name);
+      void selectEntry(entry);
+    }
+  }, [selectedName, selectEntry, visibleEntries]);
+
+  const handleDropOnFolder = useCallback(async (event: React.DragEvent, targetFolder: CloudFileEntry) => {
+    if (targetFolder.kind !== 'directory' || source !== 'opfs') return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer.files.length) {
+      setIsLoading(true);
+      try {
+        await fileSourceFacade.upload(source, [...currentPath, targetFolder.name], Array.from(event.dataTransfer.files));
+        await loadDirectory();
+      } catch (err: any) {
+        setErrorMessage(err.message || 'Falha ao soltar arquivos na pasta.');
+      } finally {
+        setIsLoading(false);
+      }
+    }
+  }, [currentPath, loadDirectory, source]);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (windowId && useWindowManager.getState().activeWindowId !== windowId) return;
       if (isTypingTarget(event.target) || editor || dialog.type) return;
-      if (event.key === 'Escape') { setSelectedName(null); setPreviewFile(null); }
+      if (event.key === 'Escape') { setSelectedName(null); setSelectedNames(new Set()); setPreviewFile(null); }
+      else if (event.ctrlKey && event.key.toLowerCase() === 'a' && viewMode === 'files') {
+        event.preventDefault();
+        setSelectedNames(new Set(visibleEntries.map(e => e.name)));
+      }
       else if (event.ctrlKey && event.altKey && event.key.toLowerCase() === 't' && viewMode === 'files') { event.preventDefault(); launchTerminalAt(selectedEntry || undefined); }
-      else if (event.key === 'Delete' && selectedEntry) { event.preventDefault(); requestDelete(selectedEntry); }
+      else if (event.key === 'Delete') {
+        event.preventDefault();
+        const toDelete = visibleEntries.filter(e => selectedNames.has(e.name) || e.name === selectedName);
+        if (toDelete.length > 1) {
+          if (window.confirm(`Mover ${toDelete.length} itens selecionados para a lixeira?`)) {
+            setIsLoading(true);
+            (async () => {
+              for (const item of toDelete) {
+                if (viewMode === 'trash') await fileSourceFacade.deleteTrash(source, item);
+                else await fileSourceFacade.trash(source, currentPath, item);
+              }
+              setSelectedNames(new Set());
+              setSelectedName(null);
+              await loadDirectory();
+              setIsLoading(false);
+            })().catch(err => { setErrorMessage(err.message || 'Falha ao excluir itens.'); setIsLoading(false); });
+          }
+        } else if (selectedEntry) {
+          requestDelete(selectedEntry);
+        }
+      }
       else if (event.key === 'F2' && selectedEntry && viewMode === 'files') { event.preventDefault(); requestRename(selectedEntry); }
       else if (event.key === 'Enter' && selectedEntry) { event.preventDefault(); void openEntry(selectedEntry); }
       else if (event.ctrlKey && event.key.toLowerCase() === 'c' && selectedEntry && viewMode === 'files' && !selectedEntry.symlink) { event.preventDefault(); setClipboard({ entry: selectedEntry, action: 'copy', source, sourcePath: [...currentPath] }); rememberFileCopy(selectedEntry); }
@@ -498,7 +568,7 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [clipboard, currentPath, dialog.type, editor, launchTerminalAt, openEntry, pasteClipboard, rememberFileCopy, requestDelete, requestRename, selectedEntry, source, viewMode, windowId]);
+  }, [clipboard, currentPath, dialog.type, editor, launchTerminalAt, loadDirectory, openEntry, pasteClipboard, rememberFileCopy, requestDelete, requestRename, selectedEntry, selectedName, selectedNames, source, viewMode, visibleEntries, windowId]);
 
   const pathPrefix = source === 'opfs' ? '🏠 ~/' : source === 'windows' ? '🪟 /mnt/c' : '🐧 /';
 
@@ -533,10 +603,13 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
         </nav>
         <input className="cf-search" value={searchQuery} onChange={event => setSearchQuery(event.target.value)} placeholder="Pesquisar…" aria-label="Pesquisar arquivos" />
         <select className="cf-sort-select" value={sortField} onChange={event => setSortField(event.target.value as SortField)} aria-label="Ordenar por"><option value="name">Nome</option><option value="modified">Modificado</option><option value="size">Tamanho</option></select>
-        <div className="cf-view-toggle" aria-label="Modo de visualização"><button className={layoutMode === 'grid' ? 'active' : ''} onClick={() => setLayoutMode('grid')} aria-label="Grade">▦</button><button className={layoutMode === 'list' ? 'active' : ''} onClick={() => setLayoutMode('list')} aria-label="Lista">☷</button></div>
+        <div className="cf-layout-switch">
+          <button className={`cf-layout-btn ${layoutMode === 'grid' ? 'active' : ''}`} onClick={() => setLayoutMode('grid')} title="Exibição em grade" aria-label="Exibição em grade">▦</button>
+          <button className={`cf-layout-btn ${layoutMode === 'list' ? 'active' : ''}`} onClick={() => setLayoutMode('list')} title="Exibição em lista" aria-label="Exibição em lista">☰</button>
+        </div>
       </header>
 
-      {errorMessage && <div className="cf-error" role="alert"><span>⚠️ {errorMessage}</span><button onClick={() => setErrorMessage('')}>×</button></div>}
+      {errorMessage && <div className="cf-banner cf-banner--error" role="alert"><span className="cf-banner-icon">⚠️</span><span>{errorMessage}</span><button className="cf-banner-close" onClick={() => setErrorMessage('')} aria-label="Fechar erro">✕</button></div>}
       {activeOperation && <div className="cf-real-operation" data-operation-status={activeOperation.status}><div><strong>{activeOperation.message}</strong><span>{activeOperation.progress}%</span></div><progress max={100} value={activeOperation.progress} />{['queued', 'running', 'cancelling'].includes(activeOperation.status) && <button className="cf-btn danger-btn" disabled={activeOperation.status === 'cancelling'} onClick={() => void cancelActiveOperation()}>{activeOperation.status === 'cancelling' ? 'Revertendo…' : 'Cancelar'}</button>}</div>}
 
       <section className="cf-storage-strip" data-storage-provider={source}>
@@ -552,9 +625,21 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
           {isLoading ? <div className="cf-empty"><div className="cf-spinner" /><span>Processando {sourceLabel(source)}…</span></div> : visibleEntries.length ? (
             <div className={layoutMode === 'grid' ? 'cf-grid cf-grid--visual' : 'cf-list'} role="list" data-files-view={layoutMode}>
               {visibleEntries.map(entry => {
-                const selected = selectedName === entry.name;
+                const selected = selectedNames.has(entry.name) || selectedName === entry.name;
                 const symlink = entry.kind === 'symlink' || entry.symlink;
-                return <article key={`${entry.name}-${entry.trashId || ''}`} className={`cf-item ${selected ? 'selected' : ''} ${symlink ? 'cf-item--symlink' : ''}`} onClick={() => void selectEntry(entry)} onDoubleClick={() => void openEntry(entry)} onContextMenu={event => openEntryContextMenu(event, entry)} onKeyDown={event => { if (event.key === 'Enter') void openEntry(entry); }} role="listitem" tabIndex={0} data-file-kind={entry.kind}>
+                return <article
+                  key={`${entry.name}-${entry.trashId || ''}`}
+                  className={`cf-item ${selected ? 'selected' : ''} ${symlink ? 'cf-item--symlink' : ''}`}
+                  onClick={event => handleClickEntry(event, entry)}
+                  onDoubleClick={() => void openEntry(entry)}
+                  onContextMenu={event => openEntryContextMenu(event, entry)}
+                  onKeyDown={event => { if (event.key === 'Enter') void openEntry(entry); }}
+                  onDragOver={event => { if (entry.kind === 'directory' && source === 'opfs') { event.preventDefault(); event.stopPropagation(); } }}
+                  onDrop={event => void handleDropOnFolder(event, entry)}
+                  role="listitem"
+                  tabIndex={0}
+                  data-file-kind={entry.kind}
+                >
                   <FileVisual entry={entry} source={source} path={currentPath} fromTrash={viewMode === 'trash'} compact={layoutMode === 'list'} />
                   <div className="cf-item-main"><strong className="cf-name" title={entry.originalName || entry.name}>{entry.originalName || entry.name}</strong><small className="cf-size">{symlink ? 'Link não seguido' : entry.kind === 'directory' ? 'Pasta' : formatBytes(entry.size)}{source === 'wsl' && entry.mode !== undefined ? ` · 0${entry.mode.toString(8)}` : ''}</small></div>
                   <div className="cf-actions">{viewMode === 'files' ? <>
