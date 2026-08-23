@@ -48,3 +48,23 @@ test('Linux runtime recovery: WSLInterop probe failure remains fail-closed', () 
   assert.match(runtime, /evidence:\s*'CHECK_FAILED'/);
   assert.doesNotMatch(runtime, /WSL_INTEROP_ASSUMED_VALID/);
 });
+
+test('Linux runtime allocator: never destroys a live DISPLAY while trying to clean stale Xpra state', () => {
+  const runtime = read('backend', 'src', 'linuxRuntime', 'xpraPoc.js');
+  const buildStart = runtime.indexOf('export function buildXpraStartCommand');
+  const buildEnd = runtime.indexOf('async function execWsl');
+  const buildBlock = runtime.slice(buildStart, buildEnd);
+  const reserveStart = runtime.indexOf('async function reservePair');
+  const reserveEnd = runtime.indexOf('function releasePort');
+  const reserveBlock = runtime.slice(reserveStart, reserveEnd);
+
+  assert.ok(buildStart >= 0 && buildEnd > buildStart);
+  assert.match(buildBlock, /XPRA_DISPLAY_BUSY/);
+  assert.match(buildBlock, /xpra info :\$\{display\}/);
+  assert.doesNotMatch(buildBlock, /xpra stop :\$\{display\}/);
+  assert.match(buildBlock, /\/tmp\/\.X\$\{display\}-lock/);
+
+  assert.ok(reserveStart >= 0 && reserveEnd > reserveStart);
+  assert.match(reserveBlock, /probeWslServer\(\{ distribution: distro, display \}\)/);
+  assert.match(reserveBlock, /if \(linux\.ok\) continue/);
+});

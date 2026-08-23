@@ -206,8 +206,8 @@ export function buildXpraStartCommand({ appCommand, port, sessionId = 'cloudos-p
     'mkdir -p -m 1777 /tmp/.X11-unix /run/xpra 2>/dev/null || true',
     'mount -o remount,rw /tmp/.X11-unix 2>/dev/null || true',
     'chmod 1777 /tmp/.X11-unix /run/xpra 2>/dev/null || true',
-    `rm -rf /run/xpra/${display} /run/user/0/xpra/${display} /tmp/.X11-unix/X${display} /run/xpra/*-${display} /root/.xpra/*-${display} 2>/dev/null || true`,
-    `xpra stop :${display} >/dev/null 2>&1 || true`,
+    `if xpra info :${display} >/dev/null 2>&1; then echo XPRA_DISPLAY_BUSY >&2; exit 43; fi`,
+    `rm -rf /run/xpra/${display} /run/user/0/xpra/${display} /tmp/.X11-unix/X${display} /tmp/.X${display}-lock /run/xpra/*-${display} /root/.xpra/*-${display} 2>/dev/null || true`,
     'rm -f /tmp/cloudos-*-poc/.parentlock /tmp/cloudos-*-poc/lock /tmp/cloudos-*-poc/SingletonLock 2>/dev/null || true',
     'if [ -d /mnt/c/Users ]; then WIN_USER=$(ls -d /mnt/c/Users/* 2>/dev/null | grep -vE "Default|Public|All Users|desktop.ini" | head -n1 || true); if [ -n "$WIN_USER" ]; then mkdir -p /root/.config/gtk-3.0; printf "file://%s/Downloads Downloads\\nfile://%s/Documents Documentos\\nfile://%s/Desktop Área de Trabalho\\nfile://%s/Pictures Imagens\\nfile://%s/Videos Vídeos\\n" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" > /root/.config/gtk-3.0/bookmarks 2>/dev/null || true; mkdir -p /root/.config; printf "XDG_DESKTOP_DIR=\\"%s/Desktop\\"\\nXDG_DOWNLOAD_DIR=\\"%s/Downloads\\"\\nXDG_DOCUMENTS_DIR=\\"%s/Documents\\"\\nXDG_PICTURES_DIR=\\"%s/Pictures\\"\\nXDG_VIDEOS_DIR=\\"%s/Videos\\"\\n" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" > /root/.config/user-dirs.dirs 2>/dev/null || true; if [ -d "$WIN_USER/Downloads" ]; then rm -rf /root/Downloads; ln -sfn "$WIN_USER/Downloads" /root/Downloads 2>/dev/null || true; fi; fi; fi',
     'unset DISPLAY WAYLAND_DISPLAY WAYLAND_SOCKET PULSE_SERVER',
@@ -453,10 +453,11 @@ async function reservePair(distro) {
     const offset = (nextPortOffset++) % 40;
     const port = PORT_START + offset;
     const display = DISPLAY_START + offset;
-    if (!reservedPorts.has(port) && await isPortFree(port)) {
-      reservedPorts.add(port);
-      return { port, display, distribution: distro };
-    }
+    if (reservedPorts.has(port) || !await isPortFree(port)) continue;
+    const linux = await probeWslServer({ distribution: distro, display });
+    if (linux.ok) continue;
+    reservedPorts.add(port);
+    return { port, display, distribution: distro };
   }
   throw createPocError('XPRA_PAIR_UNAVAILABLE', 'Nenhum par display/porta livre no momento.');
 }
@@ -587,8 +588,9 @@ export async function startXpraPoc({ app, distribution, ownerId, generation = 1,
       writeLedger();
       return publicSession(session);
     } catch (cause) {
-      session.errorCode = cause.code || 'XPRA_START_FAILED';
-      session.error = `${cause.message}\n${diagnosticsFor(session)}`.trim();
+      const diagnostics = diagnosticsFor(session);
+      session.errorCode = diagnostics.includes('XPRA_DISPLAY_BUSY') ? 'XPRA_DISPLAY_BUSY' : (cause.code || 'XPRA_START_FAILED');
+      session.error = `${cause.message}\n${diagnostics}`.trim();
       await stopSessionInternal(session).catch(() => undefined);
       throw createPocError(session.errorCode, session.error);
     }
