@@ -311,3 +311,28 @@ export async function installDistro(distroName) {
     message: `Instalação de ${cleanName} iniciada em segundo plano.`,
   };
 }
+
+/**
+ * Remove e cancela o registro de uma distribuição WSL.
+ */
+export async function unregisterDistro(distroName) {
+  if (!distroName || typeof distroName !== 'string') {
+    throw new Error('Nome de distribuição inválido.');
+  }
+  const cleanName = distroName.trim();
+  await execFileAsync(WSL_EXE, ['--unregister', cleanName], { windowsHide: true, timeout: 15000 });
+  return { success: true, distro: cleanName, message: `Distribuição ${cleanName} removida com sucesso.` };
+}
+
+/**
+ * Importa uma imagem personalizada de RootFS (.tar / .tar.gz) para o WSL.
+ */
+export async function importDistro(distroName, installLocation, tarPath) {
+  if (!distroName || !installLocation || !tarPath) {
+    throw new Error('Parâmetros de importação incompletos.');
+  }
+  const cleanName = distroName.trim();
+  await execFileAsync(WSL_EXE, ['--import', cleanName, installLocation, tarPath, '--version', '2'], { windowsHide: true, timeout: 30000 });
+  return { success: true, distro: cleanName, message: `Distribuição ${cleanName} importada com sucesso.` };
+}
+
