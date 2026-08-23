@@ -111,7 +111,7 @@ export default function SettingsApp({}: { windowId: string }) {
         <span className="status-pill ok">Ativo: {distroData?.active || 'kali-linux'}</span>
       </div>
       {distroNotice && <div className="settings-recovery-notice">{distroNotice}</div>}
-      
+
       <div className="settings-card">
         <h3>Sistemas Instalados no Dispositivo</h3>
         {distroLoading && <p>Consultando distribuições WSL registradas...</p>}
