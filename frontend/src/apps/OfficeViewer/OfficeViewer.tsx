@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { apiClient } from '../../services/apiClient';
+import { readFile } from '../CloudOSFiles/opfsFileService';
 import './OfficeViewer.css';
 
 interface OfficeViewerProps {
@@ -18,18 +19,40 @@ export default function OfficeViewer({ params }: OfficeViewerProps) {
 
   const [loading, setLoading] = useState(true);
   const [content, setContent] = useState<string>('');
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>('Planilha 1');
   const [zoom, setZoom] = useState<number>(100);
 
   useEffect(() => {
     let cancelled = false;
+    let createdUrl: string | null = null;
 
     async function loadDoc() {
       setLoading(true);
       try {
         if (params?.fileContent) {
           setContent(params.fileContent);
+          if (ext === 'pdf') {
+            const blob = new Blob([params.fileContent], { type: 'application/pdf' });
+            createdUrl = URL.createObjectURL(blob);
+            setPdfBlobUrl(createdUrl);
+          }
           setLoading(false);
+          return;
+        }
+
+        if (filePath.startsWith('~/')) {
+          const parts = filePath.replace(/^~\//, '').split('/');
+          const name = parts.pop() || fileName;
+          const file = await readFile(parts, name);
+          if (ext === 'pdf') {
+            createdUrl = URL.createObjectURL(file);
+            if (!cancelled) setPdfBlobUrl(createdUrl);
+          } else {
+            const text = await file.text();
+            if (!cancelled) setContent(text);
+          }
+          if (!cancelled) setLoading(false);
           return;
         }
 
@@ -49,8 +72,11 @@ export default function OfficeViewer({ params }: OfficeViewerProps) {
     }
 
     void loadDoc();
-    return () => { cancelled = true; };
-  }, [filePath, params?.fileContent]);
+    return () => {
+      cancelled = true;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+    };
+  }, [ext, fileName, filePath, params?.fileContent]);
 
   const isSheet = ['xlsx', 'xls', 'ods', 'csv'].includes(ext);
   const isPresentation = ['pptx', 'ppt', 'odp'].includes(ext);
@@ -78,11 +104,15 @@ export default function OfficeViewer({ params }: OfficeViewerProps) {
       </div>
 
       {/* Main Content Area */}
-      <div className="office-viewer__body" style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'top center' }}>
+      <div className="office-viewer__body" style={{ transform: ext === 'pdf' ? undefined : `scale(${zoom / 100})`, transformOrigin: 'top center' }}>
         {loading ? (
           <div className="office-viewer__loading">
             <div className="office-spinner" />
             <span>Carregando documento...</span>
+          </div>
+        ) : ext === 'pdf' && pdfBlobUrl ? (
+          <div className="office-pdf-view" style={{ width: '100%', height: 'calc(100vh - 140px)', minHeight: 480 }}>
+            <iframe src={pdfBlobUrl} title={fileName} width="100%" height="100%" style={{ border: 'none', borderRadius: 6, minHeight: 480 }} />
           </div>
         ) : isSheet ? (
           <div className="office-sheet-view">
