@@ -222,20 +222,39 @@ export async function renameEntry(path: string[], entry: FileEntry, requestedNam
   const dir = await getDirAt(path);
   const safe = sanitizeName(requestedName);
   if (!safe || safe === entry.name) return entry.name;
-  const unique = await getUniqueName(dir, safe, entry.kind === 'directory');
   if (entry.kind === 'file') {
+    try {
+      await dir.getFileHandle(safe);
+      if (safe.toLowerCase() !== entry.name.toLowerCase()) {
+        throw new Error(`Já existe um arquivo com o nome “${safe}” nesta pasta.`);
+      }
+    } catch (err: any) {
+      if (err.message?.includes('Já existe')) throw err;
+    }
     const file = await (await dir.getFileHandle(entry.name)).getFile();
-    const target = await dir.getFileHandle(unique, { create: true });
+    const target = await dir.getFileHandle(safe, { create: true });
     const writable = await (target as any).createWritable();
     await writable.write(file);
     await writable.close();
-    await dir.removeEntry(entry.name);
+    if (safe !== entry.name) {
+      await dir.removeEntry(entry.name);
+    }
   } else {
+    try {
+      await dir.getDirectoryHandle(safe);
+      if (safe.toLowerCase() !== entry.name.toLowerCase()) {
+        throw new Error(`Já existe uma pasta com o nome “${safe}” neste local.`);
+      }
+    } catch (err: any) {
+      if (err.message?.includes('Já existe')) throw err;
+    }
     const source = await dir.getDirectoryHandle(entry.name);
-    await copyDirectory(source, dir, unique);
-    await dir.removeEntry(entry.name, { recursive: true });
+    await copyDirectory(source, dir, safe);
+    if (safe !== entry.name) {
+      await dir.removeEntry(entry.name, { recursive: true });
+    }
   }
-  return unique;
+  return safe;
 }
 
 export async function moveToTrash(path: string[], entry: FileEntry) {
@@ -267,7 +286,7 @@ export async function restoreFromTrash(entry: FileEntry) {
   const meta = metadata.entries[entry.name];
   let destination: FileSystemDirectoryHandle;
   try {
-    destination = await getDirAt(meta?.originalPath ?? entry.originalPath ?? [], false);
+    destination = await getDirAt(meta?.originalPath ?? entry.originalPath ?? [], true);
   } catch {
     destination = await getOpfsRoot();
   }
