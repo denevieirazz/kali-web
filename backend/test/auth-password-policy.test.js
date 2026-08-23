@@ -36,13 +36,13 @@ function makeRequest(port, options, body) {
 }
 
 test('EF2-P0-004: Password policy unit validation', () => {
-  assert.equal(MIN_PASSWORD_LENGTH, 4);
+  assert.equal(MIN_PASSWORD_LENGTH, 8);
   assert.equal(MAX_PASSWORD_LENGTH, 128);
 
-  // 1. Boundary: 3 chars rejected, 4 chars accepted, empty allowed
-  assert.match(validateNewPassword('123', '123').error, /4 caracteres/);
-  assert.equal(validateNewPassword('1234', '1234').error, null);
-  assert.equal(validateNewPassword('', '').error, null);
+  // 1. Boundary: 7 chars and empty rejected, 8 chars accepted for new credentials.
+  assert.match(validateNewPassword('1234567', '1234567').error, /8 caracteres/);
+  assert.equal(validateNewPassword('12345678', '12345678').error, null);
+  assert.match(validateNewPassword('', '').error, /8 caracteres/);
 
   // 2. Boundary: 128 chars accepted, 129 chars rejected
   const p128 = 'a'.repeat(128);
@@ -74,16 +74,25 @@ test('EF2-P0-004: HTTP Setup, Reset and Legacy Login Compatibility', async () =>
   const { server, port } = await startServer(app);
 
   try {
-    // 1. Setup rejects password shorter than 4 characters
+    // 1. Setup rejects password shorter than 8 characters
     const shortSetup = await makeRequest(port, {
       path: '/api/setup/admin',
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
-    }, JSON.stringify({ username: 'admin', password: '123', confirmPassword: '123' }));
+    }, JSON.stringify({ username: 'admin', password: '1234567', confirmPassword: '1234567' }));
     assert.strictEqual(shortSetup.status, 400);
-    assert.match(JSON.parse(shortSetup.body).error, /4 caracteres/);
+    assert.match(JSON.parse(shortSetup.body).error, /8 caracteres/);
 
-    // 2. Setup rejects password with control characters
+    // 2. Setup rejects empty new password
+    const emptySetup = await makeRequest(port, {
+      path: '/api/setup/admin',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    }, JSON.stringify({ username: 'admin', password: '', confirmPassword: '' }));
+    assert.strictEqual(emptySetup.status, 400);
+    assert.match(JSON.parse(emptySetup.body).error, /8 caracteres/);
+
+    // 3. Setup rejects password with control characters
     const ctrlSetup = await makeRequest(port, {
       path: '/api/setup/admin',
       method: 'POST',
@@ -92,7 +101,7 @@ test('EF2-P0-004: HTTP Setup, Reset and Legacy Login Compatibility', async () =>
     assert.strictEqual(ctrlSetup.status, 400);
     assert.match(JSON.parse(ctrlSetup.body).error, /caracteres de controle/);
 
-    // 3. Setup accepts strong password >= 8 characters
+    // 4. Setup accepts password >= 8 characters
     const validSetup = await makeRequest(port, {
       path: '/api/setup/admin',
       method: 'POST',
@@ -103,20 +112,20 @@ test('EF2-P0-004: HTTP Setup, Reset and Legacy Login Compatibility', async () =>
     assert.ok(validJson.token);
     assert.ok(validJson.recoveryCode);
 
-    // 4. Recovery reset rejects password < 4 characters
+    // 5. Recovery reset rejects password < 8 characters
     const shortRecovery = await makeRequest(port, {
       path: '/api/auth/recovery/reset',
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
     }, JSON.stringify({
       recoveryCode: validJson.recoveryCode,
-      password: '123',
-      confirmPassword: '123'
+      password: '1234567',
+      confirmPassword: '1234567'
     }));
     assert.strictEqual(shortRecovery.status, 400);
-    assert.match(JSON.parse(shortRecovery.body).error, /4 caracteres/);
+    assert.match(JSON.parse(shortRecovery.body).error, /8 caracteres/);
 
-    // 5. Recovery reset accepts strong password >= 8 characters
+    // 6. Recovery reset accepts password >= 8 characters
     const okRecovery = await makeRequest(port, {
       path: '/api/auth/recovery/reset',
       method: 'POST',
@@ -130,7 +139,7 @@ test('EF2-P0-004: HTTP Setup, Reset and Legacy Login Compatibility', async () =>
     const okRecoveryJson = JSON.parse(okRecovery.body);
     assert.ok(okRecoveryJson.token);
 
-    // 6. Login with new strong password works
+    // 7. Login with new strong password works
     const loginOk = await makeRequest(port, {
       path: '/api/auth/login',
       method: 'POST',
@@ -146,7 +155,7 @@ test('EF2-P0-004: Legacy Account with Short Password Continues Authenticating No
   resetLocalDatabase();
   const db = getDb();
 
-  // Inserir diretamente uma conta legada que foi criada no passado com senha de 4 caracteres ("1234")
+  // Existing password hashes are verified as-is; the stronger policy applies only to new credentials.
   const legacyUserId = uuidv4();
   const legacyPasswordHash = bcrypt.hashSync('1234', 4);
   await new Promise((resolve, reject) => {
@@ -161,7 +170,6 @@ test('EF2-P0-004: Legacy Account with Short Password Continues Authenticating No
   const { server, port } = await startServer(app);
 
   try {
-    // Login da conta legada com senha curta ("1234") DEVE passar com 200 OK
     const legacyLogin = await makeRequest(port, {
       path: '/api/auth/login',
       method: 'POST',
@@ -172,7 +180,6 @@ test('EF2-P0-004: Legacy Account with Short Password Continues Authenticating No
     assert.ok(legacyJson.token);
     assert.strictEqual(legacyJson.user.username, 'legacyuser');
 
-    // Login com senha errada falha com 401
     const badLogin = await makeRequest(port, {
       path: '/api/auth/login',
       method: 'POST',
