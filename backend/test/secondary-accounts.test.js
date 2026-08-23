@@ -41,13 +41,13 @@ test('Contas secundárias: ciclo de vida, validações, isolamento e bloqueio de
   const { server, port } = await startServer(app);
 
   try {
-    // 1. Tentar criar conta secundária antes do setup deve falhar com 400
+    // 1. Conta secundária nunca é parte do primeiro boot: sem admin autenticado, deve falhar com 401.
     const premature = await makeRequest(port, {
       path: '/api/auth/accounts',
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
     }, JSON.stringify({ username: 'user1', password: 'password123', confirmPassword: 'password123' }));
-    assert.strictEqual(premature.status, 400);
+    assert.strictEqual(premature.status, 401);
 
     // 2. Concluir setup com conta administradora
     const adminSetup = await makeRequest(port, {
@@ -58,13 +58,17 @@ test('Contas secundárias: ciclo de vida, validações, isolamento e bloqueio de
     assert.strictEqual(adminSetup.status, 201);
     const adminData = JSON.parse(adminSetup.body);
     const adminToken = adminData.token;
+    const adminHeaders = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${adminToken}`
+    };
     assert.strictEqual(adminData.user.role, 'admin');
 
     // 3. Tentar criar conta secundária com senhas divergentes
     const mismatch = await makeRequest(port, {
       path: '/api/auth/accounts',
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
+      headers: adminHeaders
     }, JSON.stringify({ username: 'alice', password: 'password123', confirmPassword: 'differentpassword' }));
     assert.strictEqual(mismatch.status, 400);
 
@@ -72,7 +76,7 @@ test('Contas secundárias: ciclo de vida, validações, isolamento e bloqueio de
     const weak = await makeRequest(port, {
       path: '/api/auth/accounts',
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
+      headers: adminHeaders
     }, JSON.stringify({ username: 'alice', password: '123', confirmPassword: '123' }));
     assert.strictEqual(weak.status, 400);
 
@@ -80,7 +84,7 @@ test('Contas secundárias: ciclo de vida, validações, isolamento e bloqueio de
     const createAlice = await makeRequest(port, {
       path: '/api/auth/accounts',
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
+      headers: adminHeaders
     }, JSON.stringify({ username: 'alice', displayName: 'Alice User', password: 'alicepassword123', confirmPassword: 'alicepassword123' }));
     assert.strictEqual(createAlice.status, 201);
     const aliceData = JSON.parse(createAlice.body);
@@ -97,7 +101,7 @@ test('Contas secundárias: ciclo de vida, validações, isolamento e bloqueio de
     const duplicate = await makeRequest(port, {
       path: '/api/auth/accounts',
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
+      headers: adminHeaders
     }, JSON.stringify({ username: 'ALICE', password: 'alicepassword123', confirmPassword: 'alicepassword123' }));
     assert.strictEqual(duplicate.status, 400);
 
@@ -105,7 +109,7 @@ test('Contas secundárias: ciclo de vida, validações, isolamento e bloqueio de
     const createBob = await makeRequest(port, {
       path: '/api/auth/accounts',
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
+      headers: adminHeaders
     }, JSON.stringify({ username: 'bob', displayName: 'Bob User', password: 'bobpassword123', confirmPassword: 'bobpassword123' }));
     assert.strictEqual(createBob.status, 201);
     const bobData = JSON.parse(createBob.body);
