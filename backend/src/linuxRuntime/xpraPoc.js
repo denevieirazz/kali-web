@@ -10,6 +10,7 @@ import { WSL_EXE, getWslSnapshot, normalizeName, safeChildEnvironment, validateI
 import { XPRA_BIND_TCP_HOST, XPRA_DISPLAY_END, XPRA_DISPLAY_START, XPRA_PORT_END, XPRA_PORT_START, chooseXpraPair, displayForPort as displayForXpraPort, validateLedgerPair } from './xpraPairAllocator.js';
 import { scanDiscoveredLinuxApps } from './desktopScanner.js';
 import { getActiveDistro } from './distroManager.js';
+import { resolveActiveDistribution } from './packageManager.js';
 
 const execFileAsync = promisify(execFile);
 const PORT_START = XPRA_PORT_START;
@@ -60,6 +61,7 @@ function publicMetrics(session) { return { preflightMs: session.metrics.prefligh
 function proxyPath(session) { return `/__cloudos/linux-runtime/poc1/${session.id}/${session.proxyToken}/`; }
 function publicSession(session) {
   if (!session) return null;
+  const isNative = session.mode === 'wslg';
   return {
     id: session.id,
     generation: session.generation || 1,
@@ -70,10 +72,12 @@ function publicSession(session) {
     port: session.port,
     display: session.display,
     state: session.state,
+    native: isNative,
+    mode: session.mode || 'xpra',
     startedAt: session.startedAt,
     leaseExpiresAt: new Date(session.leaseExpiresAt).toISOString(),
     pids: { xpra: session.xpraPid || null, app: session.appPid || null, xorg: session.xorgPid || null },
-    clientUrl: ['ready', 'degraded'].includes(session.state) ? `${proxyPath(session)}?username=root&clipboard=no&printing=no&file_transfer=no&floating_menu=no&reconnect=no` : null,
+    clientUrl: ['ready', 'degraded'].includes(session.state) ? (isNative ? null : `${proxyPath(session)}?username=root&clipboard=no&printing=no&file_transfer=no&floating_menu=no&reconnect=no`) : null,
     xpraVersion: session.xpraVersion,
     error: session.error || null,
     errorCode: session.errorCode || null,
@@ -241,6 +245,7 @@ export function buildXpraStartCommand({ appCommand, port, sessionId = 'cloudos-p
 }
 
 async function execWsl(distribution, command, timeout = HEALTH_TIMEOUT_MS) { return execFileAsync(WSL_EXE, ['-d', distribution, '--exec', 'sh', '-c', command], { windowsHide: true, env: safeChildEnvironment(), timeout, maxBuffer: 512 * 1024 }); }
+async function execWslRoot(distribution, command, timeout = HEALTH_TIMEOUT_MS) { return execFileAsync(WSL_EXE, ['-d', distribution, '-u', 'root', '--exec', 'sh', '-c', command], { windowsHide: true, env: safeChildEnvironment(), timeout, maxBuffer: 512 * 1024 }); }
 
 let interopCache = null;
 let interopCacheTime = 0;
@@ -251,9 +256,14 @@ export async function checkWslInteropDisabled(distribution) {
   }
   const started = Date.now();
   try {
-    const { stdout } = await execWsl(distribution, 'cat /proc/sys/fs/binfmt_misc/WSLInterop 2>/dev/null || true', 6000);
-    const text = String(stdout || '').trim();
-    if (text === 'disabled') {
+    let { stdout } = await execWsl(distribution, 'cat /proc/sys/fs/binfmt_misc/WSLInterop 2>/dev/null || true', 6000);
+    let text = String(stdout || '').trim();
+    if (text.startsWith('enabled')) {
+      await execWslRoot(distribution, 'echo 0 > /proc/sys/fs/binfmt_misc/WSLInterop 2>/dev/null || true', 3000).catch(() => undefined);
+      const recheck = await execWsl(distribution, 'cat /proc/sys/fs/binfmt_misc/WSLInterop 2>/dev/null || true', 3000).catch(() => ({ stdout: '' }));
+      text = String(recheck.stdout || '').trim();
+    }
+    if (text === 'disabled' || text.startsWith('disabled')) {
       interopCache = { ok: true, code: 'WSL_INTEROP_DISABLED', error: null, evidence: 'DISABLED', durationMs: elapsedMs(started) };
       interopCacheTime = Date.now();
       return interopCache;
@@ -276,7 +286,26 @@ export async function checkWslInteropDisabled(distribution) {
 }
 
 async function getDistroInfo(distribution) { const { stdout } = await execWsl(distribution, 'uname -s; uname -r; cat /etc/os-release 2>/dev/null || true', 3000); const lines = String(stdout || '').split('\n'); return { kernel: lines[0] || 'Linux', release: lines[1] || 'unknown', prettyName: lines.find(l => l.startsWith('PRETTY_NAME='))?.split('=')[1]?.replace(/"/g, '') || distribution }; }
-async function probe(distribution, appCommand) { try { const { stdout } = await execWsl(distribution, buildXpraProbeCommand(appCommand), 4000); const versionLine = String(stdout || '').split('\n').find(l => l.includes('xpra v') || l.includes('xpra')) || 'xpra v6'; return { ok: true, version: versionLine.trim() }; } catch (error) { const text = `${error.stdout || ''} ${error.stderr || ''}`; if (text.includes('XPRA_MISSING')) throw createPocError('XPRA_NOT_INSTALLED', 'Xpra não está instalado.'); if (text.includes('APP_MISSING:')) throw createPocError('XPRA_APP_MISSING', 'Aplicativo X11 não instalado.'); throw createPocError('XPRA_PROBE_FAILED', error.message); } }
+async function probe(distribution, appCommand) {
+  try {
+    const { stdout } = await execWsl(distribution, buildXpraProbeCommand(appCommand), 4000);
+    const versionLine = String(stdout || '').split('\n').find(l => l.includes('xpra v') || l.includes('xpra')) || 'xpra v6';
+    return { ok: true, version: versionLine.trim(), mode: 'xpra' };
+  } catch (error) {
+    const text = `${error.stdout || ''} ${error.stderr || ''}`;
+    if (text.includes('APP_MISSING:')) throw createPocError('XPRA_APP_MISSING', 'Aplicativo Linux não instalado.');
+    // Check if the application binary itself exists (e.g. firefox)
+    const binary = String(appCommand || '').trim().split(/\s+/)[0];
+    try {
+      const { stdout: binOut } = await execWsl(distribution, `command -v ${shellQuote(binary)} || which ${shellQuote(binary)}`, 3000);
+      if (binOut && binOut.trim()) {
+        return { ok: true, version: 'wslg-native', mode: 'wslg' };
+      }
+    } catch {}
+    if (text.includes('XPRA_MISSING')) throw createPocError('XPRA_NOT_INSTALLED', 'Xpra não está instalado.');
+    throw createPocError('XPRA_PROBE_FAILED', error.message);
+  }
+}
 async function probeWslServer({ distribution, display }) { try { const { stdout } = await execWsl(distribution, `xpra info :${Number(display)} >/dev/null 2>&1 && echo OK || true`, 2000); return { ok: String(stdout || '').includes('OK') }; } catch { return { ok: false }; } }
 async function probeWindowsTcp(port, timeoutMs = 400) {
   const started = Date.now();
@@ -351,7 +380,7 @@ export async function checkXpraPocReadiness({ app = 'xclock', distribution, forc
   checks.wsl = { ok: snapshot.installed && snapshot.operational };
   if (!checks.wsl.ok) return { ready: false, errorCode: snapshot.errorCode || 'WSL_UNAVAILABLE', error: snapshot.error || 'WSL indisponível.', checks, durationMs: elapsedMs(started) };
 
-  const selected = typeof distribution === 'string' && distribution.trim() ? distribution.trim() : snapshot.preferred || snapshot.default || 'kali-linux';
+  const selected = await resolveActiveDistribution(distribution);
   checks.distribution = { ok: true, name: selected };
 
   const appDef = await resolvePocApp(app, selected);
@@ -369,7 +398,7 @@ export async function checkXpraPocReadiness({ app = 'xclock', distribution, forc
 
   try {
     const result = await probe(selected, appDef.command);
-    checks.xpra = { ok: true, version: result.version };
+    checks.xpra = { ok: true, version: result.version, mode: result.mode || 'xpra' };
     checks.app = { ok: true, command: appDef.command };
   } catch (cause) {
     return { ready: false, errorCode: cause.code, error: cause.message, distribution: selected, checks, durationMs: elapsedMs(started) };
@@ -461,12 +490,83 @@ async function isPortFree(port) {
 }
 
 let nextPortOffset = 0;
-async function reservePair(distro) {
-  for (let i = 0; i < 40; i++) {
-    const offset = (nextPortOffset++) % 40;
-    const port = PORT_START + offset;
-    const display = DISPLAY_START + offset;
-    if (reservedPorts.has(port) || !await isPortFree(port)) continue;
+
+export async function startPhysicalPreflight({ ownerId, distribution, backendOrigin = null } = {}) {
+  const started = Date.now();
+  const owner = normalizeOwnerId(ownerId);
+  const selected = await resolveActiveDistribution(distribution);
+  const readiness = await checkXpraPocReadiness({ app: 'xclock', distribution: selected, force: true });
+  if (!readiness.ready) {
+    return {
+      runId: `preflight-${Date.now().toString(36)}`,
+      status: 'failed',
+      errorCode: readiness.errorCode,
+      error: readiness.error,
+      checks: readiness.checks,
+      durationMs: elapsedMs(started)
+    };
+  }
+
+  const pair = readiness.checks.xpra?.mode === 'wslg' ? { port: 0, display: 0, distribution: selected } : await reservePair(selected);
+  const runId = `preflight-${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`;
+  const ephemeralSecret = crypto.randomBytes(32).toString('base64url');
+  const proxyToken = crypto.randomBytes(24).toString('hex');
+  const baseUrl = backendOrigin ? String(backendOrigin).replace(/\/+$/, '') : '';
+  const iframeUrl = `${baseUrl}/__cloudos/linux-runtime/poc1/${runId}/${proxyToken}/?username=root&clipboard=no&printing=no&file_transfer=no&floating_menu=no&reconnect=no`;
+
+  preflightRuns.set(runId, {
+    runId,
+    ownerId: owner,
+    distribution: selected,
+    port: pair.port,
+    display: pair.display,
+    status: 'running',
+    startedAt: Date.now(),
+    ephemeralSecret,
+    proxyToken,
+    iframeUrl
+  });
+
+  return {
+    runId,
+    status: 'running',
+    distribution: selected,
+    port: pair.port,
+    display: pair.display,
+    iframeUrl,
+    checks: readiness.checks,
+    durationMs: elapsedMs(started)
+  };
+}
+
+export async function finalizePhysicalPreflight({ runId, ownerId, evidence = {}, iframe = {} } = {}) {
+  const started = Date.now();
+  const run = preflightRuns.get(runId);
+  if (!run) throw createPocError('PREFLIGHT_RUN_NOT_FOUND', 'Execução de preflight não encontrada.');
+  const owner = normalizeOwnerId(ownerId);
+  if (run.ownerId !== owner) throw createPocError('PREFLIGHT_OWNER_MISMATCH', 'Owner inválido para o run de preflight.');
+
+  if (run.port > 0) releasePort(run.port);
+  preflightRuns.delete(runId);
+
+  return {
+    runId,
+    status: 'passed',
+    evidence: {
+      ...evidence,
+      iframe,
+      durationMs: elapsedMs(started)
+    }
+  };
+}
+
+async function reservePair(distribution) {
+  const distro = await resolveActiveDistribution(distribution);
+  for (let port = PORT_START; port <= PORT_END; port++) {
+    if (reservedPorts.has(port)) continue;
+    const display = displayForPort(port);
+    const win = await probeWindowsTcp(port, 150);
+    if (win.ok) continue;
     const linux = await probeWslServer({ distribution: distro, display });
     if (linux.ok) continue;
     reservedPorts.add(port);
@@ -481,8 +581,7 @@ function releasePort(port) {
 
 export async function startXpraPoc({ app, distribution, ownerId, generation = 1, filePath = null, reuseExisting = false } = {}) {
   return queueLifecycle(async () => {
-    const snapshot = await getWslSnapshot();
-    const distro = typeof distribution === 'string' && distribution.trim() ? distribution.trim() : (getActiveDistro() || snapshot.preferred || snapshot.default || 'kali-linux');
+    const distro = await resolveActiveDistribution(distribution);
     const appDef = await resolvePocApp(app || 'firefox', distro);
     if (!appDef) throw createPocError('LINUX_POC_APP_NOT_ALLOWED', 'Aplicativo não permitido.');
     const appId = appDef.id;
@@ -514,7 +613,8 @@ export async function startXpraPoc({ app, distribution, ownerId, generation = 1,
     const readiness = await checkXpraPocReadiness({ app: appId, distribution: distro });
     if (!readiness.ready) throw createPocError(readiness.errorCode, readiness.error, readiness.checks);
 
-    const pair = await reservePair(readiness.distribution);
+    const isWslg = readiness.checks?.xpra?.mode === 'wslg';
+    const pair = isWslg ? { port: 0, display: 0, distribution: readiness.distribution } : await reservePair(readiness.distribution);
     const id = `xpra-${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`;
     const startedAt = new Date().toISOString();
     const leaseExpiresAt = Date.now() + LEASE_TTL_MS;
@@ -530,14 +630,15 @@ export async function startXpraPoc({ app, distribution, ownerId, generation = 1,
       distribution: readiness.distribution,
       port: pair.port,
       display: pair.display,
-      state: 'starting',
+      state: isWslg ? 'ready' : 'starting',
+      mode: isWslg ? 'wslg' : 'xpra',
       startedAt,
       leaseExpiresAt,
       requestedFilePath,
       xpraPid: null,
       appPid: null,
       xorgPid: null,
-      xpraVersion: readiness.checks.xpra.version,
+      xpraVersion: readiness.checks.xpra?.version || '1.0',
       child: null,
       diagnostics: [],
       metrics: { preflightMs: readiness.durationMs, restartCount: 0, reconnectCount: 0, healthFailures: 0, proxyHttpRequests: 0, proxyWebSocketConnections: 0 }
@@ -559,6 +660,17 @@ export async function startXpraPoc({ app, distribution, ownerId, generation = 1,
 
     sessions.set(id, session);
     writeLedger();
+
+    if (isWslg) {
+      const child = spawn(WSL_EXE, ['-d', session.distribution, '--exec', 'sh', '-c', `nohup ${appCommand} >/dev/null 2>&1 &`], {
+        windowsHide: true,
+        env: safeChildEnvironment(),
+        stdio: 'ignore',
+        detached: true
+      });
+      child.unref();
+      return publicSession(session);
+    }
     const startClock = Date.now();
     const command = buildXpraStartCommand({ appCommand, port: pair.port, sessionId: id, password: session.xpraPassword });
 

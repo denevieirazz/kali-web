@@ -20,9 +20,12 @@ interface LinuxAppWindowProps {
 
 interface LaunchSession {
   id: string;
-  clientUrl: string;
+  clientUrl?: string | null;
   title: string;
   appId: string;
+  native?: boolean;
+  mode?: string;
+  distribution?: string;
 }
 
 export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps) {
@@ -77,7 +80,7 @@ export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps
           timeoutMs: 45_000,
         });
 
-        if (!res?.session?.clientUrl) {
+        if (!res?.session?.clientUrl && !res?.session?.native) {
           throw new Error('Não foi possível inicializar a superfície do aplicativo.');
         }
 
@@ -88,6 +91,9 @@ export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps
 
         setSession(res.session);
         setReconnectAttempt(0);
+        if (res.session?.native) {
+          setLoading(false);
+        }
       } catch (err) {
         if (cancelled) return;
         const msg = err instanceof Error ? err.message : String(err);
@@ -166,7 +172,7 @@ export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       const iframe = iframeRef.current;
-      if (!iframe || !session || event.source !== iframe.contentWindow || event.data?.sessionId !== session.id) return;
+      if (!iframe || !session?.clientUrl || event.source !== iframe.contentWindow || event.data?.sessionId !== session.id) return;
       let expectedOrigin: string;
       try {
         expectedOrigin = new URL(resolveApiUrl(session.clientUrl), window.location.href).origin;
@@ -231,6 +237,18 @@ export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps
           tabIndex={0}
           onLoad={focusContainedSurface}
         />
+      ) : session?.native ? (
+        <div className="linux-app-window__native" style={{ padding: '32px', textAlign: 'center', color: '#e2e8f0', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+          <div style={{ fontSize: '56px', marginBottom: '16px' }}>🦊</div>
+          <h2 style={{ fontSize: '20px', fontWeight: 600, marginBottom: '8px' }}>{targetTitle} em Execução</h2>
+          <p style={{ color: '#94a3b8', maxWidth: '420px', fontSize: '14px', lineHeight: 1.5, marginBottom: '20px' }}>
+            O aplicativo Linux foi iniciado com aceleração gráfica direta (WSLg) e sua janela está visível na Área de Trabalho.
+          </p>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 14px', background: 'rgba(34, 197, 94, 0.15)', border: '1px solid rgba(34, 197, 94, 0.3)', borderRadius: '20px', color: '#4ade80', fontSize: '13px', fontWeight: 500 }}>
+            <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#22c55e' }}></span>
+            Processo Ativo no WSL ({session.distribution})
+          </div>
+        </div>
       ) : null}
     </div>
   );
