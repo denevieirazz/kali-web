@@ -8,7 +8,7 @@ import { installLinuxPackage, listLinuxPackages, searchLinuxPackages, uninstallL
 import { scanDiscoveredLinuxApps } from './desktopScanner.js';
 import { resolveLinuxIconPath, getMimeTypeForIcon } from './iconResolver.js';
 
-import { getActiveDistro, setActiveDistro, listInstalledDistros, listOnlineDistros, installDistro, unregisterDistro, importDistro, provisionDistro, getCloudOSHome } from './distroManager.js';
+import { getActiveDistro, setActiveDistro, listInstalledDistros, listOnlineDistros, installDistro, unregisterDistro, importDistro, provisionDistro, streamProvisionDistro, getCloudOSHome } from './distroManager.js';
 
 export const linuxRuntimeRouter = express.Router();
 
@@ -102,6 +102,26 @@ linuxRuntimeRouter.post('/distros/provision', async (req, res) => {
     res.json(result);
   } catch (error) {
     sendError(res, error, 'DISTRO_PROVISION_FAILED');
+  }
+});
+
+linuxRuntimeRouter.get('/distros/provision/stream', async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  const distro = String(req.query?.distro || '').trim();
+  const mode = String(req.query?.mode || 'existing').trim();
+
+  try {
+    for await (const event of streamProvisionDistro(distro, mode)) {
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+    }
+  } catch (error) {
+    res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+  } finally {
+    res.end();
   }
 });
 

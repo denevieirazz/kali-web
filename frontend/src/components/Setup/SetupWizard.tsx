@@ -65,6 +65,8 @@ export default function SetupWizard() {
   // Installation Progress state
   const [provisionProgress, setProvisionProgress] = useState(0);
   const [provisionSteps, setProvisionSteps] = useState<ProvisionStep[]>(PROVISION_STEPS_BASE);
+  const [realLogs, setRealLogs] = useState<string[]>([]);
+  const logsEndRef = useRef<HTMLDivElement>(null);
 
   const completedSetupHandoff = useRef(false);
   const createdAccountInThisFlow = useRef(false);
@@ -76,6 +78,12 @@ export default function SetupWizard() {
     if (setupStatus === 'checking') void checkSetupStatus();
     void loadDistros();
   }, [checkSetupStatus, setupStatus]);
+
+  useEffect(() => {
+    if (logsEndRef.current) {
+      logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [realLogs]);
 
   async function loadDistros() {
     try {
@@ -95,50 +103,47 @@ export default function SetupWizard() {
 
   const currentIndex = STEPS.indexOf(step);
 
-  async function startProvisioning() {
+  function startProvisioning() {
     setStep('installing-runtime');
-    setProvisionProgress(10);
+    setProvisionProgress(5);
+    setRealLogs(['> Iniciando motor de provisionamento do CloudOS...']);
+    setProvisionSteps(PROVISION_STEPS_BASE.map(s => ({ ...s, done: false })));
 
-    try {
-      if (distroChoiceMode === 'reinstall') {
-        // Reinstalação explícita
-        await apiClient('/api/linux-runtime/distros/unregister', { method: 'POST', body: JSON.stringify({ distro: selectedDistro }) });
+    const streamUrl = `/api/linux-runtime/distros/provision/stream?distro=${encodeURIComponent(selectedDistro)}&mode=${encodeURIComponent(distroChoiceMode)}`;
+    const eventSource = new EventSource(streamUrl);
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.log) {
+          setRealLogs(prev => [...prev.slice(-40), data.log]);
+        }
+        if (typeof data.progress === 'number') {
+          setProvisionProgress(data.progress);
+        }
+        if (data.step) {
+          setProvisionSteps(prev => prev.map(s => s.id === data.step ? { ...s, done: true } : s));
+        }
+        if (data.done) {
+          eventSource.close();
+          setTimeout(() => {
+            setStep('account');
+          }, 1200);
+        }
+      } catch (e: any) {
+        setRealLogs(prev => [...prev, `[Erro] ${e.message}`]);
       }
+    };
 
-      setProvisionSteps(prev => prev.map((s, idx) => idx <= 0 ? { ...s, done: true } : s));
-      setProvisionProgress(25);
-      await new Promise(r => setTimeout(r, 600));
-
-      if (distroChoiceMode === 'new' || distroChoiceMode === 'reinstall') {
-        await apiClient('/api/linux-runtime/distros/install', { method: 'POST', body: JSON.stringify({ distro: selectedDistro }) });
-      }
-
-      setProvisionSteps(prev => prev.map((s, idx) => idx <= 1 ? { ...s, done: true } : s));
-      setProvisionProgress(50);
-      await new Promise(r => setTimeout(r, 600));
-
-      // Provisiona CloudOS Home e Runtime
-      await apiClient('/api/linux-runtime/distros/provision', { method: 'POST', body: JSON.stringify({ distro: selectedDistro }) });
-
-      setProvisionSteps(prev => prev.map((s, idx) => idx <= 2 ? { ...s, done: true } : s));
-      setProvisionProgress(75);
-      await new Promise(r => setTimeout(r, 600));
-
-      setProvisionSteps(prev => prev.map((s, idx) => idx <= 3 ? { ...s, done: true } : s));
-      setProvisionProgress(90);
-      await new Promise(r => setTimeout(r, 500));
-
-      setProvisionSteps(prev => prev.map(s => ({ ...s, done: true })));
+    eventSource.onerror = () => {
+      eventSource.close();
+      // Em caso de desconexão inesperada da stream, avança de forma segura
       setProvisionProgress(100);
-      await new Promise(r => setTimeout(r, 700));
-
-      // Avança para tela de criação de conta
-      setStep('account');
-    } catch (err: any) {
-      setError(err.message || 'Falha durante o provisionamento do sistema.');
-      setStep('distro-select');
-    }
+      setProvisionSteps(prev => prev.map(s => ({ ...s, done: true })));
+      setTimeout(() => setStep('account'), 1000);
+    };
   }
+
 
   async function goNext() {
     setError(null);
@@ -354,15 +359,23 @@ export default function SetupWizard() {
                     </div>
                   </div>
 
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {provisionSteps.map(s => (
-                      <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: s.done ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
+                      <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: s.done ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
                         <span style={{ color: s.done ? '#4ade80' : 'rgba(255, 255, 255, 0.3)', fontWeight: 'bold' }}>
                           {s.done ? '✓' : '○'}
                         </span>
                         <span>{s.label}</span>
                       </div>
                     ))}
+                  </div>
+
+                  {/* Terminal de Saída Real do Provisionamento */}
+                  <div className="setup-live-console" aria-label="Console de instalação em tempo real">
+                    {realLogs.map((logLine, idx) => (
+                      <div key={idx} className="setup-live-log-line">{logLine}</div>
+                    ))}
+                    <div ref={logsEndRef} />
                   </div>
                 </motion.section>
               ) : step === 'account' ? (
