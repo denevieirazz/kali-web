@@ -70,6 +70,8 @@ export default function OpenWithModal() {
     if (callback) callback(selectedAppId);
   };
 
+  const isRichDoc = ['docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp'].includes(ext);
+
   return (
     <div className="openwith-overlay" onClick={handleClose}>
       <div className="openwith-modal" onClick={e => e.stopPropagation()} role="dialog" aria-label="Abrir com">
@@ -80,6 +82,22 @@ export default function OpenWithModal() {
           </div>
           <button className="openwith-close-btn" onClick={handleClose}>✕</button>
         </div>
+
+        {isRichDoc && (
+          <div style={{
+            margin: '0 20px 12px',
+            padding: '10px 14px',
+            background: 'rgba(59, 130, 246, 0.12)',
+            border: '1px solid rgba(59, 130, 246, 0.3)',
+            borderRadius: '8px',
+            fontSize: '12px',
+            lineHeight: '1.4',
+            color: 'var(--text-primary, #f1f5f9)'
+          }}>
+            <strong>É necessário um aplicativo compatível.</strong><br />
+            Documentos formatados de escritório requerem uma suíte compatível (ex: LibreOffice). O Bloco de Notas não é recomendado pois exibe o arquivo bruto.
+          </div>
+        )}
 
         <div className="openwith-section-title">
           Como deseja abrir este arquivo?

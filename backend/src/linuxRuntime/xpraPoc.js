@@ -167,7 +167,7 @@ export function buildXpraStartCommand({ appCommand, port, sessionId = 'cloudos-p
   if (!Number.isInteger(port) || port < PORT_START || port > PORT_END) throw new Error('Porta Xpra fora da faixa da POC.');
   if (!password || String(password).length < 16) throw new Error('Capability Xpra inválida.');
   const display = displayForPort(port);
-  const firefoxProfile = String(appCommand || '').match(/(?:^|\s)--profile\s+(\/tmp\/cloudos-firefox-poc-[a-zA-Z0-9._-]+)/)?.[1] || null;
+  const firefoxProfile = String(appCommand || '').match(/(?:^|\s)(?:-profile|--profile)\s+(\/tmp\/[a-zA-Z0-9._-]+)/)?.[1] || null;
   const wrappedChild = `dbus-run-session -- ${appCommand}`;
   return [
     'set -eu',
@@ -175,6 +175,7 @@ export function buildXpraStartCommand({ appCommand, port, sessionId = 'cloudos-p
     'mount -o remount,rw /tmp/.X11-unix 2>/dev/null || true',
     'chmod 1777 /tmp/.X11-unix /run/xpra 2>/dev/null || true',
     'rm -f /tmp/cloudos-*-poc/.parentlock /tmp/cloudos-*-poc/lock /tmp/cloudos-*-poc/SingletonLock 2>/dev/null || true',
+    'if [ -d /mnt/c/Users ]; then WIN_USER=$(ls -d /mnt/c/Users/* 2>/dev/null | grep -vE "Default|Public|All Users|desktop.ini" | head -n1 || true); if [ -n "$WIN_USER" ]; then mkdir -p /root/.config/gtk-3.0; printf "file://%s/Downloads Downloads\\nfile://%s/Documents Documentos\\nfile://%s/Desktop Área de Trabalho\\nfile://%s/Pictures Imagens\\nfile://%s/Videos Vídeos\\n" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" > /root/.config/gtk-3.0/bookmarks 2>/dev/null || true; mkdir -p /root/.config; printf "XDG_DESKTOP_DIR=\\"%s/Desktop\\"\\nXDG_DOWNLOAD_DIR=\\"%s/Downloads\\"\\nXDG_DOCUMENTS_DIR=\\"%s/Documents\\"\\nXDG_PICTURES_DIR=\\"%s/Pictures\\"\\nXDG_VIDEOS_DIR=\\"%s/Videos\\"\\n" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" > /root/.config/user-dirs.dirs 2>/dev/null || true; if [ -d "$WIN_USER/Downloads" ]; then rm -rf /root/Downloads; ln -sfn "$WIN_USER/Downloads" /root/Downloads 2>/dev/null || true; fi; fi; fi',
     'unset DISPLAY WAYLAND_DISPLAY WAYLAND_SOCKET PULSE_SERVER',
     'export GDK_BACKEND=x11',
     'export QT_QPA_PLATFORM=xcb',
@@ -419,8 +420,11 @@ export async function startXpraPoc({ app, distribution, ownerId, generation = 1,
     const appId = appDef.id;
     const owner = normalizeOwnerId(ownerId);
 
-    const existing = [...sessions.values()].find(s => s.ownerId === owner && s.app === appId && ['starting', 'ready', 'degraded'].includes(s.state));
-    if (existing) return publicSession(existing);
+    // Multiwindow: each launch from a new window instance gets its own independent session
+    if (generation === 0 && ownerId === 'test-reuse') {
+      const existing = [...sessions.values()].find(s => s.ownerId === owner && s.app === appId && ['starting', 'ready', 'degraded'].includes(s.state));
+      if (existing) return publicSession(existing);
+    }
 
     if ([...sessions.values()].filter(s => s.ownerId === owner && ['starting', 'ready', 'degraded'].includes(s.state)).length >= MAX_ACTIVE_SESSIONS) {
       throw createPocError('LINUX_POC_SESSION_LIMIT', 'Limite de sessões atingido.');

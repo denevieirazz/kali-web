@@ -10,7 +10,7 @@ export const CURATED_LINUX_APPS = Object.freeze([
     id: 'firefox',
     name: 'Firefox ESR',
     packageName: 'firefox-esr',
-    command: 'firefox-esr --no-remote -profile /tmp/cloudos-ff-poc',
+    command: 'firefox-esr --no-remote -profile /tmp/cloudos-ff-{sessionId}',
     category: 'internet',
     description: 'Navegador web moderno, rápido e seguro da Mozilla.',
     icon: '🦊',
@@ -272,12 +272,18 @@ export async function listLinuxPackages(requestedDistribution) {
     curatedWithStatus = CURATED_LINUX_APPS.map(app => ({ ...app, installed: false, isCurated: true, isUserApp: true, isTechnical: false, mimeTypes: [] }));
   }
 
-  // 3. Merge discovered apps that are NOT curated
-  const curatedIds = new Set(CURATED_LINUX_APPS.map(a => a.id));
+  // 3. Merge discovered apps that are NOT curated (deduplicating by id, desktopId, packageName and binary name)
+  const curatedIds = new Set();
+  for (const a of CURATED_LINUX_APPS) {
+    if (a.id) curatedIds.add(a.id.toLowerCase());
+    if (a.desktopId) curatedIds.add(a.desktopId.toLowerCase());
+    if (a.packageName) curatedIds.add(a.packageName.toLowerCase());
+  }
   const additionalDiscovered = discovered.filter(d => {
-    if (curatedIds.has(d.id)) return false;
-    const bin = d.command.split(' ')[0].split('/').pop();
-    if (curatedIds.has(bin)) return false;
+    if (curatedIds.has(d.id?.toLowerCase())) return false;
+    if (d.desktopId && curatedIds.has(d.desktopId.toLowerCase())) return false;
+    const bin = d.command?.split(' ')[0].split('/').pop()?.toLowerCase();
+    if (bin && curatedIds.has(bin)) return false;
     return true;
   }).map(d => ({
     id: d.id,

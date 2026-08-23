@@ -294,6 +294,14 @@ function StartMenu() {
       return;
     }
 
+    const existingNativeWin = allWindows.find(w => w.appId === app.id);
+    if (existingNativeWin && ['settings', 'task-manager', 'system-monitor', 'regedit', 'obsidian-store'].includes(app.id)) {
+      if (existingNativeWin.isMinimized) restoreWindow(existingNativeWin.id);
+      focusWindow(existingNativeWin.id);
+      closeStartMenu();
+      return;
+    }
+
     const pid = createProcess(app.id, app.name, app.icon);
     openWindow({
       title: app.name,

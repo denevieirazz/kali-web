@@ -4,7 +4,7 @@
 import { useWindowManager } from '../stores/windowManager';
 import { useProcessManager } from '../stores/processManager';
 import { useAppRegistry } from '../core/appRegistry';
-import { getDefaultAppForFile, getCompatibleApps, type AppAssociation } from './mimeRegistry';
+import { getDefaultAppForFile, getCompatibleApps, getFileExtension, type AppAssociation } from './mimeRegistry';
 import { openOpenWithModal } from '../components/OpenWithModal/OpenWithModal';
 
 export interface OpenFileOptions {
@@ -87,6 +87,22 @@ export function openFile(options: OpenFileOptions): void {
 
   // 2. Native CloudOS Application execution
   const appId = selectedApp.id;
+
+  const richOfficeExtensions = ['docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp'];
+  const ext = getFileExtension(fileName);
+  if (richOfficeExtensions.includes(ext) && appId === 'notepad' && !targetAppId) {
+    const compatible = getCompatibleApps(fileName, linuxApps);
+    openOpenWithModal({
+      fileName,
+      filePath,
+      fileContent,
+      compatibleApps: compatible,
+      onSelectApp: (chosenId) => {
+        openFile({ ...options, openWith: false, targetAppId: chosenId });
+      }
+    });
+    return;
+  }
 
   if (appId === 'notepad') {
     const pid = createProcess('notepad', 'Bloco de Notas', '📝');
