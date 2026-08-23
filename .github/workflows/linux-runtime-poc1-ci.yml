@@ -30,7 +30,8 @@ jobs:
         run: npm.cmd test
 
   physical-runtime:
-    name: Physical WSL + Xpra probe
+    name: Manual physical WSL + Xpra prerequisite probe
+    if: github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
@@ -43,7 +44,7 @@ jobs:
           $report = New-Object System.Collections.Generic.List[string]
           $report.Add('# POC1_RESULTS.md')
           $report.Add('')
-          $report.Add('## Physical runtime probe')
+          $report.Add('## Physical runtime prerequisite probe')
           $report.Add('')
           $report.Add("**Runner:** windows-latest")
           $report.Add("**Commit:** ``$env:GITHUB_SHA``")
@@ -96,7 +97,7 @@ jobs:
           $report | Set-Content POC1_RESULTS.md -Encoding UTF8
           "runtime_ready=true" >> $env:GITHUB_OUTPUT
 
-      - name: Upload physical probe evidence
+      - name: Upload physical prerequisite probe evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -104,7 +105,7 @@ jobs:
           path: POC1_RESULTS.md
           retention-days: 14
 
-      - name: Physical runtime gate
+      - name: Physical prerequisite gate
         if: steps.probe.outputs.runtime_ready != 'true'
         shell: pwsh
         run: |
