@@ -188,11 +188,14 @@ test('OOBE E2E: 20 fluxos completos de validação lógica com fronteira WSL det
     assert.ok(events11.length >= 3, 'Flow 11: Debian reinstall gerou eventos');
     assert.strictEqual(events11.at(-1).done, true, 'Flow 11: Debian reinstall finalizou em done');
 
-    // FLUXO 12: Troca e persistência de distro ativa.
+    // FLUXO 12: Troca e persistência de distro ativa exige a sessão administrativa após o setup.
     setActiveDistro('ubuntu-24.04');
     assert.strictEqual(getActiveDistro(), 'ubuntu-24.04', 'Flow 12: activeDistro é ubuntu-24.04');
     const res12 = await makeRequest(port, {
-      path: '/api/linux-runtime/distros/active', method: 'POST', headers: { 'Content-Type': 'application/json' }
+      path: '/api/linux-runtime/distros/active', method: 'POST', headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${json5.token}`
+      }
     }, JSON.stringify({ distro: 'kali-linux' }));
     assert.strictEqual(res12.status, 200, 'Flow 12: setActiveDistro HTTP 200');
     assert.strictEqual(getActiveDistro(), 'kali-linux', 'Flow 12: activeDistro atualizada para kali-linux');
@@ -211,9 +214,12 @@ test('OOBE E2E: 20 fluxos completos de validação lógica com fronteira WSL det
     assert.match(buildInstallCommand('pacman', 'firefox'), /pacman -Sy/);
     assert.match(buildInstallCommand('apk', 'firefox'), /apk add/);
 
-    // FLUXO 15: Unregister rejeita nome inseguro.
+    // FLUXO 15: Mesmo autenticado, unregister rejeita nome inseguro.
     const res15 = await makeRequest(port, {
-      path: '/api/linux-runtime/distros/unregister', method: 'POST', headers: { 'Content-Type': 'application/json' }
+      path: '/api/linux-runtime/distros/unregister', method: 'POST', headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${json5.token}`
+      }
     }, JSON.stringify({ distro: 'invalid;rm -rf /' }));
     assert.strictEqual(res15.status, 400, 'Flow 15: Injeção em distro rejeitada com HTTP 400');
 
@@ -231,16 +237,19 @@ test('OOBE E2E: 20 fluxos completos de validação lógica com fronteira WSL det
     assert.strictEqual(json17.authenticated, true);
     assert.strictEqual(json17.user.username, 'douglas');
 
-    // FLUXO 18: Logout revoga a sessão.
+    // FLUXO 18: Logout confirma o encerramento do lado cliente.
     const res18 = await makeRequest(port, {
       path: '/api/auth/logout', method: 'POST', headers: { 'Authorization': `Bearer ${json5.token}` }
     });
     assert.strictEqual(res18.status, 200, 'Flow 18: Logout HTTP 200');
 
-    // FLUXO 19: Conta secundária também exige senha segura.
+    // FLUXO 19: Conta secundária exige senha segura e autorização administrativa.
     const secondaryPassword = 'Secundaria5678';
     const res19 = await makeRequest(port, {
-      path: '/api/auth/accounts', method: 'POST', headers: { 'Content-Type': 'application/json' }
+      path: '/api/auth/accounts', method: 'POST', headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${json5.token}`
+      }
     }, JSON.stringify({ username: 'usuario_secundario', displayName: 'Usuario Secundario', password: secondaryPassword, confirmPassword: secondaryPassword }));
     assert.strictEqual(res19.status, 201, 'Flow 19: Conta secundária criada com HTTP 201');
     const json19 = JSON.parse(res19.body);
