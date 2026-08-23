@@ -177,6 +177,14 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
 
   useEffect(() => { void loadDirectory(); }, [loadDirectory]);
 
+  useEffect(() => {
+    const onFilesChanged = () => {
+      if (source === 'opfs') void loadDirectory();
+    };
+    window.addEventListener('cloudos:files-changed', onFilesChanged);
+    return () => window.removeEventListener('cloudos:files-changed', onFilesChanged);
+  }, [loadDirectory, source]);
+
   useEffect(() => () => {
     operationController.current?.abort();
     const operation = activeOperationRef.current;

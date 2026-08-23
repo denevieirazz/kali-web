@@ -39,6 +39,12 @@ export function sanitizeName(name: string): string {
   return name.trim().replace(/[\\/:*?"<>|\u0000-\u001f]/g, '-').replace(/\.+$/g, '').slice(0, 120);
 }
 
+export function notifyFilesChanged() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('cloudos:files-changed'));
+  }
+}
+
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
   if (bytes < 1024) return `${bytes} B`;
@@ -191,6 +197,7 @@ export async function writeTextFile(path: string[], name: string, content: strin
   const writable = await (handle as any).createWritable();
   await writable.write(content);
   await writable.close();
+  notifyFilesChanged();
 }
 
 export async function createEntry(path: string[], kind: FileEntry['kind'], requestedName: string) {
@@ -202,6 +209,7 @@ export async function createEntry(path: string[], kind: FileEntry['kind'], reque
     const writable = await (handle as any).createWritable();
     await writable.close();
   }
+  notifyFilesChanged();
   return name;
 }
 
@@ -216,6 +224,7 @@ export async function uploadFiles(path: string[], files: File[]) {
     await writable.write(file);
     await writable.close();
   }
+  notifyFilesChanged();
 }
 
 export async function renameEntry(path: string[], entry: FileEntry, requestedName: string) {
@@ -254,6 +263,7 @@ export async function renameEntry(path: string[], entry: FileEntry, requestedNam
       await dir.removeEntry(entry.name, { recursive: true });
     }
   }
+  notifyFilesChanged();
   return safe;
 }
 
@@ -278,6 +288,7 @@ export async function moveToTrash(path: string[], entry: FileEntry) {
   const metadata = await readTrashMetadata();
   metadata.entries[trashName] = { originalPath: cleanPath(path), originalName: entry.name, deletedAt: Date.now(), kind: entry.kind };
   await writeTrashMetadata(metadata);
+  notifyFilesChanged();
 }
 
 export async function restoreFromTrash(entry: FileEntry) {
@@ -307,6 +318,7 @@ export async function restoreFromTrash(entry: FileEntry) {
   }
   delete metadata.entries[entry.name];
   await writeTrashMetadata(metadata);
+  notifyFilesChanged();
   return restoredName;
 }
 
@@ -316,6 +328,7 @@ export async function permanentlyDelete(entry: FileEntry) {
   const metadata = await readTrashMetadata();
   delete metadata.entries[entry.name];
   await writeTrashMetadata(metadata);
+  notifyFilesChanged();
 }
 
 export async function emptyTrash() {
@@ -325,6 +338,7 @@ export async function emptyTrash() {
     await trash.removeEntry(name, { recursive: handle.kind === 'directory' });
   }
   await writeTrashMetadata({ version: 1, entries: {} });
+  notifyFilesChanged();
 }
 
 export function validatePaste(sourcePath: string[], entry: FileEntry, destinationPath: string[]) {
@@ -361,5 +375,6 @@ export async function pasteEntry(clipboard: ClipboardEntry, destinationPath: str
     await copyDirectory(sourceDir, destination, name);
     if (clipboard.action === 'cut') await source.removeEntry(entry.name, { recursive: true });
   }
+  notifyFilesChanged();
   return { moved: clipboard.action === 'cut', name };
 }
