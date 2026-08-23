@@ -113,13 +113,17 @@ export default function NotepadApp({ windowId }: { windowId: string }) {
   };
 
   const handleSaveAs = async () => {
-    const name = window.prompt('Salvar arquivo em CloudOS Home (~/Documents):', fileName.endsWith('.txt') ? fileName : `${fileName}.txt`);
-    if (!name) return;
-    const cleanName = name.trim();
+    const defaultVal = filePath || `~/Documents/${fileName.endsWith('.txt') ? fileName : `${fileName}.txt`}`;
+    const input = window.prompt('Salvar arquivo em CloudOS Home:', defaultVal);
+    if (!input) return;
+    const normalized = input.trim().replace(/^~\//, '');
+    const segments = normalized.split(/[\/\\]+/).filter(Boolean);
+    const saveName = segments.pop() || 'documento.txt';
+    const folderParts = segments.length > 0 ? segments : ['Documents'];
     try {
-      await writeTextFile(['Documents'], cleanName, content);
-      setFileName(cleanName);
-      setFilePath(`~/Documents/${cleanName}`);
+      await writeTextFile(folderParts, saveName, content);
+      setFileName(saveName);
+      setFilePath(`~/${[...folderParts, saveName].join('/')}`);
       setIsModified(false);
     } catch (err: any) {
       alert(`Erro ao salvar no CloudOS Home: ${err.message}`);
