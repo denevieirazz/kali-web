@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config/index.js';
+import { getDb } from './database/index.js';
 import { authRouter } from './auth/routes.js';
 import { systemRouter } from './system/routes.js';
 import { operationsRouter } from './operations/routes.js';
@@ -21,9 +22,19 @@ import { linuxRuntimeRouter } from './linuxRuntime/routes.js';
 import { xpraHttpProxyMiddleware } from './linuxRuntime/xpraProxy.js';
 import { resolveLinuxIconPath, getMimeTypeForIcon } from './linuxRuntime/iconResolver.js';
 import { createHostTrustPolicy, hasSupervisorTrust } from './auth/hostTrust.js';
+import { authenticateToken, requireAdmin } from './middleware/auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const defaultFrontendDist = path.resolve(__dirname, '../../frontend/dist');
+
+const PROTECTED_LINUX_DISTRO_MUTATIONS = new Set([
+  'POST /api/linux-runtime/distros/active',
+  'POST /api/linux-runtime/distros/install',
+  'POST /api/linux-runtime/distros/unregister',
+  'POST /api/linux-runtime/distros/import',
+  'POST /api/linux-runtime/distros/provision',
+  'GET /api/linux-runtime/distros/provision/stream'
+]);
 
 function normalizeOrigin(origin) {
   try {
@@ -44,6 +55,23 @@ function hasTraversalPath(requestUrl) {
     return true;
   }
   return candidate.includes('\0') || candidate.split(/[\\/]/).includes('..');
+}
+
+function dbGet(db, query, params) {
+  return new Promise((resolve, reject) => db.get(query, params, (error, row) => error ? reject(error) : resolve(row)));
+}
+
+async function protectLinuxDistroMutationsAfterSetup(req, res, next) {
+  const routeKey = `${req.method.toUpperCase()} ${req.path}`;
+  if (!PROTECTED_LINUX_DISTRO_MUTATIONS.has(routeKey)) return next();
+
+  try {
+    const row = await dbGet(getDb(), 'SELECT COUNT(*) AS count FROM users WHERE role = ?', ['admin']);
+    if ((row?.count || 0) === 0) return next();
+    return authenticateToken(req, res, () => requireAdmin(req, res, next));
+  } catch (error) {
+    return next(error);
+  }
 }
 
 export function createApp(initialPort, options = {}) {
@@ -137,6 +165,10 @@ export function createApp(initialPort, options = {}) {
       webSocketBase: `ws://127.0.0.1:${port}`, instanceId: app._cloudosInstanceId || null, nativeHost
     });
   });
+
+  // Distro mutation endpoints are intentionally public during first boot, before an
+  // administrator exists. Once setup is complete they become administrator-only.
+  app.use(protectLinuxDistroMutationsAfterSetup);
 
   app.use('/api/auth', authRouter);
   app.use('/api/user', userRouter);
