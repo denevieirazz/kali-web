@@ -38,11 +38,11 @@ const PROVISION_STEPS_BASE: ProvisionStep[] = [
 ];
 
 function passwordStrength(password: string) {
-  if (!password) return { level: 'empty', label: 'Digite uma senha.', detail: 'Uma frase maior é mais fácil de lembrar e mais difícil de adivinhar.' };
-  if (password.length < 8) return { level: 'invalid', label: 'Muito curta', detail: 'O mínimo é 8 caracteres.' };
-  if (password.length < 12) return { level: 'weak', label: 'Fraca', detail: 'Recomendamos uma frase maior, mesmo sem números ou símbolos obrigatórios.' };
-  if (password.length < 16) return { level: 'medium', label: 'Razoável', detail: 'Uma frase longa aumenta a resistência sem exigir combinações artificiais.' };
-  return { level: 'strong', label: 'Mais forte', detail: 'Frases longas e únicas são recomendadas.' };
+  if (!password) return { level: 'empty', label: 'Sem senha (Opcional)', detail: 'Acesso direto habilitado. Você pode definir uma senha depois.' };
+  if (password.length < 4) return { level: 'invalid', label: 'Muito curta', detail: 'O mínimo é 4 caracteres ou deixe em branco.' };
+  if (password.length < 8) return { level: 'weak', label: 'Senha curta', detail: 'Válida. Recomendamos uma senha maior para segurança em rede.' };
+  if (password.length < 14) return { level: 'medium', label: 'Boa', detail: 'Senha adequada para proteção padrão.' };
+  return { level: 'strong', label: 'Forte', detail: 'Excelente nível de segurança.' };
 }
 
 export default function SetupWizard() {
@@ -60,7 +60,7 @@ export default function SetupWizard() {
   // Distro OOBE state
   const [distroData, setDistroData] = useState<{ active: string; installed: DistroOption[]; online: DistroOption[] } | null>(null);
   const [selectedDistro, setSelectedDistro] = useState<string>('kali-linux');
-  const [distroChoiceMode, setDistroChoiceMode] = useState<'existing' | 'reinstall' | 'new' | 'custom'>('existing');
+  const [distroChoiceMode, setDistroChoiceMode] = useState<'existing' | 'reinstall' | 'new' | 'remove' | 'custom'>('existing');
 
   // Installation Progress state
   const [provisionProgress, setProvisionProgress] = useState(0);
@@ -145,38 +145,61 @@ export default function SetupWizard() {
   }
 
 
+  async function handleRemoveDistro(distroId: string) {
+    if (!window.confirm(`Tem certeza que deseja EXCLUIR permanentemente a distribuição "${distroId}" do WSL?\n\nIsso executará "wsl.exe --unregister ${distroId}" e removerá todos os arquivos internos.`)) {
+      return;
+    }
+    try {
+      setLoading(true);
+      setError(null);
+      await apiClient('/api/linux-runtime/distros/unregister', {
+        method: 'POST',
+        body: JSON.stringify({ distro: distroId })
+      });
+      await loadDistros();
+      setLoading(false);
+    } catch (err: any) {
+      setLoading(false);
+      setError(err.message || 'Falha ao excluir a distribuição.');
+    }
+  }
+
   async function goNext() {
     setError(null);
     if (step === 'welcome') return setStep('distro-select');
     if (step === 'distro-select') {
+      if (distroChoiceMode === 'remove') {
+        return void handleRemoveDistro(selectedDistro);
+      }
       return void startProvisioning();
     }
     if (step === 'account') {
-      if (setupStatus === 'complete' && !password && !username) {
+      if (setupStatus === 'complete' && !username && !password) {
         // Mantém conta de administrador existente
         return setStep('ready');
       }
-      const validation = validateDisplayName(displayName) || validateUsername(username) || validateNewPassword(password, confirmPassword);
+      const cleanUser = username.trim() || 'admin';
+      const cleanDisplay = displayName.trim() || cleanUser;
+      const validation = validateUsername(cleanUser) || validateDisplayName(cleanDisplay) || validateNewPassword(password || '', confirmPassword || '');
       if (validation) return setError(validation);
-      return void createRealAccount();
+      return void createRealAccount(cleanUser, cleanDisplay);
     }
   }
 
-  async function createRealAccount() {
+  async function createRealAccount(cleanUser: string, cleanDisplay: string) {
     if (loading) return;
     createdAccountInThisFlow.current = true;
     setLoading(true);
     setError(null);
 
-    const result = await createAdmin(username.trim(), displayName.trim(), password, confirmPassword);
+    const result = await createAdmin(cleanUser, cleanDisplay, password || '', confirmPassword || '');
     setPassword('');
     setConfirmPassword('');
 
     if (!result.success || !result.recoveryCode) {
       createdAccountInThisFlow.current = false;
-      const refreshedStatus = await checkSetupStatus();
       setLoading(false);
-      if (refreshedStatus !== 'complete') setError(result.message || 'Não foi possível criar a conta no agente local.');
+      setError(result.message || 'Falha ao salvar a conta administradora.');
       return;
     }
 
@@ -188,9 +211,8 @@ export default function SetupWizard() {
   }
 
   function completeSetup() {
-    if (username.trim()) {
-      kernel.sysCreateUserHome(username.trim());
-    }
+    const finalUser = username.trim() || 'admin';
+    kernel.sysCreateUserHome(finalUser);
     kernel.regSetValue('HKEY_LOCAL_MACHINE\\SYSTEM\\Setup\\SetupInProgress', 'REG_DWORD', 0);
     kernel.regSetValue('HKEY_LOCAL_MACHINE\\SYSTEM\\Setup\\OOBEInProgress', 'REG_DWORD', 0);
     localStorage.setItem('cloudos-oobe-completed', 'true');
@@ -282,32 +304,52 @@ export default function SetupWizard() {
 
                   {distroData?.installed && distroData.installed.length > 0 ? (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 8 }}>
                         <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12 }}>
                           <input type="radio" name="distroChoiceMode" checked={distroChoiceMode === 'existing'} onChange={() => setDistroChoiceMode('existing')} />
                           <span>Utilizar existente</span>
                         </label>
                         <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12 }}>
                           <input type="radio" name="distroChoiceMode" checked={distroChoiceMode === 'reinstall'} onChange={() => setDistroChoiceMode('reinstall')} />
-                          <span style={{ color: '#f87171' }}>Reinstalar do zero</span>
+                          <span style={{ color: '#f59e0b' }}>Reinstalar do zero</span>
                         </label>
                         <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12 }}>
                           <input type="radio" name="distroChoiceMode" checked={distroChoiceMode === 'new'} onChange={() => setDistroChoiceMode('new')} />
                           <span>Instalar novo</span>
                         </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12 }}>
+                          <input type="radio" name="distroChoiceMode" checked={distroChoiceMode === 'remove'} onChange={() => setDistroChoiceMode('remove')} />
+                          <span style={{ color: '#ef4444' }}>Excluir sistema</span>
+                        </label>
                       </div>
 
                       {distroChoiceMode === 'reinstall' && (
-                        <div className="setup-alert" style={{ background: 'rgba(239, 68, 68, 0.15)', borderColor: '#ef4444', color: '#fca5a5' }}>
+                        <div className="setup-alert" style={{ background: 'rgba(245, 158, 11, 0.15)', borderColor: '#f59e0b', color: '#fde68a' }}>
                           ⚠️ <strong>Aviso:</strong> A reinstalação removerá os pacotes customizados da distribuição anterior e recriará um ambiente limpo.
                         </div>
                       )}
 
-                      {distroChoiceMode === 'existing' || distroChoiceMode === 'reinstall' ? (
+                      {distroChoiceMode === 'remove' && (
+                        <div className="setup-alert" style={{ background: 'rgba(239, 68, 68, 0.15)', borderColor: '#ef4444', color: '#fca5a5' }}>
+                          🗑️ <strong>Excluir Distribuição:</strong> Isso executará <code>wsl.exe --unregister {selectedDistro}</code> e apagará permanentemente o disco virtual desta distribuição.
+                        </div>
+                      )}
+
+                      {distroChoiceMode === 'existing' || distroChoiceMode === 'reinstall' || distroChoiceMode === 'remove' ? (
                         <div className="setup-distro-grid">
                           {distroData.installed.map(d => (
                             <div key={d.id} className={`setup-distro-card ${selectedDistro === d.id ? 'selected' : ''}`} onClick={() => setSelectedDistro(d.id)}>
-                              <span className="setup-distro-icon">{d.icon || '🐉'}</span>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                                <span className="setup-distro-icon">{d.icon || '🐉'}</span>
+                                <button
+                                  type="button"
+                                  title={`Excluir ${d.name} do WSL`}
+                                  style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.4)', borderRadius: 4, color: '#f87171', padding: '2px 6px', fontSize: 10, cursor: 'pointer' }}
+                                  onClick={(e) => { e.stopPropagation(); void handleRemoveDistro(d.id); }}
+                                >
+                                  🗑️ Excluir
+                                </button>
+                              </div>
                               <span className="setup-distro-title">{d.name}</span>
                               <span className="setup-distro-meta">{d.category}</span>
                               <span className="setup-distro-badge">✓ Instalado (WSL {d.version || '2'})</span>
@@ -404,18 +446,24 @@ export default function SetupWizard() {
                   <div className="setup-password-grid">
                     <label className="setup-field">
                       Senha
-                      <input type="password" className="setup-input" value={password} onChange={event => setPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} />
+                      <input type="password" className="setup-input" value={password} onChange={event => setPassword(event.target.value)} autoComplete="new-password" maxLength={128} placeholder="Opcional (mínimo 4 caracteres)" />
                     </label>
                     <label className="setup-field">
                       Confirmar senha
-                      <input type="password" className="setup-input" value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} />
+                      <input type="password" className="setup-input" value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} autoComplete="new-password" maxLength={128} placeholder="Confirmar senha" />
                     </label>
                   </div>
 
-                  <div className={`setup-password-strength setup-password-strength--${strength.level}`} data-password-strength={strength.level}>
-                    <strong>{strength.label}</strong>
-                    <span>{strength.detail}</span>
-                  </div>
+                  {!password ? (
+                    <div style={{ fontSize: 11, color: '#fbbf24', marginTop: 2 }}>
+                      ⚠️ Aviso de segurança: Conta sem senha (acesso direto). Recomendado para desenvolvimento e testes rápidos.
+                    </div>
+                  ) : (
+                    <div className={`setup-password-strength setup-password-strength--${strength.level}`} data-password-strength={strength.level}>
+                      <strong>{strength.label}</strong>
+                      <span>{strength.detail}</span>
+                    </div>
+                  )}
 
                   <div style={{ marginTop: 12 }}>
                     <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Cor de destaque pessoal</span>
@@ -449,7 +497,7 @@ export default function SetupWizard() {
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0' }}>
                       <span style={{ color: 'var(--text-secondary)' }}>Usuário Ativo:</span>
-                      <strong>{displayName || username || 'Administrador'}</strong>
+                      <strong>{displayName || username || 'admin'}</strong>
                     </div>
                   </div>
 
@@ -477,9 +525,15 @@ export default function SetupWizard() {
                 </button>
               )}
               {step === 'distro-select' && (
-                <button className="setup-btn setup-btn-primary" onClick={() => void startProvisioning()}>
-                  Instalar Sistema →
-                </button>
+                distroChoiceMode === 'remove' ? (
+                  <button className="setup-btn" style={{ background: '#ef4444', color: '#fff', fontWeight: 'bold' }} onClick={() => void handleRemoveDistro(selectedDistro)} disabled={loading}>
+                    {loading ? 'Excluindo…' : 'Excluir Distribuição 🗑️'}
+                  </button>
+                ) : (
+                  <button className="setup-btn setup-btn-primary" onClick={() => void startProvisioning()}>
+                    Instalar Sistema →
+                  </button>
+                )
               )}
               {step === 'account' && (
                 <button className="setup-btn setup-btn-primary" onClick={() => void goNext()} disabled={loading}>

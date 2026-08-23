@@ -36,18 +36,19 @@ function makeRequest(port, options, body) {
 }
 
 test('EF2-P0-004: Password policy unit validation', () => {
-  assert.equal(MIN_PASSWORD_LENGTH, 8);
+  assert.equal(MIN_PASSWORD_LENGTH, 4);
   assert.equal(MAX_PASSWORD_LENGTH, 128);
 
-  // 1. Boundary: 7 chars rejected, 8 chars accepted
-  assert.match(validateNewPassword('1234567', '1234567').error, /8 e 128/);
-  assert.equal(validateNewPassword('12345678', '12345678').error, null);
+  // 1. Boundary: 3 chars rejected, 4 chars accepted, empty allowed
+  assert.match(validateNewPassword('123', '123').error, /4 caracteres/);
+  assert.equal(validateNewPassword('1234', '1234').error, null);
+  assert.equal(validateNewPassword('', '').error, null);
 
   // 2. Boundary: 128 chars accepted, 129 chars rejected
   const p128 = 'a'.repeat(128);
   const p129 = 'a'.repeat(129);
   assert.equal(validateNewPassword(p128, p128).error, null);
-  assert.match(validateNewPassword(p129, p129).error, /8 e 128/);
+  assert.match(validateNewPassword(p129, p129).error, /128 caracteres/);
 
   // 3. Control characters rejected
   assert.match(validateNewPassword('pass\x00word12', 'pass\x00word12').error, /caracteres de controle/);
@@ -73,14 +74,14 @@ test('EF2-P0-004: HTTP Setup, Reset and Legacy Login Compatibility', async () =>
   const { server, port } = await startServer(app);
 
   try {
-    // 1. Setup rejects password shorter than 8 characters
+    // 1. Setup rejects password shorter than 4 characters
     const shortSetup = await makeRequest(port, {
       path: '/api/setup/admin',
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
-    }, JSON.stringify({ username: 'admin', password: '1234567', confirmPassword: '1234567' }));
+    }, JSON.stringify({ username: 'admin', password: '123', confirmPassword: '123' }));
     assert.strictEqual(shortSetup.status, 400);
-    assert.match(JSON.parse(shortSetup.body).error, /8 e 128/);
+    assert.match(JSON.parse(shortSetup.body).error, /4 caracteres/);
 
     // 2. Setup rejects password with control characters
     const ctrlSetup = await makeRequest(port, {
@@ -102,18 +103,18 @@ test('EF2-P0-004: HTTP Setup, Reset and Legacy Login Compatibility', async () =>
     assert.ok(validJson.token);
     assert.ok(validJson.recoveryCode);
 
-    // 4. Recovery reset rejects password < 8 characters
+    // 4. Recovery reset rejects password < 4 characters
     const shortRecovery = await makeRequest(port, {
       path: '/api/auth/recovery/reset',
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
     }, JSON.stringify({
       recoveryCode: validJson.recoveryCode,
-      password: 'curta',
-      confirmPassword: 'curta'
+      password: '123',
+      confirmPassword: '123'
     }));
     assert.strictEqual(shortRecovery.status, 400);
-    assert.match(JSON.parse(shortRecovery.body).error, /8 e 128/);
+    assert.match(JSON.parse(shortRecovery.body).error, /4 caracteres/);
 
     // 5. Recovery reset accepts strong password >= 8 characters
     const okRecovery = await makeRequest(port, {

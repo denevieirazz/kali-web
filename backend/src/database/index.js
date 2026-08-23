@@ -343,6 +343,18 @@ export class PersistentDatabase {
             updated_at: now
           }));
         });
+      } else if (query.includes('UPDATE users SET')) {
+        const [username, displayName, passwordHash, recoveryCodeHash, id] = params;
+        this.#change((state) => {
+          const user = state.users.find(u => u.id === id || u.role === 'admin');
+          if (!user) throw new Error('USER_NOT_FOUND');
+          user.username = username;
+          user.display_name = displayName;
+          user.password_hash = passwordHash;
+          if (recoveryCodeHash) user.recovery_code_hash = recoveryCodeHash;
+          user.auth_version = (user.auth_version || 1) + 1;
+          user.updated_at = new Date().toISOString();
+        });
       } else if (query.includes('INSERT INTO operations')) {
         if (query.includes('target')) {
           const [id, type, target, status = 'completed'] = params;

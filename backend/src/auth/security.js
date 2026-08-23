@@ -45,7 +45,7 @@ export function validateDisplayName(value, fallback) {
   return { value: displayName, error: null };
 }
 
-export const MIN_PASSWORD_LENGTH = 8;
+export const MIN_PASSWORD_LENGTH = 4;
 export const MAX_PASSWORD_LENGTH = 128;
 
 export function validateNewPassword(password, confirmPassword) {
@@ -55,8 +55,11 @@ export function validateNewPassword(password, confirmPassword) {
   if (/[\u0000-\u001f\u007f]/.test(password)) {
     return { error: 'A senha não pode conter caracteres de controle.' };
   }
-  if (password.length < MIN_PASSWORD_LENGTH || password.length > MAX_PASSWORD_LENGTH) {
-    return { error: `A senha deve conter entre ${MIN_PASSWORD_LENGTH} e ${MAX_PASSWORD_LENGTH} caracteres.` };
+  if (password.length > 0 && password.length < MIN_PASSWORD_LENGTH) {
+    return { error: `A senha deve conter pelo menos ${MIN_PASSWORD_LENGTH} caracteres ou ser deixada em branco.` };
+  }
+  if (password.length > MAX_PASSWORD_LENGTH) {
+    return { error: `A senha deve conter no máximo ${MAX_PASSWORD_LENGTH} caracteres.` };
   }
   if (password !== confirmPassword) {
     return { error: 'A confirmação de senha não confere.' };
