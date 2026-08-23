@@ -9,6 +9,7 @@ import { useContextMenuStore } from '../../stores/contextMenuStore';
 import { useAppRegistry } from '../../core/appRegistry';
 import { useRubberBand } from '../../hooks/useRubberBand';
 import { getUserStorageKey } from '../../services/userScope.js';
+import { openFile } from '../../services/fileLauncher';
 import defaultWallpaper from '../../assets/wallpapers/default.png';
 import './Desktop.css';
 
@@ -17,6 +18,7 @@ interface DesktopIconData {
   name: string;
   icon: string;
   appId: string;
+  filePath?: string;
   x: number;
   y: number;
 }
@@ -57,7 +59,7 @@ function findFreeCell(
 
 function buildDefaultIcons(): DesktopIconData[] {
   const raw = [
-    { id: 'recycle', name: 'Lixeira', icon: '🗑️', appId: '' },
+    { id: 'recycle', name: 'Lixeira', icon: '🗑️', appId: 'cloudos-files' },
     { id: 'explorer', name: 'Explorador de Arquivos', icon: '📁', appId: 'file-explorer' },
     { id: 'cloudos-term', name: 'CloudOS Terminal', icon: '⚡', appId: 'cloudos-terminal' },
     { id: 'cloudos-files', name: 'CloudOS Files', icon: '☁️', appId: 'cloudos-files' },
@@ -288,10 +290,33 @@ export default function Desktop() {
   }, []);
 
   const handleIconDoubleClick = useCallback(
-    (_e: React.MouseEvent, appId: string) => {
-      handleOpenApp(appId);
+    (_e: React.MouseEvent, icon: DesktopIconData) => {
+      if (icon.id === 'recycle') {
+        const pid = createProcess('cloudos-files', 'Lixeira', '🗑️');
+        openWindow({
+          title: 'Lixeira - CloudOS Files',
+          icon: '🗑️',
+          appId: 'cloudos-files',
+          width: 980,
+          height: 640,
+          minWidth: 540,
+          minHeight: 360,
+          isResizable: true,
+          processId: pid,
+          params: { initialViewMode: 'trash' }
+        });
+        return;
+      }
+      if (icon.appId) {
+        handleOpenApp(icon.appId);
+      } else if (icon.filePath || icon.id.startsWith('dropped-')) {
+        openFile({
+          filePath: icon.filePath || `~/Desktop/${icon.name}`,
+          fileName: icon.name,
+        });
+      }
     },
-    [handleOpenApp]
+    [createProcess, handleOpenApp, openWindow]
   );
 
   const handleDesktopMouseDown = useCallback(
@@ -342,7 +367,7 @@ export default function Desktop() {
 
         setIcons((prev) => [
           ...prev,
-          { id, name: data.name, icon: data.icon || '📄', appId: data.appId || '', x, y },
+          { id, name: data.name, icon: data.icon || '📄', appId: data.appId || '', filePath: data.path, x, y },
         ]);
       } catch {}
     },
@@ -460,7 +485,7 @@ export default function Desktop() {
             setSelectedIcons(new Set([icon.id]));
             closeStartMenu();
           }}
-          onDoubleClick={(e) => handleIconDoubleClick(e, icon.appId)}
+          onDoubleClick={(e) => handleIconDoubleClick(e, icon)}
           onContextMenu={(e) => handleIconContextMenu(e, icon)}
         >
           <div className="desktop-icon-image">{icon.icon}</div>

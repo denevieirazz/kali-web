@@ -36,7 +36,7 @@ type DialogType = 'create-file' | 'create-folder' | 'rename' | 'confirm-delete' 
 type DialogState = { type: DialogType; title?: string; message?: string; entry?: CloudFileEntry };
 type EditorState = { name: string; content: string; mode?: number } | null;
 type ActiveOperation = { source: 'windows' | 'wsl'; id?: string; status: string; progress: number; message: string };
-type LaunchParams = { workflowSource?: FileSourceKind; workflowPath?: string[]; workflowSelectName?: string };
+type LaunchParams = { workflowSource?: FileSourceKind; workflowPath?: string[]; workflowSelectName?: string; initialViewMode?: ViewMode };
 
 const MAX_DOWNLOAD_BYTES = 256 * 1024 * 1024;
 const delay = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms));
@@ -81,6 +81,7 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
       workflowSource: validSource(raw.workflowSource) ? raw.workflowSource : undefined,
       workflowPath: Array.isArray(raw.workflowPath) ? raw.workflowPath.filter((part): part is string => typeof part === 'string' && Boolean(part)) : undefined,
       workflowSelectName: typeof raw.workflowSelectName === 'string' ? raw.workflowSelectName : undefined,
+      initialViewMode: raw.initialViewMode === 'trash' ? 'trash' : 'files',
     };
   });
   const initialSource = launchParams.workflowSource || 'opfs';
@@ -88,7 +89,7 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
   const [runtime, setRuntime] = useState<SourceRuntime>({ source: initialSource, label: sourceLabel(initialSource), mounted: initialSource === 'opfs', available: initialSource === 'opfs', detail: '' });
   const [entries, setEntries] = useState<CloudFileEntry[]>([]);
   const [currentPath, setCurrentPath] = useState<string[]>(launchParams.workflowPath || []);
-  const [viewMode, setViewMode] = useState<ViewMode>('files');
+  const [viewMode, setViewMode] = useState<ViewMode>(launchParams.initialViewMode || 'files');
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('grid');
   const [selectedName, setSelectedName] = useState<string | null>(launchParams.workflowSelectName || null);
   const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set(launchParams.workflowSelectName ? [launchParams.workflowSelectName] : []));
