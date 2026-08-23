@@ -9,7 +9,7 @@ import { getDb } from './database/index.js';
 import { connectHostLease, readHostLeaseConfig } from './runtime/hostLease.js';
 import { setupTerminalWebSocket } from './terminal/websocket.js';
 import { handleXpraProxyUpgrade } from './linuxRuntime/xpraProxy.js';
-import { shutdownXpraPocRuntime } from './linuxRuntime/xpraPoc.js';
+import { restoreSessionsFromLedger, shutdownXpraPocRuntime } from './linuxRuntime/xpraPoc.js';
 import { shutdownPhysicalPreflight } from './linuxRuntime/preflight.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -135,6 +135,9 @@ async function startServer() {
   app._cloudosPort = port;
 
   console.log(`🚀 CloudOS-Unified Backend rodando em http://127.0.0.1:${port}`);
+
+  // Re-hidrata sessões ativas do Linux Runtime
+  restoreSessionsFromLedger().catch(() => undefined);
 
   // Gravação atômica do arquivo de runtime — APÓS listen efetivo
   if (!fs.existsSync(runtimeDir)) {

@@ -45,11 +45,14 @@ export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps
     iframe?.contentWindow?.focus();
   }, []);
 
+  const [reconnectAttempt, setReconnectAttempt] = useState(0);
+
   useEffect(() => {
     let cancelled = false;
+    let retryTimer: any = null;
 
     async function startApp() {
-      setLoading(true);
+      if (reconnectAttempt === 0) setLoading(true);
       setError(null);
       try {
         const res = await apiClient<{ session: LaunchSession }>('/api/linux-runtime/launch', {
@@ -65,14 +68,23 @@ export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps
         if (cancelled) return;
         if (res?.session?.clientUrl) {
           setSession(res.session);
+          setReconnectAttempt(0);
         } else {
-          setError('Não foi possível inicializar a superfície do aplicativo.');
-          setLoading(false);
+          throw new Error('Não foi possível inicializar a superfície do aplicativo.');
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
-          setLoading(false);
+          const msg = err instanceof Error ? err.message : String(err);
+          // Se for erro de rede/transporte, entra em modo de reconexão automática
+          if (reconnectAttempt < 30) {
+            setError(`Conexão interrompida. Tentando reconectar automaticamente (${reconnectAttempt + 1})...`);
+            retryTimer = setTimeout(() => {
+              if (!cancelled) setReconnectAttempt(prev => prev + 1);
+            }, 2000);
+          } else {
+            setError(msg);
+            setLoading(false);
+          }
         }
       }
     }
@@ -81,8 +93,9 @@ export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps
 
     return () => {
       cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [targetAppId, windowId]);
+  }, [targetAppId, windowId, targetFilePath, reconnectAttempt]);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
