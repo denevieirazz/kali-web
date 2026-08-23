@@ -170,6 +170,10 @@ export function createApp(initialPort, options = {}) {
   // administrator exists. Once setup is complete they become administrator-only.
   app.use(protectLinuxDistroMutationsAfterSetup);
 
+  // Secondary accounts are never part of first boot. Creating another local identity
+  // changes the machine's trust boundary, so it always requires the current administrator.
+  app.post('/api/auth/accounts', authenticateToken, requireAdmin);
+
   app.use('/api/auth', authRouter);
   app.use('/api/user', userRouter);
   app.use('/api/system', systemRouter);
