@@ -155,7 +155,15 @@ const PACKAGE_STATUS_SCRIPT = [
   'for item in "$@"; do',
   '  cmd="${item%%:*}"',
   '  pkg="${item##*:}"',
-  '  if command -v "$cmd" >/dev/null 2>&1 || dpkg -s "$pkg" 2>/dev/null | grep -q "Status: install ok installed"; then',
+  '  if command -v "$cmd" >/dev/null 2>&1; then',
+  '    printf "%s\\0371\\n" "$cmd"',
+  '  elif command -v dpkg >/dev/null 2>&1 && dpkg -s "$pkg" 2>/dev/null | grep -q "Status: install ok installed"; then',
+  '    printf "%s\\0371\\n" "$cmd"',
+  '  elif command -v rpm >/dev/null 2>&1 && rpm -q "$pkg" >/dev/null 2>&1; then',
+  '    printf "%s\\0371\\n" "$cmd"',
+  '  elif command -v pacman >/dev/null 2>&1 && pacman -Q "$pkg" >/dev/null 2>&1; then',
+  '    printf "%s\\0371\\n" "$cmd"',
+  '  elif command -v apk >/dev/null 2>&1 && apk info -e "$pkg" >/dev/null 2>&1; then',
   '    printf "%s\\0371\\n" "$cmd"',
   '  else',
   '    printf "%s\\0370\\n" "$cmd"',
@@ -345,6 +353,75 @@ export async function listLinuxPackages(requestedDistribution, dependencies = {}
   };
 }
 
+export async function detectDistroPackageManager(distribution) {
+  const detectScript = [
+    'if command -v apt-get >/dev/null 2>&1; then echo "apt";',
+    'elif command -v dnf >/dev/null 2>&1; then echo "dnf";',
+    'elif command -v pacman >/dev/null 2>&1; then echo "pacman";',
+    'elif command -v apk >/dev/null 2>&1; then echo "apk";',
+    'elif command -v zypper >/dev/null 2>&1; then echo "zypper";',
+    'else echo "apt"; fi'
+  ].join(' ');
+
+  try {
+    const { stdout } = await execFileAsync(WSL_EXE, [
+      '--distribution', distribution,
+      '--exec', '/bin/sh', '-c', detectScript
+    ], { windowsHide: true, timeout: 5000 });
+    return stdout.trim() || 'apt';
+  } catch {
+    return 'apt';
+  }
+}
+
+export function buildInstallCommand(pm, pkg) {
+  switch (pm) {
+    case 'dnf':
+      return `sudo -n dnf install -y ${pkg}`;
+    case 'pacman':
+      return `sudo -n pacman -Sy --noconfirm ${pkg}`;
+    case 'apk':
+      return `sudo -n apk add ${pkg}`;
+    case 'zypper':
+      return `sudo -n zypper install -y ${pkg}`;
+    case 'apt':
+    default:
+      return `DEBIAN_FRONTEND=noninteractive sudo -n apt-get update -qq && DEBIAN_FRONTEND=noninteractive sudo -n apt-get install -y --no-install-recommends ${pkg}`;
+  }
+}
+
+export function buildUninstallCommand(pm, pkg) {
+  switch (pm) {
+    case 'dnf':
+      return `sudo -n dnf remove -y ${pkg}`;
+    case 'pacman':
+      return `sudo -n pacman -R --noconfirm ${pkg}`;
+    case 'apk':
+      return `sudo -n apk del ${pkg}`;
+    case 'zypper':
+      return `sudo -n zypper remove -y ${pkg}`;
+    case 'apt':
+    default:
+      return `DEBIAN_FRONTEND=noninteractive sudo -n apt-get remove -y ${pkg}`;
+  }
+}
+
+export function buildSearchCommand(pm, query) {
+  switch (pm) {
+    case 'dnf':
+      return `dnf search ${query} 2>/dev/null | head -n 30`;
+    case 'pacman':
+      return `pacman -Ss ${query} 2>/dev/null | head -n 30`;
+    case 'apk':
+      return `apk search -v ${query} 2>/dev/null | head -n 30`;
+    case 'zypper':
+      return `zypper search ${query} 2>/dev/null | head -n 30`;
+    case 'apt':
+    default:
+      return `apt-cache search ${query} 2>/dev/null | head -n 30`;
+  }
+}
+
 export async function installLinuxPackage(requestedDistribution, packageId) {
   const snapshot = await getWslSnapshot();
   const distribution = typeof requestedDistribution === 'string' && requestedDistribution.trim()
@@ -367,7 +444,8 @@ export async function installLinuxPackage(requestedDistribution, packageId) {
     throw error;
   }
 
-  const installCmd = `DEBIAN_FRONTEND=noninteractive sudo -n apt-get update -qq && DEBIAN_FRONTEND=noninteractive sudo -n apt-get install -y --no-install-recommends ${sanitizedPkg}`;
+  const pm = await detectDistroPackageManager(distribution);
+  const installCmd = buildInstallCommand(pm, sanitizedPkg);
 
   try {
     const { stdout, stderr } = await execFileAsync(WSL_EXE, [
@@ -388,6 +466,7 @@ export async function installLinuxPackage(requestedDistribution, packageId) {
       packageId,
       packageName: sanitizedPkg,
       distribution,
+      packageManager: pm,
       log: stdout + (stderr ? `\n${stderr}` : '')
     };
   } catch (err) {
@@ -414,7 +493,8 @@ export async function uninstallLinuxPackage(requestedDistribution, packageId) {
   const rawPkg = curated ? curated.packageName : packageId;
   const sanitizedPkg = rawPkg.replace(/[^a-zA-Z0-9._+-]/g, '');
 
-  const removeCmd = `DEBIAN_FRONTEND=noninteractive sudo -n apt-get remove -y ${sanitizedPkg}`;
+  const pm = await detectDistroPackageManager(distribution);
+  const removeCmd = buildUninstallCommand(pm, sanitizedPkg);
 
   try {
     const { stdout, stderr } = await execFileAsync(WSL_EXE, [
@@ -435,6 +515,7 @@ export async function uninstallLinuxPackage(requestedDistribution, packageId) {
       packageId,
       packageName: sanitizedPkg,
       distribution,
+      packageManager: pm,
       log: stdout + (stderr ? `\n${stderr}` : '')
     };
   } catch (err) {
@@ -455,36 +536,37 @@ export async function searchLinuxPackages(requestedDistribution, query) {
     : snapshot.preferred || snapshot.default || 'kali-linux';
 
   if (!distribution || !await validateInstalledAsync(distribution)) {
-    return { results: [] };
+    return { results: [], error: 'Distribuição não instalada.' };
   }
+
+  const pm = await detectDistroPackageManager(distribution);
+  const searchCmd = buildSearchCommand(pm, cleanQuery);
 
   try {
     const { stdout } = await execFileAsync(WSL_EXE, [
       '--distribution', distribution,
-      '--exec', 'apt-cache', 'search', '--names-only', cleanQuery
+      '--exec', '/bin/sh', '-lc', searchCmd
     ], {
       encoding: 'utf8',
       env: safeChildEnvironment(),
-      timeout: 10_000,
+      timeout: 15_000,
       windowsHide: true,
-      maxBuffer: 512 * 1024
+      maxBuffer: 1024 * 1024
     });
 
-    const results = String(stdout || '')
-      .split(/\r?\n/)
-      .filter(Boolean)
-      .slice(0, 30)
-      .map(line => {
-        const idx = line.indexOf(' - ');
-        if (idx === -1) return { packageName: line.trim(), description: '' };
-        return {
-          packageName: line.slice(0, idx).trim(),
-          description: line.slice(idx + 3).trim()
-        };
-      });
-
-    return { results };
-  } catch {
-    return { results: [] };
+    const results = [];
+    for (const line of stdout.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('Listing') || trimmed.startsWith('Sorted')) continue;
+      const parts = trimmed.split(/\s+-\s+|\s{2,}/);
+      const pkg = parts[0]?.trim();
+      const desc = parts[1]?.trim() || '';
+      if (pkg && pkg.length < 80) {
+        results.push({ name: pkg, description: desc });
+      }
+    }
+    return { results: results.slice(0, 25), packageManager: pm };
+  } catch (err) {
+    return { results: [], error: err.message };
   }
 }

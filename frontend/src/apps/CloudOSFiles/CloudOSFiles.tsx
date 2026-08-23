@@ -494,10 +494,10 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
   return (
     <div className="cf-root" data-files-source={source} data-files-actor="user-ui" data-files-layout={layoutMode}>
       <header className="cf-toolbar">
-        <select className="cf-sort-select cf-source-select" value={source} onChange={event => void changeSource(event.target.value as FileSourceKind)} aria-label="Origem dos arquivos">
-          <option value="opfs">📁 CloudOS Home (Início: Downloads, Documentos, Projetos)</option>
-          <option value="windows">🪟 Pasta do Windows autorizada…</option>
-          <option value="wsl">🐧 Linux Home (Distribuição Ativa)</option>
+        <select className="cf-source-select" value={source} onChange={event => void changeSource(event.target.value as FileSourceKind)} aria-label="Origem de arquivos">
+          <option value="opfs">🏠 CloudOS Home (~/)</option>
+          <option value="wsl">🐧 Linux RootFS (/)</option>
+          <option value="windows">🪟 Windows Drives (/mnt/c)</option>
         </select>
         <button className="cf-btn" onClick={() => setCurrentPath(path => path.slice(0, -1))} disabled={!currentPath.length || viewMode === 'trash'} title="Pasta anterior">←</button>
         <button className="cf-btn" onClick={() => void loadDirectory()} title="Atualizar">↻</button>

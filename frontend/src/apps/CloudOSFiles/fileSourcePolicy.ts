@@ -25,9 +25,9 @@ export function assertExplicitUserActor(actor: FileActor) {
 }
 
 export function sourceLabel(source: FileSourceKind) {
-  if (source === 'windows') return 'Windows selecionado';
-  if (source === 'wsl') return 'Linux Home';
-  return 'CloudOS local';
+  if (source === 'windows') return 'Windows Drives (/mnt/c)';
+  if (source === 'wsl') return 'Linux RootFS (/)';
+  return 'CloudOS Home (/home/cloudos)';
 }
 
 export function sourceIsReal(source: FileSourceKind) {
