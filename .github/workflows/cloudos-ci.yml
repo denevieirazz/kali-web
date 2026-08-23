@@ -18,7 +18,10 @@ on:
 
 jobs:
   validate:
-    runs-on: windows-latest
+    # Pixel-strict Chromium snapshots are coupled to the Windows font/rasterization
+    # stack. Pin the runner instead of weakening screenshot tolerances when
+    # windows-latest advances to a new Server image.
+    runs-on: windows-2022
     timeout-minutes: 45
 
     steps:
