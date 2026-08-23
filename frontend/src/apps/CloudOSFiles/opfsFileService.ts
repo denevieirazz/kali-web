@@ -186,7 +186,7 @@ export async function readFile(path: string[], name: string, fromTrash = false) 
 }
 
 export async function writeTextFile(path: string[], name: string, content: string) {
-  const dir = await getDirAt(path);
+  const dir = await getDirAt(path, true);
   const handle = await dir.getFileHandle(sanitizeName(name), { create: true });
   const writable = await (handle as any).createWritable();
   await writable.write(content);
@@ -194,7 +194,7 @@ export async function writeTextFile(path: string[], name: string, content: strin
 }
 
 export async function createEntry(path: string[], kind: FileEntry['kind'], requestedName: string) {
-  const dir = await getDirAt(path);
+  const dir = await getDirAt(path, true);
   const name = await getUniqueName(dir, requestedName, kind === 'directory');
   if (kind === 'directory') await dir.getDirectoryHandle(name, { create: true });
   else {
@@ -206,7 +206,7 @@ export async function createEntry(path: string[], kind: FileEntry['kind'], reque
 }
 
 export async function uploadFiles(path: string[], files: File[]) {
-  const dir = await getDirAt(path);
+  const dir = await getDirAt(path, true);
   for (const file of files) {
     const safe = sanitizeName(file.name);
     if (!safe) continue;
