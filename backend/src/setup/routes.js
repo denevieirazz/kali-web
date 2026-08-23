@@ -25,10 +25,17 @@ function dbRun(db, query, params) {
   return new Promise((resolve, reject) => db.run(query, params, error => error ? reject(error) : resolve()));
 }
 
-async function requireAdminForExistingSetup(req, res, next) {
+async function guardExistingAdminSetup(req, res, next) {
   try {
     const existingAdmin = await dbGet(getDb(), 'SELECT id FROM users WHERE role = ? LIMIT 1', ['admin']);
     if (!existingAdmin) return next();
+
+    // A second setup attempt is a resource conflict, not an authentication challenge.
+    // Only an explicit replacement request enters the administrator auth gate.
+    if (req.body?.allowUpdate !== true) {
+      return res.status(409).json({ error: 'Um administrador já foi configurado no sistema.' });
+    }
+
     return authenticateToken(req, res, () => requireAdmin(req, res, next));
   } catch (error) {
     return next(error);
@@ -47,9 +54,9 @@ setupRouter.get('/status', async (_req, res, next) => {
 });
 
 // POST /api/setup/admin
-// First-boot creation is public only while no administrator exists. Any later replacement
-// requires the currently authenticated CloudOS administrator.
-setupRouter.post('/admin', requireAdminForExistingSetup, async (req, res, next) => {
+// First-boot creation is public only while no administrator exists. A second creation
+// remains a 409 conflict; only explicit replacement requires the current administrator.
+setupRouter.post('/admin', guardExistingAdminSetup, async (req, res, next) => {
   try {
     const db = getDb();
     const { username, displayName, password = '', confirmPassword = '' } = req.body || {};
@@ -63,7 +70,7 @@ setupRouter.post('/admin', requireAdminForExistingSetup, async (req, res, next) 
     if (checkedPassword.error) return res.status(400).json({ error: checkedPassword.error });
 
     const existingAdmin = await dbGet(db, 'SELECT * FROM users WHERE role = ?', ['admin']);
-    if (existingAdmin && !req.body?.allowUpdate && existingAdmin.username !== checkedUsername.value) {
+    if (existingAdmin && !req.body?.allowUpdate) {
       return res.status(409).json({ error: 'Um administrador já foi configurado no sistema.' });
     }
 
