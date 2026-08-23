@@ -20,6 +20,7 @@ import {
   sanitizePersistedProfile
 } from '../services/accountContract.js';
 import { setActiveScopedUser } from '../services/userScope.js';
+import { useSystem } from './systemStore';
 
 export type SetupStatus = 'checking' | 'required' | 'complete' | 'unavailable';
 type ActionResult = { success: boolean; message?: string; recoveryCode?: string; username?: string };
@@ -351,6 +352,7 @@ export const useUserStore = create<UserState>((set, get) => {
         clearStoredAuth();
         setActiveScopedUser(null);
         set({ currentUser: null, isAuthenticated: false });
+        useSystem.getState().setBootPhase('login');
         await get().checkSetupStatus();
       }
     },

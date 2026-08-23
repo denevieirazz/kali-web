@@ -62,7 +62,10 @@ export default function ObsidianStore() {
     setLoading(true);
     setError(null);
     try {
-      const res = await apiClient<{ packages: LinuxPackage[]; operational: boolean; error?: string }>('/api/linux-runtime/packages');
+      const res = await apiClient<{ packages: LinuxPackage[]; operational: boolean; error?: string }>(
+        '/api/linux-runtime/packages',
+        { timeoutMs: 30000 }
+      );
       if (res?.packages) {
         setPackages(res.packages);
       }
