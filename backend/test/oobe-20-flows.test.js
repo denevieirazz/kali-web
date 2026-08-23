@@ -5,7 +5,7 @@ import http from 'http';
 import { createApp } from '../src/app.js';
 import { resetLocalDatabase } from '../src/database/index.js';
 import { streamProvisionDistro, getActiveDistro, setActiveDistro } from '../src/linuxRuntime/distroManager.js';
-import { detectDistroPackageManager, buildInstallCommand } from '../src/linuxRuntime/packageManager.js';
+import { buildInstallCommand } from '../src/linuxRuntime/packageManager.js';
 
 function startServer(app) {
   return new Promise((resolve, reject) => {
@@ -41,161 +41,92 @@ test('OOBE E2E: 20 fluxos completos de validação física e lógica', async () 
   const { server, port } = await startServer(app);
 
   try {
-    // -------------------------------------------------------------
-    // FLUXO 1: Status inicial - Primeiro boot deve exigir setup
-    // -------------------------------------------------------------
+    // FLUXO 1: Primeiro boot exige setup.
     const res1 = await makeRequest(port, { path: '/api/setup/status' });
     assert.strictEqual(res1.status, 200, 'Flow 1: status endpoint HTTP 200');
     const json1 = JSON.parse(res1.body);
     assert.strictEqual(json1.setupRequired, true, 'Flow 1: setupRequired deve ser true no boot inicial');
 
-    // -------------------------------------------------------------
-    // FLUXO 2: Listagem de distros para a Tela 2
-    // -------------------------------------------------------------
+    // FLUXO 2: Catálogo de distros disponível para a Tela 2.
     const res2 = await makeRequest(port, { path: '/api/linux-runtime/distros' });
     assert.strictEqual(res2.status, 200, 'Flow 2: distros endpoint HTTP 200');
     const json2 = JSON.parse(res2.body);
     assert.ok(Array.isArray(json2.online), 'Flow 2: online distros array');
     assert.ok(json2.online.length >= 5, 'Flow 2: pelo menos 5 distros no catálogo');
 
-    // -------------------------------------------------------------
-    // FLUXO 3: Provisionamento SSE Real (Kali Linux - modo existing)
-    // -------------------------------------------------------------
+    // FLUXO 3: Provisionamento SSE termina somente em done: true.
     const events3 = [];
-    for await (const ev of streamProvisionDistro('kali-linux', 'existing')) {
-      events3.push(ev);
-    }
+    for await (const ev of streamProvisionDistro('kali-linux', 'existing')) events3.push(ev);
     assert.ok(events3.length >= 3, 'Flow 3: SSE gerou múltiplos eventos');
-    assert.strictEqual(events3[events3.length - 1].done, true, 'Flow 3: último evento tem done: true');
-    assert.strictEqual(events3[events3.length - 1].progress, 100, 'Flow 3: progresso atinge 100%');
+    assert.strictEqual(events3.at(-1).done, true, 'Flow 3: último evento tem done: true');
+    assert.strictEqual(events3.at(-1).progress, 100, 'Flow 3: progresso atinge 100%');
 
-    // -------------------------------------------------------------
-    // FLUXO 4: Criação de conta sem senha (acesso direto)
-    // -------------------------------------------------------------
+    // FLUXO 4: Conta nova sem senha é rejeitada.
     const res4 = await makeRequest(port, {
-      path: '/api/setup/admin',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    }, JSON.stringify({
-      username: 'usuario_sem_senha',
-      displayName: 'Usuario Sem Senha',
-      password: '',
-      confirmPassword: '',
-      allowUpdate: true
-    }));
-    assert.strictEqual(res4.status, 201, 'Flow 4: Conta sem senha criada com sucesso HTTP 201');
-    const json4 = JSON.parse(res4.body);
-    assert.ok(json4.token, 'Flow 4: Token JWT emitido');
+      path: '/api/setup/admin', method: 'POST', headers: { 'Content-Type': 'application/json' }
+    }, JSON.stringify({ username: 'usuario_sem_senha', displayName: 'Usuario Sem Senha', password: '', confirmPassword: '', allowUpdate: true }));
+    assert.strictEqual(res4.status, 400, 'Flow 4: Conta sem senha rejeitada com HTTP 400');
+    assert.match(JSON.parse(res4.body).error, /8 caracteres/);
 
-    // -------------------------------------------------------------
-    // FLUXO 5: Login imediato com a conta sem senha
-    // -------------------------------------------------------------
+    // FLUXO 5: Criação de administrador com senha válida.
+    const strongPassword = 'Senha1234';
     const res5 = await makeRequest(port, {
-      path: '/api/auth/login',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    }, JSON.stringify({ username: 'usuario_sem_senha', password: '' }));
-    assert.strictEqual(res5.status, 200, 'Flow 5: Login sem senha autenticado com sucesso HTTP 200');
+      path: '/api/setup/admin', method: 'POST', headers: { 'Content-Type': 'application/json' }
+    }, JSON.stringify({ username: 'douglas', displayName: 'Douglas Vieira', password: strongPassword, confirmPassword: strongPassword, allowUpdate: true }));
+    assert.strictEqual(res5.status, 201, 'Flow 5: Conta com senha segura criada com HTTP 201');
+    const json5 = JSON.parse(res5.body);
+    assert.ok(json5.token, 'Flow 5: Token JWT emitido');
+    assert.ok(json5.recoveryCode, 'Flow 5: Código de recuperação emitido');
 
-    // -------------------------------------------------------------
-    // FLUXO 6: Criação de conta com senha de 4 dígitos ('1234')
-    // -------------------------------------------------------------
+    // FLUXO 6: Login imediato com a senha válida.
     const res6 = await makeRequest(port, {
-      path: '/api/setup/admin',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    }, JSON.stringify({
-      username: 'douglas',
-      displayName: 'Douglas Vieira',
-      password: '1234',
-      confirmPassword: '1234',
-      allowUpdate: true
-    }));
-    assert.strictEqual(res6.status, 201, 'Flow 6: Conta 4 dígitos criada com HTTP 201');
-    const json6 = JSON.parse(res6.body);
-    assert.ok(json6.token, 'Flow 6: Token JWT emitido');
+      path: '/api/auth/login', method: 'POST', headers: { 'Content-Type': 'application/json' }
+    }, JSON.stringify({ username: 'douglas', password: strongPassword }));
+    assert.strictEqual(res6.status, 200, 'Flow 6: Login autenticado com sucesso HTTP 200');
 
-    // -------------------------------------------------------------
-    // FLUXO 7: Login com senha de 4 dígitos ('1234')
-    // -------------------------------------------------------------
+    // FLUXO 7: Atualização para senha de 7 caracteres é rejeitada.
     const res7 = await makeRequest(port, {
-      path: '/api/auth/login',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    }, JSON.stringify({ username: 'douglas', password: '1234' }));
-    assert.strictEqual(res7.status, 200, 'Flow 7: Login com 4 dígitos autenticado HTTP 200');
+      path: '/api/setup/admin', method: 'POST', headers: { 'Content-Type': 'application/json' }
+    }, JSON.stringify({ username: 'douglas', displayName: 'Douglas Vieira', password: '1234567', confirmPassword: '1234567', allowUpdate: true }));
+    assert.strictEqual(res7.status, 400, 'Flow 7: Senha de 7 caracteres rejeitada com HTTP 400');
+    assert.match(JSON.parse(res7.body).error, /8 caracteres/);
 
-    // -------------------------------------------------------------
-    // FLUXO 8: Rejeição com senha < 4 dígitos ('123')
-    // -------------------------------------------------------------
+    // FLUXO 8: Senha extremamente curta também é rejeitada.
     const res8 = await makeRequest(port, {
-      path: '/api/setup/admin',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    }, JSON.stringify({
-      username: 'douglas',
-      displayName: 'Douglas Vieira',
-      password: '123',
-      confirmPassword: '123',
-      allowUpdate: true
-    }));
+      path: '/api/setup/admin', method: 'POST', headers: { 'Content-Type': 'application/json' }
+    }, JSON.stringify({ username: 'douglas', displayName: 'Douglas Vieira', password: '123', confirmPassword: '123', allowUpdate: true }));
     assert.strictEqual(res8.status, 400, 'Flow 8: Senha de 3 caracteres rejeitada com HTTP 400');
-    assert.match(JSON.parse(res8.body).error, /4 caracteres/);
+    assert.match(JSON.parse(res8.body).error, /8 caracteres/);
 
-    // -------------------------------------------------------------
-    // FLUXO 9: Rejeição quando confirmação não confere
-    // -------------------------------------------------------------
+    // FLUXO 9: Confirmação divergente é rejeitada quando a senha já atende o mínimo.
     const res9 = await makeRequest(port, {
-      path: '/api/setup/admin',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    }, JSON.stringify({
-      username: 'douglas',
-      displayName: 'Douglas Vieira',
-      password: '1234',
-      confirmPassword: '9999',
-      allowUpdate: true
-    }));
+      path: '/api/setup/admin', method: 'POST', headers: { 'Content-Type': 'application/json' }
+    }, JSON.stringify({ username: 'douglas', displayName: 'Douglas Vieira', password: 'abcdefgh', confirmPassword: 'abcdefgi', allowUpdate: true }));
     assert.strictEqual(res9.status, 400, 'Flow 9: Senhas divergentes rejeitadas com HTTP 400');
     assert.match(JSON.parse(res9.body).error, /não confere/);
 
-    // -------------------------------------------------------------
-    // FLUXO 10: Provisionamento SSE para Ubuntu (modo new)
-    // -------------------------------------------------------------
+    // FLUXO 10: Provisionamento SSE para Ubuntu (modo new).
     const events10 = [];
-    for await (const ev of streamProvisionDistro('ubuntu', 'new')) {
-      events10.push(ev);
-    }
+    for await (const ev of streamProvisionDistro('ubuntu', 'new')) events10.push(ev);
     assert.ok(events10.length >= 3, 'Flow 10: Ubuntu stream gerou eventos');
-    assert.strictEqual(events10[events10.length - 1].done, true, 'Flow 10: Ubuntu stream finalizou em done');
+    assert.strictEqual(events10.at(-1).done, true, 'Flow 10: Ubuntu stream finalizou em done');
 
-    // -------------------------------------------------------------
-    // FLUXO 11: Provisionamento SSE para Debian (modo reinstall)
-    // -------------------------------------------------------------
+    // FLUXO 11: Provisionamento SSE para Debian (modo reinstall).
     const events11 = [];
-    for await (const ev of streamProvisionDistro('debian', 'reinstall')) {
-      events11.push(ev);
-    }
+    for await (const ev of streamProvisionDistro('debian', 'reinstall')) events11.push(ev);
     assert.ok(events11.length >= 3, 'Flow 11: Debian reinstall gerou eventos');
-    assert.strictEqual(events11[events11.length - 1].done, true, 'Flow 11: Debian reinstall finalizou em done');
+    assert.strictEqual(events11.at(-1).done, true, 'Flow 11: Debian reinstall finalizou em done');
 
-    // -------------------------------------------------------------
-    // FLUXO 12: Troca e persistência de distro ativa
-    // -------------------------------------------------------------
+    // FLUXO 12: Troca e persistência de distro ativa.
     setActiveDistro('ubuntu-24.04');
     assert.strictEqual(getActiveDistro(), 'ubuntu-24.04', 'Flow 12: activeDistro é ubuntu-24.04');
-
     const res12 = await makeRequest(port, {
-      path: '/api/linux-runtime/distros/active',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
+      path: '/api/linux-runtime/distros/active', method: 'POST', headers: { 'Content-Type': 'application/json' }
     }, JSON.stringify({ distro: 'kali-linux' }));
     assert.strictEqual(res12.status, 200, 'Flow 12: setActiveDistro HTTP 200');
     assert.strictEqual(getActiveDistro(), 'kali-linux', 'Flow 12: activeDistro atualizada para kali-linux');
 
-    // -------------------------------------------------------------
-    // FLUXO 13: Estrutura do CloudOS Home
-    // -------------------------------------------------------------
+    // FLUXO 13: Estrutura do CloudOS Home.
     const res13 = await makeRequest(port, { path: '/api/linux-runtime/home' });
     assert.strictEqual(res13.status, 200, 'Flow 13: CloudOS Home HTTP 200');
     const json13 = JSON.parse(res13.body);
@@ -203,89 +134,54 @@ test('OOBE E2E: 20 fluxos completos de validação física e lógica', async () 
     assert.ok(json13.home.downloads, 'Flow 13: Home Downloads existe');
     assert.ok(json13.home.projects, 'Flow 13: Home Projects existe');
 
-    // -------------------------------------------------------------
-    // FLUXO 14: PackageManager - Abstração Multi-Distro (apt / dnf / pacman / apk)
-    // -------------------------------------------------------------
-    const aptCmd = buildInstallCommand('apt', 'firefox');
-    assert.match(aptCmd, /apt-get install/);
+    // FLUXO 14: PackageManager multi-distro.
+    assert.match(buildInstallCommand('apt', 'firefox'), /apt-get install/);
+    assert.match(buildInstallCommand('dnf', 'firefox'), /dnf install/);
+    assert.match(buildInstallCommand('pacman', 'firefox'), /pacman -Sy/);
+    assert.match(buildInstallCommand('apk', 'firefox'), /apk add/);
 
-    const dnfCmd = buildInstallCommand('dnf', 'firefox');
-    assert.match(dnfCmd, /dnf install/);
-
-    const pacmanCmd = buildInstallCommand('pacman', 'firefox');
-    assert.match(pacmanCmd, /pacman -Sy/);
-
-    const apkCmd = buildInstallCommand('apk', 'firefox');
-    assert.match(apkCmd, /apk add/);
-
-    // -------------------------------------------------------------
-    // FLUXO 15: Unregister endpoint com validação de nome seguro
-    // -------------------------------------------------------------
+    // FLUXO 15: Unregister rejeita nome inseguro.
     const res15 = await makeRequest(port, {
-      path: '/api/linux-runtime/distros/unregister',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
+      path: '/api/linux-runtime/distros/unregister', method: 'POST', headers: { 'Content-Type': 'application/json' }
     }, JSON.stringify({ distro: 'invalid;rm -rf /' }));
     assert.strictEqual(res15.status, 400, 'Flow 15: Injeção em distro rejeitada com HTTP 400');
 
-    // -------------------------------------------------------------
-    // FLUXO 16: Setup Status agora reporta setupRequired: false
-    // -------------------------------------------------------------
+    // FLUXO 16: Setup concluído após criação válida.
     const res16 = await makeRequest(port, { path: '/api/setup/status' });
     const json16 = JSON.parse(res16.body);
     assert.strictEqual(json16.setupRequired, false, 'Flow 16: setupRequired é false após configuração');
 
-    // -------------------------------------------------------------
-    // FLUXO 17: Verificação de Sessão JWT Ativa
-    // -------------------------------------------------------------
+    // FLUXO 17: Sessão JWT válida.
     const res17 = await makeRequest(port, {
-      path: '/api/auth/session',
-      headers: { 'Authorization': `Bearer ${json6.token}` }
+      path: '/api/auth/session', headers: { 'Authorization': `Bearer ${json5.token}` }
     });
     assert.strictEqual(res17.status, 200, 'Flow 17: Sessão válida HTTP 200');
     const json17 = JSON.parse(res17.body);
     assert.strictEqual(json17.authenticated, true);
     assert.strictEqual(json17.user.username, 'douglas');
 
-    // -------------------------------------------------------------
-    // FLUXO 18: Logout revoga acesso à sessão
-    // -------------------------------------------------------------
+    // FLUXO 18: Logout revoga a sessão.
     const res18 = await makeRequest(port, {
-      path: '/api/auth/logout',
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${json6.token}` }
+      path: '/api/auth/logout', method: 'POST', headers: { 'Authorization': `Bearer ${json5.token}` }
     });
     assert.strictEqual(res18.status, 200, 'Flow 18: Logout HTTP 200');
 
-    // -------------------------------------------------------------
-    // FLUXO 19: Criação de conta secundária após setup
-    // -------------------------------------------------------------
+    // FLUXO 19: Conta secundária também exige senha segura.
+    const secondaryPassword = 'Secundaria5678';
     const res19 = await makeRequest(port, {
-      path: '/api/auth/accounts',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    }, JSON.stringify({
-      username: 'usuario_secundario',
-      displayName: 'Usuario Secundario',
-      password: '5678',
-      confirmPassword: '5678'
-    }));
+      path: '/api/auth/accounts', method: 'POST', headers: { 'Content-Type': 'application/json' }
+    }, JSON.stringify({ username: 'usuario_secundario', displayName: 'Usuario Secundario', password: secondaryPassword, confirmPassword: secondaryPassword }));
     assert.strictEqual(res19.status, 201, 'Flow 19: Conta secundária criada com HTTP 201');
     const json19 = JSON.parse(res19.body);
     assert.ok(json19.recoveryCode, 'Flow 19: Código de recuperação emitido');
     assert.strictEqual(json19.user.role, 'user', 'Flow 19: Papel do usuário é user');
 
-    // -------------------------------------------------------------
-    // FLUXO 20: Login com a conta secundária ('5678')
-    // -------------------------------------------------------------
+    // FLUXO 20: Login da conta secundária.
     const res20 = await makeRequest(port, {
-      path: '/api/auth/login',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    }, JSON.stringify({ username: 'usuario_secundario', password: '5678' }));
+      path: '/api/auth/login', method: 'POST', headers: { 'Content-Type': 'application/json' }
+    }, JSON.stringify({ username: 'usuario_secundario', password: secondaryPassword }));
     assert.strictEqual(res20.status, 200, 'Flow 20: Login conta secundária HTTP 200');
     assert.ok(JSON.parse(res20.body).token, 'Flow 20: Sessão autenticada');
-
   } finally {
     server.close();
   }
