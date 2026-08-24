@@ -5,4 +5,3 @@ export interface UnifiedCatalogPayload {
 }
 
 export function mapUnifiedCatalogApps(payload: UnifiedCatalogPayload | unknown[]): AppDefinition[];
-
