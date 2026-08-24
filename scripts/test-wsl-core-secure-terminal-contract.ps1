@@ -8,11 +8,12 @@ function Require([bool]$Condition, [string]$Message) { if (-not $Condition) { $s
 $coreRoot = Join-Path $root 'core\wsl\cloudos-core'
 $hostRoot = Join-Path $root 'desktop\CloudOS.WslCore'
 $terminalAdapter = Join-Path $root 'backend\src\terminal\wslCoreAdapter.js'
+$terminalContainment = Join-Path $root 'backend\src\terminal\wslTerminalContainment.js'
 $terminalSocket = Join-Path $root 'backend\src\terminal\websocket.js'
 $validationScript = Join-Path $root 'scripts\validate-wsl-core-secure-terminal.ps1'
 $nodeProbe = Join-Path $root 'scripts\probe-wsl-core-terminal.mjs'
 
-foreach ($path in @($coreRoot,$hostRoot,$terminalAdapter,$terminalSocket,$validationScript,$nodeProbe)) {
+foreach ($path in @($coreRoot,$hostRoot,$terminalAdapter,$terminalContainment,$terminalSocket,$validationScript,$nodeProbe)) {
   Require (Test-Path -LiteralPath $path) "Required secure Terminal component is missing: $path"
 }
 
@@ -55,8 +56,12 @@ Require ($serverText -match 'channel\.Read\(\)') 'Post-handshake server traffic 
 Require ($serverText -match 'channel\.Write') 'Post-handshake server traffic is not written through protected channel.'
 
 $adapterText = Get-Content -LiteralPath $terminalAdapter -Raw
-foreach ($required in @('createCipheriv','createDecipheriv','aes-256-gcm','FRAME_SEQUENCE','FRAME_INTEGRITY','CLOUDOS_WSL_CORE_TERMINAL','CLOUDOS_WSL_CORE_TERMINAL_FALLBACK','terminal.create','--distribution','--exec')) {
+$containmentText = Get-Content -LiteralPath $terminalContainment -Raw
+foreach ($required in @('createCipheriv','createDecipheriv','aes-256-gcm','FRAME_SEQUENCE','FRAME_INTEGRITY','CLOUDOS_WSL_CORE_TERMINAL','CLOUDOS_WSL_CORE_TERMINAL_FALLBACK','terminal.create','buildContainedCoreBootstrapArgs')) {
   Require ($adapterText.IndexOf($required, [StringComparison]::Ordinal) -ge 0) "Node WSL core adapter is missing contract token: $required"
+}
+foreach ($required in @('--distribution','--user','root','--exec','/usr/bin/env','mount-pid-nointerop-v1')) {
+  Require ($containmentText.IndexOf($required, [StringComparison]::Ordinal) -ge 0) "Terminal containment bootstrap is missing contract token: $required"
 }
 Require ($adapterText -match 'shell:\s*false') 'Node WSL bootstrap does not explicitly disable shell execution.'
 Require ($adapterText -notmatch '(?i)(nmap|sqlmap|metasploit|msfvenom|nikto|gobuster)') 'Node WSL core adapter references offensive tooling.'
@@ -69,14 +74,14 @@ Require ($socketText -match 'wslCoreTerminalFallbackEnabled') 'Legacy fallback i
 Require ($socketText -match "backendMode = 'legacy-pty'") 'Legacy PTY fallback path was removed.'
 Require ($socketText -match "backendMode = 'emulator'") 'Existing node-pty-unavailable emulator fallback was removed.'
 
-$implementationText = @($protocolGo,$protocolCs,$processText,$serverText,$adapterText) -join "`n"
+$implementationText = @($protocolGo,$protocolCs,$processText,$serverText,$adapterText,$containmentText) -join "`n"
 Require ($implementationText -notmatch '(?i)(metasploit|sqlmap|nmap|nikto|gobuster|msfvenom)') 'Secure WSL core implementation references offensive tooling.'
 Require ($implementationText -notmatch '(?i)(ext4\.vhdx|usbipd|weston|wayland|xwayland)') 'Secure WSL core implementation crosses excluded WSL/WSLg boundaries.'
 Require ($implementationText -notmatch '(?i)(sqlite|persistentdatabase|CLOUDOS_DATA_DIR|CLOUDOS_DATABASE)') 'Secure WSL core implementation references CloudOS database surface.'
 
 $supervisorText = Get-Content -LiteralPath (Join-Path $hostRoot 'WslCoreSupervisor.cs') -Raw
 $validationText = Get-Content -LiteralPath $validationScript -Raw
-foreach ($textAndName in @(@($supervisorText,'Supervisor'),@($adapterText,'Node adapter'),@($validationText,'Physical validator'))) {
+foreach ($textAndName in @(@($supervisorText,'Supervisor'),@($adapterText,'Node adapter'),@($containmentText,'Terminal containment'),@($validationText,'Physical validator'))) {
   $text = $textAndName[0]; $name = $textAndName[1]
   foreach ($forbidden in @('--install','--import','--update','--terminate','--shutdown','--set-default','--set-version','-Verb RunAs')) {
     Require ($text.IndexOf($forbidden, [StringComparison]::OrdinalIgnoreCase) -lt 0) "$name contains forbidden WSL mutation/elevation token: $forbidden"
