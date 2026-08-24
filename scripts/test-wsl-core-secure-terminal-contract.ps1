@@ -63,6 +63,10 @@ foreach ($required in @('createCipheriv','createDecipheriv','aes-256-gcm','FRAME
 foreach ($required in @('--distribution','--user','root','--exec','/usr/bin/env','mount-pid-nointerop-v1')) {
   Require ($containmentText.IndexOf($required, [StringComparison]::Ordinal) -ge 0) "Terminal containment bootstrap is missing contract token: $required"
 }
+Require ($containmentText -match 'for blocked_environment in DISPLAY WAYLAND_DISPLAY WAYLAND_SOCKET PULSE_SERVER WSL_INTEROP WSLENV DBUS_SESSION_BUS_ADDRESS') 'Terminal containment does not fail closed on host display/session environment.'
+Require ($containmentText -match '\[ ! -S /mnt/wslg/runtime-dir/wayland-0 \]') 'Terminal containment is missing the WSLg Wayland socket canary.'
+Require ($containmentText -match 'for target in /mnt/wslg /run/WSL /run/systemd /run/dbus /proc/sys/fs/binfmt_misc') 'Terminal containment does not mask the WSLg/interop runtime surfaces.'
+Require ($containmentText -match 'NO_UNIX_SOCKET_BPF_BASE64') 'Terminal containment is missing the AF_UNIX seccomp filter.'
 Require ($adapterText -match 'shell:\s*false') 'Node WSL bootstrap does not explicitly disable shell execution.'
 Require ($adapterText -notmatch '(?i)(nmap|sqlmap|metasploit|msfvenom|nikto|gobuster)') 'Node WSL core adapter references offensive tooling.'
 Require ($adapterText -notmatch '(?i)(sqlite|CLOUDOS_DATA_DIR|CLOUDOS_DATABASE|databasePath)') 'Node WSL core adapter references database state.'
@@ -74,10 +78,11 @@ Require ($socketText -match 'wslCoreTerminalFallbackEnabled') 'Legacy fallback i
 Require ($socketText -match "backendMode = 'legacy-pty'") 'Legacy PTY fallback path was removed.'
 Require ($socketText -match "backendMode = 'emulator'") 'Existing node-pty-unavailable emulator fallback was removed.'
 
-$implementationText = @($protocolGo,$protocolCs,$processText,$serverText,$adapterText,$containmentText) -join "`n"
-Require ($implementationText -notmatch '(?i)(metasploit|sqlmap|nmap|nikto|gobuster|msfvenom)') 'Secure WSL core implementation references offensive tooling.'
+$implementationText = @($protocolGo,$protocolCs,$processText,$serverText,$adapterText) -join "`n"
+$extendedImplementationText = @($implementationText,$containmentText) -join "`n"
+Require ($extendedImplementationText -notmatch '(?i)(metasploit|sqlmap|nmap|nikto|gobuster|msfvenom)') 'Secure WSL core implementation references offensive tooling.'
 Require ($implementationText -notmatch '(?i)(ext4\.vhdx|usbipd|weston|wayland|xwayland)') 'Secure WSL core implementation crosses excluded WSL/WSLg boundaries.'
-Require ($implementationText -notmatch '(?i)(sqlite|persistentdatabase|CLOUDOS_DATA_DIR|CLOUDOS_DATABASE)') 'Secure WSL core implementation references CloudOS database surface.'
+Require ($extendedImplementationText -notmatch '(?i)(sqlite|persistentdatabase|CLOUDOS_DATA_DIR|CLOUDOS_DATABASE)') 'Secure WSL core implementation references CloudOS database surface.'
 
 $supervisorText = Get-Content -LiteralPath (Join-Path $hostRoot 'WslCoreSupervisor.cs') -Raw
 $validationText = Get-Content -LiteralPath $validationScript -Raw
