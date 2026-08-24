@@ -6,6 +6,9 @@ on:
       - poc/cloudos-linux-runtime-xpra
     paths:
       - .github/workflows/tmp-refresh-start-menu-snapshot.yml
+  pull_request:
+    paths:
+      - .github/workflows/tmp-refresh-start-menu-snapshot.yml
 
 permissions:
   contents: write
