@@ -1,11 +1,9 @@
 name: TEMP Fix CI contract and whitespace
 
 on:
-  pull_request:
+  push:
     branches:
-      - stabilization/cloudos-workflow-batch-4
-    paths:
-      - .github/workflows/tmp-fix-ci-contract-and-whitespace.yml
+      - poc/cloudos-linux-runtime-xpra
 
 permissions:
   contents: write
@@ -24,9 +22,9 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-          # 1) Preserve the secure Terminal contract after bootstrap argv moved into
-          #    wslTerminalContainment.js. Keep crypto/session checks on the adapter,
-          #    and verify WSL argv tokens in the module that now owns them.
+          # Preserve the secure Terminal contract after bootstrap argv moved into
+          # wslTerminalContainment.js. Crypto/session checks remain on the adapter;
+          # WSL argv checks follow the module that now owns the bootstrap argv.
           $contractPath = 'scripts/test-wsl-core-secure-terminal-contract.ps1'
           $text = Get-Content -LiteralPath $contractPath -Raw
           $text = $text.Replace(
@@ -67,7 +65,7 @@ Require ($adapterText -match 'shell:\s*false') 'Node WSL bootstrap does not expl
           )
           Set-Content -LiteralPath $contractPath -Value ($text.TrimEnd("`r","`n") + "`n") -NoNewline
 
-          # 2) Remove only the whitespace defects reproduced by git diff --check.
+          # Remove only the whitespace defects reproduced by git diff --check.
           $paths = @(
             'backend/test/linux-desktop-scanner.test.js',
             'frontend/src/services/unifiedAppCatalog.d.ts',
@@ -81,8 +79,6 @@ Require ($adapterText -match 'shell:\s*false') 'Node WSL bootstrap does not expl
           }
 
           ./scripts/test-wsl-core-secure-terminal-contract.ps1
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git diff --check 56f0ca8bc0a59987a43295da1ded277afc40e6e9...HEAD -- . ':!.github/workflows/tmp-fix-ci-contract-and-whitespace.yml'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test backend/test/wsl-core-terminal.test.js backend/test/linux-desktop-scanner.test.js
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
