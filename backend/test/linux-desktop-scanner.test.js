@@ -191,4 +191,3 @@ test('lookup só aceita ID opaco e ícone é lido pelo nome interno sem caminho 
   assert.equal(icon.mimeType, 'image/png');
   assert.deepEqual(icon.data, iconBytes);
 });
-
