@@ -42,16 +42,17 @@ const FAVORITES_STORAGE_KEY = 'cloudos_startmenu_favorites_v1';
 const RECENT_STORAGE_KEY = 'cloudos_startmenu_recent_v1';
 
 const DEFAULT_FAVORITE_IDS = [
-  'linux-app-firefox-esr',
-  'linux-app-firefox',
-  'file-explorer',
-  'cloudos-terminal',
+  'notepad',
+  'calculator',
   'terminal',
-  'linux-app-code',
-  'linux-app-geany',
-  'linux-app-mousepad',
-  'linux-app-obsidian',
-  'settings'
+  'cloudos-terminal',
+  'system-monitor',
+  'install-linux',
+  'env-doctor',
+  'file-explorer',
+  'settings',
+  'task-manager',
+  'browser'
 ];
 
 const LINUX_CATEGORIES: Array<{ id: string; label: string; icon: string }> = [
