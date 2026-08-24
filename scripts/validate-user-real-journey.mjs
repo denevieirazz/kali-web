@@ -23,11 +23,11 @@ async function runRealJourney() {
     console.log('Step 2: Checking Lock Screen / Login...');
     const lockScreen = page.locator('.cloudos-lock-screen');
     await lockScreen.waitFor({ state: 'visible', timeout: 10000 });
-    
+
     // Click lock screen to show panel
     await lockScreen.click({ position: { x: 400, y: 300 } });
     await page.locator('#login-password').waitFor({ state: 'visible', timeout: 8000 });
-    
+
     const userInput = page.locator('#login-username');
     if (await userInput.isVisible()) await userInput.fill('douglas');
     await page.locator('#login-password').fill('Admin@123456');
@@ -142,14 +142,14 @@ async function runRealJourney() {
 
     await page.locator('.desktop').waitFor({ state: 'visible', timeout: 15000 });
     console.log('Step 14: Logged back in, opening Firefox one more time...');
-    
+
     // Open Linux App Center -> Open Firefox
     await page.locator('button[title="Iniciar"]').click();
     await page.locator('.start-native-tabs button', { hasText: 'Todos' }).click();
     await page.locator('.start-app-btn', { hasText: 'Linux App Center' }).click();
     await appCenterWindow.waitFor({ state: 'visible', timeout: 15000 });
     await appCenterWindow.locator('.app-card', { hasText: 'Firefox' }).locator('button:has-text("Abrir")').click({ force: true });
-    
+
     // Wait for the visible Firefox window
     await page.locator('.window:not([aria-hidden="true"])', { hasText: 'Mozilla Firefox' }).or(page.locator('.window:not([aria-hidden="true"])[data-app-id="linux-app-runner"]')).first().waitFor({ state: 'visible', timeout: 25000 });
     await page.waitForTimeout(2000);
