@@ -13,6 +13,12 @@ import {
   wslCoreTerminalEnabled,
   wslCoreTerminalFallbackEnabled
 } from '../src/terminal/wslCoreAdapter.js';
+import {
+  buildContainedLegacyShellArgs,
+  buildWslHostEnvironment,
+  WSL_TERMINAL_CONTAINMENT,
+  WSL_TERMINAL_SAFE_PATH
+} from '../src/terminal/wslTerminalContainment.js';
 
 const secret = Buffer.alloc(32, 7);
 const clientNonce = Buffer.alloc(32, 8);
@@ -59,14 +65,63 @@ test('replay e sequência fora de ordem são rejeitados', () => {
 });
 
 test('bootstrap usa argv separado e path Linux validado', () => {
-  assert.deepEqual(
-    buildBootstrapArgs('kali-linux', '/tmp/cloudos-core-abc123'),
-    ['--distribution', 'kali-linux', '--exec', '/tmp/cloudos-core-abc123', 'serve']
-  );
+  const args = buildBootstrapArgs('kali-linux', '/tmp/cloudos-core-abc123');
+  assert.deepEqual(args.slice(0, 6), ['--distribution', 'kali-linux', '--user', 'root', '--exec', '/usr/bin/env']);
+  assert.equal(args.includes('/tmp/cloudos-core-abc123'), true);
+  assert.equal(args.includes('core'), true);
   assert.equal(validateLinuxCorePath('/tmp/cloudos-core-abc123'), '/tmp/cloudos-core-abc123');
   assert.throws(() => buildBootstrapArgs('kali-linux;whoami', '/tmp/core'));
   assert.throws(() => validateLinuxCorePath('relative/core'));
   assert.throws(() => validateLinuxCorePath('/tmp/core;whoami'));
+});
+
+test('core e fallback WSL compartilham namespace mount+PID fail-closed', () => {
+  const core = buildBootstrapArgs('Ubuntu', '/tmp/cloudos-core-safe');
+  const shell = buildContainedLegacyShellArgs('Ubuntu');
+  for (const args of [core, shell]) {
+    const command = args.join('\n');
+    assert.match(command, /--mount/);
+    assert.match(command, /--pid/);
+    assert.match(command, /--fork/);
+    assert.match(command, /--kill-child/);
+    assert.match(command, /--mount-proc=\/proc/);
+    assert.match(command, /--propagation private/);
+    assert.match(command, /mount -t tmpfs[^\n]* \/tmp/);
+    assert.match(command, /mount -t tmpfs[^\n]* \/run\/user/);
+    for (const target of ['/mnt/wslg', '/run/WSL', '/init', '/run/systemd', '/run/dbus']) {
+      assert.equal(command.includes(target), true, `missing containment mask ${target}`);
+    }
+    assert.match(command, /--reuid="\$target_uid"/);
+    assert.match(command, /--no-new-privs/);
+    assert.match(command, /--bounding-set=-all/);
+    assert.match(command, /--seccomp-filter/);
+    assert.match(command, /env -i/);
+    assert.match(command, /CLOUDOS_TERMINAL_CONTAINMENT_CANARY_FAILED/);
+    assert.match(command, /seccomp-not-active/);
+    assert.match(command, /interop-handler-enabled/);
+    assert.match(command, /\/mnt\/c\/Windows\/System32\/cmd\.exe \/c exit/);
+    assert.match(command, /\[ "\$\$" -eq 1 \]/);
+  }
+  assert.equal(WSL_TERMINAL_CONTAINMENT, 'mount-pid-nointerop-v1');
+  assert.equal(WSL_TERMINAL_SAFE_PATH, '/usr/local/bin:/usr/bin:/bin');
+});
+
+test('ambiente host do wsl.exe não propaga PATH, WSLENV, display ou segredos', () => {
+  const environment = buildWslHostEnvironment({
+    SystemRoot: 'C:\\Windows',
+    TEMP: 'C:\\Temp',
+    USERPROFILE: 'C:\\Users\\test',
+    Path: 'C:\\unsafe',
+    WSLENV: 'DISPLAY/u:SECRET/u',
+    DISPLAY: ':0',
+    WAYLAND_DISPLAY: 'wayland-0',
+    WSL_INTEROP: '/run/WSL/1_interop',
+    CLOUD_TOKEN: 'secret'
+  });
+  assert.equal(environment.Path, 'C:\\Windows\\System32;C:\\Windows');
+  for (const key of ['WSLENV', 'DISPLAY', 'WAYLAND_DISPLAY', 'WSL_INTEROP', 'CLOUD_TOKEN']) {
+    assert.equal(Object.hasOwn(environment, key), false, `unsafe host environment key ${key}`);
+  }
 });
 
 test('fallback do Terminal é explicitamente controlado por feature flags', () => {

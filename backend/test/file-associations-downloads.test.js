@@ -1,56 +1,48 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { scanDiscoveredLinuxApps } from '../src/linuxRuntime/desktopScanner.js';
+import { parseDesktopEntry } from '../src/apps/linuxDesktopScanner.js';
 import { listLinuxPackages } from '../src/linuxRuntime/packageManager.js';
 
-test('MIME extraction: .desktop scanner extrai MimeType com sucesso', async () => {
-  const apps = await scanDiscoveredLinuxApps('kali-linux');
-  assert.ok(Array.isArray(apps), 'Deve retornar lista de apps');
-  const geany = apps.find(a => a.id === 'geany' || a.name.toLowerCase().includes('geany'));
-  if (geany) {
-    assert.ok(Array.isArray(geany.mimeTypes), 'geany deve conter array de mimeTypes');
-  }
+test('MIME extraction reads every MimeType from an arbitrary Desktop Entry', () => {
+  const app = parseDesktopEntry([
+    '[Desktop Entry]',
+    'Type=Application',
+    'Name=Unplanned Editor',
+    'Exec=unplanned-editor %F',
+    'Categories=Utility;TextEditor;',
+    'MimeType=text/plain;application/json;',
+  ].join('\n'), {
+    distribution: 'kali-linux',
+    desktopId: 'unplanned-editor.desktop',
+    desktopFile: '/usr/share/applications/unplanned-editor.desktop',
+  });
+
+  assert.deepEqual(app?.mimeTypes, ['text/plain', 'application/json']);
 });
 
-test('Package Manager: propaga mimeTypes e flags de curação sem depender de WSL físico', async () => {
-  const discoveredFirefox = {
-    id: 'firefox-esr',
-    desktopId: 'firefox-esr',
-    name: 'Firefox ESR',
-    command: 'firefox-esr',
-    category: 'internet',
-    categories: ['Network', 'WebBrowser'],
-    comment: 'Browser fixture',
-    iconName: 'firefox-esr',
-    iconUrl: '/__cloudos/linux-runtime/icons/firefox-esr?distro=kali-linux',
-    emojiFallback: '🦊',
-    mimeTypes: ['text/html', 'application/xhtml+xml'],
+test('Package Manager propagates scanner metadata without a curated alias', async () => {
+  const discovered = {
+    id: 'linux-1234567890abcdef1234567890abcdef',
+    desktopId: 'unplanned-editor.desktop',
+    name: 'Unplanned Editor',
+    argv: ['unplanned-editor'],
+    category: 'utilities',
+    categories: ['Utility', 'TextEditor'],
+    comment: 'Editor fixture',
+    iconName: 'accessories-text-editor',
+    iconUrl: '/__cloudos/linux-runtime/apps/linux-1234567890abcdef1234567890abcdef/icon?distribution=kali-linux',
+    mimeTypes: ['text/plain', 'application/json'],
     terminal: false,
-    isUserApp: true,
-    isTechnical: false,
   };
 
   const result = await listLinuxPackages('kali-linux', {
-    getWslSnapshot: async () => ({
-      installed: true,
-      operational: true,
-      preferred: 'kali-linux',
-      default: 'kali-linux',
-    }),
-    scanDiscoveredLinuxApps: async () => [discoveredFirefox],
-    execFileAsync: async () => ({ stdout: 'firefox-esr\x1f1\n', stderr: '' }),
+    getWslSnapshot: async () => ({ operational: true, distributions: [{ name: 'kali-linux' }] }),
+    scanLinuxDesktopApps: async () => [discovered],
   });
 
-  assert.equal(result.operational, true);
-  assert.ok(Array.isArray(result.packages), 'Deve retornar pacotes');
-
-  const firefox = result.packages.find(p => p.id === 'firefox');
-  assert.ok(firefox, 'Firefox curado deve continuar presente');
-  assert.equal(firefox.installed, true, 'Alias firefox-esr deve marcar Firefox como instalado');
-  assert.equal(firefox.isCurated, true);
-  assert.equal(firefox.isUserApp, true);
-  assert.equal(firefox.isTechnical, false);
-  assert.deepEqual(firefox.mimeTypes, ['text/html', 'application/xhtml+xml']);
-  assert.equal(firefox.iconUrl, discoveredFirefox.iconUrl);
-  assert.equal(result.packages.filter(p => p.id === 'firefox-esr').length, 0, 'Alias descoberto não deve duplicar o app curado');
+  assert.deepEqual(result.packages.map((app) => app.id), [discovered.id]);
+  assert.equal(result.packages[0].installed, true);
+  assert.equal(result.packages[0].isDiscovered, true);
+  assert.deepEqual(result.packages[0].mimeTypes, discovered.mimeTypes);
+  assert.equal(result.packages[0].iconUrl, discovered.iconUrl);
 });

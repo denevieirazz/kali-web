@@ -169,9 +169,9 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
   const [readiness, setReadiness] = useState<PocReadiness | null>(null);
   const [physicalPreflight, setPhysicalPreflight] = useState<PhysicalPreflight | null>(null);
   const [pendingPreflightIframe, setPendingPreflightIframe] = useState<PendingPreflightIframe | null>(null);
-  const [selectedApp, setSelectedApp] = useState(() => {
+  const [selectedApp, setSelectedApp] = useState<string>(() => {
     const win = useWindowManager.getState().getWindow(windowId);
-    return typeof win?.params?.app === 'string' ? win.params.app : 'xclock';
+    return typeof win?.params?.app === 'string' ? win.params.app : '';
   });
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -205,9 +205,11 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
   async function refresh() {
     const next = await apiClient<PocStatus>(`/api/linux-runtime/poc1?ownerId=${encodeURIComponent(windowId)}`);
     setStatus(next);
+    setSelectedApp(current => next.apps.some(app => app.id === current) ? current : next.apps[0]?.id ?? '');
     setActiveSessionId(current => current && next.sessions.some(session => session.id === current)
       ? current
       : next.sessions[0]?.id ?? null);
+    return next;
   }
 
   async function refreshReadiness(app = selectedApp) {
@@ -222,7 +224,7 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
       window.clearTimeout(pending);
       pendingOwnerCleanup.delete(windowId);
     }
-    void Promise.all([refresh(), refreshReadiness('xclock')]).catch(cause => {
+    void refresh().catch(cause => {
       setError(cause instanceof Error ? cause.message : String(cause));
     });
     return () => {
@@ -248,6 +250,10 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
   }, [windowId]);
 
   useEffect(() => {
+    if (!selectedApp) {
+      setReadiness(null);
+      return;
+    }
     void refreshReadiness(selectedApp).catch(cause => setError(cause instanceof Error ? cause.message : String(cause)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedApp]);
@@ -373,6 +379,7 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
   }
 
   async function start() {
+    if (!selectedApp) return;
     setBusy(true);
     setError(null);
     const started = performance.now();
@@ -531,11 +538,11 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
             disabled={controlsBusy}
             onChange={event => setSelectedApp(event.target.value)}
           >
-            {(status?.apps ?? [{ id: 'xclock', command: 'xclock', title: 'XClock' }]).map(app => (
+            {(status?.apps ?? []).map(app => (
               <option key={app.id} value={app.id}>{app.title}</option>
             ))}
           </select>
-          <button type="button" onClick={start} disabled={controlsBusy || appAlreadyRunning || sessions.length >= (status?.maxAppsPerWindow ?? 4)}>
+          <button type="button" onClick={start} disabled={!selectedApp || controlsBusy || appAlreadyRunning || sessions.length >= (status?.maxAppsPerWindow ?? 4)}>
             {busy ? 'Processando…' : appAlreadyRunning ? `${selectedTitle} ativo` : `Abrir ${selectedTitle}`}
           </button>
           {readiness?.errorCode === 'LINUX_POC_ORPHANED_SESSION' && (
@@ -641,7 +648,7 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
               {activeSession?.state === 'failed'
                 ? `${activeSession.errorCode ?? 'XPRA_START_FAILED'}: ${activeSession.error ?? 'Xpra não iniciou.'}`
                 : readiness?.ready
-                  ? 'Pré-requisitos presentes. Execute Linux Runtime Preflight antes da primeira prova física; xclock não é iniciado pelo preflight.'
+                  ? 'Pré-requisitos presentes. Execute Linux Runtime Preflight antes da primeira prova física; nenhum aplicativo é iniciado pelo preflight.'
                   : readiness?.error ?? 'Validando WSL, distro, Xpra, app e portas.'}
             </p>
             {error && <pre>{error}</pre>}
@@ -663,7 +670,7 @@ export default function LinuxRuntimePoc({ windowId }: Props) {
           </>
         ) : physicalPreflight ? (
           <>
-            <div><strong>Preflight</strong><span>{physicalPreflight.decision}</span><span>fase {physicalPreflight.phase}</span><span>xclock NÃO executado</span></div>
+            <div><strong>Preflight</strong><span>{physicalPreflight.decision}</span><span>fase {physicalPreflight.phase}</span><span>nenhum app executado</span></div>
             <div><strong>Dry Run</strong><span>DISPLAY {physicalPreflight.display === null ? '—' : `:${physicalPreflight.display}`}</span><span>porta {physicalPreflight.port ?? '—'}</span><span>iframe {formatMs(physicalPreflight.metrics.iframeConnectionMs)}</span></div>
             <div><strong>Forensics</strong><span>baseline {physicalPreflight.artifacts.windowBaseline}</span><span>logs {physicalPreflight.artifacts.logs}</span></div>
           </>

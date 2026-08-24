@@ -1,0 +1,118 @@
+namespace CloudOS.Host.Native;
+
+/// <summary>
+/// Defines the fail-closed contract between the backend catalog launcher and the
+/// Windows host. Only host-created direct launch Jobs whose UI can be attributed
+/// to their bounded member processes are admitted. Protocol/UWP launches and
+/// shared brokers cannot satisfy that contract and must be unavailable.
+/// </summary>
+public static class NativeLaunchContainmentPolicy
+{
+    public const int WindowCorrelationTimeoutMilliseconds = 8_000;
+    public const int PendingAttachTimeoutMilliseconds = 10_000;
+    public const int GracefulCloseTimeoutMilliseconds = 1_000;
+
+    private static readonly HashSet<string> DirectLaunchKinds = new(StringComparer.Ordinal)
+    {
+        "windows-executable",
+        // The backend may resolve a verified .lnk target and start that target directly.
+        // A regular shell/Start-Process shortcut launch is brokerable and is not admitted.
+        "windows-shortcut-direct"
+    };
+
+    private static readonly HashSet<string> SharedBrokerProcessNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "applicationframehost",
+        "dwm",
+        "explorer",
+        "msrdc",
+        "mstsc",
+        "runtimebroker",
+        "shellexperiencehost",
+        "startmenuexperiencehost",
+        "wsl",
+        "wslg",
+        "wslhost",
+        "wslservice"
+    };
+
+    public static NativeLaunchAdmission EvaluateLaunchKind(string? launchKind)
+    {
+        if (string.IsNullOrWhiteSpace(launchKind) || !DirectLaunchKinds.Contains(launchKind))
+        {
+            return NativeLaunchAdmission.Deny(
+                "APP_LAUNCH_KIND_UNSUPPORTED",
+                "Este tipo de aplicativo usa protocolo, UWP ou broker e não pode ser correlacionado com segurança.");
+        }
+
+        return NativeLaunchAdmission.Allow();
+    }
+
+    public static bool IsSharedBroker(string? processName) =>
+        !string.IsNullOrWhiteSpace(processName) && SharedBrokerProcessNames.Contains(processName);
+
+    /// <summary>
+    /// Shortcut arguments are not admitted because Windows stores them as a raw
+    /// command-line string; reparsing that value cannot preserve argv boundaries.
+    /// </summary>
+    public static bool AllowsArgumentVector(string? launchKind, int argumentCount) =>
+        argumentCount >= 0
+        && (string.Equals(launchKind, "windows-executable", StringComparison.Ordinal)
+            || (string.Equals(launchKind, "windows-shortcut-direct", StringComparison.Ordinal)
+                && argumentCount == 0));
+
+    /// <summary>
+    /// Tracking a Job member PID is necessary but not sufficient. Public managed=true
+    /// is allowed only after a concrete top-level HWND from that exact member has
+    /// been observed and quarantined by NativeWindowManager.
+    /// </summary>
+    public static bool CanReportManaged(bool processTracked, bool hasTrackableWindow, bool sharedBroker) =>
+        processTracked && hasTrackableWindow && !sharedBroker;
+
+    /// <summary>
+    /// Every failure after a process was launched is terminal. Restoring an
+    /// attached window to the desktop would be an external-window fallback.
+    /// </summary>
+    public static bool RequiresTermination(NativeContainmentFailure failure) => failure is
+        NativeContainmentFailure.WindowCorrelationTimeout or
+        NativeContainmentFailure.QuarantineFailed or
+        NativeContainmentFailure.AttachFailed or
+        NativeContainmentFailure.LayoutFailed or
+        NativeContainmentFailure.AttachmentLost or
+        NativeContainmentFailure.PendingAttachExpired or
+        NativeContainmentFailure.DetachRequested or
+        NativeContainmentFailure.GracefulCloseFailed or
+        NativeContainmentFailure.DocumentReset or
+        NativeContainmentFailure.HostDisposed;
+}
+
+public sealed class NativeLaunchAdmission
+{
+    private NativeLaunchAdmission(bool allowed, string? errorCode, string? message)
+    {
+        Allowed = allowed;
+        ErrorCode = errorCode;
+        Message = message;
+    }
+
+    public bool Allowed { get; }
+    public string? ErrorCode { get; }
+    public string? Message { get; }
+
+    public static NativeLaunchAdmission Allow() => new(true, null, null);
+    public static NativeLaunchAdmission Deny(string errorCode, string message) => new(false, errorCode, message);
+}
+
+public enum NativeContainmentFailure
+{
+    WindowCorrelationTimeout,
+    QuarantineFailed,
+    AttachFailed,
+    LayoutFailed,
+    AttachmentLost,
+    PendingAttachExpired,
+    DetachRequested,
+    GracefulCloseFailed,
+    DocumentReset,
+    HostDisposed
+}

@@ -15,6 +15,7 @@ interface LinuxAppWindowProps {
     title?: string;
     icon?: string;
     filePath?: string;
+    distribution?: string | null;
   };
 }
 
@@ -23,7 +24,6 @@ interface LaunchSession {
   clientUrl?: string | null;
   title: string;
   appId: string;
-  native?: boolean;
   mode?: string;
   distribution?: string;
 }
@@ -31,10 +31,11 @@ interface LaunchSession {
 export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps) {
   const win = useWindowManager(s => s.windows.find(w => w.id === windowId));
   const effectiveParams = params || win?.params as any;
-  const targetAppId = effectiveParams?.appId || effectiveParams?.app || 'firefox';
+  const targetAppId = effectiveParams?.appId || effectiveParams?.app || '';
   const targetTitle = effectiveParams?.title || win?.title || 'Aplicativo Linux';
   const targetIcon = effectiveParams?.icon || win?.icon || '🐧';
   const targetFilePath = effectiveParams?.filePath || null;
+  const targetDistribution = effectiveParams?.distribution || null;
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -68,6 +69,11 @@ export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps
     async function startApp() {
       if (attempt === 0) setLoading(true);
       setError(null);
+      if (!/^linux-[a-f0-9]{32}$/.test(targetAppId)) {
+        setError('Containment recusado: o aplicativo não veio do registro Linux automático do CloudOS.');
+        setLoading(false);
+        return;
+      }
       try {
         const res = await apiClient<{ session: LaunchSession }>('/api/linux-runtime/launch', {
           method: 'POST',
@@ -75,13 +81,14 @@ export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps
             appId: targetAppId,
             ownerId: windowId,
             filePath: targetFilePath,
+            distribution: targetDistribution,
             reuseExisting: true,
           }),
           timeoutMs: 45_000,
         });
 
-        if (!res?.session?.clientUrl && !res?.session?.native) {
-          throw new Error('Não foi possível inicializar a superfície do aplicativo.');
+        if (!res?.session?.clientUrl || res.session.mode !== 'xpra') {
+          throw new Error('Containment recusado: o runtime não forneceu uma superfície Xpra interna. Nenhuma janela externa foi aceita.');
         }
 
         if (cancelled) {
@@ -91,9 +98,6 @@ export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps
 
         setSession(res.session);
         setReconnectAttempt(0);
-        if (res.session?.native) {
-          setLoading(false);
-        }
       } catch (err) {
         if (cancelled) return;
         const msg = err instanceof Error ? err.message : String(err);
@@ -118,18 +122,18 @@ export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps
       cancelled = true;
       if (retryTimer !== null) window.clearTimeout(retryTimer);
     };
-  }, [targetAppId, windowId, targetFilePath, recoveryGeneration, stopSessionBestEffort]);
+  }, [targetAppId, windowId, targetFilePath, targetDistribution, recoveryGeneration, stopSessionBestEffort]);
 
   useEffect(() => {
-    if (!session?.id || session?.native) return undefined;
+    if (!session?.id) return undefined;
     const sessionId = session.id;
     return () => {
       void stopSessionBestEffort(sessionId);
     };
-  }, [session?.id, session?.native, stopSessionBestEffort]);
+  }, [session?.id, stopSessionBestEffort]);
 
   useEffect(() => {
-    if (!session?.id || session?.native) return undefined;
+    if (!session?.id) return undefined;
     let disposed = false;
     let failures = 0;
     let timer: ReturnType<typeof window.setTimeout> | null = null;
@@ -167,7 +171,7 @@ export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps
       disposed = true;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [session?.id, session?.native]);
+  }, [session?.id]);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -237,18 +241,6 @@ export default function LinuxAppWindow({ windowId, params }: LinuxAppWindowProps
           tabIndex={0}
           onLoad={focusContainedSurface}
         />
-      ) : session?.native ? (
-        <div className="linux-app-window__native" style={{ padding: '32px', textAlign: 'center', color: '#e2e8f0', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-          <div style={{ fontSize: '56px', marginBottom: '16px' }}>🦊</div>
-          <h2 style={{ fontSize: '20px', fontWeight: 600, marginBottom: '8px' }}>{targetTitle} em Execução</h2>
-          <p style={{ color: '#94a3b8', maxWidth: '420px', fontSize: '14px', lineHeight: 1.5, marginBottom: '20px' }}>
-            O aplicativo Linux foi iniciado com aceleração gráfica direta (WSLg) e sua janela está visível na Área de Trabalho.
-          </p>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 14px', background: 'rgba(34, 197, 94, 0.15)', border: '1px solid rgba(34, 197, 94, 0.3)', borderRadius: '20px', color: '#4ade80', fontSize: '13px', fontWeight: 500 }}>
-            <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#22c55e' }}></span>
-            Processo Ativo no WSL ({session.distribution})
-          </div>
-        </div>
       ) : null}
     </div>
   );

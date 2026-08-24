@@ -1,42 +1,20 @@
 import { memo, useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useSystem } from '../../stores/systemStore';
 import { useWindowManager } from '../../stores/windowManager';
-import { useProcessManager } from '../../stores/processManager';
 import { useContextMenuStore } from '../../stores/contextMenuStore';
 import { useAppRegistry } from '../../core/appRegistry';
-import { nativeHostBridge } from '../../services/nativeHostBridge';
-import { apiClient } from '../../services/apiClient';
 import { useUserStore } from '../../stores/userStore';
+import { refreshUnifiedAppRegistry } from '../../services/systemHubClient';
+import { appLaunchUnavailableReason, launchWorkflowApp } from '../../services/workflowLaunch';
+import type { AppDefinition } from '../../types';
 import kernel from '../../core/kernel';
 import './StartMenu.css';
 import './StartMenu.native.css';
 
-type View = 'home' | 'all' | 'linux' | 'running';
+type View = 'home' | 'all' | 'linux' | 'windows' | 'running';
+type App = AppDefinition;
 
-type App = {
-  id: string;
-  name: string;
-  genericName?: string;
-  comment?: string;
-  category?: string;
-  categories?: string[];
-  icon: string;
-  iconUrl?: string | null;
-  emojiFallback?: string;
-  defaultWidth?: number;
-  defaultHeight?: number;
-  minWidth?: number;
-  minHeight?: number;
-  isResizable?: boolean;
-  binaryPath?: string;
-  isLinux?: boolean;
-  linuxAppId?: string;
-  isUserApp?: boolean;
-  isTechnical?: boolean;
-};
-
-const requiresNativeHost = (app: App) => app.id === 'browser';
-const appUnavailable = (app: App) => requiresNativeHost(app) && !nativeHostBridge.available;
+const appUnavailable = (app: App) => Boolean(appLaunchUnavailableReason(app));
 
 const FAVORITES_STORAGE_KEY = 'cloudos_startmenu_favorites_v1';
 const RECENT_STORAGE_KEY = 'cloudos_startmenu_recent_v1';
@@ -65,6 +43,11 @@ const LINUX_CATEGORIES: Array<{ id: string; label: string; icon: string }> = [
   { id: 'graphics', label: 'Gráficos', icon: '🎨' },
   { id: 'security', label: 'Segurança', icon: '🛡️' },
   { id: 'system', label: 'Sistema', icon: '⚙️' },
+  { id: 'utilities', label: 'Utilitários', icon: '🧰' },
+  { id: 'education', label: 'Educação', icon: '🎓' },
+  { id: 'science', label: 'Ciência', icon: '🔬' },
+  { id: 'entertainment', label: 'Jogos', icon: '🎮' },
+  { id: 'other', label: 'Outros', icon: '🧩' },
   { id: 'all', label: 'Todos', icon: '📦' },
 ];
 
@@ -88,26 +71,24 @@ function StartMenu() {
   const { isStartMenuOpen, closeStartMenu, currentUser } = useSystem();
   const allWindows = useWindowManager((s) => s.windows);
   const windows = useMemo(() => allWindows.filter((w) => !w.isSystem), [allWindows]);
-  const openWindow = useWindowManager((s) => s.openWindow);
   const closeWindow = useWindowManager((s) => s.closeWindow);
   const minimizeWindow = useWindowManager((s) => s.minimizeWindow);
   const maximizeWindow = useWindowManager((s) => s.maximizeWindow);
   const restoreWindow = useWindowManager((s) => s.restoreWindow);
   const focusWindow = useWindowManager((s) => s.focusWindow);
-  const createProcess = useProcessManager((s) => s.createProcess);
   const openContextMenu = useContextMenuStore((s) => s.openContextMenu);
-  const apps = useAppRegistry((s: any) => s.apps) as Record<string, App>;
+  const apps = useAppRegistry((s) => s.apps);
   const [view, setView] = useState<View>('home');
   const [linuxCategoryFilter, setLinuxCategoryFilter] = useState<string>('user_apps');
   const [query, setQuery] = useState('');
   const [capabilityNotice, setCapabilityNotice] = useState('');
-  const [linuxApps, setLinuxApps] = useState<App[]>([]);
   const [favorites, setFavorites] = useState<string[]>(getStoredFavorites);
   const [recentAppIds, setRecentAppIds] = useState<string[]>(getStoredRecent);
   const [showPowerMenu, setShowPowerMenu] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const catalogRefreshRef = useRef<Promise<void> | null>(null);
 
   const toggleFavorite = useCallback((appId: string, linuxAppId?: string) => {
     setFavorites(prev => {
@@ -132,51 +113,41 @@ function StartMenu() {
     });
   }, []);
 
-  const fetchLinuxApps = useCallback(async () => {
-    try {
-      const res = await apiClient<{ packages: Array<any> }>('/api/linux-runtime/packages');
-      if (res?.packages) {
-        const installed = res.packages
-          .filter((pkg: any) => pkg.installed)
-          .map((pkg: any) => ({
-            id: `linux-app-${pkg.id}`,
-            name: `${pkg.name}`,
-            genericName: pkg.genericName || '',
-            comment: pkg.description || pkg.comment || '',
-            category: pkg.category || 'utilities',
-            categories: pkg.categories || [],
-            icon: pkg.iconUrl || pkg.icon || pkg.emojiFallback || '🐧',
-            iconUrl: pkg.iconUrl || null,
-            emojiFallback: pkg.emojiFallback || '🐧',
-            defaultWidth: 960,
-            defaultHeight: 640,
-            isLinux: true,
-            linuxAppId: pkg.id,
-            isUserApp: pkg.isUserApp !== false,
-            isTechnical: pkg.isTechnical === true,
-          }));
-        setLinuxApps(installed);
-      }
-    } catch {
-      // Graceful fallback if backend runtime is starting up
-    }
+  const refreshCatalog = useCallback((force = false) => {
+    if (catalogRefreshRef.current) return catalogRefreshRef.current;
+    const refresh = refreshUnifiedAppRegistry(force)
+      .then(() => undefined)
+      .finally(() => {
+        if (catalogRefreshRef.current === refresh) catalogRefreshRef.current = null;
+      });
+    catalogRefreshRef.current = refresh;
+    return refresh;
   }, []);
 
   useEffect(() => {
-    fetchLinuxApps();
-    const handleAppsChanged = () => fetchLinuxApps();
+    void refreshCatalog(false).catch(() => undefined);
+    const handleAppsChanged = () => { void refreshCatalog(true).catch(() => undefined); };
     window.addEventListener('cloudos:apps-changed', handleAppsChanged);
-    return () => window.removeEventListener('cloudos:apps-changed', handleAppsChanged);
-  }, [fetchLinuxApps]);
+    return () => {
+      window.removeEventListener('cloudos:apps-changed', handleAppsChanged);
+    };
+  }, [refreshCatalog]);
+
+  useEffect(() => {
+    if (!isStartMenuOpen) return;
+    void refreshCatalog(true).catch(() => undefined);
+    const timer = window.setInterval(() => {
+      void refreshCatalog(true).catch(() => undefined);
+    }, 8_000);
+    return () => window.clearInterval(timer);
+  }, [isStartMenuOpen, refreshCatalog]);
 
   const isAppFavorite = useCallback((app: App) => {
     return favorites.includes(app.id) || (app.linuxAppId ? favorites.includes(app.linuxAppId) : false);
   }, [favorites]);
 
   const appList = useMemo(() => {
-    const base = Object.values(apps);
-    const all = [...base, ...linuxApps];
-    return all.sort((a, b) => {
+    return Object.values(apps).sort((a, b) => {
       const aFav = isAppFavorite(a) ? 1 : 0;
       const bFav = isAppFavorite(b) ? 1 : 0;
       if (aFav !== bFav) return bFav - aFav;
@@ -185,18 +156,22 @@ function StartMenu() {
       if (aUser !== bUser) return bUser - aUser;
       return a.name.localeCompare(b.name, 'pt-BR');
     });
-  }, [apps, linuxApps, isAppFavorite]);
+  }, [apps, isAppFavorite]);
 
   const filtered = useMemo(() => {
     const value = query.trim().toLocaleLowerCase('pt-BR');
     if (!value) return appList;
-    return appList.filter((app) =>
-      app.name.toLocaleLowerCase('pt-BR').includes(value) ||
-      (app.genericName && app.genericName.toLocaleLowerCase('pt-BR').includes(value)) ||
-      (app.comment && app.comment.toLocaleLowerCase('pt-BR').includes(value)) ||
-      (app.category && app.category.toLocaleLowerCase('pt-BR').includes(value)) ||
-      (app.linuxAppId && app.linuxAppId.toLocaleLowerCase('pt-BR').includes(value))
-    );
+    return appList.filter((app) => [
+      app.name,
+      app.genericName,
+      app.comment,
+      app.category,
+      ...(app.keywords || []),
+      ...(app.categories || []),
+      ...(app.mimeTypes || []),
+      app.distribution,
+      app.catalogSource,
+    ].filter(Boolean).join(' ').toLocaleLowerCase('pt-BR').includes(value));
   }, [appList, query]);
 
   const favoriteApps = useMemo(() => {
@@ -210,8 +185,11 @@ function StartMenu() {
   }, [appList, recentAppIds]);
 
   const userLinuxApps = useMemo(() => {
-    return linuxApps.filter(app => app.isUserApp !== false);
-  }, [linuxApps]);
+    return appList.filter(app => app.catalogSource === 'linux' && app.isUserApp !== false);
+  }, [appList]);
+
+  const linuxApps = useMemo(() => appList.filter(app => app.catalogSource === 'linux'), [appList]);
+  const windowsApps = useMemo(() => appList.filter(app => app.catalogSource === 'windows'), [appList]);
 
   const filteredLinuxApps = useMemo(() => {
     if (linuxCategoryFilter === 'user_apps') return userLinuxApps;
@@ -250,7 +228,6 @@ function StartMenu() {
       setCapabilityNotice('');
       return;
     }
-    fetchLinuxApps();
     requestAnimationFrame(() => inputRef.current?.focus());
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') closeStartMenu();
@@ -271,56 +248,22 @@ function StartMenu() {
       document.removeEventListener('keydown', onKey);
       document.removeEventListener('pointerdown', onPointer);
     };
-  }, [isStartMenuOpen, closeStartMenu, fetchLinuxApps]);
+  }, [isStartMenuOpen, closeStartMenu, refreshCatalog]);
 
   const launch = (app: App) => {
-    if (appUnavailable(app)) {
-      setCapabilityNotice(`${app.name} exige o modo Full. Execute “Iniciar CloudOS.cmd Full” para usar o Host nativo.`);
+    const unavailableReason = appLaunchUnavailableReason(app);
+    if (unavailableReason) {
+      setCapabilityNotice(unavailableReason);
       return;
     }
 
-    addRecentApp(app.id);
-
-    if (app.isLinux && app.linuxAppId) {
-      const pid = createProcess('linux-app-runner', app.name, app.icon);
-      openWindow({
-        title: app.name,
-        icon: app.icon,
-        appId: 'linux-app-runner',
-        width: 1020,
-        height: 680,
-        minWidth: 480,
-        minHeight: 320,
-        isResizable: true,
-        processId: pid,
-        params: { appId: app.linuxAppId, app: app.linuxAppId, title: app.name, icon: app.icon },
-      });
+    try {
+      launchWorkflowApp(app.id, app.binaryPath ? { binaryPath: app.binaryPath } : undefined);
+      addRecentApp(app.id);
       closeStartMenu();
-      return;
+    } catch (error) {
+      setCapabilityNotice(error instanceof Error ? error.message : 'O aplicativo não pôde ser aberto de forma contida.');
     }
-
-    const existingNativeWin = allWindows.find(w => w.appId === app.id);
-    if (existingNativeWin && ['settings', 'task-manager', 'system-monitor', 'regedit', 'obsidian-store'].includes(app.id)) {
-      if (existingNativeWin.isMinimized) restoreWindow(existingNativeWin.id);
-      focusWindow(existingNativeWin.id);
-      closeStartMenu();
-      return;
-    }
-
-    const pid = createProcess(app.id, app.name, app.icon);
-    openWindow({
-      title: app.name,
-      icon: app.icon,
-      appId: app.id,
-      width: app.defaultWidth,
-      height: app.defaultHeight,
-      minWidth: app.minWidth,
-      minHeight: app.minHeight,
-      isResizable: app.isResizable,
-      processId: pid,
-      params: app.binaryPath ? { binaryPath: app.binaryPath } : undefined,
-    });
-    closeStartMenu();
   };
 
   const activate = (id: string) => {
@@ -337,7 +280,7 @@ function StartMenu() {
   const context = (event: React.MouseEvent, app: App) => {
     event.preventDefault();
     if (appUnavailable(app)) {
-      setCapabilityNotice(`${app.name} está indisponível nesta sessão porque o Native Host não está ativo.`);
+      setCapabilityNotice(appLaunchUnavailableReason(app) || `${app.name} está indisponível nesta sessão.`);
       return;
     }
     const isFav = isAppFavorite(app);
@@ -362,7 +305,7 @@ function StartMenu() {
           <input
             ref={inputRef}
             className="start-search-input"
-            placeholder="Pesquisar aplicativos (Linux, Web e Sistema)..."
+            placeholder="Pesquisar aplicativos Windows, Linux e CloudOS..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -381,6 +324,9 @@ function StartMenu() {
             </button>
             <button className={view === 'linux' ? 'active' : ''} onClick={() => setView('linux')}>
               🐧 Linux <b>{userLinuxApps.length}</b>
+            </button>
+            <button className={view === 'windows' ? 'active' : ''} onClick={() => setView('windows')}>
+              ▦ Windows <b>{windowsApps.length}</b>
             </button>
             <button className={view === 'all' ? 'active' : ''} onClick={() => setView('all')}>
               Todos <b>{appList.length}</b>
@@ -485,6 +431,22 @@ function StartMenu() {
                 <AppGrid apps={filteredLinuxApps} launch={launch} context={context} isAppFavorite={isAppFavorite} />
               ) : (
                 <div className="start-empty">Nenhum aplicativo encontrado nesta categoria.</div>
+              )}
+            </>
+          ) : view === 'windows' ? (
+            <>
+              <div className="start-section-header">
+                <div>
+                  <strong>▦ Aplicativos Windows ({windowsApps.length})</strong>
+                  <small style={{ color: '#94a3b8', display: 'block', fontSize: '11px' }}>
+                    Somente aplicativos que podem ser encaixados pelo Host nativo do CloudOS
+                  </small>
+                </div>
+              </div>
+              {windowsApps.length ? (
+                <AppGrid apps={windowsApps} launch={launch} context={context} isAppFavorite={isAppFavorite} />
+              ) : (
+                <div className="start-empty">Nenhum aplicativo Windows contido disponível nesta sessão.</div>
               )}
             </>
           ) : view === 'all' ? (
@@ -627,8 +589,15 @@ const AppGrid = memo(function AppGrid({ apps, launch, context, isAppFavorite }: 
     <div className="start-pinned-grid">
       {apps.map((app) => {
         const unavailable = appUnavailable(app);
-        const isIconUrl = typeof app.icon === 'string' && (app.icon.startsWith('/') || app.icon.startsWith('http'));
+        const visibleIcon = app.iconUrl || app.icon;
+        const isIconUrl = typeof visibleIcon === 'string' && (visibleIcon.startsWith('/') || visibleIcon.startsWith('http'));
         const fav = isAppFavorite(app);
+        const originLabel = app.catalogSource === 'linux'
+          ? 'Linux · Xpra'
+          : app.catalogSource === 'windows'
+            ? 'Windows · CloudOS'
+            : '';
+        const categoryLabel = app.categories?.[0] || app.category;
         return (
           <button
             key={app.id}
@@ -657,7 +626,7 @@ const AppGrid = memo(function AppGrid({ apps, launch, context, isAppFavorite }: 
             <span className="start-app-icon">
               {isIconUrl ? (
                 <img
-                  src={app.icon}
+                  src={visibleIcon}
                   alt=""
                   style={{ width: '34px', height: '34px', objectFit: 'contain' }}
                   onError={(e) => {
@@ -674,7 +643,10 @@ const AppGrid = memo(function AppGrid({ apps, launch, context, isAppFavorite }: 
             <span className="start-app-name" style={{ fontWeight: fav ? 600 : 400 }}>
               {app.name}
             </span>
-            {unavailable && <small>Modo Full</small>}
+            {(originLabel || categoryLabel) && (
+              <small>{[originLabel, categoryLabel].filter(Boolean).join(' · ')}</small>
+            )}
+            {unavailable && <small>Indisponível sem containment</small>}
           </button>
         );
       })}

@@ -7,8 +7,8 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { WebSocket } from 'ws';
 import { WSL_EXE, getWslSnapshot, normalizeName, safeChildEnvironment, validateInstalledAsync } from '../wsl/distroService.js';
+import { expandDesktopExec, resolveLinuxDesktopApp, scanLinuxDesktopApps } from '../apps/linuxDesktopScanner.js';
 import { XPRA_BIND_TCP_HOST, XPRA_DISPLAY_END, XPRA_DISPLAY_START, XPRA_PORT_END, XPRA_PORT_START, chooseXpraPair, displayForPort as displayForXpraPort, validateLedgerPair } from './xpraPairAllocator.js';
-import { scanDiscoveredLinuxApps } from './desktopScanner.js';
 import { getActiveDistro } from './distroManager.js';
 import { resolveActiveDistribution } from './packageManager.js';
 
@@ -24,28 +24,25 @@ const STOP_TIMEOUT_MS = 6_000;
 const LEASE_TTL_MS = 120_000;
 const LEDGER_FILE = path.join(os.tmpdir(), 'cloudos-linux-runtime-poc1-sessions.json');
 
-export const ALLOWED_APPS = Object.freeze({
-  xclock: { command: 'xclock', title: 'XClock' },
-  xeyes: { command: 'xeyes', title: 'XEyes' },
-  xterm: { command: "xterm -fa 'Monospace' -fs 11 -bg black -fg white", title: 'XTerm' },
-  gedit: { command: 'gedit', title: 'Gedit' },
-  firefox: { command: 'firefox-esr --no-remote --profile /tmp/cloudos-firefox-poc-{sessionId}', title: 'Firefox ESR' },
-  chromium: { command: 'chromium --no-sandbox --disable-gpu', title: 'Chromium' },
-  code: { command: 'code --no-sandbox', title: 'Visual Studio Code' },
-  gimp: { command: 'gimp', title: 'GIMP' },
-  vlc: { command: 'vlc', title: 'VLC Media Player' },
-  libreoffice: { command: 'libreoffice', title: 'LibreOffice' },
-  filezilla: { command: 'filezilla', title: 'FileZilla' },
-  wireshark: { command: 'wireshark', title: 'Wireshark' },
-  galculator: { command: 'galculator', title: 'Calculadora' },
-  htop: { command: "xterm -fa 'Monospace' -fs 11 -e htop", title: 'Htop Monitor' },
-  mousepad: { command: 'mousepad', title: 'Mousepad' },
-});
-
 const OWNER_ID = /^[a-zA-Z0-9._:-]{1,128}$/;
+const APP_ID = /^linux-[a-f0-9]{32}$/;
+const SESSION_ID = /^xpra-[a-z0-9-]{12,96}$/;
+const MAX_APP_ARGV = 128;
+const MAX_APP_ARGUMENT_LENGTH = 4096;
 const sessions = new Map();
 const reservedPorts = new Set();
 let lifecycleQueue = Promise.resolve();
+
+const defaultAppResolver = Object.freeze({
+  async list(distribution) {
+    return scanLinuxDesktopApps(distribution);
+  },
+  async resolve(appId, distribution) {
+    return resolveLinuxDesktopApp(appId, distribution);
+  }
+});
+
+let configuredAppResolver = defaultAppResolver;
 
 function queueLifecycle(operation) {
   const next = lifecycleQueue.then(operation, operation);
@@ -53,6 +50,8 @@ function queueLifecycle(operation) {
   return next;
 }
 function shellQuote(value) { return `'${String(value).replace(/'/g, `'"'"'`)}'`; }
+function shellToken(value) { const text = String(value); return /^[a-zA-Z0-9_./:@%+=,-]+$/.test(text) ? text : shellQuote(text); }
+function shellCommand(argv) { return argv.map(shellToken).join(' '); }
 function createPocError(code, message, details = null) { const error = new Error(message); error.code = code; if (details) error.details = details; return error; }
 function normalizeOwnerId(value) { const ownerId = String(value || 'cloudos-poc1').trim(); if (!OWNER_ID.test(ownerId)) throw createPocError('LINUX_POC_OWNER_INVALID', 'Identificador de owner inválido.'); return ownerId; }
 function elapsedMs(start) { return Math.max(0, Date.now() - start); }
@@ -61,7 +60,6 @@ function publicMetrics(session) { return { preflightMs: session.metrics.prefligh
 function proxyPath(session) { return `/__cloudos/linux-runtime/poc1/${session.id}/${session.proxyToken}/`; }
 function publicSession(session) {
   if (!session) return null;
-  const isNative = session.mode === 'wslg';
   return {
     id: session.id,
     generation: session.generation || 1,
@@ -72,12 +70,12 @@ function publicSession(session) {
     port: session.port,
     display: session.display,
     state: session.state,
-    native: isNative,
-    mode: session.mode || 'xpra',
+    native: false,
+    mode: 'xpra',
     startedAt: session.startedAt,
     leaseExpiresAt: new Date(session.leaseExpiresAt).toISOString(),
     pids: { xpra: session.xpraPid || null, app: session.appPid || null, xorg: session.xorgPid || null },
-    clientUrl: ['ready', 'degraded'].includes(session.state) ? (isNative ? null : `${proxyPath(session)}?username=root&clipboard=no&printing=no&file_transfer=no&floating_menu=no&reconnect=no`) : null,
+    clientUrl: ['ready', 'degraded'].includes(session.state) ? `${proxyPath(session)}?username=root&clipboard=no&printing=no&file_transfer=no&floating_menu=no&reconnect=no` : null,
     xpraVersion: session.xpraVersion,
     error: session.error || null,
     errorCode: session.errorCode || null,
@@ -121,7 +119,7 @@ export async function restoreSessionsFromLedger() {
         }
         await stopLedgerEntry(entry);
         const [linux, tcp] = await Promise.all([
-          probeWslServer({ distribution: entry.distribution, display: entry.display }),
+          probeWslServer({ sessionId: entry.id, display: entry.display }),
           probeWindowsTcp(entry.port, 500),
         ]);
         if (linux.ok || tcp.ok) remaining.push(entry);
@@ -136,98 +134,337 @@ export async function restoreSessionsFromLedger() {
   });
 }
 
-export async function resolvePocApp(appId, distro = 'kali-linux') {
-  if (!appId) return null;
-  const cleanId = String(appId).trim().toLowerCase();
-  if (cleanId === 'firefox') {
-    const isUbuntuOrFedora = /ubuntu|fedora|arch/i.test(String(distro || ''));
-    const binary = isUbuntuOrFedora ? 'firefox' : 'firefox-esr';
-    return {
-      id: 'firefox',
-      command: `${binary} --no-remote --profile /tmp/cloudos-firefox-poc-{sessionId}`,
-      title: isUbuntuOrFedora ? 'Mozilla Firefox' : 'Firefox ESR'
-    };
-  }
-  if (ALLOWED_APPS[cleanId]) {
-    return { id: cleanId, ...ALLOWED_APPS[cleanId] };
-  }
-  const discovered = await scanDiscoveredLinuxApps(distro).catch(() => []);
-  const found = discovered.find(d => d.id === cleanId || d.command.split(' ')[0].split('/').pop() === cleanId);
-  if (found) {
-    const cmd = found.terminal ? `xterm -fa 'Monospace' -fs 11 -bg black -fg white -e ${found.command}` : found.command;
-    return {
-      id: found.id,
-      command: cmd,
-      title: found.name,
-      icon: found.iconUrl || found.icon,
-      isDiscovered: true
-    };
-  }
-  const cleanBinary = cleanId.replace(/[^a-zA-Z0-9._+-]/g, '');
-  if (cleanBinary) {
-    return {
-      id: cleanBinary,
-      command: cleanBinary,
-      title: cleanBinary.charAt(0).toUpperCase() + cleanBinary.slice(1),
-      icon: '🐧',
-      isDiscovered: true
-    };
-  }
-  return null;
-}
-
-export async function getAllowedLinuxPocApps(distro = 'kali-linux') {
-  const curated = Object.entries(ALLOWED_APPS).map(([id, value]) => ({ id, ...value }));
-  try {
-    const discovered = await scanDiscoveredLinuxApps(distro);
-    const curatedIds = new Set(curated.map(c => c.id));
-    const extra = discovered.filter(d => !curatedIds.has(d.id)).map(d => ({
-      id: d.id,
-      title: d.name,
-      command: d.terminal ? `xterm -fa 'Monospace' -fs 11 -bg black -fg white -e ${d.command}` : d.command,
-      category: d.category,
-      icon: d.iconUrl || d.icon,
-      isDiscovered: true
-    }));
-    return [...curated, ...extra];
-  } catch {
-    return curated;
-  }
-}
-
 export function normalizePocApp(value) {
-  const id = String(value || '').trim().toLowerCase();
-  if (ALLOWED_APPS[id]) return id;
-  if (/^[a-zA-Z0-9._+-]+$/.test(id)) return id;
-  return null;
+  const id = typeof value === 'string' ? value.trim() : '';
+  return APP_ID.test(id) ? id : null;
 }
+
+function tokenizeTrustedCommand(command) {
+  const input = String(command || '').trim();
+  if (!input || /[\0\r\n]/.test(input)) return null;
+  const argv = [];
+  let token = '';
+  let quote = null;
+  let escaped = false;
+  let tokenStarted = false;
+  for (const char of input) {
+    if (escaped) {
+      token += char;
+      tokenStarted = true;
+      escaped = false;
+      continue;
+    }
+    if (char === '\\' && quote !== "'") {
+      escaped = true;
+      tokenStarted = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) quote = null;
+      else token += char;
+      tokenStarted = true;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      tokenStarted = true;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (tokenStarted) {
+        argv.push(token);
+        token = '';
+        tokenStarted = false;
+      }
+      continue;
+    }
+    token += char;
+    tokenStarted = true;
+  }
+  if (escaped || quote) return null;
+  if (tokenStarted) argv.push(token);
+  return argv;
+}
+
+function normalizeArgv(argv) {
+  if (!Array.isArray(argv) || argv.length < 1 || argv.length > MAX_APP_ARGV) return null;
+  const normalized = [];
+  for (const value of argv) {
+    if (typeof value !== 'string' || !value || value.length > MAX_APP_ARGUMENT_LENGTH || /[\0\r\n]/.test(value)) return null;
+    normalized.push(value);
+  }
+  const executable = normalized[0];
+  if (!(executable.startsWith('/') || /^[a-zA-Z0-9][a-zA-Z0-9._+-]*$/.test(executable))) return null;
+  if (executable.startsWith('/') && (!/^\/[a-zA-Z0-9_./+@-]+$/.test(executable) || executable.split('/').includes('..'))) return null;
+  return normalized;
+}
+
+function normalizeRequestedFilePath(value) {
+  const input = typeof value === 'string' ? value.trim() : '';
+  if (!input) return null;
+  if (input.length > MAX_APP_ARGUMENT_LENGTH || /[\0\r\n]/.test(input)) {
+    throw createPocError('LINUX_FILE_PATH_INVALID', 'Caminho de arquivo inválido.');
+  }
+  let candidate = input.replace(/\\/g, '/');
+  if (/^[a-zA-Z]:\//.test(candidate)) {
+    candidate = `/mnt/${candidate.charAt(0).toLowerCase()}/${candidate.slice(3)}`;
+  }
+  if (!/^\/mnt\/[a-z]\//.test(candidate) || candidate.split('/').includes('..')) {
+    throw createPocError('LINUX_FILE_PATH_OUTSIDE_WORKSPACE', 'Somente arquivos do Windows montados em /mnt/<drive> podem ser enviados ao aplicativo Linux.');
+  }
+  return candidate;
+}
+
+function normalizeResolvedAppDefinition(candidate, requestedId) {
+  if (!candidate || typeof candidate !== 'object') return null;
+  const id = normalizePocApp(candidate.id);
+  if (!id || id !== requestedId) return null;
+  const argv = normalizeArgv(candidate.argv || candidate.launchArgv || candidate.execArgv);
+  if (!argv) return null;
+  const execTemplate = normalizeArgv(candidate.execTemplate || candidate.argv || candidate.launchArgv || candidate.execArgv);
+  if (!execTemplate) return null;
+  return {
+    id,
+    argv,
+    execTemplate,
+    command: shellCommand(argv),
+    title: String(candidate.title || candidate.name || id).trim().slice(0, 256) || id,
+    name: String(candidate.name || candidate.title || id).trim().slice(0, 256) || id,
+    genericName: String(candidate.genericName || '').trim().slice(0, 256),
+    comment: String(candidate.comment || '').trim().slice(0, 1_000),
+    keywords: Array.isArray(candidate.keywords) ? [...candidate.keywords] : [],
+    icon: candidate.icon || candidate.iconName || null,
+    iconUrl: candidate.iconUrl || null,
+    category: candidate.category || null,
+    categories: Array.isArray(candidate.categories) ? [...candidate.categories] : [],
+    mimeTypes: Array.isArray(candidate.mimeTypes) ? [...candidate.mimeTypes] : [],
+    terminal: candidate.terminal === true,
+    userLocal: typeof candidate.desktopFile === 'string' && candidate.desktopFile.includes('/.local/share/applications/'),
+    source: 'linux',
+    distribution: candidate.distribution || null,
+    launchMode: 'xpra-contained',
+    installed: true,
+    isDiscovered: true
+  };
+}
+
+async function resolverList(resolver, distribution) {
+  if (typeof resolver?.list === 'function') return resolver.list(distribution);
+  return [];
+}
+
+async function resolverResolve(resolver, appId, distribution) {
+  if (typeof resolver === 'function') return resolver(appId, distribution);
+  if (typeof resolver?.resolve === 'function') return resolver.resolve(appId, distribution);
+  const discovered = await resolverList(resolver, distribution);
+  return Array.isArray(discovered) ? discovered.find(app => String(app?.id || '') === appId) || null : null;
+}
+
+export function setXpraPocAppResolver(resolver = null) {
+  if (resolver !== null && typeof resolver !== 'function' && typeof resolver?.resolve !== 'function' && typeof resolver?.list !== 'function') {
+    throw new TypeError('Resolver de aplicativos Linux inválido.');
+  }
+  configuredAppResolver = resolver || defaultAppResolver;
+}
+
+export async function resolvePocApp(appId, distro, resolver = configuredAppResolver) {
+  const requestedId = normalizePocApp(appId);
+  if (!requestedId) return null;
+  const candidate = await resolverResolve(resolver, requestedId, distro).catch(() => null);
+  return normalizeResolvedAppDefinition(candidate, requestedId);
+}
+
+function publicDiscoveredApp(app) {
+  return {
+    id: app.id,
+    name: app.name,
+    title: app.title,
+    genericName: app.genericName,
+    comment: app.comment,
+    keywords: [...app.keywords],
+    icon: app.icon,
+    iconUrl: app.iconUrl,
+    category: app.category,
+    categories: [...app.categories],
+    mimeTypes: [...app.mimeTypes],
+    terminal: app.terminal,
+    source: app.source,
+    distribution: app.distribution,
+    launchMode: app.launchMode,
+    installed: app.installed,
+    isDiscovered: app.isDiscovered
+  };
+}
+
+export async function getDiscoveredLinuxPocApps(distro, resolver = configuredAppResolver) {
+  const discovered = await resolverList(resolver, distro).catch(() => []);
+  if (!Array.isArray(discovered)) return [];
+  const unique = new Map();
+  for (const candidate of discovered) {
+    const id = normalizePocApp(candidate?.id);
+    const app = id ? normalizeResolvedAppDefinition(candidate, id) : null;
+    if (app && !unique.has(app.id)) unique.set(app.id, app);
+  }
+  return [...unique.values()]
+    .sort((a, b) => a.title.localeCompare(b.title))
+    .map(publicDiscoveredApp);
+}
+
+// Kept as a compatibility alias for existing route consumers. The result is
+// exclusively scanner-backed; there is no static allowlist or curated catalog.
+export const getAllowedLinuxPocApps = getDiscoveredLinuxPocApps;
 
 export function displayForPort(port) { return displayForXpraPort(port); }
 
-export function buildXpraProbeCommand(appCommand) {
-  const binary = String(appCommand || '').trim().split(/\s+/)[0];
-  const binaryCheck = (binary === 'firefox' || binary === 'firefox-esr')
-    ? `(command -v firefox >/dev/null 2>&1 || command -v firefox-esr >/dev/null 2>&1) || { echo APP_MISSING:${binary}; exit 42; }`
-    : `command -v ${shellQuote(binary)} >/dev/null 2>&1 || { echo APP_MISSING:${binary}; exit 42; }`;
-  return ['set -eu', 'command -v xpra >/dev/null 2>&1 || { echo XPRA_MISSING; exit 41; }', binaryCheck, 'xpra --version'].join('; ');
+function commandInputArgv(appCommand, appArgv = null) {
+  const argv = appArgv || (Array.isArray(appCommand) ? appCommand : tokenizeTrustedCommand(appCommand));
+  const normalized = normalizeArgv(argv);
+  if (!normalized) throw createPocError('XPRA_APP_DEFINITION_INVALID', 'Definição de execução Linux inválida.');
+  return normalized;
 }
 
-export function buildXpraStartCommand({ appCommand, port, sessionId = 'cloudos-poc1', password = 'test-only-secret' }) {
+function runtimeArgvFor(appDef, sessionId, requestedFilePath = null) {
+  let argv = requestedFilePath
+    ? expandDesktopExec(appDef.execTemplate, {
+        files: [requestedFilePath],
+        urls: [`file://${requestedFilePath}`],
+        name: appDef.name,
+        icon: appDef.icon || ''
+      })
+    : [...appDef.argv];
+  if (requestedFilePath && argv.length === appDef.argv.length && argv.every((value, index) => value === appDef.argv[index])) {
+    argv.push('--', requestedFilePath);
+  }
+  const binary = path.posix.basename(argv[0]).toLowerCase();
+
+  // Firefox must never hand a launch to an already-running process connected to
+  // another display. This is a runtime policy derived from the executable, not
+  // a catalog entry.
+  if (binary === 'firefox' || binary === 'firefox-esr') {
+    const withoutProfile = [];
+    for (let index = 0; index < argv.length; index += 1) {
+      if (argv[index] === '--profile' || argv[index] === '-profile') {
+        index += 1;
+        continue;
+      }
+      withoutProfile.push(argv[index]);
+    }
+    argv = withoutProfile;
+    if (!argv.includes('--no-remote')) argv.splice(1, 0, '--no-remote');
+    argv.push('--profile', `/tmp/cloudos-firefox-poc-${sessionId}`);
+  }
+
+  if (appDef.terminal) {
+    argv = ['xterm', '-fa', 'Monospace', '-fs', '11', '-bg', 'black', '-fg', 'white', '-e', ...argv];
+  }
+  return commandInputArgv(null, argv);
+}
+
+export function buildXpraProbeCommand(appCommand, appArgv = null) {
+  const argv = commandInputArgv(appCommand, appArgv);
+  const binary = argv[0];
+  const marker = path.posix.basename(binary).replace(/[^a-zA-Z0-9._+-]/g, '') || 'unknown';
+  const binaryCheck = `command -v ${shellQuote(binary)} >/dev/null 2>&1 || { echo APP_MISSING:${marker}; exit 42; }`;
+  const containmentTools = 'for tool in unshare mount setpriv; do command -v "$tool" >/dev/null 2>&1 || { echo CONTAINMENT_TOOL_MISSING:$tool; exit 44; }; done';
+  const abstractSocketGuard = "if grep -q ' @/tmp/.X11-unix/X0$' /proc/net/unix 2>/dev/null; then echo WSLG_ABSTRACT_SOCKET_PRESENT; exit 45; fi";
+  return ['set -eu', 'command -v xpra >/dev/null 2>&1 || { echo XPRA_MISSING; exit 41; }', containmentTools, abstractSocketGuard, binaryCheck, 'xpra --version'].join('; ');
+}
+
+function normalizedLaunchIdentity(identity = {}) {
+  const candidateUid = Number(identity.uid);
+  const candidateGid = Number(identity.gid);
+  const validUid = Number.isInteger(candidateUid) && candidateUid > 0 && candidateUid <= 2_147_483_646;
+  const validGid = Number.isInteger(candidateGid) && candidateGid > 0 && candidateGid <= 2_147_483_646;
+  const uid = validUid ? candidateUid : 65534;
+  const gid = validUid && validGid ? candidateGid : 65534;
+  const name = validUid && /^[a-z_][a-z0-9_-]{0,31}$/i.test(String(identity.name || '')) ? String(identity.name) : 'cloudos-app';
+  const sourceHome = uid !== 65534 && /^\/[a-zA-Z0-9_ ./+@-]{1,1024}$/.test(String(identity.home || '')) && !String(identity.home).split('/').includes('..')
+    ? String(identity.home)
+    : null;
+  return { uid, gid, name, sourceHome };
+}
+
+export function buildXpraStartCommand({ appCommand = null, appArgv = null, port, sessionId = 'cloudos-poc1', password = 'test-only-secret', launchIdentity = null }) {
   if (!Number.isInteger(port) || port < PORT_START || port > PORT_END) throw new Error('Porta Xpra fora da faixa da POC.');
   if (!password || String(password).length < 16) throw new Error('Capability Xpra inválida.');
+  const argv = commandInputArgv(appCommand, appArgv);
+  const childCommand = shellCommand(argv);
   const display = displayForPort(port);
-  const firefoxProfile = String(appCommand || '').match(/(?:^|\s)(?:-profile|--profile)\s+(\/tmp\/[a-zA-Z0-9._-]+)/)?.[1] || null;
-  const wrappedChild = `dbus-run-session -- ${appCommand}`;
+  const identity = normalizedLaunchIdentity(launchIdentity || {});
+  const profileFlagIndex = argv.findIndex(argument => argument === '-profile' || argument === '--profile');
+  const firefoxProfile = profileFlagIndex >= 0 && /^\/tmp\/[a-zA-Z0-9._-]+$/.test(argv[profileFlagIndex + 1] || '') ? argv[profileFlagIndex + 1] : null;
+  const isolationId = crypto.createHash('sha256').update(String(sessionId)).digest('hex').slice(0, 16);
+  const appProfileId = crypto.createHash('sha256').update(`${identity.uid}\0${argv[0]}`).digest('hex').slice(0, 24);
+  const containedHome = `/var/lib/cloudos/contained-homes/${identity.uid}-${appProfileId}`;
+  const containedRuntime = `/run/user/${identity.uid}`;
+  const containedPath = `${identity.sourceHome ? `${identity.sourceHome}/.local/bin:` : ''}/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`;
+  // The contained app gets a dedicated persistent HOME plus a private runtime,
+  // PID view and /tmp. This prevents an existing WSLg singleton from accepting
+  // the launch through a socket or D-Bus session outside the Xpra namespace.
+  // It runs as an unprivileged UID with a clean environment. Xpra contributes
+  // only its private DISPLAY and XAUTHORITY values to the child.
+  const childEnvironment = [
+    `HOME=${shellQuote(containedHome)}`,
+    `USER=${shellToken(identity.name)}`,
+    `LOGNAME=${shellToken(identity.name)}`,
+    'SHELL=/bin/sh',
+    `PATH=${shellQuote(containedPath)}`,
+    'LANG=C.UTF-8',
+    `XDG_RUNTIME_DIR=${containedRuntime}`,
+    `XDG_CONFIG_HOME=${shellQuote(`${containedHome}/.config`)}`,
+    `XDG_CACHE_HOME=${shellQuote(`${containedHome}/.cache`)}`,
+    `XDG_DATA_HOME=${shellQuote(`${containedHome}/.local/share`)}`,
+    'GDK_BACKEND=x11',
+    'QT_QPA_PLATFORM=xcb',
+    'SDL_VIDEODRIVER=x11',
+    'CLUTTER_BACKEND=x11',
+    'XDG_SESSION_TYPE=x11',
+    'MOZ_ENABLE_WAYLAND=0',
+    'ELECTRON_OZONE_PLATFORM_HINT=x11',
+    'LIBGL_ALWAYS_SOFTWARE=1',
+    'MOZ_X11_EGL=0',
+    'NO_AT_BRIDGE=1',
+  ].join(' ');
+  const wrappedChild = `env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET -u PULSE_SERVER -u WSLENV -u WSL_INTEROP -u DBUS_SESSION_BUS_ADDRESS -u XPRA_PASSWORD ${childEnvironment} dbus-run-session -- ${childCommand}`;
+  const xpraServer = `exec setpriv --reuid=${identity.uid} --regid=${identity.gid} --clear-groups --no-new-privs --bounding-set=-all --inh-caps=-all --ambient-caps=-all -- xpra seamless :${display} --socket-dirs=/run/xpra --session-name=${shellQuote(`cloudos-poc1-${sessionId}`)} --start-child=${shellQuote(wrappedChild)} --exit-with-children=yes --daemon=no --clipboard=no --printing=no --file-transfer=no --webcam=no --audio=no --speaker=no --microphone=no --notifications=no --mdns=no --dbus-launch=no --dbus-control=no --start-new-commands=no --bind=noabstract --bind-tcp=${XPRA_BIND_TCP_HOST}:${port},auth=env --video=no --html=on`;
+  const isolatedMounts = [
+    'set -eu',
+    'mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs /tmp',
+    'install -d -m 1777 /tmp/.X11-unix',
+    'mount -t tmpfs -o mode=755,nosuid,nodev,noexec tmpfs /run/user',
+    `install -d -o ${identity.uid} -g ${identity.gid} -m 700 ${containedRuntime}`,
+    'mount -t tmpfs -o mode=700,nosuid,nodev,noexec tmpfs /run/xpra',
+    `chown ${identity.uid}:${identity.gid} /run/xpra`,
+    `install -d -m 000 /tmp/cloudos-wslg-mask-${isolationId}`,
+    `[ ! -d /mnt/wslg ] || mount --bind /tmp/cloudos-wslg-mask-${isolationId} /mnt/wslg`,
+    `[ ! -d /run/WSL ] || mount --bind /tmp/cloudos-wslg-mask-${isolationId} /run/WSL`,
+    `[ ! -d /run/systemd ] || mount --bind /tmp/cloudos-wslg-mask-${isolationId} /run/systemd`,
+    `[ ! -d /run/dbus ] || mount --bind /tmp/cloudos-wslg-mask-${isolationId} /run/dbus`,
+    `install -m 000 /dev/null /tmp/cloudos-init-mask-${isolationId}`,
+    `mount --bind /tmp/cloudos-init-mask-${isolationId} /init`,
+    'mount -o remount,bind,ro,noexec,nosuid,nodev /init',
+    `install -d -m 700 ${shellQuote(containedHome)}`,
+    `chown ${identity.uid}:${identity.gid} ${shellQuote(containedHome)}`,
+    ...(firefoxProfile ? [`install -d -o ${identity.uid} -g ${identity.gid} -m 700 ${shellQuote(firefoxProfile)}`] : []),
+    `export HOME=${shellQuote(containedHome)}`,
+    `export XDG_RUNTIME_DIR=${containedRuntime}`,
+    `export XDG_CONFIG_HOME=${shellQuote(`${containedHome}/.config`)}`,
+    `export XDG_CACHE_HOME=${shellQuote(`${containedHome}/.cache`)}`,
+    `export XDG_DATA_HOME=${shellQuote(`${containedHome}/.local/share`)}`,
+    `export USER=${shellToken(identity.name)} LOGNAME=${shellToken(identity.name)}`,
+    'unset WSLENV WSL_INTEROP WAYLAND_DISPLAY WAYLAND_SOCKET PULSE_SERVER',
+    'export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+    "if grep -q ' @/tmp/.X11-unix/X0$' /proc/net/unix 2>/dev/null; then echo WSLG_ABSTRACT_SOCKET_PRESENT >&2; exit 45; fi",
+    '[ ! -S /tmp/.X11-unix/X0 ] || { echo WSLG_X11_SOCKET_VISIBLE >&2; exit 46; }',
+    '[ ! -S /mnt/wslg/runtime-dir/wayland-0 ] || { echo WSLG_WAYLAND_SOCKET_VISIBLE >&2; exit 46; }',
+    '[ ! -x /init ] || { echo WSL_INIT_VISIBLE >&2; exit 46; }',
+    'if /init /mnt/c/Windows/System32/cmd.exe /c exit >/dev/null 2>&1; then echo WSL_INTEROP_BYPASS >&2; exit 46; fi',
+    'if /mnt/c/Windows/System32/cmd.exe /c exit >/dev/null 2>&1; then echo WSL_PE_BYPASS >&2; exit 46; fi',
+    xpraServer,
+  ].join('; ');
   return [
     'set -eu',
-    'mkdir -p -m 1777 /tmp/.X11-unix /run/xpra 2>/dev/null || true',
-    'mount -o remount,rw /tmp/.X11-unix 2>/dev/null || true',
-    'chmod 1777 /tmp/.X11-unix /run/xpra 2>/dev/null || true',
-    `if xpra info :${display} >/dev/null 2>&1; then echo XPRA_DISPLAY_BUSY >&2; exit 43; fi`,
-    `rm -rf /run/xpra/${display} /run/user/0/xpra/${display} /tmp/.X11-unix/X${display} /tmp/.X${display}-lock /run/xpra/*-${display} /root/.xpra/*-${display} 2>/dev/null || true`,
-    'rm -f /tmp/cloudos-*-poc/.parentlock /tmp/cloudos-*-poc/lock /tmp/cloudos-*-poc/SingletonLock 2>/dev/null || true',
-    'if [ -d /mnt/c/Users ]; then WIN_USER=$(ls -d /mnt/c/Users/* 2>/dev/null | grep -vE "Default|Public|All Users|desktop.ini" | head -n1 || true); if [ -n "$WIN_USER" ]; then mkdir -p /root/.config/gtk-3.0 "$WIN_USER/CloudOS/Downloads" "$WIN_USER/CloudOS/Documents" "$WIN_USER/CloudOS/Desktop" "$WIN_USER/CloudOS/Projects" "$WIN_USER/CloudOS/Workspace" 2>/dev/null || true; printf "file://%s/CloudOS/Downloads Downloads\\nfile://%s/CloudOS/Documents Documentos\\nfile://%s/CloudOS/Desktop Área de Trabalho\\nfile://%s/CloudOS/Projects Projetos\\nfile://%s/CloudOS/Workspace Workspace\\nfile://%s/Downloads Windows Downloads\\n" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" > /root/.config/gtk-3.0/bookmarks 2>/dev/null || true; mkdir -p /root/.config; printf "XDG_DESKTOP_DIR=\\"%s/CloudOS/Desktop\\"\\nXDG_DOWNLOAD_DIR=\\"%s/CloudOS/Downloads\\"\\nXDG_DOCUMENTS_DIR=\\"%s/CloudOS/Documents\\"\\nXDG_PICTURES_DIR=\\"%s/CloudOS/Pictures\\"\\nXDG_VIDEOS_DIR=\\"%s/CloudOS/Videos\\"\\n" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" "$WIN_USER" > /root/.config/user-dirs.dirs 2>/dev/null || true; if [ -d "$WIN_USER/CloudOS/Downloads" ]; then rm -rf /root/Downloads; ln -sfn "$WIN_USER/CloudOS/Downloads" /root/Downloads 2>/dev/null || true; fi; fi; fi',
-    'unset DISPLAY WAYLAND_DISPLAY WAYLAND_SOCKET PULSE_SERVER',
+    'unset DISPLAY WAYLAND_DISPLAY WAYLAND_SOCKET PULSE_SERVER WSLENV WSL_INTEROP',
     'export GDK_BACKEND=x11',
     'export QT_QPA_PLATFORM=xcb',
     'export SDL_VIDEODRIVER=x11',
@@ -238,40 +475,31 @@ export function buildXpraStartCommand({ appCommand, port, sessionId = 'cloudos-p
     'export LIBGL_ALWAYS_SOFTWARE=1',
     'export MOZ_X11_EGL=0',
     'export NO_AT_BRIDGE=1',
-    ...(firefoxProfile ? [`install -d -m 700 ${shellQuote(firefoxProfile)}`] : []),
     `export XPRA_PASSWORD=${shellQuote(password)}`,
-    `exec xpra seamless :${display} --socket-dirs=/run/xpra --session-name=${shellQuote(`cloudos-poc1-${sessionId}`)} --start-child=${shellQuote(wrappedChild)} --exit-with-children=yes --daemon=no --clipboard=no --printing=no --file-transfer=no --webcam=no --audio=no --speaker=no --microphone=no --notifications=no --mdns=no --dbus-launch=no --dbus-control=no --start-new-commands=no --bind=noabstract --bind-tcp=${XPRA_BIND_TCP_HOST}:${port},auth=env --video=no --html=on`,
+    `exec unshare --mount --pid --fork --kill-child=KILL --mount-proc=/proc --propagation private sh -c ${shellQuote(isolatedMounts)}`,
   ].join('; ');
 }
 
 async function execWsl(distribution, command, timeout = HEALTH_TIMEOUT_MS) { return execFileAsync(WSL_EXE, ['-d', distribution, '--exec', 'sh', '-c', command], { windowsHide: true, env: safeChildEnvironment(), timeout, maxBuffer: 512 * 1024 }); }
-async function execWslRoot(distribution, command, timeout = HEALTH_TIMEOUT_MS) { return execFileAsync(WSL_EXE, ['-d', distribution, '-u', 'root', '--exec', 'sh', '-c', command], { windowsHide: true, env: safeChildEnvironment(), timeout, maxBuffer: 512 * 1024 }); }
-
-let interopCache = null;
-let interopCacheTime = 0;
+async function execWslSystem(args, timeout = HEALTH_TIMEOUT_MS) {
+  return execFileAsync(WSL_EXE, ['--system', '-u', 'root', '--', ...args], {
+    windowsHide: true,
+    env: safeChildEnvironment(),
+    timeout,
+    maxBuffer: 2 * 1024 * 1024,
+  });
+}
 
 export async function checkWslInteropDisabled(distribution) {
-  if (interopCache && (Date.now() - interopCacheTime < 120_000)) {
-    return interopCache;
-  }
   const started = Date.now();
   try {
-    let { stdout } = await execWsl(distribution, 'cat /proc/sys/fs/binfmt_misc/WSLInterop 2>/dev/null || true', 6000);
-    let text = String(stdout || '').trim();
-    if (text.startsWith('enabled')) {
-      await execWslRoot(distribution, 'echo 0 > /proc/sys/fs/binfmt_misc/WSLInterop 2>/dev/null || true', 3000).catch(() => undefined);
-      const recheck = await execWsl(distribution, 'cat /proc/sys/fs/binfmt_misc/WSLInterop 2>/dev/null || true', 3000).catch(() => ({ stdout: '' }));
-      text = String(recheck.stdout || '').trim();
-    }
+    const { stdout } = await execWsl(distribution, 'cat /proc/sys/fs/binfmt_misc/WSLInterop 2>/dev/null || true', 6000);
+    const text = String(stdout || '').trim();
     if (text === 'disabled' || text.startsWith('disabled')) {
-      interopCache = { ok: true, code: 'WSL_INTEROP_DISABLED', error: null, evidence: 'DISABLED', durationMs: elapsedMs(started) };
-      interopCacheTime = Date.now();
-      return interopCache;
+      return { ok: true, code: 'WSL_INTEROP_DISABLED', error: null, evidence: 'DISABLED', durationMs: elapsedMs(started) };
     }
     if (!text) {
-      interopCache = { ok: true, code: 'WSL_INTEROP_NOT_REGISTERED', error: null, evidence: 'UNAVAILABLE', durationMs: elapsedMs(started) };
-      interopCacheTime = Date.now();
-      return interopCache;
+      return { ok: true, code: 'WSL_INTEROP_NOT_REGISTERED', error: null, evidence: 'UNAVAILABLE', durationMs: elapsedMs(started) };
     }
     return { ok: false, code: 'WSL_INTEROP_ENABLED', error: 'WSL interop está habilitado. A POC 1 exige interop desabilitado.', evidence: 'ENABLED', durationMs: elapsedMs(started) };
   } catch {
@@ -286,27 +514,49 @@ export async function checkWslInteropDisabled(distribution) {
 }
 
 async function getDistroInfo(distribution) { const { stdout } = await execWsl(distribution, 'uname -s; uname -r; cat /etc/os-release 2>/dev/null || true', 3000); const lines = String(stdout || '').split('\n'); return { kernel: lines[0] || 'Linux', release: lines[1] || 'unknown', prettyName: lines.find(l => l.startsWith('PRETTY_NAME='))?.split('=')[1]?.replace(/"/g, '') || distribution }; }
-async function probe(distribution, appCommand) {
+async function getDistroLaunchIdentity(distribution) {
+  const python = 'import json,os,pwd; p=pwd.getpwuid(os.getuid()); print(json.dumps({"uid":os.getuid(),"gid":os.getgid(),"name":p.pw_name,"home":p.pw_dir}))';
   try {
-    const { stdout } = await execWsl(distribution, buildXpraProbeCommand(appCommand), 4000);
+    const { stdout } = await execFileAsync(WSL_EXE, ['-d', distribution, '--exec', 'python3', '-c', python], {
+      windowsHide: true,
+      env: safeChildEnvironment(),
+      timeout: 4000,
+      maxBuffer: 64 * 1024,
+    });
+    const parsed = JSON.parse(String(stdout || '{}'));
+    // A root default user is never propagated to GUI applications. The
+    // sandbox identity remains able to launch apt-installed system apps.
+    return normalizedLaunchIdentity(parsed);
+  } catch {
+    return normalizedLaunchIdentity();
+  }
+}
+async function probe(distribution, appArgv) {
+  try {
+    const { stdout } = await execWsl(distribution, buildXpraProbeCommand(null, appArgv), 4000);
     const versionLine = String(stdout || '').split('\n').find(l => l.includes('xpra v') || l.includes('xpra')) || 'xpra v6';
     return { ok: true, version: versionLine.trim(), mode: 'xpra' };
   } catch (error) {
     const text = `${error.stdout || ''} ${error.stderr || ''}`;
     if (text.includes('APP_MISSING:')) throw createPocError('XPRA_APP_MISSING', 'Aplicativo Linux não instalado.');
-    // Check if the application binary itself exists (e.g. firefox)
-    const binary = String(appCommand || '').trim().split(/\s+/)[0];
-    try {
-      const { stdout: binOut } = await execWsl(distribution, `command -v ${shellQuote(binary)} || which ${shellQuote(binary)}`, 3000);
-      if (binOut && binOut.trim()) {
-        return { ok: true, version: 'wslg-native', mode: 'wslg' };
-      }
-    } catch {}
     if (text.includes('XPRA_MISSING')) throw createPocError('XPRA_NOT_INSTALLED', 'Xpra não está instalado.');
+    if (text.includes('CONTAINMENT_TOOL_MISSING:')) throw createPocError('XPRA_CONTAINMENT_UNAVAILABLE', 'As barreiras de isolamento do runtime Linux não estão disponíveis.');
+    if (text.includes('WSLG_ABSTRACT_SOCKET_PRESENT')) throw createPocError('XPRA_CONTAINMENT_UNAVAILABLE', 'Um socket abstrato do WSLg impediria o isolamento garantido; lançamento recusado.');
     throw createPocError('XPRA_PROBE_FAILED', error.message);
   }
 }
-async function probeWslServer({ distribution, display }) { try { const { stdout } = await execWsl(distribution, `xpra info :${Number(display)} >/dev/null 2>&1 && echo OK || true`, 2000); return { ok: String(stdout || '').includes('OK') }; } catch { return { ok: false }; } }
+async function probeWslServer({ sessionId = null, id = null, display }) {
+  const pids = await inspectSessionPids(sessionId || id, display);
+  return { ok: Boolean(pids.xpra && pids.xorg), pids };
+}
+async function probeExternalWslgRoute(distribution) {
+  try {
+    const { stdout } = await execWsl(distribution, "grep -q ' @/tmp/.X11-unix/X0$' /proc/net/unix 2>/dev/null && echo PRESENT || echo ABSENT", 2500);
+    return String(stdout || '').includes('PRESENT');
+  } catch {
+    return true;
+  }
+}
 async function probeWindowsTcp(port, timeoutMs = 400) {
   const started = Date.now();
   return new Promise(resolve => {
@@ -322,6 +572,23 @@ async function probeWindowsTcp(port, timeoutMs = 400) {
     socket.once('error', () => finish(false));
     socket.setTimeout(timeoutMs, () => finish(false));
   });
+}
+
+async function probeWslTcpAvailable(distribution, port) {
+  const numericPort = Number(port);
+  if (!Number.isInteger(numericPort) || numericPort < PORT_START || numericPort > PORT_END) return false;
+  const python = `import socket\ns=socket.socket()\ns.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)\ntry:\n s.bind(('0.0.0.0',${numericPort}))\n print('FREE')\nfinally:\n s.close()`;
+  try {
+    const { stdout } = await execFileAsync(WSL_EXE, ['-d', distribution, '--exec', 'python3', '-c', python], {
+      windowsHide: true,
+      env: safeChildEnvironment(),
+      timeout: 2500,
+      maxBuffer: 64 * 1024,
+    });
+    return String(stdout || '').trim() === 'FREE';
+  } catch {
+    return false;
+  }
 }
 async function probeHttp(port, password, timeoutMs = 800) {
   const started = Date.now();
@@ -372,7 +639,7 @@ const readinessCache = new Map();
 export function getXpraPocSession(id = null) { return id ? publicSession(sessions.get(id)) : publicSession([...sessions.values()][0] || null); }
 export function getXpraPocSessions(ownerId = null) { const owner = ownerId ? normalizeOwnerId(ownerId) : null; return [...sessions.values()].filter(s => !owner || s.ownerId === owner).map(publicSession); }
 
-export async function checkXpraPocReadiness({ app = 'xclock', distribution, force = false } = {}) {
+export async function checkXpraPocReadiness({ app = null, distribution, force = false } = {}) {
   const started = Date.now();
   const checks = { wsl: { ok: false }, distribution: { ok: false }, interop: { ok: false }, xpra: { ok: false }, app: { ok: false }, port: { ok: false }, windowsLoopback: { ok: null }, websocket: { ok: null }, orphans: { ok: true, count: 0 } };
 
@@ -383,8 +650,9 @@ export async function checkXpraPocReadiness({ app = 'xclock', distribution, forc
   const selected = await resolveActiveDistribution(distribution);
   checks.distribution = { ok: true, name: selected };
 
-  const appDef = await resolvePocApp(app, selected);
-  if (!appDef) return { ready: false, errorCode: 'LINUX_POC_APP_NOT_ALLOWED', error: 'Aplicativo não permitido.', checks, durationMs: elapsedMs(started) };
+  const requestedAppId = normalizePocApp(app) || (await getDiscoveredLinuxPocApps(selected))[0]?.id || null;
+  const appDef = await resolvePocApp(requestedAppId, selected);
+  if (!appDef) return { ready: false, errorCode: 'LINUX_POC_APP_NOT_DISCOVERED', error: 'Aplicativo não encontrado no registro Linux.', checks, durationMs: elapsedMs(started) };
 
   const cacheKey = `${appDef.id}:${selected}`;
   const cached = readinessCache.get(cacheKey);
@@ -397,9 +665,10 @@ export async function checkXpraPocReadiness({ app = 'xclock', distribution, forc
   if (!interop.ok) return { ready: false, errorCode: interop.code || 'WSL_INTEROP_ENABLED', error: interop.error || 'POC1 exige WSL interoperability desabilitado e reinício da distro antes de iniciar.', distribution: selected, checks, durationMs: elapsedMs(started) };
 
   try {
-    const result = await probe(selected, appDef.command);
-    checks.xpra = { ok: true, version: result.version, mode: result.mode || 'xpra' };
-    checks.app = { ok: true, command: appDef.command };
+    const readinessArgv = runtimeArgvFor(appDef, 'readiness');
+    const result = await probe(selected, readinessArgv);
+    checks.xpra = { ok: true, version: result.version, mode: 'xpra' };
+    checks.app = { ok: true, id: appDef.id, binary: path.posix.basename(readinessArgv[0]) };
   } catch (cause) {
     return { ready: false, errorCode: cause.code, error: cause.message, distribution: selected, checks, durationMs: elapsedMs(started) };
   }
@@ -430,7 +699,7 @@ async function inspectOwnedOrphans({ distribution = null } = {}) {
     if (!pair.ok) { orphans.push({ ...entry, classification: pair.code }); continue; }
     if (distribution && entry.distribution !== distribution) continue;
     if (!await validateInstalledAsync(entry.distribution)) continue;
-    const linux = await probeWslServer({ distribution: entry.distribution, display: entry.display });
+    const linux = await probeWslServer({ sessionId: entry.id, display: entry.display });
     const tcp = await probeWindowsTcp(entry.port, 500);
     if (linux.ok || tcp.ok) orphans.push({ ...entry, linuxAlive: linux.ok, windowsPortAlive: tcp.ok });
   }
@@ -438,9 +707,8 @@ async function inspectOwnedOrphans({ distribution = null } = {}) {
 }
 
 async function stopLedgerEntry(entry) {
-  if (await validateInstalledAsync(entry.distribution)) {
-    await execWsl(entry.distribution, `xpra stop :${Number(entry.display)} >/dev/null 2>&1 || true`, STOP_TIMEOUT_MS).catch(() => undefined);
-  }
+  if (!SESSION_ID.test(String(entry?.id || ''))) return;
+  await terminateSystemSession(entry.id).catch(() => undefined);
 }
 
 export async function cleanupXpraPoc({ ownerId = null, orphansOnly = false } = {}) {
@@ -464,18 +732,64 @@ export async function cleanupXpraPoc({ ownerId = null, orphansOnly = false } = {
 
 function diagnosticsFor(session) { return session.diagnostics.join('').slice(-6000); }
 
-async function inspectSessionPids(distribution, display, appCommand) {
+function parseSystemProcessTable(output) {
+  const rows = [];
+  for (const line of String(output || '').split(/\r?\n/)) {
+    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/);
+    if (!match) continue;
+    rows.push({ pid: Number(match[1]), ppid: Number(match[2]), uid: Number(match[3]), command: match[4], args: match[5] });
+  }
+  return rows;
+}
+
+async function systemProcessTable() {
+  const { stdout } = await execWslSystem(['ps', '-eo', 'pid=,ppid=,uid=,comm=,args='], 4000);
+  return parseSystemProcessTable(stdout);
+}
+
+function processDescendsFrom(row, ancestorPid, byPid) {
+  const seen = new Set();
+  let current = row;
+  while (current && current.ppid > 0 && !seen.has(current.pid)) {
+    if (current.ppid === ancestorPid) return true;
+    seen.add(current.pid);
+    current = byPid.get(current.ppid);
+  }
+  return false;
+}
+
+async function inspectSessionPids(sessionId, display, appArgv = null) {
   try {
-    const binary = path.posix.basename(String(appCommand || '').trim().split(/\s+/)[0]);
-    if (!/^[a-zA-Z0-9._+-]+$/.test(binary)) return { xpra: null, app: null, xorg: null };
-    const runtimeDirectory = `/run/xpra/${Number(display)}`;
-    const cmd = `server_pid="$(cat ${runtimeDirectory}/server.pid 2>/dev/null || true)"; printf '%s\n' "$server_pid"; echo '---'; if [ -n "$server_pid" ]; then pgrep -P "$server_pid" -x ${shellQuote(binary)} | head -n 1; fi; echo '---'; cat ${runtimeDirectory}/xvfb.pid 2>/dev/null || true`;
-    const { stdout } = await execWsl(distribution, cmd, 3000);
-    const parts = String(stdout || '').split('---').map(s => Number(s.trim())).map(n => Number.isInteger(n) && n > 0 ? n : null);
-    return { xpra: parts[0] || null, app: parts[1] || null, xorg: parts[2] || null };
+    if (!SESSION_ID.test(String(sessionId || ''))) return { xpra: null, app: null, xorg: null };
+    const rows = await systemProcessTable();
+    const byPid = new Map(rows.map(row => [row.pid, row]));
+    const marker = `--session-name=cloudos-poc1-${sessionId}`;
+    const xpra = rows.find(row => row.args.includes('/usr/bin/xpra seamless') && row.args.includes(marker)) || null;
+    if (!xpra) return { xpra: null, app: null, xorg: null };
+    const descendants = rows.filter(row => processDescendsFrom(row, xpra.pid, byPid));
+    const xorg = descendants.find(row => row.args.includes(`Xvfb-for-Xpra-${Number(display)}`)) || null;
+    let app = null;
+    if (appArgv) {
+      const binary = path.posix.basename(commandInputArgv(null, appArgv)[0]);
+      if (/^[a-zA-Z0-9._+-]+$/.test(binary)) {
+        app = descendants.find(row => row.command === binary || path.posix.basename(row.args.split(/\s+/)[0] || '') === binary) || null;
+      }
+    }
+    return { xpra: xpra.pid, app: app?.pid || null, xorg: xorg?.pid || null };
   } catch {
     return { xpra: null, app: null, xorg: null };
   }
+}
+
+async function terminateSystemSession(sessionId) {
+  if (!SESSION_ID.test(String(sessionId || ''))) return false;
+  const pids = await inspectSessionPids(sessionId, DISPLAY_START);
+  if (!pids.xpra) return false;
+  await execWslSystem(['kill', '-TERM', String(pids.xpra)], STOP_TIMEOUT_MS).catch(() => undefined);
+  await new Promise(resolve => setTimeout(resolve, 250));
+  const remaining = await inspectSessionPids(sessionId, DISPLAY_START);
+  if (remaining.xpra) await execWslSystem(['kill', '-KILL', String(remaining.xpra)], 2000).catch(() => undefined);
+  return true;
 }
 
 async function isPortFree(port) {
@@ -495,7 +809,7 @@ export async function startPhysicalPreflight({ ownerId, distribution, backendOri
   const started = Date.now();
   const owner = normalizeOwnerId(ownerId);
   const selected = await resolveActiveDistribution(distribution);
-  const readiness = await checkXpraPocReadiness({ app: 'xclock', distribution: selected, force: true });
+  const readiness = await checkXpraPocReadiness({ distribution: selected, force: true });
   if (!readiness.ready) {
     return {
       runId: `preflight-${Date.now().toString(36)}`,
@@ -507,7 +821,7 @@ export async function startPhysicalPreflight({ ownerId, distribution, backendOri
     };
   }
 
-  const pair = readiness.checks.xpra?.mode === 'wslg' ? { port: 0, display: 0, distribution: selected } : await reservePair(selected);
+  const pair = await reservePair(selected);
   const runId = `preflight-${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`;
   const ephemeralSecret = crypto.randomBytes(32).toString('base64url');
   const proxyToken = crypto.randomBytes(24).toString('hex');
@@ -565,10 +879,11 @@ async function reservePair(distribution) {
   for (let port = PORT_START; port <= PORT_END; port++) {
     if (reservedPorts.has(port)) continue;
     const display = displayForPort(port);
-    const win = await probeWindowsTcp(port, 150);
-    if (win.ok) continue;
-    const linux = await probeWslServer({ distribution: distro, display });
-    if (linux.ok) continue;
+    const [win, wslPortFree] = await Promise.all([
+      probeWindowsTcp(port, 150),
+      probeWslTcpAvailable(distro, port),
+    ]);
+    if (win.ok || !wslPortFree) continue;
     reservedPorts.add(port);
     return { port, display, distribution: distro };
   }
@@ -582,11 +897,11 @@ function releasePort(port) {
 export async function startXpraPoc({ app, distribution, ownerId, generation = 1, filePath = null, reuseExisting = false } = {}) {
   return queueLifecycle(async () => {
     const distro = await resolveActiveDistribution(distribution);
-    const appDef = await resolvePocApp(app || 'firefox', distro);
-    if (!appDef) throw createPocError('LINUX_POC_APP_NOT_ALLOWED', 'Aplicativo não permitido.');
+    const appDef = await resolvePocApp(app, distro);
+    if (!appDef) throw createPocError('LINUX_POC_APP_NOT_DISCOVERED', 'Aplicativo não encontrado no registro Linux.');
     const appId = appDef.id;
     const owner = normalizeOwnerId(ownerId);
-    const requestedFilePath = typeof filePath === 'string' && filePath.trim() ? filePath.trim() : null;
+    const requestedFilePath = normalizeRequestedFilePath(filePath);
 
     if (reuseExisting) {
       const existing = [...sessions.values()].find(s =>
@@ -613,8 +928,17 @@ export async function startXpraPoc({ app, distribution, ownerId, generation = 1,
     const readiness = await checkXpraPocReadiness({ app: appId, distribution: distro });
     if (!readiness.ready) throw createPocError(readiness.errorCode, readiness.error, readiness.checks);
 
-    const isWslg = readiness.checks?.xpra?.mode === 'wslg';
-    const pair = isWslg ? { port: 0, display: 0, distribution: readiness.distribution } : await reservePair(readiness.distribution);
+    // Readiness metadata may be cached, but this security boundary may not be.
+    // Revalidate interop immediately before every launch in the selected distro.
+    const launchInterop = await checkWslInteropDisabled(readiness.distribution);
+    if (!launchInterop.ok) throw createPocError(launchInterop.code || 'WSL_INTEROP_ENABLED', launchInterop.error || 'WSL interop permanece habilitado.');
+
+    const launchIdentity = await getDistroLaunchIdentity(readiness.distribution);
+    if (appDef.userLocal && launchIdentity.uid === 65534 && !launchIdentity.sourceHome) {
+      throw createPocError('LINUX_USER_LOCAL_ROOT_UNSAFE', 'Aplicativos locais de um usuário WSL root não são executados como root; instale o aplicativo pelo gerenciador de pacotes ou configure um usuário WSL sem privilégios.');
+    }
+
+    const pair = await reservePair(readiness.distribution);
     const id = `xpra-${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`;
     const startedAt = new Date().toISOString();
     const leaseExpiresAt = Date.now() + LEASE_TTL_MS;
@@ -630,8 +954,8 @@ export async function startXpraPoc({ app, distribution, ownerId, generation = 1,
       distribution: readiness.distribution,
       port: pair.port,
       display: pair.display,
-      state: isWslg ? 'ready' : 'starting',
-      mode: isWslg ? 'wslg' : 'xpra',
+      state: 'starting',
+      mode: 'xpra',
       startedAt,
       leaseExpiresAt,
       requestedFilePath,
@@ -644,37 +968,15 @@ export async function startXpraPoc({ app, distribution, ownerId, generation = 1,
       metrics: { preflightMs: readiness.durationMs, restartCount: 0, reconnectCount: 0, healthFailures: 0, proxyHttpRequests: 0, proxyWebSocketConnections: 0 }
     };
 
-    let appCommand = appDef.command.replaceAll('{sessionId}', id);
-    if (requestedFilePath) {
-      let linuxPath = requestedFilePath;
-      if (/^[a-zA-Z]:[\\/]/.test(linuxPath)) {
-        const drive = linuxPath.charAt(0).toLowerCase();
-        linuxPath = `/mnt/${drive}/${linuxPath.slice(3).replace(/\\/g, '/')}`;
-      }
-      if (/%[fFuU]/.test(appCommand)) {
-        appCommand = appCommand.replace(/%[fFuU]/g, shellQuote(linuxPath));
-      } else {
-        appCommand = `${appCommand} ${shellQuote(linuxPath)}`;
-      }
-    }
+    const appArgv = runtimeArgvFor(appDef, id, requestedFilePath);
 
     sessions.set(id, session);
     writeLedger();
 
-    if (isWslg) {
-      const child = spawn(WSL_EXE, ['-d', session.distribution, '--exec', 'sh', '-c', `nohup ${appCommand} >/dev/null 2>&1 &`], {
-        windowsHide: true,
-        env: safeChildEnvironment(),
-        stdio: 'ignore',
-        detached: true
-      });
-      child.unref();
-      return publicSession(session);
-    }
     const startClock = Date.now();
-    const command = buildXpraStartCommand({ appCommand, port: pair.port, sessionId: id, password: session.xpraPassword });
+    const command = buildXpraStartCommand({ appArgv, port: pair.port, sessionId: id, password: session.xpraPassword, launchIdentity });
 
-    const child = spawn(WSL_EXE, ['-d', session.distribution, '--exec', 'sh', '-c', command], {
+    const child = spawn(WSL_EXE, ['-d', session.distribution, '-u', 'root', '--exec', 'sh', '-c', command], {
       windowsHide: true,
       env: safeChildEnvironment(),
       stdio: ['ignore', 'pipe', 'pipe']
@@ -701,7 +1003,7 @@ export async function startXpraPoc({ app, distribution, ownerId, generation = 1,
     try {
       await withTimeout(waitForWindowsTransport(session, child), START_TIMEOUT_MS, 'XPRA_WINDOWS_TRANSPORT_TIMEOUT', 'Timeout transporte.');
       session.metrics.windowsTransportReadyMs = elapsedMs(startClock);
-      inspectSessionPids(session.distribution, session.display, appCommand).then(pids => {
+      inspectSessionPids(session.id, session.display, appArgv).then(pids => {
         session.xpraPid = pids.xpra;
         session.appPid = pids.app;
         session.xorgPid = pids.xorg;
@@ -728,14 +1030,16 @@ export async function healthXpraPocSession(id) {
   const started = Date.now();
   session.leaseExpiresAt = Date.now() + LEASE_TTL_MS;
 
-  if (session.mode === 'wslg') {
-    session.metrics.lastHealthMs = elapsedMs(started);
-    session.state = 'ready';
-    session.health = { healthy: true, checkedAt: new Date().toISOString(), mode: 'wslg' };
-    return { session: publicSession(session), health: session.health };
-  }
-
-  const linux = await probeWslServer(session);
+  const [linuxProcess, externalWslgRoute] = await Promise.all([
+    probeWslServer(session),
+    probeExternalWslgRoute(session.distribution),
+  ]);
+  const linux = {
+    ...linuxProcess,
+    ok: linuxProcess.ok && !externalWslgRoute,
+    externalWslgRoute,
+    errorCode: externalWslgRoute ? 'WSLG_ABSTRACT_SOCKET_PRESENT' : null,
+  };
   const tcp = await probeWindowsTcp(session.port);
   const http = tcp.ok ? await probeHttp(session.port, session.xpraPassword) : { ok: false };
   const websocket = http.ok ? await probeWebSocket(session.port, session.xpraPassword) : { ok: false };
@@ -744,22 +1048,20 @@ export async function healthXpraPocSession(id) {
   if (!healthy) session.metrics.healthFailures += 1;
   session.state = healthy ? 'ready' : 'degraded';
   session.health = { healthy, checkedAt: new Date().toISOString(), linux, windowsTcp: tcp, http, websocket };
+  if (externalWslgRoute) await stopSessionInternal(session);
   return { session: publicSession(session), health: session.health };
 }
 
 async function stopSessionInternal(session) {
   if (!session || session.state === 'stopped') return publicSession(session);
   session.state = 'stopping';
-  if (session.mode !== 'wslg') {
-    await execWsl(session.distribution, `xpra stop :${session.display} >/dev/null 2>&1 || true`, STOP_TIMEOUT_MS).catch(() => undefined);
-    if (session.child && session.child.exitCode === null) {
-      try { session.child.kill('SIGTERM'); } catch {}
-      await new Promise(r => setTimeout(r, 400));
-      if (session.child.exitCode === null) {
-        try { session.child.kill('SIGKILL'); } catch {}
-      }
+  await terminateSystemSession(session.id).catch(() => undefined);
+  if (session.child && session.child.exitCode === null) {
+    try { session.child.kill('SIGTERM'); } catch {}
+    await new Promise(r => setTimeout(r, 400));
+    if (session.child.exitCode === null) {
+      try { session.child.kill('SIGKILL'); } catch {}
     }
-    await execWsl(session.distribution, `rm -f /tmp/.X11-unix/X${session.display} /tmp/.X${session.display}-lock /tmp/${session.display}/*.pid >/dev/null 2>&1 || true`, 2000).catch(() => undefined);
   }
   session.state = 'stopped';
   if (session.xpraPassword) session.xpraPassword = null;

@@ -167,7 +167,7 @@ export async function getHostCapabilities() {
   if (wsl.installed) {
     try { versionInfo = await getWslVersionInfo(); } catch {}
   }
-  const wslgReady = wsl.operational && Boolean(versionInfo.wslgVersion) && wsl.distributions.some((distro) => distro.version === 2);
+  const containedLinuxReady = wsl.operational && wsl.distributions.some((distro) => distro.version === 2);
   return {
     host: {
       platform: process.platform,
@@ -180,19 +180,19 @@ export async function getHostCapabilities() {
     integration: {
       terminal: true,
       windowsApps: process.platform === 'win32',
-      linuxGuiApps: wslgReady,
-      windowMode: nativeHostActive ? 'native-managed' : 'native-external',
+      linuxGuiApps: containedLinuxReady,
+      windowMode: nativeHostActive ? 'native-managed' : 'unavailable',
       nativeHostActive,
       managedNativeWindows: nativeHostActive,
-      embeddedNativeWindows: false,
+      embeddedNativeWindows: nativeHostActive,
       nativeHostRequired: !nativeHostActive
     },
     limitations: nativeHostActive ? [
-      'Aplicativos Windows e WSLg continuam sendo superfícies nativas, mas o host CloudOS acompanha foco, estado e fechamento.',
-      'Aplicativos elevados, DRM, anti-cheat e janelas protegidas podem recusar gerenciamento.'
+      'Aplicativos Linux usam somente a superfície Xpra interna; WSLg/RAIL não é usado como fallback.',
+      'Aplicativos Windows brokerizados, elevados ou protegidos ficam indisponíveis quando não podem ser contidos antes de aparecer.'
     ] : [
-      'Aplicativos Windows e WSLg são abertos como janelas nativas pelo modo web atual.',
-      'Gerenciar essas janelas a partir do desktop CloudOS exige o host WebView2.'
+      'Aplicativos Windows ficam indisponíveis sem o Host WebView2; nenhuma janela externa é aberta.',
+      'Aplicativos Linux continuam limitados à superfície Xpra interna do CloudOS.'
     ]
   };
 }

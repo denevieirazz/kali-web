@@ -11,7 +11,6 @@ type NativeRequestMethod =
   | 'native.sessions.list'
   | 'native.session.attach'
   | 'native.session.layout'
-  | 'native.session.detach'
   | 'native.session.focus'
   | 'native.session.minimize'
   | 'native.session.maximize'
@@ -43,7 +42,7 @@ export interface NativeViewportBounds {
   height: number;
 }
 
-export type NativeContainmentMode = 'anchored-overlay' | 'external';
+export type NativeContainmentMode = 'anchored-overlay' | 'hidden-quarantine' | 'terminated';
 
 export interface NativeSession {
   sessionId: string;
@@ -186,11 +185,6 @@ class NativeHostBridge {
   async layoutSession(sessionId: string, bounds: NativeViewportBounds, visible: boolean) {
     await this.requireConnection();
     return this.request<{ sessionId: string; accepted: boolean; contained?: boolean; containmentMode?: NativeContainmentMode; visible?: boolean }>('native.session.layout', { sessionId, bounds, visible });
-  }
-
-  async detachSession(sessionId: string) {
-    await this.requireConnection();
-    return this.request<{ sessionId: string; accepted: boolean; contained?: boolean; containmentMode?: NativeContainmentMode }>('native.session.detach', { sessionId });
   }
 
   onSessionsChanged(listener: (sessions: NativeSession[]) => void) {

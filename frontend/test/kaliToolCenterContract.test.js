@@ -14,7 +14,9 @@ test('Kali Tool Center does not expose arbitrary command execution endpoints', (
 
 test('GUI launch continues through opaque catalog IDs', () => {
   const component = read('../src/apps/KaliToolCenter/KaliToolCenter.tsx');
-  assert.match(component, /\/api\/apps\/\$\{encodeURIComponent\(app\.id\)\}\/launch/);
+  assert.match(component, /launchWorkflowApp\(app\.id\)/);
+  assert.match(component, /app\.source !== 'linux'/);
+  assert.doesNotMatch(component, /\/api\/apps\/[^\s]*\/launch/);
   assert.doesNotMatch(component, /app\.path|app\.command|app\.executable/);
 });
 

@@ -1,314 +1,21 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { WSL_EXE, getWslSnapshot, safeChildEnvironment, validateInstalledAsync } from '../wsl/distroService.js';
-import { scanDiscoveredLinuxApps, invalidateDiscoveryCache } from './desktopScanner.js';
+import { invalidateLinuxDesktopAppCache, scanLinuxDesktopApps } from '../apps/linuxDesktopScanner.js';
 import { getActiveDistro } from './distroManager.js';
 
 const execFileAsync = promisify(execFile);
-
-export const CURATED_LINUX_APPS = Object.freeze([
-  {
-    id: 'firefox',
-    name: 'Firefox ESR',
-    packageName: 'firefox-esr',
-    command: 'firefox-esr --no-remote -profile /tmp/cloudos-ff-{sessionId}',
-    category: 'internet',
-    description: 'Navegador web moderno, rápido e seguro da Mozilla.',
-    icon: '🦊',
-    isPopular: true,
-    desktopId: 'firefox-esr'
-  },
-  {
-    id: 'chromium',
-    name: 'Chromium',
-    packageName: 'chromium',
-    command: 'chromium --no-sandbox --disable-gpu',
-    category: 'internet',
-    description: 'Navegador de código aberto base do Google Chrome.',
-    icon: '🌐',
-    isPopular: true,
-    desktopId: 'chromium'
-  },
-  {
-    id: 'code',
-    name: 'Visual Studio Code',
-    packageName: 'code',
-    command: 'code --no-sandbox',
-    category: 'development',
-    description: 'Editor de código-fonte poderoso e extensível da Microsoft.',
-    icon: '💻',
-    isPopular: true,
-    desktopId: 'code'
-  },
-  {
-    id: 'gimp',
-    name: 'GIMP',
-    packageName: 'gimp',
-    command: 'gimp',
-    category: 'graphics',
-    description: 'Editor profissional de imagens e manipulação fotográfica.',
-    icon: '🎨',
-    isPopular: true,
-    desktopId: 'gimp'
-  },
-  {
-    id: 'vlc',
-    name: 'VLC Media Player',
-    packageName: 'vlc',
-    command: 'vlc',
-    category: 'multimedia',
-    description: 'Reprodutor multimídia completo compatível com múltiplos formatos.',
-    icon: '🎬',
-    isPopular: true,
-    desktopId: 'vlc'
-  },
-  {
-    id: 'libreoffice',
-    name: 'LibreOffice',
-    packageName: 'libreoffice',
-    command: 'libreoffice',
-    category: 'office',
-    description: 'Suíte de escritório completa com editor de texto, planilhas e slides.',
-    icon: '📄',
-    isPopular: true,
-    desktopId: 'libreoffice-startcenter'
-  },
-  {
-    id: 'filezilla',
-    name: 'FileZilla',
-    packageName: 'filezilla',
-    command: 'filezilla',
-    category: 'internet',
-    description: 'Cliente FTP, FTPS e SFTP gráfico rápido e confiável.',
-    icon: '📁',
-    isPopular: true,
-    desktopId: 'filezilla'
-  },
-  {
-    id: 'wireshark',
-    name: 'Wireshark',
-    packageName: 'wireshark',
-    command: 'wireshark',
-    category: 'security',
-    description: 'Analisador de protocolos de rede e inspeção de tráfego em tempo real.',
-    icon: '🦈',
-    isPopular: true,
-    desktopId: 'wireshark'
-  },
-  {
-    id: 'galculator',
-    name: 'Calculadora Científica',
-    packageName: 'galculator',
-    command: 'galculator',
-    category: 'utilities',
-    description: 'Calculadora científica avançada baseada em GTK.',
-    icon: '🧮',
-    isPopular: false,
-    desktopId: 'galculator'
-  },
-  {
-    id: 'htop',
-    name: 'Htop Monitor',
-    packageName: 'htop',
-    command: "xterm -fa 'Monospace' -fs 11 -bg black -fg white -e htop",
-    category: 'utilities',
-    description: 'Visualizador de processos interativo em tempo real para Linux.',
-    icon: '📈',
-    isPopular: false,
-    desktopId: 'htop'
-  },
-  {
-    id: 'xclock',
-    name: 'XClock',
-    packageName: 'x11-apps',
-    command: 'xclock',
-    category: 'utilities',
-    description: 'Relógio analógico e digital tradicional do sistema gráfico X11.',
-    icon: '⏱️',
-    isPopular: false,
-    desktopId: 'xclock'
-  },
-  {
-    id: 'xeyes',
-    name: 'XEyes',
-    packageName: 'x11-apps',
-    command: 'xeyes',
-    category: 'utilities',
-    description: 'Aplicativo clássico do X11 que acompanha a posição do cursor do mouse.',
-    icon: '👀',
-    isPopular: false,
-    desktopId: 'xeyes'
-  },
-  {
-    id: 'xterm',
-    name: 'XTerm',
-    packageName: 'xterm',
-    command: "xterm -fa 'Monospace' -fs 11 -bg black -fg white",
-    category: 'utilities',
-    description: 'Emulador de terminal gráfico padrão para o X Window System.',
-    icon: '🖥️',
-    isPopular: false,
-    desktopId: 'xterm'
-  }
-]);
-
-export function getDistroFamily(distroName = '') {
-  const norm = String(distroName || '').toLowerCase();
-  if (norm.includes('ubuntu')) return 'ubuntu';
-  if (norm.includes('kali') || norm.includes('debian')) return 'debian';
-  if (norm.includes('fedora') || norm.includes('rhel') || norm.includes('alma') || norm.includes('centos') || norm.includes('rocky') || norm.includes('oracle')) return 'fedora';
-  if (norm.includes('arch')) return 'arch';
-  if (norm.includes('suse')) return 'suse';
-  if (norm.includes('alpine')) return 'alpine';
-  return 'debian';
-}
-
-export const DISTRO_PACKAGE_MAP = Object.freeze({
-  firefox: {
-    ubuntu: 'firefox',
-    debian: 'firefox-esr',
-    kali: 'firefox-esr',
-    fedora: 'firefox',
-    arch: 'firefox',
-    suse: 'MozillaFirefox',
-    alpine: 'firefox-esr',
-    default: 'firefox-esr'
-  },
-  chromium: {
-    ubuntu: 'chromium-browser',
-    debian: 'chromium',
-    kali: 'chromium',
-    fedora: 'chromium',
-    arch: 'chromium',
-    suse: 'chromium',
-    alpine: 'chromium',
-    default: 'chromium'
-  },
-  xclock: {
-    ubuntu: 'x11-apps',
-    debian: 'x11-apps',
-    kali: 'x11-apps',
-    fedora: 'xorg-x11-apps',
-    arch: 'xorg-xclock',
-    suse: 'xclock',
-    alpine: 'xclock',
-    default: 'x11-apps'
-  },
-  xeyes: {
-    ubuntu: 'x11-apps',
-    debian: 'x11-apps',
-    kali: 'x11-apps',
-    fedora: 'xorg-x11-apps',
-    arch: 'xorg-xeyes',
-    suse: 'xeyes',
-    alpine: 'xeyes',
-    default: 'x11-apps'
-  }
-});
-
-export function resolvePackageNameForDistro(appIdOrPackageName, distroName) {
-  const normKey = String(appIdOrPackageName || '').toLowerCase().trim();
-  const family = getDistroFamily(distroName);
-
-  const curated = CURATED_LINUX_APPS.find(a => a.id.toLowerCase() === normKey || a.packageName.toLowerCase() === normKey);
-  const targetId = curated ? curated.id : normKey;
-
-  const overrides = DISTRO_PACKAGE_MAP[targetId];
-  if (overrides) {
-    if (overrides[family]) return overrides[family];
-    if (overrides.default) return overrides.default;
-  }
-
-  return curated ? curated.packageName : appIdOrPackageName;
-}
-
-export function getCuratedAppsForDistro(distroName) {
-  const family = getDistroFamily(distroName);
-  return CURATED_LINUX_APPS.map(app => {
-    const pkg = resolvePackageNameForDistro(app.id, distroName);
-    let command = app.command;
-    let name = app.name;
-    let desktopId = app.desktopId;
-
-    if (app.id === 'firefox') {
-      if (family === 'ubuntu' || family === 'fedora' || family === 'arch') {
-        name = 'Mozilla Firefox';
-        command = 'firefox --no-remote -profile /tmp/cloudos-ff-{sessionId}';
-        desktopId = 'firefox';
-      } else {
-        name = 'Firefox ESR';
-        command = 'firefox-esr --no-remote -profile /tmp/cloudos-ff-{sessionId}';
-        desktopId = 'firefox-esr';
-      }
-    }
-
-    return {
-      ...app,
-      name,
-      packageName: pkg,
-      command,
-      desktopId
-    };
-  });
-}
-
-const PACKAGE_STATUS_SCRIPT = [
-  'for item in "$@"; do',
-  '  cmd="${item%%:*}"',
-  '  pkg="${item##*:}"',
-  '  if command -v "$cmd" >/dev/null 2>&1; then',
-  '    printf "%s\\0371\\n" "$cmd"',
-  '  elif [ "$cmd" = "firefox-esr" ] && command -v firefox >/dev/null 2>&1; then',
-  '    printf "%s\\0371\\n" "$cmd"',
-  '  elif [ "$cmd" = "firefox" ] && command -v firefox-esr >/dev/null 2>&1; then',
-  '    printf "%s\\0371\\n" "$cmd"',
-  '  elif command -v dpkg >/dev/null 2>&1 && dpkg -s "$pkg" 2>/dev/null | grep -q "Status: install ok installed"; then',
-  '    printf "%s\\0371\\n" "$cmd"',
-  '  elif command -v rpm >/dev/null 2>&1 && rpm -q "$pkg" >/dev/null 2>&1; then',
-  '    printf "%s\\0371\\n" "$cmd"',
-  '  elif command -v pacman >/dev/null 2>&1 && pacman -Q "$pkg" >/dev/null 2>&1; then',
-  '    printf "%s\\0371\\n" "$cmd"',
-  '  elif command -v apk >/dev/null 2>&1 && apk info -e "$pkg" >/dev/null 2>&1; then',
-  '    printf "%s\\0371\\n" "$cmd"',
-  '  else',
-  '    printf "%s\\0370\\n" "$cmd"',
-  '  fi',
-  'done'
-].join('\n');
 
 function commandBinary(command) {
   return String(command || '').trim().split(/\s+/)[0].split('/').pop() || '';
 }
 
-function normalizedCatalogKey(value) {
-  return String(value || '').trim().toLowerCase();
+export function resolvePackageNameForDistro(packageName) {
+  const normalized = String(packageName || '').trim();
+  return /^[a-zA-Z0-9][a-zA-Z0-9._+-]{0,127}$/.test(normalized) ? normalized : '';
 }
 
-function discoveryKeys(app) {
-  return [app?.id, app?.desktopId, app?.packageName, commandBinary(app?.command)]
-    .map(normalizedCatalogKey)
-    .filter(Boolean);
-}
-
-function buildDiscoveryIndex(discovered) {
-  const index = new Map();
-  for (const app of discovered) {
-    for (const key of discoveryKeys(app)) {
-      if (!index.has(key)) index.set(key, app);
-    }
-  }
-  return index;
-}
-
-function findDiscoveredForCurated(app, discoveryIndex) {
-  for (const key of discoveryKeys(app)) {
-    const discovered = discoveryIndex.get(key);
-    if (discovered) return discovered;
-  }
-  return null;
-}
-
-export function parsePackageStatuses(output, catalog = CURATED_LINUX_APPS) {
+export function parsePackageStatuses(output, catalog = []) {
   const statusByCommand = new Map();
   const statusByBinary = new Map();
   for (const rawLine of String(output || '').split(/\r?\n/)) {
@@ -339,56 +46,20 @@ export function parsePackageStatuses(output, catalog = CURATED_LINUX_APPS) {
   });
 }
 
-export function mergeLinuxPackageCatalog(discovered = [], statusMap = new Map(), distroName = '') {
+export function mergeLinuxPackageCatalog(discovered = []) {
   const safeDiscovered = Array.isArray(discovered) ? discovered : [];
-  const discoveryIndex = buildDiscoveryIndex(safeDiscovered);
-  const curatedApps = getCuratedAppsForDistro(distroName);
-
-  const curatedWithStatus = curatedApps.map(app => {
-    const bin = commandBinary(app.command);
-    const disc = findDiscoveredForCurated(app, discoveryIndex);
-    const isInstalled = statusMap.get(bin) === true || (app.id === 'firefox' && (statusMap.get('firefox') === true || statusMap.get('firefox-esr') === true)) || Boolean(disc);
-    return {
-      id: app.id,
-      name: app.name,
-      packageName: app.packageName,
-      command: app.command,
-      category: app.category,
-      description: app.description,
-      icon: disc?.iconUrl || app.icon,
-      iconName: disc?.iconName || null,
-      iconUrl: disc?.iconUrl || null,
-      emojiFallback: app.icon,
-      isPopular: Boolean(app.isPopular),
-      desktopId: app.desktopId || app.id,
-      mimeTypes: Array.isArray(disc?.mimeTypes) ? disc.mimeTypes : [],
-      installed: isInstalled,
-      isCurated: true,
-      isUserApp: true,
-      isTechnical: false
-    };
-  });
-
-  const curatedKeys = new Set();
-  for (const app of curatedApps) {
-    for (const key of discoveryKeys(app)) curatedKeys.add(key);
-  }
-
-  const additionalDiscovered = safeDiscovered.filter(app => {
-    return !discoveryKeys(app).some(key => curatedKeys.has(key));
-  }).map(app => ({
+  return safeDiscovered.map(app => ({
     id: app.id,
     name: app.name,
     genericName: app.genericName,
-    packageName: app.packageName || app.id,
-    command: app.command,
-    category: app.category,
-    categories: app.categories,
+    packageName: app.packageName || app.desktopId || commandBinary(app.command || app.argv?.[0]) || app.id,
+    category: app.category || app.categories?.[0] || 'Utility',
+    categories: Array.isArray(app.categories) ? app.categories : [],
     description: app.comment || app.genericName || `${app.name} para Linux`,
-    icon: app.iconUrl || app.emojiFallback,
-    iconName: app.iconName,
-    iconUrl: app.iconUrl,
-    emojiFallback: app.emojiFallback,
+    icon: app.iconUrl || app.icon || app.emojiFallback || '🐧',
+    iconName: app.iconName || null,
+    iconUrl: app.iconUrl || null,
+    emojiFallback: app.emojiFallback || '🐧',
     isPopular: false,
     desktopId: app.desktopId || app.id,
     terminal: app.terminal,
@@ -398,8 +69,6 @@ export function mergeLinuxPackageCatalog(discovered = [], statusMap = new Map(),
     isUserApp: app.isUserApp !== false,
     isTechnical: app.isTechnical === true
   }));
-
-  return [...curatedWithStatus, ...additionalDiscovered];
 }
 
 export async function resolveActiveDistribution(requestedDistribution, getSnapshot = getWslSnapshot) {
@@ -425,11 +94,9 @@ export async function resolveActiveDistribution(requestedDistribution, getSnapsh
 
 export async function listLinuxPackages(requestedDistribution, dependencies = {}) {
   const getSnapshot = dependencies.getWslSnapshot || getWslSnapshot;
-  const scanApps = dependencies.scanDiscoveredLinuxApps || scanDiscoveredLinuxApps;
-  const runExecFile = dependencies.execFileAsync || execFileAsync;
+  const scanApps = dependencies.scanLinuxDesktopApps || dependencies.scanDiscoveredLinuxApps || scanLinuxDesktopApps;
   const snapshot = await getSnapshot();
   const distribution = await resolveActiveDistribution(requestedDistribution, getSnapshot);
-  const curatedApps = getCuratedAppsForDistro(distribution);
 
   if (!snapshot.operational) {
     return {
@@ -437,37 +104,12 @@ export async function listLinuxPackages(requestedDistribution, dependencies = {}
       distribution: null,
       errorCode: snapshot.errorCode || 'WSL_NOT_OPERATIONAL',
       error: snapshot.error || 'WSL não está operacional.',
-      packages: curatedApps.map(app => ({ ...app, installed: false }))
+      packages: []
     };
   }
 
   const discovered = await scanApps(distribution);
-  const queryItems = curatedApps.map(app => `${commandBinary(app.command)}:${app.packageName}`);
-  const statusMap = new Map();
-
-  try {
-    const { stdout } = await runExecFile(WSL_EXE, [
-      '--distribution', distribution,
-      '--exec', '/bin/sh', '-c', PACKAGE_STATUS_SCRIPT,
-      'cloudos-pkg-status',
-      ...queryItems
-    ], {
-      encoding: 'utf8',
-      env: safeChildEnvironment(),
-      timeout: 8_000,
-      windowsHide: true,
-      maxBuffer: 256 * 1024
-    });
-
-    for (const rawLine of String(stdout || '').split(/\r?\n/)) {
-      const [cmd, rawInstalled] = rawLine.split('\x1f');
-      if (cmd) statusMap.set(commandBinary(cmd), rawInstalled === '1');
-    }
-  } catch {
-    // Discovery remains useful even when the status probe is temporarily unavailable.
-  }
-
-  const allPackages = mergeLinuxPackageCatalog(discovered, statusMap, distribution);
+  const allPackages = mergeLinuxPackageCatalog(discovered);
 
   return {
     operational: true,
@@ -503,32 +145,32 @@ export async function detectDistroPackageManager(distribution) {
 export function buildInstallCommand(pm, pkg) {
   switch (pm) {
     case 'dnf':
-      return `sudo -n dnf install -y ${pkg}`;
+      return `dnf install -y ${pkg}`;
     case 'pacman':
-      return `sudo -n pacman -Sy --noconfirm ${pkg}`;
+      return `pacman -Sy --noconfirm ${pkg}`;
     case 'apk':
-      return `sudo -n apk add ${pkg}`;
+      return `apk add ${pkg}`;
     case 'zypper':
-      return `sudo -n zypper install -y ${pkg}`;
+      return `zypper install -y ${pkg}`;
     case 'apt':
     default:
-      return `DEBIAN_FRONTEND=noninteractive sudo -n apt-get update -qq && DEBIAN_FRONTEND=noninteractive sudo -n apt-get install -y --no-install-recommends ${pkg}`;
+      return `DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${pkg}`;
   }
 }
 
 export function buildUninstallCommand(pm, pkg) {
   switch (pm) {
     case 'dnf':
-      return `sudo -n dnf remove -y ${pkg}`;
+      return `dnf remove -y ${pkg}`;
     case 'pacman':
-      return `sudo -n pacman -R --noconfirm ${pkg}`;
+      return `pacman -R --noconfirm ${pkg}`;
     case 'apk':
-      return `sudo -n apk del ${pkg}`;
+      return `apk del ${pkg}`;
     case 'zypper':
-      return `sudo -n zypper remove -y ${pkg}`;
+      return `zypper remove -y ${pkg}`;
     case 'apt':
     default:
-      return `DEBIAN_FRONTEND=noninteractive sudo -n apt-get remove -y ${pkg}`;
+      return `DEBIAN_FRONTEND=noninteractive apt-get remove -y ${pkg}`;
   }
 }
 
@@ -580,6 +222,7 @@ export async function installLinuxPackage(requestedDistribution, packageId) {
   try {
     const { stdout, stderr } = await execFileAsync(WSL_EXE, [
       '--distribution', distribution,
+      '--user', 'root',
       '--exec', '/bin/sh', '-lc', installCmd
     ], {
       encoding: 'utf8',
@@ -589,7 +232,7 @@ export async function installLinuxPackage(requestedDistribution, packageId) {
       maxBuffer: 4 * 1024 * 1024
     });
 
-    invalidateDiscoveryCache();
+    invalidateLinuxDesktopAppCache(distribution);
 
     return {
       success: true,
@@ -625,6 +268,7 @@ export async function uninstallLinuxPackage(requestedDistribution, packageId) {
   try {
     const { stdout, stderr } = await execFileAsync(WSL_EXE, [
       '--distribution', distribution,
+      '--user', 'root',
       '--exec', '/bin/sh', '-lc', removeCmd
     ], {
       encoding: 'utf8',
@@ -634,7 +278,7 @@ export async function uninstallLinuxPackage(requestedDistribution, packageId) {
       maxBuffer: 2 * 1024 * 1024
     });
 
-    invalidateDiscoveryCache();
+    invalidateLinuxDesktopAppCache(distribution);
 
     return {
       success: true,

@@ -32,3 +32,10 @@ test('fallback desligado é fail-closed', () => {
   assert.match(source, /if \(!wslCoreTerminalFallbackEnabled\(process\.env\)\)/);
   assert.match(source, /ws\.close\(1011, 'WSL Core falhou'\)/);
 });
+
+test('fallback WSL usa o mesmo construtor de containment sem argv gráfico próprio', () => {
+  assert.match(source, /buildContainedLegacyShellArgs\(targetDistro\)/);
+  assert.match(source, /buildWslHostEnvironment\(process\.env\)/);
+  assert.doesNotMatch(source, /GDK_BACKEND=x11/);
+  assert.doesNotMatch(source, /MOZ_ENABLE_WAYLAND=0/);
+});

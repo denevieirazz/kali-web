@@ -1,0 +1,8 @@
+CLOUDOS WINDOWS HWND EVIDENCE: PASS
+phase=Baseline
+collectedAt=08/24/2026 20:23:03
+topLevel=277 altTab=4 targetHwnd=0 targetAltTab=0
+
+ASSERTIONS
+PASS hwnd.target-zero expected=zero top-level HWND matching target process/title/class actual=0
+PASS alttab.target-zero expected=zero target Alt+Tab candidates actual=0

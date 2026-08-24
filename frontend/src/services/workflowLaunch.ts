@@ -3,6 +3,7 @@ import { terminalHereCapability, workflowFileOpenMode, type WorkflowProvider } f
 import { useProcessManager } from '../stores/processManager';
 import { useWindowManager } from '../stores/windowManager';
 import { nativeHostBridge } from './nativeHostBridge';
+import type { AppDefinition } from '../types';
 import type { WorkspaceRecord } from './workflowWorkspace';
 
 export type WorkflowTextFileTarget = {
@@ -11,9 +12,34 @@ export type WorkflowTextFileTarget = {
   name: string;
 };
 
+export function appLaunchUnavailableReason(app: AppDefinition): string | null {
+  if (app.launchable === false || app.launchMode === 'unavailable') {
+    return app.catalogSource === 'windows'
+      ? 'Este aplicativo Windows exige o Host nativo gerenciado do CloudOS. Nenhuma janela externa será aberta.'
+      : 'Este aplicativo Linux não possui uma superfície Xpra contida disponível.';
+  }
+  if (app.catalogSource === 'linux' || app.isLinux) {
+    if (!app.linuxAppId || app.launchMode !== 'xpra-contained') {
+      return 'O lançamento Linux foi bloqueado porque a superfície Xpra contida não foi confirmada.';
+    }
+  }
+  if (app.catalogSource === 'windows' || app.isNative) {
+    if (!nativeHostBridge.available || app.launchMode !== 'native-managed') {
+      return 'Este aplicativo Windows exige o Host nativo gerenciado do CloudOS. Nenhuma janela externa será aberta.';
+    }
+  }
+  if (app.id === 'browser' && !nativeHostBridge.available) {
+    return 'O Browser CloudOS exige o modo Full com Host nativo.';
+  }
+  return null;
+}
+
 export function launchWorkflowApp(appId: string, params?: Record<string, unknown>) {
   const app = useAppRegistry.getState().getApp(appId);
   if (!app) throw new Error(`Aplicativo “${appId}” não está registrado.`);
+
+  const unavailableReason = appLaunchUnavailableReason(app);
+  if (unavailableReason) throw new Error(unavailableReason);
 
   const windowManager = useWindowManager.getState();
   if (app.isSingleInstance) {
@@ -23,6 +49,23 @@ export function launchWorkflowApp(appId: string, params?: Record<string, unknown
       windowManager.focusWindow(existing.id);
       return existing.id;
     }
+  }
+
+  if (app.catalogSource === 'linux' || app.isLinux) {
+    const linuxAppId = app.linuxAppId!;
+    const pid = useProcessManager.getState().createProcess('linux-app-runner', app.name, app.icon);
+    return windowManager.openWindow({
+      title: app.name,
+      icon: app.icon,
+      appId: 'linux-app-runner',
+      width: app.defaultWidth,
+      height: app.defaultHeight,
+      minWidth: app.minWidth,
+      minHeight: app.minHeight,
+      isResizable: app.isResizable,
+      processId: pid,
+      params: { ...params, appId: linuxAppId, app: linuxAppId, distribution: app.distribution, title: app.name, icon: app.icon },
+    });
   }
 
   const pid = useProcessManager.getState().createProcess(app.id, app.name, app.icon);
@@ -85,16 +128,9 @@ export function openWorkspaceTerminal(workspace: WorkspaceRecord) {
 
 export function openExistingBrowser() {
   if (!nativeHostBridge.available) {
-    const openDefault = window.confirm('Browser CloudOS disponível apenas no modo Full. Abrir o navegador padrão nesta sessão WebOnly?');
-    return openDefault ? openDefaultBrowser() : null;
+    throw new Error('Browser CloudOS disponível apenas no modo Full. Nenhuma janela externa foi aberta.');
   }
   return launchWorkflowApp('browser');
-}
-
-export function openDefaultBrowser() {
-  const opened = window.open('about:blank', '_blank', 'noopener,noreferrer');
-  if (!opened) throw new Error('O navegador bloqueou a nova guia. Permita pop-ups para abrir o navegador padrão.');
-  return opened;
 }
 
 export function openSettings() {

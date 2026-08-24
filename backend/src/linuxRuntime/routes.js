@@ -1,13 +1,11 @@
 import crypto from 'node:crypto';
-import fs from 'node:fs';
 import express from 'express';
 import { authenticateToken } from '../middleware/auth.js';
 import { validateInstalledAsync } from '../wsl/distroService.js';
+import { scanLinuxDesktopApps, toPublicLinuxDesktopApp } from '../apps/linuxDesktopScanner.js';
 import { checkXpraPocReadiness, cleanupXpraPoc, getAllowedLinuxPocApps, getXpraPocSessions, healthXpraPocSession, recordXpraPocClientMetrics, restartXpraPoc, startXpraPoc, stopXpraPoc } from './xpraPoc.js';
 import { finalizePhysicalPreflight, startPhysicalPreflight } from './preflight.js';
 import { installLinuxPackage, listLinuxPackages, searchLinuxPackages, uninstallLinuxPackage } from './packageManager.js';
-import { scanDiscoveredLinuxApps } from './desktopScanner.js';
-import { resolveLinuxIconPath, getMimeTypeForIcon } from './iconResolver.js';
 
 import { getActiveDistro, setActiveDistro, listInstalledDistros, listOnlineDistros, installDistro, unregisterDistro, importDistro, provisionDistro, streamProvisionDistro, getCloudOSHome, validateDistroIdentifier } from './distroManager.js';
 
@@ -26,24 +24,6 @@ function sendError(res, error, fallback) {
   const status = error?.statusCode || statusForCode(code, error?.statusCode);
   res.status(status).json({ error: error?.message || 'Erro interno.', errorCode: code, details: error?.details || null });
 }
-
-// Public icon serving endpoint (no token required for img tags)
-linuxRuntimeRouter.get('/icons/:id', (req, res) => {
-  try {
-    const distro = req.query?.distro || 'kali-linux';
-    const iconId = req.params.id;
-    const filePath = resolveLinuxIconPath(distro, iconId);
-    if (!filePath || !fs.existsSync(filePath)) {
-      return res.status(404).send('Icon not found');
-    }
-    const mime = getMimeTypeForIcon(filePath);
-    res.setHeader('Content-Type', mime);
-    res.setHeader('Cache-Control', 'public, max-age=604800');
-    res.sendFile(filePath);
-  } catch {
-    res.status(404).send('Icon error');
-  }
-});
 
 // Public distro lifecycle routes for First Boot Setup & OOBE
 linuxRuntimeRouter.get('/distros', async (req, res) => {
@@ -197,7 +177,8 @@ linuxRuntimeRouter.get('/packages', async (req, res) => {
 linuxRuntimeRouter.get('/discovered', async (req, res) => {
   try {
     const distro = req.query?.distribution || req.query?.distro;
-    const apps = await scanDiscoveredLinuxApps(distro, { force: req.query?.force === 'true' });
+    const internalApps = await scanLinuxDesktopApps(distro, { force: req.query?.force === 'true' });
+    const apps = internalApps.map((app) => toPublicLinuxDesktopApp(app)).filter(Boolean);
     res.json({ apps, count: apps.length });
   } catch (error) {
     sendError(res, error, 'DISCOVERY_SCAN_FAILED');
@@ -254,7 +235,7 @@ linuxRuntimeRouter.get('/poc1', async (req, res) => {
 
 linuxRuntimeRouter.get('/poc1/readiness', async (req, res) => {
   try {
-    res.json(await checkXpraPocReadiness({ app: req.query?.app || 'xclock', distribution: req.query?.distribution || undefined }));
+    res.json(await checkXpraPocReadiness({ app: req.query?.app || null, distribution: req.query?.distribution || undefined }));
   } catch (error) {
     sendError(res, error, 'LINUX_POC_READINESS_FAILED');
   }
@@ -346,7 +327,7 @@ linuxRuntimeRouter.post('/launch', async (req, res) => {
   try {
     const owner = ownerFor(req, req.body?.ownerId);
     const session = await startXpraPoc({
-      app: req.body?.appId || req.body?.app || 'firefox',
+      app: req.body?.appId || req.body?.app || null,
       ownerId: owner,
       distribution: req.body?.distribution,
       filePath: req.body?.filePath,

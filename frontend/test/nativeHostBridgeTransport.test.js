@@ -16,10 +16,11 @@ function methodBody(name) {
 }
 
 test('all native session operations establish the WebView host handshake first', () => {
-  for (const method of ['launchApp', 'listSessions', 'operate', 'attachSession', 'layoutSession', 'detachSession']) {
+  for (const method of ['launchApp', 'listSessions', 'operate', 'attachSession', 'layoutSession']) {
     const body = methodBody(method);
     assert.match(body, /await this\.requireConnection\(\)/, `${method} must handshake before sending a protected native request`);
   }
+  assert.doesNotMatch(source, /detachSession|native\.session\.detach/);
 });
 
 test('bridge request removes pending state when postMessage fails synchronously', () => {

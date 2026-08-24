@@ -20,7 +20,7 @@ import { filesRouter } from './files/routes.js';
 import { productRouter } from './product/routes.js';
 import { linuxRuntimeRouter } from './linuxRuntime/routes.js';
 import { xpraHttpProxyMiddleware } from './linuxRuntime/xpraProxy.js';
-import { resolveLinuxIconPath, getMimeTypeForIcon } from './linuxRuntime/iconResolver.js';
+import { readLinuxDesktopIcon } from './apps/linuxDesktopScanner.js';
 import { createHostTrustPolicy, hasSupervisorTrust } from './auth/hostTrust.js';
 import { authenticateToken, requireAdmin } from './middleware/auth.js';
 
@@ -117,19 +117,19 @@ export function createApp(initialPort, options = {}) {
   // O token é emitido apenas pela API autenticada da POC e nunca é encaminhado ao Xpra.
   app.use(xpraHttpProxyMiddleware);
 
-  // Public Linux app icon endpoint for <img> tags
-  app.get('/__cloudos/linux-runtime/icons/:id', (req, res) => {
+  // Desktop entries expose only an opaque app ID. Icon names and Linux paths are
+  // resolved again inside the trusted scanner boundary and never accepted here.
+  app.get('/__cloudos/linux-runtime/apps/:id/icon', async (req, res) => {
     try {
-      const distro = req.query?.distro || 'kali-linux';
-      const iconId = req.params.id;
-      const filePath = resolveLinuxIconPath(distro, iconId);
-      if (!filePath || !fs.existsSync(filePath)) {
-        return res.status(404).send('Icon not found');
-      }
-      const mime = getMimeTypeForIcon(filePath);
-      res.setHeader('Content-Type', mime);
+      const distribution = req.query?.distribution || req.query?.distro;
+      const icon = await readLinuxDesktopIcon(req.params.id, distribution);
+      if (!icon) return res.status(404).send('Icon not found');
+      res.setHeader('Content-Type', icon.mimeType);
       res.setHeader('Cache-Control', 'public, max-age=604800');
-      res.sendFile(filePath);
+      res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'; style-src 'unsafe-inline'");
+      res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.end(icon.data);
     } catch {
       res.status(404).send('Icon error');
     }

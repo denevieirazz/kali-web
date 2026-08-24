@@ -1,5 +1,36 @@
 using CloudOS.Host.Browser;
+using CloudOS.Host.Native;
 using CloudOS.Host.Security;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text.Json;
+
+if (args is ["--native-contained-fixture-exit"]) return;
+if (args is ["--native-contained-fixture-wait"])
+{
+    Thread.Sleep(TimeSpan.FromSeconds(30));
+    return;
+}
+if (args is ["--native-contained-fixture-window"])
+{
+    NativeFixtureWindow.RunVisibleMessageLoop();
+    return;
+}
+if (args is ["--native-contained-fixture-spawn-window-child"])
+{
+    var childStart = new ProcessStartInfo
+    {
+        FileName = Environment.ProcessPath ?? throw new InvalidOperationException("The test process path is unavailable."),
+        UseShellExecute = false
+    };
+    foreach (var argument in FixtureArguments("--native-contained-fixture-window"))
+        childStart.ArgumentList.Add(argument);
+    using var child = Process.Start(childStart)
+        ?? throw new InvalidOperationException("The contained child fixture could not be started.");
+    Thread.Sleep(TimeSpan.FromSeconds(30));
+    return;
+}
 
 var tests = new (string Name, Action Run)[]
 {
@@ -21,7 +52,15 @@ var tests = new (string Name, Action Run)[]
     ("browser state normalization enforces limits", BrowserStateEnforcesLimits),
     ("browser state restores optional session safely", BrowserStateRestoresOptionalSession),
     ("browser state recovers from corruption", BrowserStateRecoversFromCorruption),
-    ("browser state can recover from atomic backup", BrowserStateRecoversBackup)
+    ("browser state can recover from atomic backup", BrowserStateRecoversBackup),
+    ("native launch accepts only direct host descriptors", NativeLaunchAcceptsOnlyDirectDescriptors),
+    ("native launch rejects broker and UWP kinds", NativeLaunchRejectsBrokersAndUwp),
+    ("native launch reports managed only after HWND correlation", NativeLaunchReportsManagedOnlyAfterCorrelation),
+    ("native containment failures require termination", NativeContainmentFailuresRequireTermination),
+    ("native launch descriptor preserves argv JSON", NativeLaunchDescriptorPreservesArgvJson),
+    ("native command line quoting is bounded", NativeCommandLineQuotingIsBounded),
+    ("native launcher tracks suspended process before resume", NativeLauncherTracksSuspendedProcessBeforeResume),
+    ("native job child HWND is quarantined and escape is detected", NativeJobChildWindowIsQuarantined)
 };
 
 foreach (var test in tests)
@@ -241,6 +280,183 @@ static void BrowserStateRecoversBackup()
     Assert(recovered.History.Count >= 1, "A valid atomic backup must recover state after corruption.");
 }
 
+static void NativeLaunchAcceptsOnlyDirectDescriptors()
+{
+    Assert(NativeLaunchContainmentPolicy.EvaluateLaunchKind("windows-executable").Allowed,
+        "A direct executable descriptor must be eligible for host-owned suspended launch.");
+    Assert(NativeLaunchContainmentPolicy.EvaluateLaunchKind("windows-shortcut-direct").Allowed,
+        "A verified shortcut target descriptor must be eligible for host-owned suspended launch.");
+    Assert(NativeLaunchContainmentPolicy.AllowsArgumentVector("windows-shortcut-direct", 0),
+        "A direct shortcut target with no raw shortcut arguments may reach the Host boundary.");
+    Assert(!NativeLaunchContainmentPolicy.AllowsArgumentVector("windows-shortcut-direct", 1),
+        "A shortcut argument string must never be approximated as argv.");
+    Assert(NativeLaunchContainmentPolicy.AllowsArgumentVector("windows-executable", 3),
+        "A direct executable may carry a validated argv array.");
+    Assert(!NativeLaunchContainmentPolicy.EvaluateLaunchKind(null).Allowed, "A missing launch kind must fail closed.");
+}
+
+static void NativeLaunchRejectsBrokersAndUwp()
+{
+    foreach (var kind in new[] { "windows-start-app", "windows-shortcut", "uwp", "protocol", "brokered", "" })
+    {
+        var decision = NativeLaunchContainmentPolicy.EvaluateLaunchKind(kind);
+        Assert(!decision.Allowed && decision.ErrorCode == "APP_LAUNCH_KIND_UNSUPPORTED", $"Launch kind {kind} must be unavailable.");
+    }
+
+    foreach (var broker in new[] { "explorer", "RuntimeBroker", "ApplicationFrameHost", "wslhost" })
+        Assert(NativeLaunchContainmentPolicy.IsSharedBroker(broker), $"Shared broker {broker} must never be adopted or killed.");
+}
+
+static void NativeLaunchReportsManagedOnlyAfterCorrelation()
+{
+    Assert(!NativeLaunchContainmentPolicy.CanReportManaged(true, false, false), "A tracked PID without an HWND is not managed.");
+    Assert(!NativeLaunchContainmentPolicy.CanReportManaged(true, true, true), "A broker HWND is not an exclusive managed capability.");
+    Assert(NativeLaunchContainmentPolicy.CanReportManaged(true, true, false), "A direct tracked process with a quarantined HWND may be reported managed.");
+}
+
+static void NativeContainmentFailuresRequireTermination()
+{
+    foreach (var failure in Enum.GetValues<NativeContainmentFailure>())
+        Assert(NativeLaunchContainmentPolicy.RequiresTermination(failure), $"Failure {failure} must terminate instead of restoring an external window.");
+}
+
+static void NativeLaunchDescriptorPreservesArgvJson()
+{
+    var processPath = Environment.ProcessPath ?? throw new InvalidOperationException("The test process path is unavailable.");
+    var json = JsonSerializer.Serialize(new
+    {
+        executable = processPath,
+        arguments = new[] { "--profile", "path with spaces\\", "quoted\"value", "" },
+        workingDirectory = AppContext.BaseDirectory
+    });
+    var descriptor = JsonSerializer.Deserialize<NativeProcessLaunchDescriptor>(json)
+        ?? throw new InvalidOperationException("The native launch descriptor was not deserialized.");
+    Assert(descriptor.Arguments is ["--profile", "path with spaces\\", "quoted\"value", ""],
+        "The backend-to-host contract must preserve exact argv entries and quoting boundaries.");
+    var validated = descriptor.Validate();
+    Assert(validated.Arguments.SequenceEqual(descriptor.Arguments!), "Validation must not split or rewrite argv.");
+
+    AssertThrowsJson(() => JsonSerializer.Deserialize<NativeProcessLaunchDescriptor>(
+        """{"executable":"C:\\app.exe","arguments":"--unsafe split","workingDirectory":"C:\\"}"""));
+    AssertThrowsArgument(() => (JsonSerializer.Deserialize<NativeProcessLaunchDescriptor>(
+        """{"executable":"C:\\app.exe","workingDirectory":"C:\\"}""")
+        ?? throw new InvalidOperationException()).Validate());
+}
+
+static void NativeCommandLineQuotingIsBounded()
+{
+    Assert(NativeContainedProcessLauncher.QuoteArgument("") == "\"\"", "Empty argv entries must be preserved.");
+    Assert(NativeContainedProcessLauncher.QuoteArgument("plain") == "plain", "Plain arguments must not be rewritten.");
+    Assert(NativeContainedProcessLauncher.QuoteArgument("a b\\") == "\"a b\\\\\"", "Trailing backslashes in quoted arguments must be doubled.");
+    Assert(NativeContainedProcessLauncher.QuoteArgument("a\"b") == "\"a\\\"b\"", "Embedded quotes must be escaped using CommandLineToArgvW rules.");
+
+    var processPath = Environment.ProcessPath ?? throw new InvalidOperationException("The test process path is unavailable.");
+    var spec = NativeProcessLaunchSpec.Create(processPath, FixtureArguments("--native-contained-fixture-exit"), AppContext.BaseDirectory);
+    Assert(Path.IsPathFullyQualified(spec.Executable) && spec.Executable.EndsWith(".exe", StringComparison.OrdinalIgnoreCase), "Launch specs must resolve an existing local .exe.");
+    AssertThrowsArgument(() => NativeProcessLaunchSpec.Create("relative.exe", [], null));
+    var explorer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
+    AssertThrowsArgument(() => NativeProcessLaunchSpec.Create(explorer, [], null));
+}
+
+static void NativeLauncherTracksSuspendedProcessBeforeResume()
+{
+    var processPath = Environment.ProcessPath ?? throw new InvalidOperationException("The test process path is unavailable.");
+    var spec = NativeProcessLaunchSpec.Create(processPath, FixtureArguments("--native-contained-fixture-wait"), AppContext.BaseDirectory);
+    using var lease = NativeContainedProcessLauncher.StartSuspended(spec);
+    using var windows = new NativeWindowManager();
+    Assert(!lease.IsResumed && !lease.Process.HasExited, "The fixture must be alive and suspended before tracking.");
+    windows.TrackLaunchedProcess(lease.Process);
+    Assert(windows.IsTrackedProcess(lease.ProcessId), "The exact suspended process must be tracked before ResumeThread.");
+    lease.Resume();
+    Assert(lease.IsResumed, "The tracked primary thread must resume exactly once.");
+    Assert(lease.TryTerminate(3_000, out var error), error ?? "The kill-on-close Job did not terminate the fixture.");
+    Assert(windows.TryTerminateTrackedProcess(lease.ProcessId, out error), error ?? "The exited fixture capability was not revoked.");
+}
+
+static void NativeJobChildWindowIsQuarantined()
+{
+    var processPath = Environment.ProcessPath ?? throw new InvalidOperationException("The test process path is unavailable.");
+    var spec = NativeProcessLaunchSpec.Create(
+        processPath,
+        FixtureArguments("--native-contained-fixture-spawn-window-child"),
+        AppContext.BaseDirectory);
+    using var lease = NativeContainedProcessLauncher.StartSuspended(spec);
+    using var windows = new NativeWindowManager();
+    windows.TrackLaunchedProcess(lease.Process);
+    lease.Resume();
+
+    NativeWindowSnapshot? childWindow = null;
+    IReadOnlyList<int> members = [];
+    var deadline = DateTimeOffset.UtcNow.AddSeconds(8);
+    while (DateTimeOffset.UtcNow < deadline && childWindow is null)
+    {
+        members = NativeContainedJobTracker.Synchronize(lease, windows);
+        windows.Refresh();
+        childWindow = windows.GetWindows()
+            .FirstOrDefault(window => window.ProcessId != lease.ProcessId
+                && window.Title == NativeFixtureWindow.Title);
+        if (childWindow is null) Thread.Sleep(25);
+    }
+
+    Assert(members.Count >= 2, "The root wrapper and its child must both remain inside the Job.");
+    Assert(childWindow is not null, "The child-created HWND must be correlated through Job membership.");
+    var quarantinedWindow = childWindow
+        ?? throw new InvalidOperationException("The child-created HWND was not observed.");
+    Assert(!quarantinedWindow.IsVisible && windows.IsTrackedProcess(quarantinedWindow.ProcessId),
+        "A child HWND must be hidden and tracked before it becomes a public session.");
+
+    var owner = NativeFixtureWindow.CreateHiddenOwner();
+    try
+    {
+        var bounds = new NativeWindowBounds(100, 100, 360, 240);
+        Assert(windows.TryAttach(quarantinedWindow.Handle, owner.ToInt64(), bounds, true, out var attachError),
+            attachError ?? "The fixture HWND could not be attached.");
+
+        var hwnd = new IntPtr(quarantinedWindow.Handle);
+        NativeMethods.SetWindowStyle(
+            hwnd,
+            NativeMethods.GetWindowStyle(hwnd) | NativeMethods.WS_CAPTION);
+        windows.Refresh();
+
+        Assert(windows.TryGetContainmentFailure(quarantinedWindow.ProcessId, out var failure)
+            && failure.Contains("frame", StringComparison.Ordinal),
+            "Restoring an external window frame must be recorded as terminal containment loss.");
+        Assert(!NativeMethods.IsWindowVisible(hwnd), "A containment escape must be hidden before Job termination.");
+    }
+    finally
+    {
+        NativeFixtureWindow.Destroy(owner);
+    }
+
+    Assert(lease.TryTerminate(3_000, out var terminationError),
+        terminationError ?? "The Job did not terminate the wrapper and child fixture.");
+    foreach (var processId in members)
+        Assert(windows.TryTerminateTrackedProcess(processId, out terminationError),
+            terminationError ?? "A child process capability was not revoked after Job termination.");
+}
+
+static string[] FixtureArguments(string fixtureArgument)
+{
+    var processPath = Environment.ProcessPath ?? throw new InvalidOperationException("The test process path is unavailable.");
+    return string.Equals(Path.GetFileNameWithoutExtension(processPath), "dotnet", StringComparison.OrdinalIgnoreCase)
+        ? [System.Reflection.Assembly.GetExecutingAssembly().Location, fixtureArgument]
+        : [fixtureArgument];
+}
+
+static void AssertThrowsArgument(Action action)
+{
+    try { action(); }
+    catch (ArgumentException) { return; }
+    throw new InvalidOperationException("An invalid native launch descriptor was accepted.");
+}
+
+static void AssertThrowsJson(Action action)
+{
+    try { action(); }
+    catch (JsonException) { return; }
+    throw new InvalidOperationException("A raw command-line string was accepted as argv JSON.");
+}
+
 static void AssertThrows(Action action)
 {
     try { action(); }
@@ -267,4 +483,123 @@ sealed class TempDirectory : IDisposable
             Console.Error.WriteLine($"WARN temp cleanup failed: {error.GetType().Name}");
         }
     }
+}
+
+static class NativeFixtureWindow
+{
+    internal const string Title = "CloudOS Native Containment Fixture";
+    private const uint WsOverlappedWindow = 0x00CF0000;
+    private const uint WsPopup = 0x80000000;
+    private const uint WsVisible = 0x10000000;
+    private const uint WsExAppWindow = 0x00040000;
+
+    internal static void RunVisibleMessageLoop()
+    {
+        var hwnd = CreateWindowEx(
+            WsExAppWindow,
+            "STATIC",
+            Title,
+            WsPopup | WsVisible,
+            20,
+            20,
+            420,
+            280,
+            IntPtr.Zero,
+            IntPtr.Zero,
+            GetModuleHandle(null),
+            IntPtr.Zero);
+        if (hwnd == IntPtr.Zero)
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "The native fixture HWND could not be created.");
+        ShowWindow(hwnd, 5);
+        UpdateWindow(hwnd);
+        while (GetMessage(out var message, IntPtr.Zero, 0, 0) > 0)
+        {
+            TranslateMessage(ref message);
+            DispatchMessage(ref message);
+        }
+    }
+
+    internal static IntPtr CreateHiddenOwner()
+    {
+        var hwnd = CreateWindowEx(
+            0,
+            "STATIC",
+            "CloudOS Test Owner",
+            WsOverlappedWindow,
+            0,
+            0,
+            640,
+            480,
+            IntPtr.Zero,
+            IntPtr.Zero,
+            GetModuleHandle(null),
+            IntPtr.Zero);
+        if (hwnd == IntPtr.Zero)
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "The test owner HWND could not be created.");
+        return hwnd;
+    }
+
+    internal static void Destroy(IntPtr hwnd)
+    {
+        if (hwnd != IntPtr.Zero) DestroyWindow(hwnd);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Point
+    {
+        internal int X;
+        internal int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Message
+    {
+        internal IntPtr Hwnd;
+        internal uint Value;
+        internal UIntPtr WParam;
+        internal IntPtr LParam;
+        internal uint Time;
+        internal Point Location;
+        internal uint Private;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr GetModuleHandle(string? moduleName);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateWindowEx(
+        uint extendedStyle,
+        string className,
+        string windowName,
+        uint style,
+        int x,
+        int y,
+        int width,
+        int height,
+        IntPtr parent,
+        IntPtr menu,
+        IntPtr instance,
+        IntPtr parameter);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ShowWindow(IntPtr hwnd, int command);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool UpdateWindow(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    private static extern int GetMessage(out Message message, IntPtr hwnd, uint min, uint max);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool TranslateMessage(ref Message message);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr DispatchMessage(ref Message message);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DestroyWindow(IntPtr hwnd);
 }

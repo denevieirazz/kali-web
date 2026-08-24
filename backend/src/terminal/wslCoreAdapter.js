@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import net from 'node:net';
+import { buildContainedCoreBootstrapArgs, buildWslHostEnvironment } from './wslTerminalContainment.js';
 
 export const WSL_CORE_PROTOCOL = 2;
 export const WSL_CORE_PROTECTION = 'aes-256-gcm-seq';
@@ -119,10 +120,18 @@ class Channel {
 
 export function validateLinuxCorePath(path) { if (typeof path !== 'string' || path.length > 4096 || !LINUX_PATH.test(path)) throw new WslCoreAdapterError('CORE_PATH_INVALID', 'cloudos-core Linux path is invalid.'); return path; }
 function validateDistribution(name) { if (!DISTRO.test(name || '')) throw new WslCoreAdapterError('DISTRO_INVALID', 'WSL distribution identifier is invalid.'); }
-export const buildBootstrapArgs = (distribution, linuxCorePath) => { validateDistribution(distribution); validateLinuxCorePath(linuxCorePath); return ['--distribution', distribution, '--exec', linuxCorePath, 'serve']; };
+export const buildBootstrapArgs = (distribution, linuxCorePath) => {
+  validateDistribution(distribution);
+  validateLinuxCorePath(linuxCorePath);
+  return buildContainedCoreBootstrapArgs(distribution, linuxCorePath);
+};
 export const wslCoreTerminalEnabled = env => env.CLOUDOS_WSL_CORE_TERMINAL === '1';
 export const wslCoreTerminalFallbackEnabled = env => env.CLOUDOS_WSL_CORE_TERMINAL_FALLBACK === '1';
-function safeEnv() { const out = {}; for (const [k,v] of Object.entries(process.env)) if (typeof v === 'string' && !SENSITIVE.test(k)) out[k] = v; return out; }
+function safeEnv() {
+  const out = buildWslHostEnvironment(process.env);
+  for (const key of Object.keys(out)) if (SENSITIVE.test(key)) delete out[key];
+  return out;
+}
 
 export function sanitizeBootstrapStderr(value) {
   const text = String(value ?? '')

@@ -49,7 +49,7 @@ test('Linux runtime recovery: WSLInterop probe failure remains fail-closed', () 
   assert.doesNotMatch(runtime, /WSL_INTEROP_ASSUMED_VALID/);
 });
 
-test('Linux runtime allocator: never destroys a live DISPLAY while trying to clean stale Xpra state', () => {
+test('Linux runtime allocator isolates DISPLAY state and never removes another session files', () => {
   const runtime = read('backend', 'src', 'linuxRuntime', 'xpraPoc.js');
   const buildStart = runtime.indexOf('export function buildXpraStartCommand');
   const buildEnd = runtime.indexOf('async function execWsl');
@@ -59,12 +59,15 @@ test('Linux runtime allocator: never destroys a live DISPLAY while trying to cle
   const reserveBlock = runtime.slice(reserveStart, reserveEnd);
 
   assert.ok(buildStart >= 0 && buildEnd > buildStart);
-  assert.match(buildBlock, /XPRA_DISPLAY_BUSY/);
-  assert.match(buildBlock, /xpra info :\$\{display\}/);
+  assert.match(buildBlock, /mount -t tmpfs[^'\"]*\/tmp/);
+  assert.match(buildBlock, /mount -t tmpfs[^'\"]*\/run\/xpra/);
+  assert.match(buildBlock, /--kill-child=KILL/);
   assert.doesNotMatch(buildBlock, /xpra stop :\$\{display\}/);
-  assert.match(buildBlock, /\/tmp\/\.X\$\{display\}-lock/);
+  assert.doesNotMatch(buildBlock, /rm -rf[^\n]*\/run\/xpra/);
+  assert.doesNotMatch(buildBlock, /rm -f[^\n]*cloudos-\*-poc/);
 
   assert.ok(reserveStart >= 0 && reserveEnd > reserveStart);
-  assert.match(reserveBlock, /probeWslServer\(\{ distribution: distro, display \}\)/);
-  assert.match(reserveBlock, /if \(linux\.ok\) continue/);
+  assert.match(reserveBlock, /probeWslTcpAvailable\(distro, port\)/);
+  assert.match(reserveBlock, /if \(win\.ok \|\| !wslPortFree\) continue/);
+  assert.doesNotMatch(reserveBlock, /probeWslServer/);
 });

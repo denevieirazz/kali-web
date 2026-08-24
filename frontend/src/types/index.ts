@@ -284,8 +284,24 @@ export interface AppDefinition {
   isResizable: boolean;
   isSingleInstance: boolean;
   hasFrame?: boolean;
-  category: 'system' | 'productivity' | 'utilities' | 'entertainment';
+  category: string;
   binaryPath?: string;
+  genericName?: string;
+  comment?: string;
+  keywords?: string[];
+  categories?: string[];
+  mimeTypes?: string[];
+  iconUrl?: string | null;
+  emojiFallback?: string;
+  catalogSource?: 'windows' | 'linux';
+  source?: 'windows' | 'linux';
+  distribution?: string | null;
+  launchMode?: 'cloudos' | 'native-managed' | 'xpra-contained' | 'unavailable';
+  launchable?: boolean;
   isLinux?: boolean;
   linuxAppId?: string;
+  isNative?: boolean;
+  nativeAppId?: string;
+  isUserApp?: boolean;
+  isTechnical?: boolean;
 }

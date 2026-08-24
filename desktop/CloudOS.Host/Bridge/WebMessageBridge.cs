@@ -1,4 +1,6 @@
+using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -19,11 +21,9 @@ namespace CloudOS.Host.Bridge;
 public sealed class WebMessageBridge : IDisposable
 {
     private const int MaxMessageLength = 32 * 1024;
+    private const int IdleRefreshMilliseconds = 1_200;
+    private const int ActiveContainmentRefreshMilliseconds = 100;
     private static readonly Regex AppIdPattern = new("^native-[a-f0-9]{24}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
-    private static readonly HashSet<string> BrokerProcessNames = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "explorer", "wsl", "wslhost", "wslservice", "msrdc", "mstsc", "dwm"
-    };
 
     private readonly WebView2 _webView;
     private readonly Uri _trustedDocumentOrigin;
@@ -44,7 +44,12 @@ public sealed class WebMessageBridge : IDisposable
     };
     private readonly Dictionary<long, string> _sessionIdsByHandle = new();
     private readonly Dictionary<string, long> _handlesBySessionId = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, int> _processIdsBySessionId = new(StringComparer.Ordinal);
+    private readonly Dictionary<int, NativeContainedProcessLease> _launchLeasesByProcessId = new();
+    private readonly Dictionary<int, int> _launchRootByMemberProcessId = new();
+    private readonly Dictionary<int, (DateTimeOffset Deadline, NativeContainmentFailure Failure)> _terminationRetriesByRoot = new();
     private readonly Dictionary<long, AttachedSurfaceRequest> _surfacesByHandle = new();
+    private readonly Dictionary<long, DateTimeOffset> _pendingAttachDeadlinesByHandle = new();
     private readonly HashSet<Guid> _inFlight = new();
     private readonly Queue<DateTime> _recentMessages = new();
     private readonly DispatcherTimer _refreshTimer;
@@ -83,11 +88,13 @@ public sealed class WebMessageBridge : IDisposable
         var browserDevTools = string.Equals(Environment.GetEnvironmentVariable("CLOUDOS_BROWSER_DEVTOOLS"), "1", StringComparison.Ordinal);
         _browserManager = new BrowserManager(dispatcher, trustedDocumentOrigin, backendOrigin, browserDevTools, BrowserDiagnostics.Write);
         _windows.WindowChanged += OnNativeWindowChanged;
-        _refreshTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(1200), DispatcherPriority.Background, (_, _) =>
+        _refreshTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(IdleRefreshMilliseconds), DispatcherPriority.Background, (_, _) =>
         {
             try
             {
+                SynchronizeAllTrackedJobs();
                 _windows.Refresh();
+                SweepContainmentDeadlines();
             }
             catch (ObjectDisposedException error)
             {
@@ -116,9 +123,7 @@ public sealed class WebMessageBridge : IDisposable
     public void ResetDocument()
     {
         _handshakeComplete = false;
-        foreach (var handle in _surfacesByHandle.Keys.ToArray())
-            _windows.TryDetach(handle, out _);
-        _surfacesByHandle.Clear();
+        TerminateAllManagedProcesses(NativeContainmentFailure.DocumentReset);
     }
 
     private async void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs eventArgs)
@@ -208,7 +213,7 @@ public sealed class WebMessageBridge : IDisposable
             case "native.session.restore":
                 return Operate(parameters, _windows.TryRestore);
             case "native.session.close":
-                return Operate(parameters, _windows.TryClose);
+                return await CloseSessionAsync(parameters);
             case "native.session.attach":
                 return Attach(parameters);
             case "native.session.layout":
@@ -259,8 +264,11 @@ public sealed class WebMessageBridge : IDisposable
         if (!AppIdPattern.IsMatch(appId)) throw new BridgeException("INVALID_APP_ID", "Aplicativo inválido.");
         if (token.Length is < 16 or > 8192) throw new BridgeException("INVALID_AUTH", "Sessão inválida.");
 
+        if (string.IsNullOrWhiteSpace(_hostLeaseToken))
+            throw new BridgeException("HOST_CONTAINMENT_UNAVAILABLE", "O Host não possui uma credencial válida para solicitar o descritor de lançamento.");
         using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(_backendOrigin, $"/api/apps/{Uri.EscapeDataString(appId)}/launch"));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        request.Headers.Add("X-CloudOS-Host-Token", _hostLeaseToken);
         request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
         using var response = await _http.SendAsync(request);
         if (!response.IsSuccessStatusCode)
@@ -274,34 +282,95 @@ public sealed class WebMessageBridge : IDisposable
         await using var body = await response.Content.ReadAsStreamAsync();
         var launched = await JsonSerializer.DeserializeAsync<LaunchResponse>(body)
             ?? throw new BridgeException("APP_LAUNCH_FAILED", "Resposta de lançamento inválida.");
-        var managed = false;
-        string? managementReason = null;
-        if (launched.Pid > 0)
+
+        var admission = NativeLaunchContainmentPolicy.EvaluateLaunchKind(launched.LaunchKind);
+        if (!admission.Allowed)
+            throw new BridgeException(admission.ErrorCode!, admission.Message!);
+        if (launched.LaunchSpec is null)
+            throw new BridgeException("APP_LAUNCH_SPEC_INVALID", "O agente local não retornou um descritor de lançamento.");
+        if (!NativeLaunchContainmentPolicy.AllowsArgumentVector(
+            launched.LaunchKind,
+            launched.LaunchSpec.Arguments?.Length ?? -1))
+            throw new BridgeException("APP_LAUNCH_SPEC_INVALID", "O descritor de atalho contém argumentos que não podem ser preservados com segurança.");
+
+        NativeProcessLaunchSpec launchSpec;
+        try
         {
-            try
-            {
-                using var process = Process.GetProcessById(launched.Pid);
-                if (BrokerProcessNames.Contains(process.ProcessName)) managementReason = "A janela usa um broker compartilhado do Windows/WSLg.";
-                else { _windows.TrackLaunchedProcess(process); managed = true; }
-            }
-            catch (Exception error) when (error is ArgumentException or InvalidOperationException)
-            {
-                BrowserDiagnostics.Write("native_process_tracking_failed", $"type={error.GetType().Name}");
-                managementReason = "O processo entregou a janela a outro componente do Windows.";
-            }
+            launchSpec = launched.LaunchSpec.Validate();
+        }
+        catch (Exception error) when (error is ArgumentException or IOException or NotSupportedException or UnauthorizedAccessException)
+        {
+            BrowserDiagnostics.Write("native_launch_spec_rejected", $"type={error.GetType().Name}");
+            throw new BridgeException("APP_LAUNCH_SPEC_INVALID", "O descritor de lançamento do aplicativo é inválido.");
         }
 
-        return new
+        NativeContainedProcessLease? launchLease = null;
+        var registered = false;
+        try
         {
-            name = launched.Name,
-            source = launched.Source,
-            distribution = launched.Distribution,
-            pid = launched.Pid,
-            windowMode = managed ? "native-managed" : launched.WindowMode,
-            managed,
-            managementReason,
-            sessionId = launched.Pid > 0 ? GetSessionIdForProcess(launched.Pid) : null
-        };
+            launchLease = NativeContainedProcessLauncher.StartSuspended(launchSpec);
+            var launchedProcess = launchLease.Process;
+            if (NativeLaunchContainmentPolicy.IsSharedBroker(launchedProcess.ProcessName))
+                throw new BridgeException("BROKERED_WINDOW_UNSUPPORTED", "Um broker compartilhado não pode ser iniciado como aplicativo contido.");
+
+            // The process has not executed a single application instruction yet. Install the
+            // exact PID/start-time capability and only then release its primary thread.
+            _windows.TrackLaunchedProcess(launchedProcess);
+            registered = true;
+            _launchLeasesByProcessId.Add(launchLease.ProcessId, launchLease);
+            _launchRootByMemberProcessId.Add(launchLease.ProcessId, launchLease.ProcessId);
+            _refreshTimer.Interval = TimeSpan.FromMilliseconds(ActiveContainmentRefreshMilliseconds);
+            launchLease.Resume();
+
+            var window = await WaitForQuarantinedWindowAsync(launchLease);
+            if (window is null)
+            {
+                TerminateProcessAndForget(launchLease.ProcessId, NativeContainmentFailure.WindowCorrelationTimeout);
+                throw new BridgeException(
+                    "NATIVE_WINDOW_NOT_FOUND",
+                    "Nenhuma janela rastreável apareceu sob quarentena antes do limite de contenção.");
+            }
+
+            var processTracked = _windows.IsTrackedProcess(window.ProcessId);
+            var hasTrackableWindow = _windows.GetWindows(window.ProcessId)
+                .Any(item => item.Handle == window.Handle && !item.IsAttached && !item.IsVisible);
+            var sharedBroker = IsSharedBrokerProcess(window.ProcessId);
+            if (!NativeLaunchContainmentPolicy.CanReportManaged(processTracked, hasTrackableWindow, sharedBroker))
+            {
+                TerminateProcessAndForget(launchLease.ProcessId, NativeContainmentFailure.QuarantineFailed);
+                throw new BridgeException("WINDOW_CONTAINMENT_DENIED", "A janela não pôde ser marcada como gerenciada.");
+            }
+
+            var sessionId = GetOrCreateSession(window);
+            _pendingAttachDeadlinesByHandle[window.Handle] = DateTimeOffset.UtcNow.AddMilliseconds(
+                NativeLaunchContainmentPolicy.PendingAttachTimeoutMilliseconds);
+
+            return new
+            {
+                name = launched.Name,
+                source = launched.Source,
+                distribution = launched.Distribution,
+                pid = launchLease.ProcessId,
+                windowMode = "native-managed",
+                managed = true,
+                managementReason = (string?)null,
+                sessionId,
+                contained = false,
+                containmentMode = "hidden-quarantine"
+            };
+        }
+        catch (BridgeException)
+        {
+            AbortContainedLaunch(launchLease, registered);
+            throw;
+        }
+        catch (Exception error) when (error is ArgumentException or InvalidOperationException or Win32Exception
+            or IOException or NotSupportedException or UnauthorizedAccessException)
+        {
+            BrowserDiagnostics.Write("native_process_tracking_failed", $"type={error.GetType().Name}");
+            AbortContainedLaunch(launchLease, registered);
+            throw new BridgeException("APP_PROCESS_NOT_TRACKABLE", "O processo lançado não pôde ser rastreado com segurança.");
+        }
     }
 
     private object Attach(JsonElement parameters)
@@ -314,7 +383,11 @@ public sealed class WebMessageBridge : IDisposable
         var bounds = ConvertBounds(surface);
         var visible = ReadOptionalBoolean(parameters, "visible", true);
         if (!_windows.TryAttach(handle, _ownerWindowHandle, bounds, visible, out var error))
+        {
+            TerminateSessionAndForget(sessionId, NativeContainmentFailure.AttachFailed);
             throw new BridgeException("WINDOW_CONTAINMENT_DENIED", error ?? "O aplicativo não aceita contenção visual.");
+        }
+        _pendingAttachDeadlinesByHandle.Remove(handle);
         _surfacesByHandle[handle] = surface with { Visible = visible, LastNativeBounds = bounds };
         return new { sessionId, accepted = true, contained = true, containmentMode = "anchored-overlay" };
     }
@@ -331,6 +404,7 @@ public sealed class WebMessageBridge : IDisposable
         if (!_windows.TryUpdateAttachedLayout(handle, bounds, visible, out var error))
         {
             _surfacesByHandle.Remove(handle);
+            TerminateSessionAndForget(sessionId, NativeContainmentFailure.LayoutFailed);
             throw new BridgeException("WINDOW_LAYOUT_DENIED", error ?? "O Windows recusou a posição da janela.");
         }
         _surfacesByHandle[handle] = surface with { Visible = visible, LastNativeBounds = bounds };
@@ -342,11 +416,9 @@ public sealed class WebMessageBridge : IDisposable
         RequireObject(parameters);
         RejectUnknownProperties(parameters, "sessionId");
         var sessionId = ReadString(parameters, "sessionId");
-        var handle = GetHandle(sessionId);
-        if (!_windows.TryDetach(handle, out var error))
-            throw new BridgeException("WINDOW_OPERATION_DENIED", error ?? "O Windows recusou a operação.");
-        _surfacesByHandle.Remove(handle);
-        return new { sessionId, accepted = true, contained = false, containmentMode = "external" };
+        GetHandle(sessionId);
+        TerminateSessionAndForget(sessionId, NativeContainmentFailure.DetachRequested);
+        return new { sessionId, accepted = true, contained = false, containmentMode = "terminated", closed = true };
     }
 
     public void RelayoutAttachedWindows()
@@ -359,18 +431,22 @@ public sealed class WebMessageBridge : IDisposable
             if (_disposed) return;
             foreach (var pair in _surfacesByHandle.ToArray())
             {
-                if (!_windows.IsAttached(pair.Key)) { _surfacesByHandle.Remove(pair.Key); continue; }
+                if (!_windows.IsAttached(pair.Key))
+                {
+                    TerminateHandleAndForget(pair.Key, NativeContainmentFailure.AttachmentLost);
+                    continue;
+                }
                 try
                 {
                     var bounds = ConvertBounds(pair.Value);
                     if (_windows.TryUpdateAttachedLayout(pair.Key, bounds, pair.Value.Visible, out _))
                         _surfacesByHandle[pair.Key] = pair.Value with { LastNativeBounds = bounds };
-                    else _surfacesByHandle.Remove(pair.Key);
+                    else TerminateHandleAndForget(pair.Key, NativeContainmentFailure.LayoutFailed);
                 }
                 catch (Exception error) when (error is BridgeException or InvalidOperationException or OverflowException or ArithmeticException)
                 {
                     BrowserDiagnostics.Write("native_relayout_failed", $"type={error.GetType().Name}");
-                    _windows.TryUpdateAttachedLayout(pair.Key, pair.Value.LastNativeBounds, false, out _);
+                    TerminateHandleAndForget(pair.Key, NativeContainmentFailure.LayoutFailed);
                 }
             }
         }, DispatcherPriority.Render);
@@ -382,18 +458,296 @@ public sealed class WebMessageBridge : IDisposable
         return handle;
     }
 
-    private string? GetSessionIdForProcess(int processId)
+    private async Task<NativeWindowSnapshot?> WaitForQuarantinedWindowAsync(NativeContainedProcessLease lease)
     {
-        _windows.Refresh();
-        var window = _windows.GetWindows(processId).OrderBy(item => item.ObservedAtUtc).FirstOrDefault();
-        if (window is null) return null;
+        var deadline = DateTimeOffset.UtcNow.AddMilliseconds(
+            NativeLaunchContainmentPolicy.WindowCorrelationTimeoutMilliseconds);
+        while (!_disposed && DateTimeOffset.UtcNow < deadline)
+        {
+            var processIds = SynchronizeTrackedJob(lease);
+            _windows.Refresh();
+
+            foreach (var processId in processIds)
+            {
+                if (!_windows.TryGetContainmentFailure(processId, out var quarantineError)) continue;
+                TerminateProcessAndForget(lease.ProcessId, NativeContainmentFailure.QuarantineFailed);
+                throw new BridgeException("WINDOW_QUARANTINE_FAILED",
+                    quarantineError ?? "A janela não aceitou a quarentena preventiva do CloudOS.");
+            }
+
+            var memberSet = processIds.ToHashSet();
+            var candidates = _windows.GetWindows()
+                .Where(item => memberSet.Contains(item.ProcessId))
+                .Where(item => !item.IsAttached && !item.IsVisible)
+                .OrderBy(item => item.ObservedAtUtc)
+                .ToArray();
+            if (candidates.Length > 0)
+            {
+                var rootMainHandle = IntPtr.Zero;
+                try
+                {
+                    lease.Process.Refresh();
+                    rootMainHandle = lease.Process.MainWindowHandle;
+                }
+                catch (InvalidOperationException) { }
+                return candidates.FirstOrDefault(item => item.Handle == rootMainHandle.ToInt64()) ?? candidates[0];
+            }
+
+            await Task.Delay(25);
+        }
+        return null;
+    }
+
+    private IReadOnlyList<int> SynchronizeTrackedJob(NativeContainedProcessLease lease)
+    {
+        var processIds = NativeContainedJobTracker.Synchronize(lease, _windows);
+        foreach (var processId in processIds)
+        {
+            if (_launchRootByMemberProcessId.TryGetValue(processId, out var existingRoot)
+                && existingRoot != lease.ProcessId)
+                throw new InvalidOperationException("A process cannot belong to multiple CloudOS launch capabilities.");
+            _launchRootByMemberProcessId[processId] = lease.ProcessId;
+        }
+        return processIds;
+    }
+
+    private void SynchronizeAllTrackedJobs()
+    {
+        foreach (var pair in _launchLeasesByProcessId.ToArray())
+        {
+            try
+            {
+                SynchronizeTrackedJob(pair.Value);
+            }
+            catch (Exception error) when (error is ArgumentException or InvalidOperationException
+                or Win32Exception or NotSupportedException)
+            {
+                BrowserDiagnostics.Write("native_job_tracking_failed", $"pid={pair.Key} type={error.GetType().Name}");
+                TerminateProcessAndForget(pair.Key, NativeContainmentFailure.QuarantineFailed);
+            }
+        }
+    }
+
+    private static bool IsSharedBrokerProcess(int processId)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            return NativeLaunchContainmentPolicy.IsSharedBroker(process.ProcessName);
+        }
+        catch (ArgumentException)
+        {
+            return true;
+        }
+    }
+
+    private string GetOrCreateSession(NativeWindowSnapshot window)
+    {
         if (!_sessionIdsByHandle.TryGetValue(window.Handle, out var sessionId))
         {
             sessionId = $"window-{Guid.NewGuid():N}";
             _sessionIdsByHandle[window.Handle] = sessionId;
             _handlesBySessionId[sessionId] = window.Handle;
         }
+        _processIdsBySessionId[sessionId] = window.ProcessId;
         return sessionId;
+    }
+
+    private void AbortContainedLaunch(NativeContainedProcessLease? lease, bool registered)
+    {
+        if (lease is null) return;
+        if (registered || _launchLeasesByProcessId.ContainsKey(lease.ProcessId))
+        {
+            _launchLeasesByProcessId.TryAdd(lease.ProcessId, lease);
+            _launchRootByMemberProcessId.TryAdd(lease.ProcessId, lease.ProcessId);
+            _refreshTimer.Interval = TimeSpan.FromMilliseconds(ActiveContainmentRefreshMilliseconds);
+            TerminateProcessAndForget(lease.ProcessId, NativeContainmentFailure.QuarantineFailed);
+            return;
+        }
+        lease.Dispose();
+    }
+
+    private void SweepContainmentDeadlines()
+    {
+        if (_disposed) return;
+        foreach (var pair in _launchLeasesByProcessId.ToArray())
+        {
+            try
+            {
+                if (pair.Value.GetMemberProcessIds().Count == 0)
+                    CompleteExitedLaunch(pair.Key);
+            }
+            catch (Exception error) when (error is InvalidOperationException or Win32Exception)
+            {
+                BrowserDiagnostics.Write("native_job_query_failed", $"pid={pair.Key} type={error.GetType().Name}");
+                TerminateProcessAndForget(pair.Key, NativeContainmentFailure.QuarantineFailed);
+            }
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        foreach (var retry in _terminationRetriesByRoot
+            .Where(pair => pair.Value.Deadline <= now)
+            .ToArray())
+        {
+            _terminationRetriesByRoot.Remove(retry.Key);
+            TerminateProcessAndForget(retry.Key, retry.Value.Failure);
+        }
+
+        foreach (var handle in _pendingAttachDeadlinesByHandle
+            .Where(pair => pair.Value <= now)
+            .Select(pair => pair.Key)
+            .ToArray())
+        {
+            TerminateHandleAndForget(handle, NativeContainmentFailure.PendingAttachExpired);
+        }
+
+        foreach (var processId in _processIdsBySessionId.Values
+            .Concat(_launchRootByMemberProcessId.Keys)
+            .Distinct()
+            .ToArray())
+        {
+            if (_windows.TryGetContainmentFailure(processId, out _))
+                TerminateProcessAndForget(processId, NativeContainmentFailure.QuarantineFailed);
+        }
+    }
+
+    private void TerminateSessionAndForget(string sessionId, NativeContainmentFailure failure)
+    {
+        if (!_processIdsBySessionId.TryGetValue(sessionId, out var processId))
+            throw new BridgeException("SESSION_NOT_FOUND", "Janela não encontrada.");
+        TerminateProcessAndForget(processId, failure);
+    }
+
+    private void TerminateHandleAndForget(long handle, NativeContainmentFailure failure)
+    {
+        if (_sessionIdsByHandle.TryGetValue(handle, out var sessionId)
+            && _processIdsBySessionId.TryGetValue(sessionId, out var processId))
+        {
+            TerminateProcessAndForget(processId, failure);
+            return;
+        }
+        if (_windows.TryGetProcessId(handle, out var trackedProcessId))
+            TerminateProcessAndForget(trackedProcessId, failure);
+    }
+
+    private void TerminateProcessAndForget(int processId, NativeContainmentFailure failure)
+    {
+        if (!NativeLaunchContainmentPolicy.RequiresTermination(failure))
+            throw new InvalidOperationException("The containment policy did not authorize process termination.");
+        var rootProcessId = ResolveLaunchRoot(processId);
+        var memberProcessIds = GetKnownLaunchMembers(rootProcessId);
+        BrowserDiagnostics.Write("native_containment_terminated", $"pid={rootProcessId} reason={failure}");
+        foreach (var memberProcessId in memberProcessIds)
+            _windows.TryQuarantineTrackedProcess(memberProcessId, out _);
+
+        _launchLeasesByProcessId.TryGetValue(rootProcessId, out var lease);
+        if (lease is not null)
+        {
+            try
+            {
+                foreach (var memberProcessId in NativeContainedJobTracker.Synchronize(lease, _windows))
+                {
+                    if (!memberProcessIds.Contains(memberProcessId)) memberProcessIds.Add(memberProcessId);
+                    _launchRootByMemberProcessId[memberProcessId] = rootProcessId;
+                    _windows.TryQuarantineTrackedProcess(memberProcessId, out _);
+                }
+            }
+            catch (Exception error) when (error is InvalidOperationException or Win32Exception)
+            {
+                BrowserDiagnostics.Write("native_job_query_failed", $"pid={rootProcessId} type={error.GetType().Name}");
+            }
+        }
+
+        string? jobError = null;
+        var jobTerminated = lease is null || lease.TryTerminate(3_000, out jobError);
+        var processTerminated = true;
+        var processErrors = new List<string>();
+        foreach (var memberProcessId in memberProcessIds)
+        {
+            if (_windows.TryTerminateTrackedProcess(memberProcessId, out var memberError)) continue;
+            processTerminated = false;
+            if (!string.IsNullOrWhiteSpace(memberError)) processErrors.Add($"{memberProcessId}:{memberError}");
+        }
+
+        if (!processTerminated || !jobTerminated)
+        {
+            BrowserDiagnostics.Write(
+                "native_containment_termination_failed",
+                $"pid={rootProcessId} reason={failure} jobError={jobError} processError={string.Join(";", processErrors)}");
+            foreach (var pair in _processIdsBySessionId
+                .Where(pair => memberProcessIds.Contains(pair.Value))
+                .ToArray())
+            {
+                if (_handlesBySessionId.TryGetValue(pair.Key, out var retryHandle))
+                    _pendingAttachDeadlinesByHandle[retryHandle] = DateTimeOffset.UtcNow.AddSeconds(1);
+            }
+            _terminationRetriesByRoot[rootProcessId] = (
+                DateTimeOffset.UtcNow.AddMilliseconds(500),
+                failure);
+            return;
+        }
+
+        CompleteExitedLaunch(rootProcessId);
+    }
+
+    private int ResolveLaunchRoot(int processId) =>
+        _launchRootByMemberProcessId.TryGetValue(processId, out var rootProcessId)
+            ? rootProcessId
+            : processId;
+
+    private List<int> GetKnownLaunchMembers(int rootProcessId)
+    {
+        var members = _launchRootByMemberProcessId
+            .Where(pair => pair.Value == rootProcessId)
+            .Select(pair => pair.Key)
+            .ToList();
+        if (!members.Contains(rootProcessId)) members.Add(rootProcessId);
+        return members;
+    }
+
+    private void CompleteExitedLaunch(int rootProcessId)
+    {
+        _terminationRetriesByRoot.Remove(rootProcessId);
+        var members = GetKnownLaunchMembers(rootProcessId);
+        foreach (var memberProcessId in members)
+        {
+            _windows.TryTerminateTrackedProcess(memberProcessId, out _);
+            ForgetProcessMappings(memberProcessId);
+            _launchRootByMemberProcessId.Remove(memberProcessId);
+        }
+        if (_launchLeasesByProcessId.Remove(rootProcessId, out var completedLease)) completedLease.Dispose();
+        if (_launchLeasesByProcessId.Count == 0)
+            _refreshTimer.Interval = TimeSpan.FromMilliseconds(IdleRefreshMilliseconds);
+    }
+
+    private void ForgetProcessMappings(int processId)
+    {
+        foreach (var pair in _processIdsBySessionId.Where(pair => pair.Value == processId).ToArray())
+        {
+            _processIdsBySessionId.Remove(pair.Key);
+            if (_handlesBySessionId.Remove(pair.Key, out var handle))
+            {
+                _sessionIdsByHandle.Remove(handle);
+                _surfacesByHandle.Remove(handle);
+                _pendingAttachDeadlinesByHandle.Remove(handle);
+            }
+        }
+    }
+
+    private void TerminateAllManagedProcesses(NativeContainmentFailure failure)
+    {
+        foreach (var processId in _processIdsBySessionId.Values
+            .Concat(_windows.GetWindows().Select(window => window.ProcessId))
+            .Concat(_launchLeasesByProcessId.Keys)
+            .Concat(_launchRootByMemberProcessId.Keys)
+            .Select(ResolveLaunchRoot)
+            .Distinct()
+            .ToArray())
+        {
+            TerminateProcessAndForget(processId, failure);
+        }
+        _surfacesByHandle.Clear();
+        _pendingAttachDeadlinesByHandle.Clear();
     }
 
     private static AttachedSurfaceRequest ReadSurfaceRequest(JsonElement parameters)
@@ -436,6 +790,56 @@ public sealed class WebMessageBridge : IDisposable
         return new { sessionId, accepted = true };
     }
 
+    private async Task<object> CloseSessionAsync(JsonElement parameters)
+    {
+        RequireObject(parameters);
+        RejectUnknownProperties(parameters, "sessionId");
+        var sessionId = ReadString(parameters, "sessionId");
+        var handle = GetHandle(sessionId);
+        if (!_processIdsBySessionId.TryGetValue(sessionId, out var processId))
+            throw new BridgeException("SESSION_NOT_FOUND", "Janela não encontrada.");
+
+        var rootProcessId = ResolveLaunchRoot(processId);
+        if (!_windows.TryClose(handle, out var error))
+        {
+            foreach (var memberProcessId in GetKnownLaunchMembers(rootProcessId))
+                _windows.TryQuarantineTrackedProcess(memberProcessId, out _);
+            TerminateProcessAndForget(rootProcessId, NativeContainmentFailure.GracefulCloseFailed);
+            return new { sessionId, accepted = true, closed = true, forced = true };
+        }
+
+        foreach (var memberProcessId in GetKnownLaunchMembers(rootProcessId))
+            _windows.TryQuarantineTrackedProcess(memberProcessId, out _);
+
+        if (_launchLeasesByProcessId.TryGetValue(rootProcessId, out var lease))
+        {
+            var deadline = DateTimeOffset.UtcNow.AddMilliseconds(
+                NativeLaunchContainmentPolicy.GracefulCloseTimeoutMilliseconds);
+            while (!_disposed && DateTimeOffset.UtcNow < deadline)
+            {
+                IReadOnlyList<int> members;
+                try { members = SynchronizeTrackedJob(lease); }
+                catch (Exception closeError) when (closeError is ArgumentException or InvalidOperationException
+                    or Win32Exception or NotSupportedException)
+                {
+                    BrowserDiagnostics.Write("native_close_tracking_failed", $"pid={rootProcessId} type={closeError.GetType().Name}");
+                    break;
+                }
+                if (members.Count == 0)
+                {
+                    CompleteExitedLaunch(rootProcessId);
+                    return new { sessionId, accepted = true, closed = true, forced = false };
+                }
+                await Task.Delay(50);
+            }
+        }
+
+        // WM_CLOSE merely being delivered is not proof of closure. Tray behavior, a save
+        // prompt, or an ignored message must end in Job termination, never a latent HWND.
+        TerminateProcessAndForget(rootProcessId, NativeContainmentFailure.GracefulCloseFailed);
+        return new { sessionId, accepted = true, closed = true, forced = true };
+    }
+
     private void OnNativeWindowChanged(object? sender, NativeWindowChangedEventArgs eventArgs)
     {
         _dispatcher.BeginInvoke(() =>
@@ -445,13 +849,21 @@ public sealed class WebMessageBridge : IDisposable
             if (eventArgs.Kind == NativeWindowChangeKind.Removed)
             {
                 _surfacesByHandle.Remove(handle);
-                if (_sessionIdsByHandle.Remove(handle, out var removed)) _handlesBySessionId.Remove(removed);
+                _pendingAttachDeadlinesByHandle.Remove(handle);
+                if (_sessionIdsByHandle.Remove(handle, out var removed))
+                {
+                    _handlesBySessionId.Remove(removed);
+                    _processIdsBySessionId.Remove(removed);
+                }
             }
-            else if (!_sessionIdsByHandle.ContainsKey(handle))
+            else
             {
-                var sessionId = $"window-{Guid.NewGuid():N}";
-                _sessionIdsByHandle[handle] = sessionId;
-                _handlesBySessionId[sessionId] = handle;
+                GetOrCreateSession(eventArgs.Window);
+                if (!eventArgs.Window.IsAttached && !_pendingAttachDeadlinesByHandle.ContainsKey(handle))
+                {
+                    _pendingAttachDeadlinesByHandle[handle] = DateTimeOffset.UtcNow.AddMilliseconds(
+                        NativeLaunchContainmentPolicy.PendingAttachTimeoutMilliseconds);
+                }
             }
             PostEvent("native.sessionsChanged", new { sessions = GetPublicSessions() });
         }, DispatcherPriority.Background);
@@ -463,12 +875,7 @@ public sealed class WebMessageBridge : IDisposable
         var sessions = new List<object>();
         foreach (var window in snapshots.OrderBy(window => window.ProcessId).ThenBy(window => window.Title, StringComparer.OrdinalIgnoreCase))
         {
-            if (!_sessionIdsByHandle.TryGetValue(window.Handle, out var sessionId))
-            {
-                sessionId = $"window-{Guid.NewGuid():N}";
-                _sessionIdsByHandle[window.Handle] = sessionId;
-                _handlesBySessionId[sessionId] = window.Handle;
-            }
+            var sessionId = GetOrCreateSession(window);
             sessions.Add(new
             {
                 sessionId,
@@ -477,7 +884,7 @@ public sealed class WebMessageBridge : IDisposable
                 minimized = window.IsMinimized,
                 maximized = window.IsMaximized,
                 contained = window.IsAttached,
-                containmentMode = window.IsAttached ? "anchored-overlay" : "external",
+                containmentMode = window.IsAttached ? "anchored-overlay" : "hidden-quarantine",
                 visible = window.IsVisible,
                 bounds = new { x = window.Bounds.X, y = window.Bounds.Y, width = window.Bounds.Width, height = window.Bounds.Height }
             });
@@ -554,6 +961,7 @@ public sealed class WebMessageBridge : IDisposable
     public void Dispose()
     {
         if (_disposed) return;
+        TerminateAllManagedProcesses(NativeContainmentFailure.HostDisposed);
         _disposed = true;
         _refreshTimer.Stop();
         _browserManager.Dispose();
@@ -577,7 +985,13 @@ public sealed class WebMessageBridge : IDisposable
         _recentMessages.Clear();
         _sessionIdsByHandle.Clear();
         _handlesBySessionId.Clear();
+        _processIdsBySessionId.Clear();
+        foreach (var lease in _launchLeasesByProcessId.Values) lease.Dispose();
+        _launchLeasesByProcessId.Clear();
+        _launchRootByMemberProcessId.Clear();
+        _terminationRetriesByRoot.Clear();
         _surfacesByHandle.Clear();
+        _pendingAttachDeadlinesByHandle.Clear();
         _http.Dispose();
     }
 
@@ -593,8 +1007,9 @@ public sealed class WebMessageBridge : IDisposable
         [JsonPropertyName("name")] public string? Name { get; init; }
         [JsonPropertyName("source")] public string? Source { get; init; }
         [JsonPropertyName("distribution")] public string? Distribution { get; init; }
-        [JsonPropertyName("pid")] public int Pid { get; init; }
         [JsonPropertyName("windowMode")] public string? WindowMode { get; init; }
+        [JsonPropertyName("launchKind")] public string? LaunchKind { get; init; }
+        [JsonPropertyName("launchSpec")] public NativeProcessLaunchDescriptor? LaunchSpec { get; init; }
     }
 
     private sealed record AttachedSurfaceRequest(double X, double Y, double Width, double Height, bool Visible, NativeWindowBounds LastNativeBounds);
