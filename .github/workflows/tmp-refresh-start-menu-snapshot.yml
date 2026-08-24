@@ -41,24 +41,24 @@ jobs:
       - name: Refresh only Start Menu Home baseline
         shell: pwsh
         run: |
-          $home = 'tests/playwright/__screenshots__/start-menu.spec.ts/start-menu-home-chromium-windows.png'
-          $all = 'tests/playwright/__screenshots__/start-menu.spec.ts/start-menu-all-chromium-windows.png'
+          $homeSnapshot = 'tests/playwright/__screenshots__/start-menu.spec.ts/start-menu-home-chromium-windows.png'
+          $allSnapshot = 'tests/playwright/__screenshots__/start-menu.spec.ts/start-menu-all-chromium-windows.png'
 
           npx playwright test tests/playwright/start-menu.spec.ts --update-snapshots --reporter=list
           $testExit = $LASTEXITCODE
 
           # PW-02 has a second screenshot. It is outside this reviewed change, so never refresh it here.
-          git restore --source=HEAD -- $all
+          git restore --source=HEAD -- $allSnapshot
 
           git status --short
-          git diff --quiet -- $home
+          git diff --quiet -- $homeSnapshot
           if ($LASTEXITCODE -eq 0) {
             throw 'Start Menu Home snapshot did not change; refusing an empty baseline refresh.'
           }
 
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- $home
+          git add -- $homeSnapshot
           git commit -m 'test(playwright): refresh start menu home visual baseline'
           git push origin HEAD:poc/cloudos-linux-runtime-xpra
 
