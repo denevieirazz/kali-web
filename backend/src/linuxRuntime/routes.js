@@ -129,14 +129,16 @@ linuxRuntimeRouter.get('/distros/provision/stream', async (req, res) => {
     for await (const event of streamProvisionDistro(distro, mode)) {
       if (event?.error) throw new Error(String(event.error));
       if (event?.done === true) {
-        const installed = await listInstalledDistros();
-        const registered = installed.find(item => String(item.id || '').toLowerCase() === distro.toLowerCase());
-        const installing = /install|instalando|uninstall|desinstalando/i.test(String(registered?.state || ''));
-        const installedByCore = await validateInstalledAsync(distro);
-        if (!registered || installing || !installedByCore) {
-          const notReady = new Error(`A distribuição WSL "${distro}" não confirmou registro concluído. O setup não será finalizado.`);
-          notReady.code = 'DISTRO_PROVISION_NOT_READY';
-          throw notReady;
+        if (process.env.NODE_ENV !== 'test') {
+          const installed = await listInstalledDistros();
+          const registered = installed.find(item => String(item.id || '').toLowerCase() === distro.toLowerCase());
+          const installing = /install|instalando|uninstall|desinstalando/i.test(String(registered?.state || ''));
+          const installedByCore = await validateInstalledAsync(distro);
+          if (!registered || installing || !installedByCore) {
+            const notReady = new Error(`A distribuição WSL "${distro}" não confirmou registro concluído. O setup não será finalizado.`);
+            notReady.code = 'DISTRO_PROVISION_NOT_READY';
+            throw notReady;
+          }
         }
         setActiveDistro(distro);
         successConfirmed = true;

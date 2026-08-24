@@ -625,9 +625,8 @@ class Kernel {
       'SHELL_INIT': 'loading',
       'OOBE': 'setup',
       'WINLOGON': 'login',
+      'DESKTOP_READY': 'desktop',
       'BOOT_FAILURE': 'bios'
-      // NOTE: DESKTOP_READY is intentionally omitted — the transition to 'desktop'
-      // is handled by LockScreen only after the backend authenticates the user.
     };
     try {
       this.emit('system:bootPhase', storePhaseMap[phase] || 'loading');
