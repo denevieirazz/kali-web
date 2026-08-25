@@ -18,6 +18,8 @@ let cachedCatalog = [];
 let cacheTimestamp = 0;
 let refreshInFlight = null;
 const CACHE_TTL_MS = 60_000;
+const MAX_SHORTCUT_ARGUMENTS = 128;
+const MAX_SHORTCUT_ARGUMENT_LENGTH = 8_192;
 
 function currentWindowMode() {
   return process.env.CLOUDOS_NATIVE_HOST === '1' ? 'native-managed' : 'unavailable';
@@ -35,7 +37,12 @@ function publicApp(app) {
       launchable: true
     };
   }
-  const directWindowsLaunch = ['windows-executable', 'windows-shortcut-direct', 'windows-script-direct'].includes(app.kind);
+  const directWindowsLaunch = [
+    'windows-executable',
+    'windows-shortcut-direct',
+    'windows-shortcut-argv',
+    'windows-script-direct'
+  ].includes(app.kind);
   const launchable = app.source === 'windows'
     ? process.env.CLOUDOS_NATIVE_HOST === '1' && directWindowsLaunch
     : true;
@@ -71,6 +78,62 @@ function windowsCommandProcessor() {
   return path.win32.join(systemRoot, 'System32', 'cmd.exe');
 }
 
+// Parse only the documented Windows backslash/quote grammar used by conventional
+// Win32 argv consumers. Malformed/unbalanced input fails closed instead of being
+// approximated. The Host will quote each resulting argv entry again before
+// CreateProcessW, preserving the parsed argument boundaries without invoking a shell.
+export function parseWindowsShortcutArguments(value) {
+  const input = typeof value === 'string' ? value.trim() : '';
+  if (!input) return [];
+  if (input.length > 16_384 || /[\0\r\n]/.test(input)) return null;
+
+  const args = [];
+  let index = 0;
+  while (index < input.length) {
+    while (index < input.length && /[ \t]/.test(input[index])) index += 1;
+    if (index >= input.length) break;
+    if (args.length >= MAX_SHORTCUT_ARGUMENTS) return null;
+
+    let argument = '';
+    let inQuotes = false;
+    let started = false;
+    while (index < input.length) {
+      if (!inQuotes && /[ \t]/.test(input[index])) break;
+
+      let backslashes = 0;
+      while (index < input.length && input[index] === '\\') {
+        backslashes += 1;
+        index += 1;
+      }
+
+      if (index < input.length && input[index] === '"') {
+        argument += '\\'.repeat(Math.floor(backslashes / 2));
+        if (backslashes % 2 === 1) {
+          argument += '"';
+        } else {
+          inQuotes = !inQuotes;
+        }
+        started = true;
+        index += 1;
+        continue;
+      }
+
+      argument += '\\'.repeat(backslashes);
+      if (index >= input.length) break;
+      argument += input[index];
+      started = true;
+      index += 1;
+      if (argument.length > MAX_SHORTCUT_ARGUMENT_LENGTH) return null;
+    }
+
+    if (inQuotes || !started || argument.length > MAX_SHORTCUT_ARGUMENT_LENGTH) return null;
+    args.push(argument);
+    while (index < input.length && /[ \t]/.test(input[index])) index += 1;
+  }
+
+  return args;
+}
+
 export function parseWindowsAppDiscovery(payload, existingApps = []) {
   const directTargets = new Set(existingApps.map((app) => String(app.executable || '').toLowerCase()));
   const directNames = new Set(existingApps.map((app) => normalizedDisplayName(app.name)));
@@ -100,9 +163,13 @@ export function parseWindowsAppDiscovery(payload, existingApps = []) {
     if (directTargets.has(targetKey) || directNames.has(nameKey)) continue;
     directTargets.add(targetKey);
     directNames.add(nameKey);
-    const directKind = argumentsText
-      ? 'windows-shortcut'
-      : (scriptTarget ? 'windows-script-direct' : 'windows-shortcut-direct');
+
+    const parsedArguments = executableTarget && argumentsText
+      ? parseWindowsShortcutArguments(argumentsText)
+      : [];
+    const directKind = !argumentsText
+      ? (scriptTarget ? 'windows-script-direct' : 'windows-shortcut-direct')
+      : (executableTarget && parsedArguments ? 'windows-shortcut-argv' : 'windows-shortcut');
     shortcuts.push({
       id: opaqueId(directKind, shortcutPath, targetPath, argumentsText),
       name,
@@ -113,6 +180,7 @@ export function parseWindowsAppDiscovery(payload, existingApps = []) {
       shortcutPath,
       targetPath,
       arguments: argumentsText,
+      args: directKind === 'windows-shortcut-argv' ? parsedArguments : [],
       workingDirectory: path.win32.isAbsolute(workingDirectory) ? workingDirectory : path.win32.dirname(targetPath)
     });
   }
@@ -212,14 +280,13 @@ export async function launchCatalogApp(id) {
     throw Object.assign(new Error('Aplicativos UWP/brokerizados permanecem visíveis no menu, mas não podem ser contidos por PID direto.'), { code: 'APP_NOT_CONTAINABLE' });
   }
 
-  const launchKind = app.kind === 'windows-shortcut-direct'
-    ? 'windows-shortcut-direct'
-    : app.kind;
+  const launchKind = app.kind;
   const scriptLaunch = launchKind === 'windows-script-direct';
+  const shortcutLaunch = launchKind === 'windows-shortcut-direct' || launchKind === 'windows-shortcut-argv';
   const executable = scriptLaunch
     ? windowsCommandProcessor()
-    : (launchKind === 'windows-shortcut-direct' ? app.targetPath : app.executable);
-  if (!['windows-shortcut-direct', 'windows-executable', 'windows-script-direct'].includes(launchKind)
+    : (shortcutLaunch ? app.targetPath : app.executable);
+  if (!['windows-shortcut-direct', 'windows-shortcut-argv', 'windows-executable', 'windows-script-direct'].includes(launchKind)
       || !path.win32.isAbsolute(String(executable || ''))) {
     throw Object.assign(new Error('Tipo de aplicativo não suportado sob containment.'), { code: 'APP_KIND_UNSUPPORTED' });
   }
