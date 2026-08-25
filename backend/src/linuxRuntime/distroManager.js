@@ -391,7 +391,12 @@ export async function* streamProvisionDistro(distroName, mode = 'existing') {
   const cleanName = validateDistroIdentifier(distroName || getActiveDistro());
 
   yield { step: 'wsl', stepDone: false, progress: 15, log: '[WSL] Verificando subsistema WSL 2 e integridade do host...' };
-  if (process.env.NODE_ENV === 'test' && process.env.CLOUDOS_TEST_ROOT) {
+  if (
+    process.env.NODE_ENV === 'test' &&
+    process.env.CLOUDOS_TEST_ROOT &&
+    process.env.CLOUDOS_RUNTIME_DIR &&
+    process.env.CLOUDOS_DATA_DIR
+  ) {
     yield { step: 'wsl', stepDone: true, progress: 25, log: '[WSL] WSL 2 Operacional (simulado em teste)' };
   } else {
     try {
