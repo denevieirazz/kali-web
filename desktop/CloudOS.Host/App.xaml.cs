@@ -5,6 +5,7 @@ namespace CloudOS.Host;
 public partial class App : Application
 {
     private SingleInstanceCoordinator? _singleInstance;
+    private Native.NativeKeyboardShortcutManager? _keyboardShortcuts;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -48,6 +49,24 @@ public partial class App : Application
 
         var window = new MainWindow(options);
         MainWindow = window;
+        try
+        {
+            var handle = new System.Windows.Interop.WindowInteropHelper(window).EnsureHandle();
+            _keyboardShortcuts = new Native.NativeKeyboardShortcutManager(handle, window.DispatchNativeShortcut);
+        }
+        catch (System.ComponentModel.Win32Exception error)
+        {
+            MessageBox.Show(
+                $"O CloudOS não conseguiu instalar o controle nativo de teclado.\n\n{error.Message}",
+                "CloudOS",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            _singleInstance.Dispose();
+            _singleInstance = null;
+            Shutdown(3);
+            return;
+        }
+
         _singleInstance.ActivationRequested += (_, _) => Dispatcher.Invoke(() =>
         {
             if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
@@ -68,6 +87,8 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _keyboardShortcuts?.Dispose();
+        _keyboardShortcuts = null;
         _singleInstance?.Dispose();
         base.OnExit(e);
     }
