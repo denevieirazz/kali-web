@@ -27,6 +27,17 @@ export function nativeViewportBounds(rect, viewport) {
   return { x, y, width: right - x, height: bottom - y };
 }
 
+/** Returns true only when a native layout IPC would change observable state. */
+export function nativeSurfaceLayoutChanged(previous, bounds, visible) {
+  if (!bounds) return false;
+  if (!previous) return true;
+  return previous.visible !== visible
+    || previous.bounds.x !== bounds.x
+    || previous.bounds.y !== bounds.y
+    || previous.bounds.width !== bounds.width
+    || previous.bounds.height !== bounds.height;
+}
+
 /** Finds the concrete native window created by an allow-listed launch. */
 export function nativeSessionForLaunch(sessions, launch) {
   if (!Array.isArray(sessions) || !launch) return null;
@@ -37,4 +48,3 @@ export function nativeSessionForLaunch(sessions, launch) {
   if (!Number.isInteger(launch.pid) || launch.pid <= 0) return null;
   return sessions.find((session) => session?.processId === launch.pid) || null;
 }
-

@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { nativeHostBridge, NativeHostError, type NativeSession, type NativeViewportBounds } from '../../services/nativeHostBridge';
-import { nativeSessionForLaunch, nativeViewportBounds } from '../../services/nativeWindowContract.js';
+import { nativeSessionForLaunch, nativeSurfaceLayoutChanged, nativeViewportBounds } from '../../services/nativeWindowContract.js';
 import { useSystem } from '../../stores/systemStore';
 import { useWindowManager } from '../../stores/windowManager';
 import './NativeAppWindow.css';
 
 type NativeSurfaceStatus = 'launching' | 'waiting' | 'attaching' | 'contained' | 'error';
 type NativeLaunch = Awaited<ReturnType<typeof nativeHostBridge.launchApp>>;
+type NativeLayoutState = { bounds: NativeViewportBounds; visible: boolean };
 
 const SESSION_ATTEMPTS = 32;
 const SESSION_RETRY_MS = 125;
@@ -40,6 +41,7 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
   const sessionIdRef = useRef<string | null>(null);
   const attachedRef = useRef(false);
   const lastBoundsRef = useRef<NativeViewportBounds | null>(null);
+  const lastLayoutRef = useRef<NativeLayoutState | null>(null);
   const disposedRef = useRef(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState<NativeSurfaceStatus>('launching');
@@ -62,14 +64,26 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
 
     if (attach && !attachedRef.current) {
       setStatus('attaching');
-      await nativeHostBridge.attachSession(currentSessionId, bounds);
+      await nativeHostBridge.attachSession(currentSessionId, bounds, visible);
+      if (disposedRef.current) return;
       attachedRef.current = true;
+      lastLayoutRef.current = { bounds, visible };
       setStatus('contained');
       return;
     }
 
-    if (attachedRef.current) {
+    if (!attachedRef.current || !nativeSurfaceLayoutChanged(lastLayoutRef.current, bounds, visible)) return;
+
+    const previous = lastLayoutRef.current;
+    const requested = { bounds, visible };
+    // Mark the request before awaiting the bridge so ResizeObserver/window events
+    // in the same frame cannot enqueue identical native layout IPC.
+    lastLayoutRef.current = requested;
+    try {
       await nativeHostBridge.layoutSession(currentSessionId, bounds, visible);
+    } catch (layoutError) {
+      if (lastLayoutRef.current === requested) lastLayoutRef.current = previous;
+      throw layoutError;
     }
   }, [visible]);
 
@@ -82,10 +96,16 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
 
     let cancelled = false;
     disposedRef.current = false;
+    attachedRef.current = false;
+    lastBoundsRef.current = null;
+    lastLayoutRef.current = null;
+    sessionIdRef.current = null;
+    setSessionId(null);
 
     void (async () => {
       try {
         setStatus('launching');
+        setError('');
         await nativeHostBridge.connect();
         if (cancelled) return;
 
@@ -120,9 +140,13 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
       disposedRef.current = true;
       const currentSessionId = sessionIdRef.current;
       const bounds = lastBoundsRef.current;
+      const wasAttached = attachedRef.current;
+      sessionIdRef.current = null;
+      attachedRef.current = false;
+      lastLayoutRef.current = null;
       if (!currentSessionId) return;
       void (async () => {
-        if (attachedRef.current && bounds) {
+        if (wasAttached && bounds) {
           try {
             await nativeHostBridge.layoutSession(currentSessionId, bounds, false);
           } catch {}
@@ -164,14 +188,26 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
     };
   }, [sessionId, syncSurface]);
 
+  // Position changes can move the surface without triggering ResizeObserver.
+  // Relayout on geometry changes, but do not refocus the native HWND on every
+  // drag/resize frame.
   useEffect(() => {
-    if (!sessionId || !attachedRef.current) return undefined;
+    if (!sessionId || status !== 'contained') return undefined;
     const frame = window.requestAnimationFrame(() => {
       void syncSurface(false).catch(() => undefined);
-      if (visible) void nativeHostBridge.operate('focus', sessionId).catch(() => undefined);
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [sessionId, syncSurface, visible, win?.x, win?.y, win?.width, win?.height, win?.isMaximized, win?.isMinimized]);
+  }, [sessionId, status, syncSurface, win?.x, win?.y, win?.width, win?.height, win?.isMaximized, win?.isMinimized]);
+
+  // Focus only when containment becomes ready or the CloudOS window becomes
+  // active again. Geometry changes must not generate foreground-activation IPC.
+  useEffect(() => {
+    if (!sessionId || status !== 'contained' || !visible) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      void nativeHostBridge.operate('focus', sessionId).catch(() => undefined);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [sessionId, status, visible]);
 
   useEffect(() => {
     if (!sessionId) return undefined;

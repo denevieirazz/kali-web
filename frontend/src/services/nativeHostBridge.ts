@@ -177,9 +177,9 @@ class NativeHostBridge {
     return this.request(`native.session.${method}` as NativeRequestMethod, { sessionId });
   }
 
-  async attachSession(sessionId: string, bounds: NativeViewportBounds) {
+  async attachSession(sessionId: string, bounds: NativeViewportBounds, visible = true) {
     await this.requireConnection();
-    return this.request<{ sessionId: string; accepted: boolean; contained?: boolean; containmentMode?: NativeContainmentMode }>('native.session.attach', { sessionId, bounds });
+    return this.request<{ sessionId: string; accepted: boolean; contained?: boolean; containmentMode?: NativeContainmentMode }>('native.session.attach', { sessionId, bounds, visible });
   }
 
   async layoutSession(sessionId: string, bounds: NativeViewportBounds, visible: boolean) {
