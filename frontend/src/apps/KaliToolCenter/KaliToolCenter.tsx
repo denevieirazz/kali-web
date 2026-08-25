@@ -8,8 +8,10 @@ import {
   type SecurityWorkspaceState,
 } from '../../core/securityWorkspaceState.js';
 import { apiClient } from '../../services/apiClient';
+import { launchWorkflowApp } from '../../services/workflowLaunch';
 import { useProcessManager } from '../../stores/processManager';
 import { useWindowManager } from '../../stores/windowManager';
+import { getUserStorageKey } from '../../services/userScope.js';
 import './KaliToolCenter.css';
 
 type SecurityTool = {
@@ -40,7 +42,7 @@ type WslInfo = {
 type NativeApp = {
   id: string;
   name: string;
-  source: 'windows' | 'wsl';
+  source: 'windows' | 'linux';
   distribution: string | null;
   icon?: string;
   windowMode?: string;
@@ -67,17 +69,22 @@ function normalizeName(value: string) {
 function findGuiApp(tool: SecurityTool, apps: NativeApp[], distribution: string) {
   const aliases = [tool.name, ...tool.guiAliases].map(normalizeName).filter(Boolean);
   return apps.find(app => {
-    if (app.source !== 'wsl' || app.distribution !== distribution) return false;
+    if (app.source !== 'linux' || app.distribution !== distribution) return false;
     const appName = normalizeName(app.name);
     return aliases.some(alias => appName === alias || appName.includes(alias) || alias.includes(appName));
   }) ?? null;
 }
 
+function getWorkspaceStorageKey(): string {
+  return getUserStorageKey(SECURITY_WORKSPACE_STORAGE_KEY);
+}
+
 function loadWorkspace(): SecurityWorkspaceState {
+  const key = getWorkspaceStorageKey();
   try {
-    return normalizeSecurityWorkspace(JSON.parse(localStorage.getItem(SECURITY_WORKSPACE_STORAGE_KEY) ?? 'null'));
+    return normalizeSecurityWorkspace(JSON.parse(localStorage.getItem(key) ?? 'null'));
   } catch {
-    localStorage.removeItem(SECURITY_WORKSPACE_STORAGE_KEY);
+    localStorage.removeItem(key);
     return normalizeSecurityWorkspace(null);
   }
 }
@@ -101,7 +108,7 @@ export default function KaliToolCenter() {
   const openWindow = useWindowManager(state => state.openWindow);
 
   useEffect(() => {
-    localStorage.setItem(SECURITY_WORKSPACE_STORAGE_KEY, JSON.stringify(workspace));
+    localStorage.setItem(getWorkspaceStorageKey(), JSON.stringify(workspace));
   }, [workspace]);
 
   useEffect(() => {
@@ -191,8 +198,8 @@ export default function KaliToolCenter() {
     setNotice('');
     setError('');
     try {
-      await apiClient(`/api/apps/${encodeURIComponent(app.id)}/launch`, { method: 'POST' });
-      setNotice(`${app.name} foi encaminhado ao Host/WSLg.`);
+      launchWorkflowApp(app.id);
+      setNotice(`${app.name} foi aberto na superfície contida do CloudOS.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : `Não foi possível abrir ${app.name}.`);
     }
@@ -253,7 +260,7 @@ export default function KaliToolCenter() {
         <article><small>Catalogadas</small><strong>{stats.total}</strong><span>allowlist CloudOS</span></article>
         <article><small>Instaladas</small><strong>{stats.installed}</strong><span>na distro atual</span></article>
         <article><small>Ausentes</small><strong>{stats.missing}</strong><span>sem execução implícita</span></article>
-        <article><small>GUI WSLg</small><strong>{stats.gui}</strong><span>detectadas no catálogo</span></article>
+        <article><small>GUI contida</small><strong>{stats.gui}</strong><span>detectadas no catálogo automático</span></article>
       </section>
 
       <div className="ktc-layout">

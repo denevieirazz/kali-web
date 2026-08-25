@@ -1,7 +1,7 @@
 // ============================================
 // File Explorer App — Fully Interactive
 // ============================================
-import { useState, useCallback, useRef, useMemo } from 'react';
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { useFileSystem } from '../../stores/fileSystem';
 import { useSystem } from '../../stores/systemStore';
 import { useWindowManager } from '../../stores/windowManager';
@@ -9,6 +9,9 @@ import { useProcessManager } from '../../stores/processManager';
 import { useContextMenuStore } from '../../stores/contextMenuStore';
 import { useAppRegistry } from '../../core/appRegistry';
 import { useRubberBand } from '../../hooks/useRubberBand';
+import { openFile } from '../../services/fileLauncher';
+import { getFileIconForExtension } from '../../services/mimeRegistry';
+import { apiClient } from '../../services/apiClient';
 import kernel from '../../core/kernel';
 import type { FileSystemNode } from '../../types';
 import './FileExplorer.css';
@@ -100,135 +103,105 @@ export default function FileExplorerApp({ windowId }: { windowId: string }) {
     }
   }, [currentPath, navigateTo]);
 
+  const [linuxApps, setLinuxApps] = useState<any[]>([]);
+
+  useEffect(() => {
+    apiClient<{ packages: Array<any> }>('/api/linux-runtime/packages')
+      .then(res => {
+        if (res?.packages) setLinuxApps(res.packages);
+      })
+      .catch(() => undefined);
+  }, []);
+
   const handleDoubleClick = (node: FileSystemNode) => {
     if (node.type === 'directory') {
       navigateTo(node.path);
-    } else {
-      const ext = node.extension;
-      let targetAppId = '';
-      let titlePrefix = `${node.name} - `;
+      return;
+    }
 
-      if (ext === 'exe') {
-        const isApp =
-          node.metadata?.type === 'app_executable' || (node.content && node.content.startsWith('{'));
-        const isBinary = node.metadata?.type === 'binary_executable';
+    const ext = node.extension;
 
-        if (isApp) {
-          try {
-            const manifest = JSON.parse(node.content || '{}');
-            targetAppId = manifest.appId || 'notepad';
-            titlePrefix = '';
-          } catch (e) {
-            kernel.log('WARN', 'Explorer', `Invalid executable manifest: ${node.name}`);
-            return;
-          }
-        } else if (isBinary) {
-          const isSdkApp = node.content && !node.content.trimStart().startsWith('[');
+    // Direct Executable check
+    if (ext === 'exe') {
+      const isApp = node.metadata?.type === 'app_executable' || (node.content && node.content.startsWith('{'));
+      const isBinary = node.metadata?.type === 'binary_executable';
 
-          if (isSdkApp) {
-            const pid = createProcess('sdk-app-runner', node.name, '⚡');
+      if (isApp) {
+        try {
+          const manifest = JSON.parse(node.content || '{}');
+          const targetAppId = manifest.appId || 'notepad';
+          const app = apps[targetAppId];
+          if (app) {
+            const pid = createProcess(app.id, app.name, app.icon);
             openWindow({
-              title: node.name,
-              icon: '⚡',
-              appId: 'sdk-app-runner',
-              width: 600,
-              height: 400,
+              title: app.name,
+              icon: app.icon,
+              appId: app.id,
+              width: app.defaultWidth,
+              height: app.defaultHeight,
               processId: pid,
-              params: { binaryPath: node.path },
+              params: { filePath: node.path },
             });
             return;
           }
-
-          const terminalApp = apps['terminal'];
-          if (terminalApp) {
-            const pid = createProcess(terminalApp.id, terminalApp.name, '💻');
-            openWindow({
-              title: `Executando ${node.name} - Terminal`,
-              icon: '💻',
-              appId: 'terminal',
-              processId: pid,
-              width: 700,
-              height: 450,
-              params: { command: node.path },
-            });
-            return;
-          }
-        } else {
-          kernel.log('INFO', 'Explorer', `Cannot execute system driver or library: ${node.name}`);
+        } catch {
+          kernel.log('WARN', 'Explorer', `Invalid executable manifest: ${node.name}`);
+        }
+      } else if (isBinary) {
+        const isSdkApp = node.content && !node.content.trimStart().startsWith('[');
+        if (isSdkApp) {
+          const pid = createProcess('sdk-app-runner', node.name, '⚡');
+          openWindow({
+            title: node.name,
+            icon: '⚡',
+            appId: 'sdk-app-runner',
+            width: 600,
+            height: 400,
+            processId: pid,
+            params: { binaryPath: node.path },
+          });
           return;
         }
-      } else {
-        targetAppId =
-          ext === 'txt' || ext === 'ini' || ext === 'js' || ext === 'json'
-            ? 'notepad'
-            : ext === 'html' || ext === 'htm'
-            ? 'browser'
-            : ext === 'webm' || ext === 'mp4'
-            ? 'media-player'
-            : '';
-      }
-
-      if (!targetAppId) {
-        kernel.log('INFO', 'Explorer', `No application associated with .${ext} files.`);
-        return;
-      }
-
-      const app = apps[targetAppId];
-      if (app) {
-        const pid = createProcess(app.id, app.name, app.icon);
-        openWindow({
-          title: `${titlePrefix}${app.name}`,
-          icon: app.icon,
-          appId: app.id,
-          width: app.defaultWidth,
-          height: app.defaultHeight,
-          processId: pid,
-          params: { filePath: node.path },
-        });
-      } else {
-        kernel.log('ERROR', 'Explorer', `Application '${targetAppId}' not found in registry.`);
+        const terminalApp = apps['terminal'];
+        if (terminalApp) {
+          const pid = createProcess(terminalApp.id, terminalApp.name, '💻');
+          openWindow({
+            title: `Executando ${node.name} - Terminal`,
+            icon: '💻',
+            appId: 'terminal',
+            processId: pid,
+            width: 700,
+            height: 450,
+            params: { command: node.path },
+          });
+          return;
+        }
       }
     }
+
+    // Standard File Association & Launch
+    openFile({
+      filePath: node.path,
+      fileName: node.name,
+      fileContent: node.content,
+      linuxApps
+    });
+  };
+
+  const handleOpenWith = (node: FileSystemNode) => {
+    if (node.type !== 'file') return;
+    openFile({
+      filePath: node.path,
+      fileName: node.name,
+      fileContent: node.content,
+      openWith: true,
+      linuxApps
+    });
   };
 
   const getFileIcon = (node: FileSystemNode) => {
     if (node.type === 'directory') return '📁';
-    const ext = node.extension;
-    switch (ext) {
-      case 'txt':
-        return '📝';
-      case 'js':
-        return '📜';
-      case 'html':
-        return '🌐';
-      case 'css':
-        return '🎨';
-      case 'json':
-        return '📋';
-      case 'ini':
-        return '⚙️';
-      case 'png':
-      case 'jpg':
-      case 'gif':
-        return '🖼️';
-      case 'mp3':
-      case 'wav':
-        return '🎵';
-      case 'mp4':
-      case 'avi':
-      case 'webm':
-        return '🎬';
-      case 'exe':
-      case 'obx':
-        return '⚡';
-      case 'osl':
-        return '🔷';
-      case 'zip':
-      case 'rar':
-        return '📦';
-      default:
-        return '📄';
-    }
+    return getFileIconForExtension(node.name);
   };
 
   const handleDragStart = useCallback((e: React.DragEvent, node: FileSystemNode) => {
@@ -291,7 +264,10 @@ export default function FileExplorerApp({ windowId }: { windowId: string }) {
     setSelectedItems(new Set([node.path]));
 
     openContextMenu(e.clientX, e.clientY, [
-      { id: 'open', label: 'Abrir', icon: '📂', onClick: () => handleDoubleClick(node) },
+      { id: 'open', label: 'Abrir', icon: '⚡', onClick: () => handleDoubleClick(node) },
+      ...(node.type === 'file' ? [
+        { id: 'open-with', label: 'Abrir com...', icon: '🗂️', onClick: () => handleOpenWith(node) },
+      ] : []),
       { id: 'sep1', label: '', separator: true },
       {
         id: 'cut',

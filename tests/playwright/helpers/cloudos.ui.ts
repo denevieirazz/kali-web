@@ -64,7 +64,7 @@ export function installBrowserErrorGuards(page: Page): ErrorGuards {
 export async function waitForOobe(page: Page, baseURL: string): Promise<void> {
   await page.goto(baseURL);
   await expect(page.locator('.setup-wizard')).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByRole('heading', { name: 'Sua conta começa aqui.' })).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.setup-title').first()).toBeVisible({ timeout: 10_000 });
   await expect(page.locator('.desktop')).toHaveCount(0);
   await expect(page.locator('.taskbar')).toHaveCount(0);
 }

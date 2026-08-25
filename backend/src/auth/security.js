@@ -45,14 +45,30 @@ export function validateDisplayName(value, fallback) {
   return { value: displayName, error: null };
 }
 
-export function validatePassword(password, confirmPassword) {
-  if (typeof password !== 'string' || password.length < 4 || password.length > 128) {
-    return { error: 'A senha deve conter entre 4 e 128 caracteres.' };
+export const MIN_PASSWORD_LENGTH = 8;
+export const MAX_PASSWORD_LENGTH = 128;
+
+export function validateNewPassword(password, confirmPassword) {
+  if (typeof password !== 'string') {
+    return { error: 'A senha deve ser um texto válido.' };
+  }
+  if (/[\u0000-\u001f\u007f]/.test(password)) {
+    return { error: 'A senha não pode conter caracteres de controle.' };
+  }
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    return { error: `A senha deve conter pelo menos ${MIN_PASSWORD_LENGTH} caracteres.` };
+  }
+  if (password.length > MAX_PASSWORD_LENGTH) {
+    return { error: `A senha deve conter no máximo ${MAX_PASSWORD_LENGTH} caracteres.` };
   }
   if (password !== confirmPassword) {
     return { error: 'A confirmação de senha não confere.' };
   }
   return { error: null };
+}
+
+export function validatePassword(password, confirmPassword) {
+  return validateNewPassword(password, confirmPassword);
 }
 
 function encodeReadableRecoveryPayload(bytes) {

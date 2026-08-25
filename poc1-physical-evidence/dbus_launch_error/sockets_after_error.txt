@@ -1,0 +1,5 @@
+/tmp/.X11-unix/:
+total 4
+drwxrwxrwx  2 root       root         60 Aug 20 20:03 .
+drwxrwxrwt 43 root       root       4096 Aug 20 20:03 ..
+srwxrwxrwx  1 denevieira denevieira    0 Aug 20 20:03 X0

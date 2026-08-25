@@ -102,9 +102,9 @@ function recoveryFailureResponse(db, res) {
 // Login
 authRouter.post('/login', async (req, res, next) => {
   try {
-    const { username, password } = req.body || {};
-    if (typeof username !== 'string' || !username.trim() || typeof password !== 'string' || !password) {
-      return res.status(400).json({ error: 'Usuário e senha são obrigatórios.' });
+    const { username, password = '' } = req.body || {};
+    if (typeof username !== 'string' || !username.trim() || typeof password !== 'string') {
+      return res.status(400).json({ error: 'Usuário é obrigatório.' });
     }
 
     const db = getDb();
@@ -173,11 +173,92 @@ authRouter.get('/recovery/status', async (_req, res, next) => {
   }
 });
 
-// Redefine a única conta administradora usando somente o código de recuperação.
+// Criação de contas secundárias após a conclusão do setup
+authRouter.post('/accounts', async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const checkedUsername = validateUsername(body.username, { required: true });
+    if (checkedUsername.error) return res.status(400).json({ error: checkedUsername.error });
+
+    const checkedPassword = validatePassword(body.password, body.confirmPassword);
+    if (checkedPassword.error) return res.status(400).json({ error: checkedPassword.error });
+
+    const username = checkedUsername.value;
+    const checkedDisplayName = body.displayName === undefined || body.displayName === ''
+      ? { value: username, error: null }
+      : validateDisplayName(body.displayName, username);
+    if (checkedDisplayName.error) return res.status(400).json({ error: checkedDisplayName.error });
+
+    const db = getDb();
+    const adminCount = await new Promise((resolve, reject) => {
+      db.get('SELECT COUNT(*) as count FROM users WHERE role = ?', ['admin'], (err, row) => {
+        if (err) return reject(err);
+        resolve(row?.count ?? 0);
+      });
+    });
+
+    if (adminCount === 0) {
+      return res.status(400).json({ error: 'A conta administradora principal precisa ser criada antes de contas secundárias.' });
+    }
+
+    const existingUser = await dbGet(db, 'SELECT * FROM users WHERE username = ?', [username]);
+    if (existingUser) {
+      return res.status(400).json({ error: 'Nome de usuário já cadastrado.' });
+    }
+
+    const id = crypto.randomUUID();
+    const recoveryCode = generateRecoveryCode();
+    const [passwordHash, recoveryCodeHash] = await Promise.all([
+      hashPassword(body.password),
+      hashRecoveryCode(recoveryCode)
+    ]);
+
+    await new Promise((resolve, reject) => {
+      db.run(
+        'INSERT INTO users (id, username, display_name, password_hash, recovery_code_hash, auth_version, role) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [id, username, checkedDisplayName.value, passwordHash, recoveryCodeHash, 1, 'user'],
+        error => error ? reject(error) : resolve()
+      );
+    });
+
+    const createdUser = await dbGet(db, 'SELECT * FROM users WHERE id = ?', [id]);
+
+    // Registrar operação de auditoria sem segredos
+    try {
+      await new Promise((resolve) => db.run(
+        'INSERT INTO operations (id, type, target, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [
+          `op-${crypto.randomUUID()}`,
+          'secondary-account-creation',
+          createdUser.username,
+          'completed',
+          new Date().toISOString(),
+          new Date().toISOString()
+        ],
+        () => resolve()
+      ));
+    } catch {}
+
+    noStore(res);
+    return res.status(201).json({
+      message: 'Conta criada com sucesso.',
+      user: toPublicUser(createdUser),
+      recoveryCode,
+      recoveryCodeShownOnce: true
+    });
+  } catch (error) {
+    if (error.message === 'USERNAME_EXISTS') {
+      return res.status(400).json({ error: 'Nome de usuário já cadastrado.' });
+    }
+    next(error);
+  }
+});
+
+// Redefine a conta usando somente o código de recuperação.
 authRouter.post('/recovery/reset', async (req, res, next) => {
   try {
     const body = req.body || {};
-    const checkedUsername = validateUsername(body.newUsername, { required: false });
+    const checkedUsername = validateUsername(body.newUsername || body.username, { required: false });
     if (checkedUsername.error) return res.status(400).json({ error: checkedUsername.error });
 
     const checkedPassword = validatePassword(body.password, body.confirmPassword);
@@ -192,21 +273,40 @@ authRouter.post('/recovery/reset', async (req, res, next) => {
     const currentThrottle = db.getRecoveryThrottle();
     if (currentThrottle.limited) return recoveryLimitedResponse(res, currentThrottle);
 
-    const admin = await dbGet(db, 'SELECT * FROM users WHERE role = ?', ['admin']);
     const rawRecoveryCode = typeof body.recoveryCode === 'string' ? body.recoveryCode : '';
     const recoveryCode = normalizeRecoveryCodeInput(rawRecoveryCode);
     const inputIsValid = validRecoveryCodeInput(rawRecoveryCode);
-    const recoveryMatches = await verifyRecoveryCode(
-      inputIsValid ? recoveryCode : 'CLOUDOS-invalid-recovery-code',
-      inputIsValid ? admin?.recovery_code_hash : null
-    );
-    if (!inputIsValid || !admin || !admin.recovery_code_hash || !recoveryMatches) {
+    if (!inputIsValid) {
       return recoveryFailureResponse(db, res);
     }
 
-    const username = checkedUsername.value || admin.username;
+    const allUsers = await new Promise((resolve, reject) => {
+      db.all('SELECT * FROM users', [], (err, rows) => err ? reject(err) : resolve(rows || []));
+    });
+
+    let matchedUser = null;
+    const specifiedUsername = (body.username || body.currentUsername || '').trim();
+    if (specifiedUsername) {
+      const candidate = allUsers.find(u => u.username.toLowerCase() === specifiedUsername.toLowerCase());
+      if (candidate?.recovery_code_hash && await verifyRecoveryCode(recoveryCode, candidate.recovery_code_hash)) {
+        matchedUser = candidate;
+      }
+    } else {
+      for (const candidate of allUsers) {
+        if (candidate.recovery_code_hash && await verifyRecoveryCode(recoveryCode, candidate.recovery_code_hash)) {
+          matchedUser = candidate;
+          break;
+        }
+      }
+    }
+
+    if (!matchedUser) {
+      return recoveryFailureResponse(db, res);
+    }
+
+    const username = checkedUsername.value || matchedUser.username;
     const checkedDisplayName = body.displayName === undefined
-      ? { value: admin.display_name || username, error: null }
+      ? { value: matchedUser.display_name || username, error: null }
       : validateDisplayName(body.displayName, username);
 
     const nextRecoveryCode = generateRecoveryCode();
@@ -217,14 +317,16 @@ authRouter.post('/recovery/reset', async (req, res, next) => {
 
     let updatedUser;
     try {
-      updatedUser = await recoverAdmin(db, {
-        id: admin.id,
-        expectedRecoveryCodeHash: admin.recovery_code_hash,
-        username,
-        displayName: checkedDisplayName.value,
-        passwordHash,
-        recoveryCodeHash,
-        authVersion: (Number(admin.auth_version) || 1) + 1
+      updatedUser = await new Promise((resolve, reject) => {
+        db.recoverUser({
+          id: matchedUser.id,
+          expectedRecoveryCodeHash: matchedUser.recovery_code_hash,
+          username,
+          displayName: checkedDisplayName.value,
+          passwordHash,
+          recoveryCodeHash,
+          authVersion: (Number(matchedUser.auth_version) || 1) + 1
+        }, (err, user) => err ? reject(err) : resolve(user));
       });
     } catch (error) {
       if (['RECOVERY_CODE_CHANGED', 'USERNAME_EXISTS'].includes(error.message)) {
@@ -232,6 +334,22 @@ authRouter.post('/recovery/reset', async (req, res, next) => {
       }
       throw error;
     }
+
+    // Registrar operação de auditoria sem segredos
+    try {
+      await new Promise((resolve) => db.run(
+        'INSERT INTO operations (id, type, target, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [
+          `op-${crypto.randomUUID()}`,
+          'account-recovery',
+          updatedUser.username,
+          'completed',
+          new Date().toISOString(),
+          new Date().toISOString()
+        ],
+        () => resolve()
+      ));
+    } catch {}
 
     noStore(res);
     return res.json({
@@ -246,8 +364,8 @@ authRouter.post('/recovery/reset', async (req, res, next) => {
   }
 });
 
-// Gera um novo código para contas existentes; exige uma sessão administrativa válida.
-authRouter.post('/recovery/rotate', authenticateToken, requireAdmin, async (req, res, next) => {
+// Gera um novo código para a conta autenticada; exige uma sessão válida.
+authRouter.post('/recovery/rotate', authenticateToken, async (req, res, next) => {
   try {
     const db = getDb();
     const recoveryCode = generateRecoveryCode();

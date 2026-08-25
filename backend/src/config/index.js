@@ -27,6 +27,7 @@ export function resolveNativeShellOrigin(environment = process.env) {
 export function resolveSetupResetEnabled(environment = process.env) {
   if (environment.CLOUDOS_NATIVE_HOST === '1') return false;
   if (environment.NODE_ENV === 'test') return true;
+  if (environment.CLOUDOS_ALLOW_TEST_RESET === 'true' || environment.CLOUDOS_ALLOW_TEST_RESET === '1') return true;
   return environment.NODE_ENV === 'development'
     && environment.CLOUDOS_ALLOW_SETUP_RESET === '1';
 }

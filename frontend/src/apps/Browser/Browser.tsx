@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { nativeHostBridge } from '../../services/nativeHostBridge';
 import { useProcessManager } from '../../stores/processManager';
 import { useWindowManager } from '../../stores/windowManager';
+import LinuxAppWindow from '../LinuxAppWindow/LinuxAppWindow';
 import {
   browserLauncherFailure,
   browserLauncherOpening,
@@ -12,6 +13,10 @@ import './Browser.css';
 const HOST_REQUIRED_CODE = 'NATIVE_HOST_UNAVAILABLE';
 
 export default function BrowserApp({ windowId }: { windowId: string }) {
+  if (!nativeHostBridge.available) {
+    return <LinuxAppWindow windowId={windowId} params={{ appId: 'firefox', title: 'Mozilla Firefox', icon: '🦊' }} />;
+  }
+
   const [launcher, setLauncher] = useState(browserLauncherOpening);
   const started = useRef(false);
   const launching = useRef(false);

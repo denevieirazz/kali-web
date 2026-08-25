@@ -138,7 +138,9 @@ export default function Window({ windowId, children }: Props) {
     ]);
   }, [win, windowId, toggleMaximize, minimizeWindow, handleClose, openContextMenu]);
 
-  if (!win || win.isMinimized) return null;
+  // Minimize apenas oculta a janela. A subtree continua montada para preservar lifecycle
+  // de apps com sessão própria (ex.: Linux Runtime/Xpra). Close continua desmontando.
+  if (!win) return null;
 
   return (
     <div
@@ -150,14 +152,22 @@ export default function Window({ windowId, children }: Props) {
         width: win.width,
         height: win.height,
         zIndex: win.zIndex,
+        display: win.isMinimized ? 'none' : undefined,
       }}
+      aria-hidden={win.isMinimized || undefined}
       onMouseDown={handleMouseDown}
     >
       {/* Title Bar - Only show if hasFrame is True */}
       {win.hasFrame && (
         <div className="window-titlebar" onMouseDown={handleTitleMouseDown} onDoubleClick={() => toggleMaximize(windowId)} onContextMenu={handleWindowContextMenu}>
           <div className="window-titlebar-left">
-            <span className="window-icon">{win.icon}</span>
+            <span className="window-icon">
+              {typeof win.icon === 'string' && (win.icon.startsWith('/') || win.icon.startsWith('http')) ? (
+                <img src={win.icon} alt="" style={{ width: '16px', height: '16px', objectFit: 'contain' }} onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }} />
+              ) : (
+                win.icon || '🗔'
+              )}
+            </span>
             <span className="window-title text-ellipsis">{win.title}</span>
           </div>
           <div className="window-controls">

@@ -11,12 +11,15 @@ import {
 
 const READABLE = /^CLOUDOS-[2-9A-HJ-NP-Z]{3}(?:-[2-9A-HJ-NP-Z]{4}){8}$/;
 
-test('password accepts four characters, spaces and passphrases without composition rules', () => {
-  assert.equal(validatePassword('1234', '1234').error, null);
-  assert.equal(validatePassword('a b ', 'a b ').error, null);
+test('password requires eight characters while accepting spaces, Unicode and passphrases without arbitrary composition rules', () => {
+  assert.match(validatePassword('1234567', '1234567').error, /8 caracteres/);
+  assert.equal(validatePassword('12345678', '12345678').error, null);
+  assert.equal(validatePassword('a b c d ', 'a b c d ').error, null);
   assert.equal(validatePassword('uma frase senha longa', 'uma frase senha longa').error, null);
-  assert.match(validatePassword('123', '123').error, /4 e 128/);
-  assert.match(validatePassword('abcd', 'abce').error, /não confere/);
+  assert.equal(validatePassword('CaféComPão#2026', 'CaféComPão#2026').error, null);
+  assert.match(validatePassword('123', '123').error, /8 caracteres/);
+  assert.match(validatePassword('12345678\x00', '12345678\x00').error, /caracteres de controle/);
+  assert.match(validatePassword('abcdefgh', 'abcdefgi').error, /não confere/);
 });
 
 test('recovery code is readable, grouped and backed by 175 random bits', () => {

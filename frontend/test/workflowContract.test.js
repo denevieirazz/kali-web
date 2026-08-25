@@ -197,26 +197,27 @@ test('WebOnly launcher explains Browser Full-only capability without offering im
   has(shell, /nativeHostBridge\.available/);
   has(shell, /filter\(app => nativeHostBridge\.available \|\| app\.id !== 'browser'\)/);
   has(shell, /Browser disponível apenas no modo Full/);
-  has(shell, /Abrir navegador padrão/);
-  has(shell, /não ativa o Browser do CloudOS, não muda o modo da sessão/);
+  has(shell, /nenhuma janela externa será aberta/);
+  assert.doesNotMatch(shell, /Abrir navegador padrão|openDefaultBrowser|window\.open/);
   assert.doesNotMatch(shell, /\.\.\/\.\.\/apps\/Browser/);
 });
 
-test('WebOnly Browser fallback returns before the generic CloudOS Browser launch', () => {
+test('WebOnly Browser fails closed before the generic CloudOS Browser launch', () => {
   const start = workflowLaunch.indexOf('export function openExistingBrowser()');
-  const end = workflowLaunch.indexOf('\nexport function openDefaultBrowser()', start);
+  const end = workflowLaunch.indexOf('\nexport function openSettings()', start);
   assert.ok(start >= 0 && end > start, 'openExistingBrowser precisa existir como fluxo isolável');
   const body = workflowLaunch.slice(start, end);
   const guard = body.indexOf('if (!nativeHostBridge.available) {');
-  const fallbackReturn = body.indexOf('return openDefault ? openDefaultBrowser() : null;', guard);
-  const guardedEnd = body.indexOf("\n  }\n  return launchWorkflowApp('browser');", guard);
+  const blocked = body.indexOf("throw new Error('Browser CloudOS disponível apenas no modo Full. Nenhuma janela externa foi aberta.');", guard);
+  const guardedEnd = body.indexOf("\n  }\n  return launchWorkflowApp('browser');", blocked);
   const cloudosLaunch = body.indexOf("return launchWorkflowApp('browser');", guard);
   assert.ok(guard >= 0, 'WebOnly precisa de guard explícito de Native Host');
-  assert.ok(fallbackReturn > guard, 'WebOnly precisa retornar o fallback antes de sair do branch protegido');
-  assert.ok(guardedEnd > fallbackReturn, 'o retorno WebOnly precisa permanecer dentro do branch protegido');
+  assert.ok(blocked > guard, 'WebOnly precisa bloquear antes de sair do branch protegido');
+  assert.ok(guardedEnd > blocked, 'o bloqueio WebOnly precisa permanecer dentro do branch protegido');
   assert.ok(cloudosLaunch > guardedEnd, 'Browser CloudOS só pode ser lançado depois do branch WebOnly retornar');
   has(body, /Browser CloudOS disponível apenas no modo Full/);
-  has(body, /Abrir o navegador padrão nesta sessão WebOnly/);
+  has(body, /Nenhuma janela externa foi aberta/);
+  assert.doesNotMatch(workflowLaunch, /openDefaultBrowser|window\.open|about:blank/);
 });
 
 test('Batch 3.6 productivity review remains factual and names the remaining system boundaries', () => {

@@ -6,6 +6,11 @@ import {
   wslCoreTerminalEnabled,
   wslCoreTerminalFallbackEnabled
 } from './wslCoreAdapter.js';
+import {
+  buildContainedLegacyShellArgs,
+  buildWslHostEnvironment,
+  WSL_TERMINAL_EXECUTABLE
+} from './wslTerminalContainment.js';
 
 let pty = null;
 try {
@@ -14,7 +19,6 @@ try {
   console.warn('⚠️  node-pty não disponível — terminal legado usará emulador local.');
 }
 
-const WSL_EXE = 'C:\\Windows\\System32\\wsl.exe';
 const POWERSHELL_EXE = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
 
 function buildTerminalEnvironment() {
@@ -26,7 +30,7 @@ function buildTerminalEnvironment() {
     'PROCESSOR_REVISION', 'ProgramData', 'ProgramFiles', 'ProgramFiles(x86)',
     'ProgramW6432', 'PSModulePath', 'PUBLIC', 'SystemDrive', 'SystemRoot',
     'TEMP', 'TMP', 'USERDOMAIN', 'USERNAME', 'USERPROFILE', 'windir',
-    'LANG', 'LC_ALL', 'TERM', 'WSLENV'
+    'LANG', 'LC_ALL', 'TERM'
   ];
   const environment = { CLOUDOS: '1', TERM: 'xterm-256color' };
   for (const key of allowedKeys) {
@@ -181,8 +185,8 @@ export function setupTerminalWebSocket(wss) {
           let spawnExe = POWERSHELL_EXE;
           let spawnArgs = ['-NoLogo'];
           if (requestedProfile === 'wsl' && snapshot?.operational && targetDistro) {
-            spawnExe = WSL_EXE;
-            spawnArgs = ['-d', targetDistro, '--', '/bin/bash', '-l'];
+            spawnExe = WSL_TERMINAL_EXECUTABLE;
+            spawnArgs = buildContainedLegacyShellArgs(targetDistro);
           }
 
           try {
@@ -191,7 +195,9 @@ export function setupTerminalWebSocket(wss) {
               cols,
               rows,
               cwd: process.env.USERPROFILE || 'C:\\',
-              env: buildTerminalEnvironment()
+              env: spawnExe === WSL_TERMINAL_EXECUTABLE
+                ? buildWslHostEnvironment(process.env)
+                : buildTerminalEnvironment()
             });
             backendMode = 'legacy-pty';
             isInitialized = true;

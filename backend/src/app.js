@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config/index.js';
+import { getDb } from './database/index.js';
 import { authRouter } from './auth/routes.js';
 import { systemRouter } from './system/routes.js';
 import { operationsRouter } from './operations/routes.js';
@@ -17,10 +18,23 @@ import { readinessRouter } from './readiness/routes.js';
 import { securityToolsRouter } from './security/routes.js';
 import { filesRouter } from './files/routes.js';
 import { productRouter } from './product/routes.js';
+import { linuxRuntimeRouter } from './linuxRuntime/routes.js';
+import { xpraHttpProxyMiddleware } from './linuxRuntime/xpraProxy.js';
+import { readLinuxDesktopIcon } from './apps/linuxDesktopScanner.js';
 import { createHostTrustPolicy, hasSupervisorTrust } from './auth/hostTrust.js';
+import { authenticateToken, requireAdmin } from './middleware/auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const defaultFrontendDist = path.resolve(__dirname, '../../frontend/dist');
+
+const PROTECTED_LINUX_DISTRO_MUTATIONS = new Set([
+  'POST /api/linux-runtime/distros/active',
+  'POST /api/linux-runtime/distros/install',
+  'POST /api/linux-runtime/distros/unregister',
+  'POST /api/linux-runtime/distros/import',
+  'POST /api/linux-runtime/distros/provision',
+  'GET /api/linux-runtime/distros/provision/stream'
+]);
 
 function normalizeOrigin(origin) {
   try {
@@ -41,6 +55,23 @@ function hasTraversalPath(requestUrl) {
     return true;
   }
   return candidate.includes('\0') || candidate.split(/[\\/]/).includes('..');
+}
+
+function dbGet(db, query, params) {
+  return new Promise((resolve, reject) => db.get(query, params, (error, row) => error ? reject(error) : resolve(row)));
+}
+
+async function protectLinuxDistroMutationsAfterSetup(req, res, next) {
+  const routeKey = `${req.method.toUpperCase()} ${req.path}`;
+  if (!PROTECTED_LINUX_DISTRO_MUTATIONS.has(routeKey)) return next();
+
+  try {
+    const row = await dbGet(getDb(), 'SELECT COUNT(*) AS count FROM users WHERE role = ?', ['admin']);
+    if ((row?.count || 0) === 0) return next();
+    return authenticateToken(req, res, () => requireAdmin(req, res, next));
+  } catch (error) {
+    return next(error);
+  }
 }
 
 export function createApp(initialPort, options = {}) {
@@ -82,6 +113,28 @@ export function createApp(initialPort, options = {}) {
     credentials: true
   }));
 
+  // Capability-scoped proxy: mantém Xpra HTTP/HTML5 dentro do origin CloudOS.
+  // O token é emitido apenas pela API autenticada da POC e nunca é encaminhado ao Xpra.
+  app.use(xpraHttpProxyMiddleware);
+
+  // Desktop entries expose only an opaque app ID. Icon names and Linux paths are
+  // resolved again inside the trusted scanner boundary and never accepted here.
+  app.get('/__cloudos/linux-runtime/apps/:id/icon', async (req, res) => {
+    try {
+      const distribution = req.query?.distribution || req.query?.distro;
+      const icon = await readLinuxDesktopIcon(req.params.id, distribution);
+      if (!icon) return res.status(404).send('Icon not found');
+      res.setHeader('Content-Type', icon.mimeType);
+      res.setHeader('Cache-Control', 'public, max-age=604800');
+      res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'; style-src 'unsafe-inline'");
+      res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.end(icon.data);
+    } catch {
+      res.status(404).send('Icon error');
+    }
+  });
+
   app.use(express.json({ limit: '5mb' }));
 
   app.get('/_cloudos/supervisor/health', (req, res) => {
@@ -113,6 +166,19 @@ export function createApp(initialPort, options = {}) {
     });
   });
 
+  // Distro mutation endpoints are intentionally public during first boot, before an
+  // administrator exists. Once setup is complete they become administrator-only.
+  app.use(protectLinuxDistroMutationsAfterSetup);
+
+  // Secondary accounts are never part of first boot. Creating another local identity
+  // changes the machine's trust boundary, so it always requires the current administrator.
+  app.post('/api/auth/accounts', authenticateToken, requireAdmin);
+
+  // Package install/remove changes the shared Linux runtime, not only the caller's profile.
+  // Keep catalog/search available to signed-in users while restricting system mutations.
+  app.post('/api/linux-runtime/packages/:id/install', authenticateToken, requireAdmin);
+  app.post('/api/linux-runtime/packages/:id/uninstall', authenticateToken, requireAdmin);
+
   app.use('/api/auth', authRouter);
   app.use('/api/user', userRouter);
   app.use('/api/system', systemRouter);
@@ -125,6 +191,7 @@ export function createApp(initialPort, options = {}) {
   app.use('/api/security/tools', securityToolsRouter);
   app.use('/api/files/wsl', filesRouter);
   app.use('/api/product', productRouter);
+  app.use('/api/linux-runtime', linuxRuntimeRouter);
 
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', service: 'CloudOS-Unified Backend', instanceId: app._cloudosInstanceId || null, timestamp: new Date().toISOString() });

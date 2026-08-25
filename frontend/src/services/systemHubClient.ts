@@ -1,5 +1,7 @@
 import { apiClient } from './apiClient';
-import { nativeHostBridge } from './nativeHostBridge';
+import { useAppRegistry } from '../core/appRegistry';
+import { nativeHostBridge, NativeHostError, type NativeContainmentMode } from './nativeHostBridge';
+import { mapUnifiedCatalogApps } from './unifiedAppCatalog.js';
 
 export interface WslDistribution {
   name: string;
@@ -32,12 +34,12 @@ export interface HostCapabilities {
     terminal: boolean;
     windowsApps: boolean;
     linuxGuiApps: boolean;
-    windowMode: 'native-external' | 'native-managed' | 'streamed';
+    windowMode: 'native-managed' | 'streamed' | 'xpra-contained' | 'unavailable';
     nativeHostActive: boolean;
     managedNativeWindows: boolean;
     embeddedNativeWindows: boolean;
     nativeHostRequired: boolean;
-    nativeWindowContainment?: 'anchored-overlay' | 'external';
+    nativeWindowContainment?: NativeContainmentMode;
   };
   limitations: string[];
 }
@@ -50,10 +52,17 @@ export interface DistroCatalogItem {
 export interface NativeApp {
   id: string;
   name: string;
-  source: 'windows' | 'wsl';
+  source: 'windows' | 'linux' | 'wsl';
   distribution: string | null;
   icon: string;
-  windowMode: 'native-external' | 'native-managed' | 'streamed';
+  iconUrl?: string | null;
+  genericName?: string;
+  comment?: string;
+  keywords?: string[];
+  categories?: string[];
+  mimeTypes?: string[];
+  windowMode: 'native-managed' | 'streamed' | 'xpra-contained' | 'unavailable';
+  launchable?: boolean;
 }
 
 export interface NativeLaunchResult {
@@ -66,7 +75,7 @@ export interface NativeLaunchResult {
   managementReason?: string | null;
   sessionId?: string | null;
   contained?: boolean;
-  containmentMode?: 'anchored-overlay' | 'external';
+  containmentMode?: NativeContainmentMode;
 }
 
 export interface SystemOperation {
@@ -83,6 +92,15 @@ export interface SystemOperation {
   finishedAt: string | null;
   exitCode: number | null;
   errorCode: string | null;
+}
+
+export async function refreshUnifiedAppRegistry(force = false) {
+  const response = await apiClient<{ apps: NativeApp[] }>(`/api/apps${force ? '?refresh=true' : ''}`, { timeoutMs: 30000 });
+  const definitions = mapUnifiedCatalogApps(response);
+  const registry = useAppRegistry.getState();
+  registry.syncDiscoveredApps('windows', definitions.filter(app => app.catalogSource === 'windows'));
+  registry.syncDiscoveredApps('linux', definitions.filter(app => app.catalogSource === 'linux'));
+  return { apps: response.apps || [], definitions };
 }
 
 export const systemHubClient = {
@@ -134,7 +152,15 @@ export const systemHubClient = {
   operations: () => apiClient<{ operations: SystemOperation[] }>('/api/operations'),
   cancelOperation: (id: string) => apiClient<SystemOperation>(`/api/operations/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
   apps: (refresh = false) => apiClient<{ apps: NativeApp[] }>(`/api/apps${refresh ? '?refresh=true' : ''}`, { timeoutMs: 30000 }),
-  launchApp: async (id: string): Promise<NativeLaunchResult> => nativeHostBridge.available
-    ? nativeHostBridge.connect().then(() => nativeHostBridge.launchApp(id))
-    : apiClient<NativeLaunchResult>(`/api/apps/${encodeURIComponent(id)}/launch`, { method: 'POST' })
+  launchApp: async (id: string): Promise<NativeLaunchResult> => {
+    if (!nativeHostBridge.available) {
+      throw new NativeHostError('NATIVE_CONTAINMENT_REQUIRED', 'Aplicativos Windows exigem o Host nativo gerenciado do CloudOS. Nenhuma janela externa foi aberta.');
+    }
+    await nativeHostBridge.connect();
+    const host = await nativeHostBridge.getHostState();
+    if (!host.nativeHost || !host.managedWindows || host.nativeWindowContainment !== 'anchored-overlay') {
+      throw new NativeHostError('NATIVE_CONTAINMENT_REQUIRED', 'O Host atual não consegue encaixar esta janela no CloudOS. O lançamento foi bloqueado.');
+    }
+    return nativeHostBridge.launchApp(id);
+  }
 };

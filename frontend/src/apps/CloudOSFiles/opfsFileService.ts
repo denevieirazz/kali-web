@@ -39,6 +39,12 @@ export function sanitizeName(name: string): string {
   return name.trim().replace(/[\\/:*?"<>|\u0000-\u001f]/g, '-').replace(/\.+$/g, '').slice(0, 120);
 }
 
+export function notifyFilesChanged() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('cloudos:files-changed'));
+  }
+}
+
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
   if (bytes < 1024) return `${bytes} B`;
@@ -52,7 +58,12 @@ async function storageRoot() {
 }
 
 export async function getOpfsRoot(): Promise<FileSystemDirectoryHandle> {
-  return (await storageRoot()).getDirectoryHandle(ROOT_DIR, { create: true });
+  const root = await (await storageRoot()).getDirectoryHandle(ROOT_DIR, { create: true });
+  const defaultFolders = ['Downloads', 'Documents', 'Desktop', 'Pictures', 'Videos', 'Projects', 'Workspace'];
+  for (const folder of defaultFolders) {
+    try { await root.getDirectoryHandle(folder, { create: true }); } catch {}
+  }
+  return root;
 }
 
 export async function getTrashRoot(): Promise<FileSystemDirectoryHandle> {
@@ -181,15 +192,16 @@ export async function readFile(path: string[], name: string, fromTrash = false) 
 }
 
 export async function writeTextFile(path: string[], name: string, content: string) {
-  const dir = await getDirAt(path);
+  const dir = await getDirAt(path, true);
   const handle = await dir.getFileHandle(sanitizeName(name), { create: true });
   const writable = await (handle as any).createWritable();
   await writable.write(content);
   await writable.close();
+  notifyFilesChanged();
 }
 
 export async function createEntry(path: string[], kind: FileEntry['kind'], requestedName: string) {
-  const dir = await getDirAt(path);
+  const dir = await getDirAt(path, true);
   const name = await getUniqueName(dir, requestedName, kind === 'directory');
   if (kind === 'directory') await dir.getDirectoryHandle(name, { create: true });
   else {
@@ -197,11 +209,12 @@ export async function createEntry(path: string[], kind: FileEntry['kind'], reque
     const writable = await (handle as any).createWritable();
     await writable.close();
   }
+  notifyFilesChanged();
   return name;
 }
 
 export async function uploadFiles(path: string[], files: File[]) {
-  const dir = await getDirAt(path);
+  const dir = await getDirAt(path, true);
   for (const file of files) {
     const safe = sanitizeName(file.name);
     if (!safe) continue;
@@ -211,26 +224,47 @@ export async function uploadFiles(path: string[], files: File[]) {
     await writable.write(file);
     await writable.close();
   }
+  notifyFilesChanged();
 }
 
 export async function renameEntry(path: string[], entry: FileEntry, requestedName: string) {
   const dir = await getDirAt(path);
   const safe = sanitizeName(requestedName);
   if (!safe || safe === entry.name) return entry.name;
-  const unique = await getUniqueName(dir, safe, entry.kind === 'directory');
   if (entry.kind === 'file') {
+    try {
+      await dir.getFileHandle(safe);
+      if (safe.toLowerCase() !== entry.name.toLowerCase()) {
+        throw new Error(`Já existe um arquivo com o nome “${safe}” nesta pasta.`);
+      }
+    } catch (err: any) {
+      if (err.message?.includes('Já existe')) throw err;
+    }
     const file = await (await dir.getFileHandle(entry.name)).getFile();
-    const target = await dir.getFileHandle(unique, { create: true });
+    const target = await dir.getFileHandle(safe, { create: true });
     const writable = await (target as any).createWritable();
     await writable.write(file);
     await writable.close();
-    await dir.removeEntry(entry.name);
+    if (safe !== entry.name) {
+      await dir.removeEntry(entry.name);
+    }
   } else {
+    try {
+      await dir.getDirectoryHandle(safe);
+      if (safe.toLowerCase() !== entry.name.toLowerCase()) {
+        throw new Error(`Já existe uma pasta com o nome “${safe}” neste local.`);
+      }
+    } catch (err: any) {
+      if (err.message?.includes('Já existe')) throw err;
+    }
     const source = await dir.getDirectoryHandle(entry.name);
-    await copyDirectory(source, dir, unique);
-    await dir.removeEntry(entry.name, { recursive: true });
+    await copyDirectory(source, dir, safe);
+    if (safe !== entry.name) {
+      await dir.removeEntry(entry.name, { recursive: true });
+    }
   }
-  return unique;
+  notifyFilesChanged();
+  return safe;
 }
 
 export async function moveToTrash(path: string[], entry: FileEntry) {
@@ -254,6 +288,7 @@ export async function moveToTrash(path: string[], entry: FileEntry) {
   const metadata = await readTrashMetadata();
   metadata.entries[trashName] = { originalPath: cleanPath(path), originalName: entry.name, deletedAt: Date.now(), kind: entry.kind };
   await writeTrashMetadata(metadata);
+  notifyFilesChanged();
 }
 
 export async function restoreFromTrash(entry: FileEntry) {
@@ -262,7 +297,7 @@ export async function restoreFromTrash(entry: FileEntry) {
   const meta = metadata.entries[entry.name];
   let destination: FileSystemDirectoryHandle;
   try {
-    destination = await getDirAt(meta?.originalPath ?? entry.originalPath ?? [], false);
+    destination = await getDirAt(meta?.originalPath ?? entry.originalPath ?? [], true);
   } catch {
     destination = await getOpfsRoot();
   }
@@ -283,6 +318,7 @@ export async function restoreFromTrash(entry: FileEntry) {
   }
   delete metadata.entries[entry.name];
   await writeTrashMetadata(metadata);
+  notifyFilesChanged();
   return restoredName;
 }
 
@@ -292,6 +328,7 @@ export async function permanentlyDelete(entry: FileEntry) {
   const metadata = await readTrashMetadata();
   delete metadata.entries[entry.name];
   await writeTrashMetadata(metadata);
+  notifyFilesChanged();
 }
 
 export async function emptyTrash() {
@@ -301,6 +338,7 @@ export async function emptyTrash() {
     await trash.removeEntry(name, { recursive: handle.kind === 'directory' });
   }
   await writeTrashMetadata({ version: 1, entries: {} });
+  notifyFilesChanged();
 }
 
 export function validatePaste(sourcePath: string[], entry: FileEntry, destinationPath: string[]) {
@@ -337,5 +375,6 @@ export async function pasteEntry(clipboard: ClipboardEntry, destinationPath: str
     await copyDirectory(sourceDir, destination, name);
     if (clipboard.action === 'cut') await source.removeEntry(entry.name, { recursive: true });
   }
+  notifyFilesChanged();
   return { moved: clipboard.action === 'cut', name };
 }

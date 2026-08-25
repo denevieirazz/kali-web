@@ -1,8 +1,11 @@
 import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
-const EXPECTED_BRANCH = 'stabilization/cloudos-workflow-batch-4';
-const FREEZE_HEAD = 'ae08460f8c813ed9264ca330ef918071c6f3c2aa';
-const allowed = new Set([
+export const EXPECTED_BRANCH = 'stabilization/cloudos-workflow-batch-4';
+export const FREEZE_HEAD = 'ae08460f8c813ed9264ca330ef918071c6f3c2aa';
+export const allowed = new Set([
   '.github/workflows/workflow-batch4-stabilization-ci.yml',
   '.github/workflows/workflow-drone-ci.yml',
   'DRONE_REPORT.md',
@@ -35,9 +38,17 @@ const allowed = new Set([
   'frontend/test/workflowDroneReport.test.js',
   'playwright.drone.config.ts',
   'playwright.human.config.ts',
+  'scripts/Get-GitContext.ps1',
+  'scripts/test-git-branch-resolution-contract.ps1',
+  'scripts/workflow/record-sha-telemetry.mjs',
   'scripts/workflow/render-drone-report.mjs',
   'scripts/workflow/run-hardening-regressions.mjs',
+  'scripts/workflow/test-batch4-stabilization-scope-contract.mjs',
   'scripts/workflow/test-batch4-stabilization-scope.mjs',
+  'scripts/workflow/test-record-sha-telemetry.mjs',
+  'scripts/workflow/test-verify-spec-integrity.mjs',
+  'scripts/workflow/test-workflow-sha-contract.mjs',
+  'scripts/workflow/verify-spec-integrity.mjs',
   'tests/playwright/fixtures/cloudos.fixture.ts',
   'tests/playwright/workflow-drone.spec.ts',
   'tests/playwright/workflow-hardening-resilience.spec.ts',
@@ -45,21 +56,7 @@ const allowed = new Set([
   'tests/playwright/workflow-human-simulation-v2.spec.ts',
 ]);
 
-function git(...args) {
-  return execFileSync('git', args, { encoding: 'utf8' }).trim();
-}
-
-const changed = git('diff', '--name-only', `${FREEZE_HEAD}...HEAD`).split(/\r?\n/).filter(Boolean);
-if (!changed.length) throw new Error('A estabilização não contém alterações em relação ao freeze.');
-
-const unexpected = changed.filter(path => !allowed.has(path));
-if (unexpected.length) {
-  console.error('BATCH4_STABILIZATION_SCOPE_VIOLATION');
-  for (const path of unexpected) console.error(` - ${path}`);
-  process.exit(1);
-}
-
-const required = [
+export const required = [
   'frontend/src/apps/CloudOSFiles/CloudOSFiles.tsx',
   'frontend/src/apps/CloudOSFiles/windowsDirectorySource.ts',
   'frontend/src/apps/CloudOSTerminal/TerminalSession.tsx',
@@ -69,21 +66,130 @@ const required = [
   'frontend/src/services/workflowWorkspace.ts',
   'frontend/test/workflowBatch4Stabilization.test.js',
 ];
-const missing = required.filter(path => !changed.includes(path));
-if (missing.length) {
-  console.error('BATCH4_STABILIZATION_REQUIRED_FILE_MISSING');
-  for (const path of missing) console.error(` - ${path}`);
-  process.exit(1);
+
+function git(...args) {
+  return execFileSync('git', args, { encoding: 'utf8' }).trim();
 }
 
-const refName = process.env.GITHUB_REF_NAME;
-const headRef = process.env.GITHUB_HEAD_REF;
-const baseRef = process.env.GITHUB_BASE_REF;
-const branchMatches = refName === EXPECTED_BRANCH || headRef === EXPECTED_BRANCH || baseRef === EXPECTED_BRANCH;
-if ((refName || headRef || baseRef) && !branchMatches) {
-  console.error(`BATCH4_STABILIZATION_WRONG_BRANCH: ref=${refName || '-'} head=${headRef || '-'} base=${baseRef || '-'}`);
-  process.exit(1);
+function policyError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
 }
 
-console.log(`BATCH4_STABILIZATION_SCOPE_OK base=${FREEZE_HEAD} files=${changed.length}`);
-for (const path of changed) console.log(` + ${path}`);
+function readEventPayload(env) {
+  const eventPath = env.GITHUB_EVENT_PATH;
+  if (!eventPath) return null;
+  try {
+    return JSON.parse(fs.readFileSync(eventPath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function validSha(value) {
+  return typeof value === 'string' && /^[0-9a-f]{40}$/i.test(value);
+}
+
+export function resolveScopeContext(env = process.env, eventPayload = null, gitResolver = git) {
+  const refName = env.GITHUB_REF_NAME || '';
+  const headRef = env.GITHUB_HEAD_REF || '';
+  const baseRef = env.GITHUB_BASE_REF || '';
+  const isPullRequest = Boolean(baseRef);
+
+  if (isPullRequest) {
+    if (baseRef !== EXPECTED_BRANCH) {
+      throw policyError(
+        'BATCH4_STABILIZATION_WRONG_BRANCH',
+        `ref=${refName || '-'} head=${headRef || '-'} base=${baseRef || '-'}`
+      );
+    }
+
+    const payload = eventPayload || readEventPayload(env);
+    const payloadBaseRef = payload?.pull_request?.base?.ref;
+    const payloadBaseSha = payload?.pull_request?.base?.sha;
+    if (payloadBaseRef && payloadBaseRef !== EXPECTED_BRANCH) {
+      throw policyError(
+        'BATCH4_STABILIZATION_WRONG_BRANCH',
+        `event-base=${payloadBaseRef}`
+      );
+    }
+
+    let scopeRef = validSha(payloadBaseSha) ? payloadBaseSha : null;
+    if (!scopeRef) {
+      const remoteBase = gitResolver('rev-parse', `refs/remotes/origin/${baseRef}`);
+      if (validSha(remoteBase)) scopeRef = remoteBase;
+    }
+    if (!scopeRef) {
+      throw policyError(
+        'BATCH4_STABILIZATION_BASE_SHA_UNRESOLVED',
+        `base=${baseRef}`
+      );
+    }
+
+    return {
+      mode: 'pull-request-base',
+      scopeRef,
+      refName,
+      headRef,
+      baseRef,
+    };
+  }
+
+  if ((refName || headRef) && refName !== EXPECTED_BRANCH && headRef !== EXPECTED_BRANCH) {
+    throw policyError(
+      'BATCH4_STABILIZATION_WRONG_BRANCH',
+      `ref=${refName || '-'} head=${headRef || '-'} base=${baseRef || '-'}`
+    );
+  }
+
+  return {
+    mode: 'stabilization-head',
+    scopeRef: 'HEAD',
+    refName,
+    headRef,
+    baseRef,
+  };
+}
+
+export function evaluateScope(changed) {
+  const unexpected = changed.filter(filePath => !allowed.has(filePath));
+  const missing = required.filter(filePath => !changed.includes(filePath));
+  return { unexpected, missing };
+}
+
+export function runScopeGate(env = process.env) {
+  let context;
+  try {
+    context = resolveScopeContext(env);
+  } catch (error) {
+    console.error(`${error.code || 'BATCH4_STABILIZATION_SCOPE_CONTEXT_FAILED'}: ${error.message}`);
+    return 1;
+  }
+
+  const changed = git('diff', '--name-only', `${FREEZE_HEAD}...${context.scopeRef}`).split(/\r?\n/).filter(Boolean);
+  if (!changed.length) {
+    console.error('BATCH4_STABILIZATION_EMPTY_SCOPE');
+    return 1;
+  }
+
+  const { unexpected, missing } = evaluateScope(changed);
+  if (unexpected.length) {
+    console.error('BATCH4_STABILIZATION_SCOPE_VIOLATION');
+    for (const filePath of unexpected) console.error(` - ${filePath}`);
+    return 1;
+  }
+
+  if (missing.length) {
+    console.error('BATCH4_STABILIZATION_REQUIRED_FILE_MISSING');
+    for (const filePath of missing) console.error(` - ${filePath}`);
+    return 1;
+  }
+
+  console.log(`BATCH4_STABILIZATION_SCOPE_OK freeze=${FREEZE_HEAD} scope=${context.scopeRef} mode=${context.mode} files=${changed.length}`);
+  for (const filePath of changed) console.log(` + ${filePath}`);
+  return 0;
+}
+
+const invokedDirectly = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
+if (invokedDirectly) process.exit(runScopeGate());

@@ -1,0 +1,4 @@
+
+Warning: running as root
+
+No xpra sessions found

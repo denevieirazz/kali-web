@@ -102,7 +102,7 @@ wslRouter.post('/update', requireAdmin, async (_req, res) => {
   res.location(`/api/operations/${operation.id}`).status(202).json({ operationId: operation.id, operation });
 });
 
-wslRouter.post('/distributions/:name/start', async (req, res) => {
+wslRouter.post('/distributions/:name/start', requireAdmin, async (req, res) => {
   try {
     const pid = await startDistribution(req.params.name);
     res.status(202).json({ status: 'starting', pid });
@@ -111,7 +111,7 @@ wslRouter.post('/distributions/:name/start', async (req, res) => {
   }
 });
 
-wslRouter.post('/distributions/:name/stop', async (req, res) => {
+wslRouter.post('/distributions/:name/stop', requireAdmin, async (req, res) => {
   try {
     await stopDistribution(req.params.name);
     res.json({ status: 'stopped' });

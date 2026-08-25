@@ -1,6 +1,6 @@
 export const ACCOUNT_RECOVERY_ENDPOINT = '/api/auth/recovery/reset';
 export const ACCOUNT_LEGACY_RECOVERY_ENDPOINT = '/api/auth/legacy-recovery/reset';
-export const MIN_PASSWORD_LENGTH = 4;
+export const MIN_PASSWORD_LENGTH = 8;
 export const MAX_PASSWORD_LENGTH = 128;
 const RECOVERY_GROUP_LENGTHS = Object.freeze([3, 4, 4, 4, 4, 4, 4, 4, 4]);
 const RECOVERY_PAYLOAD_LENGTH = RECOVERY_GROUP_LENGTHS.reduce((total, length) => total + length, 0);
@@ -23,7 +23,11 @@ export function validateDisplayName(value, { required = true } = {}) {
 }
 
 export function validateNewPassword(password, confirmPassword) {
-  if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) return `A senha deve conter pelo menos ${MIN_PASSWORD_LENGTH} caracteres.`;
+  if (typeof password !== 'string') return 'A senha deve ser um texto válido.';
+  if (/[\u0000-\u001f\u007f]/.test(password)) return 'A senha não pode conter caracteres de controle.';
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    return `A senha deve conter pelo menos ${MIN_PASSWORD_LENGTH} caracteres.`;
+  }
   if (password.length > MAX_PASSWORD_LENGTH) return `A senha deve ter no máximo ${MAX_PASSWORD_LENGTH} caracteres.`;
   if (password !== confirmPassword) return 'A confirmação de senha não confere.';
   return null;

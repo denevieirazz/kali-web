@@ -1,0 +1,357 @@
+{
+  "version": 1,
+  "runId": "mt2485q1-35011b43e4",
+  "ownerId": "f29af1c42854e6751fe255c7:2411dd48-3fa4-4bcf-9629-b4faa267fd1c",
+  "phase": "complete",
+  "startedAt": "2026-08-20T22:52:09.337Z",
+  "completedAt": "2026-08-20T22:52:22.822Z",
+  "decision": "GO",
+  "readyToClickXclock": true,
+  "branch": "poc/cloudos-linux-runtime-xpra",
+  "head": "6d09f38c17e99cf5de05b1b3ce6afec85e272216",
+  "distribution": "kali-linux",
+  "display": 100,
+  "port": 14500,
+  "boundaries": {
+    "WSL": {
+      "status": "PASS",
+      "code": "WSL_FUNCTIONAL",
+      "component": "WSL service",
+      "cause": "WSL respondeu à enumeração de distribuições.",
+      "evidence": "[{\"name\":\"kali-linux\",\"state\":\"Running\",\"version\":2,\"isDefault\":true}]"
+    },
+    "DISTRO": {
+      "status": "PASS",
+      "code": "WSL_DISTRO_RESPONSIVE",
+      "component": "kali-linux",
+      "cause": "A distro iniciou/respondeu ao comando mínimo.",
+      "evidence": "stateBefore=Running; marker=CLOUDOS_PREFLIGHT_DISTRO_OK"
+    },
+    "XPRA": {
+      "status": "PASS",
+      "code": "XPRA_DRY_RUN_SERVER_READY",
+      "component": "Xpra seamless :100",
+      "cause": "Servidor Xpra efêmero respondeu a xpra info sem iniciar xclock.",
+      "evidence": "display=:100; port=14500; auth=env; startChild=false"
+    },
+    "TRANSPORTE": {
+      "status": "PASS",
+      "code": "XPRA_WEBSOCKET_DIRECT_PASS",
+      "component": "Xpra WebSocket direct",
+      "cause": "Handshake WebSocket direto com Xpra abriu.",
+      "evidence": "websocket=open"
+    },
+    "PROXY": {
+      "status": "PASS",
+      "code": "CLOUDOS_XPRA_PROXY_WEBSOCKET_PASS",
+      "component": "CloudOS capability WebSocket proxy",
+      "cause": "Handshake WebSocket atravessou o dispatcher/proxy CloudOS e alcançou Xpra.",
+      "evidence": "url=ws://127.0.0.1:59593/__cloudos/linux-runtime/poc1/preflight-mt2485q1-35011b43e4/5d9dde1b747d4a7b40eb95781a2e81e02954e828607e62a6/"
+    },
+    "IFRAME": {
+      "status": "PASS",
+      "code": "IFRAME_XPRA_CONNECTION_PASS",
+      "component": "CloudOS hidden preflight iframe",
+      "cause": "Evidência correlacionada out-of-band confirmou frame anexado, navegação HTTP e WebSocket ativo sem violar sandbox.",
+      "evidence": "signals=FRAME_ATTACH,NAVIGATION,SESSION,HTTP,WS,CSP_SANDBOX; httpRequests=1; wsConnections=1; loadMs=19ms"
+    }
+  },
+  "metrics": {
+    "wslSnapshotMs": 356,
+    "distroResponsiveMs": 3452,
+    "xpraProbeMs": 228,
+    "displayScanMs": 243,
+    "portScanMs": 32,
+    "orphanScanMs": 1,
+    "staticPreflightMs": 4887,
+    "dryRunSpawnMs": 5,
+    "xpraServerReadyMs": 3488,
+    "loopbackTcpMs": 1,
+    "directHttpMs": 30,
+    "directWebSocketMs": 12,
+    "proxyHttpMs": 17,
+    "proxyWebSocketMs": 7,
+    "totalMs": 13429,
+    "iframeLoadMs": 19,
+    "iframeHttpRequests": 1,
+    "iframeWebSocketConnections": 1,
+    "stopMs": 919,
+    "postConditionMs": 2019
+  },
+  "proxy": {
+    "httpRequests": 1,
+    "webSocketConnections": 1
+  },
+  "checks": [
+    {
+      "id": "forensics-directories",
+      "layer": "FORENSICS",
+      "status": "PASS",
+      "code": "EVIDENCE_DIRECTORIES_WRITABLE",
+      "component": "screenshots/logs/telemetry",
+      "cause": "Diretórios de evidência existem e aceitaram escrita.",
+      "evidence": "C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\poc1-physical-evidence | C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\poc1-physical-evidence\\screenshots | C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\poc1-physical-evidence\\logs | C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\poc1-physical-evidence\\telemetry",
+      "durationMs": 6
+    },
+    {
+      "id": "window-baseline",
+      "layer": "FORENSICS",
+      "status": "PASS",
+      "code": "WINDOW_BASELINE_CAPTURED",
+      "component": "Windows HWND baseline",
+      "cause": "Processos com MainWindowHandle foram registrados antes do dry run.",
+      "evidence": "count=8; file=C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\poc1-physical-evidence\\WINDOW_BASELINE.json",
+      "durationMs": 308
+    },
+    {
+      "id": "wsl-present",
+      "layer": "WSL",
+      "status": "PASS",
+      "code": "WSL_PRESENT",
+      "component": "wsl.exe",
+      "cause": "Executável WSL foi localizado.",
+      "evidence": "C:\\WINDOWS\\System32\\wsl.exe",
+      "durationMs": 356
+    },
+    {
+      "id": "wsl-functional",
+      "layer": "WSL",
+      "status": "PASS",
+      "code": "WSL_FUNCTIONAL",
+      "component": "WSL service",
+      "cause": "WSL respondeu à enumeração de distribuições.",
+      "evidence": "[{\"name\":\"kali-linux\",\"state\":\"Running\",\"version\":2,\"isDefault\":true}]",
+      "durationMs": null
+    },
+    {
+      "id": "distro-configured",
+      "layer": "DISTRO",
+      "status": "PASS",
+      "code": "WSL_DISTRO_CONFIGURED",
+      "component": "kali-linux",
+      "cause": "Distribuição instalada foi resolvida para a prova física.",
+      "evidence": "{\"name\":\"kali-linux\",\"state\":\"Running\",\"version\":2,\"isDefault\":true}",
+      "durationMs": null
+    },
+    {
+      "id": "distro-responsive",
+      "layer": "DISTRO",
+      "status": "PASS",
+      "code": "WSL_DISTRO_RESPONSIVE",
+      "component": "kali-linux",
+      "cause": "A distro iniciou/respondeu ao comando mínimo.",
+      "evidence": "stateBefore=Running; marker=CLOUDOS_PREFLIGHT_DISTRO_OK",
+      "durationMs": 3452
+    },
+    {
+      "id": "xpra-binary",
+      "layer": "XPRA",
+      "status": "PASS",
+      "code": "XPRA_PRESENT",
+      "component": "xpra",
+      "cause": "Executável Xpra e versão foram obtidos.",
+      "evidence": "/usr/local/bin/xpra\nxpra v6.5.3-r0",
+      "durationMs": 228
+    },
+    {
+      "id": "xpra-html5",
+      "layer": "XPRA",
+      "status": "PASS",
+      "code": "XPRA_HTML5_PRESENT",
+      "component": "xpra-html5",
+      "cause": "Cliente HTML5 do Xpra foi confirmado por pacote ou asset instalado.",
+      "evidence": "ASSET=/usr/share/xpra/www/index.html",
+      "durationMs": 121
+    },
+    {
+      "id": "xpra-x11",
+      "layer": "XPRA",
+      "status": "PASS",
+      "code": "XPRA_X11_PRESENT",
+      "component": "xpra-x11",
+      "cause": "Backend X11 do Xpra foi confirmado.",
+      "evidence": "XPRA_X11_MODULE_OK",
+      "durationMs": 119
+    },
+    {
+      "id": "xclock-present",
+      "layer": "XPRA",
+      "status": "PASS",
+      "code": "XCLOCK_PRESENT_NOT_EXECUTED",
+      "component": "xclock",
+      "cause": "xclock foi localizado sem ser executado.",
+      "evidence": "/usr/bin/xclock",
+      "durationMs": 118
+    },
+    {
+      "id": "xpra-cli",
+      "layer": "XPRA",
+      "status": "PASS",
+      "code": "XPRA_CLI_COMPATIBLE",
+      "component": "xpra seamless CLI",
+      "cause": "A ajuda do Xpra expõe as opções essenciais usadas pela POC1.",
+      "evidence": "flags=--start-child,--exit-with-children,--session-name,--bind-tcp,--html,--start-new-commands,--bind",
+      "durationMs": 155
+    },
+    {
+      "id": "display-range",
+      "layer": "XPRA",
+      "status": "PASS",
+      "code": "XPRA_DISPLAY_RANGE_CLEAR",
+      "component": ":100..:149",
+      "cause": "Nenhum socket/lock X11 foi encontrado na faixa.",
+      "evidence": "{\"occupied\":[],\"xpraList\":\"\"}",
+      "durationMs": 243
+    },
+    {
+      "id": "port-range",
+      "layer": "TRANSPORTE",
+      "status": "PASS",
+      "code": "XPRA_PORT_RANGE_CLEAR",
+      "component": "127.0.0.1:14500..14549",
+      "cause": "Toda a faixa está livre.",
+      "evidence": "{\"freeCount\":50,\"occupied\":[]}",
+      "durationMs": 32
+    },
+    {
+      "id": "orphans",
+      "layer": "XPRA",
+      "status": "PASS",
+      "code": "POC_ORPHANS_CLEAR",
+      "component": "POC1 runtime ledger",
+      "cause": "Nenhuma sessão ativa ou entrada anterior foi encontrada no ledger.",
+      "evidence": "file=C:\\Users\\dougl\\AppData\\Local\\Temp\\cloudos-linux-runtime-poc1-sessions.json; entries=0",
+      "durationMs": 1
+    },
+    {
+      "id": "dry-run-pair",
+      "layer": "TRANSPORTE",
+      "status": "PASS",
+      "code": "PREFLIGHT_DISPLAY_PORT_PAIR_READY",
+      "component": "display/port allocator",
+      "cause": "O mesmo allocator canônico do runtime selecionou o par efêmero para o dry run.",
+      "evidence": "display=:100; port=14500",
+      "durationMs": null
+    },
+    {
+      "id": "pair-race",
+      "layer": "TRANSPORTE",
+      "status": "PASS",
+      "code": "PREFLIGHT_PAIR_RECHECK_PASS",
+      "component": "display/port allocator",
+      "cause": "Display e porta continuavam livres imediatamente antes do spawn.",
+      "evidence": "display=:100; port=14500",
+      "durationMs": null
+    },
+    {
+      "id": "dry-run-server",
+      "layer": "XPRA",
+      "status": "PASS",
+      "code": "XPRA_DRY_RUN_SERVER_READY",
+      "component": "Xpra seamless :100",
+      "cause": "Servidor Xpra efêmero respondeu a xpra info sem iniciar xclock.",
+      "evidence": "display=:100; port=14500; auth=env; startChild=false",
+      "durationMs": 3488
+    },
+    {
+      "id": "loopback-tcp",
+      "layer": "TRANSPORTE",
+      "status": "PASS",
+      "code": "WSL_WINDOWS_LOOPBACK_PASS",
+      "component": "127.0.0.1:14500",
+      "cause": "Windows alcançou a porta publicada pelo Xpra dentro do WSL.",
+      "evidence": "tcp=connected",
+      "durationMs": 1
+    },
+    {
+      "id": "direct-http",
+      "layer": "TRANSPORTE",
+      "status": "PASS",
+      "code": "XPRA_HTML5_HTTP_PASS",
+      "component": "Xpra HTML5 HTTP direct",
+      "cause": "Cliente HTML5 respondeu diretamente na porta Xpra.",
+      "evidence": "{\"ok\":true,\"status\":200,\"contentType\":\"text/html\",\"xpraHtml\":true,\"durationMs\":30,\"error\":null}",
+      "durationMs": 30
+    },
+    {
+      "id": "direct-websocket",
+      "layer": "TRANSPORTE",
+      "status": "PASS",
+      "code": "XPRA_WEBSOCKET_DIRECT_PASS",
+      "component": "Xpra WebSocket direct",
+      "cause": "Handshake WebSocket direto com Xpra abriu.",
+      "evidence": "websocket=open",
+      "durationMs": 12
+    },
+    {
+      "id": "proxy-http",
+      "layer": "PROXY",
+      "status": "PASS",
+      "code": "CLOUDOS_XPRA_PROXY_HTTP_PASS",
+      "component": "CloudOS capability HTTP proxy",
+      "cause": "O backend CloudOS encaminhou HTML5 pelo capability path.",
+      "evidence": "url=http://127.0.0.1:59593/__cloudos/linux-runtime/poc1/preflight-mt2485q1-35011b43e4/5d9dde1b747d4a7b40eb95781a2e81e02954e828607e62a6/; status=200",
+      "durationMs": 17
+    },
+    {
+      "id": "proxy-websocket",
+      "layer": "PROXY",
+      "status": "PASS",
+      "code": "CLOUDOS_XPRA_PROXY_WEBSOCKET_PASS",
+      "component": "CloudOS capability WebSocket proxy",
+      "cause": "Handshake WebSocket atravessou o dispatcher/proxy CloudOS e alcançou Xpra.",
+      "evidence": "url=ws://127.0.0.1:59593/__cloudos/linux-runtime/poc1/preflight-mt2485q1-35011b43e4/5d9dde1b747d4a7b40eb95781a2e81e02954e828607e62a6/",
+      "durationMs": 7
+    },
+    {
+      "id": "iframe-boundary",
+      "layer": "IFRAME",
+      "status": "PASS",
+      "code": "IFRAME_XPRA_CONNECTION_PASS",
+      "component": "CloudOS hidden preflight iframe",
+      "cause": "Evidência correlacionada out-of-band confirmou frame anexado, navegação HTTP e WebSocket ativo sem violar sandbox.",
+      "evidence": "signals=FRAME_ATTACH,NAVIGATION,SESSION,HTTP,WS,CSP_SANDBOX; httpRequests=1; wsConnections=1; loadMs=19ms",
+      "durationMs": 19
+    },
+    {
+      "id": "post-display",
+      "layer": "POST_CONDITION",
+      "status": "PASS",
+      "code": "POST_DISPLAY_DEAD",
+      "component": "Xpra display :100",
+      "cause": "xpra info deixou de responder após Stop.",
+      "evidence": "display=:100",
+      "durationMs": null
+    },
+    {
+      "id": "post-port",
+      "layer": "POST_CONDITION",
+      "status": "PASS",
+      "code": "POST_PORT_CLOSED",
+      "component": "127.0.0.1:14500",
+      "cause": "A porta TCP deixou de aceitar conexão.",
+      "evidence": "port=14500",
+      "durationMs": null
+    },
+    {
+      "id": "post-websocket",
+      "layer": "POST_CONDITION",
+      "status": "PASS",
+      "code": "POST_WEBSOCKET_CLOSED",
+      "component": "Xpra WebSocket",
+      "cause": "Handshake WebSocket não abre após Stop, como esperado.",
+      "evidence": "websocket=closed; probe=connect ECONNREFUSED 127.0.0.1:14500",
+      "durationMs": 1
+    },
+    {
+      "id": "post-ledger",
+      "layer": "POST_CONDITION",
+      "status": "PASS",
+      "code": "POST_LEDGER_CLEAN",
+      "component": "POC1 runtime ledger",
+      "cause": "Nenhuma referência do dry run ficou no ledger.",
+      "evidence": "file=C:\\Users\\dougl\\AppData\\Local\\Temp\\cloudos-linux-runtime-poc1-sessions.json; matching=0",
+      "durationMs": null
+    }
+  ]
+}

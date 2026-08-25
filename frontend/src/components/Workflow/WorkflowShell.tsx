@@ -11,7 +11,7 @@ import {
   toggleClipboardFavorite,
   type ClipboardMetadata,
 } from '../../services/workflowClipboard';
-import { launchWorkflowApp, openDefaultBrowser, openFilesAt, openSettings, openWorkspace } from '../../services/workflowLaunch';
+import { launchWorkflowApp, openFilesAt, openSettings, openWorkspace } from '../../services/workflowLaunch';
 import { listIndexedFiles, listNoteIndex, listWorkspaces } from '../../services/workflowWorkspace';
 import { activeWorkflowWindowId, maximizeWorkflowWindow, restoreWorkflowWindow, snapWorkflowWindow } from '../../services/workflowWindow';
 import FilesWorkflowBridge from './FilesWorkflowBridge';
@@ -212,7 +212,7 @@ export default function WorkflowShell() {
     {launcherOpen && <div className="wf-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setLauncherOpen(false); }}>
       <section className="wf-launcher" role="dialog" aria-modal="true" aria-label="App Launcher">
         <header><span>⌕</span><input ref={inputRef} value={query} onChange={event => setQuery(event.target.value)} placeholder="Aplicações, arquivos, workspace, notas, configurações…" /></header>
-        {showWebOnlyBrowser && <div className="wf-webonly-browser" role="status"><div><strong>Browser disponível apenas no modo Full</strong><small>Esta sessão é WebOnly. Abrir o navegador padrão não ativa o Browser do CloudOS, não muda o modo da sessão e não cria integração nova.</small></div><button onClick={() => { try { openDefaultBrowser(); setLauncherOpen(false); setQuery(''); } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Não foi possível abrir o navegador padrão.'); } }}>Abrir navegador padrão</button></div>}
+        {showWebOnlyBrowser && <div className="wf-webonly-browser" role="status"><div><strong>Browser disponível apenas no modo Full</strong><small>Esta sessão é WebOnly. O lançamento permanece bloqueado e nenhuma janela externa será aberta.</small></div></div>}
         {message && <div className="wf-message">{message}</div>}
         <div className="wf-results">{results.map((result, index) => <button key={result.key} className={index === selected ? 'selected' : ''} onMouseEnter={() => setSelected(index)} onClick={() => { try { result.run(); setLauncherOpen(false); setQuery(''); } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Falha ao abrir item.'); } }}><span className="wf-icon">{result.icon}</span><div><strong>{result.title}</strong><small>{result.detail}</small></div><span className="wf-kind">{result.type}</span></button>)}{!results.length && !showWebOnlyBrowser && <p>Nenhum resultado.</p>}</div>
         <footer><span>Alt+Espaço</span><span>fallback: Ctrl+Shift+P</span><span>↑↓ navegar · Enter abrir</span><span>Alt+Shift+←/→ organiza sem perder foco</span></footer>

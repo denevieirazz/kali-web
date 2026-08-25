@@ -6,9 +6,11 @@ import Window from './Window';
 const RenderedWindow = memo(function RenderedWindow({
   windowId,
   appId,
+  params,
 }: {
   windowId: string;
   appId: string;
+  params?: any;
 }) {
   const AppComponent = getAppComponent(appId);
 
@@ -22,7 +24,7 @@ const RenderedWindow = memo(function RenderedWindow({
           </div>
         )}
       >
-        <AppComponent windowId={windowId} />
+        <AppComponent windowId={windowId} params={params} />
       </Suspense>
     </Window>
   );
@@ -34,7 +36,7 @@ export default function WindowRenderer() {
   return (
     <>
       {windows.map(window => (
-        <RenderedWindow key={window.id} windowId={window.id} appId={window.appId} />
+        <RenderedWindow key={window.id} windowId={window.id} appId={window.appId} params={window.params} />
       ))}
     </>
   );

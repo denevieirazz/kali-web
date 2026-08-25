@@ -1,10 +1,10 @@
 import express from 'express';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 import { cancelOperation, getOperation, listOperations } from './operationManager.js';
 
 export const operationsRouter = express.Router();
 
-operationsRouter.use(authenticateToken);
+operationsRouter.use(authenticateToken, requireAdmin);
 
 operationsRouter.get('/', (_req, res) => {
   res.json({ operations: listOperations() });

@@ -5,6 +5,8 @@ import { useContextMenuStore } from '../../stores/contextMenuStore';
 import { useWindowManager } from '../../stores/windowManager';
 import { addClipboardText } from '../../services/workflowClipboard';
 import { openTerminalHere, openWorkspace } from '../../services/workflowLaunch';
+import { openFile } from '../../services/fileLauncher';
+import { getFileIconForExtension } from '../../services/mimeRegistry';
 import {
   createWorkspace,
   getActiveWorkspace,
@@ -34,7 +36,7 @@ type DialogType = 'create-file' | 'create-folder' | 'rename' | 'confirm-delete' 
 type DialogState = { type: DialogType; title?: string; message?: string; entry?: CloudFileEntry };
 type EditorState = { name: string; content: string; mode?: number } | null;
 type ActiveOperation = { source: 'windows' | 'wsl'; id?: string; status: string; progress: number; message: string };
-type LaunchParams = { workflowSource?: FileSourceKind; workflowPath?: string[]; workflowSelectName?: string };
+type LaunchParams = { workflowSource?: FileSourceKind; workflowPath?: string[]; workflowSelectName?: string; initialViewMode?: ViewMode };
 
 const MAX_DOWNLOAD_BYTES = 256 * 1024 * 1024;
 const delay = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms));
@@ -49,11 +51,11 @@ function validSource(value: unknown): value is FileSourceKind {
 
 function storageDescription(source: FileSourceKind, runtime: SourceRuntime, storage: StorageInfo | null) {
   if (source === 'opfs') return {
-    title: 'Armazenamento local do navegador',
-    type: 'OPFS privado do origin',
-    persistence: 'Persiste conforme a política de armazenamento do navegador/WebView',
-    permission: 'Privado do CloudOS; não é um HD nem VHDX',
-    capacity: storage ? `${formatBytes(storage.used)} usados de ${formatBytes(storage.quota)} de quota reportada` : 'Capacidade ainda não estimada',
+    title: 'CloudOS Home (Início)',
+    type: 'Armazenamento Híbrido Unificado (Downloads, Documentos, Projetos, Workspace)',
+    persistence: 'Persiste no CloudOS Home',
+    permission: 'Acesso padrão e integrado para todos os aplicativos',
+    capacity: storage ? `${formatBytes(storage.used)} usados de ${formatBytes(storage.quota)} de quota reportada` : 'Capacidade dinâmica do CloudOS',
   };
   if (source === 'windows') return {
     title: 'Pasta Windows autorizada',
@@ -79,6 +81,7 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
       workflowSource: validSource(raw.workflowSource) ? raw.workflowSource : undefined,
       workflowPath: Array.isArray(raw.workflowPath) ? raw.workflowPath.filter((part): part is string => typeof part === 'string' && Boolean(part)) : undefined,
       workflowSelectName: typeof raw.workflowSelectName === 'string' ? raw.workflowSelectName : undefined,
+      initialViewMode: raw.initialViewMode === 'trash' ? 'trash' : 'files',
     };
   });
   const initialSource = launchParams.workflowSource || 'opfs';
@@ -86,9 +89,10 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
   const [runtime, setRuntime] = useState<SourceRuntime>({ source: initialSource, label: sourceLabel(initialSource), mounted: initialSource === 'opfs', available: initialSource === 'opfs', detail: '' });
   const [entries, setEntries] = useState<CloudFileEntry[]>([]);
   const [currentPath, setCurrentPath] = useState<string[]>(launchParams.workflowPath || []);
-  const [viewMode, setViewMode] = useState<ViewMode>('files');
+  const [viewMode, setViewMode] = useState<ViewMode>(launchParams.initialViewMode || 'files');
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('grid');
   const [selectedName, setSelectedName] = useState<string | null>(launchParams.workflowSelectName || null);
+  const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set(launchParams.workflowSelectName ? [launchParams.workflowSelectName] : []));
   const [previewFile, setPreviewFile] = useState<File | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -173,6 +177,14 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
 
   useEffect(() => { void loadDirectory(); }, [loadDirectory]);
 
+  useEffect(() => {
+    const onFilesChanged = () => {
+      if (source === 'opfs') void loadDirectory();
+    };
+    window.addEventListener('cloudos:files-changed', onFilesChanged);
+    return () => window.removeEventListener('cloudos:files-changed', onFilesChanged);
+  }, [loadDirectory, source]);
+
   useEffect(() => () => {
     operationController.current?.abort();
     const operation = activeOperationRef.current;
@@ -240,11 +252,36 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
     }
   }, [currentPath, source, viewMode]);
 
+  const handleLaunchFile = useCallback(async (entry: CloudFileEntry, openWith = false) => {
+    if (entry.kind !== 'file' || entry.symlink) return;
+    const fullPath = source === 'opfs'
+      ? `~/${currentPath.length ? `${currentPath.join('/')}/` : ''}${entry.name}`
+      : source === 'wsl'
+      ? `/${currentPath.length ? `${currentPath.join('/')}/` : ''}${entry.name}`
+      : `/mnt/c/${currentPath.length ? `${currentPath.join('/')}/` : ''}${entry.name}`;
+
+    let fileContent: string | undefined;
+    if (source === 'opfs' && entry.size < 4 * 1024 * 1024) {
+      try {
+        const file = await fileSourceFacade.readFile(source, currentPath, entry, 4 * 1024 * 1024);
+        fileContent = await file.text();
+      } catch {}
+    }
+
+    openFile({
+      filePath: fullPath,
+      fileName: entry.name,
+      fileContent,
+      openWith,
+    });
+  }, [currentPath, source]);
+
   const openEntry = useCallback(async (entry: CloudFileEntry) => {
     if (entry.kind === 'symlink' || entry.symlink) { await selectEntry(entry); return; }
     if (entry.kind === 'directory' && viewMode === 'files') { setCurrentPath(path => [...path, entry.name]); return; }
     await selectEntry(entry);
-  }, [selectEntry, viewMode]);
+    await handleLaunchFile(entry, false);
+  }, [handleLaunchFile, selectEntry, viewMode]);
 
   const downloadEntry = useCallback(async (entry: CloudFileEntry) => {
     if (entry.kind !== 'file' || entry.symlink || (viewMode === 'trash' && source !== 'opfs')) return;
@@ -431,7 +468,19 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
     setSelectedName(entry.name);
     const symlink = entry.kind === 'symlink' || entry.symlink;
     openContextMenu(event.clientX, event.clientY, [
-      { id: 'open', label: symlink ? 'Detalhes' : entry.kind === 'directory' ? 'Abrir' : 'Preview', onClick: () => void openEntry(entry) },
+      {
+        id: 'open',
+        label: symlink ? 'Detalhes' : entry.kind === 'directory' ? 'Abrir pasta' : 'Abrir',
+        icon: '⚡',
+        onClick: () => {
+          if (entry.kind === 'directory') void openEntry(entry);
+          else handleLaunchFile(entry, false);
+        }
+      },
+      ...(entry.kind === 'file' && !symlink ? [
+        { id: 'open-with', label: 'Abrir com...', icon: '🗂️', onClick: () => handleLaunchFile(entry, true) },
+        { id: 'preview-pane', label: 'Visualizar (Preview)', icon: '👁️', onClick: () => void selectEntry(entry) },
+      ] : []),
       { id: 'terminal-here', label: 'Abrir Terminal aqui', shortcut: 'Ctrl+Alt+T', onClick: () => launchTerminalAt(entry) },
       { id: 'sep-workflow', label: '', separator: true },
       { id: 'send-linux', label: 'Enviar para Linux', disabled: source === 'wsl' || entry.kind !== 'file' || Boolean(symlink), onClick: () => void sendToLinux(entry) },
@@ -442,15 +491,130 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
       { id: 'rename', label: 'Renomear', shortcut: 'F2', disabled: Boolean(symlink), onClick: () => requestRename(entry) },
       { id: 'delete', label: 'Excluir', shortcut: 'Delete', disabled: Boolean(symlink), onClick: () => requestDelete(entry) },
     ]);
-  }, [copyToWorkspace, currentPath, launchTerminalAt, openContextMenu, openEntry, rememberFileCopy, requestDelete, requestRename, sendToLinux, sendToWindows, source]);
+  }, [copyToWorkspace, currentPath, handleLaunchFile, launchTerminalAt, openContextMenu, openEntry, rememberFileCopy, requestDelete, requestRename, selectEntry, sendToLinux, sendToWindows, source]);
+
+  const handleClickEntry = useCallback((event: React.MouseEvent, entry: CloudFileEntry) => {
+    if (event.ctrlKey || event.metaKey) {
+      setSelectedNames(prev => {
+        const next = new Set(prev);
+        if (next.has(entry.name)) next.delete(entry.name);
+        else next.add(entry.name);
+        return next;
+      });
+      setSelectedName(entry.name);
+      void selectEntry(entry);
+    } else if (event.shiftKey && selectedName) {
+      const idx1 = visibleEntries.findIndex(e => e.name === selectedName);
+      const idx2 = visibleEntries.findIndex(e => e.name === entry.name);
+      if (idx1 !== -1 && idx2 !== -1) {
+        const start = Math.min(idx1, idx2);
+        const end = Math.max(idx1, idx2);
+        const range = visibleEntries.slice(start, end + 1).map(e => e.name);
+        setSelectedNames(new Set(range));
+        setSelectedName(entry.name);
+        void selectEntry(entry);
+      }
+    } else {
+      setSelectedNames(new Set([entry.name]));
+      setSelectedName(entry.name);
+      void selectEntry(entry);
+    }
+  }, [selectedName, selectEntry, visibleEntries]);
+
+  const handleDragStart = useCallback((event: React.DragEvent, entry: CloudFileEntry) => {
+    if (viewMode !== 'files' || entry.symlink || entry.kind === 'symlink') return;
+    const items = selectedNames.has(entry.name) && selectedNames.size > 0
+      ? Array.from(selectedNames)
+      : [entry.name];
+    event.dataTransfer.setData('application/json', JSON.stringify({
+      items,
+      source,
+      sourcePath: currentPath,
+    }));
+    event.dataTransfer.effectAllowed = 'move';
+  }, [currentPath, selectedNames, source, viewMode]);
+
+  const handleDropOnFolder = useCallback(async (event: React.DragEvent, targetFolder: CloudFileEntry) => {
+    if (targetFolder.kind !== 'directory' || source !== 'opfs') return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    // 1. Internal item drag & drop move
+    const rawData = event.dataTransfer.getData('application/json');
+    if (rawData) {
+      try {
+        const payload = JSON.parse(rawData);
+        if (payload && Array.isArray(payload.items) && payload.source === source) {
+          if (payload.items.includes(targetFolder.name)) return;
+          setIsLoading(true);
+          const destPath = [...currentPath, targetFolder.name];
+          for (const itemName of payload.items) {
+            const itemEntry = visibleEntries.find(e => e.name === itemName);
+            if (!itemEntry) continue;
+            await fileSourceFacade.paste(source, {
+              entry: itemEntry,
+              action: 'cut',
+              source,
+              sourcePath: payload.sourcePath || currentPath,
+            }, destPath, { signal: new AbortController().signal });
+          }
+          setSelectedNames(new Set());
+          setSelectedName(null);
+          await loadDirectory();
+          return;
+        }
+      } catch (err: any) {
+        setErrorMessage(err.message || 'Falha ao mover itens para a subpasta.');
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    // 2. External host files upload drop
+    if (event.dataTransfer.files.length) {
+      setIsLoading(true);
+      try {
+        await fileSourceFacade.upload(source, [...currentPath, targetFolder.name], Array.from(event.dataTransfer.files));
+        await loadDirectory();
+      } catch (err: any) {
+        setErrorMessage(err.message || 'Falha ao soltar arquivos na pasta.');
+      } finally {
+        setIsLoading(false);
+      }
+    }
+  }, [currentPath, loadDirectory, source, visibleEntries]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (windowId && useWindowManager.getState().activeWindowId !== windowId) return;
       if (isTypingTarget(event.target) || editor || dialog.type) return;
-      if (event.key === 'Escape') { setSelectedName(null); setPreviewFile(null); }
+      if (event.key === 'Escape') { setSelectedName(null); setSelectedNames(new Set()); setPreviewFile(null); }
+      else if (event.ctrlKey && event.key.toLowerCase() === 'a' && viewMode === 'files') {
+        event.preventDefault();
+        setSelectedNames(new Set(visibleEntries.map(e => e.name)));
+      }
       else if (event.ctrlKey && event.altKey && event.key.toLowerCase() === 't' && viewMode === 'files') { event.preventDefault(); launchTerminalAt(selectedEntry || undefined); }
-      else if (event.key === 'Delete' && selectedEntry) { event.preventDefault(); requestDelete(selectedEntry); }
+      else if (event.key === 'Delete') {
+        event.preventDefault();
+        const toDelete = visibleEntries.filter(e => selectedNames.has(e.name) || e.name === selectedName);
+        if (toDelete.length > 1) {
+          if (window.confirm(`Mover ${toDelete.length} itens selecionados para a lixeira?`)) {
+            setIsLoading(true);
+            (async () => {
+              for (const item of toDelete) {
+                if (viewMode === 'trash') await fileSourceFacade.deleteTrash(source, item);
+                else await fileSourceFacade.trash(source, currentPath, item);
+              }
+              setSelectedNames(new Set());
+              setSelectedName(null);
+              await loadDirectory();
+              setIsLoading(false);
+            })().catch(err => { setErrorMessage(err.message || 'Falha ao excluir itens.'); setIsLoading(false); });
+          }
+        } else if (selectedEntry) {
+          requestDelete(selectedEntry);
+        }
+      }
       else if (event.key === 'F2' && selectedEntry && viewMode === 'files') { event.preventDefault(); requestRename(selectedEntry); }
       else if (event.key === 'Enter' && selectedEntry) { event.preventDefault(); void openEntry(selectedEntry); }
       else if (event.ctrlKey && event.key.toLowerCase() === 'c' && selectedEntry && viewMode === 'files' && !selectedEntry.symlink) { event.preventDefault(); setClipboard({ entry: selectedEntry, action: 'copy', source, sourcePath: [...currentPath] }); rememberFileCopy(selectedEntry); }
@@ -459,17 +623,17 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [clipboard, currentPath, dialog.type, editor, launchTerminalAt, openEntry, pasteClipboard, rememberFileCopy, requestDelete, requestRename, selectedEntry, source, viewMode, windowId]);
+  }, [clipboard, currentPath, dialog.type, editor, launchTerminalAt, loadDirectory, openEntry, pasteClipboard, rememberFileCopy, requestDelete, requestRename, selectedEntry, selectedName, selectedNames, source, viewMode, visibleEntries, windowId]);
 
-  const pathPrefix = source === 'opfs' ? 'local:' : source === 'windows' ? 'win:' : 'linux:';
+  const pathPrefix = source === 'opfs' ? '🏠 ~/' : source === 'windows' ? '🪟 /mnt/c' : '🐧 /';
 
   return (
     <div className="cf-root" data-files-source={source} data-files-actor="user-ui" data-files-layout={layoutMode}>
       <header className="cf-toolbar">
-        <select className="cf-sort-select cf-source-select" value={source} onChange={event => void changeSource(event.target.value as FileSourceKind)} aria-label="Origem dos arquivos">
-          <option value="opfs">Armazenamento local do navegador</option>
-          <option value="windows">Pasta Windows autorizada…</option>
-          <option value="wsl">Linux Home</option>
+        <select className="cf-source-select" value={source} onChange={event => void changeSource(event.target.value as FileSourceKind)} aria-label="Origem de arquivos">
+          <option value="opfs">🏠 CloudOS Home (~/)</option>
+          <option value="wsl">🐧 Linux RootFS (/)</option>
+          <option value="windows">🪟 Windows Drives (/mnt/c)</option>
         </select>
         <button className="cf-btn" onClick={() => setCurrentPath(path => path.slice(0, -1))} disabled={!currentPath.length || viewMode === 'trash'} title="Pasta anterior">←</button>
         <button className="cf-btn" onClick={() => void loadDirectory()} title="Atualizar">↻</button>
@@ -490,14 +654,17 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
         </>}
         <nav className="cf-address" aria-label="Caminho">
           <button className={!currentPath.length && viewMode === 'files' ? 'active-breadcrumb' : ''} onClick={() => { setViewMode('files'); setCurrentPath([]); }}>{pathPrefix}</button>
-          {viewMode === 'trash' ? <button className="active-breadcrumb">/ 🗑️ lixeira</button> : currentPath.map((part, index) => <button key={`${part}-${index}`} className={index === currentPath.length - 1 ? 'active-breadcrumb' : ''} onClick={() => setCurrentPath(currentPath.slice(0, index + 1))}>/ {part}</button>)}
+          {viewMode === 'trash' ? <button className="active-breadcrumb">/ 🗑️ Lixeira</button> : currentPath.map((part, index) => <button key={`${part}-${index}`} className={index === currentPath.length - 1 ? 'active-breadcrumb' : ''} onClick={() => setCurrentPath(currentPath.slice(0, index + 1))}>/ {part}</button>)}
         </nav>
         <input className="cf-search" value={searchQuery} onChange={event => setSearchQuery(event.target.value)} placeholder="Pesquisar…" aria-label="Pesquisar arquivos" />
         <select className="cf-sort-select" value={sortField} onChange={event => setSortField(event.target.value as SortField)} aria-label="Ordenar por"><option value="name">Nome</option><option value="modified">Modificado</option><option value="size">Tamanho</option></select>
-        <div className="cf-view-toggle" aria-label="Modo de visualização"><button className={layoutMode === 'grid' ? 'active' : ''} onClick={() => setLayoutMode('grid')} aria-label="Grade">▦</button><button className={layoutMode === 'list' ? 'active' : ''} onClick={() => setLayoutMode('list')} aria-label="Lista">☷</button></div>
+        <div className="cf-layout-switch">
+          <button className={`cf-layout-btn ${layoutMode === 'grid' ? 'active' : ''}`} onClick={() => setLayoutMode('grid')} title="Exibição em grade" aria-label="Exibição em grade">▦</button>
+          <button className={`cf-layout-btn ${layoutMode === 'list' ? 'active' : ''}`} onClick={() => setLayoutMode('list')} title="Exibição em lista" aria-label="Exibição em lista">☰</button>
+        </div>
       </header>
 
-      {errorMessage && <div className="cf-error" role="alert"><span>⚠️ {errorMessage}</span><button onClick={() => setErrorMessage('')}>×</button></div>}
+      {errorMessage && <div className="cf-banner cf-banner--error" role="alert"><span className="cf-banner-icon">⚠️</span><span>{errorMessage}</span><button className="cf-banner-close" onClick={() => setErrorMessage('')} aria-label="Fechar erro">✕</button></div>}
       {activeOperation && <div className="cf-real-operation" data-operation-status={activeOperation.status}><div><strong>{activeOperation.message}</strong><span>{activeOperation.progress}%</span></div><progress max={100} value={activeOperation.progress} />{['queued', 'running', 'cancelling'].includes(activeOperation.status) && <button className="cf-btn danger-btn" disabled={activeOperation.status === 'cancelling'} onClick={() => void cancelActiveOperation()}>{activeOperation.status === 'cancelling' ? 'Revertendo…' : 'Cancelar'}</button>}</div>}
 
       <section className="cf-storage-strip" data-storage-provider={source}>
@@ -513,9 +680,23 @@ export default function CloudOSFiles({ windowId }: { windowId?: string }) {
           {isLoading ? <div className="cf-empty"><div className="cf-spinner" /><span>Processando {sourceLabel(source)}…</span></div> : visibleEntries.length ? (
             <div className={layoutMode === 'grid' ? 'cf-grid cf-grid--visual' : 'cf-list'} role="list" data-files-view={layoutMode}>
               {visibleEntries.map(entry => {
-                const selected = selectedName === entry.name;
+                const selected = selectedNames.has(entry.name) || selectedName === entry.name;
                 const symlink = entry.kind === 'symlink' || entry.symlink;
-                return <article key={`${entry.name}-${entry.trashId || ''}`} className={`cf-item ${selected ? 'selected' : ''} ${symlink ? 'cf-item--symlink' : ''}`} onClick={() => void selectEntry(entry)} onDoubleClick={() => void openEntry(entry)} onContextMenu={event => openEntryContextMenu(event, entry)} onKeyDown={event => { if (event.key === 'Enter') void openEntry(entry); }} role="listitem" tabIndex={0} data-file-kind={entry.kind}>
+                return <article
+                  key={`${entry.name}-${entry.trashId || ''}`}
+                  className={`cf-item ${selected ? 'selected' : ''} ${symlink ? 'cf-item--symlink' : ''}`}
+                  draggable={viewMode === 'files' && !symlink}
+                  onDragStart={event => handleDragStart(event, entry)}
+                  onClick={event => handleClickEntry(event, entry)}
+                  onDoubleClick={() => void openEntry(entry)}
+                  onContextMenu={event => openEntryContextMenu(event, entry)}
+                  onKeyDown={event => { if (event.key === 'Enter') void openEntry(entry); }}
+                  onDragOver={event => { if (entry.kind === 'directory' && source === 'opfs') { event.preventDefault(); event.stopPropagation(); } }}
+                  onDrop={event => void handleDropOnFolder(event, entry)}
+                  role="listitem"
+                  tabIndex={0}
+                  data-file-kind={entry.kind}
+                >
                   <FileVisual entry={entry} source={source} path={currentPath} fromTrash={viewMode === 'trash'} compact={layoutMode === 'list'} />
                   <div className="cf-item-main"><strong className="cf-name" title={entry.originalName || entry.name}>{entry.originalName || entry.name}</strong><small className="cf-size">{symlink ? 'Link não seguido' : entry.kind === 'directory' ? 'Pasta' : formatBytes(entry.size)}{source === 'wsl' && entry.mode !== undefined ? ` · 0${entry.mode.toString(8)}` : ''}</small></div>
                   <div className="cf-actions">{viewMode === 'files' ? <>

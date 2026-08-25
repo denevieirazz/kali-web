@@ -8,8 +8,12 @@
 // ============================================
 
 import type { FileSystemNode } from '../types';
+import { getUserOpfsRootName } from '../services/userScope.js';
 
-const DISK_ROOT = 'obsidianos-disk';
+function getDiskRootName(): string {
+  return getUserOpfsRootName();
+}
+
 const META_SUFFIX = '.__meta__';
 
 // ── Path translation ──────────────────────────────────────────────────────────
@@ -27,11 +31,19 @@ function entries(dir: FileSystemDirectoryHandle): OPFSEntries {
   return (dir as unknown as { entries(): OPFSEntries }).entries();
 }
 let _diskRoot: FileSystemDirectoryHandle | null = null;
+let _currentDiskRootName: string | null = null;
+
+export function resetDiskRoot(): void {
+  _diskRoot = null;
+  _currentDiskRootName = null;
+}
 
 async function getDiskRoot(): Promise<FileSystemDirectoryHandle> {
-  if (_diskRoot) return _diskRoot;
+  const rootName = getDiskRootName();
+  if (_diskRoot && _currentDiskRootName === rootName) return _diskRoot;
   const opfsRoot = await navigator.storage.getDirectory();
-  _diskRoot = await opfsRoot.getDirectoryHandle(DISK_ROOT, { create: true });
+  _diskRoot = await opfsRoot.getDirectoryHandle(rootName, { create: true });
+  _currentDiskRootName = rootName;
   return _diskRoot;
 }
 
@@ -58,18 +70,16 @@ async function getFileHandle(
   if (parts.length === 0) return null;
   const dirParts = parts.slice(0, -1);
   const fileName = parts[parts.length - 1];
+  const dir = await getDirectoryHandle(dirParts, create);
+  if (!dir) return null;
   try {
-    const dir = dirParts.length > 0
-      ? await getDirectoryHandle(dirParts, create)
-      : await getDiskRoot();
-    if (!dir) return null;
     return await dir.getFileHandle(fileName, { create });
   } catch {
     return null;
   }
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
+// ── Low-level operations ──────────────────────────────────────────────────────
 
 export interface OPFSDriver {
   isAvailable: () => boolean;
@@ -93,8 +103,9 @@ export const opfsDriver: OPFSDriver = {
 
   async diskExists(): Promise<boolean> {
     try {
+      const rootName = getDiskRootName();
       const opfsRoot = await navigator.storage.getDirectory();
-      await opfsRoot.getDirectoryHandle(DISK_ROOT, { create: false });
+      await opfsRoot.getDirectoryHandle(rootName, { create: false });
       return true;
     } catch {
       return false;
@@ -104,11 +115,12 @@ export const opfsDriver: OPFSDriver = {
   // Called on first boot — writes all defaultNodes to OPFS
   async formatDisk(nodes: Record<string, FileSystemNode>): Promise<void> {
     // Reset disk root
+    const rootName = getDiskRootName();
     try {
       const opfsRoot = await navigator.storage.getDirectory();
-      await opfsRoot.removeEntry(DISK_ROOT, { recursive: true });
+      await opfsRoot.removeEntry(rootName, { recursive: true });
     } catch { /* doesn't exist yet */ }
-    _diskRoot = null;
+    resetDiskRoot();
 
     const sorted = Object.values(nodes).sort((a, b) => {
       const da = (a.path.match(/\\/g) || []).length;

@@ -8,6 +8,10 @@ import { useProcessManager } from '../../stores/processManager';
 import { useContextMenuStore } from '../../stores/contextMenuStore';
 import { useAppRegistry } from '../../core/appRegistry';
 import { useRubberBand } from '../../hooks/useRubberBand';
+import { getUserStorageKey } from '../../services/userScope.js';
+import { openFile } from '../../services/fileLauncher';
+import { listDirectory, uploadFiles, renameEntry, moveToTrash } from '../../apps/CloudOSFiles/opfsFileService';
+import { getDefaultAppForFile } from '../../services/mimeRegistry';
 import defaultWallpaper from '../../assets/wallpapers/default.png';
 import './Desktop.css';
 
@@ -16,6 +20,7 @@ interface DesktopIconData {
   name: string;
   icon: string;
   appId: string;
+  filePath?: string;
   x: number;
   y: number;
 }
@@ -56,7 +61,7 @@ function findFreeCell(
 
 function buildDefaultIcons(): DesktopIconData[] {
   const raw = [
-    { id: 'recycle', name: 'Lixeira', icon: '🗑️', appId: '' },
+    { id: 'recycle', name: 'Lixeira', icon: '🗑️', appId: 'cloudos-files' },
     { id: 'explorer', name: 'Explorador de Arquivos', icon: '📁', appId: 'file-explorer' },
     { id: 'cloudos-term', name: 'CloudOS Terminal', icon: '⚡', appId: 'cloudos-terminal' },
     { id: 'cloudos-files', name: 'CloudOS Files', icon: '☁️', appId: 'cloudos-files' },
@@ -77,9 +82,13 @@ function buildDefaultIcons(): DesktopIconData[] {
 
 const STORAGE_KEY = 'cloudos-unified-desktop-icons-v2';
 
+function getDesktopStorageKey(): string {
+  return getUserStorageKey(STORAGE_KEY);
+}
+
 function loadIcons(): DesktopIconData[] {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = localStorage.getItem(getDesktopStorageKey());
     if (saved) {
       return (JSON.parse(saved) as DesktopIconData[]).map((icon) =>
         icon.id === 'inst-linux' ? { ...icon, name: 'Windows + Linux', icon: '◈' } : icon
@@ -90,7 +99,7 @@ function loadIcons(): DesktopIconData[] {
 }
 
 function saveIcons(icons: DesktopIconData[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(icons));
+  localStorage.setItem(getDesktopStorageKey(), JSON.stringify(icons));
 }
 
 export default function Desktop() {
@@ -115,6 +124,54 @@ export default function Desktop() {
 
   const iconRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const desktopRef = useRef<HTMLDivElement>(null);
+
+  const syncDesktopFiles = useCallback(async () => {
+    try {
+      const opfsFiles = await listDirectory(['Desktop']);
+      setIcons((prev) => {
+        const nonOpfs = prev.filter((ic) => !ic.id.startsWith('opfs-desktop-'));
+        const occupied = nonOpfs.map((ic) => ({ x: ic.x, y: ic.y }));
+        const desktop = desktopRef.current;
+        const dw = desktop?.getBoundingClientRect().width ?? 1200;
+        const dh = desktop?.getBoundingClientRect().height ?? 800;
+
+        const newOpfsIcons: DesktopIconData[] = opfsFiles.map((file) => {
+          const id = `opfs-desktop-${file.name}`;
+          const existing = prev.find((ic) => ic.id === id);
+          if (existing) {
+            occupied.push({ x: existing.x, y: existing.y });
+            return existing;
+          }
+          const appInfo = getDefaultAppForFile(file.name);
+          const icon = file.kind === 'directory' ? '📁' : appInfo.icon || '📄';
+          const { x, y } = findFreeCell(12 + GRID * 2, 12, occupied, dw, dh);
+          occupied.push({ x, y });
+          return {
+            id,
+            name: file.name,
+            icon,
+            appId: file.kind === 'directory' ? 'cloudos-files' : appInfo.id || '',
+            filePath: `~/Desktop/${file.name}`,
+            x,
+            y,
+          };
+        });
+
+        return [...nonOpfs, ...newOpfsIcons];
+      });
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    void syncDesktopFiles();
+    const onFilesChanged = () => void syncDesktopFiles();
+    window.addEventListener('cloudos:files-changed', onFilesChanged);
+    window.addEventListener('focus', onFilesChanged);
+    return () => {
+      window.removeEventListener('cloudos:files-changed', onFilesChanged);
+      window.removeEventListener('focus', onFilesChanged);
+    };
+  }, [syncDesktopFiles]);
 
   useEffect(() => {
     saveIcons(icons);
@@ -145,6 +202,41 @@ export default function Desktop() {
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    const handleGlobalShortcuts = (e: KeyboardEvent) => {
+      // 1. Meta / Win Key -> Toggle Start Menu
+      if (e.key === 'Meta' || e.key === 'OS') {
+        e.preventDefault();
+        useSystem.getState().toggleStartMenu();
+        return;
+      }
+      // 2. Alt + Tab -> Window Switcher
+      if (e.altKey && e.key === 'Tab') {
+        e.preventDefault();
+        const { windows, activeWindowId, focusWindow } = useWindowManager.getState();
+        const nonMinimized = windows.filter(w => !w.isMinimized);
+        if (nonMinimized.length > 1) {
+          const currentIndex = nonMinimized.findIndex(w => w.id === activeWindowId);
+          const nextIndex = (currentIndex + 1) % nonMinimized.length;
+          focusWindow(nonMinimized[nextIndex].id);
+        }
+        return;
+      }
+      // 3. Alt + F4 -> Close Active Window
+      if (e.altKey && e.key === 'F4') {
+        e.preventDefault();
+        const { activeWindowId, closeWindow } = useWindowManager.getState();
+        if (activeWindowId) {
+          closeWindow(activeWindowId);
+        }
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalShortcuts, { capture: true });
+    return () => window.removeEventListener('keydown', handleGlobalShortcuts, { capture: true });
+  }, []);
+
   const getItemRects = useCallback(() => {
     const map = new Map<string, DOMRect>();
     iconRefs.current.forEach((el, key) => {
@@ -163,6 +255,22 @@ export default function Desktop() {
       if (!appId) return;
       const app = useAppRegistry.getState().apps[appId];
       if (!app) return;
+      if (app.isLinux && app.linuxAppId) {
+        const pid = createProcess('linux-app-runner', app.name, app.icon);
+        openWindow({
+          title: app.name,
+          icon: app.icon,
+          appId: 'linux-app-runner',
+          width: 1020,
+          height: 680,
+          minWidth: 480,
+          minHeight: 320,
+          isResizable: true,
+          processId: pid,
+          params: { appId: app.linuxAppId, app: app.linuxAppId, title: app.name, icon: app.icon },
+        });
+        return;
+      }
       const pid = createProcess(app.id, app.name, app.icon);
       openWindow({
         title: app.name,
@@ -232,10 +340,33 @@ export default function Desktop() {
   }, []);
 
   const handleIconDoubleClick = useCallback(
-    (_e: React.MouseEvent, appId: string) => {
-      handleOpenApp(appId);
+    (_e: React.MouseEvent, icon: DesktopIconData) => {
+      if (icon.id === 'recycle') {
+        const pid = createProcess('cloudos-files', 'Lixeira', '🗑️');
+        openWindow({
+          title: 'Lixeira - CloudOS Files',
+          icon: '🗑️',
+          appId: 'cloudos-files',
+          width: 980,
+          height: 640,
+          minWidth: 540,
+          minHeight: 360,
+          isResizable: true,
+          processId: pid,
+          params: { initialViewMode: 'trash' }
+        });
+        return;
+      }
+      if (icon.appId) {
+        handleOpenApp(icon.appId);
+      } else if (icon.filePath || icon.id.startsWith('dropped-')) {
+        openFile({
+          filePath: icon.filePath || `~/Desktop/${icon.name}`,
+          fileName: icon.name,
+        });
+      }
     },
-    [handleOpenApp]
+    [createProcess, handleOpenApp, openWindow]
   );
 
   const handleDesktopMouseDown = useCallback(
@@ -248,7 +379,7 @@ export default function Desktop() {
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     const types = e.dataTransfer.types;
-    if (types.includes('application/obsidianos-file') || types.includes('text/plain')) {
+    if (types.includes('application/obsidianos-file') || types.includes('text/plain') || types.includes('Files')) {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'copy';
       setDragOver(true);
@@ -258,7 +389,7 @@ export default function Desktop() {
   const handleDragLeave = useCallback(() => setDragOver(false), []);
 
   const handleDrop = useCallback(
-    (e: React.DragEvent) => {
+    async (e: React.DragEvent) => {
       e.preventDefault();
       setDragOver(false);
 
@@ -269,6 +400,16 @@ export default function Desktop() {
       const dropY = snapToGrid(e.clientY - rect.top);
 
       if (e.dataTransfer.getData('application/obsidianos-icon')) return;
+
+      if (e.dataTransfer.files.length > 0) {
+        try {
+          await uploadFiles(['Desktop'], Array.from(e.dataTransfer.files));
+          await syncDesktopFiles();
+        } catch (err: any) {
+          console.error('Falha ao soltar arquivos no Desktop:', err);
+        }
+        return;
+      }
 
       let raw = e.dataTransfer.getData('application/obsidianos-file');
       if (!raw) raw = e.dataTransfer.getData('text/plain');
@@ -286,11 +427,11 @@ export default function Desktop() {
 
         setIcons((prev) => [
           ...prev,
-          { id, name: data.name, icon: data.icon || '📄', appId: data.appId || '', x, y },
+          { id, name: data.name, icon: data.icon || '📄', appId: data.appId || '', filePath: data.path, x, y },
         ]);
       } catch {}
     },
-    [icons]
+    [icons, syncDesktopFiles]
   );
 
   const handleContextMenu = useCallback(
@@ -312,7 +453,7 @@ export default function Desktop() {
           label: 'Atualizar',
           shortcut: 'F5',
           onClick: () => {
-            setIcons((prev) => [...prev]);
+            void syncDesktopFiles();
             setSelectedIcons(new Set());
           },
         },
@@ -323,6 +464,7 @@ export default function Desktop() {
             const fresh = buildDefaultIcons();
             setIcons(fresh);
             saveIcons(fresh);
+            void syncDesktopFiles();
           },
         },
         { id: 'sep2', label: '', separator: true },
@@ -331,11 +473,10 @@ export default function Desktop() {
           label: 'Configurações de Exibição',
           onClick: () => handleOpenApp('settings'),
         },
-        { id: 'personalize', label: 'Personalizar', onClick: () => handleOpenApp('settings'),
-        },
+        { id: 'personalize', label: 'Personalizar', onClick: () => handleOpenApp('settings') },
       ]);
     },
-    [closeStartMenu, openContextMenu, handleOpenApp]
+    [closeStartMenu, handleOpenApp, openContextMenu, syncDesktopFiles]
   );
 
   const handleIconContextMenu = useCallback(
@@ -343,19 +484,57 @@ export default function Desktop() {
       e.preventDefault();
       e.stopPropagation();
       setSelectedIcons(new Set([icon.id]));
+      const isFile = Boolean(icon.filePath || icon.id.startsWith('opfs-desktop-') || icon.id.startsWith('dropped-'));
+
       openContextMenu(e.clientX, e.clientY, [
-        { id: 'open', label: 'Abrir', onClick: () => handleOpenApp(icon.appId) },
-        { id: 'sep1', label: '', separator: true },
         {
-          id: 'remove',
-          label: 'Remover da Área de Trabalho',
-          onClick: () => {
-            setIcons((prev) => prev.filter((ic) => ic.id !== icon.id));
-          },
+          id: 'open',
+          label: 'Abrir',
+          onClick: () => handleIconDoubleClick(e, icon),
         },
+        ...(isFile
+          ? [
+              {
+                id: 'rename',
+                label: 'Renomear',
+                shortcut: 'F2',
+                onClick: async () => {
+                  const newName = window.prompt('Novo nome para o arquivo:', icon.name);
+                  if (!newName || newName === icon.name) return;
+                  try {
+                    await renameEntry(['Desktop'], { name: icon.name, kind: 'file', size: 0, modified: Date.now() }, newName);
+                    await syncDesktopFiles();
+                  } catch (err: any) {
+                    alert(`Falha ao renomear: ${err.message}`);
+                  }
+                },
+              },
+              {
+                id: 'trash',
+                label: 'Mover para a Lixeira',
+                shortcut: 'Delete',
+                onClick: async () => {
+                  try {
+                    await moveToTrash(['Desktop'], { name: icon.name, kind: 'file', size: 0, modified: Date.now() });
+                    await syncDesktopFiles();
+                  } catch (err: any) {
+                    alert(`Falha ao mover para a Lixeira: ${err.message}`);
+                  }
+                },
+              },
+            ]
+          : [
+              {
+                id: 'remove',
+                label: 'Remover da Área de Trabalho',
+                onClick: () => {
+                  setIcons((prev) => prev.filter((ic) => ic.id !== icon.id));
+                },
+              },
+            ]),
       ]);
     },
-    [openContextMenu, handleOpenApp]
+    [handleIconDoubleClick, openContextMenu, syncDesktopFiles]
   );
 
   const currentWallpaper =
@@ -404,7 +583,7 @@ export default function Desktop() {
             setSelectedIcons(new Set([icon.id]));
             closeStartMenu();
           }}
-          onDoubleClick={(e) => handleIconDoubleClick(e, icon.appId)}
+          onDoubleClick={(e) => handleIconDoubleClick(e, icon)}
           onContextMenu={(e) => handleIconContextMenu(e, icon)}
         >
           <div className="desktop-icon-image">{icon.icon}</div>

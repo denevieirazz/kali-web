@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 2,
+  "id": "74d5b498bb",
+  "mode": "Full",
+  "startedAt": "2026-08-22T17:34:44.3666913Z",
+  "finishedAt": null,
+  "root": "C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3",
+  "logDirectory": "C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\logs\\session-20260822-143444-74d5b498bb",
+  "runtimeDirectory": "C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\logs\\session-20260822-143444-74d5b498bb\\runtime",
+  "dataDirectory": "C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\logs\\session-20260822-143444-74d5b498bb\\data",
+  "git": {
+    "branch": "poc/cloudos-linux-runtime-xpra",
+    "sha": "12c2c953ffbfb7a1221cfe73a0d2a2b52c8ce4a1",
+    "dirty": true
+  },
+  "teardownResult": null,
+  "stoppedProcesses": [],
+  "preservedProcesses": [],
+  "failures": [],
+  "processes": [
+    {
+      "component": "host-runtime",
+      "pid": 9380,
+      "parentPid": 5644,
+      "sessionId": "74d5b498bb",
+      "logDirectory": "C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\logs\\session-20260822-143444-74d5b498bb",
+      "creationUtcTicks": "639230169052790000",
+      "creationTimeUtc": "2026-08-22T17:35:05.2790380Z",
+      "startedAt": "2026-08-22T17:35:05.2790380Z",
+      "executablePath": "C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\desktop\\CloudOS.Host\\bin\\Release\\net8.0-windows10.0.19041.0\\CloudOS.Host.exe",
+      "commandLineSanitized": "C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\desktop\\CloudOS.Host\\bin\\Release\\net8.0-windows10.0.19041.0\\CloudOS.Host.exe --root C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3 --bootstrap-pipe cloudos-launch-74d5b498bb-04a4fda382",
+      "processName": "CloudOS.Host.exe",
+      "stdout": "C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\logs\\session-20260822-143444-74d5b498bb\\host.log",
+      "stderr": "C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\logs\\session-20260822-143444-74d5b498bb\\host.stderr.log"
+    },
+    {
+      "component": "backend-hosted",
+      "pid": 1680,
+      "parentPid": 9380,
+      "sessionId": "74d5b498bb",
+      "logDirectory": "C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\logs\\session-20260822-143444-74d5b498bb",
+      "creationUtcTicks": "639230169064600000",
+      "creationTimeUtc": "2026-08-22T17:35:06.4602600Z",
+      "startedAt": "2026-08-22T17:35:06.4602600Z",
+      "executablePath": "C:\\Users\\dougl\\AppData\\Local\\hermes\\node\\node.exe",
+      "commandLineSanitized": "\"C:\\Users\\dougl\\AppData\\Local\\hermes\\node\\node.exe\" C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\backend\\src\\server.js",
+      "processName": "node.exe",
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "readiness": {
+    "status": "ready",
+    "mode": "Full",
+    "readyAt": "2026-08-22T17:35:10.2650567Z",
+    "hostLauncherPid": null,
+    "hostRuntimePid": 9380,
+    "shellWindowReady": true,
+    "shellHandshakeReady": true,
+    "shellHandshakeProtocol": 1,
+    "frontendIndex": "C:\\Users\\dougl\\Documents\\Codex\\2026-08-12\\c-users-dougl-gemini-antigravity-scratch\\worktrees\\CloudOS-workflow-batch-3\\frontend\\dist\\index.html",
+    "backendPid": 1680,
+    "backendApiBase": "http://127.0.0.1:54317",
+    "backendRuntimeManifest": "C:\\Users\\dougl\\AppData\\Local\\CloudOS\\runtime\\4452480f-dd93-4ffc-82fc-da815b798c3e\\backend-port.json"
+  },
+  "status": "running"
+}

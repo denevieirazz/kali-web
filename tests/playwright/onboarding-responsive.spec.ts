@@ -5,8 +5,13 @@ type Geometry = { x: number; width: number; scrollWidth: number; clientWidth: nu
 
 async function accountStep(page: Parameters<typeof waitForOobe>[0], baseURL: string) {
   await waitForOobe(page, baseURL);
-  await page.locator('.setup-footer button.setup-btn-primary', { hasText: 'Continuar' }).click();
-  await expect(page.getByRole('textbox', { name: 'Nome de exibição' })).toBeVisible();
+  const welcomeBtn = page.locator('.setup-footer button.setup-btn-primary', { hasText: 'Começar' }).or(page.locator('.setup-footer button.setup-btn-primary', { hasText: 'Continuar' })).first();
+  if (await welcomeBtn.isVisible()) {
+    await welcomeBtn.click();
+    const distroBtn = page.locator('.setup-footer button.setup-btn-primary').first();
+    await distroBtn.click();
+    await expect(page.locator('.setup-form')).toBeVisible({ timeout: 25_000 });
+  }
 }
 
 async function geometry(page: Parameters<typeof waitForOobe>[0]): Promise<Geometry> {

@@ -80,3 +80,38 @@ test('Drone gera findings.json e permanece fail-closed quando regressao ou patru
     rmSync(fixture.root, { recursive: true, force: true });
   }
 });
+
+test('Drone nao duplica finding de regressao quando renderiza relatorio e gate em sequencia', () => {
+  const fixture = createFixture();
+  try {
+    writeFileSync(join(fixture.drone, 'findings.json'), JSON.stringify([
+      {
+        id: 'LOW-ENV-1',
+        severity: 'BAIXO',
+        category: 'environment',
+        title: 'WSL indisponivel no runner WebOnly',
+        evidence: '503',
+      },
+    ], null, 2), 'utf8');
+    writeFileSync(join(fixture.drone, 'regressions.json'), JSON.stringify({
+      ok: false,
+      results: [{ label: 'backend', ok: false, status: 1, error: 'contract failed' }],
+    }, null, 2), 'utf8');
+
+    const reportRun = runRenderer(fixture.root);
+    assert.equal(reportRun.status, 0, reportRun.stderr || reportRun.stdout);
+
+    const gateRun = runRenderer(fixture.root, ['--gate']);
+    assert.equal(gateRun.status, 1, 'segunda renderizacao precisa continuar fail-closed');
+
+    const findings = JSON.parse(readFileSync(join(fixture.drone, 'findings.json'), 'utf8'));
+    assert.equal(findings.filter(item => item.id === 'DRONE-REGRESSION-0001').length, 1, 'finding gerado precisa ser idempotente');
+    assert.equal(findings.filter(item => item.id === 'LOW-ENV-1').length, 1, 'finding de runtime precisa ser preservado');
+    assert.match(gateRun.stdout, /DRONE_COUNTS critical=1 high=0 medium=0 low=1/);
+
+    const observations = JSON.parse(readFileSync(join(fixture.drone, 'observations.json'), 'utf8'));
+    assert.deepEqual(observations.map(item => item.id), ['LOW-ENV-1'], 'observacoes brutas nao devem receber finding derivado do renderer');
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});

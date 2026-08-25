@@ -1,0 +1,863 @@
+{
+  "schemaVersion": 1,
+  "collectedAt": "2026-08-24T23:24:08.878Z",
+  "collector": "scripts/collect-linux-containment-evidence.mjs",
+  "failClosed": true,
+  "inputs": {
+    "distribution": "Ubuntu",
+    "display": 101,
+    "app": "l3afpad",
+    "requestedSessionName": "cloudos-poc1-xpra-mt7v3q3n-ac515ea3",
+    "correlatedSessionName": "cloudos-poc1-xpra-mt7v3q3n-ac515ea3"
+  },
+  "verdict": "PASS",
+  "assertions": [
+    {
+      "id": "xpra.unique-display-session",
+      "ok": true,
+      "expected": "exactly one Xpra process matching display and session-name",
+      "actual": [
+        538
+      ]
+    },
+    {
+      "id": "xpra.session-name-exact",
+      "ok": true,
+      "expected": "cloudos-poc1-xpra-mt7v3q3n-ac515ea3",
+      "actual": "cloudos-poc1-xpra-mt7v3q3n-ac515ea3"
+    },
+    {
+      "id": "xpra.display-exact",
+      "ok": true,
+      "expected": ":101",
+      "actual": "/usr/bin/python3 /usr/bin/xpra seamless :101 --socket-dirs=/run/xpra --session-name=cloudos-poc1-xpra-mt7v3q3n-ac515ea3 --start-child=env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET -u PULSE_SERVER -u WSLENV -u WSL_INTEROP -u DBUS_SESSION_BUS_ADDRESS -u XPRA_PASSWORD HOME='/var/lib/cloudos/contained-homes/65534-be88c707b93359aee4cbb3ce' USER=cloudos-app LOGNAME=cloudos-app SHELL=/bin/sh PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' LANG=C.UTF-8 XDG_RUNTIME_DIR=/run/user/65534 XDG_CONFIG_HOME='/var/lib/cloudos/contained-homes/65534-be88c707b93359aee4cbb3ce/.config' XDG_CACHE_HOME='/var/lib/cloudos/contained-homes/65534-be88c707b93359aee4cbb3ce/.cache' XDG_DATA_HOME='/var/lib/cloudos/contained-homes/65534-be88c707b93359aee4cbb3ce/.local/share' GDK_BACKEND=x11 QT_QPA_PLATFORM=xcb SDL_VIDEODRIVER=x11 CLUTTER_BACKEND=x11 XDG_SESSION_TYPE=x11 MOZ_ENABLE_WAYLAND=0 ELECTRON_OZONE_PLATFORM_HINT=x11 LIBGL_ALWAYS_SOFTWARE=1 MOZ_X11_EGL=0 NO_AT_BRIDGE=1 dbus-run-session -- l3afpad -"
+    },
+    {
+      "id": "xpra.bind-noabstract",
+      "ok": true,
+      "expected": "--bind=noabstract",
+      "actual": true
+    },
+    {
+      "id": "xpra.tcp-authenticated",
+      "ok": true,
+      "expected": "declared TCP binding with auth=env",
+      "actual": {
+        "host": "0.0.0.0",
+        "port": 14501,
+        "auth": "env"
+      }
+    },
+    {
+      "id": "xpra.tcp-listener-present",
+      "ok": true,
+      "expected": "one listener for the correlated authenticated Xpra port",
+      "actual": [
+        "LISTEN 0      5             0.0.0.0:14501      0.0.0.0:*    users:((\"xpra\",pid=538,fd=4))            "
+      ]
+    },
+    {
+      "id": "process.app-descendant",
+      "ok": true,
+      "expected": "app descends from PID 538",
+      "actual": {
+        "appPid": 606,
+        "appPpid": 604
+      }
+    },
+    {
+      "id": "process.xserver-descendant",
+      "ok": true,
+      "expected": "X server descends from PID 538",
+      "actual": {
+        "xServerPid": 569,
+        "xServerPpid": 538
+      }
+    },
+    {
+      "id": "process.uid-nonroot-xpra",
+      "ok": true,
+      "expected": "UID > 0",
+      "actual": 65534
+    },
+    {
+      "id": "process.uid-nonroot-xserver",
+      "ok": true,
+      "expected": "UID > 0",
+      "actual": 65534
+    },
+    {
+      "id": "process.uid-nonroot-app",
+      "ok": true,
+      "expected": "UID > 0",
+      "actual": 65534
+    },
+    {
+      "id": "process.same-mount-namespace",
+      "ok": true,
+      "expected": "Xpra, X server and app share the isolated mount namespace",
+      "actual": {
+        "app": "mnt:[4026532227]",
+        "xpra": "mnt:[4026532227]",
+        "xServer": "mnt:[4026532227]"
+      }
+    },
+    {
+      "id": "process.same-pid-namespace",
+      "ok": true,
+      "expected": "Xpra, X server and app share the isolated PID namespace",
+      "actual": {
+        "app": "pid:[4026532228]",
+        "xpra": "pid:[4026532228]",
+        "xServer": "pid:[4026532228]"
+      }
+    },
+    {
+      "id": "namespace.private-mount",
+      "ok": true,
+      "expected": "at least one ancestor remains outside the session mount namespace",
+      "actual": {
+        "pid": 536,
+        "command": "Relay(495)",
+        "mnt": "mnt:[4026532219]",
+        "pidNamespace": "pid:[4026532221]"
+      }
+    },
+    {
+      "id": "tree.no-wslg-process",
+      "ok": true,
+      "expected": "no WSLg/RAIL process in the correlated tree",
+      "actual": []
+    },
+    {
+      "id": "env.display",
+      "ok": true,
+      "expected": ":101",
+      "actual": ":101"
+    },
+    {
+      "id": "env.gdk-x11",
+      "ok": true,
+      "expected": "x11",
+      "actual": "x11"
+    },
+    {
+      "id": "env.qt-xcb",
+      "ok": true,
+      "expected": "xcb",
+      "actual": "xcb"
+    },
+    {
+      "id": "env.forbidden-absent",
+      "ok": true,
+      "expected": "absent: WAYLAND_*, PULSE_*, WSL_INTEROP, WSLENV, XPRA_PASSWORD",
+      "actual": []
+    },
+    {
+      "id": "env.path-no-windows",
+      "ok": true,
+      "expected": "PATH contains no Windows mount",
+      "actual": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    },
+    {
+      "id": "mount.tmp-private",
+      "ok": true,
+      "expected": "/tmp is tmpfs",
+      "actual": {
+        "mountId": 492,
+        "parentId": 481,
+        "majorMinor": "0:96",
+        "root": "/",
+        "mountPoint": "/tmp",
+        "mountOptions": [
+          "rw",
+          "nosuid",
+          "nodev",
+          "relatime"
+        ],
+        "optionalFields": [],
+        "filesystem": "tmpfs",
+        "source": "tmpfs",
+        "superOptions": [
+          "rw"
+        ]
+      }
+    },
+    {
+      "id": "mount.runtime-private",
+      "ok": true,
+      "expected": "/run/user is tmpfs",
+      "actual": {
+        "mountId": 493,
+        "parentId": 416,
+        "majorMinor": "0:97",
+        "root": "/",
+        "mountPoint": "/run/user",
+        "mountOptions": [
+          "rw",
+          "nosuid",
+          "nodev",
+          "noexec",
+          "relatime"
+        ],
+        "optionalFields": [],
+        "filesystem": "tmpfs",
+        "source": "tmpfs",
+        "superOptions": [
+          "rw",
+          "mode=755"
+        ]
+      }
+    },
+    {
+      "id": "mount.xpra-private",
+      "ok": true,
+      "expected": "/run/xpra is tmpfs",
+      "actual": {
+        "mountId": 494,
+        "parentId": 412,
+        "majorMinor": "0:98",
+        "root": "/",
+        "mountPoint": "/run/xpra",
+        "mountOptions": [
+          "rw",
+          "nosuid",
+          "nodev",
+          "noexec",
+          "relatime"
+        ],
+        "optionalFields": [],
+        "filesystem": "tmpfs",
+        "source": "tmpfs",
+        "superOptions": [
+          "rw",
+          "mode=700"
+        ]
+      }
+    },
+    {
+      "id": "mask.mnt-wslg",
+      "ok": true,
+      "expected": "/mnt/wslg absent or an empty mode-000 mount",
+      "actual": {
+        "probe": {
+          "path": "/mnt/wslg",
+          "exists": true,
+          "type": "directory",
+          "mode": "0",
+          "deviceInode": "96:3",
+          "empty": true,
+          "executable": false
+        },
+        "mount": {
+          "mountId": 495,
+          "parentId": 424,
+          "majorMinor": "0:96",
+          "root": "/cloudos-wslg-mask-a71ce25165a031c4",
+          "mountPoint": "/mnt/wslg",
+          "mountOptions": [
+            "rw",
+            "nosuid",
+            "nodev",
+            "relatime"
+          ],
+          "optionalFields": [],
+          "filesystem": "tmpfs",
+          "source": "tmpfs",
+          "superOptions": [
+            "rw"
+          ]
+        }
+      }
+    },
+    {
+      "id": "mask.run-wsl",
+      "ok": true,
+      "expected": "/run/WSL absent or an empty mode-000 mount",
+      "actual": {
+        "probe": {
+          "path": "/run/WSL",
+          "exists": true,
+          "type": "directory",
+          "mode": "0",
+          "deviceInode": "96:3",
+          "empty": true,
+          "executable": false
+        },
+        "mount": {
+          "mountId": 496,
+          "parentId": 412,
+          "majorMinor": "0:96",
+          "root": "/cloudos-wslg-mask-a71ce25165a031c4",
+          "mountPoint": "/run/WSL",
+          "mountOptions": [
+            "rw",
+            "nosuid",
+            "nodev",
+            "relatime"
+          ],
+          "optionalFields": [],
+          "filesystem": "tmpfs",
+          "source": "tmpfs",
+          "superOptions": [
+            "rw"
+          ]
+        }
+      }
+    },
+    {
+      "id": "mask.init-file",
+      "ok": true,
+      "expected": "/init is a non-executable mode-000 regular empty file",
+      "actual": {
+        "path": "/init",
+        "exists": true,
+        "type": "regular empty file",
+        "mode": "0",
+        "deviceInode": "96:4",
+        "empty": false,
+        "executable": false
+      }
+    },
+    {
+      "id": "mask.init-mount-flags",
+      "ok": true,
+      "expected": "/init mount is ro,noexec,nosuid,nodev",
+      "actual": {
+        "mountId": 499,
+        "parentId": 283,
+        "majorMinor": "0:96",
+        "root": "/cloudos-init-mask-a71ce25165a031c4",
+        "mountPoint": "/init",
+        "mountOptions": [
+          "ro",
+          "nosuid",
+          "nodev",
+          "noexec",
+          "relatime"
+        ],
+        "optionalFields": [],
+        "filesystem": "tmpfs",
+        "source": "tmpfs",
+        "superOptions": [
+          "rw"
+        ]
+      }
+    },
+    {
+      "id": "mask.wslg-x11-hidden",
+      "ok": true,
+      "expected": "/tmp/.X11-unix/X0 is not visible",
+      "actual": false
+    },
+    {
+      "id": "mask.wslg-abstract-x11-absent",
+      "ok": true,
+      "expected": "no abstract @/tmp/.X11-unix/X0 socket in the session network view",
+      "actual": []
+    },
+    {
+      "id": "mask.wslg-wayland-hidden",
+      "ok": true,
+      "expected": "/mnt/wslg/runtime-dir/wayland-0 is not visible",
+      "actual": false
+    },
+    {
+      "id": "xserver.display-socket",
+      "ok": true,
+      "expected": "/tmp/.X11-unix/X101 is a socket",
+      "actual": true
+    },
+    {
+      "id": "xpra.private-socket",
+      "ok": true,
+      "expected": "Xpra filesystem socket for :101 under private /run/xpra",
+      "actual": {
+        "sockets": [
+          "/run/xpra/DESKTOP-65BUITP-101"
+        ],
+        "matching": [
+          "/run/xpra/DESKTOP-65BUITP-101"
+        ]
+      }
+    },
+    {
+      "id": "interop.disabled",
+      "ok": true,
+      "expected": "WSLInterop disabled or unregistered inside the session",
+      "actual": "unregistered"
+    }
+  ],
+  "processes": {
+    "xpra": {
+      "pid": 538,
+      "ppid": 537,
+      "uid": 65534,
+      "gid": 65534,
+      "user": "nobody",
+      "stat": "Sl+",
+      "command": "xpra",
+      "args": "/usr/bin/python3 /usr/bin/xpra seamless :101 --socket-dirs=/run/xpra --session-name=cloudos-poc1-xpra-mt7v3q3n-ac515ea3 --start-child=env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET -u PULSE_SERVER -u WSLENV -u WSL_INTEROP -u DBUS_SESSION_BUS_ADDRESS -u XPRA_PASSWORD HOME='/var/lib/cloudos/contained-homes/65534-be88c707b93359aee4cbb3ce' USER=cloudos-app LOGNAME=cloudos-app SHELL=/bin/sh PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' LANG=C.UTF-8 XDG_RUNTIME_DIR=/run/user/65534 XDG_CONFIG_HOME='/var/lib/cloudos/contained-homes/65534-be88c707b93359aee4cbb3ce/.config' XDG_CACHE_HOME='/var/lib/cloudos/contained-homes/65534-be88c707b93359aee4cbb3ce/.cache' XDG_DATA_HOME='/var/lib/cloudos/contained-homes/65534-be88c707b93359aee4cbb3ce/.local/share' GDK_BACKEND=x11 QT_QPA_PLATFORM=xcb SDL_VIDEODRIVER=x11 CLUTTER_BACKEND=x11 XDG_SESSION_TYPE=x11 MOZ_ENABLE_WAYLAND=0 ELECTRON_OZONE_PLATFORM_HINT=x11 LIBGL_ALWAYS_SOFTWARE=1 MOZ_X11_EGL=0 NO_AT_BRIDGE=1 dbus-run-session -- l3afpad --exit-with-children=yes --daemon=no --clipboard=no --printing=no --file-transfer=no --webcam=no --audio=no --speaker=no --microphone=no --notifications=no --mdns=no --dbus-launch=no --dbus-control=no --start-new-commands=no --bind=noabstract --bind-tcp=0.0.0.0:14501,auth=env --video=no --html=on"
+    },
+    "xServer": {
+      "pid": 569,
+      "ppid": 538,
+      "uid": 65534,
+      "gid": 65534,
+      "user": "nobody",
+      "stat": "Ss",
+      "command": "Xvfb",
+      "args": "Xvfb-for-Xpra-101 -screen 0 8192x4096x24 +extension GLX +extension RANDR +extension RENDER +extension Composite -extension DOUBLE-BUFFER -nolisten tcp -noreset -auth /var/lib/cloudos/contained-homes/65534-be88c707b93359aee4cbb3ce/.Xauthority :101"
+    },
+    "app": {
+      "pid": 606,
+      "ppid": 604,
+      "uid": 65534,
+      "gid": 65534,
+      "user": "nobody",
+      "stat": "Sl+",
+      "command": "l3afpad",
+      "args": "l3afpad"
+    },
+    "appCandidates": [
+      {
+        "pid": 606,
+        "ppid": 604,
+        "uid": 65534,
+        "gid": 65534,
+        "user": "nobody",
+        "stat": "Sl+",
+        "command": "l3afpad",
+        "args": "l3afpad"
+      }
+    ],
+    "correlatedTree": [
+      {
+        "pid": 538,
+        "ppid": 537,
+        "uid": 65534,
+        "gid": 65534,
+        "user": "nobody",
+        "stat": "Sl+",
+        "command": "xpra",
+        "args": "/usr/bin/python3 /usr/bin/xpra seamless :101 --socket-dirs=/run/xpra --session-name=cloudos-poc1-xpra-mt7v3q3n-ac515ea3 --start-child=env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET -u PULSE_SERVER -u WSLENV -u WSL_INTEROP -u DBUS_SESSION_BUS_ADDRESS -u XPRA_PASSWORD HOME='/var/lib/cloudos/contained-homes/65534-be88c707b93359aee4cbb3ce' USER=cloudos-app LOGNAME=cloudos-app SHELL=/bin/sh PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' LANG=C.UTF-8 XDG_RUNTIME_DIR=/run/user/65534 XDG_CONFIG_HOME='/var/lib/cloudos/contained-homes/65534-be88c707b93359aee4cbb3ce/.config' XDG_CACHE_HOME='/var/lib/cloudos/contained-homes/65534-be88c707b93359aee4cbb3ce/.cache' XDG_DATA_HOME='/var/lib/cloudos/contained-homes/65534-be88c707b93359aee4cbb3ce/.local/share' GDK_BACKEND=x11 QT_QPA_PLATFORM=xcb SDL_VIDEODRIVER=x11 CLUTTER_BACKEND=x11 XDG_SESSION_TYPE=x11 MOZ_ENABLE_WAYLAND=0 ELECTRON_OZONE_PLATFORM_HINT=x11 LIBGL_ALWAYS_SOFTWARE=1 MOZ_X11_EGL=0 NO_AT_BRIDGE=1 dbus-run-session -- l3afpad --exit-with-children=yes --daemon=no --clipboard=no --printing=no --file-transfer=no --webcam=no --audio=no --speaker=no --microphone=no --notifications=no --mdns=no --dbus-launch=no --dbus-control=no --start-new-commands=no --bind=noabstract --bind-tcp=0.0.0.0:14501,auth=env --video=no --html=on"
+      },
+      {
+        "pid": 569,
+        "ppid": 538,
+        "uid": 65534,
+        "gid": 65534,
+        "user": "nobody",
+        "stat": "Ss",
+        "command": "Xvfb",
+        "args": "Xvfb-for-Xpra-101 -screen 0 8192x4096x24 +extension GLX +extension RANDR +extension RENDER +extension Composite -extension DOUBLE-BUFFER -nolisten tcp -noreset -auth /var/lib/cloudos/contained-homes/65534-be88c707b93359aee4cbb3ce/.Xauthority :101"
+      },
+      {
+        "pid": 595,
+        "ppid": 538,
+        "uid": 65534,
+        "gid": 65534,
+        "user": "nobody",
+        "stat": "S+",
+        "command": "dbus-launch",
+        "args": "dbus-launch --autolaunch d9dece46c9dc413cac7703509a7eb18d --binary-syntax --close-stderr"
+      },
+      {
+        "pid": 596,
+        "ppid": 538,
+        "uid": 65534,
+        "gid": 65534,
+        "user": "nobody",
+        "stat": "Ss",
+        "command": "dbus-daemon",
+        "args": "/usr/bin/dbus-daemon --syslog-only --fork --print-pid 5 --print-address 7 --session"
+      },
+      {
+        "pid": 604,
+        "ppid": 538,
+        "uid": 65534,
+        "gid": 65534,
+        "user": "nobody",
+        "stat": "S+",
+        "command": "dbus-run-sessio",
+        "args": "dbus-run-session -- l3afpad"
+      },
+      {
+        "pid": 605,
+        "ppid": 604,
+        "uid": 65534,
+        "gid": 65534,
+        "user": "nobody",
+        "stat": "S+",
+        "command": "dbus-daemon",
+        "args": "dbus-daemon --nofork --print-address 4 --session"
+      },
+      {
+        "pid": 606,
+        "ppid": 604,
+        "uid": 65534,
+        "gid": 65534,
+        "user": "nobody",
+        "stat": "Sl+",
+        "command": "l3afpad",
+        "args": "l3afpad"
+      }
+    ],
+    "globalWslgProcesses": [
+      {
+        "pid": 10,
+        "ppid": 1,
+        "uid": 0,
+        "gid": 0,
+        "user": "root",
+        "stat": "Sl+",
+        "command": "WSLGd",
+        "args": "/usr/bin/WSLGd"
+      },
+      {
+        "pid": 14,
+        "ppid": 10,
+        "uid": 1000,
+        "gid": 1000,
+        "user": "wslg",
+        "stat": "Sl+",
+        "command": "weston",
+        "args": "/usr/bin/weston --backend=rdp-backend.so --modules=wslgd-notify.so --xwayland --socket=wayland-0 --shell=rdprail-shell.so --log=/mnt/wslg/weston.log --logger-scopes=log,rdp-backend,rdprail-shell"
+      },
+      {
+        "pid": 20,
+        "ppid": 10,
+        "uid": 1000,
+        "gid": 1000,
+        "user": "wslg",
+        "stat": "S+",
+        "command": "init",
+        "args": "/init /mnt/c/Program Files/WSL/msrdc.exe msrdc.exe /wslg /silent /v:1C254065-0473-443D-9F6E-D81FEE867169 /hvsocketserviceid:00000001-FACB-11E6-BD58-64006A7986D3 /plugin:WSLDVC_PACKAGE /wslgsharedmemorypath:WSL\\1C254065-0473-443D-9F6E-D81FEE867169\\wslg C:\\Program Files\\WSL\\wslg.rdp"
+      },
+      {
+        "pid": 33,
+        "ppid": 14,
+        "uid": 1000,
+        "gid": 1000,
+        "user": "wslg",
+        "stat": "Ss",
+        "command": "Xwayland",
+        "args": "/usr/bin/Xwayland :0 -rootless -core -listen 37 -wm 38 -terminate -nolisten local -ac"
+      }
+    ]
+  },
+  "environment": {
+    "allowed": {
+      "DISPLAY": ":101",
+      "XAUTHORITY": "/var/lib/cloudos/contained-homes/65534-be88c707b93359aee4cbb3ce/.Xauthority",
+      "GDK_BACKEND": "x11",
+      "QT_QPA_PLATFORM": "xcb",
+      "SDL_VIDEODRIVER": "x11",
+      "CLUTTER_BACKEND": "x11",
+      "XDG_SESSION_TYPE": "x11",
+      "XDG_RUNTIME_DIR": "/run/user/65534",
+      "HOME": "/var/lib/cloudos/contained-homes/65534-be88c707b93359aee4cbb3ce",
+      "USER": "cloudos-app",
+      "LOGNAME": "cloudos-app",
+      "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "MOZ_ENABLE_WAYLAND": "0",
+      "ELECTRON_OZONE_PLATFORM_HINT": "x11"
+    },
+    "forbiddenNames": [
+      "WAYLAND_*",
+      "PULSE_*",
+      "WSL_INTEROP",
+      "WSLENV",
+      "XPRA_PASSWORD"
+    ],
+    "forbiddenPresent": []
+  },
+  "namespaces": {
+    "app": {
+      "mnt": "mnt:[4026532227]",
+      "pid": "pid:[4026532228]",
+      "user": "user:[4026531837]",
+      "net": "net:[4026531833]"
+    },
+    "xpra": {
+      "mnt": "mnt:[4026532227]",
+      "pid": "pid:[4026532228]",
+      "user": "user:[4026531837]",
+      "net": "net:[4026531833]"
+    },
+    "xServer": {
+      "mnt": "mnt:[4026532227]",
+      "pid": "pid:[4026532228]",
+      "user": "user:[4026531837]",
+      "net": "net:[4026531833]"
+    },
+    "ancestors": [
+      {
+        "pid": 538,
+        "command": "xpra",
+        "mnt": "mnt:[4026532227]",
+        "pidNamespace": "pid:[4026532228]"
+      },
+      {
+        "pid": 537,
+        "command": "unshare",
+        "mnt": "mnt:[4026532227]",
+        "pidNamespace": "pid:[4026532221]"
+      },
+      {
+        "pid": 536,
+        "command": "Relay(495)",
+        "mnt": "mnt:[4026532219]",
+        "pidNamespace": "pid:[4026532221]"
+      },
+      {
+        "pid": 535,
+        "command": "SessionLeader",
+        "mnt": "mnt:[4026532219]",
+        "pidNamespace": "pid:[4026532221]"
+      },
+      {
+        "pid": 3,
+        "command": "init-systemd(Ub",
+        "mnt": "mnt:[4026532219]",
+        "pidNamespace": "pid:[4026532221]"
+      },
+      {
+        "pid": 2,
+        "command": "systemd",
+        "mnt": "mnt:[4026532219]",
+        "pidNamespace": "pid:[4026532221]"
+      },
+      {
+        "pid": 1,
+        "command": "init()",
+        "mnt": "mnt:[4026532206]",
+        "pidNamespace": "pid:[4026532209]"
+      }
+    ],
+    "outsideMountAncestor": {
+      "pid": 536,
+      "command": "Relay(495)",
+      "mnt": "mnt:[4026532219]",
+      "pidNamespace": "pid:[4026532221]"
+    }
+  },
+  "mounts": {
+    "relevant": [
+      {
+        "mountId": 492,
+        "parentId": 481,
+        "majorMinor": "0:96",
+        "root": "/",
+        "mountPoint": "/tmp",
+        "mountOptions": [
+          "rw",
+          "nosuid",
+          "nodev",
+          "relatime"
+        ],
+        "optionalFields": [],
+        "filesystem": "tmpfs",
+        "source": "tmpfs",
+        "superOptions": [
+          "rw"
+        ]
+      },
+      {
+        "mountId": 493,
+        "parentId": 416,
+        "majorMinor": "0:97",
+        "root": "/",
+        "mountPoint": "/run/user",
+        "mountOptions": [
+          "rw",
+          "nosuid",
+          "nodev",
+          "noexec",
+          "relatime"
+        ],
+        "optionalFields": [],
+        "filesystem": "tmpfs",
+        "source": "tmpfs",
+        "superOptions": [
+          "rw",
+          "mode=755"
+        ]
+      },
+      {
+        "mountId": 494,
+        "parentId": 412,
+        "majorMinor": "0:98",
+        "root": "/",
+        "mountPoint": "/run/xpra",
+        "mountOptions": [
+          "rw",
+          "nosuid",
+          "nodev",
+          "noexec",
+          "relatime"
+        ],
+        "optionalFields": [],
+        "filesystem": "tmpfs",
+        "source": "tmpfs",
+        "superOptions": [
+          "rw",
+          "mode=700"
+        ]
+      },
+      {
+        "mountId": 495,
+        "parentId": 424,
+        "majorMinor": "0:96",
+        "root": "/cloudos-wslg-mask-a71ce25165a031c4",
+        "mountPoint": "/mnt/wslg",
+        "mountOptions": [
+          "rw",
+          "nosuid",
+          "nodev",
+          "relatime"
+        ],
+        "optionalFields": [],
+        "filesystem": "tmpfs",
+        "source": "tmpfs",
+        "superOptions": [
+          "rw"
+        ]
+      },
+      {
+        "mountId": 496,
+        "parentId": 412,
+        "majorMinor": "0:96",
+        "root": "/cloudos-wslg-mask-a71ce25165a031c4",
+        "mountPoint": "/run/WSL",
+        "mountOptions": [
+          "rw",
+          "nosuid",
+          "nodev",
+          "relatime"
+        ],
+        "optionalFields": [],
+        "filesystem": "tmpfs",
+        "source": "tmpfs",
+        "superOptions": [
+          "rw"
+        ]
+      },
+      {
+        "mountId": 497,
+        "parentId": 412,
+        "majorMinor": "0:96",
+        "root": "/cloudos-wslg-mask-a71ce25165a031c4",
+        "mountPoint": "/run/systemd",
+        "mountOptions": [
+          "rw",
+          "nosuid",
+          "nodev",
+          "relatime"
+        ],
+        "optionalFields": [],
+        "filesystem": "tmpfs",
+        "source": "tmpfs",
+        "superOptions": [
+          "rw"
+        ]
+      },
+      {
+        "mountId": 498,
+        "parentId": 412,
+        "majorMinor": "0:96",
+        "root": "/cloudos-wslg-mask-a71ce25165a031c4",
+        "mountPoint": "/run/dbus",
+        "mountOptions": [
+          "rw",
+          "nosuid",
+          "nodev",
+          "relatime"
+        ],
+        "optionalFields": [],
+        "filesystem": "tmpfs",
+        "source": "tmpfs",
+        "superOptions": [
+          "rw"
+        ]
+      },
+      {
+        "mountId": 499,
+        "parentId": 283,
+        "majorMinor": "0:96",
+        "root": "/cloudos-init-mask-a71ce25165a031c4",
+        "mountPoint": "/init",
+        "mountOptions": [
+          "ro",
+          "nosuid",
+          "nodev",
+          "noexec",
+          "relatime"
+        ],
+        "optionalFields": [],
+        "filesystem": "tmpfs",
+        "source": "tmpfs",
+        "superOptions": [
+          "rw"
+        ]
+      }
+    ],
+    "probes": {
+      "/mnt/wslg": {
+        "path": "/mnt/wslg",
+        "exists": true,
+        "type": "directory",
+        "mode": "0",
+        "deviceInode": "96:3",
+        "empty": true,
+        "executable": false
+      },
+      "/run/WSL": {
+        "path": "/run/WSL",
+        "exists": true,
+        "type": "directory",
+        "mode": "0",
+        "deviceInode": "96:3",
+        "empty": true,
+        "executable": false
+      },
+      "/init": {
+        "path": "/init",
+        "exists": true,
+        "type": "regular empty file",
+        "mode": "0",
+        "deviceInode": "96:4",
+        "empty": false,
+        "executable": false
+      },
+      "/run/xpra": {
+        "path": "/run/xpra",
+        "exists": true,
+        "type": "directory",
+        "mode": "700",
+        "deviceInode": "98:1",
+        "empty": false,
+        "executable": false
+      }
+    }
+  },
+  "sockets": {
+    "x11": {
+      "wslgDisplay0Visible": false,
+      "abstractWslgDisplay0": [],
+      "containedDisplayVisible": true
+    },
+    "xpra": [
+      "/run/xpra/DESKTOP-65BUITP-101"
+    ],
+    "tcpBinding": {
+      "host": "0.0.0.0",
+      "port": 14501,
+      "auth": "env"
+    },
+    "tcpListeners": [
+      "LISTEN 0      5             0.0.0.0:14501      0.0.0.0:*    users:((\"xpra\",pid=538,fd=4))            "
+    ]
+  },
+  "interop": "unregistered"
+}

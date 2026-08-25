@@ -28,10 +28,10 @@ test('shell typography never depends on a remote font CDN', () => {
   assert.match(globalCss, /--font-family:\s*'Inter',\s*'Segoe UI Variable',\s*'Segoe UI',\s*system-ui/);
 });
 
-test('password hints and controls expose the four-character policy consistently', () => {
-  assert.ok(setup.includes('minLength={4}'));
-  assert.ok(setup.includes('Mínimo de 4 caracteres'));
-  assert.ok(lock.includes('Mínimo de 4 caracteres'));
+test('password hints and controls expose the eight-character policy consistently', () => {
+  assert.ok(setup.includes('minLength={8}'));
+  assert.ok(setup.includes('Mínimo de 8 caracteres'));
+  assert.ok(lock.includes('Mínimo de 8 caracteres'));
   assert.equal(setup.includes('Use de 10 a 128'), false);
   assert.equal(lock.includes('Use de 10 a 128'), false);
 });

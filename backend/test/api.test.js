@@ -223,6 +223,7 @@ test('mutações administrativas do WSL rejeitam usuário sem papel admin', asyn
 });
 
 test('reset local exige sessão autenticada', async () => {
+  process.env.CLOUDOS_ALLOW_TEST_RESET = 'true';
   const app = createApp(0);
   const { server, port } = await startServer(app);
   try {
@@ -233,6 +234,7 @@ test('reset local exige sessão autenticada', async () => {
     }, JSON.stringify({ confirm: true }));
     assert.strictEqual(res.status, 401);
   } finally {
+    delete process.env.CLOUDOS_ALLOW_TEST_RESET;
     server.close();
   }
 });

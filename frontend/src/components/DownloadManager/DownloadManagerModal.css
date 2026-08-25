@@ -1,0 +1,265 @@
+/* ============================================
+   Download Manager Modal Styles
+   ============================================ */
+
+.dlm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100000;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.dlm-modal {
+  width: 520px;
+  max-width: 92vw;
+  max-height: 80vh;
+  background: rgba(26, 30, 42, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+  color: #f1f5f9;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: slideUp 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dlm-header {
+  padding: 16px 20px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.dlm-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dlm-header-icon {
+  font-size: 22px;
+}
+
+.dlm-title-wrap h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.dlm-title-wrap small {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.dlm-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dlm-btn-text {
+  background: transparent;
+  border: none;
+  color: #818cf8;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.dlm-btn-text:hover {
+  background: rgba(99, 102, 241, 0.15);
+}
+
+.dlm-close-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.dlm-close-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.dlm-list {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  min-height: 180px;
+  max-height: 420px;
+}
+
+.dlm-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  color: #94a3b8;
+  text-align: center;
+}
+
+.dlm-empty span {
+  font-size: 36px;
+  margin-bottom: 8px;
+}
+
+.dlm-empty p {
+  margin: 0 0 4px 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: #cbd5e1;
+}
+
+.dlm-empty small {
+  font-size: 11px;
+}
+
+.dlm-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  transition: all 0.15s ease;
+}
+
+.dlm-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.dlm-item-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.dlm-item-details {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dlm-item-name-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.dlm-item-name {
+  font-size: 13px;
+  color: #f8fafc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dlm-item-size {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-left: 8px;
+}
+
+.dlm-progress-bar {
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.dlm-progress-fill {
+  height: 100%;
+  background: #6366f1;
+  transition: width 0.12s linear;
+}
+
+.dlm-item-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.dlm-badge {
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.dlm-badge.completed {
+  background: rgba(34, 197, 94, 0.2);
+  color: #4ade80;
+}
+
+.dlm-badge.downloading {
+  background: rgba(99, 102, 241, 0.2);
+  color: #818cf8;
+}
+
+.dlm-badge.failed {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+}
+
+.dlm-item-time {
+  color: #64748b;
+}
+
+.dlm-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.dlm-action-btn {
+  padding: 4px 8px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
+  color: #cbd5e1;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.dlm-action-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}
+
+.dlm-action-btn.primary {
+  background: #6366f1;
+  color: #ffffff;
+  border: none;
+}
+
+.dlm-action-btn.primary:hover {
+  background: #4f46e5;
+}
+
+.dlm-action-btn.danger:hover {
+  background: rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+}

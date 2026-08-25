@@ -1,3 +1,4 @@
+process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 import test from 'node:test';
 import assert from 'node:assert';
 import http from 'http';
@@ -34,7 +35,9 @@ function makeRequest(port, options, body) {
 
 test('Setup e Auth: Teste completo de primeiro acesso e autenticação', async () => {
   resetLocalDatabase();
-  const app = createApp(0);
+  const app = createApp(0, {
+    environment: { NODE_ENV: 'test' }
+  });
   const { server, port } = await startServer(app);
 
   try {

@@ -6,6 +6,23 @@ import { startWslCopyTransaction } from './wslFileTransactions.js';
 export const filesRouter = express.Router();
 filesRouter.use(authenticateToken);
 
+function requirePrimaryAccount(req, res, next) {
+  if (req.user?.role !== 'admin') {
+    return res.status(403).json({
+      status: 'unavailable',
+      source: 'wsl',
+      error: {
+        code: 'FILES_SECONDARY_USER_BLOCKED',
+        message: 'Contas secundárias não possuem acesso ao sistema de arquivos WSL compartilhado.',
+      },
+      message: 'Contas secundárias não possuem acesso ao sistema de arquivos WSL compartilhado.'
+    });
+  }
+  next();
+}
+
+filesRouter.use(requirePrimaryAccount);
+
 const MAX_SEGMENTS = 64;
 const MAX_NAME = 255;
 const ACTOR_HEADER = 'x-cloudos-file-actor';

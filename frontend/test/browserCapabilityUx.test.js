@@ -18,14 +18,14 @@ test('browser does not offer impossible retry when host cannot exist in session'
   assert.match(browser,/\>\s*Fechar\s*</);
 });
 
-test('start menu marks and blocks Browser before creating process in no-host session',()=>{
+test('start menu marks and blocks Browser before the centralized launch in no-host session',()=>{
   assert.match(start,/appUnavailable\(app\)/);
-  assert.match(start,/requiresNativeHost/);
-  assert.match(start,/setCapabilityNotice/);
+  assert.match(start,/appLaunchUnavailableReason/);
+  assert.match(start,/setCapabilityNotice\(unavailableReason\)/);
   assert.match(start,/data-app-capability=\{unavailable \? 'requires-full'/);
-  const guard=start.indexOf('if (appUnavailable(app))');
-  const create=start.indexOf('const pid = createProcess');
-  assert.ok(guard >= 0 && create > guard);
+  const guard=start.indexOf('if (unavailableReason)');
+  const launch=start.indexOf('launchWorkflowApp(app.id', guard);
+  assert.ok(guard >= 0 && launch > guard);
 });
 
 test('browser still uses native bridge and never default Windows browser fallback',()=>{

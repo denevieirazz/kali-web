@@ -7,8 +7,8 @@ import { nativeHostBridge } from '../../services/nativeHostBridge';
 import kernel from '../../core/kernel';
 import './LockScreen.css';
 
-type PanelMode = 'login' | 'recovery' | 'recovery-code' | 'legacy-recovery';
-type OneTimeCodeOrigin = 'legacy-login' | 'recovery-reset' | 'legacy-recovery';
+type PanelMode = 'login' | 'recovery' | 'recovery-code' | 'legacy-recovery' | 'create-account';
+type OneTimeCodeOrigin = 'legacy-login' | 'recovery-reset' | 'legacy-recovery' | 'account-created';
 
 export default function LockScreen() {
   const { bootPhase, unlock } = useSystem();
@@ -20,6 +20,7 @@ export default function LockScreen() {
     legacyAdminAvailable,
     recoveryStatusMessage,
     login,
+    createAccount,
     recoverAccount,
     recoverLegacyAccount,
     checkSetupStatus,
@@ -104,6 +105,16 @@ export default function LockScreen() {
     setMode('recovery');
   }
 
+  function switchToCreateAccount() {
+    resetMessages();
+    setUsername('');
+    setDisplayName('');
+    setPassword('');
+    setConfirmPassword('');
+    setRecoveredUsername(null);
+    setMode('create-account');
+  }
+
   function switchToLogin() {
     resetMessages();
     setPassword('');
@@ -113,6 +124,30 @@ export default function LockScreen() {
     setRecoveredUsername(null);
     if (recoveryFileRef.current) recoveryFileRef.current.value = '';
     setMode('login');
+  }
+
+  async function handleCreateAccount(event: React.FormEvent) {
+    event.preventDefault();
+    resetMessages();
+    const usernameError = validateUsername(username);
+    if (usernameError) return setError(usernameError);
+    const passwordError = validateNewPassword(password, confirmPassword);
+    if (passwordError) return setError(passwordError);
+    if (displayName) {
+      const displayNameError = validateDisplayName(displayName);
+      if (displayNameError) return setError(displayNameError);
+    }
+    setLoading(true);
+    const result = await createAccount(username.trim(), displayName.trim() || username.trim(), password, confirmPassword);
+    setLoading(false);
+    if (!result.success || !result.recoveryCode) {
+      return setError(result.message || 'Não foi possível criar a conta.');
+    }
+    setRotatedCode(result.recoveryCode);
+    setRecoveredUsername(result.username || username.trim());
+    setOneTimeCodeOrigin('account-created');
+    setRecoverySaved(false);
+    setMode('recovery-code');
   }
 
   async function startLegacyRecovery() {
@@ -137,7 +172,7 @@ export default function LockScreen() {
     event.preventDefault();
     resetMessages();
     const usernameError = validateUsername(username);
-    if (usernameError || !password) return setError(usernameError || 'Informe a senha.');
+    if (usernameError) return setError(usernameError);
     setLoading(true);
     const result = await login(username.trim(), password);
     setLoading(false);
@@ -213,13 +248,22 @@ export default function LockScreen() {
 
   function finishRecovery() {
     if (!recoverySaved) return;
-    const finalUsername = recoveredUsername || useUserStore.getState().currentUser?.username;
-    if (finalUsername) kernel.sysCreateUserHome(finalUsername);
+    const finalUsername = recoveredUsername || username || useUserStore.getState().currentUser?.username;
     confirmRecoveryCodeSaved();
     setRotatedCode(null);
     setRecoveredUsername(null);
     setRecoverySaved(false);
     setCopiedCode(false);
+
+    if (oneTimeCodeOrigin === 'account-created') {
+      switchToLogin();
+      if (finalUsername) setUsername(finalUsername);
+      setPassword('');
+      setSuccessMsg('Conta criada com sucesso. Digite sua senha para entrar.');
+      return;
+    }
+
+    if (finalUsername) kernel.sysCreateUserHome(finalUsername);
     setSuccessMsg('Conta recuperada. Abrindo o CloudOS…');
     setIsUnlocking(true);
     window.setTimeout(() => unlock(), 650);
@@ -262,8 +306,23 @@ export default function LockScreen() {
     void checkRecoveryStatus().finally(() => { recoveryCheckInFlight.current = false; });
   }
 
-  const title = mode === 'recovery' ? 'Recuperar conta' : mode === 'legacy-recovery' ? 'Recuperar conta antiga' : mode === 'recovery-code' ? 'Novo código de recuperação' : 'Bem-vindo ao CloudOS';
-  const subtitle = mode === 'login' ? 'Entre com sua conta local' : mode === 'recovery' || mode === 'legacy-recovery' ? 'Redefina a conta com segurança' : 'Salve antes de continuar';
+  const title = mode === 'recovery'
+    ? 'Recuperar conta'
+    : mode === 'legacy-recovery'
+    ? 'Recuperar conta antiga'
+    : mode === 'recovery-code'
+    ? (oneTimeCodeOrigin === 'account-created' ? 'Código de recuperação' : 'Novo código de recuperação')
+    : mode === 'create-account'
+    ? 'Criar nova conta'
+    : 'Bem-vindo ao CloudOS';
+
+  const subtitle = mode === 'login'
+    ? 'Entre com sua conta local'
+    : mode === 'create-account'
+    ? 'Crie uma conta adicional neste computador'
+    : mode === 'recovery' || mode === 'legacy-recovery'
+    ? 'Redefina a conta com segurança'
+    : 'Salve antes de continuar';
 
   return (
     <div className={`cloudos-lock-screen ${isUnlocking ? 'unlocking' : ''}`} onClick={() => !showPanel && setShowPanel(true)}>
@@ -283,12 +342,27 @@ export default function LockScreen() {
             <FormField id="login-password" label="Senha" type="password" value={password} onChange={setPassword} autoComplete="current-password" />
             {error && <Alert tone="error">{error}</Alert>}{successMsg && <Alert tone="success">{successMsg}</Alert>}
             <button type="submit" className="btn-primary-gradient" disabled={loading}>{loading ? 'Entrando…' : 'Entrar'}</button>
+            <button type="button" className="btn-recovery-link" onClick={switchToCreateAccount}>Criar outra conta</button>
             <button type="button" className="btn-recovery-link" disabled={recoveryAvailable === false} onClick={switchToRecovery}>
               {recoveryAvailable === null && !recoveryStatusMessage ? 'Verificando recuperação…' : 'Esqueci minha senha'}
             </button>
             {recoveryAvailable === false && !legacyAdminAvailable && <div className="lock-recovery-unavailable" role="status">Esta conta antiga ainda não possui um código. Entre uma vez com a senha e salve o código que será mostrado antes de acessar o desktop.</div>}
             {recoveryAvailable === false && legacyAdminAvailable && (nativeHostBridge.available ? <button type="button" className="btn-recovery-link" onClick={startLegacyRecovery} disabled={loading}>Recuperar conta antiga neste computador</button> : <div className="lock-recovery-unavailable" role="status">Esta conta antiga ainda não possui um código. Abra o aplicativo nativo do CloudOS neste computador para recuperá-la.</div>)}
             {recoveryStatusMessage && <div className="lock-recovery-unavailable error" role="alert"><span>Não foi possível verificar se a recuperação está disponível.</span><button type="button" onClick={refreshRecoveryStatus}>Tentar novamente</button></div>}
+          </form>}
+
+          {setupStatus === 'complete' && mode === 'create-account' && <form onSubmit={handleCreateAccount} className="card-form" noValidate>
+            <FormField id="create-username" label="Nome de usuário" value={username} onChange={setUsername} autoComplete="username" />
+            <FormField id="create-display-name" label="Nome de exibição (opcional)" value={displayName} onChange={setDisplayName} autoComplete="name" />
+            <div className="recovery-password-grid">
+              <FormField id="create-password" label="Senha" type="password" value={password} onChange={setPassword} autoComplete="new-password" />
+              <FormField id="create-confirm" label="Confirmar senha" type="password" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" />
+            </div>
+            <small className="recovery-password-hint">Mínimo de 8 caracteres. Espaços e frases-senha são aceitos.</small>
+            {error && <Alert tone="error">{error}</Alert>}
+            {successMsg && <Alert tone="success">{successMsg}</Alert>}
+            <button type="submit" className="btn-primary-gradient" disabled={loading}>{loading ? 'Criando conta…' : 'Criar conta'}</button>
+            <button type="button" className="btn-recovery-link" onClick={switchToLogin}>Voltar para entrar</button>
           </form>}
 
           {setupStatus === 'complete' && mode === 'recovery' && <form onSubmit={handleRecovery} className="card-form recovery-form" noValidate>
@@ -299,7 +373,7 @@ export default function LockScreen() {
             <FormField id="recovery-username" label="Novo nome de usuário (opcional)" value={username} onChange={setUsername} autoComplete="username" />
             <FormField id="recovery-display-name" label="Nome de exibição (opcional)" value={displayName} onChange={setDisplayName} autoComplete="name" />
             <div className="recovery-password-grid"><FormField id="recovery-password" label="Nova senha" type="password" value={password} onChange={setPassword} autoComplete="new-password" /><FormField id="recovery-confirm" label="Confirmar senha" type="password" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" /></div>
-            <small className="recovery-password-hint">Mínimo de 4 caracteres. Espaços e frases-senha são aceitos.</small>
+            <small className="recovery-password-hint">Mínimo de 8 caracteres. Espaços e frases-senha são aceitos.</small>
             {error && <Alert tone="error">{error}</Alert>}
             <button type="submit" className="btn-primary-gradient" disabled={loading}>{loading ? 'Recuperando…' : 'Recuperar conta'}</button>
             <button type="button" className="btn-recovery-link" onClick={switchToLogin}>Voltar para entrar</button>
@@ -310,19 +384,19 @@ export default function LockScreen() {
             <FormField id="legacy-username" label="Novo nome de usuário (opcional)" value={username} onChange={setUsername} autoComplete="username" />
             <FormField id="legacy-display-name" label="Nome de exibição (opcional)" value={displayName} onChange={setDisplayName} autoComplete="name" />
             <div className="recovery-password-grid"><FormField id="legacy-password" label="Nova senha" type="password" value={password} onChange={setPassword} autoComplete="new-password" /><FormField id="legacy-confirm" label="Confirmar senha" type="password" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" /></div>
-            <small className="recovery-password-hint">Mínimo de 4 caracteres. Espaços e frases-senha são aceitos.</small>
+            <small className="recovery-password-hint">Mínimo de 8 caracteres. Espaços e frases-senha são aceitos.</small>
             {error && <Alert tone="error">{error}</Alert>}
             <button type="submit" className="btn-primary-gradient" disabled={loading}>{loading ? 'Recuperando…' : 'Definir nova senha e recuperar'}</button>
             <button type="button" className="btn-recovery-link" onClick={switchToLogin}>Voltar para entrar</button>
           </form>}
 
           {mode === 'recovery-code' && <div className="recovery-result">
-            <p>{oneTimeCodeOrigin === 'legacy-login' || oneTimeCodeOrigin === 'legacy-recovery' ? 'A recuperação desta conta antiga foi ativada. Este código será mostrado somente agora.' : 'O código antigo foi invalidado. Este novo código será mostrado somente agora.'}</p>
+            <p>{oneTimeCodeOrigin === 'account-created' ? 'Guarde o código de recuperação gerado para esta nova conta. Ele será mostrado somente agora.' : oneTimeCodeOrigin === 'legacy-login' || oneTimeCodeOrigin === 'legacy-recovery' ? 'A recuperação desta conta antiga foi ativada. Este código será mostrado somente agora.' : 'O código antigo foi invalidado. Este novo código será mostrado somente agora.'}</p>
             <div className="lock-recovery-code"><code>{rotatedCode}</code></div>
             <div className="lock-recovery-actions"><button type="button" className="btn-recovery-link" onClick={() => void runRotatedCodeAction('copy')}>{copiedCode ? 'Copiado!' : 'Copiar'}</button><button type="button" className="btn-recovery-link" onClick={() => void runRotatedCodeAction('save')}>Salvar .txt</button><button type="button" className="btn-recovery-link" onClick={() => void runRotatedCodeAction('print')}>Imprimir</button></div>
             <label><input type="checkbox" checked={recoverySaved} onChange={(event) => setRecoverySaved(event.target.checked)} /><span><strong>Confirmei que guardei o novo código</strong><small>Ele não será salvo automaticamente pelo CloudOS.</small></span></label>
             {error && <Alert tone="error">{error}</Alert>}
-            <button type="button" className="btn-primary-gradient" disabled={!recoverySaved} onClick={finishRecovery}>Entrar no CloudOS</button>
+            <button type="button" className="btn-primary-gradient" disabled={!recoverySaved} onClick={finishRecovery}>{oneTimeCodeOrigin === 'account-created' ? 'Continuar para o login' : 'Entrar no CloudOS'}</button>
           </div>}
 
           {isDevEnvironment && mode === 'login' && <div className="advanced-options-container"><button type="button" className="btn-toggle-advanced" onClick={() => setShowAdvanced(!showAdvanced)}>Opções avançadas</button>{showAdvanced && <div className="advanced-panel"><button type="button" className="btn-dev-reset" onClick={handleResetDev} disabled={loading}>Redefinir instalação local (Dev)</button></div>}</div>}

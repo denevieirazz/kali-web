@@ -10,6 +10,7 @@ import type { Process, ProcessPriority, Signal, WindowState, FileSystemNode, Sys
 import { defaultNodes, makeFile, makeDir } from './defaultFileSystem';
 import { defaultRegistry, type RegistryEntry, type RegistryValue } from './defaultRegistry';
 import { opfsDriver, type OPFSDriver } from './opfsDriver';
+import { getUserStorageKey } from '../services/userScope.js';
 
 import { Lexer } from './osl/lexer';
 import { Parser } from './osl/parser';
@@ -334,10 +335,10 @@ class Kernel {
       this._resources.usedMemory += 48;
     }
 
-    // Check OOBE flag — if SetupInProgress is set, go to setup wizard first
-    const setupInProgress = this.regGetValue('HKEY_LOCAL_MACHINE\\SYSTEM\\Setup\\SetupInProgress');
-    if (setupInProgress === 1) {
-      this.log('INFO', 'Kernel', 'OOBE detected — launching Setup Wizard');
+    // Check OOBE flag — if First Boot OOBE is not completed, go to setup wizard first
+    const oobeCompleted = typeof window !== 'undefined' && localStorage.getItem('cloudos-oobe-completed') === 'true';
+    if (!oobeCompleted) {
+      this.log('INFO', 'Kernel', 'First Boot OOBE detected — launching CloudOS Setup Wizard');
       this.bootPhase = 'OOBE';
     } else {
       // Normal boot — hand off to Winlogon (LockScreen handles auth in React)
@@ -353,7 +354,8 @@ class Kernel {
   private _initSystemState() {
     if (typeof window === 'undefined') return;
     let loaded = false;
-    const saved = localStorage.getItem('obsidianos-system-v2');
+    const sysKey = getUserStorageKey('obsidianos-system-v2', this._user);
+    const saved = localStorage.getItem(sysKey);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -363,7 +365,7 @@ class Kernel {
         loaded = true;
       } catch (e) {
         console.error('Failed to parse obsidianos-system-v2', e);
-        localStorage.removeItem('obsidianos-system-v2');
+        localStorage.removeItem(sysKey);
       }
     }
 
@@ -408,7 +410,8 @@ class Kernel {
     }
 
     // Migrate or load
-    const savedFsV2 = localStorage.getItem('obsidianos-filesystem-v2');
+    const fsKey = getUserStorageKey('obsidianos-filesystem-v2', this._user);
+    const savedFsV2 = localStorage.getItem(fsKey);
     if (savedFsV2) {
       try {
         const parsed: Record<string, FileSystemNode> = JSON.parse(savedFsV2);
@@ -421,7 +424,7 @@ class Kernel {
         );
         if (hasLegacyExe) {
           console.info('[Kernel] Detected legacy .exe filesystem — migrating to .obx');
-          localStorage.removeItem('obsidianos-filesystem-v2');
+          localStorage.removeItem(fsKey);
           this._filesystem = new Map(Object.entries(defaultNodes));
           this._persistFileSystem();
           return;
@@ -462,7 +465,8 @@ class Kernel {
     let loaded = false;
 
     // Try to load ObsidianOS V2 registry first
-    const savedRegV2 = localStorage.getItem('obsidianos-registry-v2');
+    const regKey = getUserStorageKey('obsidianos-registry-v2', this._user);
+    const savedRegV2 = localStorage.getItem(regKey);
     if (savedRegV2) {
       try {
         this._registry = JSON.parse(savedRegV2);
@@ -494,10 +498,7 @@ class Kernel {
     }
 
     // ── Setup flag correction ──────────────────────────────────────────────
-    // If setup was already completed (localStorage flag), ensure the registry
-    // reflects that — even if the saved registry still has SetupInProgress = 1
-    // (e.g. from a previous session before this fix was applied).
-    if (localStorage.getItem('obsidianos-setup-completed') === 'true') {
+    if (localStorage.getItem('cloudos-oobe-completed') === 'true') {
       const setupKey = 'HKEY_LOCAL_MACHINE\\SYSTEM\\Setup';
       if (!this._registry[setupKey]) this._registry[setupKey] = {};
       this._registry[setupKey]['SetupInProgress'] = { type: 'REG_DWORD', value: 0 };
@@ -624,9 +625,8 @@ class Kernel {
       'SHELL_INIT': 'loading',
       'OOBE': 'setup',
       'WINLOGON': 'login',
+      'DESKTOP_READY': 'desktop',
       'BOOT_FAILURE': 'bios'
-      // NOTE: DESKTOP_READY is intentionally omitted — the transition to 'desktop'
-      // is handled by LockScreen only after the backend authenticates the user.
     };
     try {
       this.emit('system:bootPhase', storePhaseMap[phase] || 'loading');
@@ -663,7 +663,7 @@ class Kernel {
     if (typeof window === 'undefined') return;
     this._user = this._sanitizeUserProfile(this._user);
     const state = { user: this._user, theme: this._theme, hardware: this._hardware };
-    localStorage.setItem('obsidianos-system-v2', JSON.stringify(state));
+    localStorage.setItem(getUserStorageKey('obsidianos-system-v2', this._user), JSON.stringify(state));
     this._emitSystemSnapshot();
   }
 
@@ -1782,7 +1782,7 @@ class Kernel {
     }
     if (typeof window === 'undefined') return;
     const obj = Object.fromEntries(this._filesystem);
-    localStorage.setItem('obsidianos-filesystem-v2', JSON.stringify(obj));
+    localStorage.setItem(getUserStorageKey('obsidianos-filesystem-v2', this._user), JSON.stringify(obj));
     this.emit('fs:snapshot', obj);
   }
 
@@ -1972,7 +1972,7 @@ class Kernel {
 
   private _persistRegistry() {
     if (typeof window === 'undefined') return;
-    localStorage.setItem('obsidianos-registry-v2', JSON.stringify(this._registry));
+    localStorage.setItem(getUserStorageKey('obsidianos-registry-v2', this._user), JSON.stringify(this._registry));
     this.emit('registry:snapshot', this._registry);
   }
 

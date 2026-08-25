@@ -1,19 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAppRegistry } from '../../core/appRegistry';
-import { useProcessManager } from '../../stores/processManager';
-import { useWindowManager } from '../../stores/windowManager';
-import { useNativeSessions } from '../../hooks/useNativeSessions';
-import { nativeSessionForLaunch } from '../../services/nativeWindowContract.js';
 import {
+  refreshUnifiedAppRegistry,
   systemHubClient,
   type DistroCatalogItem,
   type HostCapabilities,
   type NativeApp,
-  type NativeLaunchResult,
   type SystemOperation,
   type WslDistribution
 } from '../../services/systemHubClient';
-import NativeAppDock from './NativeAppDock';
+import { launchWorkflowApp } from '../../services/workflowLaunch';
 import SystemReadiness from './SystemReadiness';
 import './InstallLinux.css';
 
@@ -40,17 +36,6 @@ export default function InstallLinux() {
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: 'info' | 'success' | 'error'; text: string } | null>(null);
-  const [selectedNativeSessionId, setSelectedNativeSessionId] = useState<string | null>(null);
-  const [pendingNativeLaunch, setPendingNativeLaunch] = useState<{
-    appName: string;
-    launch: NativeLaunchResult;
-    startedAt: number;
-  } | null>(null);
-
-  const createProcess = useProcessManager((state) => state.createProcess);
-  const openWindow = useWindowManager((state) => state.openWindow);
-  const nativeSessions = useNativeSessions();
-
   const refresh = useCallback(async (forceApps = false) => {
     setLoading(true);
     const results = await Promise.allSettled([
@@ -58,7 +43,7 @@ export default function InstallLinux() {
       systemHubClient.distributions(),
       systemHubClient.catalog(),
       systemHubClient.operations(),
-      systemHubClient.apps(forceApps)
+      refreshUnifiedAppRegistry(forceApps)
     ]);
 
     if (results[0].status === 'fulfilled') setCapabilities(results[0].value);
@@ -100,36 +85,6 @@ export default function InstallLinux() {
     return () => window.clearInterval(timer);
   }, [operations, refresh]);
 
-  useEffect(() => {
-    setSelectedNativeSessionId((current) => {
-      if (current && nativeSessions.some((session) => session.sessionId === current)) return current;
-      return nativeSessions[0]?.sessionId || null;
-    });
-  }, [nativeSessions]);
-
-  useEffect(() => {
-    if (!pendingNativeLaunch) return;
-    const session = nativeSessionForLaunch(nativeSessions, pendingNativeLaunch.launch);
-    if (session) {
-      setSelectedNativeSessionId(session.sessionId);
-      setPendingNativeLaunch(null);
-      setNotice({ tone: 'success', text: `${pendingNativeLaunch.appName} foi identificado e será fixado no Hub.` });
-      return;
-    }
-    const remaining = Math.max(0, 10_000 - (Date.now() - pendingNativeLaunch.startedAt));
-    const timer = window.setTimeout(() => {
-      setPendingNativeLaunch((current) => {
-        if (!current || current.startedAt !== pendingNativeLaunch.startedAt) return current;
-        setNotice({
-          tone: 'info',
-          text: `${current.appName} foi aberto, mas o Windows não expôs uma janela que o Hub possa fixar. Ele continuará disponível externamente.`
-        });
-        return null;
-      });
-    }, remaining);
-    return () => window.clearTimeout(timer);
-  }, [nativeSessions, pendingNativeLaunch]);
-
   const runAction = useCallback(async (key: string, action: () => Promise<unknown>, successMessage: string, refreshAfter = true) => {
     setBusyAction(key);
     setNotice(null);
@@ -155,56 +110,49 @@ export default function InstallLinux() {
   };
 
   const launchTerminal = useCallback((profile: 'wsl' | 'powershell', distribution?: string) => {
-    const app = useAppRegistry.getState().apps['cloudos-terminal'];
-    if (!app) {
-      setNotice({ tone: 'error', text: 'O Terminal CloudOS ainda não foi registrado pelo kernel.' });
-      return;
-    }
     const title = profile === 'wsl' ? `Terminal — ${distribution || 'WSL'}` : 'Terminal — PowerShell';
-    const pid = createProcess('cloudos-terminal', title, app.icon);
-    openWindow({
-      title,
-      icon: app.icon,
-      appId: 'cloudos-terminal',
-      width: app.defaultWidth,
-      height: app.defaultHeight,
-      minWidth: app.minWidth,
-      minHeight: app.minHeight,
-      isResizable: app.isResizable,
-      processId: pid,
-      params: { profile, distribution }
-    });
-  }, [createProcess, openWindow]);
+    try {
+      launchWorkflowApp('cloudos-terminal', { profile, distribution, title });
+    } catch (error) {
+      setNotice({ tone: 'error', text: error instanceof Error ? error.message : 'O Terminal CloudOS ainda não foi registrado pelo kernel.' });
+    }
+  }, []);
 
   const filteredApps = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase('pt-BR');
     if (!normalized) return apps;
-    return apps.filter((app) => `${app.name} ${app.source} ${app.distribution || ''}`.toLocaleLowerCase('pt-BR').includes(normalized));
+    return apps.filter((app) => [
+      app.name,
+      app.genericName,
+      app.comment,
+      app.source,
+      app.distribution,
+      ...(app.keywords || []),
+      ...(app.categories || []),
+      ...(app.mimeTypes || []),
+    ].filter(Boolean).join(' ').toLocaleLowerCase('pt-BR').includes(normalized));
   }, [apps, query]);
 
-  const launchNativeApp = useCallback(async (app: NativeApp) => {
+  const launchNativeApp = useCallback((app: NativeApp) => {
     const key = `app-${app.id}`;
     setBusyAction(key);
     setNotice(null);
     try {
-      const launched = await systemHubClient.launchApp(app.id);
-      if (launched.managed) {
-        setPendingNativeLaunch({ appName: app.name, launch: launched, startedAt: Date.now() });
-        setNotice({ tone: 'info', text: `${app.name} foi iniciado. Aguardando a janela para fixá-la no Hub…` });
-      } else if (capabilities?.integration.managedNativeWindows && launched.managed === false) {
-        setNotice({
-          tone: 'info',
-          text: `${app.name} foi aberto. ${launched.managementReason || 'O Windows entregou esta janela a um broker compartilhado, então ela permanece no fallback nativo.'}`
-        });
-      } else {
-        setNotice({ tone: 'success', text: `${app.name} foi aberto em uma janela nativa externa.` });
-      }
+      const definition = useAppRegistry.getState().getApp(app.id);
+      if (!definition) throw new Error('O aplicativo ainda não foi sincronizado com o registro do CloudOS. Atualize o inventário.');
+      launchWorkflowApp(definition.id);
+      setNotice({
+        tone: 'success',
+        text: definition.catalogSource === 'linux'
+          ? `${app.name} está abrindo na superfície Xpra contida do CloudOS.`
+          : `${app.name} está abrindo na janela gerenciada do CloudOS.`
+      });
     } catch (error) {
-      setNotice({ tone: 'error', text: error instanceof Error ? error.message : 'O aplicativo não pôde ser aberto.' });
+      setNotice({ tone: 'error', text: error instanceof Error ? error.message : 'O aplicativo não pôde ser aberto de forma contida.' });
     } finally {
       setBusyAction(null);
     }
-  }, [capabilities?.integration.managedNativeWindows]);
+  }, []);
 
   const installedNames = useMemo(() => new Set(distros.map((distro) => distro.name.toLowerCase())), [distros]);
   const availableCatalog = catalog.filter((item) => !installedNames.has(item.id.toLowerCase()));
@@ -228,7 +176,7 @@ export default function InstallLinux() {
           <span className={`status-dot ${capabilities?.integration.managedNativeWindows ? 'ready' : 'attention'}`} />
           <div>
             <strong>{capabilities?.integration.managedNativeWindows ? 'Host nativo ativo' : 'Modo web local'}</strong>
-            <small>{capabilities?.integration.managedNativeWindows ? 'Janelas gerenciadas' : 'Apps em janelas nativas'}</small>
+            <small>{capabilities?.integration.managedNativeWindows ? 'Janelas gerenciadas' : 'Windows bloqueado sem containment'}</small>
           </div>
         </div>
       </aside>
@@ -238,7 +186,7 @@ export default function InstallLinux() {
           <div>
             <span className="eyebrow">CONTROLE DO HOST</span>
             <h1>{section === 'readiness' ? 'Prontidão do sistema' : section === 'overview' ? 'Seu ambiente híbrido' : section === 'distros' ? 'Distribuições Linux' : section === 'apps' ? 'Aplicativos do computador' : 'Operações do sistema'}</h1>
-            <p>{section === 'readiness' ? 'Evidências reais para evoluir o CloudOS sem alterar o shell do Windows antes da hora.' : section === 'overview' ? 'Windows, WSL e WSLg coordenados a partir do CloudOS.' : section === 'distros' ? 'Instale, inicie e configure sistemas WSL sem sair desta central.' : section === 'apps' ? 'Um catálogo seguro para programas Windows e aplicativos gráficos Linux.' : 'Instalações e conversões continuam mesmo quando esta janela é fechada.'}</p>
+            <p>{section === 'readiness' ? 'Evidências reais para evoluir o CloudOS sem alterar o shell do Windows antes da hora.' : section === 'overview' ? 'Windows gerenciado e Linux Xpra coordenados a partir do CloudOS.' : section === 'distros' ? 'Instale, inicie e configure sistemas WSL sem sair desta central.' : section === 'apps' ? 'Um registro único para programas Windows gerenciados e aplicativos Linux contidos.' : 'Instalações e conversões continuam mesmo quando esta janela é fechada.'}</p>
           </div>
           {section !== 'readiness' && <button className="secondary-button" onClick={() => refresh(true)} disabled={loading}>{loading ? 'Lendo host…' : 'Atualizar inventário'}</button>}
         </header>
@@ -252,8 +200,8 @@ export default function InstallLinux() {
             <div className="capability-grid">
               <CapabilityCard label="Windows host" value={capabilities?.host.windows ? `${capabilities.host.release} · ${capabilities.host.architecture}` : 'Não detectado'} tone={capabilityTone(Boolean(capabilities?.host.windows))} detail={capabilities?.host.hostname || 'Aguardando agente local'} />
               <CapabilityCard label="WSL" value={capabilities?.wsl.operational ? `Versão ${capabilities.wsl.wslVersion || 'instalada'}` : capabilities?.wsl.installed ? 'Requer atenção' : 'Não instalado'} tone={capabilityTone(Boolean(capabilities?.wsl.operational))} detail={capabilities?.wsl.error || `${distros.length} distribuição(ões) registrada(s)`} />
-              <CapabilityCard label="WSLg" value={capabilities?.integration.linuxGuiApps ? `Versão ${capabilities.wsl.wslgVersion || 'ativa'}` : 'Indisponível'} tone={capabilityTone(Boolean(capabilities?.integration.linuxGuiApps))} detail="Aplicativos gráficos Linux no desktop Windows" />
-              <CapabilityCard label="Integração de janelas" value={capabilities?.integration.managedNativeWindows ? 'Gerenciada pelo host' : 'Janela nativa'} tone={capabilities?.integration.managedNativeWindows ? 'ready' : 'neutral'} detail={capabilities?.integration.managedNativeWindows ? 'Foco, estado e fechamento integrados' : 'Abra pelo aplicativo desktop CloudOS'} />
+              <CapabilityCard label="Linux GUI" value={apps.some(app => (app.source === 'linux' || app.source === 'wsl') && app.windowMode === 'xpra-contained') ? 'Xpra contido' : 'Indisponível'} tone={capabilityTone(apps.some(app => (app.source === 'linux' || app.source === 'wsl') && app.windowMode === 'xpra-contained'))} detail="Renderização exclusivamente dentro da janela CloudOS" />
+              <CapabilityCard label="Integração de janelas" value={capabilities?.integration.managedNativeWindows ? 'Gerenciada pelo host' : 'Windows bloqueado'} tone={capabilities?.integration.managedNativeWindows ? 'ready' : 'neutral'} detail={capabilities?.integration.managedNativeWindows ? 'Foco, estado e fechamento integrados' : 'Nenhuma janela Windows externa será iniciada'} />
             </div>
 
             <div className="hub-split">
@@ -266,17 +214,17 @@ export default function InstallLinux() {
               </article>
               <article className="hub-panel readiness-panel">
                 <span className="panel-kicker">PRONTIDÃO</span>
-                <h2>{capabilities?.integration.linuxGuiApps ? 'Ambiente gráfico pronto' : 'Configuração necessária'}</h2>
+                <h2>{apps.some(app => (app.source === 'linux' || app.source === 'wsl') && app.windowMode === 'xpra-contained') ? 'Ambiente gráfico contido pronto' : 'Configuração necessária'}</h2>
                 <ul>
                   <li className={capabilities?.wsl.operational ? 'ok' : ''}>WSL operacional</li>
                   <li className={distros.some((distro) => distro.version === 2) ? 'ok' : ''}>Distribuição em WSL 2</li>
-                  <li className={capabilities?.integration.linuxGuiApps ? 'ok' : ''}>WSLg detectado</li>
+                  <li className={apps.some(app => (app.source === 'linux' || app.source === 'wsl') && app.windowMode === 'xpra-contained') ? 'ok' : ''}>Xpra contido detectado</li>
                 </ul>
               </article>
             </div>
 
             {!capabilities?.integration.managedNativeWindows && (
-              <article className="architecture-note"><span>Camada nativa</span><div><strong>O controle já é real; o encaixe visual vem com o host WebView2.</strong><p>Neste modo web, o CloudOS instala, descobre e inicia os programas, mas o Windows/WSLg desenha as janelas fora do DOM. Um navegador não pode incorporar HWNDs com segurança.</p></div></article>
+              <article className="architecture-note"><span>Containment</span><div><strong>Aplicativos Windows ficam indisponíveis sem o Host WebView2 gerenciado.</strong><p>Aplicativos Linux continuam usando somente Xpra dentro do CloudOS. Não existe fallback para WSLg, RAIL ou janela externa.</p></div></article>
             )}
           </section>
         )}
@@ -306,30 +254,33 @@ export default function InstallLinux() {
               <label>Distribuição<select value={selectedDistro} onChange={(event) => setSelectedDistro(event.target.value)} disabled={!availableCatalog.length}>{availableCatalog.length ? availableCatalog.map((item) => <option key={item.id} value={item.id}>{item.name}</option>) : <option value="">Nenhuma opção disponível</option>}</select></label>
               <label className="toggle-row"><input type="checkbox" checked={webDownload} onChange={(event) => setWebDownload(event.target.checked)} /><span><strong>Download direto</strong><small>Usa a fonte web quando a Microsoft Store estiver bloqueada.</small></span></label>
               <button className="primary-button wide" disabled={!selectedDistro || Boolean(busyAction)} onClick={installSelected}>{busyAction?.startsWith('install-') ? 'Preparando…' : 'Instalar distribuição'}</button>
-              <button className="secondary-button wide" disabled={Boolean(busyAction)} onClick={() => { runAction('update-wsl', systemHubClient.updateWsl, 'Atualização do WSL iniciada.'); setSection('operations'); }}>Atualizar WSL e WSLg</button>
+              <button className="secondary-button wide" disabled={Boolean(busyAction)} onClick={() => { runAction('update-wsl', systemHubClient.updateWsl, 'Atualização do WSL iniciada.'); setSection('operations'); }}>Atualizar WSL</button>
               <div className="install-footnote"><strong>Primeiro acesso</strong><span>Depois da instalação, abra o Terminal para criar o usuário Linux solicitado pela distribuição.</span></div>
             </aside>
           </section>
         )}
 
         <section className="hub-section native-apps-section" hidden={section !== 'apps'}>
-            <div className="app-toolbar"><div className="hub-search"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Pesquisar Windows, Linux ou distribuição…" /></div><div className="catalog-legend"><span><i className="windows" />Windows</span><span><i className="linux" />Linux/WSLg</span></div></div>
-            {!capabilities?.integration.managedNativeWindows && <div className="inline-note">Abra o CloudOS Desktop para prender aplicativos dentro do Hub. No navegador comum, eles continuam em janelas externas seguras.</div>}
+            <div className="app-toolbar"><div className="hub-search"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Pesquisar nome, categoria, MIME ou distribuição…" /></div><div className="catalog-legend"><span><i className="windows" />Windows gerenciado</span><span><i className="linux" />Linux/Xpra</span></div></div>
+            {!capabilities?.integration.managedNativeWindows && <div className="inline-note">Aplicativos Windows estão bloqueados nesta sessão. Aplicativos Linux permanecem disponíveis somente pela superfície Xpra contida.</div>}
             <div className="native-apps-layout">
               <div className="native-app-catalog">
                 <div className="native-app-grid">
-                  {filteredApps.map((app) => <button className="native-app-card" key={app.id} disabled={busyAction === `app-${app.id}`} onClick={() => launchNativeApp(app)}><span className={`native-app-icon ${app.source}`}>{app.icon || (app.source === 'wsl' ? 'L' : 'W')}</span><span className="native-app-copy"><strong>{app.name}</strong><small>{app.source === 'wsl' ? app.distribution || 'Linux / WSLg' : 'Windows'} <i className={app.windowMode === 'native-managed' ? 'managed' : 'external'}>{app.windowMode === 'native-managed' ? 'Fixável' : 'Externo'}</i></small></span><span className="launch-arrow">↗</span></button>)}
+                  {filteredApps.map((app) => {
+                    const linux = app.source === 'linux' || app.source === 'wsl';
+                    const contained = app.windowMode === 'xpra-contained' || app.windowMode === 'native-managed';
+                    const fallbackIcon = linux ? 'L' : 'W';
+                    const icon = app.iconUrl || ([...(app.icon || '')].length <= 4 ? app.icon : fallbackIcon);
+                    return <button className="native-app-card" key={app.id} disabled={busyAction === `app-${app.id}` || app.launchable === false || !contained} onClick={() => launchNativeApp(app)}><span className={`native-app-icon ${linux ? 'wsl' : 'windows'}`}>{typeof icon === 'string' && (icon.startsWith('/') || icon.startsWith('http')) ? <img src={icon} alt="" style={{ width: 28, height: 28, objectFit: 'contain' }} onError={(event) => { const parent = event.currentTarget.parentElement; if (parent) parent.textContent = fallbackIcon; }} /> : icon || fallbackIcon}</span><span className="native-app-copy"><strong>{app.name}</strong><small>{linux ? app.distribution || 'Linux' : 'Windows'} <i className={contained ? 'managed' : 'external'}>{app.windowMode === 'xpra-contained' ? 'Xpra contido' : app.windowMode === 'native-managed' ? 'CloudOS gerenciado' : 'Indisponível'}</i>{app.categories?.[0] ? ` · ${app.categories[0]}` : ''}</small></span><span className="launch-arrow">↗</span></button>;
+                  })}
                   {!filteredApps.length && <div className="empty-state"><strong>Nenhum aplicativo encontrado</strong><span>Atualize o inventário ou altere a pesquisa.</span></div>}
                 </div>
               </div>
-              <NativeAppDock
-                active={section === 'apps'}
-                sessions={nativeSessions}
-                selectedSessionId={selectedNativeSessionId}
-                pendingAppName={pendingNativeLaunch?.appName || null}
-                onSelect={setSelectedNativeSessionId}
-                onNotice={setNotice}
-              />
+              <aside className="native-dock-panel hub-panel">
+                <span className="panel-kicker">POLÍTICA DE EXECUÇÃO</span>
+                <h2>Uma superfície CloudOS</h2>
+                <p>Linux abre no Xpra incorporado. Windows abre somente quando o Host confirma gerenciamento e encaixe. Qualquer modo externo fica bloqueado antes do lançamento.</p>
+              </aside>
             </div>
           </section>
 

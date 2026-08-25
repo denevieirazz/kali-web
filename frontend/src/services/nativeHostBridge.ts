@@ -11,7 +11,6 @@ type NativeRequestMethod =
   | 'native.sessions.list'
   | 'native.session.attach'
   | 'native.session.layout'
-  | 'native.session.detach'
   | 'native.session.focus'
   | 'native.session.minimize'
   | 'native.session.maximize'
@@ -43,7 +42,7 @@ export interface NativeViewportBounds {
   height: number;
 }
 
-export type NativeContainmentMode = 'anchored-overlay' | 'external';
+export type NativeContainmentMode = 'anchored-overlay' | 'hidden-quarantine' | 'terminated';
 
 export interface NativeSession {
   sessionId: string;
@@ -116,21 +115,24 @@ class NativeHostBridge {
     return connection;
   }
 
+  private async requireConnection(message = 'O host nativo do CloudOS não está ativo.') {
+    if (!this.available) throw new NativeHostError('NATIVE_HOST_UNAVAILABLE', message);
+    const connected = await this.connect();
+    if (!connected) throw new NativeHostError('NATIVE_HOST_UNAVAILABLE', message);
+  }
+
   async getHostState() {
-    if (!this.available) throw new NativeHostError('NATIVE_HOST_UNAVAILABLE', 'O host nativo do CloudOS não está ativo.');
-    await this.connect();
+    await this.requireConnection();
     return this.request<NativeHostState>('host.getState', {});
   }
 
   async requestLegacyRecoveryToken() {
-    if (!this.available) throw new NativeHostError('NATIVE_HOST_UNAVAILABLE', 'O host nativo do CloudOS não está ativo.');
-    await this.connect();
+    await this.requireConnection();
     return this.request<{ token: string; expiresIn: number }>('host.requestLegacyRecoveryToken', {});
   }
 
   async openBrowser(url?: string): Promise<NativeBrowserOpenResult> {
-    if (!this.available) throw new NativeHostError('NATIVE_HOST_UNAVAILABLE', 'O Navegador CloudOS requer o Host nativo.');
-    await this.connect();
+    await this.requireConnection('O Navegador CloudOS requer o Host nativo.');
     const result = await this.request<NativeBrowserOpenResult>('browser.open', url ? { url } : {}, 30_000);
     if (!result?.opened) {
       throw new NativeHostError(
@@ -150,6 +152,7 @@ class NativeHostBridge {
   async launchApp(appId: string) {
     const token = getStoredToken();
     if (!token) throw new NativeHostError('AUTH_REQUIRED', 'Entre no CloudOS para abrir aplicativos nativos.');
+    await this.requireConnection();
     return this.request<{
       name: string;
       source: string;
@@ -164,24 +167,24 @@ class NativeHostBridge {
     }>('native.launchApp', { appId, token }, 40_000);
   }
 
-  listSessions() {
+  async listSessions() {
+    await this.requireConnection();
     return this.request<{ sessions: NativeSession[] }>('native.sessions.list', {});
   }
 
-  operate(method: 'focus' | 'minimize' | 'maximize' | 'restore' | 'close', sessionId: string) {
+  async operate(method: 'focus' | 'minimize' | 'maximize' | 'restore' | 'close', sessionId: string) {
+    await this.requireConnection();
     return this.request(`native.session.${method}` as NativeRequestMethod, { sessionId });
   }
 
-  attachSession(sessionId: string, bounds: NativeViewportBounds) {
+  async attachSession(sessionId: string, bounds: NativeViewportBounds) {
+    await this.requireConnection();
     return this.request<{ sessionId: string; accepted: boolean; contained?: boolean; containmentMode?: NativeContainmentMode }>('native.session.attach', { sessionId, bounds });
   }
 
-  layoutSession(sessionId: string, bounds: NativeViewportBounds, visible: boolean) {
+  async layoutSession(sessionId: string, bounds: NativeViewportBounds, visible: boolean) {
+    await this.requireConnection();
     return this.request<{ sessionId: string; accepted: boolean; contained?: boolean; containmentMode?: NativeContainmentMode; visible?: boolean }>('native.session.layout', { sessionId, bounds, visible });
-  }
-
-  detachSession(sessionId: string) {
-    return this.request<{ sessionId: string; accepted: boolean; contained?: boolean; containmentMode?: NativeContainmentMode }>('native.session.detach', { sessionId });
   }
 
   onSessionsChanged(listener: (sessions: NativeSession[]) => void) {
@@ -199,7 +202,16 @@ class NativeHostBridge {
         reject(new NativeHostError('NATIVE_TIMEOUT', 'A operação nativa excedeu o tempo limite.'));
       }, timeoutMs);
       this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
-      this.transport!.postMessage({ v: 1, id, type: 'request', method, nonce: window.__cloudosNativeNonce, params });
+      try {
+        this.transport!.postMessage({ v: 1, id, type: 'request', method, nonce: window.__cloudosNativeNonce, params });
+      } catch (postError) {
+        window.clearTimeout(timer);
+        this.pending.delete(id);
+        reject(new NativeHostError(
+          'NATIVE_TRANSPORT_FAILED',
+          postError instanceof Error ? postError.message : 'A ponte nativa não aceitou a solicitação.'
+        ));
+      }
     });
   }
 
@@ -216,7 +228,13 @@ class NativeHostBridge {
     if (!message || message.v !== 1) return;
     if (message.type === 'event' && message.event === 'native.sessionsChanged') {
       const sessions = message.data?.sessions || [];
-      this.eventListeners.forEach(listener => listener(sessions));
+      for (const listener of this.eventListeners) {
+        try {
+          listener(sessions);
+        } catch {
+          // One renderer listener must not prevent other native windows from receiving state updates.
+        }
+      }
       return;
     }
     if (message.type !== 'response') return;
