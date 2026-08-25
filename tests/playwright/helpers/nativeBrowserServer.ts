@@ -94,8 +94,8 @@ export async function startNativeBrowserServer() {
     }
     if (pathname === '/downloads') {
       return html(`
-        <a id="download-one" href="/download-slow?name=one.bin">download one</a>
-        <a id="download-two" href="/download-slow?name=two.bin">download two</a>
+        <a id="download-one" download href="/download-slow?name=one.bin">download one</a>
+        <a id="download-two" download href="/download-slow?name=two.bin">download two</a>
       `);
     }
     if (pathname === '/download-slow') {
