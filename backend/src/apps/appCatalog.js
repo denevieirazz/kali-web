@@ -12,6 +12,7 @@ const BLOCKED_SHORTCUT_TARGETS = new Set([
   'wsl.exe', 'wslg.exe', 'bash.exe', 'explorer.exe', 'runtimebroker.exe',
   'applicationframehost.exe', 'wt.exe', 'windowsterminal.exe'
 ]);
+const WINDOWS_SCRIPT_EXTENSIONS = new Set(['.bat', '.cmd']);
 const catalogById = new Map();
 let cachedCatalog = [];
 let cacheTimestamp = 0;
@@ -34,7 +35,7 @@ function publicApp(app) {
       launchable: true
     };
   }
-  const directWindowsLaunch = app.kind === 'windows-executable' || app.kind === 'windows-shortcut-direct';
+  const directWindowsLaunch = ['windows-executable', 'windows-shortcut-direct', 'windows-script-direct'].includes(app.kind);
   const launchable = app.source === 'windows'
     ? process.env.CLOUDOS_NATIVE_HOST === '1' && directWindowsLaunch
     : true;
@@ -64,6 +65,12 @@ function normalizedDisplayName(value) {
   return String(value || '').trim().toLocaleLowerCase('pt-BR');
 }
 
+function windowsCommandProcessor() {
+  const systemRoot = String(process.env.SystemRoot || process.env.WINDIR || '').trim();
+  if (!path.win32.isAbsolute(systemRoot)) return null;
+  return path.win32.join(systemRoot, 'System32', 'cmd.exe');
+}
+
 export function parseWindowsAppDiscovery(payload, existingApps = []) {
   const directTargets = new Set(existingApps.map((app) => String(app.executable || '').toLowerCase()));
   const directNames = new Set(existingApps.map((app) => normalizedDisplayName(app.name)));
@@ -80,15 +87,22 @@ export function parseWindowsAppDiscovery(payload, existingApps = []) {
     if (!name || name.includes('\0') || shortcutPath.includes('\0') || targetPath.includes('\0')) continue;
     if (/[\0\r\n]/.test(argumentsText) || /[\0\r\n]/.test(workingDirectory)) continue;
     if (!path.win32.isAbsolute(shortcutPath) || path.win32.extname(shortcutPath).toLowerCase() !== '.lnk') continue;
-    if (!path.win32.isAbsolute(targetPath) || path.win32.extname(targetPath).toLowerCase() !== '.exe') continue;
-    if (BLOCKED_SHORTCUT_TARGETS.has(path.win32.basename(targetPath).toLowerCase())) continue;
+
+    const targetExtension = path.win32.extname(targetPath).toLowerCase();
+    const executableTarget = targetExtension === '.exe';
+    const scriptTarget = WINDOWS_SCRIPT_EXTENSIONS.has(targetExtension);
+    if (!path.win32.isAbsolute(targetPath) || (!executableTarget && !scriptTarget)) continue;
+    if (scriptTarget && /[%\r\n\0]/.test(targetPath)) continue;
+    if (executableTarget && BLOCKED_SHORTCUT_TARGETS.has(path.win32.basename(targetPath).toLowerCase())) continue;
 
     const targetKey = targetPath.toLowerCase();
     const nameKey = normalizedDisplayName(name);
     if (directTargets.has(targetKey) || directNames.has(nameKey)) continue;
     directTargets.add(targetKey);
     directNames.add(nameKey);
-    const directKind = argumentsText ? 'windows-shortcut' : 'windows-shortcut-direct';
+    const directKind = argumentsText
+      ? 'windows-shortcut'
+      : (scriptTarget ? 'windows-script-direct' : 'windows-shortcut-direct');
     shortcuts.push({
       id: opaqueId(directKind, shortcutPath, targetPath, argumentsText),
       name,
@@ -132,7 +146,7 @@ async function getWindowsStartApps(wslDistributions = []) {
     '$shortcutRoots = @([Environment]::GetFolderPath("CommonStartMenu"), [Environment]::GetFolderPath("StartMenu")) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }',
     '$shortcuts = @()',
     '$shell = New-Object -ComObject WScript.Shell',
-    'foreach ($root in $shortcutRoots) { Get-ChildItem -LiteralPath $root -Filter *.lnk -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 800 | ForEach-Object { try { $link = $shell.CreateShortcut($_.FullName); $target = [Environment]::ExpandEnvironmentVariables([string]$link.TargetPath); if ($target -and [IO.Path]::GetExtension($target) -ieq ".exe" -and (Test-Path -LiteralPath $target -PathType Leaf)) { $shortcuts += [PSCustomObject]@{ Name = $_.BaseName; ShortcutPath = $_.FullName; TargetPath = [IO.Path]::GetFullPath($target); Arguments = [string]$link.Arguments; WorkingDirectory = [Environment]::ExpandEnvironmentVariables([string]$link.WorkingDirectory) } } } catch {} } }',
+    'foreach ($root in $shortcutRoots) { Get-ChildItem -LiteralPath $root -Filter *.lnk -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 800 | ForEach-Object { try { $link = $shell.CreateShortcut($_.FullName); $target = [Environment]::ExpandEnvironmentVariables([string]$link.TargetPath); $ext = [IO.Path]::GetExtension($target).ToLowerInvariant(); if ($target -and @(".exe", ".bat", ".cmd") -contains $ext -and (Test-Path -LiteralPath $target -PathType Leaf)) { $shortcuts += [PSCustomObject]@{ Name = $_.BaseName; ShortcutPath = $_.FullName; TargetPath = [IO.Path]::GetFullPath($target); Arguments = [string]$link.Arguments; WorkingDirectory = [Environment]::ExpandEnvironmentVariables([string]$link.WorkingDirectory) } } } catch {} } }',
     '[PSCustomObject]@{ StartApps = $startApps; Shortcuts = $shortcuts } | ConvertTo-Json -Depth 4 -Compress'
   ].join('; ');
   const encoded = Buffer.from(command, 'utf16le').toString('base64');
@@ -197,11 +211,33 @@ export async function launchCatalogApp(id) {
   if (app.kind === 'windows-start-app') {
     throw Object.assign(new Error('Aplicativos UWP/brokerizados permanecem visíveis no menu, mas não podem ser contidos por PID direto.'), { code: 'APP_NOT_CONTAINABLE' });
   }
-  const launchKind = app.kind === 'windows-shortcut-direct' ? 'windows-shortcut-direct' : app.kind;
-  const executable = launchKind === 'windows-shortcut-direct' ? app.targetPath : app.executable;
-  if (!['windows-shortcut-direct', 'windows-executable'].includes(launchKind) || !path.win32.isAbsolute(String(executable || ''))) {
+
+  const launchKind = app.kind === 'windows-shortcut-direct'
+    ? 'windows-shortcut-direct'
+    : app.kind;
+  const scriptLaunch = launchKind === 'windows-script-direct';
+  const executable = scriptLaunch
+    ? windowsCommandProcessor()
+    : (launchKind === 'windows-shortcut-direct' ? app.targetPath : app.executable);
+  if (!['windows-shortcut-direct', 'windows-executable', 'windows-script-direct'].includes(launchKind)
+      || !path.win32.isAbsolute(String(executable || ''))) {
     throw Object.assign(new Error('Tipo de aplicativo não suportado sob containment.'), { code: 'APP_KIND_UNSUPPORTED' });
   }
+
+  const scriptPath = scriptLaunch ? String(app.targetPath || '') : null;
+  if (scriptLaunch && (!path.win32.isAbsolute(scriptPath) || !WINDOWS_SCRIPT_EXTENSIONS.has(path.win32.extname(scriptPath).toLowerCase()) || /[%\0\r\n]/.test(scriptPath))) {
+    throw Object.assign(new Error('Script Windows inválido para execução contida.'), { code: 'APP_SCRIPT_INVALID' });
+  }
+
+  const launchArguments = scriptLaunch
+    ? ['/d', '/s', '/v:off', '/c', scriptPath]
+    : (launchKind === 'windows-shortcut-direct'
+        ? []
+        : (Array.isArray(app.args) ? app.args.filter((value) => typeof value === 'string' && !/[\0\r\n]/.test(value)).slice(0, 128) : []));
+  const workingDirectory = scriptLaunch
+    ? (app.workingDirectory || path.win32.dirname(scriptPath))
+    : (app.workingDirectory || path.win32.dirname(executable));
+
   return {
     id: app.id,
     name: app.name,
@@ -211,12 +247,10 @@ export async function launchCatalogApp(id) {
     launchKind,
     launchSpec: {
       executable,
-      arguments: launchKind === 'windows-shortcut-direct'
-        ? []
-        : (Array.isArray(app.args) ? app.args.filter((value) => typeof value === 'string' && !/[\0\r\n]/.test(value)).slice(0, 128) : []),
-      workingDirectory: app.workingDirectory || path.win32.dirname(executable)
+      arguments: launchArguments,
+      workingDirectory
     },
-    containment: { required: true, correlation: 'direct-pid', startedHidden: true, createSuspended: true }
+    containment: { required: true, correlation: 'direct-pid-job-tree', startedHidden: true, createSuspended: true }
   };
 }
 
