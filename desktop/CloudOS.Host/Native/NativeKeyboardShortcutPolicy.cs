@@ -71,13 +71,20 @@ public sealed class NativeKeyboardShortcutRouter
         var winDown = _leftWinDown || _rightWinDown;
         if (input.IsInjected)
         {
-            // Synthetic low-level keyboard input may not invoke privileged shell
-            // actions. Reserved injected sequences are swallowed while CloudOS owns
-            // focus so they also cannot fall through to the Windows shell.
+            // Synthetic low-level input may never invoke a privileged CloudOS action.
+            // If it arrives while a physical Win sequence is captured, mark that
+            // sequence as a chord so the later physical Win release cannot be
+            // reinterpreted as a bare privileged Start-menu action.
+            if ((virtualKey is VirtualKeyR or VirtualKeyD) && (winDown || suppressedWinChordKey))
+            {
+                _winChordUsed = true;
+                if (input.IsKeyUp) _suppressedWinChordKeys.Remove(virtualKey);
+                else _suppressedWinChordKeys.Add(virtualKey);
+                return NativeKeyboardDecision.Consume();
+            }
             if (isWinKey ||
                 (virtualKey == VirtualKeyTab && (input.AltDown || _altTabHeld)) ||
-                (virtualKey == VirtualKeyF4 && (input.AltDown || _altF4Held)) ||
-                (winDown && (virtualKey is VirtualKeyR or VirtualKeyD)))
+                (virtualKey == VirtualKeyF4 && (input.AltDown || _altF4Held)))
             {
                 return NativeKeyboardDecision.Consume();
             }

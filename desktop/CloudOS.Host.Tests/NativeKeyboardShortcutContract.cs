@@ -12,6 +12,7 @@ internal static class NativeKeyboardShortcutContract
         AltTabRoutesOncePerPress();
         AltF4RoutesOncePerPress();
         InjectedReservedInputCannotInvokeCloudOsActions();
+        InjectedChordCannotPromotePhysicalWinToBareAction();
         UnrelatedForegroundWindowsRemainUntouched();
         FocusLossCannotTriggerDeferredCloudOsActions();
         Console.WriteLine("PASS native keyboard shortcuts are scoped and fail closed");
@@ -67,6 +68,18 @@ internal static class NativeKeyboardShortcutContract
         AssertConsumed(router.Route(new NativeKeyboardInput(NativeKeyboardShortcutRouter.VirtualKeyLeftWin, true, false, true), true), null, "Injected Win release must not toggle Start.");
         AssertConsumed(router.Route(new NativeKeyboardInput(NativeKeyboardShortcutRouter.VirtualKeyTab, false, true, true), true), null, "Injected Alt+Tab must not invoke the CloudOS switcher.");
         AssertConsumed(router.Route(new NativeKeyboardInput(NativeKeyboardShortcutRouter.VirtualKeyF4, false, true, true), true), null, "Injected Alt+F4 must not close a CloudOS window.");
+    }
+
+    private static void InjectedChordCannotPromotePhysicalWinToBareAction()
+    {
+        foreach (var key in new[] { NativeKeyboardShortcutRouter.VirtualKeyR, NativeKeyboardShortcutRouter.VirtualKeyD })
+        {
+            var router = new NativeKeyboardShortcutRouter();
+            AssertConsumed(router.Route(new NativeKeyboardInput(NativeKeyboardShortcutRouter.VirtualKeyLeftWin, false, false, false), true), null, "Physical Win down must start captured.");
+            AssertConsumed(router.Route(new NativeKeyboardInput(key, false, false, true), true), null, "Injected Win-shell chord input must be swallowed.");
+            AssertConsumed(router.Route(new NativeKeyboardInput(NativeKeyboardShortcutRouter.VirtualKeyLeftWin, true, false, false), true), null, "An injected chord must prevent physical Win release from toggling Start.");
+            AssertConsumed(router.Route(new NativeKeyboardInput(key, true, false, true), true), null, "The injected chord release must finish the captured sequence.");
+        }
     }
 
     private static void UnrelatedForegroundWindowsRemainUntouched()
