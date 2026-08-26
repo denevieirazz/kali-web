@@ -60,6 +60,7 @@ var tests = new (string Name, Action Run)[]
     ("native launch descriptor preserves argv JSON", NativeLaunchDescriptorPreservesArgvJson),
     ("native command line quoting is bounded", NativeCommandLineQuotingIsBounded),
     ("native launcher tracks suspended process before resume", NativeLauncherTracksSuspendedProcessBeforeResume),
+    ("cmd script GUI descendant is contained by the same Job", NativeScriptLaunchContract.Validate),
     ("native job child HWND is quarantined and escape is detected", NativeJobChildWindowIsQuarantined)
 };
 
