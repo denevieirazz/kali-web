@@ -1,7 +1,6 @@
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
-using Microsoft.Win32;
 using Microsoft.Web.WebView2.Core;
 
 namespace CloudOS.Host.Browser;
@@ -45,7 +44,7 @@ public sealed class BrowserDownloadManager : IDisposable
             var suggestedName = string.IsNullOrWhiteSpace(suggestedPath) ? "download" : Path.GetFileName(suggestedPath);
             if (string.IsNullOrWhiteSpace(suggestedName)) suggestedName = "download";
             var destination = _destinationSelector is null
-                ? SelectDestination(owner, suggestedName)
+                ? SelectCloudOsDestination(suggestedName)
                 : _destinationSelector(owner, suggestedName);
 
             if (string.IsNullOrWhiteSpace(destination) || !Path.IsPathFullyQualified(destination))
@@ -67,7 +66,7 @@ public sealed class BrowserDownloadManager : IDisposable
             args.Handled = true;
             Track(args.DownloadOperation, destination);
         }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException)
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
             args.Cancel = true;
             args.Handled = true;
@@ -97,19 +96,14 @@ public sealed class BrowserDownloadManager : IDisposable
         return requested;
     }
 
-    private static string? SelectDestination(Window owner, string suggestedName)
+    private string SelectCloudOsDestination(string suggestedName)
     {
-        var dialog = new SaveFileDialog
-        {
-            Title = "Salvar download — Navegador CloudOS",
-            FileName = suggestedName,
-            OverwritePrompt = true,
-            CheckPathExists = true,
-            AddExtension = false
-        };
-        return dialog.ShowDialog(owner) == true && !string.IsNullOrWhiteSpace(dialog.FileName)
-            ? dialog.FileName
-            : null;
+        var localApplicationData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrWhiteSpace(localApplicationData))
+            throw new InvalidOperationException("LOCALAPPDATA is unavailable for CloudOS Drive downloads.");
+        var overrideRoot = Environment.GetEnvironmentVariable("CLOUDOS_DRIVE_DIR");
+        var downloads = BrowserStorageLayout.CloudOsDriveDownloads(localApplicationData, overrideRoot);
+        return BrowserStorageLayout.AllocateCloudOsDownloadPath(downloads, suggestedName, _active.Values.Select(item => item.Path));
     }
 
     private void Track(CoreWebView2DownloadOperation operation, string path)

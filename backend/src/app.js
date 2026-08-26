@@ -17,6 +17,7 @@ import { appsRouter } from './apps/routes.js';
 import { readinessRouter } from './readiness/routes.js';
 import { securityToolsRouter } from './security/routes.js';
 import { filesRouter } from './files/routes.js';
+import { cloudOsDriveRouter } from './storage/routes.js';
 import { productRouter } from './product/routes.js';
 import { linuxRuntimeRouter } from './linuxRuntime/routes.js';
 import { xpraHttpProxyMiddleware } from './linuxRuntime/xpraProxy.js';
@@ -189,6 +190,7 @@ export function createApp(initialPort, options = {}) {
   app.use('/api/apps', appsRouter);
   app.use('/api/readiness', readinessRouter);
   app.use('/api/security/tools', securityToolsRouter);
+  app.use('/api/files/cloudos', cloudOsDriveRouter);
   app.use('/api/files/wsl', filesRouter);
   app.use('/api/product', productRouter);
   app.use('/api/linux-runtime', linuxRuntimeRouter);

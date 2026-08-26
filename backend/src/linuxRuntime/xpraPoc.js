@@ -8,6 +8,8 @@ import { promisify } from 'node:util';
 import { WebSocket } from 'ws';
 import { WSL_EXE, getWslSnapshot, normalizeName, safeChildEnvironment, validateInstalledAsync } from '../wsl/distroService.js';
 import { expandDesktopExec, resolveLinuxDesktopApp, scanLinuxDesktopApps } from '../apps/linuxDesktopScanner.js';
+import { cloudOsDrive } from '../storage/cloudosDrive.js';
+import { buildCloudOsDriveSandboxMounts, mapCloudOsDriveFilePath, normalizeWslCloudOsDriveRoot } from './cloudOsDriveSandbox.js';
 import { XPRA_BIND_TCP_HOST, XPRA_DISPLAY_END, XPRA_DISPLAY_START, XPRA_PORT_END, XPRA_PORT_START, chooseXpraPair, displayForPort as displayForXpraPort, validateLedgerPair } from './xpraPairAllocator.js';
 import { getActiveDistro } from './distroManager.js';
 import { resolveActiveDistribution } from './packageManager.js';
@@ -310,8 +312,6 @@ export async function getDiscoveredLinuxPocApps(distro, resolver = configuredApp
     .map(publicDiscoveredApp);
 }
 
-// Kept as a compatibility alias for existing route consumers. The result is
-// exclusively scanner-backed; there is no static allowlist or curated catalog.
 export const getAllowedLinuxPocApps = getDiscoveredLinuxPocApps;
 
 export function displayForPort(port) { return displayForXpraPort(port); }
@@ -337,9 +337,6 @@ function runtimeArgvFor(appDef, sessionId, requestedFilePath = null) {
   }
   const binary = path.posix.basename(argv[0]).toLowerCase();
 
-  // Firefox must never hand a launch to an already-running process connected to
-  // another display. This is a runtime policy derived from the executable, not
-  // a catalog entry.
   if (binary === 'firefox' || binary === 'firefox-esr') {
     const withoutProfile = [];
     for (let index = 0; index < argv.length; index += 1) {
@@ -378,31 +375,34 @@ function normalizedLaunchIdentity(identity = {}) {
   const uid = validUid ? candidateUid : 65534;
   const gid = validUid && validGid ? candidateGid : 65534;
   const name = validUid && /^[a-z_][a-z0-9_-]{0,31}$/i.test(String(identity.name || '')) ? String(identity.name) : 'cloudos-app';
-  const sourceHome = uid !== 65534 && /^\/[a-zA-Z0-9_ ./+@-]{1,1024}$/.test(String(identity.home || '')) && !String(identity.home).split('/').includes('..')
+  const sourceHome = uid !== 65534 && /^\/home\/[a-zA-Z0-9_ ./+@-]{1,1024}$/.test(String(identity.home || '')) && !String(identity.home).split('/').includes('..')
     ? String(identity.home)
     : null;
   return { uid, gid, name, sourceHome };
 }
 
-export function buildXpraStartCommand({ appCommand = null, appArgv = null, port, sessionId = 'cloudos-poc1', password = 'test-only-secret', launchIdentity = null }) {
+export function buildXpraStartCommand({ appCommand = null, appArgv = null, port, sessionId = 'cloudos-poc1', password = 'test-only-secret', launchIdentity = null, cloudOsDriveRoot = null }) {
   if (!Number.isInteger(port) || port < PORT_START || port > PORT_END) throw new Error('Porta Xpra fora da faixa da POC.');
   if (!password || String(password).length < 16) throw new Error('Capability Xpra inválida.');
   const argv = commandInputArgv(appCommand, appArgv);
   const childCommand = shellCommand(argv);
   const display = displayForPort(port);
   const identity = normalizedLaunchIdentity(launchIdentity || {});
+  const normalizedDriveRoot = cloudOsDriveRoot ? normalizeWslCloudOsDriveRoot(cloudOsDriveRoot) : null;
+  if (cloudOsDriveRoot && !normalizedDriveRoot) throw new Error('CloudOS Drive WSL root inválido.');
   const profileFlagIndex = argv.findIndex(argument => argument === '-profile' || argument === '--profile');
   const firefoxProfile = profileFlagIndex >= 0 && /^\/tmp\/[a-zA-Z0-9._-]+$/.test(argv[profileFlagIndex + 1] || '') ? argv[profileFlagIndex + 1] : null;
   const isolationId = crypto.createHash('sha256').update(String(sessionId)).digest('hex').slice(0, 16);
   const appProfileId = crypto.createHash('sha256').update(`${identity.uid}\0${argv[0]}`).digest('hex').slice(0, 24);
   const containedHome = `/var/lib/cloudos/contained-homes/${identity.uid}-${appProfileId}`;
   const containedRuntime = `/run/user/${identity.uid}`;
-  const containedPath = `${identity.sourceHome ? `${identity.sourceHome}/.local/bin:` : ''}/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`;
-  // The contained app gets a dedicated persistent HOME plus a private runtime,
-  // PID view and /tmp. This prevents an existing WSLg singleton from accepting
-  // the launch through a socket or D-Bus session outside the Xpra namespace.
-  // It runs as an unprivileged UID with a clean environment. Xpra contributes
-  // only its private DISPLAY and XAUTHORITY values to the child.
+  const containedPath = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
+  const driveMounts = buildCloudOsDriveSandboxMounts({
+    wslRoot: normalizedDriveRoot,
+    containedHome,
+    uid: identity.uid,
+    gid: identity.gid,
+  });
   const childEnvironment = [
     `HOME=${shellQuote(containedHome)}`,
     `USER=${shellToken(identity.name)}`,
@@ -431,6 +431,8 @@ export function buildXpraStartCommand({ appCommand = null, appArgv = null, port,
     'set -eu',
     'mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs /tmp',
     'install -d -m 1777 /tmp/.X11-unix',
+    '[ ! -d /var/tmp ] || mount -t tmpfs -o mode=1777,nosuid,nodev,noexec tmpfs /var/tmp',
+    '[ ! -d /dev/shm ] || mount -t tmpfs -o mode=1777,nosuid,nodev,noexec tmpfs /dev/shm',
     'mount -t tmpfs -o mode=755,nosuid,nodev,noexec tmpfs /run/user',
     `install -d -o ${identity.uid} -g ${identity.gid} -m 700 ${containedRuntime}`,
     'mount -t tmpfs -o mode=700,nosuid,nodev,noexec tmpfs /run/xpra',
@@ -446,6 +448,9 @@ export function buildXpraStartCommand({ appCommand = null, appArgv = null, port,
     `install -d -m 700 ${shellQuote(containedHome)}`,
     `chown ${identity.uid}:${identity.gid} ${shellQuote(containedHome)}`,
     ...(firefoxProfile ? [`install -d -o ${identity.uid} -g ${identity.gid} -m 700 ${shellQuote(firefoxProfile)}`] : []),
+    ...driveMounts,
+    '[ ! -d /home ] || mount -t tmpfs -o mode=755,nosuid,nodev,noexec tmpfs /home',
+    'mount -t tmpfs -o mode=755,nosuid,nodev,noexec tmpfs /mnt',
     `export HOME=${shellQuote(containedHome)}`,
     `export XDG_RUNTIME_DIR=${containedRuntime}`,
     `export XDG_CONFIG_HOME=${shellQuote(`${containedHome}/.config`)}`,
@@ -453,7 +458,8 @@ export function buildXpraStartCommand({ appCommand = null, appArgv = null, port,
     `export XDG_DATA_HOME=${shellQuote(`${containedHome}/.local/share`)}`,
     `export USER=${shellToken(identity.name)} LOGNAME=${shellToken(identity.name)}`,
     'unset WSLENV WSL_INTEROP WAYLAND_DISPLAY WAYLAND_SOCKET PULSE_SERVER',
-    'export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+    `export PATH=${shellQuote(containedPath)}`,
+    '[ ! -e /mnt/c ] || { echo CLOUDOS_HOST_MOUNT_VISIBLE >&2; exit 48; }',
     "if grep -q ' @/tmp/.X11-unix/X0$' /proc/net/unix 2>/dev/null; then echo WSLG_ABSTRACT_SOCKET_PRESENT >&2; exit 45; fi",
     '[ ! -S /tmp/.X11-unix/X0 ] || { echo WSLG_X11_SOCKET_VISIBLE >&2; exit 46; }',
     '[ ! -S /mnt/wslg/runtime-dir/wayland-0 ] || { echo WSLG_WAYLAND_SOCKET_VISIBLE >&2; exit 46; }',
@@ -524,8 +530,6 @@ async function getDistroLaunchIdentity(distribution) {
       maxBuffer: 64 * 1024,
     });
     const parsed = JSON.parse(String(stdout || '{}'));
-    // A root default user is never propagated to GUI applications. The
-    // sandbox identity remains able to launch apt-installed system apps.
     return normalizedLaunchIdentity(parsed);
   } catch {
     return normalizedLaunchIdentity();
@@ -804,6 +808,7 @@ async function isPortFree(port) {
 }
 
 let nextPortOffset = 0;
+const preflightRuns = new Map();
 
 export async function startPhysicalPreflight({ ownerId, distribution, backendOrigin = null } = {}) {
   const started = Date.now();
@@ -928,14 +933,29 @@ export async function startXpraPoc({ app, distribution, ownerId, generation = 1,
     const readiness = await checkXpraPocReadiness({ app: appId, distribution: distro });
     if (!readiness.ready) throw createPocError(readiness.errorCode, readiness.error, readiness.checks);
 
-    // Readiness metadata may be cached, but this security boundary may not be.
-    // Revalidate interop immediately before every launch in the selected distro.
     const launchInterop = await checkWslInteropDisabled(readiness.distribution);
     if (!launchInterop.ok) throw createPocError(launchInterop.code || 'WSL_INTEROP_ENABLED', launchInterop.error || 'WSL interop permanece habilitado.');
 
     const launchIdentity = await getDistroLaunchIdentity(readiness.distribution);
-    if (appDef.userLocal && launchIdentity.uid === 65534 && !launchIdentity.sourceHome) {
-      throw createPocError('LINUX_USER_LOCAL_ROOT_UNSAFE', 'Aplicativos locais de um usuário WSL root não são executados como root; instale o aplicativo pelo gerenciador de pacotes ou configure um usuário WSL sem privilégios.');
+    if (appDef.userLocal) {
+      throw createPocError('LINUX_USER_LOCAL_APP_OUTSIDE_SANDBOX', 'Aplicativos instalados no HOME real do WSL ficam bloqueados neste modo de sandbox; use um pacote de sistema ou uma instalação gerenciada pelo CloudOS.');
+    }
+
+    let driveRuntimePaths;
+    try {
+      driveRuntimePaths = await cloudOsDrive.runtimePaths();
+    } catch {
+      throw createPocError('CLOUDOS_DRIVE_UNAVAILABLE', 'CloudOS Drive indisponível para o sandbox Linux.');
+    }
+    const cloudOsDriveRoot = normalizeWslCloudOsDriveRoot(driveRuntimePaths.wslRoot);
+    if (!cloudOsDriveRoot) {
+      throw createPocError('CLOUDOS_DRIVE_WSL_PATH_UNAVAILABLE', 'CloudOS Drive não possui um caminho WSL confiável.');
+    }
+    let sandboxFilePath = null;
+    try {
+      sandboxFilePath = mapCloudOsDriveFilePath(requestedFilePath, cloudOsDriveRoot);
+    } catch {
+      throw createPocError('LINUX_FILE_PATH_OUTSIDE_CLOUDOS_DRIVE', 'O aplicativo Linux só pode abrir arquivos das áreas compartilhadas do CloudOS Drive.');
     }
 
     const pair = await reservePair(readiness.distribution);
@@ -968,13 +988,13 @@ export async function startXpraPoc({ app, distribution, ownerId, generation = 1,
       metrics: { preflightMs: readiness.durationMs, restartCount: 0, reconnectCount: 0, healthFailures: 0, proxyHttpRequests: 0, proxyWebSocketConnections: 0 }
     };
 
-    const appArgv = runtimeArgvFor(appDef, id, requestedFilePath);
+    const appArgv = runtimeArgvFor(appDef, id, sandboxFilePath);
 
     sessions.set(id, session);
     writeLedger();
 
     const startClock = Date.now();
-    const command = buildXpraStartCommand({ appArgv, port: pair.port, sessionId: id, password: session.xpraPassword, launchIdentity });
+    const command = buildXpraStartCommand({ appArgv, port: pair.port, sessionId: id, password: session.xpraPassword, launchIdentity, cloudOsDriveRoot });
 
     const child = spawn(WSL_EXE, ['-d', session.distribution, '-u', 'root', '--exec', 'sh', '-c', command], {
       windowsHide: true,

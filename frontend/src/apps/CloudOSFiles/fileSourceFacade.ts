@@ -1,20 +1,5 @@
-import {
-  createEntry as opfsCreate,
-  emptyTrash as opfsEmptyTrash,
-  listDirectory as opfsList,
-  listTrash as opfsListTrash,
-  moveToTrash as opfsTrash,
-  pasteEntry as opfsPaste,
-  permanentlyDelete as opfsDeleteTrash,
-  readFile as opfsRead,
-  renameEntry as opfsRename,
-  restoreFromTrash as opfsRestore,
-  storageEstimate,
-  uploadFiles as opfsUpload,
-  writeTextFile as opfsWriteText,
-  type FileEntry as OpfsFileEntry,
-  type StorageInfo,
-} from './opfsFileService';
+import { type StorageInfo } from './opfsFileService';
+import { cloudosDriveSource, type CloudOsDriveEntry, type CloudOsDriveStatus } from './cloudosDriveSource';
 import { type FileSourceKind, normalizeFilePath } from './fileSourcePolicy';
 import { windowsDirectorySource, type CopyProgress, type WindowsFileEntry } from './windowsDirectorySource';
 import { wslFileSource, type FileOperation, type WslFileEntry, type WslFilesStatus } from './wslFileSource';
@@ -68,8 +53,11 @@ export type AssistedTransferResult = {
 
 export const MAX_ASSISTED_TRANSFER_BYTES = 256 * 1024 * 1024;
 
-function fromOpfs(entry: OpfsFileEntry): CloudFileEntry {
-  return { ...entry, kind: entry.kind, source: 'opfs' };
+// Persisted workspace records already use provider="opfs" for CloudOS Home. Keep
+// that stable provider id while swapping its implementation from browser-private
+// OPFS to the host-backed canonical CloudOS Drive.
+function fromCloudos(entry: CloudOsDriveEntry): CloudFileEntry {
+  return { ...entry, source: 'opfs' };
 }
 
 function fromWindows(entry: WindowsFileEntry): CloudFileEntry {
@@ -80,28 +68,38 @@ function fromWsl(entry: WslFileEntry): CloudFileEntry {
   return { ...entry, source: 'wsl' };
 }
 
-function toOpfs(entry: CloudFileEntry): OpfsFileEntry {
-  if (entry.kind === 'symlink') throw new Error('Link simbólico não existe no OPFS.');
-  return {
-    name: entry.name,
-    kind: entry.kind,
-    size: entry.size,
-    modified: entry.modified,
-    originalName: entry.originalName,
-    originalPath: entry.originalPath,
-    deletedAt: entry.deletedAt,
-  };
-}
-
 function migrateRenameReferences(source: FileSourceKind, path: string[], oldName: string, newName: string) {
   const target = { provider: source, path: [...path], name: oldName };
   renameFileMarkReference(target, newName);
   renameRecentFileReference(target, newName);
 }
 
+async function cloudosRuntime(source: FileSourceKind): Promise<SourceRuntime> {
+  try {
+    const status: CloudOsDriveStatus = await cloudosDriveSource.status();
+    return {
+      source,
+      label: status.rootLabel || 'CloudOS Drive',
+      mounted: status.mounted === true,
+      available: status.available === true,
+      detail: status.available
+        ? 'CloudOS Drive físico · compartilhado com Windows e Linux'
+        : 'CloudOS Drive indisponível',
+    };
+  } catch (error) {
+    return {
+      source,
+      label: 'CloudOS Drive',
+      mounted: false,
+      available: false,
+      detail: error instanceof Error ? error.message : 'CloudOS Drive indisponível',
+    };
+  }
+}
+
 export const fileSourceFacade = {
   async runtime(source: FileSourceKind): Promise<SourceRuntime> {
-    if (source === 'opfs') return { source, label: 'CloudOS local', mounted: true, available: true, detail: 'Origin Private File System' };
+    if (source === 'opfs') return cloudosRuntime(source);
     if (source === 'windows') {
       const mounted = windowsDirectorySource.mounted();
       return {
@@ -131,25 +129,36 @@ export const fileSourceFacade = {
 
   async list(source: FileSourceKind, path: string[], trash = false): Promise<CloudFileEntry[]> {
     const safe = normalizeFilePath(path);
-    if (source === 'opfs') return (trash ? await opfsListTrash() : await opfsList(safe)).map(fromOpfs);
+    if (source === 'opfs') return (trash ? await cloudosDriveSource.listTrash() : await cloudosDriveSource.list(safe)).map(fromCloudos);
     if (source === 'windows') return (trash ? await windowsDirectorySource.listTrash() : await windowsDirectorySource.list(safe)).map(fromWindows);
     return (trash ? await wslFileSource.listTrash() : await wslFileSource.list(safe)).map(fromWsl);
   },
 
   async storage(source: FileSourceKind): Promise<StorageInfo | null> {
-    return source === 'opfs' ? storageEstimate() : null;
+    if (source !== 'opfs') return null;
+    const status = await cloudosDriveSource.status();
+    if (!status.capacity || !Number.isFinite(status.capacity.total) || !Number.isFinite(status.capacity.free)) return null;
+    return {
+      used: Math.max(0, status.capacity.total - status.capacity.free),
+      quota: Math.max(0, status.capacity.total),
+    };
   },
 
   async readFile(source: FileSourceKind, path: string[], entry: CloudFileEntry, maximumBytes: number): Promise<File> {
     if (entry.kind !== 'file' || entry.symlink) throw new Error('Este item não pode ser aberto como arquivo.');
     if (entry.size > maximumBytes) throw new Error(`Arquivo excede o limite permitido de ${maximumBytes} bytes.`);
-    if (source === 'opfs') return opfsRead(path, entry.name, false);
+    if (source === 'opfs') return cloudosDriveSource.readFile(path, entry.name, maximumBytes);
     if (source === 'windows') return windowsDirectorySource.readFile(path, entry.name);
     return wslFileSource.readFile(path, entry.name, maximumBytes);
   },
 
   async create(source: FileSourceKind, path: string[], kind: 'file' | 'directory', name: string) {
-    if (source === 'opfs') return opfsCreate(path, kind, name);
+    if (source === 'opfs') {
+      const safeName = normalizeFilePath([name])[0];
+      if (kind === 'directory') await cloudosDriveSource.mkdir(path, safeName);
+      else await cloudosDriveSource.writeText(path, safeName, '');
+      return safeName;
+    }
     if (source === 'windows') return windowsDirectorySource.create(path, kind, name);
     const safeName = normalizeFilePath([name])[0];
     if (kind === 'directory') await wslFileSource.mkdir(path, safeName);
@@ -158,19 +167,13 @@ export const fileSourceFacade = {
   },
 
   async writeText(source: FileSourceKind, path: string[], name: string, content: string, mode?: number) {
-    if (source === 'opfs') return opfsWriteText(path, name, content);
+    if (source === 'opfs') return cloudosDriveSource.writeText(path, name, content);
     if (source === 'windows') return windowsDirectorySource.writeText(path, name, content);
     return wslFileSource.writeText(path, name, content, mode || 0o600);
   },
 
   async writeFile(source: FileSourceKind, path: string[], file: File, mode?: number) {
-    if (source === 'opfs') {
-      const before = await opfsList(path);
-      await opfsUpload(path, [file]);
-      const after = await opfsList(path);
-      const previousNames = new Set(before.map(item => item.name));
-      return after.find(item => !previousNames.has(item.name))?.name || file.name;
-    }
+    if (source === 'opfs') return cloudosDriveSource.writeFile(path, file);
     if (source === 'windows') return windowsDirectorySource.writeFile(path, file);
     return wslFileSource.writeFile(path, file, mode || 0o600);
   },
@@ -200,9 +203,10 @@ export const fileSourceFacade = {
   async rename(source: FileSourceKind, path: string[], entry: CloudFileEntry, newName: string) {
     if (entry.symlink || entry.kind === 'symlink') throw new Error('Link simbólico não pode ser renomeado pelo CloudOS Files.');
     if (source === 'opfs') {
-      const result = await opfsRename(path, toOpfs(entry), newName);
-      migrateRenameReferences(source, path, entry.name, typeof result === 'string' ? result : newName);
-      return result;
+      const safeName = normalizeFilePath([newName])[0];
+      await cloudosDriveSource.move(path, entry.name, path, safeName);
+      migrateRenameReferences(source, path, entry.name, safeName);
+      return safeName;
     }
     if (source === 'windows') {
       const result = await windowsDirectorySource.rename(path, entry.name, newName);
@@ -216,35 +220,43 @@ export const fileSourceFacade = {
 
   async trash(source: FileSourceKind, path: string[], entry: CloudFileEntry) {
     if (entry.symlink || entry.kind === 'symlink') throw new Error('Link simbólico não entra na lixeira transacional.');
-    if (source === 'opfs') return opfsTrash(path, toOpfs(entry));
+    if (source === 'opfs') return cloudosDriveSource.trash(path, entry.name);
     if (source === 'windows') return windowsDirectorySource.trash(path, entry as WindowsFileEntry);
     return wslFileSource.trash(path, entry.name);
   },
 
   async restore(source: FileSourceKind, entry: CloudFileEntry) {
-    if (source === 'opfs') return opfsRestore(toOpfs(entry));
+    if (source === 'opfs') {
+      if (!entry.trashId) throw new Error('Identificador da lixeira CloudOS ausente.');
+      return cloudosDriveSource.restoreTrash(entry.trashId);
+    }
     if (source === 'windows') return windowsDirectorySource.restore(entry as WindowsFileEntry);
     if (!entry.trashId) throw new Error('Identificador da lixeira Linux ausente.');
     return wslFileSource.restoreTrash(entry.trashId);
   },
 
   async deleteTrash(source: FileSourceKind, entry: CloudFileEntry) {
-    if (source === 'opfs') return opfsDeleteTrash(toOpfs(entry));
+    if (source === 'opfs') {
+      if (!entry.trashId) throw new Error('Identificador da lixeira CloudOS ausente.');
+      return cloudosDriveSource.deleteTrash(entry.trashId);
+    }
     if (source === 'windows') return windowsDirectorySource.deleteTrash(entry as WindowsFileEntry);
     if (!entry.trashId) throw new Error('Identificador da lixeira Linux ausente.');
     return wslFileSource.deleteTrash(entry.trashId);
   },
 
   async emptyTrash(source: FileSourceKind) {
-    if (source === 'opfs') return opfsEmptyTrash();
+    if (source === 'opfs') return cloudosDriveSource.emptyTrash();
     if (source === 'windows') return windowsDirectorySource.emptyTrash();
     const entries = await wslFileSource.listTrash();
     for (const entry of entries) if (entry.trashId) await wslFileSource.deleteTrash(entry.trashId);
   },
 
   async upload(source: FileSourceKind, path: string[], files: File[]) {
-    if (source !== 'opfs') throw new Error('Envio direto ainda é restrito ao CloudOS local; use copiar/colar dentro da origem real.');
-    return opfsUpload(path, files);
+    if (source !== 'opfs') throw new Error('Envio direto está disponível somente no CloudOS Drive.');
+    const names: string[] = [];
+    for (const file of files) names.push(await cloudosDriveSource.writeFile(path, file));
+    return names;
   },
 
   async paste(
@@ -257,8 +269,13 @@ export const fileSourceFacade = {
     if (clipboard.entry.symlink || clipboard.entry.kind === 'symlink') throw new Error('Link simbólico não pode ser copiado pelo CloudOS Files.');
 
     if (source === 'opfs') {
-      const result = await opfsPaste({ entry: toOpfs(clipboard.entry), action: clipboard.action, sourcePath: clipboard.sourcePath }, destinationPath);
-      return { name: result.name, moved: result.moved };
+      if (options.signal.aborted) throw new DOMException('Operação cancelada.', 'AbortError');
+      if (clipboard.action === 'cut') {
+        await cloudosDriveSource.move(clipboard.sourcePath, clipboard.entry.name, destinationPath, clipboard.entry.name);
+        return { name: clipboard.entry.name, moved: true };
+      }
+      await cloudosDriveSource.copy(clipboard.sourcePath, clipboard.entry.name, destinationPath, clipboard.entry.name);
+      return { name: clipboard.entry.name, moved: false };
     }
 
     if (source === 'windows') {
