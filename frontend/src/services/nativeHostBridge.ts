@@ -213,7 +213,17 @@ class NativeHostBridge {
         this.pending.delete(id);
         reject(new NativeHostError('NATIVE_TIMEOUT', 'A operação nativa excedeu o tempo limite.'));
       }, timeoutMs);
-      this.pending.set(id, { resolve: resolve as (value: unknown) => void; reject: (reason: Error) => void; timer: number });
+      this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
+      try {
+        this.transport!.postMessage({ v: 1, id, type: 'request', method, nonce: window.__cloudosNativeNonce, params });
+      } catch (postError) {
+        window.clearTimeout(timer);
+        this.pending.delete(id);
+        reject(new NativeHostError(
+          'NATIVE_TRANSPORT_FAILED',
+          postError instanceof Error ? postError.message : 'A ponte nativa não aceitou a solicitação.'
+        ));
+      }
     });
   }
 
