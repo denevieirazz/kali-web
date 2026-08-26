@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-26T20:07:16.9820810Z",
+  "sessionId": "xpra-mtaios45-1aa7ef99",
+  "distribution": "Ubuntu",
+  "xpraPid": 560,
+  "result": "PASS",
+  "checks": [
+    {
+      "name": "rootfs-readonly",
+      "passed": true,
+      "detail": "mount=/ fs=ext4 options=ro,nosuid,nodev,relatime"
+    },
+    {
+      "name": "windows-mounts-hidden",
+      "passed": true,
+      "detail": "mount=/mnt fs=tmpfs options=rw,nosuid,nodev,noexec,relatime"
+    },
+    {
+      "name": "real-wsl-home-hidden",
+      "passed": true,
+      "detail": "mount=/home fs=tmpfs options=rw,nosuid,nodev,noexec,relatime"
+    },
+    {
+      "name": "contained-home-writable",
+      "passed": true,
+      "detail": "mount=/var/lib/cloudos/contained-homes/65534-3343140837056ff28a493a1a fs=ext4 options=rw,nosuid,nodev,noexec,relatime"
+    },
+    {
+      "name": "drive-desktop",
+      "passed": true,
+      "detail": "mount=/run/cloudos-drive/Desktop fs=9p options=rw,nosuid,nodev,noexec,noatime,nosymfollow"
+    },
+    {
+      "name": "drive-documents",
+      "passed": true,
+      "detail": "mount=/run/cloudos-drive/Documents fs=9p options=rw,nosuid,nodev,noexec,noatime,nosymfollow"
+    },
+    {
+      "name": "drive-downloads",
+      "passed": true,
+      "detail": "mount=/run/cloudos-drive/Downloads fs=9p options=rw,nosuid,nodev,noexec,noatime,nosymfollow"
+    },
+    {
+      "name": "drive-projects",
+      "passed": true,
+      "detail": "mount=/run/cloudos-drive/Projects fs=9p options=rw,nosuid,nodev,noexec,noatime,nosymfollow"
+    },
+    {
+      "name": "drive-shared",
+      "passed": true,
+      "detail": "mount=/run/cloudos-drive/Shared fs=9p options=rw,nosuid,nodev,noexec,noatime,nosymfollow"
+    },
+    {
+      "name": "wsl-init-masked",
+      "passed": true,
+      "detail": "mount=/init fs=tmpfs options=ro,nosuid,nodev,noexec,relatime"
+    }
+  ],
+  "evidence": {
+    "mountinfo": "C:\\Users\\dougl\\AppData\\Local\\Temp\\cloudos-linux-sandbox-evidence-20260826-170716\\mountinfo.txt",
+    "ledger": "C:\\Users\\dougl\\AppData\\Local\\Temp\\cloudos-linux-runtime-poc1-sessions.json"
+  }
+}
