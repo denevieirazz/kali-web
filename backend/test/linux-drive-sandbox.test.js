@@ -75,10 +75,17 @@ test('Xpra sandbox captures approved Drive binds before hiding all Windows mount
     cloudOsDriveRoot: driveRoot,
   });
 
-  const bindDownload = command.indexOf(`mount --bind '${driveRoot}/Home/Downloads'`);
-  const hideWindowsMounts = command.indexOf('mount -t tmpfs -o mode=755,nosuid,nodev,noexec tmpfs /mnt');
-  assert.ok(bindDownload >= 0, 'Downloads must be captured from the canonical Drive before /mnt is hidden');
-  assert.ok(hideWindowsMounts > bindDownload, '/mnt must be hidden only after approved bind mounts exist');
+  // buildXpraStartCommand shell-quotes the complete inner mount program for
+  // sh -c. The dedicated mount-policy test above asserts the exact bind
+  // command; here we only assert that the approved source/staging markers are
+  // emitted before the /mnt masking operation after that outer escaping.
+  const capturedDrivePath = command.indexOf(`${driveRoot}/Home/Downloads`);
+  const stagedDownloadPath = command.indexOf('/run/cloudos-drive/Downloads');
+  const hideWindowsMounts = command.indexOf('tmpfs /mnt');
+  assert.ok(capturedDrivePath >= 0, 'Downloads source must be present in the generated sandbox command');
+  assert.ok(stagedDownloadPath >= 0, 'Downloads staging mount must be present in the generated sandbox command');
+  assert.ok(hideWindowsMounts > capturedDrivePath, '/mnt must be hidden only after the approved Drive source is captured');
+  assert.ok(hideWindowsMounts > stagedDownloadPath, '/mnt must be hidden only after the approved staging mount exists');
 
   assert.match(command, /tmpfs \/home/);
   assert.match(command, /tmpfs \/var\/tmp/);
