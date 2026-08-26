@@ -1,4 +1,4 @@
-export type FileSourceKind = 'opfs' | 'windows' | 'wsl';
+export type FileSourceKind = 'cloudos' | 'opfs' | 'windows' | 'wsl';
 export type FileActor = 'user-ui' | 'agent';
 
 export const USER_FILE_ACTOR: FileActor = 'user-ui';
@@ -25,11 +25,12 @@ export function assertExplicitUserActor(actor: FileActor) {
 }
 
 export function sourceLabel(source: FileSourceKind) {
+  if (source === 'cloudos') return 'CloudOS Drive';
   if (source === 'windows') return 'Windows Drives (/mnt/c)';
   if (source === 'wsl') return 'Linux RootFS (/)';
-  return 'CloudOS Home (/home/cloudos)';
+  return 'CloudOS legado (OPFS)';
 }
 
 export function sourceIsReal(source: FileSourceKind) {
-  return source === 'windows' || source === 'wsl';
+  return source === 'cloudos' || source === 'windows' || source === 'wsl';
 }
