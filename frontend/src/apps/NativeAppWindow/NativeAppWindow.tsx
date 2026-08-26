@@ -51,9 +51,10 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState<NativeSurfaceStatus>('launching');
   const [error, setError] = useState('');
+  const [documentVisible, setDocumentVisible] = useState(() => document.visibilityState === 'visible');
 
   const appId = win?.appId || '';
-  const visible = Boolean(win && !win.isMinimized && win.isActive && !isStartMenuOpen && document.visibilityState === 'visible');
+  const visible = Boolean(win && !win.isMinimized && win.isActive && !isStartMenuOpen && documentVisible);
 
   const syncSurface = useCallback(async (attach = false) => {
     const currentSessionId = sessionIdRef.current;
@@ -91,6 +92,12 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
       throw layoutError;
     }
   }, [visible]);
+
+  useEffect(() => {
+    const syncDocumentVisibility = () => setDocumentVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', syncDocumentVisibility);
+    return () => document.removeEventListener('visibilitychange', syncDocumentVisibility);
+  }, []);
 
   useEffect(() => {
     if (!appId.startsWith('native-')) {
@@ -183,14 +190,12 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
     if (surfaceRef.current) observer.observe(surfaceRef.current);
     window.addEventListener('resize', scheduleSync);
     window.addEventListener('scroll', scheduleSync, true);
-    document.addEventListener('visibilitychange', scheduleSync);
 
     return () => {
       window.cancelAnimationFrame(frame);
       observer.disconnect();
       window.removeEventListener('resize', scheduleSync);
       window.removeEventListener('scroll', scheduleSync, true);
-      document.removeEventListener('visibilitychange', scheduleSync);
     };
   }, [sessionId, syncSurface]);
 
