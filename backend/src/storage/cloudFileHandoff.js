@@ -44,9 +44,9 @@ export function validateCloudFileRef(value) {
   return Object.freeze({ provider: 'cloudos', path: Object.freeze(segments) });
 }
 
-export async function resolveCloudFileRef(value) {
+export async function resolveCloudFileRef(value, drive = cloudOsDrive) {
   const fileRef = validateCloudFileRef(value);
-  const runtimePaths = await cloudOsDrive.runtimePaths();
+  const runtimePaths = await drive.runtimePaths();
   const root = runtimePaths.hostRoot;
   let candidate = root;
 
