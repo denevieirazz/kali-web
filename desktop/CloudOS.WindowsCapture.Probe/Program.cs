@@ -35,7 +35,7 @@ try
         : "FAIL";
     var report = new
     {
-        schemaVersion = 1,
+        schemaVersion = 2,
         probe = "CloudOS.WindowsCapture.Probe",
         startedAt,
         completedAt,
@@ -65,6 +65,18 @@ try
             snapshot.Width,
             snapshot.Height,
             snapshot.ResizeCount,
+            snapshot.EmptyFrameCount,
+            initialItemSize = new
+            {
+                width = snapshot.InitialItemWidth,
+                height = snapshot.InitialItemHeight
+            },
+            initialBufferSize = new
+            {
+                width = snapshot.InitialBufferWidth,
+                height = snapshot.InitialBufferHeight,
+                source = snapshot.InitialSizeSource
+            },
             snapshot.FirstFrameAtUtc,
             snapshot.LastFrameAtUtc,
             snapshot.Failure
@@ -177,7 +189,7 @@ internal static class WindowLocator
     [DllImport("user32.dll")]
     internal static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", SetLastError = true)]
     private static extern bool GetWindowRect(IntPtr hwnd, out NativeRect rectangle);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]

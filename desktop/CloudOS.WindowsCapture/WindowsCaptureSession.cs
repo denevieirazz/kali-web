@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+using Windows.Graphics;
 using Windows.Graphics.Capture;
 using Windows.Graphics.DirectX;
 using Windows.Graphics.DirectX.Direct3D11;
@@ -9,6 +11,12 @@ public sealed record WindowsCaptureSnapshot(
     int Width,
     int Height,
     int ResizeCount,
+    int EmptyFrameCount,
+    int InitialItemWidth,
+    int InitialItemHeight,
+    int InitialBufferWidth,
+    int InitialBufferHeight,
+    string InitialSizeSource,
     DateTimeOffset? FirstFrameAtUtc,
     DateTimeOffset? LastFrameAtUtc,
     string? Failure)
@@ -18,15 +26,23 @@ public sealed record WindowsCaptureSnapshot(
 
 public sealed class WindowsCaptureSession : IDisposable
 {
+    private const uint DwmwaExtendedFrameBounds = 9;
+
     private readonly object _sync = new();
     private readonly IDirect3DDevice _device;
     private readonly GraphicsCaptureItem _item;
     private readonly Direct3D11CaptureFramePool _framePool;
     private readonly GraphicsCaptureSession _session;
+    private readonly int _initialItemWidth;
+    private readonly int _initialItemHeight;
+    private readonly int _initialBufferWidth;
+    private readonly int _initialBufferHeight;
+    private readonly string _initialSizeSource;
     private long _frameCount;
     private int _width;
     private int _height;
     private int _resizeCount;
+    private int _emptyFrameCount;
     private DateTimeOffset? _firstFrameAtUtc;
     private DateTimeOffset? _lastFrameAtUtc;
     private string? _failure;
@@ -37,20 +53,28 @@ public sealed class WindowsCaptureSession : IDisposable
     {
         if (!GraphicsCaptureSession.IsSupported())
             throw new PlatformNotSupportedException("Windows.Graphics.Capture is not supported in this Windows session.");
+        if (windowHandle == IntPtr.Zero || !IsWindow(windowHandle))
+            throw new ArgumentException("The capture target must be a live HWND.", nameof(windowHandle));
 
         WindowHandle = windowHandle;
         _item = WindowsCaptureInterop.CreateItemForWindow(windowHandle);
-        if (_item.Size.Width <= 0 || _item.Size.Height <= 0)
-            throw new InvalidOperationException("The capture target reported an empty content size.");
+        var itemSize = _item.Size;
+        _initialItemWidth = itemSize.Width;
+        _initialItemHeight = itemSize.Height;
+
+        var initial = ResolveInitialBufferSize(windowHandle, itemSize);
+        _initialBufferWidth = initial.Size.Width;
+        _initialBufferHeight = initial.Size.Height;
+        _initialSizeSource = initial.Source;
 
         _device = WindowsCaptureInterop.CreateDirect3DDevice();
-        _width = _item.Size.Width;
-        _height = _item.Size.Height;
+        _width = initial.Size.Width;
+        _height = initial.Size.Height;
         _framePool = Direct3D11CaptureFramePool.CreateFreeThreaded(
             _device,
             DirectXPixelFormat.B8G8R8A8UIntNormalized,
             3,
-            _item.Size);
+            initial.Size);
         _session = _framePool.CreateCaptureSession(_item);
         _framePool.FrameArrived += OnFrameArrived;
     }
@@ -77,6 +101,12 @@ public sealed class WindowsCaptureSession : IDisposable
                 _width,
                 _height,
                 _resizeCount,
+                _emptyFrameCount,
+                _initialItemWidth,
+                _initialItemHeight,
+                _initialBufferWidth,
+                _initialBufferHeight,
+                _initialSizeSource,
                 _firstFrameAtUtc,
                 _lastFrameAtUtc,
                 _failure);
@@ -108,19 +138,24 @@ public sealed class WindowsCaptureSession : IDisposable
         try
         {
             var resize = false;
-            Windows.Graphics.SizeInt32 newSize = default;
+            SizeInt32 newSize = default;
             using (var frame = sender.TryGetNextFrame())
             {
                 if (frame is null) return;
                 newSize = frame.ContentSize;
+                if (newSize.Width <= 0 || newSize.Height <= 0)
+                {
+                    lock (_sync) _emptyFrameCount++;
+                    return;
+                }
+
                 var now = DateTimeOffset.UtcNow;
                 lock (_sync)
                 {
                     _frameCount++;
                     _firstFrameAtUtc ??= now;
                     _lastFrameAtUtc = now;
-                    if (newSize.Width > 0 && newSize.Height > 0 &&
-                        (newSize.Width != _width || newSize.Height != _height))
+                    if (newSize.Width != _width || newSize.Height != _height)
                     {
                         _width = newSize.Width;
                         _height = newSize.Height;
@@ -159,8 +194,72 @@ public sealed class WindowsCaptureSession : IDisposable
         _device.Dispose();
     }
 
+    private static InitialCaptureSize ResolveInitialBufferSize(IntPtr windowHandle, SizeInt32 itemSize)
+    {
+        if (IsValidSize(itemSize))
+            return new InitialCaptureSize(itemSize, "graphics-capture-item");
+
+        if (DwmGetWindowAttribute(
+                windowHandle,
+                DwmwaExtendedFrameBounds,
+                out var frameBounds,
+                (uint)Marshal.SizeOf<NativeRect>()) == 0 &&
+            TryConvert(frameBounds, out var dwmSize))
+        {
+            return new InitialCaptureSize(dwmSize, "dwm-extended-frame-bounds");
+        }
+
+        if (GetWindowRect(windowHandle, out var windowBounds) && TryConvert(windowBounds, out var windowSize))
+            return new InitialCaptureSize(windowSize, "get-window-rect");
+
+        throw new InvalidOperationException(
+            $"The capture target has no usable initial size. item={itemSize.Width}x{itemSize.Height}; hwnd=0x{windowHandle.ToInt64():X}.");
+    }
+
+    private static bool IsValidSize(SizeInt32 size) => size.Width > 0 && size.Height > 0;
+
+    private static bool TryConvert(NativeRect rectangle, out SizeInt32 size)
+    {
+        var width = (long)rectangle.Right - rectangle.Left;
+        var height = (long)rectangle.Bottom - rectangle.Top;
+        if (width is <= 0 or > int.MaxValue || height is <= 0 or > int.MaxValue)
+        {
+            size = default;
+            return false;
+        }
+
+        size = new SizeInt32 { Width = (int)width, Height = (int)height };
+        return true;
+    }
+
     private void ThrowIfDisposed()
     {
         if (_disposed) throw new ObjectDisposedException(nameof(WindowsCaptureSession));
     }
+
+    private readonly record struct InitialCaptureSize(SizeInt32 Size, string Source);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindow(IntPtr windowHandle);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetWindowRect(IntPtr windowHandle, out NativeRect rectangle);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmGetWindowAttribute(
+        IntPtr windowHandle,
+        uint attribute,
+        out NativeRect value,
+        uint valueSize);
 }
