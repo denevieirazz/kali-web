@@ -11,7 +11,7 @@ function launchError(code, message) {
   return Object.assign(new Error(message), { code });
 }
 
-export async function applyCloudFileHandoff(launch, fileRef) {
+export async function applyCloudFileHandoff(launch, fileRef, resolveFileRef = resolveCloudFileRef) {
   if (fileRef === undefined || fileRef === null) return launch;
   if (!launch || typeof launch !== 'object' || !launch.launchSpec || typeof launch.launchSpec !== 'object') {
     throw launchError('APP_LAUNCH_SPEC_INVALID', 'Descritor de lançamento inválido para entrega de arquivo.');
@@ -23,7 +23,7 @@ export async function applyCloudFileHandoff(launch, fileRef) {
     throw launchError('APP_FILE_HANDOFF_UNSUPPORTED', 'Este tipo de aplicativo não aceita entrega de arquivos contida.');
   }
 
-  const resolved = await resolveCloudFileRef(fileRef);
+  const resolved = await resolveFileRef(fileRef);
   const currentArguments = Array.isArray(launch.launchSpec.arguments) ? launch.launchSpec.arguments : [];
   if (currentArguments.length >= MAX_ARGUMENTS) {
     throw launchError('APP_ARGUMENT_LIMIT', 'O aplicativo já atingiu o limite seguro de argumentos.');
