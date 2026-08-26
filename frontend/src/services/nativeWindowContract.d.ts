@@ -21,6 +21,11 @@ export function nativeSurfaceLayoutChanged(
   visible: boolean
 ): boolean;
 
+export function nativeSessionListsEqual(
+  previous: NativeSession[] | null,
+  next: NativeSession[] | null
+): boolean;
+
 export function nativeSessionForLaunch(
   sessions: NativeSession[],
   launch: { pid: number; sessionId?: string | null }
