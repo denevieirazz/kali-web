@@ -1,0 +1,26 @@
+name: Windows Captured Surface CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'desktop/CloudOS.WindowsCapture/**'
+      - 'desktop/CloudOS.WindowsCapture.Probe/**'
+      - '.github/workflows/windows-captured-surface-ci.yml'
+
+jobs:
+  build-capture-probe:
+    runs-on: windows-2022
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build generic Windows capture probe
+        run: dotnet build desktop/CloudOS.WindowsCapture.Probe/CloudOS.WindowsCapture.Probe.csproj -c Release --nologo
