@@ -84,15 +84,18 @@ if (-not (Test-Path -LiteralPath $fixtureExe -PathType Leaf)) {
 if ($fixtureExe -match '[%\r\n\0]' -or $scriptPath -match '[%\r\n\0]') {
     throw 'O caminho físico contém caracteres incompatíveis com o contrato windows-script-direct.'
 }
+if ($fixtureExe.Contains('"')) {
+    throw 'O caminho da fixture contém aspas e não pode ser serializado com segurança no .cmd físico.'
+}
 
 [System.IO.Directory]::CreateDirectory($fixtureRoot) | Out-Null
 [System.IO.Directory]::CreateDirectory($startMenuDirectory) | Out-Null
 
-$escapedExe = $fixtureExe.Replace('"', '""')
+$scriptInvocation = '"' + $fixtureExe + '" --native-contained-fixture-window'
 $scriptContent = @(
     '@echo off',
     'setlocal',
-    "\"$escapedExe\" --native-contained-fixture-window",
+    $scriptInvocation,
     'exit /b %ERRORLEVEL%'
 ) -join "`r`n"
 $scriptContent += "`r`n"
@@ -160,7 +163,7 @@ $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 Write-Host ''
 Write-Host 'CloudOS Windows contained-runtime physical fixture: READY' -ForegroundColor Green
 Write-Host "Git HEAD:  $currentHead"
-Write-Host "Menu name: CloudOS BAT Contained Fixture"
+Write-Host 'Menu name: CloudOS BAT Contained Fixture'
 Write-Host "Shortcut:  $shortcutPath"
 Write-Host "Script:    $scriptPath"
 Write-Host "Manifest:  $manifestPath"
