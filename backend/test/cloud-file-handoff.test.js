@@ -60,25 +60,32 @@ test('resolver blocks symlink or junction traversal before runtime handoff', asy
 });
 
 test('Windows handoff appends one broker-resolved path and upgrades shortcut-direct to argv', async () => {
-  const fakePath = process.platform === 'win32' ? 'C:\\CloudOS\\Drive\\Home\\Downloads\\report.pdf' : '/tmp/cloudos/report.pdf';
-  const resolverLaunch = {
-    id: 'native-example',
-    launchKind: 'windows-shortcut-direct',
-    launchSpec: { executable: 'C:\\Program Files\\Viewer\\viewer.exe', arguments: [], workingDirectory: 'C:\\Program Files\\Viewer' },
-  };
-
-  // The integration helper delegates path resolution to the canonical resolver. For this
-  // pure launch-policy assertion, temporarily emulate its already-validated output by
-  // using an executable launch and verify the public shape via a real temporary Drive.
   await withDrive(async drive => {
     const logical = ['Home', 'Downloads', 'report.pdf'];
     await drive.write(logical, Buffer.from('pdf'), { truncate: true });
-    const resolved = await resolveCloudFileRef({ provider: 'cloudos', path: logical }, drive);
-    assert.ok(resolved.absolutePath.endsWith(path.join('Home', 'Downloads', 'report.pdf')));
-  });
+    const fileRef = { provider: 'cloudos', path: logical };
+    const launch = {
+      id: 'native-example',
+      launchKind: 'windows-shortcut-direct',
+      launchSpec: { executable: 'C:\\Program Files\\Viewer\\viewer.exe', arguments: [], workingDirectory: 'C:\\Program Files\\Viewer' },
+    };
 
-  assert.equal(resolverLaunch.launchKind, 'windows-shortcut-direct');
-  assert.equal(fakePath.includes('report.pdf'), true);
+    const result = await applyCloudFileHandoff(launch, fileRef, ref => resolveCloudFileRef(ref, drive));
+    const runtime = await drive.runtimePaths();
+    assert.equal(result.launchKind, 'windows-shortcut-argv');
+    assert.deepEqual(result.launchSpec.arguments, [path.join(runtime.hostRoot, ...logical)]);
+    assert.deepEqual(result.fileHandoff, fileRef);
+    assert.deepEqual(launch.launchSpec.arguments, [], 'original catalog launch capability must remain immutable by convention');
+  });
+});
+
+test('existing shortcut argv is preserved before the brokered file argument', async () => {
+  const resolvedPath = 'C:\\CloudOS\\Drive\\Home\\Documents\\notes.txt';
+  const result = await applyCloudFileHandoff({
+    launchKind: 'windows-shortcut-argv',
+    launchSpec: { executable: 'C:\\Editor\\editor.exe', arguments: ['--safe-mode'] },
+  }, { provider: 'cloudos', path: ['Home', 'Documents', 'notes.txt'] }, async fileRef => ({ fileRef, absolutePath: resolvedPath }));
+  assert.deepEqual(result.launchSpec.arguments, ['--safe-mode', resolvedPath]);
 });
 
 test('BAT/CMD handoff stays fail-closed until its quoting contract is explicitly extended', async () => {
