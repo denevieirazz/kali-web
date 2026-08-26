@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { nativeHostBridge, NativeHostError, type NativeSession, type NativeViewportBounds } from '../../services/nativeHostBridge';
 import { nativeSessionForLaunch, nativeSurfaceLayoutChanged, nativeViewportBounds } from '../../services/nativeWindowContract.js';
+import { isCloudFileRef, type CloudFileRef } from '../../services/cloudFileRef';
+import { stageNativeFileLaunch } from '../../services/nativeFileHandoff';
 import { useSystem } from '../../stores/systemStore';
 import { useWindowManager } from '../../stores/windowManager';
 import './NativeAppWindow.css';
@@ -82,6 +84,8 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
   const [documentVisible, setDocumentVisible] = useState(() => document.visibilityState === 'visible');
 
   const appId = win?.appId || '';
+  const rawFileRef = win?.params?.fileRef;
+  const fileRefKey = isCloudFileRef(rawFileRef) ? JSON.stringify(rawFileRef) : '';
   const visible = Boolean(win && !win.isMinimized && win.isActive && !isStartMenuOpen && documentVisible);
 
   const syncSurface = useCallback(async (attach = false) => {
@@ -149,7 +153,15 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
         await nativeHostBridge.connect();
         if (cancelled) return;
 
-        const launch = await nativeHostBridge.launchApp(appId);
+        let launchAppId = appId;
+        if (fileRefKey) {
+          const fileRef = JSON.parse(fileRefKey) as CloudFileRef;
+          const staged = await stageNativeFileLaunch(appId, fileRef);
+          if (cancelled) return;
+          launchAppId = staged.launchAppId;
+        }
+
+        const launch = await nativeHostBridge.launchApp(launchAppId);
         if (cancelled) {
           await closeCancelledLaunch(launch);
           return;
@@ -201,7 +213,7 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
         await closeSessionBestEffort(currentSessionId);
       })();
     };
-  }, [appId, updateWindowTitle, windowId]);
+  }, [appId, fileRefKey, updateWindowTitle, windowId]);
 
   useEffect(() => {
     if (!sessionId) return undefined;
