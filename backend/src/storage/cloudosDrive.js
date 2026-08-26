@@ -63,6 +63,15 @@ function mapFsError(error, fallbackCode = 'CLOUDOS_DRIVE_IO_FAILED') {
   return new CloudOsDriveError(fallbackCode, 'Falha ao acessar o CloudOS Drive.', error);
 }
 
+export function resolveCloudOsDriveRoot(environment = process.env, platform = process.platform) {
+  const platformPath = platform === 'win32' ? path.win32 : path;
+  if (environment.CLOUDOS_DRIVE_DIR) return platformPath.resolve(environment.CLOUDOS_DRIVE_DIR);
+  if (platform === 'win32' && environment.LOCALAPPDATA) {
+    return platformPath.join(platformPath.resolve(environment.LOCALAPPDATA), 'CloudOS', 'Drive');
+  }
+  return path.resolve(config.dataDir, 'drive');
+}
+
 export function windowsPathToWslPath(candidate) {
   if (typeof candidate !== 'string') return null;
   const match = /^([a-zA-Z]):[\\/](.*)$/.exec(candidate);
@@ -73,7 +82,7 @@ export function windowsPathToWslPath(candidate) {
 }
 
 export class CloudOsDrive {
-  constructor(rootDir = process.env.CLOUDOS_DRIVE_DIR || path.join(config.dataDir, 'drive')) {
+  constructor(rootDir = resolveCloudOsDriveRoot()) {
     this.rootDir = path.resolve(rootDir);
     this.realRoot = null;
     this.readyPromise = null;
