@@ -128,6 +128,13 @@ public sealed class NativeKeyboardShortcutManager : IDisposable
             message is WmKeyUp or WmSysKeyUp,
             (data.Flags & LlkhfAltDown) != 0,
             (data.Flags & (LlkhfInjected | LlkhfLowerIlInjected)) != 0);
+
+        // Ordinary typing has no CloudOS routing semantics unless a reserved
+        // sequence is already captured. Avoid GetForegroundWindow/GetWindow on
+        // this hot path and forward directly to the target application.
+        if (!_router.RequiresRouting(input))
+            return CallNextHookEx(hook, code, messagePointer, dataPointer);
+
         var decision = _router.Route(input, IsCloudOsForeground());
 
         if (decision.Shortcut is { } shortcut)
