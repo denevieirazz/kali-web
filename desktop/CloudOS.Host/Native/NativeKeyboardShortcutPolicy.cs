@@ -48,6 +48,19 @@ public sealed class NativeKeyboardShortcutRouter
         _altF4Held ||
         _suppressedWinChordKeys.Count > 0;
 
+    /// <summary>
+    /// Returns false for ordinary application input when no reserved sequence is
+    /// active. The low-level hook can then skip foreground/owner Win32 queries and
+    /// forward the event immediately. Once a sequence is captured, every key still
+    /// routes through the state machine so Win chords and release cleanup stay exact.
+    /// </summary>
+    public bool RequiresRouting(NativeKeyboardInput input)
+    {
+        if (HasCapture) return true;
+        return input.VirtualKey is VirtualKeyLeftWin or VirtualKeyRightWin
+            || (input.AltDown && input.VirtualKey is VirtualKeyTab or VirtualKeyF4);
+    }
+
     public NativeKeyboardDecision Route(NativeKeyboardInput input, bool cloudOsForeground)
     {
         var virtualKey = input.VirtualKey;
