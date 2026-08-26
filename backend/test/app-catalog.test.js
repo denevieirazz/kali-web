@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseWindowsAppDiscovery, parseWindowsShortcutArguments } from '../src/apps/appCatalog.js';
+import { buildWindowsScriptLaunchArguments, parseWindowsAppDiscovery, parseWindowsShortcutArguments } from '../src/apps/appCatalog.js';
+
+test('launcher de script Windows preserva caminho com espaços sob cmd /s /c', () => {
+  const scriptPath = 'C:\\Users\\Runner User\\CloudOS Fixtures\\Launch GUI.cmd';
+  assert.deepEqual(
+    buildWindowsScriptLaunchArguments(scriptPath),
+    ['/d', '/s', '/v:off', '/c', 'call', scriptPath]
+  );
+});
 
 test('parser de argumentos Windows preserva limites argv convencionais e falha fechado', () => {
   assert.deepEqual(parseWindowsShortcutArguments('--profile "Profile 1" --safe'), ['--profile', 'Profile 1', '--safe']);
