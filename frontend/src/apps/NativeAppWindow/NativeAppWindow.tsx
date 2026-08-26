@@ -31,6 +31,34 @@ async function resolveSessionId(launch: NativeLaunch, cancelled: () => boolean):
   return null;
 }
 
+async function closeSessionBestEffort(sessionId: string | null | undefined) {
+  if (!sessionId) return;
+  try {
+    await nativeHostBridge.operate('close', sessionId);
+  } catch {
+    // Host-side pending-attach/document-reset containment remains the final fail-safe
+    // if the WebView transport disappears during renderer teardown.
+  }
+}
+
+async function closeCancelledLaunch(launch: NativeLaunch) {
+  if (!launch.managed) return;
+  const exactSessionId = typeof launch.sessionId === 'string' && launch.sessionId ? launch.sessionId : null;
+  if (exactSessionId) {
+    await closeSessionBestEffort(exactSessionId);
+    return;
+  }
+
+  // Compatibility fallback for older Hosts that returned only the launch PID. Query
+  // once rather than waiting through the normal correlation loop during teardown.
+  try {
+    const result = await nativeHostBridge.listSessions();
+    await closeSessionBestEffort(nativeSessionForLaunch(result.sessions, launch)?.sessionId);
+  } catch {
+    // The Host will terminate an unattached launch when its existing deadline expires.
+  }
+}
+
 function errorMessage(error: unknown) {
   if (error instanceof NativeHostError) return error.message;
   if (error instanceof Error) return error.message;
@@ -122,7 +150,10 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
         if (cancelled) return;
 
         const launch = await nativeHostBridge.launchApp(appId);
-        if (cancelled) return;
+        if (cancelled) {
+          await closeCancelledLaunch(launch);
+          return;
+        }
         if (launch.name) updateWindowTitle(windowId, launch.name);
         if (!launch.managed) {
           throw new NativeHostError(
@@ -134,7 +165,10 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
         const exactSessionId = typeof launch.sessionId === 'string' && launch.sessionId ? launch.sessionId : null;
         if (!exactSessionId) setStatus('waiting');
         const resolvedSessionId = await resolveSessionId(launch, () => cancelled);
-        if (cancelled) return;
+        if (cancelled) {
+          await closeSessionBestEffort(resolvedSessionId);
+          return;
+        }
         if (!resolvedSessionId) {
           throw new NativeHostError('NATIVE_WINDOW_NOT_FOUND', 'A janela do aplicativo não apareceu a tempo para ser encaixada no CloudOS.');
         }
@@ -164,9 +198,7 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
             await nativeHostBridge.layoutSession(currentSessionId, bounds, false);
           } catch {}
         }
-        try {
-          await nativeHostBridge.operate('close', currentSessionId);
-        } catch {}
+        await closeSessionBestEffort(currentSessionId);
       })();
     };
   }, [appId, updateWindowTitle, windowId]);
