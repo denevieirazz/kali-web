@@ -16,8 +16,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $expectedBranch = 'poc/cloudos-windows-captured-surface'
 $repoRoot = [System.IO.Path]::GetFullPath((Get-Location).Path)
-$hostTestsProject = Join-Path $repoRoot 'desktop\CloudOS.Host.Tests\CloudOS.Host.Tests.csproj'
-$fixtureExe = Join-Path $repoRoot 'desktop\CloudOS.Host.Tests\bin\Release\net8.0\CloudOS.Host.Tests.exe'
+$fixtureProject = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.Fixture\CloudOS.WindowsCapture.Fixture.csproj'
+$fixtureExe = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.Fixture\bin\Release\net8.0-windows\CloudOS.WindowsCapture.Fixture.exe'
 $probeProject = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.Probe\CloudOS.WindowsCapture.Probe.csproj'
 $probeDll = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.Probe\bin\Release\net8.0-windows10.0.19041.0\CloudOS.WindowsCapture.Probe.dll'
 $outputRoot = [System.IO.Path]::GetFullPath($OutputDirectory)
@@ -56,8 +56,8 @@ $fixture = $null
 $startedAt = [DateTimeOffset]::UtcNow
 
 try {
-    Write-Host 'Compilando fixture Win32...' -ForegroundColor Cyan
-    & $dotnet build $hostTestsProject -c Release --nologo
+    Write-Host 'Compilando fixture Windows convencional...' -ForegroundColor Cyan
+    & $dotnet build $fixtureProject -c Release --nologo
     if ($LASTEXITCODE -ne 0) { throw "Build da fixture falhou com exit code $LASTEXITCODE." }
     if (-not (Test-Path -LiteralPath $fixtureExe -PathType Leaf)) { throw "Fixture não encontrada: $fixtureExe" }
 
@@ -66,8 +66,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Build do capture probe falhou com exit code $LASTEXITCODE." }
     if (-not (Test-Path -LiteralPath $probeDll -PathType Leaf)) { throw "Probe não encontrado: $probeDll" }
 
-    Write-Host 'Iniciando fixture Win32 real...' -ForegroundColor Cyan
-    $fixture = Start-Process -FilePath $fixtureExe -ArgumentList '--native-contained-fixture-window' -PassThru
+    Write-Host 'Iniciando fixture WinForms animada...' -ForegroundColor Cyan
+    $fixture = Start-Process -FilePath $fixtureExe -PassThru
     $deadline = [DateTimeOffset]::UtcNow.AddSeconds(10)
     $reportedMainWindowHwnd = [IntPtr]::Zero
     do {
@@ -79,10 +79,8 @@ try {
 
     if ($reportedMainWindowHwnd -eq [IntPtr]::Zero) { throw 'Fixture não publicou nenhuma janela dentro do timeout.' }
 
-    # IMPORTANT: Process.MainWindowHandle is not authoritative for a console-hosted test process.
-    # It can identify a console/ConPTY window instead of the Win32 fixture HWND. The capture probe
-    # owns target selection: given the fixture PID it enumerates visible top-level HWNDs belonging
-    # to that process and selects the largest candidate by native window bounds.
+    # MainWindowHandle is only a readiness signal. The probe remains authoritative and
+    # enumerates visible top-level HWNDs belonging to this PID, selecting the largest one.
     Write-Host "Fixture PID=$($fixture.Id) reported MainWindowHandle=0x$('{0:X}' -f $reportedMainWindowHwnd.ToInt64())" -ForegroundColor Cyan
     Write-Host 'Executando Windows.Graphics.Capture...' -ForegroundColor Cyan
     $probeOutput = & $dotnet $probeDll `
@@ -98,6 +96,7 @@ try {
         "completedAt=$([DateTimeOffset]::UtcNow.ToString('o'))",
         "branch=$branch",
         "head=$currentHead",
+        'fixtureKind=winforms-overlapped-animated',
         "fixturePid=$($fixture.Id)",
         "fixtureReportedMainWindowHwnd=0x$('{0:X}' -f $reportedMainWindowHwnd.ToInt64())",
         'targetSelection=probe-enumerated-largest-visible-top-level-window-for-pid',
@@ -125,6 +124,7 @@ try {
     Write-Host ''
     Write-Host 'CLOUDOS WINDOWS CAPTURE PROBE LOCAL SMOKE: PASS' -ForegroundColor Green
     Write-Host "Target HWND: $($report.window.handle)"
+    Write-Host "Target title: $($report.window.title)"
     Write-Host "Target size: $($report.window.width)x$($report.window.height)"
     Write-Host "Frames: $($report.capture.frameCount)"
     Write-Host "Size:   $($report.capture.width)x$($report.capture.height)"
