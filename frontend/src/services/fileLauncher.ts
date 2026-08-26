@@ -18,11 +18,11 @@ export interface OpenFileOptions {
 }
 
 function isFileCapableWindowsApp(app: any) {
-  const runtime = app?.metadata?.runtime;
-  const launchKind = app?.metadata?.launchKind;
-  return runtime === 'windows'
-    && typeof app?.metadata?.nativeAppId === 'string'
-    && ['windows-executable', 'windows-shortcut-direct', 'windows-shortcut-argv'].includes(launchKind);
+  return app?.source === 'windows'
+    && app?.isNative === true
+    && typeof app?.nativeAppId === 'string'
+    && app?.launchable === true
+    && app?.launchMode === 'native-managed';
 }
 
 function windowsOpenWithApps(registeredApps: Record<string, any>): AppAssociation[] {
@@ -133,9 +133,7 @@ export function openFile(options: OpenFileOptions): void {
   // 2. Native CloudOS Application execution
   const appId = selectedApp.id;
 
-  const richOfficeExtensions = ['docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp'];
-  const ext = getFileExtension(fileName);
-  if (appId === 'office-viewer' || (richOfficeExtensions.includes(ext) && !targetAppId)) {
+  if (appId === 'office-viewer') {
     const pid = createProcess('office-viewer', selectedApp.name || 'Visualizador Office', selectedApp.icon || '📄');
     openWindow({
       title,
@@ -247,7 +245,7 @@ export function openFile(options: OpenFileOptions): void {
   const fallback = registeredApps[appId] || registeredApps['notepad'];
   if (fallback) {
     const pid = createProcess(fallback.id, fallback.name, fallback.icon);
-    const fileRef = fallback.metadata?.runtime === 'windows' ? cloudFileRefFromLegacyPath(filePath) : null;
+    const fileRef = isFileCapableWindowsApp(fallback) ? cloudFileRefFromLegacyPath(filePath) : null;
     openWindow({
       title,
       icon: fallback.icon,
