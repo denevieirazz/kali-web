@@ -1,4 +1,5 @@
 import { getStoredToken } from './apiClient';
+import { nativeSessionListsEqual } from './nativeWindowContract.js';
 
 type NativeRequestMethod =
   | 'bridge.handshake'
@@ -89,11 +90,19 @@ declare global {
   }
 }
 
+function snapshotSessions(sessions: NativeSession[]) {
+  return sessions.map((session) => ({
+    ...session,
+    bounds: { ...session.bounds }
+  }));
+}
+
 class NativeHostBridge {
   private transport: WebViewMessageTransport | null = null;
   private pending = new Map<string, { resolve: (value: unknown) => void; reject: (reason: Error) => void; timer: number }>();
   private eventListeners = new Set<(sessions: NativeSession[]) => void>();
   private connectPromise: Promise<boolean> | null = null;
+  private lastSessions: NativeSession[] | null = null;
   private listening = false;
   private ready = false;
 
@@ -177,9 +186,9 @@ class NativeHostBridge {
     return this.request(`native.session.${method}` as NativeRequestMethod, { sessionId });
   }
 
-  async attachSession(sessionId: string, bounds: NativeViewportBounds) {
+  async attachSession(sessionId: string, bounds: NativeViewportBounds, visible = true) {
     await this.requireConnection();
-    return this.request<{ sessionId: string; accepted: boolean; contained?: boolean; containmentMode?: NativeContainmentMode }>('native.session.attach', { sessionId, bounds });
+    return this.request<{ sessionId: string; accepted: boolean; contained?: boolean; containmentMode?: NativeContainmentMode }>('native.session.attach', { sessionId, bounds, visible });
   }
 
   async layoutSession(sessionId: string, bounds: NativeViewportBounds, visible: boolean) {
@@ -188,6 +197,9 @@ class NativeHostBridge {
   }
 
   onSessionsChanged(listener: (sessions: NativeSession[]) => void) {
+    // A newly subscribed NativeAppWindow must receive the next host event even if
+    // it happens to match the last event seen by older listeners.
+    this.lastSessions = null;
     this.eventListeners.add(listener);
     return () => this.eventListeners.delete(listener);
   }
@@ -227,7 +239,15 @@ class NativeHostBridge {
     const message = event.data as NativeResponse<unknown> | { v: 1; type: 'event'; event: string; data?: { sessions?: NativeSession[] } };
     if (!message || message.v !== 1) return;
     if (message.type === 'event' && message.event === 'native.sessionsChanged') {
+      if (this.eventListeners.size === 0) {
+        this.lastSessions = null;
+        return;
+      }
       const sessions = message.data?.sessions || [];
+      if (nativeSessionListsEqual(this.lastSessions, sessions)) return;
+      // Listeners are application code and may mutate their input. Keep an isolated
+      // structural snapshot so one listener cannot defeat duplicate-event suppression.
+      this.lastSessions = snapshotSessions(sessions);
       for (const listener of this.eventListeners) {
         try {
           listener(sessions);

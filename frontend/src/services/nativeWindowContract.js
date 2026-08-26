@@ -27,6 +27,53 @@ export function nativeViewportBounds(rect, viewport) {
   return { x, y, width: right - x, height: bottom - y };
 }
 
+/** Returns true only when a native layout IPC would change observable state. */
+export function nativeSurfaceLayoutChanged(previous, bounds, visible) {
+  if (!bounds) return false;
+  if (!previous) return true;
+  return previous.visible !== visible
+    || previous.bounds.x !== bounds.x
+    || previous.bounds.y !== bounds.y
+    || previous.bounds.width !== bounds.width
+    || previous.bounds.height !== bounds.height;
+}
+
+function nativeBoundsEqual(left, right) {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return left.x === right.x
+    && left.y === right.y
+    && left.width === right.width
+    && left.height === right.height;
+}
+
+/**
+ * Compares only state observable by NativeAppWindow. Host refresh timestamps and
+ * fresh object identities must not wake React when the native session is unchanged.
+ */
+export function nativeSessionListsEqual(previous, next) {
+  if (previous === next) return true;
+  if (!Array.isArray(previous) || !Array.isArray(next) || previous.length !== next.length) return false;
+
+  for (let index = 0; index < previous.length; index += 1) {
+    const left = previous[index];
+    const right = next[index];
+    if (!left || !right
+      || left.sessionId !== right.sessionId
+      || left.title !== right.title
+      || left.processId !== right.processId
+      || left.minimized !== right.minimized
+      || left.maximized !== right.maximized
+      || left.contained !== right.contained
+      || left.containmentMode !== right.containmentMode
+      || left.visible !== right.visible
+      || !nativeBoundsEqual(left.bounds, right.bounds)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /** Finds the concrete native window created by an allow-listed launch. */
 export function nativeSessionForLaunch(sessions, launch) {
   if (!Array.isArray(sessions) || !launch) return null;
@@ -37,4 +84,3 @@ export function nativeSessionForLaunch(sessions, launch) {
   if (!Number.isInteger(launch.pid) || launch.pid <= 0) return null;
   return sessions.find((session) => session?.processId === launch.pid) || null;
 }
-
