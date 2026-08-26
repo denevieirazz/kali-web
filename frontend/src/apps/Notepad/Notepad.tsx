@@ -1,7 +1,7 @@
 // ============================================
 // Notepad App
 // ============================================
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { useWindowManager } from '../../stores/windowManager';
 import { useFileSystem } from '../../stores/fileSystem';
 import { useProcess } from '../../contexts/ProcessContext';
@@ -38,8 +38,8 @@ export default function NotepadApp({ windowId }: { windowId: string }) {
     }
   }, [windowId, getWindow, getNode]);
 
-  useEffect(() => {
-    updateWindowTitle(windowId, `${fileName}${isModified ? ' •' : ''} - Bloco de Notas`);
+  useLayoutEffect(() => {
+    updateWindowTitle(windowId, `${isModified ? '*' : ''}${fileName} - Bloco de Notas`);
   }, [fileName, isModified, windowId, updateWindowTitle]);
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {

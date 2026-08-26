@@ -7,6 +7,9 @@ import { useWindowManager } from '../../stores/windowManager';
 import { useProcessManager } from '../../stores/processManager';
 import { useContextMenuStore } from '../../stores/contextMenuStore';
 import { useRegistry } from '../../stores/registry';
+import { useNativeSessions } from '../../hooks/useNativeSessions';
+import { nativeHostBridge, type NativeSession } from '../../services/nativeHostBridge';
+import { useNativeWindowBindings } from '../../stores/nativeWindowBindings';
 import './Taskbar.css';
 
 export default function Taskbar() {
@@ -15,6 +18,8 @@ export default function Taskbar() {
   const { createProcess } = useProcessManager();
   const { openContextMenu } = useContextMenuStore();
   const [time, setTime] = useState(new Date());
+  const nativeSessions = useNativeSessions();
+  const nativeWindowBindings = useNativeWindowBindings((state) => state.sessionToWindow);
 
   const position = String(useRegistry(s => s.hives['HKEY_CURRENT_USER\\Software\\ObsidianOS\\Taskbar']?.Position?.value || 'bottom'));
   const alignment = String(useRegistry(s => s.hives['HKEY_CURRENT_USER\\Software\\ObsidianOS\\Taskbar']?.Alignment?.value || 'center'));
@@ -71,6 +76,21 @@ export default function Taskbar() {
     ]);
   };
 
+  const handleNativeSessionContextMenu = (e: React.MouseEvent, session: NativeSession) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const operate = (action: 'focus' | 'minimize' | 'maximize' | 'restore' | 'close') => () => {
+      nativeHostBridge.operate(action, session.sessionId).catch(() => {});
+    };
+    openContextMenu(e.clientX, e.clientY, [
+      { id: 'native-focus', label: session.minimized ? 'Restaurar' : 'Trazer para frente', icon: '▣', onClick: operate(session.minimized ? 'restore' : 'focus') },
+      { id: 'native-minimize', label: 'Minimizar', icon: '—', onClick: operate('minimize') },
+      { id: 'native-maximize', label: session.maximized ? 'Restaurar tamanho' : 'Maximizar', icon: '□', onClick: operate(session.maximized ? 'restore' : 'maximize') },
+      { id: 'native-separator', label: '', separator: true },
+      { id: 'native-close', label: 'Fechar aplicativo', icon: '×', onClick: operate('close') }
+    ]);
+  };
+
   return (
     <div className={`taskbar acrylic position-${position} alignment-${alignment}`} onContextMenu={handleTaskbarContextMenu}>
       {/* Left section - Empty or system icons */}
@@ -100,6 +120,19 @@ export default function Taskbar() {
             title={win.title}
           >
             <span className="taskbar-app-icon">{win.icon}</span>
+            <div className="taskbar-app-indicator" />
+          </button>
+        ))}
+
+        {nativeSessions.filter(session => !nativeWindowBindings[session.sessionId]).map(session => (
+          <button
+            key={session.sessionId}
+            className={`taskbar-app-btn native-session ${session.minimized ? 'minimized' : ''}`}
+            onClick={() => nativeHostBridge.operate(session.minimized ? 'restore' : 'focus', session.sessionId).catch(() => {})}
+            onContextMenu={(event) => handleNativeSessionContextMenu(event, session)}
+            title={`${session.title} · aplicativo nativo`}
+          >
+            <span className="taskbar-app-icon">▣</span>
             <div className="taskbar-app-indicator" />
           </button>
         ))}

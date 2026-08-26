@@ -1,14 +1,15 @@
-$ErrorActionPreference = 'Continue'
-$Root = Split-Path -Parent $PSScriptRoot
-$Runtime = Join-Path $Root 'runtime'
-foreach ($name in 'frontend-port.json','backend-port.json') {
-  $file = Join-Path $Runtime $name
-  if (Test-Path -LiteralPath $file) {
-    try {
-      $info = Get-Content -LiteralPath $file -Raw | ConvertFrom-Json
-      if ($info.pid) { Stop-Process -Id ([int]$info.pid) -Force -ErrorAction SilentlyContinue }
-    } catch {}
-    Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+﻿$ErrorActionPreference = 'Continue'
+$hosts = @(Get-Process -Name 'CloudOS.Host' -ErrorAction SilentlyContinue)
+if (-not $hosts.Count) {
+  Write-Host 'Nenhuma janela CloudOS.Host está ativa.'
+  exit 0
+}
+
+foreach ($hostProcess in $hosts) {
+  if ($hostProcess.MainWindowHandle -ne 0) {
+    [void]$hostProcess.CloseMainWindow()
+    Write-Host "Encerramento gracioso solicitado ao CloudOS PID=$($hostProcess.Id)."
   }
 }
-Write-Host 'CloudOS encerrado.'
+
+Write-Host 'O script não força processos nem confia em PIDs de arquivos runtime.'

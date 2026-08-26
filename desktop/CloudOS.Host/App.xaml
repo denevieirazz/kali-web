@@ -1,0 +1,10 @@
+<Application x:Class="CloudOS.Host.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ShutdownMode="OnMainWindowClose">
+  <Application.Resources>
+    <SolidColorBrush x:Key="CloudOsBackground" Color="#080D18" />
+    <SolidColorBrush x:Key="CloudOsPanel" Color="#111A2B" />
+    <SolidColorBrush x:Key="CloudOsAccent" Color="#5B92EE" />
+  </Application.Resources>
+</Application>

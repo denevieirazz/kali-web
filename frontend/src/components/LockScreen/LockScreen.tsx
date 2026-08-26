@@ -1,338 +1,381 @@
-// ============================================
-// Lock Screen / Login / Primeiro Acesso — CloudOS-Unified
-// ============================================
-import { useState, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSystem } from '../../stores/systemStore';
 import { useUserStore } from '../../stores/userStore';
+import { validateDisplayName, validateNewPassword, validateUsername } from '../../services/accountContract.js';
+import kernel from '../../core/kernel';
 import './LockScreen.css';
+
+type PanelMode = 'login' | 'create-account' | 'recovery' | 'recovery-code';
+type CreateAccountStage = 'authorize' | 'details';
+type OneTimeCodeOrigin = 'legacy-login' | 'recovery-reset' | 'account-creation';
 
 export default function LockScreen() {
   const { bootPhase, unlock } = useSystem();
-  const { currentUser, setupRequired, login, createAdmin, checkSetupStatus, resetLocalInstallation } = useUserStore();
-
+  const {
+    currentUser,
+    setupStatus,
+    setupStatusMessage,
+    recoveryAvailable,
+    recoveryStatusMessage,
+    login,
+    createAccount,
+    recoverAccount,
+    checkSetupStatus,
+    checkRecoveryStatus,
+    confirmRecoveryCodeSaved,
+    logout,
+    resetLocalInstallation
+  } = useUserStore();
+  const [showPanel, setShowPanel] = useState(false);
+  const [mode, setMode] = useState<PanelMode>('login');
+  const [createAccountStage, setCreateAccountStage] = useState<CreateAccountStage>('authorize');
   const [username, setUsername] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-
-  const [showPanel, setShowPanel] = useState(false);
+  const [recoveryCode, setRecoveryCode] = useState('');
+  const [rotatedCode, setRotatedCode] = useState<string | null>(null);
+  const [oneTimeCodeOrigin, setOneTimeCodeOrigin] = useState<OneTimeCodeOrigin>('recovery-reset');
+  const [recoverySaved, setRecoverySaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [time, setTime] = useState(new Date());
   const [isUnlocking, setIsUnlocking] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [checkingRecovery, setCheckingRecovery] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
-
+  const recoveryCheckInFlight = useRef(false);
   const isDevEnvironment = import.meta.env.DEV || import.meta.env.MODE === 'development';
 
   useEffect(() => {
-    const timer = setInterval(() => setTime(new Date()), 1000);
-    return () => clearInterval(timer);
+    const timer = window.setInterval(() => setTime(new Date()), 1000);
+    return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
-    checkSetupStatus();
-  }, [checkSetupStatus]);
+    if (showPanel) return;
+    const revealLogin = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.altKey || event.metaKey) return;
+      setShowPanel(true);
+    };
+    window.addEventListener('keydown', revealLogin);
+    return () => window.removeEventListener('keydown', revealLogin);
+  }, [showPanel]);
+
+  useEffect(() => {
+    if (setupStatus === 'checking') void checkSetupStatus();
+  }, [checkSetupStatus, setupStatus]);
+
+  useEffect(() => {
+    if (bootPhase === 'login' && setupStatus === 'required') kernel.bootPhase = 'OOBE';
+  }, [bootPhase, setupStatus]);
+
+  useEffect(() => {
+    if (setupStatus === 'complete' && mode === 'login' && recoveryAvailable === null && !recoveryStatusMessage && !recoveryCheckInFlight.current) {
+      recoveryCheckInFlight.current = true;
+      void checkRecoveryStatus().finally(() => { recoveryCheckInFlight.current = false; });
+    }
+  }, [checkRecoveryStatus, mode, recoveryAvailable, recoveryStatusMessage, setupStatus]);
+
+  useEffect(() => {
+    if (mode === 'create-account') return;
+    if (currentUser?.username && !username) setUsername(currentUser.username);
+    if (currentUser?.displayName && !displayName) setDisplayName(currentUser.displayName);
+  }, [currentUser, displayName, mode, username]);
 
   if (bootPhase !== 'login') return null;
 
   const hours = time.getHours().toString().padStart(2, '0');
   const minutes = time.getMinutes().toString().padStart(2, '0');
-  const dateStr = time.toLocaleDateString('pt-BR', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-  });
+  const dateStr = time.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
 
-  const handleCreateAdmin = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  function resetMessages() {
     setError(null);
     setSuccessMsg(null);
-    const cleanUser = username.trim();
+  }
 
-    // Validações no frontend sem chamar a API desnecessariamente
-    if (!cleanUser) {
-      setError('Por favor, preencha o nome de usuário.');
-      return;
-    }
-    if (cleanUser.length < 3) {
-      setError('O nome de usuário deve conter pelo menos 3 caracteres.');
-      return;
-    }
-    if (!/^[a-zA-Z0-9._-]+$/.test(cleanUser)) {
-      setError('O nome de usuário contem caracteres inválidos.');
-      return;
-    }
-    if (!password) {
-      setError('Por favor, digite a senha.');
-      return;
-    }
-    if (password.length < 6) {
-      setError('A senha deve conter pelo menos 6 caracteres.');
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError('A confirmação de senha não confere.');
-      return;
-    }
-
+  async function handleLogin(event: React.FormEvent) {
+    event.preventDefault();
+    resetMessages();
+    const usernameError = validateUsername(username);
+    if (usernameError || !password) return setError(usernameError || 'Informe a senha.');
     setLoading(true);
-    const res = await createAdmin(cleanUser, password, confirmPassword);
+    const result = await login(username.trim(), password);
     setLoading(false);
-
-    if (res.success) {
-      setSuccessMsg('Administrador criado com sucesso! Abrindo o sistema...');
-      setIsUnlocking(true);
-      setTimeout(() => unlock(), 900);
-    } else {
-      setError(res.message || 'Falha ao criar a conta de administrador.');
-    }
-  };
-
-  const handleLogin = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    setError(null);
-    setSuccessMsg(null);
-    const cleanUser = username.trim();
-
-    if (!cleanUser || !password) {
-      setError('Preencha os campos de usuário e senha.');
+    setPassword('');
+    if (!result.success) return setError(result.message || 'Conta ou senha não conferem.');
+    if (result.recoveryCode) {
+      setRotatedCode(result.recoveryCode);
+      setOneTimeCodeOrigin('legacy-login');
+      setRecoverySaved(false);
+      setMode('recovery-code');
       return;
     }
+    setSuccessMsg('Conta autenticada. Abrindo o CloudOS…');
+    setIsUnlocking(true);
+    window.setTimeout(() => unlock(), 650);
+  }
 
+  async function handleRecovery(event: React.FormEvent) {
+    event.preventDefault();
+    resetMessages();
+    if (!recoveryCode.trim()) return setError('Informe o código de recuperação.');
+    const validation = validateUsername(username) || validateDisplayName(displayName) || validateNewPassword(password, confirmPassword);
+    if (validation) return setError(validation);
     setLoading(true);
-    const res = await login(cleanUser, password);
+    const result = await recoverAccount(recoveryCode, username.trim(), displayName.trim(), password, confirmPassword);
     setLoading(false);
+    setPassword('');
+    setConfirmPassword('');
+    setRecoveryCode('');
+    if (!result.success || !result.recoveryCode) return setError(result.message || 'Não foi possível recuperar a conta.');
+    setRotatedCode(result.recoveryCode);
+    setOneTimeCodeOrigin('recovery-reset');
+    setRecoverySaved(false);
+    setMode('recovery-code');
+  }
 
-    if (res.success) {
-      setSuccessMsg('Autenticado com sucesso!');
-      setIsUnlocking(true);
-      setTimeout(() => unlock(), 800);
-    } else {
-      setError('Credenciais inválidas.');
+  function openCreateAccount() {
+    resetMessages();
+    setMode('create-account');
+    setCreateAccountStage('authorize');
+    setUsername('');
+    setDisplayName('');
+    setPassword('');
+    setConfirmPassword('');
+  }
+
+  async function handleAuthorizeAccountCreation(event: React.FormEvent) {
+    event.preventDefault();
+    resetMessages();
+    const usernameError = validateUsername(username);
+    if (usernameError || !password) return setError(usernameError || 'Informe a senha do administrador.');
+    setLoading(true);
+    const result = await login(username.trim(), password);
+    setLoading(false);
+    setPassword('');
+    if (!result.success) return setError(result.message || 'Não foi possível autorizar a criação da conta.');
+    if (useUserStore.getState().currentUser?.isAdmin !== true) {
+      await logout();
+      return setError('A criação de contas exige uma conta administradora do CloudOS.');
+    }
+    if (result.recoveryCode) {
+      setRotatedCode(result.recoveryCode);
+      setOneTimeCodeOrigin('account-creation');
+      setRecoverySaved(false);
+      setMode('recovery-code');
+      return;
+    }
+    setUsername('');
+    setDisplayName('');
+    setConfirmPassword('');
+    setCreateAccountStage('details');
+    setSuccessMsg('Administrador confirmado. Agora informe os dados da nova conta.');
+  }
+
+  async function handleCreateAccount(event: React.FormEvent) {
+    event.preventDefault();
+    resetMessages();
+    const validation = validateUsername(username) || validateDisplayName(displayName) || validateNewPassword(password, confirmPassword);
+    if (validation) return setError(validation);
+    const newUsername = username.trim();
+    setLoading(true);
+    const result = await createAccount(newUsername, displayName.trim(), password, confirmPassword);
+    if (result.success) await logout();
+    setLoading(false);
+    setPassword('');
+    setConfirmPassword('');
+    if (!result.success) return setError(result.message || 'Não foi possível criar a conta.');
+    setMode('login');
+    setCreateAccountStage('authorize');
+    setUsername(newUsername);
+    setDisplayName('');
+    setSuccessMsg('Conta criada. Entre com a senha que você acabou de definir.');
+  }
+
+  async function cancelCreateAccount() {
+    if (createAccountStage === 'details' && useUserStore.getState().isAuthenticated) await logout();
+    resetMessages();
+    setMode('login');
+    setCreateAccountStage('authorize');
+    setUsername('');
+    setDisplayName('');
+    setPassword('');
+    setConfirmPassword('');
+  }
+
+  function finishRecovery() {
+    if (!recoverySaved) return;
+    confirmRecoveryCodeSaved();
+    setRotatedCode(null);
+    setRecoverySaved(false);
+    if (oneTimeCodeOrigin === 'account-creation') {
+      setMode('create-account');
+      setCreateAccountStage('details');
+      setUsername('');
+      setDisplayName('');
       setPassword('');
+      setConfirmPassword('');
+      setSuccessMsg('Código confirmado. Agora informe os dados da nova conta.');
+      return;
     }
-  };
+    setSuccessMsg('Conta recuperada. Abrindo o CloudOS…');
+    setIsUnlocking(true);
+    window.setTimeout(() => unlock(), 650);
+  }
 
-  const handleResetDev = async () => {
-    if (window.confirm('Tem certeza que deseja redefinir a instalação local do CloudOS-Unified? Todo o banco local será zerado.')) {
-      setLoading(true);
-      const ok = await resetLocalInstallation();
-      setLoading(false);
-      if (ok) {
-        setUsername('');
-        setPassword('');
-        setConfirmPassword('');
-        setError(null);
-        setSuccessMsg('Instalação local redefinida com sucesso.');
-        setTimeout(() => setSuccessMsg(null), 3000);
-      }
+  async function copyRotatedCode() {
+    if (!rotatedCode) return;
+    try { await navigator.clipboard.writeText(rotatedCode); }
+    catch { setError('Selecione e salve o código manualmente.'); }
+  }
+
+  async function handleResetDev() {
+    if (!window.confirm('Redefinir a instalação local do CloudOS? As contas locais serão removidas.')) return;
+    setLoading(true);
+    const ok = await resetLocalInstallation();
+    setLoading(false);
+    if (!ok) setError('Não foi possível redefinir a instalação.');
+  }
+
+  function refreshRecoveryStatus() {
+    if (recoveryCheckInFlight.current) return;
+    recoveryCheckInFlight.current = true;
+    void checkRecoveryStatus().finally(() => { recoveryCheckInFlight.current = false; });
+  }
+
+  async function openRecovery() {
+    setShowPanel(true);
+    resetMessages();
+    setPassword('');
+    setConfirmPassword('');
+    if (setupStatus !== 'complete') return;
+
+    let available = recoveryAvailable;
+    if (available !== true) {
+      setCheckingRecovery(true);
+      recoveryCheckInFlight.current = true;
+      available = await checkRecoveryStatus();
+      recoveryCheckInFlight.current = false;
+      setCheckingRecovery(false);
     }
-  };
+
+    if (available === true) {
+      setMode('recovery');
+      return;
+    }
+
+    if (available === false) {
+      setError('A recuperação ainda não foi ativada nesta conta. Em contas antigas, entre uma vez com a senha atual para receber e salvar o primeiro código.');
+      return;
+    }
+    setError('Não foi possível consultar a recuperação agora. Verifique o agente local e tente novamente.');
+  }
+
+  const title = mode === 'recovery'
+    ? 'Recuperar conta'
+    : mode === 'recovery-code'
+      ? 'Novo código de recuperação'
+      : mode === 'create-account'
+        ? 'Criar outra conta'
+        : 'Bem-vindo ao CloudOS';
+  const subtitle = mode === 'login'
+    ? 'Entre com sua conta local'
+    : mode === 'recovery'
+      ? 'Redefina a conta com segurança'
+      : mode === 'create-account'
+        ? createAccountStage === 'authorize' ? 'Confirme um administrador' : 'Dados da nova conta local'
+        : 'Etapa única e obrigatória de segurança';
 
   return (
-    <div
-      className={`cloudos-lock-screen ${isUnlocking ? 'unlocking' : ''}`}
-      onClick={() => !showPanel && setShowPanel(true)}
-    >
-      {/* Luzes de Fundo Tecnológicas em Roxo e Azul */}
-      <div className="bg-glow bg-glow-1" />
-      <div className="bg-glow bg-glow-2" />
-      <div className="bg-glow bg-glow-3" />
+    <div className={`cloudos-lock-screen ${isUnlocking ? 'unlocking' : ''}`} onClick={() => !showPanel && setShowPanel(true)}>
+      <div className="bg-glow bg-glow-1" /><div className="bg-glow bg-glow-2" /><div className="bg-glow bg-glow-3" />
+      {!showPanel && <div className="lock-time-container"><div className="lock-time">{hours}:{minutes}</div><div className="lock-date">{dateStr}</div></div>}
 
-      {/* Relógio em Standby */}
-      {!showPanel && (
-        <div className="lock-time-container">
-          <div className="lock-time">{hours}:{minutes}</div>
-          <div className="lock-date">{dateStr}</div>
+      {showPanel && <div className="cloudos-lock-outer-frame" onClick={(event) => event.stopPropagation()}>
+        <div className={`cloudos-glass-card ${mode !== 'login' ? 'recovery-mode' : ''}`}>
+          <header className="card-header"><div className="cloudos-brand-logo">C</div><h1 className="card-title">{title}</h1><p className="card-subtitle">{subtitle}</p></header>
+
+          {setupStatus === 'checking' && <div className="lock-system-state"><span className="spinner" /><div><strong>Verificando instalação</strong><p>Consultando o agente local antes de liberar o acesso.</p></div></div>}
+          {setupStatus === 'unavailable' && <div className="lock-system-state unavailable"><div><strong>O agente local está indisponível</strong><p>{setupStatusMessage || 'Não foi possível saber se a instalação está configurada.'}</p><button type="button" onClick={() => checkSetupStatus()}>Tentar novamente</button></div></div>}
+          {setupStatus === 'required' && <div className="lock-system-state unavailable"><div><strong>A instalação ainda não possui administrador</strong><p>Reinicie o fluxo de primeiro acesso para criar a conta real.</p></div></div>}
+
+          {setupStatus === 'complete' && mode === 'login' && <form onSubmit={handleLogin} className="card-form" noValidate>
+            <FormField id="login-username" label="Nome de usuário" value={username} onChange={setUsername} autoComplete="username" autoFocus />
+            <FormField id="login-password" label="Senha" type="password" value={password} onChange={setPassword} autoComplete="current-password" />
+            {error && <Alert tone="error">{error}</Alert>}{successMsg && <Alert tone="success">{successMsg}</Alert>}
+            <button type="submit" className="btn-primary-gradient" disabled={loading}>{loading ? 'Entrando…' : 'Entrar'}</button>
+            <button type="button" className="btn-recovery-link" disabled={loading} onClick={openCreateAccount}>Criar outra conta</button>
+            <button
+              type="button"
+              className="btn-recovery-link"
+              disabled={loading || checkingRecovery}
+              onClick={() => void openRecovery()}
+            >
+              {checkingRecovery ? 'Verificando recuperação…' : 'Esqueci minha conta ou senha'}
+            </button>
+            {recoveryAvailable === null && !recoveryStatusMessage && <div className="lock-recovery-status" role="status">Verificando se esta conta já possui recuperação…</div>}
+            {recoveryAvailable === false && <div className="lock-recovery-unavailable" role="status">Esta conta antiga ainda não possui um código. Entre uma vez com a senha e salve o código que será mostrado antes de acessar o desktop.</div>}
+            {recoveryStatusMessage && <div className="lock-recovery-unavailable error" role="alert"><span>Não foi possível verificar se a recuperação está disponível.</span><button type="button" onClick={refreshRecoveryStatus}>Tentar novamente</button></div>}
+          </form>}
+
+          {setupStatus === 'complete' && mode === 'create-account' && createAccountStage === 'authorize' && <form onSubmit={handleAuthorizeAccountCreation} className="card-form" noValidate>
+            <p className="recovery-explanation">Para impedir cadastros anônimos, confirme primeiro o nome de usuário e a senha de um administrador. O desktop continuará bloqueado.</p>
+            <FormField id="create-admin-username" label="Administrador" value={username} onChange={setUsername} autoComplete="username" autoFocus />
+            <FormField id="create-admin-password" label="Senha do administrador" type="password" value={password} onChange={setPassword} autoComplete="current-password" />
+            {error && <Alert tone="error">{error}</Alert>}
+            <button type="submit" className="btn-primary-gradient" disabled={loading}>{loading ? 'Confirmando…' : 'Autorizar criação'}</button>
+            <button type="button" className="btn-recovery-link" disabled={loading} onClick={() => void cancelCreateAccount()}>Voltar para entrar</button>
+          </form>}
+
+          {setupStatus === 'complete' && mode === 'create-account' && createAccountStage === 'details' && <form onSubmit={handleCreateAccount} className="card-form recovery-form" noValidate>
+            <div className="lock-security-step" role="status"><strong>Administrador confirmado</strong><span>A nova conta será comum e não poderá criar outras contas.</span></div>
+            <FormField id="create-username" label="Nome de usuário" value={username} onChange={setUsername} autoComplete="username" autoFocus />
+            <FormField id="create-display-name" label="Nome de exibição" value={displayName} onChange={setDisplayName} autoComplete="name" />
+            <div className="recovery-password-grid"><FormField id="create-password" label="Senha" type="password" value={password} onChange={setPassword} autoComplete="new-password" /><FormField id="create-confirm" label="Confirmar senha" type="password" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" /></div>
+            <small className="recovery-password-hint">Use de 10 a 128 caracteres.</small>
+            {error && <Alert tone="error">{error}</Alert>}{successMsg && <Alert tone="success">{successMsg}</Alert>}
+            <button type="submit" className="btn-primary-gradient" disabled={loading}>{loading ? 'Criando…' : 'Criar conta local'}</button>
+            <button type="button" className="btn-recovery-link" disabled={loading} onClick={() => void cancelCreateAccount()}>Cancelar</button>
+          </form>}
+
+          {setupStatus === 'complete' && recoveryAvailable === true && mode === 'recovery' && <form onSubmit={handleRecovery} className="card-form recovery-form" noValidate>
+            <p className="recovery-explanation">Use o código salvo no primeiro acesso. Se ele for válido, a senha e o nome de usuário serão substituídos e um novo código será gerado.</p>
+            <FormField id="recovery-code" label="Código de recuperação" value={recoveryCode} onChange={setRecoveryCode} autoComplete="off" monospace autoFocus />
+            <FormField id="recovery-username" label="Novo nome de usuário" value={username} onChange={setUsername} autoComplete="username" />
+            <FormField id="recovery-display-name" label="Nome de exibição" value={displayName} onChange={setDisplayName} autoComplete="name" />
+            <div className="recovery-password-grid"><FormField id="recovery-password" label="Nova senha" type="password" value={password} onChange={setPassword} autoComplete="new-password" /><FormField id="recovery-confirm" label="Confirmar senha" type="password" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" /></div>
+            <small className="recovery-password-hint">Use de 10 a 128 caracteres. Uma frase-senha longa também é aceita.</small>
+            {error && <Alert tone="error">{error}</Alert>}
+            <button type="submit" className="btn-primary-gradient" disabled={loading}>{loading ? 'Recuperando…' : 'Recuperar conta'}</button>
+            <button type="button" className="btn-recovery-link" onClick={() => { resetMessages(); setPassword(''); setConfirmPassword(''); setRecoveryCode(''); setMode('login'); }}>Voltar para entrar</button>
+          </form>}
+
+          {mode === 'recovery-code' && <div className="recovery-result">
+            <div className="lock-mandatory-step" role="status"><strong>Sua senha foi aceita</strong><span>Esta etapa acontece uma única vez em contas administradoras antigas. O CloudOS não travou.</span></div>
+            <p>{oneTimeCodeOrigin === 'recovery-reset' ? 'O código antigo foi invalidado. Este novo código será mostrado somente agora.' : 'A recuperação desta conta antiga foi ativada. Este código será mostrado somente agora.'}</p>
+            <div className="lock-recovery-code"><code>{rotatedCode}</code><button type="button" onClick={copyRotatedCode}>Copiar</button></div>
+            <label><input type="checkbox" checked={recoverySaved} onChange={(event) => setRecoverySaved(event.target.checked)} /><span><strong>Confirmei que salvei o novo código</strong><small>Guarde-o fora deste computador.</small></span></label>
+            {error && <Alert tone="error">{error}</Alert>}
+            <button type="button" className="btn-primary-gradient" disabled={!recoverySaved} onClick={finishRecovery}>{oneTimeCodeOrigin === 'account-creation' ? 'Continuar criação da conta' : 'Entrar no CloudOS'}</button>
+          </div>}
+
+          {isDevEnvironment && mode === 'login' && <div className="advanced-options-container"><button type="button" className="btn-toggle-advanced" onClick={() => setShowAdvanced(!showAdvanced)}>Opções avançadas</button>{showAdvanced && <div className="advanced-panel"><button type="button" className="btn-dev-reset" onClick={handleResetDev} disabled={loading}>Redefinir instalação local (Dev)</button></div>}</div>}
         </div>
-      )}
-
-      {/* Moldura Externa Translúcida e Painel Glassmorphism Central */}
-      {showPanel && (
-        <div className="cloudos-lock-outer-frame" onClick={(e) => e.stopPropagation()}>
-          <div className="cloudos-glass-card">
-            
-            {/* Header: Logo CloudOS, Título e Subtítulo */}
-            <div className="card-header">
-              <div className="cloudos-brand-logo">
-                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z" fill="url(#cloudos-grad)" />
-                  <defs>
-                    <linearGradient id="cloudos-grad" x1="0" y1="4" x2="22" y2="20" gradientUnits="userSpaceOnUse">
-                      <stop stopColor="#818cf8" />
-                      <stop offset="1" stopColor="#c084fc" />
-                    </linearGradient>
-                  </defs>
-                </svg>
-              </div>
-              
-              <h1 className="card-title">
-                {setupRequired ? 'Primeiro Acesso' : 'Bem-vindo ao CloudOS'}
-              </h1>
-              <p className="card-subtitle">
-                {setupRequired ? 'Criar Administrador' : 'Autenticação do Sistema'}
-              </p>
-            </div>
-
-            {/* Formulário com labels visíveis e navegação por teclado */}
-            <form onSubmit={setupRequired ? handleCreateAdmin : handleLogin} className="card-form" noValidate>
-              
-              {/* Campo: Nome de Usuário */}
-              <div className="form-group">
-                <label htmlFor="input-username" className="form-label">
-                  Nome de usuário
-                </label>
-                <div className="input-wrapper">
-                  <span className="input-icon">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                      <circle cx="12" cy="7" r="4" />
-                    </svg>
-                  </span>
-                  <input
-                    id="input-username"
-                    type="text"
-                    className="form-input"
-                    placeholder="Digite o nome de usuário"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    disabled={loading}
-                    autoFocus
-                    autoComplete="username"
-                  />
-                </div>
-              </div>
-
-              {/* Campo: Senha */}
-              <div className="form-group">
-                <label htmlFor="input-password" className="form-label">
-                  Senha
-                </label>
-                <div className="input-wrapper">
-                  <span className="input-icon">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                    </svg>
-                  </span>
-                  <input
-                    id="input-password"
-                    type="password"
-                    className="form-input"
-                    placeholder="Digite a senha"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    disabled={loading}
-                    autoComplete={setupRequired ? 'new-password' : 'current-password'}
-                  />
-                </div>
-              </div>
-
-              {/* Campo: Confirmar Senha (Apenas em Primeiro Acesso) */}
-              {setupRequired && (
-                <div className="form-group">
-                  <label htmlFor="input-confirm-password" className="form-label">
-                    Confirmar senha
-                  </label>
-                  <div className="input-wrapper">
-                    <span className="input-icon">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                      </svg>
-                    </span>
-                    <input
-                      id="input-confirm-password"
-                      type="password"
-                      className="form-input"
-                      placeholder="Repita a senha para confirmar"
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      disabled={loading}
-                      autoComplete="new-password"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Caixa de Erro de Validação */}
-              {error && (
-                <div className="alert-box alert-error" role="alert">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="12" cy="12" r="10" />
-                    <line x1="12" y1="8" x2="12" y2="12" />
-                    <line x1="12" y1="16" x2="12.01" y2="16" />
-                  </svg>
-                  <span>{error}</span>
-                </div>
-              )}
-
-              {/* Caixa de Sucesso */}
-              {successMsg && (
-                <div className="alert-box alert-success" role="status">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-                    <polyline points="22 4 12 14.01 9 11.01" />
-                  </svg>
-                  <span>{successMsg}</span>
-                </div>
-              )}
-
-              {/* Botão Principal com Gradiente Violeta */}
-              <button
-                type="submit"
-                className={`btn-primary-gradient ${loading ? 'loading' : ''}`}
-                disabled={loading}
-              >
-                {loading ? (
-                  <span className="btn-spinner-wrapper">
-                    <span className="spinner" />
-                    <span>{setupRequired ? 'Criando Administrador...' : 'Entrando...'}</span>
-                  </span>
-                ) : (
-                  <span>{setupRequired ? 'Criar Administrador' : 'Entrar'}</span>
-                )}
-              </button>
-            </form>
-
-            {/* Opções Avançadas para Ambiente de Desenvolvimento */}
-            {isDevEnvironment && (
-              <div className="advanced-options-container">
-                <button
-                  type="button"
-                  className="btn-toggle-advanced"
-                  onClick={() => setShowAdvanced(!showAdvanced)}
-                >
-                  <span>Opções Avançadas</span>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: showAdvanced ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
-                </button>
-
-                {showAdvanced && (
-                  <div className="advanced-panel">
-                    <button
-                      type="button"
-                      className="btn-dev-reset"
-                      onClick={handleResetDev}
-                      disabled={loading}
-                    >
-                      Redefinir instalação local (Dev)
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-
-          </div>
-        </div>
-      )}
-
-      {/* Rodapé / Dica para entrar */}
-      {!showPanel && (
-        <div className="lock-hint">
-          {setupRequired ? 'Clique para configurar a conta de Administrador' : 'Clique ou pressione qualquer tecla para entrar'}
-        </div>
-      )}
+      </div>}
+      {!showPanel && <div className="lock-entry-actions">
+        <button type="button" className="lock-entry-primary" onClick={() => setShowPanel(true)}>Entrar</button>
+        <button type="button" className="lock-entry-recovery" onClick={() => void openRecovery()}>Esqueci minha conta ou senha</button>
+        <span>Clique ou pressione qualquer tecla para continuar</span>
+      </div>}
     </div>
   );
+}
+
+function FormField({ id, label, type = 'text', value, onChange, autoComplete, monospace = false, autoFocus = false }: { id: string; label: string; type?: string; value: string; onChange: (value: string) => void; autoComplete: string; monospace?: boolean; autoFocus?: boolean }) {
+  return <label className="form-group" htmlFor={id}><span className="form-label">{label}</span><input id={id} className={`form-input no-icon${monospace ? ' monospace' : ''}`} type={type} value={value} onChange={(event) => onChange(event.target.value)} autoComplete={autoComplete} maxLength={type === 'password' ? 128 : 80} autoFocus={autoFocus} /></label>;
+}
+
+function Alert({ tone, children }: { tone: 'error' | 'success'; children: React.ReactNode }) {
+  return <div className={`alert-box alert-${tone}`} role={tone === 'error' ? 'alert' : 'status'}>{children}</div>;
 }

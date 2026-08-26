@@ -200,7 +200,7 @@ export default function ObsidianStore() {
         <p style={{ color: '#888' }}>Aplicativos oficiais e da comunidade.</p>
         
         <div className="store-search-container">
-          <FiSearch className="store-search-icon" />
+          <span className="store-search-icon"><FiSearch /></span>
           <input
             type="text"
             className="store-search-input"
@@ -239,7 +239,7 @@ export default function ObsidianStore() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span className="app-developer">{app.developer}</span>
                     <span style={{ fontSize: '12px', color: '#fbbf24', display: 'flex', alignItems: 'center', gap: '2px' }}>
-                      <FiStar size={10} fill="#fbbf24" /> {app.rating}
+                      <FiStar size={10} color="#fbbf24" /> {app.rating}
                     </span>
                   </div>
                 </div>

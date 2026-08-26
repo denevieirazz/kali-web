@@ -5,6 +5,18 @@
 interface RequestOptions extends RequestInit {
   timeoutMs?: number;
   skipAuth?: boolean;
+  suppressUnauthorizedHandler?: boolean;
+}
+
+export interface CloudOSRuntimeConfig {
+  apiBase?: string;
+  webSocketBase?: string;
+}
+
+declare global {
+  interface Window {
+    __CLOUDOS_RUNTIME__?: CloudOSRuntimeConfig;
+  }
 }
 
 const TOKEN_KEY = 'cloudos_jwt_token';
@@ -28,14 +40,31 @@ export function setStoredToken(token: string) {
 export function getStoredUser(): any | null {
   try {
     const raw = localStorage.getItem(USER_KEY);
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const clean = { ...parsed };
+    for (const key of Object.keys(clean)) {
+      if (/(?:password|recovery|secret|token|credential)/i.test(key)) delete clean[key];
+    }
+    localStorage.setItem(USER_KEY, JSON.stringify(clean));
+    return clean;
   } catch {
+    localStorage.removeItem(USER_KEY);
     return null;
   }
 }
 
 export function setStoredUser(user: any) {
-  localStorage.setItem(USER_KEY, JSON.stringify(user));
+  if (!user || typeof user !== 'object') {
+    localStorage.removeItem(USER_KEY);
+    return;
+  }
+  const clean = { ...user };
+  for (const key of Object.keys(clean)) {
+    if (/(?:password|recovery|secret|token|credential)/i.test(key)) delete clean[key];
+  }
+  localStorage.setItem(USER_KEY, JSON.stringify(clean));
 }
 
 export function clearStoredAuth() {
@@ -43,8 +72,43 @@ export function clearStoredAuth() {
   localStorage.removeItem(USER_KEY);
 }
 
+function normalizedBase(value: unknown, protocols: string[]) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  try {
+    const url = new URL(value.trim(), window.location.origin);
+    if (!protocols.includes(url.protocol) || url.username || url.password) return null;
+    return url.href.replace(/\/$/, '');
+  } catch {
+    return null;
+  }
+}
+
+export function getApiBase() {
+  return normalizedBase(window.__CLOUDOS_RUNTIME__?.apiBase, ['http:', 'https:']) || window.location.origin;
+}
+
+export function getWebSocketBase() {
+  const injected = normalizedBase(window.__CLOUDOS_RUNTIME__?.webSocketBase, ['ws:', 'wss:']);
+  if (injected) return injected;
+  const api = new URL(getApiBase());
+  api.protocol = api.protocol === 'https:' ? 'wss:' : 'ws:';
+  return api.href.replace(/\/$/, '');
+}
+
+export function resolveApiUrl(endpoint: string) {
+  if (/^https?:\/\//i.test(endpoint)) return endpoint;
+  const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  return `${getApiBase()}${path}`;
+}
+
+export function resolveWebSocketUrl(endpoint: string) {
+  if (/^wss?:\/\//i.test(endpoint)) return endpoint;
+  const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  return `${getWebSocketBase()}${path}`;
+}
+
 export async function apiClient<T = any>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-  const { timeoutMs = 10000, skipAuth = false, headers: customHeaders, ...rest } = options;
+  const { timeoutMs = 10000, skipAuth = false, suppressUnauthorizedHandler = false, headers: customHeaders, ...rest } = options;
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -62,7 +126,7 @@ export async function apiClient<T = any>(endpoint: string, options: RequestOptio
   }
 
   try {
-    const response = await fetch(endpoint, {
+    const response = await fetch(resolveApiUrl(endpoint), {
       ...rest,
       headers,
       signal: controller.signal
@@ -70,7 +134,7 @@ export async function apiClient<T = any>(endpoint: string, options: RequestOptio
 
     clearTimeout(timeoutId);
 
-    if (response.status === 401 || response.status === 403) {
+    if ((response.status === 401 || response.status === 403) && !suppressUnauthorizedHandler) {
       if (!isHandlingUnauthorized) {
         isHandlingUnauthorized = true;
         clearStoredAuth();
@@ -88,6 +152,7 @@ export async function apiClient<T = any>(endpoint: string, options: RequestOptio
       try {
         const errJson = JSON.parse(errorText);
         if (errJson.error) errorMsg = errJson.error;
+        else if (errJson.message) errorMsg = errJson.message;
       } catch {}
       throw new Error(errorMsg);
     }

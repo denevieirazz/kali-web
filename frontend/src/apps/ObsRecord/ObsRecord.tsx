@@ -294,7 +294,7 @@ export default function ObsRecord() {
       {/* ── Header ── */}
       <div className="obsr-header">
         <div className="obsr-title">
-          <FiVideo className="obsr-title-icon" />
+          <span className="obsr-title-icon"><FiVideo /></span>
           <span>ObS Record</span>
         </div>
 

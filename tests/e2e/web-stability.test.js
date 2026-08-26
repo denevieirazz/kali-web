@@ -113,7 +113,7 @@ test('4. Security: CORS & Origin Validation — Rejeita origens externas não pe
     const res = await requestJson(port, '/api/health', 'GET', null, {
       Origin: 'http://malicious-site.com',
     });
-    assert.strictEqual(res.status, 500);
+    assert.strictEqual(res.status, 403);
   } finally {
     server.close();
   }

@@ -254,7 +254,6 @@ export interface UserProfile {
   username: string;
   displayName: string;
   avatar: string;
-  password: string;
   isAdmin: boolean;
   lastLogin: number;
 }

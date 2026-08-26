@@ -12,8 +12,14 @@
   "scripts": {
     "dev": "powershell.exe -ExecutionPolicy Bypass -File scripts/start-dev.ps1",
     "build": "npm --prefix frontend run build",
+    "build:host": "dotnet build desktop/CloudOS.Host/CloudOS.Host.csproj -c Release",
+    "build:bootstrap": "dotnet build desktop/CloudOS.Bootstrap/CloudOS.Bootstrap.csproj -c Release",
+    "test:bootstrap": "dotnet run --project desktop/CloudOS.Bootstrap.Tests/CloudOS.Bootstrap.Tests.csproj -c Release",
     "lint": "npm --prefix backend run lint && npm --prefix frontend run lint",
     "test": "npm --prefix backend test",
-    "test:e2e": "node --test tests/e2e/*.test.js"
+    "test:e2e": "node scripts/run-node-tests.js tests/e2e",
+    "shell:check": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-shell-readiness.ps1",
+    "shell:gate": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-shell-readiness.ps1 -Json -FailOnBlocked",
+    "preview:shell": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/run-shell-preview.ps1"
   }
 }

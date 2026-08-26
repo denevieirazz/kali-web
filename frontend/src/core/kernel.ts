@@ -161,7 +161,7 @@ class Kernel {
 
   // ── System State ───────────────────────────────────────────────────────────
   private _user: UserProfile = {
-    username: 'user', displayName: 'User', avatar: '', password: '',
+    username: 'user', displayName: 'User', avatar: '',
     isAdmin: true, lastLogin: Date.now(),
   };
   private _isLocked: boolean = false;
@@ -352,24 +352,29 @@ class Kernel {
   // ========== System Init ==========
   private _initSystemState() {
     if (typeof window === 'undefined') return;
+    let loaded = false;
     const saved = localStorage.getItem('obsidianos-system-v2');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        this._user = { ...this._user, ...parsed.user };
+        this._user = this._sanitizeUserProfile({ ...this._user, ...parsed.user });
         this._theme = { ...this._theme, ...parsed.theme };
         this._hardware = { ...this._hardware, ...parsed.hardware };
+        loaded = true;
       } catch (e) {
         console.error('Failed to parse obsidianos-system-v2', e);
+        localStorage.removeItem('obsidianos-system-v2');
       }
-    } else {
+    }
+
+    if (!loaded) {
       const legacy = localStorage.getItem('webos-system-v2') || localStorage.getItem('webos-system');
       if (legacy) {
         try {
           const parsed = JSON.parse(legacy);
           const state = parsed.state || parsed; // Handle different structures
           if (state) {
-            this._user = { ...this._user, ...(state.user || state.currentUser) };
+            this._user = this._sanitizeUserProfile({ ...this._user, ...(state.user || state.currentUser) });
             this._theme = { ...this._theme, ...state.theme };
             this._hardware = {
               volume: state.volume ?? state.hardware?.volume ?? 75,
@@ -379,13 +384,20 @@ class Kernel {
               isBluetooth: state.isBluetooth ?? state.hardware?.isBluetooth ?? false,
               batteryLevel: state.batteryLevel ?? state.hardware?.batteryLevel ?? 85,
             };
+            loaded = true;
           }
-          this._persistSystemState();
         } catch (e) {
           console.error('Failed to parse legacy system state', e);
         }
       }
     }
+
+    // Old stores could contain a plaintext `password`. Persist the allow-listed
+    // profile immediately and remove both legacy containers, even when a newer
+    // state already exists, so stale credential copies do not survive migration.
+    localStorage.removeItem('webos-system-v2');
+    localStorage.removeItem('webos-system');
+    this._persistSystemState();
   }
 
   // ========== File System Init ==========
@@ -614,7 +626,7 @@ class Kernel {
       'WINLOGON': 'login',
       'BOOT_FAILURE': 'bios'
       // NOTE: DESKTOP_READY is intentionally omitted — the transition to 'desktop'
-      // is handled by LockScreen after the user logs in via kernel.sysLogin()
+      // is handled by LockScreen only after the backend authenticates the user.
     };
     try {
       this.emit('system:bootPhase', storePhaseMap[phase] || 'loading');
@@ -624,6 +636,20 @@ class Kernel {
   }
   
   // ========== System State Management ==========
+  private _sanitizeUserProfile(value: unknown): UserProfile {
+    const source = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+    const username = typeof source.username === 'string' && source.username.trim() ? source.username.trim() : 'user';
+    const displayName = typeof source.displayName === 'string' && source.displayName.trim() ? source.displayName.trim() : username;
+    const avatar = typeof source.avatar === 'string' && source.avatar.startsWith('data:image/') ? source.avatar : '';
+    return {
+      username,
+      displayName,
+      avatar,
+      isAdmin: source.isAdmin === true,
+      lastLogin: typeof source.lastLogin === 'number' ? source.lastLogin : Date.now()
+    };
+  }
+
   private _emitSystemSnapshot() {
     this.emit('system:snapshot', {
       user: this._user,
@@ -635,6 +661,7 @@ class Kernel {
 
   private _persistSystemState() {
     if (typeof window === 'undefined') return;
+    this._user = this._sanitizeUserProfile(this._user);
     const state = { user: this._user, theme: this._theme, hardware: this._hardware };
     localStorage.setItem('obsidianos-system-v2', JSON.stringify(state));
     this._emitSystemSnapshot();
@@ -647,17 +674,6 @@ class Kernel {
       theme: this._theme,
       hardware: this._hardware,
     };
-  }
-
-  sysLogin(password: string): boolean {
-    if (this._user.password === '' || password === this._user.password) {
-      this._isLocked = false;
-      this._user.lastLogin = Date.now();
-      this._persistSystemState();
-      this.emit('system:bootPhase', 'desktop');
-      return true;
-    }
-    return false;
   }
 
   sysLock() {
@@ -2170,7 +2186,9 @@ class Kernel {
   updateWindowTitle(id: string, title: string) {
     const win = this._windows.get(id);
     if (!win) return;
-    const updated = { ...win, title };
+    const nextTitle = String(title || '').slice(0, 1024);
+    if (win.title === nextTitle) return;
+    const updated = { ...win, title: nextTitle };
     this._windows.set(id, updated);
     this.emit('window:updated', updated);
   }

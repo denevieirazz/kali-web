@@ -7,6 +7,10 @@ dist/
 **/dist/
 dist-ssr/
 build/
+**/bin/
+**/obj/
+**/publish/
+**/publish-next/
 
 # Test outputs & Coverage
 coverage/
@@ -14,8 +18,9 @@ playwright-report/
 test-results/
 
 # Runtime dynamic files & ports
-runtime/
+/runtime/
 *.tmp
+*.tsbuildinfo
 
 # Environment variables & secrets
 .env

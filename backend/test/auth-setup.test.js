@@ -107,6 +107,45 @@ test('Setup e Auth: Teste completo de primeiro acesso e autenticação', async (
     const okLoginJson = JSON.parse(okLogin.body);
     assert.ok(okLoginJson.token);
 
+    // Contas secundárias exigem administrador autenticado e nunca recebem privilégios.
+    const accountBody = JSON.stringify({
+      username: 'conta-secundaria',
+      displayName: 'Conta Secundária',
+      password: 'senha-secundaria-segura',
+      confirmPassword: 'senha-secundaria-segura'
+    });
+    const anonymousAccount = await makeRequest(port, {
+      path: '/api/auth/accounts',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    }, accountBody);
+    assert.strictEqual(anonymousAccount.status, 401);
+
+    const createdAccount = await makeRequest(port, {
+      path: '/api/auth/accounts',
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${okLoginJson.token}`, 'Content-Type': 'application/json' }
+    }, accountBody);
+    assert.strictEqual(createdAccount.status, 201);
+    const createdAccountJson = JSON.parse(createdAccount.body);
+    assert.strictEqual(createdAccountJson.user.role, 'user');
+    assert.strictEqual(createdAccountJson.user.password_hash, undefined);
+
+    const secondaryLogin = await makeRequest(port, {
+      path: '/api/auth/login',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    }, JSON.stringify({ username: 'conta-secundaria', password: 'senha-secundaria-segura' }));
+    assert.strictEqual(secondaryLogin.status, 200);
+    const secondaryToken = JSON.parse(secondaryLogin.body).token;
+
+    const nonAdminAccount = await makeRequest(port, {
+      path: '/api/auth/accounts',
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${secondaryToken}`, 'Content-Type': 'application/json' }
+    }, JSON.stringify({ username: 'nao-autorizada', password: 'senha-nao-autorizada', confirmPassword: 'senha-nao-autorizada' }));
+    assert.strictEqual(nonAdminAccount.status, 403);
+
     // 8. Restauração de Sessão via GET /api/auth/session
     const sessRes = await makeRequest(port, {
       path: '/api/auth/session',
@@ -124,6 +163,20 @@ test('Setup e Auth: Teste completo de primeiro acesso e autenticação', async (
       headers: { 'Authorization': `Bearer ${okLoginJson.token}` }
     });
     assert.strictEqual(logoutRes.status, 200);
+
+    // 10. Reset exige admin e revoga o token ao remover a conta correspondente
+    const resetRes = await makeRequest(port, {
+      path: '/api/setup/reset',
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${okLoginJson.token}`, 'Content-Type': 'application/json' }
+    }, JSON.stringify({ confirm: true }));
+    assert.strictEqual(resetRes.status, 200);
+
+    const revokedSession = await makeRequest(port, {
+      path: '/api/auth/session',
+      headers: { 'Authorization': `Bearer ${okLoginJson.token}` }
+    });
+    assert.strictEqual(revokedSession.status, 403);
 
   } finally {
     server.close();

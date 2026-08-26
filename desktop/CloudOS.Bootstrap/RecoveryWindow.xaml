@@ -1,0 +1,40 @@
+<Window x:Class="CloudOS.Bootstrap.RecoveryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Recuperação do CloudOS"
+        Width="650"
+        Height="420"
+        MinWidth="560"
+        MinHeight="360"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource CloudOsBackground}">
+  <Grid Margin="42">
+    <Border Padding="34"
+            Background="{StaticResource CloudOsPanel}"
+            BorderBrush="#34507C"
+            BorderThickness="1"
+            CornerRadius="18">
+      <StackPanel>
+        <Border Width="54" Height="54" CornerRadius="16"
+                Background="{StaticResource CloudOsAccent}"
+                HorizontalAlignment="Left">
+          <TextBlock Text="C" Foreground="White" FontWeight="Bold" FontSize="28"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Border>
+        <TextBlock Margin="0,20,0,8" Text="Recuperação do CloudOS"
+                   Foreground="White" FontSize="24" FontWeight="SemiBold" />
+        <TextBlock Text="O host não conseguiu permanecer ativo. Nenhuma configuração do Windows foi modificada."
+                   Foreground="#B5C2D8" FontSize="14" TextWrapping="Wrap" LineHeight="21" />
+        <Border Margin="0,18,0,24" Padding="14" Background="#0B1322" CornerRadius="8">
+          <TextBlock x:Name="FailureDetails" Foreground="#9AA9C3" FontSize="12"
+                     TextWrapping="Wrap" MaxHeight="90" />
+        </Border>
+        <WrapPanel>
+          <Button Content="Tentar novamente" Padding="18,10" Margin="0,0,10,0" Click="Retry_Click" />
+          <Button Content="Abrir logs" Padding="18,10" Margin="0,0,10,0" Click="OpenLogs_Click" />
+          <Button Content="Sair" Padding="18,10" Click="Exit_Click" />
+        </WrapPanel>
+      </StackPanel>
+    </Border>
+  </Grid>
+</Window>

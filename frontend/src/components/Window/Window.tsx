@@ -126,7 +126,7 @@ export default function Window({ windowId, children }: Props) {
     ]);
   }, [win, windowId, toggleMaximize, minimizeWindow, handleClose, openContextMenu]);
 
-  if (!win || win.isMinimized) return null;
+  if (!win) return null;
 
   return (
     <div
@@ -138,6 +138,7 @@ export default function Window({ windowId, children }: Props) {
         width: win.width,
         height: win.height,
         zIndex: win.zIndex,
+        display: win.isMinimized ? 'none' : undefined,
       }}
       onMouseDown={handleMouseDown}
     >

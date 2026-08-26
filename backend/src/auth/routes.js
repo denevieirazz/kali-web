@@ -1,66 +1,302 @@
 import express from 'express';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../database/index.js';
 import { config } from '../config/index.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, requireAdmin } from '../middleware/auth.js';
+import {
+  generateRecoveryCode,
+  hashPassword,
+  hashRecoveryCode,
+  noStore,
+  signSessionToken,
+  toPublicUser,
+  validRecoveryCodeInput,
+  validateDisplayName,
+  validatePassword,
+  validateUsername,
+  verifyPassword,
+  verifyRecoveryCode
+} from './security.js';
 
 export const authRouter = express.Router();
 
-// Login
-authRouter.post('/login', (req, res) => {
-  const { username, password } = req.body;
+const RECOVERY_ERROR = 'Não foi possível recuperar a conta com os dados informados.';
+const LOGIN_ERROR = 'Credenciais inválidas.';
 
-  if (!username || !password) {
-    return res.status(400).json({ error: 'Usuário e senha são obrigatórios.' });
-  }
+function dbGet(db, query, params) {
+  return new Promise((resolve, reject) => db.get(query, params, (error, row) => error ? reject(error) : resolve(row)));
+}
 
-  const db = getDb();
-  db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
-    if (err) {
-      return res.status(500).json({ error: 'Erro interno no banco de dados.' });
-    }
+function dbRun(db, query, params) {
+  return new Promise((resolve, reject) => db.run(query, params, error => error ? reject(error) : resolve()));
+}
 
-    if (!user) {
-      // Para fins de dev/bootstrap inicial controlado, se for admin e senha configurada, cria usuário
-      return res.status(401).json({ error: 'Credenciais inválidas.' });
-    }
+function rotateRecoveryCode(db, userId, recoveryCodeHash) {
+  return new Promise((resolve, reject) => db.rotateRecoveryCode(
+    userId,
+    recoveryCodeHash,
+    error => error ? reject(error) : resolve()
+  ));
+}
 
-    const isMatch = await bcrypt.compare(password, user.password_hash);
-    if (!isMatch) {
-      return res.status(401).json({ error: 'Credenciais inválidas.' });
-    }
+function enrollRecoveryCode(db, userId, recoveryCodeHash) {
+  return new Promise((resolve, reject) => db.enrollRecoveryCode(
+    userId,
+    recoveryCodeHash,
+    (error, enrolled) => error ? reject(error) : resolve(enrolled)
+  ));
+}
 
-    const payload = {
-      userId: user.id,
-      username: user.username,
-      role: user.role
-    };
+function recoverAdmin(db, credentials) {
+  return new Promise((resolve, reject) => db.recoverAdmin(
+    credentials,
+    (error, user) => error ? reject(error) : resolve(user)
+  ));
+}
 
-    const token = jwt.sign(payload, config.jwtSecret, { expiresIn: config.jwtExpiresIn });
+function clearLoginThrottle(db) {
+  return new Promise((resolve, reject) => db.clearLoginThrottle(
+    error => error ? reject(error) : resolve()
+  ));
+}
 
-    res.json({
-      message: 'Autenticado com sucesso.',
-      token,
-      user: {
-        id: user.id,
-        username: user.username,
-        role: user.role
-      }
-    });
+function loginLimitedResponse(res, throttle) {
+  const retryAfterSeconds = Math.max(1, Math.ceil(throttle.retryAfterMs / 1000));
+  noStore(res);
+  res.set('Retry-After', String(retryAfterSeconds));
+  return res.status(429).json({
+    error: 'Não foi possível autenticar agora. Aguarde e tente novamente.'
   });
+}
+
+function loginFailureResponse(db, res) {
+  const throttle = db.recordLoginFailure({
+    maxAttempts: config.loginMaxAttempts,
+    windowMs: config.loginWindowMs,
+    lockMs: config.loginLockMs
+  });
+  if (throttle.limited) return loginLimitedResponse(res, throttle);
+  noStore(res);
+  return res.status(401).json({ error: LOGIN_ERROR });
+}
+
+function recoveryLimitedResponse(res, throttle) {
+  const retryAfterSeconds = Math.max(1, Math.ceil(throttle.retryAfterMs / 1000));
+  noStore(res);
+  res.set('Retry-After', String(retryAfterSeconds));
+  return res.status(429).json({
+    error: 'Não foi possível concluir a recuperação agora. Aguarde e tente novamente.'
+  });
+}
+
+function recoveryFailureResponse(db, res) {
+  const throttle = db.recordRecoveryFailure({
+    maxAttempts: config.recoveryMaxAttempts,
+    windowMs: config.recoveryWindowMs,
+    lockMs: config.recoveryLockMs
+  });
+  if (throttle.limited) return recoveryLimitedResponse(res, throttle);
+  noStore(res);
+  return res.status(401).json({ error: RECOVERY_ERROR });
+}
+
+// Login
+authRouter.post('/login', async (req, res, next) => {
+  try {
+    const { username, password } = req.body || {};
+    if (typeof username !== 'string' || !username.trim() || typeof password !== 'string' || !password) {
+      return res.status(400).json({ error: 'Usuário e senha são obrigatórios.' });
+    }
+
+    const db = getDb();
+    const currentThrottle = db.getLoginThrottle();
+    if (currentThrottle.limited) return loginLimitedResponse(res, currentThrottle);
+
+    const user = await dbGet(db, 'SELECT * FROM users WHERE username = ?', [username.trim()]);
+    // A comparação com um hash sentinela reduz diferenças de tempo entre usuário ausente e senha incorreta.
+    const isMatch = await verifyPassword(password, user?.password_hash);
+    if (!user || !isMatch) return loginFailureResponse(db, res);
+
+    await clearLoginThrottle(db);
+
+    let recoveryCode;
+    if (user.role === 'admin' && !user.recovery_code_hash) {
+      const candidateRecoveryCode = generateRecoveryCode();
+      const candidateHash = await hashRecoveryCode(candidateRecoveryCode);
+      if (await enrollRecoveryCode(db, user.id, candidateHash)) recoveryCode = candidateRecoveryCode;
+    }
+
+    noStore(res);
+    return res.json({
+      message: 'Autenticado com sucesso.',
+      token: signSessionToken(user),
+      user: toPublicUser(user),
+      ...(recoveryCode ? { recoveryCode, recoveryCodeShownOnce: true } : {})
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 // Sessão atual
 authRouter.get('/session', authenticateToken, (req, res) => {
+  noStore(res);
   res.json({
     authenticated: true,
-    user: req.user
+    user: {
+      id: req.user.userId,
+      userId: req.user.userId,
+      username: req.user.username,
+      displayName: req.user.displayName,
+      role: req.user.role
+    }
   });
 });
 
-// Logout
-authRouter.post('/logout', authenticateToken, (req, res) => {
+// Cria uma conta local secundária. A tela de bloqueio autentica novamente um
+// administrador antes de chamar esta rota; nunca aceite cadastro anônimo aqui.
+authRouter.post('/accounts', authenticateToken, requireAdmin, async (req, res, next) => {
+  try {
+    const { username, displayName, password, confirmPassword } = req.body || {};
+    const checkedUsername = validateUsername(username);
+    if (checkedUsername.error) return res.status(400).json({ error: checkedUsername.error });
+
+    const checkedDisplayName = validateDisplayName(displayName, checkedUsername.value);
+    if (checkedDisplayName.error) return res.status(400).json({ error: checkedDisplayName.error });
+
+    const checkedPassword = validatePassword(password, confirmPassword);
+    if (checkedPassword.error) return res.status(400).json({ error: checkedPassword.error });
+
+    const userId = uuidv4();
+    const passwordHash = await hashPassword(password);
+    await dbRun(
+      getDb(),
+      'INSERT INTO users (id, username, display_name, password_hash, recovery_code_hash, auth_version, role) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [userId, checkedUsername.value, checkedDisplayName.value, passwordHash, null, 1, 'user']
+    );
+
+    noStore(res);
+    return res.status(201).json({
+      message: 'Conta local criada com sucesso.',
+      user: toPublicUser({
+        id: userId,
+        username: checkedUsername.value,
+        display_name: checkedDisplayName.value,
+        role: 'user',
+        auth_version: 1
+      })
+    });
+  } catch (error) {
+    if (error.message === 'USERNAME_EXISTS') {
+      return res.status(409).json({ error: 'Já existe uma conta com esse nome de usuário.' });
+    }
+    return next(error);
+  }
+});
+
+// Logout (o token é removido pelo cliente; tokens antigos também são invalidados por authVersion após recuperação).
+authRouter.post('/logout', authenticateToken, (_req, res) => {
+  noStore(res);
   res.json({ message: 'Sessão encerrada com sucesso.' });
+});
+
+// Informa apenas se a recuperação foi preparada, sem revelar identificação da conta.
+authRouter.get('/recovery/status', async (_req, res, next) => {
+  try {
+    const db = getDb();
+    const admin = await dbGet(db, 'SELECT * FROM users WHERE role = ?', ['admin']);
+    noStore(res);
+    res.json({ available: Boolean(admin?.recovery_code_hash) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Redefine a única conta administradora usando somente o código de recuperação.
+authRouter.post('/recovery/reset', async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const checkedUsername = validateUsername(body.newUsername, { required: false });
+    if (checkedUsername.error) return res.status(400).json({ error: checkedUsername.error });
+
+    const checkedPassword = validatePassword(body.password, body.confirmPassword);
+    if (checkedPassword.error) return res.status(400).json({ error: checkedPassword.error });
+
+    if (body.displayName !== undefined) {
+      const checkedDisplayName = validateDisplayName(body.displayName, checkedUsername.value || 'CloudOS');
+      if (checkedDisplayName.error) return res.status(400).json({ error: checkedDisplayName.error });
+    }
+
+    const db = getDb();
+    const currentThrottle = db.getRecoveryThrottle();
+    if (currentThrottle.limited) return recoveryLimitedResponse(res, currentThrottle);
+
+    const admin = await dbGet(db, 'SELECT * FROM users WHERE role = ?', ['admin']);
+    const inputIsValid = validRecoveryCodeInput(body.recoveryCode);
+    const recoveryMatches = await verifyRecoveryCode(
+      inputIsValid ? body.recoveryCode : 'CLOUDOS-invalid-recovery-code',
+      inputIsValid ? admin?.recovery_code_hash : null
+    );
+    if (!inputIsValid || !admin || !admin.recovery_code_hash || !recoveryMatches) {
+      return recoveryFailureResponse(db, res);
+    }
+
+    const username = checkedUsername.value || admin.username;
+    const checkedDisplayName = body.displayName === undefined
+      ? { value: admin.display_name || username, error: null }
+      : validateDisplayName(body.displayName, username);
+
+    const nextRecoveryCode = generateRecoveryCode();
+    const [passwordHash, recoveryCodeHash] = await Promise.all([
+      hashPassword(body.password),
+      hashRecoveryCode(nextRecoveryCode)
+    ]);
+
+    let updatedUser;
+    try {
+      updatedUser = await recoverAdmin(db, {
+        id: admin.id,
+        expectedRecoveryCodeHash: admin.recovery_code_hash,
+        username,
+        displayName: checkedDisplayName.value,
+        passwordHash,
+        recoveryCodeHash,
+        authVersion: (Number(admin.auth_version) || 1) + 1
+      });
+    } catch (error) {
+      if (['RECOVERY_CODE_CHANGED', 'USERNAME_EXISTS'].includes(error.message)) {
+        return recoveryFailureResponse(db, res);
+      }
+      throw error;
+    }
+
+    noStore(res);
+    return res.json({
+      message: 'Conta recuperada com sucesso.',
+      token: signSessionToken(updatedUser),
+      user: toPublicUser(updatedUser),
+      recoveryCode: nextRecoveryCode,
+      recoveryCodeShownOnce: true
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Gera um novo código para contas existentes; exige uma sessão administrativa válida.
+authRouter.post('/recovery/rotate', authenticateToken, requireAdmin, async (req, res, next) => {
+  try {
+    const db = getDb();
+    const recoveryCode = generateRecoveryCode();
+    const recoveryCodeHash = await hashRecoveryCode(recoveryCode);
+    await rotateRecoveryCode(db, req.user.userId, recoveryCodeHash);
+    noStore(res);
+    return res.json({
+      message: 'Novo código de recuperação gerado com sucesso.',
+      recoveryCode,
+      recoveryCodeShownOnce: true
+    });
+  } catch (error) {
+    next(error);
+  }
 });

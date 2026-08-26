@@ -20,6 +20,7 @@ import ContextMenu from './components/ContextMenu/ContextMenu';
 import { NotificationContainer } from './components/Notifications/NotificationContainer';
 import { NotificationCenter } from './components/Notifications/NotificationCenter';
 import { useUserStore } from './stores/userStore';
+import { nativeHostBridge } from './services/nativeHostBridge';
 import './index.css';
 
 export default function App() {
@@ -36,6 +37,15 @@ export default function App() {
   useEffect(() => {
     validateSession();
   }, [validateSession]);
+
+  // Confirma que o bundle React realmente montou, inclusive nas telas de
+  // primeiro acesso e login. O bootstrap nativo usa esse handshake para não
+  // considerar uma página vazia como um shell pronto.
+  useEffect(() => {
+    if (nativeHostBridge.available) {
+      void nativeHostBridge.connect().catch(() => {});
+    }
+  }, []);
 
   // SYNC: Ensure Kernel user matches persisted Local User Store
   useEffect(() => {

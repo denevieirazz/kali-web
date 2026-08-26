@@ -1,6 +1,6 @@
 # 🖥️ ObsidianOS
 
-> Um sistema operacional completo rodando inteiramente no navegador, construído com React, TypeScript e Vite. Simula fielmente a experiência de um OS moderno — com BIOS real, kernel executável, disco virtual OPFS, sistema de arquivos persistente, registro, processos, janelas, BSOD, Recovery Mode, linguagem de script própria (OSL) e muito mais.
+> Interface web do CloudOS, construída com React, TypeScript e Vite. No produto ela roda dentro do host WebView2 e usa o agente local autenticado para conta, terminal, Windows, WSL e WSLg; no navegador isolado, apenas os recursos estritamente cliente ficam disponíveis.
 
 ---
 
@@ -24,9 +24,9 @@
 
 ## 🎯 Visão Geral
 
-**ObsidianOS** é uma simulação completa de um sistema operacional moderno (inspirado no Windows 11), rodando 100% no navegador. Não é apenas uma casca visual:
+**ObsidianOS/CloudOS UI** é a experiência visual e a camada de aplicativos próprios do CloudOS. O frontend não é o sistema inteiro nem uma aplicação autônoma no produto: ele depende do agente local e do host nativo para recursos reais do computador.
 
-- **BIOS + Boot Manager reais** — o kernel executa `bootmgr.exe` como um binário JavaScript real dentro de um sandbox
+- **Boot visual + Boot Manager simulado** — o kernel executa scripts JavaScript locais do filesystem virtual; isso não é um sandbox de segurança para código não confiável
 - **Kernel singleton** com sistema de eventos, logging, gerenciamento de recursos e execution engine
 - **Disco virtual OPFS** — persistência real via Origin Private File System do navegador, com fallback para `localStorage`
 - **Sistema de arquivos virtual** com permissões, atributos, metadados e suporte a executáveis JS
@@ -141,7 +141,7 @@ Acesse `http://localhost:5173`. O sistema inicia o boot automaticamente.
 npm run build
 ```
 
-SPA pura sem backend — pode ser hospedada em qualquer CDN estático (Vercel, Netlify, GitHub Pages).
+O frontend não deve ser publicado sozinho como se fosse o produto completo. Em desenvolvimento ele usa Vite junto do agente local; no host nativo o build é mapeado pelo WebView2 para `http://cloudos.localhost/` e recebe os endpoints efêmeros da API/WS.
 
 ---
 
@@ -177,7 +177,7 @@ Singleton clássico — uma única instância em toda a aplicação.
 | Sistema | Função |
 |---------|--------|
 | **BIOS / Boot** | Executa `powerOn()`, roda `bootmgr.exe` como binário real |
-| **Execution Engine** | Executa arquivos `.exe` e `.osl` do filesystem como scripts em sandbox |
+| **Execution Engine** | Executa arquivos `.exe` e `.osl` locais do filesystem virtual; não é fronteira para código não confiável |
 | **Logging** | 6 níveis: `DEBUG`, `INFO`, `WARN`, `ERROR`, `CRITICAL`, `FATAL` |
 | **Recursos** | CPU, RAM e disco em tempo real |
 | **Drivers** | Registra e consulta drivers carregados |
@@ -227,7 +227,7 @@ kernel.reset()                     // Reseta estado (reboot)
 
 ### Execution Engine
 
-O kernel possui um **execution engine** que executa arquivos `.exe` do filesystem como scripts JavaScript reais dentro de um sandbox (`new Function`).
+O kernel possui um **execution engine** que executa arquivos `.exe` do filesystem como scripts JavaScript por `new Function`. Esse mecanismo compartilha a origem autenticada e não deve ser descrito nem usado como sandbox para pacotes não confiáveis.
 
 Cada binário recebe o objeto `OS` com a API do sistema:
 
@@ -273,8 +273,9 @@ O boot é inteiramente orquestrado pelo kernel — não existe mais um `bootSequ
    - scanSystemApps()             → descobre e registra apps do System32
    - createProcess('explorer.exe', 'dwm.exe', 'SearchHost.exe')
    - bootPhase = 'DESKTOP_READY'
-6. BootScreen → setBootPhase('login') → LockScreen aparece
-7. Usuário faz login → kernel.sysLogin() → bootPhase = 'desktop'
+6. A interface consulta `GET /api/setup/status` e abre o OOBE real se não existir administrador
+7. O OOBE chama `POST /api/setup/admin` e exige salvar o código de recuperação mostrado uma única vez
+8. A tela de bloqueio chama `POST /api/auth/login`; somente uma resposta autenticada permite `kernel.sysUnlock()`
 ```
 
 **Auto-Repair:** Se `bootmgr.exe` não for encontrado, o kernel chama `fsDeepReformat()` e tenta novamente antes de falhar.
@@ -360,7 +361,7 @@ Modo gráfico (shell init): logo 4 quadrados + spinner de 5 pontos.
 Fiel ao Windows 11. Barra de progresso do memory dump baseada na RAM real do kernel. Cria `.DMP` em `C:\ObsidianOS\System32\Minidump\`. Reinicia após 3s via `window.location.reload()`.
 
 ### Lock Screen
-Duas fases: relógio/data → campo de senha. Senha em branco = acesso direto.
+Duas fases: relógio/data → conta e senha. Senha vazia nunca libera o desktop. “Esqueci minha conta ou senha” só fica disponível quando existe um código de recuperação preparado; o código permite trocar usuário, nome e senha e gera um substituto mostrado uma única vez.
 
 ### Desktop
 Ícones fixos com double-click para abrir. Menu de contexto com opções de exibição e novo arquivo. Só renderiza se `explorer.exe` estiver rodando.
@@ -397,7 +398,7 @@ Global, singleton, gerenciado pelo `contextMenuStore`. Suporta separadores, item
 | **Obsidian Store** | `obsidian-store` | App Store com busca, categorias e instalação de apps via filesystem virtual |
 | **ObS Record** | `obs-record` | Gravador de tela/câmera com preview ao vivo, pausa, qualidade ajustável, download e save no VFS |
 | **Media Player** | `media-player` | Player de vídeo com suporte a blob URLs e base64, integrado ao File Explorer |
-| **SDK App Runner** | `sdk-runner` | Executor sandbox para apps instalados via Obsidian Store |
+| **SDK App Runner** | `sdk-runner` | Executor compatível para apps locais; ainda não é uma fronteira segura para código de terceiros |
 
 ### Comandos do Terminal
 
