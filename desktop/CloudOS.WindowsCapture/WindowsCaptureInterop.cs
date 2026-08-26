@@ -9,22 +9,27 @@ namespace CloudOS.WindowsCapture;
 internal static unsafe partial class WindowsCaptureInterop
 {
     private static readonly Guid GraphicsCaptureItemGuid = new("79C3F95B-31F7-4EC2-A464-632EF5D30760");
+    private static readonly Guid DxgiDeviceGuid = new("54EC77FA-1377-44E6-8C32-88FD5F44C84C");
 
     [ComImport]
     [Guid("3628E81B-3CAC-4C60-B7F4-23CE0E0C3356")]
     [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    [ComVisible(true)]
     private interface IGraphicsCaptureItemInterop
     {
-        IntPtr CreateForWindow([In] IntPtr window, in Guid iid);
-        IntPtr CreateForMonitor([In] IntPtr monitor, in Guid iid);
+        // Preserve the native HRESULT and explicit output pointer. Treating this COM method as
+        // an IntPtr-returning method changes the ABI shape and can manufacture an unusable item.
+        [PreserveSig]
+        int CreateForWindow([In] IntPtr window, in Guid iid, out IntPtr result);
+
+        [PreserveSig]
+        int CreateForMonitor([In] IntPtr monitor, in Guid iid, out IntPtr result);
     }
 
     [LibraryImport("d3d11.dll", EntryPoint = "CreateDirect3D11DeviceFromDXGIDevice")]
-    private static partial uint CreateDirect3D11DeviceFromDXGIDevice(IntPtr dxgiDevice, out IntPtr graphicsDevice);
+    private static partial int CreateDirect3D11DeviceFromDXGIDevice(IntPtr dxgiDevice, out IntPtr graphicsDevice);
 
     [LibraryImport("d3d11.dll")]
-    private static partial uint D3D11CreateDevice(
+    private static partial int D3D11CreateDevice(
         IDXGIAdapter* adapter,
         D3D_DRIVER_TYPE driverType,
         nint software,
@@ -38,11 +43,15 @@ internal static unsafe partial class WindowsCaptureInterop
 
     public static GraphicsCaptureItem CreateItemForWindow(IntPtr windowHandle)
     {
-        if (windowHandle == IntPtr.Zero) throw new ArgumentException("A non-zero HWND is required.", nameof(windowHandle));
+        if (windowHandle == IntPtr.Zero)
+            throw new ArgumentException("A non-zero HWND is required.", nameof(windowHandle));
 
         var interop = GraphicsCaptureItem.As<IGraphicsCaptureItemInterop>();
-        var itemPointer = interop.CreateForWindow(windowHandle, GraphicsCaptureItemGuid);
-        if (itemPointer == IntPtr.Zero) throw new InvalidOperationException("Windows.Graphics.Capture returned a null GraphicsCaptureItem.");
+        var result = interop.CreateForWindow(windowHandle, GraphicsCaptureItemGuid, out var itemPointer);
+        if (result < 0)
+            Marshal.ThrowExceptionForHR(result);
+        if (itemPointer == IntPtr.Zero)
+            throw new InvalidOperationException("Windows.Graphics.Capture returned a null GraphicsCaptureItem.");
 
         try
         {
@@ -67,7 +76,7 @@ internal static unsafe partial class WindowsCaptureInterop
             D3D_FEATURE_LEVEL.D3D_FEATURE_LEVEL_9_3
         ];
 
-        uint result;
+        int result;
         fixed (D3D_FEATURE_LEVEL* featureLevelPointer = featureLevels)
         {
             D3D_FEATURE_LEVEL selectedFeatureLevel = default;
@@ -84,31 +93,45 @@ internal static unsafe partial class WindowsCaptureInterop
                 &immediateContext);
         }
 
-        if (result != 0 || nativeDevice is null)
+        if (result < 0 || nativeDevice is null)
         {
             if (immediateContext is not null) immediateContext->Release();
             if (nativeDevice is not null) nativeDevice->Release();
-            Marshal.ThrowExceptionForHR(unchecked((int)result));
-            throw new InvalidOperationException("D3D11CreateDevice failed without an HRESULT exception.");
+            if (result < 0) Marshal.ThrowExceptionForHR(result);
+            throw new InvalidOperationException("D3D11CreateDevice returned no device.");
         }
 
         if (immediateContext is not null) immediateContext->Release();
 
+        IntPtr dxgiDevice = IntPtr.Zero;
         IntPtr graphicsDevice = IntPtr.Zero;
         try
         {
-            result = CreateDirect3D11DeviceFromDXGIDevice((IntPtr)nativeDevice, out graphicsDevice);
-            if (result != 0 || graphicsDevice == IntPtr.Zero)
+            // CreateDirect3D11DeviceFromDXGIDevice requires IDXGIDevice*, not ID3D11Device*.
+            // Query the D3D device for the correct interface before crossing the WinRT bridge.
+            var iid = DxgiDeviceGuid;
+            result = Marshal.QueryInterface((IntPtr)nativeDevice, ref iid, out dxgiDevice);
+            if (result < 0 || dxgiDevice == IntPtr.Zero)
             {
-                Marshal.ThrowExceptionForHR(unchecked((int)result));
+                if (result < 0) Marshal.ThrowExceptionForHR(result);
+                throw new InvalidOperationException("ID3D11Device did not expose IDXGIDevice.");
+            }
+
+            result = CreateDirect3D11DeviceFromDXGIDevice(dxgiDevice, out graphicsDevice);
+            if (result < 0 || graphicsDevice == IntPtr.Zero)
+            {
+                if (result < 0) Marshal.ThrowExceptionForHR(result);
                 throw new InvalidOperationException("CreateDirect3D11DeviceFromDXGIDevice returned no device.");
             }
 
-            return MarshalInterface<IDirect3DDevice>.FromAbi(graphicsDevice);
+            // The returned pointer is an IInspectable for a WinRT IDirect3DDevice. Project it
+            // with the CsWinRT inspectable marshaler; MarshalInterface is for classic COM ABI.
+            return MarshalInspectable<IDirect3DDevice>.FromAbi(graphicsDevice);
         }
         finally
         {
             if (graphicsDevice != IntPtr.Zero) Marshal.Release(graphicsDevice);
+            if (dxgiDevice != IntPtr.Zero) Marshal.Release(dxgiDevice);
             nativeDevice->Release();
         }
     }
