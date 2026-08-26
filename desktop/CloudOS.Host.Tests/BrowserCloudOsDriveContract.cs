@@ -20,23 +20,23 @@ internal static class BrowserCloudOsDriveContract
             Assert(Path.GetFullPath(overrideDownloads) == Path.GetFullPath(Path.Combine(overrideRoot, "Home", "Downloads")),
                 "CLOUDOS_DRIVE_DIR override must preserve the shared Downloads layout.");
 
-            var first = BrowserDownloadManager.AllocateCloudOsDownloadPath(downloads, "report.txt");
+            var first = BrowserStorageLayout.AllocateCloudOsDownloadPath(downloads, "report.txt");
             Assert(Path.GetFileName(first) == "report.txt", "The first download should keep a safe suggested name.");
             File.WriteAllText(first, "existing");
-            var second = BrowserDownloadManager.AllocateCloudOsDownloadPath(downloads, "report.txt");
+            var second = BrowserStorageLayout.AllocateCloudOsDownloadPath(downloads, "report.txt");
             Assert(Path.GetFileName(second) == "report (1).txt", "An existing CloudOS download must never be overwritten implicitly.");
 
-            var activeReservation = BrowserDownloadManager.AllocateCloudOsDownloadPath(
+            var activeReservation = BrowserStorageLayout.AllocateCloudOsDownloadPath(
                 downloads,
                 "parallel.zip",
                 new[] { Path.Combine(downloads, "parallel.zip") });
             Assert(Path.GetFileName(activeReservation) == "parallel (1).zip",
                 "Concurrent active downloads must reserve distinct CloudOS Drive paths before files exist.");
 
-            var reserved = BrowserDownloadManager.SanitizeDownloadName("CON.txt");
+            var reserved = BrowserStorageLayout.SanitizeDownloadName("CON.txt");
             Assert(!reserved.Equals("CON.txt", StringComparison.OrdinalIgnoreCase),
                 "Windows device names must not be emitted into CloudOS Downloads.");
-            var traversal = BrowserDownloadManager.SanitizeDownloadName("..\\escape.exe");
+            var traversal = BrowserStorageLayout.SanitizeDownloadName("..\\escape.exe");
             Assert(!traversal.Contains("..", StringComparison.Ordinal) && !traversal.Contains('\\') && !traversal.Contains('/'),
                 "Suggested download names may not create paths outside CloudOS Downloads.");
 
