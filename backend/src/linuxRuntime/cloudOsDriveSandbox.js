@@ -2,6 +2,7 @@ import path from 'node:path';
 import { buildReadOnlyRootfsFinalize, buildWritableContainedHomeMount } from './linuxRootfsSandbox.js';
 
 const SANDBOX_DRIVE_ROOT = '/run/cloudos-drive';
+const DRIVE_MOUNT_FLAGS = 'rw,nosuid,nodev,noexec,nosymfollow';
 const DRIVE_BINDINGS = Object.freeze([
   Object.freeze({ source: ['Home', 'Desktop'], name: 'Desktop' }),
   Object.freeze({ source: ['Home', 'Documents'], name: 'Documents' }),
@@ -75,12 +76,12 @@ export function buildCloudOsDriveSandboxMounts({ wslRoot, containedHome, uid, gi
     commands.push(
       `install -d -o ${uid} -g ${gid} -m 700 ${shellQuote(staging)}`,
       `mount --bind ${shellQuote(source)} ${shellQuote(staging)}`,
-      `mount -o remount,bind,rw,nosuid,nodev,noexec ${shellQuote(staging)}`,
+      `mount -o remount,bind,${DRIVE_MOUNT_FLAGS} ${shellQuote(staging)} || { echo CLOUDOS_DRIVE_NOSYMFOLLOW_UNAVAILABLE >&2; exit 47; }`,
       `[ ! -L ${shellQuote(homeTarget)} ] || rm -f -- ${shellQuote(homeTarget)}`,
       `[ ! -e ${shellQuote(homeTarget)} ] || [ -d ${shellQuote(homeTarget)} ] || rm -f -- ${shellQuote(homeTarget)}`,
       `install -d -o ${uid} -g ${gid} -m 700 ${shellQuote(homeTarget)}`,
       `mount --bind ${shellQuote(staging)} ${shellQuote(homeTarget)}`,
-      `mount -o remount,bind,rw,nosuid,nodev,noexec ${shellQuote(homeTarget)}`,
+      `mount -o remount,bind,${DRIVE_MOUNT_FLAGS} ${shellQuote(homeTarget)} || { echo CLOUDOS_DRIVE_NOSYMFOLLOW_UNAVAILABLE >&2; exit 47; }`,
     );
   }
 
@@ -93,5 +94,6 @@ export function buildCloudOsDriveSandboxMounts({ wslRoot, containedHome, uid, gi
 
 export const cloudOsDriveSandboxPolicy = Object.freeze({
   sandboxRoot: SANDBOX_DRIVE_ROOT,
+  mountFlags: Object.freeze(DRIVE_MOUNT_FLAGS.split(',')),
   bindings: DRIVE_BINDINGS.map(binding => Object.freeze({ source: [...binding.source], name: binding.name })),
 });
