@@ -4,6 +4,7 @@ export interface CloudFileRef {
 }
 
 const MAX_SEGMENTS = 64;
+const LEGACY_HOME_DIRECTORIES = new Set(['Desktop', 'Documents', 'Downloads', 'Projects']);
 
 function validSegment(segment: string) {
   return Boolean(segment)
@@ -17,10 +18,24 @@ function validSegment(segment: string) {
 
 export function cloudFileRefFromLegacyPath(filePath: string): CloudFileRef | null {
   if (typeof filePath !== 'string' || !filePath.startsWith('~/')) return null;
-  const relative = filePath.slice(2);
-  const segments = relative.split('/').filter(Boolean);
-  if (!segments.length || segments.length + 1 > MAX_SEGMENTS || segments.some(segment => !validSegment(segment))) return null;
-  return { provider: 'cloudos', path: ['Home', ...segments] };
+  const segments = filePath.slice(2).split('/').filter(Boolean);
+  if (!segments.length || segments.length > MAX_SEGMENTS || segments.some(segment => !validSegment(segment))) return null;
+
+  // CloudOS Files currently labels the Drive root as `~/`, therefore canonical
+  // entries already arrive as `~/Home/...` or `~/Shared/...`. Preserve those
+  // roots exactly instead of accidentally generating Home/Home/...
+  if (segments[0] === 'Home' || segments[0] === 'Shared') {
+    return segments.length >= 2 ? { provider: 'cloudos', path: segments } : null;
+  }
+
+  // Compatibility with older callers that exposed Home children directly as
+  // `~/Downloads/...`, `~/Documents/...`, etc.
+  if (LEGACY_HOME_DIRECTORIES.has(segments[0])) {
+    return { provider: 'cloudos', path: ['Home', ...segments] };
+  }
+
+  // Apps/, arbitrary Drive roots and unknown legacy paths never gain a handoff.
+  return null;
 }
 
 export function isCloudFileRef(value: unknown): value is CloudFileRef {
@@ -30,5 +45,6 @@ export function isCloudFileRef(value: unknown): value is CloudFileRef {
     && Array.isArray(candidate.path)
     && candidate.path.length >= 2
     && candidate.path.length <= MAX_SEGMENTS
-    && candidate.path.every(segment => typeof segment === 'string' && validSegment(segment));
+    && candidate.path.every(segment => typeof segment === 'string' && validSegment(segment))
+    && (candidate.path[0] === 'Home' || candidate.path[0] === 'Shared');
 }
