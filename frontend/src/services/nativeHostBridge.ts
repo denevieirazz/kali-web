@@ -1,5 +1,6 @@
 import { getStoredToken } from './apiClient';
 import { nativeSessionListsEqual } from './nativeWindowContract.js';
+import type { CloudFileRef } from './cloudFileRef';
 
 type NativeRequestMethod =
   | 'bridge.handshake'
@@ -158,7 +159,7 @@ class NativeHostBridge {
     return result;
   }
 
-  async launchApp(appId: string) {
+  async launchApp(appId: string, fileRef?: CloudFileRef | null) {
     const token = getStoredToken();
     if (!token) throw new NativeHostError('AUTH_REQUIRED', 'Entre no CloudOS para abrir aplicativos nativos.');
     await this.requireConnection();
@@ -173,7 +174,7 @@ class NativeHostBridge {
       sessionId?: string | null;
       contained?: boolean;
       containmentMode?: NativeContainmentMode;
-    }>('native.launchApp', { appId, token }, 40_000);
+    }>('native.launchApp', fileRef ? { appId, token, fileRef } : { appId, token }, 40_000);
   }
 
   async listSessions() {
