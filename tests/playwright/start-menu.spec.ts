@@ -3,7 +3,7 @@ import { login, openStartMenu, openAllApps } from './helpers/cloudos.ui';
 
 const deterministicWindowsCatalog = [
   {
-    id: 'pw-windows-editor',
+    id: 'native-aaaaaaaaaaaaaaaaaaaaaaaa',
     name: 'Windows Fixture Editor',
     source: 'windows',
     distribution: null,
@@ -18,7 +18,7 @@ const deterministicWindowsCatalog = [
     launchable: false
   },
   {
-    id: 'pw-windows-browser',
+    id: 'native-bbbbbbbbbbbbbbbbbbbbbbbb',
     name: 'Windows Fixture Browser',
     source: 'windows',
     distribution: null,
