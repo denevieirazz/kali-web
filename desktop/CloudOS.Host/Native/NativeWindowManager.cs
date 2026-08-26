@@ -294,12 +294,17 @@ namespace CloudOS.Host.Native
                 foreach (KeyValuePair<IntPtr, NativeWindowSnapshot> item in discovered)
                 {
                     NativeWindowSnapshot previous;
-                    NativeWindowChangeKind kind = _windows.TryGetValue(item.Key, out previous)
-                        ? NativeWindowChangeKind.Updated
-                        : NativeWindowChangeKind.Added;
-
-                    _windows[item.Key] = item.Value;
-                    changes.Add(new NativeWindowChangedEventArgs(kind, item.Value));
+                    if (_windows.TryGetValue(item.Key, out previous))
+                    {
+                        _windows[item.Key] = item.Value;
+                        if (!HasSameObservableState(previous, item.Value))
+                            changes.Add(new NativeWindowChangedEventArgs(NativeWindowChangeKind.Updated, item.Value));
+                    }
+                    else
+                    {
+                        _windows[item.Key] = item.Value;
+                        changes.Add(new NativeWindowChangedEventArgs(NativeWindowChangeKind.Added, item.Value));
+                    }
                 }
 
                 List<IntPtr> stale = new List<IntPtr>();
@@ -1251,22 +1256,23 @@ namespace CloudOS.Host.Native
                 return;
             }
 
-            NativeWindowChangedEventArgs change;
+            NativeWindowChangedEventArgs change = null;
             lock (_sync)
             {
-                bool alreadyKnown = _windows.ContainsKey(hwnd);
+                NativeWindowSnapshot previous;
+                bool alreadyKnown = _windows.TryGetValue(hwnd, out previous);
                 if (!alreadyKnown
                     && (_windows.Count >= _options.MaxTotalWindows
                         || CountWindowsForProcessLocked(snapshot.ProcessId) >= _options.MaxWindowsPerProcess))
                     return;
 
-                NativeWindowChangeKind kind = alreadyKnown
-                    ? existingKind
-                    : NativeWindowChangeKind.Added;
                 _windows[hwnd] = snapshot;
-                change = new NativeWindowChangedEventArgs(kind, snapshot);
+                if (!alreadyKnown)
+                    change = new NativeWindowChangedEventArgs(NativeWindowChangeKind.Added, snapshot);
+                else if (!HasSameObservableState(previous, snapshot))
+                    change = new NativeWindowChangedEventArgs(existingKind, snapshot);
             }
-            RaiseChange(change);
+            if (change != null) RaiseChange(change);
         }
 
         private void RemoveWindow(IntPtr hwnd, bool discardAttachment = false)
@@ -1342,6 +1348,23 @@ namespace CloudOS.Host.Native
                 if (snapshot.ProcessId == processId) count++;
             }
             return count;
+        }
+
+        internal static bool HasSameObservableState(NativeWindowSnapshot left, NativeWindowSnapshot right)
+        {
+            if (ReferenceEquals(left, right)) return true;
+            if (left == null || right == null) return false;
+            return left.Handle == right.Handle
+                && left.ProcessId == right.ProcessId
+                && String.Equals(left.Title, right.Title, StringComparison.Ordinal)
+                && left.IsVisible == right.IsVisible
+                && left.IsMinimized == right.IsMinimized
+                && left.IsMaximized == right.IsMaximized
+                && left.IsAttached == right.IsAttached
+                && left.Bounds.X == right.Bounds.X
+                && left.Bounds.Y == right.Bounds.Y
+                && left.Bounds.Width == right.Bounds.Width
+                && left.Bounds.Height == right.Bounds.Height;
         }
 
         private void RaiseChanges(IEnumerable<NativeWindowChangedEventArgs> changes)
