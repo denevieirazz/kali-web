@@ -56,9 +56,21 @@ test.describe('Navegador CloudOS — WebView2 real', () => {
         '--backend-origin', `${testServer.backendOrigin}/`,
         '--url', `${testServer.origin}/xfo-deny`,
       ];
+      const hostEnv = {
+        ...process.env,
+        // The WebView2 loader merges this process-wide variable with the
+        // environment options. An inherited fixed port would otherwise win
+        // over --debug-port and make Playwright wait on the wrong endpoint.
+        WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${debugPort}`,
+      };
 
       if (existsSync(testHostExe)) {
-        host = spawn(testHostExe, hostArgs, { cwd: process.cwd(), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+        host = spawn(testHostExe, hostArgs, {
+          cwd: process.cwd(),
+          windowsHide: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: hostEnv,
+        });
       } else {
         const dotnetRoot = process.env.DOTNET_ROOT || 'C:\\Users\\dougl\\Documents\\Codex\\.dotnet8';
         const dotnetCmd = path.join(dotnetRoot, 'dotnet.exe');
@@ -70,7 +82,7 @@ test.describe('Navegador CloudOS — WebView2 real', () => {
           windowsHide: true,
           stdio: ['ignore', 'pipe', 'pipe'],
           env: {
-            ...process.env,
+            ...hostEnv,
             DOTNET_ROOT: dotnetRoot,
             PATH: `${dotnetRoot};${process.env.PATH}`,
           }

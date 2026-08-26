@@ -1,10 +1,8 @@
 using System.Reflection;
-using System.Runtime.CompilerServices;
 using CloudOS.Host.Native;
 
 internal static class NativeScriptLaunchContract
 {
-    [ModuleInitializer]
     internal static void Validate()
     {
         if (Environment.GetCommandLineArgs().Any(argument =>
@@ -23,7 +21,7 @@ internal static class NativeScriptLaunchContract
 
         var spec = NativeProcessLaunchSpec.Create(
             commandProcessor,
-            ["/d", "/s", "/v:off", "/c", scriptPath],
+            ["/d", "/s", "/v:off", "/c", "call", scriptPath],
             temp.Path);
         using var lease = NativeContainedProcessLauncher.StartSuspended(spec);
         using var windows = new NativeWindowManager();

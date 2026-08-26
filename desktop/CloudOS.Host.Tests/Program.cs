@@ -59,6 +59,7 @@ var tests = new (string Name, Action Run)[]
     ("native containment failures require termination", NativeContainmentFailuresRequireTermination),
     ("native launch descriptor preserves argv JSON", NativeLaunchDescriptorPreservesArgvJson),
     ("native command line quoting is bounded", NativeCommandLineQuotingIsBounded),
+    ("cmd script GUI descendant is correlated through the contained Job", NativeScriptLaunchContract.Validate),
     ("native launcher tracks suspended process before resume", NativeLauncherTracksSuspendedProcessBeforeResume),
     ("native job child HWND is quarantined and escape is detected", NativeJobChildWindowIsQuarantined)
 };
@@ -292,6 +293,10 @@ static void NativeLaunchAcceptsOnlyDirectDescriptors()
         "A shortcut argument string must never be approximated as argv.");
     Assert(NativeLaunchContainmentPolicy.AllowsArgumentVector("windows-executable", 3),
         "A direct executable may carry a validated argv array.");
+    Assert(NativeLaunchContainmentPolicy.AllowsArgumentVector("windows-script-direct", 6),
+        "A script launch must carry the fixed cmd.exe CALL grammar and one absolute path.");
+    Assert(!NativeLaunchContainmentPolicy.AllowsArgumentVector("windows-script-direct", 5),
+        "The quote-stripping five-item cmd.exe grammar must fail closed.");
     Assert(!NativeLaunchContainmentPolicy.EvaluateLaunchKind(null).Allowed, "A missing launch kind must fail closed.");
 }
 

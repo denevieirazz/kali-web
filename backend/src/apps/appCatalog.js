@@ -87,6 +87,14 @@ function windowsCommandProcessor() {
   return path.win32.join(systemRoot, 'System32', 'cmd.exe');
 }
 
+export function buildWindowsScriptArguments(scriptPath) {
+  // `cmd /s /c "C:\\path with spaces\\script.cmd"` strips the command's
+  // outer quotes before execution and truncates the path at the first space.
+  // A fixed CALL token keeps the quoted script path as a distinct command
+  // operand while preserving the bounded, non-user-controlled shell grammar.
+  return ['/d', '/s', '/v:off', '/c', 'call', scriptPath];
+}
+
 // Parse only the documented Windows backslash/quote grammar used by conventional
 // Win32 argv consumers. Malformed/unbalanced input fails closed instead of being
 // approximated. The Host will quote each resulting argv entry again before
@@ -310,7 +318,7 @@ export async function launchCatalogApp(id) {
   }
 
   const launchArguments = scriptLaunch
-    ? ['/d', '/s', '/v:off', '/c', scriptPath]
+    ? buildWindowsScriptArguments(scriptPath)
     : (launchKind === 'windows-shortcut-direct'
         ? []
         : (Array.isArray(app.args) ? app.args.filter((value) => typeof value === 'string' && !/[\0\r\n]/.test(value)).slice(0, 128) : []));
