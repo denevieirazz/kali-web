@@ -14,6 +14,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$expectedBranch = 'poc/cloudos-windows-captured-surface'
 $repoRoot = [System.IO.Path]::GetFullPath((Get-Location).Path)
 $hostTestsProject = Join-Path $repoRoot 'desktop\CloudOS.Host.Tests\CloudOS.Host.Tests.csproj'
 $fixtureExe = Join-Path $repoRoot 'desktop\CloudOS.Host.Tests\bin\Release\net8.0\CloudOS.Host.Tests.exe'
@@ -45,6 +46,9 @@ if ($currentHead -ne $ExpectedHeadSha.ToLowerInvariant()) {
 $branch = @(git branch --show-current)
 if ($LASTEXITCODE -ne 0 -or $branch.Count -ne 1) { throw 'Não foi possível determinar a branch atual.' }
 $branch = ([string]$branch[0]).Trim()
+if ($branch -ne $expectedBranch) {
+    throw "Branch incorreta para a prova de captura. esperado=$expectedBranch atual=$branch"
+}
 
 $dotnet = Resolve-DotNet
 [System.IO.Directory]::CreateDirectory($outputRoot) | Out-Null
@@ -117,6 +121,9 @@ try {
     Write-Host 'CLOUDOS WINDOWS CAPTURE PROBE LOCAL SMOKE: PASS' -ForegroundColor Green
     Write-Host "Frames: $($report.capture.frameCount)"
     Write-Host "Size:   $($report.capture.width)x$($report.capture.height)"
+    Write-Host "Initial item:   $($report.capture.initialItemSize.width)x$($report.capture.initialItemSize.height)"
+    Write-Host "Initial buffer: $($report.capture.initialBufferSize.width)x$($report.capture.initialBufferSize.height) via $($report.capture.initialBufferSize.source)"
+    Write-Host "Empty frames:   $($report.capture.emptyFrameCount)"
     Write-Host "Report: $reportPath"
     Write-Host "Log:    $logPath"
 }
