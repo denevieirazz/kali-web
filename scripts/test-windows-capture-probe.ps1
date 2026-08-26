@@ -69,20 +69,24 @@ try {
     Write-Host 'Iniciando fixture Win32 real...' -ForegroundColor Cyan
     $fixture = Start-Process -FilePath $fixtureExe -ArgumentList '--native-contained-fixture-window' -PassThru
     $deadline = [DateTimeOffset]::UtcNow.AddSeconds(10)
-    $hwnd = [IntPtr]::Zero
+    $reportedMainWindowHwnd = [IntPtr]::Zero
     do {
         Start-Sleep -Milliseconds 100
         $fixture.Refresh()
         if ($fixture.HasExited) { throw "Fixture encerrou prematuramente com exit code $($fixture.ExitCode)." }
-        $hwnd = $fixture.MainWindowHandle
-    } while ($hwnd -eq [IntPtr]::Zero -and [DateTimeOffset]::UtcNow -lt $deadline)
+        $reportedMainWindowHwnd = $fixture.MainWindowHandle
+    } while ($reportedMainWindowHwnd -eq [IntPtr]::Zero -and [DateTimeOffset]::UtcNow -lt $deadline)
 
-    if ($hwnd -eq [IntPtr]::Zero) { throw 'Fixture não publicou HWND dentro do timeout.' }
+    if ($reportedMainWindowHwnd -eq [IntPtr]::Zero) { throw 'Fixture não publicou nenhuma janela dentro do timeout.' }
 
-    Write-Host "Fixture PID=$($fixture.Id) HWND=0x$('{0:X}' -f $hwnd.ToInt64())" -ForegroundColor Cyan
+    # IMPORTANT: Process.MainWindowHandle is not authoritative for a console-hosted test process.
+    # It can identify a console/ConPTY window instead of the Win32 fixture HWND. The capture probe
+    # owns target selection: given the fixture PID it enumerates visible top-level HWNDs belonging
+    # to that process and selects the largest candidate by native window bounds.
+    Write-Host "Fixture PID=$($fixture.Id) reported MainWindowHandle=0x$('{0:X}' -f $reportedMainWindowHwnd.ToInt64())" -ForegroundColor Cyan
     Write-Host 'Executando Windows.Graphics.Capture...' -ForegroundColor Cyan
     $probeOutput = & $dotnet $probeDll `
-        --hwnd ('0x{0:X}' -f $hwnd.ToInt64()) `
+        --pid $fixture.Id `
         --seconds $CaptureSeconds `
         --min-frames $MinimumFrames `
         --output $reportPath 2>&1
@@ -95,7 +99,8 @@ try {
         "branch=$branch",
         "head=$currentHead",
         "fixturePid=$($fixture.Id)",
-        "fixtureHwnd=0x$('{0:X}' -f $hwnd.ToInt64())",
+        "fixtureReportedMainWindowHwnd=0x$('{0:X}' -f $reportedMainWindowHwnd.ToInt64())",
+        'targetSelection=probe-enumerated-largest-visible-top-level-window-for-pid',
         "captureSeconds=$CaptureSeconds",
         "minimumFrames=$MinimumFrames",
         "probeExitCode=$probeExit",
@@ -119,6 +124,8 @@ try {
 
     Write-Host ''
     Write-Host 'CLOUDOS WINDOWS CAPTURE PROBE LOCAL SMOKE: PASS' -ForegroundColor Green
+    Write-Host "Target HWND: $($report.window.handle)"
+    Write-Host "Target size: $($report.window.width)x$($report.window.height)"
     Write-Host "Frames: $($report.capture.frameCount)"
     Write-Host "Size:   $($report.capture.width)x$($report.capture.height)"
     Write-Host "Initial item:   $($report.capture.initialItemSize.width)x$($report.capture.initialItemSize.height)"
