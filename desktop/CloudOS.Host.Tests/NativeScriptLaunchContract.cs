@@ -17,7 +17,7 @@ internal static class NativeScriptLaunchContract
 
         var spec = NativeProcessLaunchSpec.Create(
             commandProcessor,
-            ["/d", "/s", "/v:off", "/c", scriptPath],
+            ["/d", "/s", "/v:off", "/c", "call", scriptPath],
             temp.Path);
         using var lease = NativeContainedProcessLauncher.StartSuspended(spec);
         using var windows = new NativeWindowManager();
