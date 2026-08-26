@@ -25,6 +25,11 @@ function Has-MountOptions($Mount, [string[]]$Required) {
     return $true
 }
 
+function Describe-Mount($Mount, [string]$ExpectedMountPoint) {
+    if ($null -eq $Mount) { return "mount=$ExpectedMountPoint missing" }
+    return "mount=$($Mount.MountPoint) fs=$($Mount.FileSystem) options=$($Mount.Options -join ',')"
+}
+
 $ledgerPath = Join-Path $env:TEMP 'cloudos-linux-runtime-poc1-sessions.json'
 $selectedSession = $null
 
@@ -33,8 +38,12 @@ if ($XpraPid -le 0) {
         Fail "Ledger de sessões não encontrado em $ledgerPath. Abra primeiro um aplicativo Linux dentro do CloudOS."
     }
 
-    $ledger = Get-Content -LiteralPath $ledgerPath -Raw | ConvertFrom-Json
-    $sessions = @($ledger.sessions)
+    try {
+        $ledger = Get-Content -LiteralPath $ledgerPath -Raw | ConvertFrom-Json
+        $sessions = @($ledger.sessions)
+    } catch {
+        Fail 'O ledger de sessões Linux está ausente ou inválido.'
+    }
     if ($sessions.Count -eq 0) {
         Fail 'O ledger não possui uma sessão Linux ativa.'
     }
@@ -47,8 +56,12 @@ if ($XpraPid -le 0) {
     }
 
     $candidatePid = 0
-    if ($null -ne $selectedSession.pids -and $null -ne $selectedSession.pids.xpra) {
-        [void][int]::TryParse([string]$selectedSession.pids.xpra, [ref]$candidatePid)
+    $pidsProperty = $selectedSession.PSObject.Properties['pids']
+    if ($null -ne $pidsProperty -and $null -ne $pidsProperty.Value) {
+        $xpraProperty = $pidsProperty.Value.PSObject.Properties['xpra']
+        if ($null -ne $xpraProperty -and $null -ne $xpraProperty.Value) {
+            [void][int]::TryParse([string]$xpraProperty.Value, [ref]$candidatePid)
+        }
     }
     $XpraPid = $candidatePid
 }
@@ -113,33 +126,42 @@ function Add-Check([string]$Name, [bool]$Passed, [string]$Detail) {
 }
 
 $rootMount = Get-TopMount '/'
-Add-Check 'rootfs-readonly' (Has-MountOptions $rootMount @('ro', 'nosuid', 'nodev')) "root options=$($rootMount.Options -join ',')"
+Add-Check 'rootfs-readonly' (Has-MountOptions $rootMount @('ro', 'nosuid', 'nodev')) (Describe-Mount $rootMount '/')
 
 $mntMount = Get-TopMount '/mnt'
-Add-Check 'windows-mounts-hidden' ($null -ne $mntMount -and $mntMount.FileSystem -eq 'tmpfs' -and (Has-MountOptions $mntMount @('rw', 'nosuid', 'nodev', 'noexec'))) "mount=/mnt fs=$($mntMount.FileSystem) options=$($mntMount.Options -join ',')"
+Add-Check 'windows-mounts-hidden' ($null -ne $mntMount -and $mntMount.FileSystem -eq 'tmpfs' -and (Has-MountOptions $mntMount @('rw', 'nosuid', 'nodev', 'noexec'))) (Describe-Mount $mntMount '/mnt')
 
 $homeMask = Get-TopMount '/home'
-Add-Check 'real-wsl-home-hidden' ($null -ne $homeMask -and $homeMask.FileSystem -eq 'tmpfs' -and (Has-MountOptions $homeMask @('rw', 'nosuid', 'nodev', 'noexec'))) "mount=/home fs=$($homeMask.FileSystem) options=$($homeMask.Options -join ',')"
+Add-Check 'real-wsl-home-hidden' ($null -ne $homeMask -and $homeMask.FileSystem -eq 'tmpfs' -and (Has-MountOptions $homeMask @('rw', 'nosuid', 'nodev', 'noexec'))) (Describe-Mount $homeMask '/home')
 
 $containedHomeMount = $mounts | Where-Object { $_.MountPoint -match '^/var/lib/cloudos/contained-homes/[^/]+$' } | Select-Object -First 1
-Add-Check 'contained-home-writable' (Has-MountOptions $containedHomeMount @('rw', 'nosuid', 'nodev', 'noexec')) "mount=$($containedHomeMount.MountPoint) options=$($containedHomeMount.Options -join ',')"
+Add-Check 'contained-home-writable' (Has-MountOptions $containedHomeMount @('rw', 'nosuid', 'nodev', 'noexec')) (Describe-Mount $containedHomeMount '/var/lib/cloudos/contained-homes/<profile>')
 
 $driveAreas = @('Desktop', 'Documents', 'Downloads', 'Projects', 'Shared')
 foreach ($area in $driveAreas) {
     $mountPoint = "/run/cloudos-drive/$area"
     $driveMount = Get-TopMount $mountPoint
-    Add-Check "drive-$($area.ToLowerInvariant())" (Has-MountOptions $driveMount @('rw', 'nosuid', 'nodev', 'noexec', 'nosymfollow')) "mount=$mountPoint fs=$($driveMount.FileSystem) options=$($driveMount.Options -join ',')"
+    Add-Check "drive-$($area.ToLowerInvariant())" (Has-MountOptions $driveMount @('rw', 'nosuid', 'nodev', 'noexec', 'nosymfollow')) (Describe-Mount $driveMount $mountPoint)
 }
 
 $initMount = Get-TopMount '/init'
-Add-Check 'wsl-init-masked' (Has-MountOptions $initMount @('ro', 'nosuid', 'nodev', 'noexec')) "mount=/init fs=$($initMount.FileSystem) options=$($initMount.Options -join ',')"
+Add-Check 'wsl-init-masked' (Has-MountOptions $initMount @('ro', 'nosuid', 'nodev', 'noexec')) (Describe-Mount $initMount '/init')
 
 $failedChecks = @($checks | Where-Object { -not $_.passed })
+$sessionIdValue = $SessionId
+$distributionValue = $null
+if ($null -ne $selectedSession) {
+    $idProperty = $selectedSession.PSObject.Properties['id']
+    if ($null -ne $idProperty) { $sessionIdValue = [string]$idProperty.Value }
+    $distributionProperty = $selectedSession.PSObject.Properties['distribution']
+    if ($null -ne $distributionProperty) { $distributionValue = [string]$distributionProperty.Value }
+}
+
 $report = [ordered]@{
     schemaVersion = 1
     capturedAt = (Get-Date).ToUniversalTime().ToString('o')
-    sessionId = if ($null -ne $selectedSession) { $selectedSession.id } else { $SessionId }
-    distribution = if ($null -ne $selectedSession) { $selectedSession.distribution } else { $null }
+    sessionId = $sessionIdValue
+    distribution = $distributionValue
     xpraPid = $XpraPid
     result = if ($failedChecks.Count -eq 0) { 'PASS' } else { 'FAIL' }
     checks = @($checks)
