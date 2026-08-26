@@ -7,3 +7,8 @@
 .settings-recovery-result code { color: #eef2ff; font: 700 12px/1.5 "Cascadia Code", Consolas, monospace; letter-spacing: .05em; overflow-wrap: anywhere; user-select: text; }
 .settings-recovery-result label { display: flex; gap: 8px; align-items: center; color: var(--text-secondary); font-size: 11px; cursor: pointer; }
 .settings-recovery-result input { accent-color: var(--accent); }
+.settings-account-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.settings-account-form label { display: flex; flex-direction: column; gap: 6px; color: var(--text-secondary); font-size: 11px; }
+.settings-account-form input { min-height: 36px; padding: 0 10px; border: 1px solid rgba(255,255,255,.12); border-radius: 8px; background: #161126; color: #f5f3ff; font: 12px var(--font-family); }
+.settings-account-form .settings-action { grid-column: 1 / -1; justify-self: start; }
+@media(max-width:720px){.settings-account-form{grid-template-columns:1fr}.settings-account-form .settings-action{grid-column:1}}

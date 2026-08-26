@@ -187,9 +187,7 @@ export const useUserStore = create<UserState>((set, get) => {
       try {
         const response = await apiClient<{ user: unknown; recoveryCode?: string }>('/api/auth/accounts', {
           method: 'POST',
-          body: JSON.stringify({ username, displayName, password, confirmPassword }),
-          skipAuth: true,
-          suppressUnauthorizedHandler: true
+          body: JSON.stringify({ username, displayName, password, confirmPassword })
         });
         const recoveryCode = extractRecoveryCode(response);
         const profile = normalizePublicUser(response.user, { username, displayName });

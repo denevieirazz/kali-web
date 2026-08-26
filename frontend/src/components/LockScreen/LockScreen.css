@@ -242,6 +242,7 @@
 .recovery-mode .card-header { align-self: center; }
 .btn-recovery-link { align-self: center; border: 0; color: #bba6ec; background: transparent; cursor: pointer; font-size: 12px; }
 .btn-recovery-link:hover { color: #ddd1fa; text-decoration: underline; }
+.lock-account-guidance { color: #8f86a5; font-size: 11px; line-height: 1.45; text-align: center; }
 .recovery-explanation { margin: 0; color: #9ca9bc; font-size: 11px; line-height: 1.5; }
 .recovery-password-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .recovery-password-hint { margin-top: -7px; color: #7f8ba0; font-size: 9px; }
