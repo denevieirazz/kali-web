@@ -4,7 +4,8 @@
 import { useWindowManager } from '../stores/windowManager';
 import { useProcessManager } from '../stores/processManager';
 import { useAppRegistry } from '../core/appRegistry';
-import { getDefaultAppForFile, getCompatibleApps, getFileExtension, type AppAssociation } from './mimeRegistry';
+import { getDefaultAppForFile, getCompatibleApps, getFileExtension, getUserAssociations, type AppAssociation } from './mimeRegistry';
+import { cloudFileRefFromLegacyPath } from './cloudFileRef';
 import { openOpenWithModal } from '../components/OpenWithModal/OpenWithModal';
 
 export interface OpenFileOptions {
@@ -16,11 +17,44 @@ export interface OpenFileOptions {
   linuxApps?: Array<any>;
 }
 
+function isFileCapableWindowsApp(app: any) {
+  const runtime = app?.metadata?.runtime;
+  const launchKind = app?.metadata?.launchKind;
+  return runtime === 'windows'
+    && typeof app?.metadata?.nativeAppId === 'string'
+    && ['windows-executable', 'windows-shortcut-direct', 'windows-shortcut-argv'].includes(launchKind);
+}
+
+function windowsOpenWithApps(registeredApps: Record<string, any>): AppAssociation[] {
+  return Object.values(registeredApps)
+    .filter(isFileCapableWindowsApp)
+    .map((app: any) => ({
+      id: app.id,
+      name: app.name,
+      icon: app.icon || '▦',
+      description: 'Aplicativo Windows contido pelo CloudOS',
+      isLinux: false,
+    }));
+}
+
+function compatibleAppsWithWindows(fileName: string, linuxApps: Array<any>, registeredApps: Record<string, any>) {
+  const base = getCompatibleApps(fileName, linuxApps);
+  const ids = new Set(base.map(app => app.id));
+  for (const app of windowsOpenWithApps(registeredApps)) {
+    if (!ids.has(app.id)) {
+      ids.add(app.id);
+      base.push(app);
+    }
+  }
+  return base;
+}
+
 export function openFile(options: OpenFileOptions): void {
   const { filePath, fileName, targetAppId, fileContent, openWith = false, linuxApps = [] } = options;
+  const registeredApps = useAppRegistry.getState().apps;
 
   if (openWith) {
-    const compatible = getCompatibleApps(fileName, linuxApps);
+    const compatible = compatibleAppsWithWindows(fileName, linuxApps, registeredApps);
     openOpenWithModal({
       fileName,
       filePath,
@@ -35,12 +69,11 @@ export function openFile(options: OpenFileOptions): void {
 
   const { openWindow } = useWindowManager.getState();
   const { createProcess } = useProcessManager.getState();
-  const registeredApps = useAppRegistry.getState().apps;
 
   let selectedApp: AppAssociation;
 
   if (targetAppId) {
-    const compatible = getCompatibleApps(fileName, linuxApps);
+    const compatible = compatibleAppsWithWindows(fileName, linuxApps, registeredApps);
     const found = compatible.find(a => a.id === targetAppId || a.linuxAppId === targetAppId);
     if (found) {
       selectedApp = found;
@@ -55,7 +88,19 @@ export function openFile(options: OpenFileOptions): void {
       };
     }
   } else {
-    selectedApp = getDefaultAppForFile(fileName, linuxApps);
+    const userDefault = getUserAssociations()[getFileExtension(fileName)];
+    const registeredDefault = userDefault ? registeredApps[userDefault] : null;
+    if (registeredDefault && isFileCapableWindowsApp(registeredDefault)) {
+      selectedApp = {
+        id: registeredDefault.id,
+        name: registeredDefault.name,
+        icon: registeredDefault.icon || '▦',
+        description: 'Aplicativo Windows contido pelo CloudOS',
+        isLinux: false,
+      };
+    } else {
+      selectedApp = getDefaultAppForFile(fileName, linuxApps);
+    }
   }
 
   const title = `${fileName} - ${selectedApp.name}`;
@@ -196,10 +241,13 @@ export function openFile(options: OpenFileOptions): void {
     return;
   }
 
-  // Fallback to registered generic app or Notepad
+  // 3. Registered runtime app. Windows apps receive only a logical CloudOS Drive
+  // capability reference; NativeAppWindow stages it with the backend broker before
+  // asking the Host to launch anything.
   const fallback = registeredApps[appId] || registeredApps['notepad'];
   if (fallback) {
     const pid = createProcess(fallback.id, fallback.name, fallback.icon);
+    const fileRef = fallback.metadata?.runtime === 'windows' ? cloudFileRefFromLegacyPath(filePath) : null;
     openWindow({
       title,
       icon: fallback.icon,
@@ -208,7 +256,7 @@ export function openFile(options: OpenFileOptions): void {
       height: fallback.defaultHeight || 500,
       isResizable: true,
       processId: pid,
-      params: { filePath, content: fileContent }
+      params: { filePath, content: fileContent, ...(fileRef ? { fileRef } : {}) }
     });
   }
 }
