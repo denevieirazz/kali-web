@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { CloudOsDrive, CloudOsDriveError, windowsPathToWslPath } from '../src/storage/cloudosDrive.js';
+import { CloudOsDrive, CloudOsDriveError, resolveCloudOsDriveRoot, windowsPathToWslPath } from '../src/storage/cloudosDrive.js';
 
 async function withDrive(run) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cloudos-drive-test-'));
@@ -37,6 +37,18 @@ test('CloudOS Drive creates one canonical shared layout', async () => {
     assert.equal(runtime.windowsApps, path.join(runtime.hostRoot, 'Apps', 'windows'));
     assert.equal(runtime.linuxApps, path.join(runtime.hostRoot, 'Apps', 'linux'));
   });
+});
+
+test('native Windows runtime and backend resolve the same stable CloudOS Drive root', () => {
+  const environment = { LOCALAPPDATA: 'C:\\Users\\cloudos\\AppData\\Local' };
+  assert.equal(
+    resolveCloudOsDriveRoot(environment, 'win32'),
+    'C:\\Users\\cloudos\\AppData\\Local\\CloudOS\\Drive',
+  );
+  assert.equal(
+    resolveCloudOsDriveRoot({ ...environment, CLOUDOS_DRIVE_DIR: 'D:\\CloudOS Data' }, 'win32'),
+    'D:\\CloudOS Data',
+  );
 });
 
 test('CloudOS Drive reads and writes the same physical file in chunks', async () => {
