@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { buildReadOnlyRootfsFinalize, buildWritableContainedHomeMount } from './linuxRootfsSandbox.js';
 
 const SANDBOX_DRIVE_ROOT = '/run/cloudos-drive';
 const DRIVE_BINDINGS = Object.freeze([
@@ -61,6 +62,7 @@ export function buildCloudOsDriveSandboxMounts({ wslRoot, containedHome, uid, gi
   const sourcePaths = DRIVE_BINDINGS.map(binding => `${root}/${binding.source.join('/')}`);
   const commands = [
     ...sourcePaths.map(source => `[ -d ${shellQuote(source)} ] && [ ! -L ${shellQuote(source)} ] || { echo CLOUDOS_DRIVE_BIND_INVALID >&2; exit 47; }`),
+    ...buildWritableContainedHomeMount({ containedHome, uid, gid }),
     'install -d -m 755 /run/cloudos-drive',
     'mount -t tmpfs -o mode=755,nosuid,nodev,noexec tmpfs /run/cloudos-drive',
   ];
@@ -84,6 +86,7 @@ export function buildCloudOsDriveSandboxMounts({ wslRoot, containedHome, uid, gi
 
   commands.push(
     ...DRIVE_BINDINGS.map(binding => `[ -d ${shellQuote(`${SANDBOX_DRIVE_ROOT}/${binding.name}`)} ] || { echo CLOUDOS_DRIVE_BIND_MISSING >&2; exit 47; }`),
+    ...buildReadOnlyRootfsFinalize({ containedHome, uid, gid }),
   );
   return commands;
 }
