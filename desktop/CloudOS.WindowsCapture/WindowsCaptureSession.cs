@@ -57,12 +57,20 @@ public sealed class WindowsCaptureSession : IDisposable
             throw new ArgumentException("The capture target must be a live HWND.", nameof(windowHandle));
 
         WindowHandle = windowHandle;
+
+        // Snapshot Win32/DWM geometry before asking WinRT to create the capture item.
+        // The physical probe proved that GetWindowRect succeeds for the target HWND
+        // immediately before WGC activation even when GraphicsCaptureItem.Size is 0x0.
+        // Keeping this snapshot also makes the bootstrap resilient to transient WGC
+        // metadata without inventing an application-specific size.
+        var nativeInitial = TryResolveNativeInitialBufferSize(windowHandle);
+
         _item = WindowsCaptureInterop.CreateItemForWindow(windowHandle);
         var itemSize = _item.Size;
         _initialItemWidth = itemSize.Width;
         _initialItemHeight = itemSize.Height;
 
-        var initial = ResolveInitialBufferSize(windowHandle, itemSize);
+        var initial = ResolveInitialBufferSize(windowHandle, itemSize, nativeInitial);
         _initialBufferWidth = initial.Size.Width;
         _initialBufferHeight = initial.Size.Height;
         _initialSizeSource = initial.Source;
@@ -194,11 +202,31 @@ public sealed class WindowsCaptureSession : IDisposable
         _device.Dispose();
     }
 
-    private static InitialCaptureSize ResolveInitialBufferSize(IntPtr windowHandle, SizeInt32 itemSize)
+    private static InitialCaptureSize ResolveInitialBufferSize(
+        IntPtr windowHandle,
+        SizeInt32 itemSize,
+        InitialCaptureSize? nativeInitial)
     {
         if (IsValidSize(itemSize))
             return new InitialCaptureSize(itemSize, "graphics-capture-item");
 
+        if (nativeInitial is { } native)
+            return native;
+
+        // Last-chance retry after WinRT activation. This is diagnostic resilience only;
+        // normally the pre-activation native snapshot above should already have succeeded.
+        var retry = TryResolveNativeInitialBufferSize(windowHandle, "post-wgc-");
+        if (retry is { } postWgc)
+            return postWgc;
+
+        throw new InvalidOperationException(
+            $"The capture target has no usable initial size. item={itemSize.Width}x{itemSize.Height}; hwnd=0x{windowHandle.ToInt64():X}.");
+    }
+
+    private static InitialCaptureSize? TryResolveNativeInitialBufferSize(
+        IntPtr windowHandle,
+        string sourcePrefix = "pre-wgc-")
+    {
         if (DwmGetWindowAttribute(
                 windowHandle,
                 DwmwaExtendedFrameBounds,
@@ -206,14 +234,13 @@ public sealed class WindowsCaptureSession : IDisposable
                 (uint)Marshal.SizeOf<NativeRect>()) == 0 &&
             TryConvert(frameBounds, out var dwmSize))
         {
-            return new InitialCaptureSize(dwmSize, "dwm-extended-frame-bounds");
+            return new InitialCaptureSize(dwmSize, sourcePrefix + "dwm-extended-frame-bounds");
         }
 
         if (GetWindowRect(windowHandle, out var windowBounds) && TryConvert(windowBounds, out var windowSize))
-            return new InitialCaptureSize(windowSize, "get-window-rect");
+            return new InitialCaptureSize(windowSize, sourcePrefix + "get-window-rect");
 
-        throw new InvalidOperationException(
-            $"The capture target has no usable initial size. item={itemSize.Width}x{itemSize.Height}; hwnd=0x{windowHandle.ToInt64():X}.");
+        return null;
     }
 
     private static bool IsValidSize(SizeInt32 size) => size.Width > 0 && size.Height > 0;
