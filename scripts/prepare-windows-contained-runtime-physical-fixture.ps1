@@ -9,8 +9,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = [System.IO.Path]::GetFullPath((Get-Location).Path)
 $projectPath = Join-Path $repoRoot 'desktop\CloudOS.Host.Tests\CloudOS.Host.Tests.csproj'
-$fixtureExe = Join-Path $repoRoot 'desktop\CloudOS.Host.Tests\bin\Release\net8.0\CloudOS.Host.Tests.exe'
+$fixtureBuildRoot = Join-Path $repoRoot 'desktop\CloudOS.Host.Tests\bin\Release\net8.0'
+$fixtureBuildExe = Join-Path $fixtureBuildRoot 'CloudOS.Host.Tests.exe'
 $fixtureRoot = Join-Path $env:LOCALAPPDATA 'CloudOS\PhysicalProof\WindowsContainedRuntime'
+$fixtureAppRoot = Join-Path $fixtureRoot 'app'
+$fixtureExe = Join-Path $fixtureAppRoot 'CloudOS.Host.Tests.exe'
 $scriptPath = Join-Path $fixtureRoot 'cloudos-contained-gui-fixture.cmd'
 $manifestPath = Join-Path $fixtureRoot 'fixture-manifest.json'
 $startMenuDirectory = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\CloudOS Physical Proof'
@@ -35,6 +38,9 @@ function Remove-Fixture {
     }
     if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
         Remove-Item -LiteralPath $manifestPath -Force
+    }
+    if (Test-Path -LiteralPath $fixtureAppRoot -PathType Container) {
+        Remove-Item -LiteralPath $fixtureAppRoot -Recurse -Force
     }
     Remove-IfEmpty -Path $fixtureRoot
 
@@ -78,24 +84,28 @@ Write-Host 'Compilando a fixture Win32 já existente em CloudOS.Host.Tests...'
 if ($LASTEXITCODE -ne 0) {
     throw "dotnet build falhou com exit code $LASTEXITCODE."
 }
-if (-not (Test-Path -LiteralPath $fixtureExe -PathType Leaf)) {
-    throw "Executável da fixture não foi produzido: $fixtureExe"
+if (-not (Test-Path -LiteralPath $fixtureBuildExe -PathType Leaf)) {
+    throw "Executável da fixture não foi produzido: $fixtureBuildExe"
 }
-if ($fixtureExe -match '[%\r\n\0]' -or $scriptPath -match '[%\r\n\0]') {
-    throw 'O caminho físico contém caracteres incompatíveis com o contrato windows-script-direct.'
-}
-if ($fixtureExe.Contains('"')) {
-    throw 'O caminho da fixture contém aspas e não pode ser serializado com segurança no .cmd físico.'
+if ($scriptPath -match '[%\r\n\0]') {
+    throw 'O caminho físico do .cmd contém caracteres incompatíveis com o contrato windows-script-direct.'
 }
 
 [System.IO.Directory]::CreateDirectory($fixtureRoot) | Out-Null
 [System.IO.Directory]::CreateDirectory($startMenuDirectory) | Out-Null
+if (Test-Path -LiteralPath $fixtureAppRoot -PathType Container) {
+    Remove-Item -LiteralPath $fixtureAppRoot -Recurse -Force
+}
+[System.IO.Directory]::CreateDirectory($fixtureAppRoot) | Out-Null
+Copy-Item -Path (Join-Path $fixtureBuildRoot '*') -Destination $fixtureAppRoot -Recurse -Force
+if (-not (Test-Path -LiteralPath $fixtureExe -PathType Leaf)) {
+    throw "A cópia autocontida da fixture não foi criada: $fixtureExe"
+}
 
-$scriptInvocation = '"' + $fixtureExe + '" --native-contained-fixture-window'
 $scriptContent = @(
     '@echo off',
     'setlocal',
-    $scriptInvocation,
+    '"%~dp0app\CloudOS.Host.Tests.exe" --native-contained-fixture-window',
     'exit /b %ERRORLEVEL%'
 ) -join "`r`n"
 $scriptContent += "`r`n"
@@ -147,6 +157,7 @@ $manifest = [ordered]@{
     ShortcutPath = $shortcutPath
     ScriptPath = $scriptPath
     ScriptSha256 = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    FixtureBuildExecutable = $fixtureBuildExe
     FixtureExecutable = $fixtureExe
     FixtureExecutableSha256 = (Get-FileHash -LiteralPath $fixtureExe -Algorithm SHA256).Hash.ToLowerInvariant()
     FixtureArgument = '--native-contained-fixture-window'
@@ -166,6 +177,7 @@ Write-Host "Git HEAD:  $currentHead"
 Write-Host 'Menu name: CloudOS BAT Contained Fixture'
 Write-Host "Shortcut:  $shortcutPath"
 Write-Host "Script:    $scriptPath"
+Write-Host "Fixture:   $fixtureExe"
 Write-Host "Manifest:  $manifestPath"
 Write-Host ''
 Write-Host 'Agora inicie o CloudOS em modo Full. O catálogo será criado já com a fixture presente.'
