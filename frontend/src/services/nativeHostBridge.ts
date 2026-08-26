@@ -1,6 +1,5 @@
 import { getStoredToken } from './apiClient';
 import { nativeSessionListsEqual } from './nativeWindowContract.js';
-import type { CloudFileRef } from './cloudFileRef';
 
 type NativeRequestMethod =
   | 'bridge.handshake'
@@ -159,7 +158,7 @@ class NativeHostBridge {
     return result;
   }
 
-  async launchApp(appId: string, fileRef?: CloudFileRef | null) {
+  async launchApp(appId: string) {
     const token = getStoredToken();
     if (!token) throw new NativeHostError('AUTH_REQUIRED', 'Entre no CloudOS para abrir aplicativos nativos.');
     await this.requireConnection();
@@ -174,7 +173,7 @@ class NativeHostBridge {
       sessionId?: string | null;
       contained?: boolean;
       containmentMode?: NativeContainmentMode;
-    }>('native.launchApp', fileRef ? { appId, token, fileRef } : { appId, token }, 40_000);
+    }>('native.launchApp', { appId, token }, 40_000);
   }
 
   async listSessions() {
@@ -214,17 +213,7 @@ class NativeHostBridge {
         this.pending.delete(id);
         reject(new NativeHostError('NATIVE_TIMEOUT', 'A operação nativa excedeu o tempo limite.'));
       }, timeoutMs);
-      this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
-      try {
-        this.transport!.postMessage({ v: 1, id, type: 'request', method, nonce: window.__cloudosNativeNonce, params });
-      } catch (postError) {
-        window.clearTimeout(timer);
-        this.pending.delete(id);
-        reject(new NativeHostError(
-          'NATIVE_TRANSPORT_FAILED',
-          postError instanceof Error ? postError.message : 'A ponte nativa não aceitou a solicitação.'
-        ));
-      }
+      this.pending.set(id, { resolve: resolve as (value: unknown) => void; reject: (reason: Error) => void; timer: number });
     });
   }
 
