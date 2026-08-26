@@ -16,14 +16,47 @@ function sleep(ms: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 }
 
-async function waitForSession(launch: NativeLaunch, cancelled: () => boolean): Promise<NativeSession | null> {
+async function resolveSessionId(launch: NativeLaunch, cancelled: () => boolean): Promise<string | null> {
+  // Current Hosts create the opaque session before replying to native.launchApp.
+  // Trust that exact capability instead of paying an extra listSessions IPC on every launch.
+  if (typeof launch.sessionId === 'string' && launch.sessionId) return launch.sessionId;
+
+  // Compatibility fallback for older Hosts that only returned the launch PID.
   for (let attempt = 0; attempt < SESSION_ATTEMPTS && !cancelled(); attempt += 1) {
     const result = await nativeHostBridge.listSessions();
-    const session = nativeSessionForLaunch(result.sessions, launch);
-    if (session) return session;
+    const session: NativeSession | null = nativeSessionForLaunch(result.sessions, launch);
+    if (session) return session.sessionId;
     await sleep(SESSION_RETRY_MS);
   }
   return null;
+}
+
+async function closeSessionBestEffort(sessionId: string | null | undefined) {
+  if (!sessionId) return;
+  try {
+    await nativeHostBridge.operate('close', sessionId);
+  } catch {
+    // Host-side pending-attach/document-reset containment remains the final fail-safe
+    // if the WebView transport disappears during renderer teardown.
+  }
+}
+
+async function closeCancelledLaunch(launch: NativeLaunch) {
+  if (!launch.managed) return;
+  const exactSessionId = typeof launch.sessionId === 'string' && launch.sessionId ? launch.sessionId : null;
+  if (exactSessionId) {
+    await closeSessionBestEffort(exactSessionId);
+    return;
+  }
+
+  // Compatibility fallback for older Hosts that returned only the launch PID. Query
+  // once rather than waiting through the normal correlation loop during teardown.
+  try {
+    const result = await nativeHostBridge.listSessions();
+    await closeSessionBestEffort(nativeSessionForLaunch(result.sessions, launch)?.sessionId);
+  } catch {
+    // The Host will terminate an unattached launch when its existing deadline expires.
+  }
 }
 
 function errorMessage(error: unknown) {
@@ -46,9 +79,10 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState<NativeSurfaceStatus>('launching');
   const [error, setError] = useState('');
+  const [documentVisible, setDocumentVisible] = useState(() => document.visibilityState === 'visible');
 
   const appId = win?.appId || '';
-  const visible = Boolean(win && !win.isMinimized && win.isActive && !isStartMenuOpen && document.visibilityState === 'visible');
+  const visible = Boolean(win && !win.isMinimized && win.isActive && !isStartMenuOpen && documentVisible);
 
   const syncSurface = useCallback(async (attach = false) => {
     const currentSessionId = sessionIdRef.current;
@@ -88,6 +122,12 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
   }, [visible]);
 
   useEffect(() => {
+    const syncDocumentVisibility = () => setDocumentVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', syncDocumentVisibility);
+    return () => document.removeEventListener('visibilitychange', syncDocumentVisibility);
+  }, []);
+
+  useEffect(() => {
     if (!appId.startsWith('native-')) {
       setStatus('error');
       setError('Identificador nativo inválido.');
@@ -110,7 +150,10 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
         if (cancelled) return;
 
         const launch = await nativeHostBridge.launchApp(appId);
-        if (cancelled) return;
+        if (cancelled) {
+          await closeCancelledLaunch(launch);
+          return;
+        }
         if (launch.name) updateWindowTitle(windowId, launch.name);
         if (!launch.managed) {
           throw new NativeHostError(
@@ -119,15 +162,19 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
           );
         }
 
-        setStatus('waiting');
-        const session = await waitForSession(launch, () => cancelled);
-        if (cancelled) return;
-        if (!session) {
+        const exactSessionId = typeof launch.sessionId === 'string' && launch.sessionId ? launch.sessionId : null;
+        if (!exactSessionId) setStatus('waiting');
+        const resolvedSessionId = await resolveSessionId(launch, () => cancelled);
+        if (cancelled) {
+          await closeSessionBestEffort(resolvedSessionId);
+          return;
+        }
+        if (!resolvedSessionId) {
           throw new NativeHostError('NATIVE_WINDOW_NOT_FOUND', 'A janela do aplicativo não apareceu a tempo para ser encaixada no CloudOS.');
         }
 
-        sessionIdRef.current = session.sessionId;
-        setSessionId(session.sessionId);
+        sessionIdRef.current = resolvedSessionId;
+        setSessionId(resolvedSessionId);
       } catch (launchError) {
         if (cancelled) return;
         setStatus('error');
@@ -151,9 +198,7 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
             await nativeHostBridge.layoutSession(currentSessionId, bounds, false);
           } catch {}
         }
-        try {
-          await nativeHostBridge.operate('close', currentSessionId);
-        } catch {}
+        await closeSessionBestEffort(currentSessionId);
       })();
     };
   }, [appId, updateWindowTitle, windowId]);
@@ -177,14 +222,12 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
     if (surfaceRef.current) observer.observe(surfaceRef.current);
     window.addEventListener('resize', scheduleSync);
     window.addEventListener('scroll', scheduleSync, true);
-    document.addEventListener('visibilitychange', scheduleSync);
 
     return () => {
       window.cancelAnimationFrame(frame);
       observer.disconnect();
       window.removeEventListener('resize', scheduleSync);
       window.removeEventListener('scroll', scheduleSync, true);
-      document.removeEventListener('visibilitychange', scheduleSync);
     };
   }, [sessionId, syncSurface]);
 

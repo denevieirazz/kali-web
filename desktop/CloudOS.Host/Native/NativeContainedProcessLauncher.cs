@@ -363,9 +363,15 @@ public sealed class NativeContainedProcessLease : IDisposable
     private const int JobObjectBasicProcessIdList = 3;
     private const int ErrorMoreData = 234;
     private const int MaxContainedProcesses = 256;
+    private const int MaxProcessListStabilizationAttempts = 3;
+    private static readonly int JobProcessListBufferSize = checked(8 + (IntPtr.Size * MaxContainedProcesses));
+
     private readonly SafeKernelHandle _nativeProcess;
     private readonly SafeJobHandle _job;
+    private readonly object _jobQuerySync = new();
     private SafeKernelHandle? _primaryThread;
+    private IntPtr _jobProcessListBuffer;
+    private int _jobProcessListBufferAllocationCount;
     private bool _disposed;
 
     internal NativeContainedProcessLease(
@@ -384,57 +390,86 @@ public sealed class NativeContainedProcessLease : IDisposable
     public int ProcessId => Process.Id;
     public bool IsResumed { get; private set; }
 
+    internal int JobProcessListBufferAllocationCount
+    {
+        get
+        {
+            lock (_jobQuerySync) return _jobProcessListBufferAllocationCount;
+        }
+    }
+
     /// <summary>
     /// Returns every process currently assigned to the containment Job, including
     /// descendants. The bounded query fails closed if a launch fans out beyond the
-    /// host's capability budget.
+    /// host's capability budget. The maximum-size native buffer is allocated lazily
+    /// once per lease and reused by correlation and termination polling.
     /// </summary>
     public IReadOnlyList<int> GetMemberProcessIds()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        var capacity = 16;
-        while (true)
+        lock (_jobQuerySync)
         {
-            var size = checked(8 + (IntPtr.Size * capacity));
-            var pointer = Marshal.AllocHGlobal(size);
-            try
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var pointer = GetOrCreateJobProcessListBuffer();
+
+            for (var attempt = 0; attempt < MaxProcessListStabilizationAttempts; attempt++)
             {
-                if (QueryInformationJobObject(
+                if (!QueryInformationJobObject(
                     _job,
                     JobObjectBasicProcessIdList,
                     pointer,
-                    (uint)size,
+                    (uint)JobProcessListBufferSize,
                     out _))
                 {
-                    var count = Marshal.ReadInt32(pointer, 4);
-                    if (count < 0 || count > capacity || count > MaxContainedProcesses)
-                        throw new InvalidOperationException("The contained Job returned an invalid process list.");
-
-                    var processIds = new List<int>(count);
-                    for (var index = 0; index < count; index++)
+                    var nativeError = Marshal.GetLastWin32Error();
+                    if (nativeError == ErrorMoreData)
                     {
-                        var rawProcessId = Marshal.ReadIntPtr(pointer, 8 + (index * IntPtr.Size)).ToInt64();
-                        if (rawProcessId is <= 0 or > int.MaxValue)
-                            throw new InvalidOperationException("The contained Job returned an invalid process identifier.");
-                        processIds.Add((int)rawProcessId);
+                        var assigned = Marshal.ReadInt32(pointer, 0);
+                        if (assigned > MaxContainedProcesses)
+                            throw new InvalidOperationException("The contained Job exceeded the process capability budget.");
+                        throw new InvalidOperationException("The contained Job process list did not fit the bounded query buffer.");
                     }
-                    return processIds.AsReadOnly();
+                    throw new Win32Exception(nativeError, "QueryInformationJobObject failed.");
                 }
 
-                var nativeError = Marshal.GetLastWin32Error();
-                if (nativeError != ErrorMoreData)
-                    throw new Win32Exception(nativeError, "QueryInformationJobObject failed.");
+                var assignedProcesses = Marshal.ReadInt32(pointer, 0);
+                var listedProcesses = Marshal.ReadInt32(pointer, 4);
+                if (assignedProcesses < 0 || assignedProcesses > MaxContainedProcesses
+                    || listedProcesses < 0 || listedProcesses > assignedProcesses
+                    || listedProcesses > MaxContainedProcesses)
+                {
+                    throw new InvalidOperationException("The contained Job returned an invalid process list.");
+                }
 
-                var assigned = Marshal.ReadInt32(pointer, 0);
-                if (assigned < 1 || assigned > MaxContainedProcesses)
-                    throw new InvalidOperationException("The contained Job exceeded the process capability budget.");
-                capacity = Math.Max(capacity * 2, assigned);
+                // Windows documents a short list as a signal that the caller needs a larger
+                // buffer. Ours already fits the entire CloudOS capability budget, so retry the
+                // same buffer briefly to tolerate a process joining/exiting during the query.
+                if (listedProcesses != assignedProcesses)
+                {
+                    if (attempt + 1 < MaxProcessListStabilizationAttempts) continue;
+                    throw new InvalidOperationException("The contained Job process list remained incomplete.");
+                }
+
+                var processIds = new List<int>(listedProcesses);
+                for (var index = 0; index < listedProcesses; index++)
+                {
+                    var rawProcessId = Marshal.ReadIntPtr(pointer, 8 + (index * IntPtr.Size)).ToInt64();
+                    if (rawProcessId is <= 0 or > int.MaxValue)
+                        throw new InvalidOperationException("The contained Job returned an invalid process identifier.");
+                    processIds.Add((int)rawProcessId);
+                }
+                return processIds.AsReadOnly();
             }
-            finally
-            {
-                Marshal.FreeHGlobal(pointer);
-            }
+
+            throw new InvalidOperationException("The contained Job process list could not be stabilized.");
         }
+    }
+
+    private IntPtr GetOrCreateJobProcessListBuffer()
+    {
+        if (_jobProcessListBuffer != IntPtr.Zero) return _jobProcessListBuffer;
+        _jobProcessListBuffer = Marshal.AllocHGlobal(JobProcessListBufferSize);
+        _jobProcessListBufferAllocationCount++;
+        return _jobProcessListBuffer;
     }
 
     public void Resume()
@@ -488,13 +523,24 @@ public sealed class NativeContainedProcessLease : IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
-        TryTerminate(3_000, out _);
-        _disposed = true;
-        _primaryThread?.Dispose();
-        _nativeProcess.Dispose();
-        _job.Dispose(); // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE is the final fail-safe.
-        Process.Dispose();
+        lock (_jobQuerySync)
+        {
+            if (_disposed) return;
+
+            // Keep the reusable query buffer alive until Job termination is observed. Monitor
+            // locks are re-entrant, so TryTerminate can safely call GetMemberProcessIds here.
+            TryTerminate(3_000, out _);
+            _disposed = true;
+
+            var queryBuffer = _jobProcessListBuffer;
+            _jobProcessListBuffer = IntPtr.Zero;
+            if (queryBuffer != IntPtr.Zero) Marshal.FreeHGlobal(queryBuffer);
+
+            _primaryThread?.Dispose();
+            _nativeProcess.Dispose();
+            _job.Dispose(); // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE is the final fail-safe.
+            Process.Dispose();
+        }
     }
 
     [DllImport("kernel32.dll", SetLastError = true)]
