@@ -43,7 +43,7 @@ test('file handoff maps only approved CloudOS Drive areas into the private names
   assert.throws(() => mapCloudOsDriveFilePath('/mnt/c/Windows/System32/calc.exe', driveRoot), /OUTSIDE_SANDBOX/);
 });
 
-test('mount policy exposes five explicit writable noexec areas and never the Drive root', () => {
+test('mount policy exposes five explicit writable noexec no-follow areas and never the Drive root', () => {
   const commands = buildCloudOsDriveSandboxMounts({
     wslRoot: driveRoot,
     containedHome: '/var/lib/cloudos/contained-homes/1000-testprofile',
@@ -54,15 +54,17 @@ test('mount policy exposes five explicit writable noexec areas and never the Dri
   assert.deepEqual(cloudOsDriveSandboxPolicy.bindings.map(binding => binding.name), [
     'Desktop', 'Documents', 'Downloads', 'Projects', 'Shared',
   ]);
+  assert.deepEqual([...cloudOsDriveSandboxPolicy.mountFlags], ['rw', 'nosuid', 'nodev', 'noexec', 'nosymfollow']);
   for (const binding of cloudOsDriveSandboxPolicy.bindings) {
     const source = `${driveRoot}/${binding.source.join('/')}`;
     assert.ok(commands.includes(`mount --bind '${source}' '/run/cloudos-drive/${binding.name}'`));
-    assert.ok(commands.includes(`remount,bind,rw,nosuid,nodev,noexec '/run/cloudos-drive/${binding.name}'`));
+    assert.ok(commands.includes(`remount,bind,rw,nosuid,nodev,noexec,nosymfollow '/run/cloudos-drive/${binding.name}'`));
     assert.ok(commands.includes(`mount --bind '/run/cloudos-drive/${binding.name}' '/var/lib/cloudos/contained-homes/1000-testprofile/${binding.name}'`));
   }
   assert.ok(!commands.includes(`mount --bind '${driveRoot}' `));
   assert.doesNotMatch(commands, /\/Apps\/(?:windows|linux)|\.cloudos-system/);
   assert.match(commands, /CLOUDOS_DRIVE_BIND_INVALID/);
+  assert.match(commands, /CLOUDOS_DRIVE_NOSYMFOLLOW_UNAVAILABLE/);
 });
 
 test('Xpra sandbox captures approved Drive binds before hiding all Windows mounts', () => {
@@ -91,6 +93,8 @@ test('Xpra sandbox captures approved Drive binds before hiding all Windows mount
   assert.match(command, /tmpfs \/var\/tmp/);
   assert.match(command, /tmpfs \/dev\/shm/);
   assert.match(command, /CLOUDOS_HOST_MOUNT_VISIBLE/);
+  assert.match(command, /nosymfollow/);
+  assert.match(command, /CLOUDOS_DRIVE_NOSYMFOLLOW_UNAVAILABLE/);
   assert.doesNotMatch(command, /\/home\/cloudos\/\.local\/bin/);
   assert.doesNotMatch(command, /mount --bind '[^']*\/Drive' \/run\/cloudos-drive(?:;|')/);
   assert.doesNotMatch(command, /\/Drive\/Apps\/|\/Drive\/\.cloudos-system/);
