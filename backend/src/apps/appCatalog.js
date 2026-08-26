@@ -310,7 +310,7 @@ export async function launchCatalogApp(id) {
   }
 
   const launchArguments = scriptLaunch
-    ? ['/d', '/s', '/v:off', '/c', scriptPath]
+    ? ['/d', '/s', '/v:off', '/c', 'call', scriptPath]
     : (launchKind === 'windows-shortcut-direct'
         ? []
         : (Array.isArray(app.args) ? app.args.filter((value) => typeof value === 'string' && !/[\0\r\n]/.test(value)).slice(0, 128) : []));
