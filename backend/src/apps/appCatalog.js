@@ -72,6 +72,15 @@ function normalizedDisplayName(value) {
   return String(value || '').trim().toLocaleLowerCase('pt-BR');
 }
 
+function shortcutIdentityKey(targetPath, parsedArguments, argumentsText = '') {
+  const targetKey = String(targetPath || '').trim().toLowerCase();
+  if (!targetKey) return null;
+  const argumentKey = Array.isArray(parsedArguments)
+    ? JSON.stringify(parsedArguments)
+    : `raw:${String(argumentsText || '')}`;
+  return `${targetKey}\0${argumentKey}`;
+}
+
 function windowsCommandProcessor() {
   const systemRoot = String(process.env.SystemRoot || process.env.WINDIR || '').trim();
   if (!path.win32.isAbsolute(systemRoot)) return null;
@@ -135,7 +144,11 @@ export function parseWindowsShortcutArguments(value) {
 }
 
 export function parseWindowsAppDiscovery(payload, existingApps = []) {
-  const directTargets = new Set(existingApps.map((app) => String(app.executable || '').toLowerCase()));
+  const directIdentities = new Set(existingApps.map((app) => {
+    const targetPath = String(app?.targetPath || app?.executable || '').trim();
+    if (!targetPath) return null;
+    return shortcutIdentityKey(targetPath, Array.isArray(app.args) ? app.args : []);
+  }).filter(Boolean));
   const directNames = new Set(existingApps.map((app) => normalizedDisplayName(app.name)));
   const wslDistributionNames = new Set(asArray(payload?.WslDistributions).map((name) => normalizedDisplayName(name)).filter(Boolean));
   const shortcuts = [];
@@ -158,15 +171,15 @@ export function parseWindowsAppDiscovery(payload, existingApps = []) {
     if (scriptTarget && /[%\r\n\0]/.test(targetPath)) continue;
     if (executableTarget && BLOCKED_SHORTCUT_TARGETS.has(path.win32.basename(targetPath).toLowerCase())) continue;
 
-    const targetKey = targetPath.toLowerCase();
+    const parsedArguments = executableTarget
+      ? (argumentsText ? parseWindowsShortcutArguments(argumentsText) : [])
+      : (argumentsText ? null : []);
+    const identityKey = shortcutIdentityKey(targetPath, parsedArguments, argumentsText);
     const nameKey = normalizedDisplayName(name);
-    if (directTargets.has(targetKey) || directNames.has(nameKey)) continue;
-    directTargets.add(targetKey);
+    if (identityKey && directIdentities.has(identityKey)) continue;
+    if (identityKey) directIdentities.add(identityKey);
     directNames.add(nameKey);
 
-    const parsedArguments = executableTarget && argumentsText
-      ? parseWindowsShortcutArguments(argumentsText)
-      : [];
     const directKind = !argumentsText
       ? (scriptTarget ? 'windows-script-direct' : 'windows-shortcut-direct')
       : (executableTarget && parsedArguments ? 'windows-shortcut-argv' : 'windows-shortcut');

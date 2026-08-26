@@ -77,6 +77,41 @@ test('catálogo Windows prefere atalhos descobertos com alvo rastreável', () =>
   assert.equal(apps.filter((app) => app.name === 'Bloco de Notas do Windows').length, 1);
 });
 
+test('catálogo Windows usa target + argv como identidade de atalho', () => {
+  const targetPath = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+  const apps = parseWindowsAppDiscovery({
+    Shortcuts: [
+      {
+        Name: 'Google Chrome',
+        ShortcutPath: 'C:\\Start\\Chrome-A.lnk',
+        TargetPath: targetPath,
+        Arguments: '--profile=A'
+      },
+      {
+        Name: 'Google Chrome',
+        ShortcutPath: 'C:\\Start\\Chrome-B.lnk',
+        TargetPath: targetPath,
+        Arguments: '--profile=B'
+      },
+      {
+        Name: 'Chrome A duplicado',
+        ShortcutPath: 'C:\\Start\\Chrome-A-copy.lnk',
+        TargetPath: targetPath,
+        Arguments: '--profile=A'
+      }
+    ],
+    StartApps: [
+      { Name: 'Google Chrome', AppID: 'Google.Chrome' }
+    ]
+  });
+
+  const chrome = apps.filter((app) => app.targetPath === targetPath);
+  assert.equal(chrome.length, 2);
+  assert.deepEqual(chrome.map((app) => app.args), [['--profile=A'], ['--profile=B']]);
+  assert.deepEqual(chrome.map((app) => app.shortcutPath), ['C:\\Start\\Chrome-A.lnk', 'C:\\Start\\Chrome-B.lnk']);
+  assert.equal(apps.some((app) => app.kind === 'windows-start-app' && app.name === 'Google Chrome'), false);
+});
+
 test('catálogo Windows ignora aliases WSLg para impedir bypass do Xpra', () => {
   const apps = parseWindowsAppDiscovery({
     WslDistributions: ['Ubuntu'],
