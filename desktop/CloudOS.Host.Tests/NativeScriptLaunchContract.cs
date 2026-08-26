@@ -67,7 +67,7 @@ internal static class NativeScriptLaunchContract
         if (string.Equals(Path.GetFileNameWithoutExtension(executable), "dotnet", StringComparison.OrdinalIgnoreCase))
             pieces.Add(QuoteCmdPath(Assembly.GetExecutingAssembly().Location));
         pieces.Add("--native-contained-fixture-window");
-        return "@echo off\r\n" + string.Join(' ', pieces) + "\r\nexit /b %ERRORLEVEL%\r\n";
+        return "@echo off\r\n" + string.Join(" ", pieces) + "\r\nexit /b %ERRORLEVEL%\r\n";
     }
 
     private static string QuoteCmdPath(string value)
