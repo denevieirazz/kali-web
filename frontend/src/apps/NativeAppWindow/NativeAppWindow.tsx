@@ -16,11 +16,16 @@ function sleep(ms: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 }
 
-async function waitForSession(launch: NativeLaunch, cancelled: () => boolean): Promise<NativeSession | null> {
+async function resolveSessionId(launch: NativeLaunch, cancelled: () => boolean): Promise<string | null> {
+  // Current Hosts create the opaque session before replying to native.launchApp.
+  // Trust that exact capability instead of paying an extra listSessions IPC on every launch.
+  if (typeof launch.sessionId === 'string' && launch.sessionId) return launch.sessionId;
+
+  // Compatibility fallback for older Hosts that only returned the launch PID.
   for (let attempt = 0; attempt < SESSION_ATTEMPTS && !cancelled(); attempt += 1) {
     const result = await nativeHostBridge.listSessions();
-    const session = nativeSessionForLaunch(result.sessions, launch);
-    if (session) return session;
+    const session: NativeSession | null = nativeSessionForLaunch(result.sessions, launch);
+    if (session) return session.sessionId;
     await sleep(SESSION_RETRY_MS);
   }
   return null;
@@ -119,15 +124,16 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
           );
         }
 
-        setStatus('waiting');
-        const session = await waitForSession(launch, () => cancelled);
+        const exactSessionId = typeof launch.sessionId === 'string' && launch.sessionId ? launch.sessionId : null;
+        if (!exactSessionId) setStatus('waiting');
+        const resolvedSessionId = await resolveSessionId(launch, () => cancelled);
         if (cancelled) return;
-        if (!session) {
+        if (!resolvedSessionId) {
           throw new NativeHostError('NATIVE_WINDOW_NOT_FOUND', 'A janela do aplicativo não apareceu a tempo para ser encaixada no CloudOS.');
         }
 
-        sessionIdRef.current = session.sessionId;
-        setSessionId(session.sessionId);
+        sessionIdRef.current = resolvedSessionId;
+        setSessionId(resolvedSessionId);
       } catch (launchError) {
         if (cancelled) return;
         setStatus('error');
