@@ -42,6 +42,54 @@ test('catálogo Windows prefere atalhos com executável rastreável', () => {
   assert.equal(apps.filter((app) => app.name === 'Bloco de Notas do Windows').length, 1);
 });
 
+test('catálogo Windows deduplica atalhos por target + arguments e preserva perfis distintos', () => {
+  const chrome = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+  const curated = [{
+    id: 'native-chrome-default',
+    name: 'Google Chrome',
+    executable: chrome,
+    args: [],
+    source: 'windows'
+  }];
+  const apps = parseWindowsAppDiscovery({
+    Shortcuts: [
+      {
+        Name: 'Chrome padrão duplicado',
+        ShortcutPath: 'C:\\Start\\Chrome Default.lnk',
+        TargetPath: chrome,
+        Arguments: ''
+      },
+      {
+        Name: 'Chrome Perfil A',
+        ShortcutPath: 'C:\\Start\\Chrome A.lnk',
+        TargetPath: chrome,
+        Arguments: '--profile=A'
+      },
+      {
+        Name: 'Chrome Perfil B',
+        ShortcutPath: 'C:\\Start\\Chrome B.lnk',
+        TargetPath: chrome,
+        Arguments: '--profile=B'
+      },
+      {
+        Name: 'Chrome Perfil A duplicado',
+        ShortcutPath: 'C:\\Start\\Chrome A Copy.lnk',
+        TargetPath: chrome,
+        Arguments: '--profile=A'
+      }
+    ]
+  }, curated);
+
+  const shortcuts = apps.filter((app) => app.kind === 'windows-shortcut');
+  assert.equal(shortcuts.length, 2);
+  assert.deepEqual(shortcuts.map((app) => app.arguments), ['--profile=A', '--profile=B']);
+  assert.notEqual(shortcuts[0].id, shortcuts[1].id);
+  assert.equal(shortcuts[0].shortcutPath, 'C:\\Start\\Chrome A.lnk');
+  assert.equal(shortcuts[1].shortcutPath, 'C:\\Start\\Chrome B.lnk');
+  assert.equal(apps.some((app) => app.name === 'Chrome padrão duplicado'), false);
+  assert.equal(apps.some((app) => app.name === 'Chrome Perfil A duplicado'), false);
+});
+
 test('catálogo marca Paint brokerado para bloqueio antes do lançamento', () => {
   const apps = parseWindowsAppDiscovery({
     Shortcuts: [{

@@ -76,8 +76,23 @@ function normalizedDisplayName(value) {
   return String(value || '').trim().toLocaleLowerCase('pt-BR');
 }
 
+function normalizedShortcutArguments(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function shortcutIdentity(targetPath, argumentsValue = '') {
+  return `${String(targetPath || '').trim().toLowerCase()}\0${normalizedShortcutArguments(argumentsValue)}`;
+}
+
+function curatedShortcutArguments(app) {
+  if (typeof app?.arguments === 'string') return app.arguments;
+  return Array.isArray(app?.args) ? app.args.map((argument) => String(argument)).join(' ') : '';
+}
+
 export function parseWindowsAppDiscovery(payload, curatedApps = []) {
-  const directTargets = new Set(curatedApps.map((app) => String(app.executable || '').toLowerCase()));
+  const directIdentities = new Set(curatedApps
+    .filter((app) => app?.executable)
+    .map((app) => shortcutIdentity(app.executable, curatedShortcutArguments(app))));
   const directNames = new Set(curatedApps.map((app) => normalizedDisplayName(app.name)));
   const shortcuts = [];
 
@@ -86,18 +101,19 @@ export function parseWindowsAppDiscovery(payload, curatedApps = []) {
     const name = row.Name.trim().slice(0, 160);
     const shortcutPath = row.ShortcutPath.trim();
     const targetPath = row.TargetPath.trim();
-    if (!name || name.includes('\0') || shortcutPath.includes('\0') || targetPath.includes('\0')) continue;
+    const argumentsValue = normalizedShortcutArguments(row.Arguments);
+    if (!name || name.includes('\0') || shortcutPath.includes('\0') || targetPath.includes('\0') || argumentsValue.includes('\0')) continue;
     if (!path.win32.isAbsolute(shortcutPath) || path.win32.extname(shortcutPath).toLowerCase() !== '.lnk') continue;
     if (!path.win32.isAbsolute(targetPath) || path.win32.extname(targetPath).toLowerCase() !== '.exe') continue;
     if (BLOCKED_SHORTCUT_TARGETS.has(path.win32.basename(targetPath).toLowerCase())) continue;
 
-    const targetKey = targetPath.toLowerCase();
+    const identityKey = shortcutIdentity(targetPath, argumentsValue);
     const nameKey = normalizedDisplayName(name);
-    if (directTargets.has(targetKey) || directNames.has(nameKey)) continue;
-    directTargets.add(targetKey);
+    if (directIdentities.has(identityKey)) continue;
+    directIdentities.add(identityKey);
     directNames.add(nameKey);
     shortcuts.push({
-      id: opaqueId('windows-shortcut', shortcutPath, targetPath),
+      id: opaqueId('windows-shortcut', shortcutPath, targetPath, argumentsValue),
       name,
       source: 'windows',
       distribution: null,
@@ -105,6 +121,7 @@ export function parseWindowsAppDiscovery(payload, curatedApps = []) {
       kind: 'windows-shortcut',
       shortcutPath,
       targetPath,
+      arguments: argumentsValue,
       ...brokerPolicy(name, targetPath)
     });
   }
@@ -162,7 +179,7 @@ async function getWindowsStartApps() {
     '$shortcutRoots = @([Environment]::GetFolderPath("CommonStartMenu"), [Environment]::GetFolderPath("StartMenu")) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }',
     '$shortcuts = @()',
     '$shell = New-Object -ComObject WScript.Shell',
-    'foreach ($root in $shortcutRoots) { Get-ChildItem -LiteralPath $root -Filter *.lnk -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 800 | ForEach-Object { try { $link = $shell.CreateShortcut($_.FullName); $target = [Environment]::ExpandEnvironmentVariables([string]$link.TargetPath); if ($target -and [IO.Path]::GetExtension($target) -ieq ".exe" -and (Test-Path -LiteralPath $target -PathType Leaf)) { $shortcuts += [PSCustomObject]@{ Name = $_.BaseName; ShortcutPath = $_.FullName; TargetPath = [IO.Path]::GetFullPath($target) } } } catch {} } }',
+    'foreach ($root in $shortcutRoots) { Get-ChildItem -LiteralPath $root -Filter *.lnk -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 800 | ForEach-Object { try { $link = $shell.CreateShortcut($_.FullName); $target = [Environment]::ExpandEnvironmentVariables([string]$link.TargetPath); if ($target -and [IO.Path]::GetExtension($target) -ieq ".exe" -and (Test-Path -LiteralPath $target -PathType Leaf)) { $shortcuts += [PSCustomObject]@{ Name = $_.BaseName; ShortcutPath = $_.FullName; TargetPath = [IO.Path]::GetFullPath($target); Arguments = [string]$link.Arguments } } } catch {} } }',
     '[PSCustomObject]@{ StartApps = $startApps; Shortcuts = $shortcuts } | ConvertTo-Json -Depth 4 -Compress'
   ].join('; ');
   const encoded = Buffer.from(command, 'utf16le').toString('base64');
@@ -236,10 +253,13 @@ async function launchWindowsShortcut(app) {
     '$ErrorActionPreference = "Stop"',
     '$shortcutPath = [IO.Path]::GetFullPath($env:CLOUDOS_APP_SHORTCUT)',
     '$expectedTarget = [IO.Path]::GetFullPath($env:CLOUDOS_APP_TARGET)',
+    '$expectedArguments = [string]$env:CLOUDOS_APP_ARGUMENTS',
     '$shell = New-Object -ComObject WScript.Shell',
     '$link = $shell.CreateShortcut($shortcutPath)',
     '$actualTarget = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables([string]$link.TargetPath))',
+    '$actualArguments = [string]$link.Arguments',
     'if (-not [StringComparer]::OrdinalIgnoreCase.Equals($actualTarget, $expectedTarget)) { throw "Shortcut target changed after catalog discovery." }',
+    'if (-not [StringComparer]::Ordinal.Equals($actualArguments.Trim(), $expectedArguments.Trim())) { throw "Shortcut arguments changed after catalog discovery." }',
     '$process = Start-Process -FilePath $shortcutPath -PassThru',
     'if ($null -eq $process -or $process.Id -le 0) { throw "The shortcut did not return a process." }',
     '[Console]::Out.Write([string]$process.Id)'
@@ -250,7 +270,8 @@ async function launchWindowsShortcut(app) {
       encoding: 'utf8',
       env: safeChildEnvironment({
         CLOUDOS_APP_SHORTCUT: app.shortcutPath,
-        CLOUDOS_APP_TARGET: app.targetPath
+        CLOUDOS_APP_TARGET: app.targetPath,
+        CLOUDOS_APP_ARGUMENTS: app.arguments || ''
       }),
       timeout: 15_000,
       windowsHide: true,
