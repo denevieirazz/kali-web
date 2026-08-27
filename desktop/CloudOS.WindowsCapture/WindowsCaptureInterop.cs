@@ -16,9 +16,8 @@ internal static unsafe partial class WindowsCaptureInterop
     [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface IGraphicsCaptureItemInterop
     {
-        // CsWinRT's COM interop guidance keeps HRESULT translation in the CLR stub:
-        // native HRESULT methods are represented as void and ABI values stay explicit.
-        // This avoids mixing PreserveSig/manual HRESULT handling with the RCW produced by As<T>().
+        // CsWinRT COM interop guidance: keep ABI arguments explicit and let the CLR
+        // translate a failing native HRESULT into the managed exception for this RCW call.
         void CreateForWindow([In] IntPtr window, in Guid iid, out IntPtr result);
         void CreateForMonitor([In] IntPtr monitor, in Guid iid, out IntPtr result);
     }
@@ -39,21 +38,28 @@ internal static unsafe partial class WindowsCaptureInterop
         D3D_FEATURE_LEVEL* selectedFeatureLevel,
         ID3D11DeviceContext** immediateContext);
 
-    public static GraphicsCaptureItem CreateItemForWindow(IntPtr windowHandle) =>
-        CreateItem(static (interop, handle, iid, out IntPtr result) => interop.CreateForWindow(handle, iid, out result), windowHandle, "window");
-
-    public static GraphicsCaptureItem CreateItemForMonitor(IntPtr monitorHandle) =>
-        CreateItem(static (interop, handle, iid, out IntPtr result) => interop.CreateForMonitor(handle, iid, out result), monitorHandle, "monitor");
-
-    private delegate void CreateItemCall(IGraphicsCaptureItemInterop interop, IntPtr handle, in Guid iid, out IntPtr result);
-
-    private static GraphicsCaptureItem CreateItem(CreateItemCall create, IntPtr handle, string targetKind)
+    public static GraphicsCaptureItem CreateItemForWindow(IntPtr windowHandle)
     {
-        if (handle == IntPtr.Zero)
-            throw new ArgumentException($"A non-zero {targetKind} handle is required.", nameof(handle));
+        if (windowHandle == IntPtr.Zero)
+            throw new ArgumentException("A non-zero HWND is required.", nameof(windowHandle));
 
         var interop = GraphicsCaptureItem.As<IGraphicsCaptureItemInterop>();
-        create(interop, handle, GraphicsCaptureItemGuid, out var itemPointer);
+        interop.CreateForWindow(windowHandle, GraphicsCaptureItemGuid, out var itemPointer);
+        return ProjectCaptureItem(itemPointer, "window");
+    }
+
+    public static GraphicsCaptureItem CreateItemForMonitor(IntPtr monitorHandle)
+    {
+        if (monitorHandle == IntPtr.Zero)
+            throw new ArgumentException("A non-zero HMONITOR is required.", nameof(monitorHandle));
+
+        var interop = GraphicsCaptureItem.As<IGraphicsCaptureItemInterop>();
+        interop.CreateForMonitor(monitorHandle, GraphicsCaptureItemGuid, out var itemPointer);
+        return ProjectCaptureItem(itemPointer, "monitor");
+    }
+
+    private static GraphicsCaptureItem ProjectCaptureItem(IntPtr itemPointer, string targetKind)
+    {
         if (itemPointer == IntPtr.Zero)
             throw new InvalidOperationException($"Windows.Graphics.Capture returned a null GraphicsCaptureItem for {targetKind}.");
 
