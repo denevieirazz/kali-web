@@ -49,14 +49,16 @@ try
     stage = "presenter-bind";
     presenter = new HostOwnedCaptureSurfacePresenter(owner.Handle);
     coordinator = new WindowsCaptureSurfaceCoordinator("presenter-probe-surface", 1, presenter);
+    var surfaceOrigin = owner.PointToScreen(new Point(24, 24));
+    var dpiScale = owner.DeviceDpi / 96.0;
     var layout = new WindowsCapturePresentationLayout(
         Revision: 1,
-        PixelX: owner.Left + 24,
-        PixelY: owner.Top + 72,
+        PixelX: surfaceOrigin.X,
+        PixelY: surfaceOrigin.Y,
         PixelWidth: 900,
         PixelHeight: 620,
-        ScaleX: 1,
-        ScaleY: 1,
+        DpiScaleX: dpiScale,
+        DpiScaleY: dpiScale,
         Visible: true).Validate();
     coordinator.Bind(layout);
     coordinator.Activate();
@@ -69,9 +71,9 @@ try
         WindowsCaptureItemProjectionKind.MarshalInterfaceFromAbi,
         WindowsCaptureAbiLifetimeKind.HoldUntilSessionDispose,
         frameHealthOptions: new WindowsFrameHealthOptions(
-            SampleEveryNthFrame: 2,
-            MaxSamples: 16,
-            RegionSize: 256,
+            SampleEveryNFrames: 2,
+            MaximumSamples: 16,
+            MaximumRegionSize: 256,
             GridSize: 32),
         frameSink: coordinator);
     capture.Start();
