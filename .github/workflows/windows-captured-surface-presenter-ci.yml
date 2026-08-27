@@ -9,6 +9,7 @@ on:
       - 'desktop/CloudOS.WindowsCapture.Presenter.Probe/**'
       - 'desktop/CloudOS.WindowsCapture.Contracts.Tests/**'
       - 'desktop/CloudOS.WindowsCapture.Input.Tests/**'
+      - 'scripts/test-windows-capture-presenter.ps1'
       - '.github/workflows/windows-captured-surface-presenter-ci.yml'
 
 jobs:
@@ -36,7 +37,7 @@ jobs:
           $probe = 'desktop/CloudOS.WindowsCapture.Presenter.Probe/bin/Release/net8.0-windows10.0.19041.0/CloudOS.WindowsCapture.Presenter.Probe.dll'
           $output = dotnet $probe --help 2>&1 | Out-String
           if ($LASTEXITCODE -ne 0) { throw "Presenter probe --help failed: $LASTEXITCODE`n$output" }
-          foreach ($required in @('--hwnd <decimal|0xHEX>', '--minimum-frames <1-600>', '--output <path>')) {
+          foreach ($required in @('--hwnd <decimal|0xHEX>', '--minimum-frames <1-600>', '--output <path>', 'D3D11/DXGI presenter')) {
             if (-not $output.Contains($required, [System.StringComparison]::Ordinal)) {
               throw "Presenter probe CLI missing '$required'.`n$output"
             }
@@ -48,3 +49,30 @@ jobs:
 
       - name: Run input contracts
         run: dotnet run --project desktop/CloudOS.WindowsCapture.Input.Tests/CloudOS.WindowsCapture.Input.Tests.csproj -c Release
+
+      - name: Validate physical presenter harness contract
+        shell: pwsh
+        run: |
+          $scriptPath = (Resolve-Path 'scripts/test-windows-capture-presenter.ps1').Path
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw "Presenter smoke parser found $($errors.Count) error(s)."
+          }
+          $text = Get-Content -LiteralPath $scriptPath -Raw
+          foreach ($required in @(
+            'ExpectedHeadSha',
+            'poc/cloudos-windows-captured-surface',
+            'fixtureKind=winforms-overlapped-animated',
+            'CloudOS.WindowsCapture.Presenter.Probe',
+            'fixture-presenter-smoke.json',
+            'fixture-presenter-smoke.log',
+            'PRESENTER_SMOKE=PASS'
+          )) {
+            if (-not $text.Contains($required, [System.StringComparison]::Ordinal)) {
+              throw "Presenter smoke harness is missing '$required'."
+            }
+          }
+          Write-Host 'Physical presenter harness parse/contract: PASS'
