@@ -75,6 +75,11 @@ export function nativeSessionListsEqual(previous, next) {
   return true;
 }
 
+function sessionLaunchProcessId(session) {
+  if (Number.isInteger(session?.launchProcessId) && session.launchProcessId > 0) return session.launchProcessId;
+  return Number.isInteger(session?.processId) && session.processId > 0 ? session.processId : null;
+}
+
 /** Finds the concrete native window created by an allow-listed launch. */
 export function nativeSessionForLaunch(sessions, launch) {
   if (!Array.isArray(sessions) || !launch) return null;
@@ -83,12 +88,7 @@ export function nativeSessionForLaunch(sessions, launch) {
     if (exact) return exact;
   }
   if (!Number.isInteger(launch.pid) || launch.pid <= 0) return null;
-  return sessions.find((session) => session?.launchProcessId === launch.pid || session?.processId === launch.pid) || null;
-}
-
-function sessionLaunchProcessId(session) {
-  if (Number.isInteger(session?.launchProcessId) && session.launchProcessId > 0) return session.launchProcessId;
-  return Number.isInteger(session?.processId) && session.processId > 0 ? session.processId : null;
+  return sessions.find((session) => sessionLaunchProcessId(session) === launch.pid) || null;
 }
 
 /**
