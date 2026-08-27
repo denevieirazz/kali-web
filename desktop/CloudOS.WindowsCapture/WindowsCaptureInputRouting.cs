@@ -52,9 +52,9 @@ public sealed class WindowsCaptureInputRouter
         double localCssY)
     {
         if (!WindowsCaptureInputMapper.TryMapPointer(surfaceGeometry, localCssX, localCssY, out var source) || source is null)
-            return Reject(WindowsCaptureInputRejection.SurfaceInactive, "Pointer is outside the visible captured surface.");
+            return Reject(WindowsCaptureInputRejection.OutsideSurface, "Pointer is outside the visible captured surface.");
         if (!WindowsCaptureClientInputMapper.TryMapSourcePixel(clientGeometry, source.SourcePixelX, source.SourcePixelY, out var client) || client is null)
-            return Reject(WindowsCaptureInputRejection.SurfaceInactive, "Pointer lands outside the source HWND client area.");
+            return Reject(WindowsCaptureInputRejection.OutsideClientArea, "Pointer lands outside the source HWND client area.");
 
         var admission = _gate.Admit(generation, sequence);
         if (!admission.Allowed) return Reject(admission.Rejection, null);
@@ -84,7 +84,7 @@ public sealed class WindowsCaptureInputRouter
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
-            return Reject(WindowsCaptureInputRejection.SurfaceInactive, $"{error.GetType().Name}: {error.Message}");
+            return Reject(WindowsCaptureInputRejection.InjectorFailed, $"{error.GetType().Name}: {error.Message}");
         }
     }
 
@@ -106,7 +106,7 @@ public sealed class WindowsCaptureInputRouter
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
-            return Reject(WindowsCaptureInputRejection.SurfaceInactive, $"{error.GetType().Name}: {error.Message}");
+            return Reject(WindowsCaptureInputRejection.InjectorFailed, $"{error.GetType().Name}: {error.Message}");
         }
     }
 
