@@ -93,7 +93,37 @@ O comportamento legado top-level pode permanecer disponível apenas como infraes
 11. compatibility matrix;
 12. fail-closed para classes incompatíveis.
 
-A POC `poc/cloudos-windows-captured-surface` está focada primeiro nos gates 4–6. O probe físico compara HWND por activation factory WinRT em ABI cru, HWND pelo caminho projetado legado e HMONITOR pelo mesmo caminho raw para isolar defeitos entre item de janela e D3D/frame-pool/compositor.
+A POC `poc/cloudos-windows-captured-surface` está focada primeiro nos gates 4–6.
+
+### Gate de captura atual
+
+A evidência física no HEAD `7f1f561302e6fb24406de6c2e50814391b83e93d` isolou o bloqueador anterior:
+
+```text
+mesma fixture WinForms animada
+mesmo processo
+mesmo device D3D11
+mesmo frame-pool code
+
+HWND / projected factory
+→ CreateCaptureSession FAIL 0x8007139F
+→ item.Size = 0x0
+
+HMONITOR
+→ PASS
+→ 10 frames 2560x1440
+→ EmptyFrameCount = 0
+```
+
+Portanto D3D11, bridge DXGI→WinRT, frame pool, `GraphicsCaptureSession` e compositor WGC estão funcionalmente provados no ambiente físico; o defeito restante foi isolado na fronteira do `GraphicsCaptureItem` de janela.
+
+O gate seguinte usa três lanes em uma única execução:
+
+1. `window/raw-activation-factory` — gate do produto. Obtém `IGraphicsCaptureItemInterop` diretamente via `RoGetActivationFactory` e chama `CreateForWindow` no ABI COM oficial;
+2. `window/projected-factory` — controle do caminho legado anterior;
+3. `monitor/raw-activation-factory` — controle das camadas abaixo do item de janela.
+
+O probe inicializa explicitamente o apartment WinRT para a prova, registra o estágio de setup (`item-factory`, `item-metadata`, `initial-size`, `d3d-device`, `frame-pool`, `capture-session`, `start-capture`) e grava JSON mesmo quando a sessão não chega a iniciar. O smoke consolida as três lanes em `fixture-wgc-matrix-summary.json`. Nenhum controle pode mascarar um gate de janela falho.
 
 ## Etapas gerais do host
 
