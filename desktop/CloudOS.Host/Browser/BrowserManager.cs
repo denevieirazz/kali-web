@@ -2,6 +2,8 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Threading;
+using CloudOS.Host.Installer;
+using CloudOS.Installer;
 using Microsoft.Web.WebView2.Core;
 
 namespace CloudOS.Host.Browser;
@@ -14,6 +16,7 @@ public sealed class BrowserManager : IDisposable
     private readonly string _browserRoot;
     private readonly string _userDataFolder;
     private readonly BrowserStateStore _stateStore;
+    private readonly CloudOsInstallerManager _installerManager;
     private readonly SemaphoreSlim _openGate = new(1, 1);
     private readonly Action<string, string?> _diagnostics;
     private Task<CoreWebView2Environment>? _environmentTask;
@@ -43,11 +46,31 @@ public sealed class BrowserManager : IDisposable
         if (!BrowserStorageLayout.AreIsolated(_userDataFolder, shellFolder))
             throw new InvalidOperationException("BROWSER_UDF_ISOLATION_FAILED");
         _stateStore = new BrowserStateStore(BrowserStorageLayout.BrowserStatePath(local));
+        _installerManager = new CloudOsInstallerManager(local);
+        _installerManager.ArtifactRegistered += InstallerManager_ArtifactRegistered;
     }
 
     public string UserDataFolder => _userDataFolder;
     public string BrowserRoot => _browserRoot;
     public bool IsOpen => _window is not null;
+    public bool InstallerElevationBrokerAvailable => _installerManager.ElevationBrokerAvailable;
+
+    public Task<IReadOnlyList<InstallerArtifactPublicView>> ListInstallerArtifactsAsync(
+        CancellationToken cancellationToken = default) =>
+        _installerManager.ListArtifactsAsync(cancellationToken);
+
+    public Task<PreparedInstallerCapability> PrepareInstallerAsync(
+        string artifactId,
+        CancellationToken cancellationToken = default) =>
+        _installerManager.PrepareAsync(artifactId, cancellationToken);
+
+    public Task<InstallerLaunchPlan> ConsumeInstallerCapabilityAsync(
+        string capabilityId,
+        CancellationToken cancellationToken = default) =>
+        _installerManager.ConsumeAsync(capabilityId, cancellationToken);
+
+    public void CompleteInstallerCapability(string capabilityId) =>
+        _installerManager.Complete(capabilityId);
 
     public async Task<BrowserOpenResult> OpenAsync(string? initialUrl = null)
     {
@@ -74,11 +97,13 @@ public sealed class BrowserManager : IDisposable
             BrowserWindow? window = null;
             try
             {
+                var downloads = CreateDownloadManager();
                 window = new BrowserWindow(
                     GetEnvironmentAsync,
                     _policy,
                     _stateStore,
                     _developerMode,
+                    downloadManager: downloads,
                     diagnostics: _diagnostics);
                 _diagnostics("window_created", null);
                 window.Closed += OnWindowClosed;
@@ -122,6 +147,44 @@ public sealed class BrowserManager : IDisposable
         {
             _openGate.Release();
         }
+    }
+
+    private BrowserDownloadManager CreateDownloadManager()
+    {
+        var downloads = new BrowserDownloadManager(
+            managedInstallerDownloadsRoot: _installerManager.ManagedDownloadsRoot);
+        downloads.InstallerDownloadCompleted += Downloads_InstallerDownloadCompleted;
+        return downloads;
+    }
+
+    private void Downloads_InstallerDownloadCompleted(object? sender, BrowserDownloadCompleted completed)
+    {
+        _ = RegisterInstallerDownloadAsync(completed);
+    }
+
+    private async Task RegisterInstallerDownloadAsync(BrowserDownloadCompleted completed)
+    {
+        try
+        {
+            var artifact = await _installerManager.RegisterDownloadedInstallerAsync(
+                completed.CanonicalPath,
+                completed.Id);
+            _diagnostics(
+                "installer_artifact_registered",
+                $"artifact={artifact.ArtifactId} kind={artifact.Kind} trust={artifact.Trust}");
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException
+            or InvalidDataException or NotSupportedException or System.Security.Cryptography.CryptographicException)
+        {
+            _diagnostics("installer_artifact_rejected", $"type={error.GetType().Name}");
+        }
+    }
+
+    private void InstallerManager_ArtifactRegistered(object? sender, InstallerArtifactRegisteredEventArgs eventArgs)
+    {
+        _diagnostics(
+            "installer_artifact_ready",
+            $"artifact={eventArgs.Artifact.ArtifactId} file={eventArgs.Artifact.FileName}");
     }
 
     private void QueueOrForwardNavigation(BrowserWindow window, string? initialUrl)
@@ -294,6 +357,8 @@ public sealed class BrowserManager : IDisposable
         _shutdownRequested = true;
         CancelQueuedInitialization();
         CloseWindowCore();
+        _installerManager.ArtifactRegistered -= InstallerManager_ArtifactRegistered;
+        _installerManager.Dispose();
         _disposed = true;
     }
 }
