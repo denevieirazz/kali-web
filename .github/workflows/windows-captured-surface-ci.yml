@@ -7,15 +7,17 @@ on:
       - 'desktop/CloudOS.WindowsCapture/**'
       - 'desktop/CloudOS.WindowsCapture.Probe/**'
       - 'desktop/CloudOS.WindowsCapture.Fixture/**'
+      - 'desktop/CloudOS.WindowsCapture.NativeReference/**'
       - 'scripts/test-windows-capture-probe.ps1'
       - 'README.md'
       - 'docs/NATIVE-HOST-ROADMAP.md'
+      - 'WINDOWS_CAPTURED_SURFACE_REPORT.md'
       - '.github/workflows/windows-captured-surface-ci.yml'
 
 jobs:
   build-capture-probe:
     runs-on: windows-2022
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repository
@@ -35,11 +37,25 @@ jobs:
           $probe = 'desktop/CloudOS.WindowsCapture.Probe/bin/Release/net8.0-windows10.0.19041.0/CloudOS.WindowsCapture.Probe.dll'
           $output = dotnet $probe --help 2>&1 | Out-String
           if ($LASTEXITCODE -ne 0) { throw "Unexpected --help exit code: $LASTEXITCODE`n$output" }
-          foreach ($required in @('--capture-kind window|monitor', '--item-factory raw|projected', '--output <path>')) {
+          foreach ($required in @(
+            '--capture-kind window|monitor',
+            '--item-factory raw|projected',
+            '--item-projection projected|marshal-interface',
+            '--abi-lifetime release|hold',
+            '--output <path>'
+          )) {
             if (-not $output.Contains($required, [System.StringComparison]::Ordinal)) {
               throw "Probe help is missing contract '$required'.`n$output"
             }
           }
+          Write-Host $output
+
+      - name: Validate capture probe missing-argument contract
+        shell: pwsh
+        run: |
+          $probe = 'desktop/CloudOS.WindowsCapture.Probe/bin/Release/net8.0-windows10.0.19041.0/CloudOS.WindowsCapture.Probe.dll'
+          $output = dotnet $probe 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 64) { throw "Expected exit 64 without arguments, got $LASTEXITCODE.`n$output" }
           Write-Host $output
 
       - name: Parse physical matrix script
@@ -53,7 +69,45 @@ jobs:
             $errors | ForEach-Object { Write-Error $_.Message }
             throw "PowerShell parser found $($errors.Count) error(s)."
           }
-          Write-Host 'Physical matrix script parse: PASS'
+          $text = Get-Content $scriptPath -Raw
+          foreach ($required in @(
+            'WINDOW / RAW / MARSHAL-INTERFACE / HOLD (PRODUCT CANDIDATE)',
+            'LIFETIME CONTROL',
+            'PROJECTION CONTROL',
+            'FACTORY CONTROL',
+            'LOWER-LAYER CONTROL'
+          )) {
+            if (-not $text.Contains($required, [System.StringComparison]::Ordinal)) {
+              throw "Physical matrix script is missing lane '$required'."
+            }
+          }
+          Write-Host 'Physical matrix script parse/contract: PASS'
 
       - name: Build conventional Windows capture fixture
         run: dotnet build desktop/CloudOS.WindowsCapture.Fixture/CloudOS.WindowsCapture.Fixture.csproj -c Release --nologo
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build native C++ WinRT reference probe
+        shell: pwsh
+        run: |
+          msbuild desktop/CloudOS.WindowsCapture.NativeReference/CloudOS.WindowsCapture.NativeReference.vcxproj `
+            /m `
+            /p:Configuration=Release `
+            /p:Platform=x64 `
+            /verbosity:minimal
+
+      - name: Validate native C++ WinRT reference CLI
+        shell: pwsh
+        run: |
+          $probe = 'desktop/CloudOS.WindowsCapture.NativeReference/bin/Release/x64/CloudOS.WindowsCapture.NativeReference.exe'
+          if (-not (Test-Path -LiteralPath $probe -PathType Leaf)) { throw "Native reference probe not found: $probe" }
+          $output = & $probe --help 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "Native reference --help failed with $LASTEXITCODE.`n$output" }
+          foreach ($required in @('--hwnd <decimal|0xHEX>', 'CreateForWindow')) {
+            if (-not $output.Contains($required, [System.StringComparison]::Ordinal)) {
+              throw "Native reference help is missing '$required'.`n$output"
+            }
+          }
+          Write-Host $output
