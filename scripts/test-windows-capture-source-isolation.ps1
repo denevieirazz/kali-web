@@ -128,7 +128,15 @@ function Restore-Window {
         throw 'HWND da fixture deixou de existir durante a matriz.'
     }
 
-    Set-Cloak -WindowHandle $WindowHandle -Enabled $false
+    try {
+        Set-Cloak -WindowHandle $WindowHandle -Enabled $false
+    }
+    catch {
+        # Windows can deny cross-process DWMWA_CLOAK even when the window is not
+        # cloaked. Treat that specific restore no-op as unavailable capability so
+        # the supported offscreen/hidden/minimized lanes can still be measured.
+        if ($_.Exception.Message -notmatch '0x80070005') { throw }
+    }
     [void][CloudOSCaptureIsolationNative]::ShowWindow($WindowHandle, 9) # SW_RESTORE
     $flags = 0x0004 -bor 0x0010 -bor 0x0001 # SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE
     if (-not [CloudOSCaptureIsolationNative]::SetWindowPos(
@@ -252,8 +260,24 @@ try {
 
     foreach ($state in @('visible', 'offscreen', 'cloaked', 'hidden', 'minimized')) {
         Write-Host "=== SOURCE STATE: $state ===" -ForegroundColor Cyan
-        Set-IsolationState -State $state -WindowHandle $hwnd -OriginalRect $originalRect
-        $lane = Invoke-CandidateProbe -State $state -WindowHandle $hwnd
+        try {
+            Set-IsolationState -State $state -WindowHandle $hwnd -OriginalRect $originalRect
+            $lane = Invoke-CandidateProbe -State $state -WindowHandle $hwnd
+        }
+        catch {
+            $lane = [pscustomobject]@{
+                state = $state
+                exitCode = 3
+                reportPath = $null
+                verdict = 'STATE_UNAVAILABLE'
+                frameCount = 0
+                width = 0
+                height = 0
+                stage = 'isolation-state'
+                nativeHResult = ('0x{0:X8}' -f ($_.Exception.HResult -band 0xffffffff))
+                output = $_.Exception.Message
+            }
+        }
         $lanes.Add($lane)
         Write-Host $lane.output
     }
@@ -278,6 +302,7 @@ function Lane-Passed([string] $name) {
     $lane = $lanes | Where-Object { $_.state -eq $name } | Select-Object -First 1
     return $null -ne $lane -and $lane.exitCode -eq 0 -and $lane.verdict -eq 'PASS' -and $lane.frameCount -ge $MinimumFrames
 }
+$isolatedCapturePassed = (Lane-Passed 'cloaked') -or (Lane-Passed 'hidden')
 
 $summary = [ordered]@{
     schemaVersion = 1
@@ -295,6 +320,7 @@ $summary = [ordered]@{
     cloakCaptureSurvives = (Lane-Passed 'cloaked')
     hideCaptureSurvives = (Lane-Passed 'hidden')
     minimizeCaptureSurvives = (Lane-Passed 'minimized')
+    isolatedCapturePassed = $isolatedCapturePassed
     automaticContainmentDecision = 'NONE'
     manualUxStillRequired = @('desktop visibility', 'Alt+Tab visibility', 'focus', 'input', 'multi-window behavior')
     lanes = @($lanes | ForEach-Object {
@@ -327,5 +353,10 @@ if (-not (Lane-Passed 'visible')) {
     exit 2
 }
 
-Write-Host 'SOURCE_ISOLATION_GATE=BASELINE_PASS; isolation modes remain experimental until manual UX gates pass.'
+if (-not $isolatedCapturePassed) {
+    Write-Error 'SOURCE_ISOLATION_GATE=BLOCKED: neither cloaked nor hidden source HWND continued producing frames.'
+    exit 2
+}
+
+Write-Host 'SOURCE_ISOLATION_GATE=PASS; a non-visible source mode continued producing captured frames.'
 exit 0

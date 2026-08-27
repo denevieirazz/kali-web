@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace CloudOS.WindowsCapture;
 
@@ -48,10 +49,14 @@ public sealed class WindowsCaptureTargetedInputInjector
     private const uint WmMouseWheel = 0x020A;
     private const uint WmKeyDown = 0x0100;
     private const uint WmKeyUp = 0x0101;
+    private const uint BmSetState = 0x00F3;
+    private const uint BmClick = 0x00F5;
 
     private readonly IntPtr _sourceWindow;
     private readonly WindowsCaptureInputGate _gate;
     private readonly uint _timeoutMilliseconds;
+    private readonly object _pointerStateSync = new();
+    private IntPtr _pressedStandardButton;
 
     public WindowsCaptureTargetedInputInjector(
         IntPtr sourceWindow,
@@ -84,6 +89,54 @@ public sealed class WindowsCaptureTargetedInputInjector
         if (message == 0)
             return Failed(WindowsCaptureInputInjectionStatus.Unsupported, input.Sequence, input.Generation, destination, "Pointer event kind/button is not supported by the targeted injector.");
 
+        // Native Button and WinForms Button controls intentionally expose BM_CLICK as
+        // their cross-thread activation contract. Raw WM_LBUTTONDOWN/UP requires real
+        // foreground capture state and can be acknowledged without raising Click. Keep
+        // this compatibility path restricted to an exact child already proven to belong
+        // to the captured source tree; all other controls continue through pixel input.
+        if (input.Button == WindowsCapturePointerButton.Left && IsStandardButton(destination))
+        {
+            if (input.Kind == WindowsCapturePointerEventKind.ButtonDown)
+            {
+                lock (_pointerStateSync) _pressedStandardButton = destination;
+                return Send(
+                    destination,
+                    BmSetState,
+                    new IntPtr(1),
+                    IntPtr.Zero,
+                    input.Sequence,
+                    input.Generation);
+            }
+
+            if (input.Kind == WindowsCapturePointerEventKind.ButtonUp)
+            {
+                bool matchesPressedButton;
+                lock (_pointerStateSync)
+                {
+                    matchesPressedButton = _pressedStandardButton == destination;
+                    _pressedStandardButton = IntPtr.Zero;
+                }
+                if (!matchesPressedButton)
+                    return Failed(WindowsCaptureInputInjectionStatus.Unsupported, input.Sequence, input.Generation, destination, "Button release does not match the targeted pressed control.");
+
+                var released = Send(
+                    destination,
+                    BmSetState,
+                    IntPtr.Zero,
+                    IntPtr.Zero,
+                    input.Sequence,
+                    input.Generation);
+                if (!released.Delivered) return released;
+                return Send(
+                    destination,
+                    BmClick,
+                    IntPtr.Zero,
+                    IntPtr.Zero,
+                    input.Sequence,
+                    input.Generation);
+            }
+        }
+
         var wParam = BuildPointerWParam(input);
         IntPtr lParam;
         if (input.Kind == WindowsCapturePointerEventKind.Wheel)
@@ -99,6 +152,23 @@ public sealed class WindowsCaptureTargetedInputInjector
         else
         {
             lParam = PackPoint(destinationPoint.X, destinationPoint.Y);
+        }
+
+        // Conventional Win32 controls establish hover/hit-test state from the move
+        // immediately preceding a button press. A captured surface has no real cursor
+        // over the source HWND, so synthesize that targeted move on the exact proven
+        // child before the down message. This remains process-local message routing;
+        // it never moves the desktop cursor or falls back to SendInput.
+        if (input.Kind == WindowsCapturePointerEventKind.ButtonDown)
+        {
+            var moveResult = Send(
+                destination,
+                WmMouseMove,
+                BuildPointerModifierWParam(input),
+                lParam,
+                input.Sequence,
+                input.Generation);
+            if (!moveResult.Delivered) return moveResult;
         }
 
         return Send(destination, message, wParam, lParam, input.Sequence, input.Generation);
@@ -161,6 +231,15 @@ public sealed class WindowsCaptureTargetedInputInjector
     private bool BelongsToSourceTree(IntPtr candidate) =>
         candidate == _sourceWindow || IsChild(_sourceWindow, candidate);
 
+    private static bool IsStandardButton(IntPtr candidate)
+    {
+        var className = new StringBuilder(256);
+        if (GetClassNameW(candidate, className, className.Capacity) <= 0) return false;
+        var value = className.ToString();
+        return value.Equals("Button", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("WindowsForms10.BUTTON.", StringComparison.OrdinalIgnoreCase);
+    }
+
     private WindowsCaptureInputInjectionResult Send(
         IntPtr destination,
         uint message,
@@ -213,9 +292,7 @@ public sealed class WindowsCaptureTargetedInputInjector
 
     private static IntPtr BuildPointerWParam(WindowsCapturePointerInput input)
     {
-        uint flags = 0;
-        if (input.Shift) flags |= 0x0004U;
-        if (input.Control) flags |= 0x0008U;
+        var flags = unchecked((uint)(nuint)BuildPointerModifierWParam(input));
         if (input.Kind == WindowsCapturePointerEventKind.ButtonDown)
         {
             flags |= input.Button switch
@@ -226,6 +303,14 @@ public sealed class WindowsCaptureTargetedInputInjector
                 _ => 0U
             };
         }
+        return new IntPtr(unchecked((int)flags));
+    }
+
+    private static IntPtr BuildPointerModifierWParam(WindowsCapturePointerInput input)
+    {
+        uint flags = 0;
+        if (input.Shift) flags |= 0x0004U;
+        if (input.Control) flags |= 0x0008U;
         return new IntPtr(unchecked((int)flags));
     }
 
@@ -345,6 +430,9 @@ public sealed class WindowsCaptureTargetedInputInjector
         uint flags,
         uint timeout,
         out IntPtr result);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int GetClassNameW(IntPtr windowHandle, StringBuilder className, int maximumCount);
 
     [DllImport("kernel32.dll")]
     private static extern void SetLastError(uint errorCode);
