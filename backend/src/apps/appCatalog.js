@@ -119,6 +119,51 @@ export function buildIsolatedWindowsAppArguments(executable, baseDirectory) {
   return [];
 }
 
+function windowsSwitchKey(argument) {
+  const value = String(argument || '').trim().toLowerCase();
+  const match = value.match(/^(?:--|-|\/)([^=]+)(?:=.*)?$/);
+  return match?.[1] || null;
+}
+
+export function mergeIsolatedWindowsAppArguments(executable, baseDirectory, catalogArguments = []) {
+  const argumentsList = Array.isArray(catalogArguments)
+    ? catalogArguments.filter((value) => typeof value === 'string' && !/[\0\r\n]/.test(value)).slice(0, MAX_SHORTCUT_ARGUMENTS)
+    : [];
+  const isolationArguments = buildIsolatedWindowsAppArguments(executable, baseDirectory);
+  if (isolationArguments.length === 0) return argumentsList;
+
+  const executableName = path.win32.basename(String(executable || '')).toLowerCase();
+  const filtered = [];
+  for (let index = 0; index < argumentsList.length; index += 1) {
+    const argument = argumentsList[index];
+    const switchKey = windowsSwitchKey(argument);
+
+    if (ISOLATED_CHROMIUM_EXECUTABLES.has(executableName) && switchKey === 'user-data-dir') {
+      // Chromium's CommandLine map gives a later duplicate switch the effective
+      // value. CloudOS owns this capability path, so a shortcut may not redirect
+      // the browser back to a normal/external user-data directory. Tolerate the
+      // non-canonical split form too so its value cannot become a positional URL.
+      if (!argument.includes('=') && index + 1 < argumentsList.length && !windowsSwitchKey(argumentsList[index + 1])) index += 1;
+      continue;
+    }
+
+    if (executableName === 'firefox.exe'
+        && ['profile', 'p', 'profilemanager'].includes(switchKey || '')) {
+      // -profile/-P select Firefox profile state. Remove both the option and its
+      // separate operand; CloudOS supplies an isolated absolute profile below.
+      if (!argument.includes('=')
+          && switchKey !== 'profilemanager'
+          && index + 1 < argumentsList.length
+          && !windowsSwitchKey(argumentsList[index + 1])) index += 1;
+      continue;
+    }
+
+    filtered.push(argument);
+  }
+
+  return [...isolationArguments, ...filtered];
+}
+
 export function normalizeWindowsLaunchKind(launchKind, launchArguments) {
   if (launchKind === 'windows-shortcut-direct'
       && Array.isArray(launchArguments)
@@ -394,12 +439,13 @@ export async function launchCatalogApp(id) {
     : (launchKind === 'windows-shortcut-direct'
         ? []
         : (Array.isArray(app.args) ? app.args.filter((value) => typeof value === 'string' && !/[\0\r\n]/.test(value)).slice(0, 128) : []));
-  const isolatedProfileArguments = catalogArguments.length === 0
-    ? buildIsolatedWindowsAppArguments(
+  const launchArguments = scriptLaunch
+    ? catalogArguments
+    : mergeIsolatedWindowsAppArguments(
         executable,
-        process.env.CLOUDOS_LOCAL_ROOT || process.env.CLOUDOS_DATA_DIR || '')
-    : [];
-  const launchArguments = [...isolatedProfileArguments, ...catalogArguments];
+        process.env.CLOUDOS_LOCAL_ROOT || process.env.CLOUDOS_DATA_DIR || '',
+        catalogArguments
+      );
   const effectiveLaunchKind = normalizeWindowsLaunchKind(launchKind, launchArguments);
   const workingDirectory = scriptLaunch
     ? (app.workingDirectory || path.win32.dirname(scriptPath))
