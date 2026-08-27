@@ -88,7 +88,13 @@ export function nativeSessionForLaunch(sessions, launch) {
     if (exact) return exact;
   }
   if (!Number.isInteger(launch.pid) || launch.pid <= 0) return null;
-  return sessions.find((session) => sessionLaunchProcessId(session) === launch.pid) || null;
+
+  // Legacy Hosts may not return an opaque session capability. In that fallback we
+  // can correlate by the launch Job/root PID, but only if the candidate is unique.
+  // A process can own several top-level HWNDs, and a Job can contain several GUI
+  // descendants; choosing the first array entry would make ordering a capability.
+  const candidates = sessions.filter((session) => sessionLaunchProcessId(session) === launch.pid);
+  return candidates.length === 1 ? candidates[0] : null;
 }
 
 /**
