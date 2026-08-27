@@ -8,6 +8,8 @@ type NativeRequestMethod =
   | 'host.requestClose'
   | 'host.requestLegacyRecoveryToken'
   | 'browser.open'
+  | 'installer.artifacts.list'
+  | 'installer.prepare'
   | 'native.launchApp'
   | 'native.sessions.list'
   | 'native.session.attach'
@@ -34,6 +36,60 @@ export interface NativeBrowserOpenResult {
   windowVisible?: boolean;
   code?: string;
   message?: string;
+}
+
+export type NativeInstallerArtifactKind =
+  | 'WindowsExecutable'
+  | 'WindowsInstallerPackage'
+  | 'MsixPackage'
+  | 'AppxPackage'
+  | 'Unsupported';
+
+export type NativeInstallerTrustStatus =
+  | 'Trusted'
+  | 'Unsigned'
+  | 'Untrusted'
+  | 'VerificationUnavailable';
+
+export type NativeInstallerReadinessStatus =
+  | 'Ready'
+  | 'UnsupportedFormat'
+  | 'ArtifactMissing'
+  | 'ArtifactChanged'
+  | 'BrokerRequired'
+  | 'BlockedByPolicy';
+
+export interface NativeInstallerArtifact {
+  artifactId: string;
+  fileName: string;
+  kind: NativeInstallerArtifactKind;
+  sha256: string;
+  sizeBytes: number;
+  trust: NativeInstallerTrustStatus;
+  publisher: string | null;
+  registeredAtUtc: string;
+  sourceDownloadId: string | null;
+}
+
+export interface NativeInstallerReadiness {
+  status: NativeInstallerReadinessStatus;
+  integrityValid: boolean;
+  trustValid: boolean;
+  canLaunchInUserSession: boolean;
+  elevatedBrokerAvailable: boolean;
+  reason: string | null;
+}
+
+export interface NativeInstallerArtifactListResult {
+  artifacts: NativeInstallerArtifact[];
+  elevationBrokerAvailable: boolean;
+}
+
+export interface NativeInstallerPrepareResult {
+  artifact: NativeInstallerArtifact;
+  readiness: NativeInstallerReadiness;
+  capabilityId: string | null;
+  expiresAtUtc: string | null;
 }
 
 export interface NativeViewportBounds {
@@ -156,6 +212,23 @@ class NativeHostBridge {
       );
     }
     return result;
+  }
+
+  async listInstallerArtifacts(): Promise<NativeInstallerArtifactListResult> {
+    await this.requireConnection('O gerenciamento de instaladores requer o Host nativo do CloudOS.');
+    return this.request<NativeInstallerArtifactListResult>('installer.artifacts.list', {});
+  }
+
+  async prepareInstaller(artifactId: string, allowUntrusted = false): Promise<NativeInstallerPrepareResult> {
+    if (!/^[a-f0-9]{32}$/i.test(artifactId)) {
+      throw new NativeHostError('INVALID_INSTALLER_ARTIFACT', 'Identificador do instalador inválido.');
+    }
+    await this.requireConnection('O gerenciamento de instaladores requer o Host nativo do CloudOS.');
+    return this.request<NativeInstallerPrepareResult>(
+      'installer.prepare',
+      { artifactId, allowUntrusted },
+      20_000
+    );
   }
 
   async launchApp(appId: string) {
