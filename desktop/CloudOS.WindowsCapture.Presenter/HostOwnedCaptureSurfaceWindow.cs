@@ -21,7 +21,7 @@ public sealed class HostOwnedCaptureSurfaceWindow : IDisposable
     private const int SwShowNoActivate = 4;
     private static readonly IntPtr HwndTop = IntPtr.Zero;
     private static readonly object RegistrationSync = new();
-    private static readonly WindowProcedure WindowProcedureInstance = WindowProcedure;
+    private static readonly WindowProcedureDelegate WindowProcedureInstance = HandleWindowMessage;
     private static bool _registered;
 
     private bool _disposed;
@@ -120,7 +120,7 @@ public sealed class HostOwnedCaptureSurfaceWindow : IDisposable
         }
     }
 
-    private static IntPtr WindowProcedure(IntPtr windowHandle, uint message, IntPtr wParam, IntPtr lParam) =>
+    private static IntPtr HandleWindowMessage(IntPtr windowHandle, uint message, IntPtr wParam, IntPtr lParam) =>
         DefWindowProcW(windowHandle, message, wParam, lParam);
 
     private void ThrowIfDisposed()
@@ -129,7 +129,7 @@ public sealed class HostOwnedCaptureSurfaceWindow : IDisposable
     }
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
-    private delegate IntPtr WindowProcedure(IntPtr windowHandle, uint message, IntPtr wParam, IntPtr lParam);
+    private delegate IntPtr WindowProcedureDelegate(IntPtr windowHandle, uint message, IntPtr wParam, IntPtr lParam);
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct WindowClassEx
