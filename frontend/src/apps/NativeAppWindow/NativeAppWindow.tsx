@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { nativeHostBridge, NativeHostError, type NativeSession, type NativeViewportBounds } from '../../services/nativeHostBridge';
-import { nativeSessionForLaunch, nativeSurfaceLayoutChanged, nativeViewportBounds } from '../../services/nativeWindowContract.js';
+import { nativeReplacementSession, nativeSessionForLaunch, nativeSurfaceLayoutChanged, nativeViewportBounds } from '../../services/nativeWindowContract.js';
 import { useSystem } from '../../stores/systemStore';
 import { useWindowManager } from '../../stores/windowManager';
 import './NativeAppWindow.css';
@@ -11,6 +11,7 @@ type NativeLayoutState = { bounds: NativeViewportBounds; visible: boolean };
 
 const SESSION_ATTEMPTS = 32;
 const SESSION_RETRY_MS = 125;
+const SESSION_REPLACEMENT_GRACE_MS = 1_500;
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
@@ -72,6 +73,8 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
   const isStartMenuOpen = useSystem((state) => state.isStartMenuOpen);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const sessionIdRef = useRef<string | null>(null);
+  const sessionProcessIdRef = useRef<number | null>(null);
+  const replacementTimerRef = useRef<number | null>(null);
   const attachedRef = useRef(false);
   const lastBoundsRef = useRef<NativeViewportBounds | null>(null);
   const lastLayoutRef = useRef<NativeLayoutState | null>(null);
@@ -83,6 +86,13 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
 
   const appId = win?.appId || '';
   const visible = Boolean(win && !win.isMinimized && win.isActive && !isStartMenuOpen && documentVisible);
+
+  const clearReplacementTimer = useCallback(() => {
+    const timer = replacementTimerRef.current;
+    if (timer === null) return;
+    window.clearTimeout(timer);
+    replacementTimerRef.current = null;
+  }, []);
 
   const syncSurface = useCallback(async (attach = false) => {
     const currentSessionId = sessionIdRef.current;
@@ -99,7 +109,7 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
     if (attach && !attachedRef.current) {
       setStatus('attaching');
       await nativeHostBridge.attachSession(currentSessionId, bounds, visible);
-      if (disposedRef.current) return;
+      if (disposedRef.current || sessionIdRef.current !== currentSessionId) return;
       attachedRef.current = true;
       lastLayoutRef.current = { bounds, visible };
       setStatus('contained');
@@ -136,10 +146,12 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
 
     let cancelled = false;
     disposedRef.current = false;
+    clearReplacementTimer();
     attachedRef.current = false;
     lastBoundsRef.current = null;
     lastLayoutRef.current = null;
     sessionIdRef.current = null;
+    sessionProcessIdRef.current = null;
     setSessionId(null);
 
     void (async () => {
@@ -162,6 +174,7 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
           );
         }
 
+        sessionProcessIdRef.current = Number.isInteger(launch.pid) && launch.pid > 0 ? launch.pid : null;
         const exactSessionId = typeof launch.sessionId === 'string' && launch.sessionId ? launch.sessionId : null;
         if (!exactSessionId) setStatus('waiting');
         const resolvedSessionId = await resolveSessionId(launch, () => cancelled);
@@ -185,10 +198,12 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
     return () => {
       cancelled = true;
       disposedRef.current = true;
+      clearReplacementTimer();
       const currentSessionId = sessionIdRef.current;
       const bounds = lastBoundsRef.current;
       const wasAttached = attachedRef.current;
       sessionIdRef.current = null;
+      sessionProcessIdRef.current = null;
       attachedRef.current = false;
       lastLayoutRef.current = null;
       if (!currentSessionId) return;
@@ -201,7 +216,7 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
         await closeSessionBestEffort(currentSessionId);
       })();
     };
-  }, [appId, updateWindowTitle, windowId]);
+  }, [appId, clearReplacementTimer, updateWindowTitle, windowId]);
 
   useEffect(() => {
     if (!sessionId) return undefined;
@@ -256,17 +271,46 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
     if (!sessionId) return undefined;
     const unsubscribe = nativeHostBridge.onSessionsChanged((sessions) => {
       if (disposedRef.current) return;
-      const current = sessions.find((session) => session.sessionId === sessionId);
-      if (!current) {
-        closeWindow(windowId);
+      const currentSessionId = sessionIdRef.current;
+      if (!currentSessionId) return;
+
+      const current = sessions.find((candidate) => candidate.sessionId === currentSessionId);
+      if (current) {
+        clearReplacementTimer();
+        sessionProcessIdRef.current = current.processId;
+        if (current.title && current.title !== win?.title) updateWindowTitle(windowId, current.title);
         return;
       }
-      if (current.title && current.title !== win?.title) updateWindowTitle(windowId, current.title);
+
+      const replacement = nativeReplacementSession(
+        sessions,
+        currentSessionId,
+        sessionProcessIdRef.current ?? 0
+      );
+      if (replacement) {
+        clearReplacementTimer();
+        attachedRef.current = false;
+        lastLayoutRef.current = null;
+        sessionProcessIdRef.current = replacement.processId;
+        sessionIdRef.current = replacement.sessionId;
+        setStatus('waiting');
+        setSessionId(replacement.sessionId);
+        if (replacement.title && replacement.title !== win?.title) updateWindowTitle(windowId, replacement.title);
+        return;
+      }
+
+      if (replacementTimerRef.current !== null) return;
+      const missingSessionId = currentSessionId;
+      replacementTimerRef.current = window.setTimeout(() => {
+        replacementTimerRef.current = null;
+        if (disposedRef.current || sessionIdRef.current !== missingSessionId) return;
+        closeWindow(windowId);
+      }, SESSION_REPLACEMENT_GRACE_MS);
     });
     return () => {
       unsubscribe();
     };
-  }, [closeWindow, sessionId, updateWindowTitle, win?.title, windowId]);
+  }, [clearReplacementTimer, closeWindow, sessionId, updateWindowTitle, win?.title, windowId]);
 
   return (
     <div ref={surfaceRef} className="native-app-surface" data-status={status} data-session-id={sessionId || undefined}>
