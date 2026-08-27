@@ -148,11 +148,22 @@ async function startHarness(testInfo: TestInfo, extraArgs: string[]) {
     const deadline = Date.now() + timeoutMs;
     let last: Status | undefined;
     while (Date.now() < deadline) {
-      if (host.exitCode !== null) throw new Error(`TestHost encerrou antes do estado esperado: ${host.exitCode}.`);
+      if (host.exitCode !== null) {
+        await attachDiagnostics(testInfo, tempRoot, logFile, statusFile, stdout, stderr, `wait-status=host-exit exit=${host.exitCode}`);
+        throw new Error(`TestHost encerrou antes do estado esperado: ${host.exitCode}.`);
+      }
       last = await readStatus();
       if (predicate(last)) return last;
       await delay(100);
     }
+    await attachDiagnostics(
+      testInfo,
+      tempRoot,
+      logFile,
+      statusFile,
+      stdout,
+      stderr,
+      `wait-status=timeout timeoutMs=${timeoutMs} last=${JSON.stringify(last)}`);
     throw new Error(`Estado esperado não ocorreu. Último estado: ${JSON.stringify(last)}`);
   }
 
