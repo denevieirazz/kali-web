@@ -44,9 +44,9 @@ static void TestMove()
             123,
             456,
             alt: true,
-            out var input),
+            out var decoded),
         "move was rejected");
-    Require(input is not null, "move result missing");
+    var input = RequireValue(decoded, "move result missing");
     Require(input.Kind == WindowsCapturePointerEventKind.Move, "wrong move kind");
     Require(input.Button == WindowsCapturePointerButton.None, "move unexpectedly carries a button");
     Require(input.LocalPixelX == 123 && input.LocalPixelY == 456, "move coordinates changed");
@@ -69,9 +69,9 @@ static void TestButtons()
     foreach (var item in cases)
     {
         Require(
-            HostOwnedCaptureSurfacePointerDecoder.TryDecode(item.Item1, IntPtr.Zero, 10, 20, false, out var input),
+            HostOwnedCaptureSurfacePointerDecoder.TryDecode(item.Item1, IntPtr.Zero, 10, 20, false, out var decoded),
             $"button message 0x{item.Item1:X} rejected");
-        Require(input is not null, "button result missing");
+        var input = RequireValue(decoded, "button result missing");
         Require(input.Kind == item.Item2, $"wrong transition for 0x{item.Item1:X}");
         Require(input.Button == item.Item3, $"wrong button for 0x{item.Item1:X}");
         Require(input.WheelDelta == 0, "button unexpectedly carries wheel delta");
@@ -90,9 +90,9 @@ static void TestWheel()
                 40,
                 50,
                 false,
-                out var input),
+                out var decoded),
             $"wheel {delta} rejected");
-        Require(input is not null, "wheel result missing");
+        var input = RequireValue(decoded, "wheel result missing");
         Require(input.Kind == WindowsCapturePointerEventKind.Wheel, "wrong wheel kind");
         Require(input.Button == WindowsCapturePointerButton.None, "wheel unexpectedly carries a button");
         Require(input.WheelDelta == delta, $"wheel sign changed: expected {delta}, got {input.WheelDelta}");
@@ -123,6 +123,12 @@ static void TestRejectedMessages()
             false,
             out _),
         "out-of-range native coordinate was accepted");
+}
+
+static T RequireValue<T>(T? value, string message) where T : class
+{
+    if (value is null) throw new InvalidOperationException(message);
+    return value;
 }
 
 static void Require(bool condition, string message)
