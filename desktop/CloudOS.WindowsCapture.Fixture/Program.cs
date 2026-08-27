@@ -8,7 +8,12 @@ Application.Run(form);
 sealed class CaptureFixtureForm : Form
 {
     private readonly System.Windows.Forms.Timer _timer;
+    private readonly Button _inputButton;
+    private readonly TextBox _inputBox;
     private int _frame;
+    private int _clickCount;
+    private int _keyCount;
+    private string _lastKey = "none";
 
     public CaptureFixtureForm()
     {
@@ -18,6 +23,34 @@ sealed class CaptureFixtureForm : Form
         ClientSize = new Size(640, 420);
         DoubleBuffered = true;
 
+        _inputButton = new Button
+        {
+            Name = "CloudOSInputButton",
+            Text = "CloudOS input target",
+            Location = new Point(24, 250),
+            Size = new Size(190, 42),
+            TabIndex = 0
+        };
+        _inputButton.Click += (_, _) =>
+        {
+            _clickCount++;
+            UpdateObservableState();
+        };
+        _inputButton.KeyDown += OnObservedKeyDown;
+
+        _inputBox = new TextBox
+        {
+            Name = "CloudOSInputTextBox",
+            Location = new Point(24, 316),
+            Size = new Size(300, 30),
+            TabIndex = 1,
+            PlaceholderText = "targeted keyboard input"
+        };
+        _inputBox.KeyDown += OnObservedKeyDown;
+
+        Controls.Add(_inputButton);
+        Controls.Add(_inputBox);
+
         _timer = new System.Windows.Forms.Timer { Interval = 50 };
         _timer.Tick += (_, _) =>
         {
@@ -25,6 +58,25 @@ sealed class CaptureFixtureForm : Form
             Invalidate();
         };
         _timer.Start();
+
+        Shown += (_, _) =>
+        {
+            _inputButton.Focus();
+            UpdateObservableState();
+        };
+    }
+
+    private void OnObservedKeyDown(object? sender, KeyEventArgs e)
+    {
+        _keyCount++;
+        _lastKey = e.KeyCode.ToString();
+        UpdateObservableState();
+    }
+
+    private void UpdateObservableState()
+    {
+        Text = $"CloudOS Windows Capture Fixture | clicks={_clickCount} | keys={_keyCount} | last={_lastKey}";
+        Invalidate();
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -42,7 +94,8 @@ sealed class CaptureFixtureForm : Form
 
         e.Graphics.DrawString("CloudOS WGC physical fixture", titleFont, brush, 24, 24);
         e.Graphics.DrawString($"frame={_frame}", bodyFont, brush, 24, 72);
-        e.Graphics.FillRectangle(accentBrush, x, 130, 80, 80);
+        e.Graphics.DrawString($"input: clicks={_clickCount} keys={_keyCount} last={_lastKey}", bodyFont, brush, 24, 102);
+        e.Graphics.FillRectangle(accentBrush, x, 150, 80, 70);
     }
 
     protected override void Dispose(bool disposing)
