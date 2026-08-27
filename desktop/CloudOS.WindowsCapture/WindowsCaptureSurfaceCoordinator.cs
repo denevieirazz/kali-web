@@ -104,6 +104,44 @@ public sealed class WindowsCaptureSurfaceCoordinator : IWindowsCaptureFrameSink,
         }
     }
 
+    /// <summary>
+    /// Transitions the presentation surface to a terminal fail-closed state because a
+    /// non-presenter boundary (capture, source identity, device/security orchestration)
+    /// was lost. The last frame is hidden best-effort before the fault is published.
+    /// No overlay/external-window fallback is attempted.
+    /// </summary>
+    public void Fail(WindowsCapturePresentationFaultKind kind, string message)
+    {
+        ThrowIfDisposed();
+        if (kind == WindowsCapturePresentationFaultKind.None)
+            throw new ArgumentOutOfRangeException(nameof(kind));
+        if (string.IsNullOrWhiteSpace(message))
+            throw new ArgumentException("Fault message is required.", nameof(message));
+
+        var current = _lifecycle.GetSnapshot();
+        if (current.IsTerminal) return;
+
+        try
+        {
+            if (current.State is WindowsCapturePresentationState.Bound or
+                WindowsCapturePresentationState.Active or
+                WindowsCapturePresentationState.Suspended)
+            {
+                _presenter.Suspend();
+            }
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            lock (_sync) _lastPresenterFailure = $"{error.GetType().Name}: {error.Message}";
+            _lifecycle.Fail(
+                WindowsCapturePresentationFaultKind.RendererUnavailable,
+                $"Native presenter failed while hiding a faulted surface: {error.Message}");
+            return;
+        }
+
+        _lifecycle.Fail(kind, message);
+    }
+
     public void OnFrame(WindowsCaptureFrameEnvelope frame)
     {
         ThrowIfDisposed();
