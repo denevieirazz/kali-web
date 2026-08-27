@@ -8,6 +8,7 @@ if (args.Length == 0 || args.Contains("--help", StringComparer.OrdinalIgnoreCase
 {
     Console.WriteLine("CloudOS Windows capture probe");
     Console.WriteLine("  --pid <processId> | --hwnd <decimal|0xHEX>");
+    Console.WriteLine("  [--capture-kind window|monitor]");
     Console.WriteLine("  [--seconds <1-30>] [--min-frames <1-1000>] [--output <path>]");
     return 64;
 }
@@ -23,7 +24,14 @@ try
     var title = WindowLocator.GetTitle(hwnd);
     var rectangle = WindowLocator.GetRectangle(hwnd);
 
-    using var capture = new WindowsCaptureSession(hwnd);
+    var targetKind = options.CaptureKind;
+    var targetHandle = targetKind == WindowsCaptureTargetKind.Window
+        ? hwnd
+        : WindowLocator.GetNearestMonitor(hwnd);
+    if (targetHandle == IntPtr.Zero)
+        throw new InvalidOperationException($"Could not resolve a {targetKind} capture handle.");
+
+    using var capture = new WindowsCaptureSession(targetHandle, targetKind);
     var startedAt = DateTimeOffset.UtcNow;
     var snapshot = await capture.WaitForFramesAsync(
         options.MinimumFrames,
@@ -35,7 +43,7 @@ try
         : "FAIL";
     var report = new
     {
-        schemaVersion = 2,
+        schemaVersion = 3,
         probe = "CloudOS.WindowsCapture.Probe",
         startedAt,
         completedAt,
@@ -56,6 +64,11 @@ try
             top = rectangle.Top,
             width = rectangle.Right - rectangle.Left,
             height = rectangle.Bottom - rectangle.Top
+        },
+        target = new
+        {
+            kind = targetKind.ToString().ToLowerInvariant(),
+            handle = $"0x{targetHandle.ToInt64():X}"
         },
         capture = new
         {
@@ -108,12 +121,19 @@ static string? TryGetStartTime(Process process)
     catch { return null; }
 }
 
-internal sealed record ProbeOptions(int? ProcessId, IntPtr? WindowHandle, int Seconds, int MinimumFrames, string? OutputPath)
+internal sealed record ProbeOptions(
+    int? ProcessId,
+    IntPtr? WindowHandle,
+    WindowsCaptureTargetKind CaptureKind,
+    int Seconds,
+    int MinimumFrames,
+    string? OutputPath)
 {
     public static ProbeOptions Parse(string[] args)
     {
         int? processId = null;
         IntPtr? hwnd = null;
+        var captureKind = WindowsCaptureTargetKind.Window;
         var seconds = 3;
         var minimumFrames = 10;
         string? outputPath = null;
@@ -136,6 +156,14 @@ internal sealed record ProbeOptions(int? ProcessId, IntPtr? WindowHandle, int Se
                     hwnd = ParseHandle(NextValue("--hwnd"));
                     if (hwnd == IntPtr.Zero) throw new ArgumentOutOfRangeException("--hwnd");
                     break;
+                case "--capture-kind":
+                    captureKind = NextValue("--capture-kind").ToLowerInvariant() switch
+                    {
+                        "window" => WindowsCaptureTargetKind.Window,
+                        "monitor" => WindowsCaptureTargetKind.Monitor,
+                        var value => throw new ArgumentException($"Unknown capture kind: {value}")
+                    };
+                    break;
                 case "--seconds":
                     seconds = int.Parse(NextValue("--seconds"));
                     if (seconds is < 1 or > 30) throw new ArgumentOutOfRangeException("--seconds");
@@ -155,7 +183,7 @@ internal sealed record ProbeOptions(int? ProcessId, IntPtr? WindowHandle, int Se
         if ((processId.HasValue ? 1 : 0) + (hwnd.HasValue ? 1 : 0) != 1)
             throw new ArgumentException("Specify exactly one of --pid or --hwnd.");
 
-        return new ProbeOptions(processId, hwnd, seconds, minimumFrames, outputPath);
+        return new ProbeOptions(processId, hwnd, captureKind, seconds, minimumFrames, outputPath);
     }
 
     private static IntPtr ParseHandle(string text)
@@ -169,6 +197,8 @@ internal sealed record ProbeOptions(int? ProcessId, IntPtr? WindowHandle, int Se
 
 internal static class WindowLocator
 {
+    private const uint MonitorDefaultToNearest = 2;
+
     [StructLayout(LayoutKind.Sequential)]
     internal struct NativeRect
     {
@@ -194,6 +224,9 @@ internal static class WindowLocator
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetWindowTextW(IntPtr hwnd, StringBuilder text, int capacity);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
 
     public static IntPtr FindBestTopLevelWindow(int processId)
     {
@@ -229,4 +262,6 @@ internal static class WindowLocator
             throw new InvalidOperationException($"GetWindowRect failed with Win32 error {Marshal.GetLastWin32Error()}.");
         return rectangle;
     }
+
+    public static IntPtr GetNearestMonitor(IntPtr hwnd) => MonitorFromWindow(hwnd, MonitorDefaultToNearest);
 }
