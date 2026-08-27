@@ -7,6 +7,10 @@ Run("hidden surface cannot present", TestHiddenSurface);
 Run("fault is terminal until close", TestFaultTerminal);
 Run("generation validation", TestGenerationValidation);
 Run("layout validation", TestLayoutValidation);
+Run("input full-frame mapping", TestInputFullFrameMapping);
+Run("input crop mapping", TestInputCropMapping);
+Run("input boundary rejection", TestInputBoundaryRejection);
+Run("input geometry validation", TestInputGeometryValidation);
 
 if (failures.Count > 0)
 {
@@ -104,6 +108,57 @@ static void TestLayoutValidation()
     ExpectThrows<ArgumentOutOfRangeException>(() => new WindowsCapturePresentationLayout(1, 0, 0, 0, 600, 1, 1, true).Validate());
     ExpectThrows<ArgumentOutOfRangeException>(() => new WindowsCapturePresentationLayout(1, 0, 0, 800, 600, 0.1, 1, true).Validate());
     _ = Layout(1).Validate();
+}
+
+static void TestInputFullFrameMapping()
+{
+    var geometry = WindowsCaptureInputGeometry.FullFrame(1920, 1080, 960, 540);
+    Require(WindowsCaptureInputMapper.TryMapPointer(geometry, 480, 270, out var center), "center pointer did not map");
+    Require(center is not null, "center pointer mapping is null");
+    Require(center.SourcePixelX == 960 && center.SourcePixelY == 540, "center pointer mapped to wrong source pixel");
+    Require(Math.Abs(center.NormalizedX - 0.5) < 0.000001, "normalized X mismatch");
+    Require(Math.Abs(center.NormalizedY - 0.5) < 0.000001, "normalized Y mismatch");
+
+    Require(WindowsCaptureInputMapper.TryMapPointer(geometry, 959.999, 539.999, out var last), "last in-bounds pointer did not map");
+    Require(last is not null && last.SourcePixelX == 1919 && last.SourcePixelY == 1079, "last in-bounds pointer did not clamp to final source pixel");
+}
+
+static void TestInputCropMapping()
+{
+    var geometry = new WindowsCaptureInputGeometry(
+        2560,
+        1440,
+        320,
+        180,
+        1920,
+        1080,
+        960,
+        540).Validate();
+
+    Require(WindowsCaptureInputMapper.TryMapPointer(geometry, 0, 0, out var origin), "crop origin pointer did not map");
+    Require(origin is not null && origin.SourcePixelX == 320 && origin.SourcePixelY == 180, "crop origin mapped outside crop");
+
+    Require(WindowsCaptureInputMapper.TryMapPointer(geometry, 480, 270, out var center), "crop center pointer did not map");
+    Require(center is not null && center.SourcePixelX == 1280 && center.SourcePixelY == 720, "crop center mapped incorrectly");
+}
+
+static void TestInputBoundaryRejection()
+{
+    var geometry = WindowsCaptureInputGeometry.FullFrame(800, 600, 800, 600);
+    Require(!WindowsCaptureInputMapper.TryMapPointer(geometry, -0.001, 10, out _), "negative X was accepted");
+    Require(!WindowsCaptureInputMapper.TryMapPointer(geometry, 10, -0.001, out _), "negative Y was accepted");
+    Require(!WindowsCaptureInputMapper.TryMapPointer(geometry, 800, 10, out _), "right exclusive edge was accepted");
+    Require(!WindowsCaptureInputMapper.TryMapPointer(geometry, 10, 600, out _), "bottom exclusive edge was accepted");
+    Require(!WindowsCaptureInputMapper.TryMapPointer(geometry, double.NaN, 10, out _), "NaN pointer was accepted");
+    Require(!WindowsCaptureInputMapper.TryMapPointer(geometry, double.PositiveInfinity, 10, out _), "infinite pointer was accepted");
+}
+
+static void TestInputGeometryValidation()
+{
+    ExpectThrows<ArgumentOutOfRangeException>(() => WindowsCaptureInputGeometry.FullFrame(0, 600, 800, 600));
+    ExpectThrows<ArgumentOutOfRangeException>(() => new WindowsCaptureInputGeometry(800, 600, 790, 0, 20, 100, 800, 600).Validate());
+    ExpectThrows<ArgumentOutOfRangeException>(() => new WindowsCaptureInputGeometry(800, 600, 0, 0, 800, 600, double.NaN, 600).Validate());
+    _ = new WindowsCaptureInputGeometry(800, 600, 100, 50, 500, 400, 1000, 800).Validate();
 }
 
 static void ExpectThrows<T>(Action action) where T : Exception
