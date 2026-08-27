@@ -6,6 +6,8 @@ on:
     paths:
       - 'desktop/CloudOS.WindowsCapture/**'
       - 'desktop/CloudOS.WindowsCapture.Probe/**'
+      - 'desktop/CloudOS.WindowsCapture.Fixture/**'
+      - 'scripts/test-windows-capture-probe.ps1'
       - '.github/workflows/windows-captured-surface-ci.yml'
 
 jobs:
@@ -24,3 +26,6 @@ jobs:
 
       - name: Build generic Windows capture probe
         run: dotnet build desktop/CloudOS.WindowsCapture.Probe/CloudOS.WindowsCapture.Probe.csproj -c Release --nologo
+
+      - name: Build conventional Windows capture fixture
+        run: dotnet build desktop/CloudOS.WindowsCapture.Fixture/CloudOS.WindowsCapture.Fixture.csproj -c Release --nologo
