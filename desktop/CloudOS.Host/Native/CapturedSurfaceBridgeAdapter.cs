@@ -22,6 +22,7 @@ public sealed class CapturedSurfaceBridgeAdapter : IDisposable
     private readonly CapturedSurfaceSessionManager _runtime;
     private readonly long _ownerWindowHandle;
     private readonly Dictionary<string, BridgeSession> _sessions = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, int> _lastGenerationBySessionId = new(StringComparer.Ordinal);
     private bool _disposed;
 
     public CapturedSurfaceBridgeAdapter(long ownerWindowHandle, CapturedSurfaceSessionManager runtime)
@@ -54,16 +55,14 @@ public sealed class CapturedSurfaceBridgeAdapter : IDisposable
         int generation;
         lock (_sync)
         {
-            if (_sessions.TryGetValue(sessionId, out var current))
-            {
+            if (_sessions.Remove(sessionId, out var current))
                 replaced = current;
-                generation = checked(current.Generation + 1);
-                _sessions.Remove(sessionId);
-            }
-            else
-            {
-                generation = 1;
-            }
+
+            var lastGeneration = _lastGenerationBySessionId.TryGetValue(sessionId, out var previous)
+                ? previous
+                : 0;
+            generation = checked(lastGeneration + 1);
+            _lastGenerationBySessionId[sessionId] = generation;
         }
         if (replaced is not null) _runtime.Close(sessionId, replaced.Generation);
 
@@ -155,6 +154,62 @@ public sealed class CapturedSurfaceBridgeAdapter : IDisposable
             runtimeSnapshot);
     }
 
+    public bool RoutePointer(
+        string sessionId,
+        int generation,
+        long sequence,
+        WindowsCapturePointerEventKind kind,
+        WindowsCapturePointerButton button,
+        int wheelDelta,
+        bool shift,
+        bool control,
+        bool alt,
+        double surfaceCssWidth,
+        double surfaceCssHeight,
+        double localCssX,
+        double localCssY)
+    {
+        var current = GetRequiredSession(sessionId, generation);
+        if (!current.Visible) return false;
+        return _runtime.RoutePointer(
+            sessionId,
+            generation,
+            sequence,
+            kind,
+            button,
+            wheelDelta,
+            shift,
+            control,
+            alt,
+            surfaceCssWidth,
+            surfaceCssHeight,
+            localCssX,
+            localCssY);
+    }
+
+    public bool RouteKey(
+        string sessionId,
+        int generation,
+        long sequence,
+        WindowsCaptureKeyEventKind kind,
+        int virtualKey,
+        int scanCode,
+        bool extended,
+        bool repeat)
+    {
+        var current = GetRequiredSession(sessionId, generation);
+        if (!current.Visible) return false;
+        return _runtime.RouteKey(
+            sessionId,
+            generation,
+            sequence,
+            kind,
+            virtualKey,
+            scanCode,
+            extended,
+            repeat);
+    }
+
     public bool TryGetState(string sessionId, out CapturedSurfaceBridgeState? state)
     {
         state = null;
@@ -189,7 +244,8 @@ public sealed class CapturedSurfaceBridgeAdapter : IDisposable
     /// <summary>
     /// Closes all current surfaces without invalidating the adapter itself. Document reset
     /// uses this path so a fresh trusted WebView document can attach new captured sessions
-    /// through the same Host bridge instance. Final Host shutdown still uses Dispose().
+    /// through the same Host bridge instance. Generation history intentionally survives reset.
+    /// Final Host shutdown still uses Dispose().
     /// </summary>
     public void CloseAll()
     {
@@ -235,6 +291,22 @@ public sealed class CapturedSurfaceBridgeAdapter : IDisposable
             {
                 // Continue closing the remaining surfaces during terminal Host teardown.
             }
+        }
+    }
+
+    private BridgeSession GetRequiredSession(string sessionId, int generation)
+    {
+        ThrowIfDisposed();
+        ValidateSessionId(sessionId);
+        if (generation <= 0) throw new ArgumentOutOfRangeException(nameof(generation));
+        lock (_sync)
+        {
+            if (!_sessions.TryGetValue(sessionId, out var current))
+                throw new KeyNotFoundException($"Captured-surface session '{sessionId}' is not attached.");
+            if (current.Generation != generation)
+                throw new InvalidOperationException(
+                    $"Stale captured-surface generation. session={sessionId}; current={current.Generation}; requested={generation}.");
+            return current;
         }
     }
 
