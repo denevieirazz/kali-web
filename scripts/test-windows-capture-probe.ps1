@@ -21,33 +21,25 @@ $fixtureExe = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.Fixture\bin\Re
 $probeProject = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.Probe\CloudOS.WindowsCapture.Probe.csproj'
 $probeDll = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.Probe\bin\Release\net8.0-windows10.0.19041.0\CloudOS.WindowsCapture.Probe.dll'
 $outputRoot = [System.IO.Path]::GetFullPath($OutputDirectory)
-$reportPath = Join-Path $outputRoot 'fixture-wgc-smoke.json'
+$windowReportPath = Join-Path $outputRoot 'fixture-window-wgc-smoke.json'
+$monitorReportPath = Join-Path $outputRoot 'fixture-monitor-wgc-control.json'
 $logPath = Join-Path $outputRoot 'fixture-wgc-smoke.log'
 
 function Resolve-DotNet {
     $command = Get-Command dotnet -ErrorAction SilentlyContinue
     if ($null -ne $command) { return $command.Source }
-
     $localDotNet = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet\dotnet.exe'
     if (Test-Path -LiteralPath $localDotNet -PathType Leaf) { return $localDotNet }
-
-    throw 'dotnet não foi encontrado no PATH nem em %LOCALAPPDATA%\Microsoft\dotnet\dotnet.exe.'
+    throw 'dotnet não foi encontrado.'
 }
 
-$currentHead = @(git rev-parse HEAD)
-if ($LASTEXITCODE -ne 0 -or $currentHead.Count -ne 1) {
-    throw 'Não foi possível determinar o HEAD atual.'
-}
-$currentHead = ([string]$currentHead[0]).Trim().ToLowerInvariant()
-if ($currentHead -ne $ExpectedHeadSha.ToLowerInvariant()) {
+$currentHead = ([string](git rev-parse HEAD)).Trim().ToLowerInvariant()
+if ($LASTEXITCODE -ne 0 -or $currentHead -ne $ExpectedHeadSha.ToLowerInvariant()) {
     throw "HEAD incorreto. esperado=$ExpectedHeadSha atual=$currentHead"
 }
-
-$branch = @(git branch --show-current)
-if ($LASTEXITCODE -ne 0 -or $branch.Count -ne 1) { throw 'Não foi possível determinar a branch atual.' }
-$branch = ([string]$branch[0]).Trim()
-if ($branch -ne $expectedBranch) {
-    throw "Branch incorreta para a prova de captura. esperado=$expectedBranch atual=$branch"
+$branch = ([string](git branch --show-current)).Trim()
+if ($LASTEXITCODE -ne 0 -or $branch -ne $expectedBranch) {
+    throw "Branch incorreta. esperado=$expectedBranch atual=$branch"
 }
 
 $dotnet = Resolve-DotNet
@@ -59,12 +51,10 @@ try {
     Write-Host 'Compilando fixture Windows convencional...' -ForegroundColor Cyan
     & $dotnet build $fixtureProject -c Release --nologo
     if ($LASTEXITCODE -ne 0) { throw "Build da fixture falhou com exit code $LASTEXITCODE." }
-    if (-not (Test-Path -LiteralPath $fixtureExe -PathType Leaf)) { throw "Fixture não encontrada: $fixtureExe" }
 
     Write-Host 'Compilando CloudOS Windows capture probe...' -ForegroundColor Cyan
     & $dotnet build $probeProject -c Release --nologo
     if ($LASTEXITCODE -ne 0) { throw "Build do capture probe falhou com exit code $LASTEXITCODE." }
-    if (-not (Test-Path -LiteralPath $probeDll -PathType Leaf)) { throw "Probe não encontrado: $probeDll" }
 
     Write-Host 'Iniciando fixture WinForms animada...' -ForegroundColor Cyan
     $fixture = Start-Process -FilePath $fixtureExe -PassThru
@@ -76,19 +66,29 @@ try {
         if ($fixture.HasExited) { throw "Fixture encerrou prematuramente com exit code $($fixture.ExitCode)." }
         $reportedMainWindowHwnd = $fixture.MainWindowHandle
     } while ($reportedMainWindowHwnd -eq [IntPtr]::Zero -and [DateTimeOffset]::UtcNow -lt $deadline)
+    if ($reportedMainWindowHwnd -eq [IntPtr]::Zero) { throw 'Fixture não publicou janela dentro do timeout.' }
 
-    if ($reportedMainWindowHwnd -eq [IntPtr]::Zero) { throw 'Fixture não publicou nenhuma janela dentro do timeout.' }
-
-    # MainWindowHandle is only a readiness signal. The probe remains authoritative and
-    # enumerates visible top-level HWNDs belonging to this PID, selecting the largest one.
     Write-Host "Fixture PID=$($fixture.Id) reported MainWindowHandle=0x$('{0:X}' -f $reportedMainWindowHwnd.ToInt64())" -ForegroundColor Cyan
-    Write-Host 'Executando Windows.Graphics.Capture...' -ForegroundColor Cyan
-    $probeOutput = & $dotnet $probeDll `
+
+    Write-Host '=== WINDOW TARGET ===' -ForegroundColor Cyan
+    $windowOutput = & $dotnet $probeDll `
         --pid $fixture.Id `
+        --capture-kind window `
         --seconds $CaptureSeconds `
         --min-frames $MinimumFrames `
-        --output $reportPath 2>&1
-    $probeExit = $LASTEXITCODE
+        --output $windowReportPath 2>&1
+    $windowExit = $LASTEXITCODE
+    Write-Host ($windowOutput | Out-String)
+
+    Write-Host '=== MONITOR CONTROL TARGET ===' -ForegroundColor Cyan
+    $monitorOutput = & $dotnet $probeDll `
+        --pid $fixture.Id `
+        --capture-kind monitor `
+        --seconds $CaptureSeconds `
+        --min-frames $MinimumFrames `
+        --output $monitorReportPath 2>&1
+    $monitorExit = $LASTEXITCODE
+    Write-Host ($monitorOutput | Out-String)
 
     $logLines = @(
         'CLOUDOS WINDOWS CAPTURE PROBE LOCAL SMOKE',
@@ -102,37 +102,36 @@ try {
         'targetSelection=probe-enumerated-largest-visible-top-level-window-for-pid',
         "captureSeconds=$CaptureSeconds",
         "minimumFrames=$MinimumFrames",
-        "probeExitCode=$probeExit",
-        "report=$reportPath",
+        "windowProbeExitCode=$windowExit",
+        "windowReport=$windowReportPath",
+        "monitorProbeExitCode=$monitorExit",
+        "monitorReport=$monitorReportPath",
         '',
-        ($probeOutput | Out-String).TrimEnd()
+        '=== WINDOW TARGET ===',
+        ($windowOutput | Out-String).TrimEnd(),
+        '',
+        '=== MONITOR CONTROL TARGET ===',
+        ($monitorOutput | Out-String).TrimEnd()
     )
     [System.IO.File]::WriteAllLines($logPath, $logLines, [System.Text.UTF8Encoding]::new($false))
 
-    if ($probeExit -ne 0) {
-        Write-Host ($probeOutput | Out-String)
-        throw "Windows capture probe falhou com exit code $probeExit. Log: $logPath"
+    if ($windowExit -ne 0) {
+        throw "Window capture gate falhou com exit code $windowExit. Monitor control exit=$monitorExit. Log: $logPath"
     }
 
-    if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) { throw 'Probe terminou sem gerar o relatório JSON.' }
-    $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
-    if ($report.verdict -ne 'PASS') { throw "Probe reportou verdict=$($report.verdict)." }
-    if ([long]$report.capture.frameCount -lt $MinimumFrames) {
-        throw "Frames insuficientes. atual=$($report.capture.frameCount) mínimo=$MinimumFrames"
-    }
+    if (-not (Test-Path -LiteralPath $windowReportPath -PathType Leaf)) { throw 'Window probe terminou sem relatório JSON.' }
+    $report = Get-Content -LiteralPath $windowReportPath -Raw | ConvertFrom-Json
+    if ($report.verdict -ne 'PASS') { throw "Window probe reportou verdict=$($report.verdict)." }
+    if ([long]$report.capture.frameCount -lt $MinimumFrames) { throw 'Frames insuficientes no window target.' }
 
     Write-Host ''
-    Write-Host 'CLOUDOS WINDOWS CAPTURE PROBE LOCAL SMOKE: PASS' -ForegroundColor Green
-    Write-Host "Target HWND: $($report.window.handle)"
-    Write-Host "Target title: $($report.window.title)"
-    Write-Host "Target size: $($report.window.width)x$($report.window.height)"
+    Write-Host 'CLOUDOS WINDOWS CAPTURE WINDOW GATE: PASS' -ForegroundColor Green
     Write-Host "Frames: $($report.capture.frameCount)"
     Write-Host "Size:   $($report.capture.width)x$($report.capture.height)"
-    Write-Host "Initial item:   $($report.capture.initialItemSize.width)x$($report.capture.initialItemSize.height)"
-    Write-Host "Initial buffer: $($report.capture.initialBufferSize.width)x$($report.capture.initialBufferSize.height) via $($report.capture.initialBufferSize.source)"
-    Write-Host "Empty frames:   $($report.capture.emptyFrameCount)"
-    Write-Host "Report: $reportPath"
-    Write-Host "Log:    $logPath"
+    Write-Host "Monitor control exit: $monitorExit"
+    Write-Host "Window report:  $windowReportPath"
+    Write-Host "Monitor report: $monitorReportPath"
+    Write-Host "Log:            $logPath"
 }
 finally {
     if ($null -ne $fixture) {
@@ -142,11 +141,7 @@ finally {
                 [void]$fixture.WaitForExit(5000)
             }
         }
-        catch {
-            Write-Warning "Não foi possível encerrar a fixture automaticamente: $($_.Exception.Message)"
-        }
-        finally {
-            $fixture.Dispose()
-        }
+        catch { Write-Warning "Falha ao encerrar fixture: $($_.Exception.Message)" }
+        finally { $fixture.Dispose() }
     }
 }
