@@ -9,5 +9,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../CloudOS.Installer/CloudOS.Installer.csproj" />
+    <ProjectReference Include="../CloudOS.Host/CloudOS.Host.csproj" />
   </ItemGroup>
 </Project>
