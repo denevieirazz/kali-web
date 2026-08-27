@@ -1,6 +1,12 @@
 using CloudOS.Host.Installer;
 using CloudOS.Installer;
 
+if (args is [InstallerContainedExecutionCoordinatorGate.FixtureArgument])
+{
+    Thread.Sleep(TimeSpan.FromSeconds(30));
+    return 0;
+}
+
 var tests = new (string Name, Func<Task> Run)[]
 {
     ("managed path rejects escape", TestManagedPathEscapeAsync),
@@ -11,6 +17,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("capability cleanup rejects invalid ids", TestCapabilityCleanupIdAsync),
     ("stale capability staging is purged on restart", TestStaleCapabilityStagingCleanupAsync),
     ("contained EXE policy reuses native launch spec", TestContainedExePolicyAsync),
+    ("contained execution coordinator owns capability by Job root", InstallerContainedExecutionCoordinatorGate.RunAsync),
     ("MSI policy requires privileged broker", TestMsiBrokerPolicyAsync),
     ("unsupported format is rejected", TestUnsupportedFormatAsync),
     ("msi plan uses msiexec without forced restart", TestMsiPlanAsync),
