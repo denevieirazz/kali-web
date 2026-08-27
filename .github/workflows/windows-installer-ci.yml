@@ -1,0 +1,47 @@
+name: Windows Installer Capability CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'desktop/CloudOS.Installer/**'
+      - 'desktop/CloudOS.Installer.Tests/**'
+      - 'desktop/CloudOS.Host/Browser/**'
+      - 'desktop/CloudOS.Host/Installer/**'
+      - '.github/workflows/windows-installer-ci.yml'
+
+jobs:
+  validate-installer-core:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build installer capability core
+        run: dotnet build desktop/CloudOS.Installer/CloudOS.Installer.csproj -c Release --nologo
+
+      - name: Run installer contract tests
+        run: dotnet run --project desktop/CloudOS.Installer.Tests/CloudOS.Installer.Tests.csproj -c Release
+
+      - name: Enforce fail-closed elevation boundary
+        shell: pwsh
+        run: |
+          $root = 'desktop/CloudOS.Installer'
+          $text = (Get-ChildItem $root -Filter '*.cs' -File | Get-Content -Raw) -join "`n"
+          foreach ($forbidden in @('Verb = "runas"', 'Verb="runas"', 'powershell.exe', 'pwsh.exe', 'schtasks.exe')) {
+            if ($text.Contains($forbidden, [System.StringComparison]::OrdinalIgnoreCase)) {
+              throw "Installer core contains forbidden elevation fallback '$forbidden'."
+            }
+          }
+          foreach ($required in @('WinVerifyTrust', 'SHA256', 'ELEVATION_BROKER_UNAVAILABLE', 'ExpectedSha256')) {
+            if (-not $text.Contains($required, [System.StringComparison]::Ordinal)) {
+              throw "Installer core is missing required security contract '$required'."
+            }
+          }
+          Write-Host 'Installer elevation boundary: PASS'
