@@ -10,11 +10,16 @@ $script:AllowedModes = @('Full','WebOnly','Developer','UXValidation','FilesValid
 $script:IdentityGranularityTicks = [TimeSpan]::TicksPerMillisecond
 
 function Write-CloudOSJsonAtomic {
-    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)]$Value)
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][AllowNull()][AllowEmptyCollection()]$Value
+    )
     $directory = Split-Path -Parent $Path
     if ($directory) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
     $temp = "$Path.$([guid]::NewGuid().ToString('N')).tmp"
-    $Value | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $temp -Encoding UTF8
+    $json = ConvertTo-Json -InputObject $Value -Depth 16
+    if ($null -eq $json) { $json = 'null' }
+    Set-Content -LiteralPath $temp -Value $json -Encoding UTF8
     Move-Item -LiteralPath $temp -Destination $Path -Force
 }
 
@@ -171,7 +176,8 @@ function Get-CloudOSProcessSnapshot {
 
 function Save-CloudOSProcessSnapshot {
     param([Parameter(Mandatory)]$Session,[Parameter(Mandatory)][ValidateSet('before','after')]$When)
-    Write-CloudOSJsonAtomic (Join-Path $Session.logDirectory "processes-$When.json") (Get-CloudOSProcessSnapshot)
+    $snapshot = @(Get-CloudOSProcessSnapshot)
+    Write-CloudOSJsonAtomic (Join-Path $Session.logDirectory "processes-$When.json") $snapshot
 }
 
 function ConvertTo-CloudOSSanitizedCommandLine {
