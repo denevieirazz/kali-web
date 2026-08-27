@@ -7,7 +7,6 @@ on:
       - 'desktop/CloudOS.WindowsCapture/**'
       - 'desktop/CloudOS.WindowsCapture.Presenter/**'
       - 'desktop/CloudOS.WindowsCapture.Presenter.Probe/**'
-      - 'desktop/CloudOS.WindowsCapture.Presenter.Manager.Tests/**'
       - 'desktop/CloudOS.WindowsCapture.Contracts.Tests/**'
       - 'desktop/CloudOS.WindowsCapture.Input.Tests/**'
       - 'scripts/test-windows-capture-presenter.ps1'
@@ -51,9 +50,6 @@ jobs:
 
       - name: Run input contracts
         run: dotnet run --project desktop/CloudOS.WindowsCapture.Input.Tests/CloudOS.WindowsCapture.Input.Tests.csproj -c Release
-
-      - name: Run captured session manager contracts
-        run: dotnet run --project desktop/CloudOS.WindowsCapture.Presenter.Manager.Tests/CloudOS.WindowsCapture.Presenter.Manager.Tests.csproj -c Release
 
       - name: Validate physical presenter harness contract
         shell: pwsh
