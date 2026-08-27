@@ -176,9 +176,10 @@ static Task TestContainedExePolicyAsync()
 
     var admission = InstallerContainedLaunchPolicy.Evaluate(plan);
     Require(admission.Allowed, $"contained EXE plan was denied: {admission.ErrorCode}");
-    Require(admission.LaunchSpec is not null, "allowed EXE plan did not produce a native launch spec");
-    Require(admission.LaunchSpec.Executable.Equals(Path.GetFullPath(executable), StringComparison.OrdinalIgnoreCase), "native launch spec changed the executable");
-    Require(admission.LaunchSpec.Arguments.Count == 0, "native launch spec injected installer arguments");
+    var launchSpec = admission.LaunchSpec
+        ?? throw new InvalidOperationException("allowed EXE plan did not produce a native launch spec");
+    Require(launchSpec.Executable.Equals(Path.GetFullPath(executable), StringComparison.OrdinalIgnoreCase), "native launch spec changed the executable");
+    Require(launchSpec.Arguments.Count == 0, "native launch spec injected installer arguments");
     return Task.CompletedTask;
 }
 
