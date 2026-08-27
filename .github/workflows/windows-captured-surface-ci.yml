@@ -8,6 +8,8 @@ on:
       - 'desktop/CloudOS.WindowsCapture.Probe/**'
       - 'desktop/CloudOS.WindowsCapture.Fixture/**'
       - 'scripts/test-windows-capture-probe.ps1'
+      - 'README.md'
+      - 'docs/NATIVE-HOST-ROADMAP.md'
       - '.github/workflows/windows-captured-surface-ci.yml'
 
 jobs:
@@ -26,6 +28,19 @@ jobs:
 
       - name: Build generic Windows capture probe
         run: dotnet build desktop/CloudOS.WindowsCapture.Probe/CloudOS.WindowsCapture.Probe.csproj -c Release --nologo
+
+      - name: Validate capture probe CLI contract
+        shell: pwsh
+        run: |
+          $probe = 'desktop/CloudOS.WindowsCapture.Probe/bin/Release/net8.0-windows10.0.19041.0/CloudOS.WindowsCapture.Probe.dll'
+          $output = dotnet $probe --help 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 64) { throw "Unexpected --help exit code: $LASTEXITCODE`n$output" }
+          foreach ($required in @('--capture-kind window|monitor', '--item-factory raw|projected', '--output <path>')) {
+            if (-not $output.Contains($required, [System.StringComparison]::Ordinal)) {
+              throw "Probe help is missing contract '$required'.`n$output"
+            }
+          }
+          Write-Host $output
 
       - name: Build conventional Windows capture fixture
         run: dotnet build desktop/CloudOS.WindowsCapture.Fixture/CloudOS.WindowsCapture.Fixture.csproj -c Release --nologo
