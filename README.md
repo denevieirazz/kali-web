@@ -61,6 +61,18 @@ A fronteira de segurança é **fail-closed**: se o CloudOS não conseguir correl
 
 O gate físico atual da POC usa uma fixture WinForms convencional e compara três caminhos na mesma execução: HWND via activation factory WinRT em ABI cru (gate do produto), HWND pelo caminho projetado legado (controle) e HMONITOR via activation factory cru (controle de D3D/frame-pool/compositor). O caminho raw obtém `IGraphicsCaptureItemInterop` diretamente da activation factory `Windows.Graphics.Capture.GraphicsCaptureItem`, espelhando o contrato Win32 oficial em vez de depender do helper projetado como fronteira de fábrica.
 
+### Evidência física isolada antes do raw activation-factory fix
+
+No HEAD `7f1f561302e6fb24406de6c2e50814391b83e93d`, a mesma fixture WinForms animada mostrou:
+
+- alvo HWND real `0x460A22`, título `CloudOS Windows Capture Fixture`, bounds nativos positivos;
+- captura por janela: `CreateCaptureSession` falhou com `0x8007139F / ERROR_NOT_CORRECT_STATE`, `GraphicsCaptureItem.Size=0x0`;
+- controle por monitor: **PASS**, 10 frames `2560x1440`, `EmptyFrameCount=0`, item e buffer iniciais `2560x1440`.
+
+Essa prova isola o defeito anterior no caminho do `GraphicsCaptureItem` de janela: D3D11, bridge `IDXGIDevice → IDirect3DDevice`, frame pool, `GraphicsCaptureSession` e compositor WGC funcionaram no mesmo processo quando o target foi HMONITOR.
+
+O HEAD atual substitui a fronteira de factory do gate HWND por ABI cru (`RoGetActivationFactory → IGraphicsCaptureItemInterop → CreateForWindow`) e mantém o caminho projetado anterior apenas como controle explícito, sem fallback silencioso.
+
 O smoke está em `scripts/test-windows-capture-probe.ps1` e grava evidência estruturada em `poc1-physical-evidence/windows-captured-surface`, incluindo um resumo de matriz mesmo quando a sessão de captura falha durante setup.
 
 Consulte [docs/NATIVE-HOST-ROADMAP.md](docs/NATIVE-HOST-ROADMAP.md) para a evolução do host nativo.
