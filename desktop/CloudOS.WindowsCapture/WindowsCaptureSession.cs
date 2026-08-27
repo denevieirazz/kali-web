@@ -6,6 +6,12 @@ using Windows.Graphics.DirectX.Direct3D11;
 
 namespace CloudOS.WindowsCapture;
 
+public enum WindowsCaptureTargetKind
+{
+    Window,
+    Monitor
+}
+
 public sealed record WindowsCaptureSnapshot(
     long FrameCount,
     int Width,
@@ -49,28 +55,37 @@ public sealed class WindowsCaptureSession : IDisposable
     private bool _started;
     private bool _disposed;
 
-    public WindowsCaptureSession(IntPtr windowHandle)
+    public WindowsCaptureSession(IntPtr targetHandle, WindowsCaptureTargetKind targetKind = WindowsCaptureTargetKind.Window)
     {
         if (!GraphicsCaptureSession.IsSupported())
             throw new PlatformNotSupportedException("Windows.Graphics.Capture is not supported in this Windows session.");
-        if (windowHandle == IntPtr.Zero || !IsWindow(windowHandle))
-            throw new ArgumentException("The capture target must be a live HWND.", nameof(windowHandle));
+        if (targetHandle == IntPtr.Zero)
+            throw new ArgumentException("The capture target handle must be non-zero.", nameof(targetHandle));
+        if (targetKind == WindowsCaptureTargetKind.Window && !IsWindow(targetHandle))
+            throw new ArgumentException("The capture target must be a live HWND.", nameof(targetHandle));
 
-        WindowHandle = windowHandle;
+        TargetHandle = targetHandle;
+        TargetKind = targetKind;
 
-        // Snapshot Win32/DWM geometry before asking WinRT to create the capture item.
-        // The physical probe proved that GetWindowRect succeeds for the target HWND
-        // immediately before WGC activation even when GraphicsCaptureItem.Size is 0x0.
-        // Keeping this snapshot also makes the bootstrap resilient to transient WGC
-        // metadata without inventing an application-specific size.
-        var nativeInitial = TryResolveNativeInitialBufferSize(windowHandle);
+        InitialCaptureSize? nativeInitial = targetKind switch
+        {
+            WindowsCaptureTargetKind.Window => TryResolveNativeWindowSize(targetHandle),
+            WindowsCaptureTargetKind.Monitor => TryResolveNativeMonitorSize(targetHandle),
+            _ => throw new ArgumentOutOfRangeException(nameof(targetKind))
+        };
 
-        _item = WindowsCaptureInterop.CreateItemForWindow(windowHandle);
+        _item = targetKind switch
+        {
+            WindowsCaptureTargetKind.Window => WindowsCaptureInterop.CreateItemForWindow(targetHandle),
+            WindowsCaptureTargetKind.Monitor => WindowsCaptureInterop.CreateItemForMonitor(targetHandle),
+            _ => throw new ArgumentOutOfRangeException(nameof(targetKind))
+        };
+
         var itemSize = _item.Size;
         _initialItemWidth = itemSize.Width;
         _initialItemHeight = itemSize.Height;
 
-        var initial = ResolveInitialBufferSize(windowHandle, itemSize, nativeInitial);
+        var initial = ResolveInitialBufferSize(targetHandle, targetKind, itemSize, nativeInitial);
         _initialBufferWidth = initial.Size.Width;
         _initialBufferHeight = initial.Size.Height;
         _initialSizeSource = initial.Source;
@@ -83,11 +98,28 @@ public sealed class WindowsCaptureSession : IDisposable
             DirectXPixelFormat.B8G8R8A8UIntNormalized,
             3,
             initial.Size);
-        _session = _framePool.CreateCaptureSession(_item);
+
+        try
+        {
+            _session = _framePool.CreateCaptureSession(_item);
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            _framePool.Dispose();
+            _device.Dispose();
+            var displayName = TryGetDisplayName(_item);
+            throw new InvalidOperationException(
+                $"CreateCaptureSession failed for {targetKind}; handle=0x{targetHandle.ToInt64():X}; " +
+                $"item={itemSize.Width}x{itemSize.Height}; buffer={initial.Size.Width}x{initial.Size.Height} via {initial.Source}; " +
+                $"displayName={displayName ?? "<unavailable>"}; inner=0x{error.HResult:X8} {error.Message}",
+                error);
+        }
+
         _framePool.FrameArrived += OnFrameArrived;
     }
 
-    public IntPtr WindowHandle { get; }
+    public IntPtr TargetHandle { get; }
+    public WindowsCaptureTargetKind TargetKind { get; }
 
     public void Start()
     {
@@ -203,7 +235,8 @@ public sealed class WindowsCaptureSession : IDisposable
     }
 
     private static InitialCaptureSize ResolveInitialBufferSize(
-        IntPtr windowHandle,
+        IntPtr targetHandle,
+        WindowsCaptureTargetKind targetKind,
         SizeInt32 itemSize,
         InitialCaptureSize? nativeInitial)
     {
@@ -213,17 +246,20 @@ public sealed class WindowsCaptureSession : IDisposable
         if (nativeInitial is { } native)
             return native;
 
-        // Last-chance retry after WinRT activation. This is diagnostic resilience only;
-        // normally the pre-activation native snapshot above should already have succeeded.
-        var retry = TryResolveNativeInitialBufferSize(windowHandle, "post-wgc-");
+        InitialCaptureSize? retry = targetKind switch
+        {
+            WindowsCaptureTargetKind.Window => TryResolveNativeWindowSize(targetHandle, "post-wgc-"),
+            WindowsCaptureTargetKind.Monitor => TryResolveNativeMonitorSize(targetHandle, "post-wgc-"),
+            _ => null
+        };
         if (retry is { } postWgc)
             return postWgc;
 
         throw new InvalidOperationException(
-            $"The capture target has no usable initial size. item={itemSize.Width}x{itemSize.Height}; hwnd=0x{windowHandle.ToInt64():X}.");
+            $"The capture target has no usable initial size. kind={targetKind}; item={itemSize.Width}x{itemSize.Height}; handle=0x{targetHandle.ToInt64():X}.");
     }
 
-    private static InitialCaptureSize? TryResolveNativeInitialBufferSize(
+    private static InitialCaptureSize? TryResolveNativeWindowSize(
         IntPtr windowHandle,
         string sourcePrefix = "pre-wgc-")
     {
@@ -241,6 +277,22 @@ public sealed class WindowsCaptureSession : IDisposable
             return new InitialCaptureSize(windowSize, sourcePrefix + "get-window-rect");
 
         return null;
+    }
+
+    private static InitialCaptureSize? TryResolveNativeMonitorSize(
+        IntPtr monitorHandle,
+        string sourcePrefix = "pre-wgc-")
+    {
+        var info = new MonitorInfo { Size = (uint)Marshal.SizeOf<MonitorInfo>() };
+        if (GetMonitorInfo(monitorHandle, ref info) && TryConvert(info.Monitor, out var monitorSize))
+            return new InitialCaptureSize(monitorSize, sourcePrefix + "get-monitor-info");
+        return null;
+    }
+
+    private static string? TryGetDisplayName(GraphicsCaptureItem item)
+    {
+        try { return item.DisplayName; }
+        catch { return null; }
     }
 
     private static bool IsValidSize(SizeInt32 size) => size.Width > 0 && size.Height > 0;
@@ -275,6 +327,15 @@ public sealed class WindowsCaptureSession : IDisposable
         public int Bottom;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MonitorInfo
+    {
+        public uint Size;
+        public NativeRect Monitor;
+        public NativeRect Work;
+        public uint Flags;
+    }
+
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsWindow(IntPtr windowHandle);
@@ -282,6 +343,10 @@ public sealed class WindowsCaptureSession : IDisposable
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetWindowRect(IntPtr windowHandle, out NativeRect rectangle);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetMonitorInfo(IntPtr monitorHandle, ref MonitorInfo monitorInfo);
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmGetWindowAttribute(
