@@ -9,16 +9,7 @@ CloudOS Unified é um shell desktop híbrido para Windows que reúne a interface
 - Rastreamento allowlisted de janelas Win32 por HWND, com foco, minimizar, maximizar, restaurar e fechamento gracioso espelhados na taskbar.
 - Primeiro acesso sem credenciais padrão, conta persistente, bcrypt, sessões JWT e recuperação por código mostrado uma única vez.
 - Terminal real com perfis PowerShell e WSL, seleção de distribuição e PTY/WebSocket.
-- Central Windows + Linux com:
-  - inventário estruturado de Windows, WSL, kernel e WSLg;
-  - distribuições instaladas, estado, versão e padrão;
-  - catálogo oficial retornado por `wsl --list --online`;
-  - instalação de distribuição com UAC sob demanda;
-  - atualização de WSL/WSLg;
-  - iniciar, parar, tornar padrão e converter uma distribuição para WSL 2;
-  - operações assíncronas, saída técnica, cancelamento e atualização de progresso;
-  - catálogo allowlisted de aplicativos do Menu Iniciar e arquivos `.desktop` Linux;
-  - lançamento por IDs opacos, sem comandos ou caminhos enviados pela página.
+- Central Windows + Linux com inventário estruturado, operações WSL, catálogo allowlisted e lançamento por IDs opacos.
 - Sistema de arquivos virtual em OPFS, editor, upload/download e lixeira.
 - API Express ligada apenas a `127.0.0.1`, CORS local e ambiente do terminal sem segredos do backend.
 
@@ -37,16 +28,12 @@ CloudOS Local Agent / Node.js (porta efêmera)
         └── WSLg / apps Linux GUI
 ```
 
-No host desktop, o documento React usa a origem fixa `http://cloudos.localhost/`, mapeada pelo WebView2 para o build local. Assim, `localStorage`, IndexedDB e OPFS continuam na mesma partição entre reinicializações. O agente usa uma porta efêmera em `127.0.0.1`; o host injeta somente os endpoints daquela execução, e CORS/WebSocket aceitam a origem fixa apenas no modo nativo. O fluxo Vite em `15173` permanece disponível para desenvolvimento web.
+## Windows captured-surface POC
 
-## Limite das janelas nativas e captured-surface POC
-
-O host estável ainda possui infraestrutura legada que acompanha janelas top-level nativas atribuídas com segurança. Nessa arquitetura antiga, os pixels continuam sendo desenhados pelo Windows e a janela de origem continua sendo uma janela Win32 real.
-
-A branch experimental `poc/cloudos-windows-captured-surface` existe para substituir esse modelo como apresentação final de aplicativos Windows. O contrato da POC é:
+A branch experimental `poc/cloudos-windows-captured-surface` substitui o `anchored-overlay` como direção de apresentação final para apps Windows compatíveis:
 
 ```text
-processo Windows autorizado/correlacionado
+processo autorizado/correlacionado
         ↓
 GraphicsCaptureItem do HWND
         ↓
@@ -55,31 +42,38 @@ Windows.Graphics.Capture + D3D11
 surface de apresentação pertencente ao CloudOS
 ```
 
-O runtime experimental é genérico por classe de runtime, não por aplicativo. Não devem existir adapters específicos para Brave, Chrome, Discord ou programas individuais. O objetivo é que aplicativos Win32 convencionais instalados antes ou depois do CloudOS sejam descobertos, classificados e apresentados através do mesmo runtime.
+O runtime é genérico por classe, não por aplicativo. Não devem existir adapters específicos para Brave, Chrome, Discord ou programas individuais.
 
-A fronteira de segurança é **fail-closed**: se o CloudOS não conseguir correlacionar, conter, capturar ou apresentar um aplicativo com segurança, ele deve recusar a abertura e expor um diagnóstico. A POC **não pode** usar como fallback abrir a UI normalmente no desktop Windows. Apps elevados, DRM/protected capture, anti-cheat, exclusive fullscreen, brokers compartilhados, handoff de singleton e outros modelos incompatíveis podem permanecer explicitamente `UNSUPPORTED` até existir uma estratégia segura para aquela classe.
+A fronteira é **fail-closed**. Se correlação, containment, captura, apresentação ou input não puderem ser estabelecidos com segurança, o CloudOS deve bloquear a sessão e expor diagnóstico. A POC não pode usar como fallback uma janela solta no desktop Windows.
 
-O gate físico atual usa uma fixture WinForms convencional e compara três caminhos na mesma execução:
-
-1. `window/raw-activation-factory` — gate do produto;
-2. `window/projected-factory` — controle do caminho legado;
-3. `monitor/raw-activation-factory` — controle das camadas D3D/frame-pool/compositor.
-
-O caminho raw obtém `IGraphicsCaptureItemInterop` diretamente da activation factory `Windows.Graphics.Capture.GraphicsCaptureItem` via ABI WinRT, espelhando o contrato Win32 oficial.
-
-### Evidência física isolada antes do raw activation-factory fix
+### Evidência física isolada
 
 No HEAD `7f1f561302e6fb24406de6c2e50814391b83e93d`, a mesma fixture WinForms animada mostrou:
 
-- alvo HWND real `0x460A22`, título `CloudOS Windows Capture Fixture`, bounds nativos positivos;
-- captura por janela: `CreateCaptureSession` falhou com `0x8007139F / ERROR_NOT_CORRECT_STATE`, `GraphicsCaptureItem.Size=0x0`;
-- controle por monitor: **PASS**, 10 frames `2560x1440`, `EmptyFrameCount=0`, item e buffer iniciais `2560x1440`.
+- HWND real com bounds nativos positivos;
+- `window/projected`: `CreateCaptureSession` falhou com `0x8007139F / ERROR_NOT_CORRECT_STATE`, `GraphicsCaptureItem.Size=0x0`;
+- `monitor`: PASS, 10 frames `2560x1440`, `EmptyFrameCount=0`.
 
-Essa prova isola o defeito anterior no caminho do `GraphicsCaptureItem` de janela: D3D11, bridge `IDXGIDevice → IDirect3DDevice`, frame pool, `GraphicsCaptureSession` e compositor WGC funcionaram no mesmo processo quando o target foi HMONITOR.
+Isso isolou o bloqueador na fronteira do `GraphicsCaptureItem` de janela: D3D11, bridge `IDXGIDevice → IDirect3DDevice`, frame pool, `GraphicsCaptureSession` e compositor WGC funcionaram no mesmo processo para HMONITOR.
 
-O HEAD atual substitui a fronteira de factory do gate HWND por ABI cru (`RoGetActivationFactory → IGraphicsCaptureItemInterop → CreateForWindow`) e mantém o caminho projetado anterior apenas como controle explícito, sem fallback silencioso.
+### Gate físico atual
 
-O probe registra o estágio de setup e grava JSON também em falhas precoces. O smoke gera:
+O runtime agora possui dois caminhos explícitos de factory:
+
+1. `RawActivationFactory`: `RoGetActivationFactory("Windows.Graphics.Capture.GraphicsCaptureItem") → IGraphicsCaptureItemInterop → CreateForWindow/CreateForMonitor` usando ABI COM direto;
+2. `ProjectedFactory`: caminho legado mantido somente como controle diagnóstico.
+
+O probe inicializa explicitamente o apartment WinRT e registra falhas por estágio: `item-factory`, `item-metadata`, `initial-size`, `d3d-device`, `frame-pool`, `capture-session` ou `start-capture`.
+
+O smoke físico executa três lanes no mesmo processo/fixture:
+
+```text
+window/raw       # PRODUCT GATE
+window/projected # legacy control
+monitor/raw      # lower-layer control
+```
+
+Ele sempre tenta as três lanes, mesmo quando a primeira falha, e grava:
 
 ```text
 poc1-physical-evidence/windows-captured-surface/
@@ -90,46 +84,11 @@ poc1-physical-evidence/windows-captured-surface/
 └── fixture-wgc-smoke.log
 ```
 
-O `fixture-wgc-matrix-summary.json` é a evidência principal para a próxima prova física; o log mantém stdout/stderr completos das três lanes.
-
-Consulte [docs/NATIVE-HOST-ROADMAP.md](docs/NATIVE-HOST-ROADMAP.md) para a evolução do host nativo.
-
-## Requisitos
-
-- Node.js 18 ou superior; Node.js 22 LTS recomendado.
-- Microsoft Edge WebView2 Runtime.
-- .NET 8 SDK apenas para compilar/executar o host a partir do código; o instalador final será self-contained.
-- Windows 10/11 para integração nativa.
-- Windows 10 build 19044+ ou Windows 11, WSL 2 e driver de GPU compatível para WSLg.
-
-O frontend pode ser aberto em Linux/macOS para desenvolvimento, mas PowerShell, WSL e aplicativos nativos ficam indisponíveis.
-
-## Instalação e execução
-
-```powershell
-npm install
-powershell.exe -ExecutionPolicy Bypass -File scripts/start-dev.ps1
-```
-
-Ou inicie as camadas separadamente:
-
-```powershell
-npm --prefix backend start
-npm --prefix frontend run dev
-```
-
-Na primeira abertura, crie o administrador local e salve o código de recuperação mostrado uma única vez. Não existe usuário ou senha padrão. Uma conta de versão anterior recebe seu primeiro código após o próximo login válido.
-
-Para executar o host desktop durante o desenvolvimento:
-
-```powershell
-npm run build
-powershell.exe -ExecutionPolicy Bypass -File scripts/run-native-host.ps1 -NodePath C:\caminho\node.exe -Fullscreen
-```
-
-O host também aceita `--kiosk` e `--developer-mode`. O layout final empacota o Node em `runtime/node.exe`, dispensando `-NodePath`.
+O gate só passa se `window/raw` produzir o mínimo de frames configurado. Nenhum controle pode mascarar uma falha do gate de produto.
 
 ## Validação
+
+Validação geral:
 
 ```powershell
 npm run lint
@@ -141,15 +100,13 @@ npm test
 npm run test:e2e
 ```
 
-Para a POC de captured surface no Windows físico:
+Prova física captured-surface:
 
 ```powershell
 pwsh -NoProfile -File scripts/test-windows-capture-probe.ps1 -ExpectedHeadSha <SHA_EXATO>
 ```
 
-O smoke exige a branch correta e o SHA exato, compila a fixture/probe, executa a matriz `window/raw`, `window/projected` e `monitor/raw`, grava os três relatórios mais `fixture-wgc-matrix-summary.json`, e falha se o gate `window/raw-activation-factory` não entregar o mínimo de frames solicitado. Controles diagnósticos não podem transformar um gate de janela falho em PASS.
-
-Os runners de teste definem `NODE_ENV=test` e usam um diretório temporário; a suíte não deve redefinir o banco local de desenvolvimento.
+O script exige branch e SHA exatos, compila fixture/probe, executa a matriz completa e persiste evidência mesmo quando a sessão falha durante setup.
 
 ## Segurança das operações nativas
 
@@ -157,20 +114,10 @@ Os runners de teste definem `NODE_ENV=test` e usam um diretório temporário; a 
 - O backend permanece sem elevação; somente o broker de verbos fixos pede UAC.
 - O catálogo de apps guarda alvos no servidor e entrega IDs opacos ao frontend.
 - Não existe endpoint genérico para executar comando, arquivo ou argumentos enviados pelo navegador.
-- Remoção destrutiva de distribuições ainda não é exposta. Ela só será adicionada com exportação/backup, reautenticação e confirmação forte.
+- A captured-surface POC não enfraquece a política de containment nem autoriza spill de UI em caso de falha.
 
-Consulte [SECURITY.md](SECURITY.md) e [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Consulte [SECURITY.md](SECURITY.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) e [docs/NATIVE-HOST-ROADMAP.md](docs/NATIVE-HOST-ROADMAP.md).
 
 ## Futuro modo shell do computador
 
 O destino arquitetural é o CloudOS substituir a experiência visual do Explorer para uma conta dedicada, mantendo o Windows por baixo para kernel, drivers, Win32, segurança e WSLg. Nesta versão isso está apenas em preparação: nenhum script altera o shell, o Registro ou o boot do computador.
-
-Execute o diagnóstico somente leitura:
-
-```powershell
-npm run shell:check
-```
-
-Ele mostra edição compatível, pacote, WebView2, Explorer de recuperação, WinRE, assinatura e requisitos manuais sem ativar nada. O plano de fases, recuperação e limites está em [docs/SHELL-MODE-PLAN.md](docs/SHELL-MODE-PLAN.md).
-
-Quando o bootstrap publicado estiver presente, a prévia supervisionada pode ser aberta manualmente com `npm run preview:shell`. Isso apenas inicia o CloudOS em tela cheia com proteção contra crash-loop; não altera o shell, o Registro ou o boot do Windows. O atalho `Iniciar CloudOS.cmd` continua usando o fluxo estável anterior.
