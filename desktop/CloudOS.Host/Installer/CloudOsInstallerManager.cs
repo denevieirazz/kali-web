@@ -66,12 +66,14 @@ public sealed class CloudOsInstallerManager : IDisposable
 
     public Task<PreparedInstallerCapability> PrepareAsync(
         string artifactId,
+        bool allowUntrusted,
         CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
         return _capabilities.PrepareAsync(
             artifactId,
             _elevationBroker.IsAvailable,
+            allowUntrusted,
             cancellationToken);
     }
 
