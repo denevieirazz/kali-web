@@ -1,0 +1,115 @@
+name: Windows Capture Physical Harness CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'desktop/CloudOS.WindowsCapture/**'
+      - 'desktop/CloudOS.WindowsCapture.Fixture/**'
+      - 'desktop/CloudOS.WindowsCapture.InputProbe/**'
+      - 'desktop/CloudOS.WindowsCapture.Probe/**'
+      - 'scripts/test-windows-capture-input.ps1'
+      - 'scripts/test-windows-capture-source-isolation.ps1'
+      - 'scripts/finalize-windows-captured-surface.ps1'
+      - '.github/workflows/windows-capture-physical-harness-ci.yml'
+
+jobs:
+  validate-physical-harnesses:
+    runs-on: windows-2022
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build conventional capture fixture
+        run: dotnet build desktop/CloudOS.WindowsCapture.Fixture/CloudOS.WindowsCapture.Fixture.csproj -c Release --nologo
+
+      - name: Build targeted input probe
+        run: dotnet build desktop/CloudOS.WindowsCapture.InputProbe/CloudOS.WindowsCapture.InputProbe.csproj -c Release --nologo
+
+      - name: Validate targeted input probe CLI
+        shell: pwsh
+        run: |
+          $probe = 'desktop/CloudOS.WindowsCapture.InputProbe/bin/Release/net8.0-windows10.0.19041.0/CloudOS.WindowsCapture.InputProbe.dll'
+          $output = dotnet $probe --help 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "Input probe --help failed with $LASTEXITCODE.`n$output" }
+          foreach ($required in @('--pid <processId>', '--output <path>')) {
+            if (-not $output.Contains($required, [System.StringComparison]::Ordinal)) {
+              throw "Input probe help is missing '$required'.`n$output"
+            }
+          }
+
+          $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+          $startInfo.FileName = 'dotnet'
+          [void]$startInfo.ArgumentList.Add((Resolve-Path $probe).Path)
+          $startInfo.UseShellExecute = $false
+          $startInfo.CreateNoWindow = $true
+          $process = [System.Diagnostics.Process]::Start($startInfo)
+          try {
+            $process.WaitForExit()
+            if ($process.ExitCode -ne 64) { throw "Input probe without args must exit 64, got $($process.ExitCode)." }
+          }
+          finally { $process.Dispose() }
+
+      - name: Build generic WGC probe used by source-isolation matrix
+        run: dotnet build desktop/CloudOS.WindowsCapture.Probe/CloudOS.WindowsCapture.Probe.csproj -c Release --nologo
+
+      - name: Parse physical harnesses and enforce fail-closed contracts
+        shell: pwsh
+        run: |
+          $contracts = @(
+            [pscustomobject]@{
+              path = 'scripts/test-windows-capture-input.ps1'
+              required = @(
+                'ExpectedHeadSha',
+                'CloudOS.WindowsCapture.InputProbe',
+                'INPUT_GATE=PASS',
+                'fixture-targeted-input.json'
+              )
+            },
+            [pscustomobject]@{
+              path = 'scripts/test-windows-capture-source-isolation.ps1'
+              required = @(
+                'ExpectedHeadSha',
+                "@('visible', 'offscreen', 'cloaked', 'hidden', 'minimized')",
+                '--hwnd',
+                '--item-factory raw',
+                '--item-projection marshal-interface',
+                '--abi-lifetime hold',
+                'automaticContainmentDecision = ''NONE''',
+                'manualUxStillRequired',
+                'SOURCE_ISOLATION_GATE=BLOCKED'
+              )
+            }
+          )
+
+          foreach ($contract in $contracts) {
+            $scriptPath = (Resolve-Path $contract.path).Path
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error "$($contract.path): $($_.Message)" }
+              throw "PowerShell parser rejected $($contract.path)."
+            }
+
+            $text = Get-Content -LiteralPath $scriptPath -Raw
+            foreach ($required in $contract.required) {
+              if (-not $text.Contains($required, [System.StringComparison]::Ordinal)) {
+                throw "$($contract.path) is missing contract '$required'."
+              }
+            }
+            foreach ($forbidden in @('cmd.exe', 'UseShellExecute = $true')) {
+              if ($text.Contains($forbidden, [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw "$($contract.path) contains forbidden pattern '$forbidden'."
+              }
+            }
+          }
+
+          Write-Host 'Physical harness parse/security contracts: PASS'
