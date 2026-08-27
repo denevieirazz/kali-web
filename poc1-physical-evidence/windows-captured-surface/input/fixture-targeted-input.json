@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "probe": "CloudOS.WindowsCapture.InputProbe",
+  "verdict": "FAIL",
+  "processId": 7896,
+  "hwnd": "0x709B2",
+  "beforeTitle": "",
+  "afterTitle": "",
+  "observed": {
+    "click": false,
+    "key": false,
+    "replayRejected": true,
+    "staleGenerationRejected": true
+  },
+  "injections": {
+    "pointerDown": {
+      "Status": 2,
+      "Rejection": 6,
+      "Sequence": 1,
+      "Generation": 1,
+      "DestinationWindowHandle": 0,
+      "Failure": "Pointer destination could not be proven inside the source client tree.",
+      "Delivered": false
+    },
+    "pointerUp": {
+      "Status": 2,
+      "Rejection": 6,
+      "Sequence": 2,
+      "Generation": 1,
+      "DestinationWindowHandle": 0,
+      "Failure": "Pointer destination could not be proven inside the source client tree.",
+      "Delivered": false
+    },
+    "keyDown": {
+      "Status": 2,
+      "Rejection": 6,
+      "Sequence": 3,
+      "Generation": 1,
+      "DestinationWindowHandle": 0,
+      "Failure": "Focused HWND is not proven to belong to the captured source tree.",
+      "Delivered": false
+    },
+    "keyUp": {
+      "Status": 2,
+      "Rejection": 6,
+      "Sequence": 4,
+      "Generation": 1,
+      "DestinationWindowHandle": 0,
+      "Failure": "Focused HWND is not proven to belong to the captured source tree.",
+      "Delivered": false
+    },
+    "replay": {
+      "Status": 1,
+      "Rejection": 3,
+      "Sequence": 4,
+      "Generation": 1,
+      "DestinationWindowHandle": 0,
+      "Failure": null,
+      "Delivered": false
+    },
+    "staleGeneration": {
+      "Status": 1,
+      "Rejection": 2,
+      "Sequence": 5,
+      "Generation": 2,
+      "DestinationWindowHandle": 0,
+      "Failure": null,
+      "Delivered": false
+    }
+  }
+}

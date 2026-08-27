@@ -13,6 +13,7 @@ export const appExes: [string, string, string, string, string, string, string][]
   ['C:\\Program Files\\ObsidianOS Apps\\control.obx', 'control.obx', 'C:\\Program Files\\ObsidianOS Apps', 'settings', '⚙️', 'system', 'Configurações'],
   ['C:\\Program Files\\ObsidianOS Apps\\taskmgr.obx', 'taskmgr.obx', 'C:\\Program Files\\ObsidianOS Apps', 'task-manager', '📊', 'system', 'Gerenciador de Tarefas'],
   ['C:\\Program Files\\ObsidianOS Apps\\msedge.obx', 'msedge.obx', 'C:\\Program Files\\ObsidianOS Apps', 'browser', '🌐', 'productivity', 'Navegador Web'],
+  ['C:\\Program Files\\ObsidianOS Apps\\windows-installer.obx', 'windows-installer.obx', 'C:\\Program Files\\ObsidianOS Apps', 'windows-installer', '🛡️', 'system', 'Instaladores Windows'],
   ['C:\\Program Files\\ObsidianOS Apps\\kali-tool-center.obx', 'kali-tool-center.obx', 'C:\\Program Files\\ObsidianOS Apps', 'kali-tool-center', '🐉', 'utilities', 'Kali Tool Center'],
   ['C:\\Program Files\\ObsidianOS Apps\\regedit.obx', 'regedit.obx', 'C:\\Program Files\\ObsidianOS Apps', 'regedit', '🧊', 'system', 'Editor do Registro'],
   ['C:\\Program Files\\ObsidianOS Apps\\ocode.obx', 'ocode.obx', 'C:\\Program Files\\ObsidianOS Apps', 'obsidian-code', '⚡', 'productivity', 'Obsidian Code'],

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "probe": "CloudOS captured-surface presenter end-to-end",
+  "startedAt": "2026-08-27T21:31:14.5127338+00:00",
+  "completedAt": "2026-08-27T21:31:17.6105427+00:00",
+  "verdict": "ERROR",
+  "stage": "capture-session",
+  "sourceHwnd": "0x30098C",
+  "ownerHwnd": "0x109B8",
+  "presentationHwnd": "0x109D4",
+  "error": {
+    "type": "WindowsCaptureSetupException",
+    "message": "Windows capture setup failed at capture-session; target=Window; factory=RawActivationFactory; projection=MarshalInterfaceFromAbi; abiLifetime=HoldUntilSessionDispose; handle=0x30098C; item=0x0; buffer=642x452; source=pre-wgc-dwm-extended-frame-bounds; displayName=; inner=0x8007139F O grupo ou recurso n\u00E3o est\u00E1 no estado correto para executar a opera\u00E7\u00E3o requisitada.\r\n\r\nO grupo ou recurso n\u00E3o est\u00E1 no estado correto para executar a opera\u00E7\u00E3o requisitada.\r\n",
+    "hresult": "0x80131509",
+    "nativeHResult": "0x8007139F"
+  }
+}

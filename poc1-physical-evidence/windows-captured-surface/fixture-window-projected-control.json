@@ -1,0 +1,45 @@
+{
+  "SchemaVersion": 4,
+  "Probe": "CloudOS.WindowsCapture.Probe",
+  "StartedAt": "2026-08-27T00:33:33.0098284+00:00",
+  "CompletedAt": "2026-08-27T00:33:33.1890283+00:00",
+  "Verdict": "ERROR",
+  "Apartment": "mta-already-initialized",
+  "RequestedPid": 15864,
+  "Process": {
+    "ProcessId": 15864,
+    "ProcessName": "CloudOS.WindowsCapture.Fixture",
+    "StartTimeUtc": "2026-08-27T00:33:30.7414700Z",
+    "SessionId": 4
+  },
+  "Window": {
+    "Handle": "0x1003E6",
+    "Title": "CloudOS Windows Capture Fixture",
+    "Left": 120,
+    "Top": 120,
+    "Width": 656,
+    "Height": 459
+  },
+  "Target": {
+    "Kind": "window",
+    "Handle": "0x1003E6",
+    "ItemFactory": "projected-factory"
+  },
+  "Capture": null,
+  "Error": {
+    "Stage": "capture-session",
+    "Type": "WindowsCaptureSetupException",
+    "Message": "Windows capture setup failed at capture-session; target=Window; factory=ProjectedFactory; handle=0x1003E6; item=0x0; buffer=642x452; source=pre-wgc-dwm-extended-frame-bounds; displayName=; inner=0x8007139F O grupo ou recurso n\u00E3o est\u00E1 no estado correto para executar a opera\u00E7\u00E3o requisitada.\r\n\r\nO grupo ou recurso n\u00E3o est\u00E1 no estado correto para executar a opera\u00E7\u00E3o requisitada.\r\n",
+    "HResult": "0x80131509",
+    "NativeHResult": "0x8007139F",
+    "InnerType": "COMException",
+    "InnerMessage": "O grupo ou recurso n\u00E3o est\u00E1 no estado correto para executar a opera\u00E7\u00E3o requisitada.\r\n\r\nO grupo ou recurso n\u00E3o est\u00E1 no estado correto para executar a opera\u00E7\u00E3o requisitada.\r\n",
+    "ItemWidth": 0,
+    "ItemHeight": 0,
+    "BufferWidth": 642,
+    "BufferHeight": 452,
+    "InitialSizeSource": "pre-wgc-dwm-extended-frame-bounds",
+    "DisplayName": "",
+    "StackTrace": "   at CloudOS.WindowsCapture.WindowsCaptureSession..ctor(IntPtr targetHandle, WindowsCaptureTargetKind targetKind, WindowsCaptureItemFactoryKind itemFactoryKind) in C:\\CloudOS-Proof\\desktop\\CloudOS.WindowsCapture\\WindowsCaptureSession.cs:line 229\r\n   at Program.\u003C\u003CMain\u003E$\u003Eg__RunProbeAsync|0_0(ProbeOptions options, String apartmentState) in C:\\CloudOS-Proof\\desktop\\CloudOS.WindowsCapture.Probe\\Program.cs:line 51"
+  }
+}

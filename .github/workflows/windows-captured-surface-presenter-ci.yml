@@ -1,0 +1,110 @@
+name: Windows Captured Surface Presenter CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'desktop/CloudOS.WindowsCapture/**'
+      - 'desktop/CloudOS.WindowsCapture.Presenter/**'
+      - 'desktop/CloudOS.WindowsCapture.Presenter.Probe/**'
+      - 'desktop/CloudOS.WindowsCapture.Presenter.Input.Tests/**'
+      - 'desktop/CloudOS.WindowsCapture.Contracts.Tests/**'
+      - 'desktop/CloudOS.WindowsCapture.Input.Tests/**'
+      - 'scripts/test-windows-capture-presenter.ps1'
+      - 'scripts/finalize-windows-captured-surface.ps1'
+      - '.github/workflows/windows-captured-surface-presenter-ci.yml'
+
+jobs:
+  validate-presenter-stack:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build native presenter
+        run: dotnet build desktop/CloudOS.WindowsCapture.Presenter/CloudOS.WindowsCapture.Presenter.csproj -c Release --nologo
+
+      - name: Build end-to-end presenter probe
+        run: dotnet build desktop/CloudOS.WindowsCapture.Presenter.Probe/CloudOS.WindowsCapture.Presenter.Probe.csproj -c Release --nologo
+
+      - name: Validate presenter probe CLI
+        shell: pwsh
+        run: |
+          $probe = 'desktop/CloudOS.WindowsCapture.Presenter.Probe/bin/Release/net8.0-windows10.0.19041.0/CloudOS.WindowsCapture.Presenter.Probe.dll'
+          $output = dotnet $probe --help 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "Presenter probe --help failed: $LASTEXITCODE`n$output" }
+          foreach ($required in @('--hwnd <decimal|0xHEX>', '--minimum-frames <1-600>', '--output <path>', 'D3D11/DXGI presenter')) {
+            if (-not $output.Contains($required, [System.StringComparison]::Ordinal)) {
+              throw "Presenter probe CLI missing '$required'.`n$output"
+            }
+          }
+          Write-Host $output
+
+      - name: Run presentation contracts
+        run: dotnet run --project desktop/CloudOS.WindowsCapture.Contracts.Tests/CloudOS.WindowsCapture.Contracts.Tests.csproj -c Release
+
+      - name: Run input contracts
+        run: dotnet run --project desktop/CloudOS.WindowsCapture.Input.Tests/CloudOS.WindowsCapture.Input.Tests.csproj -c Release
+
+      - name: Run presenter input contracts
+        run: dotnet run --project desktop/CloudOS.WindowsCapture.Presenter.Input.Tests/CloudOS.WindowsCapture.Presenter.Input.Tests.csproj -c Release
+
+      - name: Validate physical presenter harness contract
+        shell: pwsh
+        run: |
+          $scriptPath = (Resolve-Path 'scripts/test-windows-capture-presenter.ps1').Path
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw "Presenter smoke parser found $($errors.Count) error(s)."
+          }
+          $text = Get-Content -LiteralPath $scriptPath -Raw
+          foreach ($required in @(
+            'ExpectedHeadSha',
+            'poc/cloudos-windows-captured-surface',
+            'fixtureKind=winforms-overlapped-animated',
+            'CloudOS.WindowsCapture.Presenter.Probe',
+            'fixture-presenter-smoke.json',
+            'fixture-presenter-smoke.log',
+            'PRESENTER_SMOKE=PASS'
+          )) {
+            if (-not $text.Contains($required, [System.StringComparison]::Ordinal)) {
+              throw "Presenter smoke harness is missing '$required'."
+            }
+          }
+          Write-Host 'Physical presenter harness parse/contract: PASS'
+
+      - name: Validate one-command physical finalization harness
+        shell: pwsh
+        run: |
+          $scriptPath = (Resolve-Path 'scripts/finalize-windows-captured-surface.ps1').Path
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw "Finalization harness parser found $($errors.Count) error(s)."
+          }
+          $text = Get-Content -LiteralPath $scriptPath -Raw
+          foreach ($required in @(
+            'ExpectedHeadSha',
+            'HWND_WGC_MATRIX',
+            'HOST_OWNED_PRESENTER',
+            'physical-finalization-summary.json',
+            'physical-finalization.log',
+            'WINDOWS_CAPTURED_SURFACE_FOUNDATION=PASS',
+            'WINDOWS_CAPTURED_SURFACE_FOUNDATION=NOT_READY'
+          )) {
+            if (-not $text.Contains($required, [System.StringComparison]::Ordinal)) {
+              throw "Finalization harness is missing '$required'."
+            }
+          }
+          Write-Host 'One-command physical finalization harness parse/contract: PASS'

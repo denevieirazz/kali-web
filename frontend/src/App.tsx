@@ -25,6 +25,7 @@ import {
   useShellWindows,
   useViewportSize,
 } from './hooks/useCloudOSRuntime';
+import { useUnifiedAppCatalogSync } from './hooks/useUnifiedAppCatalogSync';
 import { useContextMenuStore } from './stores/contextMenuStore';
 import { useFileSystem } from './stores/fileSystem';
 import { useProcessManager } from './stores/processManager';
@@ -33,7 +34,6 @@ import { useSystem } from './stores/systemStore';
 import { useUserStore } from './stores/userStore';
 import { useDownloadManager } from './stores/downloadManager';
 import { openFile } from './services/fileLauncher';
-import { refreshUnifiedAppRegistry } from './services/systemHubClient';
 import './index.css';
 import './cloudosEnhancements.css';
 
@@ -61,19 +61,7 @@ export default function App() {
     };
   }, [validateSession]);
 
-  // Publish one source-aware Windows + Linux snapshot into the registry used by
-  // CloudOS Start. Paths and Exec values remain behind opaque catalog IDs.
-  useEffect(() => {
-    if (bootPhase !== 'desktop' || !isAuthenticated) return undefined;
-
-    void refreshUnifiedAppRegistry(true)
-      .then(() => undefined)
-      .catch(() => {
-        // The shell remains usable while local discovery is warming up.
-      });
-
-    return undefined;
-  }, [bootPhase, isAuthenticated]);
+  useUnifiedAppCatalogSync(bootPhase, isAuthenticated);
 
   // The backend is the source of truth for whether first-boot setup still exists.
   // If the browser-local OOBE marker was lost but an administrator already exists,

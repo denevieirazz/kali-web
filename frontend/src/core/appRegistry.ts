@@ -15,6 +15,7 @@ const components: Record<string, ReturnType<typeof lazy>> = {
   'settings': lazy(() => import('../apps/Settings/Settings')),
   'task-manager': lazy(() => import('../apps/TaskManager/TaskManager')),
   'browser': lazy(() => import('../apps/Browser/Browser')),
+  'windows-installer': lazy(() => import('../apps/WindowsInstaller/WindowsInstaller')),
   'regedit': lazy(() => import('../apps/Regedit/Regedit')),
   'obsidian-code': lazy(() => import('../apps/ObsidianCode/ObsidianCode')),
   'obs-record': lazy(() => import('../apps/ObsRecord/ObsRecord')),

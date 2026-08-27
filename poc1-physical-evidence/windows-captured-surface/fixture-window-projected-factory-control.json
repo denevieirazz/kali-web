@@ -1,0 +1,63 @@
+{
+  "SchemaVersion": 5,
+  "Probe": "CloudOS.WindowsCapture.Probe",
+  "StartedAt": "2026-08-27T21:30:52.1800534+00:00",
+  "CompletedAt": "2026-08-27T21:30:52.3805891+00:00",
+  "Verdict": "ERROR",
+  "Apartment": "mta-already-initialized",
+  "RequestedPid": 6748,
+  "Process": {
+    "ProcessId": 6748,
+    "ProcessName": "CloudOS.WindowsCapture.Fixture",
+    "StartTimeUtc": "2026-08-27T21:30:47.6077878Z",
+    "SessionId": 5
+  },
+  "Window": {
+    "Handle": "0x140986",
+    "Title": "CloudOS Windows Capture Fixture | clicks=0 | keys=0 | last=none",
+    "ClassName": "WindowsForms10.Window.8.app.0.378734a_r3_ad1",
+    "Left": 120,
+    "Top": 120,
+    "Width": 656,
+    "Height": 459,
+    "Visible": true,
+    "Iconic": false,
+    "Hung": false,
+    "Cloaked": false,
+    "CloakKnown": true,
+    "Style": "0x16CF0000",
+    "ExtendedStyle": "0x50100",
+    "OwnerHandle": "0x0",
+    "RootOwnerHandle": "0x140986",
+    "MonitorHandle": "0x20001",
+    "ThreadId": 29324,
+    "ProcessId": 6748,
+    "Dpi": 96,
+    "DisplayAffinityKnown": true,
+    "DisplayAffinity": "0x00000000"
+  },
+  "Target": {
+    "Kind": "window",
+    "Handle": "0x140986",
+    "ItemFactory": "projected-factory",
+    "ItemProjection": "marshal-interface-from-abi",
+    "AbiLifetime": "hold-until-session-dispose"
+  },
+  "Capture": null,
+  "Error": {
+    "Stage": "capture-session",
+    "Type": "WindowsCaptureSetupException",
+    "Message": "Windows capture setup failed at capture-session; target=Window; factory=ProjectedFactory; projection=MarshalInterfaceFromAbi; abiLifetime=HoldUntilSessionDispose; handle=0x140986; item=0x0; buffer=642x452; source=pre-wgc-dwm-extended-frame-bounds; displayName=; inner=0x8007139F O grupo ou recurso n\u00E3o est\u00E1 no estado correto para executar a opera\u00E7\u00E3o requisitada.\r\n\r\nO grupo ou recurso n\u00E3o est\u00E1 no estado correto para executar a opera\u00E7\u00E3o requisitada.\r\n",
+    "HResult": "0x80131509",
+    "NativeHResult": "0x8007139F",
+    "InnerType": "COMException",
+    "InnerMessage": "O grupo ou recurso n\u00E3o est\u00E1 no estado correto para executar a opera\u00E7\u00E3o requisitada.\r\n\r\nO grupo ou recurso n\u00E3o est\u00E1 no estado correto para executar a opera\u00E7\u00E3o requisitada.\r\n",
+    "ItemWidth": 0,
+    "ItemHeight": 0,
+    "BufferWidth": 642,
+    "BufferHeight": 452,
+    "InitialSizeSource": "pre-wgc-dwm-extended-frame-bounds",
+    "DisplayName": "",
+    "StackTrace": "   at CloudOS.WindowsCapture.WindowsCaptureSession..ctor(IntPtr targetHandle, WindowsCaptureTargetKind targetKind, WindowsCaptureItemFactoryKind itemFactoryKind, WindowsCaptureItemProjectionKind itemProjectionKind, WindowsCaptureAbiLifetimeKind abiLifetimeKind, WindowsFrameHealthOptions frameHealthOptions, IWindowsCaptureFrameSink frameSink) in C:\\CloudOS-Proof\\desktop\\CloudOS.WindowsCapture\\WindowsCaptureSession.cs:line 289\r\n   at Program.\u003C\u003CMain\u003E$\u003Eg__RunProbeAsync|0_0(ProbeOptions options, String apartmentState) in C:\\CloudOS-Proof\\desktop\\CloudOS.WindowsCapture.Probe\\Program.cs:line 52"
+  }
+}
