@@ -22,6 +22,7 @@ public sealed class CapturedSurfaceSessionManager : IDisposable
 {
     private readonly object _sync = new();
     private readonly Dictionary<string, SessionState> _sessions = new(StringComparer.Ordinal);
+    private readonly Dictionary<long, string> _surfaceBySourceWindow = new();
     private bool _disposed;
 
     public CapturedSurfaceSessionSnapshot CreateAndStart(
@@ -43,69 +44,55 @@ public sealed class CapturedSurfaceSessionManager : IDisposable
         SessionState? stale = null;
         lock (_sync)
         {
+            ThrowIfDisposed();
             if (_sessions.TryGetValue(surfaceId, out var current))
             {
                 if (generation <= current.Generation)
                     throw new InvalidOperationException(
                         $"Captured-surface generation must increase. surface={surfaceId}; current={current.Generation}; requested={generation}.");
                 _sessions.Remove(surfaceId);
+                _surfaceBySourceWindow.Remove(current.SourceWindowHandle);
                 stale = current;
             }
+
+            if (_surfaceBySourceWindow.TryGetValue(sourceWindowHandle, out var existingSurface))
+                throw new InvalidOperationException(
+                    $"Source HWND is already owned by captured surface '{existingSurface}'.");
         }
         stale?.Dispose();
 
-        var source = new IntPtr(sourceWindowHandle);
-        var owner = new IntPtr(ownerWindowHandle);
-        HostOwnedCaptureSurfacePresenter? presenter = null;
-        WindowsCaptureSurfaceCoordinator? coordinator = null;
-        WindowsCaptureSession? capture = null;
+        HostOwnedCapturedSurfaceSession? runtime = null;
         try
         {
-            presenter = new HostOwnedCaptureSurfacePresenter(owner);
-            coordinator = new WindowsCaptureSurfaceCoordinator(surfaceId, generation, presenter);
-            coordinator.Bind(initialLayout);
-            coordinator.Activate();
-
-            capture = new WindowsCaptureSession(
-                source,
-                WindowsCaptureTargetKind.Window,
-                WindowsCaptureItemFactoryKind.RawActivationFactory,
-                WindowsCaptureItemProjectionKind.MarshalInterfaceFromAbi,
-                WindowsCaptureAbiLifetimeKind.HoldUntilSessionDispose,
-                frameHealthOptions ?? new WindowsFrameHealthOptions(),
-                coordinator);
-            capture.Start();
-
-            var inputGate = new WindowsCaptureInputGate(generation);
-            inputGate.SetActive(initialLayout.Visible);
-            var inputInjector = new WindowsCaptureTargetedInputInjector(source, inputGate);
-            var state = new SessionState(
+            runtime = new HostOwnedCapturedSurfaceSession(
+                new IntPtr(ownerWindowHandle),
+                new IntPtr(sourceWindowHandle),
                 surfaceId,
                 generation,
-                sourceWindowHandle,
-                capture,
-                coordinator,
-                inputGate,
-                inputInjector);
+                initialLayout,
+                frameHealthOptions ?? new WindowsFrameHealthOptions());
+            runtime.Start();
 
+            var state = new SessionState(runtime);
             lock (_sync)
             {
                 ThrowIfDisposed();
                 if (_sessions.ContainsKey(surfaceId))
                     throw new InvalidOperationException($"Captured surface '{surfaceId}' was concurrently replaced.");
+                if (_surfaceBySourceWindow.TryGetValue(sourceWindowHandle, out var racedSurface))
+                    throw new InvalidOperationException(
+                        $"Source HWND was concurrently claimed by captured surface '{racedSurface}'.");
+
                 _sessions.Add(surfaceId, state);
+                _surfaceBySourceWindow.Add(sourceWindowHandle, surfaceId);
             }
 
-            capture = null;
-            coordinator = null;
-            presenter = null;
+            runtime = null;
             return state.GetSnapshot();
         }
         finally
         {
-            capture?.Dispose();
-            coordinator?.Dispose();
-            if (coordinator is null) presenter?.Dispose();
+            runtime?.Dispose();
         }
     }
 
@@ -113,13 +100,15 @@ public sealed class CapturedSurfaceSessionManager : IDisposable
     {
         snapshot = null;
         if (string.IsNullOrWhiteSpace(surfaceId) || generation <= 0) return false;
+        SessionState? state;
         lock (_sync)
         {
-            if (_disposed || !_sessions.TryGetValue(surfaceId, out var state) || state.Generation != generation)
+            if (_disposed || !_sessions.TryGetValue(surfaceId, out state) || state.Generation != generation)
                 return false;
-            snapshot = state.GetSnapshot();
-            return true;
         }
+
+        snapshot = state.GetSnapshot();
+        return true;
     }
 
     public void ApplyLayout(
@@ -129,25 +118,14 @@ public sealed class CapturedSurfaceSessionManager : IDisposable
     {
         ArgumentNullException.ThrowIfNull(layout);
         layout.Validate();
-        var state = GetRequired(surfaceId, generation);
-        state.Coordinator.ApplyLayout(layout);
-        state.InputGate.SetActive(layout.Visible);
+        GetRequired(surfaceId, generation).Runtime.ApplyLayout(layout);
     }
 
-    public void Suspend(string surfaceId, int generation)
-    {
-        var state = GetRequired(surfaceId, generation);
-        state.InputGate.SetActive(false);
-        state.Coordinator.Suspend();
-    }
+    public void Suspend(string surfaceId, int generation) =>
+        GetRequired(surfaceId, generation).Runtime.Suspend();
 
-    public void Resume(string surfaceId, int generation)
-    {
-        var state = GetRequired(surfaceId, generation);
-        state.Coordinator.Activate();
-        var visible = state.Coordinator.GetSnapshot().Presentation.Layout?.Visible == true;
-        state.InputGate.SetActive(visible);
-    }
+    public void Resume(string surfaceId, int generation) =>
+        GetRequired(surfaceId, generation).Runtime.Resume();
 
     /// <summary>
     /// Admission-only diagnostic. Do not call this immediately before InjectPointer/InjectKey,
@@ -156,11 +134,8 @@ public sealed class CapturedSurfaceSessionManager : IDisposable
     public WindowsCaptureInputAdmission AdmitInput(
         string surfaceId,
         int generation,
-        long sequence)
-    {
-        var state = GetRequired(surfaceId, generation);
-        return state.InputGate.Admit(generation, sequence);
-    }
+        long sequence) =>
+        GetRequired(surfaceId, generation).Runtime.AdmitInput(sequence);
 
     public WindowsCaptureInputInjectionResult InjectPointer(
         string surfaceId,
@@ -171,8 +146,7 @@ public sealed class CapturedSurfaceSessionManager : IDisposable
         if (input.Generation != generation)
             throw new InvalidOperationException(
                 $"Pointer input generation does not match session generation. session={generation}; input={input.Generation}.");
-        var state = GetRequired(surfaceId, generation);
-        return state.InputInjector.InjectPointer(input);
+        return GetRequired(surfaceId, generation).Runtime.InjectPointer(input);
     }
 
     public WindowsCaptureInputInjectionResult InjectKey(
@@ -184,8 +158,7 @@ public sealed class CapturedSurfaceSessionManager : IDisposable
         if (input.Generation != generation)
             throw new InvalidOperationException(
                 $"Key input generation does not match session generation. session={generation}; input={input.Generation}.");
-        var state = GetRequired(surfaceId, generation);
-        return state.InputInjector.InjectKey(input);
+        return GetRequired(surfaceId, generation).Runtime.InjectKey(input);
     }
 
     public bool Close(string surfaceId, int generation)
@@ -196,6 +169,7 @@ public sealed class CapturedSurfaceSessionManager : IDisposable
             if (_disposed || !_sessions.TryGetValue(surfaceId, out state) || state.Generation != generation)
                 return false;
             _sessions.Remove(surfaceId);
+            _surfaceBySourceWindow.Remove(state.SourceWindowHandle);
         }
         state.Dispose();
         return true;
@@ -210,6 +184,7 @@ public sealed class CapturedSurfaceSessionManager : IDisposable
             _disposed = true;
             sessions = [.. _sessions.Values];
             _sessions.Clear();
+            _surfaceBySourceWindow.Clear();
         }
         foreach (var session in sessions) session.Dispose();
     }
@@ -245,47 +220,38 @@ public sealed class CapturedSurfaceSessionManager : IDisposable
     {
         private bool _disposed;
 
-        public SessionState(
-            string surfaceId,
-            int generation,
-            long sourceWindowHandle,
-            WindowsCaptureSession capture,
-            WindowsCaptureSurfaceCoordinator coordinator,
-            WindowsCaptureInputGate inputGate,
-            WindowsCaptureTargetedInputInjector inputInjector)
+        public SessionState(HostOwnedCapturedSurfaceSession runtime)
         {
-            SurfaceId = surfaceId;
-            Generation = generation;
-            SourceWindowHandle = sourceWindowHandle;
-            Capture = capture;
-            Coordinator = coordinator;
-            InputGate = inputGate;
-            InputInjector = inputInjector;
+            Runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         }
 
-        public string SurfaceId { get; }
-        public int Generation { get; }
-        public long SourceWindowHandle { get; }
-        public WindowsCaptureSession Capture { get; }
-        public WindowsCaptureSurfaceCoordinator Coordinator { get; }
-        public WindowsCaptureInputGate InputGate { get; }
-        public WindowsCaptureTargetedInputInjector InputInjector { get; }
+        public HostOwnedCapturedSurfaceSession Runtime { get; }
+        public int Generation => Runtime.Generation;
+        public long SourceWindowHandle => Runtime.SourceWindowHandle.ToInt64();
 
-        public CapturedSurfaceSessionSnapshot GetSnapshot() => new(
-            SurfaceId,
-            Generation,
-            SourceWindowHandle,
-            Capture.GetSnapshot(),
-            Coordinator.GetSnapshot(),
-            InputGate.IsActive);
+        public CapturedSurfaceSessionSnapshot GetSnapshot()
+        {
+            var snapshot = Runtime.GetSnapshot();
+            var inputActive = snapshot.State == HostOwnedCapturedSurfaceSessionState.Active &&
+                              snapshot.SourceWindowAlive &&
+                              snapshot.Surface.Presentation.Layout?.Visible == true &&
+                              string.IsNullOrWhiteSpace(snapshot.Failure) &&
+                              string.IsNullOrWhiteSpace(snapshot.Capture.Failure) &&
+                              !snapshot.Surface.Presentation.IsTerminal;
+            return new CapturedSurfaceSessionSnapshot(
+                snapshot.SurfaceId,
+                snapshot.Generation,
+                snapshot.SourceWindowHandle,
+                snapshot.Capture,
+                snapshot.Surface,
+                inputActive);
+        }
 
         public void Dispose()
         {
             if (_disposed) return;
             _disposed = true;
-            InputGate.ResetForDeactivation();
-            Capture.Dispose();
-            Coordinator.Dispose();
+            Runtime.Dispose();
         }
     }
 }
