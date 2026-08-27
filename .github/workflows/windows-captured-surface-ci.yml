@@ -6,6 +6,7 @@ on:
     paths:
       - 'desktop/CloudOS.WindowsCapture/**'
       - 'desktop/CloudOS.WindowsCapture.Probe/**'
+      - 'desktop/CloudOS.WindowsCapture.HealthProbe/**'
       - 'desktop/CloudOS.WindowsCapture.Fixture/**'
       - 'desktop/CloudOS.WindowsCapture.NativeReference/**'
       - 'scripts/test-windows-capture-probe.ps1'
@@ -76,6 +77,66 @@ jobs:
           finally {
             $process.Dispose()
           }
+
+      - name: Build frame health probe
+        run: dotnet build desktop/CloudOS.WindowsCapture.HealthProbe/CloudOS.WindowsCapture.HealthProbe.csproj -c Release --nologo
+
+      - name: Validate frame health probe CLI contract
+        shell: pwsh
+        run: |
+          $probe = 'desktop/CloudOS.WindowsCapture.HealthProbe/bin/Release/net8.0-windows10.0.19041.0/CloudOS.WindowsCapture.HealthProbe.dll'
+          $output = dotnet $probe --help 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "Unexpected frame-health --help exit code: $LASTEXITCODE`n$output" }
+          foreach ($required in @(
+            '--hwnd <decimal|0xHEX>',
+            '--sample-every <1-120>',
+            '--samples <1-64>',
+            '--region <32-1024>',
+            '--grid <8-128>',
+            '--output <path>'
+          )) {
+            if (-not $output.Contains($required, [System.StringComparison]::Ordinal)) {
+              throw "Frame-health help is missing contract '$required'.`n$output"
+            }
+          }
+          Write-Host $output
+
+      - name: Validate frame health JSON error contract
+        shell: pwsh
+        run: |
+          $probe = (Resolve-Path 'desktop/CloudOS.WindowsCapture.HealthProbe/bin/Release/net8.0-windows10.0.19041.0/CloudOS.WindowsCapture.HealthProbe.dll').Path
+          $reportPath = Join-Path $env:RUNNER_TEMP 'frame-health-invalid-hwnd.json'
+          Remove-Item -LiteralPath $reportPath -Force -ErrorAction SilentlyContinue
+
+          $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+          $startInfo.FileName = 'dotnet'
+          foreach ($argument in @($probe, '--hwnd', '0x1', '--output', $reportPath)) {
+            $startInfo.ArgumentList.Add($argument)
+          }
+          $startInfo.UseShellExecute = $false
+          $startInfo.CreateNoWindow = $true
+          $startInfo.RedirectStandardOutput = $true
+          $startInfo.RedirectStandardError = $true
+          $process = [System.Diagnostics.Process]::Start($startInfo)
+          try {
+            $stdout = $process.StandardOutput.ReadToEnd()
+            $stderr = $process.StandardError.ReadToEnd()
+            $process.WaitForExit()
+            Write-Host (($stdout + $stderr).TrimEnd())
+            if ($process.ExitCode -eq 0) { throw 'Invalid HWND unexpectedly passed frame-health probe.' }
+          }
+          finally {
+            $process.Dispose()
+          }
+
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "Frame-health probe did not write JSON report: $reportPath"
+          }
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+          if ($report.schemaVersion -ne 1) { throw "Unexpected frame-health schema: $($report.schemaVersion)" }
+          if ($report.verdict -ne 'ERROR') { throw "Unexpected frame-health verdict: $($report.verdict)" }
+          if ($null -eq $report.error) { throw 'Frame-health invalid HWND report is missing error details.' }
+          Write-Host 'Frame-health JSON error contract: PASS'
 
       - name: Parse physical matrix script
         shell: pwsh
