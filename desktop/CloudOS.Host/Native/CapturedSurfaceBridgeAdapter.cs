@@ -186,6 +186,35 @@ public sealed class CapturedSurfaceBridgeAdapter : IDisposable
         return _runtime.Close(sessionId, state.Generation);
     }
 
+    /// <summary>
+    /// Closes all current surfaces without invalidating the adapter itself. Document reset
+    /// uses this path so a fresh trusted WebView document can attach new captured sessions
+    /// through the same Host bridge instance. Final Host shutdown still uses Dispose().
+    /// </summary>
+    public void CloseAll()
+    {
+        List<KeyValuePair<string, BridgeSession>> sessions;
+        lock (_sync)
+        {
+            if (_disposed) return;
+            sessions = [.. _sessions];
+            _sessions.Clear();
+        }
+
+        foreach (var session in sessions)
+        {
+            try
+            {
+                _runtime.Close(session.Key, session.Value.Generation);
+            }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            {
+                // Process/Job termination remains the outer fail-closed boundary. One broken
+                // renderer teardown must not leave later captured surfaces alive during reset.
+            }
+        }
+    }
+
     public void Dispose()
     {
         List<KeyValuePair<string, BridgeSession>> sessions;
@@ -197,7 +226,16 @@ public sealed class CapturedSurfaceBridgeAdapter : IDisposable
             _sessions.Clear();
         }
         foreach (var session in sessions)
-            _runtime.Close(session.Key, session.Value.Generation);
+        {
+            try
+            {
+                _runtime.Close(session.Key, session.Value.Generation);
+            }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            {
+                // Continue closing the remaining surfaces during terminal Host teardown.
+            }
+        }
     }
 
     private static WindowsCapturePresentationLayout ToLayout(
