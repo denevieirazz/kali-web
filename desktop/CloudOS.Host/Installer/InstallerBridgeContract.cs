@@ -41,7 +41,7 @@ public static class InstallerBridgeContract
         ArgumentNullException.ThrowIfNull(prepared);
         var ready = prepared.Readiness.Status == InstallerReadinessStatus.Ready;
         var capabilityId = ready ? prepared.Capability.CapabilityId : null;
-        var expiresAt = ready ? prepared.Capability.ExpiresAtUtc : null;
+        DateTimeOffset? expiresAt = ready ? prepared.Capability.ExpiresAtUtc : null;
 
         if (ready)
             ValidateCapabilityId(capabilityId!);
