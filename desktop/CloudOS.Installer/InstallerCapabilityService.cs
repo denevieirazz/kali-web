@@ -215,7 +215,8 @@ public sealed class InstallerCapabilityService : IDisposable
 
     public void Complete(string capabilityId)
     {
-        if (string.IsNullOrWhiteSpace(capabilityId)) return;
+        ThrowIfDisposed();
+        ValidateCapabilityId(capabilityId);
         var directory = Path.Combine(_stagingRoot, capabilityId);
         TryDeleteDirectory(directory);
     }
@@ -293,6 +294,7 @@ public sealed class InstallerCapabilityService : IDisposable
 
     private static void ValidateCapabilityId(string capabilityId)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(capabilityId);
         if (capabilityId.Length != 64 || capabilityId.Any(character => !Uri.IsHexDigit(character)))
             throw new ArgumentException("Installer capability ID is invalid.", nameof(capabilityId));
     }
