@@ -84,3 +84,24 @@ export function nativeSessionForLaunch(sessions, launch) {
   if (!Number.isInteger(launch.pid) || launch.pid <= 0) return null;
   return sessions.find((session) => session?.processId === launch.pid) || null;
 }
+
+/**
+ * A GUI process may destroy a bootstrap/splash HWND and create its real top-level
+ * window immediately afterwards. Rebind only when there is exactly one fresh,
+ * still-quarantined session owned by the exact same PID. Cross-process guessing or
+ * already-contained windows are deliberately rejected so recovery stays fail-closed.
+ */
+export function nativeReplacementSession(sessions, currentSessionId, processId) {
+  if (!Array.isArray(sessions)
+      || typeof currentSessionId !== 'string'
+      || !currentSessionId
+      || !Number.isInteger(processId)
+      || processId <= 0) return null;
+
+  const candidates = sessions.filter((session) => session
+    && session.sessionId !== currentSessionId
+    && session.processId === processId
+    && session.contained === false
+    && session.containmentMode === 'hidden-quarantine');
+  return candidates.length === 1 ? candidates[0] : null;
+}
