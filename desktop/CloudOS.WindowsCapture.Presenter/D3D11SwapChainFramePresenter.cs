@@ -1,7 +1,9 @@
 using System.Runtime.InteropServices;
 using TerraFX.Interop.DirectX;
+using TerraFX.Interop.Windows;
 using Windows.Graphics.DirectX.Direct3D11;
 using WinRT;
+using static TerraFX.Interop.DirectX.DXGI;
 
 namespace CloudOS.WindowsCapture.Presenter;
 
@@ -99,7 +101,9 @@ internal sealed unsafe class D3D11SwapChainFramePresenter : IDisposable
                 ReleaseDeviceResources();
                 _device = sourceDevice;
                 _device->AddRef();
-                _device->GetImmediateContext(&_context);
+                ID3D11DeviceContext* context = null;
+                _device->GetImmediateContext(&context);
+                _context = context;
                 if (_context is null) throw new InvalidOperationException("D3D11 device returned no immediate context.");
                 CreateSwapChain(width, height);
                 return;
@@ -160,22 +164,24 @@ internal sealed unsafe class D3D11SwapChainFramePresenter : IDisposable
             description.Stereo = 0;
             description.SampleDesc.Count = 1;
             description.SampleDesc.Quality = 0;
-            description.BufferUsage = DXGI_USAGE.DXGI_USAGE_RENDER_TARGET_OUTPUT;
+            description.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
             description.BufferCount = 2;
             description.Scaling = DXGI_SCALING.DXGI_SCALING_STRETCH;
             description.SwapEffect = DXGI_SWAP_EFFECT.DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
             description.AlphaMode = DXGI_ALPHA_MODE.DXGI_ALPHA_MODE_IGNORE;
             description.Flags = 0;
 
+            IDXGISwapChain1* swapChain = null;
             hr = factory->CreateSwapChainForHwnd(
                 (IUnknown*)_device,
-                _windowHandle,
+                (HWND)_windowHandle,
                 &description,
                 null,
                 null,
-                &_swapChain);
+                &swapChain);
             ThrowIfFailed(hr, "IDXGIFactory2.CreateSwapChainForHwnd");
-            if (_swapChain is null) throw new InvalidOperationException("CreateSwapChainForHwnd returned no swap chain.");
+            if (swapChain is null) throw new InvalidOperationException("CreateSwapChainForHwnd returned no swap chain.");
+            _swapChain = swapChain;
             _bufferWidth = width;
             _bufferHeight = height;
         }
