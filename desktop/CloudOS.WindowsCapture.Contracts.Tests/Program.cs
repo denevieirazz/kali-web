@@ -11,6 +11,8 @@ Run("input full-frame mapping", TestInputFullFrameMapping);
 Run("input crop mapping", TestInputCropMapping);
 Run("input boundary rejection", TestInputBoundaryRejection);
 Run("input geometry validation", TestInputGeometryValidation);
+Run("surface coordinator lifecycle", TestSurfaceCoordinatorLifecycle);
+Run("surface coordinator fail closed", TestSurfaceCoordinatorFailure);
 
 if (failures.Count > 0)
 {
@@ -161,6 +163,36 @@ static void TestInputGeometryValidation()
     _ = new WindowsCaptureInputGeometry(800, 600, 100, 50, 500, 400, 1000, 800).Validate();
 }
 
+static void TestSurfaceCoordinatorLifecycle()
+{
+    var presenter = new FakePresenter();
+    using var coordinator = new WindowsCaptureSurfaceCoordinator("surface-coordinator-1", 7, presenter);
+    coordinator.Bind(Layout(1));
+    coordinator.Activate();
+    coordinator.ApplyLayout(Layout(2));
+    coordinator.Suspend();
+
+    var snapshot = coordinator.GetSnapshot();
+    Require(snapshot.Presentation.State == WindowsCapturePresentationState.Suspended, "coordinator did not suspend");
+    Require(snapshot.Presentation.Generation == 7, "coordinator generation mismatch");
+    Require(snapshot.Presentation.Layout?.Revision == 2, "coordinator layout revision mismatch");
+    Require(presenter.BindCount == 1, "presenter bind count mismatch");
+    Require(presenter.ResumeCount == 1, "presenter resume count mismatch");
+    Require(presenter.LayoutCount == 1, "presenter layout count mismatch");
+    Require(presenter.SuspendCount == 1, "presenter suspend count mismatch");
+}
+
+static void TestSurfaceCoordinatorFailure()
+{
+    var presenter = new FakePresenter { FailBind = true };
+    using var coordinator = new WindowsCaptureSurfaceCoordinator("surface-coordinator-2", 1, presenter);
+    ExpectThrows<InvalidOperationException>(() => coordinator.Bind(Layout(1)));
+    var snapshot = coordinator.GetSnapshot();
+    Require(snapshot.Presentation.State == WindowsCapturePresentationState.Faulted, "presenter failure did not fault surface");
+    Require(snapshot.Presentation.Fault?.Kind == WindowsCapturePresentationFaultKind.RendererUnavailable, "wrong coordinator fault kind");
+    Require(snapshot.LastPresenterFailure?.Contains("simulated bind failure", StringComparison.Ordinal) == true, "presenter failure was not recorded");
+}
+
 static void ExpectThrows<T>(Action action) where T : Exception
 {
     try
@@ -177,4 +209,25 @@ static void ExpectThrows<T>(Action action) where T : Exception
 static void Require(bool condition, string message)
 {
     if (!condition) throw new InvalidOperationException(message);
+}
+
+sealed class FakePresenter : IWindowsCaptureNativePresenter
+{
+    public bool FailBind { get; init; }
+    public int BindCount { get; private set; }
+    public int LayoutCount { get; private set; }
+    public int SuspendCount { get; private set; }
+    public int ResumeCount { get; private set; }
+
+    public void Bind(WindowsCapturePresentationLayout layout)
+    {
+        if (FailBind) throw new InvalidOperationException("simulated bind failure");
+        BindCount++;
+    }
+
+    public void ApplyLayout(WindowsCapturePresentationLayout layout) => LayoutCount++;
+    public void Suspend() => SuspendCount++;
+    public void Resume() => ResumeCount++;
+    public void Present(WindowsCaptureFrameEnvelope frame) => throw new NotSupportedException("Frame presentation is not used by contract tests.");
+    public void Dispose() { }
 }
