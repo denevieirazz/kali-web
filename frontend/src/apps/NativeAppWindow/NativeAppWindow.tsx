@@ -11,7 +11,7 @@ type NativeLayoutState = { bounds: NativeViewportBounds; visible: boolean };
 
 const SESSION_ATTEMPTS = 32;
 const SESSION_RETRY_MS = 125;
-const SESSION_REPLACEMENT_GRACE_MS = 1_500;
+const SESSION_REPLACEMENT_GRACE_MS = 8_000;
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
@@ -73,7 +73,7 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
   const isStartMenuOpen = useSystem((state) => state.isStartMenuOpen);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const sessionIdRef = useRef<string | null>(null);
-  const sessionProcessIdRef = useRef<number | null>(null);
+  const sessionLaunchProcessIdRef = useRef<number | null>(null);
   const replacementTimerRef = useRef<number | null>(null);
   const attachedRef = useRef(false);
   const lastBoundsRef = useRef<NativeViewportBounds | null>(null);
@@ -151,7 +151,7 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
     lastBoundsRef.current = null;
     lastLayoutRef.current = null;
     sessionIdRef.current = null;
-    sessionProcessIdRef.current = null;
+    sessionLaunchProcessIdRef.current = null;
     setSessionId(null);
 
     void (async () => {
@@ -174,7 +174,7 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
           );
         }
 
-        sessionProcessIdRef.current = Number.isInteger(launch.pid) && launch.pid > 0 ? launch.pid : null;
+        sessionLaunchProcessIdRef.current = Number.isInteger(launch.pid) && launch.pid > 0 ? launch.pid : null;
         const exactSessionId = typeof launch.sessionId === 'string' && launch.sessionId ? launch.sessionId : null;
         if (!exactSessionId) setStatus('waiting');
         const resolvedSessionId = await resolveSessionId(launch, () => cancelled);
@@ -203,7 +203,7 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
       const bounds = lastBoundsRef.current;
       const wasAttached = attachedRef.current;
       sessionIdRef.current = null;
-      sessionProcessIdRef.current = null;
+      sessionLaunchProcessIdRef.current = null;
       attachedRef.current = false;
       lastLayoutRef.current = null;
       if (!currentSessionId) return;
@@ -277,7 +277,12 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
       const current = sessions.find((candidate) => candidate.sessionId === currentSessionId);
       if (current) {
         clearReplacementTimer();
-        sessionProcessIdRef.current = current.processId;
+        if (sessionLaunchProcessIdRef.current === null) {
+          const hostLaunchProcessId = Number.isInteger(current.launchProcessId) && current.launchProcessId! > 0
+            ? current.launchProcessId!
+            : current.processId;
+          sessionLaunchProcessIdRef.current = hostLaunchProcessId;
+        }
         if (current.title && current.title !== win?.title) updateWindowTitle(windowId, current.title);
         return;
       }
@@ -285,13 +290,12 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
       const replacement = nativeReplacementSession(
         sessions,
         currentSessionId,
-        sessionProcessIdRef.current ?? 0
+        sessionLaunchProcessIdRef.current ?? 0
       );
       if (replacement) {
         clearReplacementTimer();
         attachedRef.current = false;
         lastLayoutRef.current = null;
-        sessionProcessIdRef.current = replacement.processId;
         sessionIdRef.current = replacement.sessionId;
         setStatus('waiting');
         setSessionId(replacement.sessionId);
