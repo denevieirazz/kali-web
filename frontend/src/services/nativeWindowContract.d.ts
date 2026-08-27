@@ -34,5 +34,5 @@ export function nativeSessionForLaunch(
 export function nativeReplacementSession(
   sessions: NativeSession[],
   currentSessionId: string,
-  processId: number
+  launchProcessId: number
 ): NativeSession | null;
