@@ -9,6 +9,7 @@ on:
       - 'desktop/CloudOS.Host/Browser/**'
       - 'desktop/CloudOS.Host/Bridge/WebMessageBridge.cs'
       - 'desktop/CloudOS.Host/Installer/**'
+      - 'desktop/CloudOS.Host/Native/NativeContainedProcessLauncher.cs'
       - 'frontend/src/apps/WindowsInstaller/**'
       - 'frontend/src/core/appRegistry.ts'
       - 'frontend/src/core/fs/apps.ts'
@@ -51,6 +52,36 @@ jobs:
           }
           Write-Host 'Installer elevation boundary: PASS'
 
+      - name: Enforce Host-only contained execution transaction
+        shell: pwsh
+        run: |
+          $coordinator = Get-Content 'desktop/CloudOS.Host/Installer/InstallerContainedExecutionCoordinator.cs' -Raw
+          $manager = Get-Content 'desktop/CloudOS.Host/Installer/CloudOsInstallerManager.cs' -Raw
+          $browser = Get-Content 'desktop/CloudOS.Host/Browser/BrowserManager.cs' -Raw
+
+          foreach ($required in @(
+            'NativeContainedProcessLauncher.StartSuspended',
+            'installHostTrackingBeforeResume(lease)',
+            '_ownership.Register',
+            'lease.Resume()',
+            'CompleteRootAfterJobEmpty'
+          )) {
+            if (-not $coordinator.Contains($required, [System.StringComparison]::Ordinal)) {
+              throw "Installer contained execution transaction is missing '$required'."
+            }
+          }
+
+          if (-not $manager.Contains('StartContainedAsync', [System.StringComparison]::Ordinal) -or
+              -not $manager.Contains('CompleteContainedRootAfterJobEmpty', [System.StringComparison]::Ordinal)) {
+            throw 'Host installer authority is missing contained execution ownership methods.'
+          }
+          if (-not $browser.Contains('StartContainedInstallerAsync', [System.StringComparison]::Ordinal) -or
+              -not $browser.Contains('CompleteContainedInstallerRootAfterJobEmpty', [System.StringComparison]::Ordinal)) {
+            throw 'BrowserManager is missing Host-only installer execution authority.'
+          }
+
+          Write-Host 'Installer Host-only contained execution transaction: PASS'
+
       - name: Enforce preparation-only WebView boundary
         shell: pwsh
         run: |
@@ -67,8 +98,9 @@ jobs:
             }
           }
 
-          $publicSurface = "$client`n$panel"
+          $executionSurface = "$hostBridge`n$client`n$panel"
           foreach ($forbidden in @(
+            'installer.start',
             'installer.execute',
             'installer.consume',
             'ExecutablePath',
@@ -78,7 +110,7 @@ jobs:
             'LogPath',
             'logPath'
           )) {
-            if ($publicSurface.Contains($forbidden, [System.StringComparison]::Ordinal)) {
+            if ($executionSurface.Contains($forbidden, [System.StringComparison]::Ordinal)) {
               throw "Installer WebView surface exposed forbidden execution detail '$forbidden'."
             }
           }
