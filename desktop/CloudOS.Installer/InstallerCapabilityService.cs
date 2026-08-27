@@ -37,6 +37,7 @@ public sealed class InstallerCapabilityService : IDisposable
     public async Task<PreparedInstallerCapability> PrepareAsync(
         string artifactId,
         bool elevatedBrokerAvailable,
+        bool allowUntrusted,
         CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
@@ -44,35 +45,33 @@ public sealed class InstallerCapabilityService : IDisposable
         var integrityValid = await _catalog.ValidateIntegrityAsync(record, cancellationToken);
         if (!integrityValid)
         {
-            return new PreparedInstallerCapability(
-                EmptyCapability(record),
-                record.ToPublicView(),
-                EmptyLaunchPlan(record),
-                new InstallerReadiness(
-                    InstallerReadinessStatus.ArtifactChanged,
-                    record.ToPublicView(),
-                    IntegrityValid: false,
-                    TrustValid: record.Trust == InstallerTrustStatus.Trusted,
-                    CanLaunchInUserSession: false,
-                    ElevatedBrokerAvailable: elevatedBrokerAvailable,
-                    Reason: "The downloaded artifact no longer matches its registered SHA-256."));
+            return Blocked(
+                record,
+                InstallerReadinessStatus.ArtifactChanged,
+                integrityValid: false,
+                elevatedBrokerAvailable,
+                "The downloaded artifact no longer matches its registered SHA-256.");
         }
 
         var supported = record.Kind is InstallerArtifactKind.WindowsExecutable or InstallerArtifactKind.WindowsInstallerPackage;
         if (!supported)
         {
-            return new PreparedInstallerCapability(
-                EmptyCapability(record),
-                record.ToPublicView(),
-                EmptyLaunchPlan(record),
-                new InstallerReadiness(
-                    InstallerReadinessStatus.UnsupportedFormat,
-                    record.ToPublicView(),
-                    IntegrityValid: true,
-                    TrustValid: record.Trust == InstallerTrustStatus.Trusted,
-                    CanLaunchInUserSession: false,
-                    ElevatedBrokerAvailable: elevatedBrokerAvailable,
-                    Reason: "This installer format is cataloged but does not yet have a CloudOS execution broker."));
+            return Blocked(
+                record,
+                InstallerReadinessStatus.UnsupportedFormat,
+                integrityValid: true,
+                elevatedBrokerAvailable,
+                "This installer format is cataloged but does not yet have a CloudOS execution broker.");
+        }
+
+        if (record.Trust != InstallerTrustStatus.Trusted && !allowUntrusted)
+        {
+            return Blocked(
+                record,
+                InstallerReadinessStatus.BlockedByPolicy,
+                integrityValid: true,
+                elevatedBrokerAvailable,
+                "Publisher trust is not verified. Explicit user confirmation is required before CloudOS may stage this installer.");
         }
 
         var capabilityId = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
@@ -85,7 +84,7 @@ public sealed class InstallerCapabilityService : IDisposable
         var stagedPath = Path.Combine(capabilityDirectory, record.FileName);
         try
         {
-            File.Copy(record.CanonicalPath, stagedPath, overwrite: false);
+            InstallerStagingCopy.CopyPreservingStreams(record.CanonicalPath, stagedPath);
             var stagedHash = await InstallerArtifactInspector.ComputeSha256Async(stagedPath, cancellationToken);
             if (!stagedHash.Equals(record.Sha256, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("Staged installer hash does not match the approved artifact.");
@@ -116,7 +115,7 @@ public sealed class InstallerCapabilityService : IDisposable
                 ElevatedBrokerAvailable: elevatedBrokerAvailable,
                 Reason: record.Trust == InstallerTrustStatus.Trusted
                     ? null
-                    : "Publisher trust is not verified; CloudOS must require explicit user confirmation before launch.");
+                    : "User explicitly confirmed an installer whose publisher trust is not verified.");
 
             return new PreparedInstallerCapability(capability, record.ToPublicView(), launchPlan, readiness);
         }
@@ -179,6 +178,25 @@ public sealed class InstallerCapabilityService : IDisposable
         foreach (var state in states)
             TryDeleteDirectory(Path.GetDirectoryName(state.StagedPath)!);
     }
+
+    private static PreparedInstallerCapability Blocked(
+        InstallerArtifactRecord record,
+        InstallerReadinessStatus status,
+        bool integrityValid,
+        bool elevatedBrokerAvailable,
+        string reason) =>
+        new(
+            EmptyCapability(record),
+            record.ToPublicView(),
+            EmptyLaunchPlan(record),
+            new InstallerReadiness(
+                status,
+                record.ToPublicView(),
+                integrityValid,
+                record.Trust == InstallerTrustStatus.Trusted,
+                CanLaunchInUserSession: false,
+                elevatedBrokerAvailable,
+                reason));
 
     private void PurgeExpiredLocked(DateTimeOffset now)
     {
