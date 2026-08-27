@@ -7,6 +7,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("artifact mutation blocks capability", TestArtifactMutationAsync),
     ("untrusted installer requires explicit approval", TestUntrustedApprovalAsync),
     ("capability stages exact hash and is one shot", TestCapabilityOneShotAsync),
+    ("capability cleanup rejects invalid ids", TestCapabilityCleanupIdAsync),
     ("unsupported format is rejected", TestUnsupportedFormatAsync),
     ("msi plan uses msiexec without forced restart", TestMsiPlanAsync),
     ("elevation broker fails closed", TestElevationBrokerAsync),
@@ -135,6 +136,21 @@ static async Task TestCapabilityOneShotAsync()
     RequireThrows<InvalidOperationException>(() => capabilities.ConsumeAsync(prepared.Capability.CapabilityId).GetAwaiter().GetResult());
     capabilities.Complete(prepared.Capability.CapabilityId);
     Require(!Directory.Exists(Path.GetDirectoryName(plan.ExecutablePath)), "staging directory survived completion");
+}
+
+static Task TestCapabilityCleanupIdAsync()
+{
+    using var env = TestEnvironment.Create();
+    var catalog = env.CreateCatalog();
+    using var capabilities = env.CreateCapabilities(catalog);
+    var sentinel = Path.Combine(env.Root, "cleanup-sentinel.txt");
+    File.WriteAllText(sentinel, "keep");
+
+    foreach (var invalidId in new[] { "..\\..", "../..", "", "not-a-capability" })
+        RequireThrows<ArgumentException>(() => capabilities.Complete(invalidId));
+
+    Require(File.Exists(sentinel), "invalid cleanup capability escaped staging and touched an outside file");
+    return Task.CompletedTask;
 }
 
 static async Task TestUnsupportedFormatAsync()
