@@ -74,3 +74,21 @@ test('resolução inicial mantém fallback por PID para Host legado sem launchPr
   const legacy = session({ sessionId: 'window-legacy', launchProcessId: undefined });
   assert.equal(nativeSessionForLaunch([legacy], { pid: 4242 }), legacy);
 });
+
+test('resolução inicial falha fechado quando o launch Job possui múltiplas janelas candidatas', () => {
+  const first = session({ sessionId: 'window-first', processId: 5252, launchProcessId: 4242 });
+  const second = session({ sessionId: 'window-second', processId: 5353, launchProcessId: 4242 });
+  assert.equal(nativeSessionForLaunch([first, second], { pid: 4242 }), null);
+});
+
+test('resolução inicial de Host legado falha fechado quando o mesmo PID possui múltiplas janelas', () => {
+  const first = session({ sessionId: 'window-first', launchProcessId: undefined });
+  const second = session({ sessionId: 'window-second', launchProcessId: undefined });
+  assert.equal(nativeSessionForLaunch([first, second], { pid: 4242 }), null);
+});
+
+test('sessionId opaco retornado pelo Host vence ambiguidade do mesmo launch Job', () => {
+  const first = session({ sessionId: 'window-first', processId: 5252, launchProcessId: 4242 });
+  const exact = session({ sessionId: 'window-exact', processId: 5353, launchProcessId: 4242 });
+  assert.equal(nativeSessionForLaunch([first, exact], { pid: 4242, sessionId: 'window-exact' }), exact);
+});
