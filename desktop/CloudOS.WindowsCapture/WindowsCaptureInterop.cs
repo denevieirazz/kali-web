@@ -144,13 +144,15 @@ internal static unsafe partial class WindowsCaptureInterop
             hr = callback(factory, target, ref iid, out itemPointer);
             ThrowIfFailed(hr, window ? "CreateForWindow" : "CreateForMonitor");
 
-            var lease = ProjectItem(
-                itemPointer,
+            // Transfer the ABI reference exactly once. From this point ProjectItem owns it,
+            // so the outer finally must not release the same pointer on a projection error.
+            var ownedPointer = itemPointer;
+            itemPointer = IntPtr.Zero;
+            return ProjectItem(
+                ownedPointer,
                 window ? "window/raw" : "monitor/raw",
                 projectionKind,
                 lifetimeKind);
-            itemPointer = IntPtr.Zero; // ownership moved to ProjectItem/lease or was released there.
-            return lease;
         }
         finally
         {
@@ -177,13 +179,13 @@ internal static unsafe partial class WindowsCaptureInterop
 
         try
         {
-            var lease = ProjectItem(
-                itemPointer,
+            var ownedPointer = itemPointer;
+            itemPointer = IntPtr.Zero;
+            return ProjectItem(
+                ownedPointer,
                 window ? "window/projected" : "monitor/projected",
                 projectionKind,
                 lifetimeKind);
-            itemPointer = IntPtr.Zero;
-            return lease;
         }
         finally
         {
