@@ -33,9 +33,9 @@ public sealed class CapturedSurfaceBridgeAdapter : IDisposable
     }
 
     public static bool CandidateEnabled =>
-        string.Equals(
+        !string.Equals(
             Environment.GetEnvironmentVariable("CLOUDOS_CAPTURED_SURFACE"),
-            "1",
+            "0",
             StringComparison.Ordinal);
 
     public CapturedSurfaceBridgeState Attach(

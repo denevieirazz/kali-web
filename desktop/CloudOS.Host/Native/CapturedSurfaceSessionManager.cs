@@ -7,6 +7,7 @@ public sealed record CapturedSurfaceSessionSnapshot(
     string SurfaceId,
     int Generation,
     long SourceWindowHandle,
+    long PresentationWindowHandle,
     WindowsCaptureSnapshot Capture,
     WindowsCaptureSurfaceCoordinatorSnapshot Presentation,
     bool InputActive);
@@ -291,6 +292,7 @@ public sealed class CapturedSurfaceSessionManager : IDisposable
                 snapshot.SurfaceId,
                 snapshot.Generation,
                 snapshot.SourceWindowHandle,
+                snapshot.PresentationWindowHandle,
                 snapshot.Capture,
                 snapshot.Surface,
                 inputActive);

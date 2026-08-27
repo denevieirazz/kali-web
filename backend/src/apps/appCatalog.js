@@ -10,7 +10,10 @@ const BLOCKED_SHORTCUT_TARGETS = new Set([
   'cmd.exe', 'powershell.exe', 'pwsh.exe', 'wscript.exe', 'cscript.exe',
   'mshta.exe', 'rundll32.exe', 'regsvr32.exe', 'schtasks.exe', 'wmic.exe',
   'wsl.exe', 'wslg.exe', 'bash.exe', 'explorer.exe', 'runtimebroker.exe',
-  'applicationframehost.exe', 'wt.exe', 'windowsterminal.exe'
+  'applicationframehost.exe', 'control.exe', 'wt.exe', 'windowsterminal.exe'
+]);
+const ISOLATED_CHROMIUM_EXECUTABLES = new Set([
+  'brave.exe', 'chrome.exe', 'chromium.exe', 'msedge.exe', 'vivaldi.exe', 'opera.exe'
 ]);
 const WINDOWS_SCRIPT_EXTENSIONS = new Set(['.bat', '.cmd']);
 const catalogById = new Map();
@@ -100,6 +103,20 @@ export function buildWindowsScriptLaunchArguments(scriptPath) {
   // A fixed CALL token keeps the quoted script path as a distinct command
   // operand while preserving the bounded, non-user-controlled shell grammar.
   return ['/d', '/s', '/v:off', '/c', 'call', scriptPath];
+}
+
+export function buildIsolatedWindowsAppArguments(executable, baseDirectory) {
+  const executableName = path.win32.basename(String(executable || '')).toLowerCase();
+  const root = String(baseDirectory || '').trim();
+  if (!path.win32.isAbsolute(root)) return [];
+  const profileDirectory = path.win32.join(root, 'profiles', 'windows', executableName || 'application');
+  if (ISOLATED_CHROMIUM_EXECUTABLES.has(executableName)) {
+    return [`--user-data-dir=${profileDirectory}`, '--no-first-run', '--new-window'];
+  }
+  if (executableName === 'firefox.exe') {
+    return ['-profile', profileDirectory, '-no-remote', '-new-instance'];
+  }
+  return [];
 }
 
 // Parse only the documented Windows backslash/quote grammar used by conventional
@@ -363,11 +380,17 @@ export async function launchCatalogApp(id) {
     throw Object.assign(new Error('Script Windows inválido para execução contida.'), { code: 'APP_SCRIPT_INVALID' });
   }
 
-  const launchArguments = scriptLaunch
+  const catalogArguments = scriptLaunch
     ? buildWindowsScriptLaunchArguments(scriptPath)
     : (launchKind === 'windows-shortcut-direct'
         ? []
         : (Array.isArray(app.args) ? app.args.filter((value) => typeof value === 'string' && !/[\0\r\n]/.test(value)).slice(0, 128) : []));
+  const isolatedProfileArguments = catalogArguments.length === 0
+    ? buildIsolatedWindowsAppArguments(
+        executable,
+        process.env.CLOUDOS_LOCAL_ROOT || process.env.CLOUDOS_DATA_DIR || '')
+    : [];
+  const launchArguments = [...isolatedProfileArguments, ...catalogArguments];
   const workingDirectory = scriptLaunch
     ? (app.workingDirectory || path.win32.dirname(scriptPath))
     : (app.workingDirectory || path.win32.dirname(executable));

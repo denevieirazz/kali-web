@@ -449,6 +449,13 @@ public sealed class WebMessageBridge : IDisposable
             }
 
             var dpi = VisualTreeHelper.GetDpi(_webView);
+            if (!_windows.TryPrepareCapturedSource(handle, _ownerWindowHandle, bounds, visible, out var isolationError))
+            {
+                TerminateSessionAndForget(sessionId, NativeContainmentFailure.AttachFailed);
+                throw new BridgeException(
+                    "WINDOW_CAPTURE_DENIED",
+                    isolationError ?? "A janela de origem não pôde ser isolada atrás do CloudOS.");
+            }
             try
             {
                 var state = _capturedSurfaceBridge.Attach(
@@ -458,6 +465,16 @@ public sealed class WebMessageBridge : IDisposable
                     visible,
                     dpi.DpiScaleX,
                     dpi.DpiScaleY);
+                if (!_windows.TryActivateCapturedSource(
+                    handle,
+                    state.Runtime.PresentationWindowHandle,
+                    bounds,
+                    visible,
+                    out var activationError))
+                {
+                    throw new InvalidOperationException(
+                        activationError ?? "The captured source could not be bound behind its presenter.");
+                }
                 _pendingAttachDeadlinesByHandle.Remove(handle);
                 _surfacesByHandle[handle] = surface with { Visible = visible, LastNativeBounds = bounds };
                 return new
@@ -475,6 +492,8 @@ public sealed class WebMessageBridge : IDisposable
                 BrowserDiagnostics.Write(
                     "captured_surface_attach_failed",
                     $"stage={stage} type={captureError.GetType().Name} hresult=0x{captureError.HResult:X8}");
+                _capturedSurfaceBridge.Close(sessionId);
+                _windows.CancelCapturedSource(handle);
                 TerminateSessionAndForget(sessionId, NativeContainmentFailure.AttachFailed);
                 throw new BridgeException(
                     "WINDOW_CAPTURE_DENIED",
@@ -513,6 +532,9 @@ public sealed class WebMessageBridge : IDisposable
                     visible,
                     dpi.DpiScaleX,
                     dpi.DpiScaleY);
+                if (!_windows.TryUpdateCapturedSourceLayout(handle, bounds, visible, out var sourceLayoutError))
+                    throw new InvalidOperationException(
+                        sourceLayoutError ?? "The capture source lost its covered layout.");
                 _surfacesByHandle[handle] = surface with { Visible = visible, LastNativeBounds = bounds };
                 return new
                 {
@@ -591,6 +613,11 @@ public sealed class WebMessageBridge : IDisposable
                             pair.Value.Visible,
                             dpi.DpiScaleX,
                             dpi.DpiScaleY);
+                        if (!_windows.TryUpdateCapturedSourceLayout(pair.Key, bounds, pair.Value.Visible, out _))
+                        {
+                            TerminateHandleAndForget(pair.Key, NativeContainmentFailure.LayoutFailed);
+                            continue;
+                        }
                         _surfacesByHandle[pair.Key] = pair.Value with { LastNativeBounds = bounds };
                         continue;
                     }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildWindowsScriptLaunchArguments, parseWindowsAppDiscovery, parseWindowsShortcutArguments } from '../src/apps/appCatalog.js';
+import { buildIsolatedWindowsAppArguments, buildWindowsScriptLaunchArguments, parseWindowsAppDiscovery, parseWindowsShortcutArguments } from '../src/apps/appCatalog.js';
 
 test('launcher de script Windows preserva caminho com espaços sob cmd /s /c', () => {
   const scriptPath = 'C:\\Users\\Runner User\\CloudOS Fixtures\\Launch GUI.cmd';
@@ -8,6 +8,18 @@ test('launcher de script Windows preserva caminho com espaços sob cmd /s /c', (
     buildWindowsScriptLaunchArguments(scriptPath),
     ['/d', '/s', '/v:off', '/c', 'call', scriptPath]
   );
+});
+
+test('navegadores conhecidos recebem perfil CloudOS isolado para não delegar à instância externa', () => {
+  assert.deepEqual(
+    buildIsolatedWindowsAppArguments('C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe', 'C:\\CloudOS'),
+    ['--user-data-dir=C:\\CloudOS\\profiles\\windows\\brave.exe', '--no-first-run', '--new-window']
+  );
+  assert.deepEqual(
+    buildIsolatedWindowsAppArguments('C:\\Program Files\\Mozilla Firefox\\firefox.exe', 'C:\\CloudOS'),
+    ['-profile', 'C:\\CloudOS\\profiles\\windows\\firefox.exe', '-no-remote', '-new-instance']
+  );
+  assert.deepEqual(buildIsolatedWindowsAppArguments('C:\\Tools\\Editor.exe', 'C:\\CloudOS'), []);
 });
 
 test('parser de argumentos Windows preserva limites argv convencionais e falha fechado', () => {
@@ -174,6 +186,7 @@ test('App Paths rejeita launchers perigosos e entradas que não sejam executáve
     AppPaths: [
       { Name: 'PowerShell', Executable: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe' },
       { Name: 'Explorer', Executable: 'C:\\Windows\\explorer.exe' },
+      { Name: 'Painel de Controle', Executable: 'C:\\Windows\\System32\\control.exe' },
       { Name: 'Relativo', Executable: 'Tools.exe' },
       { Name: 'Documento', Executable: 'C:\\Tools\\readme.txt' },
       { Name: 'Quebra', Executable: 'C:\\Tools\\Bad\nApp.exe' },
