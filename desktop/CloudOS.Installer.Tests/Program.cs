@@ -1,3 +1,4 @@
+using CloudOS.Host.Installer;
 using CloudOS.Installer;
 
 var tests = new (string Name, Func<Task> Run)[]
@@ -8,6 +9,8 @@ var tests = new (string Name, Func<Task> Run)[]
     ("untrusted installer requires explicit approval", TestUntrustedApprovalAsync),
     ("capability stages exact hash and is one shot", TestCapabilityOneShotAsync),
     ("capability cleanup rejects invalid ids", TestCapabilityCleanupIdAsync),
+    ("contained EXE policy reuses native launch spec", TestContainedExePolicyAsync),
+    ("MSI policy requires privileged broker", TestMsiBrokerPolicyAsync),
     ("unsupported format is rejected", TestUnsupportedFormatAsync),
     ("msi plan uses msiexec without forced restart", TestMsiPlanAsync),
     ("elevation broker fails closed", TestElevationBrokerAsync),
@@ -150,6 +153,53 @@ static Task TestCapabilityCleanupIdAsync()
         RequireThrows<ArgumentException>(() => capabilities.Complete(invalidId));
 
     Require(File.Exists(sentinel), "invalid cleanup capability escaped staging and touched an outside file");
+    return Task.CompletedTask;
+}
+
+static Task TestContainedExePolicyAsync()
+{
+    var executable = Environment.ProcessPath
+        ?? throw new InvalidOperationException("Installer test executable path is unavailable.");
+    Require(Path.GetExtension(executable).Equals(".exe", StringComparison.OrdinalIgnoreCase), "Windows installer tests are not running through an executable apphost");
+    var workingDirectory = Path.GetDirectoryName(executable)
+        ?? throw new InvalidOperationException("Installer test executable directory is unavailable.");
+    var plan = new InstallerLaunchPlan(
+        new string('a', 32),
+        InstallerArtifactKind.WindowsExecutable,
+        executable,
+        Array.Empty<string>(),
+        workingDirectory,
+        null,
+        MayRequireElevation: true,
+        ElevatedBrokerRequired: false,
+        new string('b', 64));
+
+    var admission = InstallerContainedLaunchPolicy.Evaluate(plan);
+    Require(admission.Allowed, $"contained EXE plan was denied: {admission.ErrorCode}");
+    Require(admission.LaunchSpec is not null, "allowed EXE plan did not produce a native launch spec");
+    Require(admission.LaunchSpec.Executable.Equals(Path.GetFullPath(executable), StringComparison.OrdinalIgnoreCase), "native launch spec changed the executable");
+    Require(admission.LaunchSpec.Arguments.Count == 0, "native launch spec injected installer arguments");
+    return Task.CompletedTask;
+}
+
+static Task TestMsiBrokerPolicyAsync()
+{
+    var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+    var plan = new InstallerLaunchPlan(
+        new string('a', 32),
+        InstallerArtifactKind.WindowsInstallerPackage,
+        Path.Combine(windows, "System32", "msiexec.exe"),
+        new[] { "/i", @"C:\CloudOS\Installer\Staging\fixture\fixture.msi", "/norestart" },
+        windows,
+        null,
+        MayRequireElevation: true,
+        ElevatedBrokerRequired: false,
+        new string('b', 64));
+
+    var admission = InstallerContainedLaunchPolicy.Evaluate(plan);
+    Require(!admission.Allowed, "MSI was admitted into the direct contained process path");
+    Require(admission.ErrorCode == InstallerContainedLaunchPolicy.BrokerRequiredCode, "MSI returned the wrong fail-closed status");
+    Require(admission.LaunchSpec is null, "blocked MSI leaked a native launch spec");
     return Task.CompletedTask;
 }
 
