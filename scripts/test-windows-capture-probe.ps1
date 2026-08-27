@@ -21,9 +21,11 @@ $fixtureExe = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.Fixture\bin\Re
 $probeProject = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.Probe\CloudOS.WindowsCapture.Probe.csproj'
 $probeDll = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.Probe\bin\Release\net8.0-windows10.0.19041.0\CloudOS.WindowsCapture.Probe.dll'
 $outputRoot = [System.IO.Path]::GetFullPath($OutputDirectory)
-$windowRawReportPath = Join-Path $outputRoot 'fixture-window-wgc-smoke.json'
-$windowProjectedReportPath = Join-Path $outputRoot 'fixture-window-projected-control.json'
-$monitorRawReportPath = Join-Path $outputRoot 'fixture-monitor-wgc-control.json'
+$productReportPath = Join-Path $outputRoot 'fixture-window-product-candidate.json'
+$lifetimeControlPath = Join-Path $outputRoot 'fixture-window-release-control.json'
+$projectionControlPath = Join-Path $outputRoot 'fixture-window-projected-type-control.json'
+$factoryControlPath = Join-Path $outputRoot 'fixture-window-projected-factory-control.json'
+$monitorControlPath = Join-Path $outputRoot 'fixture-monitor-lower-layer-control.json'
 $logPath = Join-Path $outputRoot 'fixture-wgc-smoke.log'
 $summaryPath = Join-Path $outputRoot 'fixture-wgc-matrix-summary.json'
 
@@ -40,6 +42,8 @@ function Invoke-ProbeLane {
         [Parameter(Mandatory)] [string] $Name,
         [Parameter(Mandatory)] [ValidateSet('window', 'monitor')] [string] $CaptureKind,
         [Parameter(Mandatory)] [ValidateSet('raw', 'projected')] [string] $ItemFactory,
+        [Parameter(Mandatory)] [ValidateSet('projected', 'marshal-interface')] [string] $ItemProjection,
+        [Parameter(Mandatory)] [ValidateSet('release', 'hold')] [string] $AbiLifetime,
         [Parameter(Mandatory)] [string] $ReportPath,
         [Parameter(Mandatory)] [int] $ProcessId
     )
@@ -50,6 +54,8 @@ function Invoke-ProbeLane {
         --pid $ProcessId `
         --capture-kind $CaptureKind `
         --item-factory $ItemFactory `
+        --item-projection $ItemProjection `
+        --abi-lifetime $AbiLifetime `
         --seconds $CaptureSeconds `
         --min-frames $MinimumFrames `
         --output $ReportPath 2>&1
@@ -66,10 +72,44 @@ function Invoke-ProbeLane {
         name = $Name
         captureKind = $CaptureKind
         itemFactory = $ItemFactory
+        itemProjection = $ItemProjection
+        abiLifetime = $AbiLifetime
         exitCode = $exitCode
         reportPath = $ReportPath
         report = $report
         output = ($output | Out-String).TrimEnd()
+    }
+}
+
+function Lane-Summary($lane) {
+    $report = $lane.report
+    $window = if ($null -ne $report) { $report.window } else { $null }
+    return [ordered]@{
+        name = $lane.name
+        captureKind = $lane.captureKind
+        itemFactory = $lane.itemFactory
+        itemProjection = $lane.itemProjection
+        abiLifetime = $lane.abiLifetime
+        exitCode = $lane.exitCode
+        reportGenerated = ($null -ne $report)
+        verdict = if ($null -ne $report) { $report.verdict } else { $null }
+        frameCount = if ($null -ne $report -and $null -ne $report.capture) { [long]$report.capture.frameCount } else { 0 }
+        width = if ($null -ne $report -and $null -ne $report.capture) { [int]$report.capture.width } else { 0 }
+        height = if ($null -ne $report -and $null -ne $report.capture) { [int]$report.capture.height } else { 0 }
+        stage = if ($null -ne $report -and $null -ne $report.error) { $report.error.stage } else { $null }
+        nativeHResult = if ($null -ne $report -and $null -ne $report.error) { $report.error.nativeHResult } else { $null }
+        itemWidth = if ($null -ne $report -and $null -ne $report.error) { [int]$report.error.itemWidth } elseif ($null -ne $report -and $null -ne $report.capture) { [int]$report.capture.initialItemWidth } else { 0 }
+        itemHeight = if ($null -ne $report -and $null -ne $report.error) { [int]$report.error.itemHeight } elseif ($null -ne $report -and $null -ne $report.capture) { [int]$report.capture.initialItemHeight } else { 0 }
+        bufferWidth = if ($null -ne $report -and $null -ne $report.error) { [int]$report.error.bufferWidth } elseif ($null -ne $report -and $null -ne $report.capture) { [int]$report.capture.initialBufferWidth } else { 0 }
+        bufferHeight = if ($null -ne $report -and $null -ne $report.error) { [int]$report.error.bufferHeight } elseif ($null -ne $report -and $null -ne $report.capture) { [int]$report.capture.initialBufferHeight } else { 0 }
+        initialSizeSource = if ($null -ne $report -and $null -ne $report.error) { $report.error.initialSizeSource } elseif ($null -ne $report -and $null -ne $report.capture) { $report.capture.initialSizeSource } else { $null }
+        hwnd = if ($null -ne $window) { $window.handle } else { $null }
+        className = if ($null -ne $window) { $window.className } else { $null }
+        visible = if ($null -ne $window) { $window.visible } else { $null }
+        iconic = if ($null -ne $window) { $window.iconic } else { $null }
+        cloaked = if ($null -ne $window) { $window.cloaked } else { $null }
+        displayAffinity = if ($null -ne $window) { $window.displayAffinity } else { $null }
+        reportPath = $lane.reportPath
     }
 }
 
@@ -110,59 +150,59 @@ try {
 
     Write-Host "Fixture PID=$($fixture.Id) reported MainWindowHandle=0x$('{0:X}' -f $reportedMainWindowHwnd.ToInt64())" -ForegroundColor Cyan
 
-    # One physical run, three deliberately isolated lanes:
-    # 1. Product candidate: HWND through raw WinRT activation factory ABI.
-    # 2. Legacy control: same HWND through the old projected/RCW factory path.
-    # 3. Lower-layer control: monitor through the same raw activation factory and D3D/frame-pool path.
-    $windowRaw = Invoke-ProbeLane `
-        -Name 'WINDOW / RAW ACTIVATION FACTORY (PRODUCT GATE)' `
+    # Five lanes isolate factory, projection, ABI lifetime, and the WGC/D3D lower layer.
+    # Only lane 1 is allowed to approve the product gate.
+    $product = Invoke-ProbeLane `
+        -Name 'WINDOW / RAW / MARSHAL-INTERFACE / HOLD (PRODUCT CANDIDATE)' `
         -CaptureKind window `
         -ItemFactory raw `
-        -ReportPath $windowRawReportPath `
+        -ItemProjection marshal-interface `
+        -AbiLifetime hold `
+        -ReportPath $productReportPath `
         -ProcessId $fixture.Id
 
-    $windowProjected = Invoke-ProbeLane `
-        -Name 'WINDOW / PROJECTED FACTORY (LEGACY CONTROL)' `
+    $lifetimeControl = Invoke-ProbeLane `
+        -Name 'WINDOW / RAW / MARSHAL-INTERFACE / RELEASE (LIFETIME CONTROL)' `
+        -CaptureKind window `
+        -ItemFactory raw `
+        -ItemProjection marshal-interface `
+        -AbiLifetime release `
+        -ReportPath $lifetimeControlPath `
+        -ProcessId $fixture.Id
+
+    $projectionControl = Invoke-ProbeLane `
+        -Name 'WINDOW / RAW / PROJECTED-TYPE / HOLD (PROJECTION CONTROL)' `
+        -CaptureKind window `
+        -ItemFactory raw `
+        -ItemProjection projected `
+        -AbiLifetime hold `
+        -ReportPath $projectionControlPath `
+        -ProcessId $fixture.Id
+
+    $factoryControl = Invoke-ProbeLane `
+        -Name 'WINDOW / PROJECTED-FACTORY / MARSHAL-INTERFACE / HOLD (FACTORY CONTROL)' `
         -CaptureKind window `
         -ItemFactory projected `
-        -ReportPath $windowProjectedReportPath `
+        -ItemProjection marshal-interface `
+        -AbiLifetime hold `
+        -ReportPath $factoryControlPath `
         -ProcessId $fixture.Id
 
-    $monitorRaw = Invoke-ProbeLane `
-        -Name 'MONITOR / RAW ACTIVATION FACTORY (LOWER-LAYER CONTROL)' `
+    $monitorControl = Invoke-ProbeLane `
+        -Name 'MONITOR / RAW / MARSHAL-INTERFACE / HOLD (LOWER-LAYER CONTROL)' `
         -CaptureKind monitor `
         -ItemFactory raw `
-        -ReportPath $monitorRawReportPath `
+        -ItemProjection marshal-interface `
+        -AbiLifetime hold `
+        -ReportPath $monitorControlPath `
         -ProcessId $fixture.Id
 
     $completedAt = [DateTimeOffset]::UtcNow
-
-    function Lane-Summary($lane) {
-        $report = $lane.report
-        return [ordered]@{
-            name = $lane.name
-            captureKind = $lane.captureKind
-            itemFactory = $lane.itemFactory
-            exitCode = $lane.exitCode
-            reportGenerated = ($null -ne $report)
-            verdict = if ($null -ne $report) { $report.verdict } else { $null }
-            frameCount = if ($null -ne $report -and $null -ne $report.capture) { [long]$report.capture.frameCount } else { 0 }
-            width = if ($null -ne $report -and $null -ne $report.capture) { [int]$report.capture.width } else { 0 }
-            height = if ($null -ne $report -and $null -ne $report.capture) { [int]$report.capture.height } else { 0 }
-            stage = if ($null -ne $report -and $null -ne $report.error) { $report.error.stage } else { $null }
-            nativeHResult = if ($null -ne $report -and $null -ne $report.error) { $report.error.nativeHResult } else { $null }
-            itemWidth = if ($null -ne $report -and $null -ne $report.error) { [int]$report.error.itemWidth } elseif ($null -ne $report -and $null -ne $report.capture) { [int]$report.capture.initialItemWidth } else { 0 }
-            itemHeight = if ($null -ne $report -and $null -ne $report.error) { [int]$report.error.itemHeight } elseif ($null -ne $report -and $null -ne $report.capture) { [int]$report.capture.initialItemHeight } else { 0 }
-            bufferWidth = if ($null -ne $report -and $null -ne $report.error) { [int]$report.error.bufferWidth } elseif ($null -ne $report -and $null -ne $report.capture) { [int]$report.capture.initialBufferWidth } else { 0 }
-            bufferHeight = if ($null -ne $report -and $null -ne $report.error) { [int]$report.error.bufferHeight } elseif ($null -ne $report -and $null -ne $report.capture) { [int]$report.capture.initialBufferHeight } else { 0 }
-            initialSizeSource = if ($null -ne $report -and $null -ne $report.error) { $report.error.initialSizeSource } elseif ($null -ne $report -and $null -ne $report.capture) { $report.capture.initialSizeSource } else { $null }
-            reportPath = $lane.reportPath
-        }
-    }
+    $productGatePassed = ($product.exitCode -eq 0 -and $null -ne $product.report -and $product.report.verdict -eq 'PASS')
 
     $summary = [ordered]@{
-        schemaVersion = 1
-        probeMatrix = 'CloudOS Windows captured-surface factory isolation'
+        schemaVersion = 2
+        probeMatrix = 'CloudOS Windows captured-surface item lifetime/projection isolation'
         startedAt = $startedAt.ToString('o')
         completedAt = $completedAt.ToString('o')
         branch = $branch
@@ -172,20 +212,29 @@ try {
         fixtureReportedMainWindowHwnd = ('0x{0:X}' -f $reportedMainWindowHwnd.ToInt64())
         minimumFrames = $MinimumFrames
         captureSeconds = $CaptureSeconds
-        productGate = 'window/raw-activation-factory'
-        productGatePassed = ($windowRaw.exitCode -eq 0 -and $null -ne $windowRaw.report -and $windowRaw.report.verdict -eq 'PASS')
+        productGate = 'window/raw/marshal-interface/hold'
+        productGatePassed = $productGatePassed
+        interpretation = [ordered]@{
+            lifetimeSuspect = ($product.exitCode -eq 0 -and $lifetimeControl.exitCode -ne 0)
+            projectionSuspect = ($product.exitCode -eq 0 -and $projectionControl.exitCode -ne 0)
+            factorySuspect = ($product.exitCode -eq 0 -and $factoryControl.exitCode -ne 0)
+            lowerLayerHealthy = ($monitorControl.exitCode -eq 0 -and $null -ne $monitorControl.report -and $monitorControl.report.verdict -eq 'PASS')
+            allWindowLanesFailed = (@($product, $lifetimeControl, $projectionControl, $factoryControl) | Where-Object { $_.exitCode -eq 0 }).Count -eq 0
+        }
         lanes = @(
-            (Lane-Summary $windowRaw),
-            (Lane-Summary $windowProjected),
-            (Lane-Summary $monitorRaw)
+            (Lane-Summary $product),
+            (Lane-Summary $lifetimeControl),
+            (Lane-Summary $projectionControl),
+            (Lane-Summary $factoryControl),
+            (Lane-Summary $monitorControl)
         )
     }
 
-    $summaryJson = $summary | ConvertTo-Json -Depth 12
+    $summaryJson = $summary | ConvertTo-Json -Depth 14
     [System.IO.File]::WriteAllText($summaryPath, $summaryJson + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
 
     $logLines = @(
-        'CLOUDOS WINDOWS CAPTURE FULL FACTORY ISOLATION',
+        'CLOUDOS WINDOWS CAPTURE FULL ITEM LIFETIME/PROJECTION ISOLATION',
         "startedAt=$($startedAt.ToString('o'))",
         "completedAt=$($completedAt.ToString('o'))",
         "branch=$branch",
@@ -196,22 +245,27 @@ try {
         'targetSelection=probe-enumerated-largest-visible-top-level-window-for-pid',
         "captureSeconds=$CaptureSeconds",
         "minimumFrames=$MinimumFrames",
-        "windowRawExitCode=$($windowRaw.exitCode)",
-        "windowProjectedExitCode=$($windowProjected.exitCode)",
-        "monitorRawExitCode=$($monitorRaw.exitCode)",
-        "windowRawReport=$windowRawReportPath",
-        "windowProjectedReport=$windowProjectedReportPath",
-        "monitorRawReport=$monitorRawReportPath",
+        "productExitCode=$($product.exitCode)",
+        "lifetimeControlExitCode=$($lifetimeControl.exitCode)",
+        "projectionControlExitCode=$($projectionControl.exitCode)",
+        "factoryControlExitCode=$($factoryControl.exitCode)",
+        "monitorControlExitCode=$($monitorControl.exitCode)",
         "matrixSummary=$summaryPath",
         '',
-        '=== WINDOW / RAW ACTIVATION FACTORY (PRODUCT GATE) ===',
-        $windowRaw.output,
+        '=== WINDOW / RAW / MARSHAL-INTERFACE / HOLD (PRODUCT CANDIDATE) ===',
+        $product.output,
         '',
-        '=== WINDOW / PROJECTED FACTORY (LEGACY CONTROL) ===',
-        $windowProjected.output,
+        '=== WINDOW / RAW / MARSHAL-INTERFACE / RELEASE (LIFETIME CONTROL) ===',
+        $lifetimeControl.output,
         '',
-        '=== MONITOR / RAW ACTIVATION FACTORY (LOWER-LAYER CONTROL) ===',
-        $monitorRaw.output,
+        '=== WINDOW / RAW / PROJECTED-TYPE / HOLD (PROJECTION CONTROL) ===',
+        $projectionControl.output,
+        '',
+        '=== WINDOW / PROJECTED-FACTORY / MARSHAL-INTERFACE / HOLD (FACTORY CONTROL) ===',
+        $factoryControl.output,
+        '',
+        '=== MONITOR / RAW / MARSHAL-INTERFACE / HOLD (LOWER-LAYER CONTROL) ===',
+        $monitorControl.output,
         '',
         '=== MATRIX SUMMARY ===',
         $summaryJson
@@ -219,17 +273,17 @@ try {
     [System.IO.File]::WriteAllLines($logPath, $logLines, [System.Text.UTF8Encoding]::new($false))
 
     Write-Host ''
-    Write-Host '=== FACTORY ISOLATION SUMMARY ===' -ForegroundColor Cyan
+    Write-Host '=== ITEM LIFETIME/PROJECTION MATRIX SUMMARY ===' -ForegroundColor Cyan
     Write-Host $summaryJson
     Write-Host "Summary: $summaryPath"
     Write-Host "Log:     $logPath"
 
-    if (-not $summary.productGatePassed) {
-        throw "Window/raw activation-factory product gate falhou. Evidence: $summaryPath ; $logPath"
+    if (-not $productGatePassed) {
+        throw "Window/raw/marshal-interface/hold product gate falhou. Evidence: $summaryPath ; $logPath"
     }
 
     Write-Host ''
-    Write-Host 'CLOUDOS WINDOWS CAPTURE WINDOW/RAW PRODUCT GATE: PASS' -ForegroundColor Green
+    Write-Host 'CLOUDOS WINDOWS CAPTURE PRODUCT CANDIDATE GATE: PASS' -ForegroundColor Green
 }
 finally {
     if ($null -ne $fixture) {
