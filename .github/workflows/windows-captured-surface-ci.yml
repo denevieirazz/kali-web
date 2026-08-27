@@ -10,6 +10,7 @@ on:
       - 'desktop/CloudOS.WindowsCapture.Contracts.Tests/**'
       - 'desktop/CloudOS.WindowsCapture.Fixture/**'
       - 'desktop/CloudOS.WindowsCapture.NativeReference/**'
+      - 'desktop/CloudOS.WindowsCapture.Presenter/**'
       - 'scripts/test-windows-capture-probe.ps1'
       - 'scripts/test-windows-capture-app.ps1'
       - 'README.md'
@@ -33,6 +34,9 @@ jobs:
 
       - name: Build generic Windows capture probe
         run: dotnet build desktop/CloudOS.WindowsCapture.Probe/CloudOS.WindowsCapture.Probe.csproj -c Release --nologo
+
+      - name: Build native captured-surface presenter
+        run: dotnet build desktop/CloudOS.WindowsCapture.Presenter/CloudOS.WindowsCapture.Presenter.csproj -c Release --nologo
 
       - name: Validate capture probe CLI contract
         shell: pwsh
