@@ -116,10 +116,10 @@ static void TestInputFullFrameMapping()
 {
     var geometry = WindowsCaptureInputGeometry.FullFrame(1920, 1080, 960, 540);
     Require(WindowsCaptureInputMapper.TryMapPointer(geometry, 480, 270, out var center), "center pointer did not map");
-    Require(center is not null, "center pointer mapping is null");
-    Require(center.SourcePixelX == 960 && center.SourcePixelY == 540, "center pointer mapped to wrong source pixel");
-    Require(Math.Abs(center.NormalizedX - 0.5) < 0.000001, "normalized X mismatch");
-    Require(Math.Abs(center.NormalizedY - 0.5) < 0.000001, "normalized Y mismatch");
+    var mappedCenter = center ?? throw new InvalidOperationException("center pointer mapping is null");
+    Require(mappedCenter.SourcePixelX == 960 && mappedCenter.SourcePixelY == 540, "center pointer mapped to wrong source pixel");
+    Require(Math.Abs(mappedCenter.NormalizedX - 0.5) < 0.000001, "normalized X mismatch");
+    Require(Math.Abs(mappedCenter.NormalizedY - 0.5) < 0.000001, "normalized Y mismatch");
 
     Require(WindowsCaptureInputMapper.TryMapPointer(geometry, 959.999, 539.999, out var last), "last in-bounds pointer did not map");
     Require(last is not null && last.SourcePixelX == 1919 && last.SourcePixelY == 1079, "last in-bounds pointer did not clamp to final source pixel");
