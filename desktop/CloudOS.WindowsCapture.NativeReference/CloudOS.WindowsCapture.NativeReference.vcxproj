@@ -48,6 +48,9 @@
       <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
+      <!-- Microsoft documents WindowsApp.lib as the umbrella import library for
+           Windows Runtime free functions consumed by desktop C++/WinRT apps. -->
+      <AdditionalDependencies>WindowsApp.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
 
