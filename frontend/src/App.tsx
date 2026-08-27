@@ -25,6 +25,7 @@ import {
   useShellWindows,
   useViewportSize,
 } from './hooks/useCloudOSRuntime';
+import { useUnifiedAppCatalogSync } from './hooks/useUnifiedAppCatalogSync';
 import { useContextMenuStore } from './stores/contextMenuStore';
 import { useFileSystem } from './stores/fileSystem';
 import { useProcessManager } from './stores/processManager';
@@ -33,7 +34,6 @@ import { useSystem } from './stores/systemStore';
 import { useUserStore } from './stores/userStore';
 import { useDownloadManager } from './stores/downloadManager';
 import { openFile } from './services/fileLauncher';
-import { refreshUnifiedAppRegistry } from './services/systemHubClient';
 import './index.css';
 import './cloudosEnhancements.css';
 
@@ -61,49 +61,7 @@ export default function App() {
     };
   }, [validateSession]);
 
-  // Publish one source-aware Windows + Linux snapshot into the registry used by
-  // CloudOS Start. The first desktop sync is forced; subsequent focus/visibility
-  // and periodic syncs are cache-aware, so an app installed while CloudOS is open
-  // appears without restarting the shell while the backend's discovery TTL prevents
-  // repeated PowerShell/WSL scans. Paths and Exec values remain behind opaque IDs.
-  useEffect(() => {
-    if (bootPhase !== 'desktop' || !isAuthenticated) return undefined;
-
-    let disposed = false;
-    let refreshInFlight = false;
-
-    const syncCatalog = async (force = false) => {
-      if (disposed || refreshInFlight) return;
-      refreshInFlight = true;
-      try {
-        await refreshUnifiedAppRegistry(force);
-      } catch {
-        // The shell remains usable while local discovery is warming up or unavailable.
-      } finally {
-        refreshInFlight = false;
-      }
-    };
-
-    const syncWhenVisible = () => {
-      if (document.visibilityState === 'visible') void syncCatalog(false);
-    };
-
-    const syncOnFocus = () => {
-      if (document.visibilityState === 'visible') void syncCatalog(false);
-    };
-
-    void syncCatalog(true);
-    document.addEventListener('visibilitychange', syncWhenVisible);
-    window.addEventListener('focus', syncOnFocus);
-    const interval = window.setInterval(syncWhenVisible, 30_000);
-
-    return () => {
-      disposed = true;
-      document.removeEventListener('visibilitychange', syncWhenVisible);
-      window.removeEventListener('focus', syncOnFocus);
-      window.clearInterval(interval);
-    };
-  }, [bootPhase, isAuthenticated]);
+  useUnifiedAppCatalogSync(bootPhase, isAuthenticated);
 
   // The backend is the source of truth for whether first-boot setup still exists.
   // If the browser-local OOBE marker was lost but an administrator already exists,
