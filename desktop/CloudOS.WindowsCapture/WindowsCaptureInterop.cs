@@ -12,6 +12,54 @@ public enum WindowsCaptureItemFactoryKind
     ProjectedFactory
 }
 
+public enum WindowsCaptureItemProjectionKind
+{
+    ProjectedTypeFromAbi,
+    MarshalInterfaceFromAbi
+}
+
+public enum WindowsCaptureAbiLifetimeKind
+{
+    ReleaseAfterProjection,
+    HoldUntilSessionDispose
+}
+
+internal sealed class WindowsCaptureItemLease : IDisposable
+{
+    private IntPtr _abiReference;
+    private bool _disposed;
+
+    public WindowsCaptureItemLease(
+        GraphicsCaptureItem item,
+        IntPtr abiReference,
+        WindowsCaptureItemProjectionKind projectionKind,
+        WindowsCaptureAbiLifetimeKind lifetimeKind,
+        string creationPath)
+    {
+        Item = item ?? throw new ArgumentNullException(nameof(item));
+        _abiReference = abiReference;
+        ProjectionKind = projectionKind;
+        LifetimeKind = lifetimeKind;
+        CreationPath = creationPath;
+    }
+
+    public GraphicsCaptureItem Item { get; }
+    public WindowsCaptureItemProjectionKind ProjectionKind { get; }
+    public WindowsCaptureAbiLifetimeKind LifetimeKind { get; }
+    public string CreationPath { get; }
+    public bool HoldsAbiReference => _abiReference != IntPtr.Zero;
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        var pointer = Interlocked.Exchange(ref _abiReference, IntPtr.Zero);
+        if (pointer != IntPtr.Zero)
+            Marshal.Release(pointer);
+    }
+}
+
 internal static unsafe partial class WindowsCaptureInterop
 {
     private const string CaptureItemRuntimeClass = "Windows.Graphics.Capture.GraphicsCaptureItem";
@@ -54,17 +102,29 @@ internal static unsafe partial class WindowsCaptureInterop
         D3D_FEATURE_LEVEL* selectedFeatureLevel,
         ID3D11DeviceContext** immediateContext);
 
-    public static GraphicsCaptureItem CreateItemForWindow(IntPtr hwnd, WindowsCaptureItemFactoryKind factoryKind) =>
+    public static WindowsCaptureItemLease CreateItemForWindow(
+        IntPtr hwnd,
+        WindowsCaptureItemFactoryKind factoryKind,
+        WindowsCaptureItemProjectionKind projectionKind,
+        WindowsCaptureAbiLifetimeKind lifetimeKind) =>
         factoryKind == WindowsCaptureItemFactoryKind.RawActivationFactory
-            ? CreateItemRaw(hwnd, true)
-            : CreateItemProjected(hwnd, true);
+            ? CreateItemRaw(hwnd, true, projectionKind, lifetimeKind)
+            : CreateItemProjected(hwnd, true, projectionKind, lifetimeKind);
 
-    public static GraphicsCaptureItem CreateItemForMonitor(IntPtr hmon, WindowsCaptureItemFactoryKind factoryKind) =>
+    public static WindowsCaptureItemLease CreateItemForMonitor(
+        IntPtr hmon,
+        WindowsCaptureItemFactoryKind factoryKind,
+        WindowsCaptureItemProjectionKind projectionKind,
+        WindowsCaptureAbiLifetimeKind lifetimeKind) =>
         factoryKind == WindowsCaptureItemFactoryKind.RawActivationFactory
-            ? CreateItemRaw(hmon, false)
-            : CreateItemProjected(hmon, false);
+            ? CreateItemRaw(hmon, false, projectionKind, lifetimeKind)
+            : CreateItemProjected(hmon, false, projectionKind, lifetimeKind);
 
-    private static GraphicsCaptureItem CreateItemRaw(IntPtr target, bool window)
+    private static WindowsCaptureItemLease CreateItemRaw(
+        IntPtr target,
+        bool window,
+        WindowsCaptureItemProjectionKind projectionKind,
+        WindowsCaptureAbiLifetimeKind lifetimeKind)
     {
         if (target == IntPtr.Zero) throw new ArgumentException("Capture handle must be non-zero.", nameof(target));
 
@@ -83,7 +143,14 @@ internal static unsafe partial class WindowsCaptureInterop
             var iid = CaptureItemGuid;
             hr = callback(factory, target, ref iid, out itemPointer);
             ThrowIfFailed(hr, window ? "CreateForWindow" : "CreateForMonitor");
-            return ProjectItem(itemPointer, window ? "window/raw" : "monitor/raw");
+
+            var lease = ProjectItem(
+                itemPointer,
+                window ? "window/raw" : "monitor/raw",
+                projectionKind,
+                lifetimeKind);
+            itemPointer = IntPtr.Zero; // ownership moved to ProjectItem/lease or was released there.
+            return lease;
         }
         finally
         {
@@ -93,7 +160,11 @@ internal static unsafe partial class WindowsCaptureInterop
         }
     }
 
-    private static GraphicsCaptureItem CreateItemProjected(IntPtr target, bool window)
+    private static WindowsCaptureItemLease CreateItemProjected(
+        IntPtr target,
+        bool window,
+        WindowsCaptureItemProjectionKind projectionKind,
+        WindowsCaptureAbiLifetimeKind lifetimeKind)
     {
         if (target == IntPtr.Zero) throw new ArgumentException("Capture handle must be non-zero.", nameof(target));
 
@@ -106,7 +177,13 @@ internal static unsafe partial class WindowsCaptureInterop
 
         try
         {
-            return ProjectItem(itemPointer, window ? "window/projected" : "monitor/projected");
+            var lease = ProjectItem(
+                itemPointer,
+                window ? "window/projected" : "monitor/projected",
+                projectionKind,
+                lifetimeKind);
+            itemPointer = IntPtr.Zero;
+            return lease;
         }
         finally
         {
@@ -114,10 +191,43 @@ internal static unsafe partial class WindowsCaptureInterop
         }
     }
 
-    private static GraphicsCaptureItem ProjectItem(IntPtr pointer, string path)
+    private static WindowsCaptureItemLease ProjectItem(
+        IntPtr pointer,
+        string path,
+        WindowsCaptureItemProjectionKind projectionKind,
+        WindowsCaptureAbiLifetimeKind lifetimeKind)
     {
         if (pointer == IntPtr.Zero) throw new InvalidOperationException($"Capture item pointer was null for {path}.");
-        return GraphicsCaptureItem.FromAbi(pointer);
+
+        GraphicsCaptureItem item;
+        try
+        {
+            item = projectionKind switch
+            {
+                WindowsCaptureItemProjectionKind.ProjectedTypeFromAbi => GraphicsCaptureItem.FromAbi(pointer),
+                WindowsCaptureItemProjectionKind.MarshalInterfaceFromAbi => MarshalInterface<GraphicsCaptureItem>.FromAbi(pointer),
+                _ => throw new ArgumentOutOfRangeException(nameof(projectionKind))
+            };
+        }
+        catch
+        {
+            Marshal.Release(pointer);
+            throw;
+        }
+
+        if (lifetimeKind == WindowsCaptureAbiLifetimeKind.ReleaseAfterProjection)
+        {
+            Marshal.Release(pointer);
+            return new WindowsCaptureItemLease(item, IntPtr.Zero, projectionKind, lifetimeKind, path);
+        }
+
+        if (lifetimeKind != WindowsCaptureAbiLifetimeKind.HoldUntilSessionDispose)
+        {
+            Marshal.Release(pointer);
+            throw new ArgumentOutOfRangeException(nameof(lifetimeKind));
+        }
+
+        return new WindowsCaptureItemLease(item, pointer, projectionKind, lifetimeKind, path);
     }
 
     private static T GetVTableMethod<T>(IntPtr instance, int slot) where T : Delegate
