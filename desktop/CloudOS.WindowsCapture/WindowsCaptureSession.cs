@@ -12,6 +12,48 @@ public enum WindowsCaptureTargetKind
     Monitor
 }
 
+public sealed class WindowsCaptureSetupException : InvalidOperationException
+{
+    public WindowsCaptureSetupException(
+        string stage,
+        WindowsCaptureTargetKind targetKind,
+        IntPtr targetHandle,
+        WindowsCaptureItemFactoryKind itemFactoryKind,
+        string message,
+        Exception innerException,
+        int itemWidth = 0,
+        int itemHeight = 0,
+        int bufferWidth = 0,
+        int bufferHeight = 0,
+        string? initialSizeSource = null,
+        string? displayName = null)
+        : base(message, innerException)
+    {
+        Stage = stage;
+        TargetKind = targetKind;
+        TargetHandle = targetHandle;
+        ItemFactoryKind = itemFactoryKind;
+        ItemWidth = itemWidth;
+        ItemHeight = itemHeight;
+        BufferWidth = bufferWidth;
+        BufferHeight = bufferHeight;
+        InitialSizeSource = initialSizeSource;
+        DisplayName = displayName;
+    }
+
+    public string Stage { get; }
+    public WindowsCaptureTargetKind TargetKind { get; }
+    public IntPtr TargetHandle { get; }
+    public WindowsCaptureItemFactoryKind ItemFactoryKind { get; }
+    public int ItemWidth { get; }
+    public int ItemHeight { get; }
+    public int BufferWidth { get; }
+    public int BufferHeight { get; }
+    public string? InitialSizeSource { get; }
+    public string? DisplayName { get; }
+    public int NativeHResult => InnerException?.HResult ?? HResult;
+}
+
 public sealed record WindowsCaptureSnapshot(
     long FrameCount,
     int Width,
@@ -23,6 +65,7 @@ public sealed record WindowsCaptureSnapshot(
     int InitialBufferWidth,
     int InitialBufferHeight,
     string InitialSizeSource,
+    string ItemFactory,
     DateTimeOffset? FirstFrameAtUtc,
     DateTimeOffset? LastFrameAtUtc,
     string? Failure)
@@ -55,7 +98,10 @@ public sealed class WindowsCaptureSession : IDisposable
     private bool _started;
     private bool _disposed;
 
-    public WindowsCaptureSession(IntPtr targetHandle, WindowsCaptureTargetKind targetKind = WindowsCaptureTargetKind.Window)
+    public WindowsCaptureSession(
+        IntPtr targetHandle,
+        WindowsCaptureTargetKind targetKind = WindowsCaptureTargetKind.Window,
+        WindowsCaptureItemFactoryKind itemFactoryKind = WindowsCaptureItemFactoryKind.RawActivationFactory)
     {
         if (!GraphicsCaptureSession.IsSupported())
             throw new PlatformNotSupportedException("Windows.Graphics.Capture is not supported in this Windows session.");
@@ -66,6 +112,7 @@ public sealed class WindowsCaptureSession : IDisposable
 
         TargetHandle = targetHandle;
         TargetKind = targetKind;
+        ItemFactoryKind = itemFactoryKind;
 
         InitialCaptureSize? nativeInitial = targetKind switch
         {
@@ -74,30 +121,102 @@ public sealed class WindowsCaptureSession : IDisposable
             _ => throw new ArgumentOutOfRangeException(nameof(targetKind))
         };
 
-        _item = targetKind switch
+        try
         {
-            WindowsCaptureTargetKind.Window => WindowsCaptureInterop.CreateItemForWindow(targetHandle),
-            WindowsCaptureTargetKind.Monitor => WindowsCaptureInterop.CreateItemForMonitor(targetHandle),
-            _ => throw new ArgumentOutOfRangeException(nameof(targetKind))
-        };
+            _item = targetKind switch
+            {
+                WindowsCaptureTargetKind.Window => WindowsCaptureInterop.CreateItemForWindow(targetHandle, itemFactoryKind),
+                WindowsCaptureTargetKind.Monitor => WindowsCaptureInterop.CreateItemForMonitor(targetHandle, itemFactoryKind),
+                _ => throw new ArgumentOutOfRangeException(nameof(targetKind))
+            };
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            throw SetupFailure("item-factory", targetHandle, targetKind, itemFactoryKind, error);
+        }
 
-        var itemSize = _item.Size;
+        SizeInt32 itemSize;
+        try
+        {
+            itemSize = _item.Size;
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            throw SetupFailure("item-metadata", targetHandle, targetKind, itemFactoryKind, error);
+        }
+
         _initialItemWidth = itemSize.Width;
         _initialItemHeight = itemSize.Height;
 
-        var initial = ResolveInitialBufferSize(targetHandle, targetKind, itemSize, nativeInitial);
+        InitialCaptureSize initial;
+        try
+        {
+            initial = ResolveInitialBufferSize(targetHandle, targetKind, itemSize, nativeInitial);
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            throw SetupFailure(
+                "initial-size",
+                targetHandle,
+                targetKind,
+                itemFactoryKind,
+                error,
+                itemSize.Width,
+                itemSize.Height,
+                displayName: TryGetDisplayName(_item));
+        }
+
         _initialBufferWidth = initial.Size.Width;
         _initialBufferHeight = initial.Size.Height;
         _initialSizeSource = initial.Source;
 
-        _device = WindowsCaptureInterop.CreateDirect3DDevice();
+        try
+        {
+            _device = WindowsCaptureInterop.CreateDirect3DDevice();
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            throw SetupFailure(
+                "d3d-device",
+                targetHandle,
+                targetKind,
+                itemFactoryKind,
+                error,
+                itemSize.Width,
+                itemSize.Height,
+                initial.Size.Width,
+                initial.Size.Height,
+                initial.Source,
+                TryGetDisplayName(_item));
+        }
+
         _width = initial.Size.Width;
         _height = initial.Size.Height;
-        _framePool = Direct3D11CaptureFramePool.CreateFreeThreaded(
-            _device,
-            DirectXPixelFormat.B8G8R8A8UIntNormalized,
-            3,
-            initial.Size);
+
+        try
+        {
+            _framePool = Direct3D11CaptureFramePool.CreateFreeThreaded(
+                _device,
+                DirectXPixelFormat.B8G8R8A8UIntNormalized,
+                3,
+                initial.Size);
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            _device.Dispose();
+            throw SetupFailure(
+                "frame-pool",
+                targetHandle,
+                targetKind,
+                itemFactoryKind,
+                error,
+                itemSize.Width,
+                itemSize.Height,
+                initial.Size.Width,
+                initial.Size.Height,
+                initial.Source,
+                TryGetDisplayName(_item));
+        }
 
         try
         {
@@ -107,12 +226,18 @@ public sealed class WindowsCaptureSession : IDisposable
         {
             _framePool.Dispose();
             _device.Dispose();
-            var displayName = TryGetDisplayName(_item);
-            throw new InvalidOperationException(
-                $"CreateCaptureSession failed for {targetKind}; handle=0x{targetHandle.ToInt64():X}; " +
-                $"item={itemSize.Width}x{itemSize.Height}; buffer={initial.Size.Width}x{initial.Size.Height} via {initial.Source}; " +
-                $"displayName={displayName ?? "<unavailable>"}; inner=0x{error.HResult:X8} {error.Message}",
-                error);
+            throw SetupFailure(
+                "capture-session",
+                targetHandle,
+                targetKind,
+                itemFactoryKind,
+                error,
+                itemSize.Width,
+                itemSize.Height,
+                initial.Size.Width,
+                initial.Size.Height,
+                initial.Source,
+                TryGetDisplayName(_item));
         }
 
         _framePool.FrameArrived += OnFrameArrived;
@@ -120,6 +245,7 @@ public sealed class WindowsCaptureSession : IDisposable
 
     public IntPtr TargetHandle { get; }
     public WindowsCaptureTargetKind TargetKind { get; }
+    public WindowsCaptureItemFactoryKind ItemFactoryKind { get; }
 
     public void Start()
     {
@@ -127,8 +253,26 @@ public sealed class WindowsCaptureSession : IDisposable
         lock (_sync)
         {
             if (_started) return;
-            _session.StartCapture();
-            _started = true;
+            try
+            {
+                _session.StartCapture();
+                _started = true;
+            }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            {
+                throw SetupFailure(
+                    "start-capture",
+                    TargetHandle,
+                    TargetKind,
+                    ItemFactoryKind,
+                    error,
+                    _initialItemWidth,
+                    _initialItemHeight,
+                    _initialBufferWidth,
+                    _initialBufferHeight,
+                    _initialSizeSource,
+                    TryGetDisplayName(_item));
+            }
         }
     }
 
@@ -147,6 +291,7 @@ public sealed class WindowsCaptureSession : IDisposable
                 _initialBufferWidth,
                 _initialBufferHeight,
                 _initialSizeSource,
+                ItemFactoryKind.ToString(),
                 _firstFrameAtUtc,
                 _lastFrameAtUtc,
                 _failure);
@@ -232,6 +377,40 @@ public sealed class WindowsCaptureSession : IDisposable
         _session.Dispose();
         _framePool.Dispose();
         _device.Dispose();
+    }
+
+    private static WindowsCaptureSetupException SetupFailure(
+        string stage,
+        IntPtr targetHandle,
+        WindowsCaptureTargetKind targetKind,
+        WindowsCaptureItemFactoryKind itemFactoryKind,
+        Exception error,
+        int itemWidth = 0,
+        int itemHeight = 0,
+        int bufferWidth = 0,
+        int bufferHeight = 0,
+        string? initialSizeSource = null,
+        string? displayName = null)
+    {
+        var message =
+            $"Windows capture setup failed at {stage}; target={targetKind}; factory={itemFactoryKind}; " +
+            $"handle=0x{targetHandle.ToInt64():X}; item={itemWidth}x{itemHeight}; " +
+            $"buffer={bufferWidth}x{bufferHeight}; source={initialSizeSource ?? "<none>"}; " +
+            $"displayName={displayName ?? "<unavailable>"}; inner=0x{error.HResult:X8} {error.Message}";
+
+        return new WindowsCaptureSetupException(
+            stage,
+            targetKind,
+            targetHandle,
+            itemFactoryKind,
+            message,
+            error,
+            itemWidth,
+            itemHeight,
+            bufferWidth,
+            bufferHeight,
+            initialSizeSource,
+            displayName);
     }
 
     private static InitialCaptureSize ResolveInitialBufferSize(
