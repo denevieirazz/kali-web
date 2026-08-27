@@ -9,6 +9,7 @@ on:
       - 'desktop/CloudOS.WindowsCapture.Fixture/**'
       - 'desktop/CloudOS.WindowsCapture.NativeReference/**'
       - 'scripts/test-windows-capture-probe.ps1'
+      - 'scripts/test-windows-capture-app.ps1'
       - 'README.md'
       - 'docs/NATIVE-HOST-ROADMAP.md'
       - 'WINDOWS_CAPTURED_SURFACE_REPORT.md'
@@ -104,6 +105,41 @@ jobs:
             }
           }
           Write-Host 'Physical matrix script parse/contract: PASS'
+
+      - name: Validate generic app qualification harness contract
+        shell: pwsh
+        run: |
+          $scriptPath = (Resolve-Path 'scripts/test-windows-capture-app.ps1').Path
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw "Generic app PowerShell parser found $($errors.Count) error(s)."
+          }
+          $text = Get-Content $scriptPath -Raw
+          foreach ($required in @(
+            'BROKER_OR_SINGLETON_UNSAFE',
+            'CAPTURE_SUPPORTED',
+            'CAPTURE_BLOCKED',
+            'RENDER_FAILED',
+            'samePidWindowRequired',
+            'window/raw/marshal-interface/hold',
+            'NATIVE C++/WINRT REFERENCE',
+            'app-capture-qualification-summary.json',
+            'ArgumentList.Add',
+            'UseShellExecute = $false'
+          )) {
+            if (-not $text.Contains($required, [System.StringComparison]::Ordinal)) {
+              throw "Generic app qualification harness is missing contract '$required'."
+            }
+          }
+          foreach ($forbidden in @('cmd.exe', 'UseShellExecute = $true')) {
+            if ($text.Contains($forbidden, [System.StringComparison]::OrdinalIgnoreCase)) {
+              throw "Generic app qualification harness contains forbidden shell/fallback pattern '$forbidden'."
+            }
+          }
+          Write-Host 'Generic app qualification harness parse/security contract: PASS'
 
       - name: Build conventional Windows capture fixture
         run: dotnet build desktop/CloudOS.WindowsCapture.Fixture/CloudOS.WindowsCapture.Fixture.csproj -c Release --nologo
