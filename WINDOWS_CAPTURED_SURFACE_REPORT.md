@@ -10,6 +10,19 @@ PR: #15, kept **DRAFT / DO NOT MERGE** until physical and UX gates are complete.
 
 Goal: replace the previous Windows `anchored-overlay` presentation with a generic captured-surface runtime for compatible Windows applications. No app-specific Brave/Chrome/Electron adapter is allowed as the architectural solution.
 
+## Canonical GitHub/CI state
+
+The latest validated GitHub-only state before physical HWND qualification is:
+
+```text
+branch = poc/cloudos-windows-captured-surface
+head = 774ae09758e4c8bd9ef339a170eb8403577a3cbd
+Windows Captured Surface CI = 33059360668 (#51) SUCCESS
+CloudOS CI Baseline = 33059360675 (#427) SUCCESS
+```
+
+The baseline passed lint, frontend build, backend/integration, E2E, frontend unit tests, Host build/tests, Browser response contracts, freshness policy, Bootstrap build/tests, Browser TestHost, Playwright characterization, Browser opening lifecycle and native Browser WebView2. Conditional visual/diff steps that did not apply were skipped rather than failed.
+
 ## Product contract
 
 For an authorized Windows app launch:
@@ -149,7 +162,7 @@ get_activation_factory<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()
   -> GraphicsCaptureItem.Size / DisplayName
 ```
 
-The executable now emits machine-readable JSON both on success and diagnostic failure:
+The executable emits machine-readable JSON both on success and diagnostic failure:
 
 ```text
 schemaVersion
@@ -239,12 +252,6 @@ The dedicated CI statically validates the generic harness security contract:
 - shell fallback is forbidden;
 - same-PID qualification and fail-closed classifications must remain present.
 
-## Current CI evidence before the next documentation-only head
-
-The code/harness state at `e88f393cf2b740adf79d1fde8f43ef1e7ba8e89b` passed `Windows Captured Surface CI` run `33059026098` (#49), including the generic harness contract and native JSON contract.
-
-The complete CloudOS baseline for that code state is tracked separately by its exact SHA/run and must be `success` before that SHA is called fully green.
-
 ## External API constraints confirmed
 
 `IGraphicsCaptureItemInterop::CreateForWindow` remains the supported desktop interop API for a top-level HWND target on Windows 10 1903+.
@@ -268,6 +275,6 @@ The independent native implementation follows the Microsoft C++/WinRT activation
 
 ## Current verdict
 
-**POC STATUS: GITHUB/CI TOOLING ADVANCED; PHYSICAL HWND WGC QUALIFICATION STILL REQUIRED.**
+**POC STATUS: CANONICAL GITHUB/CI HEAD GREEN; PHYSICAL HWND WGC QUALIFICATION STILL REQUIRED.**
 
 The lower WGC/D3D path is physically proven through monitor capture. The remaining physical blocker is window-target item/session qualification. GitHub-only work has converted the next physical session from iterative debugging into one evidence-producing fixture matrix followed by one generic real-app harness.
