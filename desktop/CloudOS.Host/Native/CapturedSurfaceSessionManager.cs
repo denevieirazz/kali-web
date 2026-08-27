@@ -128,6 +128,55 @@ public sealed class CapturedSurfaceSessionManager : IDisposable
         GetRequired(surfaceId, generation).Runtime.Resume();
 
     /// <summary>
+    /// Routes pointer coordinates expressed only in CloudOS surface CSS space. The correlated
+    /// source HWND and its physical client geometry remain Host-owned and are measured by the
+    /// runtime immediately before injection. The caller cannot supply HWND/client/screen pixels.
+    /// </summary>
+    public bool RoutePointer(
+        string surfaceId,
+        int generation,
+        long sequence,
+        WindowsCapturePointerEventKind kind,
+        WindowsCapturePointerButton button,
+        int wheelDelta,
+        bool shift,
+        bool control,
+        bool alt,
+        double surfaceCssWidth,
+        double surfaceCssHeight,
+        double localCssX,
+        double localCssY) =>
+        GetRequired(surfaceId, generation).Runtime.TryRoutePointer(
+            sequence,
+            kind,
+            button,
+            wheelDelta,
+            shift,
+            control,
+            alt,
+            surfaceCssWidth,
+            surfaceCssHeight,
+            localCssX,
+            localCssY);
+
+    public bool RouteKey(
+        string surfaceId,
+        int generation,
+        long sequence,
+        WindowsCaptureKeyEventKind kind,
+        int virtualKey,
+        int scanCode,
+        bool extended,
+        bool repeat) =>
+        GetRequired(surfaceId, generation).Runtime.TryRouteKey(
+            sequence,
+            kind,
+            virtualKey,
+            scanCode,
+            extended,
+            repeat);
+
+    /// <summary>
     /// Admission-only diagnostic. Do not call this immediately before InjectPointer/InjectKey,
     /// because successful admission consumes the sequence number by design.
     /// </summary>
