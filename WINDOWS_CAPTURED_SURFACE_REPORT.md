@@ -10,18 +10,20 @@ PR: #15, kept **DRAFT / DO NOT MERGE** until physical and UX gates are complete.
 
 Goal: replace the previous Windows `anchored-overlay` presentation with a generic captured-surface runtime for compatible Windows applications. No app-specific Brave/Chrome/Electron adapter is allowed as the architectural solution.
 
-## Canonical GitHub/CI state
+## Recorded green ancestor and canonical-head rule
 
-The latest validated GitHub-only state before physical HWND qualification is:
+A fully validated ancestor of this report is:
 
 ```text
 branch = poc/cloudos-windows-captured-surface
-head = 774ae09758e4c8bd9ef339a170eb8403577a3cbd
+validated ancestor = 774ae09758e4c8bd9ef339a170eb8403577a3cbd
 Windows Captured Surface CI = 33059360668 (#51) SUCCESS
 CloudOS CI Baseline = 33059360675 (#427) SUCCESS
 ```
 
 The baseline passed lint, frontend build, backend/integration, E2E, frontend unit tests, Host build/tests, Browser response contracts, freshness policy, Bootstrap build/tests, Browser TestHost, Playwright characterization, Browser opening lifecycle and native Browser WebView2. Conditional visual/diff steps that did not apply were skipped rather than failed.
+
+Do not infer that a descendant commit is green solely because this recorded ancestor is green. The **current canonical SHA is always the PR head whose own `Windows Captured Surface CI` and `CloudOS CI Baseline` runs both completed with `success`**. The PR description records that moving canonical head so this repository report does not create a self-referential SHA every time it is edited.
 
 ## Product contract
 
@@ -275,6 +277,6 @@ The independent native implementation follows the Microsoft C++/WinRT activation
 
 ## Current verdict
 
-**POC STATUS: CANONICAL GITHUB/CI HEAD GREEN; PHYSICAL HWND WGC QUALIFICATION STILL REQUIRED.**
+**POC STATUS: GITHUB/CI TOOLING GREEN ON A RECORDED ANCESTOR; CURRENT PR HEAD MUST PASS ITS OWN CHECKS; PHYSICAL HWND WGC QUALIFICATION STILL REQUIRED.**
 
 The lower WGC/D3D path is physically proven through monitor capture. The remaining physical blocker is window-target item/session qualification. GitHub-only work has converted the next physical session from iterative debugging into one evidence-producing fixture matrix followed by one generic real-app harness.
