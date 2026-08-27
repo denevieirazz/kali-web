@@ -147,7 +147,7 @@ public sealed class HostOwnedCapturedSurfaceSessionFactory : ICapturedSurfaceRun
 public sealed class HostOwnedCapturedSurfaceSessionManager : IDisposable
 {
     private static readonly Regex SessionIdPattern = new(
-        "^native-[a-f0-9]{24}$",
+        "^window-[a-f0-9]{32}$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private readonly object _sync = new();
