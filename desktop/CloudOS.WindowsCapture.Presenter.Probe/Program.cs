@@ -7,6 +7,7 @@ ApplicationConfiguration.Initialize();
 if (args.Contains("--help", StringComparer.Ordinal))
 {
     Console.WriteLine("CloudOS captured-surface presenter probe");
+    Console.WriteLine("  Pipeline: WGC -> D3D11/DXGI presenter -> Host-owned tool HWND");
     Console.WriteLine("  --hwnd <decimal|0xHEX>");
     Console.WriteLine("  --seconds <1-30>             default 5");
     Console.WriteLine("  --minimum-frames <1-600>     default 10");
