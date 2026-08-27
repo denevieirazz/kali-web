@@ -107,7 +107,7 @@ public sealed class InstallerContainedExecutionCoordinator
     {
         var ownership = _ownership.CompleteRoot(rootProcessId);
         if (ownership is null) return null;
-        _completeCapability(ownership.CapabilityId);
+        CompleteCapabilityBestEffort(ownership.CapabilityId);
         return ownership;
     }
 
