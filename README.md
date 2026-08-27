@@ -59,7 +59,9 @@ O runtime experimental é genérico por classe de runtime, não por aplicativo. 
 
 A fronteira de segurança é **fail-closed**: se o CloudOS não conseguir correlacionar, conter, capturar ou apresentar um aplicativo com segurança, ele deve recusar a abertura e expor um diagnóstico. A POC **não pode** usar como fallback abrir a UI normalmente no desktop Windows. Apps elevados, DRM/protected capture, anti-cheat, exclusive fullscreen, brokers compartilhados, handoff de singleton e outros modelos incompatíveis podem permanecer explicitamente `UNSUPPORTED` até existir uma estratégia segura para aquela classe.
 
-O gate físico atual da POC usa uma fixture WinForms convencional e compara três caminhos na mesma execução: HWND via activation factory WinRT em ABI cru (gate do produto), HWND pelo caminho projetado legado (controle) e HMONITOR via activation factory cru (controle de D3D/frame-pool/compositor). O smoke está em `scripts/test-windows-capture-probe.ps1` e grava evidência estruturada em `poc1-physical-evidence/windows-captured-surface`.
+O gate físico atual da POC usa uma fixture WinForms convencional e compara três caminhos na mesma execução: HWND via activation factory WinRT em ABI cru (gate do produto), HWND pelo caminho projetado legado (controle) e HMONITOR via activation factory cru (controle de D3D/frame-pool/compositor). O caminho raw obtém `IGraphicsCaptureItemInterop` diretamente da activation factory `Windows.Graphics.Capture.GraphicsCaptureItem`, espelhando o contrato Win32 oficial em vez de depender do helper projetado como fronteira de fábrica.
+
+O smoke está em `scripts/test-windows-capture-probe.ps1` e grava evidência estruturada em `poc1-physical-evidence/windows-captured-surface`, incluindo um resumo de matriz mesmo quando a sessão de captura falha durante setup.
 
 Consulte [docs/NATIVE-HOST-ROADMAP.md](docs/NATIVE-HOST-ROADMAP.md) para a evolução do host nativo.
 
@@ -116,7 +118,7 @@ Para a POC de captured surface no Windows físico:
 pwsh -NoProfile -File scripts/test-windows-capture-probe.ps1 -ExpectedHeadSha <SHA_EXATO>
 ```
 
-O smoke exige a branch correta e o SHA exato, compila a fixture/probe, executa a matriz de factory/target e falha se o gate `window/raw-activation-factory` não entregar o mínimo de frames solicitado. Controles diagnósticos não podem transformar um gate de janela falho em PASS.
+O smoke exige a branch correta e o SHA exato, compila a fixture/probe, executa a matriz `window/raw`, `window/projected` e `monitor/raw`, grava os três relatórios mais `fixture-wgc-matrix-summary.json`, e falha se o gate `window/raw-activation-factory` não entregar o mínimo de frames solicitado. Controles diagnósticos não podem transformar um gate de janela falho em PASS.
 
 Os runners de teste definem `NODE_ENV=test` e usam um diretório temporário; a suíte não deve redefinir o banco local de desenvolvimento.
 
