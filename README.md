@@ -39,11 +39,29 @@ CloudOS Local Agent / Node.js (porta efêmera)
 
 No host desktop, o documento React usa a origem fixa `http://cloudos.localhost/`, mapeada pelo WebView2 para o build local. Assim, `localStorage`, IndexedDB e OPFS continuam na mesma partição entre reinicializações. O agente usa uma porta efêmera em `127.0.0.1`; o host injeta somente os endpoints daquela execução, e CORS/WebSocket aceitam a origem fixa apenas no modo nativo. O fluxo Vite em `15173` permanece disponível para desenvolvimento web.
 
-## Limite das janelas nativas
+## Limite das janelas nativas e captured-surface POC
 
-Programas Windows e WSLg criam janelas top-level nativas. O host CloudOS acompanha as janelas que consegue atribuir com segurança e as integra à taskbar, mas os pixels continuam sendo desenhados pelo Windows, não dentro de uma `<div>`. Isso preserva compatibilidade, GPU, áudio, IME e desempenho.
+O host estável ainda possui infraestrutura legada que acompanha janelas top-level nativas atribuídas com segurança. Nessa arquitetura antiga, os pixels continuam sendo desenhados pelo Windows e a janela de origem continua sendo uma janela Win32 real.
 
-Apps elevados, DRM, anti-cheat, secure desktop e brokers compartilhados do WSLg podem exigir fallback como janela nativa não gerenciada. Captura literal dentro do canvas é uma fase experimental. Consulte [docs/NATIVE-HOST-ROADMAP.md](docs/NATIVE-HOST-ROADMAP.md).
+A branch experimental `poc/cloudos-windows-captured-surface` existe para substituir esse modelo como apresentação final de aplicativos Windows. O contrato da POC é:
+
+```text
+processo Windows autorizado/correlacionado
+        ↓
+GraphicsCaptureItem do HWND
+        ↓
+Windows.Graphics.Capture + D3D11
+        ↓
+surface de apresentação pertencente ao CloudOS
+```
+
+O runtime experimental é genérico por classe de runtime, não por aplicativo. Não devem existir adapters específicos para Brave, Chrome, Discord ou programas individuais. O objetivo é que aplicativos Win32 convencionais instalados antes ou depois do CloudOS sejam descobertos, classificados e apresentados através do mesmo runtime.
+
+A fronteira de segurança é **fail-closed**: se o CloudOS não conseguir correlacionar, conter, capturar ou apresentar um aplicativo com segurança, ele deve recusar a abertura e expor um diagnóstico. A POC **não pode** usar como fallback abrir a UI normalmente no desktop Windows. Apps elevados, DRM/protected capture, anti-cheat, exclusive fullscreen, brokers compartilhados, handoff de singleton e outros modelos incompatíveis podem permanecer explicitamente `UNSUPPORTED` até existir uma estratégia segura para aquela classe.
+
+O gate físico atual da POC usa uma fixture WinForms convencional e compara três caminhos na mesma execução: HWND via activation factory WinRT em ABI cru (gate do produto), HWND pelo caminho projetado legado (controle) e HMONITOR via activation factory cru (controle de D3D/frame-pool/compositor). O smoke está em `scripts/test-windows-capture-probe.ps1` e grava evidência estruturada em `poc1-physical-evidence/windows-captured-surface`.
+
+Consulte [docs/NATIVE-HOST-ROADMAP.md](docs/NATIVE-HOST-ROADMAP.md) para a evolução do host nativo.
 
 ## Requisitos
 
@@ -91,6 +109,14 @@ npm run test:bootstrap
 npm test
 npm run test:e2e
 ```
+
+Para a POC de captured surface no Windows físico:
+
+```powershell
+pwsh -NoProfile -File scripts/test-windows-capture-probe.ps1 -ExpectedHeadSha <SHA_EXATO>
+```
+
+O smoke exige a branch correta e o SHA exato, compila a fixture/probe, executa a matriz de factory/target e falha se o gate `window/raw-activation-factory` não entregar o mínimo de frames solicitado. Controles diagnósticos não podem transformar um gate de janela falho em PASS.
 
 Os runners de teste definem `NODE_ENV=test` e usam um diretório temporário; a suíte não deve redefinir o banco local de desenvolvimento.
 
