@@ -37,6 +37,14 @@ public sealed class WindowsCaptureInputGate
 
     public int Generation => _generation;
 
+    public bool IsActive
+    {
+        get
+        {
+            lock (_sync) return _active;
+        }
+    }
+
     public void SetActive(bool active)
     {
         lock (_sync) _active = active;
