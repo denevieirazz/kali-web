@@ -42,6 +42,16 @@ public sealed class InstallerCapabilityService : IDisposable
     {
         ThrowIfDisposed();
         var record = await _catalog.GetRequiredAsync(artifactId, cancellationToken);
+        if (!File.Exists(record.CanonicalPath))
+        {
+            return Blocked(
+                record,
+                InstallerReadinessStatus.ArtifactMissing,
+                integrityValid: false,
+                elevatedBrokerAvailable,
+                "The downloaded artifact no longer exists.");
+        }
+
         var integrityValid = await _catalog.ValidateIntegrityAsync(record, cancellationToken);
         if (!integrityValid)
         {
@@ -53,21 +63,47 @@ public sealed class InstallerCapabilityService : IDisposable
                 "The downloaded artifact no longer matches its registered SHA-256.");
         }
 
-        var supported = record.Kind is InstallerArtifactKind.WindowsExecutable or InstallerArtifactKind.WindowsInstallerPackage;
-        if (!supported)
+        InstallerArtifactInspection currentInspection;
+        try
+        {
+            currentInspection = await InstallerArtifactInspector.InspectAsync(record.CanonicalPath, cancellationToken);
+        }
+        catch (FileNotFoundException)
         {
             return Blocked(
                 record,
+                InstallerReadinessStatus.ArtifactMissing,
+                integrityValid: false,
+                elevatedBrokerAvailable,
+                "The downloaded artifact disappeared during validation.");
+        }
+
+        if (!MatchesRegisteredArtifact(record, currentInspection))
+        {
+            return Blocked(
+                RefreshSecurityMetadata(record, currentInspection),
+                InstallerReadinessStatus.ArtifactChanged,
+                integrityValid: false,
+                elevatedBrokerAvailable,
+                "The downloaded artifact changed while CloudOS was validating it.");
+        }
+
+        var currentRecord = RefreshSecurityMetadata(record, currentInspection);
+        var supported = currentRecord.Kind is InstallerArtifactKind.WindowsExecutable or InstallerArtifactKind.WindowsInstallerPackage;
+        if (!supported)
+        {
+            return Blocked(
+                currentRecord,
                 InstallerReadinessStatus.UnsupportedFormat,
                 integrityValid: true,
                 elevatedBrokerAvailable,
                 "This installer format is cataloged but does not yet have a CloudOS execution broker.");
         }
 
-        if (record.Trust != InstallerTrustStatus.Trusted && !allowUntrusted)
+        if (currentRecord.Trust != InstallerTrustStatus.Trusted && !allowUntrusted)
         {
             return Blocked(
-                record,
+                currentRecord,
                 InstallerReadinessStatus.BlockedByPolicy,
                 integrityValid: true,
                 elevatedBrokerAvailable,
@@ -81,43 +117,55 @@ public sealed class InstallerCapabilityService : IDisposable
         Directory.CreateDirectory(capabilityDirectory);
         Directory.CreateDirectory(_logsRoot);
 
-        var stagedPath = Path.Combine(capabilityDirectory, record.FileName);
+        var stagedPath = Path.Combine(capabilityDirectory, currentRecord.FileName);
         try
         {
-            InstallerStagingCopy.CopyPreservingStreams(record.CanonicalPath, stagedPath);
-            var stagedHash = await InstallerArtifactInspector.ComputeSha256Async(stagedPath, cancellationToken);
-            if (!stagedHash.Equals(record.Sha256, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidDataException("Staged installer hash does not match the approved artifact.");
+            InstallerStagingCopy.CopyPreservingStreams(currentRecord.CanonicalPath, stagedPath);
+            var stagedInspection = await InstallerArtifactInspector.InspectAsync(stagedPath, cancellationToken);
+            if (!MatchesRegisteredArtifact(currentRecord, stagedInspection))
+                throw new InvalidDataException("Staged installer no longer matches the approved artifact.");
+
+            var requireTrustedPublisher = currentRecord.Trust == InstallerTrustStatus.Trusted;
+            if (requireTrustedPublisher && stagedInspection.Trust != InstallerTrustStatus.Trusted)
+                throw new InvalidDataException("Staged installer publisher trust changed after approval.");
+
+            var stagedRecord = RefreshSecurityMetadata(currentRecord, stagedInspection);
             File.SetAttributes(stagedPath, File.GetAttributes(stagedPath) | FileAttributes.ReadOnly);
 
             var logPath = Path.Combine(_logsRoot, $"install-{capabilityId}.log");
-            var launchPlan = InstallerLaunchPlanBuilder.Build(record, stagedPath, logPath);
+            var launchPlan = InstallerLaunchPlanBuilder.Build(stagedRecord, stagedPath, logPath);
             var capability = new InstallerCapability(
                 capabilityId,
-                record.ArtifactId,
+                stagedRecord.ArtifactId,
                 issuedAt,
                 expiresAt,
-                record.Sha256);
+                stagedRecord.Sha256);
 
             lock (_sync)
             {
                 ThrowIfDisposed();
                 PurgeExpiredLocked(issuedAt);
-                _capabilities.Add(capabilityId, new CapabilityState(capability, launchPlan, stagedPath));
+                _capabilities.Add(
+                    capabilityId,
+                    new CapabilityState(
+                        capability,
+                        launchPlan,
+                        stagedPath,
+                        requireTrustedPublisher));
             }
 
             var readiness = new InstallerReadiness(
                 InstallerReadinessStatus.Ready,
-                record.ToPublicView(),
+                stagedRecord.ToPublicView(),
                 IntegrityValid: true,
-                TrustValid: record.Trust == InstallerTrustStatus.Trusted,
+                TrustValid: stagedRecord.Trust == InstallerTrustStatus.Trusted,
                 CanLaunchInUserSession: true,
                 ElevatedBrokerAvailable: elevatedBrokerAvailable,
-                Reason: record.Trust == InstallerTrustStatus.Trusted
+                Reason: stagedRecord.Trust == InstallerTrustStatus.Trusted
                     ? null
                     : "User explicitly confirmed an installer whose publisher trust is not verified.");
 
-            return new PreparedInstallerCapability(capability, record.ToPublicView(), launchPlan, readiness);
+            return new PreparedInstallerCapability(capability, stagedRecord.ToPublicView(), launchPlan, readiness);
         }
         catch
         {
@@ -146,9 +194,16 @@ public sealed class InstallerCapabilityService : IDisposable
                 throw new InvalidOperationException("Installer capability has expired.");
             if (!File.Exists(state.StagedPath))
                 throw new FileNotFoundException("Staged installer disappeared before launch.", state.StagedPath);
-            var stagedHash = await InstallerArtifactInspector.ComputeSha256Async(state.StagedPath, cancellationToken);
-            if (!stagedHash.Equals(state.Capability.ExpectedSha256, StringComparison.OrdinalIgnoreCase))
+
+            var stagedInspection = await InstallerArtifactInspector.InspectAsync(state.StagedPath, cancellationToken);
+            if (!stagedInspection.Sha256.Equals(state.Capability.ExpectedSha256, StringComparison.OrdinalIgnoreCase)
+                || stagedInspection.Kind != state.LaunchPlan.Kind)
+            {
                 throw new InvalidDataException("Staged installer changed after capability issuance.");
+            }
+            if (state.RequireTrustedPublisher && stagedInspection.Trust != InstallerTrustStatus.Trusted)
+                throw new InvalidDataException("Staged installer publisher trust is no longer valid.");
+
             return state.LaunchPlan.Validate();
         }
         catch
@@ -178,6 +233,27 @@ public sealed class InstallerCapabilityService : IDisposable
         foreach (var state in states)
             TryDeleteDirectory(Path.GetDirectoryName(state.StagedPath)!);
     }
+
+    private static bool MatchesRegisteredArtifact(
+        InstallerArtifactRecord record,
+        InstallerArtifactInspection inspection) =>
+        inspection.Kind == record.Kind
+        && inspection.SizeBytes == record.SizeBytes
+        && inspection.Sha256.Equals(record.Sha256, StringComparison.OrdinalIgnoreCase);
+
+    private static InstallerArtifactRecord RefreshSecurityMetadata(
+        InstallerArtifactRecord record,
+        InstallerArtifactInspection inspection) =>
+        record with
+        {
+            FileName = Path.GetFileName(record.CanonicalPath),
+            Kind = inspection.Kind,
+            Sha256 = inspection.Sha256,
+            SizeBytes = inspection.SizeBytes,
+            LastWriteTimeUtc = inspection.LastWriteTimeUtc,
+            Trust = inspection.Trust,
+            Publisher = inspection.Publisher
+        };
 
     private static PreparedInstallerCapability Blocked(
         InstallerArtifactRecord record,
@@ -246,5 +322,6 @@ public sealed class InstallerCapabilityService : IDisposable
     private sealed record CapabilityState(
         InstallerCapability Capability,
         InstallerLaunchPlan LaunchPlan,
-        string StagedPath);
+        string StagedPath,
+        bool RequireTrustedPublisher);
 }
