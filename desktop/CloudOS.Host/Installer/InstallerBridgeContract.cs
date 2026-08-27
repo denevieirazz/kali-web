@@ -2,12 +2,23 @@ using CloudOS.Installer;
 
 namespace CloudOS.Host.Installer;
 
+public sealed record InstallerArtifactBridgeView(
+    string ArtifactId,
+    string FileName,
+    string Kind,
+    string Sha256,
+    long SizeBytes,
+    string Trust,
+    string? Publisher,
+    DateTimeOffset RegisteredAtUtc,
+    string? SourceDownloadId);
+
 public sealed record InstallerArtifactListBridgeResponse(
-    IReadOnlyList<InstallerArtifactPublicView> Artifacts,
+    IReadOnlyList<InstallerArtifactBridgeView> Artifacts,
     bool ElevationBrokerAvailable);
 
 public sealed record InstallerReadinessBridgeView(
-    InstallerReadinessStatus Status,
+    string Status,
     bool IntegrityValid,
     bool TrustValid,
     bool CanLaunchInUserSession,
@@ -15,14 +26,15 @@ public sealed record InstallerReadinessBridgeView(
     string? Reason);
 
 public sealed record InstallerPrepareBridgeResponse(
-    InstallerArtifactPublicView Artifact,
+    InstallerArtifactBridgeView Artifact,
     InstallerReadinessBridgeView Readiness,
     string? CapabilityId,
     DateTimeOffset? ExpiresAtUtc);
 
 /// <summary>
 /// Public WebView contract for installer discovery/preparation. It deliberately
-/// omits launch-plan paths, argv, working directories and native log paths.
+/// omits launch-plan paths, argv, working directories and native log paths. Enum
+/// values are projected to stable names instead of serializer-dependent integers.
 /// </summary>
 public static class InstallerBridgeContract
 {
@@ -32,7 +44,7 @@ public static class InstallerBridgeContract
     {
         ArgumentNullException.ThrowIfNull(artifacts);
         return new InstallerArtifactListBridgeResponse(
-            artifacts.ToArray(),
+            artifacts.Select(ToBridgeView).ToArray(),
             elevationBrokerAvailable);
     }
 
@@ -49,9 +61,9 @@ public static class InstallerBridgeContract
             throw new InvalidOperationException("A blocked installer response cannot expose a capability.");
 
         return new InstallerPrepareBridgeResponse(
-            prepared.Artifact,
+            ToBridgeView(prepared.Artifact),
             new InstallerReadinessBridgeView(
-                prepared.Readiness.Status,
+                prepared.Readiness.Status.ToString(),
                 prepared.Readiness.IntegrityValid,
                 prepared.Readiness.TrustValid,
                 prepared.Readiness.CanLaunchInUserSession,
@@ -76,4 +88,16 @@ public static class InstallerBridgeContract
             throw new ArgumentException("Installer capability ID is invalid.", nameof(capabilityId));
         return capabilityId;
     }
+
+    private static InstallerArtifactBridgeView ToBridgeView(InstallerArtifactPublicView artifact) =>
+        new(
+            artifact.ArtifactId,
+            artifact.FileName,
+            artifact.Kind.ToString(),
+            artifact.Sha256,
+            artifact.SizeBytes,
+            artifact.Trust.ToString(),
+            artifact.Publisher,
+            artifact.RegisteredAtUtc,
+            artifact.SourceDownloadId);
 }
