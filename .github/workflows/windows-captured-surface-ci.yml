@@ -34,7 +34,7 @@ jobs:
         run: |
           $probe = 'desktop/CloudOS.WindowsCapture.Probe/bin/Release/net8.0-windows10.0.19041.0/CloudOS.WindowsCapture.Probe.dll'
           $output = dotnet $probe --help 2>&1 | Out-String
-          if ($LASTEXITCODE -ne 64) { throw "Unexpected --help exit code: $LASTEXITCODE`n$output" }
+          if ($LASTEXITCODE -ne 0) { throw "Unexpected --help exit code: $LASTEXITCODE`n$output" }
           foreach ($required in @('--capture-kind window|monitor', '--item-factory raw|projected', '--output <path>')) {
             if (-not $output.Contains($required, [System.StringComparison]::Ordinal)) {
               throw "Probe help is missing contract '$required'.`n$output"
