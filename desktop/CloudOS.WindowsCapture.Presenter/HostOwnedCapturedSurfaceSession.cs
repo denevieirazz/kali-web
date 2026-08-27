@@ -43,6 +43,7 @@ public sealed class HostOwnedCapturedSurfaceSession : IDisposable
     private readonly WindowsCaptureSurfaceCoordinator _surface;
     private readonly WindowsCaptureSession _capture;
     private readonly WindowsCaptureInputGate _targetedInputGate;
+    private readonly WindowsCaptureTargetedInputInjector _targetedInjector;
     private readonly WindowsCaptureInputRouter _inputRouter;
     private readonly Timer _healthTimer;
     private HostOwnedCapturedSurfaceSessionState _state = HostOwnedCapturedSurfaceSessionState.Created;
@@ -55,7 +56,8 @@ public sealed class HostOwnedCapturedSurfaceSession : IDisposable
         IntPtr sourceWindowHandle,
         string surfaceId,
         int generation,
-        WindowsCapturePresentationLayout initialLayout)
+        WindowsCapturePresentationLayout initialLayout,
+        WindowsFrameHealthOptions? frameHealthOptions = null)
     {
         if (cloudOsOwnerWindowHandle == IntPtr.Zero)
             throw new ArgumentException("CloudOS owner HWND is required.", nameof(cloudOsOwnerWindowHandle));
@@ -81,17 +83,18 @@ public sealed class HostOwnedCapturedSurfaceSession : IDisposable
                 WindowsCaptureItemFactoryKind.RawActivationFactory,
                 WindowsCaptureItemProjectionKind.MarshalInterfaceFromAbi,
                 WindowsCaptureAbiLifetimeKind.HoldUntilSessionDispose,
+                frameHealthOptions,
                 frameSink: _surface);
 
             _surface.Bind(initialLayout);
 
             _targetedInputGate = new WindowsCaptureInputGate(generation);
-            var targetedInjector = new WindowsCaptureTargetedInputInjector(
+            _targetedInjector = new WindowsCaptureTargetedInputInjector(
                 sourceWindowHandle,
                 _targetedInputGate);
             _inputRouter = new WindowsCaptureInputRouter(
                 generation,
-                new TargetedInputAdapter(targetedInjector));
+                new TargetedInputAdapter(_targetedInjector));
 
             _healthTimer = new Timer(
                 static state => ((HostOwnedCapturedSurfaceSession)state!).PollHealth(),
@@ -226,6 +229,32 @@ public sealed class HostOwnedCapturedSurfaceSession : IDisposable
                 $"Captured surface resume failed: {error.Message}");
             throw;
         }
+    }
+
+    public WindowsCaptureInputAdmission AdmitInput(long sequence)
+    {
+        PollHealth();
+        return _targetedInputGate.Admit(Generation, sequence);
+    }
+
+    public WindowsCaptureInputInjectionResult InjectPointer(WindowsCapturePointerInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        PollHealth();
+        if (input.Generation != Generation)
+            throw new InvalidOperationException(
+                $"Pointer input generation does not match session generation. session={Generation}; input={input.Generation}.");
+        return _targetedInjector.InjectPointer(input);
+    }
+
+    public WindowsCaptureInputInjectionResult InjectKey(WindowsCaptureKeyInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        PollHealth();
+        if (input.Generation != Generation)
+            throw new InvalidOperationException(
+                $"Key input generation does not match session generation. session={Generation}; input={input.Generation}.");
+        return _targetedInjector.InjectKey(input);
     }
 
     public bool TryRoutePointer(
