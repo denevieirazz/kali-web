@@ -1,3 +1,4 @@
+using System.IO;
 using CloudOS.Host.Native;
 using CloudOS.Installer;
 
