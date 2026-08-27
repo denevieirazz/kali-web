@@ -58,6 +58,8 @@ function publicApp(app) {
     categories: Array.isArray(app.categories) ? app.categories : ['Windows'],
     category: app.category || 'windows',
     mimeTypes: Array.isArray(app.mimeTypes) ? app.mimeTypes : [],
+    discoverySource: app.discoverySource || null,
+    runtimeClass: app.runtimeClass || null,
     windowMode: launchable ? currentWindowMode() : 'unavailable',
     launchable
   };
@@ -70,6 +72,11 @@ function asArray(value) {
 
 function normalizedDisplayName(value) {
   return String(value || '').trim().toLocaleLowerCase('pt-BR');
+}
+
+function normalizedExecutableKey(value) {
+  const executable = String(value || '').trim();
+  return path.win32.isAbsolute(executable) ? executable.toLowerCase() : null;
 }
 
 function shortcutIdentityKey(targetPath, parsedArguments, argumentsText = '') {
@@ -87,7 +94,7 @@ function windowsCommandProcessor() {
   return path.win32.join(systemRoot, 'System32', 'cmd.exe');
 }
 
-export function buildWindowsScriptArguments(scriptPath) {
+export function buildWindowsScriptLaunchArguments(scriptPath) {
   // `cmd /s /c "C:\\path with spaces\\script.cmd"` strips the command's
   // outer quotes before execution and truncates the path at the first space.
   // A fixed CALL token keeps the quoted script path as a distinct command
@@ -157,7 +164,8 @@ export function parseWindowsAppDiscovery(payload, existingApps = []) {
     if (!targetPath) return null;
     return shortcutIdentityKey(targetPath, Array.isArray(app.args) ? app.args : []);
   }).filter(Boolean));
-  const directNames = new Set(existingApps.map((app) => normalizedDisplayName(app.name)));
+  const directExecutablePaths = new Set(existingApps.map((app) => normalizedExecutableKey(app?.targetPath || app?.executable)).filter(Boolean));
+  const directNames = new Set(existingApps.map((app) => normalizedDisplayName(app.name)).filter(Boolean));
   const wslDistributionNames = new Set(asArray(payload?.WslDistributions).map((name) => normalizedDisplayName(name)).filter(Boolean));
   const shortcuts = [];
 
@@ -186,6 +194,7 @@ export function parseWindowsAppDiscovery(payload, existingApps = []) {
     const nameKey = normalizedDisplayName(name);
     if (identityKey && directIdentities.has(identityKey)) continue;
     if (identityKey) directIdentities.add(identityKey);
+    if (executableTarget) directExecutablePaths.add(targetPath.toLowerCase());
     directNames.add(nameKey);
 
     const directKind = !argumentsText
@@ -202,7 +211,39 @@ export function parseWindowsAppDiscovery(payload, existingApps = []) {
       targetPath,
       arguments: argumentsText,
       args: directKind === 'windows-shortcut-argv' ? parsedArguments : [],
-      workingDirectory: path.win32.isAbsolute(workingDirectory) ? workingDirectory : path.win32.dirname(targetPath)
+      workingDirectory: path.win32.isAbsolute(workingDirectory) ? workingDirectory : path.win32.dirname(targetPath),
+      discoverySource: 'start-menu-shortcut',
+      runtimeClass: directKind === 'windows-shortcut' ? 'win32-shortcut-unresolved' : 'win32-direct-candidate'
+    });
+  }
+
+  const appPaths = [];
+  for (const row of asArray(payload?.AppPaths).slice(0, 1200)) {
+    if (typeof row?.Name !== 'string' || typeof row?.Executable !== 'string') continue;
+    const name = row.Name.trim().slice(0, 160);
+    const executable = row.Executable.trim();
+    const registryPath = typeof row.RegistryPath === 'string' ? row.RegistryPath.trim().slice(0, 4096) : '';
+    if (!name || /[\0\r\n]/.test(name) || /[\0\r\n]/.test(executable) || /[\0\r\n]/.test(registryPath)) continue;
+    if (!path.win32.isAbsolute(executable) || path.win32.extname(executable).toLowerCase() !== '.exe') continue;
+    if (BLOCKED_SHORTCUT_TARGETS.has(path.win32.basename(executable).toLowerCase())) continue;
+    const executableKey = executable.toLowerCase();
+    if (directExecutablePaths.has(executableKey)) continue;
+
+    directExecutablePaths.add(executableKey);
+    directNames.add(normalizedDisplayName(name));
+    appPaths.push({
+      id: opaqueId('windows-app-path', executable),
+      name,
+      source: 'windows',
+      distribution: null,
+      icon: '\u25a6',
+      kind: 'windows-executable',
+      executable,
+      args: [],
+      workingDirectory: path.win32.dirname(executable),
+      discoverySource: 'registry-app-paths',
+      discoveryDetail: registryPath || null,
+      runtimeClass: 'win32-direct-candidate'
     });
   }
 
@@ -220,10 +261,12 @@ export function parseWindowsAppDiscovery(payload, existingApps = []) {
       distribution: null,
       icon: '\u25a6',
       kind: 'windows-start-app',
-      appUserModelId: row.AppID
+      appUserModelId: row.AppID,
+      discoverySource: 'start-apps',
+      runtimeClass: 'brokered-start-app'
     }));
 
-  return [...existingApps, ...shortcuts, ...startApps];
+  return [...existingApps, ...shortcuts, ...appPaths, ...startApps];
 }
 
 async function getWindowsStartApps(wslDistributions = []) {
@@ -236,7 +279,10 @@ async function getWindowsStartApps(wslDistributions = []) {
     '$shortcuts = @()',
     '$shell = New-Object -ComObject WScript.Shell',
     'foreach ($root in $shortcutRoots) { Get-ChildItem -LiteralPath $root -Filter *.lnk -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 800 | ForEach-Object { try { $link = $shell.CreateShortcut($_.FullName); $target = [Environment]::ExpandEnvironmentVariables([string]$link.TargetPath); $ext = [IO.Path]::GetExtension($target).ToLowerInvariant(); if ($target -and @(".exe", ".bat", ".cmd") -contains $ext -and (Test-Path -LiteralPath $target -PathType Leaf)) { $shortcuts += [PSCustomObject]@{ Name = $_.BaseName; ShortcutPath = $_.FullName; TargetPath = [IO.Path]::GetFullPath($target); Arguments = [string]$link.Arguments; WorkingDirectory = [Environment]::ExpandEnvironmentVariables([string]$link.WorkingDirectory) } } } catch {} } }',
-    '[PSCustomObject]@{ StartApps = $startApps; Shortcuts = $shortcuts } | ConvertTo-Json -Depth 4 -Compress'
+    '$appPathRoots = @("Registry::HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths", "Registry::HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths", "Registry::HKEY_LOCAL_MACHINE\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\App Paths")',
+    '$appPaths = @()',
+    'foreach ($root in $appPathRoots) { if (-not (Test-Path -LiteralPath $root)) { continue }; Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue | Select-Object -First 800 | ForEach-Object { try { $raw = [Environment]::ExpandEnvironmentVariables([string]$_.GetValue("")); if (-not $raw) { return }; $full = [IO.Path]::GetFullPath($raw); if ([IO.Path]::GetExtension($full).ToLowerInvariant() -ne ".exe" -or -not (Test-Path -LiteralPath $full -PathType Leaf)) { return }; $appPaths += [PSCustomObject]@{ Name = [IO.Path]::GetFileNameWithoutExtension($_.PSChildName); Executable = $full; RegistryPath = $_.Name } } catch {} } }',
+    '[PSCustomObject]@{ StartApps = $startApps; Shortcuts = $shortcuts; AppPaths = $appPaths } | ConvertTo-Json -Depth 4 -Compress'
   ].join('; ');
   const encoded = Buffer.from(command, 'utf16le').toString('base64');
   try {
@@ -318,7 +364,7 @@ export async function launchCatalogApp(id) {
   }
 
   const launchArguments = scriptLaunch
-    ? buildWindowsScriptArguments(scriptPath)
+    ? buildWindowsScriptLaunchArguments(scriptPath)
     : (launchKind === 'windows-shortcut-direct'
         ? []
         : (Array.isArray(app.args) ? app.args.filter((value) => typeof value === 'string' && !/[\0\r\n]/.test(value)).slice(0, 128) : []));

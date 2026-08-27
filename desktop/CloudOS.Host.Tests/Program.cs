@@ -61,6 +61,7 @@ var tests = new (string Name, Action Run)[]
     ("native command line quoting is bounded", NativeCommandLineQuotingIsBounded),
     ("cmd script GUI descendant is correlated through the contained Job", NativeScriptLaunchContract.Validate),
     ("native launcher tracks suspended process before resume", NativeLauncherTracksSuspendedProcessBeforeResume),
+    ("cmd script GUI descendant is contained by the same Job", NativeScriptLaunchContract.Validate),
     ("native job child HWND is quarantined and escape is detected", NativeJobChildWindowIsQuarantined)
 };
 

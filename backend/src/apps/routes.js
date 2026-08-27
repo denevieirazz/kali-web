@@ -1,17 +1,52 @@
+import crypto from 'node:crypto';
 import express from 'express';
 import { authenticateToken } from '../middleware/auth.js';
 import { hasNativeHostTrust } from '../auth/hostTrust.js';
 import { launchCatalogApp, refreshAppCatalog } from './appCatalog.js';
+import { classifyCatalogRuntime } from './windowsRuntimeCompatibility.js';
 
 export const appsRouter = express.Router();
 appsRouter.use(authenticateToken);
 
+function publicCatalogSnapshot(apps) {
+  const enriched = apps.map((app) => ({
+    ...app,
+    compatibility: classifyCatalogRuntime(app)
+  }));
+  const canonical = enriched.map((app) => ({
+    id: app.id,
+    name: app.name,
+    source: app.source,
+    discoverySource: app.discoverySource || null,
+    runtimeClass: app.runtimeClass || null,
+    launchable: Boolean(app.launchable),
+    compatibilityStatus: app.compatibility?.status || null
+  }));
+  const revision = crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
+  return { apps: enriched, revision, generatedAt: new Date().toISOString() };
+}
+
 appsRouter.get('/', async (req, res, next) => {
   try {
     const apps = await refreshAppCatalog(req.query.refresh === 'true');
-    res.json({ apps });
+    res.json(publicCatalogSnapshot(apps));
   } catch (error) {
     next(error);
+  }
+});
+
+appsRouter.post('/refresh', async (req, res) => {
+  try {
+    if (!hasNativeHostTrust(req, req.app.locals.cloudOsHostTrustPolicy)) {
+      return res.status(403).json({
+        error: 'Somente o Host nativo confiável pode forçar o rescan do catálogo Windows.',
+        errorCode: 'NATIVE_HOST_TRUST_REQUIRED'
+      });
+    }
+    const apps = await refreshAppCatalog(true);
+    res.json(publicCatalogSnapshot(apps));
+  } catch (error) {
+    res.status(503).json({ error: error.message, errorCode: error.code || 'APP_CATALOG_REFRESH_FAILED' });
   }
 });
 

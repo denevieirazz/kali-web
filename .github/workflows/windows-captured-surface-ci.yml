@@ -1,0 +1,315 @@
+name: Windows Captured Surface CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'desktop/CloudOS.WindowsCapture/**'
+      - 'desktop/CloudOS.WindowsCapture.Probe/**'
+      - 'desktop/CloudOS.WindowsCapture.HealthProbe/**'
+      - 'desktop/CloudOS.WindowsCapture.Contracts.Tests/**'
+      - 'desktop/CloudOS.WindowsCapture.Input.Tests/**'
+      - 'desktop/CloudOS.WindowsCapture.Fixture/**'
+      - 'desktop/CloudOS.WindowsCapture.NativeReference/**'
+      - 'desktop/CloudOS.WindowsCapture.Presenter/**'
+      - 'desktop/CloudOS.WindowsCapture.Presenter.Probe/**'
+      - 'scripts/test-windows-capture-probe.ps1'
+      - 'scripts/test-windows-capture-app.ps1'
+      - 'README.md'
+      - 'docs/NATIVE-HOST-ROADMAP.md'
+      - 'WINDOWS_CAPTURED_SURFACE_REPORT.md'
+      - '.github/workflows/windows-captured-surface-ci.yml'
+
+jobs:
+  build-capture-probe:
+    runs-on: windows-2022
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build generic Windows capture probe
+        run: dotnet build desktop/CloudOS.WindowsCapture.Probe/CloudOS.WindowsCapture.Probe.csproj -c Release --nologo
+
+      - name: Build native captured-surface presenter
+        run: dotnet build desktop/CloudOS.WindowsCapture.Presenter/CloudOS.WindowsCapture.Presenter.csproj -c Release --nologo
+
+      - name: Build presenter end-to-end probe
+        run: dotnet build desktop/CloudOS.WindowsCapture.Presenter.Probe/CloudOS.WindowsCapture.Presenter.Probe.csproj -c Release --nologo
+
+      - name: Validate presenter probe CLI contract
+        shell: pwsh
+        run: |
+          $probe = 'desktop/CloudOS.WindowsCapture.Presenter.Probe/bin/Release/net8.0-windows10.0.19041.0/CloudOS.WindowsCapture.Presenter.Probe.dll'
+          $output = dotnet $probe --help 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "Unexpected presenter-probe --help exit code: $LASTEXITCODE`n$output" }
+          foreach ($required in @('--hwnd <decimal|0xHEX>', '--minimum-frames <1-600>', '--output <path>', 'D3D11/DXGI presenter')) {
+            if (-not $output.Contains($required, [System.StringComparison]::Ordinal)) {
+              throw "Presenter probe help is missing contract '$required'.`n$output"
+            }
+          }
+          Write-Host $output
+
+      - name: Validate capture probe CLI contract
+        shell: pwsh
+        run: |
+          $probe = 'desktop/CloudOS.WindowsCapture.Probe/bin/Release/net8.0-windows10.0.19041.0/CloudOS.WindowsCapture.Probe.dll'
+          $output = dotnet $probe --help 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "Unexpected --help exit code: $LASTEXITCODE`n$output" }
+          foreach ($required in @(
+            '--capture-kind window|monitor',
+            '--item-factory raw|projected',
+            '--item-projection projected|marshal-interface',
+            '--abi-lifetime release|hold',
+            '--output <path>'
+          )) {
+            if (-not $output.Contains($required, [System.StringComparison]::Ordinal)) {
+              throw "Probe help is missing contract '$required'.`n$output"
+            }
+          }
+          Write-Host $output
+
+      - name: Validate capture probe missing-argument contract
+        shell: pwsh
+        run: |
+          $probe = (Resolve-Path 'desktop/CloudOS.WindowsCapture.Probe/bin/Release/net8.0-windows10.0.19041.0/CloudOS.WindowsCapture.Probe.dll').Path
+          $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+          $startInfo.FileName = 'dotnet'
+          $startInfo.ArgumentList.Add($probe)
+          $startInfo.UseShellExecute = $false
+          $startInfo.CreateNoWindow = $true
+          $startInfo.RedirectStandardOutput = $true
+          $startInfo.RedirectStandardError = $true
+          $process = [System.Diagnostics.Process]::Start($startInfo)
+          try {
+            $stdout = $process.StandardOutput.ReadToEnd()
+            $stderr = $process.StandardError.ReadToEnd()
+            $process.WaitForExit()
+            $output = ($stdout + $stderr).TrimEnd()
+            if ($process.ExitCode -ne 64) {
+              throw "Expected exit 64 without arguments, got $($process.ExitCode).`n$output"
+            }
+            Write-Host $output
+          }
+          finally {
+            $process.Dispose()
+          }
+
+      - name: Build frame health probe
+        run: dotnet build desktop/CloudOS.WindowsCapture.HealthProbe/CloudOS.WindowsCapture.HealthProbe.csproj -c Release --nologo
+
+      - name: Validate frame health probe CLI contract
+        shell: pwsh
+        run: |
+          $probe = 'desktop/CloudOS.WindowsCapture.HealthProbe/bin/Release/net8.0-windows10.0.19041.0/CloudOS.WindowsCapture.HealthProbe.dll'
+          $output = dotnet $probe --help 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "Unexpected frame-health --help exit code: $LASTEXITCODE`n$output" }
+          foreach ($required in @(
+            '--hwnd <decimal|0xHEX>',
+            '--sample-every <1-120>',
+            '--samples <1-64>',
+            '--region <32-1024>',
+            '--grid <8-128>',
+            '--output <path>'
+          )) {
+            if (-not $output.Contains($required, [System.StringComparison]::Ordinal)) {
+              throw "Frame-health help is missing contract '$required'.`n$output"
+            }
+          }
+          Write-Host $output
+
+      - name: Validate frame health JSON error contract
+        shell: pwsh
+        run: |
+          $probe = (Resolve-Path 'desktop/CloudOS.WindowsCapture.HealthProbe/bin/Release/net8.0-windows10.0.19041.0/CloudOS.WindowsCapture.HealthProbe.dll').Path
+          $reportPath = Join-Path $env:RUNNER_TEMP 'frame-health-invalid-hwnd.json'
+          Remove-Item -LiteralPath $reportPath -Force -ErrorAction SilentlyContinue
+
+          $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+          $startInfo.FileName = 'dotnet'
+          foreach ($argument in @($probe, '--hwnd', '0x1', '--output', $reportPath)) {
+            $startInfo.ArgumentList.Add($argument)
+          }
+          $startInfo.UseShellExecute = $false
+          $startInfo.CreateNoWindow = $true
+          $startInfo.RedirectStandardOutput = $true
+          $startInfo.RedirectStandardError = $true
+          $process = [System.Diagnostics.Process]::Start($startInfo)
+          try {
+            $stdout = $process.StandardOutput.ReadToEnd()
+            $stderr = $process.StandardError.ReadToEnd()
+            $process.WaitForExit()
+            Write-Host (($stdout + $stderr).TrimEnd())
+            if ($process.ExitCode -eq 0) { throw 'Invalid HWND unexpectedly passed frame-health probe.' }
+          }
+          finally {
+            $process.Dispose()
+          }
+
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "Frame-health probe did not write JSON report: $reportPath"
+          }
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+          if ($report.schemaVersion -ne 1) { throw "Unexpected frame-health schema: $($report.schemaVersion)" }
+          if ($report.verdict -ne 'ERROR') { throw "Unexpected frame-health verdict: $($report.verdict)" }
+          if ($null -eq $report.error) { throw 'Frame-health invalid HWND report is missing error details.' }
+          Write-Host 'Frame-health JSON error contract: PASS'
+
+      - name: Run presentation lifecycle contract tests
+        shell: pwsh
+        run: |
+          dotnet run --project desktop/CloudOS.WindowsCapture.Contracts.Tests/CloudOS.WindowsCapture.Contracts.Tests.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw "Presentation lifecycle contract tests failed with $LASTEXITCODE." }
+
+      - name: Run input mapping contract tests
+        shell: pwsh
+        run: |
+          dotnet run --project desktop/CloudOS.WindowsCapture.Input.Tests/CloudOS.WindowsCapture.Input.Tests.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw "Input contract tests failed with $LASTEXITCODE." }
+
+      - name: Parse physical matrix script
+        shell: pwsh
+        run: |
+          $scriptPath = (Resolve-Path 'scripts/test-windows-capture-probe.ps1').Path
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw "PowerShell parser found $($errors.Count) error(s)."
+          }
+          $text = Get-Content $scriptPath -Raw
+          foreach ($required in @(
+            'WINDOW / RAW / MARSHAL-INTERFACE / HOLD (PRODUCT CANDIDATE)',
+            'LIFETIME CONTROL',
+            'PROJECTION CONTROL',
+            'FACTORY CONTROL',
+            'LOWER-LAYER CONTROL',
+            'NATIVE C++/WINRT REFERENCE',
+            'fixture-native-cpp-window-reference.json',
+            'nativeDisagreesWithCsharpItemMetadata',
+            'schemaVersion = 3'
+          )) {
+            if (-not $text.Contains($required, [System.StringComparison]::Ordinal)) {
+              throw "Physical matrix script is missing contract '$required'."
+            }
+          }
+          Write-Host 'Physical matrix script parse/contract: PASS'
+
+      - name: Validate generic app qualification harness contract
+        shell: pwsh
+        run: |
+          $scriptPath = (Resolve-Path 'scripts/test-windows-capture-app.ps1').Path
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw "Generic app PowerShell parser found $($errors.Count) error(s)."
+          }
+          $text = Get-Content $scriptPath -Raw
+          foreach ($required in @(
+            'BROKER_OR_SINGLETON_UNSAFE',
+            'CAPTURE_SUPPORTED',
+            'CAPTURE_BLOCKED',
+            'RENDER_FAILED',
+            'samePidWindowRequired',
+            'window/raw/marshal-interface/hold',
+            'NATIVE C++/WINRT REFERENCE',
+            'FRAME HEALTH',
+            'app-frame-health.json',
+            'RequireFrameHealth',
+            'SUSPECT_STATIC_OR_NEUTRAL',
+            'frameHealthGatePassed',
+            'app-capture-qualification-summary.json',
+            'ArgumentList.Add',
+            'UseShellExecute = $false'
+          )) {
+            if (-not $text.Contains($required, [System.StringComparison]::Ordinal)) {
+              throw "Generic app qualification harness is missing contract '$required'."
+            }
+          }
+          foreach ($forbidden in @('cmd.exe', 'UseShellExecute = $true')) {
+            if ($text.Contains($forbidden, [System.StringComparison]::OrdinalIgnoreCase)) {
+              throw "Generic app qualification harness contains forbidden shell/fallback pattern '$forbidden'."
+            }
+          }
+          Write-Host 'Generic app qualification harness parse/security contract: PASS'
+
+      - name: Build conventional Windows capture fixture
+        run: dotnet build desktop/CloudOS.WindowsCapture.Fixture/CloudOS.WindowsCapture.Fixture.csproj -c Release --nologo
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build native C++ WinRT reference probe
+        shell: pwsh
+        run: |
+          msbuild desktop/CloudOS.WindowsCapture.NativeReference/CloudOS.WindowsCapture.NativeReference.vcxproj `
+            /m `
+            /p:Configuration=Release `
+            /p:Platform=x64 `
+            /verbosity:minimal
+
+      - name: Validate native C++ WinRT reference CLI
+        shell: pwsh
+        run: |
+          $probe = 'desktop/CloudOS.WindowsCapture.NativeReference/bin/Release/x64/CloudOS.WindowsCapture.NativeReference.exe'
+          if (-not (Test-Path -LiteralPath $probe -PathType Leaf)) { throw "Native reference probe not found: $probe" }
+          $output = & $probe --help 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "Native reference --help failed with $LASTEXITCODE.`n$output" }
+          foreach ($required in @('--hwnd <decimal|0xHEX>', '--output <path>', 'CreateForWindow')) {
+            if (-not $output.Contains($required, [System.StringComparison]::Ordinal)) {
+              throw "Native reference help is missing '$required'.`n$output"
+            }
+          }
+          Write-Host $output
+
+      - name: Validate native C++ JSON error contract
+        shell: pwsh
+        run: |
+          $probe = (Resolve-Path 'desktop/CloudOS.WindowsCapture.NativeReference/bin/Release/x64/CloudOS.WindowsCapture.NativeReference.exe').Path
+          $reportPath = Join-Path $env:RUNNER_TEMP 'native-reference-invalid-hwnd.json'
+          Remove-Item -LiteralPath $reportPath -Force -ErrorAction SilentlyContinue
+
+          $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+          $startInfo.FileName = $probe
+          foreach ($argument in @('--hwnd', '0x1', '--output', $reportPath)) {
+            $startInfo.ArgumentList.Add($argument)
+          }
+          $startInfo.UseShellExecute = $false
+          $startInfo.CreateNoWindow = $true
+          $startInfo.RedirectStandardOutput = $true
+          $startInfo.RedirectStandardError = $true
+
+          $process = [System.Diagnostics.Process]::Start($startInfo)
+          try {
+            $stdout = $process.StandardOutput.ReadToEnd()
+            $stderr = $process.StandardError.ReadToEnd()
+            $process.WaitForExit()
+            Write-Host (($stdout + $stderr).TrimEnd())
+            if ($process.ExitCode -ne 3) {
+              throw "Expected invalid-HWND exit 3, got $($process.ExitCode)."
+            }
+          }
+          finally {
+            $process.Dispose()
+          }
+
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "Native reference did not write JSON report: $reportPath"
+          }
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+          if ($report.schemaVersion -ne 1) { throw "Unexpected native report schema: $($report.schemaVersion)" }
+          if ($report.verdict -ne 'ERROR') { throw "Unexpected native verdict: $($report.verdict)" }
+          if ($report.stage -ne 'target-validation') { throw "Unexpected native error stage: $($report.stage)" }
+          if ([int]$report.itemWidth -ne 0 -or [int]$report.itemHeight -ne 0) {
+            throw "Invalid HWND unexpectedly produced item dimensions $($report.itemWidth)x$($report.itemHeight)."
+          }
+          Write-Host 'Native C++ JSON error contract: PASS'

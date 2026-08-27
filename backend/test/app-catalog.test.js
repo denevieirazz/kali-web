@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildWindowsScriptArguments, parseWindowsAppDiscovery, parseWindowsShortcutArguments } from '../src/apps/appCatalog.js';
+import { buildWindowsScriptLaunchArguments, parseWindowsAppDiscovery, parseWindowsShortcutArguments } from '../src/apps/appCatalog.js';
 
-test('script Windows preserva caminho com espaços usando CALL fixo', () => {
+test('launcher de script Windows preserva caminho com espaços sob cmd /s /c', () => {
+  const scriptPath = 'C:\\Users\\Runner User\\CloudOS Fixtures\\Launch GUI.cmd';
   assert.deepEqual(
-    buildWindowsScriptArguments('C:\\Program Files\\CloudOS App\\launch gui.cmd'),
-    ['/d', '/s', '/v:off', '/c', 'call', 'C:\\Program Files\\CloudOS App\\launch gui.cmd']
+    buildWindowsScriptLaunchArguments(scriptPath),
+    ['/d', '/s', '/v:off', '/c', 'call', scriptPath]
   );
 });
 
@@ -74,12 +75,15 @@ test('catálogo Windows prefere atalhos descobertos com alvo rastreável', () =>
   assert.equal(apps[0], existing[0]);
   assert.equal(apps.filter((app) => app.name === 'Editor Exemplo').length, 1);
   assert.equal(apps.find((app) => app.name === 'Editor Exemplo')?.kind, 'windows-shortcut-direct');
+  assert.equal(apps.find((app) => app.name === 'Editor Exemplo')?.runtimeClass, 'win32-direct-candidate');
   assert.equal(apps.find((app) => app.name === 'Browser com perfil')?.kind, 'windows-shortcut-argv');
   assert.deepEqual(apps.find((app) => app.name === 'Browser com perfil')?.args, ['--profile', 'Profile 1', '--safe']);
   assert.equal(apps.find((app) => app.name === 'Atalho com argumento inválido')?.kind, 'windows-shortcut');
+  assert.equal(apps.find((app) => app.name === 'Atalho com argumento inválido')?.runtimeClass, 'win32-shortcut-unresolved');
   assert.equal(apps.find((app) => app.name === 'Automação GUI')?.kind, 'windows-script-direct');
   assert.equal(apps.find((app) => app.name === 'Automação com argumentos crus')?.kind, 'windows-shortcut');
   assert.equal(apps.find((app) => app.name === 'Calculadora')?.kind, 'windows-start-app');
+  assert.equal(apps.find((app) => app.name === 'Calculadora')?.runtimeClass, 'brokered-start-app');
   assert.equal(apps.some((app) => app.name === 'Script bloqueado'), false);
   assert.equal(apps.filter((app) => app.name === 'Bloco de Notas do Windows').length, 1);
 });
@@ -117,6 +121,68 @@ test('catálogo Windows usa target + argv como identidade de atalho', () => {
   assert.deepEqual(chrome.map((app) => app.args), [['--profile=A'], ['--profile=B']]);
   assert.deepEqual(chrome.map((app) => app.shortcutPath), ['C:\\Start\\Chrome-A.lnk', 'C:\\Start\\Chrome-B.lnk']);
   assert.equal(apps.some((app) => app.kind === 'windows-start-app' && app.name === 'Google Chrome'), false);
+});
+
+test('App Paths complementa o catálogo com executável direto sem duplicar atalho existente', () => {
+  const editorPath = 'C:\\Program Files\\Editor\\Editor.exe';
+  const toolsPath = 'C:\\Program Files\\Tools\\Tools.exe';
+  const apps = parseWindowsAppDiscovery({
+    Shortcuts: [
+      {
+        Name: 'Editor preferido',
+        ShortcutPath: 'C:\\Start\\Editor.lnk',
+        TargetPath: editorPath
+      }
+    ],
+    AppPaths: [
+      {
+        Name: 'Editor.exe',
+        Executable: editorPath,
+        RegistryPath: 'HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\Editor.exe'
+      },
+      {
+        Name: 'Tools',
+        Executable: toolsPath,
+        RegistryPath: 'HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\Tools.exe'
+      },
+      {
+        Name: 'Tools duplicado',
+        Executable: 'c:\\program files\\tools\\tools.exe',
+        RegistryPath: 'HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\Tools.exe'
+      }
+    ],
+    StartApps: [
+      { Name: 'Tools', AppID: 'Vendor.Tools_abc!App' }
+    ]
+  });
+
+  assert.equal(apps.filter((app) => app.kind === 'windows-executable').length, 1);
+  const tools = apps.find((app) => app.kind === 'windows-executable');
+  assert.equal(tools?.name, 'Tools');
+  assert.equal(tools?.executable, toolsPath);
+  assert.equal(tools?.workingDirectory, 'C:\\Program Files\\Tools');
+  assert.deepEqual(tools?.args, []);
+  assert.equal(tools?.discoverySource, 'registry-app-paths');
+  assert.equal(tools?.runtimeClass, 'win32-direct-candidate');
+  assert.equal(apps.filter((app) => app.name === 'Editor preferido').length, 1);
+  assert.equal(apps.some((app) => app.name === 'Editor.exe'), false);
+  assert.equal(apps.some((app) => app.kind === 'windows-start-app' && app.name === 'Tools'), false);
+});
+
+test('App Paths rejeita launchers perigosos e entradas que não sejam executável absoluto', () => {
+  const apps = parseWindowsAppDiscovery({
+    AppPaths: [
+      { Name: 'PowerShell', Executable: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe' },
+      { Name: 'Explorer', Executable: 'C:\\Windows\\explorer.exe' },
+      { Name: 'Relativo', Executable: 'Tools.exe' },
+      { Name: 'Documento', Executable: 'C:\\Tools\\readme.txt' },
+      { Name: 'Quebra', Executable: 'C:\\Tools\\Bad\nApp.exe' },
+      { Name: 'Seguro', Executable: 'C:\\Tools\\Safe.exe' }
+    ]
+  });
+
+  assert.deepEqual(apps.map((app) => app.name), ['Seguro']);
+  assert.equal(apps[0].kind, 'windows-executable');
 });
 
 test('catálogo Windows ignora aliases WSLg para impedir bypass do Xpra', () => {

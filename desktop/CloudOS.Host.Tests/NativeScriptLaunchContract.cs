@@ -5,10 +5,6 @@ internal static class NativeScriptLaunchContract
 {
     internal static void Validate()
     {
-        if (Environment.GetCommandLineArgs().Any(argument =>
-            argument.StartsWith("--native-contained-fixture-", StringComparison.Ordinal)))
-            return;
-
         var systemRoot = Environment.GetEnvironmentVariable("SystemRoot")
             ?? throw new InvalidOperationException("SystemRoot is unavailable for the Windows script containment test.");
         var commandProcessor = Path.Combine(systemRoot, "System32", "cmd.exe");
@@ -53,8 +49,6 @@ internal static class NativeScriptLaunchContract
             "The script GUI descendant must remain hidden until CloudOS explicitly attaches it.");
         Assert(lease.TryTerminate(3_000, out var terminationError),
             terminationError ?? "The script containment Job did not terminate.");
-
-        Console.WriteLine("PASS cmd script GUI descendant containment contract");
     }
 
     private static string BuildScriptCommand()
