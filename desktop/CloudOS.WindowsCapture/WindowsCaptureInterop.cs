@@ -16,13 +16,11 @@ internal static unsafe partial class WindowsCaptureInterop
     [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface IGraphicsCaptureItemInterop
     {
-        // Preserve the native HRESULT and explicit output pointer. Treating this COM method as
-        // an IntPtr-returning method changes the ABI shape and can manufacture an unusable item.
-        [PreserveSig]
-        int CreateForWindow([In] IntPtr window, in Guid iid, out IntPtr result);
-
-        [PreserveSig]
-        int CreateForMonitor([In] IntPtr monitor, in Guid iid, out IntPtr result);
+        // CsWinRT's COM interop guidance keeps HRESULT translation in the CLR stub:
+        // native HRESULT methods are represented as void and ABI values stay explicit.
+        // This avoids mixing PreserveSig/manual HRESULT handling with the RCW produced by As<T>().
+        void CreateForWindow([In] IntPtr window, in Guid iid, out IntPtr result);
+        void CreateForMonitor([In] IntPtr monitor, in Guid iid, out IntPtr result);
     }
 
     [LibraryImport("d3d11.dll", EntryPoint = "CreateDirect3D11DeviceFromDXGIDevice")]
@@ -41,17 +39,23 @@ internal static unsafe partial class WindowsCaptureInterop
         D3D_FEATURE_LEVEL* selectedFeatureLevel,
         ID3D11DeviceContext** immediateContext);
 
-    public static GraphicsCaptureItem CreateItemForWindow(IntPtr windowHandle)
+    public static GraphicsCaptureItem CreateItemForWindow(IntPtr windowHandle) =>
+        CreateItem(static (interop, handle, iid, out IntPtr result) => interop.CreateForWindow(handle, iid, out result), windowHandle, "window");
+
+    public static GraphicsCaptureItem CreateItemForMonitor(IntPtr monitorHandle) =>
+        CreateItem(static (interop, handle, iid, out IntPtr result) => interop.CreateForMonitor(handle, iid, out result), monitorHandle, "monitor");
+
+    private delegate void CreateItemCall(IGraphicsCaptureItemInterop interop, IntPtr handle, in Guid iid, out IntPtr result);
+
+    private static GraphicsCaptureItem CreateItem(CreateItemCall create, IntPtr handle, string targetKind)
     {
-        if (windowHandle == IntPtr.Zero)
-            throw new ArgumentException("A non-zero HWND is required.", nameof(windowHandle));
+        if (handle == IntPtr.Zero)
+            throw new ArgumentException($"A non-zero {targetKind} handle is required.", nameof(handle));
 
         var interop = GraphicsCaptureItem.As<IGraphicsCaptureItemInterop>();
-        var result = interop.CreateForWindow(windowHandle, GraphicsCaptureItemGuid, out var itemPointer);
-        if (result < 0)
-            Marshal.ThrowExceptionForHR(result);
+        create(interop, handle, GraphicsCaptureItemGuid, out var itemPointer);
         if (itemPointer == IntPtr.Zero)
-            throw new InvalidOperationException("Windows.Graphics.Capture returned a null GraphicsCaptureItem.");
+            throw new InvalidOperationException($"Windows.Graphics.Capture returned a null GraphicsCaptureItem for {targetKind}.");
 
         try
         {
@@ -107,8 +111,6 @@ internal static unsafe partial class WindowsCaptureInterop
         IntPtr graphicsDevice = IntPtr.Zero;
         try
         {
-            // CreateDirect3D11DeviceFromDXGIDevice requires IDXGIDevice*, not ID3D11Device*.
-            // Query the D3D device for the correct interface before crossing the WinRT bridge.
             var iid = DxgiDeviceGuid;
             result = Marshal.QueryInterface((IntPtr)nativeDevice, ref iid, out dxgiDevice);
             if (result < 0 || dxgiDevice == IntPtr.Zero)
@@ -124,8 +126,6 @@ internal static unsafe partial class WindowsCaptureInterop
                 throw new InvalidOperationException("CreateDirect3D11DeviceFromDXGIDevice returned no device.");
             }
 
-            // The returned pointer is an IInspectable for a WinRT IDirect3DDevice. Project it
-            // with the CsWinRT inspectable marshaler; MarshalInterface is for classic COM ABI.
             return MarshalInspectable<IDirect3DDevice>.FromAbi(graphicsDevice);
         }
         finally
