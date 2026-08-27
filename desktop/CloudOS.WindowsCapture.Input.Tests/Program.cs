@@ -6,6 +6,9 @@ Run("non-client titlebar rejects", NonClientTitlebarRejects);
 Run("source bounds reject", SourceBoundsReject);
 Run("pointer input validates", PointerInputValidates);
 Run("key input validates", KeyInputValidates);
+Run("input gate rejects stale generation", InputGateRejectsStaleGeneration);
+Run("input gate rejects replay", InputGateRejectsReplay);
+Run("input gate rejects inactive surface", InputGateRejectsInactiveSurface);
 
 if (failures.Count > 0)
 {
@@ -110,6 +113,40 @@ static void KeyInputValidates()
     _ = new WindowsCaptureKeyInput(1, 3, WindowsCaptureKeyEventKind.KeyDown, 0x41, 0x1E, false, false).Validate();
     ExpectThrows<ArgumentOutOfRangeException>(() => new WindowsCaptureKeyInput(2, 3, WindowsCaptureKeyEventKind.KeyDown, 0, 0, false, false).Validate());
     ExpectThrows<ArgumentOutOfRangeException>(() => new WindowsCaptureKeyInput(3, 0, WindowsCaptureKeyEventKind.KeyUp, 0x41, 0x1E, false, false).Validate());
+}
+
+static void InputGateRejectsStaleGeneration()
+{
+    var gate = new WindowsCaptureInputGate(4);
+    gate.SetActive(true);
+    var stale = gate.Admit(3, 1);
+    Require(!stale.Allowed, "stale generation was admitted");
+    Require(stale.Rejection == WindowsCaptureInputRejection.StaleGeneration, "wrong stale-generation rejection");
+    var current = gate.Admit(4, 1);
+    Require(current.Allowed, "current generation was not admitted after stale event");
+}
+
+static void InputGateRejectsReplay()
+{
+    var gate = new WindowsCaptureInputGate(2);
+    gate.SetActive(true);
+    Require(gate.Admit(2, 10).Allowed, "initial sequence rejected");
+    var replay = gate.Admit(2, 10);
+    Require(!replay.Allowed && replay.Rejection == WindowsCaptureInputRejection.ReplayedSequence, "same sequence replay was admitted");
+    var old = gate.Admit(2, 9);
+    Require(!old.Allowed && old.Rejection == WindowsCaptureInputRejection.ReplayedSequence, "older sequence was admitted");
+    Require(gate.Admit(2, 11).Allowed, "next monotonic sequence rejected");
+}
+
+static void InputGateRejectsInactiveSurface()
+{
+    var gate = new WindowsCaptureInputGate(9);
+    var inactive = gate.Admit(9, 1);
+    Require(!inactive.Allowed && inactive.Rejection == WindowsCaptureInputRejection.SurfaceInactive, "inactive surface accepted input");
+    gate.SetActive(true);
+    Require(gate.Admit(9, 1).Allowed, "active surface rejected valid input");
+    gate.ResetForDeactivation();
+    Require(!gate.Admit(9, 2).Allowed, "deactivated surface accepted input");
 }
 
 static void ExpectThrows<T>(Action action) where T : Exception
