@@ -473,6 +473,7 @@ try {
 
     $summaryJson = $summary | ConvertTo-Json -Depth 18
     [System.IO.File]::WriteAllText($summaryPath, $summaryJson + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+    $healthLogOutput = if ($null -ne $health) { $health.output } else { 'NOT_RUN_CAPTURE_GATE_FAILED' }
     $logLines = @(
         'CLOUDOS GENERIC WINDOWS APP CAPTURE QUALIFICATION',
         "head=$currentHead",
@@ -490,7 +491,7 @@ try {
         $productRun.output,
         '',
         '=== FRAME HEALTH ===',
-        if ($null -ne $health) { $health.output } else { 'NOT_RUN_CAPTURE_GATE_FAILED' },
+        $healthLogOutput,
         '',
         '=== NATIVE C++/WINRT REFERENCE ===',
         $native.output,
