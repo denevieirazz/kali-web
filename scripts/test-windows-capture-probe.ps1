@@ -21,9 +21,11 @@ $fixtureExe = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.Fixture\bin\Re
 $probeProject = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.Probe\CloudOS.WindowsCapture.Probe.csproj'
 $probeDll = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.Probe\bin\Release\net8.0-windows10.0.19041.0\CloudOS.WindowsCapture.Probe.dll'
 $outputRoot = [System.IO.Path]::GetFullPath($OutputDirectory)
-$windowReportPath = Join-Path $outputRoot 'fixture-window-wgc-smoke.json'
-$monitorReportPath = Join-Path $outputRoot 'fixture-monitor-wgc-control.json'
+$windowRawReportPath = Join-Path $outputRoot 'fixture-window-wgc-smoke.json'
+$windowProjectedReportPath = Join-Path $outputRoot 'fixture-window-projected-control.json'
+$monitorRawReportPath = Join-Path $outputRoot 'fixture-monitor-wgc-control.json'
 $logPath = Join-Path $outputRoot 'fixture-wgc-smoke.log'
+$summaryPath = Join-Path $outputRoot 'fixture-wgc-matrix-summary.json'
 
 function Resolve-DotNet {
     $command = Get-Command dotnet -ErrorAction SilentlyContinue
@@ -31,6 +33,44 @@ function Resolve-DotNet {
     $localDotNet = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet\dotnet.exe'
     if (Test-Path -LiteralPath $localDotNet -PathType Leaf) { return $localDotNet }
     throw 'dotnet não foi encontrado.'
+}
+
+function Invoke-ProbeLane {
+    param(
+        [Parameter(Mandatory)] [string] $Name,
+        [Parameter(Mandatory)] [ValidateSet('window', 'monitor')] [string] $CaptureKind,
+        [Parameter(Mandatory)] [ValidateSet('raw', 'projected')] [string] $ItemFactory,
+        [Parameter(Mandatory)] [string] $ReportPath,
+        [Parameter(Mandatory)] [int] $ProcessId
+    )
+
+    Remove-Item -LiteralPath $ReportPath -Force -ErrorAction SilentlyContinue
+    Write-Host "=== $Name ===" -ForegroundColor Cyan
+    $output = & $dotnet $probeDll `
+        --pid $ProcessId `
+        --capture-kind $CaptureKind `
+        --item-factory $ItemFactory `
+        --seconds $CaptureSeconds `
+        --min-frames $MinimumFrames `
+        --output $ReportPath 2>&1
+    $exitCode = $LASTEXITCODE
+    Write-Host ($output | Out-String)
+
+    $report = $null
+    if (Test-Path -LiteralPath $ReportPath -PathType Leaf) {
+        try { $report = Get-Content -LiteralPath $ReportPath -Raw | ConvertFrom-Json }
+        catch { Write-Warning "Relatório inválido em $ReportPath : $($_.Exception.Message)" }
+    }
+
+    return [pscustomobject]@{
+        name = $Name
+        captureKind = $CaptureKind
+        itemFactory = $ItemFactory
+        exitCode = $exitCode
+        reportPath = $ReportPath
+        report = $report
+        output = ($output | Out-String).TrimEnd()
+    }
 }
 
 $currentHead = ([string](git rev-parse HEAD)).Trim().ToLowerInvariant()
@@ -70,30 +110,84 @@ try {
 
     Write-Host "Fixture PID=$($fixture.Id) reported MainWindowHandle=0x$('{0:X}' -f $reportedMainWindowHwnd.ToInt64())" -ForegroundColor Cyan
 
-    Write-Host '=== WINDOW TARGET ===' -ForegroundColor Cyan
-    $windowOutput = & $dotnet $probeDll `
-        --pid $fixture.Id `
-        --capture-kind window `
-        --seconds $CaptureSeconds `
-        --min-frames $MinimumFrames `
-        --output $windowReportPath 2>&1
-    $windowExit = $LASTEXITCODE
-    Write-Host ($windowOutput | Out-String)
+    # One physical run, three deliberately isolated lanes:
+    # 1. Product candidate: HWND through raw WinRT activation factory ABI.
+    # 2. Legacy control: same HWND through the old projected/RCW factory path.
+    # 3. Lower-layer control: monitor through the same raw activation factory and D3D/frame-pool path.
+    $windowRaw = Invoke-ProbeLane `
+        -Name 'WINDOW / RAW ACTIVATION FACTORY (PRODUCT GATE)' `
+        -CaptureKind window `
+        -ItemFactory raw `
+        -ReportPath $windowRawReportPath `
+        -ProcessId $fixture.Id
 
-    Write-Host '=== MONITOR CONTROL TARGET ===' -ForegroundColor Cyan
-    $monitorOutput = & $dotnet $probeDll `
-        --pid $fixture.Id `
-        --capture-kind monitor `
-        --seconds $CaptureSeconds `
-        --min-frames $MinimumFrames `
-        --output $monitorReportPath 2>&1
-    $monitorExit = $LASTEXITCODE
-    Write-Host ($monitorOutput | Out-String)
+    $windowProjected = Invoke-ProbeLane `
+        -Name 'WINDOW / PROJECTED FACTORY (LEGACY CONTROL)' `
+        -CaptureKind window `
+        -ItemFactory projected `
+        -ReportPath $windowProjectedReportPath `
+        -ProcessId $fixture.Id
+
+    $monitorRaw = Invoke-ProbeLane `
+        -Name 'MONITOR / RAW ACTIVATION FACTORY (LOWER-LAYER CONTROL)' `
+        -CaptureKind monitor `
+        -ItemFactory raw `
+        -ReportPath $monitorRawReportPath `
+        -ProcessId $fixture.Id
+
+    $completedAt = [DateTimeOffset]::UtcNow
+
+    function Lane-Summary($lane) {
+        $report = $lane.report
+        return [ordered]@{
+            name = $lane.name
+            captureKind = $lane.captureKind
+            itemFactory = $lane.itemFactory
+            exitCode = $lane.exitCode
+            reportGenerated = ($null -ne $report)
+            verdict = if ($null -ne $report) { $report.verdict } else { $null }
+            frameCount = if ($null -ne $report -and $null -ne $report.capture) { [long]$report.capture.frameCount } else { 0 }
+            width = if ($null -ne $report -and $null -ne $report.capture) { [int]$report.capture.width } else { 0 }
+            height = if ($null -ne $report -and $null -ne $report.capture) { [int]$report.capture.height } else { 0 }
+            stage = if ($null -ne $report -and $null -ne $report.error) { $report.error.stage } else { $null }
+            nativeHResult = if ($null -ne $report -and $null -ne $report.error) { $report.error.nativeHResult } else { $null }
+            itemWidth = if ($null -ne $report -and $null -ne $report.error) { [int]$report.error.itemWidth } elseif ($null -ne $report -and $null -ne $report.capture) { [int]$report.capture.initialItemWidth } else { 0 }
+            itemHeight = if ($null -ne $report -and $null -ne $report.error) { [int]$report.error.itemHeight } elseif ($null -ne $report -and $null -ne $report.capture) { [int]$report.capture.initialItemHeight } else { 0 }
+            bufferWidth = if ($null -ne $report -and $null -ne $report.error) { [int]$report.error.bufferWidth } elseif ($null -ne $report -and $null -ne $report.capture) { [int]$report.capture.initialBufferWidth } else { 0 }
+            bufferHeight = if ($null -ne $report -and $null -ne $report.error) { [int]$report.error.bufferHeight } elseif ($null -ne $report -and $null -ne $report.capture) { [int]$report.capture.initialBufferHeight } else { 0 }
+            initialSizeSource = if ($null -ne $report -and $null -ne $report.error) { $report.error.initialSizeSource } elseif ($null -ne $report -and $null -ne $report.capture) { $report.capture.initialSizeSource } else { $null }
+            reportPath = $lane.reportPath
+        }
+    }
+
+    $summary = [ordered]@{
+        schemaVersion = 1
+        probeMatrix = 'CloudOS Windows captured-surface factory isolation'
+        startedAt = $startedAt.ToString('o')
+        completedAt = $completedAt.ToString('o')
+        branch = $branch
+        head = $currentHead
+        fixtureKind = 'winforms-overlapped-animated'
+        fixturePid = $fixture.Id
+        fixtureReportedMainWindowHwnd = ('0x{0:X}' -f $reportedMainWindowHwnd.ToInt64())
+        minimumFrames = $MinimumFrames
+        captureSeconds = $CaptureSeconds
+        productGate = 'window/raw-activation-factory'
+        productGatePassed = ($windowRaw.exitCode -eq 0 -and $null -ne $windowRaw.report -and $windowRaw.report.verdict -eq 'PASS')
+        lanes = @(
+            (Lane-Summary $windowRaw),
+            (Lane-Summary $windowProjected),
+            (Lane-Summary $monitorRaw)
+        )
+    }
+
+    $summaryJson = $summary | ConvertTo-Json -Depth 12
+    [System.IO.File]::WriteAllText($summaryPath, $summaryJson + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
 
     $logLines = @(
-        'CLOUDOS WINDOWS CAPTURE PROBE LOCAL SMOKE',
+        'CLOUDOS WINDOWS CAPTURE FULL FACTORY ISOLATION',
         "startedAt=$($startedAt.ToString('o'))",
-        "completedAt=$([DateTimeOffset]::UtcNow.ToString('o'))",
+        "completedAt=$($completedAt.ToString('o'))",
         "branch=$branch",
         "head=$currentHead",
         'fixtureKind=winforms-overlapped-animated',
@@ -102,36 +196,40 @@ try {
         'targetSelection=probe-enumerated-largest-visible-top-level-window-for-pid',
         "captureSeconds=$CaptureSeconds",
         "minimumFrames=$MinimumFrames",
-        "windowProbeExitCode=$windowExit",
-        "windowReport=$windowReportPath",
-        "monitorProbeExitCode=$monitorExit",
-        "monitorReport=$monitorReportPath",
+        "windowRawExitCode=$($windowRaw.exitCode)",
+        "windowProjectedExitCode=$($windowProjected.exitCode)",
+        "monitorRawExitCode=$($monitorRaw.exitCode)",
+        "windowRawReport=$windowRawReportPath",
+        "windowProjectedReport=$windowProjectedReportPath",
+        "monitorRawReport=$monitorRawReportPath",
+        "matrixSummary=$summaryPath",
         '',
-        '=== WINDOW TARGET ===',
-        ($windowOutput | Out-String).TrimEnd(),
+        '=== WINDOW / RAW ACTIVATION FACTORY (PRODUCT GATE) ===',
+        $windowRaw.output,
         '',
-        '=== MONITOR CONTROL TARGET ===',
-        ($monitorOutput | Out-String).TrimEnd()
+        '=== WINDOW / PROJECTED FACTORY (LEGACY CONTROL) ===',
+        $windowProjected.output,
+        '',
+        '=== MONITOR / RAW ACTIVATION FACTORY (LOWER-LAYER CONTROL) ===',
+        $monitorRaw.output,
+        '',
+        '=== MATRIX SUMMARY ===',
+        $summaryJson
     )
     [System.IO.File]::WriteAllLines($logPath, $logLines, [System.Text.UTF8Encoding]::new($false))
 
-    if ($windowExit -ne 0) {
-        throw "Window capture gate falhou com exit code $windowExit. Monitor control exit=$monitorExit. Log: $logPath"
+    Write-Host ''
+    Write-Host '=== FACTORY ISOLATION SUMMARY ===' -ForegroundColor Cyan
+    Write-Host $summaryJson
+    Write-Host "Summary: $summaryPath"
+    Write-Host "Log:     $logPath"
+
+    if (-not $summary.productGatePassed) {
+        throw "Window/raw activation-factory product gate falhou. Evidence: $summaryPath ; $logPath"
     }
 
-    if (-not (Test-Path -LiteralPath $windowReportPath -PathType Leaf)) { throw 'Window probe terminou sem relatório JSON.' }
-    $report = Get-Content -LiteralPath $windowReportPath -Raw | ConvertFrom-Json
-    if ($report.verdict -ne 'PASS') { throw "Window probe reportou verdict=$($report.verdict)." }
-    if ([long]$report.capture.frameCount -lt $MinimumFrames) { throw 'Frames insuficientes no window target.' }
-
     Write-Host ''
-    Write-Host 'CLOUDOS WINDOWS CAPTURE WINDOW GATE: PASS' -ForegroundColor Green
-    Write-Host "Frames: $($report.capture.frameCount)"
-    Write-Host "Size:   $($report.capture.width)x$($report.capture.height)"
-    Write-Host "Monitor control exit: $monitorExit"
-    Write-Host "Window report:  $windowReportPath"
-    Write-Host "Monitor report: $monitorReportPath"
-    Write-Host "Log:            $logPath"
+    Write-Host 'CLOUDOS WINDOWS CAPTURE WINDOW/RAW PRODUCT GATE: PASS' -ForegroundColor Green
 }
 finally {
     if ($null -ne $fixture) {
