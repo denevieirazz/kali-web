@@ -93,10 +93,14 @@ jobs:
             'LIFETIME CONTROL',
             'PROJECTION CONTROL',
             'FACTORY CONTROL',
-            'LOWER-LAYER CONTROL'
+            'LOWER-LAYER CONTROL',
+            'NATIVE C++/WINRT REFERENCE',
+            'fixture-native-cpp-window-reference.json',
+            'nativeDisagreesWithCsharpItemMetadata',
+            'schemaVersion = 3'
           )) {
             if (-not $text.Contains($required, [System.StringComparison]::Ordinal)) {
-              throw "Physical matrix script is missing lane '$required'."
+              throw "Physical matrix script is missing contract '$required'."
             }
           }
           Write-Host 'Physical matrix script parse/contract: PASS'
@@ -123,9 +127,52 @@ jobs:
           if (-not (Test-Path -LiteralPath $probe -PathType Leaf)) { throw "Native reference probe not found: $probe" }
           $output = & $probe --help 2>&1 | Out-String
           if ($LASTEXITCODE -ne 0) { throw "Native reference --help failed with $LASTEXITCODE.`n$output" }
-          foreach ($required in @('--hwnd <decimal|0xHEX>', 'CreateForWindow')) {
+          foreach ($required in @('--hwnd <decimal|0xHEX>', '--output <path>', 'CreateForWindow')) {
             if (-not $output.Contains($required, [System.StringComparison]::Ordinal)) {
               throw "Native reference help is missing '$required'.`n$output"
             }
           }
           Write-Host $output
+
+      - name: Validate native C++ JSON error contract
+        shell: pwsh
+        run: |
+          $probe = (Resolve-Path 'desktop/CloudOS.WindowsCapture.NativeReference/bin/Release/x64/CloudOS.WindowsCapture.NativeReference.exe').Path
+          $reportPath = Join-Path $env:RUNNER_TEMP 'native-reference-invalid-hwnd.json'
+          Remove-Item -LiteralPath $reportPath -Force -ErrorAction SilentlyContinue
+
+          $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+          $startInfo.FileName = $probe
+          foreach ($argument in @('--hwnd', '0x1', '--output', $reportPath)) {
+            $startInfo.ArgumentList.Add($argument)
+          }
+          $startInfo.UseShellExecute = $false
+          $startInfo.CreateNoWindow = $true
+          $startInfo.RedirectStandardOutput = $true
+          $startInfo.RedirectStandardError = $true
+
+          $process = [System.Diagnostics.Process]::Start($startInfo)
+          try {
+            $stdout = $process.StandardOutput.ReadToEnd()
+            $stderr = $process.StandardError.ReadToEnd()
+            $process.WaitForExit()
+            Write-Host (($stdout + $stderr).TrimEnd())
+            if ($process.ExitCode -ne 3) {
+              throw "Expected invalid-HWND exit 3, got $($process.ExitCode)."
+            }
+          }
+          finally {
+            $process.Dispose()
+          }
+
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "Native reference did not write JSON report: $reportPath"
+          }
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+          if ($report.schemaVersion -ne 1) { throw "Unexpected native report schema: $($report.schemaVersion)" }
+          if ($report.verdict -ne 'ERROR') { throw "Unexpected native verdict: $($report.verdict)" }
+          if ($report.stage -ne 'target-validation') { throw "Unexpected native error stage: $($report.stage)" }
+          if ([int]$report.itemWidth -ne 0 -or [int]$report.itemHeight -ne 0) {
+            throw "Invalid HWND unexpectedly produced item dimensions $($report.itemWidth)x$($report.itemHeight)."
+          }
+          Write-Host 'Native C++ JSON error contract: PASS'
