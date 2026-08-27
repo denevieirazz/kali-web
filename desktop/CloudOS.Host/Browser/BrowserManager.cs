@@ -64,6 +64,12 @@ public sealed class BrowserManager : IDisposable
         CancellationToken cancellationToken = default) =>
         _installerManager.PrepareAsync(artifactId, cancellationToken);
 
+    public Task<PreparedInstallerCapability> PrepareInstallerAsync(
+        string artifactId,
+        bool allowUntrusted,
+        CancellationToken cancellationToken = default) =>
+        _installerManager.PrepareAsync(artifactId, allowUntrusted, cancellationToken);
+
     public Task<InstallerLaunchPlan> ConsumeInstallerCapabilityAsync(
         string capabilityId,
         CancellationToken cancellationToken = default) =>
