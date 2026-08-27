@@ -18,6 +18,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("stale capability staging is purged on restart", TestStaleCapabilityStagingCleanupAsync),
     ("contained EXE policy reuses native launch spec", TestContainedExePolicyAsync),
     ("contained execution coordinator owns capability by Job root", InstallerContainedExecutionCoordinatorGate.RunAsync),
+    ("Host authority owns contained installer lifecycle end to end", CloudOsInstallerManagerContainedGate.RunAsync),
     ("MSI policy requires privileged broker", TestMsiBrokerPolicyAsync),
     ("unsupported format is rejected", TestUnsupportedFormatAsync),
     ("msi plan uses msiexec without forced restart", TestMsiPlanAsync),
