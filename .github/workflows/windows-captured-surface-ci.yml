@@ -12,6 +12,7 @@ on:
       - 'desktop/CloudOS.WindowsCapture.Fixture/**'
       - 'desktop/CloudOS.WindowsCapture.NativeReference/**'
       - 'desktop/CloudOS.WindowsCapture.Presenter/**'
+      - 'desktop/CloudOS.WindowsCapture.Presenter.Probe/**'
       - 'scripts/test-windows-capture-probe.ps1'
       - 'scripts/test-windows-capture-app.ps1'
       - 'README.md'
@@ -38,6 +39,22 @@ jobs:
 
       - name: Build native captured-surface presenter
         run: dotnet build desktop/CloudOS.WindowsCapture.Presenter/CloudOS.WindowsCapture.Presenter.csproj -c Release --nologo
+
+      - name: Build presenter end-to-end probe
+        run: dotnet build desktop/CloudOS.WindowsCapture.Presenter.Probe/CloudOS.WindowsCapture.Presenter.Probe.csproj -c Release --nologo
+
+      - name: Validate presenter probe CLI contract
+        shell: pwsh
+        run: |
+          $probe = 'desktop/CloudOS.WindowsCapture.Presenter.Probe/bin/Release/net8.0-windows10.0.19041.0/CloudOS.WindowsCapture.Presenter.Probe.dll'
+          $output = dotnet $probe --help 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "Unexpected presenter-probe --help exit code: $LASTEXITCODE`n$output" }
+          foreach ($required in @('--hwnd <decimal|0xHEX>', '--minimum-frames <1-600>', '--output <path>', 'D3D11/DXGI presenter')) {
+            if (-not $output.Contains($required, [System.StringComparison]::Ordinal)) {
+              throw "Presenter probe help is missing contract '$required'.`n$output"
+            }
+          }
+          Write-Host $output
 
       - name: Validate capture probe CLI contract
         shell: pwsh
