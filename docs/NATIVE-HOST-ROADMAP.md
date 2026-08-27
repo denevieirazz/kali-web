@@ -70,9 +70,9 @@ A experiência final não possui fallback automático para uma janela solta no d
 
 ```text
 CAPTURE_SUPPORTED
-→ abre dentro do CloudOS
+→ abre dentro do CloudOS somente depois dos demais gates de apresentação/input
 
-UNSUPPORTED / PROTECTED / BROKER_UNSAFE / SINGLETON_UNSAFE / RENDER_FAILED
+UNSUPPORTED / PROTECTED / BROKER_UNSAFE / SINGLETON_UNSAFE / CAPTURE_BLOCKED / RENDER_FAILED
 → bloqueia e explica o motivo
 ```
 
@@ -97,33 +97,123 @@ A POC `poc/cloudos-windows-captured-surface` está focada primeiro nos gates 4�
 
 ### Gate de captura atual
 
-A evidência física no HEAD `7f1f561302e6fb24406de6c2e50814391b83e93d` isolou o bloqueador anterior:
+A evidência física isolou a fronteira atual usando uma fixture WinForms convencional, visível e animada:
 
 ```text
-mesma fixture WinForms animada
-mesmo processo
-mesmo device D3D11
-mesmo frame-pool code
+mesma máquina
+mesma fixture
+mesmo lower-layer D3D11/WGC
 
-HWND / projected factory
+HWND
+→ GraphicsCaptureItem.Size = 0x0
+→ buffer bootstrap nativo válido 642x452
 → CreateCaptureSession FAIL 0x8007139F
-→ item.Size = 0x0
+→ 0 frames
 
 HMONITOR
 → PASS
 → 10 frames 2560x1440
 → EmptyFrameCount = 0
+→ item.Size = 2560x1440
 ```
 
-Portanto D3D11, bridge DXGI→WinRT, frame pool, `GraphicsCaptureSession` e compositor WGC estão funcionalmente provados no ambiente físico; o defeito restante foi isolado na fronteira do `GraphicsCaptureItem` de janela.
+Portanto D3D11, bridge DXGI→WinRT, frame pool, `GraphicsCaptureSession` e compositor WGC estão fisicamente provados para monitor. O defeito restante está restrito à qualificação do item/sessão de janela; a causa ainda não é considerada provada.
 
-O gate seguinte usa três lanes em uma única execução:
+#### Matriz C# de cinco lanes
 
-1. `window/raw-activation-factory` — gate do produto. Obtém `IGraphicsCaptureItemInterop` diretamente via `RoGetActivationFactory` e chama `CreateForWindow` no ABI COM oficial;
-2. `window/projected-factory` — controle do caminho legado anterior;
-3. `monitor/raw-activation-factory` — controle das camadas abaixo do item de janela.
+Uma única execução física futura separa activation factory, projection e ABI lifetime:
 
-O probe inicializa explicitamente o apartment WinRT para a prova, registra o estágio de setup (`item-factory`, `item-metadata`, `initial-size`, `d3d-device`, `frame-pool`, `capture-session`, `start-capture`) e grava JSON mesmo quando a sessão não chega a iniciar. O smoke consolida as três lanes em `fixture-wgc-matrix-summary.json`. Nenhum controle pode mascarar um gate de janela falho.
+1. `window/raw/marshal-interface/hold` — **PRODUCT CANDIDATE**;
+2. `window/raw/marshal-interface/release` — lifetime control;
+3. `window/raw/projected-type/hold` — projection control;
+4. `window/projected-factory/marshal-interface/hold` — factory control;
+5. `monitor/raw/marshal-interface/hold` — lower-layer control.
+
+Somente a lane 1 pode aprovar o gate do produto. Todas as outras são controles e nunca funcionam como fallback silencioso.
+
+O candidate mantém a referência ABI original do `GraphicsCaptureItem` viva até o dispose da capture session e usa ownership single-owner para impedir double-release em erro.
+
+#### Diagnóstico HWND
+
+Antes de criar a sessão, o probe registra:
+
+- HWND/título/classe/retângulo;
+- visible/iconic/hung;
+- DWM cloak;
+- style/exstyle;
+- owner/root-owner;
+- HMONITOR;
+- thread/PID;
+- DPI;
+- display affinity quando disponível.
+
+#### Controle nativo independente C++/WinRT
+
+`CloudOS.WindowsCapture.NativeReference` usa o padrão nativo:
+
+```text
+get_activation_factory<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()
+→ CreateForWindow(HWND, IID_IGraphicsCaptureItem, put_abi(item))
+→ GraphicsCaptureItem.Size / DisplayName
+```
+
+Ele não compartilha CsWinRT C#, marshaling C#, TerraFX nem o frame-pool do produto. O executável gera JSON de sucesso/erro com `verdict`, `stage`, HWND, dimensões do item e HRESULT.
+
+A matriz física usa o **mesmo HWND escolhido pelo probe C#** para esse controle nativo. Se a toolchain C++ não estiver instalada na máquina física, o summary registra `NOT_AVAILABLE`; isso não aprova nem reprova o gate do produto.
+
+Interpretação:
+
+```text
+C++ item válido + C# item inválido
+→ forte suspeita de projection/lifetime C#
+
+C++ item também inválido/0x0
+→ Windows/session/eligibility do target ganha peso
+
+C++ CreateForWindow falha por HRESULT
+→ falha existe abaixo da projection C#
+```
+
+#### Harness genérico para app real
+
+Depois que a fixture passar, `scripts/test-windows-capture-app.ps1` permite qualificar um executável Windows real sem adapter específico.
+
+Contrato:
+
+- resolve executável diretamente, sem shell;
+- lança por `ProcessStartInfo.ArgumentList` com `UseShellExecute=false`;
+- exige janela top-level do mesmo PID;
+- launcher que encerra antes de publicar janela própria é `BROKER_OR_SINGLETON_UNSAFE`;
+- executa `window/raw/marshal-interface/hold`;
+- executa o controle C++ no mesmo HWND quando disponível;
+- grava summary/log antes de falhar;
+- não transforma ausência de captura em janela solta do Windows.
+
+Classificações de captura atuais:
+
+```text
+CAPTURE_SUPPORTED
+CAPTURE_BLOCKED
+RENDER_FAILED
+BROKER_OR_SINGLETON_UNSAFE
+```
+
+`CAPTURE_SUPPORTED` nesta fase prova somente captura/frame delivery. Ainda não prova presentation surface, input, isolamento de Alt+Tab ou compatibilidade final.
+
+#### CI sem desktop interativo
+
+`Windows Captured Surface CI` valida:
+
+- build do runtime/probe C#;
+- CLI de factory/projection/lifetime;
+- parser/contrato da matriz física;
+- parser/security contract do harness genérico de app real;
+- build da fixture WinForms;
+- build x64 do C++/WinRT reference;
+- CLI do reference;
+- contrato JSON de erro usando HWND inválido `0x1`, exigindo exit `3`, `verdict=ERROR` e `stage=target-validation`.
+
+CI não substitui a qualificação física do HWND real.
 
 ## Etapas gerais do host
 
