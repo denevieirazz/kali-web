@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildIsolatedWindowsAppArguments, buildWindowsScriptLaunchArguments, normalizeWindowsLaunchKind, parseWindowsAppDiscovery, parseWindowsShortcutArguments } from '../src/apps/appCatalog.js';
+import { buildIsolatedWindowsAppArguments, buildWindowsScriptLaunchArguments, mergeIsolatedWindowsAppArguments, normalizeWindowsLaunchKind, parseWindowsAppDiscovery, parseWindowsShortcutArguments } from '../src/apps/appCatalog.js';
 
 test('launcher de script Windows preserva caminho com espaços sob cmd /s /c', () => {
   const scriptPath = 'C:\\Users\\Runner User\\CloudOS Fixtures\\Launch GUI.cmd';
@@ -20,6 +20,58 @@ test('navegadores conhecidos recebem perfil CloudOS isolado para não delegar à
     ['-profile', 'C:\\CloudOS\\profiles\\windows\\firefox.exe', '-no-remote', '-new-instance']
   );
   assert.deepEqual(buildIsolatedWindowsAppArguments('C:\\Tools\\Editor.exe', 'C:\\CloudOS'), []);
+});
+
+test('isolamento do navegador vence overrides de perfil do atalho sem apagar argv comum', () => {
+  const brave = 'C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe';
+  assert.deepEqual(
+    mergeIsolatedWindowsAppArguments(brave, 'C:\\CloudOS', [
+      '--incognito',
+      '--user-data-dir=C:\\Users\\Normal\\Brave',
+      '--profile-directory=Profile 7',
+      'https://example.com/'
+    ]),
+    [
+      '--user-data-dir=C:\\CloudOS\\profiles\\windows\\brave.exe',
+      '--no-first-run',
+      '--new-window',
+      '--incognito',
+      '--profile-directory=Profile 7',
+      'https://example.com/'
+    ]
+  );
+
+  assert.deepEqual(
+    mergeIsolatedWindowsAppArguments(brave, 'C:\\CloudOS', [
+      '/USER-DATA-DIR',
+      'C:\\Users\\Normal\\Brave',
+      '--disable-extensions'
+    ]),
+    [
+      '--user-data-dir=C:\\CloudOS\\profiles\\windows\\brave.exe',
+      '--no-first-run',
+      '--new-window',
+      '--disable-extensions'
+    ]
+  );
+
+  const firefox = 'C:\\Program Files\\Mozilla Firefox\\firefox.exe';
+  assert.deepEqual(
+    mergeIsolatedWindowsAppArguments(firefox, 'C:\\CloudOS', ['-P', 'Personal', '-private-window', 'https://example.com/']),
+    [
+      '-profile',
+      'C:\\CloudOS\\profiles\\windows\\firefox.exe',
+      '-no-remote',
+      '-new-instance',
+      '-private-window',
+      'https://example.com/'
+    ]
+  );
+
+  assert.deepEqual(
+    mergeIsolatedWindowsAppArguments('C:\\Tools\\Editor.exe', 'C:\\CloudOS', ['--workspace', 'A']),
+    ['--workspace', 'A']
+  );
 });
 
 test('atalho direto promovido com argv de isolamento preserva contrato do Host', () => {
