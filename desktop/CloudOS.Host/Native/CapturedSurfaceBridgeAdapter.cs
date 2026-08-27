@@ -206,7 +206,7 @@ public sealed class CapturedSurfaceBridgeAdapter : IDisposable
         bool visible,
         double dpiScaleX,
         double dpiScaleY) =>
-        new(
+        new WindowsCapturePresentationLayout(
             revision,
             bounds.X,
             bounds.Y,
