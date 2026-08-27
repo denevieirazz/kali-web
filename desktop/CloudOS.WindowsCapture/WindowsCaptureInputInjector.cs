@@ -48,9 +48,6 @@ public sealed class WindowsCaptureTargetedInputInjector
     private const uint WmMouseWheel = 0x020A;
     private const uint WmKeyDown = 0x0100;
     private const uint WmKeyUp = 0x0101;
-    private const int VkShift = 0x10;
-    private const int VkControl = 0x11;
-    private const int VkMenu = 0x12;
 
     private readonly IntPtr _sourceWindow;
     private readonly WindowsCaptureInputGate _gate;
@@ -94,7 +91,9 @@ public sealed class WindowsCaptureTargetedInputInjector
             var screenPoint = new NativePoint(input.ClientPixelX, input.ClientPixelY);
             if (!ClientToScreen(_sourceWindow, ref screenPoint))
                 return NativeError(input.Sequence, input.Generation, destination, "ClientToScreen(mouse-wheel)");
-            wParam = new IntPtr(unchecked((int)((uint)wParam.ToInt64() & 0xFFFFU) | ((uint)(ushort)input.WheelDelta << 16)));
+            var keyState = unchecked((uint)(nuint)wParam) & 0xFFFFU;
+            var wheel = (uint)(ushort)input.WheelDelta << 16;
+            wParam = new IntPtr(unchecked((int)(keyState | wheel)));
             lParam = PackPoint(screenPoint.X, screenPoint.Y);
         }
         else
@@ -215,16 +214,16 @@ public sealed class WindowsCaptureTargetedInputInjector
     private static IntPtr BuildPointerWParam(WindowsCapturePointerInput input)
     {
         uint flags = 0;
-        if (input.Shift) flags |= 0x0004;
-        if (input.Control) flags |= 0x0008;
+        if (input.Shift) flags |= 0x0004U;
+        if (input.Control) flags |= 0x0008U;
         if (input.Kind == WindowsCapturePointerEventKind.ButtonDown)
         {
             flags |= input.Button switch
             {
-                WindowsCapturePointerButton.Left => 0x0001,
-                WindowsCapturePointerButton.Right => 0x0002,
-                WindowsCapturePointerButton.Middle => 0x0010,
-                _ => 0
+                WindowsCapturePointerButton.Left => 0x0001U,
+                WindowsCapturePointerButton.Right => 0x0002U,
+                WindowsCapturePointerButton.Middle => 0x0010U,
+                _ => 0U
             };
         }
         return new IntPtr(unchecked((int)flags));
@@ -232,16 +231,21 @@ public sealed class WindowsCaptureTargetedInputInjector
 
     private static IntPtr BuildKeyLParam(WindowsCaptureKeyInput input)
     {
-        uint value = 1;
-        value |= (uint)(input.ScanCode & 0xFF) << 16;
-        if (input.Extended || input.ScanCode > 0xFF) value |= 1U << 24;
+        uint value = 1U;
+        var scanCode = (uint)(ushort)input.ScanCode;
+        value |= (scanCode & 0xFFU) << 16;
+        if (input.Extended || scanCode > 0xFFU) value |= 1U << 24;
         if (input.Repeat || input.Kind == WindowsCaptureKeyEventKind.KeyUp) value |= 1U << 30;
         if (input.Kind == WindowsCaptureKeyEventKind.KeyUp) value |= 1U << 31;
         return new IntPtr(unchecked((int)value));
     }
 
-    private static IntPtr PackPoint(int x, int y) =>
-        new(unchecked((int)((uint)(ushort)x | ((uint)(ushort)y << 16))));
+    private static IntPtr PackPoint(int x, int y)
+    {
+        var low = (uint)(ushort)x;
+        var high = (uint)(ushort)y << 16;
+        return new IntPtr(unchecked((int)(low | high)));
+    }
 
     private static WindowsCaptureInputInjectionResult Rejected(long sequence, int generation, WindowsCaptureInputRejection rejection) =>
         new(WindowsCaptureInputInjectionStatus.Rejected, rejection, sequence, generation, 0, null);
