@@ -5,7 +5,10 @@ public enum WindowsCaptureInputRejection
     None,
     SurfaceInactive,
     StaleGeneration,
-    ReplayedSequence
+    ReplayedSequence,
+    OutsideSurface,
+    OutsideClientArea,
+    InjectorFailed
 }
 
 public sealed record WindowsCaptureInputAdmission(
