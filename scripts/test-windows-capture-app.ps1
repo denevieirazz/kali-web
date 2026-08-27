@@ -19,6 +19,8 @@ param(
     [ValidateRange(1, 1000)]
     [int] $MinimumFrames = 10,
 
+    [switch] $RequireFrameHealth,
+
     [switch] $LeaveProcessRunning,
 
     [string] $OutputDirectory = (Join-Path (Get-Location) 'poc1-physical-evidence\windows-captured-surface\app-proof')
@@ -29,10 +31,13 @@ $expectedBranch = 'poc/cloudos-windows-captured-surface'
 $repoRoot = [System.IO.Path]::GetFullPath((Get-Location).Path)
 $probeProject = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.Probe\CloudOS.WindowsCapture.Probe.csproj'
 $probeDll = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.Probe\bin\Release\net8.0-windows10.0.19041.0\CloudOS.WindowsCapture.Probe.dll'
+$healthProbeProject = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.HealthProbe\CloudOS.WindowsCapture.HealthProbe.csproj'
+$healthProbeDll = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.HealthProbe\bin\Release\net8.0-windows10.0.19041.0\CloudOS.WindowsCapture.HealthProbe.dll'
 $nativeProject = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.NativeReference\CloudOS.WindowsCapture.NativeReference.vcxproj'
 $nativeExe = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.NativeReference\bin\Release\x64\CloudOS.WindowsCapture.NativeReference.exe'
 $outputRoot = [System.IO.Path]::GetFullPath($OutputDirectory)
 $productReportPath = Join-Path $outputRoot 'app-window-product-candidate.json'
+$healthReportPath = Join-Path $outputRoot 'app-frame-health.json'
 $nativeReportPath = Join-Path $outputRoot 'app-native-cpp-window-reference.json'
 $summaryPath = Join-Path $outputRoot 'app-capture-qualification-summary.json'
 $logPath = Join-Path $outputRoot 'app-capture-qualification.log'
@@ -180,6 +185,31 @@ function Invoke-NativeReference {
     }
 }
 
+function Invoke-FrameHealth {
+    param([Parameter(Mandatory)] [string] $WindowHandle)
+
+    Remove-Item -LiteralPath $healthReportPath -Force -ErrorAction SilentlyContinue
+    $run = Invoke-ExternalProcess `
+        -FilePath $dotnet `
+        -Arguments @(
+            $healthProbeDll,
+            '--hwnd', $WindowHandle,
+            '--seconds', [string]$CaptureSeconds,
+            '--min-frames', [string]$MinimumFrames,
+            '--sample-every', '3',
+            '--samples', '8',
+            '--region', '256',
+            '--grid', '32',
+            '--output', $healthReportPath
+        )
+    return [pscustomobject]@{
+        status = 'EXECUTED'
+        exitCode = $run.exitCode
+        report = (Read-JsonOptional $healthReportPath)
+        output = $run.output
+    }
+}
+
 function Write-SummaryAndThrow {
     param(
         [Parameter(Mandatory)] [System.Collections.IDictionary] $Summary,
@@ -187,7 +217,7 @@ function Write-SummaryAndThrow {
         [string[]] $AdditionalLog = @()
     )
 
-    $summaryJson = $Summary | ConvertTo-Json -Depth 16
+    $summaryJson = $Summary | ConvertTo-Json -Depth 18
     [System.IO.File]::WriteAllText($summaryPath, $summaryJson + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
     $lines = @(
         'CLOUDOS GENERIC WINDOWS APP CAPTURE QUALIFICATION',
@@ -211,6 +241,7 @@ $dotnet = Resolve-DotNet
 $resolvedExecutable = Resolve-Executable $ExecutablePath
 [System.IO.Directory]::CreateDirectory($outputRoot) | Out-Null
 Remove-Item -LiteralPath $productReportPath -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $healthReportPath -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $nativeReportPath -Force -ErrorAction SilentlyContinue
 $target = $null
 $startedAt = [DateTimeOffset]::UtcNow
@@ -219,6 +250,10 @@ try {
     Write-Host 'Compilando CloudOS Windows capture probe...' -ForegroundColor Cyan
     & $dotnet build $probeProject -c Release --nologo
     if ($LASTEXITCODE -ne 0) { throw "Build do capture probe falhou com exit code $LASTEXITCODE." }
+
+    Write-Host 'Compilando frame-health probe...' -ForegroundColor Cyan
+    & $dotnet build $healthProbeProject -c Release --nologo
+    if ($LASTEXITCODE -ne 0) { throw "Build do frame-health probe falhou com exit code $LASTEXITCODE." }
 
     $launchInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $launchInfo.FileName = $resolvedExecutable
@@ -250,13 +285,15 @@ try {
         $exitCode = $null
         try { $exitCode = $target.ExitCode } catch {}
         $summary = [ordered]@{
-            schemaVersion = 1
+            schemaVersion = 2
             proof = 'CloudOS generic Windows app capture qualification'
             startedAt = $startedAt.ToString('o')
             completedAt = [DateTimeOffset]::UtcNow.ToString('o')
             branch = $branch
             head = $currentHead
             classification = 'BROKER_OR_SINGLETON_UNSAFE'
+            frameHealthStatus = 'NOT_RUN_CAPTURE_GATE_FAILED'
+            frameHealthRequired = [bool]$RequireFrameHealth
             executable = $resolvedExecutable
             arguments = @($Arguments)
             launch = [ordered]@{
@@ -266,6 +303,7 @@ try {
                 exitCode = $exitCode
             }
             productCandidate = $null
+            frameHealth = $null
             nativeReference = $null
         }
         Write-SummaryAndThrow -Summary $summary -FailureMessage 'O processo lançado encerrou antes de publicar janela no mesmo PID; handoff/broker/singleton não é aceito pela POC.'
@@ -273,13 +311,15 @@ try {
 
     if ($readinessHwnd -eq [IntPtr]::Zero) {
         $summary = [ordered]@{
-            schemaVersion = 1
+            schemaVersion = 2
             proof = 'CloudOS generic Windows app capture qualification'
             startedAt = $startedAt.ToString('o')
             completedAt = [DateTimeOffset]::UtcNow.ToString('o')
             branch = $branch
             head = $currentHead
             classification = 'CAPTURE_BLOCKED'
+            frameHealthStatus = 'NOT_RUN_CAPTURE_GATE_FAILED'
+            frameHealthRequired = [bool]$RequireFrameHealth
             executable = $resolvedExecutable
             arguments = @($Arguments)
             launch = [ordered]@{
@@ -290,6 +330,7 @@ try {
                 readinessHwnd = $null
             }
             productCandidate = $null
+            frameHealth = $null
             nativeReference = $null
         }
         Write-SummaryAndThrow -Summary $summary -FailureMessage 'Nenhuma janela top-level do processo ficou pronta dentro do timeout.'
@@ -341,15 +382,38 @@ try {
         'CAPTURE_BLOCKED'
     }
 
+    $health = $null
+    $healthReport = $null
+    $healthStatus = 'NOT_RUN_CAPTURE_GATE_FAILED'
+    if ($productPassed) {
+        Write-Host "Executando FRAME HEALTH no mesmo HWND $canonicalWindowHwnd..." -ForegroundColor Cyan
+        $health = Invoke-FrameHealth -WindowHandle $canonicalWindowHwnd
+        Write-Host $health.output
+        $healthReport = $health.report
+        if ($null -eq $healthReport -or $health.exitCode -ne 0 -or $healthReport.verdict -ne 'PASS') {
+            $healthStatus = 'UNAVAILABLE'
+        } elseif ($null -ne $healthReport.interpretation -and (
+            $healthReport.interpretation.staticSequenceSuspect -eq $true -or
+            $healthReport.interpretation.flatNeutralSequenceSuspect -eq $true)) {
+            $healthStatus = 'SUSPECT_STATIC_OR_NEUTRAL'
+        } else {
+            $healthStatus = 'PASS'
+        }
+    }
+
+    $healthGatePassed = (-not $RequireFrameHealth) -or ($healthStatus -eq 'PASS')
     $nativeReport = $native.report
     $summary = [ordered]@{
-        schemaVersion = 1
+        schemaVersion = 2
         proof = 'CloudOS generic Windows app capture qualification'
         startedAt = $startedAt.ToString('o')
         completedAt = [DateTimeOffset]::UtcNow.ToString('o')
         branch = $branch
         head = $currentHead
         classification = $classification
+        frameHealthStatus = $healthStatus
+        frameHealthRequired = [bool]$RequireFrameHealth
+        frameHealthGatePassed = $healthGatePassed
         executable = $resolvedExecutable
         arguments = @($Arguments)
         productGate = 'window/raw/marshal-interface/hold'
@@ -376,6 +440,23 @@ try {
             cloaked = if ($null -ne $productReport -and $null -ne $productReport.window) { $productReport.window.cloaked } else { $null }
             reportPath = $productReportPath
         }
+        frameHealth = [ordered]@{
+            status = $healthStatus
+            executed = ($null -ne $health)
+            exitCode = if ($null -ne $health) { $health.exitCode } else { $null }
+            reportGenerated = ($null -ne $healthReport)
+            verdict = if ($null -ne $healthReport) { $healthReport.verdict } else { $null }
+            distinctFrameHashes = if ($null -ne $healthReport -and $null -ne $healthReport.frameHealth) { [int]$healthReport.frameHealth.distinctFrameHashes } else { 0 }
+            changedSamples = if ($null -ne $healthReport -and $null -ne $healthReport.frameHealth) { [int]$healthReport.frameHealth.changedSamples } else { 0 }
+            successfulSamples = if ($null -ne $healthReport -and $null -ne $healthReport.frameHealth) { [int]$healthReport.frameHealth.successfulSamples } else { 0 }
+            failedSamples = if ($null -ne $healthReport -and $null -ne $healthReport.frameHealth) { [int]$healthReport.frameHealth.failedSamples } else { 0 }
+            meanLuma = if ($null -ne $healthReport -and $null -ne $healthReport.frameHealth) { [double]$healthReport.frameHealth.meanLuma } else { $null }
+            meanLumaVariance = if ($null -ne $healthReport -and $null -ne $healthReport.frameHealth) { [double]$healthReport.frameHealth.meanLumaVariance } else { $null }
+            meanChannelSpread = if ($null -ne $healthReport -and $null -ne $healthReport.frameHealth) { [double]$healthReport.frameHealth.meanChannelSpread } else { $null }
+            staticSequenceSuspect = if ($null -ne $healthReport -and $null -ne $healthReport.interpretation) { [bool]$healthReport.interpretation.staticSequenceSuspect } else { $null }
+            flatNeutralSequenceSuspect = if ($null -ne $healthReport -and $null -ne $healthReport.interpretation) { [bool]$healthReport.interpretation.flatNeutralSequenceSuspect } else { $null }
+            reportPath = $healthReportPath
+        }
         nativeReference = [ordered]@{
             status = $native.status
             buildStatus = $native.buildStatus
@@ -390,7 +471,7 @@ try {
         }
     }
 
-    $summaryJson = $summary | ConvertTo-Json -Depth 16
+    $summaryJson = $summary | ConvertTo-Json -Depth 18
     [System.IO.File]::WriteAllText($summaryPath, $summaryJson + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
     $logLines = @(
         'CLOUDOS GENERIC WINDOWS APP CAPTURE QUALIFICATION',
@@ -400,11 +481,16 @@ try {
         "readinessHwnd=$readinessHandleText",
         "canonicalWindowHwnd=$canonicalWindowHwnd",
         "classification=$classification",
+        "frameHealthStatus=$healthStatus",
+        "frameHealthRequired=$([bool]$RequireFrameHealth)",
         "productExitCode=$($productRun.exitCode)",
         "nativeStatus=$($native.status)",
         '',
         '=== PRODUCT CANDIDATE ===',
         $productRun.output,
+        '',
+        '=== FRAME HEALTH ===',
+        if ($null -ne $health) { $health.output } else { 'NOT_RUN_CAPTURE_GATE_FAILED' },
         '',
         '=== NATIVE C++/WINRT REFERENCE ===',
         $native.output,
@@ -422,6 +508,9 @@ try {
 
     if (-not $productPassed) {
         throw "Generic app capture qualification falhou com classificação $classification. Evidence: $summaryPath ; $logPath"
+    }
+    if (-not $healthGatePassed) {
+        throw "Generic app frame-health gate falhou com status $healthStatus. Evidence: $summaryPath ; $logPath"
     }
 
     Write-Host 'CLOUDOS GENERIC WINDOWS APP CAPTURE QUALIFICATION: PASS' -ForegroundColor Green
