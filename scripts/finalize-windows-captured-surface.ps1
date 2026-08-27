@@ -35,7 +35,8 @@ function Invoke-Gate {
     param(
         [Parameter(Mandatory)] [string] $Name,
         [Parameter(Mandatory)] [string] $Script,
-        [Parameter(Mandatory)] [string[]] $Arguments
+        [Parameter(Mandatory)] [string[]] $Arguments,
+        [switch] $DiagnosticOnly
     )
 
     Add-Content -LiteralPath $logPath -Encoding utf8 -Value "=== $Name ==="
@@ -65,6 +66,7 @@ function Invoke-Gate {
             exitCode = $process.ExitCode
             passed = ($process.ExitCode -eq 0)
             skipped = $false
+            diagnosticOnly = [bool]$DiagnosticOnly
             reason = $null
         }
     }
@@ -85,6 +87,7 @@ function New-SkippedGate {
         exitCode = $null
         passed = $false
         skipped = $true
+        diagnosticOnly = $false
         reason = $Reason
     }
 }
@@ -107,6 +110,20 @@ $matrix = Invoke-Gate `
         '-MinimumFrames', [string]$MinimumFrames,
         '-OutputDirectory', $evidenceDir
     )
+
+# Diagnostic A/B: one fixture, one exact HWND, product C# path versus independent
+# C++/WinRT path through CreateCaptureSession/StartCapture/frames. This never acts as a
+# product fallback and does not by itself decide readiness.
+$nativeAb = Invoke-Gate `
+    -Name 'SAME_HWND_CSHARP_NATIVE_AB' `
+    -Script (Join-Path $PSScriptRoot 'test-windows-capture-csharp-native-ab.ps1') `
+    -Arguments @(
+        '-ExpectedHeadSha', $ExpectedHeadSha,
+        '-CaptureSeconds', [string]$CaptureSeconds,
+        '-MinimumFrames', [string]$MinimumFrames,
+        '-OutputDirectory', $evidenceDir
+    ) `
+    -DiagnosticOnly
 
 # Keep presentation independent from the matrix so one failure never masks the other.
 $presenter = Invoke-Gate `
@@ -147,13 +164,29 @@ $sourceIsolation = if ($matrix.passed) {
 }
 
 $matrixSummary = Read-JsonOptional (Join-Path $evidenceDir 'fixture-wgc-matrix-summary.json')
+$nativeAbSummary = Read-JsonOptional (Join-Path $evidenceDir 'same-hwnd-csharp-native-ab-summary.json')
 $presenterReport = Read-JsonOptional (Join-Path $evidenceDir 'fixture-presenter-smoke.json')
 $inputReport = Read-JsonOptional (Join-Path $evidenceDir 'input\fixture-targeted-input.json')
 $sourceIsolationSummary = Read-JsonOptional (Join-Path $evidenceDir 'source-isolation\source-isolation-summary.json')
 
+# The native A/B is diagnostic-only. Product readiness still comes from the product path,
+# presentation, targeted input and containment/isolation evidence.
 $physicalReady = $matrix.passed -and $presenter.passed -and $input.passed -and $sourceIsolation.passed
 $nextAction = if (-not $matrix.passed) {
-    'Diagnosticar primeiro o lane HWND/item/session usando matrix + C++ reference; não culpar presenter/input.'
+    switch ([string]$nativeAbSummary.classification) {
+        'CSHARP_PATH_DIVERGES_FROM_NATIVE' {
+            'O mesmo HWND funciona no C++ nativo: investigar somente projection/ABI/runtime C# antes de qualquer outro componente.'
+        }
+        'BOTH_FAIL_SAME_CAPTURE_SESSION_HRESULT' {
+            'C# e C++ nativo falharam no mesmo CreateCaptureSession/HRESULT no mesmo HWND: investigar estado/compatibilidade HWND/WGC; não culpar CsWinRT, presenter ou input.'
+        }
+        'BOTH_CREATE_FOR_WINDOW_ITEMS_EMPTY_OR_UNUSABLE' {
+            'CreateForWindow ficou vazio/inutilizável em C# e C++ no mesmo HWND: investigar item/estado HWND/WGC antes do restante.'
+        }
+        default {
+            'Diagnosticar primeiro o lane HWND/item/session usando matrix + same-HWND C#/C++ A/B; não culpar presenter/input.'
+        }
+    }
 } elseif (-not $presenter.passed) {
     'WGC entregou frames; diagnosticar exclusivamente Host-owned D3D11/DXGI presentation.'
 } elseif (-not $input.passed) {
@@ -165,13 +198,14 @@ $nextAction = if (-not $matrix.passed) {
 }
 
 $summary = [ordered]@{
-    schemaVersion = 2
+    schemaVersion = 3
     branch = $actualBranch
     head = $actualHead
     startedAtUtc = $startedAt.ToString('O')
     completedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
-    gates = @($matrix, $presenter, $input, $sourceIsolation)
+    gates = @($matrix, $nativeAb, $presenter, $input, $sourceIsolation)
     matrix = $matrixSummary
+    sameHwndCsharpNativeAb = $nativeAbSummary
     presenter = $presenterReport
     targetedInput = $inputReport
     sourceIsolation = $sourceIsolationSummary
