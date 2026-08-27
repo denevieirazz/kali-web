@@ -10,6 +10,7 @@ on:
       - 'desktop/CloudOS.WindowsCapture.Probe/**'
       - 'scripts/test-windows-capture-input.ps1'
       - 'scripts/test-windows-capture-source-isolation.ps1'
+      - 'scripts/test-windows-capture-csharp-native-ab.ps1'
       - 'scripts/finalize-windows-captured-surface.ps1'
       - '.github/workflows/windows-capture-physical-harness-ci.yml'
 
@@ -86,6 +87,31 @@ jobs:
                 'manualUxStillRequired',
                 'SOURCE_ISOLATION_GATE=BLOCKED'
               )
+            },
+            [pscustomobject]@{
+              path = 'scripts/test-windows-capture-csharp-native-ab.ps1'
+              required = @(
+                'ExpectedHeadSha',
+                'sameHwndGuaranteed = $true',
+                'BOTH_FAIL_SAME_CAPTURE_SESSION_HRESULT',
+                'CSHARP_PATH_DIVERGES_FROM_NATIVE',
+                'automaticProductDecision = ''NONE''',
+                'same-hwnd-csharp-native-ab-summary.json'
+              )
+            },
+            [pscustomobject]@{
+              path = 'scripts/finalize-windows-captured-surface.ps1'
+              required = @(
+                'SAME_HWND_CSHARP_NATIVE_AB',
+                '-DiagnosticOnly',
+                'sameHwndCsharpNativeAb',
+                'schemaVersion = 3',
+                'SOURCE_ISOLATION',
+                'TARGETED_INPUT',
+                'HOST_OWNED_PRESENTER',
+                'HWND_WGC_MATRIX',
+                'physicalReady = $matrix.passed -and $presenter.passed -and $input.passed -and $sourceIsolation.passed'
+              )
             }
           )
 
@@ -112,4 +138,4 @@ jobs:
             }
           }
 
-          Write-Host 'Physical harness parse/security contracts: PASS'
+          Write-Host 'Physical harness/finalizer parse/security contracts: PASS'
