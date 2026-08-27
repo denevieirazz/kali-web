@@ -5,6 +5,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("managed path rejects escape", TestManagedPathEscapeAsync),
     ("catalog registers installer and persists opaque metadata", TestCatalogPersistenceAsync),
     ("artifact mutation blocks capability", TestArtifactMutationAsync),
+    ("untrusted installer requires explicit approval", TestUntrustedApprovalAsync),
     ("capability stages exact hash and is one shot", TestCapabilityOneShotAsync),
     ("unsupported format is rejected", TestUnsupportedFormatAsync),
     ("msi plan uses msiexec without forced restart", TestMsiPlanAsync),
@@ -76,10 +77,39 @@ static async Task TestArtifactMutationAsync()
     await File.AppendAllTextAsync(path, "-changed");
 
     using var capabilities = env.CreateCapabilities(catalog);
-    var prepared = await capabilities.PrepareAsync(artifact.ArtifactId, elevatedBrokerAvailable: false);
+    var prepared = await capabilities.PrepareAsync(
+        artifact.ArtifactId,
+        elevatedBrokerAvailable: false,
+        allowUntrusted: false);
     Require(prepared.Readiness.Status == InstallerReadinessStatus.ArtifactChanged, "mutated artifact was not blocked");
     Require(!prepared.Readiness.IntegrityValid, "mutated artifact was reported integral");
     Require(string.IsNullOrEmpty(prepared.Capability.CapabilityId), "mutated artifact received capability");
+}
+
+static async Task TestUntrustedApprovalAsync()
+{
+    using var env = TestEnvironment.Create();
+    var path = Path.Combine(env.Downloads, "unsigned.exe");
+    await File.WriteAllTextAsync(path, "unsigned-fixture");
+    var catalog = env.CreateCatalog();
+    var artifact = await catalog.RegisterManagedDownloadAsync(path);
+    Require(artifact.Trust != InstallerTrustStatus.Trusted, "unsigned fixture unexpectedly trusted");
+
+    using var capabilities = env.CreateCapabilities(catalog);
+    var blocked = await capabilities.PrepareAsync(
+        artifact.ArtifactId,
+        elevatedBrokerAvailable: false,
+        allowUntrusted: false);
+    Require(blocked.Readiness.Status == InstallerReadinessStatus.BlockedByPolicy, "untrusted artifact bypassed default policy");
+    Require(string.IsNullOrEmpty(blocked.Capability.CapabilityId), "blocked untrusted artifact received capability");
+
+    var approved = await capabilities.PrepareAsync(
+        artifact.ArtifactId,
+        elevatedBrokerAvailable: false,
+        allowUntrusted: true);
+    Require(approved.Readiness.Status == InstallerReadinessStatus.Ready, "explicitly approved untrusted artifact did not become ready");
+    Require(approved.Capability.CapabilityId.Length == 64, "approved artifact did not receive opaque capability");
+    capabilities.Complete(approved.Capability.CapabilityId);
 }
 
 static async Task TestCapabilityOneShotAsync()
@@ -91,8 +121,11 @@ static async Task TestCapabilityOneShotAsync()
     var artifact = await catalog.RegisterManagedDownloadAsync(path);
 
     using var capabilities = env.CreateCapabilities(catalog);
-    var prepared = await capabilities.PrepareAsync(artifact.ArtifactId, elevatedBrokerAvailable: false);
-    Require(prepared.Readiness.Status == InstallerReadinessStatus.Ready, "artifact did not become ready");
+    var prepared = await capabilities.PrepareAsync(
+        artifact.ArtifactId,
+        elevatedBrokerAvailable: false,
+        allowUntrusted: true);
+    Require(prepared.Readiness.Status == InstallerReadinessStatus.Ready, "artifact did not become ready after explicit untrusted approval");
     Require(prepared.Capability.CapabilityId.Length == 64, "capability does not have 256-bit opaque ID");
     Require(!prepared.LaunchPlan.ExecutablePath.Equals(path, StringComparison.OrdinalIgnoreCase), "launch plan points at mutable download instead of staging");
     Require(prepared.LaunchPlan.ExpectedSha256 == artifact.Sha256, "launch plan lost approved digest");
@@ -122,8 +155,11 @@ static async Task TestMsiPlanAsync()
     var artifact = await catalog.RegisterManagedDownloadAsync(path);
 
     using var capabilities = env.CreateCapabilities(catalog);
-    var prepared = await capabilities.PrepareAsync(artifact.ArtifactId, elevatedBrokerAvailable: false);
-    Require(prepared.Readiness.Status == InstallerReadinessStatus.Ready, "MSI did not become ready");
+    var prepared = await capabilities.PrepareAsync(
+        artifact.ArtifactId,
+        elevatedBrokerAvailable: false,
+        allowUntrusted: true);
+    Require(prepared.Readiness.Status == InstallerReadinessStatus.Ready, "MSI did not become ready after explicit untrusted approval");
     var plan = prepared.LaunchPlan;
     Require(Path.GetFileName(plan.ExecutablePath).Equals("msiexec.exe", StringComparison.OrdinalIgnoreCase), "MSI does not use msiexec.exe");
     Require(plan.Arguments.Count == 5, "MSI argument vector changed unexpectedly");
