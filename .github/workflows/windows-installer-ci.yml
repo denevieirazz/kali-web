@@ -7,7 +7,12 @@ on:
       - 'desktop/CloudOS.Installer/**'
       - 'desktop/CloudOS.Installer.Tests/**'
       - 'desktop/CloudOS.Host/Browser/**'
+      - 'desktop/CloudOS.Host/Bridge/WebMessageBridge.cs'
       - 'desktop/CloudOS.Host/Installer/**'
+      - 'frontend/src/apps/WindowsInstaller/**'
+      - 'frontend/src/core/appRegistry.ts'
+      - 'frontend/src/core/fs/apps.ts'
+      - 'frontend/src/services/nativeHostBridge.ts'
       - '.github/workflows/windows-installer-ci.yml'
 
 jobs:
@@ -45,3 +50,45 @@ jobs:
             }
           }
           Write-Host 'Installer elevation boundary: PASS'
+
+      - name: Enforce preparation-only WebView boundary
+        shell: pwsh
+        run: |
+          $hostBridge = Get-Content 'desktop/CloudOS.Host/Bridge/WebMessageBridge.cs' -Raw
+          $client = Get-Content 'frontend/src/services/nativeHostBridge.ts' -Raw
+          $panel = Get-Content 'frontend/src/apps/WindowsInstaller/WindowsInstaller.tsx' -Raw
+          $registry = Get-Content 'frontend/src/core/appRegistry.ts' -Raw
+          $apps = Get-Content 'frontend/src/core/fs/apps.ts' -Raw
+
+          foreach ($required in @('installer.artifacts.list', 'installer.prepare')) {
+            if (-not $hostBridge.Contains($required, [System.StringComparison]::Ordinal) -or
+                -not $client.Contains($required, [System.StringComparison]::Ordinal)) {
+              throw "Installer preparation bridge is missing required method '$required'."
+            }
+          }
+
+          $publicSurface = "$client`n$panel"
+          foreach ($forbidden in @(
+            'installer.execute',
+            'installer.consume',
+            'ExecutablePath',
+            'executablePath',
+            'WorkingDirectory',
+            'workingDirectory',
+            'LogPath',
+            'logPath'
+          )) {
+            if ($publicSurface.Contains($forbidden, [System.StringComparison]::Ordinal)) {
+              throw "Installer WebView surface exposed forbidden execution detail '$forbidden'."
+            }
+          }
+
+          foreach ($requiredRegistration in @('windows-installer', 'WindowsInstaller/WindowsInstaller', 'windows-installer.obx')) {
+            $found = $registry.Contains($requiredRegistration, [System.StringComparison]::Ordinal) -or
+                     $apps.Contains($requiredRegistration, [System.StringComparison]::Ordinal)
+            if (-not $found) {
+              throw "Installer bundled-app registration is missing '$requiredRegistration'."
+            }
+          }
+
+          Write-Host 'Installer preparation-only WebView boundary: PASS'
