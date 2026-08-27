@@ -16,6 +16,7 @@ public sealed class InstallerCapabilityService : IDisposable
     private readonly string _logsRoot;
     private readonly TimeSpan _lifetime;
     private readonly Dictionary<string, CapabilityState> _capabilities = new(StringComparer.Ordinal);
+    private readonly CancellationTokenSource _disposeSignal = new();
     private bool _disposed;
 
     public InstallerCapabilityService(
@@ -140,6 +141,7 @@ public sealed class InstallerCapabilityService : IDisposable
                 issuedAt,
                 expiresAt,
                 stagedRecord.Sha256);
+            var expirationToken = _disposeSignal.Token;
 
             lock (_sync)
             {
@@ -153,6 +155,7 @@ public sealed class InstallerCapabilityService : IDisposable
                         stagedPath,
                         requireTrustedPublisher));
             }
+            _ = ExpireCapabilityAsync(capabilityId, expiresAt, expirationToken);
 
             var readiness = new InstallerReadiness(
                 InstallerReadinessStatus.Ready,
@@ -217,7 +220,12 @@ public sealed class InstallerCapabilityService : IDisposable
     {
         ThrowIfDisposed();
         ValidateCapabilityId(capabilityId);
-        var directory = Path.Combine(_stagingRoot, capabilityId);
+        CapabilityState? state;
+        lock (_sync)
+            _capabilities.Remove(capabilityId, out state);
+        var directory = state is null
+            ? Path.Combine(_stagingRoot, capabilityId)
+            : Path.GetDirectoryName(state.StagedPath)!;
         TryDeleteDirectory(directory);
     }
 
@@ -231,8 +239,42 @@ public sealed class InstallerCapabilityService : IDisposable
             states = [.. _capabilities.Values];
             _capabilities.Clear();
         }
+        _disposeSignal.Cancel();
         foreach (var state in states)
             TryDeleteDirectory(Path.GetDirectoryName(state.StagedPath)!);
+    }
+
+    private async Task ExpireCapabilityAsync(
+        string capabilityId,
+        DateTimeOffset expiresAtUtc,
+        CancellationToken cancellationToken)
+    {
+        var delay = expiresAtUtc - DateTimeOffset.UtcNow;
+        if (delay > TimeSpan.Zero)
+        {
+            try
+            {
+                await Task.Delay(delay, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+        }
+
+        CapabilityState? expired = null;
+        lock (_sync)
+        {
+            if (_disposed) return;
+            if (_capabilities.TryGetValue(capabilityId, out var state)
+                && DateTimeOffset.UtcNow >= state.Capability.ExpiresAtUtc)
+            {
+                _capabilities.Remove(capabilityId);
+                expired = state;
+            }
+        }
+        if (expired is not null)
+            TryDeleteDirectory(Path.GetDirectoryName(expired.StagedPath)!);
     }
 
     private static bool MatchesRegisteredArtifact(
