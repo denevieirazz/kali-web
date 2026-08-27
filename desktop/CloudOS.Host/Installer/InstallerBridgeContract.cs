@@ -1,40 +1,42 @@
+using System.Text.Json.Serialization;
 using CloudOS.Installer;
 
 namespace CloudOS.Host.Installer;
 
 public sealed record InstallerArtifactBridgeView(
-    string ArtifactId,
-    string FileName,
-    string Kind,
-    string Sha256,
-    long SizeBytes,
-    string Trust,
-    string? Publisher,
-    DateTimeOffset RegisteredAtUtc,
-    string? SourceDownloadId);
+    [property: JsonPropertyName("artifactId")] string ArtifactId,
+    [property: JsonPropertyName("fileName")] string FileName,
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("sha256")] string Sha256,
+    [property: JsonPropertyName("sizeBytes")] long SizeBytes,
+    [property: JsonPropertyName("trust")] string Trust,
+    [property: JsonPropertyName("publisher")] string? Publisher,
+    [property: JsonPropertyName("registeredAtUtc")] DateTimeOffset RegisteredAtUtc,
+    [property: JsonPropertyName("sourceDownloadId")] string? SourceDownloadId);
 
 public sealed record InstallerArtifactListBridgeResponse(
-    IReadOnlyList<InstallerArtifactBridgeView> Artifacts,
-    bool ElevationBrokerAvailable);
+    [property: JsonPropertyName("artifacts")] IReadOnlyList<InstallerArtifactBridgeView> Artifacts,
+    [property: JsonPropertyName("elevationBrokerAvailable")] bool ElevationBrokerAvailable);
 
 public sealed record InstallerReadinessBridgeView(
-    string Status,
-    bool IntegrityValid,
-    bool TrustValid,
-    bool CanLaunchInUserSession,
-    bool ElevatedBrokerAvailable,
-    string? Reason);
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("integrityValid")] bool IntegrityValid,
+    [property: JsonPropertyName("trustValid")] bool TrustValid,
+    [property: JsonPropertyName("canLaunchInUserSession")] bool CanLaunchInUserSession,
+    [property: JsonPropertyName("elevatedBrokerAvailable")] bool ElevatedBrokerAvailable,
+    [property: JsonPropertyName("reason")] string? Reason);
 
 public sealed record InstallerPrepareBridgeResponse(
-    InstallerArtifactBridgeView Artifact,
-    InstallerReadinessBridgeView Readiness,
-    string? CapabilityId,
-    DateTimeOffset? ExpiresAtUtc);
+    [property: JsonPropertyName("artifact")] InstallerArtifactBridgeView Artifact,
+    [property: JsonPropertyName("readiness")] InstallerReadinessBridgeView Readiness,
+    [property: JsonPropertyName("capabilityId")] string? CapabilityId,
+    [property: JsonPropertyName("expiresAtUtc")] DateTimeOffset? ExpiresAtUtc);
 
 /// <summary>
 /// Public WebView contract for installer discovery/preparation. It deliberately
 /// omits launch-plan paths, argv, working directories and native log paths. Enum
-/// values are projected to stable names instead of serializer-dependent integers.
+/// values and JSON field names are projected explicitly so the protocol does not
+/// depend on serializer defaults.
 /// </summary>
 public static class InstallerBridgeContract
 {
