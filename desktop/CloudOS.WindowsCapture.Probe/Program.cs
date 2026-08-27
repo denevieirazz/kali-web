@@ -4,14 +4,15 @@ using System.Text;
 using System.Text.Json;
 using CloudOS.WindowsCapture;
 
-if (args.Length == 0 || args.Contains("--help", StringComparer.OrdinalIgnoreCase))
+var helpRequested = args.Contains("--help", StringComparer.OrdinalIgnoreCase);
+if (args.Length == 0 || helpRequested)
 {
     Console.WriteLine("CloudOS Windows capture probe");
     Console.WriteLine("  --pid <processId> | --hwnd <decimal|0xHEX>");
     Console.WriteLine("  [--capture-kind window|monitor]");
     Console.WriteLine("  [--item-factory raw|projected]");
     Console.WriteLine("  [--seconds <1-30>] [--min-frames <1-1000>] [--output <path>]");
-    return 64;
+    return helpRequested ? 0 : 64;
 }
 
 try
