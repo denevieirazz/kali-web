@@ -20,12 +20,15 @@ $fixtureProject = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.Fixture\Cl
 $fixtureExe = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.Fixture\bin\Release\net8.0-windows\CloudOS.WindowsCapture.Fixture.exe'
 $probeProject = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.Probe\CloudOS.WindowsCapture.Probe.csproj'
 $probeDll = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.Probe\bin\Release\net8.0-windows10.0.19041.0\CloudOS.WindowsCapture.Probe.dll'
+$nativeProject = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.NativeReference\CloudOS.WindowsCapture.NativeReference.vcxproj'
+$nativeExe = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.NativeReference\bin\Release\x64\CloudOS.WindowsCapture.NativeReference.exe'
 $outputRoot = [System.IO.Path]::GetFullPath($OutputDirectory)
 $productReportPath = Join-Path $outputRoot 'fixture-window-product-candidate.json'
 $lifetimeControlPath = Join-Path $outputRoot 'fixture-window-release-control.json'
 $projectionControlPath = Join-Path $outputRoot 'fixture-window-projected-type-control.json'
 $factoryControlPath = Join-Path $outputRoot 'fixture-window-projected-factory-control.json'
 $monitorControlPath = Join-Path $outputRoot 'fixture-monitor-lower-layer-control.json'
+$nativeReferencePath = Join-Path $outputRoot 'fixture-native-cpp-window-reference.json'
 $logPath = Join-Path $outputRoot 'fixture-wgc-smoke.log'
 $summaryPath = Join-Path $outputRoot 'fixture-wgc-matrix-summary.json'
 
@@ -35,6 +38,63 @@ function Resolve-DotNet {
     $localDotNet = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet\dotnet.exe'
     if (Test-Path -LiteralPath $localDotNet -PathType Leaf) { return $localDotNet }
     throw 'dotnet não foi encontrado.'
+}
+
+function Resolve-MSBuildOptional {
+    $command = Get-Command msbuild -ErrorAction SilentlyContinue
+    if ($null -ne $command) { return $command.Source }
+
+    $vswhereCandidates = @(
+        (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'),
+        (Join-Path $env:ProgramFiles 'Microsoft Visual Studio\Installer\vswhere.exe')
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+    foreach ($vswhere in $vswhereCandidates) {
+        if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) { continue }
+        $candidate = & $vswhere `
+            -latest `
+            -products '*' `
+            -requires Microsoft.Component.MSBuild `
+            -find 'MSBuild\**\Bin\MSBuild.exe' 2>$null | Select-Object -First 1
+        if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            return [string]$candidate
+        }
+    }
+
+    return $null
+}
+
+function Invoke-ExternalProcess {
+    param(
+        [Parameter(Mandatory)] [string] $FilePath,
+        [Parameter(Mandatory)] [string[]] $Arguments
+    )
+
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $FilePath
+    foreach ($argument in $Arguments) { [void]$startInfo.ArgumentList.Add($argument) }
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    try {
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        return [pscustomobject]@{
+            exitCode = $process.ExitCode
+            stdout = $stdout.TrimEnd()
+            stderr = $stderr.TrimEnd()
+            output = (($stdout + $stderr).TrimEnd())
+        }
+    }
+    finally {
+        $process.Dispose()
+    }
 }
 
 function Invoke-ProbeLane {
@@ -81,6 +141,82 @@ function Invoke-ProbeLane {
     }
 }
 
+function Invoke-NativeReference {
+    param([Parameter(Mandatory)] [string] $WindowHandle)
+
+    Remove-Item -LiteralPath $nativeReferencePath -Force -ErrorAction SilentlyContinue
+    $builder = Resolve-MSBuildOptional
+    if ([string]::IsNullOrWhiteSpace($builder)) {
+        return [pscustomobject]@{
+            status = 'NOT_AVAILABLE'
+            buildStatus = 'MSBUILD_NOT_FOUND'
+            executionStatus = 'NOT_RUN'
+            exitCode = $null
+            reportPath = $nativeReferencePath
+            report = $null
+            output = 'MSBuild/C++ toolchain not available on this machine.'
+        }
+    }
+
+    Write-Host '=== NATIVE C++/WINRT REFERENCE BUILD ===' -ForegroundColor Cyan
+    $build = Invoke-ExternalProcess `
+        -FilePath $builder `
+        -Arguments @(
+            $nativeProject,
+            '/m',
+            '/p:Configuration=Release',
+            '/p:Platform=x64',
+            '/verbosity:minimal'
+        )
+    Write-Host $build.output
+
+    if ($build.exitCode -ne 0) {
+        return [pscustomobject]@{
+            status = 'BUILD_FAILED'
+            buildStatus = 'FAILED'
+            executionStatus = 'NOT_RUN'
+            exitCode = $build.exitCode
+            reportPath = $nativeReferencePath
+            report = $null
+            output = $build.output
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $nativeExe -PathType Leaf)) {
+        return [pscustomobject]@{
+            status = 'BUILD_OUTPUT_MISSING'
+            buildStatus = 'SUCCESS_BUT_EXE_MISSING'
+            executionStatus = 'NOT_RUN'
+            exitCode = $null
+            reportPath = $nativeReferencePath
+            report = $null
+            output = "Native reference executable missing after successful MSBuild: $nativeExe"
+        }
+    }
+
+    Write-Host '=== NATIVE C++/WINRT REFERENCE EXECUTION ===' -ForegroundColor Cyan
+    $run = Invoke-ExternalProcess `
+        -FilePath $nativeExe `
+        -Arguments @('--hwnd', $WindowHandle, '--output', $nativeReferencePath)
+    Write-Host $run.output
+
+    $report = $null
+    if (Test-Path -LiteralPath $nativeReferencePath -PathType Leaf) {
+        try { $report = Get-Content -LiteralPath $nativeReferencePath -Raw | ConvertFrom-Json }
+        catch { Write-Warning "Relatório C++ inválido em $nativeReferencePath : $($_.Exception.Message)" }
+    }
+
+    return [pscustomobject]@{
+        status = 'EXECUTED'
+        buildStatus = 'SUCCESS'
+        executionStatus = if ($null -ne $report) { 'REPORT_GENERATED' } else { 'NO_REPORT' }
+        exitCode = $run.exitCode
+        reportPath = $nativeReferencePath
+        report = $report
+        output = $run.output
+    }
+}
+
 function Lane-Summary($lane) {
     $report = $lane.report
     $window = if ($null -ne $report) { $report.window } else { $null }
@@ -110,6 +246,37 @@ function Lane-Summary($lane) {
         cloaked = if ($null -ne $window) { $window.cloaked } else { $null }
         displayAffinity = if ($null -ne $window) { $window.displayAffinity } else { $null }
         reportPath = $lane.reportPath
+    }
+}
+
+function Get-LaneItemHealthy($lane) {
+    if ($null -eq $lane.report) { return $false }
+    if ($null -ne $lane.report.capture) {
+        return ([int]$lane.report.capture.initialItemWidth -gt 0 -and [int]$lane.report.capture.initialItemHeight -gt 0)
+    }
+    if ($null -ne $lane.report.error) {
+        return ([int]$lane.report.error.itemWidth -gt 0 -and [int]$lane.report.error.itemHeight -gt 0)
+    }
+    return $false
+}
+
+function Native-Summary($native) {
+    $report = $native.report
+    return [ordered]@{
+        status = $native.status
+        buildStatus = $native.buildStatus
+        executionStatus = $native.executionStatus
+        exitCode = $native.exitCode
+        reportGenerated = ($null -ne $report)
+        verdict = if ($null -ne $report) { $report.verdict } else { $null }
+        stage = if ($null -ne $report) { $report.stage } else { $null }
+        hwnd = if ($null -ne $report) { $report.hwnd } else { $null }
+        itemWidth = if ($null -ne $report) { [int]$report.itemWidth } else { 0 }
+        itemHeight = if ($null -ne $report) { [int]$report.itemHeight } else { 0 }
+        displayName = if ($null -ne $report) { $report.displayName } else { $null }
+        hresult = if ($null -ne $report) { $report.hresult } else { $null }
+        message = if ($null -ne $report) { $report.message } else { $null }
+        reportPath = $native.reportPath
     }
 }
 
@@ -148,9 +315,10 @@ try {
     } while ($reportedMainWindowHwnd -eq [IntPtr]::Zero -and [DateTimeOffset]::UtcNow -lt $deadline)
     if ($reportedMainWindowHwnd -eq [IntPtr]::Zero) { throw 'Fixture não publicou janela dentro do timeout.' }
 
-    Write-Host "Fixture PID=$($fixture.Id) reported MainWindowHandle=0x$('{0:X}' -f $reportedMainWindowHwnd.ToInt64())" -ForegroundColor Cyan
+    $reportedHandleText = ('0x{0:X}' -f $reportedMainWindowHwnd.ToInt64())
+    Write-Host "Fixture PID=$($fixture.Id) reported MainWindowHandle=$reportedHandleText" -ForegroundColor Cyan
 
-    # Five lanes isolate factory, projection, ABI lifetime, and the WGC/D3D lower layer.
+    # Five C# lanes isolate factory, projection, ABI lifetime, and the WGC/D3D lower layer.
     # Only lane 1 is allowed to approve the product gate.
     $product = Invoke-ProbeLane `
         -Name 'WINDOW / RAW / MARSHAL-INTERFACE / HOLD (PRODUCT CANDIDATE)' `
@@ -197,19 +365,34 @@ try {
         -ReportPath $monitorControlPath `
         -ProcessId $fixture.Id
 
+    # The native C++/WinRT reference must use the exact HWND selected by the C# probe.
+    # If the C# report is unavailable, fall back to the fixture's published HWND and record it.
+    $canonicalWindowHandle = if ($null -ne $product.report -and $null -ne $product.report.window -and -not [string]::IsNullOrWhiteSpace($product.report.window.handle)) {
+        [string]$product.report.window.handle
+    } else {
+        $reportedHandleText
+    }
+    $nativeReference = Invoke-NativeReference -WindowHandle $canonicalWindowHandle
+
     $completedAt = [DateTimeOffset]::UtcNow
     $productGatePassed = ($product.exitCode -eq 0 -and $null -ne $product.report -and $product.report.verdict -eq 'PASS')
+    $lowerLayerHealthy = ($monitorControl.exitCode -eq 0 -and $null -ne $monitorControl.report -and $monitorControl.report.verdict -eq 'PASS')
+    $allWindowLanesFailed = (@($product, $lifetimeControl, $projectionControl, $factoryControl) | Where-Object { $_.exitCode -eq 0 }).Count -eq 0
+    $csharpProductItemHealthy = Get-LaneItemHealthy $product
+    $nativeItemHealthy = ($null -ne $nativeReference.report -and $nativeReference.report.verdict -eq 'PASS' -and [int]$nativeReference.report.itemWidth -gt 0 -and [int]$nativeReference.report.itemHeight -gt 0)
+    $nativeExecutedWithReport = ($nativeReference.status -eq 'EXECUTED' -and $null -ne $nativeReference.report)
 
     $summary = [ordered]@{
-        schemaVersion = 2
-        probeMatrix = 'CloudOS Windows captured-surface item lifetime/projection isolation'
+        schemaVersion = 3
+        probeMatrix = 'CloudOS Windows captured-surface C#/native HWND isolation'
         startedAt = $startedAt.ToString('o')
         completedAt = $completedAt.ToString('o')
         branch = $branch
         head = $currentHead
         fixtureKind = 'winforms-overlapped-animated'
         fixturePid = $fixture.Id
-        fixtureReportedMainWindowHwnd = ('0x{0:X}' -f $reportedMainWindowHwnd.ToInt64())
+        fixtureReportedMainWindowHwnd = $reportedHandleText
+        canonicalWindowHwnd = $canonicalWindowHandle
         minimumFrames = $MinimumFrames
         captureSeconds = $CaptureSeconds
         productGate = 'window/raw/marshal-interface/hold'
@@ -218,8 +401,15 @@ try {
             lifetimeSuspect = ($product.exitCode -eq 0 -and $lifetimeControl.exitCode -ne 0)
             projectionSuspect = ($product.exitCode -eq 0 -and $projectionControl.exitCode -ne 0)
             factorySuspect = ($product.exitCode -eq 0 -and $factoryControl.exitCode -ne 0)
-            lowerLayerHealthy = ($monitorControl.exitCode -eq 0 -and $null -ne $monitorControl.report -and $monitorControl.report.verdict -eq 'PASS')
-            allWindowLanesFailed = (@($product, $lifetimeControl, $projectionControl, $factoryControl) | Where-Object { $_.exitCode -eq 0 }).Count -eq 0
+            lowerLayerHealthy = $lowerLayerHealthy
+            allWindowLanesFailed = $allWindowLanesFailed
+            csharpProductItemHealthy = $csharpProductItemHealthy
+            nativeReferenceAvailable = ($nativeReference.status -ne 'NOT_AVAILABLE')
+            nativeReferenceProducedReport = $nativeExecutedWithReport
+            nativeItemHealthy = $nativeItemHealthy
+            nativeDisagreesWithCsharpItemMetadata = ($nativeExecutedWithReport -and ($nativeItemHealthy -ne $csharpProductItemHealthy))
+            nativeAndCsharpBothReportUnusableWindowItem = ($nativeExecutedWithReport -and -not $nativeItemHealthy -and -not $csharpProductItemHealthy)
+            nativeHealthyWhileCsharpWindowFails = ($nativeItemHealthy -and -not $productGatePassed)
         }
         lanes = @(
             (Lane-Summary $product),
@@ -228,20 +418,22 @@ try {
             (Lane-Summary $factoryControl),
             (Lane-Summary $monitorControl)
         )
+        nativeReference = (Native-Summary $nativeReference)
     }
 
-    $summaryJson = $summary | ConvertTo-Json -Depth 14
+    $summaryJson = $summary | ConvertTo-Json -Depth 16
     [System.IO.File]::WriteAllText($summaryPath, $summaryJson + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
 
     $logLines = @(
-        'CLOUDOS WINDOWS CAPTURE FULL ITEM LIFETIME/PROJECTION ISOLATION',
+        'CLOUDOS WINDOWS CAPTURE FULL C#/NATIVE HWND ISOLATION',
         "startedAt=$($startedAt.ToString('o'))",
         "completedAt=$($completedAt.ToString('o'))",
         "branch=$branch",
         "head=$currentHead",
         'fixtureKind=winforms-overlapped-animated',
         "fixturePid=$($fixture.Id)",
-        "fixtureReportedMainWindowHwnd=0x$('{0:X}' -f $reportedMainWindowHwnd.ToInt64())",
+        "fixtureReportedMainWindowHwnd=$reportedHandleText",
+        "canonicalWindowHwnd=$canonicalWindowHandle",
         'targetSelection=probe-enumerated-largest-visible-top-level-window-for-pid',
         "captureSeconds=$CaptureSeconds",
         "minimumFrames=$MinimumFrames",
@@ -250,6 +442,10 @@ try {
         "projectionControlExitCode=$($projectionControl.exitCode)",
         "factoryControlExitCode=$($factoryControl.exitCode)",
         "monitorControlExitCode=$($monitorControl.exitCode)",
+        "nativeReferenceStatus=$($nativeReference.status)",
+        "nativeReferenceBuildStatus=$($nativeReference.buildStatus)",
+        "nativeReferenceExecutionStatus=$($nativeReference.executionStatus)",
+        "nativeReferenceExitCode=$($nativeReference.exitCode)",
         "matrixSummary=$summaryPath",
         '',
         '=== WINDOW / RAW / MARSHAL-INTERFACE / HOLD (PRODUCT CANDIDATE) ===',
@@ -267,13 +463,16 @@ try {
         '=== MONITOR / RAW / MARSHAL-INTERFACE / HOLD (LOWER-LAYER CONTROL) ===',
         $monitorControl.output,
         '',
+        '=== NATIVE C++/WINRT REFERENCE ===',
+        $nativeReference.output,
+        '',
         '=== MATRIX SUMMARY ===',
         $summaryJson
     )
     [System.IO.File]::WriteAllLines($logPath, $logLines, [System.Text.UTF8Encoding]::new($false))
 
     Write-Host ''
-    Write-Host '=== ITEM LIFETIME/PROJECTION MATRIX SUMMARY ===' -ForegroundColor Cyan
+    Write-Host '=== C#/NATIVE HWND MATRIX SUMMARY ===' -ForegroundColor Cyan
     Write-Host $summaryJson
     Write-Host "Summary: $summaryPath"
     Write-Host "Log:     $logPath"
