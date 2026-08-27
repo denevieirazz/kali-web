@@ -59,7 +59,13 @@ O runtime experimental é genérico por classe de runtime, não por aplicativo. 
 
 A fronteira de segurança é **fail-closed**: se o CloudOS não conseguir correlacionar, conter, capturar ou apresentar um aplicativo com segurança, ele deve recusar a abertura e expor um diagnóstico. A POC **não pode** usar como fallback abrir a UI normalmente no desktop Windows. Apps elevados, DRM/protected capture, anti-cheat, exclusive fullscreen, brokers compartilhados, handoff de singleton e outros modelos incompatíveis podem permanecer explicitamente `UNSUPPORTED` até existir uma estratégia segura para aquela classe.
 
-O gate físico atual da POC usa uma fixture WinForms convencional e compara três caminhos na mesma execução: HWND via activation factory WinRT em ABI cru (gate do produto), HWND pelo caminho projetado legado (controle) e HMONITOR via activation factory cru (controle de D3D/frame-pool/compositor). O caminho raw obtém `IGraphicsCaptureItemInterop` diretamente da activation factory `Windows.Graphics.Capture.GraphicsCaptureItem`, espelhando o contrato Win32 oficial em vez de depender do helper projetado como fronteira de fábrica.
+O gate físico atual usa uma fixture WinForms convencional e compara três caminhos na mesma execução:
+
+1. `window/raw-activation-factory` — gate do produto;
+2. `window/projected-factory` — controle do caminho legado;
+3. `monitor/raw-activation-factory` — controle das camadas D3D/frame-pool/compositor.
+
+O caminho raw obtém `IGraphicsCaptureItemInterop` diretamente da activation factory `Windows.Graphics.Capture.GraphicsCaptureItem` via ABI WinRT, espelhando o contrato Win32 oficial.
 
 ### Evidência física isolada antes do raw activation-factory fix
 
@@ -73,7 +79,18 @@ Essa prova isola o defeito anterior no caminho do `GraphicsCaptureItem` de janel
 
 O HEAD atual substitui a fronteira de factory do gate HWND por ABI cru (`RoGetActivationFactory → IGraphicsCaptureItemInterop → CreateForWindow`) e mantém o caminho projetado anterior apenas como controle explícito, sem fallback silencioso.
 
-O smoke está em `scripts/test-windows-capture-probe.ps1` e grava evidência estruturada em `poc1-physical-evidence/windows-captured-surface`, incluindo um resumo de matriz mesmo quando a sessão de captura falha durante setup.
+O probe registra o estágio de setup e grava JSON também em falhas precoces. O smoke gera:
+
+```text
+poc1-physical-evidence/windows-captured-surface/
+├── fixture-window-wgc-smoke.json
+├── fixture-window-projected-control.json
+├── fixture-monitor-wgc-control.json
+├── fixture-wgc-matrix-summary.json
+└── fixture-wgc-smoke.log
+```
+
+O `fixture-wgc-matrix-summary.json` é a evidência principal para a próxima prova física; o log mantém stdout/stderr completos das três lanes.
 
 Consulte [docs/NATIVE-HOST-ROADMAP.md](docs/NATIVE-HOST-ROADMAP.md) para a evolução do host nativo.
 
