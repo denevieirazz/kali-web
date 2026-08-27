@@ -17,6 +17,7 @@ public sealed class InstallerExecutionOwnershipRegistry
     private readonly object _sync = new();
     private readonly Dictionary<int, InstallerExecutionOwnership> _byRootProcessId = new();
     private readonly Dictionary<string, int> _rootByCapabilityId = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _retiredCapabilityIds = new(StringComparer.Ordinal);
 
     public InstallerExecutionOwnership Register(
         string capabilityId,
@@ -38,8 +39,8 @@ public sealed class InstallerExecutionOwnershipRegistry
         {
             if (_byRootProcessId.ContainsKey(rootProcessId))
                 throw new InvalidOperationException("The containment Job root already owns an installer capability.");
-            if (_rootByCapabilityId.ContainsKey(capabilityId))
-                throw new InvalidOperationException("The installer capability is already owned by a containment Job.");
+            if (_rootByCapabilityId.ContainsKey(capabilityId) || _retiredCapabilityIds.Contains(capabilityId))
+                throw new InvalidOperationException("The installer capability is already active or retired in this Host session.");
 
             _byRootProcessId.Add(rootProcessId, ownership);
             _rootByCapabilityId.Add(capabilityId, rootProcessId);
@@ -65,8 +66,9 @@ public sealed class InstallerExecutionOwnershipRegistry
 
     /// <summary>
     /// Removes ownership only after the caller has independently proven that the
-    /// containment Job is empty. The returned capability is then eligible for
-    /// staging cleanup and post-install catalog rescan.
+    /// containment Job is empty. The returned capability becomes retired for the
+    /// remainder of the Host session and is then eligible for staging cleanup and
+    /// post-install catalog rescan.
     /// </summary>
     public InstallerExecutionOwnership? CompleteRoot(int rootProcessId)
     {
@@ -74,6 +76,7 @@ public sealed class InstallerExecutionOwnershipRegistry
         {
             if (!_byRootProcessId.Remove(rootProcessId, out var ownership)) return null;
             _rootByCapabilityId.Remove(ownership.CapabilityId);
+            _retiredCapabilityIds.Add(ownership.CapabilityId);
             return ownership;
         }
     }
