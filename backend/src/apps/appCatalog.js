@@ -119,6 +119,15 @@ export function buildIsolatedWindowsAppArguments(executable, baseDirectory) {
   return [];
 }
 
+export function normalizeWindowsLaunchKind(launchKind, launchArguments) {
+  if (launchKind === 'windows-shortcut-direct'
+      && Array.isArray(launchArguments)
+      && launchArguments.length > 0) {
+    return 'windows-shortcut-argv';
+  }
+  return launchKind;
+}
+
 // Parse only the documented Windows backslash/quote grammar used by conventional
 // Win32 argv consumers. Malformed/unbalanced input fails closed instead of being
 // approximated. The Host will quote each resulting argv entry again before
@@ -391,6 +400,7 @@ export async function launchCatalogApp(id) {
         process.env.CLOUDOS_LOCAL_ROOT || process.env.CLOUDOS_DATA_DIR || '')
     : [];
   const launchArguments = [...isolatedProfileArguments, ...catalogArguments];
+  const effectiveLaunchKind = normalizeWindowsLaunchKind(launchKind, launchArguments);
   const workingDirectory = scriptLaunch
     ? (app.workingDirectory || path.win32.dirname(scriptPath))
     : (app.workingDirectory || path.win32.dirname(executable));
@@ -401,7 +411,7 @@ export async function launchCatalogApp(id) {
     source: app.source,
     distribution: null,
     windowMode: 'native-managed',
-    launchKind,
+    launchKind: effectiveLaunchKind,
     launchSpec: {
       executable,
       arguments: launchArguments,
