@@ -182,7 +182,7 @@ function Invoke-NativeReference {
 
 function Write-SummaryAndThrow {
     param(
-        [Parameter(Mandatory)] [hashtable] $Summary,
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $Summary,
         [Parameter(Mandatory)] [string] $FailureMessage,
         [string[]] $AdditionalLog = @()
     )
