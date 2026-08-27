@@ -8,6 +8,7 @@ on:
       - 'desktop/CloudOS.WindowsCapture.Probe/**'
       - 'desktop/CloudOS.WindowsCapture.HealthProbe/**'
       - 'desktop/CloudOS.WindowsCapture.Contracts.Tests/**'
+      - 'desktop/CloudOS.WindowsCapture.Input.Tests/**'
       - 'desktop/CloudOS.WindowsCapture.Fixture/**'
       - 'desktop/CloudOS.WindowsCapture.NativeReference/**'
       - 'desktop/CloudOS.WindowsCapture.Presenter/**'
@@ -148,6 +149,12 @@ jobs:
         run: |
           dotnet run --project desktop/CloudOS.WindowsCapture.Contracts.Tests/CloudOS.WindowsCapture.Contracts.Tests.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw "Presentation lifecycle contract tests failed with $LASTEXITCODE." }
+
+      - name: Run input mapping contract tests
+        shell: pwsh
+        run: |
+          dotnet run --project desktop/CloudOS.WindowsCapture.Input.Tests/CloudOS.WindowsCapture.Input.Tests.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw "Input contract tests failed with $LASTEXITCODE." }
 
       - name: Parse physical matrix script
         shell: pwsh
