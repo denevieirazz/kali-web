@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using CloudOS.WindowsCapture;
@@ -7,6 +8,7 @@ namespace CloudOS.WindowsCapture.Presenter;
 /// <summary>
 /// Same-process Win32 presentation HWND owned by the CloudOS Host. It is a tool window,
 /// never a taskbar/Alt+Tab application window, and it never reparents the captured app's HWND.
+/// Pointer messages are observed without activating this presenter or the foreign source HWND.
 /// </summary>
 public sealed class HostOwnedCaptureSurfaceWindow : IDisposable
 {
@@ -15,12 +17,17 @@ public sealed class HostOwnedCaptureSurfaceWindow : IDisposable
     private const uint WsClipChildren = 0x02000000;
     private const uint WsClipSiblings = 0x04000000;
     private const uint WsExToolWindow = 0x00000080;
+    private const uint WsExNoActivate = 0x08000000;
     private const uint SwpNoActivate = 0x0010;
     private const uint SwpNoOwnerZOrder = 0x0200;
+    private const uint WmMouseActivate = 0x0021;
+    private const int MaNoActivate = 3;
     private const int SwHide = 0;
     private const int SwShowNoActivate = 4;
+    private const int VkMenu = 0x12;
     private static readonly IntPtr HwndTop = IntPtr.Zero;
     private static readonly object RegistrationSync = new();
+    private static readonly ConcurrentDictionary<IntPtr, WeakReference<HostOwnedCaptureSurfaceWindow>> Windows = new();
     private static readonly WindowProcedureDelegate WindowProcedureInstance = HandleWindowMessage;
     private static bool _registered;
 
@@ -33,7 +40,7 @@ public sealed class HostOwnedCaptureSurfaceWindow : IDisposable
         EnsureWindowClass();
 
         var handle = CreateWindowExW(
-            WsExToolWindow,
+            WsExToolWindow | WsExNoActivate,
             WindowClassName,
             "CloudOS Captured Surface",
             WsPopup | WsClipChildren | WsClipSiblings,
@@ -48,10 +55,23 @@ public sealed class HostOwnedCaptureSurfaceWindow : IDisposable
         if (handle == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateWindowExW failed for captured-surface presenter.");
 
         Handle = handle;
-        ApplyLayout(initialLayout);
+        Windows[handle] = new WeakReference<HostOwnedCaptureSurfaceWindow>(this);
+        try
+        {
+            ApplyLayout(initialLayout);
+        }
+        catch
+        {
+            Windows.TryRemove(handle, out _);
+            DestroyWindow(handle);
+            Handle = IntPtr.Zero;
+            throw;
+        }
     }
 
     public IntPtr Handle { get; private set; }
+
+    public event EventHandler<HostOwnedCaptureSurfacePointerEvent>? PointerInput;
 
     public void ApplyLayout(WindowsCapturePresentationLayout layout)
     {
@@ -90,8 +110,47 @@ public sealed class HostOwnedCaptureSurfaceWindow : IDisposable
         _disposed = true;
         var handle = Handle;
         Handle = IntPtr.Zero;
-        if (handle != IntPtr.Zero && !DestroyWindow(handle))
+        if (handle == IntPtr.Zero) return;
+        Windows.TryRemove(handle, out _);
+        if (!DestroyWindow(handle))
             throw new Win32Exception(Marshal.GetLastWin32Error(), "DestroyWindow failed for captured-surface presenter.");
+    }
+
+    private bool TryHandlePointerMessage(uint message, IntPtr wParam, IntPtr lParam)
+    {
+        var x = SignedLowWord(lParam);
+        var y = SignedHighWord(lParam);
+        if (message == HostOwnedCaptureSurfacePointerDecoder.WmMouseWheel)
+        {
+            var point = new NativePoint(x, y);
+            if (!ScreenToClient(Handle, ref point)) return false;
+            x = point.X;
+            y = point.Y;
+        }
+
+        var alt = (GetKeyState(VkMenu) & unchecked((short)0x8000)) != 0;
+        if (!HostOwnedCaptureSurfacePointerDecoder.TryDecode(
+                message,
+                wParam,
+                x,
+                y,
+                alt,
+                out var pointerEvent) ||
+            pointerEvent is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            PointerInput?.Invoke(this, pointerEvent);
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            // A consumer failure must not escape a native WndProc. The session health/input
+            // boundary records routing failures independently and remains fail-closed.
+        }
+        return true;
     }
 
     private static void EnsureWindowClass()
@@ -120,8 +179,26 @@ public sealed class HostOwnedCaptureSurfaceWindow : IDisposable
         }
     }
 
-    private static IntPtr HandleWindowMessage(IntPtr windowHandle, uint message, IntPtr wParam, IntPtr lParam) =>
-        DefWindowProcW(windowHandle, message, wParam, lParam);
+    private static IntPtr HandleWindowMessage(IntPtr windowHandle, uint message, IntPtr wParam, IntPtr lParam)
+    {
+        if (message == WmMouseActivate)
+            return new IntPtr(MaNoActivate);
+
+        if (Windows.TryGetValue(windowHandle, out var weak)
+            && weak.TryGetTarget(out var window)
+            && window.TryHandlePointerMessage(message, wParam, lParam))
+        {
+            return IntPtr.Zero;
+        }
+
+        return DefWindowProcW(windowHandle, message, wParam, lParam);
+    }
+
+    private static int SignedLowWord(IntPtr value) =>
+        unchecked((short)(value.ToInt64() & 0xFFFF));
+
+    private static int SignedHighWord(IntPtr value) =>
+        unchecked((short)((value.ToInt64() >> 16) & 0xFFFF));
 
     private void ThrowIfDisposed()
     {
@@ -146,6 +223,19 @@ public sealed class HostOwnedCaptureSurfaceWindow : IDisposable
         public string? MenuName;
         public string ClassName;
         public IntPtr SmallIcon;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public NativePoint(int x, int y)
+        {
+            X = x;
+            Y = y;
+        }
+
+        public int X;
+        public int Y;
     }
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -178,6 +268,13 @@ public sealed class HostOwnedCaptureSurfaceWindow : IDisposable
 
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr windowHandle, int command);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ScreenToClient(IntPtr windowHandle, ref NativePoint point);
+
+    [DllImport("user32.dll")]
+    private static extern short GetKeyState(int virtualKey);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
