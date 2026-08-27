@@ -75,12 +75,64 @@ public sealed class HostOwnedCapturedSurfaceSessionFactory : ICapturedSurfaceRun
         string surfaceId,
         int generation,
         WindowsCapturePresentationLayout initialLayout) =>
-        new HostOwnedCapturedSurfaceSession(
+        new RuntimeAdapter(new HostOwnedCapturedSurfaceSession(
             cloudOsOwnerWindowHandle,
             sourceWindowHandle,
             surfaceId,
             generation,
-            initialLayout);
+            initialLayout));
+
+    private sealed class RuntimeAdapter : ICapturedSurfaceRuntimeSession
+    {
+        private readonly HostOwnedCapturedSurfaceSession _inner;
+
+        public RuntimeAdapter(HostOwnedCapturedSurfaceSession inner)
+        {
+            _inner = inner;
+        }
+
+        public int Generation => _inner.Generation;
+        public IntPtr SourceWindowHandle => _inner.SourceWindowHandle;
+        public void Start() => _inner.Start();
+        public void ApplyLayout(WindowsCapturePresentationLayout layout) => _inner.ApplyLayout(layout);
+        public void Suspend() => _inner.Suspend();
+        public void Resume() => _inner.Resume();
+        public bool TryRoutePointer(
+            long sequence,
+            WindowsCapturePointerEventKind kind,
+            WindowsCapturePointerButton button,
+            int wheelDelta,
+            bool shift,
+            bool control,
+            bool alt,
+            double surfaceCssWidth,
+            double surfaceCssHeight,
+            double localCssX,
+            double localCssY) =>
+            _inner.TryRoutePointer(
+                sequence,
+                kind,
+                button,
+                wheelDelta,
+                shift,
+                control,
+                alt,
+                surfaceCssWidth,
+                surfaceCssHeight,
+                localCssX,
+                localCssY);
+        public bool TryRouteKey(
+            long sequence,
+            WindowsCaptureKeyEventKind kind,
+            int virtualKey,
+            int scanCode,
+            bool extended,
+            bool repeat) =>
+            _inner.TryRouteKey(sequence, kind, virtualKey, scanCode, extended, repeat);
+        public HostOwnedCapturedSurfaceSessionSnapshot GetSnapshot() => _inner.GetSnapshot();
+        public void Close() => _inner.Close();
+        public void Dispose() => _inner.Dispose();
+    }
 }
 
 /// <summary>
@@ -356,7 +408,10 @@ public sealed class HostOwnedCapturedSurfaceSessionManager : IDisposable
             snapshot.Surface.AcceptedFrames,
             snapshot.Surface.Presentation.DroppedFrameCount,
             snapshot.Capture.HasFrames,
-            snapshot.Input.Active,
+            snapshot.State == HostOwnedCapturedSurfaceSessionState.Active &&
+                snapshot.Surface.Presentation.Layout?.Visible == true &&
+                snapshot.SourceWindowAlive &&
+                string.IsNullOrWhiteSpace(snapshot.Failure),
             snapshot.SourceWindowAlive,
             snapshot.Failure ?? snapshot.Capture.Failure ?? snapshot.Surface.LastPresenterFailure);
 
