@@ -17,6 +17,8 @@ public sealed class HostOwnedCaptureSurfacePresenter : IWindowsCaptureNativePres
         _ownerWindowHandle = ownerWindowHandle;
     }
 
+    public event EventHandler<HostOwnedCaptureSurfacePointerEvent>? PointerInput;
+
     public IntPtr PresentationWindowHandle
     {
         get
@@ -33,6 +35,7 @@ public sealed class HostOwnedCaptureSurfacePresenter : IWindowsCaptureNativePres
             ThrowIfDisposed();
             if (_window is not null) throw new InvalidOperationException("Presenter is already bound.");
             _window = new HostOwnedCaptureSurfaceWindow(_ownerWindowHandle, layout);
+            _window.PointerInput += OnWindowPointerInput;
             _gpuPresenter = new D3D11SwapChainFramePresenter(_window.Handle);
             _layout = layout;
         }
@@ -90,10 +93,25 @@ public sealed class HostOwnedCaptureSurfacePresenter : IWindowsCaptureNativePres
             _disposed = true;
             _gpuPresenter?.Dispose();
             _gpuPresenter = null;
-            _window?.Dispose();
-            _window = null;
+            if (_window is not null)
+            {
+                _window.PointerInput -= OnWindowPointerInput;
+                _window.Dispose();
+                _window = null;
+            }
             _layout = null;
         }
+    }
+
+    private void OnWindowPointerInput(object? sender, HostOwnedCaptureSurfacePointerEvent pointerEvent)
+    {
+        EventHandler<HostOwnedCaptureSurfacePointerEvent>? handler;
+        lock (_sync)
+        {
+            if (_disposed) return;
+            handler = PointerInput;
+        }
+        handler?.Invoke(this, pointerEvent);
     }
 
     private void ThrowIfDisposed()
