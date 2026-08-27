@@ -11,6 +11,7 @@ using System.Text.RegularExpressions;
 using System.Windows.Threading;
 using System.Windows.Media;
 using CloudOS.Host.Browser;
+using CloudOS.Host.Installer;
 using CloudOS.Host.Native;
 using CloudOS.Host.Security;
 using CloudOS.WindowsCapture;
@@ -208,6 +209,10 @@ public sealed class WebMessageBridge : IDisposable
                 return new { closing = true };
             case "browser.open":
                 return await OpenBrowserAsync(parameters);
+            case "installer.artifacts.list":
+                return await ListInstallerArtifactsAsync(parameters);
+            case "installer.prepare":
+                return await PrepareInstallerAsync(parameters);
             case "native.launchApp":
                 return await LaunchAppAsync(parameters);
             case "native.sessions.list":
@@ -248,6 +253,47 @@ public sealed class WebMessageBridge : IDisposable
                 throw new BridgeException("INVALID_PARAMS", "URL excede o limite permitido.");
         }
         return await _browserManager.OpenAsync(url);
+    }
+
+    private async Task<InstallerArtifactListBridgeResponse> ListInstallerArtifactsAsync(JsonElement parameters)
+    {
+        RequireObject(parameters);
+        RejectUnknownProperties(parameters);
+        var artifacts = await _browserManager.ListInstallerArtifactsAsync();
+        return InstallerBridgeContract.List(artifacts, _browserManager.InstallerElevationBrokerAvailable);
+    }
+
+    private async Task<InstallerPrepareBridgeResponse> PrepareInstallerAsync(JsonElement parameters)
+    {
+        RequireObject(parameters);
+        RejectUnknownProperties(parameters, "artifactId", "allowUntrusted");
+
+        string artifactId;
+        try
+        {
+            artifactId = InstallerBridgeContract.ValidateArtifactId(ReadString(parameters, "artifactId"));
+        }
+        catch (ArgumentException)
+        {
+            throw new BridgeException("INVALID_INSTALLER_ARTIFACT", "Identificador do instalador inválido.");
+        }
+
+        var allowUntrusted = ReadOptionalBoolean(parameters, "allowUntrusted", false);
+        try
+        {
+            var prepared = await _browserManager.PrepareInstallerAsync(artifactId, allowUntrusted);
+            return InstallerBridgeContract.Prepare(prepared);
+        }
+        catch (KeyNotFoundException)
+        {
+            throw new BridgeException("INSTALLER_ARTIFACT_NOT_FOUND", "O instalador não está mais disponível.");
+        }
+        catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException
+            or NotSupportedException or System.Security.Cryptography.CryptographicException)
+        {
+            BrowserDiagnostics.Write("installer_prepare_failed", $"type={error.GetType().Name}");
+            throw new BridgeException("INSTALLER_PREPARE_FAILED", "O instalador não pôde ser preparado com segurança.");
+        }
     }
 
     private async Task<object> RequestLegacyRecoveryTokenAsync()
