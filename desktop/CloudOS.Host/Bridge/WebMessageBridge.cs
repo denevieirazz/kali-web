@@ -1119,6 +1119,7 @@ public sealed class WebMessageBridge : IDisposable
         foreach (var window in snapshots.OrderBy(window => window.ProcessId).ThenBy(window => window.Title, StringComparer.OrdinalIgnoreCase))
         {
             var sessionId = GetOrCreateSession(window);
+            var launchProcessId = ResolveLaunchRoot(window.ProcessId);
             if (_capturedSurfaceBridge is not null
                 && _capturedSurfaceBridge.TryGetState(sessionId, out var captured)
                 && captured is not null)
@@ -1132,6 +1133,7 @@ public sealed class WebMessageBridge : IDisposable
                     generation = captured.Generation,
                     title = string.IsNullOrWhiteSpace(window.Title) ? $"Aplicativo {window.ProcessId}" : window.Title,
                     processId = window.ProcessId,
+                    launchProcessId,
                     minimized = false,
                     maximized = false,
                     contained = true,
@@ -1153,6 +1155,7 @@ public sealed class WebMessageBridge : IDisposable
                 sessionId,
                 title = string.IsNullOrWhiteSpace(window.Title) ? $"Aplicativo {window.ProcessId}" : window.Title,
                 processId = window.ProcessId,
+                launchProcessId,
                 minimized = window.IsMinimized,
                 maximized = window.IsMaximized,
                 contained = window.IsAttached,
