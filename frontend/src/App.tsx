@@ -62,17 +62,47 @@ export default function App() {
   }, [validateSession]);
 
   // Publish one source-aware Windows + Linux snapshot into the registry used by
-  // CloudOS Start. Paths and Exec values remain behind opaque catalog IDs.
+  // CloudOS Start. The first desktop sync is forced; subsequent focus/visibility
+  // and periodic syncs are cache-aware, so an app installed while CloudOS is open
+  // appears without restarting the shell while the backend's discovery TTL prevents
+  // repeated PowerShell/WSL scans. Paths and Exec values remain behind opaque IDs.
   useEffect(() => {
     if (bootPhase !== 'desktop' || !isAuthenticated) return undefined;
 
-    void refreshUnifiedAppRegistry(true)
-      .then(() => undefined)
-      .catch(() => {
-        // The shell remains usable while local discovery is warming up.
-      });
+    let disposed = false;
+    let refreshInFlight = false;
 
-    return undefined;
+    const syncCatalog = async (force = false) => {
+      if (disposed || refreshInFlight) return;
+      refreshInFlight = true;
+      try {
+        await refreshUnifiedAppRegistry(force);
+      } catch {
+        // The shell remains usable while local discovery is warming up or unavailable.
+      } finally {
+        refreshInFlight = false;
+      }
+    };
+
+    const syncWhenVisible = () => {
+      if (document.visibilityState === 'visible') void syncCatalog(false);
+    };
+
+    const syncOnFocus = () => {
+      if (document.visibilityState === 'visible') void syncCatalog(false);
+    };
+
+    void syncCatalog(true);
+    document.addEventListener('visibilitychange', syncWhenVisible);
+    window.addEventListener('focus', syncOnFocus);
+    const interval = window.setInterval(syncWhenVisible, 30_000);
+
+    return () => {
+      disposed = true;
+      document.removeEventListener('visibilitychange', syncWhenVisible);
+      window.removeEventListener('focus', syncOnFocus);
+      window.clearInterval(interval);
+    };
   }, [bootPhase, isAuthenticated]);
 
   // The backend is the source of truth for whether first-boot setup still exists.
