@@ -53,10 +53,28 @@ jobs:
       - name: Validate capture probe missing-argument contract
         shell: pwsh
         run: |
-          $probe = 'desktop/CloudOS.WindowsCapture.Probe/bin/Release/net8.0-windows10.0.19041.0/CloudOS.WindowsCapture.Probe.dll'
-          $output = dotnet $probe 2>&1 | Out-String
-          if ($LASTEXITCODE -ne 64) { throw "Expected exit 64 without arguments, got $LASTEXITCODE.`n$output" }
-          Write-Host $output
+          $probe = (Resolve-Path 'desktop/CloudOS.WindowsCapture.Probe/bin/Release/net8.0-windows10.0.19041.0/CloudOS.WindowsCapture.Probe.dll').Path
+          $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+          $startInfo.FileName = 'dotnet'
+          $startInfo.ArgumentList.Add($probe)
+          $startInfo.UseShellExecute = $false
+          $startInfo.CreateNoWindow = $true
+          $startInfo.RedirectStandardOutput = $true
+          $startInfo.RedirectStandardError = $true
+          $process = [System.Diagnostics.Process]::Start($startInfo)
+          try {
+            $stdout = $process.StandardOutput.ReadToEnd()
+            $stderr = $process.StandardError.ReadToEnd()
+            $process.WaitForExit()
+            $output = ($stdout + $stderr).TrimEnd()
+            if ($process.ExitCode -ne 64) {
+              throw "Expected exit 64 without arguments, got $($process.ExitCode).`n$output"
+            }
+            Write-Host $output
+          }
+          finally {
+            $process.Dispose()
+          }
 
       - name: Parse physical matrix script
         shell: pwsh
