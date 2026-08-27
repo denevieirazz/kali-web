@@ -9,6 +9,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("untrusted installer requires explicit approval", TestUntrustedApprovalAsync),
     ("capability stages exact hash and is one shot", TestCapabilityOneShotAsync),
     ("capability cleanup rejects invalid ids", TestCapabilityCleanupIdAsync),
+    ("stale capability staging is purged on restart", TestStaleCapabilityStagingCleanupAsync),
     ("contained EXE policy reuses native launch spec", TestContainedExePolicyAsync),
     ("MSI policy requires privileged broker", TestMsiBrokerPolicyAsync),
     ("unsupported format is rejected", TestUnsupportedFormatAsync),
@@ -153,6 +154,27 @@ static Task TestCapabilityCleanupIdAsync()
         RequireThrows<ArgumentException>(() => capabilities.Complete(invalidId));
 
     Require(File.Exists(sentinel), "invalid cleanup capability escaped staging and touched an outside file");
+    return Task.CompletedTask;
+}
+
+static Task TestStaleCapabilityStagingCleanupAsync()
+{
+    using var env = TestEnvironment.Create();
+    var stagingRoot = Path.Combine(env.Installer, "Staging");
+    var staleCapability = Path.Combine(stagingRoot, new string('a', 64));
+    var unrelatedDirectory = Path.Combine(stagingRoot, "manual-diagnostics");
+    Directory.CreateDirectory(staleCapability);
+    Directory.CreateDirectory(unrelatedDirectory);
+    var stalePayload = Path.Combine(staleCapability, "stale.exe");
+    File.WriteAllText(stalePayload, "stale");
+    File.SetAttributes(stalePayload, FileAttributes.ReadOnly);
+    File.WriteAllText(Path.Combine(unrelatedDirectory, "keep.txt"), "keep");
+
+    var catalog = env.CreateCatalog();
+    using var capabilities = env.CreateCapabilities(catalog);
+
+    Require(!Directory.Exists(staleCapability), "orphaned capability staging survived a new Host capability service");
+    Require(Directory.Exists(unrelatedDirectory), "startup cleanup removed a non-capability staging directory");
     return Task.CompletedTask;
 }
 
