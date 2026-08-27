@@ -1,3 +1,4 @@
+using CloudOS.Host.Native;
 using CloudOS.Installer;
 
 namespace CloudOS.Host.Installer;
@@ -22,6 +23,7 @@ public sealed class CloudOsInstallerManager : IDisposable
     private readonly InstallerCatalog _catalog;
     private readonly InstallerCapabilityService _capabilities;
     private readonly IInstallerElevationBroker _elevationBroker;
+    private readonly InstallerContainedExecutionCoordinator _containedExecution;
     private bool _disposed;
 
     public CloudOsInstallerManager(
@@ -39,6 +41,7 @@ public sealed class CloudOsInstallerManager : IDisposable
             InstallerStorageLayout.StagingRoot(localApplicationData),
             InstallerStorageLayout.LogsRoot(localApplicationData));
         _elevationBroker = elevationBroker ?? new UnavailableInstallerElevationBroker();
+        _containedExecution = new InstallerContainedExecutionCoordinator(ConsumeAsync, Complete);
     }
 
     public event EventHandler<InstallerArtifactRegisteredEventArgs>? ArtifactRegistered;
@@ -94,6 +97,30 @@ public sealed class CloudOsInstallerManager : IDisposable
     {
         if (_disposed) return;
         _capabilities.Complete(capabilityId);
+    }
+
+    public Task<InstallerContainedExecutionStart> StartContainedAsync(
+        string capabilityId,
+        Action<NativeContainedProcessLease> installHostTrackingBeforeResume,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        return _containedExecution.StartAsync(
+            capabilityId,
+            installHostTrackingBeforeResume,
+            cancellationToken);
+    }
+
+    public InstallerExecutionOwnership? CompleteContainedRootAfterJobEmpty(int rootProcessId)
+    {
+        ThrowIfDisposed();
+        return _containedExecution.CompleteRootAfterJobEmpty(rootProcessId);
+    }
+
+    public IReadOnlyList<InstallerExecutionOwnership> ListActiveContainedExecutions()
+    {
+        ThrowIfDisposed();
+        return _containedExecution.Ownership.Snapshot();
     }
 
     public Task<InstallerBrokerResult> StartElevatedAsync(
