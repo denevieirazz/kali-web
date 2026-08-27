@@ -423,12 +423,12 @@ public sealed class WebMessageBridge : IDisposable
                     containmentMode = "captured-surface"
                 };
             }
-            catch (Exception error) when (error is not OutOfMemoryException)
+            catch (Exception captureError) when (captureError is not OutOfMemoryException)
             {
-                var stage = error is WindowsCaptureSetupException setup ? setup.Stage : "runtime";
+                var stage = captureError is WindowsCaptureSetupException setup ? setup.Stage : "runtime";
                 BrowserDiagnostics.Write(
                     "captured_surface_attach_failed",
-                    $"stage={stage} type={error.GetType().Name} hresult=0x{error.HResult:X8}");
+                    $"stage={stage} type={captureError.GetType().Name} hresult=0x{captureError.HResult:X8}");
                 TerminateSessionAndForget(sessionId, NativeContainmentFailure.AttachFailed);
                 throw new BridgeException(
                     "WINDOW_CAPTURE_DENIED",
@@ -478,11 +478,11 @@ public sealed class WebMessageBridge : IDisposable
                     visible
                 };
             }
-            catch (Exception error) when (error is not OutOfMemoryException)
+            catch (Exception layoutError) when (layoutError is not OutOfMemoryException)
             {
                 BrowserDiagnostics.Write(
                     "captured_surface_layout_failed",
-                    $"type={error.GetType().Name} hresult=0x{error.HResult:X8}");
+                    $"type={layoutError.GetType().Name} hresult=0x{layoutError.HResult:X8}");
                 _surfacesByHandle.Remove(handle);
                 TerminateSessionAndForget(sessionId, NativeContainmentFailure.LayoutFailed);
                 throw new BridgeException(
@@ -897,7 +897,7 @@ public sealed class WebMessageBridge : IDisposable
         {
             TerminateProcessAndForget(processId, failure);
         }
-        _capturedSurfaceBridge?.Dispose();
+        _capturedSurfaceBridge?.CloseAll();
         _surfacesByHandle.Clear();
         _pendingAttachDeadlinesByHandle.Clear();
     }
