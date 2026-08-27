@@ -42,5 +42,18 @@ jobs:
           }
           Write-Host $output
 
+      - name: Parse physical matrix script
+        shell: pwsh
+        run: |
+          $scriptPath = (Resolve-Path 'scripts/test-windows-capture-probe.ps1').Path
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw "PowerShell parser found $($errors.Count) error(s)."
+          }
+          Write-Host 'Physical matrix script parse: PASS'
+
       - name: Build conventional Windows capture fixture
         run: dotnet build desktop/CloudOS.WindowsCapture.Fixture/CloudOS.WindowsCapture.Fixture.csproj -c Release --nologo
