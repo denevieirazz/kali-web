@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Threading;
 using CloudOS.Host.Installer;
+using CloudOS.Host.Native;
 using CloudOS.Installer;
 using Microsoft.Web.WebView2.Core;
 
@@ -77,6 +78,21 @@ public sealed class BrowserManager : IDisposable
 
     public void CompleteInstallerCapability(string capabilityId) =>
         _installerManager.Complete(capabilityId);
+
+    public Task<InstallerContainedExecutionStart> StartContainedInstallerAsync(
+        string capabilityId,
+        Action<NativeContainedProcessLease> installHostTrackingBeforeResume,
+        CancellationToken cancellationToken = default) =>
+        _installerManager.StartContainedAsync(
+            capabilityId,
+            installHostTrackingBeforeResume,
+            cancellationToken);
+
+    public InstallerExecutionOwnership? CompleteContainedInstallerRootAfterJobEmpty(int rootProcessId) =>
+        _installerManager.CompleteContainedRootAfterJobEmpty(rootProcessId);
+
+    public IReadOnlyList<InstallerExecutionOwnership> ListActiveContainedInstallerExecutions() =>
+        _installerManager.ListActiveContainedExecutions();
 
     public async Task<BrowserOpenResult> OpenAsync(string? initialUrl = null)
     {
