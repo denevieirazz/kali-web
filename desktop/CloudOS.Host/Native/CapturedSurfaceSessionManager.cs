@@ -78,13 +78,15 @@ public sealed class CapturedSurfaceSessionManager : IDisposable
 
             var inputGate = new WindowsCaptureInputGate(generation);
             inputGate.SetActive(initialLayout.Visible);
+            var inputInjector = new WindowsCaptureTargetedInputInjector(source, inputGate);
             var state = new SessionState(
                 surfaceId,
                 generation,
                 sourceWindowHandle,
                 capture,
                 coordinator,
-                inputGate);
+                inputGate,
+                inputInjector);
 
             lock (_sync)
             {
@@ -147,6 +149,10 @@ public sealed class CapturedSurfaceSessionManager : IDisposable
         state.InputGate.SetActive(visible);
     }
 
+    /// <summary>
+    /// Admission-only diagnostic. Do not call this immediately before InjectPointer/InjectKey,
+    /// because successful admission consumes the sequence number by design.
+    /// </summary>
     public WindowsCaptureInputAdmission AdmitInput(
         string surfaceId,
         int generation,
@@ -154,6 +160,32 @@ public sealed class CapturedSurfaceSessionManager : IDisposable
     {
         var state = GetRequired(surfaceId, generation);
         return state.InputGate.Admit(generation, sequence);
+    }
+
+    public WindowsCaptureInputInjectionResult InjectPointer(
+        string surfaceId,
+        int generation,
+        WindowsCapturePointerInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        if (input.Generation != generation)
+            throw new InvalidOperationException(
+                $"Pointer input generation does not match session generation. session={generation}; input={input.Generation}.");
+        var state = GetRequired(surfaceId, generation);
+        return state.InputInjector.InjectPointer(input);
+    }
+
+    public WindowsCaptureInputInjectionResult InjectKey(
+        string surfaceId,
+        int generation,
+        WindowsCaptureKeyInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        if (input.Generation != generation)
+            throw new InvalidOperationException(
+                $"Key input generation does not match session generation. session={generation}; input={input.Generation}.");
+        var state = GetRequired(surfaceId, generation);
+        return state.InputInjector.InjectKey(input);
     }
 
     public bool Close(string surfaceId, int generation)
@@ -219,7 +251,8 @@ public sealed class CapturedSurfaceSessionManager : IDisposable
             long sourceWindowHandle,
             WindowsCaptureSession capture,
             WindowsCaptureSurfaceCoordinator coordinator,
-            WindowsCaptureInputGate inputGate)
+            WindowsCaptureInputGate inputGate,
+            WindowsCaptureTargetedInputInjector inputInjector)
         {
             SurfaceId = surfaceId;
             Generation = generation;
@@ -227,6 +260,7 @@ public sealed class CapturedSurfaceSessionManager : IDisposable
             Capture = capture;
             Coordinator = coordinator;
             InputGate = inputGate;
+            InputInjector = inputInjector;
         }
 
         public string SurfaceId { get; }
@@ -235,6 +269,7 @@ public sealed class CapturedSurfaceSessionManager : IDisposable
         public WindowsCaptureSession Capture { get; }
         public WindowsCaptureSurfaceCoordinator Coordinator { get; }
         public WindowsCaptureInputGate InputGate { get; }
+        public WindowsCaptureTargetedInputInjector InputInjector { get; }
 
         public CapturedSurfaceSessionSnapshot GetSnapshot() => new(
             SurfaceId,
