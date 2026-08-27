@@ -77,6 +77,7 @@ public sealed record WindowsCaptureSnapshot(
     bool HoldsAbiReference,
     DateTimeOffset? FirstFrameAtUtc,
     DateTimeOffset? LastFrameAtUtc,
+    WindowsFrameHealthSnapshot? FrameHealth,
     string? Failure)
 {
     public bool HasFrames => FrameCount > 0 && Width > 0 && Height > 0;
@@ -92,6 +93,7 @@ public sealed class WindowsCaptureSession : IDisposable
     private readonly GraphicsCaptureItem _item;
     private readonly Direct3D11CaptureFramePool _framePool;
     private readonly GraphicsCaptureSession _session;
+    private readonly WindowsFrameHealthSampler? _frameHealthSampler;
     private readonly int _initialItemWidth;
     private readonly int _initialItemHeight;
     private readonly int _initialBufferWidth;
@@ -113,7 +115,8 @@ public sealed class WindowsCaptureSession : IDisposable
         WindowsCaptureTargetKind targetKind = WindowsCaptureTargetKind.Window,
         WindowsCaptureItemFactoryKind itemFactoryKind = WindowsCaptureItemFactoryKind.RawActivationFactory,
         WindowsCaptureItemProjectionKind itemProjectionKind = WindowsCaptureItemProjectionKind.MarshalInterfaceFromAbi,
-        WindowsCaptureAbiLifetimeKind abiLifetimeKind = WindowsCaptureAbiLifetimeKind.HoldUntilSessionDispose)
+        WindowsCaptureAbiLifetimeKind abiLifetimeKind = WindowsCaptureAbiLifetimeKind.HoldUntilSessionDispose,
+        WindowsFrameHealthOptions? frameHealthOptions = null)
     {
         if (!GraphicsCaptureSession.IsSupported())
             throw new PlatformNotSupportedException("Windows.Graphics.Capture is not supported in this Windows session.");
@@ -127,6 +130,7 @@ public sealed class WindowsCaptureSession : IDisposable
         ItemFactoryKind = itemFactoryKind;
         ItemProjectionKind = itemProjectionKind;
         AbiLifetimeKind = abiLifetimeKind;
+        _frameHealthSampler = frameHealthOptions is null ? null : new WindowsFrameHealthSampler(frameHealthOptions);
 
         InitialCaptureSize? nativeInitial = targetKind switch
         {
@@ -355,6 +359,7 @@ public sealed class WindowsCaptureSession : IDisposable
                 _itemLease.HoldsAbiReference,
                 _firstFrameAtUtc,
                 _lastFrameAtUtc,
+                _frameHealthSampler?.GetSnapshot(),
                 _failure);
         }
     }
@@ -396,9 +401,11 @@ public sealed class WindowsCaptureSession : IDisposable
                 }
 
                 var now = DateTimeOffset.UtcNow;
+                long currentFrameCount;
                 lock (_sync)
                 {
                     _frameCount++;
+                    currentFrameCount = _frameCount;
                     _firstFrameAtUtc ??= now;
                     _lastFrameAtUtc = now;
                     if (newSize.Width != _width || newSize.Height != _height)
@@ -409,6 +416,9 @@ public sealed class WindowsCaptureSession : IDisposable
                         resize = true;
                     }
                 }
+
+                if (_frameHealthSampler?.ShouldSample(currentFrameCount) == true)
+                    _frameHealthSampler.TrySample(frame.Surface);
             }
 
             if (resize)
