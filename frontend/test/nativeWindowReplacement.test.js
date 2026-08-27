@@ -60,7 +60,17 @@ test('Host legado continua aceitando fallback pelo PID quando launchProcessId n�
   assert.equal(nativeReplacementSession([replacement], 'window-a', 4242), replacement);
 });
 
-test('resolução inicial encontra descendente pelo launchProcessId antes do fallback de PID', () => {
+test('resolução inicial encontra descendente pelo launchProcessId', () => {
   const child = session({ sessionId: 'window-child', processId: 5252, launchProcessId: 4242 });
   assert.equal(nativeSessionForLaunch([child], { pid: 4242 }), child);
+});
+
+test('resolução inicial não usa PID físico quando Host informa outro launch Job', () => {
+  const foreign = session({ sessionId: 'window-foreign', processId: 4242, launchProcessId: 6262 });
+  assert.equal(nativeSessionForLaunch([foreign], { pid: 4242 }), null);
+});
+
+test('resolução inicial mantém fallback por PID para Host legado sem launchProcessId', () => {
+  const legacy = session({ sessionId: 'window-legacy', launchProcessId: undefined });
+  assert.equal(nativeSessionForLaunch([legacy], { pid: 4242 }), legacy);
 });
