@@ -36,8 +36,10 @@ public sealed record HostOwnedCapturedSurfaceSessionSnapshot(
 public sealed class HostOwnedCapturedSurfaceSession : IDisposable
 {
     private const int HealthPollMilliseconds = 250;
+    private const int MaxPendingPointerEvents = 128;
 
     private readonly object _sync = new();
+    private readonly object _pointerSync = new();
     private readonly IntPtr _sourceWindowHandle;
     private readonly HostOwnedCaptureSurfacePresenter _presenter;
     private readonly WindowsCaptureSurfaceCoordinator _surface;
@@ -46,9 +48,13 @@ public sealed class HostOwnedCapturedSurfaceSession : IDisposable
     private readonly WindowsCaptureTargetedInputInjector _targetedInjector;
     private readonly WindowsCaptureInputRouter _inputRouter;
     private readonly Timer _healthTimer;
+    private readonly LinkedList<HostOwnedCaptureSurfacePointerEvent> _pendingPointerEvents = new();
     private HostOwnedCapturedSurfaceSessionState _state = HostOwnedCapturedSurfaceSessionState.Created;
     private WindowsCapturePresentationLayout _layout;
     private string? _failure;
+    private long _hostPointerSequence;
+    private long _droppedPresenterPointerEvents;
+    private bool _pointerWorkerScheduled;
     private bool _disposed;
 
     public HostOwnedCapturedSurfaceSession(
@@ -86,8 +92,6 @@ public sealed class HostOwnedCapturedSurfaceSession : IDisposable
                 frameHealthOptions,
                 frameSink: _surface);
 
-            _surface.Bind(initialLayout);
-
             _targetedInputGate = new WindowsCaptureInputGate(generation);
             _targetedInjector = new WindowsCaptureTargetedInputInjector(
                 sourceWindowHandle,
@@ -95,6 +99,11 @@ public sealed class HostOwnedCapturedSurfaceSession : IDisposable
             _inputRouter = new WindowsCaptureInputRouter(
                 generation,
                 new TargetedInputAdapter(_targetedInjector));
+
+            // Subscribe before Bind so the Host-owned HWND never has a period where pointer
+            // input can fall through to default activation behavior after it becomes visible.
+            _presenter.PointerInput += OnPresenterPointerInput;
+            _surface.Bind(initialLayout);
 
             _healthTimer = new Timer(
                 static state => ((HostOwnedCapturedSurfaceSession)state!).PollHealth(),
@@ -104,6 +113,7 @@ public sealed class HostOwnedCapturedSurfaceSession : IDisposable
         }
         catch
         {
+            _presenter.PointerInput -= OnPresenterPointerInput;
             _surface.Dispose();
             throw;
         }
@@ -356,6 +366,12 @@ public sealed class HostOwnedCapturedSurfaceSession : IDisposable
             SetInputActiveLocked(false);
         }
 
+        _presenter.PointerInput -= OnPresenterPointerInput;
+        lock (_pointerSync)
+        {
+            _pendingPointerEvents.Clear();
+        }
+
         _healthTimer.Change(Timeout.Infinite, Timeout.Infinite);
         _healthTimer.Dispose();
 
@@ -365,6 +381,109 @@ public sealed class HostOwnedCapturedSurfaceSession : IDisposable
     }
 
     public void Dispose() => Close();
+
+    private void OnPresenterPointerInput(object? sender, HostOwnedCaptureSurfacePointerEvent pointerEvent)
+    {
+        var scheduleWorker = false;
+        lock (_pointerSync)
+        {
+            if (_disposed) return;
+
+            if (pointerEvent.Kind == WindowsCapturePointerEventKind.Move &&
+                _pendingPointerEvents.Last is { } last &&
+                last.Value.Kind == WindowsCapturePointerEventKind.Move)
+            {
+                // Mouse movement is state, not a transactional action. Keep only the latest
+                // move at the queue tail so a slow target cannot stall the CloudOS UI thread.
+                last.Value = pointerEvent;
+                return;
+            }
+
+            if (_pendingPointerEvents.Count >= MaxPendingPointerEvents)
+            {
+                if (pointerEvent.Kind == WindowsCapturePointerEventKind.Move)
+                {
+                    _droppedPresenterPointerEvents++;
+                    return;
+                }
+
+                // Preserve click/wheel ordering by evicting an older coalescible move first.
+                var removable = _pendingPointerEvents.First;
+                while (removable is not null && removable.Value.Kind != WindowsCapturePointerEventKind.Move)
+                    removable = removable.Next;
+                if (removable is null)
+                {
+                    _droppedPresenterPointerEvents++;
+                    return;
+                }
+                _pendingPointerEvents.Remove(removable);
+                _droppedPresenterPointerEvents++;
+            }
+
+            _pendingPointerEvents.AddLast(pointerEvent);
+            if (!_pointerWorkerScheduled)
+            {
+                _pointerWorkerScheduled = true;
+                scheduleWorker = true;
+            }
+        }
+
+        if (scheduleWorker)
+        {
+            ThreadPool.UnsafeQueueUserWorkItem(
+                static state => ((HostOwnedCapturedSurfaceSession)state!).DrainPresenterPointerQueue(),
+                this,
+                preferLocal: false);
+        }
+    }
+
+    private void DrainPresenterPointerQueue()
+    {
+        while (true)
+        {
+            HostOwnedCaptureSurfacePointerEvent pointerEvent;
+            lock (_pointerSync)
+            {
+                if (_pendingPointerEvents.First is not { } first)
+                {
+                    _pointerWorkerScheduled = false;
+                    return;
+                }
+                pointerEvent = first.Value;
+                _pendingPointerEvents.RemoveFirst();
+            }
+
+            WindowsCapturePresentationLayout layout;
+            lock (_sync)
+            {
+                if (_disposed || _state != HostOwnedCapturedSurfaceSessionState.Active || !_layout.Visible)
+                    continue;
+                layout = _layout;
+            }
+
+            var sequence = Interlocked.Increment(ref _hostPointerSequence);
+            try
+            {
+                _ = TryRoutePointer(
+                    sequence,
+                    pointerEvent.Kind,
+                    pointerEvent.Button,
+                    pointerEvent.WheelDelta,
+                    pointerEvent.Shift,
+                    pointerEvent.Control,
+                    pointerEvent.Alt,
+                    layout.PixelWidth,
+                    layout.PixelHeight,
+                    pointerEvent.LocalPixelX,
+                    pointerEvent.LocalPixelY);
+            }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            {
+                // Input rejection is fail-closed and must not kill the UI worker. Capture/source
+                // health is monitored separately and terminal loss still tears down the session.
+            }
+        }
+    }
 
     private void PollHealth()
     {
@@ -406,6 +525,11 @@ public sealed class HostOwnedCapturedSurfaceSession : IDisposable
             _failure = message;
             SetInputActiveLocked(false);
             _healthTimer.Change(Timeout.Infinite, Timeout.Infinite);
+        }
+
+        lock (_pointerSync)
+        {
+            _pendingPointerEvents.Clear();
         }
 
         try
