@@ -11,6 +11,8 @@ if (args.Length == 0 || helpRequested)
     Console.WriteLine("  --pid <processId> | --hwnd <decimal|0xHEX>");
     Console.WriteLine("  [--capture-kind window|monitor]");
     Console.WriteLine("  [--item-factory raw|projected]");
+    Console.WriteLine("  [--item-projection projected|marshal-interface]");
+    Console.WriteLine("  [--abi-lifetime release|hold]");
     Console.WriteLine("  [--seconds <1-30>] [--min-frames <1-1000>] [--output <path>]");
     return helpRequested ? 0 : 64;
 }
@@ -35,8 +37,7 @@ static async Task<int> RunProbeAsync(ProbeOptions options, string apartmentState
 
     WindowLocator.GetWindowThreadProcessId(hwnd, out var ownerProcessId);
     using var ownerProcess = Process.GetProcessById(checked((int)ownerProcessId));
-    var title = WindowLocator.GetTitle(hwnd);
-    var rectangle = WindowLocator.GetRectangle(hwnd);
+    var windowDiagnostics = WindowLocator.GetDiagnostics(hwnd);
 
     var targetKind = options.CaptureKind;
     var targetHandle = targetKind == WindowsCaptureTargetKind.Window
@@ -48,7 +49,13 @@ static async Task<int> RunProbeAsync(ProbeOptions options, string apartmentState
     var startedAt = DateTimeOffset.UtcNow;
     try
     {
-        using var capture = new WindowsCaptureSession(targetHandle, targetKind, options.ItemFactoryKind);
+        using var capture = new WindowsCaptureSession(
+            targetHandle,
+            targetKind,
+            options.ItemFactoryKind,
+            options.ItemProjectionKind,
+            options.AbiLifetimeKind);
+
         var snapshot = await capture.WaitForFramesAsync(
             options.MinimumFrames,
             TimeSpan.FromSeconds(options.Seconds));
@@ -62,9 +69,7 @@ static async Task<int> RunProbeAsync(ProbeOptions options, string apartmentState
             options,
             apartmentState,
             ownerProcess,
-            hwnd,
-            title,
-            rectangle,
+            windowDiagnostics,
             targetHandle,
             startedAt,
             completedAt,
@@ -82,9 +87,7 @@ static async Task<int> RunProbeAsync(ProbeOptions options, string apartmentState
             options,
             apartmentState,
             ownerProcess,
-            hwnd,
-            title,
-            rectangle,
+            windowDiagnostics,
             targetHandle,
             startedAt,
             completedAt,
@@ -118,9 +121,7 @@ static async Task<int> RunProbeAsync(ProbeOptions options, string apartmentState
             options,
             apartmentState,
             ownerProcess,
-            hwnd,
-            title,
-            rectangle,
+            windowDiagnostics,
             targetHandle,
             startedAt,
             completedAt,
@@ -153,9 +154,7 @@ static ProbeReport BuildReport(
     ProbeOptions options,
     string apartmentState,
     Process ownerProcess,
-    IntPtr hwnd,
-    string title,
-    WindowLocator.NativeRect rectangle,
+    WindowDiagnostics windowDiagnostics,
     IntPtr targetHandle,
     DateTimeOffset startedAt,
     DateTimeOffset completedAt,
@@ -164,7 +163,7 @@ static ProbeReport BuildReport(
     ProbeError? error)
 {
     return new ProbeReport(
-        4,
+        5,
         "CloudOS.WindowsCapture.Probe",
         startedAt,
         completedAt,
@@ -176,17 +175,13 @@ static ProbeReport BuildReport(
             ownerProcess.ProcessName,
             TryGetStartTime(ownerProcess),
             ownerProcess.SessionId),
-        new WindowReport(
-            $"0x{hwnd.ToInt64():X}",
-            title,
-            rectangle.Left,
-            rectangle.Top,
-            rectangle.Right - rectangle.Left,
-            rectangle.Bottom - rectangle.Top),
+        windowDiagnostics,
         new TargetReport(
             options.CaptureKind.ToString().ToLowerInvariant(),
             $"0x{targetHandle.ToInt64():X}",
-            FormatFactory(options.ItemFactoryKind)),
+            FormatFactory(options.ItemFactoryKind),
+            FormatProjection(options.ItemProjectionKind),
+            FormatLifetime(options.AbiLifetimeKind)),
         snapshot is null
             ? null
             : new CaptureReport(
@@ -203,6 +198,9 @@ static ProbeReport BuildReport(
                 snapshot.InitialBufferHeight,
                 snapshot.InitialSizeSource,
                 snapshot.ItemFactory,
+                snapshot.ItemProjection,
+                snapshot.AbiLifetime,
+                snapshot.HoldsAbiReference,
                 snapshot.FirstFrameAtUtc,
                 snapshot.LastFrameAtUtc,
                 snapshot.Failure),
@@ -228,6 +226,20 @@ static string FormatFactory(WindowsCaptureItemFactoryKind factoryKind) => factor
     _ => factoryKind.ToString()
 };
 
+static string FormatProjection(WindowsCaptureItemProjectionKind projectionKind) => projectionKind switch
+{
+    WindowsCaptureItemProjectionKind.ProjectedTypeFromAbi => "projected-type-from-abi",
+    WindowsCaptureItemProjectionKind.MarshalInterfaceFromAbi => "marshal-interface-from-abi",
+    _ => projectionKind.ToString()
+};
+
+static string FormatLifetime(WindowsCaptureAbiLifetimeKind lifetimeKind) => lifetimeKind switch
+{
+    WindowsCaptureAbiLifetimeKind.ReleaseAfterProjection => "release-after-projection",
+    WindowsCaptureAbiLifetimeKind.HoldUntilSessionDispose => "hold-until-session-dispose",
+    _ => lifetimeKind.ToString()
+};
+
 static string? TryGetStartTime(Process process)
 {
     try { return process.StartTime.ToUniversalTime().ToString("O"); }
@@ -243,14 +255,44 @@ internal sealed record ProbeReport(
     string Apartment,
     int? RequestedPid,
     ProcessReport Process,
-    WindowReport Window,
+    WindowDiagnostics Window,
     TargetReport Target,
     CaptureReport? Capture,
     ProbeError? Error);
 
 internal sealed record ProcessReport(int ProcessId, string ProcessName, string? StartTimeUtc, int SessionId);
-internal sealed record WindowReport(string Handle, string Title, int Left, int Top, int Width, int Height);
-internal sealed record TargetReport(string Kind, string Handle, string ItemFactory);
+
+internal sealed record WindowDiagnostics(
+    string Handle,
+    string Title,
+    string ClassName,
+    int Left,
+    int Top,
+    int Width,
+    int Height,
+    bool Visible,
+    bool Iconic,
+    bool Hung,
+    bool Cloaked,
+    bool CloakKnown,
+    string Style,
+    string ExtendedStyle,
+    string OwnerHandle,
+    string RootOwnerHandle,
+    string MonitorHandle,
+    uint ThreadId,
+    uint ProcessId,
+    uint Dpi,
+    bool DisplayAffinityKnown,
+    string? DisplayAffinity);
+
+internal sealed record TargetReport(
+    string Kind,
+    string Handle,
+    string ItemFactory,
+    string ItemProjection,
+    string AbiLifetime);
+
 internal sealed record CaptureReport(
     int RequiredFrames,
     int ObservedSeconds,
@@ -265,9 +307,13 @@ internal sealed record CaptureReport(
     int InitialBufferHeight,
     string InitialSizeSource,
     string ItemFactory,
+    string ItemProjection,
+    string AbiLifetime,
+    bool HoldsAbiReference,
     DateTimeOffset? FirstFrameAtUtc,
     DateTimeOffset? LastFrameAtUtc,
     string? Failure);
+
 internal sealed record ProbeError(
     string Stage,
     string Type,
@@ -289,6 +335,8 @@ internal sealed record ProbeOptions(
     IntPtr? WindowHandle,
     WindowsCaptureTargetKind CaptureKind,
     WindowsCaptureItemFactoryKind ItemFactoryKind,
+    WindowsCaptureItemProjectionKind ItemProjectionKind,
+    WindowsCaptureAbiLifetimeKind AbiLifetimeKind,
     int Seconds,
     int MinimumFrames,
     string? OutputPath)
@@ -299,6 +347,8 @@ internal sealed record ProbeOptions(
         IntPtr? hwnd = null;
         var captureKind = WindowsCaptureTargetKind.Window;
         var itemFactoryKind = WindowsCaptureItemFactoryKind.RawActivationFactory;
+        var itemProjectionKind = WindowsCaptureItemProjectionKind.MarshalInterfaceFromAbi;
+        var abiLifetimeKind = WindowsCaptureAbiLifetimeKind.HoldUntilSessionDispose;
         var seconds = 3;
         var minimumFrames = 10;
         string? outputPath = null;
@@ -339,6 +389,26 @@ internal sealed record ProbeOptions(
                         var value => throw new ArgumentException($"Unknown item factory: {value}")
                     };
                     break;
+                case "--item-projection":
+                    itemProjectionKind = NextValue("--item-projection").ToLowerInvariant() switch
+                    {
+                        "projected" => WindowsCaptureItemProjectionKind.ProjectedTypeFromAbi,
+                        "projected-type-from-abi" => WindowsCaptureItemProjectionKind.ProjectedTypeFromAbi,
+                        "marshal-interface" => WindowsCaptureItemProjectionKind.MarshalInterfaceFromAbi,
+                        "marshal-interface-from-abi" => WindowsCaptureItemProjectionKind.MarshalInterfaceFromAbi,
+                        var value => throw new ArgumentException($"Unknown item projection: {value}")
+                    };
+                    break;
+                case "--abi-lifetime":
+                    abiLifetimeKind = NextValue("--abi-lifetime").ToLowerInvariant() switch
+                    {
+                        "release" => WindowsCaptureAbiLifetimeKind.ReleaseAfterProjection,
+                        "release-after-projection" => WindowsCaptureAbiLifetimeKind.ReleaseAfterProjection,
+                        "hold" => WindowsCaptureAbiLifetimeKind.HoldUntilSessionDispose,
+                        "hold-until-session-dispose" => WindowsCaptureAbiLifetimeKind.HoldUntilSessionDispose,
+                        var value => throw new ArgumentException($"Unknown ABI lifetime: {value}")
+                    };
+                    break;
                 case "--seconds":
                     seconds = int.Parse(NextValue("--seconds"));
                     if (seconds is < 1 or > 30) throw new ArgumentOutOfRangeException("--seconds");
@@ -358,7 +428,16 @@ internal sealed record ProbeOptions(
         if ((processId.HasValue ? 1 : 0) + (hwnd.HasValue ? 1 : 0) != 1)
             throw new ArgumentException("Specify exactly one of --pid or --hwnd.");
 
-        return new ProbeOptions(processId, hwnd, captureKind, itemFactoryKind, seconds, minimumFrames, outputPath);
+        return new ProbeOptions(
+            processId,
+            hwnd,
+            captureKind,
+            itemFactoryKind,
+            itemProjectionKind,
+            abiLifetimeKind,
+            seconds,
+            minimumFrames,
+            outputPath);
     }
 
     private static IntPtr ParseHandle(string text)
@@ -373,6 +452,11 @@ internal sealed record ProbeOptions(
 internal static class WindowLocator
 {
     private const uint MonitorDefaultToNearest = 2;
+    private const uint GaRootOwner = 3;
+    private const uint GwOwner = 4;
+    private const int GwlStyle = -16;
+    private const int GwlExStyle = -20;
+    private const uint DwmwaCloaked = 14;
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct NativeRect
@@ -385,11 +469,17 @@ internal static class WindowLocator
 
     private delegate bool EnumWindowsCallback(IntPtr hwnd, IntPtr state);
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", SetLastError = true)]
     private static extern bool EnumWindows(EnumWindowsCallback callback, IntPtr state);
 
     [DllImport("user32.dll")]
     private static extern bool IsWindowVisible(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsHungAppWindow(IntPtr hwnd);
 
     [DllImport("user32.dll")]
     internal static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
@@ -400,8 +490,32 @@ internal static class WindowLocator
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetWindowTextW(IntPtr hwnd, StringBuilder text, int capacity);
 
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassNameW(IntPtr hwnd, StringBuilder className, int capacity);
+
     [DllImport("user32.dll")]
     private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetWindow(IntPtr hwnd, uint command);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
+    private static extern IntPtr GetWindowLongPtr64(IntPtr hwnd, int index);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongW", SetLastError = true)]
+    private static extern int GetWindowLong32(IntPtr hwnd, int index);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr hwnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetWindowDisplayAffinity(IntPtr hwnd, out uint affinity);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmGetWindowAttribute(IntPtr hwnd, uint attribute, out uint value, uint valueSize);
 
     public static IntPtr FindBestTopLevelWindow(int processId)
     {
@@ -424,11 +538,59 @@ internal static class WindowLocator
         return bestHandle;
     }
 
+    public static WindowDiagnostics GetDiagnostics(IntPtr hwnd)
+    {
+        var rectangle = GetRectangle(hwnd);
+        var title = GetTitle(hwnd);
+        var className = GetClassName(hwnd);
+        var threadId = GetWindowThreadProcessId(hwnd, out var processId);
+        var monitor = GetNearestMonitor(hwnd);
+        var owner = GetWindow(hwnd, GwOwner);
+        var rootOwner = GetAncestor(hwnd, GaRootOwner);
+        var style = GetWindowLongPtr(hwnd, GwlStyle).ToInt64();
+        var extendedStyle = GetWindowLongPtr(hwnd, GwlExStyle).ToInt64();
+
+        var cloakedValue = 0u;
+        var cloakKnown = DwmGetWindowAttribute(hwnd, DwmwaCloaked, out cloakedValue, sizeof(uint)) == 0;
+
+        var affinityKnown = GetWindowDisplayAffinity(hwnd, out var affinity);
+        return new WindowDiagnostics(
+            $"0x{hwnd.ToInt64():X}",
+            title,
+            className,
+            rectangle.Left,
+            rectangle.Top,
+            rectangle.Right - rectangle.Left,
+            rectangle.Bottom - rectangle.Top,
+            IsWindowVisible(hwnd),
+            IsIconic(hwnd),
+            IsHungAppWindow(hwnd),
+            cloakKnown && cloakedValue != 0,
+            cloakKnown,
+            $"0x{unchecked((ulong)style):X}",
+            $"0x{unchecked((ulong)extendedStyle):X}",
+            $"0x{owner.ToInt64():X}",
+            $"0x{rootOwner.ToInt64():X}",
+            $"0x{monitor.ToInt64():X}",
+            threadId,
+            processId,
+            GetDpiForWindow(hwnd),
+            affinityKnown,
+            affinityKnown ? $"0x{affinity:X8}" : null);
+    }
+
     public static string GetTitle(IntPtr hwnd)
     {
         var title = new StringBuilder(2048);
-        GetWindowTextW(hwnd, title, title.Capacity);
+        _ = GetWindowTextW(hwnd, title, title.Capacity);
         return title.ToString();
+    }
+
+    private static string GetClassName(IntPtr hwnd)
+    {
+        var className = new StringBuilder(512);
+        _ = GetClassNameW(hwnd, className, className.Capacity);
+        return className.ToString();
     }
 
     public static NativeRect GetRectangle(IntPtr hwnd)
@@ -439,6 +601,9 @@ internal static class WindowLocator
     }
 
     public static IntPtr GetNearestMonitor(IntPtr hwnd) => MonitorFromWindow(hwnd, MonitorDefaultToNearest);
+
+    private static IntPtr GetWindowLongPtr(IntPtr hwnd, int index) =>
+        IntPtr.Size == 8 ? GetWindowLongPtr64(hwnd, index) : new IntPtr(GetWindowLong32(hwnd, index));
 }
 
 internal sealed class WinRtApartment : IDisposable
