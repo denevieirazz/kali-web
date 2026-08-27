@@ -10,6 +10,7 @@ on:
       - 'desktop/CloudOS.WindowsCapture.Contracts.Tests/**'
       - 'desktop/CloudOS.WindowsCapture.Input.Tests/**'
       - 'scripts/test-windows-capture-presenter.ps1'
+      - 'scripts/finalize-windows-captured-surface.ps1'
       - '.github/workflows/windows-captured-surface-presenter-ci.yml'
 
 jobs:
@@ -76,3 +77,30 @@ jobs:
             }
           }
           Write-Host 'Physical presenter harness parse/contract: PASS'
+
+      - name: Validate one-command physical finalization harness
+        shell: pwsh
+        run: |
+          $scriptPath = (Resolve-Path 'scripts/finalize-windows-captured-surface.ps1').Path
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw "Finalization harness parser found $($errors.Count) error(s)."
+          }
+          $text = Get-Content -LiteralPath $scriptPath -Raw
+          foreach ($required in @(
+            'ExpectedHeadSha',
+            'HWND_WGC_MATRIX',
+            'HOST_OWNED_PRESENTER',
+            'physical-finalization-summary.json',
+            'physical-finalization.log',
+            'WINDOWS_CAPTURED_SURFACE_FOUNDATION=PASS',
+            'WINDOWS_CAPTURED_SURFACE_FOUNDATION=NOT_READY'
+          )) {
+            if (-not $text.Contains($required, [System.StringComparison]::Ordinal)) {
+              throw "Finalization harness is missing '$required'."
+            }
+          }
+          Write-Host 'One-command physical finalization harness parse/contract: PASS'
