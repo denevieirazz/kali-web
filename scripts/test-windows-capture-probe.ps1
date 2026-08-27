@@ -14,7 +14,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$expectedBranch = 'poc/cloudos-windows-captured-surface'
+$expectedBranches = @('poc/cloudos-windows-captured-surface', 'integration/cloudos-unified-runtime')
 $repoRoot = [System.IO.Path]::GetFullPath((Get-Location).Path)
 $fixtureProject = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.Fixture\CloudOS.WindowsCapture.Fixture.csproj'
 $fixtureExe = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.Fixture\bin\Release\net8.0-windows\CloudOS.WindowsCapture.Fixture.exe'
@@ -285,8 +285,8 @@ if ($LASTEXITCODE -ne 0 -or $currentHead -ne $ExpectedHeadSha.ToLowerInvariant()
     throw "HEAD incorreto. esperado=$ExpectedHeadSha atual=$currentHead"
 }
 $branch = ([string](git branch --show-current)).Trim()
-if ($LASTEXITCODE -ne 0 -or $branch -ne $expectedBranch) {
-    throw "Branch incorreta. esperado=$expectedBranch atual=$branch"
+if ($LASTEXITCODE -ne 0 -or $expectedBranches -notcontains $branch) {
+    throw "Branch incorreta. esperado=$($expectedBranches -join ',') atual=$branch"
 }
 
 $dotnet = Resolve-DotNet

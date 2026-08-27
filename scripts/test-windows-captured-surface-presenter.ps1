@@ -19,8 +19,9 @@ Set-Location $repoRoot
 $branch = (git branch --show-current).Trim()
 $head = (git rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Unable to resolve repository HEAD.' }
-if ($branch -ne 'poc/cloudos-windows-captured-surface') {
-    throw "Wrong branch. Expected poc/cloudos-windows-captured-surface, got '$branch'."
+$expectedBranches = @('poc/cloudos-windows-captured-surface', 'integration/cloudos-unified-runtime')
+if ($expectedBranches -notcontains $branch) {
+    throw "Wrong branch. Expected $($expectedBranches -join ','), got '$branch'."
 }
 if ($head -ne $ExpectedHeadSha) {
     throw "Wrong HEAD. Expected $ExpectedHeadSha, got $head."

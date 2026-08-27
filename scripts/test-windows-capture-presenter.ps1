@@ -16,12 +16,12 @@ Set-StrictMode -Version Latest
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 
-$expectedBranch = 'poc/cloudos-windows-captured-surface'
+$expectedBranches = @('poc/cloudos-windows-captured-surface', 'integration/cloudos-unified-runtime')
 $actualBranch = (git branch --show-current).Trim()
 $actualHead = (git rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Could not resolve git HEAD.' }
-if ($actualBranch -ne $expectedBranch) {
-    throw "Wrong branch. expected=$expectedBranch actual=$actualBranch"
+if ($expectedBranches -notcontains $actualBranch) {
+    throw "Wrong branch. expected=$($expectedBranches -join ',') actual=$actualBranch"
 }
 if ($actualHead -ne $ExpectedHeadSha) {
     throw "Wrong HEAD. expected=$ExpectedHeadSha actual=$actualHead"

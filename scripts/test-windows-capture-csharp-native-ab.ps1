@@ -16,7 +16,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$expectedBranch = 'poc/cloudos-windows-captured-surface'
+$expectedBranches = @('poc/cloudos-windows-captured-surface', 'integration/cloudos-unified-runtime')
 $repoRoot = [System.IO.Path]::GetFullPath((Get-Location).Path)
 $outputRoot = [System.IO.Path]::GetFullPath($OutputDirectory)
 $fixtureProject = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.Fixture\CloudOS.WindowsCapture.Fixture.csproj'
@@ -138,7 +138,7 @@ $actualBranch = (git branch --show-current).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao ler branch atual.' }
 $actualHead = (git rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao ler HEAD atual.' }
-if ($actualBranch -ne $expectedBranch) { throw "Branch incorreta. expected=$expectedBranch actual=$actualBranch" }
+if ($expectedBranches -notcontains $actualBranch) { throw "Branch incorreta. expected=$($expectedBranches -join ',') actual=$actualBranch" }
 if ($actualHead -ne $ExpectedHeadSha) { throw "HEAD incorreto. expected=$ExpectedHeadSha actual=$actualHead" }
 
 $dotnet = Resolve-DotNet

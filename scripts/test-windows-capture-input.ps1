@@ -8,7 +8,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$expectedBranch = 'poc/cloudos-windows-captured-surface'
+$expectedBranches = @('poc/cloudos-windows-captured-surface', 'integration/cloudos-unified-runtime')
 $repoRoot = [System.IO.Path]::GetFullPath((Get-Location).Path)
 $fixtureProject = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.Fixture\CloudOS.WindowsCapture.Fixture.csproj'
 $fixtureExe = Join-Path $repoRoot 'desktop\CloudOS.WindowsCapture.Fixture\bin\Release\net8.0-windows\CloudOS.WindowsCapture.Fixture.exe'
@@ -30,7 +30,7 @@ function Assert-RepositoryState {
     $branch = (git branch --show-current).Trim()
     $head = (git rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0) { throw 'Não foi possível ler o HEAD do Git.' }
-    if ($branch -ne $expectedBranch) { throw "Branch incorreto. esperado=$expectedBranch atual=$branch" }
+    if ($expectedBranches -notcontains $branch) { throw "Branch incorreto. esperado=$($expectedBranches -join ',') atual=$branch" }
     if ($head -ne $ExpectedHeadSha) { throw "HEAD incorreto. esperado=$ExpectedHeadSha atual=$head" }
     return [pscustomobject]@{ branch = $branch; head = $head }
 }
