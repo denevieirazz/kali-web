@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildIsolatedWindowsAppArguments, buildWindowsScriptLaunchArguments, parseWindowsAppDiscovery, parseWindowsShortcutArguments } from '../src/apps/appCatalog.js';
+import { buildIsolatedWindowsAppArguments, buildWindowsScriptLaunchArguments, normalizeWindowsLaunchKind, parseWindowsAppDiscovery, parseWindowsShortcutArguments } from '../src/apps/appCatalog.js';
 
 test('launcher de script Windows preserva caminho com espaços sob cmd /s /c', () => {
   const scriptPath = 'C:\\Users\\Runner User\\CloudOS Fixtures\\Launch GUI.cmd';
@@ -20,6 +20,16 @@ test('navegadores conhecidos recebem perfil CloudOS isolado para não delegar à
     ['-profile', 'C:\\CloudOS\\profiles\\windows\\firefox.exe', '-no-remote', '-new-instance']
   );
   assert.deepEqual(buildIsolatedWindowsAppArguments('C:\\Tools\\Editor.exe', 'C:\\CloudOS'), []);
+});
+
+test('atalho direto promovido com argv de isolamento preserva contrato do Host', () => {
+  const braveArguments = buildIsolatedWindowsAppArguments(
+    'C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe',
+    'C:\\CloudOS'
+  );
+  assert.equal(normalizeWindowsLaunchKind('windows-shortcut-direct', braveArguments), 'windows-shortcut-argv');
+  assert.equal(normalizeWindowsLaunchKind('windows-shortcut-direct', []), 'windows-shortcut-direct');
+  assert.equal(normalizeWindowsLaunchKind('windows-executable', braveArguments), 'windows-executable');
 });
 
 test('parser de argumentos Windows preserva limites argv convencionais e falha fechado', () => {
