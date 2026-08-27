@@ -30,7 +30,15 @@ public sealed record WindowsCaptureInputGeometry(
         int sourcePixelHeight,
         double surfaceCssWidth,
         double surfaceCssHeight) =>
-        new(sourcePixelWidth, sourcePixelHeight, 0, 0, sourcePixelWidth, sourcePixelHeight, surfaceCssWidth, surfaceCssHeight).Validate();
+        new WindowsCaptureInputGeometry(
+            sourcePixelWidth,
+            sourcePixelHeight,
+            0,
+            0,
+            sourcePixelWidth,
+            sourcePixelHeight,
+            surfaceCssWidth,
+            surfaceCssHeight).Validate();
 }
 
 public sealed record WindowsCapturePointerMapping(
