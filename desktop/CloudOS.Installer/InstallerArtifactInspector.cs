@@ -128,7 +128,8 @@ public static class InstallerArtifactInspector
     {
         try
         {
-            using var certificate = X509Certificate2.CreateFromSignedFile(path);
+            using var signer = X509Certificate.CreateFromSignedFile(path);
+            using var certificate = new X509Certificate2(signer);
             var simpleName = certificate.GetNameInfo(X509NameType.SimpleName, forIssuer: false);
             return string.IsNullOrWhiteSpace(simpleName) ? certificate.Subject : simpleName;
         }
