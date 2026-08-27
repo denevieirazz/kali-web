@@ -49,9 +49,9 @@ static void ClientCenterMapsInsideContent()
 {
     var geometry = TypicalWindowGeometry().Validate();
     Require(WindowsCaptureClientInputMapper.TryMapSourcePixel(geometry, 321, 241, out var mapped), "center pixel did not map");
-    Require(mapped is not null, "center mapping is null");
-    Require(mapped.ClientPixelX is >= 0 and < 640, "mapped X escaped client area");
-    Require(mapped.ClientPixelY is >= 0 and < 420, "mapped Y escaped client area");
+    var clientPoint = mapped ?? throw new InvalidOperationException("center mapping is null");
+    Require(clientPoint.ClientPixelX is >= 0 and < 640, "mapped X escaped client area");
+    Require(clientPoint.ClientPixelY is >= 0 and < 420, "mapped Y escaped client area");
 }
 
 static void NonClientTitlebarRejects()
