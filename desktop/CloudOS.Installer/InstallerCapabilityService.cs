@@ -33,6 +33,10 @@ public sealed class InstallerCapabilityService : IDisposable
         _lifetime = lifetime ?? TimeSpan.FromMinutes(5);
         if (_lifetime <= TimeSpan.Zero || _lifetime > TimeSpan.FromHours(1))
             throw new ArgumentOutOfRangeException(nameof(lifetime));
+
+        Directory.CreateDirectory(_stagingRoot);
+        Directory.CreateDirectory(_logsRoot);
+        PurgeStaleCapabilityDirectories();
     }
 
     public async Task<PreparedInstallerCapability> PrepareAsync(
@@ -325,6 +329,17 @@ public sealed class InstallerCapabilityService : IDisposable
         {
             _capabilities.Remove(pair.Key);
             TryDeleteDirectory(Path.GetDirectoryName(pair.Value.StagedPath)!);
+        }
+    }
+
+    private void PurgeStaleCapabilityDirectories()
+    {
+        foreach (var directory in Directory.EnumerateDirectories(_stagingRoot, "*", SearchOption.TopDirectoryOnly))
+        {
+            var capabilityId = Path.GetFileName(directory);
+            if (capabilityId.Length != 64 || capabilityId.Any(character => !Uri.IsHexDigit(character)))
+                continue;
+            TryDeleteDirectory(directory);
         }
     }
 
