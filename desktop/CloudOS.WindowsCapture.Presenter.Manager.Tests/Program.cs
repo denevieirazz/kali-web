@@ -38,10 +38,10 @@ return 0;
 
 static void TestOpaqueSessionIds()
 {
-    Require(HostOwnedCapturedSurfaceSessionManager.IsValidSessionId("native-0123456789abcdef01234567"), "canonical opaque id rejected");
-    Require(!HostOwnedCapturedSurfaceSessionManager.IsValidSessionId("native-0123456789ABCDEF01234567"), "uppercase id accepted");
-    Require(!HostOwnedCapturedSurfaceSessionManager.IsValidSessionId("native-0123"), "short id accepted");
-    Require(!HostOwnedCapturedSurfaceSessionManager.IsValidSessionId("../../native-0123456789abcdef01234567"), "path-like id accepted");
+    Require(HostOwnedCapturedSurfaceSessionManager.IsValidSessionId("window-0123456789abcdef0123456789abcdef"), "canonical opaque id rejected");
+    Require(!HostOwnedCapturedSurfaceSessionManager.IsValidSessionId("window-0123456789ABCDEF0123456789ABCDEF"), "uppercase id accepted");
+    Require(!HostOwnedCapturedSurfaceSessionManager.IsValidSessionId("window-0123"), "short id accepted");
+    Require(!HostOwnedCapturedSurfaceSessionManager.IsValidSessionId("../../window-0123456789abcdef0123456789abcdef"), "path-like id accepted");
 }
 
 static void TestMonotonicGenerations()
@@ -172,7 +172,7 @@ static void TestDisposeClosesSessions()
 static WindowsCapturePresentationLayout Layout(long revision, bool visible = true) =>
     new(revision, 20, 30, 640, 480, 1.0, 1.0, visible);
 
-static string Id(int value) => $"native-{value:x24}";
+static string Id(int value) => $"window-{value:x32}";
 
 static void ExpectCode(Action action, string expectedCode)
 {
