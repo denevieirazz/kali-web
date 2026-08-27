@@ -19,6 +19,8 @@ public sealed class WindowsCaptureSetupException : InvalidOperationException
         WindowsCaptureTargetKind targetKind,
         IntPtr targetHandle,
         WindowsCaptureItemFactoryKind itemFactoryKind,
+        WindowsCaptureItemProjectionKind itemProjectionKind,
+        WindowsCaptureAbiLifetimeKind abiLifetimeKind,
         string message,
         Exception innerException,
         int itemWidth = 0,
@@ -33,6 +35,8 @@ public sealed class WindowsCaptureSetupException : InvalidOperationException
         TargetKind = targetKind;
         TargetHandle = targetHandle;
         ItemFactoryKind = itemFactoryKind;
+        ItemProjectionKind = itemProjectionKind;
+        AbiLifetimeKind = abiLifetimeKind;
         ItemWidth = itemWidth;
         ItemHeight = itemHeight;
         BufferWidth = bufferWidth;
@@ -45,6 +49,8 @@ public sealed class WindowsCaptureSetupException : InvalidOperationException
     public WindowsCaptureTargetKind TargetKind { get; }
     public IntPtr TargetHandle { get; }
     public WindowsCaptureItemFactoryKind ItemFactoryKind { get; }
+    public WindowsCaptureItemProjectionKind ItemProjectionKind { get; }
+    public WindowsCaptureAbiLifetimeKind AbiLifetimeKind { get; }
     public int ItemWidth { get; }
     public int ItemHeight { get; }
     public int BufferWidth { get; }
@@ -66,6 +72,9 @@ public sealed record WindowsCaptureSnapshot(
     int InitialBufferHeight,
     string InitialSizeSource,
     string ItemFactory,
+    string ItemProjection,
+    string AbiLifetime,
+    bool HoldsAbiReference,
     DateTimeOffset? FirstFrameAtUtc,
     DateTimeOffset? LastFrameAtUtc,
     string? Failure)
@@ -78,6 +87,7 @@ public sealed class WindowsCaptureSession : IDisposable
     private const uint DwmwaExtendedFrameBounds = 9;
 
     private readonly object _sync = new();
+    private readonly WindowsCaptureItemLease _itemLease;
     private readonly IDirect3DDevice _device;
     private readonly GraphicsCaptureItem _item;
     private readonly Direct3D11CaptureFramePool _framePool;
@@ -101,7 +111,9 @@ public sealed class WindowsCaptureSession : IDisposable
     public WindowsCaptureSession(
         IntPtr targetHandle,
         WindowsCaptureTargetKind targetKind = WindowsCaptureTargetKind.Window,
-        WindowsCaptureItemFactoryKind itemFactoryKind = WindowsCaptureItemFactoryKind.RawActivationFactory)
+        WindowsCaptureItemFactoryKind itemFactoryKind = WindowsCaptureItemFactoryKind.RawActivationFactory,
+        WindowsCaptureItemProjectionKind itemProjectionKind = WindowsCaptureItemProjectionKind.MarshalInterfaceFromAbi,
+        WindowsCaptureAbiLifetimeKind abiLifetimeKind = WindowsCaptureAbiLifetimeKind.HoldUntilSessionDispose)
     {
         if (!GraphicsCaptureSession.IsSupported())
             throw new PlatformNotSupportedException("Windows.Graphics.Capture is not supported in this Windows session.");
@@ -113,6 +125,8 @@ public sealed class WindowsCaptureSession : IDisposable
         TargetHandle = targetHandle;
         TargetKind = targetKind;
         ItemFactoryKind = itemFactoryKind;
+        ItemProjectionKind = itemProjectionKind;
+        AbiLifetimeKind = abiLifetimeKind;
 
         InitialCaptureSize? nativeInitial = targetKind switch
         {
@@ -123,16 +137,32 @@ public sealed class WindowsCaptureSession : IDisposable
 
         try
         {
-            _item = targetKind switch
+            _itemLease = targetKind switch
             {
-                WindowsCaptureTargetKind.Window => WindowsCaptureInterop.CreateItemForWindow(targetHandle, itemFactoryKind),
-                WindowsCaptureTargetKind.Monitor => WindowsCaptureInterop.CreateItemForMonitor(targetHandle, itemFactoryKind),
+                WindowsCaptureTargetKind.Window => WindowsCaptureInterop.CreateItemForWindow(
+                    targetHandle,
+                    itemFactoryKind,
+                    itemProjectionKind,
+                    abiLifetimeKind),
+                WindowsCaptureTargetKind.Monitor => WindowsCaptureInterop.CreateItemForMonitor(
+                    targetHandle,
+                    itemFactoryKind,
+                    itemProjectionKind,
+                    abiLifetimeKind),
                 _ => throw new ArgumentOutOfRangeException(nameof(targetKind))
             };
+            _item = _itemLease.Item;
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
-            throw SetupFailure("item-factory", targetHandle, targetKind, itemFactoryKind, error);
+            throw SetupFailure(
+                "item-factory",
+                targetHandle,
+                targetKind,
+                itemFactoryKind,
+                itemProjectionKind,
+                abiLifetimeKind,
+                error);
         }
 
         SizeInt32 itemSize;
@@ -142,7 +172,15 @@ public sealed class WindowsCaptureSession : IDisposable
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
-            throw SetupFailure("item-metadata", targetHandle, targetKind, itemFactoryKind, error);
+            _itemLease.Dispose();
+            throw SetupFailure(
+                "item-metadata",
+                targetHandle,
+                targetKind,
+                itemFactoryKind,
+                itemProjectionKind,
+                abiLifetimeKind,
+                error);
         }
 
         _initialItemWidth = itemSize.Width;
@@ -155,15 +193,19 @@ public sealed class WindowsCaptureSession : IDisposable
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
+            var displayName = TryGetDisplayName(_item);
+            _itemLease.Dispose();
             throw SetupFailure(
                 "initial-size",
                 targetHandle,
                 targetKind,
                 itemFactoryKind,
+                itemProjectionKind,
+                abiLifetimeKind,
                 error,
                 itemSize.Width,
                 itemSize.Height,
-                displayName: TryGetDisplayName(_item));
+                displayName: displayName);
         }
 
         _initialBufferWidth = initial.Size.Width;
@@ -176,18 +218,22 @@ public sealed class WindowsCaptureSession : IDisposable
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
+            var displayName = TryGetDisplayName(_item);
+            _itemLease.Dispose();
             throw SetupFailure(
                 "d3d-device",
                 targetHandle,
                 targetKind,
                 itemFactoryKind,
+                itemProjectionKind,
+                abiLifetimeKind,
                 error,
                 itemSize.Width,
                 itemSize.Height,
                 initial.Size.Width,
                 initial.Size.Height,
                 initial.Source,
-                TryGetDisplayName(_item));
+                displayName);
         }
 
         _width = initial.Size.Width;
@@ -203,19 +249,23 @@ public sealed class WindowsCaptureSession : IDisposable
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
+            var displayName = TryGetDisplayName(_item);
             _device.Dispose();
+            _itemLease.Dispose();
             throw SetupFailure(
                 "frame-pool",
                 targetHandle,
                 targetKind,
                 itemFactoryKind,
+                itemProjectionKind,
+                abiLifetimeKind,
                 error,
                 itemSize.Width,
                 itemSize.Height,
                 initial.Size.Width,
                 initial.Size.Height,
                 initial.Source,
-                TryGetDisplayName(_item));
+                displayName);
         }
 
         try
@@ -224,20 +274,24 @@ public sealed class WindowsCaptureSession : IDisposable
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
+            var displayName = TryGetDisplayName(_item);
             _framePool.Dispose();
             _device.Dispose();
+            _itemLease.Dispose();
             throw SetupFailure(
                 "capture-session",
                 targetHandle,
                 targetKind,
                 itemFactoryKind,
+                itemProjectionKind,
+                abiLifetimeKind,
                 error,
                 itemSize.Width,
                 itemSize.Height,
                 initial.Size.Width,
                 initial.Size.Height,
                 initial.Source,
-                TryGetDisplayName(_item));
+                displayName);
         }
 
         _framePool.FrameArrived += OnFrameArrived;
@@ -246,6 +300,8 @@ public sealed class WindowsCaptureSession : IDisposable
     public IntPtr TargetHandle { get; }
     public WindowsCaptureTargetKind TargetKind { get; }
     public WindowsCaptureItemFactoryKind ItemFactoryKind { get; }
+    public WindowsCaptureItemProjectionKind ItemProjectionKind { get; }
+    public WindowsCaptureAbiLifetimeKind AbiLifetimeKind { get; }
 
     public void Start()
     {
@@ -265,6 +321,8 @@ public sealed class WindowsCaptureSession : IDisposable
                     TargetHandle,
                     TargetKind,
                     ItemFactoryKind,
+                    ItemProjectionKind,
+                    AbiLifetimeKind,
                     error,
                     _initialItemWidth,
                     _initialItemHeight,
@@ -292,6 +350,9 @@ public sealed class WindowsCaptureSession : IDisposable
                 _initialBufferHeight,
                 _initialSizeSource,
                 ItemFactoryKind.ToString(),
+                ItemProjectionKind.ToString(),
+                AbiLifetimeKind.ToString(),
+                _itemLease.HoldsAbiReference,
                 _firstFrameAtUtc,
                 _lastFrameAtUtc,
                 _failure);
@@ -377,6 +438,7 @@ public sealed class WindowsCaptureSession : IDisposable
         _session.Dispose();
         _framePool.Dispose();
         _device.Dispose();
+        _itemLease.Dispose();
     }
 
     private static WindowsCaptureSetupException SetupFailure(
@@ -384,6 +446,8 @@ public sealed class WindowsCaptureSession : IDisposable
         IntPtr targetHandle,
         WindowsCaptureTargetKind targetKind,
         WindowsCaptureItemFactoryKind itemFactoryKind,
+        WindowsCaptureItemProjectionKind itemProjectionKind,
+        WindowsCaptureAbiLifetimeKind abiLifetimeKind,
         Exception error,
         int itemWidth = 0,
         int itemHeight = 0,
@@ -394,6 +458,7 @@ public sealed class WindowsCaptureSession : IDisposable
     {
         var message =
             $"Windows capture setup failed at {stage}; target={targetKind}; factory={itemFactoryKind}; " +
+            $"projection={itemProjectionKind}; abiLifetime={abiLifetimeKind}; " +
             $"handle=0x{targetHandle.ToInt64():X}; item={itemWidth}x{itemHeight}; " +
             $"buffer={bufferWidth}x{bufferHeight}; source={initialSizeSource ?? "<none>"}; " +
             $"displayName={displayName ?? "<unavailable>"}; inner=0x{error.HResult:X8} {error.Message}";
@@ -403,6 +468,8 @@ public sealed class WindowsCaptureSession : IDisposable
             targetKind,
             targetHandle,
             itemFactoryKind,
+            itemProjectionKind,
+            abiLifetimeKind,
             message,
             error,
             itemWidth,
