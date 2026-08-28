@@ -36,7 +36,6 @@ test('isolamento do navegador vence overrides de perfil do atalho sem apagar arg
       '--no-first-run',
       '--new-window',
       '--incognito',
-      '--profile-directory=Profile 7',
       'https://example.com/'
     ]
   );
@@ -45,6 +44,8 @@ test('isolamento do navegador vence overrides de perfil do atalho sem apagar arg
     mergeIsolatedWindowsAppArguments(brave, 'C:\\CloudOS', [
       '/USER-DATA-DIR',
       'C:\\Users\\Normal\\Brave',
+      '--profile-directory',
+      '..\\..\\ExternalProfile',
       '--disable-extensions'
     ]),
     [
@@ -57,7 +58,16 @@ test('isolamento do navegador vence overrides de perfil do atalho sem apagar arg
 
   const firefox = 'C:\\Program Files\\Mozilla Firefox\\firefox.exe';
   assert.deepEqual(
-    mergeIsolatedWindowsAppArguments(firefox, 'C:\\CloudOS', ['-P', 'Personal', '-private-window', 'https://example.com/']),
+    mergeIsolatedWindowsAppArguments(firefox, 'C:\\CloudOS', [
+      '-P',
+      'Personal',
+      '--migration',
+      '-CreateProfile',
+      'Outside C:\\Users\\Normal\\Firefox',
+      '--ProfileManager',
+      '-private-window',
+      'https://example.com/'
+    ]),
     [
       '-profile',
       'C:\\CloudOS\\profiles\\windows\\firefox.exe',
@@ -70,6 +80,21 @@ test('isolamento do navegador vence overrides de perfil do atalho sem apagar arg
 
   assert.deepEqual(
     mergeIsolatedWindowsAppArguments('C:\\Tools\\Editor.exe', 'C:\\CloudOS', ['--workspace', 'A']),
+    ['--workspace', 'A']
+  );
+});
+
+test('navegador conhecido falha fechado quando o root de perfil CloudOS não é absoluto', () => {
+  const brave = 'C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe';
+  const firefox = 'C:\\Program Files\\Mozilla Firefox\\firefox.exe';
+  for (const executable of [brave, firefox]) {
+    assert.throws(
+      () => mergeIsolatedWindowsAppArguments(executable, 'profiles\\relative', ['https://example.com/']),
+      (error) => error?.code === 'BROWSER_PROFILE_ISOLATION_UNAVAILABLE'
+    );
+  }
+  assert.deepEqual(
+    mergeIsolatedWindowsAppArguments('C:\\Tools\\Editor.exe', 'profiles\\relative', ['--workspace', 'A']),
     ['--workspace', 'A']
   );
 });
