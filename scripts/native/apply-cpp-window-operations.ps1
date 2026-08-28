@@ -176,6 +176,25 @@ Replace-ExactlyOnce $layoutNeedle $layoutReplacement 'LAYOUT'
 
 [IO.File]::WriteAllText($path, $content, [Text.UTF8Encoding]::new($false))
 
+$runtimePath = Join-Path $repoRoot 'desktop\CloudOS.Host\Native\CloudOsNativeRuntime.cs'
+$runtime = [IO.File]::ReadAllText($runtimePath)
+$oldFailure = @'
+    private static Win32Exception NativeFailure(string message) =>
+        new(Marshal.GetLastWin32Error(), message);
+'@
+$newFailure = @'
+    private static Win32Exception NativeFailure(string message)
+    {
+        var nativeError = Marshal.GetLastWin32Error();
+        var systemMessage = new Win32Exception(nativeError).Message;
+        return new Win32Exception(nativeError, $"{message} Win32 error {nativeError}: {systemMessage}");
+    }
+'@
+$failureCount = ([regex]::Matches($runtime, [regex]::Escape($oldFailure))).Count
+if ($failureCount -ne 1) { throw "NATIVE_FAILURE_EXPECTED_1_FOUND_$failureCount" }
+$runtime = $runtime.Replace($oldFailure, $newFailure)
+[IO.File]::WriteAllText($runtimePath, $runtime, [Text.UTF8Encoding]::new($false))
+
 $updated = [IO.File]::ReadAllText($path)
 foreach ($needle in @(
     'CloudOsNativeRuntime.TryAttachWindow(',
@@ -184,6 +203,9 @@ foreach ($needle in @(
     'CloudOsNativeRuntime.CanUseWindowOperations'
 )) {
     if (-not $updated.Contains($needle)) { throw "MISSING_$needle" }
+}
+if (-not ([IO.File]::ReadAllText($runtimePath)).Contains('Win32 error {nativeError}')) {
+    throw 'NATIVE_ERROR_DIAGNOSTIC_MISSING'
 }
 
 Write-Host 'CPP_WINDOW_OPERATIONS_PATCHED'
