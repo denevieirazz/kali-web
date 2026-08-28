@@ -95,7 +95,8 @@ public sealed class WebMessageBridge : IDisposable
         _onHandshake = onHandshake;
         var browserDevTools = string.Equals(Environment.GetEnvironmentVariable("CLOUDOS_BROWSER_DEVTOOLS"), "1", StringComparison.Ordinal);
         _browserManager = new BrowserManager(dispatcher, trustedDocumentOrigin, backendOrigin, browserDevTools, BrowserDiagnostics.Write);
-        if (CapturedSurfaceBridgeAdapter.CandidateEnabled)
+        if (NativeSurfaceMode.Current == NativeSurfaceRenderMode.CapturedSurface
+            && CapturedSurfaceBridgeAdapter.CandidateEnabled)
         {
             _capturedSurfaceRuntime = new CapturedSurfaceSessionManager();
             _capturedSurfaceBridge = new CapturedSurfaceBridgeAdapter(ownerWindowHandle, _capturedSurfaceRuntime);
