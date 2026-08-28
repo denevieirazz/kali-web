@@ -23,6 +23,12 @@ test('all native session operations establish the WebView host handshake first',
   assert.doesNotMatch(source, /detachSession|native\.session\.detach/);
 });
 
+test('native capture attach has response margin beyond Host pending-attach containment', () => {
+  const body = methodBody('attachSession');
+  assert.match(body, /'native\.session\.attach',[\s\S]*?\{ sessionId, bounds, visible \},[\s\S]*?20_000/s);
+  assert.match(source, /private request<T = unknown>\(method: NativeRequestMethod, params: Record<string, unknown>, timeoutMs = 10_000\)/);
+});
+
 test('bridge request removes pending state when postMessage fails synchronously', () => {
   assert.match(source, /try \{\s*this\.transport!\.postMessage\(/s);
   assert.match(source, /catch \(postError\) \{\s*window\.clearTimeout\(timer\);\s*this\.pending\.delete\(id\);/s);
