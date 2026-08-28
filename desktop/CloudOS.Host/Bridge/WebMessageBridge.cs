@@ -379,10 +379,10 @@ public sealed class WebMessageBridge : IDisposable
             var window = await WaitForQuarantinedWindowAsync(launchLease);
             if (window is null)
             {
-                TerminateProcessAndForget(launchLease.ProcessId, NativeContainmentFailure.WindowCorrelationTimeout);
                 throw new BridgeException(
                     "NATIVE_WINDOW_NOT_FOUND",
-                    "Nenhuma janela rastreável apareceu sob quarentena antes do limite de contenção.");
+                    "Nenhuma janela rastreável apareceu sob quarentena antes do limite de contenção.",
+                    NativeContainmentFailure.WindowCorrelationTimeout);
             }
 
             var processTracked = _windows.IsTrackedProcess(window.ProcessId);
@@ -391,7 +391,6 @@ public sealed class WebMessageBridge : IDisposable
             var sharedBroker = IsSharedBrokerProcess(window.ProcessId);
             if (!NativeLaunchContainmentPolicy.CanReportManaged(processTracked, hasTrackableWindow, sharedBroker))
             {
-                TerminateProcessAndForget(launchLease.ProcessId, NativeContainmentFailure.QuarantineFailed);
                 throw new BridgeException("WINDOW_CONTAINMENT_DENIED", "A janela não pôde ser marcada como gerenciada.");
             }
 
@@ -413,16 +412,19 @@ public sealed class WebMessageBridge : IDisposable
                 containmentMode = "hidden-quarantine"
             };
         }
-        catch (BridgeException)
+        catch (BridgeException error)
         {
-            AbortContainedLaunch(launchLease, registered);
+            AbortContainedLaunch(
+                launchLease,
+                registered,
+                error.ContainmentFailure ?? NativeContainmentFailure.QuarantineFailed);
             throw;
         }
         catch (Exception error) when (error is ArgumentException or InvalidOperationException or Win32Exception
             or IOException or NotSupportedException or UnauthorizedAccessException)
         {
             BrowserDiagnostics.Write("native_process_tracking_failed", $"type={error.GetType().Name}");
-            AbortContainedLaunch(launchLease, registered);
+            AbortContainedLaunch(launchLease, registered, NativeContainmentFailure.QuarantineFailed);
             throw new BridgeException("APP_PROCESS_NOT_TRACKABLE", "O processo lançado não pôde ser rastreado com segurança.");
         }
     }
@@ -658,6 +660,8 @@ public sealed class WebMessageBridge : IDisposable
     {
         var deadline = DateTimeOffset.UtcNow.AddMilliseconds(
             NativeLaunchContainmentPolicy.WindowCorrelationTimeoutMilliseconds);
+        long stableCandidateHandle = 0;
+        var stableCandidateSince = DateTimeOffset.MinValue;
         while (!_disposed && DateTimeOffset.UtcNow < deadline)
         {
             var processIds = SynchronizeTrackedJob(lease);
@@ -666,9 +670,9 @@ public sealed class WebMessageBridge : IDisposable
             foreach (var processId in processIds)
             {
                 if (!_windows.TryGetContainmentFailure(processId, out var quarantineError)) continue;
-                TerminateProcessAndForget(lease.ProcessId, NativeContainmentFailure.QuarantineFailed);
                 throw new BridgeException("WINDOW_QUARANTINE_FAILED",
-                    quarantineError ?? "A janela não aceitou a quarentena preventiva do CloudOS.");
+                    quarantineError ?? "A janela não aceitou a quarentena preventiva do CloudOS.",
+                    NativeContainmentFailure.QuarantineFailed);
             }
 
             var memberSet = processIds.ToHashSet();
@@ -677,16 +681,35 @@ public sealed class WebMessageBridge : IDisposable
                 .Where(item => !item.IsAttached && !item.IsVisible)
                 .OrderBy(item => item.ObservedAtUtc)
                 .ToArray();
-            if (candidates.Length > 0)
+            var selection = NativeLaunchContainmentPolicy.SelectUniqueQuarantinedWindow(candidates, out var candidate);
+            if (selection == NativeWindowCandidateSelection.Ambiguous)
             {
-                var rootMainHandle = IntPtr.Zero;
-                try
+                BrowserDiagnostics.Write(
+                    "native_ambiguous_multiwindow_fail_closed",
+                    $"pid={lease.ProcessId} candidates={candidates.Length}");
+                throw new BridgeException(
+                    "AMBIGUOUS_MULTIWINDOW_UNSUPPORTED",
+                    "O aplicativo criou várias janelas principais e não pode ser contido com segurança nesta versão.",
+                    NativeContainmentFailure.AmbiguousWindow);
+            }
+            if (candidate is not null)
+            {
+                var now = DateTimeOffset.UtcNow;
+                if (stableCandidateHandle != candidate.Handle)
                 {
-                    lease.Process.Refresh();
-                    rootMainHandle = lease.Process.MainWindowHandle;
+                    stableCandidateHandle = candidate.Handle;
+                    stableCandidateSince = now;
                 }
-                catch (InvalidOperationException) { }
-                return candidates.FirstOrDefault(item => item.Handle == rootMainHandle.ToInt64()) ?? candidates[0];
+                else if ((now - stableCandidateSince).TotalMilliseconds
+                    >= NativeLaunchContainmentPolicy.WindowCandidateStabilityMilliseconds)
+                {
+                    return candidate;
+                }
+            }
+            else
+            {
+                stableCandidateHandle = 0;
+                stableCandidateSince = DateTimeOffset.MinValue;
             }
 
             await Task.Delay(25);
@@ -749,15 +772,22 @@ public sealed class WebMessageBridge : IDisposable
         return sessionId;
     }
 
-    private void AbortContainedLaunch(NativeContainedProcessLease? lease, bool registered)
+    private void AbortContainedLaunch(
+        NativeContainedProcessLease? lease,
+        bool registered,
+        NativeContainmentFailure failure)
     {
         if (lease is null) return;
+        // The refresh timer may observe a naturally exited Job while launch correlation is
+        // awaiting its next poll. CompleteExitedLaunch then revokes and disposes the lease;
+        // never add that terminal capability back to the active registry from the catch path.
+        if (lease.IsDisposed) return;
         if (registered || _launchLeasesByProcessId.ContainsKey(lease.ProcessId))
         {
             _launchLeasesByProcessId.TryAdd(lease.ProcessId, lease);
             _launchRootByMemberProcessId.TryAdd(lease.ProcessId, lease.ProcessId);
             _refreshTimer.Interval = TimeSpan.FromMilliseconds(ActiveContainmentRefreshMilliseconds);
-            TerminateProcessAndForget(lease.ProcessId, NativeContainmentFailure.QuarantineFailed);
+            TerminateProcessAndForget(lease.ProcessId, failure);
             return;
         }
         lease.Dispose();
@@ -1274,9 +1304,13 @@ public sealed class WebMessageBridge : IDisposable
 
     private delegate bool NativeOperation(long handle, out string error);
 
-    private sealed class BridgeException(string code, string message) : Exception(message)
+    private sealed class BridgeException(
+        string code,
+        string message,
+        NativeContainmentFailure? containmentFailure = null) : Exception(message)
     {
         public string Code { get; } = code;
+        public NativeContainmentFailure? ContainmentFailure { get; } = containmentFailure;
     }
 
     private sealed class LaunchResponse

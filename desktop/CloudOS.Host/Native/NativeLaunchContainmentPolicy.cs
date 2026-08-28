@@ -9,6 +9,7 @@ namespace CloudOS.Host.Native;
 public static class NativeLaunchContainmentPolicy
 {
     public const int WindowCorrelationTimeoutMilliseconds = 8_000;
+    public const int WindowCandidateStabilityMilliseconds = 100;
     public const int PendingAttachTimeoutMilliseconds = 10_000;
     public const int GracefulCloseTimeoutMilliseconds = 1_000;
 
@@ -85,11 +86,31 @@ public static class NativeLaunchContainmentPolicy
         processTracked && hasTrackableWindow && !sharedBroker;
 
     /// <summary>
+    /// A launch capability does not imply that any one of several top-level HWNDs is the
+    /// application's primary surface. Array order, focus and timing are not authority. The
+    /// current single-surface runtime therefore admits only one quarantined candidate.
+    /// </summary>
+    public static NativeWindowCandidateSelection SelectUniqueQuarantinedWindow(
+        IReadOnlyList<NativeWindowSnapshot> candidates,
+        out NativeWindowSnapshot? selected)
+    {
+        ArgumentNullException.ThrowIfNull(candidates);
+        selected = candidates.Count == 1 ? candidates[0] : null;
+        return candidates.Count switch
+        {
+            0 => NativeWindowCandidateSelection.None,
+            1 => NativeWindowCandidateSelection.Unique,
+            _ => NativeWindowCandidateSelection.Ambiguous
+        };
+    }
+
+    /// <summary>
     /// Every failure after a process was launched is terminal. Restoring an
     /// attached window to the desktop would be an external-window fallback.
     /// </summary>
     public static bool RequiresTermination(NativeContainmentFailure failure) => failure is
         NativeContainmentFailure.WindowCorrelationTimeout or
+        NativeContainmentFailure.AmbiguousWindow or
         NativeContainmentFailure.QuarantineFailed or
         NativeContainmentFailure.AttachFailed or
         NativeContainmentFailure.LayoutFailed or
@@ -121,6 +142,7 @@ public sealed class NativeLaunchAdmission
 public enum NativeContainmentFailure
 {
     WindowCorrelationTimeout,
+    AmbiguousWindow,
     QuarantineFailed,
     AttachFailed,
     LayoutFailed,
@@ -130,4 +152,11 @@ public enum NativeContainmentFailure
     GracefulCloseFailed,
     DocumentReset,
     HostDisposed
+}
+
+public enum NativeWindowCandidateSelection
+{
+    None,
+    Unique,
+    Ambiguous
 }

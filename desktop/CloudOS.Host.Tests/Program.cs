@@ -18,6 +18,11 @@ if (args is ["--native-contained-fixture-window"])
     NativeFixtureWindow.RunVisibleMessageLoop();
     return;
 }
+if (args is ["--native-contained-fixture-two-windows"])
+{
+    NativeFixtureWindow.RunVisibleMessageLoop(2);
+    return;
+}
 if (args is ["--native-contained-fixture-spawn-window-child"])
 {
     var childStart = new ProcessStartInfo
@@ -57,11 +62,13 @@ var tests = new (string Name, Action Run)[]
     ("native launch accepts only direct host descriptors", NativeLaunchAcceptsOnlyDirectDescriptors),
     ("native launch rejects broker and UWP kinds", NativeLaunchRejectsBrokersAndUwp),
     ("native launch reports managed only after HWND correlation", NativeLaunchReportsManagedOnlyAfterCorrelation),
+    ("native launch rejects ambiguous top-level windows", NativeLaunchRejectsAmbiguousWindows),
     ("native containment failures require termination", NativeContainmentFailuresRequireTermination),
     ("native launch descriptor preserves argv JSON", NativeLaunchDescriptorPreservesArgvJson),
     ("native command line quoting is bounded", NativeCommandLineQuotingIsBounded),
     ("cmd script GUI descendant is correlated through the contained Job", NativeScriptLaunchContract.Validate),
     ("native launcher tracks suspended process before resume", NativeLauncherTracksSuspendedProcessBeforeResume),
+    ("native lease identity remains stable after disposal", NativeLeaseIdentitySurvivesDispose),
     ("cmd script GUI descendant is contained by the same Job", NativeScriptLaunchContract.Validate),
     ("native job child HWND is quarantined and escape is detected", NativeJobChildWindowIsQuarantined),
     ("captured source stays covered and follows CloudOS visibility", CapturedSourceIsolationFollowsSurface),
@@ -567,6 +574,66 @@ static void Assert(bool condition, string message)
     if (!condition) throw new InvalidOperationException(message);
 }
 
+static void NativeLeaseIdentitySurvivesDispose()
+{
+    var processPath = Environment.ProcessPath ?? throw new InvalidOperationException("The test process path is unavailable.");
+    var spec = NativeProcessLaunchSpec.Create(
+        processPath,
+        FixtureArguments("--native-contained-fixture-wait"),
+        AppContext.BaseDirectory);
+    var lease = NativeContainedProcessLauncher.StartSuspended(spec);
+    var processId = lease.ProcessId;
+    lease.Dispose();
+
+    Assert(lease.IsDisposed, "A disposed native launch lease must expose terminal state.");
+    Assert(lease.ProcessId == processId,
+        "The stable launch identity must not dereference a disposed Process object.");
+    lease.Dispose();
+}
+
+static void NativeLaunchRejectsAmbiguousWindows()
+{
+    var processPath = Environment.ProcessPath ?? throw new InvalidOperationException("The test process path is unavailable.");
+    var spec = NativeProcessLaunchSpec.Create(
+        processPath,
+        FixtureArguments("--native-contained-fixture-two-windows"),
+        AppContext.BaseDirectory);
+    using var lease = NativeContainedProcessLauncher.StartSuspended(spec);
+    using var windows = new NativeWindowManager();
+    windows.TrackLaunchedProcess(lease.Process);
+    lease.Resume();
+
+    NativeWindowSnapshot[] candidates = [];
+    var deadline = DateTimeOffset.UtcNow.AddSeconds(8);
+    while (DateTimeOffset.UtcNow < deadline && candidates.Length < 2)
+    {
+        NativeContainedJobTracker.Synchronize(lease, windows);
+        windows.Refresh();
+        candidates = windows.GetWindows(lease.ProcessId)
+            .Where(window => !window.IsAttached && !window.IsVisible)
+            .ToArray();
+        if (candidates.Length < 2) Thread.Sleep(25);
+    }
+
+    Assert(candidates.Length == 2, "The ambiguous-window fixture did not expose two quarantined HWNDs.");
+    var selection = NativeLaunchContainmentPolicy.SelectUniqueQuarantinedWindow(candidates, out var selected);
+    Assert(selection == NativeWindowCandidateSelection.Ambiguous && selected is null,
+        "Multiple top-level HWNDs must fail closed instead of selecting array order.");
+    selection = NativeLaunchContainmentPolicy.SelectUniqueQuarantinedWindow([], out selected);
+    Assert(selection == NativeWindowCandidateSelection.None && selected is null,
+        "An empty launch must remain pending instead of inventing a candidate.");
+    selection = NativeLaunchContainmentPolicy.SelectUniqueQuarantinedWindow([candidates[0]], out selected);
+    Assert(selection == NativeWindowCandidateSelection.Unique && selected?.Handle == candidates[0].Handle,
+        "Exactly one quarantined HWND must remain eligible for the single-surface runtime.");
+    Assert(candidates.All(window => !NativeMethods.IsWindowVisible(new IntPtr(window.Handle))),
+        "Every ambiguous candidate must remain hidden while the launch is rejected.");
+
+    Assert(lease.TryTerminate(3_000, out var terminationError),
+        terminationError ?? "The ambiguous-window Job did not terminate.");
+    Assert(windows.TryTerminateTrackedProcess(lease.ProcessId, out terminationError),
+        terminationError ?? "The ambiguous-window capability was not revoked.");
+}
+
 static void CapturedSurfaceDuplicateAttachIsSerialized()
 {
     using var runtime = new ControlledCapturedSurfaceRuntime { BlockFirstCreate = true };
@@ -857,25 +924,29 @@ static class NativeFixtureWindow
     private const uint WsExAppWindow = 0x00040000;
     private const uint WsExToolWindow = 0x00000080;
 
-    internal static void RunVisibleMessageLoop()
+    internal static void RunVisibleMessageLoop(int windowCount = 1)
     {
-        var hwnd = CreateWindowEx(
-            WsExAppWindow,
-            "STATIC",
-            Title,
-            WsPopup | WsVisible,
-            20,
-            20,
-            420,
-            280,
-            IntPtr.Zero,
-            IntPtr.Zero,
-            GetModuleHandle(null),
-            IntPtr.Zero);
-        if (hwnd == IntPtr.Zero)
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "The native fixture HWND could not be created.");
-        ShowWindow(hwnd, 5);
-        UpdateWindow(hwnd);
+        if (windowCount is < 1 or > 2) throw new ArgumentOutOfRangeException(nameof(windowCount));
+        for (var index = 0; index < windowCount; index++)
+        {
+            var hwnd = CreateWindowEx(
+                WsExAppWindow,
+                "STATIC",
+                index == 0 ? Title : $"{Title} {index + 1}",
+                WsPopup | WsVisible,
+                20 + (index * 40),
+                20 + (index * 40),
+                420,
+                280,
+                IntPtr.Zero,
+                IntPtr.Zero,
+                GetModuleHandle(null),
+                IntPtr.Zero);
+            if (hwnd == IntPtr.Zero)
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "The native fixture HWND could not be created.");
+            ShowWindow(hwnd, 5);
+            UpdateWindow(hwnd);
+        }
         while (GetMessage(out var message, IntPtr.Zero, 0, 0) > 0)
         {
             TranslateMessage(ref message);

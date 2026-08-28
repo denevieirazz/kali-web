@@ -87,6 +87,47 @@ test("TryAttach libera o lock global antes de serializar um attachment já exist
   );
 });
 
+test("falha de correlação encerra a lease uma vez pelo boundary de abort", () => {
+  const bridge = fs.readFileSync(
+    path.join(root, "desktop/CloudOS.Host/Bridge/WebMessageBridge.cs"),
+    "utf8"
+  );
+  const launchStart = bridge.indexOf("private async Task<object> LaunchAppAsync(");
+  const launchEnd = bridge.indexOf("private object Attach(", launchStart);
+  const launch = bridge.slice(launchStart, launchEnd);
+  const waitStart = bridge.indexOf("private async Task<NativeWindowSnapshot?> WaitForQuarantinedWindowAsync(");
+  const waitEnd = bridge.indexOf("private IReadOnlyList<int> SynchronizeTrackedJob(", waitStart);
+  const wait = bridge.slice(waitStart, waitEnd);
+
+  assert.ok(launchStart >= 0 && launchEnd > launchStart, "LaunchAppAsync deve permanecer delimitável");
+  assert.ok(waitStart >= 0 && waitEnd > waitStart, "WaitForQuarantinedWindowAsync deve permanecer delimitável");
+  assert.doesNotMatch(
+    launch,
+    /TerminateProcessAndForget\(/,
+    "LaunchAppAsync não pode encerrar e depois reenviar a mesma lease ao AbortContainedLaunch"
+  );
+  assert.doesNotMatch(
+    wait,
+    /TerminateProcessAndForget\(/,
+    "o wait de correlação deve reportar a falha e deixar um único boundary encerrar o Job"
+  );
+  assert.match(
+    wait,
+    /SelectUniqueQuarantinedWindow\(candidates, out var candidate\)/,
+    "a correlação deve exigir um único HWND em quarentena"
+  );
+  assert.doesNotMatch(
+    wait,
+    /candidates\[0\]/,
+    "ordem de enumeração nunca pode escolher uma janela ambígua"
+  );
+  assert.match(
+    launch,
+    /catch \(BridgeException error\)[\s\S]*?AbortContainedLaunch\([\s\S]*?error\.ContainmentFailure \?\? NativeContainmentFailure\.QuarantineFailed\);/,
+    "BridgeException deve carregar a causa até o único boundary de abort"
+  );
+});
+
 test("auditoria de janela valida HWND diferente de zero, visibilidade e retangulo em tela", () => {
   const result = validateWindowPlacement({
     hwnd: "0x240AC0",

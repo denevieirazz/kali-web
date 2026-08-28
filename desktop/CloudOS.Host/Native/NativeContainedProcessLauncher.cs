@@ -369,6 +369,7 @@ public sealed class NativeContainedProcessLease : IDisposable
     private readonly SafeKernelHandle _nativeProcess;
     private readonly SafeJobHandle _job;
     private readonly object _jobQuerySync = new();
+    private readonly int _processId;
     private SafeKernelHandle? _primaryThread;
     private IntPtr _jobProcessListBuffer;
     private int _jobProcessListBufferAllocationCount;
@@ -381,14 +382,19 @@ public sealed class NativeContainedProcessLease : IDisposable
         SafeJobHandle job)
     {
         Process = process;
+        _processId = process.Id;
         _nativeProcess = nativeProcess;
         _primaryThread = primaryThread;
         _job = job;
     }
 
     public Process Process { get; }
-    public int ProcessId => Process.Id;
+    public int ProcessId => _processId;
     public bool IsResumed { get; private set; }
+    public bool IsDisposed
+    {
+        get { lock (_jobQuerySync) return _disposed; }
+    }
 
     internal int JobProcessListBufferAllocationCount
     {
