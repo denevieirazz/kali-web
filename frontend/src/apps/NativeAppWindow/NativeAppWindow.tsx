@@ -5,36 +5,22 @@ import { useSystem } from '../../stores/systemStore';
 import { useWindowManager } from '../../stores/windowManager';
 import './NativeAppWindow.css';
 
-type NativeSurfaceStatus = 'launching' | 'waiting' | 'attaching' | 'contained' | 'recovering' | 'error';
+type NativeSurfaceStatus = 'launching' | 'waiting' | 'attaching' | 'contained' | 'error';
 type NativeLaunch = Awaited<ReturnType<typeof nativeHostBridge.launchApp>>;
 type NativeLayoutState = { bounds: NativeViewportBounds; visible: boolean };
 
 const SESSION_ATTEMPTS = 32;
 const SESSION_RETRY_MS = 125;
-const MAX_NATIVE_RECOVERY_ATTEMPTS = 3;
-const NATIVE_STABLE_SESSION_MS = 3_000;
-const RECOVERY_DELAYS_MS = [250, 750, 1_500] as const;
-const RECOVERABLE_NATIVE_ERRORS = new Set([
-  'NATIVE_WINDOW_NOT_FOUND',
-  'NATIVE_TIMEOUT',
-  'WINDOW_CAPTURE_SESSION_LOST',
-  'WINDOW_LAYOUT_DENIED',
-  'WINDOW_CAPTURE_DENIED',
-  'APP_PROCESS_NOT_TRACKABLE',
-  'WINDOW_QUARANTINE_FAILED',
-  'SESSION_NOT_FOUND'
-]);
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 }
 
 async function resolveSessionId(launch: NativeLaunch, cancelled: () => boolean): Promise<string | null> {
-  // Current Hosts create the opaque session before replying to native.launchApp.
-  // Trust that exact capability instead of paying an extra listSessions IPC on every launch.
+  // The native Host owns application identity. Modern Hosts return the opaque session capability
+  // directly; this polling path exists only for older Hosts that returned a PID alone.
   if (typeof launch.sessionId === 'string' && launch.sessionId) return launch.sessionId;
 
-  // Compatibility fallback for older Hosts that only returned the launch PID.
   for (let attempt = 0; attempt < SESSION_ATTEMPTS && !cancelled(); attempt += 1) {
     const result = await nativeHostBridge.listSessions();
     const session: NativeSession | null = nativeSessionForLaunch(result.sessions, launch);
@@ -49,8 +35,7 @@ async function closeSessionBestEffort(sessionId: string | null | undefined) {
   try {
     await nativeHostBridge.operate('close', sessionId);
   } catch {
-    // Host-side pending-attach/document-reset containment remains the final fail-safe
-    // if the WebView transport disappears during renderer teardown.
+    // Host-side Job containment remains the final fail-safe if the WebView transport disappears.
   }
 }
 
@@ -62,24 +47,18 @@ async function closeCancelledLaunch(launch: NativeLaunch) {
     return;
   }
 
-  // Compatibility fallback for older Hosts that returned only the launch PID. Query
-  // once rather than waiting through the normal correlation loop during teardown.
   try {
     const result = await nativeHostBridge.listSessions();
     await closeSessionBestEffort(nativeSessionForLaunch(result.sessions, launch)?.sessionId);
   } catch {
-    // The Host will terminate an unattached launch when its existing deadline expires.
+    // An unattached launch is still fail-closed by the Host deadline/Job lifecycle.
   }
 }
 
 function errorMessage(error: unknown) {
   if (error instanceof NativeHostError) return error.message;
   if (error instanceof Error) return error.message;
-  return 'O aplicativo do Windows não pôde ser contido pelo CloudOS.';
-}
-
-function isRecoverableNativeError(error: unknown) {
-  return error instanceof NativeHostError && RECOVERABLE_NATIVE_ERRORS.has(error.code);
+  return 'O runtime nativo do Windows não pôde anexar este aplicativo ao CloudOS.';
 }
 
 export default function NativeAppWindow({ windowId }: { windowId: string; params?: any }) {
@@ -93,65 +72,13 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
   const lastBoundsRef = useRef<NativeViewportBounds | null>(null);
   const lastLayoutRef = useRef<NativeLayoutState | null>(null);
   const disposedRef = useRef(false);
-  const recoveryPendingRef = useRef(false);
-  const recoveryAttemptsRef = useRef(0);
-  const recoveryTimerRef = useRef<number | null>(null);
-  const stableSessionTimerRef = useRef<number | null>(null);
-  const containedAtRef = useRef(0);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState<NativeSurfaceStatus>('launching');
   const [error, setError] = useState('');
-  const [recoveryEpoch, setRecoveryEpoch] = useState(0);
   const [documentVisible, setDocumentVisible] = useState(() => document.visibilityState === 'visible');
 
   const appId = win?.appId || '';
   const visible = Boolean(win && !win.isMinimized && win.isActive && !isStartMenuOpen && documentVisible);
-
-  const requestRecovery = useCallback((reason: unknown) => {
-    if (disposedRef.current || recoveryPendingRef.current) return;
-
-    if (recoveryAttemptsRef.current >= MAX_NATIVE_RECOVERY_ATTEMPTS) {
-      setStatus('error');
-      setError(errorMessage(reason));
-      return;
-    }
-
-    const attemptIndex = recoveryAttemptsRef.current;
-    recoveryAttemptsRef.current += 1;
-    recoveryPendingRef.current = true;
-
-    if (stableSessionTimerRef.current !== null) {
-      window.clearTimeout(stableSessionTimerRef.current);
-      stableSessionTimerRef.current = null;
-    }
-
-    const staleSessionId = sessionIdRef.current;
-    sessionIdRef.current = null;
-    attachedRef.current = false;
-    lastLayoutRef.current = null;
-    containedAtRef.current = 0;
-    setSessionId(null);
-    setStatus('recovering');
-    setError('');
-
-    if (staleSessionId) void closeSessionBestEffort(staleSessionId);
-
-    const delay = RECOVERY_DELAYS_MS[Math.min(attemptIndex, RECOVERY_DELAYS_MS.length - 1)];
-    recoveryTimerRef.current = window.setTimeout(() => {
-      recoveryTimerRef.current = null;
-      recoveryPendingRef.current = false;
-      if (!disposedRef.current) setRecoveryEpoch((value) => value + 1);
-    }, delay);
-  }, []);
-
-  const markSessionStable = useCallback(() => {
-    containedAtRef.current = Date.now();
-    if (stableSessionTimerRef.current !== null) window.clearTimeout(stableSessionTimerRef.current);
-    stableSessionTimerRef.current = window.setTimeout(() => {
-      stableSessionTimerRef.current = null;
-      recoveryAttemptsRef.current = 0;
-    }, NATIVE_STABLE_SESSION_MS);
-  }, []);
 
   const syncSurface = useCallback(async (attach = false) => {
     const currentSessionId = sessionIdRef.current;
@@ -167,20 +94,11 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
 
     if (attach && !attachedRef.current) {
       setStatus('attaching');
-      try {
-        await nativeHostBridge.attachSession(currentSessionId, bounds, visible);
-      } catch (attachError) {
-        if (isRecoverableNativeError(attachError)) {
-          requestRecovery(attachError);
-          return;
-        }
-        throw attachError;
-      }
+      await nativeHostBridge.attachSession(currentSessionId, bounds, visible);
       if (disposedRef.current || sessionIdRef.current !== currentSessionId) return;
       attachedRef.current = true;
       lastLayoutRef.current = { bounds, visible };
       setStatus('contained');
-      markSessionStable();
       return;
     }
 
@@ -188,20 +106,16 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
 
     const previous = lastLayoutRef.current;
     const requested = { bounds, visible };
-    // Mark the request before awaiting the bridge so ResizeObserver/window events
-    // in the same frame cannot enqueue identical native layout IPC.
+    // Geometry is the web shell's only rendering responsibility for a native app. Windows/DWM
+    // renders the real HWND; the shell only keeps its reserved rectangle synchronized.
     lastLayoutRef.current = requested;
     try {
       await nativeHostBridge.layoutSession(currentSessionId, bounds, visible);
     } catch (layoutError) {
       if (lastLayoutRef.current === requested) lastLayoutRef.current = previous;
-      if (isRecoverableNativeError(layoutError)) {
-        requestRecovery(layoutError);
-        return;
-      }
       throw layoutError;
     }
-  }, [markSessionStable, requestRecovery, visible]);
+  }, [visible]);
 
   useEffect(() => {
     const syncDocumentVisibility = () => setDocumentVisible(document.visibilityState === 'visible');
@@ -218,7 +132,6 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
 
     let cancelled = false;
     disposedRef.current = false;
-    recoveryPendingRef.current = false;
     attachedRef.current = false;
     lastBoundsRef.current = null;
     lastLayoutRef.current = null;
@@ -227,7 +140,7 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
 
     void (async () => {
       try {
-        setStatus(recoveryEpoch > 0 ? 'recovering' : 'launching');
+        setStatus('launching');
         setError('');
         await nativeHostBridge.connect();
         if (cancelled) return;
@@ -253,17 +166,18 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
           return;
         }
         if (!resolvedSessionId) {
-          throw new NativeHostError('NATIVE_WINDOW_NOT_FOUND', 'A janela do aplicativo não apareceu a tempo para ser encaixada no CloudOS.');
+          throw new NativeHostError(
+            'NATIVE_WINDOW_NOT_FOUND',
+            'O runtime nativo não encontrou uma janela Windows pertencente a este lançamento.'
+          );
         }
 
+        // From here on session identity belongs to the Host/Job, not to a particular HWND.
+        // If the application replaces its primary HWND, the Host rebinds this same sessionId.
         sessionIdRef.current = resolvedSessionId;
         setSessionId(resolvedSessionId);
       } catch (launchError) {
         if (cancelled) return;
-        if (isRecoverableNativeError(launchError)) {
-          requestRecovery(launchError);
-          return;
-        }
         setStatus('error');
         setError(errorMessage(launchError));
       }
@@ -287,7 +201,7 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
         await closeSessionBestEffort(currentSessionId);
       })();
     };
-  }, [appId, recoveryEpoch, requestRecovery, updateWindowTitle, windowId]);
+  }, [appId, updateWindowTitle, windowId]);
 
   useEffect(() => {
     if (!sessionId) return undefined;
@@ -295,14 +209,10 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
     const scheduleSync = () => {
       window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(() => {
-        void syncSurface(!attachedRef.current).catch((layoutError) => {
+        void syncSurface(!attachedRef.current).catch((surfaceError) => {
           if (disposedRef.current) return;
-          if (isRecoverableNativeError(layoutError)) {
-            requestRecovery(layoutError);
-            return;
-          }
           setStatus('error');
-          setError(errorMessage(layoutError));
+          setError(errorMessage(surfaceError));
         });
       });
     };
@@ -319,23 +229,24 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
       window.removeEventListener('resize', scheduleSync);
       window.removeEventListener('scroll', scheduleSync, true);
     };
-  }, [requestRecovery, sessionId, syncSurface]);
+  }, [sessionId, syncSurface]);
 
-  // Position changes can move the surface without triggering ResizeObserver.
-  // Relayout on geometry changes, but do not refocus the native HWND on every
-  // drag/resize frame.
+  // Position changes can move the shell rectangle without triggering ResizeObserver.
+  // We only send geometry; the browser never renders or forwards pixels for the Windows app.
   useEffect(() => {
     if (!sessionId || status !== 'contained') return undefined;
     const frame = window.requestAnimationFrame(() => {
-      void syncSurface(false).catch((layoutError) => {
-        if (isRecoverableNativeError(layoutError)) requestRecovery(layoutError);
+      void syncSurface(false).catch((surfaceError) => {
+        if (disposedRef.current) return;
+        setStatus('error');
+        setError(errorMessage(surfaceError));
       });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [requestRecovery, sessionId, status, syncSurface, win?.x, win?.y, win?.width, win?.height, win?.isMaximized, win?.isMinimized]);
+  }, [sessionId, status, syncSurface, win?.x, win?.y, win?.width, win?.height, win?.isMaximized, win?.isMinimized]);
 
-  // Focus only when containment becomes ready or the CloudOS window becomes
-  // active again. Geometry changes must not generate foreground-activation IPC.
+  // Foreground ownership stays with Windows. React only asks the Host to activate the real HWND
+  // when its CloudOS shell window becomes active.
   useEffect(() => {
     if (!sessionId || status !== 'contained' || !visible) return undefined;
     const frame = window.requestAnimationFrame(() => {
@@ -350,53 +261,46 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
       if (disposedRef.current || sessionIdRef.current !== sessionId) return;
       const current = sessions.find((session) => session.sessionId === sessionId);
       if (!current) {
-        const stableFor = containedAtRef.current > 0 ? Date.now() - containedAtRef.current : 0;
-        if (status !== 'contained' || stableFor < NATIVE_STABLE_SESSION_MS) {
-          requestRecovery(new NativeHostError(
-            'SESSION_NOT_FOUND',
-            'A janela nativa mudou durante a inicialização. O CloudOS tentou reconectar automaticamente.'
-          ));
-        } else {
-          closeWindow(windowId);
-        }
+        // Primary HWND replacement is handled entirely by the native Host and does not publish
+        // a transient session disappearance. If the logical session is actually gone here, the
+        // application/Job ended and the shell window should close rather than relaunch it.
+        closeWindow(windowId);
         return;
       }
       if (current.title && current.title !== win?.title) updateWindowTitle(windowId, current.title);
     });
-    return () => {
-      unsubscribe();
-    };
-  }, [closeWindow, requestRecovery, sessionId, status, updateWindowTitle, win?.title, windowId]);
+    return unsubscribe;
+  }, [closeWindow, sessionId, updateWindowTitle, win?.title, windowId]);
 
   useEffect(() => () => {
     disposedRef.current = true;
-    if (recoveryTimerRef.current !== null) window.clearTimeout(recoveryTimerRef.current);
-    if (stableSessionTimerRef.current !== null) window.clearTimeout(stableSessionTimerRef.current);
-    recoveryTimerRef.current = null;
-    stableSessionTimerRef.current = null;
   }, []);
 
   const progressText = status === 'launching'
     ? 'Abrindo aplicativo do Windows…'
     : status === 'waiting'
       ? 'Localizando a janela nativa…'
-      : status === 'recovering'
-        ? 'Recuperando aplicativo do Windows…'
-        : 'Encaixando no CloudOS…';
+      : 'Conectando a janela nativa…';
 
   return (
-    <div ref={surfaceRef} className="native-app-surface" data-status={status} data-session-id={sessionId || undefined}>
+    <div
+      ref={surfaceRef}
+      className="native-app-surface"
+      data-status={status}
+      data-session-id={sessionId || undefined}
+      data-renderer="native-windows"
+    >
       <div className="native-app-placeholder" role={status === 'error' ? 'alert' : 'status'} aria-live="polite">
         <span className="native-app-placeholder-icon" aria-hidden="true">▦</span>
         {status === 'error' ? (
           <>
-            <strong>Não foi possível encaixar este aplicativo do Windows</strong>
+            <strong>Não foi possível conectar este aplicativo do Windows</strong>
             <span>{error}</span>
           </>
         ) : (
           <>
             <strong>{progressText}</strong>
-            <span>A janela real ficará presa a esta superfície.</span>
+            <span>O Windows renderiza o aplicativo; o CloudOS controla apenas a superfície e o ciclo de vida.</span>
           </>
         )}
       </div>
