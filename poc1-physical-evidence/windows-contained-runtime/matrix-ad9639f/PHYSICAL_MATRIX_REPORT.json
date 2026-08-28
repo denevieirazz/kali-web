@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "productTestedSha": "ad9639f1ce8d808d2d532404fd9ca6673244052e",
+  "pr": 16,
+  "prBranch": "fix/cloudos-runtime-launch-rebind",
+  "evidenceBranch": "evidence/pr16-physical-ad9639f",
+  "automatedCi": {
+    "cloudOsCiBaseline": {
+      "runId": 33168545780,
+      "conclusion": "success"
+    },
+    "windowsInstallerCapability": {
+      "runId": 33168545789,
+      "conclusion": "success"
+    }
+  },
+  "physicalRuntimeGate": "PENDING",
+  "totals": {
+    "runs": 0,
+    "pass": 0,
+    "fail": 0,
+    "expectedFailClosed": 0
+  },
+  "externalWindowLeak": null,
+  "altTabLeak": null,
+  "crossJobAdoption": null,
+  "orphanProcess": null,
+  "cases": [
+    { "case": "win32-simple", "runtimeClass": "Win32 simple", "verdict": "PENDING" },
+    { "case": "splash-bootstrap", "runtimeClass": "splash/bootstrap -> final HWND", "verdict": "PENDING" },
+    { "case": "child-gui", "runtimeClass": "launcher/wrapper -> descendant GUI PID", "verdict": "PENDING" },
+    { "case": "electron-chromium", "runtimeClass": "Electron/Chromium-like", "verdict": "PENDING" },
+    { "case": "shortcut-args", "runtimeClass": "shortcut with safe argv", "verdict": "PENDING" },
+    { "case": "dual-instance", "runtimeClass": "simultaneous contained launches", "verdict": "PENDING" },
+    { "case": "close-reopen", "runtimeClass": "lifecycle close/reopen", "verdict": "PENDING" },
+    { "case": "multiwindow-limit", "runtimeClass": "multiwindow/modal ambiguity", "verdict": "PENDING" },
+    { "case": "stress", "runtimeClass": "repeated lifecycle stress", "verdict": "PENDING" }
+  ]
+}
