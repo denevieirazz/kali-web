@@ -13,13 +13,13 @@ internal enum CloudOsNativeRuntimePreference
 }
 
 /// <summary>
-/// Thin C ABI boundary for the C++ Windows runtime. High-level containment policy
-/// remains in the Host while ownership of process/Job handles can move to native
-/// code incrementally.
+/// Thin C ABI boundary for the C++ Windows runtime. High-level containment policy and launch
+/// capability validation remain in the Host; Win32 process/Job/HWND mutations progressively
+/// live in CloudOS.NativeRuntime.dll.
 /// </summary>
 internal static class CloudOsNativeRuntime
 {
-    internal const uint ExpectedAbi = 1;
+    internal const uint ExpectedAbi = 2;
     private const string LibraryName = "CloudOS.NativeRuntime.dll";
     private const int MaxContainedProcesses = 256;
 
@@ -51,6 +51,9 @@ internal static class CloudOsNativeRuntime
             }
         }
     }
+
+    internal static bool CanUseWindowOperations =>
+        Preference != CloudOsNativeRuntimePreference.Managed && IsAvailable;
 
     internal static bool TryStartSuspended(
         NativeProcessLaunchSpec spec,
@@ -99,9 +102,7 @@ internal static class CloudOsNativeRuntime
             out var rawLease,
             out var processId))
         {
-            throw new Win32Exception(
-                Marshal.GetLastWin32Error(),
-                "CloudOS.NativeRuntime failed to create the contained process.");
+            throw NativeFailure("CloudOS.NativeRuntime failed to create the contained process.");
         }
 
         var safeLease = new SafeCloudOsNativeLeaseHandle(rawLease, ownsHandle: true);
@@ -125,9 +126,7 @@ internal static class CloudOsNativeRuntime
         ArgumentNullException.ThrowIfNull(lease);
         var ids = new uint[MaxContainedProcesses];
         if (!NativeQueryMembers(lease, ids, (uint)ids.Length, out var count))
-            throw new Win32Exception(
-                Marshal.GetLastWin32Error(),
-                "CloudOS.NativeRuntime failed to query the containment Job.");
+            throw NativeFailure("CloudOS.NativeRuntime failed to query the containment Job.");
         if (count > ids.Length)
             throw new InvalidOperationException("CloudOS.NativeRuntime exceeded the process capability budget.");
 
@@ -146,9 +145,7 @@ internal static class CloudOsNativeRuntime
     {
         ArgumentNullException.ThrowIfNull(lease);
         if (!NativeResume(lease))
-            throw new Win32Exception(
-                Marshal.GetLastWin32Error(),
-                "CloudOS.NativeRuntime failed to resume the contained process.");
+            throw NativeFailure("CloudOS.NativeRuntime failed to resume the contained process.");
     }
 
     internal static bool TryTerminate(
@@ -165,9 +162,115 @@ internal static class CloudOsNativeRuntime
             return true;
         }
 
-        error = new Win32Exception(
-            Marshal.GetLastWin32Error(),
-            "CloudOS.NativeRuntime failed to terminate the containment Job.").Message;
+        error = NativeFailure("CloudOS.NativeRuntime failed to terminate the containment Job.").Message;
+        return false;
+    }
+
+    internal static bool TryAttachWindow(
+        IntPtr window,
+        IntPtr owner,
+        NativeWindowBounds bounds,
+        bool visible,
+        out long appliedStyle,
+        out long appliedExtendedStyle,
+        out string? error)
+    {
+        appliedStyle = 0;
+        appliedExtendedStyle = 0;
+        if (!CanUseWindowOperations)
+        {
+            error = "The C++ HWND runtime is unavailable.";
+            return false;
+        }
+
+        if (NativeWindowAttach(
+            window,
+            owner,
+            bounds.X,
+            bounds.Y,
+            bounds.Width,
+            bounds.Height,
+            visible,
+            out var style,
+            out var extendedStyle))
+        {
+            appliedStyle = style.ToInt64();
+            appliedExtendedStyle = extendedStyle.ToInt64();
+            error = null;
+            return true;
+        }
+
+        error = NativeFailure("CloudOS.NativeRuntime failed to attach the real Windows HWND.").Message;
+        return false;
+    }
+
+    internal static bool TryLayoutWindow(
+        IntPtr window,
+        IntPtr owner,
+        long expectedStyle,
+        long expectedExtendedStyle,
+        NativeWindowBounds bounds,
+        bool visible,
+        bool preserveMinimized,
+        out string? error)
+    {
+        if (!CanUseWindowOperations)
+        {
+            error = "The C++ HWND runtime is unavailable.";
+            return false;
+        }
+
+        if (NativeWindowLayout(
+            window,
+            owner,
+            new IntPtr(expectedStyle),
+            new IntPtr(expectedExtendedStyle),
+            bounds.X,
+            bounds.Y,
+            bounds.Width,
+            bounds.Height,
+            visible,
+            preserveMinimized))
+        {
+            error = null;
+            return true;
+        }
+
+        error = NativeFailure("CloudOS.NativeRuntime failed to lay out the real Windows HWND.").Message;
+        return false;
+    }
+
+    internal static bool TryFocusWindow(
+        IntPtr window,
+        IntPtr owner,
+        long expectedStyle,
+        long expectedExtendedStyle,
+        NativeWindowBounds bounds,
+        int restoreTimeoutMilliseconds,
+        out string? error)
+    {
+        if (!CanUseWindowOperations)
+        {
+            error = "The C++ HWND runtime is unavailable.";
+            return false;
+        }
+
+        if (NativeWindowFocus(
+            window,
+            owner,
+            new IntPtr(expectedStyle),
+            new IntPtr(expectedExtendedStyle),
+            bounds.X,
+            bounds.Y,
+            bounds.Width,
+            bounds.Height,
+            checked((uint)restoreTimeoutMilliseconds)))
+        {
+            error = null;
+            return true;
+        }
+
+        error = NativeFailure("CloudOS.NativeRuntime failed to focus the real Windows HWND.").Message;
         return false;
     }
 
@@ -176,6 +279,9 @@ internal static class CloudOsNativeRuntime
         if (lease == IntPtr.Zero) return;
         NativeRelease(lease);
     }
+
+    private static Win32Exception NativeFailure(string message) =>
+        new(Marshal.GetLastWin32Error(), message);
 
     private static bool IsLoaderFailure(Exception error) =>
         error is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException;
@@ -218,6 +324,49 @@ internal static class CloudOsNativeRuntime
     [DllImport(LibraryName, EntryPoint = "cloudos_native_release", ExactSpelling = true,
         CallingConvention = CallingConvention.Winapi)]
     private static extern void NativeRelease(IntPtr lease);
+
+    [DllImport(LibraryName, EntryPoint = "cloudos_native_window_attach", ExactSpelling = true,
+        CallingConvention = CallingConvention.Winapi, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool NativeWindowAttach(
+        IntPtr window,
+        IntPtr owner,
+        int x,
+        int y,
+        int width,
+        int height,
+        [MarshalAs(UnmanagedType.Bool)] bool visible,
+        out IntPtr appliedStyle,
+        out IntPtr appliedExtendedStyle);
+
+    [DllImport(LibraryName, EntryPoint = "cloudos_native_window_layout", ExactSpelling = true,
+        CallingConvention = CallingConvention.Winapi, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool NativeWindowLayout(
+        IntPtr window,
+        IntPtr owner,
+        IntPtr expectedStyle,
+        IntPtr expectedExtendedStyle,
+        int x,
+        int y,
+        int width,
+        int height,
+        [MarshalAs(UnmanagedType.Bool)] bool visible,
+        [MarshalAs(UnmanagedType.Bool)] bool preserveMinimized);
+
+    [DllImport(LibraryName, EntryPoint = "cloudos_native_window_focus", ExactSpelling = true,
+        CallingConvention = CallingConvention.Winapi, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool NativeWindowFocus(
+        IntPtr window,
+        IntPtr owner,
+        IntPtr expectedStyle,
+        IntPtr expectedExtendedStyle,
+        int x,
+        int y,
+        int width,
+        int height,
+        uint restoreTimeoutMilliseconds);
 }
 
 internal sealed class SafeCloudOsNativeLeaseHandle : SafeHandleZeroOrMinusOneIsInvalid
