@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { nativeHostBridge, NativeHostError, type NativeSession, type NativeViewportBounds } from '../../services/nativeHostBridge';
-import { nativeSessionForLaunch, nativeSurfaceLayoutChanged, nativeViewportBounds } from '../../services/nativeWindowContract.js';
+import { nativeReplacementSession, nativeSessionForLaunch, nativeSurfaceLayoutChanged, nativeViewportBounds } from '../../services/nativeWindowContract.js';
 import { useSystem } from '../../stores/systemStore';
 import { useWindowManager } from '../../stores/windowManager';
 import './NativeAppWindow.css';
@@ -11,6 +11,7 @@ type NativeLayoutState = { bounds: NativeViewportBounds; visible: boolean };
 
 const SESSION_ATTEMPTS = 32;
 const SESSION_RETRY_MS = 125;
+const SESSION_REPLACEMENT_GRACE_MS = 8_000;
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
@@ -72,6 +73,9 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
   const isStartMenuOpen = useSystem((state) => state.isStartMenuOpen);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const sessionIdRef = useRef<string | null>(null);
+  const sessionLaunchProcessIdRef = useRef<number | null>(null);
+  const replacementTimerRef = useRef<number | null>(null);
+  const attachInFlightSessionRef = useRef<string | null>(null);
   const attachedRef = useRef(false);
   const lastBoundsRef = useRef<NativeViewportBounds | null>(null);
   const lastLayoutRef = useRef<NativeLayoutState | null>(null);
@@ -83,6 +87,33 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
 
   const appId = win?.appId || '';
   const visible = Boolean(win && !win.isMinimized && win.isActive && !isStartMenuOpen && documentVisible);
+
+  const clearReplacementTimer = useCallback(() => {
+    const timer = replacementTimerRef.current;
+    if (timer === null) return;
+    window.clearTimeout(timer);
+    replacementTimerRef.current = null;
+  }, []);
+
+  const startReplacementGrace = useCallback((missingSessionId: string) => {
+    if (replacementTimerRef.current !== null) return;
+    replacementTimerRef.current = window.setTimeout(() => {
+      replacementTimerRef.current = null;
+      if (disposedRef.current || sessionIdRef.current !== missingSessionId) return;
+      closeWindow(windowId);
+    }, SESSION_REPLACEMENT_GRACE_MS);
+  }, [closeWindow, windowId]);
+
+  const adoptReplacementSession = useCallback((replacement: NativeSession) => {
+    clearReplacementTimer();
+    attachInFlightSessionRef.current = null;
+    attachedRef.current = false;
+    lastLayoutRef.current = null;
+    sessionIdRef.current = replacement.sessionId;
+    setStatus('waiting');
+    setSessionId(replacement.sessionId);
+    if (replacement.title) updateWindowTitle(windowId, replacement.title);
+  }, [clearReplacementTimer, updateWindowTitle, windowId]);
 
   const syncSurface = useCallback(async (attach = false) => {
     const currentSessionId = sessionIdRef.current;
@@ -97,12 +128,51 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
     if (!bounds) return;
 
     if (attach && !attachedRef.current) {
+      // ResizeObserver, scroll and window-resize events may all queue a frame while
+      // native.session.attach is awaiting WGC/Win32 setup. A second attach against
+      // the same opaque capability can race capture creation and turn a healthy
+      // launch into a false containment failure, so serialize per session.
+      if (attachInFlightSessionRef.current === currentSessionId) return;
+      attachInFlightSessionRef.current = currentSessionId;
       setStatus('attaching');
-      await nativeHostBridge.attachSession(currentSessionId, bounds, visible);
-      if (disposedRef.current) return;
-      attachedRef.current = true;
-      lastLayoutRef.current = { bounds, visible };
-      setStatus('contained');
+      try {
+        try {
+          await nativeHostBridge.attachSession(currentSessionId, bounds, visible);
+        } catch (attachError) {
+          if (!(attachError instanceof NativeHostError) || attachError.code !== 'SESSION_NOT_FOUND') throw attachError;
+          if (disposedRef.current || sessionIdRef.current !== currentSessionId) return;
+
+          // The launch reply may refer to a splash HWND that disappears before this
+          // component subscribes to native.sessionsChanged. Query once after the stale
+          // attach instead of depending on an event that may already have been emitted.
+          const result = await nativeHostBridge.listSessions();
+          if (disposedRef.current || sessionIdRef.current !== currentSessionId) return;
+          const replacement = nativeReplacementSession(
+            result.sessions,
+            currentSessionId,
+            sessionLaunchProcessIdRef.current ?? 0
+          );
+          if (replacement) {
+            adoptReplacementSession(replacement);
+            return;
+          }
+
+          // A replacement may still be starting. Keep the surface in waiting state and
+          // let the normal sessionsChanged path recover it, bounded by the same grace.
+          setStatus('waiting');
+          startReplacementGrace(currentSessionId);
+          return;
+        }
+        if (disposedRef.current || sessionIdRef.current !== currentSessionId) return;
+        clearReplacementTimer();
+        attachedRef.current = true;
+        lastLayoutRef.current = { bounds, visible };
+        setStatus('contained');
+      } finally {
+        if (attachInFlightSessionRef.current === currentSessionId) {
+          attachInFlightSessionRef.current = null;
+        }
+      }
       return;
     }
 
@@ -117,9 +187,29 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
       await nativeHostBridge.layoutSession(currentSessionId, bounds, visible);
     } catch (layoutError) {
       if (lastLayoutRef.current === requested) lastLayoutRef.current = previous;
-      throw layoutError;
+      if (!(layoutError instanceof NativeHostError) || layoutError.code !== 'SESSION_NOT_FOUND') throw layoutError;
+      if (disposedRef.current || sessionIdRef.current !== currentSessionId) return;
+
+      // A captured splash can also disappear after the initial attach, while a layout
+      // IPC is in flight. Reconcile the same launch Job instead of letting the stale
+      // layout rejection overwrite a replacement session with a renderer error.
+      const result = await nativeHostBridge.listSessions();
+      if (disposedRef.current || sessionIdRef.current !== currentSessionId) return;
+      const replacement = nativeReplacementSession(
+        result.sessions,
+        currentSessionId,
+        sessionLaunchProcessIdRef.current ?? 0
+      );
+      if (replacement) {
+        adoptReplacementSession(replacement);
+        return;
+      }
+
+      attachedRef.current = false;
+      setStatus('waiting');
+      startReplacementGrace(currentSessionId);
     }
-  }, [visible]);
+  }, [adoptReplacementSession, clearReplacementTimer, startReplacementGrace, visible]);
 
   useEffect(() => {
     const syncDocumentVisibility = () => setDocumentVisible(document.visibilityState === 'visible');
@@ -136,10 +226,13 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
 
     let cancelled = false;
     disposedRef.current = false;
+    clearReplacementTimer();
+    attachInFlightSessionRef.current = null;
     attachedRef.current = false;
     lastBoundsRef.current = null;
     lastLayoutRef.current = null;
     sessionIdRef.current = null;
+    sessionLaunchProcessIdRef.current = null;
     setSessionId(null);
 
     void (async () => {
@@ -162,6 +255,7 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
           );
         }
 
+        sessionLaunchProcessIdRef.current = Number.isInteger(launch.pid) && launch.pid > 0 ? launch.pid : null;
         const exactSessionId = typeof launch.sessionId === 'string' && launch.sessionId ? launch.sessionId : null;
         if (!exactSessionId) setStatus('waiting');
         const resolvedSessionId = await resolveSessionId(launch, () => cancelled);
@@ -185,10 +279,13 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
     return () => {
       cancelled = true;
       disposedRef.current = true;
+      clearReplacementTimer();
+      attachInFlightSessionRef.current = null;
       const currentSessionId = sessionIdRef.current;
       const bounds = lastBoundsRef.current;
       const wasAttached = attachedRef.current;
       sessionIdRef.current = null;
+      sessionLaunchProcessIdRef.current = null;
       attachedRef.current = false;
       lastLayoutRef.current = null;
       if (!currentSessionId) return;
@@ -201,7 +298,7 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
         await closeSessionBestEffort(currentSessionId);
       })();
     };
-  }, [appId, updateWindowTitle, windowId]);
+  }, [appId, clearReplacementTimer, updateWindowTitle, windowId]);
 
   useEffect(() => {
     if (!sessionId) return undefined;
@@ -256,17 +353,58 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
     if (!sessionId) return undefined;
     const unsubscribe = nativeHostBridge.onSessionsChanged((sessions) => {
       if (disposedRef.current) return;
-      const current = sessions.find((session) => session.sessionId === sessionId);
-      if (!current) {
-        closeWindow(windowId);
+      const currentSessionId = sessionIdRef.current;
+      if (!currentSessionId) return;
+
+      const current = sessions.find((candidate) => candidate.sessionId === currentSessionId);
+      if (current) {
+        clearReplacementTimer();
+        if (sessionLaunchProcessIdRef.current === null) {
+          const hostLaunchProcessId = Number.isInteger(current.launchProcessId) && current.launchProcessId! > 0
+            ? current.launchProcessId!
+            : current.processId;
+          sessionLaunchProcessIdRef.current = hostLaunchProcessId;
+        }
+        if (current.title && current.title !== win?.title) updateWindowTitle(windowId, current.title);
+
+        // A bridge timeout is a client-side transport verdict, not proof that the
+        // Host failed. If the exact opaque session later reports successful
+        // containment, recover the renderer state from that authoritative Host
+        // snapshot and immediately reconcile its layout once.
+        if (current.contained === true && !attachedRef.current
+            && (current.containmentMode === 'captured-surface' || current.containmentMode === 'anchored-overlay')) {
+          attachInFlightSessionRef.current = null;
+          attachedRef.current = true;
+          lastLayoutRef.current = null;
+          setError('');
+          setStatus('contained');
+          window.requestAnimationFrame(() => {
+            void syncSurface(false).catch((layoutError) => {
+              if (disposedRef.current || sessionIdRef.current !== currentSessionId) return;
+              setStatus('error');
+              setError(errorMessage(layoutError));
+            });
+          });
+        }
         return;
       }
-      if (current.title && current.title !== win?.title) updateWindowTitle(windowId, current.title);
+
+      const replacement = nativeReplacementSession(
+        sessions,
+        currentSessionId,
+        sessionLaunchProcessIdRef.current ?? 0
+      );
+      if (replacement) {
+        adoptReplacementSession(replacement);
+        return;
+      }
+
+      startReplacementGrace(currentSessionId);
     });
     return () => {
       unsubscribe();
     };
-  }, [closeWindow, sessionId, updateWindowTitle, win?.title, windowId]);
+  }, [adoptReplacementSession, clearReplacementTimer, sessionId, startReplacementGrace, syncSurface, updateWindowTitle, win?.title, windowId]);
 
   return (
     <div ref={surfaceRef} className="native-app-surface" data-status={status} data-session-id={sessionId || undefined}>

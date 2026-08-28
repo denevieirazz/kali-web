@@ -3,15 +3,6 @@ using CloudOS.WindowsCapture.Presenter;
 
 namespace CloudOS.Host.Native;
 
-public sealed record CapturedSurfaceSessionSnapshot(
-    string SurfaceId,
-    int Generation,
-    long SourceWindowHandle,
-    long PresentationWindowHandle,
-    WindowsCaptureSnapshot Capture,
-    WindowsCaptureSurfaceCoordinatorSnapshot Presentation,
-    bool InputActive);
-
 /// <summary>
 /// Host-side owner for the captured-surface candidate runtime. This class intentionally
 /// does not reuse NativeWindowManager.TryAttach: the source HWND stays a foreign top-level
@@ -19,7 +10,7 @@ public sealed record CapturedSurfaceSessionSnapshot(
 /// Source-window quarantine/isolation remains a separate physical gate; this manager never
 /// falls back to showing or reparenting the source window on the normal Windows desktop.
 /// </summary>
-public sealed class CapturedSurfaceSessionManager : IDisposable
+public sealed class CapturedSurfaceSessionManager : ICapturedSurfaceSessionRuntime, IDisposable
 {
     private readonly object _sync = new();
     private readonly Dictionary<string, SessionState> _sessions = new(StringComparer.Ordinal);

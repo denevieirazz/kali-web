@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -20,5 +20,10 @@
     <Compile Include="..\CloudOS.Host\Native\NativeContainedProcessLauncher.cs" Link="Native\NativeContainedProcessLauncher.cs" />
     <Compile Include="..\CloudOS.Host\Native\NativeWindowManager.cs" Link="Native\NativeWindowManager.cs" />
     <Compile Include="..\CloudOS.Host\Native\NativeKeyboardShortcutPolicy.cs" Link="Native\NativeKeyboardShortcutPolicy.cs" />
+    <Compile Include="..\CloudOS.Host\Native\CapturedSurfaceRuntimeContract.cs" Link="Native\CapturedSurfaceRuntimeContract.cs" />
+    <Compile Include="..\CloudOS.Host\Native\CapturedSurfaceBridgeAdapter.cs" Link="Native\CapturedSurfaceBridgeAdapter.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CloudOS.WindowsCapture\CloudOS.WindowsCapture.csproj" />
   </ItemGroup>
 </Project>

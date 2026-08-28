@@ -105,7 +105,6 @@ namespace CloudOS.Host.Native
                 {
                     if (current.StartTimeUtcTicks == registration.StartTimeUtcTicks)
                     {
-                        // Idempotent registration of the same process instance.
                         alreadyTracked = true;
                     }
                     else
@@ -127,10 +126,6 @@ namespace CloudOS.Host.Native
             Refresh();
         }
 
-        /// <summary>
-        /// Ends the process before removing its capability. A live tracked application is never
-        /// released back to the external Windows desktop.
-        /// </summary>
         public bool UntrackProcess(int processId)
         {
             string error;
@@ -184,11 +179,6 @@ namespace CloudOS.Host.Native
             }
         }
 
-        /// <summary>
-        /// Force-hides every known HWND, terminates the exact registered process tree, and only
-        /// then drops its capability. Shared system brokers must never be registered and are
-        /// defensively refused here as well.
-        /// </summary>
         public bool TryTerminateTrackedProcess(int processId, out string error)
         {
             ThrowIfDisposed();
@@ -212,8 +202,6 @@ namespace CloudOS.Host.Native
                     {
                         if (!IsSameProcessInstance(registration))
                         {
-                            // The original process exited or the PID was reused. Never kill the
-                            // replacement process; revoke the stale capability instead.
                             RemoveTrackedProcess(processId);
                             error = null;
                             return true;
@@ -229,7 +217,6 @@ namespace CloudOS.Host.Native
             }
             catch (ArgumentException)
             {
-                // The exact process already exited between identity validation and termination.
             }
             catch (Exception terminationError) when (terminationError is InvalidOperationException
                 || terminationError is Win32Exception
@@ -246,16 +233,10 @@ namespace CloudOS.Host.Native
             return true;
         }
 
-        /// <summary>
-        /// Reconciles the cache with EnumWindows. This is also the polling fallback if a native
-        /// event is missed during process startup or shell transitions.
-        /// </summary>
         public void Refresh()
         {
             ThrowIfDisposed();
 
-            // Reclaim capabilities held by processes that exited without producing a final
-            // top-level-window event. Start-time validation also catches PID reuse.
             List<TrackedProcess> registrations;
             lock (_sync) registrations = new List<TrackedProcess>(_processes.Values);
             foreach (TrackedProcess registration in registrations)
@@ -284,7 +265,6 @@ namespace CloudOS.Host.Native
                 }
                 catch
                 {
-                    // Never let a bad foreign HWND unwind through an unmanaged callback.
                 }
                 return true;
             }, IntPtr.Zero);
@@ -316,7 +296,7 @@ namespace CloudOS.Host.Native
 
                 foreach (IntPtr hwnd in stale)
                 {
-                    if (_attachments.ContainsKey(hwnd) && NativeMethods.IsWindow(hwnd))
+                    if ((_attachments.ContainsKey(hwnd) || _capturedSources.ContainsKey(hwnd)) && NativeMethods.IsWindow(hwnd))
                         continue;
                     NativeWindowSnapshot old = _windows[hwnd];
                     _windows.Remove(hwnd);
@@ -372,7 +352,8 @@ namespace CloudOS.Host.Native
                 error = "The window is quarantined and cannot be focused before attachment.";
                 return false;
             }
-            else
+
+            lock (attachment.SyncRoot)
             {
                 if (!attachment.RequestedVisible)
                 {
@@ -412,11 +393,6 @@ namespace CloudOS.Host.Native
             return TrySetShowState(windowHandle, NativeMethods.SW_RESTORE, out error);
         }
 
-        /// <summary>
-        /// Visually docks an allowlisted top-level window over a CloudOS-owned surface.
-        /// The target remains a real top-level window: this deliberately uses an owner,
-        /// frame removal and bounded positioning instead of cross-process SetParent.
-        /// </summary>
         public bool TryAttach(
             long windowHandle,
             long ownerWindowHandle,
@@ -441,16 +417,19 @@ namespace CloudOS.Host.Native
             if (!TryValidateOwner(owner, out error) || !TryValidateAttachedBounds(bounds, out error)) return false;
 
             AttachedWindowState state;
+            bool alreadyAttached;
             lock (_sync)
             {
-                if (_attachments.TryGetValue(hwnd, out state))
-                    return TryApplyAttachedLayout(hwnd, state, bounds, visible, false, true, out error);
-                if (!_quarantinedWindows.ContainsKey(hwnd))
+                alreadyAttached = _attachments.TryGetValue(hwnd, out state);
+                if (!alreadyAttached && !_quarantinedWindows.ContainsKey(hwnd))
                 {
                     error = "The window was not observed inside the CloudOS launch quarantine.";
                     return false;
                 }
             }
+
+            if (alreadyAttached)
+                return TryApplyAttachedLayout(hwnd, state, bounds, visible, false, true, out error);
 
             if (NativeMethods.GetAncestor(hwnd, NativeMethods.GA_ROOT) != hwnd)
             {
@@ -465,41 +444,44 @@ namespace CloudOS.Host.Native
 
             try
             {
-                if (!TryForceHideWindow(hwnd, out error)) throw new InvalidOperationException(error);
+                lock (state.SyncRoot)
+                {
+                    if (!TryForceHideWindow(hwnd, out error)) throw new InvalidOperationException(error);
 
-                long attachedStyle = GetExpectedAttachedStyle(state);
-                long attachedExtendedStyle = GetExpectedAttachedExtendedStyle(state);
+                    long attachedStyle = GetExpectedAttachedStyle(state);
+                    long attachedExtendedStyle = GetExpectedAttachedExtendedStyle(state);
 
-                NativeMethods.SetWindowStyle(hwnd, attachedStyle);
-                NativeMethods.SetWindowExtendedStyle(hwnd, attachedExtendedStyle);
-                NativeMethods.SetWindowOwner(hwnd, owner);
-                IntPtr actualOwner = NativeMethods.GetWindow(hwnd, NativeMethods.GW_OWNER);
-                long actualStyle = NativeMethods.GetWindowStyle(hwnd);
-                long actualExtendedStyle = NativeMethods.GetWindowExtendedStyle(hwnd);
-                long forbiddenFrameStyles = NativeMethods.WS_CAPTION
-                    | NativeMethods.WS_THICKFRAME
-                    | NativeMethods.WS_MINIMIZEBOX
-                    | NativeMethods.WS_MAXIMIZEBOX
-                    | NativeMethods.WS_SYSMENU;
-                if (actualOwner != owner
-                    || (actualStyle & forbiddenFrameStyles) != 0
-                    || (actualExtendedStyle & NativeMethods.WS_EX_APPWINDOW) != 0
-                    || (actualExtendedStyle & NativeMethods.WS_EX_TOOLWINDOW) == 0)
-                    throw new Win32Exception(
-                        Marshal.GetLastWin32Error(),
-                        "Windows refused the CloudOS docking styles or owner "
-                            + "(owner=" + actualOwner.ToInt64() + "/" + owner.ToInt64()
-                            + ", style=0x" + actualStyle.ToString("X") + "/0x" + attachedStyle.ToString("X")
-                            + ", ex=0x" + actualExtendedStyle.ToString("X") + "/0x" + attachedExtendedStyle.ToString("X") + ").");
+                    NativeMethods.SetWindowStyle(hwnd, attachedStyle);
+                    NativeMethods.SetWindowExtendedStyle(hwnd, attachedExtendedStyle);
+                    NativeMethods.SetWindowOwner(hwnd, owner);
+                    IntPtr actualOwner = NativeMethods.GetWindow(hwnd, NativeMethods.GW_OWNER);
+                    long actualStyle = NativeMethods.GetWindowStyle(hwnd);
+                    long actualExtendedStyle = NativeMethods.GetWindowExtendedStyle(hwnd);
+                    long forbiddenFrameStyles = NativeMethods.WS_CAPTION
+                        | NativeMethods.WS_THICKFRAME
+                        | NativeMethods.WS_MINIMIZEBOX
+                        | NativeMethods.WS_MAXIMIZEBOX
+                        | NativeMethods.WS_SYSMENU;
+                    if (actualOwner != owner
+                        || (actualStyle & forbiddenFrameStyles) != 0
+                        || (actualExtendedStyle & NativeMethods.WS_EX_APPWINDOW) != 0
+                        || (actualExtendedStyle & NativeMethods.WS_EX_TOOLWINDOW) == 0)
+                        throw new Win32Exception(
+                            Marshal.GetLastWin32Error(),
+                            "Windows refused the CloudOS docking styles or owner "
+                                + "(owner=" + actualOwner.ToInt64() + "/" + owner.ToInt64()
+                                + ", style=0x" + actualStyle.ToString("X") + "/0x" + attachedStyle.ToString("X")
+                                + ", ex=0x" + actualExtendedStyle.ToString("X") + "/0x" + attachedExtendedStyle.ToString("X") + ").");
 
-                if (!TryRestoreResponsive(hwnd, true, out error))
-                    throw new InvalidOperationException(error);
+                    if (!TryRestoreResponsive(hwnd, true, out error))
+                        throw new InvalidOperationException(error);
 
-                state.Bounds = bounds;
-                state.RequestedVisible = visible;
-                lock (_sync) _attachments[hwnd] = state;
-                if (!TryApplyAttachedLayout(hwnd, state, bounds, visible, true, false, out error))
-                    throw new InvalidOperationException(error);
+                    state.Bounds = bounds;
+                    state.RequestedVisible = visible;
+                    lock (_sync) _attachments[hwnd] = state;
+                    if (!TryApplyAttachedLayout(hwnd, state, bounds, visible, true, false, out error))
+                        throw new InvalidOperationException(error);
+                }
 
                 RefreshOne(hwnd, NativeWindowChangeKind.Updated);
                 error = null;
@@ -513,12 +495,6 @@ namespace CloudOS.Host.Native
             }
         }
 
-        /// <summary>
-        /// Transitions a quarantined HWND into the only source state supported by WGC: visible
-        /// and rendering, but removed from task switching, owned by CloudOS and kept directly
-        /// behind the opaque Host window. The source is registered before it is shown so a
-        /// concurrent WinEvent can never reclassify it as an escaped window.
-        /// </summary>
         public bool TryPrepareCapturedSource(
             long windowHandle,
             long ownerWindowHandle,
@@ -539,6 +515,7 @@ namespace CloudOS.Host.Native
             if (!TryValidateOwner(owner, out error) || !TryValidateAttachedBounds(bounds, out error)) return false;
 
             CapturedSourceState state;
+            bool existing;
             lock (_sync)
             {
                 if (_attachments.ContainsKey(hwnd))
@@ -546,43 +523,67 @@ namespace CloudOS.Host.Native
                     error = "An anchored window cannot also become a captured source.";
                     return false;
                 }
-                if (_capturedSources.TryGetValue(hwnd, out state))
+                existing = _capturedSources.TryGetValue(hwnd, out state);
+                if (!existing)
                 {
+                    if (!_quarantinedWindows.ContainsKey(hwnd))
+                    {
+                        error = "The capture source was not observed inside the CloudOS launch quarantine.";
+                        return false;
+                    }
+                    state = new CapturedSourceState(
+                        owner,
+                        NativeMethods.GetWindowExtendedStyle(hwnd));
+                    if (NativeMethods.GetWindow(hwnd, NativeMethods.GW_OWNER) != IntPtr.Zero)
+                    {
+                        error = "Only an unowned primary window can become a captured source.";
+                        return false;
+                    }
+                    _capturedSources[hwnd] = state;
+                }
+            }
+
+            if (existing)
+            {
+                lock (state.SyncRoot)
+                {
+                    if (!IsCurrentCapturedSource(hwnd, state))
+                    {
+                        error = "The captured source was replaced during preparation.";
+                        return false;
+                    }
                     state.RequestedVisible = visible;
                     return TryApplyCapturedSourceLayout(hwnd, state, bounds, out error);
                 }
-                if (!_quarantinedWindows.ContainsKey(hwnd))
-                {
-                    error = "The capture source was not observed inside the CloudOS launch quarantine.";
-                    return false;
-                }
-                state = new CapturedSourceState(
-                    owner,
-                    NativeMethods.GetWindowExtendedStyle(hwnd));
-                if (NativeMethods.GetWindow(hwnd, NativeMethods.GW_OWNER) != IntPtr.Zero)
-                {
-                    error = "Only an unowned primary window can become a captured source.";
-                    return false;
-                }
-                _capturedSources[hwnd] = state;
             }
 
             try
             {
-                NativeMethods.SetWindowExtendedStyle(hwnd, state.CapturedExtendedStyle);
-                state.Bounds = bounds;
-                state.RequestedVisible = visible;
-                if (!TryApplyCapturedSourceLayout(hwnd, state, bounds, out error))
-                    throw new InvalidOperationException(error);
-                state.Prepared = true;
+                lock (state.SyncRoot)
+                {
+                    NativeMethods.SetWindowExtendedStyle(hwnd, state.CapturedExtendedStyle);
+                    state.Bounds = bounds;
+                    state.RequestedVisible = visible;
+                    if (!TryApplyCapturedSourceLayout(hwnd, state, bounds, out error))
+                        throw new InvalidOperationException(error);
+                    state.Prepared = true;
+                }
                 RefreshOne(hwnd, NativeWindowChangeKind.Updated);
                 error = null;
                 return true;
             }
             catch (Exception captureError) when (captureError is InvalidOperationException or Win32Exception)
             {
-                lock (_sync) _capturedSources.Remove(hwnd);
-                TryForceHideWindow(hwnd, out _);
+                lock (state.SyncRoot)
+                {
+                    lock (_sync)
+                    {
+                        if (_capturedSources.TryGetValue(hwnd, out CapturedSourceState current)
+                            && Object.ReferenceEquals(current, state))
+                            _capturedSources.Remove(hwnd);
+                    }
+                    TryForceHideWindow(hwnd, out _);
+                }
                 error = "The Windows source could not enter captured isolation: " + captureError.Message;
                 return false;
             }
@@ -609,7 +610,16 @@ namespace CloudOS.Host.Native
             CapturedSourceState state;
             lock (_sync)
             {
-                if (!_capturedSources.TryGetValue(hwnd, out state) || !state.Prepared)
+                if (!_capturedSources.TryGetValue(hwnd, out state))
+                {
+                    error = "The source did not enter captured isolation.";
+                    return false;
+                }
+            }
+
+            lock (state.SyncRoot)
+            {
+                if (!IsCurrentCapturedSource(hwnd, state) || !state.Prepared)
                 {
                     error = "The source did not enter captured isolation.";
                     return false;
@@ -617,11 +627,11 @@ namespace CloudOS.Host.Native
                 state.Presenter = presenter;
                 state.Active = true;
                 state.RequestedVisible = visible;
-            }
-            if (!TryApplyCapturedSourceLayout(hwnd, state, bounds, out error))
-            {
-                RecordCapturedContainmentFailure(hwnd, state, error);
-                return false;
+                if (!TryApplyCapturedSourceLayout(hwnd, state, bounds, out error))
+                {
+                    RecordCapturedContainmentFailure(hwnd, state, error);
+                    return false;
+                }
             }
             RefreshOne(hwnd, NativeWindowChangeKind.Updated);
             return true;
@@ -639,17 +649,26 @@ namespace CloudOS.Host.Native
             CapturedSourceState state;
             lock (_sync)
             {
-                if (!_capturedSources.TryGetValue(hwnd, out state) || !state.Active)
+                if (!_capturedSources.TryGetValue(hwnd, out state))
+                {
+                    error = "The captured source is not active.";
+                    return false;
+                }
+            }
+
+            lock (state.SyncRoot)
+            {
+                if (!IsCurrentCapturedSource(hwnd, state) || !state.Active)
                 {
                     error = "The captured source is not active.";
                     return false;
                 }
                 state.RequestedVisible = visible;
-            }
-            if (!TryApplyCapturedSourceLayout(hwnd, state, bounds, out error))
-            {
-                RecordCapturedContainmentFailure(hwnd, state, error);
-                return false;
+                if (!TryApplyCapturedSourceLayout(hwnd, state, bounds, out error))
+                {
+                    RecordCapturedContainmentFailure(hwnd, state, error);
+                    return false;
+                }
             }
             return true;
         }
@@ -659,15 +678,29 @@ namespace CloudOS.Host.Native
             IntPtr hwnd;
             try { hwnd = new IntPtr(windowHandle); }
             catch (OverflowException) { return; }
-            lock (_sync) _capturedSources.Remove(hwnd);
-            TryForceHideWindow(hwnd, out _);
+
+            CapturedSourceState state;
+            lock (_sync) _capturedSources.TryGetValue(hwnd, out state);
+            if (state != null)
+            {
+                lock (state.SyncRoot)
+                {
+                    lock (_sync)
+                    {
+                        if (_capturedSources.TryGetValue(hwnd, out CapturedSourceState current)
+                            && Object.ReferenceEquals(current, state))
+                            _capturedSources.Remove(hwnd);
+                    }
+                    TryForceHideWindow(hwnd, out _);
+                }
+            }
+            else
+            {
+                TryForceHideWindow(hwnd, out _);
+            }
             RefreshOne(hwnd, NativeWindowChangeKind.Updated);
         }
 
-        /// <summary>
-        /// Repositions and shows/hides an attached window over its current Hub slot.
-        /// Bounds are already converted by the trusted host from WebView coordinates to screen pixels.
-        /// </summary>
         public bool TryUpdateAttachedLayout(
             long windowHandle,
             NativeWindowBounds bounds,
@@ -697,11 +730,6 @@ namespace CloudOS.Host.Native
             return true;
         }
 
-        /// <summary>
-        /// Detachment to the external desktop is intentionally disabled. The bridge turns this
-        /// request into process termination; keeping this method fail-closed protects other host
-        /// callers as well.
-        /// </summary>
         public bool TryDetach(long windowHandle, out string error)
         {
             IntPtr hwnd;
@@ -719,10 +747,6 @@ namespace CloudOS.Host.Native
             lock (_sync) return !_disposed && _attachments.ContainsKey(hwnd);
         }
 
-        /// <summary>
-        /// Requests graceful close with WM_CLOSE. The method never calls TerminateProcess and
-        /// aborts if the target window does not answer within the configured timeout.
-        /// </summary>
         public bool TryClose(long windowHandle, out string error)
         {
             IntPtr hwnd;
@@ -830,29 +854,32 @@ namespace CloudOS.Host.Native
                 error = "The window is quarantined and cannot change state before attachment.";
                 return false;
             }
-            if (command != NativeMethods.SW_MINIMIZE)
-            {
-                if (!attachment.RequestedVisible)
-                {
-                    error = "The CloudOS Hub surface is hidden. Open the Hub before restoring this application.";
-                    return false;
-                }
-                if (!TryRestoreResponsive(hwnd, true, out error)) return false;
-                if (!TryApplyAttachedLayout(hwnd, attachment, attachment.Bounds, true, false, false, out error))
-                {
-                    QuarantineAfterContainmentFailure(hwnd, attachment, error);
-                    return false;
-                }
-                RefreshOne(hwnd, NativeWindowChangeKind.Updated);
-                return true;
-            }
 
-            // ShowWindowAsync's return value describes the previous visibility state, not success.
-            NativeMethods.ShowWindowAsync(hwnd, command);
-            if (!NativeMethods.IsWindow(hwnd))
+            lock (attachment.SyncRoot)
             {
-                error = "The window disappeared before the state change completed.";
-                return false;
+                if (command != NativeMethods.SW_MINIMIZE)
+                {
+                    if (!attachment.RequestedVisible)
+                    {
+                        error = "The CloudOS Hub surface is hidden. Open the Hub before restoring this application.";
+                        return false;
+                    }
+                    if (!TryRestoreResponsive(hwnd, true, out error)) return false;
+                    if (!TryApplyAttachedLayout(hwnd, attachment, attachment.Bounds, true, false, false, out error))
+                    {
+                        QuarantineAfterContainmentFailure(hwnd, attachment, error);
+                        return false;
+                    }
+                    RefreshOne(hwnd, NativeWindowChangeKind.Updated);
+                    return true;
+                }
+
+                NativeMethods.ShowWindowAsync(hwnd, command);
+                if (!NativeMethods.IsWindow(hwnd))
+                {
+                    error = "The window disappeared before the state change completed.";
+                    return false;
+                }
             }
 
             RefreshOne(hwnd, NativeWindowChangeKind.Updated);
@@ -908,54 +935,55 @@ namespace CloudOS.Host.Native
             AttachedWindowState state,
             out string error)
         {
-            if (!NativeMethods.IsWindow(hwnd))
+            lock (state.SyncRoot)
             {
-                error = "The attached window no longer exists.";
-                return false;
-            }
-            if (!TryValidateOwner(state.Owner, out error)
-                || NativeMethods.GetWindow(hwnd, NativeMethods.GW_OWNER) != state.Owner)
-            {
-                error = error ?? "The application removed its CloudOS owner.";
-                return false;
-            }
-            if (NativeMethods.GetWindowStyle(hwnd) != GetExpectedAttachedStyle(state))
-            {
-                error = "The application restored an external window frame during validation.";
-                return false;
-            }
-            if (NativeMethods.GetWindowExtendedStyle(hwnd) != GetExpectedAttachedExtendedStyle(state))
-            {
-                error = "The application restored an external Alt+Tab window style.";
-                return false;
-            }
-
-            // Minimized windows use shell-controlled off-screen placement. Owner and styles
-            // still remain mandatory, but their temporary rectangle is not a containment loss.
-            if (!NativeMethods.IsIconic(hwnd))
-            {
-                NativeMethods.RECT actual;
-                NativeWindowBounds bounds = state.Bounds;
-                if (!NativeMethods.GetWindowRect(hwnd, out actual)
-                    || actual.Left < bounds.X - 4
-                    || actual.Top < bounds.Y - 4
-                    || actual.Right > bounds.X + bounds.Width + 4
-                    || actual.Bottom > bounds.Y + bounds.Height + 4)
+                if (!NativeMethods.IsWindow(hwnd))
                 {
-                    error = "The application moved outside its CloudOS surface.";
+                    error = "The attached window no longer exists.";
                     return false;
                 }
-                if (NativeMethods.IsWindowVisible(hwnd) != state.RequestedVisible)
+                if (!TryValidateOwner(state.Owner, out error)
+                    || NativeMethods.GetWindow(hwnd, NativeMethods.GW_OWNER) != state.Owner)
                 {
-                    error = state.RequestedVisible
-                        ? "The application disappeared from its CloudOS surface."
-                        : "The application became externally visible while its CloudOS surface was hidden.";
+                    error = error ?? "The application removed its CloudOS owner.";
                     return false;
                 }
-            }
+                if (NativeMethods.GetWindowStyle(hwnd) != GetExpectedAttachedStyle(state))
+                {
+                    error = "The application restored an external window frame during validation.";
+                    return false;
+                }
+                if (NativeMethods.GetWindowExtendedStyle(hwnd) != GetExpectedAttachedExtendedStyle(state))
+                {
+                    error = "The application restored an external Alt+Tab window style.";
+                    return false;
+                }
 
-            error = null;
-            return true;
+                if (!NativeMethods.IsIconic(hwnd))
+                {
+                    NativeMethods.RECT actual;
+                    NativeWindowBounds bounds = state.Bounds;
+                    if (!NativeMethods.GetWindowRect(hwnd, out actual)
+                        || actual.Left < bounds.X - 4
+                        || actual.Top < bounds.Y - 4
+                        || actual.Right > bounds.X + bounds.Width + 4
+                        || actual.Bottom > bounds.Y + bounds.Height + 4)
+                    {
+                        error = "The application moved outside its CloudOS surface.";
+                        return false;
+                    }
+                    if (NativeMethods.IsWindowVisible(hwnd) != state.RequestedVisible)
+                    {
+                        error = state.RequestedVisible
+                            ? "The application disappeared from its CloudOS surface."
+                            : "The application became externally visible while its CloudOS surface was hidden.";
+                        return false;
+                    }
+                }
+
+                error = null;
+                return true;
+            }
         }
 
         private bool TryApplyCapturedSourceLayout(
@@ -964,36 +992,39 @@ namespace CloudOS.Host.Native
             NativeWindowBounds bounds,
             out string error)
         {
-            if (!NativeMethods.IsWindow(hwnd))
+            lock (state.SyncRoot)
             {
-                error = "The captured source window no longer exists.";
-                return false;
-            }
-            if (!TryValidateOwner(state.Owner, out error)) return false;
-            if (state.Active && !TryValidateOwner(state.Presenter, out error)) return false;
+                if (!NativeMethods.IsWindow(hwnd))
+                {
+                    error = "The captured source window no longer exists.";
+                    return false;
+                }
+                if (!TryValidateOwner(state.Owner, out error)) return false;
+                if (state.Active && !TryValidateOwner(state.Presenter, out error)) return false;
 
-            NativeMethods.SetWindowExtendedStyle(hwnd, state.CapturedExtendedStyle);
-            if (state.Active) NativeMethods.SetWindowOwner(hwnd, state.Owner);
-            if (state.RequestedVisible && NativeMethods.IsIconic(hwnd))
-                NativeMethods.ShowWindowAsync(hwnd, NativeMethods.SW_RESTORE);
+                NativeMethods.SetWindowExtendedStyle(hwnd, state.CapturedExtendedStyle);
+                if (state.Active) NativeMethods.SetWindowOwner(hwnd, state.Owner);
+                if (state.RequestedVisible && NativeMethods.IsIconic(hwnd))
+                    NativeMethods.ShowWindowAsync(hwnd, NativeMethods.SW_RESTORE);
 
-            IntPtr insertAfter = state.Active ? state.Presenter : state.Owner;
-            if (!NativeMethods.SetWindowPos(
-                hwnd,
-                insertAfter,
-                bounds.X,
-                bounds.Y,
-                bounds.Width,
-                bounds.Height,
-                NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOOWNERZORDER
-                    | (state.RequestedVisible ? NativeMethods.SWP_SHOWWINDOW : NativeMethods.SWP_HIDEWINDOW)))
-            {
-                error = "Windows refused to place the captured source behind CloudOS (Win32 error "
-                    + Marshal.GetLastWin32Error() + ").";
-                return false;
+                IntPtr insertAfter = state.Active ? state.Presenter : state.Owner;
+                if (!NativeMethods.SetWindowPos(
+                    hwnd,
+                    insertAfter,
+                    bounds.X,
+                    bounds.Y,
+                    bounds.Width,
+                    bounds.Height,
+                    NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOOWNERZORDER
+                        | (state.RequestedVisible ? NativeMethods.SWP_SHOWWINDOW : NativeMethods.SWP_HIDEWINDOW)))
+                {
+                    error = "Windows refused to place the captured source behind CloudOS (Win32 error "
+                        + Marshal.GetLastWin32Error() + ").";
+                    return false;
+                }
+                state.Bounds = bounds;
+                return TryValidateCapturedSourceContainment(hwnd, state, out error);
             }
-            state.Bounds = bounds;
-            return TryValidateCapturedSourceContainment(hwnd, state, out error);
         }
 
         private bool TryValidateCapturedSourceContainment(
@@ -1001,77 +1032,89 @@ namespace CloudOS.Host.Native
             CapturedSourceState state,
             out string error)
         {
-            if (!NativeMethods.IsWindow(hwnd))
+            lock (state.SyncRoot)
             {
-                error = "The captured source window no longer exists.";
-                return false;
-            }
-            if (!TryValidateOwner(state.Owner, out error)) return false;
-            IntPtr actualOwner = NativeMethods.GetWindow(hwnd, NativeMethods.GW_OWNER);
-            if ((state.Active && actualOwner != state.Owner)
-                || (!state.Active && actualOwner != IntPtr.Zero))
-            {
-                error = state.Active
-                    ? "The captured source removed its CloudOS owner."
-                    : "The preparing capture source unexpectedly gained an external owner.";
-                return false;
-            }
-            long extendedStyle = NativeMethods.GetWindowExtendedStyle(hwnd);
-            if ((extendedStyle & NativeMethods.WS_EX_APPWINDOW) != 0
-                || (extendedStyle & NativeMethods.WS_EX_TOOLWINDOW) == 0)
-            {
-                error = "The captured source restored an external Alt+Tab/taskbar style.";
-                return false;
-            }
-            if (state.RequestedVisible && NativeMethods.IsIconic(hwnd))
-            {
-                error = "The captured source became minimized and stopped rendering.";
-                return false;
-            }
-
-            bool ownerVisible = NativeMethods.IsWindowVisible(state.Owner)
-                && !NativeMethods.IsIconic(state.Owner);
-            bool sourceVisible = NativeMethods.IsWindowVisible(hwnd);
-            bool expectedVisible = ownerVisible && state.RequestedVisible;
-            if (expectedVisible != sourceVisible)
-            {
-                error = expectedVisible
-                    ? "The captured source stopped rendering behind CloudOS."
-                    : "The captured source remained visible while CloudOS was hidden.";
-                return false;
-            }
-
-            if (sourceVisible)
-            {
-                NativeMethods.RECT actual;
-                NativeWindowBounds bounds = state.Bounds;
-                if (!NativeMethods.GetWindowRect(hwnd, out actual)
-                    || actual.Left < bounds.X - 4
-                    || actual.Top < bounds.Y - 4
-                    || actual.Right > bounds.X + bounds.Width + 4
-                    || actual.Bottom > bounds.Y + bounds.Height + 4)
+                if (!NativeMethods.IsWindow(hwnd))
                 {
-                    error = "The captured source moved outside its CloudOS surface.";
+                    error = "The captured source window no longer exists.";
                     return false;
                 }
-                if (state.Active)
+                if (!TryValidateOwner(state.Owner, out error)) return false;
+                IntPtr actualOwner = NativeMethods.GetWindow(hwnd, NativeMethods.GW_OWNER);
+                if ((state.Active && actualOwner != state.Owner)
+                    || (!state.Active && actualOwner != IntPtr.Zero))
                 {
-                    NativeMethods.RECT presenterRect;
-                    if (!NativeMethods.IsWindowVisible(state.Presenter)
-                        || !NativeMethods.GetWindowRect(state.Presenter, out presenterRect)
-                        || presenterRect.Left > actual.Left + 4
-                        || presenterRect.Top > actual.Top + 4
-                        || presenterRect.Right < actual.Right - 4
-                        || presenterRect.Bottom < actual.Bottom - 4
-                        || !NativeMethods.IsWindowAbove(hwnd, state.Presenter))
+                    error = state.Active
+                        ? "The captured source removed its CloudOS owner."
+                        : "The preparing capture source unexpectedly gained an external owner.";
+                    return false;
+                }
+                long extendedStyle = NativeMethods.GetWindowExtendedStyle(hwnd);
+                if ((extendedStyle & NativeMethods.WS_EX_APPWINDOW) != 0
+                    || (extendedStyle & NativeMethods.WS_EX_TOOLWINDOW) == 0)
+                {
+                    error = "The captured source restored an external Alt+Tab/taskbar style.";
+                    return false;
+                }
+                if (state.RequestedVisible && NativeMethods.IsIconic(hwnd))
+                {
+                    error = "The captured source became minimized and stopped rendering.";
+                    return false;
+                }
+
+                bool ownerVisible = NativeMethods.IsWindowVisible(state.Owner)
+                    && !NativeMethods.IsIconic(state.Owner);
+                bool sourceVisible = NativeMethods.IsWindowVisible(hwnd);
+                bool expectedVisible = ownerVisible && state.RequestedVisible;
+                if (expectedVisible != sourceVisible)
+                {
+                    error = expectedVisible
+                        ? "The captured source stopped rendering behind CloudOS."
+                        : "The captured source remained visible while CloudOS was hidden.";
+                    return false;
+                }
+
+                if (sourceVisible)
+                {
+                    NativeMethods.RECT actual;
+                    NativeWindowBounds bounds = state.Bounds;
+                    if (!NativeMethods.GetWindowRect(hwnd, out actual)
+                        || actual.Left < bounds.X - 4
+                        || actual.Top < bounds.Y - 4
+                        || actual.Right > bounds.X + bounds.Width + 4
+                        || actual.Bottom > bounds.Y + bounds.Height + 4)
                     {
-                        error = "The captured source is no longer fully covered by its CloudOS presenter.";
+                        error = "The captured source moved outside its CloudOS surface.";
                         return false;
                     }
+                    if (state.Active)
+                    {
+                        NativeMethods.RECT presenterRect;
+                        if (!NativeMethods.IsWindowVisible(state.Presenter)
+                            || !NativeMethods.GetWindowRect(state.Presenter, out presenterRect)
+                            || presenterRect.Left > actual.Left + 4
+                            || presenterRect.Top > actual.Top + 4
+                            || presenterRect.Right < actual.Right - 4
+                            || presenterRect.Bottom < actual.Bottom - 4
+                            || !NativeMethods.IsWindowAbove(hwnd, state.Presenter))
+                        {
+                            error = "The captured source is no longer fully covered by its CloudOS presenter.";
+                            return false;
+                        }
+                    }
                 }
+                error = null;
+                return true;
             }
-            error = null;
-            return true;
+        }
+
+        private bool IsCurrentCapturedSource(IntPtr hwnd, CapturedSourceState state)
+        {
+            lock (_sync)
+            {
+                return _capturedSources.TryGetValue(hwnd, out CapturedSourceState current)
+                    && Object.ReferenceEquals(current, state);
+            }
         }
 
         private void RecordCapturedContainmentFailure(
@@ -1079,24 +1122,27 @@ namespace CloudOS.Host.Native
             CapturedSourceState state,
             string reason)
         {
-            int processId = 0;
-            lock (_sync)
+            lock (state.SyncRoot)
             {
-                CapturedSourceState current;
-                if (_capturedSources.TryGetValue(hwnd, out current) && Object.ReferenceEquals(current, state))
-                    _capturedSources.Remove(hwnd);
-                NativeWindowSnapshot snapshot;
-                if (_windows.TryGetValue(hwnd, out snapshot)) processId = snapshot.ProcessId;
-                if (processId == 0)
+                int processId = 0;
+                lock (_sync)
                 {
-                    uint nativeProcessId;
-                    NativeMethods.GetWindowThreadProcessId(hwnd, out nativeProcessId);
-                    if (nativeProcessId <= Int32.MaxValue) processId = unchecked((int)nativeProcessId);
+                    CapturedSourceState current;
+                    if (_capturedSources.TryGetValue(hwnd, out current) && Object.ReferenceEquals(current, state))
+                        _capturedSources.Remove(hwnd);
+                    NativeWindowSnapshot snapshot;
+                    if (_windows.TryGetValue(hwnd, out snapshot)) processId = snapshot.ProcessId;
+                    if (processId == 0)
+                    {
+                        uint nativeProcessId;
+                        NativeMethods.GetWindowThreadProcessId(hwnd, out nativeProcessId);
+                        if (nativeProcessId <= Int32.MaxValue) processId = unchecked((int)nativeProcessId);
+                    }
+                    if (processId > 0) _quarantinedWindows[hwnd] = processId;
+                    if (processId > 0) _containmentFailures[processId] = reason ?? "Captured source containment failed.";
                 }
-                if (processId > 0) _quarantinedWindows[hwnd] = processId;
-                if (processId > 0) _containmentFailures[processId] = reason ?? "Captured source containment failed.";
+                TryForceHideWindow(hwnd, out _);
             }
-            TryForceHideWindow(hwnd, out _);
         }
 
         private bool TryApplyAttachedLayout(
@@ -1108,80 +1154,81 @@ namespace CloudOS.Host.Native
             bool preserveMinimized,
             out string error)
         {
-            if (!NativeMethods.IsWindow(hwnd))
+            lock (state.SyncRoot)
             {
-                error = "The attached window no longer exists.";
-                return false;
-            }
-            if (!TryValidateOwner(state.Owner, out error)
-                || NativeMethods.GetWindow(hwnd, NativeMethods.GW_OWNER) != state.Owner)
-            {
-                error = error ?? "The application is no longer owned by the CloudOS window.";
-                return false;
-            }
+                if (!NativeMethods.IsWindow(hwnd))
+                {
+                    error = "The attached window no longer exists.";
+                    return false;
+                }
+                if (!TryValidateOwner(state.Owner, out error)
+                    || NativeMethods.GetWindow(hwnd, NativeMethods.GW_OWNER) != state.Owner)
+                {
+                    error = error ?? "The application is no longer owned by the CloudOS window.";
+                    return false;
+                }
 
-            // A layout pass must not undo an explicit minimize. Keep the latest
-            // slot/visibility intent so a later explicit restore uses current bounds.
-            if (preserveMinimized && NativeMethods.IsIconic(hwnd))
-            {
+                if (preserveMinimized && NativeMethods.IsIconic(hwnd))
+                {
+                    state.Bounds = bounds;
+                    state.RequestedVisible = visible;
+                    error = null;
+                    return true;
+                }
+
+                long currentStyle = NativeMethods.GetWindowStyle(hwnd);
+                long currentExtendedStyle = NativeMethods.GetWindowExtendedStyle(hwnd);
+                long forbiddenFrameStyles = NativeMethods.WS_CAPTION
+                    | NativeMethods.WS_THICKFRAME
+                    | NativeMethods.WS_MINIMIZEBOX
+                    | NativeMethods.WS_MAXIMIZEBOX
+                    | NativeMethods.WS_SYSMENU;
+                if (frameChanged
+                    ? (currentStyle & forbiddenFrameStyles) != 0
+                    : currentStyle != GetExpectedAttachedStyle(state))
+                {
+                    error = "The application restored an external window frame "
+                        + "(initial=" + frameChanged + ", actual=0x" + currentStyle.ToString("X")
+                        + ", expected=0x" + GetExpectedAttachedStyle(state).ToString("X") + ").";
+                    return false;
+                }
+                if (frameChanged
+                    ? (currentExtendedStyle & NativeMethods.WS_EX_APPWINDOW) != 0
+                        || (currentExtendedStyle & NativeMethods.WS_EX_TOOLWINDOW) == 0
+                    : currentExtendedStyle != GetExpectedAttachedExtendedStyle(state))
+                {
+                    error = "The application restored an external Alt+Tab window style.";
+                    return false;
+                }
+
+                uint flags = NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOOWNERZORDER
+                    | (visible ? NativeMethods.SWP_SHOWWINDOW : NativeMethods.SWP_HIDEWINDOW);
+                if (frameChanged) flags |= NativeMethods.SWP_FRAMECHANGED;
+                if (!visible) flags |= NativeMethods.SWP_NOZORDER;
+                if (!NativeMethods.SetWindowPos(
+                    hwnd,
+                    visible ? NativeMethods.HWND_TOP : IntPtr.Zero,
+                    bounds.X,
+                    bounds.Y,
+                    bounds.Width,
+                    bounds.Height,
+                    flags))
+                {
+                    error = "Windows refused to position the application inside CloudOS (Win32 error "
+                        + Marshal.GetLastWin32Error() + ").";
+                    return false;
+                }
+
                 state.Bounds = bounds;
                 state.RequestedVisible = visible;
-                error = null;
-                return true;
+                if (frameChanged)
+                {
+                    state.RecordAppliedStyles(
+                        NativeMethods.GetWindowStyle(hwnd),
+                        NativeMethods.GetWindowExtendedStyle(hwnd));
+                }
+                return TryValidateAttachedContainment(hwnd, state, out error);
             }
-
-            long currentStyle = NativeMethods.GetWindowStyle(hwnd);
-            long currentExtendedStyle = NativeMethods.GetWindowExtendedStyle(hwnd);
-            long forbiddenFrameStyles = NativeMethods.WS_CAPTION
-                | NativeMethods.WS_THICKFRAME
-                | NativeMethods.WS_MINIMIZEBOX
-                | NativeMethods.WS_MAXIMIZEBOX
-                | NativeMethods.WS_SYSMENU;
-            if (frameChanged
-                ? (currentStyle & forbiddenFrameStyles) != 0
-                : currentStyle != GetExpectedAttachedStyle(state))
-            {
-                error = "The application restored an external window frame "
-                    + "(initial=" + frameChanged + ", actual=0x" + currentStyle.ToString("X")
-                    + ", expected=0x" + GetExpectedAttachedStyle(state).ToString("X") + ").";
-                return false;
-            }
-            if (frameChanged
-                ? (currentExtendedStyle & NativeMethods.WS_EX_APPWINDOW) != 0
-                    || (currentExtendedStyle & NativeMethods.WS_EX_TOOLWINDOW) == 0
-                : currentExtendedStyle != GetExpectedAttachedExtendedStyle(state))
-            {
-                error = "The application restored an external Alt+Tab window style.";
-                return false;
-            }
-
-            uint flags = NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOOWNERZORDER
-                | (visible ? NativeMethods.SWP_SHOWWINDOW : NativeMethods.SWP_HIDEWINDOW);
-            if (frameChanged) flags |= NativeMethods.SWP_FRAMECHANGED;
-            if (!visible) flags |= NativeMethods.SWP_NOZORDER;
-            if (!NativeMethods.SetWindowPos(
-                hwnd,
-                visible ? NativeMethods.HWND_TOP : IntPtr.Zero,
-                bounds.X,
-                bounds.Y,
-                bounds.Width,
-                bounds.Height,
-                flags))
-            {
-                error = "Windows refused to position the application inside CloudOS (Win32 error "
-                    + Marshal.GetLastWin32Error() + ").";
-                return false;
-            }
-
-            state.Bounds = bounds;
-            state.RequestedVisible = visible;
-            if (frameChanged)
-            {
-                state.RecordAppliedStyles(
-                    NativeMethods.GetWindowStyle(hwnd),
-                    NativeMethods.GetWindowExtendedStyle(hwnd));
-            }
-            return TryValidateAttachedContainment(hwnd, state, out error);
         }
 
         private bool TryRestoreResponsive(IntPtr hwnd, bool restoreMaximized, out string error)
@@ -1219,27 +1266,27 @@ namespace CloudOS.Host.Native
 
         private void RecordAttachedContainmentFailure(IntPtr hwnd, AttachedWindowState state, string reason)
         {
-            int processId = 0;
-            lock (_sync)
+            lock (state.SyncRoot)
             {
-                AttachedWindowState current;
-                if (_attachments.TryGetValue(hwnd, out current) && Object.ReferenceEquals(current, state))
-                    _attachments.Remove(hwnd);
-                NativeWindowSnapshot snapshot;
-                if (_windows.TryGetValue(hwnd, out snapshot)) processId = snapshot.ProcessId;
-                if (processId == 0)
+                int processId = 0;
+                lock (_sync)
                 {
-                    uint nativeProcessId;
-                    NativeMethods.GetWindowThreadProcessId(hwnd, out nativeProcessId);
-                    if (nativeProcessId <= Int32.MaxValue) processId = unchecked((int)nativeProcessId);
+                    AttachedWindowState current;
+                    if (_attachments.TryGetValue(hwnd, out current) && Object.ReferenceEquals(current, state))
+                        _attachments.Remove(hwnd);
+                    NativeWindowSnapshot snapshot;
+                    if (_windows.TryGetValue(hwnd, out snapshot)) processId = snapshot.ProcessId;
+                    if (processId == 0)
+                    {
+                        uint nativeProcessId;
+                        NativeMethods.GetWindowThreadProcessId(hwnd, out nativeProcessId);
+                        if (nativeProcessId <= Int32.MaxValue) processId = unchecked((int)nativeProcessId);
+                    }
+                    if (processId > 0) _quarantinedWindows[hwnd] = processId;
+                    if (processId > 0) _containmentFailures[processId] = reason ?? "Native window containment failed.";
                 }
-                if (processId > 0) _quarantinedWindows[hwnd] = processId;
-                if (processId > 0) _containmentFailures[processId] = reason ?? "Native window containment failed.";
+                TryForceHideWindow(hwnd, out _);
             }
-            // Never restore the original owner/style/visibility here: doing so creates the
-            // forbidden external-window fallback. The bridge observes the failure and kills
-            // the exact tracked process tree.
-            TryForceHideWindow(hwnd, out _);
         }
 
         private static bool TryForceHideWindow(IntPtr hwnd, out string error)
@@ -1401,24 +1448,22 @@ namespace CloudOS.Host.Native
                 return false;
             }
 
-            // Polling and every WinEvent revalidate the full containment invariant. If an app
-            // restores its owner, frame, task-switcher style, visibility or external bounds,
-            // hide it immediately and let the bridge terminate the entire Job.
             if (isAttached && !TryValidateAttachedContainment(hwnd, attachment, out string attachedError))
             {
                 RecordAttachedContainmentFailure(hwnd, attachment, attachedError);
                 return false;
             }
-            if (isCapturedSource && capturedSource.Prepared
-                && !TryValidateCapturedSourceContainment(hwnd, capturedSource, out string capturedError))
+            if (isCapturedSource)
             {
-                RecordCapturedContainmentFailure(hwnd, capturedSource, capturedError);
-                return false;
+                bool prepared;
+                lock (capturedSource.SyncRoot) prepared = capturedSource.Prepared;
+                if (prepared && !TryValidateCapturedSourceContainment(hwnd, capturedSource, out string capturedError))
+                {
+                    RecordCapturedContainmentFailure(hwnd, capturedSource, capturedError);
+                    return false;
+                }
             }
 
-            // Quarantine every root HWND from a contained process before deciding whether it is
-            // a user-facing session. Tool windows, owned dialogs and cloaked broker surfaces must
-            // never escape merely because they are omitted from public snapshots.
             if (!isAttached && !isCapturedSource && requiresContainment)
             {
                 string quarantineError;
@@ -1473,7 +1518,6 @@ namespace CloudOS.Host.Native
             {
                 _hookThreadId = NativeMethods.GetCurrentThreadId();
 
-                // Force creation of this thread's message queue before Dispose can post WM_QUIT.
                 NativeMethods.MSG message;
                 NativeMethods.PeekMessage(out message, IntPtr.Zero, 0, 0, NativeMethods.PM_NOREMOVE);
 
@@ -1552,7 +1596,6 @@ namespace CloudOS.Host.Native
             }
             catch
             {
-                // Never allow managed exceptions to escape an unmanaged WinEvent callback.
             }
         }
 
@@ -1589,7 +1632,9 @@ namespace CloudOS.Host.Native
             NativeWindowChangedEventArgs change = null;
             lock (_sync)
             {
-                if (!discardAttachment && _attachments.ContainsKey(hwnd) && NativeMethods.IsWindow(hwnd))
+                if (!discardAttachment
+                    && (_attachments.ContainsKey(hwnd) || _capturedSources.ContainsKey(hwnd))
+                    && NativeMethods.IsWindow(hwnd))
                     return;
                 NativeWindowSnapshot snapshot;
                 if (_windows.TryGetValue(hwnd, out snapshot))
@@ -1697,7 +1742,7 @@ namespace CloudOS.Host.Native
             EventHandler<NativeWindowChangedEventArgs> handler = WindowChanged;
             if (handler == null) return;
             try { handler(this, change); }
-            catch { /* The WinEvent hook must remain alive if a consumer fails. */ }
+            catch { }
         }
 
         private static void Unhook(ref IntPtr hook)
@@ -1751,6 +1796,7 @@ namespace CloudOS.Host.Native
                     | NativeMethods.WS_EX_TOOLWINDOW;
             }
 
+            public object SyncRoot { get; } = new object();
             public IntPtr Owner { get; private set; }
             public long OriginalStyle { get; private set; }
             public long OriginalExtendedStyle { get; private set; }
@@ -1776,6 +1822,7 @@ namespace CloudOS.Host.Native
                     | NativeMethods.WS_EX_TOOLWINDOW;
             }
 
+            public object SyncRoot { get; } = new object();
             public IntPtr Owner { get; private set; }
             public IntPtr Presenter { get; set; }
             public long OriginalExtendedStyle { get; private set; }

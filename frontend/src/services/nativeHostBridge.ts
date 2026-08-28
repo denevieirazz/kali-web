@@ -99,12 +99,13 @@ export interface NativeViewportBounds {
   height: number;
 }
 
-export type NativeContainmentMode = 'anchored-overlay' | 'hidden-quarantine' | 'terminated';
+export type NativeContainmentMode = 'captured-surface' | 'anchored-overlay' | 'hidden-quarantine' | 'terminated';
 
 export interface NativeSession {
   sessionId: string;
   title: string;
   processId: number;
+  launchProcessId?: number;
   minimized: boolean;
   maximized: boolean;
   bounds: NativeViewportBounds;
@@ -261,7 +262,14 @@ class NativeHostBridge {
 
   async attachSession(sessionId: string, bounds: NativeViewportBounds, visible = true) {
     await this.requireConnection();
-    return this.request<{ sessionId: string; accepted: boolean; contained?: boolean; containmentMode?: NativeContainmentMode }>('native.session.attach', { sessionId, bounds, visible });
+    // Host pending-attach containment expires at 10s. The transport deadline must
+    // sit outside that boundary so WGC/Win32 setup can return the Host's real
+    // containment verdict instead of racing a client-side NATIVE_TIMEOUT.
+    return this.request<{ sessionId: string; accepted: boolean; contained?: boolean; containmentMode?: NativeContainmentMode }>(
+      'native.session.attach',
+      { sessionId, bounds, visible },
+      20_000
+    );
   }
 
   async layoutSession(sessionId: string, bounds: NativeViewportBounds, visible: boolean) {
@@ -318,12 +326,13 @@ class NativeHostBridge {
       }
       const sessions = message.data?.sessions || [];
       if (nativeSessionListsEqual(this.lastSessions, sessions)) return;
-      // Listeners are application code and may mutate their input. Keep an isolated
-      // structural snapshot so one listener cannot defeat duplicate-event suppression.
+      // Listeners are application code and may mutate their input. Keep both the
+      // dedupe snapshot and every listener delivery structurally isolated so one
+      // renderer cannot corrupt what another NativeAppWindow observes.
       this.lastSessions = snapshotSessions(sessions);
       for (const listener of this.eventListeners) {
         try {
-          listener(sessions);
+          listener(snapshotSessions(sessions));
         } catch {
           // One renderer listener must not prevent other native windows from receiving state updates.
         }

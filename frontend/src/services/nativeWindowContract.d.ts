@@ -30,3 +30,9 @@ export function nativeSessionForLaunch(
   sessions: NativeSession[],
   launch: { pid: number; sessionId?: string | null }
 ): NativeSession | null;
+
+export function nativeReplacementSession(
+  sessions: NativeSession[],
+  currentSessionId: string,
+  launchProcessId: number
+): NativeSession | null;

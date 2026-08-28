@@ -1,6 +1,7 @@
 using CloudOS.Host.Browser;
 using CloudOS.Host.Native;
 using CloudOS.Host.Security;
+using CloudOS.WindowsCapture;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -15,6 +16,11 @@ if (args is ["--native-contained-fixture-wait"])
 if (args is ["--native-contained-fixture-window"])
 {
     NativeFixtureWindow.RunVisibleMessageLoop();
+    return;
+}
+if (args is ["--native-contained-fixture-two-windows"])
+{
+    NativeFixtureWindow.RunVisibleMessageLoop(2);
     return;
 }
 if (args is ["--native-contained-fixture-spawn-window-child"])
@@ -56,14 +62,21 @@ var tests = new (string Name, Action Run)[]
     ("native launch accepts only direct host descriptors", NativeLaunchAcceptsOnlyDirectDescriptors),
     ("native launch rejects broker and UWP kinds", NativeLaunchRejectsBrokersAndUwp),
     ("native launch reports managed only after HWND correlation", NativeLaunchReportsManagedOnlyAfterCorrelation),
+    ("native launch rejects ambiguous top-level windows", NativeLaunchRejectsAmbiguousWindows),
     ("native containment failures require termination", NativeContainmentFailuresRequireTermination),
     ("native launch descriptor preserves argv JSON", NativeLaunchDescriptorPreservesArgvJson),
     ("native command line quoting is bounded", NativeCommandLineQuotingIsBounded),
     ("cmd script GUI descendant is correlated through the contained Job", NativeScriptLaunchContract.Validate),
     ("native launcher tracks suspended process before resume", NativeLauncherTracksSuspendedProcessBeforeResume),
+    ("native lease identity remains stable after disposal", NativeLeaseIdentitySurvivesDispose),
     ("cmd script GUI descendant is contained by the same Job", NativeScriptLaunchContract.Validate),
     ("native job child HWND is quarantined and escape is detected", NativeJobChildWindowIsQuarantined),
-    ("captured source stays covered and follows CloudOS visibility", CapturedSourceIsolationFollowsSurface)
+    ("captured source stays covered and follows CloudOS visibility", CapturedSourceIsolationFollowsSurface),
+    ("captured surface duplicate attach is serialized", CapturedSurfaceDuplicateAttachIsSerialized),
+    ("captured surface independent sessions stay concurrent", CapturedSurfaceIndependentSessionsStayConcurrent),
+    ("captured surface layouts receive unique ordered revisions", CapturedSurfaceLayoutsAreSerialized),
+    ("captured surface close cannot overtake layout", CapturedSurfaceCloseWaitsForLayout),
+    ("captured surface dispose closes in-flight attach", CapturedSurfaceDisposeClosesInFlightAttach)
 };
 
 foreach (var test in tests)
@@ -561,6 +574,203 @@ static void Assert(bool condition, string message)
     if (!condition) throw new InvalidOperationException(message);
 }
 
+static void NativeLeaseIdentitySurvivesDispose()
+{
+    var processPath = Environment.ProcessPath ?? throw new InvalidOperationException("The test process path is unavailable.");
+    var spec = NativeProcessLaunchSpec.Create(
+        processPath,
+        FixtureArguments("--native-contained-fixture-wait"),
+        AppContext.BaseDirectory);
+    var lease = NativeContainedProcessLauncher.StartSuspended(spec);
+    var processId = lease.ProcessId;
+    lease.Dispose();
+
+    Assert(lease.IsDisposed, "A disposed native launch lease must expose terminal state.");
+    Assert(lease.ProcessId == processId,
+        "The stable launch identity must not dereference a disposed Process object.");
+    lease.Dispose();
+}
+
+static void NativeLaunchRejectsAmbiguousWindows()
+{
+    var processPath = Environment.ProcessPath ?? throw new InvalidOperationException("The test process path is unavailable.");
+    var spec = NativeProcessLaunchSpec.Create(
+        processPath,
+        FixtureArguments("--native-contained-fixture-two-windows"),
+        AppContext.BaseDirectory);
+    using var lease = NativeContainedProcessLauncher.StartSuspended(spec);
+    using var windows = new NativeWindowManager();
+    windows.TrackLaunchedProcess(lease.Process);
+    lease.Resume();
+
+    NativeWindowSnapshot[] candidates = [];
+    var deadline = DateTimeOffset.UtcNow.AddSeconds(8);
+    while (DateTimeOffset.UtcNow < deadline && candidates.Length < 2)
+    {
+        NativeContainedJobTracker.Synchronize(lease, windows);
+        windows.Refresh();
+        candidates = windows.GetWindows(lease.ProcessId)
+            .Where(window => !window.IsAttached && !window.IsVisible)
+            .ToArray();
+        if (candidates.Length < 2) Thread.Sleep(25);
+    }
+
+    Assert(candidates.Length == 2, "The ambiguous-window fixture did not expose two quarantined HWNDs.");
+    var selection = NativeLaunchContainmentPolicy.SelectUniqueQuarantinedWindow(candidates, out var selected);
+    Assert(selection == NativeWindowCandidateSelection.Ambiguous && selected is null,
+        "Multiple top-level HWNDs must fail closed instead of selecting array order.");
+    selection = NativeLaunchContainmentPolicy.SelectUniqueQuarantinedWindow([], out selected);
+    Assert(selection == NativeWindowCandidateSelection.None && selected is null,
+        "An empty launch must remain pending instead of inventing a candidate.");
+    selection = NativeLaunchContainmentPolicy.SelectUniqueQuarantinedWindow([candidates[0]], out selected);
+    Assert(selection == NativeWindowCandidateSelection.Unique && selected?.Handle == candidates[0].Handle,
+        "Exactly one quarantined HWND must remain eligible for the single-surface runtime.");
+    var dominant = new NativeWindowSnapshot(
+        1001, lease.ProcessId, "Browser", false, false, false, false,
+        new NativeWindowBounds(0, 0, 1920, 1023), DateTimeOffset.UtcNow);
+    var helper = new NativeWindowSnapshot(
+        1002, lease.ProcessId, String.Empty, false, false, false, false,
+        new NativeWindowBounds(0, 0, 136, 39), DateTimeOffset.UtcNow);
+    selection = NativeLaunchContainmentPolicy.SelectUniqueQuarantinedWindow([dominant, helper], out selected);
+    Assert(selection == NativeWindowCandidateSelection.Unique && selected?.Handle == dominant.Handle,
+        "A uniquely dominant browser surface must be selected while its tiny helper HWND remains quarantined.");
+    var untitledLargeHelper = new NativeWindowSnapshot(
+        1003, lease.ProcessId, String.Empty, false, false, false, false,
+        new NativeWindowBounds(0, 0, 1920, 1023), DateTimeOffset.UtcNow);
+    selection = NativeLaunchContainmentPolicy.SelectUniqueQuarantinedWindow(
+        [dominant, untitledLargeHelper, helper], out selected);
+    Assert(selection == NativeWindowCandidateSelection.Unique && selected?.Handle == dominant.Handle,
+        "A single titled browser surface must win over untitled Chromium helper HWNDs in the same Job.");
+    Assert(candidates.All(window => !NativeMethods.IsWindowVisible(new IntPtr(window.Handle))),
+        "Every ambiguous candidate must remain hidden while the launch is rejected.");
+
+    Assert(lease.TryTerminate(3_000, out var terminationError),
+        terminationError ?? "The ambiguous-window Job did not terminate.");
+    Assert(windows.TryTerminateTrackedProcess(lease.ProcessId, out terminationError),
+        terminationError ?? "The ambiguous-window capability was not revoked.");
+}
+
+static void CapturedSurfaceDuplicateAttachIsSerialized()
+{
+    using var runtime = new ControlledCapturedSurfaceRuntime { BlockFirstCreate = true };
+    using var adapter = new CapturedSurfaceBridgeAdapter(9001, runtime);
+    var first = Task.Run(() => adapter.Attach("duplicate", 101, Bounds(10), true, 1, 1));
+    Assert(runtime.FirstCreateEntered.Wait(TimeSpan.FromSeconds(5)), "The first attach did not enter the runtime.");
+
+    using var secondStarted = new ManualResetEventSlim();
+    var second = Task.Run(() =>
+    {
+        secondStarted.Set();
+        return adapter.Attach("duplicate", 102, Bounds(20), true, 1, 1);
+    });
+    Assert(secondStarted.Wait(TimeSpan.FromSeconds(5)), "The duplicate attach task did not start.");
+    Assert(!SpinWait.SpinUntil(() => runtime.CreateCallCount > 1, TimeSpan.FromMilliseconds(200)),
+        "A duplicate attach entered the runtime before the first attach committed.");
+
+    runtime.ReleaseFirstCreate.Set();
+    Assert(Task.WaitAll([first, second], TimeSpan.FromSeconds(5)), "Serialized attaches did not finish.");
+    Assert(first.Result.Generation == 1 && second.Result.Generation == 2,
+        "Duplicate attach generations were not committed in order.");
+    Assert(runtime.ActiveGeneration("duplicate") == 2,
+        "The replacement generation is not the only active runtime.");
+    Assert(runtime.ClosedGenerations.SequenceEqual([1]),
+        "The replaced runtime was not closed exactly once.");
+}
+
+static void CapturedSurfaceLayoutsAreSerialized()
+{
+    using var runtime = new ControlledCapturedSurfaceRuntime { BlockFirstLayout = true };
+    using var adapter = new CapturedSurfaceBridgeAdapter(9002, runtime);
+    adapter.Attach("layout", 201, Bounds(10), true, 1, 1);
+
+    var first = Task.Run(() => adapter.Layout("layout", Bounds(20), true, 1, 1));
+    Assert(runtime.FirstLayoutEntered.Wait(TimeSpan.FromSeconds(5)), "The first layout did not enter the runtime.");
+    using var secondStarted = new ManualResetEventSlim();
+    var second = Task.Run(() =>
+    {
+        secondStarted.Set();
+        return adapter.Layout("layout", Bounds(30), true, 1, 1);
+    });
+    Assert(secondStarted.Wait(TimeSpan.FromSeconds(5)), "The second layout task did not start.");
+    Assert(!SpinWait.SpinUntil(() => runtime.LayoutCallCount > 1, TimeSpan.FromMilliseconds(200)),
+        "A second layout entered the runtime before the prior revision committed.");
+
+    runtime.ReleaseFirstLayout.Set();
+    Assert(Task.WaitAll([first, second], TimeSpan.FromSeconds(5)), "Serialized layouts did not finish.");
+    Assert(first.Result.LayoutRevision == 2 && second.Result.LayoutRevision == 3,
+        "Concurrent layouts did not receive unique ordered revisions.");
+    Assert(runtime.AppliedRevisions.SequenceEqual([2L, 3L]),
+        "The runtime observed duplicate or reordered layout revisions.");
+}
+
+static void CapturedSurfaceIndependentSessionsStayConcurrent()
+{
+    using var runtime = new ControlledCapturedSurfaceRuntime { BlockFirstCreate = true };
+    using var adapter = new CapturedSurfaceBridgeAdapter(9005, runtime);
+    var first = Task.Run(() => adapter.Attach("blocked", 501, Bounds(10), true, 1, 1));
+    Assert(runtime.FirstCreateEntered.Wait(TimeSpan.FromSeconds(5)), "The blocked attach did not enter the runtime.");
+
+    var independent = Task.Run(() => adapter.Attach("independent", 502, Bounds(20), true, 1, 1));
+    Assert(independent.Wait(TimeSpan.FromSeconds(2)),
+        "An unrelated captured session was globally blocked by another attach.");
+    Assert(independent.Result.Generation == 1 && runtime.ActiveGeneration("independent") == 1,
+        "The independent captured session did not commit normally.");
+
+    runtime.ReleaseFirstCreate.Set();
+    Assert(first.Wait(TimeSpan.FromSeconds(5)), "The blocked attach did not finish after release.");
+}
+
+static void CapturedSurfaceCloseWaitsForLayout()
+{
+    using var runtime = new ControlledCapturedSurfaceRuntime { BlockFirstLayout = true };
+    using var adapter = new CapturedSurfaceBridgeAdapter(9003, runtime);
+    adapter.Attach("close", 301, Bounds(10), true, 1, 1);
+
+    var layout = Task.Run(() => adapter.Layout("close", Bounds(20), true, 1, 1));
+    Assert(runtime.FirstLayoutEntered.Wait(TimeSpan.FromSeconds(5)), "The layout did not enter the runtime.");
+    using var closeStarted = new ManualResetEventSlim();
+    var close = Task.Run(() =>
+    {
+        closeStarted.Set();
+        return adapter.Close("close");
+    });
+    Assert(closeStarted.Wait(TimeSpan.FromSeconds(5)), "The close task did not start.");
+    Assert(!close.Wait(TimeSpan.FromMilliseconds(200)), "Close overtook an in-flight layout.");
+
+    runtime.ReleaseFirstLayout.Set();
+    Assert(layout.Wait(TimeSpan.FromSeconds(5)) && close.Wait(TimeSpan.FromSeconds(5)),
+        "Layout and close did not drain.");
+    Assert(close.Result && runtime.ActiveGeneration("close") is null,
+        "Close left a captured runtime active.");
+}
+
+static void CapturedSurfaceDisposeClosesInFlightAttach()
+{
+    using var runtime = new ControlledCapturedSurfaceRuntime { BlockFirstCreate = true };
+    var adapter = new CapturedSurfaceBridgeAdapter(9004, runtime);
+    var attach = Task.Run(() => adapter.Attach("dispose", 401, Bounds(10), true, 1, 1));
+    Assert(runtime.FirstCreateEntered.Wait(TimeSpan.FromSeconds(5)), "The attach did not enter the runtime.");
+    using var disposeStarted = new ManualResetEventSlim();
+    var dispose = Task.Run(() =>
+    {
+        disposeStarted.Set();
+        adapter.Dispose();
+    });
+    Assert(disposeStarted.Wait(TimeSpan.FromSeconds(5)), "The dispose task did not start.");
+    Assert(!dispose.Wait(TimeSpan.FromMilliseconds(200)), "Dispose overtook an in-flight attach.");
+
+    runtime.ReleaseFirstCreate.Set();
+    Assert(attach.Wait(TimeSpan.FromSeconds(5)) && dispose.Wait(TimeSpan.FromSeconds(5)),
+        "Attach and dispose did not drain.");
+    Assert(runtime.ActiveGeneration("dispose") is null,
+        "Dispose leaked the runtime created by an in-flight attach.");
+    Assert(runtime.ClosedGenerations.SequenceEqual([1]),
+        "Dispose did not close the committed generation exactly once.");
+    Assert(!adapter.TryGetState("dispose", out _), "A disposed adapter still exposed captured state.");
+}
+
+static NativeWindowBounds Bounds(int offset) => new(offset, offset, 640, 480);
+
 sealed class TempDirectory : IDisposable
 {
     public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "cloudos-host-tests", Guid.NewGuid().ToString("N"));
@@ -577,6 +787,150 @@ sealed class TempDirectory : IDisposable
     }
 }
 
+sealed class ControlledCapturedSurfaceRuntime : ICapturedSurfaceSessionRuntime, IDisposable
+{
+    private readonly object _sync = new();
+    private readonly Dictionary<string, (int Generation, long Revision)> _active = new(StringComparer.Ordinal);
+    private readonly List<int> _closedGenerations = [];
+    private readonly List<long> _appliedRevisions = [];
+    private int _createCallCount;
+    private int _layoutCallCount;
+
+    public bool BlockFirstCreate { get; init; }
+    public bool BlockFirstLayout { get; init; }
+    public ManualResetEventSlim FirstCreateEntered { get; } = new();
+    public ManualResetEventSlim ReleaseFirstCreate { get; } = new();
+    public ManualResetEventSlim FirstLayoutEntered { get; } = new();
+    public ManualResetEventSlim ReleaseFirstLayout { get; } = new();
+    public int CreateCallCount => Volatile.Read(ref _createCallCount);
+    public int LayoutCallCount => Volatile.Read(ref _layoutCallCount);
+
+    public int[] ClosedGenerations
+    {
+        get { lock (_sync) return [.. _closedGenerations]; }
+    }
+
+    public long[] AppliedRevisions
+    {
+        get { lock (_sync) return [.. _appliedRevisions]; }
+    }
+
+    public CapturedSurfaceSessionSnapshot CreateAndStart(
+        string surfaceId,
+        int generation,
+        long sourceWindowHandle,
+        long ownerWindowHandle,
+        WindowsCapturePresentationLayout initialLayout,
+        WindowsFrameHealthOptions? frameHealthOptions = null)
+    {
+        var call = Interlocked.Increment(ref _createCallCount);
+        if (BlockFirstCreate && call == 1)
+        {
+            FirstCreateEntered.Set();
+            if (!ReleaseFirstCreate.Wait(TimeSpan.FromSeconds(5)))
+                throw new TimeoutException("The test did not release the first create call.");
+        }
+        lock (_sync)
+        {
+            if (_active.ContainsKey(surfaceId))
+                throw new InvalidOperationException("A runtime generation was replaced without closing its predecessor.");
+            _active.Add(surfaceId, (generation, initialLayout.Revision));
+        }
+        return Snapshot(surfaceId, generation, sourceWindowHandle, initialLayout.Revision);
+    }
+
+    public bool TryGetSnapshot(string surfaceId, int generation, out CapturedSurfaceSessionSnapshot? snapshot)
+    {
+        lock (_sync)
+        {
+            if (!_active.TryGetValue(surfaceId, out var current) || current.Generation != generation)
+            {
+                snapshot = null;
+                return false;
+            }
+            snapshot = Snapshot(surfaceId, generation, 1, current.Revision);
+            return true;
+        }
+    }
+
+    public void ApplyLayout(string surfaceId, int generation, WindowsCapturePresentationLayout layout)
+    {
+        var call = Interlocked.Increment(ref _layoutCallCount);
+        if (BlockFirstLayout && call == 1)
+        {
+            FirstLayoutEntered.Set();
+            if (!ReleaseFirstLayout.Wait(TimeSpan.FromSeconds(5)))
+                throw new TimeoutException("The test did not release the first layout call.");
+        }
+        lock (_sync)
+        {
+            if (!_active.TryGetValue(surfaceId, out var current) || current.Generation != generation)
+                throw new ObjectDisposedException(surfaceId);
+            if (layout.Revision <= current.Revision)
+                throw new InvalidOperationException("The runtime received a stale layout revision.");
+            _active[surfaceId] = (generation, layout.Revision);
+            _appliedRevisions.Add(layout.Revision);
+        }
+    }
+
+    public bool RoutePointer(
+        string surfaceId,
+        int generation,
+        long sequence,
+        WindowsCapturePointerEventKind kind,
+        WindowsCapturePointerButton button,
+        int wheelDelta,
+        bool shift,
+        bool control,
+        bool alt,
+        double surfaceCssWidth,
+        double surfaceCssHeight,
+        double localCssX,
+        double localCssY) => ActiveGeneration(surfaceId) == generation;
+
+    public bool RouteKey(
+        string surfaceId,
+        int generation,
+        long sequence,
+        WindowsCaptureKeyEventKind kind,
+        int virtualKey,
+        int scanCode,
+        bool extended,
+        bool repeat) => ActiveGeneration(surfaceId) == generation;
+
+    public bool Close(string surfaceId, int generation)
+    {
+        lock (_sync)
+        {
+            if (!_active.TryGetValue(surfaceId, out var current) || current.Generation != generation)
+                return false;
+            _active.Remove(surfaceId);
+            _closedGenerations.Add(generation);
+            return true;
+        }
+    }
+
+    public int? ActiveGeneration(string surfaceId)
+    {
+        lock (_sync) return _active.TryGetValue(surfaceId, out var current) ? current.Generation : null;
+    }
+
+    public void Dispose()
+    {
+        FirstCreateEntered.Dispose();
+        ReleaseFirstCreate.Dispose();
+        FirstLayoutEntered.Dispose();
+        ReleaseFirstLayout.Dispose();
+    }
+
+    private static CapturedSurfaceSessionSnapshot Snapshot(
+        string surfaceId,
+        int generation,
+        long sourceWindowHandle,
+        long revision) =>
+        new(surfaceId, generation, sourceWindowHandle, 2, null!, null!, true);
+}
+
 static class NativeFixtureWindow
 {
     internal const string Title = "CloudOS Native Containment Fixture";
@@ -586,25 +940,29 @@ static class NativeFixtureWindow
     private const uint WsExAppWindow = 0x00040000;
     private const uint WsExToolWindow = 0x00000080;
 
-    internal static void RunVisibleMessageLoop()
+    internal static void RunVisibleMessageLoop(int windowCount = 1)
     {
-        var hwnd = CreateWindowEx(
-            WsExAppWindow,
-            "STATIC",
-            Title,
-            WsPopup | WsVisible,
-            20,
-            20,
-            420,
-            280,
-            IntPtr.Zero,
-            IntPtr.Zero,
-            GetModuleHandle(null),
-            IntPtr.Zero);
-        if (hwnd == IntPtr.Zero)
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "The native fixture HWND could not be created.");
-        ShowWindow(hwnd, 5);
-        UpdateWindow(hwnd);
+        if (windowCount is < 1 or > 2) throw new ArgumentOutOfRangeException(nameof(windowCount));
+        for (var index = 0; index < windowCount; index++)
+        {
+            var hwnd = CreateWindowEx(
+                WsExAppWindow,
+                "STATIC",
+                index == 0 ? Title : $"{Title} {index + 1}",
+                WsPopup | WsVisible,
+                20 + (index * 40),
+                20 + (index * 40),
+                420,
+                280,
+                IntPtr.Zero,
+                IntPtr.Zero,
+                GetModuleHandle(null),
+                IntPtr.Zero);
+            if (hwnd == IntPtr.Zero)
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "The native fixture HWND could not be created.");
+            ShowWindow(hwnd, 5);
+            UpdateWindow(hwnd);
+        }
         while (GetMessage(out var message, IntPtr.Zero, 0, 0) > 0)
         {
             TranslateMessage(ref message);

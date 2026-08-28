@@ -62,6 +62,7 @@ export function nativeSessionListsEqual(previous, next) {
       || left.sessionId !== right.sessionId
       || left.title !== right.title
       || left.processId !== right.processId
+      || left.launchProcessId !== right.launchProcessId
       || left.minimized !== right.minimized
       || left.maximized !== right.maximized
       || left.contained !== right.contained
@@ -74,6 +75,11 @@ export function nativeSessionListsEqual(previous, next) {
   return true;
 }
 
+function sessionLaunchProcessId(session) {
+  if (Number.isInteger(session?.launchProcessId) && session.launchProcessId > 0) return session.launchProcessId;
+  return Number.isInteger(session?.processId) && session.processId > 0 ? session.processId : null;
+}
+
 /** Finds the concrete native window created by an allow-listed launch. */
 export function nativeSessionForLaunch(sessions, launch) {
   if (!Array.isArray(sessions) || !launch) return null;
@@ -82,5 +88,33 @@ export function nativeSessionForLaunch(sessions, launch) {
     if (exact) return exact;
   }
   if (!Number.isInteger(launch.pid) || launch.pid <= 0) return null;
-  return sessions.find((session) => session?.processId === launch.pid) || null;
+
+  // Legacy Hosts may not return an opaque session capability. In that fallback we
+  // can correlate by the launch Job/root PID, but only if the candidate is unique.
+  // A process can own several top-level HWNDs, and a Job can contain several GUI
+  // descendants; choosing the first array entry would make ordering a capability.
+  const candidates = sessions.filter((session) => sessionLaunchProcessId(session) === launch.pid);
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
+/**
+ * A contained launch may replace a splash/bootstrap HWND with another top-level
+ * window owned by a different descendant process. The Host exposes launchProcessId
+ * as the stable Job/root capability. Rebind only when exactly one fresh quarantined
+ * session belongs to that same launch capability; never infer ownership from an
+ * arbitrary PID or from timing alone.
+ */
+export function nativeReplacementSession(sessions, currentSessionId, launchProcessId) {
+  if (!Array.isArray(sessions)
+      || typeof currentSessionId !== 'string'
+      || !currentSessionId
+      || !Number.isInteger(launchProcessId)
+      || launchProcessId <= 0) return null;
+
+  const candidates = sessions.filter((session) => session
+    && session.sessionId !== currentSessionId
+    && sessionLaunchProcessId(session) === launchProcessId
+    && session.contained === false
+    && session.containmentMode === 'hidden-quarantine');
+  return candidates.length === 1 ? candidates[0] : null;
 }

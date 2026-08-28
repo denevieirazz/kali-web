@@ -32,7 +32,7 @@ function windowsFixture(name: string, index: number) {
   };
 }
 
-// Keep the already-reviewed 241-app visual contract (23 CloudOS + 218 Windows)
+// Keep the already-reviewed 242-app visual contract (24 CloudOS + 218 Windows)
 // while removing the GitHub runner's mutable Start Menu from the test input.
 // Only the first Windows entries are visible at scrollTop=0; the canonical tail
 // keeps the large-catalog/scroll geometry deterministic without representing
@@ -82,8 +82,8 @@ test.describe('PW-02 — Menu Iniciar', () => {
       await expect(page.locator('.start-app-btn', { hasText: name })).toBeVisible({ timeout: 5_000 });
     }
     await expect(tabs.locator('button', { hasText: 'Windows' })).toContainText('218');
-    await expect(allTab).toContainText('241');
-    expect(await page.locator('.start-app-btn').count()).toBe(241);
+    await expect(allTab).toContainText('242');
+    expect(await page.locator('.start-app-btn').count()).toBe(242);
 
     // The deterministic large-catalog image is a strict visual contract. Intentional UI changes must refresh the baseline.
     await expect(page).toHaveScreenshot('start-menu-all.png');

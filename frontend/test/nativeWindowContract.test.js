@@ -26,6 +26,7 @@ test('deduplicates native session events only when observable state is identical
     sessionId: 'window-one',
     title: 'Editor',
     processId: 42,
+    launchProcessId: 42,
     minimized: false,
     maximized: false,
     contained: true,
@@ -36,18 +37,20 @@ test('deduplicates native session events only when observable state is identical
 
   assert.equal(nativeSessionListsEqual([session], [{ ...session, bounds: { ...session.bounds } }]), true);
   assert.equal(nativeSessionListsEqual([session], [{ ...session, title: 'Editor 2' }]), false);
+  assert.equal(nativeSessionListsEqual([session], [{ ...session, launchProcessId: 84 }]), false);
   assert.equal(nativeSessionListsEqual([session], [{ ...session, visible: false }]), false);
   assert.equal(nativeSessionListsEqual([session], [{ ...session, minimized: true }]), false);
   assert.equal(nativeSessionListsEqual([session], [{ ...session, bounds: { ...session.bounds, width: 641 } }]), false);
   assert.equal(nativeSessionListsEqual([session], []), false);
 });
 
-test('correlates a launch to a native session by opaque id before process id', () => {
+test('correlates by opaque session id before a unique launch/process fallback', () => {
   const sessions = [
     { sessionId: 'window-one', processId: 42 },
     { sessionId: 'window-two', processId: 42 }
   ];
   assert.equal(nativeSessionForLaunch(sessions, { sessionId: 'window-two', pid: 42 })?.sessionId, 'window-two');
-  assert.equal(nativeSessionForLaunch(sessions, { pid: 42 })?.sessionId, 'window-one');
+  assert.equal(nativeSessionForLaunch(sessions, { pid: 42 }), null);
+  assert.equal(nativeSessionForLaunch([sessions[0]], { pid: 42 })?.sessionId, 'window-one');
   assert.equal(nativeSessionForLaunch(sessions, { pid: 0 }), null);
 });

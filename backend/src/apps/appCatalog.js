@@ -15,6 +15,37 @@ const BLOCKED_SHORTCUT_TARGETS = new Set([
 const ISOLATED_CHROMIUM_EXECUTABLES = new Set([
   'brave.exe', 'chrome.exe', 'chromium.exe', 'msedge.exe', 'vivaldi.exe', 'opera.exe'
 ]);
+const BLOCKED_CHROMIUM_SHORTCUT_SWITCHES = new Set([
+  'remote-debugging-port',
+  'remote-debugging-address',
+  'remote-debugging-pipe',
+  'remote-allow-origins',
+  'no-sandbox',
+  'disable-gpu-sandbox',
+  'disable-web-security',
+  'ignore-certificate-errors',
+  'ignore-certificate-errors-spki-list',
+  'allow-running-insecure-content',
+  'load-extension',
+  'disable-extensions-except'
+]);
+const CHROMIUM_SHORTCUT_SWITCHES_WITH_VALUE = new Set([
+  'remote-debugging-port',
+  'remote-debugging-address',
+  'remote-allow-origins',
+  'ignore-certificate-errors-spki-list',
+  'load-extension',
+  'disable-extensions-except'
+]);
+const BLOCKED_FIREFOX_SHORTCUT_SWITCHES = new Set([
+  'start-debugger-server',
+  'marionette',
+  'remote-debugging-port'
+]);
+const FIREFOX_SHORTCUT_SWITCHES_WITH_VALUE = new Set([
+  'start-debugger-server',
+  'remote-debugging-port'
+]);
 const WINDOWS_SCRIPT_EXTENSIONS = new Set(['.bat', '.cmd']);
 const catalogById = new Map();
 let cachedCatalog = [];
@@ -23,6 +54,7 @@ let refreshInFlight = null;
 const CACHE_TTL_MS = 60_000;
 const MAX_SHORTCUT_ARGUMENTS = 128;
 const MAX_SHORTCUT_ARGUMENT_LENGTH = 8_192;
+const WINDOWS_LAUNCH_ISOLATION_ID_PATTERN = /^[a-f0-9]{32}$/;
 
 function currentWindowMode() {
   return process.env.CLOUDOS_NATIVE_HOST === '1' ? 'native-managed' : 'unavailable';
@@ -105,11 +137,15 @@ export function buildWindowsScriptLaunchArguments(scriptPath) {
   return ['/d', '/s', '/v:off', '/c', 'call', scriptPath];
 }
 
-export function buildIsolatedWindowsAppArguments(executable, baseDirectory) {
+export function buildIsolatedWindowsAppArguments(executable, baseDirectory, launchIsolationId = '') {
   const executableName = path.win32.basename(String(executable || '')).toLowerCase();
   const root = String(baseDirectory || '').trim();
   if (!path.win32.isAbsolute(root)) return [];
-  const profileDirectory = path.win32.join(root, 'profiles', 'windows', executableName || 'application');
+  const isolationId = String(launchIsolationId || '').trim().toLowerCase();
+  if (isolationId && !WINDOWS_LAUNCH_ISOLATION_ID_PATTERN.test(isolationId)) return [];
+  const profileDirectory = isolationId
+    ? path.win32.join(root, 'profiles', 'windows', executableName || 'application', isolationId)
+    : path.win32.join(root, 'profiles', 'windows', executableName || 'application');
   if (ISOLATED_CHROMIUM_EXECUTABLES.has(executableName)) {
     return [`--user-data-dir=${profileDirectory}`, '--no-first-run', '--new-window'];
   }
@@ -117,6 +153,112 @@ export function buildIsolatedWindowsAppArguments(executable, baseDirectory) {
     return ['-profile', profileDirectory, '-no-remote', '-new-instance'];
   }
   return [];
+}
+
+function windowsSwitchKey(argument) {
+  const value = String(argument || '').trim().toLowerCase();
+  const match = value.match(/^(?:--|-|\/)([^=]+)(?:=.*)?$/);
+  return match?.[1] || null;
+}
+
+function requiresIsolatedWindowsProfile(executableName) {
+  return ISOLATED_CHROMIUM_EXECUTABLES.has(executableName) || executableName === 'firefox.exe';
+}
+
+function skipSeparateSwitchOperand(argumentsList, index, argument) {
+  return !argument.includes('=')
+    && index + 1 < argumentsList.length
+    && !windowsSwitchKey(argumentsList[index + 1]);
+}
+
+function stripBlockedBrowserSwitch(argumentsList, index, argument, switchKey, blocked, withValue) {
+  if (!switchKey || !blocked.has(switchKey)) return { blocked: false, nextIndex: index };
+  const shouldSkipOperand = withValue.has(switchKey)
+    && skipSeparateSwitchOperand(argumentsList, index, argument);
+  return { blocked: true, nextIndex: shouldSkipOperand ? index + 1 : index };
+}
+
+export function mergeIsolatedWindowsAppArguments(executable, baseDirectory, catalogArguments = [], launchIsolationId = '') {
+  const argumentsList = Array.isArray(catalogArguments)
+    ? catalogArguments.filter((value) => typeof value === 'string' && !/[\0\r\n]/.test(value)).slice(0, MAX_SHORTCUT_ARGUMENTS)
+    : [];
+  const executableName = path.win32.basename(String(executable || '')).toLowerCase();
+  const isolationArguments = buildIsolatedWindowsAppArguments(executable, baseDirectory, launchIsolationId);
+  if (requiresIsolatedWindowsProfile(executableName) && isolationArguments.length === 0) {
+    throw Object.assign(
+      new Error('O navegador não pode ser iniciado sem um diretório de perfil isolado do CloudOS.'),
+      { code: 'BROWSER_PROFILE_ISOLATION_UNAVAILABLE' }
+    );
+  }
+  if (isolationArguments.length === 0) return argumentsList;
+
+  const filtered = [];
+  for (let index = 0; index < argumentsList.length; index += 1) {
+    const argument = argumentsList[index];
+    const switchKey = windowsSwitchKey(argument);
+
+    if (ISOLATED_CHROMIUM_EXECUTABLES.has(executableName)
+        && ['user-data-dir', 'profile-directory'].includes(switchKey || '')) {
+      // Both switches select persistent browser state. CloudOS owns the complete
+      // user-data/profile namespace, so shortcut arguments may not redirect either
+      // layer. Tolerate split forms as well so the operand cannot become a URL.
+      if (skipSeparateSwitchOperand(argumentsList, index, argument)) index += 1;
+      continue;
+    }
+
+    if (ISOLATED_CHROMIUM_EXECUTABLES.has(executableName)) {
+      const blocked = stripBlockedBrowserSwitch(
+        argumentsList,
+        index,
+        argument,
+        switchKey,
+        BLOCKED_CHROMIUM_SHORTCUT_SWITCHES,
+        CHROMIUM_SHORTCUT_SWITCHES_WITH_VALUE
+      );
+      if (blocked.blocked) {
+        index = blocked.nextIndex;
+        continue;
+      }
+    }
+
+    if (executableName === 'firefox.exe'
+        && ['profile', 'p', 'profilemanager', 'migration', 'createprofile'].includes(switchKey || '')) {
+      // Profile selectors/managers and migration/create-profile startup modes can
+      // escape or replace the CloudOS-owned profile. Keep normal content/window
+      // switches, but strip every known profile-state selector before launch.
+      if (['profile', 'p', 'createprofile'].includes(switchKey || '')
+          && skipSeparateSwitchOperand(argumentsList, index, argument)) index += 1;
+      continue;
+    }
+
+    if (executableName === 'firefox.exe') {
+      const blocked = stripBlockedBrowserSwitch(
+        argumentsList,
+        index,
+        argument,
+        switchKey,
+        BLOCKED_FIREFOX_SHORTCUT_SWITCHES,
+        FIREFOX_SHORTCUT_SWITCHES_WITH_VALUE
+      );
+      if (blocked.blocked) {
+        index = blocked.nextIndex;
+        continue;
+      }
+    }
+
+    filtered.push(argument);
+  }
+
+  return [...isolationArguments, ...filtered];
+}
+
+export function normalizeWindowsLaunchKind(launchKind, launchArguments) {
+  if (launchKind === 'windows-shortcut-direct'
+      && Array.isArray(launchArguments)
+      && launchArguments.length > 0) {
+    return 'windows-shortcut-argv';
+  }
+  return launchKind;
 }
 
 // Parse only the documented Windows backslash/quote grammar used by conventional
@@ -222,7 +364,7 @@ export function parseWindowsAppDiscovery(payload, existingApps = []) {
       name,
       source: 'windows',
       distribution: null,
-      icon: '\u25a6',
+      icon: '▦',
       kind: directKind,
       shortcutPath,
       targetPath,
@@ -253,7 +395,7 @@ export function parseWindowsAppDiscovery(payload, existingApps = []) {
       name,
       source: 'windows',
       distribution: null,
-      icon: '\u25a6',
+      icon: '▦',
       kind: 'windows-executable',
       executable,
       args: [],
@@ -276,7 +418,7 @@ export function parseWindowsAppDiscovery(payload, existingApps = []) {
       name: row.Name.trim().slice(0, 160),
       source: 'windows',
       distribution: null,
-      icon: '\u25a6',
+      icon: '▦',
       kind: 'windows-start-app',
       appUserModelId: row.AppID,
       discoverySource: 'start-apps',
@@ -385,12 +527,19 @@ export async function launchCatalogApp(id) {
     : (launchKind === 'windows-shortcut-direct'
         ? []
         : (Array.isArray(app.args) ? app.args.filter((value) => typeof value === 'string' && !/[\0\r\n]/.test(value)).slice(0, 128) : []));
-  const isolatedProfileArguments = catalogArguments.length === 0
-    ? buildIsolatedWindowsAppArguments(
+  const executableName = path.win32.basename(String(executable || '')).toLowerCase();
+  const launchIsolationId = !scriptLaunch && requiresIsolatedWindowsProfile(executableName)
+    ? crypto.randomBytes(16).toString('hex')
+    : '';
+  const launchArguments = scriptLaunch
+    ? catalogArguments
+    : mergeIsolatedWindowsAppArguments(
         executable,
-        process.env.CLOUDOS_LOCAL_ROOT || process.env.CLOUDOS_DATA_DIR || '')
-    : [];
-  const launchArguments = [...isolatedProfileArguments, ...catalogArguments];
+        process.env.CLOUDOS_LOCAL_ROOT || process.env.CLOUDOS_DATA_DIR || '',
+        catalogArguments,
+        launchIsolationId
+      );
+  const effectiveLaunchKind = normalizeWindowsLaunchKind(launchKind, launchArguments);
   const workingDirectory = scriptLaunch
     ? (app.workingDirectory || path.win32.dirname(scriptPath))
     : (app.workingDirectory || path.win32.dirname(executable));
@@ -401,7 +550,7 @@ export async function launchCatalogApp(id) {
     source: app.source,
     distribution: null,
     windowMode: 'native-managed',
-    launchKind,
+    launchKind: effectiveLaunchKind,
     launchSpec: {
       executable,
       arguments: launchArguments,

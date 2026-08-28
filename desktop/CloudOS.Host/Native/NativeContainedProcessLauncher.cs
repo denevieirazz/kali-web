@@ -369,6 +369,7 @@ public sealed class NativeContainedProcessLease : IDisposable
     private readonly SafeKernelHandle _nativeProcess;
     private readonly SafeJobHandle _job;
     private readonly object _jobQuerySync = new();
+    private readonly int _processId;
     private SafeKernelHandle? _primaryThread;
     private IntPtr _jobProcessListBuffer;
     private int _jobProcessListBufferAllocationCount;
@@ -381,14 +382,19 @@ public sealed class NativeContainedProcessLease : IDisposable
         SafeJobHandle job)
     {
         Process = process;
+        _processId = process.Id;
         _nativeProcess = nativeProcess;
         _primaryThread = primaryThread;
         _job = job;
     }
 
     public Process Process { get; }
-    public int ProcessId => Process.Id;
+    public int ProcessId => _processId;
     public bool IsResumed { get; private set; }
+    public bool IsDisposed
+    {
+        get { lock (_jobQuerySync) return _disposed; }
+    }
 
     internal int JobProcessListBufferAllocationCount
     {
@@ -575,15 +581,30 @@ public static class NativeContainedJobTracker
         ArgumentNullException.ThrowIfNull(windows);
 
         var processIds = lease.GetMemberProcessIds();
+        var synchronized = new List<int>(processIds.Count);
         foreach (var processId in processIds)
         {
-            if (windows.IsTrackedProcess(processId)) continue;
-            using var process = Process.GetProcessById(processId);
-            if (NativeLaunchContainmentPolicy.IsSharedBroker(process.ProcessName))
-                throw new InvalidOperationException("A shared Windows broker entered the contained Job.");
-            windows.TrackLaunchedProcess(process);
+            if (windows.IsTrackedProcess(processId))
+            {
+                synchronized.Add(processId);
+                continue;
+            }
+            try
+            {
+                using var process = Process.GetProcessById(processId);
+                if (NativeLaunchContainmentPolicy.IsSharedBroker(process.ProcessName))
+                    throw new InvalidOperationException("A shared Windows broker entered the contained Job.");
+                windows.TrackLaunchedProcess(process);
+                synchronized.Add(processId);
+            }
+            catch (ArgumentException)
+            {
+                // Chromium helpers can exit between the Job membership query and opening
+                // their Process handle. An already exited member has no HWND to adopt and
+                // is omitted; the next Job query remains authoritative.
+            }
         }
-        return processIds;
+        return synchronized;
     }
 }
 
