@@ -64,6 +64,13 @@ foreach ($report in $RequiredReports) {
     }
 }
 
+$validatorPath = Join-Path $matrixPath 'VALIDATE_REPORT.ps1'
+if (-not (Test-Path -LiteralPath $validatorPath -PathType Leaf)) {
+    throw "Matrix validator is missing: $validatorPath"
+}
+& $validatorPath -MatrixDirectory $matrixPath
+if ($LASTEXITCODE -ne 0) { throw "Matrix validator returned exit code $LASTEXITCODE" }
+
 [void](Invoke-Git -Arguments @('add','--',$MatrixRelativePath))
 $staged = Get-GitLines -Arguments @('diff','--cached','--name-only')
 if ($staged.Count -eq 0) {
