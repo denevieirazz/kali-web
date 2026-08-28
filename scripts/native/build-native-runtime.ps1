@@ -27,6 +27,25 @@ function Find-MSBuildWithVCTools {
     return $null
 }
 
+function Normalize-CloudOSOutputDirectory {
+    param([AllowEmptyString()][string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
+
+    # MSBuild properties representing directories conventionally end in a backslash.
+    # When such a value is interpolated inside a quoted Exec argument, Windows argv
+    # parsing can preserve the closing quote as a literal character (C:\path\").
+    # Accept that transport artifact here; never let it become part of a filesystem path.
+    $candidate = $Path.Trim()
+    while ($candidate.Length -gt 0 -and ($candidate[0] -eq '"' -or $candidate[0] -eq "'")) {
+        $candidate = $candidate.Substring(1)
+    }
+    while ($candidate.Length -gt 0 -and ($candidate[$candidate.Length - 1] -eq '"' -or $candidate[$candidate.Length - 1] -eq "'")) {
+        $candidate = $candidate.Substring(0, $candidate.Length - 1)
+    }
+    if ([string]::IsNullOrWhiteSpace($candidate)) { throw 'CLOUDOS_NATIVE_RUNTIME_OUTPUT_DIRECTORY_INVALID' }
+    return [IO.Path]::GetFullPath($candidate)
+}
+
 if (-not $IsWindows) {
     if ($Required) { throw 'CLOUDOS_NATIVE_RUNTIME_WINDOWS_REQUIRED' }
     Write-Host '[CloudOS.NativeRuntime] skipped: Windows host required.'
@@ -48,9 +67,10 @@ if ($LASTEXITCODE -ne 0) { throw "CLOUDOS_NATIVE_RUNTIME_BUILD_FAILED:exit=$LAST
 $dll = Join-Path $root "desktop\CloudOS.NativeRuntime\bin\$Configuration\CloudOS.NativeRuntime.dll"
 if (-not (Test-Path -LiteralPath $dll -PathType Leaf)) { throw "CLOUDOS_NATIVE_RUNTIME_OUTPUT_MISSING:$dll" }
 
-if (-not [string]::IsNullOrWhiteSpace($OutputDirectory)) {
-    New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
-    Copy-Item -LiteralPath $dll -Destination (Join-Path $OutputDirectory 'CloudOS.NativeRuntime.dll') -Force
+$normalizedOutputDirectory = Normalize-CloudOSOutputDirectory $OutputDirectory
+if (-not [string]::IsNullOrWhiteSpace($normalizedOutputDirectory)) {
+    New-Item -ItemType Directory -Force -Path $normalizedOutputDirectory | Out-Null
+    Copy-Item -LiteralPath $dll -Destination (Join-Path $normalizedOutputDirectory 'CloudOS.NativeRuntime.dll') -Force
 }
 
 Write-Host "CLOUDOS_NATIVE_RUNTIME_BUILT configuration=$Configuration dll=$dll"
