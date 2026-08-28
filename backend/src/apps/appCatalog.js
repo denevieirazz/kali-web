@@ -15,6 +15,37 @@ const BLOCKED_SHORTCUT_TARGETS = new Set([
 const ISOLATED_CHROMIUM_EXECUTABLES = new Set([
   'brave.exe', 'chrome.exe', 'chromium.exe', 'msedge.exe', 'vivaldi.exe', 'opera.exe'
 ]);
+const BLOCKED_CHROMIUM_SHORTCUT_SWITCHES = new Set([
+  'remote-debugging-port',
+  'remote-debugging-address',
+  'remote-debugging-pipe',
+  'remote-allow-origins',
+  'no-sandbox',
+  'disable-gpu-sandbox',
+  'disable-web-security',
+  'ignore-certificate-errors',
+  'ignore-certificate-errors-spki-list',
+  'allow-running-insecure-content',
+  'load-extension',
+  'disable-extensions-except'
+]);
+const CHROMIUM_SHORTCUT_SWITCHES_WITH_VALUE = new Set([
+  'remote-debugging-port',
+  'remote-debugging-address',
+  'remote-allow-origins',
+  'ignore-certificate-errors-spki-list',
+  'load-extension',
+  'disable-extensions-except'
+]);
+const BLOCKED_FIREFOX_SHORTCUT_SWITCHES = new Set([
+  'start-debugger-server',
+  'marionette',
+  'remote-debugging-port'
+]);
+const FIREFOX_SHORTCUT_SWITCHES_WITH_VALUE = new Set([
+  'start-debugger-server',
+  'remote-debugging-port'
+]);
 const WINDOWS_SCRIPT_EXTENSIONS = new Set(['.bat', '.cmd']);
 const catalogById = new Map();
 let cachedCatalog = [];
@@ -135,6 +166,13 @@ function skipSeparateSwitchOperand(argumentsList, index, argument) {
     && !windowsSwitchKey(argumentsList[index + 1]);
 }
 
+function stripBlockedBrowserSwitch(argumentsList, index, argument, switchKey, blocked, withValue) {
+  if (!switchKey || !blocked.has(switchKey)) return { blocked: false, nextIndex: index };
+  const shouldSkipOperand = withValue.has(switchKey)
+    && skipSeparateSwitchOperand(argumentsList, index, argument);
+  return { blocked: true, nextIndex: shouldSkipOperand ? index + 1 : index };
+}
+
 export function mergeIsolatedWindowsAppArguments(executable, baseDirectory, catalogArguments = []) {
   const argumentsList = Array.isArray(catalogArguments)
     ? catalogArguments.filter((value) => typeof value === 'string' && !/[\0\r\n]/.test(value)).slice(0, MAX_SHORTCUT_ARGUMENTS)
@@ -163,6 +201,21 @@ export function mergeIsolatedWindowsAppArguments(executable, baseDirectory, cata
       continue;
     }
 
+    if (ISOLATED_CHROMIUM_EXECUTABLES.has(executableName)) {
+      const blocked = stripBlockedBrowserSwitch(
+        argumentsList,
+        index,
+        argument,
+        switchKey,
+        BLOCKED_CHROMIUM_SHORTCUT_SWITCHES,
+        CHROMIUM_SHORTCUT_SWITCHES_WITH_VALUE
+      );
+      if (blocked.blocked) {
+        index = blocked.nextIndex;
+        continue;
+      }
+    }
+
     if (executableName === 'firefox.exe'
         && ['profile', 'p', 'profilemanager', 'migration', 'createprofile'].includes(switchKey || '')) {
       // Profile selectors/managers and migration/create-profile startup modes can
@@ -171,6 +224,21 @@ export function mergeIsolatedWindowsAppArguments(executable, baseDirectory, cata
       if (['profile', 'p', 'createprofile'].includes(switchKey || '')
           && skipSeparateSwitchOperand(argumentsList, index, argument)) index += 1;
       continue;
+    }
+
+    if (executableName === 'firefox.exe') {
+      const blocked = stripBlockedBrowserSwitch(
+        argumentsList,
+        index,
+        argument,
+        switchKey,
+        BLOCKED_FIREFOX_SHORTCUT_SWITCHES,
+        FIREFOX_SHORTCUT_SWITCHES_WITH_VALUE
+      );
+      if (blocked.blocked) {
+        index = blocked.nextIndex;
+        continue;
+      }
     }
 
     filtered.push(argument);
