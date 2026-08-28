@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  assertNoExternalInstanceHandoffRisk,
   evaluateExternalInstanceProbe,
   hasExplicitPerLaunchInstanceIsolation,
   shouldGuardExternalInstanceHandoff
@@ -114,4 +115,13 @@ test('probe ignora linhas inválidas e executável homônimo em outro caminho', 
   );
   assert.deepEqual(result.conflicts, []);
   assert.deepEqual(result.unrelated, [{ pid: 99, path: 'd:\\other vendor\\app.exe' }]);
+});
+
+test('probe real no Windows detecta o próprio node.exe já em execução', { skip: process.platform !== 'win32' }, async () => {
+  await assert.rejects(
+    assertNoExternalInstanceHandoffRisk(launch(process.execPath)),
+    (error) => error?.code === 'EXTERNAL_INSTANCE_CONFLICT'
+      && Array.isArray(error?.conflictingProcessIds)
+      && error.conflictingProcessIds.includes(process.pid)
+  );
 });
