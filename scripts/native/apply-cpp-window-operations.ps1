@@ -4,6 +4,7 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Temporary migration patcher. The Windows runner validates C++ + Host before committing production code.
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $path = Join-Path $repoRoot 'desktop\CloudOS.Host\Native\NativeWindowManager.cs'
 $content = [IO.File]::ReadAllText($path)
