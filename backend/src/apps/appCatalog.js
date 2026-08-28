@@ -54,6 +54,7 @@ let refreshInFlight = null;
 const CACHE_TTL_MS = 60_000;
 const MAX_SHORTCUT_ARGUMENTS = 128;
 const MAX_SHORTCUT_ARGUMENT_LENGTH = 8_192;
+const WINDOWS_LAUNCH_ISOLATION_ID_PATTERN = /^[a-f0-9]{32}$/;
 
 function currentWindowMode() {
   return process.env.CLOUDOS_NATIVE_HOST === '1' ? 'native-managed' : 'unavailable';
@@ -136,11 +137,15 @@ export function buildWindowsScriptLaunchArguments(scriptPath) {
   return ['/d', '/s', '/v:off', '/c', 'call', scriptPath];
 }
 
-export function buildIsolatedWindowsAppArguments(executable, baseDirectory) {
+export function buildIsolatedWindowsAppArguments(executable, baseDirectory, launchIsolationId = '') {
   const executableName = path.win32.basename(String(executable || '')).toLowerCase();
   const root = String(baseDirectory || '').trim();
   if (!path.win32.isAbsolute(root)) return [];
-  const profileDirectory = path.win32.join(root, 'profiles', 'windows', executableName || 'application');
+  const isolationId = String(launchIsolationId || '').trim().toLowerCase();
+  if (isolationId && !WINDOWS_LAUNCH_ISOLATION_ID_PATTERN.test(isolationId)) return [];
+  const profileDirectory = isolationId
+    ? path.win32.join(root, 'profiles', 'windows', executableName || 'application', isolationId)
+    : path.win32.join(root, 'profiles', 'windows', executableName || 'application');
   if (ISOLATED_CHROMIUM_EXECUTABLES.has(executableName)) {
     return [`--user-data-dir=${profileDirectory}`, '--no-first-run', '--new-window'];
   }
@@ -173,12 +178,12 @@ function stripBlockedBrowserSwitch(argumentsList, index, argument, switchKey, bl
   return { blocked: true, nextIndex: shouldSkipOperand ? index + 1 : index };
 }
 
-export function mergeIsolatedWindowsAppArguments(executable, baseDirectory, catalogArguments = []) {
+export function mergeIsolatedWindowsAppArguments(executable, baseDirectory, catalogArguments = [], launchIsolationId = '') {
   const argumentsList = Array.isArray(catalogArguments)
     ? catalogArguments.filter((value) => typeof value === 'string' && !/[\0\r\n]/.test(value)).slice(0, MAX_SHORTCUT_ARGUMENTS)
     : [];
   const executableName = path.win32.basename(String(executable || '')).toLowerCase();
-  const isolationArguments = buildIsolatedWindowsAppArguments(executable, baseDirectory);
+  const isolationArguments = buildIsolatedWindowsAppArguments(executable, baseDirectory, launchIsolationId);
   if (requiresIsolatedWindowsProfile(executableName) && isolationArguments.length === 0) {
     throw Object.assign(
       new Error('O navegador não pode ser iniciado sem um diretório de perfil isolado do CloudOS.'),
@@ -522,12 +527,17 @@ export async function launchCatalogApp(id) {
     : (launchKind === 'windows-shortcut-direct'
         ? []
         : (Array.isArray(app.args) ? app.args.filter((value) => typeof value === 'string' && !/[\0\r\n]/.test(value)).slice(0, 128) : []));
+  const executableName = path.win32.basename(String(executable || '')).toLowerCase();
+  const launchIsolationId = !scriptLaunch && requiresIsolatedWindowsProfile(executableName)
+    ? crypto.randomBytes(16).toString('hex')
+    : '';
   const launchArguments = scriptLaunch
     ? catalogArguments
     : mergeIsolatedWindowsAppArguments(
         executable,
         process.env.CLOUDOS_LOCAL_ROOT || process.env.CLOUDOS_DATA_DIR || '',
-        catalogArguments
+        catalogArguments,
+        launchIsolationId
       );
   const effectiveLaunchKind = normalizeWindowsLaunchKind(launchKind, launchArguments);
   const workingDirectory = scriptLaunch
