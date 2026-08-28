@@ -65,6 +65,28 @@ test("contrato estático do Host: App.xaml.cs, MainWindow.xaml e MainWindow.xaml
   assert.match(mainCs, /SetWindowPos/, "MainWindow deve posicionar e compor a janela no DWM");
 });
 
+test("TryAttach libera o lock global antes de serializar um attachment já existente", () => {
+  const nativeWindowManager = fs.readFileSync(
+    path.join(root, "desktop/CloudOS.Host/Native/NativeWindowManager.cs"),
+    "utf8"
+  );
+  const start = nativeWindowManager.indexOf("public bool TryAttach(");
+  const end = nativeWindowManager.indexOf("public bool TryPrepareCapturedSource(", start);
+  assert.ok(start >= 0 && end > start, "TryAttach deve existir antes de TryPrepareCapturedSource");
+  const tryAttach = nativeWindowManager.slice(start, end);
+
+  assert.match(
+    tryAttach,
+    /bool alreadyAttached;[\s\S]*?lock \(_sync\)[\s\S]*?alreadyAttached = _attachments\.TryGetValue\(hwnd, out state\);[\s\S]*?if \(!alreadyAttached && !_quarantinedWindows\.ContainsKey\(hwnd\)\)[\s\S]*?\}\s*if \(alreadyAttached\)\s*return TryApplyAttachedLayout\(hwnd, state, bounds, visible, false, true, out error\);/,
+    "duplicate attach deve consultar o dicionário sob _sync e aplicar o layout somente depois de liberar _sync"
+  );
+  assert.doesNotMatch(
+    tryAttach,
+    /lock \(_sync\)\s*\{\s*if \(_attachments\.TryGetValue\(hwnd, out state\)\)\s*return TryApplyAttachedLayout/,
+    "não pode reintroduzir _sync -> state.SyncRoot no caminho de duplicate attach"
+  );
+});
+
 test("auditoria de janela valida HWND diferente de zero, visibilidade e retangulo em tela", () => {
   const result = validateWindowPlacement({
     hwnd: "0x240AC0",
