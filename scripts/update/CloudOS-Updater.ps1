@@ -128,25 +128,38 @@ function Assert-Repository {
     return $repository
 }
 
+function Test-RemoteBranchExists {
+    param(
+        [Parameter(Mandatory = $true)][string]$Repository,
+        [Parameter(Mandatory = $true)][string]$Remote,
+        [Parameter(Mandatory = $true)][string]$Branch
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Remote) -or [string]::IsNullOrWhiteSpace($Branch)) {
+        return $false
+    }
+
+    $trackingRef = "refs/remotes/$Remote/$Branch"
+    $localCheck = Invoke-RepositoryGit -Repository $Repository -Arguments @('show-ref', '--verify', '--quiet', $trackingRef)
+    if ($localCheck.ExitCode -eq 0) {
+        return $true
+    }
+
+    $remoteCheck = Invoke-RepositoryGit -Repository $Repository -Arguments @('ls-remote', '--exit-code', '--heads', $Remote, "refs/heads/$Branch")
+    return $remoteCheck.ExitCode -eq 0
+}
+
 function Get-RemoteAndBranch([string]$Repository, [string]$CurrentBranch) {
     if ($CurrentBranch -eq 'HEAD') {
         throw 'Detached HEAD detected. Checkout a branch before updating.'
     }
 
     $remote = ''
-    $branch = $CurrentBranch
+    $configuredBranch = ''
 
     $configuredRemote = Invoke-RepositoryGit -Repository $Repository -Arguments @('config', '--get', "branch.$CurrentBranch.remote")
     if ($configuredRemote.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($configuredRemote.Output) -and $configuredRemote.Output -ne '.') {
         $remote = $configuredRemote.Output.Trim()
-    }
-
-    $configuredMerge = Invoke-RepositoryGit -Repository $Repository -Arguments @('config', '--get', "branch.$CurrentBranch.merge")
-    if ($configuredMerge.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($configuredMerge.Output)) {
-        $mergeRef = $configuredMerge.Output.Trim()
-        if ($mergeRef.StartsWith('refs/heads/')) {
-            $branch = $mergeRef.Substring(11)
-        }
     }
 
     if ([string]::IsNullOrWhiteSpace($remote)) {
@@ -162,6 +175,26 @@ function Get-RemoteAndBranch([string]$Repository, [string]$CurrentBranch) {
         else {
             $remote = $remotes[0]
         }
+    }
+
+    $configuredMerge = Invoke-RepositoryGit -Repository $Repository -Arguments @('config', '--get', "branch.$CurrentBranch.merge")
+    if ($configuredMerge.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($configuredMerge.Output)) {
+        $mergeRef = $configuredMerge.Output.Trim()
+        if ($mergeRef.StartsWith('refs/heads/')) {
+            $configuredBranch = $mergeRef.Substring(11)
+        }
+    }
+
+    # Auto-detection rule: the local branch name wins when that branch exists on
+    # the selected remote. This prevents stale upstream configuration from making
+    # the updater compare integration/foo against an unrelated legacy branch.
+    $branch = $CurrentBranch
+    $matchingRemoteBranch = Test-RemoteBranchExists -Repository $Repository -Remote $remote -Branch $CurrentBranch
+    if (-not $matchingRemoteBranch -and -not [string]::IsNullOrWhiteSpace($configuredBranch)) {
+        $branch = $configuredBranch
+    }
+    elseif ($matchingRemoteBranch -and -not [string]::IsNullOrWhiteSpace($configuredBranch) -and $configuredBranch -ne $CurrentBranch) {
+        Write-UpdaterLog "Ignoring stale upstream '$remote/$configuredBranch'; using '$remote/$CurrentBranch'."
     }
 
     if ($advancedCheckBox.Checked) {
