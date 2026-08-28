@@ -60,7 +60,7 @@ foreach ($report in $RequiredReports) {
     }
     $text = [System.IO.File]::ReadAllText($path)
     if (-not $text.Contains($ProductSha)) {
-        throw "Required report does not pin PRODUCT_TESTED_SHA=$ProductSha: $path"
+        throw "Required report does not pin PRODUCT_TESTED_SHA=$ProductSha in $path"
     }
 }
 
@@ -123,3 +123,4 @@ Write-Host 'EVIDENCE CHECKPOINT: SUCCESS' -ForegroundColor Green
 Write-Host "branch=$EvidenceBranch"
 Write-Host "commit=$head"
 Write-Host "productTestedSha=$ProductSha"
+

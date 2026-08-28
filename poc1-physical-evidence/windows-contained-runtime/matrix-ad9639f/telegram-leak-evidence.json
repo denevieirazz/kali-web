@@ -1,0 +1,14 @@
+{
+  "SchemaVersion": 1,
+  "CollectedAt": "2026-08-28T15:31:22.1440337+00:00",
+  "Collector": "scripts/collect-windows-native-containment-evidence.ps1",
+  "FailClosed": true,
+  "ExpectedState": "Attached",
+  "Verdict": "ERROR",
+  "TargetProcessIds": [
+    14448
+  ],
+  "HostProcessId": 30260,
+  "Error": "Exception calling \"Enumerate\" with \"1\" argument(s): \"EnumWindows failed; nativeError=0; callback=none\"",
+  "ErrorType": "System.Management.Automation.MethodInvocationException"
+}

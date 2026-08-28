@@ -1,0 +1,16 @@
+{
+  "os": "Microsoft Windows 11 Pro",
+  "osVersion": "10.0.28000",
+  "osArchitecture": "64 bits",
+  "pwshVersion": "7.6.5",
+  "nodeVersion": "v22.23.2",
+  "npmVersion": "12.0.2",
+  "dotnetVersion": "8.0.424",
+  "gitVersion": "git version 2.54.0.windows.1",
+  "webView2Version": "151.0.4129.107",
+  "monitors": 2,
+  "primaryResolution": "2560x1440",
+  "virtualScreen": "5120x1440",
+  "recordedAtUtc": "2026-08-28T13:50:04.2364955+00:00",
+  "productTestedSha": "ad9639f1ce8d808d2d532404fd9ca6673244052e"
+}

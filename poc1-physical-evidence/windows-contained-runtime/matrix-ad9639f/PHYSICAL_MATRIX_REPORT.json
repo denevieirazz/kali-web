@@ -14,26 +14,92 @@
       "conclusion": "success"
     }
   },
-  "physicalRuntimeGate": "PENDING",
+  "physicalRuntimeGate": "FAIL",
   "totals": {
-    "runs": 0,
-    "pass": 0,
-    "fail": 0,
-    "expectedFailClosed": 0
+    "runs": 4,
+    "pass": 1,
+    "fail": 1,
+    "expectedFailClosed": 2
   },
-  "externalWindowLeak": null,
-  "altTabLeak": null,
-  "crossJobAdoption": null,
-  "orphanProcess": null,
+  "externalWindowLeak": true,
+  "altTabLeak": true,
+  "crossJobAdoption": false,
+  "orphanProcess": false,
   "cases": [
-    { "case": "win32-simple", "runtimeClass": "Win32 simple", "verdict": "PENDING" },
-    { "case": "splash-bootstrap", "runtimeClass": "splash/bootstrap -> final HWND", "verdict": "PENDING" },
-    { "case": "child-gui", "runtimeClass": "launcher/wrapper -> descendant GUI PID", "verdict": "PENDING" },
-    { "case": "electron-chromium", "runtimeClass": "Electron/Chromium-like", "verdict": "PENDING" },
-    { "case": "shortcut-args", "runtimeClass": "shortcut with safe argv", "verdict": "PENDING" },
-    { "case": "dual-instance", "runtimeClass": "simultaneous contained launches", "verdict": "PENDING" },
-    { "case": "close-reopen", "runtimeClass": "lifecycle close/reopen", "verdict": "PENDING" },
-    { "case": "multiwindow-limit", "runtimeClass": "multiwindow/modal ambiguity", "verdict": "PENDING" },
-    { "case": "stress", "runtimeClass": "repeated lifecycle stress", "verdict": "PENDING" }
+    {
+      "case": "win32-simple",
+      "runtimeClass": "Win32 simple",
+      "target": "Telegram.exe",
+      "runs": 1,
+      "pass": 0,
+      "fail": 1,
+      "expectedFailClosed": 0,
+      "externalWindowLeak": true,
+      "altTabLeak": true,
+      "inJob": false,
+      "ownedByHost": false,
+      "verdict": "FAIL"
+    },
+    {
+      "case": "splash-bootstrap",
+      "runtimeClass": "splash/bootstrap -> final HWND",
+      "target": "windows-start-app (Mapa de Caracteres)",
+      "runs": 1,
+      "pass": 0,
+      "fail": 0,
+      "expectedFailClosed": 1,
+      "externalWindowLeak": false,
+      "altTabLeak": false,
+      "verdict": "PASS_EXPECTED_FAIL_CLOSED"
+    },
+    {
+      "case": "child-gui",
+      "runtimeClass": "launcher/wrapper -> descendant GUI PID",
+      "target": "windows-start-app (Limpeza de Disco)",
+      "runs": 1,
+      "pass": 0,
+      "fail": 0,
+      "expectedFailClosed": 1,
+      "externalWindowLeak": false,
+      "altTabLeak": false,
+      "verdict": "PASS_EXPECTED_FAIL_CLOSED"
+    },
+    {
+      "case": "electron-chromium",
+      "runtimeClass": "Electron/Chromium-like",
+      "target": "brave.exe",
+      "runs": 1,
+      "pass": 1,
+      "fail": 0,
+      "expectedFailClosed": 0,
+      "externalWindowLeak": false,
+      "altTabLeak": false,
+      "verdict": "PASS"
+    },
+    {
+      "case": "shortcut-args",
+      "runtimeClass": "shortcut with safe argv",
+      "verdict": "NOT_APPLICABLE"
+    },
+    {
+      "case": "dual-instance",
+      "runtimeClass": "simultaneous contained launches",
+      "verdict": "NOT_APPLICABLE"
+    },
+    {
+      "case": "close-reopen",
+      "runtimeClass": "lifecycle close/reopen",
+      "verdict": "NOT_APPLICABLE"
+    },
+    {
+      "case": "multiwindow-limit",
+      "runtimeClass": "multiwindow/modal ambiguity",
+      "verdict": "NOT_APPLICABLE"
+    },
+    {
+      "case": "stress",
+      "runtimeClass": "repeated lifecycle stress",
+      "verdict": "NOT_APPLICABLE"
+    }
   ]
 }

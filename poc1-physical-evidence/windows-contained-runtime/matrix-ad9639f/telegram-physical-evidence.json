@@ -1,0 +1,52 @@
+{
+  "ProcessId": 14448,
+  "HostProcessId": 30260,
+  "InJob": false,
+  "Windows": [
+    {
+      "Handle": "0x20C40",
+      "Title": "Telegram (130213)",
+      "ClassName": "Qt51519QWindowIcon",
+      "Visible": false,
+      "OwnerHandle": "0x0",
+      "OwnerProcessId": 0,
+      "OwnedByHost": false
+    },
+    {
+      "Handle": "0x20C98",
+      "Title": "QTrayIconMessageWindow",
+      "ClassName": "Qt51519TrayIconMessageWindowClass",
+      "Visible": false,
+      "OwnerHandle": "0x0",
+      "OwnerProcessId": 0,
+      "OwnedByHost": false
+    },
+    {
+      "Handle": "0x30C4A",
+      "Title": "",
+      "ClassName": "DesktopAppSystemMediaControls",
+      "Visible": false,
+      "OwnerHandle": "0x0",
+      "OwnerProcessId": 0,
+      "OwnedByHost": false
+    },
+    {
+      "Handle": "0x20C74",
+      "Title": "MSCTFIME UI",
+      "ClassName": "MSCTFIME UI",
+      "Visible": false,
+      "OwnerHandle": "0x30C4C",
+      "OwnerProcessId": 14448,
+      "OwnedByHost": false
+    },
+    {
+      "Handle": "0x30C4C",
+      "Title": "Default IME",
+      "ClassName": "IME",
+      "Visible": false,
+      "OwnerHandle": "0x20C40",
+      "OwnerProcessId": 14448,
+      "OwnedByHost": false
+    }
+  ]
+}

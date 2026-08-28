@@ -1,0 +1,22 @@
+{
+  "SchemaVersion": 1,
+  "Collector": "scripts/run-windows-contained-runtime-physical-proof.ps1",
+  "StartedAt": "2026-08-28T13:55:32.7649174+00:00",
+  "Git": {
+    "Branch": "fix/cloudos-runtime-launch-rebind",
+    "HeadSha": "ad9639f1ce8d808d2d532404fd9ca6673244052e"
+  },
+  "Host": {
+    "ProcessId": 24304,
+    "ProcessName": "CloudOS.Host",
+    "StartTimeUtc": "2026-08-28T13:52:51.0365602Z"
+  },
+  "ProofName": "windows-app",
+  "Open1": null,
+  "Close1": null,
+  "Open2": null,
+  "Close2": null,
+  "Verdict": "FAIL",
+  "CompletedAt": "2026-08-28T13:55:32.7941990+00:00",
+  "Error": "Exception calling \"Enumerate\" with \"0\" argument(s): \"EnumWindows failed; nativeError=0; callback=none\""
+}
