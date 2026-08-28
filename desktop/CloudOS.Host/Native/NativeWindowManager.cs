@@ -417,16 +417,19 @@ namespace CloudOS.Host.Native
             if (!TryValidateOwner(owner, out error) || !TryValidateAttachedBounds(bounds, out error)) return false;
 
             AttachedWindowState state;
+            bool alreadyAttached;
             lock (_sync)
             {
-                if (_attachments.TryGetValue(hwnd, out state))
-                    return TryApplyAttachedLayout(hwnd, state, bounds, visible, false, true, out error);
-                if (!_quarantinedWindows.ContainsKey(hwnd))
+                alreadyAttached = _attachments.TryGetValue(hwnd, out state);
+                if (!alreadyAttached && !_quarantinedWindows.ContainsKey(hwnd))
                 {
                     error = "The window was not observed inside the CloudOS launch quarantine.";
                     return false;
                 }
             }
+
+            if (alreadyAttached)
+                return TryApplyAttachedLayout(hwnd, state, bounds, visible, false, true, out error);
 
             if (NativeMethods.GetAncestor(hwnd, NativeMethods.GA_ROOT) != hwnd)
             {
