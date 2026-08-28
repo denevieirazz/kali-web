@@ -25,6 +25,20 @@ test('primeiro attach stale reconcilia SESSION_NOT_FOUND antes de declarar erro'
   assert.match(source, /setStatus\('waiting'\);\s*startReplacementGrace\(currentSessionId\);/s);
 });
 
+test('layout stale reconcilia replacement do mesmo Job sem deixar erro antigo vencer a nova sessão', () => {
+  const syncStart = source.indexOf('const syncSurface = useCallback');
+  const syncEnd = source.indexOf('\n\n  useEffect(() => {', syncStart);
+  const syncBody = source.slice(syncStart, syncEnd);
+  assert.match(syncBody, /layoutSession\(currentSessionId, bounds, visible\)/);
+  assert.match(syncBody, /layoutError instanceof NativeHostError/);
+  assert.match(syncBody, /layoutError\.code !== 'SESSION_NOT_FOUND'/);
+  assert.match(syncBody, /if \(disposedRef\.current \|\| sessionIdRef\.current !== currentSessionId\) return;/);
+  assert.match(syncBody, /const result = await nativeHostBridge\.listSessions\(\);/);
+  assert.match(syncBody, /nativeReplacementSession\(\s*result\.sessions,\s*currentSessionId,/s);
+  assert.match(syncBody, /adoptReplacementSession\(replacement\);/);
+  assert.match(syncBody, /attachedRef\.current = false;\s*setStatus\('waiting'\);\s*startReplacementGrace\(currentSessionId\);/s);
+});
+
 test('evento de remoção só rebinda candidato único do mesmo launch e não fecha imediatamente', () => {
   const eventEffect = source.slice(source.indexOf('const unsubscribe = nativeHostBridge.onSessionsChanged'));
   assert.match(eventEffect, /nativeReplacementSession\(/);
