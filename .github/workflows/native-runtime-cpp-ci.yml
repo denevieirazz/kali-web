@@ -1,0 +1,52 @@
+name: CloudOS C++ Native Runtime
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - integration/cloudos-unified-runtime
+    paths:
+      - 'desktop/CloudOS.NativeRuntime/**'
+      - 'desktop/CloudOS.Host/Native/**'
+      - 'desktop/CloudOS.Host/CloudOS.Host.csproj'
+      - 'desktop/CloudOS.Host.Tests/**'
+      - 'scripts/native/**'
+      - '.github/workflows/native-runtime-cpp-ci.yml'
+
+jobs:
+  native-runtime:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build C++ runtime with MSVC
+        shell: pwsh
+        run: ./scripts/native/build-native-runtime.ps1 -Configuration Release -Required
+
+      - name: Build Host with C++ runtime
+        shell: pwsh
+        env:
+          CLOUDOS_NATIVE_RUNTIME: cpp
+        run: dotnet build desktop/CloudOS.Host/CloudOS.Host.csproj -c Release --nologo
+
+      - name: Run Host contracts through C++ runtime
+        shell: pwsh
+        env:
+          CLOUDOS_NATIVE_RUNTIME: cpp
+        run: dotnet run --project desktop/CloudOS.Host.Tests/CloudOS.Host.Tests.csproj -c Release
+
+      - name: Assert native DLL was copied into Host output
+        shell: pwsh
+        run: |
+          $dll = 'desktop/CloudOS.Host/bin/Release/net8.0-windows10.0.19041.0/CloudOS.NativeRuntime.dll'
+          if (-not (Test-Path -LiteralPath $dll -PathType Leaf)) { throw "NATIVE_RUNTIME_DLL_MISSING:$dll" }
+          $file = Get-Item -LiteralPath $dll
+          if ($file.Length -le 0) { throw "NATIVE_RUNTIME_DLL_EMPTY:$dll" }
+          Write-Host "CLOUDOS_CPP_RUNTIME_GREEN path=$dll bytes=$($file.Length)"
