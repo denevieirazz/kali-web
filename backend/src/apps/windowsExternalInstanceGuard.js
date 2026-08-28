@@ -13,6 +13,7 @@ const ISOLATED_CHROMIUM_EXECUTABLES = new Set([
   'brave.exe', 'chrome.exe', 'chromium.exe', 'msedge.exe', 'vivaldi.exe', 'opera.exe'
 ]);
 const PER_LAUNCH_TOKEN_PATTERN = /^[a-f0-9]{32}$/i;
+export const EXTERNAL_INSTANCE_PROBE_TIMEOUT_MS = 8_000;
 
 function normalizedWindowsPath(value) {
   const candidate = String(value || '').trim();
@@ -134,7 +135,10 @@ async function probeProcessesByExecutableName(executable) {
         ...safeChildEnvironment(),
         CLOUDOS_EXTERNAL_INSTANCE_TARGET: executable
       },
-      timeout: 4_000,
+      // Hosted Windows runners can take slightly over four seconds just to start
+      // PowerShell under load. Keep the preflight bounded and fail-closed, but leave
+      // enough headroom that scheduler/startup jitter is not mistaken for probe failure.
+      timeout: EXTERNAL_INSTANCE_PROBE_TIMEOUT_MS,
       windowsHide: true,
       maxBuffer: 256 * 1024
     }
