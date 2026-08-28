@@ -165,7 +165,7 @@ function Get-CloudOSUpdateState {
 
     if ($Fetch) {
         Write-UpdaterLog "Checking $($config.Remote)/$($config.Branch)..."
-        $fetchResult = Invoke-RepositoryGit -Repository $config.Repository -Arguments @('fetch', '--prune', $config.Remote, $config.Branch)
+        $fetchResult = Invoke-RepositoryGit -Repository $config.Repository -Arguments @('fetch', '--prune', $config.Remote)
         if ($fetchResult.ExitCode -ne 0) {
             throw "git fetch failed: $($fetchResult.Output)"
         }
@@ -340,12 +340,7 @@ function Test-ForCloudOSUpdate([bool]$AllowAutoUpdate) {
         Show-CloudOSUpdateState $state
         Write-UpdaterLog "Local $($state.LocalSha.Substring(0, 12)) | GitHub $($state.RemoteSha.Substring(0, 12)) | $($state.Relation)"
 
-        $canAutoUpdate = $AllowAutoUpdate -and
-            $autoUpdateCheckBox.Checked -and
-            $state.Relation -eq 'behind' -and
-            -not $state.Dirty -and
-            $state.CurrentBranch -eq $state.Config.Branch
-
+        $canAutoUpdate = ($AllowAutoUpdate -and $autoUpdateCheckBox.Checked -and $state.Relation -eq 'behind' -and -not $state.Dirty -and $state.CurrentBranch -eq $state.Config.Branch)
         if ($canAutoUpdate) {
             Invoke-CloudOSUpdate -KnownState $state
         }
