@@ -108,29 +108,23 @@ export function evaluateExternalInstanceProbe(executable, rows) {
   return { conflicts, unrelated, unverifiable };
 }
 
-async function probeProcessesByExecutableName(executable) {
-  const target = normalizedWindowsPath(executable);
-  if (!target) throw new Error('invalid executable path');
-
-  const command = [
+export function buildExternalInstanceProbeCommand() {
+  return [
     '$ErrorActionPreference = "Stop"',
     '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
     '$target = [IO.Path]::GetFullPath([string]$env:CLOUDOS_EXTERNAL_INSTANCE_TARGET)',
     '$name = [IO.Path]::GetFileNameWithoutExtension($target)',
     '$records = @()',
-    'foreach ($candidate in @(Get-Process -Name $name -ErrorAction SilentlyContinue)) {',
-    '  try {',
-    '    $candidatePath = $null',
-    '    try { $candidatePath = [string]$candidate.Path } catch {}',
-    '    if (-not [string]::IsNullOrWhiteSpace($candidatePath)) {',
-    '      try { $candidatePath = [IO.Path]::GetFullPath($candidatePath) } catch { $candidatePath = $null }',
-    '    }',
-    '    $records += [PSCustomObject]@{ pid = [int]$candidate.Id; path = $candidatePath }',
-    '  } finally { try { $candidate.Dispose() } catch {} }',
-    '}',
+    'foreach ($candidate in @(Get-Process -Name $name -ErrorAction SilentlyContinue)) { $candidatePath = $null; try { $candidatePath = [string]$candidate.Path } catch {}; if (-not [string]::IsNullOrWhiteSpace($candidatePath)) { try { $candidatePath = [IO.Path]::GetFullPath($candidatePath) } catch { $candidatePath = $null } }; $records += [PSCustomObject]@{ pid = [int]$candidate.Id; path = $candidatePath } }',
     '@($records) | ConvertTo-Json -Compress'
   ].join('; ');
-  const encoded = Buffer.from(command, 'utf16le').toString('base64');
+}
+
+async function probeProcessesByExecutableName(executable) {
+  const target = normalizedWindowsPath(executable);
+  if (!target) throw new Error('invalid executable path');
+
+  const encoded = Buffer.from(buildExternalInstanceProbeCommand(), 'utf16le').toString('base64');
   const { stdout } = await execFileAsync(
     POWERSHELL_EXE,
     ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
