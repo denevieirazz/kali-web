@@ -51,6 +51,7 @@ public sealed class WebMessageBridge : IDisposable
     private readonly Dictionary<long, string> _sessionIdsByHandle = new();
     private readonly Dictionary<string, long> _handlesBySessionId = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _processIdsBySessionId = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, NativeAppSession> _nativeSessionsById = new(StringComparer.Ordinal);
     private readonly Dictionary<int, NativeContainedProcessLease> _launchLeasesByProcessId = new();
     private readonly Dictionary<int, int> _launchRootByMemberProcessId = new();
     private readonly Dictionary<int, (DateTimeOffset Deadline, NativeContainmentFailure Failure)> _terminationRetriesByRoot = new();
@@ -514,6 +515,7 @@ public sealed class WebMessageBridge : IDisposable
         }
         _pendingAttachDeadlinesByHandle.Remove(handle);
         _surfacesByHandle[handle] = surface with { Visible = visible, LastNativeBounds = bounds };
+        if (_nativeSessionsById.TryGetValue(sessionId, out var nativeSession)) nativeSession.MarkAttached();
         return new { sessionId, accepted = true, contained = true, containmentMode = "anchored-overlay" };
     }
 
@@ -776,6 +778,17 @@ public sealed class WebMessageBridge : IDisposable
             _handlesBySessionId[sessionId] = window.Handle;
         }
         _processIdsBySessionId[sessionId] = window.ProcessId;
+
+        var rootProcessId = ResolveLaunchRoot(window.ProcessId);
+        if (_nativeSessionsById.TryGetValue(sessionId, out var nativeSession))
+            nativeSession.BindWindow(window.ProcessId, window.Handle);
+        else
+            _nativeSessionsById[sessionId] = new NativeAppSession(
+                sessionId,
+                rootProcessId,
+                window.ProcessId,
+                window.Handle);
+
         return sessionId;
     }
 
@@ -967,6 +980,13 @@ public sealed class WebMessageBridge : IDisposable
             _handlesBySessionId.Remove(recoveringSessionId);
             _processIdsBySessionId.Remove(recoveringSessionId);
         }
+        foreach (var session in _nativeSessionsById.Values
+            .Where(item => item.RootProcessId == rootProcessId)
+            .ToArray())
+        {
+            session.MarkExited();
+            _nativeSessionsById.Remove(session.SessionId);
+        }
         var members = GetKnownLaunchMembers(rootProcessId);
         foreach (var memberProcessId in members)
         {
@@ -1076,6 +1096,7 @@ public sealed class WebMessageBridge : IDisposable
 
         _capturedSurfaceBridge?.Close(sessionId);
         var rootProcessId = ResolveLaunchRoot(processId);
+        if (_nativeSessionsById.TryGetValue(sessionId, out var closingNativeSession)) closingNativeSession.MarkClosing();
         if (!_windows.TryClose(handle, out var error))
         {
             foreach (var memberProcessId in GetKnownLaunchMembers(rootProcessId))
@@ -1137,6 +1158,8 @@ public sealed class WebMessageBridge : IDisposable
                         {
                             _recoveringSessionByRoot[rootProcessId] = removed;
                             _recoveringSessionIds.Add(removed);
+                            if (_nativeSessionsById.TryGetValue(removed, out var recoveringNativeSession))
+                                recoveringNativeSession.MarkWindowRecovery();
                             BrowserDiagnostics.Write(
                                 "native_primary_window_recovery_started",
                                 $"session={removed} rootPid={rootProcessId} oldPid={removedProcessId} oldHwnd={handle}");
@@ -1268,6 +1291,8 @@ public sealed class WebMessageBridge : IDisposable
                         _sessionIdsByHandle[candidate.Handle] = sessionId;
                         _handlesBySessionId[sessionId] = candidate.Handle;
                         _processIdsBySessionId[sessionId] = candidate.ProcessId;
+                        if (_nativeSessionsById.TryGetValue(sessionId, out var recoveredNativeSession))
+                            recoveredNativeSession.BindWindow(candidate.ProcessId, candidate.Handle);
                         _pendingAttachDeadlinesByHandle[candidate.Handle] = DateTimeOffset.UtcNow.AddMilliseconds(
                             NativeLaunchContainmentPolicy.PendingAttachTimeoutMilliseconds);
 
@@ -1300,6 +1325,7 @@ public sealed class WebMessageBridge : IDisposable
         _recoveringSessionIds.Remove(sessionId);
         _handlesBySessionId.Remove(sessionId);
         _processIdsBySessionId.Remove(sessionId);
+        if (_nativeSessionsById.Remove(sessionId, out var failedNativeSession)) failedNativeSession.MarkFailed();
         BrowserDiagnostics.Write(
             "native_primary_window_recovery_failed",
             $"session={sessionId} rootPid={rootProcessId} oldPid={removedProcessId} oldHwnd={removedHandle} reason={failureReason ?? "timeout"} elapsedMs={(long)(DateTimeOffset.UtcNow - started).TotalMilliseconds}");
@@ -1459,6 +1485,7 @@ public sealed class WebMessageBridge : IDisposable
         _sessionIdsByHandle.Clear();
         _handlesBySessionId.Clear();
         _processIdsBySessionId.Clear();
+        _nativeSessionsById.Clear();
         foreach (var lease in _launchLeasesByProcessId.Values) lease.Dispose();
         _launchLeasesByProcessId.Clear();
         _launchRootByMemberProcessId.Clear();
