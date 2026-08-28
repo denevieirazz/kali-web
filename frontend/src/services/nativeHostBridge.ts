@@ -319,12 +319,13 @@ class NativeHostBridge {
       }
       const sessions = message.data?.sessions || [];
       if (nativeSessionListsEqual(this.lastSessions, sessions)) return;
-      // Listeners are application code and may mutate their input. Keep an isolated
-      // structural snapshot so one listener cannot defeat duplicate-event suppression.
+      // Listeners are application code and may mutate their input. Keep both the
+      // dedupe snapshot and every listener delivery structurally isolated so one
+      // renderer cannot corrupt what another NativeAppWindow observes.
       this.lastSessions = snapshotSessions(sessions);
       for (const listener of this.eventListeners) {
         try {
-          listener(sessions);
+          listener(snapshotSessions(sessions));
         } catch {
           // One renderer listener must not prevent other native windows from receiving state updates.
         }
