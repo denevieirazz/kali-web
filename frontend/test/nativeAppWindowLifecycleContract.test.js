@@ -39,8 +39,20 @@ test('adoção de replacement invalida estado de capture anterior antes do novo 
   const end = source.indexOf('\n\n  const syncSurface', start);
   const body = source.slice(start, end);
   assert.match(body, /clearReplacementTimer\(\);/);
+  assert.match(body, /attachInFlightSessionRef\.current = null;/);
   assert.match(body, /attachedRef\.current = false;/);
   assert.match(body, /lastLayoutRef\.current = null;/);
   assert.match(body, /sessionIdRef\.current = replacement\.sessionId;/);
   assert.match(body, /setSessionId\(replacement\.sessionId\);/);
+});
+
+test('attach nativo é serializado por sessão para impedir corrida de WGC em resize/scroll', () => {
+  assert.match(source, /const attachInFlightSessionRef = useRef<string \| null>\(null\);/);
+  const syncStart = source.indexOf('const syncSurface = useCallback');
+  const syncEnd = source.indexOf('\n\n  useEffect(() => {', syncStart);
+  const syncBody = source.slice(syncStart, syncEnd);
+  assert.match(syncBody, /if \(attachInFlightSessionRef\.current === currentSessionId\) return;/);
+  assert.match(syncBody, /attachInFlightSessionRef\.current = currentSessionId;/);
+  assert.match(syncBody, /finally \{\s*if \(attachInFlightSessionRef\.current === currentSessionId\)/s);
+  assert.match(syncBody, /attachInFlightSessionRef\.current = null;/);
 });
