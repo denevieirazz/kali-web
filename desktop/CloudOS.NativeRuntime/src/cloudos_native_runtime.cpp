@@ -1,6 +1,7 @@
 #include "../include/cloudos_native_runtime.h"
 
 #include <algorithm>
+#include <cwchar>
 #include <limits>
 #include <memory>
 #include <new>
@@ -37,6 +38,14 @@ struct NativeLease final {
     }
 };
 
+struct JobProcessListBuffer final {
+    DWORD assigned = 0;
+    DWORD listed = 0;
+    ULONG_PTR process_ids[CLOUDOS_NATIVE_RUNTIME_MAX_PROCESSES]{};
+};
+
+static_assert(offsetof(JobProcessListBuffer, process_ids) == 8u);
+
 BOOL fail(DWORD error) noexcept {
     SetLastError(error == ERROR_SUCCESS ? ERROR_GEN_FAILURE : error);
     return FALSE;
@@ -68,16 +77,13 @@ BOOL query_job_members(
         return fail(ERROR_INVALID_PARAMETER);
     }
 
-    constexpr std::size_t buffer_size =
-        sizeof(DWORD) * 2u + sizeof(ULONG_PTR) * CLOUDOS_NATIVE_RUNTIME_MAX_PROCESSES;
-    std::vector<unsigned char> storage(buffer_size, 0);
-    auto* information = reinterpret_cast<JOBOBJECT_BASIC_PROCESS_ID_LIST*>(storage.data());
-
+    JobProcessListBuffer storage{};
+    auto* information = reinterpret_cast<JOBOBJECT_BASIC_PROCESS_ID_LIST*>(&storage);
     if (!QueryInformationJobObject(
             lease->job,
             JobObjectBasicProcessIdList,
             information,
-            static_cast<DWORD>(storage.size()),
+            static_cast<DWORD>(sizeof(storage)),
             nullptr)) {
         return FALSE;
     }
@@ -159,7 +165,7 @@ BOOL WINAPI cloudos_native_launch_suspended(
             return FALSE;
         }
 
-        const std::size_t length = wcslen(command_line);
+        const std::size_t length = std::wcslen(command_line);
         std::vector<wchar_t> mutable_command(length + 1u, L'\0');
         std::copy_n(command_line, length, mutable_command.data());
 
