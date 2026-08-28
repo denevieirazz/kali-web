@@ -119,6 +119,42 @@ export function buildIsolatedWindowsAppArguments(executable, baseDirectory) {
   return [];
 }
 
+export function buildContainedWindowsAppArguments(executable, baseDirectory, catalogArguments = []) {
+  const executableName = path.win32.basename(String(executable || '')).toLowerCase();
+  const inputArguments = Array.isArray(catalogArguments)
+    ? catalogArguments.filter((value) => typeof value === 'string' && !/[\0\r\n]/.test(value)).slice(0, MAX_SHORTCUT_ARGUMENTS)
+    : [];
+  const isolationArguments = buildIsolatedWindowsAppArguments(executable, baseDirectory);
+  if (isolationArguments.length === 0) return inputArguments;
+
+  const filteredArguments = [];
+  for (let index = 0; index < inputArguments.length; index += 1) {
+    const argument = inputArguments[index];
+    const normalized = argument.toLowerCase();
+
+    if (ISOLATED_CHROMIUM_EXECUTABLES.has(executableName)) {
+      if (normalized === '--user-data-dir') {
+        index += 1;
+        continue;
+      }
+      if (normalized.startsWith('--user-data-dir=')) continue;
+    }
+
+    if (executableName === 'firefox.exe') {
+      if (normalized === '-profile' || normalized === '--profile' || normalized === '-p') {
+        index += 1;
+        continue;
+      }
+      if (normalized.startsWith('-profile=') || normalized.startsWith('--profile=')) continue;
+      if (normalized === '-profilemanager' || normalized === '--profilemanager') continue;
+    }
+
+    filteredArguments.push(argument);
+  }
+
+  return [...isolationArguments, ...filteredArguments];
+}
+
 // Parse only the documented Windows backslash/quote grammar used by conventional
 // Win32 argv consumers. Malformed/unbalanced input fails closed instead of being
 // approximated. The Host will quote each resulting argv entry again before
@@ -385,12 +421,13 @@ export async function launchCatalogApp(id) {
     : (launchKind === 'windows-shortcut-direct'
         ? []
         : (Array.isArray(app.args) ? app.args.filter((value) => typeof value === 'string' && !/[\0\r\n]/.test(value)).slice(0, 128) : []));
-  const isolatedProfileArguments = catalogArguments.length === 0
-    ? buildIsolatedWindowsAppArguments(
+  const launchArguments = scriptLaunch
+    ? catalogArguments
+    : buildContainedWindowsAppArguments(
         executable,
-        process.env.CLOUDOS_LOCAL_ROOT || process.env.CLOUDOS_DATA_DIR || '')
-    : [];
-  const launchArguments = [...isolatedProfileArguments, ...catalogArguments];
+        process.env.CLOUDOS_LOCAL_ROOT || process.env.CLOUDOS_DATA_DIR || '',
+        catalogArguments
+      );
   const workingDirectory = scriptLaunch
     ? (app.workingDirectory || path.win32.dirname(scriptPath))
     : (app.workingDirectory || path.win32.dirname(executable));
