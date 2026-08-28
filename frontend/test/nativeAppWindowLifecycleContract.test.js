@@ -56,3 +56,15 @@ test('attach nativo é serializado por sessão para impedir corrida de WGC em re
   assert.match(syncBody, /finally \{\s*if \(attachInFlightSessionRef\.current === currentSessionId\)/s);
   assert.match(syncBody, /attachInFlightSessionRef\.current = null;/);
 });
+
+test('snapshot tardio do Host recupera containment que venceu depois do timeout do renderer', () => {
+  const eventEffect = source.slice(source.indexOf('const unsubscribe = nativeHostBridge.onSessionsChanged'));
+  assert.match(eventEffect, /current\.contained === true && !attachedRef\.current/);
+  assert.match(eventEffect, /current\.containmentMode === 'captured-surface'/);
+  assert.match(eventEffect, /current\.containmentMode === 'anchored-overlay'/);
+  assert.match(eventEffect, /attachInFlightSessionRef\.current = null;/);
+  assert.match(eventEffect, /attachedRef\.current = true;/);
+  assert.match(eventEffect, /lastLayoutRef\.current = null;/);
+  assert.match(eventEffect, /setStatus\('contained'\);/);
+  assert.match(eventEffect, /syncSurface\(false\)/);
+});
