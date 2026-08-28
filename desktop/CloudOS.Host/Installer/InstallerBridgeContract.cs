@@ -75,6 +75,17 @@ public static class InstallerBridgeContract
             expiresAt);
     }
 
+    // Compatibility overload for host call sites that already carry the broker flag.
+    // PreparedInstallerCapability.Readiness remains the authoritative source for the
+    // serialized readiness fields, so no second source of truth is introduced here.
+    public static InstallerPrepareBridgeResponse Prepare(
+        PreparedInstallerCapability prepared,
+        bool elevationBrokerAvailable)
+    {
+        _ = elevationBrokerAvailable;
+        return Prepare(prepared);
+    }
+
     public static string ValidateArtifactId(string artifactId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(artifactId);
