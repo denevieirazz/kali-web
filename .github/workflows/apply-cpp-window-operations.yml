@@ -1,0 +1,60 @@
+name: Apply C++ HWND Operations
+
+on:
+  push:
+    branches:
+      - integration/cloudos-unified-runtime
+    paths:
+      - scripts/native/apply-cpp-window-operations.ps1
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: integration/cloudos-unified-runtime
+          fetch-depth: 0
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Apply C++ HWND operations
+        shell: pwsh
+        run: ./scripts/native/apply-cpp-window-operations.ps1
+
+      - name: Check patch whitespace
+        shell: pwsh
+        run: git diff --check
+
+      - name: Build C++ runtime with MSVC
+        shell: pwsh
+        run: ./scripts/native/build-native-runtime.ps1 -Configuration Release
+
+      - name: Build CloudOS Host
+        shell: pwsh
+        run: dotnet build desktop/CloudOS.Host/CloudOS.Host.csproj -c Release --nologo
+
+      - name: Run Host contracts
+        shell: pwsh
+        run: dotnet run --project desktop/CloudOS.Host.Tests/CloudOS.Host.Tests.csproj -c Release
+
+      - name: Commit validated C++ window path
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add desktop/CloudOS.Host/Native/NativeWindowManager.cs
+          if (git diff --cached --quiet) {
+            Write-Host 'No NativeWindowManager change required.'
+            exit 0
+          }
+          git commit -m "refactor: execute native HWND operations in C++"
+          git push origin HEAD:integration/cloudos-unified-runtime
