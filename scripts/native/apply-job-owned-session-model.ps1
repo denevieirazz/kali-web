@@ -4,6 +4,7 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Temporary migration patcher. CI validates the production bridge before committing it.
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $bridgePath = Join-Path $repoRoot 'desktop\CloudOS.Host\Bridge\WebMessageBridge.cs'
 $content = [IO.File]::ReadAllText($bridgePath)
