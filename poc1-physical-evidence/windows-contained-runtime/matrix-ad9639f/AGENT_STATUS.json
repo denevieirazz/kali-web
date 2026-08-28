@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "repository": "denevieirazz/kali-web",
+  "pr": 16,
+  "productBranch": "fix/cloudos-runtime-launch-rebind",
+  "productTestedSha": "ad9639f1ce8d808d2d532404fd9ca6673244052e",
+  "evidenceBranch": "evidence/pr16-physical-ad9639f",
+  "matrixDirectory": "poc1-physical-evidence/windows-contained-runtime/matrix-ad9639f",
+  "state": "READY_FOR_LOCAL_PHYSICAL_MATRIX",
+  "physicalRuntimeGate": "PENDING",
+  "nextCase": "win32-simple",
+  "automation": {
+    "twoWorktreesRequired": true,
+    "prepareScript": "PREPARE_LOCAL_MATRIX.ps1",
+    "handoff": "GEMINI_HANDOFF.md",
+    "reportValidator": "VALIDATE_REPORT.ps1",
+    "checkpointScript": "CHECKPOINT_EVIDENCE.ps1",
+    "emergencyPush": "PUSH-EVIDENCE.cmd"
+  },
+  "automatedCi": {
+    "cloudOsCiBaseline": { "runId": 33168545780, "conclusion": "success" },
+    "windowsInstallerCapability": { "runId": 33168545789, "conclusion": "success" }
+  },
+  "doNotMerge": true,
+  "instructions": "Run the physical Windows matrix from a PRODUCT worktree pinned exactly to productTestedSha and write/checkpoint evidence from a separate EVIDENCE worktree. Do not modify product source during evidence collection."
+}
