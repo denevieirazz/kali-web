@@ -128,7 +128,7 @@ public static class CloudOSNativeContainmentEvidence
     [return: MarshalAs(UnmanagedType.Bool)]
     public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
 
@@ -168,7 +168,7 @@ public static class CloudOSNativeContainmentEvidence
     [DllImport("user32.dll")]
     private static extern IntPtr GetLastActivePopup(IntPtr hWnd);
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetWindowRect(IntPtr hWnd, out CloudOSNativeRect rect);
 
@@ -278,7 +278,10 @@ public static class CloudOSNativeContainmentEvidence
         };
 
         if (!EnumWindows(callback, IntPtr.Zero))
-            throw new InvalidOperationException("EnumWindows failed; callback=" + (callbackError ?? "none"));
+        {
+            var nativeError = Marshal.GetLastWin32Error();
+            throw new InvalidOperationException("EnumWindows failed; nativeError=" + nativeError + "; callback=" + (callbackError ?? "none"));
+        }
         if (callbackError != null)
             throw new InvalidOperationException("EnumWindows callback failed: " + callbackError);
         return windows.ToArray();
@@ -352,9 +355,9 @@ public static class CloudOSNativeContainmentEvidence
 
     $hostEvidence = $null
     if ($HostProcessId -gt 0) {
-        $host = $null
-        try { $host = Get-Process -Id $HostProcessId -ErrorAction Stop } catch {}
-        $hostEvidence = if ($null -eq $host) {
+        $cloudOsHostProcess = $null
+        try { $cloudOsHostProcess = Get-Process -Id $HostProcessId -ErrorAction Stop } catch {}
+        $hostEvidence = if ($null -eq $cloudOsHostProcess) {
             [pscustomobject]@{
                 ProcessId = $HostProcessId
                 Exists = $false
@@ -364,18 +367,23 @@ public static class CloudOSNativeContainmentEvidence
             }
         } else {
             $hostStartTimeUtc = $null
-            try { $hostStartTimeUtc = $host.StartTime.ToUniversalTime().ToString('o') } catch {}
+            try { $hostStartTimeUtc = $cloudOsHostProcess.StartTime.ToUniversalTime().ToString('o') } catch {}
             [pscustomobject]@{
                 ProcessId = $HostProcessId
                 Exists = $true
-                ProcessName = $host.ProcessName
-                SessionId = $host.SessionId
+                ProcessName = $cloudOsHostProcess.ProcessName
+                SessionId = $cloudOsHostProcess.SessionId
                 StartTimeUtc = $hostStartTimeUtc
             }
         }
     }
 
-    $nativeWindows = @([CloudOSNativeContainmentEvidence]::Enumerate([int[]]$targetIds))
+    $existingProcessCount = @($processEvidence | Where-Object Exists).Count
+    $nativeWindows = if ($ExpectedState -eq 'Absent' -and $existingProcessCount -eq 0) {
+        @()
+    } else {
+        @([CloudOSNativeContainmentEvidence]::Enumerate([int[]]$targetIds))
+    }
     $windowEvidence = foreach ($window in $nativeWindows) {
         $width = $window.Rect.Right - $window.Rect.Left
         $height = $window.Rect.Bottom - $window.Rect.Top
