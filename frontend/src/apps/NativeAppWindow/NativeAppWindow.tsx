@@ -75,6 +75,7 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
   const sessionIdRef = useRef<string | null>(null);
   const sessionLaunchProcessIdRef = useRef<number | null>(null);
   const replacementTimerRef = useRef<number | null>(null);
+  const attachInFlightSessionRef = useRef<string | null>(null);
   const attachedRef = useRef(false);
   const lastBoundsRef = useRef<NativeViewportBounds | null>(null);
   const lastLayoutRef = useRef<NativeLayoutState | null>(null);
@@ -105,6 +106,7 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
 
   const adoptReplacementSession = useCallback((replacement: NativeSession) => {
     clearReplacementTimer();
+    attachInFlightSessionRef.current = null;
     attachedRef.current = false;
     lastLayoutRef.current = null;
     sessionIdRef.current = replacement.sessionId;
@@ -126,39 +128,51 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
     if (!bounds) return;
 
     if (attach && !attachedRef.current) {
+      // ResizeObserver, scroll and window-resize events may all queue a frame while
+      // native.session.attach is awaiting WGC/Win32 setup. A second attach against
+      // the same opaque capability can race capture creation and turn a healthy
+      // launch into a false containment failure, so serialize per session.
+      if (attachInFlightSessionRef.current === currentSessionId) return;
+      attachInFlightSessionRef.current = currentSessionId;
       setStatus('attaching');
       try {
-        await nativeHostBridge.attachSession(currentSessionId, bounds, visible);
-      } catch (attachError) {
-        if (!(attachError instanceof NativeHostError) || attachError.code !== 'SESSION_NOT_FOUND') throw attachError;
-        if (disposedRef.current || sessionIdRef.current !== currentSessionId) return;
+        try {
+          await nativeHostBridge.attachSession(currentSessionId, bounds, visible);
+        } catch (attachError) {
+          if (!(attachError instanceof NativeHostError) || attachError.code !== 'SESSION_NOT_FOUND') throw attachError;
+          if (disposedRef.current || sessionIdRef.current !== currentSessionId) return;
 
-        // The launch reply may refer to a splash HWND that disappears before this
-        // component subscribes to native.sessionsChanged. Query once after the stale
-        // attach instead of depending on an event that may already have been emitted.
-        const result = await nativeHostBridge.listSessions();
-        if (disposedRef.current || sessionIdRef.current !== currentSessionId) return;
-        const replacement = nativeReplacementSession(
-          result.sessions,
-          currentSessionId,
-          sessionLaunchProcessIdRef.current ?? 0
-        );
-        if (replacement) {
-          adoptReplacementSession(replacement);
+          // The launch reply may refer to a splash HWND that disappears before this
+          // component subscribes to native.sessionsChanged. Query once after the stale
+          // attach instead of depending on an event that may already have been emitted.
+          const result = await nativeHostBridge.listSessions();
+          if (disposedRef.current || sessionIdRef.current !== currentSessionId) return;
+          const replacement = nativeReplacementSession(
+            result.sessions,
+            currentSessionId,
+            sessionLaunchProcessIdRef.current ?? 0
+          );
+          if (replacement) {
+            adoptReplacementSession(replacement);
+            return;
+          }
+
+          // A replacement may still be starting. Keep the surface in waiting state and
+          // let the normal sessionsChanged path recover it, bounded by the same grace.
+          setStatus('waiting');
+          startReplacementGrace(currentSessionId);
           return;
         }
-
-        // A replacement may still be starting. Keep the surface in waiting state and
-        // let the normal sessionsChanged path recover it, bounded by the same grace.
-        setStatus('waiting');
-        startReplacementGrace(currentSessionId);
-        return;
+        if (disposedRef.current || sessionIdRef.current !== currentSessionId) return;
+        clearReplacementTimer();
+        attachedRef.current = true;
+        lastLayoutRef.current = { bounds, visible };
+        setStatus('contained');
+      } finally {
+        if (attachInFlightSessionRef.current === currentSessionId) {
+          attachInFlightSessionRef.current = null;
+        }
       }
-      if (disposedRef.current || sessionIdRef.current !== currentSessionId) return;
-      clearReplacementTimer();
-      attachedRef.current = true;
-      lastLayoutRef.current = { bounds, visible };
-      setStatus('contained');
       return;
     }
 
@@ -193,6 +207,7 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
     let cancelled = false;
     disposedRef.current = false;
     clearReplacementTimer();
+    attachInFlightSessionRef.current = null;
     attachedRef.current = false;
     lastBoundsRef.current = null;
     lastLayoutRef.current = null;
@@ -245,6 +260,7 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
       cancelled = true;
       disposedRef.current = true;
       clearReplacementTimer();
+      attachInFlightSessionRef.current = null;
       const currentSessionId = sessionIdRef.current;
       const bounds = lastBoundsRef.current;
       const wasAttached = attachedRef.current;
