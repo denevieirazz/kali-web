@@ -8,8 +8,12 @@ namespace CloudOS.Host.Native;
 /// </summary>
 public static class NativeLaunchContainmentPolicy
 {
-    public const int WindowCorrelationTimeoutMilliseconds = 8_000;
-    public const int PendingAttachTimeoutMilliseconds = 10_000;
+    // Real desktop applications frequently bootstrap through helpers, splash screens,
+    // updaters or child processes before their stable top-level HWND exists. Keep the
+    // launch capability quarantined while that happens instead of killing the Job on
+    // an aggressive UI-startup deadline. These are upper bounds, not fixed sleeps.
+    public const int WindowCorrelationTimeoutMilliseconds = 20_000;
+    public const int PendingAttachTimeoutMilliseconds = 30_000;
     public const int GracefulCloseTimeoutMilliseconds = 1_000;
 
     private static readonly HashSet<string> DirectLaunchKinds = new(StringComparer.Ordinal)
