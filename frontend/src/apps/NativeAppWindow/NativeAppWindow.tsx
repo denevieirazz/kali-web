@@ -269,7 +269,9 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
       }
       if (current.title && current.title !== win?.title) updateWindowTitle(windowId, current.title);
     });
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+    };
   }, [closeWindow, sessionId, updateWindowTitle, win?.title, windowId]);
 
   useEffect(() => () => {
