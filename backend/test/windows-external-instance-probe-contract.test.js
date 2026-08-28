@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildExternalInstanceProbeCommand } from '../src/apps/windowsExternalInstanceGuard.js';
+import {
+  buildExternalInstanceProbeCommand,
+  EXTERNAL_INSTANCE_PROBE_TIMEOUT_MS
+} from '../src/apps/windowsExternalInstanceGuard.js';
 
 test('probe de singleton consulta somente processos existentes e devolve JSON', () => {
   const command = buildExternalInstanceProbeCommand();
@@ -15,4 +18,9 @@ test('probe não depende de try-finally fragmentado pelo join de PowerShell', ()
   const command = buildExternalInstanceProbeCommand();
   assert.doesNotMatch(command, /finally/i);
   assert.match(command, /try \{ \$candidatePath = \[string\]\$candidate\.Path \} catch \{\}/);
+});
+
+test('probe real mantém timeout limitado com margem para startup do PowerShell no runner Windows', () => {
+  assert.equal(EXTERNAL_INSTANCE_PROBE_TIMEOUT_MS, 8_000);
+  assert.ok(EXTERNAL_INSTANCE_PROBE_TIMEOUT_MS < 15_000);
 });
