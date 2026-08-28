@@ -54,6 +54,7 @@ public sealed class WebMessageBridge : IDisposable
     private readonly Dictionary<int, (DateTimeOffset Deadline, NativeContainmentFailure Failure)> _terminationRetriesByRoot = new();
     private readonly Dictionary<long, AttachedSurfaceRequest> _surfacesByHandle = new();
     private readonly Dictionary<long, DateTimeOffset> _pendingAttachDeadlinesByHandle = new();
+    private readonly Dictionary<long, int> _auxiliaryProcessIdsByHandle = new();
     private readonly HashSet<Guid> _inFlight = new();
     private readonly Queue<DateTime> _recentMessages = new();
     private readonly DispatcherTimer _refreshTimer;
@@ -535,8 +536,18 @@ public sealed class WebMessageBridge : IDisposable
                     dpi.DpiScaleX,
                     dpi.DpiScaleY);
                 if (!_windows.TryUpdateCapturedSourceLayout(handle, bounds, visible, out var sourceLayoutError))
+                {
+                    if (IsTransientReplacementFailure(sourceLayoutError))
+                    {
+                        var rootProcessId = ResolveLaunchRoot(_processIdsBySessionId[sessionId]);
+                        ForgetSessionWithoutTermination(sessionId);
+                        PromoteReplacementForLaunch(rootProcessId);
+                        PostEvent("native.sessionsChanged", new { sessions = GetPublicSessions() });
+                        throw new BridgeException("SESSION_NOT_FOUND", "A janela inicial foi substituída pelo aplicativo.");
+                    }
                     throw new InvalidOperationException(
                         sourceLayoutError ?? "The capture source lost its covered layout.");
+                }
                 _surfacesByHandle[handle] = surface with { Visible = visible, LastNativeBounds = bounds };
                 return new
                 {
@@ -548,11 +559,15 @@ public sealed class WebMessageBridge : IDisposable
                     visible
                 };
             }
+            catch (BridgeException replacement) when (replacement.Code == "SESSION_NOT_FOUND")
+            {
+                throw;
+            }
             catch (Exception layoutError) when (layoutError is not OutOfMemoryException)
             {
                 BrowserDiagnostics.Write(
                     "captured_surface_layout_failed",
-                    $"type={layoutError.GetType().Name} hresult=0x{layoutError.HResult:X8}");
+                    $"type={layoutError.GetType().Name} hresult=0x{layoutError.HResult:X8} message={JsonSerializer.Serialize(layoutError.Message)}");
                 _surfacesByHandle.Remove(handle);
                 TerminateSessionAndForget(sessionId, NativeContainmentFailure.LayoutFailed);
                 throw new BridgeException(
@@ -686,7 +701,10 @@ public sealed class WebMessageBridge : IDisposable
             {
                 BrowserDiagnostics.Write(
                     "native_ambiguous_multiwindow_fail_closed",
-                    $"pid={lease.ProcessId} candidates={candidates.Length}");
+                    $"pid={lease.ProcessId} candidates={candidates.Length} details="
+                    + string.Join(";", candidates.Select(item =>
+                        $"hwnd={item.Handle},pid={item.ProcessId},title={JsonSerializer.Serialize(item.Title)},"
+                        + $"bounds={item.Bounds.X},{item.Bounds.Y},{item.Bounds.Width},{item.Bounds.Height}")));
                 throw new BridgeException(
                     "AMBIGUOUS_MULTIWINDOW_UNSUPPORTED",
                     "O aplicativo criou várias janelas principais e não pode ser contido com segurança nesta versão.",
@@ -694,6 +712,7 @@ public sealed class WebMessageBridge : IDisposable
             }
             if (candidate is not null)
             {
+                SuppressAuxiliaryWindows(candidates, candidate);
                 var now = DateTimeOffset.UtcNow;
                 if (stableCandidateHandle != candidate.Handle)
                 {
@@ -770,6 +789,56 @@ public sealed class WebMessageBridge : IDisposable
         }
         _processIdsBySessionId[sessionId] = window.ProcessId;
         return sessionId;
+    }
+
+    private void SuppressAuxiliaryWindows(
+        IReadOnlyList<NativeWindowSnapshot> candidates,
+        NativeWindowSnapshot primary)
+    {
+        _auxiliaryProcessIdsByHandle.Remove(primary.Handle);
+        foreach (var auxiliary in candidates.Where(item => item.Handle != primary.Handle))
+        {
+            _auxiliaryProcessIdsByHandle[auxiliary.Handle] = auxiliary.ProcessId;
+            _pendingAttachDeadlinesByHandle.Remove(auxiliary.Handle);
+            if (!_sessionIdsByHandle.Remove(auxiliary.Handle, out var sessionId)) continue;
+            _handlesBySessionId.Remove(sessionId);
+            _processIdsBySessionId.Remove(sessionId);
+        }
+    }
+
+    private static bool IsTransientReplacementFailure(string? error) =>
+        !string.IsNullOrWhiteSpace(error)
+        && (error.Contains("no longer exists", StringComparison.OrdinalIgnoreCase)
+            || error.Contains("not registered", StringComparison.OrdinalIgnoreCase)
+            || error.Contains("stale", StringComparison.OrdinalIgnoreCase)
+            || error.Contains("not active", StringComparison.OrdinalIgnoreCase));
+
+    private void ForgetSessionWithoutTermination(string sessionId)
+    {
+        _capturedSurfaceBridge?.Close(sessionId);
+        _processIdsBySessionId.Remove(sessionId);
+        if (!_handlesBySessionId.Remove(sessionId, out var handle)) return;
+        _sessionIdsByHandle.Remove(handle);
+        _surfacesByHandle.Remove(handle);
+        _pendingAttachDeadlinesByHandle.Remove(handle);
+    }
+
+    private void PromoteReplacementForLaunch(int rootProcessId)
+    {
+        _windows.Refresh();
+        var candidates = _windows.GetWindows()
+            .Where(window => ResolveLaunchRoot(window.ProcessId) == rootProcessId)
+            .Where(window => !window.IsAttached && !window.IsVisible)
+            .ToArray();
+        var selection = NativeLaunchContainmentPolicy.SelectUniqueQuarantinedWindow(candidates, out var replacement);
+        if (selection != NativeWindowCandidateSelection.Unique || replacement is null) return;
+        SuppressAuxiliaryWindows(candidates, replacement);
+        var replacementSessionId = GetOrCreateSession(replacement);
+        _pendingAttachDeadlinesByHandle[replacement.Handle] = DateTimeOffset.UtcNow.AddMilliseconds(
+            NativeLaunchContainmentPolicy.PendingAttachTimeoutMilliseconds);
+        BrowserDiagnostics.Write(
+            "native_replacement_promoted",
+            $"pid={rootProcessId} hwnd={replacement.Handle} session={replacementSessionId}");
     }
 
     private void AbortContainedLaunch(
@@ -975,6 +1044,11 @@ public sealed class WebMessageBridge : IDisposable
 
     private void ForgetProcessMappings(int processId)
     {
+        foreach (var handle in _auxiliaryProcessIdsByHandle
+            .Where(pair => pair.Value == processId)
+            .Select(pair => pair.Key)
+            .ToArray())
+            _auxiliaryProcessIdsByHandle.Remove(handle);
         foreach (var pair in _processIdsBySessionId.Where(pair => pair.Value == processId).ToArray())
         {
             _capturedSurfaceBridge?.Close(pair.Key);
@@ -1003,6 +1077,7 @@ public sealed class WebMessageBridge : IDisposable
         _capturedSurfaceBridge?.CloseAll();
         _surfacesByHandle.Clear();
         _pendingAttachDeadlinesByHandle.Clear();
+        _auxiliaryProcessIdsByHandle.Clear();
     }
 
     private static AttachedSurfaceRequest ReadSurfaceRequest(JsonElement parameters)
@@ -1118,17 +1193,22 @@ public sealed class WebMessageBridge : IDisposable
             var handle = eventArgs.Window.Handle;
             if (eventArgs.Kind == NativeWindowChangeKind.Removed)
             {
+                var removedRootProcessId = ResolveLaunchRoot(eventArgs.Window.ProcessId);
+                _auxiliaryProcessIdsByHandle.Remove(handle);
                 _surfacesByHandle.Remove(handle);
                 _pendingAttachDeadlinesByHandle.Remove(handle);
-                if (_sessionIdsByHandle.Remove(handle, out var removed))
+                var removedManagedSession = _sessionIdsByHandle.Remove(handle, out var removed);
+                if (removedManagedSession && removed is not null)
                 {
                     _capturedSurfaceBridge?.Close(removed);
                     _handlesBySessionId.Remove(removed);
                     _processIdsBySessionId.Remove(removed);
                 }
+                if (removedManagedSession) PromoteReplacementForLaunch(removedRootProcessId);
             }
             else
             {
+                if (_auxiliaryProcessIdsByHandle.ContainsKey(handle)) return;
                 var sessionId = GetOrCreateSession(eventArgs.Window);
                 var isCaptured = _capturedSurfaceBridge is not null
                     && _capturedSurfaceBridge.TryGetState(sessionId, out _);
@@ -1148,6 +1228,7 @@ public sealed class WebMessageBridge : IDisposable
         var sessions = new List<object>();
         foreach (var window in snapshots.OrderBy(window => window.ProcessId).ThenBy(window => window.Title, StringComparer.OrdinalIgnoreCase))
         {
+            if (_auxiliaryProcessIdsByHandle.ContainsKey(window.Handle)) continue;
             var sessionId = GetOrCreateSession(window);
             var launchProcessId = ResolveLaunchRoot(window.ProcessId);
             if (_capturedSurfaceBridge is not null

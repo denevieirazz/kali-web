@@ -581,15 +581,30 @@ public static class NativeContainedJobTracker
         ArgumentNullException.ThrowIfNull(windows);
 
         var processIds = lease.GetMemberProcessIds();
+        var synchronized = new List<int>(processIds.Count);
         foreach (var processId in processIds)
         {
-            if (windows.IsTrackedProcess(processId)) continue;
-            using var process = Process.GetProcessById(processId);
-            if (NativeLaunchContainmentPolicy.IsSharedBroker(process.ProcessName))
-                throw new InvalidOperationException("A shared Windows broker entered the contained Job.");
-            windows.TrackLaunchedProcess(process);
+            if (windows.IsTrackedProcess(processId))
+            {
+                synchronized.Add(processId);
+                continue;
+            }
+            try
+            {
+                using var process = Process.GetProcessById(processId);
+                if (NativeLaunchContainmentPolicy.IsSharedBroker(process.ProcessName))
+                    throw new InvalidOperationException("A shared Windows broker entered the contained Job.");
+                windows.TrackLaunchedProcess(process);
+                synchronized.Add(processId);
+            }
+            catch (ArgumentException)
+            {
+                // Chromium helpers can exit between the Job membership query and opening
+                // their Process handle. An already exited member has no HWND to adopt and
+                // is omitted; the next Job query remains authoritative.
+            }
         }
-        return processIds;
+        return synchronized;
     }
 }
 

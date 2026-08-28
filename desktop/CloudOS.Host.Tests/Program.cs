@@ -625,6 +625,22 @@ static void NativeLaunchRejectsAmbiguousWindows()
     selection = NativeLaunchContainmentPolicy.SelectUniqueQuarantinedWindow([candidates[0]], out selected);
     Assert(selection == NativeWindowCandidateSelection.Unique && selected?.Handle == candidates[0].Handle,
         "Exactly one quarantined HWND must remain eligible for the single-surface runtime.");
+    var dominant = new NativeWindowSnapshot(
+        1001, lease.ProcessId, "Browser", false, false, false, false,
+        new NativeWindowBounds(0, 0, 1920, 1023), DateTimeOffset.UtcNow);
+    var helper = new NativeWindowSnapshot(
+        1002, lease.ProcessId, String.Empty, false, false, false, false,
+        new NativeWindowBounds(0, 0, 136, 39), DateTimeOffset.UtcNow);
+    selection = NativeLaunchContainmentPolicy.SelectUniqueQuarantinedWindow([dominant, helper], out selected);
+    Assert(selection == NativeWindowCandidateSelection.Unique && selected?.Handle == dominant.Handle,
+        "A uniquely dominant browser surface must be selected while its tiny helper HWND remains quarantined.");
+    var untitledLargeHelper = new NativeWindowSnapshot(
+        1003, lease.ProcessId, String.Empty, false, false, false, false,
+        new NativeWindowBounds(0, 0, 1920, 1023), DateTimeOffset.UtcNow);
+    selection = NativeLaunchContainmentPolicy.SelectUniqueQuarantinedWindow(
+        [dominant, untitledLargeHelper, helper], out selected);
+    Assert(selection == NativeWindowCandidateSelection.Unique && selected?.Handle == dominant.Handle,
+        "A single titled browser surface must win over untitled Chromium helper HWNDs in the same Job.");
     Assert(candidates.All(window => !NativeMethods.IsWindowVisible(new IntPtr(window.Handle))),
         "Every ambiguous candidate must remain hidden while the launch is rejected.");
 

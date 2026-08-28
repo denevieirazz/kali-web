@@ -12,6 +12,9 @@ public static class NativeLaunchContainmentPolicy
     public const int WindowCandidateStabilityMilliseconds = 100;
     public const int PendingAttachTimeoutMilliseconds = 10_000;
     public const int GracefulCloseTimeoutMilliseconds = 1_000;
+    public const int PrimaryWindowMinimumWidth = 240;
+    public const int PrimaryWindowMinimumHeight = 120;
+    public const long DominantWindowAreaRatio = 4;
 
     private static readonly HashSet<string> DirectLaunchKinds = new(StringComparer.Ordinal)
     {
@@ -88,7 +91,9 @@ public static class NativeLaunchContainmentPolicy
     /// <summary>
     /// A launch capability does not imply that any one of several top-level HWNDs is the
     /// application's primary surface. Array order, focus and timing are not authority. The
-    /// current single-surface runtime therefore admits only one quarantined candidate.
+    /// current single-surface runtime admits one candidate, or one uniquely dominant
+    /// application surface accompanied only by small Chromium/helper HWNDs. Two plausible
+    /// application surfaces remain ambiguous and fail closed.
     /// </summary>
     public static NativeWindowCandidateSelection SelectUniqueQuarantinedWindow(
         IReadOnlyList<NativeWindowSnapshot> candidates,
@@ -96,13 +101,42 @@ public static class NativeLaunchContainmentPolicy
     {
         ArgumentNullException.ThrowIfNull(candidates);
         selected = candidates.Count == 1 ? candidates[0] : null;
-        return candidates.Count switch
+        if (candidates.Count == 0) return NativeWindowCandidateSelection.None;
+        if (candidates.Count == 1) return NativeWindowCandidateSelection.Unique;
+
+        var plausible = candidates
+            .Where(IsPlausiblePrimarySurface)
+            .OrderByDescending(WindowArea)
+            .ToArray();
+        if (plausible.Length > 1)
         {
-            0 => NativeWindowCandidateSelection.None,
-            1 => NativeWindowCandidateSelection.Unique,
-            _ => NativeWindowCandidateSelection.Ambiguous
-        };
+            var titled = plausible.Where(candidate => !string.IsNullOrWhiteSpace(candidate.Title)).ToArray();
+            if (titled.Length != 1) return NativeWindowCandidateSelection.Ambiguous;
+            selected = titled[0];
+            return NativeWindowCandidateSelection.Unique;
+        }
+        if (plausible.Length != 1) return NativeWindowCandidateSelection.Ambiguous;
+
+        var primary = plausible[0];
+        var largestAuxiliaryArea = candidates
+            .Where(candidate => candidate.Handle != primary.Handle)
+            .Select(WindowArea)
+            .DefaultIfEmpty(0)
+            .Max();
+        if (largestAuxiliaryArea > 0
+            && WindowArea(primary) < largestAuxiliaryArea * DominantWindowAreaRatio)
+            return NativeWindowCandidateSelection.Ambiguous;
+
+        selected = primary;
+        return NativeWindowCandidateSelection.Unique;
     }
+
+    public static bool IsPlausiblePrimarySurface(NativeWindowSnapshot candidate) =>
+        candidate.Bounds.Width >= PrimaryWindowMinimumWidth
+        && candidate.Bounds.Height >= PrimaryWindowMinimumHeight;
+
+    private static long WindowArea(NativeWindowSnapshot candidate) =>
+        Math.Max(0L, (long)candidate.Bounds.Width) * Math.Max(0L, candidate.Bounds.Height);
 
     /// <summary>
     /// Every failure after a process was launched is terminal. Restoring an
