@@ -11,6 +11,7 @@ on:
       - refactor/cloudos-core-hardening
       - integration/cloudos-foundation
       - integration/cloudos-validated-features
+      - integration/cloudos-unified-runtime
       - ci/cloudos-baseline
       - sync/cloudos-current-state
       - main
