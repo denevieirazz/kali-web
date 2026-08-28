@@ -13,6 +13,8 @@ constexpr DWORD kCreateSuspended = CREATE_SUSPENDED;
 constexpr DWORD kCreateUnicodeEnvironment = CREATE_UNICODE_ENVIRONMENT;
 constexpr DWORD kKillOnJobClose = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
 constexpr DWORD kPollMilliseconds = 20;
+constexpr LONG_PTR kForbiddenFrameStyles = WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU;
+constexpr int kBoundsTolerance = 4;
 
 struct NativeLease final {
     HANDLE job = nullptr;
@@ -124,6 +126,146 @@ void terminate_process_if_needed(HANDLE process) noexcept {
     if (GetExitCodeProcess(process, &exit_code) && exit_code == STILL_ACTIVE) {
         TerminateProcess(process, 1);
     }
+}
+
+BOOL valid_bounds(int x, int y, int width, int height) noexcept {
+    return width >= 32 && height >= 32 && width <= 32768 && height <= 32768
+        && x >= -131072 && x <= 131072 && y >= -131072 && y <= 131072;
+}
+
+BOOL validate_owner(HWND owner) noexcept {
+    if (owner == nullptr || !IsWindow(owner)) {
+        return fail(ERROR_INVALID_WINDOW_HANDLE);
+    }
+    DWORD owner_process_id = 0;
+    GetWindowThreadProcessId(owner, &owner_process_id);
+    if (owner_process_id == 0 || owner_process_id != GetCurrentProcessId()) {
+        return fail(ERROR_ACCESS_DENIED);
+    }
+    return TRUE;
+}
+
+BOOL set_window_long_checked(HWND window, int index, LONG_PTR value) noexcept {
+    SetLastError(ERROR_SUCCESS);
+    const LONG_PTR previous = SetWindowLongPtrW(window, index, value);
+    const DWORD error = GetLastError();
+    if (previous == 0 && error != ERROR_SUCCESS) {
+        return fail(error);
+    }
+    return TRUE;
+}
+
+BOOL restore_window(HWND window, DWORD timeout_milliseconds) noexcept {
+    if (!IsWindow(window)) return fail(ERROR_INVALID_WINDOW_HANDLE);
+    if (!IsIconic(window) && !IsZoomed(window)) return TRUE;
+
+    DWORD_PTR result = 0;
+    if (SendMessageTimeoutW(
+            window,
+            WM_SYSCOMMAND,
+            static_cast<WPARAM>(SC_RESTORE),
+            0,
+            SMTO_ABORTIFHUNG | SMTO_BLOCK,
+            timeout_milliseconds,
+            &result) == 0) {
+        const DWORD error = GetLastError();
+        return fail(error == ERROR_SUCCESS ? ERROR_TIMEOUT : error);
+    }
+    if (!IsWindow(window) || IsIconic(window) || IsZoomed(window)) {
+        return fail(ERROR_TIMEOUT);
+    }
+    return TRUE;
+}
+
+BOOL validate_window_surface(
+    HWND window,
+    HWND owner,
+    LONG_PTR expected_style,
+    LONG_PTR expected_extended_style,
+    int x,
+    int y,
+    int width,
+    int height,
+    BOOL visible) noexcept {
+    if (!IsWindow(window)) return fail(ERROR_INVALID_WINDOW_HANDLE);
+    if (!validate_owner(owner)) return FALSE;
+    if (GetWindow(window, GW_OWNER) != owner) return fail(ERROR_INVALID_STATE);
+    if (GetWindowLongPtrW(window, GWL_STYLE) != expected_style) return fail(ERROR_INVALID_STATE);
+    if (GetWindowLongPtrW(window, GWL_EXSTYLE) != expected_extended_style) return fail(ERROR_INVALID_STATE);
+
+    if (!IsIconic(window)) {
+        RECT actual{};
+        if (!GetWindowRect(window, &actual)) return FALSE;
+        if (actual.left < x - kBoundsTolerance || actual.top < y - kBoundsTolerance
+            || actual.right > x + width + kBoundsTolerance
+            || actual.bottom > y + height + kBoundsTolerance) {
+            return fail(ERROR_INVALID_STATE);
+        }
+        if ((IsWindowVisible(window) ? TRUE : FALSE) != visible) {
+            return fail(ERROR_INVALID_STATE);
+        }
+    }
+    return TRUE;
+}
+
+BOOL apply_window_layout(
+    HWND window,
+    HWND owner,
+    LONG_PTR expected_style,
+    LONG_PTR expected_extended_style,
+    int x,
+    int y,
+    int width,
+    int height,
+    BOOL visible,
+    BOOL frame_changed,
+    BOOL preserve_minimized) noexcept {
+    if (!IsWindow(window)) return fail(ERROR_INVALID_WINDOW_HANDLE);
+    if (!validate_owner(owner)) return FALSE;
+    if (!valid_bounds(x, y, width, height)) return fail(ERROR_INVALID_PARAMETER);
+    if (GetWindow(window, GW_OWNER) != owner) return fail(ERROR_INVALID_STATE);
+
+    if (preserve_minimized && IsIconic(window)) {
+        SetLastError(ERROR_SUCCESS);
+        return TRUE;
+    }
+
+    const LONG_PTR current_style = GetWindowLongPtrW(window, GWL_STYLE);
+    const LONG_PTR current_extended_style = GetWindowLongPtrW(window, GWL_EXSTYLE);
+    if (frame_changed) {
+        if ((current_style & kForbiddenFrameStyles) != 0) return fail(ERROR_INVALID_STATE);
+        if ((current_extended_style & WS_EX_APPWINDOW) != 0
+            || (current_extended_style & WS_EX_TOOLWINDOW) == 0) {
+            return fail(ERROR_INVALID_STATE);
+        }
+    } else if (current_style != expected_style || current_extended_style != expected_extended_style) {
+        return fail(ERROR_INVALID_STATE);
+    }
+
+    UINT flags = SWP_NOACTIVATE | SWP_NOOWNERZORDER | (visible ? SWP_SHOWWINDOW : SWP_HIDEWINDOW);
+    if (frame_changed) flags |= SWP_FRAMECHANGED;
+    if (!visible) flags |= SWP_NOZORDER;
+    if (!SetWindowPos(
+            window,
+            visible ? HWND_TOP : nullptr,
+            x,
+            y,
+            width,
+            height,
+            flags)) {
+        return FALSE;
+    }
+
+    return validate_window_surface(
+        window,
+        owner,
+        expected_style,
+        expected_extended_style,
+        x,
+        y,
+        width,
+        height,
+        visible);
 }
 
 } // namespace
@@ -266,7 +408,6 @@ BOOL WINAPI cloudos_native_terminate(
                 CLOUDOS_NATIVE_RUNTIME_MAX_PROCESSES,
                 &count)) {
             const DWORD error = GetLastError();
-            // An already-torn-down Job is equivalent to successful termination.
             if (error == ERROR_INVALID_HANDLE) {
                 SetLastError(ERROR_SUCCESS);
                 return TRUE;
@@ -286,6 +427,118 @@ BOOL WINAPI cloudos_native_terminate(
 
 void WINAPI cloudos_native_release(void* opaque) noexcept {
     delete checked_lease(opaque);
+}
+
+BOOL WINAPI cloudos_native_window_attach(
+    HWND window,
+    HWND owner,
+    int x,
+    int y,
+    int width,
+    int height,
+    BOOL visible,
+    LONG_PTR* applied_style_out,
+    LONG_PTR* applied_extended_style_out) noexcept {
+    if (window == nullptr || applied_style_out == nullptr || applied_extended_style_out == nullptr) {
+        return fail(ERROR_INVALID_PARAMETER);
+    }
+    if (!IsWindow(window)) return fail(ERROR_INVALID_WINDOW_HANDLE);
+    if (!validate_owner(owner)) return FALSE;
+    if (!valid_bounds(x, y, width, height)) return fail(ERROR_INVALID_PARAMETER);
+    if (GetAncestor(window, GA_ROOT) != window) return fail(ERROR_INVALID_STATE);
+
+    const LONG_PTR original_style = GetWindowLongPtrW(window, GWL_STYLE);
+    const LONG_PTR original_extended_style = GetWindowLongPtrW(window, GWL_EXSTYLE);
+    const LONG_PTR attached_style = original_style & ~kForbiddenFrameStyles;
+    const LONG_PTR attached_extended_style = (original_extended_style & ~WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW;
+
+    ShowWindowAsync(window, SW_HIDE);
+    if (!set_window_long_checked(window, GWL_STYLE, attached_style)) return FALSE;
+    if (!set_window_long_checked(window, GWL_EXSTYLE, attached_extended_style)) return FALSE;
+    if (!set_window_long_checked(window, GWLP_HWNDPARENT, reinterpret_cast<LONG_PTR>(owner))) return FALSE;
+
+    if (GetWindow(window, GW_OWNER) != owner
+        || (GetWindowLongPtrW(window, GWL_STYLE) & kForbiddenFrameStyles) != 0
+        || (GetWindowLongPtrW(window, GWL_EXSTYLE) & WS_EX_APPWINDOW) != 0
+        || (GetWindowLongPtrW(window, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) == 0) {
+        return fail(ERROR_INVALID_STATE);
+    }
+
+    if (!restore_window(window, 1500)) return FALSE;
+    if (!apply_window_layout(
+            window,
+            owner,
+            attached_style,
+            attached_extended_style,
+            x,
+            y,
+            width,
+            height,
+            visible,
+            TRUE,
+            FALSE)) {
+        return FALSE;
+    }
+
+    *applied_style_out = GetWindowLongPtrW(window, GWL_STYLE);
+    *applied_extended_style_out = GetWindowLongPtrW(window, GWL_EXSTYLE);
+    SetLastError(ERROR_SUCCESS);
+    return TRUE;
+}
+
+BOOL WINAPI cloudos_native_window_layout(
+    HWND window,
+    HWND owner,
+    LONG_PTR expected_style,
+    LONG_PTR expected_extended_style,
+    int x,
+    int y,
+    int width,
+    int height,
+    BOOL visible,
+    BOOL preserve_minimized) noexcept {
+    return apply_window_layout(
+        window,
+        owner,
+        expected_style,
+        expected_extended_style,
+        x,
+        y,
+        width,
+        height,
+        visible,
+        FALSE,
+        preserve_minimized);
+}
+
+BOOL WINAPI cloudos_native_window_focus(
+    HWND window,
+    HWND owner,
+    LONG_PTR expected_style,
+    LONG_PTR expected_extended_style,
+    int x,
+    int y,
+    int width,
+    int height,
+    DWORD restore_timeout_milliseconds) noexcept {
+    if (!restore_window(window, restore_timeout_milliseconds)) return FALSE;
+    if (!apply_window_layout(
+            window,
+            owner,
+            expected_style,
+            expected_extended_style,
+            x,
+            y,
+            width,
+            height,
+            TRUE,
+            FALSE,
+            FALSE)) {
+        return FALSE;
+    }
+    if (!SetForegroundWindow(window)) return fail(ERROR_ACCESS_DENIED);
+    SetLastError(ERROR_SUCCESS);
+    return TRUE;
 }
 
 } // extern "C"
