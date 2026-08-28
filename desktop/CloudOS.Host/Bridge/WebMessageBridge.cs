@@ -25,6 +25,7 @@ public sealed class WebMessageBridge : IDisposable
     private const int MaxMessageLength = 32 * 1024;
     private const int IdleRefreshMilliseconds = 1_200;
     private const int ActiveContainmentRefreshMilliseconds = 100;
+    private const int WindowCandidateStabilityMilliseconds = 350;
     private static readonly Regex AppIdPattern = new("^native-[a-f0-9]{24}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private readonly WebView2 _webView;
@@ -282,7 +283,7 @@ public sealed class WebMessageBridge : IDisposable
         try
         {
             var prepared = await _browserManager.PrepareInstallerAsync(artifactId, allowUntrusted);
-            return InstallerBridgeContract.Prepare(prepared);
+            return InstallerBridgeContract.Prepare(prepared, _browserManager.InstallerElevationBrokerAvailable);
         }
         catch (KeyNotFoundException)
         {
@@ -658,6 +659,9 @@ public sealed class WebMessageBridge : IDisposable
     {
         var deadline = DateTimeOffset.UtcNow.AddMilliseconds(
             NativeLaunchContainmentPolicy.WindowCorrelationTimeoutMilliseconds);
+        long preferredHandle = 0;
+        var preferredSince = DateTimeOffset.MinValue;
+
         while (!_disposed && DateTimeOffset.UtcNow < deadline)
         {
             var processIds = SynchronizeTrackedJob(lease);
@@ -675,7 +679,6 @@ public sealed class WebMessageBridge : IDisposable
             var candidates = _windows.GetWindows()
                 .Where(item => memberSet.Contains(item.ProcessId))
                 .Where(item => !item.IsAttached && !item.IsVisible)
-                .OrderBy(item => item.ObservedAtUtc)
                 .ToArray();
             if (candidates.Length > 0)
             {
@@ -686,7 +689,28 @@ public sealed class WebMessageBridge : IDisposable
                     rootMainHandle = lease.Process.MainWindowHandle;
                 }
                 catch (InvalidOperationException) { }
-                return candidates.FirstOrDefault(item => item.Handle == rootMainHandle.ToInt64()) ?? candidates[0];
+
+                var candidate = candidates
+                    .OrderByDescending(item => !string.IsNullOrWhiteSpace(item.Title))
+                    .ThenByDescending(item => (long)item.Bounds.Width * item.Bounds.Height)
+                    .ThenByDescending(item => item.Handle == rootMainHandle.ToInt64())
+                    .ThenBy(item => item.ProcessId)
+                    .First();
+                var now = DateTimeOffset.UtcNow;
+                if (candidate.Handle != preferredHandle)
+                {
+                    preferredHandle = candidate.Handle;
+                    preferredSince = now;
+                }
+                else if (now - preferredSince >= TimeSpan.FromMilliseconds(WindowCandidateStabilityMilliseconds))
+                {
+                    return candidate;
+                }
+            }
+            else
+            {
+                preferredHandle = 0;
+                preferredSince = DateTimeOffset.MinValue;
             }
 
             await Task.Delay(25);
@@ -1094,12 +1118,21 @@ public sealed class WebMessageBridge : IDisposable
                 {
                     _capturedSurfaceBridge?.Close(removed);
                     _handlesBySessionId.Remove(removed);
-                    _processIdsBySessionId.Remove(removed);
+                    if (_processIdsBySessionId.Remove(removed, out var removedProcessId))
+                    {
+                        BrowserDiagnostics.Write(
+                            "native_primary_window_removed",
+                            $"session={removed} pid={removedProcessId}");
+                        TerminateProcessAndForget(removedProcessId, NativeContainmentFailure.AttachmentLost);
+                    }
                 }
             }
-            else
+            else if (_sessionIdsByHandle.TryGetValue(handle, out var sessionId))
             {
-                var sessionId = GetOrCreateSession(eventArgs.Window);
+                // Only a HWND explicitly selected by native.launchApp is a public CloudOS
+                // session. Splash screens, helper windows and other Job-owned roots remain
+                // quarantined, but they never receive their own attach deadline and therefore
+                // cannot kill the whole application merely because the frontend did not dock them.
                 var isCaptured = _capturedSurfaceBridge is not null
                     && _capturedSurfaceBridge.TryGetState(sessionId, out _);
                 if (!eventArgs.Window.IsAttached && !isCaptured && !_pendingAttachDeadlinesByHandle.ContainsKey(handle))
@@ -1118,7 +1151,11 @@ public sealed class WebMessageBridge : IDisposable
         var sessions = new List<object>();
         foreach (var window in snapshots.OrderBy(window => window.ProcessId).ThenBy(window => window.Title, StringComparer.OrdinalIgnoreCase))
         {
-            var sessionId = GetOrCreateSession(window);
+            // Job-owned auxiliary HWNDs are deliberately not public sessions. They stay hidden
+            // and tracked so they cannot escape, while the selected primary HWND alone owns the
+            // CloudOS window lifecycle.
+            if (!_sessionIdsByHandle.TryGetValue(window.Handle, out var sessionId)) continue;
+
             if (_capturedSurfaceBridge is not null
                 && _capturedSurfaceBridge.TryGetState(sessionId, out var captured)
                 && captured is not null)
