@@ -262,7 +262,14 @@ class NativeHostBridge {
 
   async attachSession(sessionId: string, bounds: NativeViewportBounds, visible = true) {
     await this.requireConnection();
-    return this.request<{ sessionId: string; accepted: boolean; contained?: boolean; containmentMode?: NativeContainmentMode }>('native.session.attach', { sessionId, bounds, visible });
+    // Host pending-attach containment expires at 10s. The transport deadline must
+    // sit outside that boundary so WGC/Win32 setup can return the Host's real
+    // containment verdict instead of racing a client-side NATIVE_TIMEOUT.
+    return this.request<{ sessionId: string; accepted: boolean; contained?: boolean; containmentMode?: NativeContainmentMode }>(
+      'native.session.attach',
+      { sessionId, bounds, visible },
+      20_000
+    );
   }
 
   async layoutSession(sessionId: string, bounds: NativeViewportBounds, visible: boolean) {
