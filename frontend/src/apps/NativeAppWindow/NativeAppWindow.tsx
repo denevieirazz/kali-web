@@ -346,6 +346,26 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
           sessionLaunchProcessIdRef.current = hostLaunchProcessId;
         }
         if (current.title && current.title !== win?.title) updateWindowTitle(windowId, current.title);
+
+        // A bridge timeout is a client-side transport verdict, not proof that the
+        // Host failed. If the exact opaque session later reports successful
+        // containment, recover the renderer state from that authoritative Host
+        // snapshot and immediately reconcile its layout once.
+        if (current.contained === true && !attachedRef.current
+            && (current.containmentMode === 'captured-surface' || current.containmentMode === 'anchored-overlay')) {
+          attachInFlightSessionRef.current = null;
+          attachedRef.current = true;
+          lastLayoutRef.current = null;
+          setError('');
+          setStatus('contained');
+          window.requestAnimationFrame(() => {
+            void syncSurface(false).catch((layoutError) => {
+              if (disposedRef.current || sessionIdRef.current !== currentSessionId) return;
+              setStatus('error');
+              setError(errorMessage(layoutError));
+            });
+          });
+        }
         return;
       }
 
@@ -364,7 +384,7 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
     return () => {
       unsubscribe();
     };
-  }, [adoptReplacementSession, clearReplacementTimer, sessionId, startReplacementGrace, updateWindowTitle, win?.title, windowId]);
+  }, [adoptReplacementSession, clearReplacementTimer, sessionId, startReplacementGrace, syncSurface, updateWindowTitle, win?.title, windowId]);
 
   return (
     <div ref={surfaceRef} className="native-app-surface" data-status={status} data-session-id={sessionId || undefined}>
