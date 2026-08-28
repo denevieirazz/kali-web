@@ -13,6 +13,9 @@ namespace CloudOS.Host.Native;
 /// kill-on-close Job, and exposes Resume only after NativeWindowManager has
 /// installed the process capability. Shell, protocol and UWP activation never
 /// enter this boundary.
+///
+/// The C++ CloudOS.NativeRuntime is preferred when its ABI is available. The
+/// original managed Win32 implementation remains as a migration fallback.
 /// </summary>
 public static class NativeContainedProcessLauncher
 {
@@ -23,10 +26,25 @@ public static class NativeContainedProcessLauncher
     private const uint JobObjectLimitKillOnJobClose = 0x00002000;
     private const int JobObjectExtendedLimitInformationClass = 9;
 
+    public static string PreferredEngine => CloudOsNativeRuntime.Preference switch
+    {
+        CloudOsNativeRuntimePreference.Managed => "managed",
+        CloudOsNativeRuntimePreference.Cpp => CloudOsNativeRuntime.IsAvailable ? "cpp" : "cpp-unavailable",
+        _ => CloudOsNativeRuntime.IsAvailable ? "cpp" : "managed-fallback"
+    };
+
     public static NativeContainedProcessLease StartSuspended(NativeProcessLaunchSpec spec)
     {
         ArgumentNullException.ThrowIfNull(spec);
 
+        if (CloudOsNativeRuntime.TryStartSuspended(spec, out var nativeLease))
+            return nativeLease!;
+
+        return StartManagedSuspended(spec);
+    }
+
+    private static NativeContainedProcessLease StartManagedSuspended(NativeProcessLaunchSpec spec)
+    {
         using var environment = NativeEnvironmentBlock.Create();
         var startup = new StartupInfo
         {
@@ -366,12 +384,14 @@ public sealed class NativeContainedProcessLease : IDisposable
     private const int MaxProcessListStabilizationAttempts = 3;
     private static readonly int JobProcessListBufferSize = checked(8 + (IntPtr.Size * MaxContainedProcesses));
 
-    private readonly SafeKernelHandle _nativeProcess;
-    private readonly SafeJobHandle _job;
+    private readonly SafeKernelHandle? _nativeProcess;
+    private readonly SafeJobHandle? _job;
+    private readonly SafeCloudOsNativeLeaseHandle? _nativeRuntimeLease;
     private readonly object _jobQuerySync = new();
     private SafeKernelHandle? _primaryThread;
     private IntPtr _jobProcessListBuffer;
     private int _jobProcessListBufferAllocationCount;
+    private int _nativeRuntimeQueryObserved;
     private bool _disposed;
 
     internal NativeContainedProcessLease(
@@ -384,37 +404,60 @@ public sealed class NativeContainedProcessLease : IDisposable
         _nativeProcess = nativeProcess;
         _primaryThread = primaryThread;
         _job = job;
+        Engine = "managed";
+    }
+
+    internal NativeContainedProcessLease(
+        Process process,
+        SafeCloudOsNativeLeaseHandle nativeRuntimeLease)
+    {
+        Process = process;
+        _nativeRuntimeLease = nativeRuntimeLease;
+        Engine = "cpp";
     }
 
     public Process Process { get; }
     public int ProcessId => Process.Id;
     public bool IsResumed { get; private set; }
+    public string Engine { get; }
 
     internal int JobProcessListBufferAllocationCount
     {
         get
         {
-            lock (_jobQuerySync) return _jobProcessListBufferAllocationCount;
+            lock (_jobQuerySync)
+            {
+                return _nativeRuntimeLease is not null
+                    ? (_nativeRuntimeQueryObserved == 0 ? 0 : 1)
+                    : _jobProcessListBufferAllocationCount;
+            }
         }
     }
 
     /// <summary>
     /// Returns every process currently assigned to the containment Job, including
     /// descendants. The bounded query fails closed if a launch fans out beyond the
-    /// host's capability budget. The maximum-size native buffer is allocated lazily
-    /// once per lease and reused by correlation and termination polling.
+    /// host's capability budget. Managed mode reuses one native buffer per lease;
+    /// the C++ runtime owns its bounded process-list storage on the native side.
     /// </summary>
     public IReadOnlyList<int> GetMemberProcessIds()
     {
         lock (_jobQuerySync)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_nativeRuntimeLease is not null)
+            {
+                _nativeRuntimeQueryObserved = 1;
+                return CloudOsNativeRuntime.GetMemberProcessIds(_nativeRuntimeLease);
+            }
+
+            var job = _job ?? throw new InvalidOperationException("The managed containment Job is unavailable.");
             var pointer = GetOrCreateJobProcessListBuffer();
 
             for (var attempt = 0; attempt < MaxProcessListStabilizationAttempts; attempt++)
             {
                 if (!QueryInformationJobObject(
-                    _job,
+                    job,
                     JobObjectBasicProcessIdList,
                     pointer,
                     (uint)JobProcessListBufferSize,
@@ -476,6 +519,22 @@ public sealed class NativeContainedProcessLease : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (IsResumed) return;
+
+        if (_nativeRuntimeLease is not null)
+        {
+            try
+            {
+                CloudOsNativeRuntime.Resume(_nativeRuntimeLease);
+                IsResumed = true;
+                return;
+            }
+            catch
+            {
+                TryTerminate(3_000, out _);
+                throw;
+            }
+        }
+
         var thread = _primaryThread ?? throw new InvalidOperationException("The primary process thread is unavailable.");
         if (ResumeThread(thread) == uint.MaxValue)
         {
@@ -498,9 +557,13 @@ public sealed class NativeContainedProcessLease : IDisposable
             return true;
         }
 
+        if (_nativeRuntimeLease is not null)
+            return CloudOsNativeRuntime.TryTerminate(_nativeRuntimeLease, timeoutMilliseconds, out error);
+
         try
         {
-            if (!TerminateJobObject(_job, 1))
+            var job = _job ?? throw new InvalidOperationException("The managed containment Job is unavailable.");
+            if (!TerminateJobObject(job, 1))
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "TerminateJobObject failed.");
 
             var deadline = Environment.TickCount64 + timeoutMilliseconds;
@@ -527,18 +590,25 @@ public sealed class NativeContainedProcessLease : IDisposable
         {
             if (_disposed) return;
 
-            // Keep the reusable query buffer alive until Job termination is observed. Monitor
-            // locks are re-entrant, so TryTerminate can safely call GetMemberProcessIds here.
+            // Keep native ownership alive until termination is observed. Both backends use
+            // kill-on-close as the final fail-safe if graceful termination cannot be observed.
             TryTerminate(3_000, out _);
             _disposed = true;
+
+            if (_nativeRuntimeLease is not null)
+            {
+                _nativeRuntimeLease.Dispose();
+                Process.Dispose();
+                return;
+            }
 
             var queryBuffer = _jobProcessListBuffer;
             _jobProcessListBuffer = IntPtr.Zero;
             if (queryBuffer != IntPtr.Zero) Marshal.FreeHGlobal(queryBuffer);
 
             _primaryThread?.Dispose();
-            _nativeProcess.Dispose();
-            _job.Dispose(); // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE is the final fail-safe.
+            _nativeProcess?.Dispose();
+            _job?.Dispose(); // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE is the final fail-safe.
             Process.Dispose();
         }
     }
