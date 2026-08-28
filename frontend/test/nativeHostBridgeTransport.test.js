@@ -29,6 +29,8 @@ test('bridge request removes pending state when postMessage fails synchronously'
   assert.match(source, /NATIVE_TRANSPORT_FAILED/);
 });
 
-test('one native sessions listener cannot break delivery to the remaining windows', () => {
-  assert.match(source, /for \(const listener of this\.eventListeners\) \{\s*try \{\s*listener\(sessions\);\s*\} catch \{/s);
+test('one native sessions listener cannot break or mutate delivery to the remaining windows', () => {
+  assert.match(source, /this\.lastSessions = snapshotSessions\(sessions\);/);
+  assert.match(source, /for \(const listener of this\.eventListeners\) \{\s*try \{\s*listener\(snapshotSessions\(sessions\)\);\s*\} catch \{/s);
+  assert.doesNotMatch(source, /listener\(sessions\);/);
 });
