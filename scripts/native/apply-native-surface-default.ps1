@@ -4,6 +4,7 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# This patcher is temporary. The workflow validates and commits only the production bridge diff.
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $bridgePath = Join-Path $repoRoot 'desktop\CloudOS.Host\Bridge\WebMessageBridge.cs'
 $content = [IO.File]::ReadAllText($bridgePath)
