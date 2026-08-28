@@ -10,6 +10,8 @@
     <AssemblyName>CloudOS.Host</AssemblyName>
     <Platforms>AnyCPU;x64;ARM64</Platforms>
     <WebView2PackageVersion>1.0.4078.44</WebView2PackageVersion>
+    <CloudOSNativeRuntimeBuildScript>$(MSBuildProjectDirectory)\..\..\scripts\native\build-native-runtime.ps1</CloudOSNativeRuntimeBuildScript>
+    <CloudOSNativeRuntimeOutput>$(MSBuildProjectDirectory)\..\CloudOS.NativeRuntime\bin\$(Configuration)\CloudOS.NativeRuntime.dll</CloudOSNativeRuntimeOutput>
   </PropertyGroup>
 
   <ItemGroup>
@@ -21,4 +23,12 @@
     <ProjectReference Include="..\CloudOS.WindowsCapture\CloudOS.WindowsCapture.csproj" />
     <ProjectReference Include="..\CloudOS.WindowsCapture.Presenter\CloudOS.WindowsCapture.Presenter.csproj" />
   </ItemGroup>
+
+  <Target Name="BuildCloudOSNativeRuntime" BeforeTargets="CoreCompile" Condition="'$(OS)' == 'Windows_NT' and Exists('$(CloudOSNativeRuntimeBuildScript)')">
+    <Exec Command="pwsh.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File &quot;$(CloudOSNativeRuntimeBuildScript)&quot; -Configuration &quot;$(Configuration)&quot; -OutputDirectory &quot;$(TargetDir)&quot;" />
+  </Target>
+
+  <Target Name="CopyCloudOSNativeRuntimeToPublish" AfterTargets="Publish" Condition="'$(OS)' == 'Windows_NT' and Exists('$(CloudOSNativeRuntimeOutput)')">
+    <Copy SourceFiles="$(CloudOSNativeRuntimeOutput)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+  </Target>
 </Project>
