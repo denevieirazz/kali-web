@@ -187,7 +187,27 @@ export default function NativeAppWindow({ windowId }: { windowId: string; params
       await nativeHostBridge.layoutSession(currentSessionId, bounds, visible);
     } catch (layoutError) {
       if (lastLayoutRef.current === requested) lastLayoutRef.current = previous;
-      throw layoutError;
+      if (!(layoutError instanceof NativeHostError) || layoutError.code !== 'SESSION_NOT_FOUND') throw layoutError;
+      if (disposedRef.current || sessionIdRef.current !== currentSessionId) return;
+
+      // A captured splash can also disappear after the initial attach, while a layout
+      // IPC is in flight. Reconcile the same launch Job instead of letting the stale
+      // layout rejection overwrite a replacement session with a renderer error.
+      const result = await nativeHostBridge.listSessions();
+      if (disposedRef.current || sessionIdRef.current !== currentSessionId) return;
+      const replacement = nativeReplacementSession(
+        result.sessions,
+        currentSessionId,
+        sessionLaunchProcessIdRef.current ?? 0
+      );
+      if (replacement) {
+        adoptReplacementSession(replacement);
+        return;
+      }
+
+      attachedRef.current = false;
+      setStatus('waiting');
+      startReplacementGrace(currentSessionId);
     }
   }, [adoptReplacementSession, clearReplacementTimer, startReplacementGrace, visible]);
 
