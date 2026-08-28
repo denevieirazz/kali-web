@@ -125,36 +125,51 @@ function windowsSwitchKey(argument) {
   return match?.[1] || null;
 }
 
+function requiresIsolatedWindowsProfile(executableName) {
+  return ISOLATED_CHROMIUM_EXECUTABLES.has(executableName) || executableName === 'firefox.exe';
+}
+
+function skipSeparateSwitchOperand(argumentsList, index, argument) {
+  return !argument.includes('=')
+    && index + 1 < argumentsList.length
+    && !windowsSwitchKey(argumentsList[index + 1]);
+}
+
 export function mergeIsolatedWindowsAppArguments(executable, baseDirectory, catalogArguments = []) {
   const argumentsList = Array.isArray(catalogArguments)
     ? catalogArguments.filter((value) => typeof value === 'string' && !/[\0\r\n]/.test(value)).slice(0, MAX_SHORTCUT_ARGUMENTS)
     : [];
+  const executableName = path.win32.basename(String(executable || '')).toLowerCase();
   const isolationArguments = buildIsolatedWindowsAppArguments(executable, baseDirectory);
+  if (requiresIsolatedWindowsProfile(executableName) && isolationArguments.length === 0) {
+    throw Object.assign(
+      new Error('O navegador não pode ser iniciado sem um diretório de perfil isolado do CloudOS.'),
+      { code: 'BROWSER_PROFILE_ISOLATION_UNAVAILABLE' }
+    );
+  }
   if (isolationArguments.length === 0) return argumentsList;
 
-  const executableName = path.win32.basename(String(executable || '')).toLowerCase();
   const filtered = [];
   for (let index = 0; index < argumentsList.length; index += 1) {
     const argument = argumentsList[index];
     const switchKey = windowsSwitchKey(argument);
 
-    if (ISOLATED_CHROMIUM_EXECUTABLES.has(executableName) && switchKey === 'user-data-dir') {
-      // Chromium's CommandLine map gives a later duplicate switch the effective
-      // value. CloudOS owns this capability path, so a shortcut may not redirect
-      // the browser back to a normal/external user-data directory. Tolerate the
-      // non-canonical split form too so its value cannot become a positional URL.
-      if (!argument.includes('=') && index + 1 < argumentsList.length && !windowsSwitchKey(argumentsList[index + 1])) index += 1;
+    if (ISOLATED_CHROMIUM_EXECUTABLES.has(executableName)
+        && ['user-data-dir', 'profile-directory'].includes(switchKey || '')) {
+      // Both switches select persistent browser state. CloudOS owns the complete
+      // user-data/profile namespace, so shortcut arguments may not redirect either
+      // layer. Tolerate split forms as well so the operand cannot become a URL.
+      if (skipSeparateSwitchOperand(argumentsList, index, argument)) index += 1;
       continue;
     }
 
     if (executableName === 'firefox.exe'
-        && ['profile', 'p', 'profilemanager'].includes(switchKey || '')) {
-      // -profile/-P select Firefox profile state. Remove both the option and its
-      // separate operand; CloudOS supplies an isolated absolute profile below.
-      if (!argument.includes('=')
-          && switchKey !== 'profilemanager'
-          && index + 1 < argumentsList.length
-          && !windowsSwitchKey(argumentsList[index + 1])) index += 1;
+        && ['profile', 'p', 'profilemanager', 'migration', 'createprofile'].includes(switchKey || '')) {
+      // Profile selectors/managers and migration/create-profile startup modes can
+      // escape or replace the CloudOS-owned profile. Keep normal content/window
+      // switches, but strip every known profile-state selector before launch.
+      if (['profile', 'p', 'createprofile'].includes(switchKey || '')
+          && skipSeparateSwitchOperand(argumentsList, index, argument)) index += 1;
       continue;
     }
 
