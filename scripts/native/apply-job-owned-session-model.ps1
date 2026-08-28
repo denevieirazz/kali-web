@@ -126,11 +126,23 @@ Replace-ExactlyOnce @'
     private void CompleteExitedLaunch(int rootProcessId)
     {
         _terminationRetriesByRoot.Remove(rootProcessId);
+        if (_recoveringSessionByRoot.Remove(rootProcessId, out var recoveringSessionId))
+        {
+            _recoveringSessionIds.Remove(recoveringSessionId);
+            _handlesBySessionId.Remove(recoveringSessionId);
+            _processIdsBySessionId.Remove(recoveringSessionId);
+        }
         var members = GetKnownLaunchMembers(rootProcessId);
 '@ @'
     private void CompleteExitedLaunch(int rootProcessId)
     {
         _terminationRetriesByRoot.Remove(rootProcessId);
+        if (_recoveringSessionByRoot.Remove(rootProcessId, out var recoveringSessionId))
+        {
+            _recoveringSessionIds.Remove(recoveringSessionId);
+            _handlesBySessionId.Remove(recoveringSessionId);
+            _processIdsBySessionId.Remove(recoveringSessionId);
+        }
         foreach (var session in _nativeSessionsById.Values
             .Where(item => item.RootProcessId == rootProcessId)
             .ToArray())
