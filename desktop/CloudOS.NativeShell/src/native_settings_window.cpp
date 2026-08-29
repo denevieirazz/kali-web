@@ -1,5 +1,7 @@
 #include "native_settings_window.h"
 
+#include "native_theme.h"
+
 #include <shellapi.h>
 
 #include <algorithm>
@@ -10,11 +12,10 @@
 
 namespace
 {
-constexpr wchar_t kClassName[] = L"CloudOS.NativeShell.Settings.v1";
+constexpr wchar_t kClassName[] = L"CloudOS.NativeShell.Settings.v2";
 constexpr wchar_t kRegistryPath[] = L"Software\\CloudOS\\Native";
-constexpr wchar_t kDesktopClass[] = L"CloudOS.NativeShell.Desktop.v2";
+constexpr wchar_t kDesktopClass[] = L"CloudOS.NativeShell.CloudOSDesktop.v19";
 
-constexpr int kTilingId = 3001;
 constexpr int kDistroId = 3002;
 constexpr int kSaveId = 3003;
 constexpr int kWindowsSettingsId = 3004;
@@ -101,24 +102,9 @@ CloudOSNativeSettings CloudOSNativeSettingsWindow::Load()
         return settings;
     }
 
-    DWORD tiling = 0;
-    DWORD type = 0;
-    DWORD size = sizeof(tiling);
-    if (RegQueryValueExW(
-            key,
-            L"TilingOnStart",
-            nullptr,
-            &type,
-            reinterpret_cast<BYTE*>(&tiling),
-            &size) == ERROR_SUCCESS &&
-        type == REG_DWORD)
-    {
-        settings.tiling_on_start = tiling != 0;
-    }
-
     std::array<wchar_t, 256> distro{};
-    type = 0;
-    size = static_cast<DWORD>(distro.size() * sizeof(wchar_t));
+    DWORD type = 0;
+    DWORD size = static_cast<DWORD>(distro.size() * sizeof(wchar_t));
     if (RegQueryValueExW(
             key,
             L"DefaultWslDistribution",
@@ -154,28 +140,19 @@ bool CloudOSNativeSettingsWindow::Save(const CloudOSNativeSettings& settings)
         return false;
     }
 
-    const DWORD tiling = settings.tiling_on_start ? 1u : 0u;
-    LONG result = RegSetValueExW(
+    const DWORD bytes = static_cast<DWORD>(
+        (settings.default_wsl_distribution.size() + 1u) * sizeof(wchar_t));
+    const LONG result = RegSetValueExW(
         key,
-        L"TilingOnStart",
+        L"DefaultWslDistribution",
         0,
-        REG_DWORD,
-        reinterpret_cast<const BYTE*>(&tiling),
-        sizeof(tiling));
+        REG_SZ,
+        reinterpret_cast<const BYTE*>(settings.default_wsl_distribution.c_str()),
+        bytes);
 
-    if (result == ERROR_SUCCESS)
-    {
-        const DWORD bytes = static_cast<DWORD>(
-            (settings.default_wsl_distribution.size() + 1u) * sizeof(wchar_t));
-        result = RegSetValueExW(
-            key,
-            L"DefaultWslDistribution",
-            0,
-            REG_SZ,
-            reinterpret_cast<const BYTE*>(
-                settings.default_wsl_distribution.c_str()),
-            bytes);
-    }
+    // Remove the obsolete preference so an old profile cannot suggest that
+    // automatic tiling is still supported.
+    (void)RegDeleteValueW(key, L"TilingOnStart");
 
     RegCloseKey(key);
     return result == ERROR_SUCCESS;
@@ -195,8 +172,8 @@ bool CloudOSNativeSettingsWindow::Create()
         WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
-        620,
-        430,
+        660,
+        360,
         nullptr,
         nullptr,
         instance_,
@@ -206,6 +183,7 @@ bool CloudOSNativeSettingsWindow::Create()
         return false;
     }
 
+    CloudOS::DarkWindow(window_);
     ShowWindow(window_, SW_SHOW);
     UpdateWindow(window_);
     return true;
@@ -216,23 +194,25 @@ void CloudOSNativeSettingsWindow::Layout()
     RECT client{};
     GetClientRect(window_, &client);
     const UINT dpi = GetDpiForWindow(window_);
-    const int margin = MulDiv(20, static_cast<int>(dpi), 96);
-    const int row_height = MulDiv(34, static_cast<int>(dpi), 96);
+    const int margin = MulDiv(24, static_cast<int>(dpi), 96);
+    const int title_height = MulDiv(34, static_cast<int>(dpi), 96);
+    const int row_height = MulDiv(36, static_cast<int>(dpi), 96);
+    const int note_height = MulDiv(46, static_cast<int>(dpi), 96);
     const int gap = MulDiv(12, static_cast<int>(dpi), 96);
     const int full_width = std::max(1, static_cast<int>(client.right) - margin * 2);
 
     int top = margin;
     SetWindowPos(
-        title_, nullptr, margin, top, full_width, row_height,
+        title_, nullptr, margin, top, full_width, title_height,
         SWP_NOZORDER | SWP_NOACTIVATE);
-    top += row_height + gap;
+    top += title_height + gap;
 
     SetWindowPos(
-        tiling_checkbox_, nullptr, margin, top, full_width, row_height,
+        tiling_note_, nullptr, margin, top, full_width, note_height,
         SWP_NOZORDER | SWP_NOACTIVATE);
-    top += row_height + gap;
+    top += note_height + gap;
 
-    const int label_width = MulDiv(190, static_cast<int>(dpi), 96);
+    const int label_width = MulDiv(205, static_cast<int>(dpi), 96);
     SetWindowPos(
         distro_label_, nullptr, margin, top, label_width, row_height,
         SWP_NOZORDER | SWP_NOACTIVATE);
@@ -246,7 +226,7 @@ void CloudOSNativeSettingsWindow::Layout()
         SWP_NOZORDER | SWP_NOACTIVATE);
     top += row_height + gap * 2;
 
-    const int button_width = MulDiv(170, static_cast<int>(dpi), 96);
+    const int button_width = MulDiv(180, static_cast<int>(dpi), 96);
     SetWindowPos(
         save_button_, nullptr, margin, top, button_width, row_height,
         SWP_NOZORDER | SWP_NOACTIVATE);
@@ -271,19 +251,12 @@ void CloudOSNativeSettingsWindow::Layout()
 void CloudOSNativeSettingsWindow::LoadIntoControls()
 {
     const CloudOSNativeSettings settings = Load();
-    SendMessageW(
-        tiling_checkbox_,
-        BM_SETCHECK,
-        settings.tiling_on_start ? BST_CHECKED : BST_UNCHECKED,
-        0);
     SetWindowTextW(distro_edit_, settings.default_wsl_distribution.c_str());
 }
 
 void CloudOSNativeSettingsWindow::SaveFromControls()
 {
     CloudOSNativeSettings settings;
-    settings.tiling_on_start =
-        SendMessageW(tiling_checkbox_, BM_GETCHECK, 0, 0) == BST_CHECKED;
     settings.default_wsl_distribution = Trim(ReadControlText(distro_edit_));
     if (settings.default_wsl_distribution.empty())
     {
@@ -377,15 +350,14 @@ LRESULT CloudOSNativeSettingsWindow::HandleMessage(
     {
         title_ = CreateWindowExW(
             0, L"STATIC",
-            L"CloudOS Native - configuracoes do shell e WSL",
+            L"CloudOS Native - sistema e WSL",
             WS_CHILD | WS_VISIBLE,
             0, 0, 0, 0, window_, nullptr, instance_, nullptr);
-        tiling_checkbox_ = CreateWindowExW(
-            0, L"BUTTON",
-            L"Ativar tiling automaticamente ao iniciar",
-            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-            0, 0, 0, 0, window_,
-            reinterpret_cast<HMENU>(kTilingId), instance_, nullptr);
+        tiling_note_ = CreateWindowExW(
+            0, L"STATIC",
+            L"Layout automatico fica desligado ao iniciar. Tiling so e ativado manualmente com Ctrl+Alt+T.",
+            WS_CHILD | WS_VISIBLE | SS_LEFT,
+            0, 0, 0, 0, window_, nullptr, instance_, nullptr);
         distro_label_ = CreateWindowExW(
             0, L"STATIC",
             L"Distribuicao WSL padrao:",
@@ -417,7 +389,7 @@ LRESULT CloudOSNativeSettingsWindow::HandleMessage(
         HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
         for (HWND child : {
                  title_,
-                 tiling_checkbox_,
+                 tiling_note_,
                  distro_label_,
                  distro_edit_,
                  save_button_,
