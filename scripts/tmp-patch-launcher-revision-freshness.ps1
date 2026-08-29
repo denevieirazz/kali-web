@@ -2,15 +2,15 @@ $ErrorActionPreference = 'Stop'
 $path = 'scripts/launch/start-cloudos.ps1'
 $text = (Get-Content -LiteralPath $path -Raw).Replace("`r`n", "`n")
 
-$sourceOld = @"
-. (Join-Path `$PSScriptRoot 'cloudos-owned-processes.ps1')
-. (Join-Path `$PSScriptRoot '..\validate\cloudos-node-dependencies.ps1')
-"@.TrimEnd()
-$sourceNew = @"
-. (Join-Path `$PSScriptRoot 'cloudos-owned-processes.ps1')
-. (Join-Path `$PSScriptRoot 'cloudos-session-freshness.ps1')
-. (Join-Path `$PSScriptRoot '..\validate\cloudos-node-dependencies.ps1')
-"@.TrimEnd()
+$sourceOld = @'
+. (Join-Path $PSScriptRoot 'cloudos-owned-processes.ps1')
+. (Join-Path $PSScriptRoot '..\validate\cloudos-node-dependencies.ps1')
+'@.TrimEnd()
+$sourceNew = @'
+. (Join-Path $PSScriptRoot 'cloudos-owned-processes.ps1')
+. (Join-Path $PSScriptRoot 'cloudos-session-freshness.ps1')
+. (Join-Path $PSScriptRoot '..\validate\cloudos-node-dependencies.ps1')
+'@.TrimEnd()
 if (([regex]::Matches($text, [regex]::Escape($sourceOld))).Count -ne 1) { throw 'SOURCE_IMPORT_PATTERN_NOT_UNIQUE' }
 $text = $text.Replace($sourceOld, $sourceNew)
 
