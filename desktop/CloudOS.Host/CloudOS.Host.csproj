@@ -12,7 +12,12 @@
     <WebView2PackageVersion>1.0.4078.44</WebView2PackageVersion>
     <CloudOSNativeRuntimeBuildScript>$(MSBuildProjectDirectory)\..\..\scripts\native\build-native-runtime.ps1</CloudOSNativeRuntimeBuildScript>
     <CloudOSNativeRuntimeOutput>$(MSBuildProjectDirectory)\..\CloudOS.NativeRuntime\bin\$(Configuration)\CloudOS.NativeRuntime.dll</CloudOSNativeRuntimeOutput>
+    <CloudOSSourceRevision Condition="'$(CloudOSSourceRevision)' == ''">unknown</CloudOSSourceRevision>
   </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyMetadata Include="CloudOSSourceRevision" Value="$(CloudOSSourceRevision)" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="$(WebView2PackageVersion)" />
