@@ -470,12 +470,8 @@ int WINAPI wWinMain(
         return 1;
     }
 
-    const HRESULT com_result = CoInitializeEx(
-        nullptr,
-        COINIT_APARTMENTTHREADED |
-            COINIT_DISABLE_OLE1DDE);
-    const bool uninitialize_com =
-        SUCCEEDED(com_result);
+    const HRESULT com_result = OleInitialize(nullptr);
+    const bool uninitialize_com = SUCCEEDED(com_result);
 
     CloudOS::CloudOSApplication application(
         instance);
@@ -483,7 +479,7 @@ int WINAPI wWinMain(
     {
         if (uninitialize_com)
         {
-            CoUninitialize();
+            OleUninitialize();
         }
         MessageBoxW(
             nullptr,
@@ -496,7 +492,8 @@ int WINAPI wWinMain(
     const int exit_code = application.Run();
     if (uninitialize_com)
     {
-        CoUninitialize();
+        OleUninitialize();
     }
     return exit_code;
 }
+

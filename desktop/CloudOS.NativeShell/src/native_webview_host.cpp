@@ -140,7 +140,7 @@ bool NativeWebViewHost::Create(
                 }
                 if (FAILED(environment_result) || environment == nullptr)
                 {
-                    NotifyReady(false, L"Falha ao criar o ambiente WebView2.");
+                    wchar_t err_buf[256]{}; swprintf_s(err_buf, L"Falha ao criar o ambiente WebView2 (hr=0x%08X).", static_cast<unsigned int>(environment_result)); NotifyReady(false, err_buf);
                     return S_OK;
                 }
 
@@ -160,7 +160,7 @@ bool NativeWebViewHost::Create(
                                 }
                                 if (FAILED(creation_result) || controller == nullptr)
                                 {
-                                    NotifyReady(false, L"Falha ao criar o controlador WebView2.");
+                                    wchar_t err_buf[256]{}; swprintf_s(err_buf, L"Falha ao criar o controlador WebView2 (hr=0x%08X).", static_cast<unsigned int>(creation_result)); NotifyReady(false, err_buf);
                                     return S_OK;
                                 }
                                 ConfigureController(controller);
@@ -168,7 +168,7 @@ bool NativeWebViewHost::Create(
                             }).Get());
                 if (FAILED(controller_result))
                 {
-                    NotifyReady(false, L"WebView2 recusou a criacao do controlador.");
+                    wchar_t err_buf[256]{}; swprintf_s(err_buf, L"WebView2 recusou a criacao do controlador (hr=0x%08X).", static_cast<unsigned int>(controller_result)); NotifyReady(false, err_buf);
                 }
                 return S_OK;
             }).Get());
@@ -399,3 +399,4 @@ void NativeWebViewHost::Destroy() noexcept
     ready_callback_ = {};
 }
 } // namespace CloudOS
+

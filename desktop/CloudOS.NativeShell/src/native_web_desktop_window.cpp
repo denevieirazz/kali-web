@@ -505,3 +505,4 @@ LRESULT CALLBACK CloudOSNativeWebDesktopWindow::WindowProcedure(
     return self->HandleMessage(message, w_param, l_param);
 }
 } // namespace CloudOS
+

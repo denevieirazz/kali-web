@@ -68,3 +68,6 @@ backup*/
 archive/
 *.zip
 *.backup*
+packages/
+**/packages/
+
