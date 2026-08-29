@@ -5,7 +5,8 @@
 #include <string>
 #include <vector>
 
-class CloudOSNativeFilesWindow final {
+class CloudOSNativeFilesWindow final
+{
 public:
     static void Open(
         HINSTANCE instance,
@@ -23,6 +24,7 @@ private:
         std::wstring name;
         std::wstring full_path;
         bool directory{};
+        bool reparse_point{};
         ULONGLONG size{};
     };
 
@@ -39,14 +41,22 @@ private:
     void Navigate(const std::wstring& path);
     void NavigateParent();
     void NavigateWslRoot();
+    void NavigateCloudOSDriveRoot();
+    void OpenCloudOSDriveTrash();
     void ActivateSelection();
     void PopulateList();
+    void PopulateCloudOSDriveList();
+    void PopulateNativeFileSystemList();
     void CreateNewFolder();
     void DeleteSelection();
     void BeginRename();
     bool CommitRename(int row, const wchar_t* new_name);
     void Refresh();
 
+    [[nodiscard]] bool IsCurrentCloudOSDrive() const;
+    bool CurrentDriveSegments(
+        std::vector<std::wstring>* segments,
+        std::wstring* error = nullptr) const;
     [[nodiscard]] std::wstring SelectedPath() const;
 
     static std::wstring ParentPath(const std::wstring& path);
@@ -64,6 +74,8 @@ private:
     HWND path_edit_{};
     HWND go_button_{};
     HWND up_button_{};
+    HWND drive_button_{};
+    HWND trash_button_{};
     HWND wsl_button_{};
     HWND refresh_button_{};
     HWND new_folder_button_{};

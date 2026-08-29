@@ -1,5 +1,8 @@
 #include "native_files_window.h"
 
+#include "native_cloudos_drive.h"
+#include "native_cloudos_trash_window.h"
+
 #include <commctrl.h>
 #include <shellapi.h>
 
@@ -14,7 +17,7 @@
 
 namespace
 {
-constexpr wchar_t kClassName[] = L"CloudOS.Native.Files.v2";
+constexpr wchar_t kClassName[] = L"CloudOS.Native.Files.v3";
 constexpr int kPathId = 1201;
 constexpr int kGoId = 1202;
 constexpr int kUpId = 1203;
@@ -23,6 +26,8 @@ constexpr int kListId = 1205;
 constexpr int kRefreshId = 1206;
 constexpr int kNewFolderId = 1207;
 constexpr int kDeleteId = 1208;
+constexpr int kDriveId = 1209;
+constexpr int kTrashId = 1210;
 
 bool RegisterWindowClass(HINSTANCE instance)
 {
@@ -33,7 +38,8 @@ bool RegisterWindowClass(HINSTANCE instance)
     window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     window_class.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
     window_class.lpszClassName = kClassName;
-    return RegisterClassExW(&window_class) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
+    return RegisterClassExW(&window_class) != 0 ||
+        GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
 }
 
 std::wstring ReadEditText(HWND edit)
@@ -58,7 +64,7 @@ std::wstring DefaultPath()
             static_cast<UINT>(windows_directory.size())) > 0)
     {
         std::wstring path = windows_directory.data();
-        if (path.size() >= 3)
+        if (path.size() >= 3u)
         {
             return path.substr(0, 3);
         }
@@ -73,13 +79,24 @@ bool IsSafeLeafName(const wchar_t* text)
         return false;
     }
 
-    std::wstring_view name(text);
-    if (name == L"." || name == L"..")
+    const std::wstring_view name(text);
+    if (name == L"." || name == L".." || name.size() > 255u)
     {
         return false;
     }
 
     return name.find_first_of(L"\\/:*?\"<>|") == std::wstring_view::npos;
+}
+
+void ShowFileError(HWND owner, const wchar_t* action, const std::wstring& detail = {})
+{
+    std::wstring message(action);
+    if (!detail.empty())
+    {
+        message += L"\n\n";
+        message += detail;
+    }
+    MessageBoxW(owner, message.c_str(), L"CloudOS Arquivos", MB_OK | MB_ICONWARNING);
 }
 }
 
@@ -125,8 +142,8 @@ bool CloudOSNativeFilesWindow::Create()
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
-        1040,
-        680,
+        1120,
+        720,
         nullptr,
         nullptr,
         instance_,
@@ -135,6 +152,14 @@ bool CloudOSNativeFilesWindow::Create()
     {
         return false;
     }
+
+    up_button_ = CreateWindowW(L"BUTTON", L"Acima", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kUpId)), instance_, nullptr);
+    drive_button_ = CreateWindowW(L"BUTTON", L"CloudOS Drive", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kDriveId)), instance_, nullptr);
+    trash_button_ = CreateWindowW(L"BUTTON", L"Lixeira", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kTrashId)), instance_, nullptr);
+    wsl_button_ = CreateWindowW(L"BUTTON", L"WSL", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kWslId)), instance_, nullptr);
+    refresh_button_ = CreateWindowW(L"BUTTON", L"Atualizar", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kRefreshId)), instance_, nullptr);
+    new_folder_button_ = CreateWindowW(L"BUTTON", L"Nova pasta", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kNewFolderId)), instance_, nullptr);
+    delete_button_ = CreateWindowW(L"BUTTON", L"Excluir", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kDeleteId)), instance_, nullptr);
 
     path_edit_ = CreateWindowExW(
         WS_EX_CLIENTEDGE,
@@ -146,7 +171,7 @@ bool CloudOSNativeFilesWindow::Create()
         0,
         0,
         window_,
-        reinterpret_cast<HMENU>(kPathId),
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPathId)),
         instance_,
         nullptr);
     go_button_ = CreateWindowW(
@@ -158,67 +183,7 @@ bool CloudOSNativeFilesWindow::Create()
         0,
         0,
         window_,
-        reinterpret_cast<HMENU>(kGoId),
-        instance_,
-        nullptr);
-    up_button_ = CreateWindowW(
-        L"BUTTON",
-        L"Acima",
-        WS_CHILD | WS_VISIBLE,
-        0,
-        0,
-        0,
-        0,
-        window_,
-        reinterpret_cast<HMENU>(kUpId),
-        instance_,
-        nullptr);
-    wsl_button_ = CreateWindowW(
-        L"BUTTON",
-        L"WSL",
-        WS_CHILD | WS_VISIBLE,
-        0,
-        0,
-        0,
-        0,
-        window_,
-        reinterpret_cast<HMENU>(kWslId),
-        instance_,
-        nullptr);
-    refresh_button_ = CreateWindowW(
-        L"BUTTON",
-        L"Atualizar",
-        WS_CHILD | WS_VISIBLE,
-        0,
-        0,
-        0,
-        0,
-        window_,
-        reinterpret_cast<HMENU>(kRefreshId),
-        instance_,
-        nullptr);
-    new_folder_button_ = CreateWindowW(
-        L"BUTTON",
-        L"Nova pasta",
-        WS_CHILD | WS_VISIBLE,
-        0,
-        0,
-        0,
-        0,
-        window_,
-        reinterpret_cast<HMENU>(kNewFolderId),
-        instance_,
-        nullptr);
-    delete_button_ = CreateWindowW(
-        L"BUTTON",
-        L"Excluir",
-        WS_CHILD | WS_VISIBLE,
-        0,
-        0,
-        0,
-        0,
-        window_,
-        reinterpret_cast<HMENU>(kDeleteId),
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kGoId)),
         instance_,
         nullptr);
     list_ = CreateWindowExW(
@@ -231,13 +196,13 @@ bool CloudOSNativeFilesWindow::Create()
         0,
         0,
         window_,
-        reinterpret_cast<HMENU>(kListId),
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kListId)),
         instance_,
         nullptr);
 
-    if (path_edit_ == nullptr || go_button_ == nullptr || up_button_ == nullptr ||
-        wsl_button_ == nullptr || refresh_button_ == nullptr ||
-        new_folder_button_ == nullptr || delete_button_ == nullptr || list_ == nullptr)
+    if (up_button_ == nullptr || drive_button_ == nullptr || trash_button_ == nullptr ||
+        wsl_button_ == nullptr || refresh_button_ == nullptr || new_folder_button_ == nullptr ||
+        delete_button_ == nullptr || path_edit_ == nullptr || go_button_ == nullptr || list_ == nullptr)
     {
         DestroyWindow(window_);
         window_ = nullptr;
@@ -250,13 +215,13 @@ bool CloudOSNativeFilesWindow::Create()
 
     LVCOLUMNW column{};
     column.mask = LVCF_TEXT | LVCF_WIDTH;
-    column.cx = 560;
+    column.cx = 650;
     column.pszText = const_cast<wchar_t*>(L"Nome");
     ListView_InsertColumn(list_, 0, &column);
-    column.cx = 130;
+    column.cx = 160;
     column.pszText = const_cast<wchar_t*>(L"Tipo");
     ListView_InsertColumn(list_, 1, &column);
-    column.cx = 150;
+    column.cx = 160;
     column.pszText = const_cast<wchar_t*>(L"Tamanho");
     ListView_InsertColumn(list_, 2, &column);
 
@@ -269,23 +234,40 @@ bool CloudOSNativeFilesWindow::Create()
 
 void CloudOSNativeFilesWindow::Layout()
 {
+    if (window_ == nullptr)
+    {
+        return;
+    }
     RECT client{};
     if (!GetClientRect(window_, &client))
     {
         return;
     }
 
-    const int width = client.right - client.left;
-    const int height = client.bottom - client.top;
+    const int width = std::max(1, client.right - client.left);
+    const int height = std::max(1, client.bottom - client.top);
+    const int margin = 12;
+    const int button_height = 30;
+    const int row1 = 10;
 
-    MoveWindow(up_button_, 12, 12, 72, 30, TRUE);
-    MoveWindow(wsl_button_, 90, 12, 58, 30, TRUE);
-    MoveWindow(refresh_button_, 154, 12, 82, 30, TRUE);
-    MoveWindow(new_folder_button_, 242, 12, 92, 30, TRUE);
-    MoveWindow(delete_button_, 340, 12, 72, 30, TRUE);
-    MoveWindow(path_edit_, 420, 12, std::max(120, width - 490), 30, TRUE);
-    MoveWindow(go_button_, std::max(420, width - 62), 12, 50, 30, TRUE);
-    MoveWindow(list_, 12, 52, std::max(100, width - 24), std::max(80, height - 64), TRUE);
+    int x = margin;
+    const auto place = [&](HWND button, int button_width)
+    {
+        MoveWindow(button, x, row1, button_width, button_height, TRUE);
+        x += button_width + 6;
+    };
+    place(up_button_, 70);
+    place(drive_button_, 112);
+    place(trash_button_, 74);
+    place(wsl_button_, 58);
+    place(refresh_button_, 82);
+    place(new_folder_button_, 92);
+    place(delete_button_, 72);
+
+    const int path_y = 48;
+    MoveWindow(path_edit_, margin, path_y, std::max(120, width - margin * 2 - 58), 30, TRUE);
+    MoveWindow(go_button_, std::max(margin, width - margin - 50), path_y, 50, 30, TRUE);
+    MoveWindow(list_, margin, 88, width - margin * 2, std::max(80, height - 100), TRUE);
 }
 
 std::wstring CloudOSNativeFilesWindow::JoinPath(
@@ -313,7 +295,8 @@ bool CloudOSNativeFilesWindow::IsWslRootPath(const std::wstring& path)
 
 bool CloudOSNativeFilesWindow::IsRootPath(const std::wstring& path)
 {
-    if (path.size() == 3 && path[1] == L':' && (path[2] == L'\\' || path[2] == L'/'))
+    if (path.size() == 3u && path[1] == L':' &&
+        (path[2] == L'\\' || path[2] == L'/'))
     {
         return true;
     }
@@ -328,7 +311,7 @@ std::wstring CloudOSNativeFilesWindow::ParentPath(const std::wstring& path)
     }
 
     std::wstring normalized = path;
-    while (normalized.size() > 3 &&
+    while (normalized.size() > 3u &&
         (normalized.back() == L'\\' || normalized.back() == L'/'))
     {
         normalized.pop_back();
@@ -339,15 +322,13 @@ std::wstring CloudOSNativeFilesWindow::ParentPath(const std::wstring& path)
     {
         return normalized;
     }
-
-    if (position == 2 && normalized.size() > 2 && normalized[1] == L':')
+    if (position == 2u && normalized.size() > 2u && normalized[1] == L':')
     {
         return normalized.substr(0, 3);
     }
-
     if (normalized.rfind(L"\\\\wsl.localhost\\", 0) == 0)
     {
-        const std::size_t distro_separator = normalized.find(L'\\', 16);
+        const std::size_t distro_separator = normalized.find(L'\\', 16u);
         if (distro_separator == std::wstring::npos)
         {
             return L"\\\\wsl.localhost\\";
@@ -355,14 +336,13 @@ std::wstring CloudOSNativeFilesWindow::ParentPath(const std::wstring& path)
     }
     else if (normalized.rfind(L"\\\\wsl$\\", 0) == 0)
     {
-        const std::size_t distro_separator = normalized.find(L'\\', 7);
+        const std::size_t distro_separator = normalized.find(L'\\', 7u);
         if (distro_separator == std::wstring::npos)
         {
             return L"\\\\wsl$\\";
         }
     }
-
-    return position == 0 ? L"\\" : normalized.substr(0, position);
+    return position == 0u ? L"\\" : normalized.substr(0, position);
 }
 
 std::wstring CloudOSNativeFilesWindow::FormatSize(ULONGLONG size)
@@ -370,10 +350,7 @@ std::wstring CloudOSNativeFilesWindow::FormatSize(ULONGLONG size)
     wchar_t buffer[64]{};
     if (size >= 1024ull * 1024ull * 1024ull)
     {
-        swprintf_s(
-            buffer,
-            L"%.2f GB",
-            static_cast<double>(size) / (1024.0 * 1024.0 * 1024.0));
+        swprintf_s(buffer, L"%.2f GB", static_cast<double>(size) / (1024.0 * 1024.0 * 1024.0));
     }
     else if (size >= 1024ull * 1024ull)
     {
@@ -385,9 +362,24 @@ std::wstring CloudOSNativeFilesWindow::FormatSize(ULONGLONG size)
     }
     else
     {
-        swprintf_s(buffer, L"%llu B", size);
+        swprintf_s(buffer, L"%llu B", static_cast<unsigned long long>(size));
     }
     return buffer;
+}
+
+bool CloudOSNativeFilesWindow::IsCurrentCloudOSDrive() const
+{
+    return CloudOS::NativeCloudOSDrive::IsPathInside(current_path_);
+}
+
+bool CloudOSNativeFilesWindow::CurrentDriveSegments(
+    std::vector<std::wstring>* segments,
+    std::wstring* error) const
+{
+    return CloudOS::NativeCloudOSDrive::SegmentsFromAbsolutePath(
+        current_path_,
+        segments,
+        error);
 }
 
 void CloudOSNativeFilesWindow::Navigate(const std::wstring& path)
@@ -397,27 +389,64 @@ void CloudOSNativeFilesWindow::Navigate(const std::wstring& path)
         return;
     }
 
-    if (!IsWslRootPath(path))
+    if (CloudOS::NativeCloudOSDrive::IsPathInside(path))
     {
-        const DWORD attributes = GetFileAttributesW(path.c_str());
-        if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+        std::vector<std::wstring> segments;
+        std::wstring error;
+        if (!CloudOS::NativeCloudOSDrive::SegmentsFromAbsolutePath(path, &segments, &error))
         {
-            MessageBoxW(
-                window_,
-                L"Pasta nao encontrada ou sem acesso.",
-                L"CloudOS Arquivos",
-                MB_OK | MB_ICONWARNING);
+            ShowFileError(window_, L"Caminho bloqueado pelo CloudOS Drive.", error);
             return;
         }
+        std::vector<CloudOS::CloudOSDriveEntry> probe;
+        if (!CloudOS::NativeCloudOSDrive::List(segments, &probe, &error))
+        {
+            ShowFileError(window_, L"Pasta do CloudOS Drive indisponivel.", error);
+            return;
+        }
+        current_path_ = CloudOS::NativeCloudOSDrive::AbsolutePath(segments);
+        SetWindowTextW(window_, L"CloudOS Drive - Arquivos");
+    }
+    else
+    {
+        if (!IsWslRootPath(path))
+        {
+            const DWORD attributes = GetFileAttributesW(path.c_str());
+            if (attributes == INVALID_FILE_ATTRIBUTES ||
+                (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+            {
+                ShowFileError(window_, L"Pasta nao encontrada ou sem acesso.");
+                return;
+            }
+        }
+        current_path_ = path;
+        SetWindowTextW(window_, L"Arquivos - CloudOS");
     }
 
-    current_path_ = path;
     SetWindowTextW(path_edit_, current_path_.c_str());
     PopulateList();
 }
 
 void CloudOSNativeFilesWindow::NavigateParent()
 {
+    if (IsCurrentCloudOSDrive())
+    {
+        std::vector<std::wstring> segments;
+        std::wstring error;
+        if (!CurrentDriveSegments(&segments, &error))
+        {
+            ShowFileError(window_, L"Nao foi possivel resolver o caminho atual.", error);
+            return;
+        }
+        if (segments.empty())
+        {
+            return;
+        }
+        segments.pop_back();
+        Navigate(CloudOS::NativeCloudOSDrive::AbsolutePath(segments));
+        return;
+    }
+
     const std::wstring parent = ParentPath(current_path_);
     if (!parent.empty())
     {
@@ -434,11 +463,97 @@ void CloudOSNativeFilesWindow::NavigateWslRoot()
     }
 }
 
+void CloudOSNativeFilesWindow::NavigateCloudOSDriveRoot()
+{
+    std::wstring error;
+    if (!CloudOS::NativeCloudOSDrive::EnsureReady(&error))
+    {
+        ShowFileError(window_, L"CloudOS Drive indisponivel.", error);
+        return;
+    }
+    const std::wstring root = CloudOS::NativeCloudOSDrive::Root();
+    if (!root.empty())
+    {
+        Navigate(root);
+    }
+}
+
+void CloudOSNativeFilesWindow::OpenCloudOSDriveTrash()
+{
+    CloudOS::CloudOSNativeDriveTrashWindow::Open(instance_);
+}
+
 void CloudOSNativeFilesWindow::PopulateList()
 {
     entries_.clear();
     ListView_DeleteAllItems(list_);
+    if (IsCurrentCloudOSDrive())
+    {
+        PopulateCloudOSDriveList();
+    }
+    else
+    {
+        PopulateNativeFileSystemList();
+    }
 
+    for (std::size_t index = 0; index < entries_.size(); ++index)
+    {
+        Entry& entry = entries_[index];
+        LVITEMW item{};
+        item.mask = LVIF_TEXT;
+        item.iItem = static_cast<int>(index);
+        item.pszText = entry.name.data();
+        ListView_InsertItem(list_, &item);
+
+        std::wstring type;
+        if (entry.reparse_point)
+        {
+            type = IsCurrentCloudOSDrive() ? L"Link bloqueado" : L"Link/Reparse";
+        }
+        else
+        {
+            type = entry.directory ? L"Pasta" : L"Arquivo";
+        }
+        ListView_SetItemText(list_, static_cast<int>(index), 1, type.data());
+
+        std::wstring size = entry.directory || entry.reparse_point
+            ? std::wstring{}
+            : FormatSize(entry.size);
+        ListView_SetItemText(list_, static_cast<int>(index), 2, size.data());
+    }
+}
+
+void CloudOSNativeFilesWindow::PopulateCloudOSDriveList()
+{
+    std::vector<std::wstring> segments;
+    std::wstring error;
+    if (!CurrentDriveSegments(&segments, &error))
+    {
+        ShowFileError(window_, L"Falha ao resolver CloudOS Drive.", error);
+        return;
+    }
+
+    std::vector<CloudOS::CloudOSDriveEntry> drive_entries;
+    if (!CloudOS::NativeCloudOSDrive::List(segments, &drive_entries, &error))
+    {
+        ShowFileError(window_, L"Falha ao listar CloudOS Drive.", error);
+        return;
+    }
+
+    for (const CloudOS::CloudOSDriveEntry& drive_entry : drive_entries)
+    {
+        Entry entry{};
+        entry.name = drive_entry.name;
+        entry.full_path = JoinPath(current_path_, drive_entry.name);
+        entry.directory = drive_entry.directory;
+        entry.reparse_point = drive_entry.reparse_point;
+        entry.size = static_cast<ULONGLONG>(drive_entry.size);
+        entries_.push_back(std::move(entry));
+    }
+}
+
+void CloudOSNativeFilesWindow::PopulateNativeFileSystemList()
+{
     const std::wstring pattern = JoinPath(current_path_, L"*");
     WIN32_FIND_DATAW find_data{};
     HANDLE find = FindFirstFileW(pattern.c_str(), &find_data);
@@ -459,6 +574,8 @@ void CloudOSNativeFilesWindow::PopulateList()
         entry.name = find_data.cFileName;
         entry.full_path = JoinPath(current_path_, entry.name);
         entry.directory = (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        entry.reparse_point =
+            (find_data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
         entry.size =
             (static_cast<ULONGLONG>(find_data.nFileSizeHigh) << 32u) |
             static_cast<ULONGLONG>(find_data.nFileSizeLow);
@@ -478,24 +595,6 @@ void CloudOSNativeFilesWindow::PopulateList()
             }
             return _wcsicmp(left.name.c_str(), right.name.c_str()) < 0;
         });
-
-    for (std::size_t index = 0; index < entries_.size(); ++index)
-    {
-        LVITEMW item{};
-        item.mask = LVIF_TEXT;
-        item.iItem = static_cast<int>(index);
-        item.pszText = entries_[index].name.data();
-        ListView_InsertItem(list_, &item);
-
-        wchar_t type[16]{};
-        wcscpy_s(type, entries_[index].directory ? L"Pasta" : L"Arquivo");
-        ListView_SetItemText(list_, static_cast<int>(index), 1, type);
-
-        auto size = entries_[index].directory
-            ? std::wstring{}
-            : FormatSize(entries_[index].size);
-        ListView_SetItemText(list_, static_cast<int>(index), 2, size.data());
-    }
 }
 
 void CloudOSNativeFilesWindow::Refresh()
@@ -521,7 +620,12 @@ void CloudOSNativeFilesWindow::ActivateSelection()
         return;
     }
 
-    auto& entry = entries_[static_cast<std::size_t>(selected)];
+    Entry& entry = entries_[static_cast<std::size_t>(selected)];
+    if (IsCurrentCloudOSDrive() && entry.reparse_point)
+    {
+        ShowFileError(window_, L"Links e pontos de reparo nao sao abertos pelo CloudOS Drive.");
+        return;
+    }
     if (entry.directory)
     {
         Navigate(entry.full_path);
@@ -537,43 +641,71 @@ void CloudOSNativeFilesWindow::ActivateSelection()
         SW_SHOWNORMAL);
     if (reinterpret_cast<INT_PTR>(result) <= 32)
     {
-        MessageBoxW(
-            window_,
-            L"O Windows nao encontrou um aplicativo para abrir este arquivo.",
-            L"CloudOS",
-            MB_OK | MB_ICONWARNING);
+        ShowFileError(window_, L"O Windows nao encontrou um aplicativo para abrir este arquivo.");
     }
 }
 
 void CloudOSNativeFilesWindow::CreateNewFolder()
 {
     std::wstring name = L"Nova pasta";
-    std::wstring target = JoinPath(current_path_, name);
-    unsigned suffix = 2;
-    while (GetFileAttributesW(target.c_str()) != INVALID_FILE_ATTRIBUTES)
-    {
-        name = L"Nova pasta (" + std::to_wstring(suffix++) + L")";
-        target = JoinPath(current_path_, name);
-    }
+    unsigned suffix = 2u;
 
-    if (!CreateDirectoryW(target.c_str(), nullptr))
+    if (IsCurrentCloudOSDrive())
     {
-        MessageBoxW(
-            window_,
-            L"Nao foi possivel criar a pasta neste local.",
-            L"CloudOS Arquivos",
-            MB_OK | MB_ICONWARNING);
-        return;
+        std::vector<std::wstring> parent;
+        std::wstring error;
+        if (!CurrentDriveSegments(&parent, &error))
+        {
+            ShowFileError(window_, L"Nao foi possivel criar a pasta.", error);
+            return;
+        }
+        while (true)
+        {
+            std::vector<std::wstring> candidate = parent;
+            candidate.push_back(name);
+            const std::wstring path = CloudOS::NativeCloudOSDrive::AbsolutePath(candidate);
+            if (path.empty() || GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES)
+            {
+                break;
+            }
+            name = L"Nova pasta (" + std::to_wstring(suffix++) + L")";
+        }
+
+        std::vector<std::wstring> target = parent;
+        target.push_back(name);
+        if (!CloudOS::NativeCloudOSDrive::Mkdir(target, &error))
+        {
+            ShowFileError(window_, L"Nao foi possivel criar a pasta no CloudOS Drive.", error);
+            return;
+        }
+    }
+    else
+    {
+        std::wstring target = JoinPath(current_path_, name);
+        while (GetFileAttributesW(target.c_str()) != INVALID_FILE_ATTRIBUTES)
+        {
+            name = L"Nova pasta (" + std::to_wstring(suffix++) + L")";
+            target = JoinPath(current_path_, name);
+        }
+        if (!CreateDirectoryW(target.c_str(), nullptr))
+        {
+            ShowFileError(window_, L"Nao foi possivel criar a pasta neste local.");
+            return;
+        }
     }
 
     PopulateList();
     for (int row = 0; row < ListView_GetItemCount(list_); ++row)
     {
-        wchar_t buffer[MAX_PATH]{};
+        wchar_t buffer[260]{};
         ListView_GetItemText(list_, row, 0, buffer, static_cast<int>(std::size(buffer)));
         if (_wcsicmp(buffer, name.c_str()) == 0)
         {
-            ListView_SetItemState(list_, row, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+            ListView_SetItemState(
+                list_,
+                row,
+                LVIS_SELECTED | LVIS_FOCUSED,
+                LVIS_SELECTED | LVIS_FOCUSED);
             ListView_EditLabel(list_, row);
             break;
         }
@@ -582,17 +714,52 @@ void CloudOSNativeFilesWindow::CreateNewFolder()
 
 void CloudOSNativeFilesWindow::DeleteSelection()
 {
-    const std::wstring path = SelectedPath();
-    if (path.empty())
+    const int selected = ListView_GetNextItem(list_, -1, LVNI_SELECTED);
+    if (selected < 0 || static_cast<std::size_t>(selected) >= entries_.size())
     {
         return;
     }
 
+    const Entry& entry = entries_[static_cast<std::size_t>(selected)];
+    if (IsCurrentCloudOSDrive())
+    {
+        if (entry.reparse_point)
+        {
+            ShowFileError(window_, L"Exclusao de link ou ponto de reparo bloqueada pelo CloudOS Drive.");
+            return;
+        }
+        if (MessageBoxW(
+                window_,
+                L"Mover o item selecionado para a Lixeira do CloudOS Drive?",
+                L"CloudOS Drive",
+                MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES)
+        {
+            return;
+        }
+
+        std::vector<std::wstring> segments;
+        std::wstring error;
+        if (!CurrentDriveSegments(&segments, &error))
+        {
+            ShowFileError(window_, L"Nao foi possivel excluir o item.", error);
+            return;
+        }
+        segments.push_back(entry.name);
+        if (!CloudOS::NativeCloudOSDrive::Trash(segments, nullptr, &error))
+        {
+            ShowFileError(window_, L"Nao foi possivel mover o item para a lixeira.", error);
+            return;
+        }
+        PopulateList();
+        return;
+    }
+
+    const std::wstring path = entry.full_path;
     if (MessageBoxW(
             window_,
-            L"Excluir o item selecionado?",
+            L"Excluir o item selecionado usando a Lixeira do Windows quando possivel?",
             L"CloudOS Arquivos",
-            MB_YESNO | MB_ICONWARNING) != IDYES)
+            MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES)
     {
         return;
     }
@@ -605,16 +772,11 @@ void CloudOSNativeFilesWindow::DeleteSelection()
     operation.hwnd = window_;
     operation.wFunc = FO_DELETE;
     operation.pFrom = double_null_path.c_str();
-    operation.fFlags = FOF_NOCONFIRMMKDIR | FOF_NOERRORUI;
-
+    operation.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMMKDIR | FOF_NOERRORUI;
     const int result = SHFileOperationW(&operation);
     if (result != 0 || operation.fAnyOperationsAborted)
     {
-        MessageBoxW(
-            window_,
-            L"Nao foi possivel excluir o item.",
-            L"CloudOS Arquivos",
-            MB_OK | MB_ICONWARNING);
+        ShowFileError(window_, L"Nao foi possivel excluir o item.");
     }
     PopulateList();
 }
@@ -630,29 +792,54 @@ void CloudOSNativeFilesWindow::BeginRename()
 
 bool CloudOSNativeFilesWindow::CommitRename(int row, const wchar_t* new_name)
 {
-    if (row < 0 || static_cast<std::size_t>(row) >= entries_.size() || !IsSafeLeafName(new_name))
+    if (row < 0 || static_cast<std::size_t>(row) >= entries_.size() ||
+        !IsSafeLeafName(new_name))
     {
         return false;
     }
 
-    const std::wstring destination = JoinPath(current_path_, new_name);
-    if (_wcsicmp(destination.c_str(), entries_[static_cast<std::size_t>(row)].full_path.c_str()) == 0)
+    Entry& entry = entries_[static_cast<std::size_t>(row)];
+    if (_wcsicmp(entry.name.c_str(), new_name) == 0)
     {
         return true;
     }
-
-    if (!MoveFileW(entries_[static_cast<std::size_t>(row)].full_path.c_str(), destination.c_str()))
+    if (IsCurrentCloudOSDrive() && entry.reparse_point)
     {
-        MessageBoxW(
-            window_,
-            L"Nao foi possivel renomear o item.",
-            L"CloudOS Arquivos",
-            MB_OK | MB_ICONWARNING);
+        ShowFileError(window_, L"Renomear link ou ponto de reparo foi bloqueado.");
         return false;
     }
 
-    entries_[static_cast<std::size_t>(row)].name = new_name;
-    entries_[static_cast<std::size_t>(row)].full_path = destination;
+    if (IsCurrentCloudOSDrive())
+    {
+        std::vector<std::wstring> parent;
+        std::wstring error;
+        if (!CurrentDriveSegments(&parent, &error))
+        {
+            ShowFileError(window_, L"Nao foi possivel renomear o item.", error);
+            return false;
+        }
+        std::vector<std::wstring> source = parent;
+        source.push_back(entry.name);
+        std::vector<std::wstring> destination = parent;
+        destination.emplace_back(new_name);
+        if (!CloudOS::NativeCloudOSDrive::Move(source, destination, &error))
+        {
+            ShowFileError(window_, L"Nao foi possivel renomear o item.", error);
+            return false;
+        }
+        entry.name = new_name;
+        entry.full_path = JoinPath(current_path_, new_name);
+        return true;
+    }
+
+    const std::wstring destination = JoinPath(current_path_, new_name);
+    if (!MoveFileW(entry.full_path.c_str(), destination.c_str()))
+    {
+        ShowFileError(window_, L"Nao foi possivel renomear o item.");
+        return false;
+    }
+    entry.name = new_name;
+    entry.full_path = destination;
     return true;
 }
 
@@ -675,6 +862,12 @@ LRESULT CloudOSNativeFilesWindow::HandleMessage(
             return 0;
         case kUpId:
             NavigateParent();
+            return 0;
+        case kDriveId:
+            NavigateCloudOSDriveRoot();
+            return 0;
+        case kTrashId:
+            OpenCloudOSDriveTrash();
             return 0;
         case kWslId:
             NavigateWslRoot();
@@ -742,6 +935,7 @@ LRESULT CloudOSNativeFilesWindow::HandleMessage(
         return 0;
 
     case WM_NCDESTROY:
+        SetWindowLongPtrW(window_, GWLP_USERDATA, 0);
         window_ = nullptr;
         delete this;
         return 0;

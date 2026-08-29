@@ -56,11 +56,15 @@ bool NativeSearchEngine::Matches(const AppItem& app, const std::wstring& query)
     }
     if (IsAny(query_view, {L"cmd", L"terminal", L"bash", L"sh", L"conpty", L"powershell"}))
     {
-        return id == L"terminal" || id == L"wsl" || id == L"projects" || id == L"powershell";
+        return id == L"terminal" || id == L"wsl" || id == L"powershell";
     }
     if (IsAny(query_view, {L"linux", L"kali", L"wsl", L"wsl2"}))
     {
-        return id == L"wsl" || id == L"projects";
+        return id == L"wsl";
+    }
+    if (IsAny(query_view, {L"projeto", L"projetos", L"project", L"projects", L"workspace", L"codigo"}))
+    {
+        return id == L"projects" || id == L"code";
     }
     if (IsAny(query_view, {L"txt", L"nota", L"notas", L"editor"}))
     {
@@ -70,9 +74,13 @@ bool NativeSearchEngine::Matches(const AppItem& app, const std::wstring& query)
     {
         return id == L"calc";
     }
+    if (IsAny(query_view, {L"cloudos drive", L"drive", L"armazenamento", L"storage", L"home"}))
+    {
+        return id == L"drive";
+    }
     if (IsAny(query_view, {L"pasta", L"pastas", L"arquivo", L"arquivos", L"explorer", L"disco", L"hd"}))
     {
-        return id == L"files" || id == L"drive";
+        return id == L"files" || id == L"drive" || id == L"systemdrive";
     }
     if (IsAny(query_view, {L"cpu", L"ram", L"processo", L"monitor", L"task"}))
     {
@@ -82,7 +90,7 @@ bool NativeSearchEngine::Matches(const AppItem& app, const std::wstring& query)
     {
         return id == L"settings";
     }
-    if (IsAny(query_view, {L"saude", L"health", L"doctor", L"diagnostico", L"diagnostico"}))
+    if (IsAny(query_view, {L"saude", L"health", L"doctor", L"diagnostico"}))
     {
         return id == L"health";
     }

@@ -3,9 +3,11 @@
 #include "cloudos_native_runtime.h"
 #include "native_apps_window.h"
 #include "native_calculator_window.h"
+#include "native_cloudos_drive.h"
 #include "native_env_doctor_window.h"
 #include "native_files_window.h"
 #include "native_notepad_window.h"
+#include "native_projects_window.h"
 #include "native_run_window.h"
 #include "native_settings_window.h"
 #include "native_shell_platform.h"
@@ -82,8 +84,6 @@ bool LaunchExternal(
 
     if (execution.hProcess != nullptr)
     {
-        // Best effort only. GUI apps can use a launcher process, packaged apps
-        // may surface under another PID, and console programs may never idle.
         (void)WaitForInputIdle(execution.hProcess, 750);
         CloseHandle(execution.hProcess);
     }
@@ -142,10 +142,6 @@ std::wstring CanonicalAppId(std::wstring_view id)
     {
         return L"terminal";
     }
-    if (id == L"wsl")
-    {
-        return L"projects";
-    }
     if (id == L"mail")
     {
         return L"notepad";
@@ -153,6 +149,10 @@ std::wstring CanonicalAppId(std::wstring_view id)
     if (id == L"more")
     {
         return L"apps";
+    }
+    if (id == L"disk" || id == L"local-drive")
+    {
+        return L"systemdrive";
     }
     return std::wstring(id);
 }
@@ -229,6 +229,10 @@ void NativeAppLauncher::LaunchById(
     }
     else if (id == L"projects")
     {
+        CloudOSNativeProjectsWindow::Open(instance);
+    }
+    else if (id == L"wsl")
+    {
         OpenWslTerminal(instance);
     }
     else if (id == L"powershell")
@@ -243,6 +247,34 @@ void NativeAppLauncher::LaunchById(
         CloudOSNativeFilesWindow::Open(instance);
     }
     else if (id == L"drive")
+    {
+        std::wstring error;
+        if (!NativeCloudOSDrive::EnsureReady(&error))
+        {
+            std::wstring message = L"CloudOS Drive indisponivel.";
+            if (!error.empty())
+            {
+                message += L"\n\n";
+                message += error;
+            }
+            MessageBoxW(parent_hwnd, message.c_str(), L"CloudOS Drive", MB_OK | MB_ICONERROR);
+            launched = false;
+        }
+        else
+        {
+            const std::wstring root = NativeCloudOSDrive::Root();
+            if (root.empty())
+            {
+                ShowLaunchError(parent_hwnd, L"o CloudOS Drive");
+                launched = false;
+            }
+            else
+            {
+                CloudOSNativeFilesWindow::Open(instance, root);
+            }
+        }
+    }
+    else if (id == L"systemdrive")
     {
         const std::wstring system_volume = NativeShellPlatform::WindowsVolumeRoot();
         launched = !system_volume.empty() &&
