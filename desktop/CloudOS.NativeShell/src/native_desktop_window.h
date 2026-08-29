@@ -1,11 +1,15 @@
 #pragma once
 
 #include <windows.h>
+
+#include <array>
 #include <functional>
+#include <string>
 #include <vector>
+
+#include "native_system_stats.h"
 #include "native_theme.h"
 #include "native_window_manager.h"
-#include "native_system_stats.h"
 
 namespace CloudOS
 {
@@ -24,6 +28,7 @@ public:
 
     void UpdateLayout(const RECT& work_area);
     void Redraw();
+    void FocusSearch();
 
     void SetActionCallback(ActionCallback callback) { on_action_ = std::move(callback); }
     void SetHotKeyCallback(HotKeyCallback callback) { on_hotkey_ = std::move(callback); }
@@ -35,9 +40,23 @@ private:
     void Paint();
     void OnSearchChanged();
     void SelectFocusedApp();
+    void ActivateAppIndex(int app_index);
+    void RefreshWorkArea();
+    bool IsPointClickable(POINT point) const;
+
     LRESULT HandleMessage(HWND window, UINT message, WPARAM w_param, LPARAM l_param);
-    static LRESULT CALLBACK SearchSubclass(HWND window, UINT message, WPARAM w_param, LPARAM l_param, UINT_PTR uIdSubclass, DWORD_PTR dwRefData);
-    static LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM w_param, LPARAM l_param);
+    static LRESULT CALLBACK SearchSubclass(
+        HWND window,
+        UINT message,
+        WPARAM w_param,
+        LPARAM l_param,
+        UINT_PTR subclass_id,
+        DWORD_PTR reference_data);
+    static LRESULT CALLBACK WindowProcedure(
+        HWND window,
+        UINT message,
+        WPARAM w_param,
+        LPARAM l_param);
 
     HWND hwnd_{};
     HWND search_edit_{};
@@ -49,19 +68,24 @@ private:
     std::wstring search_query_;
     std::vector<int> filtered_indices_;
     std::vector<RECT> app_grid_rects_;
+    std::vector<RECT> quick_launch_rects_;
+    std::vector<int> quick_launch_app_indices_;
+    std::vector<RECT> dock_rects_;
+    std::vector<int> dock_app_indices_;
+    std::vector<TaskHit> task_hits_;
+    std::array<RECT, 4> workspace_rects_{};
+
     int focused_app_index_{0};
     int hovered_app_index_{-1};
     int hovered_widget_id_{-1};
     int hovered_dock_id_{-1};
     bool tracking_mouse_{false};
 
-    // Widget Clickable Rectangles
     RECT profile_rect_{};
     RECT weather_rect_{};
     RECT calendar_rect_{};
     RECT perf_rect_{};
     RECT news_rect_{};
-    std::vector<RECT> dock_rects_;
 
     SystemStats current_stats_{};
 
