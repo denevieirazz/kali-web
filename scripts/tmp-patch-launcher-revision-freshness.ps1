@@ -8,38 +8,36 @@ if (([regex]::Matches($text, [regex]::Escape($sourceOld))).Count -ne 1) { throw 
 if ($text.Contains("cloudos-session-freshness.ps1")) { throw 'SOURCE_IMPORT_ALREADY_PRESENT' }
 $text = $text.Replace($sourceOld, $sourceNew)
 
-$existingOld = @'
-$existingSession = Read-CloudOSCurrentSession
-if ($existingSession -and $existingSession.status -eq 'running') {
-    $healthy = $false
-    $hostPid = 0
-'@.TrimEnd()
-$existingNew = @'
-$currentCheckout = Get-CloudOSGitInfo
-$existingSession = Read-CloudOSCurrentSession
-if ($existingSession -and $existingSession.status -eq 'running') {
-    $healthy = $false
+$sessionMarker = '$existingSession = Read-CloudOSCurrentSession'
+$sessionIndex = $text.IndexOf($sessionMarker, [StringComparison]::Ordinal)
+if ($sessionIndex -lt 0 -or $text.IndexOf($sessionMarker, $sessionIndex + 1, [StringComparison]::Ordinal) -ge 0) {
+    throw 'EXISTING_SESSION_MARKER_NOT_UNIQUE'
+}
+$text = $text.Insert($sessionIndex, "`$currentCheckout = Get-CloudOSGitInfo`n")
+$sessionIndex = $text.IndexOf($sessionMarker, [StringComparison]::Ordinal)
+
+$healthyMarker = '    $healthy = $false'
+$healthyIndex = $text.IndexOf($healthyMarker, $sessionIndex, [StringComparison]::Ordinal)
+if ($healthyIndex -lt 0) { throw 'HEALTHY_MARKER_NOT_FOUND' }
+$nextHostPidIndex = $text.IndexOf('    $hostPid = 0', $healthyIndex, [StringComparison]::Ordinal)
+if ($nextHostPidIndex -lt 0 -or $nextHostPidIndex - $healthyIndex -gt 100) { throw 'HOST_PID_MARKER_NOT_FOUND_AFTER_HEALTHY' }
+$healthyLineEnd = $text.IndexOf("`n", $healthyIndex, [StringComparison]::Ordinal)
+if ($healthyLineEnd -lt 0) { throw 'HEALTHY_LINE_END_NOT_FOUND' }
+$revisionBlock = @'
     $revisionMatches = Test-CloudOSSessionRevisionMatchesCheckout -Session $existingSession -Checkout $currentCheckout
     if (-not $revisionMatches) {
         $oldSha = try { [string]$existingSession.git.sha } catch { '' }
         Write-Host "CloudOS em execução pertence a outro commit (sessão=$oldSha checkout=$($currentCheckout.sha)); reiniciando runtime."
     }
-    $hostPid = 0
-'@.TrimEnd()
-if (([regex]::Matches($text, [regex]::Escape($existingOld))).Count -ne 1) { throw 'EXISTING_SESSION_PATTERN_NOT_UNIQUE' }
-$text = $text.Replace($existingOld, $existingNew)
+'@
+$text = $text.Insert($healthyLineEnd + 1, $revisionBlock.Replace("`r`n", "`n"))
 
-$healthOld = @'
-                        if ([int]$res.StatusCode -ge 200 -and [int]$res.StatusCode -lt 400) {
-                            $healthy = $true
-                        }
-'@.TrimEnd()
-$healthNew = @'
-                        if ($revisionMatches -and [int]$res.StatusCode -ge 200 -and [int]$res.StatusCode -lt 400) {
-                            $healthy = $true
-                        }
-'@.TrimEnd()
-if (([regex]::Matches($text, [regex]::Escape($healthOld))).Count -ne 1) { throw 'HEALTH_PATTERN_NOT_UNIQUE' }
-$text = $text.Replace($healthOld, $healthNew)
+$healthCondition = '                        if ([int]$res.StatusCode -ge 200 -and [int]$res.StatusCode -lt 400) {'
+$healthIndex = $text.IndexOf($healthCondition, $sessionIndex, [StringComparison]::Ordinal)
+if ($healthIndex -lt 0) { throw 'HEALTH_CONDITION_NOT_FOUND' }
+$sessionEnd = $text.IndexOf('    if ($healthy) {', $healthIndex, [StringComparison]::Ordinal)
+if ($sessionEnd -lt 0 -or $healthIndex -gt $sessionEnd) { throw 'HEALTH_CONDITION_OUTSIDE_SESSION_BLOCK' }
+$replacementCondition = '                        if ($revisionMatches -and [int]$res.StatusCode -ge 200 -and [int]$res.StatusCode -lt 400) {'
+$text = $text.Remove($healthIndex, $healthCondition.Length).Insert($healthIndex, $replacementCondition)
 
 Set-Content -LiteralPath $path -Value $text -Encoding utf8 -NoNewline
