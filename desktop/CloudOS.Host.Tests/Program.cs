@@ -56,11 +56,13 @@ var tests = new (string Name, Action Run)[]
     ("native launch accepts only direct host descriptors", NativeLaunchAcceptsOnlyDirectDescriptors),
     ("native launch rejects broker and UWP kinds", NativeLaunchRejectsBrokersAndUwp),
     ("native launch reports managed only after HWND correlation", NativeLaunchReportsManagedOnlyAfterCorrelation),
+    ("native launch selects only an unambiguous primary HWND", NativeLaunchSelectsOnlyUnambiguousPrimary),
     ("native containment failures require termination", NativeContainmentFailuresRequireTermination),
     ("native launch descriptor preserves argv JSON", NativeLaunchDescriptorPreservesArgvJson),
     ("native command line quoting is bounded", NativeCommandLineQuotingIsBounded),
     ("cmd script GUI descendant is correlated through the contained Job", NativeScriptLaunchContract.Validate),
     ("native launcher tracks suspended process before resume", NativeLauncherTracksSuspendedProcessBeforeResume),
+    ("native lease identity remains stable after disposal", NativeLeaseIdentitySurvivesDispose),
     ("cmd script GUI descendant is contained by the same Job", NativeScriptLaunchContract.Validate),
     ("native job child HWND is quarantined and escape is detected", NativeJobChildWindowIsQuarantined),
 };
@@ -320,6 +322,42 @@ static void NativeLaunchReportsManagedOnlyAfterCorrelation()
     Assert(NativeLaunchContainmentPolicy.CanReportManaged(true, true, false), "A direct tracked process with a quarantined HWND may be reported managed.");
 }
 
+static void NativeLaunchSelectsOnlyUnambiguousPrimary()
+{
+    var now = DateTimeOffset.UtcNow;
+    var primary = new NativeWindowSnapshot(
+        1001, 5001, "Browser", false, false, false, false,
+        new NativeWindowBounds(0, 0, 1920, 1023), now);
+    var tinyHelper = new NativeWindowSnapshot(
+        1002, 5001, String.Empty, false, false, false, false,
+        new NativeWindowBounds(0, 0, 136, 39), now);
+    var untitledLargeHelper = new NativeWindowSnapshot(
+        1003, 5001, String.Empty, false, false, false, false,
+        new NativeWindowBounds(0, 0, 1920, 1023), now);
+    var secondPrimary = new NativeWindowSnapshot(
+        1004, 5001, "Second Browser", false, false, false, false,
+        new NativeWindowBounds(40, 40, 1280, 800), now);
+
+    var selection = NativeLaunchContainmentPolicy.SelectUniqueQuarantinedWindow(
+        [primary, tinyHelper], out var selected);
+    Assert(selection == NativeWindowCandidateSelection.Unique && selected?.Handle == primary.Handle,
+        "A uniquely dominant browser surface must win over a tiny helper HWND.");
+
+    selection = NativeLaunchContainmentPolicy.SelectUniqueQuarantinedWindow(
+        [primary, untitledLargeHelper, tinyHelper], out selected);
+    Assert(selection == NativeWindowCandidateSelection.Unique && selected?.Handle == primary.Handle,
+        "A single titled application surface may win over untitled Chromium helper HWNDs.");
+
+    selection = NativeLaunchContainmentPolicy.SelectUniqueQuarantinedWindow(
+        [primary, secondPrimary], out selected);
+    Assert(selection == NativeWindowCandidateSelection.Ambiguous && selected is null,
+        "Two plausible titled application surfaces must fail closed.");
+
+    selection = NativeLaunchContainmentPolicy.SelectUniqueQuarantinedWindow([], out selected);
+    Assert(selection == NativeWindowCandidateSelection.None && selected is null,
+        "An empty launch must remain pending instead of inventing a HWND.");
+}
+
 static void NativeContainmentFailuresRequireTermination()
 {
     foreach (var failure in Enum.GetValues<NativeContainmentFailure>())
@@ -377,6 +415,23 @@ static void NativeLauncherTracksSuspendedProcessBeforeResume()
     Assert(lease.IsResumed, "The tracked primary thread must resume exactly once.");
     Assert(lease.TryTerminate(3_000, out var error), error ?? "The kill-on-close Job did not terminate the fixture.");
     Assert(windows.TryTerminateTrackedProcess(lease.ProcessId, out error), error ?? "The exited fixture capability was not revoked.");
+}
+
+static void NativeLeaseIdentitySurvivesDispose()
+{
+    var processPath = Environment.ProcessPath ?? throw new InvalidOperationException("The test process path is unavailable.");
+    var spec = NativeProcessLaunchSpec.Create(
+        processPath,
+        FixtureArguments("--native-contained-fixture-wait"),
+        AppContext.BaseDirectory);
+    var lease = NativeContainedProcessLauncher.StartSuspended(spec);
+    var processId = lease.ProcessId;
+    lease.Dispose();
+
+    Assert(lease.IsDisposed, "A disposed native launch lease must expose terminal state.");
+    Assert(lease.ProcessId == processId,
+        "The stable launch identity must not dereference a disposed Process object.");
+    lease.Dispose();
 }
 
 static void NativeJobChildWindowIsQuarantined()

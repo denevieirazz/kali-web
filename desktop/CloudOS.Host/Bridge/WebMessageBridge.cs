@@ -376,10 +376,10 @@ public sealed class WebMessageBridge : IDisposable
             var window = await WaitForQuarantinedWindowAsync(launchLease);
             if (window is null)
             {
-                TerminateProcessAndForget(launchLease.ProcessId, NativeContainmentFailure.WindowCorrelationTimeout);
                 throw new BridgeException(
                     "NATIVE_WINDOW_NOT_FOUND",
-                    "Nenhuma janela rastreável apareceu sob quarentena antes do limite de contenção.");
+                    "Nenhuma janela rastreável apareceu sob quarentena antes do limite de contenção.",
+                    NativeContainmentFailure.WindowCorrelationTimeout);
             }
 
             var processTracked = _windows.IsTrackedProcess(window.ProcessId);
@@ -410,16 +410,19 @@ public sealed class WebMessageBridge : IDisposable
                 containmentMode = "hidden-quarantine"
             };
         }
-        catch (BridgeException)
+        catch (BridgeException error)
         {
-            AbortContainedLaunch(launchLease, registered);
+            AbortContainedLaunch(
+                launchLease,
+                registered,
+                error.ContainmentFailure ?? NativeContainmentFailure.QuarantineFailed);
             throw;
         }
         catch (Exception error) when (error is ArgumentException or InvalidOperationException or Win32Exception
             or IOException or NotSupportedException or UnauthorizedAccessException)
         {
             BrowserDiagnostics.Write("native_process_tracking_failed", $"type={error.GetType().Name}");
-            AbortContainedLaunch(launchLease, registered);
+            AbortContainedLaunch(launchLease, registered, NativeContainmentFailure.QuarantineFailed);
             throw new BridgeException("APP_PROCESS_NOT_TRACKABLE", "O processo lançado não pôde ser rastreado com segurança.");
         }
     }
@@ -526,9 +529,10 @@ public sealed class WebMessageBridge : IDisposable
             foreach (var processId in processIds)
             {
                 if (!_windows.TryGetContainmentFailure(processId, out var quarantineError)) continue;
-                TerminateProcessAndForget(lease.ProcessId, NativeContainmentFailure.QuarantineFailed);
-                throw new BridgeException("WINDOW_QUARANTINE_FAILED",
-                    quarantineError ?? "A janela não aceitou a quarentena preventiva do CloudOS.");
+                throw new BridgeException(
+                    "WINDOW_QUARANTINE_FAILED",
+                    quarantineError ?? "A janela não aceitou a quarentena preventiva do CloudOS.",
+                    NativeContainmentFailure.QuarantineFailed);
             }
 
             var memberSet = processIds.ToHashSet();
@@ -536,22 +540,22 @@ public sealed class WebMessageBridge : IDisposable
                 .Where(item => memberSet.Contains(item.ProcessId))
                 .Where(item => !item.IsAttached && !item.IsVisible)
                 .ToArray();
-            if (candidates.Length > 0)
+            var selection = NativeLaunchContainmentPolicy.SelectUniqueQuarantinedWindow(candidates, out var candidate);
+            if (selection == NativeWindowCandidateSelection.Ambiguous)
             {
-                var rootMainHandle = IntPtr.Zero;
-                try
-                {
-                    lease.Process.Refresh();
-                    rootMainHandle = lease.Process.MainWindowHandle;
-                }
-                catch (InvalidOperationException) { }
-
-                var candidate = candidates
-                    .OrderByDescending(item => !string.IsNullOrWhiteSpace(item.Title))
-                    .ThenByDescending(item => (long)item.Bounds.Width * item.Bounds.Height)
-                    .ThenByDescending(item => item.Handle == rootMainHandle.ToInt64())
-                    .ThenBy(item => item.ProcessId)
-                    .First();
+                BrowserDiagnostics.Write(
+                    "native_ambiguous_multiwindow_fail_closed",
+                    $"pid={lease.ProcessId} candidates={candidates.Length} details="
+                    + string.Join(";", candidates.Select(item =>
+                        $"hwnd={item.Handle},pid={item.ProcessId},title={JsonSerializer.Serialize(item.Title)},"
+                        + $"bounds={item.Bounds.X},{item.Bounds.Y},{item.Bounds.Width},{item.Bounds.Height}")));
+                throw new BridgeException(
+                    "AMBIGUOUS_MULTIWINDOW_UNSUPPORTED",
+                    "O aplicativo criou várias janelas principais e não pode ser contido com segurança nesta versão.",
+                    NativeContainmentFailure.AmbiguousWindow);
+            }
+            if (candidate is not null)
+            {
                 var now = DateTimeOffset.UtcNow;
                 if (candidate.Handle != preferredHandle)
                 {
@@ -640,15 +644,18 @@ public sealed class WebMessageBridge : IDisposable
         return sessionId;
     }
 
-    private void AbortContainedLaunch(NativeContainedProcessLease? lease, bool registered)
+    private void AbortContainedLaunch(
+        NativeContainedProcessLease? lease,
+        bool registered,
+        NativeContainmentFailure failure)
     {
-        if (lease is null) return;
+        if (lease is null || lease.IsDisposed) return;
         if (registered || _launchLeasesByProcessId.ContainsKey(lease.ProcessId))
         {
             _launchLeasesByProcessId.TryAdd(lease.ProcessId, lease);
             _launchRootByMemberProcessId.TryAdd(lease.ProcessId, lease.ProcessId);
             _refreshTimer.Interval = TimeSpan.FromMilliseconds(ActiveContainmentRefreshMilliseconds);
-            TerminateProcessAndForget(lease.ProcessId, NativeContainmentFailure.QuarantineFailed);
+            TerminateProcessAndForget(lease.ProcessId, failure);
             return;
         }
         lease.Dispose();
@@ -1033,6 +1040,7 @@ public sealed class WebMessageBridge : IDisposable
         long preferredHandle = 0;
         var preferredSince = DateTimeOffset.MinValue;
         string? failureReason = null;
+        var recoveryFailure = NativeContainmentFailure.AttachmentLost;
 
         try
         {
@@ -1072,13 +1080,18 @@ public sealed class WebMessageBridge : IDisposable
                     .Where(item => !item.IsAttached && !item.IsVisible)
                     .ToArray();
 
-                if (candidates.Length > 0)
+                var selection = NativeLaunchContainmentPolicy.SelectUniqueQuarantinedWindow(candidates, out var candidate);
+                if (selection == NativeWindowCandidateSelection.Ambiguous)
                 {
-                    var candidate = candidates
-                        .OrderByDescending(item => !string.IsNullOrWhiteSpace(item.Title))
-                        .ThenByDescending(item => (long)item.Bounds.Width * item.Bounds.Height)
-                        .ThenBy(item => item.ProcessId)
-                        .First();
+                    failureReason = $"ambiguous-replacement:{candidates.Length}";
+                    recoveryFailure = NativeContainmentFailure.AmbiguousWindow;
+                    BrowserDiagnostics.Write(
+                        "native_primary_window_recovery_ambiguous",
+                        $"session={sessionId} rootPid={rootProcessId} candidates={candidates.Length}");
+                    break;
+                }
+                if (candidate is not null)
+                {
                     var now = DateTimeOffset.UtcNow;
                     if (candidate.Handle != preferredHandle)
                     {
@@ -1134,7 +1147,7 @@ public sealed class WebMessageBridge : IDisposable
         BrowserDiagnostics.Write(
             "native_primary_window_recovery_failed",
             $"session={sessionId} rootPid={rootProcessId} oldPid={removedProcessId} oldHwnd={removedHandle} reason={failureReason ?? "timeout"} elapsedMs={(long)(DateTimeOffset.UtcNow - started).TotalMilliseconds}");
-        TerminateProcessAndForget(rootProcessId, NativeContainmentFailure.AttachmentLost);
+        TerminateProcessAndForget(rootProcessId, recoveryFailure);
         PostEvent("native.sessionsChanged", new { sessions = GetPublicSessions() });
     }
 
@@ -1268,9 +1281,13 @@ public sealed class WebMessageBridge : IDisposable
 
     private delegate bool NativeOperation(long handle, out string error);
 
-    private sealed class BridgeException(string code, string message) : Exception(message)
+    private sealed class BridgeException(
+        string code,
+        string message,
+        NativeContainmentFailure? containmentFailure = null) : Exception(message)
     {
         public string Code { get; } = code;
+        public NativeContainmentFailure? ContainmentFailure { get; } = containmentFailure;
     }
 
     private sealed class LaunchResponse
