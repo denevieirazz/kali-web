@@ -7,11 +7,6 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 
 function Read-Utf8([string]$Path) { [IO.File]::ReadAllText($Path) }
 function Write-Utf8([string]$Path, [string]$Text) { [IO.File]::WriteAllText($Path, $Text, [Text.UTF8Encoding]::new($false)) }
-function Replace-ExactlyOnce([string]$Text, [string]$Old, [string]$New, [string]$Name) {
-    $count = ([regex]::Matches($Text, [regex]::Escape($Old))).Count
-    if ($count -ne 1) { throw "${Name}_EXPECTED_1_FOUND_$count" }
-    return $Text.Replace($Old, $New)
-}
 function Replace-Between([string]$Text, [string]$Start, [string]$End, [string]$Replacement, [string]$Name) {
     $startIndex = $Text.IndexOf($Start, [StringComparison]::Ordinal)
     if ($startIndex -lt 0) { throw "${Name}_START_NOT_FOUND" }
@@ -20,14 +15,12 @@ function Replace-Between([string]$Text, [string]$Start, [string]$End, [string]$R
     return $Text.Substring(0, $startIndex) + $Replacement + $Text.Substring($endIndex)
 }
 
-# Host project: native HWND is the only Windows app renderer.
 $hostProject = Join-Path $repoRoot 'desktop\CloudOS.Host\CloudOS.Host.csproj'
 $project = Read-Utf8 $hostProject
 $project = $project -replace '(?m)^\s*<ProjectReference Include="\.\.\\CloudOS\.WindowsCapture\\CloudOS\.WindowsCapture\.csproj" />\r?\n', ''
 $project = $project -replace '(?m)^\s*<ProjectReference Include="\.\.\\CloudOS\.WindowsCapture\.Presenter\\CloudOS\.WindowsCapture\.Presenter\.csproj" />\r?\n', ''
 Write-Utf8 $hostProject $project
 
-# Web bridge: remove capture renderer and keep the same native-session contract.
 $bridgePath = Join-Path $repoRoot 'desktop\CloudOS.Host\Bridge\WebMessageBridge.cs'
 $bridge = Read-Utf8 $bridgePath
 $bridge = $bridge.Replace("using CloudOS.WindowsCapture;`r`n", '').Replace("using CloudOS.WindowsCapture;`n", '')
@@ -164,8 +157,6 @@ $getSessions = @'
         var sessions = new List<object>();
         foreach (var window in snapshots.OrderBy(window => window.ProcessId).ThenBy(window => window.Title, StringComparer.OrdinalIgnoreCase))
         {
-            // Job-owned auxiliary HWNDs remain quarantined; only the selected primary HWND
-            // is a public CloudOS application session.
             if (!_sessionIdsByHandle.TryGetValue(window.Handle, out var sessionId)) continue;
             sessions.Add(new
             {
@@ -186,7 +177,11 @@ $getSessions = @'
 '@
 $bridge = Replace-Between $bridge '    private object[] GetPublicSessions()' '    private void PostResponse(string id, bool ok, object? result, object? error)' $getSessions 'BRIDGE_SESSIONS'
 
-# Remove remaining capture-specific cleanup and event hooks.
+$bridge = $bridge.Replace("        SweepCapturedSurfaceHealth();`r`n", '').Replace("        SweepCapturedSurfaceHealth();`n", '')
+if ($bridge.Contains('    private void SweepCapturedSurfaceHealth()')) {
+    $bridge = Replace-Between $bridge '    private void SweepCapturedSurfaceHealth()' '    private void TerminateSessionAndForget(string sessionId, NativeContainmentFailure failure)' '' 'BRIDGE_CAPTURE_HEALTH'
+}
+
 $bridge = [regex]::Replace($bridge, '(?m)^\s*_capturedSurfaceBridge\?\.Close\([^\r\n]+\);\r?\n', '')
 $bridge = [regex]::Replace($bridge, '(?m)^\s*_capturedSurfaceBridge\?\.CloseAll\(\);\r?\n', '')
 $bridge = [regex]::Replace($bridge, '(?m)^\s*_capturedSurfaceBridge\?\.Dispose\(\);\r?\n', '')
@@ -206,7 +201,6 @@ foreach ($forbidden in @('CapturedSurface', '_capturedSurfaceBridge', '_captured
 }
 Write-Utf8 $bridgePath $bridge
 
-# Native surface policy is now unconditional: remove fallback selector and bridge adapters.
 foreach ($path in @(
     'desktop\CloudOS.Host\Native\CapturedSurfaceBridgeAdapter.cs',
     'desktop\CloudOS.Host\Native\CapturedSurfaceSessionManager.cs',
@@ -216,7 +210,6 @@ foreach ($path in @(
     if (Test-Path $full) { Remove-Item -Force $full }
 }
 
-# Host test no longer executes the captured-source path.
 $programPath = Join-Path $repoRoot 'desktop\CloudOS.Host.Tests\Program.cs'
 $program = Read-Utf8 $programPath
 $program = [regex]::Replace($program, '(?m)^\s*CapturedSourceIsolationFollowsSurface\(\);\r?\n', '')
@@ -275,7 +268,6 @@ internal static class NativeSurfaceModeContract
 '@
 Write-Utf8 $surfaceContractPath $surfaceContract
 
-# Remove projects and capture-only CI/harness assets.
 foreach ($dir in @('desktop\CloudOS.WindowsCapture', 'desktop\CloudOS.WindowsCapture.Presenter')) {
     $full = Join-Path $repoRoot $dir
     if (Test-Path $full) { Remove-Item -Recurse -Force $full }
@@ -293,7 +285,6 @@ Get-ChildItem (Join-Path $repoRoot 'scripts') -Recurse -File | Where-Object {
     $_.Name -match '(?i)(windows-capture|captured-surface)'
 } | Remove-Item -Force
 
-# No product-level capture runtime references may survive outside history/docs.
 $forbiddenFiles = Get-ChildItem (Join-Path $repoRoot 'desktop\CloudOS.Host') -Recurse -File -Include *.cs,*.csproj |
     Where-Object { (Get-Content $_.FullName -Raw) -match 'CloudOS\.WindowsCapture|CapturedSurface|captured-surface' }
 if ($forbiddenFiles) {
