@@ -1,4 +1,5 @@
 using System.Windows;
+using CloudOS.Host.Runtime;
 
 namespace CloudOS.Host;
 
@@ -36,6 +37,26 @@ public partial class App : Application
         {
             MessageBox.Show(error.Message, "CloudOS", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown(2);
+            return;
+        }
+
+        // Validate the compiled Host before touching the single-instance coordinator. A stale
+        // executable must never be allowed to signal or activate a different CloudOS revision.
+        if (!CloudOsBuildIdentity.TryValidateExpected(options.ExpectedSourceRevision, out var buildIdentityError))
+        {
+            var logPath = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "CloudOS", "logs", $"host-{DateTime.UtcNow:yyyyMMdd}.log");
+            try
+            {
+                System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(logPath)!);
+                System.IO.File.AppendAllText(
+                    logPath,
+                    $"{DateTimeOffset.Now:O} [host:stale-build] expected={options.ExpectedSourceRevision} compiled={CloudOsBuildIdentity.SourceRevision}\n");
+            }
+            catch {}
+            MessageBox.Show(buildIdentityError, "CloudOS", MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown(4);
             return;
         }
 
