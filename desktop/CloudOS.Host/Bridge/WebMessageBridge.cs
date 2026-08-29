@@ -588,15 +588,15 @@ public sealed class WebMessageBridge : IDisposable
                         && _capturedSurfaceBridge.TryGetState(sessionId, out var captured)
                         && captured is not null)
                     {
-                        var bounds = ConvertBounds(pair.Value);
+                        var capturedBounds = ConvertBounds(pair.Value);
                         var dpi = VisualTreeHelper.GetDpi(_webView);
                         _capturedSurfaceBridge.Layout(
                             sessionId,
-                            bounds,
+                            capturedBounds,
                             pair.Value.Visible,
                             dpi.DpiScaleX,
                             dpi.DpiScaleY);
-                        _surfacesByHandle[pair.Key] = pair.Value with { LastNativeBounds = bounds };
+                        _surfacesByHandle[pair.Key] = pair.Value with { LastNativeBounds = capturedBounds };
                         continue;
                     }
 
@@ -1293,8 +1293,9 @@ public sealed class WebMessageBridge : IDisposable
         foreach (var window in snapshots.OrderBy(window => window.ProcessId).ThenBy(window => window.Title, StringComparer.OrdinalIgnoreCase))
         {
             if (!_sessionIdsByHandle.TryGetValue(window.Handle, out var sessionId)) continue;
+            CapturedSurfaceBridgeState? capturedState = null;
             var captured = _capturedSurfaceBridge is not null
-                && _capturedSurfaceBridge.TryGetState(sessionId, out var capturedState)
+                && _capturedSurfaceBridge.TryGetState(sessionId, out capturedState)
                 && capturedState is not null;
             var publicBounds = captured
                 ? capturedState!.Bounds
