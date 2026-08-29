@@ -10,10 +10,18 @@
 class CloudOSNativeAppsWindow final
 {
 public:
+    enum class AppKind
+    {
+        External,
+        Calculator,
+        Notepad,
+    };
+
     struct AppEntry final
     {
         std::wstring name;
         std::wstring path;
+        AppKind kind{AppKind::External};
     };
 
     static void Open(HINSTANCE instance);
