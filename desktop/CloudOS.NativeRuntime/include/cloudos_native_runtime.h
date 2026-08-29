@@ -3,8 +3,37 @@
 #include <Windows.h>
 #include <cstdint>
 
-#define CLOUDOS_NATIVE_RUNTIME_ABI 2u
+#define CLOUDOS_NATIVE_RUNTIME_ABI 5u
 #define CLOUDOS_NATIVE_RUNTIME_MAX_PROCESSES 256u
+
+typedef enum cloudos_native_window_event_kind : std::uint32_t {
+    CLOUDOS_NATIVE_WINDOW_UNKNOWN = 0u,
+    CLOUDOS_NATIVE_WINDOW_CREATED = 1u,
+    CLOUDOS_NATIVE_WINDOW_DESTROYED = 2u,
+    CLOUDOS_NATIVE_WINDOW_SHOWN = 3u,
+    CLOUDOS_NATIVE_WINDOW_HIDDEN = 4u,
+    CLOUDOS_NATIVE_WINDOW_FOREGROUND = 5u,
+    CLOUDOS_NATIVE_WINDOW_LOCATION_CHANGED = 6u,
+} cloudos_native_window_event_kind;
+
+typedef void (CALLBACK* cloudos_native_window_event_callback)(
+    cloudos_native_window_event_kind kind,
+    HWND window,
+    DWORD process_id,
+    void* context);
+
+typedef BOOL (CALLBACK* cloudos_native_window_enumeration_callback)(
+    HWND window,
+    DWORD process_id,
+    BOOL visible,
+    void* context);
+
+typedef struct cloudos_native_wsl_configuration {
+    ULONG version;
+    ULONG default_uid;
+    std::uint32_t flags;
+    ULONG default_environment_variable_count;
+} cloudos_native_wsl_configuration;
 
 extern "C" {
 
@@ -34,9 +63,97 @@ __declspec(dllexport) BOOL WINAPI cloudos_native_terminate(
 __declspec(dllexport) void WINAPI cloudos_native_release(
     void* lease) noexcept;
 
-// Real Windows surface operations. The Host validates the launch/session capability first;
-// the C++ runtime then performs the Win32 mutation directly so Web/React never renders or
-// forwards pixels for a native application.
+// Native ConPTY terminal runtime. The terminal process is created suspended,
+// assigned to a kill-on-close Job Object, and only then resumed.
+__declspec(dllexport) BOOL WINAPI cloudos_native_terminal_create(
+    const wchar_t* command_line,
+    const wchar_t* working_directory,
+    SHORT columns,
+    SHORT rows,
+    void** terminal_out,
+    DWORD* process_id_out) noexcept;
+
+__declspec(dllexport) BOOL WINAPI cloudos_native_terminal_write(
+    void* terminal,
+    const void* data,
+    DWORD size,
+    DWORD* written_out) noexcept;
+
+__declspec(dllexport) BOOL WINAPI cloudos_native_terminal_read(
+    void* terminal,
+    void* buffer,
+    DWORD capacity,
+    DWORD* read_out) noexcept;
+
+__declspec(dllexport) BOOL WINAPI cloudos_native_terminal_resize(
+    void* terminal,
+    SHORT columns,
+    SHORT rows) noexcept;
+
+__declspec(dllexport) BOOL WINAPI cloudos_native_terminal_get_exit_code(
+    void* terminal,
+    DWORD* exit_code_out,
+    BOOL* exited_out) noexcept;
+
+__declspec(dllexport) BOOL WINAPI cloudos_native_terminal_terminate(
+    void* terminal,
+    DWORD exit_code) noexcept;
+
+__declspec(dllexport) void WINAPI cloudos_native_terminal_release(
+    void* terminal) noexcept;
+
+// Direct Windows WSL API. This bypasses managed Process wrappers and CLI parsing
+// for operations the platform exposes through wslapi.h.
+__declspec(dllexport) BOOL WINAPI cloudos_native_wsl_is_registered(
+    const wchar_t* distribution_name,
+    BOOL* registered_out) noexcept;
+
+__declspec(dllexport) BOOL WINAPI cloudos_native_wsl_get_configuration(
+    const wchar_t* distribution_name,
+    cloudos_native_wsl_configuration* configuration_out) noexcept;
+
+__declspec(dllexport) BOOL WINAPI cloudos_native_wsl_launch(
+    const wchar_t* distribution_name,
+    const wchar_t* command,
+    BOOL use_current_working_directory,
+    HANDLE standard_input,
+    HANDLE standard_output,
+    HANDLE standard_error,
+    void** lease_out,
+    DWORD* process_id_out) noexcept;
+
+__declspec(dllexport) BOOL WINAPI cloudos_native_wsl_get_exit_code(
+    void* lease,
+    DWORD* exit_code_out,
+    BOOL* exited_out) noexcept;
+
+__declspec(dllexport) BOOL WINAPI cloudos_native_wsl_terminate(
+    void* lease,
+    DWORD exit_code) noexcept;
+
+__declspec(dllexport) void WINAPI cloudos_native_wsl_release(
+    void* lease) noexcept;
+
+// Event-driven window discovery. The shell consumes real top-level Windows HWNDs
+// instead of requiring arbitrary third-party applications to be reparented.
+__declspec(dllexport) BOOL WINAPI cloudos_native_window_events_start(
+    cloudos_native_window_event_callback callback,
+    void* context,
+    void** watcher_out) noexcept;
+
+__declspec(dllexport) void WINAPI cloudos_native_window_events_stop(
+    void* watcher) noexcept;
+
+__declspec(dllexport) BOOL WINAPI cloudos_native_window_enumerate(
+    cloudos_native_window_enumeration_callback callback,
+    void* context) noexcept;
+
+__declspec(dllexport) BOOL WINAPI cloudos_native_window_extended_frame_bounds(
+    HWND window,
+    RECT* bounds_out) noexcept;
+
+// Legacy/direct window-surface operations retained as an opt-in compatibility path.
+// They are not the universal application model of the native shell.
 __declspec(dllexport) BOOL WINAPI cloudos_native_window_attach(
     HWND window,
     HWND owner,
