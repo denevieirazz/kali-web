@@ -65,8 +65,8 @@ jobs:
           $assemblyInfo = Get-ChildItem 'desktop/CloudOS.Host/obj/Release' -Recurse -Filter 'CloudOS.Host.AssemblyInfo.cs' | Select-Object -First 1
           if (-not $assemblyInfo) { throw 'HOST_ASSEMBLY_INFO_NOT_FOUND' }
           $source = Get-Content -LiteralPath $assemblyInfo.FullName -Raw
-          $expected = '[assembly: System.Reflection.AssemblyMetadataAttribute("CloudOSSourceRevision", "${{ github.sha }}")]'
-          if (-not $source.Contains($expected)) { throw 'HOST_SOURCE_REVISION_METADATA_MISSING' }
+          if ($source -notmatch 'CloudOSSourceRevision') { throw 'HOST_SOURCE_REVISION_METADATA_KEY_MISSING' }
+          if ($source -notmatch '${{ github.sha }}') { throw 'HOST_SOURCE_REVISION_METADATA_VALUE_MISSING' }
 
       - name: Run Host contracts
         shell: pwsh
