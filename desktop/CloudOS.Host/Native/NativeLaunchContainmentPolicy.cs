@@ -15,6 +15,9 @@ public static class NativeLaunchContainmentPolicy
     public const int WindowCorrelationTimeoutMilliseconds = 20_000;
     public const int PendingAttachTimeoutMilliseconds = 30_000;
     public const int GracefulCloseTimeoutMilliseconds = 1_000;
+    public const int PrimaryWindowMinimumWidth = 240;
+    public const int PrimaryWindowMinimumHeight = 120;
+    public const long DominantWindowAreaRatio = 4;
 
     private static readonly HashSet<string> DirectLaunchKinds = new(StringComparer.Ordinal)
     {
@@ -89,12 +92,67 @@ public static class NativeLaunchContainmentPolicy
         processTracked && hasTrackableWindow && !sharedBroker;
 
     /// <summary>
+    /// Selects a primary surface without using enumeration order, focus, or timing as
+    /// authority. A single real application surface may coexist with small helper HWNDs.
+    /// Two plausible application surfaces remain ambiguous and are rejected fail-closed.
+    /// </summary>
+    public static NativeWindowCandidateSelection SelectUniqueQuarantinedWindow(
+        IReadOnlyList<NativeWindowSnapshot> candidates,
+        out NativeWindowSnapshot? selected)
+    {
+        ArgumentNullException.ThrowIfNull(candidates);
+        selected = null;
+        if (candidates.Count == 0) return NativeWindowCandidateSelection.None;
+        if (candidates.Count == 1)
+        {
+            selected = candidates[0];
+            return NativeWindowCandidateSelection.Unique;
+        }
+
+        var plausible = candidates
+            .Where(IsPlausiblePrimarySurface)
+            .OrderByDescending(WindowArea)
+            .ToArray();
+
+        if (plausible.Length > 1)
+        {
+            var titled = plausible.Where(candidate => !string.IsNullOrWhiteSpace(candidate.Title)).ToArray();
+            if (titled.Length != 1) return NativeWindowCandidateSelection.Ambiguous;
+            selected = titled[0];
+            return NativeWindowCandidateSelection.Unique;
+        }
+
+        if (plausible.Length != 1) return NativeWindowCandidateSelection.Ambiguous;
+
+        var primary = plausible[0];
+        var largestAuxiliaryArea = candidates
+            .Where(candidate => candidate.Handle != primary.Handle)
+            .Select(WindowArea)
+            .DefaultIfEmpty(0)
+            .Max();
+        if (largestAuxiliaryArea > 0
+            && WindowArea(primary) < largestAuxiliaryArea * DominantWindowAreaRatio)
+            return NativeWindowCandidateSelection.Ambiguous;
+
+        selected = primary;
+        return NativeWindowCandidateSelection.Unique;
+    }
+
+    public static bool IsPlausiblePrimarySurface(NativeWindowSnapshot candidate) =>
+        candidate.Bounds.Width >= PrimaryWindowMinimumWidth
+        && candidate.Bounds.Height >= PrimaryWindowMinimumHeight;
+
+    private static long WindowArea(NativeWindowSnapshot candidate) =>
+        Math.Max(0L, (long)candidate.Bounds.Width) * Math.Max(0L, candidate.Bounds.Height);
+
+    /// <summary>
     /// Every failure after a process was launched is terminal. Restoring an
     /// attached window to the desktop would be an external-window fallback.
     /// </summary>
     public static bool RequiresTermination(NativeContainmentFailure failure) => failure is
         NativeContainmentFailure.WindowCorrelationTimeout or
         NativeContainmentFailure.QuarantineFailed or
+        NativeContainmentFailure.AmbiguousWindow or
         NativeContainmentFailure.AttachFailed or
         NativeContainmentFailure.LayoutFailed or
         NativeContainmentFailure.AttachmentLost or
@@ -122,10 +180,18 @@ public sealed class NativeLaunchAdmission
     public static NativeLaunchAdmission Deny(string errorCode, string message) => new(false, errorCode, message);
 }
 
+public enum NativeWindowCandidateSelection
+{
+    None,
+    Unique,
+    Ambiguous
+}
+
 public enum NativeContainmentFailure
 {
     WindowCorrelationTimeout,
     QuarantineFailed,
+    AmbiguousWindow,
     AttachFailed,
     LayoutFailed,
     AttachmentLost,
