@@ -1,6 +1,7 @@
 #pragma once
 
 #include "native_files_window.h"
+#include "native_files_style.h"
 #include "native_theme.h"
 
 #include <Windows.h>
@@ -9,7 +10,7 @@
 
 namespace
 {
-constexpr wchar_t kClassName[] = L"CloudOS.Native.Files.v4";
+constexpr wchar_t kClassName[] = L"CloudOS.Native.Files.v5";
 constexpr int kSidebarId = 1200;
 constexpr int kBackId = 1201;
 constexpr int kForwardId = 1202;
@@ -24,14 +25,21 @@ constexpr int kListId = 1210;
 constexpr int kShellHostId = 1211;
 constexpr int kStatusId = 1212;
 
-constexpr COLORREF kBg = RGB(8, 12, 22);
-constexpr COLORREF kPanel = RGB(13, 20, 34);
-constexpr COLORREF kSurface = RGB(18, 27, 45);
-constexpr COLORREF kHot = RGB(29, 45, 72);
-constexpr COLORREF kBorder = RGB(48, 68, 98);
-constexpr COLORREF kAccent = RGB(80, 151, 239);
-constexpr COLORREF kText = RGB(237, 243, 252);
-constexpr COLORREF kMuted = RGB(148, 166, 193);
+constexpr COLORREF kBg = CloudOS::FilesStyle::kPalette.base;
+constexpr COLORREF kPanel = CloudOS::FilesStyle::kPalette.sidebar;
+constexpr COLORREF kToolbar = CloudOS::FilesStyle::kPalette.toolbar;
+constexpr COLORREF kAddress = CloudOS::FilesStyle::kPalette.address;
+constexpr COLORREF kSurface = CloudOS::FilesStyle::kPalette.content;
+constexpr COLORREF kButton = CloudOS::FilesStyle::kPalette.button;
+constexpr COLORREF kHot = CloudOS::FilesStyle::kPalette.hover;
+constexpr COLORREF kPressed = CloudOS::FilesStyle::kPalette.pressed;
+constexpr COLORREF kSelection = CloudOS::FilesStyle::kPalette.selection;
+constexpr COLORREF kBorder = CloudOS::FilesStyle::kPalette.border;
+constexpr COLORREF kAccent = CloudOS::FilesStyle::kPalette.accent;
+constexpr COLORREF kAccentPressed = CloudOS::FilesStyle::kPalette.accent_pressed;
+constexpr COLORREF kText = CloudOS::FilesStyle::kPalette.text;
+constexpr COLORREF kMuted = CloudOS::FilesStyle::kPalette.muted;
+constexpr COLORREF kDanger = CloudOS::FilesStyle::kPalette.danger;
 
 constexpr UINT_PTR kAddressSubclassId = 0xC10D;
 
@@ -50,7 +58,11 @@ inline LRESULT CALLBACK AddressEditSubclass(
             HWND parent = GetParent(window);
             if (parent != nullptr)
             {
-                SendMessageW(parent, WM_COMMAND, MAKEWPARAM(kGoId, BN_CLICKED), reinterpret_cast<LPARAM>(window));
+                SendMessageW(
+                    parent,
+                    WM_COMMAND,
+                    MAKEWPARAM(kGoId, BN_CLICKED),
+                    reinterpret_cast<LPARAM>(window));
             }
             return 0;
         }
@@ -87,16 +99,27 @@ inline bool RegisterWindowClass(HINSTANCE instance)
 inline HWND CreateButton(HINSTANCE instance, HWND parent, const wchar_t* text, int id)
 {
     return CreateWindowExW(
-        0, L"BUTTON", text,
+        0,
+        L"BUTTON",
+        text,
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-        0, 0, 0, 0, parent,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), instance, nullptr);
+        0,
+        0,
+        0,
+        0,
+        parent,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),
+        instance,
+        nullptr);
 }
 
 inline bool DirectoryExists(const std::wstring& path)
 {
-    const DWORD attributes = path.empty() ? INVALID_FILE_ATTRIBUTES : GetFileAttributesW(path.c_str());
-    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    const DWORD attributes = path.empty()
+        ? INVALID_FILE_ATTRIBUTES
+        : GetFileAttributesW(path.c_str());
+    return attributes != INVALID_FILE_ATTRIBUTES &&
+        (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
 inline bool StartsWithInsensitive(const std::wstring& value, const std::wstring& prefix)
@@ -115,4 +138,4 @@ inline void ShowError(HWND owner, const wchar_t* message, const std::wstring& de
     }
     MessageBoxW(owner, text.c_str(), L"Arquivos - CloudOS", MB_OK | MB_ICONWARNING);
 }
-}
+} // namespace
