@@ -29,7 +29,8 @@ if not exist "%DLL%" (
 taskkill /F /IM CloudOS.exe >nul 2>&1
 timeout /t 1 /nobreak >nul 2>&1
 
-echo [CloudOS Native] Iniciando shell C++ nativo com apresentacao WebView2.
+echo [CloudOS Native] Iniciando shell C++ Win32 nativo.
+echo [CloudOS Native] Tiling inicia DESATIVADO e so muda por acao explicita do usuario.
 echo [CloudOS Native] EXE=%EXE%
 echo [CloudOS Native] Shell iniciado com sucesso.
 
