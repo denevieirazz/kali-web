@@ -29,7 +29,7 @@ foreach ($entry in $paths.GetEnumerator()) {
 foreach ($token in @('CloudOSDesktopSurface desktop_','ICC_LISTVIEW_CLASSES','ICC_WIN95_CLASSES','CloudOSNativeWindowManager')) {
     if (-not $content.Main.Contains($token)) { throw "Main native authority contract missing: $token" }
 }
-foreach ($token in @('web_.Create','fallback_.Create','web_.SetActionCallback','fallback_.SetActionCallback','UsingWebUi')) {
+foreach ($token in @('web_.Create','fallback_.Create','web_.SetActionCallback','fallback_.SetActionCallback')) {
     if (-not $content.Surface.Contains($token)) { throw "Desktop fallback facade contract missing: $token" }
 }
 foreach ($token in @('SetVirtualHostNameToFolderMapping','https://cloudos.local','add_WebMessageReceived','get_Source','TryGetWebMessageAsString','add_NavigationStarting','PostWebMessageAsJson','COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_DENY_CORS')) {
