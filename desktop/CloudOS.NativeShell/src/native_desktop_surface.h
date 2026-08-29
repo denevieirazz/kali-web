@@ -5,7 +5,6 @@
 #include <functional>
 
 #include "native_desktop_window.h"
-#include "native_web_desktop_window.h"
 #include "native_window_manager.h"
 
 namespace CloudOS
@@ -34,11 +33,9 @@ public:
     void SetTimerCallback(TimerCallback callback);
 
     [[nodiscard]] HWND Hwnd() const noexcept;
-    [[nodiscard]] bool UsingWebUi() const noexcept { return web_active_; }
+    [[nodiscard]] bool UsingWebUi() const noexcept { return false; }
 
 private:
-    bool web_active_{};
-    CloudOSNativeWebDesktopWindow web_;
-    CloudOSNativeDesktopWindow fallback_;
+    CloudOSNativeDesktopWindow native_;
 };
 } // namespace CloudOS
