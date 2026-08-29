@@ -1,5 +1,6 @@
 using CloudOS.Host.Browser;
 using CloudOS.Host.Native;
+using CloudOS.Host.Runtime;
 using CloudOS.Host.Security;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -54,6 +55,7 @@ var tests = new (string Name, Action Run)[]
     ("browser state restores optional session safely", BrowserStateRestoresOptionalSession),
     ("browser state recovers from corruption", BrowserStateRecoversFromCorruption),
     ("browser state can recover from atomic backup", BrowserStateRecoversBackup),
+    ("compiled Host revision requires exact source identity", CompiledHostRevisionRequiresExactIdentity),
     ("native launch accepts only direct host descriptors", NativeLaunchAcceptsOnlyDirectDescriptors),
     ("native launch rejects broker and UWP kinds", NativeLaunchRejectsBrokersAndUwp),
     ("native launch reports managed only after HWND correlation", NativeLaunchReportsManagedOnlyAfterCorrelation),
@@ -284,6 +286,17 @@ static void BrowserStateRecoversBackup()
     File.WriteAllText(path, "{corrupt");
     var recovered = new BrowserStateStore(path);
     Assert(recovered.History.Count >= 1, "A valid atomic backup must recover state after corruption.");
+}
+
+static void CompiledHostRevisionRequiresExactIdentity()
+{
+    var revisionA = new string('a', 40);
+    var revisionB = new string('b', 40);
+    Assert(CloudOsBuildIdentity.MatchesExpected(revisionA, revisionA), "Equal source revisions must match.");
+    Assert(CloudOsBuildIdentity.MatchesExpected(revisionA.ToUpperInvariant(), revisionA), "Revision normalization must be case-insensitive.");
+    Assert(!CloudOsBuildIdentity.MatchesExpected(revisionA, revisionB), "Different revisions must never match.");
+    Assert(!CloudOsBuildIdentity.MatchesExpected("unknown", revisionA), "A Host without compiled identity must fail closed when an expected revision exists.");
+    Assert(!CloudOsBuildIdentity.MatchesExpected(revisionA, "abc123"), "Malformed expected revisions must fail closed.");
 }
 
 static void NativeLaunchAcceptsOnlyDirectDescriptors()

@@ -18,6 +18,7 @@
     <Compile Include="..\CloudOS.Host\Browser\BrowserSecurityPolicy.cs" Link="Browser\BrowserSecurityPolicy.cs" />
     <Compile Include="..\CloudOS.Host\Browser\BrowserChromeTheme.cs" Link="Browser\BrowserChromeTheme.cs" />
     <Compile Include="..\CloudOS.Host\Native\NativeLaunchContainmentPolicy.cs" Link="Native\NativeLaunchContainmentPolicy.cs" />
+    <Compile Include="..\CloudOS.Host\Runtime\CloudOsBuildIdentity.cs" Link="Runtime\CloudOsBuildIdentity.cs" />
     <Compile Include="..\CloudOS.Host\Native\CloudOsNativeRuntime.cs" Link="Native\CloudOsNativeRuntime.cs" />
     <Compile Include="..\CloudOS.Host\Native\NativeContainedProcessLauncher.cs" Link="Native\NativeContainedProcessLauncher.cs" />
     <Compile Include="..\CloudOS.Host\Native\NativeManagedProcessClaims.cs" Link="Native\NativeManagedProcessClaims.cs" />

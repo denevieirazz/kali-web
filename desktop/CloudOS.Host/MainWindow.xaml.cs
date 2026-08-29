@@ -265,6 +265,7 @@ public partial class MainWindow : Window
         embeddedNativeWindows = true,
         nativeWindowContainment = "anchored-overlay",
         platform = "windows",
+        sourceRevision = CloudOsBuildIdentity.SourceRevision,
         version = typeof(MainWindow).Assembly.GetName().Version?.ToString() ?? "1.0.0"
     };
 

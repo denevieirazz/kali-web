@@ -350,7 +350,8 @@ if ($existingSession -and $existingSession.status -eq 'running') {
     if (-not $revisionMatches) {
         $oldSha = try { [string]$existingSession.git.sha } catch { '' }
         Write-Host "CloudOS em execução pertence a outro commit (sessão=$oldSha checkout=$($currentCheckout.sha)); reiniciando runtime."
-    }    $hostPid = 0
+    }
+    $hostPid = 0
     if ($existingSession.readiness -and $existingSession.readiness.hostRuntimePid) {
         $hostPid = [int]$existingSession.readiness.hostRuntimePid
     }
@@ -377,7 +378,7 @@ if ($existingSession -and $existingSession.status -eq 'running') {
         $hostExe = Join-Path $script:CloudOSRoot 'desktop\CloudOS.Host\bin\Release\net8.0-windows10.0.19041.0\CloudOS.Host.exe'
         if (Test-Path -LiteralPath $hostExe) {
             try {
-                $signalProc = Start-Process -FilePath $hostExe -ArgumentList @('--root', $script:CloudOSRoot) -WindowStyle Hidden -PassThru -ErrorAction SilentlyContinue
+                $signalProc = Start-Process -FilePath $hostExe -ArgumentList @('--root', $script:CloudOSRoot, '--expected-source-revision', [string]$currentCheckout.sha) -WindowStyle Hidden -PassThru -ErrorAction SilentlyContinue
                 if ($signalProc) { [void]$signalProc.WaitForExit(5000) }
             } catch {}
         }
@@ -432,6 +433,9 @@ try {
     $env:CLOUDOS_NATIVE_HOST = if ($Mode -in @('Full','BrowserValidation')) { '1' } else { '0' }
     $env:CLOUDOS_SESSION_ID = [string]$session.id
     $env:CLOUDOS_SESSION_LOG_DIR = [string]$session.logDirectory
+    $sourceRevision = ([string]$session.git.sha).Trim().ToLowerInvariant()
+    if ($sourceRevision -notmatch '^[a-f0-9]{40}$') { throw "SOURCE_REVISION_INVALID:$sourceRevision" }
+    $env:VITE_CLOUDOS_SOURCE_REVISION = $sourceRevision
     if ($Mode -in @('UXValidation','FilesValidation','BrowserValidation','TerminalValidation')) { $env:NODE_ENV = 'test' }
 
     if ($Mode -eq 'FilesValidation') {
@@ -461,7 +465,7 @@ try {
         [void](Invoke-CloudOSVisibleProcess -Session $session -Name 'host-restore' -FilePath $pre.dotnet -Arguments @('restore',$hostProject,'--nologo') -WorkingDirectory $script:CloudOSRoot -PwshPath $pre.pwsh -BootstrapLog $bootstrapLog -TimeoutSeconds 300 -TimeoutCode 'HOST_RESTORE_TIMEOUT' -FailureCode 'HOST_RESTORE_FAILED')
 
         Write-CloudOSLaunchStage -Session $session -Step 5 -Percent 50 -Stage 'host-build' -Message 'Compilando o Host nativo sem novo restore.' -TimeoutSeconds 300 -LogPath $bootstrapLog
-        [void](Invoke-CloudOSVisibleProcess -Session $session -Name 'host-build' -FilePath $pre.dotnet -Arguments @('build',$hostProject,'-c','Release','--no-restore','--nologo','--verbosity','minimal') -WorkingDirectory $script:CloudOSRoot -PwshPath $pre.pwsh -BootstrapLog $bootstrapLog -TimeoutSeconds 300 -TimeoutCode 'HOST_BUILD_TIMEOUT' -FailureCode 'HOST_BUILD_FAILED')
+        [void](Invoke-CloudOSVisibleProcess -Session $session -Name 'host-build' -FilePath $pre.dotnet -Arguments @('build',$hostProject,'-c','Release','--no-restore','--nologo','--verbosity','minimal',"-p:CloudOSSourceRevision=$sourceRevision") -WorkingDirectory $script:CloudOSRoot -PwshPath $pre.pwsh -BootstrapLog $bootstrapLog -TimeoutSeconds 300 -TimeoutCode 'HOST_BUILD_TIMEOUT' -FailureCode 'HOST_BUILD_FAILED')
 
         $hostExe=Join-Path $script:CloudOSRoot 'desktop\CloudOS.Host\bin\Release\net8.0-windows10.0.19041.0\CloudOS.Host.exe'
         if(-not(Test-Path -LiteralPath $hostExe -PathType Leaf)){throw "HOST_EXECUTABLE_MISSING_AFTER_BUILD:$hostExe"}
@@ -471,7 +475,7 @@ try {
         $bootstrapPipe = New-NativeHostBootstrapPipe -Session $session
         try{
             Write-CloudOSLaunchStage -Session $session -Step 6 -Percent 60 -Stage 'host-start' -Message 'Iniciando o processo Host nativo.' -TimeoutSeconds 15 -LogPath $hostErr
-            $hostArgs = @('--root',$script:CloudOSRoot,'--bootstrap-pipe',$bootstrapPipe.name)
+            $hostArgs = @('--root',$script:CloudOSRoot,'--bootstrap-pipe',$bootstrapPipe.name,'--expected-source-revision',$sourceRevision)
             if ($Mode -eq 'BrowserValidation') { $hostArgs += '--developer-mode' }
             $hostRuntime = Start-CloudOSLoggedProcess $session 'host-runtime' $hostExe $hostArgs $hostOut $hostErr @{
                 CLOUDOS_LAUNCH_MODE=$Mode
@@ -506,6 +510,7 @@ try {
                 readyAt=(Get-Date).ToUniversalTime().ToString('o')
                 hostLauncherPid=$null
                 hostRuntimePid=$hostRuntime.Id
+                sourceRevision=$sourceRevision
                 shellWindowReady=$true
                 shellHandshakeReady=$true
                 shellHandshakeProtocol=[int]$shellReady.protocol

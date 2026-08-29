@@ -121,6 +121,7 @@ export interface NativeHostState {
   embeddedNativeWindows: boolean;
   nativeWindowContainment?: NativeContainmentMode;
   platform: string;
+  sourceRevision?: string;
   version: string;
 }
 
@@ -146,6 +147,8 @@ declare global {
   }
 }
 
+const EXPECTED_SOURCE_REVISION = String(import.meta.env.VITE_CLOUDOS_SOURCE_REVISION || '').trim().toLowerCase();
+
 function snapshotSessions(sessions: NativeSession[]) {
   return sessions.map((session) => ({
     ...session,
@@ -168,8 +171,17 @@ class NativeHostBridge {
     if (!this.available || this.ready) return this.ready;
     if (this.connectPromise) return this.connectPromise;
     this.ensureTransport();
-    const connection = this.request('bridge.handshake', {})
-      .then(() => {
+    const connection = this.request<{ protocol: number; host: NativeHostState }>('bridge.handshake', {})
+      .then((handshake) => {
+        if (/^[a-f0-9]{40}$/.test(EXPECTED_SOURCE_REVISION)) {
+          const hostRevision = String(handshake?.host?.sourceRevision || '').trim().toLowerCase();
+          if (hostRevision !== EXPECTED_SOURCE_REVISION) {
+            throw new NativeHostError(
+              'STALE_NATIVE_HOST',
+              `O Host nativo pertence a outra revisão do CloudOS (esperado ${EXPECTED_SOURCE_REVISION}, recebido ${hostRevision || 'ausente'}).`
+            );
+          }
+        }
         this.ready = true;
         return true;
       })
