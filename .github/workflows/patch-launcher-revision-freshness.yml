@@ -6,6 +6,7 @@ on:
       - integration/cloudos-unified-runtime
     paths:
       - .github/workflows/patch-launcher-revision-freshness.yml
+      - scripts/tmp-patch-launcher-revision-freshness.ps1
 
 permissions:
   contents: write
