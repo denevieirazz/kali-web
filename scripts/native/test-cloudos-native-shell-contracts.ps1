@@ -2,8 +2,12 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $desktopPath = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\src\native_desktop_window.cpp'
+$surfacePath = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\src\native_desktop_surface.cpp'
+$surfaceHeaderPath = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\src\native_desktop_surface.h'
 $launcherPath = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\src\native_app_launcher.cpp'
 $mainPath = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\src\main.cpp'
+$settingsPath = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\src\native_settings_window.cpp'
+$settingsHeaderPath = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\src\native_settings_window.h'
 $themePath = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\src\native_theme.h'
 $mruPath = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\src\native_start_menu_mru.h'
 $platformPath = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\src\native_shell_platform.cpp'
@@ -22,16 +26,21 @@ $researchPolicyPath = Join-Path $repoRoot 'docs\native\RESEARCH_POLICY.md'
 $filesResearchPath = Join-Path $repoRoot 'docs\native\research\FILES_NATIVE_SHELL_RESEARCH.md'
 
 foreach ($path in @(
-    $desktopPath,$launcherPath,$mainPath,$themePath,$mruPath,$platformPath,$shellViewPath,
-    $drivePath,$trashPath,$filesPath,$filesInternalPath,$filesStylePath,$filesNavigationPath,
-    $filesOperationsPath,$filesSupportPath,$projectsPath,$projectPath,$researchPolicyPath,$filesResearchPath
+    $desktopPath,$surfacePath,$surfaceHeaderPath,$launcherPath,$mainPath,$settingsPath,$settingsHeaderPath,
+    $themePath,$mruPath,$platformPath,$shellViewPath,$drivePath,$trashPath,$filesPath,$filesInternalPath,
+    $filesStylePath,$filesNavigationPath,$filesOperationsPath,$filesSupportPath,$projectsPath,$projectPath,
+    $researchPolicyPath,$filesResearchPath
 )) {
     if (-not (Test-Path -LiteralPath $path)) { throw "Required native shell file missing: $path" }
 }
 
 $desktop = Get-Content -LiteralPath $desktopPath -Raw
+$surface = Get-Content -LiteralPath $surfacePath -Raw
+$surfaceHeader = Get-Content -LiteralPath $surfaceHeaderPath -Raw
 $launcher = Get-Content -LiteralPath $launcherPath -Raw
 $main = Get-Content -LiteralPath $mainPath -Raw
+$settings = Get-Content -LiteralPath $settingsPath -Raw
+$settingsHeader = Get-Content -LiteralPath $settingsHeaderPath -Raw
 $theme = Get-Content -LiteralPath $themePath -Raw
 $mru = Get-Content -LiteralPath $mruPath -Raw
 $platform = Get-Content -LiteralPath $platformPath -Raw
@@ -56,12 +65,28 @@ foreach ($token in @('Neo-Tokyo','22°C','OCT 26, 2045','CloudOS Architecture Sy
 foreach ($token in @('CurrentWorkspaceWindows','StartMenuMRUTracker::Instance().GetTopApps','cloudos_native_runtime_abi','FocusWindow','SwitchWorkspace')) {
     if (-not $desktop.Contains($token)) { throw "Desktop contract missing: $token" }
 }
+
+if (-not $surface.Contains('return native_.Create(instance, window_manager)')) { throw 'Native desktop surface must be authoritative at startup.' }
+foreach ($token in @('web_.Create','native_web_desktop_window.h','web_active_')) {
+    if ($surface.Contains($token) -or $surfaceHeader.Contains($token)) { throw "Web-first desktop presentation regressed into the authoritative shell surface: $token" }
+}
+if (-not $surfaceHeader.Contains('UsingWebUi() const noexcept { return false; }')) { throw 'Desktop surface must report native-only presentation.' }
+
+if ($main.Contains('tiling_on_start') -or $main.Contains('CloudOSNativeSettingsWindow::Load')) { throw 'Tiling must never be restored or auto-enabled during shell startup.' }
+if (-not $main.Contains('window_manager_.ToggleTiling()') -or -not $main.Contains('{HotTiling, modifiers, L''T''}')) { throw 'Manual tiling toggle contract missing.' }
+if ($settings.Contains('TilingOnStart') -and -not $settings.Contains('RegDeleteValueW')) { throw 'Legacy TilingOnStart persistence must be removed, not loaded.' }
+if ($settingsHeader.Contains('tiling_on_start') -or $settingsHeader.Contains('tiling_checkbox_')) { throw 'Startup tiling setting must not exist in the settings model or UI.' }
+
 foreach ($token in @('GetDateFormatEx','GetTimeFormatEx','GetWindowsDirectoryW','GetVolumePathNameW')) {
     if (-not $platform.Contains($token)) { throw "Platform contract missing: $token" }
 }
 foreach ($token in @('CanonicalAppId','SEE_MASK_NOCLOSEPROCESS','StartMenuMRUTracker::Instance().RecordLaunch','CloudOSNativeProjectsWindow::Open','NativeCloudOSDrive::EnsureReady','CloudOSNativeFilesWindow::Open(instance, root)','OpenWslTerminal','systemdrive','ms-settings:dateandtime')) {
     if (-not $launcher.Contains($token)) { throw "Launcher contract missing: $token" }
 }
+foreach ($token in @('kExternalHostClass','CollectProcessFamily','SetParent(application_window, state->host)','WS_CHILD','CloudOSNativeFilesWindow::Open(instance, system_volume)')) {
+    if (-not $launcher.Contains($token)) { throw "Contained external app contract missing: $token" }
+}
+if ($launcher.Contains('External Windows programs stay independent top-level HWNDs')) { throw 'Launcher must not intentionally allow managed external apps to escape the CloudOS surface.' }
 if (-not $main.Contains('HotSearch') -or -not $main.Contains('VK_SPACE')) { throw 'Global native search hotkey contract missing.' }
 if ($theme.Contains('Disco Local (C:)') -or $theme.Contains('Disco C:')) { throw 'System volume label must not assume Windows is installed on C:.' }
 if (-not $theme.Contains('L"drive", L"CloudOS Drive"') -or -not $theme.Contains('L"systemdrive", L"Disco do Sistema"') -or -not $theme.Contains('L"projects", L"Projetos"') -or -not $theme.Contains('L"wsl", L"WSL / Kali"')) { throw 'CloudOS Drive, system volume, Projects and WSL must remain distinct truthful app identities.' }
@@ -106,4 +131,4 @@ foreach ($source in @('src\native_start_menu_window.cpp','src\native_taskbar_win
     if ($project.Contains($source)) { throw "Empty/provisional shell placeholder returned to build: $source" }
 }
 
-Write-Host 'PASS: CloudOS native shell, research policy, Drive, modern Files, Windows Shell view and Projects contracts are truthful and functional.'
+Write-Host 'PASS: CloudOS native-only shell, manual tiling, contained external apps, Drive, modern Files, Windows Shell view and Projects contracts are truthful and functional.'
