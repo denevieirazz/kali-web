@@ -388,8 +388,10 @@ public sealed class WebMessageBridge : IDisposable
             var sharedBroker = IsSharedBrokerProcess(window.ProcessId);
             if (!NativeLaunchContainmentPolicy.CanReportManaged(processTracked, hasTrackableWindow, sharedBroker))
             {
-                TerminateProcessAndForget(launchLease.ProcessId, NativeContainmentFailure.QuarantineFailed);
-                throw new BridgeException("WINDOW_CONTAINMENT_DENIED", "A janela não pôde ser marcada como gerenciada.");
+                throw new BridgeException(
+                    "WINDOW_CONTAINMENT_DENIED",
+                    "A janela não pôde ser marcada como gerenciada.",
+                    NativeContainmentFailure.QuarantineFailed);
             }
 
             var sessionId = GetOrCreateSession(window);
