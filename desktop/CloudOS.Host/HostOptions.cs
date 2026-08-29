@@ -6,7 +6,8 @@ public sealed record HostOptions(
     bool Fullscreen,
     bool Kiosk,
     bool DeveloperMode,
-    string? BootstrapPipe)
+    string? BootstrapPipe,
+    string? ExpectedSourceRevision)
 {
     public static HostOptions Parse(IReadOnlyList<string> arguments)
     {
@@ -16,6 +17,7 @@ public sealed record HostOptions(
         var kiosk = false;
         var developerMode = false;
         string? bootstrapPipe = null;
+        string? expectedSourceRevision = null;
 
         for (var index = 0; index < arguments.Count; index++)
         {
@@ -43,12 +45,17 @@ public sealed record HostOptions(
                         !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-')))
                         throw new ArgumentException("O nome do pipe de bootstrap é inválido.");
                     break;
+                case "--expected-source-revision":
+                    expectedSourceRevision = ReadValue(arguments, ref index, "--expected-source-revision").Trim().ToLowerInvariant();
+                    if (expectedSourceRevision.Length != 40 || expectedSourceRevision.Any(character => !char.IsAsciiHexDigit(character)))
+                        throw new ArgumentException("O SHA de origem esperado é inválido.");
+                    break;
                 default:
                     throw new ArgumentException($"Opção desconhecida: {arguments[index]}");
             }
         }
 
-        return new HostOptions(root, node, fullscreen, kiosk, developerMode, bootstrapPipe);
+        return new HostOptions(root, node, fullscreen, kiosk, developerMode, bootstrapPipe, expectedSourceRevision);
     }
 
     private static string ReadValue(IReadOnlyList<string> arguments, ref int index, string option)
