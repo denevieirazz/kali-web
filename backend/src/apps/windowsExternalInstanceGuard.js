@@ -162,7 +162,7 @@ export function evaluateExternalInstanceProbe(executable, rows, managedProcessCl
   return { conflicts, unrelated, unverifiable, managed };
 }
 
-async function probeProcessesByExecutableName(executable) {
+export async function probeProcessesByExecutableName(executable) {
   const target = normalizedWindowsPath(executable);
   if (!target) throw new Error('invalid executable path');
 
@@ -196,7 +196,7 @@ async function probeProcessesByExecutableName(executable) {
         ...safeChildEnvironment(),
         CLOUDOS_EXTERNAL_INSTANCE_TARGET: executable
       },
-      timeout: 4_000,
+      timeout: 12_000,
       windowsHide: true,
       maxBuffer: 256 * 1024
     }
