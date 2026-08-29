@@ -1,0 +1,196 @@
+name: Port Browser Launch Isolation
+
+on:
+  push:
+    branches:
+      - integration/cloudos-unified-runtime
+    paths:
+      - '.github/workflows/port-browser-launch-isolation.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  port:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: integration/cloudos-unified-runtime
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Port per-launch browser profile isolation
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('backend/src/apps/appCatalog.js')
+          text = path.read_text(encoding='utf-8')
+
+          def replace_once(old, new, label):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              "const MAX_SHORTCUT_ARGUMENT_LENGTH = 8_192;\n",
+              "const MAX_SHORTCUT_ARGUMENT_LENGTH = 8_192;\nconst WINDOWS_LAUNCH_ISOLATION_ID_PATTERN = /^[a-f0-9]{32}$/;\n",
+              'isolation-id-pattern'
+          )
+
+          replace_once(
+              "export function buildIsolatedWindowsAppArguments(executable, baseDirectory) {\n"
+              "  const executableName = path.win32.basename(String(executable || '')).toLowerCase();\n"
+              "  const root = String(baseDirectory || '').trim();\n"
+              "  if (!path.win32.isAbsolute(root)) return [];\n"
+              "  const profileDirectory = path.win32.join(root, 'profiles', 'windows', executableName || 'application');\n",
+              "export function buildIsolatedWindowsAppArguments(executable, baseDirectory, launchIsolationId = '') {\n"
+              "  const executableName = path.win32.basename(String(executable || '')).toLowerCase();\n"
+              "  const root = String(baseDirectory || '').trim();\n"
+              "  if (!path.win32.isAbsolute(root)) return [];\n"
+              "  const isolationId = String(launchIsolationId || '').trim().toLowerCase();\n"
+              "  if (isolationId && !WINDOWS_LAUNCH_ISOLATION_ID_PATTERN.test(isolationId)) return [];\n"
+              "  const profileDirectory = isolationId\n"
+              "    ? path.win32.join(root, 'profiles', 'windows', executableName || 'application', isolationId)\n"
+              "    : path.win32.join(root, 'profiles', 'windows', executableName || 'application');\n",
+              'isolated-profile-builder'
+          )
+
+          replace_once(
+              "export function buildContainedWindowsAppArguments(executable, baseDirectory, catalogArguments = []) {\n",
+              "export function buildContainedWindowsAppArguments(executable, baseDirectory, catalogArguments = [], launchIsolationId = '') {\n",
+              'contained-builder-signature'
+          )
+
+          replace_once(
+              "  const isolationArguments = buildIsolatedWindowsAppArguments(executable, baseDirectory);\n"
+              "  if (isolationArguments.length === 0) return inputArguments;\n",
+              "  const browserRequiresIsolation = ISOLATED_CHROMIUM_EXECUTABLES.has(executableName) || executableName === 'firefox.exe';\n"
+              "  const isolationArguments = buildIsolatedWindowsAppArguments(executable, baseDirectory, launchIsolationId);\n"
+              "  if (browserRequiresIsolation && isolationArguments.length === 0) {\n"
+              "    throw Object.assign(\n"
+              "      new Error('O navegador não pode ser iniciado sem um diretório de perfil isolado do CloudOS.'),\n"
+              "      { code: 'BROWSER_PROFILE_ISOLATION_UNAVAILABLE' }\n"
+              "    );\n"
+              "  }\n"
+              "  if (isolationArguments.length === 0) return inputArguments;\n",
+              'browser-isolation-fail-closed'
+          )
+
+          replace_once(
+              "  const launchArguments = scriptLaunch\n"
+              "    ? catalogArguments\n"
+              "    : buildContainedWindowsAppArguments(\n"
+              "        executable,\n"
+              "        process.env.CLOUDOS_LOCAL_ROOT || process.env.CLOUDOS_DATA_DIR || '',\n"
+              "        catalogArguments\n"
+              "      );\n",
+              "  const executableName = path.win32.basename(String(executable || '')).toLowerCase();\n"
+              "  const launchIsolationId = !scriptLaunch\n"
+              "    && (ISOLATED_CHROMIUM_EXECUTABLES.has(executableName) || executableName === 'firefox.exe')\n"
+              "      ? crypto.randomBytes(16).toString('hex')\n"
+              "      : '';\n"
+              "  const launchArguments = scriptLaunch\n"
+              "    ? catalogArguments\n"
+              "    : buildContainedWindowsAppArguments(\n"
+              "        executable,\n"
+              "        process.env.CLOUDOS_LOCAL_ROOT || process.env.CLOUDOS_DATA_DIR || '',\n"
+              "        catalogArguments,\n"
+              "        launchIsolationId\n"
+              "      );\n",
+              'production-launch-token'
+          )
+
+          path.write_text(text, encoding='utf-8')
+
+          test_path = Path('backend/test/windows-browser-launch-instance-isolation.test.js')
+          test_path.write_text(r'''import test from 'node:test';
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import { fileURLToPath } from 'node:url';
+          import { buildContainedWindowsAppArguments, buildIsolatedWindowsAppArguments } from '../src/apps/appCatalog.js';
+
+          const here = path.dirname(fileURLToPath(import.meta.url));
+          const catalogSource = fs.readFileSync(path.resolve(here, '../src/apps/appCatalog.js'), 'utf8');
+          const FIRST_LAUNCH = 'a'.repeat(32);
+          const SECOND_LAUNCH = 'b'.repeat(32);
+          const CLOUDOS_ROOT = 'C:\\CloudOS';
+
+          test('Chromium-family launches receive distinct user-data directories per contained launch', () => {
+            const browser = 'C:\\Program Files\\Chromium\\Application\\chrome.exe';
+            const first = buildIsolatedWindowsAppArguments(browser, CLOUDOS_ROOT, FIRST_LAUNCH);
+            const second = buildIsolatedWindowsAppArguments(browser, CLOUDOS_ROOT, SECOND_LAUNCH);
+            assert.equal(first[0], `--user-data-dir=C:\\CloudOS\\profiles\\windows\\chrome.exe\\${FIRST_LAUNCH}`);
+            assert.equal(second[0], `--user-data-dir=C:\\CloudOS\\profiles\\windows\\chrome.exe\\${SECOND_LAUNCH}`);
+            assert.notEqual(first[0], second[0]);
+          });
+
+          test('Firefox launches receive distinct no-remote profiles per contained launch', () => {
+            const browser = 'C:\\Program Files\\Mozilla Firefox\\firefox.exe';
+            const first = buildIsolatedWindowsAppArguments(browser, CLOUDOS_ROOT, FIRST_LAUNCH);
+            const second = buildIsolatedWindowsAppArguments(browser, CLOUDOS_ROOT, SECOND_LAUNCH);
+            assert.equal(first[1], `C:\\CloudOS\\profiles\\windows\\firefox.exe\\${FIRST_LAUNCH}`);
+            assert.equal(second[1], `C:\\CloudOS\\profiles\\windows\\firefox.exe\\${SECOND_LAUNCH}`);
+            assert.ok(first.includes('-no-remote'));
+            assert.ok(first.includes('-new-instance'));
+            assert.notEqual(first[1], second[1]);
+          });
+
+          test('invalid browser isolation IDs fail closed instead of becoming profile paths', () => {
+            const browser = 'C:\\Program Files\\Chromium\\Application\\chrome.exe';
+            assert.deepEqual(buildIsolatedWindowsAppArguments(browser, CLOUDOS_ROOT, '..\\outside'), []);
+            assert.throws(
+              () => buildContainedWindowsAppArguments(browser, CLOUDOS_ROOT, ['https://example.test/'], '..\\outside'),
+              (error) => error?.code === 'BROWSER_PROFILE_ISOLATION_UNAVAILABLE'
+            );
+          });
+
+          test('browser launch without a valid CloudOS root fails closed', () => {
+            const browser = 'C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe';
+            assert.throws(
+              () => buildContainedWindowsAppArguments(browser, '', [], FIRST_LAUNCH),
+              (error) => error?.code === 'BROWSER_PROFILE_ISOLATION_UNAVAILABLE'
+            );
+          });
+
+          test('production browser launch generates a fresh cryptographic isolation ID', () => {
+            assert.match(catalogSource, /launchIsolationId\s*=\s*!scriptLaunch[\s\S]*?crypto\.randomBytes\(16\)\.toString\('hex'\)/);
+            assert.match(catalogSource, /buildContainedWindowsAppArguments\([\s\S]*?catalogArguments,\s*launchIsolationId\s*\)/);
+          });
+          '''.replace('          ', ''), encoding='utf-8')
+          PY
+
+      - name: Run affected backend contracts
+        run: node --test backend/test/browser-containment-arguments.test.js backend/test/windows-browser-launch-instance-isolation.test.js
+
+      - name: Verify bounded diff
+        shell: bash
+        run: |
+          changed="$(git status --porcelain | cut -c4-)"
+          printf '%s\n' "$changed"
+          test "$(printf '%s\n' "$changed" | sed '/^$/d' | wc -l)" -eq 2
+          printf '%s\n' "$changed" | grep -Fx 'backend/src/apps/appCatalog.js'
+          printf '%s\n' "$changed" | grep -Fx 'backend/test/windows-browser-launch-instance-isolation.test.js'
+
+      - name: Commit port
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- backend/src/apps/appCatalog.js backend/test/windows-browser-launch-instance-isolation.test.js
+          git commit -m "fix(runtime): isolate browser profile per contained launch"
+          git push origin HEAD:integration/cloudos-unified-runtime
