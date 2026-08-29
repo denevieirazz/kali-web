@@ -295,9 +295,7 @@ void NativeAppLauncher::LaunchById(
             }
             else
             {
-                CloudOSNativeFilesWindow::Open(
-                    instance,
-                    root);
+                CloudOSNativeFilesWindow::Open(instance, root);
             }
         }
     }
