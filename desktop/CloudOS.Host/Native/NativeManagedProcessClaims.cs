@@ -9,7 +9,8 @@ namespace CloudOS.Host.Native;
 /// <summary>
 /// Process identity exported only from the trusted native Host to the backend launch
 /// guard. PID alone is not authority because Windows can reuse it; the creation time
-/// must match the process observed by the backend probe as well.
+/// must match the process observed by the backend probe as well. Claims are advisory
+/// exclusions only: any process identity the Host cannot prove remains externally guarded.
 /// </summary>
 public sealed record NativeManagedProcessClaim(
     [property: JsonPropertyName("processId")] int ProcessId,
