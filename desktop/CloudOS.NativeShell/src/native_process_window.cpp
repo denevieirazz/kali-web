@@ -118,6 +118,7 @@ bool CloudOSNativeProcessWindow::Create()
 
     if (list_ == nullptr)
     {
+        SetWindowLongPtrW(window_, GWLP_USERDATA, 0);
         DestroyWindow(window_);
         window_ = nullptr;
         return false;
@@ -176,6 +177,7 @@ bool CloudOSNativeProcessWindow::Create()
 
     if (refresh_button_ == nullptr || terminate_button_ == nullptr || focus_button_ == nullptr)
     {
+        SetWindowLongPtrW(window_, GWLP_USERDATA, 0);
         DestroyWindow(window_);
         window_ = nullptr;
         return false;
@@ -197,15 +199,15 @@ void CloudOSNativeProcessWindow::Layout()
         return;
     }
 
-    const int width = client.right - client.left;
-    const int height = client.bottom - client.top;
+    const int width = static_cast<int>(client.right - client.left);
+    const int height = static_cast<int>(client.bottom - client.top);
     MoveWindow(list_, 12, 12, std::max(100, width - 24), std::max(100, height - 66), TRUE);
     MoveWindow(refresh_button_, 12, std::max(12, height - 44), 100, 30, TRUE);
     MoveWindow(focus_button_, 122, std::max(12, height - 44), 120, 30, TRUE);
     MoveWindow(terminate_button_, 252, std::max(12, height - 44), 100, 30, TRUE);
 }
 
-SIZE_T CloudOSNativeProcessWindow::QueryWorkingSet(DWORD process_id)
+SIZE_T CloudOSNativeProcessWindow::QueryProcessWorkingSetBytes(DWORD process_id)
 {
     HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE, process_id);
     if (process == nullptr)
@@ -251,7 +253,7 @@ void CloudOSNativeProcessWindow::Refresh()
             ProcessEntry process{};
             process.process_id = entry.th32ProcessID;
             process.name = entry.szExeFile;
-            process.working_set = QueryWorkingSet(process.process_id);
+            process.working_set = QueryProcessWorkingSetBytes(process.process_id);
             processes_.push_back(std::move(process));
         }
         while (Process32NextW(snapshot, &entry));
@@ -273,26 +275,18 @@ void CloudOSNativeProcessWindow::Refresh()
     ListView_DeleteAllItems(list_);
     for (std::size_t index = 0; index < processes_.size(); ++index)
     {
-        wchar_t process_id[32]{};
-        swprintf_s(process_id, L"%lu", processes_[index].process_id);
+        wchar_t process_id_text[32]{};
+        swprintf_s(process_id_text, L"%lu", processes_[index].process_id);
 
         LVITEMW item{};
         item.mask = LVIF_TEXT;
         item.iItem = static_cast<int>(index);
-        item.pszText = process_id;
+        item.pszText = process_id_text;
         ListView_InsertItem(list_, &item);
 
-        ListView_SetItemText(
-            list_,
-            static_cast<int>(index),
-            1,
-            processes_[index].name.data());
+        ListView_SetItemText(list_, static_cast<int>(index), 1, processes_[index].name.data());
         auto memory = FormatMemory(processes_[index].working_set);
-        ListView_SetItemText(
-            list_,
-            static_cast<int>(index),
-            2,
-            memory.data());
+        ListView_SetItemText(list_, static_cast<int>(index), 2, memory.data());
     }
 }
 
@@ -379,7 +373,10 @@ void CloudOSNativeProcessWindow::FocusSelectedProcess()
     }
 }
 
-LRESULT CloudOSNativeProcessWindow::HandleMessage(UINT message, WPARAM w_param, LPARAM)
+LRESULT CloudOSNativeProcessWindow::HandleMessage(
+    UINT message,
+    WPARAM w_param,
+    LPARAM l_param)
 {
     switch (message)
     {
@@ -422,7 +419,7 @@ LRESULT CloudOSNativeProcessWindow::HandleMessage(UINT message, WPARAM w_param, 
         break;
     }
 
-    return DefWindowProcW(window_, message, w_param, 0);
+    return DefWindowProcW(window_, message, w_param, l_param);
 }
 
 LRESULT CALLBACK CloudOSNativeProcessWindow::WindowProcedure(
@@ -441,8 +438,7 @@ LRESULT CALLBACK CloudOSNativeProcessWindow::WindowProcedure(
     }
     else
     {
-        self = reinterpret_cast<CloudOSNativeProcessWindow*>(
-            GetWindowLongPtrW(window, GWLP_USERDATA));
+        self = reinterpret_cast<CloudOSNativeProcessWindow*>(GetWindowLongPtrW(window, GWLP_USERDATA));
     }
 
     return self != nullptr
