@@ -47,3 +47,7 @@ try {
 finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+# The file timestamp freshness gate above is not enough to protect a live session.
+# Also require the persisted session/runtime revision to match the active checkout.
+& (Join-Path $PSScriptRoot 'test-cloudos-session-freshness.ps1')
