@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   evaluateExternalInstanceProbe,
   hasExplicitPerLaunchInstanceIsolation,
+  normalizeManagedProcessClaims,
   shouldGuardExternalInstanceHandoff
 } from '../src/apps/windowsExternalInstanceGuard.js';
 
@@ -18,6 +19,8 @@ function launch(executable, args = [], launchKind = 'windows-executable') {
 }
 
 const TOKEN = 'a'.repeat(32);
+const FIRST_START = '134171420000000000';
+const SECOND_START = '134171420000000123';
 
 test('per-launch Chromium profile is accepted as explicit instance isolation', () => {
   const item = launch(
@@ -63,10 +66,10 @@ test('ordinary direct Win32 executable is guarded while script launch is outside
 test('process probe conflicts only with same executable path and fails closed on unverifiable path', () => {
   const executable = 'C:\\Tools\\Editor.exe';
   const result = evaluateExternalInstanceProbe(executable, [
-    { pid: 101, path: 'C:\\Tools\\EDITOR.exe' },
-    { pid: 102, path: 'D:\\Other\\Editor.exe' },
-    { pid: 103, path: null },
-    { pid: -1, path: executable }
+    { pid: 101, path: 'C:\\Tools\\EDITOR.exe', startTimeFileTimeUtc: FIRST_START },
+    { pid: 102, path: 'D:\\Other\\Editor.exe', startTimeFileTimeUtc: FIRST_START },
+    { pid: 103, path: null, startTimeFileTimeUtc: FIRST_START },
+    { pid: -1, path: executable, startTimeFileTimeUtc: FIRST_START }
   ]);
 
   assert.deepEqual(result.conflicts, [
@@ -78,5 +81,56 @@ test('process probe conflicts only with same executable path and fails closed on
   ]);
   assert.deepEqual(result.unverifiable, [
     { pid: 103, reason: 'path-unverifiable' }
+  ]);
+  assert.deepEqual(result.managed, []);
+});
+
+test('exact Host-managed PID and creation time is excluded from external conflict', () => {
+  const executable = 'C:\\Tools\\Editor.exe';
+  const result = evaluateExternalInstanceProbe(
+    executable,
+    [{ pid: 201, path: executable, startTimeFileTimeUtc: FIRST_START }],
+    [{ processId: 201, startTimeFileTimeUtc: FIRST_START }]
+  );
+
+  assert.deepEqual(result.conflicts, []);
+  assert.deepEqual(result.managed, [
+    { pid: 201, startTimeFileTimeUtc: FIRST_START }
+  ]);
+});
+
+test('PID reuse cannot bypass external instance conflict', () => {
+  const executable = 'C:\\Tools\\Editor.exe';
+  const result = evaluateExternalInstanceProbe(
+    executable,
+    [{ pid: 202, path: executable, startTimeFileTimeUtc: SECOND_START }],
+    [{ processId: 202, startTimeFileTimeUtc: FIRST_START }]
+  );
+
+  assert.deepEqual(result.managed, []);
+  assert.deepEqual(result.conflicts, [{ pid: 202, reason: 'same-executable' }]);
+});
+
+test('unverifiable executable path remains a conflict even with an exact managed process claim', () => {
+  const result = evaluateExternalInstanceProbe(
+    'C:\\Tools\\Editor.exe',
+    [{ pid: 203, path: null, startTimeFileTimeUtc: FIRST_START }],
+    [{ processId: 203, startTimeFileTimeUtc: FIRST_START }]
+  );
+
+  assert.deepEqual(result.managed, []);
+  assert.deepEqual(result.conflicts, [{ pid: 203, reason: 'path-unverifiable' }]);
+});
+
+test('managed process claims accept only exact decimal FILETIME strings', () => {
+  assert.deepEqual(normalizeManagedProcessClaims([
+    { processId: 301, startTimeFileTimeUtc: FIRST_START },
+    { processId: 301, startTimeFileTimeUtc: FIRST_START },
+    { processId: 302, startTimeFileTimeUtc: Number(FIRST_START) },
+    { processId: 303, startTimeFileTimeUtc: '-1' },
+    { processId: 304, startTimeFileTimeUtc: '9223372036854775808' },
+    { processId: 0, startTimeFileTimeUtc: FIRST_START }
+  ]), [
+    { processId: 301, startTimeFileTimeUtc: FIRST_START }
   ]);
 });
