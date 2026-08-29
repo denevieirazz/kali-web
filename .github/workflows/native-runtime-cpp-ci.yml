@@ -8,15 +8,22 @@ on:
     paths:
       - 'desktop/CloudOS.NativeRuntime/**'
       - 'desktop/CloudOS.Host/Native/**'
+      - 'desktop/CloudOS.Host/Runtime/**'
+      - 'desktop/CloudOS.Host/App.xaml.cs'
+      - 'desktop/CloudOS.Host/HostOptions.cs'
+      - 'desktop/CloudOS.Host/MainWindow.xaml.cs'
       - 'desktop/CloudOS.Host/CloudOS.Host.csproj'
       - 'desktop/CloudOS.Host.Tests/**'
       - 'scripts/native/**'
+      - 'scripts/launch/**'
+      - 'scripts/test-cloudos-session-freshness.ps1'
+      - 'scripts/test-native-host-freshness.ps1'
       - '.github/workflows/native-runtime-cpp-ci.yml'
 
 jobs:
   native-runtime:
     runs-on: windows-2022
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,11 +37,25 @@ jobs:
         shell: pwsh
         run: ./scripts/native/build-native-runtime.ps1 -Configuration Release -Required
 
-      - name: Build Host with C++ runtime
+      - name: Build Host with C++ runtime and source identity
         shell: pwsh
         env:
           CLOUDOS_NATIVE_RUNTIME: cpp
-        run: dotnet build desktop/CloudOS.Host/CloudOS.Host.csproj -c Release --nologo
+        run: dotnet build desktop/CloudOS.Host/CloudOS.Host.csproj -c Release --nologo -p:CloudOSSourceRevision=${{ github.sha }}
+
+      - name: Assert Host source revision metadata
+        shell: pwsh
+        run: |
+          $assemblyInfo = Get-ChildItem 'desktop/CloudOS.Host/obj/Release' -Recurse -Filter 'CloudOS.Host.AssemblyInfo.cs' | Select-Object -First 1
+          if (-not $assemblyInfo) { throw 'HOST_ASSEMBLY_INFO_NOT_FOUND' }
+          $source = Get-Content -LiteralPath $assemblyInfo.FullName -Raw
+          if ($source -notmatch 'CloudOSSourceRevision') { throw 'HOST_SOURCE_REVISION_METADATA_KEY_MISSING' }
+          if ($source -notmatch '${{ github.sha }}') { throw 'HOST_SOURCE_REVISION_METADATA_VALUE_MISSING' }
+          Write-Host 'PASS Host compiled source revision identity'
+
+      - name: Run launcher freshness contracts
+        shell: pwsh
+        run: ./scripts/test-native-host-freshness.ps1
 
       - name: Run Host contracts through C++ runtime
         shell: pwsh
