@@ -1,0 +1,102 @@
+name: Patch Launcher Revision Freshness
+
+on:
+  push:
+    branches:
+      - integration/cloudos-unified-runtime
+    paths:
+      - .github/workflows/patch-launcher-revision-freshness.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: integration/cloudos-unified-runtime
+          fetch-depth: 0
+
+      - name: Patch launcher
+        shell: pwsh
+        run: |
+          $path = 'scripts/launch/start-cloudos.ps1'
+          $text = Get-Content -LiteralPath $path -Raw
+
+          $sourceOld = ". (Join-Path `$PSScriptRoot 'cloudos-owned-processes.ps1')`r`n. (Join-Path `$PSScriptRoot '..\validate\cloudos-node-dependencies.ps1')"
+          $sourceNew = ". (Join-Path `$PSScriptRoot 'cloudos-owned-processes.ps1')`r`n. (Join-Path `$PSScriptRoot 'cloudos-session-freshness.ps1')`r`n. (Join-Path `$PSScriptRoot '..\validate\cloudos-node-dependencies.ps1')"
+          if (-not $text.Contains($sourceOld)) {
+            $sourceOld = $sourceOld.Replace("`r`n", "`n")
+            $sourceNew = $sourceNew.Replace("`r`n", "`n")
+          }
+          if (-not $text.Contains($sourceOld)) { throw 'SOURCE_IMPORT_PATTERN_NOT_FOUND' }
+          $text = $text.Replace($sourceOld, $sourceNew)
+
+          $existingOld = @'
+$existingSession = Read-CloudOSCurrentSession
+if ($existingSession -and $existingSession.status -eq 'running') {
+    $healthy = $false
+    $hostPid = 0
+'@
+          $existingNew = @'
+$currentCheckout = Get-CloudOSGitInfo
+$existingSession = Read-CloudOSCurrentSession
+if ($existingSession -and $existingSession.status -eq 'running') {
+    $healthy = $false
+    $revisionMatches = Test-CloudOSSessionRevisionMatchesCheckout -Session $existingSession -Checkout $currentCheckout
+    if (-not $revisionMatches) {
+        $oldSha = try { [string]$existingSession.git.sha } catch { '' }
+        Write-Host "CloudOS em execução pertence a outro commit (sessão=$oldSha checkout=$($currentCheckout.sha)); reiniciando runtime."
+    }
+    $hostPid = 0
+'@
+          $normalized = $text.Replace("`r`n", "`n")
+          $oldNormalized = $existingOld.Replace("`r`n", "`n")
+          $newNormalized = $existingNew.Replace("`r`n", "`n")
+          if (($normalized.Split($oldNormalized).Count - 1) -ne 1) { throw 'EXISTING_SESSION_PATTERN_NOT_UNIQUE' }
+          $normalized = $normalized.Replace($oldNormalized, $newNormalized)
+
+          $healthOld = @'
+                        if ([int]$res.StatusCode -ge 200 -and [int]$res.StatusCode -lt 400) {
+                            $healthy = $true
+                        }
+'@
+          $healthNew = @'
+                        if ($revisionMatches -and [int]$res.StatusCode -ge 200 -and [int]$res.StatusCode -lt 400) {
+                            $healthy = $true
+                        }
+'@
+          $healthOld = $healthOld.Replace("`r`n", "`n")
+          $healthNew = $healthNew.Replace("`r`n", "`n")
+          if (($normalized.Split($healthOld).Count - 1) -ne 1) { throw 'HEALTH_PATTERN_NOT_UNIQUE' }
+          $normalized = $normalized.Replace($healthOld, $healthNew)
+          Set-Content -LiteralPath $path -Value $normalized -Encoding utf8 -NoNewline
+
+      - name: Run freshness contracts
+        shell: pwsh
+        run: |
+          ./scripts/test-cloudos-session-freshness.ps1
+          ./scripts/test-native-host-freshness.ps1
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'scripts/launch/start-cloudos.ps1'), [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; throw "LAUNCHER_PARSE_ERRORS=$($errors.Count)" }
+
+      - name: Verify bounded diff
+        shell: pwsh
+        run: |
+          $changed = @(git status --porcelain | ForEach-Object { $_.Substring(3) })
+          if ($changed.Count -ne 1 -or $changed[0] -ne 'scripts/launch/start-cloudos.ps1') { throw "UNEXPECTED_FILES=$($changed -join ',')" }
+
+      - name: Commit patch
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- scripts/launch/start-cloudos.ps1
+          git commit -m "fix(launcher): restart stale running revision"
+          git push origin HEAD:integration/cloudos-unified-runtime
