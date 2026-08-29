@@ -3,6 +3,7 @@ name: CloudOS Native Windows CI
 on:
   push:
     branches:
+      - main
       - 'rewrite/cloudos-native-win32*'
   pull_request:
     paths:
@@ -107,10 +108,45 @@ jobs:
             throw 'Portable ZIP was not created.'
           }
 
+      - name: Build full source bundle
+        shell: pwsh
+        run: |
+          $bundle = 'artifacts/CloudOS-Native-Source-x64'
+          New-Item -ItemType Directory -Force -Path $bundle | Out-Null
+          $tracked = git ls-files
+          foreach ($path in $tracked) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+            $destination = Join-Path $bundle $path
+            $parent = Split-Path -Parent $destination
+            if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+            Copy-Item -LiteralPath $path -Destination $destination
+          }
+          $dist = Join-Path $bundle 'dist'
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          Copy-Item 'desktop/CloudOS.NativeShell/bin/Release/CloudOS.exe' $dist
+          Copy-Item 'desktop/CloudOS.NativeShell/bin/Release/CloudOS.NativeRuntime.dll' $dist
+          @(
+            'CloudOS Native full source + x64 binaries',
+            "Commit=$env:GITHUB_SHA",
+            "BuiltUtc=$([DateTime]::UtcNow.ToString('o'))"
+          ) | Set-Content -LiteralPath (Join-Path $bundle 'BUILD.txt') -Encoding utf8
+          Compress-Archive -Path "$bundle/*" -DestinationPath 'artifacts/CloudOS-Native-Source-x64.zip' -Force
+          if (-not (Test-Path -LiteralPath 'artifacts/CloudOS-Native-Source-x64.zip')) {
+            throw 'Full source ZIP was not created.'
+          }
+
       - name: Upload CloudOS Native x64
         uses: actions/upload-artifact@v4
         with:
           name: CloudOS-Native-x64
           path: artifacts/CloudOS-Native-x64.zip
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload CloudOS Native source x64
+        uses: actions/upload-artifact@v4
+        with:
+          name: CloudOS-Native-Source-x64
+          path: artifacts/CloudOS-Native-Source-x64.zip
           if-no-files-found: error
           compression-level: 0
