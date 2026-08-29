@@ -3,6 +3,7 @@ using CloudOS.Host.Native;
 using CloudOS.Host.Security;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 
@@ -63,6 +64,7 @@ var tests = new (string Name, Action Run)[]
     ("cmd script GUI descendant is correlated through the contained Job", NativeScriptLaunchContract.Validate),
     ("native launcher tracks suspended process before resume", NativeLauncherTracksSuspendedProcessBeforeResume),
     ("native lease identity remains stable after disposal", NativeLeaseIdentitySurvivesDispose),
+    ("native managed process claims bind PID to creation time", NativeManagedProcessClaimsBindPidAndCreationTime),
     ("cmd script GUI descendant is contained by the same Job", NativeScriptLaunchContract.Validate),
     ("native job child HWND is quarantined and escape is detected", NativeJobChildWindowIsQuarantined),
 };
@@ -434,6 +436,41 @@ static void NativeLeaseIdentitySurvivesDispose()
     lease.Dispose();
 }
 
+static void NativeManagedProcessClaimsBindPidAndCreationTime()
+{
+    var processPath = Environment.ProcessPath ?? throw new InvalidOperationException("The test process path is unavailable.");
+    var spec = NativeProcessLaunchSpec.Create(
+        processPath,
+        FixtureArguments("--native-contained-fixture-wait"),
+        AppContext.BaseDirectory);
+    using var lease = NativeContainedProcessLauncher.StartSuspended(spec);
+    lease.Resume();
+
+    var expectedStart = lease.Process.StartTime
+        .ToUniversalTime()
+        .ToFileTimeUtc()
+        .ToString(CultureInfo.InvariantCulture);
+    var claims = NativeManagedProcessClaims.Capture([lease]);
+    var claim = claims.SingleOrDefault(item => item.ProcessId == lease.ProcessId);
+    Assert(claim is not null, "The active contained root PID must be exported to the launch guard.");
+    Assert(claim!.StartTimeFileTimeUtc == expectedStart,
+        "A managed process claim must bind PID to the exact Windows process creation time.");
+
+    var json = NativeManagedProcessClaims.CreateLaunchGuardRequestJson([lease]);
+    using var document = JsonDocument.Parse(json);
+    var managed = document.RootElement.GetProperty("managedProcesses");
+    Assert(managed.ValueKind == JsonValueKind.Array && managed.GetArrayLength() >= 1,
+        "The Host launch request must contain a managedProcesses array.");
+    var serializedClaim = managed.EnumerateArray()
+        .FirstOrDefault(item => item.GetProperty("processId").GetInt32() == lease.ProcessId);
+    Assert(serializedClaim.ValueKind == JsonValueKind.Object,
+        "The launch request must serialize the active contained process claim.");
+    Assert(serializedClaim.GetProperty("startTimeFileTimeUtc").GetString() == expectedStart,
+        "FILETIME must stay a decimal string across the Host-to-backend JSON boundary.");
+
+    Assert(lease.TryTerminate(3_000, out var terminationError),
+        terminationError ?? "The managed-claim fixture Job did not terminate.");
+}
 static void NativeJobChildWindowIsQuarantined()
 {
     var processPath = Environment.ProcessPath ?? throw new InvalidOperationException("The test process path is unavailable.");

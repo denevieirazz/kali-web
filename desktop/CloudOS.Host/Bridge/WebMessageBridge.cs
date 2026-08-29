@@ -320,7 +320,9 @@ public sealed class WebMessageBridge : IDisposable
         using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(_backendOrigin, $"/api/apps/{Uri.EscapeDataString(appId)}/launch"));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         request.Headers.Add("X-CloudOS-Host-Token", _hostLeaseToken);
-        request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
+        var launchGuardRequestJson = NativeManagedProcessClaims.CreateLaunchGuardRequestJson(
+            _launchLeasesByProcessId.Values.ToArray());
+        request.Content = new StringContent(launchGuardRequestJson, Encoding.UTF8, "application/json");
         using var response = await _http.SendAsync(request);
         if (!response.IsSuccessStatusCode)
         {
