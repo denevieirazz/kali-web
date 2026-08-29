@@ -4,10 +4,30 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# Temporary migration patcher. The Windows runner validates C++ + Host before committing production code.
+# Temporary migration patcher. The Windows runner validates the production
+# NativeWindowManager against the real C++ DLL before committing the manager.
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $path = Join-Path $repoRoot 'desktop\CloudOS.Host\Native\NativeWindowManager.cs'
 $content = [IO.File]::ReadAllText($path)
+
+$requiredNativeCalls = @(
+    'CloudOsNativeRuntime.TryAttachWindow(',
+    'CloudOsNativeRuntime.TryLayoutWindow(',
+    'CloudOsNativeRuntime.TryFocusWindow(',
+    'CloudOsNativeRuntime.CanUseWindowOperations'
+)
+
+$alreadyMigrated = $true
+foreach ($needle in $requiredNativeCalls) {
+    if (-not $content.Contains($needle)) {
+        $alreadyMigrated = $false
+        break
+    }
+}
+if ($alreadyMigrated) {
+    Write-Host 'CPP_WINDOW_OPERATIONS_ALREADY_MIGRATED'
+    exit 0
+}
 
 function Replace-ExactlyOnce([string]$Old, [string]$New, [string]$Name) {
     $count = ([regex]::Matches($script:content, [regex]::Escape($Old))).Count
@@ -176,36 +196,9 @@ Replace-ExactlyOnce $layoutNeedle $layoutReplacement 'LAYOUT'
 
 [IO.File]::WriteAllText($path, $content, [Text.UTF8Encoding]::new($false))
 
-$runtimePath = Join-Path $repoRoot 'desktop\CloudOS.Host\Native\CloudOsNativeRuntime.cs'
-$runtime = [IO.File]::ReadAllText($runtimePath)
-$oldFailure = @'
-    private static Win32Exception NativeFailure(string message) =>
-        new(Marshal.GetLastWin32Error(), message);
-'@
-$newFailure = @'
-    private static Win32Exception NativeFailure(string message)
-    {
-        var nativeError = Marshal.GetLastWin32Error();
-        var systemMessage = new Win32Exception(nativeError).Message;
-        return new Win32Exception(nativeError, $"{message} Win32 error {nativeError}: {systemMessage}");
-    }
-'@
-$failureCount = ([regex]::Matches($runtime, [regex]::Escape($oldFailure))).Count
-if ($failureCount -ne 1) { throw "NATIVE_FAILURE_EXPECTED_1_FOUND_$failureCount" }
-$runtime = $runtime.Replace($oldFailure, $newFailure)
-[IO.File]::WriteAllText($runtimePath, $runtime, [Text.UTF8Encoding]::new($false))
-
 $updated = [IO.File]::ReadAllText($path)
-foreach ($needle in @(
-    'CloudOsNativeRuntime.TryAttachWindow(',
-    'CloudOsNativeRuntime.TryLayoutWindow(',
-    'CloudOsNativeRuntime.TryFocusWindow(',
-    'CloudOsNativeRuntime.CanUseWindowOperations'
-)) {
+foreach ($needle in $requiredNativeCalls) {
     if (-not $updated.Contains($needle)) { throw "MISSING_$needle" }
-}
-if (-not ([IO.File]::ReadAllText($runtimePath)).Contains('Win32 error {nativeError}')) {
-    throw 'NATIVE_ERROR_DIAGNOSTIC_MISSING'
 }
 
 Write-Host 'CPP_WINDOW_OPERATIONS_PATCHED'
