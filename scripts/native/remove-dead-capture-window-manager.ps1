@@ -18,7 +18,6 @@ function Replace-Between([string]$Text, [string]$Start, [string]$End, [string]$R
 $path = Join-Path $repoRoot 'desktop\CloudOS.Host\Native\NativeWindowManager.cs'
 $manager = Read-Utf8 $path
 
-# The manager is already clean on reruns.
 if (-not $manager.Contains('_capturedSources') -and -not $manager.Contains('CapturedSourceState')) {
     Write-Host 'NATIVE_WINDOW_MANAGER_CAPTURE_ALREADY_REMOVED'
     exit 0
@@ -31,23 +30,12 @@ $manager = [regex]::Replace(
 $manager = [regex]::Replace($manager, '(?m)^\s*_capturedSources\.Clear\(\);\r?\n', '')
 $manager = [regex]::Replace($manager, '(?m)^\s*_capturedSources\.Remove\(hwnd\);\r?\n', '')
 
-# Public capture-source API is dead now that the Host bridge has one native renderer.
-$manager = Replace-Between \
-    $manager \
-    '        public bool TryPrepareCapturedSource(' \
-    '        public bool TryUpdateAttachedLayout(' \
-    '        public bool TryUpdateAttachedLayout(' \
-    'CAPTURE_PUBLIC_API'
+# Remove the entire public captured-source API. Replace-Between preserves the end marker.
+$manager = Replace-Between $manager '        public bool TryPrepareCapturedSource(' '        public bool TryUpdateAttachedLayout(' '' 'CAPTURE_PUBLIC_API'
 
-# Remove capture-specific private layout/validation/failure machinery.
-$manager = Replace-Between \
-    $manager \
-    '        private bool TryApplyCapturedSourceLayout(' \
-    '        private bool TryApplyAttachedLayout(' \
-    '        private bool TryApplyAttachedLayout(' \
-    'CAPTURE_PRIVATE_API'
+# Remove capture-only private layout/validation/failure machinery. The attached-layout method is preserved.
+$manager = Replace-Between $manager '        private bool TryApplyCapturedSourceLayout(' '        private bool TryApplyAttachedLayout(' '' 'CAPTURE_PRIVATE_API'
 
-# Snapshot logic now has only two states: attached HWND or hidden quarantine.
 $snapshotReplacement = @'
         private bool TryCreateSnapshot(IntPtr hwnd, out NativeWindowSnapshot snapshot)
         {
@@ -77,9 +65,6 @@ $snapshotReplacement = @'
                 return false;
             }
 
-            // Polling and every WinEvent revalidate the native containment invariant. If an app
-            // restores owner/frame/task-switcher style/visibility or leaves its CloudOS bounds,
-            // hide it immediately and let the bridge terminate the entire Job.
             if (isAttached && !TryValidateAttachedContainment(hwnd, attachment, out string attachedError))
             {
                 RecordAttachedContainmentFailure(hwnd, attachment, attachedError);
@@ -137,7 +122,6 @@ $snapshotReplacement = @'
 '@
 $manager = Replace-Between $manager '        private bool TryCreateSnapshot(IntPtr hwnd, out NativeWindowSnapshot snapshot)' '        private void HookThreadMain()' $snapshotReplacement 'SNAPSHOT'
 
-# ForceHideWindowsForProcess no longer scans a capture state table.
 $forceHideReplacement = @'
         private void ForceHideWindowsForProcess(int processId)
         {
@@ -159,7 +143,6 @@ $forceHideReplacement = @'
 '@
 $manager = Replace-Between $manager '        private void ForceHideWindowsForProcess(int processId)' '        private bool TryAuthorizeOperation(long windowHandle, out IntPtr hwnd, out string error)' $forceHideReplacement 'FORCE_HIDE'
 
-# Process cleanup removes windows/attachments/quarantine only.
 $removeWindowsReplacement = @'
         private void RemoveWindowsForProcessLocked(int processId, IList<NativeWindowChangedEventArgs> changes)
         {
@@ -189,7 +172,6 @@ $removeWindowsReplacement = @'
 '@
 $manager = Replace-Between $manager '        private void RemoveWindowsForProcessLocked(int processId, IList<NativeWindowChangedEventArgs> changes)' '        private int CountWindowsForProcessLocked(int processId)' $removeWindowsReplacement 'REMOVE_WINDOWS'
 
-# Remove capture state class while preserving the NativeWindowManager closing brace.
 $classStart = $manager.IndexOf('        private sealed class CapturedSourceState', [StringComparison]::Ordinal)
 if ($classStart -ge 0) {
     $nextType = $manager.IndexOf('    public sealed class NativeWindowManagerOptions', $classStart, [StringComparison]::Ordinal)
@@ -197,26 +179,29 @@ if ($classStart -ge 0) {
     $manager = $manager.Substring(0, $classStart) + "    }`r`n`r`n" + $manager.Substring($nextType)
 }
 
-# Remove any capture summary comment orphaned by method deletion.
-$manager = [regex]::Replace(
-    $manager,
-    '(?ms)^\s*/// <summary>\r?\n\s*/// Transitions a quarantined HWND.*?/// </summary>\r?\n(?=\s*public bool TryUpdateAttachedLayout)',
-    '')
-
-foreach ($forbidden in @('_capturedSources', 'CapturedSourceState', 'TryPrepareCapturedSource', 'TryActivateCapturedSource', 'TryUpdateCapturedSourceLayout', 'CancelCapturedSource', 'TryApplyCapturedSourceLayout', 'TryValidateCapturedSourceContainment', 'RecordCapturedContainmentFailure')) {
+foreach ($forbidden in @(
+    '_capturedSources',
+    'CapturedSourceState',
+    'TryPrepareCapturedSource',
+    'TryActivateCapturedSource',
+    'TryUpdateCapturedSourceLayout',
+    'CancelCapturedSource',
+    'TryApplyCapturedSourceLayout',
+    'TryValidateCapturedSourceContainment',
+    'RecordCapturedContainmentFailure'
+)) {
     if ($manager.Contains($forbidden)) { throw "NATIVE_MANAGER_CAPTURE_REMAINS_$forbidden" }
 }
 Write-Utf8 $path $manager
 
-# Delete capture-only fixture helpers from Host tests if they are no longer referenced.
+# These fixture helpers existed solely for the removed captured-source presenter test.
 $testPath = Join-Path $repoRoot 'desktop\CloudOS.Host.Tests\Program.cs'
 $test = Read-Utf8 $testPath
-if ($test.Contains('internal static IntPtr CreateVisiblePresenter(')) {
-    $test = Replace-Between $test '    internal static IntPtr CreateVisiblePresenter(' '    internal static void Destroy(IntPtr hwnd)' '' 'TEST_PRESENTER_HELPER'
-}
-# CreateVisibleOwner was only used to anchor the capture presenter.
-if ($test.Contains('internal static IntPtr CreateVisibleOwner(')) {
+if ($test.Contains('    internal static IntPtr CreateVisibleOwner()')) {
     $test = Replace-Between $test '    internal static IntPtr CreateVisibleOwner()' '    internal static IntPtr CreateVisiblePresenter(' '' 'TEST_VISIBLE_OWNER'
+}
+if ($test.Contains('    internal static IntPtr CreateVisiblePresenter(')) {
+    $test = Replace-Between $test '    internal static IntPtr CreateVisiblePresenter(' '    internal static void Destroy(IntPtr hwnd)' '' 'TEST_PRESENTER_HELPER'
 }
 Write-Utf8 $testPath $test
 
