@@ -11,12 +11,14 @@
 
 #pragma comment(lib, "dwmapi.lib")
 
-namespace {
+namespace
+{
 constexpr int kWorkspaceCount = 4;
 constexpr COLORREF kActiveBorder = RGB(91, 140, 255);
 constexpr COLORREF kInactiveBorder = 0xFFFFFFFFu;
 constexpr DWORD kDwmBorderColorAttribute = 34u;
 constexpr DWORD kExcludedStyles = WS_DISABLED;
+constexpr wchar_t kWorkspaceHiddenProperty[] = L"CloudOS.Native.WorkspaceHidden.v1";
 
 bool IsCloaked(HWND window) noexcept
 {
@@ -27,11 +29,6 @@ bool IsCloaked(HWND window) noexcept
         &cloaked,
         static_cast<DWORD>(sizeof(cloaked)));
     return SUCCEEDED(result) && cloaked != 0;
-}
-
-bool IsSameWindow(HWND left, HWND right) noexcept
-{
-    return left != nullptr && left == right;
 }
 
 void SetBorderColor(HWND window, COLORREF color) noexcept
@@ -127,6 +124,7 @@ bool CloudOSNativeWindowManager::Initialize(HWND event_sink)
     {
         TileCurrentWorkspace();
     }
+
     SetLastError(ERROR_SUCCESS);
     return true;
 }
@@ -141,8 +139,14 @@ void CloudOSNativeWindowManager::Shutdown() noexcept
 
     for (auto& item : windows_)
     {
-        if (item.hidden_by_workspace && IsWindow(item.hwnd))
+        if (item.hwnd == nullptr || !IsWindow(item.hwnd))
         {
+            continue;
+        }
+
+        if (item.hidden_by_workspace || GetPropW(item.hwnd, kWorkspaceHiddenProperty) != nullptr)
+        {
+            MarkWorkspaceHidden(item.hwnd, false);
             ShowWindow(item.hwnd, SW_SHOWNA);
         }
         SetBorderColor(item.hwnd, kInactiveBorder);
@@ -151,6 +155,11 @@ void CloudOSNativeWindowManager::Shutdown() noexcept
     windows_.clear();
     event_sink_ = nullptr;
     active_window_ = nullptr;
+}
+
+void CloudOSNativeWindowManager::SetReservedBottomPixels(int pixels) noexcept
+{
+    reserved_bottom_pixels_ = std::max(0, pixels);
 }
 
 void CALLBACK CloudOSNativeWindowManager::RuntimeWindowEvent(
@@ -175,7 +184,7 @@ void CALLBACK CloudOSNativeWindowManager::RuntimeWindowEvent(
 BOOL CALLBACK CloudOSNativeWindowManager::RuntimeWindowEnumeration(
     HWND window,
     DWORD process_id,
-    BOOL,
+    BOOL visible,
     void* context)
 {
     auto* self = static_cast<CloudOSNativeWindowManager*>(context);
@@ -184,6 +193,10 @@ BOOL CALLBACK CloudOSNativeWindowManager::RuntimeWindowEnumeration(
         return FALSE;
     }
 
+    if (!visible && GetPropW(window, kWorkspaceHiddenProperty) != nullptr)
+    {
+        self->RecoverTaggedWindow(window);
+    }
     self->AddOrRefresh(window, process_id);
     return TRUE;
 }
@@ -230,7 +243,6 @@ void CloudOSNativeWindowManager::HandleRuntimeEvent(
     case CLOUDOS_NATIVE_WINDOW_CREATED:
     case CLOUDOS_NATIVE_WINDOW_SHOWN:
     case CLOUDOS_NATIVE_WINDOW_LOCATION_CHANGED:
-    {
         if (window != nullptr && IsWindow(window))
         {
             DWORD process_id = 0;
@@ -238,7 +250,6 @@ void CloudOSNativeWindowManager::HandleRuntimeEvent(
             AddOrRefresh(window, process_id);
         }
         break;
-    }
 
     case CLOUDOS_NATIVE_WINDOW_HIDDEN:
     case CLOUDOS_NATIVE_WINDOW_UNKNOWN:
@@ -294,7 +305,7 @@ bool CloudOSNativeWindowManager::IsManageable(
     if (window == nullptr ||
         !IsWindow(window) ||
         process_id == 0 ||
-        IsSameWindow(window, event_sink_) ||
+        window == event_sink_ ||
         GetAncestor(window, GA_ROOT) != window)
     {
         return false;
@@ -306,16 +317,16 @@ bool CloudOSNativeWindowManager::IsManageable(
     }
 
     const LONG_PTR style = GetWindowLongPtrW(window, GWL_STYLE);
-    const LONG_PTR ex_style = GetWindowLongPtrW(window, GWL_EXSTYLE);
+    const LONG_PTR extended_style = GetWindowLongPtrW(window, GWL_EXSTYLE);
     if ((style & kExcludedStyles) != 0 ||
-        (ex_style & WS_EX_TOOLWINDOW) != 0 ||
+        (extended_style & WS_EX_TOOLWINDOW) != 0 ||
         IsCloaked(window))
     {
         return false;
     }
 
     const HWND owner = GetWindow(window, GW_OWNER);
-    if (owner != nullptr && (ex_style & WS_EX_APPWINDOW) == 0)
+    if (owner != nullptr && (extended_style & WS_EX_APPWINDOW) == 0)
     {
         return false;
     }
@@ -438,6 +449,34 @@ void CloudOSNativeWindowManager::UpdateBorders()
     }
 }
 
+void CloudOSNativeWindowManager::RecoverTaggedWindow(HWND window)
+{
+    if (window == nullptr || !IsWindow(window) || GetPropW(window, kWorkspaceHiddenProperty) == nullptr)
+    {
+        return;
+    }
+
+    MarkWorkspaceHidden(window, false);
+    ShowWindow(window, SW_SHOWNA);
+}
+
+void CloudOSNativeWindowManager::MarkWorkspaceHidden(HWND window, bool hidden) noexcept
+{
+    if (window == nullptr || !IsWindow(window))
+    {
+        return;
+    }
+
+    if (hidden)
+    {
+        (void)SetPropW(window, kWorkspaceHiddenProperty, reinterpret_cast<HANDLE>(1));
+    }
+    else
+    {
+        (void)RemovePropW(window, kWorkspaceHiddenProperty);
+    }
+}
+
 std::vector<CloudOSManagedWindow> CloudOSNativeWindowManager::CurrentWorkspaceWindows() const
 {
     std::vector<CloudOSManagedWindow> result;
@@ -458,7 +497,6 @@ std::vector<CloudOSManagedWindow> CloudOSNativeWindowManager::CurrentWorkspaceWi
             result.push_back(std::move(copy));
         }
     }
-
     return result;
 }
 
@@ -504,6 +542,7 @@ void CloudOSNativeWindowManager::FocusWindow(HWND window)
     if (item->hidden_by_workspace)
     {
         item->hidden_by_workspace = false;
+        MarkWorkspaceHidden(window, false);
         ShowWindow(window, SW_SHOWNA);
     }
     if (IsIconic(window))
@@ -537,22 +576,28 @@ void CloudOSNativeWindowManager::FocusNext(bool reverse)
 
     const HWND active = ActiveManagedWindow();
     std::size_t index = 0;
-    for (std::size_t i = 0; i < current.size(); ++i)
+    bool found_active = false;
+    for (std::size_t candidate = 0; candidate < current.size(); ++candidate)
     {
-        if (current[i].hwnd == active)
+        if (current[candidate].hwnd == active)
         {
-            index = i;
+            index = candidate;
+            found_active = true;
             break;
         }
     }
 
-    if (reverse)
+    if (!found_active)
     {
-        index = index == 0 ? current.size() - 1 : index - 1;
+        index = reverse ? current.size() - 1u : 0u;
+    }
+    else if (reverse)
+    {
+        index = index == 0 ? current.size() - 1u : index - 1u;
     }
     else
     {
-        index = (index + 1) % current.size();
+        index = (index + 1u) % current.size();
     }
 
     FocusWindow(current[index].hwnd);
@@ -579,17 +624,29 @@ void CloudOSNativeWindowManager::MinimizeActive()
 void CloudOSNativeWindowManager::ToggleMaximizeActive()
 {
     const HWND active = ActiveManagedWindow();
-    if (active == nullptr)
+    if (active != nullptr)
     {
-        return;
+        ShowWindow(active, IsZoomed(active) ? SW_RESTORE : SW_MAXIMIZE);
     }
-
-    ShowWindow(active, IsZoomed(active) ? SW_RESTORE : SW_MAXIMIZE);
 }
 
 RECT CloudOSNativeWindowManager::WorkAreaFor(HWND reference) const noexcept
 {
-    return MonitorWorkArea(reference != nullptr ? reference : event_sink_);
+    RECT area = MonitorWorkArea(reference != nullptr ? reference : event_sink_);
+    if (event_sink_ == nullptr || reserved_bottom_pixels_ <= 0)
+    {
+        return area;
+    }
+
+    const HMONITOR shell_monitor = MonitorFromWindow(event_sink_, MONITOR_DEFAULTTOPRIMARY);
+    const HMONITOR target_monitor = MonitorFromWindow(
+        reference != nullptr ? reference : event_sink_,
+        MONITOR_DEFAULTTOPRIMARY);
+    if (shell_monitor == target_monitor)
+    {
+        area.bottom = std::max(area.top, area.bottom - reserved_bottom_pixels_);
+    }
+    return area;
 }
 
 void CloudOSNativeWindowManager::SnapActive(CloudOSSnapDirection direction)
@@ -672,7 +729,6 @@ void CloudOSNativeWindowManager::TileCurrentWorkspace()
     };
 
     std::vector<MonitorGroup> groups;
-
     for (auto& item : windows_)
     {
         if (item.workspace != current_workspace_ ||
@@ -696,15 +752,9 @@ void CloudOSNativeWindowManager::TileCurrentWorkspace()
 
         if (iterator == groups.end())
         {
-            MONITORINFO info{};
-            info.cbSize = sizeof(info);
-            if (!GetMonitorInfoW(monitor, &info))
-            {
-                continue;
-            }
             MonitorGroup group{};
             group.monitor = monitor;
-            group.work_area = info.rcWork;
+            group.work_area = WorkAreaFor(item.hwnd);
             group.windows.push_back(item.hwnd);
             groups.push_back(std::move(group));
         }
@@ -754,12 +804,12 @@ void CloudOSNativeWindowManager::TileCurrentWorkspace()
                 }
                 else
                 {
-                    const std::size_t stack_count = count - 1;
+                    const std::size_t stack_count = count - 1u;
                     const int stack_height = total_height / static_cast<int>(stack_count);
                     target.left += master_width;
-                    target.top += static_cast<int>(index - 1) * stack_height;
+                    target.top += static_cast<int>(index - 1u) * stack_height;
                     target.bottom =
-                        index == count - 1
+                        index == count - 1u
                         ? group.work_area.bottom
                         : target.top + stack_height;
                 }
@@ -812,8 +862,11 @@ void CloudOSNativeWindowManager::SwitchWorkspace(int workspace)
             continue;
         }
 
-        if (item.workspace == current_workspace_ && !IsIconic(item.hwnd) && IsWindowVisible(item.hwnd))
+        if (item.workspace == current_workspace_ &&
+            !IsIconic(item.hwnd) &&
+            IsWindowVisible(item.hwnd))
         {
+            MarkWorkspaceHidden(item.hwnd, true);
             ShowWindow(item.hwnd, SW_HIDE);
             item.hidden_by_workspace = true;
         }
@@ -824,9 +877,12 @@ void CloudOSNativeWindowManager::SwitchWorkspace(int workspace)
 
     for (auto& item : windows_)
     {
-        if (item.workspace == current_workspace_ && item.hidden_by_workspace && IsWindow(item.hwnd))
+        if (item.workspace == current_workspace_ &&
+            item.hidden_by_workspace &&
+            IsWindow(item.hwnd))
         {
             item.hidden_by_workspace = false;
+            MarkWorkspaceHidden(item.hwnd, false);
             ShowWindow(item.hwnd, SW_SHOWNA);
         }
     }
@@ -855,6 +911,7 @@ void CloudOSNativeWindowManager::MoveActiveToWorkspace(int workspace)
     item->workspace = workspace;
     if (workspace != current_workspace_ && IsWindow(item->hwnd))
     {
+        MarkWorkspaceHidden(item->hwnd, true);
         ShowWindow(item->hwnd, SW_HIDE);
         item->hidden_by_workspace = true;
         active_window_ = nullptr;
