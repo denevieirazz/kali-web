@@ -1,6 +1,9 @@
 #include "native_apps_window.h"
 #include "native_calculator_window.h"
+#include "native_env_doctor_window.h"
 #include "native_notepad_window.h"
+#include "native_settings_window.h"
+#include "native_system_monitor_window.h"
 
 #include <commctrl.h>
 #include <knownfolders.h>
@@ -11,14 +14,13 @@
 #include <array>
 #include <cwctype>
 #include <new>
-#include <utility>
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "shell32.lib")
 
 namespace
 {
-constexpr wchar_t kClassName[] = L"CloudOS.Native.Apps.v2";
+constexpr wchar_t kClassName[] = L"CloudOS.Native.Apps.v3";
 constexpr int kSearchId = 1301;
 constexpr int kListId = 1302;
 constexpr int kLaunchId = 1303;
@@ -42,7 +44,6 @@ std::wstring FileNameWithoutExtension(std::wstring path)
     {
         path = path.substr(separator + 1);
     }
-
     const std::size_t extension = path.find_last_of(L'.');
     if (extension != std::wstring::npos)
     {
@@ -73,10 +74,22 @@ void AddSearchPathExecutable(
         nullptr);
     if (length > 0 && length < buffer.size())
     {
-        catalog.push_back({display_name, buffer.data(), CloudOSNativeAppsWindow::AppKind::External});
+        catalog.push_back({
+            display_name,
+            buffer.data(),
+            CloudOSNativeAppsWindow::AppKind::External,
+        });
     }
 }
+
+void ShowInternalLaunchError(HWND owner, const wchar_t* app_name)
+{
+    std::wstring message = L"O aplicativo nativo ";
+    message += app_name;
+    message += L" nao pode ser aberto.";
+    MessageBoxW(owner, message.c_str(), L"CloudOS", MB_OK | MB_ICONERROR);
 }
+} // namespace
 
 CloudOSNativeAppsWindow::CloudOSNativeAppsWindow(HINSTANCE instance)
     : instance_(instance)
@@ -108,11 +121,11 @@ bool CloudOSNativeAppsWindow::Create()
         WS_EX_APPWINDOW,
         kClassName,
         L"Aplicativos - CloudOS",
-        WS_OVERLAPPEDWINDOW,
+        WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
-        840,
-        620,
+        900,
+        650,
         nullptr,
         nullptr,
         instance_,
@@ -127,12 +140,9 @@ bool CloudOSNativeAppsWindow::Create()
         L"EDIT",
         L"",
         WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
-        0,
-        0,
-        0,
-        0,
+        0, 0, 0, 0,
         window_,
-        reinterpret_cast<HMENU>(kSearchId),
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSearchId)),
         instance_,
         nullptr);
     list_ = CreateWindowExW(
@@ -140,24 +150,19 @@ bool CloudOSNativeAppsWindow::Create()
         WC_LISTVIEWW,
         L"",
         WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL,
-        0,
-        0,
-        0,
-        0,
+        0, 0, 0, 0,
         window_,
-        reinterpret_cast<HMENU>(kListId),
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kListId)),
         instance_,
         nullptr);
-    launch_button_ = CreateWindowW(
+    launch_button_ = CreateWindowExW(
+        0,
         L"BUTTON",
         L"Abrir",
         WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
-        0,
-        0,
-        0,
-        0,
+        0, 0, 0, 0,
         window_,
-        reinterpret_cast<HMENU>(kLaunchId),
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kLaunchId)),
         instance_,
         nullptr);
 
@@ -172,17 +177,17 @@ bool CloudOSNativeAppsWindow::Create()
         search_edit_,
         EM_SETCUEBANNER,
         TRUE,
-        reinterpret_cast<LPARAM>(L"Pesquisar aplicativos..."));
+        reinterpret_cast<LPARAM>(L"Pesquisar aplicativos do CloudOS e do Windows..."));
     ListView_SetExtendedListViewStyle(
         list_,
         LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP);
 
     LVCOLUMNW column{};
     column.mask = LVCF_TEXT | LVCF_WIDTH;
-    column.cx = 300;
+    column.cx = 320;
     column.pszText = const_cast<wchar_t*>(L"Aplicativo");
     ListView_InsertColumn(list_, 0, &column);
-    column.cx = 450;
+    column.cx = 510;
     column.pszText = const_cast<wchar_t*>(L"Origem");
     ListView_InsertColumn(list_, 1, &column);
 
@@ -203,8 +208,8 @@ void CloudOSNativeAppsWindow::Layout()
         return;
     }
 
-    const int width = client.right - client.left;
-    const int height = client.bottom - client.top;
+    const int width = static_cast<int>(client.right - client.left);
+    const int height = static_cast<int>(client.bottom - client.top);
     MoveWindow(search_edit_, 12, 12, std::max(100, width - 126), 30, TRUE);
     MoveWindow(launch_button_, std::max(12, width - 102), 12, 90, 30, TRUE);
     MoveWindow(list_, 12, 52, std::max(100, width - 24), std::max(80, height - 64), TRUE);
@@ -219,8 +224,8 @@ std::wstring CloudOSNativeAppsWindow::ReadText(HWND edit)
     }
 
     std::wstring text(static_cast<std::size_t>(length) + 1u, L'\0');
-    GetWindowTextW(edit, text.data(), length + 1);
-    text.resize(static_cast<std::size_t>(length));
+    const int copied = GetWindowTextW(edit, text.data(), length + 1);
+    text.resize(copied > 0 ? static_cast<std::size_t>(copied) : 0u);
     return text;
 }
 
@@ -284,7 +289,8 @@ void CloudOSNativeAppsWindow::EnumerateFolder(const std::wstring& folder, int de
         {
             EnumerateFolder(path, depth + 1);
         }
-        else if (HasExtension(path, L".lnk") ||
+        else if (
+            HasExtension(path, L".lnk") ||
             HasExtension(path, L".url") ||
             HasExtension(path, L".exe"))
         {
@@ -299,8 +305,11 @@ void CloudOSNativeAppsWindow::LoadCatalog()
 {
     catalog_.clear();
 
-    catalog_.push_back({L"Calculadora do CloudOS", L"cloudos://calculator", AppKind::Calculator});
     catalog_.push_back({L"Bloco de Notas do CloudOS", L"cloudos://notepad", AppKind::Notepad});
+    catalog_.push_back({L"Calculadora do CloudOS", L"cloudos://calculator", AppKind::Calculator});
+    catalog_.push_back({L"Configuracoes do CloudOS", L"cloudos://settings", AppKind::Settings});
+    catalog_.push_back({L"Saude do Sistema", L"cloudos://env-doctor", AppKind::EnvDoctor});
+    catalog_.push_back({L"System Monitor", L"cloudos://system-monitor", AppKind::SystemMonitor});
 
     const std::array<KNOWNFOLDERID, 2> folders{
         FOLDERID_Programs,
@@ -349,7 +358,8 @@ void CloudOSNativeAppsWindow::LoadCatalog()
             catalog_.end(),
             [](const AppEntry& left, const AppEntry& right)
             {
-                return left.kind == right.kind && _wcsicmp(left.path.c_str(), right.path.c_str()) == 0;
+                return left.kind == right.kind &&
+                    _wcsicmp(left.path.c_str(), right.path.c_str()) == 0;
             }),
         catalog_.end());
 }
@@ -388,21 +398,37 @@ void CloudOSNativeAppsWindow::LaunchSelection()
     }
 
     const auto& app = catalog_[visible_indices_[static_cast<std::size_t>(row)]];
-    if (app.kind == AppKind::Calculator)
+    switch (app.kind)
     {
+    case AppKind::Calculator:
         if (CloudOSNativeCalculatorWindow::Open(instance_) == nullptr)
         {
-            MessageBoxW(window_, L"A Calculadora do CloudOS nao pode ser aberta.", L"CloudOS", MB_OK | MB_ICONERROR);
+            ShowInternalLaunchError(window_, L"Calculadora");
         }
         return;
-    }
-    if (app.kind == AppKind::Notepad)
-    {
+    case AppKind::Notepad:
         if (CloudOSNativeNotepadWindow::Open(instance_) == nullptr)
         {
-            MessageBoxW(window_, L"O Bloco de Notas do CloudOS nao pode ser aberto.", L"CloudOS", MB_OK | MB_ICONERROR);
+            ShowInternalLaunchError(window_, L"Bloco de Notas");
         }
         return;
+    case AppKind::Settings:
+        CloudOSNativeSettingsWindow::Open(instance_);
+        return;
+    case AppKind::SystemMonitor:
+        if (CloudOSNativeSystemMonitorWindow::Open(instance_) == nullptr)
+        {
+            ShowInternalLaunchError(window_, L"System Monitor");
+        }
+        return;
+    case AppKind::EnvDoctor:
+        if (CloudOSNativeEnvDoctorWindow::Open(instance_) == nullptr)
+        {
+            ShowInternalLaunchError(window_, L"Saude do Sistema");
+        }
+        return;
+    case AppKind::External:
+        break;
     }
 
     HINSTANCE result = ShellExecuteW(
@@ -439,7 +465,7 @@ LRESULT CloudOSNativeAppsWindow::HandleMessage(
             ApplyFilter();
             return 0;
         }
-        if (LOWORD(w_param) == kLaunchId)
+        if (LOWORD(w_param) == kLaunchId && HIWORD(w_param) == BN_CLICKED)
         {
             LaunchSelection();
             return 0;
