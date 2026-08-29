@@ -1,96 +1,13 @@
-name: Wire Source Revision Identity
+name: Disabled Temporary Source Revision Wiring
 
 on:
-  push:
-    branches:
-      - integration/cloudos-unified-runtime
-    paths:
-      - .github/workflows/wire-source-revision-identity.yml
-      - scripts/tmp-wire-source-revision.py
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  wire:
-    runs-on: windows-2022
-    timeout-minutes: 20
+  noop:
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: integration/cloudos-unified-runtime
-          fetch-depth: 0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22.x
-
-      - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 8.0.x
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Apply source revision wiring
-        shell: pwsh
-        run: python scripts/tmp-wire-source-revision.py
-
-      - name: Parse and test launcher freshness
-        shell: pwsh
-        run: |
-          ./scripts/test-cloudos-session-freshness.ps1
-          ./scripts/test-native-host-freshness.ps1
-          $tokens = $null
-          $errors = $null
-          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'scripts/launch/start-cloudos.ps1'), [ref]$tokens, [ref]$errors)
-          if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; throw "LAUNCHER_PARSE_ERRORS=$($errors.Count)" }
-
-      - name: Build frontend with revision identity
-        shell: pwsh
-        env:
-          VITE_CLOUDOS_SOURCE_REVISION: ${{ github.sha }}
-        run: npm --prefix frontend run build
-
-      - name: Build Host with revision identity
-        shell: pwsh
-        run: dotnet build desktop/CloudOS.Host/CloudOS.Host.csproj -c Release --nologo -p:CloudOSSourceRevision=${{ github.sha }}
-
-      - name: Assert generated Host metadata
-        shell: pwsh
-        run: |
-          $assemblyInfo = Get-ChildItem 'desktop/CloudOS.Host/obj/Release' -Recurse -Filter 'CloudOS.Host.AssemblyInfo.cs' | Select-Object -First 1
-          if (-not $assemblyInfo) { throw 'HOST_ASSEMBLY_INFO_NOT_FOUND' }
-          $source = Get-Content -LiteralPath $assemblyInfo.FullName -Raw
-          if ($source -notmatch 'CloudOSSourceRevision') { throw 'HOST_SOURCE_REVISION_METADATA_KEY_MISSING' }
-          if ($source -notmatch '${{ github.sha }}') { throw 'HOST_SOURCE_REVISION_METADATA_VALUE_MISSING' }
-
-      - name: Run Host contracts
-        shell: pwsh
-        run: dotnet run --project desktop/CloudOS.Host.Tests/CloudOS.Host.Tests.csproj -c Release
-
-      - name: Verify bounded diff
-        shell: pwsh
-        run: |
-          $changed = @(git status --porcelain | ForEach-Object { $_.Substring(3) })
-          $expected = @(
-            'desktop/CloudOS.Host/MainWindow.xaml.cs',
-            'desktop/CloudOS.Host.Tests/CloudOS.Host.Tests.csproj',
-            'desktop/CloudOS.Host.Tests/Program.cs',
-            'frontend/src/services/nativeHostBridge.ts',
-            'scripts/launch/start-cloudos.ps1'
-          )
-          if ($changed.Count -ne $expected.Count) { throw "UNEXPECTED_CHANGED_FILE_COUNT=$($changed.Count):$($changed -join ',')" }
-          foreach ($file in $expected) { if ($changed -notcontains $file) { throw "EXPECTED_FILE_NOT_CHANGED=$file" } }
-
-      - name: Commit source revision wiring
-        shell: pwsh
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- desktop/CloudOS.Host/MainWindow.xaml.cs desktop/CloudOS.Host.Tests/CloudOS.Host.Tests.csproj desktop/CloudOS.Host.Tests/Program.cs frontend/src/services/nativeHostBridge.ts scripts/launch/start-cloudos.ps1
-          git commit -m "fix(runtime): bind Host and shell to checkout revision"
-          git push origin HEAD:integration/cloudos-unified-runtime
+      - run: echo "temporary workflow disabled before removal"
