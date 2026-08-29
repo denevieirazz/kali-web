@@ -5,9 +5,65 @@
 
 #include <new>
 
-#pragma comment(lib, "wslapi.lib")
-
 namespace {
+
+using WslIsDistributionRegisteredFunction = BOOL (WINAPI*)(PCWSTR);
+using WslGetDistributionConfigurationFunction = HRESULT (WINAPI*)(
+    PCWSTR,
+    ULONG*,
+    ULONG*,
+    WSL_DISTRIBUTION_FLAGS*,
+    PSTR**,
+    ULONG*);
+using WslLaunchFunction = HRESULT (WINAPI*)(
+    PCWSTR,
+    PCWSTR,
+    BOOL,
+    HANDLE,
+    HANDLE,
+    HANDLE,
+    HANDLE*);
+
+struct WslApi final {
+    HMODULE module = nullptr;
+    WslIsDistributionRegisteredFunction is_registered = nullptr;
+    WslGetDistributionConfigurationFunction get_configuration = nullptr;
+    WslLaunchFunction launch = nullptr;
+
+    WslApi() noexcept {
+        module = LoadLibraryExW(
+            L"api-ms-win-wsl-api-l1-1-0.dll",
+            nullptr,
+            LOAD_LIBRARY_SEARCH_SYSTEM32);
+        if (module == nullptr) {
+            module = LoadLibraryExW(L"wslapi.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        }
+        if (module == nullptr) return;
+
+        is_registered = reinterpret_cast<WslIsDistributionRegisteredFunction>(
+            GetProcAddress(module, "WslIsDistributionRegistered"));
+        get_configuration = reinterpret_cast<WslGetDistributionConfigurationFunction>(
+            GetProcAddress(module, "WslGetDistributionConfiguration"));
+        launch = reinterpret_cast<WslLaunchFunction>(GetProcAddress(module, "WslLaunch"));
+
+        if (is_registered == nullptr || get_configuration == nullptr || launch == nullptr) {
+            FreeLibrary(module);
+            module = nullptr;
+            is_registered = nullptr;
+            get_configuration = nullptr;
+            launch = nullptr;
+        }
+    }
+
+    ~WslApi() noexcept {
+        if (module != nullptr) FreeLibrary(module);
+    }
+
+    bool available() const noexcept {
+        return module != nullptr && is_registered != nullptr &&
+            get_configuration != nullptr && launch != nullptr;
+    }
+};
 
 struct WslLease final {
     HANDLE process = nullptr;
@@ -20,6 +76,22 @@ struct WslLease final {
         }
     }
 };
+
+WslApi& wsl_api() noexcept {
+    static WslApi api;
+    return api;
+}
+
+BOOL require_wsl_api(WslApi*& api_out) noexcept {
+    auto& api = wsl_api();
+    if (!api.available()) {
+        SetLastError(ERROR_NOT_SUPPORTED);
+        api_out = nullptr;
+        return FALSE;
+    }
+    api_out = &api;
+    return TRUE;
+}
 
 BOOL wsl_fail_from_hresult(HRESULT result) noexcept {
     DWORD error = ERROR_GEN_FAILURE;
@@ -66,7 +138,9 @@ __declspec(dllexport) BOOL WINAPI cloudos_native_wsl_is_registered(
         return FALSE;
     }
 
-    *registered_out = WslIsDistributionRegistered(distribution_name) ? TRUE : FALSE;
+    WslApi* api = nullptr;
+    if (!require_wsl_api(api)) return FALSE;
+    *registered_out = api->is_registered(distribution_name) ? TRUE : FALSE;
     SetLastError(ERROR_SUCCESS);
     return TRUE;
 }
@@ -79,12 +153,15 @@ __declspec(dllexport) BOOL WINAPI cloudos_native_wsl_get_configuration(
         return FALSE;
     }
 
+    WslApi* api = nullptr;
+    if (!require_wsl_api(api)) return FALSE;
+
     ULONG version = 0;
     ULONG default_uid = 0;
     WSL_DISTRIBUTION_FLAGS flags = WSL_DISTRIBUTION_FLAGS_NONE;
     PSTR* environment = nullptr;
     ULONG environment_count = 0;
-    const HRESULT result = WslGetDistributionConfiguration(
+    const HRESULT result = api->get_configuration(
         distribution_name,
         &version,
         &default_uid,
@@ -120,6 +197,9 @@ __declspec(dllexport) BOOL WINAPI cloudos_native_wsl_launch(
     *lease_out = nullptr;
     *process_id_out = 0;
 
+    WslApi* api = nullptr;
+    if (!require_wsl_api(api)) return FALSE;
+
     auto* lease = new (std::nothrow) WslLease{};
     if (lease == nullptr) {
         SetLastError(ERROR_NOT_ENOUGH_MEMORY);
@@ -127,7 +207,7 @@ __declspec(dllexport) BOOL WINAPI cloudos_native_wsl_launch(
     }
 
     HANDLE process = nullptr;
-    const HRESULT result = WslLaunch(
+    const HRESULT result = api->launch(
         distribution_name,
         command != nullptr && *command != L'\0' ? command : nullptr,
         use_current_working_directory,
