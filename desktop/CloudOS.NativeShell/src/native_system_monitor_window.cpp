@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <new>
 #include <string>
 
 namespace
@@ -186,13 +187,14 @@ void Paint(HWND window, const MonitorState& state)
     Fill(device, client, RGB(14, 17, 24));
 
     const int margin = 24;
+    const int client_width = static_cast<int>(client.right - client.left);
     RECT title{margin, 18, client.right - margin, 58};
     DrawTextLine(device, L"System Monitor - CloudOS", title, 22, FW_SEMIBOLD, RGB(242, 246, 251));
 
     RECT subtitle{margin, 58, client.right - margin, 88};
     DrawTextLine(device, state.cpu_name, subtitle, 10, FW_NORMAL, RGB(160, 172, 190));
 
-    const int card_width = std::max(260, (client.right - margin * 3) / 2);
+    const int card_width = std::max(260, (client_width - margin * 3) / 2);
     RECT cpu_card{margin, 105, margin + card_width, 255};
     RECT mem_card{cpu_card.right + margin, 105, client.right - margin, 255};
     Fill(device, cpu_card, RGB(27, 32, 43));
