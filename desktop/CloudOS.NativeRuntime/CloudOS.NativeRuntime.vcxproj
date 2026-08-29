@@ -71,6 +71,7 @@
     <ClInclude Include="include\cloudos_native_runtime.h" />
     <ClCompile Include="src\cloudos_native_runtime.cpp" />
     <ClCompile Include="src\cloudos_native_terminal.cpp" />
+    <ClCompile Include="src\cloudos_native_window_events.cpp" />
   </ItemGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
