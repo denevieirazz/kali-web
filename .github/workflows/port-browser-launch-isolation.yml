@@ -1,4 +1,4 @@
-name: Port Native Launch Rebind Hardening
+name: Close Native Launch Abort Boundary
 
 on:
   push:
@@ -13,7 +13,7 @@ permissions:
 jobs:
   port:
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - name: Checkout branch
         uses: actions/checkout@v4
@@ -26,184 +26,48 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Patch current Host rebind without legacy capture runtime
+      - name: Remove final inner termination
         shell: pwsh
         run: |
-          $patch = @'
-          from pathlib import Path
-
-          def replace_once(text, old, new, label):
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
-              return text.replace(old, new, 1)
-
-          bridge_path = Path('desktop/CloudOS.Host/Bridge/WebMessageBridge.cs')
-          bridge = bridge_path.read_text(encoding='utf-8')
-
-          bridge = replace_once(
-              bridge,
-              '''            if (window is null)\n            {\n                TerminateProcessAndForget(launchLease.ProcessId, NativeContainmentFailure.WindowCorrelationTimeout);\n                throw new BridgeException(\n                    "NATIVE_WINDOW_NOT_FOUND",\n                    "Nenhuma janela rastreável apareceu sob quarentena antes do limite de contenção.");\n            }''',
-              '''            if (window is null)\n            {\n                throw new BridgeException(\n                    "NATIVE_WINDOW_NOT_FOUND",\n                    "Nenhuma janela rastreável apareceu sob quarentena antes do limite de contenção.",\n                    NativeContainmentFailure.WindowCorrelationTimeout);\n            }''',
-              'window-correlation-single-abort'
-          )
-
-          bridge = replace_once(
-              bridge,
-              '''                TerminateProcessAndForget(lease.ProcessId, NativeContainmentFailure.QuarantineFailed);\n                throw new BridgeException("WINDOW_QUARANTINE_FAILED",\n                    quarantineError ?? "A janela não aceitou a quarentena preventiva do CloudOS.");''',
-              '''                throw new BridgeException(\n                    "WINDOW_QUARANTINE_FAILED",\n                    quarantineError ?? "A janela não aceitou a quarentena preventiva do CloudOS.",\n                    NativeContainmentFailure.QuarantineFailed);''',
-              'quarantine-single-abort'
-          )
-
-          bridge = replace_once(
-              bridge,
-              '''        catch (BridgeException)\n        {\n            AbortContainedLaunch(launchLease, registered);\n            throw;\n        }\n        catch (Exception error) when (error is ArgumentException or InvalidOperationException or Win32Exception\n            or IOException or NotSupportedException or UnauthorizedAccessException)\n        {\n            BrowserDiagnostics.Write("native_process_tracking_failed", $"type={error.GetType().Name}");\n            AbortContainedLaunch(launchLease, registered);\n            throw new BridgeException("APP_PROCESS_NOT_TRACKABLE", "O processo lançado não pôde ser rastreado com segurança.");\n        }''',
-              '''        catch (BridgeException error)\n        {\n            AbortContainedLaunch(\n                launchLease,\n                registered,\n                error.ContainmentFailure ?? NativeContainmentFailure.QuarantineFailed);\n            throw;\n        }\n        catch (Exception error) when (error is ArgumentException or InvalidOperationException or Win32Exception\n            or IOException or NotSupportedException or UnauthorizedAccessException)\n        {\n            BrowserDiagnostics.Write("native_process_tracking_failed", $"type={error.GetType().Name}");\n            AbortContainedLaunch(launchLease, registered, NativeContainmentFailure.QuarantineFailed);\n            throw new BridgeException("APP_PROCESS_NOT_TRACKABLE", "O processo lançado não pôde ser rastreado com segurança.");\n        }''',
-              'launch-abort-boundary'
-          )
-
-          wait_start = bridge.index('    private async Task<NativeWindowSnapshot?> WaitForQuarantinedWindowAsync(')
-          candidate_start = bridge.index('            if (candidates.Length > 0)\n', wait_start)
-          candidate_end = bridge.index('\n\n            await Task.Delay(25);', candidate_start)
-          wait_replacement = '''            var selection = NativeLaunchContainmentPolicy.SelectUniqueQuarantinedWindow(candidates, out var candidate);\n            if (selection == NativeWindowCandidateSelection.Ambiguous)\n            {\n                BrowserDiagnostics.Write(\n                    "native_ambiguous_multiwindow_fail_closed",\n                    $"pid={lease.ProcessId} candidates={candidates.Length} details="\n                    + string.Join(";", candidates.Select(item =>\n                        $"hwnd={item.Handle},pid={item.ProcessId},title={JsonSerializer.Serialize(item.Title)},"\n                        + $"bounds={item.Bounds.X},{item.Bounds.Y},{item.Bounds.Width},{item.Bounds.Height}")));\n                throw new BridgeException(\n                    "AMBIGUOUS_MULTIWINDOW_UNSUPPORTED",\n                    "O aplicativo criou várias janelas principais e não pode ser contido com segurança nesta versão.",\n                    NativeContainmentFailure.AmbiguousWindow);\n            }\n            if (candidate is not null)\n            {\n                var now = DateTimeOffset.UtcNow;\n                if (candidate.Handle != preferredHandle)\n                {\n                    preferredHandle = candidate.Handle;\n                    preferredSince = now;\n                }\n                else if (now - preferredSince >= TimeSpan.FromMilliseconds(WindowCandidateStabilityMilliseconds))\n                {\n                    return candidate;\n                }\n            }\n            else\n            {\n                preferredHandle = 0;\n                preferredSince = DateTimeOffset.MinValue;\n            }'''
-          bridge = bridge[:candidate_start] + wait_replacement + bridge[candidate_end:]
-
-          recovery_start = bridge.index('    private async Task RecoverPrimaryWindowAsync(')
-          failure_decl = bridge.index('        string? failureReason = null;', recovery_start)
-          bridge = bridge[:failure_decl] + bridge[failure_decl:].replace(
-              '        string? failureReason = null;',
-              '        string? failureReason = null;\n        var recoveryFailure = NativeContainmentFailure.AttachmentLost;',
-              1
-          )
-          recovery_start = bridge.index('    private async Task RecoverPrimaryWindowAsync(')
-          recovery_candidate_start = bridge.index('                if (candidates.Length > 0)\n', recovery_start)
-          recovery_candidate_end = bridge.index('\n\n                await Task.Delay(25);', recovery_candidate_start)
-          recovery_replacement = '''                var selection = NativeLaunchContainmentPolicy.SelectUniqueQuarantinedWindow(candidates, out var candidate);\n                if (selection == NativeWindowCandidateSelection.Ambiguous)\n                {\n                    failureReason = $"ambiguous-replacement:{candidates.Length}";\n                    recoveryFailure = NativeContainmentFailure.AmbiguousWindow;\n                    BrowserDiagnostics.Write(\n                        "native_primary_window_recovery_ambiguous",\n                        $"session={sessionId} rootPid={rootProcessId} candidates={candidates.Length}");\n                    break;\n                }\n                if (candidate is not null)\n                {\n                    var now = DateTimeOffset.UtcNow;\n                    if (candidate.Handle != preferredHandle)\n                    {\n                        preferredHandle = candidate.Handle;\n                        preferredSince = now;\n                    }\n                    else if (now - preferredSince >= TimeSpan.FromMilliseconds(WindowCandidateStabilityMilliseconds))\n                    {\n                        if (!_recoveringSessionByRoot.TryGetValue(rootProcessId, out currentSession)\n                            || !string.Equals(currentSession, sessionId, StringComparison.Ordinal))\n                            return;\n\n                        _recoveringSessionByRoot.Remove(rootProcessId);\n                        _recoveringSessionIds.Remove(sessionId);\n                        _sessionIdsByHandle[candidate.Handle] = sessionId;\n                        _handlesBySessionId[sessionId] = candidate.Handle;\n                        _processIdsBySessionId[sessionId] = candidate.ProcessId;\n                        if (_nativeSessionsById.TryGetValue(sessionId, out var recoveredNativeSession))\n                            recoveredNativeSession.BindWindow(candidate.ProcessId, candidate.Handle);\n                        _pendingAttachDeadlinesByHandle[candidate.Handle] = DateTimeOffset.UtcNow.AddMilliseconds(\n                            NativeLaunchContainmentPolicy.PendingAttachTimeoutMilliseconds);\n\n                        BrowserDiagnostics.Write(\n                            "native_primary_window_recovered",\n                            $"session={sessionId} rootPid={rootProcessId} oldPid={removedProcessId} newPid={candidate.ProcessId} oldHwnd={removedHandle} newHwnd={candidate.Handle} elapsedMs={(long)(DateTimeOffset.UtcNow - started).TotalMilliseconds}");\n                        PostEvent("native.sessionsChanged", new { sessions = GetPublicSessions() });\n                        return;\n                    }\n                }\n                else\n                {\n                    preferredHandle = 0;\n                    preferredSince = DateTimeOffset.MinValue;\n                }'''
-          bridge = bridge[:recovery_candidate_start] + recovery_replacement + bridge[recovery_candidate_end:]
-
-          recovery_start = bridge.index('    private async Task RecoverPrimaryWindowAsync(')
-          final_termination = bridge.index(
-              '        TerminateProcessAndForget(rootProcessId, NativeContainmentFailure.AttachmentLost);',
-              recovery_start
-          )
-          bridge = bridge[:final_termination] + bridge[final_termination:].replace(
-              '        TerminateProcessAndForget(rootProcessId, NativeContainmentFailure.AttachmentLost);',
-              '        TerminateProcessAndForget(rootProcessId, recoveryFailure);',
-              1
-          )
-
-          bridge = replace_once(
-              bridge,
-              '''    private void AbortContainedLaunch(NativeContainedProcessLease? lease, bool registered)\n    {\n        if (lease is null) return;\n        if (registered || _launchLeasesByProcessId.ContainsKey(lease.ProcessId))\n        {\n            _launchLeasesByProcessId.TryAdd(lease.ProcessId, lease);\n            _launchRootByMemberProcessId.TryAdd(lease.ProcessId, lease.ProcessId);\n            _refreshTimer.Interval = TimeSpan.FromMilliseconds(ActiveContainmentRefreshMilliseconds);\n            TerminateProcessAndForget(lease.ProcessId, NativeContainmentFailure.QuarantineFailed);\n            return;\n        }\n        lease.Dispose();\n    }''',
-              '''    private void AbortContainedLaunch(\n        NativeContainedProcessLease? lease,\n        bool registered,\n        NativeContainmentFailure failure)\n    {\n        if (lease is null || lease.IsDisposed) return;\n        if (registered || _launchLeasesByProcessId.ContainsKey(lease.ProcessId))\n        {\n            _launchLeasesByProcessId.TryAdd(lease.ProcessId, lease);\n            _launchRootByMemberProcessId.TryAdd(lease.ProcessId, lease.ProcessId);\n            _refreshTimer.Interval = TimeSpan.FromMilliseconds(ActiveContainmentRefreshMilliseconds);\n            TerminateProcessAndForget(lease.ProcessId, failure);\n            return;\n        }\n        lease.Dispose();\n    }''',
-              'abort-contained-launch'
-          )
-
-          bridge = replace_once(
-              bridge,
-              '''    private sealed class BridgeException(string code, string message) : Exception(message)\n    {\n        public string Code { get; } = code;\n    }''',
-              '''    private sealed class BridgeException(\n        string code,\n        string message,\n        NativeContainmentFailure? containmentFailure = null) : Exception(message)\n    {\n        public string Code { get; } = code;\n        public NativeContainmentFailure? ContainmentFailure { get; } = containmentFailure;\n    }''',
-              'bridge-exception-cause'
-          )
-
-          bridge_path.write_text(bridge, encoding='utf-8')
-
-          launcher_path = Path('desktop/CloudOS.Host/Native/NativeContainedProcessLauncher.cs')
-          launcher = launcher_path.read_text(encoding='utf-8')
-          launcher = replace_once(
-              launcher,
-              '    private bool _disposed;\n',
-              '    private readonly int _processId;\n    private bool _disposed;\n',
-              'stable-process-id-field'
-          )
-          launcher = replace_once(
-              launcher,
-              '''    {\n        Process = process;\n        _nativeProcess = nativeProcess;\n        _primaryThread = primaryThread;\n        _job = job;\n        Engine = "managed";\n    }''',
-              '''    {\n        Process = process;\n        _processId = process.Id;\n        _nativeProcess = nativeProcess;\n        _primaryThread = primaryThread;\n        _job = job;\n        Engine = "managed";\n    }''',
-              'managed-lease-id'
-          )
-          launcher = replace_once(
-              launcher,
-              '''    {\n        Process = process;\n        _nativeRuntimeLease = nativeRuntimeLease;\n        Engine = "cpp";\n    }''',
-              '''    {\n        Process = process;\n        _processId = process.Id;\n        _nativeRuntimeLease = nativeRuntimeLease;\n        Engine = "cpp";\n    }''',
-              'cpp-lease-id'
-          )
-          launcher = replace_once(
-              launcher,
-              '''    public Process Process { get; }\n    public int ProcessId => Process.Id;\n    public bool IsResumed { get; private set; }''',
-              '''    public Process Process { get; }\n    public int ProcessId => _processId;\n    public bool IsDisposed\n    {\n        get { lock (_jobQuerySync) return _disposed; }\n    }\n    public bool IsResumed { get; private set; }''',
-              'stable-lease-identity'
-          )
-          launcher = replace_once(
-              launcher,
-              '''        var processIds = lease.GetMemberProcessIds();\n        foreach (var processId in processIds)\n        {\n            if (windows.IsTrackedProcess(processId)) continue;\n            using var process = Process.GetProcessById(processId);\n            if (NativeLaunchContainmentPolicy.IsSharedBroker(process.ProcessName))\n                throw new InvalidOperationException("A shared Windows broker entered the contained Job.");\n            windows.TrackLaunchedProcess(process);\n        }\n        return processIds;''',
-              '''        var processIds = lease.GetMemberProcessIds();\n        var synchronized = new List<int>(processIds.Count);\n        foreach (var processId in processIds)\n        {\n            if (windows.IsTrackedProcess(processId))\n            {\n                synchronized.Add(processId);\n                continue;\n            }\n            try\n            {\n                using var process = Process.GetProcessById(processId);\n                if (NativeLaunchContainmentPolicy.IsSharedBroker(process.ProcessName))\n                    throw new InvalidOperationException("A shared Windows broker entered the contained Job.");\n                windows.TrackLaunchedProcess(process);\n                synchronized.Add(processId);\n            }\n            catch (ArgumentException)\n            {\n                // Chromium helpers can exit between the authoritative Job membership query\n                // and opening their Process handle. An already exited member owns no HWND,\n                // so omit it and let the next Job query remain authoritative.\n            }\n        }\n        return synchronized;''',
-              'transient-helper-race'
-          )
-          launcher_path.write_text(launcher, encoding='utf-8')
-
-          tests_path = Path('desktop/CloudOS.Host.Tests/Program.cs')
-          tests = tests_path.read_text(encoding='utf-8')
-          tests = replace_once(
-              tests,
-              '    ("native launch reports managed only after HWND correlation", NativeLaunchReportsManagedOnlyAfterCorrelation),\n',
-              '    ("native launch reports managed only after HWND correlation", NativeLaunchReportsManagedOnlyAfterCorrelation),\n    ("native launch selects only an unambiguous primary HWND", NativeLaunchSelectsOnlyUnambiguousPrimary),\n',
-              'selector-test-list'
-          )
-          tests = replace_once(
-              tests,
-              '    ("native launcher tracks suspended process before resume", NativeLauncherTracksSuspendedProcessBeforeResume),\n',
-              '    ("native launcher tracks suspended process before resume", NativeLauncherTracksSuspendedProcessBeforeResume),\n    ("native lease identity remains stable after disposal", NativeLeaseIdentitySurvivesDispose),\n',
-              'lease-test-list'
-          )
-
-          selector_test = '''static void NativeLaunchSelectsOnlyUnambiguousPrimary()\n{\n    var now = DateTimeOffset.UtcNow;\n    var primary = new NativeWindowSnapshot(\n        1001, 5001, "Browser", false, false, false, false,\n        new NativeWindowBounds(0, 0, 1920, 1023), now);\n    var tinyHelper = new NativeWindowSnapshot(\n        1002, 5001, String.Empty, false, false, false, false,\n        new NativeWindowBounds(0, 0, 136, 39), now);\n    var untitledLargeHelper = new NativeWindowSnapshot(\n        1003, 5001, String.Empty, false, false, false, false,\n        new NativeWindowBounds(0, 0, 1920, 1023), now);\n    var secondPrimary = new NativeWindowSnapshot(\n        1004, 5001, "Second Browser", false, false, false, false,\n        new NativeWindowBounds(40, 40, 1280, 800), now);\n\n    var selection = NativeLaunchContainmentPolicy.SelectUniqueQuarantinedWindow(\n        [primary, tinyHelper], out var selected);\n    Assert(selection == NativeWindowCandidateSelection.Unique && selected?.Handle == primary.Handle,\n        "A uniquely dominant browser surface must win over a tiny helper HWND.");\n\n    selection = NativeLaunchContainmentPolicy.SelectUniqueQuarantinedWindow(\n        [primary, untitledLargeHelper, tinyHelper], out selected);\n    Assert(selection == NativeWindowCandidateSelection.Unique && selected?.Handle == primary.Handle,\n        "A single titled application surface may win over untitled Chromium helper HWNDs.");\n\n    selection = NativeLaunchContainmentPolicy.SelectUniqueQuarantinedWindow(\n        [primary, secondPrimary], out selected);\n    Assert(selection == NativeWindowCandidateSelection.Ambiguous && selected is null,\n        "Two plausible titled application surfaces must fail closed.");\n\n    selection = NativeLaunchContainmentPolicy.SelectUniqueQuarantinedWindow([], out selected);\n    Assert(selection == NativeWindowCandidateSelection.None && selected is null,\n        "An empty launch must remain pending instead of inventing a HWND.");\n}\n\n'''
-          tests = replace_once(
-              tests,
-              'static void NativeContainmentFailuresRequireTermination()\n',
-              selector_test + 'static void NativeContainmentFailuresRequireTermination()\n',
-              'selector-test-method'
-          )
-
-          lease_test = '''static void NativeLeaseIdentitySurvivesDispose()\n{\n    var processPath = Environment.ProcessPath ?? throw new InvalidOperationException("The test process path is unavailable.");\n    var spec = NativeProcessLaunchSpec.Create(\n        processPath,\n        FixtureArguments("--native-contained-fixture-wait"),\n        AppContext.BaseDirectory);\n    var lease = NativeContainedProcessLauncher.StartSuspended(spec);\n    var processId = lease.ProcessId;\n    lease.Dispose();\n\n    Assert(lease.IsDisposed, "A disposed native launch lease must expose terminal state.");\n    Assert(lease.ProcessId == processId,\n        "The stable launch identity must not dereference a disposed Process object.");\n    lease.Dispose();\n}\n\n'''
-          tests = replace_once(
-              tests,
-              'static void NativeJobChildWindowIsQuarantined()\n',
-              lease_test + 'static void NativeJobChildWindowIsQuarantined()\n',
-              'lease-test-method'
-          )
-          tests_path.write_text(tests, encoding='utf-8')
-          '@
-          Set-Content -LiteralPath patch-native-rebind.py -Value $patch -Encoding utf8
-          python patch-native-rebind.py
-          Remove-Item -LiteralPath patch-native-rebind.py -Force
+          $path = 'desktop/CloudOS.Host/Bridge/WebMessageBridge.cs'
+          $text = Get-Content -LiteralPath $path -Raw
+          $old = @'
+            if (!NativeLaunchContainmentPolicy.CanReportManaged(processTracked, hasTrackableWindow, sharedBroker))
+            {
+                TerminateProcessAndForget(launchLease.ProcessId, NativeContainmentFailure.QuarantineFailed);
+                throw new BridgeException("WINDOW_CONTAINMENT_DENIED", "A janela não pôde ser marcada como gerenciada.");
+            }
+'@
+          $new = @'
+            if (!NativeLaunchContainmentPolicy.CanReportManaged(processTracked, hasTrackableWindow, sharedBroker))
+            {
+                throw new BridgeException(
+                    "WINDOW_CONTAINMENT_DENIED",
+                    "A janela não pôde ser marcada como gerenciada.",
+                    NativeContainmentFailure.QuarantineFailed);
+            }
+'@
+          if (($text.Split($old).Count - 1) -ne 1) { throw 'MANAGED_BOUNDARY_PATTERN_NOT_UNIQUE' }
+          $text = $text.Replace($old, $new)
+          Set-Content -LiteralPath $path -Value $text -Encoding utf8 -NoNewline
 
       - name: Run Host contracts
         shell: pwsh
         run: dotnet run --project desktop/CloudOS.Host.Tests/CloudOS.Host.Tests.csproj -c Release
 
-      - name: Verify bounded diff
+      - name: Verify only bridge changed
         shell: pwsh
         run: |
           $changed = @(git status --porcelain | ForEach-Object { $_.Substring(3) })
-          $changed | ForEach-Object { Write-Host $_ }
-          $expected = @(
-            'desktop/CloudOS.Host/Bridge/WebMessageBridge.cs',
-            'desktop/CloudOS.Host/Native/NativeContainedProcessLauncher.cs',
-            'desktop/CloudOS.Host.Tests/Program.cs'
-          )
-          if ($changed.Count -ne $expected.Count) { throw "UNEXPECTED_CHANGED_FILE_COUNT:$($changed.Count)" }
-          foreach ($item in $expected) {
-            if ($changed -notcontains $item) { throw "EXPECTED_FILE_NOT_CHANGED:$item" }
+          if ($changed.Count -ne 1 -or $changed[0] -ne 'desktop/CloudOS.Host/Bridge/WebMessageBridge.cs') {
+            throw "UNEXPECTED_FILES:$($changed -join ',')"
           }
-          $unexpected = @($changed | Where-Object { $_ -notin $expected })
-          if ($unexpected.Count -gt 0) { throw "UNEXPECTED_FILES:$($unexpected -join ',')" }
 
-      - name: Commit Host hardening
+      - name: Commit final boundary fix
         shell: pwsh
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- desktop/CloudOS.Host/Bridge/WebMessageBridge.cs desktop/CloudOS.Host/Native/NativeContainedProcessLauncher.cs desktop/CloudOS.Host.Tests/Program.cs
-          git commit -m "fix(host): harden native launch rebind correlation"
+          git add -- desktop/CloudOS.Host/Bridge/WebMessageBridge.cs
+          git commit -m "fix(host): centralize native launch abort ownership"
           git push origin HEAD:integration/cloudos-unified-runtime
