@@ -38,8 +38,8 @@ if errorlevel 1 (
 )
 
 if not exist "%ROOT%\frontend\node_modules\.bin\vite.cmd" (
-  echo [CloudOS] Restaurando dependencias de build da interface...
-  call npm.cmd ci --prefix "%ROOT%\frontend"
+  echo [CloudOS] Restaurando dependencias declaradas de build da interface...
+  call npm.cmd install --prefix "%ROOT%\frontend" --no-audit --no-fund
   if errorlevel 1 exit /b %ERRORLEVEL%
 )
 
