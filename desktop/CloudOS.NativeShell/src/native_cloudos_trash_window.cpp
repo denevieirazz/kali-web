@@ -238,8 +238,8 @@ void CloudOSNativeDriveTrashWindow::Layout()
     }
     RECT client{};
     GetClientRect(window_, &client);
-    const int width = std::max(1, client.right - client.left);
-    const int height = std::max(1, client.bottom - client.top);
+    const int width = std::max(1, static_cast<int>(client.right - client.left));
+    const int height = std::max(1, static_cast<int>(client.bottom - client.top));
     const int margin = 12;
     const int button_height = 32;
     const int bottom = height - margin - button_height;
@@ -432,8 +432,8 @@ LRESULT CloudOSNativeDriveTrashWindow::HandleMessage(
         return 0;
 
     case WM_NCDESTROY:
-        window_ = nullptr;
         SetWindowLongPtrW(window_, GWLP_USERDATA, 0);
+        window_ = nullptr;
         delete this;
         return 0;
 

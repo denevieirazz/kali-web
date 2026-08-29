@@ -249,8 +249,8 @@ void CloudOSNativeProjectsWindow::Layout()
     }
     RECT client{};
     GetClientRect(window_, &client);
-    const int width = std::max(1, client.right - client.left);
-    const int height = std::max(1, client.bottom - client.top);
+    const int width = std::max(1, static_cast<int>(client.right - client.left));
+    const int height = std::max(1, static_cast<int>(client.bottom - client.top));
     const int margin = 12;
     const int label_height = 22;
     const int button_height = 32;

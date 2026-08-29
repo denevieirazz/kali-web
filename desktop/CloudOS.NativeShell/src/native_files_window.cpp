@@ -244,8 +244,8 @@ void CloudOSNativeFilesWindow::Layout()
         return;
     }
 
-    const int width = std::max(1, client.right - client.left);
-    const int height = std::max(1, client.bottom - client.top);
+    const int width = std::max(1, static_cast<int>(client.right - client.left));
+    const int height = std::max(1, static_cast<int>(client.bottom - client.top));
     const int margin = 12;
     const int button_height = 30;
     const int row1 = 10;
