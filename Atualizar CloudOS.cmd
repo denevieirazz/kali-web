@@ -1,21 +1,10 @@
 @echo off
-setlocal
+setlocal EnableExtensions
 cd /d "%~dp0"
-
-where powershell.exe >nul 2>&1
-if errorlevel 1 (
-  echo [CloudOS] PowerShell nao foi encontrado.
-  pause
-  exit /b 1
-)
-
-powershell.exe -NoLogo -NoProfile -STA -ExecutionPolicy Bypass -File "%~dp0scripts\update\CloudOS-Updater.ps1"
-set "CLOUDOS_UPDATER_EXIT=%ERRORLEVEL%"
-
-if not "%CLOUDOS_UPDATER_EXIT%"=="0" (
-  echo.
-  echo [CloudOS] O atualizador encerrou com codigo %CLOUDOS_UPDATER_EXIT%.
-  pause
-)
-
-exit /b %CLOUDOS_UPDATER_EXIT%
+where git.exe >nul 2>&1 || (echo [CloudOS] git.exe nao encontrado.& exit /b 30)
+git fetch origin rewrite/cloudos-native-win32
+if errorlevel 1 exit /b %ERRORLEVEL%
+git merge --ff-only origin/rewrite/cloudos-native-win32
+if errorlevel 1 exit /b %ERRORLEVEL%
+call "%~dp0Compilar CloudOS.cmd"
+exit /b %ERRORLEVEL%

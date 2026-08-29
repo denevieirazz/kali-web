@@ -1,2 +1,6 @@
-*.cmd text eol=crlf whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
-*.md whitespace=-blank-at-eol
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.vcxproj text eol=crlf
+*.manifest text eol=crlf
+*.cpp text eol=crlf
+*.h text eol=crlf
