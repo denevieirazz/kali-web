@@ -8,12 +8,14 @@
 #include "native_notepad_window.h"
 #include "native_run_window.h"
 #include "native_settings_window.h"
+#include "native_shell_platform.h"
 #include "native_start_menu_mru.h"
 #include "native_system_monitor_window.h"
 #include "native_terminal_window.h"
 
 #include <array>
 #include <string>
+#include <string_view>
 
 namespace CloudOS
 {
@@ -49,31 +51,39 @@ bool LaunchExternal(
     HWND owner,
     const std::wstring& file,
     const std::wstring& parameters = {},
-    const std::wstring& working_directory = {})
+    const std::wstring& working_directory = {},
+    bool report_error = true)
 {
     SHELLEXECUTEINFOW execution{};
     execution.cbSize = sizeof(execution);
-    execution.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI | SEE_MASK_ASYNCOK;
+    execution.fMask =
+        SEE_MASK_NOCLOSEPROCESS |
+        SEE_MASK_FLAG_NO_UI |
+        SEE_MASK_ASYNCOK;
 
-    // External Windows programs remain independent top-level HWNDs. Do not make
-    // a CloudOS surface their owner and never reparent/embed them into the shell.
+    // External Windows programs stay independent top-level HWNDs. CloudOS tracks
+    // them through NativeWindowManager; it does not reparent/embed/capture them.
     execution.hwnd = nullptr;
     execution.lpVerb = L"open";
     execution.lpFile = file.c_str();
     execution.lpParameters = parameters.empty() ? nullptr : parameters.c_str();
-    execution.lpDirectory = working_directory.empty() ? nullptr : working_directory.c_str();
+    execution.lpDirectory =
+        working_directory.empty() ? nullptr : working_directory.c_str();
     execution.nShow = SW_SHOWNORMAL;
 
     if (!ShellExecuteExW(&execution))
     {
-        ShowLaunchError(owner, file);
+        if (report_error)
+        {
+            ShowLaunchError(owner, file);
+        }
         return false;
     }
 
     if (execution.hProcess != nullptr)
     {
-        // Best effort only: GUI apps can use a launcher process, console apps may
-        // never become input-idle, and packaged apps may surface under another PID.
+        // Best effort only. GUI apps can use a launcher process, packaged apps
+        // may surface under another PID, and console programs may never idle.
         (void)WaitForInputIdle(execution.hProcess, 750);
         CloseHandle(execution.hProcess);
     }
@@ -126,6 +136,39 @@ void OpenWslTerminal(HINSTANCE instance)
     CloudOSNativeTerminalWindow::Open(instance, command, title);
 }
 
+std::wstring CanonicalAppId(std::wstring_view id)
+{
+    if (id == L"comms")
+    {
+        return L"terminal";
+    }
+    if (id == L"wsl")
+    {
+        return L"projects";
+    }
+    if (id == L"mail")
+    {
+        return L"notepad";
+    }
+    if (id == L"more")
+    {
+        return L"apps";
+    }
+    return std::wstring(id);
+}
+
+bool IsCatalogAppId(std::wstring_view id)
+{
+    for (const AppItem& app : kAllApps)
+    {
+        if (id == app.id)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool RestartCloudOSShell(HWND owner)
 {
     std::array<wchar_t, 32768> executable{};
@@ -161,7 +204,10 @@ bool RestartCloudOSShell(HWND owner)
 }
 }
 
-void NativeAppLauncher::Launch(HINSTANCE instance, HWND parent_hwnd, const AppItem& app)
+void NativeAppLauncher::Launch(
+    HINSTANCE instance,
+    HWND parent_hwnd,
+    const AppItem& app)
 {
     LaunchById(instance, parent_hwnd, app.id);
 }
@@ -169,18 +215,19 @@ void NativeAppLauncher::Launch(HINSTANCE instance, HWND parent_hwnd, const AppIt
 void NativeAppLauncher::LaunchById(
     HINSTANCE instance,
     HWND parent_hwnd,
-    const std::wstring& id)
+    const std::wstring& requested_id)
 {
+    const std::wstring id = CanonicalAppId(requested_id);
     bool launched = true;
 
-    if (id == L"terminal" || id == L"comms")
+    if (id == L"terminal")
     {
         CloudOSNativeTerminalWindow::Open(
             instance,
             L"cmd.exe",
             L"Terminal - CloudOS");
     }
-    else if (id == L"projects" || id == L"wsl")
+    else if (id == L"projects")
     {
         OpenWslTerminal(instance);
     }
@@ -197,15 +244,26 @@ void NativeAppLauncher::LaunchById(
     }
     else if (id == L"drive")
     {
-        launched = LaunchExternal(parent_hwnd, L"explorer.exe", L"C:\\");
+        const std::wstring system_volume = NativeShellPlatform::WindowsVolumeRoot();
+        launched = !system_volume.empty() &&
+            LaunchExternal(parent_hwnd, L"explorer.exe", system_volume);
+        if (!launched && system_volume.empty())
+        {
+            ShowLaunchError(parent_hwnd, L"o volume do sistema");
+        }
     }
-    else if (id == L"notepad" || id == L"mail")
+    else if (id == L"notepad")
     {
         CloudOSNativeNotepadWindow::Open(instance);
     }
     else if (id == L"code")
     {
-        launched = LaunchExternal(parent_hwnd, L"code.cmd", L".");
+        launched = LaunchExternal(
+            parent_hwnd,
+            L"code.cmd",
+            L".",
+            {},
+            false);
         if (!launched)
         {
             CloudOSNativeNotepadWindow::Open(instance);
@@ -224,7 +282,7 @@ void NativeAppLauncher::LaunchById(
     {
         CloudOSNativeSettingsWindow::Open(instance);
     }
-    else if (id == L"apps" || id == L"more")
+    else if (id == L"apps")
     {
         CloudOSNativeAppsWindow::Open(instance);
     }
@@ -250,7 +308,16 @@ void NativeAppLauncher::LaunchById(
     }
     else if (id == L"media")
     {
-        launched = LaunchExternal(parent_hwnd, L"wmplayer.exe");
+        launched = LaunchExternal(
+            parent_hwnd,
+            L"mswindowsmusic:",
+            {},
+            {},
+            false);
+        if (!launched)
+        {
+            launched = LaunchExternal(parent_hwnd, L"wmplayer.exe");
+        }
     }
     else if (id == L"regedit")
     {
@@ -260,12 +327,20 @@ void NativeAppLauncher::LaunchById(
     {
         launched = LaunchExternal(parent_hwnd, L"SnippingTool.exe");
     }
+    else if (id == L"weather")
+    {
+        launched = LaunchExternal(parent_hwnd, L"https://www.msn.com/weather");
+    }
+    else if (id == L"datetime")
+    {
+        launched = LaunchExternal(parent_hwnd, L"ms-settings:dateandtime");
+    }
     else
     {
         launched = false;
     }
 
-    if (launched)
+    if (launched && IsCatalogAppId(id))
     {
         StartMenuMRUTracker::Instance().RecordLaunch(id.c_str());
     }

@@ -1,7 +1,8 @@
 #include "native_system_stats.h"
 
+#include "native_shell_platform.h"
+
 #include <algorithm>
-#include <array>
 
 namespace CloudOS
 {
@@ -20,27 +21,6 @@ ULONGLONG ToUnsignedLongLong(const FILETIME& file_time) noexcept
     return value.QuadPart;
 }
 
-std::wstring WindowsVolumeRoot()
-{
-    std::array<wchar_t, MAX_PATH> windows_directory{};
-    const UINT length = GetWindowsDirectoryW(
-        windows_directory.data(),
-        static_cast<UINT>(windows_directory.size()));
-    if (length == 0 || length >= windows_directory.size())
-    {
-        return L"C:\\";
-    }
-
-    std::array<wchar_t, MAX_PATH> volume_path{};
-    if (GetVolumePathNameW(
-            windows_directory.data(),
-            volume_path.data(),
-            static_cast<DWORD>(volume_path.size())))
-    {
-        return volume_path.data();
-    }
-    return L"C:\\";
-}
 }
 
 SystemStats NativeSystemStats::Query()
@@ -75,6 +55,7 @@ SystemStats NativeSystemStats::Query()
                         busy_delta * 100u / total_delta,
                         0u,
                         100u));
+                stats.cpu_available = true;
             }
         }
 
@@ -88,6 +69,7 @@ SystemStats NativeSystemStats::Query()
     memory.dwLength = sizeof(memory);
     if (GlobalMemoryStatusEx(&memory))
     {
+        stats.ram_available = true;
         stats.ram_percent = static_cast<int>(memory.dwMemoryLoad);
         stats.ram_total_mb = memory.ullTotalPhys / (1024ull * 1024ull);
         stats.ram_used_mb =
@@ -97,13 +79,15 @@ SystemStats NativeSystemStats::Query()
     ULARGE_INTEGER free_bytes{};
     ULARGE_INTEGER total_bytes{};
     ULARGE_INTEGER total_free_bytes{};
-    const std::wstring system_volume = WindowsVolumeRoot();
-    if (GetDiskFreeSpaceExW(
+    const std::wstring system_volume = NativeShellPlatform::WindowsVolumeRoot();
+    if (!system_volume.empty() &&
+        GetDiskFreeSpaceExW(
             system_volume.c_str(),
             &free_bytes,
             &total_bytes,
             &total_free_bytes))
     {
+        stats.disk_available = true;
         stats.disk_free_gb = free_bytes.QuadPart / (1024ull * 1024ull * 1024ull);
         stats.disk_total_gb = total_bytes.QuadPart / (1024ull * 1024ull * 1024ull);
     }

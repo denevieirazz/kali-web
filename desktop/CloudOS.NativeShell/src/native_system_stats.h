@@ -7,6 +7,9 @@ namespace CloudOS
 {
 struct SystemStats final
 {
+    bool cpu_available{false};
+    bool ram_available{false};
+    bool disk_available{false};
     int cpu_percent{0};
     int ram_percent{0};
     unsigned long long ram_used_mb{0};

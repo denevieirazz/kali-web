@@ -62,7 +62,7 @@ inline constexpr std::array<AppItem, 18> kAllApps{{
     {L"terminal", L"Terminal", L"Terminal nativo via ConPTY", L"cmd.exe", AppCategory::Dev, 3},
     {L"powershell", L"PowerShell", L"PowerShell em terminal ConPTY", L"powershell.exe", AppCategory::Dev, 4},
     {L"notepad", L"Bloco de Notas", L"Editor de texto nativo do CloudOS", L"", AppCategory::Accessories, 5},
-    {L"drive", L"Disco Local (C:)", L"Abrir o disco local do Windows", L"explorer.exe", AppCategory::Files, 6},
+    {L"drive", L"Disco do Sistema", L"Abrir o volume onde o Windows esta instalado", L"explorer.exe", AppCategory::Files, 6},
 
     {L"files", L"Arquivos", L"Arquivos Windows + WSL no CloudOS", L"", AppCategory::Files, 7},
     {L"paint", L"Paint", L"Editor de imagens do Windows", L"mspaint.exe", AppCategory::Accessories, 8},
@@ -104,6 +104,7 @@ enum HotKeyId : int
     HotSnapRight,
     HotSnapUp,
     HotSnapDown,
+    HotSearch,
     HotExit,
     HotWorkspace1 = 30,
     HotWorkspace2,
