@@ -1,65 +1,98 @@
 #include "native_search_engine.h"
+
 #include <algorithm>
+#include <cwctype>
+#include <string_view>
 
 namespace CloudOS
 {
+namespace
+{
+void Lowercase(std::wstring& value)
+{
+    std::transform(
+        value.begin(),
+        value.end(),
+        value.begin(),
+        [](wchar_t character)
+        {
+            return static_cast<wchar_t>(std::towlower(character));
+        });
+}
+
+bool IsAny(std::wstring_view query, std::initializer_list<std::wstring_view> values)
+{
+    return std::find(values.begin(), values.end(), query) != values.end();
+}
+}
+
 bool NativeSearchEngine::Matches(const AppItem& app, const std::wstring& query)
 {
-    if (query.empty()) return true;
+    if (query.empty())
+    {
+        return true;
+    }
 
     std::wstring name_lower = app.name;
-    std::wstring desc_lower = app.desc;
+    std::wstring description_lower = app.desc;
     std::wstring id_lower = app.id;
-    std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), ::towlower);
-    std::transform(desc_lower.begin(), desc_lower.end(), desc_lower.begin(), ::towlower);
-    std::transform(id_lower.begin(), id_lower.end(), id_lower.begin(), ::towlower);
+    Lowercase(name_lower);
+    Lowercase(description_lower);
+    Lowercase(id_lower);
 
     if (name_lower.find(query) != std::wstring::npos ||
-        desc_lower.find(query) != std::wstring::npos ||
+        description_lower.find(query) != std::wstring::npos ||
         id_lower.find(query) != std::wstring::npos)
     {
         return true;
     }
 
-    if (query == L"web" || query == L"net" || query == L"chrome" || query == L"edge" || query == L"browser")
+    const std::wstring_view id(app.id);
+    const std::wstring_view query_view(query);
+
+    if (IsAny(query_view, {L"web", L"net", L"chrome", L"edge", L"browser", L"navegador"}))
     {
-        if (std::wstring_view(app.id) == L"browser") return true;
+        return id == L"browser";
     }
-    if (query == L"cmd" || query == L"terminal" || query == L"bash" || query == L"sh" || query == L"conpty")
+    if (IsAny(query_view, {L"cmd", L"terminal", L"bash", L"sh", L"conpty", L"powershell"}))
     {
-        if (std::wstring_view(app.id) == L"terminal" || std::wstring_view(app.id) == L"projects" || std::wstring_view(app.id) == L"powershell") return true;
+        return id == L"terminal" || id == L"wsl" || id == L"projects" || id == L"powershell";
     }
-    if (query == L"linux" || query == L"kali" || query == L"wsl" || query == L"wsl2")
+    if (IsAny(query_view, {L"linux", L"kali", L"wsl", L"wsl2"}))
     {
-        if (std::wstring_view(app.id) == L"projects") return true;
+        return id == L"wsl" || id == L"projects";
     }
-    if (query == L"txt" || query == L"nota" || query == L"notas" || query == L"editor" || query == L"mail")
+    if (IsAny(query_view, {L"txt", L"nota", L"notas", L"editor"}))
     {
-        if (std::wstring_view(app.id) == L"notepad" || std::wstring_view(app.id) == L"code") return true;
+        return id == L"notepad" || id == L"code";
     }
-    if (query == L"calc" || query == L"calculadora" || query == L"math")
+    if (IsAny(query_view, {L"calc", L"calculadora", L"math"}))
     {
-        if (std::wstring_view(app.id) == L"calc") return true;
+        return id == L"calc";
     }
-    if (query == L"pasta" || query == L"pastas" || query == L"arquivo" || query == L"explorer" || query == L"disco" || query == L"hd")
+    if (IsAny(query_view, {L"pasta", L"pastas", L"arquivo", L"arquivos", L"explorer", L"disco", L"hd"}))
     {
-        if (std::wstring_view(app.id) == L"files" || std::wstring_view(app.id) == L"drive") return true;
+        return id == L"files" || id == L"drive";
     }
-    if (query == L"cpu" || query == L"ram" || query == L"processo" || query == L"monitor" || query == L"task")
+    if (IsAny(query_view, {L"cpu", L"ram", L"processo", L"monitor", L"task"}))
     {
-        if (std::wstring_view(app.id) == L"sysmon") return true;
+        return id == L"sysmon";
     }
-    if (query == L"config" || query == L"painel" || query == L"ajustes" || query == L"settings")
+    if (IsAny(query_view, {L"config", L"painel", L"ajustes", L"settings", L"configuracoes"}))
     {
-        if (std::wstring_view(app.id) == L"settings") return true;
+        return id == L"settings";
     }
-    if (query == L"paint" || query == L"desenho" || query == L"arte" || query == L"foto")
+    if (IsAny(query_view, {L"saude", L"health", L"doctor", L"diagnostico", L"diagnostico"}))
     {
-        if (std::wstring_view(app.id) == L"paint") return true;
+        return id == L"health";
     }
-    if (query == L"print" || query == L"captura" || query == L"snip" || query == L"screenshot")
+    if (IsAny(query_view, {L"paint", L"desenho", L"arte", L"foto"}))
     {
-        if (std::wstring_view(app.id) == L"snip") return true;
+        return id == L"paint";
+    }
+    if (IsAny(query_view, {L"print", L"captura", L"snip", L"screenshot"}))
+    {
+        return id == L"snip";
     }
     return false;
 }
@@ -68,15 +101,23 @@ std::vector<int> NativeSearchEngine::FilterApps(const std::wstring& query)
 {
     std::vector<int> indices;
     std::wstring lower = query;
-    std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
-    while (!lower.empty() && lower.back() == L' ') lower.pop_back();
-    while (!lower.empty() && lower.front() == L' ') lower.erase(lower.begin());
+    Lowercase(lower);
 
-    for (std::size_t i = 0; i < kAllApps.size(); ++i)
+    while (!lower.empty() && std::iswspace(lower.back()))
     {
-        if (Matches(kAllApps[i], lower))
+        lower.pop_back();
+    }
+    while (!lower.empty() && std::iswspace(lower.front()))
+    {
+        lower.erase(lower.begin());
+    }
+
+    indices.reserve(kAllApps.size());
+    for (std::size_t index = 0; index < kAllApps.size(); ++index)
+    {
+        if (Matches(kAllApps[index], lower))
         {
-            indices.push_back(static_cast<int>(i));
+            indices.push_back(static_cast<int>(index));
         }
     }
     return indices;
