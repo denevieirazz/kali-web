@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace CloudOS.Host.Native;
@@ -64,6 +65,13 @@ public static class NativeManagedProcessClaims
 
         return Ordered(claims.Values);
     }
+
+    public static string CreateLaunchGuardRequestJson(
+        IEnumerable<NativeContainedProcessLease> leases) =>
+        JsonSerializer.Serialize(new
+        {
+            managedProcesses = Capture(leases)
+        });
 
     private static IReadOnlyList<NativeManagedProcessClaim> Ordered(
         IEnumerable<NativeManagedProcessClaim> claims) =>
