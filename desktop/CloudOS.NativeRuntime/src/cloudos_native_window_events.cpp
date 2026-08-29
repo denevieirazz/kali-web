@@ -3,6 +3,7 @@
 #include <dwmapi.h>
 
 #include <array>
+#include <memory>
 #include <mutex>
 #include <new>
 #include <unordered_map>
@@ -19,6 +20,11 @@ struct WindowWatcher final {
     std::array<HWINEVENTHOOK, 3> hooks{};
     std::mutex sync;
     std::unordered_map<HWND, DWORD> process_ids;
+};
+
+struct WindowEnumerationRequest final {
+    cloudos_native_window_enumeration_callback callback = nullptr;
+    void* context = nullptr;
 };
 
 std::mutex g_watchers_sync;
@@ -69,7 +75,7 @@ void CALLBACK on_win_event(
     if (watcher == nullptr || watcher->callback == nullptr || window == nullptr) return;
 
     if (event_type != EVENT_SYSTEM_FOREGROUND) {
-        if (object_id != OBJID_WINDOW || child_id != CHILDID_SELF) return;
+        if (object_id != OBJID_WINDOW || child_id != 0) return;
     }
 
     const auto kind = translate_event(event_type);
@@ -136,7 +142,7 @@ void uninstall_hooks(WindowWatcher* watcher) noexcept {
 }
 
 BOOL CALLBACK enumerate_window_callback(HWND window, LPARAM parameter) noexcept {
-    auto* request = reinterpret_cast<cloudos_native_window_enumeration_request*>(parameter);
+    auto* request = reinterpret_cast<WindowEnumerationRequest*>(parameter);
     if (request == nullptr || request->callback == nullptr || !is_top_level_window(window)) return TRUE;
 
     const DWORD process_id = process_id_for(window);
@@ -187,11 +193,11 @@ __declspec(dllexport) BOOL WINAPI cloudos_native_window_enumerate(
     cloudos_native_window_enumeration_callback callback,
     void* context) noexcept {
     if (callback == nullptr) return window_event_fail(ERROR_INVALID_PARAMETER);
-    cloudos_native_window_enumeration_request request{callback, context};
+    WindowEnumerationRequest request{callback, context};
     SetLastError(ERROR_SUCCESS);
     const BOOL result = EnumWindows(&enumerate_window_callback, reinterpret_cast<LPARAM>(&request));
     if (!result && GetLastError() == ERROR_SUCCESS) {
-        // A callback is allowed to stop enumeration intentionally.
+        // The callback is allowed to stop enumeration intentionally.
         return TRUE;
     }
     return result;
