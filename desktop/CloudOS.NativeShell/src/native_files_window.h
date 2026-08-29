@@ -45,11 +45,15 @@ private:
     bool Create();
     bool CreateControls();
     void CreateUiResources();
+    void CreateFonts();
+    void ApplyFonts();
+    void DestroyFonts() noexcept;
     void DestroyUiResources() noexcept;
     void ConfigureLists();
     void BuildSidebar();
     void Layout();
     void UpdateStatus();
+    void PaintChrome(HDC dc, const RECT& client);
 
     void Navigate(const std::wstring& path);
     bool NavigateShell(const std::wstring& path);
@@ -76,7 +80,7 @@ private:
     [[nodiscard]] bool IsCurrentCloudOSDrive() const;
     bool CurrentDriveSegments(std::vector<std::wstring>* segments, std::wstring* error = nullptr) const;
     [[nodiscard]] int ShellIconIndex(const std::wstring& path, bool directory, bool use_attributes = false) const;
-    [[nodiscard]] int StockIconIndex(SHSTOCKICONID icon_id) const;
+    [[nodiscard]] int AddSidebarIcon(const std::wstring& path, SHSTOCKICONID fallback_icon);
 
     static std::wstring KnownFolderPath(REFKNOWNFOLDERID folder_id);
     static std::wstring JoinPath(const std::wstring& directory, const std::wstring& name);
@@ -90,6 +94,7 @@ private:
 
     LRESULT HandleMessage(UINT message, WPARAM w_param, LPARAM l_param);
     LRESULT DrawOwnerButton(const DRAWITEMSTRUCT& item);
+    LRESULT CustomDrawSidebar(const NMLVCUSTOMDRAW& draw);
 
     HINSTANCE instance_{};
     HWND window_{};
@@ -108,12 +113,19 @@ private:
     HWND status_{};
 
     HFONT ui_font_{};
+    HFONT title_font_{};
+    HFONT caption_font_{};
+    HFONT glyph_font_{};
     HBRUSH background_brush_{};
     HBRUSH panel_brush_{};
     HBRUSH surface_brush_{};
-    HIMAGELIST system_small_image_list_{};
+    HBRUSH address_brush_{};
+    HIMAGELIST sidebar_image_list_{};
     HIMAGELIST system_large_image_list_{};
     UINT dpi_{96};
+
+    RECT address_rect_{};
+    RECT content_rect_{};
 
     bool shell_available_{};
     bool sidebar_syncing_{};
