@@ -14,79 +14,46 @@ bool CloudOSDesktopSurface::Create(
     CloudOSNativeWindowManager* window_manager)
 {
     Destroy();
-    if (web_.Create(instance, window_manager))
-    {
-        web_active_ = true;
-        return true;
-    }
-
-    web_active_ = false;
-    return fallback_.Create(instance, window_manager);
+    return native_.Create(instance, window_manager);
 }
 
 void CloudOSDesktopSurface::Destroy()
 {
-    web_.Destroy();
-    fallback_.Destroy();
-    web_active_ = false;
+    native_.Destroy();
 }
 
 void CloudOSDesktopSurface::UpdateLayout(const RECT& work_area)
 {
-    if (web_active_)
-    {
-        web_.UpdateLayout(work_area);
-    }
-    else
-    {
-        fallback_.UpdateLayout(work_area);
-    }
+    native_.UpdateLayout(work_area);
 }
 
 void CloudOSDesktopSurface::Redraw()
 {
-    if (web_active_)
-    {
-        web_.Redraw();
-    }
-    else
-    {
-        fallback_.Redraw();
-    }
+    native_.Redraw();
 }
 
 void CloudOSDesktopSurface::FocusSearch()
 {
-    if (web_active_)
-    {
-        web_.FocusSearch();
-    }
-    else
-    {
-        fallback_.FocusSearch();
-    }
+    native_.FocusSearch();
 }
 
 void CloudOSDesktopSurface::SetActionCallback(ActionCallback callback)
 {
-    web_.SetActionCallback(callback);
-    fallback_.SetActionCallback(std::move(callback));
+    native_.SetActionCallback(std::move(callback));
 }
 
 void CloudOSDesktopSurface::SetHotKeyCallback(HotKeyCallback callback)
 {
-    web_.SetHotKeyCallback(callback);
-    fallback_.SetHotKeyCallback(std::move(callback));
+    native_.SetHotKeyCallback(std::move(callback));
 }
 
 void CloudOSDesktopSurface::SetTimerCallback(TimerCallback callback)
 {
-    web_.SetTimerCallback(callback);
-    fallback_.SetTimerCallback(std::move(callback));
+    native_.SetTimerCallback(std::move(callback));
 }
 
 HWND CloudOSDesktopSurface::Hwnd() const noexcept
 {
-    return web_active_ ? web_.Hwnd() : fallback_.Hwnd();
+    return native_.Hwnd();
 }
 } // namespace CloudOS
