@@ -280,8 +280,12 @@ internal static class CloudOsNativeRuntime
         NativeRelease(lease);
     }
 
-    private static Win32Exception NativeFailure(string message) =>
-        new(Marshal.GetLastWin32Error(), message);
+    private static Win32Exception NativeFailure(string message)
+    {
+        var nativeError = Marshal.GetLastWin32Error();
+        var systemMessage = new Win32Exception(nativeError).Message;
+        return new Win32Exception(nativeError, $"{message} Win32 error {nativeError}: {systemMessage}");
+    }
 
     private static bool IsLoaderFailure(Exception error) =>
         error is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException;
