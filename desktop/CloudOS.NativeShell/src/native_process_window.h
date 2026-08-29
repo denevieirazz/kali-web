@@ -16,7 +16,8 @@ public:
         LPARAM l_param);
 
 private:
-    struct ProcessEntry final {
+    struct ProcessEntry final
+    {
         DWORD process_id{};
         std::wstring name;
         SIZE_T working_set{};
@@ -33,7 +34,7 @@ private:
     void Refresh();
     void TerminateSelected();
     void FocusSelectedProcess();
-    static SIZE_T QueryWorkingSet(DWORD process_id);
+    static SIZE_T QueryProcessWorkingSetBytes(DWORD process_id);
     static std::wstring FormatMemory(SIZE_T bytes);
 
     LRESULT HandleMessage(UINT message, WPARAM w_param, LPARAM l_param);
