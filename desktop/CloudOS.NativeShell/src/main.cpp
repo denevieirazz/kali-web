@@ -1,88 +1,297 @@
 #include <windows.h>
-#include <d2d1.h>
-#include <dwrite.h>
+#include <commctrl.h>
 #include <dwmapi.h>
-#include <wrl/client.h>
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
+#include <string>
 #include <string_view>
+#include <vector>
 
-#pragma comment(lib, "d2d1.lib")
-#pragma comment(lib, "dwrite.lib")
+#include "cloudos_native_runtime.h"
+#include "native_apps_window.h"
+#include "native_files_window.h"
+#include "native_process_window.h"
+#include "native_run_window.h"
+#include "native_terminal_window.h"
+#include "native_window_manager.h"
+
+#pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "dwmapi.lib")
-
-using Microsoft::WRL::ComPtr;
 
 namespace
 {
-constexpr wchar_t kWindowClassName[] = L"CloudOS.NativeShell.Window.v1";
-constexpr float kTaskbarHeight = 58.0f;
-constexpr float kStartButtonSize = 42.0f;
-constexpr float kStartMenuWidth = 360.0f;
-constexpr float kStartMenuHeight = 430.0f;
+constexpr wchar_t kDesktopClass[] = L"CloudOS.NativeShell.Desktop.v2";
+constexpr wchar_t kTaskbarClass[] = L"CloudOS.NativeShell.Taskbar.v2";
+constexpr wchar_t kStartClass[] = L"CloudOS.NativeShell.Start.v2";
+constexpr int kBaseTaskbarHeight = 58;
+constexpr int kBaseStartWidth = 390;
+constexpr int kBaseStartHeight = 520;
+constexpr UINT_PTR kReconcileTimer = 1;
+
+constexpr COLORREF kDesktopBackground = RGB(14, 17, 24);
+constexpr COLORREF kPanelBackground = RGB(27, 32, 43);
+constexpr COLORREF kPanelHover = RGB(42, 50, 66);
+constexpr COLORREF kBorder = RGB(61, 72, 92);
+constexpr COLORREF kAccent = RGB(91, 140, 255);
+constexpr COLORREF kPrimaryText = RGB(242, 246, 251);
+constexpr COLORREF kSecondaryText = RGB(160, 172, 190);
+
+struct TaskHit final
+{
+    HWND window{};
+    RECT bounds{};
+};
+
+enum HotKeyId : int
+{
+    HotTerminal = 1,
+    HotWslTerminal,
+    HotFiles,
+    HotApps,
+    HotProcesses,
+    HotRun,
+    HotTiling,
+    HotFloating,
+    HotFocusNext,
+    HotFocusPrevious,
+    HotClose,
+    HotMinimize,
+    HotMaximize,
+    HotSnapLeft,
+    HotSnapRight,
+    HotSnapUp,
+    HotSnapDown,
+    HotExit,
+    HotWorkspace1 = 30,
+    HotWorkspace2,
+    HotWorkspace3,
+    HotWorkspace4,
+    HotMoveWorkspace1 = 40,
+    HotMoveWorkspace2,
+    HotMoveWorkspace3,
+    HotMoveWorkspace4,
+};
+
+int ScaleForDpi(int value, UINT dpi) noexcept
+{
+    return MulDiv(value, static_cast<int>(dpi == 0 ? 96 : dpi), 96);
+}
+
+bool PointInside(const RECT& rectangle, POINT point) noexcept
+{
+    return point.x >= rectangle.left && point.x < rectangle.right &&
+        point.y >= rectangle.top && point.y < rectangle.bottom;
+}
+
+std::wstring ResolveExecutable(const wchar_t* executable)
+{
+    std::array<wchar_t, 32768> buffer{};
+    const DWORD length = SearchPathW(
+        nullptr,
+        executable,
+        nullptr,
+        static_cast<DWORD>(buffer.size()),
+        buffer.data(),
+        nullptr);
+    if (length > 0 && length < buffer.size())
+    {
+        return buffer.data();
+    }
+    return executable;
+}
+
+std::wstring QuoteExecutable(const std::wstring& executable)
+{
+    return L"\"" + executable + L"\"";
+}
+
+void FillSolid(HDC device, const RECT& rectangle, COLORREF color)
+{
+    HBRUSH brush = CreateSolidBrush(color);
+    FillRect(device, &rectangle, brush);
+    DeleteObject(brush);
+}
+
+void DrawPanel(HDC device, const RECT& rectangle, COLORREF fill, COLORREF outline, int radius)
+{
+    HBRUSH brush = CreateSolidBrush(fill);
+    HPEN pen = CreatePen(PS_SOLID, 1, outline);
+    const HGDIOBJ previous_brush = SelectObject(device, brush);
+    const HGDIOBJ previous_pen = SelectObject(device, pen);
+    RoundRect(
+        device,
+        rectangle.left,
+        rectangle.top,
+        rectangle.right,
+        rectangle.bottom,
+        radius,
+        radius);
+    SelectObject(device, previous_pen);
+    SelectObject(device, previous_brush);
+    DeleteObject(pen);
+    DeleteObject(brush);
+}
+
+void DrawTextValue(
+    HDC device,
+    std::wstring_view text,
+    RECT rectangle,
+    int point_size,
+    int weight,
+    COLORREF color,
+    UINT format = DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS)
+{
+    const UINT dpi = GetDeviceCaps(device, LOGPIXELSY);
+    HFONT font = CreateFontW(
+        -MulDiv(point_size, static_cast<int>(dpi == 0 ? 96 : dpi), 72),
+        0,
+        0,
+        0,
+        weight,
+        FALSE,
+        FALSE,
+        FALSE,
+        DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS,
+        CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY,
+        DEFAULT_PITCH | FF_DONTCARE,
+        L"Segoe UI");
+    const HGDIOBJ previous_font = font != nullptr ? SelectObject(device, font) : nullptr;
+    SetBkMode(device, TRANSPARENT);
+    SetTextColor(device, color);
+    DrawTextW(
+        device,
+        text.data(),
+        static_cast<int>(text.size()),
+        &rectangle,
+        format | DT_NOPREFIX);
+    if (previous_font != nullptr)
+    {
+        SelectObject(device, previous_font);
+    }
+    if (font != nullptr)
+    {
+        DeleteObject(font);
+    }
+}
 
 class CloudOSShell final
 {
 public:
-    explicit CloudOSShell(HINSTANCE instance) noexcept : instance_(instance) {}
-
-    bool Initialize(int showCommand)
+    explicit CloudOSShell(HINSTANCE instance) noexcept
+        : instance_(instance)
     {
-        const WNDCLASSEXW windowClass{
-            .cbSize = sizeof(WNDCLASSEXW),
-            .style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS,
-            .lpfnWndProc = &CloudOSShell::WindowProcedure,
-            .cbClsExtra = 0,
-            .cbWndExtra = 0,
-            .hInstance = instance_,
-            .hIcon = LoadIconW(nullptr, IDI_APPLICATION),
-            .hCursor = LoadCursorW(nullptr, IDC_ARROW),
-            .hbrBackground = nullptr,
-            .lpszMenuName = nullptr,
-            .lpszClassName = kWindowClassName,
-            .hIconSm = LoadIconW(nullptr, IDI_APPLICATION),
-        };
+    }
 
-        if (RegisterClassExW(&windowClass) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+    ~CloudOSShell()
+    {
+        Shutdown();
+    }
+
+    bool Initialize()
+    {
+        if (!RegisterClasses())
         {
             return false;
         }
 
-        window_ = CreateWindowExW(
-            WS_EX_APPWINDOW,
-            kWindowClassName,
-            L"CloudOS Native",
-            WS_OVERLAPPEDWINDOW,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            1440,
-            900,
+        MONITORINFO monitor{};
+        monitor.cbSize = sizeof(monitor);
+        if (!GetMonitorInfoW(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &monitor))
+        {
+            return false;
+        }
+
+        desktop_ = CreateWindowExW(
+            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            kDesktopClass,
+            L"CloudOS Native Desktop",
+            WS_POPUP,
+            monitor.rcWork.left,
+            monitor.rcWork.top,
+            monitor.rcWork.right - monitor.rcWork.left,
+            monitor.rcWork.bottom - monitor.rcWork.top,
             nullptr,
             nullptr,
             instance_,
             this);
-
-        if (window_ == nullptr)
+        if (desktop_ == nullptr)
         {
             return false;
         }
 
-        const BOOL darkMode = TRUE;
-        static constexpr DWORD immersiveDarkModeAttribute = 20;
+        taskbar_ = CreateWindowExW(
+            WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
+            kTaskbarClass,
+            L"CloudOS Native Taskbar",
+            WS_POPUP,
+            0,
+            0,
+            0,
+            0,
+            nullptr,
+            nullptr,
+            instance_,
+            this);
+        if (taskbar_ == nullptr)
+        {
+            Shutdown();
+            return false;
+        }
+
+        start_ = CreateWindowExW(
+            WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
+            kStartClass,
+            L"CloudOS Start",
+            WS_POPUP,
+            0,
+            0,
+            0,
+            0,
+            taskbar_,
+            nullptr,
+            instance_,
+            this);
+        if (start_ == nullptr)
+        {
+            Shutdown();
+            return false;
+        }
+
+        const BOOL dark_mode = TRUE;
+        constexpr DWORD immersive_dark_mode_attribute = 20;
         (void)DwmSetWindowAttribute(
-            window_,
-            immersiveDarkModeAttribute,
-            &darkMode,
-            sizeof(darkMode));
+            start_,
+            immersive_dark_mode_attribute,
+            &dark_mode,
+            static_cast<DWORD>(sizeof(dark_mode)));
 
-        if (!InitializeGraphics())
+        RepositionShellWindows();
+        ShowWindow(desktop_, SW_SHOWNOACTIVATE);
+        SetWindowPos(
+            desktop_,
+            HWND_BOTTOM,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        ShowWindow(taskbar_, SW_SHOWNOACTIVATE);
+        ShowWindow(start_, SW_HIDE);
+
+        window_manager_.SetReservedBottomPixels(TaskbarHeight());
+        if (!window_manager_.Initialize(desktop_))
         {
+            Shutdown();
             return false;
         }
 
-        ShowWindow(window_, showCommand == SW_HIDE ? SW_SHOW : SW_MAXIMIZE);
-        UpdateWindow(window_);
+        RegisterHotKeys();
+        SetTimer(desktop_, kReconcileTimer, 1000, nullptr);
+        InvalidateAll();
         return true;
     }
 
@@ -98,422 +307,770 @@ public:
     }
 
 private:
-    bool InitializeGraphics()
+    bool RegisterClasses()
     {
-        if (FAILED(D2D1CreateFactory(
-                D2D1_FACTORY_TYPE_SINGLE_THREADED,
-                IID_PPV_ARGS(d2dFactory_.ReleaseAndGetAddressOf()))))
+        const struct ClassDefinition
         {
-            return false;
-        }
-
-        if (FAILED(DWriteCreateFactory(
-                DWRITE_FACTORY_TYPE_SHARED,
-                __uuidof(IDWriteFactory),
-                reinterpret_cast<IUnknown**>(dwriteFactory_.ReleaseAndGetAddressOf()))))
-        {
-            return false;
-        }
-
-        const HRESULT titleResult = dwriteFactory_->CreateTextFormat(
-            L"Segoe UI",
-            nullptr,
-            DWRITE_FONT_WEIGHT_SEMI_BOLD,
-            DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL,
-            28.0f,
-            L"pt-BR",
-            titleFormat_.ReleaseAndGetAddressOf());
-        if (FAILED(titleResult))
-        {
-            return false;
-        }
-
-        const HRESULT bodyResult = dwriteFactory_->CreateTextFormat(
-            L"Segoe UI",
-            nullptr,
-            DWRITE_FONT_WEIGHT_NORMAL,
-            DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL,
-            15.0f,
-            L"pt-BR",
-            bodyFormat_.ReleaseAndGetAddressOf());
-        if (FAILED(bodyResult))
-        {
-            return false;
-        }
-
-        const HRESULT menuResult = dwriteFactory_->CreateTextFormat(
-            L"Segoe UI",
-            nullptr,
-            DWRITE_FONT_WEIGHT_SEMI_BOLD,
-            DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL,
-            17.0f,
-            L"pt-BR",
-            menuFormat_.ReleaseAndGetAddressOf());
-        return SUCCEEDED(menuResult);
-    }
-
-    bool CreateDeviceResources()
-    {
-        if (renderTarget_ != nullptr)
-        {
-            return true;
-        }
-
-        RECT client{};
-        if (!GetClientRect(window_, &client))
-        {
-            return false;
-        }
-
-        const auto width = static_cast<UINT32>(std::max<LONG>(1, client.right - client.left));
-        const auto height = static_cast<UINT32>(std::max<LONG>(1, client.bottom - client.top));
-
-        const HRESULT renderResult = d2dFactory_->CreateHwndRenderTarget(
-            D2D1::RenderTargetProperties(),
-            D2D1::HwndRenderTargetProperties(window_, D2D1::SizeU(width, height)),
-            renderTarget_.ReleaseAndGetAddressOf());
-        if (FAILED(renderResult))
-        {
-            return false;
-        }
-
-        struct BrushDefinition
-        {
-            D2D1_COLOR_F color;
-            ComPtr<ID2D1SolidColorBrush>* brush;
+            const wchar_t* name;
+            WNDPROC procedure;
+            HCURSOR cursor;
+        } definitions[] = {
+            {kDesktopClass, &CloudOSShell::DesktopProcedure, LoadCursorW(nullptr, IDC_ARROW)},
+            {kTaskbarClass, &CloudOSShell::TaskbarProcedure, LoadCursorW(nullptr, IDC_HAND)},
+            {kStartClass, &CloudOSShell::StartProcedure, LoadCursorW(nullptr, IDC_ARROW)},
         };
 
-        const std::array<BrushDefinition, 7> brushes{{
-            {D2D1::ColorF(0x10131A), &backgroundBrush_},
-            {D2D1::ColorF(0x171B24, 0.97f), &taskbarBrush_},
-            {D2D1::ColorF(0x252B38), &panelBrush_},
-            {D2D1::ColorF(0x3A4355), &borderBrush_},
-            {D2D1::ColorF(0xF4F7FB), &primaryTextBrush_},
-            {D2D1::ColorF(0x9AA6B6), &secondaryTextBrush_},
-            {D2D1::ColorF(0x5B8CFF), &accentBrush_},
-        }};
-
-        for (const auto& definition : brushes)
+        for (const auto& definition : definitions)
         {
-            if (FAILED(renderTarget_->CreateSolidColorBrush(
-                    definition.color,
-                    definition.brush->ReleaseAndGetAddressOf())))
+            WNDCLASSEXW window_class{};
+            window_class.cbSize = sizeof(window_class);
+            window_class.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
+            window_class.lpfnWndProc = definition.procedure;
+            window_class.hInstance = instance_;
+            window_class.hCursor = definition.cursor;
+            window_class.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+            window_class.hbrBackground = nullptr;
+            window_class.lpszClassName = definition.name;
+            window_class.hIconSm = LoadIconW(nullptr, IDI_APPLICATION);
+            if (RegisterClassExW(&window_class) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
             {
-                DiscardDeviceResources();
                 return false;
             }
         }
-
         return true;
     }
 
-    void DiscardDeviceResources() noexcept
+    int TaskbarHeight() const noexcept
     {
-        accentBrush_.Reset();
-        secondaryTextBrush_.Reset();
-        primaryTextBrush_.Reset();
-        borderBrush_.Reset();
-        panelBrush_.Reset();
-        taskbarBrush_.Reset();
-        backgroundBrush_.Reset();
-        renderTarget_.Reset();
+        const UINT dpi = taskbar_ != nullptr ? GetDpiForWindow(taskbar_) : 96;
+        return ScaleForDpi(kBaseTaskbarHeight, dpi);
     }
 
-    void Paint()
+    void RepositionShellWindows()
     {
-        PAINTSTRUCT paint{};
-        BeginPaint(window_, &paint);
-
-        if (!CreateDeviceResources())
+        MONITORINFO monitor{};
+        monitor.cbSize = sizeof(monitor);
+        const HMONITOR primary = MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
+        if (!GetMonitorInfoW(primary, &monitor))
         {
-            EndPaint(window_, &paint);
             return;
         }
 
-        renderTarget_->BeginDraw();
-        renderTarget_->Clear(backgroundBrush_->GetColor());
+        const int taskbar_height = TaskbarHeight();
+        const int work_width = monitor.rcWork.right - monitor.rcWork.left;
+        const int work_height = monitor.rcWork.bottom - monitor.rcWork.top;
 
-        const auto size = renderTarget_->GetSize();
-        DrawDesktop(size.width, size.height);
-
-        const HRESULT result = renderTarget_->EndDraw();
-        if (result == D2DERR_RECREATE_TARGET)
+        if (desktop_ != nullptr)
         {
-            DiscardDeviceResources();
+            SetWindowPos(
+                desktop_,
+                HWND_BOTTOM,
+                monitor.rcWork.left,
+                monitor.rcWork.top,
+                work_width,
+                work_height,
+                SWP_NOACTIVATE | SWP_SHOWWINDOW);
         }
 
-        EndPaint(window_, &paint);
-    }
-
-    void DrawDesktop(float width, float height)
-    {
-        const auto workspaceBottom = std::max(0.0f, height - kTaskbarHeight);
-
-        const D2D1_ROUNDED_RECT statusCard{
-            .rect = D2D1::RectF(28.0f, 26.0f, 465.0f, 144.0f),
-            .radiusX = 16.0f,
-            .radiusY = 16.0f,
-        };
-        renderTarget_->FillRoundedRectangle(statusCard, panelBrush_.Get());
-        renderTarget_->DrawRoundedRectangle(statusCard, borderBrush_.Get(), 1.0f);
-
-        DrawTextLine(L"CloudOS Native", titleFormat_.Get(), primaryTextBrush_.Get(), 48.0f, 46.0f, 390.0f, 42.0f);
-        DrawTextLine(L"C++ / Win32 / Direct2D / DirectWrite", bodyFormat_.Get(), secondaryTextBrush_.Get(), 49.0f, 91.0f, 390.0f, 28.0f);
-
-        const D2D1_ROUNDED_RECT nativeChip{
-            .rect = D2D1::RectF(28.0f, 162.0f, 245.0f, 202.0f),
-            .radiusX = 12.0f,
-            .radiusY = 12.0f,
-        };
-        renderTarget_->FillRoundedRectangle(nativeChip, panelBrush_.Get());
-        renderTarget_->DrawRoundedRectangle(nativeChip, accentBrush_.Get(), 1.0f);
-        DrawTextLine(L"WEB RUNTIME: OFF", menuFormat_.Get(), primaryTextBrush_.Get(), 45.0f, 171.0f, 190.0f, 25.0f);
-
-        const D2D1_RECT_F taskbar = D2D1::RectF(0.0f, workspaceBottom, width, height);
-        renderTarget_->FillRectangle(taskbar, taskbarBrush_.Get());
-        renderTarget_->DrawLine(
-            D2D1::Point2F(0.0f, workspaceBottom),
-            D2D1::Point2F(width, workspaceBottom),
-            borderBrush_.Get(),
-            1.0f);
-
-        const auto start = StartButtonRect(width, height);
-        const D2D1_ROUNDED_RECT startBackground{
-            .rect = start,
-            .radiusX = 10.0f,
-            .radiusY = 10.0f,
-        };
-        renderTarget_->FillRoundedRectangle(startBackground, startMenuOpen_ ? panelBrush_.Get() : taskbarBrush_.Get());
-        renderTarget_->DrawRoundedRectangle(startBackground, startMenuOpen_ ? accentBrush_.Get() : borderBrush_.Get(), 1.0f);
-        DrawWindowsGlyph(start);
-
-        DrawTextLine(L"CloudOS.NativeShell.exe", bodyFormat_.Get(), secondaryTextBrush_.Get(), start.right + 14.0f, workspaceBottom + 19.0f, 250.0f, 24.0f);
-
-        if (startMenuOpen_)
+        if (taskbar_ != nullptr)
         {
-            DrawStartMenu(width, height);
+            SetWindowPos(
+                taskbar_,
+                HWND_TOPMOST,
+                monitor.rcWork.left,
+                monitor.rcWork.bottom - taskbar_height,
+                work_width,
+                taskbar_height,
+                SWP_NOACTIVATE | SWP_SHOWWINDOW);
         }
-    }
 
-    void DrawStartMenu(float width, float height)
-    {
-        const auto start = StartButtonRect(width, height);
-        const float left = std::max(18.0f, start.left - 14.0f);
-        const float bottom = start.top - 12.0f;
-        const float top = std::max(18.0f, bottom - kStartMenuHeight);
-        const D2D1_ROUNDED_RECT panel{
-            .rect = D2D1::RectF(left, top, left + kStartMenuWidth, bottom),
-            .radiusX = 20.0f,
-            .radiusY = 20.0f,
-        };
-        renderTarget_->FillRoundedRectangle(panel, panelBrush_.Get());
-        renderTarget_->DrawRoundedRectangle(panel, borderBrush_.Get(), 1.0f);
-
-        DrawTextLine(L"CloudOS", titleFormat_.Get(), primaryTextBrush_.Get(), left + 24.0f, top + 24.0f, 250.0f, 40.0f);
-        DrawTextLine(L"Runtime nativo do Windows", bodyFormat_.Get(), secondaryTextBrush_.Get(), left + 25.0f, top + 66.0f, 285.0f, 28.0f);
-
-        const std::array<std::wstring_view, 4> items{
-            L"Terminal nativo (ConPTY)",
-            L"Arquivos",
-            L"Processos",
-            L"Configurações",
-        };
-
-        float y = top + 125.0f;
-        for (const auto item : items)
+        if (start_ != nullptr)
         {
-            const D2D1_ROUNDED_RECT row{
-                .rect = D2D1::RectF(left + 18.0f, y, left + kStartMenuWidth - 18.0f, y + 54.0f),
-                .radiusX = 12.0f,
-                .radiusY = 12.0f,
-            };
-            renderTarget_->DrawRoundedRectangle(row, borderBrush_.Get(), 1.0f);
-            DrawTextLine(item, menuFormat_.Get(), primaryTextBrush_.Get(), left + 36.0f, y + 16.0f, kStartMenuWidth - 72.0f, 26.0f);
-            y += 64.0f;
+            const UINT dpi = GetDpiForWindow(start_);
+            const int start_width = ScaleForDpi(kBaseStartWidth, dpi);
+            const int start_height = ScaleForDpi(kBaseStartHeight, dpi);
+            const int margin = ScaleForDpi(12, dpi);
+            SetWindowPos(
+                start_,
+                HWND_TOPMOST,
+                monitor.rcWork.left + margin,
+                monitor.rcWork.bottom - taskbar_height - start_height - margin,
+                start_width,
+                start_height,
+                SWP_NOACTIVATE | (IsWindowVisible(start_) ? SWP_SHOWWINDOW : 0));
         }
+
+        window_manager_.SetReservedBottomPixels(taskbar_height);
     }
 
-    void DrawWindowsGlyph(const D2D1_RECT_F& bounds)
+    void RegisterHotKeys()
     {
-        constexpr float gap = 2.5f;
-        constexpr float tile = 8.0f;
-        const float centerX = (bounds.left + bounds.right) * 0.5f;
-        const float centerY = (bounds.top + bounds.bottom) * 0.5f;
-        const float left = centerX - tile - gap * 0.5f;
-        const float top = centerY - tile - gap * 0.5f;
+        const UINT modifiers = MOD_CONTROL | MOD_ALT | MOD_NOREPEAT;
+        const UINT move_modifiers = MOD_CONTROL | MOD_ALT | MOD_SHIFT | MOD_NOREPEAT;
 
-        renderTarget_->FillRectangle(D2D1::RectF(left, top, left + tile, top + tile), accentBrush_.Get());
-        renderTarget_->FillRectangle(D2D1::RectF(left + tile + gap, top, left + tile * 2.0f + gap, top + tile), accentBrush_.Get());
-        renderTarget_->FillRectangle(D2D1::RectF(left, top + tile + gap, left + tile, top + tile * 2.0f + gap), accentBrush_.Get());
-        renderTarget_->FillRectangle(D2D1::RectF(left + tile + gap, top + tile + gap, left + tile * 2.0f + gap, top + tile * 2.0f + gap), accentBrush_.Get());
-    }
-
-    void DrawTextLine(
-        const std::wstring_view text,
-        IDWriteTextFormat* format,
-        ID2D1Brush* brush,
-        float x,
-        float y,
-        float width,
-        float height)
-    {
-        const auto layout = D2D1::RectF(x, y, x + width, y + height);
-        renderTarget_->DrawTextW(
-            text.data(),
-            static_cast<UINT32>(text.size()),
-            format,
-            layout,
-            brush,
-            D2D1_DRAW_TEXT_OPTIONS_CLIP);
-    }
-
-    D2D1_RECT_F StartButtonRect(float width, float height) const noexcept
-    {
-        const float taskbarTop = std::max(0.0f, height - kTaskbarHeight);
-        const float left = std::max(16.0f, width * 0.5f - 160.0f);
-        const float top = taskbarTop + (kTaskbarHeight - kStartButtonSize) * 0.5f;
-        return D2D1::RectF(left, top, left + kStartButtonSize, top + kStartButtonSize);
-    }
-
-    void Resize(UINT width, UINT height)
-    {
-        if (renderTarget_ != nullptr && width > 0 && height > 0)
+        const struct Binding
         {
-            const HRESULT result = renderTarget_->Resize(D2D1::SizeU(width, height));
-            if (FAILED(result))
+            int id;
+            UINT modifiers;
+            UINT key;
+        } bindings[] = {
+            {HotTerminal, modifiers, VK_RETURN},
+            {HotWslTerminal, modifiers, L'K'},
+            {HotFiles, modifiers, L'E'},
+            {HotApps, modifiers, L'A'},
+            {HotProcesses, modifiers, L'P'},
+            {HotRun, modifiers, L'R'},
+            {HotTiling, modifiers, L'T'},
+            {HotFloating, modifiers, L'F'},
+            {HotFocusNext, modifiers, L'J'},
+            {HotFocusPrevious, modifiers, L'H'},
+            {HotClose, modifiers, L'Q'},
+            {HotMinimize, modifiers, L'M'},
+            {HotMaximize, modifiers, L'Z'},
+            {HotSnapLeft, modifiers, VK_LEFT},
+            {HotSnapRight, modifiers, VK_RIGHT},
+            {HotSnapUp, modifiers, VK_UP},
+            {HotSnapDown, modifiers, VK_DOWN},
+            {HotExit, modifiers, L'X'},
+            {HotWorkspace1, modifiers, L'1'},
+            {HotWorkspace2, modifiers, L'2'},
+            {HotWorkspace3, modifiers, L'3'},
+            {HotWorkspace4, modifiers, L'4'},
+            {HotMoveWorkspace1, move_modifiers, L'1'},
+            {HotMoveWorkspace2, move_modifiers, L'2'},
+            {HotMoveWorkspace3, move_modifiers, L'3'},
+            {HotMoveWorkspace4, move_modifiers, L'4'},
+        };
+
+        registered_hotkeys_.clear();
+        for (const auto& binding : bindings)
+        {
+            if (RegisterHotKey(desktop_, binding.id, binding.modifiers, binding.key))
             {
-                DiscardDeviceResources();
+                registered_hotkeys_.push_back(binding.id);
             }
         }
-        InvalidateRect(window_, nullptr, FALSE);
+    }
+
+    void UnregisterHotKeys() noexcept
+    {
+        if (desktop_ != nullptr)
+        {
+            for (int id : registered_hotkeys_)
+            {
+                UnregisterHotKey(desktop_, id);
+            }
+        }
+        registered_hotkeys_.clear();
+    }
+
+    void Shutdown() noexcept
+    {
+        if (shutting_down_)
+        {
+            return;
+        }
+        shutting_down_ = true;
+
+        if (desktop_ != nullptr)
+        {
+            KillTimer(desktop_, kReconcileTimer);
+        }
+        UnregisterHotKeys();
+        window_manager_.Shutdown();
+
+        if (start_ != nullptr && IsWindow(start_))
+        {
+            DestroyWindow(start_);
+        }
+        start_ = nullptr;
+
+        if (taskbar_ != nullptr && IsWindow(taskbar_))
+        {
+            DestroyWindow(taskbar_);
+        }
+        taskbar_ = nullptr;
+
+        if (desktop_ != nullptr && IsWindow(desktop_))
+        {
+            DestroyWindow(desktop_);
+        }
+        desktop_ = nullptr;
+    }
+
+    void InvalidateAll()
+    {
+        if (desktop_ != nullptr)
+        {
+            InvalidateRect(desktop_, nullptr, FALSE);
+        }
+        if (taskbar_ != nullptr)
+        {
+            InvalidateRect(taskbar_, nullptr, FALSE);
+        }
+        if (start_ != nullptr && IsWindowVisible(start_))
+        {
+            InvalidateRect(start_, nullptr, FALSE);
+        }
     }
 
     void ToggleStartMenu()
     {
-        startMenuOpen_ = !startMenuOpen_;
-        InvalidateRect(window_, nullptr, FALSE);
+        if (start_ == nullptr)
+        {
+            return;
+        }
+
+        if (IsWindowVisible(start_))
+        {
+            ShowWindow(start_, SW_HIDE);
+            return;
+        }
+
+        RepositionShellWindows();
+        ShowWindow(start_, SW_SHOW);
+        SetWindowPos(
+            start_,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+        SetForegroundWindow(start_);
+        InvalidateRect(start_, nullptr, FALSE);
     }
 
-    void ToggleFullscreen()
+    void HideStartMenu()
     {
-        if (!fullscreen_)
+        if (start_ != nullptr && IsWindowVisible(start_))
         {
-            savedStyle_ = static_cast<DWORD>(GetWindowLongPtrW(window_, GWL_STYLE));
-            savedPlacement_.length = sizeof(WINDOWPLACEMENT);
-            if (!GetWindowPlacement(window_, &savedPlacement_))
-            {
-                return;
-            }
-
-            MONITORINFO monitorInfo{.cbSize = sizeof(MONITORINFO)};
-            if (!GetMonitorInfoW(MonitorFromWindow(window_, MONITOR_DEFAULTTONEAREST), &monitorInfo))
-            {
-                return;
-            }
-
-            SetWindowLongPtrW(window_, GWL_STYLE, static_cast<LONG_PTR>(savedStyle_ & ~WS_OVERLAPPEDWINDOW));
-            SetWindowPos(
-                window_,
-                HWND_TOP,
-                monitorInfo.rcMonitor.left,
-                monitorInfo.rcMonitor.top,
-                monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left,
-                monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top,
-                SWP_FRAMECHANGED | SWP_NOOWNERZORDER);
-            fullscreen_ = true;
+            ShowWindow(start_, SW_HIDE);
         }
-        else
-        {
-            SetWindowLongPtrW(window_, GWL_STYLE, static_cast<LONG_PTR>(savedStyle_));
-            SetWindowPlacement(window_, &savedPlacement_);
-            SetWindowPos(
-                window_,
-                nullptr,
-                0,
-                0,
-                0,
-                0,
-                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER);
-            fullscreen_ = false;
-        }
-        InvalidateRect(window_, nullptr, FALSE);
     }
 
-    LRESULT HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
+    void OpenTerminal()
+    {
+        const std::wstring executable = ResolveExecutable(L"powershell.exe");
+        std::wstring command = QuoteExecutable(executable) + L" -NoLogo -NoProfile";
+        CloudOSNativeTerminalWindow::Open(instance_, command, L"Terminal - CloudOS");
+        window_manager_.Reconcile();
+        InvalidateAll();
+    }
+
+    void OpenWslTerminal()
+    {
+        const std::wstring executable = ResolveExecutable(L"wsl.exe");
+        if (executable == L"wsl.exe" && GetFileAttributesW(executable.c_str()) == INVALID_FILE_ATTRIBUTES)
+        {
+            MessageBoxW(
+                desktop_,
+                L"WSL nao foi encontrado neste Windows.",
+                L"CloudOS",
+                MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        BOOL kali_registered = FALSE;
+        std::wstring command = QuoteExecutable(executable);
+        if (cloudos_native_wsl_is_registered(L"kali-linux", &kali_registered) && kali_registered)
+        {
+            command += L" -d kali-linux";
+        }
+
+        CloudOSNativeTerminalWindow::Open(instance_, command, L"WSL / Kali - CloudOS");
+        window_manager_.Reconcile();
+        InvalidateAll();
+    }
+
+    void LaunchStartItem(std::size_t index)
+    {
+        HideStartMenu();
+        switch (index)
+        {
+        case 0:
+            OpenTerminal();
+            break;
+        case 1:
+            OpenWslTerminal();
+            break;
+        case 2:
+            CloudOSNativeAppsWindow::Open(instance_);
+            break;
+        case 3:
+            CloudOSNativeFilesWindow::Open(instance_);
+            break;
+        case 4:
+            CloudOSNativeProcessWindow::Open(instance_);
+            break;
+        case 5:
+            CloudOSNativeRunWindow::Open(instance_);
+            break;
+        case 6:
+            window_manager_.ToggleTiling();
+            break;
+        case 7:
+            PostMessageW(desktop_, WM_CLOSE, 0, 0);
+            return;
+        default:
+            return;
+        }
+
+        window_manager_.Reconcile();
+        InvalidateAll();
+    }
+
+    void HandleHotKey(int id)
+    {
+        if (id >= HotWorkspace1 && id <= HotWorkspace4)
+        {
+            window_manager_.SwitchWorkspace(id - HotWorkspace1);
+            HideStartMenu();
+            InvalidateAll();
+            return;
+        }
+        if (id >= HotMoveWorkspace1 && id <= HotMoveWorkspace4)
+        {
+            window_manager_.MoveActiveToWorkspace(id - HotMoveWorkspace1);
+            InvalidateAll();
+            return;
+        }
+
+        switch (id)
+        {
+        case HotTerminal:
+            OpenTerminal();
+            break;
+        case HotWslTerminal:
+            OpenWslTerminal();
+            break;
+        case HotFiles:
+            CloudOSNativeFilesWindow::Open(instance_);
+            break;
+        case HotApps:
+            CloudOSNativeAppsWindow::Open(instance_);
+            break;
+        case HotProcesses:
+            CloudOSNativeProcessWindow::Open(instance_);
+            break;
+        case HotRun:
+            CloudOSNativeRunWindow::Open(instance_);
+            break;
+        case HotTiling:
+            window_manager_.ToggleTiling();
+            break;
+        case HotFloating:
+            window_manager_.ToggleFloatingActive();
+            break;
+        case HotFocusNext:
+            window_manager_.FocusNext(false);
+            break;
+        case HotFocusPrevious:
+            window_manager_.FocusNext(true);
+            break;
+        case HotClose:
+            window_manager_.CloseActive();
+            break;
+        case HotMinimize:
+            window_manager_.MinimizeActive();
+            break;
+        case HotMaximize:
+            window_manager_.ToggleMaximizeActive();
+            break;
+        case HotSnapLeft:
+            window_manager_.SnapActive(CloudOSSnapDirection::Left);
+            break;
+        case HotSnapRight:
+            window_manager_.SnapActive(CloudOSSnapDirection::Right);
+            break;
+        case HotSnapUp:
+            window_manager_.SnapActive(CloudOSSnapDirection::Up);
+            break;
+        case HotSnapDown:
+            window_manager_.SnapActive(CloudOSSnapDirection::Down);
+            break;
+        case HotExit:
+            PostMessageW(desktop_, WM_CLOSE, 0, 0);
+            return;
+        default:
+            break;
+        }
+
+        window_manager_.Reconcile();
+        InvalidateAll();
+    }
+
+    void PaintDesktop()
+    {
+        PAINTSTRUCT paint{};
+        HDC device = BeginPaint(desktop_, &paint);
+        RECT client{};
+        GetClientRect(desktop_, &client);
+        FillSolid(device, client, kDesktopBackground);
+
+        const UINT dpi = GetDpiForWindow(desktop_);
+        RECT card{
+            ScaleForDpi(28, dpi),
+            ScaleForDpi(28, dpi),
+            ScaleForDpi(570, dpi),
+            ScaleForDpi(205, dpi),
+        };
+        DrawPanel(
+            device,
+            card,
+            kPanelBackground,
+            kBorder,
+            ScaleForDpi(18, dpi));
+
+        RECT title{
+            card.left + ScaleForDpi(24, dpi),
+            card.top + ScaleForDpi(20, dpi),
+            card.right - ScaleForDpi(20, dpi),
+            card.top + ScaleForDpi(65, dpi),
+        };
+        DrawTextValue(device, L"CloudOS Native", title, 25, FW_SEMIBOLD, kPrimaryText);
+
+        RECT subtitle{
+            title.left,
+            title.bottom,
+            card.right - ScaleForDpi(20, dpi),
+            title.bottom + ScaleForDpi(30, dpi),
+        };
+        DrawTextValue(
+            device,
+            L"C++ / Win32 / ConPTY / WSL / HWND real",
+            subtitle,
+            11,
+            FW_NORMAL,
+            kSecondaryText);
+
+        const std::wstring status =
+            L"Workspace " + std::to_wstring(window_manager_.CurrentWorkspace() + 1) +
+            L"  |  Janelas " + std::to_wstring(window_manager_.ManagedWindowCount()) +
+            L"  |  Tiling " + (window_manager_.TilingEnabled() ? L"ON" : L"OFF");
+        RECT status_rect{
+            title.left,
+            subtitle.bottom + ScaleForDpi(12, dpi),
+            card.right - ScaleForDpi(20, dpi),
+            subtitle.bottom + ScaleForDpi(42, dpi),
+        };
+        DrawTextValue(device, status, status_rect, 11, FW_SEMIBOLD, kAccent);
+
+        RECT runtime_rect{
+            title.left,
+            status_rect.bottom + ScaleForDpi(6, dpi),
+            card.right - ScaleForDpi(20, dpi),
+            status_rect.bottom + ScaleForDpi(34, dpi),
+        };
+        DrawTextValue(
+            device,
+            L"WEB RUNTIME: OFF  |  React / Vite / Node / WebView2: fora do boot",
+            runtime_rect,
+            10,
+            FW_SEMIBOLD,
+            kPrimaryText);
+
+        RECT help{
+            ScaleForDpi(30, dpi),
+            client.bottom - TaskbarHeight() - ScaleForDpi(76, dpi),
+            client.right - ScaleForDpi(30, dpi),
+            client.bottom - TaskbarHeight() - ScaleForDpi(20, dpi),
+        };
+        DrawTextValue(
+            device,
+            L"Ctrl+Alt: Enter terminal | K WSL | E arquivos | A apps | P processos | R executar | T tiling | 1-4 workspaces",
+            help,
+            10,
+            FW_NORMAL,
+            kSecondaryText,
+            DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_CENTER);
+
+        EndPaint(desktop_, &paint);
+    }
+
+    void PaintTaskbar()
+    {
+        PAINTSTRUCT paint{};
+        HDC device = BeginPaint(taskbar_, &paint);
+        RECT client{};
+        GetClientRect(taskbar_, &client);
+        FillSolid(device, client, RGB(20, 24, 33));
+
+        const UINT dpi = GetDpiForWindow(taskbar_);
+        const int margin = ScaleForDpi(8, dpi);
+        const int button_height = std::max(26, (client.bottom - client.top) - margin * 2);
+
+        start_button_rect_ = RECT{
+            margin,
+            margin,
+            margin + ScaleForDpi(112, dpi),
+            margin + button_height,
+        };
+        DrawPanel(
+            device,
+            start_button_rect_,
+            IsWindowVisible(start_) ? kPanelHover : kPanelBackground,
+            IsWindowVisible(start_) ? kAccent : kBorder,
+            ScaleForDpi(10, dpi));
+        RECT start_text = start_button_rect_;
+        start_text.left += ScaleForDpi(14, dpi);
+        DrawTextValue(device, L"CloudOS", start_text, 11, FW_SEMIBOLD, kPrimaryText);
+
+        workspace_rects_.fill(RECT{});
+        const int workspace_width = ScaleForDpi(34, dpi);
+        const int workspace_gap = ScaleForDpi(6, dpi);
+        const int clock_width = ScaleForDpi(92, dpi);
+        int right = client.right - margin - clock_width;
+        for (int workspace = 3; workspace >= 0; --workspace)
+        {
+            RECT rectangle{
+                right - workspace_width,
+                margin,
+                right,
+                margin + button_height,
+            };
+            workspace_rects_[static_cast<std::size_t>(workspace)] = rectangle;
+            DrawPanel(
+                device,
+                rectangle,
+                workspace == window_manager_.CurrentWorkspace() ? kAccent : kPanelBackground,
+                workspace == window_manager_.CurrentWorkspace() ? kAccent : kBorder,
+                ScaleForDpi(8, dpi));
+            const std::wstring label = std::to_wstring(workspace + 1);
+            DrawTextValue(
+                device,
+                label,
+                rectangle,
+                10,
+                FW_SEMIBOLD,
+                kPrimaryText,
+                DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+            right = rectangle.left - workspace_gap;
+        }
+
+        SYSTEMTIME local_time{};
+        GetLocalTime(&local_time);
+        wchar_t clock[32]{};
+        swprintf_s(clock, L"%02u:%02u", local_time.wHour, local_time.wMinute);
+        RECT clock_rect{
+            client.right - margin - clock_width,
+            margin,
+            client.right - margin,
+            margin + button_height,
+        };
+        DrawTextValue(
+            device,
+            clock,
+            clock_rect,
+            10,
+            FW_SEMIBOLD,
+            kPrimaryText,
+            DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
+
+        const int tasks_left = start_button_rect_.right + margin;
+        const int tasks_right = right - margin;
+        task_hits_.clear();
+        const auto windows = window_manager_.CurrentWorkspaceWindows();
+        const std::size_t visible_count = std::min<std::size_t>(windows.size(), 8u);
+        if (visible_count > 0 && tasks_right > tasks_left)
+        {
+            const int available = tasks_right - tasks_left;
+            const int button_width = std::clamp(
+                available / static_cast<int>(visible_count),
+                ScaleForDpi(92, dpi),
+                ScaleForDpi(220, dpi));
+            int left = tasks_left;
+            for (std::size_t index = 0; index < visible_count && left < tasks_right; ++index)
+            {
+                RECT rectangle{
+                    left,
+                    margin,
+                    std::min(tasks_right, left + button_width - workspace_gap),
+                    margin + button_height,
+                };
+                if (rectangle.right <= rectangle.left)
+                {
+                    break;
+                }
+
+                const bool active = windows[index].hwnd == window_manager_.ActiveManagedWindow();
+                DrawPanel(
+                    device,
+                    rectangle,
+                    active ? kPanelHover : kPanelBackground,
+                    active ? kAccent : kBorder,
+                    ScaleForDpi(8, dpi));
+
+                RECT text_rectangle = rectangle;
+                text_rectangle.left += ScaleForDpi(10, dpi);
+                text_rectangle.right -= ScaleForDpi(8, dpi);
+                DrawTextValue(
+                    device,
+                    windows[index].title,
+                    text_rectangle,
+                    9,
+                    active ? FW_SEMIBOLD : FW_NORMAL,
+                    active ? kPrimaryText : kSecondaryText);
+                task_hits_.push_back({windows[index].hwnd, rectangle});
+                left += button_width;
+            }
+        }
+
+        EndPaint(taskbar_, &paint);
+    }
+
+    std::array<std::wstring, 8> StartLabels() const
+    {
+        return {
+            L"Terminal nativo (ConPTY)",
+            L"WSL / Kali terminal",
+            L"Aplicativos do Windows",
+            L"Arquivos Windows + WSL",
+            L"Processos",
+            L"Executar",
+            window_manager_.TilingEnabled() ? L"Desativar tiling" : L"Ativar tiling",
+            L"Sair do CloudOS",
+        };
+    }
+
+    void PaintStart()
+    {
+        PAINTSTRUCT paint{};
+        HDC device = BeginPaint(start_, &paint);
+        RECT client{};
+        GetClientRect(start_, &client);
+        FillSolid(device, client, RGB(22, 27, 37));
+
+        const UINT dpi = GetDpiForWindow(start_);
+        RECT title{
+            ScaleForDpi(24, dpi),
+            ScaleForDpi(18, dpi),
+            client.right - ScaleForDpi(20, dpi),
+            ScaleForDpi(58, dpi),
+        };
+        DrawTextValue(device, L"CloudOS", title, 22, FW_SEMIBOLD, kPrimaryText);
+
+        RECT subtitle{
+            title.left,
+            title.bottom,
+            title.right,
+            title.bottom + ScaleForDpi(26, dpi),
+        };
+        DrawTextValue(device, L"Sistema nativo do Windows", subtitle, 10, FW_NORMAL, kSecondaryText);
+
+        const auto labels = StartLabels();
+        const int row_height = ScaleForDpi(48, dpi);
+        const int gap = ScaleForDpi(7, dpi);
+        int top = subtitle.bottom + ScaleForDpi(18, dpi);
+        start_item_rects_.fill(RECT{});
+
+        for (std::size_t index = 0; index < labels.size(); ++index)
+        {
+            RECT row{
+                ScaleForDpi(18, dpi),
+                top,
+                client.right - ScaleForDpi(18, dpi),
+                top + row_height,
+            };
+            start_item_rects_[index] = row;
+            DrawPanel(device, row, kPanelBackground, kBorder, ScaleForDpi(10, dpi));
+            RECT text = row;
+            text.left += ScaleForDpi(16, dpi);
+            text.right -= ScaleForDpi(12, dpi);
+            DrawTextValue(
+                device,
+                labels[index],
+                text,
+                10,
+                index == 7 ? FW_SEMIBOLD : FW_NORMAL,
+                index == 7 ? RGB(255, 175, 175) : kPrimaryText);
+            top += row_height + gap;
+        }
+
+        EndPaint(start_, &paint);
+    }
+
+    LRESULT HandleDesktopMessage(UINT message, WPARAM w_param, LPARAM l_param)
     {
         switch (message)
         {
         case WM_PAINT:
-            Paint();
+            PaintDesktop();
             return 0;
 
         case WM_ERASEBKGND:
             return 1;
 
-        case WM_SIZE:
-            Resize(LOWORD(lParam), HIWORD(lParam));
-            return 0;
-
-        case WM_DPICHANGED:
-        {
-            const auto* suggested = reinterpret_cast<const RECT*>(lParam);
-            SetWindowPos(
-                window_,
-                nullptr,
-                suggested->left,
-                suggested->top,
-                suggested->right - suggested->left,
-                suggested->bottom - suggested->top,
-                SWP_NOACTIVATE | SWP_NOZORDER);
-            DiscardDeviceResources();
-            InvalidateRect(window_, nullptr, FALSE);
-            return 0;
-        }
-
-        case WM_LBUTTONUP:
-        {
-            if (renderTarget_ == nullptr)
+        case WM_TIMER:
+            if (w_param == kReconcileTimer)
             {
-                return 0;
-            }
-            const auto size = renderTarget_->GetSize();
-            const auto start = StartButtonRect(size.width, size.height);
-            const float x = static_cast<float>(GET_X_LPARAM(lParam));
-            const float y = static_cast<float>(GET_Y_LPARAM(lParam));
-            if (x >= start.left && x <= start.right && y >= start.top && y <= start.bottom)
-            {
-                ToggleStartMenu();
-            }
-            else if (startMenuOpen_)
-            {
-                startMenuOpen_ = false;
-                InvalidateRect(window_, nullptr, FALSE);
+                window_manager_.Reconcile();
+                SetWindowPos(
+                    desktop_,
+                    HWND_BOTTOM,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                SetWindowPos(
+                    taskbar_,
+                    HWND_TOPMOST,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                InvalidateAll();
             }
             return 0;
-        }
 
-        case WM_KEYDOWN:
-            if (wParam == VK_F11)
-            {
-                ToggleFullscreen();
-                return 0;
-            }
-            if (wParam == VK_ESCAPE && startMenuOpen_)
-            {
-                startMenuOpen_ = false;
-                InvalidateRect(window_, nullptr, FALSE);
-                return 0;
-            }
-            break;
+        case CLOUDOS_WM_NATIVE_WINDOW_EVENT:
+            window_manager_.HandleRuntimeEvent(
+                static_cast<cloudos_native_window_event_kind>(w_param),
+                reinterpret_cast<HWND>(l_param));
+            InvalidateAll();
+            return 0;
+
+        case WM_HOTKEY:
+            HandleHotKey(static_cast<int>(w_param));
+            return 0;
 
         case WM_DISPLAYCHANGE:
-            InvalidateRect(window_, nullptr, FALSE);
+        case WM_SETTINGCHANGE:
+            RepositionShellWindows();
+            InvalidateAll();
+            return 0;
+
+        case WM_LBUTTONUP:
+            HideStartMenu();
+            SetWindowPos(
+                desktop_,
+                HWND_BOTTOM,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            return 0;
+
+        case WM_CLOSE:
+            window_manager_.Shutdown();
+            if (start_ != nullptr && IsWindow(start_))
+            {
+                DestroyWindow(start_);
+                start_ = nullptr;
+            }
+            if (taskbar_ != nullptr && IsWindow(taskbar_))
+            {
+                DestroyWindow(taskbar_);
+                taskbar_ = nullptr;
+            }
+            DestroyWindow(desktop_);
             return 0;
 
         case WM_DESTROY:
+            desktop_ = nullptr;
             PostQuitMessage(0);
             return 0;
 
@@ -521,74 +1078,247 @@ private:
             break;
         }
 
-        return DefWindowProcW(window_, message, wParam, lParam);
+        return DefWindowProcW(desktop_, message, w_param, l_param);
     }
 
-    static LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
+    LRESULT HandleTaskbarMessage(UINT message, WPARAM w_param, LPARAM l_param)
+    {
+        switch (message)
+        {
+        case WM_PAINT:
+            PaintTaskbar();
+            return 0;
+
+        case WM_ERASEBKGND:
+            return 1;
+
+        case WM_LBUTTONUP:
+        {
+            POINT point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
+            if (PointInside(start_button_rect_, point))
+            {
+                ToggleStartMenu();
+                InvalidateRect(taskbar_, nullptr, FALSE);
+                return 0;
+            }
+
+            for (const auto& hit : task_hits_)
+            {
+                if (PointInside(hit.bounds, point))
+                {
+                    HideStartMenu();
+                    window_manager_.FocusWindow(hit.window);
+                    InvalidateAll();
+                    return 0;
+                }
+            }
+
+            for (std::size_t workspace = 0; workspace < workspace_rects_.size(); ++workspace)
+            {
+                if (PointInside(workspace_rects_[workspace], point))
+                {
+                    HideStartMenu();
+                    window_manager_.SwitchWorkspace(static_cast<int>(workspace));
+                    InvalidateAll();
+                    return 0;
+                }
+            }
+            return 0;
+        }
+
+        case WM_DISPLAYCHANGE:
+        case WM_DPICHANGED:
+            RepositionShellWindows();
+            InvalidateAll();
+            return 0;
+
+        case WM_DESTROY:
+            taskbar_ = nullptr;
+            return 0;
+
+        default:
+            break;
+        }
+
+        return DefWindowProcW(taskbar_, message, w_param, l_param);
+    }
+
+    LRESULT HandleStartMessage(UINT message, WPARAM w_param, LPARAM l_param)
+    {
+        switch (message)
+        {
+        case WM_PAINT:
+            PaintStart();
+            return 0;
+
+        case WM_ERASEBKGND:
+            return 1;
+
+        case WM_LBUTTONUP:
+        {
+            POINT point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
+            for (std::size_t index = 0; index < start_item_rects_.size(); ++index)
+            {
+                if (PointInside(start_item_rects_[index], point))
+                {
+                    LaunchStartItem(index);
+                    return 0;
+                }
+            }
+            return 0;
+        }
+
+        case WM_KEYDOWN:
+            if (w_param == VK_ESCAPE)
+            {
+                HideStartMenu();
+                return 0;
+            }
+            break;
+
+        case WM_KILLFOCUS:
+            if (reinterpret_cast<HWND>(w_param) != taskbar_)
+            {
+                HideStartMenu();
+            }
+            return 0;
+
+        case WM_DPICHANGED:
+            RepositionShellWindows();
+            InvalidateAll();
+            return 0;
+
+        case WM_DESTROY:
+            start_ = nullptr;
+            return 0;
+
+        default:
+            break;
+        }
+
+        return DefWindowProcW(start_, message, w_param, l_param);
+    }
+
+    static CloudOSShell* ResolveShell(HWND window, UINT message, LPARAM l_param)
     {
         CloudOSShell* shell = nullptr;
         if (message == WM_NCCREATE)
         {
-            const auto* create = reinterpret_cast<const CREATESTRUCTW*>(lParam);
+            const auto* create = reinterpret_cast<const CREATESTRUCTW*>(l_param);
             shell = static_cast<CloudOSShell*>(create->lpCreateParams);
-            shell->window_ = window;
             SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(shell));
         }
         else
         {
             shell = reinterpret_cast<CloudOSShell*>(GetWindowLongPtrW(window, GWLP_USERDATA));
         }
+        return shell;
+    }
 
+    static LRESULT CALLBACK DesktopProcedure(
+        HWND window,
+        UINT message,
+        WPARAM w_param,
+        LPARAM l_param)
+    {
+        auto* shell = ResolveShell(window, message, l_param);
+        if (shell != nullptr && shell->desktop_ == nullptr && message == WM_NCCREATE)
+        {
+            shell->desktop_ = window;
+        }
         return shell != nullptr
-            ? shell->HandleMessage(message, wParam, lParam)
-            : DefWindowProcW(window, message, wParam, lParam);
+            ? shell->HandleDesktopMessage(message, w_param, l_param)
+            : DefWindowProcW(window, message, w_param, l_param);
+    }
+
+    static LRESULT CALLBACK TaskbarProcedure(
+        HWND window,
+        UINT message,
+        WPARAM w_param,
+        LPARAM l_param)
+    {
+        auto* shell = ResolveShell(window, message, l_param);
+        if (shell != nullptr && shell->taskbar_ == nullptr && message == WM_NCCREATE)
+        {
+            shell->taskbar_ = window;
+        }
+        return shell != nullptr
+            ? shell->HandleTaskbarMessage(message, w_param, l_param)
+            : DefWindowProcW(window, message, w_param, l_param);
+    }
+
+    static LRESULT CALLBACK StartProcedure(
+        HWND window,
+        UINT message,
+        WPARAM w_param,
+        LPARAM l_param)
+    {
+        auto* shell = ResolveShell(window, message, l_param);
+        if (shell != nullptr && shell->start_ == nullptr && message == WM_NCCREATE)
+        {
+            shell->start_ = window;
+        }
+        return shell != nullptr
+            ? shell->HandleStartMessage(message, w_param, l_param)
+            : DefWindowProcW(window, message, w_param, l_param);
     }
 
     HINSTANCE instance_{};
-    HWND window_{};
-    bool startMenuOpen_{};
-    bool fullscreen_{};
-    DWORD savedStyle_{WS_OVERLAPPEDWINDOW};
-    WINDOWPLACEMENT savedPlacement_{.length = sizeof(WINDOWPLACEMENT)};
+    HWND desktop_{};
+    HWND taskbar_{};
+    HWND start_{};
+    bool shutting_down_{};
 
-    ComPtr<ID2D1Factory> d2dFactory_;
-    ComPtr<IDWriteFactory> dwriteFactory_;
-    ComPtr<IDWriteTextFormat> titleFormat_;
-    ComPtr<IDWriteTextFormat> bodyFormat_;
-    ComPtr<IDWriteTextFormat> menuFormat_;
-    ComPtr<ID2D1HwndRenderTarget> renderTarget_;
-    ComPtr<ID2D1SolidColorBrush> backgroundBrush_;
-    ComPtr<ID2D1SolidColorBrush> taskbarBrush_;
-    ComPtr<ID2D1SolidColorBrush> panelBrush_;
-    ComPtr<ID2D1SolidColorBrush> borderBrush_;
-    ComPtr<ID2D1SolidColorBrush> primaryTextBrush_;
-    ComPtr<ID2D1SolidColorBrush> secondaryTextBrush_;
-    ComPtr<ID2D1SolidColorBrush> accentBrush_;
+    RECT start_button_rect_{};
+    std::array<RECT, 4> workspace_rects_{};
+    std::array<RECT, 8> start_item_rects_{};
+    std::vector<TaskHit> task_hits_;
+    std::vector<int> registered_hotkeys_;
+    CloudOSNativeWindowManager window_manager_;
 };
 }
 
-int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
+int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
-    const HRESULT comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-    const bool uninitializeCom = SUCCEEDED(comResult);
-
-    CloudOSShell shell(instance);
-    if (!shell.Initialize(showCommand))
+    INITCOMMONCONTROLSEX common_controls{};
+    common_controls.dwSize = sizeof(common_controls);
+    common_controls.dwICC = ICC_LISTVIEW_CLASSES | ICC_STANDARD_CLASSES;
+    if (!InitCommonControlsEx(&common_controls))
     {
-        if (uninitializeCom)
-        {
-            CoUninitialize();
-        }
-        MessageBoxW(nullptr, L"O CloudOS Native não conseguiu inicializar o runtime gráfico Win32.", L"CloudOS Native", MB_OK | MB_ICONERROR);
+        MessageBoxW(
+            nullptr,
+            L"O CloudOS Native nao conseguiu inicializar os controles Win32.",
+            L"CloudOS Native",
+            MB_OK | MB_ICONERROR);
         return 1;
     }
 
-    const int exitCode = shell.Run();
-    if (uninitializeCom)
+    const HRESULT com_result = CoInitializeEx(
+        nullptr,
+        COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    const bool uninitialize_com = SUCCEEDED(com_result);
+
+    CloudOSShell shell(instance);
+    if (!shell.Initialize())
+    {
+        if (uninitialize_com)
+        {
+            CoUninitialize();
+        }
+        MessageBoxW(
+            nullptr,
+            L"O CloudOS Native nao conseguiu inicializar o shell Win32.",
+            L"CloudOS Native",
+            MB_OK | MB_ICONERROR);
+        return 1;
+    }
+
+    const int exit_code = shell.Run();
+    if (uninitialize_com)
     {
         CoUninitialize();
     }
-    return exitCode;
+    return exit_code;
 }
