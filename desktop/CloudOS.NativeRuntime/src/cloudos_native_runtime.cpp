@@ -256,6 +256,36 @@ BOOL apply_window_layout(
         return FALSE;
     }
 
+    const LONG_PTR current_style_after_frame = GetWindowLongPtrW(window, GWL_STYLE);
+    const LONG_PTR current_extended_style_after_frame = GetWindowLongPtrW(window, GWL_EXSTYLE);
+
+    // SWP_FRAMECHANGED is allowed to normalize otherwise harmless style bits. On the
+    // initial attach validate containment invariants and let the caller persist the
+    // actual post-frame styles. Subsequent layout/focus calls require exact equality.
+    if (frame_changed) {
+        if (GetWindow(window, GW_OWNER) != owner) return fail(ERROR_INVALID_STATE);
+        if ((current_style_after_frame & kForbiddenFrameStyles) != 0) return fail(ERROR_INVALID_STATE);
+        if ((current_extended_style_after_frame & WS_EX_APPWINDOW) != 0
+            || (current_extended_style_after_frame & WS_EX_TOOLWINDOW) == 0) {
+            return fail(ERROR_INVALID_STATE);
+        }
+        if (!IsIconic(window)) {
+            RECT actual{};
+            if (!GetWindowRect(window, &actual)) return FALSE;
+            if (actual.left < x - kBoundsTolerance || actual.top < y - kBoundsTolerance
+                || actual.right > x + width + kBoundsTolerance
+                || actual.bottom > y + height + kBoundsTolerance) {
+                return fail(ERROR_INVALID_STATE);
+            }
+            if ((IsWindowVisible(window) ? TRUE : FALSE) != visible) {
+                return fail(ERROR_INVALID_STATE);
+            }
+        }
+        SetLastError(ERROR_SUCCESS);
+        return TRUE;
+    }
+
+    // marker: frame_changed ? current_style_after_frame
     return validate_window_surface(
         window,
         owner,

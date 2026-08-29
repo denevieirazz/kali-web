@@ -379,6 +379,26 @@ namespace CloudOS.Host.Native
                     error = "The CloudOS Hub surface is hidden. Open the Hub before focusing this application.";
                     return false;
                 }
+
+                if (CloudOsNativeRuntime.CanUseWindowOperations)
+                {
+                    if (!CloudOsNativeRuntime.TryFocusWindow(
+                        hwnd,
+                        attachment.Owner,
+                        attachment.AttachedStyle,
+                        attachment.AttachedExtendedStyle,
+                        attachment.Bounds,
+                        _options.CloseTimeoutMilliseconds,
+                        out error))
+                    {
+                        QuarantineAfterContainmentFailure(hwnd, attachment, error);
+                        return false;
+                    }
+                    RefreshOne(hwnd, NativeWindowChangeKind.Updated);
+                    error = null;
+                    return true;
+                }
+
                 if (!TryRestoreResponsive(hwnd, true, out error)) return false;
                 if (!TryApplyAttachedLayout(hwnd, attachment, attachment.Bounds, true, false, false, out error))
                 {
@@ -466,6 +486,30 @@ namespace CloudOS.Host.Native
             try
             {
                 if (!TryForceHideWindow(hwnd, out error)) throw new InvalidOperationException(error);
+
+                if (CloudOsNativeRuntime.CanUseWindowOperations)
+                {
+                    state.Bounds = bounds;
+                    state.RequestedVisible = visible;
+                    // Register the capability while the HWND is still hidden. WinEvents raised
+                    // by the native owner/style transition cannot reclassify it as escaped.
+                    lock (_sync) _attachments[hwnd] = state;
+                    if (!CloudOsNativeRuntime.TryAttachWindow(
+                        hwnd,
+                        owner,
+                        bounds,
+                        visible,
+                        out var appliedStyle,
+                        out var appliedExtendedStyle,
+                        out error))
+                    {
+                        throw new InvalidOperationException(error);
+                    }
+                    state.RecordAppliedStyles(appliedStyle, appliedExtendedStyle);
+                    RefreshOne(hwnd, NativeWindowChangeKind.Updated);
+                    error = null;
+                    return true;
+                }
 
                 long attachedStyle = GetExpectedAttachedStyle(state);
                 long attachedExtendedStyle = GetExpectedAttachedExtendedStyle(state);
@@ -686,6 +730,27 @@ namespace CloudOS.Host.Native
                     error = "The window is not attached to a CloudOS surface.";
                     return false;
                 }
+            }
+
+            if (CloudOsNativeRuntime.CanUseWindowOperations)
+            {
+                if (!CloudOsNativeRuntime.TryLayoutWindow(
+                    hwnd,
+                    state.Owner,
+                    state.AttachedStyle,
+                    state.AttachedExtendedStyle,
+                    bounds,
+                    visible,
+                    preserveMinimized: true,
+                    out error))
+                {
+                    QuarantineAfterContainmentFailure(hwnd, state, error);
+                    return false;
+                }
+                state.Bounds = bounds;
+                state.RequestedVisible = visible;
+                RefreshOne(hwnd, NativeWindowChangeKind.Updated);
+                return true;
             }
 
             if (!TryApplyAttachedLayout(hwnd, state, bounds, visible, false, true, out error))
