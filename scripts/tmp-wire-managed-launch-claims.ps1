@@ -1,5 +1,10 @@
 $ErrorActionPreference = 'Stop'
 
+function Normalize-Newlines {
+    param([Parameter(Mandatory)] [string] $Value)
+    return $Value.Replace("`r`n", "`n").Replace("`r", "`n")
+}
+
 function Replace-Once {
     param(
         [Parameter(Mandatory)] [string] $Text,
@@ -7,20 +12,23 @@ function Replace-Once {
         [Parameter(Mandatory)] [string] $New,
         [Parameter(Mandatory)] [string] $Label
     )
+    $Text = Normalize-Newlines $Text
+    $Old = Normalize-Newlines $Old
+    $New = Normalize-Newlines $New
     $count = ([regex]::Matches($Text, [regex]::Escape($Old))).Count
     if ($count -ne 1) { throw "$Label expected one match, found $count" }
     return $Text.Replace($Old, $New)
 }
 
 $bridgePath = 'desktop/CloudOS.Host/Bridge/WebMessageBridge.cs'
-$bridge = Get-Content -LiteralPath $bridgePath -Raw
-$oldBridge = @'
+$bridge = Normalize-Newlines (Get-Content -LiteralPath $bridgePath -Raw)
+$oldBridge = Normalize-Newlines @'
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         request.Headers.Add("X-CloudOS-Host-Token", _hostLeaseToken);
         request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
         using var response = await _http.SendAsync(request);
 '@
-$newBridge = @'
+$newBridge = Normalize-Newlines @'
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         request.Headers.Add("X-CloudOS-Host-Token", _hostLeaseToken);
         var launchGuardRequestJson = NativeManagedProcessClaims.CreateLaunchGuardRequestJson(
@@ -32,7 +40,7 @@ $bridge = Replace-Once -Text $bridge -Old $oldBridge -New $newBridge -Label 'lau
 Set-Content -LiteralPath $bridgePath -Value $bridge -Encoding utf8 -NoNewline
 
 $testsPath = 'desktop/CloudOS.Host.Tests/Program.cs'
-$tests = Get-Content -LiteralPath $testsPath -Raw
+$tests = Normalize-Newlines (Get-Content -LiteralPath $testsPath -Raw)
 $tests = Replace-Once -Text $tests `
     -Old "using System.Diagnostics;`nusing System.Runtime.InteropServices;`n" `
     -New "using System.Diagnostics;`nusing System.Globalization;`nusing System.Runtime.InteropServices;`n" `
@@ -42,7 +50,7 @@ $tests = Replace-Once -Text $tests `
     -New "    (`"native lease identity remains stable after disposal`", NativeLeaseIdentitySurvivesDispose),`n    (`"native managed process claims bind PID to creation time`", NativeManagedProcessClaimsBindPidAndCreationTime),`n" `
     -Label 'managed-claim-test-list'
 
-$method = @'
+$method = Normalize-Newlines @'
 static void NativeManagedProcessClaimsBindPidAndCreationTime()
 {
     var processPath = Environment.ProcessPath ?? throw new InvalidOperationException("The test process path is unavailable.");
