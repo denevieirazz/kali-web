@@ -176,12 +176,14 @@ bool CloudOSNativeTerminalWindow::StartTerminal()
         return false;
     }
 
+    const int client_width = static_cast<int>(client.right - client.left);
+    const int client_height = static_cast<int>(client.bottom - client.top);
     const SHORT columns = static_cast<SHORT>(std::clamp(
-        (client.right - client.left) / std::max(1, cell_width_),
+        client_width / std::max(1, cell_width_),
         20,
         240));
     const SHORT rows = static_cast<SHORT>(std::clamp(
-        (client.bottom - client.top) / std::max(1, cell_height_),
+        client_height / std::max(1, cell_height_),
         5,
         120));
 
@@ -468,12 +470,14 @@ void CloudOSNativeTerminalWindow::ResizeTerminal()
         return;
     }
 
+    const int client_width = static_cast<int>(client.right - client.left);
+    const int client_height = static_cast<int>(client.bottom - client.top);
     const SHORT columns = static_cast<SHORT>(std::clamp(
-        (client.right - client.left) / std::max(1, cell_width_),
+        client_width / std::max(1, cell_width_),
         20,
         240));
     const SHORT rows = static_cast<SHORT>(std::clamp(
-        (client.bottom - client.top) / std::max(1, cell_height_),
+        client_height / std::max(1, cell_height_),
         5,
         120));
     (void)cloudos_native_terminal_resize(terminal_, columns, rows);
@@ -536,8 +540,10 @@ void CloudOSNativeTerminalWindow::UpdateFontMetrics()
     TEXTMETRICW metrics{};
     if (GetTextMetricsW(device, &metrics))
     {
-        cell_width_ = std::max(1, metrics.tmAveCharWidth);
-        cell_height_ = std::max(1, metrics.tmHeight + metrics.tmExternalLeading);
+        cell_width_ = std::max(1, static_cast<int>(metrics.tmAveCharWidth));
+        cell_height_ = std::max(
+            1,
+            static_cast<int>(metrics.tmHeight + metrics.tmExternalLeading));
     }
     SelectObject(device, previous);
     ReleaseDC(window_, device);
@@ -569,13 +575,16 @@ std::vector<std::wstring> CloudOSNativeTerminalWindow::VisibleLines() const
         return {};
     }
 
+    const int client_height = static_cast<int>(client.bottom - client.top);
     const std::size_t visible_rows = static_cast<std::size_t>(std::max(
         1,
-        (client.bottom - client.top) / std::max(1, cell_height_)));
+        client_height / std::max(1, cell_height_)));
 
     std::vector<std::wstring> all_lines;
+    std::size_t offset = 0;
     {
         std::lock_guard lock(output_mutex_);
+        offset = static_cast<std::size_t>(std::max(0, scroll_offset_lines_));
         std::size_t start = 0;
         while (start <= output_.size())
         {
@@ -595,7 +604,6 @@ std::vector<std::wstring> CloudOSNativeTerminalWindow::VisibleLines() const
         return {};
     }
 
-    const std::size_t offset = static_cast<std::size_t>(std::max(0, scroll_offset_lines_));
     const std::size_t end = all_lines.size() > offset
         ? all_lines.size() - offset
         : 0;
@@ -799,8 +807,7 @@ LRESULT CALLBACK CloudOSNativeTerminalWindow::WindowProcedure(
     }
     else
     {
-        self = reinterpret_cast<CloudOSNativeTerminalWindow*>(
-            GetWindowLongPtrW(window, GWLP_USERDATA));
+        self = reinterpret_cast<CloudOSNativeTerminalWindow*>(GetWindowLongPtrW(window, GWLP_USERDATA));
     }
 
     return self != nullptr
