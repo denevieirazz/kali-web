@@ -18,7 +18,8 @@ public:
         LPARAM l_param);
 
 private:
-    struct Entry final {
+    struct Entry final
+    {
         std::wstring name;
         std::wstring full_path;
         bool directory{};
@@ -40,13 +41,21 @@ private:
     void NavigateWslRoot();
     void ActivateSelection();
     void PopulateList();
-    std::wstring SelectedPath() const;
+    void CreateNewFolder();
+    void DeleteSelection();
+    void BeginRename();
+    bool CommitRename(int row, const wchar_t* new_name);
+    void Refresh();
+
+    [[nodiscard]] std::wstring SelectedPath() const;
+
     static std::wstring ParentPath(const std::wstring& path);
     static std::wstring JoinPath(
         const std::wstring& directory,
         const std::wstring& name);
     static std::wstring FormatSize(ULONGLONG size);
     static bool IsRootPath(const std::wstring& path);
+    static bool IsWslRootPath(const std::wstring& path);
 
     LRESULT HandleMessage(UINT message, WPARAM w_param, LPARAM l_param);
 
@@ -56,6 +65,9 @@ private:
     HWND go_button_{};
     HWND up_button_{};
     HWND wsl_button_{};
+    HWND refresh_button_{};
+    HWND new_folder_button_{};
+    HWND delete_button_{};
     HWND list_{};
 
     std::wstring current_path_;
