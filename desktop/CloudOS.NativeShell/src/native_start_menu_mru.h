@@ -1,20 +1,24 @@
 #pragma once
 
 #include <windows.h>
+#include <knownfolders.h>
 #include <shlobj.h>
+
+#include <algorithm>
+#include <cstdint>
+#include <limits>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <algorithm>
-#include <fstream>
 
 namespace CloudOS
 {
 struct AppUsageStats final
 {
     std::wstring app_id;
-    int launch_count{0};
-    uint64_t last_launch_time{0};
+    std::uint32_t launch_count{0};
+    std::uint64_t last_launch_time{0};
 };
 
 class StartMenuMRUTracker final
@@ -26,112 +30,255 @@ public:
         return instance;
     }
 
-    void Initialize()
-    {
-        wchar_t app_data[MAX_PATH]{};
-        if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, app_data)))
-        {
-            storage_path_ = std::wstring(app_data) + L"\\CloudOS";
-            CreateDirectoryW(storage_path_.c_str(), nullptr);
-            storage_path_ += L"\\start_mru.dat";
-            Load();
-        }
-    }
-
     void RecordLaunch(const wchar_t* app_id)
     {
-        if (app_id == nullptr || *app_id == L'\0') return;
-        FILETIME ft{};
-        GetSystemTimeAsFileTime(&ft);
-        uint64_t now = (static_cast<uint64_t>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
+        if (app_id == nullptr || *app_id == L'\0')
+        {
+            return;
+        }
 
+        FILETIME file_time{};
+        GetSystemTimeAsFileTime(&file_time);
+        const std::uint64_t now =
+            (static_cast<std::uint64_t>(file_time.dwHighDateTime) << 32u) |
+            static_cast<std::uint64_t>(file_time.dwLowDateTime);
+
+        std::scoped_lock lock(mutex_);
         auto& stats = usage_map_[app_id];
         stats.app_id = app_id;
-        stats.launch_count++;
+        if (stats.launch_count != (std::numeric_limits<std::uint32_t>::max)())
+        {
+            ++stats.launch_count;
+        }
         stats.last_launch_time = now;
-        Save();
+        SaveLocked();
     }
 
-    int GetLaunchCount(const wchar_t* app_id) const
+    std::uint32_t GetLaunchCount(const wchar_t* app_id) const
     {
-        auto it = usage_map_.find(app_id);
-        return it != usage_map_.end() ? it->second.launch_count : 0;
+        if (app_id == nullptr)
+        {
+            return 0;
+        }
+
+        std::scoped_lock lock(mutex_);
+        const auto iterator = usage_map_.find(app_id);
+        return iterator != usage_map_.end() ? iterator->second.launch_count : 0;
     }
 
     std::vector<std::wstring> GetTopApps(std::size_t limit = 6) const
     {
+        std::scoped_lock lock(mutex_);
+
         std::vector<AppUsageStats> list;
         list.reserve(usage_map_.size());
-        for (const auto& [id, stats] : usage_map_)
+        for (const auto& entry : usage_map_)
         {
-            list.push_back(stats);
+            list.push_back(entry.second);
         }
 
-        std::sort(list.begin(), list.end(), [](const AppUsageStats& a, const AppUsageStats& b) {
-            if (a.launch_count != b.launch_count) return a.launch_count > b.launch_count;
-            return a.last_launch_time > b.last_launch_time;
-        });
+        std::sort(
+            list.begin(),
+            list.end(),
+            [](const AppUsageStats& first, const AppUsageStats& second)
+            {
+                if (first.launch_count != second.launch_count)
+                {
+                    return first.launch_count > second.launch_count;
+                }
+                return first.last_launch_time > second.last_launch_time;
+            });
 
         std::vector<std::wstring> result;
-        for (std::size_t i = 0; i < std::min(limit, list.size()); ++i)
+        const std::size_t count = std::min(limit, list.size());
+        result.reserve(count);
+        for (std::size_t index = 0; index < count; ++index)
         {
-            result.push_back(list[i].app_id);
+            result.push_back(list[index].app_id);
         }
         return result;
     }
 
 private:
-    StartMenuMRUTracker() { Initialize(); }
+    StartMenuMRUTracker()
+    {
+        PWSTR local_app_data = nullptr;
+        if (SUCCEEDED(SHGetKnownFolderPath(
+                FOLDERID_LocalAppData,
+                KF_FLAG_DEFAULT,
+                nullptr,
+                &local_app_data)) &&
+            local_app_data != nullptr)
+        {
+            storage_directory_ = local_app_data;
+            CoTaskMemFree(local_app_data);
+
+            storage_directory_ += L"\\CloudOS";
+            (void)CreateDirectoryW(storage_directory_.c_str(), nullptr);
+            storage_path_ = storage_directory_ + L"\\start_mru.dat";
+            Load();
+        }
+        else if (local_app_data != nullptr)
+        {
+            CoTaskMemFree(local_app_data);
+        }
+    }
+
+    static bool ReadExact(HANDLE file, void* buffer, DWORD bytes)
+    {
+        DWORD bytes_read = 0;
+        return ReadFile(file, buffer, bytes, &bytes_read, nullptr) != FALSE &&
+            bytes_read == bytes;
+    }
+
+    static bool WriteExact(HANDLE file, const void* buffer, DWORD bytes)
+    {
+        DWORD bytes_written = 0;
+        return WriteFile(file, buffer, bytes, &bytes_written, nullptr) != FALSE &&
+            bytes_written == bytes;
+    }
 
     void Load()
     {
-        if (storage_path_.empty()) return;
-        HANDLE file = CreateFileW(storage_path_.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (file == INVALID_HANDLE_VALUE) return;
-
-        DWORD bytes_read = 0;
-        uint32_t count = 0;
-        if (ReadFile(file, &count, sizeof(count), &bytes_read, nullptr) && bytes_read == sizeof(count))
+        if (storage_path_.empty())
         {
-            for (uint32_t i = 0; i < count; ++i)
+            return;
+        }
+
+        HANDLE file = CreateFileW(
+            storage_path_.c_str(),
+            GENERIC_READ,
+            FILE_SHARE_READ,
+            nullptr,
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN,
+            nullptr);
+        if (file == INVALID_HANDLE_VALUE)
+        {
+            return;
+        }
+
+        std::uint32_t count = 0;
+        if (!ReadExact(file, &count, sizeof(count)) || count > 512u)
+        {
+            CloseHandle(file);
+            return;
+        }
+
+        for (std::uint32_t index = 0; index < count; ++index)
+        {
+            std::uint32_t id_length = 0;
+            if (!ReadExact(file, &id_length, sizeof(id_length)) ||
+                id_length == 0 ||
+                id_length > 128u)
             {
-                uint32_t id_len = 0;
-                if (!ReadFile(file, &id_len, sizeof(id_len), &bytes_read, nullptr) || id_len > 256) break;
-                std::wstring id(id_len, L'\0');
-                if (!ReadFile(file, id.data(), id_len * sizeof(wchar_t), &bytes_read, nullptr)) break;
+                break;
+            }
 
-                int launches = 0;
-                uint64_t last_time = 0;
-                (void)ReadFile(file, &launches, sizeof(launches), &bytes_read, nullptr);
-                (void)ReadFile(file, &last_time, sizeof(last_time), &bytes_read, nullptr);
+            std::wstring id(id_length, L'\0');
+            const DWORD id_bytes =
+                static_cast<DWORD>(id_length * sizeof(wchar_t));
+            if (!ReadExact(file, id.data(), id_bytes))
+            {
+                break;
+            }
 
-                usage_map_[id] = AppUsageStats{id, launches, last_time};
+            std::uint32_t launches = 0;
+            std::uint64_t last_time = 0;
+            if (!ReadExact(file, &launches, sizeof(launches)) ||
+                !ReadExact(file, &last_time, sizeof(last_time)))
+            {
+                break;
+            }
+
+            usage_map_[id] = AppUsageStats{id, launches, last_time};
+        }
+
+        CloseHandle(file);
+    }
+
+    void SaveLocked() const
+    {
+        if (storage_path_.empty() || storage_directory_.empty())
+        {
+            return;
+        }
+
+        const std::wstring temporary_path = storage_path_ + L".tmp";
+        HANDLE file = CreateFileW(
+            temporary_path.c_str(),
+            GENERIC_WRITE,
+            0,
+            nullptr,
+            CREATE_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH,
+            nullptr);
+        if (file == INVALID_HANDLE_VALUE)
+        {
+            return;
+        }
+
+        std::uint32_t count = 0;
+        for (const auto& entry : usage_map_)
+        {
+            if (!entry.second.app_id.empty() &&
+                entry.second.app_id.size() <= 128u &&
+                count < 512u)
+            {
+                ++count;
             }
         }
-        CloseHandle(file);
-    }
 
-    void Save() const
-    {
-        if (storage_path_.empty()) return;
-        HANDLE file = CreateFileW(storage_path_.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (file == INVALID_HANDLE_VALUE) return;
-
-        DWORD bytes_written = 0;
-        uint32_t count = static_cast<uint32_t>(usage_map_.size());
-        (void)WriteFile(file, &count, sizeof(count), &bytes_written, nullptr);
-
-        for (const auto& [id, stats] : usage_map_)
+        bool success = WriteExact(file, &count, sizeof(count));
+        std::uint32_t written_entries = 0;
+        for (const auto& entry : usage_map_)
         {
-            uint32_t id_len = static_cast<uint32_t>(id.size());
-            (void)WriteFile(file, &id_len, sizeof(id_len), &bytes_written, nullptr);
-            (void)WriteFile(file, id.data(), id_len * sizeof(wchar_t), &bytes_written, nullptr);
-            (void)WriteFile(file, &stats.launch_count, sizeof(stats.launch_count), &bytes_written, nullptr);
-            (void)WriteFile(file, &stats.last_launch_time, sizeof(stats.last_launch_time), &bytes_written, nullptr);
+            if (!success || written_entries >= count)
+            {
+                break;
+            }
+
+            const AppUsageStats& stats = entry.second;
+            if (stats.app_id.empty() || stats.app_id.size() > 128u)
+            {
+                continue;
+            }
+
+            const std::uint32_t id_length =
+                static_cast<std::uint32_t>(stats.app_id.size());
+            const DWORD id_bytes =
+                static_cast<DWORD>(id_length * sizeof(wchar_t));
+
+            success =
+                WriteExact(file, &id_length, sizeof(id_length)) &&
+                WriteExact(file, stats.app_id.data(), id_bytes) &&
+                WriteExact(file, &stats.launch_count, sizeof(stats.launch_count)) &&
+                WriteExact(file, &stats.last_launch_time, sizeof(stats.last_launch_time));
+
+            if (success)
+            {
+                ++written_entries;
+            }
+        }
+
+        if (success)
+        {
+            (void)FlushFileBuffers(file);
         }
         CloseHandle(file);
+
+        if (!success ||
+            !MoveFileExW(
+                temporary_path.c_str(),
+                storage_path_.c_str(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        {
+            (void)DeleteFileW(temporary_path.c_str());
+        }
     }
 
+    mutable std::mutex mutex_;
+    std::wstring storage_directory_;
     std::wstring storage_path_;
     std::unordered_map<std::wstring, AppUsageStats> usage_map_;
 };
