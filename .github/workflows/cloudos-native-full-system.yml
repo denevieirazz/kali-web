@@ -52,8 +52,13 @@ jobs:
       - name: Build static CloudOS UI
         shell: pwsh
         run: |
-          npm ci --prefix frontend
+          # The preserved legacy frontend currently has package-lock drift from its
+          # package.json. npm install resolves the declared package graph without
+          # making Node/Vite a production runtime dependency.
+          npm install --prefix frontend --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw "npm install failed with $LASTEXITCODE" }
           npm run build --prefix frontend
+          if ($LASTEXITCODE -ne 0) { throw "frontend build failed with $LASTEXITCODE" }
           if (-not (Test-Path -LiteralPath 'frontend/dist/index.html')) {
             throw 'frontend/dist/index.html was not produced.'
           }
