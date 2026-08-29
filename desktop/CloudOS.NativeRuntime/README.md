@@ -1,26 +1,24 @@
 # CloudOS.NativeRuntime
 
-Native Windows engine for CloudOS.
+`CloudOS.NativeRuntime` e o nucleo C++/Win32 do CloudOS.
 
-This project is intentionally introduced beside the existing .NET/WPF Host instead of replacing it in one rewrite. The migration boundary is a small C ABI so the high-level CloudOS bridge can remain stable while low-level Windows ownership moves to C++.
+Ele nao e uma ponte para React, Node, WebView2 ou um host gerenciado. O runtime e carregado diretamente pelo `CloudOS.NativeShell.exe` e expoe uma ABI C pequena e versionada para os subsistemas nativos.
 
-## Phase 1 responsibilities
+## Responsabilidades atuais
 
-- CreateProcessW in suspended state.
-- Kill-on-close Job Object ownership.
-- Resume the primary thread only after CloudOS installs its capability.
-- Enumerate the complete Job process tree.
-- Terminate the Job as one containment unit.
+- `CreateProcessW` suspenso e ownership por Job Object.
+- encerramento fail-closed da arvore de processos contida.
+- terminal nativo via ConPTY (`CreatePseudoConsole`).
+- leitura, escrita e resize do pseudoconsole.
+- descoberta de HWNDs top-level por `SetWinEventHook`.
+- enumeracao e frame bounds reais via Win32/DWM.
+- operacoes de foco/layout para compatibilidade Win32.
+- acesso WSL por API nativa resolvida dinamicamente quando disponivel.
 
-The current C# implementation remains as an automatic fallback when the native DLL is unavailable. Set `CLOUDOS_NATIVE_RUNTIME=managed` to force the fallback, or `CLOUDOS_NATIVE_RUNTIME=cpp` to require this runtime and fail closed when it cannot be loaded.
+## ABI
 
-## Planned migration
+A versao da ABI fica em `include/cloudos_native_runtime.h` e e validada pelo shell no boot. Uma DLL incompatível faz o shell falhar fechado antes de iniciar a interface.
 
-1. process and Job ownership
-2. HWND discovery and lifecycle
-3. input routing
-4. Windows.Graphics.Capture / D3D11
-5. DirectComposition presenter
-6. WebView2 CompositionController host
+## Limites do Windows
 
-The public frontend bridge should not need to change as these layers move.
+O runtime nao tenta contornar Secure Desktop/UAC, UIPI, anti-cheat, janelas protegidas, DRM, AppContainer ou outras fronteiras de seguranca do Windows. A arquitetura administra HWNDs reais em vez de depender de reparenting universal.
