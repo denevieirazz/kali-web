@@ -8,20 +8,24 @@ internal static class NativeSurfaceModeContract
         var repoRoot = RepoRoot();
         var bridgePath = Path.Combine(repoRoot, "desktop", "CloudOS.Host", "Bridge", "WebMessageBridge.cs");
         var projectPath = Path.Combine(repoRoot, "desktop", "CloudOS.Host", "CloudOS.Host.csproj");
+        var captureProject = Path.Combine(repoRoot, "desktop", "CloudOS.WindowsCapture", "CloudOS.WindowsCapture.csproj");
+        var presenterProject = Path.Combine(repoRoot, "desktop", "CloudOS.WindowsCapture.Presenter", "CloudOS.WindowsCapture.Presenter.csproj");
         var bridge = File.ReadAllText(bridgePath);
         var project = File.ReadAllText(projectPath);
 
+        Assert(bridge.Contains("containmentMode = \"captured-surface\"", StringComparison.Ordinal),
+            "Production Host must expose the WGC/D3D captured-surface compatibility renderer.");
         Assert(bridge.Contains("containmentMode = \"anchored-overlay\"", StringComparison.Ordinal),
-            "Native HWND anchored-overlay must remain the Windows application renderer.");
-        Assert(!bridge.Contains("captured-surface", StringComparison.OrdinalIgnoreCase)
-            && !bridge.Contains("CapturedSurface", StringComparison.Ordinal),
-            "The production bridge must not contain a captured-surface renderer.");
-        Assert(!project.Contains("CloudOS.WindowsCapture", StringComparison.Ordinal),
-            "The Host must not reference Windows capture projects.");
+            "Native HWND anchored-overlay must remain available as a fallback renderer.");
+        Assert(project.Contains("CloudOS.WindowsCapture\\CloudOS.WindowsCapture.csproj", StringComparison.Ordinal)
+            && project.Contains("CloudOS.WindowsCapture.Presenter\\CloudOS.WindowsCapture.Presenter.csproj", StringComparison.Ordinal),
+            "The Host must reference both production capture projects.");
+        Assert(File.Exists(captureProject) && File.Exists(presenterProject),
+            "Production WGC/D3D capture and presenter projects must exist.");
         Assert(!File.Exists(Path.Combine(repoRoot, "desktop", "CloudOS.Host", "Native", "NativeSurfaceMode.cs")),
-            "The capture renderer selector must be removed.");
+            "Renderer selection must remain Host-owned instead of trusting web-provided native mode state.");
 
-        Console.WriteLine("PASS native Windows surface-only contract");
+        Console.WriteLine("PASS native Windows hybrid surface contract");
     }
 
     private static string RepoRoot()
