@@ -1,0 +1,57 @@
+name: CloudOS Native Windows CI
+
+on:
+  push:
+    branches:
+      - 'rewrite/cloudos-native-win32*'
+  pull_request:
+    paths:
+      - 'desktop/CloudOS.NativeRuntime/**'
+      - 'desktop/CloudOS.NativeShell/**'
+      - 'scripts/native/**'
+      - 'Iniciar CloudOS.cmd'
+      - '.github/workflows/cloudos-native-windows.yml'
+
+jobs:
+  build-native:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Enforce native boot boundary
+        shell: pwsh
+        run: |
+          $launcher = Get-Content -LiteralPath 'Iniciar CloudOS.cmd' -Raw
+          $nativeLauncher = Get-Content -LiteralPath 'scripts/native/build-and-run-cloudos-native.cmd' -Raw
+          $forbidden = @('pwsh.exe', 'node ', 'npm ', 'vite', 'webview2', 'start-cloudos.ps1')
+          foreach ($token in $forbidden) {
+            if ($launcher.ToLowerInvariant().Contains($token) -or $nativeLauncher.ToLowerInvariant().Contains($token)) {
+              throw "Native boot path contains forbidden web/runtime token: $token"
+            }
+          }
+          if (-not $nativeLauncher.Contains('CloudOS.NativeShell.exe')) {
+            throw 'Native launcher does not target CloudOS.NativeShell.exe.'
+          }
+
+      - name: Build native runtime
+        shell: pwsh
+        run: |
+          msbuild 'desktop/CloudOS.NativeRuntime/CloudOS.NativeRuntime.vcxproj' /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
+
+      - name: Build native shell
+        shell: pwsh
+        run: |
+          msbuild 'desktop/CloudOS.NativeShell/CloudOS.NativeShell.vcxproj' /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
+
+      - name: Verify native executable
+        shell: pwsh
+        run: |
+          $exe = 'desktop/CloudOS.NativeShell/bin/Release/CloudOS.NativeShell.exe'
+          if (-not (Test-Path -LiteralPath $exe)) {
+            throw "Native shell executable missing: $exe"
+          }
+          Get-Item -LiteralPath $exe | Select-Object FullName, Length, LastWriteTimeUtc
