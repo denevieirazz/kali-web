@@ -95,6 +95,7 @@ public static class NativeLaunchContainmentPolicy
     /// Selects a primary surface without using enumeration order, focus, or timing as
     /// authority. A single real application surface may coexist with small helper HWNDs.
     /// Two plausible application surfaces remain ambiguous and are rejected fail-closed.
+    /// Sorting is used only to compare geometry; enumeration order is never launch authority.
     /// </summary>
     public static NativeWindowCandidateSelection SelectUniqueQuarantinedWindow(
         IReadOnlyList<NativeWindowSnapshot> candidates,
