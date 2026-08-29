@@ -1,0 +1,58 @@
+name: Refresh Start Menu Baseline
+
+on:
+  push:
+    branches:
+      - integration/cloudos-unified-runtime
+    paths:
+      - '.github/workflows/refresh-start-menu-baseline.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: integration/cloudos-unified-runtime
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium
+
+      - name: Refresh deterministic Start Menu snapshot
+        run: npx playwright test tests/playwright/start-menu.spec.ts --update-snapshots --reporter=list
+
+      - name: Verify only expected visual baseline changed
+        shell: pwsh
+        run: |
+          $expected = 'tests/playwright/__screenshots__/start-menu.spec.ts/start-menu-all-chromium-windows.png'
+          $changed = @(git status --porcelain | ForEach-Object { $_.Substring(3) })
+          $unexpected = @($changed | Where-Object { $_ -ne $expected })
+          if ($unexpected.Count -gt 0) {
+            throw "UNEXPECTED_SNAPSHOT_CHANGES: $($unexpected -join ', ')"
+          }
+          if (-not ($changed -contains $expected)) {
+            throw "EXPECTED_START_MENU_BASELINE_NOT_CHANGED: $expected"
+          }
+
+      - name: Commit reviewed 242-app baseline
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- tests/playwright/__screenshots__/start-menu.spec.ts/start-menu-all-chromium-windows.png
+          git commit -m "test(playwright): refresh Start Menu 242-app baseline"
+          git push origin HEAD:integration/cloudos-unified-runtime
