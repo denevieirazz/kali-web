@@ -4,6 +4,7 @@ import { authenticateToken } from '../middleware/auth.js';
 import { hasNativeHostTrust } from '../auth/hostTrust.js';
 import { launchCatalogApp, refreshAppCatalog } from './appCatalog.js';
 import { classifyCatalogRuntime } from './windowsRuntimeCompatibility.js';
+import { assertNoExternalInstanceHandoffRisk } from './windowsExternalInstanceGuard.js';
 
 export const appsRouter = express.Router();
 appsRouter.use(authenticateToken);
@@ -55,8 +56,13 @@ appsRouter.post('/:id/launch', async (req, res) => {
     if (!hasNativeHostTrust(req, req.app.locals.cloudOsHostTrustPolicy)) {
       return res.status(403).json({ error: 'Somente o Host nativo confiável pode resolver uma especificação de lançamento Windows.', errorCode: 'NATIVE_HOST_TRUST_REQUIRED' });
     }
-    res.status(202).json(await launchCatalogApp(req.params.id));
+    const launch = await launchCatalogApp(req.params.id);
+    await assertNoExternalInstanceHandoffRisk(launch);
+    res.status(202).json(launch);
   } catch (error) {
-    res.status(error.code === 'APP_NOT_FOUND' ? 404 : 503).json({ error: error.message, errorCode: error.code || 'APP_LAUNCH_FAILED' });
+    const status = error.code === 'APP_NOT_FOUND'
+      ? 404
+      : (error.code === 'EXTERNAL_INSTANCE_CONFLICT' ? 409 : 503);
+    res.status(status).json({ error: error.message, errorCode: error.code || 'APP_LAUNCH_FAILED' });
   }
 });
