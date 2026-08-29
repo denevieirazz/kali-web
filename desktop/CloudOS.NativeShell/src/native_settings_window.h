@@ -8,7 +8,6 @@ constexpr UINT CLOUDOS_WM_NATIVE_SETTINGS_CHANGED = WM_APP + 0x471;
 
 struct CloudOSNativeSettings final
 {
-    bool tiling_on_start{};
     std::wstring default_wsl_distribution{L"kali-linux"};
 };
 
@@ -43,7 +42,7 @@ private:
     HINSTANCE instance_{};
     HWND window_{};
     HWND title_{};
-    HWND tiling_checkbox_{};
+    HWND tiling_note_{};
     HWND distro_label_{};
     HWND distro_edit_{};
     HWND save_button_{};
