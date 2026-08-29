@@ -6,7 +6,9 @@
 #include <commctrl.h>
 #include <dwmapi.h>
 
+#include <algorithm>
 #include <array>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -212,7 +214,11 @@ void Populate(HWND list)
 
         std::wstring status = checks[index].ok ? L"OK" : L"ATENCAO";
         ListView_SetItemText(list, static_cast<int>(index), 1, status.data());
-        ListView_SetItemText(list, static_cast<int>(index), 2, checks[index].detail.data());
+        ListView_SetItemText(
+            list,
+            static_cast<int>(index),
+            2,
+            const_cast<wchar_t*>(checks[index].detail.c_str()));
     }
 }
 
@@ -222,13 +228,15 @@ void Layout(HWND window, DoctorState& state)
     GetClientRect(window, &client);
     const int margin = 12;
     const int button_height = 34;
+    const int client_width = static_cast<int>(client.right - client.left);
+    const int client_height = static_cast<int>(client.bottom - client.top);
     MoveWindow(state.button, margin, margin, 180, button_height, TRUE);
     MoveWindow(
         state.list,
         margin,
         margin + button_height + 10,
-        std::max(120, static_cast<int>(client.right) - margin * 2),
-        std::max(100, static_cast<int>(client.bottom) - (margin * 2 + button_height + 10)),
+        std::max(120, client_width - margin * 2),
+        std::max(100, client_height - (margin * 2 + button_height + 10)),
         TRUE);
 }
 
