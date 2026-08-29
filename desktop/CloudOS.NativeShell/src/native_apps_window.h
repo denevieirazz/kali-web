@@ -15,6 +15,9 @@ public:
         External,
         Calculator,
         Notepad,
+        Settings,
+        SystemMonitor,
+        EnvDoctor,
     };
 
     struct AppEntry final
