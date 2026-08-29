@@ -4,12 +4,19 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# Temporary migration patcher. The Windows runner validates the production
-# NativeWindowManager against the real C++ DLL before committing the manager.
-# Keep this rerunnable while the physical HWND migration is being proven.
+# Temporary migration patcher. The Windows runner validates both the production
+# NativeWindowManager and the C++ HWND implementation before committing either.
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$path = Join-Path $repoRoot 'desktop\CloudOS.Host\Native\NativeWindowManager.cs'
-$content = [IO.File]::ReadAllText($path)
+$managerPath = Join-Path $repoRoot 'desktop\CloudOS.Host\Native\NativeWindowManager.cs'
+$cppPath = Join-Path $repoRoot 'desktop\CloudOS.NativeRuntime\src\cloudos_native_runtime.cpp'
+$manager = [IO.File]::ReadAllText($managerPath)
+$cpp = [IO.File]::ReadAllText($cppPath)
+
+function Replace-ExactlyOnce([ref]$Text, [string]$Old, [string]$New, [string]$Name) {
+    $count = ([regex]::Matches($Text.Value, [regex]::Escape($Old))).Count
+    if ($count -ne 1) { throw "${Name}_EXPECTED_1_FOUND_$count" }
+    $Text.Value = $Text.Value.Replace($Old, $New)
+}
 
 $requiredNativeCalls = @(
     'CloudOsNativeRuntime.TryAttachWindow(',
@@ -18,25 +25,16 @@ $requiredNativeCalls = @(
     'CloudOsNativeRuntime.CanUseWindowOperations'
 )
 
-$alreadyMigrated = $true
+$managerMigrated = $true
 foreach ($needle in $requiredNativeCalls) {
-    if (-not $content.Contains($needle)) {
-        $alreadyMigrated = $false
+    if (-not $manager.Contains($needle)) {
+        $managerMigrated = $false
         break
     }
 }
-if ($alreadyMigrated) {
-    Write-Host 'CPP_WINDOW_OPERATIONS_ALREADY_MIGRATED'
-    exit 0
-}
 
-function Replace-ExactlyOnce([string]$Old, [string]$New, [string]$Name) {
-    $count = ([regex]::Matches($script:content, [regex]::Escape($Old))).Count
-    if ($count -ne 1) { throw "${Name}_EXPECTED_1_FOUND_$count" }
-    $script:content = $script:content.Replace($Old, $New)
-}
-
-$focusOld = @'
+if (-not $managerMigrated) {
+    $focusOld = @'
             else
             {
                 if (!attachment.RequestedVisible)
@@ -61,7 +59,7 @@ $focusOld = @'
             error = null;
             return true;
 '@
-$focusNew = @'
+    $focusNew = @'
             else
             {
                 if (!attachment.RequestedVisible)
@@ -106,9 +104,9 @@ $focusNew = @'
             error = null;
             return true;
 '@
-Replace-ExactlyOnce $focusOld $focusNew 'FOCUS'
+    Replace-ExactlyOnce ([ref]$manager) $focusOld $focusNew 'FOCUS'
 
-$attachNeedle = @'
+    $attachOld = @'
             try
             {
                 if (!TryForceHideWindow(hwnd, out error)) throw new InvalidOperationException(error);
@@ -118,7 +116,7 @@ $attachNeedle = @'
 
                 NativeMethods.SetWindowStyle(hwnd, attachedStyle);
 '@
-$attachReplacement = @'
+    $attachNew = @'
             try
             {
                 if (!TryForceHideWindow(hwnd, out error)) throw new InvalidOperationException(error);
@@ -127,8 +125,8 @@ $attachReplacement = @'
                 {
                     state.Bounds = bounds;
                     state.RequestedVisible = visible;
-                    // Register attachment capability while hidden. A WinEvent produced by the
-                    // native style/owner transition can never reclassify the HWND as escaped.
+                    // Register the capability while the HWND is still hidden. WinEvents raised
+                    // by the native owner/style transition cannot reclassify it as escaped.
                     lock (_sync) _attachments[hwnd] = state;
                     if (!CloudOsNativeRuntime.TryAttachWindow(
                         hwnd,
@@ -152,9 +150,9 @@ $attachReplacement = @'
 
                 NativeMethods.SetWindowStyle(hwnd, attachedStyle);
 '@
-Replace-ExactlyOnce $attachNeedle $attachReplacement 'ATTACH'
+    Replace-ExactlyOnce ([ref]$manager) $attachOld $attachNew 'ATTACH'
 
-$layoutNeedle = @'
+    $layoutOld = @'
             if (!TryApplyAttachedLayout(hwnd, state, bounds, visible, false, true, out error))
             {
                 QuarantineAfterContainmentFailure(hwnd, state, error);
@@ -163,7 +161,7 @@ $layoutNeedle = @'
             RefreshOne(hwnd, NativeWindowChangeKind.Updated);
             return true;
 '@
-$layoutReplacement = @'
+    $layoutNew = @'
             if (CloudOsNativeRuntime.CanUseWindowOperations)
             {
                 if (!CloudOsNativeRuntime.TryLayoutWindow(
@@ -193,13 +191,78 @@ $layoutReplacement = @'
             RefreshOne(hwnd, NativeWindowChangeKind.Updated);
             return true;
 '@
-Replace-ExactlyOnce $layoutNeedle $layoutReplacement 'LAYOUT'
-
-[IO.File]::WriteAllText($path, $content, [Text.UTF8Encoding]::new($false))
-
-$updated = [IO.File]::ReadAllText($path)
-foreach ($needle in $requiredNativeCalls) {
-    if (-not $updated.Contains($needle)) { throw "MISSING_$needle" }
+    Replace-ExactlyOnce ([ref]$manager) $layoutOld $layoutNew 'LAYOUT'
+    [IO.File]::WriteAllText($managerPath, $manager, [Text.UTF8Encoding]::new($false))
 }
 
-Write-Host 'CPP_WINDOW_OPERATIONS_PATCHED'
+$normalizationMarker = 'frame_changed ? current_style_after_frame'
+$cppMigrated = $cpp.Contains($normalizationMarker)
+if (-not $cppMigrated) {
+    $validationOld = @'
+    return validate_window_surface(
+        window,
+        owner,
+        expected_style,
+        expected_extended_style,
+        x,
+        y,
+        width,
+        height,
+        visible);
+'@
+    $validationNew = @'
+    const LONG_PTR current_style_after_frame = GetWindowLongPtrW(window, GWL_STYLE);
+    const LONG_PTR current_extended_style_after_frame = GetWindowLongPtrW(window, GWL_EXSTYLE);
+
+    // SWP_FRAMECHANGED is allowed to normalize otherwise harmless style bits. On the
+    // initial attach validate containment invariants and let the caller persist the
+    // actual post-frame styles. Subsequent layout/focus calls require exact equality.
+    if (frame_changed) {
+        if (GetWindow(window, GW_OWNER) != owner) return fail(ERROR_INVALID_STATE);
+        if ((current_style_after_frame & kForbiddenFrameStyles) != 0) return fail(ERROR_INVALID_STATE);
+        if ((current_extended_style_after_frame & WS_EX_APPWINDOW) != 0
+            || (current_extended_style_after_frame & WS_EX_TOOLWINDOW) == 0) {
+            return fail(ERROR_INVALID_STATE);
+        }
+        if (!IsIconic(window)) {
+            RECT actual{};
+            if (!GetWindowRect(window, &actual)) return FALSE;
+            if (actual.left < x - kBoundsTolerance || actual.top < y - kBoundsTolerance
+                || actual.right > x + width + kBoundsTolerance
+                || actual.bottom > y + height + kBoundsTolerance) {
+                return fail(ERROR_INVALID_STATE);
+            }
+            if ((IsWindowVisible(window) ? TRUE : FALSE) != visible) {
+                return fail(ERROR_INVALID_STATE);
+            }
+        }
+        SetLastError(ERROR_SUCCESS);
+        return TRUE;
+    }
+
+    // marker: frame_changed ? current_style_after_frame
+    return validate_window_surface(
+        window,
+        owner,
+        expected_style,
+        expected_extended_style,
+        x,
+        y,
+        width,
+        height,
+        visible);
+'@
+    Replace-ExactlyOnce ([ref]$cpp) $validationOld $validationNew 'CPP_FRAME_NORMALIZATION'
+    [IO.File]::WriteAllText($cppPath, $cpp, [Text.UTF8Encoding]::new($false))
+}
+
+$managerAfter = [IO.File]::ReadAllText($managerPath)
+foreach ($needle in $requiredNativeCalls) {
+    if (-not $managerAfter.Contains($needle)) { throw "MISSING_$needle" }
+}
+$cppAfter = [IO.File]::ReadAllText($cppPath)
+if (-not $cppAfter.Contains($normalizationMarker)) {
+    throw 'CPP_FRAME_NORMALIZATION_MISSING'
+}
+
+Write-Host "CPP_WINDOW_OPERATIONS_PATCHED managerChanged=$(-not $managerMigrated) cppChanged=$(-not $cppMigrated)"
