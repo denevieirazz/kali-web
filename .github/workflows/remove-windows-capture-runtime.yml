@@ -1,0 +1,62 @@
+name: Remove Windows Capture Runtime
+
+on:
+  push:
+    branches:
+      - integration/cloudos-unified-runtime
+    paths:
+      - scripts/native/remove-windows-capture-runtime.ps1
+      - .github/workflows/remove-windows-capture-runtime.yml
+
+permissions:
+  contents: write
+
+jobs:
+  remove:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: integration/cloudos-unified-runtime
+          fetch-depth: 0
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Remove capture runtime
+        shell: pwsh
+        run: ./scripts/native/remove-windows-capture-runtime.ps1
+
+      - name: Check whitespace
+        shell: pwsh
+        run: git diff --check
+
+      - name: Build C++ runtime
+        shell: pwsh
+        run: ./scripts/native/build-native-runtime.ps1 -Configuration Release
+
+      - name: Build Host
+        shell: pwsh
+        run: dotnet build desktop/CloudOS.Host/CloudOS.Host.csproj -c Release --nologo
+
+      - name: Run Host contracts
+        shell: pwsh
+        run: dotnet run --project desktop/CloudOS.Host.Tests/CloudOS.Host.Tests.csproj -c Release
+
+      - name: Commit validated capture removal
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git reset -- .github/workflows/remove-windows-capture-runtime.yml scripts/native/remove-windows-capture-runtime.ps1
+          if (git diff --cached --quiet) {
+            Write-Host 'No capture runtime removal changes required.'
+            exit 0
+          }
+          git commit -m "refactor: remove Windows captured-surface runtime"
+          git push origin HEAD:integration/cloudos-unified-runtime
