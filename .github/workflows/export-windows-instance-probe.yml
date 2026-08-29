@@ -1,0 +1,60 @@
+name: Validate Windows External Instance Probe
+
+on:
+  push:
+    branches:
+      - integration/cloudos-unified-runtime
+    paths:
+      - .github/workflows/export-windows-instance-probe.yml
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: integration/cloudos-unified-runtime
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+
+      - name: Export bounded probe for integration contract
+        shell: pwsh
+        run: |
+          $path = 'backend/src/apps/windowsExternalInstanceGuard.js'
+          $text = Get-Content -LiteralPath $path -Raw
+          $old = 'async function probeProcessesByExecutableName(executable) {'
+          $new = 'export async function probeProcessesByExecutableName(executable) {'
+          $count = ([regex]::Matches($text, [regex]::Escape($old))).Count
+          if ($count -ne 1) { throw "PROBE_EXPORT_PATTERN_COUNT=$count" }
+          $text = $text.Replace($old, $new)
+          Set-Content -LiteralPath $path -Value $text -Encoding utf8 -NoNewline
+
+      - name: Run guard and real Windows probe contracts
+        shell: pwsh
+        run: node --test backend/test/windows-external-instance-guard.test.js backend/test/windows-external-instance-probe.test.js
+
+      - name: Verify only guard source changed
+        shell: pwsh
+        run: |
+          $changed = @(git status --porcelain | ForEach-Object { $_.Substring(3) })
+          if ($changed.Count -ne 1 -or $changed[0] -ne 'backend/src/apps/windowsExternalInstanceGuard.js') {
+            throw "UNEXPECTED_FILES=$($changed -join ',')"
+          }
+
+      - name: Commit probe contract export
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- backend/src/apps/windowsExternalInstanceGuard.js
+          git commit -m "test(runtime): expose Windows instance probe contract"
+          git push origin HEAD:integration/cloudos-unified-runtime
