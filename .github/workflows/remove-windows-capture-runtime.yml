@@ -6,6 +6,7 @@ on:
       - integration/cloudos-unified-runtime
     paths:
       - scripts/native/remove-windows-capture-runtime.ps1
+      - scripts/native/remove-dead-capture-window-manager.ps1
       - .github/workflows/remove-windows-capture-runtime.yml
 
 permissions:
@@ -57,6 +58,10 @@ jobs:
           }
           [IO.File]::WriteAllText($path, $text, [Text.UTF8Encoding]::new($false))
 
+      - name: Remove dead capture code from NativeWindowManager
+        shell: pwsh
+        run: ./scripts/native/remove-dead-capture-window-manager.ps1
+
       - name: Check whitespace
         shell: pwsh
         run: git diff --check
@@ -79,10 +84,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git reset -- .github/workflows/remove-windows-capture-runtime.yml scripts/native/remove-windows-capture-runtime.ps1
+          git reset -- .github/workflows/remove-windows-capture-runtime.yml scripts/native/remove-windows-capture-runtime.ps1 scripts/native/remove-dead-capture-window-manager.ps1
           if (git diff --cached --quiet) {
             Write-Host 'No capture runtime removal changes required.'
             exit 0
           }
-          git commit -m "refactor: remove Windows captured-surface runtime"
+          git commit -m "refactor: remove captured-surface dead code"
           git push origin HEAD:integration/cloudos-unified-runtime
