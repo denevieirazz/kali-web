@@ -57,7 +57,7 @@ appsRouter.post('/:id/launch', async (req, res) => {
       return res.status(403).json({ error: 'Somente o Host nativo confiável pode resolver uma especificação de lançamento Windows.', errorCode: 'NATIVE_HOST_TRUST_REQUIRED' });
     }
     const launch = await launchCatalogApp(req.params.id);
-    await assertNoExternalInstanceHandoffRisk(launch);
+    await assertNoExternalInstanceHandoffRisk(launch, req.body?.managedProcesses);
     res.status(202).json(launch);
   } catch (error) {
     const status = error.code === 'APP_NOT_FOUND'
