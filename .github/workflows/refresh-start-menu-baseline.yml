@@ -13,7 +13,7 @@ permissions:
 jobs:
   refresh:
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Checkout branch
         uses: actions/checkout@v4
@@ -32,8 +32,8 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install chromium
 
-      - name: Refresh deterministic Start Menu snapshot
-        run: npx playwright test tests/playwright/start-menu.spec.ts --update-snapshots --reporter=list
+      - name: Refresh deterministic characterization snapshots
+        run: npx playwright test tests/playwright/boot-oobe.spec.ts tests/playwright/onboarding-responsive.spec.ts tests/playwright/settings-personalization.spec.ts tests/playwright/start-menu.spec.ts tests/playwright/window-lifecycle.spec.ts --update-snapshots --reporter=list
 
       - name: Verify only expected visual baseline changed
         shell: pwsh
