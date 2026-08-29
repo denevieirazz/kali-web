@@ -20,8 +20,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CloudOS.Installer\CloudOS.Installer.csproj" />
-    <ProjectReference Include="..\CloudOS.WindowsCapture\CloudOS.WindowsCapture.csproj" />
-    <ProjectReference Include="..\CloudOS.WindowsCapture.Presenter\CloudOS.WindowsCapture.Presenter.csproj" />
   </ItemGroup>
 
   <Target Name="BuildCloudOSNativeRuntime" BeforeTargets="CoreCompile" Condition="'$(OS)' == 'Windows_NT' and Exists('$(CloudOSNativeRuntimeBuildScript)')">

@@ -5,31 +5,34 @@ internal static class NativeSurfaceModeContract
     [ModuleInitializer]
     internal static void Validate()
     {
-        if (Environment.GetCommandLineArgs().Any(argument =>
-            argument.StartsWith("--native-contained-fixture-", StringComparison.Ordinal)))
-            return;
-
-        var desktopRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
-        var modePath = Path.Combine(desktopRoot, "CloudOS.Host", "Native", "NativeSurfaceMode.cs");
-        var bridgePath = Path.Combine(desktopRoot, "CloudOS.Host", "Bridge", "WebMessageBridge.cs");
-        if (!File.Exists(modePath) || !File.Exists(bridgePath))
-            throw new InvalidOperationException("Native surface source files were not found.");
-
-        var mode = File.ReadAllText(modePath);
+        var repoRoot = RepoRoot();
+        var bridgePath = Path.Combine(repoRoot, "desktop", "CloudOS.Host", "Bridge", "WebMessageBridge.cs");
+        var projectPath = Path.Combine(repoRoot, "desktop", "CloudOS.Host", "CloudOS.Host.csproj");
         var bridge = File.ReadAllText(bridgePath);
+        var project = File.ReadAllText(projectPath);
 
-        Assert(mode.Contains("return NativeSurfaceRenderMode.NativeOverlay;", StringComparison.Ordinal),
-            "Native overlay must be the fail-safe/default Windows app renderer.");
-        Assert(mode.Contains("CLOUDOS_NATIVE_SURFACE_MODE", StringComparison.Ordinal),
-            "The capture fallback must be controlled by an explicit environment switch.");
-        Assert(bridge.Contains(
-                "NativeSurfaceMode.Current == NativeSurfaceRenderMode.CapturedSurface",
-                StringComparison.Ordinal),
-            "The bridge must not initialize captured-surface unless capture was explicitly requested.");
         Assert(bridge.Contains("containmentMode = \"anchored-overlay\"", StringComparison.Ordinal),
-            "The real native HWND overlay path must remain a first-class containment mode.");
+            "Native HWND anchored-overlay must remain the Windows application renderer.");
+        Assert(!bridge.Contains("captured-surface", StringComparison.OrdinalIgnoreCase)
+            && !bridge.Contains("CapturedSurface", StringComparison.Ordinal),
+            "The production bridge must not contain a captured-surface renderer.");
+        Assert(!project.Contains("CloudOS.WindowsCapture", StringComparison.Ordinal),
+            "The Host must not reference Windows capture projects.");
+        Assert(!File.Exists(Path.Combine(repoRoot, "desktop", "CloudOS.Host", "Native", "NativeSurfaceMode.cs")),
+            "The capture renderer selector must be removed.");
 
-        Console.WriteLine("PASS native Windows surface default contract");
+        Console.WriteLine("PASS native Windows surface-only contract");
+    }
+
+    private static string RepoRoot()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            if (Directory.Exists(Path.Combine(current.FullName, ".git"))) return current.FullName;
+            current = current.Parent;
+        }
+        throw new InvalidOperationException("Repository root not found.");
     }
 
     private static void Assert(bool condition, string message)

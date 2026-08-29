@@ -14,7 +14,6 @@ using CloudOS.Host.Browser;
 using CloudOS.Host.Installer;
 using CloudOS.Host.Native;
 using CloudOS.Host.Security;
-using CloudOS.WindowsCapture;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 
@@ -37,8 +36,6 @@ public sealed class WebMessageBridge : IDisposable
     private readonly long _ownerWindowHandle;
     private readonly NativeWindowManager _windows;
     private readonly BrowserManager _browserManager;
-    private readonly CapturedSurfaceSessionManager? _capturedSurfaceRuntime;
-    private readonly CapturedSurfaceBridgeAdapter? _capturedSurfaceBridge;
     private readonly Dispatcher _dispatcher;
     private readonly Action<bool> _setFullscreen;
     private readonly Action _requestClose;
@@ -96,12 +93,6 @@ public sealed class WebMessageBridge : IDisposable
         _onHandshake = onHandshake;
         var browserDevTools = string.Equals(Environment.GetEnvironmentVariable("CLOUDOS_BROWSER_DEVTOOLS"), "1", StringComparison.Ordinal);
         _browserManager = new BrowserManager(dispatcher, trustedDocumentOrigin, backendOrigin, browserDevTools, BrowserDiagnostics.Write);
-        if (NativeSurfaceMode.Current == NativeSurfaceRenderMode.CapturedSurface
-            && CapturedSurfaceBridgeAdapter.CandidateEnabled)
-        {
-            _capturedSurfaceRuntime = new CapturedSurfaceSessionManager();
-            _capturedSurfaceBridge = new CapturedSurfaceBridgeAdapter(ownerWindowHandle, _capturedSurfaceRuntime);
-        }
         _windows.WindowChanged += OnNativeWindowChanged;
         _refreshTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(IdleRefreshMilliseconds), DispatcherPriority.Background, (_, _) =>
         {
@@ -444,70 +435,6 @@ public sealed class WebMessageBridge : IDisposable
         var bounds = ConvertBounds(surface);
         var visible = ReadOptionalBoolean(parameters, "visible", true);
 
-        if (_capturedSurfaceBridge is not null)
-        {
-            var source = _windows.GetWindows().FirstOrDefault(item => item.Handle == handle);
-            if (source is null || source.IsAttached || source.IsVisible || !_windows.IsTrackedProcess(source.ProcessId))
-            {
-                TerminateSessionAndForget(sessionId, NativeContainmentFailure.AttachFailed);
-                throw new BridgeException(
-                    "WINDOW_CAPTURE_DENIED",
-                    "A janela de origem perdeu a quarentena antes da captura.");
-            }
-
-            var dpi = VisualTreeHelper.GetDpi(_webView);
-            if (!_windows.TryPrepareCapturedSource(handle, _ownerWindowHandle, bounds, visible, out var isolationError))
-            {
-                TerminateSessionAndForget(sessionId, NativeContainmentFailure.AttachFailed);
-                throw new BridgeException(
-                    "WINDOW_CAPTURE_DENIED",
-                    isolationError ?? "A janela de origem não pôde ser isolada atrás do CloudOS.");
-            }
-            try
-            {
-                var state = _capturedSurfaceBridge.Attach(
-                    sessionId,
-                    handle,
-                    bounds,
-                    visible,
-                    dpi.DpiScaleX,
-                    dpi.DpiScaleY);
-                if (!_windows.TryActivateCapturedSource(
-                    handle,
-                    state.Runtime.PresentationWindowHandle,
-                    bounds,
-                    visible,
-                    out var activationError))
-                {
-                    throw new InvalidOperationException(
-                        activationError ?? "The captured source could not be bound behind its presenter.");
-                }
-                _pendingAttachDeadlinesByHandle.Remove(handle);
-                _surfacesByHandle[handle] = surface with { Visible = visible, LastNativeBounds = bounds };
-                return new
-                {
-                    sessionId,
-                    generation = state.Generation,
-                    accepted = true,
-                    contained = true,
-                    containmentMode = "captured-surface"
-                };
-            }
-            catch (Exception captureError) when (captureError is not OutOfMemoryException)
-            {
-                var stage = captureError is WindowsCaptureSetupException setup ? setup.Stage : "runtime";
-                BrowserDiagnostics.Write(
-                    "captured_surface_attach_failed",
-                    $"stage={stage} type={captureError.GetType().Name} hresult=0x{captureError.HResult:X8}");
-                _capturedSurfaceBridge.Close(sessionId);
-                _windows.CancelCapturedSource(handle);
-                TerminateSessionAndForget(sessionId, NativeContainmentFailure.AttachFailed);
-                throw new BridgeException(
-                    "WINDOW_CAPTURE_DENIED",
-                    "A superfície capturada não pôde ser criada com segurança.");
-            }
-        }
-
         if (!_windows.TryAttach(handle, _ownerWindowHandle, bounds, visible, out var error))
         {
             TerminateSessionAndForget(sessionId, NativeContainmentFailure.AttachFailed);
@@ -518,7 +445,6 @@ public sealed class WebMessageBridge : IDisposable
         if (_nativeSessionsById.TryGetValue(sessionId, out var nativeSession)) nativeSession.MarkAttached();
         return new { sessionId, accepted = true, contained = true, containmentMode = "anchored-overlay" };
     }
-
     private async Task<object> LayoutAsync(JsonElement parameters)
     {
         RequireObject(parameters);
@@ -530,52 +456,6 @@ public sealed class WebMessageBridge : IDisposable
         var bounds = ConvertBounds(surface);
         var visible = ReadOptionalBoolean(parameters, "visible", true);
 
-        if (_capturedSurfaceBridge is not null && _capturedSurfaceBridge.TryGetState(sessionId, out var current) && current is not null)
-        {
-            var dpi = VisualTreeHelper.GetDpi(_webView);
-            try
-            {
-                var state = _capturedSurfaceBridge.Layout(
-                    sessionId,
-                    bounds,
-                    visible,
-                    dpi.DpiScaleX,
-                    dpi.DpiScaleY);
-                if (!_windows.TryUpdateCapturedSourceLayout(handle, bounds, visible, out var sourceLayoutError))
-                    throw new InvalidOperationException(
-                        sourceLayoutError ?? "The capture source lost its covered layout.");
-                _surfacesByHandle[handle] = surface with { Visible = visible, LastNativeBounds = bounds };
-                return new
-                {
-                    sessionId,
-                    generation = state.Generation,
-                    accepted = true,
-                    contained = true,
-                    containmentMode = "captured-surface",
-                    visible
-                };
-            }
-            catch (Exception layoutError) when (layoutError is not OutOfMemoryException)
-            {
-                BrowserDiagnostics.Write(
-                    "captured_surface_layout_failed",
-                    $"type={layoutError.GetType().Name} hresult=0x{layoutError.HResult:X8}");
-                _surfacesByHandle.Remove(handle);
-                TerminateSessionAndForget(sessionId, NativeContainmentFailure.LayoutFailed);
-                throw new BridgeException(
-                    "WINDOW_LAYOUT_DENIED",
-                    "A superfície capturada perdeu a contenção de layout.");
-            }
-        }
-
-        if (_capturedSurfaceBridge is not null)
-        {
-            TerminateSessionAndForget(sessionId, NativeContainmentFailure.LayoutFailed);
-            throw new BridgeException(
-                "WINDOW_CAPTURE_SESSION_LOST",
-                "A sessão capturada não está mais ativa.");
-        }
-
         if (!_windows.TryUpdateAttachedLayout(handle, bounds, visible, out var error))
         {
             _surfacesByHandle.Remove(handle);
@@ -583,20 +463,17 @@ public sealed class WebMessageBridge : IDisposable
             throw new BridgeException("WINDOW_LAYOUT_DENIED", error ?? "O Windows recusou a posição da janela.");
         }
         _surfacesByHandle[handle] = surface with { Visible = visible, LastNativeBounds = bounds };
-        return new { sessionId, accepted = true, contained = true, containmentMode = "anchored-overlay" };
+        return new { sessionId, accepted = true, contained = true, containmentMode = "anchored-overlay", visible };
     }
-
     private object Detach(JsonElement parameters)
     {
         RequireObject(parameters);
         RejectUnknownProperties(parameters, "sessionId");
         var sessionId = ReadString(parameters, "sessionId");
         GetHandle(sessionId);
-        _capturedSurfaceBridge?.Close(sessionId);
         TerminateSessionAndForget(sessionId, NativeContainmentFailure.DetachRequested);
         return new { sessionId, accepted = true, contained = false, containmentMode = "terminated", closed = true };
     }
-
     public void RelayoutAttachedWindows()
     {
         if (_disposed || _relayoutPending || _surfacesByHandle.Count == 0) return;
@@ -609,43 +486,15 @@ public sealed class WebMessageBridge : IDisposable
             {
                 try
                 {
-                    if (_sessionIdsByHandle.TryGetValue(pair.Key, out var sessionId)
-                        && _capturedSurfaceBridge is not null
-                        && _capturedSurfaceBridge.TryGetState(sessionId, out var captured)
-                        && captured is not null)
-                    {
-                        var bounds = ConvertBounds(pair.Value);
-                        var dpi = VisualTreeHelper.GetDpi(_webView);
-                        _capturedSurfaceBridge.Layout(
-                            sessionId,
-                            bounds,
-                            pair.Value.Visible,
-                            dpi.DpiScaleX,
-                            dpi.DpiScaleY);
-                        if (!_windows.TryUpdateCapturedSourceLayout(pair.Key, bounds, pair.Value.Visible, out _))
-                        {
-                            TerminateHandleAndForget(pair.Key, NativeContainmentFailure.LayoutFailed);
-                            continue;
-                        }
-                        _surfacesByHandle[pair.Key] = pair.Value with { LastNativeBounds = bounds };
-                        continue;
-                    }
-
-                    if (_capturedSurfaceBridge is not null)
-                    {
-                        TerminateHandleAndForget(pair.Key, NativeContainmentFailure.AttachmentLost);
-                        continue;
-                    }
-
                     if (!_windows.IsAttached(pair.Key))
                     {
                         TerminateHandleAndForget(pair.Key, NativeContainmentFailure.AttachmentLost);
                         continue;
                     }
 
-                    var legacyBounds = ConvertBounds(pair.Value);
-                    if (_windows.TryUpdateAttachedLayout(pair.Key, legacyBounds, pair.Value.Visible, out _))
-                        _surfacesByHandle[pair.Key] = pair.Value with { LastNativeBounds = legacyBounds };
+                    var bounds = ConvertBounds(pair.Value);
+                    if (_windows.TryUpdateAttachedLayout(pair.Key, bounds, pair.Value.Visible, out _))
+                        _surfacesByHandle[pair.Key] = pair.Value with { LastNativeBounds = bounds };
                     else TerminateHandleAndForget(pair.Key, NativeContainmentFailure.LayoutFailed);
                 }
                 catch (Exception error) when (error is BridgeException or InvalidOperationException or OverflowException or ArithmeticException)
@@ -656,7 +505,6 @@ public sealed class WebMessageBridge : IDisposable
             }
         }, DispatcherPriority.Render);
     }
-
     private long GetHandle(string sessionId)
     {
         if (!_handlesBySessionId.TryGetValue(sessionId, out var handle)) throw new BridgeException("SESSION_NOT_FOUND", "Janela não encontrada.");
@@ -840,7 +688,6 @@ public sealed class WebMessageBridge : IDisposable
             TerminateHandleAndForget(handle, NativeContainmentFailure.PendingAttachExpired);
         }
 
-        SweepCapturedSurfaceHealth();
 
         foreach (var processId in _processIdsBySessionId.Values
             .Concat(_launchRootByMemberProcessId.Keys)
@@ -852,28 +699,10 @@ public sealed class WebMessageBridge : IDisposable
         }
     }
 
-    private void SweepCapturedSurfaceHealth()
-    {
-        if (_capturedSurfaceBridge is null) return;
-        foreach (var pair in _handlesBySessionId.ToArray())
-        {
-            if (!_capturedSurfaceBridge.TryGetState(pair.Key, out var state) || state is null) continue;
-            var runtime = state.Runtime;
-            if (!runtime.Presentation.Presentation.IsTerminal && string.IsNullOrWhiteSpace(runtime.Capture.Failure))
-                continue;
-
-            BrowserDiagnostics.Write(
-                "captured_surface_terminal",
-                $"session={pair.Key} generation={state.Generation} presentation={runtime.Presentation.Presentation.State}");
-            TerminateSessionAndForget(pair.Key, NativeContainmentFailure.AttachmentLost);
-        }
-    }
-
     private void TerminateSessionAndForget(string sessionId, NativeContainmentFailure failure)
     {
         if (!_processIdsBySessionId.TryGetValue(sessionId, out var processId))
             throw new BridgeException("SESSION_NOT_FOUND", "Janela não encontrada.");
-        _capturedSurfaceBridge?.Close(sessionId);
         TerminateProcessAndForget(processId, failure);
     }
 
@@ -882,7 +711,6 @@ public sealed class WebMessageBridge : IDisposable
         if (_sessionIdsByHandle.TryGetValue(handle, out var sessionId)
             && _processIdsBySessionId.TryGetValue(sessionId, out var processId))
         {
-            _capturedSurfaceBridge?.Close(sessionId);
             TerminateProcessAndForget(processId, failure);
             return;
         }
@@ -900,7 +728,6 @@ public sealed class WebMessageBridge : IDisposable
             .Where(pair => memberProcessIds.Contains(pair.Value))
             .ToArray())
         {
-            _capturedSurfaceBridge?.Close(pair.Key);
         }
         BrowserDiagnostics.Write("native_containment_terminated", $"pid={rootProcessId} reason={failure}");
         foreach (var memberProcessId in memberProcessIds)
@@ -1003,7 +830,6 @@ public sealed class WebMessageBridge : IDisposable
     {
         foreach (var pair in _processIdsBySessionId.Where(pair => pair.Value == processId).ToArray())
         {
-            _capturedSurfaceBridge?.Close(pair.Key);
             _processIdsBySessionId.Remove(pair.Key);
             if (_handlesBySessionId.Remove(pair.Key, out var handle))
             {
@@ -1026,7 +852,6 @@ public sealed class WebMessageBridge : IDisposable
         {
             TerminateProcessAndForget(processId, failure);
         }
-        _capturedSurfaceBridge?.CloseAll();
         _surfacesByHandle.Clear();
         _pendingAttachDeadlinesByHandle.Clear();
     }
@@ -1067,24 +892,9 @@ public sealed class WebMessageBridge : IDisposable
         RejectUnknownProperties(parameters, "sessionId");
         var sessionId = ReadString(parameters, "sessionId");
         if (!_handlesBySessionId.TryGetValue(sessionId, out var handle)) throw new BridgeException("SESSION_NOT_FOUND", "Janela não encontrada.");
-        if (_capturedSurfaceBridge is not null && _capturedSurfaceBridge.TryGetState(sessionId, out var captured) && captured is not null)
-        {
-            // Captured mode never restores/focuses/minimizes the foreign source HWND. CloudOS
-            // window state is already expressed through native.session.layout + visible.
-            return new
-            {
-                sessionId,
-                generation = captured.Generation,
-                accepted = true,
-                containmentMode = "captured-surface"
-            };
-        }
-        if (_capturedSurfaceBridge is not null)
-            throw new BridgeException("WINDOW_CAPTURE_SESSION_LOST", "A sessão capturada não está mais ativa.");
         if (!operation(handle, out var error)) throw new BridgeException("WINDOW_OPERATION_DENIED", error ?? "O Windows recusou a operação.");
         return new { sessionId, accepted = true };
     }
-
     private async Task<object> CloseSessionAsync(JsonElement parameters)
     {
         RequireObject(parameters);
@@ -1093,8 +903,6 @@ public sealed class WebMessageBridge : IDisposable
         var handle = GetHandle(sessionId);
         if (!_processIdsBySessionId.TryGetValue(sessionId, out var processId))
             throw new BridgeException("SESSION_NOT_FOUND", "Janela não encontrada.");
-
-        _capturedSurfaceBridge?.Close(sessionId);
         var rootProcessId = ResolveLaunchRoot(processId);
         if (_nativeSessionsById.TryGetValue(sessionId, out var closingNativeSession)) closingNativeSession.MarkClosing();
         if (!_windows.TryClose(handle, out var error))
@@ -1150,7 +958,6 @@ public sealed class WebMessageBridge : IDisposable
                 _pendingAttachDeadlinesByHandle.Remove(handle);
                 if (_sessionIdsByHandle.Remove(handle, out var removed))
                 {
-                    _capturedSurfaceBridge?.Close(removed);
                     if (_processIdsBySessionId.TryGetValue(removed, out var removedProcessId))
                     {
                         var rootProcessId = ResolveLaunchRoot(removedProcessId);
@@ -1188,9 +995,7 @@ public sealed class WebMessageBridge : IDisposable
                 // session. Splash screens, helper windows and other Job-owned roots remain
                 // quarantined, but they never receive their own attach deadline and therefore
                 // cannot kill the whole application merely because the frontend did not dock them.
-                var isCaptured = _capturedSurfaceBridge is not null
-                    && _capturedSurfaceBridge.TryGetState(sessionId, out _);
-                if (!eventArgs.Window.IsAttached && !isCaptured && !_pendingAttachDeadlinesByHandle.ContainsKey(handle))
+                if (!eventArgs.Window.IsAttached && !_pendingAttachDeadlinesByHandle.ContainsKey(handle))
                 {
                     _pendingAttachDeadlinesByHandle[handle] = DateTimeOffset.UtcNow.AddMilliseconds(
                         NativeLaunchContainmentPolicy.PendingAttachTimeoutMilliseconds);
@@ -1339,40 +1144,7 @@ public sealed class WebMessageBridge : IDisposable
         var sessions = new List<object>();
         foreach (var window in snapshots.OrderBy(window => window.ProcessId).ThenBy(window => window.Title, StringComparer.OrdinalIgnoreCase))
         {
-            // Job-owned auxiliary HWNDs are deliberately not public sessions. They stay hidden
-            // and tracked so they cannot escape, while the selected primary HWND alone owns the
-            // CloudOS window lifecycle.
             if (!_sessionIdsByHandle.TryGetValue(window.Handle, out var sessionId)) continue;
-
-            if (_capturedSurfaceBridge is not null
-                && _capturedSurfaceBridge.TryGetState(sessionId, out var captured)
-                && captured is not null)
-            {
-                var healthy = !captured.Runtime.Presentation.Presentation.IsTerminal
-                    && string.IsNullOrWhiteSpace(captured.Runtime.Capture.Failure);
-                if (!healthy) continue;
-                sessions.Add(new
-                {
-                    sessionId,
-                    generation = captured.Generation,
-                    title = string.IsNullOrWhiteSpace(window.Title) ? $"Aplicativo {window.ProcessId}" : window.Title,
-                    processId = window.ProcessId,
-                    minimized = false,
-                    maximized = false,
-                    contained = true,
-                    containmentMode = "captured-surface",
-                    visible = captured.Visible,
-                    bounds = new
-                    {
-                        x = captured.Bounds.X,
-                        y = captured.Bounds.Y,
-                        width = captured.Bounds.Width,
-                        height = captured.Bounds.Height
-                    }
-                });
-                continue;
-            }
-
             sessions.Add(new
             {
                 sessionId,
@@ -1388,7 +1160,6 @@ public sealed class WebMessageBridge : IDisposable
         }
         return sessions.ToArray();
     }
-
     private void PostResponse(string id, bool ok, object? result, object? error)
     {
         if (_disposed || _webView.CoreWebView2 is null) return;
@@ -1463,8 +1234,6 @@ public sealed class WebMessageBridge : IDisposable
         _refreshTimer.Stop();
         _browserManager.Dispose();
         _windows.WindowChanged -= OnNativeWindowChanged;
-        _capturedSurfaceBridge?.Dispose();
-        _capturedSurfaceRuntime?.Dispose();
         try
         {
             var core = _webView.CoreWebView2;

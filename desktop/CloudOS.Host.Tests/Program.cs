@@ -63,7 +63,6 @@ var tests = new (string Name, Action Run)[]
     ("native launcher tracks suspended process before resume", NativeLauncherTracksSuspendedProcessBeforeResume),
     ("cmd script GUI descendant is contained by the same Job", NativeScriptLaunchContract.Validate),
     ("native job child HWND is quarantined and escape is detected", NativeJobChildWindowIsQuarantined),
-    ("captured source stays covered and follows CloudOS visibility", CapturedSourceIsolationFollowsSurface)
 };
 
 foreach (var test in tests)
@@ -442,91 +441,6 @@ static void NativeJobChildWindowIsQuarantined()
             terminationError ?? "A child process capability was not revoked after Job termination.");
 }
 
-static void CapturedSourceIsolationFollowsSurface()
-{
-    var processPath = Environment.ProcessPath ?? throw new InvalidOperationException("The test process path is unavailable.");
-    var spec = NativeProcessLaunchSpec.Create(
-        processPath,
-        FixtureArguments("--native-contained-fixture-spawn-window-child"),
-        AppContext.BaseDirectory);
-    using var lease = NativeContainedProcessLauncher.StartSuspended(spec);
-    using var windows = new NativeWindowManager();
-    windows.TrackLaunchedProcess(lease.Process);
-    lease.Resume();
-
-    NativeWindowSnapshot? source = null;
-    IReadOnlyList<int> members = [];
-    var deadline = DateTimeOffset.UtcNow.AddSeconds(8);
-    while (DateTimeOffset.UtcNow < deadline && source is null)
-    {
-        members = NativeContainedJobTracker.Synchronize(lease, windows);
-        windows.Refresh();
-        source = windows.GetWindows().FirstOrDefault(window =>
-            window.ProcessId != lease.ProcessId && window.Title == NativeFixtureWindow.Title);
-        if (source is null) Thread.Sleep(25);
-    }
-    Assert(source is not null, "The capture source fixture did not enter quarantine.");
-
-    var bounds = new NativeWindowBounds(140, 120, 420, 280);
-    var owner = NativeFixtureWindow.CreateVisibleOwner();
-    var presenter = NativeFixtureWindow.CreateVisiblePresenter(owner, bounds);
-    try
-    {
-        Assert(windows.TryPrepareCapturedSource(source!.Handle, owner.ToInt64(), bounds, true, out var error),
-            error ?? "The source did not enter covered capture preparation.");
-        var sourceHandle = new IntPtr(source.Handle);
-        Assert(NativeMethods.IsWindowVisible(sourceHandle), "A prepared WGC source must keep rendering.");
-        Assert(NativeMethods.GetWindow(sourceHandle, NativeMethods.GW_OWNER) == IntPtr.Zero,
-            "The preparing source must remain unowned so it can stay behind the Host.");
-
-        Assert(windows.TryActivateCapturedSource(source.Handle, presenter.ToInt64(), bounds, true, out error),
-            error ?? "The source did not bind behind the Host-owned presenter.");
-        Assert(NativeMethods.GetWindow(sourceHandle, NativeMethods.GW_OWNER) == owner,
-            "The active source must be owned by CloudOS.");
-        var extendedStyle = NativeMethods.GetWindowExtendedStyle(sourceHandle);
-        Assert((extendedStyle & NativeMethods.WS_EX_APPWINDOW) == 0
-            && (extendedStyle & NativeMethods.WS_EX_TOOLWINDOW) != 0,
-            "The source must not appear in the taskbar or Alt+Tab.");
-
-        Assert(windows.TryUpdateCapturedSourceLayout(source.Handle, bounds, false, out error),
-            error ?? "The source did not follow hidden CloudOS surface state.");
-        Assert(!NativeMethods.IsWindowVisible(sourceHandle),
-            "A source must be hidden when its CloudOS surface is hidden.");
-        Assert(windows.TryUpdateCapturedSourceLayout(source.Handle, bounds, true, out error),
-            error ?? "The source did not resume behind the CloudOS surface.");
-        Assert(NativeMethods.IsWindowVisible(sourceHandle),
-            "A reopened CloudOS surface must resume its WGC source.");
-
-        NativeMethods.SetWindowExtendedStyle(
-            sourceHandle,
-            NativeMethods.GetWindowExtendedStyle(sourceHandle) | NativeMethods.WS_EX_APPWINDOW);
-        var failureDeadline = DateTimeOffset.UtcNow.AddSeconds(2);
-        var hasCapturedFailure = false;
-        string? failure = null;
-        while (DateTimeOffset.UtcNow < failureDeadline && !hasCapturedFailure)
-        {
-            windows.Refresh();
-            hasCapturedFailure = windows.TryGetContainmentFailure(source.ProcessId, out failure);
-            if (!hasCapturedFailure) Thread.Sleep(20);
-        }
-        Assert(hasCapturedFailure && failure?.Contains("Alt+Tab", StringComparison.Ordinal) == true,
-            $"Restoring task-switcher style must fail captured containment. recorded={hasCapturedFailure}; failure={failure}");
-        Assert(!NativeMethods.IsWindowVisible(sourceHandle),
-            "A captured-source escape must be hidden before Job termination.");
-    }
-    finally
-    {
-        NativeFixtureWindow.Destroy(presenter);
-        NativeFixtureWindow.Destroy(owner);
-    }
-
-    Assert(lease.TryTerminate(3_000, out var terminationError),
-        terminationError ?? "The captured-source Job did not terminate.");
-    foreach (var processId in members)
-        Assert(windows.TryTerminateTrackedProcess(processId, out terminationError),
-            terminationError ?? "A captured-source capability survived Job termination.");
-}
-
 static string[] FixtureArguments(string fixtureArgument)
 {
     var processPath = Environment.ProcessPath ?? throw new InvalidOperationException("The test process path is unavailable.");
@@ -534,7 +448,6 @@ static string[] FixtureArguments(string fixtureArgument)
         ? [System.Reflection.Assembly.GetExecutingAssembly().Location, fixtureArgument]
         : [fixtureArgument];
 }
-
 static void AssertThrowsArgument(Action action)
 {
     try { action(); }
