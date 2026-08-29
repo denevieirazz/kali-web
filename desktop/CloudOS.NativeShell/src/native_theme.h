@@ -20,9 +20,6 @@ constexpr int kBottomBarHeight = 56;
 constexpr UINT_PTR kReconcileTimer = 1;
 constexpr UINT_PTR kMetricsTimer = 2;
 
-// CloudOS native shell visual tokens.
-// The palette intentionally follows a restrained desktop-shell hierarchy:
-// wallpaper < shell surfaces < hover/selection < one semantic accent.
 constexpr COLORREF kBgTop = RGB(17, 20, 29);
 constexpr COLORREF kBgBottom = RGB(8, 11, 17);
 constexpr COLORREF kGlassBg = RGB(26, 28, 33);
@@ -57,22 +54,21 @@ struct AppItem final
     int icon_id;
 };
 
-// Keep visible names honest: an item must describe what the launcher really opens.
-inline constexpr std::array<AppItem, 20> kAllApps{{
-    {L"browser", L"Navegador", L"Abrir o navegador padrao do Windows", L"", AppCategory::Accessories, 1},
+// The catalog describes what each item actually launches.
+inline constexpr std::array<AppItem, 21> kAllApps{{
+    {L"browser", L"Navegador", L"Navegador Win32 in-process do CloudOS com WebView2", L"", AppCategory::Accessories, 1},
+    {L"control", L"Central de Comandos", L"Mais de 100 acoes do CloudOS e do Windows em uma central pesquisavel", L"", AppCategory::System, 16},
     {L"projects", L"Projetos", L"Projetos persistentes no CloudOS Drive", L"", AppCategory::Dev, 2},
     {L"wsl", L"WSL / Kali", L"Terminal Linux pela distribuicao WSL configurada", L"wsl.exe", AppCategory::Dev, 4},
     {L"terminal", L"Terminal", L"Terminal nativo via ConPTY", L"cmd.exe", AppCategory::Dev, 3},
     {L"powershell", L"PowerShell", L"PowerShell em terminal ConPTY", L"powershell.exe", AppCategory::Dev, 4},
     {L"notepad", L"Bloco de Notas", L"Editor de texto nativo do CloudOS", L"", AppCategory::Accessories, 5},
-
     {L"drive", L"CloudOS Drive", L"Armazenamento persistente isolado do CloudOS", L"", AppCategory::Files, 6},
     {L"systemdrive", L"Disco do Sistema", L"Abrir o volume onde o Windows esta instalado", L"explorer.exe", AppCategory::Files, 6},
     {L"files", L"Arquivos", L"Arquivos Windows, CloudOS Drive e WSL", L"", AppCategory::Files, 7},
     {L"paint", L"Paint", L"Editor de imagens do Windows", L"mspaint.exe", AppCategory::Accessories, 8},
     {L"media", L"Midia", L"Abrir o player de midia do Windows", L"", AppCategory::Accessories, 9},
     {L"code", L"Editor de Codigo", L"Abrir VS Code quando disponivel", L"code.cmd", AppCategory::Dev, 10},
-
     {L"settings", L"Configuracoes", L"Configuracoes nativas do CloudOS", L"", AppCategory::Settings, 11},
     {L"calc", L"Calculadora", L"Calculadora nativa do CloudOS", L"", AppCategory::Accessories, 12},
     {L"sysmon", L"Monitor do Sistema", L"Telemetria nativa do CloudOS", L"", AppCategory::System, 13},
@@ -137,7 +133,8 @@ inline int Height(const RECT& r) noexcept
 
 inline bool Contains(const RECT& r, POINT pt) noexcept
 {
-    return pt.x >= r.left && pt.x < r.right && pt.y >= r.top && pt.y < r.bottom;
+    return pt.x >= r.left && pt.x < r.right &&
+        pt.y >= r.top && pt.y < r.bottom;
 }
 
 inline void DarkWindow(HWND window, bool round = true)
@@ -164,5 +161,4 @@ inline void DarkWindow(HWND window, bool round = true)
             static_cast<DWORD>(sizeof(preference)));
     }
 }
-
 } // namespace CloudOS
