@@ -13,11 +13,47 @@ const ISOLATED_CHROMIUM_EXECUTABLES = new Set([
   'brave.exe', 'chrome.exe', 'chromium.exe', 'msedge.exe', 'vivaldi.exe', 'opera.exe'
 ]);
 const PER_LAUNCH_TOKEN_PATTERN = /^[a-f0-9]{32}$/i;
+const FILE_TIME_PATTERN = /^[0-9]{1,20}$/;
+const MAX_MANAGED_PROCESS_CLAIMS = 1_024;
+const MAX_SIGNED_INT64 = 9_223_372_036_854_775_807n;
 
 function normalizedWindowsPath(value) {
   const candidate = String(value || '').trim();
   if (!path.win32.isAbsolute(candidate) || /[\0\r\n]/.test(candidate)) return null;
   return path.win32.normalize(candidate).toLowerCase();
+}
+
+function normalizedFileTime(value) {
+  if (typeof value !== 'string') return null;
+  const candidate = value.trim();
+  if (!FILE_TIME_PATTERN.test(candidate)) return null;
+  try {
+    const parsed = BigInt(candidate);
+    if (parsed <= 0n || parsed > MAX_SIGNED_INT64) return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function managedProcessClaimKey(pid, startTimeFileTimeUtc) {
+  return `${pid}:${startTimeFileTimeUtc}`;
+}
+
+export function normalizeManagedProcessClaims(value) {
+  if (!Array.isArray(value)) return [];
+  const normalized = [];
+  const seen = new Set();
+  for (const claim of value.slice(0, MAX_MANAGED_PROCESS_CLAIMS)) {
+    const pid = Number(claim?.processId);
+    const startTimeFileTimeUtc = normalizedFileTime(claim?.startTimeFileTimeUtc);
+    if (!Number.isInteger(pid) || pid <= 0 || !startTimeFileTimeUtc) continue;
+    const key = managedProcessClaimKey(pid, startTimeFileTimeUtc);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push({ processId: pid, startTimeFileTimeUtc });
+  }
+  return normalized;
 }
 
 function profilePathHasPerLaunchToken(profilePath, executableName) {
@@ -85,13 +121,19 @@ export function shouldGuardExternalInstanceHandoff(launch) {
   return !hasExplicitPerLaunchInstanceIsolation(launch);
 }
 
-export function evaluateExternalInstanceProbe(executable, rows) {
+export function evaluateExternalInstanceProbe(executable, rows, managedProcessClaims = []) {
   const target = normalizedWindowsPath(executable);
-  if (!target) return { conflicts: [], unrelated: [], unverifiable: [] };
+  if (!target) return { conflicts: [], unrelated: [], unverifiable: [], managed: [] };
 
+  const managedKeys = new Set(
+    normalizeManagedProcessClaims(managedProcessClaims)
+      .map((claim) => managedProcessClaimKey(claim.processId, claim.startTimeFileTimeUtc))
+  );
   const conflicts = [];
   const unrelated = [];
   const unverifiable = [];
+  const managed = [];
+
   for (const row of Array.isArray(rows) ? rows : []) {
     const pid = Number(row?.pid);
     if (!Number.isInteger(pid) || pid <= 0) continue;
@@ -102,10 +144,22 @@ export function evaluateExternalInstanceProbe(executable, rows) {
       conflicts.push(item);
       continue;
     }
-    if (candidate === target) conflicts.push({ pid, reason: 'same-executable' });
-    else unrelated.push({ pid, path: candidate });
+
+    if (candidate !== target) {
+      unrelated.push({ pid, path: candidate });
+      continue;
+    }
+
+    const startTimeFileTimeUtc = normalizedFileTime(row?.startTimeFileTimeUtc);
+    if (startTimeFileTimeUtc
+      && managedKeys.has(managedProcessClaimKey(pid, startTimeFileTimeUtc))) {
+      managed.push({ pid, startTimeFileTimeUtc });
+      continue;
+    }
+
+    conflicts.push({ pid, reason: 'same-executable' });
   }
-  return { conflicts, unrelated, unverifiable };
+  return { conflicts, unrelated, unverifiable, managed };
 }
 
 async function probeProcessesByExecutableName(executable) {
@@ -121,11 +175,13 @@ async function probeProcessesByExecutableName(executable) {
     'foreach ($candidate in @(Get-Process -Name $name -ErrorAction SilentlyContinue)) {',
     '  try {',
     '    $candidatePath = $null',
+    '    $candidateStartTimeFileTimeUtc = $null',
     '    try { $candidatePath = [string]$candidate.Path } catch {}',
+    '    try { $candidateStartTimeFileTimeUtc = [string]$candidate.StartTime.ToUniversalTime().ToFileTimeUtc() } catch {}',
     '    if (-not [string]::IsNullOrWhiteSpace($candidatePath)) {',
     '      try { $candidatePath = [IO.Path]::GetFullPath($candidatePath) } catch { $candidatePath = $null }',
     '    }',
-    '    $records += [PSCustomObject]@{ pid = [int]$candidate.Id; path = $candidatePath }',
+    '    $records += [PSCustomObject]@{ pid = [int]$candidate.Id; path = $candidatePath; startTimeFileTimeUtc = $candidateStartTimeFileTimeUtc }',
     '  } finally { try { $candidate.Dispose() } catch {} }',
     '}',
     '@($records) | ConvertTo-Json -Compress'
@@ -150,7 +206,7 @@ async function probeProcessesByExecutableName(executable) {
   return Array.isArray(parsed) ? parsed : [parsed];
 }
 
-export async function assertNoExternalInstanceHandoffRisk(launch) {
+export async function assertNoExternalInstanceHandoffRisk(launch, managedProcessClaims = []) {
   if (!shouldGuardExternalInstanceHandoff(launch)) {
     return {
       checked: false,
@@ -169,7 +225,11 @@ export async function assertNoExternalInstanceHandoffRisk(launch) {
     );
   }
 
-  const evaluation = evaluateExternalInstanceProbe(launch.launchSpec.executable, rows);
+  const evaluation = evaluateExternalInstanceProbe(
+    launch.launchSpec.executable,
+    rows,
+    managedProcessClaims
+  );
   if (evaluation.conflicts.length > 0) {
     throw Object.assign(
       new Error('Já existe uma instância do mesmo executável fora deste novo launch. Feche a instância existente e tente novamente para evitar handoff ou adoção entre Jobs.'),
@@ -180,5 +240,5 @@ export async function assertNoExternalInstanceHandoffRisk(launch) {
     );
   }
 
-  return { checked: true, conflicts: 0 };
+  return { checked: true, conflicts: 0, managedProcessesIgnored: evaluation.managed.length };
 }
