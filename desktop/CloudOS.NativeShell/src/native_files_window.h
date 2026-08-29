@@ -4,6 +4,7 @@
 
 #include <Windows.h>
 #include <CommCtrl.h>
+#include <Shellapi.h>
 
 #include <string>
 #include <vector>
