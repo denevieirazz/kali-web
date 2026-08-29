@@ -6,6 +6,7 @@ on:
       - integration/cloudos-unified-runtime
     paths:
       - .github/workflows/wire-managed-process-launch-claims.yml
+      - scripts/tmp-wire-managed-launch-claims.ps1
 
 permissions:
   contents: write
