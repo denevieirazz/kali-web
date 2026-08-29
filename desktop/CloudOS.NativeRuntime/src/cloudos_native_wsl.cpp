@@ -1,5 +1,6 @@
 #include "../include/cloudos_native_runtime.h"
 
+#include <combaseapi.h>
 #include <wslapi.h>
 
 #include <new>
