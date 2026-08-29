@@ -117,3 +117,7 @@ O pacote nativo `Microsoft.Web.WebView2` é restaurado durante o build C++ e o l
 ## Próxima migração
 
 Depois de estabilizar o desktop híbrido, migrar visualmente os aplicativos em blocos, mantendo cada backend nativo. `CloudOSFiles` é candidato prioritário: preservar seu frontend rico, substituir `OPFS`/facades HTTP pela bridge `NativeCloudOSDrive`/Windows Shell/WSL.
+
+## Estado da implementação
+
+A fundação híbrida foi integrada na branch nativa e esta revisão existe para disparar a validação completa do pipeline: contratos, build estático do frontend, restauração do SDK WebView2, build MSVC x64 e cópia dos assets para o diretório do executável.
