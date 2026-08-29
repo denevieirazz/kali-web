@@ -24,12 +24,13 @@ $projectsPath = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\src\native_proj
 $projectPath = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\CloudOS.NativeShell.vcxproj'
 $researchPolicyPath = Join-Path $repoRoot 'docs\native\RESEARCH_POLICY.md'
 $filesResearchPath = Join-Path $repoRoot 'docs\native\research\FILES_NATIVE_SHELL_RESEARCH.md'
+$desktopResearchPath = Join-Path $repoRoot 'docs\native\research\DESKTOP_SHELL_ARCHITECTURE.md'
 
 foreach ($path in @(
     $desktopPath,$surfacePath,$surfaceHeaderPath,$launcherPath,$mainPath,$settingsPath,$settingsHeaderPath,
     $themePath,$mruPath,$platformPath,$shellViewPath,$drivePath,$trashPath,$filesPath,$filesInternalPath,
     $filesStylePath,$filesNavigationPath,$filesOperationsPath,$filesSupportPath,$projectsPath,$projectPath,
-    $researchPolicyPath,$filesResearchPath
+    $researchPolicyPath,$filesResearchPath,$desktopResearchPath
 )) {
     if (-not (Test-Path -LiteralPath $path)) { throw "Required native shell file missing: $path" }
 }
@@ -57,6 +58,7 @@ $projects = Get-Content -LiteralPath $projectsPath -Raw
 $project = Get-Content -LiteralPath $projectPath -Raw
 $researchPolicy = Get-Content -LiteralPath $researchPolicyPath -Raw
 $filesResearch = Get-Content -LiteralPath $filesResearchPath -Raw
+$desktopResearch = Get-Content -LiteralPath $desktopResearchPath -Raw
 
 foreach ($token in @('Neo-Tokyo','22°C','OCT 26, 2045','CloudOS Architecture Sync','Sistema 100% Operacional','CloudOS Native Kernel v2.0')) {
     if ($desktop.Contains($token)) { throw "Synthetic desktop data regressed into native UI: $token" }
@@ -64,6 +66,12 @@ foreach ($token in @('Neo-Tokyo','22°C','OCT 26, 2045','CloudOS Architecture Sy
 
 foreach ($token in @('CurrentWorkspaceWindows','StartMenuMRUTracker::Instance().GetTopApps','cloudos_native_runtime_abi','FocusWindow','SwitchWorkspace')) {
     if (-not $desktop.Contains($token)) { throw "Desktop contract missing: $token" }
+}
+foreach ($token in @('BuildDesktopShortcuts','BuildDockApps','BuildStartApps','start_menu_open_','start_button_rect_','system_button_rect_','clock_rect_','Tiling manual')) {
+    if (-not $desktop.Contains($token)) { throw "Desktop shell UX contract missing: $token" }
+}
+foreach ($token in @('dashboard central permanente','DesktopSurface','Taskbar','StartMenu','WindowManager','DWM','Shell Launcher')) {
+    if (-not $desktopResearch.Contains($token)) { throw "Desktop shell architecture research missing: $token" }
 }
 
 if (-not $surface.Contains('return native_.Create(instance, window_manager)')) { throw 'Native desktop surface must be authoritative at startup.' }
@@ -131,4 +139,4 @@ foreach ($source in @('src\native_start_menu_window.cpp','src\native_taskbar_win
     if ($project.Contains($source)) { throw "Empty/provisional shell placeholder returned to build: $source" }
 }
 
-Write-Host 'PASS: CloudOS native-only shell, manual tiling, contained external apps, Drive, modern Files, Windows Shell view and Projects contracts are truthful and functional.'
+Write-Host 'PASS: CloudOS native desktop shell, Start/taskbar/workspaces, manual tiling, contained external apps, Drive, modern Files, Windows Shell view and Projects contracts are truthful and functional.'

@@ -16,26 +16,26 @@
 
 namespace CloudOS
 {
-constexpr int kBottomBarHeight = 48;
+constexpr int kBottomBarHeight = 56;
 constexpr UINT_PTR kReconcileTimer = 1;
 constexpr UINT_PTR kMetricsTimer = 2;
 
-// Native CloudOS palette: restrained Windows/Fluent hierarchy instead of the
-// previous neon-heavy dashboard look. Names are kept stable to avoid needless
-// churn in the drawing code while the values define the new visual language.
-constexpr COLORREF kBgTop = RGB(17, 22, 31);
+// CloudOS native shell visual tokens.
+// The palette intentionally follows a restrained desktop-shell hierarchy:
+// wallpaper < shell surfaces < hover/selection < one semantic accent.
+constexpr COLORREF kBgTop = RGB(17, 20, 29);
 constexpr COLORREF kBgBottom = RGB(8, 11, 17);
-constexpr COLORREF kGlassBg = RGB(23, 29, 40);
-constexpr COLORREF kGlassCard = RGB(29, 37, 50);
-constexpr COLORREF kGlassBorder = RGB(61, 73, 91);
-constexpr COLORREF kNeonCyan = RGB(96, 165, 250);
-constexpr COLORREF kNeonPurple = RGB(129, 140, 248);
-constexpr COLORREF kNeonPink = RGB(192, 132, 252);
-constexpr COLORREF kTextWhite = RGB(248, 250, 252);
-constexpr COLORREF kTextSec = RGB(203, 213, 225);
-constexpr COLORREF kTextMuted = RGB(148, 163, 184);
-constexpr COLORREF kAccentGreen = RGB(74, 222, 128);
-constexpr COLORREF kDanger = RGB(248, 113, 113);
+constexpr COLORREF kGlassBg = RGB(26, 28, 33);
+constexpr COLORREF kGlassCard = RGB(37, 40, 47);
+constexpr COLORREF kGlassBorder = RGB(72, 77, 88);
+constexpr COLORREF kNeonCyan = RGB(103, 165, 246);
+constexpr COLORREF kNeonPurple = RGB(126, 184, 255);
+constexpr COLORREF kNeonPink = RGB(213, 151, 171);
+constexpr COLORREF kTextWhite = RGB(245, 247, 250);
+constexpr COLORREF kTextSec = RGB(194, 199, 208);
+constexpr COLORREF kTextMuted = RGB(139, 146, 158);
+constexpr COLORREF kAccentGreen = RGB(102, 187, 141);
+constexpr COLORREF kDanger = RGB(219, 99, 106);
 
 enum class AppCategory : int
 {
@@ -57,9 +57,9 @@ struct AppItem final
     int icon_id;
 };
 
-// Visible names describe the behavior exposed by the native launcher.
+// Keep visible names honest: an item must describe what the launcher really opens.
 inline constexpr std::array<AppItem, 20> kAllApps{{
-    {L"browser", L"Navegador", L"Navegador do Windows hospedado dentro do CloudOS", L"", AppCategory::Accessories, 1},
+    {L"browser", L"Navegador", L"Abrir o navegador padrao do Windows", L"", AppCategory::Accessories, 1},
     {L"projects", L"Projetos", L"Projetos persistentes no CloudOS Drive", L"", AppCategory::Dev, 2},
     {L"wsl", L"WSL / Kali", L"Terminal Linux pela distribuicao WSL configurada", L"wsl.exe", AppCategory::Dev, 4},
     {L"terminal", L"Terminal", L"Terminal nativo via ConPTY", L"cmd.exe", AppCategory::Dev, 3},
@@ -67,17 +67,17 @@ inline constexpr std::array<AppItem, 20> kAllApps{{
     {L"notepad", L"Bloco de Notas", L"Editor de texto nativo do CloudOS", L"", AppCategory::Accessories, 5},
 
     {L"drive", L"CloudOS Drive", L"Armazenamento persistente isolado do CloudOS", L"", AppCategory::Files, 6},
-    {L"systemdrive", L"Disco do Sistema", L"Explorar o volume do Windows dentro do Arquivos", L"", AppCategory::Files, 6},
+    {L"systemdrive", L"Disco do Sistema", L"Abrir o volume onde o Windows esta instalado", L"explorer.exe", AppCategory::Files, 6},
     {L"files", L"Arquivos", L"Arquivos Windows, CloudOS Drive e WSL", L"", AppCategory::Files, 7},
-    {L"paint", L"Paint", L"Paint do Windows hospedado dentro do CloudOS", L"mspaint.exe", AppCategory::Accessories, 8},
-    {L"media", L"Midia", L"Player de midia hospedado dentro do CloudOS", L"", AppCategory::Accessories, 9},
-    {L"code", L"Editor de Codigo", L"VS Code hospedado no CloudOS quando disponivel", L"code.cmd", AppCategory::Dev, 10},
+    {L"paint", L"Paint", L"Editor de imagens do Windows", L"mspaint.exe", AppCategory::Accessories, 8},
+    {L"media", L"Midia", L"Abrir o player de midia do Windows", L"", AppCategory::Accessories, 9},
+    {L"code", L"Editor de Codigo", L"Abrir VS Code quando disponivel", L"code.cmd", AppCategory::Dev, 10},
 
     {L"settings", L"Configuracoes", L"Configuracoes nativas do CloudOS", L"", AppCategory::Settings, 11},
     {L"calc", L"Calculadora", L"Calculadora nativa do CloudOS", L"", AppCategory::Accessories, 12},
     {L"sysmon", L"Monitor do Sistema", L"Telemetria nativa do CloudOS", L"", AppCategory::System, 13},
-    {L"regedit", L"Registro", L"Editor do Registro hospedado quando permitido pelo Windows", L"regedit.exe", AppCategory::System, 14},
-    {L"snip", L"Captura de Tela", L"Ferramenta de Captura hospedada quando suportado", L"SnippingTool.exe", AppCategory::Accessories, 15},
+    {L"regedit", L"Registro", L"Editor do Registro do Windows", L"regedit.exe", AppCategory::System, 14},
+    {L"snip", L"Captura de Tela", L"Ferramenta de Captura do Windows", L"SnippingTool.exe", AppCategory::Accessories, 15},
     {L"apps", L"Aplicativos", L"Catalogo de aplicativos Windows e CloudOS", L"", AppCategory::System, 16},
     {L"run", L"Executar", L"Executar comando ou aplicativo", L"", AppCategory::System, 17},
     {L"health", L"Saude do Sistema", L"Diagnostico do runtime, WSL e ambiente", L"", AppCategory::System, 18},

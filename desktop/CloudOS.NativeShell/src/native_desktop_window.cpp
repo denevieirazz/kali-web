@@ -11,6 +11,7 @@
 #include <array>
 #include <cstdint>
 #include <cwchar>
+#include <initializer_list>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -21,71 +22,69 @@ namespace CloudOS
 {
 namespace
 {
-constexpr wchar_t kDesktopClass[] = L"CloudOS.NativeShell.CloudOSDesktop.v19";
+constexpr wchar_t kDesktopClass[] = L"CloudOS.NativeShell.CloudOSDesktop.v20";
 constexpr UINT_PTR kSearchSubclassId = 301;
 constexpr int kSearchControlId = 501;
-constexpr int kBaseDashboardWidth = 1060;
-constexpr int kBaseDashboardHeight = 650;
+constexpr int kStartGridColumns = 4;
+constexpr int kStartGridRows = 3;
+constexpr int kStartGridCapacity = kStartGridColumns * kStartGridRows;
 
-struct LayoutMetrics final
+struct ShellMetrics final
 {
     UINT dpi{96};
     int width{};
     int height{};
-    int dash_x{};
-    int dash_y{};
-    int dash_width{};
-    int dash_height{};
-    int bar_height{};
-    int bar_y{};
+    int taskbar_height{};
+    int taskbar_y{};
+    int taskbar_margin{};
+    int start_x{};
+    int start_y{};
+    int start_width{};
+    int start_height{};
     int search_x{};
     int search_y{};
     int search_width{};
     int search_height{};
 };
 
-UINT ComputeLayoutDpi(HWND window, int width, int height)
+ShellMetrics ComputeMetrics(HWND window, int width, int height)
 {
-    UINT actual_dpi = window != nullptr ? GetDpiForWindow(window) : 96u;
-    if (actual_dpi == 0)
+    ShellMetrics metrics{};
+    metrics.width = std::max(1, width);
+    metrics.height = std::max(1, height);
+    metrics.dpi = window != nullptr ? GetDpiForWindow(window) : 96u;
+    if (metrics.dpi == 0)
     {
-        actual_dpi = 96u;
+        metrics.dpi = 96u;
     }
 
-    const int actual_bar_height = Scale(kBottomBarHeight, actual_dpi);
-    const int available_width = std::max(1, width - Scale(24, actual_dpi));
-    const int available_height =
-        std::max(1, height - actual_bar_height - Scale(24, actual_dpi));
+    metrics.taskbar_height = Scale(kBottomBarHeight, metrics.dpi);
+    metrics.taskbar_y = std::max(0, metrics.height - metrics.taskbar_height);
+    metrics.taskbar_margin = Scale(10, metrics.dpi);
 
-    const UINT width_fit = static_cast<UINT>(
-        std::max(72, available_width * 96 / kBaseDashboardWidth));
-    const UINT height_fit = static_cast<UINT>(
-        std::max(72, available_height * 96 / kBaseDashboardHeight));
+    const int outer_margin = Scale(18, metrics.dpi);
+    const int maximum_start_width = Scale(700, metrics.dpi);
+    const int maximum_start_height = Scale(590, metrics.dpi);
+    metrics.start_width = std::max(
+        1,
+        std::min(
+            maximum_start_width,
+            metrics.width - outer_margin * 2));
+    metrics.start_height = std::max(
+        1,
+        std::min(
+            maximum_start_height,
+            metrics.taskbar_y - outer_margin * 2));
 
-    return std::max<UINT>(
-        72u,
-        std::min(actual_dpi, std::min(width_fit, height_fit)));
-}
+    metrics.start_x = std::max(outer_margin, (metrics.width - metrics.start_width) / 2);
+    metrics.start_y = std::max(
+        outer_margin,
+        metrics.taskbar_y - metrics.start_height - Scale(12, metrics.dpi));
 
-LayoutMetrics ComputeMetrics(HWND window, int width, int height)
-{
-    LayoutMetrics metrics{};
-    metrics.width = width;
-    metrics.height = height;
-    metrics.dpi = ComputeLayoutDpi(window, width, height);
-    metrics.dash_width = Scale(kBaseDashboardWidth, metrics.dpi);
-    metrics.dash_height = Scale(kBaseDashboardHeight, metrics.dpi);
-    metrics.bar_height = Scale(kBottomBarHeight, metrics.dpi);
-    metrics.bar_y = std::max(0, height - metrics.bar_height);
-    metrics.dash_x = std::max(0, (width - metrics.dash_width) / 2);
-    metrics.dash_y = std::max(
-        Scale(8, metrics.dpi),
-        (metrics.bar_y - metrics.dash_height) / 2);
-
-    metrics.search_x = metrics.dash_x + Scale(280, metrics.dpi);
-    metrics.search_y = metrics.dash_y + Scale(31, metrics.dpi);
-    metrics.search_width = Scale(330, metrics.dpi);
-    metrics.search_height = Scale(27, metrics.dpi);
+    metrics.search_x = metrics.start_x + Scale(28, metrics.dpi);
+    metrics.search_y = metrics.start_y + Scale(28, metrics.dpi);
+    metrics.search_width = std::max(1, metrics.start_width - Scale(56, metrics.dpi));
+    metrics.search_height = Scale(38, metrics.dpi);
     return metrics;
 }
 
@@ -101,51 +100,66 @@ int FindAppIndex(std::wstring_view id)
     return -1;
 }
 
-std::vector<int> BuildQuickLaunchIndices()
+std::vector<int> BuildIds(std::initializer_list<std::wstring_view> ids)
 {
     std::vector<int> result;
-    result.reserve(6);
-
-    const auto append_unique = [&result](int app_index)
+    result.reserve(ids.size());
+    for (const std::wstring_view id : ids)
     {
-        if (app_index < 0)
+        const int index = FindAppIndex(id);
+        if (index >= 0)
         {
-            return;
-        }
-        if (std::find(result.begin(), result.end(), app_index) == result.end())
-        {
-            result.push_back(app_index);
-        }
-    };
-
-    for (const std::wstring& id :
-         StartMenuMRUTracker::Instance().GetTopApps(6))
-    {
-        append_unique(FindAppIndex(id));
-        if (result.size() >= 6)
-        {
-            return result;
+            result.push_back(index);
         }
     }
+    return result;
+}
 
-    constexpr std::array<std::wstring_view, 6> fallback_ids{{
+std::vector<int> BuildDesktopShortcuts()
+{
+    return BuildIds({
+        L"files",
+        L"projects",
+        L"terminal",
+        L"drive",
+        L"wsl",
+        L"settings",
+    });
+}
+
+std::vector<int> BuildDockApps()
+{
+    return BuildIds({
+        L"files",
         L"terminal",
         L"projects",
-        L"files",
+        L"browser",
         L"code",
-        L"sysmon",
         L"settings",
-    }};
-    for (const std::wstring_view id : fallback_ids)
+    });
+}
+
+std::vector<int> BuildStartApps(const std::wstring& query)
+{
+    if (!query.empty())
     {
-        append_unique(FindAppIndex(id));
-        if (result.size() >= 6)
-        {
-            break;
-        }
+        return NativeSearchEngine::FilterApps(query);
     }
 
-    return result;
+    return BuildIds({
+        L"files",
+        L"projects",
+        L"terminal",
+        L"browser",
+        L"drive",
+        L"wsl",
+        L"code",
+        L"notepad",
+        L"calc",
+        L"sysmon",
+        L"apps",
+        L"settings",
+    });
 }
 
 std::wstring Shorten(std::wstring value, std::size_t maximum)
@@ -184,6 +198,22 @@ void DrawCenteredText(
         &brush);
 }
 
+std::wstring CurrentUserName()
+{
+    std::array<wchar_t, 256> username{};
+    DWORD length = static_cast<DWORD>(username.size());
+    if (!GetUserNameW(username.data(), &length) || username[0] == L'\0')
+    {
+        return L"Usuario";
+    }
+    return username.data();
+}
+
+std::wstring FormatPercent(bool available, unsigned int value)
+{
+    return available ? std::to_wstring(value) + L"%" : L"--";
+}
+
 } // namespace
 
 CloudOSNativeDesktopWindow::~CloudOSNativeDesktopWindow()
@@ -197,7 +227,7 @@ bool CloudOSNativeDesktopWindow::Create(
 {
     instance_ = instance;
     window_manager_ = window_manager;
-    edit_bg_brush_ = CreateSolidBrush(RGB(24, 34, 58));
+    edit_bg_brush_ = CreateSolidBrush(RGB(29, 31, 36));
 
     WNDCLASSEXW window_class{};
     window_class.cbSize = sizeof(window_class);
@@ -213,12 +243,10 @@ bool CloudOSNativeDesktopWindow::Create(
         return false;
     }
 
-    // ToolWindow keeps the shell surface out of Alt+Tab. It remains activatable
-    // when the user intentionally clicks the search field.
     hwnd_ = CreateWindowExW(
         WS_EX_TOOLWINDOW,
         kDesktopClass,
-        L"CloudOS Native Desktop",
+        L"CloudOS Desktop",
         WS_POPUP | WS_CLIPCHILDREN,
         0,
         0,
@@ -237,7 +265,7 @@ bool CloudOSNativeDesktopWindow::Create(
         0,
         L"EDIT",
         L"",
-        WS_CHILD | WS_VISIBLE | ES_LEFT | ES_AUTOHSCROLL,
+        WS_CHILD | ES_LEFT | ES_AUTOHSCROLL,
         0,
         0,
         0,
@@ -247,7 +275,6 @@ bool CloudOSNativeDesktopWindow::Create(
             static_cast<INT_PTR>(kSearchControlId)),
         instance_,
         nullptr);
-
     if (search_edit_ == nullptr)
     {
         Destroy();
@@ -269,12 +296,13 @@ bool CloudOSNativeDesktopWindow::Create(
         EM_SETCUEBANNER,
         TRUE,
         reinterpret_cast<LPARAM>(
-            L"Pesquisar apps, arquivos e configuracoes..."));
+            L"Pesquisar aplicativos e ferramentas do CloudOS"));
 
-    filtered_indices_ = NativeSearchEngine::FilterApps(L"");
+    filtered_indices_ = BuildStartApps(L"");
     current_stats_ = NativeSystemStats::Query();
 
     DarkWindow(hwnd_, false);
+    ShowWindow(search_edit_, SW_HIDE);
     return true;
 }
 
@@ -326,8 +354,10 @@ void CloudOSNativeDesktopWindow::UpdateLayout(const RECT& work_area)
         work_height,
         SWP_NOACTIVATE | SWP_SHOWWINDOW);
 
-    const LayoutMetrics metrics =
-        ComputeMetrics(hwnd_, work_width, work_height);
+    const ShellMetrics metrics = ComputeMetrics(
+        hwnd_,
+        work_width,
+        work_height);
 
     SetWindowPos(
         search_edit_,
@@ -336,19 +366,24 @@ void CloudOSNativeDesktopWindow::UpdateLayout(const RECT& work_area)
         metrics.search_y,
         metrics.search_width,
         metrics.search_height,
-        SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        SWP_NOZORDER | SWP_NOACTIVATE);
+
+    ShowWindow(
+        search_edit_,
+        start_menu_open_ ? SW_SHOWNA : SW_HIDE);
 
     if (search_font_ != nullptr)
     {
         DeleteObject(search_font_);
         search_font_ = nullptr;
     }
+
     search_font_ = CreateFontW(
-        -Scale(13, metrics.dpi),
+        -Scale(14, metrics.dpi),
         0,
         0,
         0,
-        FW_MEDIUM,
+        FW_NORMAL,
         FALSE,
         FALSE,
         FALSE,
@@ -376,16 +411,61 @@ void CloudOSNativeDesktopWindow::Redraw()
     }
 }
 
-void CloudOSNativeDesktopWindow::FocusSearch()
+void CloudOSNativeDesktopWindow::SetStartMenuOpen(
+    bool open,
+    bool focus_search)
 {
     if (hwnd_ == nullptr || search_edit_ == nullptr)
     {
         return;
     }
 
+    start_menu_open_ = open;
+    if (!open)
+    {
+        SetWindowTextW(search_edit_, L"");
+        search_query_.clear();
+        filtered_indices_ = BuildStartApps(L"");
+        focused_app_index_ = 0;
+        ShowWindow(search_edit_, SW_HIDE);
+        SetFocus(hwnd_);
+        Redraw();
+        return;
+    }
+
+    RECT client{};
+    GetClientRect(hwnd_, &client);
+    const ShellMetrics metrics = ComputeMetrics(
+        hwnd_,
+        Width(client),
+        Height(client));
+
+    SetWindowPos(
+        search_edit_,
+        HWND_TOP,
+        metrics.search_x,
+        metrics.search_y,
+        metrics.search_width,
+        metrics.search_height,
+        SWP_SHOWWINDOW);
+    ShowWindow(search_edit_, SW_SHOW);
     SetForegroundWindow(hwnd_);
-    SetFocus(search_edit_);
-    SendMessageW(search_edit_, EM_SETSEL, 0, -1);
+    if (focus_search)
+    {
+        SetFocus(search_edit_);
+        SendMessageW(search_edit_, EM_SETSEL, 0, -1);
+    }
+    Redraw();
+}
+
+void CloudOSNativeDesktopWindow::ToggleStartMenu()
+{
+    SetStartMenuOpen(!start_menu_open_, true);
+}
+
+void CloudOSNativeDesktopWindow::FocusSearch()
+{
+    SetStartMenuOpen(true, true);
 }
 
 void CloudOSNativeDesktopWindow::RefreshWorkArea()
@@ -412,8 +492,7 @@ void CloudOSNativeDesktopWindow::OnSearchChanged()
         static_cast<int>(buffer.size()));
 
     search_query_ = buffer.data();
-    filtered_indices_ =
-        NativeSearchEngine::FilterApps(search_query_);
+    filtered_indices_ = BuildStartApps(search_query_);
     focused_app_index_ = 0;
     Redraw();
 }
@@ -446,24 +525,34 @@ void CloudOSNativeDesktopWindow::SelectFocusedApp()
         return;
     }
 
+    const int visible_total = std::min(
+        static_cast<int>(filtered_indices_.size()),
+        kStartGridCapacity);
+    if (visible_total <= 0)
+    {
+        return;
+    }
+
     const int index = std::clamp(
         focused_app_index_,
         0,
-        static_cast<int>(filtered_indices_.size()) - 1);
-    ActivateAppIndex(
-        filtered_indices_[static_cast<std::size_t>(index)]);
+        visible_total - 1);
+    const int app_index =
+        filtered_indices_[static_cast<std::size_t>(index)];
+
+    SetStartMenuOpen(false, false);
+    ActivateAppIndex(app_index);
 }
 
 bool CloudOSNativeDesktopWindow::IsPointClickable(POINT point) const
 {
-    const std::size_t visible_apps =
-        std::min(app_grid_rects_.size(), filtered_indices_.size());
-    for (std::size_t index = 0; index < visible_apps; ++index)
+    if (Contains(start_button_rect_, point) ||
+        Contains(desktop_status_rect_, point) ||
+        Contains(system_button_rect_, point) ||
+        Contains(clock_rect_, point) ||
+        Contains(power_button_rect_, point))
     {
-        if (Contains(app_grid_rects_[index], point))
-        {
-            return true;
-        }
+        return true;
     }
 
     for (const RECT& rectangle : quick_launch_rects_)
@@ -473,6 +562,7 @@ bool CloudOSNativeDesktopWindow::IsPointClickable(POINT point) const
             return true;
         }
     }
+
     for (const RECT& rectangle : dock_rects_)
     {
         if (Contains(rectangle, point))
@@ -480,6 +570,7 @@ bool CloudOSNativeDesktopWindow::IsPointClickable(POINT point) const
             return true;
         }
     }
+
     for (const RECT& rectangle : workspace_rects_)
     {
         if (Contains(rectangle, point))
@@ -487,6 +578,7 @@ bool CloudOSNativeDesktopWindow::IsPointClickable(POINT point) const
             return true;
         }
     }
+
     for (const TaskHit& hit : task_hits_)
     {
         if (Contains(hit.bounds, point))
@@ -495,12 +587,21 @@ bool CloudOSNativeDesktopWindow::IsPointClickable(POINT point) const
         }
     }
 
-    return
-        Contains(profile_rect_, point) ||
-        Contains(weather_rect_, point) ||
-        Contains(calendar_rect_, point) ||
-        Contains(perf_rect_, point) ||
-        Contains(news_rect_, point);
+    if (start_menu_open_)
+    {
+        const std::size_t visible_apps = std::min(
+            app_grid_rects_.size(),
+            static_cast<std::size_t>(kStartGridCapacity));
+        for (std::size_t index = 0; index < visible_apps; ++index)
+        {
+            if (Contains(app_grid_rects_[index], point))
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 void CloudOSNativeDesktopWindow::Paint()
@@ -541,54 +642,68 @@ void CloudOSNativeDesktopWindow::Paint()
     graphics.SetSmoothingMode(SmoothingModeAntiAlias);
     graphics.SetTextRenderingHint(TextRenderingHintClearTypeGridFit);
 
-    const LayoutMetrics metrics =
-        ComputeMetrics(hwnd_, width, height);
+    const ShellMetrics metrics = ComputeMetrics(hwnd_, width, height);
     const UINT dpi = metrics.dpi;
 
-    LinearGradientBrush background(
+    LinearGradientBrush wallpaper(
         PointF(0.0f, 0.0f),
-        PointF(0.0f, static_cast<float>(height)),
-        Color(255, 10, 14, 26),
-        Color(255, 4, 6, 12));
+        PointF(
+            static_cast<float>(width),
+            static_cast<float>(height)),
+        Color(255, 17, 20, 29),
+        Color(255, 8, 11, 17));
     graphics.FillRectangle(
-        &background,
+        &wallpaper,
         RectF(
             0.0f,
             0.0f,
             static_cast<float>(width),
             static_cast<float>(height)));
 
-    SolidBrush cyan_glow(Color(24, 56, 189, 248));
-    SolidBrush purple_glow(Color(20, 168, 85, 247));
+    SolidBrush wallpaper_light(Color(26, 88, 150, 235));
+    SolidBrush wallpaper_shadow(Color(24, 58, 72, 98));
     graphics.FillEllipse(
-        &cyan_glow,
-        static_cast<float>(width / 2 - Scale(470, dpi)),
-        static_cast<float>(height / 2 - Scale(360, dpi)),
-        static_cast<float>(Scale(940, dpi)),
-        static_cast<float>(Scale(720, dpi)));
+        &wallpaper_light,
+        static_cast<float>(width - Scale(760, dpi)),
+        static_cast<float>(-Scale(280, dpi)),
+        static_cast<float>(Scale(850, dpi)),
+        static_cast<float>(Scale(650, dpi)));
     graphics.FillEllipse(
-        &purple_glow,
-        static_cast<float>(width - Scale(560, dpi)),
-        static_cast<float>(Scale(20, dpi)),
-        static_cast<float>(Scale(620, dpi)),
-        static_cast<float>(Scale(520, dpi)));
+        &wallpaper_shadow,
+        static_cast<float>(-Scale(260, dpi)),
+        static_cast<float>(height - Scale(520, dpi)),
+        static_cast<float>(Scale(700, dpi)),
+        static_cast<float>(Scale(600, dpi)));
 
-    const RectF main_glass(
-        static_cast<float>(metrics.dash_x),
-        static_cast<float>(metrics.dash_y),
-        static_cast<float>(metrics.dash_width),
-        static_cast<float>(metrics.dash_height));
-    NativeIconRenderer::DrawGlassPanel(
-        graphics,
-        main_glass,
-        static_cast<float>(Scale(26, dpi)),
-        Color(214, 15, 23, 40),
-        Color(170, 56, 189, 248),
-        1.4f);
+    Pen grid_pen(Color(16, 255, 255, 255), 1.0f);
+    const int grid_step = std::max(Scale(72, dpi), 24);
+    for (int x = 0; x < width; x += grid_step)
+    {
+        graphics.DrawLine(
+            &grid_pen,
+            static_cast<REAL>(x),
+            0.0f,
+            static_cast<REAL>(x),
+            static_cast<REAL>(metrics.taskbar_y));
+    }
+    for (int y = 0; y < metrics.taskbar_y; y += grid_step)
+    {
+        graphics.DrawLine(
+            &grid_pen,
+            0.0f,
+            static_cast<REAL>(y),
+            static_cast<REAL>(width),
+            static_cast<REAL>(y));
+    }
 
+    Font brand_font(
+        L"Segoe UI Variable Display",
+        static_cast<REAL>(Scale(24, dpi)),
+        FontStyleBold,
+        UnitPixel);
     Font title_font(
         L"Segoe UI",
-        static_cast<REAL>(Scale(17, dpi)),
+        static_cast<REAL>(Scale(15, dpi)),
         FontStyleBold,
         UnitPixel);
     Font section_font(
@@ -601,838 +716,214 @@ void CloudOSNativeDesktopWindow::Paint()
         static_cast<REAL>(Scale(10, dpi)),
         FontStyleRegular,
         UnitPixel);
-    Font micro_font(
+    Font small_font(
         L"Segoe UI",
-        static_cast<REAL>(Scale(8, dpi)),
+        static_cast<REAL>(Scale(9, dpi)),
         FontStyleRegular,
         UnitPixel);
-    Font micro_bold_font(
+    Font small_bold_font(
         L"Segoe UI",
-        static_cast<REAL>(Scale(8, dpi)),
+        static_cast<REAL>(Scale(9, dpi)),
         FontStyleBold,
         UnitPixel);
 
-    SolidBrush white(Color(255, 255, 255, 255));
-    SolidBrush cyan(Color(255, 56, 189, 248));
-    SolidBrush secondary(Color(255, 180, 200, 230));
-    SolidBrush muted(Color(255, 120, 145, 180));
-    SolidBrush green(Color(255, 52, 211, 153));
+    SolidBrush white(Color(255, 245, 247, 250));
+    SolidBrush secondary(Color(255, 194, 199, 208));
+    SolidBrush muted(Color(255, 139, 146, 158));
+    SolidBrush accent_soft(Color(255, 150, 193, 252));
+
+    const int workspace =
+        window_manager_ != nullptr
+            ? window_manager_->CurrentWorkspace() + 1
+            : 1;
 
     graphics.DrawString(
         L"CloudOS",
         -1,
-        &title_font,
+        &brand_font,
         PointF(
-            static_cast<float>(
-                metrics.dash_x + Scale(34, dpi)),
-            static_cast<float>(
-                metrics.dash_y + Scale(31, dpi))),
+            static_cast<float>(Scale(24, dpi)),
+            static_cast<float>(Scale(20, dpi))),
         &white);
+
+    std::wstring session_line =
+        L"Desktop  ·  Workspace " +
+        std::to_wstring(workspace);
     graphics.DrawString(
-        L"AETHER NATIVE DESKTOP",
+        session_line.c_str(),
         -1,
-        &micro_font,
+        &small_font,
         PointF(
-            static_cast<float>(
-                metrics.dash_x + Scale(34, dpi)),
-            static_cast<float>(
-                metrics.dash_y + Scale(53, dpi))),
-        &cyan);
+            static_cast<float>(Scale(26, dpi)),
+            static_cast<float>(Scale(54, dpi))),
+        &secondary);
 
-    const RectF search_panel(
-        static_cast<float>(
-            metrics.search_x - Scale(38, dpi)),
-        static_cast<float>(
-            metrics.search_y - Scale(5, dpi)),
-        static_cast<float>(
-            metrics.search_width + Scale(120, dpi)),
-        static_cast<float>(
-            metrics.search_height + Scale(10, dpi)));
-    NativeIconRenderer::DrawGlassPanel(
-        graphics,
-        search_panel,
-        static_cast<float>(Scale(18, dpi)),
-        Color(170, 24, 34, 58),
-        search_query_.empty()
-            ? Color(90, 56, 189, 248)
-            : Color(220, 56, 189, 248),
-        1.2f);
-    graphics.DrawString(
-        L"BUSCAR",
-        -1,
-        &micro_bold_font,
-        PointF(
-            search_panel.X + static_cast<float>(Scale(10, dpi)),
-            search_panel.Y + static_cast<float>(Scale(10, dpi))),
-        &muted);
-    graphics.DrawString(
-        L"Enter abre  |  setas navegam",
-        -1,
-        &micro_font,
-        PointF(
-            search_panel.X + search_panel.Width - static_cast<float>(Scale(150, dpi)),
-            search_panel.Y + static_cast<float>(Scale(10, dpi))),
-        &muted);
+    quick_launch_rects_.clear();
+    quick_launch_app_indices_ = BuildDesktopShortcuts();
 
-    const int grid_left =
-        metrics.dash_x + Scale(32, dpi);
-    const int grid_top =
-        metrics.dash_y + Scale(88, dpi);
-    const int item_width = Scale(102, dpi);
-    const int item_height = Scale(98, dpi);
-    const int icon_size = Scale(52, dpi);
-    constexpr int columns = 6;
+    const int desktop_left = Scale(20, dpi);
+    const int desktop_top = Scale(92, dpi);
+    const int shortcut_width = Scale(92, dpi);
+    const int shortcut_height = Scale(86, dpi);
+    const int shortcut_gap = Scale(8, dpi);
+    const int shortcut_icon = Scale(44, dpi);
 
-    app_grid_rects_.clear();
-    const std::size_t visible_count =
-        std::min<std::size_t>(18, filtered_indices_.size());
-
-    for (std::size_t slot = 0; slot < 18; ++slot)
+    for (std::size_t index = 0;
+         index < quick_launch_app_indices_.size();
+         ++index)
     {
-        const int column =
-            static_cast<int>(slot % columns);
-        const int row =
-            static_cast<int>(slot / columns);
-        const int x =
-            grid_left +
-            column * (item_width + Scale(4, dpi));
-        const int y =
-            grid_top +
-            row * (item_height + Scale(6, dpi));
+        const int app_index = quick_launch_app_indices_[index];
+        const int row = static_cast<int>(index);
+        const int x = desktop_left;
+        const int y = desktop_top + row * (shortcut_height + shortcut_gap);
 
         const RECT hit{
             x,
             y,
-            x + item_width,
-            y + item_height,
-        };
-        app_grid_rects_.push_back(hit);
-
-        if (slot >= visible_count)
-        {
-            continue;
-        }
-
-        const int app_index = filtered_indices_[slot];
-        const AppItem& app =
-            kAllApps[static_cast<std::size_t>(app_index)];
-        const bool hovered =
-            hovered_app_index_ == static_cast<int>(slot);
-        const bool focused =
-            !search_query_.empty() &&
-            focused_app_index_ == static_cast<int>(slot);
-
-        if (hovered || focused)
-        {
-            NativeIconRenderer::DrawGlassPanel(
-                graphics,
-                RectF(
-                    static_cast<float>(x + Scale(3, dpi)),
-                    static_cast<float>(y - Scale(2, dpi)),
-                    static_cast<float>(
-                        item_width - Scale(6, dpi)),
-                    static_cast<float>(
-                        item_height + Scale(4, dpi))),
-                static_cast<float>(Scale(15, dpi)),
-                Color(95, 56, 189, 248),
-                Color(210, 56, 189, 248),
-                1.0f);
-        }
-
-        NativeIconRenderer::DrawAetherSquircle(
-            graphics,
-            app.icon_id,
-            x + (item_width - icon_size) / 2,
-            y,
-            icon_size);
-
-        DrawCenteredText(
-            graphics,
-            app.name,
-            micro_font,
-            RectF(
-                static_cast<float>(x),
-                static_cast<float>(
-                    y + icon_size + Scale(5, dpi)),
-                static_cast<float>(item_width),
-                static_cast<float>(Scale(30, dpi))),
-            hovered ? white : secondary);
-    }
-
-    if (visible_count == 0)
-    {
-        graphics.DrawString(
-            L"Nenhum aplicativo encontrado.",
-            -1,
-            &body_font,
-            PointF(
-                static_cast<float>(grid_left),
-                static_cast<float>(
-                    grid_top + Scale(130, dpi))),
-            &muted);
-    }
-
-    const int activity_y =
-        metrics.dash_y + Scale(447, dpi);
-    graphics.DrawString(
-        L"ATIVIDADE RECENTE",
-        -1,
-        &section_font,
-        PointF(
-            static_cast<float>(
-                metrics.dash_x + Scale(34, dpi)),
-            static_cast<float>(activity_y)),
-        &muted);
-
-    const std::vector<std::wstring> recent_ids =
-        StartMenuMRUTracker::Instance().GetTopApps(3);
-    int recent_line = 0;
-    for (const std::wstring& id : recent_ids)
-    {
-        const int app_index = FindAppIndex(id);
-        if (app_index < 0)
-        {
-            continue;
-        }
-
-        const AppItem& app =
-            kAllApps[static_cast<std::size_t>(app_index)];
-        const std::uint32_t launches =
-            StartMenuMRUTracker::Instance().GetLaunchCount(app.id);
-
-        std::wstring line = app.name;
-        line += L"  ·  ";
-        line += std::to_wstring(launches);
-        line += launches == 1 ? L" abertura" : L" aberturas";
-
-        graphics.DrawString(
-            line.c_str(),
-            -1,
-            &micro_font,
-            PointF(
-                static_cast<float>(
-                    metrics.dash_x + Scale(34, dpi)),
-                static_cast<float>(
-                    activity_y +
-                    Scale(24 + recent_line * 18, dpi))),
-            recent_line == 0 ? &cyan : &secondary);
-
-        if (++recent_line >= 3)
-        {
-            break;
-        }
-    }
-
-    if (recent_line == 0)
-    {
-        graphics.DrawString(
-            L"A atividade aparece aqui conforme os apps forem usados.",
-            -1,
-            &micro_font,
-            PointF(
-                static_cast<float>(
-                    metrics.dash_x + Scale(34, dpi)),
-                static_cast<float>(
-                    activity_y + Scale(24, dpi))),
-            &secondary);
-    }
-
-    graphics.DrawString(
-        L"ACESSO RAPIDO",
-        -1,
-        &section_font,
-        PointF(
-            static_cast<float>(
-                metrics.dash_x + Scale(365, dpi)),
-            static_cast<float>(activity_y)),
-        &muted);
-
-    quick_launch_rects_.clear();
-    quick_launch_app_indices_ = BuildQuickLaunchIndices();
-    int quick_x =
-        metrics.dash_x + Scale(365, dpi);
-    for (const int app_index : quick_launch_app_indices_)
-    {
-        if (app_index < 0 ||
-            app_index >= static_cast<int>(kAllApps.size()))
-        {
-            continue;
-        }
-
-        const int size = Scale(31, dpi);
-        const RECT hit{
-            quick_x,
-            activity_y + Scale(22, dpi),
-            quick_x + size,
-            activity_y + Scale(22, dpi) + size,
+            x + shortcut_width,
+            y + shortcut_height,
         };
         quick_launch_rects_.push_back(hit);
 
         NativeIconRenderer::DrawAetherSquircle(
             graphics,
             kAllApps[static_cast<std::size_t>(app_index)].icon_id,
-            quick_x,
-            activity_y + Scale(22, dpi),
-            size);
-        quick_x += Scale(39, dpi);
-    }
+            x + (shortcut_width - shortcut_icon) / 2,
+            y + Scale(4, dpi),
+            shortcut_icon);
 
-    const int sidebar_x =
-        metrics.dash_x + Scale(714, dpi);
-    const int sidebar_width = Scale(312, dpi);
-    int widget_y =
-        metrics.dash_y + Scale(24, dpi);
-
-    profile_rect_ = RECT{
-        sidebar_x,
-        widget_y,
-        sidebar_x + sidebar_width,
-        widget_y + Scale(64, dpi),
-    };
-    NativeIconRenderer::DrawGlassPanel(
-        graphics,
-        RectF(
-            static_cast<float>(profile_rect_.left),
-            static_cast<float>(profile_rect_.top),
-            static_cast<float>(Width(profile_rect_)),
-            static_cast<float>(Height(profile_rect_))),
-        static_cast<float>(Scale(16, dpi)),
-        hovered_widget_id_ == 1
-            ? Color(205, 36, 48, 78)
-            : Color(165, 24, 34, 58),
-        Color(85, 56, 189, 248),
-        1.0f);
-
-    std::array<wchar_t, 256> username{};
-    DWORD username_length =
-        static_cast<DWORD>(username.size());
-    if (!GetUserNameW(
-            username.data(),
-            &username_length))
-    {
-        wcscpy_s(
-            username.data(),
-            username.size(),
-            L"Usuario");
-    }
-
-    const float avatar_size =
-        static_cast<float>(Scale(40, dpi));
-    const float avatar_x =
-        static_cast<float>(
-            sidebar_x + Scale(12, dpi));
-    const float avatar_y =
-        static_cast<float>(
-            widget_y + Scale(12, dpi));
-    LinearGradientBrush avatar_brush(
-        PointF(avatar_x, avatar_y),
-        PointF(
-            avatar_x + avatar_size,
-            avatar_y + avatar_size),
-        Color(255, 56, 189, 248),
-        Color(255, 168, 85, 247));
-    graphics.FillEllipse(
-        &avatar_brush,
-        avatar_x,
-        avatar_y,
-        avatar_size,
-        avatar_size);
-
-    wchar_t initial[2]{
-        username[0] != L'\0' ? username[0] : L'C',
-        L'\0',
-    };
-    DrawCenteredText(
-        graphics,
-        initial,
-        section_font,
-        RectF(
-            avatar_x,
-            avatar_y,
-            avatar_size,
-            avatar_size),
-        white);
-
-    graphics.DrawString(
-        username.data(),
-        -1,
-        &section_font,
-        PointF(
-            static_cast<float>(
-                sidebar_x + Scale(62, dpi)),
-            static_cast<float>(
-                widget_y + Scale(13, dpi))),
-        &white);
-    graphics.DrawString(
-        L"Sessao local ativa  ·  clique para energia",
-        -1,
-        &micro_font,
-        PointF(
-            static_cast<float>(
-                sidebar_x + Scale(62, dpi)),
-            static_cast<float>(
-                widget_y + Scale(36, dpi))),
-        &secondary);
-
-    widget_y += Scale(74, dpi);
-
-    weather_rect_ = RECT{
-        sidebar_x,
-        widget_y,
-        sidebar_x + sidebar_width,
-        widget_y + Scale(70, dpi),
-    };
-    NativeIconRenderer::DrawGlassPanel(
-        graphics,
-        RectF(
-            static_cast<float>(weather_rect_.left),
-            static_cast<float>(weather_rect_.top),
-            static_cast<float>(Width(weather_rect_)),
-            static_cast<float>(Height(weather_rect_))),
-        static_cast<float>(Scale(16, dpi)),
-        hovered_widget_id_ == 2
-            ? Color(205, 36, 48, 78)
-            : Color(165, 24, 34, 58),
-        Color(85, 56, 189, 248),
-        1.0f);
-    graphics.DrawString(
-        L"CLIMA",
-        -1,
-        &micro_bold_font,
-        PointF(
-            static_cast<float>(
-                sidebar_x + Scale(14, dpi)),
-            static_cast<float>(
-                widget_y + Scale(10, dpi))),
-        &muted);
-    graphics.DrawString(
-        L"Abrir previsao local",
-        -1,
-        &section_font,
-        PointF(
-            static_cast<float>(
-                sidebar_x + Scale(14, dpi)),
-            static_cast<float>(
-                widget_y + Scale(31, dpi))),
-        &white);
-    graphics.DrawString(
-        L"Nenhuma temperatura e inventada pelo shell.",
-        -1,
-        &micro_font,
-        PointF(
-            static_cast<float>(
-                sidebar_x + Scale(14, dpi)),
-            static_cast<float>(
-                widget_y + Scale(50, dpi))),
-        &secondary);
-
-    widget_y += Scale(80, dpi);
-
-    calendar_rect_ = RECT{
-        sidebar_x,
-        widget_y,
-        sidebar_x + sidebar_width,
-        widget_y + Scale(76, dpi),
-    };
-    NativeIconRenderer::DrawGlassPanel(
-        graphics,
-        RectF(
-            static_cast<float>(calendar_rect_.left),
-            static_cast<float>(calendar_rect_.top),
-            static_cast<float>(Width(calendar_rect_)),
-            static_cast<float>(Height(calendar_rect_))),
-        static_cast<float>(Scale(16, dpi)),
-        hovered_widget_id_ == 3
-            ? Color(205, 36, 48, 78)
-            : Color(165, 24, 34, 58),
-        Color(85, 56, 189, 248),
-        1.0f);
-
-    const std::wstring local_time = NativeShellPlatform::FormatLocalTime();
-    const std::wstring long_date =
-        Shorten(NativeShellPlatform::FormatLocalDate(true), 34);
-    graphics.DrawString(
-        L"DATA E HORA",
-        -1,
-        &micro_bold_font,
-        PointF(
-            static_cast<float>(
-                sidebar_x + Scale(14, dpi)),
-            static_cast<float>(
-                widget_y + Scale(9, dpi))),
-        &muted);
-    graphics.DrawString(
-        local_time.c_str(),
-        -1,
-        &section_font,
-        PointF(
-            static_cast<float>(
-                sidebar_x + Scale(14, dpi)),
-            static_cast<float>(
-                widget_y + Scale(29, dpi))),
-        &cyan);
-    graphics.DrawString(
-        long_date.c_str(),
-        -1,
-        &micro_font,
-        PointF(
-            static_cast<float>(
-                sidebar_x + Scale(82, dpi)),
-            static_cast<float>(
-                widget_y + Scale(31, dpi))),
-        &white);
-    graphics.DrawString(
-        L"Clique para abrir as configuracoes de data e hora.",
-        -1,
-        &micro_font,
-        PointF(
-            static_cast<float>(
-                sidebar_x + Scale(14, dpi)),
-            static_cast<float>(
-                widget_y + Scale(52, dpi))),
-        &secondary);
-
-    widget_y += Scale(86, dpi);
-
-    perf_rect_ = RECT{
-        sidebar_x,
-        widget_y,
-        sidebar_x + sidebar_width,
-        widget_y + Scale(96, dpi),
-    };
-    NativeIconRenderer::DrawGlassPanel(
-        graphics,
-        RectF(
-            static_cast<float>(perf_rect_.left),
-            static_cast<float>(perf_rect_.top),
-            static_cast<float>(Width(perf_rect_)),
-            static_cast<float>(Height(perf_rect_))),
-        static_cast<float>(Scale(16, dpi)),
-        hovered_widget_id_ == 4
-            ? Color(205, 36, 48, 78)
-            : Color(165, 24, 34, 58),
-        Color(85, 56, 189, 248),
-        1.0f);
-    graphics.DrawString(
-        L"DESEMPENHO  ·  clique para detalhes",
-        -1,
-        &micro_bold_font,
-        PointF(
-            static_cast<float>(
-                sidebar_x + Scale(14, dpi)),
-            static_cast<float>(
-                widget_y + Scale(10, dpi))),
-        &muted);
-
-    std::wstring cpu_text =
-        current_stats_.cpu_available
-            ? std::to_wstring(current_stats_.cpu_percent) + L"%"
-            : L"--";
-    std::wstring ram_text =
-        current_stats_.ram_available
-            ? std::to_wstring(current_stats_.ram_percent) + L"%"
-            : L"--";
-    std::wstring disk_text =
-        current_stats_.disk_available
-            ? std::to_wstring(current_stats_.disk_free_gb) + L" GB livres"
-            : L"--";
-
-    std::wstring performance_line =
-        L"CPU " + cpu_text +
-        L"   RAM " + ram_text +
-        L"   Disco " + disk_text;
-    graphics.DrawString(
-        performance_line.c_str(),
-        -1,
-        &micro_font,
-        PointF(
-            static_cast<float>(
-                sidebar_x + Scale(14, dpi)),
-            static_cast<float>(
-                widget_y + Scale(34, dpi))),
-        &white);
-
-    const float bar_width =
-        static_cast<float>(
-            sidebar_width - Scale(28, dpi));
-    const float bar_y =
-        static_cast<float>(
-            widget_y + Scale(60, dpi));
-    NativeIconRenderer::DrawGlassPanel(
-        graphics,
-        RectF(
-            static_cast<float>(
-                sidebar_x + Scale(14, dpi)),
-            bar_y,
-            bar_width,
-            static_cast<float>(Scale(7, dpi))),
-        static_cast<float>(Scale(3, dpi)),
-        Color(255, 30, 41, 59),
-        Color(0, 0, 0, 0),
-        0.0f);
-
-    if (current_stats_.cpu_available)
-    {
-        NativeIconRenderer::DrawGlassPanel(
+        DrawCenteredText(
             graphics,
+            kAllApps[static_cast<std::size_t>(app_index)].name,
+            small_font,
             RectF(
-                static_cast<float>(
-                    sidebar_x + Scale(14, dpi)),
-                bar_y,
-                bar_width *
-                    (current_stats_.cpu_percent / 100.0f),
-                static_cast<float>(Scale(7, dpi))),
-            static_cast<float>(Scale(3, dpi)),
-            Color(255, 56, 189, 248),
-            Color(255, 168, 85, 247),
-            0.8f);
+                static_cast<float>(x),
+                static_cast<float>(y + Scale(52, dpi)),
+                static_cast<float>(shortcut_width),
+                static_cast<float>(Scale(28, dpi))),
+            white);
     }
 
-    if (current_stats_.ram_available)
-    {
-        std::wstring memory_line =
-            std::to_wstring(current_stats_.ram_used_mb / 1024ull) +
-            L" / " +
-            std::to_wstring(current_stats_.ram_total_mb / 1024ull) +
-            L" GB RAM";
-        graphics.DrawString(
-            memory_line.c_str(),
-            -1,
-            &micro_font,
-            PointF(
-                static_cast<float>(
-                    sidebar_x + Scale(14, dpi)),
-                static_cast<float>(
-                    widget_y + Scale(78, dpi))),
-            &secondary);
-    }
-
-    widget_y += Scale(106, dpi);
-
-    news_rect_ = RECT{
-        sidebar_x,
-        widget_y,
-        sidebar_x + sidebar_width,
-        widget_y + Scale(118, dpi),
+    const int status_width = Scale(250, dpi);
+    const int status_height = Scale(64, dpi);
+    const int status_x = width - status_width - Scale(20, dpi);
+    const int status_y = Scale(20, dpi);
+    desktop_status_rect_ = RECT{
+        status_x,
+        status_y,
+        status_x + status_width,
+        status_y + status_height,
     };
+
     NativeIconRenderer::DrawGlassPanel(
         graphics,
         RectF(
-            static_cast<float>(news_rect_.left),
-            static_cast<float>(news_rect_.top),
-            static_cast<float>(Width(news_rect_)),
-            static_cast<float>(Height(news_rect_))),
+            static_cast<float>(status_x),
+            static_cast<float>(status_y),
+            static_cast<float>(status_width),
+            static_cast<float>(status_height)),
         static_cast<float>(Scale(16, dpi)),
         hovered_widget_id_ == 5
-            ? Color(205, 36, 48, 78)
-            : Color(165, 24, 34, 58),
-        Color(85, 56, 189, 248),
+            ? Color(235, 37, 40, 47)
+            : Color(220, 27, 30, 36),
+        Color(100, 89, 95, 108),
         1.0f);
 
-    const unsigned int runtime_abi =
-        cloudos_native_runtime_abi();
-    const std::size_t managed_windows =
-        window_manager_ != nullptr
-            ? window_manager_->ManagedWindowCount()
-            : 0u;
-    const int workspace =
-        window_manager_ != nullptr
-            ? window_manager_->CurrentWorkspace() + 1
-            : 1;
-    const bool tiling =
-        window_manager_ != nullptr &&
-        window_manager_->TilingEnabled();
+    std::wstring cpu =
+        FormatPercent(
+            current_stats_.cpu_available,
+            current_stats_.cpu_percent);
+    std::wstring ram =
+        FormatPercent(
+            current_stats_.ram_available,
+            current_stats_.ram_percent);
 
     graphics.DrawString(
-        L"STATUS NATIVO  ·  clique para diagnostico",
+        L"SISTEMA",
         -1,
-        &micro_bold_font,
+        &small_bold_font,
         PointF(
-            static_cast<float>(
-                sidebar_x + Scale(14, dpi)),
-            static_cast<float>(
-                widget_y + Scale(10, dpi))),
+            static_cast<float>(status_x + Scale(16, dpi)),
+            static_cast<float>(status_y + Scale(10, dpi))),
         &muted);
 
-    wchar_t runtime_line[160]{};
-    swprintf_s(
-        runtime_line,
-        L"Runtime ABI %u  |  Workspace %d  |  HWNDs %llu",
-        runtime_abi,
-        workspace,
-        static_cast<unsigned long long>(managed_windows));
+    std::wstring system_line =
+        L"CPU " + cpu + L"   RAM " + ram +
+        L"   W" + std::to_wstring(workspace);
     graphics.DrawString(
-        runtime_line,
+        system_line.c_str(),
         -1,
-        &micro_font,
+        &body_font,
         PointF(
-            static_cast<float>(
-                sidebar_x + Scale(14, dpi)),
-            static_cast<float>(
-                widget_y + Scale(36, dpi))),
+            static_cast<float>(status_x + Scale(16, dpi)),
+            static_cast<float>(status_y + Scale(32, dpi))),
         &white);
 
-    std::wstring tiling_line =
-        L"Tiling: ";
-    tiling_line += tiling ? L"ativo" : L"manual";
-    tiling_line += L"   |   Uptime Windows: ";
-    tiling_line +=
-        current_stats_.uptime_str.empty()
-            ? L"--"
-            : current_stats_.uptime_str;
-    graphics.DrawString(
-        tiling_line.c_str(),
-        -1,
-        &micro_font,
-        PointF(
-            static_cast<float>(
-                sidebar_x + Scale(14, dpi)),
-            static_cast<float>(
-                widget_y + Scale(58, dpi))),
-        &secondary);
-    graphics.DrawString(
-        L"ConPTY, WSL e integracoes podem ser verificados no Doctor.",
-        -1,
-        &micro_font,
-        PointF(
-            static_cast<float>(
-                sidebar_x + Scale(14, dpi)),
-            static_cast<float>(
-                widget_y + Scale(82, dpi))),
-        &secondary);
-    graphics.DrawString(
-        L"Runtime nativo ativo",
-        -1,
-        &micro_bold_font,
-        PointF(
-            static_cast<float>(
-                sidebar_x + Scale(14, dpi)),
-            static_cast<float>(
-                widget_y + Scale(101, dpi))),
-        &green);
+    const int taskbar_x = metrics.taskbar_margin;
+    const int taskbar_y = metrics.taskbar_y + Scale(5, dpi);
+    const int taskbar_width = width - metrics.taskbar_margin * 2;
+    const int taskbar_height = metrics.taskbar_height - Scale(10, dpi);
 
     NativeIconRenderer::DrawGlassPanel(
         graphics,
         RectF(
-            0.0f,
-            static_cast<float>(metrics.bar_y),
-            static_cast<float>(width),
-            static_cast<float>(metrics.bar_height)),
-        0.0f,
-        Color(238, 8, 12, 20),
-        Color(100, 45, 90, 140),
+            static_cast<float>(taskbar_x),
+            static_cast<float>(taskbar_y),
+            static_cast<float>(taskbar_width),
+            static_cast<float>(taskbar_height)),
+        static_cast<float>(Scale(17, dpi)),
+        Color(238, 24, 26, 31),
+        Color(120, 71, 76, 86),
         1.0f);
 
-    graphics.DrawString(
-        L"CloudOS",
-        -1,
-        &section_font,
-        PointF(
-            static_cast<float>(Scale(18, dpi)),
-            static_cast<float>(
-                metrics.bar_y + Scale(13, dpi))),
-        &cyan);
-
     workspace_rects_.fill(RECT{});
-    int workspace_x = Scale(92, dpi);
+    int workspace_x = taskbar_x + Scale(14, dpi);
     for (int index = 0; index < 4; ++index)
     {
-        const int button_size = Scale(25, dpi);
-        workspace_rects_[static_cast<std::size_t>(index)] = RECT{
+        const int button_width = Scale(28, dpi);
+        const int button_height = Scale(28, dpi);
+        const int button_y =
+            taskbar_y + (taskbar_height - button_height) / 2;
+        const RECT hit{
             workspace_x,
-            metrics.bar_y + Scale(9, dpi),
-            workspace_x + button_size,
-            metrics.bar_y + Scale(9, dpi) + button_size,
+            button_y,
+            workspace_x + button_width,
+            button_y + button_height,
         };
+        workspace_rects_[static_cast<std::size_t>(index)] = hit;
 
         const bool active =
             window_manager_ != nullptr &&
             window_manager_->CurrentWorkspace() == index;
+
         NativeIconRenderer::DrawGlassPanel(
             graphics,
             RectF(
-                static_cast<float>(workspace_x),
-                static_cast<float>(
-                    metrics.bar_y + Scale(9, dpi)),
-                static_cast<float>(button_size),
-                static_cast<float>(button_size)),
-            static_cast<float>(Scale(7, dpi)),
+                static_cast<float>(hit.left),
+                static_cast<float>(hit.top),
+                static_cast<float>(Width(hit)),
+                static_cast<float>(Height(hit))),
+            static_cast<float>(Scale(9, dpi)),
             active
-                ? Color(180, 56, 189, 248)
-                : Color(120, 24, 34, 58),
+                ? Color(255, 68, 113, 170)
+                : Color(115, 38, 40, 47),
             active
-                ? Color(255, 56, 189, 248)
-                : Color(90, 45, 90, 140),
+                ? Color(220, 120, 181, 255)
+                : Color(65, 100, 105, 114),
             1.0f);
 
         DrawCenteredText(
             graphics,
             std::to_wstring(index + 1),
-            micro_bold_font,
+            small_bold_font,
             RectF(
-                static_cast<float>(workspace_x),
-                static_cast<float>(
-                    metrics.bar_y + Scale(9, dpi)),
-                static_cast<float>(button_size),
-                static_cast<float>(button_size)),
+                static_cast<float>(hit.left),
+                static_cast<float>(hit.top),
+                static_cast<float>(Width(hit)),
+                static_cast<float>(Height(hit))),
             active ? white : secondary);
 
-        workspace_x += Scale(31, dpi);
-    }
-
-    const int dock_width = Scale(224, dpi);
-    const int dock_height = Scale(36, dpi);
-    const int dock_x = (width - dock_width) / 2;
-    const int dock_y =
-        metrics.bar_y +
-        (metrics.bar_height - dock_height) / 2;
-
-    NativeIconRenderer::DrawGlassPanel(
-        graphics,
-        RectF(
-            static_cast<float>(dock_x),
-            static_cast<float>(dock_y),
-            static_cast<float>(dock_width),
-            static_cast<float>(dock_height)),
-        static_cast<float>(Scale(12, dpi)),
-        Color(180, 24, 34, 58),
-        Color(120, 56, 189, 248),
-        1.0f);
-
-    dock_rects_.clear();
-    dock_app_indices_.clear();
-    constexpr std::array<std::wstring_view, 5> dock_ids{{
-        L"terminal",
-        L"projects",
-        L"files",
-        L"code",
-        L"apps",
-    }};
-    int dock_icon_x =
-        dock_x + Scale(14, dpi);
-    for (const std::wstring_view id : dock_ids)
-    {
-        const int app_index = FindAppIndex(id);
-        if (app_index < 0)
-        {
-            continue;
-        }
-
-        const int icon_size = Scale(28, dpi);
-        dock_rects_.push_back(RECT{
-            dock_icon_x,
-            dock_y + Scale(4, dpi),
-            dock_icon_x + icon_size,
-            dock_y + Scale(4, dpi) + icon_size,
-        });
-        dock_app_indices_.push_back(app_index);
-        NativeIconRenderer::DrawAetherSquircle(
-            graphics,
-            kAllApps[static_cast<std::size_t>(app_index)].icon_id,
-            dock_icon_x,
-            dock_y + Scale(4, dpi),
-            icon_size);
-        dock_icon_x += Scale(39, dpi);
+        workspace_x += Scale(34, dpi);
     }
 
     task_hits_.clear();
@@ -1440,36 +931,37 @@ void CloudOSNativeDesktopWindow::Paint()
     {
         const std::vector<CloudOSManagedWindow> windows =
             window_manager_->CurrentWorkspaceWindows();
-        const int task_start = Scale(235, dpi);
-        const int task_end =
-            std::max(task_start, dock_x - Scale(18, dpi));
-        const int available =
-            std::max(0, task_end - task_start);
-        const int task_width = Scale(126, dpi);
+
+        const int task_start = workspace_x + Scale(8, dpi);
+        const int task_limit = std::max(
+            task_start,
+            width / 2 - Scale(220, dpi));
+        const int available = std::max(0, task_limit - task_start);
+        const int task_width = Scale(112, dpi);
         const int task_gap = Scale(6, dpi);
         const int capacity =
-            std::max(
-                0,
-                available /
-                    std::max(1, task_width + task_gap));
-        const int task_count =
-            std::min(
-                static_cast<int>(windows.size()),
-                std::min(4, capacity));
+            available > 0
+                ? available / std::max(1, task_width + task_gap)
+                : 0;
+        const int task_count = std::min(
+            static_cast<int>(windows.size()),
+            std::min(3, capacity));
 
         int task_x = task_start;
         for (int index = 0; index < task_count; ++index)
         {
             const CloudOSManagedWindow& managed =
                 windows[static_cast<std::size_t>(index)];
+            const int task_h = Scale(30, dpi);
+            const int task_y =
+                taskbar_y + (taskbar_height - task_h) / 2;
             const RECT hit{
                 task_x,
-                metrics.bar_y + Scale(7, dpi),
+                task_y,
                 task_x + task_width,
-                metrics.bar_y + metrics.bar_height - Scale(7, dpi),
+                task_y + task_h,
             };
-            task_hits_.push_back(
-                TaskHit{managed.hwnd, hit});
+            task_hits_.push_back(TaskHit{managed.hwnd, hit});
 
             const bool active =
                 window_manager_->ActiveManagedWindow() ==
@@ -1481,13 +973,13 @@ void CloudOSNativeDesktopWindow::Paint()
                     static_cast<float>(hit.top),
                     static_cast<float>(Width(hit)),
                     static_cast<float>(Height(hit))),
-                static_cast<float>(Scale(8, dpi)),
+                static_cast<float>(Scale(9, dpi)),
                 active
-                    ? Color(150, 36, 64, 92)
-                    : Color(110, 24, 34, 58),
+                    ? Color(210, 51, 57, 68)
+                    : Color(105, 38, 40, 47),
                 active
-                    ? Color(230, 56, 189, 248)
-                    : Color(70, 45, 90, 140),
+                    ? Color(180, 103, 165, 246)
+                    : Color(60, 92, 97, 108),
                 1.0f);
 
             DrawCenteredText(
@@ -1496,14 +988,12 @@ void CloudOSNativeDesktopWindow::Paint()
                     managed.title.empty()
                         ? L"Aplicativo"
                         : managed.title,
-                    22),
-                micro_font,
+                    18),
+                small_font,
                 RectF(
-                    static_cast<float>(
-                        hit.left + Scale(5, dpi)),
+                    static_cast<float>(hit.left + Scale(6, dpi)),
                     static_cast<float>(hit.top),
-                    static_cast<float>(
-                        Width(hit) - Scale(10, dpi)),
+                    static_cast<float>(Width(hit) - Scale(12, dpi)),
                     static_cast<float>(Height(hit))),
                 active ? white : secondary);
 
@@ -1511,25 +1001,529 @@ void CloudOSNativeDesktopWindow::Paint()
         }
     }
 
-    const std::wstring clock_text =
-        NativeShellPlatform::FormatLocalTime() + L"  |  " +
-        NativeShellPlatform::FormatLocalDate(false);
-    StringFormat right_align;
-    right_align.SetAlignment(StringAlignmentFar);
-    graphics.DrawString(
-        clock_text.c_str(),
-        -1,
-        &micro_bold_font,
+    dock_app_indices_ = BuildDockApps();
+    dock_rects_.clear();
+
+    const int start_size = Scale(36, dpi);
+    const int icon_size = Scale(34, dpi);
+    const int icon_gap = Scale(8, dpi);
+    const int center_cluster_width =
+        start_size +
+        Scale(12, dpi) +
+        static_cast<int>(dock_app_indices_.size()) *
+            (icon_size + icon_gap) -
+        (dock_app_indices_.empty() ? 0 : icon_gap);
+
+    int center_x = (width - center_cluster_width) / 2;
+    const int center_y =
+        taskbar_y + (taskbar_height - start_size) / 2;
+
+    start_button_rect_ = RECT{
+        center_x,
+        center_y,
+        center_x + start_size,
+        center_y + start_size,
+    };
+
+    NativeIconRenderer::DrawGlassPanel(
+        graphics,
         RectF(
-            static_cast<float>(
-                width - Scale(300, dpi)),
-            static_cast<float>(
-                metrics.bar_y + Scale(9, dpi)),
-            static_cast<float>(Scale(282, dpi)),
-            static_cast<float>(
-                metrics.bar_height - Scale(10, dpi))),
-        &right_align,
-        &secondary);
+            static_cast<float>(start_button_rect_.left),
+            static_cast<float>(start_button_rect_.top),
+            static_cast<float>(Width(start_button_rect_)),
+            static_cast<float>(Height(start_button_rect_))),
+        static_cast<float>(Scale(11, dpi)),
+        start_menu_open_ || hovered_widget_id_ == 1
+            ? Color(255, 64, 105, 160)
+            : Color(150, 39, 42, 49),
+        start_menu_open_
+            ? Color(230, 126, 184, 255)
+            : Color(80, 103, 165, 246),
+        1.0f);
+
+    const int logo_inset = Scale(9, dpi);
+    SolidBrush logo_brush(Color(255, 235, 240, 247));
+    graphics.FillRectangle(
+        &logo_brush,
+        static_cast<float>(start_button_rect_.left + logo_inset),
+        static_cast<float>(start_button_rect_.top + logo_inset),
+        static_cast<float>(Scale(7, dpi)),
+        static_cast<float>(Scale(7, dpi)));
+    graphics.FillRectangle(
+        &logo_brush,
+        static_cast<float>(start_button_rect_.left + logo_inset + Scale(9, dpi)),
+        static_cast<float>(start_button_rect_.top + logo_inset),
+        static_cast<float>(Scale(7, dpi)),
+        static_cast<float>(Scale(7, dpi)));
+    graphics.FillRectangle(
+        &logo_brush,
+        static_cast<float>(start_button_rect_.left + logo_inset),
+        static_cast<float>(start_button_rect_.top + logo_inset + Scale(9, dpi)),
+        static_cast<float>(Scale(7, dpi)),
+        static_cast<float>(Scale(7, dpi)));
+    graphics.FillRectangle(
+        &logo_brush,
+        static_cast<float>(start_button_rect_.left + logo_inset + Scale(9, dpi)),
+        static_cast<float>(start_button_rect_.top + logo_inset + Scale(9, dpi)),
+        static_cast<float>(Scale(7, dpi)),
+        static_cast<float>(Scale(7, dpi)));
+
+    center_x += start_size + Scale(12, dpi);
+    for (std::size_t index = 0;
+         index < dock_app_indices_.size();
+         ++index)
+    {
+        const int app_index = dock_app_indices_[index];
+        const int icon_y =
+            taskbar_y + (taskbar_height - icon_size) / 2;
+        const RECT hit{
+            center_x,
+            icon_y,
+            center_x + icon_size,
+            icon_y + icon_size,
+        };
+        dock_rects_.push_back(hit);
+
+        if (hovered_dock_id_ == static_cast<int>(index))
+        {
+            NativeIconRenderer::DrawGlassPanel(
+                graphics,
+                RectF(
+                    static_cast<float>(hit.left - Scale(3, dpi)),
+                    static_cast<float>(hit.top - Scale(3, dpi)),
+                    static_cast<float>(Width(hit) + Scale(6, dpi)),
+                    static_cast<float>(Height(hit) + Scale(6, dpi))),
+                static_cast<float>(Scale(10, dpi)),
+                Color(185, 48, 51, 59),
+                Color(80, 110, 174, 250),
+                1.0f);
+        }
+
+        NativeIconRenderer::DrawAetherSquircle(
+            graphics,
+            kAllApps[static_cast<std::size_t>(app_index)].icon_id,
+            hit.left,
+            hit.top,
+            icon_size);
+
+        center_x += icon_size + icon_gap;
+    }
+
+    const int right_area = Scale(300, dpi);
+    const int right_x = width - metrics.taskbar_margin - right_area;
+    const int tray_y = taskbar_y + Scale(8, dpi);
+    const int tray_height = std::max(
+        Scale(30, dpi),
+        taskbar_height - Scale(16, dpi));
+
+    system_button_rect_ = RECT{
+        right_x,
+        tray_y,
+        right_x + Scale(156, dpi),
+        tray_y + tray_height,
+    };
+    clock_rect_ = RECT{
+        right_x + Scale(160, dpi),
+        tray_y,
+        width - metrics.taskbar_margin - Scale(8, dpi),
+        tray_y + tray_height,
+    };
+
+    if (hovered_widget_id_ == 2)
+    {
+        NativeIconRenderer::DrawGlassPanel(
+            graphics,
+            RectF(
+                static_cast<float>(system_button_rect_.left),
+                static_cast<float>(system_button_rect_.top),
+                static_cast<float>(Width(system_button_rect_)),
+                static_cast<float>(Height(system_button_rect_))),
+            static_cast<float>(Scale(9, dpi)),
+            Color(170, 46, 49, 57),
+            Color(70, 103, 165, 246),
+            1.0f);
+    }
+
+    std::wstring tray_system =
+        L"CPU " + cpu + L"  RAM " + ram;
+    DrawCenteredText(
+        graphics,
+        tray_system,
+        small_font,
+        RectF(
+            static_cast<float>(system_button_rect_.left),
+            static_cast<float>(system_button_rect_.top),
+            static_cast<float>(Width(system_button_rect_)),
+            static_cast<float>(Height(system_button_rect_))),
+        secondary);
+
+    if (hovered_widget_id_ == 3)
+    {
+        NativeIconRenderer::DrawGlassPanel(
+            graphics,
+            RectF(
+                static_cast<float>(clock_rect_.left),
+                static_cast<float>(clock_rect_.top),
+                static_cast<float>(Width(clock_rect_)),
+                static_cast<float>(Height(clock_rect_))),
+            static_cast<float>(Scale(9, dpi)),
+            Color(170, 46, 49, 57),
+            Color(70, 103, 165, 246),
+            1.0f);
+    }
+
+    std::wstring clock_text =
+        NativeShellPlatform::FormatLocalTime() +
+        L"   " +
+        NativeShellPlatform::FormatLocalDate(false);
+    DrawCenteredText(
+        graphics,
+        clock_text,
+        small_bold_font,
+        RectF(
+            static_cast<float>(clock_rect_.left),
+            static_cast<float>(clock_rect_.top),
+            static_cast<float>(Width(clock_rect_)),
+            static_cast<float>(Height(clock_rect_))),
+        white);
+
+    app_grid_rects_.clear();
+    start_menu_rect_ = RECT{};
+    power_button_rect_ = RECT{};
+
+    if (start_menu_open_)
+    {
+        start_menu_rect_ = RECT{
+            metrics.start_x,
+            metrics.start_y,
+            metrics.start_x + metrics.start_width,
+            metrics.start_y + metrics.start_height,
+        };
+
+        NativeIconRenderer::DrawGlassPanel(
+            graphics,
+            RectF(
+                static_cast<float>(metrics.start_x),
+                static_cast<float>(metrics.start_y),
+                static_cast<float>(metrics.start_width),
+                static_cast<float>(metrics.start_height)),
+            static_cast<float>(Scale(22, dpi)),
+            Color(248, 26, 28, 33),
+            Color(145, 72, 77, 88),
+            1.2f);
+
+        const int content_x = metrics.start_x + Scale(28, dpi);
+        const int content_width =
+            metrics.start_width - Scale(56, dpi);
+        const int grid_top =
+            metrics.search_y + metrics.search_height + Scale(30, dpi);
+
+        graphics.DrawString(
+            search_query_.empty()
+                ? L"Fixados"
+                : L"Resultados",
+            -1,
+            &section_font,
+            PointF(
+                static_cast<float>(content_x),
+                static_cast<float>(
+                    grid_top - Scale(24, dpi))),
+            &white);
+
+        const int grid_gap = Scale(10, dpi);
+        const int item_width = std::max(
+            Scale(90, dpi),
+            (content_width - grid_gap * (kStartGridColumns - 1)) /
+                kStartGridColumns);
+        const int item_height = Scale(86, dpi);
+        const int grid_icon = Scale(38, dpi);
+        const std::size_t visible_count = std::min(
+            filtered_indices_.size(),
+            static_cast<std::size_t>(kStartGridCapacity));
+
+        for (std::size_t slot = 0;
+             slot < visible_count;
+             ++slot)
+        {
+            const int column =
+                static_cast<int>(slot % kStartGridColumns);
+            const int row =
+                static_cast<int>(slot / kStartGridColumns);
+            const int x =
+                content_x +
+                column * (item_width + grid_gap);
+            const int y =
+                grid_top +
+                row * (item_height + Scale(6, dpi));
+
+            const RECT hit{
+                x,
+                y,
+                x + item_width,
+                y + item_height,
+            };
+            app_grid_rects_.push_back(hit);
+
+            const bool hovered =
+                hovered_app_index_ ==
+                static_cast<int>(slot);
+            const bool focused =
+                focused_app_index_ ==
+                static_cast<int>(slot) &&
+                GetFocus() == search_edit_;
+
+            if (hovered || focused)
+            {
+                NativeIconRenderer::DrawGlassPanel(
+                    graphics,
+                    RectF(
+                        static_cast<float>(hit.left),
+                        static_cast<float>(hit.top),
+                        static_cast<float>(Width(hit)),
+                        static_cast<float>(Height(hit))),
+                    static_cast<float>(Scale(13, dpi)),
+                    Color(205, 47, 51, 60),
+                    focused
+                        ? Color(170, 103, 165, 246)
+                        : Color(75, 91, 97, 108),
+                    1.0f);
+            }
+
+            const int app_index =
+                filtered_indices_[slot];
+            NativeIconRenderer::DrawAetherSquircle(
+                graphics,
+                kAllApps[
+                    static_cast<std::size_t>(app_index)].icon_id,
+                x + (item_width - grid_icon) / 2,
+                y + Scale(6, dpi),
+                grid_icon);
+
+            DrawCenteredText(
+                graphics,
+                kAllApps[
+                    static_cast<std::size_t>(app_index)].name,
+                small_font,
+                RectF(
+                    static_cast<float>(x + Scale(4, dpi)),
+                    static_cast<float>(y + Scale(50, dpi)),
+                    static_cast<float>(item_width - Scale(8, dpi)),
+                    static_cast<float>(Scale(28, dpi))),
+                hovered || focused ? white : secondary);
+        }
+
+        if (visible_count == 0)
+        {
+            graphics.DrawString(
+                L"Nenhum aplicativo encontrado.",
+                -1,
+                &body_font,
+                PointF(
+                    static_cast<float>(content_x),
+                    static_cast<float>(
+                        grid_top + Scale(32, dpi))),
+                &secondary);
+        }
+
+        const int grid_bottom =
+            grid_top +
+            kStartGridRows *
+                (item_height + Scale(6, dpi));
+        const int footer_height = Scale(58, dpi);
+        const int footer_y =
+            metrics.start_y +
+            metrics.start_height -
+            footer_height;
+
+        if (search_query_.empty() &&
+            grid_bottom + Scale(84, dpi) < footer_y)
+        {
+            const int recent_y =
+                grid_bottom + Scale(10, dpi);
+            graphics.DrawString(
+                L"Recentes",
+                -1,
+                &section_font,
+                PointF(
+                    static_cast<float>(content_x),
+                    static_cast<float>(recent_y)),
+                &white);
+
+            const std::vector<std::wstring> recent_ids =
+                StartMenuMRUTracker::Instance().GetTopApps(3);
+            int recent_line = 0;
+            for (const std::wstring& id : recent_ids)
+            {
+                const int app_index = FindAppIndex(id);
+                if (app_index < 0)
+                {
+                    continue;
+                }
+
+                const AppItem& app =
+                    kAllApps[
+                        static_cast<std::size_t>(app_index)];
+                const std::uint32_t launches =
+                    StartMenuMRUTracker::Instance().GetLaunchCount(
+                        app.id);
+
+                std::wstring line = app.name;
+                line += L"  ·  ";
+                line += std::to_wstring(launches);
+                line += launches == 1
+                    ? L" abertura"
+                    : L" aberturas";
+
+                graphics.DrawString(
+                    line.c_str(),
+                    -1,
+                    &small_font,
+                    PointF(
+                        static_cast<float>(content_x),
+                        static_cast<float>(
+                            recent_y +
+                            Scale(25 + recent_line * 20, dpi))),
+                    recent_line == 0
+                        ? &accent_soft
+                        : &secondary);
+
+                if (++recent_line >= 3)
+                {
+                    break;
+                }
+            }
+
+            if (recent_line == 0)
+            {
+                graphics.DrawString(
+                    L"Os aplicativos usados aparecem aqui.",
+                    -1,
+                    &small_font,
+                    PointF(
+                        static_cast<float>(content_x),
+                        static_cast<float>(
+                            recent_y + Scale(25, dpi))),
+                    &muted);
+            }
+        }
+
+        Pen footer_line(Color(75, 110, 114, 124), 1.0f);
+        graphics.DrawLine(
+            &footer_line,
+            static_cast<REAL>(metrics.start_x + Scale(18, dpi)),
+            static_cast<REAL>(footer_y),
+            static_cast<REAL>(
+                metrics.start_x +
+                metrics.start_width -
+                Scale(18, dpi)),
+            static_cast<REAL>(footer_y));
+
+        const std::wstring username = CurrentUserName();
+        graphics.DrawString(
+            username.c_str(),
+            -1,
+            &small_bold_font,
+            PointF(
+                static_cast<float>(
+                    content_x + Scale(36, dpi)),
+                static_cast<float>(
+                    footer_y + Scale(18, dpi))),
+            &white);
+
+        const int avatar_size = Scale(28, dpi);
+        const int avatar_x = content_x;
+        const int avatar_y =
+            footer_y +
+            (footer_height - avatar_size) / 2;
+        SolidBrush avatar(Color(255, 72, 109, 160));
+        graphics.FillEllipse(
+            &avatar,
+            static_cast<float>(avatar_x),
+            static_cast<float>(avatar_y),
+            static_cast<float>(avatar_size),
+            static_cast<float>(avatar_size));
+
+        std::wstring initial(
+            1,
+            username.empty() ? L'C' : username[0]);
+        DrawCenteredText(
+            graphics,
+            initial,
+            small_bold_font,
+            RectF(
+                static_cast<float>(avatar_x),
+                static_cast<float>(avatar_y),
+                static_cast<float>(avatar_size),
+                static_cast<float>(avatar_size)),
+            white);
+
+        const bool tiling =
+            window_manager_ != nullptr &&
+            window_manager_->TilingEnabled();
+        std::wstring shell_state =
+            tiling
+                ? L"Tiling ativo"
+                : L"Tiling manual";
+        shell_state += L"  ·  ABI ";
+        shell_state +=
+            std::to_wstring(cloudos_native_runtime_abi());
+
+        DrawCenteredText(
+            graphics,
+            shell_state,
+            small_font,
+            RectF(
+                static_cast<float>(
+                    metrics.start_x +
+                    metrics.start_width / 2 -
+                    Scale(110, dpi)),
+                static_cast<float>(
+                    footer_y + Scale(14, dpi)),
+                static_cast<float>(Scale(220, dpi)),
+                static_cast<float>(Scale(30, dpi))),
+            muted);
+
+        const int power_size = Scale(34, dpi);
+        const int power_x =
+            metrics.start_x +
+            metrics.start_width -
+            Scale(28, dpi) -
+            power_size;
+        const int power_y =
+            footer_y +
+            (footer_height - power_size) / 2;
+        power_button_rect_ = RECT{
+            power_x,
+            power_y,
+            power_x + power_size,
+            power_y + power_size,
+        };
+
+        NativeIconRenderer::DrawGlassPanel(
+            graphics,
+            RectF(
+                static_cast<float>(power_x),
+                static_cast<float>(power_y),
+                static_cast<float>(power_size),
+                static_cast<float>(power_size)),
+            static_cast<float>(Scale(10, dpi)),
+            hovered_widget_id_ == 4
+                ? Color(220, 69, 48, 51)
+                : Color(130, 42, 44, 51),
+            Color(80, 134, 88, 95),
+            1.0f);
+
+        DrawCenteredText(
+            graphics,
+            L"\x23FB",
+            title_font,
+            RectF(
+                static_cast<float>(power_x),
+                static_cast<float>(power_y - Scale(1, dpi)),
+                static_cast<float>(power_size),
+                static_cast<float>(power_size)),
+            white);
+    }
 
     BitBlt(
         screen_dc,
@@ -1564,19 +1558,12 @@ LRESULT CloudOSNativeDesktopWindow::HandleMessage(
         return 1;
 
     case WM_CTLCOLOREDIT:
-    case WM_CTLCOLORSTATIC:
         if (reinterpret_cast<HWND>(l_param) == search_edit_)
         {
-            HDC edit_dc =
-                reinterpret_cast<HDC>(w_param);
-            SetTextColor(
-                edit_dc,
-                RGB(255, 255, 255));
-            SetBkColor(
-                edit_dc,
-                RGB(24, 34, 58));
-            return reinterpret_cast<LRESULT>(
-                edit_bg_brush_);
+            HDC edit_dc = reinterpret_cast<HDC>(w_param);
+            SetTextColor(edit_dc, RGB(245, 247, 250));
+            SetBkColor(edit_dc, RGB(29, 31, 36));
+            return reinterpret_cast<LRESULT>(edit_bg_brush_);
         }
         break;
 
@@ -1592,8 +1579,7 @@ LRESULT CloudOSNativeDesktopWindow::HandleMessage(
     case WM_TIMER:
         if (w_param == kMetricsTimer)
         {
-            current_stats_ =
-                NativeSystemStats::Query();
+            current_stats_ = NativeSystemStats::Query();
             Redraw();
             return 0;
         }
@@ -1622,8 +1608,7 @@ LRESULT CloudOSNativeDesktopWindow::HandleMessage(
     case WM_HOTKEY:
         if (on_hotkey_)
         {
-            on_hotkey_(
-                static_cast<int>(w_param));
+            on_hotkey_(static_cast<int>(w_param));
         }
         return 0;
 
@@ -1659,63 +1644,58 @@ LRESULT CloudOSNativeDesktopWindow::HandleMessage(
             tracking_mouse_ = true;
         }
 
-        const int previous_app =
-            hovered_app_index_;
-        const int previous_widget =
-            hovered_widget_id_;
-        const int previous_dock =
-            hovered_dock_id_;
+        const int previous_app = hovered_app_index_;
+        const int previous_widget = hovered_widget_id_;
+        const int previous_dock = hovered_dock_id_;
 
         hovered_app_index_ = -1;
         hovered_widget_id_ = -1;
         hovered_dock_id_ = -1;
 
-        const std::size_t visible_apps =
-            std::min(
-                app_grid_rects_.size(),
-                filtered_indices_.size());
-        for (std::size_t index = 0;
-             index < visible_apps;
-             ++index)
+        if (start_menu_open_)
         {
-            if (Contains(
-                    app_grid_rects_[index],
-                    point))
+            const std::size_t visible_apps = std::min(
+                app_grid_rects_.size(),
+                static_cast<std::size_t>(kStartGridCapacity));
+            for (std::size_t index = 0;
+                 index < visible_apps;
+                 ++index)
             {
-                hovered_app_index_ =
-                    static_cast<int>(index);
-                break;
+                if (Contains(app_grid_rects_[index], point))
+                {
+                    hovered_app_index_ =
+                        static_cast<int>(index);
+                    break;
+                }
             }
         }
 
-        if (Contains(profile_rect_, point))
+        if (Contains(start_button_rect_, point))
         {
             hovered_widget_id_ = 1;
         }
-        else if (Contains(weather_rect_, point))
+        else if (Contains(desktop_status_rect_, point))
+        {
+            hovered_widget_id_ = 5;
+        }
+        else if (Contains(system_button_rect_, point))
         {
             hovered_widget_id_ = 2;
         }
-        else if (Contains(calendar_rect_, point))
+        else if (Contains(clock_rect_, point))
         {
             hovered_widget_id_ = 3;
         }
-        else if (Contains(perf_rect_, point))
+        else if (Contains(power_button_rect_, point))
         {
             hovered_widget_id_ = 4;
-        }
-        else if (Contains(news_rect_, point))
-        {
-            hovered_widget_id_ = 5;
         }
 
         for (std::size_t index = 0;
              index < dock_rects_.size();
              ++index)
         {
-            if (Contains(
-                    dock_rects_[index],
-                    point))
+            if (Contains(dock_rects_[index], point))
             {
                 hovered_dock_id_ =
                     static_cast<int>(index);
@@ -1755,52 +1735,44 @@ LRESULT CloudOSNativeDesktopWindow::HandleMessage(
             GET_Y_LPARAM(l_param),
         };
 
-        const std::size_t visible_apps =
-            std::min(
+        if (Contains(start_button_rect_, point))
+        {
+            ToggleStartMenu();
+            return 0;
+        }
+
+        if (start_menu_open_)
+        {
+            const std::size_t visible_apps = std::min(
                 app_grid_rects_.size(),
                 filtered_indices_.size());
-        for (std::size_t index = 0;
-             index < visible_apps;
-             ++index)
-        {
-            if (Contains(
-                    app_grid_rects_[index],
-                    point))
+            for (std::size_t index = 0;
+                 index < visible_apps;
+                 ++index)
             {
-                ActivateAppIndex(
-                    filtered_indices_[index]);
+                if (Contains(app_grid_rects_[index], point))
+                {
+                    const int app_index =
+                        filtered_indices_[index];
+                    SetStartMenuOpen(false, false);
+                    ActivateAppIndex(app_index);
+                    return 0;
+                }
+            }
+
+            if (Contains(power_button_rect_, point))
+            {
+                POINT screen_point = point;
+                ClientToScreen(hwnd_, &screen_point);
+                NativeAppLauncher::ShowQuickPowerMenu(
+                    hwnd_,
+                    screen_point);
                 return 0;
             }
         }
 
-        if (Contains(profile_rect_, point))
-        {
-            POINT screen_point = point;
-            ClientToScreen(
-                hwnd_,
-                &screen_point);
-            NativeAppLauncher::ShowQuickPowerMenu(
-                hwnd_,
-                screen_point);
-            return 0;
-        }
-        if (Contains(weather_rect_, point))
-        {
-            NativeAppLauncher::LaunchById(
-                instance_,
-                hwnd_,
-                L"weather");
-            return 0;
-        }
-        if (Contains(calendar_rect_, point))
-        {
-            NativeAppLauncher::LaunchById(
-                instance_,
-                hwnd_,
-                L"datetime");
-            return 0;
-        }
-        if (Contains(perf_rect_, point))
+        if (Contains(desktop_status_rect_, point) ||
+            Contains(system_button_rect_, point))
         {
             NativeAppLauncher::LaunchById(
                 instance_,
@@ -1808,12 +1780,13 @@ LRESULT CloudOSNativeDesktopWindow::HandleMessage(
                 L"sysmon");
             return 0;
         }
-        if (Contains(news_rect_, point))
+
+        if (Contains(clock_rect_, point))
         {
             NativeAppLauncher::LaunchById(
                 instance_,
                 hwnd_,
-                L"health");
+                L"datetime");
             return 0;
         }
 
@@ -1822,10 +1795,9 @@ LRESULT CloudOSNativeDesktopWindow::HandleMessage(
              index < quick_launch_app_indices_.size();
              ++index)
         {
-            if (Contains(
-                    quick_launch_rects_[index],
-                    point))
+            if (Contains(quick_launch_rects_[index], point))
             {
+                SetStartMenuOpen(false, false);
                 ActivateAppIndex(
                     quick_launch_app_indices_[index]);
                 return 0;
@@ -1837,10 +1809,9 @@ LRESULT CloudOSNativeDesktopWindow::HandleMessage(
              index < dock_app_indices_.size();
              ++index)
         {
-            if (Contains(
-                    dock_rects_[index],
-                    point))
+            if (Contains(dock_rects_[index], point))
             {
+                SetStartMenuOpen(false, false);
                 ActivateAppIndex(
                     dock_app_indices_[index]);
                 return 0;
@@ -1851,14 +1822,13 @@ LRESULT CloudOSNativeDesktopWindow::HandleMessage(
              index < workspace_rects_.size();
              ++index)
         {
-            if (Contains(
-                    workspace_rects_[index],
-                    point))
+            if (Contains(workspace_rects_[index], point))
             {
                 if (window_manager_ != nullptr)
                 {
                     window_manager_->SwitchWorkspace(
                         static_cast<int>(index));
+                    SetStartMenuOpen(false, false);
                     Redraw();
                 }
                 return 0;
@@ -1871,12 +1841,19 @@ LRESULT CloudOSNativeDesktopWindow::HandleMessage(
             {
                 if (window_manager_ != nullptr)
                 {
-                    window_manager_->FocusWindow(
-                        hit.window);
+                    window_manager_->FocusWindow(hit.window);
+                    SetStartMenuOpen(false, false);
                     Redraw();
                 }
                 return 0;
             }
+        }
+
+        if (start_menu_open_ &&
+            !Contains(start_menu_rect_, point))
+        {
+            SetStartMenuOpen(false, false);
+            return 0;
         }
 
         SetWindowPos(
@@ -1945,7 +1922,7 @@ LRESULT CALLBACK CloudOSNativeDesktopWindow::SearchSubclass(
 
         if (w_param == VK_ESCAPE)
         {
-            SetWindowTextW(window, L"");
+            self->SetStartMenuOpen(false, false);
             return 0;
         }
 
@@ -1954,10 +1931,10 @@ LRESULT CALLBACK CloudOSNativeDesktopWindow::SearchSubclass(
             w_param == VK_UP ||
             w_param == VK_DOWN)
         {
-            constexpr int columns = 6;
-            const int total =
+            const int total = std::min(
                 static_cast<int>(
-                    self->filtered_indices_.size());
+                    self->filtered_indices_.size()),
+                kStartGridCapacity);
             if (total > 0)
             {
                 if (w_param == VK_RIGHT)
@@ -1976,14 +1953,16 @@ LRESULT CALLBACK CloudOSNativeDesktopWindow::SearchSubclass(
                 {
                     self->focused_app_index_ =
                         std::min(
-                            self->focused_app_index_ + columns,
+                            self->focused_app_index_ +
+                                kStartGridColumns,
                             total - 1);
                 }
                 else
                 {
                     self->focused_app_index_ =
                         std::max(
-                            self->focused_app_index_ - columns,
+                            self->focused_app_index_ -
+                                kStartGridColumns,
                             0);
                 }
                 self->Redraw();

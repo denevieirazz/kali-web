@@ -42,6 +42,8 @@ private:
     void SelectFocusedApp();
     void ActivateAppIndex(int app_index);
     void RefreshWorkArea();
+    void SetStartMenuOpen(bool open, bool focus_search = true);
+    void ToggleStartMenu();
     bool IsPointClickable(POINT point) const;
 
     LRESULT HandleMessage(HWND window, UINT message, WPARAM w_param, LPARAM l_param);
@@ -80,12 +82,14 @@ private:
     int hovered_widget_id_{-1};
     int hovered_dock_id_{-1};
     bool tracking_mouse_{false};
+    bool start_menu_open_{false};
 
-    RECT profile_rect_{};
-    RECT weather_rect_{};
-    RECT calendar_rect_{};
-    RECT perf_rect_{};
-    RECT news_rect_{};
+    RECT start_button_rect_{};
+    RECT start_menu_rect_{};
+    RECT power_button_rect_{};
+    RECT desktop_status_rect_{};
+    RECT system_button_rect_{};
+    RECT clock_rect_{};
 
     SystemStats current_stats_{};
 
