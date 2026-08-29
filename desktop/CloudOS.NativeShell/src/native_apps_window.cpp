@@ -1,4 +1,6 @@
 #include "native_apps_window.h"
+#include "native_calculator_window.h"
+#include "native_notepad_window.h"
 
 #include <commctrl.h>
 #include <knownfolders.h>
@@ -71,7 +73,7 @@ void AddSearchPathExecutable(
         nullptr);
     if (length > 0 && length < buffer.size())
     {
-        catalog.push_back({display_name, buffer.data()});
+        catalog.push_back({display_name, buffer.data(), CloudOSNativeAppsWindow::AppKind::External});
     }
 }
 }
@@ -286,7 +288,7 @@ void CloudOSNativeAppsWindow::EnumerateFolder(const std::wstring& folder, int de
             HasExtension(path, L".url") ||
             HasExtension(path, L".exe"))
         {
-            catalog_.push_back({FileNameWithoutExtension(find_data.cFileName), path});
+            catalog_.push_back({FileNameWithoutExtension(find_data.cFileName), path, AppKind::External});
         }
     }
     while (FindNextFileW(find, &find_data));
@@ -296,6 +298,9 @@ void CloudOSNativeAppsWindow::EnumerateFolder(const std::wstring& folder, int de
 void CloudOSNativeAppsWindow::LoadCatalog()
 {
     catalog_.clear();
+
+    catalog_.push_back({L"Calculadora do CloudOS", L"cloudos://calculator", AppKind::Calculator});
+    catalog_.push_back({L"Bloco de Notas do CloudOS", L"cloudos://notepad", AppKind::Notepad});
 
     const std::array<KNOWNFOLDERID, 2> folders{
         FOLDERID_Programs,
@@ -321,7 +326,7 @@ void CloudOSNativeAppsWindow::LoadCatalog()
     AddSearchPathExecutable(catalog_, L"powershell.exe", L"Windows PowerShell");
     AddSearchPathExecutable(catalog_, L"taskmgr.exe", L"Gerenciador de Tarefas");
     AddSearchPathExecutable(catalog_, L"control.exe", L"Painel de Controle");
-    AddSearchPathExecutable(catalog_, L"notepad.exe", L"Bloco de Notas");
+    AddSearchPathExecutable(catalog_, L"notepad.exe", L"Bloco de Notas do Windows");
     AddSearchPathExecutable(catalog_, L"wsl.exe", L"WSL");
     AddSearchPathExecutable(catalog_, L"wt.exe", L"Windows Terminal");
 
@@ -344,7 +349,7 @@ void CloudOSNativeAppsWindow::LoadCatalog()
             catalog_.end(),
             [](const AppEntry& left, const AppEntry& right)
             {
-                return _wcsicmp(left.path.c_str(), right.path.c_str()) == 0;
+                return left.kind == right.kind && _wcsicmp(left.path.c_str(), right.path.c_str()) == 0;
             }),
         catalog_.end());
 }
@@ -383,6 +388,23 @@ void CloudOSNativeAppsWindow::LaunchSelection()
     }
 
     const auto& app = catalog_[visible_indices_[static_cast<std::size_t>(row)]];
+    if (app.kind == AppKind::Calculator)
+    {
+        if (CloudOSNativeCalculatorWindow::Open(instance_) == nullptr)
+        {
+            MessageBoxW(window_, L"A Calculadora do CloudOS nao pode ser aberta.", L"CloudOS", MB_OK | MB_ICONERROR);
+        }
+        return;
+    }
+    if (app.kind == AppKind::Notepad)
+    {
+        if (CloudOSNativeNotepadWindow::Open(instance_) == nullptr)
+        {
+            MessageBoxW(window_, L"O Bloco de Notas do CloudOS nao pode ser aberto.", L"CloudOS", MB_OK | MB_ICONERROR);
+        }
+        return;
+    }
+
     HINSTANCE result = ShellExecuteW(
         window_,
         L"open",
