@@ -41,3 +41,37 @@ test('Absent evidence does not require desktop enumeration once every target PID
   assert.match(collectorScript, /Add-Assertion 'process\.target-absent-all'/);
   assert.match(collectorScript, /Add-Assertion 'hwnd\.target-zero'/);
 });
+
+
+test('physical proof reproduces the resize then reopen white-surface regression sequence', () => {
+  assert.match(proofScript, /MoveResize1\s*=\s*\$null/);
+  assert.match(proofScript, /mova e redimensione a janela interna/);
+  assert.match(proofScript, /Read-ManualObservation -Stage 'move-resize1'/);
+  assert.match(proofScript, /WhiteOrBlankSurfaceObserved/);
+  assert.match(proofScript, /open2-after-resize-reopen/);
+  assert.match(proofScript, /superfície branca\/vazia/);
+});
+
+test('physical proof makes dual-instance behavior explicit and fail closed', () => {
+  assert.match(proofScript, /ValidateSet\('Skip', 'Supported', 'FailClosed'\)/);
+  assert.match(proofScript, /DualInstanceExpectation/);
+  assert.match(proofScript, /A segunda instância esperada não criou um novo HWND contido/);
+  assert.match(proofScript, /O modo FailClosed criou\/adotou um novo HWND/);
+  assert.match(proofScript, /FirstInstanceProcessIds/);
+});
+
+test('physical proof can verify unique per-launch Chromium profile tokens', () => {
+  assert.match(proofScript, /RequireDistinctChromiumProfiles/);
+  assert.match(proofScript, /--user-data-dir=/);
+  assert.match(proofScript, /\[a-f0-9\]\{32\}/i);
+  assert.match(proofScript, /Assert-And-RegisterChromiumProfiles/);
+  assert.match(proofScript, /O perfil Chromium foi reutilizado entre launches/);
+});
+
+test('physical proof captures sanitized Host diagnostics and bounded reopen stress', () => {
+  assert.match(proofScript, /ReopenStressCycles/);
+  assert.match(proofScript, /ValidateRange\(0, 5\)/);
+  assert.match(proofScript, /Save-DiagnosticDelta/);
+  assert.match(proofScript, /browser-\$\(\[DateTime\]::UtcNow\.ToString\('yyyyMMdd'\)\)\.log/);
+  assert.match(proofScript, /StressCycles \+=/);
+});
