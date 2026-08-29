@@ -7,6 +7,7 @@ param(
 
 . (Join-Path $PSScriptRoot 'cloudos-launcher-common.ps1')
 . (Join-Path $PSScriptRoot 'cloudos-owned-processes.ps1')
+. (Join-Path $PSScriptRoot 'cloudos-session-freshness.ps1')
 . (Join-Path $PSScriptRoot '..\validate\cloudos-node-dependencies.ps1')
 
 $script:FullLaunchStepCount = 11
@@ -341,10 +342,15 @@ function Get-CloudOSFriendlyLaunchFailure {
     }
 }
 
+$currentCheckout = Get-CloudOSGitInfo
 $existingSession = Read-CloudOSCurrentSession
 if ($existingSession -and $existingSession.status -eq 'running') {
     $healthy = $false
-    $hostPid = 0
+    $revisionMatches = Test-CloudOSSessionRevisionMatchesCheckout -Session $existingSession -Checkout $currentCheckout
+    if (-not $revisionMatches) {
+        $oldSha = try { [string]$existingSession.git.sha } catch { '' }
+        Write-Host "CloudOS em execução pertence a outro commit (sessão=$oldSha checkout=$($currentCheckout.sha)); reiniciando runtime."
+    }    $hostPid = 0
     if ($existingSession.readiness -and $existingSession.readiness.hostRuntimePid) {
         $hostPid = [int]$existingSession.readiness.hostRuntimePid
     }
@@ -357,7 +363,7 @@ if ($existingSession -and $existingSession.status -eq 'running') {
                 if ($apiBase) {
                     try {
                         $res = Invoke-WebRequest -Uri "$apiBase/api/health" -TimeoutSec 2 -SkipHttpErrorCheck -ErrorAction Stop
-                        if ([int]$res.StatusCode -ge 200 -and [int]$res.StatusCode -lt 400) {
+                        if ($revisionMatches -and [int]$res.StatusCode -ge 200 -and [int]$res.StatusCode -lt 400) {
                             $healthy = $true
                         }
                     } catch {}
