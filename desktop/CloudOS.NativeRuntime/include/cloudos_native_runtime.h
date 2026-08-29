@@ -3,8 +3,30 @@
 #include <Windows.h>
 #include <cstdint>
 
-#define CLOUDOS_NATIVE_RUNTIME_ABI 3u
+#define CLOUDOS_NATIVE_RUNTIME_ABI 4u
 #define CLOUDOS_NATIVE_RUNTIME_MAX_PROCESSES 256u
+
+typedef enum cloudos_native_window_event_kind : std::uint32_t {
+    CLOUDOS_NATIVE_WINDOW_UNKNOWN = 0u,
+    CLOUDOS_NATIVE_WINDOW_CREATED = 1u,
+    CLOUDOS_NATIVE_WINDOW_DESTROYED = 2u,
+    CLOUDOS_NATIVE_WINDOW_SHOWN = 3u,
+    CLOUDOS_NATIVE_WINDOW_HIDDEN = 4u,
+    CLOUDOS_NATIVE_WINDOW_FOREGROUND = 5u,
+    CLOUDOS_NATIVE_WINDOW_LOCATION_CHANGED = 6u,
+} cloudos_native_window_event_kind;
+
+typedef void (CALLBACK* cloudos_native_window_event_callback)(
+    cloudos_native_window_event_kind kind,
+    HWND window,
+    DWORD process_id,
+    void* context);
+
+typedef BOOL (CALLBACK* cloudos_native_window_enumeration_callback)(
+    HWND window,
+    DWORD process_id,
+    BOOL visible,
+    void* context);
 
 extern "C" {
 
@@ -74,8 +96,27 @@ __declspec(dllexport) BOOL WINAPI cloudos_native_terminal_terminate(
 __declspec(dllexport) void WINAPI cloudos_native_terminal_release(
     void* terminal) noexcept;
 
-// Real Windows surface operations. The native shell validates the session
-// capability first; the C++ runtime then performs the Win32 mutation directly.
+// Event-driven window discovery. The shell consumes real top-level Windows HWNDs
+// instead of requiring arbitrary third-party applications to be reparented into a
+// browser/XAML surface.
+__declspec(dllexport) BOOL WINAPI cloudos_native_window_events_start(
+    cloudos_native_window_event_callback callback,
+    void* context,
+    void** watcher_out) noexcept;
+
+__declspec(dllexport) void WINAPI cloudos_native_window_events_stop(
+    void* watcher) noexcept;
+
+__declspec(dllexport) BOOL WINAPI cloudos_native_window_enumerate(
+    cloudos_native_window_enumeration_callback callback,
+    void* context) noexcept;
+
+__declspec(dllexport) BOOL WINAPI cloudos_native_window_extended_frame_bounds(
+    HWND window,
+    RECT* bounds_out) noexcept;
+
+// Legacy/direct window-surface operations retained as an opt-in compatibility path.
+// They are not the universal application model of the native shell.
 __declspec(dllexport) BOOL WINAPI cloudos_native_window_attach(
     HWND window,
     HWND owner,
