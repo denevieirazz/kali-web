@@ -25,6 +25,12 @@ constexpr int kSearchId = 1301;
 constexpr int kListId = 1302;
 constexpr int kLaunchId = 1303;
 
+struct ProcessWindowSearch final
+{
+    DWORD process_id{};
+    HWND window{};
+};
+
 bool RegisterWindowClass(HINSTANCE instance)
 {
     WNDCLASSEXW window_class{};
@@ -88,6 +94,119 @@ void ShowInternalLaunchError(HWND owner, const wchar_t* app_name)
     message += app_name;
     message += L" nao pode ser aberto.";
     MessageBoxW(owner, message.c_str(), L"CloudOS", MB_OK | MB_ICONERROR);
+}
+
+BOOL CALLBACK FindProcessWindow(HWND window, LPARAM parameter)
+{
+    auto* search = reinterpret_cast<ProcessWindowSearch*>(parameter);
+    if (search == nullptr || search->window != nullptr)
+    {
+        return FALSE;
+    }
+
+    DWORD process_id = 0;
+    GetWindowThreadProcessId(window, &process_id);
+    if (process_id != search->process_id ||
+        !IsWindowVisible(window) ||
+        GetAncestor(window, GA_ROOT) != window)
+    {
+        return TRUE;
+    }
+
+    const LONG_PTR style = GetWindowLongPtrW(window, GWL_STYLE);
+    const LONG_PTR extended_style = GetWindowLongPtrW(window, GWL_EXSTYLE);
+    if ((style & WS_DISABLED) != 0 ||
+        (extended_style & WS_EX_TOOLWINDOW) != 0)
+    {
+        return TRUE;
+    }
+
+    RECT bounds{};
+    if (!GetWindowRect(window, &bounds) ||
+        bounds.right - bounds.left < 32 ||
+        bounds.bottom - bounds.top < 32)
+    {
+        return TRUE;
+    }
+
+    search->window = window;
+    return FALSE;
+}
+
+HWND FindTopLevelWindowForProcess(DWORD process_id)
+{
+    if (process_id == 0)
+    {
+        return nullptr;
+    }
+
+    ProcessWindowSearch search{};
+    search.process_id = process_id;
+    EnumWindows(&FindProcessWindow, reinterpret_cast<LPARAM>(&search));
+    return search.window;
+}
+
+bool LaunchExternalApplication(HWND launcher, const std::wstring& path)
+{
+    // The catalog used to call ShellExecuteW directly on the UI thread while
+    // keeping its own white Win32 window in the foreground. On several Windows
+    // applications that made the catalog look like a blank white app while the
+    // real process was created behind it. Launch without an owner, keep a
+    // process handle when possible, then explicitly surface the real HWND.
+    ShowWindow(launcher, SW_HIDE);
+
+    SHELLEXECUTEINFOW execution{};
+    execution.cbSize = sizeof(execution);
+    execution.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI | SEE_MASK_ASYNCOK;
+    execution.hwnd = nullptr;
+    execution.lpVerb = L"open";
+    execution.lpFile = path.c_str();
+    execution.nShow = SW_SHOWNORMAL;
+
+    if (!ShellExecuteExW(&execution))
+    {
+        ShowWindow(launcher, SW_SHOW);
+        SetForegroundWindow(launcher);
+        return false;
+    }
+
+    HWND target = nullptr;
+    if (execution.hProcess != nullptr)
+    {
+        const DWORD process_id = GetProcessId(execution.hProcess);
+
+        // GUI processes normally become input-idle quickly. Console programs,
+        // packaged apps and launchers can return immediately or report that the
+        // wait is not applicable, so this is only a best-effort synchronization.
+        (void)WaitForInputIdle(execution.hProcess, 1500);
+
+        for (int attempt = 0; attempt < 30 && target == nullptr; ++attempt)
+        {
+            target = FindTopLevelWindowForProcess(process_id);
+            if (target == nullptr)
+            {
+                Sleep(100);
+            }
+        }
+
+        CloseHandle(execution.hProcess);
+    }
+
+    if (target != nullptr)
+    {
+        if (IsIconic(target))
+        {
+            ShowWindow(target, SW_RESTORE);
+        }
+        else
+        {
+            ShowWindow(target, SW_SHOW);
+        }
+        BringWindowToTop(target);
+        SetForegroundWindow(target);
+    }
+
+    return true;
 }
 } // namespace
 
@@ -431,21 +550,19 @@ void CloudOSNativeAppsWindow::LaunchSelection()
         break;
     }
 
-    HINSTANCE result = ShellExecuteW(
-        window_,
-        L"open",
-        app.path.c_str(),
-        nullptr,
-        nullptr,
-        SW_SHOWNORMAL);
-    if (reinterpret_cast<INT_PTR>(result) <= 32)
+    if (!LaunchExternalApplication(window_, app.path))
     {
         MessageBoxW(
             window_,
             L"O aplicativo nao pode ser iniciado.",
             L"CloudOS",
             MB_OK | MB_ICONERROR);
+        return;
     }
+
+    // Close the catalog after a successful external launch. This prevents the
+    // old white catalog surface from remaining above the real Windows app.
+    PostMessageW(window_, WM_CLOSE, 0, 0);
 }
 
 LRESULT CloudOSNativeAppsWindow::HandleMessage(
