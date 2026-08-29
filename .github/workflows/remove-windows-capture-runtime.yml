@@ -31,6 +31,32 @@ jobs:
         shell: pwsh
         run: ./scripts/native/remove-windows-capture-runtime.ps1
 
+      - name: Preserve native fixture helper
+        shell: pwsh
+        run: |
+          $path = 'desktop/CloudOS.Host.Tests/Program.cs'
+          $text = [IO.File]::ReadAllText($path)
+          $text = [regex]::Replace(
+            $text,
+            '(?m)^\s*\([^\r\n]*CapturedSourceIsolationFollowsSurface\)\s*,?\r?\n',
+            '')
+          if (-not $text.Contains('static string[] FixtureArguments(string fixtureArgument)')) {
+            $needle = 'static void AssertThrowsArgument(Action action)'
+            if (-not $text.Contains($needle)) { throw 'ASSERT_HELPER_BOUNDARY_NOT_FOUND' }
+            $helper = @'
+          static string[] FixtureArguments(string fixtureArgument)
+          {
+              var processPath = Environment.ProcessPath ?? throw new InvalidOperationException("The test process path is unavailable.");
+              return string.Equals(Path.GetFileNameWithoutExtension(processPath), "dotnet", StringComparison.OrdinalIgnoreCase)
+                  ? [System.Reflection.Assembly.GetExecutingAssembly().Location, fixtureArgument]
+                  : [fixtureArgument];
+          }
+
+          '@
+            $text = $text.Replace($needle, $helper + $needle)
+          }
+          [IO.File]::WriteAllText($path, $text, [Text.UTF8Encoding]::new($false))
+
       - name: Check whitespace
         shell: pwsh
         run: git diff --check
