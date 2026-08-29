@@ -7,28 +7,20 @@ $mainPath = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\src\main.cpp'
 $themePath = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\src\native_theme.h'
 $mruPath = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\src\native_start_menu_mru.h'
 $platformPath = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\src\native_shell_platform.cpp'
+$shellViewPath = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\src\native_shell_view_host.cpp'
 $drivePath = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\src\native_cloudos_drive.cpp'
 $trashPath = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\src\native_cloudos_trash_window.cpp'
 $filesPath = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\src\native_files_window.cpp'
+$filesNavigationPath = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\src\native_files_navigation.cpp'
+$filesOperationsPath = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\src\native_files_operations.cpp'
+$filesSupportPath = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\src\native_files_support.cpp'
 $projectsPath = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\src\native_projects_window.cpp'
 $projectPath = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\CloudOS.NativeShell.vcxproj'
+$researchPolicyPath = Join-Path $repoRoot 'docs\native\RESEARCH_POLICY.md'
+$filesResearchPath = Join-Path $repoRoot 'docs\native\research\FILES_NATIVE_SHELL_RESEARCH.md'
 
-foreach ($path in @(
-    $desktopPath,
-    $launcherPath,
-    $mainPath,
-    $themePath,
-    $mruPath,
-    $platformPath,
-    $drivePath,
-    $trashPath,
-    $filesPath,
-    $projectsPath,
-    $projectPath
-)) {
-    if (-not (Test-Path -LiteralPath $path)) {
-        throw "Required native shell file missing: $path"
-    }
+foreach ($path in @($desktopPath,$launcherPath,$mainPath,$themePath,$mruPath,$platformPath,$shellViewPath,$drivePath,$trashPath,$filesPath,$filesNavigationPath,$filesOperationsPath,$filesSupportPath,$projectsPath,$projectPath,$researchPolicyPath,$filesResearchPath)) {
+    if (-not (Test-Path -LiteralPath $path)) { throw "Required native shell file missing: $path" }
 }
 
 $desktop = Get-Content -LiteralPath $desktopPath -Raw
@@ -37,176 +29,64 @@ $main = Get-Content -LiteralPath $mainPath -Raw
 $theme = Get-Content -LiteralPath $themePath -Raw
 $mru = Get-Content -LiteralPath $mruPath -Raw
 $platform = Get-Content -LiteralPath $platformPath -Raw
+$shellView = Get-Content -LiteralPath $shellViewPath -Raw
 $drive = Get-Content -LiteralPath $drivePath -Raw
 $trash = Get-Content -LiteralPath $trashPath -Raw
-$files = Get-Content -LiteralPath $filesPath -Raw
+$files = (Get-Content -LiteralPath $filesPath -Raw) + (Get-Content -LiteralPath $filesNavigationPath -Raw) + (Get-Content -LiteralPath $filesOperationsPath -Raw) + (Get-Content -LiteralPath $filesSupportPath -Raw)
 $projects = Get-Content -LiteralPath $projectsPath -Raw
 $project = Get-Content -LiteralPath $projectPath -Raw
+$researchPolicy = Get-Content -LiteralPath $researchPolicyPath -Raw
+$filesResearch = Get-Content -LiteralPath $filesResearchPath -Raw
 
-$forbiddenFakeUi = @(
-    'Neo-Tokyo',
-    '22°C',
-    'OCT 26, 2045',
-    'CloudOS Architecture Sync',
-    'Sistema 100% Operacional',
-    'CloudOS Native Kernel v2.0'
-)
-
-foreach ($token in $forbiddenFakeUi) {
-    if ($desktop.Contains($token)) {
-        throw "Synthetic desktop data regressed into native UI: $token"
-    }
+foreach ($token in @('Neo-Tokyo','22°C','OCT 26, 2045','CloudOS Architecture Sync','Sistema 100% Operacional','CloudOS Native Kernel v2.0')) {
+    if ($desktop.Contains($token)) { throw "Synthetic desktop data regressed into native UI: $token" }
 }
 
-$desktopContracts = @(
-    'CurrentWorkspaceWindows',
-    'StartMenuMRUTracker::Instance().GetTopApps',
-    'cloudos_native_runtime_abi',
-    'FocusWindow',
-    'SwitchWorkspace'
-)
-foreach ($token in $desktopContracts) {
-    if (-not $desktop.Contains($token)) {
-        throw "Desktop contract missing: $token"
-    }
+foreach ($token in @('CurrentWorkspaceWindows','StartMenuMRUTracker::Instance().GetTopApps','cloudos_native_runtime_abi','FocusWindow','SwitchWorkspace')) {
+    if (-not $desktop.Contains($token)) { throw "Desktop contract missing: $token" }
+}
+foreach ($token in @('GetDateFormatEx','GetTimeFormatEx','GetWindowsDirectoryW','GetVolumePathNameW')) {
+    if (-not $platform.Contains($token)) { throw "Platform contract missing: $token" }
+}
+foreach ($token in @('CanonicalAppId','SEE_MASK_NOCLOSEPROCESS','StartMenuMRUTracker::Instance().RecordLaunch','CloudOSNativeProjectsWindow::Open','NativeCloudOSDrive::EnsureReady','CloudOSNativeFilesWindow::Open(instance, root)','OpenWslTerminal','systemdrive','ms-settings:dateandtime')) {
+    if (-not $launcher.Contains($token)) { throw "Launcher contract missing: $token" }
+}
+if (-not $main.Contains('HotSearch') -or -not $main.Contains('VK_SPACE')) { throw 'Global native search hotkey contract missing.' }
+if ($theme.Contains('Disco Local (C:)') -or $theme.Contains('Disco C:')) { throw 'System volume label must not assume Windows is installed on C:.' }
+if (-not $theme.Contains('L"drive", L"CloudOS Drive"') -or -not $theme.Contains('L"systemdrive", L"Disco do Sistema"') -or -not $theme.Contains('L"projects", L"Projetos"') -or -not $theme.Contains('L"wsl", L"WSL / Kali"')) { throw 'CloudOS Drive, system volume, Projects and WSL must remain distinct truthful app identities.' }
+if (-not $mru.Contains('SHGetKnownFolderPath') -or -not $mru.Contains('FOLDERID_LocalAppData') -or -not $mru.Contains('MoveFileExW')) { throw 'MRU persistence must use Known Folders and atomic replacement.' }
+
+foreach ($token in @('CLSID_ExplorerBrowser','IExplorerBrowserEvents','OleInitialize','browser->Initialize','browser->Advise','BrowseToIDList','IFolderView2','DoRename','InvokeVerbOnSelection','SetViewModeAndIconSize','browser_->Destroy')) {
+    if (-not $shellView.Contains($token)) { throw "Native Windows Shell view contract missing: $token" }
+}
+if ($shellView.Contains('#include <WebView2.h>') -or $shellView.Contains('ICoreWebView2')) { throw 'Native Shell view must not depend on WebView2.' }
+
+foreach ($token in @('CLOUDOS_DRIVE_DIR','FOLDERID_LocalAppData','.cloudos-system','FILE_ATTRIBUTE_REPARSE_POINT','ValidateSegments','NativeCloudOSDrive::List','NativeCloudOSDrive::Read','NativeCloudOSDrive::Write','NativeCloudOSDrive::Mkdir','NativeCloudOSDrive::Move','NativeCloudOSDrive::Copy','NativeCloudOSDrive::Trash','NativeCloudOSDrive::ListTrash','NativeCloudOSDrive::RestoreTrash','NativeCloudOSDrive::DeleteTrash','NativeCloudOSDrive::EmptyTrash')) {
+    if (-not $drive.Contains($token)) { throw "CloudOS Drive native contract missing: $token" }
 }
 
-$platformContracts = @(
-    'GetDateFormatEx',
-    'GetTimeFormatEx',
-    'GetWindowsDirectoryW',
-    'GetVolumePathNameW'
-)
-foreach ($token in $platformContracts) {
-    if (-not $platform.Contains($token)) {
-        throw "Platform contract missing: $token"
-    }
+foreach ($token in @('shell_view_.Create','FOLDERID_Profile','FOLDERID_Desktop','FOLDERID_Documents','FOLDERID_Downloads','SHGetStockIconInfo','NavigateCloudOSDrive','CloudOSNativeDriveTrashWindow::Open','NativeCloudOSDrive::List','NativeCloudOSDrive::Mkdir','NativeCloudOSDrive::Trash','NativeCloudOSDrive::Move','shell_view_.BeginRenameSelection','shell_view_.DeleteSelection','FOF_ALLOWUNDO','LVS_ICON','SHGFI_LARGEICON','ListView_SetIconSpacing','destroy_deletes_self_')) {
+    if (-not $files.Contains($token)) { throw "Native Files integration contract missing: $token" }
+}
+foreach ($token in @('NativeCloudOSDrive::ListTrash','NativeCloudOSDrive::RestoreTrash','NativeCloudOSDrive::DeleteTrash','NativeCloudOSDrive::EmptyTrash')) {
+    if (-not $trash.Contains($token)) { throw "Native Drive Trash contract missing: $token" }
+}
+foreach ($token in @('kProjectsSegments','NativeCloudOSDrive::List','NativeCloudOSDrive::Mkdir','NativeCloudOSDrive::Move','NativeCloudOSDrive::Trash','CloudOSNativeFilesWindow::Open','CloudOSNativeTerminalWindow::Open','code.cmd')) {
+    if (-not $projects.Contains($token)) { throw "Native Projects contract missing: $token" }
+}
+foreach ($source in @('src\native_cloudos_drive.cpp','src\native_cloudos_trash_window.cpp','src\native_projects_window.cpp','src\native_shell_view_host.cpp','src\native_files_navigation.cpp','src\native_files_operations.cpp','src\native_files_support.cpp')) {
+    if (-not $project.Contains($source)) { throw "Required native source not compiled by project: $source" }
 }
 
-$launcherContracts = @(
-    'CanonicalAppId',
-    'SEE_MASK_NOCLOSEPROCESS',
-    'StartMenuMRUTracker::Instance().RecordLaunch',
-    'CloudOSNativeProjectsWindow::Open',
-    'NativeCloudOSDrive::EnsureReady',
-    'CloudOSNativeFilesWindow::Open(instance, root)',
-    'OpenWslTerminal',
-    'systemdrive',
-    'ms-settings:dateandtime'
-)
-foreach ($token in $launcherContracts) {
-    if (-not $launcher.Contains($token)) {
-        throw "Launcher contract missing: $token"
-    }
+foreach ($token in @('pesquisar antes de implementar','docs/native/research/','Microsoft Learn','licença')) {
+    if (-not $researchPolicy.Contains($token)) { throw "Research-before-implementation policy missing: $token" }
+}
+foreach ($token in @('IExplorerBrowser','Windows-classic-samples','MIT','Explorer++','GPL-3.0','nenhum código GPL','CloudOS Drive','mr-foxxo/vibe-os','inconsistência de licença','Nenhum código do VibeOS foi copiado')) {
+    if (-not $filesResearch.Contains($token)) { throw "Files research record missing: $token" }
 }
 
-if (-not $main.Contains('HotSearch') -or -not $main.Contains('VK_SPACE')) {
-    throw 'Global native search hotkey contract missing.'
+foreach ($source in @('src\native_start_menu_window.cpp','src\native_taskbar_window.cpp','src\native_dash_window.cpp')) {
+    if ($project.Contains($source)) { throw "Empty/provisional shell placeholder returned to build: $source" }
 }
 
-if ($theme.Contains('Disco Local (C:)') -or $theme.Contains('Disco C:')) {
-    throw 'System volume label must not assume Windows is installed on C:.'
-}
-if (-not $theme.Contains('L"drive", L"CloudOS Drive"') -or
-    -not $theme.Contains('L"systemdrive", L"Disco do Sistema"') -or
-    -not $theme.Contains('L"projects", L"Projetos"') -or
-    -not $theme.Contains('L"wsl", L"WSL / Kali"')) {
-    throw 'CloudOS Drive, system volume, Projects and WSL must remain distinct truthful app identities.'
-}
-
-if (-not $mru.Contains('SHGetKnownFolderPath') -or
-    -not $mru.Contains('FOLDERID_LocalAppData') -or
-    -not $mru.Contains('MoveFileExW')) {
-    throw 'MRU persistence must use Known Folders and atomic replacement.'
-}
-
-$driveContracts = @(
-    'CLOUDOS_DRIVE_DIR',
-    'FOLDERID_LocalAppData',
-    '.cloudos-system',
-    'FILE_ATTRIBUTE_REPARSE_POINT',
-    'ValidateSegments',
-    'NativeCloudOSDrive::List',
-    'NativeCloudOSDrive::Read',
-    'NativeCloudOSDrive::Write',
-    'NativeCloudOSDrive::Mkdir',
-    'NativeCloudOSDrive::Move',
-    'NativeCloudOSDrive::Copy',
-    'NativeCloudOSDrive::Trash',
-    'NativeCloudOSDrive::ListTrash',
-    'NativeCloudOSDrive::RestoreTrash',
-    'NativeCloudOSDrive::DeleteTrash',
-    'NativeCloudOSDrive::EmptyTrash'
-)
-foreach ($token in $driveContracts) {
-    if (-not $drive.Contains($token)) {
-        throw "CloudOS Drive native contract missing: $token"
-    }
-}
-
-$filesContracts = @(
-    'NavigateCloudOSDriveRoot',
-    'CloudOSNativeDriveTrashWindow::Open',
-    'NativeCloudOSDrive::List',
-    'NativeCloudOSDrive::Mkdir',
-    'NativeCloudOSDrive::Trash',
-    'NativeCloudOSDrive::Move',
-    'FOF_ALLOWUNDO'
-)
-foreach ($token in $filesContracts) {
-    if (-not $files.Contains($token)) {
-        throw "Native Files integration contract missing: $token"
-    }
-}
-
-$trashContracts = @(
-    'NativeCloudOSDrive::ListTrash',
-    'NativeCloudOSDrive::RestoreTrash',
-    'NativeCloudOSDrive::DeleteTrash',
-    'NativeCloudOSDrive::EmptyTrash'
-)
-foreach ($token in $trashContracts) {
-    if (-not $trash.Contains($token)) {
-        throw "Native Drive Trash contract missing: $token"
-    }
-}
-
-$projectsContracts = @(
-    'kProjectsSegments',
-    'NativeCloudOSDrive::List',
-    'NativeCloudOSDrive::Mkdir',
-    'NativeCloudOSDrive::Move',
-    'NativeCloudOSDrive::Trash',
-    'CloudOSNativeFilesWindow::Open',
-    'CloudOSNativeTerminalWindow::Open',
-    'code.cmd'
-)
-foreach ($token in $projectsContracts) {
-    if (-not $projects.Contains($token)) {
-        throw "Native Projects contract missing: $token"
-    }
-}
-
-$requiredProjectSources = @(
-    'src\native_cloudos_drive.cpp',
-    'src\native_cloudos_trash_window.cpp',
-    'src\native_projects_window.cpp'
-)
-foreach ($source in $requiredProjectSources) {
-    if (-not $project.Contains($source)) {
-        throw "Required native source not compiled by project: $source"
-    }
-}
-
-$placeholderSources = @(
-    'src\native_start_menu_window.cpp',
-    'src\native_taskbar_window.cpp',
-    'src\native_dash_window.cpp'
-)
-foreach ($source in $placeholderSources) {
-    if ($project.Contains($source)) {
-        throw "Empty/provisional shell placeholder returned to build: $source"
-    }
-}
-
-Write-Host 'PASS: CloudOS native shell, Drive, Files and Projects contracts are truthful and functional.'
+Write-Host 'PASS: CloudOS native shell, research policy, Drive, Files, Windows Shell view and Projects contracts are truthful and functional.'

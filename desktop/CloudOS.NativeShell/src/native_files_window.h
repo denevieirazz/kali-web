@@ -1,6 +1,9 @@
 #pragma once
 
+#include "native_shell_view_host.h"
+
 #include <Windows.h>
+#include <CommCtrl.h>
 
 #include <string>
 #include <vector>
@@ -8,17 +11,12 @@
 class CloudOSNativeFilesWindow final
 {
 public:
-    static void Open(
-        HINSTANCE instance,
-        const std::wstring& initial_path = L"");
-
-    static LRESULT CALLBACK WindowProcedure(
-        HWND window,
-        UINT message,
-        WPARAM w_param,
-        LPARAM l_param);
+    static void Open(HINSTANCE instance, const std::wstring& initial_path = L"");
+    static LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM w_param, LPARAM l_param);
 
 private:
+    enum class ContentMode { Shell, CloudOSDrive, FallbackFileSystem };
+
     struct Entry final
     {
         std::wstring name;
@@ -26,62 +24,102 @@ private:
         bool directory{};
         bool reparse_point{};
         ULONGLONG size{};
+        FILETIME modified{};
+        int image_index{-1};
     };
 
-    explicit CloudOSNativeFilesWindow(
-        HINSTANCE instance,
-        std::wstring initial_path);
-    ~CloudOSNativeFilesWindow() = default;
+    struct SidebarItem final
+    {
+        std::wstring label;
+        std::wstring path;
+        bool opens_trash{};
+        int image_index{-1};
+    };
 
+    explicit CloudOSNativeFilesWindow(HINSTANCE instance, std::wstring initial_path);
+    ~CloudOSNativeFilesWindow() = default;
     CloudOSNativeFilesWindow(const CloudOSNativeFilesWindow&) = delete;
     CloudOSNativeFilesWindow& operator=(const CloudOSNativeFilesWindow&) = delete;
 
     bool Create();
+    bool CreateControls();
+    void CreateUiResources();
+    void DestroyUiResources() noexcept;
+    void ConfigureLists();
+    void BuildSidebar();
     void Layout();
+    void UpdateStatus();
+
     void Navigate(const std::wstring& path);
+    bool NavigateShell(const std::wstring& path);
+    void NavigateCloudOSDrive(const std::wstring& path);
+    void NavigateFallback(const std::wstring& path);
+    void NavigateBack();
+    void NavigateForward();
     void NavigateParent();
-    void NavigateWslRoot();
-    void NavigateCloudOSDriveRoot();
-    void OpenCloudOSDriveTrash();
-    void ActivateSelection();
-    void PopulateList();
+    void OnShellNavigationComplete(const std::wstring& path);
+    void SelectSidebarForCurrentPath();
+    void ActivateSidebarSelection();
+
+    void PopulateCustomList();
     void PopulateCloudOSDriveList();
-    void PopulateNativeFileSystemList();
+    void PopulateFallbackList();
+    void RenderCustomList();
+    void ActivateCustomSelection();
     void CreateNewFolder();
-    void DeleteSelection();
     void BeginRename();
     bool CommitRename(int row, const wchar_t* new_name);
+    void DeleteSelection();
     void Refresh();
 
     [[nodiscard]] bool IsCurrentCloudOSDrive() const;
-    bool CurrentDriveSegments(
-        std::vector<std::wstring>* segments,
-        std::wstring* error = nullptr) const;
-    [[nodiscard]] std::wstring SelectedPath() const;
+    bool CurrentDriveSegments(std::vector<std::wstring>* segments, std::wstring* error = nullptr) const;
+    [[nodiscard]] int ShellIconIndex(const std::wstring& path, bool directory, bool use_attributes = false) const;
+    [[nodiscard]] int StockIconIndex(SHSTOCKICONID icon_id) const;
 
+    static std::wstring KnownFolderPath(REFKNOWNFOLDERID folder_id);
+    static std::wstring JoinPath(const std::wstring& directory, const std::wstring& name);
     static std::wstring ParentPath(const std::wstring& path);
-    static std::wstring JoinPath(
-        const std::wstring& directory,
-        const std::wstring& name);
+    static std::wstring ReadEditText(HWND edit);
     static std::wstring FormatSize(ULONGLONG size);
-    static bool IsRootPath(const std::wstring& path);
+    static std::wstring FormatModified(const FILETIME& value);
     static bool IsWslRootPath(const std::wstring& path);
+    static bool IsRootPath(const std::wstring& path);
+    static bool IsSafeLeafName(const wchar_t* text);
 
     LRESULT HandleMessage(UINT message, WPARAM w_param, LPARAM l_param);
+    LRESULT DrawOwnerButton(const DRAWITEMSTRUCT& item);
 
     HINSTANCE instance_{};
     HWND window_{};
+    HWND sidebar_{};
+    HWND back_button_{};
+    HWND forward_button_{};
+    HWND up_button_{};
     HWND path_edit_{};
     HWND go_button_{};
-    HWND up_button_{};
-    HWND drive_button_{};
-    HWND trash_button_{};
-    HWND wsl_button_{};
     HWND refresh_button_{};
     HWND new_folder_button_{};
+    HWND rename_button_{};
     HWND delete_button_{};
+    HWND shell_host_{};
     HWND list_{};
+    HWND status_{};
 
+    HFONT ui_font_{};
+    HBRUSH background_brush_{};
+    HBRUSH panel_brush_{};
+    HBRUSH surface_brush_{};
+    HIMAGELIST system_small_image_list_{};
+    HIMAGELIST system_large_image_list_{};
+    UINT dpi_{96};
+
+    bool shell_available_{};
+    bool sidebar_syncing_{};
+    bool destroy_deletes_self_{};
+    ContentMode content_mode_{ContentMode::FallbackFileSystem};
     std::wstring current_path_;
     std::vector<Entry> entries_;
+    std::vector<SidebarItem> sidebar_items_;
+    CloudOS::NativeShellViewHost shell_view_;
 };
