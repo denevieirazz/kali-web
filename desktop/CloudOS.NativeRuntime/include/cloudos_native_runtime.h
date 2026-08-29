@@ -3,7 +3,7 @@
 #include <Windows.h>
 #include <cstdint>
 
-#define CLOUDOS_NATIVE_RUNTIME_ABI 2u
+#define CLOUDOS_NATIVE_RUNTIME_ABI 3u
 #define CLOUDOS_NATIVE_RUNTIME_MAX_PROCESSES 256u
 
 extern "C" {
@@ -34,9 +34,48 @@ __declspec(dllexport) BOOL WINAPI cloudos_native_terminate(
 __declspec(dllexport) void WINAPI cloudos_native_release(
     void* lease) noexcept;
 
-// Real Windows surface operations. The Host validates the launch/session capability first;
-// the C++ runtime then performs the Win32 mutation directly so Web/React never renders or
-// forwards pixels for a native application.
+// Native ConPTY terminal runtime. The terminal process is created suspended,
+// assigned to a kill-on-close Job Object, and only then resumed. No browser,
+// WebView, Node process, socket bridge, or JavaScript terminal is involved.
+__declspec(dllexport) BOOL WINAPI cloudos_native_terminal_create(
+    const wchar_t* command_line,
+    const wchar_t* working_directory,
+    SHORT columns,
+    SHORT rows,
+    void** terminal_out,
+    DWORD* process_id_out) noexcept;
+
+__declspec(dllexport) BOOL WINAPI cloudos_native_terminal_write(
+    void* terminal,
+    const void* data,
+    DWORD size,
+    DWORD* written_out) noexcept;
+
+__declspec(dllexport) BOOL WINAPI cloudos_native_terminal_read(
+    void* terminal,
+    void* buffer,
+    DWORD capacity,
+    DWORD* read_out) noexcept;
+
+__declspec(dllexport) BOOL WINAPI cloudos_native_terminal_resize(
+    void* terminal,
+    SHORT columns,
+    SHORT rows) noexcept;
+
+__declspec(dllexport) BOOL WINAPI cloudos_native_terminal_get_exit_code(
+    void* terminal,
+    DWORD* exit_code_out,
+    BOOL* exited_out) noexcept;
+
+__declspec(dllexport) BOOL WINAPI cloudos_native_terminal_terminate(
+    void* terminal,
+    DWORD exit_code) noexcept;
+
+__declspec(dllexport) void WINAPI cloudos_native_terminal_release(
+    void* terminal) noexcept;
+
+// Real Windows surface operations. The native shell validates the session
+// capability first; the C++ runtime then performs the Win32 mutation directly.
 __declspec(dllexport) BOOL WINAPI cloudos_native_window_attach(
     HWND window,
     HWND owner,
