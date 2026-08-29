@@ -8,7 +8,6 @@
 
 #include "native_app_launcher.h"
 #include "native_desktop_surface.h"
-#include "native_settings_window.h"
 #include "native_theme.h"
 #include "native_window_manager.h"
 
@@ -58,13 +57,9 @@ public:
         }
         window_manager_initialized_ = true;
 
-        const CloudOSNativeSettings settings =
-            CloudOSNativeSettingsWindow::Load();
-        if (settings.tiling_on_start &&
-            !window_manager_.TilingEnabled())
-        {
-            window_manager_.ToggleTiling();
-        }
+        // Tiling is deliberately manual-only. A previous saved preference must
+        // never rearrange windows just because the CloudOS shell was opened.
+        // The user can still toggle it explicitly through Ctrl+Alt+T.
 
         RegisterHotKeys();
         if (SetTimer(
@@ -496,4 +491,3 @@ int WINAPI wWinMain(
     }
     return exit_code;
 }
-
