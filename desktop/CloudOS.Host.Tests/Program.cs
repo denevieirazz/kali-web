@@ -545,36 +545,6 @@ static class NativeFixtureWindow
         return hwnd;
     }
 
-    internal static IntPtr CreateVisibleOwner()
-    {
-        var hwnd = CreateHiddenOwner();
-        ShowWindow(hwnd, 5);
-        UpdateWindow(hwnd);
-        return hwnd;
-    }
-
-    internal static IntPtr CreateVisiblePresenter(IntPtr owner, NativeWindowBounds bounds)
-    {
-        var hwnd = CreateWindowEx(
-            WsExToolWindow,
-            "STATIC",
-            "CloudOS Test Captured Presenter",
-            WsPopup | WsVisible,
-            bounds.X,
-            bounds.Y,
-            bounds.Width,
-            bounds.Height,
-            owner,
-            IntPtr.Zero,
-            GetModuleHandle(null),
-            IntPtr.Zero);
-        if (hwnd == IntPtr.Zero)
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "The test presenter HWND could not be created.");
-        ShowWindow(hwnd, 4);
-        UpdateWindow(hwnd);
-        return hwnd;
-    }
-
     internal static void Destroy(IntPtr hwnd)
     {
         if (hwnd != IntPtr.Zero) DestroyWindow(hwnd);
