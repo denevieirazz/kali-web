@@ -50,6 +50,7 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <ForcedIncludeFiles>windowsx.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
+      <AdditionalIncludeDirectories>$(MSBuildProjectDirectory)\..\CloudOS.NativeRuntime\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;UNICODE;_UNICODE;_WIN32_WINNT=0x0A00;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
@@ -67,6 +68,7 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <ForcedIncludeFiles>windowsx.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
+      <AdditionalIncludeDirectories>$(MSBuildProjectDirectory)\..\CloudOS.NativeRuntime\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;NDEBUG;UNICODE;_UNICODE;_WIN32_WINNT=0x0A00;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
@@ -78,10 +80,25 @@
 
   <ItemGroup>
     <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\runtime_bootstrap.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Manifest Include="app.manifest" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CloudOS.NativeRuntime\CloudOS.NativeRuntime.vcxproj">
+      <Project>{98C78343-0E9A-4A67-A61D-8F811A2755C8}</Project>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <LinkLibraryDependencies>true</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemGroup>
+
+  <Target Name="CopyNativeRuntime" AfterTargets="Build">
+    <Copy
+      SourceFiles="$(MSBuildProjectDirectory)\..\CloudOS.NativeRuntime\bin\$(Configuration)\CloudOS.NativeRuntime.dll"
+      DestinationFolder="$(OutDir)"
+      SkipUnchangedFiles="true" />
+  </Target>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
