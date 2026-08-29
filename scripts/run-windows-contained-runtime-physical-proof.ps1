@@ -52,18 +52,18 @@ function Wait-Enter {
 
 function Resolve-HostProcess {
     if ($HostProcessId -gt 0) {
-        $host = Get-Process -Id $HostProcessId -ErrorAction Stop
-        if ($host.ProcessName -ine 'CloudOS.Host') {
-            throw "HostProcessId=$HostProcessId pertence a $($host.ProcessName), não CloudOS.Host."
+        $cloudOsHostProcess = Get-Process -Id $HostProcessId -ErrorAction Stop
+        if ($cloudOsHostProcess.ProcessName -ine 'CloudOS.Host') {
+            throw "HostProcessId=$HostProcessId pertence a $($cloudOsHostProcess.ProcessName), não CloudOS.Host."
         }
-        return $host
+        return $cloudOsHostProcess
     }
 
-    $hosts = @(Get-Process -Name 'CloudOS.Host' -ErrorAction SilentlyContinue)
-    if ($hosts.Count -ne 1) {
-        throw "Era esperado exatamente um CloudOS.Host em execução; encontrados=$($hosts.Count). Informe -HostProcessId se necessário."
+    $cloudOsHostProcesses = @(Get-Process -Name 'CloudOS.Host' -ErrorAction SilentlyContinue)
+    if ($cloudOsHostProcesses.Count -ne 1) {
+        throw "Era esperado exatamente um CloudOS.Host em execução; encontrados=$($cloudOsHostProcesses.Count). Informe -HostProcessId se necessário."
     }
-    return $hosts[0]
+    return $cloudOsHostProcesses[0]
 }
 
 if (-not ('CloudOSNativeProofDiscovery' -as [type])) {
@@ -91,7 +91,7 @@ public static class CloudOSNativeProofDiscovery
     [return: MarshalAs(UnmanagedType.Bool)]
     public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
 
@@ -145,7 +145,10 @@ public static class CloudOSNativeProofDiscovery
             return true;
         };
         if (!EnumWindows(callback, IntPtr.Zero))
-            throw new InvalidOperationException("EnumWindows failed; callback=" + (callbackError ?? "none"));
+        {
+            var nativeError = Marshal.GetLastWin32Error();
+            throw new InvalidOperationException("EnumWindows failed; nativeError=" + nativeError + "; callback=" + (callbackError ?? "none"));
+        }
         if (callbackError != null)
             throw new InvalidOperationException("EnumWindows callback failed: " + callbackError);
         return result.ToArray();
@@ -298,9 +301,9 @@ if ($currentHead -ne $ExpectedHeadSha.ToLowerInvariant()) {
 $branch = (git branch --show-current).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Não foi possível determinar a branch atual.' }
 
-$host = Resolve-HostProcess
-$hostStartUtc = $host.StartTime.ToUniversalTime().ToString('o')
-Write-Host "CloudOS Host: pid=$($host.Id) start=$hostStartUtc"
+$cloudOsHostProcess = Resolve-HostProcess
+$hostStartUtc = $cloudOsHostProcess.StartTime.ToUniversalTime().ToString('o')
+Write-Host "CloudOS Host: pid=$($cloudOsHostProcess.Id) start=$hostStartUtc"
 Write-Host "Git: branch=$branch sha=$currentHead"
 Write-Host "Evidence: $resolvedOutputDirectory"
 Write-Host ''
@@ -310,7 +313,7 @@ $proof = [ordered]@{
     Collector = 'scripts/run-windows-contained-runtime-physical-proof.ps1'
     StartedAt = [DateTimeOffset]::UtcNow.ToString('o')
     Git = [ordered]@{ Branch = $branch; HeadSha = $currentHead }
-    Host = [ordered]@{ ProcessId = $host.Id; ProcessName = $host.ProcessName; StartTimeUtc = $hostStartUtc }
+    Host = [ordered]@{ ProcessId = $cloudOsHostProcess.Id; ProcessName = $cloudOsHostProcess.ProcessName; StartTimeUtc = $hostStartUtc }
     ProofName = $ProofName
     Open1 = $null
     Close1 = $null
@@ -323,10 +326,10 @@ Write-Utf8Json -Value $proof -Path $summaryPath
 try {
     $baseline1 = New-BaselineKeyMap
     Wait-Enter 'Abra AGORA o aplicativo Windows pelo Start Menu/App Center do CloudOS. Quando ele estiver visível DENTRO do CloudOS, pressione Enter'
-    $windows1 = Wait-NewContainedWindows -HostPid $host.Id -BaselineKeys $baseline1 -TimeoutSeconds $OpenTimeoutSeconds
+    $windows1 = Wait-NewContainedWindows -HostPid $cloudOsHostProcess.Id -BaselineKeys $baseline1 -TimeoutSeconds $OpenTimeoutSeconds
     if ($windows1.Count -eq 0) { throw 'Nenhum novo HWND visível owned pelo CloudOS Host foi detectado no open1.' }
     $pids1 = @($windows1.ProcessId | Select-Object -Unique)
-    Invoke-AttachedEvidence -ProcessIds $pids1 -HostPid $host.Id -Prefix "$ProofName-open1"
+    Invoke-AttachedEvidence -ProcessIds $pids1 -HostPid $cloudOsHostProcess.Id -Prefix "$ProofName-open1"
     $screenshot1 = Join-Path $resolvedOutputDirectory "$ProofName-open1-desktop.png"
     Save-VirtualDesktopScreenshot -Path $screenshot1
     $manual1 = Read-ManualObservation -Stage 'open1'
@@ -353,13 +356,13 @@ try {
 
     $baseline2 = New-BaselineKeyMap
     Wait-Enter 'REABRA o mesmo aplicativo PELO CLOUDOS. Quando ele estiver visível DENTRO do CloudOS, pressione Enter'
-    $windows2 = Wait-NewContainedWindows -HostPid $host.Id -BaselineKeys $baseline2 -TimeoutSeconds $OpenTimeoutSeconds
+    $windows2 = Wait-NewContainedWindows -HostPid $cloudOsHostProcess.Id -BaselineKeys $baseline2 -TimeoutSeconds $OpenTimeoutSeconds
     if ($windows2.Count -eq 0) { throw 'Nenhum novo HWND visível owned pelo CloudOS Host foi detectado no open2.' }
     $pids2 = @($windows2.ProcessId | Select-Object -Unique)
     if (@($pids2 | Where-Object { $pids1 -contains $_ }).Count -gt 0) {
         throw "O reopen reutilizou PID que deveria ter sido encerrado. open1=$($pids1 -join ',') open2=$($pids2 -join ',')"
     }
-    Invoke-AttachedEvidence -ProcessIds $pids2 -HostPid $host.Id -Prefix "$ProofName-open2"
+    Invoke-AttachedEvidence -ProcessIds $pids2 -HostPid $cloudOsHostProcess.Id -Prefix "$ProofName-open2"
     $screenshot2 = Join-Path $resolvedOutputDirectory "$ProofName-open2-desktop.png"
     Save-VirtualDesktopScreenshot -Path $screenshot2
     $manual2 = Read-ManualObservation -Stage 'open2'
@@ -391,7 +394,7 @@ try {
         'CLOUDOS WINDOWS CONTAINED RUNTIME PHYSICAL PROOF: PASS',
         "proof=$ProofName",
         "head=$currentHead",
-        "hostPid=$($host.Id)",
+        "hostPid=$($cloudOsHostProcess.Id)",
         "open1Pids=$($pids1 -join ',')",
         "open2Pids=$($pids2 -join ',')",
         "summary=$summaryPath"
@@ -411,7 +414,7 @@ catch {
         'CLOUDOS WINDOWS CONTAINED RUNTIME PHYSICAL PROOF: FAIL',
         "proof=$ProofName",
         "head=$currentHead",
-        "hostPid=$($host.Id)",
+        "hostPid=$($cloudOsHostProcess.Id)",
         "error=$($_.Exception.Message)",
         "summary=$summaryPath"
     ), $utf8NoBom)
