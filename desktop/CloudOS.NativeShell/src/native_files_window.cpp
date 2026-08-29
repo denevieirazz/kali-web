@@ -567,8 +567,8 @@ void CloudOSNativeFilesWindow::Layout()
         std::max(right_start + 1, width - right_margin),
         content_bottom};
 
-    const int content_width = std::max(1, content_rect_.right - content_rect_.left);
-    const int content_height = std::max(1, content_rect_.bottom - content_rect_.top);
+    const int content_width = std::max<int>(1, static_cast<int>(content_rect_.right - content_rect_.left));
+    const int content_height = std::max<int>(1, static_cast<int>(content_rect_.bottom - content_rect_.top));
     const int content_inset = 1;
     MoveWindow(
         shell_host_,
@@ -624,7 +624,7 @@ void CloudOSNativeFilesWindow::PaintChrome(HDC dc, const RECT& client)
     FillRect(dc, &client, background_brush_);
 
     const int side = CloudOS::Scale(252, dpi_);
-    RECT sidebar_background{0, 0, std::min(client.right, side), client.bottom};
+    RECT sidebar_background{0, 0, std::min<LONG>(client.right, static_cast<LONG>(side)), client.bottom};
     FillRect(dc, &sidebar_background, panel_brush_);
 
     CloudOS::FilesStyle::PaintSeparator(
@@ -725,3 +725,4 @@ void CloudOSNativeFilesWindow::UpdateStatus()
     }
     SetWindowTextW(status_, text.c_str());
 }
+

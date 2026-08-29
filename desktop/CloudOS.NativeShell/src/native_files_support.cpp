@@ -411,7 +411,7 @@ LRESULT CloudOSNativeFilesWindow::CustomDrawSidebar(const NMLVCUSTOMDRAW& draw)
     {
         const int icon_x = pill.left + CloudOS::Scale(12, dpi_);
         const int icon_y = bounds.top +
-            std::max(0, (bounds.bottom - bounds.top - icon_height) / 2);
+            std::max<LONG>(0, static_cast<LONG>((bounds.bottom - bounds.top - icon_height) / 2));
         ImageList_Draw(
             sidebar_image_list_,
             item.image_index,
@@ -634,7 +634,7 @@ LRESULT CloudOSNativeFilesWindow::HandleMessage(
             RECT sidebar_rect{
                 0,
                 0,
-                std::min(client.right, CloudOS::Scale(252, dpi_)),
+                std::min<LONG>(client.right, static_cast<LONG>(CloudOS::Scale(252, dpi_))),
                 client.bottom};
             FillRect(reinterpret_cast<HDC>(w_param), &sidebar_rect, panel_brush_);
             return 1;
@@ -716,3 +716,4 @@ LRESULT CALLBACK CloudOSNativeFilesWindow::WindowProcedure(
         ? self->HandleMessage(message, w_param, l_param)
         : DefWindowProcW(window, message, w_param, l_param);
 }
+
