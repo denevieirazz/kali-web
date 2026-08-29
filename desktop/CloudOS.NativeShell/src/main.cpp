@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <dwmapi.h>
+#include <objbase.h>
 
 #include <algorithm>
 #include <array>
@@ -357,8 +358,8 @@ private:
         }
 
         const int taskbar_height = TaskbarHeight();
-        const int work_width = monitor.rcWork.right - monitor.rcWork.left;
-        const int work_height = monitor.rcWork.bottom - monitor.rcWork.top;
+        const int work_width = static_cast<int>(monitor.rcWork.right - monitor.rcWork.left);
+        const int work_height = static_cast<int>(monitor.rcWork.bottom - monitor.rcWork.top);
 
         if (desktop_ != nullptr)
         {
@@ -552,7 +553,7 @@ private:
     void OpenTerminal()
     {
         const std::wstring executable = ResolveExecutable(L"powershell.exe");
-        std::wstring command = QuoteExecutable(executable) + L" -NoLogo -NoProfile";
+        const std::wstring command = QuoteExecutable(executable) + L" -NoLogo -NoProfile";
         CloudOSNativeTerminalWindow::Open(instance_, command, L"Terminal - CloudOS");
         window_manager_.Reconcile();
         InvalidateAll();
@@ -715,12 +716,7 @@ private:
             ScaleForDpi(570, dpi),
             ScaleForDpi(205, dpi),
         };
-        DrawPanel(
-            device,
-            card,
-            kPanelBackground,
-            kBorder,
-            ScaleForDpi(18, dpi));
+        DrawPanel(device, card, kPanelBackground, kBorder, ScaleForDpi(18, dpi));
 
         RECT title{
             card.left + ScaleForDpi(24, dpi),
@@ -798,7 +794,8 @@ private:
 
         const UINT dpi = GetDpiForWindow(taskbar_);
         const int margin = ScaleForDpi(8, dpi);
-        const int button_height = std::max(26, (client.bottom - client.top) - margin * 2);
+        const int client_height = static_cast<int>(client.bottom - client.top);
+        const int button_height = std::max(26, client_height - margin * 2);
 
         start_button_rect_ = RECT{
             margin,
