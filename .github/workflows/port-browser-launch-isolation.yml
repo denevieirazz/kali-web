@@ -5,13 +5,13 @@ on:
     branches:
       - integration/cloudos-unified-runtime
     paths:
-      - '.github/workflows/port-browser-launch-isolation.yml'
+      - .github/workflows/port-browser-launch-isolation.yml
 
 permissions:
   contents: write
 
 jobs:
-  port:
+  patch:
     runs-on: windows-2022
     timeout-minutes: 15
     steps:
@@ -21,49 +21,27 @@ jobs:
           ref: integration/cloudos-unified-runtime
           fetch-depth: 0
 
-      - name: Setup .NET 8
+      - name: Setup dotnet
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: 8.0.x
 
-      - name: Remove final inner termination
+      - name: Apply bounded patch
         shell: pwsh
-        run: |
-          $path = 'desktop/CloudOS.Host/Bridge/WebMessageBridge.cs'
-          $text = Get-Content -LiteralPath $path -Raw
-          $old = @'
-            if (!NativeLaunchContainmentPolicy.CanReportManaged(processTracked, hasTrackableWindow, sharedBroker))
-            {
-                TerminateProcessAndForget(launchLease.ProcessId, NativeContainmentFailure.QuarantineFailed);
-                throw new BridgeException("WINDOW_CONTAINMENT_DENIED", "A janela não pôde ser marcada como gerenciada.");
-            }
-'@
-          $new = @'
-            if (!NativeLaunchContainmentPolicy.CanReportManaged(processTracked, hasTrackableWindow, sharedBroker))
-            {
-                throw new BridgeException(
-                    "WINDOW_CONTAINMENT_DENIED",
-                    "A janela não pôde ser marcada como gerenciada.",
-                    NativeContainmentFailure.QuarantineFailed);
-            }
-'@
-          if (($text.Split($old).Count - 1) -ne 1) { throw 'MANAGED_BOUNDARY_PATTERN_NOT_UNIQUE' }
-          $text = $text.Replace($old, $new)
-          Set-Content -LiteralPath $path -Value $text -Encoding utf8 -NoNewline
+        run: ./scripts/tmp-close-native-abort-boundary.ps1
 
       - name: Run Host contracts
         shell: pwsh
         run: dotnet run --project desktop/CloudOS.Host.Tests/CloudOS.Host.Tests.csproj -c Release
 
-      - name: Verify only bridge changed
+      - name: Verify bounded diff
         shell: pwsh
         run: |
           $changed = @(git status --porcelain | ForEach-Object { $_.Substring(3) })
-          if ($changed.Count -ne 1 -or $changed[0] -ne 'desktop/CloudOS.Host/Bridge/WebMessageBridge.cs') {
-            throw "UNEXPECTED_FILES:$($changed -join ',')"
-          }
+          if ($changed.Count -ne 1) { throw "UNEXPECTED_CHANGED_FILE_COUNT=$($changed.Count)" }
+          if ($changed[0] -ne 'desktop/CloudOS.Host/Bridge/WebMessageBridge.cs') { throw "UNEXPECTED_FILE=$($changed[0])" }
 
-      - name: Commit final boundary fix
+      - name: Commit patch
         shell: pwsh
         run: |
           git config user.name "github-actions[bot]"
