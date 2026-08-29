@@ -2,6 +2,7 @@
 
 #include <windows.h>
 #include <commdlg.h>
+#include <algorithm>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -120,11 +121,12 @@ bool WriteAllTextUtf8(const std::wstring& path, const std::wstring& text)
 std::wstring ReadEditText(HWND edit)
 {
     const int length = GetWindowTextLengthW(edit);
-    std::wstring text(static_cast<std::size_t>(length), L'\0');
+    std::wstring text(static_cast<std::size_t>(length) + 1u, L'\0');
     if (length > 0)
     {
         GetWindowTextW(edit, text.data(), length + 1);
     }
+    text.resize(static_cast<std::size_t>(length));
     return text;
 }
 
@@ -170,8 +172,8 @@ void Layout(HWND window, NotepadState& state)
             state.edit,
             margin,
             margin + toolbar_height + gap,
-            max(0, client.right - margin * 2),
-            max(0, client.bottom - (margin * 2 + toolbar_height + gap)),
+            std::max(0, client.right - margin * 2),
+            std::max(0, client.bottom - (margin * 2 + toolbar_height + gap)),
             TRUE);
     }
 }
