@@ -26,16 +26,24 @@ jobs:
         with:
           node-version: 22.x
 
-      - name: Export bounded probe for integration contract
+      - name: Export probe and widen bounded startup timeout
         shell: pwsh
         run: |
           $path = 'backend/src/apps/windowsExternalInstanceGuard.js'
           $text = Get-Content -LiteralPath $path -Raw
-          $old = 'async function probeProcessesByExecutableName(executable) {'
-          $new = 'export async function probeProcessesByExecutableName(executable) {'
-          $count = ([regex]::Matches($text, [regex]::Escape($old))).Count
-          if ($count -ne 1) { throw "PROBE_EXPORT_PATTERN_COUNT=$count" }
-          $text = $text.Replace($old, $new)
+
+          $oldExport = 'async function probeProcessesByExecutableName(executable) {'
+          $newExport = 'export async function probeProcessesByExecutableName(executable) {'
+          $exportCount = ([regex]::Matches($text, [regex]::Escape($oldExport))).Count
+          if ($exportCount -ne 1) { throw "PROBE_EXPORT_PATTERN_COUNT=$exportCount" }
+          $text = $text.Replace($oldExport, $newExport)
+
+          $oldTimeout = 'timeout: 4_000,'
+          $newTimeout = 'timeout: 12_000,'
+          $timeoutCount = ([regex]::Matches($text, [regex]::Escape($oldTimeout))).Count
+          if ($timeoutCount -ne 1) { throw "PROBE_TIMEOUT_PATTERN_COUNT=$timeoutCount" }
+          $text = $text.Replace($oldTimeout, $newTimeout)
+
           Set-Content -LiteralPath $path -Value $text -Encoding utf8 -NoNewline
 
       - name: Run guard and real Windows probe contracts
@@ -50,11 +58,11 @@ jobs:
             throw "UNEXPECTED_FILES=$($changed -join ',')"
           }
 
-      - name: Commit probe contract export
+      - name: Commit probe hardening
         shell: pwsh
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -- backend/src/apps/windowsExternalInstanceGuard.js
-          git commit -m "test(runtime): expose Windows instance probe contract"
+          git commit -m "fix(runtime): tolerate Windows instance probe startup"
           git push origin HEAD:integration/cloudos-unified-runtime
