@@ -3,7 +3,6 @@
 #include <windows.h>
 #include <commdlg.h>
 #include <algorithm>
-#include <fstream>
 #include <string>
 #include <vector>
 
@@ -96,7 +95,7 @@ bool ReadAllText(const std::wstring& path, std::wstring& output)
 
 bool WriteAllTextUtf8(const std::wstring& path, const std::wstring& text)
 {
-    int bytes_required = WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+    const int bytes_required = WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
     if (bytes_required < 0)
     {
         return false;
@@ -115,7 +114,7 @@ bool WriteAllTextUtf8(const std::wstring& path, const std::wstring& text)
     DWORD written = 0;
     const BOOL ok = bytes.empty() || WriteFile(file, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr);
     CloseHandle(file);
-    return ok && written == bytes.size();
+    return ok && static_cast<std::size_t>(written) == bytes.size();
 }
 
 std::wstring ReadEditText(HWND edit)
@@ -168,12 +167,16 @@ void Layout(HWND window, NotepadState& state)
     }
     if (state.edit != nullptr)
     {
+        const int client_width = static_cast<int>(client.right - client.left);
+        const int client_height = static_cast<int>(client.bottom - client.top);
+        const int edit_width = std::max(0, client_width - margin * 2);
+        const int edit_height = std::max(0, client_height - (margin * 2 + toolbar_height + gap));
         MoveWindow(
             state.edit,
             margin,
             margin + toolbar_height + gap,
-            std::max(0, client.right - margin * 2),
-            std::max(0, client.bottom - (margin * 2 + toolbar_height + gap)),
+            edit_width,
+            edit_height,
             TRUE);
     }
 }
