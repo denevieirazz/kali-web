@@ -1281,7 +1281,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 
     INITCOMMONCONTROLSEX common_controls{};
     common_controls.dwSize = sizeof(common_controls);
-    common_controls.dwICC = ICC_LISTVIEW_CLASSES | ICC_STANDARD_CLASSES;
+    common_controls.dwICC = ICC_LISTVIEW_CLASSES | ICC_WIN95_CLASSES;
     if (!InitCommonControlsEx(&common_controls))
     {
         MessageBoxW(
