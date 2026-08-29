@@ -6,6 +6,7 @@ $ErrorActionPreference = 'Stop'
 
 # Temporary migration patcher. The Windows runner validates the production
 # NativeWindowManager against the real C++ DLL before committing the manager.
+# Keep this rerunnable while the physical HWND migration is being proven.
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $path = Join-Path $repoRoot 'desktop\CloudOS.Host\Native\NativeWindowManager.cs'
 $content = [IO.File]::ReadAllText($path)
