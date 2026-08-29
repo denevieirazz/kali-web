@@ -1,0 +1,53 @@
+name: CloudOS Native Full-System CI
+
+on:
+  push:
+    branches:
+      - 'rewrite/cloudos-native-full-system'
+  pull_request:
+    paths:
+      - 'desktop/CloudOS.NativeRuntime/**'
+      - 'desktop/CloudOS.NativeShell/**'
+      - 'scripts/native/**'
+      - '.github/workflows/cloudos-native-full-system.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-foundation:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Confirm full CloudOS tree is preserved
+        shell: pwsh
+        run: |
+          foreach ($path in @('frontend', 'backend', 'desktop/CloudOS.Host', 'desktop/CloudOS.NativeRuntime', 'desktop/CloudOS.NativeShell')) {
+            if (-not (Test-Path -LiteralPath $path)) {
+              throw "Required migration source/target path missing: $path"
+            }
+          }
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build native runtime
+        shell: pwsh
+        run: msbuild 'desktop/CloudOS.NativeRuntime/CloudOS.NativeRuntime.vcxproj' /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
+
+      - name: Build native shell
+        shell: pwsh
+        run: msbuild 'desktop/CloudOS.NativeShell/CloudOS.NativeShell.vcxproj' /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
+
+      - name: Verify native binaries
+        shell: pwsh
+        run: |
+          $out = 'desktop/CloudOS.NativeShell/bin/Release'
+          foreach ($name in @('CloudOS.exe', 'CloudOS.NativeRuntime.dll')) {
+            $path = Join-Path $out $name
+            if (-not (Test-Path -LiteralPath $path)) { throw "Missing $path" }
+            if ((Get-Item -LiteralPath $path).Length -le 0) { throw "Empty $path" }
+          }
