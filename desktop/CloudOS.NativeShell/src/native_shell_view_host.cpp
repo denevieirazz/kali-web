@@ -78,7 +78,11 @@ HRESULT STDMETHODCALLTYPE NativeShellViewHost::EventSink::OnViewCreated(
         if (SUCCEEDED(shell_view->QueryInterface(IID_PPV_ARGS(&folder_view))) &&
             folder_view != nullptr)
         {
-            (void)folder_view->SetViewModeAndIconSize(FVM_ICON, 48);
+            // Keep Windows/WSL locations close to the current Windows 11
+            // Explorer baseline: compact details, real Shell icons and full
+            // provider context menus. The previous forced 48px icon mode
+            // produced a visually awkward header + icon-grid combination.
+            (void)folder_view->SetViewModeAndIconSize(FVM_DETAILS, 20);
             folder_view->Release();
         }
     }
@@ -139,11 +143,12 @@ bool NativeShellViewHost::Create(
     }
 
     FOLDERSETTINGS settings{};
-    settings.ViewMode = FVM_ICON;
+    settings.ViewMode = FVM_DETAILS;
     settings.fFlags = static_cast<FOLDERFLAGS>(
         FWF_AUTOARRANGE |
         FWF_NOWEBVIEW |
-        FWF_FULLROWSELECT);
+        FWF_FULLROWSELECT |
+        FWF_NOCLIENTEDGE);
 
     result = browser->Initialize(parent, &bounds, &settings);
     if (FAILED(result))
@@ -159,7 +164,11 @@ bool NativeShellViewHost::Create(
             EBO_ALWAYSNAVIGATE |
             EBO_NOBORDER);
     (void)browser->SetOptions(options);
-    (void)browser->SetPropertyBag(L"CloudOS.NativeFiles.ShellView");
+
+    // Version the property bag whenever the default presentation changes so
+    // an older persisted 48px icon preference cannot override the refreshed
+    // details layout on existing CloudOS installations.
+    (void)browser->SetPropertyBag(L"CloudOS.NativeFiles.ShellView.v2");
     (void)browser->SetEmptyText(L"Esta pasta esta vazia.");
 
     auto* sink = new (std::nothrow) EventSink(this);
