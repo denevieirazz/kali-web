@@ -39,7 +39,7 @@
   <PropertyGroup>
     <OutDir>$(MSBuildProjectDirectory)\bin\$(Configuration)\</OutDir>
     <IntDir>$(MSBuildProjectDirectory)\obj\$(Configuration)\</IntDir>
-    <TargetName>CloudOS.NativeShell</TargetName>
+    <TargetName>CloudOS</TargetName>
   </PropertyGroup>
 
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
