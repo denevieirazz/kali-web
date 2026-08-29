@@ -9,7 +9,8 @@
 #include <thread>
 #include <vector>
 
-class CloudOSNativeTerminalWindow final {
+class CloudOSNativeTerminalWindow final
+{
 public:
     static void Open(
         HINSTANCE instance,
@@ -45,6 +46,7 @@ private:
     void ResizeTerminal();
     void Paint();
     void UpdateFontMetrics();
+    void ScrollBy(int lines);
     std::vector<std::wstring> VisibleLines() const;
 
     LRESULT HandleMessage(UINT message, WPARAM w_param, LPARAM l_param);
@@ -60,6 +62,7 @@ private:
     HFONT font_{};
     int cell_width_{9};
     int cell_height_{18};
+    int scroll_offset_lines_{};
 
     std::wstring output_;
     std::vector<char> pending_utf8_;
