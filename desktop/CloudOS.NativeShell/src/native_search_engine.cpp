@@ -20,7 +20,9 @@ void Lowercase(std::wstring& value)
         });
 }
 
-bool IsAny(std::wstring_view query, std::initializer_list<std::wstring_view> values)
+bool IsAny(
+    std::wstring_view query,
+    std::initializer_list<std::wstring_view> values)
 {
     return std::find(values.begin(), values.end(), query) != values.end();
 }
@@ -50,6 +52,10 @@ bool NativeSearchEngine::Matches(const AppItem& app, const std::wstring& query)
     const std::wstring_view id(app.id);
     const std::wstring_view query_view(query);
 
+    if (IsAny(query_view, {L"central", L"comando", L"comandos", L"acoes", L"acao", L"controle", L"command", L"control"}))
+    {
+        return id == L"control";
+    }
     if (IsAny(query_view, {L"web", L"net", L"chrome", L"edge", L"browser", L"navegador"}))
     {
         return id == L"browser";
@@ -84,11 +90,11 @@ bool NativeSearchEngine::Matches(const AppItem& app, const std::wstring& query)
     }
     if (IsAny(query_view, {L"cpu", L"ram", L"processo", L"monitor", L"task"}))
     {
-        return id == L"sysmon";
+        return id == L"sysmon" || id == L"control";
     }
     if (IsAny(query_view, {L"config", L"painel", L"ajustes", L"settings", L"configuracoes"}))
     {
-        return id == L"settings";
+        return id == L"settings" || id == L"control";
     }
     if (IsAny(query_view, {L"saude", L"health", L"doctor", L"diagnostico"}))
     {
