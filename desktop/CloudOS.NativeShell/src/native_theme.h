@@ -13,7 +13,6 @@
 #include <cstddef>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace CloudOS
 {
@@ -21,7 +20,7 @@ constexpr int kBottomBarHeight = 44;
 constexpr UINT_PTR kReconcileTimer = 1;
 constexpr UINT_PTR kMetricsTimer = 2;
 
-// AETHER OS Cyberpunk Glass Palette
+// AETHER is the visual language of the native CloudOS shell, not a product rename.
 constexpr COLORREF kBgTop = RGB(10, 14, 26);
 constexpr COLORREF kBgBottom = RGB(6, 8, 16);
 constexpr COLORREF kGlassBg = RGB(16, 24, 40);
@@ -56,31 +55,35 @@ struct AppItem final
     int icon_id;
 };
 
-// 18 Grid Apps matching Aether OS layout
-const std::vector<AppItem> kAllApps = {
-    {L"browser", L"Nebula Browser", L"Navegador Web", L"msedge.exe", AppCategory::Dev, 1},
-    {L"projects", L"Orion Projects", L"Ambiente Linux WSL2", L"wsl.exe", AppCategory::Dev, 2},
-    {L"terminal", L"Comms Hub", L"Terminal ConPTY", L"cmd.exe", AppCategory::Dev, 3},
-    {L"powershell", L"Quantum Shell", L"PowerShell Terminal", L"powershell.exe", AppCategory::Dev, 4},
-    {L"notepad", L"Quantum Mail", L"Editor de Texto", L"notepad.exe", AppCategory::Accessories, 5},
-    {L"drive", L"Synapse Drive", L"Disco C: do Sistema", L"explorer.exe", AppCategory::Files, 6},
+// Keep visible names honest: an item must describe what the launcher really opens.
+inline constexpr std::array<AppItem, 18> kAllApps{{
+    {L"browser", L"Navegador", L"Abrir o navegador padrao do Windows", L"", AppCategory::Accessories, 1},
+    {L"projects", L"WSL / Kali", L"Terminal Linux pelo WSL", L"wsl.exe", AppCategory::Dev, 2},
+    {L"terminal", L"Terminal", L"Terminal nativo via ConPTY", L"cmd.exe", AppCategory::Dev, 3},
+    {L"powershell", L"PowerShell", L"PowerShell em terminal ConPTY", L"powershell.exe", AppCategory::Dev, 4},
+    {L"notepad", L"Bloco de Notas", L"Editor de texto nativo do CloudOS", L"", AppCategory::Accessories, 5},
+    {L"drive", L"Disco Local (C:)", L"Abrir o disco local do Windows", L"explorer.exe", AppCategory::Files, 6},
 
-    {L"files", L"Synapse Files", L"Explorador de Arquivos", L"explorer.exe", AppCategory::Files, 7},
-    {L"paint", L"Art Studio", L"Editor de Imagens", L"mspaint.exe", AppCategory::Accessories, 8},
-    {L"media", L"Media Player", L"Reprodutor de Mídia", L"wmplayer.exe", AppCategory::Accessories, 9},
-    {L"code", L"Code Editor", L"Editor de Código", L"notepad.exe", AppCategory::Dev, 10},
-    {L"settings", L"Settings", L"Configurações do Sistema", L"control.exe", AppCategory::Settings, 11},
-    {L"calc", L"Calculadora", L"Calculadora Rápida", L"calc.exe", AppCategory::Accessories, 12},
+    {L"files", L"Arquivos", L"Arquivos Windows + WSL no CloudOS", L"", AppCategory::Files, 7},
+    {L"paint", L"Paint", L"Editor de imagens do Windows", L"mspaint.exe", AppCategory::Accessories, 8},
+    {L"media", L"Midia", L"Abrir o player de midia do Windows", L"", AppCategory::Accessories, 9},
+    {L"code", L"Editor de Codigo", L"Abrir VS Code quando disponivel", L"code.cmd", AppCategory::Dev, 10},
+    {L"settings", L"Configuracoes", L"Configuracoes nativas do CloudOS", L"", AppCategory::Settings, 11},
+    {L"calc", L"Calculadora", L"Calculadora nativa do CloudOS", L"", AppCategory::Accessories, 12},
 
-    {L"sysmon", L"Sys Monitor", L"Monitor de Recursos", L"taskmgr.exe", AppCategory::System, 13},
-    {L"regedit", L"Registro", L"Editor do Registro", L"regedit.exe", AppCategory::System, 14},
-    {L"snip", L"Screen Snip", L"Captura de Tela", L"SnippingTool.exe", AppCategory::Accessories, 15},
-    {L"apps", L"App Catalog", L"Catálogo de Apps", L"", AppCategory::System, 16},
-    {L"run", L"Quick Run", L"Executar Comando", L"", AppCategory::System, 17},
-    {L"more", L"More Apps", L"Todos os Aplicativos", L"", AppCategory::System, 18},
+    {L"sysmon", L"Monitor do Sistema", L"Telemetria nativa do CloudOS", L"", AppCategory::System, 13},
+    {L"regedit", L"Registro", L"Editor do Registro do Windows", L"regedit.exe", AppCategory::System, 14},
+    {L"snip", L"Captura de Tela", L"Ferramenta de Captura do Windows", L"SnippingTool.exe", AppCategory::Accessories, 15},
+    {L"apps", L"Aplicativos", L"Catalogo de aplicativos Windows e CloudOS", L"", AppCategory::System, 16},
+    {L"run", L"Executar", L"Executar comando ou aplicativo", L"", AppCategory::System, 17},
+    {L"health", L"Saude do Sistema", L"Diagnostico do runtime, WSL e ambiente", L"", AppCategory::System, 18},
+}};
+
+struct TaskHit final
+{
+    HWND window{};
+    RECT bounds{};
 };
-
-struct TaskHit final { HWND window{}; RECT bounds{}; };
 
 enum HotKeyId : int
 {
@@ -90,14 +93,26 @@ enum HotKeyId : int
     HotApps,
     HotProcesses,
     HotRun,
+    HotTiling,
+    HotFloating,
     HotFocusNext,
+    HotFocusPrevious,
     HotClose,
     HotMinimize,
+    HotMaximize,
+    HotSnapLeft,
+    HotSnapRight,
+    HotSnapUp,
+    HotSnapDown,
     HotExit,
     HotWorkspace1 = 30,
     HotWorkspace2,
     HotWorkspace3,
     HotWorkspace4,
+    HotMoveWorkspace1 = 40,
+    HotMoveWorkspace2,
+    HotMoveWorkspace3,
+    HotMoveWorkspace4,
 };
 
 inline int Scale(int value, UINT dpi) noexcept
@@ -122,15 +137,27 @@ inline bool Contains(const RECT& r, POINT pt) noexcept
 
 inline void DarkWindow(HWND window, bool round = true)
 {
-    if (window == nullptr) return;
-    BOOL dark = TRUE;
-    (void)DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
+    if (window == nullptr)
+    {
+        return;
+    }
+
+    const BOOL dark = TRUE;
+    (void)DwmSetWindowAttribute(
+        window,
+        DWMWA_USE_IMMERSIVE_DARK_MODE,
+        &dark,
+        static_cast<DWORD>(sizeof(dark)));
+
     if (round)
     {
-        DWM_WINDOW_CORNER_PREFERENCE preference = DWMWCP_ROUND;
-        (void)DwmSetWindowAttribute(window, DWMWA_WINDOW_CORNER_PREFERENCE, &preference, sizeof(preference));
+        const DWM_WINDOW_CORNER_PREFERENCE preference = DWMWCP_ROUND;
+        (void)DwmSetWindowAttribute(
+            window,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            &preference,
+            static_cast<DWORD>(sizeof(preference)));
     }
 }
 
 } // namespace CloudOS
-
