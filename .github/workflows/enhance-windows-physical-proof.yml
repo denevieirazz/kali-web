@@ -29,7 +29,14 @@ jobs:
 
       - name: Apply harness expansion
         shell: pwsh
-        run: python scripts/tmp-enhance-windows-physical-proof.py
+        run: |
+          $generator = 'scripts/tmp-enhance-windows-physical-proof.py'
+          $text = Get-Content -LiteralPath $generator -Raw
+          $text = $text.Replace('$Stage:', '${Stage}:')
+          $text = $text.Replace('$ReopenStressCycles:', '${ReopenStressCycles}:')
+          Set-Content -LiteralPath $generator -Value $text -Encoding utf8 -NoNewline
+          python $generator
+          git checkout -- $generator
 
       - name: Run physical proof contract tests
         shell: pwsh
