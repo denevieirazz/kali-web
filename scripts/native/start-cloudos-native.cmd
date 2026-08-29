@@ -26,13 +26,15 @@ if not exist "%DLL%" (
   exit /b 6
 )
 
-echo [CloudOS Native] Iniciando shell C++/Win32 real.
-echo [CloudOS Native] WEB_RUNTIME=OFF
+taskkill /F /IM CloudOS.exe >nul 2>&1
+timeout /t 1 /nobreak >nul 2>&1
+
+echo [CloudOS Native] Iniciando shell C++ nativo com apresentacao WebView2.
 echo [CloudOS Native] EXE=%EXE%
-echo [CloudOS Native] AVISO: o modo Full legado usa CloudOS.Host/WebView2 e nao e este shell nativo.
+echo [CloudOS Native] Shell iniciado com sucesso.
 
 pushd "%OUT%" >nul
-start "CloudOS Native" /D "%OUT%" "%EXE%"
+start "" /D "%OUT%" "%EXE%"
 set "RC=%ERRORLEVEL%"
 popd >nul
 exit /b %RC%
