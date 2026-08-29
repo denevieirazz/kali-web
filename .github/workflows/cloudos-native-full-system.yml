@@ -6,9 +6,14 @@ on:
       - 'rewrite/cloudos-native-full-system'
   pull_request:
     paths:
+      - 'frontend/src/**'
+      - 'frontend/package.json'
+      - 'frontend/package-lock.json'
+      - 'frontend/vite.config.ts'
       - 'desktop/CloudOS.NativeRuntime/**'
       - 'desktop/CloudOS.NativeShell/**'
       - 'scripts/native/**'
+      - 'docs/native/**'
       - '.github/workflows/cloudos-native-full-system.yml'
   workflow_dispatch:
 
@@ -33,10 +38,34 @@ jobs:
 
       - name: Validate native shell contracts
         shell: pwsh
-        run: ./scripts/native/test-cloudos-native-shell-contracts.ps1
+        run: |
+          ./scripts/native/test-cloudos-native-shell-contracts.ps1
+          ./scripts/native/test-native-web-ui-contract.ps1
+
+      - name: Setup Node for UI asset build
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build static CloudOS UI
+        shell: pwsh
+        run: |
+          npm ci --prefix frontend
+          npm run build --prefix frontend
+          if (-not (Test-Path -LiteralPath 'frontend/dist/index.html')) {
+            throw 'frontend/dist/index.html was not produced.'
+          }
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
+
+      - name: Restore native WebView2 SDK
+        shell: pwsh
+        run: |
+          $packages = Join-Path $PWD 'desktop\CloudOS.NativeShell\packages'
+          msbuild 'desktop/CloudOS.NativeShell/CloudOS.NativeShell.vcxproj' /t:Restore /nologo /v:minimal /p:RestorePackagesConfig=true /p:RestoreProjectStyle=PackagesConfig "/p:RestoreRepositoryPath=$packages"
 
       - name: Build native runtime
         shell: pwsh
@@ -46,7 +75,7 @@ jobs:
         shell: pwsh
         run: msbuild 'desktop/CloudOS.NativeShell/CloudOS.NativeShell.vcxproj' /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
 
-      - name: Verify native binaries
+      - name: Verify native binaries and web UI
         shell: pwsh
         run: |
           $out = 'desktop/CloudOS.NativeShell/bin/Release'
@@ -55,3 +84,6 @@ jobs:
             if (-not (Test-Path -LiteralPath $path)) { throw "Missing $path" }
             if ((Get-Item -LiteralPath $path).Length -le 0) { throw "Empty $path" }
           }
+          $ui = Join-Path $out 'ui/index.html'
+          if (-not (Test-Path -LiteralPath $ui)) { throw "Missing $ui" }
+          if ((Get-Item -LiteralPath $ui).Length -le 0) { throw "Empty $ui" }

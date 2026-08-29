@@ -26,6 +26,35 @@ if not exist "%MSBUILD%" (
   exit /b 4
 )
 
+where node.exe >nul 2>nul
+if errorlevel 1 (
+  echo [CloudOS] Node.js nao encontrado. Ele e necessario apenas para COMPILAR os assets da interface web.
+  exit /b 7
+)
+where npm.cmd >nul 2>nul
+if errorlevel 1 (
+  echo [CloudOS] npm nao encontrado. Ele e necessario apenas para COMPILAR os assets da interface web.
+  exit /b 8
+)
+
+if not exist "%ROOT%\frontend\node_modules\.bin\vite.cmd" (
+  echo [CloudOS] Restaurando dependencias de build da interface...
+  call npm.cmd ci --prefix "%ROOT%\frontend"
+  if errorlevel 1 exit /b %ERRORLEVEL%
+)
+
+echo [CloudOS] Compilando interface React/TypeScript em assets estaticos...
+call npm.cmd run build --prefix "%ROOT%\frontend"
+if errorlevel 1 exit /b %ERRORLEVEL%
+if not exist "%ROOT%\frontend\dist\index.html" (
+  echo [CloudOS] ERRO: frontend\dist\index.html nao foi produzido.
+  exit /b 9
+)
+
+echo [CloudOS] Restaurando SDK nativo Microsoft.Web.WebView2...
+"%MSBUILD%" "%ROOT%\desktop\CloudOS.NativeShell\CloudOS.NativeShell.vcxproj" /t:Restore /nologo /v:minimal /p:RestorePackagesConfig=true /p:RestoreProjectStyle=PackagesConfig /p:RestoreRepositoryPath="%ROOT%\desktop\CloudOS.NativeShell\packages"
+if errorlevel 1 exit /b %ERRORLEVEL%
+
 echo [CloudOS] Compilando runtime C++ %CONFIG% x64...
 "%MSBUILD%" "%ROOT%\desktop\CloudOS.NativeRuntime\CloudOS.NativeRuntime.vcxproj" /m /nologo /v:minimal /p:Configuration=%CONFIG% /p:Platform=%PLATFORM%
 if errorlevel 1 exit /b %ERRORLEVEL%
@@ -43,6 +72,12 @@ if not exist "%OUT%\CloudOS.NativeRuntime.dll" (
   echo [CloudOS] ERRO: CloudOS.NativeRuntime.dll nao foi copiado para a saida.
   exit /b 6
 )
+if not exist "%OUT%\ui\index.html" (
+  echo [CloudOS] ERRO: assets da interface nao foram copiados para "%OUT%\ui".
+  exit /b 10
+)
 
 echo [CloudOS] BUILD_OK=%OUT%\CloudOS.exe
+echo [CloudOS] WEB_UI=%OUT%\ui\index.html
+echo [CloudOS] WEB_RUNTIME=WebView2 somente para apresentacao; autoridade=C++/Win32
 exit /b 0

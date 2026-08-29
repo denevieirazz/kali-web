@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "native_app_launcher.h"
-#include "native_desktop_window.h"
+#include "native_desktop_surface.h"
 #include "native_settings_window.h"
 #include "native_theme.h"
 #include "native_window_manager.h"
@@ -436,7 +436,7 @@ private:
     HINSTANCE instance_{};
     ULONG_PTR gdiplus_token_{};
     CloudOSNativeWindowManager window_manager_;
-    CloudOSNativeDesktopWindow desktop_;
+    CloudOSDesktopSurface desktop_;
     RECT last_work_area_{};
     bool have_work_area_{};
     bool window_manager_initialized_{};
