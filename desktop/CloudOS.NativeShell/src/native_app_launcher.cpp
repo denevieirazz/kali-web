@@ -14,15 +14,35 @@
 #include "native_start_menu_mru.h"
 #include "native_system_monitor_window.h"
 #include "native_terminal_window.h"
+#include "native_theme.h"
 
+#include <tlhelp32.h>
+
+#include <algorithm>
 #include <array>
+#include <new>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace CloudOS
 {
 namespace
 {
+constexpr wchar_t kExternalHostClass[] = L"CloudOS.NativeShell.ExternalHost.v1";
+constexpr UINT_PTR kExternalHostTimer = 1;
+constexpr DWORD kExternalHostTimeoutMs = 5000;
+
+struct ExternalHostState final
+{
+    HWND host{};
+    HWND embedded{};
+    HANDLE process{};
+    DWORD root_process_id{};
+    ULONGLONG started_at{};
+    std::wstring target;
+};
+
 std::wstring QuoteArgument(const std::wstring& value)
 {
     std::wstring result = L"\"";
@@ -45,8 +65,360 @@ void ShowLaunchError(HWND owner, const std::wstring& target)
 {
     std::wstring message = L"Nao foi possivel abrir ";
     message += target.empty() ? L"o aplicativo solicitado" : target;
-    message += L".";
+    message += L" dentro do CloudOS.";
     MessageBoxW(owner, message.c_str(), L"CloudOS", MB_OK | MB_ICONERROR);
+}
+
+bool ContainsProcessId(const std::vector<DWORD>& ids, DWORD process_id)
+{
+    return std::find(ids.cbegin(), ids.cend(), process_id) != ids.cend();
+}
+
+std::vector<DWORD> CollectProcessFamily(DWORD root_process_id)
+{
+    std::vector<DWORD> result;
+    if (root_process_id == 0)
+    {
+        return result;
+    }
+    result.push_back(root_process_id);
+
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE)
+    {
+        return result;
+    }
+
+    struct ProcessLink final
+    {
+        DWORD process_id{};
+        DWORD parent_process_id{};
+    };
+    std::vector<ProcessLink> links;
+
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    if (Process32FirstW(snapshot, &entry))
+    {
+        do
+        {
+            links.push_back({entry.th32ProcessID, entry.th32ParentProcessID});
+        }
+        while (Process32NextW(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+
+    bool changed = true;
+    while (changed)
+    {
+        changed = false;
+        for (const ProcessLink& link : links)
+        {
+            if (!ContainsProcessId(result, link.process_id) &&
+                ContainsProcessId(result, link.parent_process_id))
+            {
+                result.push_back(link.process_id);
+                changed = true;
+            }
+        }
+    }
+    return result;
+}
+
+struct FindHostedWindowContext final
+{
+    const std::vector<DWORD>* process_ids{};
+    HWND found{};
+};
+
+BOOL CALLBACK FindHostedWindow(HWND window, LPARAM parameter)
+{
+    auto* context = reinterpret_cast<FindHostedWindowContext*>(parameter);
+    if (context == nullptr || context->process_ids == nullptr)
+    {
+        return FALSE;
+    }
+
+    DWORD process_id = 0;
+    GetWindowThreadProcessId(window, &process_id);
+    if (!ContainsProcessId(*context->process_ids, process_id))
+    {
+        return TRUE;
+    }
+
+    const LONG_PTR extended_style = GetWindowLongPtrW(window, GWL_EXSTYLE);
+    if (GetWindow(window, GW_OWNER) != nullptr &&
+        (extended_style & WS_EX_APPWINDOW) == 0)
+    {
+        return TRUE;
+    }
+
+    RECT bounds{};
+    if (!GetWindowRect(window, &bounds) ||
+        bounds.right - bounds.left < 32 ||
+        bounds.bottom - bounds.top < 32)
+    {
+        return TRUE;
+    }
+
+    context->found = window;
+    return FALSE;
+}
+
+HWND FindProcessFamilyWindow(DWORD root_process_id)
+{
+    const std::vector<DWORD> process_ids = CollectProcessFamily(root_process_id);
+    FindHostedWindowContext context{};
+    context.process_ids = &process_ids;
+    EnumWindows(&FindHostedWindow, reinterpret_cast<LPARAM>(&context));
+    return context.found;
+}
+
+void LayoutEmbeddedWindow(ExternalHostState* state)
+{
+    if (state == nullptr ||
+        state->host == nullptr ||
+        state->embedded == nullptr ||
+        !IsWindow(state->embedded))
+    {
+        return;
+    }
+
+    RECT client{};
+    GetClientRect(state->host, &client);
+    SetWindowPos(
+        state->embedded,
+        nullptr,
+        0,
+        0,
+        std::max(1L, client.right - client.left),
+        std::max(1L, client.bottom - client.top),
+        SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+}
+
+bool EmbedExternalWindow(ExternalHostState* state, HWND application_window)
+{
+    if (state == nullptr ||
+        state->host == nullptr ||
+        application_window == nullptr ||
+        !IsWindow(application_window))
+    {
+        return false;
+    }
+
+    LONG_PTR style = GetWindowLongPtrW(application_window, GWL_STYLE);
+    LONG_PTR extended_style = GetWindowLongPtrW(application_window, GWL_EXSTYLE);
+
+    style &= ~static_cast<LONG_PTR>(
+        WS_POPUP |
+        WS_CAPTION |
+        WS_THICKFRAME |
+        WS_SYSMENU |
+        WS_MINIMIZEBOX |
+        WS_MAXIMIZEBOX);
+    style |= WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+
+    extended_style &= ~static_cast<LONG_PTR>(
+        WS_EX_APPWINDOW |
+        WS_EX_TOPMOST |
+        WS_EX_TOOLWINDOW);
+    extended_style |= WS_EX_CONTROLPARENT;
+
+    SetLastError(ERROR_SUCCESS);
+    const HWND previous_parent = SetParent(application_window, state->host);
+    if (previous_parent == nullptr && GetLastError() != ERROR_SUCCESS)
+    {
+        return false;
+    }
+
+    SetWindowLongPtrW(application_window, GWL_STYLE, style);
+    SetWindowLongPtrW(application_window, GWL_EXSTYLE, extended_style);
+    SetWindowPos(
+        application_window,
+        nullptr,
+        0,
+        0,
+        1,
+        1,
+        SWP_NOZORDER |
+            SWP_NOACTIVATE |
+            SWP_FRAMECHANGED |
+            SWP_SHOWWINDOW);
+
+    state->embedded = application_window;
+    KillTimer(state->host, kExternalHostTimer);
+    LayoutEmbeddedWindow(state);
+    SetFocus(application_window);
+    return true;
+}
+
+LRESULT CALLBACK ExternalHostWindowProcedure(
+    HWND window,
+    UINT message,
+    WPARAM w_param,
+    LPARAM l_param)
+{
+    auto* state = reinterpret_cast<ExternalHostState*>(
+        GetWindowLongPtrW(window, GWLP_USERDATA));
+
+    if (message == WM_NCCREATE)
+    {
+        const auto* create = reinterpret_cast<const CREATESTRUCTW*>(l_param);
+        state = static_cast<ExternalHostState*>(create->lpCreateParams);
+        state->host = window;
+        SetWindowLongPtrW(
+            window,
+            GWLP_USERDATA,
+            reinterpret_cast<LONG_PTR>(state));
+    }
+
+    if (state == nullptr)
+    {
+        return DefWindowProcW(window, message, w_param, l_param);
+    }
+
+    switch (message)
+    {
+    case WM_TIMER:
+        if (w_param == kExternalHostTimer && state->embedded == nullptr)
+        {
+            const HWND candidate = FindProcessFamilyWindow(state->root_process_id);
+            if (candidate != nullptr)
+            {
+                if (!EmbedExternalWindow(state, candidate))
+                {
+                    ShowLaunchError(GetParent(window), state->target);
+                    PostMessageW(candidate, WM_CLOSE, 0, 0);
+                    DestroyWindow(window);
+                }
+                return 0;
+            }
+
+            if (GetTickCount64() - state->started_at >= kExternalHostTimeoutMs)
+            {
+                ShowLaunchError(GetParent(window), state->target);
+                if (state->process != nullptr)
+                {
+                    (void)TerminateProcess(state->process, ERROR_TIMEOUT);
+                }
+                DestroyWindow(window);
+                return 0;
+            }
+        }
+        return 0;
+
+    case WM_SIZE:
+        LayoutEmbeddedWindow(state);
+        return 0;
+
+    case WM_SETFOCUS:
+        if (state->embedded != nullptr && IsWindow(state->embedded))
+        {
+            SetFocus(state->embedded);
+        }
+        return 0;
+
+    case WM_CLOSE:
+        if (state->embedded != nullptr && IsWindow(state->embedded))
+        {
+            PostMessageW(state->embedded, WM_CLOSE, 0, 0);
+        }
+        DestroyWindow(window);
+        return 0;
+
+    case WM_NCDESTROY:
+        KillTimer(window, kExternalHostTimer);
+        if (state->process != nullptr)
+        {
+            CloseHandle(state->process);
+            state->process = nullptr;
+        }
+        SetWindowLongPtrW(window, GWLP_USERDATA, 0);
+        state->host = nullptr;
+        delete state;
+        return 0;
+
+    default:
+        break;
+    }
+
+    return DefWindowProcW(window, message, w_param, l_param);
+}
+
+bool EnsureExternalHostClass(HINSTANCE instance)
+{
+    WNDCLASSEXW window_class{};
+    window_class.cbSize = sizeof(window_class);
+    window_class.style = CS_HREDRAW | CS_VREDRAW;
+    window_class.lpfnWndProc = &ExternalHostWindowProcedure;
+    window_class.hInstance = instance;
+    window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    window_class.hbrBackground = CreateSolidBrush(RGB(14, 18, 28));
+    window_class.lpszClassName = kExternalHostClass;
+
+    if (RegisterClassExW(&window_class) != 0)
+    {
+        return true;
+    }
+    return GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
+}
+
+HWND CreateExternalHost(HWND owner, const std::wstring& target, ExternalHostState* state)
+{
+    if (owner == nullptr || !IsWindow(owner) || state == nullptr)
+    {
+        return nullptr;
+    }
+
+    HINSTANCE instance = GetModuleHandleW(nullptr);
+    if (!EnsureExternalHostClass(instance))
+    {
+        return nullptr;
+    }
+
+    RECT client{};
+    GetClientRect(owner, &client);
+    const UINT dpi = GetDpiForWindow(owner);
+    const int margin = Scale(42, dpi);
+    const int top_offset = Scale(28, dpi);
+    const int reserved_bottom = Scale(kBottomBarHeight + 18, dpi);
+    const int width = std::max(420, static_cast<int>(client.right) - margin * 2);
+    const int height = std::max(
+        300,
+        static_cast<int>(client.bottom) - top_offset - margin - reserved_bottom);
+
+    std::wstring title = L"CloudOS  |  ";
+    title += target.empty() ? L"Aplicativo Windows" : target;
+
+    HWND host = CreateWindowExW(
+        0,
+        kExternalHostClass,
+        title.c_str(),
+        WS_CHILD |
+            WS_VISIBLE |
+            WS_CLIPCHILDREN |
+            WS_CLIPSIBLINGS |
+            WS_CAPTION |
+            WS_THICKFRAME |
+            WS_SYSMENU |
+            WS_MINIMIZEBOX |
+            WS_MAXIMIZEBOX,
+        margin,
+        top_offset,
+        width,
+        height,
+        owner,
+        nullptr,
+        instance,
+        state);
+
+    if (host != nullptr)
+    {
+        DarkWindow(host);
+        ShowWindow(host, SW_SHOW);
+        BringWindowToTop(host);
+    }
+    return host;
 }
 
 bool LaunchExternal(
@@ -56,24 +428,8 @@ bool LaunchExternal(
     const std::wstring& working_directory = {},
     bool report_error = true)
 {
-    SHELLEXECUTEINFOW execution{};
-    execution.cbSize = sizeof(execution);
-    execution.fMask =
-        SEE_MASK_NOCLOSEPROCESS |
-        SEE_MASK_FLAG_NO_UI |
-        SEE_MASK_ASYNCOK;
-
-    // External Windows programs stay independent top-level HWNDs. CloudOS tracks
-    // them through NativeWindowManager; it does not reparent/embed/capture them.
-    execution.hwnd = nullptr;
-    execution.lpVerb = L"open";
-    execution.lpFile = file.c_str();
-    execution.lpParameters = parameters.empty() ? nullptr : parameters.c_str();
-    execution.lpDirectory =
-        working_directory.empty() ? nullptr : working_directory.c_str();
-    execution.nShow = SW_SHOWNORMAL;
-
-    if (!ShellExecuteExW(&execution))
+    auto* state = new (std::nothrow) ExternalHostState();
+    if (state == nullptr)
     {
         if (report_error)
         {
@@ -81,12 +437,66 @@ bool LaunchExternal(
         }
         return false;
     }
+    state->target = file;
 
-    if (execution.hProcess != nullptr)
+    HWND host = CreateExternalHost(owner, file, state);
+    if (host == nullptr)
     {
-        (void)WaitForInputIdle(execution.hProcess, 750);
-        CloseHandle(execution.hProcess);
+        delete state;
+        if (report_error)
+        {
+            ShowLaunchError(owner, file);
+        }
+        return false;
     }
+
+    SHELLEXECUTEINFOW execution{};
+    execution.cbSize = sizeof(execution);
+    execution.fMask =
+        SEE_MASK_NOCLOSEPROCESS |
+        SEE_MASK_FLAG_NO_UI |
+        SEE_MASK_ASYNCOK;
+    execution.hwnd = host;
+    execution.lpVerb = L"open";
+    execution.lpFile = file.c_str();
+    execution.lpParameters = parameters.empty() ? nullptr : parameters.c_str();
+    execution.lpDirectory =
+        working_directory.empty() ? nullptr : working_directory.c_str();
+    execution.nShow = SW_SHOWNOACTIVATE;
+
+    if (!ShellExecuteExW(&execution) || execution.hProcess == nullptr)
+    {
+        DestroyWindow(host);
+        if (report_error)
+        {
+            ShowLaunchError(owner, file);
+        }
+        return false;
+    }
+
+    state->process = execution.hProcess;
+    state->root_process_id = GetProcessId(execution.hProcess);
+    state->started_at = GetTickCount64();
+
+    (void)WaitForInputIdle(execution.hProcess, 750);
+
+    const HWND immediate = FindProcessFamilyWindow(state->root_process_id);
+    if (immediate != nullptr && EmbedExternalWindow(state, immediate))
+    {
+        return true;
+    }
+
+    if (SetTimer(host, kExternalHostTimer, 50, nullptr) == 0)
+    {
+        if (report_error)
+        {
+            ShowLaunchError(owner, file);
+        }
+        (void)TerminateProcess(execution.hProcess, ERROR_TIMEOUT);
+        DestroyWindow(host);
+        return false;
+    }
+
     return true;
 }
 
@@ -277,11 +687,14 @@ void NativeAppLauncher::LaunchById(
     else if (id == L"systemdrive")
     {
         const std::wstring system_volume = NativeShellPlatform::WindowsVolumeRoot();
-        launched = !system_volume.empty() &&
-            LaunchExternal(parent_hwnd, L"explorer.exe", system_volume);
-        if (!launched && system_volume.empty())
+        if (system_volume.empty())
         {
             ShowLaunchError(parent_hwnd, L"o volume do sistema");
+            launched = false;
+        }
+        else
+        {
+            CloudOSNativeFilesWindow::Open(instance, system_volume);
         }
     }
     else if (id == L"notepad")
