@@ -20,12 +20,14 @@ $paths = @{
     RecoveryHeader = Join-Path $src 'native_session_recovery.h'
     Watchdog = Join-Path $src 'native_watchdog.cpp'
     FileOps = Join-Path $src 'native_file_operations_window.cpp'
-    Launcher = Join-Path $src 'native_app_launcher_v3.cpp'
+    Launcher = Join-Path $src 'native_app_launcher_v4.cpp'
     Browser = Join-Path $src 'native_browser_window.cpp'
     Actions = Join-Path $src 'native_shell_actions.cpp'
     Quick = Join-Path $src 'native_quick_settings_window.cpp'
     Monitor = Join-Path $src 'native_monitor_manager.cpp'
     Drop = Join-Path $src 'native_desktop_drop_target.cpp'
+    SystemBackend = Join-Path $src 'native_system_control_backend.cpp'
+    SystemCenter = Join-Path $src 'native_system_control_window.cpp'
 }
 
 foreach ($entry in $paths.GetEnumerator()) {
@@ -70,7 +72,9 @@ Require 'Build graph' $content.Project @(
     'src\native_session_recovery.cpp',
     'src\native_watchdog.cpp',
     'src\native_file_operations_window.cpp',
-    'src\native_app_launcher_v3.cpp',
+    'src\native_app_launcher_v4.cpp',
+    'src\native_system_control_backend.cpp',
+    'src\native_system_control_window.cpp',
     'src\native_browser_window.cpp'
 )
 Forbid 'Build graph' $content.Project @(
@@ -79,7 +83,8 @@ Forbid 'Build graph' $content.Project @(
     '<ClCompile Include="src\native_taskbar_appbar.cpp"',
     '<ClCompile Include="src\native_web_desktop_window.cpp"',
     '<ClCompile Include="src\native_app_launcher.cpp"',
-    '<ClCompile Include="src\native_app_launcher_v2.cpp"'
+    '<ClCompile Include="src\native_app_launcher_v2.cpp"',
+    '<ClCompile Include="src\native_app_launcher_v3.cpp"'
 )
 
 Require 'Session shell' $content.Main @(
@@ -104,7 +109,6 @@ Require 'Session shell' $content.Main @(
 )
 Forbid 'Session shell' $content.Main @('tiling_on_start')
 
-# Start is a real launcher now: Home first, then All Apps/search.
 Require 'Start V4' $content.Start @(
     'CloudOS.NativeShell.Start.v4',
     'ViewMode::Home',
@@ -147,7 +151,6 @@ Require 'Windows app index' $content.StartIndex @(
     'ShellExecuteW'
 )
 
-# Pins are shared by Start and Taskbar and survive restarts.
 Require 'Persistent pins' $content.Pins @(
     'ShellPinKind',
     'shell_pins_v1.dat',
@@ -161,7 +164,6 @@ Require 'Persistent pins' $content.Pins @(
     'MOVEFILE_WRITE_THROUGH'
 )
 
-# Taskbar V4 is an AppBar plus a task/pin/workspace manager, not a painted strip.
 Require 'Taskbar V4' $content.Taskbar @(
     'CloudOS.NativeShell.Taskbar.v4',
     'kTaskbarHeightDip = 68',
@@ -201,7 +203,6 @@ Require 'DWM hover preview' $content.Hover @(
 )
 Forbid 'DWM hover preview' $content.Hover @('kPinnedCount = 5')
 
-# The old web design language is a native token system now.
 Require 'WebSkin' $content.Theme @(
     'namespace WebSkin',
     'RGB(10, 10, 15)',
@@ -213,7 +214,9 @@ Require 'WebSkin' $content.Theme @(
     'PaintOwnerDrawButton',
     'WindowSkinSubclass',
     'ApplyWebFlyoutMaterial',
-    'ApplyWebWindowMaterial'
+    'ApplyWebWindowMaterial',
+    'std::array<AppItem, 23>',
+    '{L"systemcenter", L"Central do Sistema"'
 )
 Require 'Desktop shell' $content.Desktop @(
     'CloudOS.NativeShell.Desktop.v2',
@@ -248,7 +251,6 @@ Require 'Desktop drag/drop' $content.Drop @(
     'IFileOperation'
 )
 
-# Productivity and durability from Shell V3 remain mandatory.
 Require 'Snap Assist' $content.Snap @(
     'SetWinEventHook',
     'EVENT_SYSTEM_MOVESIZESTART',
@@ -295,13 +297,55 @@ Require 'Watchdog' $content.Watchdog @(
     'StartForCurrentProcess'
 )
 
-# Main Files deliberately delegates to Windows Explorer for its complete native UX.
-Require 'Launcher' $content.Launcher @(
+Require 'Launcher V4' $content.Launcher @(
     'CloudOSNativeBrowserWindow::Open',
     'StartMenuMRUTracker::Instance().RecordLaunch',
-    'L"explorer.exe"'
+    'L"explorer.exe"',
+    '#include "native_system_control_window.h"',
+    'return L"systemcenter"',
+    'CloudOSNativeSystemControlWindow::Open',
+    'kSystemCenter = 1143',
+    'L"Central do Sistema  ·  hardware e rede"'
 )
-Forbid 'Launcher' $content.Launcher @('SetParent(', 'kExternalHostClass')
+Forbid 'Launcher V4' $content.Launcher @('SetParent(', 'kExternalHostClass')
+
+Require 'System control backend' $content.SystemBackend @(
+    'WlanOpenHandle',
+    'WlanEnumInterfaces',
+    'WlanGetAvailableNetworkList',
+    'WlanConnect',
+    'WlanDisconnect',
+    'IAudioEndpointVolume',
+    'GetMonitorBrightness',
+    'SetMonitorBrightness',
+    'WmiMonitorBrightness',
+    'WmiSetBrightness',
+    'PowerGetActiveScheme',
+    'PowerSetActiveScheme',
+    'GetAdaptersAddresses',
+    'GetDiskFreeSpaceExW',
+    'CreateToolhelp32Snapshot',
+    'QueryServiceStatusEx'
+)
+Require 'System control window' $content.SystemCenter @(
+    'CloudOS.Native.SystemControl.v1',
+    'Central do Sistema - CloudOS',
+    'Page::Overview',
+    'Page::Wifi',
+    'Page::Display',
+    'Page::Audio',
+    'Page::Power',
+    'Page::Network',
+    'Page::Storage',
+    'Page::Processes',
+    'ConnectSelectedWifi',
+    'SetMasterVolume',
+    'SetBrightness',
+    'SetBalancedPowerPlan',
+    'TerminateProcess',
+    'ApplyWebWindowMaterial'
+)
+
 Require 'Browser' $content.Browser @(
     'CreateCoreWebView2EnvironmentWithOptions',
     'CreateCoreWebView2Controller',
@@ -316,4 +360,4 @@ if ($actionCount -lt 100) {
     throw "Shell action catalog regressed below 100 actions: $actionCount"
 }
 
-Write-Host "PASS: CloudOS shell contracts passed - Start V4, Taskbar V4, persistent pins, grouped/overflow tasks, WebSkin, Snap, DWM previews, recovery, Explorer integration and $actionCount shell actions."
+Write-Host "PASS: CloudOS shell contracts passed - Launcher V4, System Center, Start V4, Taskbar V4, pins, WebSkin, Snap, DWM previews, recovery, Explorer integration and $actionCount shell actions."
