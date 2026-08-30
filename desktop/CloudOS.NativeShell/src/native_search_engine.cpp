@@ -56,6 +56,10 @@ bool NativeSearchEngine::Matches(const AppItem& app, const std::wstring& query)
     {
         return id == L"control";
     }
+    if (IsAny(query_view, {L"area", L"areas", L"workspace", L"workspaces", L"janela", L"janelas", L"overview", L"task view", L"task-view", L"mission control", L"desktop virtual", L"areas de trabalho", L"visao de trabalho"}))
+    {
+        return id == L"workspaces";
+    }
     if (IsAny(query_view, {L"web", L"net", L"chrome", L"edge", L"browser", L"navegador"}))
     {
         return id == L"browser";
@@ -68,7 +72,7 @@ bool NativeSearchEngine::Matches(const AppItem& app, const std::wstring& query)
     {
         return id == L"wsl";
     }
-    if (IsAny(query_view, {L"projeto", L"projetos", L"project", L"projects", L"workspace", L"codigo"}))
+    if (IsAny(query_view, {L"projeto", L"projetos", L"project", L"projects", L"codigo"}))
     {
         return id == L"projects" || id == L"code";
     }
