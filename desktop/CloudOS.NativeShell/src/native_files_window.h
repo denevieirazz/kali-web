@@ -2,6 +2,7 @@
 
 #include "native_file_preview.h"
 #include "native_files_state.h"
+#include "native_shell_context_menu_v7.h"
 #include "native_shell_view_host.h"
 
 #include <Windows.h>
