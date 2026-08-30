@@ -3,7 +3,11 @@
 #include <windows.h>
 #include <guiddef.h>
 
+#include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <iterator>
+#include <new>
 #include <string>
 #include <vector>
 
