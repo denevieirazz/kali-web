@@ -65,6 +65,7 @@ private:
     void ShowPinOverflowMenu(POINT screen_point);
     void ShowTaskContextMenu(std::size_t index, POINT screen_point);
     void ShowTaskGroupPicker(std::size_t index, POINT screen_point);
+    void ShowTaskOverflowMenu(POINT screen_point);
     void ActivateTaskGroup(std::size_t index);
     void MoveTaskToWorkspace(HWND window, int workspace);
     void CloseTaskGroup(const TaskGroup& group);
@@ -86,12 +87,14 @@ private:
     RECT notification_rect_{};
     RECT clock_rect_{};
     RECT pin_overflow_rect_{};
+    RECT task_overflow_rect_{};
     std::vector<RECT> workspace_rects_;
     std::vector<RECT> pinned_rects_;
     std::vector<ShellPinItem> pinned_items_;
     std::vector<RECT> task_rects_;
     std::vector<TaskGroup> task_groups_;
     std::size_t visible_pin_count_{};
+    std::size_t visible_task_group_count_{};
 
     int hovered_kind_{-1};
     int hovered_index_{-1};
