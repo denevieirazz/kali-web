@@ -1,0 +1,569 @@
+#pragma once
+
+#include <windows.h>
+#include <commctrl.h>
+#include <objidl.h>
+
+#include <gdiplus.h>
+
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <cstring>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "native_flyout_motion_v8.h"
+#include "native_media_control_v7.h"
+#include "native_theme.h"
+
+namespace CloudOS::QuickSettingsMediaV8
+{
+constexpr wchar_t PanelClass[] = L"CloudOS.NativeShell.QuickMedia.v8";
+constexpr wchar_t QuickSettingsClass[] = L"CloudOS.NativeShell.QuickSettings.v4";
+constexpr UINT_PTR RefreshTimerId = 0xC118;
+constexpr UINT_PTR ParentSubclassId = 0xC118A11;
+constexpr int ExistingPreviousId = 8813;
+constexpr int ExistingToggleId = 8814;
+constexpr int ExistingNextId = 8815;
+
+inline HWND panel{};
+inline HWND parent_window{};
+inline NativeMediaSnapshot snapshot{};
+inline bool dragging_timeline{};
+inline HWINEVENTHOOK show_hook{};
+
+inline int ScaleDip(int value, UINT dpi) noexcept
+{
+    return MulDiv(value, static_cast<int>(dpi == 0 ? 96 : dpi), 96);
+}
+
+inline std::wstring FormatTime(std::int64_t milliseconds)
+{
+    const std::int64_t total = std::max<std::int64_t>(0, milliseconds) / 1000;
+    const std::int64_t hours = total / 3600;
+    const std::int64_t minutes = (total / 60) % 60;
+    const std::int64_t seconds = total % 60;
+    wchar_t buffer[32]{};
+    if (hours > 0)
+        swprintf_s(buffer, L"%lld:%02lld:%02lld", hours, minutes, seconds);
+    else
+        swprintf_s(buffer, L"%lld:%02lld", minutes, seconds);
+    return buffer;
+}
+
+struct PanelRects final
+{
+    RECT artwork{};
+    RECT previous{};
+    RECT toggle{};
+    RECT next{};
+    RECT timeline{};
+};
+
+inline PanelRects Rects(HWND window)
+{
+    RECT client{};
+    GetClientRect(window, &client);
+    const UINT dpi = GetDpiForWindow(window);
+    const int width = std::max<LONG>(1, client.right - client.left);
+    const int height = std::max<LONG>(1, client.bottom - client.top);
+    const int margin = ScaleDip(8, dpi);
+    const int artwork_size = std::max(1, height - margin * 2);
+    const int button = ScaleDip(28, dpi);
+    const int gap = ScaleDip(5, dpi);
+
+    PanelRects rects{};
+    rects.artwork = RECT{margin, margin, margin + artwork_size, margin + artwork_size};
+    rects.next = RECT{width - margin - button, margin, width - margin, margin + button};
+    rects.toggle = RECT{rects.next.left - gap - button, margin, rects.next.left - gap, margin + button};
+    rects.previous = RECT{rects.toggle.left - gap - button, margin, rects.toggle.left - gap, margin + button};
+    rects.timeline = RECT{
+        rects.artwork.right + ScaleDip(10, dpi),
+        height - ScaleDip(27, dpi),
+        width - margin,
+        height - ScaleDip(17, dpi)};
+    return rects;
+}
+
+inline bool ContainsRect(const RECT& rect, POINT point) noexcept
+{
+    return point.x >= rect.left && point.x < rect.right && point.y >= rect.top && point.y < rect.bottom;
+}
+
+inline bool DrawArtworkBytes(
+    Gdiplus::Graphics& graphics,
+    const RECT& destination,
+    const std::vector<std::uint8_t>& bytes)
+{
+    if (bytes.empty()) return false;
+    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, bytes.size());
+    if (memory == nullptr) return false;
+    void* target = GlobalLock(memory);
+    if (target == nullptr)
+    {
+        GlobalFree(memory);
+        return false;
+    }
+    std::memcpy(target, bytes.data(), bytes.size());
+    GlobalUnlock(memory);
+
+    IStream* stream = nullptr;
+    if (CreateStreamOnHGlobal(memory, TRUE, &stream) != S_OK || stream == nullptr)
+    {
+        GlobalFree(memory);
+        return false;
+    }
+
+    Gdiplus::Bitmap image(stream, FALSE);
+    bool drawn = false;
+    if (image.GetLastStatus() == Gdiplus::Ok && image.GetWidth() > 0 && image.GetHeight() > 0)
+    {
+        const Gdiplus::REAL dest_width = static_cast<Gdiplus::REAL>(destination.right - destination.left);
+        const Gdiplus::REAL dest_height = static_cast<Gdiplus::REAL>(destination.bottom - destination.top);
+        const Gdiplus::REAL source_width = static_cast<Gdiplus::REAL>(image.GetWidth());
+        const Gdiplus::REAL source_height = static_cast<Gdiplus::REAL>(image.GetHeight());
+        const Gdiplus::REAL scale = std::max(dest_width / source_width, dest_height / source_height);
+        const Gdiplus::REAL crop_width = dest_width / scale;
+        const Gdiplus::REAL crop_height = dest_height / scale;
+        const Gdiplus::REAL source_x = (source_width - crop_width) * 0.5f;
+        const Gdiplus::REAL source_y = (source_height - crop_height) * 0.5f;
+
+        const Gdiplus::GraphicsState state = graphics.Save();
+        Gdiplus::GraphicsPath clip;
+        const Gdiplus::REAL radius = 12.0f;
+        const Gdiplus::RectF dest(
+            static_cast<Gdiplus::REAL>(destination.left),
+            static_cast<Gdiplus::REAL>(destination.top),
+            dest_width,
+            dest_height);
+        clip.AddArc(dest.X, dest.Y, radius * 2.0f, radius * 2.0f, 180.0f, 90.0f);
+        clip.AddArc(dest.GetRight() - radius * 2.0f, dest.Y, radius * 2.0f, radius * 2.0f, 270.0f, 90.0f);
+        clip.AddArc(dest.GetRight() - radius * 2.0f, dest.GetBottom() - radius * 2.0f,
+            radius * 2.0f, radius * 2.0f, 0.0f, 90.0f);
+        clip.AddArc(dest.X, dest.GetBottom() - radius * 2.0f, radius * 2.0f, radius * 2.0f, 90.0f, 90.0f);
+        clip.CloseFigure();
+        graphics.SetClip(&clip);
+        graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+        drawn = graphics.DrawImage(
+            &image,
+            dest,
+            source_x,
+            source_y,
+            crop_width,
+            crop_height,
+            Gdiplus::UnitPixel) == Gdiplus::Ok;
+        graphics.Restore(state);
+    }
+    stream->Release();
+    return drawn;
+}
+
+inline void RefreshSnapshot()
+{
+    NativeMediaControlV7::RefreshAsync();
+    snapshot = NativeMediaControlV7::Snapshot();
+    if (panel != nullptr && IsWindow(panel))
+        InvalidateRect(panel, nullptr, FALSE);
+}
+
+inline void SeekFromPoint(POINT point, bool commit)
+{
+    if (panel == nullptr || snapshot.duration_ms <= 0) return;
+    const PanelRects rects = Rects(panel);
+    const int width = std::max(1, rects.timeline.right - rects.timeline.left);
+    const double ratio = std::clamp(
+        static_cast<double>(point.x - rects.timeline.left) / static_cast<double>(width),
+        0.0,
+        1.0);
+    snapshot.position_ms = static_cast<std::int64_t>(ratio * static_cast<double>(snapshot.duration_ms));
+    InvalidateRect(panel, nullptr, FALSE);
+    if (commit && snapshot.can_seek)
+        NativeMediaControlV7::SeekAsync(snapshot.position_ms);
+}
+
+inline void DrawControl(
+    Gdiplus::Graphics& graphics,
+    const RECT& rect,
+    const wchar_t* glyph,
+    bool accent,
+    bool enabled)
+{
+    WebSkin::DrawRoundedPanel(
+        graphics,
+        Gdiplus::RectF(
+            static_cast<Gdiplus::REAL>(rect.left),
+            static_cast<Gdiplus::REAL>(rect.top),
+            static_cast<Gdiplus::REAL>(rect.right - rect.left),
+            static_cast<Gdiplus::REAL>(rect.bottom - rect.top)),
+        8.0f,
+        WebSkin::GdiColor(accent ? WebSkin::Accent : WebSkin::BgTertiary, enabled ? 245 : 150),
+        WebSkin::GdiColor(accent ? WebSkin::AccentHover : WebSkin::BorderStrong, enabled ? 255 : 120),
+        1.0f);
+    Gdiplus::Font font(L"Segoe UI Symbol", 13.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+    Gdiplus::SolidBrush brush(WebSkin::GdiColor(enabled ? WebSkin::TextPrimary : WebSkin::TextDisabled));
+    Gdiplus::StringFormat format;
+    format.SetAlignment(Gdiplus::StringAlignmentCenter);
+    format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+    graphics.DrawString(
+        glyph,
+        -1,
+        &font,
+        Gdiplus::RectF(
+            static_cast<Gdiplus::REAL>(rect.left),
+            static_cast<Gdiplus::REAL>(rect.top),
+            static_cast<Gdiplus::REAL>(rect.right - rect.left),
+            static_cast<Gdiplus::REAL>(rect.bottom - rect.top)),
+        &format,
+        &brush);
+}
+
+inline void PaintPanel(HWND window)
+{
+    PAINTSTRUCT paint{};
+    HDC dc = BeginPaint(window, &paint);
+    RECT client{};
+    GetClientRect(window, &client);
+    const int width = std::max<LONG>(1, client.right - client.left);
+    const int height = std::max<LONG>(1, client.bottom - client.top);
+
+    HDC memory_dc = CreateCompatibleDC(dc);
+    HBITMAP bitmap = CreateCompatibleBitmap(dc, width, height);
+    HGDIOBJ old_bitmap = SelectObject(memory_dc, bitmap);
+
+    Gdiplus::Graphics graphics(memory_dc);
+    graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+    graphics.SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
+    Gdiplus::SolidBrush background(WebSkin::GdiColor(WebSkin::BgSecondary, 255));
+    graphics.FillRectangle(&background, 0, 0, width, height);
+
+    const PanelRects rects = Rects(window);
+    if (!DrawArtworkBytes(graphics, rects.artwork, snapshot.artwork))
+    {
+        WebSkin::DrawRoundedPanel(
+            graphics,
+            Gdiplus::RectF(
+                static_cast<Gdiplus::REAL>(rects.artwork.left),
+                static_cast<Gdiplus::REAL>(rects.artwork.top),
+                static_cast<Gdiplus::REAL>(rects.artwork.right - rects.artwork.left),
+                static_cast<Gdiplus::REAL>(rects.artwork.bottom - rects.artwork.top)),
+            12.0f,
+            WebSkin::GdiColor(WebSkin::AccentSubtle, 255),
+            WebSkin::GdiColor(WebSkin::BorderStrong, 255),
+            1.0f);
+        Gdiplus::Font icon_font(L"Segoe UI Symbol", 25.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+        Gdiplus::SolidBrush icon_brush(WebSkin::GdiColor(WebSkin::AccentHover));
+        Gdiplus::StringFormat center;
+        center.SetAlignment(Gdiplus::StringAlignmentCenter);
+        center.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+        graphics.DrawString(
+            L"♫",
+            -1,
+            &icon_font,
+            Gdiplus::RectF(
+                static_cast<Gdiplus::REAL>(rects.artwork.left),
+                static_cast<Gdiplus::REAL>(rects.artwork.top),
+                static_cast<Gdiplus::REAL>(rects.artwork.right - rects.artwork.left),
+                static_cast<Gdiplus::REAL>(rects.artwork.bottom - rects.artwork.top)),
+            &center,
+            &icon_brush);
+    }
+
+    const int text_left = rects.artwork.right + 10;
+    const int text_right = std::max(text_left + 1, rects.previous.left - 8);
+    Gdiplus::Font title_font(L"Segoe UI Variable Text", 12.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+    Gdiplus::Font meta_font(L"Segoe UI Variable Text", 9.5f, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+    Gdiplus::SolidBrush title_brush(WebSkin::GdiColor(WebSkin::TextPrimary));
+    Gdiplus::SolidBrush meta_brush(WebSkin::GdiColor(WebSkin::TextSecondary));
+    Gdiplus::StringFormat ellipsis;
+    ellipsis.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
+    ellipsis.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
+
+    const std::wstring title = snapshot.available
+        ? (snapshot.title.empty() ? std::wstring(L"Reproducao ativa") : snapshot.title)
+        : std::wstring(L"Nenhuma midia ativa");
+    std::wstring meta;
+    if (snapshot.available)
+    {
+        if (!snapshot.artist.empty()) meta = snapshot.artist;
+        if (!snapshot.album.empty()) meta += (meta.empty() ? L"" : L"  ·  ") + snapshot.album;
+        if (meta.empty()) meta = snapshot.source_app_id.empty() ? L"Sessao GSMTC" : snapshot.source_app_id;
+    }
+    else
+    {
+        meta = L"Spotify, navegadores e players via GSMTC";
+    }
+
+    graphics.DrawString(
+        title.c_str(),
+        -1,
+        &title_font,
+        Gdiplus::RectF(static_cast<Gdiplus::REAL>(text_left), 8.0f,
+            static_cast<Gdiplus::REAL>(text_right - text_left), 19.0f),
+        &ellipsis,
+        &title_brush);
+    graphics.DrawString(
+        meta.c_str(),
+        -1,
+        &meta_font,
+        Gdiplus::RectF(static_cast<Gdiplus::REAL>(text_left), 30.0f,
+            static_cast<Gdiplus::REAL>(width - text_left - 8), 18.0f),
+        &ellipsis,
+        &meta_brush);
+
+    DrawControl(graphics, rects.previous, L"‹", false, snapshot.can_previous);
+    DrawControl(graphics, rects.toggle, snapshot.playing ? L"Ⅱ" : L"▶", true, snapshot.can_toggle);
+    DrawControl(graphics, rects.next, L"›", false, snapshot.can_next);
+
+    const int timeline_width = std::max(1, rects.timeline.right - rects.timeline.left);
+    const double ratio = snapshot.duration_ms > 0
+        ? std::clamp(static_cast<double>(snapshot.position_ms) / static_cast<double>(snapshot.duration_ms), 0.0, 1.0)
+        : 0.0;
+    const int progress = static_cast<int>(ratio * timeline_width);
+    Gdiplus::SolidBrush track(WebSkin::GdiColor(WebSkin::BgActive, 255));
+    Gdiplus::SolidBrush fill(WebSkin::GdiColor(WebSkin::AccentHover, 255));
+    graphics.FillRectangle(&track,
+        rects.timeline.left,
+        rects.timeline.top + 2,
+        timeline_width,
+        std::max(2, rects.timeline.bottom - rects.timeline.top - 4));
+    if (progress > 0)
+        graphics.FillRectangle(&fill,
+            rects.timeline.left,
+            rects.timeline.top + 2,
+            progress,
+            std::max(2, rects.timeline.bottom - rects.timeline.top - 4));
+
+    const std::wstring time = FormatTime(snapshot.position_ms) + L" / " + FormatTime(snapshot.duration_ms);
+    graphics.DrawString(
+        time.c_str(),
+        -1,
+        &meta_font,
+        Gdiplus::PointF(static_cast<Gdiplus::REAL>(rects.timeline.left), static_cast<Gdiplus::REAL>(height - 16)),
+        &meta_brush);
+
+    BitBlt(dc, 0, 0, width, height, memory_dc, 0, 0, SRCCOPY);
+    SelectObject(memory_dc, old_bitmap);
+    DeleteObject(bitmap);
+    DeleteDC(memory_dc);
+    EndPaint(window, &paint);
+}
+
+inline LRESULT CALLBACK PanelProcedure(HWND window, UINT message, WPARAM w_param, LPARAM l_param)
+{
+    switch (message)
+    {
+    case WM_PAINT:
+        PaintPanel(window);
+        return 0;
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_TIMER:
+        if (w_param == RefreshTimerId)
+        {
+            RefreshSnapshot();
+            return 0;
+        }
+        break;
+    case WM_LBUTTONDOWN:
+    {
+        const POINT point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
+        const PanelRects rects = Rects(window);
+        if (ContainsRect(rects.timeline, point) && snapshot.duration_ms > 0)
+        {
+            dragging_timeline = true;
+            SetCapture(window);
+            SeekFromPoint(point, false);
+            return 0;
+        }
+        break;
+    }
+    case WM_MOUSEMOVE:
+        if (dragging_timeline && GetCapture() == window)
+        {
+            SeekFromPoint(POINT{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)}, false);
+            return 0;
+        }
+        break;
+    case WM_LBUTTONUP:
+    {
+        const POINT point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
+        const PanelRects rects = Rects(window);
+        if (dragging_timeline)
+        {
+            dragging_timeline = false;
+            if (GetCapture() == window) ReleaseCapture();
+            SeekFromPoint(point, true);
+            return 0;
+        }
+        if (ContainsRect(rects.previous, point) && snapshot.can_previous)
+            NativeMediaControlV7::PreviousAsync();
+        else if (ContainsRect(rects.toggle, point) && snapshot.can_toggle)
+            NativeMediaControlV7::TogglePlayPauseAsync();
+        else if (ContainsRect(rects.next, point) && snapshot.can_next)
+            NativeMediaControlV7::NextAsync();
+        else
+            return 0;
+        SetTimer(window, RefreshTimerId, 220, nullptr);
+        return 0;
+    }
+    case WM_CAPTURECHANGED:
+        dragging_timeline = false;
+        return 0;
+    case WM_DESTROY:
+        KillTimer(window, RefreshTimerId);
+        if (panel == window) panel = nullptr;
+        return 0;
+    default:
+        break;
+    }
+    return DefWindowProcW(window, message, w_param, l_param);
+}
+
+inline void Layout(HWND parent)
+{
+    if (panel == nullptr || !IsWindow(panel) || parent == nullptr || !IsWindow(parent)) return;
+    RECT client{};
+    GetClientRect(parent, &client);
+    const UINT dpi = GetDpiForWindow(parent);
+    const int margin = ScaleDip(22, dpi);
+    const int width = std::max(1, static_cast<int>(client.right - client.left) - margin * 2);
+    MoveWindow(panel, margin, ScaleDip(82, dpi), width, ScaleDip(94, dpi), TRUE);
+    SetWindowPos(panel, HWND_TOP, 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+}
+
+inline LRESULT CALLBACK ParentSubclass(
+    HWND parent,
+    UINT message,
+    WPARAM w_param,
+    LPARAM l_param,
+    UINT_PTR subclass_id,
+    DWORD_PTR)
+{
+    switch (message)
+    {
+    case WM_SIZE:
+    case WM_DPICHANGED:
+        Layout(parent);
+        break;
+    case WM_SHOWWINDOW:
+        if (w_param != FALSE)
+        {
+            Layout(parent);
+            RefreshSnapshot();
+            if (panel != nullptr) SetTimer(panel, RefreshTimerId, 850, nullptr);
+        }
+        else if (panel != nullptr)
+        {
+            KillTimer(panel, RefreshTimerId);
+        }
+        break;
+    case WM_NCDESTROY:
+        if (panel != nullptr && IsWindow(panel)) DestroyWindow(panel);
+        panel = nullptr;
+        parent_window = nullptr;
+        RemoveWindowSubclass(parent, ParentSubclass, subclass_id);
+        break;
+    default:
+        break;
+    }
+    return DefSubclassProc(parent, message, w_param, l_param);
+}
+
+inline bool EnsurePanelClass(HINSTANCE instance)
+{
+    WNDCLASSEXW window_class{};
+    window_class.cbSize = sizeof(window_class);
+    window_class.lpfnWndProc = &PanelProcedure;
+    window_class.hInstance = instance;
+    window_class.hCursor = LoadCursorW(nullptr, IDC_HAND);
+    window_class.hbrBackground = nullptr;
+    window_class.lpszClassName = PanelClass;
+    return RegisterClassExW(&window_class) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
+}
+
+inline void Attach(HWND parent)
+{
+    if (parent == nullptr || !IsWindow(parent)) return;
+    if (parent_window == parent && panel != nullptr && IsWindow(panel))
+    {
+        Layout(parent);
+        RefreshSnapshot();
+        return;
+    }
+
+    HINSTANCE instance = reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(parent, GWLP_HINSTANCE));
+    if (!EnsurePanelClass(instance)) return;
+
+    parent_window = parent;
+    panel = CreateWindowExW(
+        0,
+        PanelClass,
+        L"CloudOS Media V8",
+        WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,
+        0, 0, 1, 1,
+        parent,
+        nullptr,
+        instance,
+        nullptr);
+    if (panel == nullptr) return;
+
+    for (int id : {ExistingPreviousId, ExistingToggleId, ExistingNextId})
+    {
+        HWND legacy = GetDlgItem(parent, id);
+        if (legacy != nullptr) ShowWindow(legacy, SW_HIDE);
+    }
+
+    (void)SetWindowSubclass(parent, ParentSubclass, ParentSubclassId, 0);
+    Layout(parent);
+    RefreshSnapshot();
+    SetTimer(panel, RefreshTimerId, 850, nullptr);
+}
+
+inline void CALLBACK WinEventCallback(
+    HWINEVENTHOOK,
+    DWORD event,
+    HWND window,
+    LONG object_id,
+    LONG child_id,
+    DWORD,
+    DWORD)
+{
+    if (event != EVENT_OBJECT_SHOW || object_id != OBJID_WINDOW || child_id != CHILDID_SELF ||
+        window == nullptr || !IsWindow(window))
+        return;
+
+    wchar_t class_name[128]{};
+    const int length = GetClassNameW(window, class_name, static_cast<int>(std::size(class_name)));
+    if (length <= 0) return;
+    if (std::wstring_view(class_name, static_cast<std::size_t>(length)) == QuickSettingsClass)
+        Attach(window);
+}
+
+class Bootstrap final
+{
+public:
+    Bootstrap() noexcept
+    {
+        show_hook = SetWinEventHook(
+            EVENT_OBJECT_SHOW,
+            EVENT_OBJECT_SHOW,
+            nullptr,
+            &WinEventCallback,
+            GetCurrentProcessId(),
+            0,
+            WINEVENT_OUTOFCONTEXT);
+    }
+    ~Bootstrap()
+    {
+        if (show_hook != nullptr) UnhookWinEvent(show_hook);
+        show_hook = nullptr;
+    }
+    Bootstrap(const Bootstrap&) = delete;
+    Bootstrap& operator=(const Bootstrap&) = delete;
+};
+
+inline Bootstrap bootstrap;
+} // namespace CloudOS::QuickSettingsMediaV8
