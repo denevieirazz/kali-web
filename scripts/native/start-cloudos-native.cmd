@@ -54,6 +54,9 @@ goto RUN
 
 :BUILD
 if defined REBUILD_REASON echo [CloudOS Native] Rebuild necessario: %REBUILD_REASON%.
+rem O linker precisa conseguir substituir CloudOS.exe. Mate a instancia antiga antes do build.
+taskkill /F /IM CloudOS.exe >nul 2>&1
+timeout /t 1 /nobreak >nul 2>&1
 echo [CloudOS Native] Validando e compilando Release x64...
 call "%ROOT%\scripts\native\build-cloudos-native.cmd" Release
 if errorlevel 1 exit /b %ERRORLEVEL%
