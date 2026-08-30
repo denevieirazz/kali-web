@@ -40,6 +40,8 @@ pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-visual-platform-v7
 if errorlevel 1 exit /b %ERRORLEVEL%
 pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-stability-readiness-v9-contract.ps1"
 if errorlevel 1 exit /b %ERRORLEVEL%
+pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-lifecycle-v10-contract.ps1"
+if errorlevel 1 exit /b %ERRORLEVEL%
 pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-taskbar-productivity-contract.ps1"
 if errorlevel 1 exit /b %ERRORLEVEL%
 pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-workspace-overview-contract.ps1"
@@ -140,6 +142,7 @@ echo [CloudOS] CONTROL_PLANE_V4=System Center, Quick Settings real, tray first-p
 echo [CloudOS] FILES_STORAGE_V5=Files first-party, tabs, Quick Access, busca limitada, preview WIC/texto e Windows Shell via IExplorerBrowser
 echo [CloudOS] VISUAL_PLATFORM_V7=reveal Fluent, DWM material sem magic numbers, GSMTC, mixer por app e Windows Search SystemIndex
 echo [CloudOS] STABILITY_READINESS_V9=health ABI 96 bytes, heartbeat UI, readiness e soak automatizado
+echo [CloudOS] LIFECYCLE_V10=resume, WTS/RDP, display revalidation, WTS retry e single-instance smoke
 echo [CloudOS] WEBVIEW2=usado somente pelo Navegador CloudOS
 echo [CloudOS] FRONTEND_REACT=referencia visual; nao participa deste build
 exit /b 0
