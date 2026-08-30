@@ -195,6 +195,14 @@ public:
             L"Visao de Trabalho ativa: Ctrl+Alt+O abre as 4 areas; Ctrl+Alt+PgUp/PgDn alterna entre elas.");
 
         RefreshShell();
+
+        if (!HealthBootstrapV9::HasCommandLineArgument(L"--stability-probe") &&
+            !HealthBootstrapV9::HasCommandLineArgument(L"--lifecycle-probe") &&
+            !HealthBootstrapV9::HasCommandLineArgument(L"--watchdog"))
+        {
+            start_menu_.ToggleNear(PrimaryTaskbarBounds());
+        }
+
         return true;
     }
 
