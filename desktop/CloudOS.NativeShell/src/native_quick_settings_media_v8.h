@@ -455,7 +455,7 @@ inline LRESULT CALLBACK ParentSubclass(
     HWND parent,
     UINT message,
     WPARAM w_param,
-    LPARAM,
+    LPARAM l_param,
     UINT_PTR subclass_id,
     DWORD_PTR)
 {
@@ -486,7 +486,7 @@ inline LRESULT CALLBACK ParentSubclass(
     default:
         break;
     }
-    return DefSubclassProc(parent, message, w_param, 0);
+    return DefSubclassProc(parent, message, w_param, l_param);
 }
 
 inline bool EnsurePanelClass(HINSTANCE instance)
