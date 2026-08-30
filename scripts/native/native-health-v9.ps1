@@ -57,6 +57,13 @@ function Get-CloudOSHealthSnapshotV9 {
             if ($magic -ne $script:CloudOSHealthMagicV9 -or
                 $schema -ne $script:CloudOSHealthSchemaV9 -or
                 $structureSize -ne $script:CloudOSHealthStructureSizeV9) {
+                # CreateFileMapping publishes the name before the producer has
+                # finished zeroing/filling the first snapshot. Retry that tiny
+                # initialization window; only a persistent mismatch is an ABI error.
+                if ($attempt + 1 -lt $RetryCount) {
+                    if ($RetryDelayMilliseconds -gt 0) { Start-Sleep -Milliseconds $RetryDelayMilliseconds }
+                    continue
+                }
                 throw 'CloudOS health V9 shared-memory ABI mismatch.'
             }
 
