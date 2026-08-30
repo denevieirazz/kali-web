@@ -15,6 +15,13 @@ $paths = @{
     Switcher = Join-Path $src 'native_task_switcher_window.cpp'
     Quick = Join-Path $src 'native_quick_settings_window.cpp'
     Notifications = Join-Path $src 'native_notification_center.cpp'
+    CommandCenter = Join-Path $src 'native_command_center_window.cpp'
+    Calculator = Join-Path $src 'native_calculator_window.cpp'
+    Notepad = Join-Path $src 'native_notepad_window.cpp'
+    Settings = Join-Path $src 'native_settings_window.cpp'
+    SystemMonitor = Join-Path $src 'native_system_monitor_window.cpp'
+    FilesStyleHeader = Join-Path $src 'native_files_style.h'
+    FilesStyle = Join-Path $src 'native_files_style.cpp'
     Monitor = Join-Path $src 'native_monitor_manager.cpp'
     Snap = Join-Path $src 'native_snap_assist.cpp'
     Recovery = Join-Path $src 'native_session_recovery.cpp'
@@ -169,8 +176,8 @@ Require-Tokens 'Wallpaper' $text.Wallpaper @(
     'SPI_SETDESKWALLPAPER', 'GetOpenFileNameW', 'InterpolationModeHighQualityBicubic'
 )
 
-# Old web interface palette, now mirrored by native Win32/GDI+ surfaces.
-Require-Tokens 'Native web skin' $text.Theme @(
+# Unified old-web visual language, now implemented natively.
+Require-Tokens 'Native unified web skin' $text.Theme @(
     'namespace WebSkin',
     'RGB(10, 10, 15)',
     'RGB(17, 17, 24)',
@@ -178,8 +185,59 @@ Require-Tokens 'Native web skin' $text.Theme @(
     'RGB(129, 140, 248)',
     'RadiusXL = 16',
     'DrawRoundedPanel',
-    'ApplyWebFlyoutMaterial'
+    'PaintWindowBackground',
+    'PrepareListView',
+    'PaintOwnerDrawButton',
+    'WindowSkinSubclass',
+    'ApplyWebFlyoutMaterial',
+    'ApplyWebWindowMaterial'
 )
+Require-Tokens 'Taskbar web skin' $text.Taskbar @(
+    'kTaskbarHeightDip = 64',
+    'WebSkin::BgPrimary',
+    'WebSkin::Accent',
+    'Som  ·  Rede'
+)
+Require-Tokens 'Desktop web skin' $text.Desktop @(
+    'WebSkin::BgPrimary',
+    'Subtle ambient accents',
+    'WebSkin::TextPrimary'
+)
+Forbid-Tokens 'Desktop web skin' $text.Desktop @('Scale(920, dpi)')
+Require-Tokens 'Quick Settings web skin' $text.Quick @(
+    'BS_OWNERDRAW', 'ApplyWebFlyoutMaterial',
+    'WebSkin::PaintOwnerDrawButton', 'WebSkin::PaintWindowBackground'
+)
+Require-Tokens 'Notification web skin' $text.Notifications @(
+    'ApplyWebFlyoutMaterial', 'WebSkin::PrepareListView',
+    'WebSkin::HandleListViewCustomDraw', 'BS_OWNERDRAW'
+)
+Require-Tokens 'Calculator web skin' $text.Calculator @(
+    'ApplyWebWindowMaterial', 'BS_OWNERDRAW',
+    'WebSkin::PaintOwnerDrawButton', 'ButtonTone::Accent', 'ButtonTone::Danger'
+)
+Require-Tokens 'Notepad web skin' $text.Notepad @(
+    'ApplyWebWindowMaterial', 'Cascadia Mono',
+    'BS_OWNERDRAW', 'WebSkin::PrepareEdit', 'ButtonTone::Accent'
+)
+Require-Tokens 'Settings web skin' $text.Settings @(
+    'ApplyWebWindowMaterial', 'BS_OWNERDRAW',
+    'WebSkin::PrepareEdit', 'WebSkin::PaintWindowBackground'
+)
+Require-Tokens 'System Monitor web skin' $text.SystemMonitor @(
+    'ApplyWebWindowMaterial', 'WebSkin::BgSecondary',
+    'WebSkin::Accent', 'Monitor do Sistema'
+)
+Require-Tokens 'Files dark web skin palette' $text.FilesStyleHeader @(
+    'RGB(10, 10, 15)', 'RGB(17, 17, 24)',
+    'RGB(99, 102, 241)', 'RGB(240, 240, 245)'
+)
+Require-Tokens 'Files dark Mica chrome' $text.FilesStyle @(
+    'DWMWA_USE_IMMERSIVE_DARK_MODE', 'DWMSBT_MAINWINDOW',
+    'kPalette.border'
+)
+Require-Tokens 'Command Center shared skin' $text.CommandCenter @('DarkWindow(window_)')
+Require-Tokens 'File Operations shared skin' $text.FileOps @('DarkWindow(window_)')
 
 # Start V3 + installed app index + web visual language.
 Require-Tokens 'Start V3 web skin' $text.Start @(
@@ -191,10 +249,7 @@ Require-Tokens 'Start V3 web skin' $text.Start @(
     'ApplyWebFlyoutMaterial', 'WebSkin::Accent',
     'NM_DBLCLK', 'NM_RETURN', 'VK_ESCAPE', 'Central de Comandos'
 )
-Forbid-Tokens 'Start V3 web skin' $text.Start @(
-    'WS_EX_CLIENTEDGE',
-    'L"Origem / descricao"'
-)
+Forbid-Tokens 'Start V3 web skin' $text.Start @('WS_EX_CLIENTEDGE', 'L"Origem / descricao"')
 Require-Tokens 'Start index' $text.StartIndex @(
     'FOLDERID_Programs', 'FOLDERID_CommonPrograms', 'shell:AppsFolder',
     'BHID_EnumItems', 'IEnumShellItems', 'SIGDN_NORMALDISPLAY',
@@ -294,4 +349,4 @@ Require-Tokens 'Official Shell Launcher script' $text.ShellLauncher @(
     'SetEnabled', 'RemoveCustomShell', 'Enterprise|Education|IoT', 'ShouldProcess'
 )
 
-Write-Host "PASS: CloudOS Shell V3 contracts passed - web-skin Start, AppBars, indexed apps, Snap Assist, DWM task previews, File Operations/ZIP, session recovery, watchdog, multi-monitor and $actionCount shell actions."
+Write-Host "PASS: CloudOS Shell V3 contracts passed - unified WebSkin, AppBars, indexed Start, Snap Assist, DWM previews, File Operations/ZIP, recovery, watchdog, multi-monitor and $actionCount shell actions."
