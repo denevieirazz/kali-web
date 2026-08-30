@@ -6,7 +6,7 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <new>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -17,10 +17,11 @@
 
 namespace CloudOS
 {
-// Native Snap Layouts V8 deliberately stays in the CloudOS process. It detects
-// a real maximize hit through WM_NCHITTEST/HTMAXBUTTON with SendMessageTimeout,
-// then presents a WS_EX_NOACTIVATE flyout owned by the shell. No cross-process
-// subclassing, hooks injected into applications or SetParent are used.
+// Native Snap Layouts V8 stays entirely in the CloudOS process. Detection of
+// another application's maximize button is read-only: WM_NCHITTEST is queried
+// with SendMessageTimeout. The popup is WS_EX_NOACTIVATE and placement is done
+// through SetWindowPos on the normal top-level HWND. There is no cross-process
+// subclass, injected hook or SetParent path here.
 namespace SnapLayoutsV8
 {
 constexpr wchar_t kEngineClass[] = L"CloudOS.NativeShell.SnapLayoutsEngine.v8";
@@ -57,19 +58,22 @@ inline State& GetState() noexcept
 
 inline int RectWidth(const RECT& rect) noexcept
 {
-    return std::max<int>(0, static_cast<int>(rect.right - rect.left));
+    return std::max(0, static_cast<int>(rect.right - rect.left));
 }
 
 inline int RectHeight(const RECT& rect) noexcept
 {
-    return std::max<int>(0, static_cast<int>(rect.bottom - rect.top));
+    return std::max(0, static_cast<int>(rect.bottom - rect.top));
 }
 
 inline bool HasClassPrefix(HWND window, const wchar_t* prefix) noexcept
 {
     if (window == nullptr || prefix == nullptr) return false;
     wchar_t class_name[160]{};
-    const int length = GetClassNameW(window, class_name, static_cast<int>(std::size(class_name)));
+    const int length = GetClassNameW(
+        window,
+        class_name,
+        static_cast<int>(std::size(class_name)));
     if (length <= 0) return false;
     const std::wstring value(class_name, static_cast<std::size_t>(length));
     const std::wstring expected(prefix);
@@ -84,6 +88,7 @@ inline bool IsCandidate(HWND window) noexcept
     {
         return false;
     }
+
     const LONG_PTR style = GetWindowLongPtrW(window, GWL_STYLE);
     const LONG_PTR ex_style = GetWindowLongPtrW(window, GWL_EXSTYLE);
     if ((style & WS_DISABLED) != 0 || (style & WS_CAPTION) == 0 ||
@@ -91,17 +96,14 @@ inline bool IsCandidate(HWND window) noexcept
     {
         return false;
     }
-    if (HasClassPrefix(window, L"CloudOS.NativeShell.Taskbar") ||
-        HasClassPrefix(window, L"CloudOS.NativeShell.Start") ||
-        HasClassPrefix(window, L"CloudOS.NativeShell.QuickSettings") ||
-        HasClassPrefix(window, L"CloudOS.NativeShell.Notification") ||
-        HasClassPrefix(window, L"CloudOS.NativeShell.TaskPreview") ||
-        HasClassPrefix(window, L"CloudOS.NativeShell.SnapLayouts") ||
-        HasClassPrefix(window, L"CloudOS.NativeShell.SnapAssist"))
-    {
-        return false;
-    }
-    return true;
+
+    return !HasClassPrefix(window, L"CloudOS.NativeShell.Taskbar") &&
+        !HasClassPrefix(window, L"CloudOS.NativeShell.Start") &&
+        !HasClassPrefix(window, L"CloudOS.NativeShell.QuickSettings") &&
+        !HasClassPrefix(window, L"CloudOS.NativeShell.Notification") &&
+        !HasClassPrefix(window, L"CloudOS.NativeShell.TaskPreview") &&
+        !HasClassPrefix(window, L"CloudOS.NativeShell.SnapLayouts") &&
+        !HasClassPrefix(window, L"CloudOS.NativeShell.SnapAssist");
 }
 
 inline bool HitMaxButton(HWND window, POINT screen_point) noexcept
@@ -136,22 +138,27 @@ inline RECT WorkAreaFor(HWND window) noexcept
     return fallback;
 }
 
-inline RECT CellRect(const RECT& card, int column, int columns, int row, int rows, int gap) noexcept
+inline RECT CellRect(
+    const RECT& card,
+    int column,
+    int columns,
+    int row,
+    int rows,
+    int gap) noexcept
 {
     const int total_width = RectWidth(card) - gap * (columns - 1);
     const int total_height = RectHeight(card) - gap * (rows - 1);
     const int cell_width = std::max(1, total_width / std::max(1, columns));
     const int cell_height = std::max(1, total_height / std::max(1, rows));
-    const int left = card.left + column * (cell_width + gap);
-    const int top = card.top + row * (cell_height + gap);
-    const int right = column == columns - 1 ? card.right : left + cell_width;
-    const int bottom = row == rows - 1 ? card.bottom : top + cell_height;
+    const int left = static_cast<int>(card.left) + column * (cell_width + gap);
+    const int top = static_cast<int>(card.top) + row * (cell_height + gap);
+    const int right = column == columns - 1
+        ? static_cast<int>(card.right)
+        : left + cell_width;
+    const int bottom = row == rows - 1
+        ? static_cast<int>(card.bottom)
+        : top + cell_height;
     return RECT{left, top, right, bottom};
-}
-
-inline void AddChoice(State& state, const RECT& preview, const RECT& target)
-{
-    state.choices.push_back(Choice{preview, target});
 }
 
 inline std::vector<RECT> CardRects(HWND popup)
@@ -162,16 +169,26 @@ inline std::vector<RECT> CardRects(HWND popup)
     const int margin = Scale(14, dpi);
     const int gap = Scale(10, dpi);
     const int title_height = Scale(48, dpi);
-    const int card_width = std::max(1, (RectWidth(client) - margin * 2 - gap) / 2);
-    const int available_height = std::max(1, RectHeight(client) - title_height - margin * 2 - gap);
+    const int card_width = std::max(
+        1,
+        (RectWidth(client) - margin * 2 - gap) / 2);
+    const int available_height = std::max(
+        1,
+        RectHeight(client) - title_height - margin * 2 - gap);
     const int card_height = std::max(1, available_height / 2);
     const int left = margin;
     const int top = margin + title_height;
     return {
         RECT{left, top, left + card_width, top + card_height},
-        RECT{left + card_width + gap, top, client.right - margin, top + card_height},
-        RECT{left, top + card_height + gap, left + card_width, client.bottom - margin},
-        RECT{left + card_width + gap, top + card_height + gap, client.right - margin, client.bottom - margin}};
+        RECT{left + card_width + gap, top, static_cast<int>(client.right) - margin, top + card_height},
+        RECT{left, top + card_height + gap, left + card_width, static_cast<int>(client.bottom) - margin},
+        RECT{left + card_width + gap, top + card_height + gap,
+             static_cast<int>(client.right) - margin, static_cast<int>(client.bottom) - margin}};
+}
+
+inline void AddChoice(State& state, const RECT& preview, const RECT& target)
+{
+    state.choices.push_back(Choice{preview, target});
 }
 
 inline void BuildChoices(HWND popup, HWND target)
@@ -191,13 +208,11 @@ inline void BuildChoices(HWND popup, HWND target)
     const int half_h = height / 2;
     const int third_w = width / 3;
 
-    // Layout 1: equal halves.
     AddChoice(state, CellRect(cards[0], 0, 2, 0, 1, gap),
         RECT{work.left, work.top, work.left + half_w, work.bottom});
     AddChoice(state, CellRect(cards[0], 1, 2, 0, 1, gap),
         RECT{work.left + half_w, work.top, work.right, work.bottom});
 
-    // Layout 2: equal thirds.
     AddChoice(state, CellRect(cards[1], 0, 3, 0, 1, gap),
         RECT{work.left, work.top, work.left + third_w, work.bottom});
     AddChoice(state, CellRect(cards[1], 1, 3, 0, 1, gap),
@@ -205,13 +220,12 @@ inline void BuildChoices(HWND popup, HWND target)
     AddChoice(state, CellRect(cards[1], 2, 3, 0, 1, gap),
         RECT{work.right - third_w, work.top, work.right, work.bottom});
 
-    // Layout 3: two-thirds + one-third.
-    const RECT two_thirds_preview = RECT{
+    const RECT two_thirds_preview{
         cards[2].left,
         cards[2].top,
         cards[2].left + (RectWidth(cards[2]) * 2) / 3 - gap / 2,
         cards[2].bottom};
-    const RECT one_third_preview = RECT{
+    const RECT one_third_preview{
         two_thirds_preview.right + gap,
         cards[2].top,
         cards[2].right,
@@ -221,7 +235,6 @@ inline void BuildChoices(HWND popup, HWND target)
     AddChoice(state, one_third_preview,
         RECT{work.left + (width * 2) / 3, work.top, work.right, work.bottom});
 
-    // Layout 4: quarters.
     AddChoice(state, CellRect(cards[3], 0, 2, 0, 2, gap),
         RECT{work.left, work.top, work.left + half_w, work.top + half_h});
     AddChoice(state, CellRect(cards[3], 1, 2, 0, 2, gap),
@@ -230,6 +243,29 @@ inline void BuildChoices(HWND popup, HWND target)
         RECT{work.left, work.top + half_h, work.left + half_w, work.bottom});
     AddChoice(state, CellRect(cards[3], 1, 2, 1, 2, gap),
         RECT{work.left + half_w, work.top + half_h, work.right, work.bottom});
+}
+
+inline void ApplyMaterial(HWND window) noexcept
+{
+    if (window == nullptr) return;
+    const BOOL dark = TRUE;
+    (void)DwmSetWindowAttribute(
+        window,
+        DWMWA_USE_IMMERSIVE_DARK_MODE,
+        &dark,
+        static_cast<DWORD>(sizeof(dark)));
+    const DWM_WINDOW_CORNER_PREFERENCE corner = DWMWCP_ROUND;
+    (void)DwmSetWindowAttribute(
+        window,
+        DWMWA_WINDOW_CORNER_PREFERENCE,
+        &corner,
+        static_cast<DWORD>(sizeof(corner)));
+    const DWM_SYSTEMBACKDROP_TYPE backdrop = DWMSBT_TRANSIENTWINDOW;
+    (void)DwmSetWindowAttribute(
+        window,
+        DWMWA_SYSTEMBACKDROP_TYPE,
+        &backdrop,
+        static_cast<DWORD>(sizeof(backdrop)));
 }
 
 inline void Hide() noexcept
@@ -259,13 +295,22 @@ inline void ShowFor(HWND target)
             &frame,
             sizeof(frame))))
     {
-        GetWindowRect(target, &frame);
+        (void)GetWindowRect(target, &frame);
     }
+
     const RECT work = WorkAreaFor(target);
-    int x = frame.right - width - Scale(10, dpi);
-    int y = frame.top + Scale(36, dpi);
-    x = std::clamp(x, work.left + Scale(8, dpi), std::max(work.left + Scale(8, dpi), work.right - width - Scale(8, dpi)));
-    y = std::clamp(y, work.top + Scale(8, dpi), std::max(work.top + Scale(8, dpi), work.bottom - height - Scale(8, dpi)));
+    int x = static_cast<int>(frame.right) - width - Scale(10, dpi);
+    int y = static_cast<int>(frame.top) + Scale(36, dpi);
+    const int min_x = static_cast<int>(work.left) + Scale(8, dpi);
+    const int min_y = static_cast<int>(work.top) + Scale(8, dpi);
+    const int max_x = std::max(
+        min_x,
+        static_cast<int>(work.right) - width - Scale(8, dpi));
+    const int max_y = std::max(
+        min_y,
+        static_cast<int>(work.bottom) - height - Scale(8, dpi));
+    x = std::clamp(x, min_x, max_x);
+    y = std::clamp(y, min_y, max_y);
 
     SetWindowPos(
         state.popup,
@@ -275,7 +320,7 @@ inline void ShowFor(HWND target)
         width,
         height,
         SWP_NOACTIVATE | SWP_SHOWWINDOW);
-    ApplyWebFlyoutMaterial(state.popup);
+    ApplyMaterial(state.popup);
     BuildChoices(state.popup, target);
     InvalidateRect(state.popup, nullptr, FALSE);
 }
@@ -288,6 +333,7 @@ inline void ApplyChoice(std::size_t index)
         Hide();
         return;
     }
+
     const HWND target = state.target;
     const RECT destination = state.choices[index].target;
     if (IsZoomed(target)) ShowWindow(target, SW_RESTORE);
@@ -301,7 +347,8 @@ inline void ApplyChoice(std::size_t index)
         SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
     if (moved != FALSE)
     {
-        if (CloudOSNativeWindowManager* manager = NativeSnapAssist::ActiveWindowManager(); manager != nullptr)
+        if (CloudOSNativeWindowManager* manager = NativeSnapAssist::ActiveWindowManager();
+            manager != nullptr)
         {
             manager->SetWindowFloating(target, true);
             manager->Reconcile();
@@ -309,7 +356,7 @@ inline void ApplyChoice(std::size_t index)
         }
         else
         {
-            SetForegroundWindow(target);
+            (void)SetForegroundWindow(target);
         }
     }
     Hide();
@@ -321,20 +368,27 @@ inline void PaintPopup(HWND window)
     PAINTSTRUCT paint{};
     HDC screen = BeginPaint(window, &paint);
     if (screen == nullptr) return;
+
     RECT client{};
     GetClientRect(window, &client);
     const int width = std::max(1, RectWidth(client));
     const int height = std::max(1, RectHeight(client));
     HDC memory = CreateCompatibleDC(screen);
     HBITMAP bitmap = CreateCompatibleBitmap(screen, width, height);
+    if (memory == nullptr || bitmap == nullptr)
+    {
+        if (bitmap != nullptr) DeleteObject(bitmap);
+        if (memory != nullptr) DeleteDC(memory);
+        EndPaint(window, &paint);
+        return;
+    }
     HGDIOBJ old_bitmap = SelectObject(memory, bitmap);
-
     WebSkin::PaintWindowBackground(memory, client);
+
     Gdiplus::Graphics graphics(memory);
     graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
     graphics.SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
     const UINT dpi = GetDpiForWindow(window);
-
     Gdiplus::Font title_font(
         L"Segoe UI Variable Display",
         static_cast<Gdiplus::REAL>(Scale(16, dpi)),
@@ -347,21 +401,25 @@ inline void PaintPopup(HWND window)
         Gdiplus::UnitPixel);
     Gdiplus::SolidBrush title(WebSkin::GdiColor(WebSkin::TextPrimary));
     Gdiplus::SolidBrush meta(WebSkin::GdiColor(WebSkin::TextTertiary));
+
     graphics.DrawString(
         L"Organizar janela",
         -1,
         &title_font,
-        Gdiplus::PointF(static_cast<Gdiplus::REAL>(Scale(16, dpi)), static_cast<Gdiplus::REAL>(Scale(11, dpi))),
+        Gdiplus::PointF(
+            static_cast<Gdiplus::REAL>(Scale(16, dpi)),
+            static_cast<Gdiplus::REAL>(Scale(11, dpi))),
         &title);
     graphics.DrawString(
         L"Escolha uma zona · sem sair do aplicativo",
         -1,
         &meta_font,
-        Gdiplus::PointF(static_cast<Gdiplus::REAL>(Scale(17, dpi)), static_cast<Gdiplus::REAL>(Scale(32, dpi))),
+        Gdiplus::PointF(
+            static_cast<Gdiplus::REAL>(Scale(17, dpi)),
+            static_cast<Gdiplus::REAL>(Scale(32, dpi))),
         &meta);
 
-    const std::vector<RECT> cards = CardRects(window);
-    for (const RECT& card : cards)
+    for (const RECT& card : CardRects(window))
     {
         WebSkin::DrawElevatedPanel(
             graphics,
@@ -379,30 +437,26 @@ inline void PaintPopup(HWND window)
     {
         const RECT& rect = state.choices[index].preview;
         const bool hot = state.hovered_choice == static_cast<int>(index);
+        const Gdiplus::RectF surface(
+            static_cast<Gdiplus::REAL>(rect.left),
+            static_cast<Gdiplus::REAL>(rect.top),
+            static_cast<Gdiplus::REAL>(std::max(1, RectWidth(rect))),
+            static_cast<Gdiplus::REAL>(std::max(1, RectHeight(rect))));
         WebSkin::DrawRoundedPanel(
             graphics,
-            Gdiplus::RectF(
-                static_cast<Gdiplus::REAL>(rect.left),
-                static_cast<Gdiplus::REAL>(rect.top),
-                static_cast<Gdiplus::REAL>(std::max(1, RectWidth(rect))),
-                static_cast<Gdiplus::REAL>(std::max(1, RectHeight(rect)))),
+            surface,
             static_cast<Gdiplus::REAL>(Scale(7, dpi)),
             WebSkin::GdiColor(hot ? WebSkin::AccentSubtle : WebSkin::BgElevated, hot ? 255 : 230),
             WebSkin::GdiColor(hot ? WebSkin::AccentCyan : WebSkin::BorderStrong, hot ? 245 : 190),
             hot ? 1.5f : 1.0f);
         if (hot)
         {
-            Gdiplus::PointF cursor(
-                static_cast<Gdiplus::REAL>((rect.left + rect.right) / 2),
-                static_cast<Gdiplus::REAL>((rect.top + rect.bottom) / 2));
             WebSkin::DrawRevealHighlight(
                 graphics,
-                Gdiplus::RectF(
-                    static_cast<Gdiplus::REAL>(rect.left),
-                    static_cast<Gdiplus::REAL>(rect.top),
-                    static_cast<Gdiplus::REAL>(std::max(1, RectWidth(rect))),
-                    static_cast<Gdiplus::REAL>(std::max(1, RectHeight(rect)))),
-                cursor,
+                surface,
+                Gdiplus::PointF(
+                    static_cast<Gdiplus::REAL>((rect.left + rect.right) / 2),
+                    static_cast<Gdiplus::REAL>((rect.top + rect.bottom) / 2)),
                 static_cast<float>(Scale(70, dpi)),
                 WebSkin::GdiColor(WebSkin::AccentCyan, 58));
         }
@@ -444,7 +498,7 @@ inline void Poll()
             state.hover_started = now;
         }
         else if (now - state.hover_started >= kHoverDelayMilliseconds &&
-                 (state.popup == nullptr || !IsWindowVisible(state.popup) || state.target != candidate))
+            (state.popup == nullptr || !IsWindowVisible(state.popup) || state.target != candidate))
         {
             ShowFor(candidate);
         }
@@ -460,7 +514,11 @@ inline void Poll()
     }
 }
 
-inline LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM w_param, LPARAM l_param)
+inline LRESULT CALLBACK WindowProcedure(
+    HWND window,
+    UINT message,
+    WPARAM w_param,
+    LPARAM l_param)
 {
     State& state = GetState();
     if (window == state.engine)
@@ -534,8 +592,14 @@ inline bool EnsurePopup()
         kPopupClass,
         L"Snap Layouts - CloudOS",
         WS_POPUP | WS_CLIPCHILDREN,
-        0, 0, 1, 1,
-        nullptr, nullptr, state.instance, nullptr);
+        0,
+        0,
+        1,
+        1,
+        nullptr,
+        nullptr,
+        state.instance,
+        nullptr);
     return state.popup != nullptr;
 }
 
@@ -570,7 +634,10 @@ inline bool Initialize() noexcept
         kEngineClass,
         L"",
         0,
-        0, 0, 0, 0,
+        0,
+        0,
+        0,
+        0,
         HWND_MESSAGE,
         nullptr,
         state.instance,
