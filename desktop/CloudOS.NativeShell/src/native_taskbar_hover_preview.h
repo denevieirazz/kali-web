@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Windows.h>
+#include <dwmapi.h>
 
 class CloudOSNativeWindowManager;
 
