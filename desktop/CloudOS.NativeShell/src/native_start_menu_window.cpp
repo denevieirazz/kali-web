@@ -46,6 +46,7 @@ constexpr UINT kContextOpenLocation = 9204;
 constexpr UINT kContextMoveLeft = 9205;
 constexpr UINT kContextMoveRight = 9206;
 constexpr UINT kContextRefreshIndex = 9207;
+constexpr UINT kContextClearRecommendations = 9208;
 
 void SetControlFont(HWND control, HFONT font)
 {
@@ -695,8 +696,8 @@ void CloudOSNativeStartMenuWindow::PaintHome(
                     static_cast<REAL>(tile_height)),
                 static_cast<REAL>(Scale(WebSkin::RadiusLarge, dpi)),
                 WebSkin::GdiColor(WebSkin::BgHover, 225),
-                WebSkin::GdiColor(WebSkin::BorderStrong),
-                1.0f);
+                WebSkin::GdiColor(keyboard_home_navigation_ ? WebSkin::Accent : WebSkin::BorderStrong),
+                keyboard_home_navigation_ ? 1.5f : 1.0f);
         }
 
         const int icon_size = Scale(40, dpi);
@@ -789,8 +790,10 @@ void CloudOSNativeStartMenuWindow::PaintHome(
                 static_cast<REAL>(card_height)),
             static_cast<REAL>(Scale(WebSkin::RadiusLarge, dpi)),
             WebSkin::GdiColor(hot ? WebSkin::BgHover : WebSkin::BgSecondary, 218),
-            WebSkin::GdiColor(hot ? WebSkin::BorderStrong : WebSkin::BorderDefault),
-            1.0f);
+            WebSkin::GdiColor(
+                hot && keyboard_home_navigation_ ? WebSkin::Accent :
+                hot ? WebSkin::BorderStrong : WebSkin::BorderDefault),
+            hot && keyboard_home_navigation_ ? 1.5f : 1.0f);
 
         const int icon_size = Scale(34, dpi);
         NativeIconRenderer::DrawAetherSquircle(
@@ -831,7 +834,7 @@ void CloudOSNativeStartMenuWindow::PaintHome(
         dc,
         small_font_,
         WebSkin::TextTertiary,
-        L"Digite para pesquisar  ·  F5 reindexa  ·  Clique direito para fixar ou organizar",
+        L"Setas navegam  ·  Enter abre  ·  Shift+F10 menu  ·  Digite para pesquisar  ·  F5 reindexa",
         hint_rect,
         DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
@@ -1182,6 +1185,8 @@ void CloudOSNativeStartMenuWindow::RefreshResults()
     if (!query.empty())
     {
         view_mode_ = ViewMode::Search;
+        hovered_home_index_ = -1;
+        keyboard_home_navigation_ = false;
     }
     else if (view_mode_ == ViewMode::Search)
     {
@@ -1364,6 +1369,114 @@ void CloudOSNativeStartMenuWindow::MoveSelection(int delta)
     ListView_EnsureVisible(app_list_, selected, FALSE);
 }
 
+void CloudOSNativeStartMenuWindow::MoveHomeSelection(int horizontal, int vertical)
+{
+    if (window_ == nullptr || view_mode_ != ViewMode::Home || !SearchText(search_edit_).empty())
+    {
+        return;
+    }
+
+    if (home_hits_.empty())
+    {
+        InvalidateRect(window_, nullptr, FALSE);
+        UpdateWindow(window_);
+    }
+    if (home_hits_.empty())
+    {
+        return;
+    }
+
+    keyboard_home_navigation_ = true;
+    if (hovered_home_index_ < 0 || hovered_home_index_ >= static_cast<int>(home_hits_.size()))
+    {
+        hovered_home_index_ = (horizontal < 0 || vertical < 0)
+            ? static_cast<int>(home_hits_.size()) - 1
+            : 0;
+        InvalidateRect(window_, nullptr, FALSE);
+        return;
+    }
+
+    const RECT current = home_hits_[static_cast<std::size_t>(hovered_home_index_)].rect;
+    const long current_x = (current.left + current.right) / 2;
+    const long current_y = (current.top + current.bottom) / 2;
+    long long best_score = 0x7fffffffffffffffLL;
+    int best_index = hovered_home_index_;
+
+    for (std::size_t index = 0; index < home_hits_.size(); ++index)
+    {
+        if (static_cast<int>(index) == hovered_home_index_)
+        {
+            continue;
+        }
+        const RECT candidate = home_hits_[index].rect;
+        const long candidate_x = (candidate.left + candidate.right) / 2;
+        const long candidate_y = (candidate.top + candidate.bottom) / 2;
+        const long delta_x = candidate_x - current_x;
+        const long delta_y = candidate_y - current_y;
+
+        if ((horizontal < 0 && delta_x >= 0) ||
+            (horizontal > 0 && delta_x <= 0) ||
+            (vertical < 0 && delta_y >= 0) ||
+            (vertical > 0 && delta_y <= 0))
+        {
+            continue;
+        }
+
+        const long primary = horizontal != 0 ? std::abs(delta_x) : std::abs(delta_y);
+        const long secondary = horizontal != 0 ? std::abs(delta_y) : std::abs(delta_x);
+        const long long score = static_cast<long long>(primary) * 1000LL + secondary;
+        if (score < best_score)
+        {
+            best_score = score;
+            best_index = static_cast<int>(index);
+        }
+    }
+
+    hovered_home_index_ = best_index;
+    InvalidateRect(window_, nullptr, FALSE);
+}
+
+void CloudOSNativeStartMenuWindow::SelectHomeEdge(bool last)
+{
+    if (window_ == nullptr || view_mode_ != ViewMode::Home || !SearchText(search_edit_).empty())
+    {
+        return;
+    }
+    if (home_hits_.empty())
+    {
+        InvalidateRect(window_, nullptr, FALSE);
+        UpdateWindow(window_);
+    }
+    if (home_hits_.empty())
+    {
+        return;
+    }
+    keyboard_home_navigation_ = true;
+    hovered_home_index_ = last ? static_cast<int>(home_hits_.size()) - 1 : 0;
+    InvalidateRect(window_, nullptr, FALSE);
+}
+
+void CloudOSNativeStartMenuWindow::ActivateHomeSelection()
+{
+    if (hovered_home_index_ < 0 || hovered_home_index_ >= static_cast<int>(home_hits_.size()))
+    {
+        return;
+    }
+    ExecutePin(home_hits_[static_cast<std::size_t>(hovered_home_index_)].pin);
+}
+
+void CloudOSNativeStartMenuWindow::ShowHomeSelectionContextMenu()
+{
+    if (hovered_home_index_ < 0 || hovered_home_index_ >= static_cast<int>(home_hits_.size()))
+    {
+        return;
+    }
+    const RECT rect = home_hits_[static_cast<std::size_t>(hovered_home_index_)].rect;
+    POINT point{(rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2};
+    ClientToScreen(window_, &point);
+    ShowPinContextMenu(static_cast<std::size_t>(hovered_home_index_), point);
+}
+
 void CloudOSNativeStartMenuWindow::RefreshIndexer()
 {
     NativeStartIndex::Instance().RefreshAsync();
@@ -1375,6 +1488,8 @@ void CloudOSNativeStartMenuWindow::ToggleAllApps()
 {
     SetWindowTextW(search_edit_, L"");
     view_mode_ = view_mode_ == ViewMode::Home ? ViewMode::AllApps : ViewMode::Home;
+    hovered_home_index_ = -1;
+    keyboard_home_navigation_ = false;
     RefreshResults();
     if (view_mode_ == ViewMode::AllApps && app_list_ != nullptr)
     {
@@ -1547,6 +1662,11 @@ void CloudOSNativeStartMenuWindow::ShowPinContextMenu(
             kContextMoveRight,
             L"Mover para a direita");
     }
+    if (hit.recommended)
+    {
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING, kContextClearRecommendations, L"Redefinir recomendacoes");
+    }
 
     const int command = TrackPopupMenu(
         menu,
@@ -1585,6 +1705,12 @@ void CloudOSNativeStartMenuWindow::ShowPinContextMenu(
             RefreshHome();
         }
         break;
+    case kContextClearRecommendations:
+        StartMenuMRUTracker::Instance().Clear();
+        hovered_home_index_ = -1;
+        keyboard_home_navigation_ = false;
+        RefreshHome();
+        break;
     default:
         break;
     }
@@ -1601,6 +1727,7 @@ void CloudOSNativeStartMenuWindow::ShowNear(const RECT& taskbar_bounds)
     SetWindowTextW(search_edit_, L"");
     view_mode_ = ViewMode::Home;
     hovered_home_index_ = -1;
+    keyboard_home_navigation_ = false;
     RefreshHome();
     RefreshResults();
 
@@ -1649,6 +1776,7 @@ void CloudOSNativeStartMenuWindow::FocusSearch()
 {
     if (search_edit_ != nullptr)
     {
+        keyboard_home_navigation_ = false;
         SetFocus(search_edit_);
         SendMessageW(search_edit_, EM_SETSEL, 0, -1);
     }
@@ -1709,6 +1837,7 @@ LRESULT CloudOSNativeStartMenuWindow::HandleMessage(
     case WM_MOUSEMOVE:
         if (view_mode_ == ViewMode::Home)
         {
+            keyboard_home_navigation_ = false;
             if (!tracking_mouse_)
             {
                 TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, window_, 0};
@@ -1735,12 +1864,16 @@ LRESULT CloudOSNativeStartMenuWindow::HandleMessage(
         return 0;
     case WM_MOUSELEAVE:
         tracking_mouse_ = false;
-        hovered_home_index_ = -1;
-        InvalidateRect(window_, nullptr, FALSE);
+        if (!keyboard_home_navigation_)
+        {
+            hovered_home_index_ = -1;
+            InvalidateRect(window_, nullptr, FALSE);
+        }
         return 0;
     case WM_LBUTTONUP:
         if (view_mode_ == ViewMode::Home)
         {
+            keyboard_home_navigation_ = false;
             const POINT point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
             for (const HomeHit& hit : home_hits_)
             {
@@ -1755,11 +1888,13 @@ LRESULT CloudOSNativeStartMenuWindow::HandleMessage(
     case WM_RBUTTONUP:
         if (view_mode_ == ViewMode::Home)
         {
+            keyboard_home_navigation_ = false;
             const POINT client_point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
             for (std::size_t index = 0; index < home_hits_.size(); ++index)
             {
                 if (Contains(home_hits_[index].rect, client_point))
                 {
+                    hovered_home_index_ = static_cast<int>(index);
                     POINT screen_point = client_point;
                     ClientToScreen(window_, &screen_point);
                     ShowPinContextMenu(index, screen_point);
@@ -1855,12 +1990,59 @@ LRESULT CloudOSNativeStartMenuWindow::HandleMessage(
         break;
     }
     case WM_KEYDOWN:
+        if (view_mode_ == ViewMode::Home && SearchText(search_edit_).empty())
+        {
+            switch (w_param)
+            {
+            case VK_LEFT:
+                MoveHomeSelection(-1, 0);
+                return 0;
+            case VK_RIGHT:
+                MoveHomeSelection(1, 0);
+                return 0;
+            case VK_UP:
+                MoveHomeSelection(0, -1);
+                return 0;
+            case VK_DOWN:
+                MoveHomeSelection(0, 1);
+                return 0;
+            case VK_HOME:
+                SelectHomeEdge(false);
+                return 0;
+            case VK_END:
+                SelectHomeEdge(true);
+                return 0;
+            case VK_RETURN:
+            case VK_SPACE:
+                ActivateHomeSelection();
+                return 0;
+            case VK_APPS:
+                ShowHomeSelectionContextMenu();
+                return 0;
+            case VK_F10:
+                if ((GetKeyState(VK_SHIFT) & 0x8000) != 0)
+                {
+                    ShowHomeSelectionContextMenu();
+                    return 0;
+                }
+                break;
+            default:
+                break;
+            }
+        }
+        if (w_param == L'F' && (GetKeyState(VK_CONTROL) & 0x8000) != 0)
+        {
+            FocusSearch();
+            return 0;
+        }
         if (w_param == VK_ESCAPE)
         {
             if (view_mode_ != ViewMode::Home)
             {
                 SetWindowTextW(search_edit_, L"");
                 view_mode_ = ViewMode::Home;
+                hovered_home_index_ = -1;
+                keyboard_home_navigation_ = false;
                 RefreshResults();
                 FocusSearch();
             }
@@ -1873,6 +2055,18 @@ LRESULT CloudOSNativeStartMenuWindow::HandleMessage(
         if (w_param == VK_F5)
         {
             RefreshIndexer();
+            return 0;
+        }
+        break;
+    case WM_CHAR:
+        if (view_mode_ == ViewMode::Home &&
+            SearchText(search_edit_).empty() &&
+            w_param >= 0x21 &&
+            (GetKeyState(VK_CONTROL) & 0x8000) == 0 &&
+            (GetKeyState(VK_MENU) & 0x8000) == 0)
+        {
+            FocusSearch();
+            SendMessageW(search_edit_, WM_CHAR, w_param, l_param);
             return 0;
         }
         break;
@@ -1904,32 +2098,92 @@ LRESULT CALLBACK CloudOSNativeStartMenuWindow::SearchSubclass(
     auto* self = reinterpret_cast<CloudOSNativeStartMenuWindow*>(reference_data);
     if (message == WM_KEYDOWN && self != nullptr)
     {
+        const bool home_empty = self->view_mode_ == ViewMode::Home && SearchText(window).empty();
         switch (w_param)
         {
         case VK_DOWN:
-            if (self->view_mode_ == ViewMode::Home && SearchText(window).empty())
+            if (home_empty)
             {
-                self->view_mode_ = ViewMode::AllApps;
-                self->RefreshResults();
+                self->MoveHomeSelection(0, 1);
+                SetFocus(self->window_);
+                return 0;
             }
             self->MoveSelection(1);
             SetFocus(self->app_list_);
             return 0;
         case VK_UP:
+            if (home_empty)
+            {
+                self->MoveHomeSelection(0, -1);
+                SetFocus(self->window_);
+                return 0;
+            }
             self->MoveSelection(-1);
             SetFocus(self->app_list_);
             return 0;
+        case VK_LEFT:
+            if (home_empty)
+            {
+                self->MoveHomeSelection(-1, 0);
+                SetFocus(self->window_);
+                return 0;
+            }
+            break;
+        case VK_RIGHT:
+            if (home_empty)
+            {
+                self->MoveHomeSelection(1, 0);
+                SetFocus(self->window_);
+                return 0;
+            }
+            break;
+        case VK_HOME:
+            if (home_empty)
+            {
+                self->SelectHomeEdge(false);
+                SetFocus(self->window_);
+                return 0;
+            }
+            break;
+        case VK_END:
+            if (home_empty)
+            {
+                self->SelectHomeEdge(true);
+                SetFocus(self->window_);
+                return 0;
+            }
+            break;
         case VK_RETURN:
-            if (self->view_mode_ != ViewMode::Home || !SearchText(window).empty())
+            if (home_empty)
+            {
+                self->ActivateHomeSelection();
+            }
+            else
             {
                 self->ExecuteSelection();
             }
             return 0;
+        case VK_APPS:
+            if (home_empty)
+            {
+                self->ShowHomeSelectionContextMenu();
+                return 0;
+            }
+            break;
+        case VK_F10:
+            if (home_empty && (GetKeyState(VK_SHIFT) & 0x8000) != 0)
+            {
+                self->ShowHomeSelectionContextMenu();
+                return 0;
+            }
+            break;
         case VK_ESCAPE:
             if (self->view_mode_ != ViewMode::Home || !SearchText(window).empty())
             {
                 SetWindowTextW(window, L"");
                 self->view_mode_ = ViewMode::Home;
+                self->hovered_home_index_ = -1;
+                self->keyboard_home_navigation_ = false;
                 self->RefreshResults();
             }
             else
