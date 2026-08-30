@@ -408,11 +408,6 @@ bool CloudOSTaskbarAppBar::Create(
     data.hWnd = window_;
     data.uCallbackMessage = kAppBarCallback;
     registered_ = SHAppBarMessage(ABM_NEW, &data) != FALSE;
-    if (!registered_)
-    {
-        Destroy();
-        return false;
-    }
 
     DarkWindow(window_, false);
     const COLORREF border = WebSkin::BorderDefault;
@@ -490,9 +485,12 @@ void CloudOSTaskbarAppBar::PositionAppBar()
     data.uEdge = ABE_BOTTOM;
     data.rc = info.rcMonitor;
     data.rc.top = data.rc.bottom - height;
-    (void)SHAppBarMessage(ABM_QUERYPOS, &data);
-    data.rc.top = data.rc.bottom - height;
-    (void)SHAppBarMessage(ABM_SETPOS, &data);
+    if (registered_)
+    {
+        (void)SHAppBarMessage(ABM_QUERYPOS, &data);
+        data.rc.top = data.rc.bottom - height;
+        (void)SHAppBarMessage(ABM_SETPOS, &data);
+    }
 
     SetWindowPos(
         window_,

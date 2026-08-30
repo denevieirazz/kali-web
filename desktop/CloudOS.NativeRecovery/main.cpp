@@ -323,7 +323,8 @@ bool ReadHealthSnapshot(NativeHealthSnapshotV9* snapshot)
 bool HeartbeatFresh(const NativeHealthSnapshotV9& snapshot, DWORD maximum_age_ms) noexcept
 {
     const ULONGLONG now = GetTickCount64();
-    if (snapshot.heartbeat_tick_ms > now) return false;
+    if (snapshot.heartbeat_tick_ms > now + 2000u) return false;
+    if (snapshot.heartbeat_tick_ms > now) return true;
     return now - snapshot.heartbeat_tick_ms <= static_cast<ULONGLONG>(maximum_age_ms);
 }
 

@@ -1,5 +1,16 @@
 $ErrorActionPreference = 'Stop'
 
+if (-not ('CloudOSHealthNativeV9' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class CloudOSHealthNativeV9 {
+    [DllImport("kernel32.dll")]
+    public static extern ulong GetTickCount64();
+}
+'@
+}
+
 $script:CloudOSHealthMappingNameV9 = 'Local\CloudOS.NativeShell.Health.v9'
 $script:CloudOSReadyEventNameV9 = 'Local\CloudOS.NativeShell.Ready.v9'
 $script:CloudOSHealthMagicV9 = [uint32]0x39484F43
@@ -125,8 +136,9 @@ function Test-CloudOSHeartbeatFreshV9 {
         [int]$MaximumAgeSeconds = 5
     )
 
-    $now = [uint64][Environment]::TickCount64
-    if ([uint64]$Snapshot.heartbeat_tick_ms -gt $now) { return $false }
+    $now = [CloudOSHealthNativeV9]::GetTickCount64()
+    if ([uint64]$Snapshot.heartbeat_tick_ms -gt ($now + 2000)) { return $false }
+    if ([uint64]$Snapshot.heartbeat_tick_ms -gt $now) { return $true }
     $maximumAgeMilliseconds = [uint64]$MaximumAgeSeconds * [uint64]1000
     return (($now - [uint64]$Snapshot.heartbeat_tick_ms) -le $maximumAgeMilliseconds)
 }

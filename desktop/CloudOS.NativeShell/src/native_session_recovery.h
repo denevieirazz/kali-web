@@ -9,6 +9,7 @@
 #include <string_view>
 #include <vector>
 
+#include "native_health_bootstrap_v9.h"
 #include "native_lifecycle_v10.h"
 #include "native_session_events_v7.h"
 #include "native_window_manager.h"
@@ -194,6 +195,7 @@ private:
 
         void Checkpoint() noexcept
         {
+            HealthBootstrapV9::bootstrap.Pulse();
             if (owner_ == nullptr || owner_->session_window_manager_ == nullptr)
             {
                 return;
@@ -216,6 +218,7 @@ private:
 
         void Revalidate(NativeLifecycleV10::RevalidateReason) noexcept
         {
+            HealthBootstrapV9::bootstrap.Pulse();
             if (owner_ == nullptr)
             {
                 return;

@@ -5,6 +5,7 @@
 #include <shellapi.h>
 
 #include <array>
+#include <string>
 #include <string_view>
 
 #include "../../CloudOS.NativeCommon/native_supervisor_protocol_v11.h"
@@ -46,11 +47,21 @@ inline bool HasCommandLineArgument(std::wstring_view expected) noexcept
 
 inline bool RequiredShellSurfacesExist() noexcept
 {
-    return FindWindowW(DesktopClass, nullptr) != nullptr &&
-        FindWindowW(TaskbarClass, nullptr) != nullptr &&
-        FindWindowW(StartClass, nullptr) != nullptr &&
-        FindWindowW(QuickSettingsClass, nullptr) != nullptr &&
-        FindWindowW(NotificationClass, nullptr) != nullptr;
+    const DWORD current_pid = GetCurrentProcessId();
+    const auto owns = [current_pid](const wchar_t* class_name) noexcept
+    {
+        HWND window = FindWindowW(class_name, nullptr);
+        if (window == nullptr) return false;
+        DWORD window_pid = 0;
+        GetWindowThreadProcessId(window, &window_pid);
+        return window_pid == current_pid;
+    };
+
+    return owns(DesktopClass) &&
+        owns(TaskbarClass) &&
+        owns(StartClass) &&
+        owns(QuickSettingsClass) &&
+        owns(NotificationClass);
 }
 
 class Bootstrap final
@@ -97,6 +108,14 @@ public:
         TryAttach(FindWindowW(DesktopClass, nullptr));
     }
 
+    void Pulse() noexcept
+    {
+        if (desktop_ != nullptr && IsWindow(desktop_))
+        {
+            signal_.Pulse(desktop_);
+        }
+    }
+
 private:
     static void CALLBACK WinEventCallback(
         HWINEVENTHOOK,
@@ -127,6 +146,10 @@ private:
         }
         if (desktop == nullptr || !IsWindow(desktop)) return;
 
+        DWORD window_pid = 0;
+        GetWindowThreadProcessId(desktop, &window_pid);
+        if (window_pid != GetCurrentProcessId()) return;
+
         if (!signal_.Initialize()) return;
         if (SetWindowSubclass(
                 desktop,
@@ -141,6 +164,7 @@ private:
         desktop_ = desktop;
         ready_ = false;
         consecutive_ready_checks_ = 0;
+        ChangeWindowMessageFilterEx(desktop_, SupervisorProtocolV11::RequestGracefulExitMessage, MSGFLT_ALLOW, nullptr);
         signal_.Pulse(desktop_);
         if (SetTimer(desktop_, HealthTimerId, HealthIntervalMilliseconds, nullptr) == 0)
         {

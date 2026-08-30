@@ -12,6 +12,8 @@
 #include <shellapi.h>
 #include <shlobj.h>
 
+#include "../../CloudOS.NativeCommon/native_supervisor_protocol_v11.h"
+
 #include <algorithm>
 #include <filesystem>
 #include <string>
@@ -673,6 +675,9 @@ LRESULT CloudOSNativeDesktopWindow::HandleMessage(HWND window, UINT message, WPA
     case WM_KEYDOWN:
         if (w_param == VK_F5) { Redraw(); return 0; }
         break;
+    case SupervisorProtocolV11::RequestGracefulExitMessage:
+        PostQuitMessage(0);
+        return 0;
     case WM_DESTROY:
         NativeDesktopDropTarget::Unregister(hwnd_); hwnd_ = nullptr; return 0;
     default: break;
