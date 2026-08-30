@@ -6,6 +6,7 @@ $ErrorActionPreference = 'Stop'
 
 $rootPath = (Resolve-Path -LiteralPath $Root).Path
 $sourceRoots = @(
+    (Join-Path $rootPath 'desktop\CloudOS.NativeCommon'),
     (Join-Path $rootPath 'desktop\CloudOS.NativeRuntime'),
     (Join-Path $rootPath 'desktop\CloudOS.NativeShell'),
     (Join-Path $rootPath 'desktop\CloudOS.NativeRecovery'),
