@@ -126,7 +126,15 @@ Require 'Stale binary detection' $content.NativeStart @(
     'status --porcelain',
     'o codigo Git mudou desde o ultimo build',
     'existem alteracoes locais no codigo nativo/scripts',
+    'taskkill /F /IM CloudOS.exe',
     'build-cloudos-native.cmd'
 )
 
-Write-Host 'PASS: Taskbar V4 live geometry, power-user mouse controls, rich DWM preview, self-healing pins, smart Start recommendations, quick-access hub and stale-binary protection are protected.'
+$buildLabel = $content.NativeStart.IndexOf(':BUILD')
+$killBeforeBuild = $content.NativeStart.IndexOf('taskkill /F /IM CloudOS.exe', $buildLabel)
+$buildCall = $content.NativeStart.IndexOf('build-cloudos-native.cmd', $buildLabel)
+if ($buildLabel -lt 0 -or $killBeforeBuild -lt 0 -or $buildCall -lt 0 -or $killBeforeBuild -gt $buildCall) {
+    throw 'Native launcher must stop CloudOS.exe before invoking an automatic rebuild.'
+}
+
+Write-Host 'PASS: Taskbar V4 live geometry, power-user mouse controls, rich DWM preview, self-healing pins, smart Start recommendations, quick-access hub and safe stale-binary rebuilds are protected.'
