@@ -36,10 +36,16 @@ private:
     };
 
     void Layout();
+    void Paint();
     void RefreshResults();
     void ExecuteSelection();
     void MoveSelection(int delta);
     void RefreshIndexer();
+    void RebuildRowHeight();
+    LRESULT DrawOwnerButton(const DRAWITEMSTRUCT& item);
+    LRESULT CustomDrawResults(const NMLVCUSTOMDRAW& draw);
+    std::wstring ResultTitle(std::size_t index) const;
+    std::wstring ResultSubtitle(std::size_t index) const;
     LRESULT HandleMessage(HWND window, UINT message, WPARAM w_param, LPARAM l_param);
     static LRESULT CALLBACK SearchSubclass(
         HWND window,
@@ -59,10 +65,13 @@ private:
     HWND power_button_{};
     HWND footer_label_{};
     HFONT font_{};
+    HFONT small_font_{};
     HFONT title_font_{};
     HBRUSH background_{};
     HBRUSH edit_background_{};
+    HIMAGELIST row_height_image_list_{};
     std::vector<ResultRow> results_;
     std::size_t last_index_count_{};
+    bool search_focused_{};
 };
 } // namespace CloudOS
