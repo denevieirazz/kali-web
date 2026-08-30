@@ -97,9 +97,18 @@ if not exist "%OUT%\CloudOS.Supervisor.exe" (
 for %%F in ("%OUT%\CloudOS.exe") do set "EXE_SIZE=%%~zF"
 for %%F in ("%OUT%\CloudOS.NativeRuntime.dll") do set "RUNTIME_SIZE=%%~zF"
 for %%F in ("%OUT%\CloudOS.Supervisor.exe") do set "SUPERVISOR_SIZE=%%~zF"
-if "%EXE_SIZE%"=="0" exit /b 11
-if "%RUNTIME_SIZE%"=="0" exit /b 12
-if "%SUPERVISOR_SIZE%"=="0" exit /b 15
+if "%EXE_SIZE%"=="0" (
+  echo [CloudOS] ERRO: CloudOS.exe vazio.
+  exit /b 11
+)
+if "%RUNTIME_SIZE%"=="0" (
+  echo [CloudOS] ERRO: CloudOS.NativeRuntime.dll vazio.
+  exit /b 12
+)
+if "%SUPERVISOR_SIZE%"=="0" (
+  echo [CloudOS] ERRO: CloudOS.Supervisor.exe vazio.
+  exit /b 15
+)
 
 if exist "%OUT%\ui" (
   echo [CloudOS] Removendo assets obsoletos do antigo desktop web da saida nativa...
