@@ -53,17 +53,77 @@ foreach ($file in @('CloudOS.exe', 'CloudOS.NativeRuntime.dll')) {
 }
 Set-Content -LiteralPath (Join-Path $stage 'SHA256SUMS.txt') -Value $sumLines -Encoding ascii
 
+$packageVerifier = @'
+param(
+    [string]$Root = $PSScriptRoot
+)
+
+$ErrorActionPreference = 'Stop'
+$rootPath = (Resolve-Path -LiteralPath $Root).Path
+$manifestPath = Join-Path $rootPath 'cloudos-native-manifest.json'
+if (-not (Test-Path -LiteralPath $manifestPath)) {
+    throw "Manifesto ausente: $manifestPath"
+}
+
+$manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+if ($manifest.schema -ne 1 -or
+    $manifest.product -ne 'CloudOS Native Shell' -or
+    $manifest.shell_authority -ne 'C++/Win32' -or
+    $manifest.legacy_react_desktop -ne $false) {
+    throw 'Manifesto do pacote CloudOS Native invalido.'
+}
+
+foreach ($name in @('CloudOS.exe', 'CloudOS.NativeRuntime.dll')) {
+    $records = @($manifest.files | Where-Object { $_.name -eq $name })
+    if ($records.Count -ne 1) {
+        throw "Registro de integridade invalido para $name"
+    }
+
+    $path = Join-Path $rootPath $name
+    if (-not (Test-Path -LiteralPath $path)) {
+        throw "Arquivo ausente: $name"
+    }
+
+    $item = Get-Item -LiteralPath $path
+    if ($item.Length -le 0 -or [Int64]$records[0].size -ne [Int64]$item.Length) {
+        throw "Tamanho invalido: $name"
+    }
+
+    $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($hash -ne ([string]$records[0].sha256).ToLowerInvariant()) {
+        throw "SHA256 invalido: $name"
+    }
+}
+
+if (Test-Path -LiteralPath (Join-Path $rootPath 'ui')) {
+    throw 'Desktop web legado nao e permitido no pacote nativo.'
+}
+
+Write-Host '[CloudOS] INTEGRITY_OK: EXE, runtime e manifesto conferem.'
+'@
+Set-Content -LiteralPath (Join-Path $stage 'Verificar Integridade.ps1') -Value $packageVerifier -Encoding utf8
+
+$verifyLauncher = @'
+@echo off
+setlocal EnableExtensions
+set "ROOT=%~dp0"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%Verificar Integridade.ps1" -Root "%ROOT%"
+exit /b %ERRORLEVEL%
+'@
+Set-Content -LiteralPath (Join-Path $stage 'Verificar Integridade.cmd') -Value $verifyLauncher -Encoding ascii
+
 $launcher = @'
 @echo off
 setlocal EnableExtensions
 set "ROOT=%~dp0"
-if not exist "%ROOT%CloudOS.exe" (
-  echo [CloudOS] CloudOS.exe ausente neste pacote.
-  exit /b 2
+if not exist "%ROOT%Verificar Integridade.ps1" (
+  echo [CloudOS] Verificador de integridade ausente neste pacote.
+  exit /b 4
 )
-if not exist "%ROOT%CloudOS.NativeRuntime.dll" (
-  echo [CloudOS] CloudOS.NativeRuntime.dll ausente neste pacote.
-  exit /b 3
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%Verificar Integridade.ps1" -Root "%ROOT%"
+if errorlevel 1 (
+  echo [CloudOS] Integridade do pacote FALHOU. O shell nao sera iniciado.
+  exit /b 5
 )
 taskkill /F /IM CloudOS.exe >nul 2>&1
 timeout /t 1 /nobreak >nul 2>&1
@@ -88,7 +148,11 @@ Arquivos principais:
 - CloudOS.NativeRuntime.dll
 - cloudos-native-manifest.json
 - SHA256SUMS.txt
+- Verificar Integridade.ps1
+- Verificar Integridade.cmd
 - Iniciar CloudOS.cmd
+
+`Iniciar CloudOS.cmd` valida automaticamente tamanho e SHA256 de CloudOS.exe e CloudOS.NativeRuntime.dll antes de executar. Para verificar sem iniciar, use `Verificar Integridade.cmd`.
 
 O frontend React antigo nao faz parte deste pacote. WebView2 e usado somente pelo Navegador CloudOS.
 "@
