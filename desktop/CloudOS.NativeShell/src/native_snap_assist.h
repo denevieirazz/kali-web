@@ -76,7 +76,3 @@ private:
     static NativeSnapAssist* active_instance_;
 };
 } // namespace CloudOS
-
-// Header-only V8 service starts with the native shell message loop and reuses
-// NativeSnapAssist::ActiveWindowManager() after the class above is complete.
-#include "native_snap_layouts_v8.h"
