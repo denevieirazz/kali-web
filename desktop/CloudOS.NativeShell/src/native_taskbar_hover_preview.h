@@ -58,5 +58,6 @@ private:
     RECT pending_task_rect_{};
     bool tracking_taskbar_{};
     bool tracking_preview_{};
+    bool show_desktop_hot_{};
 };
 } // namespace CloudOS
