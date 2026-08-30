@@ -62,6 +62,116 @@ int WrappedWorkspace(int current, int direction) noexcept
     }
     return (current + direction + kWorkspaceCount) % kWorkspaceCount;
 }
+
+RECT ShowDesktopRect(HWND taskbar)
+{
+    RECT client{};
+    if (taskbar == nullptr || !GetClientRect(taskbar, &client))
+    {
+        return client;
+    }
+    const UINT dpi = GetDpiForWindow(taskbar);
+    const int width = Scale(12, dpi);
+    client.left = std::max<LONG>(client.left, client.right - width);
+    return client;
+}
+
+bool IsShowDesktopPoint(HWND taskbar, POINT point)
+{
+    const RECT rect = ShowDesktopRect(taskbar);
+    return rect.right > rect.left && PtInRect(&rect, point) != FALSE;
+}
+
+void PaintShowDesktopEdge(HWND taskbar, bool hot)
+{
+    if (taskbar == nullptr || !IsWindow(taskbar))
+    {
+        return;
+    }
+    HDC dc = GetDC(taskbar);
+    if (dc == nullptr)
+    {
+        return;
+    }
+
+    RECT rect = ShowDesktopRect(taskbar);
+    const UINT dpi = GetDpiForWindow(taskbar);
+    if (hot)
+    {
+        HBRUSH hover = CreateSolidBrush(WebSkin::BgHover);
+        if (hover != nullptr)
+        {
+            FillRect(dc, &rect, hover);
+            DeleteObject(hover);
+        }
+    }
+
+    RECT accent = rect;
+    accent.left = std::max<LONG>(rect.left, rect.right - Scale(hot ? 4 : 2, dpi));
+    HBRUSH brush = CreateSolidBrush(hot ? WebSkin::AccentHover : WebSkin::BorderStrong);
+    if (brush != nullptr)
+    {
+        FillRect(dc, &accent, brush);
+        DeleteObject(brush);
+    }
+    ReleaseDC(taskbar, dc);
+}
+
+void ToggleShowDesktop(
+    HWND taskbar,
+    HMONITOR monitor,
+    CloudOSNativeWindowManager* window_manager)
+{
+    if (taskbar == nullptr || window_manager == nullptr)
+    {
+        return;
+    }
+
+    const std::vector<CloudOSManagedWindow> windows =
+        window_manager->CurrentWorkspaceWindows();
+    bool has_restorable_window = false;
+    for (const CloudOSManagedWindow& item : windows)
+    {
+        if (item.hwnd == nullptr || !IsWindow(item.hwnd) ||
+            MonitorFromWindow(item.hwnd, MONITOR_DEFAULTTONEAREST) != monitor)
+        {
+            continue;
+        }
+        if (IsWindowVisible(item.hwnd) && !IsIconic(item.hwnd))
+        {
+            has_restorable_window = true;
+            break;
+        }
+    }
+
+    if (has_restorable_window)
+    {
+        for (const CloudOSManagedWindow& item : windows)
+        {
+            if (item.hwnd != nullptr && IsWindow(item.hwnd) &&
+                MonitorFromWindow(item.hwnd, MONITOR_DEFAULTTONEAREST) == monitor &&
+                IsWindowVisible(item.hwnd) && !IsIconic(item.hwnd))
+            {
+                ShowWindow(item.hwnd, SW_MINIMIZE);
+            }
+        }
+    }
+    else
+    {
+        for (const CloudOSManagedWindow& item : windows)
+        {
+            if (item.hwnd != nullptr && IsWindow(item.hwnd) &&
+                MonitorFromWindow(item.hwnd, MONITOR_DEFAULTTONEAREST) == monitor &&
+                IsIconic(item.hwnd))
+            {
+                ShowWindow(item.hwnd, SW_RESTORE);
+            }
+        }
+    }
+
+    window_manager->Reconcile();
+    InvalidateRect(taskbar, nullptr, FALSE);
+}
 }
 
 NativeTaskbarHoverPreview::NativeTaskbarHoverPreview(
@@ -485,6 +595,12 @@ LRESULT CALLBACK NativeTaskbarHoverPreview::TaskbarSubclass(
 
     switch (message)
     {
+    case WM_PAINT:
+    {
+        const LRESULT result = DefSubclassProc(window, message, w_param, l_param);
+        PaintShowDesktopEdge(window, self->show_desktop_hot_);
+        return result;
+    }
     case WM_MOUSEMOVE:
     {
         if (!self->tracking_taskbar_)
@@ -493,8 +609,40 @@ LRESULT CALLBACK NativeTaskbarHoverPreview::TaskbarSubclass(
             (void)TrackMouseEvent(&tracking);
             self->tracking_taskbar_ = true;
         }
-        KillTimer(window, kHideTimer);
-        self->UpdateHover(POINT{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)});
+        const POINT point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
+        const bool show_desktop_hot = IsShowDesktopPoint(window, point);
+        if (show_desktop_hot != self->show_desktop_hot_)
+        {
+            self->show_desktop_hot_ = show_desktop_hot;
+            InvalidateRect(window, &ShowDesktopRect(window), FALSE);
+        }
+        if (show_desktop_hot)
+        {
+            self->pending_source_ = nullptr;
+            KillTimer(window, kHoverTimer);
+            self->HidePreview();
+        }
+        else
+        {
+            KillTimer(window, kHideTimer);
+            self->UpdateHover(point);
+        }
+        const LRESULT result = DefSubclassProc(window, message, w_param, l_param);
+        if (show_desktop_hot)
+        {
+            SetCursor(LoadCursorW(nullptr, IDC_HAND));
+        }
+        return result;
+    }
+    case WM_LBUTTONUP:
+    {
+        const POINT point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
+        if (IsShowDesktopPoint(window, point))
+        {
+            self->HidePreview();
+            ToggleShowDesktop(window, self->monitor_, self->window_manager_);
+            return 0;
+        }
         break;
     }
     case WM_MBUTTONUP:
@@ -553,9 +701,11 @@ LRESULT CALLBACK NativeTaskbarHoverPreview::TaskbarSubclass(
     }
     case WM_MOUSELEAVE:
         self->tracking_taskbar_ = false;
+        self->show_desktop_hot_ = false;
         self->pending_source_ = nullptr;
         KillTimer(window, kHoverTimer);
         SetTimer(window, kHideTimer, 260, nullptr);
+        InvalidateRect(window, nullptr, FALSE);
         break;
     case WM_TIMER:
         if (w_param == kHoverTimer)
