@@ -67,6 +67,8 @@ Require 'UI heartbeat bootstrap V9' $content.HealthBootstrap @(
     'consecutive_ready_checks_ >= 2',
     'signal_.MarkReady',
     'signal_.MarkShuttingDown',
+    'CloudOS.NativeShell.Desktop.v2',
+    'native_desktop_window_v2.cpp is the implementation compiled',
     'CloudOS.NativeShell.Taskbar.v4',
     'CloudOS.NativeShell.Start.v4',
     'CloudOS.NativeShell.QuickSettings.v4',
@@ -156,4 +158,4 @@ Require 'V9 documentation' $content.Document @(
     'criterio de aceite, nao uma alegacao'
 )
 
-Write-Host 'PASS: Stability/Readiness V9 contracts passed - fixed health ABI, deterministic post-initialize UI heartbeat, automated soak, local diagnostics, portable tooling and CI smoke are protected.'
+Write-Host 'PASS: Stability/Readiness V9 contracts passed - fixed health ABI, authoritative Desktop v2 heartbeat, deterministic post-initialize attach, automated soak, local diagnostics, portable tooling and CI smoke are protected.'
