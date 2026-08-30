@@ -132,7 +132,9 @@
     <ClCompile Include="src\native_start_index.cpp" />
     <ClCompile Include="src\native_start_menu_window.cpp" />
     <ClCompile Include="src\native_system_control_backend.cpp" />
-    <ClCompile Include="src\native_system_control_window.cpp" />
+    <ClCompile Include="src\native_system_control_window.cpp">
+      <DisableSpecificWarnings>4505;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
     <ClCompile Include="src\native_system_monitor_window.cpp" />
     <ClCompile Include="src\native_system_stats.cpp" />
     <ClCompile Include="src\native_task_switcher_window.cpp" />
