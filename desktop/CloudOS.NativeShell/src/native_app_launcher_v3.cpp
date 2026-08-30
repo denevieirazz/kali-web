@@ -7,7 +7,6 @@
 #include "native_cloudos_drive.h"
 #include "native_command_center_window.h"
 #include "native_env_doctor_window.h"
-#include "native_files_window.h"
 #include "native_notepad_window.h"
 #include "native_projects_window.h"
 #include "native_run_window.h"
@@ -261,7 +260,12 @@ void NativeAppLauncher::LaunchById(
     }
     else if (id == L"files")
     {
-        CloudOSNativeFilesWindow::Open(instance);
+        // Use the real Windows Explorer for the main Files entry. It is much
+        // faster than hosting IExplorerBrowser inside a custom CloudOS frame,
+        // and it gives the user the complete Windows 11 file-management UX.
+        launched = LaunchWindowsTarget(
+            parent_hwnd,
+            L"explorer.exe");
     }
     else if (id == L"drive")
     {
@@ -295,7 +299,10 @@ void NativeAppLauncher::LaunchById(
             }
             else
             {
-                CloudOSNativeFilesWindow::Open(instance, root);
+                // ShellExecute on a directory delegates directly to Explorer.
+                launched = LaunchWindowsTarget(
+                    parent_hwnd,
+                    root);
             }
         }
     }
@@ -312,8 +319,8 @@ void NativeAppLauncher::LaunchById(
         }
         else
         {
-            CloudOSNativeFilesWindow::Open(
-                instance,
+            launched = LaunchWindowsTarget(
+                parent_hwnd,
                 system_volume);
         }
     }
