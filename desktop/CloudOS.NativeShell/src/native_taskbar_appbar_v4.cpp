@@ -3,6 +3,7 @@
 #include "native_app_launcher.h"
 #include "native_icon_renderer.h"
 #include "native_notification_center.h"
+#include "native_popup_menu.h"
 #include "native_shell_platform.h"
 #include "native_theme.h"
 
@@ -1103,7 +1104,7 @@ void CloudOSTaskbarAppBar::ShowPinnedContextMenu(
         kPinMoveRight,
         L"Mover para a direita");
 
-    const int command = TrackPopupMenu(
+    const int command = NativePopupMenu::Track(
         menu,
         TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
         screen_point.x,
@@ -1171,7 +1172,7 @@ void CloudOSTaskbarAppBar::ShowPinOverflowMenu(POINT screen_point)
             PinTitle(pinned_items_[index]).c_str());
     }
 
-    const int command = TrackPopupMenu(
+    const int command = NativePopupMenu::Track(
         menu,
         TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
         screen_point.x,
@@ -1250,7 +1251,7 @@ void CloudOSTaskbarAppBar::ShowTaskGroupPicker(
         AppendMenuW(menu, MF_STRING, kTaskCloseAll, L"Fechar todas as janelas");
     }
 
-    const int command = TrackPopupMenu(
+    const int command = NativePopupMenu::Track(
         menu,
         TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
         screen_point.x,
@@ -1308,7 +1309,7 @@ void CloudOSTaskbarAppBar::ShowTaskOverflowMenu(POINT screen_point)
             label.c_str());
     }
 
-    const int command = TrackPopupMenu(
+    const int command = NativePopupMenu::Track(
         menu,
         TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
         screen_point.x,
@@ -1435,7 +1436,7 @@ void CloudOSTaskbarAppBar::ShowTaskContextMenu(
         AppendMenuW(menu, MF_STRING, kTaskCloseAll, L"Fechar todas");
     }
 
-    const int command = TrackPopupMenu(
+    const int command = NativePopupMenu::Track(
         menu,
         TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
         screen_point.x,

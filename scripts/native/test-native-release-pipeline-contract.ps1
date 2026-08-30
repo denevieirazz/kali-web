@@ -107,8 +107,13 @@ Require 'Native launcher integrity gate' $content.Start @(
     'SOURCE_FINGERPRINT',
     '--force-rebuild',
     '--no-build',
-    'taskkill /F /IM CloudOS.exe'
+    'tasklist /FI "IMAGENAME eq CloudOS.exe"',
+    'encerre a instancia aberta normalmente'
 )
+
+if ($content.Start -match '(?i)taskkill\s+/F' -or $content.Packager -match '(?i)taskkill\s+/F') {
+    throw 'Launchers must not force-close user sessions.'
+}
 
 Require 'Root start shortcut forwards flags' $content.RootStart @(
     'start-cloudos-native.cmd',

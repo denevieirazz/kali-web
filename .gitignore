@@ -67,7 +67,12 @@ backup-*/
 backup*/
 archive/
 *.zip
-*.backup*
+# Packages
 packages/
 **/packages/
+# Local test outputs and artifacts
+TestResults/
+test-evidence-windows-apps/
+desktop/CloudOS.NativeShell/artifacts/
+
 

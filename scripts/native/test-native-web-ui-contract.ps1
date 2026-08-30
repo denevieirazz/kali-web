@@ -92,7 +92,6 @@ Forbid-Tokens 'Native build graph' $content.Project @(
     'CopyWebUi'
 )
 
-# The developer build command must compile only the native shell/runtime. React is a design reference.
 Require-Tokens 'Native developer build' $content.NativeBuild @(
     'test-cloudos-native-shell-contracts.ps1',
     'test-native-web-ui-contract.ps1',
@@ -122,14 +121,21 @@ if (-not $content.Packages.Contains('Microsoft.Web.WebView2') -or
     throw 'Pinned Microsoft.Web.WebView2 package for the native Browser is missing.'
 }
 
+# The frontend remains a historical design reference, but the native token
+# system is explicitly allowed to evolve beyond those original CSS hex values.
 Require-Tokens 'Unified native WebSkin' $content.Theme @(
     'namespace WebSkin',
-    'RGB(10, 10, 15)',
-    'RGB(17, 17, 24)',
-    'RGB(26, 26, 36)',
-    'RGB(99, 102, 241)',
-    'RGB(129, 140, 248)',
+    'BgSolid = RGB(5, 7, 12)',
+    'BgPrimary = RGB(9, 13, 21)',
+    'BgSecondary = RGB(14, 20, 31)',
+    'BgElevated = RGB(30, 39, 57)',
+    'Accent = RGB(124, 92, 255)',
+    'AccentHover = RGB(154, 126, 255)',
+    'AccentCyan = RGB(77, 208, 225)',
+    'RadiusXL = 20',
     'DrawRoundedPanel',
+    'DrawElevatedPanel',
+    'PaintWindowBackground',
     'PaintOwnerDrawButton',
     'WindowSkinSubclass',
     'ApplyWebFlyoutMaterial',
@@ -173,7 +179,6 @@ Require-Tokens 'Native Desktop skin' $content.Desktop @(
     'NativeDesktopDropTarget::Register'
 )
 
-# The old frontend remains only a design specification for the native surfaces.
 Require-Tokens 'Legacy CSS design reference' $content.FrontendCss @(
     '--accent: #6366f1',
     '--bg-solid: #0a0a0f',
@@ -195,4 +200,4 @@ Require-Tokens 'Unified WebSkin documentation' $content.WebSkinDoc @(
     'não volta a controlar Desktop, Taskbar, Start'
 )
 
-Write-Host 'PASS: old web UI remains design-reference-only; native build no longer compiles React desktop assets; Start V4/Taskbar V4 stay native; WebView2 stays scoped to Browser.'
+Write-Host 'PASS: old web UI remains design-reference-only; native Visual Experience V6 is free to evolve beyond frozen CSS colors; Start V4/Taskbar V4 stay native; WebView2 stays scoped to Browser.'

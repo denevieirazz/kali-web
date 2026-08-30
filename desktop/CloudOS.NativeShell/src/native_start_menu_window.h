@@ -17,6 +17,7 @@ class Graphics;
 
 namespace CloudOS
 {
+class NativeSurfacePreview;
 class CloudOSNativeStartMenuWindow final
 {
 public:
@@ -31,6 +32,7 @@ public:
     void FocusSearch();
 
 private:
+    friend class NativeSurfacePreview;
     enum class ResultKind
     {
         CloudOSApp,

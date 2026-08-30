@@ -95,9 +95,12 @@ goto BUILD
 
 :BUILD
 if defined REBUILD_REASON echo [CloudOS Native] Rebuild necessario: %REBUILD_REASON%.
-rem O linker precisa conseguir substituir CloudOS.exe. Mate a instancia antiga antes do build.
-taskkill /F /IM CloudOS.exe >nul 2>&1
-timeout /t 1 /nobreak >nul 2>&1
+rem O linker nao pode substituir um shell em uso. Preserve a sessao do usuario.
+tasklist /FI "IMAGENAME eq CloudOS.exe" /NH 2>nul | findstr /I /C:"CloudOS.exe" >nul
+if not errorlevel 1 (
+  echo [CloudOS Native] Salve seu trabalho e encerre a instancia aberta normalmente antes do build.
+  exit /b 24
+)
 echo [CloudOS Native] Validando, compilando e assinando o manifesto Release x64...
 call "%ROOT%\scripts\native\build-cloudos-native.cmd" Release
 if errorlevel 1 exit /b %ERRORLEVEL%
@@ -120,8 +123,11 @@ if not exist "%MANIFEST%" (
   exit /b 23
 )
 
-taskkill /F /IM CloudOS.exe >nul 2>&1
-timeout /t 1 /nobreak >nul 2>&1
+tasklist /FI "IMAGENAME eq CloudOS.exe" /NH 2>nul | findstr /I /C:"CloudOS.exe" >nul
+if not errorlevel 1 (
+  echo [CloudOS Native] Salve seu trabalho e encerre a instancia aberta normalmente antes de iniciar outra versao.
+  exit /b 24
+)
 
 set "SOURCE_FINGERPRINT="
 if exist "%FINGERPRINT_STAMP%" set /p SOURCE_FINGERPRINT=<"%FINGERPRINT_STAMP%"

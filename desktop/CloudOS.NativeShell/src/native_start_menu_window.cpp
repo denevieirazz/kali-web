@@ -4,6 +4,7 @@
 #include "native_icon_renderer.h"
 #include "native_search_engine.h"
 #include "native_start_menu_mru.h"
+#include "native_popup_menu.h"
 #include "native_theme.h"
 
 #include <commctrl.h>
@@ -644,12 +645,12 @@ void CloudOSNativeStartMenuWindow::PaintHome(
         PointF(static_cast<REAL>(margin), static_cast<REAL>(pinned_title_y)),
         &primary);
 
-    const int columns = 6;
+    const int columns = std::clamp(content_width / Scale(112, dpi), 2, 6);
     const int gap = Scale(8, dpi);
     const int tile_width = std::max(72, (content_width - gap * (columns - 1)) / columns);
     const int tile_height = Scale(94, dpi);
     const int grid_y = pinned_title_y + Scale(31, dpi);
-    const std::size_t visible_pins = std::min<std::size_t>(12u, start_pins_.size());
+    const std::size_t visible_pins = start_pins_.size();
 
     auto draw_pin_icon = [this, dc, &graphics, dpi](const ShellPinItem& pin, int x, int y, int size)
     {
@@ -732,7 +733,8 @@ void CloudOSNativeStartMenuWindow::PaintHome(
             empty_rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     }
 
-    const int recommended_y = grid_y + Scale(202, dpi);
+    const int pinned_rows = std::max<int>(1, static_cast<int>((visible_pins + static_cast<std::size_t>(columns) - 1u) / static_cast<std::size_t>(columns)));
+    const int recommended_y = grid_y + pinned_rows * (tile_height + gap) + Scale(18, dpi);
     graphics.DrawString(
         L"Recomendados",
         -1,
@@ -1568,7 +1570,7 @@ void CloudOSNativeStartMenuWindow::ShowResultContextMenu(int row, POINT screen_p
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, kContextRefreshIndex, L"Reindexar aplicativos  (F5)");
 
-    const int command = TrackPopupMenu(
+    const int command = NativePopupMenu::Track(
         menu,
         TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
         screen_point.x,
@@ -1668,7 +1670,7 @@ void CloudOSNativeStartMenuWindow::ShowPinContextMenu(
         AppendMenuW(menu, MF_STRING, kContextClearRecommendations, L"Redefinir recomendacoes");
     }
 
-    const int command = TrackPopupMenu(
+    const int command = NativePopupMenu::Track(
         menu,
         TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
         screen_point.x,

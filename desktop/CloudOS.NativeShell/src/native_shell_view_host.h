@@ -5,6 +5,7 @@
 
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace CloudOS
 {
@@ -30,6 +31,7 @@ public:
 
     [[nodiscard]] bool IsReady() const noexcept;
     [[nodiscard]] const std::wstring& CurrentPath() const noexcept;
+    [[nodiscard]] std::vector<std::wstring> SelectedPaths() const;
 
     bool Navigate(const std::wstring& path);
     bool NavigateBack();
@@ -70,6 +72,7 @@ private:
 
     void OnNavigationComplete(PCIDLIST_ABSOLUTE folder);
     static std::wstring DisplayPathFromPidl(PCIDLIST_ABSOLUTE folder);
+    static std::wstring DisplayPathFromShellItem(IShellItem* item);
 
     template <typename Interface>
     bool GetCurrentView(Interface** view) const

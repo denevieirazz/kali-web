@@ -11,6 +11,7 @@
 
 namespace CloudOS
 {
+class NativeSurfacePreview;
 // Shell V3 desktop is intentionally narrow: wallpaper, desktop namespace,
 // first-party shortcuts and input forwarding. Start, AppBar/taskbar and flyouts
 // are separate HWND components and must not creep back into this class.
@@ -38,6 +39,7 @@ public:
     HWND Hwnd() const noexcept { return hwnd_; }
 
 private:
+    friend class NativeSurfacePreview;
     void Paint();
     void ActivateAppIndex(int app_index);
     void RefreshWorkArea();

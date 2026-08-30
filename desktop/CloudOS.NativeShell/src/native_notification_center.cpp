@@ -83,7 +83,7 @@ bool CloudOSNativeNotificationCenter::Create(HINSTANCE instance)
 
     list_ = CreateWindowExW(
         0, WC_LISTVIEWW, L"",
-        WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS,
+        WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOCOLUMNHEADER,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kListId)), instance_, nullptr);
     clear_button_ = CreateWindowW(
         L"BUTTON", L"Limpar historico",

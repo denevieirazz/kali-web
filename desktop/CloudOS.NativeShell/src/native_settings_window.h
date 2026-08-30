@@ -46,6 +46,9 @@ private:
     HWND distro_label_{};
     HWND distro_edit_{};
     HWND save_button_{};
+    HWND wallpaper_button_{};
+    HWND reset_wallpaper_button_{};
+    HWND system_center_button_{};
     HWND windows_settings_button_{};
     HWND install_wsl_button_{};
 };

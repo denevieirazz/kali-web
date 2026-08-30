@@ -32,7 +32,11 @@ rem WebView2 continua sendo restaurado exclusivamente para o Navegador nativo in
 echo [CloudOS] Validando contratos do shell nativo...
 pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-cloudos-native-shell-contracts.ps1"
 if errorlevel 1 exit /b %ERRORLEVEL%
+pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-shell-lifecycle-contract.ps1"
+if errorlevel 1 exit /b %ERRORLEVEL%
 pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-native-web-ui-contract.ps1"
+if errorlevel 1 exit /b %ERRORLEVEL%
+pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-visual-platform-v7-contract.ps1"
 if errorlevel 1 exit /b %ERRORLEVEL%
 pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-taskbar-productivity-contract.ps1"
 if errorlevel 1 exit /b %ERRORLEVEL%
@@ -43,6 +47,8 @@ if errorlevel 1 exit /b %ERRORLEVEL%
 pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-session-continuity-contract.ps1"
 if errorlevel 1 exit /b %ERRORLEVEL%
 pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-shell-control-plane-contract.ps1"
+if errorlevel 1 exit /b %ERRORLEVEL%
+pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-files-storage-v5-contract.ps1"
 if errorlevel 1 exit /b %ERRORLEVEL%
 pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-native-release-pipeline-contract.ps1"
 if errorlevel 1 exit /b %ERRORLEVEL%
@@ -129,6 +135,8 @@ echo [CloudOS] WORKSPACE_OVERVIEW=nativo com DWM previews e 4 areas
 echo [CloudOS] WORKSPACE_STUDIO=perfis, regras, layouts, inicializacao e historico de foco
 echo [CloudOS] SESSION_CONTINUITY=ledger atomico, checkpoints por area, journal e recuperacao conservadora
 echo [CloudOS] CONTROL_PLANE_V4=System Center, Quick Settings real, tray first-party, toasts, health e appearance persistente
+echo [CloudOS] FILES_STORAGE_V5=Files first-party, tabs, Quick Access, busca limitada, preview WIC/texto e Windows Shell via IExplorerBrowser
+echo [CloudOS] VISUAL_PLATFORM_V7=reveal Fluent, DWM material sem magic numbers, GSMTC, mixer por app e Windows Search SystemIndex
 echo [CloudOS] WEBVIEW2=usado somente pelo Navegador CloudOS
 echo [CloudOS] FRONTEND_REACT=referencia visual; nao participa deste build
 exit /b 0

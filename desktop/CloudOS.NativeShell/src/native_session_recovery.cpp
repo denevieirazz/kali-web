@@ -2,6 +2,7 @@
 
 #include "native_app_launcher.h"
 
+#include <CommCtrl.h>
 #include <KnownFolders.h>
 #include <ShlObj.h>
 
@@ -12,6 +13,7 @@
 #include <unordered_set>
 #include <utility>
 
+#pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "shell32.lib")
 
 namespace CloudOS
@@ -22,6 +24,7 @@ constexpr std::uint32_t kMagic = 0x33534F43u; // COS3
 constexpr std::uint32_t kVersion = 3u;
 constexpr std::uint32_t kMaximumRecords = 256u;
 constexpr std::uint32_t kMaximumString = 2048u;
+constexpr UINT_PTR kWtsSessionSubclassId = 0xC10D5707u;
 
 struct FileHeader final
 {
@@ -102,6 +105,99 @@ bool ContainsInsensitive(std::wstring value, const wchar_t* needle)
     Lowercase(target);
     return value.find(target) != std::wstring::npos;
 }
+}
+
+NativeSessionRecovery::~NativeSessionRecovery()
+{
+    DetachSessionNotifications();
+}
+
+void NativeSessionRecovery::AttachSessionNotifications(
+    HWND owner,
+    CloudOSNativeWindowManager& window_manager)
+{
+    if (owner == nullptr || !IsWindow(owner)) return;
+    if (session_window_ == owner && session_subclass_attached_)
+    {
+        session_window_manager_ = &window_manager;
+        return;
+    }
+
+    DetachSessionNotifications();
+    session_window_ = owner;
+    session_window_manager_ = &window_manager;
+    session_subclass_attached_ = SetWindowSubclass(
+        owner,
+        &NativeSessionRecovery::SessionNotificationSubclass,
+        kWtsSessionSubclassId,
+        reinterpret_cast<DWORD_PTR>(this)) != FALSE;
+    if (!session_subclass_attached_)
+    {
+        session_window_ = nullptr;
+        session_window_manager_ = nullptr;
+        return;
+    }
+    session_notifications_registered_ = NativeSessionEventsV7::Register(owner);
+}
+
+void NativeSessionRecovery::DetachSessionNotifications() noexcept
+{
+    const HWND window = session_window_;
+    if (window != nullptr && IsWindow(window))
+    {
+        if (session_notifications_registered_)
+            NativeSessionEventsV7::Unregister(window);
+        if (session_subclass_attached_)
+            RemoveWindowSubclass(
+                window,
+                &NativeSessionRecovery::SessionNotificationSubclass,
+                kWtsSessionSubclassId);
+    }
+    session_notifications_registered_ = false;
+    session_subclass_attached_ = false;
+    session_window_ = nullptr;
+    session_window_manager_ = nullptr;
+}
+
+LRESULT CALLBACK NativeSessionRecovery::SessionNotificationSubclass(
+    HWND window,
+    UINT message,
+    WPARAM w_param,
+    LPARAM l_param,
+    UINT_PTR subclass_id,
+    DWORD_PTR reference_data)
+{
+    auto* self = reinterpret_cast<NativeSessionRecovery*>(reference_data);
+    if (self != nullptr && NativeSessionEventsV7::IsSessionMessage(message))
+    {
+        CloudOSNativeWindowManager* manager = self->session_window_manager_;
+        if (manager != nullptr && NativeSessionEventsV7::ShouldCheckpoint(w_param))
+        {
+            manager->Reconcile();
+            self->Save(*manager);
+        }
+        else if (manager != nullptr && NativeSessionEventsV7::ShouldRefresh(w_param))
+        {
+            manager->Reconcile();
+            self->ApplyPending(*manager);
+        }
+        return 0;
+    }
+
+    if (message == WM_NCDESTROY && self != nullptr)
+    {
+        if (self->session_notifications_registered_)
+            NativeSessionEventsV7::Unregister(window);
+        RemoveWindowSubclass(
+            window,
+            &NativeSessionRecovery::SessionNotificationSubclass,
+            subclass_id);
+        self->session_notifications_registered_ = false;
+        self->session_subclass_attached_ = false;
+        self->session_window_ = nullptr;
+        self->session_window_manager_ = nullptr;
+    }
+    return DefSubclassProc(window, message, w_param, l_param);
 }
 
 bool NativeSessionRecovery::BeginSession()
@@ -227,7 +323,16 @@ void NativeSessionRecovery::Restore(
     HWND owner,
     CloudOSNativeWindowManager& window_manager)
 {
-    if (!begun_ || loaded_records_.empty())
+    if (!begun_)
+    {
+        return;
+    }
+
+    // WTS lifecycle ownership starts here because Restore is the first point
+    // where the recovery engine owns both the shell HWND and Window Manager.
+    AttachSessionNotifications(owner, window_manager);
+
+    if (loaded_records_.empty())
     {
         return;
     }
@@ -405,6 +510,7 @@ void NativeSessionRecovery::MarkCleanExit(
 {
     if (!begun_)
     {
+        DetachSessionNotifications();
         return;
     }
     Save(window_manager);
@@ -413,6 +519,7 @@ void NativeSessionRecovery::MarkCleanExit(
         (void)DeleteFileW(unclean_marker_path_.c_str());
     }
     begun_ = false;
+    DetachSessionNotifications();
 }
 
 bool NativeSessionRecovery::Load()

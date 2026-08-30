@@ -8,10 +8,11 @@ $rootPath = (Resolve-Path -LiteralPath $Root).Path
 $sourceRoots = @(
     (Join-Path $rootPath 'desktop\CloudOS.NativeRuntime'),
     (Join-Path $rootPath 'desktop\CloudOS.NativeShell'),
+    (Join-Path $rootPath 'desktop\CloudOS.NativeRecovery'),
     (Join-Path $rootPath 'scripts\native')
 )
 
-$excludedSegments = @('bin', 'obj', 'packages', '.vs')
+$excludedSegments = @('bin', 'obj', 'packages', '.vs', 'artifacts')
 $files = New-Object System.Collections.Generic.List[System.IO.FileInfo]
 
 foreach ($sourceRoot in $sourceRoots) {

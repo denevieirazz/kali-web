@@ -2,13 +2,15 @@ param(
     [string]$Root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
     [ValidateSet('Release', 'Debug')]
     [string]$Configuration = 'Release',
-    [switch]$CheckSourceFingerprint
+    [switch]$CheckSourceFingerprint,
+    [string]$BuildDirectory
 )
 
 $ErrorActionPreference = 'Stop'
 
 $rootPath = (Resolve-Path -LiteralPath $Root).Path
 $out = Join-Path $rootPath "desktop\CloudOS.NativeShell\bin\$Configuration"
+if ($BuildDirectory) { $out = (Resolve-Path -LiteralPath $BuildDirectory).Path }
 $manifestPath = Join-Path $out 'cloudos-native-manifest.json'
 $fingerprintStamp = Join-Path $out '.cloudos-build-fingerprint'
 $fingerprintScript = Join-Path $PSScriptRoot 'get-native-build-fingerprint.ps1'

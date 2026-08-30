@@ -1,11 +1,15 @@
 #pragma once
 
+#include "native_file_preview.h"
+#include "native_files_state.h"
+#include "native_shell_context_menu_v7.h"
 #include "native_shell_view_host.h"
 
 #include <Windows.h>
 #include <CommCtrl.h>
 #include <Shellapi.h>
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -34,7 +38,15 @@ private:
         std::wstring label;
         std::wstring path;
         bool opens_trash{};
+        bool favorite{};
         int image_index{-1};
+    };
+
+    struct TabState final
+    {
+        std::wstring path;
+        std::vector<std::wstring> back;
+        std::vector<std::wstring> forward;
     };
 
     explicit CloudOSNativeFilesWindow(HINSTANCE instance, std::wstring initial_path);
@@ -54,6 +66,21 @@ private:
     void Layout();
     void UpdateStatus();
     void PaintChrome(HDC dc, const RECT& client);
+
+    void LoadV5State();
+    void PersistV5State() noexcept;
+    void SyncTabStrip();
+    void NewTab();
+    void CloseActiveTab();
+    void SelectTab(std::size_t index);
+    void CommitNavigatedPath(const std::wstring& path);
+    void ToggleFavorite();
+    void TogglePreview();
+    void OpenSearch();
+    void OpenOperations();
+    void RefreshPreview();
+    void ShowContentContextMenu(POINT screen_point);
+    [[nodiscard]] std::vector<std::wstring> SelectedPaths() const;
 
     void Navigate(const std::wstring& path);
     bool NavigateShell(const std::wstring& path);
@@ -88,6 +115,8 @@ private:
     static std::wstring ReadEditText(HWND edit);
     static std::wstring FormatSize(ULONGLONG size);
     static std::wstring FormatModified(const FILETIME& value);
+    static std::wstring LeafName(const std::wstring& path);
+    static bool PathsEqual(const std::wstring& left, const std::wstring& right) noexcept;
     static bool IsWslRootPath(const std::wstring& path);
     static bool IsRootPath(const std::wstring& path);
     static bool IsSafeLeafName(const wchar_t* text);
@@ -99,12 +128,19 @@ private:
     HINSTANCE instance_{};
     HWND window_{};
     HWND sidebar_{};
+    HWND tab_strip_{};
+    HWND new_tab_button_{};
+    HWND close_tab_button_{};
     HWND back_button_{};
     HWND forward_button_{};
     HWND up_button_{};
     HWND path_edit_{};
     HWND go_button_{};
     HWND refresh_button_{};
+    HWND favorite_button_{};
+    HWND search_edit_{};
+    HWND search_button_{};
+    HWND preview_button_{};
     HWND new_folder_button_{};
     HWND rename_button_{};
     HWND delete_button_{};
@@ -127,13 +163,23 @@ private:
 
     RECT address_rect_{};
     RECT content_rect_{};
+    RECT preview_rect_{};
 
     bool shell_available_{};
     bool sidebar_syncing_{};
     bool destroy_deletes_self_{};
+    bool initial_path_explicit_{};
+    bool preview_visible_{true};
     ContentMode content_mode_{ContentMode::FallbackFileSystem};
     std::wstring current_path_;
+    std::wstring suppressed_history_target_;
+    std::wstring preview_selection_;
     std::vector<Entry> entries_;
     std::vector<SidebarItem> sidebar_items_;
+    CloudOS::NativeFilesPersistedState persisted_state_;
+    std::vector<TabState> tab_states_;
+    std::size_t active_tab_{};
+    UINT_PTR preview_timer_{};
     CloudOS::NativeShellViewHost shell_view_;
+    CloudOS::NativeFilePreviewPane preview_;
 };

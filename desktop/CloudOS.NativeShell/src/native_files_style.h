@@ -23,25 +23,25 @@ struct Palette final
     COLORREF danger;
 };
 
-// Same visual tokens used by frontend/src/index.css and native_theme.h.  The
-// hosted Windows Shell view may still follow the user's system theme, but all
-// CloudOS-owned chrome remains dark and consistent around it.
+// Files V5 uses a deeper graphite/indigo hierarchy than the early WebSkin.
+// The Windows namespace itself is still provided by IExplorerBrowser; these
+// tokens only own the CloudOS chrome around it.
 inline constexpr Palette kPalette{
-    RGB(10, 10, 15),    // base #0a0a0f
-    RGB(17, 17, 24),    // sidebar #111118
-    RGB(17, 17, 24),    // toolbar
-    RGB(34, 34, 46),    // address #22222e
-    RGB(26, 26, 36),    // content #1a1a24
-    RGB(34, 34, 46),    // button
-    RGB(40, 40, 53),    // hover
-    RGB(31, 31, 66),    // pressed/accent subtle
-    RGB(31, 31, 66),    // selection
-    RGB(55, 55, 70),    // border
-    RGB(99, 102, 241),  // accent #6366f1
-    RGB(79, 70, 229),   // accent pressed
-    RGB(240, 240, 245), // text
-    RGB(160, 160, 184), // muted
-    RGB(219, 99, 106),  // danger
+    RGB(6, 8, 14),      // base: deep graphite
+    RGB(11, 15, 24),    // sidebar
+    RGB(13, 18, 28),    // toolbar
+    RGB(22, 29, 43),    // address / input surface
+    RGB(15, 20, 31),    // content
+    RGB(24, 31, 46),    // button
+    RGB(31, 40, 58),    // hover
+    RGB(40, 37, 86),    // pressed/accent subtle
+    RGB(34, 34, 78),    // selection
+    RGB(48, 58, 78),    // border
+    RGB(124, 92, 255),  // accent
+    RGB(97, 70, 224),   // accent pressed
+    RGB(244, 246, 252), // text
+    RGB(151, 161, 184), // muted
+    RGB(235, 92, 108),  // danger
 };
 
 void ApplyWindowChrome(HWND window) noexcept;
