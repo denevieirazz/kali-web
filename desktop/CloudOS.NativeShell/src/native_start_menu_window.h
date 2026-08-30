@@ -4,10 +4,16 @@
 #include <commctrl.h>
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "native_shell_pins.h"
 #include "native_start_index.h"
+
+namespace Gdiplus
+{
+class Graphics;
+}
 
 namespace CloudOS
 {
@@ -104,6 +110,8 @@ private:
     std::vector<HomeHit> home_hits_;
     std::size_t last_index_count_{};
     ViewMode view_mode_{ViewMode::Home};
+    int hovered_home_index_{-1};
+    bool tracking_mouse_{};
     bool search_focused_{};
 };
 } // namespace CloudOS
