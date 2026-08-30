@@ -8,6 +8,7 @@
 #include "native_audio_mixer_v7.h"
 #include "native_bluetooth_v7.h"
 #include "native_media_control_v7.h"
+#include "native_quick_settings_media_v8.h"
 #include "native_system_control_backend.h"
 #include "native_windows_search_v7.h"
 
@@ -31,8 +32,6 @@ private:
     friend class NativeSurfacePreview;
     void Layout();
     void UpdateState(bool force_network = false);
-    void ApplyMediaTimelineFromSlider(bool commit);
-    bool PaintMediaArtwork(const DRAWITEMSTRUCT* draw);
     void ApplyVolumeFromSlider();
     void ApplyBrightnessFromSlider();
     void ApplyMixerFromSlider();
@@ -60,14 +59,11 @@ private:
     HWND title_{};
     HWND subtitle_{};
 
-    HWND media_artwork_{};
     HWND media_label_{};
     HWND media_meta_{};
     HWND media_previous_button_{};
     HWND media_toggle_button_{};
     HWND media_next_button_{};
-    HWND media_timeline_{};
-    HWND media_time_label_{};
 
     HWND volume_label_{};
     HWND volume_slider_{};
@@ -101,11 +97,9 @@ private:
     HFONT title_font_{};
     HBRUSH background_{};
     bool updating_slider_{};
-    bool updating_media_timeline_{};
     unsigned wifi_refresh_tick_{};
     unsigned mixer_refresh_tick_{};
     unsigned bluetooth_refresh_tick_{};
-    NativeMediaSnapshot media_snapshot_{};
     std::vector<NativeWifiNetwork> wifi_networks_;
     std::vector<NativeAudioSessionV7> audio_sessions_;
     std::vector<NativeBluetoothDeviceV7> bluetooth_devices_;
