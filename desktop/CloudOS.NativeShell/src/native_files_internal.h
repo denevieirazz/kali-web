@@ -24,6 +24,7 @@ constexpr int kDeleteId = 1209;
 constexpr int kListId = 1210;
 constexpr int kShellHostId = 1211;
 constexpr int kStatusId = 1212;
+constexpr int kOperationsId = 1213;
 
 constexpr COLORREF kBg = CloudOS::FilesStyle::kPalette.base;
 constexpr COLORREF kPanel = CloudOS::FilesStyle::kPalette.sidebar;
