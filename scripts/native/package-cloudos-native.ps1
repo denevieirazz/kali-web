@@ -38,16 +38,17 @@ foreach ($name in $payload) {
     }
 }
 
-# Stability/Readiness V9 tooling is intentionally script-only and local. It
-# reads allowlisted health/process counters and never uploads diagnostics.
+# Stability/Readiness V9 and Lifecycle V10 tooling is script-only and local.
+# The reports use allowlisted process/resource metadata and never upload data.
 foreach ($name in @(
     'native-health-v9.ps1',
     'collect-native-diagnostics.ps1',
-    'run-native-soak-v9.ps1'
+    'run-native-soak-v9.ps1',
+    'run-native-lifecycle-smoke-v10.ps1'
 )) {
     $source = Join-Path $PSScriptRoot $name
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
-        throw "Stability V9 package tool missing: $source"
+        throw "Native validation package tool missing: $source"
     }
     Copy-Item -LiteralPath $source -Destination (Join-Path $stage $name) -Force
 }
@@ -186,8 +187,19 @@ Stability/Readiness V9:
 - Coletar Diagnostico 60s.cmd: coleta rapida de CPU/RAM/threads/handles/GDI/USER/heartbeat.
 - run-native-soak-v9.ps1: soak automatizado com deteccao de crash/hang e orcamentos de crescimento.
 
+Lifecycle V10:
+- resume revalida Window Manager, work area e AppBars na fila da UI.
+- WTS/RDP lock/disconnect faz checkpoint; unlock/reconnect agenda revalidacao.
+- registro WTS que falhar no startup e tentado novamente a cada 30 segundos.
+- run-native-lifecycle-smoke-v10.ps1 valida single-instance e os handlers deterministas de transicao.
+
 Exemplo de soak de 30 minutos em uma instancia isolada:
   pwsh -File .\run-native-soak-v9.ps1 -Root . -Launch -DurationSeconds 1800
+
+Smoke Lifecycle V10 local:
+  pwsh -File .\run-native-lifecycle-smoke-v10.ps1 -Root .
+
+O smoke determinista nao substitui a matriz de VM/hardware para suspend/resume fisico, transporte RDP ou hotplug real de monitor.
 
 `Iniciar CloudOS.cmd` valida automaticamente tamanho e SHA256 de CloudOS.exe e CloudOS.NativeRuntime.dll antes de executar. Para verificar sem iniciar, use `Verificar Integridade.cmd`.
 
