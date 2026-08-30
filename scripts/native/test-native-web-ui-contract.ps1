@@ -13,6 +13,7 @@ $paths = @{
     Browser = Join-Path $root 'desktop\CloudOS.NativeShell\src\native_browser_window.cpp'
     Project = Join-Path $root 'desktop\CloudOS.NativeShell\CloudOS.NativeShell.vcxproj'
     Packages = Join-Path $root 'desktop\CloudOS.NativeShell\packages.config'
+    NativeBuild = Join-Path $root 'scripts\native\build-cloudos-native.cmd'
     FrontendCss = Join-Path $root 'frontend\src\index.css'
     StartCss = Join-Path $root 'frontend\src\components\StartMenu\StartMenu.css'
     TaskbarCss = Join-Path $root 'frontend\src\components\Taskbar\Taskbar.css'
@@ -89,6 +90,24 @@ Forbid-Tokens 'Native build graph' $content.Project @(
     '<ClInclude Include="src\native_web_desktop_window.h"',
     '<ClInclude Include="src\native_webview_host.h"',
     'CopyWebUi'
+)
+
+# The developer build command must compile only the native shell/runtime. React is a design reference.
+Require-Tokens 'Native developer build' $content.NativeBuild @(
+    'test-cloudos-native-shell-contracts.ps1',
+    'test-native-web-ui-contract.ps1',
+    'test-taskbar-productivity-contract.ps1',
+    'CloudOS.NativeRuntime\CloudOS.NativeRuntime.vcxproj',
+    'CloudOS.NativeShell\CloudOS.NativeShell.vcxproj',
+    'SHELL_UI=C++/Win32 nativo',
+    'WEBVIEW2=usado somente pelo Navegador CloudOS',
+    'FRONTEND_REACT=referencia visual; nao participa deste build'
+)
+Forbid-Tokens 'Native developer build' $content.NativeBuild @(
+    'node.exe',
+    'npm.cmd',
+    'frontend\dist',
+    'WEB_UI='
 )
 
 Require-Tokens 'Native WebView2 Browser' $content.Browser @(
@@ -176,4 +195,4 @@ Require-Tokens 'Unified WebSkin documentation' $content.WebSkinDoc @(
     'não volta a controlar Desktop, Taskbar, Start'
 )
 
-Write-Host 'PASS: old web UI remains design-reference-only; Start V4 and Taskbar V4 are native, persistent and WebSkin-styled; WebView2 stays scoped to Browser.'
+Write-Host 'PASS: old web UI remains design-reference-only; native build no longer compiles React desktop assets; Start V4/Taskbar V4 stay native; WebView2 stays scoped to Browser.'
