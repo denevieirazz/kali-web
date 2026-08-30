@@ -19,7 +19,7 @@ internal enum CloudOsNativeRuntimePreference
 /// </summary>
 internal static class CloudOsNativeRuntime
 {
-    internal const uint ExpectedAbi = 2;
+    internal const uint ExpectedAbi = 5;
     private const string LibraryName = "CloudOS.NativeRuntime.dll";
     private const int MaxContainedProcesses = 256;
 

@@ -24,8 +24,8 @@ internal static class NativeCppWindowOperationsContract
         var bridge = File.ReadAllText(bridgePath);
         var manager = File.ReadAllText(managerPath);
 
-        Assert(header.Contains("CLOUDOS_NATIVE_RUNTIME_ABI 2u", StringComparison.Ordinal),
-            "The C++ ABI must expose the HWND runtime generation.");
+        Assert(header.Contains("CLOUDOS_NATIVE_RUNTIME_ABI 5u", StringComparison.Ordinal),
+            "The C++ ABI must expose the current HWND/runtime generation.");
         Assert(header.Contains("cloudos_native_window_attach", StringComparison.Ordinal)
             && header.Contains("cloudos_native_window_layout", StringComparison.Ordinal)
             && header.Contains("cloudos_native_window_focus", StringComparison.Ordinal),
@@ -34,11 +34,11 @@ internal static class NativeCppWindowOperationsContract
             && source.Contains("SetWindowPos", StringComparison.Ordinal)
             && source.Contains("SetForegroundWindow", StringComparison.Ordinal),
             "The native runtime must execute real Win32 window operations rather than proxy pixels through Web code.");
-        Assert(bridge.Contains("ExpectedAbi = 2", StringComparison.Ordinal)
+        Assert(bridge.Contains("ExpectedAbi = 5", StringComparison.Ordinal)
             && bridge.Contains("NativeWindowAttach(", StringComparison.Ordinal)
             && bridge.Contains("NativeWindowLayout(", StringComparison.Ordinal)
             && bridge.Contains("NativeWindowFocus(", StringComparison.Ordinal),
-            "The Host C ABI bridge must bind the C++ HWND operations.");
+            "The Host C ABI bridge must bind the current C++ HWND operations generation.");
         Assert(manager.Contains("CloudOsNativeRuntime.TryAttachWindow(", StringComparison.Ordinal)
             && manager.Contains("CloudOsNativeRuntime.TryLayoutWindow(", StringComparison.Ordinal)
             && manager.Contains("CloudOsNativeRuntime.TryFocusWindow(", StringComparison.Ordinal),

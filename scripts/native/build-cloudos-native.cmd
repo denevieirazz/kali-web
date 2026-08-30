@@ -38,6 +38,12 @@ pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-taskbar-productivi
 if errorlevel 1 exit /b %ERRORLEVEL%
 pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-workspace-overview-contract.ps1"
 if errorlevel 1 exit /b %ERRORLEVEL%
+pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-workspace-studio-contract.ps1"
+if errorlevel 1 exit /b %ERRORLEVEL%
+pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-session-continuity-contract.ps1"
+if errorlevel 1 exit /b %ERRORLEVEL%
+pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-shell-control-plane-contract.ps1"
+if errorlevel 1 exit /b %ERRORLEVEL%
 pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-native-release-pipeline-contract.ps1"
 if errorlevel 1 exit /b %ERRORLEVEL%
 
@@ -120,6 +126,9 @@ if defined SOURCE_FINGERPRINT echo [CloudOS] SOURCE_FINGERPRINT=%SOURCE_FINGERPR
 if defined BUILD_HEAD echo [CloudOS] BUILD_HEAD=%BUILD_HEAD%
 echo [CloudOS] SHELL_UI=C++/Win32 nativo
 echo [CloudOS] WORKSPACE_OVERVIEW=nativo com DWM previews e 4 areas
+echo [CloudOS] WORKSPACE_STUDIO=perfis, regras, layouts, inicializacao e historico de foco
+echo [CloudOS] SESSION_CONTINUITY=ledger atomico, checkpoints por area, journal e recuperacao conservadora
+echo [CloudOS] CONTROL_PLANE_V4=System Center, Quick Settings real, tray first-party, toasts, health e appearance persistente
 echo [CloudOS] WEBVIEW2=usado somente pelo Navegador CloudOS
 echo [CloudOS] FRONTEND_REACT=referencia visual; nao participa deste build
 exit /b 0
