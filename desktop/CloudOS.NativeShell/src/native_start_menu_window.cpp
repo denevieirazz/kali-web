@@ -1,15 +1,22 @@
 #include "native_start_menu_window.h"
 
 #include "native_app_launcher.h"
+#include "native_icon_renderer.h"
 #include "native_search_engine.h"
 #include "native_start_menu_mru.h"
 #include "native_theme.h"
 
 #include <commctrl.h>
+#include <gdiplus.h>
+#include <uxtheme.h>
 
 #include <algorithm>
 #include <array>
 #include <string>
+
+#pragma comment(lib, "uxtheme.lib")
+
+using namespace Gdiplus;
 
 namespace CloudOS
 {
@@ -48,6 +55,30 @@ std::wstring SearchText(HWND edit)
     value.resize(copied > 0 ? static_cast<std::size_t>(copied) : 0u);
     return value;
 }
+
+void DrawTextLine(
+    HDC dc,
+    HFONT font,
+    COLORREF color,
+    const std::wstring& text,
+    RECT rect,
+    UINT format)
+{
+    if (dc == nullptr || text.empty())
+    {
+        return;
+    }
+    HGDIOBJ old_font = font != nullptr ? SelectObject(dc, font) : nullptr;
+    const int old_mode = SetBkMode(dc, TRANSPARENT);
+    const COLORREF old_color = SetTextColor(dc, color);
+    DrawTextW(dc, text.c_str(), -1, &rect, format);
+    SetTextColor(dc, old_color);
+    SetBkMode(dc, old_mode);
+    if (old_font != nullptr)
+    {
+        SelectObject(dc, old_font);
+    }
+}
 }
 
 CloudOSNativeStartMenuWindow::~CloudOSNativeStartMenuWindow()
@@ -65,7 +96,7 @@ bool CloudOSNativeStartMenuWindow::Create(HINSTANCE instance)
     window_class.lpfnWndProc = &CloudOSNativeStartMenuWindow::WindowProcedure;
     window_class.hInstance = instance_;
     window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    window_class.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    window_class.hbrBackground = nullptr;
     window_class.lpszClassName = kStartClass;
     if (RegisterClassExW(&window_class) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
     {
@@ -76,11 +107,11 @@ bool CloudOSNativeStartMenuWindow::Create(HINSTANCE instance)
         WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
         kStartClass,
         L"Iniciar - CloudOS",
-        WS_POPUP | WS_BORDER | WS_CLIPCHILDREN,
+        WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
         0,
         0,
-        720,
-        690,
+        620,
+        680,
         nullptr,
         nullptr,
         instance_,
@@ -90,19 +121,24 @@ bool CloudOSNativeStartMenuWindow::Create(HINSTANCE instance)
         return false;
     }
 
-    background_ = CreateSolidBrush(RGB(24, 26, 31));
-    edit_background_ = CreateSolidBrush(RGB(34, 37, 44));
+    const UINT dpi = GetDpiForWindow(window_);
+    background_ = CreateSolidBrush(WebSkin::BgPrimary);
+    edit_background_ = CreateSolidBrush(WebSkin::BgSecondary);
     font_ = CreateFontW(
-        -15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        -Scale(14, dpi), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Text");
+    small_font_ = CreateFontW(
+        -Scale(11, dpi), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Text");
     title_font_ = CreateFontW(
-        -20, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+        -Scale(15, dpi), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Display");
 
     search_edit_ = CreateWindowExW(
-        WS_EX_CLIENTEDGE,
+        0,
         L"EDIT",
         L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
@@ -113,19 +149,20 @@ bool CloudOSNativeStartMenuWindow::Create(HINSTANCE instance)
         nullptr);
     refresh_button_ = CreateWindowW(
         L"BUTTON",
-        L"Reindexar",
-        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+        L"↻",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
         0, 0, 0, 0,
         window_,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(kRefreshId)),
         instance_,
         nullptr);
     app_list_ = CreateWindowExW(
-        WS_EX_CLIENTEDGE,
+        0,
         WC_LISTVIEWW,
         L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP |
-            LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER,
+            LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS |
+            LVS_NOSORTHEADER | LVS_NOCOLUMNHEADER,
         0, 0, 0, 0,
         window_,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(kListId)),
@@ -134,7 +171,7 @@ bool CloudOSNativeStartMenuWindow::Create(HINSTANCE instance)
     command_button_ = CreateWindowW(
         L"BUTTON",
         L"Central de Comandos",
-        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
         0, 0, 0, 0,
         window_,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(kCommandId)),
@@ -142,8 +179,8 @@ bool CloudOSNativeStartMenuWindow::Create(HINSTANCE instance)
         nullptr);
     power_button_ = CreateWindowW(
         L"BUTTON",
-        L"Energia",
-        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+        L"⏻",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
         0, 0, 0, 0,
         window_,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPowerId)),
@@ -152,7 +189,7 @@ bool CloudOSNativeStartMenuWindow::Create(HINSTANCE instance)
     footer_label_ = CreateWindowW(
         L"STATIC",
         L"",
-        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX,
         0, 0, 0, 0,
         window_,
         nullptr,
@@ -170,12 +207,13 @@ bool CloudOSNativeStartMenuWindow::Create(HINSTANCE instance)
     {
         SetControlFont(child, font_);
     }
+    SetControlFont(footer_label_, small_font_);
 
     SendMessageW(
         search_edit_,
         EM_SETCUEBANNER,
         TRUE,
-        reinterpret_cast<LPARAM>(L"Pesquisar CloudOS, Menu Iniciar e aplicativos instalados"));
+        reinterpret_cast<LPARAM>(L"Pesquisar aplicativos, arquivos e comandos"));
 
     if (!SetWindowSubclass(
             search_edit_,
@@ -190,21 +228,21 @@ bool CloudOSNativeStartMenuWindow::Create(HINSTANCE instance)
     ListView_SetExtendedListViewStyle(
         app_list_,
         LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP);
+    ListView_SetBkColor(app_list_, WebSkin::BgPrimary);
+    ListView_SetTextBkColor(app_list_, WebSkin::BgPrimary);
+    ListView_SetTextColor(app_list_, WebSkin::TextPrimary);
 
     LVCOLUMNW app_column{};
     app_column.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
     app_column.pszText = const_cast<LPWSTR>(L"Aplicativo");
-    app_column.cx = 270;
+    app_column.cx = 540;
     ListView_InsertColumn(app_list_, 0, &app_column);
 
-    LVCOLUMNW description_column{};
-    description_column.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
-    description_column.pszText = const_cast<LPWSTR>(L"Origem / descricao");
-    description_column.cx = 385;
-    description_column.iSubItem = 1;
-    ListView_InsertColumn(app_list_, 1, &description_column);
+    (void)SetWindowTheme(app_list_, L"DarkMode_Explorer", nullptr);
+    (void)SetWindowTheme(search_edit_, L"DarkMode_CFD", nullptr);
 
-    DarkWindow(window_);
+    ApplyWebFlyoutMaterial(window_);
+    RebuildRowHeight();
     Layout();
     NativeStartIndex::Instance().StartAsync();
     last_index_count_ = NativeStartIndex::Instance().Count();
@@ -222,6 +260,15 @@ void CloudOSNativeStartMenuWindow::Destroy()
     if (search_edit_ != nullptr && IsWindow(search_edit_))
     {
         RemoveWindowSubclass(search_edit_, &CloudOSNativeStartMenuWindow::SearchSubclass, kSearchSubclass);
+    }
+    if (app_list_ != nullptr && IsWindow(app_list_))
+    {
+        ListView_SetImageList(app_list_, nullptr, LVSIL_SMALL);
+    }
+    if (row_height_image_list_ != nullptr)
+    {
+        ImageList_Destroy(row_height_image_list_);
+        row_height_image_list_ = nullptr;
     }
     if (window_ != nullptr && IsWindow(window_))
     {
@@ -241,6 +288,11 @@ void CloudOSNativeStartMenuWindow::Destroy()
         DeleteObject(font_);
         font_ = nullptr;
     }
+    if (small_font_ != nullptr)
+    {
+        DeleteObject(small_font_);
+        small_font_ = nullptr;
+    }
     if (title_font_ != nullptr)
     {
         DeleteObject(title_font_);
@@ -258,6 +310,42 @@ void CloudOSNativeStartMenuWindow::Destroy()
     }
 }
 
+void CloudOSNativeStartMenuWindow::RebuildRowHeight()
+{
+    if (app_list_ == nullptr)
+    {
+        return;
+    }
+
+    if (row_height_image_list_ != nullptr)
+    {
+        ListView_SetImageList(app_list_, nullptr, LVSIL_SMALL);
+        ImageList_Destroy(row_height_image_list_);
+        row_height_image_list_ = nullptr;
+    }
+
+    const UINT dpi = GetDpiForWindow(window_);
+    const int row_height = Scale(58, dpi);
+    row_height_image_list_ = ImageList_Create(1, row_height, ILC_COLOR32, 1, 1);
+    if (row_height_image_list_ == nullptr)
+    {
+        return;
+    }
+
+    HDC dc = GetDC(window_);
+    HBITMAP blank = dc != nullptr ? CreateCompatibleBitmap(dc, 1, row_height) : nullptr;
+    if (dc != nullptr)
+    {
+        ReleaseDC(window_, dc);
+    }
+    if (blank != nullptr)
+    {
+        (void)ImageList_Add(row_height_image_list_, blank, nullptr);
+        DeleteObject(blank);
+    }
+    ListView_SetImageList(app_list_, row_height_image_list_, LVSIL_SMALL);
+}
+
 void CloudOSNativeStartMenuWindow::Layout()
 {
     if (window_ == nullptr)
@@ -268,30 +356,31 @@ void CloudOSNativeStartMenuWindow::Layout()
     RECT client{};
     GetClientRect(window_, &client);
     const UINT dpi = GetDpiForWindow(window_);
-    const int margin = Scale(18, dpi);
+    const int margin = Scale(24, dpi);
     const int width = std::max<int>(1, static_cast<int>(client.right - client.left));
     const int height = std::max<int>(1, static_cast<int>(client.bottom - client.top));
-    const int search_height = Scale(40, dpi);
-    const int refresh_width = Scale(92, dpi);
-    const int footer_height = Scale(52, dpi);
+    const int search_height = Scale(42, dpi);
+    const int refresh_size = Scale(42, dpi);
+    const int footer_height = Scale(62, dpi);
+    const int footer_y = height - footer_height;
 
+    const int search_frame_right = width - margin - refresh_size - Scale(10, dpi);
     MoveWindow(
         search_edit_,
-        margin,
-        margin,
-        std::max(80, width - margin * 3 - refresh_width),
-        search_height,
+        margin + Scale(14, dpi),
+        margin + Scale(8, dpi),
+        std::max(80, search_frame_right - margin - Scale(28, dpi)),
+        search_height - Scale(16, dpi),
         TRUE);
     MoveWindow(
         refresh_button_,
-        width - margin - refresh_width,
+        width - margin - refresh_size,
         margin,
-        refresh_width,
+        refresh_size,
         search_height,
         TRUE);
 
-    const int list_y = margin + search_height + Scale(14, dpi);
-    const int footer_y = height - margin - footer_height;
+    const int list_y = margin + search_height + Scale(42, dpi);
     MoveWindow(
         app_list_,
         margin,
@@ -300,12 +389,396 @@ void CloudOSNativeStartMenuWindow::Layout()
         std::max(80, footer_y - list_y - Scale(10, dpi)),
         TRUE);
 
-    MoveWindow(footer_label_, margin, footer_y + Scale(9, dpi), std::max(100, width - Scale(380, dpi)), Scale(34, dpi), TRUE);
-    MoveWindow(command_button_, width - margin - Scale(270, dpi), footer_y + Scale(6, dpi), Scale(176, dpi), Scale(36, dpi), TRUE);
-    MoveWindow(power_button_, width - margin - Scale(86, dpi), footer_y + Scale(6, dpi), Scale(86, dpi), Scale(36, dpi), TRUE);
+    MoveWindow(
+        footer_label_,
+        margin,
+        footer_y + Scale(18, dpi),
+        std::max(100, width - Scale(285, dpi)),
+        Scale(30, dpi),
+        TRUE);
+    MoveWindow(
+        command_button_,
+        width - margin - Scale(218, dpi),
+        footer_y + Scale(12, dpi),
+        Scale(164, dpi),
+        Scale(38, dpi),
+        TRUE);
+    MoveWindow(
+        power_button_,
+        width - margin - Scale(44, dpi),
+        footer_y + Scale(12, dpi),
+        Scale(44, dpi),
+        Scale(38, dpi),
+        TRUE);
 
-    ListView_SetColumnWidth(app_list_, 0, std::max(180, (width - margin * 2) * 42 / 100));
-    ListView_SetColumnWidth(app_list_, 1, LVSCW_AUTOSIZE_USEHEADER);
+    ListView_SetColumnWidth(app_list_, 0, std::max(180, width - margin * 2 - Scale(8, dpi)));
+    InvalidateRect(window_, nullptr, FALSE);
+}
+
+void CloudOSNativeStartMenuWindow::Paint()
+{
+    PAINTSTRUCT paint{};
+    HDC screen_dc = BeginPaint(window_, &paint);
+    RECT client{};
+    GetClientRect(window_, &client);
+    const int width = std::max<int>(1, static_cast<int>(client.right - client.left));
+    const int height = std::max<int>(1, static_cast<int>(client.bottom - client.top));
+
+    HDC memory_dc = CreateCompatibleDC(screen_dc);
+    HBITMAP bitmap = CreateCompatibleBitmap(screen_dc, width, height);
+    HGDIOBJ old_bitmap = SelectObject(memory_dc, bitmap);
+
+    Graphics graphics(memory_dc);
+    graphics.SetSmoothingMode(SmoothingModeAntiAlias);
+    graphics.SetTextRenderingHint(TextRenderingHintClearTypeGridFit);
+
+    LinearGradientBrush background(
+        PointF(0.0f, 0.0f),
+        PointF(0.0f, static_cast<REAL>(height)),
+        WebSkin::GdiColor(WebSkin::BgSecondary),
+        WebSkin::GdiColor(WebSkin::BgSolid));
+    graphics.FillRectangle(&background, RectF(0.0f, 0.0f, static_cast<REAL>(width), static_cast<REAL>(height)));
+
+    const UINT dpi = GetDpiForWindow(window_);
+    const int margin = Scale(24, dpi);
+    const int search_height = Scale(42, dpi);
+    const int refresh_size = Scale(42, dpi);
+    const int search_width = width - margin * 2 - refresh_size - Scale(10, dpi);
+
+    WebSkin::DrawRoundedPanel(
+        graphics,
+        RectF(
+            static_cast<REAL>(margin),
+            static_cast<REAL>(margin),
+            static_cast<REAL>(std::max(1, search_width)),
+            static_cast<REAL>(search_height)),
+        static_cast<REAL>(Scale(WebSkin::RadiusMedium, dpi)),
+        WebSkin::GdiColor(search_focused_ ? WebSkin::BgTertiary : WebSkin::BgSecondary),
+        WebSkin::GdiColor(search_focused_ ? WebSkin::Accent : WebSkin::BorderDefault),
+        search_focused_ ? 1.5f : 1.0f);
+
+    if (search_focused_)
+    {
+        WebSkin::DrawRoundedPanel(
+            graphics,
+            RectF(
+                static_cast<REAL>(margin - Scale(2, dpi)),
+                static_cast<REAL>(margin - Scale(2, dpi)),
+                static_cast<REAL>(std::max(1, search_width + Scale(4, dpi))),
+                static_cast<REAL>(search_height + Scale(4, dpi))),
+            static_cast<REAL>(Scale(WebSkin::RadiusMedium + 2, dpi)),
+            Color(0, 0, 0, 0),
+            Color(70, 99, 102, 241),
+            1.0f);
+    }
+
+    RECT section_title{
+        margin,
+        margin + search_height + Scale(17, dpi),
+        width - margin,
+        margin + search_height + Scale(39, dpi)};
+    DrawTextLine(
+        memory_dc,
+        title_font_,
+        WebSkin::TextPrimary,
+        SearchText(search_edit_).empty() ? L"Aplicativos" : L"Resultados",
+        section_title,
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+    std::wstring section_meta;
+    if (NativeStartIndex::Instance().Indexing())
+    {
+        section_meta = L"indexando...";
+    }
+    else
+    {
+        section_meta = std::to_wstring(results_.size());
+        section_meta += L" encontrados";
+    }
+    RECT section_meta_rect = section_title;
+    DrawTextLine(
+        memory_dc,
+        small_font_,
+        WebSkin::TextTertiary,
+        section_meta,
+        section_meta_rect,
+        DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+    const int footer_y = height - Scale(62, dpi);
+    Pen footer_border(WebSkin::GdiColor(WebSkin::BorderDefault), 1.0f);
+    graphics.DrawLine(
+        &footer_border,
+        static_cast<REAL>(margin),
+        static_cast<REAL>(footer_y),
+        static_cast<REAL>(width - margin),
+        static_cast<REAL>(footer_y));
+
+    // Tiny brand accent copied from the web shell's indigo focus language.
+    SolidBrush accent(WebSkin::GdiColor(WebSkin::Accent));
+    graphics.FillEllipse(
+        &accent,
+        static_cast<REAL>(margin),
+        static_cast<REAL>(footer_y + Scale(25, dpi)),
+        static_cast<REAL>(Scale(6, dpi)),
+        static_cast<REAL>(Scale(6, dpi)));
+
+    BitBlt(screen_dc, 0, 0, width, height, memory_dc, 0, 0, SRCCOPY);
+    SelectObject(memory_dc, old_bitmap);
+    DeleteObject(bitmap);
+    DeleteDC(memory_dc);
+    EndPaint(window_, &paint);
+}
+
+std::wstring CloudOSNativeStartMenuWindow::ResultTitle(std::size_t index) const
+{
+    if (index >= results_.size())
+    {
+        return {};
+    }
+    const ResultRow& result = results_[index];
+    if (result.kind == ResultKind::CloudOSApp)
+    {
+        if (result.cloud_app_index >= 0 && result.cloud_app_index < static_cast<int>(kAllApps.size()))
+        {
+            return kAllApps[static_cast<std::size_t>(result.cloud_app_index)].name;
+        }
+        return L"CloudOS";
+    }
+    return result.indexed.title;
+}
+
+std::wstring CloudOSNativeStartMenuWindow::ResultSubtitle(std::size_t index) const
+{
+    if (index >= results_.size())
+    {
+        return {};
+    }
+    const ResultRow& result = results_[index];
+    if (result.kind == ResultKind::CloudOSApp)
+    {
+        if (result.cloud_app_index >= 0 && result.cloud_app_index < static_cast<int>(kAllApps.size()))
+        {
+            std::wstring subtitle = L"CloudOS  •  ";
+            subtitle += kAllApps[static_cast<std::size_t>(result.cloud_app_index)].desc;
+            return subtitle;
+        }
+        return L"Aplicativo CloudOS";
+    }
+    return result.indexed.subtitle.empty()
+        ? std::wstring(L"Aplicativo do Windows")
+        : result.indexed.subtitle;
+}
+
+LRESULT CloudOSNativeStartMenuWindow::CustomDrawResults(const NMLVCUSTOMDRAW& draw)
+{
+    switch (draw.nmcd.dwDrawStage)
+    {
+    case CDDS_PREPAINT:
+        return CDRF_NOTIFYITEMDRAW;
+    case CDDS_ITEMPREPAINT:
+    {
+        const std::size_t index = static_cast<std::size_t>(draw.nmcd.dwItemSpec);
+        if (index >= results_.size())
+        {
+            return CDRF_DODEFAULT;
+        }
+
+        RECT row{};
+        if (!ListView_GetItemRect(app_list_, static_cast<int>(index), &row, LVIR_BOUNDS))
+        {
+            return CDRF_DODEFAULT;
+        }
+
+        HDC dc = draw.nmcd.hdc;
+        HBRUSH clear = CreateSolidBrush(WebSkin::BgPrimary);
+        if (clear != nullptr)
+        {
+            FillRect(dc, &row, clear);
+            DeleteObject(clear);
+        }
+
+        const UINT dpi = GetDpiForWindow(app_list_);
+        const bool selected = (draw.nmcd.uItemState & CDIS_SELECTED) != 0;
+        const bool hot = (draw.nmcd.uItemState & CDIS_HOT) != 0;
+
+        Graphics graphics(dc);
+        graphics.SetSmoothingMode(SmoothingModeAntiAlias);
+        graphics.SetTextRenderingHint(TextRenderingHintClearTypeGridFit);
+
+        RectF card(
+            static_cast<REAL>(row.left + Scale(3, dpi)),
+            static_cast<REAL>(row.top + Scale(3, dpi)),
+            static_cast<REAL>(std::max(1, Width(row) - Scale(6, dpi))),
+            static_cast<REAL>(std::max(1, Height(row) - Scale(6, dpi))));
+        if (selected || hot)
+        {
+            WebSkin::DrawRoundedPanel(
+                graphics,
+                card,
+                static_cast<REAL>(Scale(WebSkin::RadiusMedium, dpi)),
+                WebSkin::GdiColor(selected ? WebSkin::AccentSubtle : WebSkin::BgHover),
+                WebSkin::GdiColor(selected ? WebSkin::Accent : WebSkin::BorderDefault, selected ? 125 : 80),
+                1.0f);
+        }
+
+        const int icon_size = Scale(34, dpi);
+        const int icon_x = row.left + Scale(13, dpi);
+        const int icon_y = row.top + (Height(row) - icon_size) / 2;
+        const ResultRow& result = results_[index];
+        if (result.kind == ResultKind::CloudOSApp &&
+            result.cloud_app_index >= 0 &&
+            result.cloud_app_index < static_cast<int>(kAllApps.size()))
+        {
+            NativeIconRenderer::DrawAetherSquircle(
+                graphics,
+                kAllApps[static_cast<std::size_t>(result.cloud_app_index)].icon_id,
+                icon_x,
+                icon_y,
+                icon_size);
+        }
+        else
+        {
+            WebSkin::DrawRoundedPanel(
+                graphics,
+                RectF(
+                    static_cast<REAL>(icon_x),
+                    static_cast<REAL>(icon_y),
+                    static_cast<REAL>(icon_size),
+                    static_cast<REAL>(icon_size)),
+                static_cast<REAL>(Scale(WebSkin::RadiusMedium, dpi)),
+                WebSkin::GdiColor(WebSkin::BgTertiary),
+                WebSkin::GdiColor(WebSkin::BorderDefault),
+                1.0f);
+
+            const std::wstring title = ResultTitle(index);
+            const wchar_t initial[2]{title.empty() ? L'•' : title.front(), L'\0'};
+            Font icon_font(
+                L"Segoe UI Variable Display",
+                static_cast<REAL>(Scale(15, dpi)),
+                FontStyleBold,
+                UnitPixel);
+            SolidBrush icon_text(WebSkin::GdiColor(WebSkin::TextSecondary));
+            StringFormat center;
+            center.SetAlignment(StringAlignmentCenter);
+            center.SetLineAlignment(StringAlignmentCenter);
+            graphics.DrawString(
+                initial,
+                -1,
+                &icon_font,
+                RectF(
+                    static_cast<REAL>(icon_x),
+                    static_cast<REAL>(icon_y),
+                    static_cast<REAL>(icon_size),
+                    static_cast<REAL>(icon_size)),
+                &center,
+                &icon_text);
+        }
+
+        const int text_x = icon_x + icon_size + Scale(12, dpi);
+        const int text_right = row.right - Scale(12, dpi);
+        const std::wstring title = ResultTitle(index);
+        const std::wstring subtitle = ResultSubtitle(index);
+
+        Font title_font(
+            L"Segoe UI Variable Text",
+            static_cast<REAL>(Scale(13, dpi)),
+            FontStyleRegular,
+            UnitPixel);
+        Font subtitle_font(
+            L"Segoe UI Variable Text",
+            static_cast<REAL>(Scale(10, dpi)),
+            FontStyleRegular,
+            UnitPixel);
+        SolidBrush title_brush(WebSkin::GdiColor(WebSkin::TextPrimary));
+        SolidBrush subtitle_brush(WebSkin::GdiColor(WebSkin::TextTertiary));
+        StringFormat format;
+        format.SetTrimming(StringTrimmingEllipsisCharacter);
+        format.SetFormatFlags(StringFormatFlagsNoWrap);
+
+        graphics.DrawString(
+            title.c_str(),
+            -1,
+            &title_font,
+            RectF(
+                static_cast<REAL>(text_x),
+                static_cast<REAL>(row.top + Scale(9, dpi)),
+                static_cast<REAL>(std::max(1, text_right - text_x)),
+                static_cast<REAL>(Scale(21, dpi))),
+            &format,
+            &title_brush);
+        graphics.DrawString(
+            subtitle.c_str(),
+            -1,
+            &subtitle_font,
+            RectF(
+                static_cast<REAL>(text_x),
+                static_cast<REAL>(row.top + Scale(31, dpi)),
+                static_cast<REAL>(std::max(1, text_right - text_x)),
+                static_cast<REAL>(Scale(17, dpi))),
+            &format,
+            &subtitle_brush);
+
+        return CDRF_SKIPDEFAULT;
+    }
+    default:
+        return CDRF_DODEFAULT;
+    }
+}
+
+LRESULT CloudOSNativeStartMenuWindow::DrawOwnerButton(const DRAWITEMSTRUCT& item)
+{
+    if (item.hDC == nullptr || item.hwndItem == nullptr)
+    {
+        return FALSE;
+    }
+
+    const int id = GetDlgCtrlID(item.hwndItem);
+    const UINT dpi = GetDpiForWindow(item.hwndItem);
+    const bool pressed = (item.itemState & ODS_SELECTED) != 0;
+    const bool disabled = (item.itemState & ODS_DISABLED) != 0;
+    const bool focused = (item.itemState & ODS_FOCUS) != 0;
+
+    COLORREF fill = WebSkin::BgSecondary;
+    COLORREF border = WebSkin::BorderDefault;
+    COLORREF text = disabled ? WebSkin::TextDisabled : WebSkin::TextSecondary;
+
+    if (id == kCommandId)
+    {
+        fill = pressed ? WebSkin::AccentActive : WebSkin::AccentSubtle;
+        border = WebSkin::Accent;
+        text = WebSkin::TextPrimary;
+    }
+    else if (pressed)
+    {
+        fill = WebSkin::BgActive;
+        text = WebSkin::TextPrimary;
+    }
+
+    Graphics graphics(item.hDC);
+    graphics.SetSmoothingMode(SmoothingModeAntiAlias);
+    WebSkin::DrawRoundedPanel(
+        graphics,
+        RectF(
+            static_cast<REAL>(item.rcItem.left + 1),
+            static_cast<REAL>(item.rcItem.top + 1),
+            static_cast<REAL>(std::max<LONG>(1, item.rcItem.right - item.rcItem.left - 2)),
+            static_cast<REAL>(std::max<LONG>(1, item.rcItem.bottom - item.rcItem.top - 2))),
+        static_cast<REAL>(Scale(WebSkin::RadiusMedium, dpi)),
+        WebSkin::GdiColor(fill),
+        WebSkin::GdiColor(focused ? WebSkin::AccentHover : border),
+        1.0f);
+
+    std::array<wchar_t, 128> label{};
+    GetWindowTextW(item.hwndItem, label.data(), static_cast<int>(label.size()));
+    RECT text_rect = item.rcItem;
+    DrawTextLine(
+        item.hDC,
+        id == kPowerId || id == kRefreshId ? title_font_ : font_,
+        text,
+        label.data(),
+        text_rect,
+        DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+    return TRUE;
 }
 
 void CloudOSNativeStartMenuWindow::RefreshResults()
@@ -346,61 +819,39 @@ void CloudOSNativeStartMenuWindow::RefreshResults()
 
     for (std::size_t row_index = 0; row_index < results_.size(); ++row_index)
     {
-        const ResultRow& result = results_[row_index];
-        std::wstring title;
-        std::wstring description;
-        if (result.kind == ResultKind::CloudOSApp)
-        {
-            const AppItem& app = kAllApps[static_cast<std::size_t>(result.cloud_app_index)];
-            title = app.name;
-            description = L"CloudOS  •  ";
-            description += app.desc;
-        }
-        else
-        {
-            title = result.indexed.title;
-            description = result.indexed.subtitle;
-        }
-
+        std::wstring title = ResultTitle(row_index);
         LVITEMW item{};
-        item.mask = LVIF_TEXT;
+        item.mask = LVIF_TEXT | LVIF_IMAGE;
         item.iItem = static_cast<int>(row_index);
+        item.iImage = 0;
         item.pszText = title.data();
         ListView_InsertItem(app_list_, &item);
-        ListView_SetItemText(app_list_, static_cast<int>(row_index), 1, description.data());
     }
 
     if (!results_.empty())
     {
-        ListView_SetItemState(app_list_, 0, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+        ListView_SetItemState(
+            app_list_,
+            0,
+            LVIS_SELECTED | LVIS_FOCUSED,
+            LVIS_SELECTED | LVIS_FOCUSED);
     }
 
-    const auto recent = StartMenuMRUTracker::Instance().GetTopApps(3);
-    std::wstring footer;
+    std::wstring footer = L"CloudOS  •  ";
     if (NativeStartIndex::Instance().Indexing())
     {
-        footer = L"Indexando aplicativos do Windows...";
+        footer += L"indexando aplicativos...";
     }
     else
     {
-        footer = std::to_wstring(kAllApps.size());
-        footer += L" apps CloudOS  •  ";
+        footer += std::to_wstring(kAllApps.size());
+        footer += L" nativos  •  ";
         footer += std::to_wstring(NativeStartIndex::Instance().Count());
-        footer += L" apps Windows";
-    }
-    if (!recent.empty())
-    {
-        footer += L"  •  Recentes: ";
-        for (std::size_t index = 0; index < recent.size(); ++index)
-        {
-            if (index != 0)
-            {
-                footer += L", ";
-            }
-            footer += recent[index];
-        }
+        footer += L" Windows";
     }
     SetWindowTextW(footer_label_, footer.c_str());
+    InvalidateRect(app_list_, nullptr, TRUE);
+    InvalidateRect(window_, nullptr, FALSE);
 }
 
 void CloudOSNativeStartMenuWindow::ExecuteSelection()
@@ -449,7 +900,11 @@ void CloudOSNativeStartMenuWindow::MoveSelection(int delta)
     }
     selected = std::clamp(selected + delta, 0, static_cast<int>(results_.size()) - 1);
     ListView_SetItemState(app_list_, -1, 0, LVIS_SELECTED | LVIS_FOCUSED);
-    ListView_SetItemState(app_list_, selected, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+    ListView_SetItemState(
+        app_list_,
+        selected,
+        LVIS_SELECTED | LVIS_FOCUSED,
+        LVIS_SELECTED | LVIS_FOCUSED);
     ListView_EnsureVisible(app_list_, selected, FALSE);
 }
 
@@ -477,12 +932,18 @@ void CloudOSNativeStartMenuWindow::ShowNear(const RECT& taskbar_bounds)
     GetMonitorInfoW(monitor, &info);
 
     const UINT dpi = GetDpiForWindow(window_);
-    const int width = Scale(720, dpi);
-    const int height = Scale(690, dpi);
+    const int width = Scale(620, dpi);
+    const int height = Scale(680, dpi);
     int x = taskbar_bounds.left + (taskbar_bounds.right - taskbar_bounds.left - width) / 2;
-    int y = taskbar_bounds.top - height - Scale(8, dpi);
-    x = std::clamp<int>(x, static_cast<int>(info.rcWork.left), std::max<int>(static_cast<int>(info.rcWork.left), static_cast<int>(info.rcWork.right - width)));
-    y = std::clamp<int>(y, static_cast<int>(info.rcWork.top), std::max<int>(static_cast<int>(info.rcWork.top), static_cast<int>(info.rcWork.bottom - height)));
+    int y = taskbar_bounds.top - height - Scale(12, dpi);
+    x = std::clamp<int>(
+        x,
+        static_cast<int>(info.rcWork.left),
+        std::max<int>(static_cast<int>(info.rcWork.left), static_cast<int>(info.rcWork.right - width)));
+    y = std::clamp<int>(
+        y,
+        static_cast<int>(info.rcWork.top),
+        std::max<int>(static_cast<int>(info.rcWork.top), static_cast<int>(info.rcWork.bottom - height)));
 
     SetWindowPos(window_, HWND_TOPMOST, x, y, width, height, SWP_SHOWWINDOW);
     ShowWindow(window_, SW_SHOWNORMAL);
@@ -523,9 +984,32 @@ LRESULT CloudOSNativeStartMenuWindow::HandleMessage(
 {
     switch (message)
     {
+    case WM_PAINT:
+        Paint();
+        return 0;
+    case WM_ERASEBKGND:
+        return 1;
     case WM_SIZE:
         Layout();
         return 0;
+    case WM_DPICHANGED:
+    {
+        const auto* suggested = reinterpret_cast<const RECT*>(l_param);
+        if (suggested != nullptr)
+        {
+            SetWindowPos(
+                window_,
+                nullptr,
+                suggested->left,
+                suggested->top,
+                suggested->right - suggested->left,
+                suggested->bottom - suggested->top,
+                SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        RebuildRowHeight();
+        Layout();
+        return 0;
+    }
     case WM_ACTIVATE:
         if (LOWORD(w_param) == WA_INACTIVE)
         {
@@ -545,10 +1029,25 @@ LRESULT CloudOSNativeStartMenuWindow::HandleMessage(
         }
         break;
     case WM_COMMAND:
-        if (LOWORD(w_param) == kSearchId && HIWORD(w_param) == EN_CHANGE)
+        if (LOWORD(w_param) == kSearchId)
         {
-            RefreshResults();
-            return 0;
+            if (HIWORD(w_param) == EN_CHANGE)
+            {
+                RefreshResults();
+                return 0;
+            }
+            if (HIWORD(w_param) == EN_SETFOCUS)
+            {
+                search_focused_ = true;
+                InvalidateRect(window_, nullptr, FALSE);
+                return 0;
+            }
+            if (HIWORD(w_param) == EN_KILLFOCUS)
+            {
+                search_focused_ = false;
+                InvalidateRect(window_, nullptr, FALSE);
+                return 0;
+            }
         }
         if (LOWORD(w_param) == kRefreshId)
         {
@@ -572,14 +1071,31 @@ LRESULT CloudOSNativeStartMenuWindow::HandleMessage(
             return 0;
         }
         break;
+    case WM_DRAWITEM:
+        if (l_param != 0)
+        {
+            return DrawOwnerButton(*reinterpret_cast<const DRAWITEMSTRUCT*>(l_param));
+        }
+        break;
     case WM_NOTIFY:
     {
         const auto* notification = reinterpret_cast<const NMHDR*>(l_param);
-        if (notification != nullptr && notification->hwndFrom == app_list_ &&
-            (notification->code == NM_DBLCLK || notification->code == NM_RETURN))
+        if (notification != nullptr && notification->hwndFrom == app_list_)
         {
-            ExecuteSelection();
-            return 0;
+            if (notification->code == NM_CUSTOMDRAW)
+            {
+                return CustomDrawResults(*reinterpret_cast<const NMLVCUSTOMDRAW*>(l_param));
+            }
+            if (notification->code == NM_DBLCLK || notification->code == NM_RETURN)
+            {
+                ExecuteSelection();
+                return 0;
+            }
+            if (notification->code == LVN_ITEMCHANGED)
+            {
+                InvalidateRect(app_list_, nullptr, FALSE);
+                return 0;
+            }
         }
         break;
     }
@@ -596,20 +1112,13 @@ LRESULT CloudOSNativeStartMenuWindow::HandleMessage(
         }
         break;
     case WM_CTLCOLOREDIT:
-        SetTextColor(reinterpret_cast<HDC>(w_param), RGB(240, 244, 248));
-        SetBkColor(reinterpret_cast<HDC>(w_param), RGB(34, 37, 44));
+        SetTextColor(reinterpret_cast<HDC>(w_param), WebSkin::TextPrimary);
+        SetBkColor(reinterpret_cast<HDC>(w_param), WebSkin::BgSecondary);
         return reinterpret_cast<LRESULT>(edit_background_);
     case WM_CTLCOLORSTATIC:
-        SetTextColor(reinterpret_cast<HDC>(w_param), RGB(184, 191, 203));
-        SetBkColor(reinterpret_cast<HDC>(w_param), RGB(24, 26, 31));
+        SetTextColor(reinterpret_cast<HDC>(w_param), WebSkin::TextSecondary);
+        SetBkColor(reinterpret_cast<HDC>(w_param), WebSkin::BgPrimary);
         return reinterpret_cast<LRESULT>(background_);
-    case WM_ERASEBKGND:
-    {
-        RECT client{};
-        GetClientRect(window_, &client);
-        FillRect(reinterpret_cast<HDC>(w_param), &client, background_);
-        return 1;
-    }
     case WM_CLOSE:
         Hide();
         return 0;
