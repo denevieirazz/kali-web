@@ -8,6 +8,7 @@
 #include "native_audio_mixer_v7.h"
 #include "native_bluetooth_v7.h"
 #include "native_media_control_v7.h"
+#include "native_quick_settings_media_v8.h"
 #include "native_system_control_backend.h"
 #include "native_windows_search_v7.h"
 

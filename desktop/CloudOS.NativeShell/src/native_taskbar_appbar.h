@@ -17,17 +17,17 @@ namespace CloudOS
 {
 constexpr UINT CLOUDOS_WM_TASKBAR_QUERY_HIT = WM_APP + 0x492;
 
-// Floating Dock V7 keeps the full-width HWND as a real SHAppBarMessage AppBar,
+// Floating Dock V8 keeps the full-width HWND as a real SHAppBarMessage AppBar,
 // so maximized windows and multi-monitor rcWork remain correct. Only the visible
-// and hit-testable region is clipped into a rounded, inset dock. This gives the
-// shell the detached 10-DIP bottom gap without sacrificing Windows AppBar
-// semantics or introducing a fake overlay taskbar.
-namespace FloatingDockV7
+// and hit-testable region is clipped into a softer rounded, inset dock. V8 adds
+// a little more breathing room around the shell chrome while preserving the
+// native AppBar contract and the existing task/pin hit geometry.
+namespace FloatingDockV8
 {
-constexpr int HorizontalInsetDip = 10;
-constexpr int TopInsetDip = 4;
-constexpr int BottomGapDip = 10;
-constexpr int CornerRadiusDip = 20;
+constexpr int HorizontalInsetDip = 18;
+constexpr int TopInsetDip = 5;
+constexpr int BottomGapDip = 9;
+constexpr int CornerRadiusDip = 22;
 
 inline bool IsTaskbar(HWND window) noexcept
 {
@@ -55,7 +55,8 @@ inline void Apply(HWND window) noexcept
     const int inset = dip(HorizontalInsetDip);
     const int top = dip(TopInsetDip);
     const int bottom_gap = dip(BottomGapDip);
-    const int radius = dip(CornerRadiusDip);
+    const int visible_height = std::max(1, height - top - bottom_gap);
+    const int radius = std::min(dip(CornerRadiusDip), visible_height / 2);
     const int right = std::max(inset + 1, width - inset);
     const int bottom = std::max(top + 1, height - bottom_gap);
 
@@ -64,8 +65,8 @@ inline void Apply(HWND window) noexcept
         top,
         right + 1,
         bottom + 1,
-        radius * 2,
-        radius * 2);
+        std::max(2, radius * 2),
+        std::max(2, radius * 2));
     if (region == nullptr) return;
     // SetWindowRgn emits a location-change WinEvent. Avoid feeding that event
     // back into the hook when the geometry is already applied.
@@ -122,7 +123,7 @@ private:
 };
 
 inline Bootstrap bootstrap;
-} // namespace FloatingDockV7
+} // namespace FloatingDockV8
 
 struct CloudOSTaskbarHitQuery final
 {
@@ -150,7 +151,7 @@ public:
 
     HWND Hwnd() const noexcept
     {
-        FloatingDockV7::Apply(window_);
+        FloatingDockV8::Apply(window_);
         return window_;
     }
     HMONITOR Monitor() const noexcept { return monitor_; }
