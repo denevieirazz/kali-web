@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-class CloudOSNativeWindowManager;
+#include "native_window_manager.h"
 
 namespace CloudOS
 {
@@ -49,7 +49,7 @@ private:
 
     static std::wstring AppIdFor(HWND window, const std::wstring& class_name, const std::wstring& title);
     static std::wstring ClassName(HWND window);
-    static bool MatchesExternal(const Record& record, const struct CloudOSManagedWindow& item);
+    static bool MatchesExternal(const Record& record, const CloudOSManagedWindow& item);
     bool Load();
     bool Write(const std::vector<Record>& records) const;
     void ApplyPending(CloudOSNativeWindowManager& window_manager);
