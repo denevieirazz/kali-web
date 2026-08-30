@@ -18,6 +18,14 @@ public:
     bool Start(HINSTANCE instance, CloudOSNativeWindowManager* window_manager);
     void Stop() noexcept;
 
+    // Snap Layouts V8 is a shell-owned popup and never enters another process.
+    // This read-only bridge lets its final placement mark the managed HWND as
+    // floating and reconcile the existing CloudOS window model immediately.
+    static CloudOSNativeWindowManager* ActiveWindowManager() noexcept
+    {
+        return active_instance_ != nullptr ? active_instance_->window_manager_ : nullptr;
+    }
+
 private:
     enum class Zone
     {
@@ -68,3 +76,7 @@ private:
     static NativeSnapAssist* active_instance_;
 };
 } // namespace CloudOS
+
+// Header-only V8 service starts with the native shell message loop and reuses
+// NativeSnapAssist::ActiveWindowManager() after the class above is complete.
+#include "native_snap_layouts_v8.h"
