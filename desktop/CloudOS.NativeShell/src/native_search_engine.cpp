@@ -54,7 +54,11 @@ bool NativeSearchEngine::Matches(const AppItem& app, const std::wstring& query)
 
     if (IsAny(query_view, {L"central", L"comando", L"comandos", L"acoes", L"acao", L"controle", L"command", L"control"}))
     {
-        return id == L"control";
+        return id == L"control" || id == L"systemcenter";
+    }
+    if (IsAny(query_view, {L"hardware", L"central do sistema", L"system center", L"system-center", L"systemcontrol", L"wifi", L"wi-fi", L"brilho", L"brightness", L"volume", L"audio", L"bateria", L"energia", L"power plan", L"adaptador", L"adaptadores", L"ip", L"discos", L"processos"}))
+    {
+        return id == L"systemcenter";
     }
     if (IsAny(query_view, {L"area", L"areas", L"workspace", L"workspaces", L"janela", L"janelas", L"overview", L"task view", L"task-view", L"mission control", L"desktop virtual", L"areas de trabalho", L"visao de trabalho"}))
     {
@@ -86,23 +90,23 @@ bool NativeSearchEngine::Matches(const AppItem& app, const std::wstring& query)
     }
     if (IsAny(query_view, {L"cloudos drive", L"drive", L"armazenamento", L"storage", L"home"}))
     {
-        return id == L"drive";
+        return id == L"drive" || id == L"systemcenter";
     }
     if (IsAny(query_view, {L"pasta", L"pastas", L"arquivo", L"arquivos", L"explorer", L"disco", L"hd"}))
     {
-        return id == L"files" || id == L"drive" || id == L"systemdrive";
+        return id == L"files" || id == L"drive" || id == L"systemdrive" || id == L"systemcenter";
     }
     if (IsAny(query_view, {L"cpu", L"ram", L"processo", L"monitor", L"task"}))
     {
-        return id == L"sysmon" || id == L"control";
+        return id == L"sysmon" || id == L"control" || id == L"systemcenter";
     }
     if (IsAny(query_view, {L"config", L"painel", L"ajustes", L"settings", L"configuracoes"}))
     {
-        return id == L"settings" || id == L"control";
+        return id == L"settings" || id == L"control" || id == L"systemcenter";
     }
     if (IsAny(query_view, {L"saude", L"health", L"doctor", L"diagnostico"}))
     {
-        return id == L"health";
+        return id == L"health" || id == L"systemcenter";
     }
     if (IsAny(query_view, {L"paint", L"desenho", L"arte", L"foto"}))
     {
