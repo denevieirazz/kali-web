@@ -120,8 +120,8 @@ inline void DrawElevatedPanel(
             graphics,
             glow,
             radius + 2.0f,
-            Gdiplus::Color(18, GetRValue(Accent), GetGValue(Accent), GetBValue(Accent)),
-            Gdiplus::Color(46, GetRValue(AccentHover), GetGValue(AccentHover), GetBValue(AccentHover)),
+            Gdiplus::Color(18, 124, 92, 255),
+            Gdiplus::Color(46, 154, 126, 255),
             1.0f);
     }
     DrawRoundedPanel(graphics, rect, radius, fill, border, 1.0f);
@@ -153,14 +153,14 @@ inline void PaintWindowBackground(HDC dc, const RECT& bounds)
 
     // Ambient light gives native flyouts/windows depth without depending on a
     // web compositor. Alpha remains deliberately subtle so text contrast wins.
-    Gdiplus::SolidBrush indigo_glow(Gdiplus::Color(24, GetRValue(Accent), GetGValue(Accent), GetBValue(Accent)));
+    Gdiplus::SolidBrush indigo_glow(Gdiplus::Color(24, 124, 92, 255));
     graphics.FillEllipse(
         &indigo_glow,
         left + width * 0.60f,
         top - height * 0.24f,
         width * 0.62f,
         height * 0.58f);
-    Gdiplus::SolidBrush cyan_glow(Gdiplus::Color(12, GetRValue(AccentCyan), GetGValue(AccentCyan), GetBValue(AccentCyan)));
+    Gdiplus::SolidBrush cyan_glow(Gdiplus::Color(12, 77, 208, 225));
     graphics.FillEllipse(
         &cyan_glow,
         left - width * 0.22f,
