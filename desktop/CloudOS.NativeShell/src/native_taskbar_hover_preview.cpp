@@ -21,10 +21,47 @@ namespace CloudOS
 {
 namespace
 {
-constexpr wchar_t kPreviewClass[] = L"CloudOS.NativeShell.TaskPreview.v2";
+constexpr wchar_t kPreviewClass[] = L"CloudOS.NativeShell.TaskPreview.v3";
 constexpr UINT_PTR kSubclassId = 0xA901;
 constexpr UINT_PTR kHoverTimer = 0xA902;
 constexpr UINT_PTR kHideTimer = 0xA903;
+
+HICON ResolveWindowIcon(HWND window)
+{
+    if (window == nullptr || !IsWindow(window))
+    {
+        return nullptr;
+    }
+
+    HICON icon = reinterpret_cast<HICON>(
+        SendMessageW(window, WM_GETICON, ICON_SMALL2, 0));
+    if (icon == nullptr)
+    {
+        icon = reinterpret_cast<HICON>(
+            SendMessageW(window, WM_GETICON, ICON_SMALL, 0));
+    }
+    if (icon == nullptr)
+    {
+        icon = reinterpret_cast<HICON>(
+            GetClassLongPtrW(window, GCLP_HICONSM));
+    }
+    if (icon == nullptr)
+    {
+        icon = reinterpret_cast<HICON>(
+            GetClassLongPtrW(window, GCLP_HICON));
+    }
+    return icon;
+}
+
+int WrappedWorkspace(int current, int direction) noexcept
+{
+    constexpr int kWorkspaceCount = 4;
+    if (current < 0 || current >= kWorkspaceCount)
+    {
+        current = 0;
+    }
+    return (current + direction + kWorkspaceCount) % kWorkspaceCount;
+}
 }
 
 NativeTaskbarHoverPreview::NativeTaskbarHoverPreview(
@@ -94,7 +131,7 @@ bool NativeTaskbarHoverPreview::Initialize()
         0,
         0,
         360,
-        260,
+        278,
         nullptr,
         nullptr,
         instance_,
@@ -190,7 +227,7 @@ void NativeTaskbarHoverPreview::UpdateHover(POINT client_point)
 
     if (taskbar_ != nullptr)
     {
-        SetTimer(taskbar_, kHoverTimer, 380, nullptr);
+        SetTimer(taskbar_, kHoverTimer, 360, nullptr);
     }
 }
 
@@ -213,8 +250,8 @@ void NativeTaskbarHoverPreview::ShowPreview(
     ClientToScreen(taskbar_, &bottom_right);
 
     const UINT dpi = GetDpiForWindow(taskbar_);
-    const int preview_width = Scale(360, dpi);
-    const int preview_height = Scale(260, dpi);
+    const int preview_width = Scale(372, dpi);
+    const int preview_height = Scale(278, dpi);
     int x = top_left.x + (bottom_right.x - top_left.x - preview_width) / 2;
     int y = top_left.y - preview_height - Scale(10, dpi);
 
@@ -223,8 +260,14 @@ void NativeTaskbarHoverPreview::ShowPreview(
     const HMONITOR monitor = MonitorFromWindow(taskbar_, MONITOR_DEFAULTTONEAREST);
     if (monitor != nullptr && GetMonitorInfoW(monitor, &info))
     {
-        x = std::clamp<int>(x, info.rcWork.left, std::max<int>(info.rcWork.left, info.rcWork.right - preview_width));
-        y = std::clamp<int>(y, info.rcWork.top, std::max<int>(info.rcWork.top, info.rcWork.bottom - preview_height));
+        x = std::clamp<int>(
+            x,
+            info.rcWork.left,
+            std::max<int>(info.rcWork.left, info.rcWork.right - preview_width));
+        y = std::clamp<int>(
+            y,
+            info.rcWork.top,
+            std::max<int>(info.rcWork.top, info.rcWork.bottom - preview_height));
     }
 
     SetWindowPos(
@@ -269,7 +312,7 @@ void NativeTaskbarHoverPreview::LayoutThumbnail()
     GetClientRect(preview_, &client);
     const UINT dpi = GetDpiForWindow(preview_);
     const int margin = Scale(12, dpi);
-    const int title_height = Scale(42, dpi);
+    const int title_height = Scale(52, dpi);
     RECT available{
         margin,
         title_height,
@@ -312,10 +355,10 @@ void NativeTaskbarHoverPreview::LayoutThumbnail()
     DwmUpdateThumbnailProperties(thumbnail_, &properties);
 
     close_rect_ = RECT{
-        client.right - Scale(38, dpi),
-        Scale(8, dpi),
+        client.right - Scale(40, dpi),
+        Scale(10, dpi),
         client.right - Scale(9, dpi),
-        Scale(37, dpi)};
+        Scale(41, dpi)};
 }
 
 void NativeTaskbarHoverPreview::PaintPreview()
@@ -353,6 +396,24 @@ void NativeTaskbarHoverPreview::PaintPreview()
     }
 
     const UINT dpi = GetDpiForWindow(preview_);
+    const int icon_size = Scale(24, dpi);
+    const int icon_x = Scale(14, dpi);
+    const int icon_y = Scale(14, dpi);
+    HICON icon = ResolveWindowIcon(source_);
+    if (icon != nullptr)
+    {
+        (void)DrawIconEx(
+            dc,
+            icon_x,
+            icon_y,
+            icon,
+            icon_size,
+            icon_size,
+            0,
+            nullptr,
+            DI_NORMAL);
+    }
+
     HFONT font = CreateFontW(
         -Scale(13, dpi), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
@@ -361,16 +422,23 @@ void NativeTaskbarHoverPreview::PaintPreview()
     SetBkMode(dc, TRANSPARENT);
     SetTextColor(dc, WebSkin::TextPrimary);
     RECT title_rect{
-        Scale(14, dpi),
+        icon != nullptr ? icon_x + icon_size + Scale(10, dpi) : Scale(14, dpi),
         Scale(6, dpi),
-        std::max<LONG>(Scale(20, dpi), client.right - Scale(46, dpi)),
-        Scale(38, dpi)};
+        std::max<LONG>(Scale(20, dpi), client.right - Scale(48, dpi)),
+        Scale(48, dpi)};
     (void)DrawTextW(
         dc,
         title.c_str(),
         -1,
         &title_rect,
         DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+    POINT cursor{};
+    bool close_hot = false;
+    if (GetCursorPos(&cursor) && ScreenToClient(preview_, &cursor))
+    {
+        close_hot = PtInRect(&close_rect_, cursor) != FALSE;
+    }
 
     WebSkin::DrawRoundedPanel(
         graphics,
@@ -380,10 +448,14 @@ void NativeTaskbarHoverPreview::PaintPreview()
             static_cast<REAL>(Width(close_rect_)),
             static_cast<REAL>(Height(close_rect_))),
         static_cast<REAL>(Scale(8, dpi)),
-        WebSkin::GdiColor(WebSkin::BgTertiary),
-        WebSkin::GdiColor(WebSkin::BorderDefault),
+        close_hot
+            ? WebSkin::GdiColor(WebSkin::Danger, 72)
+            : WebSkin::GdiColor(WebSkin::BgTertiary),
+        close_hot
+            ? WebSkin::GdiColor(WebSkin::Danger)
+            : WebSkin::GdiColor(WebSkin::BorderDefault),
         1.0f);
-    SetTextColor(dc, WebSkin::Danger);
+    SetTextColor(dc, close_hot ? RGB(255, 224, 228) : WebSkin::Danger);
     (void)DrawTextW(dc, L"×", -1, &close_rect_, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
     if (old_font != nullptr)
@@ -423,6 +495,60 @@ LRESULT CALLBACK NativeTaskbarHoverPreview::TaskbarSubclass(
         }
         KillTimer(window, kHideTimer);
         self->UpdateHover(POINT{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)});
+        break;
+    }
+    case WM_MBUTTONUP:
+    {
+        const POINT point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
+        const HWND target = self->HitTaskWindow(point, nullptr);
+        if (target != nullptr && IsWindow(target))
+        {
+            self->HidePreview();
+            PostMessageW(target, WM_CLOSE, 0, 0);
+            return 0;
+        }
+        break;
+    }
+    case WM_MOUSEWHEEL:
+    {
+        if (self->window_manager_ == nullptr)
+        {
+            break;
+        }
+        const int wheel = GET_WHEEL_DELTA_WPARAM(w_param);
+        if (wheel == 0)
+        {
+            return 0;
+        }
+        const int direction = wheel > 0 ? -1 : 1;
+        const int current = self->window_manager_->CurrentWorkspace();
+        const int next = WrappedWorkspace(current, direction);
+        const bool move_active = (GET_KEYSTATE_WPARAM(w_param) & MK_CONTROL) != 0;
+        if (move_active && self->window_manager_->ActiveManagedWindow() != nullptr)
+        {
+            self->window_manager_->MoveActiveToWorkspace(next);
+        }
+        self->window_manager_->SwitchWorkspace(next);
+        self->HidePreview();
+        InvalidateRect(window, nullptr, FALSE);
+        return 0;
+    }
+    case WM_XBUTTONUP:
+    {
+        if (self->window_manager_ == nullptr)
+        {
+            break;
+        }
+        const WORD button = GET_XBUTTON_WPARAM(w_param);
+        const int direction = button == XBUTTON1 ? -1 : button == XBUTTON2 ? 1 : 0;
+        if (direction != 0)
+        {
+            const int current = self->window_manager_->CurrentWorkspace();
+            self->window_manager_->SwitchWorkspace(WrappedWorkspace(current, direction));
+            self->HidePreview();
+            InvalidateRect(window, nullptr, FALSE);
+            return TRUE;
+        }
         break;
     }
     case WM_MOUSELEAVE:
@@ -505,21 +631,33 @@ LRESULT CALLBACK NativeTaskbarHoverPreview::PreviewProcedure(
         if (!self->tracking_preview_)
         {
             TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, window, 0};
-            (void)TrackMouseEvent(&tracking);
+            TrackMouseEvent(&tracking);
             self->tracking_preview_ = true;
         }
         if (self->taskbar_ != nullptr)
         {
             KillTimer(self->taskbar_, kHideTimer);
         }
+        InvalidateRect(window, nullptr, FALSE);
         return 0;
     case WM_MOUSELEAVE:
         self->tracking_preview_ = false;
+        InvalidateRect(window, nullptr, FALSE);
         if (self->taskbar_ != nullptr)
         {
             SetTimer(self->taskbar_, kHideTimer, 220, nullptr);
         }
         return 0;
+    case WM_MBUTTONUP:
+    {
+        const HWND source = self->source_;
+        if (source != nullptr && IsWindow(source))
+        {
+            PostMessageW(source, WM_CLOSE, 0, 0);
+        }
+        self->HidePreview();
+        return 0;
+    }
     case WM_LBUTTONUP:
     {
         const POINT point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
@@ -532,6 +670,10 @@ LRESULT CALLBACK NativeTaskbarHoverPreview::PreviewProcedure(
             }
             else if (self->window_manager_ != nullptr)
             {
+                if (IsIconic(source))
+                {
+                    ShowWindow(source, SW_RESTORE);
+                }
                 self->window_manager_->FocusWindow(source);
             }
         }
