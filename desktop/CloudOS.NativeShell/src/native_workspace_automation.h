@@ -88,6 +88,7 @@ private:
 
     std::unordered_map<HWND, std::uint64_t> processed_windows_;
     std::vector<WorkspaceFocusRecord> focus_history_;
+    std::array<bool, kWorkspaceStudioCount> startup_launched_{};
     int last_workspace_{-1};
     HWND last_foreground_{};
 };
