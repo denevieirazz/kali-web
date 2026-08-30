@@ -11,6 +11,7 @@
 #include "native_notification_center.h"
 #include "native_quick_settings_window.h"
 #include "native_session_recovery.h"
+#include "native_shell_bridge.h"
 #include "native_snap_assist.h"
 #include "native_start_menu_window.h"
 #include "native_task_switcher_window.h"
@@ -19,6 +20,7 @@
 #include "native_theme.h"
 #include "native_watchdog.h"
 #include "native_window_manager.h"
+#include "native_workspace_overview_window.h"
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "gdiplus.lib")
@@ -35,7 +37,23 @@ constexpr int kHotMonitorLeft = 1005;
 constexpr int kHotMonitorRight = 1006;
 constexpr int kHotMonitorLeftFallback = 1007;
 constexpr int kHotMonitorRightFallback = 1008;
+constexpr int kHotWorkspaceOverview = 1009;
+constexpr int kHotWorkspacePrevious = 1010;
+constexpr int kHotWorkspaceNext = 1011;
+constexpr int kHotMoveWorkspacePrevious = 1012;
+constexpr int kHotMoveWorkspaceNext = 1013;
+constexpr int kHotShowDesktop = 1014;
 constexpr UINT_PTR kSessionLifecycleSubclass = 0xC501;
+
+int WrappedWorkspace(int current, int direction) noexcept
+{
+    constexpr int kWorkspaceCount = 4;
+    if (current < 0 || current >= kWorkspaceCount)
+    {
+        current = 0;
+    }
+    return (current + direction + kWorkspaceCount) % kWorkspaceCount;
+}
 }
 
 class CloudOSApplication final
@@ -90,11 +108,14 @@ public:
         if (!start_menu_.Create(instance_) ||
             !quick_settings_.Create(instance_) ||
             !notification_center_.Create(instance_) ||
-            !task_switcher_.Create(instance_, &window_manager_))
+            !task_switcher_.Create(instance_, &window_manager_) ||
+            !workspace_overview_.Create(instance_, &window_manager_))
         {
             Shutdown();
             return false;
         }
+
+        SetupShellBridge();
 
         monitor_signature_ = NativeMonitorManager::Signature();
         if (!BuildTaskbars())
@@ -134,7 +155,7 @@ public:
 
         CloudOSNativeNotificationCenter::Post(
             L"CloudOS pronto",
-            L"Shell V3 carregado: AppBars, Start indexado, DWM previews, Snap Assist, recovery e watchdog.");
+            L"Visao de Trabalho ativa: Ctrl+Alt+O abre as 4 areas; Ctrl+Alt+PgUp/PgDn alterna entre elas.");
 
         RefreshShell();
         return true;
@@ -222,6 +243,23 @@ private:
             });
     }
 
+    void SetupShellBridge()
+    {
+        NativeShellBridge::SetWorkspaceOverviewCallback(
+            [this]()
+            {
+                start_menu_.Hide();
+                quick_settings_.Hide();
+                notification_center_.Hide();
+                workspace_overview_.Toggle(desktop_.Hwnd());
+            });
+        NativeShellBridge::SetShowDesktopCallback(
+            [this]()
+            {
+                ToggleShowDesktopCurrentWorkspace();
+            });
+    }
+
     bool BuildTaskbars()
     {
         taskbars_.clear();
@@ -242,6 +280,7 @@ private:
             taskbar->SetStartCallback(
                 [this](const RECT& anchor)
                 {
+                    workspace_overview_.Hide();
                     quick_settings_.Hide();
                     notification_center_.Hide();
                     start_menu_.ToggleNear(anchor);
@@ -249,6 +288,7 @@ private:
             taskbar->SetQuickSettingsCallback(
                 [this](const RECT& anchor)
                 {
+                    workspace_overview_.Hide();
                     start_menu_.Hide();
                     notification_center_.Hide();
                     quick_settings_.ToggleNear(anchor);
@@ -256,6 +296,7 @@ private:
             taskbar->SetNotificationsCallback(
                 [this](const RECT& anchor)
                 {
+                    workspace_overview_.Hide();
                     start_menu_.Hide();
                     quick_settings_.Hide();
                     notification_center_.ToggleNear(anchor);
@@ -311,6 +352,7 @@ private:
         }
 
         session_recovery_.Save(window_manager_);
+        workspace_overview_.Hide();
         start_menu_.Hide();
         quick_settings_.Hide();
         notification_center_.Hide();
@@ -340,6 +382,72 @@ private:
         desktop_.Redraw();
         RefreshTaskbars();
         notification_center_.Refresh();
+        if (workspace_overview_.Visible())
+        {
+            workspace_overview_.Refresh();
+        }
+    }
+
+    void SwitchWorkspaceRelative(int direction)
+    {
+        if (direction == 0)
+        {
+            return;
+        }
+        window_manager_.SwitchWorkspace(
+            WrappedWorkspace(window_manager_.CurrentWorkspace(), direction));
+    }
+
+    void MoveActiveToRelativeWorkspace(int direction, bool follow)
+    {
+        if (direction == 0 || window_manager_.ActiveManagedWindow() == nullptr)
+        {
+            return;
+        }
+        const int target = WrappedWorkspace(window_manager_.CurrentWorkspace(), direction);
+        window_manager_.MoveActiveToWorkspace(target);
+        if (follow)
+        {
+            window_manager_.SwitchWorkspace(target);
+        }
+    }
+
+    void ToggleShowDesktopCurrentWorkspace()
+    {
+        const auto windows = window_manager_.CurrentWorkspaceWindows();
+        bool has_visible = false;
+        for (const CloudOSManagedWindow& item : windows)
+        {
+            if (item.hwnd != nullptr && IsWindow(item.hwnd) &&
+                IsWindowVisible(item.hwnd) && !IsIconic(item.hwnd))
+            {
+                has_visible = true;
+                break;
+            }
+        }
+
+        for (const CloudOSManagedWindow& item : windows)
+        {
+            if (item.hwnd == nullptr || !IsWindow(item.hwnd))
+            {
+                continue;
+            }
+            if (has_visible)
+            {
+                if (IsWindowVisible(item.hwnd) && !IsIconic(item.hwnd))
+                {
+                    ShowWindow(item.hwnd, SW_MINIMIZE);
+                }
+            }
+            else if (IsIconic(item.hwnd))
+            {
+                ShowWindow(item.hwnd, SW_RESTORE);
+            }
+        }
+
+        window_manager_.Reconcile();
+        session_recovery_.Save(window_manager_);
+        RefreshShell();
     }
 
     void HandleHotKey(int id)
@@ -413,22 +521,45 @@ private:
             window_manager_.SnapActive(CloudOSSnapDirection::Down);
             break;
         case HotSearch:
+            workspace_overview_.Hide();
             start_menu_.ShowNear(PrimaryTaskbarBounds());
             return;
         case HotExit:
             PostQuitMessage(0);
             return;
         case kHotTaskSwitcher:
+            workspace_overview_.Hide();
             task_switcher_.ShowCycle(false);
             return;
         case kHotTaskSwitcherReverse:
+            workspace_overview_.Hide();
             task_switcher_.ShowCycle(true);
             return;
         case kHotQuickSettings:
+            workspace_overview_.Hide();
             quick_settings_.ToggleNear(PrimaryTaskbarBounds());
             return;
         case kHotNotifications:
+            workspace_overview_.Hide();
             notification_center_.ToggleNear(PrimaryTaskbarBounds());
+            return;
+        case kHotWorkspaceOverview:
+            workspace_overview_.Toggle(desktop_.Hwnd());
+            return;
+        case kHotWorkspacePrevious:
+            SwitchWorkspaceRelative(-1);
+            break;
+        case kHotWorkspaceNext:
+            SwitchWorkspaceRelative(1);
+            break;
+        case kHotMoveWorkspacePrevious:
+            MoveActiveToRelativeWorkspace(-1, true);
+            break;
+        case kHotMoveWorkspaceNext:
+            MoveActiveToRelativeWorkspace(1, true);
+            break;
+        case kHotShowDesktop:
+            ToggleShowDesktopCurrentWorkspace();
             return;
         case kHotMonitorLeft:
         case kHotMonitorLeftFallback:
@@ -506,6 +637,12 @@ private:
             {HotMoveWorkspace4, move_modifiers, L'4'},
             {kHotQuickSettings, modifiers, L'V'},
             {kHotNotifications, modifiers, L'N'},
+            {kHotWorkspaceOverview, modifiers, L'O'},
+            {kHotWorkspacePrevious, modifiers, VK_PRIOR},
+            {kHotWorkspaceNext, modifiers, VK_NEXT},
+            {kHotMoveWorkspacePrevious, move_modifiers, VK_PRIOR},
+            {kHotMoveWorkspaceNext, move_modifiers, VK_NEXT},
+            {kHotShowDesktop, modifiers, L'D'},
             {kHotMonitorLeftFallback, move_modifiers, VK_LEFT},
             {kHotMonitorRightFallback, move_modifiers, VK_RIGHT},
         };
@@ -548,6 +685,8 @@ private:
         }
         shutting_down_ = true;
 
+        NativeShellBridge::Clear();
+
         const HWND window = desktop_.Hwnd();
         if (window != nullptr)
         {
@@ -576,6 +715,7 @@ private:
         }
 
         UnregisterHotKeys();
+        workspace_overview_.Destroy();
         task_switcher_.Destroy();
         notification_center_.Destroy();
         quick_settings_.Destroy();
@@ -613,6 +753,7 @@ private:
     CloudOSNativeQuickSettingsWindow quick_settings_;
     CloudOSNativeNotificationCenter notification_center_;
     CloudOSNativeTaskSwitcherWindow task_switcher_;
+    CloudOSNativeWorkspaceOverviewWindow workspace_overview_;
     NativeSnapAssist snap_assist_;
     NativeSessionRecovery session_recovery_;
     std::vector<std::unique_ptr<CloudOSTaskbarAppBar>> taskbars_;
