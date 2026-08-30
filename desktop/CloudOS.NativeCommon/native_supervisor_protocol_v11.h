@@ -7,6 +7,8 @@
 namespace CloudOS::SupervisorProtocolV11
 {
 constexpr wchar_t SupervisedArgument[] = L"--supervised";
+constexpr wchar_t ProbeFailureArgument[] = L"--supervisor-probe-fail";
+constexpr wchar_t SupervisorMutexName[] = L"Local\\CloudOS.NativeShell.Supervisor.v11";
 constexpr wchar_t HealthMappingName[] = L"Local\\CloudOS.NativeShell.Health.v9";
 constexpr wchar_t DesktopClass[] = L"CloudOS.NativeShell.Desktop.v2";
 constexpr wchar_t ExplorerTrayClass[] = L"Shell_TrayWnd";
