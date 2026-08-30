@@ -65,11 +65,18 @@ Require 'Native integrity verifier' $content.Verifier @(
     'Native binary is stale for the current source tree'
 )
 
-Require 'Portable native packager' $content.Packager @(
+Require 'Portable native self-verifying packager' $content.Packager @(
     'CloudOS-Native-Release-x64.zip',
     'verify-native-build-manifest.ps1',
     'SHA256SUMS.txt',
+    'Verificar Integridade.ps1',
+    'Verificar Integridade.cmd',
     'Iniciar CloudOS.cmd',
+    'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass',
+    'Integridade do pacote FALHOU',
+    'INTEGRITY_OK',
+    'Get-FileHash',
+    'legacy_react_desktop',
     'LEIA-ME.txt',
     'Compress-Archive',
     'PACKAGE_SHA256'
@@ -137,4 +144,4 @@ Require 'CI release artifact and dependency cache' $content.Workflow @(
     'cloudos-native-manifest.json'
 )
 
-Write-Host 'PASS: deterministic fingerprint, binary integrity, portable package, root workflow shortcuts, WebView2 CI cache and verified release artifact contracts are protected.'
+Write-Host 'PASS: deterministic fingerprint, binary integrity, self-verifying portable package, root workflow shortcuts, WebView2 CI cache and verified release artifact contracts are protected.'
