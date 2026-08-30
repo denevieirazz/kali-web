@@ -20,20 +20,20 @@ constexpr int kBottomBarHeight = 48;
 constexpr UINT_PTR kReconcileTimer = 1;
 constexpr UINT_PTR kMetricsTimer = 2;
 
-// Native mirror of frontend/src/index.css.  The Win32 shell keeps the native
-// runtime/WindowManager, but the visual language comes from the old web UI.
+// Native mirror of frontend/src/index.css. The runtime remains Win32/C++, but
+// every shell surface consumes the same visual language as the former web UI.
 namespace WebSkin
 {
-constexpr COLORREF BgSolid = RGB(10, 10, 15);       // #0a0a0f
-constexpr COLORREF BgPrimary = RGB(17, 17, 24);     // #111118
-constexpr COLORREF BgSecondary = RGB(26, 26, 36);   // #1a1a24
-constexpr COLORREF BgTertiary = RGB(34, 34, 46);    // #22222e
-constexpr COLORREF BgElevated = RGB(42, 42, 56);    // #2a2a38
+constexpr COLORREF BgSolid = RGB(10, 10, 15);        // #0a0a0f
+constexpr COLORREF BgPrimary = RGB(17, 17, 24);      // #111118
+constexpr COLORREF BgSecondary = RGB(26, 26, 36);    // #1a1a24
+constexpr COLORREF BgTertiary = RGB(34, 34, 46);     // #22222e
+constexpr COLORREF BgElevated = RGB(42, 42, 56);     // #2a2a38
 constexpr COLORREF BgHover = RGB(34, 34, 45);
 constexpr COLORREF BgActive = RGB(40, 40, 53);
-constexpr COLORREF Accent = RGB(99, 102, 241);      // #6366f1
-constexpr COLORREF AccentHover = RGB(129, 140, 248);// #818cf8
-constexpr COLORREF AccentActive = RGB(79, 70, 229); // #4f46e5
+constexpr COLORREF Accent = RGB(99, 102, 241);       // #6366f1
+constexpr COLORREF AccentHover = RGB(129, 140, 248); // #818cf8
+constexpr COLORREF AccentActive = RGB(79, 70, 229);  // #4f46e5
 constexpr COLORREF AccentSubtle = RGB(31, 31, 66);
 constexpr COLORREF TextPrimary = RGB(240, 240, 245); // #f0f0f5
 constexpr COLORREF TextSecondary = RGB(160, 160, 184);// #a0a0b8
@@ -47,6 +47,13 @@ constexpr int RadiusSmall = 4;
 constexpr int RadiusMedium = 8;
 constexpr int RadiusLarge = 12;
 constexpr int RadiusXL = 16;
+
+enum class ButtonTone
+{
+    Neutral,
+    Accent,
+    Danger,
+};
 
 inline Gdiplus::Color GdiColor(COLORREF color, BYTE alpha = 255) noexcept
 {
@@ -65,7 +72,9 @@ inline void DrawRoundedPanel(
     Gdiplus::Color border,
     float border_width = 1.0f)
 {
-    const float safe_radius = std::max(0.0f, std::min(radius, std::min(rect.Width, rect.Height) / 2.0f));
+    const float safe_radius = std::max(
+        0.0f,
+        std::min(radius, std::min(rect.Width, rect.Height) / 2.0f));
     const float diameter = safe_radius * 2.0f;
 
     Gdiplus::GraphicsPath path;
@@ -90,11 +99,252 @@ inline void DrawRoundedPanel(
         graphics.DrawPath(&outline, &path);
     }
 }
+
+inline void PaintWindowBackground(HDC dc, const RECT& bounds)
+{
+    if (dc == nullptr || bounds.right <= bounds.left || bounds.bottom <= bounds.top)
+    {
+        return;
+    }
+    Gdiplus::Graphics graphics(dc);
+    Gdiplus::LinearGradientBrush gradient(
+        Gdiplus::PointF(static_cast<Gdiplus::REAL>(bounds.left), static_cast<Gdiplus::REAL>(bounds.top)),
+        Gdiplus::PointF(static_cast<Gdiplus::REAL>(bounds.right), static_cast<Gdiplus::REAL>(bounds.bottom)),
+        GdiColor(BgPrimary),
+        GdiColor(BgSolid));
+    graphics.FillRectangle(
+        &gradient,
+        Gdiplus::RectF(
+            static_cast<Gdiplus::REAL>(bounds.left),
+            static_cast<Gdiplus::REAL>(bounds.top),
+            static_cast<Gdiplus::REAL>(bounds.right - bounds.left),
+            static_cast<Gdiplus::REAL>(bounds.bottom - bounds.top)));
+}
+
+inline void ApplyUxTheme(HWND control)
+{
+    if (control == nullptr)
+    {
+        return;
+    }
+    using SetWindowThemeFn = HRESULT (WINAPI*)(HWND, LPCWSTR, LPCWSTR);
+    static HMODULE module = LoadLibraryW(L"uxtheme.dll");
+    static auto set_window_theme = module == nullptr
+        ? nullptr
+        : reinterpret_cast<SetWindowThemeFn>(GetProcAddress(module, "SetWindowTheme"));
+    if (set_window_theme != nullptr)
+    {
+        (void)set_window_theme(control, L"DarkMode_Explorer", nullptr);
+    }
+}
+
+inline void RemoveLegacyClientEdge(HWND control)
+{
+    if (control == nullptr)
+    {
+        return;
+    }
+    const LONG_PTR ex_style = GetWindowLongPtrW(control, GWL_EXSTYLE);
+    if ((ex_style & WS_EX_CLIENTEDGE) != 0)
+    {
+        SetWindowLongPtrW(control, GWL_EXSTYLE, ex_style & ~static_cast<LONG_PTR>(WS_EX_CLIENTEDGE));
+        SetWindowPos(
+            control,
+            nullptr,
+            0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    }
+}
+
+inline void PrepareButton(HWND button)
+{
+    if (button == nullptr)
+    {
+        return;
+    }
+    ApplyUxTheme(button);
+    const LONG_PTR style = GetWindowLongPtrW(button, GWL_STYLE);
+    SetWindowLongPtrW(
+        button,
+        GWL_STYLE,
+        (style & ~static_cast<LONG_PTR>(BS_TYPEMASK)) | BS_OWNERDRAW);
+    InvalidateRect(button, nullptr, TRUE);
+}
+
+inline void PrepareEdit(HWND edit)
+{
+    RemoveLegacyClientEdge(edit);
+    ApplyUxTheme(edit);
+}
+
+inline void PrepareListView(HWND list)
+{
+    if (list == nullptr)
+    {
+        return;
+    }
+    RemoveLegacyClientEdge(list);
+    ApplyUxTheme(list);
+    ListView_SetBkColor(list, BgSecondary);
+    ListView_SetTextBkColor(list, BgSecondary);
+    ListView_SetTextColor(list, TextPrimary);
+    ListView_SetExtendedListViewStyleEx(
+        list,
+        LVS_EX_DOUBLEBUFFER | LVS_EX_FULLROWSELECT,
+        LVS_EX_DOUBLEBUFFER | LVS_EX_FULLROWSELECT);
+}
+
+inline void PrepareControl(HWND control)
+{
+    if (control == nullptr)
+    {
+        return;
+    }
+
+    wchar_t class_name[64]{};
+    GetClassNameW(control, class_name, static_cast<int>(std::size(class_name)));
+    if (_wcsicmp(class_name, L"Button") == 0)
+    {
+        ApplyUxTheme(control);
+    }
+    else if (_wcsicmp(class_name, L"Edit") == 0)
+    {
+        PrepareEdit(control);
+    }
+    else if (_wcsicmp(class_name, WC_LISTVIEWW) == 0)
+    {
+        PrepareListView(control);
+    }
+    else
+    {
+        ApplyUxTheme(control);
+    }
+}
+
+inline BOOL CALLBACK PrepareChildCallback(HWND child, LPARAM)
+{
+    PrepareControl(child);
+    EnumChildWindows(child, PrepareChildCallback, 0);
+    return TRUE;
+}
+
+inline void PrepareWindowTree(HWND window)
+{
+    if (window == nullptr)
+    {
+        return;
+    }
+    EnumChildWindows(window, PrepareChildCallback, 0);
+}
+
+inline bool PaintOwnerDrawButton(
+    const DRAWITEMSTRUCT* draw,
+    ButtonTone tone = ButtonTone::Neutral)
+{
+    if (draw == nullptr || draw->CtlType != ODT_BUTTON || draw->hwndItem == nullptr)
+    {
+        return false;
+    }
+
+    const bool pressed = (draw->itemState & ODS_SELECTED) != 0;
+    const bool disabled = (draw->itemState & ODS_DISABLED) != 0;
+    const bool focused = (draw->itemState & ODS_FOCUS) != 0;
+
+    COLORREF fill = pressed ? BgActive : BgTertiary;
+    COLORREF border = focused ? AccentHover : BorderDefault;
+    COLORREF text = disabled ? TextDisabled : TextPrimary;
+
+    if (tone == ButtonTone::Accent)
+    {
+        fill = pressed ? AccentActive : Accent;
+        border = pressed ? AccentActive : AccentHover;
+        text = RGB(255, 255, 255);
+    }
+    else if (tone == ButtonTone::Danger)
+    {
+        fill = pressed ? RGB(89, 31, 38) : RGB(59, 27, 35);
+        border = Danger;
+    }
+
+    Gdiplus::Graphics graphics(draw->hDC);
+    graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+    const Gdiplus::RectF rect(
+        static_cast<Gdiplus::REAL>(draw->rcItem.left + 1),
+        static_cast<Gdiplus::REAL>(draw->rcItem.top + 1),
+        static_cast<Gdiplus::REAL>(std::max<LONG>(1, draw->rcItem.right - draw->rcItem.left - 2)),
+        static_cast<Gdiplus::REAL>(std::max<LONG>(1, draw->rcItem.bottom - draw->rcItem.top - 2)));
+    DrawRoundedPanel(
+        graphics,
+        rect,
+        9.0f,
+        GdiColor(fill),
+        GdiColor(border),
+        1.0f);
+
+    wchar_t caption[256]{};
+    GetWindowTextW(draw->hwndItem, caption, static_cast<int>(std::size(caption)));
+    HGDIOBJ previous_font = nullptr;
+    HFONT font = reinterpret_cast<HFONT>(SendMessageW(draw->hwndItem, WM_GETFONT, 0, 0));
+    if (font != nullptr)
+    {
+        previous_font = SelectObject(draw->hDC, font);
+    }
+    SetBkMode(draw->hDC, TRANSPARENT);
+    SetTextColor(draw->hDC, text);
+    RECT text_rect = draw->rcItem;
+    DrawTextW(
+        draw->hDC,
+        caption,
+        -1,
+        &text_rect,
+        DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+    if (previous_font != nullptr)
+    {
+        SelectObject(draw->hDC, previous_font);
+    }
+    return true;
+}
+
+inline LRESULT HandleListViewCustomDraw(LPNMLVCUSTOMDRAW custom_draw)
+{
+    if (custom_draw == nullptr)
+    {
+        return CDRF_DODEFAULT;
+    }
+    if (custom_draw->nmcd.dwDrawStage == CDDS_PREPAINT)
+    {
+        return CDRF_NOTIFYITEMDRAW;
+    }
+    if (custom_draw->nmcd.dwDrawStage == CDDS_ITEMPREPAINT)
+    {
+        const bool selected = (custom_draw->nmcd.uItemState & CDIS_SELECTED) != 0;
+        const bool hot = (custom_draw->nmcd.uItemState & CDIS_HOT) != 0;
+        custom_draw->clrText = TextPrimary;
+        custom_draw->clrTextBk = selected
+            ? AccentSubtle
+            : (hot ? BgHover : BgSecondary);
+        return CDRF_DODEFAULT;
+    }
+    return CDRF_DODEFAULT;
+}
+
+inline HBRUSH CreateBackgroundBrush()
+{
+    return CreateSolidBrush(BgPrimary);
+}
+
+inline HBRUSH CreateSurfaceBrush()
+{
+    return CreateSolidBrush(BgSecondary);
+}
+
+inline HBRUSH CreateEditBrush()
+{
+    return CreateSolidBrush(BgTertiary);
+}
 } // namespace WebSkin
 
-// Compatibility names used by the existing native surfaces.  Mapping them to
-// the web palette immediately pulls Taskbar/Desktop/other GDI+ surfaces toward
-// the same visual identity without touching their behavior.
+// Compatibility names used by existing native surfaces.
 constexpr COLORREF kBgTop = WebSkin::BgPrimary;
 constexpr COLORREF kBgBottom = WebSkin::BgSolid;
 constexpr COLORREF kGlassBg = WebSkin::BgSecondary;
@@ -129,7 +379,6 @@ struct AppItem final
     int icon_id;
 };
 
-// The catalog describes what each item actually launches.
 inline constexpr std::array<AppItem, 21> kAllApps{{
     {L"browser", L"Navegador", L"Navegador Win32 in-process do CloudOS com WebView2", L"", AppCategory::Accessories, 1},
     {L"control", L"Central de Comandos", L"Mais de 100 acoes do CloudOS e do Windows em uma central pesquisavel", L"", AppCategory::System, 16},
@@ -235,6 +484,15 @@ inline void DarkWindow(HWND window, bool round = true)
             &preference,
             static_cast<DWORD>(sizeof(preference)));
     }
+
+    const COLORREF border = WebSkin::BorderStrong;
+    (void)DwmSetWindowAttribute(
+        window,
+        static_cast<DWMWINDOWATTRIBUTE>(34),
+        &border,
+        static_cast<DWORD>(sizeof(border)));
+
+    WebSkin::PrepareWindowTree(window);
 }
 
 inline void ApplyWebFlyoutMaterial(HWND window)
@@ -246,21 +504,26 @@ inline void ApplyWebFlyoutMaterial(HWND window)
 
     DarkWindow(window, true);
 
-    // Windows 11: DWMWA_BORDER_COLOR (34) and DWMWA_SYSTEMBACKDROP_TYPE (38).
-    // Numeric attributes keep the code buildable with older Windows 10 SDK
-    // headers while failing harmlessly on unsupported Windows builds.
-    const COLORREF border = WebSkin::BorderStrong;
-    (void)DwmSetWindowAttribute(
-        window,
-        static_cast<DWMWINDOWATTRIBUTE>(34),
-        &border,
-        static_cast<DWORD>(sizeof(border)));
-
     const int transient_backdrop = 3; // DWMSBT_TRANSIENTWINDOW / Acrylic-like.
     (void)DwmSetWindowAttribute(
         window,
         static_cast<DWMWINDOWATTRIBUTE>(38),
         &transient_backdrop,
         static_cast<DWORD>(sizeof(transient_backdrop)));
+}
+
+inline void ApplyWebWindowMaterial(HWND window)
+{
+    if (window == nullptr)
+    {
+        return;
+    }
+    DarkWindow(window, true);
+    const int main_backdrop = 2; // DWMSBT_MAINWINDOW / Mica.
+    (void)DwmSetWindowAttribute(
+        window,
+        static_cast<DWMWINDOWATTRIBUTE>(38),
+        &main_backdrop,
+        static_cast<DWORD>(sizeof(main_backdrop)));
 }
 } // namespace CloudOS
