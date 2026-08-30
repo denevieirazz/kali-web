@@ -15,6 +15,7 @@ enum class NativeStartIndexKind
 {
     Shortcut,
     PackagedApp,
+    IndexedItem,
 };
 
 struct NativeStartIndexEntry final
@@ -51,11 +52,22 @@ private:
 
     void StartWorker(bool force_refresh);
     void BuildIndex();
+    void RequestUniversalSearch(const std::wstring& query) const;
+    void UniversalSearchLoop() const;
 
     mutable std::mutex mutex_;
     std::vector<NativeStartIndexEntry> entries_;
     std::thread worker_;
     std::atomic_bool indexing_{false};
     std::atomic_bool ready_{false};
+
+    // Windows Search is queried asynchronously. Query() only reads this cache,
+    // so typing in Start never blocks the Win32 UI thread on OLE DB/SystemIndex.
+    mutable std::mutex universal_mutex_;
+    mutable std::thread universal_worker_;
+    mutable std::atomic_bool universal_searching_{false};
+    mutable std::wstring universal_requested_query_;
+    mutable std::wstring universal_completed_query_;
+    mutable std::vector<NativeStartIndexEntry> universal_entries_;
 };
 } // namespace CloudOS
