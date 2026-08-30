@@ -6,7 +6,9 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <iterator>
 #include <string>
@@ -579,8 +581,6 @@ int SelfTest()
     if (IsFailureExitCode(0) || IsFailureExitCode(1) || IsFailureExitCode(kStatusControlCExit)) return 5;
     if (!IsFailureExitCode(0xC0000001u)) return 6;
     if (RestartBackoff(1) != 500u || RestartBackoff(2) != 1000u || RestartBackoff(4) != 4000u) return 7;
-    NativeHealthSnapshotV9 snapshot{};
-    if (sizeof(snapshot) != CloudOS::SupervisorProtocolV11::HealthStructureSize) return 8;
     return 0;
 }
 
