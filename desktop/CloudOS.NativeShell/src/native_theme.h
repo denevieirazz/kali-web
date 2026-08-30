@@ -160,7 +160,7 @@ inline void PrepareControl(HWND control)
     wchar_t class_name[64]{};
     GetClassNameW(control, class_name, static_cast<int>(std::size(class_name)));
     if (_wcsicmp(class_name, L"Button") == 0)
-        ApplyUxTheme(control);
+        PrepareButton(control);
     else if (_wcsicmp(class_name, L"Edit") == 0)
         PrepareEdit(control);
     else if (_wcsicmp(class_name, WC_LISTVIEWW) == 0)
@@ -243,6 +243,14 @@ inline LRESULT CALLBACK WindowSkinSubclass(
 {
     switch (message)
     {
+    case WM_DRAWITEM:
+    {
+        // Give an app-specific handler first refusal (Start/Quick Settings/etc.).
+        const LRESULT app_result = DefSubclassProc(window, message, w_param, l_param);
+        if (app_result != 0) return app_result;
+        if (PaintOwnerDrawButton(reinterpret_cast<const DRAWITEMSTRUCT*>(l_param), ButtonTone::Neutral)) return TRUE;
+        return app_result;
+    }
     case WM_ERASEBKGND:
     {
         RECT client{}; GetClientRect(window, &client);
@@ -289,8 +297,6 @@ inline HBRUSH CreateSurfaceBrush() { return CreateSolidBrush(BgSecondary); }
 inline HBRUSH CreateEditBrush() { return CreateSolidBrush(BgTertiary); }
 } // namespace WebSkin
 
-// Convenience alias keeps individual native surfaces terse while the source
-// of truth for the enum remains inside the WebSkin design-system namespace.
 using ButtonTone = WebSkin::ButtonTone;
 
 constexpr COLORREF kBgTop = WebSkin::BgPrimary;
@@ -358,7 +364,6 @@ inline int Scale(int value, UINT dpi) noexcept
 {
     return MulDiv(value, static_cast<int>(dpi == 0 ? 96 : dpi), 96);
 }
-
 inline int Width(const RECT& r) noexcept { return static_cast<int>(std::max<LONG>(0, r.right - r.left)); }
 inline int Height(const RECT& r) noexcept { return static_cast<int>(std::max<LONG>(0, r.bottom - r.top)); }
 inline bool Contains(const RECT& r, POINT pt) noexcept
