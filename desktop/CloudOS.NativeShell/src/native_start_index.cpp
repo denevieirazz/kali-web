@@ -1,5 +1,7 @@
 #include "native_start_index.h"
 
+#include "native_windows_search_v7.h"
+
 #include <KnownFolders.h>
 #include <ShlObj.h>
 #include <ShObjIdl.h>
@@ -128,10 +130,10 @@ int MatchScore(const NativeStartIndexEntry& entry, const std::vector<std::wstrin
         }
     }
 
-    if (entry.kind == NativeStartIndexKind::PackagedApp)
-    {
-        score += 5;
-    }
+    // Preserve app-first behavior for equally good matches while still letting
+    // SystemIndex documents surface immediately beneath applications.
+    if (entry.kind == NativeStartIndexKind::PackagedApp) score += 15;
+    else if (entry.kind == NativeStartIndexKind::Shortcut) score += 10;
     return score;
 }
 
@@ -251,6 +253,19 @@ void ScanAppsFolder(std::vector<NativeStartIndexEntry>& entries)
 
     enumeration->Release();
 }
+
+std::wstring IndexedTitle(const NativeSearchIndexResultV7& item)
+{
+    if (!item.name.empty()) return item.name;
+    if (!item.path.empty())
+    {
+        const std::filesystem::path path(item.path);
+        const std::wstring name = path.filename().wstring();
+        if (!name.empty()) return name;
+        return item.path;
+    }
+    return item.url;
+}
 }
 
 NativeStartIndex& NativeStartIndex::Instance()
@@ -264,6 +279,10 @@ NativeStartIndex::~NativeStartIndex()
     if (worker_.joinable())
     {
         worker_.join();
+    }
+    if (universal_worker_.joinable())
+    {
+        universal_worker_.join();
     }
 }
 
@@ -355,6 +374,95 @@ void NativeStartIndex::BuildIndex()
     }
 }
 
+void NativeStartIndex::RequestUniversalSearch(const std::wstring& query) const
+{
+    const std::wstring requested = Trim(query);
+    if (requested.size() < 2u)
+    {
+        std::scoped_lock lock(universal_mutex_);
+        universal_requested_query_.clear();
+        universal_completed_query_.clear();
+        universal_entries_.clear();
+        return;
+    }
+
+    {
+        std::scoped_lock lock(universal_mutex_);
+        if (_wcsicmp(universal_requested_query_.c_str(), requested.c_str()) == 0 &&
+            (_wcsicmp(universal_completed_query_.c_str(), requested.c_str()) == 0 ||
+             universal_searching_.load()))
+        {
+            return;
+        }
+        universal_requested_query_ = requested;
+    }
+
+    bool expected = false;
+    if (!universal_searching_.compare_exchange_strong(expected, true))
+    {
+        // The active worker will observe universal_requested_query_ and loop to
+        // the newest text instead of spawning one OLE DB query per keystroke.
+        return;
+    }
+
+    if (universal_worker_.joinable())
+    {
+        universal_worker_.join();
+    }
+    universal_worker_ = std::thread([this]() { UniversalSearchLoop(); });
+}
+
+void NativeStartIndex::UniversalSearchLoop() const
+{
+    const HRESULT com_result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const bool uninitialize = SUCCEEDED(com_result);
+
+    for (;;)
+    {
+        std::wstring query;
+        {
+            std::scoped_lock lock(universal_mutex_);
+            query = universal_requested_query_;
+        }
+        if (query.size() < 2u) break;
+
+        const auto indexed = NativeWindowsSearchV7::Query(query, 48u);
+        std::vector<NativeStartIndexEntry> converted;
+        converted.reserve(indexed.size());
+        std::unordered_set<std::wstring> seen;
+        for (const auto& item : indexed)
+        {
+            const std::wstring target = !item.path.empty() ? item.path : item.url;
+            if (target.empty()) continue;
+            std::wstring key = Lower(target);
+            if (!seen.insert(std::move(key)).second) continue;
+
+            NativeStartIndexEntry entry{};
+            entry.title = IndexedTitle(item);
+            entry.subtitle = L"Windows Search";
+            if (!item.path.empty()) entry.subtitle += L"  •  " + item.path;
+            entry.launch_target = target;
+            entry.kind = NativeStartIndexKind::IndexedItem;
+            converted.push_back(std::move(entry));
+        }
+
+        bool latest = false;
+        {
+            std::scoped_lock lock(universal_mutex_);
+            latest = _wcsicmp(universal_requested_query_.c_str(), query.c_str()) == 0;
+            if (latest)
+            {
+                universal_completed_query_ = query;
+                universal_entries_ = std::move(converted);
+            }
+        }
+        if (latest) break;
+    }
+
+    if (uninitialize) CoUninitialize();
+    universal_searching_.store(false);
+}
+
 bool NativeStartIndex::Ready() const noexcept
 {
     return ready_.load();
@@ -362,7 +470,7 @@ bool NativeStartIndex::Ready() const noexcept
 
 bool NativeStartIndex::Indexing() const noexcept
 {
-    return indexing_.load();
+    return indexing_.load() || universal_searching_.load();
 }
 
 std::size_t NativeStartIndex::Count() const
@@ -381,17 +489,32 @@ std::vector<NativeStartIndexEntry> NativeStartIndex::Query(
         NativeStartIndexEntry entry;
     };
 
+    RequestUniversalSearch(query);
     const auto tokens = Tokens(query);
     std::vector<ScoredEntry> scored;
     {
         std::scoped_lock lock(mutex_);
-        scored.reserve(entries_.size());
+        scored.reserve(entries_.size() + 48u);
         for (const auto& entry : entries_)
         {
             const int score = MatchScore(entry, tokens);
             if (score >= 0)
             {
                 scored.push_back(ScoredEntry{score, entry});
+            }
+        }
+    }
+
+    const std::wstring requested = Trim(query);
+    if (requested.size() >= 2u)
+    {
+        std::scoped_lock lock(universal_mutex_);
+        if (_wcsicmp(universal_completed_query_.c_str(), requested.c_str()) == 0)
+        {
+            for (const auto& entry : universal_entries_)
+            {
+                const int score = MatchScore(entry, tokens);
+                if (score >= 0) scored.push_back(ScoredEntry{score, entry});
             }
         }
     }
@@ -408,16 +531,15 @@ std::vector<NativeStartIndexEntry> NativeStartIndex::Query(
             return _wcsicmp(left.entry.title.c_str(), right.entry.title.c_str()) < 0;
         });
 
-    if (scored.size() > limit)
-    {
-        scored.resize(limit);
-    }
-
+    std::unordered_set<std::wstring> seen;
     std::vector<NativeStartIndexEntry> result;
-    result.reserve(scored.size());
+    result.reserve(std::min<std::size_t>(scored.size(), limit));
     for (auto& item : scored)
     {
+        std::wstring key = Lower(item.entry.launch_target);
+        if (key.empty() || !seen.insert(std::move(key)).second) continue;
         result.push_back(std::move(item.entry));
+        if (result.size() >= limit) break;
     }
     return result;
 }
