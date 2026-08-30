@@ -21,24 +21,22 @@ constexpr int kBottomBarHeight = 48;
 constexpr UINT_PTR kReconcileTimer = 1;
 constexpr UINT_PTR kMetricsTimer = 2;
 
-// Native mirror of frontend/src/index.css. The runtime remains Win32/C++, but
-// every shell surface consumes the same visual language as the former web UI.
 namespace WebSkin
 {
-constexpr COLORREF BgSolid = RGB(10, 10, 15);        // #0a0a0f
-constexpr COLORREF BgPrimary = RGB(17, 17, 24);      // #111118
-constexpr COLORREF BgSecondary = RGB(26, 26, 36);    // #1a1a24
-constexpr COLORREF BgTertiary = RGB(34, 34, 46);     // #22222e
-constexpr COLORREF BgElevated = RGB(42, 42, 56);     // #2a2a38
+constexpr COLORREF BgSolid = RGB(10, 10, 15);
+constexpr COLORREF BgPrimary = RGB(17, 17, 24);
+constexpr COLORREF BgSecondary = RGB(26, 26, 36);
+constexpr COLORREF BgTertiary = RGB(34, 34, 46);
+constexpr COLORREF BgElevated = RGB(42, 42, 56);
 constexpr COLORREF BgHover = RGB(34, 34, 45);
 constexpr COLORREF BgActive = RGB(40, 40, 53);
-constexpr COLORREF Accent = RGB(99, 102, 241);       // #6366f1
-constexpr COLORREF AccentHover = RGB(129, 140, 248); // #818cf8
-constexpr COLORREF AccentActive = RGB(79, 70, 229);  // #4f46e5
+constexpr COLORREF Accent = RGB(99, 102, 241);
+constexpr COLORREF AccentHover = RGB(129, 140, 248);
+constexpr COLORREF AccentActive = RGB(79, 70, 229);
 constexpr COLORREF AccentSubtle = RGB(31, 31, 66);
-constexpr COLORREF TextPrimary = RGB(240, 240, 245); // #f0f0f5
-constexpr COLORREF TextSecondary = RGB(160, 160, 184);// #a0a0b8
-constexpr COLORREF TextTertiary = RGB(107, 107, 130); // #6b6b82
+constexpr COLORREF TextPrimary = RGB(240, 240, 245);
+constexpr COLORREF TextSecondary = RGB(160, 160, 184);
+constexpr COLORREF TextTertiary = RGB(107, 107, 130);
 constexpr COLORREF TextDisabled = RGB(69, 69, 90);
 constexpr COLORREF BorderDefault = RGB(43, 43, 56);
 constexpr COLORREF BorderSubtle = RGB(31, 31, 42);
@@ -50,12 +48,7 @@ constexpr int RadiusLarge = 12;
 constexpr int RadiusXL = 16;
 constexpr UINT_PTR WindowSubclassId = 0xC10D5A11;
 
-enum class ButtonTone
-{
-    Neutral,
-    Accent,
-    Danger,
-};
+enum class ButtonTone { Neutral, Accent, Danger };
 
 inline Gdiplus::Color GdiColor(COLORREF color, BYTE alpha = 255) noexcept
 {
@@ -74,9 +67,7 @@ inline void DrawRoundedPanel(
     const float diameter = safe_radius * 2.0f;
     Gdiplus::GraphicsPath path;
     if (diameter <= 0.0f)
-    {
         path.AddRectangle(rect);
-    }
     else
     {
         path.AddArc(rect.X, rect.Y, diameter, diameter, 180.0f, 90.0f);
@@ -107,23 +98,9 @@ inline void PaintWindowBackground(HDC dc, const RECT& bounds)
         static_cast<Gdiplus::REAL>(bounds.right - bounds.left), static_cast<Gdiplus::REAL>(bounds.bottom - bounds.top)));
 }
 
-inline HBRUSH SharedBackgroundBrush()
-{
-    static HBRUSH brush = CreateSolidBrush(BgPrimary);
-    return brush;
-}
-
-inline HBRUSH SharedSurfaceBrush()
-{
-    static HBRUSH brush = CreateSolidBrush(BgSecondary);
-    return brush;
-}
-
-inline HBRUSH SharedEditBrush()
-{
-    static HBRUSH brush = CreateSolidBrush(BgTertiary);
-    return brush;
-}
+inline HBRUSH SharedBackgroundBrush() { static HBRUSH brush = CreateSolidBrush(BgPrimary); return brush; }
+inline HBRUSH SharedSurfaceBrush() { static HBRUSH brush = CreateSolidBrush(BgSecondary); return brush; }
+inline HBRUSH SharedEditBrush() { static HBRUSH brush = CreateSolidBrush(BgTertiary); return brush; }
 
 inline void ApplyUxTheme(HWND control)
 {
@@ -262,19 +239,13 @@ inline LRESULT HandleListViewCustomDraw(LPNMLVCUSTOMDRAW custom_draw)
 }
 
 inline LRESULT CALLBACK WindowSkinSubclass(
-    HWND window,
-    UINT message,
-    WPARAM w_param,
-    LPARAM l_param,
-    UINT_PTR subclass_id,
-    DWORD_PTR)
+    HWND window, UINT message, WPARAM w_param, LPARAM l_param, UINT_PTR subclass_id, DWORD_PTR)
 {
     switch (message)
     {
     case WM_ERASEBKGND:
     {
-        RECT client{};
-        GetClientRect(window, &client);
+        RECT client{}; GetClientRect(window, &client);
         PaintWindowBackground(reinterpret_cast<HDC>(w_param), client);
         return 1;
     }
@@ -310,14 +281,17 @@ inline LRESULT CALLBACK WindowSkinSubclass(
 
 inline void InstallWindowSkin(HWND window)
 {
-    if (window != nullptr)
-        (void)SetWindowSubclass(window, WindowSkinSubclass, WindowSubclassId, 0);
+    if (window != nullptr) (void)SetWindowSubclass(window, WindowSkinSubclass, WindowSubclassId, 0);
 }
 
 inline HBRUSH CreateBackgroundBrush() { return CreateSolidBrush(BgPrimary); }
 inline HBRUSH CreateSurfaceBrush() { return CreateSolidBrush(BgSecondary); }
 inline HBRUSH CreateEditBrush() { return CreateSolidBrush(BgTertiary); }
 } // namespace WebSkin
+
+// Convenience alias keeps individual native surfaces terse while the source
+// of truth for the enum remains inside the WebSkin design-system namespace.
+using ButtonTone = WebSkin::ButtonTone;
 
 constexpr COLORREF kBgTop = WebSkin::BgPrimary;
 constexpr COLORREF kBgBottom = WebSkin::BgSolid;
