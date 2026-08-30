@@ -167,6 +167,47 @@ Cada push da branch `rewrite/cloudos-native-full-system`:
 
 O artifact nao inclui o desktop React antigo.
 
+## Start V4 keyboard-first
+
+A tela Home do Start agora pode ser usada sem mouse. Quando a busca esta vazia:
+
+- setas navegam espacialmente entre os fixados e os cards recomendados;
+- `Home` seleciona o primeiro item;
+- `End` seleciona o ultimo item;
+- `Enter` ou `Espaco` abre o item selecionado;
+- tecla de menu ou `Shift+F10` abre o menu de contexto;
+- `Ctrl+F` devolve foco para a pesquisa;
+- ao simplesmente digitar um caractere imprimivel, o foco migra para a pesquisa e o texto ja entra na consulta;
+- `Esc` volta/fecha conforme o estado;
+- `F5` continua reindexando aplicativos.
+
+A selecao por teclado usa a geometria real de `home_hits_`, portanto a transicao entre a grade de fixados e os cards de recomendados nao depende de indices hardcoded.
+
+Os recomendados continuam usando score de frequencia + recencia. O menu de contexto de um recomendado inclui `Redefinir recomendacoes`, que limpa o MRU persistido sem alterar os pins do Start ou da Taskbar.
+
+## Taskbar V4 power-user controls
+
+A Taskbar V4 mantem os controles ja existentes:
+
+- hover abre preview DWM vivo da janela;
+- botao de fechar dentro do preview;
+- clique do meio em tarefa fecha a janela;
+- roda do mouse sobre a barra troca a area de trabalho;
+- `Ctrl + roda` move a janela ativa para a area adjacente e acompanha a troca;
+- botoes laterais X1/X2 trocam entre areas;
+- grupos de janelas possuem picker, contador e menu de contexto;
+- pins sao reordenaveis por arrasto e persistidos com backup.
+
+### Mostrar Area de Trabalho
+
+O extremo direito de cada AppBar agora funciona como uma faixa nativa de `Mostrar Area de Trabalho`:
+
+- ao passar o mouse, a faixa recebe destaque visual;
+- clique minimiza todas as janelas visiveis da area atual naquele monitor;
+- se todas estiverem minimizadas, o proximo clique restaura as janelas minimizadas naquele monitor;
+- a operacao usa o `CloudOSNativeWindowManager`, respeita o workspace atual e filtra pelo monitor da AppBar;
+- o recurso nao depende da taskbar do Explorer ou de simulacao de `Win+D`.
+
 ## Quick-access hub
 
 O botao de energia/acesso rapido do Start agora funciona como um launcher hierarquico amplo, separado por grupos:
@@ -180,4 +221,4 @@ O botao de energia/acesso rapido do Start agora funciona como um launcher hierar
 
 ## Regra de regressao
 
-Os contratos em `scripts/native/test-native-release-pipeline-contract.ps1` e `scripts/native/test-taskbar-productivity-contract.ps1` devem falhar se qualquer uma dessas garantias for removida silenciosamente.
+Os contratos em `scripts/native/test-native-release-pipeline-contract.ps1` e `scripts/native/test-taskbar-productivity-contract.ps1` devem falhar se qualquer uma dessas garantias for removida silenciosamente. Isso inclui os controles de mouse da Taskbar, a faixa Mostrar Area de Trabalho, a navegacao completa do Start por teclado, o reset do MRU, a integridade SHA256 e a proibicao de reintroduzir o desktop React no release nativo.
