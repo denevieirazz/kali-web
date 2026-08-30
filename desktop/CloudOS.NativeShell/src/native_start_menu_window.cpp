@@ -1827,11 +1827,14 @@ LRESULT CloudOSNativeStartMenuWindow::HandleMessage(
     case WM_TIMER:
         if (w_param == kIndexTimer)
         {
-            const std::size_t count = NativeStartIndex::Instance().Count();
-            if (count != last_index_count_ || NativeStartIndex::Instance().Indexing())
+            if (IsWindowVisible(window_))
             {
-                last_index_count_ = count;
-                RefreshResults();
+                const std::size_t count = NativeStartIndex::Instance().Count();
+                if (count != last_index_count_ || NativeStartIndex::Instance().Indexing())
+                {
+                    last_index_count_ = count;
+                    RefreshResults();
+                }
             }
             return 0;
         }

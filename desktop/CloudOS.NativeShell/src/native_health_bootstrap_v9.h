@@ -50,11 +50,14 @@ inline bool RequiredShellSurfacesExist() noexcept
     const DWORD current_pid = GetCurrentProcessId();
     const auto owns = [current_pid](const wchar_t* class_name) noexcept
     {
-        HWND window = FindWindowW(class_name, nullptr);
-        if (window == nullptr) return false;
-        DWORD window_pid = 0;
-        GetWindowThreadProcessId(window, &window_pid);
-        return window_pid == current_pid;
+        HWND window = nullptr;
+        while ((window = FindWindowExW(nullptr, window, class_name, nullptr)) != nullptr)
+        {
+            DWORD window_pid = 0;
+            GetWindowThreadProcessId(window, &window_pid);
+            if (window_pid == current_pid) return true;
+        }
+        return false;
     };
 
     return owns(DesktopClass) &&
@@ -142,13 +145,33 @@ private:
             GetClassNameW(desktop, class_name, static_cast<int>(std::size(class_name))) <= 0 ||
             std::wstring_view(class_name) != DesktopClass)
         {
-            desktop = FindWindowW(DesktopClass, nullptr);
+            desktop = nullptr;
+            while ((desktop = FindWindowExW(nullptr, desktop, DesktopClass, nullptr)) != nullptr)
+            {
+                DWORD window_pid = 0;
+                GetWindowThreadProcessId(desktop, &window_pid);
+                if (window_pid == GetCurrentProcessId()) break;
+            }
         }
         if (desktop == nullptr || !IsWindow(desktop)) return;
 
         DWORD window_pid = 0;
         GetWindowThreadProcessId(desktop, &window_pid);
-        if (window_pid != GetCurrentProcessId()) return;
+        if (window_pid != GetCurrentProcessId())
+        {
+            desktop = nullptr;
+            while ((desktop = FindWindowExW(nullptr, desktop, DesktopClass, nullptr)) != nullptr)
+            {
+                DWORD pid = 0;
+                GetWindowThreadProcessId(desktop, &pid);
+                if (pid == GetCurrentProcessId())
+                {
+                    desktop = desktop;
+                    break;
+                }
+            }
+            if (desktop == nullptr || !IsWindow(desktop)) return;
+        }
 
         if (!signal_.Initialize()) return;
         if (SetWindowSubclass(
