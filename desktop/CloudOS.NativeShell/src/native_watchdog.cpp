@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
+#include <cstdlib>
 #include <string>
 
 #pragma comment(lib, "shell32.lib")
@@ -12,8 +14,8 @@ namespace CloudOS
 {
 namespace
 {
-constexpr wchar_t kWatchdogMutex[] = L"Local\\CloudOS.NativeShell.Watchdog.v1";
-constexpr DWORD kRestartExitCode = 23;
+constexpr wchar_t kSessionMutex[] = L"Local\\CloudOS.NativeShell.Session.v1";
+constexpr wchar_t kWatchdogArgument[] = L"--watchdog";
 constexpr int kMaximumRapidCrashes = 5;
 constexpr ULONGLONG kCrashWindowMilliseconds = 30000ull;
 
@@ -31,6 +33,46 @@ std::wstring ExecutablePath()
     return std::wstring(buffer.data(), static_cast<std::size_t>(length));
 }
 
+std::vector<std::wstring> Arguments()
+{
+    int count = 0;
+    LPWSTR* raw = CommandLineToArgvW(GetCommandLineW(), &count);
+    if (raw == nullptr)
+    {
+        return {};
+    }
+
+    std::vector<std::wstring> result;
+    result.reserve(static_cast<std::size_t>(std::max(0, count)));
+    for (int index = 0; index < count; ++index)
+    {
+        result.emplace_back(raw[index]);
+    }
+    LocalFree(raw);
+    return result;
+}
+
+DWORD WatchedProcessId()
+{
+    const auto arguments = Arguments();
+    for (std::size_t index = 1; index + 1u < arguments.size(); ++index)
+    {
+        if (_wcsicmp(arguments[index].c_str(), kWatchdogArgument) != 0)
+        {
+            continue;
+        }
+
+        wchar_t* end = nullptr;
+        errno = 0;
+        const unsigned long value = std::wcstoul(arguments[index + 1u].c_str(), &end, 10);
+        if (errno == 0 && end != arguments[index + 1u].c_str() && *end == L'\0' && value != 0)
+        {
+            return static_cast<DWORD>(value);
+        }
+    }
+    return 0;
+}
+
 void SurfaceExistingShell()
 {
     for (const wchar_t* class_name : {
@@ -40,69 +82,26 @@ void SurfaceExistingShell()
         HWND window = FindWindowW(class_name, nullptr);
         if (window != nullptr)
         {
+            ShowWindow(window, SW_SHOWNA);
             SetForegroundWindow(window);
             return;
         }
     }
 }
-}
 
-bool NativeWatchdog::HasSessionArgument()
+bool LaunchNormalShell()
 {
-    int count = 0;
-    LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &count);
-    if (arguments == nullptr)
+    const std::wstring executable = ExecutablePath();
+    if (executable.empty())
     {
         return false;
     }
 
-    bool found = false;
-    for (int index = 1; index < count; ++index)
-    {
-        if (_wcsicmp(arguments[index], L"--session") == 0)
-        {
-            found = true;
-            break;
-        }
-    }
-    LocalFree(arguments);
-    return found;
-}
-
-int NativeWatchdog::Run()
-{
-    HANDLE mutex = CreateMutexW(nullptr, TRUE, kWatchdogMutex);
-    if (mutex == nullptr)
-    {
-        return 2;
-    }
-    if (GetLastError() == ERROR_ALREADY_EXISTS)
-    {
-        SurfaceExistingShell();
-        CloseHandle(mutex);
-        return 0;
-    }
-
-    const std::wstring executable = ExecutablePath();
-    if (executable.empty())
-    {
-        ReleaseMutex(mutex);
-        CloseHandle(mutex);
-        return 3;
-    }
-
-    int rapid_crashes = 0;
-    ULONGLONG first_crash_tick = 0;
-    int result = 0;
-
-    for (;;)
-    {
-        std::wstring command_line = L"\"" + executable + L"\" --session";
-        STARTUPINFOW startup{};
-        startup.cb = sizeof(startup);
-        PROCESS_INFORMATION process{};
-
-        const BOOL created = CreateProcessW(
+    std::wstring command_line = L"\"" + executable + L"\"";
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    if (!CreateProcessW(
             executable.c_str(),
             command_line.data(),
             nullptr,
@@ -112,72 +111,158 @@ int NativeWatchdog::Run()
             nullptr,
             nullptr,
             &startup,
-            &process);
-        if (!created)
-        {
-            result = 4;
-            break;
-        }
+            &process))
+    {
+        return false;
+    }
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    return true;
+}
+}
 
-        CloseHandle(process.hThread);
-        const DWORD wait = WaitForSingleObject(process.hProcess, INFINITE);
-        DWORD exit_code = 1;
-        if (wait == WAIT_OBJECT_0)
-        {
-            (void)GetExitCodeProcess(process.hProcess, &exit_code);
-        }
-        CloseHandle(process.hProcess);
+bool NativeWatchdog::IsWatchdogInvocation()
+{
+    return WatchedProcessId() != 0;
+}
 
-        if (wait != WAIT_OBJECT_0)
-        {
-            result = 5;
-            break;
-        }
-        if (exit_code == 0)
-        {
-            result = 0;
-            break;
-        }
-
-        if (exit_code == kRestartExitCode)
-        {
-            rapid_crashes = 0;
-            first_crash_tick = 0;
-            Sleep(150);
-            continue;
-        }
-
-        const ULONGLONG now = GetTickCount64();
-        if (first_crash_tick == 0 || now - first_crash_tick > kCrashWindowMilliseconds)
-        {
-            first_crash_tick = now;
-            rapid_crashes = 1;
-        }
-        else
-        {
-            ++rapid_crashes;
-        }
-
-        if (rapid_crashes > kMaximumRapidCrashes)
-        {
-            MessageBoxW(
-                nullptr,
-                L"O CloudOS falhou repetidamente em menos de 30 segundos.\n\n"
-                L"O watchdog interrompeu o reinicio automatico para evitar um loop de crash. "
-                L"Execute o CloudOS novamente depois de verificar os logs/build.",
-                L"CloudOS Watchdog",
-                MB_OK | MB_ICONERROR);
-            result = static_cast<int>(exit_code);
-            break;
-        }
-
-        const DWORD backoff = static_cast<DWORD>(
-            std::min(3000, 250 * rapid_crashes));
-        Sleep(backoff);
+int NativeWatchdog::RunWatchdogInvocation()
+{
+    const DWORD process_id = WatchedProcessId();
+    if (process_id == 0)
+    {
+        return 2;
     }
 
-    ReleaseMutex(mutex);
+    HANDLE process = OpenProcess(
+        SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+        FALSE,
+        process_id);
+    if (process == nullptr)
+    {
+        // The parent may already have completed while the helper was starting.
+        return 0;
+    }
+
+    const DWORD wait = WaitForSingleObject(process, INFINITE);
+    DWORD exit_code = 0;
+    if (wait == WAIT_OBJECT_0)
+    {
+        (void)GetExitCodeProcess(process, &exit_code);
+    }
+    CloseHandle(process);
+
+    if (wait != WAIT_OBJECT_0 || exit_code == 0)
+    {
+        return wait == WAIT_OBJECT_0 ? 0 : 3;
+    }
+
+    // Give Windows time to release HWNDs, AppBars and the session mutex before
+    // the replacement shell attempts to acquire them.
+    Sleep(450);
+
+    const ULONGLONG now = GetTickCount64();
+    wchar_t environment_name[] = L"CLOUDOS_WATCHDOG_CRASH_TICK";
+    std::array<wchar_t, 64> previous{};
+    const DWORD previous_length = GetEnvironmentVariableW(
+        environment_name,
+        previous.data(),
+        static_cast<DWORD>(previous.size()));
+    ULONGLONG first_tick = now;
+    int crash_count = 1;
+    if (previous_length > 0 && previous_length < previous.size())
+    {
+        unsigned long long parsed_tick = 0;
+        int parsed_count = 0;
+        if (swscanf_s(previous.data(), L"%llu:%d", &parsed_tick, &parsed_count) == 2 &&
+            parsed_tick != 0 && now - parsed_tick <= kCrashWindowMilliseconds)
+        {
+            first_tick = parsed_tick;
+            crash_count = parsed_count + 1;
+        }
+    }
+
+    if (crash_count > kMaximumRapidCrashes)
+    {
+        MessageBoxW(
+            nullptr,
+            L"O CloudOS falhou repetidamente. O watchdog interrompeu o reinicio automatico "
+            L"para impedir um loop de crash.",
+            L"CloudOS Watchdog",
+            MB_OK | MB_ICONERROR);
+        return static_cast<int>(exit_code);
+    }
+
+    wchar_t state[64]{};
+    swprintf_s(state, L"%llu:%d", first_tick, crash_count);
+    SetEnvironmentVariableW(environment_name, state);
+
+    const DWORD backoff = static_cast<DWORD>(std::min(3000, 250 * crash_count));
+    Sleep(backoff);
+    return LaunchNormalShell() ? 0 : 4;
+}
+
+HANDLE NativeWatchdog::AcquireSessionMutex(DWORD wait_milliseconds)
+{
+    HANDLE mutex = CreateMutexW(nullptr, FALSE, kSessionMutex);
+    if (mutex == nullptr)
+    {
+        return nullptr;
+    }
+
+    const DWORD wait = WaitForSingleObject(mutex, wait_milliseconds);
+    if (wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED)
+    {
+        return mutex;
+    }
+
+    SurfaceExistingShell();
     CloseHandle(mutex);
-    return result;
+    return nullptr;
+}
+
+void NativeWatchdog::ReleaseSessionMutex(HANDLE mutex) noexcept
+{
+    if (mutex != nullptr)
+    {
+        (void)ReleaseMutex(mutex);
+        CloseHandle(mutex);
+    }
+}
+
+bool NativeWatchdog::StartForCurrentProcess()
+{
+    const std::wstring executable = ExecutablePath();
+    if (executable.empty())
+    {
+        return false;
+    }
+
+    std::wstring command_line = L"\"" + executable + L"\" ";
+    command_line += kWatchdogArgument;
+    command_line += L" ";
+    command_line += std::to_wstring(GetCurrentProcessId());
+
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    if (!CreateProcessW(
+            executable.c_str(),
+            command_line.data(),
+            nullptr,
+            nullptr,
+            FALSE,
+            CREATE_NO_WINDOW,
+            nullptr,
+            nullptr,
+            &startup,
+            &process))
+    {
+        return false;
+    }
+
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    return true;
 }
 } // namespace CloudOS
