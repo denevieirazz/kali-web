@@ -6,11 +6,15 @@ $src = Join-Path $root 'desktop\CloudOS.NativeShell\src'
 $paths = @{
     Theme = Join-Path $src 'native_theme.h'
     QuickHeader = Join-Path $src 'native_quick_settings_window.h'
+    FilesHeader = Join-Path $src 'native_files_window.h'
+    RecoveryHeader = Join-Path $src 'native_session_recovery.h'
     Media = Join-Path $src 'native_media_control_v7.h'
     Mixer = Join-Path $src 'native_audio_mixer_v7.h'
+    Bluetooth = Join-Path $src 'native_bluetooth_v7.h'
     Search = Join-Path $src 'native_windows_search_v7.h'
+    ContextMenu = Join-Path $src 'native_shell_context_menu_v7.h'
+    SessionEvents = Join-Path $src 'native_session_events_v7.h'
     Backend = Join-Path $src 'native_system_control_backend.cpp'
-    ShellView = Join-Path $src 'native_shell_view_host.cpp'
     Blueprint = Join-Path $root 'docs\native\VISUAL_PLATFORM_V7_BLUEPRINT.md'
 }
 
@@ -80,6 +84,15 @@ Require 'Per-app CoreAudio mixer' $content.Mixer @(
     'GetProcessId'
 )
 
+Require 'Modern Bluetooth provider' $content.Bluetooth @(
+    'BluetoothDevice::GetDeviceSelector()',
+    'BluetoothLEDevice::GetDeviceSelector()',
+    'DeviceInformation::FindAllAsync',
+    'PairAsync().get()',
+    'UnpairAsync().get()',
+    'multi_threaded'
+)
+
 Require 'Windows Search SystemIndex' $content.Search @(
     'CLSID_CSearchManager',
     'GetCatalog(L"SystemIndex"',
@@ -93,10 +106,38 @@ Require 'Windows Search SystemIndex' $content.Search @(
     'maximum_results = 80u'
 )
 
-Require 'Native platform headers compiled by Quick Settings' $content.QuickHeader @(
+Require 'IContextMenu3 Shell bridge' $content.ContextMenu @(
+    'SHBindToParent',
+    'GetUIObjectOf',
+    'IID_IContextMenu',
+    'IContextMenu2',
+    'IContextMenu3',
+    'HandleMenuMsg2',
+    'QueryContextMenu',
+    'InvokeCommand'
+)
+
+Require 'WTS session bridge' $content.SessionEvents @(
+    'WTSRegisterSessionNotification',
+    'WTSUnRegisterSessionNotification',
+    'WM_WTSSESSION_CHANGE',
+    'WTS_SESSION_LOCK',
+    'WTS_SESSION_UNLOCK',
+    'ShouldCheckpoint',
+    'ShouldRefresh'
+)
+
+Require 'Native platform headers compiled by shell' $content.QuickHeader @(
     '#include "native_audio_mixer_v7.h"',
+    '#include "native_bluetooth_v7.h"',
     '#include "native_media_control_v7.h"',
     '#include "native_windows_search_v7.h"'
+)
+Require 'Files context menu bridge compiled' $content.FilesHeader @(
+    '#include "native_shell_context_menu_v7.h"'
+)
+Require 'Session events bridge compiled' $content.RecoveryHeader @(
+    '#include "native_session_events_v7.h"'
 )
 
 Require 'Native WLAN already first-party' $content.Backend @(
@@ -118,4 +159,4 @@ Require 'Blueprint accuracy' $content.Blueprint @(
     'Floating Taskbar/Dock V7'
 )
 
-Write-Host 'PASS: Visual Platform V7 contracts passed - Fluent reveal/materials, GSMTC, per-app CoreAudio, Windows Search SystemIndex and native WLAN foundations are protected.'
+Write-Host 'PASS: Visual Platform V7 contracts passed - Fluent reveal/materials, GSMTC, CoreAudio mixer, Bluetooth, SystemIndex, IContextMenu3, WTS and native WLAN foundations are protected.'
