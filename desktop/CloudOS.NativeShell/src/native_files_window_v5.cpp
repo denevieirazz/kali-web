@@ -378,8 +378,8 @@ void CloudOSNativeFilesWindow::Layout()
     RECT client{};
     if (!GetClientRect(window_, &client)) return;
 
-    const int width = std::max<LONG>(1, client.right - client.left);
-    const int height = std::max<LONG>(1, client.bottom - client.top);
+    const int width = static_cast<int>(std::max<LONG>(1, client.right - client.left));
+    const int height = static_cast<int>(std::max<LONG>(1, client.bottom - client.top));
     const int side = CloudOS::Scale(252, dpi_);
     const int side_padding = CloudOS::Scale(12, dpi_);
     const int side_header = CloudOS::Scale(78, dpi_);
@@ -473,8 +473,10 @@ void CloudOSNativeFilesWindow::Layout()
         right_start + available_content_width,
         content_bottom};
 
-    const int content_width = std::max<LONG>(1, content_rect_.right - content_rect_.left);
-    const int content_height = std::max<LONG>(1, content_rect_.bottom - content_rect_.top);
+    const int content_width = static_cast<int>(
+        std::max<LONG>(1, content_rect_.right - content_rect_.left));
+    const int content_height = static_cast<int>(
+        std::max<LONG>(1, content_rect_.bottom - content_rect_.top));
     const int content_inset = 1;
     MoveWindow(shell_host_, content_rect_.left + content_inset, content_rect_.top + content_inset,
         std::max(1, content_width - content_inset * 2),
@@ -512,7 +514,11 @@ void CloudOSNativeFilesWindow::PaintChrome(HDC dc, const RECT& client)
     FillRect(dc, &client, background_brush_);
 
     const int side = CloudOS::Scale(252, dpi_);
-    RECT sidebar_background{0, 0, std::min<LONG>(client.right, side), client.bottom};
+    RECT sidebar_background{
+        0,
+        0,
+        std::min<LONG>(client.right, static_cast<LONG>(side)),
+        client.bottom};
     FillRect(dc, &sidebar_background, panel_brush_);
     CloudOS::FilesStyle::PaintSeparator(dc, side - 1, 0, side - 1, client.bottom, kBorder);
 
@@ -545,10 +551,10 @@ void CloudOSNativeFilesWindow::PaintChrome(HDC dc, const RECT& client)
         CloudOS::FilesStyle::PaintRoundedSurface(
             dc, preview_rect_, CloudOS::WebSkin::BgSecondary, kBorder, CloudOS::Scale(10, dpi_));
 
-    const int status_y = client.bottom - CloudOS::Scale(30, dpi_);
+    const int status_y = static_cast<int>(client.bottom) - CloudOS::Scale(30, dpi_);
     CloudOS::FilesStyle::PaintSeparator(
         dc, side + CloudOS::Scale(18, dpi_), status_y,
-        client.right - CloudOS::Scale(18, dpi_), status_y, kBorder);
+        static_cast<int>(client.right) - CloudOS::Scale(18, dpi_), status_y, kBorder);
 }
 
 void CloudOSNativeFilesWindow::UpdateStatus()
