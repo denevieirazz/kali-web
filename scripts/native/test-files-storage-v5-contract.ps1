@@ -168,7 +168,7 @@ Require 'Windows Shell provider boundary' $content.ShellView @(
     'IShellItemArray',
     'SIGDN_FILESYSPATH',
     'SIGDN_DESKTOPABSOLUTEPARSING',
-    'paths.size() >= 256'
+    'kMaximumSelection = 256'
 )
 
 Require 'CloudOS content interactions' $content.Support @(
