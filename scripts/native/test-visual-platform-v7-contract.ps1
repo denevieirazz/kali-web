@@ -7,6 +7,10 @@ $paths = @{
     Theme = Join-Path $src 'native_theme.h'
     QuickHeader = Join-Path $src 'native_quick_settings_window.h'
     TaskbarHeader = Join-Path $src 'native_taskbar_appbar.h'
+    SnapHeader = Join-Path $src 'native_snap_assist.h'
+    Snap = Join-Path $src 'native_snap_assist.cpp'
+    FlyoutMotion = Join-Path $src 'native_flyout_motion_v8.h'
+    MediaPanel = Join-Path $src 'native_quick_settings_media_v8.h'
     FilesHeader = Join-Path $src 'native_files_window.h'
     RecoveryHeader = Join-Path $src 'native_session_recovery.h'
     Media = Join-Path $src 'native_media_control_v7.h'
@@ -21,7 +25,7 @@ $paths = @{
 
 foreach ($entry in $paths.GetEnumerator()) {
     if (-not (Test-Path -LiteralPath $entry.Value)) {
-        throw "Visual Platform V7 file missing [$($entry.Key)]: $($entry.Value)"
+        throw "Visual Platform V7/V8 file missing [$($entry.Key)]: $($entry.Value)"
     }
 }
 
@@ -42,7 +46,7 @@ function Forbid([string]$Name, [string]$Text, [string[]]$Tokens) {
     }
 }
 
-Require 'Visual Experience V7' $content.Theme @(
+Require 'Visual Experience V7 foundation' $content.Theme @(
     'Visual Experience V7',
     'DrawRevealHighlight',
     'PathGradientBrush',
@@ -54,23 +58,60 @@ Require 'Visual Experience V7' $content.Theme @(
     'DWMSBT_MAINWINDOW',
     'Specular light edge'
 )
-Forbid 'Visual Experience V7' $content.Theme @(
+Forbid 'Visual Experience V7 foundation' $content.Theme @(
     'const int transient_backdrop = 3',
     'const int main_backdrop = 2',
     'DWMSBT_ACRYLIC'
 )
 
-Require 'Floating AppBar Dock V7' $content.TaskbarHeader @(
-    'namespace FloatingDockV7',
-    'HorizontalInsetDip = 10',
-    'BottomGapDip = 10',
-    'CornerRadiusDip = 20',
+Require 'Floating AppBar Dock V8' $content.TaskbarHeader @(
+    'namespace FloatingDockV8',
+    'HorizontalInsetDip = 18',
+    'TopInsetDip = 5',
+    'BottomGapDip = 9',
+    'CornerRadiusDip = 22',
     'CreateRoundRectRgn',
     'SetWindowRgn',
     'SetWinEventHook',
     'EVENT_OBJECT_LOCATIONCHANGE',
     'CloudOS.NativeShell.Taskbar.v4',
+    'FloatingDockV8::Apply(window_)'
+)
+Forbid 'Floating AppBar Dock V8' $content.TaskbarHeader @(
+    'namespace FloatingDockV7',
     'FloatingDockV7::Apply(window_)'
+)
+
+Require 'Snap Layout V8' $content.SnapHeader @(
+    'LayoutProcedure',
+    'EnsureLayoutFlyout',
+    'ShowLayoutFlyout',
+    'HideLayoutFlyout'
+)
+Require 'Snap Layout V8' $content.Snap @(
+    'CloudOS.NativeShell.SnapLayoutFlyout.v8',
+    'kLayoutZoneCount = 8',
+    'Zone::LeftHalf',
+    'Zone::LeftThird',
+    'Zone::LeftTwoThirds',
+    'Zone::CenterThird',
+    'Zone::Maximize',
+    'Zone::RightTwoThirds',
+    'Zone::RightThird',
+    'Zone::RightHalf',
+    'ShowLayoutFlyout(WorkAreaFor(window), zone)'
+)
+
+Require 'Reusable Flyout Motion V8' $content.FlyoutMotion @(
+    'CloudOS::FlyoutMotionV8',
+    'SPI_GETCLIENTAREAANIMATION',
+    'EVENT_OBJECT_SHOW',
+    'CloudOS.NativeShell.Start.v4',
+    'CloudOS.NativeShell.QuickSettings.v4',
+    'CloudOS.NativeShell.NotificationCenter.v2',
+    'WS_EX_LAYERED',
+    'SetWindowSubclass',
+    'SetLayeredWindowAttributes'
 )
 
 Require 'GSMTC service' $content.Media @(
@@ -84,6 +125,27 @@ Require 'GSMTC service' $content.Media @(
     'std::thread',
     'multi_threaded',
     'RefreshAsync'
+)
+Require 'GSMTC timeline and artwork V8' $content.Media @(
+    'IsPlaybackPositionEnabled()',
+    'GetTimelineProperties()',
+    'TryChangePlaybackPositionAsync',
+    'media.Thumbnail()',
+    'OpenReadAsync().get()',
+    'DataReader',
+    'artwork'
+)
+Require 'Quick Settings Media V8' $content.MediaPanel @(
+    'CloudOS.NativeShell.QuickMedia.v8',
+    'DrawArtworkBytes',
+    'CreateStreamOnHGlobal',
+    'InterpolationModeHighQualityBicubic',
+    'SeekFromPoint',
+    'NativeMediaControlV7::SeekAsync',
+    'RefreshTimerId',
+    'ExistingPreviousId = 8813',
+    'ExistingToggleId = 8814',
+    'ExistingNextId = 8815'
 )
 
 Require 'Per-app CoreAudio mixer' $content.Mixer @(
@@ -150,6 +212,7 @@ Require 'Native platform headers compiled by shell' $content.QuickHeader @(
     '#include "native_audio_mixer_v7.h"',
     '#include "native_bluetooth_v7.h"',
     '#include "native_media_control_v7.h"',
+    '#include "native_quick_settings_media_v8.h"',
     '#include "native_windows_search_v7.h"'
 )
 Require 'Files context menu bridge compiled' $content.FilesHeader @(
@@ -178,4 +241,4 @@ Require 'Blueprint accuracy' $content.Blueprint @(
     'Floating Taskbar/Dock V7'
 )
 
-Write-Host 'PASS: Visual Platform V7 contracts passed - floating AppBar dock, Fluent reveal/materials, GSMTC, CoreAudio mixer, Bluetooth, SystemIndex, IContextMenu3, WTS and native WLAN foundations are protected.'
+Write-Host 'PASS: Visual Platform V7 foundation + Shell Experience V8 contracts passed - Dock V8, Snap Layout V8, reusable flyout motion, GSMTC artwork/timeline/seek, CoreAudio mixer, Bluetooth, SystemIndex, IContextMenu3, WTS and native WLAN foundations are protected.'
