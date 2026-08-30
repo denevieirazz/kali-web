@@ -69,6 +69,15 @@ jobs:
             }
           }
 
+      - name: Package portable CloudOS Native x64
+        shell: pwsh
+        run: |
+          ./scripts/native/package-cloudos-native.ps1 -Configuration Release
+          $zip = 'desktop/CloudOS.NativeShell/artifacts/CloudOS-Native-Release-x64.zip'
+          if (-not (Test-Path -LiteralPath $zip)) { throw "Portable native package missing: $zip" }
+          if ((Get-Item -LiteralPath $zip).Length -le 0) { throw "Portable native package is empty: $zip" }
+          Write-Host "PACKAGE_SHA256=$((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant())"
+
       - name: Publish verified CloudOS Native x64 artifact
         uses: actions/upload-artifact@v4
         with:
@@ -76,8 +85,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           path: |
-            desktop/CloudOS.NativeShell/bin/Release/CloudOS.exe
-            desktop/CloudOS.NativeShell/bin/Release/CloudOS.NativeRuntime.dll
+            desktop/CloudOS.NativeShell/artifacts/CloudOS-Native-Release-x64.zip
             desktop/CloudOS.NativeShell/bin/Release/cloudos-native-manifest.json
             desktop/CloudOS.NativeShell/bin/Release/.cloudos-build-head
             desktop/CloudOS.NativeShell/bin/Release/.cloudos-build-fingerprint
