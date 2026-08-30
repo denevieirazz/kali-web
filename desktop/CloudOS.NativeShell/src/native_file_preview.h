@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 
+#include <limits>
 #include <string>
 
 namespace CloudOS
@@ -25,6 +26,8 @@ public:
     [[nodiscard]] HWND Window() const noexcept { return window_; }
     [[nodiscard]] const std::wstring& Path() const noexcept { return path_; }
 
+    static std::wstring Extension(const std::wstring& path);
+
 private:
     enum class PreviewKind
     {
@@ -45,7 +48,6 @@ private:
     static bool LooksLikeImage(const std::wstring& path);
     static bool LooksLikeText(const std::wstring& path);
     static std::wstring FileName(const std::wstring& path);
-    static std::wstring Extension(const std::wstring& path);
     static std::wstring FormatBytes(ULONGLONG bytes);
     static std::wstring FormatModified(const FILETIME& value);
     static LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM w_param, LPARAM l_param);
