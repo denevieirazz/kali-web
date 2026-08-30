@@ -7,6 +7,7 @@ $paths = @{
     Project = Join-Path $root 'desktop\CloudOS.NativeShell\CloudOS.NativeShell.vcxproj'
     Launcher = Join-Path $src 'native_app_launcher_v3.cpp'
     Header = Join-Path $src 'native_files_window.h'
+    Internal = Join-Path $src 'native_files_internal.h'
     Window = Join-Path $src 'native_files_window_v5.cpp'
     Navigation = Join-Path $src 'native_files_navigation_v5.cpp'
     Support = Join-Path $src 'native_files_support_v5.cpp'
@@ -36,6 +37,7 @@ $content.State = $content.StateHeader + "`n" + $content.State
 $content.Search = $content.SearchHeader + "`n" + $content.Search
 $content.Preview = $content.PreviewHeader + "`n" + $content.Preview
 $content.ShellView = $content.ShellViewHeader + "`n" + $content.ShellView
+$content.Window = $content.Header + "`n" + $content.Internal + "`n" + $content.Window
 
 function Require([string]$Name, [string]$Text, [string[]]$Tokens) {
     foreach ($token in $Tokens) {
@@ -83,7 +85,7 @@ Forbid 'First-party launcher' $content.Launcher @(
     'SetParent('
 )
 
-Require 'Files V5 window model' ($content.Header + "`n" + $content.Window) @(
+Require 'Files V5 window model' $content.Window @(
     'struct TabState final',
     'std::vector<std::wstring> back;',
     'std::vector<std::wstring> forward;',
