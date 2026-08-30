@@ -50,6 +50,13 @@ public:
         SaveLocked();
     }
 
+    void Clear()
+    {
+        std::scoped_lock lock(mutex_);
+        usage_map_.clear();
+        SaveLocked();
+    }
+
     std::uint32_t GetLaunchCount(const wchar_t* app_id) const
     {
         if (app_id == nullptr)
