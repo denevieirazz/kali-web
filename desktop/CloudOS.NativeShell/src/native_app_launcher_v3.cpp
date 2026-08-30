@@ -12,6 +12,7 @@
 #include "native_run_window.h"
 #include "native_settings_window.h"
 #include "native_shell_actions.h"
+#include "native_shell_bridge.h"
 #include "native_shell_platform.h"
 #include "native_start_menu_mru.h"
 #include "native_system_monitor_window.h"
@@ -180,6 +181,14 @@ std::wstring CanonicalAppId(std::wstring_view id)
     {
         return L"control";
     }
+    if (id == L"workspace" ||
+        id == L"overview" ||
+        id == L"task-view" ||
+        id == L"mission-control" ||
+        id == L"areas")
+    {
+        return L"workspaces";
+    }
     return std::wstring(id);
 }
 
@@ -230,7 +239,15 @@ void NativeAppLauncher::LaunchById(
         CanonicalAppId(requested_id);
     bool launched = true;
 
-    if (id == L"control")
+    if (id == L"workspaces")
+    {
+        launched = NativeShellBridge::OpenWorkspaceOverview();
+        if (!launched)
+        {
+            ShowLaunchError(parent_hwnd, L"a Visao de Trabalho");
+        }
+    }
+    else if (id == L"control")
     {
         CloudOSNativeCommandCenterWindow::Open(
             instance,
@@ -260,9 +277,6 @@ void NativeAppLauncher::LaunchById(
     }
     else if (id == L"files")
     {
-        // Use the real Windows Explorer for the main Files entry. It is much
-        // faster than hosting IExplorerBrowser inside a custom CloudOS frame,
-        // and it gives the user the complete Windows 11 file-management UX.
         launched = LaunchWindowsTarget(
             parent_hwnd,
             L"explorer.exe");
@@ -272,8 +286,7 @@ void NativeAppLauncher::LaunchById(
         std::wstring error;
         if (!NativeCloudOSDrive::EnsureReady(&error))
         {
-            std::wstring message =
-                L"CloudOS Drive indisponivel.";
+            std::wstring message = L"CloudOS Drive indisponivel.";
             if (!error.empty())
             {
                 message += L"\n\n";
@@ -288,40 +301,29 @@ void NativeAppLauncher::LaunchById(
         }
         else
         {
-            const std::wstring root =
-                NativeCloudOSDrive::Root();
+            const std::wstring root = NativeCloudOSDrive::Root();
             if (root.empty())
             {
-                ShowLaunchError(
-                    parent_hwnd,
-                    L"o CloudOS Drive");
+                ShowLaunchError(parent_hwnd, L"o CloudOS Drive");
                 launched = false;
             }
             else
             {
-                // ShellExecute on a directory delegates directly to Explorer.
-                launched = LaunchWindowsTarget(
-                    parent_hwnd,
-                    root);
+                launched = LaunchWindowsTarget(parent_hwnd, root);
             }
         }
     }
     else if (id == L"systemdrive")
     {
-        const std::wstring system_volume =
-            NativeShellPlatform::WindowsVolumeRoot();
+        const std::wstring system_volume = NativeShellPlatform::WindowsVolumeRoot();
         if (system_volume.empty())
         {
-            ShowLaunchError(
-                parent_hwnd,
-                L"o volume do sistema");
+            ShowLaunchError(parent_hwnd, L"o volume do sistema");
             launched = false;
         }
         else
         {
-            launched = LaunchWindowsTarget(
-                parent_hwnd,
-                system_volume);
+            launched = LaunchWindowsTarget(parent_hwnd, system_volume);
         }
     }
     else if (id == L"notepad")
@@ -364,13 +366,10 @@ void NativeAppLauncher::LaunchById(
     }
     else if (id == L"health")
     {
-        launched =
-            CloudOSNativeEnvDoctorWindow::Open(instance) != nullptr;
+        launched = CloudOSNativeEnvDoctorWindow::Open(instance) != nullptr;
         if (!launched)
         {
-            ShowLaunchError(
-                parent_hwnd,
-                L"Saude do Sistema");
+            ShowLaunchError(parent_hwnd, L"Saude do Sistema");
         }
     }
     else if (id == L"browser")
@@ -381,9 +380,7 @@ void NativeAppLauncher::LaunchById(
     }
     else if (id == L"paint")
     {
-        launched = LaunchWindowsTarget(
-            parent_hwnd,
-            L"mspaint.exe");
+        launched = LaunchWindowsTarget(parent_hwnd, L"mspaint.exe");
     }
     else if (id == L"media")
     {
@@ -395,22 +392,16 @@ void NativeAppLauncher::LaunchById(
             false);
         if (!launched)
         {
-            launched = LaunchWindowsTarget(
-                parent_hwnd,
-                L"wmplayer.exe");
+            launched = LaunchWindowsTarget(parent_hwnd, L"wmplayer.exe");
         }
     }
     else if (id == L"regedit")
     {
-        launched = LaunchWindowsTarget(
-            parent_hwnd,
-            L"regedit.exe");
+        launched = LaunchWindowsTarget(parent_hwnd, L"regedit.exe");
     }
     else if (id == L"snip")
     {
-        launched = LaunchWindowsTarget(
-            parent_hwnd,
-            L"SnippingTool.exe");
+        launched = LaunchWindowsTarget(parent_hwnd, L"SnippingTool.exe");
     }
     else if (id == L"weather")
     {
@@ -420,9 +411,7 @@ void NativeAppLauncher::LaunchById(
     }
     else if (id == L"datetime")
     {
-        launched = LaunchWindowsTarget(
-            parent_hwnd,
-            L"ms-settings:dateandtime");
+        launched = LaunchWindowsTarget(parent_hwnd, L"ms-settings:dateandtime");
     }
     else
     {
@@ -431,8 +420,7 @@ void NativeAppLauncher::LaunchById(
 
     if (launched && IsCatalogAppId(id))
     {
-        StartMenuMRUTracker::Instance().RecordLaunch(
-            id.c_str());
+        StartMenuMRUTracker::Instance().RecordLaunch(id.c_str());
     }
 }
 
@@ -481,6 +469,8 @@ void NativeAppLauncher::ShowQuickPowerMenu(
     constexpr UINT kNetwork = 1138;
     constexpr UINT kSystemDrive = 1139;
     constexpr UINT kDeviceManager = 1140;
+    constexpr UINT kWorkspaces = 1141;
+    constexpr UINT kShowDesktop = 1142;
 
     HMENU menu = CreatePopupMenu();
     HMENU cloud = CreatePopupMenu();
@@ -490,8 +480,7 @@ void NativeAppLauncher::ShowQuickPowerMenu(
     HMENU settings = CreatePopupMenu();
     HMENU power = CreatePopupMenu();
     if (menu == nullptr || cloud == nullptr || terminals == nullptr ||
-        productivity == nullptr || tools == nullptr || settings == nullptr ||
-        power == nullptr)
+        productivity == nullptr || tools == nullptr || settings == nullptr || power == nullptr)
     {
         if (menu != nullptr) DestroyMenu(menu);
         if (cloud != nullptr) DestroyMenu(cloud);
@@ -506,6 +495,7 @@ void NativeAppLauncher::ShowQuickPowerMenu(
     AppendMenuW(menu, MF_STRING, kCommandCenter, L"Central de Comandos  ·  106 acoes");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 
+    AppendMenuW(cloud, MF_STRING, kWorkspaces, L"Visão de Trabalho  ·  Ctrl+Alt+O");
     AppendMenuW(cloud, MF_STRING, kBrowser, L"Navegador");
     AppendMenuW(cloud, MF_STRING, kFiles, L"Arquivos");
     AppendMenuW(cloud, MF_STRING, kDrive, L"CloudOS Drive");
@@ -575,6 +565,7 @@ void NativeAppLauncher::ShowQuickPowerMenu(
         L"Sistema e configuracoes");
 
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, kShowDesktop, L"Mostrar Área de Trabalho  ·  Ctrl+Alt+D");
     AppendMenuW(menu, MF_STRING, kLock, L"Bloquear Windows");
     AppendMenuW(menu, MF_STRING, kRestartCloudOS, L"Reiniciar CloudOS");
     AppendMenuW(menu, MF_STRING, kExitCloudOS, L"Sair do CloudOS");
@@ -611,6 +602,9 @@ void NativeAppLauncher::ShowQuickPowerMenu(
     {
     case kCommandCenter:
         CloudOSNativeCommandCenterWindow::Open(instance, parent_hwnd);
+        break;
+    case kWorkspaces:
+        LaunchById(instance, parent_hwnd, L"workspaces");
         break;
     case kBrowser:
         LaunchById(instance, parent_hwnd, L"browser");
@@ -716,6 +710,9 @@ void NativeAppLauncher::ShowQuickPowerMenu(
         break;
     case kHealth:
         LaunchById(instance, parent_hwnd, L"health");
+        break;
+    case kShowDesktop:
+        (void)NativeShellBridge::ToggleShowDesktop();
         break;
     case kLock:
         (void)ExecuteNamedShellAction(instance, parent_hwnd, L"session.lock");
