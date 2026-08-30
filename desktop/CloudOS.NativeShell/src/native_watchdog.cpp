@@ -267,6 +267,10 @@ void NativeWatchdog::ReleaseSessionMutex(HANDLE mutex) noexcept
 
 bool NativeWatchdog::StartForCurrentProcess()
 {
+    // wWinMain reaches this method only after CloudOSApplication::Initialize()
+    // succeeds. Use that deterministic lifecycle point to arm the UI heartbeat.
+    HealthBootstrapV9::bootstrap.AttachAfterInitialization();
+
     // Stability/soak runs must observe the original process directly. A crash
     // must fail the probe instead of being hidden by the normal recovery helper.
     if (HasArgument(kStabilityProbeArgument))
