@@ -77,8 +77,8 @@ Require 'Watchdog integration V9' $content.WatchdogHeader @(
 )
 Require 'Probe watchdog bypass V9' $content.Watchdog @(
     'kStabilityProbeArgument[] = L"--stability-probe"',
-    'HasArgument(kStabilityProbeArgument)',
-    'A crash must fail the probe'
+    'if (HasArgument(kStabilityProbeArgument))',
+    'Stability/soak runs must observe the original process directly.'
 )
 
 Require 'Health reader V9' $content.HealthReader @(
