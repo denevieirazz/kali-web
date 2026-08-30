@@ -9,6 +9,10 @@ $paths = @{
     Status = Join-Path $PSScriptRoot 'get-native-build-status.ps1'
     Build = Join-Path $PSScriptRoot 'build-cloudos-native.cmd'
     Start = Join-Path $PSScriptRoot 'start-cloudos-native.cmd'
+    RootStart = Join-Path $root 'Iniciar CloudOS Nativo.cmd'
+    RootBuild = Join-Path $root 'Compilar CloudOS Nativo.cmd'
+    RootVerify = Join-Path $root 'Verificar CloudOS Nativo.cmd'
+    RootPackage = Join-Path $root 'Empacotar CloudOS Nativo.cmd'
     Workflow = Join-Path $root '.github\workflows\cloudos-native-full-system.yml'
 }
 
@@ -99,6 +103,27 @@ Require 'Native launcher integrity gate' $content.Start @(
     'taskkill /F /IM CloudOS.exe'
 )
 
+Require 'Root start shortcut forwards flags' $content.RootStart @(
+    'start-cloudos-native.cmd',
+    '%*'
+)
+Require 'Root verified build shortcut' $content.RootBuild @(
+    'build-cloudos-native.cmd',
+    'Release',
+    'BUILD OK'
+)
+Require 'Root build verification shortcut' $content.RootVerify @(
+    'get-native-build-status.ps1',
+    '--force-rebuild',
+    'Build pronto para executar'
+)
+Require 'Root portable package shortcut' $content.RootPackage @(
+    'get-native-build-status.ps1',
+    'build-cloudos-native.cmd',
+    'package-cloudos-native.ps1',
+    'CloudOS-Native-Release-x64.zip'
+)
+
 Require 'CI release artifact' $content.Workflow @(
     'build-cloudos-native.cmd',
     'verify-native-build-manifest.ps1',
@@ -108,4 +133,4 @@ Require 'CI release artifact' $content.Workflow @(
     'cloudos-native-manifest.json'
 )
 
-Write-Host 'PASS: deterministic source fingerprint, binary integrity manifest, portable package, status diagnostics, stale-build gate and CI release artifact contracts are protected.'
+Write-Host 'PASS: deterministic source fingerprint, binary integrity manifest, portable package, root build/status/package shortcuts, stale-build gate and CI release artifact contracts are protected.'
