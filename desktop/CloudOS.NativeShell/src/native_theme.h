@@ -23,29 +23,34 @@ constexpr UINT_PTR kMetricsTimer = 2;
 
 namespace WebSkin
 {
-constexpr COLORREF BgSolid = RGB(10, 10, 15);
-constexpr COLORREF BgPrimary = RGB(17, 17, 24);
-constexpr COLORREF BgSecondary = RGB(26, 26, 36);
-constexpr COLORREF BgTertiary = RGB(34, 34, 46);
-constexpr COLORREF BgElevated = RGB(42, 42, 56);
-constexpr COLORREF BgHover = RGB(34, 34, 45);
-constexpr COLORREF BgActive = RGB(40, 40, 53);
-constexpr COLORREF Accent = RGB(99, 102, 241);
-constexpr COLORREF AccentHover = RGB(129, 140, 248);
-constexpr COLORREF AccentActive = RGB(79, 70, 229);
-constexpr COLORREF AccentSubtle = RGB(31, 31, 66);
-constexpr COLORREF TextPrimary = RGB(240, 240, 245);
-constexpr COLORREF TextSecondary = RGB(160, 160, 184);
-constexpr COLORREF TextTertiary = RGB(107, 107, 130);
-constexpr COLORREF TextDisabled = RGB(69, 69, 90);
-constexpr COLORREF BorderDefault = RGB(43, 43, 56);
-constexpr COLORREF BorderSubtle = RGB(31, 31, 42);
-constexpr COLORREF BorderStrong = RGB(55, 55, 70);
-constexpr COLORREF Danger = RGB(219, 99, 106);
-constexpr int RadiusSmall = 4;
-constexpr int RadiusMedium = 8;
-constexpr int RadiusLarge = 12;
-constexpr int RadiusXL = 16;
+// Visual Experience V6 foundation.  The old palette was intentionally close
+// to the reference frontend, but in native Win32 it read too flat.  These
+// values keep the CloudOS indigo identity while introducing real surface
+// hierarchy, colder graphite backgrounds and brighter foreground contrast.
+constexpr COLORREF BgSolid = RGB(5, 7, 12);
+constexpr COLORREF BgPrimary = RGB(9, 13, 21);
+constexpr COLORREF BgSecondary = RGB(14, 20, 31);
+constexpr COLORREF BgTertiary = RGB(22, 29, 44);
+constexpr COLORREF BgElevated = RGB(30, 39, 57);
+constexpr COLORREF BgHover = RGB(31, 41, 59);
+constexpr COLORREF BgActive = RGB(39, 50, 71);
+constexpr COLORREF Accent = RGB(124, 92, 255);
+constexpr COLORREF AccentHover = RGB(154, 126, 255);
+constexpr COLORREF AccentActive = RGB(96, 68, 225);
+constexpr COLORREF AccentSubtle = RGB(35, 31, 78);
+constexpr COLORREF AccentCyan = RGB(77, 208, 225);
+constexpr COLORREF TextPrimary = RGB(245, 247, 252);
+constexpr COLORREF TextSecondary = RGB(167, 177, 199);
+constexpr COLORREF TextTertiary = RGB(111, 123, 148);
+constexpr COLORREF TextDisabled = RGB(69, 79, 100);
+constexpr COLORREF BorderDefault = RGB(43, 53, 72);
+constexpr COLORREF BorderSubtle = RGB(27, 35, 50);
+constexpr COLORREF BorderStrong = RGB(59, 70, 94);
+constexpr COLORREF Danger = RGB(235, 92, 108);
+constexpr int RadiusSmall = 6;
+constexpr int RadiusMedium = 10;
+constexpr int RadiusLarge = 14;
+constexpr int RadiusXL = 20;
 constexpr UINT_PTR WindowSubclassId = 0xC10D5A11;
 
 enum class ButtonTone { Neutral, Accent, Danger };
@@ -85,17 +90,83 @@ inline void DrawRoundedPanel(
     }
 }
 
+inline void DrawElevatedPanel(
+    Gdiplus::Graphics& graphics,
+    const Gdiplus::RectF& rect,
+    float radius,
+    Gdiplus::Color fill,
+    Gdiplus::Color border,
+    bool accent_glow = false)
+{
+    if (rect.Width <= 0.0f || rect.Height <= 0.0f) return;
+    Gdiplus::RectF shadow = rect;
+    shadow.X += 0.0f;
+    shadow.Y += 4.0f;
+    DrawRoundedPanel(
+        graphics,
+        shadow,
+        radius,
+        Gdiplus::Color(86, 0, 0, 0),
+        Gdiplus::Color(0, 0, 0, 0),
+        0.0f);
+    if (accent_glow)
+    {
+        Gdiplus::RectF glow = rect;
+        glow.X -= 2.0f;
+        glow.Y -= 2.0f;
+        glow.Width += 4.0f;
+        glow.Height += 4.0f;
+        DrawRoundedPanel(
+            graphics,
+            glow,
+            radius + 2.0f,
+            Gdiplus::Color(18, GetRValue(Accent), GetGValue(Accent), GetBValue(Accent)),
+            Gdiplus::Color(46, GetRValue(AccentHover), GetGValue(AccentHover), GetBValue(AccentHover)),
+            1.0f);
+    }
+    DrawRoundedPanel(graphics, rect, radius, fill, border, 1.0f);
+
+    Gdiplus::Pen highlight(Gdiplus::Color(40, 255, 255, 255), 1.0f);
+    const float inset = std::max(8.0f, radius * 0.65f);
+    graphics.DrawLine(
+        &highlight,
+        rect.X + inset,
+        rect.Y + 1.0f,
+        rect.GetRight() - inset,
+        rect.Y + 1.0f);
+}
+
 inline void PaintWindowBackground(HDC dc, const RECT& bounds)
 {
     if (dc == nullptr || bounds.right <= bounds.left || bounds.bottom <= bounds.top) return;
     Gdiplus::Graphics graphics(dc);
+    graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+    const Gdiplus::REAL left = static_cast<Gdiplus::REAL>(bounds.left);
+    const Gdiplus::REAL top = static_cast<Gdiplus::REAL>(bounds.top);
+    const Gdiplus::REAL width = static_cast<Gdiplus::REAL>(bounds.right - bounds.left);
+    const Gdiplus::REAL height = static_cast<Gdiplus::REAL>(bounds.bottom - bounds.top);
     Gdiplus::LinearGradientBrush gradient(
-        Gdiplus::PointF(static_cast<Gdiplus::REAL>(bounds.left), static_cast<Gdiplus::REAL>(bounds.top)),
-        Gdiplus::PointF(static_cast<Gdiplus::REAL>(bounds.right), static_cast<Gdiplus::REAL>(bounds.bottom)),
+        Gdiplus::PointF(left, top),
+        Gdiplus::PointF(left + width, top + height),
         GdiColor(BgPrimary), GdiColor(BgSolid));
-    graphics.FillRectangle(&gradient, Gdiplus::RectF(
-        static_cast<Gdiplus::REAL>(bounds.left), static_cast<Gdiplus::REAL>(bounds.top),
-        static_cast<Gdiplus::REAL>(bounds.right - bounds.left), static_cast<Gdiplus::REAL>(bounds.bottom - bounds.top)));
+    graphics.FillRectangle(&gradient, Gdiplus::RectF(left, top, width, height));
+
+    // Ambient light gives native flyouts/windows depth without depending on a
+    // web compositor. Alpha remains deliberately subtle so text contrast wins.
+    Gdiplus::SolidBrush indigo_glow(Gdiplus::Color(24, GetRValue(Accent), GetGValue(Accent), GetBValue(Accent)));
+    graphics.FillEllipse(
+        &indigo_glow,
+        left + width * 0.60f,
+        top - height * 0.24f,
+        width * 0.62f,
+        height * 0.58f);
+    Gdiplus::SolidBrush cyan_glow(Gdiplus::Color(12, GetRValue(AccentCyan), GetGValue(AccentCyan), GetBValue(AccentCyan)));
+    graphics.FillEllipse(
+        &cyan_glow,
+        left - width * 0.22f,
+        top + height * 0.58f,
+        width * 0.52f,
+        height * 0.48f);
 }
 
 inline HBRUSH SharedBackgroundBrush() { static HBRUSH brush = CreateSolidBrush(BgPrimary); return brush; }
@@ -186,29 +257,36 @@ inline bool PaintOwnerDrawButton(const DRAWITEMSTRUCT* draw, ButtonTone tone = B
     const bool pressed = (draw->itemState & ODS_SELECTED) != 0;
     const bool disabled = (draw->itemState & ODS_DISABLED) != 0;
     const bool focused = (draw->itemState & ODS_FOCUS) != 0;
-    COLORREF fill = pressed ? BgActive : BgTertiary;
-    COLORREF border = focused ? AccentHover : BorderDefault;
+    const bool hot = (draw->itemState & ODS_HOTLIGHT) != 0;
+    COLORREF fill = pressed ? BgActive : (hot ? BgHover : BgTertiary);
+    COLORREF border = focused ? AccentHover : (hot ? BorderStrong : BorderDefault);
     COLORREF text = disabled ? TextDisabled : TextPrimary;
     if (tone == ButtonTone::Accent)
     {
-        fill = pressed ? AccentActive : Accent;
+        fill = pressed ? AccentActive : (hot ? AccentHover : Accent);
         border = pressed ? AccentActive : AccentHover;
         text = RGB(255, 255, 255);
     }
     else if (tone == ButtonTone::Danger)
     {
-        fill = pressed ? RGB(89, 31, 38) : RGB(59, 27, 35);
+        fill = pressed ? RGB(92, 27, 40) : (hot ? RGB(75, 29, 40) : RGB(52, 24, 33));
         border = Danger;
     }
 
     Gdiplus::Graphics graphics(draw->hDC);
     graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
     const Gdiplus::RectF rect(
-        static_cast<Gdiplus::REAL>(draw->rcItem.left + 1),
-        static_cast<Gdiplus::REAL>(draw->rcItem.top + 1),
-        static_cast<Gdiplus::REAL>(std::max<LONG>(1, draw->rcItem.right - draw->rcItem.left - 2)),
-        static_cast<Gdiplus::REAL>(std::max<LONG>(1, draw->rcItem.bottom - draw->rcItem.top - 2)));
-    DrawRoundedPanel(graphics, rect, 9.0f, GdiColor(fill), GdiColor(border), 1.0f);
+        static_cast<Gdiplus::REAL>(draw->rcItem.left + 2),
+        static_cast<Gdiplus::REAL>(draw->rcItem.top + 2),
+        static_cast<Gdiplus::REAL>(std::max<LONG>(1, draw->rcItem.right - draw->rcItem.left - 4)),
+        static_cast<Gdiplus::REAL>(std::max<LONG>(1, draw->rcItem.bottom - draw->rcItem.top - 4)));
+    DrawElevatedPanel(
+        graphics,
+        rect,
+        10.0f,
+        GdiColor(fill, disabled ? 170 : 248),
+        GdiColor(border),
+        tone == ButtonTone::Accent && !disabled);
 
     wchar_t caption[256]{};
     GetWindowTextW(draw->hwndItem, caption, static_cast<int>(std::size(caption)));
@@ -304,13 +382,13 @@ constexpr COLORREF kBgBottom = WebSkin::BgSolid;
 constexpr COLORREF kGlassBg = WebSkin::BgSecondary;
 constexpr COLORREF kGlassCard = WebSkin::BgTertiary;
 constexpr COLORREF kGlassBorder = WebSkin::BorderStrong;
-constexpr COLORREF kNeonCyan = WebSkin::Accent;
+constexpr COLORREF kNeonCyan = WebSkin::AccentCyan;
 constexpr COLORREF kNeonPurple = WebSkin::AccentHover;
-constexpr COLORREF kNeonPink = RGB(213, 151, 171);
+constexpr COLORREF kNeonPink = RGB(231, 132, 183);
 constexpr COLORREF kTextWhite = WebSkin::TextPrimary;
 constexpr COLORREF kTextSec = WebSkin::TextSecondary;
 constexpr COLORREF kTextMuted = WebSkin::TextTertiary;
-constexpr COLORREF kAccentGreen = RGB(102, 187, 141);
+constexpr COLORREF kAccentGreen = RGB(93, 204, 146);
 constexpr COLORREF kDanger = WebSkin::Danger;
 
 enum class AppCategory : int { All = 0, Dev, Accessories, Files, System, Settings };
@@ -383,7 +461,9 @@ inline void DarkWindow(HWND window, bool round = true)
         (void)DwmSetWindowAttribute(window, DWMWA_WINDOW_CORNER_PREFERENCE, &preference, static_cast<DWORD>(sizeof(preference)));
     }
     const COLORREF border = WebSkin::BorderStrong;
+    const COLORREF caption = WebSkin::BgSecondary;
     (void)DwmSetWindowAttribute(window, static_cast<DWMWINDOWATTRIBUTE>(34), &border, static_cast<DWORD>(sizeof(border)));
+    (void)DwmSetWindowAttribute(window, static_cast<DWMWINDOWATTRIBUTE>(35), &caption, static_cast<DWORD>(sizeof(caption)));
     WebSkin::PrepareWindowTree(window);
     if (round) WebSkin::InstallWindowSkin(window);
 }
