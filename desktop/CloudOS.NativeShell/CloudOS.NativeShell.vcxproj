@@ -127,6 +127,7 @@
     <ClCompile Include="src\native_file_operations_window.cpp">
       <DisableSpecificWarnings>4505;%(DisableSpecificWarnings)</DisableSpecificWarnings>
     </ClCompile>
+    <ClCompile Include="src\native_file_operations_files_v5.cpp" />
     <ClCompile Include="src\native_file_preview.cpp" />
     <ClCompile Include="src\native_files_window_v5.cpp" />
     <ClCompile Include="src\native_files_navigation_v5.cpp" />
