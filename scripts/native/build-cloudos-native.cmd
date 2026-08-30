@@ -69,9 +69,23 @@ if "%RUNTIME_SIZE%"=="0" (
   exit /b 12
 )
 
+rem Marca exatamente qual revisao Git gerou estes binarios. O launcher usa isso
+rem para nunca iniciar silenciosamente um CloudOS.exe antigo depois de git pull.
+set "BUILD_HEAD="
+where git.exe >nul 2>nul
+if not errorlevel 1 (
+  for /f "usebackq tokens=*" %%H in (`git.exe -C "%ROOT%" rev-parse HEAD 2^>nul`) do set "BUILD_HEAD=%%H"
+)
+if defined BUILD_HEAD (
+  >"%OUT%\.cloudos-build-head" echo %BUILD_HEAD%
+) else (
+  if exist "%OUT%\.cloudos-build-head" del /q "%OUT%\.cloudos-build-head" >nul 2>&1
+)
+
 echo.
 echo [CloudOS] BUILD_OK=%OUT%\CloudOS.exe
 echo [CloudOS] RUNTIME=%OUT%\CloudOS.NativeRuntime.dll
+if defined BUILD_HEAD echo [CloudOS] BUILD_HEAD=%BUILD_HEAD%
 echo [CloudOS] SHELL_UI=C++/Win32 nativo
 echo [CloudOS] WEBVIEW2=usado somente pelo Navegador CloudOS
 echo [CloudOS] FRONTEND_REACT=referencia visual; nao participa deste build
