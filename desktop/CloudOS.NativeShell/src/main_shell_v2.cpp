@@ -10,10 +10,14 @@
 #include "native_monitor_manager.h"
 #include "native_notification_center.h"
 #include "native_quick_settings_window.h"
+#include "native_session_recovery.h"
+#include "native_snap_assist.h"
 #include "native_start_menu_window.h"
 #include "native_task_switcher_window.h"
 #include "native_taskbar_appbar.h"
+#include "native_taskbar_hover_preview.h"
 #include "native_theme.h"
+#include "native_watchdog.h"
 #include "native_window_manager.h"
 
 #pragma comment(lib, "comctl32.lib")
@@ -31,6 +35,7 @@ constexpr int kHotMonitorLeft = 1005;
 constexpr int kHotMonitorRight = 1006;
 constexpr int kHotMonitorLeftFallback = 1007;
 constexpr int kHotMonitorRightFallback = 1008;
+constexpr UINT_PTR kSessionLifecycleSubclass = 0xC501;
 }
 
 class CloudOSApplication final
@@ -55,11 +60,19 @@ public:
             return false;
         }
 
+        (void)session_recovery_.BeginSession();
+
         if (!desktop_.Create(instance_, &window_manager_))
         {
             Shutdown();
             return false;
         }
+
+        lifecycle_subclass_attached_ = SetWindowSubclass(
+            desktop_.Hwnd(),
+            &CloudOSApplication::SessionLifecycleSubclass,
+            kSessionLifecycleSubclass,
+            reinterpret_cast<DWORD_PTR>(this)) != FALSE;
 
         SetupCallbacks();
         LayoutDesktop();
@@ -93,6 +106,23 @@ public:
         LayoutDesktop();
         RegisterHotKeys();
 
+        snap_assist_active_ = snap_assist_.Start(instance_, &window_manager_);
+        if (!snap_assist_active_)
+        {
+            CloudOSNativeNotificationCenter::Post(
+                L"Snap Assist indisponivel",
+                L"Os atalhos de snap continuam ativos, mas o detector de arrasto nao iniciou.");
+        }
+
+        const bool previous_unclean = session_recovery_.PreviousSessionUnclean();
+        session_recovery_.Restore(instance_, desktop_.Hwnd(), window_manager_);
+        if (previous_unclean)
+        {
+            CloudOSNativeNotificationCenter::Post(
+                L"Sessao recuperada",
+                L"O CloudOS detectou uma finalizacao inesperada e restaurou o ultimo estado salvo.");
+        }
+
         if (SetTimer(desktop_.Hwnd(), kReconcileTimer, 1000, nullptr) != 0)
         {
             reconcile_timer_active_ = true;
@@ -104,7 +134,7 @@ public:
 
         CloudOSNativeNotificationCenter::Post(
             L"CloudOS pronto",
-            L"Taskbar AppBar, Start independente, Alt+Tab DWM, drag-and-drop e configuracoes rapidas carregados.");
+            L"Shell V3 carregado: AppBars, Start indexado, DWM previews, Snap Assist, recovery e watchdog.");
 
         RefreshShell();
         return true;
@@ -122,6 +152,44 @@ public:
     }
 
 private:
+    static LRESULT CALLBACK SessionLifecycleSubclass(
+        HWND window,
+        UINT message,
+        WPARAM w_param,
+        LPARAM l_param,
+        UINT_PTR subclass_id,
+        DWORD_PTR reference_data)
+    {
+        auto* self = reinterpret_cast<CloudOSApplication*>(reference_data);
+        if (self != nullptr)
+        {
+            if (message == WM_QUERYENDSESSION)
+            {
+                self->window_manager_.Reconcile();
+                self->session_recovery_.Save(self->window_manager_);
+            }
+            else if (message == WM_ENDSESSION && w_param != FALSE)
+            {
+                self->window_manager_.Reconcile();
+                self->session_recovery_.MarkCleanExit(self->window_manager_);
+            }
+            else if (message == WM_POWERBROADCAST && w_param == PBT_APMSUSPEND)
+            {
+                self->window_manager_.Reconcile();
+                self->session_recovery_.Save(self->window_manager_);
+            }
+            else if (message == WM_NCDESTROY)
+            {
+                RemoveWindowSubclass(
+                    window,
+                    &CloudOSApplication::SessionLifecycleSubclass,
+                    subclass_id);
+                self->lifecycle_subclass_attached_ = false;
+            }
+        }
+        return DefSubclassProc(window, message, w_param, l_param);
+    }
+
     void SetupCallbacks()
     {
         desktop_.SetActionCallback(
@@ -149,6 +217,7 @@ private:
             {
                 window_manager_.Reconcile();
                 RebuildForDisplayChangeIfNeeded();
+                session_recovery_.Tick(window_manager_);
                 RefreshShell();
             });
     }
@@ -193,6 +262,15 @@ private:
                     RefreshTaskbars();
                 });
 
+            // Hover previews are attached as a subclass to the actual AppBar.
+            // Their lifetime is tied to the taskbar HWND and they unregister all
+            // DWM thumbnail relationships during WM_NCDESTROY.
+            (void)NativeTaskbarHoverPreview::Attach(
+                instance_,
+                taskbar->Hwnd(),
+                monitor.handle,
+                &window_manager_);
+
             taskbars_.push_back(std::move(taskbar));
         }
 
@@ -232,6 +310,7 @@ private:
             return;
         }
 
+        session_recovery_.Save(window_manager_);
         start_menu_.Hide();
         quick_settings_.Hide();
         notification_center_.Hide();
@@ -242,7 +321,7 @@ private:
         LayoutDesktop();
         CloudOSNativeNotificationCenter::Post(
             L"Monitores atualizados",
-            L"A topologia de telas mudou e as AppBars foram reconstruidas.");
+            L"A topologia de telas mudou e as AppBars/previews foram reconstruidas.");
     }
 
     void RefreshTaskbars()
@@ -268,12 +347,14 @@ private:
         if (id >= HotWorkspace1 && id <= HotWorkspace4)
         {
             window_manager_.SwitchWorkspace(id - HotWorkspace1);
+            session_recovery_.Save(window_manager_);
             RefreshShell();
             return;
         }
         if (id >= HotMoveWorkspace1 && id <= HotMoveWorkspace4)
         {
             window_manager_.MoveActiveToWorkspace(id - HotMoveWorkspace1);
+            session_recovery_.Save(window_manager_);
             RefreshShell();
             return;
         }
@@ -366,6 +447,7 @@ private:
         }
 
         window_manager_.Reconcile();
+        session_recovery_.Save(window_manager_);
         RefreshShell();
     }
 
@@ -481,6 +563,18 @@ private:
             }
         }
 
+        if (window_manager_initialized_)
+        {
+            window_manager_.Reconcile();
+        }
+        session_recovery_.MarkCleanExit(window_manager_);
+
+        if (snap_assist_active_)
+        {
+            snap_assist_.Stop();
+            snap_assist_active_ = false;
+        }
+
         UnregisterHotKeys();
         task_switcher_.Destroy();
         notification_center_.Destroy();
@@ -492,6 +586,15 @@ private:
         {
             window_manager_.Shutdown();
             window_manager_initialized_ = false;
+        }
+
+        if (lifecycle_subclass_attached_ && window != nullptr && IsWindow(window))
+        {
+            RemoveWindowSubclass(
+                window,
+                &CloudOSApplication::SessionLifecycleSubclass,
+                kSessionLifecycleSubclass);
+            lifecycle_subclass_attached_ = false;
         }
 
         desktop_.Destroy();
@@ -510,11 +613,15 @@ private:
     CloudOSNativeQuickSettingsWindow quick_settings_;
     CloudOSNativeNotificationCenter notification_center_;
     CloudOSNativeTaskSwitcherWindow task_switcher_;
+    NativeSnapAssist snap_assist_;
+    NativeSessionRecovery session_recovery_;
     std::vector<std::unique_ptr<CloudOSTaskbarAppBar>> taskbars_;
     std::wstring monitor_signature_;
     bool window_manager_initialized_{};
     bool reconcile_timer_active_{};
     bool metrics_timer_active_{};
+    bool lifecycle_subclass_attached_{};
+    bool snap_assist_active_{};
     bool shutting_down_{};
     std::vector<int> registered_hotkeys_;
 };
@@ -526,11 +633,23 @@ int WINAPI wWinMain(
     PWSTR,
     int)
 {
+    if (CloudOS::NativeWatchdog::IsWatchdogInvocation())
+    {
+        return CloudOS::NativeWatchdog::RunWatchdogInvocation();
+    }
+
+    HANDLE session_mutex = CloudOS::NativeWatchdog::AcquireSessionMutex();
+    if (session_mutex == nullptr)
+    {
+        return 0;
+    }
+
     INITCOMMONCONTROLSEX common_controls{};
     common_controls.dwSize = sizeof(common_controls);
     common_controls.dwICC =
         ICC_LISTVIEW_CLASSES |
         ICC_BAR_CLASSES |
+        ICC_PROGRESS_CLASS |
         ICC_WIN95_CLASSES;
     if (!InitCommonControlsEx(&common_controls))
     {
@@ -544,25 +663,28 @@ int WINAPI wWinMain(
     const HRESULT com_result = OleInitialize(nullptr);
     const bool uninitialize_com = SUCCEEDED(com_result);
 
-    CloudOS::CloudOSApplication application(instance);
-    if (!application.Initialize())
+    int exit_code = 1;
     {
-        if (uninitialize_com)
+        CloudOS::CloudOSApplication application(instance);
+        if (!application.Initialize())
         {
-            OleUninitialize();
+            MessageBoxW(
+                nullptr,
+                L"O CloudOS Native nao conseguiu inicializar o shell multi-HWND.",
+                L"CloudOS Native",
+                MB_OK | MB_ICONERROR);
         }
-        MessageBoxW(
-            nullptr,
-            L"O CloudOS Native nao conseguiu inicializar o shell multi-HWND.",
-            L"CloudOS Native",
-            MB_OK | MB_ICONERROR);
-        return 1;
+        else
+        {
+            (void)CloudOS::NativeWatchdog::StartForCurrentProcess();
+            exit_code = application.Run();
+        }
     }
 
-    const int exit_code = application.Run();
     if (uninitialize_com)
     {
         OleUninitialize();
     }
+    CloudOS::NativeWatchdog::ReleaseSessionMutex(session_mutex);
     return exit_code;
 }
