@@ -30,6 +30,12 @@
     </Link>
     <Manifest><EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness><UACExecutionLevel>AsInvoker</UACExecutionLevel></Manifest>
   </ItemDefinitionGroup>
-  <ItemGroup><ClCompile Include="main.cpp" /></ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp">
+      <!-- The shared V11 header already static_asserts the 96-byte ABI. SelfTest
+           repeats that invariant for diagnostics, which MSVC reports as C4127. -->
+      <DisableSpecificWarnings>4127;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
