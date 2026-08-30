@@ -295,13 +295,20 @@ Require 'Watchdog' $content.Watchdog @(
     'StartForCurrentProcess'
 )
 
-# Main Files deliberately delegates to Windows Explorer for its complete native UX.
+# Files V5 is first-party CloudOS chrome. Explorer remains an in-process Shell namespace provider
+# through IExplorerBrowser; the launcher must not delegate the Files app to explorer.exe anymore.
 Require 'Launcher' $content.Launcher @(
+    '#include "native_files_window.h"',
     'CloudOSNativeBrowserWindow::Open',
     'StartMenuMRUTracker::Instance().RecordLaunch',
-    'L"explorer.exe"'
+    'else if (id == L"files")',
+    'CloudOSNativeFilesWindow::Open(instance);',
+    'else if (id == L"drive")',
+    'CloudOSNativeFilesWindow::Open(instance, root);',
+    'else if (id == L"systemdrive")',
+    'CloudOSNativeFilesWindow::Open(instance, system_volume);'
 )
-Forbid 'Launcher' $content.Launcher @('SetParent(', 'kExternalHostClass')
+Forbid 'Launcher' $content.Launcher @('L"explorer.exe"', 'SetParent(', 'kExternalHostClass')
 Require 'Browser' $content.Browser @(
     'CreateCoreWebView2EnvironmentWithOptions',
     'CreateCoreWebView2Controller',
@@ -316,4 +323,4 @@ if ($actionCount -lt 100) {
     throw "Shell action catalog regressed below 100 actions: $actionCount"
 }
 
-Write-Host "PASS: CloudOS shell contracts passed - Start V4, Taskbar V4, persistent pins, grouped/overflow tasks, WebSkin, Snap, DWM previews, recovery, Explorer integration and $actionCount shell actions."
+Write-Host "PASS: CloudOS shell contracts passed - Start V4, Taskbar V4, persistent pins, grouped/overflow tasks, WebSkin, Snap, DWM previews, recovery, first-party Files integration and $actionCount shell actions."
