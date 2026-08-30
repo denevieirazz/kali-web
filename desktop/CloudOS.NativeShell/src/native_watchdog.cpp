@@ -151,11 +151,20 @@ bool ShouldRestartAfterExit(DWORD exit_code) noexcept
 
 bool NativeWatchdog::IsWatchdogInvocation()
 {
-    return WatchedProcessId() != 0;
+    return WatchedProcessId() != 0 ||
+        HasArgument(SupervisorProtocolV11::ProbeFailureArgument);
 }
 
 int NativeWatchdog::RunWatchdogInvocation()
 {
+    // Deterministic CI-only abnormal exit: this path runs before the session
+    // mutex and before any shell HWND/state is created. It exercises Supervisor
+    // crash-loop handling without corrupting user state or forcing a real crash.
+    if (HasArgument(SupervisorProtocolV11::ProbeFailureArgument))
+    {
+        return static_cast<int>(0xC0000001u);
+    }
+
     const DWORD process_id = WatchedProcessId();
     if (process_id == 0)
     {
@@ -261,19 +270,13 @@ void NativeWatchdog::ReleaseSessionMutex(HANDLE mutex) noexcept
 
 bool NativeWatchdog::StartForCurrentProcess()
 {
-    // Readiness belongs to the UI process even when recovery ownership is moved
-    // to CloudOS.Supervisor.exe, so arm V9 health before selecting the recovery path.
     HealthBootstrapV9::bootstrap.AttachAfterInitialization();
 
-    // The external Supervisor V11 is the sole recovery authority for supervised
-    // launches. Never start the embedded helper as well: competing restart loops
-    // could race on the same session mutex and obscure the original failure.
     if (HasArgument(SupervisorProtocolV11::SupervisedArgument))
     {
         return true;
     }
 
-    // Stability/soak runs also observe the original process directly.
     if (HasArgument(kStabilityProbeArgument))
     {
         return true;
