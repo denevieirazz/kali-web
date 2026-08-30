@@ -353,8 +353,8 @@ void CloudOSNativeQuickSettingsWindow::ShowNear(const RECT& anchor)
     const int height = Scale(350, dpi);
     int x = anchor.right - width;
     int y = anchor.top - height - Scale(8, dpi);
-    x = std::clamp(x, info.rcWork.left, std::max(info.rcWork.left, info.rcWork.right - width));
-    y = std::clamp(y, info.rcWork.top, std::max(info.rcWork.top, info.rcWork.bottom - height));
+    x = std::clamp<int>(x, static_cast<int>(info.rcWork.left), std::max<int>(static_cast<int>(info.rcWork.left), static_cast<int>(info.rcWork.right - width)));
+    y = std::clamp<int>(y, static_cast<int>(info.rcWork.top), std::max<int>(static_cast<int>(info.rcWork.top), static_cast<int>(info.rcWork.bottom - height)));
 
     SetWindowPos(window_, HWND_TOPMOST, x, y, width, height, SWP_SHOWWINDOW);
     ShowWindow(window_, SW_SHOWNORMAL);

@@ -250,8 +250,10 @@ void CloudOSNativeTaskSwitcherWindow::ShowCycle(bool reverse)
         GetMonitorInfoW(monitor, &info);
 
         const UINT dpi = GetDpiForWindow(window_);
-        const int width = std::min(Scale(980, dpi), std::max(Scale(540, dpi), info.rcWork.right - info.rcWork.left - Scale(80, dpi)));
-        const int height = std::min(Scale(560, dpi), std::max(Scale(320, dpi), info.rcWork.bottom - info.rcWork.top - Scale(100, dpi)));
+        const int max_w = static_cast<int>(info.rcWork.right - info.rcWork.left - Scale(80, dpi));
+        const int max_h = static_cast<int>(info.rcWork.bottom - info.rcWork.top - Scale(100, dpi));
+        const int width = std::min(Scale(980, dpi), std::max(Scale(540, dpi), max_w));
+        const int height = std::min(Scale(560, dpi), std::max(Scale(320, dpi), max_h));
         const int x = info.rcWork.left + (info.rcWork.right - info.rcWork.left - width) / 2;
         const int y = info.rcWork.top + (info.rcWork.bottom - info.rcWork.top - height) / 2;
 

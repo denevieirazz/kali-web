@@ -113,6 +113,7 @@
     <ClCompile Include="src\native_shell_actions.cpp" />
     <ClCompile Include="src\native_shell_platform.cpp" />
     <ClCompile Include="src\native_shell_view_host.cpp" />
+    <ClCompile Include="src\native_start_menu_window.cpp" />
     <ClCompile Include="src\native_system_monitor_window.cpp" />
     <ClCompile Include="src\native_system_stats.cpp" />
     <ClCompile Include="src\native_task_switcher_window.cpp" />

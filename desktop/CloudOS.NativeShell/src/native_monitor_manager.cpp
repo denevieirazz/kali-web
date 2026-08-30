@@ -232,8 +232,8 @@ bool NativeMonitorManager::MoveWindowToAdjacentMonitor(HWND window, int directio
 
     int x = target_work.left + static_cast<int>(relative_x * target_width);
     int y = target_work.top + static_cast<int>(relative_y * target_height);
-    x = std::clamp(x, target_work.left, std::max(target_work.left, target_work.right - width));
-    y = std::clamp(y, target_work.top, std::max(target_work.top, target_work.bottom - height));
+    x = std::clamp<int>(x, static_cast<int>(target_work.left), std::max<int>(static_cast<int>(target_work.left), static_cast<int>(target_work.right - width)));
+    y = std::clamp<int>(y, static_cast<int>(target_work.top), std::max<int>(static_cast<int>(target_work.top), static_cast<int>(target_work.bottom - height)));
 
     (void)SetWindowPos(
         window,
