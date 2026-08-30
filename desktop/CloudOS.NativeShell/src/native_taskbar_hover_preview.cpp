@@ -1,29 +1,30 @@
 #include "native_taskbar_hover_preview.h"
 
+#include "native_taskbar_appbar.h"
 #include "native_theme.h"
 #include "native_window_manager.h"
 
 #include <commctrl.h>
 #include <dwmapi.h>
+#include <gdiplus.h>
 
 #include <algorithm>
 #include <new>
 #include <string>
-#include <vector>
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "dwmapi.lib")
+
+using namespace Gdiplus;
 
 namespace CloudOS
 {
 namespace
 {
-constexpr wchar_t kPreviewClass[] = L"CloudOS.NativeShell.TaskPreview.v1";
+constexpr wchar_t kPreviewClass[] = L"CloudOS.NativeShell.TaskPreview.v2";
 constexpr UINT_PTR kSubclassId = 0xA901;
 constexpr UINT_PTR kHoverTimer = 0xA902;
 constexpr UINT_PTR kHideTimer = 0xA903;
-constexpr int kPinnedCount = 5;
-
 }
 
 NativeTaskbarHoverPreview::NativeTaskbarHoverPreview(
@@ -78,7 +79,7 @@ bool NativeTaskbarHoverPreview::Initialize()
     window_class.lpfnWndProc = &NativeTaskbarHoverPreview::PreviewProcedure;
     window_class.hInstance = instance_;
     window_class.hCursor = LoadCursorW(nullptr, IDC_HAND);
-    window_class.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    window_class.hbrBackground = nullptr;
     window_class.lpszClassName = kPreviewClass;
     if (RegisterClassExW(&window_class) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
     {
@@ -89,7 +90,7 @@ bool NativeTaskbarHoverPreview::Initialize()
         WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
         kPreviewClass,
         L"",
-        WS_POPUP | WS_BORDER,
+        WS_POPUP,
         0,
         0,
         360,
@@ -102,7 +103,7 @@ bool NativeTaskbarHoverPreview::Initialize()
     {
         return false;
     }
-    DarkWindow(preview_, false);
+    ApplyWebFlyoutMaterial(preview_);
 
     if (!SetWindowSubclass(
             taskbar_,
@@ -139,62 +140,27 @@ HWND NativeTaskbarHoverPreview::HitTaskWindow(
     POINT client_point,
     RECT* task_rect) const
 {
-    if (taskbar_ == nullptr || window_manager_ == nullptr)
+    if (taskbar_ == nullptr || !IsWindow(taskbar_))
     {
         return nullptr;
     }
 
-    RECT client{};
-    GetClientRect(taskbar_, &client);
-    const UINT dpi = GetDpiForWindow(taskbar_);
-    const int width = std::max<int>(1, static_cast<int>(client.right - client.left));
-    const int height = std::max<int>(1, static_cast<int>(client.bottom - client.top));
-    const int margin = Scale(10, dpi);
-    const int button = Scale(38, dpi);
-    const int gap = Scale(7, dpi);
-    const int y = (height - button) / 2;
-
-    const int workspace_end = margin + 4 * Scale(35, dpi);
-    const int center_group = button + Scale(10, dpi) +
-        kPinnedCount * (button + gap) - gap;
-    const int task_left = workspace_end + Scale(8, dpi);
-    const int task_right = std::max(task_left, (width - center_group) / 2 - Scale(18, dpi));
-    const int available = std::max(0, task_right - task_left);
-    const int task_width = Scale(112, dpi);
-    const int task_gap = Scale(6, dpi);
-    const int capacity = available / std::max(1, task_width + task_gap);
-
-    std::vector<CloudOSManagedWindow> windows = window_manager_->CurrentWorkspaceWindows();
-    windows.erase(
-        std::remove_if(
-            windows.begin(),
-            windows.end(),
-            [this](const CloudOSManagedWindow& item)
-            {
-                return item.hwnd == nullptr || !IsWindow(item.hwnd) ||
-                    MonitorFromWindow(item.hwnd, MONITOR_DEFAULTTONEAREST) != monitor_;
-            }),
-        windows.end());
-
-    const int count = std::min<int>(static_cast<int>(windows.size()), capacity);
-    for (int index = 0; index < count; ++index)
+    CloudOSTaskbarHitQuery query{};
+    query.client_point = client_point;
+    if (SendMessageW(
+            taskbar_,
+            CLOUDOS_WM_TASKBAR_QUERY_HIT,
+            0,
+            reinterpret_cast<LPARAM>(&query)) == FALSE ||
+        query.window == nullptr)
     {
-        const int left = task_left + index * (task_width + task_gap);
-        RECT rect{
-            left,
-            y + Scale(3, dpi),
-            left + task_width,
-            y + button - Scale(3, dpi)};
-        if (PtInRect(&rect, client_point))
-        {
-            if (task_rect != nullptr)
-            {
-                *task_rect = rect;
-            }
-            return windows[static_cast<std::size_t>(index)].hwnd;
-        }
+        return nullptr;
     }
-    return nullptr;
+    if (task_rect != nullptr)
+    {
+        *task_rect = query.task_rect;
+    }
+    return query.window;
 }
 
 void NativeTaskbarHoverPreview::UpdateHover(POINT client_point)
@@ -224,7 +190,7 @@ void NativeTaskbarHoverPreview::UpdateHover(POINT client_point)
 
     if (taskbar_ != nullptr)
     {
-        SetTimer(taskbar_, kHoverTimer, 420, nullptr);
+        SetTimer(taskbar_, kHoverTimer, 380, nullptr);
     }
 }
 
@@ -250,7 +216,7 @@ void NativeTaskbarHoverPreview::ShowPreview(
     const int preview_width = Scale(360, dpi);
     const int preview_height = Scale(260, dpi);
     int x = top_left.x + (bottom_right.x - top_left.x - preview_width) / 2;
-    int y = top_left.y - preview_height - Scale(8, dpi);
+    int y = top_left.y - preview_height - Scale(10, dpi);
 
     MONITORINFO info{};
     info.cbSize = sizeof(info);
@@ -302,8 +268,8 @@ void NativeTaskbarHoverPreview::LayoutThumbnail()
     RECT client{};
     GetClientRect(preview_, &client);
     const UINT dpi = GetDpiForWindow(preview_);
-    const int margin = Scale(10, dpi);
-    const int title_height = Scale(38, dpi);
+    const int margin = Scale(12, dpi);
+    const int title_height = Scale(42, dpi);
     RECT available{
         margin,
         title_height,
@@ -346,10 +312,10 @@ void NativeTaskbarHoverPreview::LayoutThumbnail()
     DwmUpdateThumbnailProperties(thumbnail_, &properties);
 
     close_rect_ = RECT{
-        client.right - Scale(34, dpi),
-        Scale(6, dpi),
-        client.right - Scale(8, dpi),
-        Scale(32, dpi)};
+        client.right - Scale(38, dpi),
+        Scale(8, dpi),
+        client.right - Scale(9, dpi),
+        Scale(37, dpi)};
 }
 
 void NativeTaskbarHoverPreview::PaintPreview()
@@ -359,18 +325,16 @@ void NativeTaskbarHoverPreview::PaintPreview()
     RECT client{};
     GetClientRect(preview_, &client);
 
-    HBRUSH background = CreateSolidBrush(RGB(24, 27, 33));
-    HBRUSH border = CreateSolidBrush(RGB(74, 80, 92));
-    if (background != nullptr)
-    {
-        FillRect(dc, &client, background);
-        DeleteObject(background);
-    }
-    if (border != nullptr)
-    {
-        FrameRect(dc, &client, border);
-        DeleteObject(border);
-    }
+    Graphics graphics(dc);
+    graphics.SetSmoothingMode(SmoothingModeAntiAlias);
+    LinearGradientBrush background(
+        PointF(0.0f, 0.0f),
+        PointF(static_cast<REAL>(client.right), static_cast<REAL>(client.bottom)),
+        WebSkin::GdiColor(WebSkin::BgSecondary, 252),
+        WebSkin::GdiColor(WebSkin::BgSolid, 252));
+    graphics.FillRectangle(
+        &background,
+        RectF(0.0f, 0.0f, static_cast<REAL>(client.right), static_cast<REAL>(client.bottom)));
 
     std::wstring title = L"Janela";
     if (source_ != nullptr && IsWindow(source_))
@@ -390,21 +354,37 @@ void NativeTaskbarHoverPreview::PaintPreview()
 
     const UINT dpi = GetDpiForWindow(preview_);
     HFONT font = CreateFontW(
-        -Scale(14, dpi), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+        -Scale(13, dpi), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Text");
     HGDIOBJ old_font = font != nullptr ? SelectObject(dc, font) : nullptr;
     SetBkMode(dc, TRANSPARENT);
-    SetTextColor(dc, RGB(241, 244, 248));
+    SetTextColor(dc, WebSkin::TextPrimary);
     RECT title_rect{
-        Scale(12, dpi),
-        Scale(4, dpi),
-        std::max<LONG>(Scale(20, dpi), client.right - Scale(42, dpi)),
-        Scale(36, dpi)};
-    DrawTextW(dc, title.c_str(), -1, &title_rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        Scale(14, dpi),
+        Scale(6, dpi),
+        std::max<LONG>(Scale(20, dpi), client.right - Scale(46, dpi)),
+        Scale(38, dpi)};
+    (void)DrawTextW(
+        dc,
+        title.c_str(),
+        -1,
+        &title_rect,
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
-    SetTextColor(dc, RGB(230, 110, 116));
-    DrawTextW(dc, L"×", -1, &close_rect_, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    WebSkin::DrawRoundedPanel(
+        graphics,
+        RectF(
+            static_cast<REAL>(close_rect_.left),
+            static_cast<REAL>(close_rect_.top),
+            static_cast<REAL>(Width(close_rect_)),
+            static_cast<REAL>(Height(close_rect_))),
+        static_cast<REAL>(Scale(8, dpi)),
+        WebSkin::GdiColor(WebSkin::BgTertiary),
+        WebSkin::GdiColor(WebSkin::BorderDefault),
+        1.0f);
+    SetTextColor(dc, WebSkin::Danger);
+    (void)DrawTextW(dc, L"×", -1, &close_rect_, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
     if (old_font != nullptr)
     {
@@ -438,7 +418,7 @@ LRESULT CALLBACK NativeTaskbarHoverPreview::TaskbarSubclass(
         if (!self->tracking_taskbar_)
         {
             TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, window, 0};
-            TrackMouseEvent(&tracking);
+            (void)TrackMouseEvent(&tracking);
             self->tracking_taskbar_ = true;
         }
         KillTimer(window, kHideTimer);
@@ -525,7 +505,7 @@ LRESULT CALLBACK NativeTaskbarHoverPreview::PreviewProcedure(
         if (!self->tracking_preview_)
         {
             TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, window, 0};
-            TrackMouseEvent(&tracking);
+            (void)TrackMouseEvent(&tracking);
             self->tracking_preview_ = true;
         }
         if (self->taskbar_ != nullptr)
