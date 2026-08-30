@@ -51,6 +51,7 @@ private:
     struct TaskGroup final
     {
         DWORD process_id{};
+        std::wstring class_name;
         std::vector<HWND> windows;
         std::wstring title;
     };
