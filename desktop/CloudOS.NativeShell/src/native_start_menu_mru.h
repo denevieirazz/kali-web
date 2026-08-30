@@ -37,11 +37,7 @@ public:
             return;
         }
 
-        FILETIME file_time{};
-        GetSystemTimeAsFileTime(&file_time);
-        const std::uint64_t now =
-            (static_cast<std::uint64_t>(file_time.dwHighDateTime) << 32u) |
-            static_cast<std::uint64_t>(file_time.dwLowDateTime);
+        const std::uint64_t now = CurrentFileTime();
 
         std::scoped_lock lock(mutex_);
         auto& stats = usage_map_[app_id];
@@ -77,16 +73,23 @@ public:
             list.push_back(entry.second);
         }
 
+        const std::uint64_t now = CurrentFileTime();
         std::sort(
             list.begin(),
             list.end(),
-            [](const AppUsageStats& first, const AppUsageStats& second)
+            [now](const AppUsageStats& first, const AppUsageStats& second)
             {
-                if (first.launch_count != second.launch_count)
+                const std::uint64_t first_score = UsageScore(first, now);
+                const std::uint64_t second_score = UsageScore(second, now);
+                if (first_score != second_score)
                 {
-                    return first.launch_count > second.launch_count;
+                    return first_score > second_score;
                 }
-                return first.last_launch_time > second.last_launch_time;
+                if (first.last_launch_time != second.last_launch_time)
+                {
+                    return first.last_launch_time > second.last_launch_time;
+                }
+                return first.launch_count > second.launch_count;
             });
 
         std::vector<std::wstring> result;
@@ -124,6 +127,37 @@ private:
         }
     }
 
+    static std::uint64_t CurrentFileTime() noexcept
+    {
+        FILETIME file_time{};
+        GetSystemTimeAsFileTime(&file_time);
+        return (static_cast<std::uint64_t>(file_time.dwHighDateTime) << 32u) |
+            static_cast<std::uint64_t>(file_time.dwLowDateTime);
+    }
+
+    static std::uint64_t UsageScore(
+        const AppUsageStats& stats,
+        std::uint64_t now) noexcept
+    {
+        constexpr std::uint64_t kTicksPerDay = 864000000000ULL;
+        constexpr std::uint64_t kRecencyWindowDays = 30ULL;
+        constexpr std::uint64_t kRecencyWeightPerDay = 50ULL;
+        constexpr std::uint64_t kFrequencyWeight = 10ULL;
+        constexpr std::uint64_t kMaxCountForScore = 1000ULL;
+
+        const std::uint64_t age_ticks = now >= stats.last_launch_time
+            ? now - stats.last_launch_time
+            : 0ULL;
+        const std::uint64_t age_days = age_ticks / kTicksPerDay;
+        const std::uint64_t recency_bonus = age_days < kRecencyWindowDays
+            ? (kRecencyWindowDays - age_days) * kRecencyWeightPerDay
+            : 0ULL;
+        const std::uint64_t frequency = std::min<std::uint64_t>(
+            static_cast<std::uint64_t>(stats.launch_count),
+            kMaxCountForScore) * kFrequencyWeight;
+        return frequency + recency_bonus;
+    }
+
     static bool ReadExact(HANDLE file, void* buffer, DWORD bytes)
     {
         DWORD bytes_read = 0;
@@ -138,15 +172,17 @@ private:
             bytes_written == bytes;
     }
 
-    void Load()
+    static bool ReadUsageFile(
+        const std::wstring& path,
+        std::unordered_map<std::wstring, AppUsageStats>& output)
     {
-        if (storage_path_.empty())
+        if (path.empty())
         {
-            return;
+            return false;
         }
 
         HANDLE file = CreateFileW(
-            storage_path_.c_str(),
+            path.c_str(),
             GENERIC_READ,
             FILE_SHARE_READ,
             nullptr,
@@ -155,23 +191,25 @@ private:
             nullptr);
         if (file == INVALID_HANDLE_VALUE)
         {
-            return;
+            return false;
         }
 
         std::uint32_t count = 0;
-        if (!ReadExact(file, &count, sizeof(count)) || count > 512u)
+        bool valid = ReadExact(file, &count, sizeof(count)) && count <= 512u;
+        std::unordered_map<std::wstring, AppUsageStats> loaded;
+        if (valid)
         {
-            CloseHandle(file);
-            return;
+            loaded.reserve(count);
         }
 
-        for (std::uint32_t index = 0; index < count; ++index)
+        for (std::uint32_t index = 0; valid && index < count; ++index)
         {
             std::uint32_t id_length = 0;
             if (!ReadExact(file, &id_length, sizeof(id_length)) ||
                 id_length == 0 ||
                 id_length > 128u)
             {
+                valid = false;
                 break;
             }
 
@@ -180,6 +218,7 @@ private:
                 static_cast<DWORD>(id_length * sizeof(wchar_t));
             if (!ReadExact(file, id.data(), id_bytes))
             {
+                valid = false;
                 break;
             }
 
@@ -188,13 +227,43 @@ private:
             if (!ReadExact(file, &launches, sizeof(launches)) ||
                 !ReadExact(file, &last_time, sizeof(last_time)))
             {
+                valid = false;
                 break;
             }
 
-            usage_map_[id] = AppUsageStats{id, launches, last_time};
+            loaded[id] = AppUsageStats{id, launches, last_time};
         }
 
         CloseHandle(file);
+        if (!valid)
+        {
+            return false;
+        }
+
+        output = std::move(loaded);
+        return true;
+    }
+
+    void Load()
+    {
+        if (storage_path_.empty())
+        {
+            return;
+        }
+
+        std::unordered_map<std::wstring, AppUsageStats> loaded;
+        if (ReadUsageFile(storage_path_, loaded))
+        {
+            usage_map_ = std::move(loaded);
+            return;
+        }
+
+        const std::wstring backup = storage_path_ + L".bak";
+        if (ReadUsageFile(backup, loaded))
+        {
+            usage_map_ = std::move(loaded);
+            (void)CopyFileW(backup.c_str(), storage_path_.c_str(), FALSE);
+        }
     }
 
     void SaveLocked() const
@@ -274,7 +343,11 @@ private:
                 MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
         {
             (void)DeleteFileW(temporary_path.c_str());
+            return;
         }
+
+        const std::wstring backup = storage_path_ + L".bak";
+        (void)CopyFileW(storage_path_.c_str(), backup.c_str(), FALSE);
     }
 
     mutable std::mutex mutex_;
