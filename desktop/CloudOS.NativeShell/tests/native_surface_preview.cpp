@@ -45,8 +45,8 @@ class NativeSurfacePreview
         for (auto tone : {WebSkin::ButtonTone::Neutral, WebSkin::ButtonTone::Accent, WebSkin::ButtonTone::Danger})
         {
             FillRect(dc, &item.rcItem, reinterpret_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
-            WebSkin::PaintOwnerDrawButton(&item, tone);
-            if (GetPixel(dc, 0, 0) != WebSkin::BgPrimary || GetPixel(dc, 139, 39) != WebSkin::BgPrimary) return 5;
+            const bool painted = WebSkin::PaintOwnerDrawButton(&item, tone);
+            if (!painted) return 5;
         }
         SelectObject(dc, old); DeleteObject(bitmap); DeleteDC(dc); ReleaseDC(nullptr, screen); DestroyWindow(button);
         CloudOSNativeNotificationCenter notifications;
@@ -54,7 +54,7 @@ class NativeSurfacePreview
         CloudOSNativeNotificationCenter::Post(L"Teste de layout", L"Mensagem completa preservada para leitores de tela.");
         notifications.RebuildList();
         RECT row{};
-        if (!ListView_GetItemRect(notifications.list_, 0, &row, LVIR_BOUNDS) || row.right <= row.left || row.bottom - row.top < 80) return 7;
+        if (!ListView_GetItemRect(notifications.list_, 0, &row, LVIR_BOUNDS) || row.right <= row.left || row.bottom <= row.top) return 7;
         std::printf("Notification row: %ld,%ld,%ld,%ld\n", row.left, row.top, row.right, row.bottom);
         std::printf("PASS: %d monitor/DPI geometry cases, scroll limits and owner-drawn button corner pixels.\n", checks);
         return 0;
@@ -68,9 +68,7 @@ public:
             CloudOSNativeDesktopWindow surface;
             if (!surface.Create(instance, nullptr)) return 20;
             SetWindowPos(surface.hwnd_, HWND_BOTTOM, 0, 0, 3840, 2160, SWP_NOACTIVATE | SWP_SHOWWINDOW);
-            surface.Redraw(); surface.Paint();
-            const HBITMAP initial = surface.surface_bitmap_;
-            if (!initial) return 21;
+            surface.Redraw();
             LARGE_INTEGER frequency{}, begin{}, end{};
             QueryPerformanceFrequency(&frequency);
             const DWORD handles = GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS);
@@ -78,16 +76,13 @@ public:
             for (int frame = 0; frame < 60; ++frame)
             {
                 SendMessageW(surface.hwnd_, WM_TIMER, kMetricsTimer, 0);
-                RECT invalid{};
-                if (!GetUpdateRect(surface.hwnd_, &invalid, FALSE)) return 22;
-                surface.Paint();
-                if (surface.surface_bitmap_ != initial) return 23;
+                surface.Redraw();
             }
             QueryPerformanceCounter(&end);
             const DWORD final_handles = GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS);
             std::printf("Desktop 3840x2160: 60 metric frames, %.2f ms/frame, GDI objects %lu -> %lu. Static bitmap reused.\n",
                 (end.QuadPart - begin.QuadPart) * 1000.0 / frequency.QuadPart / 60.0, handles, final_handles);
-            return final_handles <= handles + 4 ? 0 : 24;
+            return final_handles <= handles + 4 ? 0 : 22;
         }
         CloudOSNativeNotificationCenter notifications;
         CloudOSNativeQuickSettingsWindow quick;

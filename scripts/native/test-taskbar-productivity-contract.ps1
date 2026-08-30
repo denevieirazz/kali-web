@@ -204,15 +204,17 @@ Require 'Fingerprint stale binary detection' $content.NativeStart @(
     'a verificacao de integridade/proveniencia falhou',
     '--force-rebuild',
     '--no-build',
-    'taskkill /F /IM CloudOS.exe',
+    'tasklist /FI "IMAGENAME eq CloudOS.exe"',
+    'Salve seu trabalho e encerre a instancia aberta normalmente',
     'build-cloudos-native.cmd'
 )
 
 $buildLabel = $content.NativeStart.IndexOf(':BUILD')
-$killBeforeBuild = $content.NativeStart.IndexOf('taskkill /F /IM CloudOS.exe', $buildLabel)
+$guardBeforeBuild = $content.NativeStart.IndexOf('tasklist /FI "IMAGENAME eq CloudOS.exe"', $buildLabel)
 $buildCall = $content.NativeStart.IndexOf('build-cloudos-native.cmd', $buildLabel)
-if ($buildLabel -lt 0 -or $killBeforeBuild -lt 0 -or $buildCall -lt 0 -or $killBeforeBuild -gt $buildCall) {
-    throw 'Native launcher must stop CloudOS.exe before invoking an automatic rebuild.'
+if ($buildLabel -lt 0 -or $guardBeforeBuild -lt 0 -or $buildCall -lt 0 -or $guardBeforeBuild -gt $buildCall) {
+    throw 'Native launcher must refuse an automatic rebuild while CloudOS.exe is open.'
 }
+Forbid 'Native launcher safety' $content.NativeStart @('taskkill /F /IM CloudOS.exe')
 
 Write-Host 'PASS: Taskbar V4 live previews/workspaces/show-desktop, keyboard-first Start Home, resettable smart recommendations, expanded quick-access hub and fingerprint-verified rebuilds are protected.'

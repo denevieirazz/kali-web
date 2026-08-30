@@ -67,6 +67,16 @@ inline void Apply(HWND window) noexcept
         radius * 2,
         radius * 2);
     if (region == nullptr) return;
+    // SetWindowRgn emits a location-change WinEvent. Avoid feeding that event
+    // back into the hook when the geometry is already applied.
+    HRGN current = CreateRectRgn(0, 0, 0, 0);
+    if (current != nullptr && GetWindowRgn(window, current) != ERROR && EqualRgn(current, region))
+    {
+        DeleteObject(current);
+        DeleteObject(region);
+        return;
+    }
+    if (current != nullptr) DeleteObject(current);
     if (SetWindowRgn(window, region, TRUE) == 0)
         DeleteObject(region); // ownership transfers to USER only on success.
 }

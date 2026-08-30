@@ -325,6 +325,8 @@ inline void PrepareWindowTree(HWND window)
 inline bool PaintOwnerDrawButton(const DRAWITEMSTRUCT* draw, ButtonTone tone = ButtonTone::Neutral)
 {
     if (draw == nullptr || draw->CtlType != ODT_BUTTON || draw->hwndItem == nullptr) return false;
+    // Owner draw receives the full client rectangle. Clear it first so the
+    // anti-aliased rounded panel cannot leave the legacy white button corners.
     const bool pressed = (draw->itemState & ODS_SELECTED) != 0;
     const bool disabled = (draw->itemState & ODS_DISABLED) != 0;
     const bool focused = (draw->itemState & ODS_FOCUS) != 0;
@@ -344,6 +346,9 @@ inline bool PaintOwnerDrawButton(const DRAWITEMSTRUCT* draw, ButtonTone tone = B
         border = Danger;
     }
 
+    HBRUSH clear_brush = CreateSolidBrush(BgPrimary);
+    FillRect(draw->hDC, &draw->rcItem, clear_brush);
+    DeleteObject(clear_brush);
     Gdiplus::Graphics graphics(draw->hDC);
     graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
     const Gdiplus::RectF rect(

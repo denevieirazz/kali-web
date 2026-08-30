@@ -13,6 +13,7 @@
 
 namespace CloudOS
 {
+class NativeSurfacePreview;
 class CloudOSNativeQuickSettingsWindow final
 {
 public:
@@ -27,6 +28,7 @@ public:
     void Refresh();
 
 private:
+    friend class NativeSurfacePreview;
     void Layout();
     void UpdateState(bool force_network = false);
     void ApplyVolumeFromSlider();

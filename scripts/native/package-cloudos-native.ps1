@@ -1,19 +1,21 @@
 param(
     [string]$Root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
     [ValidateSet('Release', 'Debug')]
-    [string]$Configuration = 'Release'
+    [string]$Configuration = 'Release',
+    [string]$BuildDirectory
 )
 
 $ErrorActionPreference = 'Stop'
 
 $rootPath = (Resolve-Path -LiteralPath $Root).Path
 $out = Join-Path $rootPath "desktop\CloudOS.NativeShell\bin\$Configuration"
+if ($BuildDirectory) { $out = (Resolve-Path -LiteralPath $BuildDirectory).Path }
 $artifactDir = Join-Path $rootPath 'desktop\CloudOS.NativeShell\artifacts'
 $stage = Join-Path $artifactDir 'CloudOS-Native-Release-x64'
 $zip = Join-Path $artifactDir 'CloudOS-Native-Release-x64.zip'
 $verify = Join-Path $PSScriptRoot 'verify-native-build-manifest.ps1'
 
-& $verify -Root $rootPath -Configuration $Configuration -CheckSourceFingerprint
+& $verify -Root $rootPath -Configuration $Configuration -BuildDirectory $out -CheckSourceFingerprint
 
 New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
 if (Test-Path -LiteralPath $stage) {
@@ -125,8 +127,11 @@ if errorlevel 1 (
   echo [CloudOS] Integridade do pacote FALHOU. O shell nao sera iniciado.
   exit /b 5
 )
-taskkill /F /IM CloudOS.exe >nul 2>&1
-timeout /t 1 /nobreak >nul 2>&1
+tasklist /FI "IMAGENAME eq CloudOS.exe" /NH 2>nul | findstr /I /C:"CloudOS.exe" >nul
+if not errorlevel 1 (
+  echo [CloudOS] Ja existe uma instancia aberta. Salve seu trabalho e encerre-a normalmente antes de iniciar esta versao.
+  exit /b 6
+)
 pushd "%ROOT%" >nul
 start "" /D "%ROOT%" "%ROOT%CloudOS.exe"
 set "RC=%ERRORLEVEL%"

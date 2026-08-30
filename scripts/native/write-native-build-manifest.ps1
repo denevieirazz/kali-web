@@ -1,13 +1,15 @@
 param(
     [string]$Root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
     [ValidateSet('Release', 'Debug')]
-    [string]$Configuration = 'Release'
+    [string]$Configuration = 'Release',
+    [string]$BuildDirectory
 )
 
 $ErrorActionPreference = 'Stop'
 
 $rootPath = (Resolve-Path -LiteralPath $Root).Path
 $out = Join-Path $rootPath "desktop\CloudOS.NativeShell\bin\$Configuration"
+if ($BuildDirectory) { $out = (Resolve-Path -LiteralPath $BuildDirectory).Path }
 $exe = Join-Path $out 'CloudOS.exe'
 $dll = Join-Path $out 'CloudOS.NativeRuntime.dll'
 $manifestPath = Join-Path $out 'cloudos-native-manifest.json'

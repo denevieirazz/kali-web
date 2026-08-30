@@ -7,6 +7,7 @@
 
 namespace CloudOS
 {
+class NativeSurfacePreview;
 class CloudOSNativeNotificationCenter final
 {
 public:
@@ -27,6 +28,7 @@ public:
     static std::size_t UnreadCount();
 
 private:
+    friend class NativeSurfacePreview;
     void Layout();
     void RebuildList();
     void MarkAllRead();
