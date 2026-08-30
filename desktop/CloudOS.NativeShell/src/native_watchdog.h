@@ -5,6 +5,8 @@
 #include <cwchar>
 #include <vector>
 
+#include "native_health_bootstrap_v9.h"
+
 namespace CloudOS
 {
 class NativeWatchdog final
@@ -20,6 +22,8 @@ public:
 
     // Launches a tiny helper instance of CloudOS.exe that waits on the current
     // process handle and relaunches the shell only after an abnormal exit.
+    // Explicit --stability-probe launches skip the helper so crashes remain
+    // visible to the automated soak harness instead of being auto-recovered.
     static bool StartForCurrentProcess();
 };
 } // namespace CloudOS
