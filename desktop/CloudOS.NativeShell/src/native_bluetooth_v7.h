@@ -5,6 +5,7 @@
 #include <winrt/Windows.Devices.Bluetooth.h>
 #include <winrt/Windows.Devices.Enumeration.h>
 #include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Foundation.Collections.h>
 
 #include <algorithm>
 #include <atomic>
@@ -70,7 +71,7 @@ public:
             {
                 winrt::init_apartment(winrt::apartment_type::multi_threaded);
                 using namespace winrt::Windows::Devices::Enumeration;
-                const auto device = DeviceInformation::CreateFromIdAsync(device_id).get();
+                const auto device = DeviceInformation::CreateFromIdAsync(winrt::hstring(device_id)).get();
                 if (device && device.Pairing().CanPair())
                     (void)device.Pairing().PairAsync().get();
             }
@@ -90,7 +91,7 @@ public:
             {
                 winrt::init_apartment(winrt::apartment_type::multi_threaded);
                 using namespace winrt::Windows::Devices::Enumeration;
-                const auto device = DeviceInformation::CreateFromIdAsync(device_id).get();
+                const auto device = DeviceInformation::CreateFromIdAsync(winrt::hstring(device_id)).get();
                 if (device && device.Pairing().IsPaired())
                     (void)device.Pairing().UnpairAsync().get();
             }
@@ -131,8 +132,10 @@ private:
         std::unordered_set<std::wstring> existing;
         for (const auto& item : *output) existing.insert(item.id);
 
-        for (const auto& device : found)
+        const uint32_t count = found.Size();
+        for (uint32_t index = 0; index < count && output->size() < 96u; ++index)
         {
+            const DeviceInformation device = found.GetAt(index);
             const std::wstring id = device.Id().c_str();
             if (id.empty() || existing.contains(id)) continue;
             NativeBluetoothDeviceV7 item{};
@@ -143,7 +146,6 @@ private:
             item.low_energy = low_energy;
             output->push_back(std::move(item));
             existing.insert(id);
-            if (output->size() >= 96u) break;
         }
     }
 };
