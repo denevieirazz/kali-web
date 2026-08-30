@@ -329,7 +329,7 @@ LRESULT CloudOSNativeFilesWindow::CustomDrawSidebar(const NMLVCUSTOMDRAW& draw)
     text_rect.left = pill.left + CloudOS::Scale(42, dpi_);
     text_rect.right = pill.right - CloudOS::Scale(8, dpi_);
     SetBkMode(draw.nmcd.hdc, TRANSPARENT);
-    SetTextColor(draw.nmcd.hdc, item.favorite ? CloudOS::WebSkin::AccentSoft : kText);
+    SetTextColor(draw.nmcd.hdc, item.favorite ? CloudOS::WebSkin::AccentHover : kText);
     HGDIOBJ old_font = ui_font_ != nullptr ? SelectObject(draw.nmcd.hdc, ui_font_) : nullptr;
     DrawTextW(draw.nmcd.hdc, item.label.c_str(), -1, &text_rect,
         DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
@@ -456,7 +456,7 @@ LRESULT CloudOSNativeFilesWindow::HandleMessage(UINT message, WPARAM w_param, LP
             }
             if (header->code == NM_RCLICK)
             {
-                DWORD packed = GetMessagePos();
+                const LPARAM packed = static_cast<LPARAM>(GetMessagePos());
                 POINT point{GET_X_LPARAM(packed), GET_Y_LPARAM(packed)};
                 ShowContentContextMenu(point);
                 return 0;
