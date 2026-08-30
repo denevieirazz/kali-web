@@ -7,6 +7,7 @@
 #include <array>
 #include <string_view>
 
+#include "../../CloudOS.NativeCommon/native_supervisor_protocol_v11.h"
 #include "native_health_signal_v9.h"
 
 #pragma comment(lib, "comctl32.lib")
@@ -18,8 +19,6 @@ constexpr UINT_PTR HealthTimerId = 0xC509;
 constexpr UINT_PTR HealthSubclassId = 0xC509A11;
 constexpr UINT HealthIntervalMilliseconds = 1000;
 constexpr wchar_t WatchdogArgument[] = L"--watchdog";
-// native_desktop_window_v2.cpp is the implementation compiled by the current
-// NativeShell project. Keep readiness bound to that authoritative HWND class.
 constexpr wchar_t DesktopClass[] = L"CloudOS.NativeShell.Desktop.v2";
 constexpr wchar_t TaskbarClass[] = L"CloudOS.NativeShell.Taskbar.v4";
 constexpr wchar_t StartClass[] = L"CloudOS.NativeShell.Start.v4";
@@ -92,10 +91,6 @@ public:
     Bootstrap(const Bootstrap&) = delete;
     Bootstrap& operator=(const Bootstrap&) = delete;
 
-    // NativeWatchdog::StartForCurrentProcess is reached only after the main
-    // CloudOSApplication::Initialize path has created every first-party shell
-    // surface. Attach here so readiness does not depend on an EVENT_OBJECT_SHOW
-    // notification that may have happened before the Win32 message loop starts.
     void AttachAfterInitialization() noexcept
     {
         if (HasCommandLineArgument(WatchdogArgument)) return;
@@ -187,6 +182,12 @@ private:
         auto* self = reinterpret_cast<Bootstrap*>(reference_data);
         if (self != nullptr)
         {
+            if (message == SupervisorProtocolV11::RequestGracefulExitMessage)
+            {
+                self->signal_.MarkShuttingDown(window);
+                PostQuitMessage(0);
+                return 0;
+            }
             if (message == WM_TIMER && w_param == HealthTimerId)
             {
                 self->Tick();
