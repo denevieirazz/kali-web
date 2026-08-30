@@ -90,6 +90,16 @@ public:
     Bootstrap(const Bootstrap&) = delete;
     Bootstrap& operator=(const Bootstrap&) = delete;
 
+    // NativeWatchdog::StartForCurrentProcess is reached only after the main
+    // CloudOSApplication::Initialize path has created every first-party shell
+    // surface. Attach here so readiness does not depend on an EVENT_OBJECT_SHOW
+    // notification that may have happened before the Win32 message loop starts.
+    void AttachAfterInitialization() noexcept
+    {
+        if (HasCommandLineArgument(WatchdogArgument)) return;
+        TryAttach(FindWindowW(DesktopClass, nullptr));
+    }
+
 private:
     static void CALLBACK WinEventCallback(
         HWINEVENTHOOK,
@@ -132,6 +142,7 @@ private:
         }
 
         desktop_ = desktop;
+        ready_ = false;
         consecutive_ready_checks_ = 0;
         signal_.Pulse(desktop_);
         if (SetTimer(desktop_, HealthTimerId, HealthIntervalMilliseconds, nullptr) == 0)
