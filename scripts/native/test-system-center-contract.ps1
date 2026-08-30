@@ -132,14 +132,15 @@ Require 'Network/storage/process/service telemetry' $content.Backend @(
 
 Require 'System Center surface' $content.WindowHeader @(
     'CloudOSNativeSystemControlWindow',
-    'Page::Overview',
-    'Page::Wifi',
-    'Page::Display',
-    'Page::Audio',
-    'Page::Power',
-    'Page::Network',
-    'Page::Storage',
-    'Page::Processes'
+    'enum class Page',
+    'Overview = 0',
+    'Wifi,',
+    'Display,',
+    'Audio,',
+    'Power,',
+    'Network,',
+    'Storage,',
+    'Processes,'
 )
 Require 'System Center implementation' $content.Window @(
     'CloudOS.Native.SystemControl.v1',
@@ -148,6 +149,14 @@ Require 'System Center implementation' $content.Window @(
     'Wi-Fi',
     'Armazenamento',
     'Processos',
+    'Page::Overview',
+    'Page::Wifi',
+    'Page::Display',
+    'Page::Audio',
+    'Page::Power',
+    'Page::Network',
+    'Page::Storage',
+    'Page::Processes',
     'RefreshOverview',
     'RefreshWifi',
     'RefreshDisplay',
