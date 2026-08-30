@@ -31,7 +31,7 @@ enum class CloudOSSnapDirection
 class CloudOSNativeWindowManager final
 {
 public:
-    CloudOSNativeWindowManager() = default;
+    CloudOSNativeWindowManager();
     ~CloudOSNativeWindowManager();
 
     CloudOSNativeWindowManager(const CloudOSNativeWindowManager&) = delete;
@@ -60,12 +60,14 @@ public:
     void SnapActive(CloudOSSnapDirection direction);
 
     void ToggleTiling();
+    void SetTilingEnabled(bool enabled);
     void TileCurrentWorkspace();
     void ToggleFloatingActive();
     void SetWindowFloating(HWND window, bool floating);
 
     void SwitchWorkspace(int workspace);
     void MoveActiveToWorkspace(int workspace);
+    void MoveWindowToWorkspace(HWND window, int workspace);
     bool RestoreWindowState(
         HWND window,
         int workspace,
