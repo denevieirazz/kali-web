@@ -1,5 +1,7 @@
 #include "native_watchdog.h"
 
+#include "../../CloudOS.NativeCommon/native_supervisor_protocol_v11.h"
+
 #include <Shellapi.h>
 
 #include <algorithm>
@@ -139,11 +141,6 @@ bool LaunchNormalShell()
 
 bool ShouldRestartAfterExit(DWORD exit_code) noexcept
 {
-    // The watchdog exists to recover a crashed shell, not to fight the user.
-    // Task Manager/taskkill commonly terminate a process with a small ordinary
-    // exit code (for example 1). Treat those exits as intentional and stay
-    // closed. Only NT failure/status exits with the high bit set are eligible
-    // for automatic recovery. Ctrl+C/console close is also intentional.
     if (exit_code == 0 || exit_code == kStatusControlCExit)
     {
         return false;
@@ -154,11 +151,20 @@ bool ShouldRestartAfterExit(DWORD exit_code) noexcept
 
 bool NativeWatchdog::IsWatchdogInvocation()
 {
-    return WatchedProcessId() != 0;
+    return WatchedProcessId() != 0 ||
+        HasArgument(SupervisorProtocolV11::ProbeFailureArgument);
 }
 
 int NativeWatchdog::RunWatchdogInvocation()
 {
+    // Deterministic CI-only abnormal exit: this path runs before the session
+    // mutex and before any shell HWND/state is created. It exercises Supervisor
+    // crash-loop handling without corrupting user state or forcing a real crash.
+    if (HasArgument(SupervisorProtocolV11::ProbeFailureArgument))
+    {
+        return static_cast<int>(0xC0000001u);
+    }
+
     const DWORD process_id = WatchedProcessId();
     if (process_id == 0)
     {
@@ -171,7 +177,6 @@ int NativeWatchdog::RunWatchdogInvocation()
         process_id);
     if (process == nullptr)
     {
-        // The parent may already have completed while the helper was starting.
         return 0;
     }
 
@@ -192,8 +197,6 @@ int NativeWatchdog::RunWatchdogInvocation()
         return 0;
     }
 
-    // Give Windows time to release HWNDs, AppBars and the session mutex before
-    // the replacement shell attempts to acquire them.
     Sleep(450);
 
     const ULONGLONG now = GetTickCount64();
@@ -267,12 +270,13 @@ void NativeWatchdog::ReleaseSessionMutex(HANDLE mutex) noexcept
 
 bool NativeWatchdog::StartForCurrentProcess()
 {
-    // wWinMain reaches this method only after CloudOSApplication::Initialize()
-    // succeeds. Use that deterministic lifecycle point to arm the UI heartbeat.
     HealthBootstrapV9::bootstrap.AttachAfterInitialization();
 
-    // Stability/soak runs must observe the original process directly. A crash
-    // must fail the probe instead of being hidden by the normal recovery helper.
+    if (HasArgument(SupervisorProtocolV11::SupervisedArgument))
+    {
+        return true;
+    }
+
     if (HasArgument(kStabilityProbeArgument))
     {
         return true;

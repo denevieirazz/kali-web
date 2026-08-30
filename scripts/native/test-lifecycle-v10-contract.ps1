@@ -19,18 +19,14 @@ foreach ($entry in $paths.GetEnumerator()) {
         throw "Lifecycle V10 file missing [$($entry.Key)]: $($entry.Value)"
     }
 }
-
 $content = @{}
-foreach ($entry in $paths.GetEnumerator()) {
-    $content[$entry.Key] = Get-Content -LiteralPath $entry.Value -Raw
-}
+foreach ($entry in $paths.GetEnumerator()) { $content[$entry.Key] = Get-Content -LiteralPath $entry.Value -Raw }
 
 function Require([string]$Name, [string]$Text, [string[]]$Tokens) {
     foreach ($token in $Tokens) {
         if (-not $Text.Contains($token)) { throw "$Name contract missing: $token" }
     }
 }
-
 function Forbid([string]$Name, [string]$Text, [string[]]$Tokens) {
     foreach ($token in $Tokens) {
         if ($Text.Contains($token)) { throw "$Name forbidden regression found: $token" }
@@ -94,25 +90,17 @@ Require 'Lifecycle smoke V10' $content.Smoke @(
     'Physical suspend/resume, RDP transport and monitor hotplug remain VM/hardware matrix tests.'
 )
 
-Forbid 'Lifecycle smoke privacy V10' $content.Smoke @(
-    'MainWindowTitle',
-    'Get-CimInstance',
-    'Get-WmiObject',
-    'Win32_Process',
-    'CommandLine =',
-    'DocumentPath'
-)
+Forbid 'Lifecycle smoke privacy V10' $content.Smoke @('MainWindowTitle', 'Get-CimInstance', 'Get-WmiObject', 'Win32_Process', 'CommandLine =', 'DocumentPath')
 
-Require 'Developer build V10' $content.Build @(
-    'test-lifecycle-v10-contract.ps1',
-    'LIFECYCLE_V10='
-)
+Require 'Developer build V10' $content.Build @('test-lifecycle-v10-contract.ps1', 'LIFECYCLE_V10=')
 
+# Package wording may evolve in later releases. Protect the V10 executable
+# validation tool and the explicit physical-test boundary rather than prose.
 Require 'Portable package V10' $content.Package @(
     "'run-native-lifecycle-smoke-v10.ps1'",
     'Lifecycle V10:',
-    'WTS/RDP lock/disconnect faz checkpoint',
-    'matriz de VM/hardware'
+    'resume, WTS/RDP, display revalidation e single-instance',
+    'VM/hardware'
 )
 
 Require 'Native CI V10' $content.Workflow @(

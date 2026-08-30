@@ -7,6 +7,8 @@ on:
   pull_request:
     paths:
       - 'frontend/src/**'
+      - 'desktop/CloudOS.NativeCommon/**'
+      - 'desktop/CloudOS.NativeRecovery/**'
       - 'desktop/CloudOS.NativeRuntime/**'
       - 'desktop/CloudOS.NativeShell/**'
       - 'scripts/native/**'
@@ -27,7 +29,7 @@ jobs:
       - name: Confirm full CloudOS tree is preserved
         shell: pwsh
         run: |
-          foreach ($path in @('frontend', 'backend', 'desktop/CloudOS.Host', 'desktop/CloudOS.NativeRuntime', 'desktop/CloudOS.NativeShell')) {
+          foreach ($path in @('frontend', 'backend', 'desktop/CloudOS.Host', 'desktop/CloudOS.NativeCommon', 'desktop/CloudOS.NativeRecovery', 'desktop/CloudOS.NativeRuntime', 'desktop/CloudOS.NativeShell')) {
             if (-not (Test-Path -LiteralPath $path)) {
               throw "Required migration source/target path missing: $path"
             }
@@ -83,13 +85,26 @@ jobs:
           if ($result.verdict -ne 'pass') { throw 'Lifecycle V10 smoke verdict was not pass.' }
           if (@($result.events).Count -lt 6) { throw 'Lifecycle V10 did not exercise all expected transition checks.' }
 
+      - name: Smoke Shell Supervisor V11
+        shell: pwsh
+        run: |
+          $artifactDir = 'desktop/CloudOS.NativeShell/artifacts'
+          New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+          $report = Join-Path $artifactDir 'supervisor-v11-smoke.json'
+          ./scripts/native/run-native-supervisor-smoke-v11.ps1 -OutputPath $report
+          if (-not (Test-Path -LiteralPath $report)) { throw 'Supervisor V11 smoke report missing.' }
+          $result = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
+          if ($result.verdict -ne 'pass') { throw 'Supervisor V11 smoke verdict was not pass.' }
+          if ($result.evidence.ready_probe_exit_code -ne 0) { throw 'Supervisor V11 real readiness probe failed.' }
+          if ($result.evidence.remaining_installation_shell_processes -ne 0) { throw 'Supervisor V11 leaked CloudOS processes.' }
+
       - name: Verify native release provenance and compiled graph
         shell: pwsh
         run: |
           ./scripts/native/verify-native-build-manifest.ps1 -Configuration Release -CheckSourceFingerprint
 
           $out = 'desktop/CloudOS.NativeShell/bin/Release'
-          foreach ($name in @('CloudOS.exe', 'CloudOS.NativeRuntime.dll', 'cloudos-native-manifest.json', '.cloudos-build-fingerprint')) {
+          foreach ($name in @('CloudOS.exe', 'CloudOS.NativeRuntime.dll', 'CloudOS.Supervisor.exe', 'cloudos-native-manifest.json', '.cloudos-build-fingerprint')) {
             $path = Join-Path $out $name
             if (-not (Test-Path -LiteralPath $path)) { throw "Missing $path" }
             if ((Get-Item -LiteralPath $path).Length -le 0) { throw "Empty $path" }
@@ -103,6 +118,11 @@ jobs:
           if ($project.Contains('<ClCompile Include="src\native_web_desktop_window.cpp"') -or
               $project.Contains('<ClCompile Include="src\native_webview_host.cpp"')) {
             throw 'Legacy web desktop returned to the compiled native shell graph.'
+          }
+
+          $supervisorProject = Get-Content -LiteralPath 'desktop/CloudOS.NativeRecovery/CloudOS.NativeRecovery.vcxproj' -Raw
+          if (-not $supervisorProject.Contains('<TargetName>CloudOS.Supervisor</TargetName>')) {
+            throw 'External Shell Supervisor V11 is not the compiled recovery target.'
           }
 
           $build = Get-Content -LiteralPath 'scripts/native/build-cloudos-native.cmd' -Raw
@@ -131,6 +151,7 @@ jobs:
             desktop/CloudOS.NativeShell/artifacts/CloudOS-Native-Release-x64.zip
             desktop/CloudOS.NativeShell/artifacts/stability-v9-smoke.json
             desktop/CloudOS.NativeShell/artifacts/lifecycle-v10-smoke.json
+            desktop/CloudOS.NativeShell/artifacts/supervisor-v11-smoke.json
             desktop/CloudOS.NativeShell/bin/Release/cloudos-native-manifest.json
             desktop/CloudOS.NativeShell/bin/Release/.cloudos-build-head
             desktop/CloudOS.NativeShell/bin/Release/.cloudos-build-fingerprint

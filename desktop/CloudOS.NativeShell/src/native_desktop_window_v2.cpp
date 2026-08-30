@@ -12,6 +12,8 @@
 #include <shellapi.h>
 #include <shlobj.h>
 
+#include "../../CloudOS.NativeCommon/native_supervisor_protocol_v11.h"
+
 #include <algorithm>
 #include <filesystem>
 #include <string>
@@ -378,7 +380,7 @@ void CloudOSNativeDesktopWindow::UpdateLayout(const RECT& work_area)
 
 void CloudOSNativeDesktopWindow::Redraw() { if (hwnd_ != nullptr) InvalidateRect(hwnd_, nullptr, FALSE); }
 void CloudOSNativeDesktopWindow::FocusSearch() { if (on_hotkey_) on_hotkey_(HotSearch); }
-void CloudOSNativeDesktopWindow::RefreshWorkArea() { if (on_timer_) on_timer_(); Redraw(); }
+void CloudOSNativeDesktopWindow::RefreshWorkArea() { Redraw(); }
 
 void CloudOSNativeDesktopWindow::ActivateAppIndex(int app_index)
 {
@@ -673,6 +675,9 @@ LRESULT CloudOSNativeDesktopWindow::HandleMessage(HWND window, UINT message, WPA
     case WM_KEYDOWN:
         if (w_param == VK_F5) { Redraw(); return 0; }
         break;
+    case SupervisorProtocolV11::RequestGracefulExitMessage:
+        PostQuitMessage(0);
+        return 0;
     case WM_DESTROY:
         NativeDesktopDropTarget::Unregister(hwnd_); hwnd_ = nullptr; return 0;
     default: break;

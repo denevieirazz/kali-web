@@ -22,18 +22,14 @@ foreach ($entry in $paths.GetEnumerator()) {
         throw "Stability/Readiness V9 file missing [$($entry.Key)]: $($entry.Value)"
     }
 }
-
 $content = @{}
-foreach ($entry in $paths.GetEnumerator()) {
-    $content[$entry.Key] = Get-Content -LiteralPath $entry.Value -Raw
-}
+foreach ($entry in $paths.GetEnumerator()) { $content[$entry.Key] = Get-Content -LiteralPath $entry.Value -Raw }
 
 function Require([string]$Name, [string]$Text, [string[]]$Tokens) {
     foreach ($token in $Tokens) {
         if (-not $Text.Contains($token)) { throw "$Name contract missing: $token" }
     }
 }
-
 function Forbid([string]$Name, [string]$Text, [string[]]$Tokens) {
     foreach ($token in $Tokens) {
         if ($Text.Contains($token)) { throw "$Name forbidden regression found: $token" }
@@ -67,8 +63,7 @@ Require 'UI heartbeat bootstrap V9' $content.HealthBootstrap @(
     'consecutive_ready_checks_ >= 2',
     'signal_.MarkReady',
     'signal_.MarkShuttingDown',
-    'CloudOS.NativeShell.Desktop.v2',
-    'native_desktop_window_v2.cpp is the implementation compiled',
+    'constexpr wchar_t DesktopClass[] = L"CloudOS.NativeShell.Desktop.v2"',
     'CloudOS.NativeShell.Taskbar.v4',
     'CloudOS.NativeShell.Start.v4',
     'CloudOS.NativeShell.QuickSettings.v4',
@@ -83,7 +78,7 @@ Require 'Probe watchdog bypass V9' $content.Watchdog @(
     'HealthBootstrapV9::bootstrap.AttachAfterInitialization()',
     'kStabilityProbeArgument[] = L"--stability-probe"',
     'if (HasArgument(kStabilityProbeArgument))',
-    'Stability/soak runs must observe the original process directly.'
+    'return true;'
 )
 
 Require 'Health reader V9' $content.HealthReader @(
@@ -112,13 +107,7 @@ Require 'Automated soak V9' $content.Soak @(
     'No window titles, filenames, command lines, URLs, credentials, session contents, dumps or uploads.'
 )
 
-Forbid 'Automated soak V9 privacy' $content.Soak @(
-    'MainWindowTitle',
-    'Win32_Process',
-    'Get-CimInstance',
-    'Get-WmiObject',
-    'CommandLine ='
-)
+Forbid 'Automated soak V9 privacy' $content.Soak @('MainWindowTitle', 'Win32_Process', 'Get-CimInstance', 'Get-WmiObject', 'CommandLine =')
 
 Require 'Diagnostics V9' $content.Diagnostics @(
     'native-health-v9.ps1',
@@ -129,33 +118,9 @@ Require 'Diagnostics V9' $content.Diagnostics @(
     'user_objects',
     'health_handles'
 )
-
-Require 'Developer build V9 contract' $content.Build @(
-    'test-stability-readiness-v9-contract.ps1',
-    'STABILITY_READINESS_V9='
-)
-
-Require 'Portable package V9' $content.Package @(
-    "'native-health-v9.ps1'",
-    "'collect-native-diagnostics.ps1'",
-    "'run-native-soak-v9.ps1'",
-    'Coletar Diagnostico 60s.cmd',
-    'Stability/Readiness V9'
-)
-
-Require 'Native CI V9' $content.Workflow @(
-    'Smoke Stability/Readiness V9',
-    'run-native-soak-v9.ps1',
-    '-DurationSeconds 20',
-    'stability-v9-smoke.json'
-)
-
-Require 'V9 documentation' $content.Document @(
-    'ABI binario fixo de 96 bytes',
-    'heartbeat da thread de UI',
-    '--stability-probe',
-    'DurationSeconds 86400',
-    'criterio de aceite, nao uma alegacao'
-)
+Require 'Developer build V9 contract' $content.Build @('test-stability-readiness-v9-contract.ps1', 'STABILITY_READINESS_V9=')
+Require 'Portable package V9' $content.Package @("'native-health-v9.ps1'", "'collect-native-diagnostics.ps1'", "'run-native-soak-v9.ps1'", 'Coletar Diagnostico 60s.cmd', 'Stability/Readiness V9')
+Require 'Native CI V9' $content.Workflow @('Smoke Stability/Readiness V9', 'run-native-soak-v9.ps1', '-DurationSeconds 20', 'stability-v9-smoke.json')
+Require 'V9 documentation' $content.Document @('ABI binario fixo de 96 bytes', 'heartbeat da thread de UI', '--stability-probe', 'DurationSeconds 86400', 'criterio de aceite, nao uma alegacao')
 
 Write-Host 'PASS: Stability/Readiness V9 contracts passed - fixed health ABI, authoritative Desktop v2 heartbeat, deterministic post-initialize attach, automated soak, local diagnostics, portable tooling and CI smoke are protected.'

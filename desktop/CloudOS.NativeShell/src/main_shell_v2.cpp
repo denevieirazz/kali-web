@@ -7,6 +7,7 @@
 
 #include "native_app_launcher.h"
 #include "native_desktop_surface.h"
+#include "native_health_bootstrap_v9.h"
 #include "native_monitor_manager.h"
 #include "native_notification_center.h"
 #include "native_quick_settings_window.h"
@@ -82,9 +83,11 @@ public:
 
         if (!desktop_.Create(instance_, &window_manager_))
         {
+            OutputDebugStringW(L"[CloudOS Init] desktop_.Create failed\n");
             Shutdown();
             return false;
         }
+        OutputDebugStringW(L"[CloudOS Init] desktop_.Create OK\n");
 
         lifecycle_subclass_attached_ = SetWindowSubclass(
             desktop_.Hwnd(),
@@ -100,29 +103,63 @@ public:
         window_manager_.SetReservedBottomPixels(0);
         if (!window_manager_.Initialize(desktop_.Hwnd()))
         {
+            OutputDebugStringW(L"[CloudOS Init] window_manager_.Initialize failed\n");
             Shutdown();
             return false;
         }
         window_manager_initialized_ = true;
+        OutputDebugStringW(L"[CloudOS Init] window_manager_.Initialize OK\n");
 
-        if (!start_menu_.Create(instance_) ||
-            !quick_settings_.Create(instance_) ||
-            !notification_center_.Create(instance_) ||
-            !task_switcher_.Create(instance_, &window_manager_) ||
-            !workspace_overview_.Create(instance_, &window_manager_))
+        if (!start_menu_.Create(instance_))
         {
+            OutputDebugStringW(L"[CloudOS Init] start_menu_.Create failed\n");
             Shutdown();
             return false;
         }
+        OutputDebugStringW(L"[CloudOS Init] start_menu_.Create OK\n");
+
+        if (!quick_settings_.Create(instance_))
+        {
+            OutputDebugStringW(L"[CloudOS Init] quick_settings_.Create failed\n");
+            Shutdown();
+            return false;
+        }
+        OutputDebugStringW(L"[CloudOS Init] quick_settings_.Create OK\n");
+
+        if (!notification_center_.Create(instance_))
+        {
+            OutputDebugStringW(L"[CloudOS Init] notification_center_.Create failed\n");
+            Shutdown();
+            return false;
+        }
+        OutputDebugStringW(L"[CloudOS Init] notification_center_.Create OK\n");
+
+        if (!task_switcher_.Create(instance_, &window_manager_))
+        {
+            OutputDebugStringW(L"[CloudOS Init] task_switcher_.Create failed\n");
+            Shutdown();
+            return false;
+        }
+        OutputDebugStringW(L"[CloudOS Init] task_switcher_.Create OK\n");
+
+        if (!workspace_overview_.Create(instance_, &window_manager_))
+        {
+            OutputDebugStringW(L"[CloudOS Init] workspace_overview_.Create failed\n");
+            Shutdown();
+            return false;
+        }
+        OutputDebugStringW(L"[CloudOS Init] workspace_overview_.Create OK\n");
 
         SetupShellBridge();
 
         monitor_signature_ = NativeMonitorManager::Signature();
         if (!BuildTaskbars())
         {
+            OutputDebugStringW(L"[CloudOS Init] BuildTaskbars failed\n");
             Shutdown();
             return false;
         }
+        OutputDebugStringW(L"[CloudOS Init] BuildTaskbars OK\n");
 
         LayoutDesktop();
         RegisterHotKeys();
@@ -158,6 +195,14 @@ public:
             L"Visao de Trabalho ativa: Ctrl+Alt+O abre as 4 areas; Ctrl+Alt+PgUp/PgDn alterna entre elas.");
 
         RefreshShell();
+
+        if (!HealthBootstrapV9::HasCommandLineArgument(L"--stability-probe") &&
+            !HealthBootstrapV9::HasCommandLineArgument(L"--lifecycle-probe") &&
+            !HealthBootstrapV9::HasCommandLineArgument(L"--watchdog"))
+        {
+            start_menu_.ToggleNear(PrimaryTaskbarBounds());
+        }
+
         return true;
     }
 
@@ -817,6 +862,7 @@ int WINAPI wWinMain(
         }
         else
         {
+            CloudOS::HealthBootstrapV9::bootstrap.AttachAfterInitialization();
             (void)CloudOS::NativeWatchdog::StartForCurrentProcess();
             exit_code = application.Run();
         }

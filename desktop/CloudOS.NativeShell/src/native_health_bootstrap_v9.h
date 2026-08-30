@@ -5,8 +5,10 @@
 #include <shellapi.h>
 
 #include <array>
+#include <string>
 #include <string_view>
 
+#include "../../CloudOS.NativeCommon/native_supervisor_protocol_v11.h"
 #include "native_health_signal_v9.h"
 
 #pragma comment(lib, "comctl32.lib")
@@ -18,8 +20,6 @@ constexpr UINT_PTR HealthTimerId = 0xC509;
 constexpr UINT_PTR HealthSubclassId = 0xC509A11;
 constexpr UINT HealthIntervalMilliseconds = 1000;
 constexpr wchar_t WatchdogArgument[] = L"--watchdog";
-// native_desktop_window_v2.cpp is the implementation compiled by the current
-// NativeShell project. Keep readiness bound to that authoritative HWND class.
 constexpr wchar_t DesktopClass[] = L"CloudOS.NativeShell.Desktop.v2";
 constexpr wchar_t TaskbarClass[] = L"CloudOS.NativeShell.Taskbar.v4";
 constexpr wchar_t StartClass[] = L"CloudOS.NativeShell.Start.v4";
@@ -47,11 +47,24 @@ inline bool HasCommandLineArgument(std::wstring_view expected) noexcept
 
 inline bool RequiredShellSurfacesExist() noexcept
 {
-    return FindWindowW(DesktopClass, nullptr) != nullptr &&
-        FindWindowW(TaskbarClass, nullptr) != nullptr &&
-        FindWindowW(StartClass, nullptr) != nullptr &&
-        FindWindowW(QuickSettingsClass, nullptr) != nullptr &&
-        FindWindowW(NotificationClass, nullptr) != nullptr;
+    const DWORD current_pid = GetCurrentProcessId();
+    const auto owns = [current_pid](const wchar_t* class_name) noexcept
+    {
+        HWND window = nullptr;
+        while ((window = FindWindowExW(nullptr, window, class_name, nullptr)) != nullptr)
+        {
+            DWORD window_pid = 0;
+            GetWindowThreadProcessId(window, &window_pid);
+            if (window_pid == current_pid) return true;
+        }
+        return false;
+    };
+
+    return owns(DesktopClass) &&
+        owns(TaskbarClass) &&
+        owns(StartClass) &&
+        owns(QuickSettingsClass) &&
+        owns(NotificationClass);
 }
 
 class Bootstrap final
@@ -92,14 +105,18 @@ public:
     Bootstrap(const Bootstrap&) = delete;
     Bootstrap& operator=(const Bootstrap&) = delete;
 
-    // NativeWatchdog::StartForCurrentProcess is reached only after the main
-    // CloudOSApplication::Initialize path has created every first-party shell
-    // surface. Attach here so readiness does not depend on an EVENT_OBJECT_SHOW
-    // notification that may have happened before the Win32 message loop starts.
     void AttachAfterInitialization() noexcept
     {
         if (HasCommandLineArgument(WatchdogArgument)) return;
         TryAttach(FindWindowW(DesktopClass, nullptr));
+    }
+
+    void Pulse() noexcept
+    {
+        if (desktop_ != nullptr && IsWindow(desktop_))
+        {
+            signal_.Pulse(desktop_);
+        }
     }
 
 private:
@@ -128,9 +145,33 @@ private:
             GetClassNameW(desktop, class_name, static_cast<int>(std::size(class_name))) <= 0 ||
             std::wstring_view(class_name) != DesktopClass)
         {
-            desktop = FindWindowW(DesktopClass, nullptr);
+            desktop = nullptr;
+            while ((desktop = FindWindowExW(nullptr, desktop, DesktopClass, nullptr)) != nullptr)
+            {
+                DWORD window_pid = 0;
+                GetWindowThreadProcessId(desktop, &window_pid);
+                if (window_pid == GetCurrentProcessId()) break;
+            }
         }
         if (desktop == nullptr || !IsWindow(desktop)) return;
+
+        DWORD window_pid = 0;
+        GetWindowThreadProcessId(desktop, &window_pid);
+        if (window_pid != GetCurrentProcessId())
+        {
+            desktop = nullptr;
+            while ((desktop = FindWindowExW(nullptr, desktop, DesktopClass, nullptr)) != nullptr)
+            {
+                DWORD pid = 0;
+                GetWindowThreadProcessId(desktop, &pid);
+                if (pid == GetCurrentProcessId())
+                {
+                    desktop = desktop;
+                    break;
+                }
+            }
+            if (desktop == nullptr || !IsWindow(desktop)) return;
+        }
 
         if (!signal_.Initialize()) return;
         if (SetWindowSubclass(
@@ -146,6 +187,7 @@ private:
         desktop_ = desktop;
         ready_ = false;
         consecutive_ready_checks_ = 0;
+        ChangeWindowMessageFilterEx(desktop_, SupervisorProtocolV11::RequestGracefulExitMessage, MSGFLT_ALLOW, nullptr);
         signal_.Pulse(desktop_);
         if (SetTimer(desktop_, HealthTimerId, HealthIntervalMilliseconds, nullptr) == 0)
         {
@@ -187,6 +229,12 @@ private:
         auto* self = reinterpret_cast<Bootstrap*>(reference_data);
         if (self != nullptr)
         {
+            if (message == SupervisorProtocolV11::RequestGracefulExitMessage)
+            {
+                self->signal_.MarkShuttingDown(window);
+                PostQuitMessage(0);
+                return 0;
+            }
             if (message == WM_TIMER && w_param == HealthTimerId)
             {
                 self->Tick();
