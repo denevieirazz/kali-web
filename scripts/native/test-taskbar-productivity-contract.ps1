@@ -9,6 +9,8 @@ $paths = @{
     Pins = Join-Path $src 'native_shell_pins.cpp'
     Mru = Join-Path $src 'native_start_menu_mru.h'
     Launcher = Join-Path $src 'native_app_launcher_v3.cpp'
+    NativeBuild = Join-Path $root 'scripts\native\build-cloudos-native.cmd'
+    NativeStart = Join-Path $root 'scripts\native\start-cloudos-native.cmd'
 }
 
 foreach ($entry in $paths.GetEnumerator()) {
@@ -107,4 +109,24 @@ Require 'Hierarchical quick-access hub' $content.Launcher @(
     'L"session.shutdown"'
 )
 
-Write-Host 'PASS: Taskbar V4 live geometry, power-user mouse controls, rich DWM preview, self-healing pins, smart Start recommendations and hierarchical quick-access hub are protected.'
+Require 'Native build revision stamp' $content.NativeBuild @(
+    'BUILD_HEAD',
+    '.cloudos-build-head',
+    'git.exe -C',
+    'rev-parse HEAD',
+    'CloudOS.exe vazio',
+    'CloudOS.NativeRuntime.dll vazio'
+)
+Require 'Stale binary detection' $content.NativeStart @(
+    '.cloudos-build-head',
+    'CURRENT_HEAD',
+    'BUILT_HEAD',
+    'REBUILD_REASON',
+    'rev-parse HEAD',
+    'status --porcelain',
+    'o codigo Git mudou desde o ultimo build',
+    'existem alteracoes locais no codigo nativo/scripts',
+    'build-cloudos-native.cmd'
+)
+
+Write-Host 'PASS: Taskbar V4 live geometry, power-user mouse controls, rich DWM preview, self-healing pins, smart Start recommendations, quick-access hub and stale-binary protection are protected.'
