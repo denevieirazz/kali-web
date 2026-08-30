@@ -4,6 +4,7 @@
 #include "native_desktop_context_menu.h"
 #include "native_desktop_drop_target.h"
 #include "native_icon_renderer.h"
+#include "native_media_control_v7.h"
 #include "native_monitor_manager.h"
 #include "native_shell_platform.h"
 #include "native_wallpaper_manager.h"
@@ -26,6 +27,9 @@ namespace
 constexpr wchar_t kDesktopClass[] = L"CloudOS.NativeShell.Desktop.v2";
 std::vector<RECT> g_file_rects;
 std::vector<std::wstring> g_file_paths;
+RECT g_media_previous_rect{};
+RECT g_media_toggle_rect{};
+RECT g_media_next_rect{};
 
 int FindApp(std::wstring_view id)
 {
@@ -85,21 +89,235 @@ void DrawCenteredText(Graphics& graphics, const std::wstring& text, const Font& 
     graphics.DrawString(text.c_str(), -1, &font, rectangle, &format, &brush);
 }
 
-POINT PrimaryOriginInClient(HWND window)
+RECT PrimaryBoundsInClient(HWND window)
 {
-    POINT origin{};
-    RECT window_bounds{}; GetWindowRect(window, &window_bounds);
+    RECT bounds{};
+    RECT window_bounds{};
+    GetWindowRect(window, &window_bounds);
     const auto monitors = NativeMonitorManager::Enumerate();
     for (const auto& monitor : monitors)
     {
-        if (monitor.primary)
-        {
-            origin.x = monitor.monitor.left - window_bounds.left;
-            origin.y = monitor.monitor.top - window_bounds.top;
-            return origin;
-        }
+        if (!monitor.primary) continue;
+        bounds.left = monitor.monitor.left - window_bounds.left;
+        bounds.top = monitor.monitor.top - window_bounds.top;
+        bounds.right = monitor.monitor.right - window_bounds.left;
+        bounds.bottom = monitor.monitor.bottom - window_bounds.top;
+        return bounds;
     }
-    return origin;
+    GetClientRect(window, &bounds);
+    return bounds;
+}
+
+POINT PrimaryOriginInClient(HWND window)
+{
+    const RECT bounds = PrimaryBoundsInClient(window);
+    return POINT{bounds.left, bounds.top};
+}
+
+std::wstring LocalTimeText()
+{
+    SYSTEMTIME now{};
+    GetLocalTime(&now);
+    wchar_t buffer[64]{};
+    if (GetTimeFormatEx(
+            LOCALE_NAME_USER_DEFAULT,
+            TIME_NOSECONDS,
+            &now,
+            nullptr,
+            buffer,
+            static_cast<int>(std::size(buffer))) == 0)
+        return L"--:--";
+    return buffer;
+}
+
+std::wstring LocalDateText()
+{
+    SYSTEMTIME now{};
+    GetLocalTime(&now);
+    wchar_t buffer[96]{};
+    if (GetDateFormatEx(
+            LOCALE_NAME_USER_DEFAULT,
+            DATE_LONGDATE,
+            &now,
+            nullptr,
+            buffer,
+            static_cast<int>(std::size(buffer)),
+            nullptr) == 0)
+        return {};
+    return buffer;
+}
+
+void DrawRing(
+    Graphics& graphics,
+    const RectF& bounds,
+    int percent,
+    Color accent,
+    const std::wstring& label,
+    const Font& value_font,
+    const Font& label_font,
+    const Brush& primary,
+    const Brush& secondary)
+{
+    const REAL stroke = std::max<REAL>(5.0f, bounds.Width * 0.075f);
+    Pen track(Color(72, 120, 132, 158), stroke);
+    Pen progress(accent, stroke);
+    track.SetStartCap(LineCapRound);
+    track.SetEndCap(LineCapRound);
+    progress.SetStartCap(LineCapRound);
+    progress.SetEndCap(LineCapRound);
+    RectF arc = bounds;
+    arc.Inflate(-stroke, -stroke);
+    graphics.DrawArc(&track, arc, -90.0f, 360.0f);
+    graphics.DrawArc(
+        &progress,
+        arc,
+        -90.0f,
+        360.0f * static_cast<REAL>(std::clamp(percent, 0, 100)) / 100.0f);
+
+    StringFormat centered;
+    centered.SetAlignment(StringAlignmentCenter);
+    centered.SetLineAlignment(StringAlignmentCenter);
+    const std::wstring value = std::to_wstring(std::clamp(percent, 0, 100)) + L"%";
+    graphics.DrawString(value.c_str(), -1, &value_font, bounds, &centered, &primary);
+    graphics.DrawString(
+        label.c_str(),
+        -1,
+        &label_font,
+        RectF(bounds.X, bounds.GetBottom() + 3.0f, bounds.Width, 18.0f),
+        &centered,
+        &secondary);
+}
+
+void DrawDesktopWidgets(
+    Graphics& graphics,
+    UINT dpi,
+    const RECT& monitor,
+    const SystemStats& stats,
+    const NativeMediaSnapshot& media)
+{
+    const int margin = Scale(24, dpi);
+    const int card_width = Scale(330, dpi);
+    const int x = monitor.right - margin - card_width;
+    int y = monitor.top + Scale(24, dpi);
+
+    Font clock_font(L"Segoe UI Variable Display", static_cast<REAL>(Scale(38, dpi)), FontStyleBold, UnitPixel);
+    Font heading_font(L"Segoe UI Variable Display", static_cast<REAL>(Scale(13, dpi)), FontStyleBold, UnitPixel);
+    Font text_font(L"Segoe UI Variable Text", static_cast<REAL>(Scale(11, dpi)), FontStyleRegular, UnitPixel);
+    Font small_font(L"Segoe UI Variable Text", static_cast<REAL>(Scale(9, dpi)), FontStyleRegular, UnitPixel);
+    Font ring_font(L"Segoe UI Variable Display", static_cast<REAL>(Scale(15, dpi)), FontStyleBold, UnitPixel);
+    SolidBrush primary(WebSkin::GdiColor(WebSkin::TextPrimary));
+    SolidBrush secondary(WebSkin::GdiColor(WebSkin::TextSecondary));
+    SolidBrush tertiary(WebSkin::GdiColor(WebSkin::TextTertiary));
+
+    // Clock / calendar card.
+    RectF clock_card(
+        static_cast<REAL>(x), static_cast<REAL>(y),
+        static_cast<REAL>(card_width), static_cast<REAL>(Scale(132, dpi)));
+    WebSkin::DrawElevatedPanel(
+        graphics, clock_card, static_cast<REAL>(Scale(WebSkin::RadiusXL, dpi)),
+        WebSkin::GdiColor(WebSkin::BgSecondary, 226),
+        WebSkin::GdiColor(WebSkin::BorderStrong, 160), true);
+    graphics.DrawString(LocalTimeText().c_str(), -1, &clock_font,
+        PointF(clock_card.X + Scale(20, dpi), clock_card.Y + Scale(15, dpi)), &primary);
+    graphics.DrawString(LocalDateText().c_str(), -1, &text_font,
+        RectF(clock_card.X + Scale(22, dpi), clock_card.Y + Scale(82, dpi),
+            clock_card.Width - Scale(44, dpi), static_cast<REAL>(Scale(28, dpi))),
+        nullptr, &secondary);
+    y += Scale(148, dpi);
+
+    // CPU / RAM activity-rings card.
+    RectF performance_card(
+        static_cast<REAL>(x), static_cast<REAL>(y),
+        static_cast<REAL>(card_width), static_cast<REAL>(Scale(184, dpi)));
+    WebSkin::DrawElevatedPanel(
+        graphics, performance_card, static_cast<REAL>(Scale(WebSkin::RadiusXL, dpi)),
+        WebSkin::GdiColor(WebSkin::BgSecondary, 226),
+        WebSkin::GdiColor(WebSkin::BorderStrong, 150));
+    graphics.DrawString(L"Desempenho", -1, &heading_font,
+        PointF(performance_card.X + Scale(20, dpi), performance_card.Y + Scale(16, dpi)), &primary);
+    graphics.DrawString(stats.uptime_str.c_str(), -1, &small_font,
+        RectF(performance_card.X + Scale(20, dpi), performance_card.Y + Scale(40, dpi),
+            performance_card.Width - Scale(40, dpi), static_cast<REAL>(Scale(20, dpi))),
+        nullptr, &tertiary);
+
+    const REAL ring_size = static_cast<REAL>(Scale(82, dpi));
+    const REAL ring_y = performance_card.Y + Scale(66, dpi);
+    DrawRing(
+        graphics,
+        RectF(performance_card.X + Scale(44, dpi), ring_y, ring_size, ring_size),
+        stats.cpu_available ? stats.cpu_percent : 0,
+        WebSkin::GdiColor(WebSkin::AccentHover),
+        L"CPU",
+        ring_font, small_font, primary, secondary);
+    DrawRing(
+        graphics,
+        RectF(performance_card.X + performance_card.Width - Scale(44, dpi) - ring_size,
+            ring_y, ring_size, ring_size),
+        stats.ram_available ? stats.ram_percent : 0,
+        WebSkin::GdiColor(WebSkin::AccentCyan),
+        L"RAM",
+        ring_font, small_font, primary, secondary);
+    y += Scale(200, dpi);
+
+    // GSMTC media card. Even without album art the card is live and controls
+    // Spotify/browser/player sessions without opening another application.
+    RectF media_card(
+        static_cast<REAL>(x), static_cast<REAL>(y),
+        static_cast<REAL>(card_width), static_cast<REAL>(Scale(142, dpi)));
+    WebSkin::DrawElevatedPanel(
+        graphics, media_card, static_cast<REAL>(Scale(WebSkin::RadiusXL, dpi)),
+        WebSkin::GdiColor(WebSkin::BgSecondary, 232),
+        WebSkin::GdiColor(media.available ? WebSkin::AccentHover : WebSkin::BorderStrong, 155),
+        media.available && media.playing);
+    graphics.DrawString(L"Agora tocando", -1, &heading_font,
+        PointF(media_card.X + Scale(20, dpi), media_card.Y + Scale(14, dpi)), &primary);
+
+    const std::wstring media_title = media.available && !media.title.empty()
+        ? media.title : std::wstring(L"Nenhuma sessao de midia ativa");
+    const std::wstring media_subtitle = media.available
+        ? (!media.artist.empty() ? media.artist : media.source_app_id)
+        : std::wstring(L"Spotify, navegador e players via GSMTC");
+    graphics.DrawString(media_title.c_str(), -1, &text_font,
+        RectF(media_card.X + Scale(20, dpi), media_card.Y + Scale(42, dpi),
+            media_card.Width - Scale(40, dpi), static_cast<REAL>(Scale(24, dpi))),
+        nullptr, &primary);
+    graphics.DrawString(media_subtitle.c_str(), -1, &small_font,
+        RectF(media_card.X + Scale(20, dpi), media_card.Y + Scale(68, dpi),
+            media_card.Width - Scale(40, dpi), static_cast<REAL>(Scale(18, dpi))),
+        nullptr, &secondary);
+
+    const int button_w = Scale(46, dpi);
+    const int button_h = Scale(34, dpi);
+    const int button_gap = Scale(10, dpi);
+    const int controls_w = button_w * 3 + button_gap * 2;
+    const int controls_x = x + (card_width - controls_w) / 2;
+    const int controls_y = y + Scale(96, dpi);
+    g_media_previous_rect = RECT{controls_x, controls_y, controls_x + button_w, controls_y + button_h};
+    g_media_toggle_rect = RECT{controls_x + button_w + button_gap, controls_y,
+        controls_x + button_w * 2 + button_gap, controls_y + button_h};
+    g_media_next_rect = RECT{controls_x + (button_w + button_gap) * 2, controls_y,
+        controls_x + (button_w + button_gap) * 2 + button_w, controls_y + button_h};
+
+    auto draw_media_button = [&](const RECT& rect, const wchar_t* glyph, bool enabled, bool accent)
+    {
+        RectF panel(
+            static_cast<REAL>(rect.left), static_cast<REAL>(rect.top),
+            static_cast<REAL>(Width(rect)), static_cast<REAL>(Height(rect)));
+        WebSkin::DrawRoundedPanel(
+            graphics, panel, static_cast<REAL>(Scale(12, dpi)),
+            WebSkin::GdiColor(
+                accent ? WebSkin::Accent : WebSkin::BgTertiary,
+                enabled ? static_cast<BYTE>(245) : static_cast<BYTE>(130)),
+            WebSkin::GdiColor(accent ? WebSkin::AccentHover : WebSkin::BorderStrong, 180), 1.0f);
+        StringFormat format;
+        format.SetAlignment(StringAlignmentCenter);
+        format.SetLineAlignment(StringAlignmentCenter);
+        graphics.DrawString(glyph, -1, &text_font, panel, &format,
+            enabled ? &primary : &tertiary);
+    };
+    draw_media_button(g_media_previous_rect, L"◀", media.available && media.can_previous, false);
+    draw_media_button(g_media_toggle_rect, media.playing ? L"Ⅱ" : L"▶", media.available && media.can_toggle, true);
+    draw_media_button(g_media_next_rect, L"▶", media.available && media.can_next, false);
 }
 }
 
@@ -111,6 +329,7 @@ bool CloudOSNativeDesktopWindow::Create(HINSTANCE instance, CloudOSNativeWindowM
     window_manager_ = window_manager;
     quick_launch_app_indices_ = DesktopApps();
     current_stats_ = NativeSystemStats::Query();
+    NativeMediaControlV7::RefreshAsync();
 
     WNDCLASSEXW window_class{};
     window_class.cbSize = sizeof(window_class);
@@ -141,6 +360,9 @@ void CloudOSNativeDesktopWindow::Destroy()
     hwnd_ = nullptr;
     quick_launch_rects_.clear(); quick_launch_app_indices_.clear();
     g_file_rects.clear(); g_file_paths.clear();
+    g_media_previous_rect = {};
+    g_media_toggle_rect = {};
+    g_media_next_rect = {};
 }
 
 void CloudOSNativeDesktopWindow::UpdateLayout(const RECT& work_area)
@@ -184,8 +406,6 @@ void CloudOSNativeDesktopWindow::Paint()
             WebSkin::GdiColor(WebSkin::BgPrimary), WebSkin::GdiColor(WebSkin::BgSolid));
         graphics.FillRectangle(&background, RectF(0.0f, 0.0f, static_cast<REAL>(width), static_cast<REAL>(height)));
 
-        // Subtle ambient accents reproduce the web desktop without the huge
-        // opaque circle that dominated the previous fallback wallpaper.
         SolidBrush glow_top(Color(24, 99, 102, 241));
         graphics.FillEllipse(&glow_top,
             static_cast<REAL>(width - Scale(440, dpi)), static_cast<REAL>(-Scale(180, dpi)),
@@ -205,7 +425,8 @@ void CloudOSNativeDesktopWindow::Paint()
     SolidBrush white(WebSkin::GdiColor(WebSkin::TextPrimary));
     SolidBrush secondary(WebSkin::GdiColor(WebSkin::TextSecondary));
 
-    const POINT primary = PrimaryOriginInClient(hwnd_);
+    const RECT primary_bounds = PrimaryBoundsInClient(hwnd_);
+    const POINT primary{primary_bounds.left, primary_bounds.top};
     graphics.DrawString(L"CloudOS", -1, &brand_font,
         PointF(static_cast<REAL>(primary.x + Scale(24, dpi)), static_cast<REAL>(primary.y + Scale(20, dpi))), &white);
 
@@ -272,6 +493,10 @@ void CloudOSNativeDesktopWindow::Paint()
     graphics.DrawString(status.c_str(), -1, &small_bold,
         PointF(static_cast<REAL>(primary.x + Scale(24, dpi)), static_cast<REAL>(primary.y + Scale(74, dpi))), &secondary);
 
+    NativeMediaControlV7::RefreshAsync();
+    const NativeMediaSnapshot media = NativeMediaControlV7::Snapshot();
+    DrawDesktopWidgets(graphics, dpi, primary_bounds, current_stats_, media);
+
     BitBlt(screen_dc, 0, 0, width, height, memory_dc, 0, 0, SRCCOPY);
     SelectObject(memory_dc, old_bitmap); DeleteObject(bitmap); DeleteDC(memory_dc); EndPaint(hwnd_, &paint);
 }
@@ -297,6 +522,27 @@ LRESULT CloudOSNativeDesktopWindow::HandleMessage(HWND window, UINT message, WPA
     case WM_DPICHANGED:
     case WM_SETTINGCHANGE:
         RefreshWorkArea(); return 0;
+    case WM_LBUTTONUP:
+    {
+        const POINT point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
+        const NativeMediaSnapshot media = NativeMediaControlV7::Snapshot();
+        if (media.available && media.can_previous && Contains(g_media_previous_rect, point))
+        {
+            NativeMediaControlV7::PreviousAsync();
+            return 0;
+        }
+        if (media.available && media.can_toggle && Contains(g_media_toggle_rect, point))
+        {
+            NativeMediaControlV7::TogglePlayPauseAsync();
+            return 0;
+        }
+        if (media.available && media.can_next && Contains(g_media_next_rect, point))
+        {
+            NativeMediaControlV7::NextAsync();
+            return 0;
+        }
+        break;
+    }
     case WM_LBUTTONDBLCLK:
     {
         const POINT point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
