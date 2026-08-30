@@ -54,7 +54,10 @@ void CloudOSNativeWindowManager::MoveWindowToWorkspace(HWND window, int workspac
         {
             MarkWorkspaceHidden(window, false);
             item->hidden_by_workspace = false;
-            ShowWindow(window, SW_SHOWNOACTIVATE);
+            if (!IsIconic(window))
+            {
+                ShowWindow(window, SW_SHOWNOACTIVATE);
+            }
         }
         return;
     }
@@ -62,12 +65,9 @@ void CloudOSNativeWindowManager::MoveWindowToWorkspace(HWND window, int workspac
     item->workspace = workspace;
     if (workspace != current_workspace_)
     {
-        if (!IsIconic(window))
-        {
-            MarkWorkspaceHidden(window, true);
-            item->hidden_by_workspace = true;
-            ShowWindow(window, SW_HIDE);
-        }
+        MarkWorkspaceHidden(window, true);
+        item->hidden_by_workspace = true;
+        ShowWindow(window, SW_HIDE);
         if (active_window_ == window)
         {
             active_window_ = nullptr;
