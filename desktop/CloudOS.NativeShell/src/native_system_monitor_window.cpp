@@ -127,15 +127,11 @@ void DrawTextLine(HDC device, const std::wstring& text, RECT rectangle, int poin
 
 void DrawBar(HDC device, RECT rectangle, double percent, COLORREF color)
 {
-    HBRUSH track = CreateSolidBrush(CloudOS::WebSkin::BgTertiary);
-    HBRUSH fill = CreateSolidBrush(color);
-    RoundRect(device, rectangle.left, rectangle.top, rectangle.right, rectangle.bottom, 10, 10);
-    FillRect(device, &rectangle, track);
+    Fill(device, rectangle, CloudOS::WebSkin::BgTertiary);
     const LONG width = rectangle.right - rectangle.left;
-    rectangle.right = rectangle.left + static_cast<LONG>((static_cast<double>(width) * std::clamp(percent, 0.0, 100.0)) / 100.0);
-    if (rectangle.right > rectangle.left) FillRect(device, &rectangle, fill);
-    DeleteObject(track);
-    DeleteObject(fill);
+    rectangle.right = rectangle.left + static_cast<LONG>(
+        (static_cast<double>(width) * std::clamp(percent, 0.0, 100.0)) / 100.0);
+    if (rectangle.right > rectangle.left) Fill(device, rectangle, color);
 }
 
 void Paint(HWND window, const MonitorState& state)
@@ -188,7 +184,6 @@ void Paint(HWND window, const MonitorState& state)
         logical_cpus, state.process_count, uptime_seconds / 60ULL);
     RECT details_rect{system_card.left + 20, system_card.top + 48, system_card.right - 20, system_card.bottom - 14};
     DrawTextLine(device, details, details_rect, 11, FW_NORMAL, CloudOS::WebSkin::TextSecondary);
-
     EndPaint(window, &paint);
 }
 
@@ -204,8 +199,7 @@ LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM w_param, LPAR
     }
     switch (message)
     {
-    case WM_CREATE:
-        Refresh(*state); SetTimer(window, kRefreshTimer, 1000, nullptr); return 0;
+    case WM_CREATE: Refresh(*state); SetTimer(window, kRefreshTimer, 1000, nullptr); return 0;
     case WM_TIMER:
         if (w_param == kRefreshTimer) { Refresh(*state); InvalidateRect(window, nullptr, FALSE); }
         return 0;
