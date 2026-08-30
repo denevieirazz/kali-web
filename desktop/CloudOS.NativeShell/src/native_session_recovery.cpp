@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cwctype>
 #include <unordered_set>
 #include <utility>
 
@@ -73,21 +74,21 @@ bool ReadString(HANDLE file, std::uint32_t length, std::wstring* value)
         static_cast<DWORD>(length * sizeof(wchar_t)));
 }
 
-bool WriteString(HANDLE file, const std::wstring& value)
-{
-    if (value.empty())
-    {
-        return true;
-    }
-    return WriteExact(
-        file,
-        value.data(),
-        static_cast<DWORD>(value.size() * sizeof(wchar_t)));
-}
-
 bool EqualInsensitive(const std::wstring& left, const wchar_t* right)
 {
     return right != nullptr && _wcsicmp(left.c_str(), right) == 0;
+}
+
+void Lowercase(std::wstring& value)
+{
+    std::transform(
+        value.begin(),
+        value.end(),
+        value.begin(),
+        [](wchar_t ch)
+        {
+            return static_cast<wchar_t>(std::towlower(ch));
+        });
 }
 
 bool ContainsInsensitive(std::wstring value, const wchar_t* needle)
@@ -97,8 +98,8 @@ bool ContainsInsensitive(std::wstring value, const wchar_t* needle)
         return false;
     }
     std::wstring target(needle);
-    std::transform(value.begin(), value.end(), value.begin(), towlower);
-    std::transform(target.begin(), target.end(), target.begin(), towlower);
+    Lowercase(value);
+    Lowercase(target);
     return value.find(target) != std::wstring::npos;
 }
 }
@@ -148,9 +149,9 @@ bool NativeSessionRecovery::BeginSession()
         const DWORD process_id = GetCurrentProcessId();
         FILETIME now{};
         GetSystemTimeAsFileTime(&now);
-        (void)WriteExact(marker, &process_id, sizeof(process_id));
-        (void)WriteExact(marker, &now, sizeof(now));
-        FlushFileBuffers(marker);
+        (void)WriteExact(marker, &process_id, static_cast<DWORD>(sizeof(process_id)));
+        (void)WriteExact(marker, &now, static_cast<DWORD>(sizeof(now)));
+        (void)FlushFileBuffers(marker);
         CloseHandle(marker);
     }
 
@@ -186,7 +187,10 @@ std::wstring NativeSessionRecovery::AppIdFor(
     if (EqualInsensitive(class_name, L"CloudOS.Native.Run.v2")) return L"run";
     if (EqualInsensitive(class_name, L"CloudOS.Native.EnvDoctor.v1")) return L"health";
     if (EqualInsensitive(class_name, L"CloudOS.NativeShell.CommandCenter.v1")) return L"control";
-    if (EqualInsensitive(class_name, L"CloudOS.Native.FileOperations.v1")) return L"fileops";
+    // File-operation windows are deliberately transient: automatically
+    // replaying a copy/move/archive operation after a crash could duplicate or
+    // damage user data, so they are excluded from relaunch recovery.
+    if (EqualInsensitive(class_name, L"CloudOS.Native.FileOperations.v1")) return {};
     if (EqualInsensitive(class_name, L"CloudOS.Native.Terminal.v2"))
     {
         if (ContainsInsensitive(title, L"powershell")) return L"powershell";
@@ -302,7 +306,7 @@ void NativeSessionRecovery::ApplyPending(CloudOSNativeWindowManager& window_mana
 
             const std::wstring class_name = ClassName(item.hwnd);
             const std::wstring app_id = AppIdFor(item.hwnd, class_name, item.title);
-            if (_wcsicmp(app_id.c_str(), pending.app_id.c_str()) != 0)
+            if (app_id.empty() || _wcsicmp(app_id.c_str(), pending.app_id.c_str()) != 0)
             {
                 continue;
             }
@@ -372,8 +376,11 @@ void NativeSessionRecovery::Save(const CloudOSNativeWindowManager& window_manage
         record.workspace = item.workspace;
         record.floating = item.floating;
         record.app_id = AppIdFor(item.hwnd, record.class_name, record.title);
+
         if (record.process_id == GetCurrentProcessId() && record.app_id.empty())
         {
+            // Do not persist transient/unrecognized CloudOS HWNDs. External
+            // Windows processes can still be preserved below by PID/class.
             continue;
         }
         if (!GetWindowRect(item.hwnd, &record.bounds))
@@ -425,7 +432,7 @@ bool NativeSessionRecovery::Load()
     }
 
     FileHeader header{};
-    if (!ReadExact(file, &header, sizeof(header)) ||
+    if (!ReadExact(file, &header, static_cast<DWORD>(sizeof(header))) ||
         header.magic != kMagic || header.version != kVersion || header.count > kMaximumRecords)
     {
         CloseHandle(file);
@@ -436,7 +443,7 @@ bool NativeSessionRecovery::Load()
     for (std::uint32_t index = 0; index < header.count; ++index)
     {
         FileRecord disk{};
-        if (!ReadExact(file, &disk, sizeof(disk)) ||
+        if (!ReadExact(file, &disk, static_cast<DWORD>(sizeof(disk))) ||
             disk.class_length > kMaximumString ||
             disk.title_length > kMaximumString ||
             disk.app_id_length > 128u)
@@ -490,14 +497,21 @@ bool NativeSessionRecovery::Write(const std::vector<Record>& records) const
         return false;
     }
 
-    FileHeader header{kMagic, kVersion, static_cast<std::uint32_t>(std::min<std::size_t>(records.size(), kMaximumRecords))};
-    bool success = WriteExact(file, &header, sizeof(header));
+    FileHeader header{
+        kMagic,
+        kVersion,
+        static_cast<std::uint32_t>(
+            std::min<std::size_t>(records.size(), kMaximumRecords))};
+    bool success = WriteExact(file, &header, static_cast<DWORD>(sizeof(header)));
     for (std::uint32_t index = 0; success && index < header.count; ++index)
     {
         const Record& record = records[index];
-        const std::uint32_t class_length = static_cast<std::uint32_t>(std::min<std::size_t>(record.class_name.size(), kMaximumString));
-        const std::uint32_t title_length = static_cast<std::uint32_t>(std::min<std::size_t>(record.title.size(), kMaximumString));
-        const std::uint32_t app_length = static_cast<std::uint32_t>(std::min<std::size_t>(record.app_id.size(), 128u));
+        const std::uint32_t class_length = static_cast<std::uint32_t>(
+            std::min<std::size_t>(record.class_name.size(), kMaximumString));
+        const std::uint32_t title_length = static_cast<std::uint32_t>(
+            std::min<std::size_t>(record.title.size(), kMaximumString));
+        const std::uint32_t app_length = static_cast<std::uint32_t>(
+            std::min<std::size_t>(record.app_id.size(), 128u));
         FileRecord disk{
             class_length,
             title_length,
@@ -511,24 +525,33 @@ bool NativeSessionRecovery::Write(const std::vector<Record>& records) const
             record.bounds.bottom,
             record.show_command};
 
-        success = WriteExact(file, &disk, sizeof(disk));
+        success = WriteExact(file, &disk, static_cast<DWORD>(sizeof(disk)));
         if (success && class_length > 0)
         {
-            success = WriteExact(file, record.class_name.data(), class_length * sizeof(wchar_t));
+            success = WriteExact(
+                file,
+                record.class_name.data(),
+                static_cast<DWORD>(class_length * sizeof(wchar_t)));
         }
         if (success && title_length > 0)
         {
-            success = WriteExact(file, record.title.data(), title_length * sizeof(wchar_t));
+            success = WriteExact(
+                file,
+                record.title.data(),
+                static_cast<DWORD>(title_length * sizeof(wchar_t)));
         }
         if (success && app_length > 0)
         {
-            success = WriteExact(file, record.app_id.data(), app_length * sizeof(wchar_t));
+            success = WriteExact(
+                file,
+                record.app_id.data(),
+                static_cast<DWORD>(app_length * sizeof(wchar_t)));
         }
     }
 
     if (success)
     {
-        FlushFileBuffers(file);
+        (void)FlushFileBuffers(file);
     }
     CloseHandle(file);
 
@@ -537,7 +560,7 @@ bool NativeSessionRecovery::Write(const std::vector<Record>& records) const
             state_path_.c_str(),
             MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
     {
-        DeleteFileW(temporary.c_str());
+        (void)DeleteFileW(temporary.c_str());
         return false;
     }
     return true;
