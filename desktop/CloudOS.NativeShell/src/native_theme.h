@@ -325,9 +325,10 @@ struct AppItem final
     int icon_id;
 };
 
-inline constexpr std::array<AppItem, 21> kAllApps{{
+inline constexpr std::array<AppItem, 22> kAllApps{{
     {L"browser", L"Navegador", L"Navegador Win32 in-process do CloudOS com WebView2", L"", AppCategory::Accessories, 1},
     {L"control", L"Central de Comandos", L"Mais de 100 acoes do CloudOS e do Windows em uma central pesquisavel", L"", AppCategory::System, 16},
+    {L"workspaces", L"Visão de Trabalho", L"Gerenciar as 4 áreas, janelas, tiling e previews DWM", L"", AppCategory::System, 19},
     {L"projects", L"Projetos", L"Projetos persistentes no CloudOS Drive", L"", AppCategory::Dev, 2},
     {L"wsl", L"WSL / Kali", L"Terminal Linux pela distribuicao WSL configurada", L"wsl.exe", AppCategory::Dev, 4},
     {L"terminal", L"Terminal", L"Terminal nativo via ConPTY", L"cmd.exe", AppCategory::Dev, 3},
