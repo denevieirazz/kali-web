@@ -33,36 +33,14 @@ jobs:
             }
           }
 
-      - name: Validate native shell, WebSkin and productivity contracts
-        shell: pwsh
-        run: |
-          ./scripts/native/test-cloudos-native-shell-contracts.ps1
-          ./scripts/native/test-native-web-ui-contract.ps1
-          ./scripts/native/test-taskbar-productivity-contract.ps1
-
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Restore native WebView2 SDK for Browser
-        shell: pwsh
-        run: |
-          $packages = Join-Path $PWD 'desktop\CloudOS.NativeShell\packages'
-          msbuild 'desktop/CloudOS.NativeShell/CloudOS.NativeShell.vcxproj' /t:Restore /nologo /v:minimal /p:RestorePackagesConfig=true /p:RestoreProjectStyle=PackagesConfig "/p:RestoreRepositoryPath=$packages"
-          if ($LASTEXITCODE -ne 0) { throw "WebView2 package restore failed with $LASTEXITCODE" }
+      - name: Validate and build through the developer entrypoint
+        shell: cmd
+        run: scripts\native\build-cloudos-native.cmd Release
 
-      - name: Build native runtime Release x64
-        shell: pwsh
-        run: |
-          msbuild 'desktop/CloudOS.NativeRuntime/CloudOS.NativeRuntime.vcxproj' /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
-          if ($LASTEXITCODE -ne 0) { throw "Native runtime build failed with $LASTEXITCODE" }
-
-      - name: Build native shell Release x64
-        shell: pwsh
-        run: |
-          msbuild 'desktop/CloudOS.NativeShell/CloudOS.NativeShell.vcxproj' /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
-          if ($LASTEXITCODE -ne 0) { throw "Native shell build failed with $LASTEXITCODE" }
-
-      - name: Verify native binaries
+      - name: Verify native binaries and compiled graph
         shell: pwsh
         run: |
           $out = 'desktop/CloudOS.NativeShell/bin/Release'
@@ -75,5 +53,12 @@ jobs:
           $project = Get-Content -LiteralPath 'desktop/CloudOS.NativeShell/CloudOS.NativeShell.vcxproj' -Raw
           if ($project.Contains('<ClCompile Include="src\native_web_desktop_window.cpp"') -or
               $project.Contains('<ClCompile Include="src\native_webview_host.cpp"')) {
-            throw 'Legacy web desktop returned to the compiled Shell V3 graph.'
+            throw 'Legacy web desktop returned to the compiled native shell graph.'
+          }
+
+          $build = Get-Content -LiteralPath 'scripts/native/build-cloudos-native.cmd' -Raw
+          foreach ($forbidden in @('node.exe', 'npm.cmd', 'frontend\dist', 'WEB_UI=')) {
+            if ($build.Contains($forbidden)) {
+              throw "Native developer build regressed to obsolete web desktop asset build: $forbidden"
+            }
           }
