@@ -119,6 +119,7 @@ function Test-CloudOSHeartbeatFreshV9 {
     )
 
     $now = [uint64][Environment]::TickCount64
-    if ($Snapshot.heartbeat_tick_ms -gt $now) { return $false }
-    return (($now - [uint64]$Snapshot.heartbeat_tick_ms) -le ([uint64]$MaximumAgeSeconds * 1000uL))
+    if ([uint64]$Snapshot.heartbeat_tick_ms -gt $now) { return $false }
+    $maximumAgeMilliseconds = [uint64]$MaximumAgeSeconds * [uint64]1000
+    return (($now - [uint64]$Snapshot.heartbeat_tick_ms) -le $maximumAgeMilliseconds)
 }
