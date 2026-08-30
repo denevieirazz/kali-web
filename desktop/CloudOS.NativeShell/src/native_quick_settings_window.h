@@ -2,6 +2,11 @@
 
 #include <windows.h>
 
+#include <string>
+#include <vector>
+
+#include "native_system_control_backend.h"
+
 namespace CloudOS
 {
 class CloudOSNativeQuickSettingsWindow final
@@ -19,29 +24,47 @@ public:
 
 private:
     void Layout();
-    void UpdateState();
+    void UpdateState(bool force_wifi = false);
     void ApplyVolumeFromSlider();
+    void ApplyBrightnessFromSlider();
     void ToggleMute();
+    void HandleWifiAction();
+    void ApplyPowerPlan(int plan);
+    void CycleAccent();
+    void OpenSystemCenter();
+    int SelectedWifiIndex() const noexcept;
+    void ShowOperationResult(
+        const std::wstring& title,
+        bool success,
+        const std::wstring& error = {});
     LRESULT HandleMessage(HWND window, UINT message, WPARAM w_param, LPARAM l_param);
     static LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM w_param, LPARAM l_param);
 
     HINSTANCE instance_{};
     HWND window_{};
     HWND title_{};
+    HWND subtitle_{};
     HWND volume_label_{};
     HWND volume_slider_{};
     HWND mute_button_{};
-    HWND power_label_{};
-    HWND monitor_label_{};
-    HWND wifi_button_{};
+    HWND wifi_label_{};
+    HWND wifi_combo_{};
+    HWND wifi_action_button_{};
     HWND bluetooth_button_{};
-    HWND network_button_{};
-    HWND display_button_{};
-    HWND sound_button_{};
-    HWND power_button_{};
+    HWND brightness_label_{};
+    HWND brightness_slider_{};
+    HWND power_label_{};
+    HWND balanced_button_{};
+    HWND saver_button_{};
+    HWND performance_button_{};
+    HWND system_center_button_{};
+    HWND appearance_button_{};
     HFONT font_{};
+    HFONT small_font_{};
     HFONT title_font_{};
     HBRUSH background_{};
     bool updating_slider_{};
+    unsigned wifi_refresh_tick_{};
+    std::vector<NativeWifiNetwork> wifi_networks_;
 };
 } // namespace CloudOS
