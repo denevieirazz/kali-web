@@ -46,6 +46,28 @@ jobs:
         shell: cmd
         run: scripts\native\build-cloudos-native.cmd Release
 
+      - name: Smoke Stability/Readiness V9
+        shell: pwsh
+        run: |
+          $artifactDir = 'desktop/CloudOS.NativeShell/artifacts'
+          New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+          $report = Join-Path $artifactDir 'stability-v9-smoke.json'
+          ./scripts/native/run-native-soak-v9.ps1 `
+            -Launch `
+            -DurationSeconds 20 `
+            -StartupTimeoutSeconds 30 `
+            -HeartbeatTimeoutSeconds 5 `
+            -MaxWorkingSetGrowthMB 256 `
+            -MaxPrivateGrowthMB 256 `
+            -MaxHandleGrowth 512 `
+            -MaxGdiGrowth 256 `
+            -MaxUserGrowth 256 `
+            -MaxThreadGrowth 64 `
+            -OutputPath $report
+          if (-not (Test-Path -LiteralPath $report)) { throw 'Stability V9 smoke report missing.' }
+          $result = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
+          if ($result.verdict -ne 'pass') { throw 'Stability V9 smoke verdict was not pass.' }
+
       - name: Verify native release provenance and compiled graph
         shell: pwsh
         run: |
@@ -92,6 +114,7 @@ jobs:
           retention-days: 14
           path: |
             desktop/CloudOS.NativeShell/artifacts/CloudOS-Native-Release-x64.zip
+            desktop/CloudOS.NativeShell/artifacts/stability-v9-smoke.json
             desktop/CloudOS.NativeShell/bin/Release/cloudos-native-manifest.json
             desktop/CloudOS.NativeShell/bin/Release/.cloudos-build-head
             desktop/CloudOS.NativeShell/bin/Release/.cloudos-build-fingerprint
