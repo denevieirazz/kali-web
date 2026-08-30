@@ -2,6 +2,7 @@
 setlocal EnableExtensions
 
 set "ROOT=%~dp0..\.."
+for %%I in ("%ROOT%") do set "ROOT=%%~fI"
 set "CONFIG=Release"
 set "PLATFORM=x64"
 if /I "%~1"=="Debug" set "CONFIG=Debug"
@@ -35,10 +36,17 @@ pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-native-web-ui-cont
 if errorlevel 1 exit /b %ERRORLEVEL%
 pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-taskbar-productivity-contract.ps1"
 if errorlevel 1 exit /b %ERRORLEVEL%
-
-echo [CloudOS] Restaurando SDK Microsoft.Web.WebView2 somente para o Navegador...
-"%MSBUILD%" "%ROOT%\desktop\CloudOS.NativeShell\CloudOS.NativeShell.vcxproj" /t:Restore /nologo /v:minimal /p:RestorePackagesConfig=true /p:RestoreProjectStyle=PackagesConfig /p:RestoreRepositoryPath="%ROOT%\desktop\CloudOS.NativeShell\packages"
+pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-native-release-pipeline-contract.ps1"
 if errorlevel 1 exit /b %ERRORLEVEL%
+
+set "WEBVIEW_TARGET=%ROOT%\desktop\CloudOS.NativeShell\packages\Microsoft.Web.WebView2.1.0.4078.44\build\native\Microsoft.Web.WebView2.targets"
+if exist "%WEBVIEW_TARGET%" (
+  echo [CloudOS] SDK Microsoft.Web.WebView2 ja restaurado; reutilizando cache local.
+) else (
+  echo [CloudOS] Restaurando SDK Microsoft.Web.WebView2 somente para o Navegador...
+  "%MSBUILD%" "%ROOT%\desktop\CloudOS.NativeShell\CloudOS.NativeShell.vcxproj" /t:Restore /nologo /v:minimal /p:RestorePackagesConfig=true /p:RestoreProjectStyle=PackagesConfig /p:RestoreRepositoryPath="%ROOT%\desktop\CloudOS.NativeShell\packages"
+  if errorlevel 1 exit /b %ERRORLEVEL%
+)
 
 echo [CloudOS] Compilando runtime C++ %CONFIG% x64...
 "%MSBUILD%" "%ROOT%\desktop\CloudOS.NativeRuntime\CloudOS.NativeRuntime.vcxproj" /m /nologo /v:minimal /p:Configuration=%CONFIG% /p:Platform=%PLATFORM%
@@ -49,6 +57,8 @@ echo [CloudOS] Compilando shell C++/Win32 %CONFIG% x64...
 if errorlevel 1 exit /b %ERRORLEVEL%
 
 set "OUT=%ROOT%\desktop\CloudOS.NativeShell\bin\%CONFIG%"
+set "MANIFEST=%OUT%\cloudos-native-manifest.json"
+set "FINGERPRINT_STAMP=%OUT%\.cloudos-build-fingerprint"
 if not exist "%OUT%\CloudOS.exe" (
   echo [CloudOS] ERRO: CloudOS.exe nao foi produzido.
   exit /b 5
@@ -76,22 +86,35 @@ if exist "%OUT%\ui" (
   rmdir /s /q "%OUT%\ui" >nul 2>&1
 )
 
-rem Marca exatamente qual revisao Git gerou estes binarios. O launcher usa isso
-rem para nunca iniciar silenciosamente um CloudOS.exe antigo depois de git pull.
+rem Gera proveniencia reproduzivel: commit quando disponivel, fingerprint deterministico
+rem das fontes e SHA256/tamanho dos dois binarios autoritativos.
+echo [CloudOS] Gerando manifesto de proveniencia e integridade...
+pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\write-native-build-manifest.ps1" -Root "%ROOT%" -Configuration "%CONFIG%"
+if errorlevel 1 exit /b %ERRORLEVEL%
+
+if not exist "%MANIFEST%" (
+  echo [CloudOS] ERRO: manifesto nativo nao foi produzido.
+  exit /b 13
+)
+if not exist "%FINGERPRINT_STAMP%" (
+  echo [CloudOS] ERRO: fingerprint da fonte nao foi produzido.
+  exit /b 14
+)
+
+echo [CloudOS] Verificando hashes e proveniencia do build...
+pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\verify-native-build-manifest.ps1" -Root "%ROOT%" -Configuration "%CONFIG%" -CheckSourceFingerprint
+if errorlevel 1 exit /b %ERRORLEVEL%
+
+set "SOURCE_FINGERPRINT="
+set /p SOURCE_FINGERPRINT=<"%FINGERPRINT_STAMP%"
 set "BUILD_HEAD="
-where git.exe >nul 2>nul
-if not errorlevel 1 (
-  for /f "usebackq tokens=*" %%H in (`git.exe -C "%ROOT%" rev-parse HEAD 2^>nul`) do set "BUILD_HEAD=%%H"
-)
-if defined BUILD_HEAD (
-  >"%OUT%\.cloudos-build-head" echo %BUILD_HEAD%
-) else (
-  if exist "%OUT%\.cloudos-build-head" del /q "%OUT%\.cloudos-build-head" >nul 2>&1
-)
+if exist "%OUT%\.cloudos-build-head" set /p BUILD_HEAD=<"%OUT%\.cloudos-build-head"
 
 echo.
 echo [CloudOS] BUILD_OK=%OUT%\CloudOS.exe
 echo [CloudOS] RUNTIME=%OUT%\CloudOS.NativeRuntime.dll
+echo [CloudOS] MANIFEST=%MANIFEST%
+if defined SOURCE_FINGERPRINT echo [CloudOS] SOURCE_FINGERPRINT=%SOURCE_FINGERPRINT%
 if defined BUILD_HEAD echo [CloudOS] BUILD_HEAD=%BUILD_HEAD%
 echo [CloudOS] SHELL_UI=C++/Win32 nativo
 echo [CloudOS] WEBVIEW2=usado somente pelo Navegador CloudOS
