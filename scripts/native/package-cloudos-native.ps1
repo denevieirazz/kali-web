@@ -15,11 +15,11 @@ $verify = Join-Path $PSScriptRoot 'verify-native-build-manifest.ps1'
 
 & $verify -Root $rootPath -Configuration $Configuration -CheckSourceFingerprint
 
+New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
 if (Test-Path -LiteralPath $stage) {
     Remove-Item -LiteralPath $stage -Recurse -Force
 }
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
-New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
 
 $payload = @(
     'CloudOS.exe',
@@ -36,10 +36,18 @@ foreach ($name in $payload) {
     }
 }
 
-$manifest = Get-Content -LiteralPath (Join-Path $stage 'cloudos-native-manifest.json') -Raw | ConvertFrom-Json
+$manifestPath = Join-Path $stage 'cloudos-native-manifest.json'
+if (-not (Test-Path -LiteralPath $manifestPath)) {
+    throw "Staged native manifest missing: $manifestPath"
+}
+$manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+
 $sumLines = New-Object System.Collections.Generic.List[string]
 foreach ($file in @('CloudOS.exe', 'CloudOS.NativeRuntime.dll')) {
     $path = Join-Path $stage $file
+    if (-not (Test-Path -LiteralPath $path)) {
+        throw "Staged native payload missing: $path"
+    }
     $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
     $sumLines.Add("$hash  $file")
 }
@@ -89,7 +97,11 @@ Set-Content -LiteralPath (Join-Path $stage 'LEIA-ME.txt') -Value $readme -Encodi
 if (Test-Path -LiteralPath $zip) {
     Remove-Item -LiteralPath $zip -Force
 }
-Compress-Archive -LiteralPath (Join-Path $stage '*') -DestinationPath $zip -CompressionLevel Optimal
+Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -CompressionLevel Optimal
+
+if (-not (Test-Path -LiteralPath $zip) -or (Get-Item -LiteralPath $zip).Length -le 0) {
+    throw "Portable CloudOS archive was not produced correctly: $zip"
+}
 
 $zipHash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
 Write-Host "[CloudOS] PACKAGE=$zip"
