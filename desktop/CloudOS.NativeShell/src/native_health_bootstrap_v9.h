@@ -18,7 +18,9 @@ constexpr UINT_PTR HealthTimerId = 0xC509;
 constexpr UINT_PTR HealthSubclassId = 0xC509A11;
 constexpr UINT HealthIntervalMilliseconds = 1000;
 constexpr wchar_t WatchdogArgument[] = L"--watchdog";
-constexpr wchar_t DesktopClass[] = L"CloudOS.NativeShell.CloudOSDesktop.v20";
+// native_desktop_window_v2.cpp is the implementation compiled by the current
+// NativeShell project. Keep readiness bound to that authoritative HWND class.
+constexpr wchar_t DesktopClass[] = L"CloudOS.NativeShell.Desktop.v2";
 constexpr wchar_t TaskbarClass[] = L"CloudOS.NativeShell.Taskbar.v4";
 constexpr wchar_t StartClass[] = L"CloudOS.NativeShell.Start.v4";
 constexpr wchar_t QuickSettingsClass[] = L"CloudOS.NativeShell.QuickSettings.v4";
