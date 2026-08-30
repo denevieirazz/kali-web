@@ -7,6 +7,8 @@ $paths = @{
     Taskbar = Join-Path $src 'native_taskbar_appbar_v4.cpp'
     Hover = Join-Path $src 'native_taskbar_hover_preview.cpp'
     Pins = Join-Path $src 'native_shell_pins.cpp'
+    Start = Join-Path $src 'native_start_menu_window.cpp'
+    StartHeader = Join-Path $src 'native_start_menu_window.h'
     Mru = Join-Path $src 'native_start_menu_mru.h'
     Launcher = Join-Path $src 'native_app_launcher_v3.cpp'
     NativeBuild = Join-Path $root 'scripts\native\build-cloudos-native.cmd'
@@ -86,9 +88,47 @@ Require 'Smart Start recommendations' $content.Mru @(
     'kRecencyWeightPerDay',
     'kFrequencyWeight',
     'ReadUsageFile',
+    'void Clear()',
+    'usage_map_.clear()',
     'L".bak"',
     'CopyFileW',
     'MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH'
+)
+
+Require 'Keyboard-first Start Home header contract' $content.StartHeader @(
+    'MoveHomeSelection',
+    'SelectHomeEdge',
+    'ActivateHomeSelection',
+    'ShowHomeSelectionContextMenu',
+    'keyboard_home_navigation_'
+)
+
+Require 'Keyboard-first Start Home implementation' $content.Start @(
+    'MoveHomeSelection(int horizontal, int vertical)',
+    'SelectHomeEdge(bool last)',
+    'ActivateHomeSelection()',
+    'ShowHomeSelectionContextMenu()',
+    'keyboard_home_navigation_',
+    'VK_LEFT',
+    'VK_RIGHT',
+    'VK_UP',
+    'VK_DOWN',
+    'VK_HOME',
+    'VK_END',
+    'VK_RETURN',
+    'VK_SPACE',
+    'VK_APPS',
+    'VK_F10',
+    'WM_CHAR',
+    'GetKeyState(VK_SHIFT)',
+    'GetKeyState(VK_CONTROL)',
+    'L"Setas navegam  ·  Enter abre  ·  Shift+F10 menu',
+    'L"Redefinir recomendacoes"',
+    'StartMenuMRUTracker::Instance().Clear()',
+    'WebSkin::Accent'
+)
+Forbid 'Keyboard-first Start Home implementation' $content.Start @(
+    'self->view_mode_ = ViewMode::AllApps;\n                self->RefreshResults();\n            }\n            self->MoveSelection(1)'
 )
 
 Require 'Expanded hierarchical quick-access hub' $content.Launcher @(
@@ -153,4 +193,4 @@ if ($buildLabel -lt 0 -or $killBeforeBuild -lt 0 -or $buildCall -lt 0 -or $killB
     throw 'Native launcher must stop CloudOS.exe before invoking an automatic rebuild.'
 }
 
-Write-Host 'PASS: Taskbar V4 live geometry, power-user mouse controls, rich DWM preview, self-healing pins, smart Start recommendations, expanded quick-access hub and fingerprint-verified rebuilds are protected.'
+Write-Host 'PASS: Taskbar V4 productivity, keyboard-first Start Home, resettable smart recommendations, expanded quick-access hub and fingerprint-verified rebuilds are protected.'
