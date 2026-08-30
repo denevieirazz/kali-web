@@ -11,7 +11,6 @@
 #include <vector>
 
 #pragma comment(lib, "ole32.lib")
-#pragma comment(lib, "oledb32.lib")
 #pragma comment(lib, "SearchSDK.lib")
 #pragma comment(lib, "uuid.lib")
 
@@ -72,6 +71,9 @@ public:
             return results;
         }
 
+        // IDataInitialize and the OLE DB interfaces are COM contracts. They are
+        // activated through CoCreateInstance; no oledb32 import library is
+        // required (and current Windows SDK runners do not ship oledb32.lib).
         IDataInitialize* data_initialize = nullptr;
         hr = CoCreateInstance(
             CLSID_MSDAINITIALIZE,
