@@ -132,7 +132,7 @@ bool CloudOSNativeQuickSettingsWindow::Create(HINSTANCE instance)
     media_label_ = CreateWindowW(L"STATIC", L"Midia · procurando sessao ativa", WS_CHILD | WS_VISIBLE | SS_LEFT,
         0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     media_meta_ = CreateWindowW(L"STATIC", L"Spotify, navegadores e players via GSMTC",
-        WS_CHILD | WS_VISIBLE | SS_LEFT | SS_END_ELLIPSIS, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+        WS_CHILD | WS_VISIBLE | SS_LEFT | SS_ENDELLIPSIS, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     media_previous_button_ = CreateWindowW(L"BUTTON", L"⏮", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kMediaPreviousId)), instance_, nullptr);
     media_toggle_button_ = CreateWindowW(L"BUTTON", L"Reproduzir", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
