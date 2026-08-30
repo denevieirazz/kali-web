@@ -21,23 +21,20 @@ foreach ($entry in $paths.GetEnumerator()) {
         throw "Native release pipeline contract path missing [$($entry.Key)]: $($entry.Value)"
     }
 }
-
 $content = @{}
-foreach ($entry in $paths.GetEnumerator()) {
-    $content[$entry.Key] = Get-Content -LiteralPath $entry.Value -Raw
-}
+foreach ($entry in $paths.GetEnumerator()) { $content[$entry.Key] = Get-Content -LiteralPath $entry.Value -Raw }
 
 function Require([string]$Name, [string]$Text, [string[]]$Tokens) {
     foreach ($token in $Tokens) {
-        if (-not $Text.Contains($token)) {
-            throw "$Name contract missing: $token"
-        }
+        if (-not $Text.Contains($token)) { throw "$Name contract missing: $token" }
     }
 }
 
 Require 'Deterministic native fingerprint' $content.Fingerprint @(
+    'desktop\CloudOS.NativeCommon',
     'desktop\CloudOS.NativeRuntime',
     'desktop\CloudOS.NativeShell',
+    'desktop\CloudOS.NativeRecovery',
     'scripts\native',
     "'bin', 'obj', 'packages', '.vs'",
     'Get-FileHash',
@@ -50,14 +47,17 @@ Require 'Native provenance manifest writer' $content.Writer @(
     '.cloudos-build-head',
     '.cloudos-build-fingerprint',
     "shell_authority = 'C++/Win32'",
+    "recovery_authority = 'CloudOS.Supervisor.exe V11'",
     "legacy_react_desktop = `$false",
     'source_fingerprint_sha256',
     'CloudOS.exe',
     'CloudOS.NativeRuntime.dll',
+    'CloudOS.Supervisor.exe',
     'Get-FileHash'
 )
 
 Require 'Native integrity verifier' $content.Verifier @(
+    'CloudOS.Supervisor.exe',
     'Native binary SHA256 mismatch',
     'Native binary size mismatch',
     'Obsolete web-desktop output',
@@ -67,11 +67,14 @@ Require 'Native integrity verifier' $content.Verifier @(
 
 Require 'Portable native self-verifying packager' $content.Packager @(
     'CloudOS-Native-Release-x64.zip',
+    'CloudOS.Supervisor.exe',
     'verify-native-build-manifest.ps1',
     'SHA256SUMS.txt',
     'Verificar Integridade.ps1',
     'Verificar Integridade.cmd',
     'Iniciar CloudOS.cmd',
+    'Recuperacao CloudOS.cmd',
+    '--recovery-ui',
     'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass',
     'Integridade do pacote FALHOU',
     'INTEGRITY_OK',
@@ -87,12 +90,15 @@ Require 'Native build status diagnostics' $content.Status @(
     'built_source_fingerprint',
     'source_matches_build',
     'integrity_ok',
+    'supervisor_exists',
     'ready_to_run',
     '--force-rebuild'
 )
 
 Require 'Native build entrypoint provenance' $content.Build @(
     'test-native-release-pipeline-contract.ps1',
+    'CloudOS.NativeRecovery\CloudOS.NativeRecovery.vcxproj',
+    'CloudOS.Supervisor.exe',
     'write-native-build-manifest.ps1',
     'verify-native-build-manifest.ps1',
     'cloudos-native-manifest.json',
@@ -108,33 +114,19 @@ Require 'Native launcher integrity gate' $content.Start @(
     '--force-rebuild',
     '--no-build',
     'tasklist /FI "IMAGENAME eq CloudOS.exe"',
-    'encerre a instancia aberta normalmente'
+    'encerre a instancia aberta normalmente',
+    'CloudOS.Supervisor.exe',
+    'Shell Supervisor V11'
 )
 
 if ($content.Start -match '(?i)taskkill\s+/F' -or $content.Packager -match '(?i)taskkill\s+/F') {
     throw 'Launchers must not force-close user sessions.'
 }
 
-Require 'Root start shortcut forwards flags' $content.RootStart @(
-    'start-cloudos-native.cmd',
-    '%*'
-)
-Require 'Root verified build shortcut' $content.RootBuild @(
-    'build-cloudos-native.cmd',
-    'Release',
-    'BUILD OK'
-)
-Require 'Root build verification shortcut' $content.RootVerify @(
-    'get-native-build-status.ps1',
-    '--force-rebuild',
-    'Build pronto para executar'
-)
-Require 'Root portable package shortcut' $content.RootPackage @(
-    'get-native-build-status.ps1',
-    'build-cloudos-native.cmd',
-    'package-cloudos-native.ps1',
-    'CloudOS-Native-Release-x64.zip'
-)
+Require 'Root start shortcut forwards flags' $content.RootStart @('start-cloudos-native.cmd', '%*')
+Require 'Root verified build shortcut' $content.RootBuild @('build-cloudos-native.cmd', 'Release', 'BUILD OK')
+Require 'Root build verification shortcut' $content.RootVerify @('get-native-build-status.ps1', '--force-rebuild', 'Build pronto para executar')
+Require 'Root portable package shortcut' $content.RootPackage @('get-native-build-status.ps1', 'build-cloudos-native.cmd', 'package-cloudos-native.ps1', 'CloudOS-Native-Release-x64.zip')
 
 Require 'CI release artifact and dependency cache' $content.Workflow @(
     'actions/cache@v4',
@@ -142,11 +134,13 @@ Require 'CI release artifact and dependency cache' $content.Workflow @(
     'desktop/CloudOS.NativeShell/packages/Microsoft.Web.WebView2.1.0.4078.44',
     'cloudos-webview2-1.0.4078.44-windows-v1',
     'build-cloudos-native.cmd',
+    'run-native-supervisor-smoke-v11.ps1',
     'verify-native-build-manifest.ps1',
     'package-cloudos-native.ps1',
+    'CloudOS.Supervisor.exe',
     'CloudOS-Native-Release-x64.zip',
     'actions/upload-artifact@v4',
     'cloudos-native-manifest.json'
 )
 
-Write-Host 'PASS: deterministic fingerprint, binary integrity, self-verifying portable package, root workflow shortcuts, WebView2 CI cache and verified release artifact contracts are protected.'
+Write-Host 'PASS: deterministic fingerprint, three-binary integrity, Supervisor V11 launch authority, self-verifying portable package, root workflow shortcuts, WebView2 CI cache and verified release artifact contracts are protected.'
