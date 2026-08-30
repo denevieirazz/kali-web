@@ -11,6 +11,8 @@ $paths = @{
     HoverPreview = Join-Path $src 'native_taskbar_hover_preview.cpp'
     Start = Join-Path $src 'native_start_menu_window.cpp'
     StartIndex = Join-Path $src 'native_start_index.cpp'
+    ShellPins = Join-Path $src 'native_shell_pins.cpp'
+    ShellPinsHeader = Join-Path $src 'native_shell_pins.h'
     Theme = Join-Path $src 'native_theme.h'
     Switcher = Join-Path $src 'native_task_switcher_window.cpp'
     Quick = Join-Path $src 'native_quick_settings_window.cpp'
@@ -35,7 +37,6 @@ $paths = @{
     Launcher = Join-Path $src 'native_app_launcher_v3.cpp'
     Browser = Join-Path $src 'native_browser_window.cpp'
     Actions = Join-Path $src 'native_shell_actions.cpp'
-    ShellView = Join-Path $src 'native_shell_view_host.cpp'
     ResearchV2 = Join-Path $repoRoot 'docs\native\research\DESKTOP_INFRASTRUCTURE_V2_RESEARCH.md'
     ResearchV3 = Join-Path $repoRoot 'docs\native\research\SHELL_V3_PRODUCTIVITY_RECOVERY_RESEARCH.md'
     FeaturesV3 = Join-Path $repoRoot 'docs\native\SHELL_V3_FEATURES.md'
@@ -44,7 +45,7 @@ $paths = @{
 
 foreach ($entry in $paths.GetEnumerator()) {
     if (-not (Test-Path -LiteralPath $entry.Value)) {
-        throw "Required CloudOS Shell V3 file missing [$($entry.Key)]: $($entry.Value)"
+        throw "Required CloudOS shell file missing [$($entry.Key)]: $($entry.Value)"
     }
 }
 
@@ -53,6 +54,7 @@ foreach ($entry in $paths.GetEnumerator()) {
     $text[$entry.Key] = Get-Content -LiteralPath $entry.Value -Raw
 }
 $text.Recovery = $text.Recovery + "`n" + $text.RecoveryHeader
+$text.ShellPins = $text.ShellPinsHeader + "`n" + $text.ShellPins
 
 function Require-Tokens([string]$Name, [string]$Content, [string[]]$Tokens) {
     foreach ($token in $Tokens) {
@@ -70,7 +72,7 @@ function Forbid-Tokens([string]$Name, [string]$Content, [string[]]$Tokens) {
     }
 }
 
-# Build graph.
+# Build graph: V4 Start/taskbar additions must be real compiled C++.
 Require-Tokens 'Project' $text.Project @(
     'src\main_shell_v2.cpp',
     'src\native_desktop_window_v2.cpp',
@@ -78,6 +80,7 @@ Require-Tokens 'Project' $text.Project @(
     'src\native_taskbar_hover_preview.cpp',
     'src\native_start_menu_window.cpp',
     'src\native_start_index.cpp',
+    'src\native_shell_pins.cpp',
     'src\native_task_switcher_window.cpp',
     'src\native_quick_settings_window.cpp',
     'src\native_notification_center.cpp',
@@ -96,11 +99,12 @@ Forbid-Tokens 'Project' $text.Project @(
     '<ClCompile Include="src\main.cpp"',
     '<ClCompile Include="src\native_desktop_window.cpp"',
     '<ClCompile Include="src\native_app_launcher.cpp"',
-    '<ClCompile Include="src\native_app_launcher_v2.cpp"'
+    '<ClCompile Include="src\native_app_launcher_v2.cpp"',
+    '<ClCompile Include="src\native_web_desktop_window.cpp"'
 )
 
-# Main shell and lifecycle.
-Require-Tokens 'Main Shell V3' $text.Main @(
+# Main shell and lifecycle stay authoritative.
+Require-Tokens 'Main Shell' $text.Main @(
     'NativeMonitorManager::VirtualBounds()',
     'window_manager_.SetReservedBottomPixels(0)',
     'BuildTaskbars()',
@@ -122,7 +126,7 @@ Require-Tokens 'Main Shell V3' $text.Main @(
     'HotTiling, modifiers, L''T''',
     'OleInitialize(nullptr)'
 )
-Forbid-Tokens 'Main Shell V3' $text.Main @('tiling_on_start', 'CloudOSNativeSettingsWindow::Load')
+Forbid-Tokens 'Main Shell' $text.Main @('tiling_on_start', 'CloudOSNativeSettingsWindow::Load')
 
 $initializePosition = $text.Main.IndexOf('if (!application.Initialize())')
 $watchdogPosition = $text.Main.IndexOf('NativeWatchdog::StartForCurrentProcess')
@@ -130,23 +134,101 @@ if ($initializePosition -lt 0 -or $watchdogPosition -lt 0 -or $watchdogPosition 
     throw 'Watchdog must start only after a successful CloudOSApplication::Initialize().'
 }
 
-# Existing real desktop primitives.
-Require-Tokens 'Taskbar AppBar' $text.Taskbar @(
-    'CloudOS.NativeShell.Taskbar.v2',
+# AppBar/taskbar V3: persistent pins, grouping, contexts, workspace movement, and truthful hit geometry.
+Require-Tokens 'Taskbar AppBar V3' $text.Taskbar @(
+    'CloudOS.NativeShell.Taskbar.v3',
+    'kTaskbarHeightDip = 68',
     'SHAppBarMessage(ABM_NEW',
     'SHAppBarMessage(ABM_QUERYPOS',
     'SHAppBarMessage(ABM_SETPOS',
     'SHAppBarMessage(ABM_REMOVE',
     'ABN_POSCHANGED',
-    'CurrentWorkspaceWindows()',
+    'ShellPinStore::Instance().TaskbarPins()',
+    'TaskGroup',
+    'ShowTaskContextMenu',
+    'ShowTaskGroupPicker',
+    'MoveTaskToWorkspace',
+    'SetWindowFloating',
+    'MoveTaskbar',
+    'SetCapture',
+    'CLOUDOS_WM_TASKBAR_QUERY_HIT',
+    'GetSystemPowerStatus',
     'SwitchWorkspace',
     'FocusWindow'
 )
+Require-Tokens 'Persistent shell pins' $text.ShellPins @(
+    'shell_pins_v1.dat',
+    'ShellPinKind',
+    'StartPins()',
+    'TaskbarPins()',
+    'ToggleStart',
+    'ToggleTaskbar',
+    'MoveStart',
+    'MoveTaskbar',
+    'MOVEFILE_REPLACE_EXISTING',
+    'MOVEFILE_WRITE_THROUGH'
+)
+
 Require-Tokens 'DWM switcher' $text.Switcher @(
     'DwmRegisterThumbnail', 'DwmQueryThumbnailSourceSize',
     'DwmUpdateThumbnailProperties', 'DwmUnregisterThumbnail',
     'CurrentWorkspaceWindows()', 'VK_TAB', 'Commit()'
 )
+Require-Tokens 'Taskbar hover preview V2' $text.HoverPreview @(
+    'CloudOS.NativeShell.TaskPreview.v2',
+    'CLOUDOS_WM_TASKBAR_QUERY_HIT',
+    'SetWindowSubclass',
+    'ApplyWebFlyoutMaterial',
+    'DwmRegisterThumbnail',
+    'DwmQueryThumbnailSourceSize',
+    'DwmUpdateThumbnailProperties',
+    'DwmUnregisterThumbnail',
+    'DWM_TNP_RECTDESTINATION',
+    'WM_MOUSELEAVE',
+    'WM_CLOSE',
+    'FocusWindow'
+)
+Forbid-Tokens 'Taskbar hover preview V2' $text.HoverPreview @('kPinnedCount = 5')
+
+# Start V4: Home first, pinned grid, recommendations, search/all-apps and context actions.
+Require-Tokens 'Start V4' $text.Start @(
+    'CloudOS.NativeShell.Start.v4',
+    'ViewMode::Home',
+    'L"Fixados"',
+    'L"Recomendados"',
+    'ShellPinStore::Instance().StartPins()',
+    'StartMenuMRUTracker::Instance().GetTopApps',
+    'ShowResultContextMenu',
+    'ShowPinContextMenu',
+    'Fixar no Iniciar',
+    'Fixar na barra',
+    'Mover para a esquerda',
+    'Mover para a direita',
+    'NativeSearchEngine::FilterApps',
+    'NativeStartIndex::Instance().Query',
+    'NativeStartIndex::Instance().Launch',
+    'NativeStartIndex::Instance().RefreshAsync',
+    'DrawWindowsIcon',
+    'LVS_NOCOLUMNHEADER',
+    'BS_OWNERDRAW',
+    'NM_CUSTOMDRAW',
+    'NM_RCLICK',
+    'ApplyWebFlyoutMaterial',
+    'WebSkin::Accent',
+    'NM_DBLCLK',
+    'NM_RETURN',
+    'VK_ESCAPE',
+    'Central de Comandos'
+)
+Forbid-Tokens 'Start V4' $text.Start @('WS_EX_CLIENTEDGE', 'L"Origem / descricao"', 'CloudOS.NativeShell.Start.v3')
+Require-Tokens 'Start index' $text.StartIndex @(
+    'FOLDERID_Programs', 'FOLDERID_CommonPrograms', 'shell:AppsFolder',
+    'BHID_EnumItems', 'IEnumShellItems', 'SIGDN_NORMALDISPLAY',
+    'SIGDN_DESKTOPABSOLUTEPARSING', 'recursive_directory_iterator',
+    'std::thread', 'CoInitializeEx', 'MatchScore', 'ShellExecuteW'
+)
+
+# Existing desktop/system primitives.
 Require-Tokens 'Quick Settings' $text.Quick @(
     'IAudioEndpointVolume', 'GetDefaultAudioEndpoint',
     'GetMasterVolumeLevelScalar', 'SetMasterVolumeLevelScalar',
@@ -176,7 +258,7 @@ Require-Tokens 'Wallpaper' $text.Wallpaper @(
     'SPI_SETDESKWALLPAPER', 'GetOpenFileNameW', 'InterpolationModeHighQualityBicubic'
 )
 
-# Unified old-web visual language, now implemented natively.
+# Unified old-web visual language implemented natively.
 Require-Tokens 'Native unified web skin' $text.Theme @(
     'namespace WebSkin',
     'RGB(10, 10, 15)',
@@ -192,70 +274,47 @@ Require-Tokens 'Native unified web skin' $text.Theme @(
     'ApplyWebFlyoutMaterial',
     'ApplyWebWindowMaterial'
 )
-Require-Tokens 'Taskbar web skin' $text.Taskbar @(
-    'kTaskbarHeightDip = 64',
-    'WebSkin::BgPrimary',
-    'WebSkin::Accent',
-    'Som  ·  Rede'
+Require-Tokens 'Taskbar WebSkin' $text.Taskbar @(
+    'WebSkin::BgPrimary', 'WebSkin::Accent',
+    'DrawCloudLogo', 'DrawQuickGlyphs', 'WebSkin::BgHover'
 )
-Require-Tokens 'Desktop web skin' $text.Desktop @(
-    'WebSkin::BgPrimary',
-    'Subtle ambient accents',
-    'WebSkin::TextPrimary'
+Require-Tokens 'Desktop WebSkin' $text.Desktop @(
+    'WebSkin::BgPrimary', 'Subtle ambient accents', 'WebSkin::TextPrimary'
 )
-Forbid-Tokens 'Desktop web skin' $text.Desktop @('Scale(920, dpi)')
-Require-Tokens 'Quick Settings web skin' $text.Quick @(
+Forbid-Tokens 'Desktop WebSkin' $text.Desktop @('Scale(920, dpi)')
+Require-Tokens 'Quick Settings WebSkin' $text.Quick @(
     'BS_OWNERDRAW', 'ApplyWebFlyoutMaterial',
     'WebSkin::PaintOwnerDrawButton', 'WebSkin::PaintWindowBackground'
 )
-Require-Tokens 'Notification web skin' $text.Notifications @(
+Require-Tokens 'Notification WebSkin' $text.Notifications @(
     'ApplyWebFlyoutMaterial', 'WebSkin::PrepareListView',
     'WebSkin::HandleListViewCustomDraw', 'BS_OWNERDRAW'
 )
-Require-Tokens 'Calculator web skin' $text.Calculator @(
+Require-Tokens 'Calculator WebSkin' $text.Calculator @(
     'ApplyWebWindowMaterial', 'BS_OWNERDRAW',
     'WebSkin::PaintOwnerDrawButton', 'ButtonTone::Accent', 'ButtonTone::Danger'
 )
-Require-Tokens 'Notepad web skin' $text.Notepad @(
+Require-Tokens 'Notepad WebSkin' $text.Notepad @(
     'ApplyWebWindowMaterial', 'Cascadia Mono',
     'BS_OWNERDRAW', 'WebSkin::PrepareEdit', 'ButtonTone::Accent'
 )
-Require-Tokens 'Settings web skin' $text.Settings @(
+Require-Tokens 'Settings WebSkin' $text.Settings @(
     'ApplyWebWindowMaterial', 'BS_OWNERDRAW',
     'WebSkin::PrepareEdit', 'WebSkin::PaintWindowBackground'
 )
-Require-Tokens 'System Monitor web skin' $text.SystemMonitor @(
+Require-Tokens 'System Monitor WebSkin' $text.SystemMonitor @(
     'ApplyWebWindowMaterial', 'WebSkin::BgSecondary',
     'WebSkin::Accent', 'Monitor do Sistema'
 )
-Require-Tokens 'Files dark web skin palette' $text.FilesStyleHeader @(
+Require-Tokens 'Files dark palette' $text.FilesStyleHeader @(
     'RGB(10, 10, 15)', 'RGB(17, 17, 24)',
     'RGB(99, 102, 241)', 'RGB(240, 240, 245)'
 )
 Require-Tokens 'Files dark Mica chrome' $text.FilesStyle @(
-    'DWMWA_USE_IMMERSIVE_DARK_MODE', 'DWMSBT_MAINWINDOW',
-    'kPalette.border'
+    'DWMWA_USE_IMMERSIVE_DARK_MODE', 'DWMSBT_MAINWINDOW', 'kPalette.border'
 )
 Require-Tokens 'Command Center shared skin' $text.CommandCenter @('DarkWindow(window_)')
 Require-Tokens 'File Operations shared skin' $text.FileOps @('DarkWindow(window_)')
-
-# Start V3 + installed app index + web visual language.
-Require-Tokens 'Start V3 web skin' $text.Start @(
-    'CloudOS.NativeShell.Start.v3', 'WS_POPUP',
-    'WS_EX_TOOLWINDOW | WS_EX_TOPMOST', 'NativeSearchEngine::FilterApps',
-    'NativeStartIndex::Instance().Query', 'NativeStartIndex::Instance().Launch',
-    'NativeStartIndex::Instance().RefreshAsync', 'LVS_NOCOLUMNHEADER',
-    'BS_OWNERDRAW', 'NM_CUSTOMDRAW', 'CustomDrawResults',
-    'ApplyWebFlyoutMaterial', 'WebSkin::Accent',
-    'NM_DBLCLK', 'NM_RETURN', 'VK_ESCAPE', 'Central de Comandos'
-)
-Forbid-Tokens 'Start V3 web skin' $text.Start @('WS_EX_CLIENTEDGE', 'L"Origem / descricao"')
-Require-Tokens 'Start index' $text.StartIndex @(
-    'FOLDERID_Programs', 'FOLDERID_CommonPrograms', 'shell:AppsFolder',
-    'BHID_EnumItems', 'IEnumShellItems', 'SIGDN_NORMALDISPLAY',
-    'SIGDN_DESKTOPABSOLUTEPARSING', 'recursive_directory_iterator',
-    'std::thread', 'CoInitializeEx', 'MatchScore', 'ShellExecuteW'
-)
 
 # Snap Assist.
 Require-Tokens 'Snap Assist' $text.Snap @(
@@ -268,15 +327,6 @@ Require-Tokens 'Snap Assist' $text.Snap @(
     'window_manager_->SetWindowFloating', 'SetWindowPos'
 )
 Forbid-Tokens 'Snap Assist' $text.Snap @('CreateRemoteThread', 'WriteProcessMemory', 'SetWindowsHookEx')
-
-# Hover previews.
-Require-Tokens 'Taskbar hover preview' $text.HoverPreview @(
-    'CloudOS.NativeShell.TaskPreview.v1', 'SetWindowSubclass',
-    'DwmRegisterThumbnail', 'DwmQueryThumbnailSourceSize',
-    'DwmUpdateThumbnailProperties', 'DwmUnregisterThumbnail',
-    'DWM_TNP_RECTDESTINATION', 'CurrentWorkspaceWindows()',
-    'WM_MOUSELEAVE', 'WM_CLOSE', 'FocusWindow'
-)
 
 # Copy/move/progress/ZIP.
 Require-Tokens 'Advanced File Operations' $text.FileOps @(
@@ -291,7 +341,7 @@ Require-Tokens 'Desktop File Operations entry' $text.Context @(
     'Operacoes de arquivos / ZIP', 'CloudOSNativeFileOperationsWindow::Open'
 )
 
-# Recovery + window-manager restore primitives.
+# Recovery/window-manager/watchdog.
 Require-Tokens 'Session recovery' $text.Recovery @(
     'session_v3.dat', 'session_v3.unclean', 'FOLDERID_LocalAppData',
     'MOVEFILE_REPLACE_EXISTING', 'MOVEFILE_WRITE_THROUGH',
@@ -303,8 +353,6 @@ Require-Tokens 'Window recovery primitives' $text.WindowRecovery @(
     'AllManagedWindows', 'WorkspaceFor', 'SetWindowFloating',
     'RestoreWindowState', 'MarkWorkspaceHidden', 'SW_MAXIMIZE', 'SW_MINIMIZE'
 )
-
-# Watchdog + single session lease.
 Require-Tokens 'Watchdog' $text.Watchdog @(
     'CloudOS.NativeShell.Session.v1', '--watchdog', 'OpenProcess',
     'SYNCHRONIZE', 'PROCESS_QUERY_LIMITED_INFORMATION', 'WaitForSingleObject',
@@ -312,11 +360,12 @@ Require-Tokens 'Watchdog' $text.Watchdog @(
     'SurfaceExistingShell'
 )
 
-# Browser/launcher remain native/truthful.
+# Browser/launcher remain truthful. Main Files delegates to Windows Explorer for speed.
 Forbid-Tokens 'Launcher V3' $text.Launcher @('SetParent(', 'kExternalHostClass', 'CollectProcessFamily')
 Require-Tokens 'Launcher V3' $text.Launcher @(
     'CloudOSNativeBrowserWindow::Open', 'CloudOSNativeCommandCenterWindow::Open',
-    'StartMenuMRUTracker::Instance().RecordLaunch'
+    'StartMenuMRUTracker::Instance().RecordLaunch',
+    'L"explorer.exe"'
 )
 Require-Tokens 'Browser' $text.Browser @(
     'CreateCoreWebView2EnvironmentWithOptions', 'CreateCoreWebView2Controller',
@@ -329,7 +378,7 @@ if ($actionCount -lt 100) {
     throw "Shell action catalog regressed below 100 actions: $actionCount"
 }
 
-# Research / compatibility policy.
+# Research/compatibility records remain available.
 Require-Tokens 'V2 research' $text.ResearchV2 @(
     'SHAppBarMessage', 'ABM_NEW', 'DwmRegisterThumbnail', 'RegisterDragDrop',
     'IAudioEndpointVolume', 'EnumDisplayMonitors', 'WESL_UserSetting'
@@ -349,4 +398,4 @@ Require-Tokens 'Official Shell Launcher script' $text.ShellLauncher @(
     'SetEnabled', 'RemoveCustomShell', 'Enterprise|Education|IoT', 'ShouldProcess'
 )
 
-Write-Host "PASS: CloudOS Shell V3 contracts passed - unified WebSkin, AppBars, indexed Start, Snap Assist, DWM previews, File Operations/ZIP, recovery, watchdog, multi-monitor and $actionCount shell actions."
+Write-Host "PASS: CloudOS shell contracts passed - Start V4 Home/search/pins, Taskbar V3 groups/pins/context, WebSkin, AppBars, Snap, DWM previews, recovery, watchdog, multi-monitor and $actionCount shell actions."
