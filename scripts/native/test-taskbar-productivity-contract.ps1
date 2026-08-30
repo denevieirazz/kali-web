@@ -7,11 +7,12 @@ $paths = @{
     Taskbar = Join-Path $src 'native_taskbar_appbar_v4.cpp'
     Hover = Join-Path $src 'native_taskbar_hover_preview.cpp'
     Pins = Join-Path $src 'native_shell_pins.cpp'
+    Mru = Join-Path $src 'native_start_menu_mru.h'
 }
 
 foreach ($entry in $paths.GetEnumerator()) {
     if (-not (Test-Path -LiteralPath $entry.Value)) {
-        throw "Taskbar productivity contract file missing [$($entry.Key)]: $($entry.Value)"
+        throw "Shell productivity contract file missing [$($entry.Key)]: $($entry.Value)"
     }
 }
 
@@ -75,4 +76,16 @@ Require 'Persistent pin recovery' $content.Pins @(
     'Deduplicate'
 )
 
-Write-Host 'PASS: taskbar V4 live geometry, middle-click close, wheel/XButton workspaces, rich DWM preview and self-healing pin persistence are protected.'
+Require 'Smart Start recommendations' $content.Mru @(
+    'start_mru.dat',
+    'UsageScore',
+    'kRecencyWindowDays',
+    'kRecencyWeightPerDay',
+    'kFrequencyWeight',
+    'ReadUsageFile',
+    'L".bak"',
+    'CopyFileW',
+    'MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH'
+)
+
+Write-Host 'PASS: Taskbar V4 live geometry, middle-click close, wheel/XButton workspaces, rich DWM preview, self-healing pins and smart Start recommendations are protected.'
