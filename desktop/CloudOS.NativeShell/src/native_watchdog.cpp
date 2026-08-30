@@ -18,6 +18,8 @@ constexpr wchar_t kSessionMutex[] = L"Local\\CloudOS.NativeShell.Session.v1";
 constexpr wchar_t kWatchdogArgument[] = L"--watchdog";
 constexpr int kMaximumRapidCrashes = 5;
 constexpr ULONGLONG kCrashWindowMilliseconds = 30000ull;
+constexpr DWORD kNtStatusFailureMask = 0x80000000u;
+constexpr DWORD kStatusControlCExit = 0xC000013Au;
 
 std::wstring ExecutablePath()
 {
@@ -119,6 +121,20 @@ bool LaunchNormalShell()
     CloseHandle(process.hProcess);
     return true;
 }
+
+bool ShouldRestartAfterExit(DWORD exit_code) noexcept
+{
+    // The watchdog exists to recover a crashed shell, not to fight the user.
+    // Task Manager/taskkill commonly terminate a process with a small ordinary
+    // exit code (for example 1). Treat those exits as intentional and stay
+    // closed. Only NT failure/status exits with the high bit set are eligible
+    // for automatic recovery. Ctrl+C/console close is also intentional.
+    if (exit_code == 0 || exit_code == kStatusControlCExit)
+    {
+        return false;
+    }
+    return (exit_code & kNtStatusFailureMask) != 0;
+}
 }
 
 bool NativeWatchdog::IsWatchdogInvocation()
@@ -152,9 +168,13 @@ int NativeWatchdog::RunWatchdogInvocation()
     }
     CloseHandle(process);
 
-    if (wait != WAIT_OBJECT_0 || exit_code == 0)
+    if (wait != WAIT_OBJECT_0)
     {
-        return wait == WAIT_OBJECT_0 ? 0 : 3;
+        return 3;
+    }
+    if (!ShouldRestartAfterExit(exit_code))
+    {
+        return 0;
     }
 
     // Give Windows time to release HWNDs, AppBars and the session mutex before
