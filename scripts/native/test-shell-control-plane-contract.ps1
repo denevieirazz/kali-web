@@ -85,7 +85,10 @@ Require 'System backend' $content.Backend @(
     'PowerSetActiveScheme',
     'GetAdaptersAddresses',
     'GetDiskFreeSpaceExW',
-    'EnumProcesses'
+    'CreateToolhelp32Snapshot',
+    'Process32FirstW',
+    'Process32NextW',
+    'GetProcessMemoryInfo'
 )
 
 Require 'Quick Settings V4' $content.Quick @(
