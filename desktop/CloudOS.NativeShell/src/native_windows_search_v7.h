@@ -72,8 +72,8 @@ public:
         }
 
         // IDataInitialize and the OLE DB interfaces are COM contracts. They are
-        // activated through CoCreateInstance; no oledb32 import library is
-        // required (and current Windows SDK runners do not ship oledb32.lib).
+        // activated through CoCreateInstance; no separate OLE DB import library is
+        // required (and current Windows SDK runners do not ship OLE DB stub libs).
         IDataInitialize* data_initialize = nullptr;
         hr = CoCreateInstance(
             CLSID_MSDAINITIALIZE,

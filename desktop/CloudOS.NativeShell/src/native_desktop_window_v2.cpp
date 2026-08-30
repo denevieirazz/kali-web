@@ -27,6 +27,10 @@ namespace
 constexpr wchar_t kDesktopClass[] = L"CloudOS.NativeShell.Desktop.v2";
 std::vector<RECT> g_file_rects;
 std::vector<std::wstring> g_file_paths;
+std::vector<std::size_t> g_selected_files;
+bool g_is_box_selecting = false;
+POINT g_box_start{};
+POINT g_box_current{};
 RECT g_media_previous_rect{};
 RECT g_media_toggle_rect{};
 RECT g_media_next_rect{};
@@ -472,6 +476,17 @@ void CloudOSNativeDesktopWindow::Paint()
         RECT hit{x, file_y, x + file_cell_width, file_y + file_cell_height};
         g_file_rects.push_back(hit);
 
+        const bool is_selected = std::find(g_selected_files.begin(), g_selected_files.end(), index) != g_selected_files.end();
+        if (is_selected)
+        {
+            SolidBrush sel_bg(Color(45, 99, 102, 241));
+            graphics.FillRectangle(&sel_bg, RectF(static_cast<REAL>(x), static_cast<REAL>(file_y),
+                static_cast<REAL>(file_cell_width), static_cast<REAL>(file_cell_height)));
+            Pen sel_border(Color(180, 129, 140, 248), 1.0f);
+            graphics.DrawRectangle(&sel_border, RectF(static_cast<REAL>(x), static_cast<REAL>(file_y),
+                static_cast<REAL>(file_cell_width), static_cast<REAL>(file_cell_height)));
+        }
+
         SHFILEINFOW file_info{};
         if (SHGetFileInfoW(g_file_paths[index].c_str(), 0, &file_info, sizeof(file_info), SHGFI_ICON | SHGFI_LARGEICON) != 0 &&
             file_info.hIcon != nullptr)
@@ -483,6 +498,25 @@ void CloudOSNativeDesktopWindow::Paint()
         DrawCenteredText(graphics, FileName(g_file_paths[index]), small_font,
             RectF(static_cast<REAL>(x + Scale(3, dpi)), static_cast<REAL>(file_y + Scale(54, dpi)),
                 static_cast<REAL>(file_cell_width - Scale(6, dpi)), static_cast<REAL>(Scale(40, dpi))), white);
+    }
+
+    if (g_is_box_selecting)
+    {
+        const int box_left = std::min(g_box_start.x, g_box_current.x);
+        const int box_top = std::min(g_box_start.y, g_box_current.y);
+        const int box_right = std::max(g_box_start.x, g_box_current.x);
+        const int box_bottom = std::max(g_box_start.y, g_box_current.y);
+        const int box_w = box_right - box_left;
+        const int box_h = box_bottom - box_top;
+        if (box_w > 1 && box_h > 1)
+        {
+            SolidBrush box_fill(Color(35, 99, 102, 241));
+            graphics.FillRectangle(&box_fill, RectF(static_cast<REAL>(box_left), static_cast<REAL>(box_top),
+                static_cast<REAL>(box_w), static_cast<REAL>(box_h)));
+            Pen box_pen(Color(180, 129, 140, 248), 1.0f);
+            graphics.DrawRectangle(&box_pen, RectF(static_cast<REAL>(box_left), static_cast<REAL>(box_top),
+                static_cast<REAL>(box_w), static_cast<REAL>(box_h)));
+        }
     }
 
     current_stats_ = NativeSystemStats::Query();
@@ -508,13 +542,27 @@ LRESULT CloudOSNativeDesktopWindow::HandleMessage(HWND window, UINT message, WPA
     case WM_PAINT: Paint(); return 0;
     case WM_ERASEBKGND: return 1;
     case WM_TIMER:
-        if (w_param == kMetricsTimer) { current_stats_ = NativeSystemStats::Query(); Redraw(); return 0; }
-        if (w_param == kReconcileTimer) { if (on_timer_) on_timer_(); Redraw(); return 0; }
+        if (w_param == kMetricsTimer)
+        {
+            const auto next_stats = NativeSystemStats::Query();
+            if (next_stats.cpu_percent != current_stats_.cpu_percent ||
+                next_stats.ram_percent != current_stats_.ram_percent)
+            {
+                current_stats_ = next_stats;
+                Redraw();
+            }
+            return 0;
+        }
+        if (w_param == kReconcileTimer)
+        {
+            if (on_timer_) on_timer_();
+            return 0;
+        }
         break;
     case CLOUDOS_WM_NATIVE_WINDOW_EVENT:
         if (window_manager_ != nullptr)
             window_manager_->HandleRuntimeEvent(static_cast<cloudos_native_window_event_kind>(w_param), reinterpret_cast<HWND>(l_param));
-        Redraw(); return 0;
+        return 0;
     case WM_HOTKEY:
         if (on_hotkey_) on_hotkey_(static_cast<int>(w_param));
         return 0;
@@ -522,8 +570,70 @@ LRESULT CloudOSNativeDesktopWindow::HandleMessage(HWND window, UINT message, WPA
     case WM_DPICHANGED:
     case WM_SETTINGCHANGE:
         RefreshWorkArea(); return 0;
+    case WM_LBUTTONDOWN:
+    {
+        const POINT point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
+        const NativeMediaSnapshot media = NativeMediaControlV7::Snapshot();
+        if ((media.available && media.can_previous && Contains(g_media_previous_rect, point)) ||
+            (media.available && media.can_toggle && Contains(g_media_toggle_rect, point)) ||
+            (media.available && media.can_next && Contains(g_media_next_rect, point)))
+        {
+            break;
+        }
+        for (const auto& r : quick_launch_rects_)
+        {
+            if (Contains(r, point)) return 0;
+        }
+        g_is_box_selecting = true;
+        g_box_start = point;
+        g_box_current = point;
+        g_selected_files.clear();
+        for (std::size_t i = 0; i < g_file_rects.size(); ++i)
+        {
+            if (Contains(g_file_rects[i], point))
+            {
+                g_selected_files.push_back(i);
+                break;
+            }
+        }
+        SetCapture(hwnd_);
+        Redraw();
+        return 0;
+    }
+    case WM_MOUSEMOVE:
+    {
+        if (g_is_box_selecting)
+        {
+            g_box_current = POINT{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
+            const int bl = std::min(g_box_start.x, g_box_current.x);
+            const int bt = std::min(g_box_start.y, g_box_current.y);
+            const int br = std::max(g_box_start.x, g_box_current.x);
+            const int bb = std::max(g_box_start.y, g_box_current.y);
+            const RECT box_rc{bl, bt, br, bb};
+
+            g_selected_files.clear();
+            for (std::size_t i = 0; i < g_file_rects.size(); ++i)
+            {
+                RECT intersect{};
+                if (IntersectRect(&intersect, &box_rc, &g_file_rects[i]))
+                {
+                    g_selected_files.push_back(i);
+                }
+            }
+            Redraw();
+            return 0;
+        }
+        break;
+    }
     case WM_LBUTTONUP:
     {
+        if (g_is_box_selecting)
+        {
+            g_is_box_selecting = false;
+            if (GetCapture() == hwnd_) ReleaseCapture();
+            Redraw();
+            return 0;
+        }
         const POINT point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
         const NativeMediaSnapshot media = NativeMediaControlV7::Snapshot();
         if (media.available && media.can_previous && Contains(g_media_previous_rect, point))

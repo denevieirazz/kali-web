@@ -1,6 +1,8 @@
 #include "native_settings_window.h"
 
+#include "native_system_control_window.h"
 #include "native_theme.h"
+#include "native_wallpaper_manager.h"
 
 #include <shellapi.h>
 
@@ -14,11 +16,14 @@ namespace
 {
 constexpr wchar_t kClassName[] = L"CloudOS.NativeShell.Settings.v2";
 constexpr wchar_t kRegistryPath[] = L"Software\\CloudOS\\Native";
-constexpr wchar_t kDesktopClass[] = L"CloudOS.NativeShell.CloudOSDesktop.v19";
+constexpr wchar_t kDesktopClass[] = L"CloudOS.NativeShell.Desktop.v2";
 constexpr int kDistroId = 3002;
 constexpr int kSaveId = 3003;
 constexpr int kWindowsSettingsId = 3004;
 constexpr int kInstallWslId = 3005;
+constexpr int kWallpaperId = 3006;
+constexpr int kResetWallpaperId = 3007;
+constexpr int kSystemCenterId = 3008;
 
 HBRUSH BackgroundBrush()
 {
@@ -152,10 +157,15 @@ void CloudOSNativeSettingsWindow::Layout()
         std::max(1, full_width - label_width), row_height, SWP_NOZORDER | SWP_NOACTIVATE);
     top += row_height + gap * 2;
 
-    const int button_width = CloudOS::Scale(190, dpi);
+    const int button_width = CloudOS::Scale(180, dpi);
     SetWindowPos(save_button_, nullptr, margin, top, button_width, row_height, SWP_NOZORDER | SWP_NOACTIVATE);
-    SetWindowPos(windows_settings_button_, nullptr, margin + button_width + gap, top,
-        button_width, row_height, SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(wallpaper_button_, nullptr, margin + button_width + gap, top, button_width, row_height, SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(reset_wallpaper_button_, nullptr, margin + (button_width + gap) * 2, top,
+        std::max(1, full_width - (button_width + gap) * 2), row_height, SWP_NOZORDER | SWP_NOACTIVATE);
+    top += row_height + gap;
+
+    SetWindowPos(system_center_button_, nullptr, margin, top, button_width, row_height, SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(windows_settings_button_, nullptr, margin + button_width + gap, top, button_width, row_height, SWP_NOZORDER | SWP_NOACTIVATE);
     SetWindowPos(install_wsl_button_, nullptr, margin + (button_width + gap) * 2, top,
         std::max(1, full_width - (button_width + gap) * 2), row_height, SWP_NOZORDER | SWP_NOACTIVATE);
 }
@@ -211,10 +221,10 @@ LRESULT CloudOSNativeSettingsWindow::HandleMessage(UINT message, WPARAM w_param,
     {
     case WM_CREATE:
     {
-        title_ = CreateWindowExW(0, L"STATIC", L"CloudOS · Sistema e WSL",
+        title_ = CreateWindowExW(0, L"STATIC", L"CloudOS · Sistema e Personalizacao",
             WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
         tiling_note_ = CreateWindowExW(0, L"STATIC",
-            L"Layout automatico permanece desligado ao iniciar. O Tiling so e ativado manualmente com Ctrl+Alt+T.",
+            L"Ambiente de trabalho nativo do CloudOS. Personalize papéis de parede, atalhos do sistema e integração com WSL.",
             WS_CHILD | WS_VISIBLE | SS_LEFT, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
         distro_label_ = CreateWindowExW(0, L"STATIC", L"Distribuicao WSL padrao:",
             WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
@@ -224,6 +234,15 @@ LRESULT CloudOSNativeSettingsWindow::HandleMessage(UINT message, WPARAM w_param,
         save_button_ = CreateWindowExW(0, L"BUTTON", L"Salvar",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 0, 0, 0, 0, window_,
             reinterpret_cast<HMENU>(kSaveId), instance_, nullptr);
+        wallpaper_button_ = CreateWindowExW(0, L"BUTTON", L"Escolher Wallpaper...",
+            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 0, 0, 0, 0, window_,
+            reinterpret_cast<HMENU>(kWallpaperId), instance_, nullptr);
+        reset_wallpaper_button_ = CreateWindowExW(0, L"BUTTON", L"Fundo Padrao",
+            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 0, 0, 0, 0, window_,
+            reinterpret_cast<HMENU>(kResetWallpaperId), instance_, nullptr);
+        system_center_button_ = CreateWindowExW(0, L"BUTTON", L"Central do Sistema",
+            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 0, 0, 0, 0, window_,
+            reinterpret_cast<HMENU>(kSystemCenterId), instance_, nullptr);
         windows_settings_button_ = CreateWindowExW(0, L"BUTTON", L"Configuracoes do Windows",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 0, 0, 0, 0, window_,
             reinterpret_cast<HMENU>(kWindowsSettingsId), instance_, nullptr);
@@ -239,11 +258,11 @@ LRESULT CloudOSNativeSettingsWindow::HandleMessage(UINT message, WPARAM w_param,
             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
             DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Display");
         SendMessageW(title_, WM_SETFONT, reinterpret_cast<WPARAM>(title_font), TRUE);
-        for (HWND child : {tiling_note_, distro_label_, distro_edit_, save_button_, windows_settings_button_, install_wsl_button_})
+        for (HWND child : {tiling_note_, distro_label_, distro_edit_, save_button_, wallpaper_button_, reset_wallpaper_button_, system_center_button_, windows_settings_button_, install_wsl_button_})
             if (child != nullptr) SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(body_font), TRUE);
 
         CloudOS::WebSkin::PrepareEdit(distro_edit_);
-        for (HWND button : {save_button_, windows_settings_button_, install_wsl_button_})
+        for (HWND button : {save_button_, wallpaper_button_, reset_wallpaper_button_, system_center_button_, windows_settings_button_, install_wsl_button_})
             CloudOS::WebSkin::PrepareButton(button);
         LoadIntoControls();
         Layout();
@@ -258,6 +277,23 @@ LRESULT CloudOSNativeSettingsWindow::HandleMessage(UINT message, WPARAM w_param,
             switch (LOWORD(w_param))
             {
             case kSaveId: SaveFromControls(); return 0;
+            case kWallpaperId:
+                if (CloudOS::NativeWallpaperManager::PickAndApply(window_))
+                {
+                    HWND desktop = FindWindowW(kDesktopClass, nullptr);
+                    if (desktop != nullptr) InvalidateRect(desktop, nullptr, FALSE);
+                }
+                return 0;
+            case kResetWallpaperId:
+                CloudOS::NativeWallpaperManager::Reset();
+                {
+                    HWND desktop = FindWindowW(kDesktopClass, nullptr);
+                    if (desktop != nullptr) InvalidateRect(desktop, nullptr, FALSE);
+                }
+                return 0;
+            case kSystemCenterId:
+                CloudOS::CloudOSNativeSystemControlWindow::Open(instance_);
+                return 0;
             case kWindowsSettingsId: OpenWindowsSettings(); return 0;
             case kInstallWslId: InstallWsl(); return 0;
             default: break;
