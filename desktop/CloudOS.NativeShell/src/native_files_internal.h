@@ -25,6 +25,14 @@ constexpr int kListId = 1210;
 constexpr int kShellHostId = 1211;
 constexpr int kStatusId = 1212;
 constexpr int kOperationsId = 1213;
+constexpr int kTabsId = 1214;
+constexpr int kNewTabId = 1215;
+constexpr int kCloseTabId = 1216;
+constexpr int kFavoriteId = 1217;
+constexpr int kSearchEditId = 1218;
+constexpr int kSearchId = 1219;
+constexpr int kPreviewId = 1220;
+constexpr UINT_PTR kPreviewTimerId = 0xF105;
 
 constexpr COLORREF kBg = CloudOS::FilesStyle::kPalette.base;
 constexpr COLORREF kPanel = CloudOS::FilesStyle::kPalette.sidebar;
@@ -43,6 +51,7 @@ constexpr COLORREF kMuted = CloudOS::FilesStyle::kPalette.muted;
 constexpr COLORREF kDanger = CloudOS::FilesStyle::kPalette.danger;
 
 constexpr UINT_PTR kAddressSubclassId = 0xC10D;
+constexpr UINT_PTR kSearchSubclassId = 0xC10E;
 
 inline LRESULT CALLBACK AddressEditSubclass(
     HWND window,
@@ -70,17 +79,46 @@ inline LRESULT CALLBACK AddressEditSubclass(
         if (w_param == VK_ESCAPE)
         {
             HWND parent = GetParent(window);
-            if (parent != nullptr)
-            {
-                SetFocus(parent);
-            }
+            if (parent != nullptr) SetFocus(parent);
             return 0;
         }
     }
     if (message == WM_NCDESTROY)
-    {
         RemoveWindowSubclass(window, AddressEditSubclass, kAddressSubclassId);
+    return DefSubclassProc(window, message, w_param, l_param);
+}
+
+inline LRESULT CALLBACK SearchEditSubclass(
+    HWND window,
+    UINT message,
+    WPARAM w_param,
+    LPARAM l_param,
+    UINT_PTR,
+    DWORD_PTR)
+{
+    if (message == WM_KEYDOWN)
+    {
+        if (w_param == VK_RETURN)
+        {
+            HWND parent = GetParent(window);
+            if (parent != nullptr)
+            {
+                SendMessageW(
+                    parent,
+                    WM_COMMAND,
+                    MAKEWPARAM(kSearchId, BN_CLICKED),
+                    reinterpret_cast<LPARAM>(window));
+            }
+            return 0;
+        }
+        if (w_param == VK_ESCAPE)
+        {
+            SetWindowTextW(window, L"");
+            return 0;
+        }
     }
+    if (message == WM_NCDESTROY)
+        RemoveWindowSubclass(window, SearchEditSubclass, kSearchSubclassId);
     return DefSubclassProc(window, message, w_param, l_param);
 }
 
