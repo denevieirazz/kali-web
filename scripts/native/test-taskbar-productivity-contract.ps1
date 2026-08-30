@@ -8,6 +8,7 @@ $paths = @{
     Hover = Join-Path $src 'native_taskbar_hover_preview.cpp'
     Pins = Join-Path $src 'native_shell_pins.cpp'
     Mru = Join-Path $src 'native_start_menu_mru.h'
+    Launcher = Join-Path $src 'native_app_launcher_v3.cpp'
 }
 
 foreach ($entry in $paths.GetEnumerator()) {
@@ -88,4 +89,22 @@ Require 'Smart Start recommendations' $content.Mru @(
     'MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH'
 )
 
-Write-Host 'PASS: Taskbar V4 live geometry, middle-click close, wheel/XButton workspaces, rich DWM preview, self-healing pins and smart Start recommendations are protected.'
+Require 'Hierarchical quick-access hub' $content.Launcher @(
+    'ShowQuickPowerMenu',
+    'L"Central de Comandos  ·  106 acoes"',
+    'L"Terminais"',
+    'L"Ferramentas"',
+    'L"Sistema e configuracoes"',
+    'L"Energia do Windows"',
+    'L"powershell"',
+    'L"wsl"',
+    'L"run"',
+    'L"drive"',
+    'L"ms-settings:network-wifi"',
+    'L"ms-settings:windowsupdate"',
+    'L"classic.taskmgr"',
+    'L"session.restart-cloudos"',
+    'L"session.shutdown"'
+)
+
+Write-Host 'PASS: Taskbar V4 live geometry, power-user mouse controls, rich DWM preview, self-healing pins, smart Start recommendations and hierarchical quick-access hub are protected.'
