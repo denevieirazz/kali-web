@@ -223,7 +223,16 @@ void CloudOSNativeFilesWindow::OpenSearch()
 
 void CloudOSNativeFilesWindow::OpenOperations()
 {
-    CloudOS::CloudOSNativeFileOperationsWindow::Open(instance_, current_path_);
+    const auto selected = SelectedPaths();
+    if (selected.empty())
+    {
+        CloudOS::CloudOSNativeFileOperationsWindow::Open(instance_, current_path_);
+        return;
+    }
+    CloudOS::CloudOSNativeFileOperationsWindow::OpenWithSources(
+        instance_,
+        selected,
+        current_path_);
 }
 
 std::vector<std::wstring> CloudOSNativeFilesWindow::SelectedPaths() const
