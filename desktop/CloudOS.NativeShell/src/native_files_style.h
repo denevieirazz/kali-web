@@ -4,7 +4,6 @@
 
 namespace CloudOS::FilesStyle
 {
-
 struct Palette final
 {
     COLORREF base;
@@ -24,26 +23,25 @@ struct Palette final
     COLORREF danger;
 };
 
-// Fluent-inspired light palette intentionally matches the native Windows
-// Shell view hosted by IExplorerBrowser. Avoiding a forced dark client chrome
-// prevents the hard dark/white split that made the previous Files UI look
-// unfinished while keeping the rest of CloudOS free to use its dark shell.
+// Same visual tokens used by frontend/src/index.css and native_theme.h.  The
+// hosted Windows Shell view may still follow the user's system theme, but all
+// CloudOS-owned chrome remains dark and consistent around it.
 inline constexpr Palette kPalette{
-    RGB(247, 248, 251), // base
-    RGB(241, 243, 247), // sidebar
-    RGB(247, 248, 251), // toolbar
-    RGB(238, 241, 246), // address
-    RGB(252, 252, 253), // content
-    RGB(246, 247, 250), // button
-    RGB(233, 237, 244), // hover
-    RGB(222, 229, 239), // pressed
-    RGB(220, 232, 250), // selection
-    RGB(214, 220, 230), // border
-    RGB(0, 103, 192),   // accent
-    RGB(0, 82, 153),    // accent pressed
-    RGB(31, 36, 44),    // text
-    RGB(100, 109, 124), // muted
-    RGB(184, 40, 50),   // danger
+    RGB(10, 10, 15),    // base #0a0a0f
+    RGB(17, 17, 24),    // sidebar #111118
+    RGB(17, 17, 24),    // toolbar
+    RGB(34, 34, 46),    // address #22222e
+    RGB(26, 26, 36),    // content #1a1a24
+    RGB(34, 34, 46),    // button
+    RGB(40, 40, 53),    // hover
+    RGB(31, 31, 66),    // pressed/accent subtle
+    RGB(31, 31, 66),    // selection
+    RGB(55, 55, 70),    // border
+    RGB(99, 102, 241),  // accent #6366f1
+    RGB(79, 70, 229),   // accent pressed
+    RGB(240, 240, 245), // text
+    RGB(160, 160, 184), // muted
+    RGB(219, 99, 106),  // danger
 };
 
 void ApplyWindowChrome(HWND window) noexcept;
