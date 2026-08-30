@@ -6,6 +6,7 @@
 #include "native_notification_center.h"
 #include "native_terminal_window.h"
 #include "native_wallpaper_manager.h"
+#include "native_workspace_studio_service.h"
 
 #include <shellapi.h>
 #include <shlobj.h>
@@ -29,6 +30,7 @@ constexpr UINT kDisplaySettings = 9109;
 constexpr UINT kPersonalization = 9110;
 constexpr UINT kAutoArrange = 9111;
 constexpr UINT kFileOperations = 9112;
+constexpr UINT kWorkspaceStudio = 9113;
 
 std::wstring DesktopPath()
 {
@@ -160,14 +162,15 @@ bool NativeDesktopContextMenu::Show(
     InsertMenuW(menu, 4, MF_BYPOSITION | MF_STRING, kFileOperations, L"Operacoes de arquivos / ZIP...");
     InsertMenuW(menu, 5, MF_BYPOSITION | MF_STRING, kOpenTerminal, L"Abrir no Terminal");
     InsertMenuW(menu, 6, MF_BYPOSITION | MF_STRING, kCommandCenter, L"Central de Comandos");
-    InsertMenuW(menu, 7, MF_BYPOSITION | MF_SEPARATOR, 0, nullptr);
-    InsertMenuW(menu, 8, MF_BYPOSITION | MF_STRING, kWallpaper, L"Mudar wallpaper...");
-    InsertMenuW(menu, 9, MF_BYPOSITION | MF_STRING, kResetWallpaper, L"Restaurar wallpaper padrao");
-    InsertMenuW(menu, 10, MF_BYPOSITION | MF_STRING, kDisplaySettings, L"Configuracoes de tela");
-    InsertMenuW(menu, 11, MF_BYPOSITION | MF_STRING, kPersonalization, L"Personalizacao do Windows");
-    InsertMenuW(menu, 12, MF_BYPOSITION | MF_SEPARATOR, 0, nullptr);
-    InsertMenuW(menu, 13, MF_BYPOSITION | MF_STRING | MF_CHECKED, kAutoArrange, L"Organizar icones automaticamente");
-    InsertMenuW(menu, 14, MF_BYPOSITION | MF_STRING, kRefresh, L"Atualizar");
+    InsertMenuW(menu, 7, MF_BYPOSITION | MF_STRING, kWorkspaceStudio, L"Workspace Studio...");
+    InsertMenuW(menu, 8, MF_BYPOSITION | MF_SEPARATOR, 0, nullptr);
+    InsertMenuW(menu, 9, MF_BYPOSITION | MF_STRING, kWallpaper, L"Mudar wallpaper...");
+    InsertMenuW(menu, 10, MF_BYPOSITION | MF_STRING, kResetWallpaper, L"Restaurar wallpaper padrao");
+    InsertMenuW(menu, 11, MF_BYPOSITION | MF_STRING, kDisplaySettings, L"Configuracoes de tela");
+    InsertMenuW(menu, 12, MF_BYPOSITION | MF_STRING, kPersonalization, L"Personalizacao do Windows");
+    InsertMenuW(menu, 13, MF_BYPOSITION | MF_SEPARATOR, 0, nullptr);
+    InsertMenuW(menu, 14, MF_BYPOSITION | MF_STRING | MF_CHECKED, kAutoArrange, L"Organizar icones automaticamente");
+    InsertMenuW(menu, 15, MF_BYPOSITION | MF_STRING, kRefresh, L"Atualizar");
 
     SetForegroundWindow(owner);
     const int command = TrackPopupMenu(
@@ -203,6 +206,9 @@ bool NativeDesktopContextMenu::Show(
         return false;
     case kCommandCenter:
         NativeAppLauncher::LaunchById(instance, owner, L"control");
+        return false;
+    case kWorkspaceStudio:
+        NativeWorkspaceStudioService::Open(instance, owner);
         return false;
     case kWallpaper:
         return NativeWallpaperManager::PickAndApply(owner);
