@@ -6,6 +6,7 @@ $src = Join-Path $root 'desktop\CloudOS.NativeShell\src'
 $paths = @{
     Taskbar = Join-Path $src 'native_taskbar_appbar_v4.cpp'
     Hover = Join-Path $src 'native_taskbar_hover_preview.cpp'
+    HoverHeader = Join-Path $src 'native_taskbar_hover_preview.h'
     Pins = Join-Path $src 'native_shell_pins.cpp'
     Start = Join-Path $src 'native_start_menu_window.cpp'
     StartHeader = Join-Path $src 'native_start_menu_window.h'
@@ -68,6 +69,22 @@ Require 'Taskbar live preview productivity' $content.Hover @(
 )
 Forbid 'Taskbar live preview productivity' $content.Hover @(
     'kPinnedCount = 5'
+)
+
+Require 'Taskbar native show-desktop edge' $content.Hover @(
+    'ShowDesktopRect',
+    'IsShowDesktopPoint',
+    'PaintShowDesktopEdge',
+    'ToggleShowDesktop',
+    'CurrentWorkspaceWindows',
+    'MonitorFromWindow',
+    'SW_MINIMIZE',
+    'SW_RESTORE',
+    'show_desktop_hot_',
+    'WebSkin::AccentHover'
+)
+Require 'Taskbar native show-desktop state' $content.HoverHeader @(
+    'bool show_desktop_hot_{}'
 )
 
 Require 'Persistent pin recovery' $content.Pins @(
@@ -193,4 +210,4 @@ if ($buildLabel -lt 0 -or $killBeforeBuild -lt 0 -or $buildCall -lt 0 -or $killB
     throw 'Native launcher must stop CloudOS.exe before invoking an automatic rebuild.'
 }
 
-Write-Host 'PASS: Taskbar V4 productivity, keyboard-first Start Home, resettable smart recommendations, expanded quick-access hub and fingerprint-verified rebuilds are protected.'
+Write-Host 'PASS: Taskbar V4 live previews/workspaces/show-desktop, keyboard-first Start Home, resettable smart recommendations, expanded quick-access hub and fingerprint-verified rebuilds are protected.'
