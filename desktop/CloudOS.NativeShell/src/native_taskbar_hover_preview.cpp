@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <new>
 #include <string>
+#include <vector>
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "dwmapi.lib")
@@ -614,7 +615,8 @@ LRESULT CALLBACK NativeTaskbarHoverPreview::TaskbarSubclass(
         if (show_desktop_hot != self->show_desktop_hot_)
         {
             self->show_desktop_hot_ = show_desktop_hot;
-            InvalidateRect(window, &ShowDesktopRect(window), FALSE);
+            const RECT edge = ShowDesktopRect(window);
+            InvalidateRect(window, &edge, FALSE);
         }
         if (show_desktop_hot)
         {
