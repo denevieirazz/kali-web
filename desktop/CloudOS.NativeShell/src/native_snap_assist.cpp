@@ -243,7 +243,10 @@ void NativeSnapAssist::BeginMove(HWND window)
     }
     moving_window_ = window;
     active_zone_ = Zone::None;
-    SetWindowFloating(window, true);
+    if (window_manager_ != nullptr)
+    {
+        window_manager_->SetWindowFloating(window, true);
+    }
     UpdateMove(window);
 }
 
@@ -439,7 +442,10 @@ bool NativeSnapAssist::ApplyZone(
     if (zone == Zone::Maximize)
     {
         ShowWindow(window, SW_MAXIMIZE);
-        SetWindowFloating(window, true);
+        if (window_manager_ != nullptr)
+        {
+            window_manager_->SetWindowFloating(window, true);
+        }
         return true;
     }
 
@@ -459,9 +465,9 @@ bool NativeSnapAssist::ApplyZone(
         SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
     if (moved)
     {
-        SetWindowFloating(window, true);
         if (window_manager_ != nullptr)
         {
+            window_manager_->SetWindowFloating(window, true);
             window_manager_->Reconcile();
             window_manager_->FocusWindow(window);
         }
