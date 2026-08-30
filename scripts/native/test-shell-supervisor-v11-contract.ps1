@@ -87,13 +87,13 @@ Require 'Graceful supervisor shutdown protocol' $content.Health @(
 
 Require 'Native build integrates Supervisor V11' $content.Build @(
     'test-shell-supervisor-v11-contract.ps1',
-    'CloudOS.NativeRecovery\\CloudOS.NativeRecovery.vcxproj',
+    'CloudOS.NativeRecovery\CloudOS.NativeRecovery.vcxproj',
     'CloudOS.Supervisor.exe',
     'SHELL_SUPERVISOR_V11='
 )
 Require 'Fingerprint covers shared protocol' $content.Fingerprint @(
-    'desktop\\CloudOS.NativeCommon',
-    'desktop\\CloudOS.NativeRecovery'
+    'desktop\CloudOS.NativeCommon',
+    'desktop\CloudOS.NativeRecovery'
 )
 Require 'Manifest covers Supervisor V11' $content.Manifest @('CloudOS.Supervisor.exe')
 Require 'Integrity verifier covers Supervisor V11' $content.Verify @('CloudOS.Supervisor.exe')
