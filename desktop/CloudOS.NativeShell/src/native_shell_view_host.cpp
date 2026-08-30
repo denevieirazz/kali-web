@@ -13,9 +13,9 @@
 
 namespace CloudOS
 {
-// Hosting remains Microsoft ExplorerBrowser COM, not HTML/WebView.  The only
-// new integration here is visual: ask the hosted Shell HWND to use the same
-// DarkMode_Explorer treatment as the CloudOS Files chrome.
+// Hosting remains Microsoft ExplorerBrowser COM, not HTML/WebView. The only
+// integration added by Files V5 is a safe selection bridge from IFolderView2
+// back into first-party CloudOS chrome.
 
 NativeShellViewHost::EventSink::EventSink(NativeShellViewHost* owner) noexcept : owner_(owner) {}
 
@@ -119,7 +119,7 @@ bool NativeShellViewHost::Create(HWND parent, const RECT& bounds, NavigationCall
     const EXPLORER_BROWSER_OPTIONS options = static_cast<EXPLORER_BROWSER_OPTIONS>(
         EBO_ALWAYSNAVIGATE | EBO_NOBORDER);
     (void)browser->SetOptions(options);
-    (void)browser->SetPropertyBag(L"CloudOS.NativeFiles.ShellView.v3.WebSkin");
+    (void)browser->SetPropertyBag(L"CloudOS.NativeFiles.ShellView.v5.WebSkin");
     (void)browser->SetEmptyText(L"Esta pasta esta vazia.");
 
     auto* sink = new (std::nothrow) EventSink(this);
@@ -168,6 +168,39 @@ void NativeShellViewHost::Resize(const RECT& bounds) noexcept
 
 bool NativeShellViewHost::IsReady() const noexcept { return browser_ != nullptr; }
 const std::wstring& NativeShellViewHost::CurrentPath() const noexcept { return current_path_; }
+
+std::vector<std::wstring> NativeShellViewHost::SelectedPaths() const
+{
+    std::vector<std::wstring> result;
+    IFolderView2* view = nullptr;
+    if (!GetCurrentView(&view) || view == nullptr) return result;
+
+    IShellItemArray* selection = nullptr;
+    const HRESULT selection_result = view->GetSelection(TRUE, &selection);
+    view->Release();
+    if (FAILED(selection_result) || selection == nullptr) return result;
+
+    DWORD count = 0;
+    if (FAILED(selection->GetCount(&count)))
+    {
+        selection->Release();
+        return result;
+    }
+
+    constexpr DWORD kMaximumSelection = 256;
+    const DWORD bounded = (std::min)(count, kMaximumSelection);
+    result.reserve(bounded);
+    for (DWORD index = 0; index < bounded; ++index)
+    {
+        IShellItem* item = nullptr;
+        if (FAILED(selection->GetItemAt(index, &item)) || item == nullptr) continue;
+        std::wstring path = DisplayPathFromShellItem(item);
+        item->Release();
+        if (!path.empty()) result.push_back(std::move(path));
+    }
+    selection->Release();
+    return result;
+}
 
 bool NativeShellViewHost::Navigate(const std::wstring& path)
 {
@@ -234,6 +267,27 @@ std::wstring NativeShellViewHost::DisplayPathFromPidl(PCIDLIST_ABSOLUTE folder)
     if (SUCCEEDED(SHGetNameFromIDList(folder, SIGDN_DESKTOPABSOLUTEPARSING, &value)) && value != nullptr)
     {
         std::wstring path(value); CoTaskMemFree(value); return path;
+    }
+    if (value != nullptr) CoTaskMemFree(value);
+    return {};
+}
+
+std::wstring NativeShellViewHost::DisplayPathFromShellItem(IShellItem* item)
+{
+    if (item == nullptr) return {};
+    PWSTR value = nullptr;
+    if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &value)) && value != nullptr)
+    {
+        std::wstring path(value);
+        CoTaskMemFree(value);
+        return path;
+    }
+    if (value != nullptr) { CoTaskMemFree(value); value = nullptr; }
+    if (SUCCEEDED(item->GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING, &value)) && value != nullptr)
+    {
+        std::wstring path(value);
+        CoTaskMemFree(value);
+        return path;
     }
     if (value != nullptr) CoTaskMemFree(value);
     return {};
