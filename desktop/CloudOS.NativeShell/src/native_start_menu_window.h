@@ -3,8 +3,10 @@
 #include <windows.h>
 #include <commctrl.h>
 
+#include <string>
 #include <vector>
 
+#include "native_shell_pins.h"
 #include "native_start_index.h"
 
 namespace CloudOS
@@ -29,6 +31,13 @@ private:
         IndexedWindowsApp,
     };
 
+    enum class ViewMode
+    {
+        Home,
+        AllApps,
+        Search,
+    };
+
     struct ResultRow final
     {
         ResultKind kind{ResultKind::CloudOSApp};
@@ -36,13 +45,32 @@ private:
         NativeStartIndexEntry indexed;
     };
 
+    struct HomeHit final
+    {
+        RECT rect{};
+        ShellPinItem pin;
+        bool recommended{};
+    };
+
     void Layout();
     void Paint();
+    void PaintHome(HDC dc, Gdiplus::Graphics& graphics, UINT dpi, int width, int height);
     void RefreshResults();
+    void RefreshHome();
+    void UpdateViewVisibility();
     void ExecuteSelection();
+    void ExecutePin(const ShellPinItem& pin);
     void MoveSelection(int delta);
     void RefreshIndexer();
     void RebuildRowHeight();
+    void ToggleAllApps();
+    void ShowResultContextMenu(int row, POINT screen_point);
+    void ShowPinContextMenu(std::size_t hit_index, POINT screen_point);
+    void OpenIndexedLocation(const NativeStartIndexEntry& entry);
+    [[nodiscard]] ShellPinItem PinFromResult(const ResultRow& result) const;
+    [[nodiscard]] int FindCloudApp(std::wstring_view id) const;
+    [[nodiscard]] std::wstring PinTitle(const ShellPinItem& pin) const;
+    [[nodiscard]] std::wstring PinSubtitle(const ShellPinItem& pin) const;
     LRESULT DrawOwnerButton(const DRAWITEMSTRUCT& item);
     LRESULT CustomDrawResults(const NMLVCUSTOMDRAW& draw);
     std::wstring ResultTitle(std::size_t index) const;
@@ -61,7 +89,7 @@ private:
     HWND window_{};
     HWND search_edit_{};
     HWND app_list_{};
-    HWND refresh_button_{};
+    HWND all_apps_button_{};
     HWND command_button_{};
     HWND power_button_{};
     HWND footer_label_{};
@@ -72,7 +100,10 @@ private:
     HBRUSH edit_background_{};
     HIMAGELIST row_height_image_list_{};
     std::vector<ResultRow> results_;
+    std::vector<ShellPinItem> start_pins_;
+    std::vector<HomeHit> home_hits_;
     std::size_t last_index_count_{};
+    ViewMode view_mode_{ViewMode::Home};
     bool search_focused_{};
 };
 } // namespace CloudOS
