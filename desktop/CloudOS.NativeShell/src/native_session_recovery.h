@@ -15,7 +15,7 @@ class NativeSessionRecovery final
 {
 public:
     NativeSessionRecovery() = default;
-    ~NativeSessionRecovery() = default;
+    ~NativeSessionRecovery();
 
     NativeSessionRecovery(const NativeSessionRecovery&) = delete;
     NativeSessionRecovery& operator=(const NativeSessionRecovery&) = delete;
@@ -54,12 +54,25 @@ private:
     bool Load();
     bool Write(const std::vector<Record>& records) const;
     void ApplyPending(CloudOSNativeWindowManager& window_manager);
+    void AttachSessionNotifications(HWND owner, CloudOSNativeWindowManager& window_manager);
+    void DetachSessionNotifications() noexcept;
+    static LRESULT CALLBACK SessionNotificationSubclass(
+        HWND window,
+        UINT message,
+        WPARAM w_param,
+        LPARAM l_param,
+        UINT_PTR subclass_id,
+        DWORD_PTR reference_data);
 
     std::wstring storage_directory_;
     std::wstring state_path_;
     std::wstring unclean_marker_path_;
     std::vector<Record> loaded_records_;
     std::vector<Record> pending_internal_;
+    HWND session_window_{};
+    CloudOSNativeWindowManager* session_window_manager_{};
+    bool session_notifications_registered_{};
+    bool session_subclass_attached_{};
     bool previous_unclean_{};
     bool begun_{};
     unsigned tick_counter_{};
