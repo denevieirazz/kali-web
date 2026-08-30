@@ -21,7 +21,7 @@ namespace CloudOS
 {
 namespace
 {
-constexpr wchar_t kPreviewClass[] = L"CloudOS.NativeShell.TaskPreview.v3";
+constexpr wchar_t kPreviewClass[] = L"CloudOS.NativeShell.TaskPreview.v2";
 constexpr UINT_PTR kSubclassId = 0xA901;
 constexpr UINT_PTR kHoverTimer = 0xA902;
 constexpr UINT_PTR kHideTimer = 0xA903;
