@@ -13,6 +13,7 @@ $paths = @{
     Window = Join-Path $src 'native_workspace_studio_window.cpp'
     ManagerHeader = Join-Path $src 'native_window_manager.h'
     ManagerBridge = Join-Path $src 'native_window_manager_workspace_studio.cpp'
+    DesktopMenu = Join-Path $src 'native_desktop_context_menu.cpp'
     Project = Join-Path $root 'desktop\CloudOS.NativeShell\CloudOS.NativeShell.vcxproj'
 }
 
@@ -50,6 +51,7 @@ Require 'Persistent workspace model' ($content.ModelHeader + "`n" + $content.Mod
     'WorkspaceSnapshot',
     'WorkspaceLayoutWindow',
     'WorkspaceLayoutPreset',
+    'Grid = 3',
     'WorkspaceMatchField',
     'WorkspaceMatchMode',
     'workspace_studio_v2.dat',
@@ -84,24 +86,28 @@ Require 'Layout snapshots and presets' $content.Automation @(
     'DenormalizeBounds',
     'MonitorDeviceName',
     'NativeMonitorManager::Enumerate',
+    'monitor.work',
     'GetWindowPlacement',
     'WorkspaceLayoutPreset::MasterStack',
     'WorkspaceLayoutPreset::Columns',
-    'WorkspaceLayoutPreset::Grid',
     'WorkspaceLayoutPreset::Focus',
+    'std::sqrt',
+    'std::ceil',
     'NativeWorkspaceLayoutEngine::Capture',
     'NativeWorkspaceLayoutEngine::Restore',
     'NativeWorkspaceLayoutEngine::ApplyPreset'
 )
 
-Require 'Workspace transitions' $content.Automation @(
+Require 'Workspace transitions' ($content.AutomationHeader + "`n" + $content.Automation) @(
     'HandleWorkspaceTransition',
     'NativeWallpaperManager::Apply',
     'LaunchWorkspaceEntries',
     'NativeAppLauncher::LaunchById',
     'profile.auto_launch',
     'profile.apply_wallpaper',
-    'profile.auto_tile'
+    'profile.auto_tile',
+    'startup_launched_',
+    '!startup_launched_'
 )
 
 Require 'Resident service' ($content.ServiceHeader + "`n" + $content.Service) @(
@@ -113,6 +119,7 @@ Require 'Resident service' ($content.ServiceHeader + "`n" + $content.Service) @(
     'MOD_CONTROL',
     'MOD_ALT',
     'MOD_SHIFT',
+    'MOD_NOREPEAT',
     'kHotOpenStudio',
     'kHotQuickSnapshot',
     'kHotRestoreSnapshot',
@@ -160,12 +167,20 @@ Forbid 'Studio native-only UI' $content.Window @(
     'SetParent('
 )
 
+Require 'Desktop discovery' $content.DesktopMenu @(
+    '#include "native_workspace_studio_service.h"',
+    'kWorkspaceStudio = 9113',
+    'L"Workspace Studio..."',
+    'NativeWorkspaceStudioService::Open(instance, owner)'
+)
+
 Require 'Window manager workspace API' ($content.ManagerHeader + "`n" + $content.ManagerBridge) @(
     'CloudOSNativeWindowManager();',
     'SetTilingEnabled(bool enabled)',
     'MoveWindowToWorkspace(HWND window, int workspace)',
     'NativeWorkspaceStudioService::RegisterManager(this)',
     'MarkWorkspaceHidden',
+    'ShowWindow(window, SW_HIDE)',
     'TileCurrentWorkspace',
     'UpdateBorders'
 )
@@ -183,4 +198,4 @@ Require 'MSVC compile graph' $content.Project @(
     'native_workspace_automation_compile.h'
 )
 
-Write-Host 'PASS: Workspace Studio V2 contracts passed - persistent profiles, window rules, normalized layout snapshots, startup presets, focus history, resident engine, global hotkeys and five native pages are protected.'
+Write-Host 'PASS: Workspace Studio V2 contracts passed - persistent profiles, window rules, monitor-normalized layouts/grid, startup-once presets, focus history, resident engine, global hotkeys, desktop discovery and five native pages are protected.'
