@@ -110,7 +110,9 @@ Require 'Resident service' ($content.ServiceHeader + "`n" + $content.Service) @(
     'HWND_MESSAGE',
     'kEngineIntervalMs = 850',
     'RegisterHotKey',
-    'Ctrl',
+    'MOD_CONTROL',
+    'MOD_ALT',
+    'MOD_SHIFT',
     'kHotOpenStudio',
     'kHotQuickSnapshot',
     'kHotRestoreSnapshot',
@@ -122,11 +124,12 @@ Require 'Resident service' ($content.ServiceHeader + "`n" + $content.Service) @(
 )
 
 Require 'Five-page native Studio header' $content.WindowHeader @(
-    'Page::Profiles',
-    'Page::Rules',
-    'Page::Layouts',
-    'Page::Startup',
-    'Page::Activity',
+    'enum class Page',
+    'Profiles = 0',
+    'Rules = 1',
+    'Layouts = 2',
+    'Startup = 3',
+    'Activity = 4',
     'SaveProfile',
     'AddRule',
     'CaptureLayout',
