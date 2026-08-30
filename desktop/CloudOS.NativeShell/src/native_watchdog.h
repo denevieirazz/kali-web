@@ -2,6 +2,9 @@
 
 #include <Windows.h>
 
+#include <cwchar>
+#include <vector>
+
 namespace CloudOS
 {
 class NativeWatchdog final
