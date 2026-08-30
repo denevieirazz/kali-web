@@ -171,7 +171,24 @@ bool CloudOSNativeFilesWindow::IsSafeLeafName(const wchar_t* text)
 
 void CloudOSNativeFilesWindow::ShowContentContextMenu(POINT screen_point)
 {
+    // IExplorerBrowser owns the standard Shell view context menu while in Shell
+    // mode. For the V5 fallback filesystem view, however, CloudOS owns the
+    // list HWND, so route real filesystem selections through IContextMenu3 and
+    // preserve installed Shell extensions (7-Zip, Git, VS Code, Properties,
+    // Share, Open With, etc.). CloudOS Drive deliberately keeps its safer
+    // first-party menu because its virtual paths are not Windows Shell items.
     if (content_mode_ == ContentMode::Shell) return;
+
+    const auto selected = SelectedPaths();
+    if (content_mode_ == ContentMode::FallbackFileSystem && !selected.empty())
+    {
+        if (CloudOS::NativeShellContextMenuV7::Show(window_, selected, screen_point))
+        {
+            Refresh();
+            return;
+        }
+    }
+
     enum : UINT
     {
         kOpen = 1,
@@ -184,7 +201,6 @@ void CloudOSNativeFilesWindow::ShowContentContextMenu(POINT screen_point)
 
     HMENU menu = CreatePopupMenu();
     if (menu == nullptr) return;
-    const auto selected = SelectedPaths();
     const bool has_selection = !selected.empty();
     AppendMenuW(menu, MF_STRING | (has_selection ? 0 : MF_GRAYED), kOpen, L"Abrir");
     AppendMenuW(menu, MF_STRING | (has_selection ? 0 : MF_GRAYED), kRename, L"Renomear");
