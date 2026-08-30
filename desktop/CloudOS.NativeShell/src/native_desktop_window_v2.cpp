@@ -380,7 +380,7 @@ void CloudOSNativeDesktopWindow::UpdateLayout(const RECT& work_area)
 
 void CloudOSNativeDesktopWindow::Redraw() { if (hwnd_ != nullptr) InvalidateRect(hwnd_, nullptr, FALSE); }
 void CloudOSNativeDesktopWindow::FocusSearch() { if (on_hotkey_) on_hotkey_(HotSearch); }
-void CloudOSNativeDesktopWindow::RefreshWorkArea() { if (on_timer_) on_timer_(); Redraw(); }
+void CloudOSNativeDesktopWindow::RefreshWorkArea() { Redraw(); }
 
 void CloudOSNativeDesktopWindow::ActivateAppIndex(int app_index)
 {
