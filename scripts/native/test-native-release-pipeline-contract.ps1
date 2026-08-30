@@ -5,6 +5,8 @@ $paths = @{
     Fingerprint = Join-Path $PSScriptRoot 'get-native-build-fingerprint.ps1'
     Writer = Join-Path $PSScriptRoot 'write-native-build-manifest.ps1'
     Verifier = Join-Path $PSScriptRoot 'verify-native-build-manifest.ps1'
+    Packager = Join-Path $PSScriptRoot 'package-cloudos-native.ps1'
+    Status = Join-Path $PSScriptRoot 'get-native-build-status.ps1'
     Build = Join-Path $PSScriptRoot 'build-cloudos-native.cmd'
     Start = Join-Path $PSScriptRoot 'start-cloudos-native.cmd'
     Workflow = Join-Path $root '.github\workflows\cloudos-native-full-system.yml'
@@ -59,12 +61,32 @@ Require 'Native integrity verifier' $content.Verifier @(
     'Native binary is stale for the current source tree'
 )
 
+Require 'Portable native packager' $content.Packager @(
+    'CloudOS-Native-Release-x64.zip',
+    'verify-native-build-manifest.ps1',
+    'SHA256SUMS.txt',
+    'Iniciar CloudOS.cmd',
+    'LEIA-ME.txt',
+    'Compress-Archive',
+    'PACKAGE_SHA256'
+)
+
+Require 'Native build status diagnostics' $content.Status @(
+    'current_source_fingerprint',
+    'built_source_fingerprint',
+    'source_matches_build',
+    'integrity_ok',
+    'ready_to_run',
+    '--force-rebuild'
+)
+
 Require 'Native build entrypoint provenance' $content.Build @(
     'test-native-release-pipeline-contract.ps1',
     'write-native-build-manifest.ps1',
     'verify-native-build-manifest.ps1',
     'cloudos-native-manifest.json',
-    '.cloudos-build-fingerprint'
+    '.cloudos-build-fingerprint',
+    'Microsoft.Web.WebView2 ja restaurado; reutilizando cache local'
 )
 
 Require 'Native launcher integrity gate' $content.Start @(
@@ -72,14 +94,18 @@ Require 'Native launcher integrity gate' $content.Start @(
     'verify-native-build-manifest.ps1',
     '.cloudos-build-fingerprint',
     'SOURCE_FINGERPRINT',
+    '--force-rebuild',
+    '--no-build',
     'taskkill /F /IM CloudOS.exe'
 )
 
 Require 'CI release artifact' $content.Workflow @(
     'build-cloudos-native.cmd',
     'verify-native-build-manifest.ps1',
+    'package-cloudos-native.ps1',
+    'CloudOS-Native-Release-x64.zip',
     'actions/upload-artifact@v4',
     'cloudos-native-manifest.json'
 )
 
-Write-Host 'PASS: deterministic source fingerprint, binary integrity manifest, stale-build gate and CI release artifact contracts are protected.'
+Write-Host 'PASS: deterministic source fingerprint, binary integrity manifest, portable package, status diagnostics, stale-build gate and CI release artifact contracts are protected.'
