@@ -81,7 +81,12 @@ Require 'Taskbar native show-desktop edge' $content.Hover @(
     'SW_MINIMIZE',
     'SW_RESTORE',
     'show_desktop_hot_',
-    'WebSkin::AccentHover'
+    'WebSkin::AccentHover',
+    'const RECT edge = ShowDesktopRect(window)',
+    'InvalidateRect(window, &edge, FALSE)'
+)
+Forbid 'Taskbar native show-desktop edge' $content.Hover @(
+    '&ShowDesktopRect(window)'
 )
 Require 'Taskbar native show-desktop state' $content.HoverHeader @(
     'bool show_desktop_hot_{}'
