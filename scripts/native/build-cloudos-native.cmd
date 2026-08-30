@@ -27,8 +27,6 @@ if not exist "%MSBUILD%" (
   exit /b 4
 )
 
-rem O frontend React antigo e somente referencia visual. O Shell compilado e C++/Win32.
-rem WebView2 continua sendo restaurado exclusivamente para o Navegador nativo in-process.
 echo [CloudOS] Validando contratos do shell nativo...
 pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-cloudos-native-shell-contracts.ps1"
 if errorlevel 1 exit /b %ERRORLEVEL%
@@ -41,6 +39,8 @@ if errorlevel 1 exit /b %ERRORLEVEL%
 pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-stability-readiness-v9-contract.ps1"
 if errorlevel 1 exit /b %ERRORLEVEL%
 pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-lifecycle-v10-contract.ps1"
+if errorlevel 1 exit /b %ERRORLEVEL%
+pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-shell-supervisor-v11-contract.ps1"
 if errorlevel 1 exit /b %ERRORLEVEL%
 pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-taskbar-productivity-contract.ps1"
 if errorlevel 1 exit /b %ERRORLEVEL%
@@ -74,6 +74,10 @@ echo [CloudOS] Compilando shell C++/Win32 %CONFIG% x64...
 "%MSBUILD%" "%ROOT%\desktop\CloudOS.NativeShell\CloudOS.NativeShell.vcxproj" /m /nologo /v:minimal /p:Configuration=%CONFIG% /p:Platform=%PLATFORM%
 if errorlevel 1 exit /b %ERRORLEVEL%
 
+echo [CloudOS] Compilando Shell Supervisor V11 independente %CONFIG% x64...
+"%MSBUILD%" "%ROOT%\desktop\CloudOS.NativeRecovery\CloudOS.NativeRecovery.vcxproj" /m /nologo /v:minimal /p:Configuration=%CONFIG% /p:Platform=%PLATFORM%
+if errorlevel 1 exit /b %ERRORLEVEL%
+
 set "OUT=%ROOT%\desktop\CloudOS.NativeShell\bin\%CONFIG%"
 set "MANIFEST=%OUT%\cloudos-native-manifest.json"
 set "FINGERPRINT_STAMP=%OUT%\.cloudos-build-fingerprint"
@@ -85,39 +89,29 @@ if not exist "%OUT%\CloudOS.NativeRuntime.dll" (
   echo [CloudOS] ERRO: CloudOS.NativeRuntime.dll nao foi copiado para a saida.
   exit /b 6
 )
+if not exist "%OUT%\CloudOS.Supervisor.exe" (
+  echo [CloudOS] ERRO: CloudOS.Supervisor.exe nao foi produzido.
+  exit /b 7
+)
 
 for %%F in ("%OUT%\CloudOS.exe") do set "EXE_SIZE=%%~zF"
 for %%F in ("%OUT%\CloudOS.NativeRuntime.dll") do set "RUNTIME_SIZE=%%~zF"
-if "%EXE_SIZE%"=="0" (
-  echo [CloudOS] ERRO: CloudOS.exe vazio.
-  exit /b 11
-)
-if "%RUNTIME_SIZE%"=="0" (
-  echo [CloudOS] ERRO: CloudOS.NativeRuntime.dll vazio.
-  exit /b 12
-)
+for %%F in ("%OUT%\CloudOS.Supervisor.exe") do set "SUPERVISOR_SIZE=%%~zF"
+if "%EXE_SIZE%"=="0" exit /b 11
+if "%RUNTIME_SIZE%"=="0" exit /b 12
+if "%SUPERVISOR_SIZE%"=="0" exit /b 15
 
-rem Releases antigos podiam deixar bin\Release\ui com o desktop React. Como o shell
-rem atual e nativo, remova essa sobra para ela nao parecer um fallback valido.
 if exist "%OUT%\ui" (
   echo [CloudOS] Removendo assets obsoletos do antigo desktop web da saida nativa...
   rmdir /s /q "%OUT%\ui" >nul 2>&1
 )
 
-rem Gera proveniencia reproduzivel: commit quando disponivel, fingerprint deterministico
-rem das fontes e SHA256/tamanho dos dois binarios autoritativos.
 echo [CloudOS] Gerando manifesto de proveniencia e integridade...
 pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\write-native-build-manifest.ps1" -Root "%ROOT%" -Configuration "%CONFIG%"
 if errorlevel 1 exit /b %ERRORLEVEL%
 
-if not exist "%MANIFEST%" (
-  echo [CloudOS] ERRO: manifesto nativo nao foi produzido.
-  exit /b 13
-)
-if not exist "%FINGERPRINT_STAMP%" (
-  echo [CloudOS] ERRO: fingerprint da fonte nao foi produzido.
-  exit /b 14
-)
+if not exist "%MANIFEST%" exit /b 13
+if not exist "%FINGERPRINT_STAMP%" exit /b 14
 
 echo [CloudOS] Verificando hashes e proveniencia do build...
 pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\verify-native-build-manifest.ps1" -Root "%ROOT%" -Configuration "%CONFIG%" -CheckSourceFingerprint
@@ -130,6 +124,7 @@ if exist "%OUT%\.cloudos-build-head" set /p BUILD_HEAD=<"%OUT%\.cloudos-build-he
 
 echo.
 echo [CloudOS] BUILD_OK=%OUT%\CloudOS.exe
+echo [CloudOS] SUPERVISOR=%OUT%\CloudOS.Supervisor.exe
 echo [CloudOS] RUNTIME=%OUT%\CloudOS.NativeRuntime.dll
 echo [CloudOS] MANIFEST=%MANIFEST%
 if defined SOURCE_FINGERPRINT echo [CloudOS] SOURCE_FINGERPRINT=%SOURCE_FINGERPRINT%
@@ -143,6 +138,7 @@ echo [CloudOS] FILES_STORAGE_V5=Files first-party, tabs, Quick Access, busca lim
 echo [CloudOS] VISUAL_PLATFORM_V7=reveal Fluent, DWM material sem magic numbers, GSMTC, mixer por app e Windows Search SystemIndex
 echo [CloudOS] STABILITY_READINESS_V9=health ABI 96 bytes, heartbeat UI, readiness e soak automatizado
 echo [CloudOS] LIFECYCLE_V10=resume, WTS/RDP, display revalidation, WTS retry e single-instance smoke
+echo [CloudOS] SHELL_SUPERVISOR_V11=processo externo, readiness 30s, heartbeat, restart limitado e fallback seguro Explorer
 echo [CloudOS] WEBVIEW2=usado somente pelo Navegador CloudOS
 echo [CloudOS] FRONTEND_REACT=referencia visual; nao participa deste build
 exit /b 0
