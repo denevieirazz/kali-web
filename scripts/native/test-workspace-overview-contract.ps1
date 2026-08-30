@@ -10,7 +10,7 @@ $paths = @{
     BridgeHeader = Join-Path $src 'native_shell_bridge.h'
     Main = Join-Path $src 'main_shell_v2.cpp'
     Theme = Join-Path $src 'native_theme.h'
-    Launcher = Join-Path $src 'native_app_launcher_v3.cpp'
+    Launcher = Join-Path $src 'native_app_launcher_v4.cpp'
     Search = Join-Path $src 'native_search_engine.cpp'
     Project = Join-Path $root 'desktop\CloudOS.NativeShell\CloudOS.NativeShell.vcxproj'
 }
@@ -135,7 +135,7 @@ Require 'Main shell overview integration' $content.Main @(
 )
 
 Require 'Start catalog entry' $content.Theme @(
-    'std::array<AppItem, 22>',
+    'std::array<AppItem, 23>',
     '{L"workspaces", L"Visão de Trabalho"',
     'Gerenciar as 4 áreas, janelas, tiling e previews DWM'
 )
@@ -169,7 +169,11 @@ Require 'MSVC compile graph' $content.Project @(
     'src\native_shell_bridge.h',
     'src\native_workspace_overview_window.h',
     'src\native_shell_bridge.cpp',
-    'src\native_workspace_overview_window.cpp'
+    'src\native_workspace_overview_window.cpp',
+    'src\native_app_launcher_v4.cpp'
+)
+Forbid 'MSVC compile graph' $content.Project @(
+    '<ClCompile Include="src\native_app_launcher_v3.cpp"'
 )
 
 Write-Host 'PASS: native Workspace Overview, DWM previews, global workspace controls, Start/launcher discovery and in-process shell bridge contracts are protected.'
