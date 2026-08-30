@@ -7,7 +7,7 @@ $paths = @{
     SurfaceHeader = Join-Path $root 'desktop\CloudOS.NativeShell\src\native_desktop_surface.h'
     Desktop = Join-Path $root 'desktop\CloudOS.NativeShell\src\native_desktop_window_v2.cpp'
     Start = Join-Path $root 'desktop\CloudOS.NativeShell\src\native_start_menu_window.cpp'
-    Taskbar = Join-Path $root 'desktop\CloudOS.NativeShell\src\native_taskbar_appbar.cpp'
+    Taskbar = Join-Path $root 'desktop\CloudOS.NativeShell\src\native_taskbar_appbar_v4.cpp'
     Pins = Join-Path $root 'desktop\CloudOS.NativeShell\src\native_shell_pins.cpp'
     Theme = Join-Path $root 'desktop\CloudOS.NativeShell\src\native_theme.h'
     Browser = Join-Path $root 'desktop\CloudOS.NativeShell\src\native_browser_window.cpp'
@@ -46,7 +46,6 @@ function Forbid-Tokens([string]$Name, [string]$Text, [string[]]$Tokens) {
     }
 }
 
-# C++/Win32 is the authority. The old web app is only a visual specification.
 Require-Tokens 'Main native authority' $content.Main @(
     'CloudOSDesktopSurface desktop_',
     'CloudOSNativeWindowManager window_manager_',
@@ -78,12 +77,13 @@ Require-Tokens 'Native build graph' $content.Project @(
     'src\native_desktop_surface.cpp',
     'src\native_desktop_window_v2.cpp',
     'src\native_start_menu_window.cpp',
-    'src\native_taskbar_appbar.cpp',
+    'src\native_taskbar_appbar_v4.cpp',
     'src\native_shell_pins.cpp',
     'src\native_browser_window.cpp',
     'Microsoft.Web.WebView2'
 )
 Forbid-Tokens 'Native build graph' $content.Project @(
+    '<ClCompile Include="src\native_taskbar_appbar.cpp"',
     '<ClCompile Include="src\native_web_desktop_window.cpp"',
     '<ClCompile Include="src\native_webview_host.cpp"',
     '<ClInclude Include="src\native_web_desktop_window.h"',
@@ -103,7 +103,6 @@ if (-not $content.Packages.Contains('Microsoft.Web.WebView2') -or
     throw 'Pinned Microsoft.Web.WebView2 package for the native Browser is missing.'
 }
 
-# WebSkin mirrors the old frontend palette/material system, while behavior stays native.
 Require-Tokens 'Unified native WebSkin' $content.Theme @(
     'namespace WebSkin',
     'RGB(10, 10, 15)',
@@ -128,14 +127,17 @@ Require-Tokens 'Native Start V4 skin/functionality' $content.Start @(
     'ShowResultContextMenu',
     'WebSkin::Accent'
 )
-Require-Tokens 'Native Taskbar V3 skin/functionality' $content.Taskbar @(
-    'CloudOS.NativeShell.Taskbar.v3',
+Require-Tokens 'Native Taskbar V4 skin/functionality' $content.Taskbar @(
+    'CloudOS.NativeShell.Taskbar.v4',
     'SHAppBarMessage(ABM_NEW',
     'kTaskbarHeightDip = 68',
     'ShellPinStore::Instance().TaskbarPins()',
     'TaskGroup',
     'ShowTaskContextMenu',
+    'ShowTaskOverflowMenu',
     'MoveTaskbar',
+    'DrawStartGlyph',
+    'DrawQuickGlyph',
     'WebSkin::BgPrimary',
     'WebSkin::Accent'
 )
@@ -152,7 +154,7 @@ Require-Tokens 'Native Desktop skin' $content.Desktop @(
     'NativeDesktopDropTarget::Register'
 )
 
-# Preserve old web sources strictly as the visual reference.
+# The old frontend remains only a design specification for the native surfaces.
 Require-Tokens 'Legacy CSS design reference' $content.FrontendCss @(
     '--accent: #6366f1',
     '--bg-solid: #0a0a0f',
@@ -174,4 +176,4 @@ Require-Tokens 'Unified WebSkin documentation' $content.WebSkinDoc @(
     'não volta a controlar Desktop, Taskbar, Start'
 )
 
-Write-Host 'PASS: old web UI remains design-reference-only; Start V4 and Taskbar V3 are native, persistent and WebSkin-styled; WebView2 stays scoped to Browser.'
+Write-Host 'PASS: old web UI remains design-reference-only; Start V4 and Taskbar V4 are native, persistent and WebSkin-styled; WebView2 stays scoped to Browser.'
