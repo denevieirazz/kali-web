@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "native_session_events_v7.h"
 #include "native_window_manager.h"
 
 namespace CloudOS
