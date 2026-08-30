@@ -122,6 +122,105 @@ void Deduplicate(Collection& items)
     }
     items = std::move(unique);
 }
+
+std::wstring BackupPath(const std::wstring& storage)
+{
+    return storage.empty() ? std::wstring{} : storage + L".bak";
+}
+
+bool ReadStoreFile(
+    const std::wstring& path,
+    std::vector<ShellPinItem>& start,
+    std::vector<ShellPinItem>& taskbar)
+{
+    if (path.empty())
+    {
+        return false;
+    }
+
+    HANDLE file = CreateFileW(
+        path.c_str(),
+        GENERIC_READ,
+        FILE_SHARE_READ,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN,
+        nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+    {
+        return false;
+    }
+
+    std::uint32_t magic = 0;
+    std::uint32_t version = 0;
+    std::uint32_t start_count = 0;
+    std::uint32_t taskbar_count = 0;
+    bool valid = ReadExact(file, &magic, sizeof(magic)) &&
+        ReadExact(file, &version, sizeof(version)) &&
+        ReadExact(file, &start_count, sizeof(start_count)) &&
+        ReadExact(file, &taskbar_count, sizeof(taskbar_count)) &&
+        magic == kMagic && version == kVersion &&
+        start_count <= kMaxPins && taskbar_count <= kMaxPins;
+
+    std::vector<ShellPinItem> loaded_start;
+    std::vector<ShellPinItem> loaded_taskbar;
+    if (valid)
+    {
+        loaded_start.reserve(start_count);
+        for (std::uint32_t index = 0; index < start_count; ++index)
+        {
+            ShellPinItem item{};
+            if (!ReadPin(file, item))
+            {
+                valid = false;
+                break;
+            }
+            const bool usable = item.kind == ShellPinKind::CloudOSApp
+                ? !item.id.empty()
+                : !item.target.empty();
+            if (!usable)
+            {
+                valid = false;
+                break;
+            }
+            loaded_start.push_back(std::move(item));
+        }
+    }
+    if (valid)
+    {
+        loaded_taskbar.reserve(taskbar_count);
+        for (std::uint32_t index = 0; index < taskbar_count; ++index)
+        {
+            ShellPinItem item{};
+            if (!ReadPin(file, item))
+            {
+                valid = false;
+                break;
+            }
+            const bool usable = item.kind == ShellPinKind::CloudOSApp
+                ? !item.id.empty()
+                : !item.target.empty();
+            if (!usable)
+            {
+                valid = false;
+                break;
+            }
+            loaded_taskbar.push_back(std::move(item));
+        }
+    }
+    CloseHandle(file);
+
+    if (!valid)
+    {
+        return false;
+    }
+
+    Deduplicate(loaded_start);
+    Deduplicate(loaded_taskbar);
+    start = std::move(loaded_start);
+    taskbar = std::move(loaded_taskbar);
+    return true;
+}
 }
 
 ShellPinStore& ShellPinStore::Instance()
@@ -192,72 +291,30 @@ void ShellPinStore::Load()
         return;
     }
 
-    HANDLE file = CreateFileW(
-        storage_path_.c_str(),
-        GENERIC_READ,
-        FILE_SHARE_READ,
-        nullptr,
-        OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN,
-        nullptr);
-    if (file == INVALID_HANDLE_VALUE)
-    {
-        return;
-    }
-
-    std::uint32_t magic = 0;
-    std::uint32_t version = 0;
-    std::uint32_t start_count = 0;
-    std::uint32_t taskbar_count = 0;
-    bool valid = ReadExact(file, &magic, sizeof(magic)) &&
-        ReadExact(file, &version, sizeof(version)) &&
-        ReadExact(file, &start_count, sizeof(start_count)) &&
-        ReadExact(file, &taskbar_count, sizeof(taskbar_count)) &&
-        magic == kMagic && version == kVersion &&
-        start_count <= kMaxPins && taskbar_count <= kMaxPins;
-
     std::vector<ShellPinItem> start;
     std::vector<ShellPinItem> taskbar;
-    if (valid)
+    bool recovered_from_backup = false;
+    if (!ReadStoreFile(storage_path_, start, taskbar))
     {
-        start.reserve(start_count);
-        for (std::uint32_t index = 0; index < start_count; ++index)
+        const std::wstring backup = BackupPath(storage_path_);
+        recovered_from_backup = ReadStoreFile(backup, start, taskbar);
+        if (!recovered_from_backup)
         {
-            ShellPinItem item{};
-            if (!ReadPin(file, item) || !IsUsable(item))
-            {
-                valid = false;
-                break;
-            }
-            start.push_back(std::move(item));
+            return;
         }
     }
-    if (valid)
-    {
-        taskbar.reserve(taskbar_count);
-        for (std::uint32_t index = 0; index < taskbar_count; ++index)
-        {
-            ShellPinItem item{};
-            if (!ReadPin(file, item) || !IsUsable(item))
-            {
-                valid = false;
-                break;
-            }
-            taskbar.push_back(std::move(item));
-        }
-    }
-    CloseHandle(file);
 
-    if (!valid)
     {
-        return;
+        std::scoped_lock lock(mutex_);
+        start_pins_ = std::move(start);
+        taskbar_pins_ = std::move(taskbar);
     }
 
-    Deduplicate(start);
-    Deduplicate(taskbar);
-    std::scoped_lock lock(mutex_);
-    start_pins_ = std::move(start);
-    taskbar_pins_ = std::move(taskbar);
+    if (recovered_from_backup)
+    {
+        const std::wstring backup = BackupPath(storage_path_);
+        (void)CopyFileW(backup.c_str(), storage_path_.c_str(), FALSE);
+    }
 }
 
 void ShellPinStore::EnsureDefaultsLocked()
@@ -341,7 +398,11 @@ void ShellPinStore::SaveLocked() const
             MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
     {
         (void)DeleteFileW(temporary.c_str());
+        return;
     }
+
+    const std::wstring backup = BackupPath(storage_path_);
+    (void)CopyFileW(storage_path_.c_str(), backup.c_str(), FALSE);
 }
 
 std::vector<ShellPinItem> ShellPinStore::StartPins() const
