@@ -1,6 +1,7 @@
 #include "native_desktop_context_menu.h"
 
 #include "native_app_launcher.h"
+#include "native_file_operations_window.h"
 #include "native_files_window.h"
 #include "native_notification_center.h"
 #include "native_terminal_window.h"
@@ -27,6 +28,7 @@ constexpr UINT kResetWallpaper = 9108;
 constexpr UINT kDisplaySettings = 9109;
 constexpr UINT kPersonalization = 9110;
 constexpr UINT kAutoArrange = 9111;
+constexpr UINT kFileOperations = 9112;
 
 std::wstring DesktopPath()
 {
@@ -155,16 +157,17 @@ bool NativeDesktopContextMenu::Show(
     InsertMenuW(menu, 1, MF_BYPOSITION | MF_STRING, kNewText, L"Novo arquivo de texto");
     InsertMenuW(menu, 2, MF_BYPOSITION | MF_SEPARATOR, 0, nullptr);
     InsertMenuW(menu, 3, MF_BYPOSITION | MF_STRING, kOpenFiles, L"Abrir Area de Trabalho em Arquivos");
-    InsertMenuW(menu, 4, MF_BYPOSITION | MF_STRING, kOpenTerminal, L"Abrir no Terminal");
-    InsertMenuW(menu, 5, MF_BYPOSITION | MF_STRING, kCommandCenter, L"Central de Comandos");
-    InsertMenuW(menu, 6, MF_BYPOSITION | MF_SEPARATOR, 0, nullptr);
-    InsertMenuW(menu, 7, MF_BYPOSITION | MF_STRING, kWallpaper, L"Mudar wallpaper...");
-    InsertMenuW(menu, 8, MF_BYPOSITION | MF_STRING, kResetWallpaper, L"Restaurar wallpaper padrao");
-    InsertMenuW(menu, 9, MF_BYPOSITION | MF_STRING, kDisplaySettings, L"Configuracoes de tela");
-    InsertMenuW(menu, 10, MF_BYPOSITION | MF_STRING, kPersonalization, L"Personalizacao do Windows");
-    InsertMenuW(menu, 11, MF_BYPOSITION | MF_SEPARATOR, 0, nullptr);
-    InsertMenuW(menu, 12, MF_BYPOSITION | MF_STRING | MF_CHECKED, kAutoArrange, L"Organizar icones automaticamente");
-    InsertMenuW(menu, 13, MF_BYPOSITION | MF_STRING, kRefresh, L"Atualizar");
+    InsertMenuW(menu, 4, MF_BYPOSITION | MF_STRING, kFileOperations, L"Operacoes de arquivos / ZIP...");
+    InsertMenuW(menu, 5, MF_BYPOSITION | MF_STRING, kOpenTerminal, L"Abrir no Terminal");
+    InsertMenuW(menu, 6, MF_BYPOSITION | MF_STRING, kCommandCenter, L"Central de Comandos");
+    InsertMenuW(menu, 7, MF_BYPOSITION | MF_SEPARATOR, 0, nullptr);
+    InsertMenuW(menu, 8, MF_BYPOSITION | MF_STRING, kWallpaper, L"Mudar wallpaper...");
+    InsertMenuW(menu, 9, MF_BYPOSITION | MF_STRING, kResetWallpaper, L"Restaurar wallpaper padrao");
+    InsertMenuW(menu, 10, MF_BYPOSITION | MF_STRING, kDisplaySettings, L"Configuracoes de tela");
+    InsertMenuW(menu, 11, MF_BYPOSITION | MF_STRING, kPersonalization, L"Personalizacao do Windows");
+    InsertMenuW(menu, 12, MF_BYPOSITION | MF_SEPARATOR, 0, nullptr);
+    InsertMenuW(menu, 13, MF_BYPOSITION | MF_STRING | MF_CHECKED, kAutoArrange, L"Organizar icones automaticamente");
+    InsertMenuW(menu, 14, MF_BYPOSITION | MF_STRING, kRefresh, L"Atualizar");
 
     SetForegroundWindow(owner);
     const int command = TrackPopupMenu(
@@ -192,6 +195,9 @@ bool NativeDesktopContextMenu::Show(
         }
         return false;
     }
+    case kFileOperations:
+        CloudOSNativeFileOperationsWindow::Open(instance, DesktopPath());
+        return false;
     case kOpenTerminal:
         OpenTerminalAtDesktop(instance);
         return false;
