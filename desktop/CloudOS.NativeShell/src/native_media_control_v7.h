@@ -6,6 +6,7 @@
 #include <winrt/Windows.Media.Control.h>
 #include <winrt/Windows.Storage.Streams.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -80,12 +81,11 @@ public:
                     next.can_seek = controls.IsPlaybackPositionEnabled();
 
                     const auto timeline = session.GetTimelineProperties();
-                    next.position_ms = std::max<std::int64_t>(
-                        0,
-                        std::chrono::duration_cast<std::chrono::milliseconds>(timeline.Position()).count());
                     const auto start_ms = std::chrono::duration_cast<std::chrono::milliseconds>(timeline.StartTime()).count();
+                    const auto position_ms = std::chrono::duration_cast<std::chrono::milliseconds>(timeline.Position()).count();
                     const auto end_ms = std::chrono::duration_cast<std::chrono::milliseconds>(timeline.EndTime()).count();
                     next.duration_ms = std::max<std::int64_t>(0, end_ms - start_ms);
+                    next.position_ms = std::max<std::int64_t>(0, position_ms - start_ms);
                     if (next.duration_ms > 0)
                         next.position_ms = std::min(next.position_ms, next.duration_ms);
 
@@ -102,7 +102,9 @@ public:
                             if (loaded > 0)
                             {
                                 next.artwork.resize(loaded);
-                                reader.ReadBytes(winrt::array_view<std::uint8_t>(next.artwork));
+                                reader.ReadBytes(winrt::array_view<std::uint8_t>(
+                                    next.artwork.data(),
+                                    next.artwork.data() + next.artwork.size()));
                             }
                             reader.Close();
                         }
@@ -137,8 +139,10 @@ public:
                 const auto manager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync().get();
                 const auto session = manager.GetCurrentSession();
                 if (!session) return;
+                const auto timeline = session.GetTimelineProperties();
+                const auto start_ms = std::chrono::duration_cast<std::chrono::milliseconds>(timeline.StartTime()).count();
                 const std::int64_t safe_ms = std::max<std::int64_t>(0, position_ms);
-                (void)session.TryChangePlaybackPositionAsync(safe_ms * 10000LL).get();
+                (void)session.TryChangePlaybackPositionAsync((start_ms + safe_ms) * 10000LL).get();
                 RefreshAsync();
             }
             catch (...)
