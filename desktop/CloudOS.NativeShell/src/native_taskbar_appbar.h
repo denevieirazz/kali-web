@@ -2,8 +2,10 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <functional>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <vector>
