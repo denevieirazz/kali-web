@@ -129,7 +129,7 @@
     <ClCompile Include="src\native_system_monitor_window.cpp" />
     <ClCompile Include="src\native_system_stats.cpp" />
     <ClCompile Include="src\native_task_switcher_window.cpp" />
-    <ClCompile Include="src\native_taskbar_appbar.cpp" />
+    <ClCompile Include="src\native_taskbar_appbar_v4.cpp" />
     <ClCompile Include="src\native_taskbar_hover_preview.cpp" />
     <ClCompile Include="src\native_terminal_window.cpp" />
     <ClCompile Include="src\native_wallpaper_manager.cpp" />
