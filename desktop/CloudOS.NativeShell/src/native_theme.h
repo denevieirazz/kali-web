@@ -23,10 +23,9 @@ constexpr UINT_PTR kMetricsTimer = 2;
 
 namespace WebSkin
 {
-// Visual Experience V6 foundation.  The old palette was intentionally close
-// to the reference frontend, but in native Win32 it read too flat.  These
-// values keep the CloudOS indigo identity while introducing real surface
-// hierarchy, colder graphite backgrounds and brighter foreground contrast.
+// Visual Experience V7 foundation. The shell stays native Win32/DWM, but the
+// material system now carries Fluent-style reveal lighting, stronger depth,
+// ambient color and motion primitives instead of flat dark rectangles.
 constexpr COLORREF BgSolid = RGB(5, 7, 12);
 constexpr COLORREF BgPrimary = RGB(9, 13, 21);
 constexpr COLORREF BgSecondary = RGB(14, 20, 31);
@@ -51,13 +50,34 @@ constexpr int RadiusSmall = 6;
 constexpr int RadiusMedium = 10;
 constexpr int RadiusLarge = 14;
 constexpr int RadiusXL = 20;
+constexpr UINT MotionFrameMilliseconds = 8; // target cadence; compositor decides final refresh cadence.
 constexpr UINT_PTR WindowSubclassId = 0xC10D5A11;
 
 enum class ButtonTone { Neutral, Accent, Danger };
 
 inline Gdiplus::Color GdiColor(COLORREF color, BYTE alpha = 255) noexcept
 {
-    return Gdiplus::Color(alpha, GetRValue(color), GetGValue(color), GetBValue(color));
+    const BYTE red = static_cast<BYTE>(color & 0xFFu);
+    const BYTE green = static_cast<BYTE>((color >> 8u) & 0xFFu);
+    const BYTE blue = static_cast<BYTE>((color >> 16u) & 0xFFu);
+    return Gdiplus::Color(alpha, red, green, blue);
+}
+
+inline float ClampUnit(float value) noexcept
+{
+    return std::clamp(value, 0.0f, 1.0f);
+}
+
+inline float EaseOutCubic(float value) noexcept
+{
+    const float t = 1.0f - ClampUnit(value);
+    return 1.0f - t * t * t;
+}
+
+inline float EaseOutQuint(float value) noexcept
+{
+    const float t = 1.0f - ClampUnit(value);
+    return 1.0f - t * t * t * t * t;
 }
 
 inline void DrawRoundedPanel(
@@ -90,6 +110,56 @@ inline void DrawRoundedPanel(
     }
 }
 
+inline void DrawRevealHighlight(
+    Gdiplus::Graphics& graphics,
+    const Gdiplus::RectF& clip_rect,
+    const Gdiplus::PointF& cursor,
+    float radius,
+    Gdiplus::Color center_color)
+{
+    if (clip_rect.Width <= 0.0f || clip_rect.Height <= 0.0f || radius <= 1.0f) return;
+
+    const float reach = radius * 0.55f;
+    if (cursor.X < clip_rect.X - reach || cursor.X > clip_rect.GetRight() + reach ||
+        cursor.Y < clip_rect.Y - reach || cursor.Y > clip_rect.GetBottom() + reach)
+    {
+        return;
+    }
+
+    const Gdiplus::GraphicsState state = graphics.Save();
+    graphics.SetClip(clip_rect);
+
+    Gdiplus::GraphicsPath halo_path;
+    const Gdiplus::RectF halo(
+        cursor.X - radius,
+        cursor.Y - radius,
+        radius * 2.0f,
+        radius * 2.0f);
+    halo_path.AddEllipse(halo);
+    Gdiplus::PathGradientBrush halo_brush(&halo_path);
+    halo_brush.SetCenterPoint(cursor);
+    halo_brush.SetCenterColor(center_color);
+    Gdiplus::Color edge_color(0, center_color.GetR(), center_color.GetG(), center_color.GetB());
+    INT surround_count = 1;
+    halo_brush.SetSurroundColors(&edge_color, &surround_count);
+    graphics.FillEllipse(&halo_brush, halo);
+    graphics.Restore(state);
+}
+
+inline bool CursorInControl(HWND control, Gdiplus::PointF* point) noexcept
+{
+    if (control == nullptr || point == nullptr) return false;
+    POINT cursor{};
+    if (!GetCursorPos(&cursor) || !ScreenToClient(control, &cursor)) return false;
+    RECT client{};
+    if (!GetClientRect(control, &client)) return false;
+    *point = Gdiplus::PointF(
+        static_cast<Gdiplus::REAL>(cursor.x),
+        static_cast<Gdiplus::REAL>(cursor.y));
+    return cursor.x >= -96 && cursor.y >= -96 &&
+        cursor.x <= client.right + 96 && cursor.y <= client.bottom + 96;
+}
+
 inline void DrawElevatedPanel(
     Gdiplus::Graphics& graphics,
     const Gdiplus::RectF& rect,
@@ -100,7 +170,6 @@ inline void DrawElevatedPanel(
 {
     if (rect.Width <= 0.0f || rect.Height <= 0.0f) return;
     Gdiplus::RectF shadow = rect;
-    shadow.X += 0.0f;
     shadow.Y += 4.0f;
     DrawRoundedPanel(
         graphics,
@@ -126,7 +195,9 @@ inline void DrawElevatedPanel(
     }
     DrawRoundedPanel(graphics, rect, radius, fill, border, 1.0f);
 
-    Gdiplus::Pen highlight(Gdiplus::Color(40, 255, 255, 255), 1.0f);
+    // Specular light edge: a small bright edge at the top makes elevation read
+    // even on near-black monitors without turning every border neon.
+    Gdiplus::Pen highlight(Gdiplus::Color(42, 255, 255, 255), 1.0f);
     const float inset = std::max(8.0f, radius * 0.65f);
     graphics.DrawLine(
         &highlight,
@@ -288,6 +359,22 @@ inline bool PaintOwnerDrawButton(const DRAWITEMSTRUCT* draw, ButtonTone tone = B
         GdiColor(border),
         tone == ButtonTone::Accent && !disabled);
 
+    // Fluent Reveal Highlight. GetCursorPos lets the native control participate
+    // without a web event loop; the radial light is clipped to the button.
+    Gdiplus::PointF cursor{};
+    if (!disabled && CursorInControl(draw->hwndItem, &cursor))
+    {
+        const BYTE alpha = hot ? static_cast<BYTE>(72) : static_cast<BYTE>(42);
+        DrawRevealHighlight(
+            graphics,
+            rect,
+            cursor,
+            76.0f,
+            tone == ButtonTone::Danger
+                ? GdiColor(Danger, alpha)
+                : GdiColor(tone == ButtonTone::Accent ? AccentCyan : AccentHover, alpha));
+    }
+
     wchar_t caption[256]{};
     GetWindowTextW(draw->hwndItem, caption, static_cast<int>(std::size(caption)));
     HGDIOBJ previous_font = nullptr;
@@ -323,7 +410,6 @@ inline LRESULT CALLBACK WindowSkinSubclass(
     {
     case WM_DRAWITEM:
     {
-        // Give an app-specific handler first refusal (Start/Quick Settings/etc.).
         const LRESULT app_result = DefSubclassProc(window, message, w_param, l_param);
         if (app_result != 0) return app_result;
         if (PaintOwnerDrawButton(reinterpret_cast<const DRAWITEMSTRUCT*>(l_param), ButtonTone::Neutral)) return TRUE;
@@ -472,15 +558,23 @@ inline void ApplyWebFlyoutMaterial(HWND window)
 {
     if (window == nullptr) return;
     DarkWindow(window, true);
-    const int transient_backdrop = 3;
-    (void)DwmSetWindowAttribute(window, static_cast<DWMWINDOWATTRIBUTE>(38), &transient_backdrop, static_cast<DWORD>(sizeof(transient_backdrop)));
+    const DWM_SYSTEMBACKDROP_TYPE transient_backdrop = DWMSBT_TRANSIENTWINDOW;
+    (void)DwmSetWindowAttribute(
+        window,
+        DWMWA_SYSTEMBACKDROP_TYPE,
+        &transient_backdrop,
+        static_cast<DWORD>(sizeof(transient_backdrop)));
 }
 
 inline void ApplyWebWindowMaterial(HWND window)
 {
     if (window == nullptr) return;
     DarkWindow(window, true);
-    const int main_backdrop = 2;
-    (void)DwmSetWindowAttribute(window, static_cast<DWMWINDOWATTRIBUTE>(38), &main_backdrop, static_cast<DWORD>(sizeof(main_backdrop)));
+    const DWM_SYSTEMBACKDROP_TYPE main_backdrop = DWMSBT_MAINWINDOW;
+    (void)DwmSetWindowAttribute(
+        window,
+        DWMWA_SYSTEMBACKDROP_TYPE,
+        &main_backdrop,
+        static_cast<DWORD>(sizeof(main_backdrop)));
 }
 } // namespace CloudOS
