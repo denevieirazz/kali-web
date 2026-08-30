@@ -33,11 +33,12 @@ jobs:
             }
           }
 
-      - name: Validate native shell and WebSkin contracts
+      - name: Validate native shell, WebSkin and productivity contracts
         shell: pwsh
         run: |
           ./scripts/native/test-cloudos-native-shell-contracts.ps1
           ./scripts/native/test-native-web-ui-contract.ps1
+          ./scripts/native/test-taskbar-productivity-contract.ps1
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
