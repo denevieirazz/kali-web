@@ -67,6 +67,10 @@ private:
     void ExecuteSelection();
     void ExecutePin(const ShellPinItem& pin);
     void MoveSelection(int delta);
+    void MoveHomeSelection(int horizontal, int vertical);
+    void SelectHomeEdge(bool last);
+    void ActivateHomeSelection();
+    void ShowHomeSelectionContextMenu();
     void RefreshIndexer();
     void RebuildRowHeight();
     void ToggleAllApps();
@@ -113,5 +117,6 @@ private:
     int hovered_home_index_{-1};
     bool tracking_mouse_{};
     bool search_focused_{};
+    bool keyboard_home_navigation_{};
 };
 } // namespace CloudOS
