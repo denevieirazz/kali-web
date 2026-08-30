@@ -10,6 +10,8 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <cwchar>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -37,6 +39,16 @@ inline HWINEVENTHOOK show_hook{};
 inline int ScaleDip(int value, UINT dpi) noexcept
 {
     return MulDiv(value, static_cast<int>(dpi == 0 ? 96 : dpi), 96);
+}
+
+inline int RectWidth(const RECT& rect) noexcept
+{
+    return std::max<int>(0, static_cast<int>(rect.right - rect.left));
+}
+
+inline int RectHeight(const RECT& rect) noexcept
+{
+    return std::max<int>(0, static_cast<int>(rect.bottom - rect.top));
 }
 
 inline std::wstring FormatTime(std::int64_t milliseconds)
@@ -67,8 +79,8 @@ inline PanelRects Rects(HWND window)
     RECT client{};
     GetClientRect(window, &client);
     const UINT dpi = GetDpiForWindow(window);
-    const int width = std::max<LONG>(1, client.right - client.left);
-    const int height = std::max<LONG>(1, client.bottom - client.top);
+    const int width = std::max<int>(1, static_cast<int>(client.right - client.left));
+    const int height = std::max<int>(1, static_cast<int>(client.bottom - client.top));
     const int margin = ScaleDip(8, dpi);
     const int artwork_size = std::max(1, height - margin * 2);
     const int button = ScaleDip(28, dpi);
@@ -120,8 +132,8 @@ inline bool DrawArtworkBytes(
     bool drawn = false;
     if (image.GetLastStatus() == Gdiplus::Ok && image.GetWidth() > 0 && image.GetHeight() > 0)
     {
-        const Gdiplus::REAL dest_width = static_cast<Gdiplus::REAL>(destination.right - destination.left);
-        const Gdiplus::REAL dest_height = static_cast<Gdiplus::REAL>(destination.bottom - destination.top);
+        const Gdiplus::REAL dest_width = static_cast<Gdiplus::REAL>(RectWidth(destination));
+        const Gdiplus::REAL dest_height = static_cast<Gdiplus::REAL>(RectHeight(destination));
         const Gdiplus::REAL source_width = static_cast<Gdiplus::REAL>(image.GetWidth());
         const Gdiplus::REAL source_height = static_cast<Gdiplus::REAL>(image.GetHeight());
         const Gdiplus::REAL scale = std::max(dest_width / source_width, dest_height / source_height);
@@ -172,9 +184,9 @@ inline void SeekFromPoint(POINT point, bool commit)
 {
     if (panel == nullptr || snapshot.duration_ms <= 0) return;
     const PanelRects rects = Rects(panel);
-    const int width = std::max(1, rects.timeline.right - rects.timeline.left);
+    const int width = std::max<int>(1, RectWidth(rects.timeline));
     const double ratio = std::clamp(
-        static_cast<double>(point.x - rects.timeline.left) / static_cast<double>(width),
+        static_cast<double>(static_cast<int>(point.x - rects.timeline.left)) / static_cast<double>(width),
         0.0,
         1.0);
     snapshot.position_ms = static_cast<std::int64_t>(ratio * static_cast<double>(snapshot.duration_ms));
@@ -195,8 +207,8 @@ inline void DrawControl(
         Gdiplus::RectF(
             static_cast<Gdiplus::REAL>(rect.left),
             static_cast<Gdiplus::REAL>(rect.top),
-            static_cast<Gdiplus::REAL>(rect.right - rect.left),
-            static_cast<Gdiplus::REAL>(rect.bottom - rect.top)),
+            static_cast<Gdiplus::REAL>(RectWidth(rect)),
+            static_cast<Gdiplus::REAL>(RectHeight(rect))),
         8.0f,
         WebSkin::GdiColor(accent ? WebSkin::Accent : WebSkin::BgTertiary, enabled ? 245 : 150),
         WebSkin::GdiColor(accent ? WebSkin::AccentHover : WebSkin::BorderStrong, enabled ? 255 : 120),
@@ -213,8 +225,8 @@ inline void DrawControl(
         Gdiplus::RectF(
             static_cast<Gdiplus::REAL>(rect.left),
             static_cast<Gdiplus::REAL>(rect.top),
-            static_cast<Gdiplus::REAL>(rect.right - rect.left),
-            static_cast<Gdiplus::REAL>(rect.bottom - rect.top)),
+            static_cast<Gdiplus::REAL>(RectWidth(rect)),
+            static_cast<Gdiplus::REAL>(RectHeight(rect))),
         &format,
         &brush);
 }
@@ -225,8 +237,8 @@ inline void PaintPanel(HWND window)
     HDC dc = BeginPaint(window, &paint);
     RECT client{};
     GetClientRect(window, &client);
-    const int width = std::max<LONG>(1, client.right - client.left);
-    const int height = std::max<LONG>(1, client.bottom - client.top);
+    const int width = std::max<int>(1, static_cast<int>(client.right - client.left));
+    const int height = std::max<int>(1, static_cast<int>(client.bottom - client.top));
 
     HDC memory_dc = CreateCompatibleDC(dc);
     HBITMAP bitmap = CreateCompatibleBitmap(dc, width, height);
@@ -246,8 +258,8 @@ inline void PaintPanel(HWND window)
             Gdiplus::RectF(
                 static_cast<Gdiplus::REAL>(rects.artwork.left),
                 static_cast<Gdiplus::REAL>(rects.artwork.top),
-                static_cast<Gdiplus::REAL>(rects.artwork.right - rects.artwork.left),
-                static_cast<Gdiplus::REAL>(rects.artwork.bottom - rects.artwork.top)),
+                static_cast<Gdiplus::REAL>(RectWidth(rects.artwork)),
+                static_cast<Gdiplus::REAL>(RectHeight(rects.artwork))),
             12.0f,
             WebSkin::GdiColor(WebSkin::AccentSubtle, 255),
             WebSkin::GdiColor(WebSkin::BorderStrong, 255),
@@ -264,14 +276,14 @@ inline void PaintPanel(HWND window)
             Gdiplus::RectF(
                 static_cast<Gdiplus::REAL>(rects.artwork.left),
                 static_cast<Gdiplus::REAL>(rects.artwork.top),
-                static_cast<Gdiplus::REAL>(rects.artwork.right - rects.artwork.left),
-                static_cast<Gdiplus::REAL>(rects.artwork.bottom - rects.artwork.top)),
+                static_cast<Gdiplus::REAL>(RectWidth(rects.artwork)),
+                static_cast<Gdiplus::REAL>(RectHeight(rects.artwork))),
             &center,
             &icon_brush);
     }
 
-    const int text_left = rects.artwork.right + 10;
-    const int text_right = std::max(text_left + 1, rects.previous.left - 8);
+    const int text_left = static_cast<int>(rects.artwork.right) + 10;
+    const int text_right = std::max<int>(text_left + 1, static_cast<int>(rects.previous.left) - 8);
     Gdiplus::Font title_font(L"Segoe UI Variable Text", 12.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
     Gdiplus::Font meta_font(L"Segoe UI Variable Text", 9.5f, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
     Gdiplus::SolidBrush title_brush(WebSkin::GdiColor(WebSkin::TextPrimary));
@@ -308,7 +320,7 @@ inline void PaintPanel(HWND window)
         -1,
         &meta_font,
         Gdiplus::RectF(static_cast<Gdiplus::REAL>(text_left), 30.0f,
-            static_cast<Gdiplus::REAL>(width - text_left - 8), 18.0f),
+            static_cast<Gdiplus::REAL>(std::max(1, width - text_left - 8)), 18.0f),
         &ellipsis,
         &meta_brush);
 
@@ -316,24 +328,29 @@ inline void PaintPanel(HWND window)
     DrawControl(graphics, rects.toggle, snapshot.playing ? L"Ⅱ" : L"▶", true, snapshot.can_toggle);
     DrawControl(graphics, rects.next, L"›", false, snapshot.can_next);
 
-    const int timeline_width = std::max(1, rects.timeline.right - rects.timeline.left);
+    const int timeline_width = std::max<int>(1, RectWidth(rects.timeline));
     const double ratio = snapshot.duration_ms > 0
         ? std::clamp(static_cast<double>(snapshot.position_ms) / static_cast<double>(snapshot.duration_ms), 0.0, 1.0)
         : 0.0;
-    const int progress = static_cast<int>(ratio * timeline_width);
+    const int progress = static_cast<int>(ratio * static_cast<double>(timeline_width));
+    const int track_height = std::max<int>(2, RectHeight(rects.timeline) - 4);
     Gdiplus::SolidBrush track(WebSkin::GdiColor(WebSkin::BgActive, 255));
     Gdiplus::SolidBrush fill(WebSkin::GdiColor(WebSkin::AccentHover, 255));
-    graphics.FillRectangle(&track,
-        rects.timeline.left,
-        rects.timeline.top + 2,
+    graphics.FillRectangle(
+        &track,
+        static_cast<INT>(rects.timeline.left),
+        static_cast<INT>(rects.timeline.top + 2),
         timeline_width,
-        std::max(2, rects.timeline.bottom - rects.timeline.top - 4));
+        track_height);
     if (progress > 0)
-        graphics.FillRectangle(&fill,
-            rects.timeline.left,
-            rects.timeline.top + 2,
+    {
+        graphics.FillRectangle(
+            &fill,
+            static_cast<INT>(rects.timeline.left),
+            static_cast<INT>(rects.timeline.top + 2),
             progress,
-            std::max(2, rects.timeline.bottom - rects.timeline.top - 4));
+            track_height);
+    }
 
     const std::wstring time = FormatTime(snapshot.position_ms) + L" / " + FormatTime(snapshot.duration_ms);
     graphics.DrawString(
@@ -428,7 +445,7 @@ inline void Layout(HWND parent)
     GetClientRect(parent, &client);
     const UINT dpi = GetDpiForWindow(parent);
     const int margin = ScaleDip(22, dpi);
-    const int width = std::max(1, static_cast<int>(client.right - client.left) - margin * 2);
+    const int width = std::max<int>(1, static_cast<int>(client.right - client.left) - margin * 2);
     MoveWindow(panel, margin, ScaleDip(82, dpi), width, ScaleDip(94, dpi), TRUE);
     SetWindowPos(panel, HWND_TOP, 0, 0, 0, 0,
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
@@ -438,7 +455,7 @@ inline LRESULT CALLBACK ParentSubclass(
     HWND parent,
     UINT message,
     WPARAM w_param,
-    LPARAM l_param,
+    LPARAM,
     UINT_PTR subclass_id,
     DWORD_PTR)
 {
@@ -469,7 +486,7 @@ inline LRESULT CALLBACK ParentSubclass(
     default:
         break;
     }
-    return DefSubclassProc(parent, message, w_param, l_param);
+    return DefSubclassProc(parent, message, w_param, 0);
 }
 
 inline bool EnsurePanelClass(HINSTANCE instance)
