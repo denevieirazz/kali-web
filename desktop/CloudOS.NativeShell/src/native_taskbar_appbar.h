@@ -215,6 +215,15 @@ private:
     bool drag_pin_moved_{};
     bool tracking_mouse_{};
 
+    // Shell Experience V8: the workspace selector now has a compositor-like
+    // sliding indicator instead of hard switching between four static pills.
+    // The timer only runs for the short transition, so idle CPU stays quiet.
+    int workspace_indicator_index_{-1};
+    int workspace_motion_from_{-1};
+    int workspace_motion_to_{-1};
+    ULONGLONG workspace_motion_started_{};
+    bool workspace_motion_active_{};
+
     AnchorCallback on_start_;
     AnchorCallback on_quick_settings_;
     AnchorCallback on_notifications_;
