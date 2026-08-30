@@ -8,6 +8,7 @@ $paths = @{
     Desktop = Join-Path $root 'desktop\CloudOS.NativeShell\src\native_desktop_window_v2.cpp'
     Start = Join-Path $root 'desktop\CloudOS.NativeShell\src\native_start_menu_window.cpp'
     Taskbar = Join-Path $root 'desktop\CloudOS.NativeShell\src\native_taskbar_appbar.cpp'
+    Pins = Join-Path $root 'desktop\CloudOS.NativeShell\src\native_shell_pins.cpp'
     Theme = Join-Path $root 'desktop\CloudOS.NativeShell\src\native_theme.h'
     Browser = Join-Path $root 'desktop\CloudOS.NativeShell\src\native_browser_window.cpp'
     Project = Join-Path $root 'desktop\CloudOS.NativeShell\CloudOS.NativeShell.vcxproj'
@@ -45,7 +46,7 @@ function Forbid-Tokens([string]$Name, [string]$Text, [string[]]$Tokens) {
     }
 }
 
-# Native Shell V3 is the authority. There is no web-desktop fallback anymore.
+# C++/Win32 is the authority. The old web app is only a visual specification.
 Require-Tokens 'Main native authority' $content.Main @(
     'CloudOSDesktopSurface desktop_',
     'CloudOSNativeWindowManager window_manager_',
@@ -54,7 +55,6 @@ Require-Tokens 'Main native authority' $content.Main @(
     'NativeSnapAssist snap_assist_',
     'NativeSessionRecovery session_recovery_'
 )
-
 Require-Tokens 'Native desktop facade' $content.Surface @(
     'return native_.Create(instance, window_manager)',
     'native_.UpdateLayout(work_area)',
@@ -73,13 +73,13 @@ Forbid-Tokens 'Native desktop facade header' $content.SurfaceHeader @(
     'CloudOSNativeWebDesktopWindow', 'NativeWebViewHost'
 )
 
-# The old React UI is a design reference only. It is not in the compiled shell graph.
 Require-Tokens 'Native build graph' $content.Project @(
     'src\main_shell_v2.cpp',
     'src\native_desktop_surface.cpp',
     'src\native_desktop_window_v2.cpp',
     'src\native_start_menu_window.cpp',
     'src\native_taskbar_appbar.cpp',
+    'src\native_shell_pins.cpp',
     'src\native_browser_window.cpp',
     'Microsoft.Web.WebView2'
 )
@@ -91,7 +91,6 @@ Forbid-Tokens 'Native build graph' $content.Project @(
     'CopyWebUi'
 )
 
-# WebView2 remains a valid dependency only for the in-process CloudOS Browser.
 Require-Tokens 'Native WebView2 Browser' $content.Browser @(
     'CreateCoreWebView2EnvironmentWithOptions',
     'CreateCoreWebView2Controller',
@@ -104,7 +103,7 @@ if (-not $content.Packages.Contains('Microsoft.Web.WebView2') -or
     throw 'Pinned Microsoft.Web.WebView2 package for the native Browser is missing.'
 }
 
-# WebSkin mirrors the old CSS palette/materials in native C++.
+# WebSkin mirrors the old frontend palette/material system, while behavior stays native.
 Require-Tokens 'Unified native WebSkin' $content.Theme @(
     'namespace WebSkin',
     'RGB(10, 10, 15)',
@@ -118,18 +117,33 @@ Require-Tokens 'Unified native WebSkin' $content.Theme @(
     'ApplyWebFlyoutMaterial',
     'ApplyWebWindowMaterial'
 )
-Require-Tokens 'Native Start skin' $content.Start @(
-    'CloudOS.NativeShell.Start.v3',
+Require-Tokens 'Native Start V4 skin/functionality' $content.Start @(
+    'CloudOS.NativeShell.Start.v4',
+    'L"Fixados"',
+    'L"Recomendados"',
     'ApplyWebFlyoutMaterial',
     'BS_OWNERDRAW',
     'NM_CUSTOMDRAW',
+    'ShellPinStore::Instance().StartPins()',
+    'ShowResultContextMenu',
     'WebSkin::Accent'
 )
-Require-Tokens 'Native Taskbar skin' $content.Taskbar @(
+Require-Tokens 'Native Taskbar V3 skin/functionality' $content.Taskbar @(
+    'CloudOS.NativeShell.Taskbar.v3',
     'SHAppBarMessage(ABM_NEW',
-    'kTaskbarHeightDip = 64',
+    'kTaskbarHeightDip = 68',
+    'ShellPinStore::Instance().TaskbarPins()',
+    'TaskGroup',
+    'ShowTaskContextMenu',
+    'MoveTaskbar',
     'WebSkin::BgPrimary',
     'WebSkin::Accent'
+)
+Require-Tokens 'Persistent pin model' $content.Pins @(
+    'shell_pins_v1.dat',
+    'MOVEFILE_REPLACE_EXISTING',
+    'MoveStart',
+    'MoveTaskbar'
 )
 Require-Tokens 'Native Desktop skin' $content.Desktop @(
     'CloudOS.NativeShell.Desktop.v2',
@@ -138,7 +152,7 @@ Require-Tokens 'Native Desktop skin' $content.Desktop @(
     'NativeDesktopDropTarget::Register'
 )
 
-# Preserve the old web design sources as the visual specification.
+# Preserve old web sources strictly as the visual reference.
 Require-Tokens 'Legacy CSS design reference' $content.FrontendCss @(
     '--accent: #6366f1',
     '--bg-solid: #0a0a0f',
@@ -153,7 +167,6 @@ Require-Tokens 'Legacy Start design reference' $content.StartCss @(
 Require-Tokens 'Legacy Taskbar design reference' $content.TaskbarCss @(
     '.taskbar', '.taskbar-app-btn', '.system-tray', '.taskbar-clock'
 )
-
 Require-Tokens 'Unified WebSkin documentation' $content.WebSkinDoc @(
     'Funcionalidade e lifecycle ficam nativos',
     'frontend antigo funciona apenas como especificação visual',
@@ -161,4 +174,4 @@ Require-Tokens 'Unified WebSkin documentation' $content.WebSkinDoc @(
     'não volta a controlar Desktop, Taskbar, Start'
 )
 
-Write-Host 'PASS: old web UI is design-reference-only; Shell V3 stays native and WebView2 remains scoped to the Browser.'
+Write-Host 'PASS: old web UI remains design-reference-only; Start V4 and Taskbar V3 are native, persistent and WebSkin-styled; WebView2 stays scoped to Browser.'
