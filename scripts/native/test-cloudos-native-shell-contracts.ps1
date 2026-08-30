@@ -11,6 +11,7 @@ $paths = @{
     HoverPreview = Join-Path $src 'native_taskbar_hover_preview.cpp'
     Start = Join-Path $src 'native_start_menu_window.cpp'
     StartIndex = Join-Path $src 'native_start_index.cpp'
+    Theme = Join-Path $src 'native_theme.h'
     Switcher = Join-Path $src 'native_task_switcher_window.cpp'
     Quick = Join-Path $src 'native_quick_settings_window.cpp'
     Notifications = Join-Path $src 'native_notification_center.cpp'
@@ -168,13 +169,31 @@ Require-Tokens 'Wallpaper' $text.Wallpaper @(
     'SPI_SETDESKWALLPAPER', 'GetOpenFileNameW', 'InterpolationModeHighQualityBicubic'
 )
 
-# Start V3 + installed app index.
-Require-Tokens 'Start V3' $text.Start @(
+# Old web interface palette, now mirrored by native Win32/GDI+ surfaces.
+Require-Tokens 'Native web skin' $text.Theme @(
+    'namespace WebSkin',
+    'RGB(10, 10, 15)',
+    'RGB(17, 17, 24)',
+    'RGB(99, 102, 241)',
+    'RGB(129, 140, 248)',
+    'RadiusXL = 16',
+    'DrawRoundedPanel',
+    'ApplyWebFlyoutMaterial'
+)
+
+# Start V3 + installed app index + web visual language.
+Require-Tokens 'Start V3 web skin' $text.Start @(
     'CloudOS.NativeShell.Start.v3', 'WS_POPUP',
     'WS_EX_TOOLWINDOW | WS_EX_TOPMOST', 'NativeSearchEngine::FilterApps',
     'NativeStartIndex::Instance().Query', 'NativeStartIndex::Instance().Launch',
-    'NativeStartIndex::Instance().RefreshAsync', 'Reindexar',
+    'NativeStartIndex::Instance().RefreshAsync', 'LVS_NOCOLUMNHEADER',
+    'BS_OWNERDRAW', 'NM_CUSTOMDRAW', 'CustomDrawResults',
+    'ApplyWebFlyoutMaterial', 'WebSkin::Accent',
     'NM_DBLCLK', 'NM_RETURN', 'VK_ESCAPE', 'Central de Comandos'
+)
+Forbid-Tokens 'Start V3 web skin' $text.Start @(
+    'WS_EX_CLIENTEDGE',
+    'L"Origem / descricao"'
 )
 Require-Tokens 'Start index' $text.StartIndex @(
     'FOLDERID_Programs', 'FOLDERID_CommonPrograms', 'shell:AppsFolder',
@@ -275,4 +294,4 @@ Require-Tokens 'Official Shell Launcher script' $text.ShellLauncher @(
     'SetEnabled', 'RemoveCustomShell', 'Enterprise|Education|IoT', 'ShouldProcess'
 )
 
-Write-Host "PASS: CloudOS Shell V3 contracts passed - AppBars, indexed Start, Snap Assist, DWM task previews, File Operations/ZIP, session recovery, watchdog, multi-monitor and $actionCount shell actions."
+Write-Host "PASS: CloudOS Shell V3 contracts passed - web-skin Start, AppBars, indexed apps, Snap Assist, DWM task previews, File Operations/ZIP, session recovery, watchdog, multi-monitor and $actionCount shell actions."
