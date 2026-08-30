@@ -440,30 +440,100 @@ void NativeAppLauncher::ShowQuickPowerMenu(
     HWND parent_hwnd,
     POINT screen_pt)
 {
+    constexpr UINT kCommandCenter = 1100;
+    constexpr UINT kBrowser = 1101;
+    constexpr UINT kFiles = 1102;
+    constexpr UINT kTerminal = 1103;
+    constexpr UINT kSystemMonitor = 1104;
+    constexpr UINT kTaskManager = 1105;
+    constexpr UINT kCloudSettings = 1106;
+    constexpr UINT kWindowsSettings = 1107;
+    constexpr UINT kHealth = 1108;
+    constexpr UINT kLock = 1109;
+    constexpr UINT kRestartCloudOS = 1110;
+    constexpr UINT kExitCloudOS = 1111;
+    constexpr UINT kRestartWindows = 1112;
+    constexpr UINT kShutdownWindows = 1113;
+    constexpr UINT kPowerShell = 1114;
+    constexpr UINT kWsl = 1115;
+    constexpr UINT kRun = 1116;
+    constexpr UINT kSnip = 1117;
+    constexpr UINT kDrive = 1118;
+    constexpr UINT kWifi = 1119;
+    constexpr UINT kWindowsUpdate = 1120;
+    constexpr UINT kCalculator = 1121;
+    constexpr UINT kNotepad = 1122;
+    constexpr UINT kApps = 1123;
+
     HMENU menu = CreatePopupMenu();
-    if (menu == nullptr)
+    HMENU terminals = CreatePopupMenu();
+    HMENU tools = CreatePopupMenu();
+    HMENU settings = CreatePopupMenu();
+    HMENU power = CreatePopupMenu();
+    if (menu == nullptr || terminals == nullptr || tools == nullptr ||
+        settings == nullptr || power == nullptr)
     {
+        if (menu != nullptr) DestroyMenu(menu);
+        if (terminals != nullptr) DestroyMenu(terminals);
+        if (tools != nullptr) DestroyMenu(tools);
+        if (settings != nullptr) DestroyMenu(settings);
+        if (power != nullptr) DestroyMenu(power);
         return;
     }
 
-    InsertMenuW(menu, 0, MF_BYPOSITION | MF_STRING, 1100, L"Central de Comandos (106 acoes)");
-    InsertMenuW(menu, 1, MF_BYPOSITION | MF_SEPARATOR, 0, nullptr);
-    InsertMenuW(menu, 2, MF_BYPOSITION | MF_STRING, 1101, L"Navegador");
-    InsertMenuW(menu, 3, MF_BYPOSITION | MF_STRING, 1102, L"Arquivos");
-    InsertMenuW(menu, 4, MF_BYPOSITION | MF_STRING, 1103, L"Terminal");
-    InsertMenuW(menu, 5, MF_BYPOSITION | MF_STRING, 1104, L"Monitor do Sistema");
-    InsertMenuW(menu, 6, MF_BYPOSITION | MF_STRING, 1105, L"Gerenciador de Tarefas");
-    InsertMenuW(menu, 7, MF_BYPOSITION | MF_SEPARATOR, 0, nullptr);
-    InsertMenuW(menu, 8, MF_BYPOSITION | MF_STRING, 1106, L"Configuracoes do CloudOS");
-    InsertMenuW(menu, 9, MF_BYPOSITION | MF_STRING, 1107, L"Configuracoes do Windows");
-    InsertMenuW(menu, 10, MF_BYPOSITION | MF_STRING, 1108, L"Saude do Sistema");
-    InsertMenuW(menu, 11, MF_BYPOSITION | MF_SEPARATOR, 0, nullptr);
-    InsertMenuW(menu, 12, MF_BYPOSITION | MF_STRING, 1109, L"Bloquear Windows");
-    InsertMenuW(menu, 13, MF_BYPOSITION | MF_STRING, 1110, L"Reiniciar CloudOS");
-    InsertMenuW(menu, 14, MF_BYPOSITION | MF_STRING, 1111, L"Sair do CloudOS");
-    InsertMenuW(menu, 15, MF_BYPOSITION | MF_SEPARATOR, 0, nullptr);
-    InsertMenuW(menu, 16, MF_BYPOSITION | MF_STRING, 1112, L"Reiniciar Windows...");
-    InsertMenuW(menu, 17, MF_BYPOSITION | MF_STRING, 1113, L"Desligar Windows...");
+    AppendMenuW(menu, MF_STRING, kCommandCenter, L"Central de Comandos  ·  106 acoes");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, kBrowser, L"Navegador");
+    AppendMenuW(menu, MF_STRING, kFiles, L"Arquivos");
+    AppendMenuW(menu, MF_STRING, kDrive, L"CloudOS Drive");
+
+    AppendMenuW(terminals, MF_STRING, kTerminal, L"Terminal");
+    AppendMenuW(terminals, MF_STRING, kPowerShell, L"PowerShell");
+    AppendMenuW(terminals, MF_STRING, kWsl, L"WSL / Kali");
+    AppendMenuW(
+        menu,
+        MF_POPUP,
+        reinterpret_cast<UINT_PTR>(terminals),
+        L"Terminais");
+
+    AppendMenuW(tools, MF_STRING, kRun, L"Executar...");
+    AppendMenuW(tools, MF_STRING, kCalculator, L"Calculadora");
+    AppendMenuW(tools, MF_STRING, kNotepad, L"Bloco de Notas");
+    AppendMenuW(tools, MF_STRING, kSnip, L"Captura de Tela");
+    AppendMenuW(tools, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(tools, MF_STRING, kSystemMonitor, L"Monitor do Sistema");
+    AppendMenuW(tools, MF_STRING, kTaskManager, L"Gerenciador de Tarefas");
+    AppendMenuW(tools, MF_STRING, kApps, L"Todos os Aplicativos");
+    AppendMenuW(
+        menu,
+        MF_POPUP,
+        reinterpret_cast<UINT_PTR>(tools),
+        L"Ferramentas");
+
+    AppendMenuW(settings, MF_STRING, kCloudSettings, L"Configuracoes do CloudOS");
+    AppendMenuW(settings, MF_STRING, kWindowsSettings, L"Configuracoes do Windows");
+    AppendMenuW(settings, MF_STRING, kWifi, L"Wi-Fi e rede");
+    AppendMenuW(settings, MF_STRING, kWindowsUpdate, L"Windows Update");
+    AppendMenuW(settings, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(settings, MF_STRING, kHealth, L"Saude do Sistema");
+    AppendMenuW(
+        menu,
+        MF_POPUP,
+        reinterpret_cast<UINT_PTR>(settings),
+        L"Sistema e configuracoes");
+
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, kLock, L"Bloquear Windows");
+    AppendMenuW(menu, MF_STRING, kRestartCloudOS, L"Reiniciar CloudOS");
+    AppendMenuW(menu, MF_STRING, kExitCloudOS, L"Sair do CloudOS");
+
+    AppendMenuW(power, MF_STRING, kRestartWindows, L"Reiniciar Windows...");
+    AppendMenuW(power, MF_STRING, kShutdownWindows, L"Desligar Windows...");
+    AppendMenuW(
+        menu,
+        MF_POPUP,
+        reinterpret_cast<UINT_PTR>(power),
+        L"Energia do Windows");
 
     if (parent_hwnd != nullptr)
     {
@@ -475,7 +545,8 @@ void NativeAppLauncher::ShowQuickPowerMenu(
         TPM_RETURNCMD |
             TPM_NONOTIFY |
             TPM_LEFTALIGN |
-            TPM_BOTTOMALIGN,
+            TPM_BOTTOMALIGN |
+            TPM_RIGHTBUTTON,
         screen_pt.x,
         screen_pt.y,
         0,
@@ -486,46 +557,76 @@ void NativeAppLauncher::ShowQuickPowerMenu(
     const HINSTANCE instance = GetModuleHandleW(nullptr);
     switch (command)
     {
-    case 1100:
+    case kCommandCenter:
         CloudOSNativeCommandCenterWindow::Open(instance, parent_hwnd);
         break;
-    case 1101:
+    case kBrowser:
         LaunchById(instance, parent_hwnd, L"browser");
         break;
-    case 1102:
+    case kFiles:
         LaunchById(instance, parent_hwnd, L"files");
         break;
-    case 1103:
+    case kDrive:
+        LaunchById(instance, parent_hwnd, L"drive");
+        break;
+    case kTerminal:
         LaunchById(instance, parent_hwnd, L"terminal");
         break;
-    case 1104:
+    case kPowerShell:
+        LaunchById(instance, parent_hwnd, L"powershell");
+        break;
+    case kWsl:
+        LaunchById(instance, parent_hwnd, L"wsl");
+        break;
+    case kRun:
+        LaunchById(instance, parent_hwnd, L"run");
+        break;
+    case kCalculator:
+        LaunchById(instance, parent_hwnd, L"calc");
+        break;
+    case kNotepad:
+        LaunchById(instance, parent_hwnd, L"notepad");
+        break;
+    case kSnip:
+        LaunchById(instance, parent_hwnd, L"snip");
+        break;
+    case kSystemMonitor:
         LaunchById(instance, parent_hwnd, L"sysmon");
         break;
-    case 1105:
+    case kTaskManager:
         (void)ExecuteNamedShellAction(instance, parent_hwnd, L"classic.taskmgr");
         break;
-    case 1106:
+    case kApps:
+        LaunchById(instance, parent_hwnd, L"apps");
+        break;
+    case kCloudSettings:
         LaunchById(instance, parent_hwnd, L"settings");
         break;
-    case 1107:
+    case kWindowsSettings:
         (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:");
         break;
-    case 1108:
+    case kWifi:
+        (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:network-wifi");
+        break;
+    case kWindowsUpdate:
+        (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:windowsupdate");
+        break;
+    case kHealth:
         LaunchById(instance, parent_hwnd, L"health");
         break;
-    case 1109:
+    case kLock:
         (void)ExecuteNamedShellAction(instance, parent_hwnd, L"session.lock");
         break;
-    case 1110:
+    case kRestartCloudOS:
         (void)ExecuteNamedShellAction(instance, parent_hwnd, L"session.restart-cloudos");
         break;
-    case 1111:
+    case kExitCloudOS:
         (void)ExecuteNamedShellAction(instance, parent_hwnd, L"session.exit-cloudos");
         break;
-    case 1112:
+    case kRestartWindows:
         (void)ExecuteNamedShellAction(instance, parent_hwnd, L"session.restart-windows");
         break;
-    case 1113:
+    case kShutdownWindows:
         (void)ExecuteNamedShellAction(instance, parent_hwnd, L"session.shutdown");
         break;
     default:
