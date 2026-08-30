@@ -26,6 +26,9 @@ if ($manifest.schema -ne 1) {
 if ($manifest.product -ne 'CloudOS Native Shell' -or $manifest.shell_authority -ne 'C++/Win32') {
     throw 'Native build manifest does not describe the authoritative C++/Win32 CloudOS shell.'
 }
+if ($manifest.recovery_authority -ne 'CloudOS.Supervisor.exe V11') {
+    throw 'Native build manifest does not identify Shell Supervisor V11 as recovery authority.'
+}
 if ($manifest.configuration -ne $Configuration -or $manifest.platform -ne 'x64') {
     throw "Native manifest configuration/platform mismatch: $($manifest.configuration)/$($manifest.platform)"
 }
@@ -36,7 +39,7 @@ if ($manifest.source_fingerprint_sha256 -notmatch '^[0-9a-f]{64}$') {
     throw 'Native manifest contains an invalid source fingerprint.'
 }
 
-$expectedNames = @('CloudOS.exe', 'CloudOS.NativeRuntime.dll')
+$expectedNames = @('CloudOS.exe', 'CloudOS.NativeRuntime.dll', 'CloudOS.Supervisor.exe')
 foreach ($name in $expectedNames) {
     $record = @($manifest.files | Where-Object { $_.name -eq $name })
     if ($record.Count -ne 1) {
@@ -81,4 +84,4 @@ if ($CheckSourceFingerprint) {
     }
 }
 
-Write-Host "PASS: native release integrity verified ($Configuration x64, fingerprint=$stamp)."
+Write-Host "PASS: native release integrity verified ($Configuration x64, Supervisor V11, fingerprint=$stamp)."
