@@ -124,7 +124,11 @@ Require 'Root portable package shortcut' $content.RootPackage @(
     'CloudOS-Native-Release-x64.zip'
 )
 
-Require 'CI release artifact' $content.Workflow @(
+Require 'CI release artifact and dependency cache' $content.Workflow @(
+    'actions/cache@v4',
+    'Cache pinned WebView2 SDK',
+    'desktop/CloudOS.NativeShell/packages/Microsoft.Web.WebView2.1.0.4078.44',
+    'cloudos-webview2-1.0.4078.44-windows-v1',
     'build-cloudos-native.cmd',
     'verify-native-build-manifest.ps1',
     'package-cloudos-native.ps1',
@@ -133,4 +137,4 @@ Require 'CI release artifact' $content.Workflow @(
     'cloudos-native-manifest.json'
 )
 
-Write-Host 'PASS: deterministic source fingerprint, binary integrity manifest, portable package, root build/status/package shortcuts, stale-build gate and CI release artifact contracts are protected.'
+Write-Host 'PASS: deterministic fingerprint, binary integrity, portable package, root workflow shortcuts, WebView2 CI cache and verified release artifact contracts are protected.'
