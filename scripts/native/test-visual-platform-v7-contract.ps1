@@ -6,6 +6,7 @@ $src = Join-Path $root 'desktop\CloudOS.NativeShell\src'
 $paths = @{
     Theme = Join-Path $src 'native_theme.h'
     QuickHeader = Join-Path $src 'native_quick_settings_window.h'
+    TaskbarHeader = Join-Path $src 'native_taskbar_appbar.h'
     FilesHeader = Join-Path $src 'native_files_window.h'
     RecoveryHeader = Join-Path $src 'native_session_recovery.h'
     Media = Join-Path $src 'native_media_control_v7.h'
@@ -59,6 +60,19 @@ Forbid 'Visual Experience V7' $content.Theme @(
     'DWMSBT_ACRYLIC'
 )
 
+Require 'Floating AppBar Dock V7' $content.TaskbarHeader @(
+    'namespace FloatingDockV7',
+    'HorizontalInsetDip = 10',
+    'BottomGapDip = 10',
+    'CornerRadiusDip = 20',
+    'CreateRoundRectRgn',
+    'SetWindowRgn',
+    'SetWinEventHook',
+    'EVENT_OBJECT_LOCATIONCHANGE',
+    'CloudOS.NativeShell.Taskbar.v4',
+    'FloatingDockV7::Apply(window_)'
+)
+
 Require 'GSMTC service' $content.Media @(
     'GlobalSystemMediaTransportControlsSessionManager',
     'RequestAsync().get()',
@@ -105,8 +119,12 @@ Require 'Windows Search SystemIndex' $content.Search @(
     'System.ItemName,System.ItemPathDisplay,System.ItemUrl',
     'maximum_results = 80u'
 )
+Forbid 'Windows Search SystemIndex' $content.Search @(
+    'oledb32.lib'
+)
 
 Require 'IContextMenu3 Shell bridge' $content.ContextMenu @(
+    '#include <shellapi.h>',
     'SHBindToParent',
     'GetUIObjectOf',
     'IID_IContextMenu',
@@ -114,6 +132,7 @@ Require 'IContextMenu3 Shell bridge' $content.ContextMenu @(
     'IContextMenu3',
     'HandleMenuMsg2',
     'QueryContextMenu',
+    'CMIC_MASK_UNICODE',
     'InvokeCommand'
 )
 
@@ -159,4 +178,4 @@ Require 'Blueprint accuracy' $content.Blueprint @(
     'Floating Taskbar/Dock V7'
 )
 
-Write-Host 'PASS: Visual Platform V7 contracts passed - Fluent reveal/materials, GSMTC, CoreAudio mixer, Bluetooth, SystemIndex, IContextMenu3, WTS and native WLAN foundations are protected.'
+Write-Host 'PASS: Visual Platform V7 contracts passed - floating AppBar dock, Fluent reveal/materials, GSMTC, CoreAudio mixer, Bluetooth, SystemIndex, IContextMenu3, WTS and native WLAN foundations are protected.'
