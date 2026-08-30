@@ -4,6 +4,8 @@
 
 #include <vector>
 
+#include "native_start_index.h"
+
 namespace CloudOS
 {
 class CloudOSNativeStartMenuWindow final
@@ -20,10 +22,24 @@ public:
     void FocusSearch();
 
 private:
+    enum class ResultKind
+    {
+        CloudOSApp,
+        IndexedWindowsApp,
+    };
+
+    struct ResultRow final
+    {
+        ResultKind kind{ResultKind::CloudOSApp};
+        int cloud_app_index{-1};
+        NativeStartIndexEntry indexed;
+    };
+
     void Layout();
     void RefreshResults();
     void ExecuteSelection();
     void MoveSelection(int delta);
+    void RefreshIndexer();
     LRESULT HandleMessage(HWND window, UINT message, WPARAM w_param, LPARAM l_param);
     static LRESULT CALLBACK SearchSubclass(
         HWND window,
@@ -38,6 +54,7 @@ private:
     HWND window_{};
     HWND search_edit_{};
     HWND app_list_{};
+    HWND refresh_button_{};
     HWND command_button_{};
     HWND power_button_{};
     HWND footer_label_{};
@@ -45,6 +62,7 @@ private:
     HFONT title_font_{};
     HBRUSH background_{};
     HBRUSH edit_background_{};
-    std::vector<int> results_;
+    std::vector<ResultRow> results_;
+    std::size_t last_index_count_{};
 };
 } // namespace CloudOS
