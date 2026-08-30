@@ -22,16 +22,6 @@ constexpr int kLayoutHeightDip = 88;
 constexpr int kLayoutTopGapDip = 8;
 constexpr int kLayoutZoneCount = 8;
 
-int Width(const RECT& rect) noexcept
-{
-    return std::max<int>(0, static_cast<int>(rect.right - rect.left));
-}
-
-int Height(const RECT& rect) noexcept
-{
-    return std::max<int>(0, static_cast<int>(rect.bottom - rect.top));
-}
-
 int ScaleDip(int value, UINT dpi) noexcept
 {
     return MulDiv(value, static_cast<int>(dpi == 0 ? 96 : dpi), 96);
@@ -452,14 +442,15 @@ NativeSnapAssist::Zone NativeSnapAssist::ResolveZone(
     {
         const int maximum_layout_width = std::max(1, width - ScaleDip(24, dpi));
         const int layout_width = std::min(ScaleDip(kLayoutWidthDip, dpi), maximum_layout_width);
-        const int layout_left = work.left + (width - layout_width) / 2;
+        const int layout_left = static_cast<int>(work.left) + (width - layout_width) / 2;
         const int layout_right = layout_left + layout_width;
+        const int cursor_x = static_cast<int>(cursor.x);
 
         if (layout_width >= ScaleDip(320, dpi) &&
-            cursor.x >= layout_left && cursor.x < layout_right)
+            cursor_x >= layout_left && cursor_x < layout_right)
         {
             *show_layout = true;
-            const int relative = std::clamp(cursor.x - layout_left, 0, layout_width - 1);
+            const int relative = std::clamp(cursor_x - layout_left, 0, layout_width - 1);
             const int segment = std::clamp(
                 (relative * kLayoutZoneCount) / std::max(1, layout_width),
                 0,
@@ -504,7 +495,7 @@ NativeSnapAssist::Zone NativeSnapAssist::ResolveZone(
 
         if ((GetKeyState(VK_CONTROL) & 0x8000) != 0)
         {
-            const int relative_x = cursor.x - work.left;
+            const int relative_x = static_cast<int>(cursor.x - work.left);
             if (relative_x < third_width)
             {
                 result.right = work.left + third_width;
@@ -654,8 +645,8 @@ void NativeSnapAssist::ShowLayoutFlyout(const RECT& work, Zone selected)
     const int maximum_width = std::max(1, Width(work) - ScaleDip(24, dpi));
     const int width = std::min(ScaleDip(kLayoutWidthDip, dpi), maximum_width);
     const int height = ScaleDip(kLayoutHeightDip, dpi);
-    const int x = work.left + (Width(work) - width) / 2;
-    const int y = work.top + ScaleDip(kLayoutTopGapDip, dpi);
+    const int x = static_cast<int>(work.left) + (Width(work) - width) / 2;
+    const int y = static_cast<int>(work.top) + ScaleDip(kLayoutTopGapDip, dpi);
 
     HRGN region = CreateRoundRectRgn(
         0,
