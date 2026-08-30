@@ -15,6 +15,10 @@ class CloudOSNativeFileOperationsWindow final
 {
 public:
     static void Open(HINSTANCE instance, const std::wstring& initial_destination = {});
+    static void OpenWithSources(
+        HINSTANCE instance,
+        const std::vector<std::wstring>& sources,
+        const std::wstring& initial_destination = {});
 
 private:
     enum class OperationKind
