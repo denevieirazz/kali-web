@@ -332,7 +332,7 @@ HRESULT RunShellOperation(
         return FAILED(result) ? result : E_FAIL;
     }
 
-    const FILEOP_FLAGS flags =
+    const DWORD flags =
         FOF_ALLOWUNDO |
         FOF_NOCONFIRMMKDIR |
         FOFX_ADDUNDORECORD |
@@ -659,9 +659,9 @@ void CloudOSNativeFileOperationsWindow::Layout()
 
     int x = margin;
     const int top = margin;
-    const int small = Scale(128, dpi);
-    MoveWindow(add_files_button_, x, top, small, button_height, TRUE); x += small + gap;
-    MoveWindow(add_folder_button_, x, top, small, button_height, TRUE); x += small + gap;
+    const int small_width = Scale(128, dpi);
+    MoveWindow(add_files_button_, x, top, small_width, button_height, TRUE); x += small_width + gap;
+    MoveWindow(add_folder_button_, x, top, small_width, button_height, TRUE); x += small_width + gap;
     MoveWindow(remove_button_, x, top, Scale(92, dpi), button_height, TRUE);
 
     const int list_top = top + button_height + gap;

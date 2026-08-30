@@ -49,7 +49,7 @@ Decisão CloudOS:
 
 - anexar a funcionalidade ao HWND de cada AppBar via `SetWindowSubclass` apenas dentro do próprio processo CloudOS;
 - ao manter o mouse sobre uma tarefa, abrir popup independente `CloudOS.NativeShell.TaskPreview.v1`;
-- registrar thumbnail DWM somente enquanto o preview está visível;
+- registrar thumbnail DWM com DwmRegisterThumbnail somente enquanto o preview está visível;
 - redimensionar mantendo proporção com `DwmQueryThumbnailSourceSize`;
 - clique no preview foca a janela;
 - botão fechar envia `WM_CLOSE` à janela;
@@ -149,8 +149,8 @@ Fontes primárias:
 Decisão CloudOS:
 
 - o processo UI permanece o processo normal que o usuário iniciou;
-- depois que a inicialização passa, ele cria uma segunda instância `CloudOS.exe --watchdog <pid>`;
-- o helper abre o PID com `SYNCHRONIZE` e espera no process handle;
+- depois que a inicialização passa, ele cria uma segunda instância `CloudOS.exe --watchdog <pid>` via `CreateProcessW`;
+- o helper abre o PID com `SYNCHRONIZE` e espera com `WaitForSingleObject` no process handle;
 - exit code 0 é tratado como saída limpa e não relança;
 - exit não zero é tratado como falha e dispara um novo CloudOS depois que HWNDs/AppBars/mutex puderam ser liberados;
 - um mutex de sessão impede duas UIs CloudOS simultâneas;

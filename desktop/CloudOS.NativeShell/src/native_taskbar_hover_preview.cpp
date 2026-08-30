@@ -24,15 +24,6 @@ constexpr UINT_PTR kHoverTimer = 0xA902;
 constexpr UINT_PTR kHideTimer = 0xA903;
 constexpr int kPinnedCount = 5;
 
-int Width(const RECT& rect) noexcept
-{
-    return std::max<int>(0, static_cast<int>(rect.right - rect.left));
-}
-
-int Height(const RECT& rect) noexcept
-{
-    return std::max<int>(0, static_cast<int>(rect.bottom - rect.top));
-}
 }
 
 NativeTaskbarHoverPreview::NativeTaskbarHoverPreview(
