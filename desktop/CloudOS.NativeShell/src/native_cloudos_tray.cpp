@@ -10,7 +10,7 @@
 #include <gdiplus.h>
 
 #include <algorithm>
-#include <string>
+#include <iterator>
 
 namespace CloudOS
 {
@@ -41,7 +41,7 @@ RECT QuickRect(HWND window)
     return RECT{right_x, y, right_x + quick_width, y + button};
 }
 
-bool Contains(const RECT& rect, POINT point)
+bool TrayContains(const RECT& rect, POINT point) noexcept
 {
     return point.x >= rect.left && point.x < rect.right &&
         point.y >= rect.top && point.y < rect.bottom;
@@ -106,6 +106,7 @@ void PaintTray(HWND window)
     const RECT rect = QuickRect(window);
     HDC dc = GetDC(window);
     if (dc == nullptr) return;
+
     Gdiplus::Graphics graphics(dc);
     graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
     const UINT dpi = GetDpiForWindow(window);
@@ -146,15 +147,13 @@ void AdjustVolume(int delta)
 {
     const NativeAudioState audio = NativeSystemControlBackend::QueryAudio();
     if (!audio.available) return;
-    const int target = std::clamp<int>(
-        static_cast<int>(audio.volume_percent) + delta, 0, 100);
-    (void)NativeSystemControlBackend::SetMasterVolume(
-        static_cast<unsigned>(target), nullptr);
+    const int target = std::clamp<int>(static_cast<int>(audio.volume_percent) + delta, 0, 100);
+    (void)NativeSystemControlBackend::SetMasterVolume(static_cast<unsigned>(target), nullptr);
     if (audio.muted && target > 0)
         (void)NativeSystemControlBackend::SetMasterMute(false, nullptr);
     NativeControlPlaneService::Instance().RefreshNow();
 }
-}
+} // namespace
 
 NativeCloudOSTrayService& NativeCloudOSTrayService::Instance()
 {
@@ -221,8 +220,7 @@ BOOL CALLBACK NativeCloudOSTrayService::EnumerateWindow(HWND window, LPARAM para
 
 void NativeCloudOSTrayService::AttachExistingTaskbars()
 {
-    EnumWindows(&NativeCloudOSTrayService::EnumerateWindow,
-        reinterpret_cast<LPARAM>(this));
+    EnumWindows(&NativeCloudOSTrayService::EnumerateWindow, reinterpret_cast<LPARAM>(this));
 }
 
 LRESULT CALLBACK NativeCloudOSTrayService::TaskbarSubclass(
@@ -244,6 +242,7 @@ LRESULT NativeCloudOSTrayService::HandleTaskbar(
         PaintTray(window);
         return result;
     }
+
     if (message == WM_RBUTTONUP || message == WM_MBUTTONUP || message == WM_MOUSEWHEEL)
     {
         POINT point{};
@@ -258,7 +257,8 @@ LRESULT NativeCloudOSTrayService::HandleTaskbar(
             point.x = GET_X_LPARAM(l_param);
             point.y = GET_Y_LPARAM(l_param);
         }
-        if (Contains(QuickRect(window), point))
+
+        if (TrayContains(QuickRect(window), point))
         {
             if (message == WM_RBUTTONUP)
             {
@@ -274,14 +274,12 @@ LRESULT NativeCloudOSTrayService::HandleTaskbar(
                 Refresh();
                 return 0;
             }
-            if (message == WM_MOUSEWHEEL)
-            {
-                AdjustVolume(GET_WHEEL_DELTA_WPARAM(w_param) > 0 ? 5 : -5);
-                Refresh();
-                return 0;
-            }
+            AdjustVolume(GET_WHEEL_DELTA_WPARAM(w_param) > 0 ? 5 : -5);
+            Refresh();
+            return 0;
         }
     }
+
     if (message == WM_NCDESTROY)
     {
         RemoveWindowSubclass(window, &NativeCloudOSTrayService::TaskbarSubclass, subclass_id);
@@ -293,8 +291,7 @@ LRESULT NativeCloudOSTrayService::HandleTaskbar(
 LRESULT CALLBACK NativeCloudOSTrayService::EngineProcedure(
     HWND window, UINT message, WPARAM w_param, LPARAM l_param)
 {
-    auto* self = reinterpret_cast<NativeCloudOSTrayService*>(
-        GetWindowLongPtrW(window, GWLP_USERDATA));
+    auto* self = reinterpret_cast<NativeCloudOSTrayService*>(GetWindowLongPtrW(window, GWLP_USERDATA));
     if (message == WM_NCCREATE)
     {
         const auto* create = reinterpret_cast<const CREATESTRUCTW*>(l_param);
