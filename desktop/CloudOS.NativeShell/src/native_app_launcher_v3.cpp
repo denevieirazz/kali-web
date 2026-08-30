@@ -7,6 +7,7 @@
 #include "native_cloudos_drive.h"
 #include "native_command_center_window.h"
 #include "native_env_doctor_window.h"
+#include "native_files_window.h"
 #include "native_notepad_window.h"
 #include "native_projects_window.h"
 #include "native_run_window.h"
@@ -76,62 +77,33 @@ bool LaunchWindowsTarget(
     execution.hwnd = owner;
     execution.lpVerb = L"open";
     execution.lpFile = file.c_str();
-    execution.lpParameters =
-        parameters.empty() ? nullptr : parameters.c_str();
-    execution.lpDirectory =
-        working_directory.empty()
-            ? nullptr
-            : working_directory.c_str();
+    execution.lpParameters = parameters.empty() ? nullptr : parameters.c_str();
+    execution.lpDirectory = working_directory.empty() ? nullptr : working_directory.c_str();
     execution.nShow = SW_SHOWNORMAL;
 
     if (!ShellExecuteExW(&execution))
     {
-        if (report_error)
-        {
-            ShowLaunchError(owner, file);
-        }
+        if (report_error) ShowLaunchError(owner, file);
         return false;
     }
-
-    if (execution.hProcess != nullptr)
-    {
-        CloseHandle(execution.hProcess);
-    }
+    if (execution.hProcess != nullptr) CloseHandle(execution.hProcess);
     return true;
 }
 
 bool IsRegisteredDistribution(const std::wstring& distribution)
 {
-    if (distribution.empty())
-    {
-        return false;
-    }
-
+    if (distribution.empty()) return false;
     BOOL registered = FALSE;
-    return cloudos_native_wsl_is_registered(
-               distribution.c_str(),
-               &registered) != FALSE &&
-        registered != FALSE;
+    return cloudos_native_wsl_is_registered(distribution.c_str(), &registered) != FALSE && registered != FALSE;
 }
 
 std::wstring ResolveWslDistribution()
 {
-    const CloudOSNativeSettings settings =
-        CloudOSNativeSettingsWindow::Load();
-    if (IsRegisteredDistribution(
-            settings.default_wsl_distribution))
-    {
-        return settings.default_wsl_distribution;
-    }
-
-    if (_wcsicmp(
-            settings.default_wsl_distribution.c_str(),
-            L"kali-linux") != 0 &&
+    const CloudOSNativeSettings settings = CloudOSNativeSettingsWindow::Load();
+    if (IsRegisteredDistribution(settings.default_wsl_distribution)) return settings.default_wsl_distribution;
+    if (_wcsicmp(settings.default_wsl_distribution.c_str(), L"kali-linux") != 0 &&
         IsRegisteredDistribution(L"kali-linux"))
-    {
         return L"kali-linux";
-    }
-
     return {};
 }
 
@@ -139,95 +111,45 @@ void OpenWslTerminal(HINSTANCE instance)
 {
     std::wstring command = L"wsl.exe";
     std::wstring title = L"WSL - CloudOS";
-    const std::wstring distribution =
-        ResolveWslDistribution();
-
+    const std::wstring distribution = ResolveWslDistribution();
     if (!distribution.empty())
     {
         command += L" -d ";
         command += QuoteArgument(distribution);
-        title = L"WSL / ";
-        title += distribution;
-        title += L" - CloudOS";
+        title = L"WSL / " + distribution + L" - CloudOS";
     }
-
-    CloudOSNativeTerminalWindow::Open(
-        instance,
-        command,
-        title);
+    CloudOSNativeTerminalWindow::Open(instance, command, title);
 }
 
 std::wstring CanonicalAppId(std::wstring_view id)
 {
-    if (id == L"comms")
-    {
-        return L"terminal";
-    }
-    if (id == L"mail")
-    {
-        return L"notepad";
-    }
-    if (id == L"more")
-    {
-        return L"apps";
-    }
-    if (id == L"disk" || id == L"local-drive")
-    {
-        return L"systemdrive";
-    }
-    if (id == L"commands" ||
-        id == L"command-center" ||
-        id == L"action-center")
-    {
-        return L"control";
-    }
-    if (id == L"workspace" ||
-        id == L"overview" ||
-        id == L"task-view" ||
-        id == L"mission-control" ||
-        id == L"areas")
-    {
-        return L"workspaces";
-    }
+    if (id == L"comms") return L"terminal";
+    if (id == L"mail") return L"notepad";
+    if (id == L"more") return L"apps";
+    if (id == L"disk" || id == L"local-drive") return L"systemdrive";
+    if (id == L"commands" || id == L"command-center" || id == L"action-center") return L"control";
+    if (id == L"workspace" || id == L"overview" || id == L"task-view" ||
+        id == L"mission-control" || id == L"areas") return L"workspaces";
     return std::wstring(id);
 }
 
 bool IsCatalogAppId(std::wstring_view id)
 {
     for (const AppItem& app : kAllApps)
-    {
-        if (id == app.id)
-        {
-            return true;
-        }
-    }
+        if (id == app.id) return true;
     return false;
 }
 
-bool ExecuteNamedShellAction(
-    HINSTANCE instance,
-    HWND owner,
-    std::wstring_view id)
+bool ExecuteNamedShellAction(HINSTANCE instance, HWND owner, std::wstring_view id)
 {
-    const ShellAction* action =
-        NativeShellActions::Find(id);
-    return action != nullptr &&
-        NativeShellActions::Execute(
-            instance,
-            owner,
-            *action);
+    const ShellAction* action = NativeShellActions::Find(id);
+    return action != nullptr && NativeShellActions::Execute(instance, owner, *action);
 }
 } // namespace
 
-void NativeAppLauncher::Launch(
-    HINSTANCE instance,
-    HWND parent_hwnd,
-    const AppItem& app)
+void NativeAppLauncher::Launch(HINSTANCE instance, HWND parent_hwnd, const AppItem& app)
 {
-    LaunchById(
-        instance,
-        parent_hwnd,
-        app.id);
+    LaunchById(instance, parent_hwnd, app.id);
 }
 
 void NativeAppLauncher::LaunchById(
@@ -235,30 +157,21 @@ void NativeAppLauncher::LaunchById(
     HWND parent_hwnd,
     const std::wstring& requested_id)
 {
-    const std::wstring id =
-        CanonicalAppId(requested_id);
+    const std::wstring id = CanonicalAppId(requested_id);
     bool launched = true;
 
     if (id == L"workspaces")
     {
         launched = NativeShellBridge::OpenWorkspaceOverview();
-        if (!launched)
-        {
-            ShowLaunchError(parent_hwnd, L"a Visao de Trabalho");
-        }
+        if (!launched) ShowLaunchError(parent_hwnd, L"a Visao de Trabalho");
     }
     else if (id == L"control")
     {
-        CloudOSNativeCommandCenterWindow::Open(
-            instance,
-            parent_hwnd);
+        CloudOSNativeCommandCenterWindow::Open(instance, parent_hwnd);
     }
     else if (id == L"terminal")
     {
-        CloudOSNativeTerminalWindow::Open(
-            instance,
-            L"cmd.exe",
-            L"Terminal - CloudOS");
+        CloudOSNativeTerminalWindow::Open(instance, L"cmd.exe", L"Terminal - CloudOS");
     }
     else if (id == L"projects")
     {
@@ -277,9 +190,7 @@ void NativeAppLauncher::LaunchById(
     }
     else if (id == L"files")
     {
-        launched = LaunchWindowsTarget(
-            parent_hwnd,
-            L"explorer.exe");
+        CloudOSNativeFilesWindow::Open(instance);
     }
     else if (id == L"drive")
     {
@@ -287,16 +198,8 @@ void NativeAppLauncher::LaunchById(
         if (!NativeCloudOSDrive::EnsureReady(&error))
         {
             std::wstring message = L"CloudOS Drive indisponivel.";
-            if (!error.empty())
-            {
-                message += L"\n\n";
-                message += error;
-            }
-            MessageBoxW(
-                parent_hwnd,
-                message.c_str(),
-                L"CloudOS Drive",
-                MB_OK | MB_ICONERROR);
+            if (!error.empty()) message += L"\n\n" + error;
+            MessageBoxW(parent_hwnd, message.c_str(), L"CloudOS Drive", MB_OK | MB_ICONERROR);
             launched = false;
         }
         else
@@ -309,7 +212,7 @@ void NativeAppLauncher::LaunchById(
             }
             else
             {
-                launched = LaunchWindowsTarget(parent_hwnd, root);
+                CloudOSNativeFilesWindow::Open(instance, root);
             }
         }
     }
@@ -323,7 +226,7 @@ void NativeAppLauncher::LaunchById(
         }
         else
         {
-            launched = LaunchWindowsTarget(parent_hwnd, system_volume);
+            CloudOSNativeFilesWindow::Open(instance, system_volume);
         }
     }
     else if (id == L"notepad")
@@ -332,12 +235,7 @@ void NativeAppLauncher::LaunchById(
     }
     else if (id == L"code")
     {
-        launched = LaunchWindowsTarget(
-            parent_hwnd,
-            L"code.cmd",
-            L".",
-            {},
-            false);
+        launched = LaunchWindowsTarget(parent_hwnd, L"code.cmd", L".", {}, false);
         if (!launched)
         {
             CloudOSNativeNotepadWindow::Open(instance);
@@ -367,16 +265,11 @@ void NativeAppLauncher::LaunchById(
     else if (id == L"health")
     {
         launched = CloudOSNativeEnvDoctorWindow::Open(instance) != nullptr;
-        if (!launched)
-        {
-            ShowLaunchError(parent_hwnd, L"Saude do Sistema");
-        }
+        if (!launched) ShowLaunchError(parent_hwnd, L"Saude do Sistema");
     }
     else if (id == L"browser")
     {
-        CloudOSNativeBrowserWindow::Open(
-            instance,
-            L"https://www.google.com/");
+        CloudOSNativeBrowserWindow::Open(instance, L"https://www.google.com/");
     }
     else if (id == L"paint")
     {
@@ -384,16 +277,8 @@ void NativeAppLauncher::LaunchById(
     }
     else if (id == L"media")
     {
-        launched = LaunchWindowsTarget(
-            parent_hwnd,
-            L"mswindowsmusic:",
-            {},
-            {},
-            false);
-        if (!launched)
-        {
-            launched = LaunchWindowsTarget(parent_hwnd, L"wmplayer.exe");
-        }
+        launched = LaunchWindowsTarget(parent_hwnd, L"mswindowsmusic:", {}, {}, false);
+        if (!launched) launched = LaunchWindowsTarget(parent_hwnd, L"wmplayer.exe");
     }
     else if (id == L"regedit")
     {
@@ -405,9 +290,7 @@ void NativeAppLauncher::LaunchById(
     }
     else if (id == L"weather")
     {
-        CloudOSNativeBrowserWindow::Open(
-            instance,
-            L"https://www.msn.com/weather");
+        CloudOSNativeBrowserWindow::Open(instance, L"https://www.msn.com/weather");
     }
     else if (id == L"datetime")
     {
@@ -418,15 +301,10 @@ void NativeAppLauncher::LaunchById(
         launched = false;
     }
 
-    if (launched && IsCatalogAppId(id))
-    {
-        StartMenuMRUTracker::Instance().RecordLaunch(id.c_str());
-    }
+    if (launched && IsCatalogAppId(id)) StartMenuMRUTracker::Instance().RecordLaunch(id.c_str());
 }
 
-void NativeAppLauncher::ShowQuickPowerMenu(
-    HWND parent_hwnd,
-    POINT screen_pt)
+void NativeAppLauncher::ShowQuickPowerMenu(HWND parent_hwnd, POINT screen_pt)
 {
     constexpr UINT kCommandCenter = 1100;
     constexpr UINT kBrowser = 1101;
@@ -501,20 +379,12 @@ void NativeAppLauncher::ShowQuickPowerMenu(
     AppendMenuW(cloud, MF_STRING, kDrive, L"CloudOS Drive");
     AppendMenuW(cloud, MF_STRING, kProjects, L"Projetos");
     AppendMenuW(cloud, MF_STRING, kCode, L"VS Code");
-    AppendMenuW(
-        menu,
-        MF_POPUP,
-        reinterpret_cast<UINT_PTR>(cloud),
-        L"CloudOS e desenvolvimento");
+    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(cloud), L"CloudOS e desenvolvimento");
 
     AppendMenuW(terminals, MF_STRING, kTerminal, L"Terminal");
     AppendMenuW(terminals, MF_STRING, kPowerShell, L"PowerShell");
     AppendMenuW(terminals, MF_STRING, kWsl, L"WSL / Kali");
-    AppendMenuW(
-        menu,
-        MF_POPUP,
-        reinterpret_cast<UINT_PTR>(terminals),
-        L"Terminais");
+    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(terminals), L"Terminais");
 
     AppendMenuW(productivity, MF_STRING, kRun, L"Executar...");
     AppendMenuW(productivity, MF_STRING, kCalculator, L"Calculadora");
@@ -523,11 +393,7 @@ void NativeAppLauncher::ShowQuickPowerMenu(
     AppendMenuW(productivity, MF_STRING, kSnip, L"Captura de Tela");
     AppendMenuW(productivity, MF_STRING, kMedia, L"Midia / Musica");
     AppendMenuW(productivity, MF_STRING, kWeather, L"Clima");
-    AppendMenuW(
-        menu,
-        MF_POPUP,
-        reinterpret_cast<UINT_PTR>(productivity),
-        L"Produtividade");
+    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(productivity), L"Produtividade");
 
     AppendMenuW(tools, MF_STRING, kSystemMonitor, L"Monitor do Sistema");
     AppendMenuW(tools, MF_STRING, kTaskManager, L"Gerenciador de Tarefas");
@@ -536,11 +402,7 @@ void NativeAppLauncher::ShowQuickPowerMenu(
     AppendMenuW(tools, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(tools, MF_STRING, kSystemDrive, L"Disco do Sistema");
     AppendMenuW(tools, MF_STRING, kApps, L"Todos os Aplicativos");
-    AppendMenuW(
-        menu,
-        MF_POPUP,
-        reinterpret_cast<UINT_PTR>(tools),
-        L"Ferramentas do sistema");
+    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(tools), L"Ferramentas do sistema");
 
     AppendMenuW(settings, MF_STRING, kCloudSettings, L"Configuracoes do CloudOS");
     AppendMenuW(settings, MF_STRING, kWindowsSettings, L"Configuracoes do Windows");
@@ -558,11 +420,7 @@ void NativeAppLauncher::ShowQuickPowerMenu(
     AppendMenuW(settings, MF_STRING, kSecurity, L"Seguranca do Windows");
     AppendMenuW(settings, MF_STRING, kWindowsUpdate, L"Windows Update");
     AppendMenuW(settings, MF_STRING, kHealth, L"Saude do Sistema");
-    AppendMenuW(
-        menu,
-        MF_POPUP,
-        reinterpret_cast<UINT_PTR>(settings),
-        L"Sistema e configuracoes");
+    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(settings), L"Sistema e configuracoes");
 
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, kShowDesktop, L"Mostrar Área de Trabalho  ·  Ctrl+Alt+D");
@@ -572,165 +430,63 @@ void NativeAppLauncher::ShowQuickPowerMenu(
 
     AppendMenuW(power, MF_STRING, kRestartWindows, L"Reiniciar Windows...");
     AppendMenuW(power, MF_STRING, kShutdownWindows, L"Desligar Windows...");
-    AppendMenuW(
-        menu,
-        MF_POPUP,
-        reinterpret_cast<UINT_PTR>(power),
-        L"Energia do Windows");
+    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(power), L"Energia do Windows");
 
-    if (parent_hwnd != nullptr)
-    {
-        SetForegroundWindow(parent_hwnd);
-    }
+    if (parent_hwnd != nullptr) SetForegroundWindow(parent_hwnd);
 
     const int command = TrackPopupMenu(
         menu,
-        TPM_RETURNCMD |
-            TPM_NONOTIFY |
-            TPM_LEFTALIGN |
-            TPM_BOTTOMALIGN |
-            TPM_RIGHTBUTTON,
-        screen_pt.x,
-        screen_pt.y,
-        0,
-        parent_hwnd,
-        nullptr);
+        TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_BOTTOMALIGN | TPM_RIGHTBUTTON,
+        screen_pt.x, screen_pt.y, 0, parent_hwnd, nullptr);
     DestroyMenu(menu);
 
     const HINSTANCE instance = GetModuleHandleW(nullptr);
     switch (command)
     {
-    case kCommandCenter:
-        CloudOSNativeCommandCenterWindow::Open(instance, parent_hwnd);
-        break;
-    case kWorkspaces:
-        LaunchById(instance, parent_hwnd, L"workspaces");
-        break;
-    case kBrowser:
-        LaunchById(instance, parent_hwnd, L"browser");
-        break;
-    case kFiles:
-        LaunchById(instance, parent_hwnd, L"files");
-        break;
-    case kDrive:
-        LaunchById(instance, parent_hwnd, L"drive");
-        break;
-    case kProjects:
-        LaunchById(instance, parent_hwnd, L"projects");
-        break;
-    case kCode:
-        LaunchById(instance, parent_hwnd, L"code");
-        break;
-    case kTerminal:
-        LaunchById(instance, parent_hwnd, L"terminal");
-        break;
-    case kPowerShell:
-        LaunchById(instance, parent_hwnd, L"powershell");
-        break;
-    case kWsl:
-        LaunchById(instance, parent_hwnd, L"wsl");
-        break;
-    case kRun:
-        LaunchById(instance, parent_hwnd, L"run");
-        break;
-    case kCalculator:
-        LaunchById(instance, parent_hwnd, L"calc");
-        break;
-    case kNotepad:
-        LaunchById(instance, parent_hwnd, L"notepad");
-        break;
-    case kPaint:
-        LaunchById(instance, parent_hwnd, L"paint");
-        break;
-    case kSnip:
-        LaunchById(instance, parent_hwnd, L"snip");
-        break;
-    case kMedia:
-        LaunchById(instance, parent_hwnd, L"media");
-        break;
-    case kWeather:
-        LaunchById(instance, parent_hwnd, L"weather");
-        break;
-    case kSystemMonitor:
-        LaunchById(instance, parent_hwnd, L"sysmon");
-        break;
-    case kTaskManager:
-        (void)ExecuteNamedShellAction(instance, parent_hwnd, L"classic.taskmgr");
-        break;
-    case kDeviceManager:
-        (void)LaunchWindowsTarget(parent_hwnd, L"devmgmt.msc");
-        break;
-    case kRegedit:
-        LaunchById(instance, parent_hwnd, L"regedit");
-        break;
-    case kSystemDrive:
-        LaunchById(instance, parent_hwnd, L"systemdrive");
-        break;
-    case kApps:
-        LaunchById(instance, parent_hwnd, L"apps");
-        break;
-    case kCloudSettings:
-        LaunchById(instance, parent_hwnd, L"settings");
-        break;
-    case kWindowsSettings:
-        (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:");
-        break;
-    case kDisplay:
-        (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:display");
-        break;
-    case kSound:
-        (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:sound");
-        break;
-    case kNetwork:
-        (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:network-status");
-        break;
-    case kWifi:
-        (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:network-wifi");
-        break;
-    case kBluetooth:
-        (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:bluetooth");
-        break;
-    case kStorage:
-        (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:storagesense");
-        break;
-    case kClipboard:
-        (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:clipboard");
-        break;
-    case kDateTime:
-        LaunchById(instance, parent_hwnd, L"datetime");
-        break;
-    case kDevelopers:
-        (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:developers");
-        break;
-    case kSecurity:
-        (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:windowsdefender");
-        break;
-    case kWindowsUpdate:
-        (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:windowsupdate");
-        break;
-    case kHealth:
-        LaunchById(instance, parent_hwnd, L"health");
-        break;
-    case kShowDesktop:
-        (void)NativeShellBridge::ToggleShowDesktop();
-        break;
-    case kLock:
-        (void)ExecuteNamedShellAction(instance, parent_hwnd, L"session.lock");
-        break;
-    case kRestartCloudOS:
-        (void)ExecuteNamedShellAction(instance, parent_hwnd, L"session.restart-cloudos");
-        break;
-    case kExitCloudOS:
-        (void)ExecuteNamedShellAction(instance, parent_hwnd, L"session.exit-cloudos");
-        break;
-    case kRestartWindows:
-        (void)ExecuteNamedShellAction(instance, parent_hwnd, L"session.restart-windows");
-        break;
-    case kShutdownWindows:
-        (void)ExecuteNamedShellAction(instance, parent_hwnd, L"session.shutdown");
-        break;
-    default:
-        break;
+    case kCommandCenter: CloudOSNativeCommandCenterWindow::Open(instance, parent_hwnd); break;
+    case kWorkspaces: LaunchById(instance, parent_hwnd, L"workspaces"); break;
+    case kBrowser: LaunchById(instance, parent_hwnd, L"browser"); break;
+    case kFiles: LaunchById(instance, parent_hwnd, L"files"); break;
+    case kDrive: LaunchById(instance, parent_hwnd, L"drive"); break;
+    case kProjects: LaunchById(instance, parent_hwnd, L"projects"); break;
+    case kCode: LaunchById(instance, parent_hwnd, L"code"); break;
+    case kTerminal: LaunchById(instance, parent_hwnd, L"terminal"); break;
+    case kPowerShell: LaunchById(instance, parent_hwnd, L"powershell"); break;
+    case kWsl: LaunchById(instance, parent_hwnd, L"wsl"); break;
+    case kRun: LaunchById(instance, parent_hwnd, L"run"); break;
+    case kCalculator: LaunchById(instance, parent_hwnd, L"calc"); break;
+    case kNotepad: LaunchById(instance, parent_hwnd, L"notepad"); break;
+    case kPaint: LaunchById(instance, parent_hwnd, L"paint"); break;
+    case kSnip: LaunchById(instance, parent_hwnd, L"snip"); break;
+    case kMedia: LaunchById(instance, parent_hwnd, L"media"); break;
+    case kWeather: LaunchById(instance, parent_hwnd, L"weather"); break;
+    case kSystemMonitor: LaunchById(instance, parent_hwnd, L"sysmon"); break;
+    case kTaskManager: (void)ExecuteNamedShellAction(instance, parent_hwnd, L"classic.taskmgr"); break;
+    case kDeviceManager: (void)LaunchWindowsTarget(parent_hwnd, L"devmgmt.msc"); break;
+    case kRegedit: LaunchById(instance, parent_hwnd, L"regedit"); break;
+    case kSystemDrive: LaunchById(instance, parent_hwnd, L"systemdrive"); break;
+    case kApps: LaunchById(instance, parent_hwnd, L"apps"); break;
+    case kCloudSettings: LaunchById(instance, parent_hwnd, L"settings"); break;
+    case kWindowsSettings: (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:"); break;
+    case kDisplay: (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:display"); break;
+    case kSound: (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:sound"); break;
+    case kNetwork: (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:network-status"); break;
+    case kWifi: (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:network-wifi"); break;
+    case kBluetooth: (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:bluetooth"); break;
+    case kStorage: (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:storagesense"); break;
+    case kClipboard: (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:clipboard"); break;
+    case kDateTime: LaunchById(instance, parent_hwnd, L"datetime"); break;
+    case kDevelopers: (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:developers"); break;
+    case kSecurity: (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:windowsdefender"); break;
+    case kWindowsUpdate: (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:windowsupdate"); break;
+    case kHealth: LaunchById(instance, parent_hwnd, L"health"); break;
+    case kShowDesktop: (void)NativeShellBridge::ToggleShowDesktop(); break;
+    case kLock: (void)ExecuteNamedShellAction(instance, parent_hwnd, L"session.lock"); break;
+    case kRestartCloudOS: (void)ExecuteNamedShellAction(instance, parent_hwnd, L"session.restart-cloudos"); break;
+    case kExitCloudOS: (void)ExecuteNamedShellAction(instance, parent_hwnd, L"session.exit-cloudos"); break;
+    case kRestartWindows: (void)ExecuteNamedShellAction(instance, parent_hwnd, L"session.restart-windows"); break;
+    case kShutdownWindows: (void)ExecuteNamedShellAction(instance, parent_hwnd, L"session.shutdown"); break;
+    default: break;
     }
 }
 } // namespace CloudOS
