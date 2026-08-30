@@ -3,6 +3,8 @@
 #include <Windows.h>
 
 #include <atomic>
+#include <cwctype>
+#include <functional>
 #include <string>
 #include <thread>
 #include <vector>
