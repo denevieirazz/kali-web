@@ -1,5 +1,6 @@
 #include "native_window_manager.h"
 
+#include "native_session_continuity_service.h"
 #include "native_workspace_studio_service.h"
 
 #include <algorithm>
@@ -7,6 +8,7 @@
 CloudOSNativeWindowManager::CloudOSNativeWindowManager()
 {
     CloudOS::NativeWorkspaceStudioService::RegisterManager(this);
+    CloudOS::NativeSessionContinuityService::RegisterManager(this);
 }
 
 void CloudOSNativeWindowManager::SetTilingEnabled(bool enabled)
