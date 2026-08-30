@@ -84,7 +84,12 @@
     <ClInclude Include="src\native_wallpaper_manager.h" />
     <ClInclude Include="src\native_watchdog.h" />
     <ClInclude Include="src\native_window_manager.h" />
+    <ClInclude Include="src\native_workspace_automation.h" />
+    <ClInclude Include="src\native_workspace_automation_compile.h" />
     <ClInclude Include="src\native_workspace_overview_window.h" />
+    <ClInclude Include="src\native_workspace_studio_model.h" />
+    <ClInclude Include="src\native_workspace_studio_service.h" />
+    <ClInclude Include="src\native_workspace_studio_window.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\main_shell_v2.cpp" />
@@ -139,7 +144,14 @@
     <ClCompile Include="src\native_watchdog.cpp" />
     <ClCompile Include="src\native_window_manager.cpp" />
     <ClCompile Include="src\native_window_manager_recovery.cpp" />
+    <ClCompile Include="src\native_window_manager_workspace_studio.cpp" />
+    <ClCompile Include="src\native_workspace_automation.cpp">
+      <ForcedIncludeFiles>$(MSBuildProjectDirectory)\src\native_workspace_automation_compile.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
+    </ClCompile>
     <ClCompile Include="src\native_workspace_overview_window.cpp" />
+    <ClCompile Include="src\native_workspace_studio_model.cpp" />
+    <ClCompile Include="src\native_workspace_studio_service.cpp" />
+    <ClCompile Include="src\native_workspace_studio_window.cpp" />
     <ClCompile Include="src\runtime_bootstrap.cpp" />
   </ItemGroup>
   <ItemGroup>
