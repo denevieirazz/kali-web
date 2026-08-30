@@ -1,5 +1,7 @@
 #include "native_watchdog.h"
 
+#include "../../CloudOS.NativeCommon/native_supervisor_protocol_v11.h"
+
 #include <Shellapi.h>
 
 #include <algorithm>
@@ -139,11 +141,6 @@ bool LaunchNormalShell()
 
 bool ShouldRestartAfterExit(DWORD exit_code) noexcept
 {
-    // The watchdog exists to recover a crashed shell, not to fight the user.
-    // Task Manager/taskkill commonly terminate a process with a small ordinary
-    // exit code (for example 1). Treat those exits as intentional and stay
-    // closed. Only NT failure/status exits with the high bit set are eligible
-    // for automatic recovery. Ctrl+C/console close is also intentional.
     if (exit_code == 0 || exit_code == kStatusControlCExit)
     {
         return false;
@@ -171,7 +168,6 @@ int NativeWatchdog::RunWatchdogInvocation()
         process_id);
     if (process == nullptr)
     {
-        // The parent may already have completed while the helper was starting.
         return 0;
     }
 
@@ -192,8 +188,6 @@ int NativeWatchdog::RunWatchdogInvocation()
         return 0;
     }
 
-    // Give Windows time to release HWNDs, AppBars and the session mutex before
-    // the replacement shell attempts to acquire them.
     Sleep(450);
 
     const ULONGLONG now = GetTickCount64();
@@ -267,12 +261,19 @@ void NativeWatchdog::ReleaseSessionMutex(HANDLE mutex) noexcept
 
 bool NativeWatchdog::StartForCurrentProcess()
 {
-    // wWinMain reaches this method only after CloudOSApplication::Initialize()
-    // succeeds. Use that deterministic lifecycle point to arm the UI heartbeat.
+    // Readiness belongs to the UI process even when recovery ownership is moved
+    // to CloudOS.Supervisor.exe, so arm V9 health before selecting the recovery path.
     HealthBootstrapV9::bootstrap.AttachAfterInitialization();
 
-    // Stability/soak runs must observe the original process directly. A crash
-    // must fail the probe instead of being hidden by the normal recovery helper.
+    // The external Supervisor V11 is the sole recovery authority for supervised
+    // launches. Never start the embedded helper as well: competing restart loops
+    // could race on the same session mutex and obscure the original failure.
+    if (HasArgument(SupervisorProtocolV11::SupervisedArgument))
+    {
+        return true;
+    }
+
+    // Stability/soak runs also observe the original process directly.
     if (HasArgument(kStabilityProbeArgument))
     {
         return true;
