@@ -531,16 +531,14 @@ int WINAPI wWinMain(
     common_controls.dwICC =
         ICC_LISTVIEW_CLASSES |
         ICC_BAR_CLASSES |
-        ICC_STANDARD_CLASSES |
         ICC_WIN95_CLASSES;
     if (!InitCommonControlsEx(&common_controls))
     {
-        MessageBoxW(
-            nullptr,
-            L"O CloudOS Native nao conseguiu inicializar os controles Win32.",
-            L"CloudOS Native",
-            MB_OK | MB_ICONERROR);
-        return 1;
+        common_controls.dwICC = ICC_WIN95_CLASSES;
+        if (!InitCommonControlsEx(&common_controls))
+        {
+            InitCommonControls();
+        }
     }
 
     const HRESULT com_result = OleInitialize(nullptr);
