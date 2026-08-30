@@ -40,14 +40,20 @@ jobs:
         shell: cmd
         run: scripts\native\build-cloudos-native.cmd Release
 
-      - name: Verify native binaries and compiled graph
+      - name: Verify native release provenance and compiled graph
         shell: pwsh
         run: |
+          ./scripts/native/verify-native-build-manifest.ps1 -Configuration Release -CheckSourceFingerprint
+
           $out = 'desktop/CloudOS.NativeShell/bin/Release'
-          foreach ($name in @('CloudOS.exe', 'CloudOS.NativeRuntime.dll')) {
+          foreach ($name in @('CloudOS.exe', 'CloudOS.NativeRuntime.dll', 'cloudos-native-manifest.json', '.cloudos-build-fingerprint')) {
             $path = Join-Path $out $name
             if (-not (Test-Path -LiteralPath $path)) { throw "Missing $path" }
             if ((Get-Item -LiteralPath $path).Length -le 0) { throw "Empty $path" }
+          }
+
+          if (Test-Path -LiteralPath (Join-Path $out 'ui')) {
+            throw 'Obsolete web desktop output returned to the native release.'
           }
 
           $project = Get-Content -LiteralPath 'desktop/CloudOS.NativeShell/CloudOS.NativeShell.vcxproj' -Raw
@@ -62,3 +68,16 @@ jobs:
               throw "Native developer build regressed to obsolete web desktop asset build: $forbidden"
             }
           }
+
+      - name: Publish verified CloudOS Native x64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CloudOS-Native-Release-x64-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            desktop/CloudOS.NativeShell/bin/Release/CloudOS.exe
+            desktop/CloudOS.NativeShell/bin/Release/CloudOS.NativeRuntime.dll
+            desktop/CloudOS.NativeShell/bin/Release/cloudos-native-manifest.json
+            desktop/CloudOS.NativeShell/bin/Release/.cloudos-build-head
+            desktop/CloudOS.NativeShell/bin/Release/.cloudos-build-fingerprint
