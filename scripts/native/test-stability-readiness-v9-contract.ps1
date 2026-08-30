@@ -61,6 +61,8 @@ Require 'UI heartbeat bootstrap V9' $content.HealthBootstrap @(
     'SetWindowSubclass',
     'WM_TIMER',
     'HealthIntervalMilliseconds = 1000',
+    'AttachAfterInitialization()',
+    'TryAttach(FindWindowW(DesktopClass, nullptr))',
     'RequiredShellSurfacesExist',
     'consecutive_ready_checks_ >= 2',
     'signal_.MarkReady',
@@ -76,6 +78,7 @@ Require 'Watchdog integration V9' $content.WatchdogHeader @(
     '--stability-probe'
 )
 Require 'Probe watchdog bypass V9' $content.Watchdog @(
+    'HealthBootstrapV9::bootstrap.AttachAfterInitialization()',
     'kStabilityProbeArgument[] = L"--stability-probe"',
     'if (HasArgument(kStabilityProbeArgument))',
     'Stability/soak runs must observe the original process directly.'
@@ -153,4 +156,4 @@ Require 'V9 documentation' $content.Document @(
     'criterio de aceite, nao uma alegacao'
 )
 
-Write-Host 'PASS: Stability/Readiness V9 contracts passed - fixed health ABI, UI heartbeat, deterministic probe, automated soak, local diagnostics, portable tooling and CI smoke are protected.'
+Write-Host 'PASS: Stability/Readiness V9 contracts passed - fixed health ABI, deterministic post-initialize UI heartbeat, automated soak, local diagnostics, portable tooling and CI smoke are protected.'
