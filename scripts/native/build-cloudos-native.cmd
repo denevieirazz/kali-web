@@ -36,6 +36,8 @@ pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-native-web-ui-cont
 if errorlevel 1 exit /b %ERRORLEVEL%
 pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-taskbar-productivity-contract.ps1"
 if errorlevel 1 exit /b %ERRORLEVEL%
+pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-workspace-overview-contract.ps1"
+if errorlevel 1 exit /b %ERRORLEVEL%
 pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-native-release-pipeline-contract.ps1"
 if errorlevel 1 exit /b %ERRORLEVEL%
 
@@ -117,6 +119,7 @@ echo [CloudOS] MANIFEST=%MANIFEST%
 if defined SOURCE_FINGERPRINT echo [CloudOS] SOURCE_FINGERPRINT=%SOURCE_FINGERPRINT%
 if defined BUILD_HEAD echo [CloudOS] BUILD_HEAD=%BUILD_HEAD%
 echo [CloudOS] SHELL_UI=C++/Win32 nativo
+echo [CloudOS] WORKSPACE_OVERVIEW=nativo com DWM previews e 4 areas
 echo [CloudOS] WEBVIEW2=usado somente pelo Navegador CloudOS
 echo [CloudOS] FRONTEND_REACT=referencia visual; nao participa deste build
 exit /b 0
