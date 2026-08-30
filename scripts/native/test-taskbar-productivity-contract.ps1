@@ -91,41 +91,57 @@ Require 'Smart Start recommendations' $content.Mru @(
     'MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH'
 )
 
-Require 'Hierarchical quick-access hub' $content.Launcher @(
+Require 'Expanded hierarchical quick-access hub' $content.Launcher @(
     'ShowQuickPowerMenu',
     'L"Central de Comandos  ·  106 acoes"',
+    'L"CloudOS e desenvolvimento"',
     'L"Terminais"',
-    'L"Ferramentas"',
+    'L"Produtividade"',
+    'L"Ferramentas do sistema"',
     'L"Sistema e configuracoes"',
     'L"Energia do Windows"',
+    'L"projects"',
+    'L"code"',
     'L"powershell"',
     'L"wsl"',
-    'L"run"',
-    'L"drive"',
+    'L"paint"',
+    'L"media"',
+    'L"weather"',
+    'L"devmgmt.msc"',
+    'L"ms-settings:display"',
+    'L"ms-settings:sound"',
+    'L"ms-settings:network-status"',
     'L"ms-settings:network-wifi"',
+    'L"ms-settings:bluetooth"',
+    'L"ms-settings:storagesense"',
+    'L"ms-settings:clipboard"',
+    'L"ms-settings:developers"',
+    'L"ms-settings:windowsdefender"',
     'L"ms-settings:windowsupdate"',
     'L"classic.taskmgr"',
     'L"session.restart-cloudos"',
     'L"session.shutdown"'
 )
 
-Require 'Native build revision stamp' $content.NativeBuild @(
-    'BUILD_HEAD',
-    '.cloudos-build-head',
-    'git.exe -C',
-    'rev-parse HEAD',
+Require 'Native build provenance' $content.NativeBuild @(
+    'cloudos-native-manifest.json',
+    '.cloudos-build-fingerprint',
+    'write-native-build-manifest.ps1',
+    'verify-native-build-manifest.ps1',
+    'SOURCE_FINGERPRINT',
     'CloudOS.exe vazio',
     'CloudOS.NativeRuntime.dll vazio'
 )
-Require 'Stale binary detection' $content.NativeStart @(
-    '.cloudos-build-head',
-    'CURRENT_HEAD',
-    'BUILT_HEAD',
+Require 'Fingerprint stale binary detection' $content.NativeStart @(
+    '.cloudos-build-fingerprint',
+    'FINGERPRINT_SCRIPT',
+    'CURRENT_FINGERPRINT',
+    'BUILT_FINGERPRINT',
     'REBUILD_REASON',
-    'rev-parse HEAD',
-    'status --porcelain',
-    'o codigo Git mudou desde o ultimo build',
-    'existem alteracoes locais no codigo nativo/scripts',
+    'o codigo nativo mudou desde o ultimo build',
+    'a verificacao de integridade/proveniencia falhou',
+    '--force-rebuild',
+    '--no-build',
     'taskkill /F /IM CloudOS.exe',
     'build-cloudos-native.cmd'
 )
@@ -137,4 +153,4 @@ if ($buildLabel -lt 0 -or $killBeforeBuild -lt 0 -or $buildCall -lt 0 -or $killB
     throw 'Native launcher must stop CloudOS.exe before invoking an automatic rebuild.'
 }
 
-Write-Host 'PASS: Taskbar V4 live geometry, power-user mouse controls, rich DWM preview, self-healing pins, smart Start recommendations, quick-access hub and safe stale-binary rebuilds are protected.'
+Write-Host 'PASS: Taskbar V4 live geometry, power-user mouse controls, rich DWM preview, self-healing pins, smart Start recommendations, expanded quick-access hub and fingerprint-verified rebuilds are protected.'
