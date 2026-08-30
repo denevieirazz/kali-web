@@ -2,8 +2,10 @@
 
 #include <windows.h>
 
+#include <cstddef>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "native_shell_pins.h"
@@ -59,6 +61,7 @@ private:
     void LaunchPinned(std::size_t index);
     void LaunchPin(const ShellPinItem& pin);
     void ShowPinnedContextMenu(std::size_t index, POINT screen_point);
+    void ShowPinOverflowMenu(POINT screen_point);
     void ShowTaskContextMenu(std::size_t index, POINT screen_point);
     void ShowTaskGroupPicker(std::size_t index, POINT screen_point);
     void ActivateTaskGroup(std::size_t index);
@@ -81,11 +84,13 @@ private:
     RECT quick_rect_{};
     RECT notification_rect_{};
     RECT clock_rect_{};
+    RECT pin_overflow_rect_{};
     std::vector<RECT> workspace_rects_;
     std::vector<RECT> pinned_rects_;
     std::vector<ShellPinItem> pinned_items_;
     std::vector<RECT> task_rects_;
     std::vector<TaskGroup> task_groups_;
+    std::size_t visible_pin_count_{};
 
     int hovered_kind_{-1};
     int hovered_index_{-1};
