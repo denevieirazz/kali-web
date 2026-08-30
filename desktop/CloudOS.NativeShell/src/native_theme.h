@@ -16,23 +16,98 @@
 
 namespace CloudOS
 {
-constexpr int kBottomBarHeight = 56;
+constexpr int kBottomBarHeight = 48;
 constexpr UINT_PTR kReconcileTimer = 1;
 constexpr UINT_PTR kMetricsTimer = 2;
 
-constexpr COLORREF kBgTop = RGB(17, 20, 29);
-constexpr COLORREF kBgBottom = RGB(8, 11, 17);
-constexpr COLORREF kGlassBg = RGB(26, 28, 33);
-constexpr COLORREF kGlassCard = RGB(37, 40, 47);
-constexpr COLORREF kGlassBorder = RGB(72, 77, 88);
-constexpr COLORREF kNeonCyan = RGB(103, 165, 246);
-constexpr COLORREF kNeonPurple = RGB(126, 184, 255);
+// Native mirror of frontend/src/index.css.  The Win32 shell keeps the native
+// runtime/WindowManager, but the visual language comes from the old web UI.
+namespace WebSkin
+{
+constexpr COLORREF BgSolid = RGB(10, 10, 15);       // #0a0a0f
+constexpr COLORREF BgPrimary = RGB(17, 17, 24);     // #111118
+constexpr COLORREF BgSecondary = RGB(26, 26, 36);   // #1a1a24
+constexpr COLORREF BgTertiary = RGB(34, 34, 46);    // #22222e
+constexpr COLORREF BgElevated = RGB(42, 42, 56);    // #2a2a38
+constexpr COLORREF BgHover = RGB(34, 34, 45);
+constexpr COLORREF BgActive = RGB(40, 40, 53);
+constexpr COLORREF Accent = RGB(99, 102, 241);      // #6366f1
+constexpr COLORREF AccentHover = RGB(129, 140, 248);// #818cf8
+constexpr COLORREF AccentActive = RGB(79, 70, 229); // #4f46e5
+constexpr COLORREF AccentSubtle = RGB(31, 31, 66);
+constexpr COLORREF TextPrimary = RGB(240, 240, 245); // #f0f0f5
+constexpr COLORREF TextSecondary = RGB(160, 160, 184);// #a0a0b8
+constexpr COLORREF TextTertiary = RGB(107, 107, 130); // #6b6b82
+constexpr COLORREF TextDisabled = RGB(69, 69, 90);
+constexpr COLORREF BorderDefault = RGB(43, 43, 56);
+constexpr COLORREF BorderSubtle = RGB(31, 31, 42);
+constexpr COLORREF BorderStrong = RGB(55, 55, 70);
+constexpr COLORREF Danger = RGB(219, 99, 106);
+constexpr int RadiusSmall = 4;
+constexpr int RadiusMedium = 8;
+constexpr int RadiusLarge = 12;
+constexpr int RadiusXL = 16;
+
+inline Gdiplus::Color GdiColor(COLORREF color, BYTE alpha = 255) noexcept
+{
+    return Gdiplus::Color(
+        alpha,
+        GetRValue(color),
+        GetGValue(color),
+        GetBValue(color));
+}
+
+inline void DrawRoundedPanel(
+    Gdiplus::Graphics& graphics,
+    const Gdiplus::RectF& rect,
+    float radius,
+    Gdiplus::Color fill,
+    Gdiplus::Color border,
+    float border_width = 1.0f)
+{
+    const float safe_radius = std::max(0.0f, std::min(radius, std::min(rect.Width, rect.Height) / 2.0f));
+    const float diameter = safe_radius * 2.0f;
+
+    Gdiplus::GraphicsPath path;
+    if (diameter <= 0.0f)
+    {
+        path.AddRectangle(rect);
+    }
+    else
+    {
+        path.AddArc(rect.X, rect.Y, diameter, diameter, 180.0f, 90.0f);
+        path.AddArc(rect.GetRight() - diameter, rect.Y, diameter, diameter, 270.0f, 90.0f);
+        path.AddArc(rect.GetRight() - diameter, rect.GetBottom() - diameter, diameter, diameter, 0.0f, 90.0f);
+        path.AddArc(rect.X, rect.GetBottom() - diameter, diameter, diameter, 90.0f, 90.0f);
+        path.CloseFigure();
+    }
+
+    Gdiplus::SolidBrush background(fill);
+    graphics.FillPath(&background, &path);
+    if (border_width > 0.0f && border.GetA() != 0)
+    {
+        Gdiplus::Pen outline(border, border_width);
+        graphics.DrawPath(&outline, &path);
+    }
+}
+} // namespace WebSkin
+
+// Compatibility names used by the existing native surfaces.  Mapping them to
+// the web palette immediately pulls Taskbar/Desktop/other GDI+ surfaces toward
+// the same visual identity without touching their behavior.
+constexpr COLORREF kBgTop = WebSkin::BgPrimary;
+constexpr COLORREF kBgBottom = WebSkin::BgSolid;
+constexpr COLORREF kGlassBg = WebSkin::BgSecondary;
+constexpr COLORREF kGlassCard = WebSkin::BgTertiary;
+constexpr COLORREF kGlassBorder = WebSkin::BorderStrong;
+constexpr COLORREF kNeonCyan = WebSkin::Accent;
+constexpr COLORREF kNeonPurple = WebSkin::AccentHover;
 constexpr COLORREF kNeonPink = RGB(213, 151, 171);
-constexpr COLORREF kTextWhite = RGB(245, 247, 250);
-constexpr COLORREF kTextSec = RGB(194, 199, 208);
-constexpr COLORREF kTextMuted = RGB(139, 146, 158);
+constexpr COLORREF kTextWhite = WebSkin::TextPrimary;
+constexpr COLORREF kTextSec = WebSkin::TextSecondary;
+constexpr COLORREF kTextMuted = WebSkin::TextTertiary;
 constexpr COLORREF kAccentGreen = RGB(102, 187, 141);
-constexpr COLORREF kDanger = RGB(219, 99, 106);
+constexpr COLORREF kDanger = WebSkin::Danger;
 
 enum class AppCategory : int
 {
@@ -160,5 +235,32 @@ inline void DarkWindow(HWND window, bool round = true)
             &preference,
             static_cast<DWORD>(sizeof(preference)));
     }
+}
+
+inline void ApplyWebFlyoutMaterial(HWND window)
+{
+    if (window == nullptr)
+    {
+        return;
+    }
+
+    DarkWindow(window, true);
+
+    // Windows 11: DWMWA_BORDER_COLOR (34) and DWMWA_SYSTEMBACKDROP_TYPE (38).
+    // Numeric attributes keep the code buildable with older Windows 10 SDK
+    // headers while failing harmlessly on unsupported Windows builds.
+    const COLORREF border = WebSkin::BorderStrong;
+    (void)DwmSetWindowAttribute(
+        window,
+        static_cast<DWMWINDOWATTRIBUTE>(34),
+        &border,
+        static_cast<DWORD>(sizeof(border)));
+
+    const int transient_backdrop = 3; // DWMSBT_TRANSIENTWINDOW / Acrylic-like.
+    (void)DwmSetWindowAttribute(
+        window,
+        static_cast<DWMWINDOWATTRIBUTE>(38),
+        &transient_backdrop,
+        static_cast<DWORD>(sizeof(transient_backdrop)));
 }
 } // namespace CloudOS
