@@ -464,17 +464,39 @@ void NativeAppLauncher::ShowQuickPowerMenu(
     constexpr UINT kCalculator = 1121;
     constexpr UINT kNotepad = 1122;
     constexpr UINT kApps = 1123;
+    constexpr UINT kProjects = 1124;
+    constexpr UINT kCode = 1125;
+    constexpr UINT kPaint = 1126;
+    constexpr UINT kMedia = 1127;
+    constexpr UINT kWeather = 1128;
+    constexpr UINT kDateTime = 1129;
+    constexpr UINT kRegedit = 1130;
+    constexpr UINT kDisplay = 1131;
+    constexpr UINT kSound = 1132;
+    constexpr UINT kBluetooth = 1133;
+    constexpr UINT kStorage = 1134;
+    constexpr UINT kClipboard = 1135;
+    constexpr UINT kDevelopers = 1136;
+    constexpr UINT kSecurity = 1137;
+    constexpr UINT kNetwork = 1138;
+    constexpr UINT kSystemDrive = 1139;
+    constexpr UINT kDeviceManager = 1140;
 
     HMENU menu = CreatePopupMenu();
+    HMENU cloud = CreatePopupMenu();
     HMENU terminals = CreatePopupMenu();
+    HMENU productivity = CreatePopupMenu();
     HMENU tools = CreatePopupMenu();
     HMENU settings = CreatePopupMenu();
     HMENU power = CreatePopupMenu();
-    if (menu == nullptr || terminals == nullptr || tools == nullptr ||
-        settings == nullptr || power == nullptr)
+    if (menu == nullptr || cloud == nullptr || terminals == nullptr ||
+        productivity == nullptr || tools == nullptr || settings == nullptr ||
+        power == nullptr)
     {
         if (menu != nullptr) DestroyMenu(menu);
+        if (cloud != nullptr) DestroyMenu(cloud);
         if (terminals != nullptr) DestroyMenu(terminals);
+        if (productivity != nullptr) DestroyMenu(productivity);
         if (tools != nullptr) DestroyMenu(tools);
         if (settings != nullptr) DestroyMenu(settings);
         if (power != nullptr) DestroyMenu(power);
@@ -483,9 +505,17 @@ void NativeAppLauncher::ShowQuickPowerMenu(
 
     AppendMenuW(menu, MF_STRING, kCommandCenter, L"Central de Comandos  ·  106 acoes");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, kBrowser, L"Navegador");
-    AppendMenuW(menu, MF_STRING, kFiles, L"Arquivos");
-    AppendMenuW(menu, MF_STRING, kDrive, L"CloudOS Drive");
+
+    AppendMenuW(cloud, MF_STRING, kBrowser, L"Navegador");
+    AppendMenuW(cloud, MF_STRING, kFiles, L"Arquivos");
+    AppendMenuW(cloud, MF_STRING, kDrive, L"CloudOS Drive");
+    AppendMenuW(cloud, MF_STRING, kProjects, L"Projetos");
+    AppendMenuW(cloud, MF_STRING, kCode, L"VS Code");
+    AppendMenuW(
+        menu,
+        MF_POPUP,
+        reinterpret_cast<UINT_PTR>(cloud),
+        L"CloudOS e desenvolvimento");
 
     AppendMenuW(terminals, MF_STRING, kTerminal, L"Terminal");
     AppendMenuW(terminals, MF_STRING, kPowerShell, L"PowerShell");
@@ -496,25 +526,47 @@ void NativeAppLauncher::ShowQuickPowerMenu(
         reinterpret_cast<UINT_PTR>(terminals),
         L"Terminais");
 
-    AppendMenuW(tools, MF_STRING, kRun, L"Executar...");
-    AppendMenuW(tools, MF_STRING, kCalculator, L"Calculadora");
-    AppendMenuW(tools, MF_STRING, kNotepad, L"Bloco de Notas");
-    AppendMenuW(tools, MF_STRING, kSnip, L"Captura de Tela");
-    AppendMenuW(tools, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(productivity, MF_STRING, kRun, L"Executar...");
+    AppendMenuW(productivity, MF_STRING, kCalculator, L"Calculadora");
+    AppendMenuW(productivity, MF_STRING, kNotepad, L"Bloco de Notas");
+    AppendMenuW(productivity, MF_STRING, kPaint, L"Paint");
+    AppendMenuW(productivity, MF_STRING, kSnip, L"Captura de Tela");
+    AppendMenuW(productivity, MF_STRING, kMedia, L"Midia / Musica");
+    AppendMenuW(productivity, MF_STRING, kWeather, L"Clima");
+    AppendMenuW(
+        menu,
+        MF_POPUP,
+        reinterpret_cast<UINT_PTR>(productivity),
+        L"Produtividade");
+
     AppendMenuW(tools, MF_STRING, kSystemMonitor, L"Monitor do Sistema");
     AppendMenuW(tools, MF_STRING, kTaskManager, L"Gerenciador de Tarefas");
+    AppendMenuW(tools, MF_STRING, kDeviceManager, L"Gerenciador de Dispositivos");
+    AppendMenuW(tools, MF_STRING, kRegedit, L"Editor do Registro");
+    AppendMenuW(tools, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(tools, MF_STRING, kSystemDrive, L"Disco do Sistema");
     AppendMenuW(tools, MF_STRING, kApps, L"Todos os Aplicativos");
     AppendMenuW(
         menu,
         MF_POPUP,
         reinterpret_cast<UINT_PTR>(tools),
-        L"Ferramentas");
+        L"Ferramentas do sistema");
 
     AppendMenuW(settings, MF_STRING, kCloudSettings, L"Configuracoes do CloudOS");
     AppendMenuW(settings, MF_STRING, kWindowsSettings, L"Configuracoes do Windows");
-    AppendMenuW(settings, MF_STRING, kWifi, L"Wi-Fi e rede");
-    AppendMenuW(settings, MF_STRING, kWindowsUpdate, L"Windows Update");
     AppendMenuW(settings, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(settings, MF_STRING, kDisplay, L"Tela e monitores");
+    AppendMenuW(settings, MF_STRING, kSound, L"Som e audio");
+    AppendMenuW(settings, MF_STRING, kNetwork, L"Rede e Internet");
+    AppendMenuW(settings, MF_STRING, kWifi, L"Wi-Fi");
+    AppendMenuW(settings, MF_STRING, kBluetooth, L"Bluetooth");
+    AppendMenuW(settings, MF_STRING, kStorage, L"Armazenamento");
+    AppendMenuW(settings, MF_STRING, kClipboard, L"Area de transferencia");
+    AppendMenuW(settings, MF_STRING, kDateTime, L"Data e hora");
+    AppendMenuW(settings, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(settings, MF_STRING, kDevelopers, L"Para desenvolvedores");
+    AppendMenuW(settings, MF_STRING, kSecurity, L"Seguranca do Windows");
+    AppendMenuW(settings, MF_STRING, kWindowsUpdate, L"Windows Update");
     AppendMenuW(settings, MF_STRING, kHealth, L"Saude do Sistema");
     AppendMenuW(
         menu,
@@ -569,6 +621,12 @@ void NativeAppLauncher::ShowQuickPowerMenu(
     case kDrive:
         LaunchById(instance, parent_hwnd, L"drive");
         break;
+    case kProjects:
+        LaunchById(instance, parent_hwnd, L"projects");
+        break;
+    case kCode:
+        LaunchById(instance, parent_hwnd, L"code");
+        break;
     case kTerminal:
         LaunchById(instance, parent_hwnd, L"terminal");
         break;
@@ -587,14 +645,32 @@ void NativeAppLauncher::ShowQuickPowerMenu(
     case kNotepad:
         LaunchById(instance, parent_hwnd, L"notepad");
         break;
+    case kPaint:
+        LaunchById(instance, parent_hwnd, L"paint");
+        break;
     case kSnip:
         LaunchById(instance, parent_hwnd, L"snip");
+        break;
+    case kMedia:
+        LaunchById(instance, parent_hwnd, L"media");
+        break;
+    case kWeather:
+        LaunchById(instance, parent_hwnd, L"weather");
         break;
     case kSystemMonitor:
         LaunchById(instance, parent_hwnd, L"sysmon");
         break;
     case kTaskManager:
         (void)ExecuteNamedShellAction(instance, parent_hwnd, L"classic.taskmgr");
+        break;
+    case kDeviceManager:
+        (void)LaunchWindowsTarget(parent_hwnd, L"devmgmt.msc");
+        break;
+    case kRegedit:
+        LaunchById(instance, parent_hwnd, L"regedit");
+        break;
+    case kSystemDrive:
+        LaunchById(instance, parent_hwnd, L"systemdrive");
         break;
     case kApps:
         LaunchById(instance, parent_hwnd, L"apps");
@@ -605,8 +681,35 @@ void NativeAppLauncher::ShowQuickPowerMenu(
     case kWindowsSettings:
         (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:");
         break;
+    case kDisplay:
+        (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:display");
+        break;
+    case kSound:
+        (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:sound");
+        break;
+    case kNetwork:
+        (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:network-status");
+        break;
     case kWifi:
         (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:network-wifi");
+        break;
+    case kBluetooth:
+        (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:bluetooth");
+        break;
+    case kStorage:
+        (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:storagesense");
+        break;
+    case kClipboard:
+        (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:clipboard");
+        break;
+    case kDateTime:
+        LaunchById(instance, parent_hwnd, L"datetime");
+        break;
+    case kDevelopers:
+        (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:developers");
+        break;
+    case kSecurity:
+        (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:windowsdefender");
         break;
     case kWindowsUpdate:
         (void)LaunchWindowsTarget(parent_hwnd, L"ms-settings:windowsupdate");
