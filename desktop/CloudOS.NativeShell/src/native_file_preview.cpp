@@ -43,7 +43,7 @@ bool HasExtension(const std::wstring& path, std::initializer_list<std::wstring_v
     });
 }
 
-void SelectFont(HDC dc, HFONT font, HGDIOBJ* old_font)
+void SelectPreviewFont(HDC dc, HFONT font, HGDIOBJ* old_font)
 {
     if (old_font != nullptr) *old_font = nullptr;
     if (dc != nullptr && font != nullptr && old_font != nullptr)
@@ -428,14 +428,14 @@ void NativeFilePreviewPane::Paint(HDC dc)
     SetBkMode(dc, TRANSPARENT);
     SetTextColor(dc, WebSkin::TextPrimary);
     HGDIOBJ old_font = nullptr;
-    SelectFont(dc, title_font_, &old_font);
+    SelectPreviewFont(dc, title_font_, &old_font);
     RECT title_rect{margin, margin, client.right - margin, margin + Scale(48, dpi)};
     DrawTextW(dc, title_.empty() ? L"Visualização" : title_.c_str(), -1, &title_rect,
         DT_LEFT | DT_TOP | DT_END_ELLIPSIS | DT_SINGLELINE);
     if (old_font != nullptr) SelectObject(dc, old_font);
 
     SetTextColor(dc, WebSkin::TextSecondary);
-    SelectFont(dc, text_font_, &old_font);
+    SelectPreviewFont(dc, text_font_, &old_font);
     RECT metadata_rect{margin, margin + Scale(42, dpi), client.right - margin, margin + Scale(118, dpi)};
     DrawTextW(dc, metadata_.c_str(), -1, &metadata_rect, DT_LEFT | DT_TOP | DT_WORDBREAK | DT_END_ELLIPSIS);
     if (old_font != nullptr) SelectObject(dc, old_font);
@@ -444,8 +444,8 @@ void NativeFilePreviewPane::Paint(HDC dc)
     RECT body{margin, body_top, client.right - margin, client.bottom - margin};
     if (kind_ == PreviewKind::Image && bitmap_ != nullptr && bitmap_size_.cx > 0 && bitmap_size_.cy > 0)
     {
-        const int available_width = std::max(1, body.right - body.left);
-        const int available_height = std::max(1, body.bottom - body.top);
+        const int available_width = static_cast<int>(std::max<LONG>(1, body.right - body.left));
+        const int available_height = static_cast<int>(std::max<LONG>(1, body.bottom - body.top));
         const double scale = std::min(
             static_cast<double>(available_width) / static_cast<double>(bitmap_size_.cx),
             static_cast<double>(available_height) / static_cast<double>(bitmap_size_.cy));
@@ -467,7 +467,7 @@ void NativeFilePreviewPane::Paint(HDC dc)
     else if (kind_ == PreviewKind::Text)
     {
         SetTextColor(dc, WebSkin::TextPrimary);
-        SelectFont(dc, text_font_, &old_font);
+        SelectPreviewFont(dc, text_font_, &old_font);
         DrawTextW(dc, text_.c_str(), -1, &body, DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
         if (old_font != nullptr) SelectObject(dc, old_font);
     }
@@ -479,7 +479,7 @@ void NativeFilePreviewPane::Paint(HDC dc)
         else if (kind_ == PreviewKind::Generic) message = L"Sem visualização de conteúdo para este tipo de arquivo.";
         else message = L"Selecione um arquivo para visualizar.";
         SetTextColor(dc, WebSkin::TextTertiary);
-        SelectFont(dc, text_font_, &old_font);
+        SelectPreviewFont(dc, text_font_, &old_font);
         DrawTextW(dc, message.c_str(), -1, &body, DT_LEFT | DT_TOP | DT_WORDBREAK);
         if (old_font != nullptr) SelectObject(dc, old_font);
     }
