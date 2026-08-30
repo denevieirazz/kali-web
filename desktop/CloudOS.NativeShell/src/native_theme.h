@@ -245,7 +245,6 @@ inline LRESULT CALLBACK WindowSkinSubclass(
     {
     case WM_DRAWITEM:
     {
-        // Give an app-specific handler first refusal (Start/Quick Settings/etc.).
         const LRESULT app_result = DefSubclassProc(window, message, w_param, l_param);
         if (app_result != 0) return app_result;
         if (PaintOwnerDrawButton(reinterpret_cast<const DRAWITEMSTRUCT*>(l_param), ButtonTone::Neutral)) return TRUE;
@@ -325,9 +324,10 @@ struct AppItem final
     int icon_id;
 };
 
-inline constexpr std::array<AppItem, 22> kAllApps{{
+inline constexpr std::array<AppItem, 23> kAllApps{{
     {L"browser", L"Navegador", L"Navegador Win32 in-process do CloudOS com WebView2", L"", AppCategory::Accessories, 1},
     {L"control", L"Central de Comandos", L"Mais de 100 acoes do CloudOS e do Windows em uma central pesquisavel", L"", AppCategory::System, 16},
+    {L"systemcenter", L"Central do Sistema", L"Wi-Fi, brilho, audio, energia, rede, discos e processos em um painel nativo", L"", AppCategory::System, 20},
     {L"workspaces", L"Visão de Trabalho", L"Gerenciar as 4 áreas, janelas, tiling e previews DWM", L"", AppCategory::System, 19},
     {L"projects", L"Projetos", L"Projetos persistentes no CloudOS Drive", L"", AppCategory::Dev, 2},
     {L"wsl", L"WSL / Kali", L"Terminal Linux pela distribuicao WSL configurada", L"wsl.exe", AppCategory::Dev, 4},
