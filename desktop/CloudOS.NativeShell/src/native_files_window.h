@@ -108,6 +108,7 @@ private:
     HWND new_folder_button_{};
     HWND rename_button_{};
     HWND delete_button_{};
+    HWND operations_button_{};
     HWND shell_host_{};
     HWND list_{};
     HWND status_{};
