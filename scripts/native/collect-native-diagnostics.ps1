@@ -5,6 +5,12 @@ param(
     [ValidateRange(1, 60)][int]$IntervalSeconds = 5
 )
 $ErrorActionPreference = 'Stop'
+
+$healthHelper = Join-Path $PSScriptRoot 'native-health-v9.ps1'
+if (Test-Path -LiteralPath $healthHelper) {
+    . $healthHelper
+}
+
 $rootPath = (Resolve-Path -LiteralPath $Root).Path
 $out = if (Test-Path -LiteralPath (Join-Path $rootPath 'cloudos-native-manifest.json')) { $rootPath } else { Join-Path $rootPath 'desktop\CloudOS.NativeShell\bin\Release' }
 if (-not $OutputPath) {
@@ -46,11 +52,17 @@ $samples = [Collections.Generic.List[object]]::new()
 $session = [Diagnostics.Process]::GetCurrentProcess().SessionId
 $timer = [Diagnostics.Stopwatch]::StartNew()
 do {
+    $health = $null
+    if (Get-Command Get-CloudOSHealthSnapshotV9 -ErrorAction SilentlyContinue) {
+        try { $health = Get-CloudOSHealthSnapshotV9 } catch { $health = $null }
+    }
+
     $processes = @(Get-Process -Name CloudOS -ErrorAction SilentlyContinue | Where-Object {
         $_.SessionId -eq $session -and $_.Path -eq (Join-Path $out 'CloudOS.exe')
     })
     $metrics = foreach ($process in $processes) {
         try {
+            $isHealthOwner = $health -and [int]$health.process_id -eq $process.Id
             [ordered]@{
                 pid = $process.Id
                 cpu_seconds = $process.TotalProcessorTime.TotalSeconds
@@ -59,6 +71,12 @@ do {
                 threads = $process.Threads.Count
                 handles = $process.HandleCount
                 responding = $process.Responding
+                health_state = if ($isHealthOwner) { [int]$health.state } else { $null }
+                heartbeat_count = if ($isHealthOwner) { [uint64]$health.heartbeat_count } else { $null }
+                heartbeat_tick_ms = if ($isHealthOwner) { [uint64]$health.heartbeat_tick_ms } else { $null }
+                gdi_objects = if ($isHealthOwner) { [int]$health.gdi_objects } else { $null }
+                user_objects = if ($isHealthOwner) { [int]$health.user_objects } else { $null }
+                health_handles = if ($isHealthOwner) { [int]$health.handle_count } else { $null }
             }
         } catch { [ordered]@{ pid = $process.Id; exited_during_sample = $true } }
     }
@@ -75,6 +93,7 @@ $report = [ordered]@{
     build = $build
     build_error = $buildError
     artifacts = @($artifacts)
+    health_schema = 9
     samples = $samples.ToArray()
 }
 $json = $report | ConvertTo-Json -Depth 10

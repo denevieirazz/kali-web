@@ -7,6 +7,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <string>
+#include <string_view>
 
 #pragma comment(lib, "shell32.lib")
 
@@ -16,6 +17,7 @@ namespace
 {
 constexpr wchar_t kSessionMutex[] = L"Local\\CloudOS.NativeShell.Session.v1";
 constexpr wchar_t kWatchdogArgument[] = L"--watchdog";
+constexpr wchar_t kStabilityProbeArgument[] = L"--stability-probe";
 constexpr int kMaximumRapidCrashes = 5;
 constexpr ULONGLONG kCrashWindowMilliseconds = 30000ull;
 constexpr DWORD kNtStatusFailureMask = 0x80000000u;
@@ -52,6 +54,19 @@ std::vector<std::wstring> Arguments()
     }
     LocalFree(raw);
     return result;
+}
+
+bool HasArgument(std::wstring_view expected)
+{
+    const auto arguments = Arguments();
+    for (std::size_t index = 1; index < arguments.size(); ++index)
+    {
+        if (_wcsicmp(arguments[index].c_str(), expected.data()) == 0)
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 DWORD WatchedProcessId()
@@ -252,6 +267,17 @@ void NativeWatchdog::ReleaseSessionMutex(HANDLE mutex) noexcept
 
 bool NativeWatchdog::StartForCurrentProcess()
 {
+    // wWinMain reaches this method only after CloudOSApplication::Initialize()
+    // succeeds. Use that deterministic lifecycle point to arm the UI heartbeat.
+    HealthBootstrapV9::bootstrap.AttachAfterInitialization();
+
+    // Stability/soak runs must observe the original process directly. A crash
+    // must fail the probe instead of being hidden by the normal recovery helper.
+    if (HasArgument(kStabilityProbeArgument))
+    {
+        return true;
+    }
+
     const std::wstring executable = ExecutablePath();
     if (executable.empty())
     {
