@@ -69,6 +69,13 @@ if "%RUNTIME_SIZE%"=="0" (
   exit /b 12
 )
 
+rem Releases antigos podiam deixar bin\Release\ui com o desktop React. Como o shell
+rem atual e nativo, remova essa sobra para ela nao parecer um fallback valido.
+if exist "%OUT%\ui" (
+  echo [CloudOS] Removendo assets obsoletos do antigo desktop web da saida nativa...
+  rmdir /s /q "%OUT%\ui" >nul 2>&1
+)
+
 rem Marca exatamente qual revisao Git gerou estes binarios. O launcher usa isso
 rem para nunca iniciar silenciosamente um CloudOS.exe antigo depois de git pull.
 set "BUILD_HEAD="
