@@ -8,10 +8,12 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cwctype>
 #include <shellapi.h>
 #include <string_view>
 #include <unordered_set>
+#include <utility>
 
 namespace CloudOS
 {
@@ -99,12 +101,15 @@ std::wstring MonitorDeviceName(HMONITOR monitor)
 
 RECT MonitorWorkAreaByDevice(const std::wstring& device, HWND fallback_window)
 {
-    const auto monitors = NativeMonitorManager::Enumerate();
-    for (const auto& monitor : monitors)
+    if (!device.empty())
     {
-        if (_wcsicmp(monitor.device.c_str(), device.c_str()) == 0)
+        const auto monitors = NativeMonitorManager::Enumerate();
+        for (const auto& monitor : monitors)
         {
-            return monitor.work_rect;
+            if (_wcsicmp(monitor.device.c_str(), device.c_str()) == 0)
+            {
+                return monitor.work;
+            }
         }
     }
 
@@ -295,7 +300,8 @@ bool NativeWorkspaceLayoutEngine::Restore(
     CloudOSNativeWindowManager& manager,
     const WorkspaceSnapshot& snapshot)
 {
-    if (snapshot.workspace < 0 || snapshot.workspace >= kWorkspaceStudioCount)
+    if (snapshot.workspace < 0 || snapshot.workspace >= kWorkspaceStudioCount ||
+        snapshot.workspace != manager.CurrentWorkspace())
     {
         return false;
     }
@@ -313,7 +319,8 @@ bool NativeWorkspaceLayoutEngine::Restore(
             {
                 continue;
             }
-            const auto identity = IdentifyWindow(candidate.hwnd, candidate.process_id);
+            const auto identity =
+                NativeWorkspaceAutomationEngine::IdentifyWindow(candidate.hwnd, candidate.process_id);
             if (IdentityMatchesSnapshot(identity, saved))
             {
                 match = candidate.hwnd;
@@ -349,6 +356,11 @@ void NativeWorkspaceLayoutEngine::ApplyPreset(
     WorkspaceLayoutPreset preset)
 {
     workspace = std::clamp(workspace, 0, kWorkspaceStudioCount - 1);
+    if (workspace != manager.CurrentWorkspace())
+    {
+        return;
+    }
+
     auto windows = WindowsForWorkspace(manager, workspace);
     if (windows.empty())
     {
@@ -357,10 +369,7 @@ void NativeWorkspaceLayoutEngine::ApplyPreset(
 
     if (preset == WorkspaceLayoutPreset::Free)
     {
-        if (workspace == manager.CurrentWorkspace())
-        {
-            manager.SetTilingEnabled(false);
-        }
+        manager.SetTilingEnabled(false);
         return;
     }
 
@@ -370,18 +379,12 @@ void NativeWorkspaceLayoutEngine::ApplyPreset(
         {
             manager.SetWindowFloating(item.hwnd, false);
         }
-        if (workspace == manager.CurrentWorkspace())
-        {
-            manager.SetTilingEnabled(true);
-            manager.TileCurrentWorkspace();
-        }
+        manager.SetTilingEnabled(true);
+        manager.TileCurrentWorkspace();
         return;
     }
 
-    if (workspace == manager.CurrentWorkspace())
-    {
-        manager.SetTilingEnabled(false);
-    }
+    manager.SetTilingEnabled(false);
     for (const auto& item : windows)
     {
         manager.SetWindowFloating(item.hwnd, true);
@@ -428,7 +431,9 @@ void NativeWorkspaceLayoutEngine::ApplyPreset(
         return;
     }
 
-    const std::size_t columns = count <= 2 ? count : static_cast<std::size_t>(std::ceil(std::sqrt(static_cast<double>(count))));
+    const std::size_t columns = count <= 2
+        ? count
+        : static_cast<std::size_t>(std::ceil(std::sqrt(static_cast<double>(count))));
     const std::size_t rows = (count + columns - 1) / columns;
     const LONG cell_width = width / static_cast<LONG>(std::max<std::size_t>(1, columns));
     const LONG cell_height = height / static_cast<LONG>(std::max<std::size_t>(1, rows));
@@ -449,6 +454,7 @@ void NativeWorkspaceAutomationEngine::ResetRuntimeState()
 {
     processed_windows_.clear();
     focus_history_.clear();
+    startup_launched_.fill(false);
     last_workspace_ = -1;
     last_foreground_ = nullptr;
 }
@@ -682,8 +688,9 @@ void NativeWorkspaceAutomationEngine::HandleWorkspaceTransition(
         manager.SetTilingEnabled(false);
     }
 
-    if (profile.auto_launch)
+    if (profile.auto_launch && !startup_launched_[static_cast<std::size_t>(workspace)])
     {
+        startup_launched_[static_cast<std::size_t>(workspace)] = true;
         LaunchWorkspaceEntries(instance, owner, workspace, store);
     }
 }
@@ -738,9 +745,10 @@ void NativeWorkspaceAutomationEngine::ApplyRule(
     {
         return;
     }
+    const int workspace = std::clamp(rule.workspace, 0, kWorkspaceStudioCount - 1);
     manager.SetWindowFloating(identity.hwnd, rule.floating);
-    manager.MoveWindowToWorkspace(identity.hwnd, std::clamp(rule.workspace, 0, kWorkspaceStudioCount - 1));
-    if (rule.maximize && IsWindow(identity.hwnd))
+    manager.MoveWindowToWorkspace(identity.hwnd, workspace);
+    if (rule.maximize && workspace == manager.CurrentWorkspace() && IsWindow(identity.hwnd))
     {
         ShowWindow(identity.hwnd, SW_MAXIMIZE);
     }
