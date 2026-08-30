@@ -45,10 +45,12 @@ public:
     void Reconcile();
 
     [[nodiscard]] std::vector<CloudOSManagedWindow> CurrentWorkspaceWindows() const;
+    [[nodiscard]] std::vector<CloudOSManagedWindow> AllManagedWindows() const;
     [[nodiscard]] std::size_t ManagedWindowCount() const noexcept;
     [[nodiscard]] int CurrentWorkspace() const noexcept;
     [[nodiscard]] bool TilingEnabled() const noexcept;
     [[nodiscard]] HWND ActiveManagedWindow() const noexcept;
+    [[nodiscard]] int WorkspaceFor(HWND window) const noexcept;
 
     void FocusWindow(HWND window);
     void FocusNext(bool reverse);
@@ -60,9 +62,16 @@ public:
     void ToggleTiling();
     void TileCurrentWorkspace();
     void ToggleFloatingActive();
+    void SetWindowFloating(HWND window, bool floating);
 
     void SwitchWorkspace(int workspace);
     void MoveActiveToWorkspace(int workspace);
+    bool RestoreWindowState(
+        HWND window,
+        int workspace,
+        bool floating,
+        const RECT& bounds,
+        UINT show_command);
 
 private:
     static void CALLBACK RuntimeWindowEvent(
