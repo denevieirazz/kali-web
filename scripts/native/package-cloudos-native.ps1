@@ -38,6 +38,20 @@ foreach ($name in $payload) {
     }
 }
 
+# Stability/Readiness V9 tooling is intentionally script-only and local. It
+# reads allowlisted health/process counters and never uploads diagnostics.
+foreach ($name in @(
+    'native-health-v9.ps1',
+    'collect-native-diagnostics.ps1',
+    'run-native-soak-v9.ps1'
+)) {
+    $source = Join-Path $PSScriptRoot $name
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+        throw "Stability V9 package tool missing: $source"
+    }
+    Copy-Item -LiteralPath $source -Destination (Join-Path $stage $name) -Force
+}
+
 $manifestPath = Join-Path $stage 'cloudos-native-manifest.json'
 if (-not (Test-Path -LiteralPath $manifestPath)) {
     throw "Staged native manifest missing: $manifestPath"
@@ -140,6 +154,15 @@ exit /b %RC%
 '@
 Set-Content -LiteralPath (Join-Path $stage 'Iniciar CloudOS.cmd') -Value $launcher -Encoding ascii
 
+$diagnosticsLauncher = @'
+@echo off
+setlocal EnableExtensions
+set "ROOT=%~dp0"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%collect-native-diagnostics.ps1" -Root "%ROOT%" -SampleSeconds 60 -IntervalSeconds 5
+exit /b %ERRORLEVEL%
+'@
+Set-Content -LiteralPath (Join-Path $stage 'Coletar Diagnostico 60s.cmd') -Value $diagnosticsLauncher -Encoding ascii
+
 $readme = @"
 CloudOS Native Shell - $Configuration x64
 
@@ -156,6 +179,15 @@ Arquivos principais:
 - Verificar Integridade.ps1
 - Verificar Integridade.cmd
 - Iniciar CloudOS.cmd
+
+Stability/Readiness V9:
+- native-health-v9.ps1: leitor do heartbeat/readiness em memoria compartilhada.
+- collect-native-diagnostics.ps1: coleta local allowlisted, sem upload.
+- Coletar Diagnostico 60s.cmd: coleta rapida de CPU/RAM/threads/handles/GDI/USER/heartbeat.
+- run-native-soak-v9.ps1: soak automatizado com deteccao de crash/hang e orcamentos de crescimento.
+
+Exemplo de soak de 30 minutos em uma instancia isolada:
+  pwsh -File .\run-native-soak-v9.ps1 -Root . -Launch -DurationSeconds 1800
 
 `Iniciar CloudOS.cmd` valida automaticamente tamanho e SHA256 de CloudOS.exe e CloudOS.NativeRuntime.dll antes de executar. Para verificar sem iniciar, use `Verificar Integridade.cmd`.
 
