@@ -7,9 +7,6 @@ on:
   pull_request:
     paths:
       - 'frontend/src/**'
-      - 'frontend/package.json'
-      - 'frontend/package-lock.json'
-      - 'frontend/vite.config.ts'
       - 'desktop/CloudOS.NativeRuntime/**'
       - 'desktop/CloudOS.NativeShell/**'
       - 'scripts/native/**'
@@ -36,51 +33,35 @@ jobs:
             }
           }
 
-      - name: Validate native shell contracts
+      - name: Validate native shell and WebSkin contracts
         shell: pwsh
         run: |
           ./scripts/native/test-cloudos-native-shell-contracts.ps1
           ./scripts/native/test-native-web-ui-contract.ps1
 
-      - name: Setup Node for UI asset build
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Build static CloudOS UI
-        shell: pwsh
-        run: |
-          # The preserved legacy frontend currently has package-lock drift from its
-          # package.json. npm install resolves the declared package graph without
-          # making Node/Vite a production runtime dependency.
-          npm install --prefix frontend --no-audit --no-fund
-          if ($LASTEXITCODE -ne 0) { throw "npm install failed with $LASTEXITCODE" }
-          npm run build --prefix frontend
-          if ($LASTEXITCODE -ne 0) { throw "frontend build failed with $LASTEXITCODE" }
-          if (-not (Test-Path -LiteralPath 'frontend/dist/index.html')) {
-            throw 'frontend/dist/index.html was not produced.'
-          }
-
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Restore native WebView2 SDK
+      - name: Restore native WebView2 SDK for Browser
         shell: pwsh
         run: |
           $packages = Join-Path $PWD 'desktop\CloudOS.NativeShell\packages'
           msbuild 'desktop/CloudOS.NativeShell/CloudOS.NativeShell.vcxproj' /t:Restore /nologo /v:minimal /p:RestorePackagesConfig=true /p:RestoreProjectStyle=PackagesConfig "/p:RestoreRepositoryPath=$packages"
+          if ($LASTEXITCODE -ne 0) { throw "WebView2 package restore failed with $LASTEXITCODE" }
 
-      - name: Build native runtime
+      - name: Build native runtime Release x64
         shell: pwsh
-        run: msbuild 'desktop/CloudOS.NativeRuntime/CloudOS.NativeRuntime.vcxproj' /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
+        run: |
+          msbuild 'desktop/CloudOS.NativeRuntime/CloudOS.NativeRuntime.vcxproj' /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
+          if ($LASTEXITCODE -ne 0) { throw "Native runtime build failed with $LASTEXITCODE" }
 
-      - name: Build native shell
+      - name: Build native shell Release x64
         shell: pwsh
-        run: msbuild 'desktop/CloudOS.NativeShell/CloudOS.NativeShell.vcxproj' /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
+        run: |
+          msbuild 'desktop/CloudOS.NativeShell/CloudOS.NativeShell.vcxproj' /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
+          if ($LASTEXITCODE -ne 0) { throw "Native shell build failed with $LASTEXITCODE" }
 
-      - name: Verify native binaries and web UI
+      - name: Verify native binaries
         shell: pwsh
         run: |
           $out = 'desktop/CloudOS.NativeShell/bin/Release'
@@ -89,6 +70,9 @@ jobs:
             if (-not (Test-Path -LiteralPath $path)) { throw "Missing $path" }
             if ((Get-Item -LiteralPath $path).Length -le 0) { throw "Empty $path" }
           }
-          $ui = Join-Path $out 'ui/index.html'
-          if (-not (Test-Path -LiteralPath $ui)) { throw "Missing $ui" }
-          if ((Get-Item -LiteralPath $ui).Length -le 0) { throw "Empty $ui" }
+
+          $project = Get-Content -LiteralPath 'desktop/CloudOS.NativeShell/CloudOS.NativeShell.vcxproj' -Raw
+          if ($project.Contains('<ClCompile Include="src\native_web_desktop_window.cpp"') -or
+              $project.Contains('<ClCompile Include="src\native_webview_host.cpp"')) {
+            throw 'Legacy web desktop returned to the compiled Shell V3 graph.'
+          }
