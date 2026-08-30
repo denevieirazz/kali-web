@@ -104,7 +104,6 @@ Require 'Session shell' $content.Main @(
 )
 Forbid 'Session shell' $content.Main @('tiling_on_start')
 
-# Start is a real launcher now: Home first, then All Apps/search.
 Require 'Start V4' $content.Start @(
     'CloudOS.NativeShell.Start.v4',
     'ViewMode::Home',
@@ -147,7 +146,6 @@ Require 'Windows app index' $content.StartIndex @(
     'ShellExecuteW'
 )
 
-# Pins are shared by Start and Taskbar and survive restarts.
 Require 'Persistent pins' $content.Pins @(
     'ShellPinKind',
     'shell_pins_v1.dat',
@@ -161,7 +159,6 @@ Require 'Persistent pins' $content.Pins @(
     'MOVEFILE_WRITE_THROUGH'
 )
 
-# Taskbar V4 is an AppBar plus a task/pin/workspace manager, not a painted strip.
 Require 'Taskbar V4' $content.Taskbar @(
     'CloudOS.NativeShell.Taskbar.v4',
     'kTaskbarHeightDip = 68',
@@ -201,15 +198,19 @@ Require 'DWM hover preview' $content.Hover @(
 )
 Forbid 'DWM hover preview' $content.Hover @('kPinnedCount = 5')
 
-# The old web design language is a native token system now.
+# Visual Experience V6 is semantic native design, not a frozen copy of old CSS hex values.
 Require 'WebSkin' $content.Theme @(
     'namespace WebSkin',
-    'RGB(10, 10, 15)',
-    'RGB(17, 17, 24)',
-    'RGB(99, 102, 241)',
-    'RGB(129, 140, 248)',
-    'RadiusXL = 16',
+    'BgSolid = RGB(5, 7, 12)',
+    'BgPrimary = RGB(9, 13, 21)',
+    'BgSecondary = RGB(14, 20, 31)',
+    'Accent = RGB(124, 92, 255)',
+    'AccentHover = RGB(154, 126, 255)',
+    'AccentCyan = RGB(77, 208, 225)',
+    'RadiusXL = 20',
     'DrawRoundedPanel',
+    'DrawElevatedPanel',
+    'PaintWindowBackground',
     'PaintOwnerDrawButton',
     'WindowSkinSubclass',
     'ApplyWebFlyoutMaterial',
@@ -248,7 +249,6 @@ Require 'Desktop drag/drop' $content.Drop @(
     'IFileOperation'
 )
 
-# Productivity and durability from Shell V3 remain mandatory.
 Require 'Snap Assist' $content.Snap @(
     'SetWinEventHook',
     'EVENT_SYSTEM_MOVESIZESTART',
@@ -295,8 +295,6 @@ Require 'Watchdog' $content.Watchdog @(
     'StartForCurrentProcess'
 )
 
-# Files V5 is first-party CloudOS chrome. Explorer remains an in-process Shell namespace provider
-# through IExplorerBrowser; the launcher must not delegate the Files app to explorer.exe anymore.
 Require 'Launcher' $content.Launcher @(
     '#include "native_files_window.h"',
     'CloudOSNativeBrowserWindow::Open',
@@ -323,4 +321,4 @@ if ($actionCount -lt 100) {
     throw "Shell action catalog regressed below 100 actions: $actionCount"
 }
 
-Write-Host "PASS: CloudOS shell contracts passed - Start V4, Taskbar V4, persistent pins, grouped/overflow tasks, WebSkin, Snap, DWM previews, recovery, first-party Files integration and $actionCount shell actions."
+Write-Host "PASS: CloudOS shell contracts passed - Start V4, Taskbar V4, persistent pins, grouped/overflow tasks, Visual Experience V6, Snap, DWM previews, recovery, first-party Files integration and $actionCount shell actions."
