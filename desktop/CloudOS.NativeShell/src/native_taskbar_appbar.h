@@ -15,6 +15,103 @@ namespace CloudOS
 {
 constexpr UINT CLOUDOS_WM_TASKBAR_QUERY_HIT = WM_APP + 0x492;
 
+// Floating Dock V7 keeps the full-width HWND as a real SHAppBarMessage AppBar,
+// so maximized windows and multi-monitor rcWork remain correct. Only the visible
+// and hit-testable region is clipped into a rounded, inset dock. This gives the
+// shell the detached 10-DIP bottom gap without sacrificing Windows AppBar
+// semantics or introducing a fake overlay taskbar.
+namespace FloatingDockV7
+{
+constexpr int HorizontalInsetDip = 10;
+constexpr int TopInsetDip = 4;
+constexpr int BottomGapDip = 10;
+constexpr int CornerRadiusDip = 20;
+
+inline bool IsTaskbar(HWND window) noexcept
+{
+    if (window == nullptr || !IsWindow(window)) return false;
+    wchar_t class_name[96]{};
+    if (GetClassNameW(window, class_name, static_cast<int>(std::size(class_name))) <= 0)
+        return false;
+    return _wcsicmp(class_name, L"CloudOS.NativeShell.Taskbar.v4") == 0;
+}
+
+inline void Apply(HWND window) noexcept
+{
+    if (!IsTaskbar(window)) return;
+    RECT client{};
+    if (!GetClientRect(window, &client)) return;
+    const int width = static_cast<int>(client.right - client.left);
+    const int height = static_cast<int>(client.bottom - client.top);
+    if (width <= 0 || height <= 0) return;
+
+    const UINT dpi = GetDpiForWindow(window);
+    const auto dip = [dpi](int value) noexcept
+    {
+        return MulDiv(value, static_cast<int>(dpi == 0 ? 96 : dpi), 96);
+    };
+    const int inset = dip(HorizontalInsetDip);
+    const int top = dip(TopInsetDip);
+    const int bottom_gap = dip(BottomGapDip);
+    const int radius = dip(CornerRadiusDip);
+    const int right = std::max(inset + 1, width - inset);
+    const int bottom = std::max(top + 1, height - bottom_gap);
+
+    HRGN region = CreateRoundRectRgn(
+        inset,
+        top,
+        right + 1,
+        bottom + 1,
+        radius * 2,
+        radius * 2);
+    if (region == nullptr) return;
+    if (SetWindowRgn(window, region, TRUE) == 0)
+        DeleteObject(region); // ownership transfers to USER only on success.
+}
+
+inline void CALLBACK WinEventCallback(
+    HWINEVENTHOOK,
+    DWORD event,
+    HWND window,
+    LONG object_id,
+    LONG child_id,
+    DWORD,
+    DWORD)
+{
+    if ((event == EVENT_OBJECT_CREATE || event == EVENT_OBJECT_LOCATIONCHANGE) &&
+        object_id == OBJID_WINDOW && child_id == CHILDID_SELF)
+    {
+        Apply(window);
+    }
+}
+
+class Bootstrap final
+{
+public:
+    Bootstrap() noexcept
+    {
+        hook_ = SetWinEventHook(
+            EVENT_OBJECT_CREATE,
+            EVENT_OBJECT_LOCATIONCHANGE,
+            nullptr,
+            &WinEventCallback,
+            GetCurrentProcessId(),
+            0,
+            WINEVENT_OUTOFCONTEXT);
+    }
+    ~Bootstrap()
+    {
+        if (hook_ != nullptr) UnhookWinEvent(hook_);
+    }
+    Bootstrap(const Bootstrap&) = delete;
+    Bootstrap& operator=(const Bootstrap&) = delete;
+private:
+    HWINEVENTHOOK hook_{};
+};
+
+inline Bootstrap bootstrap;
+} // namespace FloatingDockV7
+
 struct CloudOSTaskbarHitQuery final
 {
     POINT client_point{};
@@ -39,7 +136,11 @@ public:
     void Refresh();
     void PositionAppBar();
 
-    HWND Hwnd() const noexcept { return window_; }
+    HWND Hwnd() const noexcept
+    {
+        FloatingDockV7::Apply(window_);
+        return window_;
+    }
     HMONITOR Monitor() const noexcept { return monitor_; }
     RECT Bounds() const noexcept;
 
