@@ -133,21 +133,21 @@ class _StartPanelState extends State<StartPanel> {
                 const SizedBox(height: 12),
                 const Divider(height: 1),
                 const SizedBox(height: 14),
-                Row(
+                const Row(
                   children: <Widget>[
-                    const CircleAvatar(
+                    CircleAvatar(
                       radius: 17,
                       backgroundColor: CloudOSColors.accentSoft,
                       child: Icon(Icons.person_rounded, size: 18, color: CloudOSColors.text),
                     ),
-                    const SizedBox(width: 10),
-                    const Text(
+                    SizedBox(width: 10),
+                    Text(
                       'CloudOS User',
                       style: TextStyle(color: CloudOSColors.text, fontWeight: FontWeight.w600),
                     ),
-                    const Spacer(),
+                    Spacer(),
                     _FooterAction(icon: Icons.lock_outline_rounded, tooltip: 'Bloquear'),
-                    const SizedBox(width: 6),
+                    SizedBox(width: 6),
                     _FooterAction(icon: Icons.power_settings_new_rounded, tooltip: 'Energia'),
                   ],
                 ),
