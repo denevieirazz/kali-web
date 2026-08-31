@@ -38,7 +38,9 @@ Os contratos protegem, entre outros:
 - Performance/Visual V12;
 - Deployment V13;
 - Shell Activation V14;
-- organização/source-of-truth V15.
+- organização/source-of-truth V15;
+- Unified Integration V16;
+- Package Maintenance V17.
 
 Contrato não substitui runtime smoke.
 
@@ -55,13 +57,9 @@ Contrato não substitui runtime smoke.
 - smoke curto no Full-System CI;
 - harness de soak configurável.
 
-### O que a CI atual prova
+### Limite
 
-A Full-System CI executa um smoke curto de V9 e exige verdict `pass`.
-
-### O que NÃO foi provado automaticamente
-
-O harness suporta execução longa, mas **24 horas de soak não são afirmadas como executadas** nesta linha de validação. Sem evidência explícita de uma execução física de 24h, não escreva “24h PASS”.
+O harness suporta execução longa, mas **24 horas de soak não são afirmadas como executadas** sem evidência física específica.
 
 ---
 
@@ -79,7 +77,7 @@ O harness suporta execução longa, mas **24 horas de soak não são afirmadas c
 
 ### Limite
 
-Hosted CI **não suspende fisicamente a máquina**, não transporta uma sessão RDP real e não faz hotplug físico de monitor. Esses casos pertencem à matriz de VM/hardware.
+Hosted CI **não suspende fisicamente a máquina**, não transporta uma sessão RDP real e não faz hotplug físico de monitor.
 
 ---
 
@@ -98,7 +96,7 @@ Hosted CI **não suspende fisicamente a máquina**, não transporta uma sessão 
 
 ### Fallback Explorer no CI
 
-O probe de failure loop valida a **decisão** de fallback, mas usa supressão de Explorer no hosted CI. Não descreva o smoke como “Explorer realmente foi lançado durante fallback” quando ele foi deliberadamente suprimido.
+O probe valida a **decisão** de fallback, mas suprime o lançamento real do Explorer no hosted CI.
 
 ---
 
@@ -127,27 +125,9 @@ Idle deve ser orientado por eventos. Filesystem/Shell APIs caras não podem reap
 
 ## V13 — Transactional Deployment
 
-Smoke:
+Smoke: `scripts/native/run-native-deployment-smoke-v13.ps1`.
 
-```text
-scripts/native/run-native-deployment-smoke-v13.ps1
-```
-
-Executado contra diretórios temporários no Windows CI.
-
-### Evidências esperadas
-
-- clean install;
-- reinstall idempotente;
-- upgrade verificado;
-- pacote corrompido rejeitado;
-- versão ativa preservada após rejeição;
-- transação interrompida reparada;
-- rollback para versão anterior;
-- uninstall apenas de raiz gerenciada;
-- nenhuma modificação de registry/Winlogon.
-
-### Limite
+Executado contra diretórios temporários no Windows CI. Prova clean install, reinstall idempotente, upgrade verificado, rejeição de pacote corrompido, repair, rollback e uninstall da raiz gerenciada sem modificar registry/Winlogon.
 
 Não é instalação comercial/MSIX nem prova de falha de energia física no exato instante de I/O.
 
@@ -155,39 +135,66 @@ Não é instalação comercial/MSIX nem prova de falha de energia física no exa
 
 ## V14 — Shell Activation
 
-Smoke:
+Smoke: `scripts/native/run-native-shell-activation-smoke-v14.ps1`.
 
-```text
-scripts/native/run-native-shell-activation-smoke-v14.ps1
-```
+Hosted CI usa uma subchave exclusiva `HKCU\Software\CloudOS\Tests\ShellActivationV14\<guid>` e **não escreve** a chave Winlogon real do runner.
 
-### Hosted CI
+Prova restauração exata de ausência/Explorer/`REG_EXPAND_SZ`, idempotência, shell-entry Ready, repair de journal, rejeição de payload inválido, interlock de uninstall e snapshot Winlogon de produção idêntico antes/depois.
 
-O smoke cria uma subchave exclusiva em:
+Hosted CI não faz logoff/login real, reboot, boot recovery ou troca física de usuário.
 
-```text
-HKCU\Software\CloudOS\Tests\ShellActivationV14\<guid>
-```
+---
 
-Ele **não escreve** a chave Winlogon real do runner.
+## V16 — Unified Integration
 
-### Evidências esperadas
+Contrato: `scripts/native/test-unified-integration-v16-contract.ps1`.
 
-- deployment V13 válido antes de ativar;
-- prior value ausente restaurado como ausente;
-- `explorer.exe` anterior restaurado exatamente;
-- `REG_EXPAND_SZ` anterior restaurado com tipo/dado preservados;
-- ativação idempotente;
-- shell-entry estável resolve V13 e alcança Ready com Supervisor real;
-- interrupção após escrita reparada pelo journal;
-- payload ativo inválido rejeitado;
-- uninstall V13 bloqueado enquanto V14 está ativo;
-- uninstall permitido depois do rollback;
-- snapshot da chave de produção Winlogon idêntico antes/depois.
+Smoke: `scripts/native/run-native-integration-smoke-v16.ps1`.
+
+### O que a CI prova
+
+- grafo compilado da integração Windows + Linux;
+- Browser com destino de download first-party;
+- boundary de inventário/package management presente;
+- known folders resolvidos;
+- capability snapshot de WinGet/WSL;
+- Winlogon real idêntico antes/depois;
+- nenhuma mutação de pacote executada pelo smoke.
 
 ### Limite
 
-Hosted CI não faz logoff/login real, reboot, boot recovery, troca física de usuário ou cenário de credencial/logon. Esses gates exigem VM/piloto.
+Hosted CI não instala/remove software de terceiros e não afirma WSLg GUI real quando não existe distro/WSLg adequada.
+
+---
+
+## V17 — Package Maintenance
+
+Contrato:
+
+```text
+scripts/native/test-package-maintenance-v17-contract.ps1
+```
+
+Smoke:
+
+```text
+scripts/native/run-native-package-maintenance-smoke-v17.ps1
+```
+
+### O que a CI prova
+
+- binário nativo Release presente;
+- builder de upgrade Windows via WinGet com seleção exata;
+- builders Linux para apt `--only-upgrade`, Snap `refresh` e Flatpak `update`;
+- resolução de ownership apt via `dpkg-query -S` em vez de adivinhar pelo nome visual;
+- allowlist/token validation da identidade Linux;
+- ação **Atualizar app** ligada ao Apps com confirmação e Terminal visível;
+- Winlogon de produção idêntico antes/depois;
+- `mutating_package_operation_executed = false`.
+
+### O que NÃO prova
+
+Hosted CI **não executa upgrade real** de WinGet/apt/Snap/Flatpak, não aprova UAC/sudo, não prova comportamento de instaladores de terceiros e não prova upgrade Linux num runner sem distro apropriada. Esses casos pertencem à matriz manual/VM.
 
 ---
 
@@ -200,14 +207,7 @@ Scripts:
 - `get-native-build-fingerprint.ps1`
 - `package-cloudos-native.ps1`
 
-O release deve incluir e verificar:
-
-- `CloudOS.exe`;
-- `CloudOS.NativeRuntime.dll`;
-- `CloudOS.Supervisor.exe`;
-- manifesto com tamanho/SHA256;
-- fingerprint de fontes;
-- build head.
+O release deve incluir e verificar `CloudOS.exe`, `CloudOS.NativeRuntime.dll`, `CloudOS.Supervisor.exe`, manifesto com tamanho/SHA256, fingerprint de fontes e build head.
 
 Em PR, `github.sha`/manifesto pode apontar para o merge commit sintético do PR, enquanto metadados do workflow mostram o **branch head real**. Relatórios devem distinguir os dois.
 
@@ -217,9 +217,7 @@ SHA256 garante integridade em relação ao manifesto. Sem assinatura Authenticod
 
 ## Baseline CI
 
-A `CloudOS CI Baseline` preserva o restante do repositório: lint/build/testes do frontend/backend/Host/Bootstrap/Browser e caracterizações aplicáveis.
-
-V15 não transforma essas áreas em autoridade do desktop; elas continuam sendo código suportado/compatibilidade e precisam permanecer verdes enquanto existirem no repositório.
+A `CloudOS CI Baseline` preserva o restante do repositório: lint/build/testes do frontend/backend/Host/Bootstrap/Browser e caracterizações aplicáveis. Essas áreas não substituem a autoridade do desktop nativo.
 
 ---
 
@@ -241,6 +239,8 @@ Em VM descartável e, depois, hardware piloto:
 12. suspend/resume físico;
 13. monitor hotplug/DPI físico;
 14. 24h soak por configuração;
-15. piloto de dias/semanas antes de uso como shell diário.
+15. WinGet install/update/remove real com UAC quando aplicável;
+16. apt/Snap/Flatpak install/update/remove real com sudo e falhas controladas;
+17. piloto de dias/semanas antes de uso como shell diário.
 
 Registre data, Windows build, hardware/VM, commit exato, artifact digest e resultado. Sem essa evidência, mantenha a descrição como “pendente”.
