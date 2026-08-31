@@ -6,12 +6,16 @@ on:
       - 'rewrite/cloudos-native-full-system'
   pull_request:
     paths:
+      - 'AGENTS.md'
+      - 'README.md'
+      - '.editorconfig'
       - 'frontend/src/**'
       - 'desktop/CloudOS.NativeCommon/**'
       - 'desktop/CloudOS.NativeRecovery/**'
       - 'desktop/CloudOS.NativeRuntime/**'
       - 'desktop/CloudOS.NativeShell/**'
       - 'scripts/native/**'
+      - 'docs/ARCHITECTURE.md'
       - 'docs/native/**'
       - '.github/workflows/cloudos-native-full-system.yml'
   workflow_dispatch:
@@ -51,6 +55,10 @@ jobs:
       - name: Contract Shell Activation V14
         shell: pwsh
         run: ./scripts/native/test-shell-activation-v14-contract.ps1
+
+      - name: Contract Repository Clarity V15
+        shell: pwsh
+        run: ./scripts/native/test-repository-clarity-v15-contract.ps1
 
       - name: Validate and build through the developer entrypoint
         shell: cmd
