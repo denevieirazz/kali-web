@@ -1,3 +1,17 @@
+# LEGACY / ADMINISTRATIVE ONLY
+#
+# This script configures the Windows Shell Launcher (WESL_UserSetting) feature on
+# supported Enterprise/Education/IoT editions. It predates the current CloudOS
+# activation path and is intentionally kept only for compatibility/experiments.
+#
+# Current authority:
+#   V13 deployment  -> scripts/native/CloudOS.Deployment.V13.psm1
+#   V14 activation  -> scripts/native/CloudOS.ShellActivation.V14.psm1
+#
+# Do not call this script from normal install/update/activation flows. V14 is
+# per-user, snapshots the exact prior Winlogon Shell value and has journal/repair
+# semantics that this WESL helper does not provide.
+
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
     [ValidateSet('Status', 'Enable', 'Disable')]

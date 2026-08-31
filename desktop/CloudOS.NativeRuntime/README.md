@@ -1,24 +1,31 @@
 # CloudOS.NativeRuntime
 
-`CloudOS.NativeRuntime` e o nucleo C++/Win32 do CloudOS.
+`CloudOS.NativeRuntime` is the low-level C++/Win32 runtime DLL used by the native shell. It is **not** the desktop UI and it is not a bridge to React, Node, WPF or a managed host.
 
-Ele nao e uma ponte para React, Node, WebView2 ou um host gerenciado. O runtime e carregado diretamente pelo `CloudOS.NativeShell.exe` e expoe uma ABI C pequena e versionada para os subsistemas nativos.
+Release output:
 
-## Responsabilidades atuais
+```text
+CloudOS.NativeRuntime.dll
+```
 
-- `CreateProcessW` suspenso e ownership por Job Object.
-- encerramento fail-closed da arvore de processos contida.
-- terminal nativo via ConPTY (`CreatePseudoConsole`).
-- leitura, escrita e resize do pseudoconsole.
-- descoberta de HWNDs top-level por `SetWinEventHook`.
-- enumeracao e frame bounds reais via Win32/DWM.
-- operacoes de foco/layout para compatibilidade Win32.
-- acesso WSL por API nativa resolvida dinamicamente quando disponivel.
+## Source of truth
 
-## ABI
+- `CloudOS.NativeRuntime.vcxproj` — compiled graph and build policy.
+- `include/cloudos_native_runtime.h` — small versioned C ABI consumed by `CloudOS.exe`.
+- `src/` — runtime implementation.
 
-A versao da ABI fica em `include/cloudos_native_runtime.h` e e validada pelo shell no boot. Uma DLL incompatível faz o shell falhar fechado antes de iniciar a interface.
+The shell validates runtime ABI compatibility during startup. An incompatible runtime must fail closed rather than continue with an unknown ABI.
 
-## Limites do Windows
+## Responsibilities
 
-O runtime nao tenta contornar Secure Desktop/UAC, UIPI, anti-cheat, janelas protegidas, DRM, AppContainer ou outras fronteiras de seguranca do Windows. A arquitetura administra HWNDs reais em vez de depender de reparenting universal.
+- process creation/ownership using Win32 and Job Objects;
+- ConPTY creation, I/O and resize;
+- WinEvent/HWND discovery and window metadata;
+- focus/layout helpers used by the native shell;
+- WSL platform integration where available.
+
+## Boundary
+
+Do not put Desktop/Taskbar/Start UI policy here. Those belong to `CloudOS.NativeShell`. Do not put Supervisor V11 policy here; that belongs to `CloudOS.NativeRecovery` with cross-process constants in `CloudOS.NativeCommon`.
+
+The runtime does not attempt to bypass Secure Desktop/UAC, UIPI, protected windows, DRM, anti-cheat, AppContainer or other Windows security boundaries.

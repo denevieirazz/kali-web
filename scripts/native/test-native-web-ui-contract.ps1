@@ -14,6 +14,7 @@ $paths = @{
     Project = Join-Path $root 'desktop\CloudOS.NativeShell\CloudOS.NativeShell.vcxproj'
     Packages = Join-Path $root 'desktop\CloudOS.NativeShell\packages.config'
     NativeBuild = Join-Path $root 'scripts\native\build-cloudos-native.cmd'
+    ContractSuite = Join-Path $root 'scripts\native\test-native-contract-suite.ps1'
     FrontendCss = Join-Path $root 'frontend\src\index.css'
     StartCss = Join-Path $root 'frontend\src\components\StartMenu\StartMenu.css'
     TaskbarCss = Join-Path $root 'frontend\src\components\Taskbar\Taskbar.css'
@@ -93,9 +94,7 @@ Forbid-Tokens 'Native build graph' $content.Project @(
 )
 
 Require-Tokens 'Native developer build' $content.NativeBuild @(
-    'test-cloudos-native-shell-contracts.ps1',
-    'test-native-web-ui-contract.ps1',
-    'test-taskbar-productivity-contract.ps1',
+    'test-native-contract-suite.ps1',
     'CloudOS.NativeRuntime\CloudOS.NativeRuntime.vcxproj',
     'CloudOS.NativeShell\CloudOS.NativeShell.vcxproj',
     'SHELL_UI=C++/Win32 nativo',
@@ -107,6 +106,11 @@ Forbid-Tokens 'Native developer build' $content.NativeBuild @(
     'npm.cmd',
     'frontend\dist',
     'WEB_UI='
+)
+Require-Tokens 'Central native contract suite' $content.ContractSuite @(
+    'test-cloudos-native-shell-contracts.ps1',
+    'test-native-web-ui-contract.ps1',
+    'test-taskbar-productivity-contract.ps1'
 )
 
 Require-Tokens 'Native WebView2 Browser' $content.Browser @(

@@ -1,123 +1,164 @@
-# CloudOS Unified
+# CloudOS Native Shell
 
-CloudOS Unified é um shell desktop híbrido para Windows que reúne a interface CloudOS, PowerShell, distribuições WSL e aplicativos gráficos Linux/WSLg. A interface React roda dentro de um host WPF/WebView2; um agente Node.js limitado ao loopback executa a integração real com o computador.
+CloudOS é um shell desktop nativo C++/Win32 sobre Windows. O Windows continua responsável por kernel, drivers, DWM, segurança, Win32 e serviços do sistema; o CloudOS fornece a experiência Desktop/Taskbar/Start, Window Manager, workspaces, Files, controles e aplicativos first-party.
 
-## O que já funciona
+> Para agentes de IA: comece por [`AGENTS.md`](AGENTS.md), depois [`docs/native/ARCHITECTURE.md`](docs/native/ARCHITECTURE.md) e [`docs/native/CODEMAP.md`](docs/native/CODEMAP.md).
 
-- Desktop web com boot, login, janelas, processos, taskbar, menu Iniciar e aplicativos CloudOS.
-- Host desktop .NET 8/WebView2 com single-instance, fullscreen/kiosk, origem local verificada e recuperação de falha.
-- Rastreamento allowlisted de janelas Win32 por HWND, com foco, minimizar, maximizar, restaurar e fechamento gracioso espelhados na taskbar.
-- Primeiro acesso sem credenciais padrão, conta persistente, bcrypt, sessões JWT e recuperação por código mostrado uma única vez.
-- Terminal real com perfis PowerShell e WSL, seleção de distribuição e PTY/WebSocket.
-- Central Windows + Linux com inventário estruturado, operações WSL, catálogo allowlisted e lançamento por IDs opacos.
-- Sistema de arquivos virtual em OPFS, editor, upload/download e lixeira.
-- API Express ligada apenas a `127.0.0.1`, CORS local e ambiente do terminal sem segredos do backend.
-
-## Arquitetura
+## Arquitetura atual
 
 ```text
-CloudOS.Host / WPF / WebView2
-        │ ponte JSON versionada e restrita
-        ▼
-React / Vite / Zustand
-        │ HTTP + WebSocket autenticados para loopback
-        ▼
-CloudOS Local Agent / Node.js (porta efêmera)
-        ├── Windows / PowerShell
-        ├── WSL 2 / distribuições
-        └── WSLg / apps Linux GUI
+CloudOS.Supervisor.exe              V11: recovery externo/readiness/restart
+        │
+        └── CloudOS.exe --supervised
+                │
+                ├── Desktop / Taskbar / Start
+                ├── Window Manager / Workspaces
+                ├── Quick Settings / Notification Center
+                ├── Files / apps first-party
+                └── CloudOS.NativeRuntime.dll
 ```
 
-## Windows captured-surface POC
+O desktop atual **não é React/WPF/WebView2**. Essas áreas continuam no repositório por compatibilidade, testes, referência histórica/visual e componentes específicos. WebView2 permanece permitido no Navegador CloudOS, mas não é o renderer do Desktop principal.
 
-A branch experimental `poc/cloudos-windows-captured-surface` substitui o `anchored-overlay` como direção de apresentação final para apps Windows compatíveis:
+## Estado dos marcos nativos
+
+| Marco | Estado | Resultado principal |
+|---|---|---|
+| V9 Stability/Readiness | ✅ | health ABI, Ready e heartbeat da UI thread |
+| V10 Lifecycle | ✅ | single-instance e revalidação de lifecycle |
+| V11 Shell Supervisor | ✅ | supervisor externo, restart limitado e fallback Explorer |
+| V12 Performance/Visual | ✅ | shell event-driven, paint cacheado, telemetria de idle |
+| V13 Transactional Deployment | ✅ | versões imutáveis, staging, LKG, repair e rollback |
+| V14 Shell Activation | ✅ hosted CI | ativação opt-in por usuário + restauração exata do Shell |
+| V15 Repository Clarity | em validação | source-of-truth e navegação do código para humanos/IAs |
+
+A CI hospedada não substitui a matriz física. Login real com V14, reboot, RDP físico, suspend físico, hotplug e soak de 24h continuam gates separados; veja [`docs/native/VALIDATION.md`](docs/native/VALIDATION.md).
+
+## Onde está o código atual
 
 ```text
-processo autorizado/correlacionado
-        ↓
-GraphicsCaptureItem do HWND
-        ↓
-Windows.Graphics.Capture + D3D11
-        ↓
-surface de apresentação pertencente ao CloudOS
+desktop/
+├── CloudOS.NativeShell/       # CloudOS.exe — shell/UI atual
+├── CloudOS.NativeRuntime/     # CloudOS.NativeRuntime.dll
+├── CloudOS.NativeRecovery/    # CloudOS.Supervisor.exe
+└── CloudOS.NativeCommon/      # protocolos/ABI compartilhados
+
+scripts/native/                # build, contratos, smokes, V13 e V14
+docs/native/                   # documentação autoritativa do shell nativo
 ```
 
-O runtime é genérico por classe, não por aplicativo. Não devem existir adapters específicos para Brave, Chrome, Discord ou programas individuais.
-
-A fronteira é **fail-closed**. Se correlação, containment, captura, apresentação ou input não puderem ser estabelecidos com segurança, o CloudOS deve bloquear a sessão e expor diagnóstico. A POC não pode usar como fallback uma janela solta no desktop Windows.
-
-### Evidência física isolada
-
-No HEAD `7f1f561302e6fb24406de6c2e50814391b83e93d`, a mesma fixture WinForms animada mostrou:
-
-- HWND real com bounds nativos positivos;
-- `window/projected`: `CreateCaptureSession` falhou com `0x8007139F / ERROR_NOT_CORRECT_STATE`, `GraphicsCaptureItem.Size=0x0`;
-- `monitor`: PASS, 10 frames `2560x1440`, `EmptyFrameCount=0`.
-
-Isso isolou o bloqueador na fronteira do `GraphicsCaptureItem` de janela: D3D11, bridge `IDXGIDevice → IDirect3DDevice`, frame pool, `GraphicsCaptureSession` e compositor WGC funcionaram no mesmo processo para HMONITOR.
-
-### Gate físico atual
-
-O runtime agora possui dois caminhos explícitos de factory:
-
-1. `RawActivationFactory`: `RoGetActivationFactory("Windows.Graphics.Capture.GraphicsCaptureItem") → IGraphicsCaptureItemInterop → CreateForWindow/CreateForMonitor` usando ABI COM direto;
-2. `ProjectedFactory`: caminho legado mantido somente como controle diagnóstico.
-
-O probe inicializa explicitamente o apartment WinRT e registra falhas por estágio: `item-factory`, `item-metadata`, `initial-size`, `d3d-device`, `frame-pool`, `capture-session` ou `start-capture`.
-
-O smoke físico executa três lanes no mesmo processo/fixture:
+O entrypoint compilado do shell é:
 
 ```text
-window/raw       # PRODUCT GATE
-window/projected # legacy control
-monitor/raw      # lower-layer control
+desktop/CloudOS.NativeShell/src/main_shell_v2.cpp
 ```
 
-Ele sempre tenta as três lanes, mesmo quando a primeira falha, e grava:
+Para localizar um subsistema, use [`docs/native/CODEMAP.md`](docs/native/CODEMAP.md) em vez de inferir responsabilidade só pelo nome do arquivo.
 
-```text
-poc1-physical-evidence/windows-captured-surface/
-├── fixture-window-wgc-smoke.json
-├── fixture-window-projected-control.json
-├── fixture-monitor-wgc-control.json
-├── fixture-wgc-matrix-summary.json
-└── fixture-wgc-smoke.log
-```
+## Build nativo
 
-O gate só passa se `window/raw` produzir o mínimo de frames configurado. Nenhum controle pode mascarar uma falha do gate de produto.
+Pré-requisitos principais no Windows:
 
-## Validação
+- Visual Studio/Build Tools com Desktop development with C++;
+- Windows SDK;
+- PowerShell 7 (`pwsh`);
+- WebView2 SDK restaurado pelo build somente para o Navegador CloudOS.
 
-Validação geral:
+Build oficial:
 
 ```powershell
-npm run lint
-npm run build
-npm run build:host
-npm run build:bootstrap
-npm run test:bootstrap
-npm test
-npm run test:e2e
+scripts\native\build-cloudos-native.cmd Release
 ```
 
-Prova física captured-surface:
+Rodar apenas os contratos:
 
 ```powershell
-pwsh -NoProfile -File scripts/test-windows-capture-probe.ps1 -ExpectedHeadSha <SHA_EXATO>
+pwsh -NoProfile -File scripts/native/test-native-contract-suite.ps1
 ```
 
-O script exige branch e SHA exatos, compila fixture/probe, executa a matriz completa e persiste evidência mesmo quando a sessão falha durante setup.
+O build produz e verifica:
 
-## Segurança das operações nativas
+- `CloudOS.exe`;
+- `CloudOS.NativeRuntime.dll`;
+- `CloudOS.Supervisor.exe`;
+- `cloudos-native-manifest.json`;
+- fingerprint e SHA256 do release.
 
-- Instalação, atualização e conversão de WSL exigem administrador CloudOS.
-- O backend permanece sem elevação; somente o broker de verbos fixos pede UAC.
-- O catálogo de apps guarda alvos no servidor e entrega IDs opacos ao frontend.
-- Não existe endpoint genérico para executar comando, arquivo ou argumentos enviados pelo navegador.
-- A captured-surface POC não enfraquece a política de containment nem autoriza spill de UI em caso de falha.
+## Executar sem substituir Explorer
 
-Consulte [SECURITY.md](SECURITY.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) e [docs/NATIVE-HOST-ROADMAP.md](docs/NATIVE-HOST-ROADMAP.md).
+Depois de um build verificado, use os launchers do projeto/pacote que passam pelo `CloudOS.Supervisor.exe`. O Supervisor inicia `CloudOS.exe --supervised`; o watchdog interno não deve competir nesse modo.
 
-## Futuro modo shell do computador
+## Instalar / atualizar — V13
 
-O destino arquitetural é o CloudOS substituir a experiência visual do Explorer para uma conta dedicada, mantendo o Windows por baixo para kernel, drivers, Win32, segurança e WSLg. Nesta versão isso está apenas em preparação: nenhum script altera o shell, o Registro ou o boot do computador.
+V13 instala por usuário, por padrão em:
+
+```text
+%LOCALAPPDATA%\CloudOS\NativeShell
+```
+
+Entrypoints principais:
+
+```powershell
+scripts/native/install-cloudos-native-v13.ps1
+scripts/native/update-cloudos-native-v13.ps1
+scripts/native/get-cloudos-deployment-status-v13.ps1
+scripts/native/rollback-cloudos-native-v13.ps1
+scripts/native/repair-cloudos-native-v13.ps1
+scripts/native/uninstall-cloudos-native-v13.ps1
+```
+
+Instalação/update **não ativa o CloudOS como shell de logon**.
+
+## Ativação opt-in — V14
+
+V14 é uma operação separada e explícita. A fonte de verdade é:
+
+```text
+scripts/native/CloudOS.ShellActivation.V14.psm1
+```
+
+O alvo de produção atual é o valor `Shell` do Winlogon do usuário atual em HKCU. Antes da alteração, V14 salva presença, tipo e dado anterior; rollback restaura exatamente o snapshot, inclusive o caso “valor ausente”. Há journal/repair para interrupção e detecção de drift externo.
+
+Entrypoints:
+
+```powershell
+scripts/native/activate-cloudos-shell-v14.ps1
+scripts/native/get-cloudos-shell-status-v14.ps1
+scripts/native/rollback-cloudos-shell-v14.ps1
+scripts/native/repair-cloudos-shell-v14.ps1
+```
+
+**Não use isso como shell diário em uma máquina importante antes da matriz de login/boot/rollback em VM e piloto.** Hosted CI testa a lógica V14 em uma subchave HKCU sandbox e confirma que a chave Winlogon real do runner não mudou.
+
+## Documentação fonte de verdade
+
+- [`AGENTS.md`](AGENTS.md) — regras e leitura rápida para agentes de IA.
+- [`docs/native/README.md`](docs/native/README.md) — índice do nativo.
+- [`docs/native/ARCHITECTURE.md`](docs/native/ARCHITECTURE.md) — processos, responsabilidades e fronteiras.
+- [`docs/native/CODEMAP.md`](docs/native/CODEMAP.md) — mapa arquivo→subsistema.
+- [`docs/native/VALIDATION.md`](docs/native/VALIDATION.md) — o que cada teste prova/não prova.
+- [`docs/native/DESKTOP_SYSTEM_ROADMAP.md`](docs/native/DESKTOP_SYSTEM_ROADMAP.md) — gates de entrega.
+- [`scripts/native/README.md`](scripts/native/README.md) — organização dos scripts.
+
+## Código de compatibilidade / histórico
+
+Ainda existem áreas como:
+
+- `frontend/`;
+- `backend/`;
+- `desktop/CloudOS.Host/`;
+- `desktop/CloudOS.Bootstrap/`;
+- provas/experimentos históricos.
+
+Elas não foram apagadas na V15 porque “limpar” não deve significar destruir compatibilidade ou histórico sem prova de que o código está morto. Quando um componente for aposentado, a remoção deve ocorrer em um marco próprio, com busca de referências e CI verde.
+
+## Segurança e validação
+
+- não há elevação silenciosa no fluxo V13/V14;
+- V14 não usa HKLM, `Userinit`, `Run`, `RunOnce`, serviço ou tarefa agendada como atalho;
+- recovery precisa continuar independente da UI do shell;
+- release é validado por manifesto/fingerprint/SHA256;
+- SHA256 não substitui assinatura Authenticode de produção;
+- `main` não é usada como branch de experimento durante as validações dos marcos.
+
+Consulte também [`SECURITY.md`](SECURITY.md) e a matriz nativa em [`docs/native/VALIDATION.md`](docs/native/VALIDATION.md).

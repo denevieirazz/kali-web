@@ -1,73 +1,104 @@
-# CloudOS Desktop System sobre Windows — plano de entrega
+# CloudOS Native Desktop — delivery roadmap
 
-## Estado desta entrega
+This roadmap describes the **current C++/Win32 native product**. Historical React/WPF/Node plans are compatibility material and do not override this document.
 
-Base `work/files-storage-v5` / `c04745a8c9ffea33f8ef829f7b6ac86fc7272c33`,
-com alterações locais identificadas pelo fingerprint do manifesto. Não é um novo
-kernel e ainda não é uma distribuição pronta para substituir Explorer em produção.
+## Current validated baseline
 
-Implementado nesta etapa:
+Repository Clarity V15 starts from the exact green Shell Activation V14 branch head:
 
-- Correção do falso positivo `oledb32.lib`, mantendo a rejeição da dependência no código; nove casos de regressão.
-- Correção do ciclo de eventos causado por SetWindowRgn no dock; fixture Win32 exercita fila de eventos, resize, regiões e recursos GDI. A versão original entra em loop.
-- Remoção de repinturas completas redundantes do desktop provocadas por eventos de janelas externas; atualizações periódicas e mudanças do desktop continuam ativas. O orçamento de CPU ainda depende de perfil e medição.
-- `CloudOS.Recovery.exe` independente de CloudOS.exe, runtime e WebView2; ações explícitas, confirmação antes de encerramento forçado, validação por caminho/usuário/sessão no mesmo handle.
-- Watchdog oferece Recovery ao esgotar reinícios; mantém mensagem de erro caso não consiga iniciar o Recovery. Não há fallback automático habilitado.
-- Revalidação após resume na fila da UI, nova tentativa de registro WTS a cada 30 ticks quando o serviço ainda não está pronto, preservação do checkpoint após inicialização incompleta e tratamento de erro GetMessage.
-- Coletor de diagnóstico local com lista explícita de campos, tolerância a manifesto corrompido, proteção de evidências e amostragem de CPU/RAM/threads. Não coleta documentos, títulos, histórico, credenciais, comandos ou dumps; não envia dados.
-- Recovery incluído no build, fingerprint, manifesto, verificador, ZIP portátil e CI. Manifesto distingue fontes localmente modificadas com `source_tree_dirty`.
-- Correção da autorreferência do fingerprint: a pasta de artefatos gerados não entra no hash de fontes. Teste cobre empacotamento sem invalidação e alteração de fonte do Recovery com invalidação.
+```text
+bf5aef7f46bc4ee71f4f59f2639e277f91a56d15
+```
 
-## Etapas e critérios de aceite
+That V14 head passed CloudOS Native Full-System CI #402 and CloudOS CI Baseline #930 before V15 cleanup began.
 
-| Frente do pedido | Próxima entrega verificável | Critério antes de considerar concluído |
+Current release architecture:
+
+```text
+CloudOS.Supervisor.exe V11
+        |
+        v
+CloudOS.exe --supervised
+        |
+        +--> CloudOS.NativeRuntime.dll
+        +--> Desktop / Taskbar / Start / Files / workspaces / control plane
+```
+
+The release is built from `CloudOS.NativeShell.vcxproj`; `main_shell_v2.cpp` is the active shell entry point.
+
+## Delivered milestones
+
+| Version | Delivered capability | Automated evidence |
 |---|---|---|
-| 1. Estabilidade | Soak automatizado e instrumentação de readiness/hang | 24 h por configuração sem crash/hang; filas e recursos limitados; depois semanas de uso piloto |
-| 2. Lifecycle | Matriz suspend/resume, WTS, RDP e hotplug | Checkpoints íntegros e exatamente uma instância após cada transição; logoff/restart somente em VM de teste |
-| 3. Substituição Explorer | Supervisor externo com timeout de readiness e retorno seguro | Teste de boot/crash/update em VM; Explorer recuperável sem CloudOS; Shell Launcher permanece opt-in |
-| 4. Files | Testes reais de namespace, operações e extensões Shell | Cópia cancelável grande, conflito, UAC, reparse, WSL/rede, recycle e submenus sem bloquear UI |
-| 5. Start/Search | Índice unificado e cancelamento de consultas antigas | Digitação rápida sem bloqueio com milhares de itens e SystemIndex desligado/lento |
-| 6. Taskbar/Dock | Multi-monitor/DPI/fullscreen, jump lists e badges | Maximização respeita rcWork; cinco ciclos por monitor; nenhuma área invisível intercepta input |
-| 7. Hardware | Fluxos nativos de áudio, GSMTC, Wi-Fi e Bluetooth | Mixer independente entre dois apps, credenciais nunca em logs, reconexão/ausência de hardware tratadas |
-| 8. Settings | Inventário e navegação unificada das preferências | Uma fonte de verdade por configuração; persistência e feedback de erro; links ao Windows claramente identificados |
-| 9. Instalação/update | Instalador nativo e staging A/B por usuário | Atualização interrompida não perde versão boa; rollback offline; Stable/Beta/Dev e desinstalação testados |
-| 10. Segurança | Revisão de IPC, permissões, assinatura e cadeia de release | Authenticode com identidade real, sem certificado fictício; revisão de ameaças; nenhuma elevação silenciosa |
-| 11. Apps | Identidade e protocolo de ativação/lifecycle comuns | Abrir/focar/restaurar/grupar previsíveis; apps internos não duplicados após recovery |
-| 12. Multiusuário | Testes com duas contas e duas sessões | Estado e IPC separados; ações de recovery não alcançam outra conta/sessão/instalação |
-| 13. Acessibilidade | UIA para superfícies customizadas e teclado integral | Narrator, contraste, IME, foco, touch e escala 100–300% validados; automação consegue selecionar as superfícies |
-| 14. Performance | Perfil de repaints, cache e timers | Orçamento de idle definido e medido; CPU abaixo de 1% como meta inicial, memória sem crescimento sustentado |
-| 15. Composição | Protótipo DirectComposition isolado | Frame pacing medido e fallback funcional; sem migrar tudo antes de medir |
-| 16. Widgets | Modelo persistente de posição/tamanho/visibilidade | Layout sobrevive a DPI/monitores/restart; serviços opcionais e canceláveis |
-| 17. Visual | Inventário de componentes e estados | Mesmos tokens/estados de foco, erro, loading e acessibilidade em todas as superfícies |
-| 18. Qualidade | Matriz CI e bundles de diagnóstico | Testes unitários/comportamento/UI; artifacts de falha sanitizados; dump de memória só com consentimento separado |
-| 19. Recovery | Expandir utilitário independente para safe mode/repair/rollback | Não apaga estado sem backup; funciona com shell quebrado; ações destrutivas exigem confirmação |
-| 20. Release | Checklist versionado e changelog de compatibilidade | Toda release registra base, fingerprint, assinatura, testes, riscos, recuperação e limitações |
+| V9 | fixed health ABI, Ready event, UI heartbeat, diagnostics/soak harness | contract + short hosted smoke |
+| V10 | suspend/resume/display/WTS lifecycle revalidation and single-instance behavior | contract + deterministic lifecycle smoke |
+| V11 | external `CloudOS.Supervisor.exe`, bounded restart, graceful exit and safe Explorer fallback decision | contract + real Ready/heartbeat supervisor smoke |
+| V12 | event-driven idle behavior, cached paint and native surface/performance regression checks | contracts + surface tests + ~120 s idle soak |
+| V13 | per-user transactional deployment, verified active version, repair, rollback, uninstall interlock foundations | contract + temp-directory deployment smoke |
+| V14 | explicit per-user shell activation, exact previous-value snapshot/restore, journal repair and independent Explorer rollback | contract + HKCU sandbox activation smoke + real shell-entry Ready probe |
+| V15 | repository/source-of-truth cleanup for humans and coding agents; central native contract suite | repository-clarity contract + full existing CI matrix |
 
-Ordem: estabilizar e medir → recuperação e sessão → integração de Files/Start/dock
-→ hardware/settings/acessibilidade → instalador/update/assinatura → piloto controlado
-→ substituição opt-in do shell. Acabamento visual avança sem enfraquecer esses critérios.
+## Current ownership
 
-## Operação atual
+- Native desktop UI: `desktop/CloudOS.NativeShell`.
+- Low-level native ABI/runtime: `desktop/CloudOS.NativeRuntime`.
+- External recovery/supervision: `desktop/CloudOS.NativeRecovery` -> `CloudOS.Supervisor.exe`.
+- Cross-project supervisor protocol: `desktop/CloudOS.NativeCommon`.
+- Build/deployment/activation/test tooling: `scripts/native`.
+- Current architecture/code map/validation: `docs/native`.
 
-Compilar pelo entrypoint habitual `scripts\native\build-cloudos-native.cmd Release`.
-Abrir pelo launcher `Iniciar CloudOS Nativo.cmd`, que continua validando proveniência.
-Para recuperação manual, abrir `desktop\CloudOS.NativeShell\bin\Release\CloudOS.Recovery.exe`.
-Fechar a janela de Recovery não altera nada. Encerrar CloudOS à força pode perder
-edições não salvas de apps internos; o aviso pede confirmação. Explorer é iniciado
-por ação explícita e caminho do diretório Windows. O utilitário não altera Winlogon,
-Shell Launcher, ACLs, contas nem políticas do Windows.
+Read `AGENTS.md` and `docs/native/CODEMAP.md` before changing a subsystem.
 
-Diagnóstico: `pwsh -File scripts\native\collect-native-diagnostics.ps1 -SampleSeconds 300`.
-Saída padrão: `%LOCALAPPDATA%\CloudOS\Diagnostics\native-<data>-<id>.json`.
-No ZIP, o mesmo script opera a partir do diretório do pacote. A assinatura ainda
-pode aparecer como `NotSigned`: SHA256 garante integridade contra o manifesto,
-não identidade do editor nem autenticidade de um manifesto substituído.
+## Production gates still open
 
-## Limites desta etapa
+The following remain distinct from hosted CI success:
 
-Não há promessa de estabilidade absoluta, fallback de boot validado, safe mode,
-rollback/instalador comercial, assinatura de produção, UIA completo, suporte a todo
-hardware ou soak de dias. Recovery de boot e encerramento real de processos de outras
-instalações/sessões precisam de ambiente isolado. Não ativar o shell padrão até passar
-a matriz de qualidade. A validação de processo/caminho é uma barreira de escopo,
-não uma sandbox contra código malicioso executando como o próprio usuário.
+| Area | Remaining gate |
+|---|---|
+| Real shell login | activate V14 in a disposable VM, perform logout/login cycles and verify recovery |
+| Crash before Ready | force real pre-Ready crashes across logon and prove Supervisor/Explorer recovery |
+| Reboot/boot recovery | reboot with activation enabled; verify emergency rollback independently of CloudOS UI |
+| Physical lifecycle | real suspend/resume, RDP transport, user switching and monitor hotplug/DPI changes |
+| Long soak | 24 h per target configuration, then multi-day pilot use |
+| Multi-user | two accounts/two sessions with isolated state, IPC and recovery scope |
+| Accessibility | Narrator/UIA, keyboard-only flows, IME, contrast, touch and 100–300% scaling |
+| Release identity | production Authenticode signing and publisher/release-chain review |
+| Security review | threat review of IPC, install/activation permissions and recovery boundaries |
+| Installer UX | production-grade install/update channel UX beyond the current per-user transactional scripts |
+
+Do not claim these gates passed without corresponding physical/VM evidence.
+
+## Active shell activation model
+
+V14 owns current activation through a per-user Winlogon `Shell` transaction. Hosted CI injects a dedicated HKCU sandbox subkey and deliberately leaves the production Winlogon key unchanged.
+
+The old `scripts/native/configure-cloudos-shell-launcher.ps1` experiment is **LEGACY**. It targets Windows Shell Launcher/WESL on supported editions and is not the current production authority. Do not use it as a substitute for V13 + V14.
+
+## Build and validation
+
+Canonical local flow:
+
+```powershell
+pwsh -NoProfile -File scripts/native/test-native-contract-suite.ps1
+scripts\native\build-cloudos-native.cmd Release
+```
+
+The build itself invokes the same central contract suite, then produces and verifies:
+
+- `CloudOS.exe`
+- `CloudOS.NativeRuntime.dll`
+- `CloudOS.Supervisor.exe`
+- `cloudos-native-manifest.json`
+- source fingerprint/build-head metadata
+
+Full runtime validation belongs to `.github/workflows/cloudos-native-full-system.yml`.
+
+## Rules for future milestones
+
+1. Do not reintroduce React/WebView as Desktop authority; WebView2 remains scoped to the Browser.
+2. Do not create competing watchdog/recovery authorities; Supervisor V11 remains external authority unless explicitly versioned.
+3. Preserve exact rollback semantics for shell activation and transactional deployment.
+4. Change ABI/protocol contracts only through explicit versioning.
+5. Prefer behavior-preserving modularization over cosmetic file moves.
+6. Update `AGENTS.md`, `CODEMAP.md` and `VALIDATION.md` when source ownership or acceptance criteria change.
+7. Every milestone must finish with actual Windows CI evidence before being called complete.

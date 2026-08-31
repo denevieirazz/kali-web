@@ -6,8 +6,9 @@ $entryPath = Join-Path $PSScriptRoot 'CloudOS.ShellEntry.V14.ps1'
 $smokePath = Join-Path $PSScriptRoot 'run-native-shell-activation-smoke-v14.ps1'
 $uninstallPath = Join-Path $PSScriptRoot 'uninstall-cloudos-native-v13.ps1'
 $packagePath = Join-Path $PSScriptRoot 'package-cloudos-native.ps1'
+$contractSuitePath = Join-Path $PSScriptRoot 'test-native-contract-suite.ps1'
 $workflowPath = Join-Path $root '.github\workflows\cloudos-native-full-system.yml'
-foreach ($path in @($modulePath, $entryPath, $smokePath, $uninstallPath, $packagePath, $workflowPath)) {
+foreach ($path in @($modulePath, $entryPath, $smokePath, $uninstallPath, $packagePath, $contractSuitePath, $workflowPath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "V14 contract prerequisite missing: $path" }
 }
 
@@ -16,6 +17,7 @@ $entry = Get-Content -LiteralPath $entryPath -Raw
 $smoke = Get-Content -LiteralPath $smokePath -Raw
 $uninstall = Get-Content -LiteralPath $uninstallPath -Raw
 $package = Get-Content -LiteralPath $packagePath -Raw
+$contractSuite = Get-Content -LiteralPath $contractSuitePath -Raw
 $workflow = Get-Content -LiteralPath $workflowPath -Raw
 
 foreach ($required in @(
@@ -100,8 +102,11 @@ foreach ($required in @(
     if (-not $package.Contains($required)) { throw "Portable V14 package contract missing: $required" }
 }
 
-foreach ($required in @('Contract Shell Activation V14', 'Smoke Shell Activation V14', 'shell-activation-v14-smoke.json')) {
-    if (-not $workflow.Contains($required)) { throw "V14 workflow contract missing: $required" }
+if (-not $contractSuite.Contains('test-shell-activation-v14-contract.ps1')) {
+    throw 'Central native contract suite does not include the V14 activation contract.'
+}
+foreach ($required in @('Smoke Shell Activation V14', 'shell-activation-v14-smoke.json')) {
+    if (-not $workflow.Contains($required)) { throw "V14 workflow runtime contract missing: $required" }
 }
 
 Write-Host 'PASS: Shell Activation V14 safety/rollback/sandbox contracts are locked.'
