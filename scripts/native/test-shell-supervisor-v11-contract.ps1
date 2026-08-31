@@ -8,6 +8,7 @@ $paths = @{
     Watchdog = Join-Path $root 'desktop\CloudOS.NativeShell\src\native_watchdog.cpp'
     Health = Join-Path $root 'desktop\CloudOS.NativeShell\src\native_health_bootstrap_v9.h'
     Build = Join-Path $root 'scripts\native\build-cloudos-native.cmd'
+    ContractSuite = Join-Path $root 'scripts\native\test-native-contract-suite.ps1'
     Fingerprint = Join-Path $root 'scripts\native\get-native-build-fingerprint.ps1'
     Manifest = Join-Path $root 'scripts\native\write-native-build-manifest.ps1'
     Verify = Join-Path $root 'scripts\native\verify-native-build-manifest.ps1'
@@ -86,11 +87,12 @@ Require 'Graceful supervisor shutdown protocol' $content.Health @(
 )
 
 Require 'Native build integrates Supervisor V11' $content.Build @(
-    'test-shell-supervisor-v11-contract.ps1',
+    'test-native-contract-suite.ps1',
     'CloudOS.NativeRecovery\CloudOS.NativeRecovery.vcxproj',
     'CloudOS.Supervisor.exe',
     'SHELL_SUPERVISOR_V11='
 )
+Require 'Central contract suite contains V11' $content.ContractSuite @('test-shell-supervisor-v11-contract.ps1')
 Require 'Fingerprint covers shared protocol' $content.Fingerprint @(
     'desktop\CloudOS.NativeCommon',
     'desktop\CloudOS.NativeRecovery'
