@@ -368,7 +368,7 @@ void CloudOSNativeWindowManager::AddOrRefresh(HWND window, DWORD process_id)
     {
         RECT bounds{}; GetWindowRect(window,&bounds);
         const std::wstring title = ReadWindowTitle(window);
-        if (existing->title != title) NativeIconCacheV12::Instance().InvalidateReady(NativeIconCacheV12::WindowKey(window));
+        if (existing->title != title) CloudOS::NativeIconCacheV12::Instance().InvalidateReady(CloudOS::NativeIconCacheV12::WindowKey(window));
         const HMONITOR monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
         const bool minimized = IsIconic(window) != FALSE;
         if (existing->title != title || existing->monitor != monitor || existing->minimized != minimized || !EqualRect(&existing->bounds,&bounds))
@@ -382,7 +382,7 @@ void CloudOSNativeWindowManager::AddOrRefresh(HWND window, DWORD process_id)
     }
 
     CloudOSManagedWindow item{};
-    NativeIconCacheV12::Instance().InvalidateReady(NativeIconCacheV12::WindowKey(window));
+    CloudOS::NativeIconCacheV12::Instance().InvalidateReady(CloudOS::NativeIconCacheV12::WindowKey(window));
     item.hwnd = window;
     item.process_id = process_id;
     item.workspace = current_workspace_;
