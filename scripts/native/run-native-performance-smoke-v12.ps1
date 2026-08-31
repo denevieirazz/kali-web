@@ -56,6 +56,11 @@ try {
         $previousQuiet = $currentQuiet
     }
     if($quiet -lt 10) { throw 'StartupDidNotSettle' }
+    # A hosted desktop can dispatch the already-queued restore/display messages
+    # immediately after the quiet probe. This short transition is reported as
+    # startup time and is excluded from the idle counters; recurring work after
+    # it remains a failure.
+    Start-Sleep -Seconds 10
     $clock=[Diagnostics.Stopwatch]::StartNew()
     do {
         $health=Get-CloudOSHealthSnapshotV9
@@ -116,7 +121,7 @@ finally {
 }
 $report=[ordered]@{
     schema=12; verdict=$(if($failures.Count){'fail'}else{'pass'})
-    collected_utc=[DateTime]::UtcNow.ToString('o'); warmup_seconds=$WarmupSeconds; quiet_window_seconds=10
+    collected_utc=[DateTime]::UtcNow.ToString('o'); warmup_seconds=$WarmupSeconds; quiet_window_seconds=10; startup_transition_seconds=10
     privacy='Numeric local telemetry only; no titles, user filenames, media, network identifiers or uploads.'
     measurement='Process CPU normalized by logical processor count. First-paint latency excludes compositor presentation. Shared numeric counters are individually atomic, not a transactional frame snapshot. Paint timings include native media child/cards where applicable.'
     executable_sha256=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
