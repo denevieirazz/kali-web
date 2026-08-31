@@ -123,6 +123,7 @@ echo [CloudOS] VISUAL_PLATFORM_V7=GSMTC, mixer por app, Bluetooth e Windows Sear
 echo [CloudOS] STABILITY_READINESS_V9=health ABI 96 bytes, heartbeat UI, readiness e soak automatizado
 echo [CloudOS] LIFECYCLE_V10=resume, WTS/RDP, display revalidation, WTS retry e single-instance smoke
 echo [CloudOS] SHELL_SUPERVISOR_V11=processo externo, readiness 30s, heartbeat, restart limitado e fallback seguro Explorer
+echo [CloudOS] UNIFIED_INTEGRATION_V16=downloads first-party, catalogo Windows+Linux, WinGet, WSLg e integracao event-driven Desktop/Start
 echo [CloudOS] WEBVIEW2=usado somente pelo Navegador CloudOS
 echo [CloudOS] FRONTEND_REACT=referencia visual; nao participa deste build
 exit /b 0

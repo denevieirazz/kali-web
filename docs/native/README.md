@@ -15,6 +15,8 @@ Este diretório documenta a arquitetura **atual** do CloudOS Native Shell. Para 
 - Performance/Visual V12 — arquitetura event-driven, paint cacheado e telemetria; veja contratos/scripts V12 e o roadmap.
 - [`TRANSACTIONAL_DEPLOYMENT_V13.md`](TRANSACTIONAL_DEPLOYMENT_V13.md) — deploy versionado por usuário, LKG, repair e rollback.
 - Documentação V14 de ativação do shell — veja `scripts/native/CloudOS.ShellActivation.V14.psm1`, o contrato V14 e o roadmap; hosted CI usa HKCU sandbox.
+- Repository Clarity V15 — `AGENTS.md`, `CODEMAP.md`, `VALIDATION.md` e a suite central tornam a árvore legível por humanos/IAs sem criar uma segunda arquitetura.
+- [`UNIFIED_INTEGRATION_V16.md`](UNIFIED_INTEGRATION_V16.md) — downloads Browser→Files, catálogo/instalação/remoção Windows+Linux, WSLg e Desktop integrado.
 
 ## Regra de autoridade
 
@@ -23,6 +25,7 @@ CloudOS Native Shell C++/Win32 = desktop atual
 CloudOS.Supervisor.exe         = recovery/supervisão externa
 V13                            = instalação/update/rollback de versões
 V14                            = ativação opt-in do shell e restauração exata
+V16                            = boundary de integração Windows + Linux/WSL
 React/WPF/Node legado          = compatibilidade, referência e testes; não autoridade do desktop nativo
 ```
 
