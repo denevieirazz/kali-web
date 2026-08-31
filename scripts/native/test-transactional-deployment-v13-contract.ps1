@@ -4,9 +4,10 @@ $ErrorActionPreference = 'Stop'
 $rootPath = (Resolve-Path -LiteralPath $Root).Path
 $modulePath = Join-Path $rootPath 'scripts\native\CloudOS.Deployment.V13.psm1'
 $packagePath = Join-Path $rootPath 'scripts\native\package-cloudos-native.ps1'
+$contractSuitePath = Join-Path $rootPath 'scripts\native\test-native-contract-suite.ps1'
 $workflowPath = Join-Path $rootPath '.github\workflows\cloudos-native-full-system.yml'
 
-foreach ($path in @($modulePath, $packagePath, $workflowPath)) {
+foreach ($path in @($modulePath, $packagePath, $contractSuitePath, $workflowPath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "V13 contract input missing: $path" }
 }
 
@@ -68,9 +69,14 @@ foreach ($name in @(
     if (-not $package.Contains($name)) { throw "Portable package does not expose V13 deployment capability: $name" }
 }
 
+$contractSuite = Get-Content -LiteralPath $contractSuitePath -Raw
+if (-not $contractSuite.Contains('test-transactional-deployment-v13-contract.ps1')) {
+    throw 'Central native contract suite does not include the V13 deployment contract.'
+}
+
 $workflow = Get-Content -LiteralPath $workflowPath -Raw
-foreach ($required in @('test-transactional-deployment-v13-contract.ps1', 'run-native-deployment-smoke-v13.ps1', 'deployment-v13-smoke.json')) {
-    if (-not $workflow.Contains($required)) { throw "Full-System CI does not protect V13 deployment: $required" }
+foreach ($required in @('run-native-deployment-smoke-v13.ps1', 'deployment-v13-smoke.json')) {
+    if (-not $workflow.Contains($required)) { throw "Full-System CI does not protect V13 deployment runtime behavior: $required" }
 }
 
 Write-Host 'PASS: Transactional Deployment V13 contract is enforced (per-user filesystem deployment only; no Winlogon/registry activation).'
