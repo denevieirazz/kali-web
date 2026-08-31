@@ -41,6 +41,21 @@ try {
         Start-Sleep -Milliseconds 1000
     }
     for($second=0;$second -lt $WarmupSeconds;$second++){Start-Sleep -Seconds 1}
+    # Hosted runners can deliver one-time recovery/display notifications after
+    # the fixed warmup. Start the idle baseline only after ten quiet seconds;
+    # events after that gate remain failures.
+    $quiet = 0; $previousQuiet = Get-CloudOSPerformanceV12 $owned.Id
+    for($settle=0; $settle -lt 120 -and $quiet -lt 10; $settle++) {
+        Start-Sleep -Seconds 1
+        $currentQuiet = Get-CloudOSPerformanceV12 $owned.Id
+        $changedQuiet = $false
+        foreach($name in @('desktop_full_paint','taskbar_full_paint','refresh_shell','reconcile')) {
+            if($currentQuiet.$name -ne $previousQuiet.$name) { $changedQuiet = $true; break }
+        }
+        $quiet = if($changedQuiet) { 0 } else { $quiet + 1 }
+        $previousQuiet = $currentQuiet
+    }
+    if($quiet -lt 10) { throw 'StartupDidNotSettle' }
     $clock=[Diagnostics.Stopwatch]::StartNew()
     do {
         $health=Get-CloudOSHealthSnapshotV9
@@ -101,7 +116,7 @@ finally {
 }
 $report=[ordered]@{
     schema=12; verdict=$(if($failures.Count){'fail'}else{'pass'})
-    collected_utc=[DateTime]::UtcNow.ToString('o'); warmup_seconds=$WarmupSeconds
+    collected_utc=[DateTime]::UtcNow.ToString('o'); warmup_seconds=$WarmupSeconds; quiet_window_seconds=10
     privacy='Numeric local telemetry only; no titles, user filenames, media, network identifiers or uploads.'
     measurement='Process CPU normalized by logical processor count. First-paint latency excludes compositor presentation. Shared numeric counters are individually atomic, not a transactional frame snapshot. Paint timings include native media child/cards where applicable.'
     executable_sha256=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
