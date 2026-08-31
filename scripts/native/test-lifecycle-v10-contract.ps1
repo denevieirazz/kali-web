@@ -9,6 +9,7 @@ $paths = @{
     Watchdog = Join-Path $src 'native_watchdog.cpp'
     Smoke = Join-Path $root 'scripts\native\run-native-lifecycle-smoke-v10.ps1'
     Build = Join-Path $root 'scripts\native\build-cloudos-native.cmd'
+    ContractSuite = Join-Path $root 'scripts\native\test-native-contract-suite.ps1'
     Package = Join-Path $root 'scripts\native\package-cloudos-native.ps1'
     Workflow = Join-Path $root '.github\workflows\cloudos-native-full-system.yml'
     Document = Join-Path $root 'docs\native\LIFECYCLE_V10.md'
@@ -92,7 +93,8 @@ Require 'Lifecycle smoke V10' $content.Smoke @(
 
 Forbid 'Lifecycle smoke privacy V10' $content.Smoke @('MainWindowTitle', 'Get-CimInstance', 'Get-WmiObject', 'Win32_Process', 'CommandLine =', 'DocumentPath')
 
-Require 'Developer build V10' $content.Build @('test-lifecycle-v10-contract.ps1', 'LIFECYCLE_V10=')
+Require 'Developer build V10' $content.Build @('test-native-contract-suite.ps1', 'LIFECYCLE_V10=')
+Require 'Central contract suite contains V10' $content.ContractSuite @('test-lifecycle-v10-contract.ps1')
 
 # Package wording may evolve in later releases. Protect the V10 executable
 # validation tool and the explicit physical-test boundary rather than prose.
