@@ -1,5 +1,7 @@
 #include "native_browser_window.h"
 
+#include "native_folder_picker_v16.h"
+#include "native_integration_v16.h"
 #include "native_theme.h"
 
 #include <ShlObj.h>
@@ -43,7 +45,28 @@ std::wstring Trim(std::wstring value)
     while (!value.empty() && is_space(value.back())) value.pop_back();
     return value;
 }
+
+std::wstring UniqueDownloadPath(const std::wstring& directory, const std::wstring& requested_name)
+{
+    if (directory.empty()) return {};
+    std::filesystem::path file_name(requested_name);
+    std::wstring leaf = file_name.filename().wstring();
+    if (leaf.empty()) leaf = L"download.bin";
+
+    std::filesystem::path candidate = std::filesystem::path(directory) / leaf;
+    if (GetFileAttributesW(candidate.c_str()) == INVALID_FILE_ATTRIBUTES) return candidate.wstring();
+
+    const std::filesystem::path stem = candidate.stem();
+    const std::filesystem::path extension = candidate.extension();
+    for (unsigned int index = 1; index <= 9999u; ++index)
+    {
+        const std::wstring numbered = stem.wstring() + L" (" + std::to_wstring(index) + L")" + extension.wstring();
+        candidate = std::filesystem::path(directory) / numbered;
+        if (GetFileAttributesW(candidate.c_str()) == INVALID_FILE_ATTRIBUTES) return candidate.wstring();
+    }
+    return {};
 }
+} // namespace
 
 CloudOSNativeBrowserWindow::CloudOSNativeBrowserWindow(
     HINSTANCE instance,
@@ -55,27 +78,19 @@ CloudOSNativeBrowserWindow::CloudOSNativeBrowserWindow(
 
 CloudOSNativeBrowserWindow::~CloudOSNativeBrowserWindow()
 {
-    if (alive_)
-    {
-        alive_->store(false);
-    }
+    if (alive_) alive_->store(false);
 
     if (webview_ != nullptr)
     {
         if (navigation_completed_registered_)
-        {
             (void)webview_->remove_NavigationCompleted(navigation_completed_token_);
-        }
         if (history_changed_registered_)
-        {
             (void)webview_->remove_HistoryChanged(history_changed_token_);
-        }
+        if (download_starting_registered_)
+            (void)webview_->remove_DownloadStarting(download_starting_token_);
     }
 
-    if (controller_ != nullptr)
-    {
-        (void)controller_->Close();
-    }
+    if (controller_ != nullptr) (void)controller_->Close();
     webview_.Reset();
     controller_.Reset();
     environment_.Reset();
@@ -100,11 +115,8 @@ void CloudOSNativeBrowserWindow::Open(
     if (browser == nullptr || !browser->Create())
     {
         delete browser;
-        MessageBoxW(
-            nullptr,
-            L"Nao foi possivel abrir o Navegador do CloudOS.",
-            L"CloudOS",
-            MB_OK | MB_ICONERROR);
+        MessageBoxW(nullptr, L"Nao foi possivel abrir o Navegador do CloudOS.",
+            L"CloudOS", MB_OK | MB_ICONERROR);
     }
 }
 
@@ -116,51 +128,38 @@ bool CloudOSNativeBrowserWindow::Create()
     window_class.lpfnWndProc = &CloudOSNativeBrowserWindow::WindowProcedure;
     window_class.hInstance = instance_;
     window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    window_class.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    window_class.hbrBackground = WebSkin::SharedBackgroundBrush();
     window_class.lpszClassName = kBrowserClass;
-
-    if (RegisterClassExW(&window_class) == 0 &&
-        GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
-    {
+    if (RegisterClassExW(&window_class) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
         return false;
-    }
 
     window_ = CreateWindowExW(
         WS_EX_APPWINDOW,
         kBrowserClass,
         L"Navegador - CloudOS",
         WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        1180,
-        760,
-        nullptr,
-        nullptr,
-        instance_,
-        this);
-    if (window_ == nullptr)
-    {
-        return false;
-    }
+        CW_USEDEFAULT, CW_USEDEFAULT, 1180, 760,
+        nullptr, nullptr, instance_, this);
+    if (window_ == nullptr) return false;
 
-    toolbar_brush_ = CreateSolidBrush(RGB(28, 32, 40));
+    toolbar_brush_ = CreateSolidBrush(WebSkin::BgPrimary);
     ui_font_ = CreateFontW(
         -15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Text");
 
-    back_button_ = CreateWindowW(L"BUTTON", L"<", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+    back_button_ = CreateWindowW(L"BUTTON", L"<", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(kBackId), instance_, nullptr);
-    forward_button_ = CreateWindowW(L"BUTTON", L">", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+    forward_button_ = CreateWindowW(L"BUTTON", L">", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(kForwardId), instance_, nullptr);
-    reload_button_ = CreateWindowW(L"BUTTON", L"Recarregar", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+    reload_button_ = CreateWindowW(L"BUTTON", L"Recarregar", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(kReloadId), instance_, nullptr);
-    home_button_ = CreateWindowW(L"BUTTON", L"Inicio", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+    home_button_ = CreateWindowW(L"BUTTON", L"Inicio", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(kHomeId), instance_, nullptr);
-    address_edit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", initial_url_.c_str(),
+    address_edit_ = CreateWindowExW(0, L"EDIT", initial_url_.c_str(),
         WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(kAddressId), instance_, nullptr);
-    go_button_ = CreateWindowW(L"BUTTON", L"Ir", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
+    go_button_ = CreateWindowW(L"BUTTON", L"Ir", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(kGoId), instance_, nullptr);
     status_label_ = CreateWindowW(L"STATIC", L"Inicializando WebView2...",
         WS_CHILD | WS_VISIBLE | SS_LEFT,
@@ -177,13 +176,16 @@ bool CloudOSNativeBrowserWindow::Create()
 
     if (ui_font_ != nullptr)
     {
-        for (HWND child : {back_button_, forward_button_, reload_button_, home_button_, address_edit_, go_button_, status_label_})
-        {
+        for (HWND child : {back_button_, forward_button_, reload_button_, home_button_,
+                 address_edit_, go_button_, status_label_})
             SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(ui_font_), TRUE);
-        }
     }
 
-    DarkWindow(window_);
+    ApplyWebWindowMaterial(window_);
+    WebSkin::PrepareEdit(address_edit_);
+    for (HWND button : {back_button_, forward_button_, reload_button_, home_button_, go_button_})
+        WebSkin::PrepareButton(button);
+
     Layout();
     ShowWindow(window_, SW_SHOW);
     UpdateWindow(window_);
@@ -224,7 +226,6 @@ void CloudOSNativeBrowserWindow::InitializeWebView()
                     ShowWebViewFailure(L"Falha ao criar o ambiente WebView2.");
                     return S_OK;
                 }
-
                 environment_ = environment;
                 const HRESULT controller_hr = environment->CreateCoreWebView2Controller(
                     window_,
@@ -241,16 +242,11 @@ void CloudOSNativeBrowserWindow::InitializeWebView()
                             return S_OK;
                         }).Get());
                 if (FAILED(controller_hr))
-                {
                     ShowWebViewFailure(L"WebView2 recusou a criacao do controlador.");
-                }
                 return S_OK;
             }).Get());
 
-    if (FAILED(result))
-    {
-        ShowWebViewFailure(L"Nao foi possivel inicializar o WebView2.");
-    }
+    if (FAILED(result)) ShowWebViewFailure(L"Nao foi possivel inicializar o WebView2.");
 }
 
 void CloudOSNativeBrowserWindow::ConfigureController(ICoreWebView2Controller* controller)
@@ -286,9 +282,7 @@ void CloudOSNativeBrowserWindow::ConfigureController(ICoreWebView2Controller* co
                     return S_OK;
                 }).Get(),
             &navigation_completed_token_)))
-    {
         navigation_completed_registered_ = true;
-    }
 
     if (SUCCEEDED(webview_->add_HistoryChanged(
             Microsoft::WRL::Callback<ICoreWebView2HistoryChangedEventHandler>(
@@ -299,9 +293,61 @@ void CloudOSNativeBrowserWindow::ConfigureController(ICoreWebView2Controller* co
                     return S_OK;
                 }).Get(),
             &history_changed_token_)))
-    {
         history_changed_registered_ = true;
-    }
+
+    if (SUCCEEDED(webview_->add_DownloadStarting(
+            Microsoft::WRL::Callback<ICoreWebView2DownloadStartingEventHandler>(
+                [this, lifetime](ICoreWebView2*, ICoreWebView2DownloadStartingEventArgs* args) -> HRESULT
+                {
+                    if (!lifetime->load() || args == nullptr) return S_OK;
+
+                    LPWSTR default_path_raw = nullptr;
+                    std::wstring default_path;
+                    if (SUCCEEDED(args->get_ResultFilePath(&default_path_raw)) && default_path_raw != nullptr)
+                    {
+                        default_path = default_path_raw;
+                        CoTaskMemFree(default_path_raw);
+                    }
+
+                    const std::filesystem::path suggested(default_path);
+                    std::wstring initial_directory = suggested.parent_path().wstring();
+                    if (initial_directory.empty()) initial_directory = NativeIntegrationV16::DownloadsFolder();
+                    std::wstring file_name = suggested.filename().wstring();
+                    if (file_name.empty()) file_name = L"download.bin";
+
+                    std::wstring selected_directory;
+                    if (!CloudOSNativeFolderPickerV16::Pick(window_, initial_directory, &selected_directory))
+                    {
+                        (void)args->put_Cancel(TRUE);
+                        (void)args->put_Handled(TRUE);
+                        SetWindowTextW(status_label_, L"Download cancelado");
+                        return S_OK;
+                    }
+
+                    const std::wstring result_path = UniqueDownloadPath(selected_directory, file_name);
+                    if (result_path.empty())
+                    {
+                        (void)args->put_Cancel(TRUE);
+                        (void)args->put_Handled(TRUE);
+                        SetWindowTextW(status_label_, L"Nao foi possivel preparar o destino do download");
+                        return S_OK;
+                    }
+
+                    if (FAILED(args->put_ResultFilePath(result_path.c_str())))
+                    {
+                        (void)args->put_Cancel(TRUE);
+                        (void)args->put_Handled(TRUE);
+                        SetWindowTextW(status_label_, L"WebView2 recusou o destino do download");
+                        return S_OK;
+                    }
+                    (void)args->put_Handled(TRUE);
+                    std::wstring status = L"Baixando para CloudOS Files: ";
+                    status += result_path;
+                    SetWindowTextW(status_label_, status.c_str());
+                    return S_OK;
+                }).Get(),
+            &download_starting_token_)))
+        download_starting_registered_ = true;
 
     Layout();
     (void)controller_->put_IsVisible(TRUE);
@@ -311,7 +357,6 @@ void CloudOSNativeBrowserWindow::ConfigureController(ICoreWebView2Controller* co
 void CloudOSNativeBrowserWindow::Layout()
 {
     if (window_ == nullptr) return;
-
     RECT client{};
     GetClientRect(window_, &client);
     const int width = std::max(1L, client.right - client.left);
@@ -331,12 +376,9 @@ void CloudOSNativeBrowserWindow::Layout()
     MoveWindow(forward_button_, x, y, small_w, button_h, TRUE); x += small_w + gap;
     MoveWindow(reload_button_, x, y, medium_w, button_h, TRUE); x += medium_w + gap;
     MoveWindow(home_button_, x, y, Scale(64, dpi), button_h, TRUE); x += Scale(64, dpi) + gap;
-
     const int address_w = std::max(120, width - x - go_w - margin - gap);
-    MoveWindow(address_edit_, x, y, address_w, button_h, TRUE);
-    x += address_w + gap;
+    MoveWindow(address_edit_, x, y, address_w, button_h, TRUE); x += address_w + gap;
     MoveWindow(go_button_, x, y, go_w, button_h, TRUE);
-
     MoveWindow(status_label_, margin, Scale(42, dpi), width - margin * 2, Scale(18, dpi), TRUE);
 
     if (controller_ != nullptr)
@@ -367,21 +409,16 @@ void CloudOSNativeBrowserWindow::Navigate(const std::wstring& raw_url)
         SetWindowTextW(status_label_, L"Motor de navegacao ainda nao esta pronto");
         return;
     }
-
     const std::wstring url = NormalizeUrl(raw_url);
     SetWindowTextW(address_edit_, url.c_str());
     SetWindowTextW(status_label_, L"Carregando...");
-    const HRESULT result = webview_->Navigate(url.c_str());
-    if (FAILED(result))
-    {
+    if (FAILED(webview_->Navigate(url.c_str())))
         SetWindowTextW(status_label_, L"Endereco invalido ou navegacao recusada");
-    }
 }
 
 void CloudOSNativeBrowserWindow::UpdateNavigationState()
 {
     if (webview_ == nullptr) return;
-
     BOOL can_back = FALSE;
     BOOL can_forward = FALSE;
     (void)webview_->get_CanGoBack(&can_back);
@@ -395,7 +432,6 @@ void CloudOSNativeBrowserWindow::UpdateNavigationState()
         SetWindowTextW(address_edit_, source);
         CoTaskMemFree(source);
     }
-
     LPWSTR title = nullptr;
     if (SUCCEEDED(webview_->get_DocumentTitle(&title)) && title != nullptr)
     {
@@ -417,18 +453,12 @@ std::wstring CloudOSNativeBrowserWindow::NormalizeUrl(std::wstring value)
     value = Trim(std::move(value));
     if (value.empty()) return kHomeUrl;
     if (IsHttpUrl(value)) return value;
-
     if (value.find(L' ') == std::wstring::npos && value.find(L'.') != std::wstring::npos)
-    {
         return L"https://" + value;
-    }
 
     std::wstring encoded;
     encoded.reserve(value.size() + 32u);
-    for (const wchar_t ch : value)
-    {
-        encoded += ch == L' ' ? L'+' : ch;
-    }
+    for (const wchar_t ch : value) encoded += ch == L' ' ? L'+' : ch;
     return L"https://www.google.com/search?q=" + encoded;
 }
 
@@ -437,14 +467,11 @@ std::wstring CloudOSNativeBrowserWindow::UserDataDirectory()
     PWSTR local_app_data = nullptr;
     if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_CREATE, nullptr, &local_app_data)) ||
         local_app_data == nullptr)
-    {
         return {};
-    }
 
     const std::filesystem::path path =
         std::filesystem::path(local_app_data) / L"CloudOS" / L"BrowserProfile";
     CoTaskMemFree(local_app_data);
-
     std::error_code error;
     std::filesystem::create_directories(path, error);
     return error ? std::wstring{} : path.wstring();
@@ -460,37 +487,20 @@ LRESULT CloudOSNativeBrowserWindow::HandleMessage(
     case WM_SIZE:
         Layout();
         return 0;
-
     case WM_COMMAND:
         if (HIWORD(w_param) == BN_CLICKED)
         {
             switch (LOWORD(w_param))
             {
-            case kBackId:
-                if (webview_ != nullptr) (void)webview_->GoBack();
-                return 0;
-            case kForwardId:
-                if (webview_ != nullptr) (void)webview_->GoForward();
-                return 0;
-            case kReloadId:
-                if (webview_ != nullptr) (void)webview_->Reload();
-                return 0;
-            case kHomeId:
-                Navigate(kHomeUrl);
-                return 0;
-            case kGoId:
-                NavigateFromAddress();
-                return 0;
-            default:
-                break;
+            case kBackId: if (webview_ != nullptr) (void)webview_->GoBack(); return 0;
+            case kForwardId: if (webview_ != nullptr) (void)webview_->GoForward(); return 0;
+            case kReloadId: if (webview_ != nullptr) (void)webview_->Reload(); return 0;
+            case kHomeId: Navigate(kHomeUrl); return 0;
+            case kGoId: NavigateFromAddress(); return 0;
+            default: break;
             }
         }
-        if (LOWORD(w_param) == kAddressId && HIWORD(w_param) == EN_MAXTEXT)
-        {
-            return 0;
-        }
         break;
-
     case WM_KEYDOWN:
         if (w_param == VK_RETURN && GetFocus() == address_edit_)
         {
@@ -498,30 +508,33 @@ LRESULT CloudOSNativeBrowserWindow::HandleMessage(
             return 0;
         }
         break;
-
+    case WM_DRAWITEM:
+    {
+        const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(l_param);
+        if (draw != nullptr && draw->CtlType == ODT_BUTTON &&
+            WebSkin::PaintOwnerDrawButton(draw, ButtonTone::Neutral)) return TRUE;
+        break;
+    }
     case WM_CTLCOLORSTATIC:
         if (toolbar_brush_ != nullptr)
         {
             HDC dc = reinterpret_cast<HDC>(w_param);
-            SetBkColor(dc, RGB(28, 32, 40));
-            SetTextColor(dc, RGB(220, 224, 232));
+            SetBkColor(dc, WebSkin::BgPrimary);
+            SetTextColor(dc, WebSkin::TextSecondary);
             return reinterpret_cast<LRESULT>(toolbar_brush_);
         }
         break;
-
     case WM_CLOSE:
         DestroyWindow(window_);
         return 0;
-
     case WM_NCDESTROY:
+        SetWindowLongPtrW(window_, GWLP_USERDATA, 0);
         window_ = nullptr;
         delete this;
         return 0;
-
     default:
         break;
     }
-
     return DefWindowProcW(window_, message, w_param, l_param);
 }
 
@@ -544,7 +557,6 @@ LRESULT CALLBACK CloudOSNativeBrowserWindow::WindowProcedure(
     {
         self = reinterpret_cast<CloudOSNativeBrowserWindow*>(GetWindowLongPtrW(window, GWLP_USERDATA));
     }
-
     return self != nullptr
         ? self->HandleMessage(message, w_param, l_param)
         : DefWindowProcW(window, message, w_param, l_param);
