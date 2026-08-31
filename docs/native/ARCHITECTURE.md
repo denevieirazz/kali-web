@@ -2,7 +2,7 @@
 
 ## 1. Visão geral
 
-O CloudOS atual é um shell desktop nativo sobre Windows. Ele não substitui kernel, drivers, Win32, DWM ou os serviços do Windows. A camada CloudOS fornece Desktop, Taskbar, Start, flyouts, Window Manager, workspaces, Files e apps first-party, enquanto integra capacidades do sistema operacional por APIs Windows.
+CloudOS é um shell desktop nativo sobre Windows. Ele não substitui kernel, drivers, Win32, DWM ou os serviços do Windows. A camada CloudOS fornece Desktop, Taskbar, Start, flyouts, Window Manager, workspaces, Files e apps first-party e integra capacidades Windows + Linux/WSL por boundaries explícitas.
 
 A autoridade do desktop é C++/Win32:
 
@@ -12,25 +12,26 @@ CloudOS.NativeShell (C++/Win32)
          ├─ Desktop / Taskbar / Start
          ├─ Window Manager / Workspaces
          ├─ Quick Settings / Notification Center / System Center
-         ├─ Files e apps first-party
+         ├─ Files / Browser / Apps first-party
+         ├─ Unified Integration V16 (Windows + WSL/Linux)
          ├─ Health V9 + Lifecycle V10
          └─ CloudOS.NativeRuntime.dll
 ```
 
-WebView2 existe apenas onde é apropriado, principalmente no Navegador CloudOS. O antigo desktop React não participa do build nativo.
+WebView2 existe onde é apropriado, principalmente no Navegador CloudOS. O antigo desktop React não participa do build nativo.
 
 ## 2. Grafo de processos e autoridade
 
-### Execução normal portátil/de desenvolvimento
+### Execução normal
 
 ```text
 launcher
-  └─ CloudOS.Supervisor.exe          [V11 — autoridade externa de recovery]
+  └─ CloudOS.Supervisor.exe          [V11 — recovery]
        └─ CloudOS.exe --supervised   [shell/UI]
             └─ CloudOS.NativeRuntime.dll
 ```
 
-Quando `CloudOS.exe` recebe `--supervised`, o watchdog embutido não cria um segundo loop de recovery concorrente. O Supervisor observa readiness/heartbeat V9, reinicia com orçamento limitado e mantém Explorer como fallback seguro.
+Sob `--supervised`, o watchdog embutido não cria um recovery loop concorrente. Supervisor observa readiness/heartbeat V9, reinicia com orçamento limitado e mantém Explorer como fallback.
 
 ### Instalação V13
 
@@ -46,7 +47,7 @@ Quando `CloudOS.exe` recebe `--supervised`, o watchdog embutido não cria um seg
   └─ tools\...
 ```
 
-V13 separa o estado `active_version` da versão física. Uma versão só é publicada depois de manifesto, tamanho, SHA256 e `CloudOS.Supervisor.exe --self-test`. A versão anterior pode permanecer como last-known-good.
+Uma versão V13 só é publicada depois de manifesto, tamanho, SHA256 e Supervisor self-test. A versão anterior pode ser last-known-good.
 
 ### Ativação opt-in V14
 
@@ -54,141 +55,172 @@ V13 separa o estado `active_version` da versão física. Uma versão só é publ
 HKCU\Software\Microsoft\Windows NT\CurrentVersion\Winlogon\Shell
   └─ comando estável V14
        └─ <install-root>\shell-v14\CloudOS.ShellEntry.V14.cmd
-            └─ resolve deployment-v13.json
+            └─ deployment-v13.json
                  └─ versions\<active>\CloudOS.Supervisor.exe
                       └─ CloudOS.exe --supervised
 ```
 
-A ativação V14 é explícita. Instalar ou atualizar não altera automaticamente o shell de logon.
-
-Antes da escrita, V14 salva presença, tipo e dado não expandido do valor `Shell`. Rollback restaura exatamente esse snapshot — inclusive o caso em que o valor não existia. Um journal permite desfazer uma escrita interrompida. Drift externo é detectado e não é sobrescrito silenciosamente.
-
-Hosted CI testa V14 somente em `HKCU\Software\CloudOS\Tests\ShellActivationV14\...`; a chave Winlogon real é comparada antes/depois e deve permanecer intacta.
+Instalar/atualizar não ativa automaticamente o shell. V14 salva presença/tipo/dado não expandido do `Shell`, restaura exatamente esse snapshot e usa journal para recuperação. Hosted CI só escreve em HKCU sandbox.
 
 ## 3. Componentes de processo
 
 ### `desktop/CloudOS.NativeShell`
 
-Responsável pela experiência desktop e pela coordenação dos subsistemas nativos. O entrypoint compilado é `src/main_shell_v2.cpp`.
+Entry point compilado: `src/main_shell_v2.cpp`.
 
-Principais grupos:
+Grupos principais:
 
-- Desktop: wallpaper, ícones, drop target e menu de contexto.
+- Desktop: wallpaper, namespace, drop target, menu de contexto.
 - Shell chrome: Taskbar, Start, Quick Settings, Notification Center, toast.
-- Window management: enumeração, eventos, workspaces, Snap e previews DWM.
-- Control plane: System Center, tray first-party, system controls.
-- Files: navegação, busca, preview e operações nativas.
+- Window management: HWND events, workspaces, Snap, DWM previews.
+- Control plane: System Center, tray, controles.
+- Files: Windows/CloudOS Drive/WSL filesystem.
 - Session: continuity, recovery e lifecycle.
-- Apps: Browser, Terminal, Notepad, Calculator, Projects, Run etc.
+- Apps: Browser, Terminal, Notepad, Calculator, Projects, Run.
+- V16: downloads, inventory/package management Windows e WSLg/Linux.
 
-Veja a correspondência arquivo→responsabilidade em `CODEMAP.md`.
+Veja `CODEMAP.md`.
 
 ### `desktop/CloudOS.NativeRuntime`
 
-DLL de runtime nativo usada pelo shell. Contém integrações que devem permanecer separadas da apresentação, incluindo runtime base, terminal, eventos de janela e WSL.
+DLL nativa: runtime base, ConPTY, eventos de janela e WSL API de baixo nível.
 
 ### `desktop/CloudOS.NativeRecovery`
 
-Produz `CloudOS.Supervisor.exe`. Apesar do nome histórico da pasta, a saída atual é o Supervisor V11 e ele é a autoridade externa de readiness/restart/fallback.
+Produz `CloudOS.Supervisor.exe`, autoridade externa V11.
 
 ### `desktop/CloudOS.NativeCommon`
 
-Contratos compartilhados entre processos. Alterações aqui exigem atenção especial a ABI, tamanho de estruturas, nomes de mapping/event/message e compatibilidade entre binários.
+Protocolos compartilhados; alterações exigem cuidado com ABI/mappings/messages.
 
 ## 4. Health V9
 
-Health V9 é a fonte compartilhada de readiness/heartbeat entre shell e Supervisor.
+Invariantes:
 
-Invariantes importantes:
-
-- snapshot fixo e pointer-free de 96 bytes;
+- snapshot pointer-free de 96 bytes;
 - mapping `Local\CloudOS.NativeShell.Health.v9`;
-- ready event `Local\CloudOS.NativeShell.Ready.v9`;
+- event `Local\CloudOS.NativeShell.Ready.v9`;
 - heartbeat produzido pela UI thread;
-- Desktop autoritativo `CloudOS.NativeShell.Desktop.v2`.
-
-O objetivo é distinguir processo existente de shell realmente pronto/respondendo.
+- Desktop `CloudOS.NativeShell.Desktop.v2`.
 
 ## 5. Lifecycle V10
 
-Lifecycle trata mudanças de sessão/sistema sem criar outra instância do shell:
-
-- suspend/resume checkpoint e revalidação;
-- display/AppBar/workarea revalidation;
-- WTS/RDP checkpoint/refresh;
-- retry de registro WTS quando necessário;
-- single-instance.
-
-A CI usa mensagens/probes determinísticos. Ela não deve ser descrita como prova de suspend físico, transporte RDP ou hotplug real.
+Trata suspend/resume, display/AppBar/workarea, WTS/RDP checkpoints/refresh, retry WTS e single-instance. Hosted CI usa probes determinísticos e não prova transporte/hardware físico.
 
 ## 6. Supervisor V11
 
-Responsabilidades:
-
-1. iniciar `CloudOS.exe --supervised`;
-2. aguardar Ready com timeout;
-3. observar freshness do heartbeat;
-4. distinguir saída normal de falha/hang;
-5. reiniciar com backoff/orçamento limitado;
-6. solicitar graceful exit antes de `TerminateProcess`;
-7. recorrer a Explorer apenas quando necessário.
-
-Não deve existir um segundo supervisor/recovery loop competindo com ele.
+1. inicia `CloudOS.exe --supervised`;
+2. espera Ready;
+3. observa heartbeat;
+4. distingue shutdown normal de falha/hang;
+5. aplica restart budget/backoff;
+6. pede graceful exit antes de terminate;
+7. usa Explorer como fallback quando necessário.
 
 ## 7. Performance/Visual V12
 
-Princípios que devem continuar verdadeiros:
+Princípios:
 
-- atualização event-driven para superfícies do shell;
-- `WM_PAINT` desenha estado preparado/cacheado;
-- filesystem/Shell APIs caras não entram no caminho de pintura;
-- backbuffers são reutilizados;
-- invalidação usa regiões quando possível;
-- workers fazem I/O/trabalho lento e retornam resultado à UI thread;
-- painéis escondidos não continuam fazendo refresh caro;
-- telemetria mede repaints/scans/recursos sem coletar conteúdo pessoal.
+- event-driven;
+- `WM_PAINT` só desenha estado cacheado;
+- filesystem/Shell APIs caras fora do paint;
+- backbuffer reutilizado;
+- dirty regions;
+- workers para trabalho lento;
+- superfícies escondidas não fazem refresh caro;
+- telemetria sem conteúdo pessoal.
 
 ## 8. Deployment V13
 
-`CloudOS.Deployment.V13.psm1` é a fonte de verdade da instalação por usuário.
-
-Operações:
-
-- install/update transacional;
-- verificação antes de publish;
-- estado ativo separado;
-- last-known-good;
-- repair de journal/staging interrompido;
-- rollback;
-- uninstall guardado por estado gerenciado.
-
-V13 não é um ativador de Winlogon.
+`CloudOS.Deployment.V13.psm1` é autoridade de install/update/repair/rollback/uninstall por usuário. Não ativa Winlogon.
 
 ## 9. Shell Activation V14
 
-`CloudOS.ShellActivation.V14.psm1` é a fonte de verdade do mecanismo moderno de ativação opt-in.
+`CloudOS.ShellActivation.V14.psm1` é a autoridade moderna de ativação opt-in. Não confundir com `configure-cloudos-shell-launcher.ps1` (WESL legado/administrativo). V14 permanece current-user e não usa HKLM/Userinit/Run/serviço/tarefa como atalho.
 
-Ele não deve ser confundido com `configure-cloudos-shell-launcher.ps1`, que é um utilitário legado/administrativo para o recurso Windows Shell Launcher (`WESL_UserSetting`).
+## 10. Repository Clarity V15
 
-V14 mantém escopo current-user e não usa HKLM, Userinit, Run/RunOnce, serviço ou tarefa agendada como atalho.
+`AGENTS.md`, `docs/native/CODEMAP.md`, `VALIDATION.md` e `test-native-contract-suite.ps1` tornam as fontes de verdade explícitas. Reorganização lógica tem preferência sobre churn físico sem ganho arquitetural.
 
-## 10. Estado e persistência
+## 11. Unified Windows + Linux Integration V16
 
-O estado deve ter dono claro:
+A autoridade é:
 
-- deployment/update: V13 state + journal;
-- shell activation: V14 state + journal;
-- shell runtime/preferences: módulos nativos correspondentes;
-- continuity/workspaces: serviços de session/workspace;
-- release integrity: manifesto + fingerprint + hashes.
+```text
+native_integration_v16.*
+    ├─ Windows installed-app inventory [registry read-only]
+    ├─ WinGet command boundary
+    ├─ WSL distro discovery
+    ├─ Linux .desktop discovery
+    ├─ WSLg gtk-launch
+    └─ apt/snap/flatpak removal mapping
+```
 
-Não crie um segundo arquivo de estado para a mesma verdade sem definir migração e autoridade.
+Surfaces consomem essa boundary em vez de duplicar integração.
 
-## 11. Fronteira legado/compatibilidade
+### Browser/download
 
-Ainda existem `frontend/`, `backend/`, `desktop/CloudOS.Host`, Bootstrap e testes do Browser/WPF. Eles podem continuar úteis para compatibilidade, caracterização e componentes específicos.
+```text
+WebView2 DownloadStarting
+   ↓
+native_browser_window.cpp
+   ↓
+native_folder_picker_v16.*
+   ├─ Windows known folders
+   └─ \\wsl.localhost\...
+   ↓
+ICoreWebView2DownloadStartingEventArgs::ResultFilePath
+```
 
-Para o **desktop atual**, porém:
+WebView2 continua sendo download engine; CloudOS controla a experiência/destino.
+
+### Files
+
+Files V5 já expõe Windows, CloudOS Drive e `\\wsl.localhost\`. Não existe um segundo file manager Linux.
+
+### Apps
+
+`native_apps_window.*` combina:
+
+- apps first-party;
+- Start Menu/PATH;
+- inventário de uninstall Windows;
+- GUI apps Linux de `/usr/share/applications`.
+
+Windows install usa WinGet em Terminal visível. Linux install V16 usa apt/WSL em Terminal visível. Removal usa uninstall registrado/WinGet no Windows e apt/snap/flatpak quando mapeável no Linux.
+
+### Desktop/Start
+
+`native_desktop_model_v12.h` agrega user Desktop + Public Desktop + launchers Linux gerenciados. Change notifications atualizam Desktop sem polling. Mudança em Programs/CommonPrograms chama `NativeStartIndex::RefreshAsync()`.
+
+Apps Linux são materializados como `.lnk` gerenciados em `%LOCALAPPDATA%\CloudOS\IntegrationV16\LinuxShortcuts`, apontando para WSLg `gtk-launch`; o CloudOS não modifica os `.desktop` originais.
+
+### Window Manager
+
+WSLg expõe GUI Linux como janelas integradas ao desktop Windows. O CloudOS usa o mesmo HWND/DWM Window Manager; não há um compositor/window manager Linux concorrente dentro do shell.
+
+### Defaults e segurança
+
+V16 **não** altera default apps/file associations silenciosamente, não escreve HKLM/package registry, não guarda senha sudo, não ignora UAC e não apaga pasta de app para fingir uninstall.
+
+Detalhes: `UNIFIED_INTEGRATION_V16.md`.
+
+## 12. Estado e persistência
+
+Dono claro por domínio:
+
+- deployment/update: V13 state/journal;
+- shell activation: V14 state/journal;
+- preferences/runtime: módulo nativo correspondente;
+- workspaces/continuity: serviços próprios;
+- release integrity: manifesto/fingerprint/hashes;
+- V16 Linux launcher cache: `%LOCALAPPDATA%\CloudOS\IntegrationV16\LinuxShortcuts` (derivado, não fonte de verdade).
+
+Não crie um segundo estado autoritativo para a mesma verdade sem migração definida.
+
+## 13. Legado/compatibilidade
+
+`frontend/`, `backend/`, `desktop/CloudOS.Host`, Bootstrap e testes WPF permanecem para compatibilidade/caracterização. Para o desktop atual:
 
 ```text
 não usar React como autoridade do Desktop
@@ -197,33 +229,37 @@ não construir frontend para gerar CloudOS.exe
 não adicionar WebView2 ao Desktop principal
 ```
 
-O `CloudOS.NativeShell.vcxproj`, o manifesto release e a Full-System CI são as provas executáveis dessa fronteira.
+## 14. Direção de dependência
 
-## 12. Regra de dependência
-
-Prefira dependências na direção:
+Prefira:
 
 ```text
 UI surface
   ↓
-service/model explícito
+service/model/boundary explícita
   ↓
-platform/runtime boundary
+platform/runtime
   ↓
-Windows API
+Windows / WSL APIs
 ```
 
-Evite:
+Para V16:
 
-- surface chamando filesystem/WMI/rede durante paint;
-- módulos alterando estado global de outro subsistema sem API clara;
-- scripts de instalação escrevendo configuração de shell como efeito colateral;
-- recovery dependendo da UI do próprio shell quebrado.
+```text
+Browser / Apps / Desktop / Files
+  ↓
+native_integration_v16.*  (quando é integração Windows↔Linux/package)
+  ↓
+Win32 / Registry read-only / WinGet / WSL / WSLg
+```
 
-## 13. Leitura recomendada antes de editar
+Evite surface fazendo I/O no paint, módulos alterando estado global alheio, scripts de install alterando shell como side effect e recovery dependendo da própria UI quebrada.
 
-- mapa de arquivos: `docs/native/CODEMAP.md`;
-- validação: `docs/native/VALIDATION.md`;
-- regras para agentes: `AGENTS.md`;
-- scripts: `scripts/native/README.md`;
-- código do shell: `desktop/CloudOS.NativeShell/src/README.md`.
+## 15. Leitura recomendada
+
+- `docs/native/CODEMAP.md`
+- `docs/native/UNIFIED_INTEGRATION_V16.md`
+- `docs/native/VALIDATION.md`
+- `AGENTS.md`
+- `scripts/native/README.md`
+- `desktop/CloudOS.NativeShell/src/README.md`
