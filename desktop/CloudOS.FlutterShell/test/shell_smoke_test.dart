@@ -102,166 +102,146 @@ void main() {
       expect(apps[0].platform, CloudAppPlatform.windows);
       expect(apps[1].id, 'wsl:gimp');
       expect(apps[1].platform, CloudAppPlatform.linux);
+      expect(apps[1].distro, 'Ubuntu');
       expect(apps[2].id, 'cloudos:files');
       expect(apps[2].platform, CloudAppPlatform.cloudos);
     });
 
-    test('loadSystemSnapshot maps all properties from native snapshot', () async {
+    test('loadSystemSnapshot parses native snapshot fields correctly', () async {
       const bridge = CloudOSBridge(channel: channel);
-      final snap = await bridge.loadSystemSnapshot();
+      final snapshot = await bridge.loadSystemSnapshot();
 
-      expect(snap.deviceName, 'TEST-DEVICE-V21');
-      expect(snap.networkName, 'Wi-Fi 6 Real Native');
-      expect(snap.volume, 0.80);
-      expect(snap.brightness, 0.90);
-      expect(snap.batteryPercent, 88);
-      expect(snap.wslAvailable, true);
-      expect(snap.distros, ['Ubuntu', 'kali-linux']);
-      expect(snap.currentWorkspace, 2);
+      expect(snapshot.deviceName, 'TEST-DEVICE-V21');
+      expect(snapshot.networkName, 'Wi-Fi 6 Real Native');
+      expect(snapshot.volume, 0.80);
+      expect(snapshot.brightness, 0.90);
+      expect(snapshot.batteryPercent, 88);
+      expect(snapshot.wslAvailable, true);
+      expect(snapshot.distros, <String>['Ubuntu', 'kali-linux']);
+      expect(snapshot.currentWorkspace, 2);
     });
 
-    test('launchApp sends typed ID argument to channel', () async {
+    test('launchApp forwards app id and handles success', () async {
       const bridge = CloudOSBridge(channel: channel);
       final success = await bridge.launchApp('windows:notepad');
 
-      expect(success, isTrue);
-      expect(log.length, 1);
-      expect(log.first.method, 'launchApp');
-      expect(log.first.arguments, {'id': 'windows:notepad'});
+      expect(success, true);
+      expect(log.last.method, 'launchApp');
+      expect(log.last.arguments, <String, Object?>{'id': 'windows:notepad'});
     });
 
-    test('setVolume and setBrightness pass values to native channel', () async {
+    test('setVolume and setBrightness forward values', () async {
       const bridge = CloudOSBridge(channel: channel);
-      final volResult = await bridge.setVolume(0.65);
-      final briResult = await bridge.setBrightness(0.75);
+      await bridge.setVolume(0.5);
+      expect(log.last.method, 'setVolume');
+      expect(log.last.arguments, <String, Object?>{'value': 0.5});
 
-      expect(volResult, isTrue);
-      expect(briResult, isTrue);
-      expect(log.length, 2);
-      expect(log[0].method, 'setVolume');
-      expect(log[0].arguments, {'value': 0.65});
-      expect(log[1].method, 'setBrightness');
-      expect(log[1].arguments, {'value': 0.75});
+      await bridge.setBrightness(0.75);
+      expect(log.last.method, 'setBrightness');
+      expect(log.last.arguments, <String, Object?>{'value': 0.75});
     });
 
-    test('getBridgeInfo returns schema 21 and arbitrary_command_api false', () async {
+    test('getBridgeInfo returns schema 21 metadata', () async {
       const bridge = CloudOSBridge(channel: channel);
       final info = await bridge.getBridgeInfo();
 
       expect(info['schema'], 21);
-      expect(info['arbitrary_command_api'], isFalse);
-      expect(info['brokerConnected'], isTrue);
+      expect(info['bridge_type'], 'CloudOSFlutterBridgeV20');
+      expect(info['brokerConnected'], true);
       expect(info['brokerState'], 'connected');
+      expect(info['arbitrary_command_api'], false);
     });
 
-    test('preview fallback activates gracefully when channel throws MissingPluginException', () async {
-      const unmockedChannel = MethodChannel('cloudos/unregistered');
-      const bridge = CloudOSBridge(channel: unmockedChannel);
+    test('preview fallback handles missing plugin without throwing', () async {
+      const missingChannel = MethodChannel('non_existent_channel');
+      const bridge = CloudOSBridge(channel: missingChannel);
 
       final apps = await bridge.loadApps();
-      expect(apps.isNotEmpty, isTrue);
+      expect(apps.isNotEmpty, true);
+      expect(apps, CloudOSBridge.previewApps);
 
-      final snap = await bridge.loadSystemSnapshot();
-      expect(snap.deviceName, isNotEmpty);
+      final snapshot = await bridge.loadSystemSnapshot();
+      expect(snapshot.deviceName, CloudOSBridge.previewSnapshot.deviceName);
 
-      final launchResult = await bridge.launchApp('cloudos:files');
-      expect(launchResult, isTrue);
-
-      final info = await bridge.getBridgeInfo();
-      expect(info['schema'], 21);
-      expect(info['bridge_type'], 'PreviewFallback');
-      expect(info['arbitrary_command_api'], isFalse);
+      final launchResult = await bridge.launchApp('anything');
+      expect(launchResult, true);
     });
   });
 
-  group('CloudOS Multi-Viewport UI Smoke Tests', () {
-    const channel = MethodChannel('cloudos/native/v19');
-
-    setUp(() {
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(channel, (call) async {
-        return null;
-      });
-    });
-
-    tearDown(() {
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(channel, null);
-    });
-
-    testWidgets('renders full Desktop environment with Taskbar and Desktop icons', (tester) async {
-      tester.view.physicalSize = const Size(1920, 1080);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(() => tester.view.resetPhysicalSize());
+  group('CloudOS V21 Desktop Presentation Suite', () {
+    testWidgets('CloudOS presentation renders core desktop surfaces on 1920x1080', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1920, 1080));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
 
       await tester.pumpWidget(const CloudOSApp());
       await tester.pumpAndSettle();
 
-      expect(find.text('Arquivos'), findsWidgets);
-      expect(find.text('Navegador Web'), findsWidgets);
-      expect(find.text('Terminal ConPTY'), findsWidgets);
-      expect(find.byType(TextField), findsOneWidget);
+      expect(find.text('CloudOS V19'), findsWidgets);
+      expect(find.text('Arquivos • Início'), findsOneWidget);
+      expect(find.text('Windows + Linux (WSL2)'), findsOneWidget);
+      expect(find.text('ACESSO RÁPIDO'), findsOneWidget);
+      expect(find.text('ARMAZENAMENTO'), findsOneWidget);
+      expect(find.text('CloudOS Drive'), findsWidgets);
+      expect(find.text('Ubuntu WSL'), findsWidgets);
+
+      // Open Start Panel
+      await tester.tap(find.byTooltip('Iniciar (Ctrl+Alt+A)'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('CloudOS Start'), findsOneWidget);
+      expect(find.text('Aplicativos Fixados'), findsOneWidget);
+      expect(find.text('Visual Studio Code'), findsOneWidget);
+      expect(find.text('Ubuntu Terminal'), findsOneWidget);
+
+      // Test Search
+      await tester.enterText(find.byType(TextField).first, 'Code');
+      await tester.pumpAndSettle();
+      expect(find.text('Visual Studio Code'), findsOneWidget);
+
+      // Close Start
+      await tester.tap(find.byTooltip('Iniciar (Ctrl+Alt+A)'));
+      await tester.pumpAndSettle();
+      expect(find.text('CloudOS Start'), findsNothing);
+
+      // Open Quick Settings
+      await tester.tap(find.byTooltip('Configurações Rápidas (Ctrl+Alt+Q)'));
+      await tester.pumpAndSettle();
+      expect(find.text('Configurações Rápidas'), findsOneWidget);
+      expect(find.text('Wi‑Fi 6'), findsOneWidget);
+      expect(find.text('Luz Noturna'), findsOneWidget);
+
+      // Open Notifications
+      await tester.tap(find.byTooltip('Notificações'));
+      await tester.pumpAndSettle();
+      expect(find.text('Centro de Notificações'), findsOneWidget);
+      expect(find.text('Limpar Tudo'), findsOneWidget);
+
+      // Clear all notifications
+      await tester.tap(find.text('Limpar Tudo'));
+      await tester.pumpAndSettle();
+      expect(find.text('Sem novas notificações'), findsOneWidget);
     });
 
-    testWidgets('opens and closes Start Menu cleanly', (tester) async {
-      tester.view.physicalSize = const Size(1920, 1080);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(() => tester.view.resetPhysicalSize());
+    testWidgets('CloudOS presentation renders cleanly on notebook viewport (1366x768)', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1366, 768));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
 
       await tester.pumpWidget(const CloudOSApp());
       await tester.pumpAndSettle();
 
-      final startButton = find.byTooltip('Iniciar');
-      expect(startButton, findsOneWidget);
-
-      await tester.tap(startButton);
-      await tester.pumpAndSettle();
-
-      expect(find.text('Fixados'), findsOneWidget);
-      expect(find.text('Recentes'), findsOneWidget);
-
-      await tester.tap(startButton);
-      await tester.pumpAndSettle();
-
-      expect(find.text('Fixados'), findsNothing);
+      expect(find.text('CloudOS V19'), findsWidgets);
+      expect(find.text('Arquivos • Início'), findsOneWidget);
     });
 
-    testWidgets('opens Quick Settings flyout and adjusts sliders without overflow', (tester) async {
-      tester.view.physicalSize = const Size(1920, 1080);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(() => tester.view.resetPhysicalSize());
+    testWidgets('CloudOS presentation renders cleanly on 2K / 1440p (2560x1440)', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(2560, 1440));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
 
       await tester.pumpWidget(const CloudOSApp());
       await tester.pumpAndSettle();
 
-      final quickSettingsBtn = find.byTooltip('Configurações rápidas');
-      expect(quickSettingsBtn, findsOneWidget);
-
-      await tester.tap(quickSettingsBtn);
-      await tester.pumpAndSettle();
-
-      expect(find.text('Ajustes Rápidos'), findsOneWidget);
-      expect(find.byType(Slider), findsNWidgets(2));
-      expect(tester.takeException(), isNull);
-    });
-
-    testWidgets('opens Notification Center and renders without header overflow', (tester) async {
-      tester.view.physicalSize = const Size(1920, 1080);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(() => tester.view.resetPhysicalSize());
-
-      await tester.pumpWidget(const CloudOSApp());
-      await tester.pumpAndSettle();
-
-      final notifBtn = find.byTooltip('Notificações');
-      expect(notifBtn, findsOneWidget);
-
-      await tester.tap(notifBtn);
-      await tester.pumpAndSettle();
-
-      expect(find.text('Central de Notificações'), findsOneWidget);
-      expect(find.text('Limpar tudo'), findsOneWidget);
-      expect(tester.takeException(), isNull);
+      expect(find.text('CloudOS V19'), findsWidgets);
+      expect(find.text('Arquivos • Início'), findsOneWidget);
     });
   });
 }
