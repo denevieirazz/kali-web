@@ -10,6 +10,9 @@ class CloudApp {
     required this.platform,
     this.subtitle,
     this.distro,
+    this.category = 'Produtividade',
+    this.isPinned = true,
+    this.isRecent = false,
   });
 
   final String id;
@@ -18,20 +21,53 @@ class CloudApp {
   final CloudAppPlatform platform;
   final String? subtitle;
   final String? distro;
+  final String category;
+  final bool isPinned;
+  final bool isRecent;
+}
+
+enum CloudFileSource { cloudDrive, windows, linux, trash }
+
+class CloudFileItem {
+  const CloudFileItem({
+    required this.name,
+    required this.path,
+    required this.isFolder,
+    required this.sizeFormatted,
+    required this.modifiedFormatted,
+    required this.source,
+    this.icon,
+    this.extension,
+  });
+
+  final String name;
+  final String path;
+  final bool isFolder;
+  final String sizeFormatted;
+  final String modifiedFormatted;
+  final CloudFileSource source;
+  final IconData? icon;
+  final String? extension;
 }
 
 class CloudNotification {
   const CloudNotification({
+    required this.id,
     required this.title,
     required this.message,
     required this.time,
     required this.icon,
+    this.source = 'Sistema',
+    this.category = 'Geral',
   });
 
+  final String id;
   final String title;
   final String message;
   final String time;
   final IconData icon;
+  final String source;
+  final String category;
 }
 
 class CloudSystemSnapshot {
@@ -43,6 +79,7 @@ class CloudSystemSnapshot {
     required this.batteryPercent,
     required this.wslAvailable,
     required this.distros,
+    this.currentWorkspace = 1,
   });
 
   final String deviceName;
@@ -52,4 +89,5 @@ class CloudSystemSnapshot {
   final int batteryPercent;
   final bool wslAvailable;
   final List<String> distros;
+  final int currentWorkspace;
 }

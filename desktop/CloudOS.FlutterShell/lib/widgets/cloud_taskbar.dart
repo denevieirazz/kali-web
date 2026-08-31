@@ -12,6 +12,15 @@ class CloudTaskbar extends StatelessWidget {
     required this.startOpen,
     required this.quickSettingsOpen,
     required this.notificationsOpen,
+    this.onBrowser,
+    this.onTerminal,
+    this.onSettings,
+    this.filesRunning = true,
+    this.browserRunning = false,
+    this.terminalRunning = false,
+    this.currentWorkspace = 1,
+    this.onWorkspaceChanged,
+    this.notificationCount = 3,
     super.key,
   });
 
@@ -19,86 +28,100 @@ class CloudTaskbar extends StatelessWidget {
   final VoidCallback onFiles;
   final VoidCallback onQuickSettings;
   final VoidCallback onNotifications;
+  final VoidCallback? onBrowser;
+  final VoidCallback? onTerminal;
+  final VoidCallback? onSettings;
   final bool startOpen;
   final bool quickSettingsOpen;
   final bool notificationsOpen;
+  final bool filesRunning;
+  final bool browserRunning;
+  final bool terminalRunning;
+  final int currentWorkspace;
+  final ValueChanged<int>? onWorkspaceChanged;
+  final int notificationCount;
 
   @override
   Widget build(BuildContext context) {
     return Align(
       alignment: Alignment.bottomCenter,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 0, 18, 14),
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
         child: GlassSurface(
-          borderRadius: 18,
-          blur: 28,
-          color: const Color(0xE616222D),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          child: Row(
-            children: <Widget>[
-              _TaskButton(
-                tooltip: 'Iniciar',
-                icon: Icons.cloud_rounded,
-                active: startOpen,
-                onPressed: onStart,
-                accent: true,
-              ),
-              const SizedBox(width: 4),
-              _TaskButton(
-                tooltip: 'Pesquisar',
-                icon: Icons.search_rounded,
-                onPressed: onStart,
-              ),
-              const SizedBox(width: 4),
-              _TaskButton(
-                tooltip: 'Arquivos',
-                icon: Icons.folder_rounded,
-                onPressed: onFiles,
-              ),
-              const SizedBox(width: 4),
-              const _TaskButton(
-                tooltip: 'Browser',
-                icon: Icons.public_rounded,
-              ),
-              const SizedBox(width: 4),
-              const _TaskButton(
-                tooltip: 'Terminal',
-                icon: Icons.terminal_rounded,
-              ),
-              const SizedBox(width: 14),
-              Container(width: 1, height: 28, color: CloudOSColors.border),
-              const SizedBox(width: 12),
-              const _WorkspacePill(index: 1, selected: true),
-              const SizedBox(width: 5),
-              const _WorkspacePill(index: 2),
-              const SizedBox(width: 5),
-              const _WorkspacePill(index: 3),
-              const Spacer(),
-              _TrayButton(
-                icon: Icons.expand_less_rounded,
-                tooltip: 'Ícones ocultos',
-                onPressed: onQuickSettings,
-              ),
-              const _TrayStatus(icon: Icons.wifi_rounded),
-              const _TrayStatus(icon: Icons.volume_up_rounded),
-              const _TrayStatus(icon: Icons.battery_5_bar_rounded),
-              const SizedBox(width: 6),
-              _ClockButton(onPressed: onNotifications),
-              const SizedBox(width: 4),
-              _TrayButton(
-                icon: Icons.notifications_none_rounded,
-                tooltip: 'Notificações',
-                active: notificationsOpen,
-                onPressed: onNotifications,
-              ),
-              const SizedBox(width: 4),
-              _TrayButton(
-                icon: Icons.tune_rounded,
-                tooltip: 'Configurações rápidas',
-                active: quickSettingsOpen,
-                onPressed: onQuickSettings,
-              ),
-            ],
+          borderRadius: 14,
+          blur: 24,
+          color: const Color(0xF2131C27),
+          borderColor: CloudOSColors.border,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: SizedBox(
+            height: 44,
+            child: Row(
+              mainAxisSize: MainAxisSize.max,
+              children: <Widget>[
+                _TaskButton(
+                  tooltip: 'Iniciar (Ctrl+Alt+A)',
+                  icon: Icons.cloud_rounded,
+                  active: startOpen,
+                  onPressed: onStart,
+                  accent: true,
+                ),
+                const SizedBox(width: 4),
+                _TaskButton(
+                  tooltip: 'Pesquisa Global (Ctrl+Alt+S)',
+                  icon: Icons.search_rounded,
+                  active: startOpen,
+                  onPressed: onStart,
+                ),
+                const SizedBox(width: 4),
+                _TaskButton(
+                  tooltip: 'Arquivos (Ctrl+Alt+E)',
+                  icon: Icons.folder_rounded,
+                  active: false,
+                  isRunning: filesRunning,
+                  onPressed: onFiles,
+                ),
+                const SizedBox(width: 4),
+                _TaskButton(
+                  tooltip: 'Navegador Web',
+                  icon: Icons.language_rounded,
+                  active: false,
+                  isRunning: browserRunning,
+                  onPressed: onBrowser,
+                ),
+                const SizedBox(width: 4),
+                _TaskButton(
+                  tooltip: 'Terminal ConPTY (Ctrl+Alt+Enter)',
+                  icon: Icons.terminal_rounded,
+                  active: false,
+                  isRunning: terminalRunning,
+                  onPressed: onTerminal,
+                ),
+                const SizedBox(width: 10),
+                Container(width: 1, height: 22, color: CloudOSColors.border),
+                const SizedBox(width: 10),
+                for (int i = 1; i <= 4; i++) ...<Widget>[
+                  _WorkspacePill(
+                    index: i,
+                    selected: currentWorkspace == i,
+                    onTap: () => onWorkspaceChanged?.call(i),
+                  ),
+                  if (i < 4) const SizedBox(width: 4),
+                ],
+                const Spacer(),
+                _TrayQuickGroup(
+                  onPressed: onQuickSettings,
+                  active: quickSettingsOpen,
+                ),
+                const SizedBox(width: 6),
+                _ClockButton(onPressed: onNotifications),
+                const SizedBox(width: 4),
+                _NotificationTrayButton(
+                  active: notificationsOpen,
+                  count: notificationCount,
+                  onPressed: onNotifications,
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -113,6 +136,7 @@ class _TaskButton extends StatelessWidget {
     this.onPressed,
     this.active = false,
     this.accent = false,
+    this.isRunning = false,
   });
 
   final String tooltip;
@@ -120,6 +144,7 @@ class _TaskButton extends StatelessWidget {
   final VoidCallback? onPressed;
   final bool active;
   final bool accent;
+  final bool isRunning;
 
   @override
   Widget build(BuildContext context) {
@@ -128,26 +153,48 @@ class _TaskButton extends StatelessWidget {
         : accent
             ? CloudOSColors.accentSoft
             : Colors.transparent;
+
     return Tooltip(
       message: tooltip,
       child: InkWell(
         onTap: onPressed,
-        borderRadius: BorderRadius.circular(11),
+        borderRadius: BorderRadius.circular(10),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
-          width: 42,
+          width: 40,
           height: 38,
           decoration: BoxDecoration(
             color: background,
-            borderRadius: BorderRadius.circular(11),
+            borderRadius: BorderRadius.circular(10),
             border: Border.all(
               color: active ? CloudOSColors.borderStrong : Colors.transparent,
             ),
           ),
-          child: Icon(
-            icon,
-            size: 21,
-            color: accent ? CloudOSColors.accent : CloudOSColors.text,
+          child: Stack(
+            alignment: Alignment.center,
+            children: <Widget>[
+              Icon(
+                icon,
+                size: 20,
+                color: accent
+                    ? CloudOSColors.accent
+                    : active
+                        ? CloudOSColors.text
+                        : CloudOSColors.secondary,
+              ),
+              if (isRunning && !active)
+                Positioned(
+                  bottom: 3,
+                  child: Container(
+                    width: 14,
+                    height: 2.5,
+                    decoration: BoxDecoration(
+                      color: CloudOSColors.accent,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
       ),
@@ -155,75 +202,143 @@ class _TaskButton extends StatelessWidget {
   }
 }
 
-class _TrayStatus extends StatelessWidget {
-  const _TrayStatus({required this.icon});
+class _TrayQuickGroup extends StatelessWidget {
+  const _TrayQuickGroup({required this.onPressed, required this.active});
 
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Icon(icon, size: 16, color: CloudOSColors.secondary),
-    );
-  }
-}
-
-class _TrayButton extends StatelessWidget {
-  const _TrayButton({
-    required this.icon,
-    required this.tooltip,
-    this.onPressed,
-    this.active = false,
-  });
-
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback? onPressed;
+  final VoidCallback onPressed;
   final bool active;
 
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: tooltip,
-      child: IconButton(
-        onPressed: onPressed,
-        visualDensity: VisualDensity.compact,
-        style: IconButton.styleFrom(
-          backgroundColor: active ? CloudOSColors.accentSoft : Colors.transparent,
+      message: 'Configurações Rápidas (Ctrl+Alt+Q)',
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          decoration: BoxDecoration(
+            color: active ? CloudOSColors.accentSoft : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: active ? CloudOSColors.borderStrong : Colors.transparent,
+            ),
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(Icons.wifi_rounded, size: 15, color: CloudOSColors.secondary),
+              SizedBox(width: 6),
+              Icon(Icons.volume_up_rounded, size: 15, color: CloudOSColors.secondary),
+              SizedBox(width: 6),
+              Icon(Icons.battery_5_bar_rounded, size: 15, color: CloudOSColors.secondary),
+            ],
+          ),
         ),
-        icon: Icon(icon, size: 18),
+      ),
+    );
+  }
+}
+
+class _NotificationTrayButton extends StatelessWidget {
+  const _NotificationTrayButton({
+    required this.active,
+    required this.count,
+    required this.onPressed,
+  });
+
+  final bool active;
+  final int count;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Notificações',
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          decoration: BoxDecoration(
+            color: active ? CloudOSColors.accentSoft : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: active ? CloudOSColors.borderStrong : Colors.transparent,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(
+                count > 0 ? Icons.notifications_rounded : Icons.notifications_none_rounded,
+                size: 16,
+                color: count > 0 ? CloudOSColors.accent : CloudOSColors.secondary,
+              ),
+              if (count > 0) ...<Widget>[
+                const SizedBox(width: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: CloudOSColors.accent,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    '$count',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
 }
 
 class _WorkspacePill extends StatelessWidget {
-  const _WorkspacePill({required this.index, this.selected = false});
+  const _WorkspacePill({
+    required this.index,
+    this.selected = false,
+    this.onTap,
+  });
 
   final int index;
   final bool selected;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      width: selected ? 34 : 26,
-      height: 24,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: selected ? CloudOSColors.accentSoft : Colors.transparent,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: selected ? CloudOSColors.accent : CloudOSColors.border,
-        ),
-      ),
-      child: Text(
-        '$index',
-        style: TextStyle(
-          color: selected ? CloudOSColors.text : CloudOSColors.caption,
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
+    return Tooltip(
+      message: 'Área de Trabalho $index (Ctrl+Alt+$index)',
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          width: selected ? 28 : 22,
+          height: 22,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected ? CloudOSColors.accentSoft : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: selected ? CloudOSColors.accent : CloudOSColors.border,
+            ),
+          ),
+          child: Text(
+            '$index',
+            style: TextStyle(
+              color: selected ? CloudOSColors.text : CloudOSColors.caption,
+              fontSize: 10.5,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
         ),
       ),
     );
@@ -237,18 +352,42 @@ class _ClockButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onPressed,
-      borderRadius: BorderRadius.circular(9),
-      child: const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: <Widget>[
-            Text('16:40', style: TextStyle(fontSize: 11, color: CloudOSColors.text)),
-            Text('31/08/2026', style: TextStyle(fontSize: 10, color: CloudOSColors.caption)),
-          ],
+    final now = DateTime.now();
+    final hour = now.hour.toString().padLeft(2, '0');
+    final minute = now.minute.toString().padLeft(2, '0');
+    final day = now.day.toString().padLeft(2, '0');
+    final month = now.month.toString().padLeft(2, '0');
+    final year = now.year.toString();
+
+    return Tooltip(
+      message: 'Calendário e Notificações',
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              Text(
+                '$hour:$minute',
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: CloudOSColors.text,
+                ),
+              ),
+              Text(
+                '$day/$month/$year',
+                style: const TextStyle(
+                  fontSize: 9.5,
+                  color: CloudOSColors.caption,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
