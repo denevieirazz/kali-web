@@ -33,6 +33,13 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'flutter create falhou.' }
     }
 
+    # flutter create injects the template MyApp widget test into an existing
+    # package. V19 owns its deterministic shell_smoke_test instead.
+    $templateTest = Join-Path $uiRoot 'test\widget_test.dart'
+    if (Test-Path $templateTest) {
+        Remove-Item $templateTest -Force
+    }
+
     Write-Host '[CloudOS Flutter V19] Resolvendo dependencias...' -ForegroundColor Cyan
     & flutter pub get | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'flutter pub get falhou.' }
