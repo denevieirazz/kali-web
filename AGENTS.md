@@ -8,6 +8,7 @@ Este arquivo é a porta de entrada para qualquer agente que vá analisar ou alte
 4. `docs/native/VALIDATION.md` — qual contrato/smoke prova cada camada.
 5. `docs/native/DESKTOP_SYSTEM_ROADMAP.md` — estado dos marcos e próximos gates.
 6. `docs/native/UNIFIED_INTEGRATION_V16.md` — boundary Windows+Linux, downloads, package management e WSLg.
+7. `docs/native/PACKAGE_MAINTENANCE_V17.md` — atualização explícita e segura de apps Windows/Linux.
 
 ## Fonte de verdade atual
 
@@ -24,6 +25,7 @@ Autoridades:
 - Ativação opt-in do shell/rollback exato: `scripts/native/CloudOS.ShellActivation.V14.psm1`.
 - Integração Windows+Linux/WSL: `desktop/CloudOS.NativeShell/src/native_integration_v16.*`.
 - Picker first-party de pastas: `desktop/CloudOS.NativeShell/src/native_folder_picker_v16.*`.
+- Manutenção/upgrade explícito de pacotes: `desktop/CloudOS.NativeShell/src/native_package_maintenance_v17.h`.
 - Build oficial: `scripts/native/build-cloudos-native.cmd`.
 - Suite de contratos: `scripts/native/test-native-contract-suite.ps1`.
 - CI Full-System: `.github/workflows/cloudos-native-full-system.yml`.
@@ -53,6 +55,12 @@ V16 integração
     ├─ Apps -> Windows inventory/WinGet + Linux .desktop/apt/snap/flatpak
     ├─ Desktop -> user/Public Desktop + launchers Linux gerenciados
     └─ Files -> Windows + CloudOS Drive + \\wsl.localhost
+
+V17 manutenção
+    └─ Apps -> seleção explícita -> confirmação -> builder V17
+         ├─ Windows: WinGet upgrade --name ... --exact
+         └─ Linux: apt --only-upgrade / snap refresh / flatpak update
+              └─ Terminal CloudOS visível (UAC/sudo não são ocultados)
 ```
 
 O V14 **não é ativado automaticamente** por instalação/update. Testes hospedados usam apenas subchave HKCU sandbox; logon real exige VM/piloto.
@@ -72,7 +80,10 @@ O V14 **não é ativado automaticamente** por instalação/update. Testes hosped
 - V14 deve preservar exatamente o valor `Shell` anterior, inclusive ausência e tipo, e deve recusar drift externo por padrão.
 - Não escrever HKLM, `Userinit`, `Run`, `RunOnce`, políticas, serviço ou tarefa agendada como atalho para ativação V14.
 - V16 pode **ler** inventário HKLM do Windows, mas não deve usá-lo para escrita de configuração/package state.
-- Não espalhar chamadas ad-hoc de WinGet/`wsl.exe`/parsing de uninstall registry por surfaces; estender `native_integration_v16.*` quando a responsabilidade for integração Windows+Linux.
+- Não espalhar chamadas ad-hoc de WinGet/`wsl.exe`/parsing de uninstall registry por surfaces; estender `native_integration_v16.*` quando a responsabilidade for descoberta/instalação/remoção Windows+Linux.
+- V17 é a boundary de **upgrade selecionado**. Não replique builders de WinGet/apt/Snap/Flatpak em outras surfaces.
+- Não introduzir `winget upgrade --all`, `apt upgrade`, `dist-upgrade`, `full-upgrade` ou auto-update de fundo como atalho de UX.
+- Toda manutenção V17 deve ser iniciada explicitamente pelo usuário, confirmada e executada com Terminal visível.
 - Não sequestrar default apps/file associations. Defaults modernos do Windows devem permanecer escolha explícita do usuário.
 - Não armazenar senha sudo/Linux nem tentar ocultar/contornar UAC.
 - Não remover software apagando pasta arbitrariamente; use mecanismo registrado, package manager ou recuse com segurança.
@@ -94,6 +105,7 @@ O V14 **não é ativado automaticamente** por instalação/update. Testes hosped
 | Files | `native_files_*`, `native_file_*` |
 | Browser/downloads | `native_browser_window.*`, `native_folder_picker_v16.*` |
 | Apps Windows+Linux/install/remove | `native_apps_window.*`, `native_integration_v16.*` |
+| upgrade/manutenção de app selecionado | `native_package_maintenance_v17.h`, `native_apps_window.*` |
 | WSL runtime baixo nível | `desktop/CloudOS.NativeRuntime`, `cloudos_native_wsl.*` |
 | lifecycle/session | `native_lifecycle_v10.h`, `native_session_*` |
 | health/readiness | `native_health_bootstrap_v9.h`, `native_health_v9.h` |
@@ -135,9 +147,9 @@ pwsh -NoProfile -File scripts/native/test-native-contract-suite.ps1
 scripts\native\build-cloudos-native.cmd Release
 ```
 
-Depois rode/observe o Full-System CI. Mudanças em estabilidade, lifecycle, supervisor, performance, deploy ou ativação devem manter os smokes V9–V14 verdes. Integração V16 também deve manter `test-unified-integration-v16-contract.ps1` verde.
+Depois rode/observe o Full-System CI. Mudanças em estabilidade, lifecycle, supervisor, performance, deploy ou ativação devem manter os smokes V9–V14 verdes. Integração V16 deve manter `test-unified-integration-v16-contract.ps1` verde. Package Maintenance V17 deve manter `test-package-maintenance-v17-contract.ps1` e `run-native-package-maintenance-smoke-v17.ps1` verdes.
 
-Não declare teste físico que não ocorreu. Hosted CI não prova suspend físico, transporte RDP, hotplug real, logoff/login real, reboot, boot recovery, instalação real de terceiros ou WSLg real sem uma distro/ambiente apropriado.
+Não declare teste físico que não ocorreu. Hosted CI não prova suspend físico, transporte RDP, hotplug real, logoff/login real, reboot, boot recovery, instalação/upgrade real de terceiros, UAC/sudo aprovado ou WSLg real sem uma distro/ambiente apropriado.
 
 ## Padrão de branch de validação
 
