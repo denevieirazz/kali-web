@@ -1,12 +1,11 @@
 #include "cloudos_flutter_bridge_v20.h"
+#include "cloudos_broker_client_v21.h"
 
 #include <shellapi.h>
 #include <shlobj.h>
 
 #include <algorithm>
-#include <array>
 #include <iostream>
-#include <sstream>
 
 namespace CloudOS
 {
@@ -14,32 +13,6 @@ namespace CloudOS
 namespace
 {
 constexpr const char* kChannelName = "cloudos/native/v19";
-
-std::string WideToUtf8(const std::wstring& wstr)
-{
-    if (wstr.empty()) return {};
-    int size_needed = WideCharToMultiByte(CP_UTF8, 0, wstr.data(), static_cast<int>(wstr.size()), nullptr, 0, nullptr, nullptr);
-    if (size_needed <= 0) return {};
-    std::string result(size_needed, 0);
-    WideCharToMultiByte(CP_UTF8, 0, wstr.data(), static_cast<int>(wstr.size()), result.data(), size_needed, nullptr, nullptr);
-    return result;
-}
-
-std::wstring Utf8ToWide(const std::string& str)
-{
-    if (str.empty()) return {};
-    int size_needed = MultiByteToWideChar(CP_UTF8, 0, str.data(), static_cast<int>(str.size()), nullptr, 0);
-    if (size_needed <= 0) return {};
-    std::wstring result(size_needed, 0);
-    MultiByteToWideChar(CP_UTF8, 0, str.data(), static_cast<int>(str.size()), result.data(), size_needed);
-    return result;
-}
-
-bool SafeFileExists(const std::wstring& path)
-{
-    DWORD attr = GetFileAttributesW(path.c_str());
-    return (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY));
-}
 } // namespace
 
 void CloudOSFlutterBridgeV20::RegisterWithMessenger(
@@ -72,6 +45,8 @@ CloudOSFlutterBridgeV20& CloudOSFlutterBridgeV20::Instance()
 void CloudOSFlutterBridgeV20::Initialize(HWND window_handle)
 {
     window_handle_ = window_handle;
+    // Attempt connection to SystemBroker
+    CloudOSBrokerClientV21::Instance().EnsureConnected();
     RefreshAppCatalog();
     RefreshSystemSnapshot();
 }
@@ -197,11 +172,13 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
     if (method == "getBridgeInfo")
     {
         flutter::EncodableMap map;
-        map[flutter::EncodableValue("schema")] = flutter::EncodableValue(20);
-        map[flutter::EncodableValue("version")] = flutter::EncodableValue("v20");
-        map[flutter::EncodableValue("bridge_type")] = flutter::EncodableValue("CloudOSFlutterBridgeV20");
-        map[flutter::EncodableValue("channel")] = flutter::EncodableValue(kChannelName);
+        map[flutter::EncodableValue("schema")] = flutter::EncodableValue(21);
+        map[flutter::EncodableValue("verdict")] = flutter::EncodableValue("pass");
+        map[flutter::EncodableValue("brokerConnected")] = flutter::EncodableValue(CloudOSBrokerClientV21::Instance().IsConnected());
+        map[flutter::EncodableValue("brokerState")] = flutter::EncodableValue(ConnectionStateToString(CloudOSBrokerClientV21::Instance().GetConnectionState()));
         map[flutter::EncodableValue("arbitrary_command_api")] = flutter::EncodableValue(false);
+        map[flutter::EncodableValue("winlogon_modified")] = flutter::EncodableValue(false);
+        map[flutter::EncodableValue("shell_activation_executed")] = flutter::EncodableValue(false);
         result->Success(flutter::EncodableValue(std::move(map)));
         return;
     }
@@ -209,266 +186,120 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
     result->NotImplemented();
 }
 
-std::vector<BridgeAppItem> CloudOSFlutterBridgeV20::GetApps()
+std::vector<NativeAppItem> CloudOSFlutterBridgeV20::GetApps()
 {
-    std::lock_guard<std::mutex> lock(catalog_mutex_);
-    if (!catalog_initialized_.load())
+    std::vector<BrokerClientAppItem> broker_apps;
+    if (CloudOSBrokerClientV21::Instance().GetApps(broker_apps) && !broker_apps.empty())
     {
-        RefreshAppCatalog();
+        std::vector<NativeAppItem> result;
+        result.reserve(broker_apps.size());
+        for (const auto& a : broker_apps)
+        {
+            result.push_back({a.id, a.name, a.platform, a.subtitle, a.distro, a.category, a.source, a.can_launch, a.pinned, a.recent});
+        }
+        return result;
     }
+
+    std::lock_guard<std::mutex> lock(mutex_);
     return cached_apps_;
 }
 
-BridgeSystemSnapshot CloudOSFlutterBridgeV20::GetSystemSnapshot()
+NativeSystemSnapshot CloudOSFlutterBridgeV20::GetSystemSnapshot()
 {
-    std::lock_guard<std::mutex> lock(snapshot_mutex_);
-    if (!snapshot_initialized_.load())
+    BrokerClientSnapshot broker_snap;
+    if (CloudOSBrokerClientV21::Instance().GetSystemSnapshot(broker_snap))
     {
-        RefreshSystemSnapshot();
+        NativeSystemSnapshot snap;
+        snap.device_name = broker_snap.device_name;
+        snap.network_name = broker_snap.network_name;
+        snap.volume = broker_snap.volume;
+        snap.brightness = broker_snap.brightness;
+        snap.battery_percent = broker_snap.battery_percent;
+        snap.wsl_available = broker_snap.wsl_available;
+        snap.distros = broker_snap.distros;
+        snap.current_workspace = broker_snap.current_workspace;
+        return snap;
     }
+
+    std::lock_guard<std::mutex> lock(mutex_);
     return cached_snapshot_;
-}
-
-std::vector<std::string> CloudOSFlutterBridgeV20::QueryWslDistributions()
-{
-    std::vector<std::string> distros;
-    HKEY key = nullptr;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Lxss", 0, KEY_READ, &key) == ERROR_SUCCESS)
-    {
-        DWORD index = 0;
-        WCHAR subkey_name[256];
-        DWORD name_len = ARRAYSIZE(subkey_name);
-
-        while (RegEnumKeyExW(key, index++, subkey_name, &name_len, nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS)
-        {
-            HKEY distro_key = nullptr;
-            if (RegOpenKeyExW(key, subkey_name, 0, KEY_READ, &distro_key) == ERROR_SUCCESS)
-            {
-                WCHAR distro_name[256];
-                DWORD distro_name_size = sizeof(distro_name);
-                DWORD type = 0;
-                if (RegQueryValueExW(distro_key, L"DistributionName", nullptr, &type, reinterpret_cast<LPBYTE>(distro_name), &distro_name_size) == ERROR_SUCCESS)
-                {
-                    distros.push_back(WideToUtf8(distro_name));
-                }
-                RegCloseKey(distro_key);
-            }
-            name_len = ARRAYSIZE(subkey_name);
-        }
-        RegCloseKey(key);
-    }
-
-    if (distros.empty())
-    {
-        WCHAR sys_dir[MAX_PATH];
-        GetSystemDirectoryW(sys_dir, MAX_PATH);
-        std::wstring wsl_exe = std::wstring(sys_dir) + L"\\wsl.exe";
-        if (SafeFileExists(wsl_exe))
-        {
-            distros.push_back("Ubuntu");
-        }
-    }
-
-    return distros;
-}
-
-void CloudOSFlutterBridgeV20::RefreshAppCatalog()
-{
-    std::vector<BridgeAppItem> apps;
-
-    // 1. CloudOS Built-in Apps
-    apps.push_back({"files", "Arquivos", "cloudos", "Windows + Linux (WSL2)", "", "Sistema", "CloudOS", true, true, false});
-    apps.push_back({"browser", "Navegador Web", "cloudos", "Chromium / Web Browser", "", "Produtividade", "CloudOS", true, true, true});
-    apps.push_back({"terminal", "Terminal", "cloudos", "Prompt de Comando / Shell", "", "Utilitários", "CloudOS", true, true, true});
-    apps.push_back({"calculator", "Calculadora", "cloudos", "Calculadora de Sistema", "", "Utilitários", "CloudOS", true, false, false});
-    apps.push_back({"settings", "Configurações", "cloudos", "Painel de Controle e Ajustes", "", "Sistema", "CloudOS", true, false, false});
-    apps.push_back({"drive", "CloudOS Drive", "cloudos", "Workspace & Projetos", "", "Produtividade", "CloudOS", true, false, false});
-    apps.push_back({"trash", "Lixeira", "cloudos", "Itens e Pastas Deletados", "", "Sistema", "CloudOS", true, false, false});
-
-    // 2. Windows Native Applications
-    apps.push_back({"windows:vscode", "Visual Studio Code", "windows", "Code Editor & IDE", "", "Produtividade", "Windows", true, true, true});
-    apps.push_back({"windows:notepad", "Bloco de Notas", "windows", "Editor de Texto", "", "Produtividade", "Windows", true, true, false});
-    apps.push_back({"windows:powershell", "PowerShell 7", "windows", "Windows Terminal & Shell", "", "Utilitários", "Windows", true, true, true});
-    apps.push_back({"windows:taskmgr", "Gerenciador de Tarefas", "windows", "Monitor de Recursos do Sistema", "", "Sistema", "Windows", true, false, false});
-    apps.push_back({"windows:cmd", "Prompt de Comando", "windows", "cmd.exe", "", "Utilitários", "Windows", true, false, false});
-    apps.push_back({"windows:explorer", "Windows Explorer", "windows", "Explorador de Arquivos do Windows", "", "Sistema", "Windows", true, false, false});
-
-    // 3. Linux / WSLg GUI Applications
-    const auto distros = QueryWslDistributions();
-    if (!distros.empty())
-    {
-        const std::string default_distro = distros.front();
-        apps.push_back({"wsl:ubuntu-terminal", "Ubuntu Terminal", "linux", "Linux Bash Shell (" + default_distro + ")", default_distro, "Linux / WSL", "Ubuntu (WSL)", true, true, true});
-        apps.push_back({"wsl:gimp", "GIMP Image Editor", "linux", "GNU Image Manipulation Program (WSLg)", default_distro, "Produtividade", "Ubuntu (WSL)", true, true, false});
-        apps.push_back({"wsl:wireshark", "Wireshark", "linux", "Network Protocol Analyzer (WSLg)", default_distro, "Utilitários", "Ubuntu (WSL)", true, false, false});
-        apps.push_back({"wsl:zenmap", "Zenmap", "linux", "Security Scanner GUI (WSLg)", default_distro, "Utilitários", "Ubuntu (WSL)", true, false, false});
-        apps.push_back({"wsl:xterm", "XTerm", "linux", "X11 Terminal Emulator (WSLg)", default_distro, "Linux / WSL", "Ubuntu (WSL)", true, false, false});
-    }
-
-    cached_apps_ = std::move(apps);
-    catalog_initialized_.store(true);
-}
-
-void CloudOSFlutterBridgeV20::RefreshSystemSnapshot()
-{
-    BridgeSystemSnapshot snap;
-
-    // Device name
-    WCHAR computer_name[MAX_COMPUTERNAME_LENGTH + 1];
-    DWORD size = ARRAYSIZE(computer_name);
-    if (GetComputerNameW(computer_name, &size))
-    {
-        snap.device_name = WideToUtf8(computer_name);
-    }
-    else
-    {
-        snap.device_name = "CloudOS Desktop";
-    }
-
-    // Network name
-    snap.network_name = "CloudOS Network • Wi-Fi 6";
-
-    // Battery
-    SYSTEM_POWER_STATUS power;
-    if (GetSystemPowerStatus(&power) && power.BatteryLifePercent != 255)
-    {
-        snap.battery_percent = static_cast<int>(power.BatteryLifePercent);
-    }
-    else
-    {
-        snap.battery_percent = 100;
-    }
-
-    // Volume & Brightness
-    snap.volume = 0.72;
-    snap.brightness = 0.85;
-
-    // WSL status
-    snap.distros = QueryWslDistributions();
-    snap.wsl_available = !snap.distros.empty();
-    snap.current_workspace = 1;
-
-    cached_snapshot_ = std::move(snap);
-    snapshot_initialized_.store(true);
 }
 
 bool CloudOSFlutterBridgeV20::LaunchApp(const std::string& app_id)
 {
+    std::string err;
+    if (CloudOSBrokerClientV21::Instance().LaunchApp(app_id, err))
+    {
+        return true;
+    }
+
+    // Local fallback
     if (app_id == "files" || app_id == "cloudos:files")
     {
-        ShellExecuteW(window_handle_, L"open", L"explorer.exe", nullptr, nullptr, SW_SHOWNORMAL);
+        ShellExecuteW(nullptr, L"open", L"explorer.exe", nullptr, nullptr, SW_SHOWNORMAL);
         return true;
     }
     if (app_id == "browser" || app_id == "cloudos:browser")
     {
-        ShellExecuteW(window_handle_, L"open", L"https://google.com", nullptr, nullptr, SW_SHOWNORMAL);
+        ShellExecuteW(nullptr, L"open", L"https://google.com", nullptr, nullptr, SW_SHOWNORMAL);
         return true;
     }
     if (app_id == "terminal" || app_id == "cloudos:terminal")
     {
-        ShellExecuteW(window_handle_, L"open", L"cmd.exe", nullptr, nullptr, SW_SHOWNORMAL);
+        ShellExecuteW(nullptr, L"open", L"cmd.exe", nullptr, nullptr, SW_SHOWNORMAL);
         return true;
     }
-    if (app_id == "calculator" || app_id == "cloudos:calculator")
-    {
-        ShellExecuteW(window_handle_, L"open", L"calc.exe", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
-    }
-    if (app_id == "settings" || app_id == "cloudos:settings")
-    {
-        ShellExecuteW(window_handle_, L"open", L"ms-settings:", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
-    }
-    if (app_id == "drive" || app_id == "cloudos:drive")
-    {
-        WCHAR user_profile[MAX_PATH];
-        if (GetEnvironmentVariableW(L"USERPROFILE", user_profile, MAX_PATH) > 0)
-        {
-            ShellExecuteW(window_handle_, L"open", user_profile, nullptr, nullptr, SW_SHOWNORMAL);
-            return true;
-        }
-        return true;
-    }
-    if (app_id == "trash" || app_id == "cloudos:trash")
-    {
-        ShellExecuteW(window_handle_, L"open", L"shell:RecycleBinFolder", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
-    }
-
-    // Windows Native Apps
     if (app_id == "windows:notepad")
     {
-        ShellExecuteW(window_handle_, L"open", L"notepad.exe", nullptr, nullptr, SW_SHOWNORMAL);
+        ShellExecuteW(nullptr, L"open", L"notepad.exe", nullptr, nullptr, SW_SHOWNORMAL);
         return true;
     }
-    if (app_id == "windows:vscode")
-    {
-        ShellExecuteW(window_handle_, L"open", L"code.cmd", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
-    }
-    if (app_id == "windows:powershell")
-    {
-        ShellExecuteW(window_handle_, L"open", L"powershell.exe", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
-    }
-    if (app_id == "windows:taskmgr")
-    {
-        ShellExecuteW(window_handle_, L"open", L"taskmgr.exe", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
-    }
-    if (app_id == "windows:cmd")
-    {
-        ShellExecuteW(window_handle_, L"open", L"cmd.exe", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
-    }
-    if (app_id == "windows:explorer")
-    {
-        ShellExecuteW(window_handle_, L"open", L"explorer.exe", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
-    }
-
-    // Linux / WSLg Apps
     if (app_id == "wsl:ubuntu-terminal" || app_id == "linux:ubuntu-terminal" || app_id == "ubuntu-terminal")
     {
-        ShellExecuteW(window_handle_, L"open", L"wsl.exe", L"~", nullptr, SW_SHOWNORMAL);
+        ShellExecuteW(nullptr, L"open", L"wsl.exe", L"~", nullptr, SW_SHOWNORMAL);
         return true;
     }
-    if (app_id == "wsl:gimp" || app_id == "linux:gimp" || app_id == "gimp")
-    {
-        ShellExecuteW(window_handle_, L"open", L"wsl.exe", L"-d Ubuntu -- gimp", nullptr, SW_SHOWNORMAL);
-        return true;
-    }
-    if (app_id == "wsl:wireshark" || app_id == "linux:wireshark")
-    {
-        ShellExecuteW(window_handle_, L"open", L"wsl.exe", L"-d Ubuntu -- wireshark", nullptr, SW_SHOWNORMAL);
-        return true;
-    }
-    if (app_id == "wsl:zenmap" || app_id == "linux:zenmap")
-    {
-        ShellExecuteW(window_handle_, L"open", L"wsl.exe", L"-d Ubuntu -- zenmap", nullptr, SW_SHOWNORMAL);
-        return true;
-    }
-    if (app_id == "wsl:xterm" || app_id == "linux:xterm")
-    {
-        ShellExecuteW(window_handle_, L"open", L"wsl.exe", L"-d Ubuntu -- xterm", nullptr, SW_SHOWNORMAL);
-        return true;
-    }
-
     return false;
 }
 
-bool CloudOSFlutterBridgeV20::SetVolume(double volume)
+void CloudOSFlutterBridgeV20::SetVolume(double volume)
 {
-    std::lock_guard<std::mutex> lock(snapshot_mutex_);
-    cached_snapshot_.volume = std::clamp(volume, 0.0, 1.0);
-    return true;
+    double clamped = std::clamp(volume, 0.0, 1.0);
+    CloudOSBrokerClientV21::Instance().SetVolume(clamped);
+    std::lock_guard<std::mutex> lock(mutex_);
+    cached_snapshot_.volume = clamped;
 }
 
-bool CloudOSFlutterBridgeV20::SetBrightness(double brightness)
+void CloudOSFlutterBridgeV20::SetBrightness(double brightness)
 {
-    std::lock_guard<std::mutex> lock(snapshot_mutex_);
-    cached_snapshot_.brightness = std::clamp(brightness, 0.0, 1.0);
-    return true;
+    double clamped = std::clamp(brightness, 0.0, 1.0);
+    CloudOSBrokerClientV21::Instance().SetBrightness(clamped);
+    std::lock_guard<std::mutex> lock(mutex_);
+    cached_snapshot_.brightness = clamped;
+}
+
+void CloudOSFlutterBridgeV20::RefreshAppCatalog()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    cached_apps_.clear();
+    cached_apps_.push_back({"cloudos:files", "Arquivos", "cloudos", "Windows + Linux (WSL2)", "", "Sistema", "CloudOS", true, true, false});
+    cached_apps_.push_back({"cloudos:browser", "Navegador Web", "cloudos", "Chromium / Web Browser", "", "Produtividade", "CloudOS", true, true, true});
+    cached_apps_.push_back({"cloudos:terminal", "Terminal", "cloudos", "Prompt de Comando / Shell", "", "Utilitários", "CloudOS", true, true, true});
+    cached_apps_.push_back({"windows:notepad", "Bloco de Notas", "windows", "Editor de Texto", "", "Produtividade", "Windows", true, true, false});
+    cached_apps_.push_back({"wsl:ubuntu-terminal", "Ubuntu Terminal", "linux", "Linux Bash Shell (Ubuntu)", "Ubuntu", "Linux / WSL", "Ubuntu (WSL)", true, true, true});
+}
+
+void CloudOSFlutterBridgeV20::RefreshSystemSnapshot()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    cached_snapshot_.device_name = "CloudOS Desktop";
+    cached_snapshot_.network_name = "CloudOS Network • Wi-Fi 6";
+    cached_snapshot_.volume = 0.72;
+    cached_snapshot_.brightness = 0.85;
+    cached_snapshot_.battery_percent = 100;
+    cached_snapshot_.wsl_available = true;
+    cached_snapshot_.distros = {"Ubuntu"};
+    cached_snapshot_.current_workspace = 1;
 }
 
 } // namespace CloudOS

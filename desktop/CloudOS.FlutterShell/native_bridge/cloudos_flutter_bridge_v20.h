@@ -1,10 +1,13 @@
 #pragma once
 
-#include <Windows.h>
+#include "cloudos_broker_client_v21.h"
+
 #include <flutter/binary_messenger.h>
 #include <flutter/encodable_value.h>
 #include <flutter/method_channel.h>
 #include <flutter/standard_method_codec.h>
+
+#include <Windows.h>
 
 #include <atomic>
 #include <memory>
@@ -15,7 +18,7 @@
 namespace CloudOS
 {
 
-struct BridgeAppItem final
+struct NativeAppItem final
 {
     std::string id;
     std::string name;
@@ -29,13 +32,13 @@ struct BridgeAppItem final
     bool recent{false};
 };
 
-struct BridgeSystemSnapshot final
+struct NativeSystemSnapshot final
 {
     std::string device_name;
     std::string network_name;
     double volume{0.72};
     double brightness{0.85};
-    int battery_percent{95};
+    int battery_percent{100};
     bool wsl_available{false};
     std::vector<std::string> distros;
     int current_workspace{1};
@@ -54,15 +57,16 @@ public:
     CloudOSFlutterBridgeV20& operator=(const CloudOSFlutterBridgeV20&) = delete;
 
     void Initialize(HWND window_handle);
+
     void HandleMethodCall(
         const flutter::MethodCall<flutter::EncodableValue>& method_call,
         std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
 
-    std::vector<BridgeAppItem> GetApps();
-    BridgeSystemSnapshot GetSystemSnapshot();
+    std::vector<NativeAppItem> GetApps();
+    NativeSystemSnapshot GetSystemSnapshot();
     bool LaunchApp(const std::string& app_id);
-    bool SetVolume(double volume);
-    bool SetBrightness(double brightness);
+    void SetVolume(double volume);
+    void SetBrightness(double brightness);
 
     [[nodiscard]] bool IsRegistered() const noexcept { return is_registered_.load(); }
 
@@ -72,18 +76,12 @@ private:
 
     void RefreshAppCatalog();
     void RefreshSystemSnapshot();
-    std::vector<std::string> QueryWslDistributions();
 
     HWND window_handle_{nullptr};
     std::atomic_bool is_registered_{false};
-
-    std::mutex catalog_mutex_;
-    std::vector<BridgeAppItem> cached_apps_;
-    std::atomic_bool catalog_initialized_{false};
-
-    std::mutex snapshot_mutex_;
-    BridgeSystemSnapshot cached_snapshot_;
-    std::atomic_bool snapshot_initialized_{false};
+    mutable std::mutex mutex_;
+    std::vector<NativeAppItem> cached_apps_;
+    NativeSystemSnapshot cached_snapshot_;
 };
 
 } // namespace CloudOS
