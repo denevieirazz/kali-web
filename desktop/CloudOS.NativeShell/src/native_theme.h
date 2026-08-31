@@ -1,3 +1,4 @@
+#include "native_design_system_v12.h"
 #pragma once
 
 #include <windows.h>
@@ -26,31 +27,31 @@ namespace WebSkin
 // Visual Experience V7 foundation. The shell stays native Win32/DWM, but the
 // material system now carries Fluent-style reveal lighting, stronger depth,
 // ambient color and motion primitives instead of flat dark rectangles.
-constexpr COLORREF BgSolid = RGB(5, 7, 12);
-constexpr COLORREF BgPrimary = RGB(9, 13, 21);
-constexpr COLORREF BgSecondary = RGB(14, 20, 31);
-constexpr COLORREF BgTertiary = RGB(22, 29, 44);
-constexpr COLORREF BgElevated = RGB(30, 39, 57);
-constexpr COLORREF BgHover = RGB(31, 41, 59);
-constexpr COLORREF BgActive = RGB(39, 50, 71);
-constexpr COLORREF Accent = RGB(124, 92, 255);
-constexpr COLORREF AccentHover = RGB(154, 126, 255);
-constexpr COLORREF AccentActive = RGB(96, 68, 225);
-constexpr COLORREF AccentSubtle = RGB(35, 31, 78);
-constexpr COLORREF AccentCyan = RGB(77, 208, 225);
-constexpr COLORREF TextPrimary = RGB(245, 247, 252);
-constexpr COLORREF TextSecondary = RGB(167, 177, 199);
-constexpr COLORREF TextTertiary = RGB(111, 123, 148);
-constexpr COLORREF TextDisabled = RGB(69, 79, 100);
-constexpr COLORREF BorderDefault = RGB(43, 53, 72);
-constexpr COLORREF BorderSubtle = RGB(27, 35, 50);
-constexpr COLORREF BorderStrong = RGB(59, 70, 94);
-constexpr COLORREF Danger = RGB(235, 92, 108);
-constexpr int RadiusSmall = 6;
-constexpr int RadiusMedium = 10;
-constexpr int RadiusLarge = 14;
-constexpr int RadiusXL = 20;
-constexpr UINT MotionFrameMilliseconds = 8; // target cadence; compositor decides final refresh cadence.
+constexpr COLORREF BgSolid = DesignV12::Canvas;
+constexpr COLORREF BgPrimary = DesignV12::Background;
+constexpr COLORREF BgSecondary = DesignV12::Surface;
+constexpr COLORREF BgTertiary = DesignV12::Raised;
+constexpr COLORREF BgElevated = DesignV12::Raised;
+constexpr COLORREF BgHover = DesignV12::Hover;
+constexpr COLORREF BgActive = DesignV12::Active;
+inline COLORREF Accent = DesignV12::Accent;
+inline COLORREF AccentHover = DesignV12::AccentHover;
+inline COLORREF AccentActive = DesignV12::AccentPressed;
+inline COLORREF AccentSubtle = DesignV12::AccentSubtle;
+inline COLORREF AccentCyan = DesignV12::Accent;
+constexpr COLORREF TextPrimary = DesignV12::Text;
+constexpr COLORREF TextSecondary = DesignV12::Secondary;
+constexpr COLORREF TextTertiary = DesignV12::Caption;
+constexpr COLORREF TextDisabled = DesignV12::Disabled;
+constexpr COLORREF BorderDefault = DesignV12::Border;
+constexpr COLORREF BorderSubtle = DesignV12::Border;
+constexpr COLORREF BorderStrong = DesignV12::BorderStrong;
+constexpr COLORREF Danger = DesignV12::Danger;
+constexpr int RadiusSmall = DesignV12::RadiusSmall;
+constexpr int RadiusMedium = DesignV12::RadiusMedium;
+constexpr int RadiusLarge = DesignV12::RadiusLarge;
+constexpr int RadiusXL = DesignV12::RadiusLarge;
+constexpr UINT MotionFrameMilliseconds = 16; // target cadence; compositor decides final refresh cadence.
 constexpr UINT_PTR WindowSubclassId = 0xC10D5A11;
 
 enum class ButtonTone { Neutral, Accent, Danger };
@@ -117,33 +118,8 @@ inline void DrawRevealHighlight(
     float radius,
     Gdiplus::Color center_color)
 {
-    if (clip_rect.Width <= 0.0f || clip_rect.Height <= 0.0f || radius <= 1.0f) return;
-
-    const float reach = radius * 0.55f;
-    if (cursor.X < clip_rect.X - reach || cursor.X > clip_rect.GetRight() + reach ||
-        cursor.Y < clip_rect.Y - reach || cursor.Y > clip_rect.GetBottom() + reach)
-    {
-        return;
-    }
-
-    const Gdiplus::GraphicsState state = graphics.Save();
-    graphics.SetClip(clip_rect);
-
-    Gdiplus::GraphicsPath halo_path;
-    const Gdiplus::RectF halo(
-        cursor.X - radius,
-        cursor.Y - radius,
-        radius * 2.0f,
-        radius * 2.0f);
-    halo_path.AddEllipse(halo);
-    Gdiplus::PathGradientBrush halo_brush(&halo_path);
-    halo_brush.SetCenterPoint(cursor);
-    halo_brush.SetCenterColor(center_color);
-    Gdiplus::Color edge_color(0, center_color.GetR(), center_color.GetG(), center_color.GetB());
-    INT surround_count = 1;
-    halo_brush.SetSurroundColors(&edge_color, &surround_count);
-    graphics.FillEllipse(&halo_brush, halo);
-    graphics.Restore(state);
+    // V12 deliberately has no reveal animation or glow.
+    (void)graphics; (void)clip_rect; (void)cursor; (void)radius; (void)center_color;
 }
 
 inline bool CursorInControl(HWND control, Gdiplus::PointF* point) noexcept
@@ -168,76 +144,14 @@ inline void DrawElevatedPanel(
     Gdiplus::Color border,
     bool accent_glow = false)
 {
-    if (rect.Width <= 0.0f || rect.Height <= 0.0f) return;
-    Gdiplus::RectF shadow = rect;
-    shadow.Y += 4.0f;
-    DrawRoundedPanel(
-        graphics,
-        shadow,
-        radius,
-        Gdiplus::Color(86, 0, 0, 0),
-        Gdiplus::Color(0, 0, 0, 0),
-        0.0f);
-    if (accent_glow)
-    {
-        Gdiplus::RectF glow = rect;
-        glow.X -= 2.0f;
-        glow.Y -= 2.0f;
-        glow.Width += 4.0f;
-        glow.Height += 4.0f;
-        DrawRoundedPanel(
-            graphics,
-            glow,
-            radius + 2.0f,
-            Gdiplus::Color(18, 124, 92, 255),
-            Gdiplus::Color(46, 154, 126, 255),
-            1.0f);
-    }
+    (void)accent_glow;
     DrawRoundedPanel(graphics, rect, radius, fill, border, 1.0f);
-
-    // Specular light edge: a small bright edge at the top makes elevation read
-    // even on near-black monitors without turning every border neon.
-    Gdiplus::Pen highlight(Gdiplus::Color(42, 255, 255, 255), 1.0f);
-    const float inset = std::max(8.0f, radius * 0.65f);
-    graphics.DrawLine(
-        &highlight,
-        rect.X + inset,
-        rect.Y + 1.0f,
-        rect.GetRight() - inset,
-        rect.Y + 1.0f);
 }
 
 inline void PaintWindowBackground(HDC dc, const RECT& bounds)
 {
-    if (dc == nullptr || bounds.right <= bounds.left || bounds.bottom <= bounds.top) return;
-    Gdiplus::Graphics graphics(dc);
-    graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
-    const Gdiplus::REAL left = static_cast<Gdiplus::REAL>(bounds.left);
-    const Gdiplus::REAL top = static_cast<Gdiplus::REAL>(bounds.top);
-    const Gdiplus::REAL width = static_cast<Gdiplus::REAL>(bounds.right - bounds.left);
-    const Gdiplus::REAL height = static_cast<Gdiplus::REAL>(bounds.bottom - bounds.top);
-    Gdiplus::LinearGradientBrush gradient(
-        Gdiplus::PointF(left, top),
-        Gdiplus::PointF(left + width, top + height),
-        GdiColor(BgPrimary), GdiColor(BgSolid));
-    graphics.FillRectangle(&gradient, Gdiplus::RectF(left, top, width, height));
-
-    // Ambient light gives native flyouts/windows depth without depending on a
-    // web compositor. Alpha remains deliberately subtle so text contrast wins.
-    Gdiplus::SolidBrush indigo_glow(Gdiplus::Color(24, 124, 92, 255));
-    graphics.FillEllipse(
-        &indigo_glow,
-        left + width * 0.60f,
-        top - height * 0.24f,
-        width * 0.62f,
-        height * 0.58f);
-    Gdiplus::SolidBrush cyan_glow(Gdiplus::Color(12, 77, 208, 225));
-    graphics.FillEllipse(
-        &cyan_glow,
-        left - width * 0.22f,
-        top + height * 0.58f,
-        width * 0.52f,
-        height * 0.48f);
+    if (!dc) return;
+    HBRUSH brush = CreateSolidBrush(BgPrimary); FillRect(dc, &bounds, brush); DeleteObject(brush);
 }
 
 inline HBRUSH SharedBackgroundBrush() { static HBRUSH brush = CreateSolidBrush(BgPrimary); return brush; }
@@ -473,8 +387,8 @@ constexpr COLORREF kBgBottom = WebSkin::BgSolid;
 constexpr COLORREF kGlassBg = WebSkin::BgSecondary;
 constexpr COLORREF kGlassCard = WebSkin::BgTertiary;
 constexpr COLORREF kGlassBorder = WebSkin::BorderStrong;
-constexpr COLORREF kNeonCyan = WebSkin::AccentCyan;
-constexpr COLORREF kNeonPurple = WebSkin::AccentHover;
+inline COLORREF& kNeonCyan = WebSkin::AccentCyan;
+inline COLORREF& kNeonPurple = WebSkin::AccentHover;
 constexpr COLORREF kNeonPink = RGB(231, 132, 183);
 constexpr COLORREF kTextWhite = WebSkin::TextPrimary;
 constexpr COLORREF kTextSec = WebSkin::TextSecondary;

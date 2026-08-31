@@ -18,6 +18,7 @@ class NativeWorkspaceStudioService final
 {
 public:
     static NativeWorkspaceStudioService& Instance();
+    void NotifyModelChangedV12() { if(engine_window_) PostMessageW(engine_window_,WM_APP+0x61C,0,0); }
     static void RegisterManager(CloudOSNativeWindowManager* manager);
     static void Open(HINSTANCE instance, HWND owner = nullptr);
 
@@ -48,6 +49,8 @@ private:
     LRESULT HandleMessage(HWND window, UINT message, WPARAM w_param, LPARAM l_param);
     static LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM w_param, LPARAM l_param);
 
+    std::uint64_t observed_revision_v12_{~0ull};
+    bool checkpoint_dirty_v12_{true};
     CloudOSNativeWindowManager* manager_{};
     NativeWorkspaceStudioStore store_;
     NativeWorkspaceAutomationEngine automation_;

@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -27,6 +28,7 @@ class ShellPinStore final
 {
 public:
     static ShellPinStore& Instance();
+    std::uint64_t Revision() const noexcept { return revision_v12_.load(); }
 
     ShellPinStore(const ShellPinStore&) = delete;
     ShellPinStore& operator=(const ShellPinStore&) = delete;
@@ -60,6 +62,7 @@ private:
     static bool IsUsable(const ShellPinItem& item) noexcept;
     static std::wstring StoragePath();
 
+    mutable std::atomic<std::uint64_t> revision_v12_{1};
     mutable std::mutex mutex_;
     std::vector<ShellPinItem> start_pins_;
     std::vector<ShellPinItem> taskbar_pins_;

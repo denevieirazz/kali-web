@@ -1,3 +1,5 @@
+#include "native_render_cache_v12.h"
+#include "native_icon_cache_v12.h"
 #include "native_desktop_window.h"
 
 #include "native_app_launcher.h"
@@ -29,6 +31,7 @@ namespace
 constexpr wchar_t kDesktopClass[] = L"CloudOS.NativeShell.Desktop.v2";
 std::vector<RECT> g_file_rects;
 std::vector<std::wstring> g_file_paths;
+std::vector<std::wstring> g_file_names;
 std::vector<std::size_t> g_selected_files;
 bool g_is_box_selecting = false;
 POINT g_box_start{};
@@ -55,36 +58,6 @@ std::vector<int> DesktopApps()
     return result;
 }
 
-std::wstring DesktopPath()
-{
-    PWSTR path = nullptr;
-    if (FAILED(SHGetKnownFolderPath(FOLDERID_Desktop, KF_FLAG_DEFAULT, nullptr, &path)) || path == nullptr) return {};
-    std::wstring result(path); CoTaskMemFree(path); return result;
-}
-
-std::vector<std::wstring> DesktopFiles()
-{
-    std::vector<std::wstring> result;
-    const std::wstring desktop = DesktopPath();
-    if (desktop.empty()) return result;
-    std::error_code error;
-    for (std::filesystem::directory_iterator iterator(desktop, error), end;
-         !error && iterator != end && result.size() < 24; iterator.increment(error))
-    {
-        const std::wstring name = iterator->path().filename().wstring();
-        if (!name.empty() && name[0] != L'.') result.push_back(iterator->path().wstring());
-    }
-    std::sort(result.begin(), result.end());
-    return result;
-}
-
-std::wstring FileName(const std::wstring& path)
-{
-    const std::filesystem::path value(path);
-    const std::wstring name = value.filename().wstring();
-    return name.empty() ? path : name;
-}
-
 void DrawCenteredText(Graphics& graphics, const std::wstring& text, const Font& font, const RectF& rectangle, const Brush& brush)
 {
     StringFormat format;
@@ -95,7 +68,19 @@ void DrawCenteredText(Graphics& graphics, const std::wstring& text, const Font& 
     graphics.DrawString(text.c_str(), -1, &font, rectangle, &format, &brush);
 }
 
-RECT PrimaryBoundsInClient(HWND window)
+RECT SelectionDirtyV12()
+{
+    RECT dirty{std::min(g_box_start.x,g_box_current.x),std::min(g_box_start.y,g_box_current.y),std::max(g_box_start.x,g_box_current.x)+1,std::max(g_box_start.y,g_box_current.y)+1};
+    for(auto index:g_selected_files) if(index<g_file_rects.size()) UnionRect(&dirty,&dirty,&g_file_rects[index]);
+    InflateRect(&dirty,3,3);return dirty;
+}
+void InvalidateSelectionV12(HWND window,const RECT& previous)
+{
+    auto next=SelectionDirtyV12();UnionRect(&next,&next,&previous);InvalidateRect(window,&next,FALSE);
+}
+
+RECT g_primary_bounds_v12{};
+RECT QueryPrimaryBoundsInClient(HWND window)
 {
     RECT bounds{};
     RECT window_bounds{};
@@ -112,12 +97,6 @@ RECT PrimaryBoundsInClient(HWND window)
     }
     GetClientRect(window, &bounds);
     return bounds;
-}
-
-POINT PrimaryOriginInClient(HWND window)
-{
-    const RECT bounds = PrimaryBoundsInClient(window);
-    return POINT{bounds.left, bounds.top};
 }
 
 std::wstring LocalTimeText()
@@ -334,8 +313,7 @@ bool CloudOSNativeDesktopWindow::Create(HINSTANCE instance, CloudOSNativeWindowM
     instance_ = instance;
     window_manager_ = window_manager;
     quick_launch_app_indices_ = DesktopApps();
-    current_stats_ = NativeSystemStats::Query();
-    NativeMediaControlV7::RefreshAsync();
+
 
     WNDCLASSEXW window_class{};
     window_class.cbSize = sizeof(window_class);
@@ -351,6 +329,8 @@ bool CloudOSNativeDesktopWindow::Create(HINSTANCE instance, CloudOSNativeWindowM
         nullptr, nullptr, instance_, this);
     if (hwnd_ == nullptr) return false;
 
+    desktop_model_.Start(hwnd_);
+    NativeWallpaperManager::Prepare();
     DarkWindow(hwnd_, false);
     (void)NativeDesktopDropTarget::Register(hwnd_);
     return true;
@@ -358,6 +338,8 @@ bool CloudOSNativeDesktopWindow::Create(HINSTANCE instance, CloudOSNativeWindowM
 
 void CloudOSNativeDesktopWindow::Destroy()
 {
+    desktop_model_.Stop();
+    if(hwnd_) NativeWallpaperManager::Stop();
     if (hwnd_ != nullptr)
     {
         NativeDesktopDropTarget::Unregister(hwnd_);
@@ -380,7 +362,7 @@ void CloudOSNativeDesktopWindow::UpdateLayout(const RECT& work_area)
 
 void CloudOSNativeDesktopWindow::Redraw() { if (hwnd_ != nullptr) InvalidateRect(hwnd_, nullptr, FALSE); }
 void CloudOSNativeDesktopWindow::FocusSearch() { if (on_hotkey_) on_hotkey_(HotSearch); }
-void CloudOSNativeDesktopWindow::RefreshWorkArea() { Redraw(); }
+void CloudOSNativeDesktopWindow::RefreshWorkArea() { g_primary_bounds_v12 = QueryPrimaryBoundsInClient(hwnd_); NativeWallpaperManager::Prepare(); Redraw(); }
 
 void CloudOSNativeDesktopWindow::ActivateAppIndex(int app_index)
 {
@@ -391,15 +373,18 @@ void CloudOSNativeDesktopWindow::ActivateAppIndex(int app_index)
 
 void CloudOSNativeDesktopWindow::Paint()
 {
+    PerformanceV12::PaintScope perf(PerformanceV12::DesktopPaint);
     PAINTSTRUCT paint{};
     HDC screen_dc = BeginPaint(hwnd_, &paint);
     RECT client{}; GetClientRect(hwnd_, &client);
     const int width = Width(client); const int height = Height(client);
     if (width <= 0 || height <= 0) { EndPaint(hwnd_, &paint); return; }
 
-    HDC memory_dc = CreateCompatibleDC(screen_dc);
-    HBITMAP bitmap = CreateCompatibleBitmap(screen_dc, width, height);
-    HGDIOBJ old_bitmap = SelectObject(memory_dc, bitmap);
+    HDC memory_dc = NativeBackbufferV12::Acquire(hwnd_, screen_dc, width, height);
+    if (!memory_dc) { EndPaint(hwnd_, &paint); return; }
+    const int saved_dc = SaveDC(memory_dc);
+    IntersectClipRect(memory_dc, paint.rcPaint.left, paint.rcPaint.top, paint.rcPaint.right, paint.rcPaint.bottom);
+    if (EqualRect(&client, &paint.rcPaint)) PerformanceV12::Add(PerformanceV12::DesktopFullPaint);
     Graphics graphics(memory_dc);
     graphics.SetSmoothingMode(SmoothingModeAntiAlias);
     graphics.SetTextRenderingHint(TextRenderingHintClearTypeGridFit);
@@ -409,44 +394,26 @@ void CloudOSNativeDesktopWindow::Paint()
     {
         LinearGradientBrush background(
             PointF(0.0f, 0.0f), PointF(static_cast<REAL>(width), static_cast<REAL>(height)),
-            WebSkin::GdiColor(WebSkin::BgPrimary), WebSkin::GdiColor(WebSkin::BgSolid));
+            WebSkin::GdiColor(WebSkin::BgPrimary), WebSkin::GdiColor(WebSkin::BgPrimary));
         graphics.FillRectangle(&background, RectF(0.0f, 0.0f, static_cast<REAL>(width), static_cast<REAL>(height)));
 
-        SolidBrush glow_top(Color(24, 99, 102, 241));
-        graphics.FillEllipse(&glow_top,
-            static_cast<REAL>(width - Scale(440, dpi)), static_cast<REAL>(-Scale(180, dpi)),
-            static_cast<REAL>(Scale(520, dpi)), static_cast<REAL>(Scale(360, dpi)));
-        SolidBrush glow_bottom(Color(14, 129, 140, 248));
-        graphics.FillEllipse(&glow_bottom,
-            static_cast<REAL>(-Scale(220, dpi)), static_cast<REAL>(height - Scale(160, dpi)),
-            static_cast<REAL>(Scale(480, dpi)), static_cast<REAL>(Scale(300, dpi)));
+
     }
 
     SolidBrush overlay(Color(18, 0, 0, 0));
     graphics.FillRectangle(&overlay, RectF(0.0f, 0.0f, static_cast<REAL>(width), static_cast<REAL>(height)));
 
-    Font brand_font(L"Segoe UI Variable Display", static_cast<REAL>(Scale(22, dpi)), FontStyleBold, UnitPixel);
-    Font small_font(L"Segoe UI Variable Text", static_cast<REAL>(Scale(10, dpi)), FontStyleRegular, UnitPixel);
-    Font small_bold(L"Segoe UI Variable Text", static_cast<REAL>(Scale(10, dpi)), FontStyleBold, UnitPixel);
+    Font small_font(L"Segoe UI Variable Text", static_cast<REAL>(Scale(12, dpi)), FontStyleRegular, UnitPixel);
     SolidBrush white(WebSkin::GdiColor(WebSkin::TextPrimary));
-    SolidBrush secondary(WebSkin::GdiColor(WebSkin::TextSecondary));
-
-    const RECT primary_bounds = PrimaryBoundsInClient(hwnd_);
+    const RECT primary_bounds = g_primary_bounds_v12;
     const POINT primary{primary_bounds.left, primary_bounds.top};
-    graphics.DrawString(L"CloudOS", -1, &brand_font,
-        PointF(static_cast<REAL>(primary.x + Scale(24, dpi)), static_cast<REAL>(primary.y + Scale(20, dpi))), &white);
-
-    std::wstring workspace_text = L"Desktop  ·  Workspace ";
-    workspace_text += std::to_wstring(window_manager_ != nullptr ? window_manager_->CurrentWorkspace() + 1 : 1);
-    graphics.DrawString(workspace_text.c_str(), -1, &small_font,
-        PointF(static_cast<REAL>(primary.x + Scale(26, dpi)), static_cast<REAL>(primary.y + Scale(54, dpi))), &secondary);
 
     quick_launch_rects_.clear();
     const int shortcut_width = Scale(96, dpi);
     const int shortcut_height = Scale(92, dpi);
     const int icon_size = Scale(46, dpi);
     const int left = primary.x + Scale(20, dpi);
-    int y = primary.y + Scale(94, dpi);
+    int y = primary.y + Scale(24, dpi);
 
     for (std::size_t index = 0; index < quick_launch_app_indices_.size(); ++index)
     {
@@ -461,10 +428,9 @@ void CloudOSNativeDesktopWindow::Paint()
         y += shortcut_height + Scale(6, dpi);
     }
 
-    g_file_paths = DesktopFiles();
     g_file_rects.clear();
     const int file_start_x = left + shortcut_width + Scale(26, dpi);
-    const int file_start_y = primary.y + Scale(94, dpi);
+    const int file_start_y = primary.y + Scale(24, dpi);
     const int file_columns = 5;
     const int file_cell_width = Scale(116, dpi);
     const int file_cell_height = Scale(100, dpi);
@@ -489,15 +455,10 @@ void CloudOSNativeDesktopWindow::Paint()
                 static_cast<REAL>(file_cell_width), static_cast<REAL>(file_cell_height)));
         }
 
-        SHFILEINFOW file_info{};
-        if (SHGetFileInfoW(g_file_paths[index].c_str(), 0, &file_info, sizeof(file_info), SHGFI_ICON | SHGFI_LARGEICON) != 0 &&
-            file_info.hIcon != nullptr)
-        {
-            DrawIconEx(memory_dc, x + (file_cell_width - Scale(42, dpi)) / 2, file_y + Scale(4, dpi),
-                file_info.hIcon, Scale(42, dpi), Scale(42, dpi), 0, nullptr, DI_NORMAL);
-            DestroyIcon(file_info.hIcon);
-        }
-        DrawCenteredText(graphics, FileName(g_file_paths[index]), small_font,
+        const auto icon = NativeIconCacheV12::Instance().Get(g_file_paths[index]);
+        if (icon && icon->handle)
+            DrawIconEx(memory_dc, x + (file_cell_width - Scale(42, dpi)) / 2, file_y + Scale(4, dpi), icon->handle, Scale(42, dpi), Scale(42, dpi), 0, nullptr, DI_NORMAL);
+        DrawCenteredText(graphics, g_file_names[index], small_font,
             RectF(static_cast<REAL>(x + Scale(3, dpi)), static_cast<REAL>(file_y + Scale(54, dpi)),
                 static_cast<REAL>(file_cell_width - Scale(6, dpi)), static_cast<REAL>(Scale(40, dpi))), white);
     }
@@ -521,38 +482,51 @@ void CloudOSNativeDesktopWindow::Paint()
         }
     }
 
-    current_stats_ = NativeSystemStats::Query();
-    std::wstring status = L"CPU ";
-    status += current_stats_.cpu_available ? std::to_wstring(current_stats_.cpu_percent) + L"%" : L"--";
-    status += L"   RAM ";
-    status += current_stats_.ram_available ? std::to_wstring(current_stats_.ram_percent) + L"%" : L"--";
-    graphics.DrawString(status.c_str(), -1, &small_bold,
-        PointF(static_cast<REAL>(primary.x + Scale(24, dpi)), static_cast<REAL>(primary.y + Scale(74, dpi))), &secondary);
+    if (widgets_enabled_)
+        DrawDesktopWidgets(graphics, dpi, primary_bounds, current_stats_, NativeMediaControlV7::Snapshot());
 
-    NativeMediaControlV7::RefreshAsync();
-    const NativeMediaSnapshot media = NativeMediaControlV7::Snapshot();
-    DrawDesktopWidgets(graphics, dpi, primary_bounds, current_stats_, media);
-
-    BitBlt(screen_dc, 0, 0, width, height, memory_dc, 0, 0, SRCCOPY);
-    SelectObject(memory_dc, old_bitmap); DeleteObject(bitmap); DeleteDC(memory_dc); EndPaint(hwnd_, &paint);
+    graphics.Flush();
+    BitBlt(screen_dc, paint.rcPaint.left, paint.rcPaint.top, paint.rcPaint.right-paint.rcPaint.left, paint.rcPaint.bottom-paint.rcPaint.top, memory_dc, paint.rcPaint.left, paint.rcPaint.top, SRCCOPY);
+    RestoreDC(memory_dc, saved_dc); EndPaint(hwnd_, &paint);
 }
 
 LRESULT CloudOSNativeDesktopWindow::HandleMessage(HWND window, UINT message, WPARAM w_param, LPARAM l_param)
 {
     switch (message)
     {
+    case WM_CLOUDOS_DESKTOP_MODEL_V12:
+    {
+        std::vector<std::wstring> selected;
+        for (auto index : g_selected_files) if (index < g_file_paths.size()) selected.push_back(g_file_paths[index]);
+        g_file_paths.clear(); g_file_names.clear(); g_selected_files.clear();
+        for (const auto& item : desktop_model_.Snapshot())
+        {
+            if (std::find(selected.begin(), selected.end(), item.path) != selected.end()) g_selected_files.push_back(g_file_paths.size());
+            g_file_paths.push_back(item.path); g_file_names.push_back(item.name);
+        }
+        Redraw(); return 0;
+    }
+    case WM_CLOUDOS_ICON_READY_V12: for(const auto& rect:g_file_rects) InvalidateRect(hwnd_,&rect,FALSE); return 0;
+    case WM_CLOUDOS_WIDGETS_V12:
+        widgets_enabled_ = !widgets_enabled_;
+        SetPropW(window, L"CloudOS.Widgets.V12", reinterpret_cast<HANDLE>(static_cast<INT_PTR>(widgets_enabled_)));
+        if (widgets_enabled_) SetTimer(window, kMetricsTimer, 2000, nullptr); else KillTimer(window, kMetricsTimer);
+        g_media_previous_rect = {}; g_media_toggle_rect = {}; g_media_next_rect = {};
+        Redraw(); return 0;
     case WM_PAINT: Paint(); return 0;
     case WM_ERASEBKGND: return 1;
     case WM_TIMER:
         if (w_param == kMetricsTimer)
         {
-            const auto next_stats = NativeSystemStats::Query();
-            if (next_stats.cpu_percent != current_stats_.cpu_percent ||
-                next_stats.ram_percent != current_stats_.ram_percent)
+            if (!widgets_enabled_ || !IsWindowVisible(window)) return 0;
+            if (metrics_future_.valid() && metrics_future_.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
             {
-                current_stats_ = next_stats;
-                Redraw();
+                current_stats_ = metrics_future_.get();
+                RECT widget = g_primary_bounds_v12; widget.left = std::max(widget.left, widget.right - Scale(370, GetDpiForWindow(hwnd_)));
+                InvalidateRect(hwnd_, &widget, FALSE);
             }
+            if (!metrics_future_.valid()) metrics_future_ = std::async(std::launch::async, []{ return NativeSystemStats::Query(); });
+            NativeMediaControlV7::RefreshAsync();
             return 0;
         }
         if (w_param == kReconcileTimer)
@@ -568,6 +542,8 @@ LRESULT CloudOSNativeDesktopWindow::HandleMessage(HWND window, UINT message, WPA
     case WM_HOTKEY:
         if (on_hotkey_) on_hotkey_(static_cast<int>(w_param));
         return 0;
+    case WM_SIZE: g_primary_bounds_v12 = QueryPrimaryBoundsInClient(hwnd_); NativeWallpaperManager::Prepare(hwnd_,LOWORD(l_param),HIWORD(l_param)); return 0;
+    case WM_APP+0x61D: Redraw(); return 0;
     case WM_DISPLAYCHANGE:
     case WM_DPICHANGED:
     case WM_SETTINGCHANGE:
@@ -586,6 +562,7 @@ LRESULT CloudOSNativeDesktopWindow::HandleMessage(HWND window, UINT message, WPA
         {
             if (Contains(r, point)) return 0;
         }
+        const auto previous=SelectionDirtyV12();
         g_is_box_selecting = true;
         g_box_start = point;
         g_box_current = point;
@@ -599,13 +576,14 @@ LRESULT CloudOSNativeDesktopWindow::HandleMessage(HWND window, UINT message, WPA
             }
         }
         SetCapture(hwnd_);
-        Redraw();
+        InvalidateSelectionV12(hwnd_,previous);
         return 0;
     }
     case WM_MOUSEMOVE:
     {
         if (g_is_box_selecting)
         {
+            const auto previous=SelectionDirtyV12();
             g_box_current = POINT{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
             const int bl = std::min(g_box_start.x, g_box_current.x);
             const int bt = std::min(g_box_start.y, g_box_current.y);
@@ -622,7 +600,7 @@ LRESULT CloudOSNativeDesktopWindow::HandleMessage(HWND window, UINT message, WPA
                     g_selected_files.push_back(i);
                 }
             }
-            Redraw();
+            InvalidateSelectionV12(hwnd_,previous);
             return 0;
         }
         break;
@@ -631,9 +609,10 @@ LRESULT CloudOSNativeDesktopWindow::HandleMessage(HWND window, UINT message, WPA
     {
         if (g_is_box_selecting)
         {
+            const auto previous=SelectionDirtyV12();
             g_is_box_selecting = false;
             if (GetCapture() == hwnd_) ReleaseCapture();
-            Redraw();
+            InvalidateSelectionV12(hwnd_,previous);
             return 0;
         }
         const POINT point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
@@ -673,7 +652,7 @@ LRESULT CloudOSNativeDesktopWindow::HandleMessage(HWND window, UINT message, WPA
         return 0;
     }
     case WM_KEYDOWN:
-        if (w_param == VK_F5) { Redraw(); return 0; }
+        if (w_param == VK_F5) { desktop_model_.Refresh(); NativeWallpaperManager::Prepare(); Redraw(); return 0; }
         break;
     case SupervisorProtocolV11::RequestGracefulExitMessage:
         PostQuitMessage(0);

@@ -18,7 +18,7 @@ namespace
 {
 constexpr wchar_t kEngineClass[] = L"CloudOS.NativeShell.SessionContinuity.Engine.v3";
 constexpr UINT_PTR kEngineTimer = 0xC610;
-constexpr UINT kEngineIntervalMs = 2000u;
+constexpr UINT kEngineIntervalMs = 5000u;
 constexpr int kHotOpenCenter = 0xC611;
 constexpr int kHotCheckpoint = 0xC612;
 constexpr int kHotRestoreLatest = 0xC613;
@@ -302,6 +302,7 @@ bool NativeSessionContinuityService::EnsureEngineWindow(HINSTANCE instance)
 
     RegisterHotKeys();
     (void)SetTimer(engine_window_, kEngineTimer, kEngineIntervalMs, nullptr);
+    NotifyModelChangedV12();
     return true;
 }
 
@@ -383,7 +384,6 @@ std::uint32_t NativeSessionContinuityService::CaptureCheckpoint(
     }
 
     workspace = std::clamp(workspace, 0, 3);
-    manager_->Reconcile();
     ContinuityCheckpoint checkpoint{};
     checkpoint.id = store_.NextCheckpointId();
     checkpoint.workspace = workspace;
@@ -592,7 +592,7 @@ void NativeSessionContinuityService::PreferencesChanged()
 
 void NativeSessionContinuityService::RefreshWindow()
 {
-    if (window_ != nullptr)
+    if (window_ != nullptr && IsWindowVisible(window_->Hwnd()))
     {
         window_->Refresh();
     }
@@ -745,6 +745,7 @@ void NativeSessionContinuityService::HandleAutoCheckpoint(int current_workspace)
         return;
     }
 
+    checkpoint_dirty_v12_=false;
     const std::uint64_t signature = WorkspaceSignature(current_workspace);
     if (last_workspace_signature_[index] == signature && last_checkpoint_tick_[index] != 0u)
     {
@@ -756,17 +757,18 @@ void NativeSessionContinuityService::HandleAutoCheckpoint(int current_workspace)
 
 void NativeSessionContinuityService::Tick()
 {
-    if (manager_ == nullptr || !initialized_)
+    if(!manager_ || !initialized_) return;
+    const auto revision=manager_->RevisionV12();
+    const bool changed=observed_revision_v12_!=revision;
+    observed_revision_v12_=revision;
+    if(changed)
     {
-        return;
+        HandleInitialResume();
+        const int workspace=manager_->CurrentWorkspace();
+        HandleWorkspaceChange(workspace); HandleFocusChange(workspace);
+        checkpoint_dirty_v12_=true; RefreshWindow();
     }
-    manager_->Reconcile();
-    HandleInitialResume();
-    const int workspace = manager_->CurrentWorkspace();
-    HandleWorkspaceChange(workspace);
-    HandleFocusChange(workspace);
-    HandleAutoCheckpoint(workspace);
-    RefreshWindow();
+    if(checkpoint_dirty_v12_) HandleAutoCheckpoint(manager_->CurrentWorkspace());
 }
 
 LRESULT CALLBACK NativeSessionContinuityService::WindowProcedure(
@@ -796,6 +798,7 @@ LRESULT NativeSessionContinuityService::HandleMessage(
 {
     switch (message)
     {
+    case WM_APP+0x61C: Tick(); return 0;
     case WM_TIMER:
         if (w_param == kEngineTimer)
         {

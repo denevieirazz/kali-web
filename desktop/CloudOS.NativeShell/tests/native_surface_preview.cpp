@@ -8,6 +8,10 @@
 #include "../src/native_desktop_window.h"
 #include "../src/native_popup_menu.h"
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include "../src/native_render_cache_v12.h"
 
 namespace CloudOS
 {
@@ -47,6 +51,8 @@ class NativeSurfacePreview
             FillRect(dc, &item.rcItem, reinterpret_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
             const bool painted = WebSkin::PaintOwnerDrawButton(&item, tone);
             if (!painted) return 5;
+            for(POINT point : {POINT{0,0},POINT{139,0},POINT{0,39},POINT{139,39}})
+                if(GetPixel(dc,point.x,point.y)!=WebSkin::BgPrimary) { std::printf("FAIL button corner color %lu expected %lu\n",GetPixel(dc,point.x,point.y),WebSkin::BgPrimary); return 8; }
         }
         SelectObject(dc, old); DeleteObject(bitmap); DeleteDC(dc); ReleaseDC(nullptr, screen); DestroyWindow(button);
         CloudOSNativeNotificationCenter notifications;
@@ -54,8 +60,51 @@ class NativeSurfacePreview
         CloudOSNativeNotificationCenter::Post(L"Teste de layout", L"Mensagem completa preservada para leitores de tela.");
         notifications.RebuildList();
         RECT row{};
-        if (!ListView_GetItemRect(notifications.list_, 0, &row, LVIR_BOUNDS) || row.right <= row.left || row.bottom <= row.top) return 7;
+        if (!ListView_GetItemRect(notifications.list_, 0, &row, LVIR_BOUNDS) || row.right <= row.left || row.bottom-row.top < Scale(100,GetDpiForWindow(notifications.window_))) return 7;
         std::printf("Notification row: %ld,%ld,%ld,%ld\n", row.left, row.top, row.right, row.bottom);
+        HWND buffer_window=CreateWindowW(L"STATIC",L"V12 buffer fixture",WS_POPUP,0,0,320,240,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+        HDC target=GetDC(buffer_window);
+        const auto allocations=PerformanceV12::state->counters[PerformanceV12::BackbufferAllocation];
+        HDC first=NativeBackbufferV12::Acquire(buffer_window,target,320,240);
+        for(int frame=0;frame<100;++frame) if(NativeBackbufferV12::Acquire(buffer_window,target,320,240)!=first) return 9;
+        if(!first || PerformanceV12::state->counters[PerformanceV12::BackbufferAllocation]!=allocations+1) return 14;
+        if(!NativeBackbufferV12::Acquire(buffer_window,target,480,300) || PerformanceV12::state->counters[PerformanceV12::BackbufferAllocation]!=allocations+2) return 15;
+        ReleaseDC(buffer_window,target); DestroyWindow(buffer_window);
+        CloudOSNativeStartMenuWindow start;
+        if (!start.Create(GetModuleHandleW(nullptr))) return 23;
+        for (int width : {390, 640})
+        {
+            const UINT dpi = GetDpiForWindow(start.window_);
+            SetWindowPos(start.window_, nullptr, 0, 0, Scale(width,dpi), Scale(540,dpi), SWP_NOZORDER|SWP_NOACTIVATE);
+            start.Layout();
+            RECT command{}, power{}, label{}, overlap{};
+            GetWindowRect(start.command_button_, &command); GetWindowRect(start.power_button_, &power);
+            GetWindowRect(start.footer_label_, &label);
+            if (command.right > power.left || command.right-command.left < Scale(120,dpi)) return 24;
+            if ((GetWindowLongPtrW(start.footer_label_,GWL_STYLE)&WS_VISIBLE) && IntersectRect(&overlap,&label,&command)) return 25;
+            if (start.HomePointVisibleV12(POINT{Scale(40,dpi),Scale(30,dpi)})) return 26;
+        }
+        start.Destroy();
+        std::printf("PASS: Start footer controls do not overlap at compact/normal widths; clipped grid does not receive header clicks.\n");
+        wchar_t temporary[MAX_PATH]{}; GetTempPathW(MAX_PATH,temporary);
+        const auto directory=std::filesystem::path(temporary)/(L"CloudOS-V12-fixture-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64()));
+        if(!std::filesystem::create_directory(directory)) return 16;
+        const auto scans=PerformanceV12::state->counters[PerformanceV12::FilesystemScan];
+        NativeDesktopModelV12 model; model.Start(nullptr,directory.wstring());
+        auto await=[&](const std::function<bool()>& condition) {
+            const auto deadline=GetTickCount64()+5000;
+            while(GetTickCount64()<deadline) { if(condition()) return true; Sleep(20); }
+            return false;
+        };
+        if(!await([&]{return PerformanceV12::state->counters[PerformanceV12::FilesystemScan]>scans;})) return 17;
+        { std::ofstream file(directory/L"first.txt"); file<<"fixture"; }
+        if(!await([&]{return model.Snapshot().size()==1;})) return 18;
+        std::filesystem::rename(directory/L"first.txt",directory/L"renamed.txt");
+        if(!await([&]{auto items=model.Snapshot();return items.size()==1 && items[0].name==L"renamed.txt";})) return 19;
+        std::filesystem::remove(directory/L"renamed.txt");
+        if(!await([&]{return model.Snapshot().empty();})) return 21;
+        model.Stop(); std::filesystem::remove(directory);
+        std::printf("PASS: backbuffer reused 100 times; one resize allocation; Desktop watcher create/rename/delete delivered.\n");
         std::printf("PASS: %d monitor/DPI geometry cases, scroll limits and owner-drawn button corner pixels.\n", checks);
         return 0;
     }
@@ -68,7 +117,7 @@ public:
             CloudOSNativeDesktopWindow surface;
             if (!surface.Create(instance, nullptr)) return 20;
             SetWindowPos(surface.hwnd_, HWND_BOTTOM, 0, 0, 3840, 2160, SWP_NOACTIVATE | SWP_SHOWWINDOW);
-            surface.Redraw();
+            surface.Redraw(); UpdateWindow(surface.hwnd_);
             LARGE_INTEGER frequency{}, begin{}, end{};
             QueryPerformanceFrequency(&frequency);
             const DWORD handles = GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS);
@@ -76,11 +125,11 @@ public:
             for (int frame = 0; frame < 60; ++frame)
             {
                 SendMessageW(surface.hwnd_, WM_TIMER, kMetricsTimer, 0);
-                surface.Redraw();
+                surface.Redraw(); UpdateWindow(surface.hwnd_);
             }
             QueryPerformanceCounter(&end);
             const DWORD final_handles = GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS);
-            std::printf("Desktop 3840x2160: 60 metric frames, %.2f ms/frame, GDI objects %lu -> %lu. Static bitmap reused.\n",
+            std::printf("Desktop 3840x2160: 60 forced paint frames, %.2f ms/frame, GDI objects %lu -> %lu. Persistent backbuffer.\n",
                 (end.QuadPart - begin.QuadPart) * 1000.0 / frequency.QuadPart / 60.0, handles, final_handles);
             return final_handles <= handles + 4 ? 0 : 22;
         }
@@ -89,24 +138,24 @@ public:
         CloudOSNativeStartMenuWindow start;
         CloudOSNativeDesktopWindow desktop;
         HWND window{};
-        int width = 480, height = 620;
+        int width = 440, height = 580;
         if (command.find(L"--quick") != std::wstring::npos)
         {
             if (!quick.Create(instance)) return 10;
-            window = quick.window_; width = 560; height = 820;
-            SetTimer(window, 8812, 1800, nullptr);
+            window = quick.window_; width = 420; height = 620;
+            RECT anchor{0,960,1920,1024}; quick.ShowNear(anchor);
         }
         else if (command.find(L"--start") != std::wstring::npos)
         {
             if (!start.Create(instance)) return 11;
             RECT anchor{0, 960, 1920, 1024}; start.ShowNear(anchor);
-            window = start.window_; width = 720; height = 710;
+            window = start.window_; width = 640; height = 680;
         }
         else if (command.find(L"--desktop") != std::wstring::npos)
         {
             if (!desktop.Create(instance, nullptr)) return 12;
             window = desktop.hwnd_; width = 1800; height = 1000;
-            SetTimer(window, kMetricsTimer, 1000, nullptr);
+
         }
         else
         {
@@ -128,7 +177,7 @@ public:
         ShowWindow(owner, SW_SHOWNOACTIVATE);
         SetWindowLongPtrW(window, GWLP_HWNDPARENT, reinterpret_cast<LONG_PTR>(owner));
         SetWindowLongPtrW(window, GWL_EXSTYLE, 0);
-        SetWindowLongPtrW(window, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN);
+        SetWindowLongPtrW(window, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_VSCROLL);
         SetWindowTextW(window, L"CloudOS - validacao visual nativa");
         const UINT dpi = GetDpiForWindow(window);
         RECT frame{0, 0, Scale(width, dpi), Scale(height, dpi)};
@@ -136,7 +185,7 @@ public:
         SetWindowPos(window, HWND_NOTOPMOST, 80, 80, frame.right - frame.left, frame.bottom - frame.top, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
         ShowWindow(window, SW_SHOWNORMAL);
         MSG message{};
-        while (GetMessageW(&message, nullptr, 0, 0) > 0) { TranslateMessage(&message); DispatchMessageW(&message); }
+        while (GetMessageW(&message, nullptr, 0, 0) > 0) { if(quick.Translate(&message)) continue; TranslateMessage(&message); DispatchMessageW(&message); }
         return 0;
     }
 };

@@ -6,6 +6,10 @@
 
 #include <algorithm>
 #include <memory>
+#include <mutex>
+#include <condition_variable>
+#include <thread>
+#include "native_theme.h"
 
 #pragma comment(lib, "comdlg32.lib")
 
@@ -16,14 +20,58 @@ namespace
 constexpr wchar_t kRegistryPath[] = L"Software\\CloudOS\\ShellV2";
 constexpr wchar_t kWallpaperValue[] = L"WallpaperPath";
 
-std::wstring g_cached_path;
-std::unique_ptr<Gdiplus::Image> g_cached_image;
-
-void InvalidateCache()
+class WallpaperCacheV12 final
 {
-    g_cached_path.clear();
-    g_cached_image.reset();
-}
+    std::mutex mutex_; std::condition_variable wake_; std::thread worker_;
+    std::shared_ptr<Gdiplus::Bitmap> bitmap_;
+    bool stopped_{},pending_{},force_{}; int width_{},height_{}; HWND target_{};
+    void Work()
+    {
+        std::wstring previous_path; int previous_width{},previous_height{}; bool initialized{};
+        for(;;)
+        {
+            int width{},height{}; HWND target{}; bool force{};
+            {std::unique_lock lock(mutex_);wake_.wait(lock,[this]{return stopped_||pending_;});if(stopped_)break;
+             pending_=false;width=width_;height=height_;target=target_;force=force_;force_=false;}
+            const auto path=NativeWallpaperManager::CurrentPath();
+            if(!force && initialized && path==previous_path && width==previous_width && height==previous_height) continue;
+            previous_path=path;previous_width=width;previous_height=height;initialized=true;
+            std::shared_ptr<Gdiplus::Bitmap> result;
+            if(!path.empty())
+            {
+                Gdiplus::Image source(path.c_str(),FALSE);
+                if(source.GetLastStatus()==Gdiplus::Ok && source.GetWidth() && source.GetHeight())
+                {
+                    result=std::make_shared<Gdiplus::Bitmap>(width,height,PixelFormat32bppPARGB);
+                    Gdiplus::Graphics draw(result.get());
+                    const double ratio=static_cast<double>(width)/height;
+                    const double source_ratio=static_cast<double>(source.GetWidth())/source.GetHeight();
+                    const double crop_width=source_ratio>ratio?source.GetHeight()*ratio:source.GetWidth();
+                    const double crop_height=source_ratio>ratio?source.GetHeight():source.GetWidth()/ratio;
+                    draw.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+                    draw.DrawImage(&source,Gdiplus::Rect(0,0,width,height),static_cast<INT>((source.GetWidth()-crop_width)/2),static_cast<INT>((source.GetHeight()-crop_height)/2),static_cast<INT>(crop_width),static_cast<INT>(crop_height),Gdiplus::UnitPixel);
+                    draw.Flush(Gdiplus::FlushIntentionSync);
+                }
+            }
+            {std::scoped_lock lock(mutex_);bitmap_=std::move(result);}
+            if(target) PostMessageW(target,WM_APP+0x61D,0,0);
+        }
+    }
+public:
+    ~WallpaperCacheV12(){Stop();}
+    void Request(HWND target,int width,int height,bool force)
+    {
+        {std::scoped_lock lock(mutex_);stopped_=false;
+         if(target)target_=target;if(width>0)width_=width;if(height>0)height_=height;
+         if(width_<=0 || height_<=0) return;
+         pending_=true;force_=force_||force;
+         if(!worker_.joinable())worker_=std::thread([this]{Work();});}
+        wake_.notify_one();
+    }
+    std::shared_ptr<Gdiplus::Bitmap> Snapshot(){std::scoped_lock lock(mutex_);return bitmap_;}
+    void Stop(){ {std::scoped_lock lock(mutex_);stopped_=true;} wake_.notify_all();if(worker_.joinable())worker_.join();bitmap_.reset();pending_=false;target_=nullptr;width_=height_=0; }
+};
+WallpaperCacheV12& WallpaperCache(){static WallpaperCacheV12 cache;return cache;}
 
 bool Exists(const std::wstring& path)
 {
@@ -36,29 +84,10 @@ bool Exists(const std::wstring& path)
         (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 
-void EnsureCache()
-{
-    const std::wstring path = NativeWallpaperManager::CurrentPath();
-    if (path == g_cached_path && g_cached_image != nullptr)
-    {
-        return;
-    }
-
-    g_cached_path = path;
-    g_cached_image.reset();
-    if (!Exists(path))
-    {
-        return;
-    }
-
-    auto image = std::make_unique<Gdiplus::Image>(path.c_str(), FALSE);
-    if (image->GetLastStatus() == Gdiplus::Ok &&
-        image->GetWidth() > 0 && image->GetHeight() > 0)
-    {
-        g_cached_image = std::move(image);
-    }
 }
-}
+
+void NativeWallpaperManager::Prepare(HWND target,int width,int height,bool force) { WallpaperCache().Request(target,width,height,force); }
+void NativeWallpaperManager::Stop() {WallpaperCache().Stop();}
 
 std::wstring NativeWallpaperManager::CurrentPath()
 {
@@ -133,7 +162,7 @@ bool NativeWallpaperManager::Apply(const std::wstring& path)
         return false;
     }
 
-    InvalidateCache();
+    Prepare(nullptr,0,0,true);
 
     // Keep Windows and CloudOS visually aligned where Windows accepts the format.
     (void)SystemParametersInfoW(
@@ -182,60 +211,19 @@ void NativeWallpaperManager::Reset()
         (void)RegDeleteValueW(key, kWallpaperValue);
         RegCloseKey(key);
     }
-    InvalidateCache();
+    Prepare(nullptr,0,0,true);
     CloudOSNativeNotificationCenter::Post(
         L"Wallpaper restaurado",
         L"O CloudOS voltou ao fundo padrao.");
 }
 
-bool NativeWallpaperManager::Draw(
-    Gdiplus::Graphics& graphics,
-    int width,
-    int height)
+bool NativeWallpaperManager::Draw(Gdiplus::Graphics& graphics,int width,int height)
 {
-    if (width <= 0 || height <= 0)
-    {
-        return false;
-    }
-
-    EnsureCache();
-    if (g_cached_image == nullptr)
-    {
-        return false;
-    }
-
-    const double source_width = static_cast<double>(g_cached_image->GetWidth());
-    const double source_height = static_cast<double>(g_cached_image->GetHeight());
-    const double destination_ratio = static_cast<double>(width) / static_cast<double>(height);
-    const double source_ratio = source_width / source_height;
-
-    Gdiplus::Rect source{};
-    if (source_ratio > destination_ratio)
-    {
-        const int crop_width = static_cast<int>(source_height * destination_ratio);
-        source.X = static_cast<int>((source_width - crop_width) / 2.0);
-        source.Y = 0;
-        source.Width = std::max(1, crop_width);
-        source.Height = static_cast<int>(source_height);
-    }
-    else
-    {
-        const int crop_height = static_cast<int>(source_width / destination_ratio);
-        source.X = 0;
-        source.Y = static_cast<int>((source_height - crop_height) / 2.0);
-        source.Width = static_cast<int>(source_width);
-        source.Height = std::max(1, crop_height);
-    }
-
-    graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
-    graphics.DrawImage(
-        g_cached_image.get(),
-        Gdiplus::Rect(0, 0, width, height),
-        source.X,
-        source.Y,
-        source.Width,
-        source.Height,
-        Gdiplus::UnitPixel);
-    return true;
+    const auto bitmap=WallpaperCache().Snapshot();
+    if(!bitmap || bitmap->GetWidth()!=static_cast<UINT>(width) || bitmap->GetHeight()!=static_cast<UINT>(height)) return false;
+    const auto state=graphics.Save();
+    graphics.SetInterpolationMode(Gdiplus::InterpolationModeNearestNeighbor);
+    const bool drawn=graphics.DrawImage(bitmap.get(),Gdiplus::Rect(0,0,width,height),0,0,width,height,Gdiplus::UnitPixel)==Gdiplus::Ok;
+    graphics.Restore(state);return drawn;
 }
 } // namespace CloudOS

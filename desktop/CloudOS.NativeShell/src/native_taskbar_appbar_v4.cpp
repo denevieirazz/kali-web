@@ -1,3 +1,5 @@
+#include "native_render_cache_v12.h"
+#include "native_icon_cache_v12.h"
 #include "native_taskbar_appbar.h"
 
 #include "native_app_launcher.h"
@@ -27,7 +29,7 @@ namespace
 constexpr wchar_t kTaskbarClass[] = L"CloudOS.NativeShell.Taskbar.v4";
 constexpr UINT kAppBarCallback = WM_APP + 0x461;
 constexpr UINT_PTR kRefreshTimer = 8901;
-constexpr int kTaskbarHeightDip = 68;
+constexpr int kTaskbarHeightDip = DesignV12::TaskbarHeight;
 
 constexpr UINT kPinOpen = 9401;
 constexpr UINT kPinToggleStart = 9402;
@@ -94,31 +96,6 @@ std::wstring ReadWindowClass(HWND window)
     return value.data();
 }
 
-HICON ResolveWindowIcon(HWND window)
-{
-    if (window == nullptr || !IsWindow(window))
-    {
-        return nullptr;
-    }
-    HICON icon = reinterpret_cast<HICON>(
-        SendMessageW(window, WM_GETICON, ICON_SMALL2, 0));
-    if (icon == nullptr)
-    {
-        icon = reinterpret_cast<HICON>(
-            SendMessageW(window, WM_GETICON, ICON_SMALL, 0));
-    }
-    if (icon == nullptr)
-    {
-        icon = reinterpret_cast<HICON>(
-            GetClassLongPtrW(window, GCLP_HICONSM));
-    }
-    if (icon == nullptr)
-    {
-        icon = reinterpret_cast<HICON>(
-            GetClassLongPtrW(window, GCLP_HICON));
-    }
-    return icon;
-}
 
 HWND RepresentativeWindow(const std::vector<HWND>& windows, HWND active)
 {
@@ -221,30 +198,8 @@ bool DrawWindowsPinIcon(
         return false;
     }
 
-    SHFILEINFOW info{};
-    if (SHGetFileInfoW(
-            pin.target.c_str(),
-            0,
-            &info,
-            sizeof(info),
-            SHGFI_ICON | SHGFI_LARGEICON) == 0 ||
-        info.hIcon == nullptr)
-    {
-        return false;
-    }
-
-    const BOOL drawn = DrawIconEx(
-        dc,
-        x,
-        y,
-        info.hIcon,
-        size,
-        size,
-        0,
-        nullptr,
-        DI_NORMAL);
-    DestroyIcon(info.hIcon);
-    return drawn != FALSE;
+    const auto icon = NativeIconCacheV12::Instance().Get(pin.target);
+    return icon && icon->handle && DrawIconEx(dc, x, y, icon->handle, size, size, 0, nullptr, DI_NORMAL) != FALSE;
 }
 
 void DrawFallbackIcon(
@@ -347,7 +302,11 @@ std::wstring CloudOSTaskbarAppBar::PinTitle(const ShellPinItem& pin) const
 
 void CloudOSTaskbarAppBar::ReloadPins()
 {
+    const auto revision = ShellPinStore::Instance().Revision();
+    if (pins_revision_v12_ == revision) return;
+    pins_revision_v12_ = revision;
     pinned_items_ = ShellPinStore::Instance().TaskbarPins();
+    for (const auto& pin : pinned_items_) if (pin.kind == ShellPinKind::WindowsTarget) NativeIconCacheV12::Instance().Warm(pin.target, window_);
 }
 
 bool CloudOSTaskbarAppBar::Create(
@@ -418,7 +377,8 @@ bool CloudOSTaskbarAppBar::Create(
         sizeof(border));
 
     PositionAppBar();
-    SetTimer(window_, kRefreshTimer, 1000, nullptr);
+    pins_revision_v12_=0; Refresh();
+    SetTimer(window_, kRefreshTimer, 1000 * 60, nullptr);
     ShowWindow(window_, SW_SHOWNOACTIVATE);
     UpdateWindow(window_);
     return true;
@@ -500,6 +460,7 @@ void CloudOSTaskbarAppBar::PositionAppBar()
         std::max<LONG>(1L, data.rc.right - data.rc.left),
         std::max<LONG>(1L, data.rc.bottom - data.rc.top),
         SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    FloatingDockV8::Apply(window_);
     InvalidateRect(window_, nullptr, FALSE);
 }
 
@@ -509,7 +470,11 @@ void CloudOSTaskbarAppBar::Refresh()
     {
         return;
     }
+    time_v12_ = NativeShellPlatform::FormatLocalTime();
+    date_v12_ = NativeShellPlatform::FormatLocalDate(false);
+    GetSystemPowerStatus(&power_v12_);
     ReloadPins();
+    RebuildHitTargets();
     InvalidateRect(window_, nullptr, FALSE);
 }
 
@@ -520,14 +485,13 @@ void CloudOSTaskbarAppBar::RebuildHitTargets()
         return;
     }
 
-    ReloadPins();
     RECT client{};
     GetClientRect(window_, &client);
     const UINT dpi = GetDpiForWindow(window_);
     const int width = std::max<int>(1, static_cast<int>(client.right - client.left));
     const int height = std::max<int>(1, static_cast<int>(client.bottom - client.top));
     const int margin = Scale(12, dpi);
-    const int button = Scale(46, dpi);
+    const int button = Scale(36, dpi);
     const int gap = Scale(8, dpi);
     const int y = (height - button) / 2;
 
@@ -538,9 +502,9 @@ void CloudOSTaskbarAppBar::RebuildHitTargets()
         workspace_rects_.push_back(RECT{
             workspace_x,
             y + Scale(5, dpi),
-            workspace_x + Scale(34, dpi),
+            workspace_x + Scale(24, dpi),
             y + button - Scale(5, dpi)});
-        workspace_x += Scale(40, dpi);
+        workspace_x += Scale(28, dpi);
     }
 
     const std::size_t max_visible_pins = width >= Scale(1900, dpi)
@@ -572,7 +536,7 @@ void CloudOSTaskbarAppBar::RebuildHitTargets()
     }
 
     const int clock_width = Scale(122, dpi);
-    const int notify_width = Scale(46, dpi);
+    const int notify_width = Scale(36, dpi);
     const int quick_width = Scale(106, dpi);
     int right_x = width - margin - clock_width;
     clock_rect_ = RECT{right_x, y, width - margin, y + button};
@@ -616,6 +580,7 @@ void CloudOSTaskbarAppBar::RebuildHitTargets()
                 {
                     created.title = L"Aplicativo";
                 }
+                NativeIconCacheV12::Instance().Warm(NativeIconCacheV12::WindowKey(item.hwnd), window_);
                 created.windows.push_back(item.hwnd);
                 task_groups_.push_back(std::move(created));
             }
@@ -631,7 +596,7 @@ void CloudOSTaskbarAppBar::RebuildHitTargets()
     const int available = std::max<int>(0, task_right - task_left);
     const int task_width = Scale(146, dpi);
     const int task_gap = Scale(7, dpi);
-    const int overflow_width = Scale(46, dpi);
+    const int overflow_width = Scale(36, dpi);
     int capacity = available > 0
         ? (available + task_gap) / (task_width + task_gap)
         : 0;
@@ -697,8 +662,19 @@ HWND CloudOSTaskbarAppBar::HitTaskWindow(POINT point, RECT* bounds) const
     return nullptr;
 }
 
+void CloudOSTaskbarAppBar::InvalidateHoverV12(int kind,int index)
+{
+    const RECT* rect=nullptr;
+    if(kind==1) rect=&start_rect_; if(kind==3) rect=&quick_rect_; if(kind==4) rect=&notification_rect_;
+    if(kind==5) rect=&clock_rect_; if(kind==7) rect=&pin_overflow_rect_; if(kind==9) rect=&task_overflow_rect_;
+    const std::vector<RECT>* list=kind==2?&pinned_rects_:kind==6?&task_rects_:kind==8?&workspace_rects_:nullptr;
+    if(list && index>=0 && index<static_cast<int>(list->size())) rect=&(*list)[index];
+    if(rect) InvalidateRect(window_,rect,FALSE);
+}
+
 void CloudOSTaskbarAppBar::Paint()
 {
+    PerformanceV12::PaintScope perf(PerformanceV12::TaskbarPaint);
     PAINTSTRUCT paint{};
     HDC screen_dc = BeginPaint(window_, &paint);
     RECT client{};
@@ -706,9 +682,11 @@ void CloudOSTaskbarAppBar::Paint()
     const int width = std::max<int>(1, static_cast<int>(client.right - client.left));
     const int height = std::max<int>(1, static_cast<int>(client.bottom - client.top));
 
-    HDC memory_dc = CreateCompatibleDC(screen_dc);
-    HBITMAP bitmap = CreateCompatibleBitmap(screen_dc, width, height);
-    HGDIOBJ old_bitmap = SelectObject(memory_dc, bitmap);
+    HDC memory_dc = NativeBackbufferV12::Acquire(window_, screen_dc, width, height);
+    if (!memory_dc) { EndPaint(window_, &paint); return; }
+    const int saved_dc = SaveDC(memory_dc);
+    IntersectClipRect(memory_dc, paint.rcPaint.left, paint.rcPaint.top, paint.rcPaint.right, paint.rcPaint.bottom);
+    if (EqualRect(&client, &paint.rcPaint)) PerformanceV12::Add(PerformanceV12::TaskbarFullPaint);
 
     Graphics graphics(memory_dc);
     graphics.SetSmoothingMode(SmoothingModeAntiAlias);
@@ -726,21 +704,20 @@ void CloudOSTaskbarAppBar::Paint()
     Pen top_border(WebSkin::GdiColor(WebSkin::BorderDefault, 190), 1.0f);
     graphics.DrawLine(&top_border, 0.0f, 0.0f, static_cast<REAL>(width), 0.0f);
 
-    RebuildHitTargets();
 
     Font normal_font(
         L"Segoe UI Variable Text",
-        static_cast<REAL>(Scale(10, dpi)),
+        static_cast<REAL>(Scale(12, dpi)),
         FontStyleRegular,
         UnitPixel);
     Font small_font(
         L"Segoe UI Variable Text",
-        static_cast<REAL>(Scale(9, dpi)),
+        static_cast<REAL>(Scale(11, dpi)),
         FontStyleRegular,
         UnitPixel);
     Font bold_font(
         L"Segoe UI Variable Text",
-        static_cast<REAL>(Scale(10, dpi)),
+        static_cast<REAL>(Scale(12, dpi)),
         FontStyleBold,
         UnitPixel);
     SolidBrush primary(WebSkin::GdiColor(WebSkin::TextPrimary));
@@ -758,8 +735,8 @@ void CloudOSTaskbarAppBar::Paint()
             graphics,
             rect,
             dpi,
-            active ? WebSkin::Accent : hot ? WebSkin::BgHover : WebSkin::BgTertiary,
-            active ? WebSkin::AccentHover : hot ? WebSkin::BorderStrong : WebSkin::BorderDefault,
+            active ? WebSkin::AccentSubtle : hot ? WebSkin::BgHover : WebSkin::BgPrimary,
+            active ? WebSkin::BorderStrong : WebSkin::BgPrimary,
             active ? 255 : 225);
         DrawCenteredText(
             graphics,
@@ -793,9 +770,10 @@ void CloudOSTaskbarAppBar::Paint()
 
         HWND representative = RepresentativeWindow(group.windows, active_window);
         const int icon_size = Scale(24, dpi);
-        const int icon_x = rect.left + Scale(10, dpi);
+        const int icon_x = rect.left + Scale(12, dpi);
         const int icon_y = rect.top + (Height(rect) - icon_size) / 2;
-        HICON icon = ResolveWindowIcon(representative);
+        const auto cached_icon = NativeIconCacheV12::Instance().Get(NativeIconCacheV12::WindowKey(representative));
+        HICON icon = cached_icon ? cached_icon->handle : nullptr;
         if (icon != nullptr)
         {
             (void)DrawIconEx(
@@ -812,10 +790,10 @@ void CloudOSTaskbarAppBar::Paint()
 
         const int text_x = icon != nullptr
             ? icon_x + icon_size + Scale(8, dpi)
-            : rect.left + Scale(10, dpi);
+            : rect.left + Scale(12, dpi);
         const int reserve = group.windows.size() > 1u
             ? Scale(38, dpi)
-            : Scale(10, dpi);
+            : Scale(12, dpi);
         RECT text_rect{
             text_x,
             rect.top,
@@ -877,8 +855,8 @@ void CloudOSTaskbarAppBar::Paint()
         graphics,
         start_rect_,
         dpi,
-        start_hot ? WebSkin::AccentHover : WebSkin::Accent,
-        WebSkin::AccentHover,
+        start_hot ? WebSkin::BgHover : WebSkin::BgPrimary,
+        WebSkin::BgPrimary,
         255);
     DrawStartGlyph(graphics, start_rect_, dpi, start_hot);
 
@@ -910,7 +888,7 @@ void CloudOSTaskbarAppBar::Paint()
         const int app_index = pin.kind == ShellPinKind::CloudOSApp
             ? FindCloudApp(pin.id)
             : -1;
-        const int icon_size = std::max<int>(18, Width(rect) - Scale(10, dpi));
+        const int icon_size = std::max<int>(18, Width(rect) - Scale(12, dpi));
         const int icon_x = rect.left + (Width(rect) - icon_size) / 2;
         const int icon_y = rect.top + (Height(rect) - icon_size) / 2;
         if (app_index >= 0)
@@ -956,8 +934,8 @@ void CloudOSTaskbarAppBar::Paint()
         220);
     DrawQuickGlyph(graphics, quick_rect_, dpi, quick_hot);
 
-    SYSTEM_POWER_STATUS power{};
-    if (GetSystemPowerStatus(&power) &&
+    const auto& power = power_v12_;
+    if (
         power.BatteryFlag != 128 &&
         power.BatteryLifePercent != 255)
     {
@@ -1008,21 +986,20 @@ void CloudOSTaskbarAppBar::Paint()
     date_rect.top += Scale(23, dpi);
     DrawCenteredText(
         graphics,
-        NativeShellPlatform::FormatLocalTime(),
+        time_v12_,
         bold_font,
         time_rect,
         primary);
     DrawCenteredText(
         graphics,
-        NativeShellPlatform::FormatLocalDate(false),
+        date_v12_,
         small_font,
         date_rect,
         tertiary);
 
-    BitBlt(screen_dc, 0, 0, width, height, memory_dc, 0, 0, SRCCOPY);
-    SelectObject(memory_dc, old_bitmap);
-    DeleteObject(bitmap);
-    DeleteDC(memory_dc);
+    graphics.Flush();
+    BitBlt(screen_dc, paint.rcPaint.left, paint.rcPaint.top, paint.rcPaint.right-paint.rcPaint.left, paint.rcPaint.bottom-paint.rcPaint.top, memory_dc, paint.rcPaint.left, paint.rcPaint.top, SRCCOPY);
+    RestoreDC(memory_dc, saved_dc);
     EndPaint(window_, &paint);
 }
 
@@ -1536,6 +1513,8 @@ LRESULT CloudOSTaskbarAppBar::HandleMessage(
 
     switch (message)
     {
+    case WM_SIZE: RebuildHitTargets(); return 0;
+    case WM_CLOUDOS_ICON_READY_V12: InvalidateRect(window_, nullptr, FALSE); return 0;
     case WM_PAINT:
         Paint();
         return 0;
@@ -1544,7 +1523,9 @@ LRESULT CloudOSTaskbarAppBar::HandleMessage(
     case WM_TIMER:
         if (w_param == kRefreshTimer)
         {
-            Refresh();
+            time_v12_ = NativeShellPlatform::FormatLocalTime();
+            date_v12_ = NativeShellPlatform::FormatLocalDate(false);
+            InvalidateRect(window_, &clock_rect_, FALSE);
             return 0;
         }
         break;
@@ -1643,16 +1624,16 @@ LRESULT CloudOSTaskbarAppBar::HandleMessage(
 
         if (old_kind != hovered_kind_ || old_index != hovered_index_)
         {
-            InvalidateRect(window_, nullptr, FALSE);
+            InvalidateHoverV12(old_kind,old_index); InvalidateHoverV12(hovered_kind_,hovered_index_);
         }
         SetCursor(LoadCursorW(nullptr, hovered_kind_ >= 0 ? IDC_HAND : IDC_ARROW));
         return 0;
     }
     case WM_MOUSELEAVE:
+        InvalidateHoverV12(hovered_kind_,hovered_index_);
         tracking_mouse_ = false;
         hovered_kind_ = -1;
         hovered_index_ = -1;
-        InvalidateRect(window_, nullptr, FALSE);
         return 0;
     case WM_LBUTTONDOWN:
     {

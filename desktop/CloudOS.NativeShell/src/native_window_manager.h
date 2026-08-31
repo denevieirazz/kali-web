@@ -3,11 +3,13 @@
 #include <Windows.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
 #include "cloudos_native_runtime.h"
 
+constexpr UINT CLOUDOS_WM_MODEL_CHANGED_V12 = WM_APP + 0x615;
 constexpr UINT CLOUDOS_WM_NATIVE_WINDOW_EVENT = WM_APP + 0x220;
 
 struct CloudOSManagedWindow final
@@ -18,6 +20,9 @@ struct CloudOSManagedWindow final
     bool floating{};
     bool hidden_by_workspace{};
     std::wstring title;
+    HMONITOR monitor{};
+    bool minimized{};
+    RECT bounds{};
 };
 
 enum class CloudOSSnapDirection
@@ -43,6 +48,7 @@ public:
 
     void HandleRuntimeEvent(cloudos_native_window_event_kind kind, HWND window);
     void Reconcile();
+    std::uint64_t RevisionV12() const noexcept {return revision_v12_;}
 
     [[nodiscard]] std::vector<CloudOSManagedWindow> CurrentWorkspaceWindows() const;
     [[nodiscard]] std::vector<CloudOSManagedWindow> AllManagedWindows() const;
@@ -99,12 +105,14 @@ private:
     const CloudOSManagedWindow* Find(HWND window) const noexcept;
     void UpdateForeground(HWND window);
     void UpdateBorders();
+    void NotifyChanged() { ++revision_v12_; if (event_sink_) PostMessageW(event_sink_, CLOUDOS_WM_MODEL_CHANGED_V12, 0, 0); }
     void RecoverTaggedWindow(HWND window);
     void MarkWorkspaceHidden(HWND window, bool hidden) noexcept;
     RECT WorkAreaFor(HWND reference) const noexcept;
     static std::wstring ReadWindowTitle(HWND window);
     static bool IsExcludedClass(HWND window);
 
+    std::uint64_t revision_v12_{};
     HWND event_sink_{};
     void* watcher_{};
     HWND active_window_{};

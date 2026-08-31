@@ -12,7 +12,7 @@
 
 namespace {
 
-constexpr DWORD kWinEventFlags = WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS;
+constexpr DWORD kWinEventFlags = WINEVENT_OUTOFCONTEXT;
 
 struct WindowWatcher final {
     cloudos_native_window_event_callback callback = nullptr;
@@ -52,7 +52,9 @@ cloudos_native_window_event_kind translate_event(DWORD event_type) noexcept {
         case EVENT_OBJECT_SHOW: return CLOUDOS_NATIVE_WINDOW_SHOWN;
         case EVENT_OBJECT_HIDE: return CLOUDOS_NATIVE_WINDOW_HIDDEN;
         case EVENT_SYSTEM_FOREGROUND: return CLOUDOS_NATIVE_WINDOW_FOREGROUND;
-        case EVENT_OBJECT_LOCATIONCHANGE: return CLOUDOS_NATIVE_WINDOW_LOCATION_CHANGED;
+        case EVENT_OBJECT_LOCATIONCHANGE:
+        case EVENT_OBJECT_NAMECHANGE:
+        case EVENT_OBJECT_STATECHANGE: return CLOUDOS_NATIVE_WINDOW_LOCATION_CHANGED;
         default: return CLOUDOS_NATIVE_WINDOW_UNKNOWN;
     }
 }
@@ -86,6 +88,7 @@ void CALLBACK on_win_event(
     {
         std::lock_guard lock(watcher->sync);
         if (kind == CLOUDOS_NATIVE_WINDOW_DESTROYED) {
+            should_dispatch = true;
             const auto tracked = watcher->process_ids.find(window);
             if (tracked != watcher->process_ids.end()) {
                 process_id = tracked->second;
@@ -94,7 +97,7 @@ void CALLBACK on_win_event(
             }
         } else if (is_top_level_window(window)) {
             process_id = process_id_for(window);
-            if (process_id != 0 && process_id != GetCurrentProcessId()) {
+            if (process_id != 0) {
                 watcher->process_ids[window] = process_id;
                 should_dispatch = true;
             }
@@ -171,7 +174,7 @@ __declspec(dllexport) BOOL WINAPI cloudos_native_window_events_start(
     // CREATE..HIDE is a compact contiguous range in the WinEvent API.
     if (!install_hook(watcher.get(), 0, EVENT_OBJECT_CREATE, EVENT_OBJECT_HIDE) ||
         !install_hook(watcher.get(), 1, EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND) ||
-        !install_hook(watcher.get(), 2, EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE)) {
+        !install_hook(watcher.get(), 2, EVENT_OBJECT_STATECHANGE, EVENT_OBJECT_NAMECHANGE)) {
         const DWORD error = GetLastError();
         uninstall_hooks(watcher.get());
         return window_event_fail(error);

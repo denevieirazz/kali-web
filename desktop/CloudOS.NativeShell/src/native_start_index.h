@@ -34,6 +34,7 @@ public:
     NativeStartIndex(const NativeStartIndex&) = delete;
     NativeStartIndex& operator=(const NativeStartIndex&) = delete;
 
+    void Subscribe(HWND window) { observer_v12_.store(window); }
     void StartAsync();
     void RefreshAsync();
 
@@ -55,6 +56,8 @@ private:
     void RequestUniversalSearch(const std::wstring& query) const;
     void UniversalSearchLoop() const;
 
+    std::atomic<HWND> observer_v12_{};
+    void NotifyV12() const { if (auto hwnd = observer_v12_.load()) PostMessageW(hwnd, WM_APP + 0x619, 0, 0); }
     mutable std::mutex mutex_;
     std::vector<NativeStartIndexEntry> entries_;
     std::thread worker_;

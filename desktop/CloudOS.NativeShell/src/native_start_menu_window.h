@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "native_shell_pins.h"
+#include "native_flyout_layout.h"
 #include "native_start_index.h"
 
 namespace Gdiplus
@@ -60,6 +61,8 @@ private:
         bool recommended{};
     };
 
+    NativeScrollState home_scroll_v12_;
+    bool HomePointVisibleV12(POINT point) const;
     void Layout();
     void Paint();
     void PaintHome(HDC dc, Gdiplus::Graphics& graphics, UINT dpi, int width, int height);
@@ -69,6 +72,7 @@ private:
     void ExecuteSelection();
     void ExecutePin(const ShellPinItem& pin);
     void MoveSelection(int delta);
+    void EnsureHomeSelectionVisibleV12();
     void MoveHomeSelection(int horizontal, int vertical);
     void SelectHomeEdge(bool last);
     void ActivateHomeSelection();
@@ -97,6 +101,7 @@ private:
         DWORD_PTR reference_data);
     static LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM w_param, LPARAM l_param);
 
+    std::vector<std::wstring> recommended_ids_v12_;
     HINSTANCE instance_{};
     HWND window_{};
     HWND search_edit_{};
@@ -108,6 +113,7 @@ private:
     HFONT font_{};
     HFONT small_font_{};
     HFONT title_font_{};
+    UINT font_dpi_v12_{};
     HBRUSH background_{};
     HBRUSH edit_background_{};
     HIMAGELIST row_height_image_list_{};

@@ -465,7 +465,7 @@ void NativeWorkspaceAutomationEngine::Tick(
     CloudOSNativeWindowManager& manager,
     NativeWorkspaceStudioStore& store)
 {
-    manager.Reconcile();
+    // The event-driven manager already owns the current window model.
     ApplyRulesToNewWindows(manager, store);
     TrackFocus(manager);
 

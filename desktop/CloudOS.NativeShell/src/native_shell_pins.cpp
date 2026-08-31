@@ -1,4 +1,5 @@
 #include "native_shell_pins.h"
+#include "native_window_manager.h"
 
 #include <Windows.h>
 #include <KnownFolders.h>
@@ -348,6 +349,8 @@ void ShellPinStore::EnsureDefaultsLocked()
 
 void ShellPinStore::SaveLocked() const
 {
+    ++revision_v12_;
+    EnumThreadWindows(GetCurrentThreadId(), [](HWND window, LPARAM)->BOOL { wchar_t cls[96]{}; GetClassNameW(window, cls, 96); if (wcscmp(cls, L"CloudOS.NativeShell.Desktop.v2") == 0) PostMessageW(window, CLOUDOS_WM_MODEL_CHANGED_V12, 0, 0); return TRUE; }, 0);
     if (storage_path_.empty())
     {
         return;

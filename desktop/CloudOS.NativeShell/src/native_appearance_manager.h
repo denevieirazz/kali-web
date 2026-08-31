@@ -8,7 +8,7 @@ namespace CloudOS
 {
 struct NativeAppearanceState final
 {
-    COLORREF accent{RGB(99, 102, 241)};
+    COLORREF accent{RGB(76, 142, 219)};
     bool transparency{true};
     bool compact_status{};
 };

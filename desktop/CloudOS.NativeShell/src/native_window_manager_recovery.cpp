@@ -122,5 +122,6 @@ bool CloudOSNativeWindowManager::RestoreWindowState(
     }
 
     UpdateBorders();
+    NotifyChanged();
     return true;
 }

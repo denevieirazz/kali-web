@@ -745,6 +745,29 @@ NativeSystemSummary NativeSystemControlBackend::QuerySummary()
     return summary;
 }
 
+NativeWifiNetwork NativeSystemControlBackend::QueryWifiConnection()
+{
+    NativeWifiNetwork result{}; WlanHandle handle; DWORD version{};
+    if(!OpenWlan(&handle,&version,nullptr)) return result;
+    PWLAN_INTERFACE_INFO_LIST interfaces{};
+    if(WlanEnumInterfaces(handle.value,nullptr,&interfaces)!=ERROR_SUCCESS || !interfaces) return result;
+    for(DWORD index=0; index<interfaces->dwNumberOfItems; ++index)
+    {
+        const auto& info=interfaces->InterfaceInfo[index];
+        result.interface_name=info.strInterfaceDescription;
+        PWLAN_CONNECTION_ATTRIBUTES connection{}; DWORD size{}; WLAN_OPCODE_VALUE_TYPE opcode{};
+        if(WlanQueryInterface(handle.value,&info.InterfaceGuid,wlan_intf_opcode_current_connection,nullptr,&size,reinterpret_cast<PVOID*>(&connection),&opcode)==ERROR_SUCCESS && connection)
+        {
+            result.connected=connection->isState==wlan_interface_state_connected;
+            result.ssid=SsidToString(connection->wlanAssociationAttributes.dot11Ssid);
+            result.signal_quality=connection->wlanAssociationAttributes.wlanSignalQuality;
+            WlanFreeMemory(connection);
+            if(result.connected) break;
+        }
+    }
+    WlanFreeMemory(interfaces); return result;
+}
+
 std::vector<NativeWifiNetwork> NativeSystemControlBackend::ScanWifi()
 {
     std::vector<NativeWifiNetwork> result;

@@ -102,6 +102,7 @@ class NativeSystemControlBackend final
 public:
     static NativeSystemSummary QuerySummary();
 
+    static NativeWifiNetwork QueryWifiConnection();
     static std::vector<NativeWifiNetwork> ScanWifi();
     static bool ConnectKnownWifi(const NativeWifiNetwork& network, std::wstring* error = nullptr);
     static bool DisconnectWifi(const GUID& interface_guid, std::wstring* error = nullptr);

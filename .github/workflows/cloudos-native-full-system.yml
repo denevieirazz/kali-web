@@ -98,6 +98,15 @@ jobs:
           if ($result.evidence.ready_probe_exit_code -ne 0) { throw 'Supervisor V11 real readiness probe failed.' }
           if ($result.evidence.remaining_installation_shell_processes -ne 0) { throw 'Supervisor V11 leaked CloudOS processes.' }
 
+      - name: Native surface regression tests V12
+        shell: pwsh
+        run: ./scripts/native/test-native-surfaces.ps1
+
+      - name: Performance Visual V12 idle soak
+        shell: pwsh
+        run: |
+          ./scripts/native/run-native-performance-smoke-v12.ps1 -DurationSeconds 120 -MaxAverageCpuPercent 2 -OutputPath 'desktop/CloudOS.NativeShell/artifacts/performance-v12-smoke.json'
+
       - name: Verify native release provenance and compiled graph
         shell: pwsh
         run: |
@@ -152,6 +161,7 @@ jobs:
             desktop/CloudOS.NativeShell/artifacts/stability-v9-smoke.json
             desktop/CloudOS.NativeShell/artifacts/lifecycle-v10-smoke.json
             desktop/CloudOS.NativeShell/artifacts/supervisor-v11-smoke.json
+            desktop/CloudOS.NativeShell/artifacts/performance-v12-smoke.json
             desktop/CloudOS.NativeShell/bin/Release/cloudos-native-manifest.json
             desktop/CloudOS.NativeShell/bin/Release/.cloudos-build-head
             desktop/CloudOS.NativeShell/bin/Release/.cloudos-build-fingerprint

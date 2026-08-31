@@ -1,3 +1,5 @@
+#include "native_performance_v12.h"
+#include "native_icon_cache_v12.h"
 #include "native_window_manager.h"
 
 #include <dwmapi.h>
@@ -252,6 +254,8 @@ void CloudOSNativeWindowManager::HandleRuntimeEvent(
         break;
 
     case CLOUDOS_NATIVE_WINDOW_HIDDEN:
+        if (Find(window)) NotifyChanged();
+        break;
     case CLOUDOS_NATIVE_WINDOW_UNKNOWN:
     default:
         break;
@@ -266,6 +270,7 @@ void CloudOSNativeWindowManager::HandleRuntimeEvent(
 
 void CloudOSNativeWindowManager::Reconcile()
 {
+    CloudOS::PerformanceV12::Add(CloudOS::PerformanceV12::Reconcile);
     windows_.erase(
         std::remove_if(
             windows_.begin(),
@@ -361,11 +366,13 @@ void CloudOSNativeWindowManager::AddOrRefresh(HWND window, DWORD process_id)
     CloudOSManagedWindow* existing = Find(window);
     if (existing != nullptr)
     {
+        RECT bounds{}; GetWindowRect(window,&bounds);
         const std::wstring title = ReadWindowTitle(window);
-        if (!title.empty())
-        {
-            existing->title = title;
-        }
+        if (existing->title != title) NativeIconCacheV12::Instance().InvalidateReady(NativeIconCacheV12::WindowKey(window));
+        const HMONITOR monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+        const bool minimized = IsIconic(window) != FALSE;
+        if (existing->title != title || existing->monitor != monitor || existing->minimized != minimized || !EqualRect(&existing->bounds,&bounds))
+        { existing->title = title; existing->monitor = monitor; existing->minimized = minimized; existing->bounds=bounds; NotifyChanged(); }
         return;
     }
 
@@ -375,17 +382,22 @@ void CloudOSNativeWindowManager::AddOrRefresh(HWND window, DWORD process_id)
     }
 
     CloudOSManagedWindow item{};
+    NativeIconCacheV12::Instance().InvalidateReady(NativeIconCacheV12::WindowKey(window));
     item.hwnd = window;
     item.process_id = process_id;
     item.workspace = current_workspace_;
     item.floating = false;
     item.hidden_by_workspace = false;
+    GetWindowRect(window,&item.bounds);
     item.title = ReadWindowTitle(window);
+    item.monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST); item.minimized = IsIconic(window) != FALSE;
     windows_.push_back(std::move(item));
+    NotifyChanged();
 }
 
 void CloudOSNativeWindowManager::Remove(HWND window)
 {
+    if (Find(window)) NotifyChanged();
     windows_.erase(
         std::remove_if(
             windows_.begin(),
@@ -432,6 +444,8 @@ void CloudOSNativeWindowManager::UpdateForeground(HWND window)
     const auto* managed = Find(window);
     if (managed != nullptr && managed->workspace == current_workspace_)
     {
+        if (active_window_ == window) return;
+        NotifyChanged();
         active_window_ = window;
     }
     UpdateBorders();
@@ -488,13 +502,7 @@ std::vector<CloudOSManagedWindow> CloudOSNativeWindowManager::CurrentWorkspaceWi
             item.hwnd != nullptr &&
             IsWindow(item.hwnd))
         {
-            auto copy = item;
-            const std::wstring title = ReadWindowTitle(item.hwnd);
-            if (!title.empty())
-            {
-                copy.title = title;
-            }
-            result.push_back(std::move(copy));
+            result.push_back(item);
         }
     }
     return result;
@@ -873,6 +881,7 @@ void CloudOSNativeWindowManager::SwitchWorkspace(int workspace)
     }
 
     current_workspace_ = workspace;
+    NotifyChanged();
     active_window_ = nullptr;
 
     for (auto& item : windows_)
@@ -909,6 +918,7 @@ void CloudOSNativeWindowManager::MoveActiveToWorkspace(int workspace)
     }
 
     item->workspace = workspace;
+    NotifyChanged();
     if (workspace != current_workspace_ && IsWindow(item->hwnd))
     {
         MarkWorkspaceHidden(item->hwnd, true);

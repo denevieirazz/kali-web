@@ -114,7 +114,7 @@ Require 'Resident service' ($content.ServiceHeader + "`n" + $content.Service) @(
     'NativeWorkspaceStudioService',
     'RegisterManager',
     'HWND_MESSAGE',
-    'kEngineIntervalMs = 850',
+    'NotifyModelChangedV12',
     'RegisterHotKey',
     'MOD_CONTROL',
     'MOD_ALT',

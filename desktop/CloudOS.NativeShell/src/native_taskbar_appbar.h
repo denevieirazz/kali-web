@@ -24,10 +24,10 @@ constexpr UINT CLOUDOS_WM_TASKBAR_QUERY_HIT = WM_APP + 0x492;
 // native AppBar contract and the existing task/pin hit geometry.
 namespace FloatingDockV8
 {
-constexpr int HorizontalInsetDip = 18;
-constexpr int TopInsetDip = 5;
-constexpr int BottomGapDip = 9;
-constexpr int CornerRadiusDip = 22;
+constexpr int HorizontalInsetDip = 0;
+constexpr int TopInsetDip = 0;
+constexpr int BottomGapDip = 0;
+constexpr int CornerRadiusDip = 12;
 
 inline bool IsTaskbar(HWND window) noexcept
 {
@@ -122,7 +122,7 @@ private:
     HWINEVENTHOOK hook_{};
 };
 
-inline Bootstrap bootstrap;
+// V12: region changes are explicit in PositionAppBar, never a global hook.
 } // namespace FloatingDockV8
 
 struct CloudOSTaskbarHitQuery final
@@ -151,7 +151,6 @@ public:
 
     HWND Hwnd() const noexcept
     {
-        FloatingDockV8::Apply(window_);
         return window_;
     }
     HMONITOR Monitor() const noexcept { return monitor_; }
@@ -171,6 +170,7 @@ private:
     };
 
     void Paint();
+    void InvalidateHoverV12(int kind,int index);
     void RebuildHitTargets();
     void ReloadPins();
     void LaunchPinned(std::size_t index);
@@ -189,6 +189,9 @@ private:
     LRESULT HandleMessage(HWND window, UINT message, WPARAM w_param, LPARAM l_param);
     static LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM w_param, LPARAM l_param);
 
+    std::uint64_t pins_revision_v12_{};
+    std::wstring time_v12_, date_v12_;
+    SYSTEM_POWER_STATUS power_v12_{};
     HINSTANCE instance_{};
     CloudOSNativeWindowManager* window_manager_{};
     HMONITOR monitor_{};

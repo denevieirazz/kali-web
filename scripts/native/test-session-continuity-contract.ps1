@@ -81,7 +81,7 @@ Require 'Resident continuity daemon' ($content.ServiceHeader + "`n" + $content.S
     'NativeSessionContinuityService',
     'RegisterManager',
     'HWND_MESSAGE',
-    'kEngineIntervalMs = 2000u',
+    'kEngineIntervalMs = 5000u',
     'RegisterHotKey',
     'MOD_CONTROL | MOD_ALT | MOD_SHIFT | MOD_NOREPEAT',
     'kHotOpenCenter',

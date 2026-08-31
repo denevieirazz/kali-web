@@ -27,6 +27,7 @@ $content = @{}
 foreach ($entry in $paths.GetEnumerator()) {
     $content[$entry.Key] = Get-Content -LiteralPath $entry.Value -Raw
 }
+$content.Quick += Get-Content -LiteralPath (Join-Path $src 'native_quick_model_v12.h') -Raw
 $content.Backend = (Get-Content -LiteralPath $paths.BackendHeader -Raw) + "`n" + $content.Backend
 
 function Require([string]$Name, [string]$Text, [string[]]$Tokens) {
@@ -153,9 +154,8 @@ Require 'Control Plane health service' $content.Service @(
     'HWND_MESSAGE',
     'kRefreshIntervalMs',
     'NativeSystemControlBackend::QueryAudio',
-    'NativeSystemControlBackend::QueryBrightness',
     'NativeSystemControlBackend::QueryPower',
-    'NativeSystemControlBackend::ScanWifi',
+    'NativeSystemControlBackend::QueryWifiConnection',
     'NativeSystemControlBackend::QueryDrives',
     'CriticalBattery',
     'lowest_drive_free_percent',

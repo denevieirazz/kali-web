@@ -49,14 +49,14 @@ function Forbid([string]$Name, [string]$Text, [string[]]$Tokens) {
 Require 'Visual Experience V7 foundation' $content.Theme @(
     'Visual Experience V7',
     'DrawRevealHighlight',
-    'PathGradientBrush',
+    'native_design_system_v12.h',
     'CursorInControl',
     'EaseOutCubic',
     'EaseOutQuint',
-    'MotionFrameMilliseconds = 8',
+    'MotionFrameMilliseconds = 16',
     'DWMSBT_TRANSIENTWINDOW',
     'DWMSBT_MAINWINDOW',
-    'Specular light edge'
+    'DrawElevatedPanel'
 )
 Forbid 'Visual Experience V7 foundation' $content.Theme @(
     'const int transient_backdrop = 3',
@@ -66,16 +66,16 @@ Forbid 'Visual Experience V7 foundation' $content.Theme @(
 
 Require 'Floating AppBar Dock V8' $content.TaskbarHeader @(
     'namespace FloatingDockV8',
-    'HorizontalInsetDip = 18',
-    'TopInsetDip = 5',
-    'BottomGapDip = 9',
-    'CornerRadiusDip = 22',
+    'HorizontalInsetDip = 0',
+    'TopInsetDip = 0',
+    'BottomGapDip = 0',
+    'CornerRadiusDip = 12',
     'CreateRoundRectRgn',
     'SetWindowRgn',
     'SetWinEventHook',
     'EVENT_OBJECT_LOCATIONCHANGE',
     'CloudOS.NativeShell.Taskbar.v4',
-    'FloatingDockV8::Apply(window_)'
+    'region changes are explicit in PositionAppBar'
 )
 Forbid 'Floating AppBar Dock V8' $content.TaskbarHeader @(
     'namespace FloatingDockV7',
