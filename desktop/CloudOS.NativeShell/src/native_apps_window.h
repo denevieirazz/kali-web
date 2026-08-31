@@ -13,6 +13,8 @@ public:
     enum class AppKind
     {
         External,
+        InstalledWindows,
+        LinuxGui,
         Calculator,
         Notepad,
         Settings,
@@ -25,6 +27,15 @@ public:
         std::wstring name;
         std::wstring path;
         AppKind kind{AppKind::External};
+        std::wstring platform{L"Windows"};
+        std::wstring source;
+        std::wstring uninstall_command;
+        std::wstring distro;
+        std::wstring desktop_id;
+        std::wstring package_manager;
+        std::wstring package_id;
+        bool can_launch{true};
+        bool can_uninstall{};
     };
 
     static void Open(HINSTANCE instance);
@@ -47,6 +58,10 @@ private:
     void EnumerateFolder(const std::wstring& folder, int depth);
     void ApplyFilter();
     void LaunchSelection();
+    void UninstallSelection();
+    void InstallFromSearch();
+    void RefreshCatalog();
+    void UpdateActionState();
 
     static std::wstring ReadText(HWND edit);
     static bool ContainsInsensitive(
@@ -60,6 +75,9 @@ private:
     HWND search_edit_{};
     HWND list_{};
     HWND launch_button_{};
+    HWND install_button_{};
+    HWND uninstall_button_{};
+    HWND refresh_button_{};
     std::vector<AppEntry> catalog_;
     std::vector<std::size_t> visible_indices_;
 };
