@@ -58,28 +58,30 @@ class _NotificationCenterPanelState extends State<NotificationCenterPanel> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        const Text(
-                          'Centro de Notificações',
-                          style: TextStyle(
-                            color: CloudOSColors.text,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.2,
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          const Text(
+                            'Centro de Notificações',
+                            style: TextStyle(
+                              color: CloudOSColors.text,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: -0.2,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          dateString,
-                          style: const TextStyle(color: CloudOSColors.caption, fontSize: 11),
-                        ),
-                      ],
+                          const SizedBox(height: 2),
+                          Text(
+                            dateString,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: CloudOSColors.caption, fontSize: 11),
+                          ),
+                        ],
+                      ),
                     ),
-                    const Spacer(),
                     if (items.isNotEmpty)
                       TextButton(
                         onPressed: _clearAll,
