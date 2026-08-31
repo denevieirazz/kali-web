@@ -86,11 +86,12 @@ CloudOSNativeBrowserWindow::~CloudOSNativeBrowserWindow()
             (void)webview_->remove_NavigationCompleted(navigation_completed_token_);
         if (history_changed_registered_)
             (void)webview_->remove_HistoryChanged(history_changed_token_);
-        if (download_starting_registered_)
-            (void)webview_->remove_DownloadStarting(download_starting_token_);
     }
+    if (webview_v4_ != nullptr && download_starting_registered_)
+        (void)webview_v4_->remove_DownloadStarting(download_starting_token_);
 
     if (controller_ != nullptr) (void)controller_->Close();
+    webview_v4_.Reset();
     webview_.Reset();
     controller_.Reset();
     environment_.Reset();
@@ -257,6 +258,9 @@ void CloudOSNativeBrowserWindow::ConfigureController(ICoreWebView2Controller* co
         ShowWebViewFailure(L"WebView2 nao retornou o motor de navegacao.");
         return;
     }
+    // DownloadStarting is an ICoreWebView2_4 capability. Query it explicitly
+    // instead of assuming the base interface exposes versioned members.
+    (void)webview_.As(&webview_v4_);
 
     Microsoft::WRL::ComPtr<ICoreWebView2Settings> settings;
     if (SUCCEEDED(webview_->get_Settings(&settings)) && settings != nullptr)
@@ -295,7 +299,7 @@ void CloudOSNativeBrowserWindow::ConfigureController(ICoreWebView2Controller* co
             &history_changed_token_)))
         history_changed_registered_ = true;
 
-    if (SUCCEEDED(webview_->add_DownloadStarting(
+    if (webview_v4_ != nullptr && SUCCEEDED(webview_v4_->add_DownloadStarting(
             Microsoft::WRL::Callback<ICoreWebView2DownloadStartingEventHandler>(
                 [this, lifetime](ICoreWebView2*, ICoreWebView2DownloadStartingEventArgs* args) -> HRESULT
                 {
