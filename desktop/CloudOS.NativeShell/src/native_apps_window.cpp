@@ -503,7 +503,9 @@ void CloudOSNativeAppsWindow::ApplyFilter()
         LVITEMW item{};
         item.mask = LVIF_TEXT;
         item.iItem = row;
-        item.pszText = app.name.data();
+        // Common Controls still models pszText as mutable even though insert
+        // synchronously copies it. The catalog entry itself remains immutable.
+        item.pszText = const_cast<wchar_t*>(app.name.c_str());
         ListView_InsertItem(list_, &item);
         ListView_SetItemText(list_, row, 1, const_cast<wchar_t*>(app.platform.c_str()));
         std::wstring source = app.source;
