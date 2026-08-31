@@ -53,9 +53,6 @@ private:
 
     void StartWorker(bool force_refresh);
     void BuildIndex();
-    void StartWatcher();
-    void StopWatcher() noexcept;
-    void WatchStartFolders();
     void RequestUniversalSearch(const std::wstring& query) const;
     void UniversalSearchLoop() const;
 
@@ -66,10 +63,6 @@ private:
     std::thread worker_;
     std::atomic_bool indexing_{false};
     std::atomic_bool ready_{false};
-
-    std::thread watcher_;
-    HANDLE watcher_stop_{};
-    std::atomic_bool watcher_started_{false};
 
     // Windows Search is queried asynchronously. Query() only reads this cache,
     // so typing in Start never blocks the Win32 UI thread on OLE DB/SystemIndex.
