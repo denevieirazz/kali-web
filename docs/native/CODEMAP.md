@@ -13,8 +13,10 @@ Leia primeiro:
 3. `desktop/CloudOS.NativeRecovery/main.cpp` — Supervisor/recovery externo V11.
 4. `scripts/native/CloudOS.Deployment.V13.psm1` — instalação/update/rollback de versões.
 5. `scripts/native/CloudOS.ShellActivation.V14.psm1` — ativação opt-in do shell/rollback.
-6. `desktop/CloudOS.NativeShell/src/native_integration_v16.*` — boundary Windows + Linux/WSL.
-7. `docs/native/UNIFIED_INTEGRATION_V16.md` — comportamento e limitações da integração.
+6. `desktop/CloudOS.NativeShell/src/native_integration_v16.*` — boundary Windows + Linux/WSL para discovery/install/remove.
+7. `desktop/CloudOS.NativeShell/src/native_package_maintenance_v17.h` — **Package Maintenance V17**, upgrade explícito selecionado.
+8. `docs/native/UNIFIED_INTEGRATION_V16.md` — comportamento e limitações da integração.
+9. `docs/native/PACKAGE_MAINTENANCE_V17.md` — comportamento e segurança de atualização.
 
 `desktop/CloudOS.NativeShell/src/main.cpp` existe por histórico, mas **não é o entrypoint compilado atual**.
 
@@ -120,9 +122,12 @@ Continuity não substitui V13 rollback nem V14 rollback do shell.
 | `native_shell_pins.*` | pins |
 | `native_appearance_manager.*` | appearance |
 | `native_monitor_manager.*` | monitores/DPI/work areas |
-| `native_integration_v16.*` | **autoridade V16** para inventário Windows, WinGet, WSL distro/apps e package removal |
+| `native_integration_v16.*` | **autoridade V16** para inventário Windows, WinGet install/remove, WSL distro/apps e package removal |
+| `native_package_maintenance_v17.h` | **Package Maintenance V17**: builders/capability para upgrade selecionado via WinGet/apt/Snap/Flatpak |
 
-Não espalhe parsing de uninstall registry, `wsl.exe --list`, `gtk-launch`, WinGet ou mapeamento apt/snap/flatpak por outras surfaces. Se a responsabilidade é Windows↔Linux/package integration, comece em `native_integration_v16.*`.
+Não espalhe parsing de uninstall registry, `wsl.exe --list`, `gtk-launch`, WinGet ou mapeamento apt/snap/flatpak por outras surfaces. Discovery/install/remove continua em `native_integration_v16.*`; upgrade explícito selecionado começa em `native_package_maintenance_v17.h` e é consumido pela UI Apps.
+
+V17 não executa processo dentro da boundary: ela constrói comandos validados. Consentimento e execução visível pertencem a `native_apps_window.*` + `native_terminal_window.*`.
 
 ---
 
@@ -130,7 +135,7 @@ Não espalhe parsing de uninstall registry, `wsl.exe --list`, `gtk-launch`, WinG
 
 | Arquivo | Responsabilidade |
 |---|---|
-| `native_browser_window.*` | WebView2; registra `DownloadStarting` e controla o destino |
+| `native_browser_window.*` | WebView2; registra `DownloadStarting` pela interface versionada suportada e controla o destino |
 | `native_folder_picker_v16.*` | picker first-party CloudOS de pastas Windows/WSL |
 | `native_integration_v16.*` | known folders + `\\wsl.localhost` boundary |
 
@@ -159,15 +164,16 @@ Files já expõe `\\wsl.localhost\` no sidebar. Essa é a visão first-party do 
 
 ---
 
-## 9. Apps first-party e gerenciador unificado V16
+## 9. Apps first-party e gerenciador unificado V16/V17
 
 | Arquivo | Aplicativo/feature |
 |---|---|
-| `native_apps_window.*` | Apps V16: Windows + Linux, abrir/instalar/remover/refresh |
-| `native_integration_v16.*` | descoberta/execução/package boundary |
+| `native_apps_window.*` | Apps: Windows + Linux, abrir/instalar/**atualizar app**/remover/recarregar |
+| `native_integration_v16.*` | descoberta/execução/install/remove boundary |
+| `native_package_maintenance_v17.h` | upgrade selecionado seguro; não executa em background |
 | `native_app_launcher_v3.*` | lançamento first-party/externo |
 | `native_browser_window.*` | Browser |
-| `native_terminal_window.*` | Terminal ConPTY usado por WinGet/apt/removal visível |
+| `native_terminal_window.*` | Terminal ConPTY usado por WinGet/apt/Snap/Flatpak com prompts visíveis |
 | `native_notepad_window.*` | Notepad |
 | `native_calculator_window.*` | Calculator |
 | `native_projects_window.*` | Projects |
@@ -177,7 +183,7 @@ Files já expõe `\\wsl.localhost\` no sidebar. Essa é a visão first-party do 
 | `native_cloudos_drive.*` | CloudOS Drive |
 | `native_cloudos_trash_window.*` | Trash |
 
-Windows inventory é read-only; uninstall/WinGet só executa após ação explícita. Linux GUI discovery lê `.desktop` e usa WSLg/`gtk-launch`.
+Windows inventory é read-only; install/remove/upgrade só executam após ação explícita. Linux GUI discovery lê `.desktop` e usa WSLg/`gtk-launch`. V17 recusa manager desconhecido e evita bulk update (`upgrade --all`, `apt upgrade`).
 
 ---
 
@@ -192,7 +198,7 @@ Diretório: `desktop/CloudOS.NativeRuntime`.
 | `cloudos_native_window_events.*` | WinEvent/HWND events |
 | `cloudos_native_wsl.*` | WSL API baixo nível |
 
-A DLL fornece capacidade; não é proprietária da UI. V16 usa a boundary existente onde a WSL API cobre a operação e usa `wsl.exe` somente para capacidades que não estão expostas pelo runtime atual (lista de distros, `gtk-launch`, package managers).
+A DLL fornece capacidade; não é proprietária da UI. V16/V17 usam a boundary existente onde a WSL API cobre a operação e `wsl.exe` para capacidades que não estão expostas pelo runtime atual.
 
 ---
 
@@ -205,7 +211,7 @@ Diretório: `desktop/CloudOS.NativeRecovery`.
 | `main.cpp` | `CloudOS.Supervisor.exe`: launch, Ready/heartbeat, restart, graceful exit, Explorer fallback |
 | `CloudOS.NativeRecovery.vcxproj` | produz Supervisor |
 
-A autoridade continua V11; integração V16 não cria recovery paralelo.
+A autoridade continua V11; V16/V17 não criam recovery paralelo.
 
 ---
 
@@ -236,6 +242,7 @@ Tamanho, nomes de mapping/event/window class/message e estruturas compartilhadas
 - `test-native-contract-suite.ps1` — entrypoint único.
 - `test-*-contract.ps1` — contrato específico.
 - V16: `test-unified-integration-v16-contract.ps1`.
+- V17: `test-package-maintenance-v17-contract.ps1`.
 
 ### Runtime smokes
 
@@ -246,6 +253,7 @@ Tamanho, nomes de mapping/event/window class/message e estruturas compartilhadas
 - V13: `run-native-deployment-smoke-v13.ps1`
 - V14: `run-native-shell-activation-smoke-v14.ps1`
 - V16: `run-native-integration-smoke-v16.ps1` — capability snapshot não destrutivo; não instala/remove software.
+- V17: `run-native-package-maintenance-smoke-v17.ps1` — snapshot não destrutivo; **não executa upgrade real**.
 
 ### Deploy V13
 
@@ -272,6 +280,6 @@ Tamanho, nomes de mapping/event/window class/message e estruturas compartilhadas
 4. estenda o módulo existente se a responsabilidade for a mesma;
 5. crie módulo novo apenas para uma fronteira coesa;
 6. adicione contrato/teste;
-7. preserve V9–V16 invariantes aplicáveis.
+7. preserve V9–V17 invariantes aplicáveis.
 
 A meta é reduzir duplicação conceitual, não apenas reduzir número de linhas por arquivo.
