@@ -183,6 +183,38 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         return;
     }
 
+    if (method == "invokeBrokerRpc")
+    {
+        const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
+        if (!args)
+        {
+            result->Error("INVALID_ARGUMENT", "invokeBrokerRpc requires a map with 'method' and 'payload'");
+            return;
+        }
+
+        auto it_m = args->find(flutter::EncodableValue("method"));
+        auto it_p = args->find(flutter::EncodableValue("payload"));
+        if (it_m == args->end() || !std::holds_alternative<std::string>(it_m->second))
+        {
+            result->Error("INVALID_ARGUMENT", "Missing 'method' string in arguments");
+            return;
+        }
+
+        std::string rpc_method = std::get<std::string>(it_m->second);
+        std::string rpc_payload = (it_p != args->end() && std::holds_alternative<std::string>(it_p->second)) ? std::get<std::string>(it_p->second) : "{}";
+
+        std::string out_resp;
+        if (CloudOSBrokerClientV21::Instance().InvokeBrokerRpc(rpc_method, rpc_payload, out_resp))
+        {
+            result->Success(flutter::EncodableValue(out_resp));
+        }
+        else
+        {
+            result->Error("BROKER_RPC_FAILED", "Failed to communicate with System Broker for method: " + rpc_method);
+        }
+        return;
+    }
+
     result->NotImplemented();
 }
 

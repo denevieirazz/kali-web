@@ -208,6 +208,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
                           onClose: () => setState(() => filesOpen = false),
                           onMinimize: () => setState(() => filesOpen = false),
                           onDrag: (delta) => setState(() => filesOffset += delta),
+                          bridge: widget.bridge,
                         ),
                       ),
                     _panelSwitcher(),

@@ -60,10 +60,11 @@ foreach ($name in @(
     'rollback-cloudos-shell-v14.ps1',
     'repair-cloudos-shell-v14.ps1',
     'get-cloudos-shell-status-v14.ps1',
-    'run-native-shell-activation-smoke-v14.ps1',
     'run-system-broker-smoke-v21.ps1',
     'test-system-broker-v21-contract.ps1',
-    'test-system-broker-v21-soak.ps1'
+    'test-system-broker-v21-soak.ps1',
+    'run-unified-files-v22-smoke.ps1',
+    'test-unified-files-v22-contract.ps1'
 )) {
     $source = Join-Path $PSScriptRoot $name
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {

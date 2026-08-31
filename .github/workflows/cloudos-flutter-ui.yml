@@ -49,6 +49,8 @@ jobs:
           pwsh -NoProfile -File scripts/native/test-system-broker-v21-contract.ps1
           pwsh -NoProfile -File scripts/native/run-system-broker-smoke-v21.ps1
           pwsh -NoProfile -File scripts/native/test-system-broker-v21-soak.ps1 -DurationSeconds 5
+          pwsh -NoProfile -File scripts/native/test-unified-files-v22-contract.ps1
+          pwsh -NoProfile -File scripts/native/run-unified-files-v22-smoke.ps1
 
       - name: Generate local Windows host
         shell: pwsh

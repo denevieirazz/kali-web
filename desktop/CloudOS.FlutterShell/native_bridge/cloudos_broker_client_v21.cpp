@@ -430,7 +430,37 @@ bool CloudOSBrokerClientV21::GetCapabilities(std::vector<std::string>& out_caps)
         "jobs.status",
         "jobs.cancel",
         "diagnostics.snapshot",
+        "files.list",
+        "files.metadata",
+        "files.drives",
+        "files.knownFolders",
+        "files.resolvePath",
+        "files.createFolder",
+        "files.rename",
+        "files.delete",
+        "files.copy",
+        "files.move",
+        "files.search",
+        "files.open",
+        "files.openWith.list",
+        "files.openWith.launch",
     };
+    return true;
+}
+
+bool CloudOSBrokerClientV21::InvokeBrokerRpc(const std::string& method, const std::string& payload_json, std::string& out_resp_json)
+{
+    if (!EnsureConnected()) return false;
+
+    uint64_t req_id = next_req_id_++;
+    std::string req = "{\"protocol\":21,\"type\":\"request\",\"id\":\"req-" + std::to_string(req_id) + "\",\"method\":\"" + method + "\",\"payload\":" + (payload_json.empty() ? "{}" : payload_json) + "}";
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!SendFrame(req) || !ReadFrame(out_resp_json))
+    {
+        state_.store(BrokerConnectionState::Degraded);
+        return false;
+    }
     return true;
 }
 

@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../core/cloudos_theme.dart';
-import '../models/shell_models.dart';
+import '../models/file_models.dart';
 import '../services/cloudos_bridge.dart';
+import '../services/files_controller.dart';
 import 'glass_surface.dart';
 
 class FilesWindow extends StatefulWidget {
@@ -10,654 +11,571 @@ class FilesWindow extends StatefulWidget {
     required this.onClose,
     required this.onMinimize,
     required this.onDrag,
+    this.bridge,
     super.key,
   });
 
   final VoidCallback onClose;
   final VoidCallback onMinimize;
   final ValueChanged<Offset> onDrag;
+  final CloudOSBridge? bridge;
 
   @override
   State<FilesWindow> createState() => _FilesWindowState();
 }
 
 class _FilesWindowState extends State<FilesWindow> {
-  String currentLocation = 'home';
-  String currentTitle = 'Início';
-  String query = '';
-  bool isGridView = true;
-  String? selectedItemPath;
+  late final FilesController _controller;
+  final TextEditingController _pathInputController = TextEditingController();
+  final TextEditingController _searchInputController = TextEditingController();
+  bool _isEditingPath = false;
 
-  static const sidebarSections = <_SidebarSection>[
-    _SidebarSection(
-      title: 'Acesso Rápido',
-      items: <_SidebarEntry>[
-        _SidebarEntry(id: 'home', label: 'Início', icon: Icons.home_rounded, color: CloudOSColors.accent),
-        _SidebarEntry(id: 'desktop', label: 'Área de Trabalho', icon: Icons.desktop_windows_rounded, color: CloudOSColors.secondary),
-        _SidebarEntry(id: 'documents', label: 'Documentos', icon: Icons.description_rounded, color: CloudOSColors.secondary),
-        _SidebarEntry(id: 'downloads', label: 'Downloads', icon: Icons.download_rounded, color: CloudOSColors.secondary),
-      ],
-    ),
-    _SidebarSection(
-      title: 'Armazenamento',
-      items: <_SidebarEntry>[
-        _SidebarEntry(id: 'cloud-drive', label: 'CloudOS Drive', icon: Icons.cloud_circle_rounded, color: CloudOSColors.accent, badge: '10 GB'),
-        _SidebarEntry(id: 'windows-c', label: 'Disco Local (C:)', icon: Icons.storage_rounded, color: CloudOSColors.windows),
-        _SidebarEntry(id: 'ubuntu-wsl', label: 'Ubuntu (WSL2)', icon: Icons.terminal_rounded, color: CloudOSColors.linux, badge: 'WSLg'),
-      ],
-    ),
-    _SidebarSection(
-      title: 'Sistema',
-      items: <_SidebarEntry>[
-        _SidebarEntry(id: 'trash', label: 'Lixeira CloudOS', icon: Icons.delete_outline_rounded, color: CloudOSColors.secondary),
-      ],
-    ),
-  ];
-
-  List<CloudFileItem> get _currentFiles {
-    final allFiles = CloudOSBridge.previewFiles['home'] ?? <CloudFileItem>[];
-    if (query.trim().isEmpty) return allFiles;
-    final q = query.trim().toLowerCase();
-    return allFiles.where((f) => f.name.toLowerCase().contains(q)).toList(growable: false);
+  @override
+  void initState() {
+    super.initState();
+    _controller = FilesController(bridge: widget.bridge);
+    _controller.addListener(_onControllerUpdate);
   }
 
-  void _navigateTo(String id, String label) {
-    setState(() {
-      currentLocation = id;
-      currentTitle = label;
-      selectedItemPath = null;
-    });
+  void _onControllerUpdate() {
+    if (mounted) {
+      final tab = _controller.activeTab;
+      if (tab != null && !_isEditingPath) {
+        _pathInputController.text = tab.currentPath;
+      }
+      setState(() {});
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(_onControllerUpdate);
+    _controller.dispose();
+    _pathInputController.dispose();
+    _searchInputController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final files = _currentFiles;
+    final tab = _controller.activeTab;
 
-    return SizedBox(
-      width: 960,
-      height: 600,
-      child: GlassSurface(
-        borderRadius: 14,
-        blur: 24,
-        color: const Color(0xF4101822),
-        borderColor: CloudOSColors.borderStrong,
-        child: Column(
-          children: <Widget>[
-            _TitleBar(
-              title: currentTitle,
-              onClose: widget.onClose,
-              onMinimize: widget.onMinimize,
-              onDrag: widget.onDrag,
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: Row(
-                children: <Widget>[
-                  SizedBox(
-                    width: 210,
-                    child: _Sidebar(
-                      sections: sidebarSections,
-                      selectedId: currentLocation,
-                      onSelect: _navigateTo,
+    return Focus(
+      autofocus: true,
+      onKey: (node, event) {
+        // Handle keyboard shortcuts
+        return KeyEventResult.ignored;
+      },
+      child: SizedBox(
+        width: 1020,
+        height: 640,
+        child: GlassSurface(
+          borderRadius: 14,
+          blur: 24,
+          color: const Color(0xF4101822),
+          borderColor: CloudOSColors.borderStrong,
+          child: Column(
+            children: <Widget>[
+              // Title Bar + Tabs
+              _buildTitleBar(tab),
+              const Divider(height: 1),
+
+              // Navigation Toolbar
+              _buildToolbar(tab),
+              const Divider(height: 1),
+
+              // Main Body: Sidebar + File Grid/List
+              Expanded(
+                child: Row(
+                  children: <Widget>[
+                    // Sidebar
+                    SizedBox(
+                      width: 220,
+                      child: _buildSidebar(tab),
                     ),
-                  ),
-                  const VerticalDivider(width: 1),
-                  Expanded(
-                    child: Column(
-                      children: <Widget>[
-                        _Toolbar(
-                          currentTitle: currentTitle,
-                          query: query,
-                          isGridView: isGridView,
-                          onQueryChanged: (val) => setState(() => query = val),
-                          onToggleView: () => setState(() => isGridView = !isGridView),
-                        ),
-                        const Divider(height: 1),
-                        Expanded(
-                          child: files.isEmpty
-                              ? _EmptyFilesState(query: query)
-                              : isGridView
-                                  ? _FilesGrid(
-                                      files: files,
-                                      selectedPath: selectedItemPath,
-                                      onSelect: (path) => setState(() => selectedItemPath = path),
-                                    )
-                                  : _FilesList(
-                                      files: files,
-                                      selectedPath: selectedItemPath,
-                                      onSelect: (path) => setState(() => selectedItemPath = path),
-                                    ),
-                        ),
-                        _StatusBar(
-                          itemCount: files.length,
-                          selectedPath: selectedItemPath,
-                        ),
-                      ],
+                    const VerticalDivider(width: 1),
+
+                    // File View
+                    Expanded(
+                      child: _buildFileView(tab),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+
+              // Status Bar
+              _buildStatusBar(tab),
+            ],
+          ),
         ),
       ),
     );
   }
-}
 
-class _TitleBar extends StatelessWidget {
-  const _TitleBar({
-    required this.title,
-    required this.onClose,
-    required this.onMinimize,
-    required this.onDrag,
-  });
-
-  final String title;
-  final VoidCallback onClose;
-  final VoidCallback onMinimize;
-  final ValueChanged<Offset> onDrag;
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildTitleBar(FilesTabState? tab) {
     return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onPanUpdate: (details) => onDrag(details.delta),
+      onPanUpdate: (details) => widget.onDrag(details.delta),
       child: Container(
-        height: 44,
-        padding: const EdgeInsets.symmetric(horizontal: 14),
+        height: 42,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        color: Colors.transparent,
         child: Row(
           children: <Widget>[
-            const Icon(Icons.folder_rounded, color: CloudOSColors.accent, size: 18),
+            const Icon(Icons.folder_rounded, size: 18, color: Color(0xFFF59E0B)),
             const SizedBox(width: 8),
-            Text(
-              'Arquivos • $title',
-              style: const TextStyle(
-                color: CloudOSColors.text,
+            const Text(
+              'Arquivos',
+              style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
+                color: CloudOSColors.textPrimary,
               ),
             ),
-            const SizedBox(width: 10),
-            const _SourceBadge(label: 'Windows + Linux (WSL2)', color: CloudOSColors.accent),
-            const Spacer(),
-            _WindowButton(
-              icon: Icons.remove_rounded,
-              tooltip: 'Minimizar',
-              onPressed: onMinimize,
-            ),
-            const SizedBox(width: 4),
-            _WindowButton(
-              icon: Icons.crop_square_rounded,
-              tooltip: 'Maximizar',
-              onPressed: () {},
-            ),
-            const SizedBox(width: 4),
-            _WindowButton(
-              icon: Icons.close_rounded,
-              tooltip: 'Fechar (Esc)',
-              isClose: true,
-              onPressed: onClose,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
+            const SizedBox(width: 16),
 
-class _WindowButton extends StatelessWidget {
-  const _WindowButton({
-    required this.icon,
-    required this.tooltip,
-    required this.onPressed,
-    this.isClose = false,
-  });
-
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback onPressed;
-  final bool isClose;
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(6),
-        child: Container(
-          width: 28,
-          height: 26,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: Colors.transparent,
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Icon(
-            icon,
-            size: 15,
-            color: isClose ? CloudOSColors.danger : CloudOSColors.secondary,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SidebarSection {
-  const _SidebarSection({required this.title, required this.items});
-  final String title;
-  final List<_SidebarEntry> items;
-}
-
-class _SidebarEntry {
-  const _SidebarEntry({
-    required this.id,
-    required this.label,
-    required this.icon,
-    required this.color,
-    this.badge,
-  });
-  final String id;
-  final String label;
-  final IconData icon;
-  final Color color;
-  final String? badge;
-}
-
-class _Sidebar extends StatelessWidget {
-  const _Sidebar({
-    required this.sections,
-    required this.selectedId,
-    required this.onSelect,
-  });
-
-  final List<_SidebarSection> sections;
-  final String selectedId;
-  final void Function(String id, String label) onSelect;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      color: const Color(0x350D151E),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-      child: ListView.separated(
-        itemCount: sections.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 12),
-        itemBuilder: (context, sIdx) {
-          final section = sections[sIdx];
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                child: Text(
-                  section.title.toUpperCase(),
-                  style: const TextStyle(
-                    color: CloudOSColors.caption,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 2),
-              for (final item in section.items) ...<Widget>[
-                _SidebarItemTile(
-                  entry: item,
-                  selected: item.id == selectedId,
-                  onTap: () => onSelect(item.id, item.label),
-                ),
-                const SizedBox(height: 2),
-              ],
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _SidebarItemTile extends StatelessWidget {
-  const _SidebarItemTile({
-    required this.entry,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final _SidebarEntry entry;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        height: 32,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        decoration: BoxDecoration(
-          color: selected ? CloudOSColors.accentSoft : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: selected ? CloudOSColors.accent.withValues(alpha: 0.5) : Colors.transparent,
-          ),
-        ),
-        child: Row(
-          children: <Widget>[
-            Icon(entry.icon, size: 16, color: selected ? CloudOSColors.accent : entry.color),
-            const SizedBox(width: 8),
+            // Tabs Row
             Expanded(
-              child: Text(
-                entry.label,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: selected ? CloudOSColors.text : CloudOSColors.secondary,
-                  fontSize: 12,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+              child: SizedBox(
+                height: 32,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _controller.tabs.length + 1,
+                  separatorBuilder: (_, __) => const SizedBox(width: 4),
+                  itemBuilder: (context, index) {
+                    if (index == _controller.tabs.length) {
+                      return IconButton(
+                        icon: const Icon(Icons.add_rounded, size: 16),
+                        tooltip: 'Nova Aba',
+                        onPressed: () => _controller.addTab(),
+                        color: CloudOSColors.textSecondary,
+                      );
+                    }
+
+                    final t = _controller.tabs[index];
+                    final isActive = index == _controller.activeTabIndex;
+
+                    return InkWell(
+                      onTap: () => _controller.selectTab(index),
+                      borderRadius: BorderRadius.circular(6),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: isActive ? const Color(0x2838BDF8) : Colors.transparent,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: isActive ? CloudOSColors.accent.withValues(alpha: 0.4) : Colors.transparent,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            Text(
+                              t.title,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: isActive ? CloudOSColors.accent : CloudOSColors.textSecondary,
+                                fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                              ),
+                            ),
+                            if (_controller.tabs.length > 1) ...<Widget>[
+                              const SizedBox(width: 6),
+                              InkWell(
+                                onTap: () => _controller.closeTab(index),
+                                child: const Icon(Icons.close_rounded, size: 12, color: CloudOSColors.textSecondary),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ),
             ),
-            if (entry.badge != null)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                decoration: BoxDecoration(
-                  color: CloudOSColors.elevated,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  entry.badge!,
-                  style: const TextStyle(color: CloudOSColors.caption, fontSize: 9.5, fontWeight: FontWeight.w600),
-                ),
-              ),
+
+            // Window Controls
+            IconButton(
+              icon: const Icon(Icons.remove_rounded, size: 16),
+              tooltip: 'Minimizar',
+              onPressed: widget.onMinimize,
+              color: CloudOSColors.textSecondary,
+            ),
+            IconButton(
+              icon: const Icon(Icons.close_rounded, size: 16),
+              tooltip: 'Fechar',
+              onPressed: widget.onClose,
+              color: CloudOSColors.textSecondary,
+            ),
           ],
         ),
       ),
     );
   }
-}
 
-class _Toolbar extends StatelessWidget {
-  const _Toolbar({
-    required this.currentTitle,
-    required this.query,
-    required this.isGridView,
-    required this.onQueryChanged,
-    required this.onToggleView,
-  });
-
-  final String currentTitle;
-  final String query;
-  final bool isGridView;
-  final ValueChanged<String> onQueryChanged;
-  final VoidCallback onToggleView;
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildToolbar(FilesTabState? tab) {
     return Container(
-      height: 46,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
+      height: 44,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       child: Row(
         children: <Widget>[
-          _NavButton(icon: Icons.arrow_back_rounded, tooltip: 'Voltar', onPressed: () {}),
-          _NavButton(icon: Icons.arrow_forward_rounded, tooltip: 'Avançar', onPressed: () {}),
-          _NavButton(icon: Icons.arrow_upward_rounded, tooltip: 'Subir Pasta', onPressed: () {}),
-          _NavButton(icon: Icons.refresh_rounded, tooltip: 'Atualizar', onPressed: () {}),
+          // Back / Forward / Up / Refresh
+          IconButton(
+            icon: const Icon(Icons.arrow_back_rounded, size: 18),
+            tooltip: 'Voltar (Alt+Seta Esquerda)',
+            onPressed: tab?.canGoBack == true ? () => _controller.goBack() : null,
+            color: CloudOSColors.textPrimary,
+          ),
+          IconButton(
+            icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+            tooltip: 'Avançar (Alt+Seta Direita)',
+            onPressed: tab?.canGoForward == true ? () => _controller.goForward() : null,
+            color: CloudOSColors.textPrimary,
+          ),
+          IconButton(
+            icon: const Icon(Icons.arrow_upward_rounded, size: 18),
+            tooltip: 'Pasta Acima',
+            onPressed: () => _controller.goToParent(),
+            color: CloudOSColors.textPrimary,
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            tooltip: 'Atualizar (F5)',
+            onPressed: () => _controller.refresh(),
+            color: CloudOSColors.textPrimary,
+          ),
           const SizedBox(width: 8),
+
+          // Location Breadcrumbs / Input Bar
           Expanded(
             child: Container(
               height: 32,
-              padding: const EdgeInsets.symmetric(horizontal: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
               decoration: BoxDecoration(
-                color: CloudOSColors.elevated.withValues(alpha: 0.5),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: CloudOSColors.border),
+                color: const Color(0x18FFFFFF),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: CloudOSColors.borderSubtle),
               ),
               child: Row(
                 children: <Widget>[
-                  const Icon(Icons.folder_open_rounded, size: 15, color: CloudOSColors.accent),
-                  const SizedBox(width: 6),
-                  const Text('CloudOS', style: TextStyle(fontSize: 11.5, color: CloudOSColors.caption)),
-                  const SizedBox(width: 4),
-                  const Icon(Icons.chevron_right_rounded, size: 14, color: CloudOSColors.caption),
-                  const SizedBox(width: 4),
-                  Text(currentTitle, style: const TextStyle(fontSize: 11.5, color: CloudOSColors.text, fontWeight: FontWeight.w600)),
+                  const Icon(Icons.folder_open_rounded, size: 16, color: CloudOSColors.textSecondary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: _pathInputController,
+                      style: const TextStyle(fontSize: 12, color: CloudOSColors.textPrimary),
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(vertical: 6),
+                        border: InputBorder.none,
+                        hintText: 'Digite o caminho (ex: C:\\ ou \\\\wsl.localhost\\Ubuntu)',
+                        hintStyle: TextStyle(fontSize: 12, color: CloudOSColors.textTertiary),
+                      ),
+                      onSubmitted: (value) {
+                        if (value.trim().isNotEmpty) {
+                          _controller.navigateTo(value.trim());
+                        }
+                      },
+                    ),
+                  ),
                 ],
               ),
             ),
           ),
           const SizedBox(width: 8),
+
+          // Search Box
           SizedBox(
             width: 180,
             height: 32,
             child: TextField(
-              onChanged: onQueryChanged,
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.search_rounded, size: 16),
-                hintText: 'Filtrar pasta...',
-                contentPadding: EdgeInsets.zero,
+              controller: _searchInputController,
+              style: const TextStyle(fontSize: 12, color: CloudOSColors.textPrimary),
+              decoration: InputDecoration(
                 isDense: true,
+                contentPadding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide: const BorderSide(color: CloudOSColors.borderSubtle),
+                ),
+                prefixIcon: const Icon(Icons.search_rounded, size: 16, color: CloudOSColors.textSecondary),
+                hintText: 'Buscar...',
+                hintStyle: const TextStyle(fontSize: 12, color: CloudOSColors.textTertiary),
               ),
+              onChanged: (value) => _controller.setSearchQuery(value),
             ),
           ),
-          const SizedBox(width: 6),
-          Tooltip(
-            message: isGridView ? 'Mudar para exibição em lista' : 'Mudar para exibição em grade',
-            child: IconButton(
-              onPressed: onToggleView,
-              visualDensity: VisualDensity.compact,
-              icon: Icon(isGridView ? Icons.view_list_rounded : Icons.grid_view_rounded, size: 18),
-            ),
+          const SizedBox(width: 8),
+
+          // Actions: New Folder, Grid/List view toggle
+          IconButton(
+            icon: const Icon(Icons.create_new_folder_rounded, size: 18),
+            tooltip: 'Nova Pasta',
+            onPressed: () => _showCreateFolderDialog(),
+            color: CloudOSColors.textPrimary,
+          ),
+          IconButton(
+            icon: Icon(tab?.isGridView == true ? Icons.view_list_rounded : Icons.grid_view_rounded, size: 18),
+            tooltip: tab?.isGridView == true ? 'Visualizar em Lista' : 'Visualizar em Grade',
+            onPressed: () => _controller.toggleViewMode(),
+            color: CloudOSColors.textPrimary,
           ),
         ],
       ),
     );
   }
-}
 
-class _NavButton extends StatelessWidget {
-  const _NavButton({required this.icon, required this.tooltip, required this.onPressed});
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: IconButton(
-        onPressed: onPressed,
-        visualDensity: VisualDensity.compact,
-        icon: Icon(icon, size: 16, color: CloudOSColors.secondary),
-      ),
-    );
-  }
-}
-
-class _FilesGrid extends StatelessWidget {
-  const _FilesGrid({
-    required this.files,
-    required this.selectedPath,
-    required this.onSelect,
-  });
-
-  final List<CloudFileItem> files;
-  final String? selectedPath;
-  final ValueChanged<String> onSelect;
-
-  @override
-  Widget build(BuildContext context) {
-    return GridView.builder(
-      padding: const EdgeInsets.all(12),
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 170,
-        mainAxisExtent: 116,
-        crossAxisSpacing: 10,
-        mainAxisSpacing: 10,
-      ),
-      itemCount: files.length,
-      itemBuilder: (context, index) {
-        final item = files[index];
-        final isSelected = item.path == selectedPath;
-        return _FileGridCard(
-          item: item,
-          isSelected: isSelected,
-          onTap: () => onSelect(item.path),
-        );
-      },
-    );
-  }
-}
-
-class _FileGridCard extends StatelessWidget {
-  const _FileGridCard({
-    required this.item,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  final CloudFileItem item;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  Color get sourceColor => switch (item.source) {
-        CloudFileSource.windows => CloudOSColors.windows,
-        CloudFileSource.linux => CloudOSColors.linux,
-        CloudFileSource.cloudDrive => CloudOSColors.accent,
-        CloudFileSource.trash => CloudOSColors.danger,
-      };
-
-  String get sourceLabel => switch (item.source) {
-        CloudFileSource.windows => 'Win',
-        CloudFileSource.linux => 'WSL',
-        CloudFileSource.cloudDrive => 'Cloud',
-        CloudFileSource.trash => 'Lixeira',
-      };
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: isSelected ? CloudOSColors.accentSoft : CloudOSColors.elevated.withValues(alpha: 0.4),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: isSelected ? CloudOSColors.accent : CloudOSColors.border,
+  Widget _buildSidebar(FilesTabState? tab) {
+    return ListView(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+      children: <Widget>[
+        // Acesso Rápido / Known Folders
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Text(
+            'Acesso Rápido',
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: CloudOSColors.textTertiary),
           ),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        for (final kf in _controller.knownFolders)
+          _buildSidebarItem(
+            id: kf.id,
+            name: kf.name,
+            icon: kf.icon,
+            color: kf.id.startsWith('wsl:') ? CloudOSColors.linux : CloudOSColors.accent,
+            isSelected: tab?.currentPath == kf.path || tab?.currentPath == kf.id,
+            onTap: () => _controller.navigateTo(kf.path, title: kf.name),
+          ),
+
+        const SizedBox(height: 12),
+        // Dispositivos e Unidades
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Text(
+            'Este Computador',
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: CloudOSColors.textTertiary),
+          ),
+        ),
+        for (final drive in _controller.drives)
+          _buildSidebarItem(
+            id: drive.letter,
+            name: drive.label.isNotEmpty ? '${drive.label} (${drive.letter})' : drive.letter,
+            icon: drive.isRemovable ? Icons.usb_rounded : Icons.storage_rounded,
+            color: CloudOSColors.windows,
+            isSelected: tab?.currentPath == drive.path || tab?.currentPath == drive.letter,
+            badge: drive.freeFormatted.isNotEmpty ? '${drive.freeFormatted} livres' : null,
+            onTap: () => _controller.navigateTo(drive.path, title: drive.letter),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildSidebarItem({
+    required String id,
+    required String name,
+    required IconData icon,
+    required Color color,
+    required bool isSelected,
+    required VoidCallback onTap,
+    String? badge,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        margin: const EdgeInsets.symmetric(vertical: 1),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0x2838BDF8) : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: isSelected ? CloudOSColors.accent.withValues(alpha: 0.3) : Colors.transparent,
+          ),
+        ),
+        child: Row(
           children: <Widget>[
-            Row(
-              children: <Widget>[
-                Icon(
-                  item.icon ?? (item.isFolder ? Icons.folder_rounded : Icons.insert_drive_file_rounded),
-                  color: item.isFolder ? CloudOSColors.accent : CloudOSColors.secondary,
-                  size: 28,
+            Icon(icon, size: 16, color: color),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                name,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isSelected ? CloudOSColors.accent : CloudOSColors.textPrimary,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                 ),
-                const Spacer(),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                  decoration: BoxDecoration(
-                    color: sourceColor.withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    sourceLabel,
-                    style: TextStyle(color: sourceColor, fontSize: 8.5, fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ],
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-            const Spacer(),
-            Text(
-              item.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: CloudOSColors.text, fontSize: 11.5, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              '${item.sizeFormatted} • ${item.modifiedFormatted}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: CloudOSColors.caption, fontSize: 9.5),
-            ),
+            if (badge != null)
+              Text(
+                badge,
+                style: const TextStyle(fontSize: 10, color: CloudOSColors.textTertiary),
+              ),
           ],
         ),
       ),
     );
   }
-}
 
-class _FilesList extends StatelessWidget {
-  const _FilesList({
-    required this.files,
-    required this.selectedPath,
-    required this.onSelect,
-  });
+  Widget _buildFileView(FilesTabState? tab) {
+    if (tab == null) return const SizedBox.shrink();
 
-  final List<CloudFileItem> files;
-  final String? selectedPath;
-  final ValueChanged<String> onSelect;
+    if (tab.isLoading) {
+      return const Center(
+        child: CircularProgressIndicator(color: CloudOSColors.accent),
+      );
+    }
 
-  @override
-  Widget build(BuildContext context) {
-    return ListView.separated(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      itemCount: files.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 2),
+    if (tab.errorMessage != null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const Icon(Icons.error_outline_rounded, size: 36, color: Color(0xFFF43F5E)),
+            const SizedBox(height: 8),
+            Text(
+              tab.errorMessage!,
+              style: const TextStyle(fontSize: 13, color: CloudOSColors.textSecondary),
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton(
+              onPressed: () => _controller.refresh(),
+              child: const Text('Tentar Novamente'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (tab.items.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: const <Widget>[
+            Icon(Icons.folder_open_rounded, size: 48, color: CloudOSColors.textTertiary),
+            SizedBox(height: 8),
+            Text(
+              'Esta pasta está vazia.',
+              style: TextStyle(fontSize: 13, color: CloudOSColors.textSecondary),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return GestureDetector(
+      onTap: () => _controller.clearSelection(),
+      child: tab.isGridView ? _buildGridView(tab) : _buildListView(tab),
+    );
+  }
+
+  Widget _buildGridView(FilesTabState tab) {
+    return GridView.builder(
+      padding: const EdgeInsets.all(12),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 110,
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        childAspectRatio: 0.85,
+      ),
+      itemCount: tab.items.length,
       itemBuilder: (context, index) {
-        final item = files[index];
-        final isSelected = item.path == selectedPath;
+        final item = tab.items[index];
+        final isSelected = tab.selectedPaths.contains(item.path);
+
         return InkWell(
-          onTap: () => onSelect(item.path),
+          onTap: () => _controller.selectItem(item.path),
+          onDoubleTap: () => _controller.openItem(item),
+          onSecondaryTapDown: (details) => _showContextMenu(context, details.globalPosition, item),
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: isSelected ? const Color(0x3038BDF8) : const Color(0x08FFFFFF),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: isSelected ? CloudOSColors.accent : CloudOSColors.borderSubtle,
+              ),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                Icon(item.icon, size: 36, color: item.iconColor),
+                const SizedBox(height: 6),
+                Text(
+                  item.displayName,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isSelected ? CloudOSColors.accent : CloudOSColors.textPrimary,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                  ),
+                  maxLines: 2,
+                  textAlign: TextAlign.center,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildListView(FilesTabState tab) {
+    return ListView.builder(
+      padding: const EdgeInsets.all(8),
+      itemCount: tab.items.length,
+      itemBuilder: (context, index) {
+        final item = tab.items[index];
+        final isSelected = tab.selectedPaths.contains(item.path);
+
+        return InkWell(
+          onTap: () => _controller.selectItem(item.path),
+          onDoubleTap: () => _controller.openItem(item),
+          onSecondaryTapDown: (details) => _showContextMenu(context, details.globalPosition, item),
           borderRadius: BorderRadius.circular(6),
           child: Container(
-            height: 34,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            margin: const EdgeInsets.symmetric(vertical: 1),
             decoration: BoxDecoration(
-              color: isSelected ? CloudOSColors.accentSoft : Colors.transparent,
+              color: isSelected ? const Color(0x3038BDF8) : Colors.transparent,
               borderRadius: BorderRadius.circular(6),
               border: Border.all(
-                color: isSelected ? CloudOSColors.accent.withValues(alpha: 0.5) : Colors.transparent,
+                color: isSelected ? CloudOSColors.accent : Colors.transparent,
               ),
             ),
             child: Row(
               children: <Widget>[
-                Icon(
-                  item.icon ?? (item.isFolder ? Icons.folder_rounded : Icons.insert_drive_file_rounded),
-                  size: 17,
-                  color: item.isFolder ? CloudOSColors.accent : CloudOSColors.secondary,
-                ),
-                const SizedBox(width: 8),
+                Icon(item.icon, size: 18, color: item.iconColor),
+                const SizedBox(width: 10),
                 Expanded(
                   flex: 3,
                   child: Text(
-                    item.name,
+                    item.displayName,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isSelected ? CloudOSColors.accent : CloudOSColors.textPrimary,
+                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: CloudOSColors.text, fontSize: 12),
                   ),
                 ),
                 Expanded(
                   flex: 2,
                   child: Text(
                     item.modifiedFormatted,
-                    style: const TextStyle(color: CloudOSColors.caption, fontSize: 11),
+                    style: const TextStyle(fontSize: 11, color: CloudOSColors.textSecondary),
+                    maxLines: 1,
                   ),
                 ),
                 SizedBox(
                   width: 80,
                   child: Text(
                     item.sizeFormatted,
+                    style: const TextStyle(fontSize: 11, color: CloudOSColors.textSecondary),
                     textAlign: TextAlign.right,
-                    style: const TextStyle(color: CloudOSColors.caption, fontSize: 11),
                   ),
                 ),
               ],
@@ -667,88 +585,283 @@ class _FilesList extends StatelessWidget {
       },
     );
   }
-}
 
-class _EmptyFilesState extends StatelessWidget {
-  const _EmptyFilesState({required this.query});
-  final String query;
+  Widget _buildStatusBar(FilesTabState? tab) {
+    final count = tab?.items.length ?? 0;
+    final selectedCount = tab?.selectedPaths.length ?? 0;
 
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          const Icon(Icons.folder_open_rounded, size: 44, color: CloudOSColors.caption),
-          const SizedBox(height: 10),
-          Text(
-            query.isNotEmpty ? 'Nenhum arquivo correspondente a "$query"' : 'Pasta vazia',
-            style: const TextStyle(color: CloudOSColors.secondary, fontSize: 13),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatusBar extends StatelessWidget {
-  const _StatusBar({required this.itemCount, required this.selectedPath});
-  final int itemCount;
-  final String? selectedPath;
-
-  @override
-  Widget build(BuildContext context) {
     return Container(
       height: 26,
       padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: const BoxDecoration(
-        color: Color(0x350D151E),
-        border: Border(top: BorderSide(color: CloudOSColors.border)),
-      ),
+      color: const Color(0x10000000),
       child: Row(
         children: <Widget>[
           Text(
-            '$itemCount itens',
-            style: const TextStyle(color: CloudOSColors.caption, fontSize: 10.5),
+            '$count itens',
+            style: const TextStyle(fontSize: 11, color: CloudOSColors.textSecondary),
           ),
-          if (selectedPath != null) ...<Widget>[
-            const SizedBox(width: 8),
-            const Text('•', style: TextStyle(color: CloudOSColors.caption)),
-            const SizedBox(width: 8),
-            const Text(
-              '1 item selecionado',
-              style: TextStyle(color: CloudOSColors.accent, fontSize: 10.5, fontWeight: FontWeight.w600),
+          if (selectedCount > 0) ...<Widget>[
+            const SizedBox(width: 12),
+            Text(
+              '$selectedCount selecionado(s)',
+              style: const TextStyle(fontSize: 11, color: CloudOSColors.accent),
             ),
           ],
           const Spacer(),
-          const Icon(Icons.cloud_done_rounded, size: 13, color: CloudOSColors.success),
-          const SizedBox(width: 5),
-          const Text(
-            'Sistema de arquivos unificado e sincronizado',
-            style: TextStyle(color: CloudOSColors.caption, fontSize: 10.5),
-          ),
+          if (tab?.locationKind == LocationKind.wsl)
+            const Text(
+              'Linux / WSL2 Filesystem',
+              style: TextStyle(fontSize: 11, color: CloudOSColors.linux),
+            )
+          else
+            const Text(
+              'Windows Filesystem',
+              style: TextStyle(fontSize: 11, color: CloudOSColors.windows),
+            ),
         ],
       ),
     );
   }
-}
 
-class _SourceBadge extends StatelessWidget {
-  const _SourceBadge({required this.label, required this.color});
-
-  final String label;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(6),
+  void _showContextMenu(BuildContext context, Offset position, CloudFileItem item) {
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(position.dx, position.dy, position.dx + 1, position.dy + 1),
+      items: <PopupMenuEntry<String>>[
+        const PopupMenuItem<String>(
+          value: 'open',
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.open_in_new_rounded, size: 16, color: CloudOSColors.textPrimary),
+              SizedBox(width: 8),
+              Text('Abrir'),
+            ],
+          ),
         ),
-        child: Text(
-          label,
-          style: TextStyle(color: color, fontSize: 9.5, fontWeight: FontWeight.w700),
+        if (!item.isDirectory)
+          const PopupMenuItem<String>(
+            value: 'open_with',
+            child: Row(
+              children: <Widget>[
+                Icon(Icons.apps_rounded, size: 16, color: CloudOSColors.textPrimary),
+                SizedBox(width: 8),
+                Text('Abrir com...'),
+              ],
+            ),
+          ),
+        const PopupMenuDivider(),
+        const PopupMenuItem<String>(
+          value: 'copy',
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.copy_rounded, size: 16, color: CloudOSColors.textPrimary),
+              SizedBox(width: 8),
+              Text('Copiar (Ctrl+C)'),
+            ],
+          ),
         ),
-      );
+        const PopupMenuItem<String>(
+          value: 'cut',
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.cut_rounded, size: 16, color: CloudOSColors.textPrimary),
+              SizedBox(width: 8),
+              Text('Recortar (Ctrl+X)'),
+            ],
+          ),
+        ),
+        const PopupMenuItem<String>(
+          value: 'rename',
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.edit_rounded, size: 16, color: CloudOSColors.textPrimary),
+              SizedBox(width: 8),
+              Text('Renomear (F2)'),
+            ],
+          ),
+        ),
+        const PopupMenuItem<String>(
+          value: 'delete',
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.delete_outline_rounded, size: 16, color: Color(0xFFF43F5E)),
+              SizedBox(width: 8),
+              Text('Excluir (Lixeira)'),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
+        const PopupMenuItem<String>(
+          value: 'properties',
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.info_outline_rounded, size: 16, color: CloudOSColors.textPrimary),
+              SizedBox(width: 8),
+              Text('Propriedades'),
+            ],
+          ),
+        ),
+      ],
+    ).then((value) {
+      if (value == 'open') {
+        _controller.openItem(item);
+      } else if (value == 'open_with') {
+        _showOpenWithDialog(item);
+      } else if (value == 'copy') {
+        _controller.copySelected();
+      } else if (value == 'cut') {
+        _controller.cutSelected();
+      } else if (value == 'rename') {
+        _showRenameDialog(item);
+      } else if (value == 'delete') {
+        _controller.deleteSelected(permanent: false);
+      } else if (value == 'properties') {
+        _showPropertiesDialog(item);
+      }
+    });
+  }
+
+  void _showOpenWithDialog(CloudFileItem item) async {
+    final apps = await _controller.getOpenWith(item.path);
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1E293B),
+          title: Text('Abrir "${item.name}" com:'),
+          content: SizedBox(
+            width: 380,
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: apps.length,
+              separatorBuilder: (_, __) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final app = apps[index];
+                return ListTile(
+                  leading: Icon(app.icon, color: app.platform == 'linux' ? CloudOSColors.linux : CloudOSColors.windows),
+                  title: Text(app.name, style: const TextStyle(fontSize: 13, color: CloudOSColors.textPrimary)),
+                  subtitle: Text(
+                    app.platform == 'linux' ? 'Aplicativo Linux (WSLg)' : 'Aplicativo Windows',
+                    style: const TextStyle(fontSize: 11, color: CloudOSColors.textSecondary),
+                  ),
+                  trailing: app.isDefault ? const Icon(Icons.check_circle_rounded, size: 16, color: CloudOSColors.accent) : null,
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    _controller.launchOpenWith(item.path, app);
+                  },
+                );
+              },
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancelar'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showCreateFolderDialog() {
+    final controller = TextEditingController(text: 'Nova Pasta');
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1E293B),
+          title: const Text('Criar Nova Pasta'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'Nome da Pasta'),
+          ),
+          actions: <Widget>[
+            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancelar')),
+            ElevatedButton(
+              onPressed: () {
+                final name = controller.text.trim();
+                if (name.isNotEmpty) {
+                  _controller.createFolder(name);
+                }
+                Navigator.of(context).pop();
+              },
+              child: const Text('Criar'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showRenameDialog(CloudFileItem item) {
+    final controller = TextEditingController(text: item.name);
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1E293B),
+          title: const Text('Renomear Item'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'Novo Nome'),
+          ),
+          actions: <Widget>[
+            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancelar')),
+            ElevatedButton(
+              onPressed: () {
+                final name = controller.text.trim();
+                if (name.isNotEmpty && name != item.name) {
+                  _controller.renameItem(item.path, name);
+                }
+                Navigator.of(context).pop();
+              },
+              child: const Text('Renomear'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showPropertiesDialog(CloudFileItem item) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1E293B),
+          title: Row(
+            children: <Widget>[
+              Icon(item.icon, size: 24, color: item.iconColor),
+              const SizedBox(width: 8),
+              Expanded(child: Text(item.name, overflow: TextOverflow.ellipsis)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text('Tipo: ${item.isDirectory ? "Pasta de Arquivos" : (item.extension.isNotEmpty ? item.extension : "Arquivo")}'),
+              const SizedBox(height: 4),
+              Text('Tamanho: ${item.sizeFormatted.isNotEmpty ? item.sizeFormatted : "0 B"}'),
+              const SizedBox(height: 4),
+              Text('Caminho: ${item.path}'),
+              const SizedBox(height: 4),
+              Text('Modificado: ${item.modifiedFormatted}'),
+              const SizedBox(height: 4),
+              Text('Origem: ${item.locationKind == LocationKind.wsl ? "Linux / WSL (${item.distro})" : "Windows"}'),
+            ],
+          ),
+          actions: <Widget>[
+            ElevatedButton(onPressed: () => Navigator.of(context).pop(), child: const Text('OK')),
+          ],
+        );
+      },
+    );
+  }
 }

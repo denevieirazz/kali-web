@@ -513,13 +513,30 @@ Tamanho, nomes de mapping/event/window class/message e estruturas compartilhadas
 
 ---
 
-## 17. Como decidir se criar arquivo novo
+---
+
+## 17. Unified Files & Open With (V22)
+
+| Arquivo / Pasta | Responsabilidade |
+|---|---|
+| `desktop/CloudOS.SystemBroker/src/file_service_v22.*` | `FileServiceV22`: operações Win32 nativas, `IFileOperation` (Lixeira), `wslpath` mapping, Known Folders, Drives, Open With e jobs assíncronos |
+| `desktop/CloudOS.FlutterShell/lib/models/file_models.dart` | Modelos tipados de arquivo (`CloudFileItem`, `DriveInfoModel`, `KnownFolderModel`, `OpenWithAppModel`) |
+| `desktop/CloudOS.FlutterShell/lib/services/files_controller.dart` | `FilesController`: gerenciador de estado, multi-tabs, navegação, ordenação, busca, seleção, clipboard (copiar/recortar/colar) |
+| `desktop/CloudOS.FlutterShell/lib/widgets/files_window.dart` | UI de arquivos: abas, barra de navegação/breadcrumbs, busca, sidebar com drives e known folders, grid/list, contexto e diálogo de Open With |
+| `scripts/native/test-unified-files-v22-contract.ps1` | Validação de contratos estruturais de arquivos e segurança |
+| `scripts/native/run-unified-files-v22-smoke.ps1` | Smoke de teste de ponta a ponta com probe de arquivos |
+| `docs/native/UNIFIED_FILES_V22.md` | Especificação completa da arquitetura de arquivos e Open With V22 |
+| `docs/native/FILES_SECURITY_V22.md` | Matriz de segurança e integridade de operações de arquivo |
+
+---
+
+## 18. Como decidir se criar arquivo novo
 
 1. procure no `CODEMAP` e `.vcxproj`;
 2. abra header + cpp do dono atual;
 4. estenda o módulo existente se a responsabilidade for a mesma;
 5. crie módulo novo apenas para uma fronteira coesa;
 6. adicione contrato/teste;
-7. preserve V9–V17 invariantes aplicáveis.
+7. preserve V9–V21 invariantes aplicáveis.
 
 A meta é reduzir duplicação conceitual, não apenas reduzir número de linhas por arquivo.

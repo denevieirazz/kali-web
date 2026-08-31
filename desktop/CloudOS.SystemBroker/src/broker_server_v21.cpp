@@ -2,6 +2,7 @@
 #include "app_service_v21.h"
 #include "diagnostics_v21.h"
 #include "event_bus_v21.h"
+#include "file_service_v22.h"
 #include "job_manager_v21.h"
 #include "security_v21.h"
 #include "system_service_v21.h"
@@ -448,6 +449,268 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
         }
         bool cancelled = JobManagerV21::Instance().CancelJob(it->second.AsString());
         res.payload["cancelled"] = JsonValue(cancelled);
+        return res;
+    }
+
+    if (method == "files.list")
+    {
+        auto it_path = req.payload.find("path");
+        std::string path = (it_path != req.payload.end() && it_path->second.IsString()) ? it_path->second.AsString() : "home";
+
+        size_t page_size = 200;
+        auto it_size = req.payload.find("pageSize");
+        if (it_size != req.payload.end() && it_size->second.IsInt()) page_size = static_cast<size_t>(it_size->second.AsInt());
+
+        std::string continuation;
+        auto it_cont = req.payload.find("continuationToken");
+        if (it_cont != req.payload.end() && it_cont->second.IsString()) continuation = it_cont->second.AsString();
+
+        FileSortOptions sort;
+        auto it_sort_field = req.payload.find("sortField");
+        if (it_sort_field != req.payload.end() && it_sort_field->second.IsString())
+        {
+            std::string sf = it_sort_field->second.AsString();
+            if (sf == "size") sort.field = FileSortField::Size;
+            else if (sf == "modified") sort.field = FileSortField::Modified;
+            else if (sf == "type") sort.field = FileSortField::Type;
+            else sort.field = FileSortField::Name;
+        }
+
+        auto it_sort_asc = req.payload.find("ascending");
+        if (it_sort_asc != req.payload.end() && it_sort_asc->second.IsBool()) sort.ascending = it_sort_asc->second.AsBool();
+
+        auto it_sort_dirs = req.payload.find("directoriesFirst");
+        if (it_sort_dirs != req.payload.end() && it_sort_dirs->second.IsBool()) sort.directories_first = it_sort_dirs->second.AsBool();
+
+        FileFilterOptions filter;
+        auto it_hidden = req.payload.find("showHidden");
+        if (it_hidden != req.payload.end() && it_hidden->second.IsBool()) filter.show_hidden = it_hidden->second.AsBool();
+
+        auto it_filter_search = req.payload.find("searchText");
+        if (it_filter_search != req.payload.end() && it_filter_search->second.IsString()) filter.search_text = it_filter_search->second.AsString();
+
+        res.payload = FileServiceV22::Instance().ListDirectory(path, page_size, continuation, sort, filter);
+        return res;
+    }
+
+    if (method == "files.metadata")
+    {
+        auto it = req.payload.find("path");
+        if (it == req.payload.end() || !it->second.IsString())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing 'path'";
+            return res;
+        }
+        res.payload = FileServiceV22::Instance().GetMetadata(it->second.AsString());
+        return res;
+    }
+
+    if (method == "files.drives")
+    {
+        res.payload = FileServiceV22::Instance().GetDrives();
+        return res;
+    }
+
+    if (method == "files.knownFolders")
+    {
+        res.payload = FileServiceV22::Instance().GetKnownFolders();
+        return res;
+    }
+
+    if (method == "files.resolvePath")
+    {
+        auto it = req.payload.find("path");
+        if (it == req.payload.end() || !it->second.IsString())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing 'path'";
+            return res;
+        }
+        res.payload = FileServiceV22::Instance().ResolvePath(it->second.AsString());
+        return res;
+    }
+
+    if (method == "files.createFolder")
+    {
+        auto it_parent = req.payload.find("parentPath");
+        auto it_name = req.payload.find("name");
+        if (it_parent == req.payload.end() || !it_parent->second.IsString() ||
+            it_name == req.payload.end() || !it_name->second.IsString())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing 'parentPath' or 'name'";
+            return res;
+        }
+        res.payload = FileServiceV22::Instance().CreateFolder(it_parent->second.AsString(), it_name->second.AsString());
+        return res;
+    }
+
+    if (method == "files.rename")
+    {
+        auto it_path = req.payload.find("path");
+        auto it_name = req.payload.find("newName");
+        if (it_path == req.payload.end() || !it_path->second.IsString() ||
+            it_name == req.payload.end() || !it_name->second.IsString())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing 'path' or 'newName'";
+            return res;
+        }
+        res.payload = FileServiceV22::Instance().RenameItem(it_path->second.AsString(), it_name->second.AsString());
+        return res;
+    }
+
+    if (method == "files.delete")
+    {
+        auto it_paths = req.payload.find("paths");
+        if (it_paths == req.payload.end() || !it_paths->second.IsArray())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing array 'paths'";
+            return res;
+        }
+        std::vector<std::string> paths;
+        for (const auto& p : it_paths->second.AsArray())
+        {
+            if (p.IsString()) paths.push_back(p.AsString());
+        }
+        bool permanent = false;
+        auto it_perm = req.payload.find("permanent");
+        if (it_perm != req.payload.end() && it_perm->second.IsBool()) permanent = it_perm->second.AsBool();
+
+        res.payload = FileServiceV22::Instance().DeleteItems(paths, permanent);
+        return res;
+    }
+
+    if (method == "files.copy")
+    {
+        auto it_sources = req.payload.find("sources");
+        auto it_dest = req.payload.find("destination");
+        if (it_sources == req.payload.end() || !it_sources->second.IsArray() ||
+            it_dest == req.payload.end() || !it_dest->second.IsString())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing 'sources' or 'destination'";
+            return res;
+        }
+        std::vector<std::string> sources;
+        for (const auto& s : it_sources->second.AsArray())
+        {
+            if (s.IsString()) sources.push_back(s.AsString());
+        }
+        std::string overwrite = "ask";
+        auto it_ov = req.payload.find("overwritePolicy");
+        if (it_ov != req.payload.end() && it_ov->second.IsString()) overwrite = it_ov->second.AsString();
+
+        std::string job_id = FileServiceV22::Instance().StartCopyJob(sources, it_dest->second.AsString(), overwrite);
+        res.payload["jobId"] = JsonValue(job_id);
+        res.payload["status"] = JsonValue("started");
+        return res;
+    }
+
+    if (method == "files.move")
+    {
+        auto it_sources = req.payload.find("sources");
+        auto it_dest = req.payload.find("destination");
+        if (it_sources == req.payload.end() || !it_sources->second.IsArray() ||
+            it_dest == req.payload.end() || !it_dest->second.IsString())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing 'sources' or 'destination'";
+            return res;
+        }
+        std::vector<std::string> sources;
+        for (const auto& s : it_sources->second.AsArray())
+        {
+            if (s.IsString()) sources.push_back(s.AsString());
+        }
+        std::string overwrite = "ask";
+        auto it_ov = req.payload.find("overwritePolicy");
+        if (it_ov != req.payload.end() && it_ov->second.IsString()) overwrite = it_ov->second.AsString();
+
+        std::string job_id = FileServiceV22::Instance().StartMoveJob(sources, it_dest->second.AsString(), overwrite);
+        res.payload["jobId"] = JsonValue(job_id);
+        res.payload["status"] = JsonValue("started");
+        return res;
+    }
+
+    if (method == "files.search")
+    {
+        auto it_root = req.payload.find("rootPath");
+        auto it_query = req.payload.find("query");
+        if (it_root == req.payload.end() || !it_root->second.IsString() ||
+            it_query == req.payload.end() || !it_query->second.IsString())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing 'rootPath' or 'query'";
+            return res;
+        }
+        bool recursive = true;
+        auto it_rec = req.payload.find("recursive");
+        if (it_rec != req.payload.end() && it_rec->second.IsBool()) recursive = it_rec->second.AsBool();
+
+        std::string job_id = FileServiceV22::Instance().StartSearchJob(it_root->second.AsString(), it_query->second.AsString(), recursive);
+        res.payload["jobId"] = JsonValue(job_id);
+        res.payload["status"] = JsonValue("started");
+        return res;
+    }
+
+    if (method == "files.open")
+    {
+        auto it = req.payload.find("path");
+        if (it == req.payload.end() || !it->second.IsString())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing 'path'";
+            return res;
+        }
+        res.payload = FileServiceV22::Instance().OpenDefault(it->second.AsString());
+        return res;
+    }
+
+    if (method == "files.openWith.list")
+    {
+        auto it = req.payload.find("path");
+        if (it == req.payload.end() || !it->second.IsString())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing 'path'";
+            return res;
+        }
+        res.payload = FileServiceV22::Instance().GetOpenWithList(it->second.AsString());
+        return res;
+    }
+
+    if (method == "files.openWith.launch")
+    {
+        auto it_path = req.payload.find("path");
+        auto it_app = req.payload.find("appId");
+        auto it_plat = req.payload.find("platform");
+        if (it_path == req.payload.end() || !it_path->second.IsString() ||
+            it_app == req.payload.end() || !it_app->second.IsString() ||
+            it_plat == req.payload.end() || !it_plat->second.IsString())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing 'path', 'appId', or 'platform'";
+            return res;
+        }
+        std::string distro;
+        auto it_distro = req.payload.find("distro");
+        if (it_distro != req.payload.end() && it_distro->second.IsString()) distro = it_distro->second.AsString();
+
+        res.payload = FileServiceV22::Instance().LaunchOpenWith(it_path->second.AsString(), it_app->second.AsString(), it_plat->second.AsString(), distro);
         return res;
     }
 

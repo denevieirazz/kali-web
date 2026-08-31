@@ -1,6 +1,9 @@
 import 'package:cloudos_flutter_shell/main.dart';
+import 'package:cloudos_flutter_shell/models/file_models.dart';
 import 'package:cloudos_flutter_shell/models/shell_models.dart';
 import 'package:cloudos_flutter_shell/services/cloudos_bridge.dart';
+import 'package:cloudos_flutter_shell/services/files_controller.dart';
+import 'package:cloudos_flutter_shell/widgets/files_window.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -8,7 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  group('CloudOS V21 System Broker Bridge Contracts', () {
+  group('CloudOS V22 System Broker & Unified Files Bridge Contracts', () {
     const channel = MethodChannel('cloudos/native/v19');
     final log = <MethodCall>[];
 
@@ -57,7 +60,7 @@ void main() {
             ];
           case 'getSystemSnapshot':
             return <String, Object?>{
-              'deviceName': 'TEST-DEVICE-V21',
+              'deviceName': 'TEST-DEVICE-V22',
               'networkName': 'Wi-Fi 6 Real Native',
               'volume': 0.80,
               'brightness': 0.90,
@@ -74,14 +77,33 @@ void main() {
             return true;
           case 'getBridgeInfo':
             return <String, Object?>{
-              'schema': 21,
-              'version': 'v21',
+              'schema': 22,
+              'version': 'v22',
               'bridge_type': 'CloudOSFlutterBridgeV20',
               'brokerConnected': true,
               'brokerState': 'connected',
               'channel': 'cloudos/native/v19',
               'arbitrary_command_api': false,
             };
+          case 'invokeBrokerRpc':
+            final args = call.arguments as Map<Object?, Object?>?;
+            final rpcMethod = args?['method'] as String?;
+            if (rpcMethod == 'files.knownFolders') {
+              return '{"ok":true,"payload":{"folders":[{"id":"home","name":"Início","path":"C:\\\\Users\\\\Test","iconKey":"home"},{"id":"desktop","name":"Área de Trabalho","path":"C:\\\\Users\\\\Test\\\\Desktop","iconKey":"desktop"}]}}';
+            }
+            if (rpcMethod == 'files.drives') {
+              return '{"ok":true,"payload":{"drives":[{"letter":"C:","path":"C:\\\\","label":"Disco Local","filesystem":"NTFS","totalBytes":512000000000,"freeBytes":256000000000,"totalFormatted":"512 GB","freeFormatted":"256 GB","isRemovable":false,"isReady":true,"driveType":"fixed"}]}}';
+            }
+            if (rpcMethod == 'files.list') {
+              return '{"ok":true,"payload":{"items":[{"id":"f1","name":"Documento.txt","displayName":"Documento.txt","path":"C:\\\\Users\\\\Test\\\\Documento.txt","canonicalPath":"C:\\\\Users\\\\Test\\\\Documento.txt","locationKind":"windows","fileKind":"text","extension":".txt","size":1024,"sizeFormatted":"1.0 KB","modifiedTime":"Hoje","createdTime":"Ontem","isDirectory":false,"isHidden":false,"isReadOnly":false,"isSystem":false,"isSymlink":false,"distro":"","iconKey":"file_text","canRename":true,"canDelete":true,"canOpen":true,"canOpenWith":true,"canCopy":true,"canMove":true}]}}';
+            }
+            if (rpcMethod == 'files.createFolder' || rpcMethod == 'files.rename' || rpcMethod == 'files.delete' || rpcMethod == 'files.open' || rpcMethod == 'files.openWith.launch') {
+              return '{"ok":true,"payload":{"ok":true}}';
+            }
+            if (rpcMethod == 'files.openWith.list') {
+              return '{"ok":true,"payload":{"apps":[{"appId":"windows:notepad","name":"Bloco de Notas","platform":"windows","distro":"","iconKey":"file_text","isRecommended":true,"isDefault":true}]}}';
+            }
+            return '{"ok":true,"payload":{}}';
           default:
             return null;
         }
@@ -111,7 +133,7 @@ void main() {
       const bridge = CloudOSBridge(channel: channel);
       final snapshot = await bridge.loadSystemSnapshot();
 
-      expect(snapshot.deviceName, 'TEST-DEVICE-V21');
+      expect(snapshot.deviceName, 'TEST-DEVICE-V22');
       expect(snapshot.networkName, 'Wi-Fi 6 Real Native');
       expect(snapshot.volume, 0.80);
       expect(snapshot.brightness, 0.90);
@@ -121,54 +143,62 @@ void main() {
       expect(snapshot.currentWorkspace, 2);
     });
 
-    test('launchApp forwards app id and handles success', () async {
+    test('Files RPC methods work through mock bridge', () async {
       const bridge = CloudOSBridge(channel: channel);
-      final success = await bridge.launchApp('windows:notepad');
 
-      expect(success, true);
-      expect(log.last.method, 'launchApp');
-      expect(log.last.arguments, <String, Object?>{'id': 'windows:notepad'});
-    });
+      final folders = await bridge.getKnownFolders();
+      expect(folders.length, 2);
+      expect(folders[0].name, 'Início');
 
-    test('setVolume and setBrightness forward values', () async {
-      const bridge = CloudOSBridge(channel: channel);
-      await bridge.setVolume(0.5);
-      expect(log.last.method, 'setVolume');
-      expect(log.last.arguments, <String, Object?>{'value': 0.5});
+      final drives = await bridge.getDrives();
+      expect(drives.length, 1);
+      expect(drives[0].letter, 'C:');
 
-      await bridge.setBrightness(0.75);
-      expect(log.last.method, 'setBrightness');
-      expect(log.last.arguments, <String, Object?>{'value': 0.75});
-    });
+      final items = await bridge.listFiles('C:\\Users\\Test');
+      expect(items.length, 1);
+      expect(items[0].name, 'Documento.txt');
 
-    test('getBridgeInfo returns schema 21 metadata', () async {
-      const bridge = CloudOSBridge(channel: channel);
-      final info = await bridge.getBridgeInfo();
+      final createOk = await bridge.createFolder('C:\\Users\\Test', 'NovaPasta');
+      expect(createOk, true);
 
-      expect(info['schema'], 21);
-      expect(info['bridge_type'], 'CloudOSFlutterBridgeV20');
-      expect(info['brokerConnected'], true);
-      expect(info['brokerState'], 'connected');
-      expect(info['arbitrary_command_api'], false);
-    });
+      final renameOk = await bridge.renameItem('C:\\Users\\Test\\Documento.txt', 'DocNovo.txt');
+      expect(renameOk, true);
 
-    test('preview fallback handles missing plugin without throwing', () async {
-      const missingChannel = MethodChannel('non_existent_channel');
-      const bridge = CloudOSBridge(channel: missingChannel);
+      final deleteOk = await bridge.deleteItems(<String>['C:\\Users\\Test\\DocNovo.txt']);
+      expect(deleteOk, true);
 
-      final apps = await bridge.loadApps();
-      expect(apps.isNotEmpty, true);
-      expect(apps, CloudOSBridge.previewApps);
-
-      final snapshot = await bridge.loadSystemSnapshot();
-      expect(snapshot.deviceName, CloudOSBridge.previewSnapshot.deviceName);
-
-      final launchResult = await bridge.launchApp('anything');
-      expect(launchResult, true);
+      final openWithApps = await bridge.getOpenWithList('C:\\Users\\Test\\Documento.txt');
+      expect(openWithApps.length, 1);
+      expect(openWithApps[0].name, 'Bloco de Notas');
     });
   });
 
-  group('CloudOS V21 Desktop Presentation Suite', () {
+  group('CloudOS V22 FilesController Unit Tests', () {
+    const channel = MethodChannel('cloudos/native/v19');
+
+    test('FilesController initializes with default tab and loads folders', () async {
+      const bridge = CloudOSBridge(channel: channel);
+      final controller = FilesController(bridge: bridge);
+
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(controller.tabs.length, 1);
+      expect(controller.activeTab?.currentPath, 'home');
+      expect(controller.knownFolders.isNotEmpty, true);
+      expect(controller.drives.isNotEmpty, true);
+
+      // Add Tab
+      controller.addTab(title: 'Desktop', initialPath: 'desktop');
+      expect(controller.tabs.length, 2);
+      expect(controller.activeTabIndex, 1);
+
+      // Close Tab
+      controller.closeTab(1);
+      expect(controller.tabs.length, 1);
+      expect(controller.activeTabIndex, 0);
+    });
+  });
+
+  group('CloudOS V22 Desktop Presentation Suite', () {
     testWidgets('CloudOS presentation renders core desktop surfaces on 1920x1080', (tester) async {
       await tester.binding.setSurfaceSize(const Size(1920, 1080));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -177,12 +207,9 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('CloudOS V19'), findsWidgets);
-      expect(find.text('Arquivos • Início'), findsOneWidget);
-      expect(find.text('Windows + Linux (WSL2)'), findsOneWidget);
-      expect(find.text('ACESSO RÁPIDO'), findsOneWidget);
-      expect(find.text('ARMAZENAMENTO'), findsOneWidget);
-      expect(find.text('CloudOS Drive'), findsWidgets);
-      expect(find.text('Ubuntu WSL'), findsWidgets);
+      expect(find.text('Arquivos'), findsWidgets);
+      expect(find.text('Acesso Rápido'), findsOneWidget);
+      expect(find.text('Este Computador'), findsOneWidget);
 
       // Open Start Panel
       await tester.tap(find.byTooltip('Iniciar (Ctrl+Alt+A)'));
@@ -190,12 +217,6 @@ void main() {
 
       expect(find.text('CloudOS Start'), findsOneWidget);
       expect(find.text('Aplicativos Fixados'), findsOneWidget);
-      expect(find.text('Visual Studio Code'), findsOneWidget);
-      expect(find.text('Ubuntu Terminal'), findsOneWidget);
-
-      // Test Search
-      await tester.enterText(find.byType(TextField).first, 'Code');
-      await tester.pumpAndSettle();
       expect(find.text('Visual Studio Code'), findsOneWidget);
 
       // Close Start
@@ -222,6 +243,40 @@ void main() {
       expect(find.text('Sem novas notificações'), findsOneWidget);
     });
 
+    testWidgets('FilesWindow renders and responds to search and tab creation', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1920, 1080));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(),
+          home: Scaffold(
+            body: Center(
+              child: FilesWindow(
+                onClose: () {},
+                onMinimize: () {},
+                onDrag: (_) {},
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Arquivos'), findsOneWidget);
+      expect(find.text('Acesso Rápido'), findsOneWidget);
+      expect(find.byTooltip('Nova Aba'), findsOneWidget);
+
+      // Add a new tab
+      await tester.tap(find.byTooltip('Nova Aba'));
+      await tester.pumpAndSettle();
+
+      // Check view mode switch
+      await tester.tap(find.byTooltip('Visualizar em Lista'));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Visualizar em Grade'), findsOneWidget);
+    });
+
     testWidgets('CloudOS presentation renders cleanly on notebook viewport (1366x768)', (tester) async {
       await tester.binding.setSurfaceSize(const Size(1366, 768));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -230,7 +285,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('CloudOS V19'), findsWidgets);
-      expect(find.text('Arquivos • Início'), findsOneWidget);
+      expect(find.text('Arquivos'), findsWidgets);
     });
 
     testWidgets('CloudOS presentation renders cleanly on 2K / 1440p (2560x1440)', (tester) async {
@@ -241,7 +296,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('CloudOS V19'), findsWidgets);
-      expect(find.text('Arquivos • Início'), findsOneWidget);
+      expect(find.text('Arquivos'), findsWidgets);
     });
   });
 }

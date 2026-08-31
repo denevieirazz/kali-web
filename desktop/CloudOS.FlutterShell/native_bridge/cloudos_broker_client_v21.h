@@ -77,6 +77,7 @@ public:
     bool SetVolume(double value);
     bool SetBrightness(double value);
     bool GetCapabilities(std::vector<std::string>& out_caps);
+    bool InvokeBrokerRpc(const std::string& method, const std::string& payload_json, std::string& out_resp_json);
 
 private:
     CloudOSBrokerClientV21() = default;

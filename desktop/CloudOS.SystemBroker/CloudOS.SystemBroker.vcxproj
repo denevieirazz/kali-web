@@ -34,7 +34,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>advapi32.lib;shell32.lib;userenv.lib;ole32.lib;uuid.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>advapi32.lib;shell32.lib;shlwapi.lib;userenv.lib;ole32.lib;uuid.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest>
       <EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness>
@@ -51,6 +51,7 @@
     <ClInclude Include="src\wsl_service_v21.h" />
     <ClInclude Include="src\diagnostics_v21.h" />
     <ClInclude Include="src\broker_server_v21.h" />
+    <ClInclude Include="src\file_service_v22.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\protocol_v21.cpp" />
@@ -61,6 +62,7 @@
     <ClCompile Include="src\system_service_v21.cpp" />
     <ClCompile Include="src\wsl_service_v21.cpp" />
     <ClCompile Include="src\diagnostics_v21.cpp" />
+    <ClCompile Include="src\file_service_v22.cpp" />
     <ClCompile Include="src\broker_server_v21.cpp" />
     <ClCompile Include="src\broker_main.cpp" />
   </ItemGroup>
