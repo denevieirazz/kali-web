@@ -255,8 +255,27 @@ Win32 / Registry read-only / WinGet / WSL / WSLg
 
 Evite surface fazendo I/O no paint, módulos alterando estado global alheio, scripts de install alterando shell como side effect e recovery dependendo da própria UI quebrada.
 
-## 15. Leitura recomendada
+## 15. Flutter Presentation & Native Bridge (V19 / V20)
 
+CloudOS V19 introduziu a camada de apresentação Flutter (`desktop/CloudOS.FlutterShell`), e a V20 estabelece a integração com o core nativo C++ através de um canal tipado `MethodChannel` (`cloudos/native/v19`).
+
+```text
+Flutter UI (Dart)
+  ↓
+CloudOSBridge (loadApps, loadSystemSnapshot, launchApp, setVolume, setBrightness)
+  ↓ [cloudos/native/v19]
+CloudOSFlutterBridgeV20 (C++ Runner)
+  ↓
+NativeIntegrationV16 / NativeStartIndex / Win32 Core
+```
+
+- Flutter é estritamente camada de apresentação visual (consumidor).
+- Chamadas a `wsl.exe`, `powershell.exe`, Registry e Win32 APIs ocorrem exclusivamente no C++.
+- Dart envia apenas identificadores tipados (`id`), e o C++ resolve o target com segurança.
+
+## 16. Leitura recomendada
+
+- `docs/native/FLUTTER_NATIVE_BRIDGE_V20.md`
 - `docs/native/CODEMAP.md`
 - `docs/native/UNIFIED_INTEGRATION_V16.md`
 - `docs/native/VALIDATION.md`

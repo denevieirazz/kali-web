@@ -35,6 +35,7 @@ class CloudOSBridge {
         wslAvailable: raw['wslAvailable'] as bool? ?? previewSnapshot.wslAvailable,
         distros: (raw['distros'] as List<Object?>?)?.whereType<String>().toList() ??
             previewSnapshot.distros,
+        currentWorkspace: (raw['currentWorkspace'] as num?)?.toInt() ?? previewSnapshot.currentWorkspace,
       );
     } on MissingPluginException {
       return previewSnapshot;
@@ -43,14 +44,56 @@ class CloudOSBridge {
     }
   }
 
-  Future<void> launchApp(String id) async {
+  Future<bool> launchApp(String id) async {
     try {
-      await _channel.invokeMethod<void>('launchApp', <String, Object?>{'id': id});
+      final result = await _channel.invokeMethod<bool>('launchApp', <String, Object?>{'id': id});
+      return result ?? true;
     } on MissingPluginException {
-      // Preview mode intentionally has no side effects.
+      // Preview mode fallback: no side effects
+      return true;
     } on PlatformException {
-      // Native launch errors are surfaced by the real host in the next stage.
+      return false;
     }
+  }
+
+  Future<bool> setVolume(double value) async {
+    try {
+      final result = await _channel.invokeMethod<bool>('setVolume', <String, Object?>{'value': value});
+      return result ?? true;
+    } on MissingPluginException {
+      return true;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  Future<bool> setBrightness(double value) async {
+    try {
+      final result = await _channel.invokeMethod<bool>('setBrightness', <String, Object?>{'value': value});
+      return result ?? true;
+    } on MissingPluginException {
+      return true;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  Future<Map<String, Object?>> getBridgeInfo() async {
+    try {
+      final raw = await _channel.invokeMapMethod<String, Object?>('getBridgeInfo');
+      if (raw != null) return raw;
+    } on MissingPluginException {
+      // Fallback preview
+    } on PlatformException {
+      // Fallback preview
+    }
+    return const <String, Object?>{
+      'schema': 20,
+      'version': 'v20-preview',
+      'bridge_type': 'PreviewFallback',
+      'channel': 'cloudos/native/v19',
+      'arbitrary_command_api': false,
+    };
   }
 
   CloudApp _appFromNative(Map<Object?, Object?> raw) {
@@ -60,14 +103,51 @@ class CloudOSBridge {
       'cloudos' => CloudAppPlatform.cloudos,
       _ => CloudAppPlatform.windows,
     };
+    final id = raw['id'] as String? ?? raw['name'] as String? ?? 'app';
+    final name = raw['name'] as String? ?? 'Aplicativo';
+    final subtitle = raw['subtitle'] as String?;
+    final distro = raw['distro'] as String?;
+    final category = raw['category'] as String? ??
+        (platform == CloudAppPlatform.linux ? 'Linux / WSL' : 'Produtividade');
+    final isPinned = raw['pinned'] as bool? ?? (raw['isPinned'] as bool? ?? false);
+    final isRecent = raw['recent'] as bool? ?? (raw['isRecent'] as bool? ?? false);
+
     return CloudApp(
-      id: raw['id'] as String? ?? raw['name'] as String? ?? 'app',
-      name: raw['name'] as String? ?? 'Aplicativo',
-      icon: _fallbackIcon(platform),
+      id: id,
+      name: name,
+      icon: _resolveIcon(id, name, platform),
       platform: platform,
-      subtitle: raw['subtitle'] as String?,
-      distro: raw['distro'] as String?,
+      subtitle: subtitle,
+      distro: distro,
+      category: category,
+      isPinned: isPinned,
+      isRecent: isRecent,
     );
+  }
+
+  static IconData _resolveIcon(String id, String name, CloudAppPlatform platform) {
+    final lower = '${id.toLowerCase()} ${name.toLowerCase()}';
+    if (lower.contains('code') || lower.contains('vscode')) return Icons.code_rounded;
+    if (lower.contains('terminal') || lower.contains('powershell') || lower.contains('cmd') || lower.contains('bash')) {
+      return Icons.terminal_rounded;
+    }
+    if (lower.contains('browser') || lower.contains('chrome') || lower.contains('edge') || lower.contains('web')) {
+      return Icons.language_rounded;
+    }
+    if (lower.contains('file') || lower.contains('arquivo') || lower.contains('drive') || lower.contains('explorer')) {
+      return Icons.folder_rounded;
+    }
+    if (lower.contains('gimp') || lower.contains('paint') || lower.contains('photo') || lower.contains('draw')) {
+      return Icons.palette_rounded;
+    }
+    if (lower.contains('calc') || lower.contains('calculadora')) return Icons.calculate_rounded;
+    if (lower.contains('setting') || lower.contains('config')) return Icons.settings_rounded;
+    if (lower.contains('wireshark') || lower.contains('nmap') || lower.contains('zenmap') || lower.contains('security')) {
+      return Icons.security_rounded;
+    }
+    if (lower.contains('trash') || lower.contains('lixeira')) return Icons.delete_outline_rounded;
+    if (lower.contains('app') || lower.contains('store')) return Icons.apps_rounded;
+    return _fallbackIcon(platform);
   }
 
   static IconData _fallbackIcon(CloudAppPlatform platform) {

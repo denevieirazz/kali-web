@@ -275,7 +275,25 @@ Tamanho, nomes de mapping/event/window class/message e estruturas compartilhadas
 
 ---
 
-## 14. Como decidir se criar arquivo novo
+---
+
+## 15. Flutter Shell & Native Bridge (V19 / V20)
+
+| Arquivo / Pasta | Responsabilidade |
+|---|---|
+| `desktop/CloudOS.FlutterShell/lib/main.dart` | Ponto de entrada Flutter e montagem do tema / shell |
+| `desktop/CloudOS.FlutterShell/lib/services/cloudos_bridge.dart` | Boundary Flutter ↔ C++ com typed methods e fallback de preview |
+| `desktop/CloudOS.FlutterShell/lib/models/shell_models.dart` | Modelos de dados (`CloudApp`, `CloudSystemSnapshot`, etc.) |
+| `desktop/CloudOS.FlutterShell/lib/shell/cloudos_shell.dart` | Shell orquestrador, atalhos globais, gerenciamento de janelas e painéis |
+| `desktop/CloudOS.FlutterShell/lib/widgets/` | Componentes de apresentação (`start_panel`, `cloud_taskbar`, `files_window`, `quick_settings_panel`, `notification_center`) |
+| `desktop/CloudOS.FlutterShell/native_bridge/cloudos_flutter_bridge_v20.*` | Implementação C++ do MethodChannel `cloudos/native/v19` |
+| `desktop/CloudOS.FlutterShell/native_bridge/flutter_window.*` | Integração do FlutterViewController no Host Win32 |
+| `desktop/CloudOS.FlutterShell/test/shell_smoke_test.dart` | Testes de widget e contratos de MethodChannel |
+| `docs/native/FLUTTER_NATIVE_BRIDGE_V20.md` | Especificação completa da integração Flutter ↔ C++ |
+
+---
+
+## 16. Como decidir se criar arquivo novo
 
 1. procure no `CODEMAP` e `.vcxproj`;
 2. abra header + cpp do dono atual;
@@ -286,3 +304,4 @@ Tamanho, nomes de mapping/event/window class/message e estruturas compartilhadas
 7. preserve V9–V17 invariantes aplicáveis.
 
 A meta é reduzir duplicação conceitual, não apenas reduzir número de linhas por arquivo.
+
