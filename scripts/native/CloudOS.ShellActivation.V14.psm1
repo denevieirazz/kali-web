@@ -486,7 +486,7 @@ function Invoke-CloudOSShellRollback {
 
     $state.active = $false
     $state.status = 'rolled-back'
-    $state.rolled_back_utc = [DateTime]::UtcNow.ToString('o')
+    $state | Add-Member -NotePropertyName rolled_back_utc -NotePropertyValue ([DateTime]::UtcNow.ToString('o')) -Force
     $state.updated_utc = [DateTime]::UtcNow.ToString('o')
     Write-CloudOSShellJsonAtomic -Path $paths.ActivationState -Value $state
     Remove-Item -LiteralPath $paths.ActivationJournal -Force
