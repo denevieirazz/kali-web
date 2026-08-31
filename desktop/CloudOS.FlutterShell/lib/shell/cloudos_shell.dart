@@ -113,6 +113,11 @@ class _CloudOSShellState extends State<CloudOSShell> {
         child: Scaffold(
           body: LayoutBuilder(
             builder: (context, constraints) {
+              final maxLeft = constraints.maxWidth > 1000 ? constraints.maxWidth - 980 : 20.0;
+              final maxTop = constraints.maxHeight > 700 ? constraints.maxHeight - 680 : 20.0;
+              final safeLeft = filesOffset.dx.clamp(20.0, maxLeft).toDouble();
+              final safeTop = filesOffset.dy.clamp(20.0, maxTop).toDouble();
+
               return Stack(
                 fit: StackFit.expand,
                 children: <Widget>[
@@ -121,8 +126,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
                   _DesktopStatus(snapshot: snapshot),
                   if (filesOpen)
                     Positioned(
-                      left: filesOffset.dx.clamp(20, constraints.maxWidth - 520),
-                      top: filesOffset.dy.clamp(20, constraints.maxHeight - 260),
+                      left: safeLeft,
+                      top: safeTop,
                       child: FilesWindow(
                         onClose: () => setState(() => filesOpen = false),
                         onMinimize: () => setState(() => filesOpen = false),
