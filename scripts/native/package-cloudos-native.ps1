@@ -51,7 +51,14 @@ foreach ($name in @(
     'repair-cloudos-native-v13.ps1',
     'uninstall-cloudos-native-v13.ps1',
     'get-cloudos-deployment-status-v13.ps1',
-    'start-cloudos-installed-v13.ps1'
+    'start-cloudos-installed-v13.ps1',
+    'CloudOS.ShellActivation.V14.psm1',
+    'CloudOS.ShellEntry.V14.ps1',
+    'activate-cloudos-shell-v14.ps1',
+    'rollback-cloudos-shell-v14.ps1',
+    'repair-cloudos-shell-v14.ps1',
+    'get-cloudos-shell-status-v14.ps1',
+    'run-native-shell-activation-smoke-v14.ps1'
 )) {
     $source = Join-Path $PSScriptRoot $name
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
@@ -194,6 +201,42 @@ exit /b %ERRORLEVEL%
 '@
 Set-Content -LiteralPath (Join-Path $stage 'Desinstalar CloudOS.cmd') -Value $uninstallLauncher -Encoding ascii
 
+$shellActivateLauncher = @'
+@echo off
+setlocal EnableExtensions
+set "ROOT=%~dp0"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%activate-cloudos-shell-v14.ps1"
+exit /b %ERRORLEVEL%
+'@
+Set-Content -LiteralPath (Join-Path $stage 'Ativar CloudOS como Shell.cmd') -Value $shellActivateLauncher -Encoding ascii
+
+$shellRollbackLauncher = @'
+@echo off
+setlocal EnableExtensions
+set "ROOT=%~dp0"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%rollback-cloudos-shell-v14.ps1"
+exit /b %ERRORLEVEL%
+'@
+Set-Content -LiteralPath (Join-Path $stage 'Restaurar Explorer.cmd') -Value $shellRollbackLauncher -Encoding ascii
+
+$shellRepairLauncher = @'
+@echo off
+setlocal EnableExtensions
+set "ROOT=%~dp0"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%repair-cloudos-shell-v14.ps1"
+exit /b %ERRORLEVEL%
+'@
+Set-Content -LiteralPath (Join-Path $stage 'Reparar Ativacao do Shell.cmd') -Value $shellRepairLauncher -Encoding ascii
+
+$shellStatusLauncher = @'
+@echo off
+setlocal EnableExtensions
+set "ROOT=%~dp0"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%get-cloudos-shell-status-v14.ps1"
+exit /b %ERRORLEVEL%
+'@
+Set-Content -LiteralPath (Join-Path $stage 'Status do Shell CloudOS.cmd') -Value $shellStatusLauncher -Encoding ascii
+
 $readme = @"
 CloudOS Native Shell - $Configuration x64
 
@@ -225,7 +268,6 @@ Shell Supervisor V11:
 - heartbeat stale padrao: 5 segundos.
 - restart com backoff limitado e maximo padrao de 3 falhas consecutivas.
 - depois do crash-loop, inicia Explorer apenas quando Shell_TrayWnd nao existe.
-- nao altera o registro do Windows e nao encerra Explorer.
 - Recuperacao CloudOS.cmd abre a interface manual independente com --recovery-ui.
 
 Performance/Visual V12:
@@ -238,7 +280,17 @@ Transactional Deployment V13:
 - Atualizar CloudOS.cmd e idempotente; Rollback CloudOS.cmd volta para a ultima versao verificada.
 - Reparar CloudOS.cmd limpa transacoes interrompidas e recupera last-known-good quando necessario.
 - Desinstalar CloudOS.cmd remove somente uma raiz que contenha estado gerenciado V13 valido.
-- V13 NAO altera Winlogon, registro de shell, HKLM, logoff ou reboot.
+
+Shell Activation V14 (OPT-IN):
+- instalar/atualizar NAO ativa CloudOS como shell do Windows automaticamente.
+- Ativar CloudOS como Shell.cmd exige um V13 instalado e verificado.
+- V14 usa somente HKCU\Software\Microsoft\Windows NT\CurrentVersion\Winlogon\Shell; nao escreve HKLM.
+- antes da alteracao, salva presenca/tipo/valor exatos e cria journal transacional.
+- Restaurar Explorer.cmd restaura exatamente o Shell anterior e e copiado para a raiz instalada.
+- se a ativacao for interrompida, Reparar Ativacao do Shell.cmd restaura o snapshot pre-transacao.
+- Desinstalar CloudOS.cmd se recusa a apagar a instalacao enquanto V14 estiver ativo.
+- V14 nao faz logoff/reboot. A mudanca so aparece num proximo sign-in iniciado pelo operador.
+- validacao real de logon/crash/boot deve ser feita primeiro em VM; o CI usa chave HKCU sandbox e nunca troca o shell do runner.
 
 Exemplo de soak de 30 minutos:
   pwsh -File .\run-native-soak-v9.ps1 -Root . -Launch -DurationSeconds 1800
