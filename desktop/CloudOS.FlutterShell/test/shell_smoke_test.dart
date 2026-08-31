@@ -15,7 +15,6 @@ void main() {
       expect(find.text('Arquivos • Início'), findsOneWidget);
       expect(find.text('Windows + Linux (WSL2)'), findsOneWidget);
       expect(find.text('ACESSO RÁPIDO'), findsOneWidget);
-      expect(find.text('ARMZENAMENTO'.replaceFirst('ARMZ', 'ARMAZ')), findsNothing);
       expect(find.text('ARMAZENAMENTO'), findsOneWidget);
       expect(find.text('CloudOS Drive'), findsWidgets);
       expect(find.text('Ubuntu WSL'), findsWidgets);
