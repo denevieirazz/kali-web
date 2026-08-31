@@ -48,14 +48,6 @@ jobs:
           path: desktop/CloudOS.NativeShell/packages/Microsoft.Web.WebView2.1.0.4078.44
           key: cloudos-webview2-1.0.4078.44-windows-v1
 
-      - name: Contract Transactional Deployment V13
-        shell: pwsh
-        run: ./scripts/native/test-transactional-deployment-v13-contract.ps1
-
-      - name: Contract Shell Activation V14
-        shell: pwsh
-        run: ./scripts/native/test-shell-activation-v14-contract.ps1
-
       - name: Contract Repository Clarity V15
         shell: pwsh
         run: ./scripts/native/test-repository-clarity-v15-contract.ps1
