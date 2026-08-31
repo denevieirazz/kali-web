@@ -52,6 +52,14 @@ echo [CloudOS] Compilando Shell Supervisor V11 independente %CONFIG% x64...
 "%MSBUILD%" "%ROOT%\desktop\CloudOS.NativeRecovery\CloudOS.NativeRecovery.vcxproj" /m /nologo /v:minimal /p:Configuration=%CONFIG% /p:Platform=%PLATFORM%
 if errorlevel 1 exit /b %ERRORLEVEL%
 
+echo [CloudOS] Compilando CloudOS.SystemBroker V21 %CONFIG% x64...
+"%MSBUILD%" "%ROOT%\desktop\CloudOS.SystemBroker\CloudOS.SystemBroker.vcxproj" /m /nologo /v:minimal /p:Configuration=%CONFIG% /p:Platform=%PLATFORM%
+if errorlevel 1 exit /b %ERRORLEVEL%
+
+echo [CloudOS] Compilando CloudOS.BrokerProbe V21 %CONFIG% x64...
+"%MSBUILD%" "%ROOT%\desktop\CloudOS.BrokerProbe\CloudOS.BrokerProbe.vcxproj" /m /nologo /v:minimal /p:Configuration=%CONFIG% /p:Platform=%PLATFORM%
+if errorlevel 1 exit /b %ERRORLEVEL%
+
 set "OUT=%ROOT%\desktop\CloudOS.NativeShell\bin\%CONFIG%"
 set "MANIFEST=%OUT%\cloudos-native-manifest.json"
 set "FINGERPRINT_STAMP=%OUT%\.cloudos-build-fingerprint"
@@ -67,10 +75,20 @@ if not exist "%OUT%\CloudOS.Supervisor.exe" (
   echo [CloudOS] ERRO: CloudOS.Supervisor.exe nao foi produzido.
   exit /b 7
 )
+if not exist "%OUT%\CloudOS.SystemBroker.exe" (
+  echo [CloudOS] ERRO: CloudOS.SystemBroker.exe nao foi produzido.
+  exit /b 8
+)
+if not exist "%OUT%\CloudOS.BrokerProbe.exe" (
+  echo [CloudOS] ERRO: CloudOS.BrokerProbe.exe nao foi produzido.
+  exit /b 9
+)
 
 for %%F in ("%OUT%\CloudOS.exe") do set "EXE_SIZE=%%~zF"
 for %%F in ("%OUT%\CloudOS.NativeRuntime.dll") do set "RUNTIME_SIZE=%%~zF"
 for %%F in ("%OUT%\CloudOS.Supervisor.exe") do set "SUPERVISOR_SIZE=%%~zF"
+for %%F in ("%OUT%\CloudOS.SystemBroker.exe") do set "BROKER_SIZE=%%~zF"
+for %%F in ("%OUT%\CloudOS.BrokerProbe.exe") do set "PROBE_SIZE=%%~zF"
 if "%EXE_SIZE%"=="0" (
   echo [CloudOS] ERRO: CloudOS.exe vazio.
   exit /b 11
@@ -81,6 +99,14 @@ if "%RUNTIME_SIZE%"=="0" (
 )
 if "%SUPERVISOR_SIZE%"=="0" (
   echo [CloudOS] ERRO: CloudOS.Supervisor.exe vazio.
+  exit /b 13
+)
+if "%BROKER_SIZE%"=="0" (
+  echo [CloudOS] ERRO: CloudOS.SystemBroker.exe vazio.
+  exit /b 14
+)
+if "%PROBE_SIZE%"=="0" (
+  echo [CloudOS] ERRO: CloudOS.BrokerProbe.exe vazio.
   exit /b 15
 )
 
