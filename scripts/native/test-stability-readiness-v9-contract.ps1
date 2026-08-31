@@ -12,6 +12,7 @@ $paths = @{
     Soak = Join-Path $root 'scripts\native\run-native-soak-v9.ps1'
     Diagnostics = Join-Path $root 'scripts\native\collect-native-diagnostics.ps1'
     Build = Join-Path $root 'scripts\native\build-cloudos-native.cmd'
+    ContractSuite = Join-Path $root 'scripts\native\test-native-contract-suite.ps1'
     Package = Join-Path $root 'scripts\native\package-cloudos-native.ps1'
     Workflow = Join-Path $root '.github\workflows\cloudos-native-full-system.yml'
     Document = Join-Path $root 'docs\native\STABILITY_READINESS_V9.md'
@@ -118,7 +119,8 @@ Require 'Diagnostics V9' $content.Diagnostics @(
     'user_objects',
     'health_handles'
 )
-Require 'Developer build V9 contract' $content.Build @('test-stability-readiness-v9-contract.ps1', 'STABILITY_READINESS_V9=')
+Require 'Developer build V9 contract' $content.Build @('test-native-contract-suite.ps1', 'STABILITY_READINESS_V9=')
+Require 'Central contract suite contains V9' $content.ContractSuite @('test-stability-readiness-v9-contract.ps1')
 Require 'Portable package V9' $content.Package @("'native-health-v9.ps1'", "'collect-native-diagnostics.ps1'", "'run-native-soak-v9.ps1'", 'Coletar Diagnostico 60s.cmd', 'Stability/Readiness V9')
 Require 'Native CI V9' $content.Workflow @('Smoke Stability/Readiness V9', 'run-native-soak-v9.ps1', '-DurationSeconds 20', 'stability-v9-smoke.json')
 Require 'V9 documentation' $content.Document @('ABI binario fixo de 96 bytes', 'heartbeat da thread de UI', '--stability-probe', 'DurationSeconds 86400', 'criterio de aceite, nao uma alegacao')
