@@ -49,6 +49,11 @@ public:
         const std::wstring& distro,
         const std::wstring& package_name);
 
+    // V17 reuses the V16 discovery/launch boundary instead of teaching Start or
+    // Desktop how to construct WSL launch commands independently.
+    static std::wstring LinuxApplicationsDirectory(const std::wstring& distro);
+    static std::wstring EnsureLinuxLauncherShortcut(const UnifiedAppV16& app);
+
     static std::wstring DownloadsFolder();
     static std::wstring DesktopFolder();
     static std::wstring PublicDesktopFolder();
