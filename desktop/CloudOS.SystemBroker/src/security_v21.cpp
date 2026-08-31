@@ -72,7 +72,7 @@ std::wstring SecurityV21::GetBrokerMutexName()
 {
     std::wstring sid = GetCurrentUserSidString();
     DWORD session_id = GetCurrentSessionId();
-    return L"Global\\CloudOS.SystemBroker.Mutex.v21." + sid + L"." + std::to_wstring(session_id);
+    return L"Local\\CloudOS.SystemBroker.Mutex.v21." + sid + L"." + std::to_wstring(session_id);
 }
 
 bool SecurityV21::CreatePerUserSecurityAttributes(
