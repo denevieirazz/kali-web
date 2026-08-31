@@ -47,7 +47,7 @@ foreach ($name in $contracts) {
     Write-Host "[CloudOS contracts] RUN  $name"
     & $pwsh -NoLogo -NoProfile -File $path
     if ($LASTEXITCODE -ne 0) {
-        throw "Native contract failed with exit code $LASTEXITCODE: $name"
+        throw "Native contract failed with exit code ${LASTEXITCODE}: $name"
     }
 
     $completed.Add($name)
