@@ -52,6 +52,10 @@ private:
     Microsoft::WRL::ComPtr<ICoreWebView2Environment> environment_;
     Microsoft::WRL::ComPtr<ICoreWebView2Controller> controller_;
     Microsoft::WRL::ComPtr<ICoreWebView2> webview_;
+    // DownloadStarting was introduced on ICoreWebView2_4. Keep the base
+    // interface for common navigation and hold the versioned capability
+    // separately so older/runtime capability failures degrade cleanly.
+    Microsoft::WRL::ComPtr<ICoreWebView2_4> webview_v4_;
     EventRegistrationToken navigation_completed_token_{};
     EventRegistrationToken history_changed_token_{};
     EventRegistrationToken download_starting_token_{};
