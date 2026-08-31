@@ -43,11 +43,19 @@ foreach ($name in @(
     'run-native-lifecycle-smoke-v10.ps1',
     'run-native-supervisor-smoke-v11.ps1',
     'native-performance-v12.ps1',
-    'run-native-performance-smoke-v12.ps1'
+    'run-native-performance-smoke-v12.ps1',
+    'CloudOS.Deployment.V13.psm1',
+    'install-cloudos-native-v13.ps1',
+    'update-cloudos-native-v13.ps1',
+    'rollback-cloudos-native-v13.ps1',
+    'repair-cloudos-native-v13.ps1',
+    'uninstall-cloudos-native-v13.ps1',
+    'get-cloudos-deployment-status-v13.ps1',
+    'start-cloudos-installed-v13.ps1'
 )) {
     $source = Join-Path $PSScriptRoot $name
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
-        throw "Native validation package tool missing: $source"
+        throw "Native validation/deployment package tool missing: $source"
     }
     Copy-Item -LiteralPath $source -Destination (Join-Path $stage $name) -Force
 }
@@ -141,6 +149,51 @@ exit /b %ERRORLEVEL%
 '@
 Set-Content -LiteralPath (Join-Path $stage 'Coletar Diagnostico 60s.cmd') -Value $diagnosticsLauncher -Encoding ascii
 
+$installLauncher = @'
+@echo off
+setlocal EnableExtensions
+set "ROOT=%~dp0"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%install-cloudos-native-v13.ps1" -PackageRoot "%ROOT%"
+exit /b %ERRORLEVEL%
+'@
+Set-Content -LiteralPath (Join-Path $stage 'Instalar CloudOS.cmd') -Value $installLauncher -Encoding ascii
+
+$updateLauncher = @'
+@echo off
+setlocal EnableExtensions
+set "ROOT=%~dp0"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%update-cloudos-native-v13.ps1" -PackageRoot "%ROOT%"
+exit /b %ERRORLEVEL%
+'@
+Set-Content -LiteralPath (Join-Path $stage 'Atualizar CloudOS.cmd') -Value $updateLauncher -Encoding ascii
+
+$rollbackLauncher = @'
+@echo off
+setlocal EnableExtensions
+set "ROOT=%~dp0"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%rollback-cloudos-native-v13.ps1"
+exit /b %ERRORLEVEL%
+'@
+Set-Content -LiteralPath (Join-Path $stage 'Rollback CloudOS.cmd') -Value $rollbackLauncher -Encoding ascii
+
+$repairLauncher = @'
+@echo off
+setlocal EnableExtensions
+set "ROOT=%~dp0"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%repair-cloudos-native-v13.ps1"
+exit /b %ERRORLEVEL%
+'@
+Set-Content -LiteralPath (Join-Path $stage 'Reparar CloudOS.cmd') -Value $repairLauncher -Encoding ascii
+
+$uninstallLauncher = @'
+@echo off
+setlocal EnableExtensions
+set "ROOT=%~dp0"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%uninstall-cloudos-native-v13.ps1"
+exit /b %ERRORLEVEL%
+'@
+Set-Content -LiteralPath (Join-Path $stage 'Desinstalar CloudOS.cmd') -Value $uninstallLauncher -Encoding ascii
+
 $readme = @"
 CloudOS Native Shell - $Configuration x64
 
@@ -174,7 +227,18 @@ Shell Supervisor V11:
 - depois do crash-loop, inicia Explorer apenas quando Shell_TrayWnd nao existe.
 - nao altera o registro do Windows e nao encerra Explorer.
 - Recuperacao CloudOS.cmd abre a interface manual independente com --recovery-ui.
-- run-native-supervisor-smoke-v11.ps1 valida supervisor + CloudOS real sem abrir Explorer no modo probe.
+
+Performance/Visual V12:
+- shell event-driven e smoke de idle/performance preservado no pipeline.
+
+Transactional Deployment V13:
+- Instalar CloudOS.cmd faz deploy por usuario em %LOCALAPPDATA%\CloudOS\NativeShell.
+- cada versao e imutavel em versions\; a nova versao so fica ativa depois de SHA256 + Supervisor --self-test.
+- o estado ativo e gravado separadamente e a versao anterior fica como last-known-good.
+- Atualizar CloudOS.cmd e idempotente; Rollback CloudOS.cmd volta para a ultima versao verificada.
+- Reparar CloudOS.cmd limpa transacoes interrompidas e recupera last-known-good quando necessario.
+- Desinstalar CloudOS.cmd remove somente uma raiz que contenha estado gerenciado V13 valido.
+- V13 NAO altera Winlogon, registro de shell, HKLM, logoff ou reboot.
 
 Exemplo de soak de 30 minutos:
   pwsh -File .\run-native-soak-v9.ps1 -Root . -Launch -DurationSeconds 1800
