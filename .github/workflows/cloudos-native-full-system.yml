@@ -44,6 +44,10 @@ jobs:
           path: desktop/CloudOS.NativeShell/packages/Microsoft.Web.WebView2.1.0.4078.44
           key: cloudos-webview2-1.0.4078.44-windows-v1
 
+      - name: Contract Transactional Deployment V13
+        shell: pwsh
+        run: ./scripts/native/test-transactional-deployment-v13-contract.ps1
+
       - name: Validate and build through the developer entrypoint
         shell: cmd
         run: scripts\native\build-cloudos-native.cmd Release
@@ -150,6 +154,20 @@ jobs:
           if ((Get-Item -LiteralPath $zip).Length -le 0) { throw "Portable native package is empty: $zip" }
           Write-Host "PACKAGE_SHA256=$((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant())"
 
+      - name: Smoke Transactional Deployment V13
+        shell: pwsh
+        run: |
+          $packageRoot = 'desktop/CloudOS.NativeShell/artifacts/CloudOS-Native-Release-x64'
+          $report = 'desktop/CloudOS.NativeShell/artifacts/deployment-v13-smoke.json'
+          ./scripts/native/run-native-deployment-smoke-v13.ps1 -PackageRoot $packageRoot -OutputPath $report
+          if (-not (Test-Path -LiteralPath $report)) { throw 'Deployment V13 smoke report missing.' }
+          $result = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
+          if ($result.verdict -ne 'pass') { throw 'Deployment V13 smoke verdict was not pass.' }
+          foreach ($name in @('clean_install', 'idempotent_reinstall', 'verified_upgrade', 'corrupted_package_rejected', 'active_unchanged_after_rejection', 'interrupted_transaction_repaired', 'rollback_restored_previous', 'uninstall_removed_managed_root')) {
+            if ($result.evidence.$name -ne $true) { throw "Deployment V13 evidence failed: $name" }
+          }
+          if ($result.evidence.registry_or_winlogon_modified -ne $false) { throw 'Deployment V13 unexpectedly touched Winlogon/registry state.' }
+
       - name: Publish verified CloudOS Native x64 artifact
         uses: actions/upload-artifact@v4
         with:
@@ -162,6 +180,7 @@ jobs:
             desktop/CloudOS.NativeShell/artifacts/lifecycle-v10-smoke.json
             desktop/CloudOS.NativeShell/artifacts/supervisor-v11-smoke.json
             desktop/CloudOS.NativeShell/artifacts/performance-v12-smoke.json
+            desktop/CloudOS.NativeShell/artifacts/deployment-v13-smoke.json
             desktop/CloudOS.NativeShell/bin/Release/cloudos-native-manifest.json
             desktop/CloudOS.NativeShell/bin/Release/.cloudos-build-head
             desktop/CloudOS.NativeShell/bin/Release/.cloudos-build-fingerprint
