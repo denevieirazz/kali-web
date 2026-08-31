@@ -1,8 +1,12 @@
 import 'package:cloudos_flutter_shell/main.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   testWidgets('CloudOS presentation renders core desktop surfaces', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
     await tester.pumpWidget(const CloudOSApp());
     await tester.pumpAndSettle();
 
