@@ -68,7 +68,7 @@ class CloudTaskbar extends StatelessWidget {
               const SizedBox(width: 14),
               Container(width: 1, height: 28, color: CloudOSColors.border),
               const SizedBox(width: 12),
-              _WorkspacePill(index: 1, selected: true),
+              const _WorkspacePill(index: 1, selected: true),
               const SizedBox(width: 5),
               const _WorkspacePill(index: 2),
               const SizedBox(width: 5),
