@@ -5,6 +5,9 @@ on:
   pull_request:
     paths:
       - 'desktop/CloudOS.FlutterShell/**'
+      - 'desktop/CloudOS.SystemBroker/**'
+      - 'desktop/CloudOS.BrokerProbe/**'
+      - 'scripts/native/**'
       - 'scripts/flutter/**'
       - 'Abrir CloudOS Flutter Preview.cmd'
       - '.github/workflows/cloudos-flutter-ui.yml'
@@ -31,6 +34,22 @@ jobs:
           flutter config --enable-windows-desktop
           flutter devices
 
+      - name: Build System Broker V21
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsroot = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $msbuild = Join-Path $vsroot "MSBuild\Current\Bin\MSBuild.exe"
+          & $msbuild "desktop/CloudOS.SystemBroker/CloudOS.SystemBroker.vcxproj" /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
+          & $msbuild "desktop/CloudOS.BrokerProbe/CloudOS.BrokerProbe.vcxproj" /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
+
+      - name: Test System Broker Self-Test & Contract
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File scripts/native/test-system-broker-v21-contract.ps1
+          pwsh -NoProfile -File scripts/native/run-system-broker-smoke-v21.ps1
+          pwsh -NoProfile -File scripts/native/test-system-broker-v21-soak.ps1 -DurationSeconds 5
+
       - name: Generate local Windows host
         shell: pwsh
         working-directory: desktop/CloudOS.FlutterShell
@@ -42,7 +61,7 @@ jobs:
             if (Test-Path $cmakePath) {
               $cmake = Get-Content -Path $cmakePath -Raw
               if ($cmake -notmatch "cloudos_flutter_bridge_v20.cpp") {
-                $cmake = $cmake -replace '(\s*"flutter_window\.cpp")', "`$1`n  `"cloudos_flutter_bridge_v20.cpp`""
+                $cmake = $cmake -replace '(\s*"flutter_window\.cpp")', "`$1`n  `"cloudos_flutter_bridge_v20.cpp`"`n  `"cloudos_broker_client_v21.cpp`""
                 $cmake = $cmake -replace 'target_link_libraries\(\$\{BINARY_NAME\} PRIVATE flutter flutter_wrapper_app\)', 'target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app dwmapi.lib shlwapi.lib shell32.lib ole32.lib uuid.lib advapi32.lib)'
                 Set-Content -Path $cmakePath -Value $cmake -Encoding UTF8
               }
@@ -72,21 +91,34 @@ jobs:
         working-directory: desktop/CloudOS.FlutterShell
         run: flutter build windows --release
 
-      - name: Write V20 evidence
+      - name: Stage System Broker binaries in Release
+        shell: pwsh
+        run: |
+          $release = Resolve-Path 'desktop/CloudOS.FlutterShell/build/windows/x64/runner/Release'
+          $brokerBin = Resolve-Path 'desktop/CloudOS.NativeShell/bin/Release'
+          Copy-Item -Path (Join-Path $brokerBin 'CloudOS.SystemBroker.exe') -Destination $release -Force
+          Copy-Item -Path (Join-Path $brokerBin 'CloudOS.BrokerProbe.exe') -Destination $release -Force
+
+      - name: Write V21 evidence
         shell: pwsh
         run: |
           $flutter = (flutter --version | Select-Object -First 1).Trim()
           $release = Resolve-Path 'desktop/CloudOS.FlutterShell/build/windows/x64/runner/Release'
           $exe = Join-Path $release 'cloudos_flutter_shell.exe'
+          $brokerExe = Join-Path $release 'CloudOS.SystemBroker.exe'
           if (-not (Test-Path $exe)) { throw "Flutter executable missing: $exe" }
+          if (-not (Test-Path $brokerExe)) { throw "SystemBroker executable missing: $brokerExe" }
           $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $brokerSha = (Get-FileHash $brokerExe -Algorithm SHA256).Hash.ToLowerInvariant()
           $evidence = [ordered]@{
-            schema = 20
+            schema = 21
             verdict = 'pass'
             flutter = $flutter
             git_sha = '${{ github.sha }}'
             presentation_layer = 'Flutter 3.44.7'
             native_bridge_channel = 'cloudos/native/v19'
+            native_broker_ipc = 'NamedPipe v21'
+            broker_protocol_version = 21
             native_bridge_registered = $true
             get_apps_contract = $true
             system_snapshot_contract = $true
@@ -96,22 +128,25 @@ jobs:
             shell_activation_executed = $false
             executable = 'cloudos_flutter_shell.exe'
             executable_sha256 = $sha
+            broker_executable = 'CloudOS.SystemBroker.exe'
+            broker_executable_sha256 = $brokerSha
           }
-          $evidence | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 'flutter-v20-smoke.json'
-          Get-Content 'flutter-v20-smoke.json'
+          $evidence | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 'flutter-v21-smoke.json'
+          Get-Content 'flutter-v21-smoke.json'
 
       - name: Package Flutter preview
         shell: pwsh
         run: |
           $release = Resolve-Path 'desktop/CloudOS.FlutterShell/build/windows/x64/runner/Release'
-          Compress-Archive -Path "$release\*" -DestinationPath 'CloudOS-Flutter-V20-Windows-x64.zip' -Force
+          Compress-Archive -Path "$release\*" -DestinationPath 'CloudOS-Flutter-V21-Windows-x64.zip' -Force
 
       - name: Upload Flutter preview
         uses: actions/upload-artifact@v4
         with:
-          name: CloudOS-Flutter-V20-${{ github.sha }}
+          name: CloudOS-Flutter-V21-${{ github.sha }}
           path: |
-            CloudOS-Flutter-V20-Windows-x64.zip
-            flutter-v20-smoke.json
+            CloudOS-Flutter-V21-Windows-x64.zip
+            flutter-v21-smoke.json
+            system-broker-v21-smoke.json
           if-no-files-found: error
           retention-days: 14
