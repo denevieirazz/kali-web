@@ -177,7 +177,7 @@ Forbid 'Desktop integration remains event-driven' $content.Desktop @(
 Require 'Files exposes Linux namespace' $content.Files @(
     'FOLDERID_Downloads',
     'L"WSL / Linux"',
-    'L"\\\\\\\\wsl.localhost\\\\"'
+    'wsl.localhost'
 )
 
 Require 'Existing low-level WSL runtime is preserved' $content.Runtime @(
