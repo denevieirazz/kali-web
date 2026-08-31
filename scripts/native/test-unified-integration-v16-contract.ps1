@@ -193,7 +193,7 @@ Require 'V16 documentation' $content.Document @(
     '\\wsl.localhost',
     'default apps',
     'PackageDeploymentManager',
-    'Hosted CI',
+    'hosted CI',
     'não altera Winlogon'
 )
 Require 'V16 code map' $content.CodeMap @('native_integration_v16.*', 'native_folder_picker_v16.*', 'test-unified-integration-v16-contract.ps1')
