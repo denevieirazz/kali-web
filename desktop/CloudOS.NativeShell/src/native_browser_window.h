@@ -54,8 +54,10 @@ private:
     Microsoft::WRL::ComPtr<ICoreWebView2> webview_;
     EventRegistrationToken navigation_completed_token_{};
     EventRegistrationToken history_changed_token_{};
+    EventRegistrationToken download_starting_token_{};
     bool navigation_completed_registered_{};
     bool history_changed_registered_{};
+    bool download_starting_registered_{};
 
     std::shared_ptr<std::atomic_bool> alive_{std::make_shared<std::atomic_bool>(true)};
 };
