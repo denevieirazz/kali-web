@@ -610,7 +610,7 @@ void CloudOSNativeStartMenuWindow::Layout()
     ListView_SetColumnWidth(app_list_, 0, std::max(180, width - margin * 2 - Scale(8, dpi)));
     UpdateViewVisibility();
     const bool home=view_mode_==ViewMode::Home && SearchText(search_edit_).empty();
-    const int columns=std::clamp((width-margin*2)/Scale(96,dpi),2,6);
+    const int columns=std::clamp((width-margin*2)/Scale(92,dpi),2,6);
     const int rows=(static_cast<int>(start_pins_.size())+columns-1)/columns;
     const int cards=width>=Scale(500,dpi)?2:1;
     const int extent=Scale(31+rows*102+18+32+((6+cards-1)/cards)*66+12,dpi);
@@ -676,7 +676,7 @@ void CloudOSNativeStartMenuWindow::PaintHome(
         PointF(static_cast<REAL>(margin), static_cast<REAL>(pinned_title_y)),
         &primary);
 
-    const int columns = std::clamp(content_width / Scale(96, dpi), 2, 6);
+    const int columns = std::clamp(content_width / Scale(92, dpi), 2, 6);
     const int gap = Scale(8, dpi);
     const int tile_width = std::max(72, (content_width - gap * (columns - 1)) / columns);
     const int tile_height = Scale(94, dpi);
