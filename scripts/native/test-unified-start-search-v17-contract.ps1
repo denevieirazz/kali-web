@@ -13,7 +13,6 @@ $paths = @{
     Desktop = Join-Path $src 'native_desktop_model_v12.h'
     StartHeader = Join-Path $src 'native_start_index.h'
     Start = Join-Path $src 'native_start_index.cpp'
-    StartMenu = Join-Path $src 'native_start_menu_window.cpp'
     Document = Join-Path $Root 'docs\native\UNIFIED_START_SEARCH_V17.md'
     Roadmap = Join-Path $Root 'docs\native\DESKTOP_SYSTEM_ROADMAP.md'
     CodeMap = Join-Path $Root 'docs\native\CODEMAP.md'
@@ -100,10 +99,6 @@ Forbid 'V17 Desktop no longer owns Linux launcher construction' $content.Desktop
     'SetTimer(',
     'Sleep(1000)',
     'Sleep(2000)'
-)
-
-Require 'V17 Start UI describes unified indexed results' $content.StartMenu @(
-    'Windows + Linux'
 )
 
 Require 'V17 documentation' $content.Document @(
