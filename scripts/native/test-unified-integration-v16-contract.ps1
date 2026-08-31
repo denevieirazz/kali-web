@@ -154,7 +154,7 @@ Require 'Unified Apps surface' ($content.AppsHeader + "`n" + $content.Apps) @(
 
 Require 'Desktop integration notifications' $content.Desktop @(
     'FOLDERID_Desktop',
-    'FOLDERID_PublicDesktop',
+    'NativeIntegrationV16::PublicDesktopFolder()',
     'FOLDERID_Programs',
     'FOLDERID_CommonPrograms',
     'FindFirstChangeNotificationW',
