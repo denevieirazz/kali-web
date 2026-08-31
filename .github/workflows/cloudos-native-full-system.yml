@@ -48,6 +48,10 @@ jobs:
         shell: pwsh
         run: ./scripts/native/test-transactional-deployment-v13-contract.ps1
 
+      - name: Contract Shell Activation V14
+        shell: pwsh
+        run: ./scripts/native/test-shell-activation-v14-contract.ps1
+
       - name: Validate and build through the developer entrypoint
         shell: cmd
         run: scripts\native\build-cloudos-native.cmd Release
@@ -168,6 +172,19 @@ jobs:
           }
           if ($result.evidence.registry_or_winlogon_modified -ne $false) { throw 'Deployment V13 unexpectedly touched Winlogon/registry state.' }
 
+      - name: Smoke Shell Activation V14
+        shell: pwsh
+        run: |
+          $packageRoot = 'desktop/CloudOS.NativeShell/artifacts/CloudOS-Native-Release-x64'
+          $report = 'desktop/CloudOS.NativeShell/artifacts/shell-activation-v14-smoke.json'
+          ./scripts/native/run-native-shell-activation-smoke-v14.ps1 -PackageRoot $packageRoot -OutputPath $report
+          if (-not (Test-Path -LiteralPath $report)) { throw 'Shell Activation V14 smoke report missing.' }
+          $result = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
+          if ($result.verdict -ne 'pass') { throw 'Shell Activation V14 smoke verdict was not pass.' }
+          foreach ($name in @('clean_deployment_verified', 'absent_prior_restored_as_absent', 'explorer_prior_restored_exactly', 'expand_string_prior_type_restored', 'idempotent_activation', 'stable_shell_entry_ready_probe', 'interrupted_activation_repaired', 'invalid_active_payload_rejected', 'uninstall_blocked_while_active', 'uninstall_succeeded_after_shell_rollback', 'production_winlogon_unchanged')) {
+            if ($result.evidence.$name -ne $true) { throw "Shell Activation V14 evidence failed: $name" }
+          }
+
       - name: Publish verified CloudOS Native x64 artifact
         uses: actions/upload-artifact@v4
         with:
@@ -181,6 +198,7 @@ jobs:
             desktop/CloudOS.NativeShell/artifacts/supervisor-v11-smoke.json
             desktop/CloudOS.NativeShell/artifacts/performance-v12-smoke.json
             desktop/CloudOS.NativeShell/artifacts/deployment-v13-smoke.json
+            desktop/CloudOS.NativeShell/artifacts/shell-activation-v14-smoke.json
             desktop/CloudOS.NativeShell/bin/Release/cloudos-native-manifest.json
             desktop/CloudOS.NativeShell/bin/Release/.cloudos-build-head
             desktop/CloudOS.NativeShell/bin/Release/.cloudos-build-fingerprint
