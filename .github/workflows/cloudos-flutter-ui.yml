@@ -36,6 +36,9 @@ jobs:
         working-directory: desktop/CloudOS.FlutterShell
         run: |
           flutter create --platforms=windows --project-name cloudos_flutter_shell .
+          if (Test-Path 'native_bridge') {
+            Copy-Item -Path "native_bridge/*" -Destination "windows/runner/" -Force
+          }
           if (Test-Path 'test/widget_test.dart') {
             Remove-Item 'test/widget_test.dart' -Force
           }
@@ -60,7 +63,7 @@ jobs:
         working-directory: desktop/CloudOS.FlutterShell
         run: flutter build windows --release
 
-      - name: Write V19 evidence
+      - name: Write V20 evidence
         shell: pwsh
         run: |
           $flutter = (flutter --version | Select-Object -First 1).Trim()
@@ -69,33 +72,37 @@ jobs:
           if (-not (Test-Path $exe)) { throw "Flutter executable missing: $exe" }
           $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           $evidence = [ordered]@{
-            schema = 19
+            schema = 20
             verdict = 'pass'
             flutter = $flutter
             git_sha = '${{ github.sha }}'
-            presentation_only = $true
+            presentation_layer = 'Flutter 3.44.7'
             native_bridge_channel = 'cloudos/native/v19'
-            native_bridge_wired = $false
+            native_bridge_registered = $true
+            get_apps_contract = $true
+            system_snapshot_contract = $true
+            launch_app_contract = $true
+            arbitrary_command_api = $false
             winlogon_modified = $false
             shell_activation_executed = $false
             executable = 'cloudos_flutter_shell.exe'
             executable_sha256 = $sha
           }
-          $evidence | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 'flutter-v19-smoke.json'
-          Get-Content 'flutter-v19-smoke.json'
+          $evidence | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 'flutter-v20-smoke.json'
+          Get-Content 'flutter-v20-smoke.json'
 
       - name: Package Flutter preview
         shell: pwsh
         run: |
           $release = Resolve-Path 'desktop/CloudOS.FlutterShell/build/windows/x64/runner/Release'
-          Compress-Archive -Path "$release\*" -DestinationPath 'CloudOS-Flutter-V19-Windows-x64.zip' -Force
+          Compress-Archive -Path "$release\*" -DestinationPath 'CloudOS-Flutter-V20-Windows-x64.zip' -Force
 
       - name: Upload Flutter preview
         uses: actions/upload-artifact@v4
         with:
-          name: CloudOS-Flutter-V19-${{ github.sha }}
+          name: CloudOS-Flutter-V20-${{ github.sha }}
           path: |
-            CloudOS-Flutter-V19-Windows-x64.zip
-            flutter-v19-smoke.json
+            CloudOS-Flutter-V20-Windows-x64.zip
+            flutter-v20-smoke.json
           if-no-files-found: error
           retention-days: 14
