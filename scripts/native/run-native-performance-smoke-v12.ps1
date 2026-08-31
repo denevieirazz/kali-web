@@ -3,7 +3,11 @@ param(
     [string]$BuildDirectory,
     [Parameter(Mandatory)][string]$OutputPath,
     [ValidateRange(20,3600)][int]$DurationSeconds=120,
-    [ValidateRange(0,60)][int]$WarmupSeconds=15,
+    # V9/V10 smoke runs may leave a deliberate unclean-session marker because
+    # their harnesses force-stop owned probes. Give V12 enough time for the
+    # one-time continuity restore and asynchronous icon/model publication to
+    # settle before the 120-second idle baseline begins.
+    [ValidateRange(0,120)][int]$WarmupSeconds=45,
     [double]$MaxAverageCpuPercent=1.0
 )
 $ErrorActionPreference='Stop'

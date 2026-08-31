@@ -105,7 +105,7 @@ jobs:
       - name: Performance Visual V12 idle soak
         shell: pwsh
         run: |
-          ./scripts/native/run-native-performance-smoke-v12.ps1 -DurationSeconds 120 -MaxAverageCpuPercent 2 -OutputPath 'desktop/CloudOS.NativeShell/artifacts/performance-v12-smoke.json'
+          ./scripts/native/run-native-performance-smoke-v12.ps1 -DurationSeconds 120 -WarmupSeconds 45 -MaxAverageCpuPercent 2 -OutputPath 'desktop/CloudOS.NativeShell/artifacts/performance-v12-smoke.json'
 
       - name: Verify native release provenance and compiled graph
         shell: pwsh
