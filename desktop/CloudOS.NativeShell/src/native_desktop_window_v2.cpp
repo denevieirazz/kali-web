@@ -537,7 +537,13 @@ LRESULT CloudOSNativeDesktopWindow::HandleMessage(HWND window, UINT message, WPA
         break;
     case CLOUDOS_WM_NATIVE_WINDOW_EVENT:
         if (window_manager_ != nullptr)
+        {
             window_manager_->HandleRuntimeEvent(static_cast<cloudos_native_window_event_kind>(w_param), reinterpret_cast<HWND>(l_param));
+            // Runtime events are the recovery checkpoint trigger. Keep the
+            // first-party restore path event-driven instead of reconciling on
+            // a periodic desktop timer while the shell is idle.
+            if (on_timer_) on_timer_();
+        }
         return 0;
     case WM_HOTKEY:
         if (on_hotkey_) on_hotkey_(static_cast<int>(w_param));

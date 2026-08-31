@@ -17,7 +17,7 @@ foreach($file in @('native_desktop_window_v2.cpp','native_taskbar_appbar_v4.cpp'
 }
 $main=Read 'main_shell_v2.cpp'
 Require $main @('CLOUDOS_WM_MODEL_CHANGED_V12','view_update_pending_','recovery_dirty_','--stability-probe')
-Forbid $main @('SetTimer(desktop_.Hwnd(), kReconcileTimer, 1000','SetTimer(desktop_.Hwnd(), kMetricsTimer','start_menu_.ToggleNear(taskbars_.front()->Bounds())')
+Forbid $main @('SetTimer(desktop_.Hwnd(), kReconcileTimer','SetTimer(desktop_.Hwnd(), kMetricsTimer','start_menu_.ToggleNear(taskbars_.front()->Bounds())')
 Require (Read 'native_desktop_model_v12.h') @('ReadDirectoryChangesW','FILE_FLAG_OVERLAPPED','CancelIoEx','GetOverlappedResult','worker_.join()')
 Require (Read 'native_icon_cache_v12.h') @('SHGetFileInfoW','std::thread','CopyIcon','DestroyIcon','entries_.size() >= 512')
 Require (Read 'native_render_cache_v12.h') @('WM_NCDESTROY','RemoveWindowSubclass','DeleteObject(bitmap_)','width_ != width','dpi_ != dpi')

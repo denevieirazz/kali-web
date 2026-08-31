@@ -188,10 +188,6 @@ public:
                 L"O CloudOS detectou uma finalizacao inesperada e restaurou o ultimo estado salvo.");
         }
 
-        if (SetTimer(desktop_.Hwnd(), kReconcileTimer, 30000, nullptr) != 0)
-        {
-            reconcile_timer_active_ = true;
-        }
         CloudOSNativeNotificationCenter::Post(
             L"CloudOS pronto",
             L"Visao de Trabalho ativa: Ctrl+Alt+O abre as 4 areas; Ctrl+Alt+PgUp/PgDn alterna entre elas.");
@@ -751,11 +747,6 @@ private:
         const HWND window = desktop_.Hwnd();
         if (window != nullptr)
         {
-            if (reconcile_timer_active_)
-            {
-                (void)KillTimer(window, kReconcileTimer);
-                reconcile_timer_active_ = false;
-            }
             if (metrics_timer_active_)
             {
                 (void)KillTimer(window, kMetricsTimer);
@@ -823,7 +814,6 @@ private:
     std::vector<std::unique_ptr<CloudOSTaskbarAppBar>> taskbars_;
     std::wstring monitor_signature_;
     bool window_manager_initialized_{};
-    bool reconcile_timer_active_{};
     bool metrics_timer_active_{};
     bool lifecycle_subclass_attached_{};
     bool snap_assist_active_{};
