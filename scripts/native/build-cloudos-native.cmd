@@ -27,36 +27,8 @@ if not exist "%MSBUILD%" (
   exit /b 4
 )
 
-echo [CloudOS] Validando contratos do shell nativo...
-pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-performance-visual-v12-contract.ps1"
-if errorlevel 1 exit /b %ERRORLEVEL%
-pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-cloudos-native-shell-contracts.ps1"
-if errorlevel 1 exit /b %ERRORLEVEL%
-pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-shell-lifecycle-contract.ps1"
-if errorlevel 1 exit /b %ERRORLEVEL%
-pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-native-web-ui-contract.ps1"
-if errorlevel 1 exit /b %ERRORLEVEL%
-pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-visual-platform-v7-contract.ps1"
-if errorlevel 1 exit /b %ERRORLEVEL%
-pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-stability-readiness-v9-contract.ps1"
-if errorlevel 1 exit /b %ERRORLEVEL%
-pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-lifecycle-v10-contract.ps1"
-if errorlevel 1 exit /b %ERRORLEVEL%
-pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-shell-supervisor-v11-contract.ps1"
-if errorlevel 1 exit /b %ERRORLEVEL%
-pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-taskbar-productivity-contract.ps1"
-if errorlevel 1 exit /b %ERRORLEVEL%
-pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-workspace-overview-contract.ps1"
-if errorlevel 1 exit /b %ERRORLEVEL%
-pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-workspace-studio-contract.ps1"
-if errorlevel 1 exit /b %ERRORLEVEL%
-pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-session-continuity-contract.ps1"
-if errorlevel 1 exit /b %ERRORLEVEL%
-pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-shell-control-plane-contract.ps1"
-if errorlevel 1 exit /b %ERRORLEVEL%
-pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-files-storage-v5-contract.ps1"
-if errorlevel 1 exit /b %ERRORLEVEL%
-pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-native-release-pipeline-contract.ps1"
+echo [CloudOS] Validando suite de contratos do shell nativo...
+pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-native-contract-suite.ps1"
 if errorlevel 1 exit /b %ERRORLEVEL%
 
 set "WEBVIEW_TARGET=%ROOT%\desktop\CloudOS.NativeShell\packages\Microsoft.Web.WebView2.1.0.4078.44\build\native\Microsoft.Web.WebView2.targets"
