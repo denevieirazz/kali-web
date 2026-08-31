@@ -4,13 +4,19 @@ This roadmap describes the **current C++/Win32 native product**. Historical Reac
 
 ## Current validated baseline
 
-Repository Clarity V15 starts from the exact green Shell Activation V14 branch head:
+Unified Start/Search V17 starts from the exact green Unified Integration V16 branch head:
 
 ```text
-bf5aef7f46bc4ee71f4f59f2639e277f91a56d15
+a995ea59d95ddf4c72d7cbc6a08e746edf26e7c3
 ```
 
-That V14 head passed CloudOS Native Full-System CI #402 and CloudOS CI Baseline #930 before V15 cleanup began.
+That V16 head passed:
+
+- CloudOS CI Baseline #948 — run `33399404466`;
+- CloudOS Native Full-System CI #420 — run `33399404475`;
+- verified artifact digest `sha256:657d19ca1a3e06896ad6df77021b4fd1cc00e1e3aab62fc450cce686f0358ffe`.
+
+V17 work must not rewrite that validated base or merge into `main` as a side effect of validation.
 
 Current release architecture:
 
@@ -22,6 +28,7 @@ CloudOS.exe --supervised
         |
         +--> CloudOS.NativeRuntime.dll
         +--> Desktop / Taskbar / Start / Files / workspaces / control plane
+        +--> NativeIntegrationV16 Windows + Linux/WSL boundary
 ```
 
 The release is built from `CloudOS.NativeShell.vcxproj`; `main_shell_v2.cpp` is the active shell entry point.
@@ -37,6 +44,34 @@ The release is built from `CloudOS.NativeShell.vcxproj`; `main_shell_v2.cpp` is 
 | V13 | per-user transactional deployment, verified active version, repair, rollback, uninstall interlock foundations | contract + temp-directory deployment smoke |
 | V14 | explicit per-user shell activation, exact previous-value snapshot/restore, journal repair and independent Explorer rollback | contract + HKCU sandbox activation smoke + real shell-entry Ready probe |
 | V15 | repository/source-of-truth cleanup for humans and coding agents; central native contract suite | repository-clarity contract + full existing CI matrix |
+| V16 | Browser→Files download destination, unified Windows/WSL app inventory, WinGet/apt/snap/flatpak boundary, Linux Desktop launchers and event-driven install discovery | V16 contract + non-mutating hosted smoke + complete V9–V14 regression matrix |
+
+## Active milestone — V17 Unified Start/Search
+
+V17 closes the remaining discovery gap after V16: Linux GUI applications must participate directly in Start/Search without creating a second Linux inventory.
+
+Design:
+
+- `NativeIntegrationV16::EnumerateLinuxGuiApps()` remains the Linux discovery authority;
+- `native_integration_v16_launchers.h` owns the shared managed `.lnk` adapter used by Desktop and Start;
+- `NativeStartIndex` consumes V16 Linux entries alongside Start folders and `shell:AppsFolder`;
+- Linux entries receive app-first search ranking and a visible `Linux`/distro identity;
+- WSL application-directory change notifications refresh Desktop and Start independently, with no polling timer;
+- Start itself must not construct `wsl.exe`/`gtk-launch` commands;
+- all V9–V16 safety/performance/deployment/activation gates remain mandatory.
+
+Acceptance before V17 may be called complete:
+
+1. central native contract suite includes V17;
+2. native Release x64 builds under existing `/W4 /WX` policy;
+3. V17 non-mutating smoke passes and Supervisor self-test remains green;
+4. production HKCU Winlogon remains unchanged;
+5. Full-System V9–V17 matrix passes on Windows CI;
+6. Baseline CI passes;
+7. verified release artifact is published and independently inspected;
+8. validation PR remains isolated from `main` unless an explicit merge is requested.
+
+Hosted CI with no configured WSL distro cannot prove a real WSLg GUI launch. That remains a VM/manual gate.
 
 ## Current ownership
 
@@ -44,6 +79,9 @@ The release is built from `CloudOS.NativeShell.vcxproj`; `main_shell_v2.cpp` is 
 - Low-level native ABI/runtime: `desktop/CloudOS.NativeRuntime`.
 - External recovery/supervision: `desktop/CloudOS.NativeRecovery` -> `CloudOS.Supervisor.exe`.
 - Cross-project supervisor protocol: `desktop/CloudOS.NativeCommon`.
+- Windows+Linux discovery/package boundary: `desktop/CloudOS.NativeShell/src/native_integration_v16.*`.
+- Shared managed Linux launch adapter: `desktop/CloudOS.NativeShell/src/native_integration_v16_launchers.h`.
+- Unified Start/Search index: `desktop/CloudOS.NativeShell/src/native_start_index.*`.
 - Build/deployment/activation/test tooling: `scripts/native`.
 - Current architecture/code map/validation: `docs/native`.
 
@@ -59,6 +97,7 @@ The following remain distinct from hosted CI success:
 | Crash before Ready | force real pre-Ready crashes across logon and prove Supervisor/Explorer recovery |
 | Reboot/boot recovery | reboot with activation enabled; verify emergency rollback independently of CloudOS UI |
 | Physical lifecycle | real suspend/resume, RDP transport, user switching and monitor hotplug/DPI changes |
+| Real WSLg | configured distro(s), Linux GUI install/remove, Start/Desktop notification and actual GUI launch |
 | Long soak | 24 h per target configuration, then multi-day pilot use |
 | Multi-user | two accounts/two sessions with isolated state, IPC and recovery scope |
 | Accessibility | Narrator/UIA, keyboard-only flows, IME, contrast, touch and 100–300% scaling |
@@ -99,6 +138,7 @@ Full runtime validation belongs to `.github/workflows/cloudos-native-full-system
 2. Do not create competing watchdog/recovery authorities; Supervisor V11 remains external authority unless explicitly versioned.
 3. Preserve exact rollback semantics for shell activation and transactional deployment.
 4. Change ABI/protocol contracts only through explicit versioning.
-5. Prefer behavior-preserving modularization over cosmetic file moves.
-6. Update `AGENTS.md`, `CODEMAP.md` and `VALIDATION.md` when source ownership or acceptance criteria change.
-7. Every milestone must finish with actual Windows CI evidence before being called complete.
+5. Keep Windows↔Linux discovery/command construction inside `NativeIntegrationV16`; consumers must not fork a second catalog.
+6. Prefer behavior-preserving modularization over cosmetic file moves.
+7. Update `AGENTS.md`, `CODEMAP.md` and `VALIDATION.md` when source ownership or acceptance criteria change.
+8. Every milestone must finish with actual Windows CI evidence before being called complete.
