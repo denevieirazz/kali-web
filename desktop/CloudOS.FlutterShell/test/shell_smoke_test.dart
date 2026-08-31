@@ -99,11 +99,11 @@ void main() {
 
       expect(apps.length, 3);
       expect(apps[0].id, 'windows:notepad');
-      expect(apps[0].platform, AppPlatform.windows);
+      expect(apps[0].platform, CloudAppPlatform.windows);
       expect(apps[1].id, 'wsl:gimp');
-      expect(apps[1].platform, AppPlatform.linux);
+      expect(apps[1].platform, CloudAppPlatform.linux);
       expect(apps[2].id, 'cloudos:files');
-      expect(apps[2].platform, AppPlatform.cloudos);
+      expect(apps[2].platform, CloudAppPlatform.cloudos);
     });
 
     test('loadSystemSnapshot maps all properties from native snapshot', () async {
@@ -194,12 +194,12 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() => tester.view.resetPhysicalSize());
 
-      await tester.pumpWidget(const CloudOSFlutterShellApp());
+      await tester.pumpWidget(const CloudOSApp());
       await tester.pumpAndSettle();
 
       expect(find.text('Arquivos'), findsWidgets);
       expect(find.text('Navegador Web'), findsWidgets);
-      expect(find.text('Terminal'), findsWidgets);
+      expect(find.text('Terminal ConPTY'), findsWidgets);
       expect(find.byType(TextField), findsOneWidget);
     });
 
@@ -208,7 +208,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() => tester.view.resetPhysicalSize());
 
-      await tester.pumpWidget(const CloudOSFlutterShellApp());
+      await tester.pumpWidget(const CloudOSApp());
       await tester.pumpAndSettle();
 
       final startButton = find.byTooltip('Iniciar');
@@ -231,7 +231,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() => tester.view.resetPhysicalSize());
 
-      await tester.pumpWidget(const CloudOSFlutterShellApp());
+      await tester.pumpWidget(const CloudOSApp());
       await tester.pumpAndSettle();
 
       final quickSettingsBtn = find.byTooltip('Configurações rápidas');
@@ -250,7 +250,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() => tester.view.resetPhysicalSize());
 
-      await tester.pumpWidget(const CloudOSFlutterShellApp());
+      await tester.pumpWidget(const CloudOSApp());
       await tester.pumpAndSettle();
 
       final notifBtn = find.byTooltip('Notificações');
