@@ -4,6 +4,7 @@
 #include "native_env_doctor_window.h"
 #include "native_integration_v16.h"
 #include "native_notepad_window.h"
+#include "native_package_maintenance_v17.h"
 #include "native_settings_window.h"
 #include "native_system_monitor_window.h"
 #include "native_terminal_window.h"
@@ -30,7 +31,8 @@ constexpr int kListId = 1302;
 constexpr int kLaunchId = 1303;
 constexpr int kInstallId = 1304;
 constexpr int kUninstallId = 1305;
-constexpr int kRefreshId = 1306;
+constexpr int kUpdateId = 1306;
+constexpr int kRefreshId = 1307;
 constexpr UINT kInstallWindows = 1;
 constexpr UINT kInstallLinux = 2;
 
@@ -234,7 +236,7 @@ bool CloudOSNativeAppsWindow::Create()
         kClassName,
         L"Aplicativos - Windows + Linux - CloudOS",
         WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
-        CW_USEDEFAULT, CW_USEDEFAULT, 1040, 690,
+        CW_USEDEFAULT, CW_USEDEFAULT, 1120, 690,
         nullptr, nullptr, instance_, this);
     if (window_ == nullptr) return false;
 
@@ -252,15 +254,19 @@ bool CloudOSNativeAppsWindow::Create()
     install_button_ = CreateWindowExW(0, L"BUTTON", L"Instalar...",
         WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kInstallId)), instance_, nullptr);
+    update_button_ = CreateWindowExW(0, L"BUTTON", L"Atualizar app",
+        WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+        0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kUpdateId)), instance_, nullptr);
     uninstall_button_ = CreateWindowExW(0, L"BUTTON", L"Remover",
         WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kUninstallId)), instance_, nullptr);
-    refresh_button_ = CreateWindowExW(0, L"BUTTON", L"Atualizar",
+    refresh_button_ = CreateWindowExW(0, L"BUTTON", L"Recarregar",
         WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kRefreshId)), instance_, nullptr);
 
     if (search_edit_ == nullptr || list_ == nullptr || launch_button_ == nullptr ||
-        install_button_ == nullptr || uninstall_button_ == nullptr || refresh_button_ == nullptr)
+        install_button_ == nullptr || update_button_ == nullptr || uninstall_button_ == nullptr ||
+        refresh_button_ == nullptr)
     {
         DestroyWindow(window_);
         window_ = nullptr;
@@ -286,7 +292,7 @@ bool CloudOSNativeAppsWindow::Create()
 
     CloudOS::ApplyWebWindowMaterial(window_);
     CloudOS::WebSkin::PrepareEdit(search_edit_);
-    for (HWND button : {launch_button_, install_button_, uninstall_button_, refresh_button_})
+    for (HWND button : {launch_button_, install_button_, update_button_, uninstall_button_, refresh_button_})
         CloudOS::WebSkin::PrepareButton(button);
 
     LoadCatalog();
@@ -310,13 +316,14 @@ void CloudOSNativeAppsWindow::Layout()
     const int button = CloudOS::Scale(104, dpi);
     const int width = static_cast<int>(client.right - client.left);
     const int height = static_cast<int>(client.bottom - client.top);
-    const int controls_width = button * 4 + gap * 4;
+    const int controls_width = button * 5 + gap * 5;
     MoveWindow(search_edit_, margin, margin,
         std::max(140, width - margin * 2 - controls_width), row, TRUE);
 
-    int x = width - margin - button * 4 - gap * 3;
+    int x = width - margin - button * 5 - gap * 4;
     MoveWindow(launch_button_, x, margin, button, row, TRUE); x += button + gap;
     MoveWindow(install_button_, x, margin, button, row, TRUE); x += button + gap;
+    MoveWindow(update_button_, x, margin, button, row, TRUE); x += button + gap;
     MoveWindow(uninstall_button_, x, margin, button, row, TRUE); x += button + gap;
     MoveWindow(refresh_button_, x, margin, button, row, TRUE);
     MoveWindow(list_, margin, margin + row + gap,
@@ -429,6 +436,7 @@ void CloudOSNativeAppsWindow::LoadCatalog()
         });
         if (existing != catalog_.end())
         {
+            existing->kind = AppKind::InstalledWindows;
             if (!installed.uninstall_command.empty())
             {
                 existing->uninstall_command = installed.uninstall_command;
@@ -520,16 +528,20 @@ void CloudOSNativeAppsWindow::UpdateActionState()
     const int row = ListView_GetNextItem(list_, -1, LVNI_SELECTED);
     const bool selected = row >= 0 && static_cast<std::size_t>(row) < visible_indices_.size();
     bool can_launch = false;
+    bool can_update = false;
     bool can_uninstall = false;
     if (selected)
     {
         const AppEntry& app = catalog_[visible_indices_[static_cast<std::size_t>(row)]];
         can_launch = app.can_launch;
+        if (app.kind == AppKind::InstalledWindows || app.kind == AppKind::LinuxGui)
+            can_update = CloudOS::NativePackageMaintenanceV17::CanUpgrade(ToUnified(app));
         can_uninstall = app.can_uninstall ||
             (app.platform == L"Windows" && app.kind != AppKind::Calculator && app.kind != AppKind::Notepad &&
              app.kind != AppKind::Settings && app.kind != AppKind::SystemMonitor && app.kind != AppKind::EnvDoctor);
     }
     EnableWindow(launch_button_, can_launch ? TRUE : FALSE);
+    EnableWindow(update_button_, can_update ? TRUE : FALSE);
     EnableWindow(uninstall_button_, can_uninstall ? TRUE : FALSE);
 }
 
@@ -633,6 +645,44 @@ void CloudOSNativeAppsWindow::InstallFromSearch()
     }
 }
 
+void CloudOSNativeAppsWindow::UpdateSelection()
+{
+    const int row = ListView_GetNextItem(list_, -1, LVNI_SELECTED);
+    if (row < 0 || static_cast<std::size_t>(row) >= visible_indices_.size()) return;
+    const AppEntry& app = catalog_[visible_indices_[static_cast<std::size_t>(row)]];
+
+    if (app.kind == AppKind::LinuxGui)
+    {
+        std::wstring command_line;
+        std::wstring package;
+        if (!CloudOS::NativePackageMaintenanceV17::BuildLinuxUpgradeCommand(ToUnified(app), &command_line, &package))
+        {
+            MessageBoxW(window_,
+                L"O CloudOS nao conseguiu identificar um caminho de atualizacao seguro para este aplicativo Linux.",
+                L"Atualizar Linux - CloudOS", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        std::wstring prompt = L"Atualizar '" + app.name + L"' (" + package + L") em " + app.distro +
+            L"?\n\nO Terminal do CloudOS manterá apt/snap/flatpak visivel e podera solicitar sua senha sudo.";
+        if (MessageBoxW(window_, prompt.c_str(), L"Atualizar Linux - CloudOS", MB_YESNO | MB_ICONQUESTION) != IDYES) return;
+        CloudOSNativeTerminalWindow::Open(instance_, command_line, L"Atualizacao Linux - CloudOS");
+        return;
+    }
+
+    if (app.kind != AppKind::InstalledWindows) return;
+    const std::wstring command_line = CloudOS::NativePackageMaintenanceV17::BuildWindowsUpgradeCommand(app.name);
+    if (command_line.empty())
+    {
+        MessageBoxW(window_, L"WinGet nao esta disponivel para atualizar este aplicativo.",
+            L"Atualizar Windows - CloudOS", MB_OK | MB_ICONWARNING);
+        return;
+    }
+    std::wstring prompt = L"Procurar e aplicar uma atualizacao para '" + app.name +
+        L"' usando WinGet?\n\nO Terminal do CloudOS ficara visivel e o Windows podera solicitar elevacao.";
+    if (MessageBoxW(window_, prompt.c_str(), L"Atualizar Windows - CloudOS", MB_YESNO | MB_ICONQUESTION) != IDYES) return;
+    CloudOSNativeTerminalWindow::Open(instance_, command_line, L"Atualizacao Windows - CloudOS");
+}
+
 void CloudOSNativeAppsWindow::UninstallSelection()
 {
     const int row = ListView_GetNextItem(list_, -1, LVNI_SELECTED);
@@ -707,6 +757,7 @@ LRESULT CloudOSNativeAppsWindow::HandleMessage(
             {
             case kLaunchId: LaunchSelection(); return 0;
             case kInstallId: InstallFromSearch(); return 0;
+            case kUpdateId: UpdateSelection(); return 0;
             case kUninstallId: UninstallSelection(); return 0;
             case kRefreshId: RefreshCatalog(); return 0;
             default: break;
@@ -750,7 +801,9 @@ LRESULT CloudOSNativeAppsWindow::HandleMessage(
         {
             const CloudOS::ButtonTone tone = draw->CtlID == kUninstallId
                 ? CloudOS::ButtonTone::Danger
-                : (draw->CtlID == kInstallId ? CloudOS::ButtonTone::Accent : CloudOS::ButtonTone::Neutral);
+                : ((draw->CtlID == kInstallId || draw->CtlID == kUpdateId)
+                    ? CloudOS::ButtonTone::Accent
+                    : CloudOS::ButtonTone::Neutral);
             if (CloudOS::WebSkin::PaintOwnerDrawButton(draw, tone)) return TRUE;
         }
         break;
