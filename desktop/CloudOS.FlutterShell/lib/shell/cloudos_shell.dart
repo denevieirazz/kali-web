@@ -176,20 +176,28 @@ class _CloudOSShellState extends State<CloudOSShell> {
                   fit: StackFit.expand,
                   children: <Widget>[
                     const RepaintBoundary(child: _Wallpaper()),
-                    RepaintBoundary(
-                      child: _DesktopIcons(
-                        selectedId: selectedDesktopIcon,
-                        onSelect: (id) => setState(() => selectedDesktopIcon = id),
-                        onFiles: _toggleFiles,
-                        onStart: _toggleStart,
-                        onTerminal: _toggleTerminal,
-                        onOpenSettings: _toggleQuickSettings,
+                    Positioned(
+                      left: 20,
+                      top: 20,
+                      child: RepaintBoundary(
+                        child: _DesktopIcons(
+                          selectedId: selectedDesktopIcon,
+                          onSelect: (id) => setState(() => selectedDesktopIcon = id),
+                          onFiles: _toggleFiles,
+                          onStart: _toggleStart,
+                          onTerminal: _toggleTerminal,
+                          onOpenSettings: _toggleQuickSettings,
+                        ),
                       ),
                     ),
-                    RepaintBoundary(
-                      child: _DesktopStatus(
-                        snapshot: snapshot,
-                        currentWorkspace: currentWorkspace,
+                    Positioned(
+                      top: 18,
+                      right: 18,
+                      child: RepaintBoundary(
+                        child: _DesktopStatus(
+                          snapshot: snapshot,
+                          currentWorkspace: currentWorkspace,
+                        ),
                       ),
                     ),
                     if (filesOpen)
@@ -358,21 +366,18 @@ class _DesktopIcons extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Positioned(
-      left: 20,
-      top: 20,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          _DesktopIcon(
-            id: 'files',
-            label: 'Arquivos',
-            icon: Icons.folder_rounded,
-            color: CloudOSColors.accent,
-            isSelected: selectedId == 'files',
-            onTap: () => onSelect('files'),
-            onDoubleTap: onFiles,
-          ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        _DesktopIcon(
+          id: 'files',
+          label: 'Arquivos',
+          icon: Icons.folder_rounded,
+          color: CloudOSColors.accent,
+          isSelected: selectedId == 'files',
+          onTap: () => onSelect('files'),
+          onDoubleTap: onFiles,
+        ),
           const SizedBox(height: 10),
           _DesktopIcon(
             id: 'apps',
@@ -538,45 +543,41 @@ class _DesktopStatus extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Positioned(
-      top: 18,
-      right: 18,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: CloudOSColors.elevated.withValues(alpha: 0.4),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: CloudOSColors.border),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            const Icon(Icons.cloud_done_rounded, size: 15, color: CloudOSColors.success),
-            const SizedBox(width: 6),
-            const Text(
-              'CloudOS V19',
-              style: TextStyle(color: CloudOSColors.text, fontSize: 11, fontWeight: FontWeight.w600),
-            ),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: CloudOSColors.elevated.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: CloudOSColors.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          const Icon(Icons.cloud_done_rounded, size: 15, color: CloudOSColors.success),
+          const SizedBox(width: 6),
+          const Text(
+            'CloudOS V19',
+            style: TextStyle(color: CloudOSColors.text, fontSize: 11, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(width: 8),
+          Container(width: 1, height: 12, color: CloudOSColors.border),
+          const SizedBox(width: 8),
+          Text(
+            'Área $currentWorkspace',
+            style: const TextStyle(color: CloudOSColors.secondary, fontSize: 11),
+          ),
+          if (snapshot.wslAvailable) ...<Widget>[
             const SizedBox(width: 8),
             Container(width: 1, height: 12, color: CloudOSColors.border),
             const SizedBox(width: 8),
+            const Icon(Icons.terminal_rounded, size: 14, color: CloudOSColors.linux),
+            const SizedBox(width: 4),
             Text(
-              'Área $currentWorkspace',
-              style: const TextStyle(color: CloudOSColors.secondary, fontSize: 11),
+              snapshot.distros.isEmpty ? 'WSL2' : snapshot.distros.first,
+              style: const TextStyle(color: CloudOSColors.caption, fontSize: 10.5),
             ),
-            if (snapshot.wslAvailable) ...<Widget>[
-              const SizedBox(width: 8),
-              Container(width: 1, height: 12, color: CloudOSColors.border),
-              const SizedBox(width: 8),
-              const Icon(Icons.terminal_rounded, size: 14, color: CloudOSColors.linux),
-              const SizedBox(width: 4),
-              Text(
-                snapshot.distros.isEmpty ? 'WSL2' : snapshot.distros.first,
-                style: const TextStyle(color: CloudOSColors.caption, fontSize: 10.5),
-              ),
-            ],
           ],
-        ),
+        ],
       ),
     );
   }
