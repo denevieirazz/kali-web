@@ -36,6 +36,9 @@ jobs:
         working-directory: desktop/CloudOS.FlutterShell
         run: |
           flutter create --platforms=windows --project-name cloudos_flutter_shell .
+          if (Test-Path 'test/widget_test.dart') {
+            Remove-Item 'test/widget_test.dart' -Force
+          }
 
       - name: Resolve dependencies
         shell: pwsh
