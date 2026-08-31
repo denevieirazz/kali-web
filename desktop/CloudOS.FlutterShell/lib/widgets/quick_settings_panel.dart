@@ -211,7 +211,7 @@ class _SliderRow extends StatelessWidget {
         const SizedBox(width: 10),
         Expanded(
           child: Slider(
-            value: value.clamp(0.0, 1.0),
+            value: value.clamp(0.0, 1.0).toDouble(),
             onChanged: onChanged,
           ),
         ),
