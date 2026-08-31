@@ -10,6 +10,7 @@ $src = Join-Path $Root 'desktop\CloudOS.NativeShell\src'
 $paths = @{
     IntegrationHeader = Join-Path $src 'native_integration_v16.h'
     Integration = Join-Path $src 'native_integration_v16.cpp'
+    Launchers = Join-Path $src 'native_integration_v16_launchers.h'
     PickerHeader = Join-Path $src 'native_folder_picker_v16.h'
     Picker = Join-Path $src 'native_folder_picker_v16.cpp'
     BrowserHeader = Join-Path $src 'native_browser_window.h'
@@ -136,6 +137,16 @@ Require 'Unified Linux WSLg integration boundary' ($content.IntegrationHeader + 
     'SafeLinuxPackageToken'
 )
 
+Require 'Shared Linux launcher adapter' ($content.IntegrationHeader + "`n" + $content.Launchers) @(
+    'EnsureLinuxLauncherShortcut',
+    'LinuxApplicationsDirectory',
+    'IntegrationV16',
+    'LinuxShortcuts',
+    'IShellLinkW',
+    'IPersistFile',
+    'gtk-launch'
+)
+
 Require 'Unified Apps surface' ($content.AppsHeader + "`n" + $content.Apps) @(
     'InstalledWindows',
     'LinuxGui',
@@ -161,12 +172,8 @@ Require 'Desktop integration notifications' $content.Desktop @(
     'FindNextChangeNotification',
     'NativeStartIndex::Instance().RefreshAsync()',
     'NativeIntegrationV16::EnumerateLinuxGuiApps()',
-    'NativeIntegrationV16::WslRoot()',
-    'IShellLinkW',
-    'IPersistFile',
-    'gtk-launch',
-    'IntegrationV16',
-    'LinuxShortcuts'
+    'NativeIntegrationV16::EnsureLinuxLauncherShortcut(app)',
+    'NativeIntegrationV16::LinuxApplicationsDirectory(distro)'
 )
 Forbid 'Desktop integration remains event-driven' $content.Desktop @(
     'SetTimer(',
@@ -215,4 +222,4 @@ Require 'Full-System CI protects V16' $content.Workflow @(
     'integration-v16-smoke.json'
 )
 
-Write-Host 'PASS: Unified Integration V16 contracts passed - first-party download picker, read-only Windows inventory, explicit WinGet/WSL package flows, WSLg app discovery and event-driven Desktop/Start integration are protected.'
+Write-Host 'PASS: Unified Integration V16 contracts passed - first-party download picker, read-only Windows inventory, explicit WinGet/WSL package flows, shared WSLg launcher adaptation and event-driven Desktop/Start integration are protected.'
