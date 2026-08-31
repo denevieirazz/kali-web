@@ -139,6 +139,9 @@ try {
     Assert-True -Condition ($repair.repaired -and (Snapshot-Equal -Left $interruptBefore -Right $interruptAfter)) -Message 'V14 repair did not restore the exact pre-transaction Shell value.'
     $evidence.interrupted_activation_repaired = $true
 
+    # V14 imports V13 internally in module scope. Re-import it here before the
+    # smoke makes direct V13 calls so those commands remain visible in script scope.
+    Import-Module -Name $deploymentModule -Force
     $deploymentStatus = Get-CloudOSDeploymentStatus -InstallRoot $installRoot
     $paths = Get-CloudOSDeploymentPaths -InstallRoot $installRoot
     $activeSupervisor = Join-Path (Join-Path $paths.Versions ([string]$deploymentStatus.active_version)) 'CloudOS.Supervisor.exe'
