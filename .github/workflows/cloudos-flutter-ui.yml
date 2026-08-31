@@ -38,6 +38,15 @@ jobs:
           flutter create --platforms=windows --project-name cloudos_flutter_shell .
           if (Test-Path 'native_bridge') {
             Copy-Item -Path "native_bridge/*" -Destination "windows/runner/" -Force
+            $cmakePath = "windows/runner/CMakeLists.txt"
+            if (Test-Path $cmakePath) {
+              $cmake = Get-Content -Path $cmakePath -Raw
+              if ($cmake -notmatch "cloudos_flutter_bridge_v20.cpp") {
+                $cmake = $cmake -replace '(\s*"flutter_window\.cpp")', "`$1`n  `"cloudos_flutter_bridge_v20.cpp`""
+                $cmake = $cmake -replace 'target_link_libraries\(\$\{BINARY_NAME\} PRIVATE flutter flutter_wrapper_app\)', 'target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app dwmapi.lib shlwapi.lib shell32.lib ole32.lib uuid.lib advapi32.lib)'
+                Set-Content -Path $cmakePath -Value $cmake -Encoding UTF8
+              }
+            }
           }
           if (Test-Path 'test/widget_test.dart') {
             Remove-Item 'test/widget_test.dart' -Force
