@@ -56,6 +56,10 @@ jobs:
         shell: pwsh
         run: ./scripts/native/test-unified-integration-v16-contract.ps1
 
+      - name: Contract Package Maintenance V17
+        shell: pwsh
+        run: ./scripts/native/test-package-maintenance-v17-contract.ps1
+
       - name: Validate and build through the developer entrypoint
         shell: cmd
         run: scripts\native\build-cloudos-native.cmd Release
@@ -202,6 +206,19 @@ jobs:
           }
           if ($result.evidence.mutating_package_operation_executed -ne $false) { throw 'Unified Integration V16 hosted smoke unexpectedly performed a package mutation.' }
 
+      - name: Smoke Package Maintenance V17
+        shell: pwsh
+        run: |
+          $report = 'desktop/CloudOS.NativeShell/artifacts/package-maintenance-v17-smoke.json'
+          ./scripts/native/run-native-package-maintenance-smoke-v17.ps1 -OutputPath $report
+          if (-not (Test-Path -LiteralPath $report)) { throw 'Package Maintenance V17 smoke report missing.' }
+          $result = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
+          if ($result.verdict -ne 'pass') { throw 'Package Maintenance V17 smoke verdict was not pass.' }
+          foreach ($name in @('windows_upgrade_builder', 'linux_upgrade_builders', 'safe_apt_package_resolution', 'apps_explicit_update_action', 'production_winlogon_unchanged')) {
+            if ($result.evidence.$name -ne $true) { throw "Package Maintenance V17 evidence failed: $name" }
+          }
+          if ($result.evidence.mutating_package_operation_executed -ne $false) { throw 'Package Maintenance V17 hosted smoke unexpectedly performed a package mutation.' }
+
       - name: Publish verified CloudOS Native x64 artifact
         uses: actions/upload-artifact@v4
         with:
@@ -217,6 +234,7 @@ jobs:
             desktop/CloudOS.NativeShell/artifacts/deployment-v13-smoke.json
             desktop/CloudOS.NativeShell/artifacts/shell-activation-v14-smoke.json
             desktop/CloudOS.NativeShell/artifacts/integration-v16-smoke.json
+            desktop/CloudOS.NativeShell/artifacts/package-maintenance-v17-smoke.json
             desktop/CloudOS.NativeShell/bin/Release/cloudos-native-manifest.json
             desktop/CloudOS.NativeShell/bin/Release/.cloudos-build-head
             desktop/CloudOS.NativeShell/bin/Release/.cloudos-build-fingerprint
