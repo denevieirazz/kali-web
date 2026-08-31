@@ -15,6 +15,7 @@
 
 #include "native_icon_cache_v12.h"
 #include "native_integration_v16.h"
+#include "native_start_index.h"
 
 namespace CloudOS
 {
@@ -45,6 +46,7 @@ private:
     {
         HANDLE handle{INVALID_HANDLE_VALUE};
         std::wstring path;
+        bool refresh_start_index{};
     };
 
     std::mutex mutex_;
@@ -204,15 +206,19 @@ private:
         PostMessageW(target_, WM_CLOUDOS_DESKTOP_MODEL_V12, 0, 0);
     }
 
-    static void AddWatch(const std::wstring& path, std::vector<Watch>* watches)
+    static void AddWatch(
+        const std::wstring& path,
+        bool subtree,
+        bool refresh_start_index,
+        std::vector<Watch>* watches)
     {
         if (path.empty() || watches == nullptr || watches->size() >= MAXIMUM_WAIT_OBJECTS - 2u) return;
         HANDLE handle = FindFirstChangeNotificationW(
             path.c_str(),
-            FALSE,
+            subtree ? TRUE : FALSE,
             FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE);
         if (handle == INVALID_HANDLE_VALUE) return;
-        watches->push_back({handle, path});
+        watches->push_back({handle, path, refresh_start_index});
     }
 
     void Run()
@@ -226,14 +232,18 @@ private:
             : std::wstring{};
 
         std::vector<Watch> watches;
-        AddWatch(primary, &watches);
+        AddWatch(primary, false, false, &watches);
         if (directory_override_v12_.empty())
         {
-            AddWatch(public_desktop, &watches);
+            AddWatch(public_desktop, false, false, &watches);
+            AddWatch(KnownFolder(FOLDERID_Programs), true, true, &watches);
+            AddWatch(KnownFolder(FOLDERID_CommonPrograms), true, true, &watches);
             for (const std::wstring& distro : NativeIntegrationV16::EnumerateWslDistributions())
             {
                 AddWatch(
                     NativeIntegrationV16::WslRoot() + L"\\" + distro + L"\\usr\\share\\applications",
+                    false,
+                    false,
                     &watches);
             }
         }
@@ -257,7 +267,15 @@ private:
             if (result >= WAIT_OBJECT_0 + 2u && result < WAIT_OBJECT_0 + wait_handles.size())
             {
                 const std::size_t watch_index = static_cast<std::size_t>(result - WAIT_OBJECT_0 - 2u);
-                if (watch_index < watches.size()) (void)FindNextChangeNotification(watches[watch_index].handle);
+                if (watch_index < watches.size())
+                {
+                    (void)FindNextChangeNotification(watches[watch_index].handle);
+                    if (watches[watch_index].refresh_start_index)
+                    {
+                        NativeStartIndex::Instance().RefreshAsync();
+                        continue;
+                    }
+                }
             }
             Reload(primary, public_desktop);
         }
