@@ -28,7 +28,8 @@ $contracts = @(
     'test-transactional-deployment-v13-contract.ps1',
     'test-shell-activation-v14-contract.ps1',
     'test-repository-clarity-v15-contract.ps1',
-    'test-unified-integration-v16-contract.ps1'
+    'test-unified-integration-v16-contract.ps1',
+    'test-unified-start-search-v17-contract.ps1'
 )
 
 $duplicates = @($contracts | Group-Object | Where-Object Count -gt 1)

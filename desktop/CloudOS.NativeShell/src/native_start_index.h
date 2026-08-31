@@ -15,6 +15,7 @@ enum class NativeStartIndexKind
 {
     Shortcut,
     PackagedApp,
+    LinuxApp,
     IndexedItem,
 };
 

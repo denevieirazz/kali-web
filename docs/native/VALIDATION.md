@@ -38,7 +38,9 @@ Os contratos protegem, entre outros:
 - Performance/Visual V12;
 - Deployment V13;
 - Shell Activation V14;
-- organização/source-of-truth V15.
+- organização/source-of-truth V15;
+- Unified Integration V16;
+- Unified Start/Search V17.
 
 Contrato não substitui runtime smoke.
 
@@ -191,6 +193,74 @@ Hosted CI não faz logoff/login real, reboot, boot recovery, troca física de us
 
 ---
 
+## V16 — Unified Integration
+
+Contrato:
+
+```text
+scripts/native/test-unified-integration-v16-contract.ps1
+```
+
+Smoke:
+
+```text
+scripts/native/run-native-integration-smoke-v16.ps1
+```
+
+### Automatizado
+
+- Browser WebView2 `DownloadStarting` conectado ao picker first-party;
+- boundary única de inventário/package management Windows+Linux;
+- inventário uninstall Windows permanece read-only;
+- known folders e `\\wsl.localhost` preservados;
+- adaptação compartilhada de launcher Linux pode ser consumida sem mover responsabilidade para surfaces;
+- snapshot do HKCU Winlogon de produção idêntico antes/depois;
+- nenhuma operação de install/upgrade/remove executada pelo smoke.
+
+### Limite
+
+A CI hospedada não instala software de terceiros e não prova WSLg GUI real quando não existe distro WSL configurada. `wsl.exe` presente com zero distros continua sendo um resultado válido do smoke, não prova de launch Linux.
+
+---
+
+## V17 — Unified Start/Search
+
+Contrato:
+
+```text
+scripts/native/test-unified-start-search-v17-contract.ps1
+```
+
+Smoke:
+
+```text
+scripts/native/run-native-unified-start-search-smoke-v17.ps1
+```
+
+### Automatizado
+
+- `NativeStartIndexKind::LinuxApp` existe;
+- Start consome `NativeIntegrationV16::EnumerateLinuxGuiApps()` em vez de duplicar `.desktop`/WSL parsing;
+- Desktop e Start usam o mesmo `EnsureLinuxLauncherShortcut()`;
+- mudanças em application directories de distros observadas acionam refresh do Desktop e do Start via change notification;
+- Start index não monta `wsl.exe`/`gtk-launch` diretamente;
+- Supervisor V11 `--self-test` continua retornando 0;
+- HKCU Winlogon de produção permanece idêntico;
+- nenhuma operação mutável de package management é executada.
+
+### O que NÃO prova
+
+Se o hosted runner reportar `wsl_distribution_count = 0`, o smoke **não prova**:
+
+- que um `.desktop` Linux real apareceu no Start;
+- que WSLg abriu uma janela GUI real;
+- que pin de app Linux sobreviveu a uma sessão física;
+- que instalação/removal apt disparou o watcher numa distro real.
+
+Esses casos exigem VM/host com WSLg configurado. Uma distro criada depois de o worker do Desktop iniciar também pode precisar de reindex/restart inicial para que seu novo diretório passe a ser observado; V17 não usa polling global para mascarar isso.
+
+---
+
 ## Release / Proveniência
 
 Scripts:
@@ -240,7 +310,8 @@ Em VM descartável e, depois, hardware piloto:
 11. RDP real;
 12. suspend/resume físico;
 13. monitor hotplug/DPI físico;
-14. 24h soak por configuração;
-15. piloto de dias/semanas antes de uso como shell diário.
+14. WSLg real: instalar/remover GUI app e validar Desktop/Start/Search/launch;
+15. 24h soak por configuração;
+16. piloto de dias/semanas antes de uso como shell diário.
 
 Registre data, Windows build, hardware/VM, commit exato, artifact digest e resultado. Sem essa evidência, mantenha a descrição como “pendente”.

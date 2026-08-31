@@ -56,6 +56,10 @@ jobs:
         shell: pwsh
         run: ./scripts/native/test-unified-integration-v16-contract.ps1
 
+      - name: Contract Unified Start/Search V17
+        shell: pwsh
+        run: ./scripts/native/test-unified-start-search-v17-contract.ps1
+
       - name: Validate and build through the developer entrypoint
         shell: cmd
         run: scripts\native\build-cloudos-native.cmd Release
@@ -202,6 +206,20 @@ jobs:
           }
           if ($result.evidence.mutating_package_operation_executed -ne $false) { throw 'Unified Integration V16 hosted smoke unexpectedly performed a package mutation.' }
 
+      - name: Smoke Unified Start/Search V17
+        shell: pwsh
+        run: |
+          $report = 'desktop/CloudOS.NativeShell/artifacts/unified-start-search-v17-smoke.json'
+          ./scripts/native/run-native-unified-start-search-smoke-v17.ps1 -OutputPath $report
+          if (-not (Test-Path -LiteralPath $report)) { throw 'Unified Start/Search V17 smoke report missing.' }
+          $result = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
+          if ($result.verdict -ne 'pass') { throw 'Unified Start/Search V17 smoke verdict was not pass.' }
+          foreach ($name in @('linux_start_kind', 'linux_catalog_consumed', 'shared_launcher_adapter', 'event_driven_linux_refresh', 'start_has_no_direct_wsl_command', 'production_winlogon_unchanged')) {
+            if ($result.evidence.$name -ne $true) { throw "Unified Start/Search V17 evidence failed: $name" }
+          }
+          if ($result.evidence.supervisor_self_test_exit_code -ne 0) { throw 'Unified Start/Search V17 supervisor self-test failed.' }
+          if ($result.evidence.mutating_package_operation_executed -ne $false) { throw 'Unified Start/Search V17 hosted smoke unexpectedly performed a package mutation.' }
+
       - name: Publish verified CloudOS Native x64 artifact
         uses: actions/upload-artifact@v4
         with:
@@ -217,6 +235,7 @@ jobs:
             desktop/CloudOS.NativeShell/artifacts/deployment-v13-smoke.json
             desktop/CloudOS.NativeShell/artifacts/shell-activation-v14-smoke.json
             desktop/CloudOS.NativeShell/artifacts/integration-v16-smoke.json
+            desktop/CloudOS.NativeShell/artifacts/unified-start-search-v17-smoke.json
             desktop/CloudOS.NativeShell/bin/Release/cloudos-native-manifest.json
             desktop/CloudOS.NativeShell/bin/Release/.cloudos-build-head
             desktop/CloudOS.NativeShell/bin/Release/.cloudos-build-fingerprint

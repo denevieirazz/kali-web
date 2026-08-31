@@ -2,7 +2,6 @@
 
 #include <windows.h>
 #include <shlobj.h>
-#include <shobjidl.h>
 
 #include <algorithm>
 #include <cwctype>
@@ -14,7 +13,7 @@
 #include <vector>
 
 #include "native_icon_cache_v12.h"
-#include "native_integration_v16.h"
+#include "native_integration_v16_launchers.h"
 #include "native_start_index.h"
 
 namespace CloudOS
@@ -46,6 +45,7 @@ private:
     {
         HANDLE handle{INVALID_HANDLE_VALUE};
         std::wstring path;
+        bool reload_desktop{};
         bool refresh_start_index{};
     };
 
@@ -64,64 +64,6 @@ private:
         std::wstring result(raw);
         CoTaskMemFree(raw);
         return result;
-    }
-
-    static std::wstring QuoteArgument(const std::wstring& value)
-    {
-        std::wstring result = L"\"";
-        for (wchar_t ch : value)
-        {
-            if (ch == L'\"') result += L"\\\"";
-            else result.push_back(ch);
-        }
-        result.push_back(L'\"');
-        return result;
-    }
-
-    static std::wstring SafeShortcutLeaf(const UnifiedAppV16& app)
-    {
-        std::wstring value = app.distro + L"__" + app.desktop_id;
-        for (wchar_t& ch : value)
-        {
-            if (wcschr(L"\\/:*?\"<>|", ch) != nullptr || iswcntrl(ch)) ch = L'_';
-        }
-        if (value.size() > 180u) value.resize(180u);
-        return value.empty() ? std::wstring(L"linux-app") : value;
-    }
-
-    static std::wstring EnsureLinuxShortcut(const UnifiedAppV16& app)
-    {
-        const std::wstring wsl = NativeIntegrationV16::WslExecutable();
-        const std::wstring local = KnownFolder(FOLDERID_LocalAppData);
-        if (wsl.empty() || local.empty() || app.distro.empty() || app.desktop_id.empty()) return {};
-
-        const std::filesystem::path directory =
-            std::filesystem::path(local) / L"CloudOS" / L"IntegrationV16" / L"LinuxShortcuts";
-        std::error_code error;
-        std::filesystem::create_directories(directory, error);
-        if (error) return {};
-        const std::filesystem::path shortcut = directory / (SafeShortcutLeaf(app) + L".lnk");
-
-        IShellLinkW* link = nullptr;
-        if (FAILED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&link))) || link == nullptr)
-            return {};
-        const std::wstring arguments =
-            L"-d " + QuoteArgument(app.distro) + L" -- gtk-launch " + QuoteArgument(app.desktop_id);
-        (void)link->SetPath(wsl.c_str());
-        (void)link->SetArguments(arguments.c_str());
-        (void)link->SetDescription(app.name.c_str());
-        (void)link->SetIconLocation(wsl.c_str(), 0);
-
-        IPersistFile* persist = nullptr;
-        const HRESULT query = link->QueryInterface(IID_PPV_ARGS(&persist));
-        HRESULT saved = E_NOINTERFACE;
-        if (SUCCEEDED(query) && persist != nullptr)
-        {
-            saved = persist->Save(shortcut.c_str(), TRUE);
-            persist->Release();
-        }
-        link->Release();
-        return SUCCEEDED(saved) ? shortcut.wstring() : std::wstring{};
     }
 
     static void AddDirectoryItems(
@@ -172,7 +114,7 @@ private:
                     return static_cast<wchar_t>(towlower(ch));
                 });
                 if (!seen.insert(key).second) continue;
-                const std::wstring shortcut = EnsureLinuxShortcut(app);
+                const std::wstring shortcut = NativeIntegrationV16::EnsureLinuxLauncherShortcut(app);
                 if (shortcut.empty()) continue;
 
                 Item item{};
@@ -209,6 +151,7 @@ private:
     static void AddWatch(
         const std::wstring& path,
         bool subtree,
+        bool reload_desktop,
         bool refresh_start_index,
         std::vector<Watch>* watches)
     {
@@ -218,7 +161,7 @@ private:
             subtree ? TRUE : FALSE,
             FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE);
         if (handle == INVALID_HANDLE_VALUE) return;
-        watches->push_back({handle, path, refresh_start_index});
+        watches->push_back({handle, path, reload_desktop, refresh_start_index});
     }
 
     void Run()
@@ -232,18 +175,19 @@ private:
             : std::wstring{};
 
         std::vector<Watch> watches;
-        AddWatch(primary, false, false, &watches);
+        AddWatch(primary, false, true, false, &watches);
         if (directory_override_v12_.empty())
         {
-            AddWatch(public_desktop, false, false, &watches);
-            AddWatch(KnownFolder(FOLDERID_Programs), true, true, &watches);
-            AddWatch(KnownFolder(FOLDERID_CommonPrograms), true, true, &watches);
+            AddWatch(public_desktop, false, true, false, &watches);
+            AddWatch(KnownFolder(FOLDERID_Programs), true, false, true, &watches);
+            AddWatch(KnownFolder(FOLDERID_CommonPrograms), true, false, true, &watches);
             for (const std::wstring& distro : NativeIntegrationV16::EnumerateWslDistributions())
             {
                 AddWatch(
-                    NativeIntegrationV16::WslRoot() + L"\\" + distro + L"\\usr\\share\\applications",
+                    NativeIntegrationV16::LinuxApplicationsDirectory(distro),
                     false,
-                    false,
+                    true,
+                    true,
                     &watches);
             }
         }
@@ -264,20 +208,22 @@ private:
                 FALSE,
                 INFINITE);
             if (result == WAIT_FAILED || result == WAIT_OBJECT_0) break;
+
+            bool reload_desktop = result == WAIT_OBJECT_0 + 1u;
             if (result >= WAIT_OBJECT_0 + 2u && result < WAIT_OBJECT_0 + wait_handles.size())
             {
                 const std::size_t watch_index = static_cast<std::size_t>(result - WAIT_OBJECT_0 - 2u);
                 if (watch_index < watches.size())
                 {
-                    (void)FindNextChangeNotification(watches[watch_index].handle);
-                    if (watches[watch_index].refresh_start_index)
-                    {
+                    Watch& watch = watches[watch_index];
+                    (void)FindNextChangeNotification(watch.handle);
+                    if (watch.refresh_start_index)
                         NativeStartIndex::Instance().RefreshAsync();
-                        continue;
-                    }
+                    reload_desktop = watch.reload_desktop;
                 }
             }
-            Reload(primary, public_desktop);
+            if (reload_desktop)
+                Reload(primary, public_desktop);
         }
 
         for (Watch& watch : watches)

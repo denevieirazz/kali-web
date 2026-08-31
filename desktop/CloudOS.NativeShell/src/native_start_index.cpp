@@ -1,5 +1,6 @@
 #include "native_start_index.h"
 
+#include "native_integration_v16_launchers.h"
 #include "native_windows_search_v7.h"
 
 #include <KnownFolders.h>
@@ -132,8 +133,11 @@ int MatchScore(const NativeStartIndexEntry& entry, const std::vector<std::wstrin
 
     // Preserve app-first behavior for equally good matches while still letting
     // SystemIndex documents surface immediately beneath applications.
-    if (entry.kind == NativeStartIndexKind::PackagedApp) score += 15;
-    else if (entry.kind == NativeStartIndexKind::Shortcut) score += 10;
+    if (entry.kind == NativeStartIndexKind::PackagedApp ||
+        entry.kind == NativeStartIndexKind::LinuxApp)
+        score += 15;
+    else if (entry.kind == NativeStartIndexKind::Shortcut)
+        score += 10;
     return score;
 }
 
@@ -254,6 +258,25 @@ void ScanAppsFolder(std::vector<NativeStartIndexEntry>& entries)
     enumeration->Release();
 }
 
+void ScanLinuxApps(std::vector<NativeStartIndexEntry>& entries)
+{
+    for (const UnifiedAppV16& app : NativeIntegrationV16::EnumerateLinuxGuiApps())
+    {
+        if (!app.can_launch || app.name.empty() || app.distro.empty() || app.desktop_id.empty())
+            continue;
+
+        const std::wstring shortcut = NativeIntegrationV16::EnsureLinuxLauncherShortcut(app);
+        if (shortcut.empty()) continue;
+
+        NativeStartIndexEntry entry{};
+        entry.title = app.name + L" · Linux";
+        entry.subtitle = L"WSL · " + app.distro;
+        entry.launch_target = shortcut;
+        entry.kind = NativeStartIndexKind::LinuxApp;
+        entries.push_back(std::move(entry));
+    }
+}
+
 std::wstring IndexedTitle(const NativeSearchIndexResultV7& item)
 {
     if (!item.name.empty()) return item.name;
@@ -333,10 +356,11 @@ void NativeStartIndex::BuildIndex()
     const bool uninitialize = SUCCEEDED(com_result);
 
     std::vector<NativeStartIndexEntry> next;
-    next.reserve(512);
+    next.reserve(640);
     ScanStartFolder(FOLDERID_Programs, next);
     ScanStartFolder(FOLDERID_CommonPrograms, next);
     ScanAppsFolder(next);
+    ScanLinuxApps(next);
 
     std::sort(
         next.begin(),
