@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/cloudos_theme.dart';
 import '../models/shell_models.dart';
+import '../services/cloudos_bridge.dart';
 import 'glass_surface.dart';
 
 class NotificationCenterPanel extends StatefulWidget {
@@ -96,9 +97,9 @@ class _NotificationCenterPanelState extends State<NotificationCenterPanel> {
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(vertical: 28),
                     alignment: Alignment.center,
-                    child: Column(
+                    child: const Column(
                       mainAxisSize: MainAxisSize.min,
-                      children: const <Widget>[
+                      children: <Widget>[
                         Icon(Icons.notifications_off_outlined, size: 36, color: CloudOSColors.caption),
                         SizedBox(height: 8),
                         Text(

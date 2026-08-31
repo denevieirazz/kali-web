@@ -444,10 +444,10 @@ class _SearchResultsList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (results.isEmpty) {
-      return Center(
+      return const Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          children: const <Widget>[
+          children: <Widget>[
             Icon(Icons.search_off_rounded, size: 40, color: CloudOSColors.caption),
             SizedBox(height: 8),
             Text(
