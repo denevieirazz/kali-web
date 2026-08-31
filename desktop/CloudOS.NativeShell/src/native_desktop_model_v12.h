@@ -2,8 +2,10 @@
 
 #include <windows.h>
 #include <shlobj.h>
+#include <shobjidl.h>
 
 #include <algorithm>
+#include <cwctype>
 #include <filesystem>
 #include <mutex>
 #include <set>
@@ -62,6 +64,64 @@ private:
         return result;
     }
 
+    static std::wstring QuoteArgument(const std::wstring& value)
+    {
+        std::wstring result = L"\"";
+        for (wchar_t ch : value)
+        {
+            if (ch == L'\"') result += L"\\\"";
+            else result.push_back(ch);
+        }
+        result.push_back(L'\"');
+        return result;
+    }
+
+    static std::wstring SafeShortcutLeaf(const UnifiedAppV16& app)
+    {
+        std::wstring value = app.distro + L"__" + app.desktop_id;
+        for (wchar_t& ch : value)
+        {
+            if (wcschr(L"\\/:*?\"<>|", ch) != nullptr || iswcntrl(ch)) ch = L'_';
+        }
+        if (value.size() > 180u) value.resize(180u);
+        return value.empty() ? std::wstring(L"linux-app") : value;
+    }
+
+    static std::wstring EnsureLinuxShortcut(const UnifiedAppV16& app)
+    {
+        const std::wstring wsl = NativeIntegrationV16::WslExecutable();
+        const std::wstring local = KnownFolder(FOLDERID_LocalAppData);
+        if (wsl.empty() || local.empty() || app.distro.empty() || app.desktop_id.empty()) return {};
+
+        const std::filesystem::path directory =
+            std::filesystem::path(local) / L"CloudOS" / L"IntegrationV16" / L"LinuxShortcuts";
+        std::error_code error;
+        std::filesystem::create_directories(directory, error);
+        if (error) return {};
+        const std::filesystem::path shortcut = directory / (SafeShortcutLeaf(app) + L".lnk");
+
+        IShellLinkW* link = nullptr;
+        if (FAILED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&link))) || link == nullptr)
+            return {};
+        const std::wstring arguments =
+            L"-d " + QuoteArgument(app.distro) + L" -- gtk-launch " + QuoteArgument(app.desktop_id);
+        (void)link->SetPath(wsl.c_str());
+        (void)link->SetArguments(arguments.c_str());
+        (void)link->SetDescription(app.name.c_str());
+        (void)link->SetIconLocation(wsl.c_str(), 0);
+
+        IPersistFile* persist = nullptr;
+        const HRESULT query = link->QueryInterface(IID_PPV_ARGS(&persist));
+        HRESULT saved = E_NOINTERFACE;
+        if (SUCCEEDED(query) && persist != nullptr)
+        {
+            saved = persist->Save(shortcut.c_str(), TRUE);
+            persist->Release();
+        }
+        link->Release();
+        return SUCCEEDED(saved) ? shortcut.wstring() : std::wstring{};
+    }
+
     static void AddDirectoryItems(
         const std::wstring& path,
         std::vector<Item>* next,
@@ -77,7 +137,10 @@ private:
             if (name.empty() || name[0] == L'.' || name == L"desktop.ini") continue;
             std::wstring absolute = it->path().wstring();
             std::wstring key = absolute;
-            std::transform(key.begin(), key.end(), key.begin(), towlower);
+            std::transform(key.begin(), key.end(), key.begin(), [](wchar_t ch)
+            {
+                return static_cast<wchar_t>(towlower(ch));
+            });
             if (!seen->insert(key).second) continue;
 
             Item item{};
@@ -98,18 +161,22 @@ private:
         if (directory_override_v12_.empty())
         {
             AddDirectoryItems(public_desktop, &next, &seen);
-            const std::wstring wsl_icon = NativeIntegrationV16::WslExecutable();
             for (const UnifiedAppV16& app : NativeIntegrationV16::EnumerateLinuxGuiApps())
             {
                 if (next.size() >= 256u) break;
                 std::wstring key = L"linux:" + app.distro + L":" + app.desktop_id;
-                std::transform(key.begin(), key.end(), key.begin(), towlower);
+                std::transform(key.begin(), key.end(), key.begin(), [](wchar_t ch)
+                {
+                    return static_cast<wchar_t>(towlower(ch));
+                });
                 if (!seen.insert(key).second) continue;
+                const std::wstring shortcut = EnsureLinuxShortcut(app);
+                if (shortcut.empty()) continue;
 
                 Item item{};
-                item.path = L"cloudos-linux://" + app.distro + L"/" + app.desktop_id;
+                item.path = shortcut;
                 item.name = app.name;
-                item.icon_source = wsl_icon;
+                item.icon_source = shortcut;
                 item.distro = app.distro;
                 item.desktop_id = app.desktop_id;
                 item.kind = ItemKind::LinuxApp;
