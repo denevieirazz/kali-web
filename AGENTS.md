@@ -8,6 +8,7 @@ Este arquivo é a porta de entrada para qualquer agente que vá analisar ou alte
 4. `docs/native/VALIDATION.md` — qual contrato/smoke prova cada camada.
 5. `docs/native/DESKTOP_SYSTEM_ROADMAP.md` — estado dos marcos e próximos gates.
 6. `docs/native/UNIFIED_INTEGRATION_V16.md` — boundary Windows+Linux, downloads, package management e WSLg.
+7. `docs/native/UNIFIED_START_SEARCH_V17.md` — Start/Search consumindo o catálogo V16 sem criar inventário Linux paralelo.
 
 ## Fonte de verdade atual
 
@@ -23,7 +24,9 @@ Autoridades:
 - Deploy versionado/rollback: `scripts/native/CloudOS.Deployment.V13.psm1`.
 - Ativação opt-in do shell/rollback exato: `scripts/native/CloudOS.ShellActivation.V14.psm1`.
 - Integração Windows+Linux/WSL: `desktop/CloudOS.NativeShell/src/native_integration_v16.*`.
+- Adaptador compartilhado de launch Linux para Shell/Start/Desktop: `desktop/CloudOS.NativeShell/src/native_integration_v16_launchers.h`.
 - Picker first-party de pastas: `desktop/CloudOS.NativeShell/src/native_folder_picker_v16.*`.
+- Índice Start/Search Windows+Linux V17: `desktop/CloudOS.NativeShell/src/native_start_index.*`.
 - Build oficial: `scripts/native/build-cloudos-native.cmd`.
 - Suite de contratos: `scripts/native/test-native-contract-suite.ps1`.
 - CI Full-System: `.github/workflows/cloudos-native-full-system.yml`.
@@ -53,6 +56,12 @@ V16 integração
     ├─ Apps -> Windows inventory/WinGet + Linux .desktop/apt/snap/flatpak
     ├─ Desktop -> user/Public Desktop + launchers Linux gerenciados
     └─ Files -> Windows + CloudOS Drive + \\wsl.localhost
+
+V17 Start/Search
+    └─ NativeStartIndex
+         ├─ Start Menu / AppsFolder / Windows Search
+         └─ NativeIntegrationV16::EnumerateLinuxGuiApps()
+              └─ native_integration_v16_launchers.h -> .lnk gerenciado -> WSLg
 ```
 
 O V14 **não é ativado automaticamente** por instalação/update. Testes hospedados usam apenas subchave HKCU sandbox; logon real exige VM/piloto.
@@ -73,6 +82,8 @@ O V14 **não é ativado automaticamente** por instalação/update. Testes hosped
 - Não escrever HKLM, `Userinit`, `Run`, `RunOnce`, políticas, serviço ou tarefa agendada como atalho para ativação V14.
 - V16 pode **ler** inventário HKLM do Windows, mas não deve usá-lo para escrita de configuração/package state.
 - Não espalhar chamadas ad-hoc de WinGet/`wsl.exe`/parsing de uninstall registry por surfaces; estender `native_integration_v16.*` quando a responsabilidade for integração Windows+Linux.
+- V17 não cria outro catálogo Linux no Start/Search. `NativeStartIndex` consome `NativeIntegrationV16` e usa `native_integration_v16_launchers.h` para o alvo Shell compartilhado.
+- Não construir `wsl.exe -d ... gtk-launch` diretamente em `native_start_index.*` ou no Desktop; essa adaptação pertence à boundary V16.
 - Não sequestrar default apps/file associations. Defaults modernos do Windows devem permanecer escolha explícita do usuário.
 - Não armazenar senha sudo/Linux nem tentar ocultar/contornar UAC.
 - Não remover software apagando pasta arbitrariamente; use mecanismo registrado, package manager ou recuse com segurança.
@@ -88,12 +99,13 @@ O V14 **não é ativado automaticamente** por instalação/update. Testes hosped
 | boot, ciclo principal, superfícies | `desktop/CloudOS.NativeShell/src/main_shell_v2.cpp` |
 | Desktop | `native_desktop_window_v2.*`, `native_desktop_model_v12.h`, `native_desktop_surface.*` |
 | Taskbar | `native_taskbar_appbar_v4.*`, `native_taskbar_hover_preview.*` |
-| Start/Search | `native_start_menu_window.*`, `native_start_index.*`, `native_search_engine.*` |
+| Start/Search | `native_start_menu_window.*`, `native_start_index.*`, `native_search_engine.*`; Linux deve vir de `native_integration_v16.*`/`native_integration_v16_launchers.h` |
 | Quick Settings/System Center | `native_quick_settings_window_v4.*`, `native_control_plane_service.*`, `native_system_control_*` |
 | janelas/workspaces | `native_window_manager*`, `native_workspace_*` |
 | Files | `native_files_*`, `native_file_*` |
 | Browser/downloads | `native_browser_window.*`, `native_folder_picker_v16.*` |
 | Apps Windows+Linux/install/remove | `native_apps_window.*`, `native_integration_v16.*` |
+| launch adapter Linux compartilhado | `native_integration_v16_launchers.h` |
 | WSL runtime baixo nível | `desktop/CloudOS.NativeRuntime`, `cloudos_native_wsl.*` |
 | lifecycle/session | `native_lifecycle_v10.h`, `native_session_*` |
 | health/readiness | `native_health_bootstrap_v9.h`, `native_health_v9.h` |
@@ -135,7 +147,7 @@ pwsh -NoProfile -File scripts/native/test-native-contract-suite.ps1
 scripts\native\build-cloudos-native.cmd Release
 ```
 
-Depois rode/observe o Full-System CI. Mudanças em estabilidade, lifecycle, supervisor, performance, deploy ou ativação devem manter os smokes V9–V14 verdes. Integração V16 também deve manter `test-unified-integration-v16-contract.ps1` verde.
+Depois rode/observe o Full-System CI. Mudanças em estabilidade, lifecycle, supervisor, performance, deploy ou ativação devem manter os smokes V9–V14 verdes. Integração V16 deve manter `test-unified-integration-v16-contract.ps1` verde; Start/Search V17 deve manter `test-unified-start-search-v17-contract.ps1` e seu smoke não mutável verdes.
 
 Não declare teste físico que não ocorreu. Hosted CI não prova suspend físico, transporte RDP, hotplug real, logoff/login real, reboot, boot recovery, instalação real de terceiros ou WSLg real sem uma distro/ambiente apropriado.
 
