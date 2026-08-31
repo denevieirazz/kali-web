@@ -4,8 +4,9 @@ import 'package:flutter/services.dart';
 import '../models/shell_models.dart';
 
 class CloudOSBridge {
-  CloudOSBridge({MethodChannel? channel})
-      : _channel = channel ?? const MethodChannel('cloudos/native/v19');
+  const CloudOSBridge({
+    MethodChannel channel = const MethodChannel('cloudos/native/v19'),
+  }) : _channel = channel;
 
   final MethodChannel _channel;
 
