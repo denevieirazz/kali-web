@@ -58,6 +58,7 @@ private:
     void EnumerateFolder(const std::wstring& folder, int depth);
     void ApplyFilter();
     void LaunchSelection();
+    void UpdateSelection();
     void UninstallSelection();
     void InstallFromSearch();
     void RefreshCatalog();
@@ -76,6 +77,7 @@ private:
     HWND list_{};
     HWND launch_button_{};
     HWND install_button_{};
+    HWND update_button_{};
     HWND uninstall_button_{};
     HWND refresh_button_{};
     std::vector<AppEntry> catalog_;
