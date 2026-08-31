@@ -8,6 +8,7 @@ $paths = @{
     Packager = Join-Path $PSScriptRoot 'package-cloudos-native.ps1'
     Status = Join-Path $PSScriptRoot 'get-native-build-status.ps1'
     Build = Join-Path $PSScriptRoot 'build-cloudos-native.cmd'
+    ContractSuite = Join-Path $PSScriptRoot 'test-native-contract-suite.ps1'
     Start = Join-Path $PSScriptRoot 'start-cloudos-native.cmd'
     RootStart = Join-Path $root 'Iniciar CloudOS Nativo.cmd'
     RootBuild = Join-Path $root 'Compilar CloudOS Nativo.cmd'
@@ -96,7 +97,7 @@ Require 'Native build status diagnostics' $content.Status @(
 )
 
 Require 'Native build entrypoint provenance' $content.Build @(
-    'test-native-release-pipeline-contract.ps1',
+    'test-native-contract-suite.ps1',
     'CloudOS.NativeRecovery\CloudOS.NativeRecovery.vcxproj',
     'CloudOS.Supervisor.exe',
     'write-native-build-manifest.ps1',
@@ -105,6 +106,7 @@ Require 'Native build entrypoint provenance' $content.Build @(
     '.cloudos-build-fingerprint',
     'Microsoft.Web.WebView2 ja restaurado; reutilizando cache local'
 )
+Require 'Central contract suite contains release pipeline contract' $content.ContractSuite @('test-native-release-pipeline-contract.ps1')
 
 Require 'Native launcher integrity gate' $content.Start @(
     'get-native-build-fingerprint.ps1',
