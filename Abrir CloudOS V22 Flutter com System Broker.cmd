@@ -42,14 +42,10 @@ if exist "%FLUTTER_APP%" (
     echo Iniciando CloudOS Flutter Shell integrado...
     start "" "%FLUTTER_APP%"
 ) else (
-    echo.
-    echo System Broker V22 ativo e aguardando conexoes IPC.
-    echo Para testar os comandos de arquivos via CLI:
-    echo   "%PROBE_BIN%" list home
-    echo   "%PROBE_BIN%" drives
-    echo   "%PROBE_BIN%" known-folders
-    echo   "%PROBE_BIN%" open-with "%REPO_ROOT%\README.md"
-    echo.
+    echo Iniciando CloudOS Native Shell visual...
+    call "%REPO_ROOT%\scripts\native\start-cloudos-native.cmd"
 )
 
-echo Pronto.
+echo.
+echo CloudOS V22 ativo.
+
