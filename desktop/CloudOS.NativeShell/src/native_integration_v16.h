@@ -54,6 +54,18 @@ public:
     static std::wstring LinuxApplicationsDirectory(const std::wstring& distro);
     static std::wstring EnsureLinuxLauncherShortcut(const UnifiedAppV16& app);
 
+    // V18 keeps Windows<->Linux path translation and WSLg file launch inside
+    // the same V16 integration authority. Files/Open-With only consume these
+    // operations and never construct wsl.exe/wslpath/gtk-launch commands.
+    static bool TryMapWindowsPathToLinux(
+        const UnifiedAppV16& app,
+        const std::wstring& windows_path,
+        std::wstring* linux_path);
+    static bool LaunchLinuxAppWithPath(
+        HWND owner,
+        const UnifiedAppV16& app,
+        const std::wstring& windows_path);
+
     static std::wstring DownloadsFolder();
     static std::wstring DesktopFolder();
     static std::wstring PublicDesktopFolder();
