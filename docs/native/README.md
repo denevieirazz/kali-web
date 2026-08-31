@@ -17,6 +17,7 @@ Este diretório documenta a arquitetura **atual** do CloudOS Native Shell. Para 
 - Documentação V14 de ativação do shell — veja `scripts/native/CloudOS.ShellActivation.V14.psm1`, o contrato V14 e o roadmap; hosted CI usa HKCU sandbox.
 - Repository Clarity V15 — `AGENTS.md`, `CODEMAP.md`, `VALIDATION.md` e a suite central tornam a árvore legível por humanos/IAs sem criar uma segunda arquitetura.
 - [`UNIFIED_INTEGRATION_V16.md`](UNIFIED_INTEGRATION_V16.md) — downloads Browser→Files, catálogo/instalação/remoção Windows+Linux, WSLg e Desktop integrado.
+- [`UNIFIED_START_SEARCH_V17.md`](UNIFIED_START_SEARCH_V17.md) — Start/Search consumindo o mesmo catálogo Linux V16, launcher Shell compartilhado e refresh event-driven.
 
 ## Regra de autoridade
 
@@ -26,6 +27,7 @@ CloudOS.Supervisor.exe         = recovery/supervisão externa
 V13                            = instalação/update/rollback de versões
 V14                            = ativação opt-in do shell e restauração exata
 V16                            = boundary de integração Windows + Linux/WSL
+V17                            = Start/Search unificado consumindo a boundary V16
 React/WPF/Node legado          = compatibilidade, referência e testes; não autoridade do desktop nativo
 ```
 
