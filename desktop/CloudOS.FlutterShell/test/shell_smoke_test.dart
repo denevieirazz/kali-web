@@ -34,7 +34,7 @@ void main() {
       expect(find.text('Visual Studio Code'), findsOneWidget);
 
       // Close Start
-      await tester.tap(find.byTooltip('Fechar (Esc)').first);
+      await tester.tap(find.byTooltip('Iniciar (Ctrl+Alt+A)'));
       await tester.pumpAndSettle();
       expect(find.text('CloudOS Start'), findsNothing);
 
