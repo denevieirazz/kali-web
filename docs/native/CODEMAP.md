@@ -14,7 +14,9 @@ Leia primeiro:
 4. `scripts/native/CloudOS.Deployment.V13.psm1` — instalação/update/rollback de versões.
 5. `scripts/native/CloudOS.ShellActivation.V14.psm1` — ativação opt-in do shell/rollback.
 6. `desktop/CloudOS.NativeShell/src/native_integration_v16.*` — boundary Windows + Linux/WSL.
-7. `docs/native/UNIFIED_INTEGRATION_V16.md` — comportamento e limitações da integração.
+7. `desktop/CloudOS.NativeShell/src/native_integration_v16_launchers.h` — adapter Shell compartilhado para apps Linux.
+8. `desktop/CloudOS.NativeShell/src/native_start_index.*` — Unified Start/Search V17.
+9. `docs/native/UNIFIED_INTEGRATION_V16.md` e `UNIFIED_START_SEARCH_V17.md` — comportamento e limitações.
 
 `desktop/CloudOS.NativeShell/src/main.cpp` existe por histórico, mas **não é o entrypoint compilado atual**.
 
@@ -41,14 +43,16 @@ Ao mexer em boot/shutdown, verifique também Supervisor V11 e single-instance.
 | Arquivo | Responsabilidade |
 |---|---|
 | `native_desktop_window_v2.*` | janela Desktop autoritativa, paint e input |
-| `native_desktop_model_v12.h` | modelo event-driven: Desktop usuário + Public Desktop + launchers Linux V16 |
+| `native_desktop_model_v12.h` | modelo event-driven: Desktop usuário + Public Desktop + launchers Linux V16/V17 |
 | `native_desktop_surface.*` | superfície/modelo auxiliar |
 | `native_desktop_context_menu.*` | menu de contexto |
 | `native_desktop_drop_target.*` | drag/drop |
 | `native_wallpaper_manager.*` | wallpaper |
 | `native_icon_renderer.*`, `native_icon_cache_v12.h` | ícones/cache |
 
-V16: `native_desktop_model_v12.h` observa Desktop/Start/WSL application directories por change notifications. Windows shortcuts criados por instaladores e apps GUI Linux entram no namespace sem polling global.
+V17: `native_desktop_model_v12.h` observa Desktop/Start/WSL application directories por change notifications. WSL application changes podem pedir `reload_desktop` e `refresh_start_index` independentemente; não existe polling global.
+
+A criação de `.lnk` Linux **não** pertence mais ao DesktopModel. Use `NativeIntegrationV16::EnsureLinuxLauncherShortcut()` definido em `native_integration_v16_launchers.h`.
 
 Regra crítica: `WM_PAINT` só desenha estado preparado. Não introduza filesystem, `SHGetFileInfoW`, WMI, rede ou package discovery no paint.
 
@@ -61,13 +65,15 @@ Regra crítica: `WM_PAINT` só desenha estado preparado. Não introduza filesyst
 | `native_taskbar_appbar_v4.*` | Taskbar/AppBar, grupos, pins, tray/clock geometry |
 | `native_taskbar_hover_preview.*` | thumbnails/previews |
 | `native_start_menu_window.*` | Start nativo |
-| `native_start_index.*` | index Windows; V16 pede refresh quando Start folders mudam |
-| `native_search_engine.*` | busca |
+| `native_start_index.*` | **Unified Start/Search V17**: Start folders + AppsFolder + Linux V16 + Windows Search |
+| `native_search_engine.*` | busca first-party CloudOS |
 | `native_quick_settings_window_v4.*` | Quick Settings |
 | `native_notification_center.*` | Notification Center |
 | `native_toast_overlay.*` | toasts first-party |
 | `native_cloudos_tray.*` | tray first-party |
 | `native_task_switcher_window.*` | alternador de tarefas |
+
+V17 não cria parser `.desktop` nem comando WSL dentro do Start. `native_start_index.*` consome `NativeIntegrationV16::EnumerateLinuxGuiApps()` e usa o launcher Shell compartilhado.
 
 Sufixos de versão representam contratos deliberados; não crie `vN+1` apenas para evitar entender o módulo atual.
 
@@ -120,7 +126,8 @@ Continuity não substitui V13 rollback nem V14 rollback do shell.
 | `native_shell_pins.*` | pins |
 | `native_appearance_manager.*` | appearance |
 | `native_monitor_manager.*` | monitores/DPI/work areas |
-| `native_integration_v16.*` | **autoridade V16** para inventário Windows, WinGet, WSL distro/apps e package removal |
+| `native_integration_v16.*` | autoridade para inventário Windows, WinGet, WSL distro/apps e package removal |
+| `native_integration_v16_launchers.h` | launcher `.lnk` Linux compartilhado por Desktop/Start |
 
 Não espalhe parsing de uninstall registry, `wsl.exe --list`, `gtk-launch`, WinGet ou mapeamento apt/snap/flatpak por outras surfaces. Se a responsabilidade é Windows↔Linux/package integration, comece em `native_integration_v16.*`.
 
@@ -159,12 +166,14 @@ Files já expõe `\\wsl.localhost\` no sidebar. Essa é a visão first-party do 
 
 ---
 
-## 9. Apps first-party e gerenciador unificado V16
+## 9. Apps first-party e gerenciador unificado V16/V17
 
 | Arquivo | Aplicativo/feature |
 |---|---|
 | `native_apps_window.*` | Apps V16: Windows + Linux, abrir/instalar/remover/refresh |
 | `native_integration_v16.*` | descoberta/execução/package boundary |
+| `native_integration_v16_launchers.h` | adaptação de app Linux para alvo `.lnk` Shell |
+| `native_start_index.*` | V17: expõe apps Linux no Start/Search usando a mesma boundary |
 | `native_app_launcher_v3.*` | lançamento first-party/externo |
 | `native_browser_window.*` | Browser |
 | `native_terminal_window.*` | Terminal ConPTY usado por WinGet/apt/removal visível |
@@ -177,7 +186,7 @@ Files já expõe `\\wsl.localhost\` no sidebar. Essa é a visão first-party do 
 | `native_cloudos_drive.*` | CloudOS Drive |
 | `native_cloudos_trash_window.*` | Trash |
 
-Windows inventory é read-only; uninstall/WinGet só executa após ação explícita. Linux GUI discovery lê `.desktop` e usa WSLg/`gtk-launch`.
+Windows inventory é read-only; uninstall/WinGet só executa após ação explícita. Linux GUI discovery lê `.desktop` e usa WSLg/`gtk-launch`. Start não duplica essa descoberta.
 
 ---
 
@@ -192,7 +201,7 @@ Diretório: `desktop/CloudOS.NativeRuntime`.
 | `cloudos_native_window_events.*` | WinEvent/HWND events |
 | `cloudos_native_wsl.*` | WSL API baixo nível |
 
-A DLL fornece capacidade; não é proprietária da UI. V16 usa a boundary existente onde a WSL API cobre a operação e usa `wsl.exe` somente para capacidades que não estão expostas pelo runtime atual (lista de distros, `gtk-launch`, package managers).
+A DLL fornece capacidade; não é proprietária da UI. V16/V17 usam a boundary existente onde a WSL API cobre a operação e `wsl.exe` somente dentro da integração para capacidades não expostas pelo runtime atual.
 
 ---
 
@@ -205,7 +214,7 @@ Diretório: `desktop/CloudOS.NativeRecovery`.
 | `main.cpp` | `CloudOS.Supervisor.exe`: launch, Ready/heartbeat, restart, graceful exit, Explorer fallback |
 | `CloudOS.NativeRecovery.vcxproj` | produz Supervisor |
 
-A autoridade continua V11; integração V16 não cria recovery paralelo.
+A autoridade continua V11; integração V16/V17 não cria recovery paralelo.
 
 ---
 
@@ -236,6 +245,7 @@ Tamanho, nomes de mapping/event/window class/message e estruturas compartilhadas
 - `test-native-contract-suite.ps1` — entrypoint único.
 - `test-*-contract.ps1` — contrato específico.
 - V16: `test-unified-integration-v16-contract.ps1`.
+- V17: `test-unified-start-search-v17-contract.ps1`.
 
 ### Runtime smokes
 
@@ -246,6 +256,7 @@ Tamanho, nomes de mapping/event/window class/message e estruturas compartilhadas
 - V13: `run-native-deployment-smoke-v13.ps1`
 - V14: `run-native-shell-activation-smoke-v14.ps1`
 - V16: `run-native-integration-smoke-v16.ps1` — capability snapshot não destrutivo; não instala/remove software.
+- V17: `run-native-unified-start-search-smoke-v17.ps1` — Start/Search boundary + Supervisor sanity, não destrutivo.
 
 ### Deploy V13
 
@@ -272,6 +283,6 @@ Tamanho, nomes de mapping/event/window class/message e estruturas compartilhadas
 4. estenda o módulo existente se a responsabilidade for a mesma;
 5. crie módulo novo apenas para uma fronteira coesa;
 6. adicione contrato/teste;
-7. preserve V9–V16 invariantes aplicáveis.
+7. preserve V9–V17 invariantes aplicáveis.
 
 A meta é reduzir duplicação conceitual, não apenas reduzir número de linhas por arquivo.
