@@ -11,7 +11,8 @@ import '../widgets/quick_settings_panel.dart';
 import '../widgets/start_panel.dart';
 
 class CloudOSShell extends StatefulWidget {
-  const CloudOSShell({super.key, CloudOSBridge? bridge}) : bridge = bridge ?? const _DefaultBridge();
+  const CloudOSShell({super.key, CloudOSBridge? bridge})
+    : bridge = bridge ?? const _DefaultBridge();
 
   final CloudOSBridge bridge;
 
@@ -24,8 +25,8 @@ class _DefaultBridge extends CloudOSBridge {
 }
 
 class _CloudOSShellState extends State<CloudOSShell> {
-  List<CloudApp> apps = CloudOSBridge.previewApps;
-  CloudSystemSnapshot snapshot = CloudOSBridge.previewSnapshot;
+  List<CloudApp> apps = const <CloudApp>[];
+  CloudSystemSnapshot snapshot = CloudOSBridge.unavailableSnapshot;
   bool startOpen = false;
   bool quickSettingsOpen = false;
   bool notificationsOpen = false;
@@ -141,30 +142,78 @@ class _CloudOSShellState extends State<CloudOSShell> {
   Widget build(BuildContext context) {
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
-        const SingleActivator(LogicalKeyboardKey.keyE, control: true, alt: true): _toggleFiles,
-        const SingleActivator(LogicalKeyboardKey.keyQ, control: true, alt: true): _toggleQuickSettings,
-        const SingleActivator(LogicalKeyboardKey.keyN, control: true, alt: true): _toggleNotifications,
-        const SingleActivator(LogicalKeyboardKey.keyS, control: true, alt: true): _toggleStart,
-        const SingleActivator(LogicalKeyboardKey.keyA, control: true, alt: true): _toggleStart,
-        const SingleActivator(LogicalKeyboardKey.escape): () => setState(_closeTransientPanels),
-        const SingleActivator(LogicalKeyboardKey.digit1, control: true, alt: true): () => _switchWorkspace(1),
-        const SingleActivator(LogicalKeyboardKey.digit2, control: true, alt: true): () => _switchWorkspace(2),
-        const SingleActivator(LogicalKeyboardKey.digit3, control: true, alt: true): () => _switchWorkspace(3),
-        const SingleActivator(LogicalKeyboardKey.digit4, control: true, alt: true): () => _switchWorkspace(4),
+        const SingleActivator(
+          LogicalKeyboardKey.keyE,
+          control: true,
+          alt: true,
+        ): _toggleFiles,
+        const SingleActivator(
+          LogicalKeyboardKey.keyQ,
+          control: true,
+          alt: true,
+        ): _toggleQuickSettings,
+        const SingleActivator(
+          LogicalKeyboardKey.keyN,
+          control: true,
+          alt: true,
+        ): _toggleNotifications,
+        const SingleActivator(
+          LogicalKeyboardKey.keyS,
+          control: true,
+          alt: true,
+        ): _toggleStart,
+        const SingleActivator(
+          LogicalKeyboardKey.keyA,
+          control: true,
+          alt: true,
+        ): _toggleStart,
+        const SingleActivator(LogicalKeyboardKey.escape): () =>
+            setState(_closeTransientPanels),
+        const SingleActivator(
+          LogicalKeyboardKey.digit1,
+          control: true,
+          alt: true,
+        ): () =>
+            _switchWorkspace(1),
+        const SingleActivator(
+          LogicalKeyboardKey.digit2,
+          control: true,
+          alt: true,
+        ): () =>
+            _switchWorkspace(2),
+        const SingleActivator(
+          LogicalKeyboardKey.digit3,
+          control: true,
+          alt: true,
+        ): () =>
+            _switchWorkspace(3),
+        const SingleActivator(
+          LogicalKeyboardKey.digit4,
+          control: true,
+          alt: true,
+        ): () =>
+            _switchWorkspace(4),
       },
       child: Focus(
         autofocus: true,
         child: Scaffold(
           body: LayoutBuilder(
             builder: (context, constraints) {
-              final maxLeft = constraints.maxWidth > 1000 ? constraints.maxWidth - 980 : 20.0;
-              final maxTop = constraints.maxHeight > 700 ? constraints.maxHeight - 660 : 20.0;
+              final maxLeft = constraints.maxWidth > 1000
+                  ? constraints.maxWidth - 980
+                  : 20.0;
+              final maxTop = constraints.maxHeight > 700
+                  ? constraints.maxHeight - 660
+                  : 20.0;
               final safeLeft = filesOffset.dx.clamp(20.0, maxLeft).toDouble();
               final safeTop = filesOffset.dy.clamp(20.0, maxTop).toDouble();
 
               return GestureDetector(
                 onTap: () {
-                  if (startOpen || quickSettingsOpen || notificationsOpen || selectedDesktopIcon != null) {
+                  if (startOpen ||
+                      quickSettingsOpen ||
+                      notificationsOpen ||
+                      selectedDesktopIcon != null) {
                     setState(() {
                       _closeTransientPanels();
                       selectedDesktopIcon = null;
@@ -182,7 +231,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
                       child: RepaintBoundary(
                         child: _DesktopIcons(
                           selectedId: selectedDesktopIcon,
-                          onSelect: (id) => setState(() => selectedDesktopIcon = id),
+                          onSelect: (id) =>
+                              setState(() => selectedDesktopIcon = id),
                           onFiles: _toggleFiles,
                           onStart: _toggleStart,
                           onTerminal: _toggleTerminal,
@@ -207,7 +257,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
                         child: FilesWindow(
                           onClose: () => setState(() => filesOpen = false),
                           onMinimize: () => setState(() => filesOpen = false),
-                          onDrag: (delta) => setState(() => filesOffset += delta),
+                          onDrag: (delta) =>
+                              setState(() => filesOffset += delta),
                           bridge: widget.bridge,
                         ),
                       ),
@@ -251,6 +302,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
       child = QuickSettingsPanel(
         key: const ValueKey<String>('quick-settings'),
         snapshot: snapshot,
+        onVolumeChanged: widget.bridge.setVolume,
+        onBrightnessChanged: widget.bridge.setBrightness,
         onOpenSettings: () {
           setState(() {
             quickSettingsOpen = false;
@@ -259,7 +312,9 @@ class _CloudOSShellState extends State<CloudOSShell> {
         },
       );
     } else if (notificationsOpen) {
-      child = const NotificationCenterPanel(key: ValueKey<String>('notifications'));
+      child = const NotificationCenterPanel(
+        key: ValueKey<String>('notifications'),
+      );
     }
 
     return AnimatedSwitcher(
@@ -312,10 +367,7 @@ class _Wallpaper extends StatelessWidget {
             decoration: const BoxDecoration(
               shape: BoxShape.circle,
               gradient: RadialGradient(
-                colors: <Color>[
-                  Color(0x184C9AFF),
-                  Color(0x004C9AFF),
-                ],
+                colors: <Color>[Color(0x184C9AFF), Color(0x004C9AFF)],
               ),
             ),
           ),
@@ -329,10 +381,7 @@ class _Wallpaper extends StatelessWidget {
             decoration: const BoxDecoration(
               shape: BoxShape.circle,
               gradient: RadialGradient(
-                colors: <Color>[
-                  Color(0x1443C780),
-                  Color(0x0043C780),
-                ],
+                colors: <Color>[Color(0x1443C780), Color(0x0043C780)],
               ),
             ),
           ),
@@ -492,7 +541,10 @@ class _DesktopIcon extends StatelessWidget {
                     right: -4,
                     bottom: -2,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 1,
+                      ),
                       decoration: BoxDecoration(
                         color: CloudOSColors.elevated,
                         borderRadius: BorderRadius.circular(4),
@@ -520,9 +572,7 @@ class _DesktopIcon extends StatelessWidget {
                 color: CloudOSColors.text,
                 fontSize: 11,
                 fontWeight: FontWeight.w500,
-                shadows: <Shadow>[
-                  Shadow(color: Colors.black, blurRadius: 4),
-                ],
+                shadows: <Shadow>[Shadow(color: Colors.black, blurRadius: 4)],
               ),
             ),
           ],
@@ -553,28 +603,46 @@ class _DesktopStatus extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          const Icon(Icons.cloud_done_rounded, size: 15, color: CloudOSColors.success),
+          const Icon(
+            Icons.cloud_done_rounded,
+            size: 15,
+            color: CloudOSColors.success,
+          ),
           const SizedBox(width: 6),
           const Text(
-            'CloudOS V19',
-            style: TextStyle(color: CloudOSColors.text, fontSize: 11, fontWeight: FontWeight.w600),
+            'CloudOS V22.1',
+            style: TextStyle(
+              color: CloudOSColors.text,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
           ),
           const SizedBox(width: 8),
           Container(width: 1, height: 12, color: CloudOSColors.border),
           const SizedBox(width: 8),
           Text(
             'Área $currentWorkspace',
-            style: const TextStyle(color: CloudOSColors.secondary, fontSize: 11),
+            style: const TextStyle(
+              color: CloudOSColors.secondary,
+              fontSize: 11,
+            ),
           ),
           if (snapshot.wslAvailable) ...<Widget>[
             const SizedBox(width: 8),
             Container(width: 1, height: 12, color: CloudOSColors.border),
             const SizedBox(width: 8),
-            const Icon(Icons.terminal_rounded, size: 14, color: CloudOSColors.linux),
+            const Icon(
+              Icons.terminal_rounded,
+              size: 14,
+              color: CloudOSColors.linux,
+            ),
             const SizedBox(width: 4),
             Text(
               snapshot.distros.isEmpty ? 'WSL2' : snapshot.distros.first,
-              style: const TextStyle(color: CloudOSColors.caption, fontSize: 10.5),
+              style: const TextStyle(
+                color: CloudOSColors.caption,
+                fontSize: 10.5,
+              ),
             ),
           ],
         ],

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:math' as math;
 
 import '../core/cloudos_theme.dart';
 import '../models/file_models.dart';
@@ -59,16 +60,19 @@ class _FilesWindowState extends State<FilesWindow> {
   @override
   Widget build(BuildContext context) {
     final tab = _controller.activeTab;
+    final viewport = MediaQuery.sizeOf(context);
+    final windowWidth = math.min(1020.0, math.max(680.0, viewport.width - 40));
+    final windowHeight = math.min(640.0, math.max(480.0, viewport.height - 96));
 
     return Focus(
       autofocus: true,
-      onKey: (node, event) {
+      onKeyEvent: (node, event) {
         // Handle keyboard shortcuts
         return KeyEventResult.ignored;
       },
       child: SizedBox(
-        width: 1020,
-        height: 640,
+        width: windowWidth,
+        height: windowHeight,
         child: GlassSurface(
           borderRadius: 14,
           blur: 24,
@@ -90,15 +94,13 @@ class _FilesWindowState extends State<FilesWindow> {
                   children: <Widget>[
                     // Sidebar
                     SizedBox(
-                      width: 220,
+                      width: windowWidth < 840 ? 180 : 220,
                       child: _buildSidebar(tab),
                     ),
                     const VerticalDivider(width: 1),
 
                     // File View
-                    Expanded(
-                      child: _buildFileView(tab),
-                    ),
+                    Expanded(child: _buildFileView(tab)),
                   ],
                 ),
               ),
@@ -121,7 +123,11 @@ class _FilesWindowState extends State<FilesWindow> {
         color: Colors.transparent,
         child: Row(
           children: <Widget>[
-            const Icon(Icons.folder_rounded, size: 18, color: Color(0xFFF59E0B)),
+            const Icon(
+              Icons.folder_rounded,
+              size: 18,
+              color: Color(0xFFF59E0B),
+            ),
             const SizedBox(width: 8),
             const Text(
               'Arquivos',
@@ -158,12 +164,19 @@ class _FilesWindowState extends State<FilesWindow> {
                       onTap: () => _controller.selectTab(index),
                       borderRadius: BorderRadius.circular(6),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
-                          color: isActive ? const Color(0x2838BDF8) : Colors.transparent,
+                          color: isActive
+                              ? const Color(0x2838BDF8)
+                              : Colors.transparent,
                           borderRadius: BorderRadius.circular(6),
                           border: Border.all(
-                            color: isActive ? CloudOSColors.accent.withValues(alpha: 0.4) : Colors.transparent,
+                            color: isActive
+                                ? CloudOSColors.accent.withValues(alpha: 0.4)
+                                : Colors.transparent,
                           ),
                         ),
                         child: Row(
@@ -173,15 +186,23 @@ class _FilesWindowState extends State<FilesWindow> {
                               t.title,
                               style: TextStyle(
                                 fontSize: 12,
-                                color: isActive ? CloudOSColors.accent : CloudOSColors.textSecondary,
-                                fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                                color: isActive
+                                    ? CloudOSColors.accent
+                                    : CloudOSColors.textSecondary,
+                                fontWeight: isActive
+                                    ? FontWeight.w600
+                                    : FontWeight.normal,
                               ),
                             ),
                             if (_controller.tabs.length > 1) ...<Widget>[
                               const SizedBox(width: 6),
                               InkWell(
                                 onTap: () => _controller.closeTab(index),
-                                child: const Icon(Icons.close_rounded, size: 12, color: CloudOSColors.textSecondary),
+                                child: const Icon(
+                                  Icons.close_rounded,
+                                  size: 12,
+                                  color: CloudOSColors.textSecondary,
+                                ),
                               ),
                             ],
                           ],
@@ -222,13 +243,17 @@ class _FilesWindowState extends State<FilesWindow> {
           IconButton(
             icon: const Icon(Icons.arrow_back_rounded, size: 18),
             tooltip: 'Voltar (Alt+Seta Esquerda)',
-            onPressed: tab?.canGoBack == true ? () => _controller.goBack() : null,
+            onPressed: tab?.canGoBack == true
+                ? () => _controller.goBack()
+                : null,
             color: CloudOSColors.textPrimary,
           ),
           IconButton(
             icon: const Icon(Icons.arrow_forward_rounded, size: 18),
             tooltip: 'Avançar (Alt+Seta Direita)',
-            onPressed: tab?.canGoForward == true ? () => _controller.goForward() : null,
+            onPressed: tab?.canGoForward == true
+                ? () => _controller.goForward()
+                : null,
             color: CloudOSColors.textPrimary,
           ),
           IconButton(
@@ -257,18 +282,29 @@ class _FilesWindowState extends State<FilesWindow> {
               ),
               child: Row(
                 children: <Widget>[
-                  const Icon(Icons.folder_open_rounded, size: 16, color: CloudOSColors.textSecondary),
+                  const Icon(
+                    Icons.folder_open_rounded,
+                    size: 16,
+                    color: CloudOSColors.textSecondary,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: TextField(
                       controller: _pathInputController,
-                      style: const TextStyle(fontSize: 12, color: CloudOSColors.textPrimary),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: CloudOSColors.textPrimary,
+                      ),
                       decoration: const InputDecoration(
                         isDense: true,
                         contentPadding: EdgeInsets.symmetric(vertical: 6),
                         border: InputBorder.none,
-                        hintText: 'Digite o caminho (ex: C:\\ ou \\\\wsl.localhost\\Ubuntu)',
-                        hintStyle: TextStyle(fontSize: 12, color: CloudOSColors.textTertiary),
+                        hintText:
+                            'Digite o caminho (ex: C:\\ ou \\\\wsl.localhost\\Ubuntu)',
+                        hintStyle: TextStyle(
+                          fontSize: 12,
+                          color: CloudOSColors.textTertiary,
+                        ),
                       ),
                       onSubmitted: (value) {
                         if (value.trim().isNotEmpty) {
@@ -289,17 +325,32 @@ class _FilesWindowState extends State<FilesWindow> {
             height: 32,
             child: TextField(
               controller: _searchInputController,
-              style: const TextStyle(fontSize: 12, color: CloudOSColors.textPrimary),
+              style: const TextStyle(
+                fontSize: 12,
+                color: CloudOSColors.textPrimary,
+              ),
               decoration: InputDecoration(
                 isDense: true,
-                contentPadding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+                contentPadding: const EdgeInsets.symmetric(
+                  vertical: 6,
+                  horizontal: 8,
+                ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(6),
-                  borderSide: const BorderSide(color: CloudOSColors.borderSubtle),
+                  borderSide: const BorderSide(
+                    color: CloudOSColors.borderSubtle,
+                  ),
                 ),
-                prefixIcon: const Icon(Icons.search_rounded, size: 16, color: CloudOSColors.textSecondary),
+                prefixIcon: const Icon(
+                  Icons.search_rounded,
+                  size: 16,
+                  color: CloudOSColors.textSecondary,
+                ),
                 hintText: 'Buscar...',
-                hintStyle: const TextStyle(fontSize: 12, color: CloudOSColors.textTertiary),
+                hintStyle: const TextStyle(
+                  fontSize: 12,
+                  color: CloudOSColors.textTertiary,
+                ),
               ),
               onChanged: (value) => _controller.setSearchQuery(value),
             ),
@@ -314,8 +365,15 @@ class _FilesWindowState extends State<FilesWindow> {
             color: CloudOSColors.textPrimary,
           ),
           IconButton(
-            icon: Icon(tab?.isGridView == true ? Icons.view_list_rounded : Icons.grid_view_rounded, size: 18),
-            tooltip: tab?.isGridView == true ? 'Visualizar em Lista' : 'Visualizar em Grade',
+            icon: Icon(
+              tab?.isGridView == true
+                  ? Icons.view_list_rounded
+                  : Icons.grid_view_rounded,
+              size: 18,
+            ),
+            tooltip: tab?.isGridView == true
+                ? 'Visualizar em Lista'
+                : 'Visualizar em Grade',
             onPressed: () => _controller.toggleViewMode(),
             color: CloudOSColors.textPrimary,
           ),
@@ -333,7 +391,11 @@ class _FilesWindowState extends State<FilesWindow> {
           padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           child: Text(
             'Acesso Rápido',
-            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: CloudOSColors.textTertiary),
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: CloudOSColors.textTertiary,
+            ),
           ),
         ),
         for (final kf in _controller.knownFolders)
@@ -341,8 +403,11 @@ class _FilesWindowState extends State<FilesWindow> {
             id: kf.id,
             name: kf.name,
             icon: kf.icon,
-            color: kf.id.startsWith('wsl:') ? CloudOSColors.linux : CloudOSColors.accent,
-            isSelected: tab?.currentPath == kf.path || tab?.currentPath == kf.id,
+            color: kf.id.startsWith('wsl:')
+                ? CloudOSColors.linux
+                : CloudOSColors.accent,
+            isSelected:
+                tab?.currentPath == kf.path || tab?.currentPath == kf.id,
             onTap: () => _controller.navigateTo(kf.path, title: kf.name),
           ),
 
@@ -352,18 +417,29 @@ class _FilesWindowState extends State<FilesWindow> {
           padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           child: Text(
             'Este Computador',
-            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: CloudOSColors.textTertiary),
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: CloudOSColors.textTertiary,
+            ),
           ),
         ),
         for (final drive in _controller.drives)
           _buildSidebarItem(
             id: drive.letter,
-            name: drive.label.isNotEmpty ? '${drive.label} (${drive.letter})' : drive.letter,
+            name: drive.label.isNotEmpty
+                ? '${drive.label} (${drive.letter})'
+                : drive.letter,
             icon: drive.isRemovable ? Icons.usb_rounded : Icons.storage_rounded,
             color: CloudOSColors.windows,
-            isSelected: tab?.currentPath == drive.path || tab?.currentPath == drive.letter,
-            badge: drive.freeFormatted.isNotEmpty ? '${drive.freeFormatted} livres' : null,
-            onTap: () => _controller.navigateTo(drive.path, title: drive.letter),
+            isSelected:
+                tab?.currentPath == drive.path ||
+                tab?.currentPath == drive.letter,
+            badge: drive.freeFormatted.isNotEmpty
+                ? '${drive.freeFormatted} livres'
+                : null,
+            onTap: () =>
+                _controller.navigateTo(drive.path, title: drive.letter),
           ),
       ],
     );
@@ -388,7 +464,9 @@ class _FilesWindowState extends State<FilesWindow> {
           color: isSelected ? const Color(0x2838BDF8) : Colors.transparent,
           borderRadius: BorderRadius.circular(6),
           border: Border.all(
-            color: isSelected ? CloudOSColors.accent.withValues(alpha: 0.3) : Colors.transparent,
+            color: isSelected
+                ? CloudOSColors.accent.withValues(alpha: 0.3)
+                : Colors.transparent,
           ),
         ),
         child: Row(
@@ -400,7 +478,9 @@ class _FilesWindowState extends State<FilesWindow> {
                 name,
                 style: TextStyle(
                   fontSize: 12,
-                  color: isSelected ? CloudOSColors.accent : CloudOSColors.textPrimary,
+                  color: isSelected
+                      ? CloudOSColors.accent
+                      : CloudOSColors.textPrimary,
                   fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                 ),
                 maxLines: 1,
@@ -408,9 +488,17 @@ class _FilesWindowState extends State<FilesWindow> {
               ),
             ),
             if (badge != null)
-              Text(
-                badge,
-                style: const TextStyle(fontSize: 10, color: CloudOSColors.textTertiary),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 58),
+                child: Text(
+                  badge,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    color: CloudOSColors.textTertiary,
+                  ),
+                ),
               ),
           ],
         ),
@@ -432,11 +520,18 @@ class _FilesWindowState extends State<FilesWindow> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            const Icon(Icons.error_outline_rounded, size: 36, color: Color(0xFFF43F5E)),
+            const Icon(
+              Icons.error_outline_rounded,
+              size: 36,
+              color: Color(0xFFF43F5E),
+            ),
             const SizedBox(height: 8),
             Text(
               tab.errorMessage!,
-              style: const TextStyle(fontSize: 13, color: CloudOSColors.textSecondary),
+              style: const TextStyle(
+                fontSize: 13,
+                color: CloudOSColors.textSecondary,
+              ),
             ),
             const SizedBox(height: 12),
             ElevatedButton(
@@ -449,15 +544,22 @@ class _FilesWindowState extends State<FilesWindow> {
     }
 
     if (tab.items.isEmpty) {
-      return Center(
+      return const Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          children: const <Widget>[
-            Icon(Icons.folder_open_rounded, size: 48, color: CloudOSColors.textTertiary),
+          children: <Widget>[
+            Icon(
+              Icons.folder_open_rounded,
+              size: 48,
+              color: CloudOSColors.textTertiary,
+            ),
             SizedBox(height: 8),
             Text(
               'Esta pasta está vazia.',
-              style: TextStyle(fontSize: 13, color: CloudOSColors.textSecondary),
+              style: TextStyle(
+                fontSize: 13,
+                color: CloudOSColors.textSecondary,
+              ),
             ),
           ],
         ),
@@ -487,15 +589,20 @@ class _FilesWindowState extends State<FilesWindow> {
         return InkWell(
           onTap: () => _controller.selectItem(item.path),
           onDoubleTap: () => _controller.openItem(item),
-          onSecondaryTapDown: (details) => _showContextMenu(context, details.globalPosition, item),
+          onSecondaryTapDown: (details) =>
+              _showContextMenu(context, details.globalPosition, item),
           borderRadius: BorderRadius.circular(8),
           child: Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: isSelected ? const Color(0x3038BDF8) : const Color(0x08FFFFFF),
+              color: isSelected
+                  ? const Color(0x3038BDF8)
+                  : const Color(0x08FFFFFF),
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
-                color: isSelected ? CloudOSColors.accent : CloudOSColors.borderSubtle,
+                color: isSelected
+                    ? CloudOSColors.accent
+                    : CloudOSColors.borderSubtle,
               ),
             ),
             child: Column(
@@ -507,8 +614,12 @@ class _FilesWindowState extends State<FilesWindow> {
                   item.displayName,
                   style: TextStyle(
                     fontSize: 11,
-                    color: isSelected ? CloudOSColors.accent : CloudOSColors.textPrimary,
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                    color: isSelected
+                        ? CloudOSColors.accent
+                        : CloudOSColors.textPrimary,
+                    fontWeight: isSelected
+                        ? FontWeight.w600
+                        : FontWeight.normal,
                   ),
                   maxLines: 2,
                   textAlign: TextAlign.center,
@@ -533,7 +644,8 @@ class _FilesWindowState extends State<FilesWindow> {
         return InkWell(
           onTap: () => _controller.selectItem(item.path),
           onDoubleTap: () => _controller.openItem(item),
-          onSecondaryTapDown: (details) => _showContextMenu(context, details.globalPosition, item),
+          onSecondaryTapDown: (details) =>
+              _showContextMenu(context, details.globalPosition, item),
           borderRadius: BorderRadius.circular(6),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -555,8 +667,12 @@ class _FilesWindowState extends State<FilesWindow> {
                     item.displayName,
                     style: TextStyle(
                       fontSize: 12,
-                      color: isSelected ? CloudOSColors.accent : CloudOSColors.textPrimary,
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                      color: isSelected
+                          ? CloudOSColors.accent
+                          : CloudOSColors.textPrimary,
+                      fontWeight: isSelected
+                          ? FontWeight.w600
+                          : FontWeight.normal,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -566,7 +682,10 @@ class _FilesWindowState extends State<FilesWindow> {
                   flex: 2,
                   child: Text(
                     item.modifiedFormatted,
-                    style: const TextStyle(fontSize: 11, color: CloudOSColors.textSecondary),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: CloudOSColors.textSecondary,
+                    ),
                     maxLines: 1,
                   ),
                 ),
@@ -574,7 +693,10 @@ class _FilesWindowState extends State<FilesWindow> {
                   width: 80,
                   child: Text(
                     item.sizeFormatted,
-                    style: const TextStyle(fontSize: 11, color: CloudOSColors.textSecondary),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: CloudOSColors.textSecondary,
+                    ),
                     textAlign: TextAlign.right,
                   ),
                 ),
@@ -598,7 +720,10 @@ class _FilesWindowState extends State<FilesWindow> {
         children: <Widget>[
           Text(
             '$count itens',
-            style: const TextStyle(fontSize: 11, color: CloudOSColors.textSecondary),
+            style: const TextStyle(
+              fontSize: 11,
+              color: CloudOSColors.textSecondary,
+            ),
           ),
           if (selectedCount > 0) ...<Widget>[
             const SizedBox(width: 12),
@@ -608,6 +733,19 @@ class _FilesWindowState extends State<FilesWindow> {
             ),
           ],
           const Spacer(),
+          if (_controller.hasActiveJob) ...<Widget>[
+            Flexible(
+              child: Text(
+                '${_controller.activeJobStatus} ${_controller.activeJobProgress.toStringAsFixed(0)}%',
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: CloudOSColors.accent,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+          ],
           if (tab?.locationKind == LocationKind.wsl)
             const Text(
               'Linux / WSL2 Filesystem',
@@ -623,16 +761,29 @@ class _FilesWindowState extends State<FilesWindow> {
     );
   }
 
-  void _showContextMenu(BuildContext context, Offset position, CloudFileItem item) {
+  void _showContextMenu(
+    BuildContext context,
+    Offset position,
+    CloudFileItem item,
+  ) {
     showMenu<String>(
       context: context,
-      position: RelativeRect.fromLTRB(position.dx, position.dy, position.dx + 1, position.dy + 1),
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        position.dx + 1,
+        position.dy + 1,
+      ),
       items: <PopupMenuEntry<String>>[
         const PopupMenuItem<String>(
           value: 'open',
           child: Row(
             children: <Widget>[
-              Icon(Icons.open_in_new_rounded, size: 16, color: CloudOSColors.textPrimary),
+              Icon(
+                Icons.open_in_new_rounded,
+                size: 16,
+                color: CloudOSColors.textPrimary,
+              ),
               SizedBox(width: 8),
               Text('Abrir'),
             ],
@@ -643,7 +794,11 @@ class _FilesWindowState extends State<FilesWindow> {
             value: 'open_with',
             child: Row(
               children: <Widget>[
-                Icon(Icons.apps_rounded, size: 16, color: CloudOSColors.textPrimary),
+                Icon(
+                  Icons.apps_rounded,
+                  size: 16,
+                  color: CloudOSColors.textPrimary,
+                ),
                 SizedBox(width: 8),
                 Text('Abrir com...'),
               ],
@@ -654,7 +809,11 @@ class _FilesWindowState extends State<FilesWindow> {
           value: 'copy',
           child: Row(
             children: <Widget>[
-              Icon(Icons.copy_rounded, size: 16, color: CloudOSColors.textPrimary),
+              Icon(
+                Icons.copy_rounded,
+                size: 16,
+                color: CloudOSColors.textPrimary,
+              ),
               SizedBox(width: 8),
               Text('Copiar (Ctrl+C)'),
             ],
@@ -664,7 +823,11 @@ class _FilesWindowState extends State<FilesWindow> {
           value: 'cut',
           child: Row(
             children: <Widget>[
-              Icon(Icons.cut_rounded, size: 16, color: CloudOSColors.textPrimary),
+              Icon(
+                Icons.cut_rounded,
+                size: 16,
+                color: CloudOSColors.textPrimary,
+              ),
               SizedBox(width: 8),
               Text('Recortar (Ctrl+X)'),
             ],
@@ -674,7 +837,11 @@ class _FilesWindowState extends State<FilesWindow> {
           value: 'rename',
           child: Row(
             children: <Widget>[
-              Icon(Icons.edit_rounded, size: 16, color: CloudOSColors.textPrimary),
+              Icon(
+                Icons.edit_rounded,
+                size: 16,
+                color: CloudOSColors.textPrimary,
+              ),
               SizedBox(width: 8),
               Text('Renomear (F2)'),
             ],
@@ -684,7 +851,11 @@ class _FilesWindowState extends State<FilesWindow> {
           value: 'delete',
           child: Row(
             children: <Widget>[
-              Icon(Icons.delete_outline_rounded, size: 16, color: Color(0xFFF43F5E)),
+              Icon(
+                Icons.delete_outline_rounded,
+                size: 16,
+                color: Color(0xFFF43F5E),
+              ),
               SizedBox(width: 8),
               Text('Excluir (Lixeira)'),
             ],
@@ -695,7 +866,11 @@ class _FilesWindowState extends State<FilesWindow> {
           value: 'properties',
           child: Row(
             children: <Widget>[
-              Icon(Icons.info_outline_rounded, size: 16, color: CloudOSColors.textPrimary),
+              Icon(
+                Icons.info_outline_rounded,
+                size: 16,
+                color: CloudOSColors.textPrimary,
+              ),
               SizedBox(width: 8),
               Text('Propriedades'),
             ],
@@ -722,7 +897,18 @@ class _FilesWindowState extends State<FilesWindow> {
   }
 
   void _showOpenWithDialog(CloudFileItem item) async {
-    final apps = await _controller.getOpenWith(item.path);
+    List<OpenWithAppModel> apps;
+    try {
+      apps = await _controller.getOpenWith(item.path);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Não foi possível consultar “Abrir com”: $error'),
+        ),
+      );
+      return;
+    }
 
     if (!mounted) return;
 
@@ -734,27 +920,51 @@ class _FilesWindowState extends State<FilesWindow> {
           title: Text('Abrir "${item.name}" com:'),
           content: SizedBox(
             width: 380,
-            child: ListView.separated(
-              shrinkWrap: true,
-              itemCount: apps.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
-              itemBuilder: (context, index) {
-                final app = apps[index];
-                return ListTile(
-                  leading: Icon(app.icon, color: app.platform == 'linux' ? CloudOSColors.linux : CloudOSColors.windows),
-                  title: Text(app.name, style: const TextStyle(fontSize: 13, color: CloudOSColors.textPrimary)),
-                  subtitle: Text(
-                    app.platform == 'linux' ? 'Aplicativo Linux (WSLg)' : 'Aplicativo Windows',
-                    style: const TextStyle(fontSize: 11, color: CloudOSColors.textSecondary),
+            child: apps.isEmpty
+                ? const Text('Nenhum aplicativo compatível foi encontrado.')
+                : ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: apps.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final app = apps[index];
+                      return ListTile(
+                        leading: Icon(
+                          app.icon,
+                          color: app.platform == 'linux'
+                              ? CloudOSColors.linux
+                              : CloudOSColors.windows,
+                        ),
+                        title: Text(
+                          app.name,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: CloudOSColors.textPrimary,
+                          ),
+                        ),
+                        subtitle: Text(
+                          app.platform == 'linux'
+                              ? 'Aplicativo Linux (WSLg)'
+                              : 'Aplicativo Windows',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: CloudOSColors.textSecondary,
+                          ),
+                        ),
+                        trailing: app.isDefault
+                            ? const Icon(
+                                Icons.check_circle_rounded,
+                                size: 16,
+                                color: CloudOSColors.accent,
+                              )
+                            : null,
+                        onTap: () {
+                          Navigator.of(context).pop();
+                          _controller.launchOpenWith(item.path, app);
+                        },
+                      );
+                    },
                   ),
-                  trailing: app.isDefault ? const Icon(Icons.check_circle_rounded, size: 16, color: CloudOSColors.accent) : null,
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    _controller.launchOpenWith(item.path, app);
-                  },
-                );
-              },
-            ),
           ),
           actions: <Widget>[
             TextButton(
@@ -781,7 +991,10 @@ class _FilesWindowState extends State<FilesWindow> {
             decoration: const InputDecoration(labelText: 'Nome da Pasta'),
           ),
           actions: <Widget>[
-            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancelar')),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancelar'),
+            ),
             ElevatedButton(
               onPressed: () {
                 final name = controller.text.trim();
@@ -795,7 +1008,7 @@ class _FilesWindowState extends State<FilesWindow> {
           ],
         );
       },
-    );
+    ).whenComplete(controller.dispose);
   }
 
   void _showRenameDialog(CloudFileItem item) {
@@ -812,7 +1025,10 @@ class _FilesWindowState extends State<FilesWindow> {
             decoration: const InputDecoration(labelText: 'Novo Nome'),
           ),
           actions: <Widget>[
-            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancelar')),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancelar'),
+            ),
             ElevatedButton(
               onPressed: () {
                 final name = controller.text.trim();
@@ -826,7 +1042,7 @@ class _FilesWindowState extends State<FilesWindow> {
           ],
         );
       },
-    );
+    ).whenComplete(controller.dispose);
   }
 
   void _showPropertiesDialog(CloudFileItem item) {
@@ -846,19 +1062,28 @@ class _FilesWindowState extends State<FilesWindow> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Text('Tipo: ${item.isDirectory ? "Pasta de Arquivos" : (item.extension.isNotEmpty ? item.extension : "Arquivo")}'),
+              Text(
+                'Tipo: ${item.isDirectory ? "Pasta de Arquivos" : (item.extension.isNotEmpty ? item.extension : "Arquivo")}',
+              ),
               const SizedBox(height: 4),
-              Text('Tamanho: ${item.sizeFormatted.isNotEmpty ? item.sizeFormatted : "0 B"}'),
+              Text(
+                'Tamanho: ${item.sizeFormatted.isNotEmpty ? item.sizeFormatted : "0 B"}',
+              ),
               const SizedBox(height: 4),
               Text('Caminho: ${item.path}'),
               const SizedBox(height: 4),
               Text('Modificado: ${item.modifiedFormatted}'),
               const SizedBox(height: 4),
-              Text('Origem: ${item.locationKind == LocationKind.wsl ? "Linux / WSL (${item.distro})" : "Windows"}'),
+              Text(
+                'Origem: ${item.locationKind == LocationKind.wsl ? "Linux / WSL (${item.distro})" : "Windows"}',
+              ),
             ],
           ),
           actions: <Widget>[
-            ElevatedButton(onPressed: () => Navigator.of(context).pop(), child: const Text('OK')),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
           ],
         );
       },

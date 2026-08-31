@@ -80,6 +80,10 @@ class CloudSystemSnapshot {
     required this.wslAvailable,
     required this.distros,
     this.currentWorkspace = 1,
+    this.batteryAvailable = true,
+    this.networkAvailable = true,
+    this.volumeAvailable = true,
+    this.brightnessAvailable = true,
   });
 
   final String deviceName;
@@ -90,4 +94,8 @@ class CloudSystemSnapshot {
   final bool wslAvailable;
   final List<String> distros;
   final int currentWorkspace;
+  final bool batteryAvailable;
+  final bool networkAvailable;
+  final bool volumeAvailable;
+  final bool brightnessAvailable;
 }

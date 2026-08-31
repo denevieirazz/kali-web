@@ -41,6 +41,15 @@ if ($fileServiceContent -notmatch 'GetOpenWithList' -or $fileServiceContent -not
     throw "Missing Open With association logic in file_service_v22.cpp"
 }
 
+if ($fileServiceContent -match 'JsonObject\s+gimp' -or $fileServiceContent -match 'Editor de Texto Linux') {
+    throw 'Open With must not advertise guessed Linux applications.'
+}
+foreach ($requiredHardening in @('IsWslCommandAvailable', 'CopyPathRecursive', 'CopyFileExW', 'source_equals_destination', 'destination_inside_source', 'if (!ok && permanent)')) {
+    if ($fileServiceContent.IndexOf($requiredHardening, [StringComparison]::Ordinal) -lt 0) {
+        throw "Missing V22.1 file-operation hardening: $requiredHardening"
+    }
+}
+
 # 6. Check Dart / Flutter Models and Controller
 $fileModelsDart = Join-Path $repoRoot "desktop\CloudOS.FlutterShell\lib\models\file_models.dart"
 $filesControllerDart = Join-Path $repoRoot "desktop\CloudOS.FlutterShell\lib\services\files_controller.dart"
@@ -53,6 +62,18 @@ if (-not (Test-Path $fileModelsDart) -or -not (Test-Path $filesControllerDart) -
 $filesWindowContent = Get-Content -Path $filesWindowDart -Raw
 if ($filesWindowContent -notmatch 'FilesController' -or $filesWindowContent -notmatch 'Nova Aba') {
     throw "FilesWindow is not connected to FilesController or lacks multi-tab support"
+}
+
+$bridgeContent = Get-Content -Path (Join-Path $repoRoot 'desktop\CloudOS.FlutterShell\lib\services\cloudos_bridge.dart') -Raw
+foreach ($forbiddenFallback in @('return previewFiles', 'return previewOpenWith', 'return previewKnownFolders', 'return previewDrives')) {
+    if ($bridgeContent.Contains($forbiddenFallback)) {
+        throw "Flutter runtime must not fabricate broker data: $forbiddenFallback"
+    }
+}
+
+$jobsContent = Get-Content -Path (Join-Path $repoRoot 'desktop\CloudOS.SystemBroker\src\job_manager_v21.h') -Raw
+if (-not $jobsContent.Contains('info_mutex') -or -not $jobsContent.Contains('kMaxRetainedJobs')) {
+    throw 'JobManager must synchronize job state and bound retained job history.'
 }
 
 # 7. Check probe commands in CloudOS.BrokerProbe

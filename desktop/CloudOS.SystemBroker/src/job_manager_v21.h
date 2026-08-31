@@ -67,6 +67,7 @@ private:
 
     struct InternalJob final
     {
+        mutable std::mutex info_mutex;
         JobInfo info;
         JobFunction func;
         std::atomic_bool cancel_flag{false};
@@ -79,6 +80,8 @@ private:
     std::vector<std::thread> workers_;
     std::atomic_bool running_{false};
     std::atomic_uint64_t next_job_id_{1};
+
+    static constexpr size_t kMaxRetainedJobs = 512;
 };
 
 } // namespace CloudOS

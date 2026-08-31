@@ -33,7 +33,7 @@ private:
     ~BrokerServerV21();
 
     void ListenerLoop();
-    void ClientSessionLoop(HANDLE pipe, std::string client_id);
+    void ClientSessionLoop(HANDLE pipe, std::string client_id, std::shared_ptr<std::atomic_bool> finished);
 
     bool SendFrame(HANDLE pipe, const std::string& payload);
     bool ReadFrame(HANDLE pipe, std::string& payload);
@@ -41,7 +41,13 @@ private:
     std::atomic_bool running_{false};
     HANDLE mutex_handle_{nullptr};
     std::thread listener_thread_;
-    std::vector<std::thread> client_threads_;
+    struct ClientThreadEntry final
+    {
+        std::thread thread;
+        std::shared_ptr<std::atomic_bool> finished;
+    };
+    std::vector<ClientThreadEntry> client_threads_;
+    std::vector<HANDLE> client_pipes_;
     std::mutex client_threads_mutex_;
     std::atomic_uint64_t next_client_id_{1};
 };

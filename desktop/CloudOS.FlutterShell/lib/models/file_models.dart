@@ -12,7 +12,7 @@ enum FileKind {
   archive,
   executable,
   code,
-  unknown
+  unknown,
 }
 
 enum FileSortField { name, size, modified, type }
@@ -132,22 +132,33 @@ class CloudFileItem {
 
     final fkStr = json['fileKind'] as String? ?? 'unknown';
     FileKind fk = FileKind.unknown;
-    if (fkStr == 'folder') fk = FileKind.folder;
-    else if (fkStr == 'text') fk = FileKind.text;
-    else if (fkStr == 'image') fk = FileKind.image;
-    else if (fkStr == 'audio') fk = FileKind.audio;
-    else if (fkStr == 'video') fk = FileKind.video;
-    else if (fkStr == 'document') fk = FileKind.document;
-    else if (fkStr == 'archive') fk = FileKind.archive;
-    else if (fkStr == 'executable') fk = FileKind.executable;
-    else if (fkStr == 'code') fk = FileKind.code;
+    if (fkStr == 'folder')
+      fk = FileKind.folder;
+    else if (fkStr == 'text')
+      fk = FileKind.text;
+    else if (fkStr == 'image')
+      fk = FileKind.image;
+    else if (fkStr == 'audio')
+      fk = FileKind.audio;
+    else if (fkStr == 'video')
+      fk = FileKind.video;
+    else if (fkStr == 'document')
+      fk = FileKind.document;
+    else if (fkStr == 'archive')
+      fk = FileKind.archive;
+    else if (fkStr == 'executable')
+      fk = FileKind.executable;
+    else if (fkStr == 'code')
+      fk = FileKind.code;
 
     return CloudFileItem(
       id: json['id'] as String? ?? '',
       name: json['name'] as String? ?? '',
-      displayName: json['displayName'] as String? ?? json['name'] as String? ?? '',
+      displayName:
+          json['displayName'] as String? ?? json['name'] as String? ?? '',
       path: json['path'] as String? ?? '',
-      canonicalPath: json['canonicalPath'] as String? ?? json['path'] as String? ?? '',
+      canonicalPath:
+          json['canonicalPath'] as String? ?? json['path'] as String? ?? '',
       locationKind: lk,
       fileKind: fk,
       extension: json['extension'] as String? ?? '',
@@ -231,15 +242,24 @@ class KnownFolderModel {
 
   IconData get icon {
     switch (iconKey) {
-      case 'home': return Icons.home_rounded;
-      case 'desktop': return Icons.desktop_windows_rounded;
-      case 'documents': return Icons.description_rounded;
-      case 'downloads': return Icons.download_rounded;
-      case 'pictures': return Icons.image_rounded;
-      case 'videos': return Icons.movie_rounded;
-      case 'music': return Icons.audiotrack_rounded;
-      case 'linux': return Icons.terminal_rounded;
-      default: return Icons.folder_rounded;
+      case 'home':
+        return Icons.home_rounded;
+      case 'desktop':
+        return Icons.desktop_windows_rounded;
+      case 'documents':
+        return Icons.description_rounded;
+      case 'downloads':
+        return Icons.download_rounded;
+      case 'pictures':
+        return Icons.image_rounded;
+      case 'videos':
+        return Icons.movie_rounded;
+      case 'music':
+        return Icons.audiotrack_rounded;
+      case 'linux':
+        return Icons.terminal_rounded;
+      default:
+        return Icons.folder_rounded;
     }
   }
 

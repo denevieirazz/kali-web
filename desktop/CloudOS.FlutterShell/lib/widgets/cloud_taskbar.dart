@@ -151,8 +151,8 @@ class _TaskButton extends StatelessWidget {
     final background = active
         ? CloudOSColors.active
         : accent
-            ? CloudOSColors.accentSoft
-            : Colors.transparent;
+        ? CloudOSColors.accentSoft
+        : Colors.transparent;
 
     return Tooltip(
       message: tooltip,
@@ -179,8 +179,8 @@ class _TaskButton extends StatelessWidget {
                 color: accent
                     ? CloudOSColors.accent
                     : active
-                        ? CloudOSColors.text
-                        : CloudOSColors.secondary,
+                    ? CloudOSColors.text
+                    : CloudOSColors.secondary,
               ),
               if (isRunning && !active)
                 Positioned(
@@ -227,11 +227,23 @@ class _TrayQuickGroup extends StatelessWidget {
           child: const Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Icon(Icons.wifi_rounded, size: 15, color: CloudOSColors.secondary),
+              Icon(
+                Icons.wifi_rounded,
+                size: 15,
+                color: CloudOSColors.secondary,
+              ),
               SizedBox(width: 6),
-              Icon(Icons.volume_up_rounded, size: 15, color: CloudOSColors.secondary),
+              Icon(
+                Icons.volume_up_rounded,
+                size: 15,
+                color: CloudOSColors.secondary,
+              ),
               SizedBox(width: 6),
-              Icon(Icons.battery_5_bar_rounded, size: 15, color: CloudOSColors.secondary),
+              Icon(
+                Icons.battery_5_bar_rounded,
+                size: 15,
+                color: CloudOSColors.secondary,
+              ),
             ],
           ),
         ),
@@ -271,14 +283,21 @@ class _NotificationTrayButton extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
               Icon(
-                count > 0 ? Icons.notifications_rounded : Icons.notifications_none_rounded,
+                count > 0
+                    ? Icons.notifications_rounded
+                    : Icons.notifications_none_rounded,
                 size: 16,
-                color: count > 0 ? CloudOSColors.accent : CloudOSColors.secondary,
+                color: count > 0
+                    ? CloudOSColors.accent
+                    : CloudOSColors.secondary,
               ),
               if (count > 0) ...<Widget>[
                 const SizedBox(width: 4),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 5,
+                    vertical: 1,
+                  ),
                   decoration: BoxDecoration(
                     color: CloudOSColors.accent,
                     borderRadius: BorderRadius.circular(6),

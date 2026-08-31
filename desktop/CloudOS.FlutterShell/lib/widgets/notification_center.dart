@@ -6,15 +6,13 @@ import '../services/cloudos_bridge.dart';
 import 'glass_surface.dart';
 
 class NotificationCenterPanel extends StatefulWidget {
-  const NotificationCenterPanel({
-    this.initialNotifications,
-    super.key,
-  });
+  const NotificationCenterPanel({this.initialNotifications, super.key});
 
   final List<CloudNotification>? initialNotifications;
 
   @override
-  State<NotificationCenterPanel> createState() => _NotificationCenterPanelState();
+  State<NotificationCenterPanel> createState() =>
+      _NotificationCenterPanelState();
 }
 
 class _NotificationCenterPanelState extends State<NotificationCenterPanel> {
@@ -37,9 +35,31 @@ class _NotificationCenterPanelState extends State<NotificationCenterPanel> {
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
-    const weekdays = <String>['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo'];
-    const months = <String>['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
-    final dateString = '${weekdays[now.weekday - 1]}, ${now.day} de ${months[now.month - 1]}';
+    const weekdays = <String>[
+      'Segunda-feira',
+      'Terça-feira',
+      'Quarta-feira',
+      'Quinta-feira',
+      'Sexta-feira',
+      'Sábado',
+      'Domingo',
+    ];
+    const months = <String>[
+      'Janeiro',
+      'Fevereiro',
+      'Março',
+      'Abril',
+      'Maio',
+      'Junho',
+      'Julho',
+      'Agosto',
+      'Setembro',
+      'Outubro',
+      'Novembro',
+      'Dezembro',
+    ];
+    final dateString =
+        '${weekdays[now.weekday - 1]}, ${now.day} de ${months[now.month - 1]}';
 
     return Align(
       alignment: Alignment.bottomRight,
@@ -77,7 +97,10 @@ class _NotificationCenterPanelState extends State<NotificationCenterPanel> {
                             dateString,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: CloudOSColors.caption, fontSize: 11),
+                            style: const TextStyle(
+                              color: CloudOSColors.caption,
+                              fontSize: 11,
+                            ),
                           ),
                         ],
                       ),
@@ -89,7 +112,13 @@ class _NotificationCenterPanelState extends State<NotificationCenterPanel> {
                           visualDensity: VisualDensity.compact,
                           padding: const EdgeInsets.symmetric(horizontal: 8),
                         ),
-                        child: const Text('Limpar Tudo', style: TextStyle(fontSize: 11.5, color: CloudOSColors.accent)),
+                        child: const Text(
+                          'Limpar Tudo',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: CloudOSColors.accent,
+                          ),
+                        ),
                       ),
                   ],
                 ),
@@ -102,16 +131,27 @@ class _NotificationCenterPanelState extends State<NotificationCenterPanel> {
                     child: const Column(
                       mainAxisSize: MainAxisSize.min,
                       children: <Widget>[
-                        Icon(Icons.notifications_off_outlined, size: 36, color: CloudOSColors.caption),
+                        Icon(
+                          Icons.notifications_off_outlined,
+                          size: 36,
+                          color: CloudOSColors.caption,
+                        ),
                         SizedBox(height: 8),
                         Text(
                           'Sem novas notificações',
-                          style: TextStyle(color: CloudOSColors.secondary, fontSize: 12.5, fontWeight: FontWeight.w600),
+                          style: TextStyle(
+                            color: CloudOSColors.secondary,
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                         SizedBox(height: 2),
                         Text(
                           'Tudo atualizado por aqui',
-                          style: TextStyle(color: CloudOSColors.caption, fontSize: 11),
+                          style: TextStyle(
+                            color: CloudOSColors.caption,
+                            fontSize: 11,
+                          ),
                         ),
                       ],
                     ),
@@ -162,7 +202,11 @@ class _NotificationCard extends StatelessWidget {
               color: CloudOSColors.accentSoft,
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(notification.icon, size: 17, color: CloudOSColors.accent),
+            child: Icon(
+              notification.icon,
+              size: 17,
+              color: CloudOSColors.accent,
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -183,7 +227,10 @@ class _NotificationCard extends StatelessWidget {
                     ),
                     Text(
                       notification.time,
-                      style: const TextStyle(color: CloudOSColors.caption, fontSize: 10.5),
+                      style: const TextStyle(
+                        color: CloudOSColors.caption,
+                        fontSize: 10.5,
+                      ),
                     ),
                     const SizedBox(width: 4),
                     InkWell(
@@ -191,7 +238,11 @@ class _NotificationCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(4),
                       child: const Padding(
                         padding: EdgeInsets.all(2),
-                        child: Icon(Icons.close_rounded, size: 14, color: CloudOSColors.caption),
+                        child: Icon(
+                          Icons.close_rounded,
+                          size: 14,
+                          color: CloudOSColors.caption,
+                        ),
                       ),
                     ),
                   ],
@@ -199,20 +250,30 @@ class _NotificationCard extends StatelessWidget {
                 const SizedBox(height: 3),
                 Text(
                   notification.message,
-                  style: const TextStyle(color: CloudOSColors.secondary, fontSize: 11.5),
+                  style: const TextStyle(
+                    color: CloudOSColors.secondary,
+                    fontSize: 11.5,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Row(
                   children: <Widget>[
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 1,
+                      ),
                       decoration: BoxDecoration(
                         color: CloudOSColors.border.withValues(alpha: 0.5),
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
                         notification.source,
-                        style: const TextStyle(color: CloudOSColors.caption, fontSize: 9, fontWeight: FontWeight.w600),
+                        style: const TextStyle(
+                          color: CloudOSColors.caption,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ],

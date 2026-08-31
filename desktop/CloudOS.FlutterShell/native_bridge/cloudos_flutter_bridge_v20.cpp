@@ -143,8 +143,8 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
             auto it = args->find(flutter::EncodableValue("value"));
             if (it != args->end() && std::holds_alternative<double>(it->second))
             {
-                SetVolume(std::get<double>(it->second));
-                result->Success(flutter::EncodableValue(true));
+                const bool updated = SetVolume(std::get<double>(it->second));
+                result->Success(flutter::EncodableValue(updated));
                 return;
             }
         }
@@ -160,8 +160,8 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
             auto it = args->find(flutter::EncodableValue("value"));
             if (it != args->end() && std::holds_alternative<double>(it->second))
             {
-                SetBrightness(std::get<double>(it->second));
-                result->Success(flutter::EncodableValue(true));
+                const bool updated = SetBrightness(std::get<double>(it->second));
+                result->Success(flutter::EncodableValue(updated));
                 return;
             }
         }
@@ -265,73 +265,38 @@ bool CloudOSFlutterBridgeV20::LaunchApp(const std::string& app_id)
         return true;
     }
 
-    // Local fallback
-    if (app_id == "files" || app_id == "cloudos:files")
-    {
-        ShellExecuteW(nullptr, L"open", L"explorer.exe", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
-    }
-    if (app_id == "browser" || app_id == "cloudos:browser")
-    {
-        ShellExecuteW(nullptr, L"open", L"https://google.com", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
-    }
-    if (app_id == "terminal" || app_id == "cloudos:terminal")
-    {
-        ShellExecuteW(nullptr, L"open", L"cmd.exe", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
-    }
-    if (app_id == "windows:notepad")
-    {
-        ShellExecuteW(nullptr, L"open", L"notepad.exe", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
-    }
-    if (app_id == "wsl:ubuntu-terminal" || app_id == "linux:ubuntu-terminal" || app_id == "ubuntu-terminal")
-    {
-        ShellExecuteW(nullptr, L"open", L"wsl.exe", L"~", nullptr, SW_SHOWNORMAL);
-        return true;
-    }
+    // Flutter is a presentation client. It has no local execution fallback.
     return false;
 }
 
-void CloudOSFlutterBridgeV20::SetVolume(double volume)
+bool CloudOSFlutterBridgeV20::SetVolume(double volume)
 {
     double clamped = std::clamp(volume, 0.0, 1.0);
-    CloudOSBrokerClientV21::Instance().SetVolume(clamped);
+    if (!CloudOSBrokerClientV21::Instance().SetVolume(clamped)) return false;
     std::lock_guard<std::mutex> lock(mutex_);
     cached_snapshot_.volume = clamped;
+    return true;
 }
 
-void CloudOSFlutterBridgeV20::SetBrightness(double brightness)
+bool CloudOSFlutterBridgeV20::SetBrightness(double brightness)
 {
     double clamped = std::clamp(brightness, 0.0, 1.0);
-    CloudOSBrokerClientV21::Instance().SetBrightness(clamped);
+    if (!CloudOSBrokerClientV21::Instance().SetBrightness(clamped)) return false;
     std::lock_guard<std::mutex> lock(mutex_);
     cached_snapshot_.brightness = clamped;
+    return true;
 }
 
 void CloudOSFlutterBridgeV20::RefreshAppCatalog()
 {
     std::lock_guard<std::mutex> lock(mutex_);
     cached_apps_.clear();
-    cached_apps_.push_back({"cloudos:files", "Arquivos", "cloudos", "Windows + Linux (WSL2)", "", "Sistema", "CloudOS", true, true, false});
-    cached_apps_.push_back({"cloudos:browser", "Navegador Web", "cloudos", "Chromium / Web Browser", "", "Produtividade", "CloudOS", true, true, true});
-    cached_apps_.push_back({"cloudos:terminal", "Terminal", "cloudos", "Prompt de Comando / Shell", "", "Utilitários", "CloudOS", true, true, true});
-    cached_apps_.push_back({"windows:notepad", "Bloco de Notas", "windows", "Editor de Texto", "", "Produtividade", "Windows", true, true, false});
-    cached_apps_.push_back({"wsl:ubuntu-terminal", "Ubuntu Terminal", "linux", "Linux Bash Shell (Ubuntu)", "Ubuntu", "Linux / WSL", "Ubuntu (WSL)", true, true, true});
 }
 
 void CloudOSFlutterBridgeV20::RefreshSystemSnapshot()
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    cached_snapshot_.device_name = "CloudOS Desktop";
-    cached_snapshot_.network_name = "CloudOS Network • Wi-Fi 6";
-    cached_snapshot_.volume = 0.72;
-    cached_snapshot_.brightness = 0.85;
-    cached_snapshot_.battery_percent = 100;
-    cached_snapshot_.wsl_available = true;
-    cached_snapshot_.distros = {"Ubuntu"};
-    cached_snapshot_.current_workspace = 1;
+    cached_snapshot_ = {};
 }
 
 } // namespace CloudOS

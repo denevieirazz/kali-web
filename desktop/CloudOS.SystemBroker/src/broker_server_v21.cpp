@@ -9,9 +9,21 @@
 #include "wsl_service_v21.h"
 
 #include <iostream>
+#include <cmath>
+#include <algorithm>
 
 namespace CloudOS
 {
+
+namespace
+{
+struct ClientSendState final
+{
+    std::mutex mutex;
+    HANDLE pipe{INVALID_HANDLE_VALUE};
+    bool active{true};
+};
+} // namespace
 
 BrokerServerV21& BrokerServerV21::Instance()
 {
@@ -83,13 +95,27 @@ void BrokerServerV21::Stop()
         listener_thread_.join();
     }
 
+    std::vector<ClientThreadEntry> client_threads;
     {
         std::lock_guard<std::mutex> lock(client_threads_mutex_);
-        for (auto& t : client_threads_)
+        for (HANDLE pipe : client_pipes_)
         {
-            if (t.joinable()) t.join();
+            CancelIoEx(pipe, nullptr);
+            DisconnectNamedPipe(pipe);
         }
-        client_threads_.clear();
+        for (auto& entry : client_threads_)
+        {
+            if (entry.thread.joinable()) CancelSynchronousIo(entry.thread.native_handle());
+        }
+        client_threads.swap(client_threads_);
+    }
+    for (auto& entry : client_threads)
+    {
+        if (entry.thread.joinable()) entry.thread.join();
+    }
+    {
+        std::lock_guard<std::mutex> lock(client_threads_mutex_);
+        client_pipes_.clear();
     }
 
     JobManagerV21::Instance().Shutdown();
@@ -104,18 +130,27 @@ void BrokerServerV21::Stop()
 
 bool BrokerServerV21::SendFrame(HANDLE pipe, const std::string& payload)
 {
+    if (payload.size() > kMaxPayloadBytes) return false;
     uint32_t len = static_cast<uint32_t>(payload.size());
     DWORD written = 0;
-    if (!WriteFile(pipe, &len, sizeof(len), &written, nullptr) || written != sizeof(len))
+    DWORD header_written = 0;
+    const auto* header = reinterpret_cast<const unsigned char*>(&len);
+    while (header_written < sizeof(len))
     {
-        return false;
-    }
-    if (len > 0)
-    {
-        if (!WriteFile(pipe, payload.data(), len, &written, nullptr) || written != len)
+        if (!WriteFile(pipe, header + header_written, sizeof(len) - header_written, &written, nullptr) || written == 0)
         {
             return false;
         }
+        header_written += written;
+    }
+    DWORD total_written = 0;
+    while (total_written < len)
+    {
+        if (!WriteFile(pipe, payload.data() + total_written, len - total_written, &written, nullptr) || written == 0)
+        {
+            return false;
+        }
+        total_written += written;
     }
     return true;
 }
@@ -124,9 +159,15 @@ bool BrokerServerV21::ReadFrame(HANDLE pipe, std::string& payload)
 {
     uint32_t len = 0;
     DWORD read_bytes = 0;
-    if (!ReadFile(pipe, &len, sizeof(len), &read_bytes, nullptr) || read_bytes != sizeof(len))
+    DWORD header_bytes = 0;
+    auto* header = reinterpret_cast<unsigned char*>(&len);
+    while (header_bytes < sizeof(len))
     {
-        return false;
+        if (!ReadFile(pipe, header + header_bytes, sizeof(len) - header_bytes, &read_bytes, nullptr) || read_bytes == 0)
+        {
+            return false;
+        }
+        header_bytes += read_bytes;
     }
     if (len > kMaxPayloadBytes)
     {
@@ -158,6 +199,14 @@ void BrokerServerV21::ListenerLoop()
         PSECURITY_DESCRIPTOR sd = nullptr;
         bool sa_ok = SecurityV21::CreatePerUserSecurityAttributes(&sa, &sd);
 
+        // The command pipe is privileged. Never fall back to the process
+        // default DACL when the per-user descriptor cannot be constructed.
+        if (!sa_ok)
+        {
+            Sleep(100);
+            continue;
+        }
+
         HANDLE pipe = CreateNamedPipeW(
             pipe_name.c_str(),
             PIPE_ACCESS_DUPLEX,
@@ -166,12 +215,9 @@ void BrokerServerV21::ListenerLoop()
             65536,
             65536,
             0,
-            sa_ok ? &sa : nullptr);
+            &sa);
 
-        if (sa_ok)
-        {
-            SecurityV21::FreeSecurityDescriptor(sd);
-        }
+        SecurityV21::FreeSecurityDescriptor(sd);
 
         if (pipe == INVALID_HANDLE_VALUE)
         {
@@ -190,7 +236,24 @@ void BrokerServerV21::ListenerLoop()
         {
             std::string client_id = "client-" + std::to_string(next_client_id_++);
             std::lock_guard<std::mutex> lock(client_threads_mutex_);
-            client_threads_.emplace_back(&BrokerServerV21::ClientSessionLoop, this, pipe, client_id);
+            for (auto it = client_threads_.begin(); it != client_threads_.end();)
+            {
+                if (it->finished->load())
+                {
+                    if (it->thread.joinable()) it->thread.join();
+                    it = client_threads_.erase(it);
+                }
+                else
+                {
+                    ++it;
+                }
+            }
+            auto finished = std::make_shared<std::atomic_bool>(false);
+            client_pipes_.push_back(pipe);
+            ClientThreadEntry entry;
+            entry.finished = finished;
+            entry.thread = std::thread(&BrokerServerV21::ClientSessionLoop, this, pipe, client_id, finished);
+            client_threads_.push_back(std::move(entry));
         }
         else
         {
@@ -199,16 +262,23 @@ void BrokerServerV21::ListenerLoop()
     }
 }
 
-void BrokerServerV21::ClientSessionLoop(HANDLE pipe, std::string client_id)
+void BrokerServerV21::ClientSessionLoop(
+    HANDLE pipe,
+    std::string client_id,
+    std::shared_ptr<std::atomic_bool> finished)
 {
     // Register client for events through this pipe
-    std::mutex send_mutex;
+    auto send_state = std::make_shared<ClientSendState>();
+    send_state->pipe = pipe;
     EventBusV21::Instance().RegisterClient(
         client_id,
-        [this, pipe, &send_mutex](const BrokerEvent& ev) {
+        [this, send_state](const BrokerEvent& ev) {
             std::string serialized = SerializeEvent(ev);
-            std::lock_guard<std::mutex> lock(send_mutex);
-            SendFrame(pipe, serialized);
+            std::lock_guard<std::mutex> lock(send_state->mutex);
+            if (send_state->active)
+            {
+                SendFrame(send_state->pipe, serialized);
+            }
         });
 
     while (running_.load())
@@ -238,7 +308,7 @@ void BrokerServerV21::ClientSessionLoop(HANDLE pipe, std::string client_id)
 
         std::string resp_str = SerializeResponse(res);
         {
-            std::lock_guard<std::mutex> lock(send_mutex);
+            std::lock_guard<std::mutex> lock(send_state->mutex);
             if (!SendFrame(pipe, resp_str))
             {
                 break;
@@ -246,10 +316,20 @@ void BrokerServerV21::ClientSessionLoop(HANDLE pipe, std::string client_id)
         }
     }
 
+    {
+        std::lock_guard<std::mutex> lock(send_state->mutex);
+        send_state->active = false;
+    }
     EventBusV21::Instance().UnregisterClient(client_id);
     FlushFileBuffers(pipe);
     DisconnectNamedPipe(pipe);
+    {
+        std::lock_guard<std::mutex> lock(client_threads_mutex_);
+        const auto it = std::find(client_pipes_.begin(), client_pipes_.end(), pipe);
+        if (it != client_pipes_.end()) client_pipes_.erase(it);
+    }
     CloseHandle(pipe);
+    finished->store(true);
 }
 
 BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, const BrokerRequest& req)
@@ -358,8 +438,23 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
             res.error_message = "Missing or invalid double 'value'";
             return res;
         }
-        SystemServiceV21::Instance().SetVolume(it->second.AsDouble());
-        res.payload["updated"] = JsonValue(true);
+        const double value = it->second.AsDouble();
+        if (!std::isfinite(value) || value < 0.0 || value > 1.0)
+        {
+            res.ok = false;
+            res.error_code = "out_of_range";
+            res.error_message = "Volume must be a finite value in [0, 1]";
+            return res;
+        }
+        const bool updated = SystemServiceV21::Instance().SetVolume(value);
+        if (!updated)
+        {
+            res.ok = false;
+            res.error_code = "volume_unavailable";
+            res.error_message = "The default audio endpoint is unavailable";
+            return res;
+        }
+        res.payload["updated"] = JsonValue(updated);
         return res;
     }
 
@@ -373,8 +468,23 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
             res.error_message = "Missing or invalid double 'value'";
             return res;
         }
-        SystemServiceV21::Instance().SetBrightness(it->second.AsDouble());
-        res.payload["updated"] = JsonValue(true);
+        const double value = it->second.AsDouble();
+        if (!std::isfinite(value) || value < 0.0 || value > 1.0)
+        {
+            res.ok = false;
+            res.error_code = "out_of_range";
+            res.error_message = "Brightness must be a finite value in [0, 1]";
+            return res;
+        }
+        const bool updated = SystemServiceV21::Instance().SetBrightness(value);
+        if (!updated)
+        {
+            res.ok = false;
+            res.error_code = "brightness_unavailable";
+            res.error_message = "Brightness control is unavailable on this display";
+            return res;
+        }
+        res.payload["updated"] = JsonValue(updated);
         return res;
     }
 

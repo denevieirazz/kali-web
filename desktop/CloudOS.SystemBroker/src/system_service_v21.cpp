@@ -3,10 +3,17 @@
 #include "security_v21.h"
 #include "wsl_service_v21.h"
 
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <Windows.h>
+#include <endpointvolume.h>
+#include <iphlpapi.h>
+#include <mmdeviceapi.h>
+#include <wrl/client.h>
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 
 namespace CloudOS
 {
@@ -29,6 +36,88 @@ uint64_t NowMs()
         std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count());
 }
+
+bool QueryMasterVolume(double* out_volume)
+{
+    if (!out_volume) return false;
+    const HRESULT init_hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const bool uninitialize = SUCCEEDED(init_hr);
+
+    Microsoft::WRL::ComPtr<IMMDeviceEnumerator> enumerator;
+    HRESULT hr = CoCreateInstance(
+        __uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&enumerator));
+    Microsoft::WRL::ComPtr<IMMDevice> device;
+    if (SUCCEEDED(hr)) hr = enumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &device);
+    Microsoft::WRL::ComPtr<IAudioEndpointVolume> endpoint;
+    if (SUCCEEDED(hr)) hr = device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr, &endpoint);
+    float scalar = 0.0F;
+    if (SUCCEEDED(hr)) hr = endpoint->GetMasterVolumeLevelScalar(&scalar);
+
+    if (uninitialize) CoUninitialize();
+    if (FAILED(hr) || !std::isfinite(scalar)) return false;
+    *out_volume = std::clamp(static_cast<double>(scalar), 0.0, 1.0);
+    return true;
+}
+
+bool SetMasterVolume(double value)
+{
+    const HRESULT init_hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const bool uninitialize = SUCCEEDED(init_hr);
+
+    Microsoft::WRL::ComPtr<IMMDeviceEnumerator> enumerator;
+    HRESULT hr = CoCreateInstance(
+        __uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&enumerator));
+    Microsoft::WRL::ComPtr<IMMDevice> device;
+    if (SUCCEEDED(hr)) hr = enumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &device);
+    Microsoft::WRL::ComPtr<IAudioEndpointVolume> endpoint;
+    if (SUCCEEDED(hr)) hr = device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr, &endpoint);
+    if (SUCCEEDED(hr)) hr = endpoint->SetMasterVolumeLevelScalar(static_cast<float>(value), nullptr);
+
+    if (uninitialize) CoUninitialize();
+    return SUCCEEDED(hr);
+}
+
+bool QueryConnectedNetwork(std::string* out_name)
+{
+    if (out_name) out_name->clear();
+    ULONG bytes = 16 * 1024;
+    std::vector<unsigned char> buffer(bytes);
+    auto* addresses = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buffer.data());
+    ULONG result = GetAdaptersAddresses(
+        AF_UNSPEC,
+        GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER,
+        nullptr,
+        addresses,
+        &bytes);
+    if (result == ERROR_BUFFER_OVERFLOW)
+    {
+        buffer.resize(bytes);
+        addresses = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buffer.data());
+        result = GetAdaptersAddresses(
+            AF_UNSPEC,
+            GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER,
+            nullptr,
+            addresses,
+            &bytes);
+    }
+    if (result != NO_ERROR) return false;
+
+    for (auto* adapter = addresses; adapter; adapter = adapter->Next)
+    {
+        if (adapter->OperStatus != IfOperStatusUp ||
+            adapter->IfType == IF_TYPE_SOFTWARE_LOOPBACK ||
+            adapter->IfType == IF_TYPE_TUNNEL)
+        {
+            continue;
+        }
+        if (out_name && adapter->FriendlyName)
+        {
+            *out_name = WideToUtf8(adapter->FriendlyName);
+        }
+        return true;
+    }
+    return false;
+}
 } // namespace
 
 JsonObject SystemSnapshot::ToJsonObject() const
@@ -41,6 +130,7 @@ JsonObject SystemSnapshot::ToJsonObject() const
     obj["batteryPercent"] = JsonValue(battery_percent);
     obj["networkAvailable"] = JsonValue(network_available);
     obj["networkName"] = JsonValue(network_name);
+    obj["volumeAvailable"] = JsonValue(volume_available);
     obj["volume"] = JsonValue(volume);
     obj["brightnessAvailable"] = JsonValue(brightness_available);
     obj["brightness"] = JsonValue(brightness);
@@ -75,7 +165,9 @@ SystemSnapshot SystemServiceV21::GetSnapshot()
 
 bool SystemServiceV21::SetVolume(double value)
 {
-    double clamped = std::clamp(value, 0.0, 1.0);
+    if (!std::isfinite(value) || value < 0.0 || value > 1.0) return false;
+    double clamped = value;
+    if (!SetMasterVolume(clamped)) return false;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         snapshot_.volume = clamped;
@@ -92,19 +184,10 @@ bool SystemServiceV21::SetVolume(double value)
 
 bool SystemServiceV21::SetBrightness(double value)
 {
-    double clamped = std::clamp(value, 0.0, 1.0);
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        snapshot_.brightness = clamped;
-        snapshot_.timestamp_ms = NowMs();
-        generation_++;
-    }
-
-    JsonObject payload;
-    payload["brightness"] = JsonValue(clamped);
-    payload["generation"] = JsonValue(static_cast<int64_t>(generation_.load()));
-    EventBusV21::Instance().Publish("system.brightnessChanged", payload);
-    return true;
+    if (!std::isfinite(value) || value < 0.0 || value > 1.0) return false;
+    // V21 has no verified physical-monitor write backend. Returning false is
+    // safer than claiming a value changed when the hardware did not expose it.
+    return false;
 }
 
 std::vector<std::string> SystemServiceV21::GetCapabilities()
@@ -184,17 +267,18 @@ void SystemServiceV21::Refresh()
     else
     {
         snapshot_.battery_available = false;
-        snapshot_.battery_percent = 100;
+        snapshot_.battery_percent = -1;
     }
 
     // Network
-    snapshot_.network_available = true;
-    snapshot_.network_name = "CloudOS Network • Wi-Fi 6";
+    snapshot_.network_available = QueryConnectedNetwork(&snapshot_.network_name);
 
-    // Audio & Display
-    snapshot_.volume = 0.72;
-    snapshot_.brightness_available = true;
-    snapshot_.brightness = 0.85;
+    // Audio is read from the current default render endpoint. Brightness is
+    // reported unavailable until a supported physical monitor API succeeds;
+    // no placeholder hardware value is emitted.
+    snapshot_.volume_available = QueryMasterVolume(&snapshot_.volume);
+    snapshot_.brightness_available = false;
+    snapshot_.brightness = 0.0;
 
     // WSL status
     snapshot_.distros = WslServiceV21::Instance().GetDistributions();

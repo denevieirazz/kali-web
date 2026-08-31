@@ -25,13 +25,20 @@ class FilesTabState {
   bool sortAscending = true;
   bool isGridView = true;
   Set<String> selectedPaths = <String>{};
+  int loadGeneration = 0;
 
   bool get canGoBack => historyIndex > 0;
   bool get canGoForward => historyIndex < history.length - 1;
+  LocationKind get locationKind =>
+      currentPath.startsWith(r'\\wsl.localhost\') ||
+          currentPath.startsWith(r'\\wsl$\')
+      ? LocationKind.wsl
+      : LocationKind.windows;
 }
 
 class FilesController extends ChangeNotifier {
-  FilesController({CloudOSBridge? bridge}) : _bridge = bridge ?? const CloudOSBridge() {
+  FilesController({CloudOSBridge? bridge})
+    : _bridge = bridge ?? const CloudOSBridge() {
     _init();
   }
 
@@ -49,13 +56,17 @@ class FilesController extends ChangeNotifier {
 
   // Active Job Progress
   String? _activeJobId;
-  String? _activeJobType;
   double _activeJobProgress = 0.0;
   String _activeJobStatus = '';
+  bool _disposed = false;
+  String? _initializationError;
 
   List<FilesTabState> get tabs => List<FilesTabState>.unmodifiable(_tabs);
   int get activeTabIndex => _activeTabIndex;
-  FilesTabState? get activeTab => _tabs.isNotEmpty && _activeTabIndex < _tabs.length ? _tabs[_activeTabIndex] : null;
+  FilesTabState? get activeTab =>
+      _tabs.isNotEmpty && _activeTabIndex < _tabs.length
+      ? _tabs[_activeTabIndex]
+      : null;
 
   List<KnownFolderModel> get knownFolders => _knownFolders;
   List<DriveInfoModel> get drives => _drives;
@@ -64,12 +75,34 @@ class FilesController extends ChangeNotifier {
   bool get hasActiveJob => _activeJobId != null;
   double get activeJobProgress => _activeJobProgress;
   String get activeJobStatus => _activeJobStatus;
+  String? get initializationError => _initializationError;
+
+  @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    for (final tab in _tabs) {
+      tab.loadGeneration++;
+    }
+    super.dispose();
+  }
 
   Future<void> _init() async {
-    _knownFolders = await _bridge.getKnownFolders();
-    _drives = await _bridge.getDrives();
+    try {
+      _knownFolders = await _bridge.getKnownFolders();
+      _drives = await _bridge.getDrives();
+    } catch (error) {
+      _knownFolders = const <KnownFolderModel>[];
+      _drives = const <DriveInfoModel>[];
+      _initializationError = 'System Broker indisponível: $error';
+    }
 
     // Create default tab
+    if (_disposed) return;
     addTab(title: 'Início', initialPath: 'home');
     notifyListeners();
   }
@@ -88,6 +121,7 @@ class FilesController extends ChangeNotifier {
 
   void closeTab(int index) {
     if (_tabs.length <= 1) return; // Keep at least 1 tab
+    _tabs[index].loadGeneration++;
     _tabs.removeAt(index);
     if (_activeTabIndex >= _tabs.length) {
       _activeTabIndex = _tabs.length - 1;
@@ -161,6 +195,7 @@ class FilesController extends ChangeNotifier {
   }
 
   Future<void> loadTabFiles(FilesTabState tab) async {
+    final generation = ++tab.loadGeneration;
     tab.isLoading = true;
     tab.errorMessage = null;
     notifyListeners();
@@ -172,9 +207,13 @@ class FilesController extends ChangeNotifier {
         ascending: tab.sortAscending,
         searchText: tab.searchQuery,
       );
+      if (_disposed || !_tabs.contains(tab) || generation != tab.loadGeneration)
+        return;
       tab.items = items;
       tab.isLoading = false;
     } catch (e) {
+      if (_disposed || !_tabs.contains(tab) || generation != tab.loadGeneration)
+        return;
       tab.isLoading = false;
       tab.errorMessage = 'Não foi possível carregar a pasta: $e';
     }
@@ -263,7 +302,10 @@ class FilesController extends ChangeNotifier {
   Future<bool> deleteSelected({bool permanent = false}) async {
     final tab = activeTab;
     if (tab == null || tab.selectedPaths.isEmpty) return false;
-    final ok = await _bridge.deleteItems(tab.selectedPaths.toList(), permanent: permanent);
+    final ok = await _bridge.deleteItems(
+      tab.selectedPaths.toList(),
+      permanent: permanent,
+    );
     if (ok) {
       tab.selectedPaths.clear();
       await refresh();
@@ -291,14 +333,75 @@ class FilesController extends ChangeNotifier {
     final tab = activeTab;
     if (tab == null || _clipboardPaths.isEmpty) return;
 
-    if (_isCutOperation) {
-      await _bridge.moveItems(_clipboardPaths, tab.currentPath, overwritePolicy: 'replace');
-      _clipboardPaths.clear();
-      _isCutOperation = false;
-    } else {
-      await _bridge.copyItems(_clipboardPaths, tab.currentPath, overwritePolicy: 'replace');
+    final cut = _isCutOperation;
+    try {
+      final jobId = cut
+          ? await _bridge.moveItems(
+              _clipboardPaths,
+              tab.currentPath,
+              overwritePolicy: 'replace',
+            )
+          : await _bridge.copyItems(
+              _clipboardPaths,
+              tab.currentPath,
+              overwritePolicy: 'replace',
+            );
+      if (jobId == null) {
+        throw const CloudOSBridgeException(
+          'job_not_started',
+          'A operação de arquivo não foi iniciada.',
+        );
+      }
+      _activeJobId = jobId;
+      _activeJobProgress = 0;
+      _activeJobStatus = 'queued';
+      notifyListeners();
+
+      await _waitForJob(jobId);
+      if (cut) {
+        _clipboardPaths.clear();
+        _isCutOperation = false;
+      }
+      await refresh();
+    } catch (error) {
+      _activeJobStatus = 'failed: $error';
+      notifyListeners();
+    } finally {
+      _activeJobId = null;
+      notifyListeners();
     }
-    await refresh();
+  }
+
+  Future<void> _waitForJob(String jobId) async {
+    const maxPolls = 600;
+    for (var poll = 0; poll < maxPolls; poll++) {
+      if (_disposed) return;
+      final status = await _bridge.getJobStatus(jobId);
+      _activeJobProgress = ((status['progress'] as num?)?.toDouble() ?? 0)
+          .clamp(0, 100)
+          .toDouble();
+      _activeJobStatus = status['state'] as String? ?? 'unknown';
+      notifyListeners();
+      switch (_activeJobStatus) {
+        case 'completed':
+          return;
+        case 'failed':
+          throw CloudOSBridgeException(
+            'job_failed',
+            status['error'] as String? ?? 'A operação de arquivo falhou.',
+          );
+        case 'cancelled':
+          throw const CloudOSBridgeException(
+            'job_cancelled',
+            'A operação foi cancelada.',
+          );
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    throw const CloudOSBridgeException(
+      'job_timeout',
+      'A operação de arquivo excedeu o tempo limite.',
+    );
   }
 
   Future<void> openItem(CloudFileItem item) async {
@@ -314,6 +417,11 @@ class FilesController extends ChangeNotifier {
   }
 
   Future<bool> launchOpenWith(String path, OpenWithAppModel app) async {
-    return _bridge.launchOpenWith(path, app.appId, app.platform, distro: app.distro);
+    return _bridge.launchOpenWith(
+      path,
+      app.appId,
+      app.platform,
+      distro: app.distro,
+    );
   }
 }

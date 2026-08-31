@@ -10,7 +10,9 @@
 #include "wsl_service_v21.h"
 
 #include <csignal>
+#include <chrono>
 #include <iostream>
+#include <limits>
 
 namespace CloudOS
 {
@@ -161,8 +163,17 @@ int RunSelfTest()
         Assert(!snap.device_name.empty(), "Device name not empty");
         Assert(snap.volume >= 0.0 && snap.volume <= 1.0, "Volume in range [0, 1]");
 
-        Assert(SystemServiceV21::Instance().SetVolume(0.88), "SetVolume succeeds");
-        Assert(SystemServiceV21::Instance().GetSnapshot().volume == 0.88, "Volume updated in snapshot");
+        Assert(!SystemServiceV21::Instance().SetVolume(-1.0), "SetVolume rejects negative values");
+        Assert(!SystemServiceV21::Instance().SetVolume(2.0), "SetVolume rejects values above one");
+        Assert(!SystemServiceV21::Instance().SetVolume(std::numeric_limits<double>::quiet_NaN()), "SetVolume rejects NaN");
+        if (snap.volume_available)
+        {
+            Assert(SystemServiceV21::Instance().SetVolume(snap.volume), "SetVolume accepts current real endpoint value");
+        }
+        else
+        {
+            Assert(!SystemServiceV21::Instance().SetVolume(0.5), "SetVolume reports unavailable endpoint");
+        }
 
         const auto caps = SystemServiceV21::Instance().GetCapabilities();
         Assert(caps.size() >= 10, "Capabilities list populated");
@@ -249,6 +260,29 @@ int RunSelfTest()
         Assert(del_res["ok"].AsBool() == true, "Delete items permanent");
 
         RemoveDirectoryW(test_dir.c_str());
+    }
+
+    // 10. Broker shutdown must interrupt an idle connected client instead of
+    // deadlocking while ClientSessionLoop is blocked in ReadFile.
+    {
+        Assert(BrokerServerV21::Instance().Start(), "Broker starts for shutdown regression");
+        Sleep(150);
+        HANDLE idle_client = CreateFileW(
+            SecurityV21::GetCommandPipeName().c_str(),
+            GENERIC_READ | GENERIC_WRITE,
+            0,
+            nullptr,
+            OPEN_EXISTING,
+            0,
+            nullptr);
+        Assert(idle_client != INVALID_HANDLE_VALUE, "Idle broker client connected");
+        Sleep(100);
+        const auto stop_started = std::chrono::steady_clock::now();
+        BrokerServerV21::Instance().Stop();
+        const auto stop_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - stop_started).count();
+        Assert(stop_ms < 3000, "Broker shutdown with idle client is bounded");
+        if (idle_client != INVALID_HANDLE_VALUE) CloseHandle(idle_client);
     }
 
     std::cout << "[PASS] CloudOS System Broker V22 Self-Test Passed (" << assertions << " assertions verified)." << std::endl;

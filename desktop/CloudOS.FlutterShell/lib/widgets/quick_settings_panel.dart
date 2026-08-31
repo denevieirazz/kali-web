@@ -7,11 +7,15 @@ import 'glass_surface.dart';
 class QuickSettingsPanel extends StatefulWidget {
   const QuickSettingsPanel({
     required this.snapshot,
+    required this.onVolumeChanged,
+    required this.onBrightnessChanged,
     this.onOpenSettings,
     super.key,
   });
 
   final CloudSystemSnapshot snapshot;
+  final Future<bool> Function(double value) onVolumeChanged;
+  final Future<bool> Function(double value) onBrightnessChanged;
   final VoidCallback? onOpenSettings;
 
   @override
@@ -21,12 +25,36 @@ class QuickSettingsPanel extends StatefulWidget {
 class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
   late double volume = widget.snapshot.volume;
   late double brightness = widget.snapshot.brightness;
-  bool wifi = true;
-  bool bluetooth = true;
-  bool nightLight = false;
-  bool focus = false;
-  bool powerSaver = false;
-  bool wslgDisplay = true;
+
+  Future<void> _setVolume(double value) async {
+    final previous = volume;
+    setState(() => volume = value);
+    final updated = await widget.onVolumeChanged(value);
+    if (!mounted) return;
+    if (!updated) {
+      setState(() => volume = previous);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('O controle de volume não está disponível.'),
+        ),
+      );
+    }
+  }
+
+  Future<void> _setBrightness(double value) async {
+    final previous = brightness;
+    setState(() => brightness = value);
+    final updated = await widget.onBrightnessChanged(value);
+    if (!mounted) return;
+    if (!updated) {
+      setState(() => brightness = previous);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('O monitor não expõe controle de brilho compatível.'),
+        ),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -68,7 +96,11 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                         borderRadius: BorderRadius.circular(6),
                         child: const Padding(
                           padding: EdgeInsets.all(4),
-                          child: Icon(Icons.settings_rounded, size: 18, color: CloudOSColors.secondary),
+                          child: Icon(
+                            Icons.settings_rounded,
+                            size: 18,
+                            color: CloudOSColors.secondary,
+                          ),
                         ),
                       ),
                     ),
@@ -84,32 +116,30 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                   crossAxisSpacing: 8,
                   children: <Widget>[
                     _ToggleTile(
-                      label: 'Wi‑Fi 6',
-                      subtitle: wifi ? widget.snapshot.networkName : 'Desativado',
+                      label: 'Rede',
+                      subtitle: widget.snapshot.networkAvailable
+                          ? widget.snapshot.networkName
+                          : 'Indisponível',
                       icon: Icons.wifi_rounded,
-                      active: wifi,
-                      onTap: () => setState(() => wifi = !wifi),
+                      active: widget.snapshot.networkAvailable,
                     ),
-                    _ToggleTile(
+                    const _ToggleTile(
                       label: 'Bluetooth',
-                      subtitle: bluetooth ? 'Conectado' : 'Desativado',
+                      subtitle: 'Somente no painel do Windows',
                       icon: Icons.bluetooth_rounded,
-                      active: bluetooth,
-                      onTap: () => setState(() => bluetooth = !bluetooth),
+                      active: false,
                     ),
-                    _ToggleTile(
+                    const _ToggleTile(
                       label: 'Luz Noturna',
-                      subtitle: nightLight ? 'Ativada (Quente)' : 'Desativada',
+                      subtitle: 'Somente no painel do Windows',
                       icon: Icons.nightlight_round,
-                      active: nightLight,
-                      onTap: () => setState(() => nightLight = !nightLight),
+                      active: false,
                     ),
-                    _ToggleTile(
+                    const _ToggleTile(
                       label: 'Modo Foco',
-                      subtitle: focus ? 'Silencioso' : 'Desligado',
+                      subtitle: 'Somente no painel do Windows',
                       icon: Icons.do_not_disturb_on_rounded,
-                      active: focus,
-                      onTap: () => setState(() => focus = !focus),
+                      active: false,
                     ),
                   ],
                 ),
@@ -118,24 +148,29 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                   icon: volume == 0
                       ? Icons.volume_off_rounded
                       : volume < 0.5
-                          ? Icons.volume_down_rounded
-                          : Icons.volume_up_rounded,
+                      ? Icons.volume_down_rounded
+                      : Icons.volume_up_rounded,
                   percentage: '$volPct%',
                   value: volume,
-                  onChanged: (val) => setState(() => volume = val),
+                  enabled: widget.snapshot.volumeAvailable,
+                  onChanged: _setVolume,
                 ),
                 const SizedBox(height: 8),
                 _SliderRow(
                   icon: Icons.brightness_6_rounded,
                   percentage: '$briPct%',
                   value: brightness,
-                  onChanged: (val) => setState(() => brightness = val),
+                  enabled: widget.snapshot.brightnessAvailable,
+                  onChanged: _setBrightness,
                 ),
                 const SizedBox(height: 12),
                 const Divider(height: 1),
                 const SizedBox(height: 12),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: CloudOSColors.elevated.withValues(alpha: 0.4),
                     borderRadius: BorderRadius.circular(10),
@@ -143,14 +178,24 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                   ),
                   child: Row(
                     children: <Widget>[
-                      const Icon(Icons.battery_charging_full_rounded, color: CloudOSColors.success, size: 20),
+                      Icon(
+                        widget.snapshot.batteryAvailable
+                            ? Icons.battery_charging_full_rounded
+                            : Icons.power_rounded,
+                        color: widget.snapshot.batteryAvailable
+                            ? CloudOSColors.success
+                            : CloudOSColors.textSecondary,
+                        size: 20,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: <Widget>[
                             Text(
-                              '${widget.snapshot.batteryPercent}% • Carregando',
+                              widget.snapshot.batteryAvailable
+                                  ? '${widget.snapshot.batteryPercent}%'
+                                  : 'Bateria não detectada',
                               style: const TextStyle(
                                 color: CloudOSColors.text,
                                 fontSize: 11.5,
@@ -161,22 +206,33 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                               widget.snapshot.wslAvailable
                                   ? 'WSL2: ${widget.snapshot.distros.join(', ')}'
                                   : 'Windows Desktop Standalone',
-                              style: const TextStyle(color: CloudOSColors.caption, fontSize: 10),
+                              style: const TextStyle(
+                                color: CloudOSColors.caption,
+                                fontSize: 10,
+                              ),
                             ),
                           ],
                         ),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: CloudOSColors.linuxSoft,
-                          borderRadius: BorderRadius.circular(6),
+                      if (widget.snapshot.wslAvailable)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: CloudOSColors.linuxSoft,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text(
+                            'WSL disponível',
+                            style: TextStyle(
+                              color: CloudOSColors.linux,
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                         ),
-                        child: const Text(
-                          'WSLg Ativo',
-                          style: TextStyle(color: CloudOSColors.linux, fontSize: 9.5, fontWeight: FontWeight.w700),
-                        ),
-                      ),
                     ],
                   ),
                 ),
@@ -195,64 +251,63 @@ class _ToggleTile extends StatelessWidget {
     required this.subtitle,
     required this.icon,
     required this.active,
-    required this.onTap,
   });
 
   final String label;
   final String subtitle;
   final IconData icon;
   final bool active;
-  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-        decoration: BoxDecoration(
-          color: active ? CloudOSColors.accentSoft : CloudOSColors.elevated.withValues(alpha: 0.4),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: active ? CloudOSColors.accent : CloudOSColors.border,
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 160),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: active
+            ? CloudOSColors.accentSoft
+            : CloudOSColors.elevated.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: active ? CloudOSColors.accent : CloudOSColors.border,
+        ),
+      ),
+      child: Row(
+        children: <Widget>[
+          Icon(
+            icon,
+            color: active ? CloudOSColors.accent : CloudOSColors.secondary,
+            size: 18,
           ),
-        ),
-        child: Row(
-          children: <Widget>[
-            Icon(
-              icon,
-              color: active ? CloudOSColors.accent : CloudOSColors.secondary,
-              size: 18,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: CloudOSColors.text,
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                    ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: CloudOSColors.text,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
                   ),
-                  Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: CloudOSColors.caption, fontSize: 9.5),
+                ),
+                Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: CloudOSColors.caption,
+                    fontSize: 9.5,
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -264,12 +319,14 @@ class _SliderRow extends StatelessWidget {
     required this.percentage,
     required this.value,
     required this.onChanged,
+    this.enabled = true,
   });
 
   final IconData icon;
   final String percentage;
   final double value;
   final ValueChanged<double> onChanged;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
@@ -289,7 +346,7 @@ class _SliderRow extends StatelessWidget {
             ),
             child: Slider(
               value: value.clamp(0.0, 1.0).toDouble(),
-              onChanged: onChanged,
+              onChanged: enabled ? onChanged : null,
             ),
           ),
         ),

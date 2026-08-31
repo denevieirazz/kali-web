@@ -383,6 +383,8 @@ std::string SerializeEvent(const BrokerEvent& ev)
 
 bool ParseRequest(const std::string& json_str, BrokerRequest& req, std::string& err)
 {
+    constexpr size_t kMaxRequestIdLength = 256;
+    constexpr size_t kMaxMethodLength = 128;
     JsonValue root;
     if (!ParseJson(json_str, root) || !root.IsObject())
     {
@@ -403,13 +405,15 @@ bool ParseRequest(const std::string& json_str, BrokerRequest& req, std::string& 
         return false;
     }
     auto it_id = obj.find("id");
-    if (it_id == obj.end() || !it_id->second.IsString() || it_id->second.AsString().empty())
+    if (it_id == obj.end() || !it_id->second.IsString() || it_id->second.AsString().empty() ||
+        it_id->second.AsString().size() > kMaxRequestIdLength)
     {
         err = "Missing or invalid request 'id'";
         return false;
     }
     auto it_method = obj.find("method");
-    if (it_method == obj.end() || !it_method->second.IsString() || it_method->second.AsString().empty())
+    if (it_method == obj.end() || !it_method->second.IsString() || it_method->second.AsString().empty() ||
+        it_method->second.AsString().size() > kMaxMethodLength)
     {
         err = "Missing or invalid 'method'";
         return false;
@@ -420,13 +424,18 @@ bool ParseRequest(const std::string& json_str, BrokerRequest& req, std::string& 
     req.method = it_method->second.AsString();
 
     auto it_payload = obj.find("payload");
-    if (it_payload != obj.end() && it_payload->second.IsObject())
+    if (it_payload == obj.end())
+    {
+        req.payload.clear();
+    }
+    else if (it_payload->second.IsObject())
     {
         req.payload = it_payload->second.AsObject();
     }
     else
     {
-        req.payload.clear();
+        err = "Invalid request 'payload'; expected an object";
+        return false;
     }
     return true;
 }

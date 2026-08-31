@@ -167,6 +167,11 @@ bool CloudOSBrokerClientV21::TryConnectPipe()
 
 void CloudOSBrokerClientV21::SpawnBrokerIfNeeded()
 {
+    const uint64_t now = GetTickCount64();
+    const uint64_t previous = last_spawn_attempt_ms_.load();
+    if (previous != 0 && now - previous < 5000) return;
+    last_spawn_attempt_ms_.store(now);
+
     WCHAR exe_path[MAX_PATH];
     if (GetModuleFileNameW(nullptr, exe_path, MAX_PATH) == 0) return;
 
@@ -212,18 +217,27 @@ void CloudOSBrokerClientV21::SpawnBrokerIfNeeded()
 bool CloudOSBrokerClientV21::SendFrame(const std::string& payload)
 {
     if (pipe_ == INVALID_HANDLE_VALUE) return false;
+    if (payload.size() > kMaxPayloadBytes) return false;
     uint32_t len = static_cast<uint32_t>(payload.size());
     DWORD written = 0;
-    if (!WriteFile(pipe_, &len, sizeof(len), &written, nullptr) || written != sizeof(len))
+    DWORD header_written = 0;
+    const auto* header = reinterpret_cast<const unsigned char*>(&len);
+    while (header_written < sizeof(len))
     {
-        return false;
-    }
-    if (len > 0)
-    {
-        if (!WriteFile(pipe_, payload.data(), len, &written, nullptr) || written != len)
+        if (!WriteFile(pipe_, header + header_written, sizeof(len) - header_written, &written, nullptr) || written == 0)
         {
             return false;
         }
+        header_written += written;
+    }
+    DWORD total_written = 0;
+    while (total_written < len)
+    {
+        if (!WriteFile(pipe_, payload.data() + total_written, len - total_written, &written, nullptr) || written == 0)
+        {
+            return false;
+        }
+        total_written += written;
     }
     return true;
 }
@@ -233,9 +247,15 @@ bool CloudOSBrokerClientV21::ReadFrame(std::string& payload)
     if (pipe_ == INVALID_HANDLE_VALUE) return false;
     uint32_t len = 0;
     DWORD read_bytes = 0;
-    if (!ReadFile(pipe_, &len, sizeof(len), &read_bytes, nullptr) || read_bytes != sizeof(len))
+    DWORD header_bytes = 0;
+    auto* header = reinterpret_cast<unsigned char*>(&len);
+    while (header_bytes < sizeof(len))
     {
-        return false;
+        if (!ReadFile(pipe_, header + header_bytes, sizeof(len) - header_bytes, &read_bytes, nullptr) || read_bytes == 0)
+        {
+            return false;
+        }
+        header_bytes += read_bytes;
     }
     if (len > kMaxPayloadBytes) return false;
     payload.resize(len);
@@ -284,30 +304,10 @@ bool CloudOSBrokerClientV21::GetApps(std::vector<BrokerClientAppItem>& out_apps)
 
     if (resp.find("\"ok\":true") == std::string::npos) return false;
 
-    // Fill standard apps
     out_apps.clear();
-    out_apps.push_back({"cloudos:files", "Arquivos", "cloudos", "Windows + Linux (WSL2)", "", "Sistema", "CloudOS", true, false, false, "files", true, false});
-    out_apps.push_back({"cloudos:browser", "Navegador Web", "cloudos", "Chromium / Web Browser", "", "Produtividade", "CloudOS", true, false, false, "browser", true, true});
-    out_apps.push_back({"cloudos:terminal", "Terminal", "cloudos", "Prompt de Comando / Shell", "", "Utilitários", "CloudOS", true, false, false, "terminal", true, true});
-    out_apps.push_back({"cloudos:calculator", "Calculadora", "cloudos", "Calculadora de Sistema", "", "Utilitários", "CloudOS", true, false, false, "calculator", false, false});
-    out_apps.push_back({"cloudos:settings", "Configurações", "cloudos", "Painel de Controle e Ajustes", "", "Sistema", "CloudOS", true, false, false, "settings", false, false});
-    out_apps.push_back({"cloudos:drive", "CloudOS Drive", "cloudos", "Workspace & Projetos", "", "Produtividade", "CloudOS", true, false, false, "drive", false, false});
-    out_apps.push_back({"cloudos:trash", "Lixeira", "cloudos", "Itens e Pastas Deletados", "", "Sistema", "CloudOS", true, false, false, "trash", false, false});
-
-    out_apps.push_back({"windows:vscode", "Visual Studio Code", "windows", "Code Editor & IDE", "", "Produtividade", "Windows", true, true, false, "vscode", true, true});
-    out_apps.push_back({"windows:notepad", "Bloco de Notas", "windows", "Editor de Texto", "", "Produtividade", "Windows", true, false, false, "notepad", true, false});
-    out_apps.push_back({"windows:powershell", "PowerShell 7", "windows", "Windows Terminal & Shell", "", "Utilitários", "Windows", true, true, false, "powershell", true, true});
-    out_apps.push_back({"windows:taskmgr", "Gerenciador de Tarefas", "windows", "Monitor de Recursos do Sistema", "", "Sistema", "Windows", true, false, false, "taskmgr", false, false});
-    out_apps.push_back({"windows:cmd", "Prompt de Comando", "windows", "cmd.exe", "", "Utilitários", "Windows", true, false, false, "cmd", false, false});
-    out_apps.push_back({"windows:explorer", "Windows Explorer", "windows", "Explorador de Arquivos do Windows", "", "Sistema", "Windows", true, false, false, "explorer", false, false});
-
-    out_apps.push_back({"wsl:ubuntu-terminal", "Ubuntu Terminal", "linux", "Linux Bash Shell (Ubuntu)", "Ubuntu", "Linux / WSL", "Ubuntu (WSL)", true, false, false, "terminal", true, true});
-    out_apps.push_back({"wsl:gimp", "GIMP Image Editor", "linux", "GNU Image Manipulation Program (WSLg)", "Ubuntu", "Produtividade", "Ubuntu (WSL)", true, true, false, "gimp", true, false});
-    out_apps.push_back({"wsl:wireshark", "Wireshark", "linux", "Network Protocol Analyzer (WSLg)", "Ubuntu", "Utilitários", "Ubuntu (WSL)", true, true, false, "wireshark", false, false});
-    out_apps.push_back({"wsl:zenmap", "Zenmap", "linux", "Security Scanner GUI (WSLg)", "Ubuntu", "Utilitários", "Ubuntu (WSL)", true, true, false, "zenmap", false, false});
-    out_apps.push_back({"wsl:xterm", "XTerm", "linux", "X11 Terminal Emulator (WSLg)", "Ubuntu", "Linux / WSL", "Ubuntu (WSL)", true, true, false, "terminal", false, false});
-
-    return true;
+    // The typed UI path consumes apps.list through InvokeBrokerRpc so the JSON
+    // remains broker-authoritative. This legacy adapter never fabricates apps.
+    return false;
 }
 
 bool CloudOSBrokerClientV21::LaunchApp(const std::string& app_id, std::string& err)
@@ -355,37 +355,8 @@ bool CloudOSBrokerClientV21::GetSystemSnapshot(BrokerClientSnapshot& out_snapsho
 
     if (resp.find("\"ok\":true") == std::string::npos) return false;
 
-    out_snapshot.device_name = "CloudOS Desktop";
-    WCHAR computer_name[MAX_COMPUTERNAME_LENGTH + 1];
-    DWORD size = ARRAYSIZE(computer_name);
-    if (GetComputerNameW(computer_name, &size))
-    {
-        int needed = WideCharToMultiByte(CP_UTF8, 0, computer_name, -1, nullptr, 0, nullptr, nullptr);
-        if (needed > 0)
-        {
-            std::string s(needed - 1, 0);
-            WideCharToMultiByte(CP_UTF8, 0, computer_name, -1, s.data(), needed, nullptr, nullptr);
-            out_snapshot.device_name = s;
-        }
-    }
-
-    out_snapshot.user_name = "User";
-    out_snapshot.session_id = GetCurrentSessionId();
-    out_snapshot.battery_available = true;
-    out_snapshot.battery_percent = 100;
-    out_snapshot.network_available = true;
-    out_snapshot.network_name = "CloudOS Network • Wi-Fi 6";
-    out_snapshot.volume = 0.72;
-    out_snapshot.brightness_available = true;
-    out_snapshot.brightness = 0.85;
-    out_snapshot.wsl_available = true;
-    out_snapshot.distros = {"Ubuntu"};
-    out_snapshot.current_workspace = 1;
-    out_snapshot.timestamp_ms = static_cast<uint64_t>(
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count());
-
-    return true;
+    out_snapshot = {};
+    return false;
 }
 
 bool CloudOSBrokerClientV21::SetVolume(double value)
@@ -393,10 +364,9 @@ bool CloudOSBrokerClientV21::SetVolume(double value)
     if (!EnsureConnected()) return false;
     std::string req = "{\"protocol\":21,\"type\":\"request\",\"id\":\"set-vol\",\"method\":\"system.volume.set\",\"payload\":{\"value\":" + std::to_string(value) + "}}";
     std::lock_guard<std::mutex> lock(mutex_);
-    SendFrame(req);
+    if (!SendFrame(req)) return false;
     std::string resp;
-    ReadFrame(resp);
-    return true;
+    return ReadFrame(resp) && resp.find("\"ok\":true") != std::string::npos;
 }
 
 bool CloudOSBrokerClientV21::SetBrightness(double value)
@@ -404,10 +374,9 @@ bool CloudOSBrokerClientV21::SetBrightness(double value)
     if (!EnsureConnected()) return false;
     std::string req = "{\"protocol\":21,\"type\":\"request\",\"id\":\"set-bri\",\"method\":\"system.brightness.set\",\"payload\":{\"value\":" + std::to_string(value) + "}}";
     std::lock_guard<std::mutex> lock(mutex_);
-    SendFrame(req);
+    if (!SendFrame(req)) return false;
     std::string resp;
-    ReadFrame(resp);
-    return true;
+    return ReadFrame(resp) && resp.find("\"ok\":true") != std::string::npos;
 }
 
 bool CloudOSBrokerClientV21::GetCapabilities(std::vector<std::string>& out_caps)

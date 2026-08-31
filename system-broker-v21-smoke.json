@@ -1,0 +1,25 @@
+{
+  "schema": 21,
+  "verdict": "pass",
+  "protocol_version": 21,
+  "broker_started": true,
+  "handshake": true,
+  "per_user_pipe_acl": true,
+  "apps_list": true,
+  "apps_count": 18,
+  "system_snapshot": true,
+  "device_name": "DESKTOP-65BUITP",
+  "wsl_available": true,
+  "distros": [
+    "Ubuntu"
+  ],
+  "typed_launch_contract": true,
+  "arbitrary_command_api": false,
+  "event_bus": true,
+  "job_manager": true,
+  "reconnect_contract": true,
+  "winlogon_modified": false,
+  "explorer_terminated": false,
+  "package_mutation": false,
+  "broker_exe_sha256": "285A90D1FB0689DF1C2B2BA34F0E26C8351D488865A7BF288B6A5D21CB08426C"
+}

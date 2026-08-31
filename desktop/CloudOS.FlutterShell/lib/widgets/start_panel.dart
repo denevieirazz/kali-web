@@ -25,7 +25,13 @@ class _StartPanelState extends State<StartPanel> {
   String query = '';
   String selectedFilter = 'Todos';
 
-  static const filters = <String>['Todos', 'Produtividade', 'Linux / WSL', 'Sistema', 'Utilitários'];
+  static const filters = <String>[
+    'Todos',
+    'Produtividade',
+    'Linux / WSL',
+    'Sistema',
+    'Utilitários',
+  ];
 
   @override
   void dispose() {
@@ -36,22 +42,31 @@ class _StartPanelState extends State<StartPanel> {
   @override
   Widget build(BuildContext context) {
     final normalized = query.trim().toLowerCase();
-    final filtered = widget.apps.where((app) {
-      final matchesQuery = normalized.isEmpty ||
-          app.name.toLowerCase().contains(normalized) ||
-          (app.subtitle?.toLowerCase().contains(normalized) ?? false) ||
-          (app.distro?.toLowerCase().contains(normalized) ?? false) ||
-          app.category.toLowerCase().contains(normalized);
+    final filtered = widget.apps
+        .where((app) {
+          final matchesQuery =
+              normalized.isEmpty ||
+              app.name.toLowerCase().contains(normalized) ||
+              (app.subtitle?.toLowerCase().contains(normalized) ?? false) ||
+              (app.distro?.toLowerCase().contains(normalized) ?? false) ||
+              app.category.toLowerCase().contains(normalized);
 
-      if (!matchesQuery) return false;
+          if (!matchesQuery) return false;
 
-      if (selectedFilter == 'Todos') return true;
-      if (selectedFilter == 'Linux / WSL') return app.platform == CloudAppPlatform.linux;
-      return app.category == selectedFilter;
-    }).toList(growable: false);
+          if (selectedFilter == 'Todos') return true;
+          if (selectedFilter == 'Linux / WSL')
+            return app.platform == CloudAppPlatform.linux;
+          return app.category == selectedFilter;
+        })
+        .toList(growable: false);
 
-    final pinnedApps = filtered.where((a) => a.isPinned).toList(growable: false);
-    final recentApps = widget.apps.where((a) => a.isRecent).take(4).toList(growable: false);
+    final pinnedApps = filtered
+        .where((a) => a.isPinned)
+        .toList(growable: false);
+    final recentApps = widget.apps
+        .where((a) => a.isRecent)
+        .take(4)
+        .toList(growable: false);
 
     return Align(
       alignment: Alignment.bottomLeft,
@@ -78,7 +93,11 @@ class _StartPanelState extends State<StartPanel> {
                         color: CloudOSColors.accentSoft,
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Icon(Icons.cloud_rounded, color: CloudOSColors.accent, size: 20),
+                      child: const Icon(
+                        Icons.cloud_rounded,
+                        color: CloudOSColors.accent,
+                        size: 20,
+                      ),
                     ),
                     const SizedBox(width: 10),
                     const Expanded(
@@ -96,7 +115,10 @@ class _StartPanelState extends State<StartPanel> {
                           ),
                           Text(
                             'Ambiente unificado Windows + Linux',
-                            style: TextStyle(color: CloudOSColors.caption, fontSize: 11),
+                            style: TextStyle(
+                              color: CloudOSColors.caption,
+                              fontSize: 11,
+                            ),
                           ),
                         ],
                       ),
@@ -117,7 +139,11 @@ class _StartPanelState extends State<StartPanel> {
                   autofocus: true,
                   onChanged: (value) => setState(() => query = value),
                   decoration: InputDecoration(
-                    prefixIcon: const Icon(Icons.search_rounded, size: 20, color: CloudOSColors.secondary),
+                    prefixIcon: const Icon(
+                      Icons.search_rounded,
+                      size: 20,
+                      color: CloudOSColors.secondary,
+                    ),
                     suffixIcon: query.isNotEmpty
                         ? IconButton(
                             icon: const Icon(Icons.clear_rounded, size: 16),
@@ -146,20 +172,31 @@ class _StartPanelState extends State<StartPanel> {
                         borderRadius: BorderRadius.circular(14),
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 140),
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
                           decoration: BoxDecoration(
-                            color: isSelected ? CloudOSColors.accentSoft : CloudOSColors.elevated.withValues(alpha: 0.5),
+                            color: isSelected
+                                ? CloudOSColors.accentSoft
+                                : CloudOSColors.elevated.withValues(alpha: 0.5),
                             borderRadius: BorderRadius.circular(14),
                             border: Border.all(
-                              color: isSelected ? CloudOSColors.accent : CloudOSColors.border,
+                              color: isSelected
+                                  ? CloudOSColors.accent
+                                  : CloudOSColors.border,
                             ),
                           ),
                           child: Text(
                             f,
                             style: TextStyle(
-                              color: isSelected ? CloudOSColors.text : CloudOSColors.secondary,
+                              color: isSelected
+                                  ? CloudOSColors.text
+                                  : CloudOSColors.secondary,
                               fontSize: 11,
-                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                              fontWeight: isSelected
+                                  ? FontWeight.w600
+                                  : FontWeight.w500,
                             ),
                           ),
                         ),
@@ -181,63 +218,79 @@ class _StartPanelState extends State<StartPanel> {
                                 children: <Widget>[
                                   Text(
                                     'Aplicativos Fixados',
-                                    style: Theme.of(context).textTheme.titleSmall,
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.titleSmall,
                                   ),
                                   const Spacer(),
                                   Text(
                                     '${pinnedApps.length} itens',
-                                    style: Theme.of(context).textTheme.bodySmall,
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodySmall,
                                   ),
                                 ],
                               ),
                             ),
-                            const SliverToBoxAdapter(child: SizedBox(height: 8)),
-                            SliverGrid(
-                              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: 3,
-                                mainAxisExtent: 68,
-                                crossAxisSpacing: 8,
-                                mainAxisSpacing: 8,
-                              ),
-                              delegate: SliverChildBuilderDelegate(
-                                (context, index) {
-                                  final app = pinnedApps[index];
-                                  return _AppCard(
-                                    app: app,
-                                    onTap: () => widget.onLaunch(app),
-                                  );
-                                },
-                                childCount: pinnedApps.length,
-                              ),
+                            const SliverToBoxAdapter(
+                              child: SizedBox(height: 8),
                             ),
-                            const SliverToBoxAdapter(child: SizedBox(height: 14)),
+                            SliverGrid(
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                    crossAxisCount: 3,
+                                    mainAxisExtent: 68,
+                                    crossAxisSpacing: 8,
+                                    mainAxisSpacing: 8,
+                                  ),
+                              delegate: SliverChildBuilderDelegate((
+                                context,
+                                index,
+                              ) {
+                                final app = pinnedApps[index];
+                                return _AppCard(
+                                  app: app,
+                                  onTap: () => widget.onLaunch(app),
+                                );
+                              }, childCount: pinnedApps.length),
+                            ),
+                            const SliverToBoxAdapter(
+                              child: SizedBox(height: 14),
+                            ),
                             SliverToBoxAdapter(
                               child: Row(
                                 children: <Widget>[
                                   Text(
                                     'Atividades Recentes',
-                                    style: Theme.of(context).textTheme.titleSmall,
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.titleSmall,
                                   ),
                                   const Spacer(),
                                   const Text(
                                     'Sessão ativa',
-                                    style: TextStyle(color: CloudOSColors.caption, fontSize: 11),
+                                    style: TextStyle(
+                                      color: CloudOSColors.caption,
+                                      fontSize: 11,
+                                    ),
                                   ),
                                 ],
                               ),
                             ),
-                            const SliverToBoxAdapter(child: SizedBox(height: 6)),
+                            const SliverToBoxAdapter(
+                              child: SizedBox(height: 6),
+                            ),
                             SliverList(
-                              delegate: SliverChildBuilderDelegate(
-                                (context, index) {
-                                  final app = recentApps[index];
-                                  return _RecentTile(
-                                    app: app,
-                                    onTap: () => widget.onLaunch(app),
-                                  );
-                                },
-                                childCount: recentApps.length,
-                              ),
+                              delegate: SliverChildBuilderDelegate((
+                                context,
+                                index,
+                              ) {
+                                final app = recentApps[index];
+                                return _RecentTile(
+                                  app: app,
+                                  onTap: () => widget.onLaunch(app),
+                                );
+                              }, childCount: recentApps.length),
                             ),
                           ],
                         ),
@@ -253,9 +306,15 @@ class _StartPanelState extends State<StartPanel> {
                       decoration: BoxDecoration(
                         color: CloudOSColors.accentSoft,
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: CloudOSColors.accent.withValues(alpha: 0.4)),
+                        border: Border.all(
+                          color: CloudOSColors.accent.withValues(alpha: 0.4),
+                        ),
                       ),
-                      child: const Icon(Icons.person_rounded, size: 18, color: CloudOSColors.accent),
+                      child: const Icon(
+                        Icons.person_rounded,
+                        size: 18,
+                        color: CloudOSColors.accent,
+                      ),
                     ),
                     const SizedBox(width: 8),
                     const Column(
@@ -271,7 +330,10 @@ class _StartPanelState extends State<StartPanel> {
                         ),
                         Text(
                           'Administrador • Sessão Ativa',
-                          style: TextStyle(color: CloudOSColors.caption, fontSize: 10),
+                          style: TextStyle(
+                            color: CloudOSColors.caption,
+                            fontSize: 10,
+                          ),
                         ),
                       ],
                     ),
@@ -305,16 +367,16 @@ class _AppCard extends StatelessWidget {
   final VoidCallback onTap;
 
   Color get platformColor => switch (app.platform) {
-        CloudAppPlatform.windows => CloudOSColors.windows,
-        CloudAppPlatform.linux => CloudOSColors.linux,
-        CloudAppPlatform.cloudos => CloudOSColors.accent,
-      };
+    CloudAppPlatform.windows => CloudOSColors.windows,
+    CloudAppPlatform.linux => CloudOSColors.linux,
+    CloudAppPlatform.cloudos => CloudOSColors.accent,
+  };
 
   String get platformLabel => switch (app.platform) {
-        CloudAppPlatform.windows => 'Win',
-        CloudAppPlatform.linux => 'WSL',
-        CloudAppPlatform.cloudos => 'Cloud',
-      };
+    CloudAppPlatform.windows => 'Win',
+    CloudAppPlatform.linux => 'WSL',
+    CloudAppPlatform.cloudos => 'Cloud',
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -359,7 +421,10 @@ class _AppCard extends StatelessWidget {
                   Row(
                     children: <Widget>[
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 1,
+                        ),
                         decoration: BoxDecoration(
                           color: platformColor.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(4),
@@ -379,7 +444,10 @@ class _AppCard extends StatelessWidget {
                           app.subtitle ?? app.category,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: CloudOSColors.caption, fontSize: 10),
+                          style: const TextStyle(
+                            color: CloudOSColors.caption,
+                            fontSize: 10,
+                          ),
                         ),
                       ),
                     ],
@@ -420,12 +488,18 @@ class _RecentTile extends StatelessWidget {
               Expanded(
                 child: Text(
                   app.name,
-                  style: const TextStyle(color: CloudOSColors.text, fontSize: 12),
+                  style: const TextStyle(
+                    color: CloudOSColors.text,
+                    fontSize: 12,
+                  ),
                 ),
               ),
               Text(
                 app.subtitle ?? 'Recente',
-                style: const TextStyle(color: CloudOSColors.caption, fontSize: 10.5),
+                style: const TextStyle(
+                  color: CloudOSColors.caption,
+                  fontSize: 10.5,
+                ),
               ),
             ],
           ),
@@ -448,7 +522,11 @@ class _SearchResultsList extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Icon(Icons.search_off_rounded, size: 40, color: CloudOSColors.caption),
+            Icon(
+              Icons.search_off_rounded,
+              size: 40,
+              color: CloudOSColors.caption,
+            ),
             SizedBox(height: 8),
             Text(
               'Nenhum resultado encontrado',

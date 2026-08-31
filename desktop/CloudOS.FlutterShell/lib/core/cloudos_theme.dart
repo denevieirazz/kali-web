@@ -11,9 +11,13 @@ abstract final class CloudOSColors {
   static const active = Color(0x385DA9FF);
   static const border = Color(0x2E728DA6);
   static const borderStrong = Color(0x528CA8C4);
+  static const borderSubtle = border;
   static const text = Color(0xFFF0F4F8);
   static const secondary = Color(0xFFAEC0D2);
   static const caption = Color(0xFF768A9E);
+  static const textPrimary = text;
+  static const textSecondary = secondary;
+  static const textTertiary = caption;
   static const accent = Color(0xFF4C9AFF);
   static const accentSoft = Color(0x294C9AFF);
   static const linux = Color(0xFFE9963F);
@@ -127,10 +131,18 @@ ThemeData buildCloudOSTheme() {
         border: Border.all(color: CloudOSColors.borderStrong),
         borderRadius: BorderRadius.circular(6),
         boxShadow: const <BoxShadow>[
-          BoxShadow(color: Color(0x40000000), blurRadius: 10, offset: Offset(0, 4)),
+          BoxShadow(
+            color: Color(0x40000000),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
         ],
       ),
-      textStyle: const TextStyle(color: CloudOSColors.text, fontSize: 11.5, fontWeight: FontWeight.w500),
+      textStyle: const TextStyle(
+        color: CloudOSColors.text,
+        fontSize: 11.5,
+        fontWeight: FontWeight.w500,
+      ),
       waitDuration: const Duration(milliseconds: 350),
     ),
   );
