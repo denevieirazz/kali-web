@@ -113,6 +113,7 @@ O V14 **não é ativado automaticamente** por instalação/update. Testes hosped
 | deploy/update/rollback | `CloudOS.Deployment.V13.psm1` |
 | ativação Explorer/CloudOS | `CloudOS.ShellActivation.V14.psm1` |
 | Flutter Shell & Native Bridge V20 | `desktop/CloudOS.FlutterShell/`, `desktop/CloudOS.FlutterShell/native_bridge/` |
+| System Broker & Event Bus V21 | `desktop/CloudOS.SystemBroker/`, `desktop/CloudOS.BrokerProbe/`, `desktop/CloudOS.FlutterShell/native_bridge/cloudos_broker_client_v21.*` |
 | release/package | `write-native-build-manifest.ps1`, `verify-native-build-manifest.ps1`, `package-cloudos-native.ps1` |
 
 Veja o mapa completo em `docs/native/CODEMAP.md`.

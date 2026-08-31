@@ -273,8 +273,30 @@ NativeIntegrationV16 / NativeStartIndex / Win32 Core
 - Chamadas a `wsl.exe`, `powershell.exe`, Registry e Win32 APIs ocorrem exclusivamente no C++.
 - Dart envia apenas identificadores tipados (`id`), e o C++ resolve o target com segurança.
 
-## 16. Leitura recomendada
+## 16. Camada de Sistema: CloudOS System Broker & Event Bus (V21)
 
+Na V21, o CloudOS introduz o executável de sistema desacoplado `CloudOS.SystemBroker.exe`:
+
+```
+Flutter UI (Dart)
+       ↓
+CloudOSBridge (Dart)
+       ↓ MethodChannel
+CloudOSFlutterBridgeV20 (C++ Adapter)
+       ↓ Named Pipe IPC (Protocolo 21)
+CloudOS.SystemBroker.exe (Per-User Authority)
+       ↓
+Win32 / WSL / Hardware Telemetry
+```
+
+- **Autoridade Operacional:** O System Broker gerencia catálogo de apps, status de bateria/rede, controle de volume/brilho, tarefas assíncronas e barramento de eventos.
+- **Isolamento de Segurança:** Comunicação via Named Pipe protegida por DACL explícita permitindo apenas o usuário atual e SYSTEM.
+- **Event Bus Integrado:** Clientes assinam eventos via `events.subscribe` com suporte a coalescing e filas delimitadas.
+
+## 17. Leitura recomendada
+
+- `docs/native/SYSTEM_BROKER_V21.md`
+- `docs/native/SYSTEM_BROKER_SECURITY_V21.md`
 - `docs/native/FLUTTER_NATIVE_BRIDGE_V20.md`
 - `docs/native/CODEMAP.md`
 - `docs/native/UNIFIED_INTEGRATION_V16.md`
@@ -282,3 +304,4 @@ NativeIntegrationV16 / NativeStartIndex / Win32 Core
 - `AGENTS.md`
 - `scripts/native/README.md`
 - `desktop/CloudOS.NativeShell/src/README.md`
+
