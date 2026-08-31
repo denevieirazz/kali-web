@@ -1,3 +1,5 @@
+#include "native_performance_v12.h"
+#include "native_controls_v12.h"
 #include "native_quick_settings_window.h"
 
 #include "native_appearance_manager.h"
@@ -90,8 +92,6 @@ bool CloudOSNativeQuickSettingsWindow::Create(HINSTANCE instance)
     (void)NativeToastOverlay::Initialize(instance_);
     (void)NativeControlPlaneService::Instance().Start(instance_);
     (void)NativeCloudOSTrayService::Instance().Start(instance_);
-    NativeMediaControlV7::RefreshAsync();
-    NativeBluetoothV7::RefreshAsync();
 
     WNDCLASSEXW window_class{};
     window_class.cbSize = sizeof(window_class);
@@ -108,7 +108,7 @@ bool CloudOSNativeQuickSettingsWindow::Create(HINSTANCE instance)
         WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
         kQuickSettingsClass,
         L"Configuracoes Rapidas - CloudOS",
-        WS_POPUP | WS_CLIPCHILDREN,
+        WS_POPUP | WS_CLIPCHILDREN | WS_VSCROLL,
         0, 0, 560, 820,
         nullptr, nullptr, instance_, this);
     if (window_ == nullptr) return false;
@@ -131,21 +131,21 @@ bool CloudOSNativeQuickSettingsWindow::Create(HINSTANCE instance)
 
     media_label_ = CreateWindowW(L"STATIC", L"Midia · procurando sessao ativa", WS_CHILD | WS_VISIBLE | SS_LEFT,
         0, 0, 0, 0, window_, nullptr, instance_, nullptr);
-    media_meta_ = CreateWindowW(L"STATIC", L"Spotify, navegadores e players via GSMTC",
+    media_meta_ = CreateWindowW(L"STATIC", L"Nenhuma reproducao ativa",
         WS_CHILD | WS_VISIBLE | SS_LEFT | SS_ENDELLIPSIS, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
-    media_previous_button_ = CreateWindowW(L"BUTTON", L"⏮", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+    media_previous_button_ = CreateWindowW(L"BUTTON", L"⏮", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kMediaPreviousId)), instance_, nullptr);
-    media_toggle_button_ = CreateWindowW(L"BUTTON", L"Reproduzir", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+    media_toggle_button_ = CreateWindowW(L"BUTTON", L"Reproduzir", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kMediaToggleId)), instance_, nullptr);
-    media_next_button_ = CreateWindowW(L"BUTTON", L"⏭", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+    media_next_button_ = CreateWindowW(L"BUTTON", L"⏭", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kMediaNextId)), instance_, nullptr);
 
     volume_label_ = CreateWindowW(L"STATIC", L"Volume", WS_CHILD | WS_VISIBLE | SS_LEFT,
         0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     volume_slider_ = CreateWindowExW(0, TRACKBAR_CLASSW, L"",
-        WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_NOTICKS,
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | TBS_HORZ | TBS_NOTICKS,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kVolumeSliderId)), instance_, nullptr);
-    mute_button_ = CreateWindowW(L"BUTTON", L"Mudo", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+    mute_button_ = CreateWindowW(L"BUTTON", L"Mudo", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kMuteId)), instance_, nullptr);
 
     mixer_label_ = CreateWindowW(L"STATIC", L"Mixer por aplicativo", WS_CHILD | WS_VISIBLE | SS_LEFT,
@@ -154,9 +154,9 @@ bool CloudOSNativeQuickSettingsWindow::Create(HINSTANCE instance)
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kMixerComboId)), instance_, nullptr);
     mixer_slider_ = CreateWindowExW(0, TRACKBAR_CLASSW, L"",
-        WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_NOTICKS,
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | TBS_HORZ | TBS_NOTICKS,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kMixerSliderId)), instance_, nullptr);
-    mixer_mute_button_ = CreateWindowW(L"BUTTON", L"Mudo app", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+    mixer_mute_button_ = CreateWindowW(L"BUTTON", L"Mudo app", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kMixerMuteId)), instance_, nullptr);
 
     wifi_label_ = CreateWindowW(L"STATIC", L"Wi-Fi", WS_CHILD | WS_VISIBLE | SS_LEFT,
@@ -164,7 +164,7 @@ bool CloudOSNativeQuickSettingsWindow::Create(HINSTANCE instance)
     wifi_combo_ = CreateWindowExW(0, WC_COMBOBOXW, L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kWifiComboId)), instance_, nullptr);
-    wifi_action_button_ = CreateWindowW(L"BUTTON", L"Conectar", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+    wifi_action_button_ = CreateWindowW(L"BUTTON", L"Conectar", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kWifiActionId)), instance_, nullptr);
 
     bluetooth_label_ = CreateWindowW(L"STATIC", L"Bluetooth", WS_CHILD | WS_VISIBLE | SS_LEFT,
@@ -172,29 +172,29 @@ bool CloudOSNativeQuickSettingsWindow::Create(HINSTANCE instance)
     bluetooth_combo_ = CreateWindowExW(0, WC_COMBOBOXW, L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kBluetoothComboId)), instance_, nullptr);
-    bluetooth_action_button_ = CreateWindowW(L"BUTTON", L"Parear", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+    bluetooth_action_button_ = CreateWindowW(L"BUTTON", L"Parear", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kBluetoothActionId)), instance_, nullptr);
-    bluetooth_button_ = CreateWindowW(L"BUTTON", L"Abrir Bluetooth do Windows", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+    bluetooth_button_ = CreateWindowW(L"BUTTON", L"Abrir Bluetooth do Windows", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kBluetoothId)), instance_, nullptr);
 
     brightness_label_ = CreateWindowW(L"STATIC", L"Brilho", WS_CHILD | WS_VISIBLE | SS_LEFT,
         0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     brightness_slider_ = CreateWindowExW(0, TRACKBAR_CLASSW, L"",
-        WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_NOTICKS,
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | TBS_HORZ | TBS_NOTICKS,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kBrightnessSliderId)), instance_, nullptr);
 
     power_label_ = CreateWindowW(L"STATIC", L"Energia", WS_CHILD | WS_VISIBLE | SS_LEFT,
         0, 0, 0, 0, window_, nullptr, instance_, nullptr);
-    balanced_button_ = CreateWindowW(L"BUTTON", L"Equilibrado", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+    balanced_button_ = CreateWindowW(L"BUTTON", L"Equilibrado", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kBalancedId)), instance_, nullptr);
-    saver_button_ = CreateWindowW(L"BUTTON", L"Economia", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+    saver_button_ = CreateWindowW(L"BUTTON", L"Economia", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSaverId)), instance_, nullptr);
-    performance_button_ = CreateWindowW(L"BUTTON", L"Desempenho", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+    performance_button_ = CreateWindowW(L"BUTTON", L"Desempenho", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPerformanceId)), instance_, nullptr);
 
-    system_center_button_ = CreateWindowW(L"BUTTON", L"Abrir Central do Sistema", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+    system_center_button_ = CreateWindowW(L"BUTTON", L"Abrir Central do Sistema", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSystemCenterId)), instance_, nullptr);
-    appearance_button_ = CreateWindowW(L"BUTTON", L"Trocar cor de destaque", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+    appearance_button_ = CreateWindowW(L"BUTTON", L"Trocar cor de destaque", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kAppearanceId)), instance_, nullptr);
 
     for (HWND control : {title_, subtitle_, media_label_, media_meta_, media_previous_button_, media_toggle_button_, media_next_button_,
@@ -221,14 +221,18 @@ bool CloudOSNativeQuickSettingsWindow::Create(HINSTANCE instance)
         SendMessageW(slider, TBM_SETRANGE, TRUE, MAKELPARAM(0, 100));
         SendMessageW(slider, TBM_SETPAGESIZE, 0, 5);
         WebSkin::ApplyUxTheme(slider);
+        ControlsV12::Prepare(slider,true);
     }
 
     for (HWND button : {media_previous_button_, media_toggle_button_, media_next_button_, mute_button_, mixer_mute_button_,
              wifi_action_button_, bluetooth_action_button_, bluetooth_button_, balanced_button_, saver_button_,
              performance_button_, system_center_button_, appearance_button_})
         WebSkin::PrepareButton(button);
-    for (HWND combo : {mixer_combo_, wifi_combo_, bluetooth_combo_}) WebSkin::ApplyUxTheme(combo);
+    for (HWND combo : {mixer_combo_, wifi_combo_, bluetooth_combo_}) { WebSkin::ApplyUxTheme(combo); ControlsV12::Prepare(combo,false); }
 
+    advanced_button_ = CreateWindowW(L"BUTTON", L"Mais controles", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW, 0,0,0,0, window_, reinterpret_cast<HMENU>(8821), instance_, nullptr);
+    SetControlFont(advanced_button_, font_);
+    WebSkin::ApplyUxTheme(window_);
     ApplyWebFlyoutMaterial(window_);
     Layout();
     UpdateState(true);
@@ -237,6 +241,7 @@ bool CloudOSNativeQuickSettingsWindow::Create(HINSTANCE instance)
 
 void CloudOSNativeQuickSettingsWindow::Destroy()
 {
+    model_v12_.Stop();
     if (window_ != nullptr && IsWindow(window_))
     {
         KillTimer(window_, kRefreshTimer);
@@ -264,49 +269,43 @@ void CloudOSNativeQuickSettingsWindow::Layout()
     RECT client{};
     GetClientRect(window_, &client);
     const UINT dpi = GetDpiForWindow(window_);
+    if (title_ && font_dpi_v12_ != dpi)
+    {
+        font_dpi_v12_=dpi;
+        if(font_) DeleteObject(font_); if(small_font_) DeleteObject(small_font_); if(title_font_) DeleteObject(title_font_);
+        font_=CreateFontW(-Scale(14,dpi),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI Variable Text");
+        small_font_=CreateFontW(-Scale(12,dpi),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI Variable Text");
+        title_font_=CreateFontW(-Scale(22,dpi),0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI Variable Display");
+        EnumChildWindows(window_,[](HWND child,LPARAM data)->BOOL { SendMessageW(child,WM_SETFONT,static_cast<WPARAM>(data),TRUE); return TRUE; },reinterpret_cast<LPARAM>(font_));
+        SetControlFont(title_,title_font_); SetControlFont(media_meta_,small_font_);
+    }
+
     const int width = std::max<LONG>(1, client.right - client.left);
-    const int margin = Scale(22, dpi);
-    const int gap = Scale(10, dpi);
-    const int inner = width - margin * 2;
+    const int margin = Scale(20,dpi), inner = std::max(1,width-margin*2), gap=Scale(8,dpi);
+    scroll_v12_.Update(window_, Scale(advanced_v12_ ? 1040 : 606,dpi), client.bottom);
+    SetPropW(window_,L"CloudOS.QuickScroll.V12",reinterpret_cast<HANDLE>(static_cast<INT_PTR>(scroll_v12_.position)));
+    if(advanced_v12_ && !QuickSettingsMediaV8::panel) QuickSettingsMediaV8::Attach(window_);
+    if(QuickSettingsMediaV8::panel) { ShowWindow(QuickSettingsMediaV8::panel,advanced_v12_?SW_SHOWNA:SW_HIDE); QuickSettingsMediaV8::Layout(window_); }
+    auto place = [&](HWND control, int x, int y, int w, int h) { if(control) MoveWindow(control,x,Scale(y,dpi)-scroll_v12_.position,w,Scale(h,dpi),TRUE); };
+    auto row = [&](HWND label, HWND combo, HWND action, int y) { place(label,margin,y,inner,22); place(combo,margin,y+26,inner-Scale(104,dpi),230); place(action,width-margin-Scale(96,dpi),y+24,Scale(96,dpi),34); };
+    place(title_,margin,16,inner,30); ShowWindow(subtitle_,SW_HIDE);
+    row(wifi_label_,wifi_combo_,wifi_action_button_,60);
+    row(bluetooth_label_,bluetooth_combo_,bluetooth_action_button_,134);
+    place(volume_label_,margin,212,inner,22); place(volume_slider_,margin,238,inner-Scale(92,dpi),32); place(mute_button_,width-margin-Scale(84,dpi),236,Scale(84,dpi),34);
+    place(brightness_label_,margin,282,inner,22); place(brightness_slider_,margin,306,inner,32);
+    place(media_label_,margin,350,inner,22); place(media_meta_,margin,374,inner,20);
+    place(media_previous_button_,margin,400,Scale(74,dpi),34); place(media_toggle_button_,margin+Scale(82,dpi),400,inner-Scale(164,dpi),34); place(media_next_button_,width-margin-Scale(74,dpi),400,Scale(74,dpi),34);
+    place(power_label_,margin,452,inner,24); place(system_center_button_,margin,488,inner,38); place(advanced_button_,margin,536,inner,36);
+    for (HWND c : {mixer_label_,mixer_combo_,mixer_slider_,mixer_mute_button_,bluetooth_button_,balanced_button_,saver_button_,performance_button_,appearance_button_}) ShowWindow(c,advanced_v12_?SW_SHOWNA:SW_HIDE);
+    if (advanced_v12_)
+    {
+        place(mixer_label_,margin,590,inner,22); place(mixer_combo_,margin,616,inner,230); place(mixer_slider_,margin,652,inner-Scale(104,dpi),32); place(mixer_mute_button_,width-margin-Scale(96,dpi),650,Scale(96,dpi),34);
+        place(bluetooth_button_,margin,704,inner,36);
+        const int third=(inner-gap*2)/3;
+        place(balanced_button_,margin,758,third,36); place(saver_button_,margin+third+gap,758,third,36); place(performance_button_,margin+(third+gap)*2,758,third,36);
+        place(appearance_button_,margin,816,inner,36);
+    }
 
-    MoveWindow(title_, margin, Scale(16, dpi), inner, Scale(32, dpi), TRUE);
-    MoveWindow(subtitle_, margin, Scale(48, dpi), inner, Scale(22, dpi), TRUE);
-
-    MoveWindow(media_label_, margin, Scale(86, dpi), inner, Scale(24, dpi), TRUE);
-    MoveWindow(media_meta_, margin, Scale(110, dpi), inner, Scale(20, dpi), TRUE);
-    MoveWindow(media_previous_button_, margin, Scale(136, dpi), Scale(70, dpi), Scale(38, dpi), TRUE);
-    MoveWindow(media_toggle_button_, margin + Scale(80, dpi), Scale(136, dpi), inner - Scale(160, dpi), Scale(38, dpi), TRUE);
-    MoveWindow(media_next_button_, width - margin - Scale(70, dpi), Scale(136, dpi), Scale(70, dpi), Scale(38, dpi), TRUE);
-
-    MoveWindow(volume_label_, margin, Scale(194, dpi), inner, Scale(22, dpi), TRUE);
-    MoveWindow(volume_slider_, margin, Scale(218, dpi), inner - Scale(96, dpi), Scale(30, dpi), TRUE);
-    MoveWindow(mute_button_, width - margin - Scale(86, dpi), Scale(215, dpi), Scale(86, dpi), Scale(34, dpi), TRUE);
-
-    MoveWindow(mixer_label_, margin, Scale(258, dpi), inner, Scale(22, dpi), TRUE);
-    MoveWindow(mixer_combo_, margin, Scale(282, dpi), inner, Scale(240, dpi), TRUE);
-    MoveWindow(mixer_slider_, margin, Scale(322, dpi), inner - Scale(106, dpi), Scale(30, dpi), TRUE);
-    MoveWindow(mixer_mute_button_, width - margin - Scale(96, dpi), Scale(319, dpi), Scale(96, dpi), Scale(34, dpi), TRUE);
-
-    MoveWindow(wifi_label_, margin, Scale(366, dpi), inner, Scale(22, dpi), TRUE);
-    MoveWindow(wifi_combo_, margin, Scale(390, dpi), inner - Scale(108, dpi), Scale(260, dpi), TRUE);
-    MoveWindow(wifi_action_button_, width - margin - Scale(98, dpi), Scale(388, dpi), Scale(98, dpi), Scale(36, dpi), TRUE);
-
-    MoveWindow(bluetooth_label_, margin, Scale(434, dpi), inner, Scale(22, dpi), TRUE);
-    MoveWindow(bluetooth_combo_, margin, Scale(458, dpi), inner - Scale(108, dpi), Scale(230, dpi), TRUE);
-    MoveWindow(bluetooth_action_button_, width - margin - Scale(98, dpi), Scale(456, dpi), Scale(98, dpi), Scale(36, dpi), TRUE);
-    MoveWindow(bluetooth_button_, margin, Scale(498, dpi), inner, Scale(36, dpi), TRUE);
-
-    MoveWindow(brightness_label_, margin, Scale(550, dpi), inner, Scale(22, dpi), TRUE);
-    MoveWindow(brightness_slider_, margin, Scale(574, dpi), inner, Scale(30, dpi), TRUE);
-
-    MoveWindow(power_label_, margin, Scale(616, dpi), inner, Scale(24, dpi), TRUE);
-    const int third = (inner - gap * 2) / 3;
-    MoveWindow(balanced_button_, margin, Scale(644, dpi), third, Scale(40, dpi), TRUE);
-    MoveWindow(saver_button_, margin + third + gap, Scale(644, dpi), third, Scale(40, dpi), TRUE);
-    MoveWindow(performance_button_, margin + (third + gap) * 2, Scale(644, dpi), third, Scale(40, dpi), TRUE);
-
-    MoveWindow(system_center_button_, margin, Scale(704, dpi), inner, Scale(42, dpi), TRUE);
-    MoveWindow(appearance_button_, margin, Scale(754, dpi), inner, Scale(38, dpi), TRUE);
 }
 
 int CloudOSNativeQuickSettingsWindow::SelectedWifiIndex() const noexcept
@@ -364,7 +363,9 @@ void CloudOSNativeQuickSettingsWindow::RefreshBluetoothSelection()
 
 void CloudOSNativeQuickSettingsWindow::UpdateState(bool force_network)
 {
-    NativeMediaControlV7::RefreshAsync();
+    if (!window_ || !IsWindowVisible(window_)) return;
+    QuickSettingsMediaV8::RefreshSnapshot();
+    const auto cached = model_v12_.Snapshot();
     const NativeMediaSnapshot media = NativeMediaControlV7::Snapshot();
     if (media.available)
     {
@@ -374,7 +375,7 @@ void CloudOSNativeQuickSettingsWindow::UpdateState(bool force_network)
         std::wstring meta;
         if (!media.artist.empty()) meta += media.artist;
         if (!media.album.empty()) meta += (meta.empty() ? L"" : L"  ·  ") + media.album;
-        if (!media.source_app_id.empty()) meta += (meta.empty() ? L"" : L"  ·  ") + media.source_app_id;
+
         SetWindowTextW(media_meta_, meta.empty() ? L"Sessao GSMTC ativa" : meta.c_str());
         SetWindowTextW(media_toggle_button_, media.playing ? L"Pausar" : L"Reproduzir");
         EnableWindow(media_toggle_button_, media.can_toggle);
@@ -384,14 +385,14 @@ void CloudOSNativeQuickSettingsWindow::UpdateState(bool force_network)
     else
     {
         SetWindowTextW(media_label_, L"Midia  ·  nenhuma sessao ativa");
-        SetWindowTextW(media_meta_, L"Spotify, navegadores e players via GSMTC");
+        SetWindowTextW(media_meta_, L"Nenhuma reproducao ativa");
         SetWindowTextW(media_toggle_button_, L"Reproduzir");
         EnableWindow(media_toggle_button_, FALSE);
         EnableWindow(media_next_button_, FALSE);
         EnableWindow(media_previous_button_, FALSE);
     }
 
-    const NativeAudioState audio = NativeSystemControlBackend::QueryAudio();
+    const NativeAudioState audio = model_v12_.Snapshot().audio;
     updating_slider_ = true;
     SendMessageW(volume_slider_, TBM_SETPOS, TRUE, static_cast<LPARAM>(audio.volume_percent));
     updating_slider_ = false;
@@ -410,7 +411,7 @@ void CloudOSNativeQuickSettingsWindow::UpdateState(bool force_network)
         const int previous_index = SelectedAudioSessionIndex();
         if (previous_index >= 0 && previous_index < static_cast<int>(audio_sessions_.size()))
             previous_pid = audio_sessions_[static_cast<std::size_t>(previous_index)].process_id;
-        audio_sessions_ = NativeAudioMixerV7::Enumerate();
+        audio_sessions_ = cached.sessions;
         SendMessageW(mixer_combo_, CB_RESETCONTENT, 0, 0);
         int selection = -1;
         for (std::size_t index = 0; index < audio_sessions_.size(); ++index)
@@ -429,7 +430,7 @@ void CloudOSNativeQuickSettingsWindow::UpdateState(bool force_network)
     SetWindowTextW(mixer_label_, mixer_text.c_str());
     RefreshMixerSelection();
 
-    const NativeBrightnessState brightness = NativeSystemControlBackend::QueryBrightness();
+    const NativeBrightnessState brightness = cached.brightness;
     updating_slider_ = true;
     SendMessageW(brightness_slider_, TBM_SETPOS, TRUE, static_cast<LPARAM>(brightness.percent));
     updating_slider_ = false;
@@ -440,10 +441,10 @@ void CloudOSNativeQuickSettingsWindow::UpdateState(bool force_network)
         brightness_text += std::to_wstring(brightness.percent) + L"%";
         if (!brightness.source.empty()) brightness_text += L"  ·  " + brightness.source;
     }
-    else brightness_text += L"hardware nao expoe DDC/CI ou WMI";
+    else brightness_text += L"ajuste no monitor";
     SetWindowTextW(brightness_label_, brightness_text.c_str());
 
-    const NativePowerState power = NativeSystemControlBackend::QueryPower();
+    const NativePowerState power = cached.power;
     std::wstring power_text = L"Energia  ·  " + (power.active_plan.empty() ? std::wstring(L"plano atual") : power.active_plan);
     if (power.battery_present)
         power_text += L"  ·  " + std::to_wstring(power.battery_percent) + L"%" + (power.on_ac ? L" AC" : L" bateria");
@@ -453,7 +454,7 @@ void CloudOSNativeQuickSettingsWindow::UpdateState(bool force_network)
     if (force_network || wifi_networks_.empty() || (wifi_refresh_tick_ % 3u) == 0u)
     {
         const int previous = SelectedWifiIndex();
-        wifi_networks_ = NativeSystemControlBackend::ScanWifi();
+        wifi_networks_ = cached.wifi;
         SendMessageW(wifi_combo_, CB_RESETCONTENT, 0, 0);
         int connected_index = -1;
         for (std::size_t index = 0; index < wifi_networks_.size(); ++index)
@@ -482,7 +483,6 @@ void CloudOSNativeQuickSettingsWindow::UpdateState(bool force_network)
     ++bluetooth_refresh_tick_;
     if (force_network || bluetooth_devices_.empty() || (bluetooth_refresh_tick_ % 3u) == 0u)
     {
-        NativeBluetoothV7::RefreshAsync();
         const int previous = SelectedBluetoothIndex();
         bluetooth_devices_ = NativeBluetoothV7::Snapshot();
         SendMessageW(bluetooth_combo_, CB_RESETCONTENT, 0, 0);
@@ -501,95 +501,63 @@ void CloudOSNativeQuickSettingsWindow::UpdateState(bool force_network)
     SetWindowTextW(bluetooth_label_, bluetooth_text.c_str());
     RefreshBluetoothSelection();
 
-    NativeControlPlaneService::Instance().RefreshNow();
-    NativeCloudOSTrayService::Instance().Refresh();
     InvalidateRect(window_, nullptr, FALSE);
 }
 
 void CloudOSNativeQuickSettingsWindow::ApplyVolumeFromSlider()
 {
-    if (updating_slider_ || volume_slider_ == nullptr) return;
-    const unsigned value = static_cast<unsigned>(std::clamp<int>(
-        static_cast<int>(SendMessageW(volume_slider_, TBM_GETPOS, 0, 0)), 0, 100));
-    std::wstring error;
-    if (!NativeSystemControlBackend::SetMasterVolume(value, &error))
-        ShowOperationResult(L"Volume", false, error);
-    else if (value > 0)
-        (void)NativeSystemControlBackend::SetMasterMute(false, nullptr);
-    UpdateState(false);
+    if(updating_slider_) return;
+    const auto value=static_cast<unsigned>(SendMessageW(volume_slider_,TBM_GETPOS,0,0));
+    model_v12_.Action(window_,L"Volume",[value](std::wstring& error){
+        if(!NativeSystemControlBackend::SetMasterVolume(value,&error)) return false;
+        return value==0 || NativeSystemControlBackend::SetMasterMute(false,&error);
+    });
 }
 
 void CloudOSNativeQuickSettingsWindow::ApplyMixerFromSlider()
 {
-    if (updating_slider_ || mixer_slider_ == nullptr) return;
-    const int index = SelectedAudioSessionIndex();
-    if (index < 0 || index >= static_cast<int>(audio_sessions_.size())) return;
-    const unsigned value = static_cast<unsigned>(std::clamp<int>(
-        static_cast<int>(SendMessageW(mixer_slider_, TBM_GETPOS, 0, 0)), 0, 100));
-    NativeAudioSessionV7& session = audio_sessions_[static_cast<std::size_t>(index)];
-    if (NativeAudioMixerV7::SetVolume(session.process_id, value))
-    {
-        session.volume_percent = value;
-        if (value > 0 && session.muted)
-        {
-            (void)NativeAudioMixerV7::SetMute(session.process_id, false);
-            session.muted = false;
-        }
-    }
-    RefreshMixerSelection();
+    if(updating_slider_) return;
+    const int index=SelectedAudioSessionIndex();
+    if(index<0 || index>=static_cast<int>(audio_sessions_.size())) return;
+    const auto pid=audio_sessions_[static_cast<std::size_t>(index)].process_id;
+    const auto value=static_cast<unsigned>(SendMessageW(mixer_slider_,TBM_GETPOS,0,0));
+    model_v12_.Action(window_,L"Mixer",[pid,value](std::wstring&){
+        return NativeAudioMixerV7::SetVolume(pid,value) && (value==0 || NativeAudioMixerV7::SetMute(pid,false));
+    });
 }
 
 void CloudOSNativeQuickSettingsWindow::ApplyBrightnessFromSlider()
 {
-    if (updating_slider_ || brightness_slider_ == nullptr) return;
-    const unsigned value = static_cast<unsigned>(std::clamp<int>(
-        static_cast<int>(SendMessageW(brightness_slider_, TBM_GETPOS, 0, 0)), 0, 100));
-    std::wstring error;
-    const bool success = NativeSystemControlBackend::SetBrightness(value, &error);
-    if (!success) ShowOperationResult(L"Brilho", false, error);
-    UpdateState(false);
+    if(updating_slider_) return;
+    const auto value=static_cast<unsigned>(SendMessageW(brightness_slider_,TBM_GETPOS,0,0));
+    model_v12_.Action(window_,L"Brilho",[value](std::wstring& error){ return NativeSystemControlBackend::SetBrightness(value,&error); },true);
 }
 
 void CloudOSNativeQuickSettingsWindow::ToggleMute()
 {
-    const NativeAudioState audio = NativeSystemControlBackend::QueryAudio();
-    if (!audio.available) return;
-    std::wstring error;
-    const bool success = NativeSystemControlBackend::SetMasterMute(!audio.muted, &error);
-    if (!success) ShowOperationResult(L"Audio", false, error);
-    UpdateState(false);
+    const auto audio=model_v12_.Snapshot().audio;
+    if(!audio.available) return;
+    model_v12_.Action(window_,L"Audio",[muted=!audio.muted](std::wstring& error){ return NativeSystemControlBackend::SetMasterMute(muted,&error); });
 }
 
 void CloudOSNativeQuickSettingsWindow::ToggleMixerMute()
 {
-    const int index = SelectedAudioSessionIndex();
-    if (index < 0 || index >= static_cast<int>(audio_sessions_.size())) return;
-    NativeAudioSessionV7& session = audio_sessions_[static_cast<std::size_t>(index)];
-    if (NativeAudioMixerV7::SetMute(session.process_id, !session.muted))
-        session.muted = !session.muted;
-    RefreshMixerSelection();
+    const int index=SelectedAudioSessionIndex();
+    if(index<0 || index>=static_cast<int>(audio_sessions_.size())) return;
+    const auto session=audio_sessions_[static_cast<std::size_t>(index)];
+    model_v12_.Action(window_,L"Mixer",[session](std::wstring&){ return NativeAudioMixerV7::SetMute(session.process_id,!session.muted); });
 }
 
 void CloudOSNativeQuickSettingsWindow::HandleWifiAction()
 {
-    const int index = SelectedWifiIndex();
-    if (index < 0 || index >= static_cast<int>(wifi_networks_.size())) return;
-    const NativeWifiNetwork network = wifi_networks_[static_cast<std::size_t>(index)];
-    std::wstring error;
-    bool success = false;
-    if (network.connected)
-        success = NativeSystemControlBackend::DisconnectWifi(network.interface_guid, &error);
-    else if (!network.profile_name.empty())
-        success = NativeSystemControlBackend::ConnectKnownWifi(network, &error);
-    else
-    {
-        (void)NativeSystemControlBackend::OpenWindowsTarget(window_, L"ms-settings:network-wifi");
-        NativeToastOverlay::Post(L"Credencial do Wi-Fi",
-            L"O Windows abriu o fluxo oficial para informar a senha da rede.", 0, 4200u);
-        return;
-    }
-    ShowOperationResult(network.connected ? L"Wi-Fi desconectado" : L"Wi-Fi conectado", success, error);
-    UpdateState(true);
+    const int index=SelectedWifiIndex();
+    if(index<0 || index>=static_cast<int>(wifi_networks_.size())) return;
+    const auto network=wifi_networks_[static_cast<std::size_t>(index)];
+    if(!network.connected && network.profile_name.empty())
+    { (void)NativeSystemControlBackend::OpenWindowsTarget(window_,L"ms-settings:network-wifi"); return; }
+    model_v12_.Action(window_,L"Wi-Fi",[network](std::wstring& error){ return network.connected
+        ? NativeSystemControlBackend::DisconnectWifi(network.interface_guid,&error)
+        : NativeSystemControlBackend::ConnectKnownWifi(network,&error); },true);
 }
 
 void CloudOSNativeQuickSettingsWindow::HandleBluetoothAction()
@@ -615,13 +583,11 @@ void CloudOSNativeQuickSettingsWindow::HandleBluetoothAction()
 
 void CloudOSNativeQuickSettingsWindow::ApplyPowerPlan(int plan)
 {
-    std::wstring error;
-    bool success = false;
-    if (plan == 0) success = NativeSystemControlBackend::SetBalancedPowerPlan(&error);
-    else if (plan == 1) success = NativeSystemControlBackend::SetPowerSaverPlan(&error);
-    else success = NativeSystemControlBackend::SetHighPerformancePlan(&error);
-    ShowOperationResult(L"Plano de energia", success, error);
-    UpdateState(false);
+    model_v12_.Action(window_,L"Plano de energia",[plan](std::wstring& error){
+        if(plan==0) return NativeSystemControlBackend::SetBalancedPowerPlan(&error);
+        if(plan==1) return NativeSystemControlBackend::SetPowerSaverPlan(&error);
+        return NativeSystemControlBackend::SetHighPerformancePlan(&error);
+    });
 }
 
 void CloudOSNativeQuickSettingsWindow::CycleAccent()
@@ -651,26 +617,23 @@ void CloudOSNativeQuickSettingsWindow::ShowOperationResult(
 void CloudOSNativeQuickSettingsWindow::ShowNear(const RECT& anchor)
 {
     if (window_ == nullptr) return;
-    NativeMediaControlV7::RefreshAsync();
-    NativeBluetoothV7::RefreshAsync();
-    UpdateState(true);
+    const auto open_begin = PerformanceV12::NowUs();
     HMONITOR monitor = MonitorFromRect(&anchor, MONITOR_DEFAULTTONEAREST);
     MONITORINFO info{};
     info.cbSize = sizeof(info);
     GetMonitorInfoW(monitor, &info);
     const UINT dpi = GetDpiForWindow(window_);
-    const int width = Scale(560, dpi);
-    const int height = Scale(820, dpi);
-    int x = anchor.right - width;
-    int y = anchor.top - height - Scale(12, dpi);
-    x = std::clamp<int>(x, static_cast<int>(info.rcWork.left),
-        std::max<int>(static_cast<int>(info.rcWork.left), static_cast<int>(info.rcWork.right - width)));
-    y = std::clamp<int>(y, static_cast<int>(info.rcWork.top),
-        std::max<int>(static_cast<int>(info.rcWork.top), static_cast<int>(info.rcWork.bottom - height)));
-    SetWindowPos(window_, HWND_TOPMOST, x, y, width, height, SWP_SHOWWINDOW);
+    const RECT fitted = FitFlyout(anchor, info.rcWork, Scale(420, dpi), Scale(620, dpi), Scale(12,dpi));
+    SetWindowPos(window_, HWND_TOPMOST, fitted.left, fitted.top, fitted.right-fitted.left, fitted.bottom-fitted.top, SWP_SHOWWINDOW);
     ShowWindow(window_, SW_SHOWNORMAL);
     SetForegroundWindow(window_);
-    SetTimer(window_, kRefreshTimer, 1800, nullptr);
+    SetTimer(window_, kRefreshTimer, 5000, nullptr);
+    UpdateState(true);
+    model_v12_.Request(window_);
+    NativeMediaControlV7::RefreshAsync();
+    NativeBluetoothV7::RefreshAsync();
+    UpdateWindow(window_); // first paint completes before the open-latency sample
+    PerformanceV12::Set(PerformanceV12::QuickOpenUs, PerformanceV12::NowUs()-open_begin);
 }
 
 void CloudOSNativeQuickSettingsWindow::ToggleNear(const RECT& anchor)
@@ -689,6 +652,8 @@ void CloudOSNativeQuickSettingsWindow::Hide()
 
 void CloudOSNativeQuickSettingsWindow::Refresh()
 {
+    if (!window_ || !IsWindowVisible(window_)) return;
+    model_v12_.Request(window_);
     UpdateState(false);
 }
 
@@ -697,11 +662,17 @@ LRESULT CloudOSNativeQuickSettingsWindow::HandleMessage(
 {
     switch (message)
     {
-    case WM_SIZE:
-    case WM_DPICHANGED:
-        Layout();
+    case WM_CLOUDOS_QUICK_DATA_V12:
+        for(const auto& result : model_v12_.TakeResults()) ShowOperationResult(result.title,result.success,result.error);
+        if(IsWindowVisible(window_)) UpdateState(true);
         return 0;
+    case WM_VSCROLL: scroll_v12_.Scroll(window_, w_param, Scale(28, GetDpiForWindow(window_))); Layout(); InvalidateRect(window_, nullptr, FALSE); return 0;
+    case WM_MOUSEWHEEL: scroll_v12_.Wheel(GET_WHEEL_DELTA_WPARAM(w_param), Scale(28, GetDpiForWindow(window_))); Layout(); InvalidateRect(window_, nullptr, FALSE); return 0;
+    case WM_SIZE: Layout(); return 0;
+    case WM_DPICHANGED:
+    { const auto rect=FitSuggestedFlyout(*reinterpret_cast<RECT*>(l_param)); SetWindowPos(window_,nullptr,rect.left,rect.top,rect.right-rect.left,rect.bottom-rect.top,SWP_NOZORDER|SWP_NOACTIVATE); Layout(); return 0; }
     case WM_HSCROLL:
+        if (LOWORD(w_param) == TB_THUMBTRACK || LOWORD(w_param) == TB_ENDTRACK) return 0;
         if (reinterpret_cast<HWND>(l_param) == volume_slider_)
         {
             ApplyVolumeFromSlider();
@@ -721,6 +692,8 @@ LRESULT CloudOSNativeQuickSettingsWindow::HandleMessage(
     case WM_COMMAND:
         switch (LOWORD(w_param))
         {
+        case IDCANCEL: Hide(); return 0;
+        case 8821: advanced_v12_ = !advanced_v12_; SetWindowTextW(advanced_button_, advanced_v12_ ? L"Menos controles" : L"Mais controles"); Layout(); InvalidateRect(window_, nullptr, FALSE); return 0;
         case kMediaPreviousId: NativeMediaControlV7::PreviousAsync(); return 0;
         case kMediaToggleId: NativeMediaControlV7::TogglePlayPauseAsync(); return 0;
         case kMediaNextId: NativeMediaControlV7::NextAsync(); return 0;
@@ -748,6 +721,10 @@ LRESULT CloudOSNativeQuickSettingsWindow::HandleMessage(
     case WM_TIMER:
         if (w_param == kRefreshTimer)
         {
+            if (!IsWindowVisible(window_)) return 0;
+            model_v12_.Request(window_);
+            NativeMediaControlV7::RefreshAsync();
+            if (++bluetooth_refresh_tick_ % 6 == 0) NativeBluetoothV7::RefreshAsync();
             UpdateState(false);
             return 0;
         }
@@ -768,6 +745,7 @@ LRESULT CloudOSNativeQuickSettingsWindow::HandleMessage(
         if (WebSkin::PaintOwnerDrawButton(reinterpret_cast<DRAWITEMSTRUCT*>(l_param), tone)) return TRUE;
         break;
     }
+    case WM_CTLCOLORLISTBOX:
     case WM_CTLCOLORSTATIC:
         SetBkMode(reinterpret_cast<HDC>(w_param), TRANSPARENT);
         SetTextColor(reinterpret_cast<HDC>(w_param), WebSkin::TextSecondary);
@@ -776,34 +754,12 @@ LRESULT CloudOSNativeQuickSettingsWindow::HandleMessage(
         return 1;
     case WM_PAINT:
     {
+        PerformanceV12::PaintScope telemetry(PerformanceV12::QuickPaint);
         PAINTSTRUCT paint{};
         HDC dc = BeginPaint(window_, &paint);
         RECT client{};
         GetClientRect(window_, &client);
         WebSkin::PaintWindowBackground(dc, client);
-
-        Gdiplus::Graphics graphics(dc);
-        graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
-        const UINT dpi = GetDpiForWindow(window_);
-        const int margin = Scale(14, dpi);
-        const int width = std::max<LONG>(1, client.right - client.left);
-        const auto card = [dpi, width, margin, &graphics](int top, int bottom)
-        {
-            WebSkin::DrawElevatedPanel(
-                graphics,
-                Gdiplus::RectF(
-                    static_cast<Gdiplus::REAL>(margin),
-                    static_cast<Gdiplus::REAL>(Scale(top, dpi)),
-                    static_cast<Gdiplus::REAL>(width - margin * 2),
-                    static_cast<Gdiplus::REAL>(Scale(bottom - top, dpi))),
-                static_cast<Gdiplus::REAL>(Scale(WebSkin::RadiusLarge, dpi)),
-                WebSkin::GdiColor(WebSkin::BgSecondary, 218),
-                WebSkin::GdiColor(WebSkin::BorderDefault, 180));
-        };
-        card(76, 180);
-        card(184, 352);
-        card(356, 540);
-        card(542, 692);
 
         EndPaint(window_, &paint);
         return 0;

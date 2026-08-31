@@ -28,6 +28,8 @@ if not exist "%MSBUILD%" (
 )
 
 echo [CloudOS] Validando contratos do shell nativo...
+pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-performance-visual-v12-contract.ps1"
+if errorlevel 1 exit /b %ERRORLEVEL%
 pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-cloudos-native-shell-contracts.ps1"
 if errorlevel 1 exit /b %ERRORLEVEL%
 pwsh.exe -NoLogo -NoProfile -File "%ROOT%\scripts\native\test-shell-lifecycle-contract.ps1"
@@ -144,7 +146,8 @@ echo [CloudOS] WORKSPACE_STUDIO=perfis, regras, layouts, inicializacao e histori
 echo [CloudOS] SESSION_CONTINUITY=ledger atomico, checkpoints por area, journal e recuperacao conservadora
 echo [CloudOS] CONTROL_PLANE_V4=System Center, Quick Settings real, tray first-party, toasts, health e appearance persistente
 echo [CloudOS] FILES_STORAGE_V5=Files first-party, tabs, Quick Access, busca limitada, preview WIC/texto e Windows Shell via IExplorerBrowser
-echo [CloudOS] VISUAL_PLATFORM_V7=reveal Fluent, DWM material sem magic numbers, GSMTC, mixer por app e Windows Search SystemIndex
+echo [CloudOS] PERFORMANCE_VISUAL_V12=eventos, paint em cache, widgets opcionais, UI neutra e telemetria numerica
+echo [CloudOS] VISUAL_PLATFORM_V7=GSMTC, mixer por app, Bluetooth e Windows Search preservados
 echo [CloudOS] STABILITY_READINESS_V9=health ABI 96 bytes, heartbeat UI, readiness e soak automatizado
 echo [CloudOS] LIFECYCLE_V10=resume, WTS/RDP, display revalidation, WTS retry e single-instance smoke
 echo [CloudOS] SHELL_SUPERVISOR_V11=processo externo, readiness 30s, heartbeat, restart limitado e fallback seguro Explorer

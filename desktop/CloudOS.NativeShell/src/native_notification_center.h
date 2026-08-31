@@ -4,9 +4,13 @@
 
 #include <cstddef>
 #include <string>
+#include <vector>
+#include <commctrl.h>
+#include <cstdint>
 
 namespace CloudOS
 {
+struct NativeNotificationItemV12 { std::uint64_t id{}; SYSTEMTIME time{}; std::wstring title, message; int severity{}; bool read{}; };
 class NativeSurfacePreview;
 class CloudOSNativeNotificationCenter final
 {
@@ -29,6 +33,14 @@ public:
 
 private:
     friend class NativeSurfacePreview;
+    std::vector<NativeNotificationItemV12> snapshot_v12_;
+    std::uint64_t revision_v12_{~0ull};
+    HIMAGELIST row_image_v12_{};
+    HWND heading_v12_{};
+    HFONT heading_font_v12_{};
+    UINT dpi_v12_{};
+    void OpenSelection();
+    LRESULT DrawCard(NMLVCUSTOMDRAW* draw);
     void Layout();
     void RebuildList();
     void MarkAllRead();

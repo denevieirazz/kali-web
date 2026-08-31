@@ -29,10 +29,10 @@ RECT QuickRect(HWND window)
     const int width = std::max<LONG>(1, client.right - client.left);
     const int height = std::max<LONG>(1, client.bottom - client.top);
     const int margin = Scale(12, dpi);
-    const int button = Scale(46, dpi);
+    const int button = Scale(36, dpi);
     const int gap = Scale(8, dpi);
     const int clock_width = Scale(122, dpi);
-    const int notify_width = Scale(46, dpi);
+    const int notify_width = Scale(36, dpi);
     const int quick_width = Scale(106, dpi);
     const int y = (height - button) / 2;
     int right_x = width - margin - clock_width;
@@ -128,7 +128,7 @@ void PaintTray(HWND window)
         WebSkin::GdiColor(snapshot.health_severity > 0 ? icon : WebSkin::BorderDefault),
         1.0f);
 
-    const Gdiplus::REAL top = static_cast<Gdiplus::REAL>(rect.top + Scale(14, dpi));
+    const Gdiplus::REAL top = static_cast<Gdiplus::REAL>(rect.top + Scale(9, dpi));
     DrawSpeaker(graphics, static_cast<Gdiplus::REAL>(rect.left + Scale(10, dpi)), top,
         snapshot.audio.available ? icon : WebSkin::TextDisabled,
         snapshot.audio.available && snapshot.audio.muted);
@@ -176,7 +176,7 @@ bool NativeCloudOSTrayService::Start(HINSTANCE instance)
         0, 0, 0, 0, HWND_MESSAGE, nullptr, instance, this);
     if (engine_window_ == nullptr) return false;
     AttachExistingTaskbars();
-    SetTimer(engine_window_, kAttachTimer, 1800, nullptr);
+    // V12: attachment is requested after taskbar creation/display rebuild.
     return true;
 }
 
@@ -200,7 +200,7 @@ void NativeCloudOSTrayService::Refresh()
             wchar_t class_name[128]{};
             GetClassNameW(window, class_name, static_cast<int>(std::size(class_name)));
             if (_wcsicmp(class_name, kTaskbarClass) == 0)
-                InvalidateRect(window, nullptr, FALSE);
+            { const RECT quick = QuickRect(window); InvalidateRect(window, &quick, FALSE); }
             return TRUE;
         }, 0);
 }

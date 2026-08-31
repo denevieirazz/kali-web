@@ -1,6 +1,8 @@
 #include "native_desktop_context_menu.h"
 
 #include "native_app_launcher.h"
+#include "native_desktop_model_v12.h"
+#include "native_popup_menu.h"
 #include "native_file_operations_window.h"
 #include "native_files_window.h"
 #include "native_notification_center.h"
@@ -175,8 +177,9 @@ bool NativeDesktopContextMenu::Show(
     InsertMenuW(menu, 15, MF_BYPOSITION | MF_STRING | MF_CHECKED, kAutoArrange, L"Organizar icones automaticamente");
     InsertMenuW(menu, 16, MF_BYPOSITION | MF_STRING, kRefresh, L"Atualizar");
 
+    AppendMenuW(menu, MF_STRING | (GetPropW(owner, L"CloudOS.Widgets.V12") ? MF_CHECKED : 0), 9120, L"Mostrar widgets");
     SetForegroundWindow(owner);
-    const int command = TrackPopupMenu(
+    const int command = NativePopupMenu::Track(
         menu,
         TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_TOPALIGN,
         screen_point.x,
@@ -188,6 +191,7 @@ bool NativeDesktopContextMenu::Show(
 
     switch (command)
     {
+    case 9120: PostMessageW(owner, WM_CLOUDOS_WIDGETS_V12, 0, 0); return true;
     case kNewFolder:
         return CreateFolder(owner);
     case kNewText:

@@ -15,6 +15,9 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <future>
+#include <memory>
+#include "native_render_cache_v12.h"
 
 #include "native_flyout_motion_v8.h"
 #include "native_media_control_v7.h"
@@ -35,6 +38,9 @@ inline HWND parent_window{};
 inline NativeMediaSnapshot snapshot{};
 inline bool dragging_timeline{};
 inline HWINEVENTHOOK show_hook{};
+inline std::shared_ptr<Gdiplus::Bitmap> artwork_v12;
+inline std::future<std::shared_ptr<Gdiplus::Bitmap>> artwork_future_v12;
+inline std::vector<std::uint8_t> artwork_key_v12;
 
 inline int ScaleDip(int value, UINT dpi) noexcept
 {
@@ -104,78 +110,34 @@ inline bool ContainsRect(const RECT& rect, POINT point) noexcept
     return point.x >= rect.left && point.x < rect.right && point.y >= rect.top && point.y < rect.bottom;
 }
 
-inline bool DrawArtworkBytes(
-    Gdiplus::Graphics& graphics,
-    const RECT& destination,
-    const std::vector<std::uint8_t>& bytes)
+inline std::shared_ptr<Gdiplus::Bitmap> DecodeArtworkV12(const std::vector<std::uint8_t>& bytes)
 {
-    if (bytes.empty()) return false;
-    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, bytes.size());
-    if (memory == nullptr) return false;
-    void* target = GlobalLock(memory);
-    if (target == nullptr)
-    {
-        GlobalFree(memory);
-        return false;
-    }
-    std::memcpy(target, bytes.data(), bytes.size());
-    GlobalUnlock(memory);
-
-    IStream* stream = nullptr;
-    if (CreateStreamOnHGlobal(memory, TRUE, &stream) != S_OK || stream == nullptr)
-    {
-        GlobalFree(memory);
-        return false;
-    }
-
-    Gdiplus::Bitmap image(stream, FALSE);
-    bool drawn = false;
-    if (image.GetLastStatus() == Gdiplus::Ok && image.GetWidth() > 0 && image.GetHeight() > 0)
-    {
-        const Gdiplus::REAL dest_width = static_cast<Gdiplus::REAL>(RectWidth(destination));
-        const Gdiplus::REAL dest_height = static_cast<Gdiplus::REAL>(RectHeight(destination));
-        const Gdiplus::REAL source_width = static_cast<Gdiplus::REAL>(image.GetWidth());
-        const Gdiplus::REAL source_height = static_cast<Gdiplus::REAL>(image.GetHeight());
-        const Gdiplus::REAL scale = std::max(dest_width / source_width, dest_height / source_height);
-        const Gdiplus::REAL crop_width = dest_width / scale;
-        const Gdiplus::REAL crop_height = dest_height / scale;
-        const Gdiplus::REAL source_x = (source_width - crop_width) * 0.5f;
-        const Gdiplus::REAL source_y = (source_height - crop_height) * 0.5f;
-
-        const Gdiplus::GraphicsState state = graphics.Save();
-        Gdiplus::GraphicsPath clip;
-        const Gdiplus::REAL radius = 12.0f;
-        const Gdiplus::RectF dest(
-            static_cast<Gdiplus::REAL>(destination.left),
-            static_cast<Gdiplus::REAL>(destination.top),
-            dest_width,
-            dest_height);
-        clip.AddArc(dest.X, dest.Y, radius * 2.0f, radius * 2.0f, 180.0f, 90.0f);
-        clip.AddArc(dest.GetRight() - radius * 2.0f, dest.Y, radius * 2.0f, radius * 2.0f, 270.0f, 90.0f);
-        clip.AddArc(dest.GetRight() - radius * 2.0f, dest.GetBottom() - radius * 2.0f,
-            radius * 2.0f, radius * 2.0f, 0.0f, 90.0f);
-        clip.AddArc(dest.X, dest.GetBottom() - radius * 2.0f, radius * 2.0f, radius * 2.0f, 90.0f, 90.0f);
-        clip.CloseFigure();
-        graphics.SetClip(&clip);
-        graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
-        drawn = graphics.DrawImage(
-            &image,
-            dest,
-            source_x,
-            source_y,
-            crop_width,
-            crop_height,
-            Gdiplus::UnitPixel) == Gdiplus::Ok;
-        graphics.Restore(state);
-    }
-    stream->Release();
-    return drawn;
+    if(bytes.empty()) return {};
+    HGLOBAL memory=GlobalAlloc(GMEM_MOVEABLE,bytes.size()); if(!memory) return {};
+    void* target=GlobalLock(memory); if(!target) {GlobalFree(memory); return {};}
+    std::memcpy(target,bytes.data(),bytes.size()); GlobalUnlock(memory);
+    IStream* stream{};
+    if(CreateStreamOnHGlobal(memory,TRUE,&stream)!=S_OK) {GlobalFree(memory);return {};}
+    std::shared_ptr<Gdiplus::Bitmap> result;
+    { Gdiplus::Bitmap decoded(stream,FALSE);
+      if(decoded.GetLastStatus()==Gdiplus::Ok) result.reset(decoded.Clone(0,0,static_cast<INT>(decoded.GetWidth()),static_cast<INT>(decoded.GetHeight()),PixelFormat32bppPARGB)); }
+    stream->Release();return result;
+}
+inline bool DrawArtworkBytes(Gdiplus::Graphics& graphics,const RECT& destination)
+{
+    if(!artwork_v12) return false;
+    graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+    return graphics.DrawImage(artwork_v12.get(),destination.left,destination.top,RectWidth(destination),RectHeight(destination))==Gdiplus::Ok;
 }
 
 inline void RefreshSnapshot()
 {
-    NativeMediaControlV7::RefreshAsync();
+    if(!panel || !IsWindowVisible(panel)) return;
     snapshot = NativeMediaControlV7::Snapshot();
+    if(artwork_future_v12.valid() && artwork_future_v12.wait_for(std::chrono::seconds(0))==std::future_status::ready)
+        artwork_v12=artwork_future_v12.get();
+    if(!artwork_future_v12.valid() && artwork_key_v12!=snapshot.artwork)
+    { artwork_key_v12=snapshot.artwork; auto bytes=artwork_key_v12; artwork_future_v12=std::async(std::launch::async,[bytes=std::move(bytes)]{return DecodeArtworkV12(bytes);}); }
     if (panel != nullptr && IsWindow(panel))
         InvalidateRect(panel, nullptr, FALSE);
 }
@@ -240,9 +202,9 @@ inline void PaintPanel(HWND window)
     const int width = std::max<int>(1, static_cast<int>(client.right - client.left));
     const int height = std::max<int>(1, static_cast<int>(client.bottom - client.top));
 
-    HDC memory_dc = CreateCompatibleDC(dc);
-    HBITMAP bitmap = CreateCompatibleBitmap(dc, width, height);
-    HGDIOBJ old_bitmap = SelectObject(memory_dc, bitmap);
+    PerformanceV12::PaintScope telemetry(PerformanceV12::QuickPaint);
+    HDC memory_dc=NativeBackbufferV12::Acquire(window,dc,width,height);
+    if(!memory_dc) { EndPaint(window,&paint); return; }
 
     Gdiplus::Graphics graphics(memory_dc);
     graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
@@ -251,7 +213,7 @@ inline void PaintPanel(HWND window)
     graphics.FillRectangle(&background, 0, 0, width, height);
 
     const PanelRects rects = Rects(window);
-    if (!DrawArtworkBytes(graphics, rects.artwork, snapshot.artwork))
+    if (!DrawArtworkBytes(graphics, rects.artwork))
     {
         WebSkin::DrawRoundedPanel(
             graphics,
@@ -300,7 +262,7 @@ inline void PaintPanel(HWND window)
     {
         if (!snapshot.artist.empty()) meta = snapshot.artist;
         if (!snapshot.album.empty()) meta += (meta.empty() ? L"" : L"  ·  ") + snapshot.album;
-        if (meta.empty()) meta = snapshot.source_app_id.empty() ? L"Sessao GSMTC" : snapshot.source_app_id;
+        if (meta.empty()) meta = L"Reproducao do Windows";
     }
     else
     {
@@ -361,9 +323,7 @@ inline void PaintPanel(HWND window)
         &meta_brush);
 
     BitBlt(dc, 0, 0, width, height, memory_dc, 0, 0, SRCCOPY);
-    SelectObject(memory_dc, old_bitmap);
-    DeleteObject(bitmap);
-    DeleteDC(memory_dc);
+
     EndPaint(window, &paint);
 }
 
@@ -422,7 +382,7 @@ inline LRESULT CALLBACK PanelProcedure(HWND window, UINT message, WPARAM w_param
             NativeMediaControlV7::NextAsync();
         else
             return 0;
-        SetTimer(window, RefreshTimerId, 220, nullptr);
+        RefreshSnapshot();
         return 0;
     }
     case WM_CAPTURECHANGED:
@@ -446,9 +406,10 @@ inline void Layout(HWND parent)
     const UINT dpi = GetDpiForWindow(parent);
     const int margin = ScaleDip(22, dpi);
     const int width = std::max<int>(1, static_cast<int>(client.right - client.left) - margin * 2);
-    MoveWindow(panel, margin, ScaleDip(82, dpi), width, ScaleDip(94, dpi), TRUE);
+    const int scroll=static_cast<int>(reinterpret_cast<INT_PTR>(GetPropW(parent,L"CloudOS.QuickScroll.V12")));
+    MoveWindow(panel,margin,ScaleDip(872,dpi)-scroll,width,ScaleDip(140,dpi),TRUE);
     SetWindowPos(panel, HWND_TOP, 0, 0, 0, 0,
-        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 inline LRESULT CALLBACK ParentSubclass(
@@ -470,7 +431,7 @@ inline LRESULT CALLBACK ParentSubclass(
         {
             Layout(parent);
             RefreshSnapshot();
-            if (panel != nullptr) SetTimer(panel, RefreshTimerId, 850, nullptr);
+
         }
         else if (panel != nullptr)
         {
@@ -527,16 +488,10 @@ inline void Attach(HWND parent)
         nullptr);
     if (panel == nullptr) return;
 
-    for (int id : {ExistingPreviousId, ExistingToggleId, ExistingNextId})
-    {
-        HWND legacy = GetDlgItem(parent, id);
-        if (legacy != nullptr) ShowWindow(legacy, SW_HIDE);
-    }
-
     (void)SetWindowSubclass(parent, ParentSubclass, ParentSubclassId, 0);
     Layout(parent);
     RefreshSnapshot();
-    SetTimer(panel, RefreshTimerId, 850, nullptr);
+
 }
 
 inline void CALLBACK WinEventCallback(
@@ -582,5 +537,5 @@ public:
     Bootstrap& operator=(const Bootstrap&) = delete;
 };
 
-inline Bootstrap bootstrap;
+// V12: the advanced view attaches explicitly; no global show hook.
 } // namespace CloudOS::QuickSettingsMediaV8

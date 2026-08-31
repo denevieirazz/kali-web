@@ -4,6 +4,8 @@
 
 #include <cstdint>
 #include <string>
+#include <thread>
+#include <atomic>
 
 #include "native_system_control_backend.h"
 
@@ -40,11 +42,15 @@ public:
 
 private:
     NativeControlPlaneService() = default;
-    ~NativeControlPlaneService() = default;
+    ~NativeControlPlaneService() { Stop(); }
     NativeControlPlaneService(const NativeControlPlaneService&) = delete;
     NativeControlPlaneService& operator=(const NativeControlPlaneService&) = delete;
 
     void RefreshInternal(bool allow_alerts);
+    void RequestRefresh(bool allow_alerts);
+    std::thread worker_v12_;
+    std::atomic_bool busy_v12_{};
+    NativeControlPlaneSnapshot pending_previous_v12_, pending_current_v12_;
     void EvaluateAlerts(const NativeControlPlaneSnapshot& previous,
         const NativeControlPlaneSnapshot& current);
     LRESULT HandleMessage(HWND window, UINT message, WPARAM w_param, LPARAM l_param);

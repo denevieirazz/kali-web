@@ -1,3 +1,4 @@
+#include "native_theme.h"
 #include "native_appearance_manager.h"
 
 #include <algorithm>
@@ -99,6 +100,11 @@ NativeAppearanceState NativeAppearanceManager::Current()
     {
         g_state = Load();
         g_loaded = true;
+        WebSkin::Accent = g_state.accent;
+        WebSkin::AccentCyan = g_state.accent;
+        WebSkin::AccentHover = Blend(g_state.accent, RGB(255,255,255), 18);
+        WebSkin::AccentActive = Blend(g_state.accent, RGB(0,0,0), 15);
+        WebSkin::AccentSubtle = Blend(g_state.accent, WebSkin::BgPrimary, 80);
     }
     return g_state;
 }
@@ -108,6 +114,10 @@ void NativeAppearanceManager::SetAccent(COLORREF accent)
     std::scoped_lock lock(g_appearance_mutex);
     if (!g_loaded) { g_state = Load(); g_loaded = true; }
     g_state.accent = accent & 0x00FFFFFFu;
+    WebSkin::Accent = g_state.accent;
+    WebSkin::AccentCyan = g_state.accent;
+    WebSkin::AccentHover = Blend(g_state.accent, RGB(255,255,255), 18);
+    WebSkin::AccentSubtle = Blend(g_state.accent, WebSkin::BgPrimary, 80);
     Save(g_state);
 }
 
@@ -116,6 +126,10 @@ void NativeAppearanceManager::SetTransparency(bool enabled)
     std::scoped_lock lock(g_appearance_mutex);
     if (!g_loaded) { g_state = Load(); g_loaded = true; }
     g_state.transparency = enabled;
+    WebSkin::Accent = g_state.accent;
+    WebSkin::AccentCyan = g_state.accent;
+    WebSkin::AccentHover = Blend(g_state.accent, RGB(255,255,255), 18);
+    WebSkin::AccentSubtle = Blend(g_state.accent, WebSkin::BgPrimary, 80);
     Save(g_state);
 }
 
@@ -124,6 +138,10 @@ void NativeAppearanceManager::SetCompactStatus(bool enabled)
     std::scoped_lock lock(g_appearance_mutex);
     if (!g_loaded) { g_state = Load(); g_loaded = true; }
     g_state.compact_status = enabled;
+    WebSkin::Accent = g_state.accent;
+    WebSkin::AccentCyan = g_state.accent;
+    WebSkin::AccentHover = Blend(g_state.accent, RGB(255,255,255), 18);
+    WebSkin::AccentSubtle = Blend(g_state.accent, WebSkin::BgPrimary, 80);
     Save(g_state);
 }
 

@@ -144,7 +144,7 @@ Require 'Keyboard-first Start Home implementation' $content.Start @(
     'WM_CHAR',
     'GetKeyState(VK_SHIFT)',
     'GetKeyState(VK_CONTROL)',
-    'L"Setas navegam  ·  Enter abre  ·  Shift+F10 menu',
+    'EnsureHomeSelectionVisibleV12',
     'L"Redefinir recomendacoes"',
     'StartMenuMRUTracker::Instance().Clear()',
     'WebSkin::Accent'

@@ -3,6 +3,8 @@
 #include <windows.h>
 
 #include <functional>
+#include <future>
+#include "native_desktop_model_v12.h"
 #include <vector>
 
 #include "native_system_stats.h"
@@ -58,6 +60,9 @@ private:
     std::vector<RECT> quick_launch_rects_;
     std::vector<int> quick_launch_app_indices_;
     SystemStats current_stats_{};
+    NativeDesktopModelV12 desktop_model_;
+    bool widgets_enabled_{};
+    std::future<SystemStats> metrics_future_;
 
     ActionCallback on_action_;
     HotKeyCallback on_hotkey_;

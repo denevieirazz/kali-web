@@ -41,7 +41,9 @@ foreach ($name in @(
     'collect-native-diagnostics.ps1',
     'run-native-soak-v9.ps1',
     'run-native-lifecycle-smoke-v10.ps1',
-    'run-native-supervisor-smoke-v11.ps1'
+    'run-native-supervisor-smoke-v11.ps1',
+    'native-performance-v12.ps1',
+    'run-native-performance-smoke-v12.ps1'
 )) {
     $source = Join-Path $PSScriptRoot $name
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {

@@ -1,3 +1,8 @@
+#include "native_cloudos_tray.h"
+#include "native_workspace_studio_service.h"
+#include "native_session_continuity_service.h"
+#include "native_performance_v12.h"
+#include "native_appearance_manager.h"
 #include <windows.h>
 #include <commctrl.h>
 #include <gdiplus.h>
@@ -72,6 +77,8 @@ public:
 
     bool Initialize()
     {
+        PerformanceV12::Initialize();
+        (void)NativeAppearanceManager::Current();
         Gdiplus::GdiplusStartupInput gdi_input;
         if (Gdiplus::GdiplusStartup(&gdiplus_token_, &gdi_input, nullptr) != Gdiplus::Ok)
         {
@@ -181,27 +188,13 @@ public:
                 L"O CloudOS detectou uma finalizacao inesperada e restaurou o ultimo estado salvo.");
         }
 
-        if (SetTimer(desktop_.Hwnd(), kReconcileTimer, 1000, nullptr) != 0)
-        {
-            reconcile_timer_active_ = true;
-        }
-        if (SetTimer(desktop_.Hwnd(), kMetricsTimer, 1000, nullptr) != 0)
-        {
-            metrics_timer_active_ = true;
-        }
-
         CloudOSNativeNotificationCenter::Post(
             L"CloudOS pronto",
             L"Visao de Trabalho ativa: Ctrl+Alt+O abre as 4 areas; Ctrl+Alt+PgUp/PgDn alterna entre elas.");
 
         RefreshShell();
 
-        if (!HealthBootstrapV9::HasCommandLineArgument(L"--stability-probe") &&
-            !HealthBootstrapV9::HasCommandLineArgument(L"--lifecycle-probe") &&
-            !HealthBootstrapV9::HasCommandLineArgument(L"--watchdog"))
-        {
-            start_menu_.ToggleNear(PrimaryTaskbarBounds());
-        }
+        // V12 boots to Desktop + Taskbar; Start is user initiated.
 
         return true;
     }
@@ -211,6 +204,7 @@ public:
         MSG message{};
         while (GetMessageW(&message, nullptr, 0, 0) > 0)
         {
+            if (quick_settings_.Translate(&message)) continue;
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }
@@ -229,6 +223,22 @@ private:
         auto* self = reinterpret_cast<CloudOSApplication*>(reference_data);
         if (self != nullptr)
         {
+            if (message == WM_APP + 0x61B && self->performance_probe_v12_)
+            {
+                RECT anchor{}; GetWindowRect(window,&anchor); anchor.top=anchor.bottom-52;
+                if(w_param==1) self->start_menu_.ShowNear(anchor);
+                if(w_param==2) self->quick_settings_.ShowNear(anchor);
+                if(w_param==3) { self->start_menu_.Hide(); self->quick_settings_.Hide(); }
+                return 1;
+            }
+            if (message == CLOUDOS_WM_MODEL_CHANGED_V12)
+            { if (!self->view_update_pending_) { self->view_update_pending_ = true; SetTimer(window, 0xC512, 50, nullptr); } self->recovery_dirty_ = true; return 0; }
+            if (message == WM_TIMER && w_param == 0xC512)
+            { KillTimer(window, 0xC512); self->view_update_pending_ = false; self->RefreshShell(); return 0; }
+            if (message == WM_DISPLAYCHANGE || message == WM_DPICHANGED || message == WM_SETTINGCHANGE)
+                PostMessageW(window, WM_APP + 0x616, 0, 0);
+            if (message == WM_APP + 0x616)
+            { self->RebuildForDisplayChangeIfNeeded(); self->LayoutDesktop(); return 0; }
             if (message == WM_QUERYENDSESSION)
             {
                 self->window_manager_.Reconcile();
@@ -281,10 +291,7 @@ private:
         desktop_.SetTimerCallback(
             [this]()
             {
-                window_manager_.Reconcile();
-                RebuildForDisplayChangeIfNeeded();
-                session_recovery_.Tick(window_manager_);
-                RefreshShell();
+                if (recovery_dirty_) { session_recovery_.Tick(window_manager_); recovery_dirty_ = false; }
             });
     }
 
@@ -360,6 +367,7 @@ private:
             taskbars_.push_back(std::move(taskbar));
         }
 
+        NativeCloudOSTrayService::Instance().Refresh();
         return !taskbars_.empty();
     }
 
@@ -424,7 +432,10 @@ private:
 
     void RefreshShell()
     {
-        desktop_.Redraw();
+        PerformanceV12::Add(PerformanceV12::RefreshShell);
+        NativeWorkspaceStudioService::Instance().NotifyModelChangedV12();
+        NativeSessionContinuityService::Instance().NotifyModelChangedV12();
+        recovery_dirty_ = true;
         RefreshTaskbars();
         notification_center_.Refresh();
         if (workspace_overview_.Visible())
@@ -497,6 +508,7 @@ private:
 
     void HandleHotKey(int id)
     {
+        if(performance_probe_v12_) return;
         if (id >= HotWorkspace1 && id <= HotWorkspace4)
         {
             window_manager_.SwitchWorkspace(id - HotWorkspace1);
@@ -735,11 +747,6 @@ private:
         const HWND window = desktop_.Hwnd();
         if (window != nullptr)
         {
-            if (reconcile_timer_active_)
-            {
-                (void)KillTimer(window, kReconcileTimer);
-                reconcile_timer_active_ = false;
-            }
             if (metrics_timer_active_)
             {
                 (void)KillTimer(window, kMetricsTimer);
@@ -790,6 +797,9 @@ private:
         }
     }
 
+    bool performance_probe_v12_{HealthBootstrapV9::HasCommandLineArgument(L"--stability-probe")};
+    bool recovery_dirty_{true};
+    bool view_update_pending_{};
     HINSTANCE instance_{};
     ULONG_PTR gdiplus_token_{};
     CloudOSNativeWindowManager window_manager_;
@@ -804,7 +814,6 @@ private:
     std::vector<std::unique_ptr<CloudOSTaskbarAppBar>> taskbars_;
     std::wstring monitor_signature_;
     bool window_manager_initialized_{};
-    bool reconcile_timer_active_{};
     bool metrics_timer_active_{};
     bool lifecycle_subclass_attached_{};
     bool snap_assist_active_{};

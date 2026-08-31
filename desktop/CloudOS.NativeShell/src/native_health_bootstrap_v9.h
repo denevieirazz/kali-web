@@ -1,3 +1,4 @@
+#include "native_performance_v12.h"
 #pragma once
 
 #include <windows.h>
@@ -237,6 +238,7 @@ private:
             }
             if (message == WM_TIMER && w_param == HealthTimerId)
             {
+                PerformanceV12::Heartbeat();
                 self->Tick();
                 return 0;
             }

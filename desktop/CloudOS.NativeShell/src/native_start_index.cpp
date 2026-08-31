@@ -323,6 +323,7 @@ void NativeStartIndex::StartWorker(bool force_refresh)
             BuildIndex();
             ready_.store(true);
             indexing_.store(false);
+            NotifyV12();
         });
 }
 
@@ -461,6 +462,7 @@ void NativeStartIndex::UniversalSearchLoop() const
 
     if (uninitialize) CoUninitialize();
     universal_searching_.store(false);
+    NotifyV12();
 }
 
 bool NativeStartIndex::Ready() const noexcept

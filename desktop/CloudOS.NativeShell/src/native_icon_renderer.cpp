@@ -39,58 +39,11 @@ void NativeIconRenderer::DrawAetherSquircle(Graphics& g, int icon_id, int x, int
     const float sz = static_cast<float>(size);
     const float fx = static_cast<float>(x);
     const float fy = static_cast<float>(y);
-    const float radius = sz * 0.28f;
-
-    // Gradient Background Palette per Icon
-    Color col1(255, 59, 130, 246);
-    Color col2(255, 147, 51, 234);
-
-    switch (icon_id)
-    {
-    case 1: col1 = Color(255, 236, 72, 153); col2 = Color(255, 99, 102, 241); break; // Nebula Browser (Pink->Violet)
-    case 2: col1 = Color(255, 168, 85, 247); col2 = Color(255, 99, 102, 241); break; // Orion (Purple->Indigo)
-    case 3: col1 = Color(255, 56, 189, 248); col2 = Color(255, 37, 99, 235); break;  // Comms (Cyan->Blue)
-    case 4: col1 = Color(255, 45, 212, 191); col2 = Color(255, 14, 165, 233); break; // Quantum Shell (Teal->Sky)
-    case 5: col1 = Color(255, 129, 140, 248); col2 = Color(255, 99, 102, 241); break; // Mail (Indigo->Violet)
-    case 6: col1 = Color(255, 52, 211, 153); col2 = Color(255, 13, 148, 136); break; // Synapse Drive (Emerald->Teal)
-    case 7: col1 = Color(255, 96, 165, 250); col2 = Color(255, 37, 99, 235); break;  // Files (Blue)
-    case 8: col1 = Color(255, 251, 146, 60); col2 = Color(255, 244, 63, 94); break;  // Art Studio (Orange->Rose)
-    case 9: col1 = Color(255, 192, 132, 252); col2 = Color(255, 147, 51, 234); break; // Media (Lavender->Purple)
-    case 10: col1 = Color(255, 56, 189, 248); col2 = Color(255, 30, 64, 175); break; // Code Editor (Cyan->DarkBlue)
-    case 11: col1 = Color(255, 148, 163, 184); col2 = Color(255, 71, 85, 105); break; // Settings (Silver->Slate)
-    case 12: col1 = Color(255, 244, 114, 182); col2 = Color(255, 219, 39, 119); break; // Calc (Pink)
-    case 13: col1 = Color(255, 56, 189, 248); col2 = Color(255, 20, 184, 166); break; // Sysmon (Cyan->Teal)
-    case 14: col1 = Color(255, 192, 132, 252); col2 = Color(255, 236, 72, 153); break; // Regedit (Violet->Pink)
-    case 15: col1 = Color(255, 251, 191, 36); col2 = Color(255, 245, 158, 11); break; // Snip (Amber->Gold)
-    case 16: col1 = Color(255, 45, 212, 191); col2 = Color(255, 59, 130, 246); break; // App Catalog (Teal->Blue)
-    case 17: col1 = Color(255, 129, 140, 248); col2 = Color(255, 56, 189, 248); break; // Run (Indigo->Cyan)
-    case 18: col1 = Color(255, 100, 116, 139); col2 = Color(255, 51, 65, 85); break; // More (Slate)
-    default: break;
-    }
-
-    GraphicsPath squircle;
-    const float d = radius * 2.0f;
-    squircle.AddArc(fx, fy, d, d, 180, 90);
-    squircle.AddArc(fx + sz - d, fy, d, d, 270, 90);
-    squircle.AddArc(fx + sz - d, fy + sz - d, d, d, 0, 90);
-    squircle.AddArc(fx, fy + sz - d, d, d, 90, 90);
-    squircle.CloseFigure();
-
-    LinearGradientBrush br(PointF(fx, fy), PointF(fx + sz, fy + sz), col1, col2);
-    g.FillPath(&br, &squircle);
-
-    // Glass top highlight shine
-    LinearGradientBrush shine(PointF(fx, fy), PointF(fx, fy + sz * 0.5f), Color(140, 255, 255, 255), Color(0, 255, 255, 255));
-    g.FillPath(&shine, &squircle);
-
-    // Glowing border outline
-    Pen p(Color(180, 255, 255, 255), 1.2f);
-    g.DrawPath(&p, &squircle);
-
+    // Shared monochrome first-party vector family; no glossy tile behind every icon.
     // Crisp White Vector Icon inside
-    Pen whitePen(Color(255, 255, 255, 255), 2.2f);
+    Pen whitePen(WebSkin::GdiColor(WebSkin::TextPrimary), std::max(1.4f, sz / 22.0f));
     whitePen.SetLineCap(LineCapRound, LineCapRound, DashCapRound);
-    SolidBrush whiteBr(Color(255, 255, 255, 255));
+    SolidBrush whiteBr(WebSkin::GdiColor(WebSkin::TextPrimary));
 
     switch (icon_id)
     {

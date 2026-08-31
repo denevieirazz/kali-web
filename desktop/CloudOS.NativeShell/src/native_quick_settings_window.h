@@ -3,6 +3,8 @@
 #include <windows.h>
 
 #include <string>
+#include "native_quick_model_v12.h"
+#include "native_flyout_layout.h"
 #include <vector>
 
 #include "native_audio_mixer_v7.h"
@@ -22,6 +24,24 @@ public:
     ~CloudOSNativeQuickSettingsWindow();
 
     bool Create(HINSTANCE instance);
+    bool Translate(MSG* message)
+    {
+        if(!window_ || !IsWindowVisible(window_) || (message->hwnd!=window_ && !IsChild(window_,message->hwnd))) return false;
+        const bool handled=IsDialogMessageW(window_,message)!=FALSE;
+        if(handled && message->message==WM_KEYDOWN && message->wParam==VK_TAB)
+        {
+            const HWND focus=GetFocus();
+            if(focus && IsChild(window_,focus))
+            {
+                RECT rect{},client{};GetWindowRect(focus,&rect);MapWindowPoints(nullptr,window_,reinterpret_cast<POINT*>(&rect),2);GetClientRect(window_,&client);
+                if(rect.top<0) scroll_v12_.position+=rect.top-8;
+                else if(rect.bottom>client.bottom) scroll_v12_.position+=rect.bottom-client.bottom+8;
+                scroll_v12_.Clamp();Layout();
+            }
+        }
+        return handled;
+    }
+
     void Destroy();
     void ToggleNear(const RECT& anchor);
     void ShowNear(const RECT& anchor);
@@ -30,6 +50,10 @@ public:
 
 private:
     friend class NativeSurfacePreview;
+    NativeQuickModelV12 model_v12_;
+    NativeScrollState scroll_v12_;
+    bool advanced_v12_{};
+    HWND advanced_button_{};
     void Layout();
     void UpdateState(bool force_network = false);
     void ApplyVolumeFromSlider();
@@ -92,6 +116,7 @@ private:
     HWND system_center_button_{};
     HWND appearance_button_{};
 
+    UINT font_dpi_v12_{};
     HFONT font_{};
     HFONT small_font_{};
     HFONT title_font_{};

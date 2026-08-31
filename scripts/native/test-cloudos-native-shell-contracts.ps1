@@ -161,7 +161,7 @@ Require 'Persistent pins' $content.Pins @(
 
 Require 'Taskbar V4' $content.Taskbar @(
     'CloudOS.NativeShell.Taskbar.v4',
-    'kTaskbarHeightDip = 68',
+    'kTaskbarHeightDip = DesignV12::TaskbarHeight',
     'SHAppBarMessage(ABM_NEW',
     'SHAppBarMessage(ABM_QUERYPOS',
     'SHAppBarMessage(ABM_SETPOS',
@@ -201,13 +201,13 @@ Forbid 'DWM hover preview' $content.Hover @('kPinnedCount = 5')
 # Visual Experience V6 is semantic native design, not a frozen copy of old CSS hex values.
 Require 'WebSkin' $content.Theme @(
     'namespace WebSkin',
-    'BgSolid = RGB(5, 7, 12)',
-    'BgPrimary = RGB(9, 13, 21)',
-    'BgSecondary = RGB(14, 20, 31)',
-    'Accent = RGB(124, 92, 255)',
-    'AccentHover = RGB(154, 126, 255)',
-    'AccentCyan = RGB(77, 208, 225)',
-    'RadiusXL = 20',
+    'BgSolid = DesignV12::Canvas',
+    'BgPrimary = DesignV12::Background',
+    'BgSecondary = DesignV12::Surface',
+    'Accent = DesignV12::Accent',
+    'AccentHover = DesignV12::AccentHover',
+    'AccentCyan = DesignV12::Accent',
+    'RadiusXL = DesignV12::RadiusLarge',
     'DrawRoundedPanel',
     'DrawElevatedPanel',
     'PaintWindowBackground',
@@ -220,8 +220,8 @@ Require 'Desktop shell' $content.Desktop @(
     'CloudOS.NativeShell.Desktop.v2',
     'NativeDesktopDropTarget::Register',
     'NativeWallpaperManager::Draw',
-    'FOLDERID_Desktop',
-    'SHGetFileInfoW',
+    'desktop_model_.Start',
+    'NativeIconCacheV12::Instance().Get',
     'NativeDesktopContextMenu::Show',
     'WebSkin::BgPrimary'
 )

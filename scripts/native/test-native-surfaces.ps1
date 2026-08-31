@@ -44,6 +44,12 @@ exit /b %ERRORLEVEL%
 "@ | Set-Content -LiteralPath $compile -Encoding utf8
 & cmd.exe /d /c $compile
 if ($LASTEXITCODE -ne 0) { throw "Native surface fixture build failed: $LASTEXITCODE" }
+# The fixture links the runtime import library, so it needs the exact Release
+# DLL beside its executable. A developer's old UX-Release folder must not hide
+# a missing dependency on a fresh CI checkout.
+$runtime = Join-Path $Root 'desktop\CloudOS.NativeShell\bin\Release\CloudOS.NativeRuntime.dll'
+if (-not (Test-Path -LiteralPath $runtime -PathType Leaf)) { throw 'Built Release runtime DLL missing.' }
+Copy-Item -LiteralPath $runtime -Destination (Join-Path $directory 'CloudOS.NativeRuntime.dll') -Force
 if (-not $CompileOnly) {
     & $fixture --test
     if ($LASTEXITCODE -ne 0) { throw "Native surface regression failed: $LASTEXITCODE" }

@@ -1,3 +1,4 @@
+#include "native_cloudos_tray.h"
 #include "native_control_plane_service.h"
 
 #include "native_notification_center.h"
@@ -14,7 +15,7 @@ namespace
 constexpr wchar_t kServiceClass[] = L"CloudOS.NativeShell.ControlPlaneService.v4";
 constexpr UINT_PTR kRefreshTimer = 0x7401;
 constexpr UINT kRefreshMessage = WM_APP + 0x7402;
-constexpr UINT kRefreshIntervalMs = 5000;
+constexpr UINT kRefreshIntervalMs = 30000;
 
 std::mutex g_snapshot_mutex;
 NativeControlPlaneSnapshot g_snapshot{};
@@ -57,13 +58,14 @@ bool NativeControlPlaneService::Start(HINSTANCE instance)
     window_ = CreateWindowExW(0, kServiceClass, L"", 0,
         0, 0, 0, 0, HWND_MESSAGE, nullptr, instance, this);
     if (window_ == nullptr) return false;
-    RefreshInternal(false);
+    RequestRefresh(false);
     SetTimer(window_, kRefreshTimer, kRefreshIntervalMs, nullptr);
     return true;
 }
 
 void NativeControlPlaneService::Stop() noexcept
 {
+    if (worker_v12_.joinable()) worker_v12_.join();
     if (window_ != nullptr && IsWindow(window_))
     {
         KillTimer(window_, kRefreshTimer);
@@ -85,23 +87,25 @@ void NativeControlPlaneService::RefreshNow()
         PostMessageW(window_, kRefreshMessage, 0, 0);
 }
 
+void NativeControlPlaneService::RequestRefresh(bool allow_alerts)
+{
+    if (busy_v12_.exchange(true)) return;
+    if (worker_v12_.joinable()) worker_v12_.join();
+    worker_v12_ = std::thread([this,allow_alerts] { const HRESULT com=CoInitializeEx(nullptr,COINIT_MULTITHREADED); RefreshInternal(allow_alerts); if(SUCCEEDED(com)) CoUninitialize(); });
+}
+
 void NativeControlPlaneService::RefreshInternal(bool allow_alerts)
 {
     NativeControlPlaneSnapshot next{};
     next.audio = NativeSystemControlBackend::QueryAudio();
-    next.brightness = NativeSystemControlBackend::QueryBrightness();
+    // Brightness and available-network enumeration belong to visible controls.
     next.power = NativeSystemControlBackend::QueryPower();
 
-    const auto wifi = NativeSystemControlBackend::ScanWifi();
-    next.wifi_available = !wifi.empty();
-    for (const auto& network : wifi)
-    {
-        if (!network.connected) continue;
-        next.wifi_connected = true;
-        next.wifi_ssid = network.ssid;
-        next.wifi_signal = network.signal_quality;
-        break;
-    }
+    const auto wifi = NativeSystemControlBackend::QueryWifiConnection();
+    next.wifi_available = !wifi.interface_name.empty();
+    next.wifi_connected = wifi.connected;
+    next.wifi_ssid = wifi.ssid;
+    next.wifi_signal = wifi.signal_quality;
 
     const auto summary = NativeSystemControlBackend::QuerySummary();
     next.monitor_count = summary.monitor_count;
@@ -152,7 +156,8 @@ void NativeControlPlaneService::RefreshInternal(bool allow_alerts)
         next.generation = previous.generation + 1u;
         g_snapshot = next;
     }
-    if (allow_alerts) EvaluateAlerts(previous, next);
+    pending_previous_v12_ = previous; pending_current_v12_ = next;
+    PostMessageW(window_, WM_APP + 0x618, allow_alerts ? 1 : 0, 0);
 }
 
 void NativeControlPlaneService::EvaluateAlerts(
@@ -193,15 +198,21 @@ LRESULT NativeControlPlaneService::HandleMessage(
 {
     switch (message)
     {
+    case WM_APP + 0x618:
+        if (worker_v12_.joinable()) worker_v12_.join();
+        busy_v12_ = false;
+        if (w_param) EvaluateAlerts(pending_previous_v12_, pending_current_v12_);
+        if (pending_previous_v12_.audio.volume_percent != pending_current_v12_.audio.volume_percent || pending_previous_v12_.audio.muted != pending_current_v12_.audio.muted || pending_previous_v12_.wifi_connected != pending_current_v12_.wifi_connected || pending_previous_v12_.power.battery_percent != pending_current_v12_.power.battery_percent || pending_previous_v12_.health_severity != pending_current_v12_.health_severity) NativeCloudOSTrayService::Instance().Refresh();
+        return 0;
     case WM_TIMER:
         if (w_param == kRefreshTimer)
         {
-            RefreshInternal(true);
+            RequestRefresh(true);
             return 0;
         }
         break;
     case kRefreshMessage:
-        RefreshInternal(false);
+        RequestRefresh(false);
         return 0;
     case WM_NCDESTROY:
         if (window_ == window) window_ = nullptr;

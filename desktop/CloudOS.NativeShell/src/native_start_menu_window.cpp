@@ -1,3 +1,5 @@
+#include "native_render_cache_v12.h"
+#include "native_icon_cache_v12.h"
 #include "native_start_menu_window.h"
 
 #include "native_app_launcher.h"
@@ -37,8 +39,8 @@ constexpr int kAllAppsId = 9005;
 constexpr UINT_PTR kSearchSubclass = 9006;
 constexpr UINT_PTR kIndexTimer = 9007;
 
-constexpr int kMenuWidthDip = 720;
-constexpr int kMenuHeightDip = 760;
+constexpr int kMenuWidthDip = 640;
+constexpr int kMenuHeightDip = 680;
 
 constexpr UINT kContextOpen = 9201;
 constexpr UINT kContextToggleStartPin = 9202;
@@ -165,29 +167,8 @@ bool DrawWindowsIcon(
     {
         return false;
     }
-    SHFILEINFOW info{};
-    const DWORD_PTR result = SHGetFileInfoW(
-        target.c_str(),
-        0,
-        &info,
-        sizeof(info),
-        SHGFI_ICON | SHGFI_LARGEICON);
-    if (result == 0 || info.hIcon == nullptr)
-    {
-        return false;
-    }
-    const BOOL drawn = DrawIconEx(
-        dc,
-        x,
-        y,
-        info.hIcon,
-        size,
-        size,
-        0,
-        nullptr,
-        DI_NORMAL);
-    DestroyIcon(info.hIcon);
-    return drawn != FALSE;
+    const auto icon = NativeIconCacheV12::Instance().Get(target);
+    return icon && icon->handle && DrawIconEx(dc, x, y, icon->handle, size, size, 0, nullptr, DI_NORMAL) != FALSE;
 }
 
 std::wstring Ellipsize(std::wstring value, std::size_t maximum)
@@ -371,19 +352,22 @@ bool CloudOSNativeStartMenuWindow::Create(HINSTANCE instance)
     WebSkin::PrepareButton(command_button_);
     WebSkin::PrepareButton(power_button_);
 
+    WebSkin::ApplyUxTheme(window_);
     ApplyWebFlyoutMaterial(window_);
     RebuildRowHeight();
     Layout();
+    NativeStartIndex::Instance().Subscribe(window_);
     NativeStartIndex::Instance().StartAsync();
     last_index_count_ = NativeStartIndex::Instance().Count();
     RefreshHome();
     RefreshResults();
-    SetTimer(window_, kIndexTimer, 750, nullptr);
+
     return true;
 }
 
 void CloudOSNativeStartMenuWindow::Destroy()
 {
+    NativeStartIndex::Instance().Subscribe(nullptr);
     if (window_ != nullptr && IsWindow(window_))
     {
         KillTimer(window_, kIndexTimer);
@@ -413,6 +397,7 @@ void CloudOSNativeStartMenuWindow::Destroy()
     command_button_ = nullptr;
     power_button_ = nullptr;
     footer_label_ = nullptr;
+    font_dpi_v12_ = 0;
     results_.clear();
     start_pins_.clear();
     home_hits_.clear();
@@ -483,7 +468,21 @@ std::wstring CloudOSNativeStartMenuWindow::PinSubtitle(const ShellPinItem& pin) 
 
 void CloudOSNativeStartMenuWindow::RefreshHome()
 {
+    recommended_ids_v12_ = StartMenuMRUTracker::Instance().GetTopApps(8);
+    for (const wchar_t* fallback : {L"files", L"browser", L"terminal", L"control", L"settings", L"sysmon"})
+    {
+        if (recommended_ids_v12_.size() >= 6u)
+        {
+            break;
+        }
+        if (std::find(recommended_ids_v12_.begin(), recommended_ids_v12_.end(), fallback) == recommended_ids_v12_.end())
+        {
+            recommended_ids_v12_.emplace_back(fallback);
+        }
+    }
+
     start_pins_ = ShellPinStore::Instance().StartPins();
+    for (const auto& pin : start_pins_) if (pin.kind == ShellPinKind::WindowsTarget) NativeIconCacheV12::Instance().Warm(pin.target, window_);
     InvalidateRect(window_, nullptr, FALSE);
 }
 
@@ -540,6 +539,16 @@ void CloudOSNativeStartMenuWindow::Layout()
     RECT client{};
     GetClientRect(window_, &client);
     const UINT dpi = GetDpiForWindow(window_);
+    if (search_edit_ && font_dpi_v12_ != dpi)
+    {
+        font_dpi_v12_ = dpi;
+        for (HFONT value : {font_, small_font_, title_font_}) if (value) DeleteObject(value);
+        font_ = CreateFontW(-Scale(14,dpi),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI Variable Text");
+        small_font_ = CreateFontW(-Scale(12,dpi),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI Variable Text");
+        title_font_ = CreateFontW(-Scale(16,dpi),0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI Variable Display");
+        for (HWND child : {search_edit_, all_apps_button_, app_list_, command_button_, power_button_}) SetControlFont(child, font_);
+        SetControlFont(footer_label_, small_font_);
+    }
     const int margin = Scale(24, dpi);
     const int width = std::max<int>(1, static_cast<int>(client.right - client.left));
     const int height = std::max<int>(1, static_cast<int>(client.bottom - client.top));
@@ -573,18 +582,21 @@ void CloudOSNativeStartMenuWindow::Layout()
         std::max(80, footer_y - list_y - Scale(12, dpi)),
         TRUE);
 
+    const bool compact_footer = width < Scale(520, dpi);
+    ShowWindow(footer_label_, compact_footer ? SW_HIDE : SW_SHOWNOACTIVATE);
+    const int command_x = compact_footer ? margin : width - margin - Scale(224, dpi);
     MoveWindow(
         footer_label_,
         margin + Scale(18, dpi),
         footer_y + Scale(21, dpi),
-        std::max(100, width - Scale(330, dpi)),
+        std::max(1, command_x - margin - Scale(26, dpi)),
         Scale(28, dpi),
         TRUE);
     MoveWindow(
         command_button_,
-        width - margin - Scale(224, dpi),
+        command_x,
         footer_y + Scale(14, dpi),
-        Scale(170, dpi),
+        width - margin - Scale(54, dpi) - command_x,
         Scale(40, dpi),
         TRUE);
     MoveWindow(
@@ -597,7 +609,22 @@ void CloudOSNativeStartMenuWindow::Layout()
 
     ListView_SetColumnWidth(app_list_, 0, std::max(180, width - margin * 2 - Scale(8, dpi)));
     UpdateViewVisibility();
+    const bool home=view_mode_==ViewMode::Home && SearchText(search_edit_).empty();
+    const int columns=std::clamp((width-margin*2)/Scale(92,dpi),2,6);
+    const int rows=(static_cast<int>(start_pins_.size())+columns-1)/columns;
+    const int cards=width>=Scale(500,dpi)?2:1;
+    const int extent=Scale(31+rows*102+18+32+((6+cards-1)/cards)*66+12,dpi);
+    home_scroll_v12_.Update(window_,home?extent:0,std::max(1,footer_y-Scale(100,dpi)));
     InvalidateRect(window_, nullptr, FALSE);
+}
+
+bool CloudOSNativeStartMenuWindow::HomePointVisibleV12(POINT point) const
+{
+    RECT client{};
+    GetClientRect(window_, &client);
+    const UINT dpi = GetDpiForWindow(window_);
+    RECT content{Scale(24,dpi), Scale(92,dpi), client.right-Scale(24,dpi), client.bottom-Scale(76,dpi)};
+    return Contains(content, point);
 }
 
 void CloudOSNativeStartMenuWindow::PaintHome(
@@ -620,7 +647,7 @@ void CloudOSNativeStartMenuWindow::PaintHome(
         UnitPixel);
     Font tile_font(
         L"Segoe UI Variable Text",
-        static_cast<REAL>(Scale(11, dpi)),
+        static_cast<REAL>(Scale(12, dpi)),
         FontStyleRegular,
         UnitPixel);
     Font card_title_font(
@@ -630,14 +657,18 @@ void CloudOSNativeStartMenuWindow::PaintHome(
         UnitPixel);
     Font card_subtitle_font(
         L"Segoe UI Variable Text",
-        static_cast<REAL>(Scale(9, dpi)),
+        static_cast<REAL>(Scale(12, dpi)),
         FontStyleRegular,
         UnitPixel);
     SolidBrush primary(WebSkin::GdiColor(WebSkin::TextPrimary));
     SolidBrush secondary(WebSkin::GdiColor(WebSkin::TextSecondary));
     SolidBrush tertiary(WebSkin::GdiColor(WebSkin::TextTertiary));
 
-    const int pinned_title_y = margin + search_height + Scale(28, dpi);
+    const auto graphics_state = graphics.Save();
+    const int dc_state = SaveDC(dc);
+    IntersectClipRect(dc,margin,Scale(92,dpi),width-margin,footer_y-Scale(8,dpi));
+    graphics.SetClip(RectF(static_cast<REAL>(margin),static_cast<REAL>(Scale(92,dpi)),static_cast<REAL>(content_width),static_cast<REAL>(std::max(1,footer_y-Scale(100,dpi)))));
+    const int pinned_title_y = margin + search_height + Scale(20, dpi) - home_scroll_v12_.position;
     graphics.DrawString(
         L"Fixados",
         -1,
@@ -645,7 +676,7 @@ void CloudOSNativeStartMenuWindow::PaintHome(
         PointF(static_cast<REAL>(margin), static_cast<REAL>(pinned_title_y)),
         &primary);
 
-    const int columns = std::clamp(content_width / Scale(112, dpi), 2, 6);
+    const int columns = std::clamp(content_width / Scale(92, dpi), 2, 6);
     const int gap = Scale(8, dpi);
     const int tile_width = std::max(72, (content_width - gap * (columns - 1)) / columns);
     const int tile_height = Scale(94, dpi);
@@ -742,25 +773,13 @@ void CloudOSNativeStartMenuWindow::PaintHome(
         PointF(static_cast<REAL>(margin), static_cast<REAL>(recommended_y)),
         &primary);
 
-    std::vector<std::wstring> recommended_ids = StartMenuMRUTracker::Instance().GetTopApps(8);
-    for (const wchar_t* fallback : {L"files", L"browser", L"terminal", L"control", L"settings", L"sysmon"})
-    {
-        if (recommended_ids.size() >= 6u)
-        {
-            break;
-        }
-        if (std::find(recommended_ids.begin(), recommended_ids.end(), fallback) == recommended_ids.end())
-        {
-            recommended_ids.emplace_back(fallback);
-        }
-    }
-
     const int card_gap = Scale(10, dpi);
-    const int card_width = (content_width - card_gap) / 2;
+    const int card_columns = width >= Scale(500,dpi) ? 2 : 1;
+    const int card_width = (content_width - card_gap*(card_columns-1)) / card_columns;
     const int card_height = Scale(58, dpi);
     const int cards_y = recommended_y + Scale(32, dpi);
     std::size_t rendered = 0;
-    for (const std::wstring& id : recommended_ids)
+    for (const std::wstring& id : recommended_ids_v12_)
     {
         if (rendered >= 6u)
         {
@@ -771,8 +790,8 @@ void CloudOSNativeStartMenuWindow::PaintHome(
         {
             continue;
         }
-        const int column = static_cast<int>(rendered % 2u);
-        const int row = static_cast<int>(rendered / 2u);
+        const int column = static_cast<int>(rendered % static_cast<std::size_t>(card_columns));
+        const int row = static_cast<int>(rendered / static_cast<std::size_t>(card_columns));
         const int x = margin + column * (card_width + card_gap);
         const int y = cards_y + row * (card_height + Scale(8, dpi));
         RECT hit{x, y, x + card_width, y + card_height};
@@ -795,7 +814,7 @@ void CloudOSNativeStartMenuWindow::PaintHome(
             WebSkin::GdiColor(
                 hot && keyboard_home_navigation_ ? WebSkin::Accent :
                 hot ? WebSkin::BorderStrong : WebSkin::BorderDefault),
-            hot && keyboard_home_navigation_ ? 1.5f : 1.0f);
+            hot && keyboard_home_navigation_ ? 1.0f : 0.0f);
 
         const int icon_size = Scale(34, dpi);
         NativeIconRenderer::DrawAetherSquircle(
@@ -830,19 +849,21 @@ void CloudOSNativeStartMenuWindow::PaintHome(
         ++rendered;
     }
 
+    graphics.Restore(graphics_state); RestoreDC(dc,dc_state);
     const int hint_y = footer_y - Scale(30, dpi);
     RECT hint_rect{margin, hint_y, width - margin, footer_y - Scale(5, dpi)};
     DrawTextLine(
         dc,
         small_font_,
         WebSkin::TextTertiary,
-        L"Setas navegam  ·  Enter abre  ·  Shift+F10 menu  ·  Digite para pesquisar  ·  F5 reindexa",
+        L"",
         hint_rect,
         DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
 
 void CloudOSNativeStartMenuWindow::Paint()
 {
+    PerformanceV12::PaintScope perf(PerformanceV12::StartPaint);
     PAINTSTRUCT paint{};
     HDC screen_dc = BeginPaint(window_, &paint);
     RECT client{};
@@ -850,9 +871,10 @@ void CloudOSNativeStartMenuWindow::Paint()
     const int width = std::max<int>(1, static_cast<int>(client.right - client.left));
     const int height = std::max<int>(1, static_cast<int>(client.bottom - client.top));
 
-    HDC memory_dc = CreateCompatibleDC(screen_dc);
-    HBITMAP bitmap = CreateCompatibleBitmap(screen_dc, width, height);
-    HGDIOBJ old_bitmap = SelectObject(memory_dc, bitmap);
+    HDC memory_dc = NativeBackbufferV12::Acquire(window_, screen_dc, width, height);
+    if (!memory_dc) { EndPaint(window_, &paint); return; }
+    const int saved_dc = SaveDC(memory_dc);
+    IntersectClipRect(memory_dc, paint.rcPaint.left, paint.rcPaint.top, paint.rcPaint.right, paint.rcPaint.bottom);
 
     Graphics graphics(memory_dc);
     graphics.SetSmoothingMode(SmoothingModeAntiAlias);
@@ -949,17 +971,16 @@ void CloudOSNativeStartMenuWindow::Paint()
         static_cast<REAL>(footer_y));
 
     SolidBrush accent(WebSkin::GdiColor(WebSkin::Accent));
-    graphics.FillEllipse(
+    if (width >= Scale(520, dpi)) graphics.FillEllipse(
         &accent,
         static_cast<REAL>(margin),
         static_cast<REAL>(footer_y + Scale(27, dpi)),
         static_cast<REAL>(Scale(7, dpi)),
         static_cast<REAL>(Scale(7, dpi)));
 
-    BitBlt(screen_dc, 0, 0, width, height, memory_dc, 0, 0, SRCCOPY);
-    SelectObject(memory_dc, old_bitmap);
-    DeleteObject(bitmap);
-    DeleteDC(memory_dc);
+    graphics.Flush();
+    BitBlt(screen_dc, paint.rcPaint.left, paint.rcPaint.top, paint.rcPaint.right-paint.rcPaint.left, paint.rcPaint.bottom-paint.rcPaint.top, memory_dc, paint.rcPaint.left, paint.rcPaint.top, SRCCOPY);
+    RestoreDC(memory_dc, saved_dc);
     EndPaint(window_, &paint);
 }
 
@@ -1112,7 +1133,7 @@ LRESULT CloudOSNativeStartMenuWindow::CustomDrawResults(const NMLVCUSTOMDRAW& dr
             UnitPixel);
         Font subtitle_font(
             L"Segoe UI Variable Text",
-            static_cast<REAL>(Scale(10, dpi)),
+            static_cast<REAL>(Scale(12, dpi)),
             FontStyleRegular,
             UnitPixel);
         SolidBrush title_brush(WebSkin::GdiColor(WebSkin::TextPrimary));
@@ -1235,6 +1256,7 @@ void CloudOSNativeStartMenuWindow::RefreshResults()
             ResultRow row{};
             row.kind = ResultKind::IndexedWindowsApp;
             row.indexed = indexed;
+            NativeIconCacheV12::Instance().Warm(indexed.launch_target, window_);
             results_.push_back(std::move(row));
         }
 
@@ -1371,6 +1393,16 @@ void CloudOSNativeStartMenuWindow::MoveSelection(int delta)
     ListView_EnsureVisible(app_list_, selected, FALSE);
 }
 
+void CloudOSNativeStartMenuWindow::EnsureHomeSelectionVisibleV12()
+{
+    if(hovered_home_index_<0 || hovered_home_index_>=static_cast<int>(home_hits_.size())) return;
+    const auto hit=home_hits_[hovered_home_index_].rect;
+    const int top=Scale(92,GetDpiForWindow(window_)), bottom=top+home_scroll_v12_.page;
+    if(hit.top<top) home_scroll_v12_.position-=top-hit.top;
+    else if(hit.bottom>bottom) home_scroll_v12_.position+=hit.bottom-bottom;
+    home_scroll_v12_.Clamp(); Layout();
+}
+
 void CloudOSNativeStartMenuWindow::MoveHomeSelection(int horizontal, int vertical)
 {
     if (window_ == nullptr || view_mode_ != ViewMode::Home || !SearchText(search_edit_).empty())
@@ -1435,6 +1467,7 @@ void CloudOSNativeStartMenuWindow::MoveHomeSelection(int horizontal, int vertica
     }
 
     hovered_home_index_ = best_index;
+    EnsureHomeSelectionVisibleV12();
     InvalidateRect(window_, nullptr, FALSE);
 }
 
@@ -1455,6 +1488,7 @@ void CloudOSNativeStartMenuWindow::SelectHomeEdge(bool last)
     }
     keyboard_home_navigation_ = true;
     hovered_home_index_ = last ? static_cast<int>(home_hits_.size()) - 1 : 0;
+    EnsureHomeSelectionVisibleV12();
     InvalidateRect(window_, nullptr, FALSE);
 }
 
@@ -1720,11 +1754,13 @@ void CloudOSNativeStartMenuWindow::ShowPinContextMenu(
 
 void CloudOSNativeStartMenuWindow::ShowNear(const RECT& taskbar_bounds)
 {
+    const auto open_begin = PerformanceV12::NowUs();
     if (window_ == nullptr)
     {
         return;
     }
 
+    NativeStartIndex::Instance().Subscribe(window_);
     NativeStartIndex::Instance().StartAsync();
     SetWindowTextW(search_edit_, L"");
     view_mode_ = ViewMode::Home;
@@ -1739,23 +1775,14 @@ void CloudOSNativeStartMenuWindow::ShowNear(const RECT& taskbar_bounds)
     GetMonitorInfoW(monitor, &info);
 
     const UINT dpi = GetDpiForWindow(window_);
-    const int width = Scale(kMenuWidthDip, dpi);
-    const int height = Scale(kMenuHeightDip, dpi);
-    int x = taskbar_bounds.left + (taskbar_bounds.right - taskbar_bounds.left - width) / 2;
-    int y = taskbar_bounds.top - height - Scale(12, dpi);
-    x = std::clamp<int>(
-        x,
-        static_cast<int>(info.rcWork.left),
-        std::max<int>(static_cast<int>(info.rcWork.left), static_cast<int>(info.rcWork.right - width)));
-    y = std::clamp<int>(
-        y,
-        static_cast<int>(info.rcWork.top),
-        std::max<int>(static_cast<int>(info.rcWork.top), static_cast<int>(info.rcWork.bottom - height)));
-
-    SetWindowPos(window_, HWND_TOPMOST, x, y, width, height, SWP_SHOWWINDOW);
+    const RECT fitted = FitFlyout(taskbar_bounds, info.rcWork, Scale(kMenuWidthDip,dpi), Scale(kMenuHeightDip,dpi), Scale(12,dpi), true);
+    SetWindowPos(window_,HWND_TOPMOST,fitted.left,fitted.top,fitted.right-fitted.left,fitted.bottom-fitted.top,SWP_SHOWWINDOW);
     ShowWindow(window_, SW_SHOWNORMAL);
     SetForegroundWindow(window_);
     FocusSearch();
+
+    UpdateWindow(window_); // first paint completes before the open-latency sample
+    PerformanceV12::Set(PerformanceV12::StartOpenUs, PerformanceV12::NowUs() - open_begin);
 }
 
 void CloudOSNativeStartMenuWindow::ToggleNear(const RECT& taskbar_bounds)
@@ -1770,6 +1797,7 @@ void CloudOSNativeStartMenuWindow::Hide()
 {
     if (window_ != nullptr)
     {
+        KillTimer(window_, kIndexTimer);
         ShowWindow(window_, SW_HIDE);
     }
 }
@@ -1792,6 +1820,10 @@ LRESULT CloudOSNativeStartMenuWindow::HandleMessage(
 {
     switch (message)
     {
+    case WM_APP + 0x619: if (IsWindowVisible(window_)) RefreshResults(); return 0;
+    case WM_VSCROLL: if (view_mode_ == ViewMode::Home) { home_scroll_v12_.Scroll(window_,w_param,Scale(32,GetDpiForWindow(window_))); Layout(); InvalidateRect(window_,nullptr,FALSE); } return 0;
+    case WM_MOUSEWHEEL: if (view_mode_ == ViewMode::Home) { home_scroll_v12_.Wheel(GET_WHEEL_DELTA_WPARAM(w_param),Scale(32,GetDpiForWindow(window_))); Layout(); InvalidateRect(window_,nullptr,FALSE); return 0; } break;
+    case WM_CLOUDOS_ICON_READY_V12: if (IsWindowVisible(window_)) { InvalidateRect(window_, nullptr, FALSE); InvalidateRect(app_list_, nullptr, FALSE); } return 0;
     case WM_PAINT:
         Paint();
         return 0;
@@ -1805,13 +1837,14 @@ LRESULT CloudOSNativeStartMenuWindow::HandleMessage(
         const auto* suggested = reinterpret_cast<const RECT*>(l_param);
         if (suggested != nullptr)
         {
+            const RECT fitted = FitSuggestedFlyout(*suggested);
             SetWindowPos(
                 window_,
                 nullptr,
-                suggested->left,
-                suggested->top,
-                suggested->right - suggested->left,
-                suggested->bottom - suggested->top,
+                fitted.left,
+                fitted.top,
+                fitted.right - fitted.left,
+                fitted.bottom - fitted.top,
                 SWP_NOZORDER | SWP_NOACTIVATE);
         }
         RebuildRowHeight();
@@ -1827,10 +1860,11 @@ LRESULT CloudOSNativeStartMenuWindow::HandleMessage(
     case WM_TIMER:
         if (w_param == kIndexTimer)
         {
+            if (!IsWindowVisible(window_) || !NativeStartIndex::Instance().Indexing()) KillTimer(window_, kIndexTimer);
             if (IsWindowVisible(window_))
             {
                 const std::size_t count = NativeStartIndex::Instance().Count();
-                if (count != last_index_count_ || NativeStartIndex::Instance().Indexing())
+                if (count != last_index_count_)
                 {
                     last_index_count_ = count;
                     RefreshResults();
@@ -1853,7 +1887,7 @@ LRESULT CloudOSNativeStartMenuWindow::HandleMessage(
             int next_hover = -1;
             for (std::size_t index = 0; index < home_hits_.size(); ++index)
             {
-                if (Contains(home_hits_[index].rect, point))
+                if (HomePointVisibleV12(point) && Contains(home_hits_[index].rect, point))
                 {
                     next_hover = static_cast<int>(index);
                     break;
@@ -1882,7 +1916,7 @@ LRESULT CloudOSNativeStartMenuWindow::HandleMessage(
             const POINT point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
             for (const HomeHit& hit : home_hits_)
             {
-                if (Contains(hit.rect, point))
+                if (HomePointVisibleV12(point) && Contains(hit.rect, point))
                 {
                     ExecutePin(hit.pin);
                     return 0;
@@ -1897,7 +1931,7 @@ LRESULT CloudOSNativeStartMenuWindow::HandleMessage(
             const POINT client_point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
             for (std::size_t index = 0; index < home_hits_.size(); ++index)
             {
-                if (Contains(home_hits_[index].rect, client_point))
+                if (HomePointVisibleV12(client_point) && Contains(home_hits_[index].rect, client_point))
                 {
                     hovered_home_index_ = static_cast<int>(index);
                     POINT screen_point = client_point;

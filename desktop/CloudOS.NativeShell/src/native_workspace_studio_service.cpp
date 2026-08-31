@@ -15,7 +15,7 @@ namespace
 {
 constexpr wchar_t kEngineClass[] = L"CloudOS.NativeShell.WorkspaceStudioEngine.v2";
 constexpr UINT_PTR kEngineTimer = 0x575332;
-constexpr UINT kEngineIntervalMs = 850;
+
 constexpr int kHotOpenStudio = 3310;
 constexpr int kHotQuickSnapshot = 3311;
 constexpr int kHotRestoreSnapshot = 3312;
@@ -106,6 +106,7 @@ void NativeWorkspaceStudioService::Reload()
 {
     (void)store_.Load();
     automation_.ResetRuntimeState();
+    observed_revision_v12_=~0ull; NotifyModelChangedV12();
     if (studio_window_ != nullptr)
     {
         studio_window_->RefreshAll();
@@ -274,7 +275,7 @@ bool NativeWorkspaceStudioService::EnsureEngineWindow(HINSTANCE instance)
         return false;
     }
 
-    (void)SetTimer(engine_window_, kEngineTimer, kEngineIntervalMs, nullptr);
+    NotifyModelChangedV12();
     RegisterHotKeys();
     return true;
 }
@@ -285,6 +286,9 @@ void NativeWorkspaceStudioService::Tick()
     {
         return;
     }
+    const auto revision=manager_->RevisionV12();
+    if(observed_revision_v12_==revision) return;
+    observed_revision_v12_=revision;
     automation_.Tick(
         instance_ != nullptr ? instance_ : GetModuleHandleW(nullptr),
         owner_ != nullptr ? owner_ : engine_window_,
@@ -329,6 +333,7 @@ LRESULT NativeWorkspaceStudioService::HandleMessage(
     (void)l_param;
     switch (message)
     {
+    case WM_APP+0x61C: Tick(); return 0;
     case WM_TIMER:
         if (w_param == kEngineTimer)
         {

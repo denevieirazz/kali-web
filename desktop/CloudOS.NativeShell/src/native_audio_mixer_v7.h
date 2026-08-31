@@ -80,6 +80,8 @@ public:
                 item.title = display_name;
                 CoTaskMemFree(display_name);
             }
+            if(item.system_sounds) item.title=L"Sons do sistema";
+            else if(!item.title.empty() && item.title.front()==L'@') item.title.clear();
             if (item.title.empty()) item.title = ProcessName(item.process_id);
             if (item.title.empty()) item.title = item.system_sounds ? L"Sons do sistema" : L"Sessao de audio";
 
