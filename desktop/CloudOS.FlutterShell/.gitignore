@@ -1,0 +1,9 @@
+.dart_tool/
+.packages
+.pub/
+pubspec.lock
+build/
+windows/
+coverage/
+.flutter-plugins
+.flutter-plugins-dependencies

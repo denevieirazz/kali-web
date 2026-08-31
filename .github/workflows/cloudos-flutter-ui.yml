@@ -1,0 +1,101 @@
+name: CloudOS Flutter UI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'desktop/CloudOS.FlutterShell/**'
+      - 'scripts/flutter/**'
+      - 'Abrir CloudOS Flutter Preview.cmd'
+      - '.github/workflows/cloudos-flutter-ui.yml'
+
+jobs:
+  flutter-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter 3.44.7
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.7'
+          channel: stable
+          cache: true
+
+      - name: Enable Windows desktop
+        shell: pwsh
+        run: |
+          flutter --version
+          flutter config --enable-windows-desktop
+          flutter devices
+
+      - name: Generate local Windows host
+        shell: pwsh
+        working-directory: desktop/CloudOS.FlutterShell
+        run: |
+          flutter create --platforms=windows --project-name cloudos_flutter_shell .
+          if (Test-Path 'test/widget_test.dart') {
+            Remove-Item 'test/widget_test.dart' -Force
+          }
+
+      - name: Resolve dependencies
+        shell: pwsh
+        working-directory: desktop/CloudOS.FlutterShell
+        run: flutter pub get
+
+      - name: Analyze
+        shell: pwsh
+        working-directory: desktop/CloudOS.FlutterShell
+        run: flutter analyze --fatal-infos --fatal-warnings
+
+      - name: Widget smoke tests
+        shell: pwsh
+        working-directory: desktop/CloudOS.FlutterShell
+        run: flutter test
+
+      - name: Build Windows Release
+        shell: pwsh
+        working-directory: desktop/CloudOS.FlutterShell
+        run: flutter build windows --release
+
+      - name: Write V19 evidence
+        shell: pwsh
+        run: |
+          $flutter = (flutter --version | Select-Object -First 1).Trim()
+          $release = Resolve-Path 'desktop/CloudOS.FlutterShell/build/windows/x64/runner/Release'
+          $exe = Join-Path $release 'cloudos_flutter_shell.exe'
+          if (-not (Test-Path $exe)) { throw "Flutter executable missing: $exe" }
+          $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $evidence = [ordered]@{
+            schema = 19
+            verdict = 'pass'
+            flutter = $flutter
+            git_sha = '${{ github.sha }}'
+            presentation_only = $true
+            native_bridge_channel = 'cloudos/native/v19'
+            native_bridge_wired = $false
+            winlogon_modified = $false
+            shell_activation_executed = $false
+            executable = 'cloudos_flutter_shell.exe'
+            executable_sha256 = $sha
+          }
+          $evidence | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 'flutter-v19-smoke.json'
+          Get-Content 'flutter-v19-smoke.json'
+
+      - name: Package Flutter preview
+        shell: pwsh
+        run: |
+          $release = Resolve-Path 'desktop/CloudOS.FlutterShell/build/windows/x64/runner/Release'
+          Compress-Archive -Path "$release\*" -DestinationPath 'CloudOS-Flutter-V19-Windows-x64.zip' -Force
+
+      - name: Upload Flutter preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: CloudOS-Flutter-V19-${{ github.sha }}
+          path: |
+            CloudOS-Flutter-V19-Windows-x64.zip
+            flutter-v19-smoke.json
+          if-no-files-found: error
+          retention-days: 14
