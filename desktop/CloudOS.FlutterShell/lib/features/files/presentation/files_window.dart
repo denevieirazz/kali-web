@@ -233,8 +233,9 @@ class _FilesWindowState extends State<FilesWindow> {
 }
 
 class _FilesLocation {
-  const _FilesLocation.root(this.rootId, this.label)
-      : entryId = null,
+  const _FilesLocation.root(String rootId, this.label)
+      : rootId = rootId,
+        entryId = null,
         sidebarId = rootId,
         parent = null;
 
