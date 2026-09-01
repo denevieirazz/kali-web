@@ -19,8 +19,14 @@ public:
             return false;
         }
 
-        const HWND activation_window =
-            FindWindowW(ShellActivationV21::kWindowClass, nullptr);
+        // The authoritative activation server is a message-only window.
+        // FindWindowW searches top-level windows and does not reliably resolve
+        // HWND_MESSAGE children, so search the message-only window tree directly.
+        const HWND activation_window = FindWindowExW(
+            HWND_MESSAGE,
+            nullptr,
+            ShellActivationV21::kWindowClass,
+            nullptr);
         if (activation_window == nullptr)
         {
             SetError(error, "CloudOS NativeShell activation endpoint is unavailable");
@@ -33,7 +39,7 @@ public:
         COPYDATASTRUCT copy_data{};
         copy_data.dwData =
             static_cast<ULONG_PTR>(ShellActivationV21::kCopyDataTag);
-        copy_data.cbData = sizeof(request);
+        copy_data.cbData = static_cast<DWORD>(sizeof(request));
         copy_data.lpData = &request;
 
         DWORD_PTR response = FALSE;
