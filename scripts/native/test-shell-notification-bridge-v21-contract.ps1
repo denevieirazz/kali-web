@@ -14,23 +14,29 @@ function Read-RepoFile([string]$relativePath) {
     return Get-Content -LiteralPath $path -Raw
 }
 
-$contract = Read-RepoFile 'desktop/CloudOS.NativeCommon/native_shell_activation_v21.h'
-$client = Read-RepoFile 'desktop/CloudOS.NativeCommon/native_shell_activation_client_v21.h'
-$server = Read-RepoFile 'desktop/CloudOS.NativeShell/src/native_shell_activation_server_v21.h'
+$contract = Read-RepoFile 'desktop/CloudOS.NativeCommon/native_shell_notification_v21.h'
+$client = Read-RepoFile 'desktop/CloudOS.NativeCommon/native_shell_notification_client_v21.h'
+$server = Read-RepoFile 'desktop/CloudOS.NativeShell/src/native_shell_notification_server_v21.h'
 $centerHeader = Read-RepoFile 'desktop/CloudOS.NativeShell/src/native_notification_center.h'
 $centerSource = Read-RepoFile 'desktop/CloudOS.NativeShell/src/native_notification_center.cpp'
 $bridge = Read-RepoFile 'desktop/CloudOS.FlutterShell/native_bridge/cloudos_flutter_bridge_v20.cpp'
 $dartBridge = Read-RepoFile 'desktop/CloudOS.FlutterShell/lib/services/cloudos_bridge.dart'
 $taskbar = Read-RepoFile 'desktop/CloudOS.FlutterShell/lib/features/taskbar/presentation/cloud_taskbar.dart'
 
-foreach ($needle in @('NotificationAction', 'NotificationRequest', 'NotificationSnapshot', 'kNotificationCopyDataTag', 'kNotificationMaxItems')) {
+foreach ($needle in @('enum class Action', 'struct Request', 'struct Snapshot', 'kCopyDataTag', 'kMaxItems', 'kWindowClass')) {
     if (-not $contract.Contains($needle)) { throw "Notification V21 contract missing: $needle" }
 }
-if (-not $client.Contains('CreateFileMappingW') -or -not $client.Contains('QueryNotifications')) {
+if (-not $contract.Contains('kMaxItems = 100')) {
+    throw 'Notification snapshot must remain bounded to 100 items.'
+}
+if (-not $client.Contains('CreateFileMappingW') -or -not $client.Contains('Query(')) {
     throw 'Notification query must use ephemeral shared memory owned by the caller.'
 }
-if (-not $server.Contains('OpenFileMappingW') -or -not $server.Contains('HandleNotificationRequest')) {
-    throw 'NativeShell activation server must fill the bounded notification snapshot.'
+if (-not $server.Contains('OpenFileMappingW') -or -not $server.Contains('FillSnapshot')) {
+    throw 'NativeShell notification endpoint must fill the bounded shared snapshot.'
+}
+if (-not $server.Contains('kMappingPrefix')) {
+    throw 'NativeShell must reject arbitrary shared-memory mapping names.'
 }
 foreach ($needle in @('Snapshot(', 'Dismiss(', 'ClearAll(', 'MarkAllRead(')) {
     if (-not $centerHeader.Contains($needle)) { throw "Notification authority API missing: $needle" }
