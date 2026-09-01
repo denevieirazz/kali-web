@@ -125,4 +125,78 @@ void main() {
     );
     expect(wslService, contains('DefaultDistribution'));
   });
+
+  test('native degraded system snapshot never fabricates hardware state', () {
+    final nativeBridge = File(
+      'native_bridge/cloudos_flutter_bridge_v20.cpp',
+    ).readAsStringSync();
+    final brokerHeader = File(
+      'native_bridge/cloudos_broker_client_v21.h',
+    ).readAsStringSync();
+    final brokerSource = File(
+      'native_bridge/cloudos_broker_client_v21.cpp',
+    ).readAsStringSync();
+    final dartBridge = File(
+      'lib/services/cloudos_bridge.dart',
+    ).readAsStringSync();
+    final quickSummary = File(
+      'lib/features/quick_settings/presentation/widgets/quick_system_summary.dart',
+    ).readAsStringSync();
+
+    for (final synthetic in <String>[
+      'cached_snapshot_.network_available = true',
+      'cached_snapshot_.volume_available = true',
+      'cached_snapshot_.brightness_available = true',
+      'cached_snapshot_.battery_percent = 100',
+      'cached_snapshot_.wsl_available = true',
+      'CloudOS Network • Wi-Fi 6',
+    ]) {
+      expect(
+        nativeBridge,
+        isNot(contains(synthetic)),
+        reason: 'degraded Native Bridge must not fabricate: $synthetic',
+      );
+    }
+
+    for (final synthetic in <String>[
+      'battery_available{true}',
+      'battery_percent{100}',
+      'network_available{true}',
+      'volume_available{true}',
+      'double volume{0.72}',
+      'brightness_available{true}',
+      'double brightness{0.85}',
+    ]) {
+      expect(
+        brokerHeader,
+        isNot(contains(synthetic)),
+        reason: 'Broker client defaults must be conservative: $synthetic',
+      );
+    }
+
+    for (final synthetic in <String>[
+      '"batteryAvailable", true',
+      '"batteryPercent", 100',
+      '"networkAvailable", true',
+      '"volumeAvailable", true',
+      '"volume", 0.72',
+      '"brightnessAvailable", true',
+      '"brightness", 0.85',
+    ]) {
+      expect(
+        brokerSource,
+        isNot(contains(synthetic)),
+        reason: 'missing Broker fields must never become healthy defaults: $synthetic',
+      );
+    }
+
+    expect(dartBridge, contains('static const degradedSnapshot'));
+    expect(dartBridge, contains('batteryAvailable: false'));
+    expect(dartBridge, contains('return degradedSnapshot;'));
+    expect(
+      quickSummary,
+      isNot(contains('Carregando')),
+      reason: 'charging state is not part of the V21 snapshot contract',
+    );
+  });
 }
