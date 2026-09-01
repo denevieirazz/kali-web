@@ -10,6 +10,7 @@ class CloudFileItem {
     required this.sizeFormatted,
     required this.modifiedFormatted,
     required this.source,
+    this.entryId,
     this.icon,
     this.extension,
   });
@@ -20,6 +21,7 @@ class CloudFileItem {
   final String sizeFormatted;
   final String modifiedFormatted;
   final CloudFileSource source;
+  final String? entryId;
   final IconData? icon;
   final String? extension;
 }

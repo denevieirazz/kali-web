@@ -10,7 +10,6 @@
 
 namespace CloudOS
 {
-
 namespace
 {
 constexpr const char* kChannelName = "cloudos/native/v19";
@@ -33,19 +32,27 @@ bool ResolveSurfaceApp(
     return false;
 }
 
+bool ReadStringArgument(
+    const flutter::MethodCall<flutter::EncodableValue>& method_call,
+    const char* key,
+    std::string* value)
+{
+    if (value == nullptr) return false;
+    const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
+    if (args == nullptr) return false;
+    const auto it = args->find(flutter::EncodableValue(key));
+    if (it == args->end() || !std::holds_alternative<std::string>(it->second)) return false;
+    *value = std::get<std::string>(it->second);
+    return !value->empty();
+}
+
 bool ReadSurfaceArgument(
     const flutter::MethodCall<flutter::EncodableValue>& method_call,
     ShellActivationV21::App* app,
     std::string* id)
 {
-    const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
-    if (args == nullptr) return false;
-
-    const auto it = args->find(flutter::EncodableValue("id"));
-    if (it == args->end() || !std::holds_alternative<std::string>(it->second))
-        return false;
-
-    const std::string surface_id = std::get<std::string>(it->second);
+    std::string surface_id;
+    if (!ReadStringArgument(method_call, "id", &surface_id)) return false;
     if (!ResolveSurfaceApp(surface_id, app)) return false;
     if (id != nullptr) *id = surface_id;
     return true;
@@ -69,12 +76,53 @@ bool ReadWorkspaceArgument(
     }
     if (const auto* value = std::get_if<int64_t>(&it->second))
     {
-        if (*value < 1 || *value > ShellActivationV21::kWorkspaceCount)
-            return false;
+        if (*value < 1 || *value > ShellActivationV21::kWorkspaceCount) return false;
         *workspace = static_cast<int>(*value);
         return true;
     }
     return false;
+}
+
+flutter::EncodableValue EncodeFileItems(const std::vector<NativeFileItem>& files)
+{
+    flutter::EncodableList list;
+    list.reserve(files.size());
+    for (const NativeFileItem& file : files)
+    {
+        flutter::EncodableMap map;
+        map[flutter::EncodableValue("name")] = flutter::EncodableValue(file.name);
+        map[flutter::EncodableValue("path")] = flutter::EncodableValue(file.path);
+        map[flutter::EncodableValue("isFolder")] = flutter::EncodableValue(file.is_folder);
+        map[flutter::EncodableValue("sizeFormatted")] = flutter::EncodableValue(file.size_formatted);
+        map[flutter::EncodableValue("modifiedFormatted")] = flutter::EncodableValue(file.modified_formatted);
+        map[flutter::EncodableValue("source")] = flutter::EncodableValue(file.source);
+        map[flutter::EncodableValue("extension")] = flutter::EncodableValue(file.extension);
+        map[flutter::EncodableValue("entryId")] = flutter::EncodableValue(file.entry_id);
+        list.push_back(flutter::EncodableValue(std::move(map)));
+    }
+    return flutter::EncodableValue(std::move(list));
+}
+
+void ConvertBrokerFiles(
+    const std::vector<BrokerClientFileItem>& broker_files,
+    std::vector<NativeFileItem>& out_files)
+{
+    std::vector<NativeFileItem> files;
+    files.reserve(broker_files.size());
+    for (const BrokerClientFileItem& item : broker_files)
+    {
+        files.push_back({
+            item.name,
+            item.path,
+            item.is_folder,
+            item.size_formatted,
+            item.modified_formatted,
+            item.source,
+            item.extension,
+            item.entry_id,
+        });
+    }
+    out_files = std::move(files);
 }
 } // namespace
 
@@ -124,7 +172,6 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         const auto apps = GetApps();
         flutter::EncodableList list;
         list.reserve(apps.size());
-
         for (const auto& app : apps)
         {
             flutter::EncodableMap map;
@@ -140,50 +187,60 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
             map[flutter::EncodableValue("recent")] = flutter::EncodableValue(app.recent);
             list.push_back(flutter::EncodableValue(std::move(map)));
         }
-
         result->Success(flutter::EncodableValue(std::move(list)));
         return;
     }
 
     if (method == "getFiles")
     {
-        const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
-        if (args == nullptr)
+        std::string location;
+        if (!ReadStringArgument(method_call, "location", &location))
         {
             result->Error("INVALID_ARGUMENT", "getFiles requires an allowlisted location id");
             return;
         }
-
-        const auto it = args->find(flutter::EncodableValue("location"));
-        if (it == args->end() || !std::holds_alternative<std::string>(it->second))
-        {
-            result->Error("INVALID_ARGUMENT", "Missing or invalid 'location' parameter");
-            return;
-        }
-
-        const std::string location = std::get<std::string>(it->second);
         std::vector<NativeFileItem> files;
         if (!GetFiles(location, files))
         {
             result->Error("FILES_UNAVAILABLE", "System broker rejected or failed the allowlisted Files location");
             return;
         }
+        result->Success(EncodeFileItems(files));
+        return;
+    }
 
-        flutter::EncodableList list;
-        list.reserve(files.size());
-        for (const NativeFileItem& file : files)
+    if (method == "getFilesEntry")
+    {
+        std::string entry_id;
+        if (!ReadStringArgument(method_call, "entryId", &entry_id))
         {
-            flutter::EncodableMap map;
-            map[flutter::EncodableValue("name")] = flutter::EncodableValue(file.name);
-            map[flutter::EncodableValue("path")] = flutter::EncodableValue(file.path);
-            map[flutter::EncodableValue("isFolder")] = flutter::EncodableValue(file.is_folder);
-            map[flutter::EncodableValue("sizeFormatted")] = flutter::EncodableValue(file.size_formatted);
-            map[flutter::EncodableValue("modifiedFormatted")] = flutter::EncodableValue(file.modified_formatted);
-            map[flutter::EncodableValue("source")] = flutter::EncodableValue(file.source);
-            map[flutter::EncodableValue("extension")] = flutter::EncodableValue(file.extension);
-            list.push_back(flutter::EncodableValue(std::move(map)));
+            result->Error("INVALID_ARGUMENT", "getFilesEntry requires an opaque entryId capability");
+            return;
         }
-        result->Success(flutter::EncodableValue(std::move(list)));
+        std::vector<NativeFileItem> files;
+        if (!GetFilesEntry(entry_id, files))
+        {
+            result->Error("FILES_ENTRY_UNAVAILABLE", "System broker rejected or expired the Files entry capability");
+            return;
+        }
+        result->Success(EncodeFileItems(files));
+        return;
+    }
+
+    if (method == "openFileEntry")
+    {
+        std::string entry_id;
+        if (!ReadStringArgument(method_call, "entryId", &entry_id))
+        {
+            result->Error("INVALID_ARGUMENT", "openFileEntry requires an opaque entryId capability");
+            return;
+        }
+        if (!OpenFileEntry(entry_id))
+        {
+            result->Error("FILES_OPEN_FAILED", "System broker rejected or failed the Files entry capability");
+            return;
+        }
+        result->Success(flutter::EncodableValue(true));
         return;
     }
 
@@ -201,14 +258,9 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         map[flutter::EncodableValue("batteryPercent")] = flutter::EncodableValue(snapshot.battery_percent);
         map[flutter::EncodableValue("wslAvailable")] = flutter::EncodableValue(snapshot.wsl_available);
         map[flutter::EncodableValue("currentWorkspace")] = flutter::EncodableValue(snapshot.current_workspace);
-
         flutter::EncodableList distros_list;
-        for (const auto& d : snapshot.distros)
-        {
-            distros_list.push_back(flutter::EncodableValue(d));
-        }
+        for (const auto& d : snapshot.distros) distros_list.push_back(flutter::EncodableValue(d));
         map[flutter::EncodableValue("distros")] = flutter::EncodableValue(std::move(distros_list));
-
         result->Success(flutter::EncodableValue(std::move(map)));
         return;
     }
@@ -230,7 +282,6 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
             result->Error("NATIVE_SHELL_UNAVAILABLE", error);
             return;
         }
-
         flutter::EncodableMap map;
         map[flutter::EncodableValue("browser")] = flutter::EncodableValue(browser_running);
         map[flutter::EncodableValue("terminal")] = flutter::EncodableValue(terminal_running);
@@ -247,7 +298,6 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
             result->Error("INVALID_ARGUMENT", "A supported Browser or Terminal surface id is required");
             return;
         }
-
         bool surface_was_running = false;
         std::string error;
         const bool ok = method == "focusShellSurface"
@@ -284,7 +334,6 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
             result->Error("INVALID_ARGUMENT", "workspace must be in the presentation range 1..4");
             return;
         }
-
         int actual_workspace = 0;
         std::string error;
         if (!NativeShellActivationClientV21::SwitchWorkspace(
@@ -301,30 +350,15 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
 
     if (method == "launchApp")
     {
-        const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
-        if (!args)
+        std::string app_id;
+        if (!ReadStringArgument(method_call, "id", &app_id))
         {
             result->Error("INVALID_ARGUMENT", "launchApp requires a map with an 'id' property");
             return;
         }
-
-        auto it = args->find(flutter::EncodableValue("id"));
-        if (it == args->end() || !std::holds_alternative<std::string>(it->second))
-        {
-            result->Error("INVALID_ARGUMENT", "Missing or invalid 'id' parameter");
-            return;
-        }
-
-        const std::string app_id = std::get<std::string>(it->second);
         const bool ok = LaunchApp(app_id);
-        if (ok)
-        {
-            result->Success(flutter::EncodableValue(true));
-        }
-        else
-        {
-            result->Error("LAUNCH_FAILED", "Failed to launch application with ID: " + app_id);
-        }
+        if (ok) result->Success(flutter::EncodableValue(true));
+        else result->Error("LAUNCH_FAILED", "Failed to launch application with ID: " + app_id);
         return;
     }
 
@@ -337,14 +371,8 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
             if (it != args->end() && std::holds_alternative<double>(it->second))
             {
                 const bool ok = SetVolume(std::get<double>(it->second));
-                if (ok)
-                {
-                    result->Success(flutter::EncodableValue(true));
-                }
-                else
-                {
-                    result->Error("BROKER_WRITE_FAILED", "System broker rejected or failed the volume update");
-                }
+                if (ok) result->Success(flutter::EncodableValue(true));
+                else result->Error("BROKER_WRITE_FAILED", "System broker rejected or failed the volume update");
                 return;
             }
         }
@@ -361,14 +389,8 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
             if (it != args->end() && std::holds_alternative<double>(it->second))
             {
                 const bool ok = SetBrightness(std::get<double>(it->second));
-                if (ok)
-                {
-                    result->Success(flutter::EncodableValue(true));
-                }
-                else
-                {
-                    result->Error("BROKER_WRITE_FAILED", "System broker rejected or failed the brightness update");
-                }
+                if (ok) result->Success(flutter::EncodableValue(true));
+                else result->Error("BROKER_WRITE_FAILED", "System broker rejected or failed the brightness update");
                 return;
             }
         }
@@ -390,6 +412,7 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         map[flutter::EncodableValue("shell_activation_executed")] = flutter::EncodableValue(false);
         map[flutter::EncodableValue("shell_surface_lifecycle")] = flutter::EncodableValue(true);
         map[flutter::EncodableValue("shell_workspace_control")] = flutter::EncodableValue(true);
+        map[flutter::EncodableValue("files_capability_actions")] = flutter::EncodableValue(true);
         result->Success(flutter::EncodableValue(std::move(map)));
         return;
     }
@@ -410,7 +433,6 @@ std::vector<NativeAppItem> CloudOSFlutterBridgeV20::GetApps()
         }
         return result;
     }
-
     std::lock_guard<std::mutex> lock(mutex_);
     return cached_apps_;
 }
@@ -420,27 +442,24 @@ bool CloudOSFlutterBridgeV20::GetFiles(
     std::vector<NativeFileItem>& out_files)
 {
     std::vector<BrokerClientFileItem> broker_files;
-    if (!CloudOSBrokerClientV21::Instance().GetFiles(location, broker_files))
-    {
-        return false;
-    }
-
-    std::vector<NativeFileItem> files;
-    files.reserve(broker_files.size());
-    for (const BrokerClientFileItem& item : broker_files)
-    {
-        files.push_back({
-            item.name,
-            item.path,
-            item.is_folder,
-            item.size_formatted,
-            item.modified_formatted,
-            item.source,
-            item.extension,
-        });
-    }
-    out_files = std::move(files);
+    if (!CloudOSBrokerClientV21::Instance().GetFiles(location, broker_files)) return false;
+    ConvertBrokerFiles(broker_files, out_files);
     return true;
+}
+
+bool CloudOSFlutterBridgeV20::GetFilesEntry(
+    const std::string& entry_id,
+    std::vector<NativeFileItem>& out_files)
+{
+    std::vector<BrokerClientFileItem> broker_files;
+    if (!CloudOSBrokerClientV21::Instance().GetFilesEntry(entry_id, broker_files)) return false;
+    ConvertBrokerFiles(broker_files, out_files);
+    return true;
+}
+
+bool CloudOSFlutterBridgeV20::OpenFileEntry(const std::string& entry_id)
+{
+    return CloudOSBrokerClientV21::Instance().OpenFileEntry(entry_id);
 }
 
 NativeSystemSnapshot CloudOSFlutterBridgeV20::GetSystemSnapshot()
@@ -478,14 +497,8 @@ NativeSystemSnapshot CloudOSFlutterBridgeV20::GetSystemSnapshot()
 bool CloudOSFlutterBridgeV20::LaunchApp(const std::string& app_id)
 {
     std::string err;
-    if (CloudOSBrokerClientV21::Instance().LaunchApp(app_id, err))
-    {
-        return true;
-    }
+    if (CloudOSBrokerClientV21::Instance().LaunchApp(app_id, err)) return true;
 
-    // If the Broker is unavailable, CloudOS first-party Browser/Terminal still
-    // remain NativeShell-owned. Never substitute the user's default browser or
-    // an external cmd.exe for these surfaces.
     ShellActivationV21::App surface_app{};
     if (ResolveSurfaceApp(app_id, &surface_app))
     {
@@ -508,11 +521,7 @@ bool CloudOSFlutterBridgeV20::LaunchApp(const std::string& app_id)
 bool CloudOSFlutterBridgeV20::SetVolume(double volume)
 {
     const double clamped = std::clamp(volume, 0.0, 1.0);
-    if (!CloudOSBrokerClientV21::Instance().SetVolume(clamped))
-    {
-        return false;
-    }
-
+    if (!CloudOSBrokerClientV21::Instance().SetVolume(clamped)) return false;
     std::lock_guard<std::mutex> lock(mutex_);
     cached_snapshot_.volume_available = true;
     cached_snapshot_.volume = clamped;
@@ -522,11 +531,7 @@ bool CloudOSFlutterBridgeV20::SetVolume(double volume)
 bool CloudOSFlutterBridgeV20::SetBrightness(double brightness)
 {
     const double clamped = std::clamp(brightness, 0.0, 1.0);
-    if (!CloudOSBrokerClientV21::Instance().SetBrightness(clamped))
-    {
-        return false;
-    }
-
+    if (!CloudOSBrokerClientV21::Instance().SetBrightness(clamped)) return false;
     std::lock_guard<std::mutex> lock(mutex_);
     cached_snapshot_.brightness_available = true;
     cached_snapshot_.brightness = clamped;

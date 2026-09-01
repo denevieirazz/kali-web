@@ -39,6 +39,37 @@ class CloudOSBridge {
     }
   }
 
+  Future<List<CloudFileItem>> loadFilesEntry(String entryId) async {
+    if (entryId.isEmpty) return const <CloudFileItem>[];
+    try {
+      final raw = await _channel.invokeListMethod<Map<Object?, Object?>>(
+        'getFilesEntry',
+        <String, Object?>{'entryId': entryId},
+      );
+      if (raw == null) return const <CloudFileItem>[];
+      return raw.map(cloudFileFromNative).toList(growable: false);
+    } on MissingPluginException {
+      return const <CloudFileItem>[];
+    } on PlatformException {
+      return const <CloudFileItem>[];
+    }
+  }
+
+  Future<bool> openFileEntry(String entryId) async {
+    if (entryId.isEmpty) return false;
+    try {
+      final opened = await _channel.invokeMethod<bool>(
+        'openFileEntry',
+        <String, Object?>{'entryId': entryId},
+      );
+      return opened ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
   Future<CloudSystemSnapshot> loadSystemSnapshot() async {
     try {
       final raw =
@@ -143,7 +174,6 @@ class CloudOSBridge {
       );
       return applied == workspace;
     } on MissingPluginException {
-      // Keep interactive preview usable without inventing a native authority.
       return true;
     } on PlatformException {
       return false;
@@ -212,6 +242,7 @@ class CloudOSBridge {
       'arbitrary_command_api': false,
       'shell_surface_lifecycle': false,
       'shell_workspace_control': false,
+      'files_capability_actions': false,
     };
   }
 

@@ -17,38 +17,34 @@ class FilesWindow extends StatefulWidget {
     required this.onClose,
     required this.onMinimize,
     required this.onDrag,
+    CloudOSBridge? bridge,
     super.key,
-  });
+  }) : bridge = bridge ?? const CloudOSBridge();
 
   final VoidCallback onClose;
   final VoidCallback onMinimize;
   final ValueChanged<Offset> onDrag;
+  final CloudOSBridge bridge;
 
   @override
   State<FilesWindow> createState() => _FilesWindowState();
 }
 
 class _FilesWindowState extends State<FilesWindow> {
-  static const _bridge = CloudOSBridge();
-
-  String currentLocation = 'home';
-  String currentTitle = 'Início';
+  _FilesLocation _current = const _FilesLocation.root('home', 'Início');
   String query = '';
   bool isGridView = true;
   String? selectedItemPath;
   List<CloudFileItem> _files = const <CloudFileItem>[];
   bool _isLoading = true;
   int _loadGeneration = 0;
-  final List<_RootLocation> _backStack = <_RootLocation>[];
-  final List<_RootLocation> _forwardStack = <_RootLocation>[];
-
-  _RootLocation get _currentRoot =>
-      _RootLocation(currentLocation, currentTitle);
+  final List<_FilesLocation> _backStack = <_FilesLocation>[];
+  final List<_FilesLocation> _forwardStack = <_FilesLocation>[];
 
   @override
   void initState() {
     super.initState();
-    unawaited(_loadLocation('home'));
+    unawaited(_loadLocation(_current));
   }
 
   List<CloudFileItem> get _currentFiles {
@@ -59,13 +55,13 @@ class _FilesWindowState extends State<FilesWindow> {
         .toList(growable: false);
   }
 
-  Future<void> _loadLocation(String location) async {
+  Future<void> _loadLocation(_FilesLocation location) async {
     final generation = ++_loadGeneration;
-    if (mounted) {
-      setState(() => _isLoading = true);
-    }
+    if (mounted) setState(() => _isLoading = true);
 
-    final files = await _bridge.loadFiles(location);
+    final files = location.entryId != null
+        ? await widget.bridge.loadFilesEntry(location.entryId!)
+        : await widget.bridge.loadFiles(location.rootId!);
     if (!mounted || generation != _loadGeneration) return;
 
     setState(() {
@@ -75,49 +71,81 @@ class _FilesWindowState extends State<FilesWindow> {
     });
   }
 
-  void _applyRoot(_RootLocation next) {
+  void _applyLocation(_FilesLocation next) {
     setState(() {
-      currentLocation = next.id;
-      currentTitle = next.label;
+      _current = next;
       query = '';
       selectedItemPath = null;
     });
-    unawaited(_loadLocation(next.id));
+    unawaited(_loadLocation(next));
   }
 
   void _navigateTo(String id, String label) {
-    if (id == currentLocation) {
-      unawaited(_loadLocation(id));
+    if (_current.rootId == id && _current.entryId == null) {
+      unawaited(_loadLocation(_current));
       return;
     }
-    _backStack.add(_currentRoot);
+    _backStack.add(_current);
     _forwardStack.clear();
-    _applyRoot(_RootLocation(id, label));
+    _applyLocation(_FilesLocation.root(id, label));
+  }
+
+  Future<void> _openItem(CloudFileItem item) async {
+    final entryId = item.entryId;
+    if (entryId == null || entryId.isEmpty) return;
+
+    if (item.isFolder) {
+      _backStack.add(_current);
+      _forwardStack.clear();
+      _applyLocation(
+        _FilesLocation.entry(
+          entryId: entryId,
+          label: item.name,
+          sidebarId: _current.sidebarId,
+          parent: _current,
+        ),
+      );
+      return;
+    }
+
+    final opened = await widget.bridge.openFileEntry(entryId);
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Não foi possível abrir ${item.name}.')),
+      );
+    }
   }
 
   void _goBack() {
     if (_backStack.isEmpty) return;
     final previous = _backStack.removeLast();
-    _forwardStack.add(_currentRoot);
-    _applyRoot(previous);
+    _forwardStack.add(_current);
+    _applyLocation(previous);
   }
 
   void _goForward() {
     if (_forwardStack.isEmpty) return;
     final next = _forwardStack.removeLast();
-    _backStack.add(_currentRoot);
-    _applyRoot(next);
+    _backStack.add(_current);
+    _applyLocation(next);
   }
 
   void _goUp() {
-    if (currentLocation == 'home') return;
-    _backStack.add(_currentRoot);
+    final parent = _current.parent;
+    if (parent != null) {
+      _backStack.add(_current);
+      _forwardStack.clear();
+      _applyLocation(parent);
+      return;
+    }
+    if (_current.rootId == 'home') return;
+    _backStack.add(_current);
     _forwardStack.clear();
-    _applyRoot(const _RootLocation('home', 'Início'));
+    _applyLocation(const _FilesLocation.root('home', 'Início'));
   }
 
   void _refresh() {
-    unawaited(_loadLocation(currentLocation));
+    unawaited(_loadLocation(_current));
   }
 
   @override
@@ -135,7 +163,7 @@ class _FilesWindowState extends State<FilesWindow> {
         child: Column(
           children: <Widget>[
             FilesTitleBar(
-              title: currentTitle,
+              title: _current.label,
               onClose: widget.onClose,
               onMinimize: widget.onMinimize,
               onDrag: widget.onDrag,
@@ -148,7 +176,7 @@ class _FilesWindowState extends State<FilesWindow> {
                     width: 210,
                     child: FilesSidebar(
                       sections: defaultFilesSidebarSections,
-                      selectedId: currentLocation,
+                      selectedId: _current.sidebarId,
                       onSelect: _navigateTo,
                     ),
                   ),
@@ -157,11 +185,12 @@ class _FilesWindowState extends State<FilesWindow> {
                     child: Column(
                       children: <Widget>[
                         _ConnectedFilesToolbar(
-                          currentTitle: currentTitle,
+                          currentTitle: _current.label,
                           isGridView: isGridView,
                           canGoBack: _backStack.isNotEmpty,
                           canGoForward: _forwardStack.isNotEmpty,
-                          canGoUp: currentLocation != 'home',
+                          canGoUp: _current.parent != null ||
+                              _current.rootId != 'home',
                           isLoading: _isLoading,
                           onBack: _goBack,
                           onForward: _goForward,
@@ -183,6 +212,7 @@ class _FilesWindowState extends State<FilesWindow> {
                                   selectedPath: selectedItemPath,
                                   onSelect: (path) =>
                                       setState(() => selectedItemPath = path),
+                                  onOpen: (item) => unawaited(_openItem(item)),
                                 ),
                         ),
                         FilesStatusBar(
@@ -202,11 +232,24 @@ class _FilesWindowState extends State<FilesWindow> {
   }
 }
 
-class _RootLocation {
-  const _RootLocation(this.id, this.label);
+class _FilesLocation {
+  const _FilesLocation.root(this.rootId, this.label)
+      : entryId = null,
+        sidebarId = rootId,
+        parent = null;
 
-  final String id;
+  const _FilesLocation.entry({
+    required this.entryId,
+    required this.label,
+    required this.sidebarId,
+    required this.parent,
+  }) : rootId = null;
+
+  final String? rootId;
+  final String? entryId;
   final String label;
+  final String sidebarId;
+  final _FilesLocation? parent;
 }
 
 class _ConnectedFilesToolbar extends StatelessWidget {

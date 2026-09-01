@@ -12,6 +12,21 @@
 
 namespace CloudOS
 {
+namespace
+{
+void WriteFilesPayload(
+    BrokerResponse& response,
+    const std::vector<FileItemV21>& items)
+{
+    JsonArray files;
+    files.reserve(items.size());
+    for (const FileItemV21& item : items)
+    {
+        files.push_back(JsonValue(item.ToJsonObject()));
+    }
+    response.payload["files"] = JsonValue(std::move(files));
+}
+}
 
 BrokerServerV21& BrokerServerV21::Instance()
 {
@@ -74,10 +89,7 @@ void BrokerServerV21::Stop()
         CloseHandle(dummy);
     }
 
-    if (listener_thread_.joinable())
-    {
-        listener_thread_.join();
-    }
+    if (listener_thread_.joinable()) listener_thread_.join();
 
     {
         std::lock_guard<std::mutex> lock(client_threads_mutex_);
@@ -102,17 +114,10 @@ bool BrokerServerV21::SendFrame(HANDLE pipe, const std::string& payload)
 {
     uint32_t len = static_cast<uint32_t>(payload.size());
     DWORD written = 0;
-    if (!WriteFile(pipe, &len, sizeof(len), &written, nullptr) || written != sizeof(len))
-    {
+    if (!WriteFile(pipe, &len, sizeof(len), &written, nullptr) || written != sizeof(len)) return false;
+    if (len > 0 &&
+        (!WriteFile(pipe, payload.data(), len, &written, nullptr) || written != len))
         return false;
-    }
-    if (len > 0)
-    {
-        if (!WriteFile(pipe, payload.data(), len, &written, nullptr) || written != len)
-        {
-            return false;
-        }
-    }
     return true;
 }
 
@@ -120,14 +125,8 @@ bool BrokerServerV21::ReadFrame(HANDLE pipe, std::string& payload)
 {
     uint32_t len = 0;
     DWORD read_bytes = 0;
-    if (!ReadFile(pipe, &len, sizeof(len), &read_bytes, nullptr) || read_bytes != sizeof(len))
-    {
-        return false;
-    }
-    if (len > kMaxPayloadBytes)
-    {
-        return false;
-    }
+    if (!ReadFile(pipe, &len, sizeof(len), &read_bytes, nullptr) || read_bytes != sizeof(len)) return false;
+    if (len > kMaxPayloadBytes) return false;
     payload.resize(len);
     if (len > 0)
     {
@@ -135,9 +134,7 @@ bool BrokerServerV21::ReadFrame(HANDLE pipe, std::string& payload)
         while (total_read < len)
         {
             if (!ReadFile(pipe, &payload[total_read], len - total_read, &read_bytes, nullptr) || read_bytes == 0)
-            {
                 return false;
-            }
             total_read += read_bytes;
         }
     }
@@ -147,7 +144,6 @@ bool BrokerServerV21::ReadFrame(HANDLE pipe, std::string& payload)
 void BrokerServerV21::ListenerLoop()
 {
     std::wstring pipe_name = SecurityV21::GetCommandPipeName();
-
     while (running_.load())
     {
         SECURITY_ATTRIBUTES sa{};
@@ -164,11 +160,7 @@ void BrokerServerV21::ListenerLoop()
             0,
             sa_ok ? &sa : nullptr);
 
-        if (sa_ok)
-        {
-            SecurityV21::FreeSecurityDescriptor(sd);
-        }
-
+        if (sa_ok) SecurityV21::FreeSecurityDescriptor(sd);
         if (pipe == INVALID_HANDLE_VALUE)
         {
             Sleep(100);
@@ -209,15 +201,11 @@ void BrokerServerV21::ClientSessionLoop(HANDLE pipe, std::string client_id)
     while (running_.load())
     {
         std::string frame;
-        if (!ReadFrame(pipe, frame))
-        {
-            break;
-        }
+        if (!ReadFrame(pipe, frame)) break;
 
         BrokerRequest req;
         std::string parse_err;
         BrokerResponse res;
-
         if (!ParseRequest(frame, req, parse_err))
         {
             res.protocol = kProtocolVersion;
@@ -234,10 +222,7 @@ void BrokerServerV21::ClientSessionLoop(HANDLE pipe, std::string client_id)
         std::string resp_str = SerializeResponse(res);
         {
             std::lock_guard<std::mutex> lock(send_mutex);
-            if (!SendFrame(pipe, resp_str))
-            {
-                break;
-            }
+            if (!SendFrame(pipe, resp_str)) break;
         }
     }
 
@@ -253,7 +238,6 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
     res.protocol = kProtocolVersion;
     res.id = req.id;
     res.ok = true;
-
     const std::string& method = req.method;
 
     if (method == "hello")
@@ -262,12 +246,8 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
         res.payload["protocolVersion"] = JsonValue(kProtocolVersion);
         res.payload["clientId"] = JsonValue(client_id);
         res.payload["serverInstanceId"] = JsonValue("broker-session-" + std::to_string(SecurityV21::GetCurrentSessionId()));
-
         JsonArray caps;
-        for (const auto& cap : SystemServiceV21::Instance().GetCapabilities())
-        {
-            caps.push_back(JsonValue(cap));
-        }
+        for (const auto& cap : SystemServiceV21::Instance().GetCapabilities()) caps.push_back(JsonValue(cap));
         res.payload["capabilities"] = JsonValue(std::move(caps));
         return res;
     }
@@ -291,10 +271,7 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
     if (method == "system.capabilities")
     {
         JsonArray caps;
-        for (const auto& cap : SystemServiceV21::Instance().GetCapabilities())
-        {
-            caps.push_back(JsonValue(cap));
-        }
+        for (const auto& cap : SystemServiceV21::Instance().GetCapabilities()) caps.push_back(JsonValue(cap));
         res.payload["capabilities"] = JsonValue(std::move(caps));
         return res;
     }
@@ -303,10 +280,7 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
     {
         const auto apps = AppServiceV21::Instance().GetApps();
         JsonArray arr;
-        for (const auto& app : apps)
-        {
-            arr.push_back(JsonValue(app.ToJsonObject()));
-        }
+        for (const auto& app : apps) arr.push_back(JsonValue(app.ToJsonObject()));
         res.payload["apps"] = JsonValue(std::move(arr));
         res.payload["generation"] = JsonValue(static_cast<int64_t>(AppServiceV21::Instance().GetGeneration()));
         return res;
@@ -322,7 +296,6 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
             res.error_message = "Missing or invalid 'id' parameter in payload";
             return res;
         }
-
         std::string app_id = it->second.AsString();
         std::string err;
         if (!AppServiceV21::Instance().LaunchApp(app_id, err))
@@ -366,15 +339,56 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
             res.error_message = error.empty() ? "The requested Files location is unavailable" : error;
             return res;
         }
-
-        JsonArray files;
-        files.reserve(items.size());
-        for (const FileItemV21& item : items)
-        {
-            files.push_back(JsonValue(item.ToJsonObject()));
-        }
         res.payload["location"] = JsonValue(location);
-        res.payload["files"] = JsonValue(std::move(files));
+        WriteFilesPayload(res, items);
+        return res;
+    }
+
+    if (method == "files.listEntry")
+    {
+        auto it = req.payload.find("entryId");
+        if (it == req.payload.end() || !it->second.IsString())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing or invalid Files entry capability";
+            return res;
+        }
+
+        std::vector<FileItemV21> items;
+        std::string error;
+        if (!FileServiceV21::Instance().ListEntry(it->second.AsString(), items, error))
+        {
+            res.ok = false;
+            res.error_code = "entry_unavailable";
+            res.error_message = error;
+            return res;
+        }
+        res.payload["entryId"] = JsonValue(it->second.AsString());
+        WriteFilesPayload(res, items);
+        return res;
+    }
+
+    if (method == "files.openEntry")
+    {
+        auto it = req.payload.find("entryId");
+        if (it == req.payload.end() || !it->second.IsString())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing or invalid Files entry capability";
+            return res;
+        }
+
+        std::string error;
+        if (!FileServiceV21::Instance().OpenEntry(it->second.AsString(), error))
+        {
+            res.ok = false;
+            res.error_code = "entry_open_failed";
+            res.error_message = error;
+            return res;
+        }
+        res.payload["opened"] = JsonValue(true);
         return res;
     }
 
@@ -432,10 +446,7 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
     {
         res.payload["wslAvailable"] = JsonValue(WslServiceV21::Instance().IsWslAvailable());
         JsonArray distros;
-        for (const auto& d : WslServiceV21::Instance().GetDistributions())
-        {
-            distros.push_back(JsonValue(d));
-        }
+        for (const auto& d : WslServiceV21::Instance().GetDistributions()) distros.push_back(JsonValue(d));
         res.payload["distros"] = JsonValue(std::move(distros));
         res.payload["generation"] = JsonValue(static_cast<int64_t>(WslServiceV21::Instance().GetGeneration()));
         return res;

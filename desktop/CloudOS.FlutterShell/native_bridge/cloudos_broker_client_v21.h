@@ -54,6 +54,7 @@ struct BrokerClientFileItem final
     std::string modified_formatted;
     std::string source;
     std::string extension;
+    std::string entry_id;
 };
 
 struct BrokerClientSnapshot final
@@ -93,15 +94,27 @@ public:
 
     bool GetFiles(const std::string& location, std::vector<BrokerClientFileItem>& out_files)
     {
-        if (!EnsureConnected()) return false;
+        return GetFilesByCapability("files.list", "location", location, out_files);
+    }
+
+    bool GetFilesEntry(
+        const std::string& entry_id,
+        std::vector<BrokerClientFileItem>& out_files)
+    {
+        return GetFilesByCapability("files.listEntry", "entryId", entry_id, out_files);
+    }
+
+    bool OpenFileEntry(const std::string& entry_id)
+    {
+        if (!EnsureConnected() || entry_id.empty()) return false;
 
         JsonObject payload;
-        payload["location"] = JsonValue(location);
+        payload["entryId"] = JsonValue(entry_id);
 
         BrokerRequest request;
         request.protocol = kProtocolVersion;
-        request.id = "get-files-" + std::to_string(next_req_id_.fetch_add(1));
-        request.method = "files.list";
+        request.id = "open-file-entry-" + std::to_string(next_req_id_.fetch_add(1));
+        request.method = "files.openEntry";
         request.payload = std::move(payload);
 
         std::string raw_response;
@@ -116,16 +129,62 @@ public:
 
         BrokerResponse response;
         std::string parse_error;
-        if (!ParseResponse(raw_response, response, parse_error) || !response.ok)
+        if (!ParseResponse(raw_response, response, parse_error) || !response.ok) return false;
+        const auto opened_it = response.payload.find("opened");
+        return opened_it != response.payload.end() &&
+            opened_it->second.IsBool() &&
+            opened_it->second.AsBool();
+    }
+
+    bool LaunchApp(const std::string& app_id, std::string& err);
+    bool GetSystemSnapshot(BrokerClientSnapshot& out_snapshot);
+    bool SetVolume(double value);
+    bool SetBrightness(double value);
+    bool GetCapabilities(std::vector<std::string>& out_caps);
+
+private:
+    CloudOSBrokerClientV21() = default;
+    ~CloudOSBrokerClientV21();
+
+    bool GetFilesByCapability(
+        const char* method,
+        const char* argument_name,
+        const std::string& argument,
+        std::vector<BrokerClientFileItem>& out_files)
+    {
+        if (!EnsureConnected() || argument.empty()) return false;
+
+        JsonObject payload;
+        payload[argument_name] = JsonValue(argument);
+
+        BrokerRequest request;
+        request.protocol = kProtocolVersion;
+        request.id = "get-files-" + std::to_string(next_req_id_.fetch_add(1));
+        request.method = method;
+        request.payload = std::move(payload);
+
+        std::string raw_response;
         {
-            return false;
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!SendFrame(SerializeRequest(request)) || !ReadFrame(raw_response))
+            {
+                state_.store(BrokerConnectionState::Degraded);
+                return false;
+            }
         }
 
+        BrokerResponse response;
+        std::string parse_error;
+        if (!ParseResponse(raw_response, response, parse_error) || !response.ok) return false;
+        return ParseFilesPayload(response, out_files);
+    }
+
+    static bool ParseFilesPayload(
+        const BrokerResponse& response,
+        std::vector<BrokerClientFileItem>& out_files)
+    {
         const auto files_it = response.payload.find("files");
-        if (files_it == response.payload.end() || !files_it->second.IsArray())
-        {
-            return false;
-        }
+        if (files_it == response.payload.end() || !files_it->second.IsArray()) return false;
 
         std::vector<BrokerClientFileItem> parsed;
         parsed.reserve(files_it->second.AsArray().size());
@@ -144,7 +203,8 @@ public:
 
             const std::string name = string_field("name");
             const std::string path = string_field("path");
-            if (name.empty() || path.empty()) continue;
+            const std::string entry_id = string_field("entryId");
+            if (name.empty() || path.empty() || entry_id.empty()) continue;
 
             BrokerClientFileItem item;
             item.name = name;
@@ -157,22 +217,13 @@ public:
             item.modified_formatted = string_field("modifiedFormatted");
             item.source = string_field("source");
             item.extension = string_field("extension");
+            item.entry_id = entry_id;
             parsed.push_back(std::move(item));
         }
 
         out_files = std::move(parsed);
         return true;
     }
-
-    bool LaunchApp(const std::string& app_id, std::string& err);
-    bool GetSystemSnapshot(BrokerClientSnapshot& out_snapshot);
-    bool SetVolume(double value);
-    bool SetBrightness(double value);
-    bool GetCapabilities(std::vector<std::string>& out_caps);
-
-private:
-    CloudOSBrokerClientV21() = default;
-    ~CloudOSBrokerClientV21();
 
     bool TryConnectPipe();
     bool PerformHandshake();

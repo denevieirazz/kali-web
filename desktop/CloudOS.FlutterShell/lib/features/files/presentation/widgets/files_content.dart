@@ -12,6 +12,7 @@ class FilesContent extends StatelessWidget {
     required this.isGridView,
     required this.selectedPath,
     required this.onSelect,
+    required this.onOpen,
     super.key,
   });
 
@@ -20,6 +21,7 @@ class FilesContent extends StatelessWidget {
   final bool isGridView;
   final String? selectedPath;
   final ValueChanged<String> onSelect;
+  final ValueChanged<CloudFileItem> onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -31,12 +33,14 @@ class FilesContent extends StatelessWidget {
         files: files,
         selectedPath: selectedPath,
         onSelect: onSelect,
+        onOpen: onOpen,
       );
     }
     return FilesList(
       files: files,
       selectedPath: selectedPath,
       onSelect: onSelect,
+      onOpen: onOpen,
     );
   }
 }

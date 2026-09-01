@@ -41,6 +41,7 @@ struct NativeFileItem final
     std::string modified_formatted;
     std::string source;
     std::string extension;
+    std::string entry_id;
 };
 
 struct NativeSystemSnapshot final
@@ -78,6 +79,8 @@ public:
 
     std::vector<NativeAppItem> GetApps();
     bool GetFiles(const std::string& location, std::vector<NativeFileItem>& out_files);
+    bool GetFilesEntry(const std::string& entry_id, std::vector<NativeFileItem>& out_files);
+    bool OpenFileEntry(const std::string& entry_id);
     NativeSystemSnapshot GetSystemSnapshot();
     bool LaunchApp(const std::string& app_id);
     bool SetVolume(double volume);

@@ -8,12 +8,14 @@ class FilesList extends StatelessWidget {
     required this.files,
     required this.selectedPath,
     required this.onSelect,
+    required this.onOpen,
     super.key,
   });
 
   final List<CloudFileItem> files;
   final String? selectedPath;
   final ValueChanged<String> onSelect;
+  final ValueChanged<CloudFileItem> onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -26,6 +28,7 @@ class FilesList extends StatelessWidget {
         final isSelected = item.path == selectedPath;
         return InkWell(
           onTap: () => onSelect(item.path),
+          onDoubleTap: () => onOpen(item),
           borderRadius: BorderRadius.circular(6),
           child: Container(
             height: 34,

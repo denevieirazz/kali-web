@@ -8,12 +8,14 @@ class FilesGrid extends StatelessWidget {
     required this.files,
     required this.selectedPath,
     required this.onSelect,
+    required this.onOpen,
     super.key,
   });
 
   final List<CloudFileItem> files;
   final String? selectedPath;
   final ValueChanged<String> onSelect;
+  final ValueChanged<CloudFileItem> onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -32,6 +34,7 @@ class FilesGrid extends StatelessWidget {
           item: item,
           isSelected: item.path == selectedPath,
           onTap: () => onSelect(item.path),
+          onDoubleTap: () => onOpen(item),
         );
       },
     );
@@ -43,11 +46,13 @@ class _FileGridCard extends StatelessWidget {
     required this.item,
     required this.isSelected,
     required this.onTap,
+    required this.onDoubleTap,
   });
 
   final CloudFileItem item;
   final bool isSelected;
   final VoidCallback onTap;
+  final VoidCallback onDoubleTap;
 
   Color get sourceColor => switch (item.source) {
         CloudFileSource.windows => CloudOSColors.windows,
@@ -67,6 +72,7 @@ class _FileGridCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
+      onDoubleTap: onDoubleTap,
       borderRadius: BorderRadius.circular(10),
       child: Container(
         padding: const EdgeInsets.all(10),

@@ -2,6 +2,8 @@
 #include "wsl_service_v21.h"
 
 #include <Windows.h>
+#include <objbase.h>
+#include <shellapi.h>
 #include <shlobj.h>
 
 #include <algorithm>
@@ -40,6 +42,31 @@ std::string WideToUtf8(const std::wstring& value)
             required,
             nullptr,
             nullptr) != required)
+    {
+        return {};
+    }
+    return output;
+}
+
+std::wstring Utf8ToWide(const std::string& value)
+{
+    if (value.empty()) return {};
+    const int required = MultiByteToWideChar(
+        CP_UTF8,
+        MB_ERR_INVALID_CHARS,
+        value.data(),
+        static_cast<int>(value.size()),
+        nullptr,
+        0);
+    if (required <= 0) return {};
+    std::wstring output(static_cast<std::size_t>(required), L'\0');
+    if (MultiByteToWideChar(
+            CP_UTF8,
+            MB_ERR_INVALID_CHARS,
+            value.data(),
+            static_cast<int>(value.size()),
+            output.data(),
+            required) != required)
     {
         return {};
     }
@@ -89,7 +116,7 @@ std::wstring WslRoot()
     const auto distros = WslServiceV21::Instance().GetDistributions();
     if (distros.empty()) return {};
 
-    int required = MultiByteToWideChar(
+    const int required = MultiByteToWideChar(
         CP_UTF8,
         MB_ERR_INVALID_CHARS,
         distros.front().data(),
@@ -98,13 +125,16 @@ std::wstring WslRoot()
         0);
     if (required <= 0) return {};
     std::wstring distro(static_cast<std::size_t>(required), L'\0');
-    MultiByteToWideChar(
-        CP_UTF8,
-        MB_ERR_INVALID_CHARS,
-        distros.front().data(),
-        static_cast<int>(distros.front().size()),
-        distro.data(),
-        required);
+    if (MultiByteToWideChar(
+            CP_UTF8,
+            MB_ERR_INVALID_CHARS,
+            distros.front().data(),
+            static_cast<int>(distros.front().size()),
+            distro.data(),
+            required) != required)
+    {
+        return {};
+    }
     return L"\\\\wsl.localhost\\" + distro + L"\\";
 }
 
@@ -201,7 +231,7 @@ bool EnumerateDirectory(
             items.clear();
             return true;
         }
-        error = "Unable to enumerate the selected allowlisted location";
+        error = "Unable to enumerate the selected Files capability";
         return false;
     }
 
@@ -257,6 +287,7 @@ JsonObject FileItemV21::ToJsonObject() const
     object["modifiedFormatted"] = JsonValue(modified_formatted);
     object["source"] = JsonValue(source);
     object["extension"] = JsonValue(extension);
+    object["entryId"] = JsonValue(entry_id);
     return object;
 }
 
@@ -277,10 +308,87 @@ bool FileServiceV21::IsAllowedLocation(const std::string& location) noexcept
         location == "ubuntu-wsl";
 }
 
+void FileServiceV21::CleanupExpiredLocked(Clock::time_point now)
+{
+    for (auto it = capabilities_.begin(); it != capabilities_.end();)
+    {
+        if (it->second.expires_at <= now)
+            it = capabilities_.erase(it);
+        else
+            ++it;
+    }
+    if (capabilities_.size() >= kMaxCapabilities)
+    {
+        capabilities_.clear();
+    }
+}
+
+std::string FileServiceV21::IssueCapability(
+    const std::wstring& path,
+    bool is_folder)
+{
+    if (path.empty()) return {};
+
+    GUID guid{};
+    if (FAILED(CoCreateGuid(&guid))) return {};
+
+    wchar_t guid_text[40]{};
+    if (StringFromGUID2(guid, guid_text, static_cast<int>(std::size(guid_text))) <= 0)
+        return {};
+
+    const std::string entry_id = "f21:" + WideToUtf8(guid_text);
+    if (entry_id.empty()) return {};
+
+    const auto now = Clock::now();
+    std::lock_guard<std::mutex> lock(capabilities_mutex_);
+    CleanupExpiredLocked(now);
+    capabilities_[entry_id] = EntryCapability{
+        fs::path(path).lexically_normal().wstring(),
+        is_folder,
+        now + kCapabilityLifetime,
+    };
+    return entry_id;
+}
+
+void FileServiceV21::AttachCapabilities(std::vector<FileItemV21>& items)
+{
+    for (FileItemV21& item : items)
+    {
+        const std::wstring path = Utf8ToWide(item.path);
+        item.entry_id = IssueCapability(path, item.is_folder);
+    }
+}
+
+bool FileServiceV21::ResolveCapability(
+    const std::string& entry_id,
+    EntryCapability& capability,
+    std::string& error)
+{
+    if (entry_id.empty() || entry_id.size() > 96 || entry_id.rfind("f21:", 0) != 0)
+    {
+        error = "Invalid Files entry capability";
+        return false;
+    }
+
+    const auto now = Clock::now();
+    std::lock_guard<std::mutex> lock(capabilities_mutex_);
+    CleanupExpiredLocked(now);
+    const auto it = capabilities_.find(entry_id);
+    if (it == capabilities_.end())
+    {
+        error = "Files entry capability is unknown or expired";
+        return false;
+    }
+
+    it->second.expires_at = now + kCapabilityLifetime;
+    capability = it->second;
+    return true;
+}
+
 bool FileServiceV21::ListLocation(
     const std::string& location,
     std::vector<FileItemV21>& items,
-    std::string& error) const
+    std::string& error)
 {
     items.clear();
     error.clear();
@@ -304,24 +412,98 @@ bool FileServiceV21::ListLocation(
         if (!cloud_drive.empty()) items.push_back(VirtualFolder("CloudOS Drive", cloud_drive, "cloudDrive"));
         items.push_back(VirtualFolder("Disco Local", SystemVolumeRoot(), "windows"));
         if (!wsl.empty()) items.push_back(VirtualFolder("Linux / WSL", wsl, "linux"));
+        AttachCapabilities(items);
         return true;
     }
 
+    bool listed = false;
     if (location == "desktop")
-        return EnumerateDirectory(KnownFolder(FOLDERID_Desktop), "windows", items, error);
-    if (location == "documents")
-        return EnumerateDirectory(KnownFolder(FOLDERID_Documents), "windows", items, error);
-    if (location == "downloads")
-        return EnumerateDirectory(KnownFolder(FOLDERID_Downloads), "windows", items, error);
-    if (location == "cloud-drive")
-        return EnumerateDirectory(CloudDriveRoot(), "cloudDrive", items, error);
-    if (location == "windows-c")
-        return EnumerateDirectory(SystemVolumeRoot(), "windows", items, error);
-    if (location == "ubuntu-wsl")
-        return EnumerateDirectory(WslRoot(), "linux", items, error);
+        listed = EnumerateDirectory(KnownFolder(FOLDERID_Desktop), "windows", items, error);
+    else if (location == "documents")
+        listed = EnumerateDirectory(KnownFolder(FOLDERID_Documents), "windows", items, error);
+    else if (location == "downloads")
+        listed = EnumerateDirectory(KnownFolder(FOLDERID_Downloads), "windows", items, error);
+    else if (location == "cloud-drive")
+        listed = EnumerateDirectory(CloudDriveRoot(), "cloudDrive", items, error);
+    else if (location == "windows-c")
+        listed = EnumerateDirectory(SystemVolumeRoot(), "windows", items, error);
+    else if (location == "ubuntu-wsl")
+        listed = EnumerateDirectory(WslRoot(), "linux", items, error);
 
-    error = "Unsupported allowlisted location";
-    return false;
+    if (!listed)
+    {
+        if (error.empty()) error = "Unsupported allowlisted location";
+        return false;
+    }
+    AttachCapabilities(items);
+    return true;
+}
+
+bool FileServiceV21::ListEntry(
+    const std::string& entry_id,
+    std::vector<FileItemV21>& items,
+    std::string& error)
+{
+    EntryCapability capability;
+    if (!ResolveCapability(entry_id, capability, error)) return false;
+    if (!capability.is_folder)
+    {
+        error = "Files entry capability does not reference a folder";
+        return false;
+    }
+
+    const DWORD attributes = GetFileAttributesW(capability.path.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES ||
+        (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+    {
+        error = "Folder capability target is no longer available";
+        return false;
+    }
+
+    std::string source = "windows";
+    if (capability.path.rfind(L"\\\\wsl", 0) == 0) source = "linux";
+    const std::wstring cloud_root = CloudDriveRoot();
+    if (!cloud_root.empty() && capability.path.rfind(cloud_root, 0) == 0)
+        source = "cloudDrive";
+
+    if (!EnumerateDirectory(capability.path, source, items, error)) return false;
+    AttachCapabilities(items);
+    return true;
+}
+
+bool FileServiceV21::OpenEntry(
+    const std::string& entry_id,
+    std::string& error)
+{
+    EntryCapability capability;
+    if (!ResolveCapability(entry_id, capability, error)) return false;
+    if (capability.is_folder)
+    {
+        error = "Folder capabilities must be navigated with files.listEntry";
+        return false;
+    }
+
+    const DWORD attributes = GetFileAttributesW(capability.path.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES ||
+        (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+    {
+        error = "File capability target is no longer available";
+        return false;
+    }
+
+    const HINSTANCE result = ShellExecuteW(
+        nullptr,
+        L"open",
+        capability.path.c_str(),
+        nullptr,
+        nullptr,
+        SW_SHOWNORMAL);
+    if (reinterpret_cast<intptr_t>(result) <= 32)
+    {
+        error = "Windows Shell could not open the capability target";
+        return false;
+    }
+    return true;
 }
 
 } // namespace CloudOS

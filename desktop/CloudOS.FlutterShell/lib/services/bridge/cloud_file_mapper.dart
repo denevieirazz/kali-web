@@ -13,6 +13,7 @@ CloudFileItem cloudFileFromNative(Map<Object?, Object?> raw) {
   final name = raw['name'] as String? ?? '';
   final path = raw['path'] as String? ?? '';
   final extension = raw['extension'] as String?;
+  final entryId = raw['entryId'] as String?;
 
   return CloudFileItem(
     name: name,
@@ -21,6 +22,7 @@ CloudFileItem cloudFileFromNative(Map<Object?, Object?> raw) {
     sizeFormatted: raw['sizeFormatted'] as String? ?? '',
     modifiedFormatted: raw['modifiedFormatted'] as String? ?? '',
     source: _sourceFromNative(raw['source']),
+    entryId: entryId == null || entryId.isEmpty ? null : entryId,
     extension: extension == null || extension.isEmpty ? null : extension,
   );
 }
