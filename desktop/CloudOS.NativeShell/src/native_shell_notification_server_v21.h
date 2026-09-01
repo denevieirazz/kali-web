@@ -196,4 +196,20 @@ private:
 
     inline static HWND window_{};
 };
+
+class NativeShellNotificationServerLifetimeV21 final
+{
+public:
+    NativeShellNotificationServerLifetimeV21() noexcept
+    {
+        (void)NativeShellNotificationServerV21::Start(GetModuleHandleW(nullptr));
+    }
+
+    ~NativeShellNotificationServerLifetimeV21()
+    {
+        NativeShellNotificationServerV21::Stop();
+    }
+};
+
+inline NativeShellNotificationServerLifetimeV21 g_native_shell_notification_server_v21;
 } // namespace CloudOS
