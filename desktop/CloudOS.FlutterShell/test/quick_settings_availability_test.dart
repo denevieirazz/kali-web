@@ -12,7 +12,8 @@ void main() {
       volume: 0,
       brightnessAvailable: false,
       brightness: 0,
-      batteryPercent: 100,
+      batteryAvailable: false,
+      batteryPercent: 0,
       wslAvailable: false,
       distros: <String>[],
     );
@@ -30,5 +31,7 @@ void main() {
     expect(sliders[0].onChanged, isNull);
     expect(sliders[1].onChanged, isNull);
     expect(find.text('N/D'), findsNWidgets(2));
+    expect(find.text('Bateria indisponível'), findsOneWidget);
+    expect(find.textContaining('Carregando'), findsNothing);
   });
 }
