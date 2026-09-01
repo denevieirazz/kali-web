@@ -59,6 +59,14 @@ jobs:
             Copy-Item -Path "native_bridge/*" -Destination "windows/runner/" -Force
             Copy-Item -Path "../CloudOS.SystemBroker/src/protocol_v21.h" -Destination "windows/runner/protocol_v21.h" -Force
             Copy-Item -Path "../CloudOS.SystemBroker/src/protocol_v21.cpp" -Destination "windows/runner/protocol_v21.cpp" -Force
+
+            # Native bridge sources are copied two levels deeper into windows/runner.
+            # Preserve their ../../CloudOS.NativeCommon include boundary by staging only
+            # the typed V21 activation/lifecycle headers required by the copied source.
+            New-Item -ItemType Directory -Force -Path "CloudOS.NativeCommon" | Out-Null
+            Copy-Item -Path "../CloudOS.NativeCommon/native_shell_activation_v21.h" -Destination "CloudOS.NativeCommon/native_shell_activation_v21.h" -Force
+            Copy-Item -Path "../CloudOS.NativeCommon/native_shell_activation_client_v21.h" -Destination "CloudOS.NativeCommon/native_shell_activation_client_v21.h" -Force
+
             $cmakePath = "windows/runner/CMakeLists.txt"
             if (Test-Path $cmakePath) {
               $cmake = Get-Content -Path $cmakePath -Raw
