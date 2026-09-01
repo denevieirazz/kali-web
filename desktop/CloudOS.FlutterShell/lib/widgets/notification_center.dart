@@ -2,22 +2,29 @@ import 'package:flutter/material.dart';
 
 import '../core/cloudos_theme.dart';
 import '../models/shell_models.dart';
-import '../services/cloudos_bridge.dart';
 import 'glass_surface.dart';
 
-class NotificationCenterPanel extends StatefulWidget {
-  const NotificationCenterPanel({this.initialNotifications, super.key});
+class NotificationCenter extends StatefulWidget {
+  const NotificationCenter({
+    this.initialNotifications,
+    this.onClose,
+    super.key,
+  });
 
   final List<CloudNotification>? initialNotifications;
+  final VoidCallback? onClose;
 
   @override
-  State<NotificationCenterPanel> createState() =>
-      _NotificationCenterPanelState();
+  State<NotificationCenter> createState() => _NotificationCenterState();
 }
 
-class _NotificationCenterPanelState extends State<NotificationCenterPanel> {
+// Compatibility name for callers/tests that adopted the refactored class name
+// before the shell API was reconciled in V22.1.
+typedef NotificationCenterPanel = NotificationCenter;
+
+class _NotificationCenterState extends State<NotificationCenter> {
   late List<CloudNotification> items = List<CloudNotification>.from(
-    widget.initialNotifications ?? CloudOSBridge.previewNotifications,
+    widget.initialNotifications ?? const <CloudNotification>[],
   );
 
   void _dismiss(String id) {
@@ -27,9 +34,7 @@ class _NotificationCenterPanelState extends State<NotificationCenterPanel> {
   }
 
   void _clearAll() {
-    setState(() {
-      items.clear();
-    });
+    setState(items.clear);
   }
 
   @override
@@ -120,6 +125,15 @@ class _NotificationCenterPanelState extends State<NotificationCenterPanel> {
                           ),
                         ),
                       ),
+                    if (widget.onClose != null)
+                      Tooltip(
+                        message: 'Fechar (Esc)',
+                        child: IconButton(
+                          onPressed: widget.onClose,
+                          visualDensity: VisualDensity.compact,
+                          icon: const Icon(Icons.close_rounded, size: 18),
+                        ),
+                      ),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -147,7 +161,7 @@ class _NotificationCenterPanelState extends State<NotificationCenterPanel> {
                         ),
                         SizedBox(height: 2),
                         Text(
-                          'Tudo atualizado por aqui',
+                          'Nenhuma fonte de notificação reportou eventos.',
                           style: TextStyle(
                             color: CloudOSColors.caption,
                             fontSize: 11,
