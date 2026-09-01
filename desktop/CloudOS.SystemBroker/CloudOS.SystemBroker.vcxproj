@@ -47,6 +47,7 @@
     <ClInclude Include="src\event_bus_v21.h" />
     <ClInclude Include="src\job_manager_v21.h" />
     <ClInclude Include="src\app_service_v21.h" />
+    <ClInclude Include="src\file_service_v21.h" />
     <ClInclude Include="src\network_status_v21.h" />
     <ClInclude Include="src\system_control_v21.h" />
     <ClInclude Include="src\system_service_v21.h" />
@@ -60,6 +61,7 @@
     <ClCompile Include="src\event_bus_v21.cpp" />
     <ClCompile Include="src\job_manager_v21.cpp" />
     <ClCompile Include="src\app_service_v21.cpp" />
+    <ClCompile Include="src\file_service_v21.cpp" />
     <ClCompile Include="src\network_status_v21.cpp" />
     <ClCompile Include="src\system_control_v21.cpp" />
     <ClCompile Include="src\system_service_v21.cpp" />
