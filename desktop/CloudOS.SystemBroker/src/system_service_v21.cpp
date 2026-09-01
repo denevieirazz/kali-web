@@ -1,5 +1,6 @@
 #include "system_service_v21.h"
 #include "event_bus_v21.h"
+#include "network_status_v21.h"
 #include "security_v21.h"
 #include "system_control_v21.h"
 #include "wsl_service_v21.h"
@@ -130,6 +131,7 @@ std::vector<std::string> SystemServiceV21::GetCapabilities()
         "apps.list",
         "apps.launch",
         "system.snapshot",
+        "system.network.read",
         "system.volume.read",
         "system.volume.write",
         "system.brightness.read",
@@ -197,8 +199,11 @@ void SystemServiceV21::Refresh()
         snapshot_.battery_percent = 100;
     }
 
-    snapshot_.network_available = true;
-    snapshot_.network_name = "CloudOS Network • Wi-Fi 6";
+    const NetworkStatusV21 network = NetworkStatusServiceV21::Query();
+    snapshot_.network_available = network.available;
+    snapshot_.network_name = network.available && !network.name.empty()
+        ? network.name
+        : "Desconectado";
 
     const AudioControlStateV21 audio = SystemControlV21::QueryAudio();
     snapshot_.volume_available = audio.available;
