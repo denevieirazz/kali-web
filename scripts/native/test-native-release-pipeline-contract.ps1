@@ -101,6 +101,9 @@ Require 'Native build status diagnostics' $content.Status @(
     'source_matches_build',
     'integrity_ok',
     'supervisor_exists',
+    'broker_exists',
+    'probe_exists',
+    "broker = 'CloudOS.SystemBroker.exe V21'",
     'ready_to_run',
     '--force-rebuild'
 )
@@ -154,4 +157,4 @@ Require 'CI release artifact and dependency cache' $content.Workflow @(
     'cloudos-native-manifest.json'
 )
 
-Write-Host 'PASS: deterministic fingerprint, five-binary V21 integrity, Supervisor V11 launch authority, self-verifying portable package, root workflow shortcuts, WebView2 CI cache and verified release artifact contracts are protected.'
+Write-Host 'PASS: deterministic fingerprint, five-binary V21 integrity/status, Supervisor V11 launch authority, self-verifying portable package, root workflow shortcuts, WebView2 CI cache and verified release artifact contracts are protected.'
