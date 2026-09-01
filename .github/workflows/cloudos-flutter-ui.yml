@@ -77,6 +77,7 @@ jobs:
             'windows/runner/cloudos_broker_client_v21.cpp',
             'windows/runner/cloudos_conpty_manager.cpp',
             'windows/runner/cloudos_system_metrics_native.cpp',
+            'windows/runner/cloudos_conpty_probe.cpp',
             'windows/runner/flutter_window.cpp'
           )
           foreach ($required in $requiredRunnerFiles) {
@@ -104,6 +105,23 @@ jobs:
         working-directory: desktop/CloudOS.FlutterShell
         run: flutter build windows --release
 
+      - name: Native ConPTY integration smoke
+        shell: pwsh
+        working-directory: desktop/CloudOS.FlutterShell
+        run: |
+          cmake --build build/windows/x64 --config Release --target cloudos_conpty_probe
+          if ($LASTEXITCODE -ne 0) { throw 'cloudos_conpty_probe build failed.' }
+          $probe = Resolve-Path 'build/windows/x64/runner/Release/cloudos_conpty_probe.exe'
+          $output = & $probe
+          $exitCode = $LASTEXITCODE
+          $output | Set-Content -Encoding UTF8 '../../conpty-v22-smoke.json'
+          $output
+          if ($exitCode -ne 0) { throw "ConPTY integration probe failed with exit code $exitCode." }
+          $result = $output | ConvertFrom-Json
+          if ($result.powershell.ok -ne $true) { throw 'ConPTY PowerShell command test failed.' }
+          if ($result.cmd.ok -ne $true) { throw 'ConPTY CMD command test failed.' }
+          if ($result.lifecycle20.ok -ne $true) { throw 'ConPTY 20-session lifecycle test failed.' }
+
       - name: Stage System Broker binaries in Release
         shell: pwsh
         run: |
@@ -121,12 +139,16 @@ jobs:
           $brokerExe = Join-Path $release 'CloudOS.SystemBroker.exe'
           $probeExe = Join-Path $release 'CloudOS.BrokerProbe.exe'
           foreach ($required in @($exe,$brokerExe,$probeExe)) { if (-not (Test-Path $required)) { throw "Release binary missing: $required" } }
+          if (-not (Test-Path 'conpty-v22-smoke.json')) { throw 'ConPTY evidence missing: conpty-v22-smoke.json' }
           $evidence = [ordered]@{
             schema = 221
             verdict = 'pass'
             flutter = $flutter
             git_sha = '${{ github.sha }}'
             presentation_layer = 'Flutter 3.44.7'
+            embedded_browser = 'webview_flutter_windows/WebView2'
+            terminal_backend = 'Windows ConPTY'
+            conpty_native_probe = $true
             native_bridge_channel = 'cloudos/native/v19'
             native_broker_ipc = 'NamedPipe v21'
             broker_protocol_version = 21
@@ -162,5 +184,6 @@ jobs:
             flutter-v22.1-smoke.json
             system-broker-v21-smoke.json
             unified-files-v22.1-smoke.json
+            conpty-v22-smoke.json
           if-no-files-found: error
           retention-days: 14

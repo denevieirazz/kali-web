@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+
 import '../core/cloudos_theme.dart';
 import '../models/file_models.dart';
 import '../models/shell_models.dart';
 import '../services/cloudos_bridge.dart';
+import '../services/cloudos_logger.dart';
 
 class SettingsWindow extends StatefulWidget {
   const SettingsWindow({
@@ -20,18 +22,22 @@ class _SettingsWindowState extends State<SettingsWindow> {
   int _selectedPageIndex = 0;
   CloudSystemSnapshot _snapshot = CloudOSBridge.unavailableSnapshot;
   List<DriveInfoModel> _drives = const <DriveInfoModel>[];
-  double _volume = 0.5;
-  bool _nightLight = false;
-  bool _darkTheme = true;
-  bool _glassEffects = true;
+  Map<String, Object?> _bridgeInfo = const <String, Object?>{};
+  double _volume = 0;
+  double _brightness = 0;
+  bool _volumeBusy = false;
+  bool _brightnessBusy = false;
 
-  final List<Map<String, dynamic>> _pages = <Map<String, dynamic>>[
+  static const List<Map<String, dynamic>> _pages = <Map<String, dynamic>>[
     <String, dynamic>{'title': 'Sistema', 'icon': Icons.computer_rounded},
     <String, dynamic>{'title': 'Tela', 'icon': Icons.desktop_windows_rounded},
     <String, dynamic>{'title': 'Som', 'icon': Icons.volume_up_rounded},
     <String, dynamic>{'title': 'Rede & Internet', 'icon': Icons.wifi_rounded},
     <String, dynamic>{'title': 'Bluetooth', 'icon': Icons.bluetooth_rounded},
-    <String, dynamic>{'title': 'Energia & Bateria', 'icon': Icons.battery_charging_full_rounded},
+    <String, dynamic>{
+      'title': 'Energia & Bateria',
+      'icon': Icons.battery_charging_full_rounded,
+    },
     <String, dynamic>{'title': 'Armazenamento', 'icon': Icons.storage_rounded},
     <String, dynamic>{'title': 'Personalização', 'icon': Icons.palette_rounded},
     <String, dynamic>{'title': 'WSL (Linux)', 'icon': Icons.auto_awesome_mosaic_rounded},
@@ -45,30 +51,94 @@ class _SettingsWindowState extends State<SettingsWindow> {
   }
 
   Future<void> _loadData() async {
-    final snap = await widget.bridge.loadSystemSnapshot();
-    final drives = await widget.bridge.getDrives();
+    CloudSystemSnapshot snapshot = CloudOSBridge.unavailableSnapshot;
+    List<DriveInfoModel> drives = const <DriveInfoModel>[];
+    Map<String, Object?> bridgeInfo = const <String, Object?>{};
+
+    try {
+      snapshot = await widget.bridge.loadSystemSnapshot();
+    } catch (error, stackTrace) {
+      CloudOSLogger.error(
+        'SettingsWindow',
+        'loadSystemSnapshot',
+        error,
+        stackTrace,
+      );
+    }
+
+    try {
+      drives = await widget.bridge.getDrives();
+    } catch (error, stackTrace) {
+      CloudOSLogger.error('SettingsWindow', 'getDrives', error, stackTrace);
+    }
+
+    try {
+      bridgeInfo = await widget.bridge.getBridgeInfo();
+    } catch (error, stackTrace) {
+      CloudOSLogger.error('SettingsWindow', 'getBridgeInfo', error, stackTrace);
+    }
+
     if (!mounted) return;
     setState(() {
-      _snapshot = snap;
+      _snapshot = snapshot;
       _drives = drives;
-      _volume = snap.volume;
+      _bridgeInfo = bridgeInfo;
+      _volume = snapshot.volume.clamp(0.0, 1.0).toDouble();
+      _brightness = snapshot.brightness.clamp(0.0, 1.0).toDouble();
     });
   }
 
-  void _onVolumeChanged(double val) {
-    setState(() => _volume = val);
-    widget.bridge.setVolume(val).then((ok) {
-      if (!ok && mounted) {
-        setState(() => _volume = _snapshot.volume);
-      }
+  String get _brokerState {
+    if (_bridgeInfo['brokerConnected'] == true) return 'Conectado';
+    final raw = _bridgeInfo['brokerState'];
+    if (raw is String && raw.trim().isNotEmpty) return raw;
+    return 'Indisponível';
+  }
+
+  Future<void> _setVolume(double value) async {
+    if (_volumeBusy || !_snapshot.volumeAvailable) return;
+    final previous = _volume;
+    setState(() {
+      _volumeBusy = true;
+      _volume = value;
     });
+    final ok = await widget.bridge.setVolume(value);
+    if (!mounted) return;
+    setState(() {
+      _volumeBusy = false;
+      if (!ok) _volume = previous;
+    });
+    if (!ok) _showUnavailable('O controle de volume não confirmou a alteração.');
+  }
+
+  Future<void> _setBrightness(double value) async {
+    if (_brightnessBusy || !_snapshot.brightnessAvailable) return;
+    final previous = _brightness;
+    setState(() {
+      _brightnessBusy = true;
+      _brightness = value;
+    });
+    final ok = await widget.bridge.setBrightness(value);
+    if (!mounted) return;
+    setState(() {
+      _brightnessBusy = false;
+      if (!ok) _brightness = previous;
+    });
+    if (!ok) {
+      _showUnavailable('O monitor não confirmou a alteração de brilho.');
+    }
+  }
+
+  void _showUnavailable(String message) {
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: <Widget>[
-        // Menu Lateral de Navegação
         Container(
           width: 220,
           color: const Color(0xFF131620),
@@ -79,7 +149,11 @@ class _SettingsWindowState extends State<SettingsWindow> {
                 alignment: Alignment.centerLeft,
                 child: const Text(
                   'Configurações',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
                 ),
               ),
               Expanded(
@@ -87,17 +161,29 @@ class _SettingsWindowState extends State<SettingsWindow> {
                   itemCount: _pages.length,
                   itemBuilder: (context, index) {
                     final page = _pages[index];
-                    final isSelected = index == _selectedPageIndex;
+                    final selected = index == _selectedPageIndex;
                     return InkWell(
                       onTap: () => setState(() => _selectedPageIndex = index),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
+                        margin: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
-                          color: isSelected ? CloudOSColors.accent.withValues(alpha: 0.18) : Colors.transparent,
+                          color: selected
+                              ? CloudOSColors.accent.withValues(alpha: 0.18)
+                              : Colors.transparent,
                           borderRadius: BorderRadius.circular(8),
-                          border: isSelected
-                              ? Border.all(color: CloudOSColors.accent.withValues(alpha: 0.4))
+                          border: selected
+                              ? Border.all(
+                                  color: CloudOSColors.accent.withValues(
+                                    alpha: 0.4,
+                                  ),
+                                )
                               : null,
                         ),
                         child: Row(
@@ -105,7 +191,9 @@ class _SettingsWindowState extends State<SettingsWindow> {
                             Icon(
                               page['icon'] as IconData,
                               size: 17,
-                              color: isSelected ? CloudOSColors.accent : Colors.white60,
+                              color: selected
+                                  ? CloudOSColors.accent
+                                  : Colors.white60,
                             ),
                             const SizedBox(width: 10),
                             Expanded(
@@ -113,8 +201,12 @@ class _SettingsWindowState extends State<SettingsWindow> {
                                 page['title'] as String,
                                 style: TextStyle(
                                   fontSize: 12.5,
-                                  color: isSelected ? Colors.white : Colors.white70,
-                                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                                  color: selected
+                                      ? Colors.white
+                                      : Colors.white70,
+                                  fontWeight: selected
+                                      ? FontWeight.w600
+                                      : FontWeight.w400,
                                 ),
                               ),
                             ),
@@ -128,15 +220,11 @@ class _SettingsWindowState extends State<SettingsWindow> {
             ],
           ),
         ),
-
-        // Área Central de Conteúdo
         Expanded(
           child: Container(
             color: const Color(0xFF171A26),
             padding: const EdgeInsets.all(24),
-            child: SingleChildScrollView(
-              child: _buildPageContent(),
-            ),
+            child: SingleChildScrollView(child: _buildPageContent()),
           ),
         ),
       ],
@@ -144,29 +232,18 @@ class _SettingsWindowState extends State<SettingsWindow> {
   }
 
   Widget _buildPageContent() {
-    switch (_selectedPageIndex) {
-      case 0:
-        return _buildSystemPage();
-      case 1:
-        return _buildDisplayPage();
-      case 2:
-        return _buildSoundPage();
-      case 3:
-        return _buildNetworkPage();
-      case 4:
-        return _buildBluetoothPage();
-      case 5:
-        return _buildPowerPage();
-      case 6:
-        return _buildStoragePage();
-      case 7:
-        return _buildPersonalizationPage();
-      case 8:
-        return _buildWslPage();
-      case 9:
-      default:
-        return _buildAboutPage();
-    }
+    return switch (_selectedPageIndex) {
+      0 => _buildSystemPage(),
+      1 => _buildDisplayPage(),
+      2 => _buildSoundPage(),
+      3 => _buildNetworkPage(),
+      4 => _buildBluetoothPage(),
+      5 => _buildPowerPage(),
+      6 => _buildStoragePage(),
+      7 => _buildPersonalizationPage(),
+      8 => _buildWslPage(),
+      _ => _buildAboutPage(),
+    };
   }
 
   Widget _buildCard({required String title, required Widget child}) {
@@ -182,7 +259,14 @@ class _SettingsWindowState extends State<SettingsWindow> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white)),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
           const SizedBox(height: 12),
           child,
         ],
@@ -195,13 +279,21 @@ class _SettingsWindowState extends State<SettingsWindow> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         _buildCard(
-          title: 'Especificações do Dispositivo',
+          title: 'Estado do Sistema',
           child: Column(
             children: <Widget>[
-              _buildInfoRow('Nome do Computador', _snapshot.deviceName),
-              _buildInfoRow('Edição do Sistema', 'CloudOS V22.1 (Host Windows 11)'),
-              _buildInfoRow('System Broker', 'V21 IPC (Conectado / Ativo)'),
-              _buildInfoRow('Sessão', 'Área de Trabalho 1'),
+              _buildInfoRow(
+                'Nome do Computador',
+                _snapshot.deviceName.trim().isEmpty
+                    ? 'Indisponível'
+                    : _snapshot.deviceName,
+              ),
+              _buildInfoRow('System Broker', _brokerState),
+              _buildInfoRow(
+                'Workspace CloudOS',
+                _snapshot.currentWorkspace.toString(),
+              ),
+              _buildInfoRow('Protocolo', 'V21 Named Pipe'),
             ],
           ),
         ),
@@ -214,17 +306,35 @@ class _SettingsWindowState extends State<SettingsWindow> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         _buildCard(
-          title: 'Configurações de Tela',
+          title: 'Tela',
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              _buildInfoRow('Resolução Ativa', '1920 x 1080 (Recomendada)'),
-              _buildInfoRow('Escala da Interface', '100% (Padrão)'),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Luz Noturna', style: TextStyle(fontSize: 13, color: Colors.white)),
-                subtitle: const Text('Reduz a fadiga visual usando cores mais quentes', style: TextStyle(fontSize: 11, color: Colors.white60)),
-                value: _nightLight,
-                onChanged: (val) => setState(() => _nightLight = val),
+              _buildInfoRow(
+                'Resolução / escala do Windows',
+                'Ainda não exposta pelo Broker',
+              ),
+              const SizedBox(height: 8),
+              if (_snapshot.brightnessAvailable)
+                _buildSlider(
+                  label: _brightnessBusy
+                      ? 'Brilho: aplicando...'
+                      : 'Brilho: ${(_brightness * 100).round()}%',
+                  value: _brightness,
+                  enabled: !_brightnessBusy,
+                  onChanged: _setBrightness,
+                )
+              else
+                const _UnavailableFeature(
+                  title: 'Brilho',
+                  message:
+                      'Este monitor não expõe controle de brilho compatível ao CloudOS.',
+                ),
+              const SizedBox(height: 10),
+              const _UnavailableFeature(
+                title: 'Luz Noturna',
+                message:
+                    'Ainda não existe backend seguro para alterar Luz Noturna.',
               ),
             ],
           ),
@@ -239,35 +349,27 @@ class _SettingsWindowState extends State<SettingsWindow> {
       children: <Widget>[
         _buildCard(
           title: 'Saída de Áudio do Sistema',
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Row(
-                children: <Widget>[
-                  const Icon(Icons.volume_up_rounded, size: 20, color: CloudOSColors.accent),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Slider(
-                      value: _volume,
-                      min: 0.0,
-                      max: 1.0,
-                      activeColor: CloudOSColors.accent,
-                      onChanged: _onVolumeChanged,
-                    ),
-                  ),
-                  Text('${(_volume * 100).toStringAsFixed(0)}%', style: const TextStyle(color: Colors.white)),
-                ],
-              ),
-              const SizedBox(height: 8),
-              _buildInfoRow('Dispositivo Padrão', 'Alto-falantes (Realtek High Definition Audio)'),
-            ],
-          ),
+          child: _snapshot.volumeAvailable
+              ? _buildSlider(
+                  label: _volumeBusy
+                      ? 'Volume: aplicando...'
+                      : 'Volume: ${(_volume * 100).round()}%',
+                  value: _volume,
+                  enabled: !_volumeBusy,
+                  onChanged: _setVolume,
+                )
+              : const _UnavailableFeature(
+                  title: 'Volume',
+                  message:
+                      'O endpoint de áudio padrão não está disponível para controle.',
+                ),
         ),
       ],
     );
   }
 
   Widget _buildNetworkPage() {
+    final networkName = _snapshot.networkName.trim();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
@@ -275,9 +377,18 @@ class _SettingsWindowState extends State<SettingsWindow> {
           title: 'Status da Conexão',
           child: Column(
             children: <Widget>[
-              _buildInfoRow('Rede Atual', _snapshot.networkName),
-              _buildInfoRow('Tipo de Conexão', 'Ethernet / Wi-Fi 6'),
-              _buildInfoRow('Status do Broker', _snapshot.networkAvailable ? 'Conectado à Internet' : 'Desconectado'),
+              _buildInfoRow(
+                'Interface ativa',
+                _snapshot.networkAvailable
+                    ? (networkName.isEmpty ? 'Detectada' : networkName)
+                    : 'Indisponível',
+              ),
+              _buildInfoRow(
+                'Estado',
+                _snapshot.networkAvailable
+                    ? 'Adaptador de rede ativo'
+                    : 'Nenhum adaptador ativo confirmado',
+              ),
             ],
           ),
         ),
@@ -286,21 +397,10 @@ class _SettingsWindowState extends State<SettingsWindow> {
   }
 
   Widget _buildBluetoothPage() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        _buildCard(
-          title: 'Dispositivos Bluetooth',
-          child: const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text('Adaptador Bluetooth Ativo', style: TextStyle(fontSize: 13, color: Colors.white70)),
-              SizedBox(height: 8),
-              Text('Pronto para emparelhamento.', style: TextStyle(fontSize: 11.5, color: Colors.white54)),
-            ],
-          ),
-        ),
-      ],
+    return const _UnavailableFeature(
+      title: 'Bluetooth',
+      message:
+          'O System Broker ainda não expõe inventário ou controle Bluetooth. Nenhum estado é inventado.',
     );
   }
 
@@ -312,8 +412,16 @@ class _SettingsWindowState extends State<SettingsWindow> {
           title: 'Bateria e Energia',
           child: Column(
             children: <Widget>[
-              _buildInfoRow('Fonte de Energia', 'Conectado à Tomada (Desktop AC)'),
-              _buildInfoRow('Status da Bateria', _snapshot.batteryPercent >= 0 ? '${_snapshot.batteryPercent}%' : 'Alimentação Direta'),
+              _buildInfoRow(
+                'Bateria',
+                _snapshot.batteryAvailable && _snapshot.batteryPercent >= 0
+                    ? '${_snapshot.batteryPercent}%'
+                    : 'Não detectada / indisponível',
+              ),
+              _buildInfoRow(
+                'Fonte AC / carregamento',
+                'Ainda não exposta pelo Broker',
+              ),
             ],
           ),
         ),
@@ -328,21 +436,40 @@ class _SettingsWindowState extends State<SettingsWindow> {
         _buildCard(
           title: 'Unidades de Armazenamento',
           child: _drives.isEmpty
-              ? const Text('Carregando drives do sistema...', style: TextStyle(color: Colors.white60))
+              ? const Text(
+                  'Nenhuma unidade foi retornada pelo Broker.',
+                  style: TextStyle(color: Colors.white60),
+                )
               : Column(
-                  children: _drives.map((d) {
+                  children: _drives.map((drive) {
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 6),
                       child: Row(
                         children: <Widget>[
-                          const Icon(Icons.storage_rounded, size: 22, color: CloudOSColors.accent),
+                          const Icon(
+                            Icons.storage_rounded,
+                            size: 22,
+                            color: CloudOSColors.accent,
+                          ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: <Widget>[
-                                Text('${d.label} (${d.letter})', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-                                Text('Espaço livre: ${d.freeFormatted} de ${d.totalFormatted} (${d.filesystem})', style: const TextStyle(fontSize: 11.5, color: Colors.white60)),
+                                Text(
+                                  '${drive.label} (${drive.letter})',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                Text(
+                                  'Livre: ${drive.freeFormatted} de ${drive.totalFormatted} · ${drive.filesystem}',
+                                  style: const TextStyle(
+                                    fontSize: 11.5,
+                                    color: Colors.white60,
+                                  ),
+                                ),
                               ],
                             ),
                           ),
@@ -357,43 +484,45 @@ class _SettingsWindowState extends State<SettingsWindow> {
   }
 
   Widget _buildPersonalizationPage() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        _buildCard(
-          title: 'Aparência e Tema',
-          child: Column(
-            children: <Widget>[
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Tema Escuro (Dark Glass)', style: TextStyle(fontSize: 13, color: Colors.white)),
-                value: _darkTheme,
-                onChanged: (val) => setState(() => _darkTheme = val),
-              ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Efeitos de Transparência Glassmorphism', style: TextStyle(fontSize: 13, color: Colors.white)),
-                value: _glassEffects,
-                onChanged: (val) => setState(() => _glassEffects = val),
-              ),
-            ],
-          ),
-        ),
-      ],
+    return const _UnavailableFeature(
+      title: 'Personalização',
+      message:
+          'Tema, transparência e wallpaper ainda não possuem persistência/configuração central concluída. Os controles permanecem desabilitados para não simular alterações.',
     );
   }
 
   Widget _buildWslPage() {
+    final defaultDistro = _snapshot.defaultDistro.trim();
+    final uncDistro = defaultDistro.isNotEmpty
+        ? defaultDistro
+        : (_snapshot.distros.isEmpty ? '' : _snapshot.distros.first);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         _buildCard(
-          title: 'Subsistema Windows para Linux (WSL2)',
+          title: 'Subsistema Windows para Linux (WSL)',
           child: Column(
             children: <Widget>[
-              _buildInfoRow('WSL Instalado', _snapshot.wslAvailable ? 'Sim (Versão 2)' : 'Não detectado'),
-              _buildInfoRow('Distribuições', _snapshot.distros.isEmpty ? 'Nenhuma instalada' : _snapshot.distros.join(', ')),
-              _buildInfoRow('Acesso UNC', _snapshot.distros.isNotEmpty ? r'\\wsl.localhost\' + _snapshot.distros.first : r'\\wsl.localhost'),
+              _buildInfoRow(
+                'WSL detectado',
+                _snapshot.wslAvailable ? 'Sim' : 'Não',
+              ),
+              _buildInfoRow(
+                'Distribuições',
+                _snapshot.distros.isEmpty
+                    ? 'Nenhuma configurada'
+                    : _snapshot.distros.join(', '),
+              ),
+              _buildInfoRow(
+                'Distribuição padrão',
+                defaultDistro.isEmpty ? 'Não informada' : defaultDistro,
+              ),
+              _buildInfoRow(
+                'Acesso UNC',
+                uncDistro.isEmpty
+                    ? r'\\wsl.localhost'
+                    : r'\\wsl.localhost\' + uncDistro,
+              ),
             ],
           ),
         ),
@@ -409,11 +538,47 @@ class _SettingsWindowState extends State<SettingsWindow> {
           title: 'CloudOS Desktop V22.1',
           child: Column(
             children: <Widget>[
-              _buildInfoRow('Versão', '22.1.0-release'),
-              _buildInfoRow('Protocolo Broker', 'V21 IPC (Named Pipe restrito)'),
-              _buildInfoRow('Arquitetura', 'x64 (Nativa Windows + Flutter Presentation)'),
-              _buildInfoRow('Compilação', 'Release x64 MSBuild / Flutter SDK 3.47.2'),
+              _buildInfoRow('Versão da aplicação', '22.1.0'),
+              _buildInfoRow('Broker IPC', 'V21 Named Pipe restrito'),
+              _buildInfoRow(
+                'Arquitetura',
+                'Flutter Windows + núcleo nativo C++',
+              ),
+              _buildInfoRow(
+                'Flutter SDK',
+                'Registrado no artefato/evidência do build',
+              ),
             ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSlider({
+    required String label,
+    required double value,
+    required bool enabled,
+    required ValueChanged<double> onChanged,
+  }) {
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: Slider(
+            value: value.clamp(0.0, 1.0).toDouble(),
+            min: 0,
+            max: 1,
+            activeColor: CloudOSColors.accent,
+            onChanged: enabled ? onChanged : null,
+          ),
+        ),
+        const SizedBox(width: 12),
+        SizedBox(
+          width: 130,
+          child: Text(
+            label,
+            textAlign: TextAlign.right,
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
           ),
         ),
       ],
@@ -422,12 +587,81 @@ class _SettingsWindowState extends State<SettingsWindow> {
 
   Widget _buildInfoRow(String label, String value) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text(label, style: const TextStyle(fontSize: 12.5, color: Colors.white60)),
-          Text(value, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Colors.white)),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(fontSize: 12.5, color: Colors.white60),
+            ),
+          ),
+          const SizedBox(width: 16),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _UnavailableFeature extends StatelessWidget {
+  const _UnavailableFeature({required this.title, required this.message});
+
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E2232),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Icon(
+            Icons.info_outline_rounded,
+            size: 18,
+            color: Colors.white54,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  message,
+                  style: const TextStyle(
+                    color: Colors.white60,
+                    fontSize: 11.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
