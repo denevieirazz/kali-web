@@ -2,6 +2,7 @@
 #include "app_service_v21.h"
 #include "diagnostics_v21.h"
 #include "event_bus_v21.h"
+#include "file_service_v21.h"
 #include "job_manager_v21.h"
 #include "security_v21.h"
 #include "system_service_v21.h"
@@ -333,6 +334,47 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
         }
         res.payload["launched"] = JsonValue(true);
         res.payload["id"] = JsonValue(app_id);
+        return res;
+    }
+
+    if (method == "files.list")
+    {
+        auto it = req.payload.find("location");
+        if (it == req.payload.end() || !it->second.IsString())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing or invalid allowlisted 'location' id";
+            return res;
+        }
+
+        const std::string location = it->second.AsString();
+        if (!FileServiceV21::IsAllowedLocation(location))
+        {
+            res.ok = false;
+            res.error_code = "location_not_allowed";
+            res.error_message = "The requested Files location is not allowlisted";
+            return res;
+        }
+
+        std::vector<FileItemV21> items;
+        std::string error;
+        if (!FileServiceV21::Instance().ListLocation(location, items, error))
+        {
+            res.ok = false;
+            res.error_code = "files_unavailable";
+            res.error_message = error.empty() ? "The requested Files location is unavailable" : error;
+            return res;
+        }
+
+        JsonArray files;
+        files.reserve(items.size());
+        for (const FileItemV21& item : items)
+        {
+            files.push_back(JsonValue(item.ToJsonObject()));
+        }
+        res.payload["location"] = JsonValue(location);
+        res.payload["files"] = JsonValue(std::move(files));
         return res;
     }
 
