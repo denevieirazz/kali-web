@@ -27,7 +27,6 @@ bool BrokerServerV21::Start()
 {
     if (running_.load()) return true;
 
-    // 1. Acquire single-instance per-user mutex
     std::wstring mutex_name = SecurityV21::GetBrokerMutexName();
     mutex_handle_ = CreateMutexW(nullptr, TRUE, mutex_name.c_str());
     if (!mutex_handle_ || GetLastError() == ERROR_ALREADY_EXISTS)
@@ -41,14 +40,12 @@ bool BrokerServerV21::Start()
         return false;
     }
 
-    // 2. Initialize subsystems
     DiagnosticsV21::Initialize();
     JobManagerV21::Instance().Initialize(2);
 
     running_.store(true);
     listener_thread_ = std::thread(&BrokerServerV21::ListenerLoop, this);
 
-    // Publish broker.ready
     JsonObject ready_payload;
     ready_payload["version"] = JsonValue("21.0.0");
     ready_payload["protocol"] = JsonValue(kProtocolVersion);
@@ -62,7 +59,6 @@ void BrokerServerV21::Stop()
     if (!running_.load()) return;
     running_.store(false);
 
-    // Unblock listener by connecting a dummy client
     std::wstring pipe_name = SecurityV21::GetCommandPipeName();
     HANDLE dummy = CreateFileW(
         pipe_name.c_str(),
@@ -129,7 +125,7 @@ bool BrokerServerV21::ReadFrame(HANDLE pipe, std::string& payload)
     }
     if (len > kMaxPayloadBytes)
     {
-        return false; // Reject oversized frame
+        return false;
     }
     payload.resize(len);
     if (len > 0)
@@ -200,7 +196,6 @@ void BrokerServerV21::ListenerLoop()
 
 void BrokerServerV21::ClientSessionLoop(HANDLE pipe, std::string client_id)
 {
-    // Register client for events through this pipe
     std::mutex send_mutex;
     EventBusV21::Instance().RegisterClient(
         client_id,
@@ -215,7 +210,7 @@ void BrokerServerV21::ClientSessionLoop(HANDLE pipe, std::string client_id)
         std::string frame;
         if (!ReadFrame(pipe, frame))
         {
-            break; // Client disconnected or error
+            break;
         }
 
         BrokerRequest req;
@@ -266,7 +261,7 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
         res.payload["protocolVersion"] = JsonValue(kProtocolVersion);
         res.payload["clientId"] = JsonValue(client_id);
         res.payload["serverInstanceId"] = JsonValue("broker-session-" + std::to_string(SecurityV21::GetCurrentSessionId()));
-        
+
         JsonArray caps;
         for (const auto& cap : SystemServiceV21::Instance().GetCapabilities())
         {
@@ -357,7 +352,14 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
             res.error_message = "Missing or invalid double 'value'";
             return res;
         }
-        SystemServiceV21::Instance().SetVolume(it->second.AsDouble());
+        if (!SystemServiceV21::Instance().SetVolume(it->second.AsDouble()))
+        {
+            res.ok = false;
+            res.error_code = "system_control_unavailable";
+            res.error_message = "The active Windows audio endpoint rejected or does not support volume control";
+            res.payload["updated"] = JsonValue(false);
+            return res;
+        }
         res.payload["updated"] = JsonValue(true);
         return res;
     }
@@ -372,7 +374,14 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
             res.error_message = "Missing or invalid double 'value'";
             return res;
         }
-        SystemServiceV21::Instance().SetBrightness(it->second.AsDouble());
+        if (!SystemServiceV21::Instance().SetBrightness(it->second.AsDouble()))
+        {
+            res.ok = false;
+            res.error_code = "system_control_unavailable";
+            res.error_message = "No monitor accepted brightness control through DDC/CI or WMI";
+            res.payload["updated"] = JsonValue(false);
+            return res;
+        }
         res.payload["updated"] = JsonValue(true);
         return res;
     }
