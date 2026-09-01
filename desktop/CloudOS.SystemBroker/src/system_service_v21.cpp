@@ -3,6 +3,8 @@
 #include "security_v21.h"
 #include "wsl_service_v21.h"
 
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <Windows.h>
 #include <endpointvolume.h>
 #include <highlevelmonitorconfigurationapi.h>
