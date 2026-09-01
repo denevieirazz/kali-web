@@ -3,6 +3,7 @@
 #include "protocol_v21.h"
 
 #include <chrono>
+#include <mutex>
 
 namespace CloudOS
 {
@@ -14,6 +15,7 @@ public:
     static JsonObject GetDiagnosticsSnapshot();
 
 private:
+    static inline std::once_flag init_once_;
     static inline std::chrono::steady_clock::time_point start_time_;
 };
 
