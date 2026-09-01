@@ -83,4 +83,46 @@ void main() {
       reason: 'shell_models.dart must not regain model implementations',
     );
   });
+
+  test('WSL app discovery stays passive and does not wake Linux', () {
+    final appService = File(
+      '../CloudOS.SystemBroker/src/app_service_v21.cpp',
+    ).readAsStringSync();
+    final refreshStart = appService.indexOf('void AppServiceV21::Refresh()');
+    final launchStart = appService.indexOf('bool AppServiceV21::LaunchApp');
+
+    expect(refreshStart, greaterThanOrEqualTo(0));
+    expect(launchStart, greaterThan(refreshStart));
+
+    final refreshSource = appService.substring(refreshStart, launchStart);
+    expect(refreshSource, contains('GetDistributions()'));
+    expect(
+      refreshSource,
+      isNot(contains('ShellExecuteW')),
+      reason: 'catalog refresh must not launch wsl.exe or any application',
+    );
+    expect(
+      refreshSource,
+      isNot(contains('CreateProcessW')),
+      reason: 'catalog refresh must remain passive',
+    );
+    expect(
+      refreshSource,
+      isNot(contains(' which ')),
+      reason: 'package probes would start a WSL distro during discovery',
+    );
+  });
+
+  test('WSL discovery never fabricates a fallback distro', () {
+    final wslService = File(
+      '../CloudOS.SystemBroker/src/wsl_service_v21.cpp',
+    ).readAsStringSync();
+
+    expect(
+      wslService,
+      isNot(contains('distros_.push_back("Ubuntu")')),
+      reason: 'configured distros must come from Windows state, never fixtures',
+    );
+    expect(wslService, contains('DefaultDistribution'));
+  });
 }
