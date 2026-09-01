@@ -75,37 +75,39 @@ class CloudOSBridge {
     try {
       final raw =
           await _channel.invokeMapMethod<String, Object?>('getSystemSnapshot');
-      if (raw == null) return previewSnapshot;
+      if (raw == null) return degradedSnapshot;
       return CloudSystemSnapshot(
         deviceName:
-            raw['deviceName'] as String? ?? previewSnapshot.deviceName,
+            raw['deviceName'] as String? ?? degradedSnapshot.deviceName,
         networkAvailable: raw['networkAvailable'] as bool? ??
-            previewSnapshot.networkAvailable,
+            degradedSnapshot.networkAvailable,
         networkName:
-            raw['networkName'] as String? ?? previewSnapshot.networkName,
+            raw['networkName'] as String? ?? degradedSnapshot.networkName,
         volumeAvailable: raw['volumeAvailable'] as bool? ??
-            previewSnapshot.volumeAvailable,
+            degradedSnapshot.volumeAvailable,
         volume:
-            (raw['volume'] as num?)?.toDouble() ?? previewSnapshot.volume,
+            (raw['volume'] as num?)?.toDouble() ?? degradedSnapshot.volume,
         brightnessAvailable: raw['brightnessAvailable'] as bool? ??
-            previewSnapshot.brightnessAvailable,
+            degradedSnapshot.brightnessAvailable,
         brightness: (raw['brightness'] as num?)?.toDouble() ??
-            previewSnapshot.brightness,
+            degradedSnapshot.brightness,
+        batteryAvailable: raw['batteryAvailable'] as bool? ??
+            degradedSnapshot.batteryAvailable,
         batteryPercent: (raw['batteryPercent'] as num?)?.toInt() ??
-            previewSnapshot.batteryPercent,
+            degradedSnapshot.batteryPercent,
         wslAvailable:
-            raw['wslAvailable'] as bool? ?? previewSnapshot.wslAvailable,
+            raw['wslAvailable'] as bool? ?? degradedSnapshot.wslAvailable,
         distros: (raw['distros'] as List<Object?>?)
                 ?.whereType<String>()
                 .toList() ??
-            previewSnapshot.distros,
+            degradedSnapshot.distros,
         currentWorkspace: (raw['currentWorkspace'] as num?)?.toInt() ??
-            previewSnapshot.currentWorkspace,
+            degradedSnapshot.currentWorkspace,
       );
     } on MissingPluginException {
       return previewSnapshot;
     } on PlatformException {
-      return previewSnapshot;
+      return degradedSnapshot;
     }
   }
 
@@ -299,6 +301,20 @@ class CloudOSBridge {
   }
 
   static const previewSnapshot = CloudOSPreviewData.snapshot;
+  static const degradedSnapshot = CloudSystemSnapshot(
+    deviceName: 'CloudOS Desktop',
+    networkAvailable: false,
+    networkName: 'Indisponível',
+    volumeAvailable: false,
+    volume: 0,
+    brightnessAvailable: false,
+    brightness: 0,
+    batteryAvailable: false,
+    batteryPercent: 0,
+    wslAvailable: false,
+    distros: <String>[],
+    currentWorkspace: 1,
+  );
   static const previewApps = CloudOSPreviewData.apps;
   static const previewFiles = CloudOSPreviewData.files;
   static const previewNotifications = CloudOSPreviewData.notifications;
