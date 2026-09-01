@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../models/shell_models.dart';
+import '../features/files/presentation/files_window.dart';
+import '../features/notifications/presentation/notification_center_panel.dart';
+import '../features/quick_settings/presentation/quick_settings_panel.dart';
+import '../features/start/presentation/start_panel.dart';
+import '../features/taskbar/presentation/cloud_taskbar.dart';
+import '../models/cloud_app.dart';
+import '../models/cloud_system_snapshot.dart';
 import '../services/cloudos_bridge.dart';
-import '../widgets/cloud_taskbar.dart';
-import '../widgets/files_window.dart';
-import '../widgets/notification_center.dart';
-import '../widgets/quick_settings_panel.dart';
-import '../widgets/start_panel.dart';
 import 'widgets/desktop_icons.dart';
 import 'widgets/desktop_status.dart';
 import 'widgets/desktop_wallpaper.dart';
