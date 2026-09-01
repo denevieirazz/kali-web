@@ -49,22 +49,21 @@ class QuickSystemSummary extends StatelessWidget {
               ],
             ),
           ),
-          if (snapshot.wslAvailable)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: CloudOSColors.linuxSoft,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: const Text(
-                'WSLg Ativo',
-                style: TextStyle(
-                  color: CloudOSColors.linux,
-                  fontSize: 9.5,
-                  fontWeight: FontWeight.w700,
-                ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: CloudOSColors.linuxSoft,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: const Text(
+              'WSLg Ativo',
+              style: TextStyle(
+                color: CloudOSColors.linux,
+                fontSize: 9.5,
+                fontWeight: FontWeight.w700,
               ),
             ),
+          ),
         ],
       ),
     );
