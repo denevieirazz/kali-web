@@ -12,6 +12,41 @@
 namespace CloudOS
 {
 
+namespace
+{
+bool WriteExact(HANDLE handle, const void* buffer, DWORD bytes)
+{
+    const auto* src = static_cast<const BYTE*>(buffer);
+    DWORD total = 0;
+    while (total < bytes)
+    {
+        DWORD written = 0;
+        if (!WriteFile(handle, src + total, bytes - total, &written, nullptr) || written == 0)
+        {
+            return false;
+        }
+        total += written;
+    }
+    return true;
+}
+
+bool ReadExact(HANDLE handle, void* buffer, DWORD bytes)
+{
+    auto* dst = static_cast<BYTE*>(buffer);
+    DWORD total = 0;
+    while (total < bytes)
+    {
+        DWORD read_bytes = 0;
+        if (!ReadFile(handle, dst + total, bytes - total, &read_bytes, nullptr) || read_bytes == 0)
+        {
+            return false;
+        }
+        total += read_bytes;
+    }
+    return true;
+}
+} // namespace
+
 BrokerServerV21& BrokerServerV21::Instance()
 {
     static BrokerServerV21 instance;
@@ -27,8 +62,7 @@ bool BrokerServerV21::Start()
 {
     if (running_.load()) return true;
 
-    // 1. Acquire single-instance per-user mutex
-    std::wstring mutex_name = SecurityV21::GetBrokerMutexName();
+    const std::wstring mutex_name = SecurityV21::GetBrokerMutexName();
     mutex_handle_ = CreateMutexW(nullptr, TRUE, mutex_name.c_str());
     if (!mutex_handle_ || GetLastError() == ERROR_ALREADY_EXISTS)
     {
@@ -41,14 +75,12 @@ bool BrokerServerV21::Start()
         return false;
     }
 
-    // 2. Initialize subsystems
     DiagnosticsV21::Initialize();
     JobManagerV21::Instance().Initialize(2);
 
     running_.store(true);
     listener_thread_ = std::thread(&BrokerServerV21::ListenerLoop, this);
 
-    // Publish broker.ready
     JsonObject ready_payload;
     ready_payload["version"] = JsonValue("21.0.0");
     ready_payload["protocol"] = JsonValue(kProtocolVersion);
@@ -59,11 +91,10 @@ bool BrokerServerV21::Start()
 
 void BrokerServerV21::Stop()
 {
-    if (!running_.load()) return;
-    running_.store(false);
+    if (!running_.exchange(false)) return;
 
-    // Unblock listener by connecting a dummy client
-    std::wstring pipe_name = SecurityV21::GetCommandPipeName();
+    // Unblock ConnectNamedPipe in the listener thread.
+    const std::wstring pipe_name = SecurityV21::GetCommandPipeName();
     HANDLE dummy = CreateFileW(
         pipe_name.c_str(),
         GENERIC_READ | GENERIC_WRITE,
@@ -82,11 +113,23 @@ void BrokerServerV21::Stop()
         listener_thread_.join();
     }
 
+    // Client sessions may be blocked in synchronous ReadFile. Cancel their
+    // pending I/O before joining so broker shutdown cannot hang indefinitely.
     {
         std::lock_guard<std::mutex> lock(client_threads_mutex_);
-        for (auto& t : client_threads_)
+        for (auto& thread : client_threads_)
         {
-            if (t.joinable()) t.join();
+            if (thread.joinable())
+            {
+                CancelSynchronousIo(thread.native_handle());
+            }
+        }
+        for (auto& thread : client_threads_)
+        {
+            if (thread.joinable())
+            {
+                thread.join();
+            }
         }
         client_threads_.clear();
     }
@@ -103,59 +146,45 @@ void BrokerServerV21::Stop()
 
 bool BrokerServerV21::SendFrame(HANDLE pipe, const std::string& payload)
 {
-    uint32_t len = static_cast<uint32_t>(payload.size());
-    DWORD written = 0;
-    if (!WriteFile(pipe, &len, sizeof(len), &written, nullptr) || written != sizeof(len))
+    if (pipe == INVALID_HANDLE_VALUE || payload.size() > kMaxPayloadBytes)
     {
         return false;
     }
-    if (len > 0)
+
+    const uint32_t len = static_cast<uint32_t>(payload.size());
+    if (!WriteExact(pipe, &len, static_cast<DWORD>(sizeof(len))))
     {
-        if (!WriteFile(pipe, payload.data(), len, &written, nullptr) || written != len)
-        {
-            return false;
-        }
+        return false;
     }
-    return true;
+    return len == 0 || WriteExact(pipe, payload.data(), len);
 }
 
 bool BrokerServerV21::ReadFrame(HANDLE pipe, std::string& payload)
 {
-    uint32_t len = 0;
-    DWORD read_bytes = 0;
-    if (!ReadFile(pipe, &len, sizeof(len), &read_bytes, nullptr) || read_bytes != sizeof(len))
+    if (pipe == INVALID_HANDLE_VALUE)
     {
         return false;
     }
-    if (len > kMaxPayloadBytes)
+
+    uint32_t len = 0;
+    if (!ReadExact(pipe, &len, static_cast<DWORD>(sizeof(len))) || len > kMaxPayloadBytes)
     {
-        return false; // Reject oversized frame
+        return false;
     }
-    payload.resize(len);
-    if (len > 0)
-    {
-        DWORD total_read = 0;
-        while (total_read < len)
-        {
-            if (!ReadFile(pipe, &payload[total_read], len - total_read, &read_bytes, nullptr) || read_bytes == 0)
-            {
-                return false;
-            }
-            total_read += read_bytes;
-        }
-    }
-    return true;
+
+    payload.assign(len, '\0');
+    return len == 0 || ReadExact(pipe, payload.data(), len);
 }
 
 void BrokerServerV21::ListenerLoop()
 {
-    std::wstring pipe_name = SecurityV21::GetCommandPipeName();
+    const std::wstring pipe_name = SecurityV21::GetCommandPipeName();
 
     while (running_.load())
     {
         SECURITY_ATTRIBUTES sa{};
         PSECURITY_DESCRIPTOR sd = nullptr;
-        bool sa_ok = SecurityV21::CreatePerUserSecurityAttributes(&sa, &sd);
+        const bool sa_ok = SecurityV21::CreatePerUserSecurityAttributes(&sa, &sd);
 
         HANDLE pipe = CreateNamedPipeW(
             pipe_name.c_str(),
@@ -178,7 +207,10 @@ void BrokerServerV21::ListenerLoop()
             continue;
         }
 
-        BOOL connected = ConnectNamedPipe(pipe, nullptr) ? TRUE : (GetLastError() == ERROR_PIPE_CONNECTED);
+        const BOOL connected = ConnectNamedPipe(pipe, nullptr)
+            ? TRUE
+            : (GetLastError() == ERROR_PIPE_CONNECTED);
+
         if (!running_.load())
         {
             CloseHandle(pipe);
@@ -187,7 +219,7 @@ void BrokerServerV21::ListenerLoop()
 
         if (connected)
         {
-            std::string client_id = "client-" + std::to_string(next_client_id_++);
+            const std::string client_id = "client-" + std::to_string(next_client_id_++);
             std::lock_guard<std::mutex> lock(client_threads_mutex_);
             client_threads_.emplace_back(&BrokerServerV21::ClientSessionLoop, this, pipe, client_id);
         }
@@ -200,12 +232,11 @@ void BrokerServerV21::ListenerLoop()
 
 void BrokerServerV21::ClientSessionLoop(HANDLE pipe, std::string client_id)
 {
-    // Register client for events through this pipe
     std::mutex send_mutex;
     EventBusV21::Instance().RegisterClient(
         client_id,
         [this, pipe, &send_mutex](const BrokerEvent& ev) {
-            std::string serialized = SerializeEvent(ev);
+            const std::string serialized = SerializeEvent(ev);
             std::lock_guard<std::mutex> lock(send_mutex);
             SendFrame(pipe, serialized);
         });
@@ -215,7 +246,7 @@ void BrokerServerV21::ClientSessionLoop(HANDLE pipe, std::string client_id)
         std::string frame;
         if (!ReadFrame(pipe, frame))
         {
-            break; // Client disconnected or error
+            break;
         }
 
         BrokerRequest req;
@@ -235,13 +266,11 @@ void BrokerServerV21::ClientSessionLoop(HANDLE pipe, std::string client_id)
             res = HandleRequest(client_id, req);
         }
 
-        std::string resp_str = SerializeResponse(res);
+        const std::string response = SerializeResponse(res);
+        std::lock_guard<std::mutex> lock(send_mutex);
+        if (!SendFrame(pipe, response))
         {
-            std::lock_guard<std::mutex> lock(send_mutex);
-            if (!SendFrame(pipe, resp_str))
-            {
-                break;
-            }
+            break;
         }
     }
 
@@ -266,7 +295,7 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
         res.payload["protocolVersion"] = JsonValue(kProtocolVersion);
         res.payload["clientId"] = JsonValue(client_id);
         res.payload["serverInstanceId"] = JsonValue("broker-session-" + std::to_string(SecurityV21::GetCurrentSessionId()));
-        
+
         JsonArray caps;
         for (const auto& cap : SystemServiceV21::Instance().GetCapabilities())
         {
@@ -318,7 +347,7 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
 
     if (method == "apps.launch")
     {
-        auto it = req.payload.find("id");
+        const auto it = req.payload.find("id");
         if (it == req.payload.end() || !it->second.IsString())
         {
             res.ok = false;
@@ -327,7 +356,7 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
             return res;
         }
 
-        std::string app_id = it->second.AsString();
+        const std::string app_id = it->second.AsString();
         std::string err;
         if (!AppServiceV21::Instance().LaunchApp(app_id, err))
         {
@@ -349,7 +378,7 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
 
     if (method == "system.volume.set")
     {
-        auto it = req.payload.find("value");
+        const auto it = req.payload.find("value");
         if (it == req.payload.end() || !it->second.IsDouble())
         {
             res.ok = false;
@@ -357,14 +386,20 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
             res.error_message = "Missing or invalid double 'value'";
             return res;
         }
-        SystemServiceV21::Instance().SetVolume(it->second.AsDouble());
+        if (!SystemServiceV21::Instance().SetVolume(it->second.AsDouble()))
+        {
+            res.ok = false;
+            res.error_code = "not_supported";
+            res.error_message = "No writable default audio endpoint is available";
+            return res;
+        }
         res.payload["updated"] = JsonValue(true);
         return res;
     }
 
     if (method == "system.brightness.set")
     {
-        auto it = req.payload.find("value");
+        const auto it = req.payload.find("value");
         if (it == req.payload.end() || !it->second.IsDouble())
         {
             res.ok = false;
@@ -372,7 +407,13 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
             res.error_message = "Missing or invalid double 'value'";
             return res;
         }
-        SystemServiceV21::Instance().SetBrightness(it->second.AsDouble());
+        if (!SystemServiceV21::Instance().SetBrightness(it->second.AsDouble()))
+        {
+            res.ok = false;
+            res.error_code = "not_supported";
+            res.error_message = "Primary monitor does not expose writable brightness control";
+            return res;
+        }
         res.payload["updated"] = JsonValue(true);
         return res;
     }
@@ -392,9 +433,11 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
 
     if (method == "events.subscribe")
     {
-        auto it = req.payload.find("pattern");
-        std::string pattern = (it != req.payload.end() && it->second.IsString()) ? it->second.AsString() : "*";
-        bool ok = EventBusV21::Instance().Subscribe(client_id, pattern);
+        const auto it = req.payload.find("pattern");
+        const std::string pattern = (it != req.payload.end() && it->second.IsString())
+            ? it->second.AsString()
+            : "*";
+        const bool ok = EventBusV21::Instance().Subscribe(client_id, pattern);
         res.payload["subscribed"] = JsonValue(ok);
         res.payload["pattern"] = JsonValue(pattern);
         return res;
@@ -402,9 +445,11 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
 
     if (method == "events.unsubscribe")
     {
-        auto it = req.payload.find("pattern");
-        std::string pattern = (it != req.payload.end() && it->second.IsString()) ? it->second.AsString() : "*";
-        bool ok = EventBusV21::Instance().Unsubscribe(client_id, pattern);
+        const auto it = req.payload.find("pattern");
+        const std::string pattern = (it != req.payload.end() && it->second.IsString())
+            ? it->second.AsString()
+            : "*";
+        const bool ok = EventBusV21::Instance().Unsubscribe(client_id, pattern);
         res.payload["unsubscribed"] = JsonValue(ok);
         res.payload["pattern"] = JsonValue(pattern);
         return res;
@@ -412,7 +457,7 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
 
     if (method == "jobs.status")
     {
-        auto it = req.payload.find("jobId");
+        const auto it = req.payload.find("jobId");
         if (it == req.payload.end() || !it->second.IsString())
         {
             res.ok = false;
@@ -438,7 +483,7 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
 
     if (method == "jobs.cancel")
     {
-        auto it = req.payload.find("jobId");
+        const auto it = req.payload.find("jobId");
         if (it == req.payload.end() || !it->second.IsString())
         {
             res.ok = false;
@@ -446,7 +491,7 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
             res.error_message = "Missing 'jobId'";
             return res;
         }
-        bool cancelled = JobManagerV21::Instance().CancelJob(it->second.AsString());
+        const bool cancelled = JobManagerV21::Instance().CancelJob(it->second.AsString());
         res.payload["cancelled"] = JsonValue(cancelled);
         return res;
     }
