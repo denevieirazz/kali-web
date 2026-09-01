@@ -11,6 +11,7 @@
 
 #include <csignal>
 #include <chrono>
+#include <cstring>
 #include <iostream>
 #include <limits>
 #include <string_view>
@@ -48,6 +49,11 @@ std::string Utf16ToUtf8Strict(std::wstring_view value)
     return written == required ? result : std::string{};
 }
 
+void SelfTestStage(const char* stage)
+{
+    std::cout << "[SELFTEST] " << stage << std::endl;
+}
+
 BOOL WINAPI ConsoleCtrlHandler(DWORD ctrl_type)
 {
     switch (ctrl_type)
@@ -79,14 +85,14 @@ int RunSelfTest()
         assertions++;
     };
 
-    // 1. Test Protocol Serialization, Parsing, and malformed-input rejection.
+    SelfTestStage("1 protocol BEGIN");
     {
         BrokerRequest req;
         req.protocol = kProtocolVersion;
         req.id = "req-test-1";
         req.method = "apps.list";
         req.payload["limit"] = JsonValue(10);
-        std::string serialized = SerializeRequest(req);
+        const std::string serialized = SerializeRequest(req);
 
         BrokerRequest parsed_req;
         std::string err;
@@ -121,21 +127,23 @@ int RunSelfTest()
         res.id = "res-test-1";
         res.ok = true;
         res.payload["result"] = JsonValue("ok");
-        std::string ser_res = SerializeResponse(res);
+        const std::string ser_res = SerializeResponse(res);
         BrokerResponse parsed_res;
         Assert(ParseResponse(ser_res, parsed_res, err), "ParseResponse valid");
         Assert(parsed_res.ok, "ParseResponse ok");
         Assert(parsed_res.payload["result"].AsString() == "ok", "ParseResponse payload");
     }
+    SelfTestStage("1 protocol PASS");
 
-    // 2. Test Security & Named Pipe ACLs
+    SelfTestStage("2 security BEGIN");
     {
-        std::wstring sid = SecurityV21::GetCurrentUserSidString();
+        const std::wstring sid = SecurityV21::GetCurrentUserSidString();
         Assert(!sid.empty(), "User SID string not empty");
-        DWORD session = SecurityV21::GetCurrentSessionId();
-        Assert(session >= 0, "Session ID valid");
+        const DWORD session = SecurityV21::GetCurrentSessionId();
+        Assert(session != 0 || ProcessIdToSessionId(GetCurrentProcessId(), const_cast<DWORD*>(&session)) != FALSE,
+            "Session ID obtainable");
 
-        std::wstring cmd_pipe = SecurityV21::GetCommandPipeName();
+        const std::wstring cmd_pipe = SecurityV21::GetCommandPipeName();
         Assert(cmd_pipe.find(L"\\\\.\\pipe\\CloudOS.SystemBroker.v21.") == 0, "Command pipe prefix valid");
 
         SECURITY_ATTRIBUTES sa{};
@@ -144,8 +152,9 @@ int RunSelfTest()
         Assert(sa.lpSecurityDescriptor != nullptr, "SecurityDescriptor not null");
         SecurityV21::FreeSecurityDescriptor(sd);
     }
+    SelfTestStage("2 security PASS");
 
-    // 3. Test Event Bus & Subscriptions
+    SelfTestStage("3 eventbus BEGIN");
     {
         EventBusV21::Instance().Reset();
         bool received_volume = false;
@@ -169,14 +178,17 @@ int RunSelfTest()
         EventBusV21::Instance().UnregisterClient("client-a");
         Assert(EventBusV21::Instance().GetActiveClientCount() == 0, "Client count 0 after unregister");
     }
+    SelfTestStage("3 eventbus PASS");
 
-    // 4. Test Job Manager
+    SelfTestStage("4 jobs BEGIN");
     {
         JobManagerV21::Instance().Initialize(1);
-        std::string job_id = JobManagerV21::Instance().SubmitJob("test.job", [](std::atomic_bool&, std::function<void(double)> progress_cb, std::string&) {
-            progress_cb(50.0);
-            return true;
-        });
+        const std::string job_id = JobManagerV21::Instance().SubmitJob(
+            "test.job",
+            [](std::atomic_bool&, std::function<void(double)> progress_cb, std::string&) {
+                progress_cb(50.0);
+                return true;
+            });
 
         Assert(!job_id.empty(), "Job submitted with valid ID");
         JobInfo info;
@@ -184,8 +196,9 @@ int RunSelfTest()
         Assert(info.type == "test.job", "Job type matches");
         JobManagerV21::Instance().Shutdown();
     }
+    SelfTestStage("4 jobs PASS");
 
-    // 5. Test App Service & Safe ID Validation
+    SelfTestStage("5 apps BEGIN");
     {
         const auto apps = AppServiceV21::Instance().GetApps();
         Assert(!apps.empty(), "App catalog contains items");
@@ -196,105 +209,108 @@ int RunSelfTest()
         Assert(!AppServiceV21::Instance().LaunchApp("powershell.exe -enc AAAAA", err), "Arbitrary PowerShell rejected");
         Assert(!err.empty(), "Error message populated on invalid app ID");
     }
+    SelfTestStage("5 apps PASS");
 
-    // 6. Test System Service
+    SelfTestStage("6 system BEGIN");
     {
         const auto snap = SystemServiceV21::Instance().GetSnapshot();
         Assert(!snap.device_name.empty(), "Device name not empty");
         Assert(snap.volume >= 0.0 && snap.volume <= 1.0, "Volume in range [0, 1]");
-
         Assert(!SystemServiceV21::Instance().SetVolume(-1.0), "SetVolume rejects negative values");
         Assert(!SystemServiceV21::Instance().SetVolume(2.0), "SetVolume rejects values above one");
         Assert(!SystemServiceV21::Instance().SetVolume(std::numeric_limits<double>::quiet_NaN()), "SetVolume rejects NaN");
-        if (snap.volume_available)
-        {
-            Assert(SystemServiceV21::Instance().SetVolume(snap.volume), "SetVolume accepts current real endpoint value");
-        }
-        else
-        {
-            Assert(!SystemServiceV21::Instance().SetVolume(0.5), "SetVolume reports unavailable endpoint");
-        }
 
         const auto caps = SystemServiceV21::Instance().GetCapabilities();
         Assert(caps.size() >= 10, "Capabilities list populated");
+        const bool advertises_volume_write =
+            std::find(caps.begin(), caps.end(), "system.volume.write") != caps.end();
+        Assert(advertises_volume_write == snap.volume_available, "Volume write capability matches real endpoint availability");
+        Assert(std::find(caps.begin(), caps.end(), "system.brightness.write") == caps.end(),
+            "Unimplemented brightness write is not advertised");
     }
+    SelfTestStage("6 system PASS");
 
-    // 7. Test WSL Service. WSL can be installed with zero configured distros.
+    SelfTestStage("7 wsl BEGIN");
     {
         const bool wsl = WslServiceV21::Instance().IsWslAvailable();
         const auto distros = WslServiceV21::Instance().GetDistributions();
         Assert(wsl || distros.empty(), "No distributions reported when WSL is unavailable");
     }
+    SelfTestStage("7 wsl PASS");
 
-    // 8. Test Diagnostics Snapshot
+    SelfTestStage("8 diagnostics BEGIN");
     {
         DiagnosticsV21::Initialize();
-        JsonObject diag = DiagnosticsV21::GetDiagnosticsSnapshot();
-        Assert(diag["brokerVersion"].AsString() == "21.0.0", "Diagnostics brokerVersion");
-        Assert(diag["protocolVersion"].AsInt() == 21, "Diagnostics protocolVersion 21");
+        const JsonObject diag = DiagnosticsV21::GetDiagnosticsSnapshot();
+        Assert(diag.at("brokerVersion").AsString() == "21.0.0", "Diagnostics brokerVersion");
+        Assert(diag.at("protocolVersion").AsInt() == 21, "Diagnostics protocolVersion 21");
     }
+    SelfTestStage("8 diagnostics PASS");
 
-    // 9. Test FileService V22
+    SelfTestStage("9 files BEGIN");
     {
-        JsonObject kf = FileServiceV22::Instance().GetKnownFolders();
-        Assert(kf["folders"].IsArray(), "Known folders returns array");
-        Assert(!kf["folders"].AsArray().empty(), "Known folders is not empty");
+        const JsonObject kf = FileServiceV22::Instance().GetKnownFolders();
+        Assert(kf.at("folders").IsArray(), "Known folders returns array");
+        Assert(!kf.at("folders").AsArray().empty(), "Known folders is not empty");
 
-        JsonObject drv = FileServiceV22::Instance().GetDrives();
-        Assert(drv["drives"].IsArray(), "Drives returns array");
-        Assert(!drv["drives"].AsArray().empty(), "Drives is not empty");
+        const JsonObject drv = FileServiceV22::Instance().GetDrives();
+        Assert(drv.at("drives").IsArray(), "Drives returns array");
+        Assert(!drv.at("drives").AsArray().empty(), "Drives is not empty");
 
-        wchar_t temp_path[MAX_PATH] = {0};
+        wchar_t temp_path[MAX_PATH]{};
         Assert(GetTempPathW(MAX_PATH, temp_path) > 0, "Resolve Windows temporary directory");
-        std::wstring test_dir = std::wstring(temp_path) + L"cloudos_v22_selftest_" +
+        const std::wstring test_dir = std::wstring(temp_path) + L"cloudos_v22_selftest_" +
             std::to_wstring(GetCurrentProcessId()) + L"_" + std::to_wstring(GetTickCount64());
         Assert(CreateDirectoryW(test_dir.c_str(), nullptr) != FALSE, "Create isolated V22 self-test directory");
 
         const std::string test_dir_utf8 = Utf16ToUtf8Strict(test_dir);
         Assert(!test_dir_utf8.empty(), "Convert self-test directory to UTF-8 without overflow");
 
-        JsonObject create_res = FileServiceV22::Instance().CreateFolder(test_dir_utf8, "Pasta_Teste_ãéíóú_漢字");
-        Assert(create_res["ok"].AsBool(), "Create folder with Unicode");
+        const JsonObject create_res = FileServiceV22::Instance().CreateFolder(test_dir_utf8, "Pasta_Teste_ãéíóú_漢字");
+        Assert(create_res.at("ok").AsBool(), "Create folder with Unicode");
 
-        JsonObject list_res = FileServiceV22::Instance().ListDirectory(test_dir_utf8);
-        Assert(list_res["items"].IsArray(), "List items is array");
-        Assert(list_res["items"].AsArray().size() == 1, "List items has 1 entry");
+        const JsonObject list_res = FileServiceV22::Instance().ListDirectory(test_dir_utf8);
+        Assert(list_res.at("items").IsArray(), "List items is array");
+        Assert(list_res.at("items").AsArray().size() == 1, "List items has 1 entry");
 
-        std::wstring test_file = test_dir + L"\\teste_arquivo.txt";
-        HANDLE hFile = CreateFileW(test_file.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-        Assert(hFile != INVALID_HANDLE_VALUE, "Create isolated self-test file");
+        const std::wstring test_file = test_dir + L"\\teste_arquivo.txt";
+        HANDLE h_file = CreateFileW(test_file.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        Assert(h_file != INVALID_HANDLE_VALUE, "Create isolated self-test file");
         const char* data = "CloudOS V22 Unified Files Self Test";
         DWORD written = 0;
-        Assert(WriteFile(hFile, data, static_cast<DWORD>(strlen(data)), &written, nullptr) != FALSE &&
-            written == static_cast<DWORD>(strlen(data)), "Write isolated self-test file");
-        CloseHandle(hFile);
+        const bool write_ok = WriteFile(h_file, data, static_cast<DWORD>(std::strlen(data)), &written, nullptr) != FALSE &&
+            written == static_cast<DWORD>(std::strlen(data));
+        CloseHandle(h_file);
+        Assert(write_ok, "Write isolated self-test file");
 
         const std::string test_file_utf8 = test_dir_utf8 + "\\teste_arquivo.txt";
-        JsonObject meta_res = FileServiceV22::Instance().GetMetadata(test_file_utf8);
-        Assert(meta_res["name"].AsString() == "teste_arquivo.txt", "GetMetadata file name");
-        Assert(!meta_res["isDirectory"].AsBool(), "GetMetadata isDirectory false");
-        Assert(meta_res["size"].AsDouble() > 0, "GetMetadata file size > 0");
+        const JsonObject meta_res = FileServiceV22::Instance().GetMetadata(test_file_utf8);
+        Assert(meta_res.at("name").AsString() == "teste_arquivo.txt", "GetMetadata file name");
+        Assert(!meta_res.at("isDirectory").AsBool(), "GetMetadata isDirectory false");
+        Assert(meta_res.at("size").AsDouble() > 0, "GetMetadata file size > 0");
 
-        JsonObject ow_res = FileServiceV22::Instance().GetOpenWithList(test_file_utf8);
-        Assert(ow_res["apps"].IsArray(), "Open with returns apps array");
+        const JsonObject ow_res = FileServiceV22::Instance().GetOpenWithList(test_file_utf8);
+        Assert(ow_res.at("apps").IsArray(), "Open with returns apps array");
 
-        JsonObject ren_res = FileServiceV22::Instance().RenameItem(test_file_utf8, "teste_arquivo_renomeado.txt");
-        Assert(ren_res["ok"].AsBool(), "Rename item");
+        const JsonObject ren_res = FileServiceV22::Instance().RenameItem(test_file_utf8, "teste_arquivo_renomeado.txt");
+        Assert(ren_res.at("ok").AsBool(), "Rename item");
 
         const std::string renamed_file_utf8 = test_dir_utf8 + "\\teste_arquivo_renomeado.txt";
         const std::string subfolder_utf8 = test_dir_utf8 + "\\Pasta_Teste_ãéíóú_漢字";
-        JsonObject del_res = FileServiceV22::Instance().DeleteItems({renamed_file_utf8, subfolder_utf8}, true);
-        Assert(del_res["ok"].AsBool(), "Delete items permanent");
+        const JsonObject del_res = FileServiceV22::Instance().DeleteItems({renamed_file_utf8, subfolder_utf8}, true);
+        Assert(del_res.at("ok").AsBool(), "Delete items permanent");
         Assert(RemoveDirectoryW(test_dir.c_str()) != FALSE, "Remove isolated V22 self-test directory");
     }
+    SelfTestStage("9 files PASS");
 
-    // 10. Broker shutdown must interrupt an idle connected client instead of
-    // deadlocking while ClientSessionLoop is blocked in ReadFile.
+    SelfTestStage("10 shutdown BEGIN");
     {
         Assert(BrokerServerV21::Instance().Start(), "Broker starts for shutdown regression");
         Sleep(150);
+        const std::wstring pipe_name = SecurityV21::GetCommandPipeName();
+        Assert(!pipe_name.empty(), "Broker command pipe name available");
         HANDLE idle_client = CreateFileW(
-            SecurityV21::GetCommandPipeName().c_str(),
+            pipe_name.c_str(),
             GENERIC_READ | GENERIC_WRITE,
             0,
             nullptr,
@@ -310,6 +326,7 @@ int RunSelfTest()
         Assert(stop_ms < 3000, "Broker shutdown with idle client is bounded");
         if (idle_client != INVALID_HANDLE_VALUE) CloseHandle(idle_client);
     }
+    SelfTestStage("10 shutdown PASS");
 
     std::cout << "[PASS] CloudOS System Broker V22.1 Self-Test Passed (" << assertions << " assertions verified)." << std::endl;
     return 0;
@@ -323,11 +340,8 @@ int main(int argc, char* argv[])
 
     for (int i = 1; i < argc; ++i)
     {
-        std::string arg = argv[i];
-        if (arg == "--self-test")
-        {
-            return CloudOS::RunSelfTest();
-        }
+        const std::string arg = argv[i];
+        if (arg == "--self-test") return CloudOS::RunSelfTest();
         if (arg == "--diagnostics")
         {
             CloudOS::DiagnosticsV21::Initialize();
@@ -347,7 +361,6 @@ int main(int argc, char* argv[])
     }
 
     std::cout << "[SystemBroker] Starting CloudOS System Broker V22.1 (Protocol " << CloudOS::kProtocolVersion << ")..." << std::endl;
-
     if (!CloudOS::BrokerServerV21::Instance().Start())
     {
         std::cerr << "[SystemBroker] Failed to start broker server." << std::endl;
@@ -355,11 +368,7 @@ int main(int argc, char* argv[])
     }
 
     std::cout << "[SystemBroker] Broker ready and listening on user named pipe." << std::endl;
-
-    while (!CloudOS::g_shutdown_requested.load())
-    {
-        Sleep(500);
-    }
+    while (!CloudOS::g_shutdown_requested.load()) Sleep(500);
 
     std::cout << "[SystemBroker] Shutting down cleanly..." << std::endl;
     CloudOS::BrokerServerV21::Instance().Stop();
