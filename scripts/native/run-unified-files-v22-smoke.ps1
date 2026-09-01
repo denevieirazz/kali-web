@@ -53,7 +53,7 @@ function Invoke-RawBrokerFrame {
         $client.Write($header, 0, $header.Length)
         if ($DeclaredLength -eq [uint32]::MaxValue -and $bytes.Length -gt 0) { $client.Write($bytes, 0, $bytes.Length) }
         $client.Flush()
-        if ($DeclaredLength -gt 1048576) { return }
+        if ($length -gt 1048576) { return }
         $responseHeader = [byte[]]::new(4); $offset = 0
         while ($offset -lt 4) { $read = $client.Read($responseHeader, $offset, 4 - $offset); if ($read -le 0) { throw 'Broker closed before controlled error response.' }; $offset += $read }
         $responseLength = [BitConverter]::ToUInt32($responseHeader, 0)
