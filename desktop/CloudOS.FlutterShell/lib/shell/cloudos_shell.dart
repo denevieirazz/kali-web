@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -40,20 +42,54 @@ class _CloudOSShellState extends State<CloudOSShell> {
   String? selectedDesktopIcon;
   Offset filesOffset = const Offset(200, 70);
 
+  Timer? _surfaceStateTimer;
+  bool _surfaceRefreshInFlight = false;
+
   @override
   void initState() {
     super.initState();
     _loadBridgeData();
+    _surfaceStateTimer = Timer.periodic(
+      const Duration(seconds: 2),
+      (_) => _refreshShellSurfaceStates(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _surfaceStateTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadBridgeData() async {
     final loadedApps = await widget.bridge.loadApps();
     final loadedSnapshot = await widget.bridge.loadSystemSnapshot();
+    final surfaceStates = await widget.bridge.loadShellSurfaceStates();
     if (!mounted) return;
     setState(() {
       apps = loadedApps;
       snapshot = loadedSnapshot;
+      browserRunning = surfaceStates['browser'] ?? false;
+      terminalRunning = surfaceStates['terminal'] ?? false;
     });
+  }
+
+  Future<void> _refreshShellSurfaceStates() async {
+    if (_surfaceRefreshInFlight) return;
+    _surfaceRefreshInFlight = true;
+    try {
+      final states = await widget.bridge.loadShellSurfaceStates();
+      if (!mounted) return;
+      final nextBrowser = states['browser'] ?? false;
+      final nextTerminal = states['terminal'] ?? false;
+      if (nextBrowser == browserRunning && nextTerminal == terminalRunning) return;
+      setState(() {
+        browserRunning = nextBrowser;
+        terminalRunning = nextTerminal;
+      });
+    } finally {
+      _surfaceRefreshInFlight = false;
+    }
   }
 
   void _closeTransientPanels() {
@@ -101,6 +137,9 @@ class _CloudOSShellState extends State<CloudOSShell> {
       if (route == ShellAppRoute.browser) browserRunning = launched;
       if (route == ShellAppRoute.terminal) terminalRunning = launched;
     });
+    if (launched) {
+      await _refreshShellSurfaceStates();
+    }
   }
 
   Future<void> _launchBrowser() {
