@@ -253,6 +253,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
       child = QuickSettingsPanel(
         key: const ValueKey<String>('quick-settings'),
         snapshot: snapshot,
+        onSetVolume: widget.bridge.setVolume,
+        onSetBrightness: widget.bridge.setBrightness,
         onOpenSettings: () {
           setState(() {
             quickSettingsOpen = false;
