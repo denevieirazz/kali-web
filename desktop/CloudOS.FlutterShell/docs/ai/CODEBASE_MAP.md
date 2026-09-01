@@ -24,7 +24,11 @@ Componentes:
 - `widgets/files_title_bar.dart` — drag, minimize, maximize visual e close.
 - `widgets/files_sidebar.dart` — modelo/itens da navegação lateral e UI da sidebar.
 - `widgets/files_toolbar.dart` — navegação visual, breadcrumb, filtro e alternância grid/list.
-- `widgets/files_content.dart` — grid/list/empty state/status bar.
+- `widgets/files_content.dart` — roteador pequeno entre empty/grid/list.
+- `widgets/files_grid.dart` — grade e card de arquivo.
+- `widgets/files_list.dart` — apresentação em lista.
+- `widgets/files_empty_state.dart` — pasta vazia / filtro sem resultado.
+- `widgets/files_status_bar.dart` — contagem, seleção e status de sincronização.
 
 Compatibilidade: `lib/widgets/files_window.dart` é apenas export; não adicionar implementação lá.
 
@@ -35,7 +39,11 @@ Canônico: `lib/features/start/presentation/start_panel.dart`
 Componentes:
 
 - `domain/start_app_filter.dart` — filtros e busca pura de `CloudApp`.
-- `presentation/widgets/start_app_views.dart` — cards fixados, recentes e resultados.
+- `presentation/widgets/start_header.dart` — identidade/close do Start.
+- `presentation/widgets/start_search_field.dart` — campo de busca/clear.
+- `presentation/widgets/start_filter_bar.dart` — filtros horizontais.
+- `presentation/widgets/start_overview.dart` — fixados + recentes.
+- `presentation/widgets/start_app_views.dart` — cards e resultados.
 - `presentation/widgets/start_footer.dart` — sessão/ações do rodapé.
 
 Compatibilidade: `lib/widgets/start_panel.dart` é apenas export.
