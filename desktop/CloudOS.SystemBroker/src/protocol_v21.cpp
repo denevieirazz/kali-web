@@ -1,8 +1,13 @@
 #include "protocol_v21.h"
 
+#include <cerrno>
+#include <charconv>
 #include <cctype>
 #include <chrono>
+#include <cmath>
+#include <cstdlib>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 
 namespace CloudOS
@@ -10,6 +15,11 @@ namespace CloudOS
 
 namespace
 {
+constexpr size_t kMaxJsonDepth = 64;
+constexpr size_t kMaxJsonContainerItems = 65536;
+constexpr size_t kMaxRequestIdLength = 256;
+constexpr size_t kMaxMethodLength = 128;
+constexpr size_t kMaxEventNameLength = 128;
 
 void EscapeString(const std::string& str, std::string& out)
 {
@@ -58,8 +68,14 @@ void SerializeValue(const JsonValue& val, std::string& out)
     }
     else if (val.IsDouble())
     {
+        const double value = val.AsDouble();
+        if (!std::isfinite(value))
+        {
+            out.append("null");
+            return;
+        }
         std::ostringstream ss;
-        ss << std::setprecision(6) << val.AsDouble();
+        ss << std::setprecision(std::numeric_limits<double>::max_digits10) << value;
         out.append(ss.str());
     }
     else if (val.IsString())
@@ -93,6 +109,42 @@ void SerializeValue(const JsonValue& val, std::string& out)
     }
 }
 
+bool AppendUtf8CodePoint(uint32_t code_point, std::string& out)
+{
+    if (code_point > 0x10FFFF || (code_point >= 0xD800 && code_point <= 0xDFFF)) return false;
+    if (code_point <= 0x7F)
+    {
+        out.push_back(static_cast<char>(code_point));
+    }
+    else if (code_point <= 0x7FF)
+    {
+        out.push_back(static_cast<char>(0xC0 | (code_point >> 6)));
+        out.push_back(static_cast<char>(0x80 | (code_point & 0x3F)));
+    }
+    else if (code_point <= 0xFFFF)
+    {
+        out.push_back(static_cast<char>(0xE0 | (code_point >> 12)));
+        out.push_back(static_cast<char>(0x80 | ((code_point >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (code_point & 0x3F)));
+    }
+    else
+    {
+        out.push_back(static_cast<char>(0xF0 | (code_point >> 18)));
+        out.push_back(static_cast<char>(0x80 | ((code_point >> 12) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | ((code_point >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (code_point & 0x3F)));
+    }
+    return true;
+}
+
+int HexDigit(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return 10 + c - 'a';
+    if (c >= 'A' && c <= 'F') return 10 + c - 'A';
+    return -1;
+}
+
 class JsonParser final
 {
 public:
@@ -102,7 +154,7 @@ public:
     {
         SkipWhitespace();
         if (pos_ >= src_.size()) return false;
-        if (!ParseValue(root)) return false;
+        if (!ParseValue(root, 0)) return false;
         SkipWhitespace();
         return pos_ == src_.size();
     }
@@ -119,10 +171,11 @@ private:
     char Peek() const { return pos_ < src_.size() ? src_[pos_] : '\0'; }
     char Get() { return pos_ < src_.size() ? src_[pos_++] : '\0'; }
 
-    bool ParseValue(JsonValue& val)
+    bool ParseValue(JsonValue& val, size_t depth)
     {
+        if (depth > kMaxJsonDepth) return false;
         SkipWhitespace();
-        char c = Peek();
+        const char c = Peek();
         if (c == '"')
         {
             std::string s;
@@ -133,14 +186,14 @@ private:
         if (c == '{')
         {
             JsonObject obj;
-            if (!ParseObject(obj)) return false;
+            if (!ParseObject(obj, depth)) return false;
             val = JsonValue(std::move(obj));
             return true;
         }
         if (c == '[')
         {
             JsonArray arr;
-            if (!ParseArray(arr)) return false;
+            if (!ParseArray(arr, depth)) return false;
             val = JsonValue(std::move(arr));
             return true;
         }
@@ -151,15 +204,22 @@ private:
             val = JsonValue(b);
             return true;
         }
-        if (c == 'n')
-        {
-            return ParseNull(val);
-        }
-        if (c == '-' || std::isdigit(static_cast<unsigned char>(c)))
-        {
-            return ParseNumber(val);
-        }
+        if (c == 'n') return ParseNull(val);
+        if (c == '-' || std::isdigit(static_cast<unsigned char>(c))) return ParseNumber(val);
         return false;
+    }
+
+    bool ParseHexUnit(uint32_t& unit)
+    {
+        if (pos_ + 4 > src_.size()) return false;
+        unit = 0;
+        for (size_t i = 0; i < 4; ++i)
+        {
+            const int value = HexDigit(src_[pos_++]);
+            if (value < 0) return false;
+            unit = (unit << 4) | static_cast<uint32_t>(value);
+        }
+        return true;
     }
 
     bool ParseString(std::string& out)
@@ -168,41 +228,55 @@ private:
         out.clear();
         while (pos_ < src_.size())
         {
-            char c = Get();
+            const char c = Get();
             if (c == '"') return true;
-            if (c == '\\')
-            {
-                if (pos_ >= src_.size()) return false;
-                char esc = Get();
-                switch (esc)
-                {
-                case '"': out.push_back('"'); break;
-                case '\\': out.push_back('\\'); break;
-                case '/': out.push_back('/'); break;
-                case 'b': out.push_back('\b'); break;
-                case 'f': out.push_back('\f'); break;
-                case 'n': out.push_back('\n'); break;
-                case 'r': out.push_back('\r'); break;
-                case 't': out.push_back('\t'); break;
-                case 'u':
-                    if (pos_ + 4 > src_.size()) return false;
-                    pos_ += 4;
-                    out.push_back('?');
-                    break;
-                default:
-                    out.push_back(esc);
-                    break;
-                }
-            }
-            else
+            if (static_cast<unsigned char>(c) < 0x20) return false;
+            if (c != '\\')
             {
                 out.push_back(c);
+                continue;
+            }
+
+            if (pos_ >= src_.size()) return false;
+            const char esc = Get();
+            switch (esc)
+            {
+            case '"': out.push_back('"'); break;
+            case '\\': out.push_back('\\'); break;
+            case '/': out.push_back('/'); break;
+            case 'b': out.push_back('\b'); break;
+            case 'f': out.push_back('\f'); break;
+            case 'n': out.push_back('\n'); break;
+            case 'r': out.push_back('\r'); break;
+            case 't': out.push_back('\t'); break;
+            case 'u':
+            {
+                uint32_t first = 0;
+                if (!ParseHexUnit(first)) return false;
+                uint32_t code_point = first;
+                if (first >= 0xD800 && first <= 0xDBFF)
+                {
+                    if (pos_ + 2 > src_.size() || src_[pos_] != '\\' || src_[pos_ + 1] != 'u') return false;
+                    pos_ += 2;
+                    uint32_t second = 0;
+                    if (!ParseHexUnit(second) || second < 0xDC00 || second > 0xDFFF) return false;
+                    code_point = 0x10000 + ((first - 0xD800) << 10) + (second - 0xDC00);
+                }
+                else if (first >= 0xDC00 && first <= 0xDFFF)
+                {
+                    return false;
+                }
+                if (!AppendUtf8CodePoint(code_point, out)) return false;
+                break;
+            }
+            default:
+                return false;
             }
         }
         return false;
     }
 
-    bool ParseObject(JsonObject& obj)
+    bool ParseObject(JsonObject& obj, size_t depth)
     {
         if (Get() != '{') return false;
         SkipWhitespace();
@@ -213,24 +287,26 @@ private:
         }
         while (pos_ < src_.size())
         {
+            if (obj.size() >= kMaxJsonContainerItems) return false;
             SkipWhitespace();
             if (Peek() != '"') return false;
             std::string key;
             if (!ParseString(key)) return false;
+            if (obj.find(key) != obj.end()) return false;
             SkipWhitespace();
             if (Get() != ':') return false;
             JsonValue val;
-            if (!ParseValue(val)) return false;
-            obj[key] = std::move(val);
+            if (!ParseValue(val, depth + 1)) return false;
+            obj.emplace(std::move(key), std::move(val));
             SkipWhitespace();
-            char c = Get();
+            const char c = Get();
             if (c == '}') return true;
             if (c != ',') return false;
         }
         return false;
     }
 
-    bool ParseArray(JsonArray& arr)
+    bool ParseArray(JsonArray& arr, size_t depth)
     {
         if (Get() != '[') return false;
         SkipWhitespace();
@@ -241,11 +317,12 @@ private:
         }
         while (pos_ < src_.size())
         {
+            if (arr.size() >= kMaxJsonContainerItems) return false;
             JsonValue val;
-            if (!ParseValue(val)) return false;
+            if (!ParseValue(val, depth + 1)) return false;
             arr.push_back(std::move(val));
             SkipWhitespace();
-            char c = Get();
+            const char c = Get();
             if (c == ']') return true;
             if (c != ',') return false;
         }
@@ -271,52 +348,66 @@ private:
 
     bool ParseNull(JsonValue& val)
     {
-        if (src_.compare(pos_, 4, "null") == 0)
-        {
-            pos_ += 4;
-            val = JsonValue(nullptr);
-            return true;
-        }
-        return false;
+        if (src_.compare(pos_, 4, "null") != 0) return false;
+        pos_ += 4;
+        val = JsonValue(nullptr);
+        return true;
     }
 
     bool ParseNumber(JsonValue& val)
     {
-        size_t start = pos_;
+        const size_t start = pos_;
         bool is_float = false;
-        if (Peek() == '-') pos_++;
-        while (pos_ < src_.size() && std::isdigit(static_cast<unsigned char>(Peek())))
+
+        if (Peek() == '-')
         {
-            pos_++;
+            ++pos_;
+            if (pos_ >= src_.size()) return false;
         }
-        if (pos_ < src_.size() && Peek() == '.')
+
+        if (Peek() == '0')
         {
-            is_float = true;
-            pos_++;
-            while (pos_ < src_.size() && std::isdigit(static_cast<unsigned char>(Peek())))
-            {
-                pos_++;
-            }
-        }
-        if (pos_ < src_.size() && (Peek() == 'e' || Peek() == 'E'))
-        {
-            is_float = true;
-            pos_++;
-            if (pos_ < src_.size() && (Peek() == '+' || Peek() == '-')) pos_++;
-            while (pos_ < src_.size() && std::isdigit(static_cast<unsigned char>(Peek())))
-            {
-                pos_++;
-            }
-        }
-        std::string num_str = src_.substr(start, pos_ - start);
-        if (is_float)
-        {
-            val = JsonValue(std::stod(num_str));
+            ++pos_;
+            if (pos_ < src_.size() && std::isdigit(static_cast<unsigned char>(Peek()))) return false;
         }
         else
         {
-            val = JsonValue(std::stoll(num_str));
+            if (Peek() < '1' || Peek() > '9') return false;
+            while (pos_ < src_.size() && std::isdigit(static_cast<unsigned char>(Peek()))) ++pos_;
         }
+
+        if (pos_ < src_.size() && Peek() == '.')
+        {
+            is_float = true;
+            ++pos_;
+            if (pos_ >= src_.size() || !std::isdigit(static_cast<unsigned char>(Peek()))) return false;
+            while (pos_ < src_.size() && std::isdigit(static_cast<unsigned char>(Peek()))) ++pos_;
+        }
+
+        if (pos_ < src_.size() && (Peek() == 'e' || Peek() == 'E'))
+        {
+            is_float = true;
+            ++pos_;
+            if (pos_ < src_.size() && (Peek() == '+' || Peek() == '-')) ++pos_;
+            if (pos_ >= src_.size() || !std::isdigit(static_cast<unsigned char>(Peek()))) return false;
+            while (pos_ < src_.size() && std::isdigit(static_cast<unsigned char>(Peek()))) ++pos_;
+        }
+
+        const std::string number = src_.substr(start, pos_ - start);
+        if (!is_float)
+        {
+            int64_t parsed = 0;
+            const auto result = std::from_chars(number.data(), number.data() + number.size(), parsed, 10);
+            if (result.ec != std::errc{} || result.ptr != number.data() + number.size()) return false;
+            val = JsonValue(parsed);
+            return true;
+        }
+
+        errno = 0;
+        char* end = nullptr;
+        const double parsed = std::strtod(number.c_str(), &end);
+        if (errno == ERANGE || end != number.c_str() + number.size() || !std::isfinite(parsed)) return false;
+        val = JsonValue(parsed);
         return true;
     }
 
@@ -337,8 +428,15 @@ std::string SerializeJson(const JsonValue& val)
 bool ParseJson(const std::string& input, JsonValue& output)
 {
     if (input.empty() || input.size() > kMaxPayloadBytes) return false;
-    JsonParser parser(input);
-    return parser.Parse(output);
+    try
+    {
+        JsonParser parser(input);
+        return parser.Parse(output);
+    }
+    catch (...)
+    {
+        return false;
+    }
 }
 
 std::string SerializeRequest(const BrokerRequest& req)
@@ -383,8 +481,8 @@ std::string SerializeEvent(const BrokerEvent& ev)
 
 bool ParseRequest(const std::string& json_str, BrokerRequest& req, std::string& err)
 {
-    constexpr size_t kMaxRequestIdLength = 256;
-    constexpr size_t kMaxMethodLength = 128;
+    req = BrokerRequest{};
+    err.clear();
     JsonValue root;
     if (!ParseJson(json_str, root) || !root.IsObject())
     {
@@ -392,26 +490,26 @@ bool ParseRequest(const std::string& json_str, BrokerRequest& req, std::string& 
         return false;
     }
     const auto& obj = root.AsObject();
-    auto it_proto = obj.find("protocol");
+    const auto it_proto = obj.find("protocol");
     if (it_proto == obj.end() || !it_proto->second.IsInt() || it_proto->second.AsInt() != kProtocolVersion)
     {
         err = "Unsupported protocol version";
         return false;
     }
-    auto it_type = obj.find("type");
+    const auto it_type = obj.find("type");
     if (it_type == obj.end() || !it_type->second.IsString() || it_type->second.AsString() != "request")
     {
         err = "Invalid message type; expected 'request'";
         return false;
     }
-    auto it_id = obj.find("id");
+    const auto it_id = obj.find("id");
     if (it_id == obj.end() || !it_id->second.IsString() || it_id->second.AsString().empty() ||
         it_id->second.AsString().size() > kMaxRequestIdLength)
     {
         err = "Missing or invalid request 'id'";
         return false;
     }
-    auto it_method = obj.find("method");
+    const auto it_method = obj.find("method");
     if (it_method == obj.end() || !it_method->second.IsString() || it_method->second.AsString().empty() ||
         it_method->second.AsString().size() > kMaxMethodLength)
     {
@@ -423,7 +521,7 @@ bool ParseRequest(const std::string& json_str, BrokerRequest& req, std::string& 
     req.id = it_id->second.AsString();
     req.method = it_method->second.AsString();
 
-    auto it_payload = obj.find("payload");
+    const auto it_payload = obj.find("payload");
     if (it_payload == obj.end())
     {
         req.payload.clear();
@@ -442,6 +540,8 @@ bool ParseRequest(const std::string& json_str, BrokerRequest& req, std::string& 
 
 bool ParseResponse(const std::string& json_str, BrokerResponse& res, std::string& err)
 {
+    res = BrokerResponse{};
+    err.clear();
     JsonValue root;
     if (!ParseJson(json_str, root) || !root.IsObject())
     {
@@ -449,19 +549,26 @@ bool ParseResponse(const std::string& json_str, BrokerResponse& res, std::string
         return false;
     }
     const auto& obj = root.AsObject();
-    auto it_proto = obj.find("protocol");
-    if (it_proto == obj.end() || !it_proto->second.IsInt())
+    const auto it_proto = obj.find("protocol");
+    if (it_proto == obj.end() || !it_proto->second.IsInt() || it_proto->second.AsInt() != kProtocolVersion)
     {
-        err = "Missing protocol";
+        err = "Unsupported protocol version";
         return false;
     }
-    auto it_id = obj.find("id");
-    if (it_id == obj.end() || !it_id->second.IsString())
+    const auto it_type = obj.find("type");
+    if (it_type == obj.end() || !it_type->second.IsString() || it_type->second.AsString() != "response")
     {
-        err = "Missing response id";
+        err = "Invalid message type; expected 'response'";
         return false;
     }
-    auto it_ok = obj.find("ok");
+    const auto it_id = obj.find("id");
+    if (it_id == obj.end() || !it_id->second.IsString() || it_id->second.AsString().empty() ||
+        it_id->second.AsString().size() > kMaxRequestIdLength)
+    {
+        err = "Missing or invalid response id";
+        return false;
+    }
+    const auto it_ok = obj.find("ok");
     if (it_ok == obj.end() || !it_ok->second.IsBool())
     {
         err = "Missing ok flag";
@@ -472,33 +579,48 @@ bool ParseResponse(const std::string& json_str, BrokerResponse& res, std::string
     res.id = it_id->second.AsString();
     res.ok = it_ok->second.AsBool();
 
-    auto it_payload = obj.find("payload");
-    if (it_payload != obj.end() && it_payload->second.IsObject())
+    const auto it_payload = obj.find("payload");
+    if (it_payload == obj.end())
+    {
+        res.payload.clear();
+    }
+    else if (it_payload->second.IsObject())
     {
         res.payload = it_payload->second.AsObject();
     }
     else
     {
-        res.payload.clear();
+        err = "Invalid response payload";
+        return false;
     }
 
     if (!res.ok)
     {
-        auto it_err = obj.find("error");
-        if (it_err != obj.end() && it_err->second.IsObject())
+        const auto it_error = obj.find("error");
+        if (it_error == obj.end() || !it_error->second.IsObject())
         {
-            const auto& err_obj = it_err->second.AsObject();
-            auto it_code = err_obj.find("code");
-            if (it_code != err_obj.end()) res.error_code = it_code->second.AsString();
-            auto it_msg = err_obj.find("message");
-            if (it_msg != err_obj.end()) res.error_message = it_msg->second.AsString();
+            err = "Missing response error object";
+            return false;
         }
+        const auto& error_obj = it_error->second.AsObject();
+        const auto it_code = error_obj.find("code");
+        const auto it_message = error_obj.find("message");
+        if (it_code == error_obj.end() || !it_code->second.IsString() ||
+            it_message == error_obj.end() || !it_message->second.IsString())
+        {
+            err = "Invalid response error object";
+            return false;
+        }
+        res.error_code = it_code->second.AsString();
+        res.error_message = it_message->second.AsString();
     }
     return true;
 }
 
 bool ParseEvent(const std::string& json_str, BrokerEvent& ev, std::string& err)
 {
+    ev = BrokerEvent{};
+    err.clear();
     JsonValue root;
     if (!ParseJson(json_str, root) || !root.IsObject())
     {
@@ -506,28 +628,51 @@ bool ParseEvent(const std::string& json_str, BrokerEvent& ev, std::string& err)
         return false;
     }
     const auto& obj = root.AsObject();
-    auto it_event = obj.find("event");
-    if (it_event == obj.end() || !it_event->second.IsString())
+    const auto it_proto = obj.find("protocol");
+    if (it_proto == obj.end() || !it_proto->second.IsInt() || it_proto->second.AsInt() != kProtocolVersion)
     {
-        err = "Missing event name";
+        err = "Unsupported protocol version";
         return false;
     }
-    ev.protocol = kProtocolVersion;
+    const auto it_type = obj.find("type");
+    if (it_type == obj.end() || !it_type->second.IsString() || it_type->second.AsString() != "event")
+    {
+        err = "Invalid message type; expected 'event'";
+        return false;
+    }
+    const auto it_event = obj.find("event");
+    if (it_event == obj.end() || !it_event->second.IsString() || it_event->second.AsString().empty() ||
+        it_event->second.AsString().size() > kMaxEventNameLength)
+    {
+        err = "Missing or invalid event name";
+        return false;
+    }
+    ev.protocol = static_cast<int>(it_proto->second.AsInt());
     ev.event = it_event->second.AsString();
 
-    auto it_payload = obj.find("payload");
-    if (it_payload != obj.end() && it_payload->second.IsObject())
+    const auto it_payload = obj.find("payload");
+    if (it_payload == obj.end())
+    {
+        ev.payload.clear();
+    }
+    else if (it_payload->second.IsObject())
     {
         ev.payload = it_payload->second.AsObject();
     }
     else
     {
-        ev.payload.clear();
+        err = "Invalid event payload";
+        return false;
     }
 
-    auto it_ts = obj.find("timestamp");
-    if (it_ts != obj.end() && it_ts->second.IsInt())
+    const auto it_ts = obj.find("timestamp");
+    if (it_ts != obj.end())
     {
+        if (!it_ts->second.IsInt() || it_ts->second.AsInt() < 0)
+        {
+            err = "Invalid event timestamp";
+            return false;
+        }
         ev.timestamp_ms = static_cast<uint64_t>(it_ts->second.AsInt());
     }
     else
