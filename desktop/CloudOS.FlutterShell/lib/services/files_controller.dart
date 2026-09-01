@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../models/file_models.dart';
+import 'broker_events.dart';
 import 'cloudos_bridge.dart';
 
 class FilesTabState {
@@ -38,11 +41,19 @@ class FilesTabState {
 
 class FilesController extends ChangeNotifier {
   FilesController({CloudOSBridge? bridge})
-    : _bridge = bridge ?? const CloudOSBridge() {
+    : _bridge = bridge ?? const CloudOSBridge(),
+      _eventStartFuture = CloudOSBrokerEvents.instance.start() {
+    _eventSubscription = CloudOSBrokerEvents.instance.stream.listen(
+      _onBrokerEvent,
+    );
     _init();
   }
 
   final CloudOSBridge _bridge;
+  final Future<bool> _eventStartFuture;
+  StreamSubscription<CloudOSBrokerEvent>? _eventSubscription;
+  Timer? _filesRefreshDebounce;
+  Completer<Map<String, Object?>>? _activeJobCompleter;
 
   final List<FilesTabState> _tabs = <FilesTabState>[];
   int _activeTabIndex = 0;
@@ -83,10 +94,62 @@ class FilesController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _filesRefreshDebounce?.cancel();
+    _eventSubscription?.cancel();
+    final completer = _activeJobCompleter;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete(<String, Object?>{'state': 'disposed'});
+    }
+    _activeJobCompleter = null;
     for (final tab in _tabs) {
       tab.loadGeneration++;
     }
     super.dispose();
+  }
+
+  void _onBrokerEvent(CloudOSBrokerEvent event) {
+    if (_disposed) return;
+
+    if (event.name == 'files.changed') {
+      _filesRefreshDebounce?.cancel();
+      _filesRefreshDebounce = Timer(const Duration(milliseconds: 120), () {
+        if (!_disposed) refresh();
+      });
+      return;
+    }
+
+    if (!event.name.startsWith('job.')) return;
+    final jobId = event.payload['jobId'];
+    if (jobId is! String || jobId != _activeJobId) return;
+
+    if (event.name == 'job.progress') {
+      _activeJobProgress = ((event.payload['progress'] as num?)?.toDouble() ?? 0)
+          .clamp(0, 100)
+          .toDouble();
+      _activeJobStatus = event.payload['state'] as String? ?? 'running';
+      notifyListeners();
+      return;
+    }
+
+    final terminalState = switch (event.name) {
+      'job.completed' => 'completed',
+      'job.failed' => 'failed',
+      'job.cancelled' => 'cancelled',
+      _ => null,
+    };
+    if (terminalState == null) return;
+
+    _activeJobStatus = terminalState;
+    if (terminalState == 'completed') _activeJobProgress = 100;
+    notifyListeners();
+
+    final completer = _activeJobCompleter;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete(<String, Object?>{
+        ...event.payload,
+        'state': terminalState,
+      });
+    }
   }
 
   Future<void> _init() async {
@@ -360,6 +423,7 @@ class FilesController extends ChangeNotifier {
       _activeJobStatus = 'failed: $error';
       notifyListeners();
     } finally {
+      _activeJobCompleter = null;
       _activeJobId = null;
       notifyListeners();
     }
@@ -372,36 +436,97 @@ class FilesController extends ChangeNotifier {
   }
 
   Future<void> _waitForJob(String jobId) async {
-    const maxPolls = 600;
+    final reactive = await _eventStartFuture;
+    if (_disposed || _activeJobId != jobId) return;
+    if (reactive) {
+      await _waitForJobReactive(jobId);
+      return;
+    }
+    await _waitForJobPollingFallback(jobId);
+  }
+
+  Future<void> _waitForJobReactive(String jobId) async {
+    final completer = Completer<Map<String, Object?>>();
+    _activeJobCompleter = completer;
+
+    // A tiny file job can finish before files.copy/move returns its jobId. One
+    // immediate status read closes that race; after this point production waits
+    // for Broker EventBus completion instead of polling every 100 ms.
+    final initial = await _bridge.getJobStatus(jobId);
+    if (_disposed || _activeJobId != jobId) return;
+    _applyJobStatus(initial);
+    if (_isTerminalJobState(_activeJobStatus)) {
+      _throwIfJobFailedOrCancelled(initial);
+      return;
+    }
+
+    Map<String, Object?> terminal;
+    try {
+      terminal = await completer.future.timeout(const Duration(seconds: 60));
+    } on TimeoutException {
+      // One final read distinguishes a genuinely stuck/missed stream from an
+      // event that raced with the timeout boundary. This is not a poll loop.
+      terminal = await _bridge.getJobStatus(jobId);
+    }
+
+    if (_disposed || _activeJobId != jobId) return;
+    _applyJobStatus(terminal);
+    if (!_isTerminalJobState(_activeJobStatus)) {
+      throw const CloudOSBridgeException(
+        'job_timeout',
+        'A operação de arquivo excedeu o tempo limite.',
+      );
+    }
+    _throwIfJobFailedOrCancelled(terminal);
+  }
+
+  Future<void> _waitForJobPollingFallback(String jobId) async {
+    // Preview/widget-test/legacy bridge fallback only. Native V23 production
+    // reaches _waitForJobReactive after startBrokerEvents succeeds.
+    const maxPolls = 240;
     for (var poll = 0; poll < maxPolls; poll++) {
       if (_disposed || _activeJobId != jobId) return;
       final status = await _bridge.getJobStatus(jobId);
       if (_disposed || _activeJobId != jobId) return;
-      _activeJobProgress = ((status['progress'] as num?)?.toDouble() ?? 0)
-          .clamp(0, 100)
-          .toDouble();
-      _activeJobStatus = status['state'] as String? ?? 'unknown';
-      notifyListeners();
-      switch (_activeJobStatus) {
-        case 'completed':
-          return;
-        case 'failed':
-          throw CloudOSBridgeException(
-            'job_failed',
-            status['error'] as String? ?? 'A operação de arquivo falhou.',
-          );
-        case 'cancelled':
-          throw const CloudOSBridgeException(
-            'job_cancelled',
-            'A operação foi cancelada.',
-          );
+      _applyJobStatus(status);
+      if (_isTerminalJobState(_activeJobStatus)) {
+        _throwIfJobFailedOrCancelled(status);
+        return;
       }
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await Future<void>.delayed(const Duration(milliseconds: 250));
     }
     throw const CloudOSBridgeException(
       'job_timeout',
       'A operação de arquivo excedeu o tempo limite.',
     );
+  }
+
+  void _applyJobStatus(Map<String, Object?> status) {
+    _activeJobProgress = ((status['progress'] as num?)?.toDouble() ??
+            (_activeJobStatus == 'completed' ? 100 : _activeJobProgress))
+        .clamp(0, 100)
+        .toDouble();
+    _activeJobStatus = status['state'] as String? ?? _activeJobStatus;
+    if (_activeJobStatus == 'completed') _activeJobProgress = 100;
+    notifyListeners();
+  }
+
+  bool _isTerminalJobState(String state) =>
+      state == 'completed' || state == 'failed' || state == 'cancelled';
+
+  void _throwIfJobFailedOrCancelled(Map<String, Object?> status) {
+    switch (_activeJobStatus) {
+      case 'failed':
+        throw CloudOSBridgeException(
+          'job_failed',
+          status['error'] as String? ?? 'A operação de arquivo falhou.',
+        );
+      case 'cancelled':
+        throw const CloudOSBridgeException(
+          'job_cancelled',
+          'A operação foi cancelada.',
+        );
+    }
   }
 
   Future<void> openItem(CloudFileItem item) async {
