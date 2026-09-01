@@ -45,6 +45,7 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
   }
 
   Future<void> _commitVolume(double value) async {
+    if (!widget.snapshot.volumeAvailable) return;
     final succeeded = await widget.onSetVolume?.call(value) ?? true;
     if (!succeeded && mounted) {
       setState(() => volume = widget.snapshot.volume);
@@ -52,6 +53,7 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
   }
 
   Future<void> _commitBrightness(double value) async {
+    if (!widget.snapshot.brightnessAvailable) return;
     final succeeded = await widget.onSetBrightness?.call(value) ?? true;
     if (!succeeded && mounted) {
       setState(() => brightness = widget.snapshot.brightness);
@@ -128,6 +130,7 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                           : Icons.volume_up_rounded,
                   percentage: '$volPct%',
                   value: volume,
+                  enabled: widget.snapshot.volumeAvailable,
                   onChanged: (value) => setState(() => volume = value),
                   onChangeEnd: (value) async => _commitVolume(value),
                 ),
@@ -136,6 +139,7 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                   icon: Icons.brightness_6_rounded,
                   percentage: '$briPct%',
                   value: brightness,
+                  enabled: widget.snapshot.brightnessAvailable,
                   onChanged: (value) => setState(() => brightness = value),
                   onChangeEnd: (value) async => _commitBrightness(value),
                 ),
