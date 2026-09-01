@@ -6,6 +6,7 @@ import '../../../services/cloudos_bridge.dart';
 import '../../../widgets/glass_surface.dart';
 import 'widgets/files_content.dart';
 import 'widgets/files_sidebar.dart';
+import 'widgets/files_status_bar.dart';
 import 'widgets/files_title_bar.dart';
 import 'widgets/files_toolbar.dart';
 
