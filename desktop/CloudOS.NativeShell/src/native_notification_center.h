@@ -71,3 +71,5 @@ private:
     HBRUSH background_{};
 };
 } // namespace CloudOS
+
+#include "native_shell_notification_server_v21.h"
