@@ -58,8 +58,11 @@ void main() {
           case 'getSystemSnapshot':
             return <String, Object?>{
               'deviceName': 'TEST-DEVICE-V21',
+              'networkAvailable': true,
               'networkName': 'Wi-Fi 6 Real Native',
+              'volumeAvailable': true,
               'volume': 0.80,
+              'brightnessAvailable': true,
               'brightness': 0.90,
               'batteryPercent': 88,
               'wslAvailable': true,
@@ -112,8 +115,11 @@ void main() {
       final snapshot = await bridge.loadSystemSnapshot();
 
       expect(snapshot.deviceName, 'TEST-DEVICE-V21');
+      expect(snapshot.networkAvailable, true);
       expect(snapshot.networkName, 'Wi-Fi 6 Real Native');
+      expect(snapshot.volumeAvailable, true);
       expect(snapshot.volume, 0.80);
+      expect(snapshot.brightnessAvailable, true);
       expect(snapshot.brightness, 0.90);
       expect(snapshot.batteryPercent, 88);
       expect(snapshot.wslAvailable, true);
@@ -207,7 +213,8 @@ void main() {
       await tester.tap(find.byTooltip('Configurações Rápidas (Ctrl+Alt+Q)'));
       await tester.pumpAndSettle();
       expect(find.text('Configurações Rápidas'), findsOneWidget);
-      expect(find.text('Wi‑Fi 6'), findsOneWidget);
+      expect(find.text('Rede'), findsOneWidget);
+      expect(find.text('Wi-Fi 6 Real Native'), findsOneWidget);
       expect(find.text('Luz Noturna'), findsOneWidget);
 
       // Open Notifications
