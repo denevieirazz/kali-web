@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 
 import '../models/shell_models.dart';
 import 'bridge/cloud_app_mapper.dart';
+import 'bridge/cloud_file_mapper.dart';
 import 'bridge/cloudos_preview_data.dart';
 
 class CloudOSBridge {
@@ -20,6 +21,21 @@ class CloudOSBridge {
       return previewApps;
     } on PlatformException {
       return previewApps;
+    }
+  }
+
+  Future<List<CloudFileItem>> loadFiles(String location) async {
+    try {
+      final raw = await _channel.invokeListMethod<Map<Object?, Object?>>(
+        'getFiles',
+        <String, Object?>{'location': location},
+      );
+      if (raw == null) return const <CloudFileItem>[];
+      return raw.map(cloudFileFromNative).toList(growable: false);
+    } on MissingPluginException {
+      return previewFiles[location] ?? const <CloudFileItem>[];
+    } on PlatformException {
+      return const <CloudFileItem>[];
     }
   }
 
