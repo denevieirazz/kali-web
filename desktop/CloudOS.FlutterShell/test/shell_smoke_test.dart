@@ -50,7 +50,7 @@ void main() {
             'recent': true,
           },
           <String, Object?>{
-            'id': 'wsl:ubuntu-terminal',
+            'id': 'wsl:default-terminal',
             'name': 'kali-linux Terminal',
             'platform': 'linux',
             'subtitle': 'Linux Shell (kali-linux)',
@@ -144,6 +144,28 @@ void main() {
       expect(snapshot.currentWorkspace, 2);
     });
 
+    test('snapshot values are clamped to safe UI ranges', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'getSystemSnapshot') {
+          return <String, Object?>{
+            'batteryPercent': 999,
+            'volume': -3.0,
+            'brightness': 7.0,
+            'currentWorkspace': 99,
+          };
+        }
+        return handler(call);
+      });
+
+      const bridge = CloudOSBridge(channel: channel);
+      final snapshot = await bridge.loadSystemSnapshot();
+      expect(snapshot.batteryPercent, 100);
+      expect(snapshot.volume, 0.0);
+      expect(snapshot.brightness, 1.0);
+      expect(snapshot.currentWorkspace, 4);
+    });
+
     test('launchApp forwards typed app id and returns native result', () async {
       const bridge = CloudOSBridge(channel: channel);
       final success = await bridge.launchApp('windows:vscode');
@@ -151,17 +173,18 @@ void main() {
       expect(success, true);
       expect(log.last.method, 'launchApp');
       expect(log.last.arguments, <String, Object?>{'id': 'windows:vscode'});
+      expect(await bridge.launchApp('   '), false);
     });
 
-    test('setVolume and setBrightness forward values', () async {
+    test('setVolume and setBrightness clamp and forward values', () async {
       const bridge = CloudOSBridge(channel: channel);
-      expect(await bridge.setVolume(0.5), true);
+      expect(await bridge.setVolume(-5), true);
       expect(log.last.method, 'setVolume');
-      expect(log.last.arguments, <String, Object?>{'value': 0.5});
+      expect(log.last.arguments, <String, Object?>{'value': 0.0});
 
-      expect(await bridge.setBrightness(0.75), true);
+      expect(await bridge.setBrightness(5), true);
       expect(log.last.method, 'setBrightness');
-      expect(log.last.arguments, <String, Object?>{'value': 0.75});
+      expect(log.last.arguments, <String, Object?>{'value': 1.0});
     });
 
     test('getBridgeInfo returns V21 metadata', () async {
@@ -182,6 +205,8 @@ void main() {
 
       final apps = await bridge.loadApps();
       expect(apps, CloudOSBridge.previewApps);
+      expect(apps.length, 1);
+      expect(apps.single.id, 'cloudos:files');
 
       final snapshot = await bridge.loadSystemSnapshot();
       expect(snapshot.wslAvailable, false);
@@ -196,7 +221,7 @@ void main() {
   });
 
   group('CloudOS V21 Active Desktop Presentation', () {
-    testWidgets('renders V21 shell and dynamic Start on desktop viewport', (tester) async {
+    testWidgets('renders V21 shell with connected broker and dynamic Start', (tester) async {
       await tester.binding.setSurfaceSize(const Size(1920, 1080));
       addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -204,6 +229,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 500));
 
       expect(find.textContaining('TEST-DEVICE-V21'), findsOneWidget);
+      expect(find.text('Broker conectado'), findsOneWidget);
       expect(find.text('Arquivos V21'), findsOneWidget);
       expect(find.text('kali-linux'), findsWidgets);
 
@@ -232,6 +258,30 @@ void main() {
       expect(find.text('Backend ainda não exposto'), findsWidgets);
     });
 
+    testWidgets('cleared notifications stay cleared after reopening panel', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1920, 1080));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(const CloudOSApp());
+      await tester.pump(const Duration(milliseconds: 500));
+
+      await tester.tap(find.byTooltip('Notificações'));
+      await tester.pumpAndSettle();
+      expect(find.text('Limpar Tudo'), findsOneWidget);
+
+      await tester.tap(find.text('Limpar Tudo'));
+      await tester.pumpAndSettle();
+      expect(find.text('Sem novas notificações'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Notificações'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Notificações'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Sem novas notificações'), findsOneWidget);
+      expect(find.text('Limpar Tudo'), findsNothing);
+    });
+
     testWidgets('renders without legacy V19 branding on notebook viewport', (tester) async {
       await tester.binding.setSurfaceSize(const Size(1366, 768));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -242,6 +292,7 @@ void main() {
       expect(find.text('CloudOS V19'), findsNothing);
       expect(find.text('Arquivos V21'), findsOneWidget);
       expect(find.textContaining('Workspace 2'), findsOneWidget);
+      expect(find.text('Broker conectado'), findsOneWidget);
     });
   });
 }
