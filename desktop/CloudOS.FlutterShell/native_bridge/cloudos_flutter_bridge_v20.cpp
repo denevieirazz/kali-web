@@ -87,6 +87,7 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         const auto snapshot = GetSystemSnapshot();
         flutter::EncodableMap map;
         map[flutter::EncodableValue("deviceName")] = flutter::EncodableValue(snapshot.device_name);
+        map[flutter::EncodableValue("networkAvailable")] = flutter::EncodableValue(snapshot.network_available);
         map[flutter::EncodableValue("networkName")] = flutter::EncodableValue(snapshot.network_name);
         map[flutter::EncodableValue("volumeAvailable")] = flutter::EncodableValue(snapshot.volume_available);
         map[flutter::EncodableValue("volume")] = flutter::EncodableValue(snapshot.volume);
@@ -228,6 +229,7 @@ NativeSystemSnapshot CloudOSFlutterBridgeV20::GetSystemSnapshot()
     {
         NativeSystemSnapshot snap;
         snap.device_name = broker_snap.device_name;
+        snap.network_available = broker_snap.network_available;
         snap.network_name = broker_snap.network_name;
         snap.volume_available = broker_snap.volume_available;
         snap.volume = broker_snap.volume;
@@ -323,6 +325,7 @@ void CloudOSFlutterBridgeV20::RefreshSystemSnapshot()
 {
     std::lock_guard<std::mutex> lock(mutex_);
     cached_snapshot_.device_name = "CloudOS Desktop";
+    cached_snapshot_.network_available = true;
     cached_snapshot_.network_name = "CloudOS Network • Wi-Fi 6";
     cached_snapshot_.volume_available = true;
     cached_snapshot_.volume = 0.72;
