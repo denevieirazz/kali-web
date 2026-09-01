@@ -121,17 +121,20 @@ jobs:
           Copy-Item -Path (Join-Path $brokerBin 'CloudOS.BrokerProbe.exe') -Destination $release -Force
           Copy-Item -Path 'Abrir CloudOS V21 Flutter com System Broker.cmd' -Destination (Join-Path $release 'Abrir CloudOS V21.cmd') -Force
 
-      - name: Write V21 evidence
+      - name: Write V21 build evidence
         shell: pwsh
         run: |
           $flutter = (flutter --version | Select-Object -First 1).Trim()
           $release = Resolve-Path 'desktop/CloudOS.FlutterShell/build/windows/x64/runner/Release'
           $exe = Join-Path $release 'cloudos_flutter_shell.exe'
           $brokerExe = Join-Path $release 'CloudOS.SystemBroker.exe'
+          $probeExe = Join-Path $release 'CloudOS.BrokerProbe.exe'
           if (-not (Test-Path $exe)) { throw "Flutter executable missing: $exe" }
           if (-not (Test-Path $brokerExe)) { throw "SystemBroker executable missing: $brokerExe" }
+          if (-not (Test-Path $probeExe)) { throw "BrokerProbe executable missing: $probeExe" }
           $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           $brokerSha = (Get-FileHash $brokerExe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $probeSha = (Get-FileHash $probeExe -Algorithm SHA256).Hash.ToLowerInvariant()
           $evidence = [ordered]@{
             schema = 21
             verdict = 'pass'
@@ -153,6 +156,8 @@ jobs:
             executable_sha256 = $sha
             broker_executable = 'CloudOS.SystemBroker.exe'
             broker_executable_sha256 = $brokerSha
+            probe_executable = 'CloudOS.BrokerProbe.exe'
+            probe_executable_sha256 = $probeSha
           }
           $evidence | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 'flutter-v21-smoke.json'
           Get-Content 'flutter-v21-smoke.json'
@@ -177,6 +182,95 @@ jobs:
           Este preview NAO substitui o Explorer, NAO altera Winlogon e NAO ativa o CloudOS como shell de logon.
           Para diagnostico, execute CloudOS.BrokerProbe.exe ou consulte os JSONs de smoke incluidos.
           '@ | Set-Content -Path (Join-Path $package 'LEIA-ME - CLOUDOS V21.txt') -Encoding UTF8
+
+      - name: Smoke assembled ready-to-run package
+        shell: pwsh
+        run: |
+          $package = Resolve-Path 'CloudOS-Flutter-V21-Package'
+          $required = @(
+            'cloudos_flutter_shell.exe',
+            'CloudOS.SystemBroker.exe',
+            'CloudOS.BrokerProbe.exe',
+            'Abrir CloudOS V21.cmd',
+            'flutter_windows.dll',
+            'data'
+          )
+          foreach ($name in $required) {
+            if (-not (Test-Path (Join-Path $package $name))) {
+              throw "Ready package missing required item: $name"
+            }
+          }
+
+          Get-Process 'CloudOS.SystemBroker' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Milliseconds 200
+
+          $brokerPath = Join-Path $package 'CloudOS.SystemBroker.exe'
+          $probePath = Join-Path $package 'CloudOS.BrokerProbe.exe'
+          $broker = Start-Process -FilePath $brokerPath -WorkingDirectory $package -WindowStyle Hidden -PassThru
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 30; $i++) {
+              $pingText = (& $probePath ping 2>$null | Out-String).Trim()
+              if ($LASTEXITCODE -eq 0 -and $pingText) {
+                try {
+                  $ping = $pingText | ConvertFrom-Json
+                  if ($ping.ok -eq $true -and $ping.payload.pong -eq $true) {
+                    $ready = $true
+                    break
+                  }
+                } catch {}
+              }
+              Start-Sleep -Milliseconds 100
+            }
+            if (-not $ready) { throw 'Packaged System Broker did not become healthy' }
+
+            $status = ((& $probePath status | Out-String).Trim() | ConvertFrom-Json)
+            if ($LASTEXITCODE -ne 0 -or $status.ok -ne $true -or $status.payload.status -ne 'healthy') {
+              throw 'Packaged Broker status contract failed'
+            }
+
+            $apps = ((& $probePath apps | Out-String).Trim() | ConvertFrom-Json)
+            if ($LASTEXITCODE -ne 0 -or $apps.ok -ne $true -or $apps.payload.apps.Count -lt 5) {
+              throw 'Packaged Broker app catalog contract failed'
+            }
+
+            $snapshot = ((& $probePath snapshot | Out-String).Trim() | ConvertFrom-Json)
+            if ($LASTEXITCODE -ne 0 -or $snapshot.ok -ne $true -or [string]::IsNullOrWhiteSpace($snapshot.payload.deviceName)) {
+              throw 'Packaged Broker snapshot contract failed'
+            }
+
+            $packageEvidence = [ordered]@{
+              schema = 21
+              verdict = 'pass'
+              git_sha = '${{ github.sha }}'
+              package_layout_verified = $true
+              broker_ping = $true
+              broker_status = 'healthy'
+              apps_count = $apps.payload.apps.Count
+              snapshot_device_present = $true
+              winlogon_modified = $false
+            }
+            $packageEvidence | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 (Join-Path $package 'package-v21-smoke.json')
+          }
+          finally {
+            if ($broker -and -not $broker.HasExited) {
+              Stop-Process -Id $broker.Id -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          $hashTargets = @(
+            'cloudos_flutter_shell.exe',
+            'CloudOS.SystemBroker.exe',
+            'CloudOS.BrokerProbe.exe',
+            'flutter_windows.dll'
+          )
+          $hashLines = foreach ($name in $hashTargets) {
+            $hash = (Get-FileHash (Join-Path $package $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $name"
+          }
+          $hashLines | Set-Content -Encoding ASCII (Join-Path $package 'SHA256SUMS.txt')
+          Get-Content (Join-Path $package 'package-v21-smoke.json')
+          Get-Content (Join-Path $package 'SHA256SUMS.txt')
 
       - name: Upload ready-to-run Flutter V21
         uses: actions/upload-artifact@v4
