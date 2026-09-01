@@ -9,6 +9,7 @@ import '../features/taskbar/presentation/cloud_taskbar.dart';
 import '../models/cloud_app.dart';
 import '../models/cloud_system_snapshot.dart';
 import '../services/cloudos_bridge.dart';
+import 'shell_app_route.dart';
 import 'widgets/desktop_icons.dart';
 import 'widgets/desktop_status.dart';
 import 'widgets/desktop_wallpaper.dart';
@@ -33,8 +34,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
   bool quickSettingsOpen = false;
   bool notificationsOpen = false;
   bool filesOpen = true;
-  bool browserOpen = false;
-  bool terminalOpen = false;
+  bool browserRunning = false;
+  bool terminalRunning = false;
   int currentWorkspace = 1;
   String? selectedDesktopIcon;
   Offset filesOffset = const Offset(200, 70);
@@ -92,18 +93,28 @@ class _CloudOSShellState extends State<CloudOSShell> {
     });
   }
 
-  void _toggleBrowser() {
+  Future<void> _launchBridgeSurface(String appId, ShellAppRoute route) async {
+    final launched = await widget.bridge.launchApp(appId);
+    if (!mounted) return;
     setState(() {
-      browserOpen = !browserOpen;
       _closeTransientPanels();
+      if (route == ShellAppRoute.browser) browserRunning = launched;
+      if (route == ShellAppRoute.terminal) terminalRunning = launched;
     });
   }
 
-  void _toggleTerminal() {
-    setState(() {
-      terminalOpen = !terminalOpen;
-      _closeTransientPanels();
-    });
+  Future<void> _launchBrowser() {
+    return _launchBridgeSurface(
+      canonicalLaunchId(ShellAppRoute.browser),
+      ShellAppRoute.browser,
+    );
+  }
+
+  Future<void> _launchTerminal() {
+    return _launchBridgeSurface(
+      canonicalLaunchId(ShellAppRoute.terminal),
+      ShellAppRoute.terminal,
+    );
   }
 
   void _switchWorkspace(int index) {
@@ -114,27 +125,26 @@ class _CloudOSShellState extends State<CloudOSShell> {
   }
 
   Future<void> _launchApp(CloudApp app) async {
-    if (app.id == 'files') {
+    final route = resolveShellAppRoute(app.id);
+    if (route == ShellAppRoute.files) {
       setState(() {
         filesOpen = true;
         _closeTransientPanels();
       });
       return;
     }
-    if (app.id == 'browser') {
-      setState(() {
-        browserOpen = true;
-        _closeTransientPanels();
-      });
+
+    if (route == ShellAppRoute.browser) {
+      final id = app.id == 'browser' ? canonicalLaunchId(route) : app.id;
+      await _launchBridgeSurface(id, route);
       return;
     }
-    if (app.id == 'terminal' || app.id == 'ubuntu-terminal') {
-      setState(() {
-        terminalOpen = true;
-        _closeTransientPanels();
-      });
+
+    if (route == ShellAppRoute.terminal) {
+      await _launchBridgeSurface(app.id, route);
       return;
     }
+
     await widget.bridge.launchApp(app.id);
     if (!mounted) return;
     setState(_closeTransientPanels);
@@ -188,7 +198,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
                           onSelect: (id) => setState(() => selectedDesktopIcon = id),
                           onFiles: _toggleFiles,
                           onStart: _toggleStart,
-                          onTerminal: _toggleTerminal,
+                          onTerminal: _launchTerminal,
                           onOpenSettings: _toggleQuickSettings,
                         ),
                       ),
@@ -219,14 +229,14 @@ class _CloudOSShellState extends State<CloudOSShell> {
                       quickSettingsOpen: quickSettingsOpen,
                       notificationsOpen: notificationsOpen,
                       filesRunning: filesOpen,
-                      browserRunning: browserOpen,
-                      terminalRunning: terminalOpen,
+                      browserRunning: browserRunning,
+                      terminalRunning: terminalRunning,
                       currentWorkspace: currentWorkspace,
                       onWorkspaceChanged: _switchWorkspace,
                       onStart: _toggleStart,
                       onFiles: _toggleFiles,
-                      onBrowser: _toggleBrowser,
-                      onTerminal: _toggleTerminal,
+                      onBrowser: _launchBrowser,
+                      onTerminal: _launchTerminal,
                       onQuickSettings: _toggleQuickSettings,
                       onNotifications: _toggleNotifications,
                     ),
