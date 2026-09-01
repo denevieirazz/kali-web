@@ -239,7 +239,7 @@ void CloudOSBrokerClientV21::SpawnBrokerIfNeeded()
     PathRemoveFileSpecW(dir);
 
     const std::wstring candidate1 = std::wstring(dir) + L"\\CloudOS.SystemBroker.exe";
-    const std::wstring candidate2 = std::wstring(dir) + L"\\..\\..\\..\\..\\..\\CloudOS.NativeShell\\bin\\Release\\CloudOS.SystemBroker.exe";
+    const std::wstring candidate2 = std::wstring(dir) + L"\\..\\..\\..\\..\\..\\..\\CloudOS.NativeShell\\bin\\Release\\CloudOS.SystemBroker.exe";
     const std::wstring candidate3 = L"C:\\CloudOS\\desktop\\CloudOS.NativeShell\\bin\\Release\\CloudOS.SystemBroker.exe";
 
     std::wstring target;
@@ -332,7 +332,6 @@ bool CloudOSBrokerClientV21::SendRequestLocked(
         return false;
     }
 
-    // Future-proof against event frames sharing the same duplex pipe.
     for (int frame_index = 0; frame_index < 16; ++frame_index)
     {
         std::string raw;
@@ -532,6 +531,7 @@ bool CloudOSBrokerClientV21::GetSystemSnapshot(BrokerClientSnapshot& out_snapsho
     snapshot.battery_percent = static_cast<int>(std::clamp<int64_t>(IntField(response.payload, "batteryPercent", 100), 0, 100));
     snapshot.network_available = BoolField(response.payload, "networkAvailable", false);
     snapshot.network_name = StringField(response.payload, "networkName", snapshot.network_available ? "Connected" : "Offline");
+    snapshot.volume_available = BoolField(response.payload, "volumeAvailable", false);
     snapshot.volume = std::clamp(DoubleField(response.payload, "volume", 0.0), 0.0, 1.0);
     snapshot.brightness_available = BoolField(response.payload, "brightnessAvailable", false);
     snapshot.brightness = std::clamp(DoubleField(response.payload, "brightness", 0.0), 0.0, 1.0);
