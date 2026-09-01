@@ -352,6 +352,7 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         map[flutter::EncodableValue("volume")] = flutter::EncodableValue(snapshot.volume);
         map[flutter::EncodableValue("brightnessAvailable")] = flutter::EncodableValue(snapshot.brightness_available);
         map[flutter::EncodableValue("brightness")] = flutter::EncodableValue(snapshot.brightness);
+        map[flutter::EncodableValue("batteryAvailable")] = flutter::EncodableValue(snapshot.battery_available);
         map[flutter::EncodableValue("batteryPercent")] = flutter::EncodableValue(snapshot.battery_percent);
         map[flutter::EncodableValue("wslAvailable")] = flutter::EncodableValue(snapshot.wsl_available);
         map[flutter::EncodableValue("currentWorkspace")] = flutter::EncodableValue(snapshot.current_workspace);
@@ -630,6 +631,7 @@ NativeSystemSnapshot CloudOSFlutterBridgeV20::GetSystemSnapshot()
         snapshot.volume = broker_snap.volume;
         snapshot.brightness_available = broker_snap.brightness_available;
         snapshot.brightness = broker_snap.brightness;
+        snapshot.battery_available = broker_snap.battery_available;
         snapshot.battery_percent = broker_snap.battery_percent;
         snapshot.wsl_available = broker_snap.wsl_available;
         snapshot.distros = broker_snap.distros;
@@ -707,14 +709,15 @@ void CloudOSFlutterBridgeV20::RefreshSystemSnapshot()
 {
     std::lock_guard<std::mutex> lock(mutex_);
     cached_snapshot_.device_name = "CloudOS Desktop";
-    cached_snapshot_.network_available = true;
-    cached_snapshot_.network_name = "CloudOS Network • Wi-Fi 6";
-    cached_snapshot_.volume_available = true;
-    cached_snapshot_.volume = 0.72;
-    cached_snapshot_.brightness_available = true;
-    cached_snapshot_.brightness = 0.85;
-    cached_snapshot_.battery_percent = 100;
-    cached_snapshot_.wsl_available = true;
+    cached_snapshot_.network_available = false;
+    cached_snapshot_.network_name = "Indisponível";
+    cached_snapshot_.volume_available = false;
+    cached_snapshot_.volume = 0.0;
+    cached_snapshot_.brightness_available = false;
+    cached_snapshot_.brightness = 0.0;
+    cached_snapshot_.battery_available = false;
+    cached_snapshot_.battery_percent = 0;
+    cached_snapshot_.wsl_available = false;
     cached_snapshot_.distros = {};
     cached_snapshot_.current_workspace = 1;
 }
