@@ -1,10 +1,10 @@
 #pragma once
 
+#include "protocol_v21.h"
+
 #include <Windows.h>
 
 #include <atomic>
-#include <functional>
-#include <map>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -44,13 +44,13 @@ struct BrokerClientSnapshot final
     std::string device_name;
     std::string user_name;
     uint32_t session_id{1};
-    bool battery_available{true};
+    bool battery_available{false};
     int battery_percent{100};
-    bool network_available{true};
+    bool network_available{false};
     std::string network_name;
-    double volume{0.72};
-    bool brightness_available{true};
-    double brightness{0.85};
+    double volume{0.0};
+    bool brightness_available{false};
+    double brightness{0.0};
     bool wsl_available{false};
     std::vector<std::string> distros;
     int current_workspace{1};
@@ -88,6 +88,11 @@ private:
 
     bool SendFrame(const std::string& payload);
     bool ReadFrame(std::string& payload);
+    bool SendRequestLocked(
+        const std::string& method,
+        JsonObject payload,
+        BrokerResponse& response,
+        std::string& err);
 
     mutable std::mutex mutex_;
     HANDLE pipe_{INVALID_HANDLE_VALUE};
