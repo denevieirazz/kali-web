@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -28,10 +30,16 @@ class CloudOSBridge {
       if (raw == null) return previewSnapshot;
       return CloudSystemSnapshot(
         deviceName: raw['deviceName'] as String? ?? previewSnapshot.deviceName,
-        networkName: raw['networkName'] as String? ?? previewSnapshot.networkName,
-        volume: (raw['volume'] as num?)?.toDouble() ?? previewSnapshot.volume,
-        brightness: (raw['brightness'] as num?)?.toDouble() ?? previewSnapshot.brightness,
+        userName: raw['userName'] as String? ?? previewSnapshot.userName,
+        sessionId: (raw['sessionId'] as num?)?.toInt() ?? previewSnapshot.sessionId,
+        batteryAvailable: raw['batteryAvailable'] as bool? ?? previewSnapshot.batteryAvailable,
         batteryPercent: (raw['batteryPercent'] as num?)?.toInt() ?? previewSnapshot.batteryPercent,
+        networkAvailable: raw['networkAvailable'] as bool? ?? previewSnapshot.networkAvailable,
+        networkName: raw['networkName'] as String? ?? previewSnapshot.networkName,
+        volumeAvailable: raw['volumeAvailable'] as bool? ?? previewSnapshot.volumeAvailable,
+        volume: (raw['volume'] as num?)?.toDouble() ?? previewSnapshot.volume,
+        brightnessAvailable: raw['brightnessAvailable'] as bool? ?? previewSnapshot.brightnessAvailable,
+        brightness: (raw['brightness'] as num?)?.toDouble() ?? previewSnapshot.brightness,
         wslAvailable: raw['wslAvailable'] as bool? ?? previewSnapshot.wslAvailable,
         distros: (raw['distros'] as List<Object?>?)?.whereType<String>().toList() ??
             previewSnapshot.distros,
@@ -47,9 +55,9 @@ class CloudOSBridge {
   Future<bool> launchApp(String id) async {
     try {
       final result = await _channel.invokeMethod<bool>('launchApp', <String, Object?>{'id': id});
-      return result ?? true;
+      return result ?? false;
     } on MissingPluginException {
-      return true;
+      return false;
     } on PlatformException {
       return false;
     }
@@ -58,9 +66,9 @@ class CloudOSBridge {
   Future<bool> setVolume(double value) async {
     try {
       final result = await _channel.invokeMethod<bool>('setVolume', <String, Object?>{'value': value});
-      return result ?? true;
+      return result ?? false;
     } on MissingPluginException {
-      return true;
+      return false;
     } on PlatformException {
       return false;
     }
@@ -69,9 +77,9 @@ class CloudOSBridge {
   Future<bool> setBrightness(double value) async {
     try {
       final result = await _channel.invokeMethod<bool>('setBrightness', <String, Object?>{'value': value});
-      return result ?? true;
+      return result ?? false;
     } on MissingPluginException {
-      return true;
+      return false;
     } on PlatformException {
       return false;
     }
@@ -82,9 +90,9 @@ class CloudOSBridge {
       final raw = await _channel.invokeMapMethod<String, Object?>('getBridgeInfo');
       if (raw != null) return raw;
     } on MissingPluginException {
-      // Fallback
+      // Conservative fallback below.
     } on PlatformException {
-      // Fallback
+      // Conservative fallback below.
     }
     return const <String, Object?>{
       'schema': 21,
@@ -135,7 +143,10 @@ class CloudOSBridge {
     if (normalized.contains('browser') || normalized.contains('chrome') || normalized.contains('edge')) {
       return Icons.public_rounded;
     }
-    if (normalized.contains('terminal') || normalized.contains('powershell') || normalized.contains('cmd') || normalized.contains('xterm')) {
+    if (normalized.contains('terminal') ||
+        normalized.contains('powershell') ||
+        normalized.contains('cmd') ||
+        normalized.contains('xterm')) {
       return Icons.terminal_rounded;
     }
     if (normalized.contains('calc')) {
@@ -171,50 +182,55 @@ class CloudOSBridge {
     return Icons.apps_rounded;
   }
 
-  static const previewSnapshot = CloudSystemSnapshot(
-    deviceName: 'CloudOS Desktop',
-    networkName: 'CloudOS Network • Wi-Fi 6',
-    volume: 0.72,
-    brightness: 0.85,
-    batteryPercent: 92,
-    wslAvailable: true,
-    distros: <String>['Ubuntu 24.04 LTS'],
+  static final previewSnapshot = CloudSystemSnapshot(
+    deviceName: Platform.environment['COMPUTERNAME'] ?? 'CloudOS Desktop',
+    userName: Platform.environment['USERNAME'] ?? 'User',
+    networkName: 'Broker offline',
+    volume: 0,
+    brightness: 0,
+    batteryPercent: 100,
+    wslAvailable: false,
+    distros: const <String>[],
+    batteryAvailable: false,
+    networkAvailable: false,
+    volumeAvailable: false,
+    brightnessAvailable: false,
     currentWorkspace: 1,
   );
 
   static const previewApps = <CloudApp>[
     CloudApp(
-      id: 'files',
+      id: 'cloudos:files',
       name: 'Arquivos',
       icon: Icons.folder_rounded,
       platform: CloudAppPlatform.cloudos,
-      subtitle: 'Windows + Linux',
+      subtitle: 'Arquivos locais',
       category: 'Sistema',
       isPinned: true,
       isRecent: true,
     ),
     CloudApp(
-      id: 'browser',
+      id: 'cloudos:browser',
       name: 'Navegador Web',
       icon: Icons.language_rounded,
       platform: CloudAppPlatform.cloudos,
-      subtitle: 'WebView2 Isolado',
+      subtitle: 'Navegador do sistema',
       category: 'Internet',
       isPinned: true,
       isRecent: true,
     ),
     CloudApp(
-      id: 'terminal',
-      name: 'Terminal ConPTY',
+      id: 'cloudos:terminal',
+      name: 'Terminal',
       icon: Icons.terminal_rounded,
       platform: CloudAppPlatform.cloudos,
-      subtitle: 'PowerShell 7 / WSL',
+      subtitle: 'Terminal do sistema',
       category: 'Desenvolvimento',
       isPinned: true,
       isRecent: true,
     ),
     CloudApp(
-      id: 'vscode',
+      id: 'windows:vscode',
       name: 'Visual Studio Code',
       icon: Icons.code_rounded,
       platform: CloudAppPlatform.windows,
@@ -224,18 +240,7 @@ class CloudOSBridge {
       isRecent: true,
     ),
     CloudApp(
-      id: 'ubuntu-terminal',
-      name: 'Ubuntu Terminal',
-      icon: Icons.terminal_rounded,
-      platform: CloudAppPlatform.linux,
-      subtitle: 'Linux WSL2 • Ubuntu',
-      distro: 'Ubuntu',
-      category: 'Linux / WSL',
-      isPinned: true,
-      isRecent: true,
-    ),
-    CloudApp(
-      id: 'settings',
+      id: 'cloudos:settings',
       name: 'Configurações',
       icon: Icons.settings_rounded,
       platform: CloudAppPlatform.cloudos,
@@ -245,27 +250,17 @@ class CloudOSBridge {
       isRecent: false,
     ),
     CloudApp(
-      id: 'sysmon',
-      name: 'Monitor de Recursos',
-      icon: Icons.speed_rounded,
-      platform: CloudAppPlatform.cloudos,
-      subtitle: 'CPU • RAM • Handles',
-      category: 'Sistema',
-      isPinned: true,
-      isRecent: false,
-    ),
-    CloudApp(
-      id: 'notepad',
-      name: 'Editor de Notas',
+      id: 'windows:notepad',
+      name: 'Bloco de Notas',
       icon: Icons.edit_note_rounded,
-      platform: CloudAppPlatform.cloudos,
-      subtitle: 'Editor Rápido',
+      platform: CloudAppPlatform.windows,
+      subtitle: 'Editor de texto',
       category: 'Produtividade',
       isPinned: false,
       isRecent: true,
     ),
     CloudApp(
-      id: 'calc',
+      id: 'cloudos:calculator',
       name: 'Calculadora',
       icon: Icons.calculate_rounded,
       platform: CloudAppPlatform.cloudos,
@@ -274,88 +269,43 @@ class CloudOSBridge {
       isPinned: false,
       isRecent: false,
     ),
-    CloudApp(
-      id: 'gimp',
-      name: 'GIMP Image Editor',
-      icon: Icons.brush_rounded,
-      platform: CloudAppPlatform.linux,
-      subtitle: 'WSLg GUI App',
-      distro: 'Ubuntu',
-      category: 'Criatividade',
-      isPinned: false,
-      isRecent: false,
-    ),
-    CloudApp(
-      id: 'wireshark',
-      name: 'Wireshark',
-      icon: Icons.troubleshoot_rounded,
-      platform: CloudAppPlatform.windows,
-      subtitle: 'Windows Win32',
-      category: 'Segurança',
-      isPinned: false,
-      isRecent: false,
-    ),
   ];
 
-  static const previewFiles = <String, List<CloudFileItem>>{
-    'home': <CloudFileItem>[
-      CloudFileItem(
-        name: 'Documentos',
-        path: 'C:\\Users\\dougl\\Documents',
-        isFolder: true,
-        sizeFormatted: '24 pastas',
-        modifiedFormatted: 'Hoje, 14:20',
-        source: CloudFileSource.windows,
-        icon: Icons.folder_special_rounded,
-      ),
-      CloudFileItem(
-        name: 'Downloads',
-        path: 'C:\\Users\\dougl\\Downloads',
-        isFolder: true,
-        sizeFormatted: '18 itens',
-        modifiedFormatted: 'Hoje, 11:05',
-        source: CloudFileSource.windows,
-        icon: Icons.download_rounded,
-      ),
-      CloudFileItem(
-        name: 'CloudOS Drive',
-        path: 'CloudOS://Drive/Home',
-        isFolder: true,
-        sizeFormatted: '1.2 GB',
-        modifiedFormatted: 'Ontem',
-        source: CloudFileSource.cloudDrive,
-        icon: Icons.cloud_circle_rounded,
-      ),
-      CloudFileItem(
-        name: 'Ubuntu Home',
-        path: '\\\\wsl.localhost\\Ubuntu\\home\\dougl',
-        isFolder: true,
-        sizeFormatted: '12 pastas',
-        modifiedFormatted: 'Ontem',
-        source: CloudFileSource.linux,
-        icon: Icons.terminal_rounded,
-      ),
-    ],
-  };
+  static Map<String, List<CloudFileItem>> get previewFiles {
+    final profile = Platform.environment['USERPROFILE'] ?? r'C:\Users';
+    return <String, List<CloudFileItem>>{
+      'home': <CloudFileItem>[
+        CloudFileItem(
+          name: 'Documentos',
+          path: '$profile\\Documents',
+          isFolder: true,
+          sizeFormatted: 'Pasta',
+          modifiedFormatted: 'Local',
+          source: CloudFileSource.windows,
+          icon: Icons.folder_special_rounded,
+        ),
+        CloudFileItem(
+          name: 'Downloads',
+          path: '$profile\\Downloads',
+          isFolder: true,
+          sizeFormatted: 'Pasta',
+          modifiedFormatted: 'Local',
+          source: CloudFileSource.windows,
+          icon: Icons.download_rounded,
+        ),
+      ],
+    };
+  }
 
   static const previewNotifications = <CloudNotification>[
     CloudNotification(
       id: 'notif-1',
-      title: 'CloudOS V21 Pronto',
-      message: 'System Broker e Event Bus ativos com suporte a Windows e Linux WSL.',
+      title: 'CloudOS V21',
+      message: 'System Broker e interface Flutter inicializados.',
       time: 'agora',
       icon: Icons.cloud_done_rounded,
       source: 'CloudOS Core',
       category: 'Sistema',
-    ),
-    CloudNotification(
-      id: 'notif-2',
-      title: 'Subsistema Linux (WSL2)',
-      message: 'Ubuntu 24.04 LTS ativo. Aplicativos gráficos WSLg disponíveis no Start.',
-      time: '5 min',
-      icon: Icons.terminal_rounded,
-      source: 'WSL2 / Ubuntu',
-      category: 'Linux',
     ),
   ];
 }
