@@ -16,13 +16,13 @@ namespace
 {
 constexpr const char* kChannelName = "cloudos/native/v19";
 constexpr size_t kMaxFlutterRpcPayloadBytes = 1024 * 1024;
+constexpr UINT_PTR kBrokerEventDrainTimerId = 0xC023;
 
 bool IsAllowedFlutterRpcMethod(const std::string& method)
 {
-    // This allowlist deliberately excludes events.subscribe/events.unsubscribe.
-    // The current Flutter bridge is synchronous request/response over one pipe
-    // and does not yet own an event demultiplexer. Exposing subscriptions would
-    // allow an unsolicited event frame to be consumed as the next RPC response.
+    // V23 exposes events only through the typed startBrokerEvents path. Keeping
+    // event subscription methods out of generic Dart RPC prevents arbitrary
+    // subscription expansion if the broker adds sensitive event families later.
     static const std::unordered_set<std::string> allowed = {
         "health.ping",
         "health.status",
@@ -70,6 +70,7 @@ void CloudOSFlutterBridgeV20::RegisterWithMessenger(
             CloudOSFlutterBridgeV20::Instance().HandleMethodCall(call, std::move(result));
         });
 
+    bridge.channel_ = std::move(channel);
     bridge.is_registered_.store(true);
 }
 
@@ -79,12 +80,117 @@ CloudOSFlutterBridgeV20& CloudOSFlutterBridgeV20::Instance()
     return instance;
 }
 
+CloudOSFlutterBridgeV20::~CloudOSFlutterBridgeV20()
+{
+    if (window_handle_)
+    {
+        KillTimer(window_handle_, kBrokerEventDrainTimerId);
+    }
+}
+
 void CloudOSFlutterBridgeV20::Initialize(HWND window_handle)
 {
     window_handle_ = window_handle;
     CloudOSBrokerClientV21::Instance().EnsureConnected();
     RefreshAppCatalog();
     RefreshSystemSnapshot();
+}
+
+bool CloudOSFlutterBridgeV20::StartBrokerEventStream()
+{
+    if (!window_handle_ || !channel_) return false;
+    if (event_stream_active_.load()) return true;
+
+    auto& client = CloudOSBrokerClientV21::Instance();
+    client.SetEventCallback(
+        [this](const std::string& event_name, const std::string& serialized_event) {
+            QueueBrokerEvent(event_name, serialized_event);
+        });
+
+    // The public Flutter event surface is intentionally fixed. Generic Dart RPC
+    // cannot call events.subscribe/unsubscribe, so adding a new family requires
+    // an explicit native review here.
+    const bool subscribed = client.ConfigureEventSubscriptions({
+        "system.*",
+        "files.*",
+        "job.*",
+    });
+    event_stream_active_.store(subscribed);
+    return subscribed;
+}
+
+void CloudOSFlutterBridgeV20::QueueBrokerEvent(
+    const std::string& event_name,
+    const std::string& serialized_event)
+{
+    (void)event_name;
+    if (!event_stream_active_.load() || serialized_event.empty()) return;
+
+    bool schedule = false;
+    {
+        std::lock_guard<std::mutex> lock(event_queue_mutex_);
+        if (broker_event_queue_.size() >= kMaxQueuedBrokerEvents)
+        {
+            broker_event_queue_.pop_front();
+            dropped_broker_events_++;
+        }
+        broker_event_queue_.push_back(serialized_event);
+        if (!event_drain_scheduled_.load())
+        {
+            event_drain_scheduled_.store(true);
+            schedule = true;
+        }
+    }
+
+    if (!schedule) return;
+
+    if (SetTimer(
+            window_handle_,
+            kBrokerEventDrainTimerId,
+            1,
+            &CloudOSFlutterBridgeV20::EventDrainTimerProc) == 0)
+    {
+        std::lock_guard<std::mutex> lock(event_queue_mutex_);
+        dropped_broker_events_ += broker_event_queue_.size();
+        broker_event_queue_.clear();
+        event_drain_scheduled_.store(false);
+    }
+}
+
+VOID CALLBACK CloudOSFlutterBridgeV20::EventDrainTimerProc(
+    HWND hwnd,
+    UINT message,
+    UINT_PTR timer_id,
+    DWORD time)
+{
+    (void)message;
+    (void)time;
+    if (timer_id != kBrokerEventDrainTimerId) return;
+    KillTimer(hwnd, timer_id);
+    CloudOSFlutterBridgeV20::Instance().DrainBrokerEventsOnPlatformThread();
+}
+
+void CloudOSFlutterBridgeV20::DrainBrokerEventsOnPlatformThread()
+{
+    std::deque<std::string> pending;
+    {
+        std::lock_guard<std::mutex> lock(event_queue_mutex_);
+        pending.swap(broker_event_queue_);
+        event_drain_scheduled_.store(false);
+    }
+
+    if (!channel_)
+    {
+        dropped_broker_events_ += pending.size();
+        return;
+    }
+
+    for (auto& serialized_event : pending)
+    {
+        channel_->InvokeMethod(
+            "brokerEvent",
+            std::make_unique<flutter::EncodableValue>(std::move(serialized_event)));
+    }
 }
 
 void CloudOSFlutterBridgeV20::HandleMethodCall(
@@ -186,17 +292,28 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         return;
     }
 
+    if (method == "startBrokerEvents")
+    {
+        result->Success(flutter::EncodableValue(StartBrokerEventStream()));
+        return;
+    }
+
     if (method == "getBridgeInfo")
     {
         flutter::EncodableMap map;
-        map[flutter::EncodableValue("schema")] = flutter::EncodableValue(22);
+        map[flutter::EncodableValue("schema")] = flutter::EncodableValue(23);
         map[flutter::EncodableValue("verdict")] = flutter::EncodableValue("runtime");
         map[flutter::EncodableValue("brokerConnected")] = flutter::EncodableValue(CloudOSBrokerClientV21::Instance().IsConnected());
         map[flutter::EncodableValue("brokerState")] = flutter::EncodableValue(ConnectionStateToString(CloudOSBrokerClientV21::Instance().GetConnectionState()));
         map[flutter::EncodableValue("arbitrary_command_api")] = flutter::EncodableValue(false);
         map[flutter::EncodableValue("generic_broker_rpc_restricted")] = flutter::EncodableValue(true);
-        map[flutter::EncodableValue("event_subscription_exposed")] = flutter::EncodableValue(false);
-        map[flutter::EncodableValue("event_demux_supported")] = flutter::EncodableValue(false);
+        map[flutter::EncodableValue("event_subscription_exposed")] = flutter::EncodableValue(true);
+        map[flutter::EncodableValue("event_demux_supported")] = flutter::EncodableValue(true);
+        map[flutter::EncodableValue("event_stream_active")] = flutter::EncodableValue(event_stream_active_.load());
+        map[flutter::EncodableValue("event_subscription_count")] = flutter::EncodableValue(
+            static_cast<int64_t>(CloudOSBrokerClientV21::Instance().DesiredEventSubscriptionCount()));
+        map[flutter::EncodableValue("dropped_broker_events")] = flutter::EncodableValue(
+            static_cast<int64_t>(dropped_broker_events_.load()));
         map[flutter::EncodableValue("winlogon_modified")] = flutter::EncodableValue(false);
         map[flutter::EncodableValue("shell_activation_executed")] = flutter::EncodableValue(false);
         result->Success(flutter::EncodableValue(std::move(map)));
@@ -233,7 +350,7 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
                 : "{}";
         if (rpc_payload.size() > kMaxFlutterRpcPayloadBytes)
         {
-            result->Error("PAYLOAD_TOO_LARGE", "Broker RPC payload exceeds the V22.1 limit");
+            result->Error("PAYLOAD_TOO_LARGE", "Broker RPC payload exceeds the V23 limit");
             return;
         }
 
