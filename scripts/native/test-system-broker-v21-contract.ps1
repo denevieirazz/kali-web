@@ -14,6 +14,7 @@ $requiredHeaders = @(
     "event_bus_v21.h",
     "job_manager_v21.h",
     "app_service_v21.h",
+    "file_service_v21.h",
     "network_status_v21.h",
     "system_control_v21.h",
     "system_service_v21.h",
@@ -29,6 +30,7 @@ foreach ($h in $requiredHeaders) {
 }
 
 $requiredSources = @(
+    "file_service_v21.cpp",
     "network_status_v21.cpp",
     "system_control_v21.cpp",
     "system_service_v21.cpp",
@@ -76,8 +78,28 @@ if ($serverContent -notmatch "!SystemServiceV21::Instance\(\)\.SetBrightness") {
     throw "BrokerServerV21 must check the SetBrightness result"
 }
 
-# 6. Verify native control/network modules are part of the Broker build graph
+# 6. Verify Files stays typed and allowlisted instead of accepting raw paths
+$fileServiceContent = Get-Content (Join-Path $brokerSrc "file_service_v21.cpp") -Raw
+if ($serverContent -notmatch 'method == "files\.list"') {
+    throw "BrokerServerV21 must expose the typed files.list method"
+}
+if ($serverContent -notmatch "location_not_allowed") {
+    throw "files.list must return a typed error for non-allowlisted locations"
+}
+if ($fileServiceContent -notmatch 'location == "home"' -or
+    $fileServiceContent -notmatch 'location == "documents"' -or
+    $fileServiceContent -notmatch 'location == "windows-c"') {
+    throw "FileServiceV21 allowlist is missing required canonical location ids"
+}
+if ($fileServiceContent -match 'req\.payload.*path' -or $serverContent -match 'files\.list.*path') {
+    throw "files.list must not expose an arbitrary raw-path request contract"
+}
+
+# 7. Verify native modules are part of the Broker build graph
 $brokerProject = Get-Content (Join-Path $root "desktop\CloudOS.SystemBroker\CloudOS.SystemBroker.vcxproj") -Raw
+if ($brokerProject -notmatch "file_service_v21\.cpp") {
+    throw "FileServiceV21 must be compiled by CloudOS.SystemBroker.vcxproj"
+}
 if ($brokerProject -notmatch "system_control_v21\.cpp") {
     throw "SystemControlV21 must be compiled by CloudOS.SystemBroker.vcxproj"
 }
@@ -91,7 +113,7 @@ if ($brokerProject -notmatch "wlanapi\.lib" -or $brokerProject -notmatch "iphlpa
     throw "NetworkStatusV21 native network dependencies are missing from the Broker link graph"
 }
 
-# 7. Verify Documentation Exists
+# 8. Verify Documentation Exists
 $docV21 = Join-Path $root "docs\native\SYSTEM_BROKER_V21.md"
 $docSec = Join-Path $root "docs\native\SYSTEM_BROKER_SECURITY_V21.md"
 if (-not (Test-Path $docV21)) {
