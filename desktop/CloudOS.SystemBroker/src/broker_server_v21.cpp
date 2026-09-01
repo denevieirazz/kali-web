@@ -7,13 +7,26 @@
 #include "system_service_v21.h"
 #include "wsl_service_v21.h"
 
+#include <atomic>
 #include <iostream>
+#include <memory>
 
 namespace CloudOS
 {
 
 namespace
 {
+constexpr size_t kMaxConcurrentClients = 64;
+
+struct ClientSendState final
+{
+    explicit ClientSendState(HANDLE value) : pipe(value) {}
+
+    HANDLE pipe{INVALID_HANDLE_VALUE};
+    std::mutex mutex;
+    std::atomic_bool active{true};
+};
+
 bool WriteExact(HANDLE handle, const void* buffer, DWORD bytes)
 {
     const auto* src = static_cast<const BYTE*>(buffer);
@@ -182,24 +195,46 @@ void BrokerServerV21::ListenerLoop()
 
     while (running_.load())
     {
+        // Reap completed sessions so repeated reconnects do not retain thread
+        // handles and stack resources until broker shutdown.
+        {
+            std::lock_guard<std::mutex> lock(client_threads_mutex_);
+            auto it = client_threads_.begin();
+            while (it != client_threads_.end())
+            {
+                if (it->joinable() && WaitForSingleObject(it->native_handle(), 0) == WAIT_OBJECT_0)
+                {
+                    it->join();
+                    it = client_threads_.erase(it);
+                }
+                else
+                {
+                    ++it;
+                }
+            }
+        }
+
         SECURITY_ATTRIBUTES sa{};
         PSECURITY_DESCRIPTOR sd = nullptr;
-        const bool sa_ok = SecurityV21::CreatePerUserSecurityAttributes(&sa, &sd);
+        if (!SecurityV21::CreatePerUserSecurityAttributes(&sa, &sd))
+        {
+            // Fail closed: never create the broker pipe with a default ACL.
+            std::cerr << "[SystemBroker] Failed to create secure per-user pipe ACL." << std::endl;
+            Sleep(100);
+            continue;
+        }
 
         HANDLE pipe = CreateNamedPipeW(
             pipe_name.c_str(),
             PIPE_ACCESS_DUPLEX,
-            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
             PIPE_UNLIMITED_INSTANCES,
             65536,
             65536,
             0,
-            sa_ok ? &sa : nullptr);
+            &sa);
 
-        if (sa_ok)
-        {
-            SecurityV21::FreeSecurityDescriptor(sd);
-        }
+        SecurityV21::FreeSecurityDescriptor(sd);
 
         if (pipe == INVALID_HANDLE_VALUE)
         {
@@ -217,29 +252,40 @@ void BrokerServerV21::ListenerLoop()
             break;
         }
 
-        if (connected)
-        {
-            const std::string client_id = "client-" + std::to_string(next_client_id_++);
-            std::lock_guard<std::mutex> lock(client_threads_mutex_);
-            client_threads_.emplace_back(&BrokerServerV21::ClientSessionLoop, this, pipe, client_id);
-        }
-        else
+        if (!connected)
         {
             CloseHandle(pipe);
+            continue;
+        }
+
+        const std::string client_id = "client-" + std::to_string(next_client_id_++);
+        {
+            std::lock_guard<std::mutex> lock(client_threads_mutex_);
+            if (client_threads_.size() >= kMaxConcurrentClients)
+            {
+                CloseHandle(pipe);
+                continue;
+            }
+            client_threads_.emplace_back(&BrokerServerV21::ClientSessionLoop, this, pipe, client_id);
         }
     }
 }
 
 void BrokerServerV21::ClientSessionLoop(HANDLE pipe, std::string client_id)
 {
-    std::mutex send_mutex;
+    const auto send_state = std::make_shared<ClientSendState>(pipe);
     EventBusV21::Instance().RegisterClient(
         client_id,
-        [this, pipe, &send_mutex](const BrokerEvent& ev) {
+        [this, send_state](const BrokerEvent& ev) {
+            if (!send_state->active.load()) return;
+
             const std::string serialized = SerializeEvent(ev);
-            std::lock_guard<std::mutex> lock(send_mutex);
-            SendFrame(pipe, serialized);
+            std::lock_guard<std::mutex> lock(send_state->mutex);
+            if (!send_state->active.load()) return;
+            SendFrame(send_state->pipe, serialized);
         });
+
+    bool handshake_complete = false;
 
     while (running_.load())
     {
@@ -252,29 +298,55 @@ void BrokerServerV21::ClientSessionLoop(HANDLE pipe, std::string client_id)
         BrokerRequest req;
         std::string parse_err;
         BrokerResponse res;
+        res.protocol = kProtocolVersion;
+        res.id = "unknown";
+        res.ok = false;
 
         if (!ParseRequest(frame, req, parse_err))
         {
-            res.protocol = kProtocolVersion;
-            res.id = "unknown";
-            res.ok = false;
             res.error_code = "invalid_request";
             res.error_message = parse_err;
+        }
+        else if (!handshake_complete && req.method != "hello")
+        {
+            res.id = req.id;
+            res.error_code = "handshake_required";
+            res.error_message = "The first request on a broker session must be 'hello'";
+        }
+        else if (handshake_complete && req.method == "hello")
+        {
+            res.id = req.id;
+            res.error_code = "duplicate_handshake";
+            res.error_message = "The broker session handshake is already complete";
         }
         else
         {
             res = HandleRequest(client_id, req);
+            if (req.method == "hello" && res.ok)
+            {
+                handshake_complete = true;
+            }
         }
 
         const std::string response = SerializeResponse(res);
-        std::lock_guard<std::mutex> lock(send_mutex);
-        if (!SendFrame(pipe, response))
         {
-            break;
+            std::lock_guard<std::mutex> lock(send_state->mutex);
+            if (!send_state->active.load() || !SendFrame(pipe, response))
+            {
+                break;
+            }
         }
     }
 
+    // Prevent new callbacks from being discovered, then synchronize with any
+    // callback that was already copied by EventBus::Publish before closing the
+    // pipe. The shared state keeps the mutex alive until copied callbacks exit.
     EventBusV21::Instance().UnregisterClient(client_id);
+    {
+        std::lock_guard<std::mutex> lock(send_state->mutex);
+        send_state->active.store(false);
+    }
+
     FlushFileBuffers(pipe);
     DisconnectNamedPipe(pipe);
     CloseHandle(pipe);
@@ -434,11 +506,23 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
     if (method == "events.subscribe")
     {
         const auto it = req.payload.find("pattern");
-        const std::string pattern = (it != req.payload.end() && it->second.IsString())
-            ? it->second.AsString()
-            : "*";
+        if (it == req.payload.end() || !it->second.IsString())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing or invalid event subscription pattern";
+            return res;
+        }
+        const std::string pattern = it->second.AsString();
         const bool ok = EventBusV21::Instance().Subscribe(client_id, pattern);
-        res.payload["subscribed"] = JsonValue(ok);
+        if (!ok)
+        {
+            res.ok = false;
+            res.error_code = "invalid_subscription";
+            res.error_message = "Event subscription pattern was rejected";
+            return res;
+        }
+        res.payload["subscribed"] = JsonValue(true);
         res.payload["pattern"] = JsonValue(pattern);
         return res;
     }
@@ -446,9 +530,14 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
     if (method == "events.unsubscribe")
     {
         const auto it = req.payload.find("pattern");
-        const std::string pattern = (it != req.payload.end() && it->second.IsString())
-            ? it->second.AsString()
-            : "*";
+        if (it == req.payload.end() || !it->second.IsString())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing or invalid event subscription pattern";
+            return res;
+        }
+        const std::string pattern = it->second.AsString();
         const bool ok = EventBusV21::Instance().Unsubscribe(client_id, pattern);
         res.payload["unsubscribed"] = JsonValue(ok);
         res.payload["pattern"] = JsonValue(pattern);
