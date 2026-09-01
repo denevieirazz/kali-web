@@ -5,6 +5,8 @@
 #include "system_service_v21.h"
 #include "wsl_service_v21.h"
 
+#include <algorithm>
+
 namespace CloudOS
 {
 
