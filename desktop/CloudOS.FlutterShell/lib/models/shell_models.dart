@@ -79,14 +79,26 @@ class CloudSystemSnapshot {
     required this.batteryPercent,
     required this.wslAvailable,
     required this.distros,
+    this.userName = 'User',
+    this.sessionId = 1,
+    this.batteryAvailable = false,
+    this.networkAvailable = false,
+    this.volumeAvailable = false,
+    this.brightnessAvailable = false,
     this.currentWorkspace = 1,
   });
 
   final String deviceName;
-  final String networkName;
-  final double volume;
-  final double brightness;
+  final String userName;
+  final int sessionId;
+  final bool batteryAvailable;
   final int batteryPercent;
+  final bool networkAvailable;
+  final String networkName;
+  final bool volumeAvailable;
+  final double volume;
+  final bool brightnessAvailable;
+  final double brightness;
   final bool wslAvailable;
   final List<String> distros;
   final int currentWorkspace;
