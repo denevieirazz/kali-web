@@ -28,7 +28,6 @@ class QuickSettingsPanel extends StatefulWidget {
 class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
   late double volume = widget.snapshot.volume;
   late double brightness = widget.snapshot.brightness;
-  bool wifi = true;
   bool bluetooth = true;
   bool nightLight = false;
   bool focus = false;
@@ -92,11 +91,14 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                   crossAxisSpacing: 8,
                   children: <Widget>[
                     QuickToggleTile(
-                      label: 'Wi‑Fi 6',
-                      subtitle: wifi ? widget.snapshot.networkName : 'Desativado',
-                      icon: Icons.wifi_rounded,
-                      active: wifi,
-                      onTap: () => setState(() => wifi = !wifi),
+                      label: 'Rede',
+                      subtitle: widget.snapshot.networkAvailable
+                          ? widget.snapshot.networkName
+                          : 'Desconectado',
+                      icon: widget.snapshot.networkAvailable
+                          ? Icons.wifi_rounded
+                          : Icons.wifi_off_rounded,
+                      active: widget.snapshot.networkAvailable,
                     ),
                     QuickToggleTile(
                       label: 'Bluetooth',
