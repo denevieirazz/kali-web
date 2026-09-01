@@ -10,18 +10,29 @@ $ErrorActionPreference = 'Stop'
 $rootPath = (Resolve-Path -LiteralPath $Root).Path
 $out = Join-Path $rootPath "desktop\CloudOS.NativeShell\bin\$Configuration"
 if ($BuildDirectory) { $out = (Resolve-Path -LiteralPath $BuildDirectory).Path }
-$exe = Join-Path $out 'CloudOS.exe'
-$dll = Join-Path $out 'CloudOS.NativeRuntime.dll'
-$supervisor = Join-Path $out 'CloudOS.Supervisor.exe'
 $manifestPath = Join-Path $out 'cloudos-native-manifest.json'
 $headStamp = Join-Path $out '.cloudos-build-head'
 $fingerprintStamp = Join-Path $out '.cloudos-build-fingerprint'
 $fingerprintScript = Join-Path $PSScriptRoot 'get-native-build-fingerprint.ps1'
 
-foreach ($required in @($exe, $dll, $supervisor, $fingerprintScript)) {
-    if (-not (Test-Path -LiteralPath $required)) {
-        throw "Cannot write native build manifest; required path missing: $required"
+$runtimeNames = @(
+    'CloudOS.exe',
+    'CloudOS.NativeRuntime.dll',
+    'CloudOS.Supervisor.exe',
+    'CloudOS.SystemBroker.exe',
+    'CloudOS.BrokerProbe.exe'
+)
+foreach ($name in $runtimeNames) {
+    $required = Join-Path $out $name
+    if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+        throw "Cannot write native build manifest; required runtime component missing: $required"
     }
+    if ((Get-Item -LiteralPath $required).Length -le 0) {
+        throw "Cannot write native build manifest; runtime component is empty: $required"
+    }
+}
+if (-not (Test-Path -LiteralPath $fingerprintScript -PathType Leaf)) {
+    throw "Cannot write native build manifest; fingerprint helper missing: $fingerprintScript"
 }
 
 $fingerprint = (& $fingerprintScript -Root $rootPath | Select-Object -Last 1).Trim()
@@ -40,17 +51,13 @@ if (Get-Command git.exe -ErrorAction SilentlyContinue) {
     }
 }
 
-$files = @(
-    [ordered]@{ path = $exe; name = 'CloudOS.exe' },
-    [ordered]@{ path = $dll; name = 'CloudOS.NativeRuntime.dll' },
-    [ordered]@{ path = $supervisor; name = 'CloudOS.Supervisor.exe' }
-)
-$records = foreach ($file in $files) {
-    $item = Get-Item -LiteralPath $file.path
+$records = foreach ($name in $runtimeNames) {
+    $path = Join-Path $out $name
+    $item = Get-Item -LiteralPath $path
     [ordered]@{
-        name = $file.name
+        name = $name
         size = [Int64]$item.Length
-        sha256 = (Get-FileHash -LiteralPath $file.path -Algorithm SHA256).Hash.ToLowerInvariant()
+        sha256 = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
     }
 }
 
@@ -59,6 +66,7 @@ $manifest = [ordered]@{
     product = 'CloudOS Native Shell'
     shell_authority = 'C++/Win32'
     recovery_authority = 'CloudOS.Supervisor.exe V11'
+    broker_authority = 'CloudOS.SystemBroker.exe V21'
     configuration = $Configuration
     platform = 'x64'
     built_utc = [DateTime]::UtcNow.ToString('o')
@@ -80,6 +88,7 @@ elseif (Test-Path -LiteralPath $headStamp) {
 
 Write-Host "[CloudOS] MANIFEST=$manifestPath"
 Write-Host "[CloudOS] SOURCE_FINGERPRINT=$fingerprint"
+Write-Host "[CloudOS] VERIFIED_RUNTIME_COMPONENTS=$($runtimeNames.Count)"
 if ($head) {
     Write-Host "[CloudOS] BUILD_HEAD=$head"
 }
