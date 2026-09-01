@@ -77,6 +77,49 @@ class CloudOSBridge {
     }
   }
 
+  Future<Map<String, bool>> loadShellSurfaceStates() async {
+    try {
+      final raw = await _channel
+          .invokeMapMethod<String, Object?>('getShellSurfaceStates');
+      return <String, bool>{
+        'browser': raw?['browser'] as bool? ?? false,
+        'terminal': raw?['terminal'] as bool? ?? false,
+      };
+    } on MissingPluginException {
+      return const <String, bool>{'browser': false, 'terminal': false};
+    } on PlatformException {
+      return const <String, bool>{'browser': false, 'terminal': false};
+    }
+  }
+
+  Future<bool> focusShellSurface(String id) async {
+    try {
+      final result = await _channel.invokeMethod<bool>(
+        'focusShellSurface',
+        <String, Object?>{'id': id},
+      );
+      return result ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  Future<bool> closeShellSurface(String id) async {
+    try {
+      final result = await _channel.invokeMethod<bool>(
+        'closeShellSurface',
+        <String, Object?>{'id': id},
+      );
+      return result ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
   Future<bool> launchApp(String id) async {
     try {
       final result = await _channel.invokeMethod<bool>(
@@ -137,6 +180,7 @@ class CloudOSBridge {
       'brokerState': 'degraded',
       'channel': 'cloudos/native/v19',
       'arbitrary_command_api': false,
+      'shell_surface_lifecycle': false,
     };
   }
 
