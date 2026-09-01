@@ -39,6 +39,44 @@ bool ReadExact(HANDLE handle, void* buffer, DWORD bytes)
     }
     return true;
 }
+
+HANDLE ConnectPipe(const std::wstring& pipe_name)
+{
+    auto open_pipe = [&]() {
+        return CreateFileW(
+            pipe_name.c_str(),
+            GENERIC_READ | GENERIC_WRITE,
+            0,
+            nullptr,
+            OPEN_EXISTING,
+            0,
+            nullptr);
+    };
+
+    HANDLE pipe = open_pipe();
+    if (pipe != INVALID_HANDLE_VALUE)
+    {
+        return pipe;
+    }
+
+    if (GetLastError() == ERROR_PIPE_BUSY && WaitNamedPipeW(pipe_name.c_str(), 500))
+    {
+        pipe = open_pipe();
+    }
+    return pipe;
+}
+
+void WriteError(const char* code, const char* message)
+{
+    JsonObject error;
+    error["code"] = JsonValue(code);
+    error["message"] = JsonValue(message);
+
+    JsonObject root;
+    root["ok"] = JsonValue(false);
+    root["error"] = JsonValue(std::move(error));
+    std::cerr << SerializeJson(JsonValue(std::move(root))) << std::endl;
+}
 } // namespace
 
 bool SendFrame(HANDLE pipe, const std::string& payload)
@@ -99,18 +137,10 @@ int main(int argc, char* argv[])
     }
 
     const std::wstring pipe_name = CloudOS::SecurityV21::GetCommandPipeName();
-    HANDLE pipe = CreateFileW(
-        pipe_name.c_str(),
-        GENERIC_READ | GENERIC_WRITE,
-        0,
-        nullptr,
-        OPEN_EXISTING,
-        0,
-        nullptr);
-
+    HANDLE pipe = CloudOS::ConnectPipe(pipe_name);
     if (pipe == INVALID_HANDLE_VALUE)
     {
-        std::cerr << "{\"ok\":false,\"error\":{\"code\":\"broker_unavailable\",\"message\":\"Failed to connect to broker named pipe\"}}" << std::endl;
+        CloudOS::WriteError("broker_unavailable", "Failed to connect to broker named pipe");
         return 2;
     }
 
@@ -124,7 +154,7 @@ int main(int argc, char* argv[])
     if (!CloudOS::SendFrame(pipe, CloudOS::SerializeRequest(hello_req)))
     {
         CloseHandle(pipe);
-        std::cerr << "{\"ok\":false,\"error\":{\"code\":\"send_failed\",\"message\":\"Failed to send hello handshake\"}}" << std::endl;
+        CloudOS::WriteError("send_failed", "Failed to send hello handshake");
         return 3;
     }
 
@@ -132,7 +162,7 @@ int main(int argc, char* argv[])
     if (!CloudOS::ReadFrame(pipe, hello_raw))
     {
         CloseHandle(pipe);
-        std::cerr << "{\"ok\":false,\"error\":{\"code\":\"read_failed\",\"message\":\"Failed to read hello response\"}}" << std::endl;
+        CloudOS::WriteError("read_failed", "Failed to read hello response");
         return 3;
     }
 
@@ -144,17 +174,25 @@ int main(int argc, char* argv[])
         hello.protocol != CloudOS::kProtocolVersion)
     {
         CloseHandle(pipe);
-        std::cerr << "{\"ok\":false,\"error\":{\"code\":\"bad_handshake\",\"message\":\"Broker handshake response was invalid\"}}" << std::endl;
+        CloudOS::WriteError("bad_handshake", "Broker handshake response was invalid");
         return 3;
     }
 
     const auto protocol_it = hello.payload.find("protocolVersion");
+    const auto client_it = hello.payload.find("clientId");
+    const auto server_it = hello.payload.find("serverInstanceId");
     if (protocol_it == hello.payload.end() ||
         !protocol_it->second.IsInt() ||
-        protocol_it->second.AsInt() != CloudOS::kProtocolVersion)
+        protocol_it->second.AsInt() != CloudOS::kProtocolVersion ||
+        client_it == hello.payload.end() ||
+        !client_it->second.IsString() ||
+        client_it->second.AsString().empty() ||
+        server_it == hello.payload.end() ||
+        !server_it->second.IsString() ||
+        server_it->second.AsString().empty())
     {
         CloseHandle(pipe);
-        std::cerr << "{\"ok\":false,\"error\":{\"code\":\"protocol_mismatch\",\"message\":\"Broker protocolVersion mismatch\"}}" << std::endl;
+        CloudOS::WriteError("protocol_mismatch", "Broker handshake metadata is incomplete or incompatible");
         return 3;
     }
 
@@ -169,7 +207,7 @@ int main(int argc, char* argv[])
     else
     {
         CloseHandle(pipe);
-        std::cerr << "{\"ok\":false,\"error\":{\"code\":\"unknown_command\",\"message\":\"Unknown BrokerProbe command\"}}" << std::endl;
+        CloudOS::WriteError("unknown_command", "Unknown BrokerProbe command");
         return 5;
     }
 
@@ -181,7 +219,7 @@ int main(int argc, char* argv[])
     if (!CloudOS::SendFrame(pipe, CloudOS::SerializeRequest(req)))
     {
         CloseHandle(pipe);
-        std::cerr << "{\"ok\":false,\"error\":{\"code\":\"send_failed\",\"message\":\"Failed to send request\"}}" << std::endl;
+        CloudOS::WriteError("send_failed", "Failed to send request");
         return 4;
     }
 
@@ -189,16 +227,18 @@ int main(int argc, char* argv[])
     if (!CloudOS::ReadFrame(pipe, response_raw))
     {
         CloseHandle(pipe);
-        std::cerr << "{\"ok\":false,\"error\":{\"code\":\"read_failed\",\"message\":\"Failed to read response\"}}" << std::endl;
+        CloudOS::WriteError("read_failed", "Failed to read response");
         return 4;
     }
 
     CloudOS::BrokerResponse response;
     parse_error.clear();
-    if (!CloudOS::ParseResponse(response_raw, response, parse_error) || response.id != req.id)
+    if (!CloudOS::ParseResponse(response_raw, response, parse_error) ||
+        response.id != req.id ||
+        response.protocol != CloudOS::kProtocolVersion)
     {
         CloseHandle(pipe);
-        std::cerr << "{\"ok\":false,\"error\":{\"code\":\"bad_response\",\"message\":\"Malformed or mismatched broker response\"}}" << std::endl;
+        CloudOS::WriteError("bad_response", "Malformed or mismatched broker response");
         return 4;
     }
 
