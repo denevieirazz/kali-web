@@ -1,5 +1,6 @@
 #include "app_service_v21.h"
 #include "event_bus_v21.h"
+#include "native_shell_activation_client_v21.h"
 #include "wsl_service_v21.h"
 
 #include <Windows.h>
@@ -188,6 +189,23 @@ bool LaunchWsl(const std::string& distro, const std::string& command, std::strin
     EventBusV21::Instance().Publish("wsl.launchRequested", payload);
     return true;
 }
+
+bool ActivateNativeCloudOSApp(
+    ShellActivationV21::App app,
+    const char* surface,
+    std::string& err)
+{
+    if (!NativeShellActivationClientV21::Activate(app, &err))
+    {
+        return false;
+    }
+
+    JsonObject payload;
+    payload["surface"] = JsonValue(surface);
+    payload["authority"] = JsonValue("CloudOS.NativeShell");
+    EventBusV21::Instance().Publish("shell.activationRequested", payload);
+    return true;
+}
 } // namespace
 
 JsonObject AppItem::ToJsonObject() const
@@ -244,8 +262,8 @@ void AppServiceV21::Refresh()
 
     // 1. CloudOS First-Party Applications
     apps_.push_back({"cloudos:files", "Arquivos", "cloudos", "Windows + Linux (WSL2)", "", "Sistema", "CloudOS", true, false, false, "files", true, false});
-    apps_.push_back({"cloudos:browser", "Navegador Web", "cloudos", "Chromium / Web Browser", "", "Produtividade", "CloudOS", true, false, false, "browser", true, true});
-    apps_.push_back({"cloudos:terminal", "Terminal", "cloudos", "Prompt de Comando / Shell", "", "Utilitários", "CloudOS", true, false, false, "terminal", true, true});
+    apps_.push_back({"cloudos:browser", "Navegador Web", "cloudos", "WebView2 nativo do CloudOS", "", "Produtividade", "CloudOS", true, false, false, "browser", true, true});
+    apps_.push_back({"cloudos:terminal", "Terminal", "cloudos", "Terminal nativo / ConPTY", "", "Utilitários", "CloudOS", true, false, false, "terminal", true, true});
     apps_.push_back({"cloudos:calculator", "Calculadora", "cloudos", "Calculadora de Sistema", "", "Utilitários", "CloudOS", true, false, false, "calculator", false, false});
     apps_.push_back({"cloudos:settings", "Configurações", "cloudos", "Painel de Controle e Ajustes", "", "Sistema", "CloudOS", true, false, false, "settings", false, false});
     apps_.push_back({"cloudos:drive", "CloudOS Drive", "cloudos", "Workspace & Projetos", "", "Produtividade", "CloudOS", true, false, false, "drive", false, false});
@@ -289,18 +307,28 @@ void AppServiceV21::Refresh()
 
 bool AppServiceV21::LaunchApp(const std::string& app_id, std::string& err)
 {
+    // CloudOS first-party Browser/Terminal are owned by the NativeShell. The Broker
+    // asks the authoritative shell to activate them instead of dispatching substitute
+    // Windows applications from the broker process.
+    if (app_id == "browser" || app_id == "cloudos:browser")
+    {
+        return ActivateNativeCloudOSApp(
+            ShellActivationV21::App::Browser,
+            "browser",
+            err);
+    }
+    if (app_id == "terminal" || app_id == "cloudos:terminal")
+    {
+        return ActivateNativeCloudOSApp(
+            ShellActivationV21::App::Terminal,
+            "terminal",
+            err);
+    }
+
     // Defensive whitelist resolution: reject arbitrary command injection.
     if (app_id == "files" || app_id == "cloudos:files")
     {
         return LaunchSucceeded(ShellExecuteW(nullptr, L"open", L"explorer.exe", nullptr, nullptr, SW_SHOWNORMAL));
-    }
-    if (app_id == "browser" || app_id == "cloudos:browser")
-    {
-        return LaunchSucceeded(ShellExecuteW(nullptr, L"open", L"https://google.com", nullptr, nullptr, SW_SHOWNORMAL));
-    }
-    if (app_id == "terminal" || app_id == "cloudos:terminal")
-    {
-        return LaunchSucceeded(ShellExecuteW(nullptr, L"open", L"cmd.exe", nullptr, nullptr, SW_SHOWNORMAL));
     }
     if (app_id == "calculator" || app_id == "cloudos:calculator")
     {
