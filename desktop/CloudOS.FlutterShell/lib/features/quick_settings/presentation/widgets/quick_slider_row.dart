@@ -9,6 +9,7 @@ class QuickSliderRow extends StatelessWidget {
     required this.value,
     required this.onChanged,
     this.onChangeEnd,
+    this.enabled = true,
     super.key,
   });
 
@@ -17,12 +18,16 @@ class QuickSliderRow extends StatelessWidget {
   final double value;
   final ValueChanged<double> onChanged;
   final ValueChanged<double>? onChangeEnd;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
+    final contentColor =
+        enabled ? CloudOSColors.secondary : CloudOSColors.secondary.withValues(alpha: 0.45);
+
     return Row(
       children: <Widget>[
-        Icon(icon, size: 18, color: CloudOSColors.secondary),
+        Icon(icon, size: 18, color: contentColor),
         const SizedBox(width: 6),
         Expanded(
           child: SliderTheme(
@@ -33,21 +38,24 @@ class QuickSliderRow extends StatelessWidget {
               activeTrackColor: CloudOSColors.accent,
               inactiveTrackColor: CloudOSColors.borderStrong,
               thumbColor: Colors.white,
+              disabledActiveTrackColor: CloudOSColors.borderStrong,
+              disabledInactiveTrackColor: CloudOSColors.borderStrong,
+              disabledThumbColor: CloudOSColors.secondary,
             ),
             child: Slider(
               value: value.clamp(0.0, 1.0).toDouble(),
-              onChanged: onChanged,
-              onChangeEnd: onChangeEnd,
+              onChanged: enabled ? onChanged : null,
+              onChangeEnd: enabled ? onChangeEnd : null,
             ),
           ),
         ),
         SizedBox(
           width: 36,
           child: Text(
-            percentage,
+            enabled ? percentage : 'N/D',
             textAlign: TextAlign.right,
-            style: const TextStyle(
-              color: CloudOSColors.secondary,
+            style: TextStyle(
+              color: contentColor,
               fontSize: 11,
               fontWeight: FontWeight.w600,
             ),
