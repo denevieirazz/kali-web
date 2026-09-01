@@ -90,6 +90,33 @@ void main() {
               'distros': <String>['Ubuntu', 'kali-linux'],
               'currentWorkspace': 2,
             };
+          case 'getNotificationState':
+            return <String, Object?>{
+              'revision': 7,
+              'unreadCount': 2,
+              'items': <Map<String, Object?>>[
+                <String, Object?>{
+                  'id': '101',
+                  'title': 'CloudOS V21 Pronto',
+                  'message': 'System Broker e NativeShell ativos.',
+                  'time': '09:31',
+                  'severity': 0,
+                  'read': false,
+                },
+                <String, Object?>{
+                  'id': '100',
+                  'title': 'Subsistema Linux (WSL2)',
+                  'message': 'WSL permanece sob demanda.',
+                  'time': '09:30',
+                  'severity': 0,
+                  'read': false,
+                },
+              ],
+            };
+          case 'markNotificationsRead':
+          case 'dismissNotification':
+          case 'clearNotifications':
+            return true;
           case 'launchApp':
             return true;
           case 'setVolume':
@@ -105,6 +132,7 @@ void main() {
               'brokerState': 'connected',
               'channel': 'cloudos/native/v19',
               'arbitrary_command_api': false,
+              'shell_notification_authority': true,
             };
           default:
             return null;
@@ -191,6 +219,7 @@ void main() {
       expect(info['brokerConnected'], true);
       expect(info['brokerState'], 'connected');
       expect(info['arbitrary_command_api'], false);
+      expect(info['shell_notification_authority'], true);
     });
 
     test('preview fallback handles missing plugin without throwing', () async {
