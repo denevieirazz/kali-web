@@ -35,17 +35,17 @@ class CloudOSBridge {
         userName: raw['userName'] as String? ?? previewSnapshot.userName,
         sessionId: (raw['sessionId'] as num?)?.toInt() ?? previewSnapshot.sessionId,
         batteryAvailable: raw['batteryAvailable'] as bool? ?? previewSnapshot.batteryAvailable,
-        batteryPercent: ((raw['batteryPercent'] as num?)?.toInt() ?? previewSnapshot.batteryPercent).clamp(0, 100),
+        batteryPercent: ((raw['batteryPercent'] as num?)?.toInt() ?? previewSnapshot.batteryPercent).clamp(0, 100).toInt(),
         networkAvailable: raw['networkAvailable'] as bool? ?? previewSnapshot.networkAvailable,
         networkName: raw['networkName'] as String? ?? previewSnapshot.networkName,
         volumeAvailable: raw['volumeAvailable'] as bool? ?? previewSnapshot.volumeAvailable,
-        volume: ((raw['volume'] as num?)?.toDouble() ?? previewSnapshot.volume).clamp(0.0, 1.0),
+        volume: ((raw['volume'] as num?)?.toDouble() ?? previewSnapshot.volume).clamp(0.0, 1.0).toDouble(),
         brightnessAvailable: raw['brightnessAvailable'] as bool? ?? previewSnapshot.brightnessAvailable,
-        brightness: ((raw['brightness'] as num?)?.toDouble() ?? previewSnapshot.brightness).clamp(0.0, 1.0),
+        brightness: ((raw['brightness'] as num?)?.toDouble() ?? previewSnapshot.brightness).clamp(0.0, 1.0).toDouble(),
         wslAvailable: raw['wslAvailable'] as bool? ?? previewSnapshot.wslAvailable,
         distros: (raw['distros'] as List<Object?>?)?.whereType<String>().where((value) => value.trim().isNotEmpty).toList() ??
             previewSnapshot.distros,
-        currentWorkspace: ((raw['currentWorkspace'] as num?)?.toInt() ?? previewSnapshot.currentWorkspace).clamp(1, 4),
+        currentWorkspace: ((raw['currentWorkspace'] as num?)?.toInt() ?? previewSnapshot.currentWorkspace).clamp(1, 4).toInt(),
       );
     } on MissingPluginException {
       return previewSnapshot;
@@ -72,7 +72,7 @@ class CloudOSBridge {
     try {
       final result = await _channel.invokeMethod<bool>(
         'setVolume',
-        <String, Object?>{'value': value.clamp(0.0, 1.0)},
+        <String, Object?>{'value': value.clamp(0.0, 1.0).toDouble()},
       );
       return result ?? false;
     } on MissingPluginException {
@@ -86,7 +86,7 @@ class CloudOSBridge {
     try {
       final result = await _channel.invokeMethod<bool>(
         'setBrightness',
-        <String, Object?>{'value': value.clamp(0.0, 1.0)},
+        <String, Object?>{'value': value.clamp(0.0, 1.0).toDouble()},
       );
       return result ?? false;
     } on MissingPluginException {
