@@ -172,7 +172,7 @@ bool CloudOSBrokerClientV21::EnsureConnected()
 
     SpawnBrokerIfNeeded();
 
-    for (int attempt = 0; attempt < 15; ++attempt)
+    for (int attempt = 0; attempt < 20; ++attempt)
     {
         Sleep(100);
         if (TryConnectPipe() && PerformHandshake())
@@ -214,14 +214,27 @@ bool CloudOSBrokerClientV21::TryConnectPipe()
     }
 
     const std::wstring pipe_name = GetCommandPipeName();
-    pipe_ = CreateFileW(
-        pipe_name.c_str(),
-        GENERIC_READ | GENERIC_WRITE,
-        0,
-        nullptr,
-        OPEN_EXISTING,
-        0,
-        nullptr);
+    auto open_pipe = [&]() {
+        return CreateFileW(
+            pipe_name.c_str(),
+            GENERIC_READ | GENERIC_WRITE,
+            0,
+            nullptr,
+            OPEN_EXISTING,
+            0,
+            nullptr);
+    };
+
+    pipe_ = open_pipe();
+    if (pipe_ != INVALID_HANDLE_VALUE)
+    {
+        return true;
+    }
+
+    if (GetLastError() == ERROR_PIPE_BUSY && WaitNamedPipeW(pipe_name.c_str(), 250))
+    {
+        pipe_ = open_pipe();
+    }
 
     return pipe_ != INVALID_HANDLE_VALUE;
 }
@@ -239,7 +252,8 @@ void CloudOSBrokerClientV21::SpawnBrokerIfNeeded()
     PathRemoveFileSpecW(dir);
 
     const std::wstring candidate1 = std::wstring(dir) + L"\\CloudOS.SystemBroker.exe";
-    const std::wstring candidate2 = std::wstring(dir) + L"\\..\\..\\..\\..\\..\\..\\CloudOS.NativeShell\\bin\\Release\\CloudOS.SystemBroker.exe";
+    // Release -> runner -> x64 -> windows -> build -> CloudOS.FlutterShell -> desktop.
+    const std::wstring candidate2 = std::wstring(dir) + L"\\..\\..\\..\\..\\..\\CloudOS.NativeShell\\bin\\Release\\CloudOS.SystemBroker.exe";
     const std::wstring candidate3 = L"C:\\CloudOS\\desktop\\CloudOS.NativeShell\\bin\\Release\\CloudOS.SystemBroker.exe";
 
     std::wstring target;
@@ -349,6 +363,7 @@ bool CloudOSBrokerClientV21::SendRequestLocked(
             if (candidate.protocol != kProtocolVersion)
             {
                 err = "Broker returned incompatible protocol version";
+                state_.store(BrokerConnectionState::Degraded);
                 return false;
             }
             if (candidate.id != req.id)
@@ -379,6 +394,7 @@ bool CloudOSBrokerClientV21::SendRequestLocked(
     }
 
     err = "Broker response was not received after event frames";
+    state_.store(BrokerConnectionState::Degraded);
     return false;
 }
 
@@ -411,6 +427,10 @@ bool CloudOSBrokerClientV21::PerformHandshake()
         }
     }
 
+    if (client_id_.empty() || server_instance_id_.empty())
+    {
+        return false;
+    }
     return IntField(response.payload, "protocolVersion", 0) == kProtocolVersion;
 }
 
@@ -463,7 +483,7 @@ bool CloudOSBrokerClientV21::GetApps(std::vector<BrokerClientAppItem>& out_apps)
         item.pinned = BoolField(obj, "pinned", false);
         item.recent = BoolField(obj, "recent", false);
 
-        if (!item.id.empty())
+        if (!item.id.empty() && item.can_launch)
         {
             parsed.push_back(std::move(item));
         }
@@ -526,20 +546,34 @@ bool CloudOSBrokerClientV21::GetSystemSnapshot(BrokerClientSnapshot& out_snapsho
     BrokerClientSnapshot snapshot;
     snapshot.device_name = StringField(response.payload, "deviceName", "CloudOS Desktop");
     snapshot.user_name = StringField(response.payload, "userName", "User");
-    snapshot.session_id = static_cast<uint32_t>(std::max<int64_t>(0, IntField(response.payload, "sessionId", 1)));
+    snapshot.session_id = static_cast<uint32_t>(
+        std::max<int64_t>(0, IntField(response.payload, "sessionId", 1)));
     snapshot.battery_available = BoolField(response.payload, "batteryAvailable", false);
-    snapshot.battery_percent = static_cast<int>(std::clamp<int64_t>(IntField(response.payload, "batteryPercent", 100), 0, 100));
+    snapshot.battery_percent = static_cast<int>(
+        std::clamp<int64_t>(IntField(response.payload, "batteryPercent", 100), 0, 100));
     snapshot.network_available = BoolField(response.payload, "networkAvailable", false);
-    snapshot.network_name = StringField(response.payload, "networkName", snapshot.network_available ? "Connected" : "Offline");
+    snapshot.network_name = StringField(
+        response.payload,
+        "networkName",
+        snapshot.network_available ? "Connected" : "Offline");
     snapshot.volume_available = BoolField(response.payload, "volumeAvailable", false);
-    snapshot.volume = std::clamp(DoubleField(response.payload, "volume", 0.0), 0.0, 1.0);
+    snapshot.volume = std::clamp(
+        DoubleField(response.payload, "volume", 0.0),
+        0.0,
+        1.0);
     snapshot.brightness_available = BoolField(response.payload, "brightnessAvailable", false);
-    snapshot.brightness = std::clamp(DoubleField(response.payload, "brightness", 0.0), 0.0, 1.0);
+    snapshot.brightness = std::clamp(
+        DoubleField(response.payload, "brightness", 0.0),
+        0.0,
+        1.0);
     snapshot.wsl_available = BoolField(response.payload, "wslAvailable", false);
-    snapshot.current_workspace = static_cast<int>(std::max<int64_t>(1, IntField(response.payload, "currentWorkspace", 1)));
-    snapshot.timestamp_ms = static_cast<uint64_t>(std::max<int64_t>(0, IntField(response.payload, "timestamp", 0)));
+    snapshot.current_workspace = static_cast<int>(
+        std::clamp<int64_t>(IntField(response.payload, "currentWorkspace", 1), 1, 4));
+    snapshot.timestamp_ms = static_cast<uint64_t>(
+        std::max<int64_t>(0, IntField(response.payload, "timestamp", 0)));
 
-    if (const JsonValue* distros = FindField(response.payload, "distros"); distros && distros->IsArray())
+    if (const JsonValue* distros = FindField(response.payload, "distros");
+        distros && distros->IsArray())
     {
         for (const auto& value : distros->AsArray())
         {
@@ -625,7 +659,7 @@ bool CloudOSBrokerClientV21::GetCapabilities(std::vector<std::string>& out_caps)
         capabilities_.clear();
         for (const auto& value : caps->AsArray())
         {
-            if (value.IsString())
+            if (value.IsString() && !value.AsString().empty())
             {
                 capabilities_.push_back(value.AsString());
             }
