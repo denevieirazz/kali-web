@@ -36,7 +36,9 @@ struct NativeSystemSnapshot final
 {
     std::string device_name;
     std::string network_name;
+    bool volume_available{true};
     double volume{0.72};
+    bool brightness_available{true};
     double brightness{0.85};
     int battery_percent{100};
     bool wsl_available{false};
