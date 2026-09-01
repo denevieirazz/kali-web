@@ -394,6 +394,8 @@ bool SystemServiceV21::SetBrightness(double value)
 
 std::vector<std::string> SystemServiceV21::GetCapabilities()
 {
+    // Only advertise methods that the broker actually implements. Job
+    // submission stays private until a typed public submit contract exists.
     std::vector<std::string> caps = {
         "broker.protocol.v21",
         "health.ping",
@@ -404,7 +406,6 @@ std::vector<std::string> SystemServiceV21::GetCapabilities()
         "wsl.list",
         "events.subscribe",
         "events.unsubscribe",
-        "jobs.submit",
         "jobs.status",
         "jobs.cancel",
         "diagnostics.snapshot",
