@@ -13,6 +13,7 @@
 #include <chrono>
 #include <iostream>
 #include <limits>
+#include <string_view>
 
 namespace CloudOS
 {
@@ -20,6 +21,32 @@ namespace CloudOS
 namespace
 {
 std::atomic_bool g_shutdown_requested{false};
+
+std::string Utf16ToUtf8Strict(std::wstring_view value)
+{
+    if (value.empty()) return {};
+    const int required = WideCharToMultiByte(
+        CP_UTF8,
+        WC_ERR_INVALID_CHARS,
+        value.data(),
+        static_cast<int>(value.size()),
+        nullptr,
+        0,
+        nullptr,
+        nullptr);
+    if (required <= 0) return {};
+    std::string result(static_cast<size_t>(required), '\0');
+    const int written = WideCharToMultiByte(
+        CP_UTF8,
+        WC_ERR_INVALID_CHARS,
+        value.data(),
+        static_cast<int>(value.size()),
+        result.data(),
+        required,
+        nullptr,
+        nullptr);
+    return written == required ? result : std::string{};
+}
 
 BOOL WINAPI ConsoleCtrlHandler(DWORD ctrl_type)
 {
@@ -40,7 +67,7 @@ BOOL WINAPI ConsoleCtrlHandler(DWORD ctrl_type)
 
 int RunSelfTest()
 {
-    std::cout << "[SystemBroker] Running V21 Self-Test Suite..." << std::endl;
+    std::cout << "[SystemBroker] Running V22.1 Self-Test Suite..." << std::endl;
     int assertions = 0;
 
     auto Assert = [&assertions](bool cond, const std::string& name) {
@@ -52,7 +79,7 @@ int RunSelfTest()
         assertions++;
     };
 
-    // 1. Test Protocol Serialization & Parsing
+    // 1. Test Protocol Serialization, Parsing, and malformed-input rejection.
     {
         BrokerRequest req;
         req.protocol = kProtocolVersion;
@@ -69,12 +96,26 @@ int RunSelfTest()
         Assert(parsed_req.method == "apps.list", "ParseRequest method");
         Assert(parsed_req.payload["limit"].AsInt() == 10, "ParseRequest payload int");
 
-        // Oversized rejection
         std::string huge_str(kMaxPayloadBytes + 10, 'A');
         JsonValue val;
         Assert(!ParseJson(huge_str, val), "Reject oversized JSON string");
+        Assert(!ParseRequest(
+            R"({"protocol":21,"type":"request","id":"bad","method":"apps.list","payload":[]})",
+            parsed_req,
+            err),
+            "Reject non-object request payload");
+        Assert(!ParseJson(R"({"bad":"\q"})", val), "Reject invalid JSON escape");
+        Assert(!ParseJson(R"({"n":9223372036854775808})", val), "Reject overflowing JSON integer");
 
-        // Response
+        std::string deep_json;
+        for (int i = 0; i < 70; ++i) deep_json.push_back('[');
+        deep_json += "0";
+        for (int i = 0; i < 70; ++i) deep_json.push_back(']');
+        Assert(!ParseJson(deep_json, val), "Reject excessive JSON nesting");
+
+        Assert(ParseJson(R"({"text":"\u00e3\u6f22\u5b57"})", val), "Parse escaped Unicode JSON");
+        Assert(val.AsObject().at("text").AsString() == "ã漢字", "Decode escaped Unicode as UTF-8");
+
         BrokerResponse res;
         res.protocol = kProtocolVersion;
         res.id = "res-test-1";
@@ -133,7 +174,7 @@ int RunSelfTest()
     {
         JobManagerV21::Instance().Initialize(1);
         std::string job_id = JobManagerV21::Instance().SubmitJob("test.job", [](std::atomic_bool&, std::function<void(double)> progress_cb, std::string&) {
-            progress_cb(0.5);
+            progress_cb(50.0);
             return true;
         });
 
@@ -151,7 +192,6 @@ int RunSelfTest()
         Assert(AppServiceV21::Instance().GetGeneration() >= 1, "App generation >= 1");
 
         std::string err;
-        // Verify invalid arbitrary string is rejected
         Assert(!AppServiceV21::Instance().LaunchApp("calc.exe && malicious_command", err), "Arbitrary command injection rejected");
         Assert(!AppServiceV21::Instance().LaunchApp("powershell.exe -enc AAAAA", err), "Arbitrary PowerShell rejected");
         Assert(!err.empty(), "Error message populated on invalid app ID");
@@ -179,14 +219,11 @@ int RunSelfTest()
         Assert(caps.size() >= 10, "Capabilities list populated");
     }
 
-    // 7. Test WSL Service
+    // 7. Test WSL Service. WSL can be installed with zero configured distros.
     {
-        bool wsl = WslServiceV21::Instance().IsWslAvailable();
+        const bool wsl = WslServiceV21::Instance().IsWslAvailable();
         const auto distros = WslServiceV21::Instance().GetDistributions();
-        if (wsl)
-        {
-            Assert(!distros.empty(), "WSL distros list populated if WSL is available");
-        }
+        Assert(wsl || distros.empty(), "No distributions reported when WSL is unavailable");
     }
 
     // 8. Test Diagnostics Snapshot
@@ -199,7 +236,6 @@ int RunSelfTest()
 
     // 9. Test FileService V22
     {
-        // 9.1 Known Folders & Drives
         JsonObject kf = FileServiceV22::Instance().GetKnownFolders();
         Assert(kf["folders"].IsArray(), "Known folders returns array");
         Assert(!kf["folders"].AsArray().empty(), "Known folders is not empty");
@@ -208,58 +244,48 @@ int RunSelfTest()
         Assert(drv["drives"].IsArray(), "Drives returns array");
         Assert(!drv["drives"].AsArray().empty(), "Drives is not empty");
 
-        // 9.2 Isolated Temp Directory Operations
         wchar_t temp_path[MAX_PATH] = {0};
-        GetTempPathW(MAX_PATH, temp_path);
-        std::wstring test_dir = std::wstring(temp_path) + L"cloudos_v22_selftest_" + std::to_wstring(GetCurrentProcessId());
-        CreateDirectoryW(test_dir.c_str(), nullptr);
+        Assert(GetTempPathW(MAX_PATH, temp_path) > 0, "Resolve Windows temporary directory");
+        std::wstring test_dir = std::wstring(temp_path) + L"cloudos_v22_selftest_" +
+            std::to_wstring(GetCurrentProcessId()) + L"_" + std::to_wstring(GetTickCount64());
+        Assert(CreateDirectoryW(test_dir.c_str(), nullptr) != FALSE, "Create isolated V22 self-test directory");
 
-        std::string test_dir_utf8;
-        int sz = WideCharToMultiByte(CP_UTF8, 0, test_dir.c_str(), -1, nullptr, 0, nullptr, nullptr);
-        test_dir_utf8.resize(sz - 1);
-        WideCharToMultiByte(CP_UTF8, 0, test_dir.c_str(), -1, test_dir_utf8.data(), sz, nullptr, nullptr);
+        const std::string test_dir_utf8 = Utf16ToUtf8Strict(test_dir);
+        Assert(!test_dir_utf8.empty(), "Convert self-test directory to UTF-8 without overflow");
 
-        // Create folder
         JsonObject create_res = FileServiceV22::Instance().CreateFolder(test_dir_utf8, "Pasta_Teste_ãéíóú_漢字");
-        Assert(create_res["ok"].AsBool() == true, "Create folder with Unicode");
+        Assert(create_res["ok"].AsBool(), "Create folder with Unicode");
 
-        // List directory
         JsonObject list_res = FileServiceV22::Instance().ListDirectory(test_dir_utf8);
         Assert(list_res["items"].IsArray(), "List items is array");
         Assert(list_res["items"].AsArray().size() == 1, "List items has 1 entry");
 
-        // Create a test file
         std::wstring test_file = test_dir + L"\\teste_arquivo.txt";
         HANDLE hFile = CreateFileW(test_file.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (hFile != INVALID_HANDLE_VALUE)
-        {
-            const char* data = "CloudOS V22 Unified Files Self Test";
-            DWORD written = 0;
-            WriteFile(hFile, data, static_cast<DWORD>(strlen(data)), &written, nullptr);
-            CloseHandle(hFile);
-        }
+        Assert(hFile != INVALID_HANDLE_VALUE, "Create isolated self-test file");
+        const char* data = "CloudOS V22 Unified Files Self Test";
+        DWORD written = 0;
+        Assert(WriteFile(hFile, data, static_cast<DWORD>(strlen(data)), &written, nullptr) != FALSE &&
+            written == static_cast<DWORD>(strlen(data)), "Write isolated self-test file");
+        CloseHandle(hFile);
 
-        std::string test_file_utf8 = test_dir_utf8 + "\\teste_arquivo.txt";
+        const std::string test_file_utf8 = test_dir_utf8 + "\\teste_arquivo.txt";
         JsonObject meta_res = FileServiceV22::Instance().GetMetadata(test_file_utf8);
         Assert(meta_res["name"].AsString() == "teste_arquivo.txt", "GetMetadata file name");
-        Assert(meta_res["isDirectory"].AsBool() == false, "GetMetadata isDirectory false");
+        Assert(!meta_res["isDirectory"].AsBool(), "GetMetadata isDirectory false");
         Assert(meta_res["size"].AsDouble() > 0, "GetMetadata file size > 0");
 
-        // Open With list
         JsonObject ow_res = FileServiceV22::Instance().GetOpenWithList(test_file_utf8);
         Assert(ow_res["apps"].IsArray(), "Open with returns apps array");
 
-        // Rename file
         JsonObject ren_res = FileServiceV22::Instance().RenameItem(test_file_utf8, "teste_arquivo_renomeado.txt");
-        Assert(ren_res["ok"].AsBool() == true, "Rename item");
+        Assert(ren_res["ok"].AsBool(), "Rename item");
 
-        // Delete test files
-        std::string renamed_file_utf8 = test_dir_utf8 + "\\teste_arquivo_renomeado.txt";
-        std::string subfolder_utf8 = test_dir_utf8 + "\\Pasta_Teste_ãéíóú_漢字";
+        const std::string renamed_file_utf8 = test_dir_utf8 + "\\teste_arquivo_renomeado.txt";
+        const std::string subfolder_utf8 = test_dir_utf8 + "\\Pasta_Teste_ãéíóú_漢字";
         JsonObject del_res = FileServiceV22::Instance().DeleteItems({renamed_file_utf8, subfolder_utf8}, true);
-        Assert(del_res["ok"].AsBool() == true, "Delete items permanent");
-
-        RemoveDirectoryW(test_dir.c_str());
+        Assert(del_res["ok"].AsBool(), "Delete items permanent");
+        Assert(RemoveDirectoryW(test_dir.c_str()) != FALSE, "Remove isolated V22 self-test directory");
     }
 
     // 10. Broker shutdown must interrupt an idle connected client instead of
@@ -285,7 +311,7 @@ int RunSelfTest()
         if (idle_client != INVALID_HANDLE_VALUE) CloseHandle(idle_client);
     }
 
-    std::cout << "[PASS] CloudOS System Broker V22 Self-Test Passed (" << assertions << " assertions verified)." << std::endl;
+    std::cout << "[PASS] CloudOS System Broker V22.1 Self-Test Passed (" << assertions << " assertions verified)." << std::endl;
     return 0;
 }
 
@@ -310,7 +336,7 @@ int main(int argc, char* argv[])
         }
         if (arg == "--help" || arg == "-h")
         {
-            std::cout << "CloudOS System Broker V21\n"
+            std::cout << "CloudOS System Broker V22.1\n"
                       << "Usage: CloudOS.SystemBroker.exe [OPTIONS]\n"
                       << "Options:\n"
                       << "  --self-test    Run in-process self-test verification suite\n"
@@ -320,7 +346,7 @@ int main(int argc, char* argv[])
         }
     }
 
-    std::cout << "[SystemBroker] Starting CloudOS System Broker V21 (Protocol " << CloudOS::kProtocolVersion << ")..." << std::endl;
+    std::cout << "[SystemBroker] Starting CloudOS System Broker V22.1 (Protocol " << CloudOS::kProtocolVersion << ")..." << std::endl;
 
     if (!CloudOS::BrokerServerV21::Instance().Start())
     {
@@ -330,7 +356,6 @@ int main(int argc, char* argv[])
 
     std::cout << "[SystemBroker] Broker ready and listening on user named pipe." << std::endl;
 
-    // Run until shutdown signal
     while (!CloudOS::g_shutdown_requested.load())
     {
         Sleep(500);
