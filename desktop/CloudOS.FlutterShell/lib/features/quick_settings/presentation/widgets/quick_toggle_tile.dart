@@ -8,7 +8,7 @@ class QuickToggleTile extends StatelessWidget {
     required this.subtitle,
     required this.icon,
     required this.active,
-    required this.onTap,
+    this.onTap,
     super.key,
   });
 
@@ -16,7 +16,7 @@ class QuickToggleTile extends StatelessWidget {
   final String subtitle;
   final IconData icon;
   final bool active;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
