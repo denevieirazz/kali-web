@@ -55,6 +55,27 @@ void main() {
                 'recent': false,
               },
             ];
+          case 'getFiles':
+            return <Map<String, Object?>>[
+              <String, Object?>{
+                'name': 'Projetos',
+                'path': r'C:\Users\tester\Documents\Projetos',
+                'isFolder': true,
+                'sizeFormatted': 'Pasta',
+                'modifiedFormatted': '2026-09-01 08:20',
+                'source': 'windows',
+                'extension': '',
+              },
+              <String, Object?>{
+                'name': 'relatorio.txt',
+                'path': r'C:\Users\tester\Documents\relatorio.txt',
+                'isFolder': false,
+                'sizeFormatted': '2.4 KB',
+                'modifiedFormatted': '2026-09-01 08:21',
+                'source': 'windows',
+                'extension': 'txt',
+              },
+            ];
           case 'getSystemSnapshot':
             return <String, Object?>{
               'deviceName': 'TEST-DEVICE-V21',
@@ -108,6 +129,20 @@ void main() {
       expect(apps[1].distro, 'Ubuntu');
       expect(apps[2].id, 'cloudos:files');
       expect(apps[2].platform, CloudAppPlatform.cloudos);
+    });
+
+    test('loadFiles forwards allowlisted location and parses native files', () async {
+      const bridge = CloudOSBridge(channel: channel);
+      final files = await bridge.loadFiles('documents');
+
+      expect(files, hasLength(2));
+      expect(files[0].name, 'Projetos');
+      expect(files[0].isFolder, true);
+      expect(files[0].source, CloudFileSource.windows);
+      expect(files[1].name, 'relatorio.txt');
+      expect(files[1].extension, 'txt');
+      expect(log.last.method, 'getFiles');
+      expect(log.last.arguments, <String, Object?>{'location': 'documents'});
     });
 
     test('loadSystemSnapshot parses native snapshot fields correctly', () async {
@@ -166,6 +201,9 @@ void main() {
       expect(apps.isNotEmpty, true);
       expect(apps, CloudOSBridge.previewApps);
 
+      final files = await bridge.loadFiles('home');
+      expect(files, CloudOSBridge.previewFiles['home']);
+
       final snapshot = await bridge.loadSystemSnapshot();
       expect(snapshot.deviceName, CloudOSBridge.previewSnapshot.deviceName);
 
@@ -190,7 +228,6 @@ void main() {
       expect(find.text('CloudOS Drive'), findsWidgets);
       expect(find.text('Ubuntu WSL'), findsWidgets);
 
-      // Open Start Panel
       await tester.tap(find.byTooltip('Iniciar (Ctrl+Alt+A)'));
       await tester.pumpAndSettle();
 
@@ -199,31 +236,26 @@ void main() {
       expect(find.text('Visual Studio Code'), findsOneWidget);
       expect(find.text('Ubuntu Terminal'), findsOneWidget);
 
-      // Test Search
       await tester.enterText(find.byType(TextField).first, 'Code');
       await tester.pumpAndSettle();
       expect(find.text('Visual Studio Code'), findsOneWidget);
 
-      // Close Start
       await tester.tap(find.byTooltip('Iniciar (Ctrl+Alt+A)'));
       await tester.pumpAndSettle();
       expect(find.text('CloudOS Start'), findsNothing);
 
-      // Open Quick Settings
       await tester.tap(find.byTooltip('Configurações Rápidas (Ctrl+Alt+Q)'));
       await tester.pumpAndSettle();
       expect(find.text('Configurações Rápidas'), findsOneWidget);
       expect(find.text('Rede'), findsOneWidget);
-      expect(find.text('Wi-Fi 6 Real Native'), findsOneWidget);
+      expect(find.text(CloudOSBridge.previewSnapshot.networkName), findsOneWidget);
       expect(find.text('Luz Noturna'), findsOneWidget);
 
-      // Open Notifications
       await tester.tap(find.byTooltip('Notificações'));
       await tester.pumpAndSettle();
       expect(find.text('Centro de Notificações'), findsOneWidget);
       expect(find.text('Limpar Tudo'), findsOneWidget);
 
-      // Clear all notifications
       await tester.tap(find.text('Limpar Tudo'));
       await tester.pumpAndSettle();
       expect(find.text('Sem novas notificações'), findsOneWidget);
