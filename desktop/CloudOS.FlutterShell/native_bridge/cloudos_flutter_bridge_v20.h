@@ -65,8 +65,8 @@ public:
     std::vector<NativeAppItem> GetApps();
     NativeSystemSnapshot GetSystemSnapshot();
     bool LaunchApp(const std::string& app_id);
-    void SetVolume(double volume);
-    void SetBrightness(double brightness);
+    bool SetVolume(double volume);
+    bool SetBrightness(double brightness);
 
     [[nodiscard]] bool IsRegistered() const noexcept { return is_registered_.load(); }
 
