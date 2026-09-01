@@ -14,6 +14,7 @@ $requiredHeaders = @(
     "event_bus_v21.h",
     "job_manager_v21.h",
     "app_service_v21.h",
+    "network_status_v21.h",
     "system_control_v21.h",
     "system_service_v21.h",
     "wsl_service_v21.h",
@@ -28,6 +29,7 @@ foreach ($h in $requiredHeaders) {
 }
 
 $requiredSources = @(
+    "network_status_v21.cpp",
     "system_control_v21.cpp",
     "system_service_v21.cpp",
     "broker_server_v21.cpp"
@@ -74,13 +76,19 @@ if ($serverContent -notmatch "!SystemServiceV21::Instance\(\)\.SetBrightness") {
     throw "BrokerServerV21 must check the SetBrightness result"
 }
 
-# 6. Verify the native control module is part of the Broker build graph
+# 6. Verify native control/network modules are part of the Broker build graph
 $brokerProject = Get-Content (Join-Path $root "desktop\CloudOS.SystemBroker\CloudOS.SystemBroker.vcxproj") -Raw
 if ($brokerProject -notmatch "system_control_v21\.cpp") {
     throw "SystemControlV21 must be compiled by CloudOS.SystemBroker.vcxproj"
 }
+if ($brokerProject -notmatch "network_status_v21\.cpp") {
+    throw "NetworkStatusV21 must be compiled by CloudOS.SystemBroker.vcxproj"
+}
 if ($brokerProject -notmatch "dxva2\.lib" -or $brokerProject -notmatch "wbemuuid\.lib") {
     throw "SystemControlV21 native brightness dependencies are missing from the Broker link graph"
+}
+if ($brokerProject -notmatch "wlanapi\.lib" -or $brokerProject -notmatch "iphlpapi\.lib") {
+    throw "NetworkStatusV21 native network dependencies are missing from the Broker link graph"
 }
 
 # 7. Verify Documentation Exists
