@@ -338,8 +338,8 @@ class _Wallpaper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: const BoxDecoration(
+    return const DecoratedBox(
+      decoration: BoxDecoration(
         gradient: RadialGradient(
           center: Alignment(0.45, -0.55),
           radius: 1.5,
@@ -351,7 +351,7 @@ class _Wallpaper extends StatelessWidget {
           stops: <double>[0, 0.48, 1],
         ),
       ),
-      child: const DecoratedBox(
+      child: DecoratedBox(
         decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
@@ -421,7 +421,7 @@ class _DesktopIcons extends StatelessWidget {
       id: 'trash',
       title: 'Lixeira',
       icon: Icons.delete_outline_rounded,
-      color: CloudOSColors.muted,
+      color: CloudOSColors.caption,
     ),
   ];
 
@@ -572,7 +572,7 @@ class _DesktopStatus extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: CloudOSColors.panel.withValues(alpha: 0.76),
+        color: CloudOSColors.surface.withValues(alpha: 0.76),
         border: Border.all(color: CloudOSColors.border),
         borderRadius: BorderRadius.circular(12),
       ),
