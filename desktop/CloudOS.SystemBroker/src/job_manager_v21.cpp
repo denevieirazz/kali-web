@@ -1,5 +1,6 @@
 #include "job_manager_v21.h"
 
+#include <algorithm>
 #include <chrono>
 
 namespace CloudOS
@@ -46,6 +47,7 @@ void JobManagerV21::Initialize(size_t worker_count)
 
     running_.store(true);
     workers_.clear();
+    worker_count = std::max<size_t>(worker_count, 1);
     for (size_t i = 0; i < worker_count; ++i)
     {
         workers_.emplace_back(&JobManagerV21::WorkerLoop, this);
@@ -73,6 +75,8 @@ void JobManagerV21::Shutdown()
 
 std::string JobManagerV21::SubmitJob(const std::string& type, JobFunction func)
 {
+    if (!func) return {};
+
     std::string job_id = "job-" + std::to_string(next_job_id_++);
     auto job = std::make_shared<InternalJob>();
     job->info.id = job_id;
@@ -85,6 +89,7 @@ std::string JobManagerV21::SubmitJob(const std::string& type, JobFunction func)
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (!running_.load()) return {};
         jobs_[job_id] = job;
         queue_.push_back(job_id);
     }
@@ -101,27 +106,34 @@ std::string JobManagerV21::SubmitJob(const std::string& type, JobFunction func)
 
 bool JobManagerV21::CancelJob(const std::string& job_id)
 {
-    std::shared_ptr<InternalJob> job;
+    JsonObject payload;
+    bool cancelled = false;
+
     {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = jobs_.find(job_id);
         if (it == jobs_.end()) return false;
-        job = it->second;
-    }
 
-    if (job->info.state == JobState::Queued || job->info.state == JobState::Running)
-    {
+        auto& job = it->second;
+        if (job->info.state != JobState::Queued && job->info.state != JobState::Running)
+        {
+            return false;
+        }
+
         job->cancel_flag.store(true);
         job->info.state = JobState::Cancelled;
         job->info.updated_at_ms = NowMs();
 
-        JsonObject payload;
         payload["jobId"] = JsonValue(job_id);
         payload["state"] = JsonValue(JobStateToString(JobState::Cancelled));
-        EventBusV21::Instance().Publish("job.failed", payload);
-        return true;
+        cancelled = true;
     }
-    return false;
+
+    if (cancelled)
+    {
+        EventBusV21::Instance().Publish("job.cancelled", payload);
+    }
+    return cancelled;
 }
 
 bool JobManagerV21::GetJobInfo(const std::string& job_id, JobInfo& info) const
@@ -171,7 +183,7 @@ void JobManagerV21::Reset()
 
 void JobManagerV21::WorkerLoop()
 {
-    while (running_.load())
+    while (true)
     {
         std::shared_ptr<InternalJob> job;
         {
@@ -184,36 +196,45 @@ void JobManagerV21::WorkerLoop()
 
             if (!queue_.empty())
             {
-                std::string job_id = queue_.front();
+                const std::string job_id = queue_.front();
                 queue_.erase(queue_.begin());
                 auto it = jobs_.find(job_id);
                 if (it != jobs_.end())
                 {
                     job = it->second;
+                    if (!job->cancel_flag.load() && job->info.state == JobState::Queued)
+                    {
+                        job->info.state = JobState::Running;
+                        job->info.updated_at_ms = NowMs();
+                    }
                 }
             }
         }
 
-        if (!job) continue;
+        if (!job || job->cancel_flag.load()) continue;
 
-        if (job->cancel_flag.load())
-        {
-            job->info.state = JobState::Cancelled;
-            job->info.updated_at_ms = NowMs();
-            continue;
-        }
-
-        job->info.state = JobState::Running;
-        job->info.updated_at_ms = NowMs();
-
-        auto progress_cb = [job](double p) {
-            job->info.progress = p;
-            job->info.updated_at_ms = NowMs();
+        auto progress_cb = [this, job](double p) {
             JsonObject payload;
-            payload["jobId"] = JsonValue(job->info.id);
-            payload["progress"] = JsonValue(p);
-            payload["state"] = JsonValue(JobStateToString(JobState::Running));
-            EventBusV21::Instance().Publish("job.progress", payload);
+            bool publish = false;
+            const double bounded = std::clamp(p, 0.0, 1.0);
+
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                if (!job->cancel_flag.load() && job->info.state == JobState::Running)
+                {
+                    job->info.progress = bounded;
+                    job->info.updated_at_ms = NowMs();
+                    payload["jobId"] = JsonValue(job->info.id);
+                    payload["progress"] = JsonValue(bounded);
+                    payload["state"] = JsonValue(JobStateToString(JobState::Running));
+                    publish = true;
+                }
+            }
+
+            if (publish)
+            {
+                EventBusV21::Instance().Publish("job.progress", payload);
+            }
         };
 
         std::string err;
@@ -223,30 +244,48 @@ void JobManagerV21::WorkerLoop()
             ok = job->func(job->cancel_flag, progress_cb, err);
         }
 
-        if (job->cancel_flag.load())
+        JsonObject payload;
+        std::string event_name;
         {
-            job->info.state = JobState::Cancelled;
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (job->cancel_flag.load())
+            {
+                // CancelJob already transitions the state and publishes the
+                // cancellation event. Keep the worker from overwriting it.
+                if (job->info.state != JobState::Cancelled)
+                {
+                    job->info.state = JobState::Cancelled;
+                    job->info.updated_at_ms = NowMs();
+                    payload["jobId"] = JsonValue(job->info.id);
+                    payload["state"] = JsonValue(JobStateToString(JobState::Cancelled));
+                    event_name = "job.cancelled";
+                }
+            }
+            else if (ok)
+            {
+                job->info.state = JobState::Completed;
+                job->info.progress = 1.0;
+                job->info.updated_at_ms = NowMs();
+                payload["jobId"] = JsonValue(job->info.id);
+                payload["state"] = JsonValue(JobStateToString(JobState::Completed));
+                event_name = "job.completed";
+            }
+            else
+            {
+                job->info.state = JobState::Failed;
+                job->info.error_message = err;
+                job->info.updated_at_ms = NowMs();
+                payload["jobId"] = JsonValue(job->info.id);
+                payload["error"] = JsonValue(err);
+                payload["state"] = JsonValue(JobStateToString(JobState::Failed));
+                event_name = "job.failed";
+            }
         }
-        else if (ok)
+
+        if (!event_name.empty())
         {
-            job->info.state = JobState::Completed;
-            job->info.progress = 1.0;
-            JsonObject payload;
-            payload["jobId"] = JsonValue(job->info.id);
-            payload["state"] = JsonValue(JobStateToString(JobState::Completed));
-            EventBusV21::Instance().Publish("job.completed", payload);
+            EventBusV21::Instance().Publish(event_name, payload);
         }
-        else
-        {
-            job->info.state = JobState::Failed;
-            job->info.error_message = err;
-            JsonObject payload;
-            payload["jobId"] = JsonValue(job->info.id);
-            payload["error"] = JsonValue(err);
-            payload["state"] = JsonValue(JobStateToString(JobState::Failed));
-            EventBusV21::Instance().Publish("job.failed", payload);
-        }
-        job->info.updated_at_ms = NowMs();
     }
 }
 
