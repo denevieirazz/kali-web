@@ -49,16 +49,22 @@ Require 'Native provenance manifest writer' $content.Writer @(
     '.cloudos-build-fingerprint',
     "shell_authority = 'C++/Win32'",
     "recovery_authority = 'CloudOS.Supervisor.exe V11'",
+    "broker_authority = 'CloudOS.SystemBroker.exe V21'",
     "legacy_react_desktop = `$false",
     'source_fingerprint_sha256',
     'CloudOS.exe',
     'CloudOS.NativeRuntime.dll',
     'CloudOS.Supervisor.exe',
+    'CloudOS.SystemBroker.exe',
+    'CloudOS.BrokerProbe.exe',
     'Get-FileHash'
 )
 
 Require 'Native integrity verifier' $content.Verifier @(
     'CloudOS.Supervisor.exe',
+    'CloudOS.SystemBroker.exe',
+    'CloudOS.BrokerProbe.exe',
+    'broker_authority',
     'Native binary SHA256 mismatch',
     'Native binary size mismatch',
     'Obsolete web-desktop output',
@@ -69,6 +75,8 @@ Require 'Native integrity verifier' $content.Verifier @(
 Require 'Portable native self-verifying packager' $content.Packager @(
     'CloudOS-Native-Release-x64.zip',
     'CloudOS.Supervisor.exe',
+    'CloudOS.SystemBroker.exe',
+    'CloudOS.BrokerProbe.exe',
     'verify-native-build-manifest.ps1',
     'SHA256SUMS.txt',
     'Verificar Integridade.ps1',
@@ -80,6 +88,7 @@ Require 'Portable native self-verifying packager' $content.Packager @(
     'Integridade do pacote FALHOU',
     'INTEGRITY_OK',
     'Get-FileHash',
+    'broker_authority',
     'legacy_react_desktop',
     'LEIA-ME.txt',
     'Compress-Archive',
@@ -145,4 +154,4 @@ Require 'CI release artifact and dependency cache' $content.Workflow @(
     'cloudos-native-manifest.json'
 )
 
-Write-Host 'PASS: deterministic fingerprint, three-binary integrity, Supervisor V11 launch authority, self-verifying portable package, root workflow shortcuts, WebView2 CI cache and verified release artifact contracts are protected.'
+Write-Host 'PASS: deterministic fingerprint, five-binary V21 integrity, Supervisor V11 launch authority, self-verifying portable package, root workflow shortcuts, WebView2 CI cache and verified release artifact contracts are protected.'

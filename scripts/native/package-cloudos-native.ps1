@@ -96,10 +96,17 @@ if ($manifest.schema -ne 1 -or
     $manifest.product -ne 'CloudOS Native Shell' -or
     $manifest.shell_authority -ne 'C++/Win32' -or
     $manifest.recovery_authority -ne 'CloudOS.Supervisor.exe V11' -or
+    $manifest.broker_authority -ne 'CloudOS.SystemBroker.exe V21' -or
     $manifest.legacy_react_desktop -ne $false) {
     throw 'Manifesto do pacote CloudOS Native invalido.'
 }
-foreach ($name in @('CloudOS.exe', 'CloudOS.NativeRuntime.dll', 'CloudOS.Supervisor.exe')) {
+foreach ($name in @(
+    'CloudOS.exe',
+    'CloudOS.NativeRuntime.dll',
+    'CloudOS.Supervisor.exe',
+    'CloudOS.SystemBroker.exe',
+    'CloudOS.BrokerProbe.exe'
+)) {
     $records = @($manifest.files | Where-Object { $_.name -eq $name })
     if ($records.Count -ne 1) { throw "Registro de integridade invalido para $name" }
     $path = Join-Path $rootPath $name
@@ -110,7 +117,7 @@ foreach ($name in @('CloudOS.exe', 'CloudOS.NativeRuntime.dll', 'CloudOS.Supervi
     if ($hash -ne ([string]$records[0].sha256).ToLowerInvariant()) { throw "SHA256 invalido: $name" }
 }
 if (Test-Path -LiteralPath (Join-Path $rootPath 'ui')) { throw 'Desktop web legado nao e permitido no pacote nativo.' }
-Write-Host '[CloudOS] INTEGRITY_OK: shell, runtime, Supervisor V11 e manifesto conferem.'
+Write-Host '[CloudOS] INTEGRITY_OK: Shell, Runtime, Supervisor V11, System Broker V21 e BrokerProbe conferem.'
 '@
 Set-Content -LiteralPath (Join-Path $stage 'Verificar Integridade.ps1') -Value $packageVerifier -Encoding utf8
 
@@ -247,6 +254,7 @@ CloudOS Native Shell - $Configuration x64
 
 Shell authority: C++/Win32
 Recovery authority: CloudOS.Supervisor.exe V11
+Broker authority: CloudOS.SystemBroker.exe V21
 Git head: $($manifest.git_head)
 Source fingerprint SHA256: $($manifest.source_fingerprint_sha256)
 Built UTC: $($manifest.built_utc)
@@ -255,6 +263,8 @@ Arquivos principais:
 - CloudOS.exe
 - CloudOS.NativeRuntime.dll
 - CloudOS.Supervisor.exe
+- CloudOS.SystemBroker.exe
+- CloudOS.BrokerProbe.exe
 - cloudos-native-manifest.json
 - SHA256SUMS.txt
 - Iniciar CloudOS.cmd
@@ -274,6 +284,11 @@ Shell Supervisor V11:
 - restart com backoff limitado e maximo padrao de 3 falhas consecutivas.
 - depois do crash-loop, inicia Explorer apenas quando Shell_TrayWnd nao existe.
 - Recuperacao CloudOS.cmd abre a interface manual independente com --recovery-ui.
+
+System Broker V21:
+- CloudOS.SystemBroker.exe e CloudOS.BrokerProbe.exe fazem parte do runtime assinado.
+- Verificar Integridade.ps1 valida tamanho + SHA256 dos cinco componentes nativos.
+- o Broker permanece boundary tipada; nao existe passthrough arbitrario de comando.
 
 Performance/Visual V12:
 - shell event-driven e smoke de idle/performance preservado no pipeline.
