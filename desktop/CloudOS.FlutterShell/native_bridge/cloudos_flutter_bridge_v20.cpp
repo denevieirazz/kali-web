@@ -82,6 +82,48 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         return;
     }
 
+    if (method == "getFiles")
+    {
+        const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
+        if (args == nullptr)
+        {
+            result->Error("INVALID_ARGUMENT", "getFiles requires an allowlisted location id");
+            return;
+        }
+
+        const auto it = args->find(flutter::EncodableValue("location"));
+        if (it == args->end() || !std::holds_alternative<std::string>(it->second))
+        {
+            result->Error("INVALID_ARGUMENT", "Missing or invalid 'location' parameter");
+            return;
+        }
+
+        const std::string location = std::get<std::string>(it->second);
+        std::vector<NativeFileItem> files;
+        if (!GetFiles(location, files))
+        {
+            result->Error("FILES_UNAVAILABLE", "System broker rejected or failed the allowlisted Files location");
+            return;
+        }
+
+        flutter::EncodableList list;
+        list.reserve(files.size());
+        for (const NativeFileItem& file : files)
+        {
+            flutter::EncodableMap map;
+            map[flutter::EncodableValue("name")] = flutter::EncodableValue(file.name);
+            map[flutter::EncodableValue("path")] = flutter::EncodableValue(file.path);
+            map[flutter::EncodableValue("isFolder")] = flutter::EncodableValue(file.is_folder);
+            map[flutter::EncodableValue("sizeFormatted")] = flutter::EncodableValue(file.size_formatted);
+            map[flutter::EncodableValue("modifiedFormatted")] = flutter::EncodableValue(file.modified_formatted);
+            map[flutter::EncodableValue("source")] = flutter::EncodableValue(file.source);
+            map[flutter::EncodableValue("extension")] = flutter::EncodableValue(file.extension);
+            list.push_back(flutter::EncodableValue(std::move(map)));
+        }
+        result->Success(flutter::EncodableValue(std::move(list)));
+        return;
+    }
+
     if (method == "getSystemSnapshot")
     {
         const auto snapshot = GetSystemSnapshot();
@@ -220,6 +262,34 @@ std::vector<NativeAppItem> CloudOSFlutterBridgeV20::GetApps()
 
     std::lock_guard<std::mutex> lock(mutex_);
     return cached_apps_;
+}
+
+bool CloudOSFlutterBridgeV20::GetFiles(
+    const std::string& location,
+    std::vector<NativeFileItem>& out_files)
+{
+    std::vector<BrokerClientFileItem> broker_files;
+    if (!CloudOSBrokerClientV21::Instance().GetFiles(location, broker_files))
+    {
+        return false;
+    }
+
+    std::vector<NativeFileItem> files;
+    files.reserve(broker_files.size());
+    for (const BrokerClientFileItem& item : broker_files)
+    {
+        files.push_back({
+            item.name,
+            item.path,
+            item.is_folder,
+            item.size_formatted,
+            item.modified_formatted,
+            item.source,
+            item.extension,
+        });
+    }
+    out_files = std::move(files);
+    return true;
 }
 
 NativeSystemSnapshot CloudOSFlutterBridgeV20::GetSystemSnapshot()
