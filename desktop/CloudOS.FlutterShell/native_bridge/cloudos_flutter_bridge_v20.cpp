@@ -1,12 +1,18 @@
 #include "cloudos_flutter_bridge_v20.h"
 #include "cloudos_broker_client_v21.h"
 #include "../../CloudOS.NativeCommon/native_shell_activation_client_v21.h"
+#include "../../CloudOS.NativeCommon/native_shell_notification_client_v21.h"
 
 #include <shellapi.h>
 #include <shlobj.h>
 
 #include <algorithm>
+#include <charconv>
+#include <cstdio>
+#include <cwchar>
 #include <iostream>
+#include <memory>
+#include <system_error>
 
 namespace CloudOS
 {
@@ -83,6 +89,64 @@ bool ReadWorkspaceArgument(
     return false;
 }
 
+std::string WideToUtf8(const wchar_t* value, std::size_t max_chars)
+{
+    if (value == nullptr || max_chars == 0) return {};
+    const std::size_t length = wcsnlen_s(value, max_chars);
+    if (length == 0 || length >= max_chars) return {};
+    const int required = WideCharToMultiByte(
+        CP_UTF8,
+        0,
+        value,
+        static_cast<int>(length),
+        nullptr,
+        0,
+        nullptr,
+        nullptr);
+    if (required <= 0) return {};
+    std::string result(static_cast<std::size_t>(required), '\0');
+    if (WideCharToMultiByte(
+            CP_UTF8,
+            0,
+            value,
+            static_cast<int>(length),
+            result.data(),
+            required,
+            nullptr,
+            nullptr) != required)
+    {
+        return {};
+    }
+    return result;
+}
+
+std::string FormatNotificationTime(const ShellNotificationV21::Item& item)
+{
+    char buffer[16]{};
+    sprintf_s(
+        buffer,
+        "%02u:%02u",
+        static_cast<unsigned int>(item.hour),
+        static_cast<unsigned int>(item.minute));
+    return buffer;
+}
+
+bool ParseNotificationId(const std::string& value, std::uint64_t* id)
+{
+    if (id == nullptr || value.empty()) return false;
+    std::uint64_t parsed = 0;
+    const auto result = std::from_chars(
+        value.data(),
+        value.data() + value.size(),
+        parsed);
+    if (result.ec != std::errc{} || result.ptr != value.data() + value.size() || parsed == 0)
+    {
+        return false;
+    }
+    *id = parsed;
+    return true;
+}
+
 flutter::EncodableValue EncodeFileItems(const std::vector<NativeFileItem>& files)
 {
     flutter::EncodableList list;
@@ -101,6 +165,39 @@ flutter::EncodableValue EncodeFileItems(const std::vector<NativeFileItem>& files
         list.push_back(flutter::EncodableValue(std::move(map)));
     }
     return flutter::EncodableValue(std::move(list));
+}
+
+flutter::EncodableValue EncodeNotificationState(
+    const ShellNotificationV21::Snapshot& snapshot)
+{
+    flutter::EncodableMap state;
+    state[flutter::EncodableValue("revision")] =
+        flutter::EncodableValue(static_cast<int64_t>(snapshot.revision));
+    state[flutter::EncodableValue("unreadCount")] =
+        flutter::EncodableValue(static_cast<int32_t>(snapshot.unread_count));
+
+    flutter::EncodableList items;
+    items.reserve(snapshot.count);
+    for (std::uint32_t index = 0; index < snapshot.count; ++index)
+    {
+        const auto& item = snapshot.items[index];
+        flutter::EncodableMap map;
+        map[flutter::EncodableValue("id")] =
+            flutter::EncodableValue(std::to_string(item.id));
+        map[flutter::EncodableValue("title")] = flutter::EncodableValue(
+            WideToUtf8(item.title, ShellNotificationV21::kTitleChars));
+        map[flutter::EncodableValue("message")] = flutter::EncodableValue(
+            WideToUtf8(item.message, ShellNotificationV21::kMessageChars));
+        map[flutter::EncodableValue("time")] =
+            flutter::EncodableValue(FormatNotificationTime(item));
+        map[flutter::EncodableValue("severity")] =
+            flutter::EncodableValue(static_cast<int32_t>(item.severity));
+        map[flutter::EncodableValue("read")] =
+            flutter::EncodableValue(item.read != 0);
+        items.push_back(flutter::EncodableValue(std::move(map)));
+    }
+    state[flutter::EncodableValue("items")] = flutter::EncodableValue(std::move(items));
+    return flutter::EncodableValue(std::move(state));
 }
 
 void ConvertBrokerFiles(
@@ -265,6 +362,63 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         return;
     }
 
+    if (method == "getNotificationState")
+    {
+        auto snapshot = std::make_unique<ShellNotificationV21::Snapshot>();
+        std::string error;
+        if (!NativeShellNotificationClientV21::Query(snapshot.get(), &error))
+        {
+            result->Error("NATIVE_SHELL_UNAVAILABLE", error);
+            return;
+        }
+        result->Success(EncodeNotificationState(*snapshot));
+        return;
+    }
+
+    if (method == "markNotificationsRead")
+    {
+        std::string error;
+        if (!NativeShellNotificationClientV21::MarkAllRead(&error))
+        {
+            result->Error("NATIVE_SHELL_UNAVAILABLE", error);
+            return;
+        }
+        result->Success(flutter::EncodableValue(true));
+        return;
+    }
+
+    if (method == "dismissNotification")
+    {
+        std::string notification_id_text;
+        std::uint64_t notification_id = 0;
+        if (!ReadStringArgument(method_call, "id", &notification_id_text) ||
+            !ParseNotificationId(notification_id_text, &notification_id))
+        {
+            result->Error("INVALID_ARGUMENT", "dismissNotification requires a numeric notification id");
+            return;
+        }
+        std::string error;
+        if (!NativeShellNotificationClientV21::Dismiss(notification_id, &error))
+        {
+            result->Error("NOTIFICATION_MUTATION_FAILED", error);
+            return;
+        }
+        result->Success(flutter::EncodableValue(true));
+        return;
+    }
+
+    if (method == "clearNotifications")
+    {
+        std::string error;
+        if (!NativeShellNotificationClientV21::Clear(&error))
+        {
+            result->Error("NATIVE_SHELL_UNAVAILABLE", error);
+            return;
+        }
+        result->Success(flutter::EncodableValue(true));
+        return;
+    }
+
     if (method == "getShellSurfaceStates")
     {
         bool browser_running = false;
@@ -412,6 +566,7 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         map[flutter::EncodableValue("shell_activation_executed")] = flutter::EncodableValue(false);
         map[flutter::EncodableValue("shell_surface_lifecycle")] = flutter::EncodableValue(true);
         map[flutter::EncodableValue("shell_workspace_control")] = flutter::EncodableValue(true);
+        map[flutter::EncodableValue("shell_notification_authority")] = flutter::EncodableValue(true);
         map[flutter::EncodableValue("files_capability_actions")] = flutter::EncodableValue(true);
         result->Success(flutter::EncodableValue(std::move(map)));
         return;
