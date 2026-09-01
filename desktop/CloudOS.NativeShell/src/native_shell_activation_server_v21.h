@@ -46,6 +46,15 @@ public:
         return window_ != nullptr;
     }
 
+    static void Stop() noexcept
+    {
+        if (window_ != nullptr && IsWindow(window_))
+        {
+            DestroyWindow(window_);
+        }
+        window_ = nullptr;
+    }
+
     [[nodiscard]] static HWND Window() noexcept
     {
         return window_;
@@ -184,6 +193,15 @@ private:
         WPARAM w_param,
         LPARAM l_param) noexcept
     {
+        if (message == WM_NCDESTROY)
+        {
+            if (window == window_)
+            {
+                window_ = nullptr;
+            }
+            return DefWindowProcW(window, message, w_param, l_param);
+        }
+
         if (message != WM_COPYDATA)
         {
             return DefWindowProcW(window, message, w_param, l_param);
