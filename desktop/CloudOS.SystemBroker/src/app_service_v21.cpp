@@ -53,7 +53,57 @@ bool ShellOpen(const wchar_t* target, const wchar_t* parameters, std::string& er
     return false;
 }
 
-bool LaunchDefaultWsl(const wchar_t* command, std::string& err)
+bool FileExists(const std::wstring& path)
+{
+    const DWORD attr = GetFileAttributesW(path.c_str());
+    return attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+bool FindExecutableOnPath(const wchar_t* name, std::wstring& result)
+{
+    WCHAR path[MAX_PATH]{};
+    DWORD length = SearchPathW(nullptr, name, nullptr, ARRAYSIZE(path), path, nullptr);
+    if (length == 0 || length >= ARRAYSIZE(path))
+    {
+        return false;
+    }
+    result.assign(path, length);
+    return true;
+}
+
+bool FindVsCode(std::wstring& result)
+{
+    if (FindExecutableOnPath(L"Code.exe", result))
+    {
+        return true;
+    }
+
+    WCHAR local_app_data[MAX_PATH]{};
+    if (GetEnvironmentVariableW(L"LOCALAPPDATA", local_app_data, ARRAYSIZE(local_app_data)) > 0)
+    {
+        std::wstring candidate = std::wstring(local_app_data) + L"\\Programs\\Microsoft VS Code\\Code.exe";
+        if (FileExists(candidate))
+        {
+            result = std::move(candidate);
+            return true;
+        }
+    }
+
+    WCHAR program_files[MAX_PATH]{};
+    if (GetEnvironmentVariableW(L"ProgramFiles", program_files, ARRAYSIZE(program_files)) > 0)
+    {
+        std::wstring candidate = std::wstring(program_files) + L"\\Microsoft VS Code\\Code.exe";
+        if (FileExists(candidate))
+        {
+            result = std::move(candidate);
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool LaunchDefaultWslTerminal(std::string& err)
 {
     const auto distros = WslServiceV21::Instance().GetDistributions();
     if (distros.empty())
@@ -69,8 +119,7 @@ bool LaunchDefaultWsl(const wchar_t* command, std::string& err)
         return false;
     }
 
-    std::wstring args = L"-d \"" + distro + L"\" ";
-    args += command;
+    const std::wstring args = L"-d \"" + distro + L"\" --cd ~";
     return ShellOpen(L"wsl.exe", args.c_str(), err);
 }
 } // namespace
@@ -127,34 +176,48 @@ void AppServiceV21::Refresh()
 {
     apps_.clear();
 
-    // 1. CloudOS first-party applications.
-    apps_.push_back({"cloudos:files", "Arquivos", "cloudos", "Windows + Linux (WSL2)", "", "Sistema", "CloudOS", true, false, false, "files", true, false});
-    apps_.push_back({"cloudos:browser", "Navegador Web", "cloudos", "Navegador Web", "", "Produtividade", "CloudOS", true, false, false, "browser", true, true});
-    apps_.push_back({"cloudos:terminal", "Terminal", "cloudos", "Terminal do Sistema", "", "Utilitários", "CloudOS", true, false, false, "terminal", true, true});
-    apps_.push_back({"cloudos:calculator", "Calculadora", "cloudos", "Calculadora do Sistema", "", "Utilitários", "CloudOS", true, false, false, "calculator", false, false});
-    apps_.push_back({"cloudos:settings", "Configurações", "cloudos", "Ajustes do Sistema", "", "Sistema", "CloudOS", true, false, false, "settings", false, false});
-    apps_.push_back({"cloudos:drive", "CloudOS Drive", "cloudos", "Workspace & Projetos", "", "Produtividade", "CloudOS", true, false, false, "drive", false, false});
-    apps_.push_back({"cloudos:trash", "Lixeira", "cloudos", "Itens e Pastas Excluídos", "", "Sistema", "CloudOS", true, false, false, "trash", false, false});
+    // CloudOS surfaces backed by real local Windows operations.
+    apps_.push_back({"cloudos:files", "Arquivos", "cloudos", "Filesystem Windows + WSL", "", "Sistema", "CloudOS", true, false, false, "files", true, true});
+    apps_.push_back({"cloudos:browser", "Navegador Padrão", "cloudos", "Abre o navegador padrão do Windows", "", "Internet", "Windows", true, false, false, "browser", true, true});
+    apps_.push_back({"cloudos:terminal", "Terminal", "cloudos", "Windows Terminal ou Prompt de Comando", "", "Utilitários", "Windows", true, false, false, "terminal", true, true});
+    apps_.push_back({"cloudos:calculator", "Calculadora", "cloudos", "Calculadora do Windows", "", "Utilitários", "Windows", true, false, false, "calculator", false, false});
+    apps_.push_back({"cloudos:settings", "Configurações", "cloudos", "Configurações do Windows", "", "Sistema", "Windows", true, false, false, "settings", false, false});
+    apps_.push_back({"cloudos:trash", "Lixeira", "cloudos", "Lixeira do Windows", "", "Sistema", "Windows", true, false, false, "trash", false, false});
 
-    // 2. Windows native applications.
-    apps_.push_back({"windows:vscode", "Visual Studio Code", "windows", "Code Editor & IDE", "", "Produtividade", "Windows", true, false, false, "vscode", true, true});
+    // Windows applications that are guaranteed by the OS.
     apps_.push_back({"windows:notepad", "Bloco de Notas", "windows", "Editor de Texto", "", "Produtividade", "Windows", true, false, false, "notepad", true, false});
-    apps_.push_back({"windows:powershell", "PowerShell", "windows", "PowerShell 7 quando disponível", "", "Utilitários", "Windows", true, false, false, "powershell", true, true});
+    apps_.push_back({"windows:powershell", "PowerShell", "windows", "PowerShell 7 quando disponível; Windows PowerShell como fallback", "", "Utilitários", "Windows", true, false, false, "powershell", true, true});
     apps_.push_back({"windows:taskmgr", "Gerenciador de Tarefas", "windows", "Monitor de Recursos do Sistema", "", "Sistema", "Windows", true, false, false, "taskmgr", false, false});
     apps_.push_back({"windows:cmd", "Prompt de Comando", "windows", "cmd.exe", "", "Utilitários", "Windows", true, false, false, "cmd", false, false});
     apps_.push_back({"windows:explorer", "Windows Explorer", "windows", "Explorador de Arquivos do Windows", "", "Sistema", "Windows", true, false, false, "explorer", false, false});
 
-    // 3. Linux / WSLg applications for the actual first registered distro.
+    // Optional applications only appear when the executable can be resolved.
+    std::wstring vscode_path;
+    if (FindVsCode(vscode_path))
+    {
+        apps_.push_back({"windows:vscode", "Visual Studio Code", "windows", "Code Editor & IDE", "", "Desenvolvimento", "Windows", true, false, false, "vscode", true, true});
+    }
+
+    // WSL only advertises the one operation we can validate without executing
+    // arbitrary commands inside the distro: starting its shell.
     const auto distros = WslServiceV21::Instance().GetDistributions();
     if (!distros.empty())
     {
         const std::string& default_distro = distros.front();
-        const std::string source = default_distro + " (WSL)";
-        apps_.push_back({"wsl:ubuntu-terminal", default_distro + " Terminal", "linux", "Linux Shell (" + default_distro + ")", default_distro, "Linux / WSL", source, true, false, false, "terminal", true, true});
-        apps_.push_back({"wsl:gimp", "GIMP Image Editor", "linux", "GNU Image Manipulation Program (WSLg)", default_distro, "Produtividade", source, true, false, false, "gimp", true, false});
-        apps_.push_back({"wsl:wireshark", "Wireshark", "linux", "Network Protocol Analyzer (WSLg)", default_distro, "Utilitários", source, true, false, false, "wireshark", false, false});
-        apps_.push_back({"wsl:zenmap", "Zenmap", "linux", "Security Scanner GUI (WSLg)", default_distro, "Utilitários", source, true, false, false, "zenmap", false, false});
-        apps_.push_back({"wsl:xterm", "XTerm", "linux", "X11 Terminal Emulator (WSLg)", default_distro, "Linux / WSL", source, true, false, false, "terminal", false, false});
+        apps_.push_back({
+            "wsl:default-terminal",
+            default_distro + " Terminal",
+            "linux",
+            "Linux Shell (" + default_distro + ")",
+            default_distro,
+            "Linux / WSL",
+            default_distro + " (WSL)",
+            true,
+            false,
+            false,
+            "terminal",
+            true,
+            true});
     }
 
     initialized_.store(true);
@@ -162,8 +225,6 @@ void AppServiceV21::Refresh()
 
 bool AppServiceV21::LaunchApp(const std::string& app_id, std::string& err)
 {
-    // Defensive whitelist resolution: no arbitrary command string crosses the
-    // public broker protocol.
     if (app_id == "files" || app_id == "cloudos:files")
     {
         return ShellOpen(L"explorer.exe", nullptr, err);
@@ -184,16 +245,6 @@ bool AppServiceV21::LaunchApp(const std::string& app_id, std::string& err)
     {
         return ShellOpen(L"ms-settings:", nullptr, err);
     }
-    if (app_id == "drive" || app_id == "cloudos:drive")
-    {
-        WCHAR user_profile[MAX_PATH]{};
-        if (GetEnvironmentVariableW(L"USERPROFILE", user_profile, ARRAYSIZE(user_profile)) == 0)
-        {
-            err = "USERPROFILE is unavailable";
-            return false;
-        }
-        return ShellOpen(user_profile, nullptr, err);
-    }
     if (app_id == "trash" || app_id == "cloudos:trash")
     {
         return ShellOpen(L"shell:RecycleBinFolder", nullptr, err);
@@ -205,7 +256,13 @@ bool AppServiceV21::LaunchApp(const std::string& app_id, std::string& err)
     }
     if (app_id == "windows:vscode")
     {
-        return ShellOpen(L"code.cmd", nullptr, err) || ShellOpen(L"Code.exe", nullptr, err);
+        std::wstring path;
+        if (!FindVsCode(path))
+        {
+            err = "Visual Studio Code is not installed or cannot be resolved";
+            return false;
+        }
+        return ShellOpen(path.c_str(), nullptr, err);
     }
     if (app_id == "windows:powershell")
     {
@@ -224,26 +281,12 @@ bool AppServiceV21::LaunchApp(const std::string& app_id, std::string& err)
         return ShellOpen(L"explorer.exe", nullptr, err);
     }
 
-    if (app_id == "wsl:ubuntu-terminal" || app_id == "wsl:default-terminal" ||
+    // Keep legacy terminal aliases accepted for V21 package compatibility,
+    // but do not advertise Ubuntu when the installed distro has another name.
+    if (app_id == "wsl:default-terminal" || app_id == "wsl:ubuntu-terminal" ||
         app_id == "linux:ubuntu-terminal" || app_id == "ubuntu-terminal")
     {
-        return LaunchDefaultWsl(L"--cd ~", err);
-    }
-    if (app_id == "wsl:gimp" || app_id == "linux:gimp" || app_id == "gimp")
-    {
-        return LaunchDefaultWsl(L"-- gimp", err);
-    }
-    if (app_id == "wsl:wireshark" || app_id == "linux:wireshark")
-    {
-        return LaunchDefaultWsl(L"-- wireshark", err);
-    }
-    if (app_id == "wsl:zenmap" || app_id == "linux:zenmap")
-    {
-        return LaunchDefaultWsl(L"-- zenmap", err);
-    }
-    if (app_id == "wsl:xterm" || app_id == "linux:xterm")
-    {
-        return LaunchDefaultWsl(L"-- xterm", err);
+        return LaunchDefaultWslTerminal(err);
     }
 
     err = "Invalid or unverified application identifier: " + app_id;
