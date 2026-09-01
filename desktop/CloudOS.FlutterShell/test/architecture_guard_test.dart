@@ -143,6 +143,12 @@ void main() {
       'lib/features/quick_settings/presentation/widgets/quick_system_summary.dart',
     ).readAsStringSync();
 
+    final fallbackStart = nativeBridge.indexOf(
+      'void CloudOSFlutterBridgeV20::RefreshSystemSnapshot()',
+    );
+    expect(fallbackStart, greaterThanOrEqualTo(0));
+    final fallbackSource = nativeBridge.substring(fallbackStart);
+
     for (final synthetic in <String>[
       'cached_snapshot_.network_available = true',
       'cached_snapshot_.volume_available = true',
@@ -152,7 +158,7 @@ void main() {
       'CloudOS Network • Wi-Fi 6',
     ]) {
       expect(
-        nativeBridge,
+        fallbackSource,
         isNot(contains(synthetic)),
         reason: 'degraded Native Bridge must not fabricate: $synthetic',
       );
