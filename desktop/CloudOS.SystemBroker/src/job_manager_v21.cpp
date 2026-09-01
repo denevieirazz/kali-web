@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 
 namespace CloudOS
 {
@@ -110,7 +111,6 @@ std::string JobManagerV21::SubmitJob(const std::string& type, JobFunction func)
             }
         }
 
-        // Do not let an untrusted local client grow the queue without bound.
         if (jobs_.size() >= kMaxRetainedJobs || queue_.size() >= kMaxQueuedJobs)
         {
             return {};
@@ -234,7 +234,7 @@ void JobManagerV21::WorkerLoop()
         }
 
         if (!job) continue;
-        if (job->cancel_flag.load()) continue; // CancelJob already published the terminal event.
+        if (job->cancel_flag.load()) continue;
 
         {
             std::lock_guard<std::mutex> info_lock(job->info_mutex);
@@ -306,8 +306,6 @@ void JobManagerV21::WorkerLoop()
             payload["error"] = JsonValue(final_info.error_message);
             EventBusV21::Instance().Publish("job.failed", payload);
         }
-        // Running cancellation is published immediately by CancelJob. Do not
-        // duplicate the terminal cancellation event here.
     }
 }
 
