@@ -25,6 +25,8 @@ $payload = @(
     'CloudOS.exe',
     'CloudOS.NativeRuntime.dll',
     'CloudOS.Supervisor.exe',
+    'CloudOS.SystemBroker.exe',
+    'CloudOS.BrokerProbe.exe',
     'cloudos-native-manifest.json',
     '.cloudos-build-head',
     '.cloudos-build-fingerprint'
@@ -58,7 +60,10 @@ foreach ($name in @(
     'rollback-cloudos-shell-v14.ps1',
     'repair-cloudos-shell-v14.ps1',
     'get-cloudos-shell-status-v14.ps1',
-    'run-native-shell-activation-smoke-v14.ps1'
+    'run-native-shell-activation-smoke-v14.ps1',
+    'run-system-broker-smoke-v21.ps1',
+    'test-system-broker-v21-contract.ps1',
+    'test-system-broker-v21-soak.ps1'
 )) {
     $source = Join-Path $PSScriptRoot $name
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
@@ -72,7 +77,7 @@ if (-not (Test-Path -LiteralPath $manifestPath)) { throw "Staged native manifest
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 
 $sumLines = New-Object System.Collections.Generic.List[string]
-foreach ($file in @('CloudOS.exe', 'CloudOS.NativeRuntime.dll', 'CloudOS.Supervisor.exe')) {
+foreach ($file in @('CloudOS.exe', 'CloudOS.NativeRuntime.dll', 'CloudOS.Supervisor.exe', 'CloudOS.SystemBroker.exe', 'CloudOS.BrokerProbe.exe')) {
     $path = Join-Path $stage $file
     if (-not (Test-Path -LiteralPath $path)) { throw "Staged native payload missing: $path" }
     $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()

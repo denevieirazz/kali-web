@@ -285,11 +285,33 @@ SHA256 garante integridade em relação ao manifesto. Sem assinatura Authenticod
 
 ---
 
+## V20 — Flutter Presentation & Native Bridge
+
+### Automatizado
+- Análise estática do Dart (`flutter analyze`) com 0 warnings/erros;
+- Testes unitários e de contrato do `MethodChannel` (`cloudos/native/v19`);
+- Compilação C++ do host Flutter Windows Release x64 com o adapter nativo linkado;
+- Verificação de fallback gracioso para preview em testes headless.
+
+---
+
+## V21 — CloudOS System Broker & Event Bus
+
+### Automatizado
+- Contrato arquitetural `test-system-broker-v21-contract.ps1`;
+- Compilação MSBuild Release x64 de `CloudOS.SystemBroker.exe` e `CloudOS.BrokerProbe.exe` com `/W4 /WX`;
+- Auto-teste in-process com `--self-test` (serialização, DACL, EventBus, JobManager, AppService, SystemService, WSL);
+- Smoke de IPC `run-system-broker-smoke-v21.ps1` via Named Pipe com probe de comandos e geração de `system-broker-v21-smoke.json`;
+- Teste de estabilidade e ausência de vazamento de memória `test-system-broker-v21-soak.ps1` (120 segundos).
+
+---
+
 ## Baseline CI
 
 A `CloudOS CI Baseline` preserva o restante do repositório: lint/build/testes do frontend/backend/Host/Bootstrap/Browser e caracterizações aplicáveis.
 
 V15 não transforma essas áreas em autoridade do desktop; elas continuam sendo código suportado/compatibilidade e precisam permanecer verdes enquanto existirem no repositório.
+
 
 ---
 

@@ -5,8 +5,12 @@ on:
   pull_request:
     paths:
       - 'desktop/CloudOS.FlutterShell/**'
+      - 'desktop/CloudOS.SystemBroker/**'
+      - 'desktop/CloudOS.BrokerProbe/**'
+      - 'scripts/native/**'
       - 'scripts/flutter/**'
       - 'Abrir CloudOS Flutter Preview.cmd'
+      - 'Abrir CloudOS V21 Flutter com System Broker.cmd'
       - '.github/workflows/cloudos-flutter-ui.yml'
 
 jobs:
@@ -31,21 +35,57 @@ jobs:
           flutter config --enable-windows-desktop
           flutter devices
 
+      - name: Build System Broker V21
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsroot = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $msbuild = Join-Path $vsroot "MSBuild\Current\Bin\MSBuild.exe"
+          & $msbuild "desktop/CloudOS.SystemBroker/CloudOS.SystemBroker.vcxproj" /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
+          if ($LASTEXITCODE -ne 0) { throw "System Broker build failed with $LASTEXITCODE" }
+          & $msbuild "desktop/CloudOS.BrokerProbe/CloudOS.BrokerProbe.vcxproj" /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
+          if ($LASTEXITCODE -ne 0) { throw "Broker Probe build failed with $LASTEXITCODE" }
+
+      - name: Test System Broker Self-Test & Contract
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File scripts/native/test-system-broker-v21-contract.ps1
+          if ($LASTEXITCODE -ne 0) { throw "V21 contract failed with $LASTEXITCODE" }
+          pwsh -NoProfile -File scripts/native/run-system-broker-smoke-v21.ps1
+          if ($LASTEXITCODE -ne 0) { throw "V21 smoke failed with $LASTEXITCODE" }
+          pwsh -NoProfile -File scripts/native/test-system-broker-v21-soak.ps1 -DurationSeconds 5
+          if ($LASTEXITCODE -ne 0) { throw "V21 soak failed with $LASTEXITCODE" }
+
       - name: Generate local Windows host
         shell: pwsh
         working-directory: desktop/CloudOS.FlutterShell
         run: |
           flutter create --platforms=windows --project-name cloudos_flutter_shell .
+          if ($LASTEXITCODE -ne 0) { throw "flutter create failed with $LASTEXITCODE" }
           if (Test-Path 'native_bridge') {
             Copy-Item -Path "native_bridge/*" -Destination "windows/runner/" -Force
+            Copy-Item -Path "../CloudOS.SystemBroker/src/protocol_v21.h" -Destination "windows/runner/protocol_v21.h" -Force
+            Copy-Item -Path "../CloudOS.SystemBroker/src/protocol_v21.cpp" -Destination "windows/runner/protocol_v21.cpp" -Force
             $cmakePath = "windows/runner/CMakeLists.txt"
             if (Test-Path $cmakePath) {
               $cmake = Get-Content -Path $cmakePath -Raw
               if ($cmake -notmatch "cloudos_flutter_bridge_v20.cpp") {
-                $cmake = $cmake -replace '(\s*"flutter_window\.cpp")', "`$1`n  `"cloudos_flutter_bridge_v20.cpp`""
-                $cmake = $cmake -replace 'target_link_libraries\(\$\{BINARY_NAME\} PRIVATE flutter flutter_wrapper_app\)', 'target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app dwmapi.lib shlwapi.lib shell32.lib ole32.lib uuid.lib advapi32.lib)'
-                Set-Content -Path $cmakePath -Value $cmake -Encoding UTF8
+                $cmake = $cmake -replace '("flutter_window\.cpp")', "`$1`r`n  `"cloudos_flutter_bridge_v20.cpp`""
               }
+              if ($cmake -notmatch "cloudos_broker_client_v21.cpp") {
+                if ($cmake -match "cloudos_flutter_bridge_v20.cpp") {
+                  $cmake = $cmake -replace '("cloudos_flutter_bridge_v20\.cpp")', "`$1`r`n  `"cloudos_broker_client_v21.cpp`""
+                } else {
+                  $cmake = $cmake -replace '("flutter_window\.cpp")', "`$1`r`n  `"cloudos_broker_client_v21.cpp`""
+                }
+              }
+              if ($cmake -notmatch "protocol_v21.cpp") {
+                $cmake = $cmake -replace '("cloudos_broker_client_v21\.cpp")', "`$1`r`n  `"protocol_v21.cpp`""
+              }
+              if ($cmake -notmatch "advapi32\.lib") {
+                $cmake = $cmake -replace 'target_link_libraries\(\$\{BINARY_NAME\} PRIVATE flutter flutter_wrapper_app\)', 'target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app dwmapi.lib shlwapi.lib shell32.lib ole32.lib uuid.lib advapi32.lib)'
+              }
+              Set-Content -Path $cmakePath -Value $cmake -Encoding UTF8
             }
           }
           if (Test-Path 'test/widget_test.dart') {
@@ -72,21 +112,39 @@ jobs:
         working-directory: desktop/CloudOS.FlutterShell
         run: flutter build windows --release
 
-      - name: Write V20 evidence
+      - name: Stage System Broker and launcher in Release
+        shell: pwsh
+        run: |
+          $release = Resolve-Path 'desktop/CloudOS.FlutterShell/build/windows/x64/runner/Release'
+          $brokerBin = Resolve-Path 'desktop/CloudOS.NativeShell/bin/Release'
+          Copy-Item -Path (Join-Path $brokerBin 'CloudOS.SystemBroker.exe') -Destination $release -Force
+          Copy-Item -Path (Join-Path $brokerBin 'CloudOS.BrokerProbe.exe') -Destination $release -Force
+          Copy-Item -Path 'Abrir CloudOS V21 Flutter com System Broker.cmd' -Destination (Join-Path $release 'Abrir CloudOS V21.cmd') -Force
+
+      - name: Write V21 build evidence
         shell: pwsh
         run: |
           $flutter = (flutter --version | Select-Object -First 1).Trim()
           $release = Resolve-Path 'desktop/CloudOS.FlutterShell/build/windows/x64/runner/Release'
           $exe = Join-Path $release 'cloudos_flutter_shell.exe'
+          $brokerExe = Join-Path $release 'CloudOS.SystemBroker.exe'
+          $probeExe = Join-Path $release 'CloudOS.BrokerProbe.exe'
           if (-not (Test-Path $exe)) { throw "Flutter executable missing: $exe" }
+          if (-not (Test-Path $brokerExe)) { throw "SystemBroker executable missing: $brokerExe" }
+          if (-not (Test-Path $probeExe)) { throw "BrokerProbe executable missing: $probeExe" }
           $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $brokerSha = (Get-FileHash $brokerExe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $probeSha = (Get-FileHash $probeExe -Algorithm SHA256).Hash.ToLowerInvariant()
           $evidence = [ordered]@{
-            schema = 20
+            schema = 21
             verdict = 'pass'
             flutter = $flutter
             git_sha = '${{ github.sha }}'
             presentation_layer = 'Flutter 3.44.7'
             native_bridge_channel = 'cloudos/native/v19'
+            native_broker_ipc = 'NamedPipe v21'
+            broker_protocol_version = 21
+            broker_response_parsing = 'typed protocol_v21'
             native_bridge_registered = $true
             get_apps_contract = $true
             system_snapshot_contract = $true
@@ -96,22 +154,128 @@ jobs:
             shell_activation_executed = $false
             executable = 'cloudos_flutter_shell.exe'
             executable_sha256 = $sha
+            broker_executable = 'CloudOS.SystemBroker.exe'
+            broker_executable_sha256 = $brokerSha
+            probe_executable = 'CloudOS.BrokerProbe.exe'
+            probe_executable_sha256 = $probeSha
           }
-          $evidence | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 'flutter-v20-smoke.json'
-          Get-Content 'flutter-v20-smoke.json'
+          $evidence | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 'flutter-v21-smoke.json'
+          Get-Content 'flutter-v21-smoke.json'
 
-      - name: Package Flutter preview
+      - name: Assemble ready-to-run V21 package
         shell: pwsh
         run: |
           $release = Resolve-Path 'desktop/CloudOS.FlutterShell/build/windows/x64/runner/Release'
-          Compress-Archive -Path "$release\*" -DestinationPath 'CloudOS-Flutter-V20-Windows-x64.zip' -Force
+          $package = Join-Path (Get-Location) 'CloudOS-Flutter-V21-Package'
+          if (Test-Path $package) { Remove-Item -Path $package -Recurse -Force }
+          New-Item -ItemType Directory -Path $package | Out-Null
+          Copy-Item -Path "$release\*" -Destination $package -Recurse -Force
+          Copy-Item -Path 'flutter-v21-smoke.json' -Destination $package -Force
+          Copy-Item -Path 'system-broker-v21-smoke.json' -Destination $package -Force
+          @'
+          CloudOS V21 — READY TO RUN
 
-      - name: Upload Flutter preview
+          1. Extraia TODO o artifact para uma pasta normal do Windows.
+          2. Execute "Abrir CloudOS V21.cmd".
+          3. O System Broker V21 sera iniciado em background pelo Native Bridge quando necessario.
+
+          Este preview NAO substitui o Explorer, NAO altera Winlogon e NAO ativa o CloudOS como shell de logon.
+          Para diagnostico, execute CloudOS.BrokerProbe.exe ou consulte os JSONs de smoke incluidos.
+          '@ | Set-Content -Path (Join-Path $package 'LEIA-ME - CLOUDOS V21.txt') -Encoding UTF8
+
+      - name: Smoke assembled ready-to-run package
+        shell: pwsh
+        run: |
+          $package = Resolve-Path 'CloudOS-Flutter-V21-Package'
+          $required = @(
+            'cloudos_flutter_shell.exe',
+            'CloudOS.SystemBroker.exe',
+            'CloudOS.BrokerProbe.exe',
+            'Abrir CloudOS V21.cmd',
+            'flutter_windows.dll',
+            'data'
+          )
+          foreach ($name in $required) {
+            if (-not (Test-Path (Join-Path $package $name))) {
+              throw "Ready package missing required item: $name"
+            }
+          }
+
+          Get-Process 'CloudOS.SystemBroker' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Milliseconds 200
+
+          $brokerPath = Join-Path $package 'CloudOS.SystemBroker.exe'
+          $probePath = Join-Path $package 'CloudOS.BrokerProbe.exe'
+          $broker = Start-Process -FilePath $brokerPath -WorkingDirectory $package -WindowStyle Hidden -PassThru
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 30; $i++) {
+              $pingText = (& $probePath ping 2>$null | Out-String).Trim()
+              if ($LASTEXITCODE -eq 0 -and $pingText) {
+                try {
+                  $ping = $pingText | ConvertFrom-Json
+                  if ($ping.ok -eq $true -and $ping.payload.pong -eq $true) {
+                    $ready = $true
+                    break
+                  }
+                } catch {}
+              }
+              Start-Sleep -Milliseconds 100
+            }
+            if (-not $ready) { throw 'Packaged System Broker did not become healthy' }
+
+            $status = ((& $probePath status | Out-String).Trim() | ConvertFrom-Json)
+            if ($LASTEXITCODE -ne 0 -or $status.ok -ne $true -or $status.payload.status -ne 'healthy') {
+              throw 'Packaged Broker status contract failed'
+            }
+
+            $apps = ((& $probePath apps | Out-String).Trim() | ConvertFrom-Json)
+            if ($LASTEXITCODE -ne 0 -or $apps.ok -ne $true -or $apps.payload.apps.Count -lt 5) {
+              throw 'Packaged Broker app catalog contract failed'
+            }
+
+            $snapshot = ((& $probePath snapshot | Out-String).Trim() | ConvertFrom-Json)
+            if ($LASTEXITCODE -ne 0 -or $snapshot.ok -ne $true -or [string]::IsNullOrWhiteSpace($snapshot.payload.deviceName)) {
+              throw 'Packaged Broker snapshot contract failed'
+            }
+
+            $packageEvidence = [ordered]@{
+              schema = 21
+              verdict = 'pass'
+              git_sha = '${{ github.sha }}'
+              package_layout_verified = $true
+              broker_ping = $true
+              broker_status = 'healthy'
+              apps_count = $apps.payload.apps.Count
+              snapshot_device_present = $true
+              winlogon_modified = $false
+            }
+            $packageEvidence | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 (Join-Path $package 'package-v21-smoke.json')
+          }
+          finally {
+            if ($broker -and -not $broker.HasExited) {
+              Stop-Process -Id $broker.Id -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          $hashTargets = @(
+            'cloudos_flutter_shell.exe',
+            'CloudOS.SystemBroker.exe',
+            'CloudOS.BrokerProbe.exe',
+            'flutter_windows.dll'
+          )
+          $hashLines = foreach ($name in $hashTargets) {
+            $hash = (Get-FileHash (Join-Path $package $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $name"
+          }
+          $hashLines | Set-Content -Encoding ASCII (Join-Path $package 'SHA256SUMS.txt')
+          Get-Content (Join-Path $package 'package-v21-smoke.json')
+          Get-Content (Join-Path $package 'SHA256SUMS.txt')
+
+      - name: Upload ready-to-run Flutter V21
         uses: actions/upload-artifact@v4
         with:
-          name: CloudOS-Flutter-V20-${{ github.sha }}
-          path: |
-            CloudOS-Flutter-V20-Windows-x64.zip
-            flutter-v20-smoke.json
+          name: CloudOS-Flutter-V21-READY-${{ github.sha }}
+          path: CloudOS-Flutter-V21-Package/
           if-no-files-found: error
           retention-days: 14

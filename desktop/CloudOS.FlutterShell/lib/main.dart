@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'core/cloudos_theme.dart';
-import 'shell/cloudos_shell.dart';
+import 'shell/cloudos_shell_v21.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -14,10 +14,10 @@ class CloudOSApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'CloudOS Flutter Preview',
+      title: 'CloudOS V21',
       debugShowCheckedModeBanner: false,
       theme: buildCloudOSTheme(),
-      home: const CloudOSShell(),
+      home: const CloudOSShellV21(),
     );
   }
 }

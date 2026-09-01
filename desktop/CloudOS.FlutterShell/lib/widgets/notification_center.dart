@@ -8,10 +8,12 @@ import 'glass_surface.dart';
 class NotificationCenterPanel extends StatefulWidget {
   const NotificationCenterPanel({
     this.initialNotifications,
+    this.onNotificationsChanged,
     super.key,
   });
 
   final List<CloudNotification>? initialNotifications;
+  final ValueChanged<List<CloudNotification>>? onNotificationsChanged;
 
   @override
   State<NotificationCenterPanel> createState() => _NotificationCenterPanelState();
@@ -22,23 +24,57 @@ class _NotificationCenterPanelState extends State<NotificationCenterPanel> {
     widget.initialNotifications ?? CloudOSBridge.previewNotifications,
   );
 
+  @override
+  void didUpdateWidget(covariant NotificationCenterPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialNotifications != widget.initialNotifications && widget.initialNotifications != null) {
+      items = List<CloudNotification>.from(widget.initialNotifications!);
+    }
+  }
+
+  void _publishChange() {
+    widget.onNotificationsChanged?.call(List<CloudNotification>.unmodifiable(items));
+  }
+
   void _dismiss(String id) {
     setState(() {
       items.removeWhere((n) => n.id == id);
     });
+    _publishChange();
   }
 
   void _clearAll() {
-    setState(() {
-      items.clear();
-    });
+    if (items.isEmpty) return;
+    setState(items.clear);
+    _publishChange();
   }
 
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
-    const weekdays = <String>['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo'];
-    const months = <String>['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+    const weekdays = <String>[
+      'Segunda-feira',
+      'Terça-feira',
+      'Quarta-feira',
+      'Quinta-feira',
+      'Sexta-feira',
+      'Sábado',
+      'Domingo',
+    ];
+    const months = <String>[
+      'Janeiro',
+      'Fevereiro',
+      'Março',
+      'Abril',
+      'Maio',
+      'Junho',
+      'Julho',
+      'Agosto',
+      'Setembro',
+      'Outubro',
+      'Novembro',
+      'Dezembro',
+    ];
     final dateString = '${weekdays[now.weekday - 1]}, ${now.day} de ${months[now.month - 1]}';
 
     return Align(
@@ -89,7 +125,10 @@ class _NotificationCenterPanelState extends State<NotificationCenterPanel> {
                           visualDensity: VisualDensity.compact,
                           padding: const EdgeInsets.symmetric(horizontal: 8),
                         ),
-                        child: const Text('Limpar Tudo', style: TextStyle(fontSize: 11.5, color: CloudOSColors.accent)),
+                        child: const Text(
+                          'Limpar Tudo',
+                          style: TextStyle(fontSize: 11.5, color: CloudOSColors.accent),
+                        ),
                       ),
                   ],
                 ),
@@ -106,7 +145,11 @@ class _NotificationCenterPanelState extends State<NotificationCenterPanel> {
                         SizedBox(height: 8),
                         Text(
                           'Sem novas notificações',
-                          style: TextStyle(color: CloudOSColors.secondary, fontSize: 12.5, fontWeight: FontWeight.w600),
+                          style: TextStyle(
+                            color: CloudOSColors.secondary,
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                         SizedBox(height: 2),
                         Text(
@@ -202,20 +245,20 @@ class _NotificationCard extends StatelessWidget {
                   style: const TextStyle(color: CloudOSColors.secondary, fontSize: 11.5),
                 ),
                 const SizedBox(height: 4),
-                Row(
-                  children: <Widget>[
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                      decoration: BoxDecoration(
-                        color: CloudOSColors.border.withValues(alpha: 0.5),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        notification.source,
-                        style: const TextStyle(color: CloudOSColors.caption, fontSize: 9, fontWeight: FontWeight.w600),
-                      ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: CloudOSColors.border.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    notification.source,
+                    style: const TextStyle(
+                      color: CloudOSColors.caption,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w600,
                     ),
-                  ],
+                  ),
                 ),
               ],
             ),

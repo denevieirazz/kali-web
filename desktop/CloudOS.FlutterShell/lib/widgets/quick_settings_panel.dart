@@ -8,11 +8,15 @@ class QuickSettingsPanel extends StatefulWidget {
   const QuickSettingsPanel({
     required this.snapshot,
     this.onOpenSettings,
+    this.onVolumeChanged,
+    this.onBrightnessChanged,
     super.key,
   });
 
   final CloudSystemSnapshot snapshot;
   final VoidCallback? onOpenSettings;
+  final ValueChanged<double>? onVolumeChanged;
+  final ValueChanged<double>? onBrightnessChanged;
 
   @override
   State<QuickSettingsPanel> createState() => _QuickSettingsPanelState();
@@ -21,12 +25,17 @@ class QuickSettingsPanel extends StatefulWidget {
 class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
   late double volume = widget.snapshot.volume;
   late double brightness = widget.snapshot.brightness;
-  bool wifi = true;
-  bool bluetooth = true;
-  bool nightLight = false;
-  bool focus = false;
-  bool powerSaver = false;
-  bool wslgDisplay = true;
+
+  @override
+  void didUpdateWidget(covariant QuickSettingsPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.snapshot.volume != widget.snapshot.volume) {
+      volume = widget.snapshot.volume;
+    }
+    if (oldWidget.snapshot.brightness != widget.snapshot.brightness) {
+      brightness = widget.snapshot.brightness;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -62,7 +71,7 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                     ),
                     const Spacer(),
                     Tooltip(
-                      message: 'Abrir Painel Completo',
+                      message: 'Abrir Configurações do Windows',
                       child: InkWell(
                         onTap: widget.onOpenSettings,
                         borderRadius: BorderRadius.circular(6),
@@ -84,32 +93,32 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                   crossAxisSpacing: 8,
                   children: <Widget>[
                     _ToggleTile(
-                      label: 'Wi‑Fi 6',
-                      subtitle: wifi ? widget.snapshot.networkName : 'Desativado',
-                      icon: Icons.wifi_rounded,
-                      active: wifi,
-                      onTap: () => setState(() => wifi = !wifi),
+                      label: 'Rede',
+                      subtitle: widget.snapshot.networkAvailable
+                          ? widget.snapshot.networkName
+                          : 'Sem conexão detectada',
+                      icon: widget.snapshot.networkAvailable
+                          ? Icons.wifi_rounded
+                          : Icons.wifi_off_rounded,
+                      active: widget.snapshot.networkAvailable,
                     ),
-                    _ToggleTile(
+                    const _ToggleTile(
                       label: 'Bluetooth',
-                      subtitle: bluetooth ? 'Conectado' : 'Desativado',
+                      subtitle: 'Backend ainda não exposto',
                       icon: Icons.bluetooth_rounded,
-                      active: bluetooth,
-                      onTap: () => setState(() => bluetooth = !bluetooth),
+                      active: false,
                     ),
-                    _ToggleTile(
+                    const _ToggleTile(
                       label: 'Luz Noturna',
-                      subtitle: nightLight ? 'Ativada (Quente)' : 'Desativada',
+                      subtitle: 'Backend ainda não exposto',
                       icon: Icons.nightlight_round,
-                      active: nightLight,
-                      onTap: () => setState(() => nightLight = !nightLight),
+                      active: false,
                     ),
-                    _ToggleTile(
+                    const _ToggleTile(
                       label: 'Modo Foco',
-                      subtitle: focus ? 'Silencioso' : 'Desligado',
+                      subtitle: 'Backend ainda não exposto',
                       icon: Icons.do_not_disturb_on_rounded,
-                      active: focus,
-                      onTap: () => setState(() => focus = !focus),
+                      active: false,
                     ),
                   ],
                 ),
@@ -120,16 +129,20 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                       : volume < 0.5
                           ? Icons.volume_down_rounded
                           : Icons.volume_up_rounded,
-                  percentage: '$volPct%',
+                  percentage: widget.snapshot.volumeAvailable ? '$volPct%' : 'N/D',
                   value: volume,
+                  enabled: widget.snapshot.volumeAvailable,
                   onChanged: (val) => setState(() => volume = val),
+                  onChangeEnd: widget.onVolumeChanged,
                 ),
                 const SizedBox(height: 8),
                 _SliderRow(
                   icon: Icons.brightness_6_rounded,
-                  percentage: '$briPct%',
+                  percentage: widget.snapshot.brightnessAvailable ? '$briPct%' : 'N/D',
                   value: brightness,
+                  enabled: widget.snapshot.brightnessAvailable,
                   onChanged: (val) => setState(() => brightness = val),
+                  onChangeEnd: widget.onBrightnessChanged,
                 ),
                 const SizedBox(height: 12),
                 const Divider(height: 1),
@@ -143,14 +156,24 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                   ),
                   child: Row(
                     children: <Widget>[
-                      const Icon(Icons.battery_charging_full_rounded, color: CloudOSColors.success, size: 20),
+                      Icon(
+                        widget.snapshot.batteryAvailable
+                            ? Icons.battery_5_bar_rounded
+                            : Icons.desktop_windows_rounded,
+                        color: widget.snapshot.batteryAvailable
+                            ? CloudOSColors.success
+                            : CloudOSColors.secondary,
+                        size: 20,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: <Widget>[
                             Text(
-                              '${widget.snapshot.batteryPercent}% • Carregando',
+                              widget.snapshot.batteryAvailable
+                                  ? '${widget.snapshot.batteryPercent}% de bateria'
+                                  : 'Energia do desktop',
                               style: const TextStyle(
                                 color: CloudOSColors.text,
                                 fontSize: 11.5,
@@ -159,24 +182,31 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                             ),
                             Text(
                               widget.snapshot.wslAvailable
-                                  ? 'WSL2: ${widget.snapshot.distros.join(', ')}'
-                                  : 'Windows Desktop Standalone',
+                                  ? widget.snapshot.distros.isEmpty
+                                      ? 'WSL instalado • nenhuma distro registrada'
+                                      : 'WSL: ${widget.snapshot.distros.join(', ')}'
+                                  : 'WSL não disponível',
                               style: const TextStyle(color: CloudOSColors.caption, fontSize: 10),
                             ),
                           ],
                         ),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: CloudOSColors.linuxSoft,
-                          borderRadius: BorderRadius.circular(6),
+                      if (widget.snapshot.wslAvailable)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: CloudOSColors.linuxSoft,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text(
+                            'WSL',
+                            style: TextStyle(
+                              color: CloudOSColors.linux,
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                         ),
-                        child: const Text(
-                          'WSLg Ativo',
-                          style: TextStyle(color: CloudOSColors.linux, fontSize: 9.5, fontWeight: FontWeight.w700),
-                        ),
-                      ),
                     ],
                   ),
                 ),
@@ -195,64 +225,58 @@ class _ToggleTile extends StatelessWidget {
     required this.subtitle,
     required this.icon,
     required this.active,
-    required this.onTap,
   });
 
   final String label;
   final String subtitle;
   final IconData icon;
   final bool active;
-  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-        decoration: BoxDecoration(
-          color: active ? CloudOSColors.accentSoft : CloudOSColors.elevated.withValues(alpha: 0.4),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: active ? CloudOSColors.accent : CloudOSColors.border,
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 160),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: active ? CloudOSColors.accentSoft : CloudOSColors.elevated.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: active ? CloudOSColors.accent : CloudOSColors.border,
+        ),
+      ),
+      child: Row(
+        children: <Widget>[
+          Icon(
+            icon,
+            color: active ? CloudOSColors.accent : CloudOSColors.secondary,
+            size: 18,
           ),
-        ),
-        child: Row(
-          children: <Widget>[
-            Icon(
-              icon,
-              color: active ? CloudOSColors.accent : CloudOSColors.secondary,
-              size: 18,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: CloudOSColors.text,
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                    ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: CloudOSColors.text,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
                   ),
-                  Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: CloudOSColors.caption, fontSize: 9.5),
-                  ),
-                ],
-              ),
+                ),
+                Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: CloudOSColors.caption, fontSize: 9.5),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -263,19 +287,27 @@ class _SliderRow extends StatelessWidget {
     required this.icon,
     required this.percentage,
     required this.value,
+    required this.enabled,
     required this.onChanged,
+    this.onChangeEnd,
   });
 
   final IconData icon;
   final String percentage;
   final double value;
+  final bool enabled;
   final ValueChanged<double> onChanged;
+  final ValueChanged<double>? onChangeEnd;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: <Widget>[
-        Icon(icon, size: 18, color: CloudOSColors.secondary),
+        Icon(
+          icon,
+          size: 18,
+          color: enabled ? CloudOSColors.secondary : CloudOSColors.caption,
+        ),
         const SizedBox(width: 6),
         Expanded(
           child: SliderTheme(
@@ -289,7 +321,8 @@ class _SliderRow extends StatelessWidget {
             ),
             child: Slider(
               value: value.clamp(0.0, 1.0).toDouble(),
-              onChanged: onChanged,
+              onChanged: enabled ? onChanged : null,
+              onChangeEnd: enabled ? onChangeEnd : null,
             ),
           ),
         ),
