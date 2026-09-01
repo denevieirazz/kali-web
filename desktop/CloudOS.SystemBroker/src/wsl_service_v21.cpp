@@ -2,6 +2,8 @@
 
 #include <Windows.h>
 
+#include <algorithm>
+
 namespace CloudOS
 {
 
@@ -97,7 +99,6 @@ void WslServiceV21::Refresh()
         const DWORD attr = GetFileAttributesW(wsl_exe.c_str());
         if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY))
         {
-            // WSL being installed does NOT imply a distro is configured.
             wsl_available_ = true;
         }
     }
