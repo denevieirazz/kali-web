@@ -1,7 +1,7 @@
 name: cloudos_flutter_shell
-description: CloudOS V19 Flutter presentation layer. The native C++ core remains authoritative.
+description: CloudOS V21 Flutter presentation layer backed by the native System Broker.
 publish_to: "none"
-version: 0.1.0+19
+version: 0.1.0+21
 
 environment:
   sdk: ">=3.8.0 <4.0.0"
