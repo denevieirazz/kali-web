@@ -1,0 +1,192 @@
+# CloudOS Flutter Shell V21 — Refactor Status
+
+## Base
+
+- base branch: `work/system-broker-v21`
+- base commit: `264a63c281f04039ec1df239fb356d7636a40ac5`
+- work branch: `refactor/v21-modular-ai`
+- validation PR: `#41`
+- validated code commit: `be9d0796cd92fe0a92405bf40113767ffbb13676`
+
+## Problema inicial
+
+A camada Flutter tinha poucas unidades grandes, o que obrigava agentes a carregar contexto demais para mudanças pequenas.
+
+Maiores concentrações observadas na base:
+
+- `lib/widgets/files_window.dart`: 754 linhas.
+- `lib/widgets/start_panel.dart`: 504 linhas.
+- `lib/widgets/cloud_taskbar.dart`: 395 linhas.
+- `lib/widgets/quick_settings_panel.dart`: 311 linhas.
+- `lib/widgets/notification_center.dart`: 227 linhas.
+- `lib/shell/cloudos_shell.dart`: shell state/orchestration misturado com wallpaper, desktop icons e desktop status.
+- `lib/services/cloudos_bridge.dart`: MethodChannel misturado com parsing, resolução de ícones e fixtures de preview.
+- `lib/models/shell_models.dart`: quatro famílias de modelos no mesmo arquivo.
+
+## Resultado estrutural
+
+### Bootstrap
+
+`lib/main.dart` contém somente bindings + `runApp`, mantendo `export 'app/cloudos_app.dart'` por compatibilidade com callers/testes.
+
+`lib/app/cloudos_app.dart` contém o `MaterialApp`.
+
+### Shell
+
+Extraído de `cloudos_shell.dart`:
+
+- `shell/widgets/desktop_wallpaper.dart`
+- `shell/widgets/desktop_icons.dart`
+- `shell/widgets/desktop_status.dart`
+
+A shell permanece responsável pela orquestração de estado, workspaces, atalhos e surfaces abertas.
+
+### Files
+
+O antigo arquivo de 754 linhas virou export de compatibilidade.
+
+Implementação canônica:
+
+- `features/files/presentation/files_window.dart` — 120 linhas.
+- `features/files/presentation/widgets/files_title_bar.dart` — 131 linhas.
+- `features/files/presentation/widgets/files_sidebar.dart` — 220 linhas.
+- `features/files/presentation/widgets/files_toolbar.dart` — 116 linhas.
+- `features/files/presentation/widgets/files_content.dart` — 42 linhas; apenas escolhe empty/grid/list.
+- `features/files/presentation/widgets/files_grid.dart` — 138 linhas.
+- `features/files/presentation/widgets/files_list.dart` — 86 linhas.
+- `features/files/presentation/widgets/files_empty_state.dart` — 35 linhas.
+- `features/files/presentation/widgets/files_status_bar.dart` — 58 linhas.
+
+### Start
+
+O antigo arquivo de 504 linhas virou export de compatibilidade.
+
+A composição principal foi reduzida para 117 linhas:
+
+- `features/start/domain/start_app_filter.dart` — 31 linhas.
+- `features/start/presentation/start_panel.dart` — 117 linhas.
+- `features/start/presentation/widgets/start_header.dart` — 59 linhas.
+- `features/start/presentation/widgets/start_search_field.dart` — 42 linhas.
+- `features/start/presentation/widgets/start_filter_bar.dart` — 58 linhas.
+- `features/start/presentation/widgets/start_overview.dart` — 89 linhas.
+- `features/start/presentation/widgets/start_app_views.dart` — 216 linhas.
+- `features/start/presentation/widgets/start_footer.dart` — 88 linhas.
+
+### Taskbar
+
+O antigo arquivo de 395 linhas virou export de compatibilidade de 2 linhas.
+
+Implementação canônica:
+
+- `features/taskbar/presentation/cloud_taskbar.dart` — 120 linhas.
+- `features/taskbar/presentation/widgets/taskbar_task_button.dart` — 77 linhas.
+- `features/taskbar/presentation/widgets/taskbar_workspace_switcher.dart` — 75 linhas.
+- `features/taskbar/presentation/widgets/taskbar_system_tray.dart` — 189 linhas.
+
+### Quick Settings
+
+O antigo arquivo de 311 linhas virou export de compatibilidade de 2 linhas.
+
+Implementação canônica:
+
+- `features/quick_settings/presentation/quick_settings_panel.dart` — 161 linhas.
+- `features/quick_settings/presentation/widgets/quick_toggle_tile.dart` — 73 linhas.
+- `features/quick_settings/presentation/widgets/quick_slider_row.dart` — 56 linhas.
+- `features/quick_settings/presentation/widgets/quick_system_summary.dart` — 71 linhas.
+
+Estados antigos `powerSaver` e `wslgDisplay`, que não participavam de UI nem comportamento, foram removidos.
+
+### Notifications
+
+O antigo arquivo de 227 linhas virou export de compatibilidade de 2 linhas.
+
+Implementação canônica:
+
+- `features/notifications/domain/notification_date_formatter.dart` — 27 linhas.
+- `features/notifications/presentation/notification_center_panel.dart` — 139 linhas.
+- `features/notifications/presentation/widgets/notification_card.dart` — 112 linhas.
+- `features/notifications/presentation/widgets/notification_empty_state.dart` — 40 linhas.
+
+### Models
+
+`shell_models.dart` caiu de 98 linhas de implementação para um compatibility barrel de 5 linhas.
+
+Modelos canônicos:
+
+- `models/cloud_app.dart` — 27 linhas.
+- `models/cloud_file_item.dart` — 25 linhas.
+- `models/cloud_notification.dart` — 21 linhas.
+- `models/cloud_system_snapshot.dart` — 21 linhas.
+
+### Dart Native Bridge
+
+`CloudOSBridge` foi reduzido e separado por responsabilidade:
+
+- `services/cloudos_bridge.dart` — transporte MethodChannel + fallbacks.
+- `services/bridge/cloud_app_mapper.dart` — conversão do payload nativo para `CloudApp`.
+- `services/bridge/cloudos_preview_data.dart` — fixtures de preview.
+
+Os contratos públicos `CloudOSBridge.previewApps`, `previewSnapshot`, `previewFiles` e `previewNotifications` foram preservados.
+
+## Compatibilidade preservada
+
+- `lib/widgets/files_window.dart` continua resolvendo `FilesWindow` via export.
+- `lib/widgets/start_panel.dart` continua resolvendo `StartPanel` via export.
+- `lib/widgets/cloud_taskbar.dart` continua resolvendo `CloudTaskbar` via export.
+- `lib/widgets/quick_settings_panel.dart` continua resolvendo `QuickSettingsPanel` via export.
+- `lib/widgets/notification_center.dart` continua resolvendo `NotificationCenterPanel` via export.
+- `lib/models/shell_models.dart` continua expondo todos os tipos compartilhados antigos.
+- `lib/main.dart` continua expondo `CloudOSApp` via export.
+- MethodChannel continua `cloudos/native/v19`.
+- nenhuma alteração foi feita no protocolo NamedPipe V21 ou no System Broker.
+
+## Testes
+
+- `test/shell_smoke_test.dart` continua sendo o smoke de apresentação/bridge existente.
+- `test/modular_logic_test.dart` cobre filtro extraído do Start, data pt-BR do Notification Center e compatibilidade do barrel de modelos.
+
+## Validação final do código
+
+O ambiente de edição atual não possui Flutter/Dart local, portanto a validação canônica foi feita no GitHub Actions sobre o commit `be9d0796cd92fe0a92405bf40113767ffbb13676` em 2026-09-01.
+
+### CloudOS Flutter UI
+
+- workflow run: `33493987417`
+- run number: `118`
+- conclusão: `success`
+- Flutter: `3.44.7`
+- `Build System Broker V21`: success
+- `Test System Broker Self-Test & Contract`: success
+- `flutter analyze --fatal-infos --fatal-warnings`: success
+- widget/unit tests: success
+- Windows Release build: success
+- staging do System Broker: success
+- evidência V21: success
+- package + upload do Flutter preview: success
+
+### CloudOS CI Baseline
+
+- workflow run: `33493987465`
+- run number: `1067`
+- conclusão: `success`
+- lint: success
+- frontend build: success
+- backend/integration tests: success
+- E2E tests: success
+- frontend unit tests: success
+- CloudOS.Host build/tests: success
+- Browser contract/characterization/lifecycle/WebView2 checks executados conforme applicability e workflow concluído com success.
+
+Portanto, o código do refactor no commit `be9d0796cd92fe0a92405bf40113767ffbb13676` está validado pelos dois gates oficiais do PR.
+
+## Resultado para contexto de IA
+
+Os antigos arquivos de 754, 504, 395, 311 e 227 linhas em `lib/widgets/` agora são shims de compatibilidade de 2–3 linhas. A implementação real está organizada por feature e responsabilidade sem duplicar contratos nativos.
+
+Os maiores arquivos restantes do conjunto modularizado representam unidades semânticas reais, não agregadores genéricos. Evitar nova fragmentação apenas por contagem de linhas.
+
+## Escopo que não foi reorganizado
+
+O lado nativo V21 já possui separação por `broker_server`, `protocol`, `event_bus`, `job_manager`, `app_service`, `system_service`, `wsl_service`, `security` e `diagnostics`, então não foi fragmentado apenas por tamanho.
+
+A regra daqui para frente é modularização semântica, não redução artificial de LOC.

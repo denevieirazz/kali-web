@@ -2,15 +2,24 @@
 
 #include <windows.h>
 
+#include <commctrl.h>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
-#include <commctrl.h>
-#include <cstdint>
 
 namespace CloudOS
 {
-struct NativeNotificationItemV12 { std::uint64_t id{}; SYSTEMTIME time{}; std::wstring title, message; int severity{}; bool read{}; };
+struct NativeNotificationItemV12
+{
+    std::uint64_t id{};
+    SYSTEMTIME time{};
+    std::wstring title;
+    std::wstring message;
+    int severity{};
+    bool read{};
+};
+
 class NativeSurfacePreview;
 class CloudOSNativeNotificationCenter final
 {
@@ -30,6 +39,13 @@ public:
         const std::wstring& message,
         int severity = 0);
     static std::size_t UnreadCount();
+    static void Snapshot(
+        std::vector<NativeNotificationItemV12>* items,
+        std::size_t* unread_count,
+        std::uint64_t* revision);
+    static void MarkAllRead();
+    static bool Dismiss(std::uint64_t notification_id);
+    static void ClearAll();
 
 private:
     friend class NativeSurfacePreview;
@@ -43,7 +59,6 @@ private:
     LRESULT DrawCard(NMLVCUSTOMDRAW* draw);
     void Layout();
     void RebuildList();
-    void MarkAllRead();
     LRESULT HandleMessage(HWND window, UINT message, WPARAM w_param, LPARAM l_param);
     static LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM w_param, LPARAM l_param);
 
@@ -56,3 +71,5 @@ private:
     HBRUSH background_{};
 };
 } // namespace CloudOS
+
+#include "native_shell_notification_server_v21.h"

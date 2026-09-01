@@ -22,7 +22,7 @@ struct NativeAppItem final
 {
     std::string id;
     std::string name;
-    std::string platform; // "windows", "linux", "cloudos"
+    std::string platform;
     std::string subtitle;
     std::string distro;
     std::string category;
@@ -32,13 +32,29 @@ struct NativeAppItem final
     bool recent{false};
 };
 
+struct NativeFileItem final
+{
+    std::string name;
+    std::string path;
+    bool is_folder{};
+    std::string size_formatted;
+    std::string modified_formatted;
+    std::string source;
+    std::string extension;
+    std::string entry_id;
+};
+
 struct NativeSystemSnapshot final
 {
     std::string device_name;
+    bool network_available{false};
     std::string network_name;
-    double volume{0.72};
-    double brightness{0.85};
-    int battery_percent{100};
+    bool volume_available{false};
+    double volume{};
+    bool brightness_available{false};
+    double brightness{};
+    bool battery_available{false};
+    int battery_percent{};
     bool wsl_available{false};
     std::vector<std::string> distros;
     int current_workspace{1};
@@ -63,10 +79,13 @@ public:
         std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
 
     std::vector<NativeAppItem> GetApps();
+    bool GetFiles(const std::string& location, std::vector<NativeFileItem>& out_files);
+    bool GetFilesEntry(const std::string& entry_id, std::vector<NativeFileItem>& out_files);
+    bool OpenFileEntry(const std::string& entry_id);
     NativeSystemSnapshot GetSystemSnapshot();
     bool LaunchApp(const std::string& app_id);
-    void SetVolume(double volume);
-    void SetBrightness(double brightness);
+    bool SetVolume(double volume);
+    bool SetBrightness(double brightness);
 
     [[nodiscard]] bool IsRegistered() const noexcept { return is_registered_.load(); }
 

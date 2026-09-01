@@ -29,6 +29,9 @@ if ($manifest.product -ne 'CloudOS Native Shell' -or $manifest.shell_authority -
 if ($manifest.recovery_authority -ne 'CloudOS.Supervisor.exe V11') {
     throw 'Native build manifest does not identify Shell Supervisor V11 as recovery authority.'
 }
+if ($manifest.broker_authority -ne 'CloudOS.SystemBroker.exe V21') {
+    throw 'Native build manifest does not identify System Broker V21 as broker authority.'
+}
 if ($manifest.configuration -ne $Configuration -or $manifest.platform -ne 'x64') {
     throw "Native manifest configuration/platform mismatch: $($manifest.configuration)/$($manifest.platform)"
 }
@@ -39,7 +42,13 @@ if ($manifest.source_fingerprint_sha256 -notmatch '^[0-9a-f]{64}$') {
     throw 'Native manifest contains an invalid source fingerprint.'
 }
 
-$expectedNames = @('CloudOS.exe', 'CloudOS.NativeRuntime.dll', 'CloudOS.Supervisor.exe')
+$expectedNames = @(
+    'CloudOS.exe',
+    'CloudOS.NativeRuntime.dll',
+    'CloudOS.Supervisor.exe',
+    'CloudOS.SystemBroker.exe',
+    'CloudOS.BrokerProbe.exe'
+)
 foreach ($name in $expectedNames) {
     $record = @($manifest.files | Where-Object { $_.name -eq $name })
     if ($record.Count -ne 1) {
@@ -84,4 +93,4 @@ if ($CheckSourceFingerprint) {
     }
 }
 
-Write-Host "PASS: native release integrity verified ($Configuration x64, Supervisor V11, fingerprint=$stamp)."
+Write-Host "PASS: native V21 runtime integrity verified ($Configuration x64, $($expectedNames.Count) signed components, fingerprint=$stamp)."

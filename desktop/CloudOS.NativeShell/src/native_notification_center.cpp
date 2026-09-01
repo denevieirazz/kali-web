@@ -7,8 +7,8 @@
 #include <commctrl.h>
 
 #include <algorithm>
-#include <mutex>
 #include <atomic>
+#include <mutex>
 #include "native_window_manager.h"
 #include <new>
 #include <vector>
@@ -28,6 +28,14 @@ constexpr UINT kNotificationChangedV12=WM_APP+0x61A;
 
 std::mutex g_notification_mutex;
 std::vector<NotificationEntry> g_notifications;
+
+void NotifyChanged()
+{
+    if (auto target = g_notification_target_v12.load())
+    {
+        PostMessageW(target, kNotificationChangedV12, 0, 0);
+    }
+}
 
 std::wstring TimeText(const SYSTEMTIME& time)
 {
@@ -136,11 +144,13 @@ void CloudOSNativeNotificationCenter::Post(const std::wstring& title, const std:
     entry.message = message;
     entry.severity = severity;
     entry.read = false;
-    std::scoped_lock lock(g_notification_mutex);
-    entry.id=++g_revision_v12;
-    if(auto target=g_notification_target_v12.load()) PostMessageW(target,kNotificationChangedV12,0,0);
-    g_notifications.insert(g_notifications.begin(), std::move(entry));
-    if (g_notifications.size() > 100) g_notifications.resize(100);
+    {
+        std::scoped_lock lock(g_notification_mutex);
+        entry.id=++g_revision_v12;
+        g_notifications.insert(g_notifications.begin(), std::move(entry));
+        if (g_notifications.size() > 100) g_notifications.resize(100);
+    }
+    NotifyChanged();
 }
 
 std::size_t CloudOSNativeNotificationCenter::UnreadCount()
@@ -150,12 +160,76 @@ std::size_t CloudOSNativeNotificationCenter::UnreadCount()
         [](const NotificationEntry& entry) { return !entry.read; }));
 }
 
-void CloudOSNativeNotificationCenter::MarkAllRead()
+void CloudOSNativeNotificationCenter::Snapshot(
+    std::vector<NativeNotificationItemV12>* items,
+    std::size_t* unread_count,
+    std::uint64_t* revision)
 {
     std::scoped_lock lock(g_notification_mutex);
-    for (auto& entry : g_notifications) entry.read = true;
-    ++g_revision_v12;
-    if(auto target=g_notification_target_v12.load()) PostMessageW(target,kNotificationChangedV12,0,0);
+    if (items != nullptr) *items = g_notifications;
+    if (unread_count != nullptr)
+    {
+        *unread_count = static_cast<std::size_t>(std::count_if(
+            g_notifications.cbegin(),
+            g_notifications.cend(),
+            [](const NotificationEntry& entry) { return !entry.read; }));
+    }
+    if (revision != nullptr) *revision = g_revision_v12;
+}
+
+void CloudOSNativeNotificationCenter::MarkAllRead()
+{
+    bool changed = false;
+    {
+        std::scoped_lock lock(g_notification_mutex);
+        for (auto& entry : g_notifications)
+        {
+            if (!entry.read)
+            {
+                entry.read = true;
+                changed = true;
+            }
+        }
+        if (changed) ++g_revision_v12;
+    }
+    if (changed) NotifyChanged();
+}
+
+bool CloudOSNativeNotificationCenter::Dismiss(std::uint64_t notification_id)
+{
+    bool changed = false;
+    {
+        std::scoped_lock lock(g_notification_mutex);
+        const auto it = std::find_if(
+            g_notifications.begin(),
+            g_notifications.end(),
+            [notification_id](const NotificationEntry& entry) {
+                return entry.id == notification_id;
+            });
+        if (it != g_notifications.end())
+        {
+            g_notifications.erase(it);
+            ++g_revision_v12;
+            changed = true;
+        }
+    }
+    if (changed) NotifyChanged();
+    return changed;
+}
+
+void CloudOSNativeNotificationCenter::ClearAll()
+{
+    bool changed = false;
+    {
+        std::scoped_lock lock(g_notification_mutex);
+        if (!g_notifications.empty())
+        {
+            g_notifications.clear();
+            ++g_revision_v12;
+            changed = true;
+        }
+    }
+    if (changed) NotifyChanged();
 }
 
 void CloudOSNativeNotificationCenter::Refresh()
@@ -305,9 +379,8 @@ LRESULT CloudOSNativeNotificationCenter::HandleMessage(HWND window, UINT message
     case WM_COMMAND:
         if (LOWORD(w_param) == kClearId)
         {
-            { std::scoped_lock lock(g_notification_mutex); g_notifications.clear(); ++g_revision_v12; }
+            ClearAll();
             RebuildList();
-            PostMessageW(window_, kNotificationChangedV12, 0, 0);
             return 0;
         }
         break;

@@ -1,5 +1,7 @@
 #include "native_shell_bridge.h"
 
+#include "native_shell_activation_server_v21.h"
+
 #include <mutex>
 #include <utility>
 
@@ -24,8 +26,11 @@ bool Invoke(const NativeShellBridge::Callback& callback)
 
 void NativeShellBridge::SetWorkspaceOverviewCallback(Callback callback)
 {
-    std::scoped_lock lock(g_bridge_mutex);
-    g_workspace_overview_callback = std::move(callback);
+    {
+        std::scoped_lock lock(g_bridge_mutex);
+        g_workspace_overview_callback = std::move(callback);
+    }
+    (void)NativeShellActivationServerV21::Start(GetModuleHandleW(nullptr));
 }
 
 void NativeShellBridge::SetShowDesktopCallback(Callback callback)
@@ -56,8 +61,11 @@ bool NativeShellBridge::ToggleShowDesktop()
 
 void NativeShellBridge::Clear() noexcept
 {
-    std::scoped_lock lock(g_bridge_mutex);
-    g_workspace_overview_callback = {};
-    g_show_desktop_callback = {};
+    {
+        std::scoped_lock lock(g_bridge_mutex);
+        g_workspace_overview_callback = {};
+        g_show_desktop_callback = {};
+    }
+    NativeShellActivationServerV21::Stop();
 }
 } // namespace CloudOS

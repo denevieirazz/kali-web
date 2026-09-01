@@ -14,6 +14,8 @@ $stampPath = Join-Path $out '.cloudos-build-fingerprint'
 $exePath = Join-Path $out 'CloudOS.exe'
 $dllPath = Join-Path $out 'CloudOS.NativeRuntime.dll'
 $supervisorPath = Join-Path $out 'CloudOS.Supervisor.exe'
+$brokerPath = Join-Path $out 'CloudOS.SystemBroker.exe'
+$probePath = Join-Path $out 'CloudOS.BrokerProbe.exe'
 
 $currentFingerprint = $null
 try { $currentFingerprint = (& $fingerprintScript -Root $rootPath | Select-Object -Last 1).Trim() } catch {}
@@ -46,6 +48,7 @@ if (Get-Command git.exe -ErrorAction SilentlyContinue) {
 $status = [ordered]@{
     shell = 'C++/Win32 native'
     recovery = 'CloudOS.Supervisor.exe V11'
+    broker = 'CloudOS.SystemBroker.exe V21'
     configuration = 'Release x64'
     git_head = $gitHead
     current_source_fingerprint = $currentFingerprint
@@ -56,6 +59,8 @@ $status = [ordered]@{
     exe_exists = Test-Path -LiteralPath $exePath
     runtime_exists = Test-Path -LiteralPath $dllPath
     supervisor_exists = Test-Path -LiteralPath $supervisorPath
+    broker_exists = Test-Path -LiteralPath $brokerPath
+    probe_exists = Test-Path -LiteralPath $probePath
     manifest_exists = Test-Path -LiteralPath $manifestPath
     manifest_built_utc = if ($manifest) { $manifest.built_utc } else { $null }
     manifest_git_head = if ($manifest) { $manifest.git_head } else { $null }
@@ -75,4 +80,4 @@ if (-not $status.ready_to_run) {
 }
 
 Write-Host ''
-Write-Host 'READY: shell, runtime e Supervisor V11 correspondem as fontes atuais e passaram na verificacao SHA256.'
+Write-Host 'READY: Shell, Runtime, Supervisor V11, System Broker V21 e BrokerProbe correspondem as fontes atuais e passaram na verificacao SHA256.'

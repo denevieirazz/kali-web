@@ -10,6 +10,8 @@ $sourceRoots = @(
     (Join-Path $rootPath 'desktop\CloudOS.NativeRuntime'),
     (Join-Path $rootPath 'desktop\CloudOS.NativeShell'),
     (Join-Path $rootPath 'desktop\CloudOS.NativeRecovery'),
+    (Join-Path $rootPath 'desktop\CloudOS.SystemBroker'),
+    (Join-Path $rootPath 'desktop\CloudOS.BrokerProbe'),
     (Join-Path $rootPath 'scripts\native')
 )
 

@@ -18,6 +18,7 @@ public:
 
     [[nodiscard]] bool IsWslAvailable();
     [[nodiscard]] std::vector<std::string> GetDistributions();
+    [[nodiscard]] std::string GetDefaultDistribution();
     [[nodiscard]] uint64_t GetGeneration() const noexcept { return generation_.load(); }
 
     void Invalidate();
@@ -31,6 +32,7 @@ private:
     mutable std::mutex mutex_;
     bool wsl_available_{false};
     std::vector<std::string> distros_;
+    std::string default_distro_;
     std::atomic_bool initialized_{false};
     std::atomic_uint64_t generation_{1};
 };

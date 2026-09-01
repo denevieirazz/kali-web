@@ -1,12 +1,235 @@
 #include "app_service_v21.h"
 #include "event_bus_v21.h"
+#include "native_shell_activation_client_v21.h"
 #include "wsl_service_v21.h"
 
 #include <Windows.h>
 #include <shellapi.h>
 
+#include <algorithm>
+#include <array>
+#include <string_view>
+
 namespace CloudOS
 {
+
+namespace
+{
+bool LaunchSucceeded(HINSTANCE result)
+{
+    return reinterpret_cast<intptr_t>(result) > 32;
+}
+
+struct SettingsRoute final
+{
+    std::string_view app_id;
+    const wchar_t* uri;
+};
+
+const wchar_t* ResolveSettingsUri(std::string_view app_id) noexcept
+{
+    static constexpr std::array<SettingsRoute, 6> kRoutes = {{
+        {"settings", L"ms-settings:"},
+        {"cloudos:settings", L"ms-settings:"},
+        {"cloudos:settings:wifi", L"ms-settings:network-wifi"},
+        {"cloudos:settings:bluetooth", L"ms-settings:bluetooth"},
+        {"cloudos:settings:nightlight", L"ms-settings:nightlight"},
+        {"cloudos:settings:focus", L"ms-settings:quiethours"},
+    }};
+    for (const SettingsRoute& route : kRoutes)
+    {
+        if (app_id == route.app_id) return route.uri;
+    }
+    return nullptr;
+}
+
+std::wstring Utf8ToWide(std::string_view value)
+{
+    if (value.empty()) return {};
+    const int length = MultiByteToWideChar(
+        CP_UTF8,
+        MB_ERR_INVALID_CHARS,
+        value.data(),
+        static_cast<int>(value.size()),
+        nullptr,
+        0);
+    if (length <= 0) return {};
+
+    std::wstring result(static_cast<size_t>(length), L'\0');
+    return MultiByteToWideChar(
+               CP_UTF8,
+               MB_ERR_INVALID_CHARS,
+               value.data(),
+               static_cast<int>(value.size()),
+               result.data(),
+               length) == length
+        ? result
+        : std::wstring{};
+}
+
+std::wstring QuoteArgument(std::wstring_view value)
+{
+    std::wstring result = L"\"";
+    size_t backslashes = 0;
+    for (const wchar_t character : value)
+    {
+        if (character == L'\\')
+        {
+            ++backslashes;
+            continue;
+        }
+        if (character == L'"')
+        {
+            result.append(backslashes * 2 + 1, L'\\');
+            result.push_back(L'"');
+            backslashes = 0;
+            continue;
+        }
+        result.append(backslashes, L'\\');
+        backslashes = 0;
+        result.push_back(character);
+    }
+    result.append(backslashes * 2, L'\\');
+    result.push_back(L'"');
+    return result;
+}
+
+bool IsAllowedLinuxCommand(std::string_view command)
+{
+    static constexpr std::array<std::string_view, 4> kAllowedCommands = {
+        "gimp",
+        "wireshark",
+        "zenmap",
+        "xterm",
+    };
+    return std::find(kAllowedCommands.begin(), kAllowedCommands.end(), command) !=
+        kAllowedCommands.end();
+}
+
+bool ResolveWslLaunch(
+    const std::string& app_id,
+    const std::vector<std::string>& distros,
+    const std::string& default_distro,
+    std::string& out_distro,
+    std::string& out_command)
+{
+    for (const std::string& distro : distros)
+    {
+        const std::string prefix = "wsl:" + distro + ":";
+        if (app_id == prefix + "terminal")
+        {
+            out_distro = distro;
+            out_command.clear();
+            return true;
+        }
+        for (const std::string_view command : {std::string_view("gimp"), std::string_view("wireshark"), std::string_view("zenmap"), std::string_view("xterm")})
+        {
+            if (app_id == prefix + std::string(command))
+            {
+                out_distro = distro;
+                out_command = command;
+                return true;
+            }
+        }
+    }
+
+    if (default_distro.empty()) return false;
+
+    if (app_id == "wsl:ubuntu-terminal" || app_id == "linux:ubuntu-terminal" || app_id == "ubuntu-terminal")
+    {
+        out_distro = default_distro;
+        out_command.clear();
+        return true;
+    }
+    if (app_id == "wsl:gimp" || app_id == "linux:gimp" || app_id == "gimp")
+    {
+        out_distro = default_distro;
+        out_command = "gimp";
+        return true;
+    }
+    if (app_id == "wsl:wireshark" || app_id == "linux:wireshark")
+    {
+        out_distro = default_distro;
+        out_command = "wireshark";
+        return true;
+    }
+    if (app_id == "wsl:zenmap" || app_id == "linux:zenmap")
+    {
+        out_distro = default_distro;
+        out_command = "zenmap";
+        return true;
+    }
+    if (app_id == "wsl:xterm" || app_id == "linux:xterm")
+    {
+        out_distro = default_distro;
+        out_command = "xterm";
+        return true;
+    }
+    return false;
+}
+
+bool LaunchWsl(const std::string& distro, const std::string& command, std::string& err)
+{
+    const std::wstring wide_distro = Utf8ToWide(distro);
+    if (wide_distro.empty())
+    {
+        err = "WSL distribution contains invalid UTF-8";
+        return false;
+    }
+
+    std::wstring parameters = L"-d " + QuoteArgument(wide_distro);
+    if (!command.empty())
+    {
+        if (!IsAllowedLinuxCommand(command))
+        {
+            err = "Linux command is not allowlisted";
+            return false;
+        }
+        const std::wstring wide_command = Utf8ToWide(command);
+        if (wide_command.empty())
+        {
+            err = "Linux command contains invalid UTF-8";
+            return false;
+        }
+        parameters += L" -- " + QuoteArgument(wide_command);
+    }
+
+    if (!LaunchSucceeded(ShellExecuteW(
+            nullptr,
+            L"open",
+            L"wsl.exe",
+            parameters.c_str(),
+            nullptr,
+            SW_SHOWNORMAL)))
+    {
+        err = "Failed to dispatch WSL application";
+        return false;
+    }
+
+    JsonObject payload;
+    payload["distro"] = JsonValue(distro);
+    payload["surface"] = JsonValue(command.empty() ? "terminal" : command);
+    EventBusV21::Instance().Publish("wsl.launchRequested", payload);
+    return true;
+}
+
+bool ActivateNativeCloudOSApp(
+    ShellActivationV21::App app,
+    const char* surface,
+    std::string& err)
+{
+    if (!NativeShellActivationClientV21::Activate(app, &err))
+    {
+        return false;
+    }
+
+    JsonObject payload;
+    payload["surface"] = JsonValue(surface);
+    payload["authority"] = JsonValue("CloudOS.NativeShell");
+    EventBusV21::Instance().Publish("shell.activationRequested", payload);
+    return true;
+}
+} // namespace
 
 JsonObject AppItem::ToJsonObject() const
 {
@@ -62,8 +285,8 @@ void AppServiceV21::Refresh()
 
     // 1. CloudOS First-Party Applications
     apps_.push_back({"cloudos:files", "Arquivos", "cloudos", "Windows + Linux (WSL2)", "", "Sistema", "CloudOS", true, false, false, "files", true, false});
-    apps_.push_back({"cloudos:browser", "Navegador Web", "cloudos", "Chromium / Web Browser", "", "Produtividade", "CloudOS", true, false, false, "browser", true, true});
-    apps_.push_back({"cloudos:terminal", "Terminal", "cloudos", "Prompt de Comando / Shell", "", "Utilitários", "CloudOS", true, false, false, "terminal", true, true});
+    apps_.push_back({"cloudos:browser", "Navegador Web", "cloudos", "WebView2 nativo do CloudOS", "", "Produtividade", "CloudOS", true, false, false, "browser", true, true});
+    apps_.push_back({"cloudos:terminal", "Terminal", "cloudos", "Terminal nativo / ConPTY", "", "Utilitários", "CloudOS", true, false, false, "terminal", true, true});
     apps_.push_back({"cloudos:calculator", "Calculadora", "cloudos", "Calculadora de Sistema", "", "Utilitários", "CloudOS", true, false, false, "calculator", false, false});
     apps_.push_back({"cloudos:settings", "Configurações", "cloudos", "Painel de Controle e Ajustes", "", "Sistema", "CloudOS", true, false, false, "settings", false, false});
     apps_.push_back({"cloudos:drive", "CloudOS Drive", "cloudos", "Workspace & Projetos", "", "Produtividade", "CloudOS", true, false, false, "drive", false, false});
@@ -77,16 +300,29 @@ void AppServiceV21::Refresh()
     apps_.push_back({"windows:cmd", "Prompt de Comando", "windows", "cmd.exe", "", "Utilitários", "Windows", true, false, false, "cmd", false, false});
     apps_.push_back({"windows:explorer", "Windows Explorer", "windows", "Explorador de Arquivos do Windows", "", "Sistema", "Windows", true, false, false, "explorer", false, false});
 
-    // 3. Linux / WSLg GUI Applications
+    // 3. Linux / WSL. Catalog discovery stays passive: it never starts a distro.
+    // Only registered distros are advertised, and only the terminal is guaranteed
+    // without probing packages inside Linux. WSLg apps may still be launched through
+    // the explicit legacy/dynamic allowlist, which is an intentional user action.
     const auto distros = WslServiceV21::Instance().GetDistributions();
-    if (!distros.empty())
+    for (const std::string& distro : distros)
     {
-        const std::string default_distro = distros.front();
-        apps_.push_back({"wsl:ubuntu-terminal", "Ubuntu Terminal", "linux", "Linux Bash Shell (" + default_distro + ")", default_distro, "Linux / WSL", "Ubuntu (WSL)", true, false, false, "terminal", true, true});
-        apps_.push_back({"wsl:gimp", "GIMP Image Editor", "linux", "GNU Image Manipulation Program (WSLg)", default_distro, "Produtividade", "Ubuntu (WSL)", true, true, false, "gimp", true, false});
-        apps_.push_back({"wsl:wireshark", "Wireshark", "linux", "Network Protocol Analyzer (WSLg)", default_distro, "Utilitários", "Ubuntu (WSL)", true, true, false, "wireshark", false, false});
-        apps_.push_back({"wsl:zenmap", "Zenmap", "linux", "Security Scanner GUI (WSLg)", default_distro, "Utilitários", "Ubuntu (WSL)", true, true, false, "zenmap", false, false});
-        apps_.push_back({"wsl:xterm", "XTerm", "linux", "X11 Terminal Emulator (WSLg)", default_distro, "Linux / WSL", "Ubuntu (WSL)", true, true, false, "terminal", false, false});
+        const std::string source = distro + " (WSL)";
+        apps_.push_back({
+            "wsl:" + distro + ":terminal",
+            distro + " Terminal",
+            "linux",
+            "Linux shell (lazy start)",
+            distro,
+            "Linux / WSL",
+            source,
+            true,
+            false,
+            false,
+            "terminal",
+            true,
+            true,
+        });
     }
 
     initialized_.store(true);
@@ -94,108 +330,97 @@ void AppServiceV21::Refresh()
 
 bool AppServiceV21::LaunchApp(const std::string& app_id, std::string& err)
 {
-    // Defensive whitelist resolution: reject arbitrary command injection
-    if (app_id == "files" || app_id == "cloudos:files")
-    {
-        ShellExecuteW(nullptr, L"open", L"explorer.exe", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
-    }
+    // CloudOS first-party Browser/Terminal are owned by the NativeShell. The Broker
+    // asks the authoritative shell to activate them instead of dispatching substitute
+    // Windows applications from the broker process.
     if (app_id == "browser" || app_id == "cloudos:browser")
     {
-        ShellExecuteW(nullptr, L"open", L"https://google.com", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
+        return ActivateNativeCloudOSApp(
+            ShellActivationV21::App::Browser,
+            "browser",
+            err);
     }
     if (app_id == "terminal" || app_id == "cloudos:terminal")
     {
-        ShellExecuteW(nullptr, L"open", L"cmd.exe", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
+        return ActivateNativeCloudOSApp(
+            ShellActivationV21::App::Terminal,
+            "terminal",
+            err);
+    }
+
+    // Defensive whitelist resolution: reject arbitrary command injection.
+    if (app_id == "files" || app_id == "cloudos:files")
+    {
+        return LaunchSucceeded(ShellExecuteW(nullptr, L"open", L"explorer.exe", nullptr, nullptr, SW_SHOWNORMAL));
     }
     if (app_id == "calculator" || app_id == "cloudos:calculator")
     {
-        ShellExecuteW(nullptr, L"open", L"calc.exe", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
+        return LaunchSucceeded(ShellExecuteW(nullptr, L"open", L"calc.exe", nullptr, nullptr, SW_SHOWNORMAL));
     }
-    if (app_id == "settings" || app_id == "cloudos:settings")
+    if (const wchar_t* settings_uri = ResolveSettingsUri(app_id); settings_uri != nullptr)
     {
-        ShellExecuteW(nullptr, L"open", L"ms-settings:", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
+        return LaunchSucceeded(ShellExecuteW(nullptr, L"open", settings_uri, nullptr, nullptr, SW_SHOWNORMAL));
     }
     if (app_id == "drive" || app_id == "cloudos:drive")
     {
-        WCHAR user_profile[MAX_PATH];
+        WCHAR user_profile[MAX_PATH]{};
         if (GetEnvironmentVariableW(L"USERPROFILE", user_profile, MAX_PATH) > 0)
         {
-            ShellExecuteW(nullptr, L"open", user_profile, nullptr, nullptr, SW_SHOWNORMAL);
-            return true;
+            return LaunchSucceeded(ShellExecuteW(nullptr, L"open", user_profile, nullptr, nullptr, SW_SHOWNORMAL));
         }
-        return true;
+        err = "USERPROFILE is unavailable";
+        return false;
     }
     if (app_id == "trash" || app_id == "cloudos:trash")
     {
-        ShellExecuteW(nullptr, L"open", L"shell:RecycleBinFolder", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
+        return LaunchSucceeded(ShellExecuteW(nullptr, L"open", L"shell:RecycleBinFolder", nullptr, nullptr, SW_SHOWNORMAL));
     }
 
     // Windows Native Apps
     if (app_id == "windows:notepad")
     {
-        ShellExecuteW(nullptr, L"open", L"notepad.exe", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
+        return LaunchSucceeded(ShellExecuteW(nullptr, L"open", L"notepad.exe", nullptr, nullptr, SW_SHOWNORMAL));
     }
     if (app_id == "windows:vscode")
     {
-        ShellExecuteW(nullptr, L"open", L"code.cmd", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
+        return LaunchSucceeded(ShellExecuteW(nullptr, L"open", L"code.cmd", nullptr, nullptr, SW_SHOWNORMAL));
     }
     if (app_id == "windows:powershell")
     {
-        ShellExecuteW(nullptr, L"open", L"powershell.exe", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
+        return LaunchSucceeded(ShellExecuteW(nullptr, L"open", L"powershell.exe", nullptr, nullptr, SW_SHOWNORMAL));
     }
     if (app_id == "windows:taskmgr")
     {
-        ShellExecuteW(nullptr, L"open", L"taskmgr.exe", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
+        return LaunchSucceeded(ShellExecuteW(nullptr, L"open", L"taskmgr.exe", nullptr, nullptr, SW_SHOWNORMAL));
     }
     if (app_id == "windows:cmd")
     {
-        ShellExecuteW(nullptr, L"open", L"cmd.exe", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
+        return LaunchSucceeded(ShellExecuteW(nullptr, L"open", L"cmd.exe", nullptr, nullptr, SW_SHOWNORMAL));
     }
     if (app_id == "windows:explorer")
     {
-        ShellExecuteW(nullptr, L"open", L"explorer.exe", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
+        return LaunchSucceeded(ShellExecuteW(nullptr, L"open", L"explorer.exe", nullptr, nullptr, SW_SHOWNORMAL));
     }
 
-    // Linux / WSLg Apps
-    if (app_id == "wsl:ubuntu-terminal" || app_id == "linux:ubuntu-terminal" || app_id == "ubuntu-terminal")
+    // Linux / WSLg apps are the lazy-start boundary. Merely opening Start/Search or
+    // loading system state never invokes wsl.exe. Only an explicit launch arrives here.
+    const auto distros = WslServiceV21::Instance().GetDistributions();
+    if (!distros.empty() && WslServiceV21::Instance().IsWslAvailable())
     {
-        ShellExecuteW(nullptr, L"open", L"wsl.exe", L"~", nullptr, SW_SHOWNORMAL);
-        return true;
-    }
-    if (app_id == "wsl:gimp" || app_id == "linux:gimp" || app_id == "gimp")
-    {
-        ShellExecuteW(nullptr, L"open", L"wsl.exe", L"-d Ubuntu -- gimp", nullptr, SW_SHOWNORMAL);
-        return true;
-    }
-    if (app_id == "wsl:wireshark" || app_id == "linux:wireshark")
-    {
-        ShellExecuteW(nullptr, L"open", L"wsl.exe", L"-d Ubuntu -- wireshark", nullptr, SW_SHOWNORMAL);
-        return true;
-    }
-    if (app_id == "wsl:zenmap" || app_id == "linux:zenmap")
-    {
-        ShellExecuteW(nullptr, L"open", L"wsl.exe", L"-d Ubuntu -- zenmap", nullptr, SW_SHOWNORMAL);
-        return true;
-    }
-    if (app_id == "wsl:xterm" || app_id == "linux:xterm")
-    {
-        ShellExecuteW(nullptr, L"open", L"wsl.exe", L"-d Ubuntu -- xterm", nullptr, SW_SHOWNORMAL);
-        return true;
+        std::string distro;
+        std::string command;
+        if (ResolveWslLaunch(
+                app_id,
+                distros,
+                WslServiceV21::Instance().GetDefaultDistribution(),
+                distro,
+                command))
+        {
+            return LaunchWsl(distro, command, err);
+        }
     }
 
-    err = "Invalid or unverified application identifier: " + app_id;
+    err = "Invalid or unavailable application identifier: " + app_id;
     return false;
 }
 

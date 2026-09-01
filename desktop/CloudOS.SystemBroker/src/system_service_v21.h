@@ -19,9 +19,10 @@ struct SystemSnapshot final
     int battery_percent{100};
     bool network_available{true};
     std::string network_name;
-    double volume{0.72};
-    bool brightness_available{true};
-    double brightness{0.85};
+    bool volume_available{false};
+    double volume{0.0};
+    bool brightness_available{false};
+    double brightness{0.0};
     bool wsl_available{false};
     std::vector<std::string> distros;
     int current_workspace{1};

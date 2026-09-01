@@ -62,15 +62,50 @@ int main(int argc, char* argv[])
     if (cmd == "--help" || cmd == "-h")
     {
         std::cout << "CloudOS Broker Probe CLI V21\n"
-                  << "Usage: CloudOS.BrokerProbe.exe [COMMAND]\n"
+                  << "Usage: CloudOS.BrokerProbe.exe [COMMAND] [VALUE]\n"
                   << "Commands:\n"
-                  << "  ping          Ping broker health (health.ping)\n"
-                  << "  status        Check broker status (health.status)\n"
-                  << "  capabilities  Query supported capabilities (system.capabilities)\n"
-                  << "  apps          Query unified application catalog (apps.list)\n"
-                  << "  snapshot      Query system snapshot (system.snapshot)\n"
-                  << "  diagnostics   Query diagnostics snapshot (diagnostics.snapshot)\n";
+                  << "  ping                    Ping broker health (health.ping)\n"
+                  << "  status                  Check broker status (health.status)\n"
+                  << "  capabilities            Query supported capabilities (system.capabilities)\n"
+                  << "  apps                    Query unified application catalog (apps.list)\n"
+                  << "  files LOCATION          List an allowlisted Files location (files.list)\n"
+                  << "  snapshot                Query system snapshot (system.snapshot)\n"
+                  << "  set-volume VALUE        Set Windows master volume (system.volume.set)\n"
+                  << "  set-brightness VALUE    Set display brightness (system.brightness.set)\n"
+                  << "  diagnostics             Query diagnostics snapshot (diagnostics.snapshot)\n";
         return 0;
+    }
+
+    bool has_value = false;
+    double numeric_value = 0.0;
+    if (cmd == "set-volume" || cmd == "set-brightness")
+    {
+        if (argc < 3)
+        {
+            std::cerr << "{\"ok\":false,\"error\":{\"code\":\"invalid_argument\",\"message\":\"A numeric VALUE is required\"}}" << std::endl;
+            return 1;
+        }
+        try
+        {
+            numeric_value = std::stod(argv[2]);
+            has_value = true;
+        }
+        catch (...)
+        {
+            std::cerr << "{\"ok\":false,\"error\":{\"code\":\"invalid_argument\",\"message\":\"VALUE must be numeric\"}}" << std::endl;
+            return 1;
+        }
+    }
+
+    std::string location;
+    if (cmd == "files")
+    {
+        if (argc < 3)
+        {
+            std::cerr << "{\"ok\":false,\"error\":{\"code\":\"invalid_argument\",\"message\":\"An allowlisted LOCATION id is required\"}}" << std::endl;
+            return 1;
+        }
+        location = argv[2];
     }
 
     std::wstring pipe_name = CloudOS::SecurityV21::GetCommandPipeName();
@@ -89,7 +124,6 @@ int main(int argc, char* argv[])
         return 2;
     }
 
-    // 1. Handshake
     CloudOS::BrokerRequest hello_req;
     hello_req.protocol = CloudOS::kProtocolVersion;
     hello_req.id = "probe-hello";
@@ -112,13 +146,15 @@ int main(int argc, char* argv[])
         return 3;
     }
 
-    // Map command to method
     std::string method = "health.ping";
     if (cmd == "ping") method = "health.ping";
     else if (cmd == "status") method = "health.status";
     else if (cmd == "capabilities") method = "system.capabilities";
     else if (cmd == "apps") method = "apps.list";
+    else if (cmd == "files") method = "files.list";
     else if (cmd == "snapshot") method = "system.snapshot";
+    else if (cmd == "set-volume") method = "system.volume.set";
+    else if (cmd == "set-brightness") method = "system.brightness.set";
     else if (cmd == "diagnostics") method = "diagnostics.snapshot";
     else method = cmd;
 
@@ -126,6 +162,14 @@ int main(int argc, char* argv[])
     req.protocol = CloudOS::kProtocolVersion;
     req.id = "probe-cmd";
     req.method = method;
+    if (has_value)
+    {
+        req.payload["value"] = CloudOS::JsonValue(numeric_value);
+    }
+    if (cmd == "files")
+    {
+        req.payload["location"] = CloudOS::JsonValue(location);
+    }
 
     if (!CloudOS::SendFrame(pipe, CloudOS::SerializeRequest(req)))
     {

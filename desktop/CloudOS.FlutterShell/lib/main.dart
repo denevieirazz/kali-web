@@ -1,23 +1,10 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 
-import 'core/cloudos_theme.dart';
-import 'shell/cloudos_shell.dart';
+import 'app/cloudos_app.dart';
+
+export 'app/cloudos_app.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const CloudOSApp());
-}
-
-class CloudOSApp extends StatelessWidget {
-  const CloudOSApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'CloudOS Flutter Preview',
-      debugShowCheckedModeBanner: false,
-      theme: buildCloudOSTheme(),
-      home: const CloudOSShell(),
-    );
-  }
 }

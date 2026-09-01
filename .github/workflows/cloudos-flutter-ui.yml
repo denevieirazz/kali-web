@@ -7,18 +7,29 @@ on:
       - 'desktop/CloudOS.FlutterShell/**'
       - 'desktop/CloudOS.SystemBroker/**'
       - 'desktop/CloudOS.BrokerProbe/**'
+      - 'desktop/CloudOS.NativeCommon/**'
+      - 'desktop/CloudOS.NativeRecovery/**'
+      - 'desktop/CloudOS.NativeRuntime/**'
+      - 'desktop/CloudOS.NativeShell/**'
       - 'scripts/native/**'
       - 'scripts/flutter/**'
       - 'Abrir CloudOS Flutter Preview.cmd'
+      - 'Abrir CloudOS V21 Flutter com System Broker.cmd'
       - '.github/workflows/cloudos-flutter-ui.yml'
 
 jobs:
   flutter-windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Cache pinned WebView2 SDK
+        uses: actions/cache@v4
+        with:
+          path: desktop/CloudOS.NativeShell/packages/Microsoft.Web.WebView2.1.0.4078.44
+          key: cloudos-webview2-1.0.4078.44-windows-v1
 
       - name: Set up Flutter 3.44.7
         uses: subosito/flutter-action@v2
@@ -34,14 +45,9 @@ jobs:
           flutter config --enable-windows-desktop
           flutter devices
 
-      - name: Build System Broker V21
-        shell: pwsh
-        run: |
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $vsroot = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          $msbuild = Join-Path $vsroot "MSBuild\Current\Bin\MSBuild.exe"
-          & $msbuild "desktop/CloudOS.SystemBroker/CloudOS.SystemBroker.vcxproj" /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
-          & $msbuild "desktop/CloudOS.BrokerProbe/CloudOS.BrokerProbe.vcxproj" /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
+      - name: Build integrated NativeShell authority and System Broker V21
+        shell: cmd
+        run: scripts\native\build-cloudos-native.cmd Release
 
       - name: Test System Broker Self-Test & Contract
         shell: pwsh
@@ -57,11 +63,23 @@ jobs:
           flutter create --platforms=windows --project-name cloudos_flutter_shell .
           if (Test-Path 'native_bridge') {
             Copy-Item -Path "native_bridge/*" -Destination "windows/runner/" -Force
+            Copy-Item -Path "../CloudOS.SystemBroker/src/protocol_v21.h" -Destination "windows/runner/protocol_v21.h" -Force
+            Copy-Item -Path "../CloudOS.SystemBroker/src/protocol_v21.cpp" -Destination "windows/runner/protocol_v21.cpp" -Force
+
+            # Native bridge sources are copied two levels deeper into windows/runner.
+            # Preserve their ../../CloudOS.NativeCommon include boundary by staging only
+            # the typed V21 activation/lifecycle and notification headers they consume.
+            New-Item -ItemType Directory -Force -Path "CloudOS.NativeCommon" | Out-Null
+            Copy-Item -Path "../CloudOS.NativeCommon/native_shell_activation_v21.h" -Destination "CloudOS.NativeCommon/native_shell_activation_v21.h" -Force
+            Copy-Item -Path "../CloudOS.NativeCommon/native_shell_activation_client_v21.h" -Destination "CloudOS.NativeCommon/native_shell_activation_client_v21.h" -Force
+            Copy-Item -Path "../CloudOS.NativeCommon/native_shell_notification_v21.h" -Destination "CloudOS.NativeCommon/native_shell_notification_v21.h" -Force
+            Copy-Item -Path "../CloudOS.NativeCommon/native_shell_notification_client_v21.h" -Destination "CloudOS.NativeCommon/native_shell_notification_client_v21.h" -Force
+
             $cmakePath = "windows/runner/CMakeLists.txt"
             if (Test-Path $cmakePath) {
               $cmake = Get-Content -Path $cmakePath -Raw
               if ($cmake -notmatch "cloudos_flutter_bridge_v20.cpp") {
-                $cmake = $cmake -replace '(\s*"flutter_window\.cpp")', "`$1`n  `"cloudos_flutter_bridge_v20.cpp`"`n  `"cloudos_broker_client_v21.cpp`""
+                $cmake = $cmake -replace '(\s*"flutter_window\.cpp")', "`$1`n  `"cloudos_flutter_bridge_v20.cpp`"`n  `"cloudos_broker_client_v21.cpp`"`n  `"protocol_v21.cpp`""
                 $cmake = $cmake -replace 'target_link_libraries\(\$\{BINARY_NAME\} PRIVATE flutter flutter_wrapper_app\)', 'target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app dwmapi.lib shlwapi.lib shell32.lib ole32.lib uuid.lib advapi32.lib)'
                 Set-Content -Path $cmakePath -Value $cmake -Encoding UTF8
               }
@@ -91,56 +109,136 @@ jobs:
         working-directory: desktop/CloudOS.FlutterShell
         run: flutter build windows --release
 
-      - name: Stage System Broker binaries in Release
+      - name: Stage verified NativeShell runtime beside Flutter
         shell: pwsh
         run: |
+          pwsh -NoProfile -File scripts/native/package-cloudos-native.ps1 -Configuration Release
           $release = Resolve-Path 'desktop/CloudOS.FlutterShell/build/windows/x64/runner/Release'
-          $brokerBin = Resolve-Path 'desktop/CloudOS.NativeShell/bin/Release'
-          Copy-Item -Path (Join-Path $brokerBin 'CloudOS.SystemBroker.exe') -Destination $release -Force
-          Copy-Item -Path (Join-Path $brokerBin 'CloudOS.BrokerProbe.exe') -Destination $release -Force
+          $nativeStage = Resolve-Path 'desktop/CloudOS.NativeShell/artifacts/CloudOS-Native-Release-x64'
+          foreach ($name in @(
+            'CloudOS.exe',
+            'CloudOS.NativeRuntime.dll',
+            'CloudOS.Supervisor.exe',
+            'CloudOS.SystemBroker.exe',
+            'CloudOS.BrokerProbe.exe',
+            'cloudos-native-manifest.json',
+            '.cloudos-build-head',
+            '.cloudos-build-fingerprint'
+          )) {
+            $source = Join-Path $nativeStage $name
+            if (-not (Test-Path -LiteralPath $source)) { throw "Integrated V21 payload missing: $source" }
+            Copy-Item -LiteralPath $source -Destination $release -Force
+          }
+          Copy-Item -LiteralPath 'scripts/flutter/verify-cloudos-v21-runtime.ps1' -Destination $release -Force
+          Copy-Item -LiteralPath 'scripts/flutter/start-cloudos-v21-integrated.ps1' -Destination $release -Force
 
-      - name: Write V21 evidence
+          $launcher = @'
+          @echo off
+          setlocal EnableExtensions
+          set "ROOT=%~dp0"
+          pwsh.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%start-cloudos-v21-integrated.ps1" -Root "%ROOT%"
+          set "RC=%ERRORLEVEL%"
+          if not "%RC%"=="0" pause
+          exit /b %RC%
+          '@
+          Set-Content -LiteralPath (Join-Path $release 'Iniciar CloudOS V21 Integrado.cmd') -Value $launcher -Encoding ascii
+
+      - name: Write and verify integrated V21 evidence
         shell: pwsh
         run: |
           $flutter = (flutter --version | Select-Object -First 1).Trim()
           $release = Resolve-Path 'desktop/CloudOS.FlutterShell/build/windows/x64/runner/Release'
           $exe = Join-Path $release 'cloudos_flutter_shell.exe'
+          $nativeManifest = Join-Path $release 'cloudos-native-manifest.json'
           $brokerExe = Join-Path $release 'CloudOS.SystemBroker.exe'
+          $nativeShellExe = Join-Path $release 'CloudOS.exe'
           if (-not (Test-Path $exe)) { throw "Flutter executable missing: $exe" }
+          if (-not (Test-Path $nativeManifest)) { throw "Native manifest missing: $nativeManifest" }
           if (-not (Test-Path $brokerExe)) { throw "SystemBroker executable missing: $brokerExe" }
-          $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if (-not (Test-Path $nativeShellExe)) { throw "NativeShell executable missing: $nativeShellExe" }
+
+          $flutterSha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $nativeManifestSha = (Get-FileHash $nativeManifest -Algorithm SHA256).Hash.ToLowerInvariant()
+          $integrated = [ordered]@{
+            schema = 21
+            product = 'CloudOS V21 Integrated Presentation Runtime'
+            git_sha = '${{ github.sha }}'
+            runtime_mode = 'native-authority-with-flutter-presentation'
+            shell_authority = 'CloudOS.exe C++/Win32'
+            recovery_authority = 'CloudOS.Supervisor.exe V11'
+            broker_authority = 'CloudOS.SystemBroker.exe V21'
+            presentation_layer = 'Flutter 3.44.7'
+            native_bridge_channel = 'cloudos/native/v19'
+            native_broker_ipc = 'NamedPipe v21'
+            native_manifest = 'cloudos-native-manifest.json'
+            native_manifest_sha256 = $nativeManifestSha
+            flutter_executable = 'cloudos_flutter_shell.exe'
+            flutter_sha256 = $flutterSha
+            arbitrary_command_api = $false
+            winlogon_modified = $false
+          }
+          $integratedPath = Join-Path $release 'cloudos-v21-integrated-manifest.json'
+          $integrated | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $integratedPath -Encoding UTF8
+
+          pwsh -NoProfile -File scripts/flutter/verify-cloudos-v21-runtime.ps1 -Root $release
+
           $brokerSha = (Get-FileHash $brokerExe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $nativeShellSha = (Get-FileHash $nativeShellExe -Algorithm SHA256).Hash.ToLowerInvariant()
           $evidence = [ordered]@{
             schema = 21
             verdict = 'pass'
             flutter = $flutter
             git_sha = '${{ github.sha }}'
             presentation_layer = 'Flutter 3.44.7'
+            shell_authority = 'CloudOS.exe C++/Win32'
+            runtime_mode = 'native-authority-with-flutter-presentation'
             native_bridge_channel = 'cloudos/native/v19'
             native_broker_ipc = 'NamedPipe v21'
             broker_protocol_version = 21
             native_bridge_registered = $true
             get_apps_contract = $true
+            files_capability_contract = $true
             system_snapshot_contract = $true
-            launch_app_contract = $true
+            shell_surface_lifecycle = $true
+            shell_workspace_control = $true
+            shell_notification_authority = $true
             arbitrary_command_api = $false
             winlogon_modified = $false
-            shell_activation_executed = $false
             executable = 'cloudos_flutter_shell.exe'
-            executable_sha256 = $sha
+            executable_sha256 = $flutterSha
+            native_shell_executable = 'CloudOS.exe'
+            native_shell_sha256 = $nativeShellSha
             broker_executable = 'CloudOS.SystemBroker.exe'
             broker_executable_sha256 = $brokerSha
+            integrated_manifest = 'cloudos-v21-integrated-manifest.json'
+            native_manifest_sha256 = $nativeManifestSha
           }
-          $evidence | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 'flutter-v21-smoke.json'
+          $evidence | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 'flutter-v21-smoke.json'
           Get-Content 'flutter-v21-smoke.json'
 
-      - name: Package Flutter preview
+      - name: Package integrated Flutter V21 runtime
         shell: pwsh
         run: |
           $release = Resolve-Path 'desktop/CloudOS.FlutterShell/build/windows/x64/runner/Release'
+          foreach ($name in @(
+            'cloudos_flutter_shell.exe',
+            'CloudOS.exe',
+            'CloudOS.NativeRuntime.dll',
+            'CloudOS.Supervisor.exe',
+            'CloudOS.SystemBroker.exe',
+            'CloudOS.BrokerProbe.exe',
+            'cloudos-native-manifest.json',
+            'cloudos-v21-integrated-manifest.json',
+            'start-cloudos-v21-integrated.ps1',
+            'verify-cloudos-v21-runtime.ps1',
+            'Iniciar CloudOS V21 Integrado.cmd'
+          )) {
+            $path = Join-Path $release $name
+            if (-not (Test-Path -LiteralPath $path)) { throw "Integrated package member missing: $path" }
+          }
           Compress-Archive -Path "$release\*" -DestinationPath 'CloudOS-Flutter-V21-Windows-x64.zip' -Force
 
-      - name: Upload Flutter preview
+      - name: Upload integrated Flutter preview
         uses: actions/upload-artifact@v4
         with:
           name: CloudOS-Flutter-V21-${{ github.sha }}

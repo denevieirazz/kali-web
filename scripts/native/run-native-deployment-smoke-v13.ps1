@@ -35,6 +35,7 @@ $evidence = [ordered]@{
     rollback_restored_previous = $false
     uninstall_removed_managed_root = $false
     supervisor_self_test_on_publish = $true
+    broker_integrity_in_transaction = $false
     registry_or_winlogon_modified = $false
     first_version = $null
     upgraded_version = $null
@@ -81,8 +82,10 @@ try {
     }
     $evidence.verified_upgrade = $true
 
+    # Corrupt the Broker rather than the shell executable so this smoke proves
+    # the V13 transaction gate protects the complete five-binary V21 runtime.
     Copy-TestPackage -Source $upgradePackage -Destination $corruptPackage
-    [IO.File]::AppendAllText((Join-Path $corruptPackage 'CloudOS.exe'), 'V13_CORRUPTION_PROBE')
+    [IO.File]::AppendAllText((Join-Path $corruptPackage 'CloudOS.SystemBroker.exe'), 'V13_BROKER_CORRUPTION_PROBE')
     $rejected = $false
     try {
         Invoke-CloudOSDeployment -SourcePackageRoot $corruptPackage -InstallRoot $installRoot -RetainVersions 2 | Out-Null
@@ -90,8 +93,9 @@ try {
     catch {
         $rejected = $true
     }
-    if (-not $rejected) { throw 'Corrupted V13 package was accepted.' }
+    if (-not $rejected) { throw 'Package with corrupted System Broker was accepted.' }
     $evidence.corrupted_package_rejected = $true
+    $evidence.broker_integrity_in_transaction = $true
 
     $afterRejection = Get-CloudOSDeploymentStatus -InstallRoot $installRoot
     if ([string]$afterRejection.active_version -ne $version2 -or [string]$afterRejection.last_known_good -ne $version1) {
@@ -149,7 +153,7 @@ $report = [ordered]@{
     test = 'CloudOS Transactional Deployment V13'
     collected_utc = [DateTime]::UtcNow.ToString('o')
     verdict = $verdict
-    scope = 'Temporary-directory install/update/repair/rollback/uninstall transaction semantics. No Winlogon, registry shell replacement, logoff or reboot is performed.'
+    scope = 'Temporary-directory install/update/repair/rollback/uninstall transaction semantics for the five-binary V21 runtime. No Winlogon, registry shell replacement, logoff or reboot is performed.'
     evidence = $evidence
     failures = @($failures)
 }
