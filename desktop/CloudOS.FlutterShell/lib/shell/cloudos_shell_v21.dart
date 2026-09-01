@@ -23,12 +23,17 @@ class CloudOSShellV21 extends StatefulWidget {
 class _CloudOSShellV21State extends State<CloudOSShellV21> {
   List<CloudApp> apps = CloudOSBridge.previewApps;
   CloudSystemSnapshot snapshot = CloudOSBridge.previewSnapshot;
+  List<CloudNotification> notifications = List<CloudNotification>.from(
+    CloudOSBridge.previewNotifications,
+  );
 
   bool startOpen = false;
   bool quickSettingsOpen = false;
   bool notificationsOpen = false;
   bool filesOpen = true;
   bool loadingBridge = true;
+  bool brokerConnected = false;
+  String brokerState = 'connecting';
   int currentWorkspace = 1;
   Offset filesOffset = const Offset(210, 70);
   String? selectedDesktopIcon;
@@ -40,22 +45,39 @@ class _CloudOSShellV21State extends State<CloudOSShellV21> {
   }
 
   Future<void> _reloadBridge() async {
-    if (mounted) setState(() => loadingBridge = true);
+    if (mounted) {
+      setState(() {
+        loadingBridge = true;
+        brokerState = 'connecting';
+      });
+    }
+
     final loadedApps = await widget.bridge.loadApps();
     final loadedSnapshot = await widget.bridge.loadSystemSnapshot();
+    final bridgeInfo = await widget.bridge.getBridgeInfo();
     if (!mounted) return;
+
     setState(() {
       apps = loadedApps;
       snapshot = loadedSnapshot;
       currentWorkspace = loadedSnapshot.currentWorkspace.clamp(1, 4).toInt();
+      brokerConnected = bridgeInfo['brokerConnected'] == true;
+      brokerState = bridgeInfo['brokerState'] as String? ??
+          (brokerConnected ? 'connected' : 'degraded');
       loadingBridge = false;
     });
   }
 
   Future<void> _reloadSnapshotOnly() async {
     final updated = await widget.bridge.loadSystemSnapshot();
+    final bridgeInfo = await widget.bridge.getBridgeInfo();
     if (!mounted) return;
-    setState(() => snapshot = updated);
+    setState(() {
+      snapshot = updated;
+      brokerConnected = bridgeInfo['brokerConnected'] == true;
+      brokerState = bridgeInfo['brokerState'] as String? ??
+          (brokerConnected ? 'connected' : 'degraded');
+    });
   }
 
   void _closePanels() {
@@ -143,7 +165,8 @@ class _CloudOSShellV21State extends State<CloudOSShellV21> {
   Future<void> _launchFirstLinuxApp() async {
     CloudApp? candidate;
     for (final app in apps) {
-      if (app.platform == CloudAppPlatform.linux && app.id.contains('terminal')) {
+      if (app.platform == CloudAppPlatform.linux &&
+          app.id.contains('terminal')) {
         candidate = app;
         break;
       }
@@ -187,7 +210,10 @@ class _CloudOSShellV21State extends State<CloudOSShellV21> {
   void _showError(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), duration: const Duration(seconds: 3)),
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 3),
+      ),
     );
   }
 
@@ -195,34 +221,82 @@ class _CloudOSShellV21State extends State<CloudOSShellV21> {
   Widget build(BuildContext context) {
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
-        const SingleActivator(LogicalKeyboardKey.keyA, control: true, alt: true): _toggleStart,
-        const SingleActivator(LogicalKeyboardKey.keyS, control: true, alt: true): _toggleStart,
-        const SingleActivator(LogicalKeyboardKey.keyE, control: true, alt: true): _toggleFiles,
-        const SingleActivator(LogicalKeyboardKey.keyQ, control: true, alt: true): _toggleQuickSettings,
-        const SingleActivator(LogicalKeyboardKey.keyN, control: true, alt: true): _toggleNotifications,
-        const SingleActivator(LogicalKeyboardKey.enter, control: true, alt: true): () {
+        const SingleActivator(
+          LogicalKeyboardKey.keyA,
+          control: true,
+          alt: true,
+        ): _toggleStart,
+        const SingleActivator(
+          LogicalKeyboardKey.keyS,
+          control: true,
+          alt: true,
+        ): _toggleStart,
+        const SingleActivator(
+          LogicalKeyboardKey.keyE,
+          control: true,
+          alt: true,
+        ): _toggleFiles,
+        const SingleActivator(
+          LogicalKeyboardKey.keyQ,
+          control: true,
+          alt: true,
+        ): _toggleQuickSettings,
+        const SingleActivator(
+          LogicalKeyboardKey.keyN,
+          control: true,
+          alt: true,
+        ): _toggleNotifications,
+        const SingleActivator(
+          LogicalKeyboardKey.enter,
+          control: true,
+          alt: true,
+        ): () {
           _launchById('cloudos:terminal');
         },
-        const SingleActivator(LogicalKeyboardKey.escape): () => setState(_closePanels),
-        const SingleActivator(LogicalKeyboardKey.digit1, control: true, alt: true): () => _switchWorkspace(1),
-        const SingleActivator(LogicalKeyboardKey.digit2, control: true, alt: true): () => _switchWorkspace(2),
-        const SingleActivator(LogicalKeyboardKey.digit3, control: true, alt: true): () => _switchWorkspace(3),
-        const SingleActivator(LogicalKeyboardKey.digit4, control: true, alt: true): () => _switchWorkspace(4),
+        const SingleActivator(LogicalKeyboardKey.escape): () =>
+            setState(_closePanels),
+        const SingleActivator(
+          LogicalKeyboardKey.digit1,
+          control: true,
+          alt: true,
+        ): () => _switchWorkspace(1),
+        const SingleActivator(
+          LogicalKeyboardKey.digit2,
+          control: true,
+          alt: true,
+        ): () => _switchWorkspace(2),
+        const SingleActivator(
+          LogicalKeyboardKey.digit3,
+          control: true,
+          alt: true,
+        ): () => _switchWorkspace(3),
+        const SingleActivator(
+          LogicalKeyboardKey.digit4,
+          control: true,
+          alt: true,
+        ): () => _switchWorkspace(4),
       },
       child: Focus(
         autofocus: true,
         child: Scaffold(
           body: LayoutBuilder(
             builder: (context, constraints) {
-              final maxLeft = (constraints.maxWidth - 1000).clamp(20.0, double.infinity).toDouble();
-              final maxTop = (constraints.maxHeight - 675).clamp(20.0, double.infinity).toDouble();
+              final maxLeft = (constraints.maxWidth - 1000)
+                  .clamp(20.0, double.infinity)
+                  .toDouble();
+              final maxTop = (constraints.maxHeight - 675)
+                  .clamp(20.0, double.infinity)
+                  .toDouble();
               final safeLeft = filesOffset.dx.clamp(20.0, maxLeft).toDouble();
               final safeTop = filesOffset.dy.clamp(20.0, maxTop).toDouble();
 
               return GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: () {
-                  if (startOpen || quickSettingsOpen || notificationsOpen || selectedDesktopIcon != null) {
+                  if (startOpen ||
+                      quickSettingsOpen ||
+                      notificationsOpen ||
+                      selectedDesktopIcon != null) {
                     setState(() {
                       _closePanels();
                       selectedDesktopIcon = null;
@@ -239,7 +313,8 @@ class _CloudOSShellV21State extends State<CloudOSShellV21> {
                       child: _DesktopShortcuts(
                         snapshot: snapshot,
                         selectedId: selectedDesktopIcon,
-                        onSelected: (id) => setState(() => selectedDesktopIcon = id),
+                        onSelected: (id) =>
+                            setState(() => selectedDesktopIcon = id),
                         onFiles: _showFiles,
                         onApps: _toggleStart,
                         onLinux: _launchFirstLinuxApp,
@@ -254,6 +329,8 @@ class _CloudOSShellV21State extends State<CloudOSShellV21> {
                         snapshot: snapshot,
                         currentWorkspace: currentWorkspace,
                         loading: loadingBridge,
+                        brokerConnected: brokerConnected,
+                        brokerState: brokerState,
                         onRefresh: _reloadBridge,
                       ),
                     ),
@@ -265,7 +342,8 @@ class _CloudOSShellV21State extends State<CloudOSShellV21> {
                           snapshot: snapshot,
                           onClose: () => setState(() => filesOpen = false),
                           onMinimize: () => setState(() => filesOpen = false),
-                          onDrag: (delta) => setState(() => filesOffset += delta),
+                          onDrag: (delta) =>
+                              setState(() => filesOffset += delta),
                         ),
                       ),
                     _panel(),
@@ -277,7 +355,7 @@ class _CloudOSShellV21State extends State<CloudOSShellV21> {
                       browserRunning: false,
                       terminalRunning: false,
                       currentWorkspace: currentWorkspace,
-                      notificationCount: CloudOSBridge.previewNotifications.length,
+                      notificationCount: notifications.length,
                       onWorkspaceChanged: _switchWorkspace,
                       onStart: _toggleStart,
                       onFiles: _toggleFiles,
@@ -315,7 +393,14 @@ class _CloudOSShellV21State extends State<CloudOSShellV21> {
         onBrightnessChanged: _setBrightness,
       );
     } else if (notificationsOpen) {
-      child = const NotificationCenterPanel(key: ValueKey<String>('notifications-v21'));
+      child = NotificationCenterPanel(
+        key: const ValueKey<String>('notifications-v21'),
+        initialNotifications: notifications,
+        onNotificationsChanged: (items) {
+          if (!mounted) return;
+          setState(() => notifications = List<CloudNotification>.from(items));
+        },
+      );
     }
 
     return AnimatedSwitcher(
@@ -339,7 +424,11 @@ class _V21Wallpaper extends StatelessWidget {
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: <Color>[Color(0xFF060A10), Color(0xFF0B1420), Color(0xFF080D15)],
+              colors: <Color>[
+                Color(0xFF060A10),
+                Color(0xFF0B1420),
+                Color(0xFF080D15),
+              ],
             ),
           ),
         ),
@@ -351,7 +440,9 @@ class _V21Wallpaper extends StatelessWidget {
             height: 560,
             decoration: const BoxDecoration(
               shape: BoxShape.circle,
-              gradient: RadialGradient(colors: <Color>[Color(0x204C9AFF), Color(0x004C9AFF)]),
+              gradient: RadialGradient(
+                colors: <Color>[Color(0x204C9AFF), Color(0x004C9AFF)],
+              ),
             ),
           ),
         ),
@@ -363,7 +454,9 @@ class _V21Wallpaper extends StatelessWidget {
             height: 600,
             decoration: const BoxDecoration(
               shape: BoxShape.circle,
-              gradient: RadialGradient(colors: <Color>[Color(0x1643C780), Color(0x0043C780)]),
+              gradient: RadialGradient(
+                colors: <Color>[Color(0x1643C780), Color(0x0043C780)],
+              ),
             ),
           ),
         ),
@@ -401,7 +494,8 @@ class _DesktopShortcuts extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final linuxLabel = snapshot.distros.isNotEmpty ? snapshot.distros.first : 'WSL';
+    final linuxLabel =
+        snapshot.distros.isNotEmpty ? snapshot.distros.first : 'WSL';
     return Column(
       children: <Widget>[
         _DesktopShortcut(
@@ -488,7 +582,9 @@ class _DesktopShortcut extends StatelessWidget {
           decoration: BoxDecoration(
             color: selected ? CloudOSColors.accentSoft : Colors.transparent,
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: selected ? CloudOSColors.accent : Colors.transparent),
+            border: Border.all(
+              color: selected ? CloudOSColors.accent : Colors.transparent,
+            ),
           ),
           child: Column(
             children: <Widget>[
@@ -509,7 +605,11 @@ class _DesktopShortcut extends StatelessWidget {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: CloudOSColors.text, fontSize: 10.5, fontWeight: FontWeight.w500),
+                style: const TextStyle(
+                  color: CloudOSColors.text,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ],
           ),
@@ -524,12 +624,16 @@ class _SystemStatusCard extends StatelessWidget {
     required this.snapshot,
     required this.currentWorkspace,
     required this.loading,
+    required this.brokerConnected,
+    required this.brokerState,
     required this.onRefresh,
   });
 
   final CloudSystemSnapshot snapshot;
   final int currentWorkspace;
   final bool loading;
+  final bool brokerConnected;
+  final String brokerState;
   final VoidCallback onRefresh;
 
   @override
@@ -539,9 +643,17 @@ class _SystemStatusCard extends StatelessWidget {
             ? 'WSL instalado'
             : 'WSL • ${snapshot.distros.join(', ')}'
         : 'WSL indisponível';
+    final networkText = snapshot.networkAvailable
+        ? snapshot.networkName
+        : 'Rede indisponível';
+    final statusText = loading
+        ? 'Broker conectando'
+        : brokerConnected
+            ? 'Broker conectado'
+            : 'Broker ${brokerState == 'disconnected' ? 'desconectado' : 'degradado'}';
 
     return Container(
-      width: 285,
+      width: 300,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: const Color(0xB5121A25),
@@ -554,10 +666,27 @@ class _SystemStatusCard extends StatelessWidget {
             width: 36,
             height: 36,
             alignment: Alignment.center,
-            decoration: BoxDecoration(color: CloudOSColors.accentSoft, borderRadius: BorderRadius.circular(9)),
+            decoration: BoxDecoration(
+              color: brokerConnected
+                  ? CloudOSColors.accentSoft
+                  : CloudOSColors.elevated,
+              borderRadius: BorderRadius.circular(9),
+            ),
             child: loading
-                ? const SizedBox(width: 17, height: 17, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.cloud_done_rounded, color: CloudOSColors.accent, size: 20),
+                ? const SizedBox(
+                    width: 17,
+                    height: 17,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(
+                    brokerConnected
+                        ? Icons.cloud_done_rounded
+                        : Icons.cloud_off_rounded,
+                    color: brokerConnected
+                        ? CloudOSColors.accent
+                        : CloudOSColors.caption,
+                    size: 20,
+                  ),
           ),
           const SizedBox(width: 9),
           Expanded(
@@ -568,13 +697,32 @@ class _SystemStatusCard extends StatelessWidget {
                   '${snapshot.deviceName} • Workspace $currentWorkspace',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: CloudOSColors.text, fontSize: 11.5, fontWeight: FontWeight.w600),
+                  style: const TextStyle(
+                    color: CloudOSColors.text,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 Text(
-                  '${snapshot.networkName} • $wslText',
+                  statusText,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: CloudOSColors.caption, fontSize: 9.5),
+                  style: TextStyle(
+                    color: brokerConnected
+                        ? CloudOSColors.success
+                        : CloudOSColors.caption,
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Text(
+                  '$networkText • $wslText',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: CloudOSColors.caption,
+                    fontSize: 9.5,
+                  ),
                 ),
               ],
             ),
