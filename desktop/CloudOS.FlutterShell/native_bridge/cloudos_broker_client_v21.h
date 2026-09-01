@@ -48,6 +48,7 @@ struct BrokerClientSnapshot final
     int battery_percent{100};
     bool network_available{true};
     std::string network_name;
+    bool volume_available{true};
     double volume{0.72};
     bool brightness_available{true};
     double brightness{0.85};
