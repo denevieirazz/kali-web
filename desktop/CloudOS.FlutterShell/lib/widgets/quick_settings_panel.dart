@@ -2,20 +2,29 @@ import 'package:flutter/material.dart';
 
 import '../core/cloudos_theme.dart';
 import '../models/shell_models.dart';
+import '../services/cloudos_bridge.dart';
 import 'glass_surface.dart';
 
 class QuickSettingsPanel extends StatefulWidget {
   const QuickSettingsPanel({
     required this.snapshot,
-    required this.onVolumeChanged,
-    required this.onBrightnessChanged,
+    this.onVolumeChanged,
+    this.onBrightnessChanged,
+    this.bridge,
+    this.onClose,
     this.onOpenSettings,
     super.key,
-  });
+  }) : assert(
+         bridge != null ||
+             (onVolumeChanged != null && onBrightnessChanged != null),
+         'QuickSettingsPanel requires either a CloudOSBridge or both control callbacks.',
+       );
 
   final CloudSystemSnapshot snapshot;
-  final Future<bool> Function(double value) onVolumeChanged;
-  final Future<bool> Function(double value) onBrightnessChanged;
+  final Future<bool> Function(double value)? onVolumeChanged;
+  final Future<bool> Function(double value)? onBrightnessChanged;
+  final CloudOSBridge? bridge;
+  final VoidCallback? onClose;
   final VoidCallback? onOpenSettings;
 
   @override
@@ -29,7 +38,8 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
   Future<void> _setVolume(double value) async {
     final previous = volume;
     setState(() => volume = value);
-    final updated = await widget.onVolumeChanged(value);
+    final handler = widget.onVolumeChanged ?? widget.bridge?.setVolume;
+    final updated = handler != null && await handler(value);
     if (!mounted) return;
     if (!updated) {
       setState(() => volume = previous);
@@ -44,7 +54,9 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
   Future<void> _setBrightness(double value) async {
     final previous = brightness;
     setState(() => brightness = value);
-    final updated = await widget.onBrightnessChanged(value);
+    final handler =
+        widget.onBrightnessChanged ?? widget.bridge?.setBrightness;
+    final updated = handler != null && await handler(value);
     if (!mounted) return;
     if (!updated) {
       setState(() => brightness = previous);
@@ -89,21 +101,40 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                       ),
                     ),
                     const Spacer(),
-                    Tooltip(
-                      message: 'Abrir Painel Completo',
-                      child: InkWell(
-                        onTap: widget.onOpenSettings,
-                        borderRadius: BorderRadius.circular(6),
-                        child: const Padding(
-                          padding: EdgeInsets.all(4),
-                          child: Icon(
-                            Icons.settings_rounded,
-                            size: 18,
-                            color: CloudOSColors.secondary,
+                    if (widget.onOpenSettings != null)
+                      Tooltip(
+                        message: 'Abrir Painel Completo',
+                        child: InkWell(
+                          onTap: widget.onOpenSettings,
+                          borderRadius: BorderRadius.circular(6),
+                          child: const Padding(
+                            padding: EdgeInsets.all(4),
+                            child: Icon(
+                              Icons.settings_rounded,
+                              size: 18,
+                              color: CloudOSColors.secondary,
+                            ),
                           ),
                         ),
                       ),
-                    ),
+                    if (widget.onClose != null) ...<Widget>[
+                      const SizedBox(width: 4),
+                      Tooltip(
+                        message: 'Fechar (Esc)',
+                        child: InkWell(
+                          onTap: widget.onClose,
+                          borderRadius: BorderRadius.circular(6),
+                          child: const Padding(
+                            padding: EdgeInsets.all(4),
+                            child: Icon(
+                              Icons.close_rounded,
+                              size: 18,
+                              color: CloudOSColors.secondary,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -118,7 +149,9 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                     _ToggleTile(
                       label: 'Rede',
                       subtitle: widget.snapshot.networkAvailable
-                          ? widget.snapshot.networkName
+                          ? (widget.snapshot.networkName.isEmpty
+                                ? 'Conectada'
+                                : widget.snapshot.networkName)
                           : 'Indisponível',
                       icon: Icons.wifi_rounded,
                       active: widget.snapshot.networkAvailable,
@@ -204,8 +237,10 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                             ),
                             Text(
                               widget.snapshot.wslAvailable
-                                  ? 'WSL2: ${widget.snapshot.distros.join(', ')}'
-                                  : 'Windows Desktop Standalone',
+                                  ? (widget.snapshot.distros.isEmpty
+                                        ? 'WSL disponível · sem distro configurada'
+                                        : 'WSL2: ${widget.snapshot.distros.join(', ')}')
+                                  : 'WSL indisponível',
                               style: const TextStyle(
                                 color: CloudOSColors.caption,
                                 fontSize: 10,

@@ -1,7 +1,8 @@
 # test-system-broker-v21-soak.ps1
-# CloudOS V21 — 120-Second System Broker Soak & Stability Test
+# CloudOS V21 — configurable short/extended System Broker soak & stability test
 
 param(
+    [ValidateRange(1, 86400)]
     [int]$DurationSeconds = 120,
     [string]$Configuration = "Release"
 )
@@ -22,9 +23,10 @@ $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
 try {
     while ($stopwatch.Elapsed.TotalSeconds -lt $DurationSeconds) {
-        # Probe broker
         $null = & $probeExe ping
+        if ($LASTEXITCODE -ne 0) { throw "Broker ping failed during soak with code $LASTEXITCODE" }
         $null = & $probeExe snapshot
+        if ($LASTEXITCODE -ne 0) { throw "Broker snapshot failed during soak with code $LASTEXITCODE" }
 
         $proc = Get-Process -Id $brokerProc.Id
         $sample = [PSCustomObject]@{
@@ -38,6 +40,8 @@ try {
         Write-Host "[Soak-V21] t=$($sample.ElapsedSec)s | WS: $($sample.WorkingSetMB) MB | Handles: $($sample.Handles) | Threads: $($sample.Threads)"
         Start-Sleep -Seconds 5
     }
+
+    if ($samples.Count -eq 0) { throw 'Broker soak produced no process samples.' }
 
     $initialWS = $samples[0].WorkingSetMB
     $finalWS = $samples[-1].WorkingSetMB
@@ -56,7 +60,7 @@ try {
         throw "Excessive handle growth detected during soak test: $handlesGrowth handles"
     }
 
-    Write-Host "[PASS] 120-Second Soak Test Passed with stable memory and zero leaks."
+    Write-Host "[PASS] $DurationSeconds-second System Broker soak passed configured memory/handle growth thresholds."
 }
 finally {
     if ($brokerProc -and -not $brokerProc.HasExited) {

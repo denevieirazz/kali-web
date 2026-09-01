@@ -50,11 +50,9 @@ class FilesController extends ChangeNotifier {
   List<KnownFolderModel> _knownFolders = <KnownFolderModel>[];
   List<DriveInfoModel> _drives = <DriveInfoModel>[];
 
-  // Clipboard for copy/cut/paste
   List<String> _clipboardPaths = <String>[];
   bool _isCutOperation = false;
 
-  // Active Job Progress
   String? _activeJobId;
   double _activeJobProgress = 0.0;
   String _activeJobStatus = '';
@@ -70,7 +68,7 @@ class FilesController extends ChangeNotifier {
 
   List<KnownFolderModel> get knownFolders => _knownFolders;
   List<DriveInfoModel> get drives => _drives;
-  List<String> get clipboardPaths => _clipboardPaths;
+  List<String> get clipboardPaths => List<String>.unmodifiable(_clipboardPaths);
   bool get isCutOperation => _isCutOperation;
   bool get hasActiveJob => _activeJobId != null;
   double get activeJobProgress => _activeJobProgress;
@@ -101,15 +99,15 @@ class FilesController extends ChangeNotifier {
       _initializationError = 'System Broker indisponível: $error';
     }
 
-    // Create default tab
     if (_disposed) return;
     addTab(title: 'Início', initialPath: 'home');
     notifyListeners();
   }
 
   void addTab({String title = 'Início', String initialPath = 'home'}) {
+    if (_disposed) return;
     final tab = FilesTabState(
-      id: 'tab-${DateTime.now().millisecondsSinceEpoch}-${_tabs.length}',
+      id: 'tab-${DateTime.now().microsecondsSinceEpoch}-${_tabs.length}',
       title: title,
       currentPath: initialPath,
     );
@@ -120,10 +118,12 @@ class FilesController extends ChangeNotifier {
   }
 
   void closeTab(int index) {
-    if (_tabs.length <= 1) return; // Keep at least 1 tab
+    if (index < 0 || index >= _tabs.length || _tabs.length <= 1) return;
     _tabs[index].loadGeneration++;
     _tabs.removeAt(index);
-    if (_activeTabIndex >= _tabs.length) {
+    if (_activeTabIndex > index) {
+      _activeTabIndex--;
+    } else if (_activeTabIndex >= _tabs.length) {
       _activeTabIndex = _tabs.length - 1;
     }
     notifyListeners();
@@ -138,7 +138,7 @@ class FilesController extends ChangeNotifier {
 
   Future<void> navigateTo(String path, {String? title}) async {
     final tab = activeTab;
-    if (tab == null) return;
+    if (tab == null || path.trim().isEmpty) return;
 
     if (tab.historyIndex < tab.history.length - 1) {
       tab.history = tab.history.sublist(0, tab.historyIndex + 1);
@@ -150,7 +150,6 @@ class FilesController extends ChangeNotifier {
     tab.selectedPaths.clear();
 
     await loadTabFiles(tab);
-    notifyListeners();
   }
 
   Future<void> goBack() async {
@@ -160,7 +159,6 @@ class FilesController extends ChangeNotifier {
     tab.currentPath = tab.history[tab.historyIndex];
     tab.selectedPaths.clear();
     await loadTabFiles(tab);
-    notifyListeners();
   }
 
   Future<void> goForward() async {
@@ -170,7 +168,6 @@ class FilesController extends ChangeNotifier {
     tab.currentPath = tab.history[tab.historyIndex];
     tab.selectedPaths.clear();
     await loadTabFiles(tab);
-    notifyListeners();
   }
 
   Future<void> goToParent() async {
@@ -188,10 +185,7 @@ class FilesController extends ChangeNotifier {
 
   Future<void> refresh() async {
     final tab = activeTab;
-    if (tab != null) {
-      await loadTabFiles(tab);
-      notifyListeners();
-    }
+    if (tab != null) await loadTabFiles(tab);
   }
 
   Future<void> loadTabFiles(FilesTabState tab) async {
@@ -207,13 +201,15 @@ class FilesController extends ChangeNotifier {
         ascending: tab.sortAscending,
         searchText: tab.searchQuery,
       );
-      if (_disposed || !_tabs.contains(tab) || generation != tab.loadGeneration)
+      if (_disposed || !_tabs.contains(tab) || generation != tab.loadGeneration) {
         return;
+      }
       tab.items = items;
       tab.isLoading = false;
     } catch (e) {
-      if (_disposed || !_tabs.contains(tab) || generation != tab.loadGeneration)
+      if (_disposed || !_tabs.contains(tab) || generation != tab.loadGeneration) {
         return;
+      }
       tab.isLoading = false;
       tab.errorMessage = 'Não foi possível carregar a pasta: $e';
     }
@@ -230,23 +226,21 @@ class FilesController extends ChangeNotifier {
 
   void setSortField(FileSortField field) {
     final tab = activeTab;
-    if (tab != null) {
-      if (tab.sortField == field) {
-        tab.sortAscending = !tab.sortAscending;
-      } else {
-        tab.sortField = field;
-        tab.sortAscending = true;
-      }
-      loadTabFiles(tab);
+    if (tab == null) return;
+    if (tab.sortField == field) {
+      tab.sortAscending = !tab.sortAscending;
+    } else {
+      tab.sortField = field;
+      tab.sortAscending = true;
     }
+    loadTabFiles(tab);
   }
 
   void setSearchQuery(String query) {
     final tab = activeTab;
-    if (tab != null) {
-      tab.searchQuery = query;
-      loadTabFiles(tab);
-    }
+    if (tab == null || tab.searchQuery == query) return;
+    tab.searchQuery = query;
+    loadTabFiles(tab);
   }
 
   void selectItem(String path, {bool isMulti = false, bool isToggle = false}) {
@@ -254,14 +248,11 @@ class FilesController extends ChangeNotifier {
     if (tab == null) return;
 
     if (!isMulti && !isToggle) {
-      tab.selectedPaths.clear();
-      tab.selectedPaths.add(path);
+      tab.selectedPaths
+        ..clear()
+        ..add(path);
     } else if (isToggle) {
-      if (tab.selectedPaths.contains(path)) {
-        tab.selectedPaths.remove(path);
-      } else {
-        tab.selectedPaths.add(path);
-      }
+      if (!tab.selectedPaths.remove(path)) tab.selectedPaths.add(path);
     } else {
       tab.selectedPaths.add(path);
     }
@@ -284,16 +275,16 @@ class FilesController extends ChangeNotifier {
     }
   }
 
-  // File Actions
   Future<bool> createFolder(String name) async {
     final tab = activeTab;
-    if (tab == null) return false;
+    if (tab == null || name.trim().isEmpty) return false;
     final ok = await _bridge.createFolder(tab.currentPath, name);
     if (ok) await refresh();
     return ok;
   }
 
   Future<bool> renameItem(String path, String newName) async {
+    if (path.isEmpty || newName.trim().isEmpty) return false;
     final ok = await _bridge.renameItem(path, newName);
     if (ok) await refresh();
     return ok;
@@ -331,22 +322,24 @@ class FilesController extends ChangeNotifier {
 
   Future<void> paste() async {
     final tab = activeTab;
-    if (tab == null || _clipboardPaths.isEmpty) return;
+    if (tab == null || _clipboardPaths.isEmpty || _activeJobId != null) return;
 
     final cut = _isCutOperation;
     try {
+      // Never overwrite user data silently. The broker returns
+      // destination_exists and the UI can ask for an explicit replace action.
       final jobId = cut
           ? await _bridge.moveItems(
               _clipboardPaths,
               tab.currentPath,
-              overwritePolicy: 'replace',
+              overwritePolicy: 'ask',
             )
           : await _bridge.copyItems(
               _clipboardPaths,
               tab.currentPath,
-              overwritePolicy: 'replace',
+              overwritePolicy: 'ask',
             );
-      if (jobId == null) {
+      if (jobId == null || jobId.isEmpty) {
         throw const CloudOSBridgeException(
           'job_not_started',
           'A operação de arquivo não foi iniciada.',
@@ -372,11 +365,18 @@ class FilesController extends ChangeNotifier {
     }
   }
 
+  Future<bool> cancelActiveJob() async {
+    final jobId = _activeJobId;
+    if (jobId == null) return false;
+    return _bridge.cancelJob(jobId);
+  }
+
   Future<void> _waitForJob(String jobId) async {
     const maxPolls = 600;
     for (var poll = 0; poll < maxPolls; poll++) {
-      if (_disposed) return;
+      if (_disposed || _activeJobId != jobId) return;
       final status = await _bridge.getJobStatus(jobId);
+      if (_disposed || _activeJobId != jobId) return;
       _activeJobProgress = ((status['progress'] as num?)?.toDouble() ?? 0)
           .clamp(0, 100)
           .toDouble();
@@ -412,11 +412,11 @@ class FilesController extends ChangeNotifier {
     }
   }
 
-  Future<List<OpenWithAppModel>> getOpenWith(String path) async {
+  Future<List<OpenWithAppModel>> getOpenWith(String path) {
     return _bridge.getOpenWithList(path);
   }
 
-  Future<bool> launchOpenWith(String path, OpenWithAppModel app) async {
+  Future<bool> launchOpenWith(String path, OpenWithAppModel app) {
     return _bridge.launchOpenWith(
       path,
       app.appId,

@@ -4,8 +4,6 @@
 param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$OutputEncoding = [System.Text.Encoding]::UTF8
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $brokerBin = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\bin\Release\CloudOS.SystemBroker.exe'
 $probeBin = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\bin\Release\CloudOS.BrokerProbe.exe'
@@ -55,7 +53,7 @@ function Invoke-RawBrokerFrame {
         $client.Write($header, 0, $header.Length)
         if ($DeclaredLength -eq [uint32]::MaxValue -and $bytes.Length -gt 0) { $client.Write($bytes, 0, $bytes.Length) }
         $client.Flush()
-        if ($DeclaredLength -ne [uint32]::MaxValue -and $DeclaredLength -gt 1048576) { return }
+        if ($length -gt 1048576) { return }
         $responseHeader = [byte[]]::new(4); $offset = 0
         while ($offset -lt 4) { $read = $client.Read($responseHeader, $offset, 4 - $offset); if ($read -le 0) { throw 'Broker closed before controlled error response.' }; $offset += $read }
         $responseLength = [BitConverter]::ToUInt32($responseHeader, 0)
@@ -84,23 +82,30 @@ try {
     Assert-True ($duplicateBroker.WaitForExit(5000)) 'Second broker instance did not exit promptly.'
     Assert-True ($duplicateBroker.ExitCode -ne 0) 'Second broker instance unexpectedly acquired the singleton.'
     $results.singleInstance = 'pass'
-    $fuzzPayloads = @(
-        '',
-        '{not-json',
-        '{"protocol":21,"type":"request","id":"missing-method","payload":{}}',
-        '{"protocol":"wrong","type":"request","id":"wrong-type","method":"health.ping","payload":[]}',
-        ('{"protocol":21,"type":"request","id":"' + ('x' * 65536) + '","method":"health.ping","payload":{}}'),
-        '{"protocol":21,"type":"request","id":"unicode-你好-😀","method":"unknown.ação","payload":{}}'
+
+    $fuzzCases = @(
+        [pscustomobject]@{ Name = 'empty-frame'; Payload = ''; ExpectedCode = 'invalid_request' },
+        [pscustomobject]@{ Name = 'malformed-json'; Payload = '{not-json'; ExpectedCode = 'invalid_request' },
+        [pscustomobject]@{ Name = 'missing-method'; Payload = '{"protocol":21,"type":"request","id":"missing-method","payload":{}}'; ExpectedCode = 'invalid_request' },
+        [pscustomobject]@{ Name = 'wrong-protocol-and-payload-type'; Payload = '{"protocol":"wrong","type":"request","id":"wrong-type","method":"health.ping","payload":[]}'; ExpectedCode = 'invalid_request' },
+        [pscustomobject]@{ Name = 'oversized-request-id'; Payload = ('{"protocol":21,"type":"request","id":"' + ('x' * 65536) + '","method":"health.ping","payload":{}}'); ExpectedCode = 'invalid_request' },
+        [pscustomobject]@{ Name = 'unicode-unsupported-method'; Payload = '{"protocol":21,"type":"request","id":"unicode-你好-😀","method":"unknown.ação","payload":{}}'; ExpectedCode = 'unsupported_method' }
     )
-    foreach ($payload in $fuzzPayloads) {
-        $fuzzResponse = Invoke-RawBrokerFrame -Payload $payload
-        Assert-True ($null -ne $fuzzResponse -and $fuzzResponse.ok -eq $false) 'Malformed IPC request was not rejected cleanly.'
-        Assert-True ((Invoke-ProbeJson -Arguments @('ping')).ok -eq $true) 'Broker died after malformed IPC request.'
+    foreach ($case in $fuzzCases) {
+        $fuzzResponse = Invoke-RawBrokerFrame -Payload $case.Payload
+        $compactResponse = if ($null -eq $fuzzResponse) { '<null>' } else { $fuzzResponse | ConvertTo-Json -Depth 10 -Compress }
+        Write-Host "[SMOKE-V22.1][IPC] $($case.Name) => $compactResponse"
+        Assert-True ($null -ne $fuzzResponse) "IPC fuzz '$($case.Name)' returned no controlled response."
+        Assert-True ($fuzzResponse.ok -eq $false) "IPC fuzz '$($case.Name)' unexpectedly succeeded: $compactResponse"
+        $actualCode = [string]$fuzzResponse.error.code
+        Assert-True ($actualCode -eq $case.ExpectedCode) "IPC fuzz '$($case.Name)' returned error '$actualCode', expected '$($case.ExpectedCode)': $compactResponse"
+        Assert-True ((Invoke-ProbeJson -Arguments @('ping')).ok -eq $true) "Broker died after IPC fuzz '$($case.Name)'."
     }
     Invoke-RawBrokerFrame -Payload '' -DeclaredLength 1048577
     Start-Sleep -Milliseconds 100
     Assert-True ((Invoke-ProbeJson -Arguments @('ping')).ok -eq $true) 'Broker died after oversized IPC frame.'
     $results.ipcFuzz = 'pass'
+
     Remove-WindowsSandbox
     New-Item -ItemType Directory -Path $sandbox -Force | Out-Null
     $source = Join-Path $sandbox 'Source'; $nested = Join-Path $source 'nested'; $copyTarget = Join-Path $sandbox 'CopyTarget'; $moveTarget = Join-Path $sandbox 'MoveTarget'; $linuxInbound = Join-Path $sandbox 'FromLinux'
