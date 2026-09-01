@@ -391,23 +391,37 @@ bool CloudOSBrokerClientV21::GetSystemSnapshot(BrokerClientSnapshot& out_snapsho
 bool CloudOSBrokerClientV21::SetVolume(double value)
 {
     if (!EnsureConnected()) return false;
+
     std::string req = "{\"protocol\":21,\"type\":\"request\",\"id\":\"set-vol\",\"method\":\"system.volume.set\",\"payload\":{\"value\":" + std::to_string(value) + "}}";
-    std::lock_guard<std::mutex> lock(mutex_);
-    SendFrame(req);
     std::string resp;
-    ReadFrame(resp);
-    return true;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!SendFrame(req) || !ReadFrame(resp))
+        {
+            state_.store(BrokerConnectionState::Degraded);
+            return false;
+        }
+    }
+
+    return resp.find("\"ok\":true") != std::string::npos;
 }
 
 bool CloudOSBrokerClientV21::SetBrightness(double value)
 {
     if (!EnsureConnected()) return false;
+
     std::string req = "{\"protocol\":21,\"type\":\"request\",\"id\":\"set-bri\",\"method\":\"system.brightness.set\",\"payload\":{\"value\":" + std::to_string(value) + "}}";
-    std::lock_guard<std::mutex> lock(mutex_);
-    SendFrame(req);
     std::string resp;
-    ReadFrame(resp);
-    return true;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!SendFrame(req) || !ReadFrame(resp))
+        {
+            state_.store(BrokerConnectionState::Degraded);
+            return false;
+        }
+    }
+
+    return resp.find("\"ok\":true") != std::string::npos;
 }
 
 bool CloudOSBrokerClientV21::GetCapabilities(std::vector<std::string>& out_caps)
