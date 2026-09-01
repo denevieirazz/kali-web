@@ -8,6 +8,7 @@
 #include "system_service_v21.h"
 #include "wsl_service_v21.h"
 
+#include <cmath>
 #include <csignal>
 #include <iostream>
 
@@ -66,12 +67,10 @@ int RunSelfTest()
         Assert(parsed_req.method == "apps.list", "ParseRequest method");
         Assert(parsed_req.payload["limit"].AsInt() == 10, "ParseRequest payload int");
 
-        // Oversized rejection
         std::string huge_str(kMaxPayloadBytes + 10, 'A');
         JsonValue val;
         Assert(!ParseJson(huge_str, val), "Reject oversized JSON string");
 
-        // Response
         BrokerResponse res;
         res.protocol = kProtocolVersion;
         res.id = "res-test-1";
@@ -148,20 +147,43 @@ int RunSelfTest()
         Assert(AppServiceV21::Instance().GetGeneration() >= 1, "App generation >= 1");
 
         std::string err;
-        // Verify invalid arbitrary string is rejected
         Assert(!AppServiceV21::Instance().LaunchApp("calc.exe && malicious_command", err), "Arbitrary command injection rejected");
         Assert(!AppServiceV21::Instance().LaunchApp("powershell.exe -enc AAAAA", err), "Arbitrary PowerShell rejected");
         Assert(!err.empty(), "Error message populated on invalid app ID");
     }
 
-    // 6. Test System Service
+    // 6. Test System Service with capability-aware physical controls
     {
         const auto snap = SystemServiceV21::Instance().GetSnapshot();
         Assert(!snap.device_name.empty(), "Device name not empty");
         Assert(snap.volume >= 0.0 && snap.volume <= 1.0, "Volume in range [0, 1]");
+        Assert(snap.brightness >= 0.0 && snap.brightness <= 1.0, "Brightness in range [0, 1]");
 
-        Assert(SystemServiceV21::Instance().SetVolume(0.88), "SetVolume succeeds");
-        Assert(SystemServiceV21::Instance().GetSnapshot().volume == 0.88, "Volume updated in snapshot");
+        const bool volume_result = SystemServiceV21::Instance().SetVolume(0.88);
+        if (snap.volume_available)
+        {
+            Assert(volume_result, "SetVolume succeeds when audio endpoint is available");
+            Assert(
+                std::abs(SystemServiceV21::Instance().GetSnapshot().volume - 0.88) <= 0.02,
+                "Volume update reflected in snapshot");
+        }
+        else
+        {
+            Assert(!volume_result, "SetVolume fails cleanly when audio endpoint is unavailable");
+        }
+
+        const bool brightness_result = SystemServiceV21::Instance().SetBrightness(0.64);
+        if (snap.brightness_available)
+        {
+            Assert(brightness_result, "SetBrightness succeeds when monitor control is available");
+            Assert(
+                std::abs(SystemServiceV21::Instance().GetSnapshot().brightness - 0.64) <= 0.02,
+                "Brightness update reflected in snapshot");
+        }
+        else
+        {
+            Assert(!brightness_result, "SetBrightness fails cleanly when monitor control is unavailable");
+        }
 
         const auto caps = SystemServiceV21::Instance().GetCapabilities();
         Assert(caps.size() >= 10, "Capabilities list populated");
@@ -230,7 +252,6 @@ int main(int argc, char* argv[])
 
     std::cout << "[SystemBroker] Broker ready and listening on user named pipe." << std::endl;
 
-    // Run until shutdown signal
     while (!CloudOS::g_shutdown_requested.load())
     {
         Sleep(500);
