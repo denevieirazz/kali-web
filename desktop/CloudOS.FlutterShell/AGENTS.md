@@ -14,21 +14,33 @@ Código novo de uma feature deve ficar em `lib/features/<feature>/` sempre que h
 - root MaterialApp/theme wiring: `lib/app/cloudos_app.dart`
 - shell/orquestração do desktop: `lib/shell/cloudos_shell.dart`
 - wallpaper/ícones/status do desktop: `lib/shell/widgets/`
-- Files: `lib/features/files/presentation/`
+- Files: `lib/features/files/`
 - Start/Search: `lib/features/start/`
-- modelos compartilhados de apresentação: `lib/models/shell_models.dart`
+- Taskbar: `lib/features/taskbar/`
+- Quick Settings: `lib/features/quick_settings/`
+- Notifications: `lib/features/notifications/`
+- modelos focados: `lib/models/cloud_*.dart`
+- facade de modelos legada: `lib/models/shell_models.dart`
 - MethodChannel Flutter -> Native Bridge: `lib/services/cloudos_bridge.dart`
+- mapper/preview do bridge: `lib/services/bridge/`
 - bridge Windows C++: `native_bridge/cloudos_flutter_bridge_v20.*`
 - cliente do System Broker V21: `native_bridge/cloudos_broker_client_v21.*`
 - broker nativo: `../CloudOS.SystemBroker/`
-- smoke/contract Flutter: `test/shell_smoke_test.dart`
+- smoke Flutter: `test/shell_smoke_test.dart`
+- lógica modular: `test/modular_logic_test.dart`
 
 ## Caminhos legados de compatibilidade
 
 Estes arquivos existem para não quebrar imports antigos; não coloque novas implementações grandes neles:
 
-- `lib/widgets/files_window.dart` -> exporta `features/files/presentation/files_window.dart`
-- `lib/widgets/start_panel.dart` -> exporta `features/start/presentation/start_panel.dart`
+- `lib/widgets/files_window.dart` -> `features/files/presentation/files_window.dart`
+- `lib/widgets/start_panel.dart` -> `features/start/presentation/start_panel.dart`
+- `lib/widgets/cloud_taskbar.dart` -> `features/taskbar/presentation/cloud_taskbar.dart`
+- `lib/widgets/quick_settings_panel.dart` -> `features/quick_settings/presentation/quick_settings_panel.dart`
+- `lib/widgets/notification_center.dart` -> `features/notifications/presentation/notification_center_panel.dart`
+- `lib/models/shell_models.dart` -> barrel dos modelos focados em `lib/models/`
+
+`lib/widgets/glass_surface.dart` continua sendo componente compartilhado real e não um shim de compatibilidade.
 
 ## Fronteiras
 
@@ -63,6 +75,17 @@ features/<feature>/
 Não crie camadas vazias só para seguir um padrão.
 Não use `part` para esconder god files.
 Não troque um arquivo gigante por outro `manager.dart` gigante.
+
+## Modelos
+
+Novo código deve importar o modelo específico quando isso reduzir contexto. `shell_models.dart` existe para compatibilidade, não para voltar a concentrar tipos.
+
+Arquivos atuais:
+
+- `cloud_app.dart`
+- `cloud_file_item.dart`
+- `cloud_notification.dart`
+- `cloud_system_snapshot.dart`
 
 ## Compatibilidade
 
