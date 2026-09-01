@@ -15,6 +15,7 @@ $requiredHeaders = @(
     "job_manager_v21.h",
     "app_service_v21.h",
     "file_service_v21.h",
+    "native_shell_activation_client_v21.h",
     "network_status_v21.h",
     "system_control_v21.h",
     "system_service_v21.h",
@@ -95,10 +96,32 @@ if ($fileServiceContent -match 'req\.payload.*path' -or $serverContent -match 'f
     throw "files.list must not expose an arbitrary raw-path request contract"
 }
 
-# 7. Verify native modules are part of the Broker build graph
+# 7. Verify CloudOS Browser/Terminal launch through NativeShell authority
+$appServiceContent = Get-Content (Join-Path $brokerSrc "app_service_v21.cpp") -Raw
+$activationClientContent = Get-Content (Join-Path $brokerSrc "native_shell_activation_client_v21.h") -Raw
+$activationServerPath = Join-Path $root "desktop\CloudOS.NativeShell\src\native_shell_activation_server_v21.h"
+$activationServerContent = Get-Content $activationServerPath -Raw
+if ($appServiceContent -notmatch "NativeShellActivationClientV21::Activate") {
+    throw "CloudOS first-party Browser/Terminal must route through NativeShell activation"
+}
+if ($appServiceContent -match 'cloudos:browser[\s\S]{0,300}ShellExecuteW') {
+    throw "cloudos:browser must not silently dispatch an external browser from SystemBroker"
+}
+if ($activationClientContent -notmatch "WM_COPYDATA" -or
+    $activationClientContent -notmatch "ShellActivationV21::Request") {
+    throw "NativeShell activation client must use the typed V21 activation request"
+}
+if ($activationServerContent -notmatch "CloudOSNativeBrowserWindow::Open") {
+    throw "NativeShell Browser activation must open the CloudOS WebView2 browser surface"
+}
+
+# 8. Verify native modules are part of the Broker build graph
 $brokerProject = Get-Content (Join-Path $root "desktop\CloudOS.SystemBroker\CloudOS.SystemBroker.vcxproj") -Raw
 if ($brokerProject -notmatch "file_service_v21\.cpp") {
     throw "FileServiceV21 must be compiled by CloudOS.SystemBroker.vcxproj"
+}
+if ($brokerProject -notmatch "native_shell_activation_client_v21\.h") {
+    throw "NativeShellActivationClientV21 must be visible in CloudOS.SystemBroker.vcxproj"
 }
 if ($brokerProject -notmatch "system_control_v21\.cpp") {
     throw "SystemControlV21 must be compiled by CloudOS.SystemBroker.vcxproj"
@@ -113,7 +136,7 @@ if ($brokerProject -notmatch "wlanapi\.lib" -or $brokerProject -notmatch "iphlpa
     throw "NetworkStatusV21 native network dependencies are missing from the Broker link graph"
 }
 
-# 8. Verify Documentation Exists
+# 9. Verify Documentation Exists
 $docV21 = Join-Path $root "docs\native\SYSTEM_BROKER_V21.md"
 $docSec = Join-Path $root "docs\native\SYSTEM_BROKER_SECURITY_V21.md"
 if (-not (Test-Path $docV21)) {
