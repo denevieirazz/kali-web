@@ -22,7 +22,7 @@ struct NativeAppItem final
 {
     std::string id;
     std::string name;
-    std::string platform; // "windows", "linux", "cloudos"
+    std::string platform;
     std::string subtitle;
     std::string distro;
     std::string category;
@@ -30,6 +30,17 @@ struct NativeAppItem final
     bool can_launch{true};
     bool pinned{false};
     bool recent{false};
+};
+
+struct NativeFileItem final
+{
+    std::string name;
+    std::string path;
+    bool is_folder{};
+    std::string size_formatted;
+    std::string modified_formatted;
+    std::string source;
+    std::string extension;
 };
 
 struct NativeSystemSnapshot final
@@ -66,6 +77,7 @@ public:
         std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
 
     std::vector<NativeAppItem> GetApps();
+    bool GetFiles(const std::string& location, std::vector<NativeFileItem>& out_files);
     NativeSystemSnapshot GetSystemSnapshot();
     bool LaunchApp(const std::string& app_id);
     bool SetVolume(double volume);
