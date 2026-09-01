@@ -5,7 +5,9 @@
 #include <shlobj.h>
 
 #include <algorithm>
+#include <cmath>
 #include <iostream>
+#include <unordered_set>
 
 namespace CloudOS
 {
@@ -13,6 +15,39 @@ namespace CloudOS
 namespace
 {
 constexpr const char* kChannelName = "cloudos/native/v19";
+constexpr size_t kMaxFlutterRpcPayloadBytes = 1024 * 1024;
+
+bool IsAllowedFlutterRpcMethod(const std::string& method)
+{
+    static const std::unordered_set<std::string> allowed = {
+        "health.ping",
+        "health.status",
+        "system.capabilities",
+        "apps.list",
+        "system.snapshot",
+        "wsl.list",
+        "events.subscribe",
+        "events.unsubscribe",
+        "jobs.status",
+        "jobs.cancel",
+        "files.list",
+        "files.metadata",
+        "files.drives",
+        "files.knownFolders",
+        "files.resolvePath",
+        "files.createFolder",
+        "files.rename",
+        "files.delete",
+        "files.copy",
+        "files.move",
+        "files.search",
+        "files.open",
+        "files.openWith.list",
+        "files.openWith.launch",
+        "diagnostics.snapshot",
+    };
+    return allowed.find(method) != allowed.end();
+}
 } // namespace
 
 void CloudOSFlutterBridgeV20::RegisterWithMessenger(
@@ -45,7 +80,6 @@ CloudOSFlutterBridgeV20& CloudOSFlutterBridgeV20::Instance()
 void CloudOSFlutterBridgeV20::Initialize(HWND window_handle)
 {
     window_handle_ = window_handle;
-    // Attempt connection to SystemBroker
     CloudOSBrokerClientV21::Instance().EnsureConnected();
     RefreshAppCatalog();
     RefreshSystemSnapshot();
@@ -62,7 +96,6 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         const auto apps = GetApps();
         flutter::EncodableList list;
         list.reserve(apps.size());
-
         for (const auto& app : apps)
         {
             flutter::EncodableMap map;
@@ -78,7 +111,6 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
             map[flutter::EncodableValue("recent")] = flutter::EncodableValue(app.recent);
             list.push_back(flutter::EncodableValue(std::move(map)));
         }
-
         result->Success(flutter::EncodableValue(std::move(list)));
         return;
     }
@@ -96,12 +128,8 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         map[flutter::EncodableValue("currentWorkspace")] = flutter::EncodableValue(snapshot.current_workspace);
 
         flutter::EncodableList distros_list;
-        for (const auto& d : snapshot.distros)
-        {
-            distros_list.push_back(flutter::EncodableValue(d));
-        }
+        for (const auto& d : snapshot.distros) distros_list.push_back(flutter::EncodableValue(d));
         map[flutter::EncodableValue("distros")] = flutter::EncodableValue(std::move(distros_list));
-
         result->Success(flutter::EncodableValue(std::move(map)));
         return;
     }
@@ -114,69 +142,57 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
             result->Error("INVALID_ARGUMENT", "launchApp requires a map with an 'id' property");
             return;
         }
-
-        auto it = args->find(flutter::EncodableValue("id"));
+        const auto it = args->find(flutter::EncodableValue("id"));
         if (it == args->end() || !std::holds_alternative<std::string>(it->second))
         {
             result->Error("INVALID_ARGUMENT", "Missing or invalid 'id' parameter");
             return;
         }
-
         const std::string app_id = std::get<std::string>(it->second);
-        bool ok = LaunchApp(app_id);
-        if (ok)
+        if (app_id.empty() || app_id.size() > 512)
         {
-            result->Success(flutter::EncodableValue(true));
+            result->Error("INVALID_ARGUMENT", "Application id is empty or too long");
+            return;
         }
-        else
-        {
-            result->Error("LAUNCH_FAILED", "Failed to launch application with ID: " + app_id);
-        }
+        if (LaunchApp(app_id)) result->Success(flutter::EncodableValue(true));
+        else result->Error("LAUNCH_FAILED", "Failed to launch application with the requested typed ID");
         return;
     }
 
-    if (method == "setVolume")
+    if (method == "setVolume" || method == "setBrightness")
     {
         const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
-        if (args)
+        if (!args)
         {
-            auto it = args->find(flutter::EncodableValue("value"));
-            if (it != args->end() && std::holds_alternative<double>(it->second))
-            {
-                const bool updated = SetVolume(std::get<double>(it->second));
-                result->Success(flutter::EncodableValue(updated));
-                return;
-            }
+            result->Error("INVALID_ARGUMENT", method + " requires a double 'value'");
+            return;
         }
-        result->Error("INVALID_ARGUMENT", "setVolume requires a double 'value'");
-        return;
-    }
-
-    if (method == "setBrightness")
-    {
-        const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
-        if (args)
+        const auto it = args->find(flutter::EncodableValue("value"));
+        if (it == args->end() || !std::holds_alternative<double>(it->second))
         {
-            auto it = args->find(flutter::EncodableValue("value"));
-            if (it != args->end() && std::holds_alternative<double>(it->second))
-            {
-                const bool updated = SetBrightness(std::get<double>(it->second));
-                result->Success(flutter::EncodableValue(updated));
-                return;
-            }
+            result->Error("INVALID_ARGUMENT", method + " requires a double 'value'");
+            return;
         }
-        result->Error("INVALID_ARGUMENT", "setBrightness requires a double 'value'");
+        const double value = std::get<double>(it->second);
+        if (!std::isfinite(value) || value < 0.0 || value > 1.0)
+        {
+            result->Error("OUT_OF_RANGE", "value must be finite and within [0, 1]");
+            return;
+        }
+        const bool updated = method == "setVolume" ? SetVolume(value) : SetBrightness(value);
+        result->Success(flutter::EncodableValue(updated));
         return;
     }
 
     if (method == "getBridgeInfo")
     {
         flutter::EncodableMap map;
-        map[flutter::EncodableValue("schema")] = flutter::EncodableValue(21);
-        map[flutter::EncodableValue("verdict")] = flutter::EncodableValue("pass");
+        map[flutter::EncodableValue("schema")] = flutter::EncodableValue(22);
+        map[flutter::EncodableValue("verdict")] = flutter::EncodableValue("runtime");
         map[flutter::EncodableValue("brokerConnected")] = flutter::EncodableValue(CloudOSBrokerClientV21::Instance().IsConnected());
         map[flutter::EncodableValue("brokerState")] = flutter::EncodableValue(ConnectionStateToString(CloudOSBrokerClientV21::Instance().GetConnectionState()));
         map[flutter::EncodableValue("arbitrary_command_api")] = flutter::EncodableValue(false);
+        map[flutter::EncodableValue("generic_broker_rpc_restricted")] = flutter::EncodableValue(true);
         map[flutter::EncodableValue("winlogon_modified")] = flutter::EncodableValue(false);
         map[flutter::EncodableValue("shell_activation_executed")] = flutter::EncodableValue(false);
         result->Success(flutter::EncodableValue(std::move(map)));
@@ -192,16 +208,30 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
             return;
         }
 
-        auto it_m = args->find(flutter::EncodableValue("method"));
-        auto it_p = args->find(flutter::EncodableValue("payload"));
+        const auto it_m = args->find(flutter::EncodableValue("method"));
+        const auto it_p = args->find(flutter::EncodableValue("payload"));
         if (it_m == args->end() || !std::holds_alternative<std::string>(it_m->second))
         {
             result->Error("INVALID_ARGUMENT", "Missing 'method' string in arguments");
             return;
         }
 
-        std::string rpc_method = std::get<std::string>(it_m->second);
-        std::string rpc_payload = (it_p != args->end() && std::holds_alternative<std::string>(it_p->second)) ? std::get<std::string>(it_p->second) : "{}";
+        const std::string rpc_method = std::get<std::string>(it_m->second);
+        if (!IsAllowedFlutterRpcMethod(rpc_method))
+        {
+            result->Error("RPC_NOT_ALLOWED", "The requested broker method is not exposed to Flutter");
+            return;
+        }
+
+        const std::string rpc_payload =
+            (it_p != args->end() && std::holds_alternative<std::string>(it_p->second))
+                ? std::get<std::string>(it_p->second)
+                : "{}";
+        if (rpc_payload.size() > kMaxFlutterRpcPayloadBytes)
+        {
+            result->Error("PAYLOAD_TOO_LARGE", "Broker RPC payload exceeds the V22.1 limit");
+            return;
+        }
 
         std::string out_resp;
         if (CloudOSBrokerClientV21::Instance().InvokeBrokerRpc(rpc_method, rpc_payload, out_resp))
@@ -210,7 +240,7 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         }
         else
         {
-            result->Error("BROKER_RPC_FAILED", "Failed to communicate with System Broker for method: " + rpc_method);
+            result->Error("BROKER_RPC_FAILED", "Failed to communicate with System Broker");
         }
         return;
     }
@@ -260,30 +290,24 @@ NativeSystemSnapshot CloudOSFlutterBridgeV20::GetSystemSnapshot()
 bool CloudOSFlutterBridgeV20::LaunchApp(const std::string& app_id)
 {
     std::string err;
-    if (CloudOSBrokerClientV21::Instance().LaunchApp(app_id, err))
-    {
-        return true;
-    }
-
-    // Flutter is a presentation client. It has no local execution fallback.
-    return false;
+    return CloudOSBrokerClientV21::Instance().LaunchApp(app_id, err);
 }
 
 bool CloudOSFlutterBridgeV20::SetVolume(double volume)
 {
-    double clamped = std::clamp(volume, 0.0, 1.0);
-    if (!CloudOSBrokerClientV21::Instance().SetVolume(clamped)) return false;
+    if (!std::isfinite(volume) || volume < 0.0 || volume > 1.0) return false;
+    if (!CloudOSBrokerClientV21::Instance().SetVolume(volume)) return false;
     std::lock_guard<std::mutex> lock(mutex_);
-    cached_snapshot_.volume = clamped;
+    cached_snapshot_.volume = volume;
     return true;
 }
 
 bool CloudOSFlutterBridgeV20::SetBrightness(double brightness)
 {
-    double clamped = std::clamp(brightness, 0.0, 1.0);
-    if (!CloudOSBrokerClientV21::Instance().SetBrightness(clamped)) return false;
+    if (!std::isfinite(brightness) || brightness < 0.0 || brightness > 1.0) return false;
+    if (!CloudOSBrokerClientV21::Instance().SetBrightness(brightness)) return false;
     std::lock_guard<std::mutex> lock(mutex_);
-    cached_snapshot_.brightness = clamped;
+    cached_snapshot_.brightness = brightness;
     return true;
 }
 
