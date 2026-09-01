@@ -143,8 +143,15 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
             auto it = args->find(flutter::EncodableValue("value"));
             if (it != args->end() && std::holds_alternative<double>(it->second))
             {
-                SetVolume(std::get<double>(it->second));
-                result->Success(flutter::EncodableValue(true));
+                const bool ok = SetVolume(std::get<double>(it->second));
+                if (ok)
+                {
+                    result->Success(flutter::EncodableValue(true));
+                }
+                else
+                {
+                    result->Error("BROKER_WRITE_FAILED", "System broker rejected or failed the volume update");
+                }
                 return;
             }
         }
@@ -160,8 +167,15 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
             auto it = args->find(flutter::EncodableValue("value"));
             if (it != args->end() && std::holds_alternative<double>(it->second))
             {
-                SetBrightness(std::get<double>(it->second));
-                result->Success(flutter::EncodableValue(true));
+                const bool ok = SetBrightness(std::get<double>(it->second));
+                if (ok)
+                {
+                    result->Success(flutter::EncodableValue(true));
+                }
+                else
+                {
+                    result->Error("BROKER_WRITE_FAILED", "System broker rejected or failed the brightness update");
+                }
                 return;
             }
         }
@@ -262,20 +276,30 @@ bool CloudOSFlutterBridgeV20::LaunchApp(const std::string& app_id)
     return false;
 }
 
-void CloudOSFlutterBridgeV20::SetVolume(double volume)
+bool CloudOSFlutterBridgeV20::SetVolume(double volume)
 {
-    double clamped = std::clamp(volume, 0.0, 1.0);
-    CloudOSBrokerClientV21::Instance().SetVolume(clamped);
+    const double clamped = std::clamp(volume, 0.0, 1.0);
+    if (!CloudOSBrokerClientV21::Instance().SetVolume(clamped))
+    {
+        return false;
+    }
+
     std::lock_guard<std::mutex> lock(mutex_);
     cached_snapshot_.volume = clamped;
+    return true;
 }
 
-void CloudOSFlutterBridgeV20::SetBrightness(double brightness)
+bool CloudOSFlutterBridgeV20::SetBrightness(double brightness)
 {
-    double clamped = std::clamp(brightness, 0.0, 1.0);
-    CloudOSBrokerClientV21::Instance().SetBrightness(clamped);
+    const double clamped = std::clamp(brightness, 0.0, 1.0);
+    if (!CloudOSBrokerClientV21::Instance().SetBrightness(clamped))
+    {
+        return false;
+    }
+
     std::lock_guard<std::mutex> lock(mutex_);
     cached_snapshot_.brightness = clamped;
+    return true;
 }
 
 void CloudOSFlutterBridgeV20::RefreshAppCatalog()
