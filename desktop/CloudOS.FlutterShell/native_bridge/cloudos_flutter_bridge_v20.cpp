@@ -1,5 +1,6 @@
 #include "cloudos_flutter_bridge_v20.h"
 #include "cloudos_broker_client_v21.h"
+#include "../../CloudOS.NativeCommon/native_shell_activation_client_v21.h"
 
 #include <shellapi.h>
 #include <shlobj.h>
@@ -13,6 +14,42 @@ namespace CloudOS
 namespace
 {
 constexpr const char* kChannelName = "cloudos/native/v19";
+
+bool ResolveSurfaceApp(
+    const std::string& id,
+    ShellActivationV21::App* app)
+{
+    if (app == nullptr) return false;
+    if (id == "browser" || id == "cloudos:browser")
+    {
+        *app = ShellActivationV21::App::Browser;
+        return true;
+    }
+    if (id == "terminal" || id == "cloudos:terminal")
+    {
+        *app = ShellActivationV21::App::Terminal;
+        return true;
+    }
+    return false;
+}
+
+bool ReadSurfaceArgument(
+    const flutter::MethodCall<flutter::EncodableValue>& method_call,
+    ShellActivationV21::App* app,
+    std::string* id)
+{
+    const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
+    if (args == nullptr) return false;
+
+    const auto it = args->find(flutter::EncodableValue("id"));
+    if (it == args->end() || !std::holds_alternative<std::string>(it->second))
+        return false;
+
+    const std::string surface_id = std::get<std::string>(it->second);
+    if (!ResolveSurfaceApp(surface_id, app)) return false;
+    if (id != nullptr) *id = surface_id;
+    return true;
+}
 } // namespace
 
 void CloudOSFlutterBridgeV20::RegisterWithMessenger(
@@ -150,6 +187,55 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         return;
     }
 
+    if (method == "getShellSurfaceStates")
+    {
+        bool browser_running = false;
+        bool terminal_running = false;
+        std::string error;
+        if (!NativeShellActivationClientV21::QueryRunning(
+                ShellActivationV21::App::Browser,
+                &browser_running,
+                &error) ||
+            !NativeShellActivationClientV21::QueryRunning(
+                ShellActivationV21::App::Terminal,
+                &terminal_running,
+                &error))
+        {
+            result->Error("NATIVE_SHELL_UNAVAILABLE", error);
+            return;
+        }
+
+        flutter::EncodableMap map;
+        map[flutter::EncodableValue("browser")] = flutter::EncodableValue(browser_running);
+        map[flutter::EncodableValue("terminal")] = flutter::EncodableValue(terminal_running);
+        result->Success(flutter::EncodableValue(std::move(map)));
+        return;
+    }
+
+    if (method == "focusShellSurface" || method == "closeShellSurface")
+    {
+        ShellActivationV21::App app{};
+        std::string surface_id;
+        if (!ReadSurfaceArgument(method_call, &app, &surface_id))
+        {
+            result->Error("INVALID_ARGUMENT", "A supported Browser or Terminal surface id is required");
+            return;
+        }
+
+        bool surface_was_running = false;
+        std::string error;
+        const bool ok = method == "focusShellSurface"
+            ? NativeShellActivationClientV21::Focus(app, &surface_was_running, &error)
+            : NativeShellActivationClientV21::Close(app, &surface_was_running, &error);
+        if (!ok)
+        {
+            result->Error("NATIVE_SHELL_UNAVAILABLE", error);
+            return;
+        }
+        result->Success(flutter::EncodableValue(surface_was_running));
+        return;
+    }
+
     if (method == "launchApp")
     {
         const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
@@ -167,7 +253,7 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         }
 
         const std::string app_id = std::get<std::string>(it->second);
-        bool ok = LaunchApp(app_id);
+        const bool ok = LaunchApp(app_id);
         if (ok)
         {
             result->Success(flutter::EncodableValue(true));
@@ -239,6 +325,7 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         map[flutter::EncodableValue("arbitrary_command_api")] = flutter::EncodableValue(false);
         map[flutter::EncodableValue("winlogon_modified")] = flutter::EncodableValue(false);
         map[flutter::EncodableValue("shell_activation_executed")] = flutter::EncodableValue(false);
+        map[flutter::EncodableValue("shell_surface_lifecycle")] = flutter::EncodableValue(true);
         result->Success(flutter::EncodableValue(std::move(map)));
         return;
     }
@@ -324,30 +411,24 @@ bool CloudOSFlutterBridgeV20::LaunchApp(const std::string& app_id)
         return true;
     }
 
+    // If the Broker is unavailable, CloudOS first-party Browser/Terminal still
+    // remain NativeShell-owned. Never substitute the user's default browser or
+    // an external cmd.exe for these surfaces.
+    ShellActivationV21::App surface_app{};
+    if (ResolveSurfaceApp(app_id, &surface_app))
+    {
+        return NativeShellActivationClientV21::Activate(surface_app, &err);
+    }
+
     if (app_id == "files" || app_id == "cloudos:files")
     {
-        ShellExecuteW(nullptr, L"open", L"explorer.exe", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
-    }
-    if (app_id == "browser" || app_id == "cloudos:browser")
-    {
-        ShellExecuteW(nullptr, L"open", L"https://google.com", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
-    }
-    if (app_id == "terminal" || app_id == "cloudos:terminal")
-    {
-        ShellExecuteW(nullptr, L"open", L"cmd.exe", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
+        return reinterpret_cast<intptr_t>(
+            ShellExecuteW(nullptr, L"open", L"explorer.exe", nullptr, nullptr, SW_SHOWNORMAL)) > 32;
     }
     if (app_id == "windows:notepad")
     {
-        ShellExecuteW(nullptr, L"open", L"notepad.exe", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
-    }
-    if (app_id == "wsl:ubuntu-terminal" || app_id == "linux:ubuntu-terminal" || app_id == "ubuntu-terminal")
-    {
-        ShellExecuteW(nullptr, L"open", L"wsl.exe", L"~", nullptr, SW_SHOWNORMAL);
-        return true;
+        return reinterpret_cast<intptr_t>(
+            ShellExecuteW(nullptr, L"open", L"notepad.exe", nullptr, nullptr, SW_SHOWNORMAL)) > 32;
     }
     return false;
 }
@@ -385,10 +466,9 @@ void CloudOSFlutterBridgeV20::RefreshAppCatalog()
     std::lock_guard<std::mutex> lock(mutex_);
     cached_apps_.clear();
     cached_apps_.push_back({"cloudos:files", "Arquivos", "cloudos", "Windows + Linux (WSL2)", "", "Sistema", "CloudOS", true, true, false});
-    cached_apps_.push_back({"cloudos:browser", "Navegador Web", "cloudos", "Chromium / Web Browser", "", "Produtividade", "CloudOS", true, true, true});
-    cached_apps_.push_back({"cloudos:terminal", "Terminal", "cloudos", "Prompt de Comando / Shell", "", "Utilitários", "CloudOS", true, true, true});
+    cached_apps_.push_back({"cloudos:browser", "Navegador Web", "cloudos", "WebView2 nativo do CloudOS", "", "Produtividade", "CloudOS", true, true, true});
+    cached_apps_.push_back({"cloudos:terminal", "Terminal", "cloudos", "Terminal nativo / ConPTY", "", "Utilitários", "CloudOS", true, true, true});
     cached_apps_.push_back({"windows:notepad", "Bloco de Notas", "windows", "Editor de Texto", "", "Produtividade", "Windows", true, true, false});
-    cached_apps_.push_back({"wsl:ubuntu-terminal", "Ubuntu Terminal", "linux", "Linux Bash Shell (Ubuntu)", "Ubuntu", "Linux / WSL", "Ubuntu (WSL)", true, true, true});
 }
 
 void CloudOSFlutterBridgeV20::RefreshSystemSnapshot()
@@ -403,7 +483,7 @@ void CloudOSFlutterBridgeV20::RefreshSystemSnapshot()
     cached_snapshot_.brightness = 0.85;
     cached_snapshot_.battery_percent = 100;
     cached_snapshot_.wsl_available = true;
-    cached_snapshot_.distros = {"Ubuntu"};
+    cached_snapshot_.distros = {};
     cached_snapshot_.current_workspace = 1;
 }
 
