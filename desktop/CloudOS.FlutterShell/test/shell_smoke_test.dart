@@ -236,7 +236,7 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(find.text('CloudOS V22.1'), findsWidgets);
+        expect(find.byTooltip('Iniciar (Ctrl+Alt+A)'), findsOneWidget);
         expect(find.text('Arquivos'), findsWidgets);
         expect(find.text('Acesso Rápido'), findsOneWidget);
         expect(find.text('Este Computador'), findsOneWidget);
@@ -312,8 +312,9 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(find.text('CloudOS V22.1'), findsWidgets);
+        expect(find.byTooltip('Iniciar (Ctrl+Alt+A)'), findsOneWidget);
         expect(find.text('Arquivos'), findsWidgets);
+        expect(tester.takeException(), isNull);
       },
     );
 
@@ -328,8 +329,9 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(find.text('CloudOS V22.1'), findsWidgets);
+        expect(find.byTooltip('Iniciar (Ctrl+Alt+A)'), findsOneWidget);
         expect(find.text('Arquivos'), findsWidgets);
+        expect(tester.takeException(), isNull);
       },
     );
 
@@ -344,7 +346,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('CloudOS V22.1'), findsWidgets);
+      expect(find.byTooltip('Iniciar (Ctrl+Alt+A)'), findsOneWidget);
+      expect(find.text('Arquivos'), findsWidgets);
       expect(tester.takeException(), isNull);
     });
 
