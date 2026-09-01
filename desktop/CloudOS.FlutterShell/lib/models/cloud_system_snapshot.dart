@@ -10,6 +10,7 @@ class CloudSystemSnapshot {
     this.networkAvailable = true,
     this.volumeAvailable = true,
     this.brightnessAvailable = true,
+    this.batteryAvailable = true,
     this.currentWorkspace = 1,
   });
 
@@ -20,6 +21,7 @@ class CloudSystemSnapshot {
   final double volume;
   final bool brightnessAvailable;
   final double brightness;
+  final bool batteryAvailable;
   final int batteryPercent;
   final bool wslAvailable;
   final List<String> distros;
