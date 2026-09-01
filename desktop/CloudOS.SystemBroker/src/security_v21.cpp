@@ -2,10 +2,58 @@
 
 #include <userenv.h>
 
+#include <mutex>
 #include <vector>
 
 namespace CloudOS
 {
+
+namespace
+{
+struct StaticDenyAllDescriptor final
+{
+    SECURITY_DESCRIPTOR descriptor{};
+    ACL acl{};
+    bool initialized{false};
+};
+
+StaticDenyAllDescriptor& DenyAllDescriptor()
+{
+    static StaticDenyAllDescriptor storage;
+    static std::once_flag once;
+    std::call_once(once, [&]() {
+        if (!InitializeSecurityDescriptor(&storage.descriptor, SECURITY_DESCRIPTOR_REVISION))
+        {
+            return;
+        }
+        if (!InitializeAcl(&storage.acl, sizeof(storage.acl), ACL_REVISION))
+        {
+            return;
+        }
+        if (!SetSecurityDescriptorDacl(&storage.descriptor, TRUE, &storage.acl, FALSE))
+        {
+            return;
+        }
+        storage.initialized = true;
+    });
+    return storage;
+}
+
+bool IsValidSidString(const std::wstring& sid_string)
+{
+    if (sid_string.empty()) return false;
+
+    PSID sid = nullptr;
+    if (!ConvertStringSidToSidW(sid_string.c_str(), &sid) || sid == nullptr)
+    {
+        return false;
+    }
+
+    const bool valid = IsValidSid(sid) != FALSE;
+    LocalFree(sid);
+    return valid;
+}
+} // namespace
 
 std::wstring SecurityV21::GetCurrentUserSidString()
 {
@@ -56,22 +104,22 @@ DWORD SecurityV21::GetCurrentSessionId()
 
 std::wstring SecurityV21::GetCommandPipeName()
 {
-    std::wstring sid = GetCurrentUserSidString();
-    DWORD session_id = GetCurrentSessionId();
+    const std::wstring sid = GetCurrentUserSidString();
+    const DWORD session_id = GetCurrentSessionId();
     return L"\\\\.\\pipe\\CloudOS.SystemBroker.v21." + sid + L"." + std::to_wstring(session_id);
 }
 
 std::wstring SecurityV21::GetEventsPipeName()
 {
-    std::wstring sid = GetCurrentUserSidString();
-    DWORD session_id = GetCurrentSessionId();
+    const std::wstring sid = GetCurrentUserSidString();
+    const DWORD session_id = GetCurrentSessionId();
     return L"\\\\.\\pipe\\CloudOS.SystemBroker.Events.v21." + sid + L"." + std::to_wstring(session_id);
 }
 
 std::wstring SecurityV21::GetBrokerMutexName()
 {
-    std::wstring sid = GetCurrentUserSidString();
-    DWORD session_id = GetCurrentSessionId();
+    const std::wstring sid = GetCurrentUserSidString();
+    const DWORD session_id = GetCurrentSessionId();
     return L"Local\\CloudOS.SystemBroker.Mutex.v21." + sid + L"." + std::to_wstring(session_id);
 }
 
@@ -81,19 +129,33 @@ bool SecurityV21::CreatePerUserSecurityAttributes(
 {
     if (!out_sa || !out_sd) return false;
 
-    std::wstring sid = GetCurrentUserSidString();
-    // SDDL: Discretionary ACL allowing only current user (GA) and SYSTEM (GA)
-    // No Everyone (WD), No Authenticated Users (AU)
-    std::wstring sddl = L"D:(A;;GA;;;" + sid + L")(A;;GA;;;SY)";
+    *out_sa = {};
+    *out_sd = nullptr;
 
     PSECURITY_DESCRIPTOR sd = nullptr;
-    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+    const std::wstring sid = GetCurrentUserSidString();
+
+    if (IsValidSidString(sid))
+    {
+        // DACL permits only the current user and LocalSystem. There is no
+        // Everyone/Authenticated Users ACE and handles are non-inheritable.
+        const std::wstring sddl = L"D:(A;;GA;;;" + sid + L")(A;;GA;;;SY)";
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
             sddl.c_str(),
             SDDL_REVISION_1,
             &sd,
-            nullptr))
+            nullptr);
+    }
+
+    if (sd == nullptr)
     {
-        return false;
+        // Security failures degrade to deny-all, never to default process ACL.
+        auto& fallback = DenyAllDescriptor();
+        if (!fallback.initialized)
+        {
+            return false;
+        }
+        sd = &fallback.descriptor;
     }
 
     out_sa->nLength = sizeof(SECURITY_ATTRIBUTES);
@@ -105,7 +167,10 @@ bool SecurityV21::CreatePerUserSecurityAttributes(
 
 void SecurityV21::FreeSecurityDescriptor(PSECURITY_DESCRIPTOR sd)
 {
-    if (sd)
+    if (!sd) return;
+
+    auto& fallback = DenyAllDescriptor();
+    if (sd != &fallback.descriptor)
     {
         LocalFree(sd);
     }
