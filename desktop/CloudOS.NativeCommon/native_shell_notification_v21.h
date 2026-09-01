@@ -7,6 +7,7 @@ namespace CloudOS::ShellNotificationV21
 {
 inline constexpr std::uint32_t kSchema = 21;
 inline constexpr std::uintptr_t kCopyDataTag = static_cast<std::uintptr_t>(0x434F534E56323100ull);
+inline constexpr wchar_t kWindowClass[] = L"CloudOS.NativeShell.Notifications.v21";
 inline constexpr std::size_t kMaxItems = 100;
 inline constexpr std::size_t kMappingNameChars = 96;
 inline constexpr std::size_t kTitleChars = 160;
