@@ -8,8 +8,10 @@
 #include "system_service_v21.h"
 #include "wsl_service_v21.h"
 
+#include <atomic>
 #include <csignal>
 #include <iostream>
+#include <string>
 
 namespace CloudOS
 {
@@ -46,10 +48,10 @@ int RunSelfTest()
             std::cerr << "[FAIL] Assertion failed: " << name << std::endl;
             exit(1);
         }
-        assertions++;
+        ++assertions;
     };
 
-    // 1. Protocol serialization & parsing.
+    // 1. Protocol serialization, strict parsing and malformed-input handling.
     {
         BrokerRequest req;
         req.protocol = kProtocolVersion;
@@ -67,8 +69,19 @@ int RunSelfTest()
         Assert(parsed_req.payload["limit"].AsInt() == 10, "ParseRequest payload int");
 
         std::string huge_str(kMaxPayloadBytes + 10, 'A');
-        JsonValue val;
-        Assert(!ParseJson(huge_str, val), "Reject oversized JSON string");
+        JsonValue value;
+        Assert(!ParseJson(huge_str, value), "Reject oversized JSON string");
+        Assert(!ParseJson("{\"n\":01}", value), "Reject leading-zero number");
+        Assert(!ParseJson("{\"n\":1e}", value), "Reject malformed exponent");
+        Assert(!ParseJson("{\"s\":\"\\q\"}", value), "Reject invalid string escape");
+        Assert(!ParseJson("{\"a\":1,\"a\":2}", value), "Reject duplicate object key");
+        Assert(ParseJson("{\"s\":\"CloudOS \\u2601\"}", value), "Accept valid Unicode escape");
+
+        std::string nested;
+        for (int i = 0; i < 70; ++i) nested.push_back('[');
+        nested.append("0");
+        for (int i = 0; i < 70; ++i) nested.push_back(']');
+        Assert(!ParseJson(nested, value), "Reject excessive JSON nesting");
 
         BrokerResponse res;
         res.protocol = kProtocolVersion;
@@ -80,14 +93,19 @@ int RunSelfTest()
         Assert(ParseResponse(ser_res, parsed_res, err), "ParseResponse valid");
         Assert(parsed_res.ok, "ParseResponse ok");
         Assert(parsed_res.payload["result"].AsString() == "ok", "ParseResponse payload");
+
+        Assert(
+            !ParseRequest(
+                "{\"protocol\":21,\"type\":\"request\",\"id\":\"x\",\"method\":\"health.ping\",\"payload\":[]}",
+                parsed_req,
+                err),
+            "Reject non-object request payload");
     }
 
     // 2. Security & named-pipe ACLs.
     {
         const std::wstring sid = SecurityV21::GetCurrentUserSidString();
         Assert(!sid.empty(), "User SID string not empty");
-        const DWORD session = SecurityV21::GetCurrentSessionId();
-        Assert(session >= 0, "Session ID valid");
 
         const std::wstring cmd_pipe = SecurityV21::GetCommandPipeName();
         Assert(cmd_pipe.find(L"\\\\.\\pipe\\CloudOS.SystemBroker.v21.") == 0, "Command pipe prefix valid");
@@ -96,10 +114,19 @@ int RunSelfTest()
         PSECURITY_DESCRIPTOR sd = nullptr;
         Assert(SecurityV21::CreatePerUserSecurityAttributes(&sa, &sd), "CreatePerUserSecurityAttributes succeeds");
         Assert(sa.lpSecurityDescriptor != nullptr, "SecurityDescriptor not null");
+        Assert(sa.bInheritHandle == FALSE, "Pipe security handle is non-inheritable");
+
+        BOOL dacl_present = FALSE;
+        BOOL dacl_defaulted = FALSE;
+        PACL dacl = nullptr;
+        Assert(
+            GetSecurityDescriptorDacl(sd, &dacl_present, &dacl, &dacl_defaulted) != FALSE,
+            "Security descriptor exposes DACL");
+        Assert(dacl_present != FALSE && dacl != nullptr, "Security descriptor DACL is present");
         SecurityV21::FreeSecurityDescriptor(sd);
     }
 
-    // 3. Event bus & subscriptions.
+    // 3. Event bus, bounded subscriptions and pattern validation.
     {
         EventBusV21::Instance().Reset();
         bool received_volume = false;
@@ -111,6 +138,8 @@ int RunSelfTest()
         });
 
         Assert(EventBusV21::Instance().Subscribe("client-a", "system.*"), "Subscribe client-a to system.*");
+        Assert(!EventBusV21::Instance().Subscribe("client-a", "system.*.bad"), "Reject mid-pattern wildcard");
+        Assert(!EventBusV21::Instance().Subscribe("client-a", "bad pattern"), "Reject unsafe subscription characters");
         Assert(EventBusV21::Instance().GetSubscriberCount("system.volumeChanged") == 1, "Subscriber count 1");
 
         JsonObject payload;
@@ -119,25 +148,52 @@ int RunSelfTest()
 
         Assert(received_volume, "Event dispatched to subscriber");
         Assert(received_wildcard, "Wildcard subscription matched");
+        Assert(EventBusV21::Instance().Unsubscribe("client-a", "system.*"), "Unsubscribe existing pattern");
+        Assert(!EventBusV21::Instance().Unsubscribe("client-a", "system.*"), "Unsubscribe missing pattern returns false");
+
+        for (int i = 0; i < 64; ++i)
+        {
+            Assert(
+                EventBusV21::Instance().Subscribe("client-a", "test." + std::to_string(i)),
+                "Bounded event subscription accepted");
+        }
+        Assert(!EventBusV21::Instance().Subscribe("client-a", "test.overflow"), "Reject subscription beyond per-client limit");
 
         EventBusV21::Instance().UnregisterClient("client-a");
         Assert(EventBusV21::Instance().GetActiveClientCount() == 0, "Client count 0 after unregister");
     }
 
-    // 4. Job manager.
+    // 4. Job manager state is observable and converges without races.
     {
         JobManagerV21::Instance().Initialize(1);
         const std::string job_id = JobManagerV21::Instance().SubmitJob(
             "test.job",
             [](std::atomic_bool&, std::function<void(double)> progress_cb, std::string&) {
                 progress_cb(0.5);
+                progress_cb(2.0); // Must be clamped to 1.0.
                 return true;
             });
 
         Assert(!job_id.empty(), "Job submitted with valid ID");
+
         JobInfo info;
-        Assert(JobManagerV21::Instance().GetJobInfo(job_id, info), "GetJobInfo succeeds");
+        bool terminal = false;
+        for (int attempt = 0; attempt < 200; ++attempt)
+        {
+            Assert(JobManagerV21::Instance().GetJobInfo(job_id, info), "GetJobInfo succeeds");
+            if (info.state == JobState::Completed || info.state == JobState::Failed || info.state == JobState::Cancelled)
+            {
+                terminal = true;
+                break;
+            }
+            Sleep(5);
+        }
+
+        Assert(terminal, "Job reaches terminal state");
         Assert(info.type == "test.job", "Job type matches");
+        Assert(info.state == JobState::Completed, "Job completed successfully");
+        Assert(info.progress == 1.0, "Completed job progress is exactly 1.0");
+        Assert(JobManagerV21::Instance().GetActiveJobCount() == 0, "No active jobs after completion");
         JobManagerV21::Instance().Shutdown();
     }
 
@@ -241,7 +297,7 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    std::cout << "[SystemBroker] Broker ready and listening on user named pipe." << std::endl;
+    std::cout << "[SystemBroker] Broker ready and listening on secure per-user named pipe." << std::endl;
 
     while (!CloudOS::g_shutdown_requested.load())
     {
