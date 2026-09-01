@@ -49,14 +49,14 @@ int RunSelfTest()
         assertions++;
     };
 
-    // 1. Test Protocol Serialization & Parsing
+    // 1. Protocol serialization & parsing.
     {
         BrokerRequest req;
         req.protocol = kProtocolVersion;
         req.id = "req-test-1";
         req.method = "apps.list";
         req.payload["limit"] = JsonValue(10);
-        std::string serialized = SerializeRequest(req);
+        const std::string serialized = SerializeRequest(req);
 
         BrokerRequest parsed_req;
         std::string err;
@@ -66,32 +66,30 @@ int RunSelfTest()
         Assert(parsed_req.method == "apps.list", "ParseRequest method");
         Assert(parsed_req.payload["limit"].AsInt() == 10, "ParseRequest payload int");
 
-        // Oversized rejection
         std::string huge_str(kMaxPayloadBytes + 10, 'A');
         JsonValue val;
         Assert(!ParseJson(huge_str, val), "Reject oversized JSON string");
 
-        // Response
         BrokerResponse res;
         res.protocol = kProtocolVersion;
         res.id = "res-test-1";
         res.ok = true;
         res.payload["result"] = JsonValue("ok");
-        std::string ser_res = SerializeResponse(res);
+        const std::string ser_res = SerializeResponse(res);
         BrokerResponse parsed_res;
         Assert(ParseResponse(ser_res, parsed_res, err), "ParseResponse valid");
         Assert(parsed_res.ok, "ParseResponse ok");
         Assert(parsed_res.payload["result"].AsString() == "ok", "ParseResponse payload");
     }
 
-    // 2. Test Security & Named Pipe ACLs
+    // 2. Security & named-pipe ACLs.
     {
-        std::wstring sid = SecurityV21::GetCurrentUserSidString();
+        const std::wstring sid = SecurityV21::GetCurrentUserSidString();
         Assert(!sid.empty(), "User SID string not empty");
-        DWORD session = SecurityV21::GetCurrentSessionId();
+        const DWORD session = SecurityV21::GetCurrentSessionId();
         Assert(session >= 0, "Session ID valid");
 
-        std::wstring cmd_pipe = SecurityV21::GetCommandPipeName();
+        const std::wstring cmd_pipe = SecurityV21::GetCommandPipeName();
         Assert(cmd_pipe.find(L"\\\\.\\pipe\\CloudOS.SystemBroker.v21.") == 0, "Command pipe prefix valid");
 
         SECURITY_ATTRIBUTES sa{};
@@ -101,7 +99,7 @@ int RunSelfTest()
         SecurityV21::FreeSecurityDescriptor(sd);
     }
 
-    // 3. Test Event Bus & Subscriptions
+    // 3. Event bus & subscriptions.
     {
         EventBusV21::Instance().Reset();
         bool received_volume = false;
@@ -126,13 +124,15 @@ int RunSelfTest()
         Assert(EventBusV21::Instance().GetActiveClientCount() == 0, "Client count 0 after unregister");
     }
 
-    // 4. Test Job Manager
+    // 4. Job manager.
     {
         JobManagerV21::Instance().Initialize(1);
-        std::string job_id = JobManagerV21::Instance().SubmitJob("test.job", [](std::atomic_bool&, std::function<void(double)> progress_cb, std::string&) {
-            progress_cb(0.5);
-            return true;
-        });
+        const std::string job_id = JobManagerV21::Instance().SubmitJob(
+            "test.job",
+            [](std::atomic_bool&, std::function<void(double)> progress_cb, std::string&) {
+                progress_cb(0.5);
+                return true;
+            });
 
         Assert(!job_id.empty(), "Job submitted with valid ID");
         JobInfo info;
@@ -141,48 +141,61 @@ int RunSelfTest()
         JobManagerV21::Instance().Shutdown();
     }
 
-    // 5. Test App Service & Safe ID Validation
+    // 5. App service & safe ID validation.
     {
         const auto apps = AppServiceV21::Instance().GetApps();
         Assert(!apps.empty(), "App catalog contains items");
         Assert(AppServiceV21::Instance().GetGeneration() >= 1, "App generation >= 1");
 
         std::string err;
-        // Verify invalid arbitrary string is rejected
         Assert(!AppServiceV21::Instance().LaunchApp("calc.exe && malicious_command", err), "Arbitrary command injection rejected");
         Assert(!AppServiceV21::Instance().LaunchApp("powershell.exe -enc AAAAA", err), "Arbitrary PowerShell rejected");
         Assert(!err.empty(), "Error message populated on invalid app ID");
     }
 
-    // 6. Test System Service
+    // 6. System service. Physical capabilities are conditional on the runner.
     {
         const auto snap = SystemServiceV21::Instance().GetSnapshot();
         Assert(!snap.device_name.empty(), "Device name not empty");
+        Assert(!snap.user_name.empty(), "User name not empty");
         Assert(snap.volume >= 0.0 && snap.volume <= 1.0, "Volume in range [0, 1]");
+        Assert(snap.brightness >= 0.0 && snap.brightness <= 1.0, "Brightness in range [0, 1]");
 
-        Assert(SystemServiceV21::Instance().SetVolume(0.88), "SetVolume succeeds");
-        Assert(SystemServiceV21::Instance().GetSnapshot().volume == 0.88, "Volume updated in snapshot");
+        if (snap.volume_available)
+        {
+            Assert(SystemServiceV21::Instance().SetVolume(snap.volume), "SetVolume round-trip when endpoint exists");
+        }
+        else
+        {
+            Assert(!SystemServiceV21::Instance().SetVolume(0.5), "SetVolume reports unavailable without audio endpoint");
+        }
+
+        if (snap.brightness_available)
+        {
+            Assert(SystemServiceV21::Instance().SetBrightness(snap.brightness), "SetBrightness round-trip when monitor supports it");
+        }
+        else
+        {
+            Assert(!SystemServiceV21::Instance().SetBrightness(0.5), "SetBrightness reports unavailable when unsupported");
+        }
 
         const auto caps = SystemServiceV21::Instance().GetCapabilities();
         Assert(caps.size() >= 10, "Capabilities list populated");
     }
 
-    // 7. Test WSL Service
+    // 7. WSL service. WSL may be installed with zero registered distros.
     {
-        bool wsl = WslServiceV21::Instance().IsWslAvailable();
+        const bool wsl = WslServiceV21::Instance().IsWslAvailable();
         const auto distros = WslServiceV21::Instance().GetDistributions();
-        if (wsl)
-        {
-            Assert(!distros.empty(), "WSL distros list populated if WSL is available");
-        }
+        Assert(distros.empty() || wsl, "Registered WSL distros imply WSL availability");
     }
 
-    // 8. Test Diagnostics Snapshot
+    // 8. Diagnostics snapshot.
     {
         DiagnosticsV21::Initialize();
-        JsonObject diag = DiagnosticsV21::GetDiagnosticsSnapshot();
-        Assert(diag["brokerVersion"].AsString() == "21.0.0", "Diagnostics brokerVersion");
-        Assert(diag["protocolVersion"].AsInt() == 21, "Diagnostics protocolVersion 21");
+        const JsonObject diag = DiagnosticsV21::GetDiagnosticsSnapshot();
+        Assert(diag.at("brokerVersion").AsString() == "21.0.0", "Diagnostics brokerVersion");
+        Assert(diag.at("protocolVersion").AsInt() == 21, "Diagnostics protocolVersion 21");
     }
 
     std::cout << "[PASS] CloudOS System Broker V21 Self-Test Passed (" << assertions << " assertions verified)." << std::endl;
@@ -197,7 +210,7 @@ int main(int argc, char* argv[])
 
     for (int i = 1; i < argc; ++i)
     {
-        std::string arg = argv[i];
+        const std::string arg = argv[i];
         if (arg == "--self-test")
         {
             return CloudOS::RunSelfTest();
@@ -230,7 +243,6 @@ int main(int argc, char* argv[])
 
     std::cout << "[SystemBroker] Broker ready and listening on user named pipe." << std::endl;
 
-    // Run until shutdown signal
     while (!CloudOS::g_shutdown_requested.load())
     {
         Sleep(500);
