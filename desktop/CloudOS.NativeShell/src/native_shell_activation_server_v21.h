@@ -1,6 +1,7 @@
 #pragma once
 
 #include "native_app_launcher.h"
+#include "native_browser_window.h"
 #include "../../CloudOS.NativeCommon/native_shell_activation_v21.h"
 
 #include <windows.h>
@@ -90,7 +91,9 @@ private:
         switch (request->app)
         {
         case ShellActivationV21::App::Browser:
-            NativeAppLauncher::LaunchById(instance, nullptr, L"browser");
+            // Browser authority belongs to the NativeShell WebView2 surface.
+            // Do not silently dispatch the user's default browser here.
+            CloudOSNativeBrowserWindow::Open(instance);
             return TRUE;
         case ShellActivationV21::App::Terminal:
             NativeAppLauncher::LaunchById(instance, nullptr, L"terminal");
