@@ -42,6 +42,9 @@ try {
     if (-not $caps.ok -or $caps.payload.capabilities.Count -lt 10) {
         throw "Capabilities probe failed: $capsRaw"
     }
+    if ($caps.payload.capabilities -notcontains 'files.list') {
+        throw "files.list capability is missing: $capsRaw"
+    }
 
     Write-Host "[Smoke-V21] 5. Probing apps.list..."
     $appsRaw = & $probeExe apps
@@ -50,7 +53,21 @@ try {
         throw "Apps probe failed: $appsRaw"
     }
 
-    Write-Host "[Smoke-V21] 6. Probing system.snapshot..."
+    Write-Host "[Smoke-V21] 6. Probing allowlisted files.list(home)..."
+    $filesRaw = & $probeExe files home
+    $files = $filesRaw | ConvertFrom-Json
+    if (-not $files.ok -or $files.payload.location -ne 'home' -or $files.payload.files.Count -lt 3) {
+        throw "Files home probe failed: $filesRaw"
+    }
+
+    Write-Host "[Smoke-V21] 7. Verifying raw filesystem paths are rejected..."
+    $blockedFilesRaw = & $probeExe files 'C:\Windows'
+    $blockedFiles = $blockedFilesRaw | ConvertFrom-Json
+    if ($blockedFiles.ok -or $blockedFiles.error.code -ne 'location_not_allowed') {
+        throw "Raw path escaped Files allowlist: $blockedFilesRaw"
+    }
+
+    Write-Host "[Smoke-V21] 8. Probing system.snapshot..."
     $snapRaw = & $probeExe snapshot
     $snap = $snapRaw | ConvertFrom-Json
     if (-not $snap.ok -or [string]::IsNullOrWhiteSpace($snap.payload.deviceName)) {
@@ -62,7 +79,7 @@ try {
     $volumeWriteVerified = $false
     $brightnessWriteVerified = $false
 
-    Write-Host "[Smoke-V21] 7. Probing system.volume.set (available=$volumeAvailable)..."
+    Write-Host "[Smoke-V21] 9. Probing system.volume.set (available=$volumeAvailable)..."
     $volumeRaw = & $probeExe set-volume 0.41
     $volume = $volumeRaw | ConvertFrom-Json
     if ($volumeAvailable) {
@@ -78,7 +95,7 @@ try {
         $volumeWriteVerified = $true
     }
 
-    Write-Host "[Smoke-V21] 8. Probing system.brightness.set (available=$brightnessAvailable)..."
+    Write-Host "[Smoke-V21] 10. Probing system.brightness.set (available=$brightnessAvailable)..."
     $brightnessRaw = & $probeExe set-brightness 0.63
     $brightness = $brightnessRaw | ConvertFrom-Json
     if ($brightnessAvailable) {
@@ -94,7 +111,7 @@ try {
         $brightnessWriteVerified = $true
     }
 
-    Write-Host "[Smoke-V21] 9. Verifying system control state through snapshot..."
+    Write-Host "[Smoke-V21] 11. Verifying system control state through snapshot..."
     $updatedSnapRaw = & $probeExe snapshot
     $updatedSnap = $updatedSnapRaw | ConvertFrom-Json
     if (-not $updatedSnap.ok) {
@@ -107,14 +124,14 @@ try {
         throw "Brightness write was not reflected by snapshot: $updatedSnapRaw"
     }
 
-    Write-Host "[Smoke-V21] 10. Probing diagnostics.snapshot..."
+    Write-Host "[Smoke-V21] 12. Probing diagnostics.snapshot..."
     $diagRaw = & $probeExe diagnostics
     $diag = $diagRaw | ConvertFrom-Json
     if (-not $diag.ok -or $diag.payload.protocolVersion -ne 21) {
         throw "Diagnostics probe failed: $diagRaw"
     }
 
-    Write-Host "[Smoke-V21] 11. Gathering smoke evidence JSON..."
+    Write-Host "[Smoke-V21] 13. Gathering smoke evidence JSON..."
     $smokeEvidence = [ordered]@{
         schema = 21
         verdict = "pass"
@@ -124,7 +141,12 @@ try {
         per_user_pipe_acl = $true
         apps_list = $true
         apps_count = $apps.payload.apps.Count
+        files_list = $true
+        files_home_count = $files.payload.files.Count
+        files_raw_path_blocked = $true
         system_snapshot = $true
+        network_available = [bool]$updatedSnap.payload.networkAvailable
+        network_name = $updatedSnap.payload.networkName
         volume_available = $volumeAvailable
         brightness_available = $brightnessAvailable
         system_volume_write_contract = $volumeWriteVerified
@@ -150,7 +172,7 @@ try {
     Write-Host "[PASS] CloudOS System Broker V21 Smoke Passed."
 }
 finally {
-    Write-Host "[Smoke-V21] 12. Shutting down System Broker..."
+    Write-Host "[Smoke-V21] 14. Shutting down System Broker..."
     if ($brokerProc -and -not $brokerProc.HasExited) {
         Stop-Process -Id $brokerProc.Id -Force -ErrorAction SilentlyContinue
     }
