@@ -1,6 +1,7 @@
 #include "system_service_v21.h"
 #include "event_bus_v21.h"
 #include "security_v21.h"
+#include "system_control_v21.h"
 #include "wsl_service_v21.h"
 
 #include <Windows.h>
@@ -41,6 +42,7 @@ JsonObject SystemSnapshot::ToJsonObject() const
     obj["batteryPercent"] = JsonValue(battery_percent);
     obj["networkAvailable"] = JsonValue(network_available);
     obj["networkName"] = JsonValue(network_name);
+    obj["volumeAvailable"] = JsonValue(volume_available);
     obj["volume"] = JsonValue(volume);
     obj["brightnessAvailable"] = JsonValue(brightness_available);
     obj["brightness"] = JsonValue(brightness);
@@ -75,9 +77,15 @@ SystemSnapshot SystemServiceV21::GetSnapshot()
 
 bool SystemServiceV21::SetVolume(double value)
 {
-    double clamped = std::clamp(value, 0.0, 1.0);
+    const double clamped = std::clamp(value, 0.0, 1.0);
+    if (!SystemControlV21::SetVolume(clamped))
+    {
+        return false;
+    }
+
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        snapshot_.volume_available = true;
         snapshot_.volume = clamped;
         snapshot_.timestamp_ms = NowMs();
         generation_++;
@@ -92,9 +100,15 @@ bool SystemServiceV21::SetVolume(double value)
 
 bool SystemServiceV21::SetBrightness(double value)
 {
-    double clamped = std::clamp(value, 0.0, 1.0);
+    const double clamped = std::clamp(value, 0.0, 1.0);
+    if (!SystemControlV21::SetBrightness(clamped))
+    {
+        return false;
+    }
+
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        snapshot_.brightness_available = true;
         snapshot_.brightness = clamped;
         snapshot_.timestamp_ms = NowMs();
         generation_++;
@@ -147,7 +161,6 @@ void SystemServiceV21::Refresh()
 {
     snapshot_ = {};
 
-    // Device Name
     WCHAR computer_name[MAX_COMPUTERNAME_LENGTH + 1];
     DWORD size = ARRAYSIZE(computer_name);
     if (GetComputerNameW(computer_name, &size))
@@ -159,7 +172,6 @@ void SystemServiceV21::Refresh()
         snapshot_.device_name = "CloudOS Desktop";
     }
 
-    // User Name
     WCHAR user_name[256];
     DWORD user_size = ARRAYSIZE(user_name);
     if (GetUserNameW(user_name, &user_size))
@@ -171,11 +183,9 @@ void SystemServiceV21::Refresh()
         snapshot_.user_name = "User";
     }
 
-    // Session ID
     snapshot_.session_id = SecurityV21::GetCurrentSessionId();
 
-    // Power / Battery
-    SYSTEM_POWER_STATUS power;
+    SYSTEM_POWER_STATUS power{};
     if (GetSystemPowerStatus(&power) && power.BatteryLifePercent != 255)
     {
         snapshot_.battery_available = true;
@@ -187,16 +197,17 @@ void SystemServiceV21::Refresh()
         snapshot_.battery_percent = 100;
     }
 
-    // Network
     snapshot_.network_available = true;
     snapshot_.network_name = "CloudOS Network • Wi-Fi 6";
 
-    // Audio & Display
-    snapshot_.volume = 0.72;
-    snapshot_.brightness_available = true;
-    snapshot_.brightness = 0.85;
+    const AudioControlStateV21 audio = SystemControlV21::QueryAudio();
+    snapshot_.volume_available = audio.available;
+    snapshot_.volume = audio.available ? audio.volume : 0.0;
 
-    // WSL status
+    const BrightnessControlStateV21 brightness = SystemControlV21::QueryBrightness();
+    snapshot_.brightness_available = brightness.available;
+    snapshot_.brightness = brightness.available ? brightness.brightness : 0.0;
+
     snapshot_.distros = WslServiceV21::Instance().GetDistributions();
     snapshot_.wsl_available = WslServiceV21::Instance().IsWslAvailable();
     snapshot_.current_workspace = 1;
