@@ -5,7 +5,6 @@
 #include <shlobj.h>
 
 #include <algorithm>
-#include <iostream>
 
 namespace CloudOS
 {
@@ -13,6 +12,18 @@ namespace CloudOS
 namespace
 {
 constexpr const char* kChannelName = "cloudos/native/v19";
+
+bool ShellOpen(const wchar_t* target, const wchar_t* parameters = nullptr)
+{
+    const HINSTANCE result = ShellExecuteW(
+        nullptr,
+        L"open",
+        target,
+        parameters,
+        nullptr,
+        SW_SHOWNORMAL);
+    return reinterpret_cast<INT_PTR>(result) > 32;
+}
 } // namespace
 
 void CloudOSFlutterBridgeV20::RegisterWithMessenger(
@@ -45,7 +56,6 @@ CloudOSFlutterBridgeV20& CloudOSFlutterBridgeV20::Instance()
 void CloudOSFlutterBridgeV20::Initialize(HWND window_handle)
 {
     window_handle_ = window_handle;
-    // Attempt connection to SystemBroker
     CloudOSBrokerClientV21::Instance().EnsureConnected();
     RefreshAppCatalog();
     RefreshSystemSnapshot();
@@ -88,10 +98,16 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         const auto snapshot = GetSystemSnapshot();
         flutter::EncodableMap map;
         map[flutter::EncodableValue("deviceName")] = flutter::EncodableValue(snapshot.device_name);
-        map[flutter::EncodableValue("networkName")] = flutter::EncodableValue(snapshot.network_name);
-        map[flutter::EncodableValue("volume")] = flutter::EncodableValue(snapshot.volume);
-        map[flutter::EncodableValue("brightness")] = flutter::EncodableValue(snapshot.brightness);
+        map[flutter::EncodableValue("userName")] = flutter::EncodableValue(snapshot.user_name);
+        map[flutter::EncodableValue("sessionId")] = flutter::EncodableValue(static_cast<int32_t>(snapshot.session_id));
+        map[flutter::EncodableValue("batteryAvailable")] = flutter::EncodableValue(snapshot.battery_available);
         map[flutter::EncodableValue("batteryPercent")] = flutter::EncodableValue(snapshot.battery_percent);
+        map[flutter::EncodableValue("networkAvailable")] = flutter::EncodableValue(snapshot.network_available);
+        map[flutter::EncodableValue("networkName")] = flutter::EncodableValue(snapshot.network_name);
+        map[flutter::EncodableValue("volumeAvailable")] = flutter::EncodableValue(snapshot.volume_available);
+        map[flutter::EncodableValue("volume")] = flutter::EncodableValue(snapshot.volume);
+        map[flutter::EncodableValue("brightnessAvailable")] = flutter::EncodableValue(snapshot.brightness_available);
+        map[flutter::EncodableValue("brightness")] = flutter::EncodableValue(snapshot.brightness);
         map[flutter::EncodableValue("wslAvailable")] = flutter::EncodableValue(snapshot.wsl_available);
         map[flutter::EncodableValue("currentWorkspace")] = flutter::EncodableValue(snapshot.current_workspace);
 
@@ -115,7 +131,7 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
             return;
         }
 
-        auto it = args->find(flutter::EncodableValue("id"));
+        const auto it = args->find(flutter::EncodableValue("id"));
         if (it == args->end() || !std::holds_alternative<std::string>(it->second))
         {
             result->Error("INVALID_ARGUMENT", "Missing or invalid 'id' parameter");
@@ -123,8 +139,7 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         }
 
         const std::string app_id = std::get<std::string>(it->second);
-        bool ok = LaunchApp(app_id);
-        if (ok)
+        if (LaunchApp(app_id))
         {
             result->Success(flutter::EncodableValue(true));
         }
@@ -140,11 +155,10 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
         if (args)
         {
-            auto it = args->find(flutter::EncodableValue("value"));
+            const auto it = args->find(flutter::EncodableValue("value"));
             if (it != args->end() && std::holds_alternative<double>(it->second))
             {
-                SetVolume(std::get<double>(it->second));
-                result->Success(flutter::EncodableValue(true));
+                result->Success(flutter::EncodableValue(SetVolume(std::get<double>(it->second))));
                 return;
             }
         }
@@ -157,11 +171,10 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
         if (args)
         {
-            auto it = args->find(flutter::EncodableValue("value"));
+            const auto it = args->find(flutter::EncodableValue("value"));
             if (it != args->end() && std::holds_alternative<double>(it->second))
             {
-                SetBrightness(std::get<double>(it->second));
-                result->Success(flutter::EncodableValue(true));
+                result->Success(flutter::EncodableValue(SetBrightness(std::get<double>(it->second))));
                 return;
             }
         }
@@ -173,7 +186,9 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
     {
         flutter::EncodableMap map;
         map[flutter::EncodableValue("schema")] = flutter::EncodableValue(21);
-        map[flutter::EncodableValue("verdict")] = flutter::EncodableValue("pass");
+        map[flutter::EncodableValue("version")] = flutter::EncodableValue("v21");
+        map[flutter::EncodableValue("bridge_type")] = flutter::EncodableValue("CloudOSFlutterBridgeV20");
+        map[flutter::EncodableValue("channel")] = flutter::EncodableValue(kChannelName);
         map[flutter::EncodableValue("brokerConnected")] = flutter::EncodableValue(CloudOSBrokerClientV21::Instance().IsConnected());
         map[flutter::EncodableValue("brokerState")] = flutter::EncodableValue(ConnectionStateToString(CloudOSBrokerClientV21::Instance().GetConnectionState()));
         map[flutter::EncodableValue("arbitrary_command_api")] = flutter::EncodableValue(false);
@@ -195,7 +210,17 @@ std::vector<NativeAppItem> CloudOSFlutterBridgeV20::GetApps()
         result.reserve(broker_apps.size());
         for (const auto& a : broker_apps)
         {
-            result.push_back({a.id, a.name, a.platform, a.subtitle, a.distro, a.category, a.source, a.can_launch, a.pinned, a.recent});
+            result.push_back({
+                a.id,
+                a.name,
+                a.platform,
+                a.subtitle,
+                a.distro,
+                a.category,
+                a.source,
+                a.can_launch,
+                a.pinned,
+                a.recent});
         }
         return result;
     }
@@ -211,10 +236,16 @@ NativeSystemSnapshot CloudOSFlutterBridgeV20::GetSystemSnapshot()
     {
         NativeSystemSnapshot snap;
         snap.device_name = broker_snap.device_name;
-        snap.network_name = broker_snap.network_name;
-        snap.volume = broker_snap.volume;
-        snap.brightness = broker_snap.brightness;
+        snap.user_name = broker_snap.user_name;
+        snap.session_id = broker_snap.session_id;
+        snap.battery_available = broker_snap.battery_available;
         snap.battery_percent = broker_snap.battery_percent;
+        snap.network_available = broker_snap.network_available;
+        snap.network_name = broker_snap.network_name;
+        snap.volume_available = broker_snap.volume_available;
+        snap.volume = broker_snap.volume;
+        snap.brightness_available = broker_snap.brightness_available;
+        snap.brightness = broker_snap.brightness;
         snap.wsl_available = broker_snap.wsl_available;
         snap.distros = broker_snap.distros;
         snap.current_workspace = broker_snap.current_workspace;
@@ -233,72 +264,76 @@ bool CloudOSFlutterBridgeV20::LaunchApp(const std::string& app_id)
         return true;
     }
 
-    // Local fallback
+    // Conservative local fallbacks for core Windows actions only.
     if (app_id == "files" || app_id == "cloudos:files")
     {
-        ShellExecuteW(nullptr, L"open", L"explorer.exe", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
+        return ShellOpen(L"explorer.exe");
     }
     if (app_id == "browser" || app_id == "cloudos:browser")
     {
-        ShellExecuteW(nullptr, L"open", L"https://google.com", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
+        return ShellOpen(L"https://www.google.com");
     }
     if (app_id == "terminal" || app_id == "cloudos:terminal")
     {
-        ShellExecuteW(nullptr, L"open", L"cmd.exe", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
+        return ShellOpen(L"wt.exe") || ShellOpen(L"cmd.exe");
     }
     if (app_id == "windows:notepad")
     {
-        ShellExecuteW(nullptr, L"open", L"notepad.exe", nullptr, nullptr, SW_SHOWNORMAL);
-        return true;
-    }
-    if (app_id == "wsl:ubuntu-terminal" || app_id == "linux:ubuntu-terminal" || app_id == "ubuntu-terminal")
-    {
-        ShellExecuteW(nullptr, L"open", L"wsl.exe", L"~", nullptr, SW_SHOWNORMAL);
-        return true;
+        return ShellOpen(L"notepad.exe");
     }
     return false;
 }
 
-void CloudOSFlutterBridgeV20::SetVolume(double volume)
+bool CloudOSFlutterBridgeV20::SetVolume(double volume)
 {
-    double clamped = std::clamp(volume, 0.0, 1.0);
-    CloudOSBrokerClientV21::Instance().SetVolume(clamped);
+    const double clamped = std::clamp(volume, 0.0, 1.0);
+    if (!CloudOSBrokerClientV21::Instance().SetVolume(clamped))
+    {
+        return false;
+    }
+
     std::lock_guard<std::mutex> lock(mutex_);
+    cached_snapshot_.volume_available = true;
     cached_snapshot_.volume = clamped;
+    return true;
 }
 
-void CloudOSFlutterBridgeV20::SetBrightness(double brightness)
+bool CloudOSFlutterBridgeV20::SetBrightness(double brightness)
 {
-    double clamped = std::clamp(brightness, 0.0, 1.0);
-    CloudOSBrokerClientV21::Instance().SetBrightness(clamped);
+    const double clamped = std::clamp(brightness, 0.0, 1.0);
+    if (!CloudOSBrokerClientV21::Instance().SetBrightness(clamped))
+    {
+        return false;
+    }
+
     std::lock_guard<std::mutex> lock(mutex_);
+    cached_snapshot_.brightness_available = true;
     cached_snapshot_.brightness = clamped;
+    return true;
 }
 
 void CloudOSFlutterBridgeV20::RefreshAppCatalog()
 {
     std::lock_guard<std::mutex> lock(mutex_);
     cached_apps_.clear();
-    cached_apps_.push_back({"cloudos:files", "Arquivos", "cloudos", "Windows + Linux (WSL2)", "", "Sistema", "CloudOS", true, true, false});
-    cached_apps_.push_back({"cloudos:browser", "Navegador Web", "cloudos", "Chromium / Web Browser", "", "Produtividade", "CloudOS", true, true, true});
-    cached_apps_.push_back({"cloudos:terminal", "Terminal", "cloudos", "Prompt de Comando / Shell", "", "Utilitários", "CloudOS", true, true, true});
+    cached_apps_.push_back({"cloudos:files", "Arquivos", "cloudos", "Windows + Linux", "", "Sistema", "CloudOS", true, true, false});
+    cached_apps_.push_back({"cloudos:browser", "Navegador Web", "cloudos", "Navegador do Sistema", "", "Produtividade", "CloudOS", true, true, true});
+    cached_apps_.push_back({"cloudos:terminal", "Terminal", "cloudos", "Terminal do Sistema", "", "Utilitários", "CloudOS", true, true, true});
     cached_apps_.push_back({"windows:notepad", "Bloco de Notas", "windows", "Editor de Texto", "", "Produtividade", "Windows", true, true, false});
-    cached_apps_.push_back({"wsl:ubuntu-terminal", "Ubuntu Terminal", "linux", "Linux Bash Shell (Ubuntu)", "Ubuntu", "Linux / WSL", "Ubuntu (WSL)", true, true, true});
 }
 
 void CloudOSFlutterBridgeV20::RefreshSystemSnapshot()
 {
     std::lock_guard<std::mutex> lock(mutex_);
+    cached_snapshot_ = {};
     cached_snapshot_.device_name = "CloudOS Desktop";
-    cached_snapshot_.network_name = "CloudOS Network • Wi-Fi 6";
-    cached_snapshot_.volume = 0.72;
-    cached_snapshot_.brightness = 0.85;
-    cached_snapshot_.battery_percent = 100;
-    cached_snapshot_.wsl_available = true;
-    cached_snapshot_.distros = {"Ubuntu"};
+    cached_snapshot_.user_name = "User";
+    cached_snapshot_.network_name = "Broker offline";
+    cached_snapshot_.network_available = false;
+    cached_snapshot_.volume_available = false;
+    cached_snapshot_.brightness_available = false;
+    cached_snapshot_.battery_available = false;
+    cached_snapshot_.wsl_available = false;
     cached_snapshot_.current_workspace = 1;
 }
 
