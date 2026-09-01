@@ -1,5 +1,11 @@
 #pragma once
 
+#if __has_include("../../CloudOS.SystemBroker/src/protocol_v21.h")
+#include "../../CloudOS.SystemBroker/src/protocol_v21.h"
+#else
+#include "protocol_v21.h"
+#endif
+
 #include <Windows.h>
 
 #include <atomic>
@@ -84,7 +90,80 @@ public:
     [[nodiscard]] BrokerConnectionState GetConnectionState() const noexcept { return state_.load(); }
 
     bool GetApps(std::vector<BrokerClientAppItem>& out_apps);
-    bool GetFiles(const std::string& location, std::vector<BrokerClientFileItem>& out_files);
+
+    bool GetFiles(const std::string& location, std::vector<BrokerClientFileItem>& out_files)
+    {
+        if (!EnsureConnected()) return false;
+
+        JsonObject payload;
+        payload["location"] = JsonValue(location);
+
+        BrokerRequest request;
+        request.protocol = kProtocolVersion;
+        request.id = "get-files-" + std::to_string(next_req_id_.fetch_add(1));
+        request.method = "files.list";
+        request.payload = std::move(payload);
+
+        std::string raw_response;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!SendFrame(SerializeRequest(request)) || !ReadFrame(raw_response))
+            {
+                state_.store(BrokerConnectionState::Degraded);
+                return false;
+            }
+        }
+
+        BrokerResponse response;
+        std::string parse_error;
+        if (!ParseResponse(raw_response, response, parse_error) || !response.ok)
+        {
+            return false;
+        }
+
+        const auto files_it = response.payload.find("files");
+        if (files_it == response.payload.end() || !files_it->second.IsArray())
+        {
+            return false;
+        }
+
+        std::vector<BrokerClientFileItem> parsed;
+        parsed.reserve(files_it->second.AsArray().size());
+        for (const JsonValue& value : files_it->second.AsArray())
+        {
+            if (!value.IsObject()) continue;
+            const JsonObject& object = value.AsObject();
+
+            const auto string_field = [&object](const char* key) -> std::string
+            {
+                const auto it = object.find(key);
+                return it != object.end() && it->second.IsString()
+                    ? it->second.AsString()
+                    : std::string{};
+            };
+
+            const std::string name = string_field("name");
+            const std::string path = string_field("path");
+            if (name.empty() || path.empty()) continue;
+
+            BrokerClientFileItem item;
+            item.name = name;
+            item.path = path;
+            const auto folder_it = object.find("isFolder");
+            item.is_folder = folder_it != object.end() && folder_it->second.IsBool()
+                ? folder_it->second.AsBool()
+                : false;
+            item.size_formatted = string_field("sizeFormatted");
+            item.modified_formatted = string_field("modifiedFormatted");
+            item.source = string_field("source");
+            item.extension = string_field("extension");
+            parsed.push_back(std::move(item));
+        }
+
+        out_files = std::move(parsed);
+        return true;
+    }
+
     bool LaunchApp(const std::string& app_id, std::string& err);
     bool GetSystemSnapshot(BrokerClientSnapshot& out_snapshot);
     bool SetVolume(double value);
