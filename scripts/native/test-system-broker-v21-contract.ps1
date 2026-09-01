@@ -101,10 +101,12 @@ $appServiceContent = Get-Content (Join-Path $brokerSrc "app_service_v21.cpp") -R
 $activationContractPath = Join-Path $root "desktop\CloudOS.NativeCommon\native_shell_activation_v21.h"
 $activationClientPath = Join-Path $root "desktop\CloudOS.NativeCommon\native_shell_activation_client_v21.h"
 $activationServerPath = Join-Path $root "desktop\CloudOS.NativeShell\src\native_shell_activation_server_v21.h"
+$shellBridgePath = Join-Path $root "desktop\CloudOS.NativeShell\src\native_shell_bridge.cpp"
 $flutterBridgePath = Join-Path $root "desktop\CloudOS.FlutterShell\native_bridge\cloudos_flutter_bridge_v20.cpp"
 $activationContractContent = Get-Content $activationContractPath -Raw
 $activationClientContent = Get-Content $activationClientPath -Raw
 $activationServerContent = Get-Content $activationServerPath -Raw
+$shellBridgeContent = Get-Content $shellBridgePath -Raw
 $flutterBridgeContent = Get-Content $flutterBridgePath -Raw
 
 if ($appServiceContent -notmatch "NativeShellActivationClientV21::Activate") {
@@ -133,6 +135,12 @@ if ($activationServerContent -notmatch "SurfaceAction::Query" -or
     $activationServerContent -notmatch "SurfaceAction::Focus" -or
     $activationServerContent -notmatch "SurfaceAction::Close") {
     throw "NativeShell must implement query/focus/close lifecycle for typed surfaces"
+}
+if ($shellBridgeContent -notmatch "NativeShellActivationServerV21::Start") {
+    throw "NativeShellBridge must start the V21 activation server after shell initialization"
+}
+if ($shellBridgeContent -notmatch "NativeShellActivationServerV21::Stop") {
+    throw "NativeShellBridge must stop the V21 activation server during shell shutdown"
 }
 if ($flutterBridgeContent -notmatch 'method == "getShellSurfaceStates"' -or
     $flutterBridgeContent -notmatch 'method == "focusShellSurface"' -or
