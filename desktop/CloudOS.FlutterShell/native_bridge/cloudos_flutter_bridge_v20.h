@@ -47,13 +47,14 @@ struct NativeFileItem final
 struct NativeSystemSnapshot final
 {
     std::string device_name;
-    bool network_available{true};
+    bool network_available{false};
     std::string network_name;
-    bool volume_available{true};
-    double volume{0.72};
-    bool brightness_available{true};
-    double brightness{0.85};
-    int battery_percent{100};
+    bool volume_available{false};
+    double volume{};
+    bool brightness_available{false};
+    double brightness{};
+    bool battery_available{false};
+    int battery_percent{};
     bool wsl_available{false};
     std::vector<std::string> distros;
     int current_workspace{1};
