@@ -4,10 +4,13 @@ $ErrorActionPreference = 'Stop'
 $script:DeploymentSchema = 13
 $script:ProductName = 'CloudOS Native Shell'
 $script:RecoveryAuthority = 'CloudOS.Supervisor.exe V11'
+$script:BrokerAuthority = 'CloudOS.SystemBroker.exe V21'
 $script:RequiredPayloadFiles = @(
     'CloudOS.exe',
     'CloudOS.NativeRuntime.dll',
-    'CloudOS.Supervisor.exe'
+    'CloudOS.Supervisor.exe',
+    'CloudOS.SystemBroker.exe',
+    'CloudOS.BrokerProbe.exe'
 )
 
 function Get-CloudOSDefaultInstallRoot {
@@ -164,6 +167,7 @@ function Get-CloudOSPayloadIdentity {
         [string]$manifest.product -ne $script:ProductName -or
         [string]$manifest.shell_authority -ne 'C++/Win32' -or
         [string]$manifest.recovery_authority -ne $script:RecoveryAuthority -or
+        [string]$manifest.broker_authority -ne $script:BrokerAuthority -or
         [string]$manifest.configuration -ne 'Release' -or
         [string]$manifest.platform -ne 'x64' -or
         $manifest.legacy_react_desktop -ne $false) {
@@ -671,7 +675,7 @@ function Invoke-CloudOSUninstall {
     Assert-CloudOSManagedInstallRoot -Paths $paths
     $lock = Enter-CloudOSDeploymentLock -Paths $paths
     try {
-        foreach ($name in @('CloudOS', 'CloudOS.Supervisor')) {
+        foreach ($name in @('CloudOS', 'CloudOS.Supervisor', 'CloudOS.SystemBroker', 'CloudOS.BrokerProbe')) {
             foreach ($process in @(Get-Process -Name $name -ErrorAction SilentlyContinue)) {
                 try { $path = $process.Path } catch { continue }
                 if (-not [string]::IsNullOrWhiteSpace($path) -and

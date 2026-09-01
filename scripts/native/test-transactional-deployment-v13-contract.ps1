@@ -19,6 +19,11 @@ foreach ($required in @(
     'FileShare]::None',
     'Test-CloudOSPayload',
     'CloudOS.Supervisor.exe',
+    'CloudOS.SystemBroker.exe',
+    'CloudOS.BrokerProbe.exe',
+    "`$script:BrokerAuthority = 'CloudOS.SystemBroker.exe V21'",
+    '[string]$manifest.broker_authority -ne $script:BrokerAuthority',
+    "@('CloudOS', 'CloudOS.Supervisor', 'CloudOS.SystemBroker', 'CloudOS.BrokerProbe')",
     '--self-test',
     'Assert-CloudOSManagedInstallRoot',
     'Source validation occurs before any active-state mutation.',
@@ -57,6 +62,8 @@ foreach ($command in @(
 $package = Get-Content -LiteralPath $packagePath -Raw
 foreach ($name in @(
     'CloudOS.Deployment.V13.psm1',
+    'CloudOS.SystemBroker.exe',
+    'CloudOS.BrokerProbe.exe',
     'install-cloudos-native-v13.ps1',
     'update-cloudos-native-v13.ps1',
     'rollback-cloudos-native-v13.ps1',
@@ -79,4 +86,4 @@ foreach ($required in @('run-native-deployment-smoke-v13.ps1', 'deployment-v13-s
     if (-not $workflow.Contains($required)) { throw "Full-System CI does not protect V13 deployment runtime behavior: $required" }
 }
 
-Write-Host 'PASS: Transactional Deployment V13 contract is enforced (per-user filesystem deployment only; no Winlogon/registry activation).'
+Write-Host 'PASS: Transactional Deployment V13 contract is enforced for all five V21 runtime binaries (per-user filesystem deployment only; no Winlogon/registry activation).'
