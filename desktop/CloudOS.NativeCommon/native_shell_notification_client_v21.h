@@ -1,6 +1,5 @@
 #pragma once
 
-#include "native_shell_activation_v21.h"
 #include "native_shell_notification_v21.h"
 
 #include <Windows.h>
@@ -24,6 +23,7 @@ public:
             return false;
         }
         *snapshot = ShellNotificationV21::Snapshot{};
+        snapshot->schema = 0;
 
         const std::wstring mapping_name = CreateMappingName();
         HANDLE mapping = CreateFileMappingW(
@@ -67,25 +67,26 @@ public:
             return false;
         }
 
-        const bool delivered = SendRequest(request, error);
-        if (delivered)
+        bool valid = false;
+        if (SendRequest(request, error))
         {
             const auto* mapped = static_cast<const ShellNotificationV21::Snapshot*>(view);
-            if (mapped->schema != ShellNotificationV21::kSchema ||
-                mapped->count > ShellNotificationV21::kMaxItems ||
-                mapped->unread_count > mapped->count)
+            valid = mapped->schema == ShellNotificationV21::kSchema &&
+                mapped->count <= ShellNotificationV21::kMaxItems &&
+                mapped->unread_count <= mapped->count;
+            if (valid)
             {
-                SetError(error, "NativeShell returned an invalid notification snapshot");
+                *snapshot = *mapped;
             }
             else
             {
-                *snapshot = *mapped;
+                SetError(error, "NativeShell returned an invalid notification snapshot");
             }
         }
 
         UnmapViewOfFile(view);
         CloseHandle(mapping);
-        return delivered && snapshot->schema == ShellNotificationV21::kSchema;
+        return valid;
     }
 
     static bool MarkAllRead(std::string* error = nullptr) noexcept
@@ -132,7 +133,7 @@ private:
         return FindWindowExW(
             HWND_MESSAGE,
             nullptr,
-            ShellActivationV21::kWindowClass,
+            ShellNotificationV21::kWindowClass,
             nullptr);
     }
 
@@ -150,7 +151,7 @@ private:
         const HWND endpoint = FindEndpoint();
         if (endpoint == nullptr)
         {
-            SetError(error, "CloudOS NativeShell activation endpoint is unavailable");
+            SetError(error, "CloudOS NativeShell notification endpoint is unavailable");
             return false;
         }
 
