@@ -108,8 +108,8 @@ void main() {
     );
     expect(
       refreshSource,
-      isNot(contains(' which ')),
-      reason: 'package probes would start a WSL distro during discovery',
+      isNot(contains('IsWslCommandAvailable(')),
+      reason: 'catalog refresh must not probe packages inside a WSL distro',
     );
   });
 
