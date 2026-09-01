@@ -7,12 +7,14 @@ class CloudSystemSnapshot {
     required this.batteryPercent,
     required this.wslAvailable,
     required this.distros,
+    this.networkAvailable = true,
     this.volumeAvailable = true,
     this.brightnessAvailable = true,
     this.currentWorkspace = 1,
   });
 
   final String deviceName;
+  final bool networkAvailable;
   final String networkName;
   final bool volumeAvailable;
   final double volume;
