@@ -449,14 +449,14 @@ bool CloudOSBrokerClientV21::GetSystemSnapshot(BrokerClientSnapshot& out_snapsho
     snapshot.user_name = StringField(response.payload, "userName", "User");
     snapshot.session_id = static_cast<uint32_t>(
         IntField(response.payload, "sessionId", GetCurrentSessionId()));
-    snapshot.battery_available = BoolField(response.payload, "batteryAvailable", true);
-    snapshot.battery_percent = static_cast<int>(IntField(response.payload, "batteryPercent", 100));
-    snapshot.network_available = BoolField(response.payload, "networkAvailable", true);
+    snapshot.battery_available = BoolField(response.payload, "batteryAvailable");
+    snapshot.battery_percent = static_cast<int>(IntField(response.payload, "batteryPercent", 0));
+    snapshot.network_available = BoolField(response.payload, "networkAvailable");
     snapshot.network_name = StringField(response.payload, "networkName");
-    snapshot.volume_available = BoolField(response.payload, "volumeAvailable", true);
-    snapshot.volume = DoubleField(response.payload, "volume", 0.72);
-    snapshot.brightness_available = BoolField(response.payload, "brightnessAvailable", true);
-    snapshot.brightness = DoubleField(response.payload, "brightness", 0.85);
+    snapshot.volume_available = BoolField(response.payload, "volumeAvailable");
+    snapshot.volume = DoubleField(response.payload, "volume", 0.0);
+    snapshot.brightness_available = BoolField(response.payload, "brightnessAvailable");
+    snapshot.brightness = DoubleField(response.payload, "brightness", 0.0);
     snapshot.wsl_available = BoolField(response.payload, "wslAvailable");
     snapshot.current_workspace = static_cast<int>(IntField(response.payload, "currentWorkspace", 1));
     snapshot.timestamp_ms = static_cast<uint64_t>(IntField(response.payload, "timestamp", 0));
