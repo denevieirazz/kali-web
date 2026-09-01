@@ -1,39 +1,23 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/cloudos_theme.dart';
-import '../../../models/shell_models.dart';
-import '../../../services/cloudos_bridge.dart';
+import '../../../models/cloud_notification.dart';
 import '../../../widgets/glass_surface.dart';
 import '../domain/notification_date_formatter.dart';
 import 'widgets/notification_card.dart';
 import 'widgets/notification_empty_state.dart';
 
-class NotificationCenterPanel extends StatefulWidget {
+class NotificationCenterPanel extends StatelessWidget {
   const NotificationCenterPanel({
-    this.initialNotifications,
+    required this.notifications,
+    required this.onDismiss,
+    required this.onClearAll,
     super.key,
   });
 
-  final List<CloudNotification>? initialNotifications;
-
-  @override
-  State<NotificationCenterPanel> createState() => _NotificationCenterPanelState();
-}
-
-class _NotificationCenterPanelState extends State<NotificationCenterPanel> {
-  late List<CloudNotification> items = List<CloudNotification>.from(
-    widget.initialNotifications ?? CloudOSBridge.previewNotifications,
-  );
-
-  void _dismiss(String id) {
-    setState(() {
-      items.removeWhere((notification) => notification.id == id);
-    });
-  }
-
-  void _clearAll() {
-    setState(items.clear);
-  }
+  final List<CloudNotification> notifications;
+  final ValueChanged<String> onDismiss;
+  final VoidCallback onClearAll;
 
   @override
   Widget build(BuildContext context) {
@@ -57,17 +41,17 @@ class _NotificationCenterPanelState extends State<NotificationCenterPanel> {
               children: <Widget>[
                 _NotificationHeader(
                   dateString: dateString,
-                  canClear: items.isNotEmpty,
-                  onClearAll: _clearAll,
+                  canClear: notifications.isNotEmpty,
+                  onClearAll: onClearAll,
                 ),
                 const SizedBox(height: 12),
-                if (items.isEmpty)
+                if (notifications.isEmpty)
                   const NotificationEmptyState()
                 else
-                  for (final item in items) ...<Widget>[
+                  for (final item in notifications) ...<Widget>[
                     NotificationCard(
                       notification: item,
-                      onDismiss: () => _dismiss(item.id),
+                      onDismiss: () => onDismiss(item.id),
                     ),
                     const SizedBox(height: 8),
                   ],
