@@ -64,6 +64,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "flutter create failed with $LASTEXITCODE" }
           if (Test-Path 'native_bridge') {
             Copy-Item -Path "native_bridge/*" -Destination "windows/runner/" -Force
+            Copy-Item -Path "../CloudOS.SystemBroker/src/protocol_v21.h" -Destination "windows/runner/protocol_v21.h" -Force
+            Copy-Item -Path "../CloudOS.SystemBroker/src/protocol_v21.cpp" -Destination "windows/runner/protocol_v21.cpp" -Force
             $cmakePath = "windows/runner/CMakeLists.txt"
             if (Test-Path $cmakePath) {
               $cmake = Get-Content -Path $cmakePath -Raw
@@ -76,6 +78,9 @@ jobs:
                 } else {
                   $cmake = $cmake -replace '("flutter_window\.cpp")', "`$1`r`n  `"cloudos_broker_client_v21.cpp`""
                 }
+              }
+              if ($cmake -notmatch "protocol_v21.cpp") {
+                $cmake = $cmake -replace '("cloudos_broker_client_v21\.cpp")', "`$1`r`n  `"protocol_v21.cpp`""
               }
               if ($cmake -notmatch "advapi32\.lib") {
                 $cmake = $cmake -replace 'target_link_libraries\(\$\{BINARY_NAME\} PRIVATE flutter flutter_wrapper_app\)', 'target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app dwmapi.lib shlwapi.lib shell32.lib ole32.lib uuid.lib advapi32.lib)'
@@ -136,6 +141,7 @@ jobs:
             native_bridge_channel = 'cloudos/native/v19'
             native_broker_ipc = 'NamedPipe v21'
             broker_protocol_version = 21
+            broker_response_parsing = 'typed protocol_v21'
             native_bridge_registered = $true
             get_apps_contract = $true
             system_snapshot_contract = $true
