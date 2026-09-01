@@ -35,7 +35,7 @@ jobs:
           flutter config --enable-windows-desktop
           flutter devices
 
-      - name: Build System Broker V22.1
+      - name: Build System Broker V23 transport harness
         shell: pwsh
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -45,9 +45,9 @@ jobs:
           & $msbuild "desktop/CloudOS.SystemBroker/CloudOS.SystemBroker.vcxproj" /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
           if ($LASTEXITCODE -ne 0) { throw 'SystemBroker Release x64 build failed.' }
           & $msbuild "desktop/CloudOS.BrokerProbe/CloudOS.BrokerProbe.vcxproj" /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
-          if ($LASTEXITCODE -ne 0) { throw 'BrokerProbe Release x64 build failed.' }
+          if ($LASTEXITCODE -ne 0) { throw 'BrokerProbe/V23 client Release x64 build failed.' }
 
-      - name: Test V21/V22.1 broker contracts and smoke
+      - name: Test V21/V22.1/V23 broker contracts and smoke
         shell: pwsh
         run: |
           pwsh -NoProfile -File scripts/native/test-system-broker-v21-contract.ps1
@@ -63,6 +63,10 @@ jobs:
           $filesEvidence = 'TestResults/v22.1-bug-bash/unified-files-v22.1-smoke.json'
           if (-not (Test-Path $filesEvidence)) { throw "V22.1 evidence missing: $filesEvidence" }
           Copy-Item $filesEvidence 'unified-files-v22.1-smoke.json' -Force
+          pwsh -NoProfile -File scripts/native/test-reactive-broker-v23-contract.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'V23 reactive broker contract failed.' }
+          pwsh -NoProfile -File scripts/native/run-reactive-broker-v23-smoke.ps1 -OutputPath 'reactive-broker-v23-smoke.json'
+          if ($LASTEXITCODE -ne 0) { throw 'V23 reactive broker smoke failed.' }
 
       - name: Generate local Windows host
         shell: pwsh
@@ -111,7 +115,7 @@ jobs:
           Copy-Item -Path (Join-Path $brokerBin 'CloudOS.SystemBroker.exe') -Destination $release -Force
           Copy-Item -Path (Join-Path $brokerBin 'CloudOS.BrokerProbe.exe') -Destination $release -Force
 
-      - name: Write V22.1 evidence
+      - name: Write V23 evidence
         shell: pwsh
         run: |
           $flutter = (flutter --version | Select-Object -First 1).Trim()
@@ -120,18 +124,25 @@ jobs:
           $brokerExe = Join-Path $release 'CloudOS.SystemBroker.exe'
           $probeExe = Join-Path $release 'CloudOS.BrokerProbe.exe'
           foreach ($required in @($exe,$brokerExe,$probeExe)) { if (-not (Test-Path $required)) { throw "Release binary missing: $required" } }
+          $reactive = Get-Content -LiteralPath 'reactive-broker-v23-smoke.json' -Raw | ConvertFrom-Json
+          if ($reactive.verdict -ne 'pass') { throw 'V23 reactive evidence is not pass.' }
           $evidence = [ordered]@{
-            schema = 221
+            schema = 23
             verdict = 'pass'
             flutter = $flutter
             git_sha = '${{ github.sha }}'
             presentation_layer = 'Flutter 3.44.7'
             native_bridge_channel = 'cloudos/native/v19'
-            native_broker_ipc = 'NamedPipe v21'
+            native_broker_ipc = 'NamedPipe v21 + V23 response/event demux'
             broker_protocol_version = 21
             native_bridge_registered = $true
             restricted_flutter_rpc_surface = $true
             unified_files_v22_1 = $true
+            event_demux_supported = $true
+            typed_native_push = $true
+            reactive_files_jobs = $true
+            reconnect_subscription_restore = [bool]$reactive.reconnect_subscription_restore
+            event_before_response = [bool]$reactive.event_before_response
             arbitrary_command_api = $false
             userchoice_modified = $false
             winlogon_modified = $false
@@ -143,22 +154,23 @@ jobs:
             probe_executable = 'CloudOS.BrokerProbe.exe'
             probe_executable_sha256 = (Get-FileHash $probeExe -Algorithm SHA256).Hash.ToLowerInvariant()
           }
-          $evidence | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 'flutter-v22.1-smoke.json'
-          Get-Content 'flutter-v22.1-smoke.json'
+          $evidence | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 'flutter-v23-smoke.json'
+          Get-Content 'flutter-v23-smoke.json'
 
       - name: Package Flutter preview
         shell: pwsh
         run: |
           $release = Resolve-Path 'desktop/CloudOS.FlutterShell/build/windows/x64/runner/Release'
-          Compress-Archive -Path "$release\*" -DestinationPath 'CloudOS-Flutter-V22.1-Windows-x64.zip' -Force
+          Compress-Archive -Path "$release\*" -DestinationPath 'CloudOS-Flutter-V23-Windows-x64.zip' -Force
 
       - name: Upload Flutter preview
         uses: actions/upload-artifact@v4
         with:
-          name: CloudOS-Flutter-V22.1-${{ github.sha }}
+          name: CloudOS-Flutter-V23-${{ github.sha }}
           path: |
-            CloudOS-Flutter-V22.1-Windows-x64.zip
-            flutter-v22.1-smoke.json
+            CloudOS-Flutter-V23-Windows-x64.zip
+            flutter-v23-smoke.json
+            reactive-broker-v23-smoke.json
             system-broker-v21-smoke.json
             unified-files-v22.1-smoke.json
           if-no-files-found: error

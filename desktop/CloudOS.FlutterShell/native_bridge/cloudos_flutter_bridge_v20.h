@@ -10,6 +10,7 @@
 #include <Windows.h>
 
 #include <atomic>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -69,19 +70,36 @@ public:
     bool SetBrightness(double brightness);
 
     [[nodiscard]] bool IsRegistered() const noexcept { return is_registered_.load(); }
+    [[nodiscard]] bool IsEventStreamActive() const noexcept { return event_stream_active_.load(); }
+    [[nodiscard]] uint64_t DroppedBrokerEventCount() const noexcept { return dropped_broker_events_.load(); }
 
 private:
     CloudOSFlutterBridgeV20() = default;
-    ~CloudOSFlutterBridgeV20() = default;
+    ~CloudOSFlutterBridgeV20();
+
+    bool StartBrokerEventStream();
+    void QueueBrokerEvent(const std::string& event_name, const std::string& serialized_event);
+    void DrainBrokerEventsOnPlatformThread();
+    static VOID CALLBACK EventDrainTimerProc(HWND hwnd, UINT message, UINT_PTR timer_id, DWORD time);
 
     void RefreshAppCatalog();
     void RefreshSystemSnapshot();
 
     HWND window_handle_{nullptr};
     std::atomic_bool is_registered_{false};
+    std::atomic_bool event_stream_active_{false};
+    std::atomic_bool event_drain_scheduled_{false};
+    std::atomic_uint64_t dropped_broker_events_{0};
+
     mutable std::mutex mutex_;
+    mutable std::mutex event_queue_mutex_;
     std::vector<NativeAppItem> cached_apps_;
     NativeSystemSnapshot cached_snapshot_;
+    std::deque<std::string> broker_event_queue_;
+
+    std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel_;
+
+    static constexpr size_t kMaxQueuedBrokerEvents = 256;
 };
 
 } // namespace CloudOS

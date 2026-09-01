@@ -98,4 +98,34 @@ class CloudSystemSnapshot {
   final bool networkAvailable;
   final bool volumeAvailable;
   final bool brightnessAvailable;
+
+  CloudSystemSnapshot copyWith({
+    String? deviceName,
+    String? networkName,
+    double? volume,
+    double? brightness,
+    int? batteryPercent,
+    bool? wslAvailable,
+    List<String>? distros,
+    int? currentWorkspace,
+    bool? batteryAvailable,
+    bool? networkAvailable,
+    bool? volumeAvailable,
+    bool? brightnessAvailable,
+  }) {
+    return CloudSystemSnapshot(
+      deviceName: deviceName ?? this.deviceName,
+      networkName: networkName ?? this.networkName,
+      volume: volume ?? this.volume,
+      brightness: brightness ?? this.brightness,
+      batteryPercent: batteryPercent ?? this.batteryPercent,
+      wslAvailable: wslAvailable ?? this.wslAvailable,
+      distros: distros ?? this.distros,
+      currentWorkspace: currentWorkspace ?? this.currentWorkspace,
+      batteryAvailable: batteryAvailable ?? this.batteryAvailable,
+      networkAvailable: networkAvailable ?? this.networkAvailable,
+      volumeAvailable: volumeAvailable ?? this.volumeAvailable,
+      brightnessAvailable: brightnessAvailable ?? this.brightnessAvailable,
+    );
+  }
 }

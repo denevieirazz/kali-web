@@ -35,6 +35,17 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
   late double volume = widget.snapshot.volume;
   late double brightness = widget.snapshot.brightness;
 
+  @override
+  void didUpdateWidget(covariant QuickSettingsPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.snapshot.volume != widget.snapshot.volume) {
+      volume = widget.snapshot.volume;
+    }
+    if (oldWidget.snapshot.brightness != widget.snapshot.brightness) {
+      brightness = widget.snapshot.brightness;
+    }
+  }
+
   Future<void> _setVolume(double value) async {
     final previous = volume;
     setState(() => volume = value);

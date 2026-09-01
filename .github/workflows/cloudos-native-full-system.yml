@@ -14,6 +14,9 @@ on:
       - 'desktop/CloudOS.NativeRecovery/**'
       - 'desktop/CloudOS.NativeRuntime/**'
       - 'desktop/CloudOS.NativeShell/**'
+      - 'desktop/CloudOS.FlutterShell/**'
+      - 'desktop/CloudOS.SystemBroker/**'
+      - 'desktop/CloudOS.BrokerProbe/**'
       - 'scripts/native/**'
       - 'docs/ARCHITECTURE.md'
       - 'docs/native/**'
@@ -33,7 +36,7 @@ jobs:
       - name: Confirm full CloudOS tree is preserved
         shell: pwsh
         run: |
-          foreach ($path in @('frontend', 'backend', 'desktop/CloudOS.Host', 'desktop/CloudOS.NativeCommon', 'desktop/CloudOS.NativeRecovery', 'desktop/CloudOS.NativeRuntime', 'desktop/CloudOS.NativeShell')) {
+          foreach ($path in @('frontend', 'backend', 'desktop/CloudOS.Host', 'desktop/CloudOS.NativeCommon', 'desktop/CloudOS.NativeRecovery', 'desktop/CloudOS.NativeRuntime', 'desktop/CloudOS.NativeShell', 'desktop/CloudOS.FlutterShell', 'desktop/CloudOS.SystemBroker', 'desktop/CloudOS.BrokerProbe')) {
             if (-not (Test-Path -LiteralPath $path)) {
               throw "Required migration source/target path missing: $path"
             }
@@ -60,9 +63,21 @@ jobs:
         shell: pwsh
         run: ./scripts/native/test-unified-start-search-v17-contract.ps1
 
+      - name: Contract Reactive Broker V23
+        shell: pwsh
+        run: ./scripts/native/test-reactive-broker-v23-contract.ps1
+
       - name: Validate and build through the developer entrypoint
         shell: cmd
         run: scripts\native\build-cloudos-native.cmd Release
+
+      - name: Build System Broker and V23 transport harness
+        shell: pwsh
+        run: |
+          msbuild 'desktop/CloudOS.SystemBroker/CloudOS.SystemBroker.vcxproj' /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
+          if ($LASTEXITCODE -ne 0) { throw 'SystemBroker Release x64 build failed.' }
+          msbuild 'desktop/CloudOS.BrokerProbe/CloudOS.BrokerProbe.vcxproj' /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
+          if ($LASTEXITCODE -ne 0) { throw 'BrokerProbe/V23 client Release x64 build failed.' }
 
       - name: Smoke Stability/Readiness V9
         shell: pwsh
@@ -220,6 +235,21 @@ jobs:
           if ($result.evidence.supervisor_self_test_exit_code -ne 0) { throw 'Unified Start/Search V17 supervisor self-test failed.' }
           if ($result.evidence.mutating_package_operation_executed -ne $false) { throw 'Unified Start/Search V17 hosted smoke unexpectedly performed a package mutation.' }
 
+      - name: Smoke Reactive Broker V23
+        shell: pwsh
+        run: |
+          $report = 'desktop/CloudOS.NativeShell/artifacts/reactive-broker-v23-smoke.json'
+          ./scripts/native/run-reactive-broker-v23-smoke.ps1 -OutputPath $report
+          if (-not (Test-Path -LiteralPath $report)) { throw 'Reactive Broker V23 smoke report missing.' }
+          $result = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
+          if ($result.verdict -ne 'pass') { throw 'Reactive Broker V23 smoke verdict was not pass.' }
+          foreach ($name in @('event_before_response','concurrent_response_correlation','reconnect_subscription_restore','post_test_broker_ping','production_winlogon_unchanged')) {
+            if ($result.$name -ne $true) { throw "Reactive Broker V23 evidence failed: $name" }
+          }
+          if ($result.userchoice_mutation_executed -ne $false -or $result.package_mutation_executed -ne $false -or $result.shell_activation_executed -ne $false) {
+            throw 'Reactive Broker V23 hosted smoke performed a forbidden mutation.'
+          }
+
       - name: Publish verified CloudOS Native x64 artifact
         uses: actions/upload-artifact@v4
         with:
@@ -236,6 +266,7 @@ jobs:
             desktop/CloudOS.NativeShell/artifacts/shell-activation-v14-smoke.json
             desktop/CloudOS.NativeShell/artifacts/integration-v16-smoke.json
             desktop/CloudOS.NativeShell/artifacts/unified-start-search-v17-smoke.json
+            desktop/CloudOS.NativeShell/artifacts/reactive-broker-v23-smoke.json
             desktop/CloudOS.NativeShell/bin/Release/cloudos-native-manifest.json
             desktop/CloudOS.NativeShell/bin/Release/.cloudos-build-head
             desktop/CloudOS.NativeShell/bin/Release/.cloudos-build-fingerprint

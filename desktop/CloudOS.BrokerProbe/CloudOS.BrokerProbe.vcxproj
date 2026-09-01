@@ -34,7 +34,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>advapi32.lib;shell32.lib;userenv.lib;ole32.lib;uuid.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>advapi32.lib;shell32.lib;shlwapi.lib;userenv.lib;ole32.lib;uuid.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest>
       <EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness>
@@ -45,6 +45,7 @@
     <ClCompile Include="main.cpp" />
     <ClCompile Include="..\CloudOS.SystemBroker\src\protocol_v21.cpp" />
     <ClCompile Include="..\CloudOS.SystemBroker\src\security_v21.cpp" />
+    <ClCompile Include="..\CloudOS.FlutterShell\native_bridge\cloudos_broker_client_v21.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
