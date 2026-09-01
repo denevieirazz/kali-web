@@ -39,6 +39,17 @@ struct BrokerClientAppItem final
     bool recent{false};
 };
 
+struct BrokerClientFileItem final
+{
+    std::string name;
+    std::string path;
+    bool is_folder{};
+    std::string size_formatted;
+    std::string modified_formatted;
+    std::string source;
+    std::string extension;
+};
+
 struct BrokerClientSnapshot final
 {
     std::string device_name;
@@ -73,6 +84,7 @@ public:
     [[nodiscard]] BrokerConnectionState GetConnectionState() const noexcept { return state_.load(); }
 
     bool GetApps(std::vector<BrokerClientAppItem>& out_apps);
+    bool GetFiles(const std::string& location, std::vector<BrokerClientFileItem>& out_files);
     bool LaunchApp(const std::string& app_id, std::string& err);
     bool GetSystemSnapshot(BrokerClientSnapshot& out_snapshot);
     bool SetVolume(double value);
