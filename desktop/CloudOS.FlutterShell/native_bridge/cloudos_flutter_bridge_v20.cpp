@@ -19,6 +19,10 @@ constexpr size_t kMaxFlutterRpcPayloadBytes = 1024 * 1024;
 
 bool IsAllowedFlutterRpcMethod(const std::string& method)
 {
+    // This allowlist deliberately excludes events.subscribe/events.unsubscribe.
+    // The current Flutter bridge is synchronous request/response over one pipe
+    // and does not yet own an event demultiplexer. Exposing subscriptions would
+    // allow an unsolicited event frame to be consumed as the next RPC response.
     static const std::unordered_set<std::string> allowed = {
         "health.ping",
         "health.status",
@@ -26,8 +30,6 @@ bool IsAllowedFlutterRpcMethod(const std::string& method)
         "apps.list",
         "system.snapshot",
         "wsl.list",
-        "events.subscribe",
-        "events.unsubscribe",
         "jobs.status",
         "jobs.cancel",
         "files.list",
@@ -193,6 +195,8 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         map[flutter::EncodableValue("brokerState")] = flutter::EncodableValue(ConnectionStateToString(CloudOSBrokerClientV21::Instance().GetConnectionState()));
         map[flutter::EncodableValue("arbitrary_command_api")] = flutter::EncodableValue(false);
         map[flutter::EncodableValue("generic_broker_rpc_restricted")] = flutter::EncodableValue(true);
+        map[flutter::EncodableValue("event_subscription_exposed")] = flutter::EncodableValue(false);
+        map[flutter::EncodableValue("event_demux_supported")] = flutter::EncodableValue(false);
         map[flutter::EncodableValue("winlogon_modified")] = flutter::EncodableValue(false);
         map[flutter::EncodableValue("shell_activation_executed")] = flutter::EncodableValue(false);
         result->Success(flutter::EncodableValue(std::move(map)));
