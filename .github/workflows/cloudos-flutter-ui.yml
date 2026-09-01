@@ -68,10 +68,12 @@ jobs:
 
             # Native bridge sources are copied two levels deeper into windows/runner.
             # Preserve their ../../CloudOS.NativeCommon include boundary by staging only
-            # the typed V21 activation/lifecycle headers required by the copied source.
+            # the typed V21 activation/lifecycle and notification headers they consume.
             New-Item -ItemType Directory -Force -Path "CloudOS.NativeCommon" | Out-Null
             Copy-Item -Path "../CloudOS.NativeCommon/native_shell_activation_v21.h" -Destination "CloudOS.NativeCommon/native_shell_activation_v21.h" -Force
             Copy-Item -Path "../CloudOS.NativeCommon/native_shell_activation_client_v21.h" -Destination "CloudOS.NativeCommon/native_shell_activation_client_v21.h" -Force
+            Copy-Item -Path "../CloudOS.NativeCommon/native_shell_notification_v21.h" -Destination "CloudOS.NativeCommon/native_shell_notification_v21.h" -Force
+            Copy-Item -Path "../CloudOS.NativeCommon/native_shell_notification_client_v21.h" -Destination "CloudOS.NativeCommon/native_shell_notification_client_v21.h" -Force
 
             $cmakePath = "windows/runner/CMakeLists.txt"
             if (Test-Path $cmakePath) {
@@ -199,6 +201,7 @@ jobs:
             system_snapshot_contract = $true
             shell_surface_lifecycle = $true
             shell_workspace_control = $true
+            shell_notification_authority = $true
             arbitrary_command_api = $false
             winlogon_modified = $false
             executable = 'cloudos_flutter_shell.exe'
