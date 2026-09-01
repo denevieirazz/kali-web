@@ -47,7 +47,8 @@ void JobManagerV21::Initialize(size_t worker_count)
 
     running_.store(true);
     workers_.clear();
-    for (size_t i = 0; i < worker_count; ++i)
+    const size_t bounded_workers = std::clamp<size_t>(worker_count, 1, 16);
+    for (size_t i = 0; i < bounded_workers; ++i)
     {
         workers_.emplace_back(&JobManagerV21::WorkerLoop, this);
     }
@@ -59,22 +60,26 @@ void JobManagerV21::Shutdown()
         std::lock_guard<std::mutex> lock(mutex_);
         if (!running_.load()) return;
         running_.store(false);
+        for (auto& [id, job] : jobs_)
+        {
+            (void)id;
+            job->cancel_flag.store(true);
+        }
     }
     cv_.notify_all();
 
     for (auto& w : workers_)
     {
-        if (w.joinable())
-        {
-            w.join();
-        }
+        if (w.joinable()) w.join();
     }
     workers_.clear();
 }
 
 std::string JobManagerV21::SubmitJob(const std::string& type, JobFunction func)
 {
-    std::string job_id = "job-" + std::to_string(next_job_id_++);
+    if (type.empty() || !func || !running_.load()) return {};
+
+    const std::string job_id = "job-" + std::to_string(next_job_id_++);
     auto job = std::make_shared<InternalJob>();
     job->info.id = job_id;
     job->info.type = type;
@@ -86,6 +91,8 @@ std::string JobManagerV21::SubmitJob(const std::string& type, JobFunction func)
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (!running_.load()) return {};
+
         if (jobs_.size() >= kMaxRetainedJobs)
         {
             for (auto it = jobs_.begin(); it != jobs_.end() && jobs_.size() >= kMaxRetainedJobs;)
@@ -102,6 +109,13 @@ std::string JobManagerV21::SubmitJob(const std::string& type, JobFunction func)
                 }
             }
         }
+
+        // Do not let an untrusted local client grow the queue without bound.
+        if (jobs_.size() >= kMaxRetainedJobs || queue_.size() >= kMaxQueuedJobs)
+        {
+            return {};
+        }
+
         jobs_[job_id] = job;
         queue_.push_back(job_id);
     }
@@ -121,7 +135,7 @@ bool JobManagerV21::CancelJob(const std::string& job_id)
     std::shared_ptr<InternalJob> job;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        auto it = jobs_.find(job_id);
+        const auto it = jobs_.find(job_id);
         if (it == jobs_.end()) return false;
         job = it->second;
     }
@@ -136,23 +150,22 @@ bool JobManagerV21::CancelJob(const std::string& job_id)
 
         job->cancel_flag.store(true);
         job->info.state = JobState::Cancelled;
+        job->info.error_message = "cancelled";
         job->info.updated_at_ms = NowMs();
         cancelled_info = job->info;
     }
 
-    {
-        JsonObject payload;
-        payload["jobId"] = JsonValue(job_id);
-        payload["state"] = JsonValue(JobStateToString(cancelled_info.state));
-        EventBusV21::Instance().Publish("job.failed", payload);
-        return true;
-    }
+    JsonObject payload;
+    payload["jobId"] = JsonValue(job_id);
+    payload["state"] = JsonValue(JobStateToString(cancelled_info.state));
+    EventBusV21::Instance().Publish("job.cancelled", payload);
+    return true;
 }
 
 bool JobManagerV21::GetJobInfo(const std::string& job_id, JobInfo& info) const
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    auto it = jobs_.find(job_id);
+    const auto it = jobs_.find(job_id);
     if (it != jobs_.end())
     {
         std::lock_guard<std::mutex> info_lock(it->second->info_mutex);
@@ -169,6 +182,7 @@ std::vector<JobInfo> JobManagerV21::ListJobs() const
     list.reserve(jobs_.size());
     for (const auto& [k, v] : jobs_)
     {
+        (void)k;
         std::lock_guard<std::mutex> info_lock(v->info_mutex);
         list.push_back(v->info);
     }
@@ -181,11 +195,9 @@ size_t JobManagerV21::GetActiveJobCount() const
     size_t active = 0;
     for (const auto& [k, v] : jobs_)
     {
+        (void)k;
         std::lock_guard<std::mutex> info_lock(v->info_mutex);
-        if (v->info.state == JobState::Queued || v->info.state == JobState::Running)
-        {
-            active++;
-        }
+        if (v->info.state == JobState::Queued || v->info.state == JobState::Running) ++active;
     }
     return active;
 }
@@ -193,52 +205,46 @@ size_t JobManagerV21::GetActiveJobCount() const
 void JobManagerV21::Reset()
 {
     std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& [id, job] : jobs_)
+    {
+        (void)id;
+        job->cancel_flag.store(true);
+    }
     jobs_.clear();
     queue_.clear();
 }
 
 void JobManagerV21::WorkerLoop()
 {
-    while (running_.load())
+    while (true)
     {
         std::shared_ptr<InternalJob> job;
         {
             std::unique_lock<std::mutex> lock(mutex_);
-            cv_.wait(lock, [this]() {
-                return !running_.load() || !queue_.empty();
-            });
-
+            cv_.wait(lock, [this]() { return !running_.load() || !queue_.empty(); });
             if (!running_.load()) break;
 
             if (!queue_.empty())
             {
-                std::string job_id = queue_.front();
+                const std::string job_id = queue_.front();
                 queue_.erase(queue_.begin());
-                auto it = jobs_.find(job_id);
-                if (it != jobs_.end())
-                {
-                    job = it->second;
-                }
+                const auto it = jobs_.find(job_id);
+                if (it != jobs_.end()) job = it->second;
             }
         }
 
         if (!job) continue;
-
-        if (job->cancel_flag.load())
-        {
-            std::lock_guard<std::mutex> info_lock(job->info_mutex);
-            job->info.state = JobState::Cancelled;
-            job->info.updated_at_ms = NowMs();
-            continue;
-        }
+        if (job->cancel_flag.load()) continue; // CancelJob already published the terminal event.
 
         {
             std::lock_guard<std::mutex> info_lock(job->info_mutex);
+            if (job->info.state == JobState::Cancelled) continue;
             job->info.state = JobState::Running;
             job->info.updated_at_ms = NowMs();
         }
 
         auto progress_cb = [job](double p) {
+            if (!std::isfinite(p)) return;
             JobInfo current;
             {
                 std::lock_guard<std::mutex> info_lock(job->info_mutex);
@@ -256,17 +262,23 @@ void JobManagerV21::WorkerLoop()
 
         std::string err;
         bool ok = false;
-        if (job->func)
+        try
         {
             ok = job->func(job->cancel_flag, progress_cb, err);
+        }
+        catch (...)
+        {
+            ok = false;
+            err = "unhandled_job_exception";
         }
 
         JobInfo final_info;
         {
             std::lock_guard<std::mutex> info_lock(job->info_mutex);
-            if (job->cancel_flag.load())
+            if (job->cancel_flag.load() || job->info.state == JobState::Cancelled)
             {
                 job->info.state = JobState::Cancelled;
+                if (job->info.error_message.empty()) job->info.error_message = "cancelled";
             }
             else if (ok)
             {
@@ -282,21 +294,20 @@ void JobManagerV21::WorkerLoop()
             final_info = job->info;
         }
 
+        JsonObject payload;
+        payload["jobId"] = JsonValue(final_info.id);
+        payload["state"] = JsonValue(JobStateToString(final_info.state));
         if (final_info.state == JobState::Completed)
         {
-            JsonObject payload;
-            payload["jobId"] = JsonValue(final_info.id);
-            payload["state"] = JsonValue(JobStateToString(JobState::Completed));
             EventBusV21::Instance().Publish("job.completed", payload);
         }
         else if (final_info.state == JobState::Failed)
         {
-            JsonObject payload;
-            payload["jobId"] = JsonValue(final_info.id);
             payload["error"] = JsonValue(final_info.error_message);
-            payload["state"] = JsonValue(JobStateToString(JobState::Failed));
             EventBusV21::Instance().Publish("job.failed", payload);
         }
+        // Running cancellation is published immediately by CancelJob. Do not
+        // duplicate the terminal cancellation event here.
     }
 }
 
