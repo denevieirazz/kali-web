@@ -40,14 +40,59 @@ Componentes:
 
 Compatibilidade: `lib/widgets/start_panel.dart` é apenas export.
 
+### Taskbar
+
+Canônico: `lib/features/taskbar/presentation/cloud_taskbar.dart`
+
+Componentes:
+
+- `widgets/taskbar_task_button.dart` — botão de app/estado running/active.
+- `widgets/taskbar_workspace_switcher.dart` — seletor das quatro áreas de trabalho.
+- `widgets/taskbar_system_tray.dart` — quick tray, relógio e badge de notificações.
+
+Compatibilidade: `lib/widgets/cloud_taskbar.dart` é apenas export.
+
+### Quick Settings
+
+Canônico: `lib/features/quick_settings/presentation/quick_settings_panel.dart`
+
+Componentes:
+
+- `widgets/quick_toggle_tile.dart` — tile binário reutilizado pelos controles rápidos.
+- `widgets/quick_slider_row.dart` — volume/brilho.
+- `widgets/quick_system_summary.dart` — bateria, WSL e resumo da sessão.
+
+Compatibilidade: `lib/widgets/quick_settings_panel.dart` é apenas export.
+
+### Notifications
+
+Canônico: `lib/features/notifications/presentation/notification_center_panel.dart`
+
+Componentes:
+
+- `domain/notification_date_formatter.dart` — data pt-BR pura.
+- `presentation/widgets/notification_card.dart` — item individual e dismiss.
+- `presentation/widgets/notification_empty_state.dart` — estado vazio.
+
+Compatibilidade: `lib/widgets/notification_center.dart` é apenas export.
+
+## Models
+
+`lib/models/shell_models.dart` é uma fachada de compatibilidade. Código novo pode importar o modelo focado diretamente:
+
+- `models/cloud_app.dart`
+- `models/cloud_file_item.dart`
+- `models/cloud_notification.dart`
+- `models/cloud_system_snapshot.dart`
+
+Não voltar a colocar modelos distintos dentro de `shell_models.dart`.
+
 ## Shared presentation
 
 - `lib/core/cloudos_theme.dart` — cores/theme/tokens compartilhados.
-- `lib/models/shell_models.dart` — `CloudApp`, `CloudSystemSnapshot`, `CloudFileItem`, notificações e enums de apresentação.
 - `lib/widgets/glass_surface.dart` — superfície visual reutilizável.
-- `lib/widgets/cloud_taskbar.dart` — taskbar.
-- `lib/widgets/quick_settings_panel.dart` — quick settings.
-- `lib/widgets/notification_center.dart` — notification center.
+
+A pasta `lib/widgets/` deve permanecer pequena: arquivos de compatibilidade e componentes realmente compartilhados. Feature implementation pertence a `lib/features/`.
 
 ## Native boundary
 
@@ -72,10 +117,14 @@ System Broker V21 já possui módulos próprios para servidor, protocolo, event 
 | alterar ícones/status/wallpaper | `lib/shell/widgets/` |
 | alterar Files | `lib/features/files/` |
 | alterar Start/Search | `lib/features/start/` |
+| alterar Taskbar | `lib/features/taskbar/` |
+| alterar Quick Settings | `lib/features/quick_settings/` |
+| alterar Notifications | `lib/features/notifications/` |
+| alterar modelo de app/arquivo/notificação/snapshot | `lib/models/<modelo>.dart` |
 | alterar dados nativos expostos ao Dart | `lib/services/cloudos_bridge.dart` + `native_bridge/` |
 | alterar IPC Broker | `native_bridge/cloudos_broker_client_v21.*` + `../CloudOS.SystemBroker/src/protocol_v21.*` |
 | alterar integração Windows/WSL real | `../CloudOS.SystemBroker/src/` e autoridades nativas descritas no `AGENTS.md` raiz |
-| validar UI | `test/shell_smoke_test.dart` + workflow `cloudos-flutter-ui.yml` |
+| validar UI | `test/shell_smoke_test.dart`, `test/modular_logic_test.dart` + workflow `cloudos-flutter-ui.yml` |
 
 ## Regra de contexto para IA
 
