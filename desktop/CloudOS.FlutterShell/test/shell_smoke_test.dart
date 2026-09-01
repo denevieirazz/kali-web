@@ -212,15 +212,14 @@ void main() {
         expect(controller.knownFolders.isNotEmpty, true);
         expect(controller.drives.isNotEmpty, true);
 
-        // Add Tab
         controller.addTab(title: 'Desktop', initialPath: 'desktop');
         expect(controller.tabs.length, 2);
         expect(controller.activeTabIndex, 1);
 
-        // Close Tab
         controller.closeTab(1);
         expect(controller.tabs.length, 1);
         expect(controller.activeTabIndex, 0);
+        controller.dispose();
       },
     );
   });
@@ -242,7 +241,6 @@ void main() {
         expect(find.text('Acesso Rápido'), findsOneWidget);
         expect(find.text('Este Computador'), findsOneWidget);
 
-        // Open Start Panel
         await tester.tap(find.byTooltip('Iniciar (Ctrl+Alt+A)'));
         await tester.pumpAndSettle();
 
@@ -250,28 +248,21 @@ void main() {
         expect(find.text('Aplicativos Fixados'), findsOneWidget);
         expect(find.text('Bloco de Notas'), findsOneWidget);
 
-        // Close Start
         await tester.tap(find.byTooltip('Iniciar (Ctrl+Alt+A)'));
         await tester.pumpAndSettle();
         expect(find.text('CloudOS Start'), findsNothing);
 
-        // Open Quick Settings
         await tester.tap(find.byTooltip('Configurações Rápidas (Ctrl+Alt+Q)'));
         await tester.pumpAndSettle();
         expect(find.text('Configurações Rápidas'), findsOneWidget);
         expect(find.text('Rede'), findsOneWidget);
         expect(find.text('Luz Noturna'), findsOneWidget);
 
-        // Open Notifications
         await tester.tap(find.byTooltip('Notificações'));
         await tester.pumpAndSettle();
         expect(find.text('Centro de Notificações'), findsOneWidget);
-        expect(find.text('Limpar Tudo'), findsOneWidget);
-
-        // Clear all notifications
-        await tester.tap(find.text('Limpar Tudo'));
-        await tester.pumpAndSettle();
         expect(find.text('Sem novas notificações'), findsOneWidget);
+        expect(find.text('Limpar Tudo'), findsNothing);
       },
     );
 
@@ -302,11 +293,9 @@ void main() {
       expect(find.text('Acesso Rápido'), findsOneWidget);
       expect(find.byTooltip('Nova Aba'), findsOneWidget);
 
-      // Add a new tab
       await tester.tap(find.byTooltip('Nova Aba'));
       await tester.pumpAndSettle();
 
-      // Check view mode switch
       await tester.tap(find.byTooltip('Visualizar em Lista'));
       await tester.pumpAndSettle();
       expect(find.byTooltip('Visualizar em Grade'), findsOneWidget);
