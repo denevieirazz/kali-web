@@ -15,6 +15,8 @@ $releaseDir = Join-Path $uiRoot 'build\windows\x64\runner\Release'
 $brokerBinDir = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\bin\Release'
 $brokerProject = Join-Path $repoRoot 'desktop\CloudOS.SystemBroker\CloudOS.SystemBroker.vcxproj'
 $probeProject = Join-Path $repoRoot 'desktop\CloudOS.BrokerProbe\CloudOS.BrokerProbe.vcxproj'
+$protocolHeader = Join-Path $repoRoot 'desktop\CloudOS.SystemBroker\src\protocol_v21.h'
+$protocolSource = Join-Path $repoRoot 'desktop\CloudOS.SystemBroker\src\protocol_v21.cpp'
 $packageLauncher = Join-Path $repoRoot 'Abrir CloudOS V21 Flutter com System Broker.cmd'
 
 function Assert-LastExitCode {
@@ -87,6 +89,8 @@ try {
 
     Write-Host '[CloudOS V21] Aplicando Native Bridge V21 ao runner...' -ForegroundColor Cyan
     Copy-Item -Path (Join-Path $nativeBridgeRoot '*') -Destination $runnerDir -Force
+    Copy-Item -Path $protocolHeader -Destination (Join-Path $runnerDir 'protocol_v21.h') -Force
+    Copy-Item -Path $protocolSource -Destination (Join-Path $runnerDir 'protocol_v21.cpp') -Force
 
     $cmakePath = Join-Path $runnerDir 'CMakeLists.txt'
     if (-not (Test-Path $cmakePath)) {
@@ -106,6 +110,10 @@ try {
         else {
             $cmake = $cmake -replace '("flutter_window\.cpp")', "`$1`r`n  `"cloudos_broker_client_v21.cpp`""
         }
+    }
+
+    if ($cmake -notmatch 'protocol_v21\.cpp') {
+        $cmake = $cmake -replace '("cloudos_broker_client_v21\.cpp")', "`$1`r`n  `"protocol_v21.cpp`""
     }
 
     if ($cmake -notmatch 'advapi32\.lib') {
