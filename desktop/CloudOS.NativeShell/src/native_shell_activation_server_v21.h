@@ -171,12 +171,23 @@ private:
             return FALSE;
         }
 
+        // Repeated taskbar/Start activation focuses the existing authoritative
+        // surface instead of spawning duplicate Browser or Terminal windows.
+        if (FindOwnedSurface(request.app) != nullptr)
+        {
+            ShellActivationV21::SurfaceRequest focus_request;
+            focus_request.app = request.app;
+            focus_request.action = ShellActivationV21::SurfaceAction::Focus;
+            return HandleSurfaceRequest(focus_request) ==
+                    static_cast<LRESULT>(ShellActivationV21::SurfaceResult::Applied)
+                ? TRUE
+                : FALSE;
+        }
+
         const HINSTANCE instance = GetModuleHandleW(nullptr);
         switch (request.app)
         {
         case ShellActivationV21::App::Browser:
-            // Browser authority belongs to the NativeShell WebView2 surface.
-            // Do not silently dispatch the user's default browser here.
             CloudOSNativeBrowserWindow::Open(instance);
             return TRUE;
         case ShellActivationV21::App::Terminal:
@@ -213,8 +224,6 @@ private:
             return FALSE;
         }
 
-        // Requests are accepted only after the authoritative desktop exists.
-        // This prevents cross-process requests from racing shell startup.
         if (FindWindowW(L"CloudOS.NativeShell.Desktop.v2", L"CloudOS Desktop") == nullptr)
         {
             return FALSE;
