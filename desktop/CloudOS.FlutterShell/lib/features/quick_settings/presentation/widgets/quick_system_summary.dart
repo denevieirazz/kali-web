@@ -14,6 +14,9 @@ class QuickSystemSummary extends StatelessWidget {
     final linuxSummary = wslReady
         ? 'WSL2 sob demanda • ${snapshot.distros.join(', ')}'
         : 'Windows Desktop Standalone';
+    final batteryLabel = snapshot.batteryAvailable
+        ? '${snapshot.batteryPercent}% • Bateria'
+        : 'Bateria indisponível';
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -24,9 +27,13 @@ class QuickSystemSummary extends StatelessWidget {
       ),
       child: Row(
         children: <Widget>[
-          const Icon(
-            Icons.battery_charging_full_rounded,
-            color: CloudOSColors.success,
+          Icon(
+            snapshot.batteryAvailable
+                ? Icons.battery_full_rounded
+                : Icons.battery_unknown_rounded,
+            color: snapshot.batteryAvailable
+                ? CloudOSColors.success
+                : CloudOSColors.caption,
             size: 20,
           ),
           const SizedBox(width: 8),
@@ -35,7 +42,7 @@ class QuickSystemSummary extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
-                  '${snapshot.batteryPercent}% • Carregando',
+                  batteryLabel,
                   style: const TextStyle(
                     color: CloudOSColors.text,
                     fontSize: 11.5,
