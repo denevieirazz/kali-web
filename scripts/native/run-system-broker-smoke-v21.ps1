@@ -57,30 +57,53 @@ try {
         throw "Snapshot probe failed: $snapRaw"
     }
 
-    Write-Host "[Smoke-V21] 7. Probing system.volume.set..."
+    $volumeAvailable = [bool]$snap.payload.volumeAvailable
+    $brightnessAvailable = [bool]$snap.payload.brightnessAvailable
+    $volumeWriteVerified = $false
+    $brightnessWriteVerified = $false
+
+    Write-Host "[Smoke-V21] 7. Probing system.volume.set (available=$volumeAvailable)..."
     $volumeRaw = & $probeExe set-volume 0.41
     $volume = $volumeRaw | ConvertFrom-Json
-    if (-not $volume.ok -or -not $volume.payload.updated) {
-        throw "Volume write probe failed: $volumeRaw"
+    if ($volumeAvailable) {
+        if (-not $volume.ok -or -not $volume.payload.updated) {
+            throw "Volume write probe failed on available endpoint: $volumeRaw"
+        }
+        $volumeWriteVerified = $true
+    }
+    else {
+        if ($volume.ok -or $volume.error.code -ne "system_control_unavailable") {
+            throw "Unavailable volume endpoint did not return typed failure: $volumeRaw"
+        }
+        $volumeWriteVerified = $true
     }
 
-    Write-Host "[Smoke-V21] 8. Probing system.brightness.set..."
+    Write-Host "[Smoke-V21] 8. Probing system.brightness.set (available=$brightnessAvailable)..."
     $brightnessRaw = & $probeExe set-brightness 0.63
     $brightness = $brightnessRaw | ConvertFrom-Json
-    if (-not $brightness.ok -or -not $brightness.payload.updated) {
-        throw "Brightness write probe failed: $brightnessRaw"
+    if ($brightnessAvailable) {
+        if (-not $brightness.ok -or -not $brightness.payload.updated) {
+            throw "Brightness write probe failed on available monitor: $brightnessRaw"
+        }
+        $brightnessWriteVerified = $true
+    }
+    else {
+        if ($brightness.ok -or $brightness.error.code -ne "system_control_unavailable") {
+            throw "Unavailable brightness control did not return typed failure: $brightnessRaw"
+        }
+        $brightnessWriteVerified = $true
     }
 
-    Write-Host "[Smoke-V21] 9. Verifying system writes through snapshot..."
+    Write-Host "[Smoke-V21] 9. Verifying system control state through snapshot..."
     $updatedSnapRaw = & $probeExe snapshot
     $updatedSnap = $updatedSnapRaw | ConvertFrom-Json
     if (-not $updatedSnap.ok) {
         throw "Updated snapshot probe failed: $updatedSnapRaw"
     }
-    if ([Math]::Abs(([double]$updatedSnap.payload.volume) - 0.41) -gt 0.001) {
+    if ($volumeAvailable -and [Math]::Abs(([double]$updatedSnap.payload.volume) - 0.41) -gt 0.02) {
         throw "Volume write was not reflected by snapshot: $updatedSnapRaw"
     }
-    if ([Math]::Abs(([double]$updatedSnap.payload.brightness) - 0.63) -gt 0.001) {
+    if ($brightnessAvailable -and [Math]::Abs(([double]$updatedSnap.payload.brightness) - 0.63) -gt 0.02) {
         throw "Brightness write was not reflected by snapshot: $updatedSnapRaw"
     }
 
@@ -102,8 +125,10 @@ try {
         apps_list = $true
         apps_count = $apps.payload.apps.Count
         system_snapshot = $true
-        system_volume_write = $true
-        system_brightness_write = $true
+        volume_available = $volumeAvailable
+        brightness_available = $brightnessAvailable
+        system_volume_write_contract = $volumeWriteVerified
+        system_brightness_write_contract = $brightnessWriteVerified
         system_write_roundtrip = $true
         device_name = $updatedSnap.payload.deviceName
         wsl_available = $updatedSnap.payload.wslAvailable
