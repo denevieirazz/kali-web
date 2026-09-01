@@ -31,6 +31,8 @@ class CloudOSBridge {
       return CloudSystemSnapshot(
         deviceName:
             raw['deviceName'] as String? ?? previewSnapshot.deviceName,
+        networkAvailable: raw['networkAvailable'] as bool? ??
+            previewSnapshot.networkAvailable,
         networkName:
             raw['networkName'] as String? ?? previewSnapshot.networkName,
         volumeAvailable: raw['volumeAvailable'] as bool? ??
