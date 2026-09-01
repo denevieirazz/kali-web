@@ -45,7 +45,6 @@ CloudOSFlutterBridgeV20& CloudOSFlutterBridgeV20::Instance()
 void CloudOSFlutterBridgeV20::Initialize(HWND window_handle)
 {
     window_handle_ = window_handle;
-    // Attempt connection to SystemBroker
     CloudOSBrokerClientV21::Instance().EnsureConnected();
     RefreshAppCatalog();
     RefreshSystemSnapshot();
@@ -89,7 +88,9 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         flutter::EncodableMap map;
         map[flutter::EncodableValue("deviceName")] = flutter::EncodableValue(snapshot.device_name);
         map[flutter::EncodableValue("networkName")] = flutter::EncodableValue(snapshot.network_name);
+        map[flutter::EncodableValue("volumeAvailable")] = flutter::EncodableValue(snapshot.volume_available);
         map[flutter::EncodableValue("volume")] = flutter::EncodableValue(snapshot.volume);
+        map[flutter::EncodableValue("brightnessAvailable")] = flutter::EncodableValue(snapshot.brightness_available);
         map[flutter::EncodableValue("brightness")] = flutter::EncodableValue(snapshot.brightness);
         map[flutter::EncodableValue("batteryPercent")] = flutter::EncodableValue(snapshot.battery_percent);
         map[flutter::EncodableValue("wslAvailable")] = flutter::EncodableValue(snapshot.wsl_available);
@@ -188,6 +189,8 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         flutter::EncodableMap map;
         map[flutter::EncodableValue("schema")] = flutter::EncodableValue(21);
         map[flutter::EncodableValue("verdict")] = flutter::EncodableValue("pass");
+        map[flutter::EncodableValue("bridge_type")] = flutter::EncodableValue("CloudOSFlutterBridgeV20");
+        map[flutter::EncodableValue("channel")] = flutter::EncodableValue(kChannelName);
         map[flutter::EncodableValue("brokerConnected")] = flutter::EncodableValue(CloudOSBrokerClientV21::Instance().IsConnected());
         map[flutter::EncodableValue("brokerState")] = flutter::EncodableValue(ConnectionStateToString(CloudOSBrokerClientV21::Instance().GetConnectionState()));
         map[flutter::EncodableValue("arbitrary_command_api")] = flutter::EncodableValue(false);
@@ -226,7 +229,9 @@ NativeSystemSnapshot CloudOSFlutterBridgeV20::GetSystemSnapshot()
         NativeSystemSnapshot snap;
         snap.device_name = broker_snap.device_name;
         snap.network_name = broker_snap.network_name;
+        snap.volume_available = broker_snap.volume_available;
         snap.volume = broker_snap.volume;
+        snap.brightness_available = broker_snap.brightness_available;
         snap.brightness = broker_snap.brightness;
         snap.battery_percent = broker_snap.battery_percent;
         snap.wsl_available = broker_snap.wsl_available;
@@ -247,7 +252,6 @@ bool CloudOSFlutterBridgeV20::LaunchApp(const std::string& app_id)
         return true;
     }
 
-    // Local fallback
     if (app_id == "files" || app_id == "cloudos:files")
     {
         ShellExecuteW(nullptr, L"open", L"explorer.exe", nullptr, nullptr, SW_SHOWNORMAL);
@@ -285,6 +289,7 @@ bool CloudOSFlutterBridgeV20::SetVolume(double volume)
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
+    cached_snapshot_.volume_available = true;
     cached_snapshot_.volume = clamped;
     return true;
 }
@@ -298,6 +303,7 @@ bool CloudOSFlutterBridgeV20::SetBrightness(double brightness)
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
+    cached_snapshot_.brightness_available = true;
     cached_snapshot_.brightness = clamped;
     return true;
 }
@@ -318,7 +324,9 @@ void CloudOSFlutterBridgeV20::RefreshSystemSnapshot()
     std::lock_guard<std::mutex> lock(mutex_);
     cached_snapshot_.device_name = "CloudOS Desktop";
     cached_snapshot_.network_name = "CloudOS Network • Wi-Fi 6";
+    cached_snapshot_.volume_available = true;
     cached_snapshot_.volume = 0.72;
+    cached_snapshot_.brightness_available = true;
     cached_snapshot_.brightness = 0.85;
     cached_snapshot_.battery_percent = 100;
     cached_snapshot_.wsl_available = true;
