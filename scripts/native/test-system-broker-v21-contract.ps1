@@ -96,11 +96,17 @@ if ($fileServiceContent -match 'req\.payload.*path' -or $serverContent -match 'f
     throw "files.list must not expose an arbitrary raw-path request contract"
 }
 
-# 7. Verify CloudOS Browser/Terminal launch through NativeShell authority
+# 7. Verify CloudOS Browser/Terminal launch and lifecycle stay under NativeShell authority
 $appServiceContent = Get-Content (Join-Path $brokerSrc "app_service_v21.cpp") -Raw
-$activationClientContent = Get-Content (Join-Path $brokerSrc "native_shell_activation_client_v21.h") -Raw
+$activationContractPath = Join-Path $root "desktop\CloudOS.NativeCommon\native_shell_activation_v21.h"
+$activationClientPath = Join-Path $root "desktop\CloudOS.NativeCommon\native_shell_activation_client_v21.h"
 $activationServerPath = Join-Path $root "desktop\CloudOS.NativeShell\src\native_shell_activation_server_v21.h"
+$flutterBridgePath = Join-Path $root "desktop\CloudOS.FlutterShell\native_bridge\cloudos_flutter_bridge_v20.cpp"
+$activationContractContent = Get-Content $activationContractPath -Raw
+$activationClientContent = Get-Content $activationClientPath -Raw
 $activationServerContent = Get-Content $activationServerPath -Raw
+$flutterBridgeContent = Get-Content $flutterBridgePath -Raw
+
 if ($appServiceContent -notmatch "NativeShellActivationClientV21::Activate") {
     throw "CloudOS first-party Browser/Terminal must route through NativeShell activation"
 }
@@ -111,8 +117,31 @@ if ($activationClientContent -notmatch "WM_COPYDATA" -or
     $activationClientContent -notmatch "ShellActivationV21::Request") {
     throw "NativeShell activation client must use the typed V21 activation request"
 }
+if ($activationClientContent -notmatch "FindWindowExW" -or
+    $activationClientContent -notmatch "HWND_MESSAGE") {
+    throw "NativeShell activation client must resolve the message-only activation endpoint correctly"
+}
+if ($activationContractContent -notmatch "SurfaceRequest" -or
+    $activationContractContent -notmatch "SurfaceAction" -or
+    $activationContractContent -notmatch "kSurfaceCopyDataTag") {
+    throw "NativeShell lifecycle must use a separate typed V21 surface contract"
+}
 if ($activationServerContent -notmatch "CloudOSNativeBrowserWindow::Open") {
     throw "NativeShell Browser activation must open the CloudOS WebView2 browser surface"
+}
+if ($activationServerContent -notmatch "SurfaceAction::Query" -or
+    $activationServerContent -notmatch "SurfaceAction::Focus" -or
+    $activationServerContent -notmatch "SurfaceAction::Close") {
+    throw "NativeShell must implement query/focus/close lifecycle for typed surfaces"
+}
+if ($flutterBridgeContent -notmatch 'method == "getShellSurfaceStates"' -or
+    $flutterBridgeContent -notmatch 'method == "focusShellSurface"' -or
+    $flutterBridgeContent -notmatch 'method == "closeShellSurface"') {
+    throw "Flutter Native Bridge must expose typed NativeShell lifecycle methods"
+}
+if ($flutterBridgeContent -match 'cloudos:browser[\s\S]{0,300}https://google\.com' -or
+    $flutterBridgeContent -match 'cloudos:terminal[\s\S]{0,300}cmd\.exe') {
+    throw "Flutter Native Bridge must not substitute external Browser/Terminal implementations"
 }
 
 # 8. Verify native modules are part of the Broker build graph
@@ -121,7 +150,7 @@ if ($brokerProject -notmatch "file_service_v21\.cpp") {
     throw "FileServiceV21 must be compiled by CloudOS.SystemBroker.vcxproj"
 }
 if ($brokerProject -notmatch "native_shell_activation_client_v21\.h") {
-    throw "NativeShellActivationClientV21 must be visible in CloudOS.SystemBroker.vcxproj"
+    throw "NativeShellActivationClientV21 compatibility include must remain visible in CloudOS.SystemBroker.vcxproj"
 }
 if ($brokerProject -notmatch "system_control_v21\.cpp") {
     throw "SystemControlV21 must be compiled by CloudOS.SystemBroker.vcxproj"
