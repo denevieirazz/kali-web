@@ -169,18 +169,19 @@ void WslServiceV21::Refresh()
         default_distro_ = distros_.front();
     }
 
+    bool wsl_executable_available = false;
     wchar_t system_directory[MAX_PATH]{};
     if (GetSystemDirectoryW(system_directory, MAX_PATH) > 0)
     {
         const std::wstring wsl_exe = std::wstring(system_directory) + L"\\wsl.exe";
         const DWORD attributes = GetFileAttributesW(wsl_exe.c_str());
-        if (attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY))
-        {
-            wsl_available_ = true;
-        }
+        wsl_executable_available =
+            attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY);
     }
 
-    if (!distros_.empty()) wsl_available_ = true;
+    // Existing V21 callers interpret wslAvailable as "usable now", not merely
+    // "wsl.exe exists". Keep that contract while avoiding any synthetic distro.
+    wsl_available_ = wsl_executable_available && !distros_.empty();
     initialized_.store(true);
 }
 
