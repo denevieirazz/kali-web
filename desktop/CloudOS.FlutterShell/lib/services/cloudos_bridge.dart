@@ -33,8 +33,12 @@ class CloudOSBridge {
             raw['deviceName'] as String? ?? previewSnapshot.deviceName,
         networkName:
             raw['networkName'] as String? ?? previewSnapshot.networkName,
+        volumeAvailable: raw['volumeAvailable'] as bool? ??
+            previewSnapshot.volumeAvailable,
         volume:
             (raw['volume'] as num?)?.toDouble() ?? previewSnapshot.volume,
+        brightnessAvailable: raw['brightnessAvailable'] as bool? ??
+            previewSnapshot.brightnessAvailable,
         brightness: (raw['brightness'] as num?)?.toDouble() ??
             previewSnapshot.brightness,
         batteryPercent: (raw['batteryPercent'] as num?)?.toInt() ??
