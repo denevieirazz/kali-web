@@ -85,6 +85,7 @@ void main() {
               'volume': 0.80,
               'brightnessAvailable': true,
               'brightness': 0.90,
+              'batteryAvailable': true,
               'batteryPercent': 88,
               'wslAvailable': true,
               'distros': <String>['Ubuntu', 'kali-linux'],
@@ -184,6 +185,7 @@ void main() {
       expect(snapshot.volume, 0.80);
       expect(snapshot.brightnessAvailable, true);
       expect(snapshot.brightness, 0.90);
+      expect(snapshot.batteryAvailable, true);
       expect(snapshot.batteryPercent, 88);
       expect(snapshot.wslAvailable, true);
       expect(snapshot.distros, <String>['Ubuntu', 'kali-linux']);
@@ -242,6 +244,50 @@ void main() {
   });
 
   group('CloudOS V21 Desktop Presentation Suite', () {
+    const presentationChannel = MethodChannel('cloudos/native/v19');
+
+    setUp(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(presentationChannel, (call) async {
+        switch (call.method) {
+          case 'getNotificationState':
+            return <String, Object?>{
+              'revision': 7,
+              'unreadCount': 2,
+              'items': <Map<String, Object?>>[
+                <String, Object?>{
+                  'id': '101',
+                  'title': 'CloudOS V21 Pronto',
+                  'message': 'System Broker e NativeShell ativos.',
+                  'time': '09:31',
+                  'severity': 0,
+                  'read': false,
+                },
+                <String, Object?>{
+                  'id': '100',
+                  'title': 'Subsistema Linux (WSL2)',
+                  'message': 'WSL permanece sob demanda.',
+                  'time': '09:30',
+                  'severity': 0,
+                  'read': false,
+                },
+              ],
+            };
+          case 'markNotificationsRead':
+          case 'clearNotifications':
+          case 'dismissNotification':
+            return true;
+          default:
+            throw MissingPluginException();
+        }
+      });
+    });
+
+    tearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(presentationChannel, null);
+    });
+
     testWidgets('CloudOS presentation renders core desktop surfaces on 1920x1080', (tester) async {
       await tester.binding.setSurfaceSize(const Size(1920, 1080));
       addTearDown(() => tester.binding.setSurfaceSize(null));
