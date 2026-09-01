@@ -36,6 +36,8 @@ Require 'Deterministic native fingerprint' $content.Fingerprint @(
     'desktop\CloudOS.NativeRuntime',
     'desktop\CloudOS.NativeShell',
     'desktop\CloudOS.NativeRecovery',
+    'desktop\CloudOS.SystemBroker',
+    'desktop\CloudOS.BrokerProbe',
     'scripts\native',
     "'bin', 'obj', 'packages', '.vs'",
     'Get-FileHash',
@@ -111,7 +113,11 @@ Require 'Native build status diagnostics' $content.Status @(
 Require 'Native build entrypoint provenance' $content.Build @(
     'test-native-contract-suite.ps1',
     'CloudOS.NativeRecovery\CloudOS.NativeRecovery.vcxproj',
+    'CloudOS.SystemBroker\CloudOS.SystemBroker.vcxproj',
+    'CloudOS.BrokerProbe\CloudOS.BrokerProbe.vcxproj',
     'CloudOS.Supervisor.exe',
+    'CloudOS.SystemBroker.exe',
+    'CloudOS.BrokerProbe.exe',
     'write-native-build-manifest.ps1',
     'verify-native-build-manifest.ps1',
     'cloudos-native-manifest.json',
@@ -128,6 +134,9 @@ Require 'Native launcher integrity gate' $content.Start @(
     '--force-rebuild',
     '--no-build',
     'tasklist /FI "IMAGENAME eq CloudOS.exe"',
+    'tasklist /FI "IMAGENAME eq CloudOS.SystemBroker.exe"',
+    'CloudOS.SystemBroker.exe ausente',
+    'CloudOS.BrokerProbe.exe ausente',
     'encerre a instancia aberta normalmente',
     'CloudOS.Supervisor.exe',
     'Shell Supervisor V11'
@@ -157,4 +166,4 @@ Require 'CI release artifact and dependency cache' $content.Workflow @(
     'cloudos-native-manifest.json'
 )
 
-Write-Host 'PASS: deterministic fingerprint, five-binary V21 integrity/status, Supervisor V11 launch authority, self-verifying portable package, root workflow shortcuts, WebView2 CI cache and verified release artifact contracts are protected.'
+Write-Host 'PASS: deterministic fingerprint includes Broker/Probe sources, five-binary V21 integrity/status, Supervisor V11 launch authority, self-verifying portable package, root workflow shortcuts, WebView2 CI cache and verified release artifact contracts are protected.'

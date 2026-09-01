@@ -7,6 +7,8 @@ set "OUT=%ROOT%\desktop\CloudOS.NativeShell\bin\Release"
 set "EXE=%OUT%\CloudOS.exe"
 set "DLL=%OUT%\CloudOS.NativeRuntime.dll"
 set "SUPERVISOR=%OUT%\CloudOS.Supervisor.exe"
+set "BROKER=%OUT%\CloudOS.SystemBroker.exe"
+set "PROBE=%OUT%\CloudOS.BrokerProbe.exe"
 set "MANIFEST=%OUT%\cloudos-native-manifest.json"
 set "HEAD_STAMP=%OUT%\.cloudos-build-head"
 set "FINGERPRINT_STAMP=%OUT%\.cloudos-build-fingerprint"
@@ -41,6 +43,14 @@ if not exist "%DLL%" (
 )
 if not exist "%SUPERVISOR%" (
   set "REBUILD_REASON=CloudOS.Supervisor.exe ausente"
+  goto NEED_BUILD
+)
+if not exist "%BROKER%" (
+  set "REBUILD_REASON=CloudOS.SystemBroker.exe ausente"
+  goto NEED_BUILD
+)
+if not exist "%PROBE%" (
+  set "REBUILD_REASON=CloudOS.BrokerProbe.exe ausente"
   goto NEED_BUILD
 )
 if not exist "%MANIFEST%" (
@@ -95,6 +105,11 @@ if not errorlevel 1 (
   echo [CloudOS Native] Salve seu trabalho e encerre a instancia aberta normalmente antes do build.
   exit /b 24
 )
+tasklist /FI "IMAGENAME eq CloudOS.SystemBroker.exe" /NH 2>nul | findstr /I /C:"CloudOS.SystemBroker.exe" >nul
+if not errorlevel 1 (
+  echo [CloudOS Native] Encerre o CloudOS System Broker V21 antes do rebuild para evitar binario bloqueado.
+  exit /b 25
+)
 echo [CloudOS Native] Validando, compilando e assinando o manifesto Release x64...
 call "%ROOT%\scripts\native\build-cloudos-native.cmd" Release
 if errorlevel 1 exit /b %ERRORLEVEL%
@@ -106,6 +121,8 @@ if errorlevel 1 exit /b %ERRORLEVEL%
 if not exist "%EXE%" exit /b 5
 if not exist "%DLL%" exit /b 6
 if not exist "%SUPERVISOR%" exit /b 7
+if not exist "%BROKER%" exit /b 8
+if not exist "%PROBE%" exit /b 9
 if not exist "%MANIFEST%" exit /b 23
 
 tasklist /FI "IMAGENAME eq CloudOS.exe" /NH 2>nul | findstr /I /C:"CloudOS.exe" >nul
@@ -123,10 +140,12 @@ echo [CloudOS Native] Iniciando Shell Supervisor V11 verificado.
 echo [CloudOS Native] O supervisor inicia CloudOS.exe --supervised, valida readiness/heartbeat e limita restart loops.
 echo [CloudOS Native] SUPERVISOR=%SUPERVISOR%
 echo [CloudOS Native] EXE=%EXE%
+echo [CloudOS Native] BROKER=%BROKER%
+echo [CloudOS Native] PROBE=%PROBE%
 echo [CloudOS Native] MANIFEST=%MANIFEST%
 if defined SOURCE_FINGERPRINT echo [CloudOS Native] SOURCE_FINGERPRINT=%SOURCE_FINGERPRINT%
 if defined BUILT_HEAD echo [CloudOS Native] BUILD_HEAD=%BUILT_HEAD%
-echo [CloudOS Native] Integridade SHA256 verificada antes da execucao.
+echo [CloudOS Native] Integridade SHA256 dos cinco componentes V21 verificada antes da execucao.
 
 pushd "%OUT%" >nul
 start "CloudOS Supervisor V11" /D "%OUT%" "%SUPERVISOR%"
