@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/cloudos_theme.dart';
-import '../../../models/shell_models.dart';
+import '../../../models/cloud_system_snapshot.dart';
 import '../../../widgets/glass_surface.dart';
 import 'widgets/quick_slider_row.dart';
 import 'widgets/quick_system_summary.dart';
@@ -11,11 +11,15 @@ class QuickSettingsPanel extends StatefulWidget {
   const QuickSettingsPanel({
     required this.snapshot,
     this.onOpenSettings,
+    this.onSetVolume,
+    this.onSetBrightness,
     super.key,
   });
 
   final CloudSystemSnapshot snapshot;
   final VoidCallback? onOpenSettings;
+  final Future<bool> Function(double value)? onSetVolume;
+  final Future<bool> Function(double value)? onSetBrightness;
 
   @override
   State<QuickSettingsPanel> createState() => _QuickSettingsPanelState();
@@ -28,6 +32,31 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
   bool bluetooth = true;
   bool nightLight = false;
   bool focus = false;
+
+  @override
+  void didUpdateWidget(covariant QuickSettingsPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.snapshot.volume != widget.snapshot.volume) {
+      volume = widget.snapshot.volume;
+    }
+    if (oldWidget.snapshot.brightness != widget.snapshot.brightness) {
+      brightness = widget.snapshot.brightness;
+    }
+  }
+
+  Future<void> _commitVolume(double value) async {
+    final succeeded = await widget.onSetVolume?.call(value) ?? true;
+    if (!succeeded && mounted) {
+      setState(() => volume = widget.snapshot.volume);
+    }
+  }
+
+  Future<void> _commitBrightness(double value) async {
+    final succeeded = await widget.onSetBrightness?.call(value) ?? true;
+    if (!succeeded && mounted) {
+      setState(() => brightness = widget.snapshot.brightness);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -100,6 +129,7 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                   percentage: '$volPct%',
                   value: volume,
                   onChanged: (value) => setState(() => volume = value),
+                  onChangeEnd: (value) async => _commitVolume(value),
                 ),
                 const SizedBox(height: 8),
                 QuickSliderRow(
@@ -107,6 +137,7 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                   percentage: '$briPct%',
                   value: brightness,
                   onChanged: (value) => setState(() => brightness = value),
+                  onChangeEnd: (value) async => _commitBrightness(value),
                 ),
                 const SizedBox(height: 12),
                 const Divider(height: 1),
