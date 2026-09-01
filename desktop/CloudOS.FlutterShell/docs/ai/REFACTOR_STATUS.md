@@ -46,20 +46,28 @@ O antigo arquivo de 754 linhas virou export de compatibilidade.
 
 Implementação canônica:
 
-- `features/files/presentation/files_window.dart` — 119 linhas.
+- `features/files/presentation/files_window.dart` — 120 linhas.
 - `features/files/presentation/widgets/files_title_bar.dart` — 131 linhas.
 - `features/files/presentation/widgets/files_sidebar.dart` — 220 linhas.
 - `features/files/presentation/widgets/files_toolbar.dart` — 116 linhas.
-- `features/files/presentation/widgets/files_content.dart` — 328 linhas.
+- `features/files/presentation/widgets/files_content.dart` — 42 linhas; apenas escolhe empty/grid/list.
+- `features/files/presentation/widgets/files_grid.dart` — 138 linhas.
+- `features/files/presentation/widgets/files_list.dart` — 86 linhas.
+- `features/files/presentation/widgets/files_empty_state.dart` — 35 linhas.
+- `features/files/presentation/widgets/files_status_bar.dart` — 58 linhas.
 
 ### Start
 
 O antigo arquivo de 504 linhas virou export de compatibilidade.
 
-Implementação canônica:
+A composição principal foi reduzida para 117 linhas:
 
 - `features/start/domain/start_app_filter.dart` — 31 linhas.
-- `features/start/presentation/start_panel.dart` — 304 linhas.
+- `features/start/presentation/start_panel.dart` — 117 linhas.
+- `features/start/presentation/widgets/start_header.dart` — 59 linhas.
+- `features/start/presentation/widgets/start_search_field.dart` — 42 linhas.
+- `features/start/presentation/widgets/start_filter_bar.dart` — 58 linhas.
+- `features/start/presentation/widgets/start_overview.dart` — 89 linhas.
 - `features/start/presentation/widgets/start_app_views.dart` — 216 linhas.
 - `features/start/presentation/widgets/start_footer.dart` — 88 linhas.
 
@@ -145,7 +153,7 @@ O primeiro lote deste PR foi validado no GitHub Actions em 2026-09-01:
 - `CloudOS Flutter UI` — success.
 - `CloudOS CI Baseline` — success.
 
-Depois do segundo lote, o CI deve ser consultado novamente antes de merge.
+Depois deste bloco ampliado, o CI deve ser consultado novamente antes de merge.
 
 Validação canônica: `.github/workflows/cloudos-flutter-ui.yml`. Ela cobre:
 
@@ -154,6 +162,12 @@ Validação canônica: `.github/workflows/cloudos-flutter-ui.yml`. Ela cobre:
 - `flutter analyze --fatal-infos --fatal-warnings`;
 - `flutter test`;
 - `flutter build windows --release`.
+
+## Resultado para contexto de IA
+
+Os antigos arquivos de 754, 504, 395, 311 e 227 linhas em `lib/widgets/` agora são shims de compatibilidade de 2–3 linhas. A implementação real está organizada por feature e responsabilidade sem duplicar contratos nativos.
+
+Os maiores arquivos restantes do conjunto modularizado representam unidades semânticas reais, não agregadores genéricos. Evitar nova fragmentação apenas por contagem de linhas.
 
 ## Escopo que não foi reorganizado
 
