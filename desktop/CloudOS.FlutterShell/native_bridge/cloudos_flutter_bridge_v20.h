@@ -35,6 +35,7 @@ struct NativeAppItem final
 struct NativeSystemSnapshot final
 {
     std::string device_name;
+    bool network_available{true};
     std::string network_name;
     bool volume_available{true};
     double volume{0.72};
