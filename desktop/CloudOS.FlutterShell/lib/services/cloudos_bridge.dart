@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../models/shell_models.dart';
 import 'bridge/cloud_app_mapper.dart';
 import 'bridge/cloud_file_mapper.dart';
+import 'bridge/cloud_notification_mapper.dart';
 import 'bridge/cloudos_preview_data.dart';
 
 class CloudOSBridge {
@@ -105,6 +106,56 @@ class CloudOSBridge {
       return previewSnapshot;
     } on PlatformException {
       return previewSnapshot;
+    }
+  }
+
+  Future<CloudNotificationState> loadNotificationState() async {
+    try {
+      final raw =
+          await _channel.invokeMapMethod<Object?, Object?>('getNotificationState');
+      if (raw == null) return previewNotificationState;
+      return cloudNotificationStateFromNative(raw);
+    } on MissingPluginException {
+      return previewNotificationState;
+    } on PlatformException {
+      return CloudNotificationState.empty;
+    }
+  }
+
+  Future<bool> markNotificationsRead() async {
+    try {
+      final result = await _channel.invokeMethod<bool>('markNotificationsRead');
+      return result ?? false;
+    } on MissingPluginException {
+      return true;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  Future<bool> dismissNotification(String id) async {
+    if (id.isEmpty) return false;
+    try {
+      final result = await _channel.invokeMethod<bool>(
+        'dismissNotification',
+        <String, Object?>{'id': id},
+      );
+      return result ?? false;
+    } on MissingPluginException {
+      return true;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  Future<bool> clearNotifications() async {
+    try {
+      final result = await _channel.invokeMethod<bool>('clearNotifications');
+      return result ?? false;
+    } on MissingPluginException {
+      return true;
+    } on PlatformException {
+      return false;
     }
   }
 
@@ -242,6 +293,7 @@ class CloudOSBridge {
       'arbitrary_command_api': false,
       'shell_surface_lifecycle': false,
       'shell_workspace_control': false,
+      'shell_notification_authority': false,
       'files_capability_actions': false,
     };
   }
@@ -250,4 +302,11 @@ class CloudOSBridge {
   static const previewApps = CloudOSPreviewData.apps;
   static const previewFiles = CloudOSPreviewData.files;
   static const previewNotifications = CloudOSPreviewData.notifications;
+
+  static CloudNotificationState get previewNotificationState =>
+      CloudNotificationState(
+        revision: 0,
+        unreadCount: previewNotifications.length,
+        items: previewNotifications,
+      );
 }
