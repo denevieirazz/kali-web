@@ -10,6 +10,11 @@ class QuickSystemSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final wslReady = snapshot.wslAvailable && snapshot.distros.isNotEmpty;
+    final linuxSummary = wslReady
+        ? 'WSL2 sob demanda • ${snapshot.distros.join(', ')}'
+        : 'Windows Desktop Standalone';
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
@@ -38,9 +43,9 @@ class QuickSystemSummary extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  snapshot.wslAvailable
-                      ? 'WSL2: ${snapshot.distros.join(', ')}'
-                      : 'Windows Desktop Standalone',
+                  linuxSummary,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: CloudOSColors.caption,
                     fontSize: 10,
@@ -52,13 +57,17 @@ class QuickSystemSummary extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: CloudOSColors.linuxSoft,
+              color: wslReady
+                  ? CloudOSColors.linuxSoft
+                  : CloudOSColors.elevated,
               borderRadius: BorderRadius.circular(6),
             ),
-            child: const Text(
-              'WSLg Ativo',
+            child: Text(
+              wslReady ? 'WSL2 Pronto' : 'Modo Windows',
               style: TextStyle(
-                color: CloudOSColors.linux,
+                color: wslReady
+                    ? CloudOSColors.linux
+                    : CloudOSColors.caption,
                 fontSize: 9.5,
                 fontWeight: FontWeight.w700,
               ),
