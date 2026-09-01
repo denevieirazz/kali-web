@@ -453,6 +453,7 @@ bool CloudOSBrokerClientV21::GetSystemSnapshot(BrokerClientSnapshot& out_snapsho
     snapshot.battery_percent = static_cast<int>(IntField(response.payload, "batteryPercent", 100));
     snapshot.network_available = BoolField(response.payload, "networkAvailable", true);
     snapshot.network_name = StringField(response.payload, "networkName");
+    snapshot.volume_available = BoolField(response.payload, "volumeAvailable", true);
     snapshot.volume = DoubleField(response.payload, "volume", 0.72);
     snapshot.brightness_available = BoolField(response.payload, "brightnessAvailable", true);
     snapshot.brightness = DoubleField(response.payload, "brightness", 0.85);
