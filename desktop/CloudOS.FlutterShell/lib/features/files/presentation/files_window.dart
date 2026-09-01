@@ -5,6 +5,7 @@ import '../../../models/shell_models.dart';
 import '../../../services/cloudos_bridge.dart';
 import '../../../widgets/glass_surface.dart';
 import 'widgets/files_content.dart';
+import 'widgets/files_loading_state.dart';
 import 'widgets/files_sidebar.dart';
 import 'widgets/files_status_bar.dart';
 import 'widgets/files_title_bar.dart';
@@ -123,7 +124,7 @@ class _FilesWindowState extends State<FilesWindow> {
                         const Divider(height: 1),
                         Expanded(
                           child: _isLoading
-                              ? const Center(child: CircularProgressIndicator())
+                              ? const FilesLoadingState()
                               : FilesContent(
                                   files: files,
                                   query: query,
