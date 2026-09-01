@@ -57,14 +57,41 @@ try {
         throw "Snapshot probe failed: $snapRaw"
     }
 
-    Write-Host "[Smoke-V21] 7. Probing diagnostics.snapshot..."
+    Write-Host "[Smoke-V21] 7. Probing system.volume.set..."
+    $volumeRaw = & $probeExe set-volume 0.41
+    $volume = $volumeRaw | ConvertFrom-Json
+    if (-not $volume.ok -or -not $volume.payload.updated) {
+        throw "Volume write probe failed: $volumeRaw"
+    }
+
+    Write-Host "[Smoke-V21] 8. Probing system.brightness.set..."
+    $brightnessRaw = & $probeExe set-brightness 0.63
+    $brightness = $brightnessRaw | ConvertFrom-Json
+    if (-not $brightness.ok -or -not $brightness.payload.updated) {
+        throw "Brightness write probe failed: $brightnessRaw"
+    }
+
+    Write-Host "[Smoke-V21] 9. Verifying system writes through snapshot..."
+    $updatedSnapRaw = & $probeExe snapshot
+    $updatedSnap = $updatedSnapRaw | ConvertFrom-Json
+    if (-not $updatedSnap.ok) {
+        throw "Updated snapshot probe failed: $updatedSnapRaw"
+    }
+    if ([Math]::Abs(([double]$updatedSnap.payload.volume) - 0.41) -gt 0.001) {
+        throw "Volume write was not reflected by snapshot: $updatedSnapRaw"
+    }
+    if ([Math]::Abs(([double]$updatedSnap.payload.brightness) - 0.63) -gt 0.001) {
+        throw "Brightness write was not reflected by snapshot: $updatedSnapRaw"
+    }
+
+    Write-Host "[Smoke-V21] 10. Probing diagnostics.snapshot..."
     $diagRaw = & $probeExe diagnostics
     $diag = $diagRaw | ConvertFrom-Json
     if (-not $diag.ok -or $diag.payload.protocolVersion -ne 21) {
         throw "Diagnostics probe failed: $diagRaw"
     }
 
-    Write-Host "[Smoke-V21] 8. Gathering smoke evidence JSON..."
+    Write-Host "[Smoke-V21] 11. Gathering smoke evidence JSON..."
     $smokeEvidence = [ordered]@{
         schema = 21
         verdict = "pass"
@@ -75,9 +102,12 @@ try {
         apps_list = $true
         apps_count = $apps.payload.apps.Count
         system_snapshot = $true
-        device_name = $snap.payload.deviceName
-        wsl_available = $snap.payload.wslAvailable
-        distros = $snap.payload.distros
+        system_volume_write = $true
+        system_brightness_write = $true
+        system_write_roundtrip = $true
+        device_name = $updatedSnap.payload.deviceName
+        wsl_available = $updatedSnap.payload.wslAvailable
+        distros = $updatedSnap.payload.distros
         typed_launch_contract = $true
         arbitrary_command_api = $false
         event_bus = $true
@@ -95,7 +125,7 @@ try {
     Write-Host "[PASS] CloudOS System Broker V21 Smoke Passed."
 }
 finally {
-    Write-Host "[Smoke-V21] 9. Shutting down System Broker..."
+    Write-Host "[Smoke-V21] 12. Shutting down System Broker..."
     if ($brokerProc -and -not $brokerProc.HasExited) {
         Stop-Process -Id $brokerProc.Id -Force -ErrorAction SilentlyContinue
     }
