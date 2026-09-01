@@ -47,3 +47,7 @@ O launcher integrado nao altera Winlogon e nao ativa CloudOS como shell de logon
 - modo `native-authority-with-flutter-presentation`.
 
 Assim, o manifesto integrado nao duplica a lista de hashes nativos: ele referencia a cadeia nativa autoritativa e adiciona somente a camada Flutter.
+
+## Gate de artifact
+
+O workflow `CloudOS Flutter UI` compila o runtime nativo pelo developer entrypoint, monta a apresentacao Flutter, compoe os dois manifests, executa o verificador integrado e somente depois cria o ZIP V21.
