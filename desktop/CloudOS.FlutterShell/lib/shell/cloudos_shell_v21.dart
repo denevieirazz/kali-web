@@ -40,15 +40,22 @@ class _CloudOSShellV21State extends State<CloudOSShellV21> {
   }
 
   Future<void> _reloadBridge() async {
+    if (mounted) setState(() => loadingBridge = true);
     final loadedApps = await widget.bridge.loadApps();
     final loadedSnapshot = await widget.bridge.loadSystemSnapshot();
     if (!mounted) return;
     setState(() {
       apps = loadedApps;
       snapshot = loadedSnapshot;
-      currentWorkspace = loadedSnapshot.currentWorkspace.clamp(1, 4);
+      currentWorkspace = loadedSnapshot.currentWorkspace.clamp(1, 4).toInt();
       loadingBridge = false;
     });
+  }
+
+  Future<void> _reloadSnapshotOnly() async {
+    final updated = await widget.bridge.loadSystemSnapshot();
+    if (!mounted) return;
+    setState(() => snapshot = updated);
   }
 
   void _closePanels() {
@@ -97,7 +104,7 @@ class _CloudOSShellV21State extends State<CloudOSShellV21> {
 
   void _switchWorkspace(int index) {
     setState(() {
-      currentWorkspace = index.clamp(1, 4);
+      currentWorkspace = index.clamp(1, 4).toInt();
       _closePanels();
     });
   }
@@ -141,10 +148,14 @@ class _CloudOSShellV21State extends State<CloudOSShellV21> {
         break;
       }
     }
-    candidate ??= apps.cast<CloudApp?>().firstWhere(
-          (app) => app?.platform == CloudAppPlatform.linux,
-          orElse: () => null,
-        );
+    if (candidate == null) {
+      for (final app in apps) {
+        if (app.platform == CloudAppPlatform.linux) {
+          candidate = app;
+          break;
+        }
+      }
+    }
 
     if (candidate == null) {
       _showError('Nenhuma distribuição WSL com app disponível foi detectada.');
@@ -173,19 +184,10 @@ class _CloudOSShellV21State extends State<CloudOSShellV21> {
     await _reloadSnapshotOnly();
   }
 
-  Future<void> _reloadSnapshotOnly() async {
-    final updated = await widget.bridge.loadSystemSnapshot();
-    if (!mounted) return;
-    setState(() => snapshot = updated);
-  }
-
   void _showError(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        duration: const Duration(seconds: 3),
-      ),
+      SnackBar(content: Text(message), duration: const Duration(seconds: 3)),
     );
   }
 
@@ -201,21 +203,19 @@ class _CloudOSShellV21State extends State<CloudOSShellV21> {
         const SingleActivator(LogicalKeyboardKey.enter, control: true, alt: true): () {
           _launchById('cloudos:terminal');
         },
-        const SingleActivator(LogicalKeyboardKey.escape): () {
-          setState(_closePanels);
-        },
-        for (int i = 1; i <= 4; i++)
-          SingleActivator(LogicalKeyboardKey.values.firstWhere((key) => key.keyLabel == '$i'), control: true, alt: true): () {
-            _switchWorkspace(i);
-          },
+        const SingleActivator(LogicalKeyboardKey.escape): () => setState(_closePanels),
+        const SingleActivator(LogicalKeyboardKey.digit1, control: true, alt: true): () => _switchWorkspace(1),
+        const SingleActivator(LogicalKeyboardKey.digit2, control: true, alt: true): () => _switchWorkspace(2),
+        const SingleActivator(LogicalKeyboardKey.digit3, control: true, alt: true): () => _switchWorkspace(3),
+        const SingleActivator(LogicalKeyboardKey.digit4, control: true, alt: true): () => _switchWorkspace(4),
       },
       child: Focus(
         autofocus: true,
         child: Scaffold(
           body: LayoutBuilder(
             builder: (context, constraints) {
-              final maxLeft = (constraints.maxWidth - 1000).clamp(20.0, double.infinity);
-              final maxTop = (constraints.maxHeight - 675).clamp(20.0, double.infinity);
+              final maxLeft = (constraints.maxWidth - 1000).clamp(20.0, double.infinity).toDouble();
+              final maxTop = (constraints.maxHeight - 675).clamp(20.0, double.infinity).toDouble();
               final safeLeft = filesOffset.dx.clamp(20.0, maxLeft).toDouble();
               final safeTop = filesOffset.dy.clamp(20.0, maxTop).toDouble();
 
@@ -298,7 +298,6 @@ class _CloudOSShellV21State extends State<CloudOSShellV21> {
 
   Widget _panel() {
     Widget child = const SizedBox.shrink(key: ValueKey<String>('none'));
-
     if (startOpen) {
       child = StartPanelV21(
         key: const ValueKey<String>('start-v21'),
@@ -340,11 +339,7 @@ class _V21Wallpaper extends StatelessWidget {
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: <Color>[
-                Color(0xFF060A10),
-                Color(0xFF0B1420),
-                Color(0xFF080D15),
-              ],
+              colors: <Color>[Color(0xFF060A10), Color(0xFF0B1420), Color(0xFF080D15)],
             ),
           ),
         ),
@@ -356,9 +351,7 @@ class _V21Wallpaper extends StatelessWidget {
             height: 560,
             decoration: const BoxDecoration(
               shape: BoxShape.circle,
-              gradient: RadialGradient(
-                colors: <Color>[Color(0x204C9AFF), Color(0x004C9AFF)],
-              ),
+              gradient: RadialGradient(colors: <Color>[Color(0x204C9AFF), Color(0x004C9AFF)]),
             ),
           ),
         ),
@@ -370,9 +363,7 @@ class _V21Wallpaper extends StatelessWidget {
             height: 600,
             decoration: const BoxDecoration(
               shape: BoxShape.circle,
-              gradient: RadialGradient(
-                colors: <Color>[Color(0x1643C780), Color(0x0043C780)],
-              ),
+              gradient: RadialGradient(colors: <Color>[Color(0x1643C780), Color(0x0043C780)]),
             ),
           ),
         ),
@@ -518,11 +509,7 @@ class _DesktopShortcut extends StatelessWidget {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: CloudOSColors.text,
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w500,
-                ),
+                style: const TextStyle(color: CloudOSColors.text, fontSize: 10.5, fontWeight: FontWeight.w500),
               ),
             ],
           ),
@@ -567,10 +554,7 @@ class _SystemStatusCard extends StatelessWidget {
             width: 36,
             height: 36,
             alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: CloudOSColors.accentSoft,
-              borderRadius: BorderRadius.circular(9),
-            ),
+            decoration: BoxDecoration(color: CloudOSColors.accentSoft, borderRadius: BorderRadius.circular(9)),
             child: loading
                 ? const SizedBox(width: 17, height: 17, child: CircularProgressIndicator(strokeWidth: 2))
                 : const Icon(Icons.cloud_done_rounded, color: CloudOSColors.accent, size: 20),
