@@ -6,6 +6,7 @@
 - base commit: `264a63c281f04039ec1df239fb356d7636a40ac5`
 - work branch: `refactor/v21-modular-ai`
 - validation PR: `#41`
+- validated code commit: `be9d0796cd92fe0a92405bf40113767ffbb13676`
 
 ## Problema inicial
 
@@ -144,24 +145,39 @@ Os contratos públicos `CloudOSBridge.previewApps`, `previewSnapshot`, `previewF
 - `test/shell_smoke_test.dart` continua sendo o smoke de apresentação/bridge existente.
 - `test/modular_logic_test.dart` cobre filtro extraído do Start, data pt-BR do Notification Center e compatibilidade do barrel de modelos.
 
-## Validação
+## Validação final do código
 
-O ambiente de edição atual não possui Flutter/Dart local, portanto não há alegação de validação local.
+O ambiente de edição atual não possui Flutter/Dart local, portanto a validação canônica foi feita no GitHub Actions sobre o commit `be9d0796cd92fe0a92405bf40113767ffbb13676` em 2026-09-01.
 
-O primeiro lote deste PR foi validado no GitHub Actions em 2026-09-01:
+### CloudOS Flutter UI
 
-- `CloudOS Flutter UI` — success.
-- `CloudOS CI Baseline` — success.
+- workflow run: `33493987417`
+- run number: `118`
+- conclusão: `success`
+- Flutter: `3.44.7`
+- `Build System Broker V21`: success
+- `Test System Broker Self-Test & Contract`: success
+- `flutter analyze --fatal-infos --fatal-warnings`: success
+- widget/unit tests: success
+- Windows Release build: success
+- staging do System Broker: success
+- evidência V21: success
+- package + upload do Flutter preview: success
 
-Depois deste bloco ampliado, o CI deve ser consultado novamente antes de merge.
+### CloudOS CI Baseline
 
-Validação canônica: `.github/workflows/cloudos-flutter-ui.yml`. Ela cobre:
+- workflow run: `33493987465`
+- run number: `1067`
+- conclusão: `success`
+- lint: success
+- frontend build: success
+- backend/integration tests: success
+- E2E tests: success
+- frontend unit tests: success
+- CloudOS.Host build/tests: success
+- Browser contract/characterization/lifecycle/WebView2 checks executados conforme applicability e workflow concluído com success.
 
-- build do System Broker V21;
-- contratos/smokes/soak do broker;
-- `flutter analyze --fatal-infos --fatal-warnings`;
-- `flutter test`;
-- `flutter build windows --release`.
+Portanto, o código do refactor no commit `be9d0796cd92fe0a92405bf40113767ffbb13676` está validado pelos dois gates oficiais do PR.
 
 ## Resultado para contexto de IA
 
