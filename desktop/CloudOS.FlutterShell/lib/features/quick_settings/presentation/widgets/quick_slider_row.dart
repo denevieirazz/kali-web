@@ -8,6 +8,7 @@ class QuickSliderRow extends StatelessWidget {
     required this.percentage,
     required this.value,
     required this.onChanged,
+    this.onChangeEnd,
     super.key,
   });
 
@@ -15,6 +16,7 @@ class QuickSliderRow extends StatelessWidget {
   final String percentage;
   final double value;
   final ValueChanged<double> onChanged;
+  final ValueChanged<double>? onChangeEnd;
 
   @override
   Widget build(BuildContext context) {
@@ -35,6 +37,7 @@ class QuickSliderRow extends StatelessWidget {
             child: Slider(
               value: value.clamp(0.0, 1.0).toDouble(),
               onChanged: onChanged,
+              onChangeEnd: onChangeEnd,
             ),
           ),
         ),
