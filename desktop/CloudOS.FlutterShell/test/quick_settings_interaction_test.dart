@@ -34,7 +34,7 @@ void main() {
     sliders = tester.widgetList<Slider>(find.byType(Slider)).toList();
     expect(sliders[0].value, closeTo(0.42, 0.001));
     sliders[0].onChangeEnd?.call(0.42);
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(committedVolume, closeTo(0.42, 0.001));
 
     sliders = tester.widgetList<Slider>(find.byType(Slider)).toList();
@@ -43,7 +43,7 @@ void main() {
     sliders = tester.widgetList<Slider>(find.byType(Slider)).toList();
     expect(sliders[1].value, closeTo(0.73, 0.001));
     sliders[1].onChangeEnd?.call(0.73);
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(committedBrightness, closeTo(0.73, 0.001));
   });
 
@@ -66,7 +66,7 @@ void main() {
     expect(slider.value, closeTo(0.11, 0.001));
 
     slider.onChangeEnd?.call(0.11);
-    await tester.pump();
+    await tester.pumpAndSettle();
     slider = tester.widgetList<Slider>(find.byType(Slider)).first;
     expect(
       slider.value,
