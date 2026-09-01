@@ -21,6 +21,8 @@ class CloudOSBridge {
       return previewApps;
     } on PlatformException {
       return previewApps;
+    } on TypeError {
+      return previewApps;
     }
   }
 
@@ -33,26 +35,29 @@ class CloudOSBridge {
         userName: raw['userName'] as String? ?? previewSnapshot.userName,
         sessionId: (raw['sessionId'] as num?)?.toInt() ?? previewSnapshot.sessionId,
         batteryAvailable: raw['batteryAvailable'] as bool? ?? previewSnapshot.batteryAvailable,
-        batteryPercent: (raw['batteryPercent'] as num?)?.toInt() ?? previewSnapshot.batteryPercent,
+        batteryPercent: ((raw['batteryPercent'] as num?)?.toInt() ?? previewSnapshot.batteryPercent).clamp(0, 100),
         networkAvailable: raw['networkAvailable'] as bool? ?? previewSnapshot.networkAvailable,
         networkName: raw['networkName'] as String? ?? previewSnapshot.networkName,
         volumeAvailable: raw['volumeAvailable'] as bool? ?? previewSnapshot.volumeAvailable,
-        volume: (raw['volume'] as num?)?.toDouble() ?? previewSnapshot.volume,
+        volume: ((raw['volume'] as num?)?.toDouble() ?? previewSnapshot.volume).clamp(0.0, 1.0),
         brightnessAvailable: raw['brightnessAvailable'] as bool? ?? previewSnapshot.brightnessAvailable,
-        brightness: (raw['brightness'] as num?)?.toDouble() ?? previewSnapshot.brightness,
+        brightness: ((raw['brightness'] as num?)?.toDouble() ?? previewSnapshot.brightness).clamp(0.0, 1.0),
         wslAvailable: raw['wslAvailable'] as bool? ?? previewSnapshot.wslAvailable,
-        distros: (raw['distros'] as List<Object?>?)?.whereType<String>().toList() ??
+        distros: (raw['distros'] as List<Object?>?)?.whereType<String>().where((value) => value.trim().isNotEmpty).toList() ??
             previewSnapshot.distros,
-        currentWorkspace: (raw['currentWorkspace'] as num?)?.toInt() ?? previewSnapshot.currentWorkspace,
+        currentWorkspace: ((raw['currentWorkspace'] as num?)?.toInt() ?? previewSnapshot.currentWorkspace).clamp(1, 4),
       );
     } on MissingPluginException {
       return previewSnapshot;
     } on PlatformException {
       return previewSnapshot;
+    } on TypeError {
+      return previewSnapshot;
     }
   }
 
   Future<bool> launchApp(String id) async {
+    if (id.trim().isEmpty) return false;
     try {
       final result = await _channel.invokeMethod<bool>('launchApp', <String, Object?>{'id': id});
       return result ?? false;
@@ -65,7 +70,10 @@ class CloudOSBridge {
 
   Future<bool> setVolume(double value) async {
     try {
-      final result = await _channel.invokeMethod<bool>('setVolume', <String, Object?>{'value': value});
+      final result = await _channel.invokeMethod<bool>(
+        'setVolume',
+        <String, Object?>{'value': value.clamp(0.0, 1.0)},
+      );
       return result ?? false;
     } on MissingPluginException {
       return false;
@@ -76,7 +84,10 @@ class CloudOSBridge {
 
   Future<bool> setBrightness(double value) async {
     try {
-      final result = await _channel.invokeMethod<bool>('setBrightness', <String, Object?>{'value': value});
+      final result = await _channel.invokeMethod<bool>(
+        'setBrightness',
+        <String, Object?>{'value': value.clamp(0.0, 1.0)},
+      );
       return result ?? false;
     } on MissingPluginException {
       return false;
@@ -92,6 +103,8 @@ class CloudOSBridge {
     } on MissingPluginException {
       // Conservative fallback below.
     } on PlatformException {
+      // Conservative fallback below.
+    } on TypeError {
       // Conservative fallback below.
     }
     return const <String, Object?>{
@@ -198,6 +211,8 @@ class CloudOSBridge {
     currentWorkspace: 1,
   );
 
+  // Degraded mode only advertises the one surface that the Flutter shell can
+  // provide without the native MethodChannel/System Broker being available.
   static const previewApps = <CloudApp>[
     CloudApp(
       id: 'cloudos:files',
@@ -208,66 +223,6 @@ class CloudOSBridge {
       category: 'Sistema',
       isPinned: true,
       isRecent: true,
-    ),
-    CloudApp(
-      id: 'cloudos:browser',
-      name: 'Navegador Web',
-      icon: Icons.language_rounded,
-      platform: CloudAppPlatform.cloudos,
-      subtitle: 'Navegador do sistema',
-      category: 'Internet',
-      isPinned: true,
-      isRecent: true,
-    ),
-    CloudApp(
-      id: 'cloudos:terminal',
-      name: 'Terminal',
-      icon: Icons.terminal_rounded,
-      platform: CloudAppPlatform.cloudos,
-      subtitle: 'Terminal do sistema',
-      category: 'Desenvolvimento',
-      isPinned: true,
-      isRecent: true,
-    ),
-    CloudApp(
-      id: 'windows:vscode',
-      name: 'Visual Studio Code',
-      icon: Icons.code_rounded,
-      platform: CloudAppPlatform.windows,
-      subtitle: 'Microsoft Windows',
-      category: 'Desenvolvimento',
-      isPinned: true,
-      isRecent: true,
-    ),
-    CloudApp(
-      id: 'cloudos:settings',
-      name: 'Configurações',
-      icon: Icons.settings_rounded,
-      platform: CloudAppPlatform.cloudos,
-      subtitle: 'Painel do Sistema',
-      category: 'Sistema',
-      isPinned: true,
-      isRecent: false,
-    ),
-    CloudApp(
-      id: 'windows:notepad',
-      name: 'Bloco de Notas',
-      icon: Icons.edit_note_rounded,
-      platform: CloudAppPlatform.windows,
-      subtitle: 'Editor de texto',
-      category: 'Produtividade',
-      isPinned: false,
-      isRecent: true,
-    ),
-    CloudApp(
-      id: 'cloudos:calculator',
-      name: 'Calculadora',
-      icon: Icons.calculate_rounded,
-      platform: CloudAppPlatform.cloudos,
-      subtitle: 'Utilitário',
-      category: 'Utilitários',
-      isPinned: false,
-      isRecent: false,
     ),
   ];
 
@@ -301,9 +256,9 @@ class CloudOSBridge {
     CloudNotification(
       id: 'notif-1',
       title: 'CloudOS V21',
-      message: 'System Broker e interface Flutter inicializados.',
+      message: 'Interface V21 ativa. O estado do System Broker aparece no cartão do sistema.',
       time: 'agora',
-      icon: Icons.cloud_done_rounded,
+      icon: Icons.cloud_rounded,
       source: 'CloudOS Core',
       category: 'Sistema',
     ),
