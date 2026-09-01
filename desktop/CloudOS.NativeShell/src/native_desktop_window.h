@@ -40,6 +40,24 @@ public:
 
     HWND Hwnd() const noexcept { return hwnd_; }
 
+    // V21 cross-process workspace control terminates at this authoritative
+    // NativeShell object. Only a bounded workspace index crosses the boundary;
+    // the window-manager pointer and HWND state remain process-local.
+    [[nodiscard]] int CurrentWorkspace() const noexcept
+    {
+        return window_manager_ != nullptr ? window_manager_->CurrentWorkspace() : -1;
+    }
+
+    bool SwitchWorkspace(int workspace)
+    {
+        if (window_manager_ == nullptr || workspace < 0 || workspace >= 4)
+        {
+            return false;
+        }
+        window_manager_->SwitchWorkspace(workspace);
+        return window_manager_->CurrentWorkspace() == workspace;
+    }
+
 private:
     friend class NativeSurfacePreview;
     void Paint();

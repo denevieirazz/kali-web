@@ -96,6 +96,56 @@ public:
         return result == ShellActivationV21::SurfaceResult::NotRunning;
     }
 
+    static bool QueryWorkspace(
+        int* workspace,
+        std::string* error = nullptr) noexcept
+    {
+        if (workspace == nullptr)
+        {
+            SetError(error, "Workspace output is required");
+            return false;
+        }
+        *workspace = 0;
+
+        ShellActivationV21::WorkspaceRequest request;
+        request.action = ShellActivationV21::WorkspaceAction::Query;
+        std::int32_t native_workspace = 0;
+        if (!SendWorkspaceRequest(request, &native_workspace, error))
+        {
+            return false;
+        }
+        *workspace = static_cast<int>(native_workspace);
+        return true;
+    }
+
+    static bool SwitchWorkspace(
+        int workspace,
+        int* actual_workspace = nullptr,
+        std::string* error = nullptr) noexcept
+    {
+        const auto native_workspace = static_cast<std::int32_t>(workspace);
+        if (!ShellActivationV21::IsSupportedWorkspace(native_workspace))
+        {
+            SetError(error, "Workspace index must be in the native range 0..3");
+            return false;
+        }
+
+        ShellActivationV21::WorkspaceRequest request;
+        request.action = ShellActivationV21::WorkspaceAction::Switch;
+        request.workspace = native_workspace;
+
+        std::int32_t applied_workspace = 0;
+        if (!SendWorkspaceRequest(request, &applied_workspace, error))
+        {
+            return false;
+        }
+        if (actual_workspace != nullptr)
+        {
+            *actual_workspace = static_cast<int>(applied_workspace);
+        }
+        return applied_workspace == native_workspace;
+    }
+
 private:
     [[nodiscard]] static HWND FindEndpoint() noexcept
     {
@@ -170,6 +220,41 @@ private:
             SetError(error, "CloudOS NativeShell rejected the surface request");
         }
         return result;
+    }
+
+    static bool SendWorkspaceRequest(
+        ShellActivationV21::WorkspaceRequest& request,
+        std::int32_t* workspace,
+        std::string* error) noexcept
+    {
+        if (workspace == nullptr ||
+            request.schema != ShellActivationV21::kSchema ||
+            !ShellActivationV21::IsSupported(request.action))
+        {
+            SetError(error, "Unsupported NativeShell workspace request");
+            return false;
+        }
+
+        const HWND activation_window = FindEndpoint();
+        if (activation_window == nullptr)
+        {
+            SetError(error, "CloudOS NativeShell activation endpoint is unavailable");
+            return false;
+        }
+
+        const DWORD_PTR response = SendTypedRequest(
+            activation_window,
+            ShellActivationV21::kWorkspaceCopyDataTag,
+            request,
+            error);
+        if (!ShellActivationV21::DecodeWorkspaceResponse(
+                static_cast<std::uintptr_t>(response),
+                workspace))
+        {
+            SetError(error, "CloudOS NativeShell rejected the workspace request");
+            return false;
+        }
+        return true;
     }
 
     static void SetError(std::string* error, const char* message) noexcept

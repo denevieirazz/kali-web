@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -40,42 +42,65 @@ class _CloudOSShellState extends State<CloudOSShell> {
   String? selectedDesktopIcon;
   Offset filesOffset = const Offset(200, 70);
 
-  bool _surfaceRefreshInFlight = false;
+  Timer? _shellStateTimer;
+  bool _shellStateRefreshInFlight = false;
 
   @override
   void initState() {
     super.initState();
-    _loadBridgeData();
+    unawaited(_loadBridgeData());
+  }
+
+  @override
+  void dispose() {
+    _shellStateTimer?.cancel();
+    _shellStateTimer = null;
+    super.dispose();
   }
 
   Future<void> _loadBridgeData() async {
     final loadedApps = await widget.bridge.loadApps();
     final loadedSnapshot = await widget.bridge.loadSystemSnapshot();
     final surfaceStates = await widget.bridge.loadShellSurfaceStates();
+    final nativeWorkspace = await widget.bridge.getCurrentWorkspace();
     if (!mounted) return;
     setState(() {
       apps = loadedApps;
       snapshot = loadedSnapshot;
       browserRunning = surfaceStates['browser'] ?? false;
       terminalRunning = surfaceStates['terminal'] ?? false;
+      currentWorkspace = nativeWorkspace ??
+          loadedSnapshot.currentWorkspace.clamp(1, 4).toInt();
     });
+    _shellStateTimer ??= Timer.periodic(
+      const Duration(seconds: 2),
+      (_) => unawaited(_refreshNativeShellState()),
+    );
   }
 
-  Future<void> _refreshShellSurfaceStates() async {
-    if (_surfaceRefreshInFlight) return;
-    _surfaceRefreshInFlight = true;
+  Future<void> _refreshNativeShellState() async {
+    if (_shellStateRefreshInFlight) return;
+    _shellStateRefreshInFlight = true;
     try {
       final states = await widget.bridge.loadShellSurfaceStates();
+      final nativeWorkspace = await widget.bridge.getCurrentWorkspace();
       if (!mounted) return;
+
       final nextBrowser = states['browser'] ?? false;
       final nextTerminal = states['terminal'] ?? false;
-      if (nextBrowser == browserRunning && nextTerminal == terminalRunning) return;
+      final nextWorkspace = nativeWorkspace ?? currentWorkspace;
+      if (nextBrowser == browserRunning &&
+          nextTerminal == terminalRunning &&
+          nextWorkspace == currentWorkspace) {
+        return;
+      }
       setState(() {
         browserRunning = nextBrowser;
         terminalRunning = nextTerminal;
+        currentWorkspace = nextWorkspace;
       });
     } finally {
-      _surfaceRefreshInFlight = false;
+      _shellStateRefreshInFlight = false;
     }
   }
 
@@ -138,7 +163,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
       if (route == ShellAppRoute.terminal) terminalRunning = launched;
     });
     if (launched) {
-      await _refreshShellSurfaceStates();
+      await _refreshNativeShellState();
     }
   }
 
@@ -156,9 +181,23 @@ class _CloudOSShellState extends State<CloudOSShell> {
     );
   }
 
-  void _switchWorkspace(int index) {
+  Future<void> _switchWorkspace(int index) async {
+    if (index < 1 || index > 4) return;
+    final switched = await widget.bridge.switchWorkspace(index);
+    if (!mounted) return;
+
+    int? authoritativeWorkspace;
+    if (!switched) {
+      authoritativeWorkspace = await widget.bridge.getCurrentWorkspace();
+      if (!mounted) return;
+    }
+
     setState(() {
-      currentWorkspace = index;
+      if (switched) {
+        currentWorkspace = index;
+      } else if (authoritativeWorkspace != null) {
+        currentWorkspace = authoritativeWorkspace!;
+      }
       _closeTransientPanels();
     });
   }
@@ -199,10 +238,10 @@ class _CloudOSShellState extends State<CloudOSShell> {
         const SingleActivator(LogicalKeyboardKey.keyS, control: true, alt: true): _toggleStart,
         const SingleActivator(LogicalKeyboardKey.keyA, control: true, alt: true): _toggleStart,
         const SingleActivator(LogicalKeyboardKey.escape): () => setState(_closeTransientPanels),
-        const SingleActivator(LogicalKeyboardKey.digit1, control: true, alt: true): () => _switchWorkspace(1),
-        const SingleActivator(LogicalKeyboardKey.digit2, control: true, alt: true): () => _switchWorkspace(2),
-        const SingleActivator(LogicalKeyboardKey.digit3, control: true, alt: true): () => _switchWorkspace(3),
-        const SingleActivator(LogicalKeyboardKey.digit4, control: true, alt: true): () => _switchWorkspace(4),
+        const SingleActivator(LogicalKeyboardKey.digit1, control: true, alt: true): () => unawaited(_switchWorkspace(1)),
+        const SingleActivator(LogicalKeyboardKey.digit2, control: true, alt: true): () => unawaited(_switchWorkspace(2)),
+        const SingleActivator(LogicalKeyboardKey.digit3, control: true, alt: true): () => unawaited(_switchWorkspace(3)),
+        const SingleActivator(LogicalKeyboardKey.digit4, control: true, alt: true): () => unawaited(_switchWorkspace(4)),
       },
       child: Focus(
         autofocus: true,
@@ -271,7 +310,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
                       browserRunning: browserRunning,
                       terminalRunning: terminalRunning,
                       currentWorkspace: currentWorkspace,
-                      onWorkspaceChanged: _switchWorkspace,
+                      onWorkspaceChanged: (index) => unawaited(_switchWorkspace(index)),
                       onStart: _toggleStart,
                       onFiles: _toggleFiles,
                       onBrowser: _launchBrowser,

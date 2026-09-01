@@ -120,6 +120,36 @@ class CloudOSBridge {
     }
   }
 
+  Future<int?> getCurrentWorkspace() async {
+    try {
+      final workspace = await _channel.invokeMethod<int>('getCurrentWorkspace');
+      if (workspace != null && workspace >= 1 && workspace <= 4) {
+        return workspace;
+      }
+    } on MissingPluginException {
+      // Preview mode has no authoritative NativeShell workspace.
+    } on PlatformException {
+      // Preserve the last presentation state if NativeShell is unavailable.
+    }
+    return null;
+  }
+
+  Future<bool> switchWorkspace(int workspace) async {
+    if (workspace < 1 || workspace > 4) return false;
+    try {
+      final applied = await _channel.invokeMethod<int>(
+        'switchWorkspace',
+        <String, Object?>{'workspace': workspace},
+      );
+      return applied == workspace;
+    } on MissingPluginException {
+      // Keep interactive preview usable without inventing a native authority.
+      return true;
+    } on PlatformException {
+      return false;
+    }
+  }
+
   Future<bool> launchApp(String id) async {
     try {
       final result = await _channel.invokeMethod<bool>(
@@ -181,6 +211,7 @@ class CloudOSBridge {
       'channel': 'cloudos/native/v19',
       'arbitrary_command_api': false,
       'shell_surface_lifecycle': false,
+      'shell_workspace_control': false,
     };
   }
 

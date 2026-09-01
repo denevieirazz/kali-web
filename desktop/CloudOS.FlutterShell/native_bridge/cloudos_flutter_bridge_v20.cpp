@@ -50,6 +50,32 @@ bool ReadSurfaceArgument(
     if (id != nullptr) *id = surface_id;
     return true;
 }
+
+bool ReadWorkspaceArgument(
+    const flutter::MethodCall<flutter::EncodableValue>& method_call,
+    int* workspace)
+{
+    if (workspace == nullptr) return false;
+    const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
+    if (args == nullptr) return false;
+
+    const auto it = args->find(flutter::EncodableValue("workspace"));
+    if (it == args->end()) return false;
+
+    if (const auto* value = std::get_if<int32_t>(&it->second))
+    {
+        *workspace = static_cast<int>(*value);
+        return true;
+    }
+    if (const auto* value = std::get_if<int64_t>(&it->second))
+    {
+        if (*value < 1 || *value > ShellActivationV21::kWorkspaceCount)
+            return false;
+        *workspace = static_cast<int>(*value);
+        return true;
+    }
+    return false;
+}
 } // namespace
 
 void CloudOSFlutterBridgeV20::RegisterWithMessenger(
@@ -236,6 +262,43 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         return;
     }
 
+    if (method == "getCurrentWorkspace")
+    {
+        int workspace = 0;
+        std::string error;
+        if (!NativeShellActivationClientV21::QueryWorkspace(&workspace, &error))
+        {
+            result->Error("NATIVE_SHELL_UNAVAILABLE", error);
+            return;
+        }
+        result->Success(flutter::EncodableValue(workspace + 1));
+        return;
+    }
+
+    if (method == "switchWorkspace")
+    {
+        int workspace = 0;
+        if (!ReadWorkspaceArgument(method_call, &workspace) || workspace < 1 ||
+            workspace > ShellActivationV21::kWorkspaceCount)
+        {
+            result->Error("INVALID_ARGUMENT", "workspace must be in the presentation range 1..4");
+            return;
+        }
+
+        int actual_workspace = 0;
+        std::string error;
+        if (!NativeShellActivationClientV21::SwitchWorkspace(
+                workspace - 1,
+                &actual_workspace,
+                &error))
+        {
+            result->Error("NATIVE_SHELL_UNAVAILABLE", error);
+            return;
+        }
+        result->Success(flutter::EncodableValue(actual_workspace + 1));
+        return;
+    }
+
     if (method == "launchApp")
     {
         const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
@@ -326,6 +389,7 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         map[flutter::EncodableValue("winlogon_modified")] = flutter::EncodableValue(false);
         map[flutter::EncodableValue("shell_activation_executed")] = flutter::EncodableValue(false);
         map[flutter::EncodableValue("shell_surface_lifecycle")] = flutter::EncodableValue(true);
+        map[flutter::EncodableValue("shell_workspace_control")] = flutter::EncodableValue(true);
         result->Success(flutter::EncodableValue(std::move(map)));
         return;
     }
@@ -381,26 +445,34 @@ bool CloudOSFlutterBridgeV20::GetFiles(
 
 NativeSystemSnapshot CloudOSFlutterBridgeV20::GetSystemSnapshot()
 {
+    NativeSystemSnapshot snapshot;
     BrokerClientSnapshot broker_snap;
     if (CloudOSBrokerClientV21::Instance().GetSystemSnapshot(broker_snap))
     {
-        NativeSystemSnapshot snap;
-        snap.device_name = broker_snap.device_name;
-        snap.network_available = broker_snap.network_available;
-        snap.network_name = broker_snap.network_name;
-        snap.volume_available = broker_snap.volume_available;
-        snap.volume = broker_snap.volume;
-        snap.brightness_available = broker_snap.brightness_available;
-        snap.brightness = broker_snap.brightness;
-        snap.battery_percent = broker_snap.battery_percent;
-        snap.wsl_available = broker_snap.wsl_available;
-        snap.distros = broker_snap.distros;
-        snap.current_workspace = broker_snap.current_workspace;
-        return snap;
+        snapshot.device_name = broker_snap.device_name;
+        snapshot.network_available = broker_snap.network_available;
+        snapshot.network_name = broker_snap.network_name;
+        snapshot.volume_available = broker_snap.volume_available;
+        snapshot.volume = broker_snap.volume;
+        snapshot.brightness_available = broker_snap.brightness_available;
+        snapshot.brightness = broker_snap.brightness;
+        snapshot.battery_percent = broker_snap.battery_percent;
+        snapshot.wsl_available = broker_snap.wsl_available;
+        snapshot.distros = broker_snap.distros;
+        snapshot.current_workspace = broker_snap.current_workspace;
+    }
+    else
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        snapshot = cached_snapshot_;
     }
 
-    std::lock_guard<std::mutex> lock(mutex_);
-    return cached_snapshot_;
+    int native_workspace = 0;
+    if (NativeShellActivationClientV21::QueryWorkspace(&native_workspace))
+    {
+        snapshot.current_workspace = native_workspace + 1;
+    }
+    return snapshot;
 }
 
 bool CloudOSFlutterBridgeV20::LaunchApp(const std::string& app_id)

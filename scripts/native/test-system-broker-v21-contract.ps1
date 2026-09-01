@@ -96,16 +96,18 @@ if ($fileServiceContent -match 'req\.payload.*path' -or $serverContent -match 'f
     throw "files.list must not expose an arbitrary raw-path request contract"
 }
 
-# 7. Verify CloudOS Browser/Terminal launch and lifecycle stay under NativeShell authority
+# 7. Verify CloudOS Browser/Terminal launch, lifecycle and workspace control stay under NativeShell authority
 $appServiceContent = Get-Content (Join-Path $brokerSrc "app_service_v21.cpp") -Raw
 $activationContractPath = Join-Path $root "desktop\CloudOS.NativeCommon\native_shell_activation_v21.h"
 $activationClientPath = Join-Path $root "desktop\CloudOS.NativeCommon\native_shell_activation_client_v21.h"
 $activationServerPath = Join-Path $root "desktop\CloudOS.NativeShell\src\native_shell_activation_server_v21.h"
+$desktopHeaderPath = Join-Path $root "desktop\CloudOS.NativeShell\src\native_desktop_window.h"
 $shellBridgePath = Join-Path $root "desktop\CloudOS.NativeShell\src\native_shell_bridge.cpp"
 $flutterBridgePath = Join-Path $root "desktop\CloudOS.FlutterShell\native_bridge\cloudos_flutter_bridge_v20.cpp"
 $activationContractContent = Get-Content $activationContractPath -Raw
 $activationClientContent = Get-Content $activationClientPath -Raw
 $activationServerContent = Get-Content $activationServerPath -Raw
+$desktopHeaderContent = Get-Content $desktopHeaderPath -Raw
 $shellBridgeContent = Get-Content $shellBridgePath -Raw
 $flutterBridgeContent = Get-Content $flutterBridgePath -Raw
 
@@ -128,6 +130,16 @@ if ($activationContractContent -notmatch "SurfaceRequest" -or
     $activationContractContent -notmatch "kSurfaceCopyDataTag") {
     throw "NativeShell lifecycle must use a separate typed V21 surface contract"
 }
+if ($activationContractContent -notmatch "WorkspaceRequest" -or
+    $activationContractContent -notmatch "WorkspaceAction" -or
+    $activationContractContent -notmatch "kWorkspaceCopyDataTag" -or
+    $activationContractContent -notmatch "kWorkspaceCount\s*=\s*4") {
+    throw "NativeShell workspace control must use a separate bounded V21 workspace contract"
+}
+if ($activationClientContent -notmatch "QueryWorkspace" -or
+    $activationClientContent -notmatch "SwitchWorkspace") {
+    throw "NativeShell activation client must expose typed workspace query/switch operations"
+}
 if ($activationServerContent -notmatch "CloudOSNativeBrowserWindow::Open") {
     throw "NativeShell Browser activation must open the CloudOS WebView2 browser surface"
 }
@@ -135,6 +147,15 @@ if ($activationServerContent -notmatch "SurfaceAction::Query" -or
     $activationServerContent -notmatch "SurfaceAction::Focus" -or
     $activationServerContent -notmatch "SurfaceAction::Close") {
     throw "NativeShell must implement query/focus/close lifecycle for typed surfaces"
+}
+if ($activationServerContent -notmatch "HandleWorkspaceRequest" -or
+    $activationServerContent -notmatch "WorkspaceAction::Query" -or
+    $activationServerContent -notmatch "WorkspaceAction::Switch") {
+    throw "NativeShell activation server must implement typed workspace query/switch"
+}
+if ($desktopHeaderContent -notmatch "window_manager_->CurrentWorkspace" -or
+    $desktopHeaderContent -notmatch "window_manager_->SwitchWorkspace") {
+    throw "Workspace requests must terminate at the authoritative NativeShell window manager"
 }
 if ($shellBridgeContent -notmatch "NativeShellActivationServerV21::Start") {
     throw "NativeShellBridge must start the V21 activation server after shell initialization"
@@ -146,6 +167,10 @@ if ($flutterBridgeContent -notmatch 'method == "getShellSurfaceStates"' -or
     $flutterBridgeContent -notmatch 'method == "focusShellSurface"' -or
     $flutterBridgeContent -notmatch 'method == "closeShellSurface"') {
     throw "Flutter Native Bridge must expose typed NativeShell lifecycle methods"
+}
+if ($flutterBridgeContent -notmatch 'method == "getCurrentWorkspace"' -or
+    $flutterBridgeContent -notmatch 'method == "switchWorkspace"') {
+    throw "Flutter Native Bridge must expose typed NativeShell workspace control"
 }
 if ($flutterBridgeContent -match 'cloudos:browser[\s\S]{0,300}https://google\.com' -or
     $flutterBridgeContent -match 'cloudos:terminal[\s\S]{0,300}cmd\.exe') {

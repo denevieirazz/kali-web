@@ -2,6 +2,7 @@
 
 #include "native_app_launcher.h"
 #include "native_browser_window.h"
+#include "native_desktop_window.h"
 #include "../../CloudOS.NativeCommon/native_shell_activation_v21.h"
 
 #include <windows.h>
@@ -61,6 +62,22 @@ public:
     }
 
 private:
+    [[nodiscard]] static HWND DesktopWindow() noexcept
+    {
+        return FindWindowW(L"CloudOS.NativeShell.Desktop.v2", L"CloudOS Desktop");
+    }
+
+    [[nodiscard]] static CloudOSNativeDesktopWindow* DesktopObject() noexcept
+    {
+        const HWND desktop = DesktopWindow();
+        if (desktop == nullptr)
+        {
+            return nullptr;
+        }
+        return reinterpret_cast<CloudOSNativeDesktopWindow*>(
+            GetWindowLongPtrW(desktop, GWLP_USERDATA));
+    }
+
     [[nodiscard]] static const wchar_t* SurfaceClass(
         ShellActivationV21::App app) noexcept
     {
@@ -162,6 +179,42 @@ private:
         return static_cast<LRESULT>(SurfaceResult::Rejected);
     }
 
+    [[nodiscard]] static LRESULT HandleWorkspaceRequest(
+        const ShellActivationV21::WorkspaceRequest& request) noexcept
+    {
+        if (request.schema != ShellActivationV21::kSchema ||
+            !ShellActivationV21::IsSupported(request.action))
+        {
+            return FALSE;
+        }
+        if (request.action == ShellActivationV21::WorkspaceAction::Switch &&
+            !ShellActivationV21::IsSupportedWorkspace(request.workspace))
+        {
+            return FALSE;
+        }
+
+        CloudOSNativeDesktopWindow* desktop = DesktopObject();
+        if (desktop == nullptr)
+        {
+            return FALSE;
+        }
+
+        if (request.action == ShellActivationV21::WorkspaceAction::Query)
+        {
+            return static_cast<LRESULT>(
+                ShellActivationV21::EncodeWorkspaceResponse(
+                    desktop->CurrentWorkspace()));
+        }
+
+        if (!desktop->SwitchWorkspace(request.workspace))
+        {
+            return FALSE;
+        }
+        return static_cast<LRESULT>(
+            ShellActivationV21::EncodeWorkspaceResponse(
+                desktop->CurrentWorkspace()));
+    }
+
     [[nodiscard]] static LRESULT HandleActivationRequest(
         const ShellActivationV21::Request& request) noexcept
     {
@@ -224,7 +277,7 @@ private:
             return FALSE;
         }
 
-        if (FindWindowW(L"CloudOS.NativeShell.Desktop.v2", L"CloudOS Desktop") == nullptr)
+        if (DesktopWindow() == nullptr)
         {
             return FALSE;
         }
@@ -243,6 +296,14 @@ private:
         {
             return HandleSurfaceRequest(
                 *static_cast<const ShellActivationV21::SurfaceRequest*>(copy_data->lpData));
+        }
+
+        if (copy_data->dwData ==
+                static_cast<ULONG_PTR>(ShellActivationV21::kWorkspaceCopyDataTag) &&
+            copy_data->cbData == sizeof(ShellActivationV21::WorkspaceRequest))
+        {
+            return HandleWorkspaceRequest(
+                *static_cast<const ShellActivationV21::WorkspaceRequest*>(copy_data->lpData));
         }
 
         return FALSE;
