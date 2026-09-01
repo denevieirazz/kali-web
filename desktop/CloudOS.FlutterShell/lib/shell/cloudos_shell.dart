@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -42,23 +40,12 @@ class _CloudOSShellState extends State<CloudOSShell> {
   String? selectedDesktopIcon;
   Offset filesOffset = const Offset(200, 70);
 
-  Timer? _surfaceStateTimer;
   bool _surfaceRefreshInFlight = false;
 
   @override
   void initState() {
     super.initState();
     _loadBridgeData();
-    _surfaceStateTimer = Timer.periodic(
-      const Duration(seconds: 2),
-      (_) => _refreshShellSurfaceStates(),
-    );
-  }
-
-  @override
-  void dispose() {
-    _surfaceStateTimer?.cancel();
-    super.dispose();
   }
 
   Future<void> _loadBridgeData() async {
@@ -130,6 +117,19 @@ class _CloudOSShellState extends State<CloudOSShell> {
   }
 
   Future<void> _launchBridgeSurface(String appId, ShellAppRoute route) async {
+    // A taskbar/start activation is focus-or-launch. Querying/focusing first makes
+    // stale local state harmless and avoids opening duplicate NativeShell surfaces.
+    final focused = await widget.bridge.focusShellSurface(appId);
+    if (!mounted) return;
+    if (focused) {
+      setState(() {
+        _closeTransientPanels();
+        if (route == ShellAppRoute.browser) browserRunning = true;
+        if (route == ShellAppRoute.terminal) terminalRunning = true;
+      });
+      return;
+    }
+
     final launched = await widget.bridge.launchApp(appId);
     if (!mounted) return;
     setState(() {
