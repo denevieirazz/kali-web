@@ -68,9 +68,10 @@ int main(int argc, char* argv[])
                   << "  status                  Check broker status (health.status)\n"
                   << "  capabilities            Query supported capabilities (system.capabilities)\n"
                   << "  apps                    Query unified application catalog (apps.list)\n"
+                  << "  files LOCATION          List an allowlisted Files location (files.list)\n"
                   << "  snapshot                Query system snapshot (system.snapshot)\n"
-                  << "  set-volume VALUE        Set broker volume state (system.volume.set)\n"
-                  << "  set-brightness VALUE    Set broker brightness state (system.brightness.set)\n"
+                  << "  set-volume VALUE        Set Windows master volume (system.volume.set)\n"
+                  << "  set-brightness VALUE    Set display brightness (system.brightness.set)\n"
                   << "  diagnostics             Query diagnostics snapshot (diagnostics.snapshot)\n";
         return 0;
     }
@@ -94,6 +95,17 @@ int main(int argc, char* argv[])
             std::cerr << "{\"ok\":false,\"error\":{\"code\":\"invalid_argument\",\"message\":\"VALUE must be numeric\"}}" << std::endl;
             return 1;
         }
+    }
+
+    std::string location;
+    if (cmd == "files")
+    {
+        if (argc < 3)
+        {
+            std::cerr << "{\"ok\":false,\"error\":{\"code\":\"invalid_argument\",\"message\":\"An allowlisted LOCATION id is required\"}}" << std::endl;
+            return 1;
+        }
+        location = argv[2];
     }
 
     std::wstring pipe_name = CloudOS::SecurityV21::GetCommandPipeName();
@@ -139,6 +151,7 @@ int main(int argc, char* argv[])
     else if (cmd == "status") method = "health.status";
     else if (cmd == "capabilities") method = "system.capabilities";
     else if (cmd == "apps") method = "apps.list";
+    else if (cmd == "files") method = "files.list";
     else if (cmd == "snapshot") method = "system.snapshot";
     else if (cmd == "set-volume") method = "system.volume.set";
     else if (cmd == "set-brightness") method = "system.brightness.set";
@@ -152,6 +165,10 @@ int main(int argc, char* argv[])
     if (has_value)
     {
         req.payload["value"] = CloudOS::JsonValue(numeric_value);
+    }
+    if (cmd == "files")
+    {
+        req.payload["location"] = CloudOS::JsonValue(location);
     }
 
     if (!CloudOS::SendFrame(pipe, CloudOS::SerializeRequest(req)))
