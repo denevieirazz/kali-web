@@ -64,22 +64,23 @@ jobs:
           if (-not (Test-Path $filesEvidence)) { throw "V22.1 evidence missing: $filesEvidence" }
           Copy-Item $filesEvidence 'unified-files-v22.1-smoke.json' -Force
 
-      - name: Generate local Windows host
+      - name: Prepare tracked Windows host
         shell: pwsh
         working-directory: desktop/CloudOS.FlutterShell
         run: |
-          flutter create --platforms=windows --project-name cloudos_flutter_shell .
-          if (Test-Path 'native_bridge') {
-            Copy-Item -Path "native_bridge/*" -Destination "windows/runner/" -Force
-            $cmakePath = "windows/runner/CMakeLists.txt"
-            if (Test-Path $cmakePath) {
-              $cmake = Get-Content -Path $cmakePath -Raw
-              if ($cmake -notmatch "cloudos_flutter_bridge_v20.cpp") {
-                $cmake = $cmake -replace '(\s*"flutter_window\.cpp")', "`$1`n  `"cloudos_flutter_bridge_v20.cpp`"`n  `"cloudos_broker_client_v21.cpp`""
-                $cmake = $cmake -replace 'target_link_libraries\(\$\{BINARY_NAME\} PRIVATE flutter flutter_wrapper_app\)', 'target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app dwmapi.lib shlwapi.lib shell32.lib ole32.lib uuid.lib advapi32.lib)'
-                Set-Content -Path $cmakePath -Value $cmake -Encoding UTF8
-              }
-            }
+          if (-not (Test-Path 'windows/CMakeLists.txt')) {
+            throw 'Tracked Windows host is missing. Do not regenerate it in CI because CloudOS V22 owns native runner sources.'
+          }
+          $requiredRunnerFiles = @(
+            'windows/runner/CMakeLists.txt',
+            'windows/runner/cloudos_flutter_bridge_v20.cpp',
+            'windows/runner/cloudos_broker_client_v21.cpp',
+            'windows/runner/cloudos_conpty_manager.cpp',
+            'windows/runner/cloudos_system_metrics_native.cpp',
+            'windows/runner/flutter_window.cpp'
+          )
+          foreach ($required in $requiredRunnerFiles) {
+            if (-not (Test-Path $required)) { throw "Tracked native runner source missing: $required" }
           }
           if (Test-Path 'test/widget_test.dart') { Remove-Item 'test/widget_test.dart' -Force }
 
