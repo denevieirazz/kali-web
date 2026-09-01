@@ -47,14 +47,52 @@ bool QueryMasterVolume(double* out_volume)
     const bool uninitialize = SUCCEEDED(init_hr);
     if (FAILED(init_hr) && init_hr != RPC_E_CHANGED_MODE) return false;
 
-    Microsoft::WRL::ComPtr<IMMDeviceEnumerator> enumerator;
-    HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&enumerator));
-    Microsoft::WRL::ComPtr<IMMDevice> device;
-    if (SUCCEEDED(hr)) hr = enumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &device);
-    Microsoft::WRL::ComPtr<IAudioEndpointVolume> endpoint;
-    if (SUCCEEDED(hr)) hr = device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr, &endpoint);
+    HRESULT hr = E_FAIL;
     float scalar = 0.0F;
-    if (SUCCEEDED(hr)) hr = endpoint->GetMasterVolumeLevelScalar(&scalar);
+    {
+        // Keep every COM interface alive only while COM is initialized on this
+        // thread. Releasing ComPtr instances after CoUninitialize can crash on
+        // headless/server runners where the audio endpoint is partially absent.
+        Microsoft::WRL::ComPtr<IMMDeviceEnumerator> enumerator;
+        hr = CoCreateInstance(
+            __uuidof(MMDeviceEnumerator),
+            nullptr,
+            CLSCTX_ALL,
+            IID_PPV_ARGS(&enumerator));
+
+        Microsoft::WRL::ComPtr<IMMDevice> device;
+        if (SUCCEEDED(hr) && enumerator)
+        {
+            hr = enumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &device);
+        }
+        else if (SUCCEEDED(hr))
+        {
+            hr = E_POINTER;
+        }
+
+        Microsoft::WRL::ComPtr<IAudioEndpointVolume> endpoint;
+        if (SUCCEEDED(hr) && device)
+        {
+            hr = device->Activate(
+                __uuidof(IAudioEndpointVolume),
+                CLSCTX_ALL,
+                nullptr,
+                &endpoint);
+        }
+        else if (SUCCEEDED(hr))
+        {
+            hr = E_POINTER;
+        }
+
+        if (SUCCEEDED(hr) && endpoint)
+        {
+            hr = endpoint->GetMasterVolumeLevelScalar(&scalar);
+        }
+        else if (SUCCEEDED(hr))
+        {
+            hr = E_POINTER;
+        }
+    }
 
     if (uninitialize) CoUninitialize();
     if (FAILED(hr) || !std::isfinite(scalar)) return false;
@@ -69,13 +107,48 @@ bool SetMasterVolume(double value)
     const bool uninitialize = SUCCEEDED(init_hr);
     if (FAILED(init_hr) && init_hr != RPC_E_CHANGED_MODE) return false;
 
-    Microsoft::WRL::ComPtr<IMMDeviceEnumerator> enumerator;
-    HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&enumerator));
-    Microsoft::WRL::ComPtr<IMMDevice> device;
-    if (SUCCEEDED(hr)) hr = enumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &device);
-    Microsoft::WRL::ComPtr<IAudioEndpointVolume> endpoint;
-    if (SUCCEEDED(hr)) hr = device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr, &endpoint);
-    if (SUCCEEDED(hr)) hr = endpoint->SetMasterVolumeLevelScalar(static_cast<float>(value), nullptr);
+    HRESULT hr = E_FAIL;
+    {
+        Microsoft::WRL::ComPtr<IMMDeviceEnumerator> enumerator;
+        hr = CoCreateInstance(
+            __uuidof(MMDeviceEnumerator),
+            nullptr,
+            CLSCTX_ALL,
+            IID_PPV_ARGS(&enumerator));
+
+        Microsoft::WRL::ComPtr<IMMDevice> device;
+        if (SUCCEEDED(hr) && enumerator)
+        {
+            hr = enumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &device);
+        }
+        else if (SUCCEEDED(hr))
+        {
+            hr = E_POINTER;
+        }
+
+        Microsoft::WRL::ComPtr<IAudioEndpointVolume> endpoint;
+        if (SUCCEEDED(hr) && device)
+        {
+            hr = device->Activate(
+                __uuidof(IAudioEndpointVolume),
+                CLSCTX_ALL,
+                nullptr,
+                &endpoint);
+        }
+        else if (SUCCEEDED(hr))
+        {
+            hr = E_POINTER;
+        }
+
+        if (SUCCEEDED(hr) && endpoint)
+        {
+            hr = endpoint->SetMasterVolumeLevelScalar(static_cast<float>(value), nullptr);
+        }
+        else if (SUCCEEDED(hr))
+        {
+            hr = E_POINTER;
+        }
+    }
 
     if (uninitialize) CoUninitialize();
     return SUCCEEDED(hr);
