@@ -11,6 +11,10 @@ class QuickSettingsPanel extends StatefulWidget {
   const QuickSettingsPanel({
     required this.snapshot,
     this.onOpenSettings,
+    this.onOpenNetworkSettings,
+    this.onOpenBluetoothSettings,
+    this.onOpenNightLightSettings,
+    this.onOpenFocusSettings,
     this.onSetVolume,
     this.onSetBrightness,
     super.key,
@@ -18,6 +22,10 @@ class QuickSettingsPanel extends StatefulWidget {
 
   final CloudSystemSnapshot snapshot;
   final VoidCallback? onOpenSettings;
+  final VoidCallback? onOpenNetworkSettings;
+  final VoidCallback? onOpenBluetoothSettings;
+  final VoidCallback? onOpenNightLightSettings;
+  final VoidCallback? onOpenFocusSettings;
   final Future<bool> Function(double value)? onSetVolume;
   final Future<bool> Function(double value)? onSetBrightness;
 
@@ -28,9 +36,6 @@ class QuickSettingsPanel extends StatefulWidget {
 class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
   late double volume = widget.snapshot.volume;
   late double brightness = widget.snapshot.brightness;
-  bool bluetooth = true;
-  bool nightLight = false;
-  bool focus = false;
 
   @override
   void didUpdateWidget(covariant QuickSettingsPanel oldWidget) {
@@ -94,32 +99,33 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                       label: 'Rede',
                       subtitle: widget.snapshot.networkAvailable
                           ? widget.snapshot.networkName
-                          : 'Desconectado',
+                          : 'Abrir Wi-Fi',
                       icon: widget.snapshot.networkAvailable
                           ? Icons.wifi_rounded
                           : Icons.wifi_off_rounded,
                       active: widget.snapshot.networkAvailable,
+                      onTap: widget.onOpenNetworkSettings,
                     ),
                     QuickToggleTile(
                       label: 'Bluetooth',
-                      subtitle: bluetooth ? 'Conectado' : 'Desativado',
+                      subtitle: 'Abrir dispositivos',
                       icon: Icons.bluetooth_rounded,
-                      active: bluetooth,
-                      onTap: () => setState(() => bluetooth = !bluetooth),
+                      active: false,
+                      onTap: widget.onOpenBluetoothSettings,
                     ),
                     QuickToggleTile(
                       label: 'Luz Noturna',
-                      subtitle: nightLight ? 'Ativada (Quente)' : 'Desativada',
+                      subtitle: 'Abrir configuração',
                       icon: Icons.nightlight_round,
-                      active: nightLight,
-                      onTap: () => setState(() => nightLight = !nightLight),
+                      active: false,
+                      onTap: widget.onOpenNightLightSettings,
                     ),
                     QuickToggleTile(
                       label: 'Modo Foco',
-                      subtitle: focus ? 'Silencioso' : 'Desligado',
+                      subtitle: 'Abrir configuração',
                       icon: Icons.do_not_disturb_on_rounded,
-                      active: focus,
-                      onTap: () => setState(() => focus = !focus),
+                      active: false,
+                      onTap: widget.onOpenFocusSettings,
                     ),
                   ],
                 ),

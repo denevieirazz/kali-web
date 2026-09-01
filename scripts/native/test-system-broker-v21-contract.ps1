@@ -177,7 +177,49 @@ if ($flutterBridgeContent -match 'cloudos:browser[\s\S]{0,300}https://google\.co
     throw "Flutter Native Bridge must not substitute external Browser/Terminal implementations"
 }
 
-# 8. Verify native modules are part of the Broker build graph
+# 8. Verify Quick Settings uses closed real Windows Settings routes instead of fake local toggles
+$quickSettingsRoutePath = Join-Path $root "desktop\CloudOS.FlutterShell\lib\features\quick_settings\domain\quick_settings_route.dart"
+$quickSettingsPanelPath = Join-Path $root "desktop\CloudOS.FlutterShell\lib\features\quick_settings\presentation\quick_settings_panel.dart"
+$flutterShellPath = Join-Path $root "desktop\CloudOS.FlutterShell\lib\shell\cloudos_shell.dart"
+if (-not (Test-Path $quickSettingsRoutePath)) {
+    throw "Quick Settings typed route map is missing"
+}
+$quickSettingsRouteContent = Get-Content $quickSettingsRoutePath -Raw
+$quickSettingsPanelContent = Get-Content $quickSettingsPanelPath -Raw
+$flutterShellContent = Get-Content $flutterShellPath -Raw
+
+$settingsRoutes = @(
+    @{ Id = 'cloudos:settings:wifi'; Uri = 'ms-settings:network-wifi' },
+    @{ Id = 'cloudos:settings:bluetooth'; Uri = 'ms-settings:bluetooth' },
+    @{ Id = 'cloudos:settings:nightlight'; Uri = 'ms-settings:nightlight' },
+    @{ Id = 'cloudos:settings:focus'; Uri = 'ms-settings:quiethours' }
+)
+foreach ($route in $settingsRoutes) {
+    if ($appServiceContent -notmatch [regex]::Escape($route.Id) -or
+        $appServiceContent -notmatch [regex]::Escape($route.Uri)) {
+        throw "Missing allowlisted Quick Settings route: $($route.Id) -> $($route.Uri)"
+    }
+    if ($quickSettingsRouteContent -notmatch [regex]::Escape($route.Id)) {
+        throw "Flutter Quick Settings route map is missing $($route.Id)"
+    }
+}
+if ($quickSettingsPanelContent -match 'bool\s+bluetooth\s*=' -or
+    $quickSettingsPanelContent -match 'bool\s+nightLight\s*=' -or
+    $quickSettingsPanelContent -match 'bool\s+focus\s*=') {
+    throw "Quick Settings must not fake mutable Bluetooth/night-light/focus state in Dart"
+}
+if ($quickSettingsPanelContent -notmatch "onOpenNetworkSettings" -or
+    $quickSettingsPanelContent -notmatch "onOpenBluetoothSettings" -or
+    $quickSettingsPanelContent -notmatch "onOpenNightLightSettings" -or
+    $quickSettingsPanelContent -notmatch "onOpenFocusSettings") {
+    throw "Quick Settings tiles must delegate to real system-settings actions"
+}
+if ($flutterShellContent -notmatch "quickSettingsLaunchId" -or
+    $flutterShellContent -notmatch "_openQuickSettingsRoute") {
+    throw "CloudOSShell must route Quick Settings actions through the typed route map"
+}
+
+# 9. Verify native modules are part of the Broker build graph
 $brokerProject = Get-Content (Join-Path $root "desktop\CloudOS.SystemBroker\CloudOS.SystemBroker.vcxproj") -Raw
 if ($brokerProject -notmatch "file_service_v21\.cpp") {
     throw "FileServiceV21 must be compiled by CloudOS.SystemBroker.vcxproj"
@@ -198,7 +240,7 @@ if ($brokerProject -notmatch "wlanapi\.lib" -or $brokerProject -notmatch "iphlpa
     throw "NetworkStatusV21 native network dependencies are missing from the Broker link graph"
 }
 
-# 9. Verify Documentation Exists
+# 10. Verify Documentation Exists
 $docV21 = Join-Path $root "docs\native\SYSTEM_BROKER_V21.md"
 $docSec = Join-Path $root "docs\native\SYSTEM_BROKER_SECURITY_V21.md"
 if (-not (Test-Path $docV21)) {

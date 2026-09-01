@@ -20,6 +20,29 @@ bool LaunchSucceeded(HINSTANCE result)
     return reinterpret_cast<intptr_t>(result) > 32;
 }
 
+struct SettingsRoute final
+{
+    std::string_view app_id;
+    const wchar_t* uri;
+};
+
+const wchar_t* ResolveSettingsUri(std::string_view app_id) noexcept
+{
+    static constexpr std::array<SettingsRoute, 6> kRoutes = {{
+        {"settings", L"ms-settings:"},
+        {"cloudos:settings", L"ms-settings:"},
+        {"cloudos:settings:wifi", L"ms-settings:network-wifi"},
+        {"cloudos:settings:bluetooth", L"ms-settings:bluetooth"},
+        {"cloudos:settings:nightlight", L"ms-settings:nightlight"},
+        {"cloudos:settings:focus", L"ms-settings:quiethours"},
+    }};
+    for (const SettingsRoute& route : kRoutes)
+    {
+        if (app_id == route.app_id) return route.uri;
+    }
+    return nullptr;
+}
+
 std::wstring Utf8ToWide(std::string_view value)
 {
     if (value.empty()) return {};
@@ -334,9 +357,9 @@ bool AppServiceV21::LaunchApp(const std::string& app_id, std::string& err)
     {
         return LaunchSucceeded(ShellExecuteW(nullptr, L"open", L"calc.exe", nullptr, nullptr, SW_SHOWNORMAL));
     }
-    if (app_id == "settings" || app_id == "cloudos:settings")
+    if (const wchar_t* settings_uri = ResolveSettingsUri(app_id); settings_uri != nullptr)
     {
-        return LaunchSucceeded(ShellExecuteW(nullptr, L"open", L"ms-settings:", nullptr, nullptr, SW_SHOWNORMAL));
+        return LaunchSucceeded(ShellExecuteW(nullptr, L"open", settings_uri, nullptr, nullptr, SW_SHOWNORMAL));
     }
     if (app_id == "drive" || app_id == "cloudos:drive")
     {

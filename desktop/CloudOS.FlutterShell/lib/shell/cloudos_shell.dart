@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../features/files/presentation/files_window.dart';
 import '../features/notifications/presentation/notification_center_panel.dart';
+import '../features/quick_settings/domain/quick_settings_route.dart';
 import '../features/quick_settings/presentation/quick_settings_panel.dart';
 import '../features/start/presentation/start_panel.dart';
 import '../features/taskbar/presentation/cloud_taskbar.dart';
@@ -142,8 +143,6 @@ class _CloudOSShellState extends State<CloudOSShell> {
   }
 
   Future<void> _launchBridgeSurface(String appId, ShellAppRoute route) async {
-    // A taskbar/start activation is focus-or-launch. Querying/focusing first makes
-    // stale local state harmless and avoids opening duplicate NativeShell surfaces.
     final focused = await widget.bridge.focusShellSurface(appId);
     if (!mounted) return;
     if (focused) {
@@ -196,10 +195,16 @@ class _CloudOSShellState extends State<CloudOSShell> {
       if (switched) {
         currentWorkspace = index;
       } else if (authoritativeWorkspace != null) {
-        currentWorkspace = authoritativeWorkspace!;
+        currentWorkspace = authoritativeWorkspace;
       }
       _closeTransientPanels();
     });
+  }
+
+  Future<void> _openQuickSettingsRoute(QuickSettingsRoute route) async {
+    final launched = await widget.bridge.launchApp(quickSettingsLaunchId(route));
+    if (!mounted || !launched) return;
+    setState(_closeTransientPanels);
   }
 
   Future<void> _launchApp(CloudApp app) async {
@@ -343,12 +348,21 @@ class _CloudOSShellState extends State<CloudOSShell> {
         snapshot: snapshot,
         onSetVolume: widget.bridge.setVolume,
         onSetBrightness: widget.bridge.setBrightness,
-        onOpenSettings: () {
-          setState(() {
-            quickSettingsOpen = false;
-            startOpen = true;
-          });
-        },
+        onOpenSettings: () => unawaited(
+          _openQuickSettingsRoute(QuickSettingsRoute.root),
+        ),
+        onOpenNetworkSettings: () => unawaited(
+          _openQuickSettingsRoute(QuickSettingsRoute.wifi),
+        ),
+        onOpenBluetoothSettings: () => unawaited(
+          _openQuickSettingsRoute(QuickSettingsRoute.bluetooth),
+        ),
+        onOpenNightLightSettings: () => unawaited(
+          _openQuickSettingsRoute(QuickSettingsRoute.nightLight),
+        ),
+        onOpenFocusSettings: () => unawaited(
+          _openQuickSettingsRoute(QuickSettingsRoute.focus),
+        ),
       );
     } else if (notificationsOpen) {
       child = const NotificationCenterPanel(key: ValueKey<String>('notifications'));
