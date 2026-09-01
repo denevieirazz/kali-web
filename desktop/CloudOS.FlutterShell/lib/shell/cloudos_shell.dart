@@ -10,6 +10,7 @@ import '../features/quick_settings/presentation/quick_settings_panel.dart';
 import '../features/start/presentation/start_panel.dart';
 import '../features/taskbar/presentation/cloud_taskbar.dart';
 import '../models/cloud_app.dart';
+import '../models/cloud_notification.dart';
 import '../models/cloud_system_snapshot.dart';
 import '../services/cloudos_bridge.dart';
 import 'shell_app_route.dart';
@@ -33,6 +34,7 @@ class _DefaultBridge extends CloudOSBridge {
 class _CloudOSShellState extends State<CloudOSShell> {
   List<CloudApp> apps = CloudOSBridge.previewApps;
   CloudSystemSnapshot snapshot = CloudOSBridge.previewSnapshot;
+  CloudNotificationState notificationState = CloudNotificationState.empty;
   bool startOpen = false;
   bool quickSettingsOpen = false;
   bool notificationsOpen = false;
@@ -62,12 +64,14 @@ class _CloudOSShellState extends State<CloudOSShell> {
   Future<void> _loadBridgeData() async {
     final loadedApps = await widget.bridge.loadApps();
     final loadedSnapshot = await widget.bridge.loadSystemSnapshot();
+    final loadedNotifications = await widget.bridge.loadNotificationState();
     final surfaceStates = await widget.bridge.loadShellSurfaceStates();
     final nativeWorkspace = await widget.bridge.getCurrentWorkspace();
     if (!mounted) return;
     setState(() {
       apps = loadedApps;
       snapshot = loadedSnapshot;
+      notificationState = loadedNotifications;
       browserRunning = surfaceStates['browser'] ?? false;
       terminalRunning = surfaceStates['terminal'] ?? false;
       currentWorkspace = nativeWorkspace ??
@@ -85,6 +89,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
     try {
       final states = await widget.bridge.loadShellSurfaceStates();
       final nativeWorkspace = await widget.bridge.getCurrentWorkspace();
+      final nativeNotifications = await widget.bridge.loadNotificationState();
       if (!mounted) return;
 
       final nextBrowser = states['browser'] ?? false;
@@ -92,13 +97,16 @@ class _CloudOSShellState extends State<CloudOSShell> {
       final nextWorkspace = nativeWorkspace ?? currentWorkspace;
       if (nextBrowser == browserRunning &&
           nextTerminal == terminalRunning &&
-          nextWorkspace == currentWorkspace) {
+          nextWorkspace == currentWorkspace &&
+          nativeNotifications.revision == notificationState.revision &&
+          nativeNotifications.unreadCount == notificationState.unreadCount) {
         return;
       }
       setState(() {
         browserRunning = nextBrowser;
         terminalRunning = nextTerminal;
         currentWorkspace = nextWorkspace;
+        notificationState = nativeNotifications;
       });
     } finally {
       _shellStateRefreshInFlight = false;
@@ -128,10 +136,59 @@ class _CloudOSShellState extends State<CloudOSShell> {
   }
 
   void _toggleNotifications() {
+    if (notificationsOpen) {
+      setState(_closeTransientPanels);
+      return;
+    }
+
     setState(() {
-      final next = !notificationsOpen;
       _closeTransientPanels();
-      notificationsOpen = next;
+      notificationsOpen = true;
+    });
+    unawaited(_openAuthoritativeNotifications());
+  }
+
+  Future<void> _openAuthoritativeNotifications() async {
+    final loaded = await widget.bridge.loadNotificationState();
+    final marked = await widget.bridge.markNotificationsRead();
+    if (!mounted) return;
+
+    final nextState = marked
+        ? loaded.copyWith(
+            revision: loaded.revision + (loaded.unreadCount > 0 ? 1 : 0),
+            unreadCount: 0,
+            items: loaded.items
+                .map((notification) => notification.copyWith(read: true))
+                .toList(growable: false),
+          )
+        : loaded;
+    setState(() {
+      notificationState = nextState;
+    });
+  }
+
+  Future<void> _dismissNotification(String id) async {
+    if (!await widget.bridge.dismissNotification(id) || !mounted) return;
+    final remaining = notificationState.items
+        .where((notification) => notification.id != id)
+        .toList(growable: false);
+    setState(() {
+      notificationState = notificationState.copyWith(
+        revision: notificationState.revision + 1,
+        unreadCount: remaining.where((notification) => !notification.read).length,
+        items: remaining,
+      );
+    });
+  }
+
+  Future<void> _clearNotifications() async {
+    if (!await widget.bridge.clearNotifications() || !mounted) return;
+    setState(() {
+      notificationState = CloudNotificationState(
+        revision: notificationState.revision + 1,
+        unreadCount: 0,
+        items: const <CloudNotification>[],
+      );
     });
   }
 
@@ -315,6 +372,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
                       browserRunning: browserRunning,
                       terminalRunning: terminalRunning,
                       currentWorkspace: currentWorkspace,
+                      notificationCount: notificationState.unreadCount,
                       onWorkspaceChanged: (index) => unawaited(_switchWorkspace(index)),
                       onStart: _toggleStart,
                       onFiles: _toggleFiles,
@@ -365,7 +423,12 @@ class _CloudOSShellState extends State<CloudOSShell> {
         ),
       );
     } else if (notificationsOpen) {
-      child = const NotificationCenterPanel(key: ValueKey<String>('notifications'));
+      child = NotificationCenterPanel(
+        key: const ValueKey<String>('notifications'),
+        notifications: notificationState.items,
+        onDismiss: (id) => unawaited(_dismissNotification(id)),
+        onClearAll: () => unawaited(_clearNotifications()),
+      );
     }
 
     return AnimatedSwitcher(
