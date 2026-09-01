@@ -23,7 +23,7 @@ class CloudTaskbar extends StatelessWidget {
     this.terminalRunning = false,
     this.currentWorkspace = 1,
     this.onWorkspaceChanged,
-    this.notificationCount = 3,
+    this.notificationCount = 0,
     super.key,
   });
 
