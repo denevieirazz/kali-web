@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/cloudos_theme.dart';
 import '../models/shell_models.dart';
+import '../services/broker_events.dart';
 import '../services/cloudos_bridge.dart';
 import '../widgets/cloud_taskbar.dart';
 import '../widgets/files_window.dart';
@@ -37,10 +40,53 @@ class _CloudOSShellState extends State<CloudOSShell> {
   String? selectedDesktopIcon;
   Offset filesOffset = const Offset(200, 70);
 
+  StreamSubscription<CloudOSBrokerEvent>? _brokerEventSubscription;
+  bool _snapshotRefreshInFlight = false;
+
   @override
   void initState() {
     super.initState();
+    _brokerEventSubscription = CloudOSBrokerEvents.instance.stream.listen(
+      _onBrokerEvent,
+    );
+    unawaited(CloudOSBrokerEvents.instance.start());
     _loadBridgeData();
+  }
+
+  @override
+  void dispose() {
+    _brokerEventSubscription?.cancel();
+    super.dispose();
+  }
+
+  void _onBrokerEvent(CloudOSBrokerEvent event) {
+    if (!mounted) return;
+
+    if (event.name == 'system.volumeChanged') {
+      final value = (event.payload['volume'] as num?)?.toDouble();
+      if (value != null && value.isFinite && value >= 0 && value <= 1) {
+        setState(() {
+          snapshot = snapshot.copyWith(volume: value, volumeAvailable: true);
+        });
+      }
+      return;
+    }
+
+    if (event.name.startsWith('system.')) {
+      unawaited(_refreshSystemSnapshotFromEvent());
+    }
+  }
+
+  Future<void> _refreshSystemSnapshotFromEvent() async {
+    if (_snapshotRefreshInFlight) return;
+    _snapshotRefreshInFlight = true;
+    try {
+      final loadedSnapshot = await widget.bridge.loadSystemSnapshot();
+      if (!mounted) return;
+      setState(() => snapshot = loadedSnapshot);
+    } finally {
+      _snapshotRefreshInFlight = false;
+    }
   }
 
   Future<void> _loadBridgeData() async {
