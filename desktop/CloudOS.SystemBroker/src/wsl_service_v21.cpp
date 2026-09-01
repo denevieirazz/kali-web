@@ -44,6 +44,16 @@ std::vector<std::string> WslServiceV21::GetDistributions()
     return distros_;
 }
 
+std::string WslServiceV21::GetDefaultDistribution()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!initialized_.load())
+    {
+        Refresh();
+    }
+    return default_distro_;
+}
+
 void WslServiceV21::Invalidate()
 {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -54,11 +64,25 @@ void WslServiceV21::Invalidate()
 void WslServiceV21::Refresh()
 {
     distros_.clear();
+    default_distro_.clear();
     wsl_available_ = false;
 
     HKEY key = nullptr;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Lxss", 0, KEY_READ, &key) == ERROR_SUCCESS)
     {
+        WCHAR default_guid[256] = {0};
+        DWORD default_guid_size = sizeof(default_guid);
+        DWORD default_type = 0;
+        const bool has_default =
+            RegQueryValueExW(
+                key,
+                L"DefaultDistribution",
+                nullptr,
+                &default_type,
+                reinterpret_cast<LPBYTE>(default_guid),
+                &default_guid_size) == ERROR_SUCCESS &&
+            (default_type == REG_SZ || default_type == REG_EXPAND_SZ);
+
         DWORD index = 0;
         WCHAR subkey_name[256];
         DWORD name_len = ARRAYSIZE(subkey_name);
@@ -73,7 +97,12 @@ void WslServiceV21::Refresh()
                 DWORD type = 0;
                 if (RegQueryValueExW(distro_key, L"DistributionName", nullptr, &type, reinterpret_cast<LPBYTE>(distro_name), &distro_name_size) == ERROR_SUCCESS)
                 {
-                    distros_.push_back(WideToUtf8(distro_name));
+                    const std::string distro = WideToUtf8(distro_name);
+                    distros_.push_back(distro);
+                    if (has_default && _wcsicmp(subkey_name, default_guid) == 0)
+                    {
+                        default_distro_ = distro;
+                    }
                 }
                 RegCloseKey(distro_key);
             }
@@ -90,10 +119,6 @@ void WslServiceV21::Refresh()
         if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY))
         {
             wsl_available_ = true;
-            if (distros_.empty())
-            {
-                distros_.push_back("Ubuntu");
-            }
         }
     }
 

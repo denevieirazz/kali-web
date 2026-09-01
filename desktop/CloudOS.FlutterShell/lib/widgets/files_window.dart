@@ -5,21 +5,28 @@ import '../core/cloudos_theme.dart';
 import '../models/file_models.dart';
 import '../services/cloudos_bridge.dart';
 import '../services/files_controller.dart';
+import '../services/window_manager.dart';
 import 'glass_surface.dart';
 
 class FilesWindow extends StatefulWidget {
   const FilesWindow({
-    required this.onClose,
-    required this.onMinimize,
-    required this.onDrag,
+    this.onClose,
+    this.onMinimize,
+    this.onDrag,
     this.bridge,
+    this.windowManager,
+    this.width,
+    this.height,
     super.key,
   });
 
-  final VoidCallback onClose;
-  final VoidCallback onMinimize;
-  final ValueChanged<Offset> onDrag;
+  final VoidCallback? onClose;
+  final VoidCallback? onMinimize;
+  final ValueChanged<Offset>? onDrag;
   final CloudOSBridge? bridge;
+  final WindowManager? windowManager;
+  final double? width;
+  final double? height;
 
   @override
   State<FilesWindow> createState() => _FilesWindowState();
@@ -57,12 +64,41 @@ class _FilesWindowState extends State<FilesWindow> {
     super.dispose();
   }
 
+  void _handleOpenItem(CloudFileItem item) {
+    if (item.isDirectory) {
+      _controller.navigateTo(item.path, title: item.displayName);
+    } else {
+      final ext = item.name.toLowerCase();
+      if (ext.endsWith('.txt') ||
+          ext.endsWith('.json') ||
+          ext.endsWith('.md') ||
+          ext.endsWith('.dart') ||
+          ext.endsWith('.log') ||
+          ext.endsWith('.yaml') ||
+          ext.endsWith('.yml') ||
+          ext.endsWith('.csv') ||
+          ext.endsWith('.xml') ||
+          ext.endsWith('.c') ||
+          ext.endsWith('.cpp') ||
+          ext.endsWith('.py') ||
+          ext.endsWith('.html') ||
+          ext.endsWith('.css') ||
+          ext.endsWith('.js')) {
+        if (widget.windowManager != null) {
+          widget.windowManager!.openWindow('cloudos:notepad', params: <String, dynamic>{'initialFilePath': item.path});
+          return;
+        }
+      }
+      _controller.openItem(item);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final tab = _controller.activeTab;
     final viewport = MediaQuery.sizeOf(context);
-    final windowWidth = math.min(1020.0, math.max(680.0, viewport.width - 40));
-    final windowHeight = math.min(640.0, math.max(480.0, viewport.height - 96));
+    final windowWidth = widget.width ?? math.min(1020.0, math.max(680.0, viewport.width - 40));
+    final windowHeight = widget.height ?? math.min(640.0, math.max(480.0, viewport.height - 96));
 
     return Focus(
       autofocus: true,
@@ -116,7 +152,7 @@ class _FilesWindowState extends State<FilesWindow> {
 
   Widget _buildTitleBar(FilesTabState? tab) {
     return GestureDetector(
-      onPanUpdate: (details) => widget.onDrag(details.delta),
+      onPanUpdate: (details) => widget.onDrag?.call(details.delta),
       child: Container(
         height: 42,
         padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -214,19 +250,21 @@ class _FilesWindowState extends State<FilesWindow> {
               ),
             ),
 
-            // Window Controls
-            IconButton(
-              icon: const Icon(Icons.remove_rounded, size: 16),
-              tooltip: 'Minimizar',
-              onPressed: widget.onMinimize,
-              color: CloudOSColors.textSecondary,
-            ),
-            IconButton(
-              icon: const Icon(Icons.close_rounded, size: 16),
-              tooltip: 'Fechar',
-              onPressed: widget.onClose,
-              color: CloudOSColors.textSecondary,
-            ),
+            // Window Controls (opcionais quando dentro de WindowFrame)
+            if (widget.onMinimize != null)
+              IconButton(
+                icon: const Icon(Icons.remove_rounded, size: 16),
+                tooltip: 'Minimizar',
+                onPressed: widget.onMinimize,
+                color: CloudOSColors.textSecondary,
+              ),
+            if (widget.onClose != null)
+              IconButton(
+                icon: const Icon(Icons.close_rounded, size: 16),
+                tooltip: 'Fechar',
+                onPressed: widget.onClose,
+                color: CloudOSColors.textSecondary,
+              ),
           ],
         ),
       ),
@@ -588,7 +626,7 @@ class _FilesWindowState extends State<FilesWindow> {
 
         return InkWell(
           onTap: () => _controller.selectItem(item.path),
-          onDoubleTap: () => _controller.openItem(item),
+          onDoubleTap: () => _handleOpenItem(item),
           onSecondaryTapDown: (details) =>
               _showContextMenu(context, details.globalPosition, item),
           borderRadius: BorderRadius.circular(8),
@@ -643,7 +681,7 @@ class _FilesWindowState extends State<FilesWindow> {
 
         return InkWell(
           onTap: () => _controller.selectItem(item.path),
-          onDoubleTap: () => _controller.openItem(item),
+          onDoubleTap: () => _handleOpenItem(item),
           onSecondaryTapDown: (details) =>
               _showContextMenu(context, details.globalPosition, item),
           borderRadius: BorderRadius.circular(6),

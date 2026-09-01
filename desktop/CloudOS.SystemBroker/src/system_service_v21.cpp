@@ -142,6 +142,7 @@ JsonObject SystemSnapshot::ToJsonObject() const
         distros_arr.push_back(JsonValue(d));
     }
     obj["distros"] = JsonValue(std::move(distros_arr));
+    obj["defaultDistro"] = JsonValue(default_distro);
     obj["currentWorkspace"] = JsonValue(current_workspace);
     obj["timestamp"] = JsonValue(static_cast<int64_t>(timestamp_ms));
     return obj;
@@ -282,6 +283,7 @@ void SystemServiceV21::Refresh()
 
     // WSL status
     snapshot_.distros = WslServiceV21::Instance().GetDistributions();
+    snapshot_.default_distro = WslServiceV21::Instance().GetDefaultDistribution();
     snapshot_.wsl_available = WslServiceV21::Instance().IsWslAvailable();
     snapshot_.current_workspace = 1;
     snapshot_.timestamp_ms = NowMs();

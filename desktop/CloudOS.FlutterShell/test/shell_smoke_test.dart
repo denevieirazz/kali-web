@@ -2,8 +2,19 @@ import 'package:cloudos_flutter_shell/models/file_models.dart' as files;
 import 'package:cloudos_flutter_shell/models/shell_models.dart';
 import 'package:cloudos_flutter_shell/services/cloudos_bridge.dart';
 import 'package:cloudos_flutter_shell/services/files_controller.dart';
+import 'package:cloudos_flutter_shell/services/window_manager.dart';
 import 'package:cloudos_flutter_shell/shell/cloudos_shell.dart';
+import 'package:cloudos_flutter_shell/widgets/browser_window.dart';
+import 'package:cloudos_flutter_shell/widgets/cloudos_drive_window.dart';
 import 'package:cloudos_flutter_shell/widgets/files_window.dart';
+import 'package:cloudos_flutter_shell/widgets/projects_window.dart';
+import 'package:cloudos_flutter_shell/widgets/settings_window.dart';
+import 'package:cloudos_flutter_shell/widgets/system_monitor_window.dart';
+import 'package:cloudos_flutter_shell/widgets/terminal_window.dart';
+import 'package:cloudos_flutter_shell/services/system_metrics_service.dart';
+import 'package:cloudos_flutter_shell/widgets/context_menu.dart';
+import 'package:cloudos_flutter_shell/widgets/desktop_widgets.dart';
+import 'package:cloudos_flutter_shell/widgets/notepad_window.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -226,6 +237,8 @@ void main() {
   });
 
   group('CloudOS V22 Desktop Presentation Suite', () {
+    tearDown(() => SystemMetricsService.instance.forceStop());
+
     testWidgets(
       'CloudOS presentation renders core desktop surfaces on 1920x1080',
       (tester) async {
@@ -237,10 +250,9 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(find.text('CloudOS V22.1'), findsWidgets);
         expect(find.text('Arquivos'), findsWidgets);
-        expect(find.text('Acesso Rápido'), findsOneWidget);
-        expect(find.text('Este Computador'), findsOneWidget);
+        expect(find.text('Navegador'), findsWidgets);
+        expect(find.text('Configurações'), findsWidgets);
 
         // Open Start Panel
         await tester.tap(find.byTooltip('Iniciar (Ctrl+Alt+A)'));
@@ -248,10 +260,10 @@ void main() {
 
         expect(find.text('CloudOS Start'), findsOneWidget);
         expect(find.text('Aplicativos Fixados'), findsOneWidget);
-        expect(find.text('Bloco de Notas'), findsOneWidget);
+        expect(find.text('Bloco de Notas'), findsWidgets);
 
         // Close Start
-        await tester.tap(find.byTooltip('Iniciar (Ctrl+Alt+A)'));
+        await tester.tap(find.byTooltip('Fechar (Esc)'));
         await tester.pumpAndSettle();
         expect(find.text('CloudOS Start'), findsNothing);
 
@@ -272,6 +284,13 @@ void main() {
         await tester.tap(find.text('Limpar Tudo'));
         await tester.pumpAndSettle();
         expect(find.text('Sem novas notificações'), findsOneWidget);
+
+        // Close Notifications
+        await tester.tap(find.byTooltip('Notificações'));
+        await tester.pumpAndSettle();
+
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
       },
     );
 
@@ -310,6 +329,9 @@ void main() {
       await tester.tap(find.byTooltip('Visualizar em Lista'));
       await tester.pumpAndSettle();
       expect(find.byTooltip('Visualizar em Grade'), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
     });
 
     testWidgets(
@@ -323,8 +345,11 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(find.text('CloudOS V22.1'), findsWidgets);
         expect(find.text('Arquivos'), findsWidgets);
+        expect(find.text('Navegador'), findsWidgets);
+
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
       },
     );
 
@@ -339,8 +364,11 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(find.text('CloudOS V22.1'), findsWidgets);
         expect(find.text('Arquivos'), findsWidgets);
+        expect(find.text('Navegador'), findsWidgets);
+
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
       },
     );
 
@@ -355,8 +383,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('CloudOS V22.1'), findsWidgets);
+      expect(find.text('Arquivos'), findsWidgets);
       expect(tester.takeException(), isNull);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
     });
 
     testWidgets('Files remains overflow-free at 200 percent text scale', (
@@ -384,6 +415,294 @@ void main() {
 
       expect(find.text('Arquivos'), findsOneWidget);
       expect(tester.takeException(), isNull);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+    });
+  });
+
+  group('CloudOS WindowManager & Internal Desktop Applications Suite', () {
+    tearDown(() => SystemMetricsService.instance.forceStop());
+
+    test('WindowManager manages open, minimize, maximize, restore, focus, and close', () {
+      final wm = WindowManager();
+      expect(wm.windows.isEmpty, true);
+
+      // Open Files Window
+      wm.openWindow('cloudos:files');
+      expect(wm.windows.length, 1);
+      expect(wm.isAppOpen('cloudos:files'), true);
+      expect(wm.isAppFocused('cloudos:files'), true);
+      expect(wm.isAppMinimized('cloudos:files'), false);
+
+      // Open Terminal Window
+      wm.openWindow('cloudos:terminal');
+      expect(wm.windows.length, 2);
+      expect(wm.isAppFocused('cloudos:terminal'), true);
+      expect(wm.isAppFocused('cloudos:files'), false);
+
+      // Minimize Terminal
+      final termWin = wm.windows.firstWhere((w) => w.appId == 'cloudos:terminal');
+      wm.minimizeWindow(termWin.id);
+      expect(wm.isAppMinimized('cloudos:terminal'), true);
+      expect(wm.isAppFocused('cloudos:files'), true);
+
+      // Toggle Files Window (should minimize since it's focused)
+      wm.toggleWindow('cloudos:files');
+      expect(wm.isAppMinimized('cloudos:files'), true);
+
+      // Toggle Files Window again (should restore and focus)
+      wm.toggleWindow('cloudos:files');
+      expect(wm.isAppFocused('cloudos:files'), true);
+
+      // Maximize / Restore
+      final filesWin = wm.windows.firstWhere((w) => w.appId == 'cloudos:files');
+      wm.toggleMaximizeWindow(filesWin.id, const Size(1920, 1080));
+      expect(filesWin.maximized, true);
+      expect(filesWin.width, 1920);
+
+      wm.toggleMaximizeWindow(filesWin.id, const Size(1920, 1080));
+      expect(filesWin.maximized, false);
+
+      // Close Window
+      wm.closeWindow(filesWin.id);
+      expect(wm.isAppOpen('cloudos:files'), false);
+    });
+
+    testWidgets('TerminalWindow renders with tabs and handles input command', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1920, 1080));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: TerminalWindow(bridge: _TestBridge()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('PowerShell'), findsWidgets);
+
+      // Enter command
+      await tester.enterText(find.byType(TextField), 'help');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('BrowserWindow renders tabs, navigation bar and favorites', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1920, 1080));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: BrowserWindow(bridge: _TestBridge()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Google'), findsWidgets);
+      expect(find.text('GitHub'), findsWidgets);
+      expect(find.byIcon(Icons.arrow_back_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.refresh_rounded), findsOneWidget);
+    });
+
+    testWidgets('SettingsWindow renders 10 settings pages and switches correctly', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1920, 1080));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: SettingsWindow(bridge: _TestBridge()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Configurações'), findsWidgets);
+      expect(find.text('Sistema'), findsOneWidget);
+      expect(find.text('Som'), findsOneWidget);
+      expect(find.text('Rede & Internet'), findsOneWidget);
+
+      // Switch to Sound page
+      await tester.tap(find.text('Som'));
+      await tester.pumpAndSettle();
+      expect(find.text('Saída de Áudio do Sistema'), findsOneWidget);
+
+      // Switch to About page
+      await tester.tap(find.text('Sobre o CloudOS'));
+      await tester.pumpAndSettle();
+      expect(find.text('CloudOS Desktop V22.1'), findsOneWidget);
+    });
+
+    testWidgets('SystemMonitorWindow renders metrics cards and processes table', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1920, 1080));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: SystemMonitorWindow(bridge: _TestBridge()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('CPU'), findsOneWidget);
+      expect(find.text('Memória RAM'), findsOneWidget);
+      expect(find.textContaining('Armazenamento'), findsOneWidget);
+      expect(find.textContaining('Processos Ativos'), findsOneWidget);
+    });
+
+    testWidgets('ProjectsWindow renders workspaces and quick action buttons', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1920, 1080));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      final wm = WindowManager();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ProjectsWindow(bridge: const _TestBridge(), windowManager: wm),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Gerenciador de Projetos & Workspaces'), findsOneWidget);
+      expect(find.text('CloudOS Core & Shell V22.1'), findsOneWidget);
+      expect(find.byTooltip('Abrir no Terminal'), findsWidgets);
+    });
+
+    testWidgets('CloudOSDriveWindow renders storage info and sync files', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1920, 1080));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      final wm = WindowManager();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CloudOSDriveWindow(bridge: const _TestBridge(), windowManager: wm),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.text('CloudOS Drive Local'), findsOneWidget);
+    });
+
+    testWidgets('NotepadWindow renders editor with tabs, line numbers and status', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1920, 1080));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: NotepadWindow(bridge: _TestBridge()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Sem título'), findsOneWidget);
+      expect(find.byTooltip('Novo Documento (Ctrl+N)'), findsOneWidget);
+      expect(find.byTooltip('Salvar no Disco (Ctrl+S)'), findsOneWidget);
+      expect(find.textContaining('UTF-8'), findsOneWidget);
+
+      // Add a new tab
+      await tester.tap(find.byTooltip('Novo Documento (Ctrl+N)'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Sem título 2.txt'), findsOneWidget);
+    });
+
+    testWidgets('DesktopClockWidget and DesktopMetricsWidget render on desktop', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1920, 1080));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: Column(
+              children: <Widget>[
+                DesktopClockWidget(),
+                DesktopMetricsWidget(bridge: _TestBridge()),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Performance'), findsOneWidget);
+      expect(find.text('CPU'), findsOneWidget);
+      expect(find.text('RAM'), findsOneWidget);
+      expect(find.text('DISCO'), findsOneWidget);
+    });
+
+    testWidgets('ContextMenuOverlay renders options and responds to tap', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1920, 1080));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      bool tapped = false;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ContextMenuOverlay(
+              position: const Offset(100, 100),
+              items: <ContextMenuItemData>[
+                ContextMenuItemData(
+                  title: 'Nova Pasta',
+                  icon: Icons.create_new_folder_outlined,
+                  onTap: () => tapped = true,
+                ),
+                ContextMenuItemData(
+                  title: 'Atualizar',
+                  icon: Icons.refresh_rounded,
+                  onTap: () {},
+                ),
+              ],
+              onDismiss: () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Nova Pasta'), findsOneWidget);
+      expect(find.text('Atualizar'), findsOneWidget);
+
+      await tester.tap(find.text('Nova Pasta'));
+      await tester.pumpAndSettle();
+      expect(tapped, true);
+    });
+
+    test('WindowManager supports Aero Snapping (Left, Right, and Top Maximize)', () {
+      final wm = WindowManager();
+      const viewport = Size(1920, 1080);
+      wm.openWindow('cloudos:files');
+
+      final win = wm.windows.first;
+      expect(win.maximized, false);
+
+      // Snap Left
+      wm.snapWindowLeft(win.id, viewport);
+      expect(win.x, 0.0);
+      expect(win.width, 960.0);
+      expect(win.height, 1032.0);
+
+      // Snap Right
+      wm.snapWindowRight(win.id, viewport);
+      expect(win.x, 960.0);
+      expect(win.width, 960.0);
+      expect(win.height, 1032.0);
+
+      // Snap Top / Maximize
+      wm.toggleMaximizeWindow(win.id, viewport);
+      expect(win.maximized, true);
+      expect(win.width, 1920.0);
     });
   });
 }

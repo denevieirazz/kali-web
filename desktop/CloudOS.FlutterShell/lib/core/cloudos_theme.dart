@@ -1,43 +1,59 @@
 import 'package:flutter/material.dart';
 
 abstract final class CloudOSColors {
-  static const canvas = Color(0xFF090D13);
-  static const background = Color(0xFF0F151F);
-  static const surface = Color(0xEE161F2C);
-  static const surfaceStrong = Color(0xF81C2636);
-  static const elevated = Color(0xFF222F42);
-  static const elevatedHover = Color(0xFF2B3A50);
-  static const hover = Color(0x1F5DA9FF);
-  static const active = Color(0x385DA9FF);
-  static const border = Color(0x2E728DA6);
-  static const borderStrong = Color(0x528CA8C4);
-  static const borderSubtle = border;
-  static const text = Color(0xFFF0F4F8);
-  static const secondary = Color(0xFFAEC0D2);
-  static const caption = Color(0xFF768A9E);
+  // Obsidian Deep Black Base
+  static const canvas = Color(0xFF05070B);
+  static const background = Color(0xFF080B12);
+  static const surface = Color(0xF00B0F19);
+  static const surfaceStrong = Color(0xF8101624);
+  static const elevated = Color(0xFF151D2E);
+  static const elevatedHover = Color(0xFF1D283E);
+  static const hover = Color(0x1F38BDF8);
+  static const active = Color(0x3838BDF8);
+  static const border = Color(0x2038BDF8);
+  static const borderStrong = Color(0x5538BDF8);
+  static const borderSubtle = Color(0x14FFFFFF);
+  static const text = Color(0xFFF1F5F9);
+  static const secondary = Color(0xFF94A3B8);
+  static const caption = Color(0xFF64748B);
   static const textPrimary = text;
   static const textSecondary = secondary;
   static const textTertiary = caption;
-  static const accent = Color(0xFF4C9AFF);
-  static const accentSoft = Color(0x294C9AFF);
-  static const linux = Color(0xFFE9963F);
-  static const linuxSoft = Color(0x29E9963F);
-  static const windows = Color(0xFF00A4EF);
-  static const windowsSoft = Color(0x2900A4EF);
-  static const success = Color(0xFF43C780);
-  static const successSoft = Color(0x2943C780);
-  static const warning = Color(0xFFE6A23C);
-  static const danger = Color(0xFFF25D6B);
-  static const shadow = Color(0x40000000);
+
+  // Accents & Neon Highlights
+  static const accent = Color(0xFF38BDF8);
+  static const accentSoft = Color(0x2638BDF8);
+  static const accentPurple = Color(0xFFC084FC);
+  static const accentPurpleSoft = Color(0x26C084FC);
+  static const neonCyan = Color(0xFF00E5FF);
+  static const neonEmerald = Color(0xFF34D399);
+  static const neonAmber = Color(0xFFFBBF24);
+  static const neonRose = Color(0xFFFB7185);
+
+  static const linux = Color(0xFFFB923C);
+  static const linuxSoft = Color(0x29FB923C);
+  static const windows = Color(0xFF38BDF8);
+  static const windowsSoft = Color(0x2938BDF8);
+  static const success = Color(0xFF34D399);
+  static const successSoft = Color(0x2934D399);
+  static const warning = Color(0xFFFBBF24);
+  static const danger = Color(0xFFF43F5E);
+  static const shadow = Color(0x80000000);
+}
+
+abstract final class CloudTheme {
+  static const accentBlue = CloudOSColors.accent;
+  static const surfaceDark = CloudOSColors.surface;
+  static const backgroundDark = CloudOSColors.background;
 }
 
 ThemeData buildCloudOSTheme() {
   const scheme = ColorScheme.dark(
     primary: CloudOSColors.accent,
-    secondary: CloudOSColors.accent,
+    secondary: CloudOSColors.accentPurple,
     surface: CloudOSColors.surfaceStrong,
     error: CloudOSColors.danger,
-    onPrimary: Colors.white,
+    onPrimary: Color(0xFF05070B),
     onSecondary: Colors.white,
     onSurface: CloudOSColors.text,
     onError: Colors.white,
@@ -50,7 +66,7 @@ ThemeData buildCloudOSTheme() {
     scaffoldBackgroundColor: CloudOSColors.canvas,
     fontFamily: 'Segoe UI',
     visualDensity: VisualDensity.standard,
-    dividerColor: CloudOSColors.border,
+    dividerColor: CloudOSColors.borderSubtle,
     textTheme: const TextTheme(
       headlineLarge: TextStyle(
         color: CloudOSColors.text,
@@ -132,8 +148,8 @@ ThemeData buildCloudOSTheme() {
         borderRadius: BorderRadius.circular(6),
         boxShadow: const <BoxShadow>[
           BoxShadow(
-            color: Color(0x40000000),
-            blurRadius: 10,
+            color: Color(0x60000000),
+            blurRadius: 12,
             offset: Offset(0, 4),
           ),
         ],

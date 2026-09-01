@@ -121,6 +121,10 @@ private:
 
     bool ParseValue(JsonValue& val)
     {
+        if (depth_ >= kMaxDepth) return false;
+        depth_++;
+        struct DepthGuard { size_t& d; ~DepthGuard() { d--; } } guard{depth_};
+
         SkipWhitespace();
         char c = Peek();
         if (c == '"')
@@ -285,43 +289,64 @@ private:
         size_t start = pos_;
         bool is_float = false;
         if (Peek() == '-') pos_++;
+        size_t int_digits = 0;
         while (pos_ < src_.size() && std::isdigit(static_cast<unsigned char>(Peek())))
         {
             pos_++;
+            int_digits++;
         }
+        if (int_digits == 0) return false;
         if (pos_ < src_.size() && Peek() == '.')
         {
             is_float = true;
             pos_++;
+            size_t frac_digits = 0;
             while (pos_ < src_.size() && std::isdigit(static_cast<unsigned char>(Peek())))
             {
                 pos_++;
+                frac_digits++;
             }
+            if (frac_digits == 0) return false;
         }
         if (pos_ < src_.size() && (Peek() == 'e' || Peek() == 'E'))
         {
             is_float = true;
             pos_++;
             if (pos_ < src_.size() && (Peek() == '+' || Peek() == '-')) pos_++;
+            size_t exp_digits = 0;
             while (pos_ < src_.size() && std::isdigit(static_cast<unsigned char>(Peek())))
             {
                 pos_++;
+                exp_digits++;
             }
+            if (exp_digits == 0) return false;
         }
         std::string num_str = src_.substr(start, pos_ - start);
-        if (is_float)
+        if (num_str.empty() || num_str == "-") return false;
+        try
         {
-            val = JsonValue(std::stod(num_str));
+            if (is_float)
+            {
+                double d = std::stod(num_str);
+                if (!std::isfinite(d)) return false;
+                val = JsonValue(d);
+            }
+            else
+            {
+                val = JsonValue(std::stoll(num_str));
+            }
+            return true;
         }
-        else
+        catch (...)
         {
-            val = JsonValue(std::stoll(num_str));
+            return false;
         }
-        return true;
     }
 
+    static constexpr size_t kMaxDepth{64};
     const std::string& src_;
     size_t pos_;
+    size_t depth_{0};
 };
 
 } // namespace

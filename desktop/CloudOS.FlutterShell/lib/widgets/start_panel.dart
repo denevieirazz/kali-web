@@ -1,7 +1,9 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../core/cloudos_theme.dart';
 import '../models/shell_models.dart';
+import '../services/cloudos_bridge.dart';
 import 'glass_surface.dart';
 
 class StartPanel extends StatefulWidget {
@@ -341,13 +343,38 @@ class _StartPanelState extends State<StartPanel> {
                     _FooterAction(
                       icon: Icons.lock_outline_rounded,
                       tooltip: 'Bloquear Sessão',
-                      onPressed: () {},
+                      onPressed: () {
+                        const CloudOSBridge().lockSession();
+                      },
                     ),
                     const SizedBox(width: 4),
                     _FooterAction(
                       icon: Icons.power_settings_new_rounded,
                       tooltip: 'Opções de Energia',
-                      onPressed: () {},
+                      onPressed: () {
+                        showDialog<void>(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            backgroundColor: const Color(0xFF101524),
+                            title: const Text('Opções de Energia CloudOS', style: TextStyle(color: Colors.white, fontSize: 15)),
+                            content: const Text('Selecione a ação desejada para o CloudOS:', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                            actions: <Widget>[
+                              TextButton(
+                                onPressed: () => Navigator.pop(ctx),
+                                child: const Text('Cancelar', style: TextStyle(color: Colors.white60)),
+                              ),
+                              ElevatedButton(
+                                style: ElevatedButton.styleFrom(backgroundColor: CloudOSColors.danger),
+                                onPressed: () {
+                                  Navigator.pop(ctx);
+                                  exit(0);
+                                },
+                                child: const Text('Sair do CloudOS', style: TextStyle(color: Colors.white)),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
                     ),
                   ],
                 ),

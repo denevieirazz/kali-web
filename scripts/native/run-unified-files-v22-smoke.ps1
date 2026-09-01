@@ -4,6 +4,8 @@
 param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $brokerBin = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\bin\Release\CloudOS.SystemBroker.exe'
 $probeBin = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\bin\Release\CloudOS.BrokerProbe.exe'
@@ -53,7 +55,7 @@ function Invoke-RawBrokerFrame {
         $client.Write($header, 0, $header.Length)
         if ($DeclaredLength -eq [uint32]::MaxValue -and $bytes.Length -gt 0) { $client.Write($bytes, 0, $bytes.Length) }
         $client.Flush()
-        if ($DeclaredLength -gt 1048576) { return }
+        if ($DeclaredLength -ne [uint32]::MaxValue -and $DeclaredLength -gt 1048576) { return }
         $responseHeader = [byte[]]::new(4); $offset = 0
         while ($offset -lt 4) { $read = $client.Read($responseHeader, $offset, 4 - $offset); if ($read -le 0) { throw 'Broker closed before controlled error response.' }; $offset += $read }
         $responseLength = [BitConverter]::ToUInt32($responseHeader, 0)

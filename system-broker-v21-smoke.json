@@ -6,7 +6,7 @@
   "handshake": true,
   "per_user_pipe_acl": true,
   "apps_list": true,
-  "apps_count": 18,
+  "apps_count": 13,
   "system_snapshot": true,
   "device_name": "DESKTOP-65BUITP",
   "wsl_available": true,
@@ -21,5 +21,5 @@
   "winlogon_modified": false,
   "explorer_terminated": false,
   "package_mutation": false,
-  "broker_exe_sha256": "285A90D1FB0689DF1C2B2BA34F0E26C8351D488865A7BF288B6A5D21CB08426C"
+  "broker_exe_sha256": "32EAA4CBF91E962A9BC65E83A77BB9B3F7064F4B12D4F4277FF9F9EC058FE357"
 }

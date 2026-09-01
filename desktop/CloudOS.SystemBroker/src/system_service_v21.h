@@ -25,6 +25,7 @@ struct SystemSnapshot final
     double brightness{0.0};
     bool wsl_available{false};
     std::vector<std::string> distros;
+    std::string default_distro;
     int current_workspace{1};
     uint64_t timestamp_ms{0};
 

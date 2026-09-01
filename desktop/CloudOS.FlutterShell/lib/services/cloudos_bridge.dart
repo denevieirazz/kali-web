@@ -1,9 +1,22 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/file_models.dart';
 import '../models/shell_models.dart' hide CloudFileItem;
+
+class TerminalDataEvent {
+  const TerminalDataEvent({required this.sessionId, required this.data});
+  final String sessionId;
+  final String data;
+}
+
+class TerminalExitEvent {
+  const TerminalExitEvent({required this.sessionId, required this.exitCode});
+  final String sessionId;
+  final int exitCode;
+}
 
 class CloudOSBridgeException implements Exception {
   const CloudOSBridgeException(this.code, this.message);
@@ -21,6 +34,40 @@ class CloudOSBridge {
   }) : _channel = channel;
 
   final MethodChannel _channel;
+  static bool _handlerInitialized = false;
+  static final StreamController<TerminalDataEvent> _terminalDataController =
+      StreamController<TerminalDataEvent>.broadcast();
+  static final StreamController<TerminalExitEvent> _terminalExitController =
+      StreamController<TerminalExitEvent>.broadcast();
+
+  Stream<TerminalDataEvent> get terminalDataStream {
+    _ensureChannelHandler();
+    return _terminalDataController.stream;
+  }
+
+  Stream<TerminalExitEvent> get terminalExitStream {
+    _ensureChannelHandler();
+    return _terminalExitController.stream;
+  }
+
+  void _ensureChannelHandler() {
+    if (_handlerInitialized) return;
+    _handlerInitialized = true;
+    _channel.setMethodCallHandler((call) async {
+      final method = call.method;
+      final args = call.arguments;
+
+      if (method == 'terminal.onData' && args is Map) {
+        final sid = args['sessionId'] as String? ?? '';
+        final data = args['data'] as String? ?? '';
+        _terminalDataController.add(TerminalDataEvent(sessionId: sid, data: data));
+      } else if (method == 'terminal.onExit' && args is Map) {
+        final sid = args['sessionId'] as String? ?? '';
+        final code = (args['exitCode'] as num?)?.toInt() ?? 0;
+        _terminalExitController.add(TerminalExitEvent(sessionId: sid, exitCode: code));
+      }
+    });
+  }
 
   Future<List<CloudApp>> loadApps() async {
     try {
@@ -62,6 +109,7 @@ class CloudOSBridge {
         distros:
             (raw['distros'] as List<Object?>?)?.whereType<String>().toList() ??
             const <String>[],
+        defaultDistro: raw['defaultDistro'] as String? ?? '',
         currentWorkspace: (raw['currentWorkspace'] as num?)?.toInt() ?? 1,
         batteryAvailable: raw['batteryAvailable'] as bool? ?? false,
         networkAvailable: raw['networkAvailable'] as bool? ?? false,
@@ -135,6 +183,120 @@ class CloudOSBridge {
       'channel': 'cloudos/native/v19',
       'arbitrary_command_api': false,
     };
+  }
+
+  Future<bool> lockSession() async {
+    try {
+      final res = await _channel.invokeMethod<bool>('lockSession');
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<Map<String, Object?>> getSystemMetrics() async {
+    try {
+      final raw = await _channel.invokeMapMethod<String, Object?>('getSystemMetrics');
+      if (raw != null) return raw;
+    } catch (_) {}
+    return const <String, Object?>{};
+  }
+
+  // ==========================================
+  // ConPTY Native Terminal Methods
+  // ==========================================
+
+  Future<String?> createTerminalSession({
+    String shellKind = 'powershell',
+    String distro = '',
+    int cols = 80,
+    int rows = 24,
+  }) async {
+    try {
+      final res = await _channel.invokeMapMethod<String, Object?>(
+        'terminal.createSession',
+        <String, Object?>{
+          'shellKind': shellKind,
+          'distro': distro,
+          'cols': cols,
+          'rows': rows,
+        },
+      );
+      return res?['sessionId'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> writeTerminal(String sessionId, String data) async {
+    try {
+      final res = await _channel.invokeMethod<bool>(
+        'terminal.write',
+        <String, Object?>{
+          'sessionId': sessionId,
+          'data': data,
+        },
+      );
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> resizeTerminal(String sessionId, int cols, int rows) async {
+    try {
+      final res = await _channel.invokeMethod<bool>(
+        'terminal.resize',
+        <String, Object?>{
+          'sessionId': sessionId,
+          'cols': cols,
+          'rows': rows,
+        },
+      );
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> signalTerminal(String sessionId, String signal) async {
+    try {
+      final res = await _channel.invokeMethod<bool>(
+        'terminal.signal',
+        <String, Object?>{
+          'sessionId': sessionId,
+          'signal': signal,
+        },
+      );
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> closeTerminal(String sessionId) async {
+    try {
+      final res = await _channel.invokeMethod<bool>(
+        'terminal.close',
+        <String, Object?>{
+          'sessionId': sessionId,
+        },
+      );
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<List<Map<String, Object?>>> listTerminalSessions() async {
+    try {
+      final res = await _channel.invokeListMethod<Map<String, Object?>>(
+        'terminal.listSessions',
+      );
+      return res ?? const <Map<String, Object?>>[];
+    } catch (_) {
+      return const <Map<String, Object?>>[];
+    }
   }
 
   // ==========================================

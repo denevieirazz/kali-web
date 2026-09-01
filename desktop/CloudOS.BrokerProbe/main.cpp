@@ -81,6 +81,8 @@ bool ReadFrame(HANDLE pipe, std::string& payload)
 
 int wmain(int argc, wchar_t* argv[])
 {
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
     const auto argument = [argc, argv](int index, const char* fallback = "") {
         return index < argc ? CloudOS::WideToUtf8(argv[index]) : std::string(fallback);
     };
@@ -165,6 +167,7 @@ int wmain(int argc, wchar_t* argv[])
     else if (cmd == "capabilities") method = "system.capabilities";
     else if (cmd == "apps") method = "apps.list";
     else if (cmd == "snapshot") method = "system.snapshot";
+    else if (cmd == "wsl") method = "wsl.list";
     else if (cmd == "diagnostics") method = "diagnostics.snapshot";
     else if (cmd == "drives") method = "files.drives";
     else if (cmd == "known-folders") method = "files.knownFolders";

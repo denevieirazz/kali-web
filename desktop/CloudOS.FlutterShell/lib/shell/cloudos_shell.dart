@@ -1,14 +1,32 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/cloudos_theme.dart';
 import '../models/shell_models.dart';
+import '../models/window_model.dart';
+import '../services/app_registry.dart';
 import '../services/cloudos_bridge.dart';
+import '../services/cloudos_logger.dart';
+import '../services/session_service.dart';
+import '../services/window_manager.dart';
+import '../widgets/alt_tab_overlay.dart';
+import '../widgets/browser_window.dart';
 import '../widgets/cloud_taskbar.dart';
+import '../widgets/cloudos_drive_window.dart';
+import '../widgets/context_menu.dart';
+import '../widgets/desktop_widgets.dart';
 import '../widgets/files_window.dart';
+import '../widgets/global_search_overlay.dart';
+import '../widgets/notepad_window.dart';
 import '../widgets/notification_center.dart';
+import '../widgets/projects_window.dart';
 import '../widgets/quick_settings_panel.dart';
+import '../widgets/settings_window.dart';
 import '../widgets/start_panel.dart';
+import '../widgets/system_monitor_window.dart';
+import '../widgets/terminal_window.dart';
+import '../widgets/window_frame.dart';
 
 class CloudOSShell extends StatefulWidget {
   const CloudOSShell({super.key, CloudOSBridge? bridge})
@@ -25,22 +43,53 @@ class _DefaultBridge extends CloudOSBridge {
 }
 
 class _CloudOSShellState extends State<CloudOSShell> {
+  final WindowManager windowManager = WindowManager();
   List<CloudApp> apps = const <CloudApp>[];
   CloudSystemSnapshot snapshot = CloudOSBridge.unavailableSnapshot;
   bool startOpen = false;
   bool quickSettingsOpen = false;
   bool notificationsOpen = false;
-  bool filesOpen = true;
-  bool browserOpen = false;
-  bool terminalOpen = false;
+  bool isAltTabOpen = false;
+  int altTabIndex = 0;
+  bool isGlobalSearchOpen = false;
   int currentWorkspace = 1;
   String? selectedDesktopIcon;
-  Offset filesOffset = const Offset(200, 70);
+  Offset? contextMenuPosition;
 
   @override
   void initState() {
     super.initState();
+    windowManager.addListener(_onWindowManagerUpdate);
     _loadBridgeData();
+    _restoreDesktopSession();
+  }
+
+  @override
+  void dispose() {
+    windowManager.removeListener(_onWindowManagerUpdate);
+    windowManager.dispose();
+    super.dispose();
+  }
+
+  void _onWindowManagerUpdate() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _restoreDesktopSession() async {
+    try {
+      final session = await SessionService.instance.loadSession();
+      if (session != null && mounted) {
+        final rawWindows = session['windows'] as List<dynamic>? ?? <dynamic>[];
+        final savedList = rawWindows.cast<Map<String, dynamic>>();
+        final savedWs = session['activeWorkspace'] as int? ?? 1;
+        if (savedList.isNotEmpty) {
+          windowManager.restoreSavedWindows(savedList, savedWs);
+          setState(() => currentWorkspace = savedWs);
+        }
+      }
+    } catch (e, st) {
+      CloudOSLogger.error('CloudOSShell', 'restoreSession', e, st);
+    }
   }
 
   Future<void> _loadBridgeData() async {
@@ -57,6 +106,9 @@ class _CloudOSShellState extends State<CloudOSShell> {
     startOpen = false;
     quickSettingsOpen = false;
     notificationsOpen = false;
+    isAltTabOpen = false;
+    isGlobalSearchOpen = false;
+    contextMenuPosition = null;
   }
 
   void _toggleStart() {
@@ -83,28 +135,38 @@ class _CloudOSShellState extends State<CloudOSShell> {
     });
   }
 
-  void _toggleFiles() {
+  void _toggleGlobalSearch() {
     setState(() {
-      filesOpen = !filesOpen;
+      final next = !isGlobalSearchOpen;
       _closeTransientPanels();
+      isGlobalSearchOpen = next;
     });
   }
 
-  void _toggleBrowser() {
+  void _toggleAltTab() {
+    final wins = windowManager.currentWorkspaceWindows;
+    if (wins.isEmpty) return;
+
     setState(() {
-      browserOpen = !browserOpen;
-      _closeTransientPanels();
+      if (!isAltTabOpen) {
+        isAltTabOpen = true;
+        altTabIndex = wins.length > 1 ? 1 : 0;
+      } else {
+        altTabIndex = (altTabIndex + 1) % wins.length;
+      }
     });
   }
 
-  void _toggleTerminal() {
-    setState(() {
-      terminalOpen = !terminalOpen;
-      _closeTransientPanels();
-    });
+  void _confirmAltTab(int index) {
+    final wins = windowManager.currentWorkspaceWindows;
+    if (index >= 0 && index < wins.length) {
+      windowManager.focusWindow(wins[index].id);
+    }
+    setState(() => isAltTabOpen = false);
   }
 
   void _switchWorkspace(int index) {
+    windowManager.setWorkspace(index);
     setState(() {
       currentWorkspace = index;
       _closeTransientPanels();
@@ -112,177 +174,397 @@ class _CloudOSShellState extends State<CloudOSShell> {
   }
 
   Future<void> _launchApp(CloudApp app) async {
-    if (app.id == 'files') {
-      setState(() {
-        filesOpen = true;
-        _closeTransientPanels();
-      });
+    final def = AppRegistry.findById(app.id);
+    if (def != null && def.isInternal) {
+      windowManager.openWindow(app.id);
+      if (mounted) setState(_closeTransientPanels);
       return;
     }
-    if (app.id == 'browser') {
-      setState(() {
-        browserOpen = true;
-        _closeTransientPanels();
-      });
+
+    final norm = app.id.toLowerCase();
+    if (norm == 'files' || norm == 'cloudos:files') {
+      windowManager.openWindow('cloudos:files');
+      if (mounted) setState(_closeTransientPanels);
       return;
     }
-    if (app.id == 'terminal' || app.id == 'ubuntu-terminal') {
-      setState(() {
-        terminalOpen = true;
-        _closeTransientPanels();
-      });
+    if (norm == 'terminal' || norm == 'cloudos:terminal') {
+      windowManager.openWindow('cloudos:terminal');
+      if (mounted) setState(_closeTransientPanels);
       return;
     }
+    if (norm == 'browser' || norm == 'cloudos:browser') {
+      windowManager.openWindow('cloudos:browser');
+      if (mounted) setState(_closeTransientPanels);
+      return;
+    }
+    if (norm == 'settings' || norm == 'cloudos:settings') {
+      windowManager.openWindow('cloudos:settings');
+      if (mounted) setState(_closeTransientPanels);
+      return;
+    }
+    if (norm == 'notepad' || norm == 'cloudos:notepad' || norm == 'windows:notepad') {
+      windowManager.openWindow('cloudos:notepad');
+      if (mounted) setState(_closeTransientPanels);
+      return;
+    }
+    if (norm.startsWith('wsl:')) {
+      windowManager.openWindow('wsl:terminal');
+      if (mounted) setState(_closeTransientPanels);
+      return;
+    }
+
     await widget.bridge.launchApp(app.id);
     if (!mounted) return;
     setState(_closeTransientPanels);
+  }
+
+  Widget _buildWindowContent(CloudWindow window) {
+    final appId = window.appId.toLowerCase();
+
+    if (appId == 'cloudos:files' || appId == 'files') {
+      return FilesWindow(
+        key: ValueKey<String>(window.id),
+        bridge: widget.bridge,
+        windowManager: windowManager,
+      );
+    }
+
+    if (appId == 'cloudos:terminal' || appId == 'terminal') {
+      return TerminalWindow(
+        key: ValueKey<String>(window.id),
+        bridge: widget.bridge,
+      );
+    }
+
+    if (appId.startsWith('wsl:')) {
+      return TerminalWindow(
+        key: ValueKey<String>(window.id),
+        bridge: widget.bridge,
+        initialShell: TerminalShellKind.wsl,
+      );
+    }
+
+    if (appId == 'cloudos:browser' || appId == 'browser') {
+      return BrowserWindow(
+        key: ValueKey<String>(window.id),
+        bridge: widget.bridge,
+        isVisible:
+            window.workspaceIndex == windowManager.activeWorkspace &&
+            !window.minimized,
+      );
+    }
+
+    if (appId == 'cloudos:notepad' || appId == 'notepad') {
+      final initialPath = window.customParams['initialFilePath'] as String?;
+      return NotepadWindow(
+        key: ValueKey<String>(window.id),
+        bridge: widget.bridge,
+        initialFilePath: initialPath,
+      );
+    }
+
+    if (appId == 'cloudos:settings' || appId == 'settings') {
+      return SettingsWindow(
+        key: ValueKey<String>(window.id),
+        bridge: widget.bridge,
+      );
+    }
+
+    if (appId == 'cloudos:system-monitor' || appId == 'system-monitor') {
+      return SystemMonitorWindow(
+        key: ValueKey<String>(window.id),
+        bridge: widget.bridge,
+      );
+    }
+
+    if (appId == 'cloudos:projects' || appId == 'projects') {
+      return ProjectsWindow(
+        key: ValueKey<String>(window.id),
+        bridge: widget.bridge,
+        windowManager: windowManager,
+      );
+    }
+
+    if (appId == 'cloudos:drive' || appId == 'drive') {
+      return CloudOSDriveWindow(
+        key: ValueKey<String>(window.id),
+        bridge: widget.bridge,
+        windowManager: windowManager,
+      );
+    }
+
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: <Widget>[
+          Icon(window.icon, size: 48, color: CloudOSColors.accent),
+          const SizedBox(height: 16),
+          Text(
+            window.title,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Aplicação ID: ${window.appId}',
+            style: const TextStyle(fontSize: 12, color: Colors.white60, fontFamily: 'Consolas'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<ContextMenuItemData> _getDesktopContextMenuItems() {
+    return <ContextMenuItemData>[
+      ContextMenuItemData(
+        title: 'Nova Pasta',
+        icon: Icons.create_new_folder_outlined,
+        onTap: () {
+          try {
+            final desktopDir = Directory('${Platform.environment['USERPROFILE'] ?? r"C:\"}\\Desktop');
+            int count = 1;
+            Directory target = Directory('${desktopDir.path}\\Nova Pasta');
+            while (target.existsSync()) {
+              count++;
+              target = Directory('${desktopDir.path}\\Nova Pasta ($count)');
+            }
+            target.createSync(recursive: true);
+            _loadBridgeData();
+          } catch (e, st) {
+            CloudOSLogger.error('CloudOSShell', 'createDesktopFolder', e, st);
+          }
+        },
+      ),
+      ContextMenuItemData(
+        title: 'Novo Documento de Texto',
+        icon: Icons.note_add_outlined,
+        onTap: () {
+          windowManager.openWindow('cloudos:notepad');
+        },
+      ),
+      const ContextMenuItemData(isDivider: true, title: '', icon: Icons.circle),
+      ContextMenuItemData(
+        title: 'Abrir Terminal Aqui',
+        icon: Icons.terminal_rounded,
+        shortcut: 'Ctrl+Alt+T',
+        onTap: () => windowManager.openWindow('cloudos:terminal'),
+      ),
+      ContextMenuItemData(
+        title: 'Abrir Explorador de Arquivos',
+        icon: Icons.folder_open_rounded,
+        shortcut: 'Ctrl+Alt+E',
+        onTap: () => windowManager.openWindow('cloudos:files'),
+      ),
+      ContextMenuItemData(
+        title: 'Configurações do Sistema',
+        icon: Icons.settings_rounded,
+        onTap: () => windowManager.openWindow('cloudos:settings'),
+      ),
+      ContextMenuItemData(
+        title: 'Atualizar Área de Trabalho',
+        icon: Icons.refresh_rounded,
+        shortcut: 'F5',
+        onTap: () => _loadBridgeData(),
+      ),
+    ];
   }
 
   @override
   Widget build(BuildContext context) {
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
-        const SingleActivator(
-          LogicalKeyboardKey.keyE,
-          control: true,
-          alt: true,
-        ): _toggleFiles,
-        const SingleActivator(
-          LogicalKeyboardKey.keyQ,
-          control: true,
-          alt: true,
-        ): _toggleQuickSettings,
-        const SingleActivator(
-          LogicalKeyboardKey.keyN,
-          control: true,
-          alt: true,
-        ): _toggleNotifications,
-        const SingleActivator(
-          LogicalKeyboardKey.keyS,
-          control: true,
-          alt: true,
-        ): _toggleStart,
-        const SingleActivator(
-          LogicalKeyboardKey.keyA,
-          control: true,
-          alt: true,
-        ): _toggleStart,
-        const SingleActivator(LogicalKeyboardKey.escape): () =>
-            setState(_closeTransientPanels),
-        const SingleActivator(
-          LogicalKeyboardKey.digit1,
-          control: true,
-          alt: true,
-        ): () =>
-            _switchWorkspace(1),
-        const SingleActivator(
-          LogicalKeyboardKey.digit2,
-          control: true,
-          alt: true,
-        ): () =>
-            _switchWorkspace(2),
-        const SingleActivator(
-          LogicalKeyboardKey.digit3,
-          control: true,
-          alt: true,
-        ): () =>
-            _switchWorkspace(3),
-        const SingleActivator(
-          LogicalKeyboardKey.digit4,
-          control: true,
-          alt: true,
-        ): () =>
-            _switchWorkspace(4),
+        const SingleActivator(LogicalKeyboardKey.keyE, control: true, alt: true): () => windowManager.toggleWindow('cloudos:files'),
+        const SingleActivator(LogicalKeyboardKey.keyT, control: true, alt: true): () => windowManager.toggleWindow('cloudos:terminal'),
+        const SingleActivator(LogicalKeyboardKey.keyB, control: true, alt: true): () => windowManager.toggleWindow('cloudos:browser'),
+        const SingleActivator(LogicalKeyboardKey.keyQ, control: true, alt: true): _toggleQuickSettings,
+        const SingleActivator(LogicalKeyboardKey.keyN, control: true, alt: true): _toggleNotifications,
+        const SingleActivator(LogicalKeyboardKey.keyS, control: true, alt: true): _toggleStart,
+        const SingleActivator(LogicalKeyboardKey.space, control: true): _toggleGlobalSearch,
+        const SingleActivator(LogicalKeyboardKey.tab, alt: true): _toggleAltTab,
+        const SingleActivator(LogicalKeyboardKey.escape): () => setState(_closeTransientPanels),
+        const SingleActivator(LogicalKeyboardKey.digit1, control: true, alt: true): () => _switchWorkspace(1),
+        const SingleActivator(LogicalKeyboardKey.digit2, control: true, alt: true): () => _switchWorkspace(2),
+        const SingleActivator(LogicalKeyboardKey.digit3, control: true, alt: true): () => _switchWorkspace(3),
+        const SingleActivator(LogicalKeyboardKey.digit4, control: true, alt: true): () => _switchWorkspace(4),
       },
       child: Focus(
         autofocus: true,
         child: Scaffold(
           body: LayoutBuilder(
             builder: (context, constraints) {
-              final maxLeft = constraints.maxWidth > 1000
-                  ? constraints.maxWidth - 980
-                  : 20.0;
-              final maxTop = constraints.maxHeight > 700
-                  ? constraints.maxHeight - 660
-                  : 20.0;
-              final safeLeft = filesOffset.dx.clamp(20.0, maxLeft).toDouble();
-              final safeTop = filesOffset.dy.clamp(20.0, maxTop).toDouble();
+              final viewportSize = Size(constraints.maxWidth, constraints.maxHeight);
+              windowManager.ensureWithinBounds(viewportSize);
 
               return GestureDetector(
                 onTap: () {
                   if (startOpen ||
                       quickSettingsOpen ||
                       notificationsOpen ||
-                      selectedDesktopIcon != null) {
+                      isAltTabOpen ||
+                      isGlobalSearchOpen ||
+                      selectedDesktopIcon != null ||
+                      contextMenuPosition != null) {
                     setState(() {
                       _closeTransientPanels();
                       selectedDesktopIcon = null;
                     });
                   }
                 },
+                onSecondaryTapDown: (details) {
+                  setState(() {
+                    _closeTransientPanels();
+                    contextMenuPosition = details.globalPosition;
+                  });
+                },
                 behavior: HitTestBehavior.opaque,
                 child: Stack(
                   fit: StackFit.expand,
                   children: <Widget>[
+                    // Fundo Wallpaper Estilizado
                     const RepaintBoundary(child: _Wallpaper()),
+
+                    // Desktop Widgets (Canto Superior Direito)
                     Positioned(
-                      left: 20,
-                      top: 20,
+                      right: 24,
+                      top: 24,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: <Widget>[
+                          const DesktopClockWidget(),
+                          const SizedBox(height: 12),
+                          DesktopMetricsWidget(bridge: widget.bridge),
+                        ],
+                      ),
+                    ),
+
+                    // Ícones da Área de Trabalho (2 Colunas)
+                    Positioned(
+                      left: 16,
+                      top: 16,
+                      bottom: 56,
                       child: RepaintBoundary(
                         child: _DesktopIcons(
                           selectedId: selectedDesktopIcon,
-                          onSelect: (id) =>
-                              setState(() => selectedDesktopIcon = id),
-                          onFiles: _toggleFiles,
+                          onSelect: (id) => setState(() => selectedDesktopIcon = id),
+                          onFiles: () => windowManager.openWindow('cloudos:files'),
                           onStart: _toggleStart,
-                          onTerminal: _toggleTerminal,
-                          onOpenSettings: _toggleQuickSettings,
+                          onTerminal: () => windowManager.openWindow('cloudos:terminal'),
+                          onOpenSettings: () => windowManager.openWindow('cloudos:settings'),
+                          onBrowser: () => windowManager.openWindow('cloudos:browser'),
+                          onDrive: () => windowManager.openWindow('cloudos:drive'),
+                          onProjects: () => windowManager.openWindow('cloudos:projects'),
+                          onSystemMonitor: () => windowManager.openWindow('cloudos:system-monitor'),
+                          onWsl: () => windowManager.openWindow('wsl:terminal'),
+                          onNotepad: () => windowManager.openWindow('cloudos:notepad'),
                         ),
                       ),
                     ),
-                    Positioned(
-                      top: 18,
-                      right: 18,
-                      child: RepaintBoundary(
-                        child: _DesktopStatus(
-                          snapshot: snapshot,
-                          currentWorkspace: currentWorkspace,
+
+                    // Snap Ghost Box Preview (Ao aproximar das bordas)
+                    if (windowManager.activeSnapPreview != SnapRegion.none)
+                      _buildSnapGhost(windowManager.activeSnapPreview, viewportSize),
+
+                    // Renderização das Janelas do Workspace Atual
+                    for (final win in windowManager.windows)
+                      Positioned.fill(
+                        key: ValueKey<String>('window-holder-${win.id}'),
+                        child: Offstage(
+                          offstage:
+                              win.workspaceIndex !=
+                                  windowManager.activeWorkspace ||
+                              win.minimized,
+                          child: Stack(
+                            children: <Widget>[
+                              WindowFrame(
+                                key: ValueKey<String>(win.id),
+                                window: win,
+                                windowManager: windowManager,
+                                viewportSize: viewportSize,
+                                child: _buildWindowContent(win),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-                    if (filesOpen)
-                      Positioned(
-                        left: safeLeft,
-                        top: safeTop,
-                        child: FilesWindow(
-                          onClose: () => setState(() => filesOpen = false),
-                          onMinimize: () => setState(() => filesOpen = false),
-                          onDrag: (delta) =>
-                              setState(() => filesOffset += delta),
-                          bridge: widget.bridge,
-                        ),
-                      ),
+
+                    // Painéis Transitórios (Start, Quick Settings, Notifications)
                     _panelSwitcher(),
+
+                    // Barra de Tarefas Contínua na Base
                     CloudTaskbar(
                       startOpen: startOpen,
                       quickSettingsOpen: quickSettingsOpen,
                       notificationsOpen: notificationsOpen,
-                      filesRunning: filesOpen,
-                      browserRunning: browserOpen,
-                      terminalRunning: terminalOpen,
                       currentWorkspace: currentWorkspace,
                       onWorkspaceChanged: _switchWorkspace,
                       onStart: _toggleStart,
-                      onFiles: _toggleFiles,
-                      onBrowser: _toggleBrowser,
-                      onTerminal: _toggleTerminal,
+                      onFiles: () => windowManager.toggleWindow('cloudos:files'),
+                      onBrowser: () => windowManager.toggleWindow('cloudos:browser'),
+                      onTerminal: () => windowManager.toggleWindow('cloudos:terminal'),
                       onQuickSettings: _toggleQuickSettings,
                       onNotifications: _toggleNotifications,
+                      windowManager: windowManager,
                     ),
+
+                    // Alt+Tab Overlay Interno
+                    if (isAltTabOpen)
+                      AltTabOverlay(
+                        windows: windowManager.currentWorkspaceWindows,
+                        selectedIndex: altTabIndex,
+                        onSelect: _confirmAltTab,
+                        onClose: () => setState(() => isAltTabOpen = false),
+                      ),
+
+                    // Busca Global Overlay (Spotlight)
+                    if (isGlobalSearchOpen)
+                      GlobalSearchOverlay(
+                        apps: apps,
+                        onSelectApp: (id) => windowManager.openWindow(id),
+                        onClose: () => setState(() => isGlobalSearchOpen = false),
+                      ),
+
+                    // Menu de Contexto Suspenso (Botão Direito)
+                    if (contextMenuPosition != null)
+                      ContextMenuOverlay(
+                        position: contextMenuPosition!,
+                        items: _getDesktopContextMenuItems(),
+                        onDismiss: () => setState(() => contextMenuPosition = null),
+                      ),
                   ],
                 ),
               );
             },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSnapGhost(SnapRegion region, Size viewportSize) {
+    double left = 0;
+    double top = 0;
+    double width = viewportSize.width;
+    double height = viewportSize.height - 48.0;
+
+    if (region == SnapRegion.left) {
+      width = viewportSize.width / 2.0;
+    } else if (region == SnapRegion.right) {
+      left = viewportSize.width / 2.0;
+      width = viewportSize.width / 2.0;
+    }
+
+    return Positioned(
+      left: left,
+      top: top,
+      width: width,
+      height: height,
+      child: Container(
+        margin: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: CloudOSColors.accent.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: CloudOSColors.accent.withValues(alpha: 0.6),
+            width: 2,
           ),
         ),
       ),
@@ -307,8 +589,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
         onOpenSettings: () {
           setState(() {
             quickSettingsOpen = false;
-            startOpen = true;
           });
+          windowManager.openWindow('cloudos:settings');
         },
       );
     } else if (notificationsOpen) {
@@ -345,52 +627,24 @@ class _Wallpaper extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: <Widget>[
-        const DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: <Color>[
-                Color(0xFF070B10),
-                Color(0xFF0D141E),
-                Color(0xFF090E16),
-              ],
-            ),
-          ),
-        ),
-        Positioned(
-          right: -100,
-          top: -120,
-          child: Container(
-            width: 500,
-            height: 500,
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: RadialGradient(
-                colors: <Color>[Color(0x184C9AFF), Color(0x004C9AFF)],
+        Image.asset(
+          'assets/wallpapers/cloudos_dark_bg.png',
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            return const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: Alignment(0.1, 0.0),
+                  radius: 0.85,
+                  colors: <Color>[
+                    Color(0xFF1E1035),
+                    Color(0xFF0C0718),
+                    Color(0xFF05070B),
+                  ],
+                ),
               ),
-            ),
-          ),
-        ),
-        Positioned(
-          left: 120,
-          bottom: -150,
-          child: Container(
-            width: 540,
-            height: 540,
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: RadialGradient(
-                colors: <Color>[Color(0x1443C780), Color(0x0043C780)],
-              ),
-            ),
-          ),
-        ),
-        const Center(
-          child: Opacity(
-            opacity: 0.035,
-            child: Icon(Icons.cloud_rounded, size: 400, color: Colors.white),
-          ),
+            );
+          },
         ),
       ],
     );
@@ -405,6 +659,12 @@ class _DesktopIcons extends StatelessWidget {
     required this.onStart,
     required this.onTerminal,
     required this.onOpenSettings,
+    required this.onBrowser,
+    required this.onDrive,
+    required this.onProjects,
+    required this.onSystemMonitor,
+    required this.onWsl,
+    required this.onNotepad,
   });
 
   final String? selectedId;
@@ -413,71 +673,118 @@ class _DesktopIcons extends StatelessWidget {
   final VoidCallback onStart;
   final VoidCallback onTerminal;
   final VoidCallback onOpenSettings;
+  final VoidCallback onBrowser;
+  final VoidCallback onDrive;
+  final VoidCallback onProjects;
+  final VoidCallback onSystemMonitor;
+  final VoidCallback onWsl;
+  final VoidCallback onNotepad;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        _DesktopIcon(
-          id: 'files',
-          label: 'Arquivos',
-          icon: Icons.folder_rounded,
-          color: CloudOSColors.accent,
-          isSelected: selectedId == 'files',
-          onTap: () => onSelect('files'),
-          onDoubleTap: onFiles,
+        // Coluna 1
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            _DesktopIcon(
+              id: 'files',
+              label: 'Arquivos',
+              icon: Icons.folder_rounded,
+              iconColor: const Color(0xFF38BDF8),
+              isSelected: selectedId == 'files',
+              onTap: () => onSelect('files'),
+              onDoubleTap: onFiles,
+            ),
+            const SizedBox(height: 14),
+            _DesktopIcon(
+              id: 'terminal',
+              label: 'Terminal',
+              icon: Icons.terminal_rounded,
+              iconColor: const Color(0xFF10B981),
+              isSelected: selectedId == 'terminal',
+              onTap: () => onSelect('terminal'),
+              onDoubleTap: onTerminal,
+            ),
+            const SizedBox(height: 14),
+            _DesktopIcon(
+              id: 'browser',
+              label: 'Navegador',
+              icon: Icons.public_rounded,
+              iconColor: const Color(0xFF06B6D4),
+              isSelected: selectedId == 'browser',
+              onTap: () => onSelect('browser'),
+              onDoubleTap: onBrowser,
+            ),
+            const SizedBox(height: 14),
+            _DesktopIcon(
+              id: 'notepad',
+              label: 'Bloco de Notas',
+              icon: Icons.edit_note_rounded,
+              iconColor: const Color(0xFFF59E0B),
+              isSelected: selectedId == 'notepad',
+              onTap: () => onSelect('notepad'),
+              onDoubleTap: onNotepad,
+            ),
+          ],
         ),
-        const SizedBox(height: 10),
-        _DesktopIcon(
-          id: 'apps',
-          label: 'Aplicativos',
-          icon: Icons.apps_rounded,
-          color: CloudOSColors.success,
-          isSelected: selectedId == 'apps',
-          onTap: () => onSelect('apps'),
-          onDoubleTap: onStart,
-        ),
-        const SizedBox(height: 10),
-        _DesktopIcon(
-          id: 'ubuntu',
-          label: 'Ubuntu WSL',
-          icon: Icons.terminal_rounded,
-          color: CloudOSColors.linux,
-          badge: 'WSL2',
-          isSelected: selectedId == 'ubuntu',
-          onTap: () => onSelect('ubuntu'),
-          onDoubleTap: onTerminal,
-        ),
-        const SizedBox(height: 10),
-        _DesktopIcon(
-          id: 'drive',
-          label: 'CloudOS Drive',
-          icon: Icons.cloud_circle_rounded,
-          color: CloudOSColors.accent,
-          isSelected: selectedId == 'drive',
-          onTap: () => onSelect('drive'),
-          onDoubleTap: onFiles,
-        ),
-        const SizedBox(height: 10),
-        _DesktopIcon(
-          id: 'settings',
-          label: 'Configurações',
-          icon: Icons.settings_rounded,
-          color: CloudOSColors.secondary,
-          isSelected: selectedId == 'settings',
-          onTap: () => onSelect('settings'),
-          onDoubleTap: onOpenSettings,
-        ),
-        const SizedBox(height: 10),
-        _DesktopIcon(
-          id: 'trash',
-          label: 'Lixeira',
-          icon: Icons.delete_outline_rounded,
-          color: CloudOSColors.caption,
-          isSelected: selectedId == 'trash',
-          onTap: () => onSelect('trash'),
-          onDoubleTap: onFiles,
+        const SizedBox(width: 14),
+        // Coluna 2
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            _DesktopIcon(
+              id: 'drive',
+              label: 'CloudOS Drive',
+              icon: Icons.cloud_queue_rounded,
+              iconColor: const Color(0xFF818CF8),
+              isSelected: selectedId == 'drive',
+              onTap: () => onSelect('drive'),
+              onDoubleTap: onDrive,
+            ),
+            const SizedBox(height: 14),
+            _DesktopIcon(
+              id: 'projects',
+              label: 'Projetos',
+              icon: Icons.account_tree_rounded,
+              iconColor: const Color(0xFFA78BFA),
+              isSelected: selectedId == 'projects',
+              onTap: () => onSelect('projects'),
+              onDoubleTap: onProjects,
+            ),
+            const SizedBox(height: 14),
+            _DesktopIcon(
+              id: 'monitor',
+              label: 'Monitor',
+              icon: Icons.speed_rounded,
+              iconColor: const Color(0xFFEC4899),
+              isSelected: selectedId == 'monitor',
+              onTap: () => onSelect('monitor'),
+              onDoubleTap: onSystemMonitor,
+            ),
+            const SizedBox(height: 14),
+            _DesktopIcon(
+              id: 'wsl',
+              label: 'WSL Linux',
+              icon: Icons.auto_awesome_mosaic_rounded,
+              iconColor: const Color(0xFFEAB308),
+              isSelected: selectedId == 'wsl',
+              onTap: () => onSelect('wsl'),
+              onDoubleTap: onWsl,
+            ),
+            const SizedBox(height: 14),
+            _DesktopIcon(
+              id: 'settings',
+              label: 'Configurações',
+              icon: Icons.settings_rounded,
+              iconColor: const Color(0xFFE2E8F0),
+              isSelected: selectedId == 'settings',
+              onTap: () => onSelect('settings'),
+              onDoubleTap: onOpenSettings,
+            ),
+          ],
         ),
       ],
     );
@@ -489,8 +796,7 @@ class _DesktopIcon extends StatelessWidget {
     required this.id,
     required this.label,
     required this.icon,
-    required this.color,
-    this.badge,
+    required this.iconColor,
     this.isSelected = false,
     this.onTap,
     this.onDoubleTap,
@@ -499,8 +805,7 @@ class _DesktopIcon extends StatelessWidget {
   final String id;
   final String label;
   final IconData icon;
-  final Color color;
-  final String? badge;
+  final Color iconColor;
   final bool isSelected;
   final VoidCallback? onTap;
   final VoidCallback? onDoubleTap;
@@ -510,142 +815,47 @@ class _DesktopIcon extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       onDoubleTap: onDoubleTap,
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(6),
       child: Container(
-        width: 80,
-        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+        width: 76,
+        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
         decoration: BoxDecoration(
-          color: isSelected ? CloudOSColors.accentSoft : Colors.transparent,
-          borderRadius: BorderRadius.circular(10),
+          color: isSelected ? const Color(0x3338BDF8) : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
           border: Border.all(
-            color: isSelected ? CloudOSColors.accent : Colors.transparent,
+            color: isSelected ? const Color(0x6638BDF8) : Colors.transparent,
           ),
         ),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Stack(
-              clipBehavior: Clip.none,
-              children: <Widget>[
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: color.withValues(alpha: 0.28)),
-                  ),
-                  child: Icon(icon, color: color, size: 23),
-                ),
-                if (badge != null)
-                  Positioned(
-                    right: -4,
-                    bottom: -2,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 4,
-                        vertical: 1,
-                      ),
-                      decoration: BoxDecoration(
-                        color: CloudOSColors.elevated,
-                        borderRadius: BorderRadius.circular(4),
-                        border: Border.all(color: CloudOSColors.border),
-                      ),
-                      child: Text(
-                        badge!,
-                        style: const TextStyle(
-                          color: CloudOSColors.linux,
-                          fontSize: 8,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ),
+            Icon(
+              icon,
+              color: iconColor,
+              size: 28,
+              shadows: const <Shadow>[
+                Shadow(color: Colors.black87, blurRadius: 6, offset: Offset(0, 2)),
               ],
             ),
-            const SizedBox(height: 5),
+            const SizedBox(height: 3),
             Text(
               label,
               maxLines: 2,
               textAlign: TextAlign.center,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                color: CloudOSColors.text,
-                fontSize: 11,
+                color: Colors.white,
+                fontSize: 10,
                 fontWeight: FontWeight.w500,
-                shadows: <Shadow>[Shadow(color: Colors.black, blurRadius: 4)],
+                height: 1.15,
+                shadows: <Shadow>[
+                  Shadow(color: Colors.black, blurRadius: 6),
+                  Shadow(color: Colors.black87, blurRadius: 3),
+                ],
               ),
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _DesktopStatus extends StatelessWidget {
-  const _DesktopStatus({
-    required this.snapshot,
-    required this.currentWorkspace,
-  });
-
-  final CloudSystemSnapshot snapshot;
-  final int currentWorkspace;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: CloudOSColors.elevated.withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: CloudOSColors.border),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          const Icon(
-            Icons.cloud_done_rounded,
-            size: 15,
-            color: CloudOSColors.success,
-          ),
-          const SizedBox(width: 6),
-          const Text(
-            'CloudOS V22.1',
-            style: TextStyle(
-              color: CloudOSColors.text,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Container(width: 1, height: 12, color: CloudOSColors.border),
-          const SizedBox(width: 8),
-          Text(
-            'Área $currentWorkspace',
-            style: const TextStyle(
-              color: CloudOSColors.secondary,
-              fontSize: 11,
-            ),
-          ),
-          if (snapshot.wslAvailable) ...<Widget>[
-            const SizedBox(width: 8),
-            Container(width: 1, height: 12, color: CloudOSColors.border),
-            const SizedBox(width: 8),
-            const Icon(
-              Icons.terminal_rounded,
-              size: 14,
-              color: CloudOSColors.linux,
-            ),
-            const SizedBox(width: 4),
-            Text(
-              snapshot.distros.isEmpty ? 'WSL2' : snapshot.distros.first,
-              style: const TextStyle(
-                color: CloudOSColors.caption,
-                fontSize: 10.5,
-              ),
-            ),
-          ],
-        ],
       ),
     );
   }
