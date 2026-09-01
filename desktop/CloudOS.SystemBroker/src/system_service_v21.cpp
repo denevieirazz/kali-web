@@ -130,6 +130,7 @@ std::vector<std::string> SystemServiceV21::GetCapabilities()
         "health.status",
         "apps.list",
         "apps.launch",
+        "files.list",
         "system.snapshot",
         "system.network.read",
         "system.volume.read",
