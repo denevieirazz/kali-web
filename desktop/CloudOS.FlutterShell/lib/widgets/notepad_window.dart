@@ -1,9 +1,10 @@
-import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/cloudos_theme.dart';
+import '../services/broker_text_file_service.dart';
 import '../services/cloudos_bridge.dart';
 import '../services/cloudos_logger.dart';
 
@@ -22,6 +23,7 @@ class NotepadDocTab {
   final TextEditingController controller;
   final FocusNode focusNode;
   bool isModified = false;
+  bool suppressDirty = false;
 }
 
 class NotepadWindow extends StatefulWidget {
@@ -41,9 +43,8 @@ class NotepadWindow extends StatefulWidget {
 }
 
 class _NotepadWindowState extends State<NotepadWindow> {
-  static const int _maxEditorFileBytes = 16 * 1024 * 1024;
-
   final List<NotepadDocTab> _tabs = <NotepadDocTab>[];
+  late final BrokerTextFileService _textFiles;
   int _activeTabIndex = 0;
   int _tabCounter = 1;
   int _currentLine = 1;
@@ -52,6 +53,7 @@ class _NotepadWindowState extends State<NotepadWindow> {
   @override
   void initState() {
     super.initState();
+    _textFiles = BrokerTextFileService(widget.bridge);
     _createInitialTab();
   }
 
@@ -68,6 +70,7 @@ class _NotepadWindowState extends State<NotepadWindow> {
     tab.controller.addListener(() {
       if (!mounted || !_tabs.contains(tab)) return;
       _updateCursorPosition(tab);
+      if (tab.suppressDirty) return;
       if (!tab.isModified) {
         setState(() => tab.isModified = true);
       }
@@ -76,37 +79,10 @@ class _NotepadWindowState extends State<NotepadWindow> {
 
   void _createInitialTab() {
     final path = widget.initialFilePath;
-    String content = widget.initialContent ?? '';
-    String title = 'Sem título 1.txt';
-
-    if (path != null && path.isNotEmpty) {
-      title = path.split(RegExp(r'[\\/]')).last;
-      try {
-        final file = File(path);
-        if (file.existsSync()) {
-          final size = file.lengthSync();
-          if (size <= _maxEditorFileBytes) {
-            content = file.readAsStringSync();
-          } else {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              _showErrorSnackBar(
-                'O arquivo é maior que 16 MB e não será aberto no editor interno.',
-              );
-            });
-          }
-        }
-      } catch (error, stackTrace) {
-        CloudOSLogger.error(
-          'NotepadWindow',
-          'readInitialFileContent',
-          error,
-          stackTrace,
-        );
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _showErrorSnackBar('Não foi possível abrir o arquivo: $error');
-        });
-      }
-    }
+    final content = widget.initialContent ?? '';
+    final title = path != null && path.isNotEmpty
+        ? path.split(RegExp(r'[\\/]')).last
+        : 'Sem título 1.txt';
 
     final tab = NotepadDocTab(
       id: 'doc_${_tabCounter++}',
@@ -116,6 +92,38 @@ class _NotepadWindowState extends State<NotepadWindow> {
     );
     _tabs.add(tab);
     _attachTabListener(tab);
+
+    if (path != null && path.isNotEmpty && widget.initialContent == null) {
+      unawaited(_loadContentIntoTab(tab, path));
+    }
+  }
+
+  Future<void> _loadContentIntoTab(NotepadDocTab tab, String path) async {
+    try {
+      final content = await _textFiles.readText(path);
+      if (!mounted || !_tabs.contains(tab)) return;
+      tab.suppressDirty = true;
+      tab.controller.value = TextEditingValue(
+        text: content,
+        selection: const TextSelection.collapsed(offset: 0),
+      );
+      tab.suppressDirty = false;
+      setState(() {
+        tab.isModified = false;
+        _currentLine = 1;
+        _currentCol = 1;
+      });
+    } catch (error, stackTrace) {
+      tab.suppressDirty = false;
+      CloudOSLogger.error(
+        'NotepadWindow',
+        'loadInitialFileContent',
+        error,
+        stackTrace,
+      );
+      if (!mounted) return;
+      _showErrorSnackBar('Não foi possível abrir o arquivo: $error');
+    }
   }
 
   NotepadDocTab? get _activeTab =>
@@ -230,8 +238,10 @@ class _NotepadWindowState extends State<NotepadWindow> {
     }
 
     if (_tabs.length <= 1) {
+      tab.suppressDirty = true;
+      tab.controller.clear();
+      tab.suppressDirty = false;
       setState(() {
-        tab.controller.clear();
         tab.title = 'Sem título 1.txt';
         tab.filePath = null;
         tab.isModified = false;
@@ -256,12 +266,9 @@ class _NotepadWindowState extends State<NotepadWindow> {
   }
 
   Future<void> _openFileDialog() async {
-    final userProfile = Platform.environment['USERPROFILE'];
-    final pathCtrl = TextEditingController(
-      text: userProfile?.trim().isNotEmpty == true
-          ? '$userProfile\\Documents\\'
-          : '',
-    );
+    final preferredDirectory = await _textFiles.preferredDirectory();
+    if (!mounted) return;
+    final pathCtrl = TextEditingController(text: preferredDirectory ?? '');
     final selectedPath = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -275,7 +282,7 @@ class _NotepadWindowState extends State<NotepadWindow> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             const Text(
-              'Digite o caminho do arquivo:',
+              'Digite o caminho absoluto do arquivo:',
               style: TextStyle(color: Colors.white70, fontSize: 12.5),
             ),
             const SizedBox(height: 8),
@@ -324,21 +331,8 @@ class _NotepadWindowState extends State<NotepadWindow> {
 
   Future<void> _openFileFromPath(String path) async {
     try {
-      final file = File(path);
-      if (!await file.exists()) {
-        _showErrorSnackBar('O arquivo "$path" não foi encontrado no disco.');
-        return;
-      }
-
-      final length = await file.length();
-      if (length > _maxEditorFileBytes) {
-        _showErrorSnackBar(
-          'O arquivo é maior que 16 MB e não será aberto no editor interno.',
-        );
-        return;
-      }
-
-      final content = await file.readAsString();
+      final content = await _textFiles.readText(path);
+      if (!mounted) return;
       final title = path.split(RegExp(r'[\\/]')).last;
       final counter = _tabCounter++;
       final tab = NotepadDocTab(
@@ -369,13 +363,12 @@ class _NotepadWindowState extends State<NotepadWindow> {
 
     String? targetPath = tab.filePath;
     if (targetPath == null || targetPath.isEmpty || saveAs) {
-      final userProfile = Platform.environment['USERPROFILE'];
-      final defaultDir = userProfile?.trim().isNotEmpty == true
-          ? '$userProfile\\Documents'
-          : Directory.current.path;
-      final pathCtrl = TextEditingController(
-        text: '$defaultDir\\${tab.title}',
-      );
+      final preferredDirectory = await _textFiles.preferredDirectory();
+      if (!mounted) return;
+      final suggestedPath = preferredDirectory == null
+          ? ''
+          : _textFiles.joinPath(preferredDirectory, tab.title);
+      final pathCtrl = TextEditingController(text: suggestedPath);
 
       final chosen = await showDialog<String>(
         context: context,
@@ -390,7 +383,7 @@ class _NotepadWindowState extends State<NotepadWindow> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               const Text(
-                'Caminho de destino do arquivo:',
+                'Caminho absoluto de destino do arquivo:',
                 style: TextStyle(color: Colors.white70, fontSize: 12.5),
               ),
               const SizedBox(height: 8),
@@ -437,12 +430,12 @@ class _NotepadWindowState extends State<NotepadWindow> {
     }
 
     try {
-      final file = File(targetPath);
-      final parent = file.parent;
-      if (!await parent.exists()) {
-        await parent.create(recursive: true);
-      }
-      await file.writeAsString(tab.controller.text, flush: true);
+      await _textFiles.writeText(
+        targetPath,
+        tab.controller.text,
+        createParents: true,
+        overwrite: true,
+      );
 
       final title = targetPath.split(RegExp(r'[\\/]')).last;
       if (!mounted) return;
@@ -451,10 +444,10 @@ class _NotepadWindowState extends State<NotepadWindow> {
         tab.title = title;
         tab.isModified = false;
       });
-      _showSuccessSnackBar('Arquivo "$title" salvo no disco.');
+      _showSuccessSnackBar('Arquivo "$title" salvo pelo System Broker.');
     } catch (error, stackTrace) {
       CloudOSLogger.error('NotepadWindow', 'saveCurrentTab', error, stackTrace);
-      _showErrorSnackBar('Falha ao gravar arquivo no disco: $error');
+      _showErrorSnackBar('Falha ao gravar arquivo: $error');
     }
   }
 
