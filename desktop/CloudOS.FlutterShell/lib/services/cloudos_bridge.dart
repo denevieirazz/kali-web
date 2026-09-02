@@ -298,24 +298,12 @@ class CloudOSBridge {
       final raw =
           await _channel.invokeMapMethod<String, Object?>('getBridgeInfo');
       if (raw != null) return raw;
+      return degradedBridgeInfo;
     } on MissingPluginException {
-      // Preview fallback is intentional when the native host is unavailable.
+      return previewBridgeInfo;
     } on PlatformException {
-      // Preview fallback is intentional when the native bridge rejects a call.
+      return degradedBridgeInfo;
     }
-    return const <String, Object?>{
-      'schema': 21,
-      'version': 'v21-preview',
-      'bridge_type': 'PreviewFallback',
-      'brokerConnected': false,
-      'brokerState': 'degraded',
-      'channel': 'cloudos/native/v19',
-      'arbitrary_command_api': false,
-      'shell_surface_lifecycle': false,
-      'shell_workspace_control': false,
-      'shell_notification_authority': false,
-      'files_capability_actions': false,
-    };
   }
 
   static const previewSnapshot = CloudOSPreviewData.snapshot;
@@ -333,6 +321,35 @@ class CloudOSBridge {
     distros: <String>[],
     currentWorkspace: 1,
   );
+
+  static const previewBridgeInfo = <String, Object?>{
+    'schema': 21,
+    'version': 'v21-preview',
+    'bridge_type': 'PreviewFallback',
+    'brokerConnected': false,
+    'brokerState': 'preview',
+    'channel': 'cloudos/native/v19',
+    'arbitrary_command_api': false,
+    'shell_surface_lifecycle': false,
+    'shell_workspace_control': false,
+    'shell_notification_authority': false,
+    'files_capability_actions': false,
+  };
+
+  static const degradedBridgeInfo = <String, Object?>{
+    'schema': 21,
+    'version': 'v21-degraded',
+    'bridge_type': 'NativeBridgeUnavailable',
+    'brokerConnected': false,
+    'brokerState': 'degraded',
+    'channel': 'cloudos/native/v19',
+    'arbitrary_command_api': false,
+    'shell_surface_lifecycle': false,
+    'shell_workspace_control': false,
+    'shell_notification_authority': false,
+    'files_capability_actions': false,
+  };
+
   static const previewApps = CloudOSPreviewData.apps;
   static const previewFiles = CloudOSPreviewData.files;
   static const previewNotifications = CloudOSPreviewData.notifications;
