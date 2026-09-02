@@ -13,7 +13,7 @@ $evidenceDirectory = Join-Path $repoRoot 'TestResults\v23-text-smoke'
 $evidencePath = Join-Path $evidenceDirectory 'text-files-v23-smoke.json'
 $requestCounter = 0
 $results = [ordered]@{
-    schema = 231
+    schema = 232
     startedUtc = [DateTime]::UtcNow.ToString('o')
     readUtf8 = 'not-run'
     multiChunkAtomicWrite = 'not-run'
@@ -26,6 +26,13 @@ $results = [ordered]@{
 function Assert-True {
     param([bool]$Condition, [string]$Message)
     if (-not $Condition) { throw $Message }
+}
+
+function Format-RpcResult {
+    param($Value)
+    if ($null -eq $Value) { return '<null>' }
+    try { return ($Value | ConvertTo-Json -Depth 20 -Compress) }
+    catch { return '<unserializable>' }
 }
 
 function Remove-TextSandbox {
@@ -46,7 +53,9 @@ function Read-Exact {
     $offset = 0
     while ($offset -lt $Count) {
         $read = $Stream.Read($Buffer, $offset, $Count - $offset)
-        if ($read -le 0) { throw "Broker pipe closed with $($Count - $offset) bytes still expected." }
+        if ($read -le 0) {
+            throw "Broker pipe closed with $($Count - $offset) bytes still expected."
+        }
         $offset += $read
     }
 }
@@ -63,10 +72,11 @@ function Invoke-BrokerRpc {
     $client = [IO.Pipes.NamedPipeClientStream]::new('.', $pipeName, [IO.Pipes.PipeDirection]::InOut)
     try {
         $client.Connect(3000)
+        $requestId = "text-smoke-$script:requestCounter"
         $request = [ordered]@{
             protocol = 21
             type = 'request'
-            id = "text-smoke-$script:requestCounter"
+            id = $requestId
             method = $Method
             payload = $Payload
         } | ConvertTo-Json -Depth 12 -Compress
@@ -86,7 +96,9 @@ function Invoke-BrokerRpc {
             Read-Exact -Stream $client -Buffer $responseBytes -Count ([int]$responseLength)
         }
         $json = [Text.Encoding]::UTF8.GetString($responseBytes)
-        return ($json | ConvertFrom-Json -Depth 30)
+        $decoded = $json | ConvertFrom-Json -Depth 30
+        Assert-True ($decoded.id -eq $requestId) "Broker response id mismatch for $Method: $(Format-RpcResult $decoded)"
+        return $decoded
     }
     finally {
         $client.Dispose()
@@ -104,7 +116,7 @@ $broker = Start-Process -FilePath $brokerBin -PassThru -WindowStyle Hidden
 try {
     Start-Sleep -Milliseconds 700
     $ping = Invoke-BrokerRpc -Method 'health.ping' -Payload @{}
-    Assert-True ($ping.ok -eq $true -and $ping.payload.pong -eq $true) 'Initial Broker ping failed.'
+    Assert-True ($ping.ok -eq $true -and $ping.payload.pong -eq $true) "Initial Broker ping failed: $(Format-RpcResult $ping)"
 
     Remove-TextSandbox
     New-Item -ItemType Directory -Path $sandbox -Force | Out-Null
@@ -118,8 +130,8 @@ try {
         offsetBytes = 0
         maxBytes = 65536
     }
-    Assert-True ($read.ok -eq $true) "Broker-level read request failed: $($read | ConvertTo-Json -Compress)"
-    Assert-True ($read.payload.ok -eq $true) "Typed text read failed: $($read.payload.message)"
+    Assert-True ($read.ok -eq $true) "Broker-level read request failed: $(Format-RpcResult $read)"
+    Assert-True ($read.payload.ok -eq $true) "Typed text read failed: $(Format-RpcResult $read.payload)"
     Assert-True ([string]$read.payload.content -eq $readExpected) 'UTF-8 text read content mismatch.'
     Assert-True ($read.payload.eof -eq $true) 'Small UTF-8 text read should finish in one chunk.'
     $results.readUtf8 = 'pass'
@@ -142,7 +154,7 @@ try {
         createParents = $false
         overwrite = $true
     }
-    Assert-True ($write1.ok -eq $true -and $write1.payload.ok -eq $true) 'First text write chunk failed.'
+    Assert-True ($write1.ok -eq $true -and $write1.payload.ok -eq $true) "First text write chunk failed: $(Format-RpcResult $write1)"
     Assert-True ($write1.payload.committed -eq $false) 'First chunk committed before finalChunk.'
     Assert-True ([IO.File]::ReadAllText($atomicPath) -eq 'ORIGINAL') 'Target changed before atomic commit.'
     $tempPath = "$atomicPath.cloudos-write-$tx.tmp"
@@ -157,7 +169,7 @@ try {
         createParents = $false
         overwrite = $true
     }
-    Assert-True ($write2.ok -eq $true -and $write2.payload.ok -eq $true) 'Final text write chunk failed.'
+    Assert-True ($write2.ok -eq $true -and $write2.payload.ok -eq $true) "Final text write chunk failed: $(Format-RpcResult $write2)"
     Assert-True ($write2.payload.committed -eq $true) 'Final text chunk did not confirm atomic commit.'
     Assert-True (-not (Test-Path -LiteralPath $tempPath)) 'Committed text write left its transaction temp file.'
     Assert-True ([IO.File]::ReadAllText($atomicPath) -eq ($chunk1 + $chunk2)) 'Committed multi-chunk UTF-8 content mismatch.'
@@ -175,14 +187,14 @@ try {
         createParents = $false
         overwrite = $true
     }
-    Assert-True ($abortWrite.ok -eq $true -and $abortWrite.payload.ok -eq $true) 'Abort setup write failed.'
+    Assert-True ($abortWrite.ok -eq $true -and $abortWrite.payload.ok -eq $true) "Abort setup write failed: $(Format-RpcResult $abortWrite)"
     $abortTemp = "$abortPath.cloudos-write-$abortTx.tmp"
     Assert-True (Test-Path -LiteralPath $abortTemp) 'Abort setup did not create transaction temp.'
     $abort = Invoke-BrokerRpc -Method 'files.text.abortWrite' -Payload @{
         path = $abortPath
         transactionId = $abortTx
     }
-    Assert-True ($abort.ok -eq $true -and $abort.payload.ok -eq $true) 'Text abort RPC failed.'
+    Assert-True ($abort.ok -eq $true -and $abort.payload.ok -eq $true) "Text abort RPC failed: $(Format-RpcResult $abort)"
     Assert-True (-not (Test-Path -LiteralPath $abortTemp)) 'Text abort left transaction temp behind.'
     Assert-True (-not (Test-Path -LiteralPath $abortPath)) 'Text abort unexpectedly created target file.'
     $results.abort = 'pass'
@@ -198,8 +210,8 @@ try {
         createParents = $false
         overwrite = $true
     }
-    Assert-True ($tooLarge.ok -eq $true) 'Oversized typed chunk should be a controlled service-level rejection.'
-    Assert-True ($tooLarge.payload.ok -eq $false -and $tooLarge.payload.error -eq 'out_of_range') 'Oversized typed chunk was not rejected with out_of_range.'
+    Assert-True ($tooLarge.ok -eq $true) "Oversized typed chunk should be a controlled service-level rejection: $(Format-RpcResult $tooLarge)"
+    Assert-True ($tooLarge.payload.ok -eq $false -and $tooLarge.payload.error -eq 'out_of_range') "Oversized typed chunk was not rejected with out_of_range: $(Format-RpcResult $tooLarge)"
     $results.oversizedChunk = 'pass'
 
     # 5. UTF-16 is rejected instead of being silently corrupted as UTF-8.
@@ -210,12 +222,12 @@ try {
         offsetBytes = 0
         maxBytes = 65536
     }
-    Assert-True ($utf16.ok -eq $true) 'UTF-16 rejection should remain a controlled service response.'
-    Assert-True ($utf16.payload.ok -eq $false -and $utf16.payload.error -eq 'unsupported_encoding') 'UTF-16 file was not explicitly rejected.'
+    Assert-True ($utf16.ok -eq $true) "UTF-16 rejection should remain a controlled service response: $(Format-RpcResult $utf16)"
+    Assert-True ($utf16.payload.ok -eq $false -and $utf16.payload.error -eq 'unsupported_encoding') "UTF-16 file was not explicitly rejected: $(Format-RpcResult $utf16)"
     $results.utf16Rejected = 'pass'
 
     $finalPing = Invoke-BrokerRpc -Method 'health.ping' -Payload @{}
-    Assert-True ($finalPing.ok -eq $true -and $finalPing.payload.pong -eq $true) 'Broker stopped responding after text-file smoke.'
+    Assert-True ($finalPing.ok -eq $true -and $finalPing.payload.pong -eq $true) "Broker stopped responding after text-file smoke: $(Format-RpcResult $finalPing)"
     $results.brokerResponsive = 'pass'
     $results.completedUtc = [DateTime]::UtcNow.ToString('o')
     $results.verdict = 'pass'
