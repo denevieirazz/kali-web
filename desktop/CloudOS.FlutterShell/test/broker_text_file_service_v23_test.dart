@@ -140,7 +140,11 @@ void main() {
     test('rejects content larger than the editor limit before RPC', () async {
       final bridge = _TextBridge();
       final service = BrokerTextFileService(bridge);
-      final oversized = 'a' * (BrokerTextFileService.maxFileBytes + 1);
+      final oversized = List<String>.filled(
+        BrokerTextFileService.maxFileBytes + 1,
+        'a',
+        growable: false,
+      ).join();
 
       await expectLater(
         service.writeText(r'Z:\Work\too-large.txt', oversized),
