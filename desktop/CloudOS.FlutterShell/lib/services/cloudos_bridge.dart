@@ -110,7 +110,9 @@ class CloudOSBridge {
             (raw['distros'] as List<Object?>?)?.whereType<String>().toList() ??
             const <String>[],
         defaultDistro: raw['defaultDistro'] as String? ?? '',
-        currentWorkspace: (raw['currentWorkspace'] as num?)?.toInt() ?? 1,
+        // Workspace belongs to WindowManager + Session V3. Older Brokers may
+        // still send this field, but the shell does not use it as authority.
+        currentWorkspace: (raw['currentWorkspace'] as num?)?.toInt() ?? 0,
         batteryAvailable: raw['batteryAvailable'] as bool? ?? false,
         networkAvailable: raw['networkAvailable'] as bool? ?? false,
         volumeAvailable: raw['volumeAvailable'] as bool? ?? false,
@@ -170,17 +172,21 @@ class CloudOSBridge {
       );
       if (raw != null) return raw;
     } on MissingPluginException {
-      // Fallback
+      // The native runner is not registered in this process.
     } on PlatformException {
-      // Fallback
+      // The native runner rejected or could not service the request.
     }
     return const <String, Object?>{
-      'schema': 22,
-      'version': 'v22-preview',
-      'bridge_type': 'PreviewFallback',
+      'schema': 23,
+      'version': 'unavailable',
+      'bridge_type': 'Unavailable',
+      'nativeBridgeAvailable': false,
       'brokerConnected': false,
-      'brokerState': 'degraded',
+      'brokerState': 'unavailable',
       'channel': 'cloudos/native/v19',
+      'eventChannel': 'cloudos/native/events/v23',
+      'dedicatedEventTransportAvailable': false,
+      'generic_broker_rpc_restricted': true,
       'arbitrary_command_api': false,
     };
   }
@@ -632,303 +638,10 @@ class CloudOSBridge {
     batteryPercent: -1,
     wslAvailable: false,
     distros: <String>[],
-    currentWorkspace: 1,
+    currentWorkspace: 0,
     batteryAvailable: false,
     networkAvailable: false,
     volumeAvailable: false,
     brightnessAvailable: false,
   );
-
-  static const previewSnapshot = CloudSystemSnapshot(
-    deviceName: 'CloudOS Desktop',
-    networkName: 'CloudOS Network • Wi-Fi 6',
-    volume: 0.72,
-    brightness: 0.85,
-    batteryPercent: 92,
-    wslAvailable: true,
-    distros: <String>['Ubuntu 24.04 LTS'],
-    currentWorkspace: 1,
-  );
-
-  static const previewApps = <CloudApp>[
-    CloudApp(
-      id: 'files',
-      name: 'Arquivos',
-      icon: Icons.folder_rounded,
-      platform: CloudAppPlatform.cloudos,
-      subtitle: 'Windows + Linux',
-      category: 'Sistema',
-      isPinned: true,
-      isRecent: true,
-    ),
-    CloudApp(
-      id: 'browser',
-      name: 'Navegador Web',
-      icon: Icons.language_rounded,
-      platform: CloudAppPlatform.cloudos,
-      subtitle: 'Chromium / WebView2',
-      category: 'Produtividade',
-      isPinned: true,
-      isRecent: true,
-    ),
-    CloudApp(
-      id: 'terminal',
-      name: 'Terminal CloudOS',
-      icon: Icons.terminal_rounded,
-      platform: CloudAppPlatform.cloudos,
-      subtitle: 'PowerShell 7 / WSL',
-      category: 'Utilitários',
-      isPinned: true,
-      isRecent: true,
-    ),
-    CloudApp(
-      id: 'vscode',
-      name: 'Visual Studio Code',
-      icon: Icons.code_rounded,
-      platform: CloudAppPlatform.windows,
-      subtitle: 'Code Editor',
-      category: 'Produtividade',
-      isPinned: true,
-      isRecent: true,
-    ),
-    CloudApp(
-      id: 'notepad',
-      name: 'Bloco de Notas',
-      icon: Icons.edit_note_rounded,
-      platform: CloudAppPlatform.windows,
-      subtitle: 'Editor de Texto',
-      category: 'Produtividade',
-      isPinned: true,
-      isRecent: false,
-    ),
-    CloudApp(
-      id: 'gimp',
-      name: 'GIMP Image Editor',
-      icon: Icons.brush_rounded,
-      platform: CloudAppPlatform.linux,
-      subtitle: 'Ubuntu (WSLg)',
-      distro: 'Ubuntu',
-      category: 'Produtividade',
-      isPinned: true,
-      isRecent: false,
-    ),
-  ];
-
-  static const previewKnownFolders = <KnownFolderModel>[
-    KnownFolderModel(
-      id: 'home',
-      name: 'Início',
-      path: 'C:\\Users\\User',
-      iconKey: 'home',
-    ),
-    KnownFolderModel(
-      id: 'desktop',
-      name: 'Área de Trabalho',
-      path: 'C:\\Users\\User\\Desktop',
-      iconKey: 'desktop',
-    ),
-    KnownFolderModel(
-      id: 'documents',
-      name: 'Documentos',
-      path: 'C:\\Users\\User\\Documents',
-      iconKey: 'documents',
-    ),
-    KnownFolderModel(
-      id: 'downloads',
-      name: 'Downloads',
-      path: 'C:\\Users\\User\\Downloads',
-      iconKey: 'downloads',
-    ),
-    KnownFolderModel(
-      id: 'pictures',
-      name: 'Imagens',
-      path: 'C:\\Users\\User\\Pictures',
-      iconKey: 'pictures',
-    ),
-    KnownFolderModel(
-      id: 'videos',
-      name: 'Vídeos',
-      path: 'C:\\Users\\User\\Videos',
-      iconKey: 'videos',
-    ),
-    KnownFolderModel(
-      id: 'music',
-      name: 'Músicas',
-      path: 'C:\\Users\\User\\Music',
-      iconKey: 'music',
-    ),
-    KnownFolderModel(
-      id: 'wsl:Ubuntu',
-      name: 'Ubuntu (WSL)',
-      path: '\\\\wsl.localhost\\Ubuntu',
-      iconKey: 'linux',
-    ),
-  ];
-
-  static const previewDrives = <DriveInfoModel>[
-    DriveInfoModel(
-      letter: 'C:',
-      path: 'C:\\',
-      label: 'Disco Local (C:)',
-      filesystem: 'NTFS',
-      totalBytes: 512000000000,
-      freeBytes: 256000000000,
-      totalFormatted: '512.0 GB',
-      freeFormatted: '256.0 GB',
-      isRemovable: false,
-      isReady: true,
-      driveType: 'fixed',
-    ),
-  ];
-
-  static const previewOpenWith = <OpenWithAppModel>[
-    OpenWithAppModel(
-      appId: 'windows:default',
-      name: 'Aplicativo Padrão do Windows',
-      platform: 'windows',
-      distro: '',
-      iconKey: 'window',
-      isRecommended: true,
-      isDefault: true,
-    ),
-    OpenWithAppModel(
-      appId: 'windows:notepad',
-      name: 'Bloco de Notas (Windows)',
-      platform: 'windows',
-      distro: '',
-      iconKey: 'file_text',
-      isRecommended: true,
-      isDefault: false,
-    ),
-    OpenWithAppModel(
-      appId: 'windows:vscode',
-      name: 'Visual Studio Code',
-      platform: 'windows',
-      distro: '',
-      iconKey: 'code',
-      isRecommended: true,
-      isDefault: false,
-    ),
-    OpenWithAppModel(
-      appId: 'wsl:Ubuntu:gimp',
-      name: 'GIMP Image Editor (Ubuntu)',
-      platform: 'linux',
-      distro: 'Ubuntu',
-      iconKey: 'brush',
-      isRecommended: false,
-      isDefault: false,
-    ),
-  ];
-
-  static const previewFiles = <String, List<CloudFileItem>>{
-    'home': <CloudFileItem>[
-      CloudFileItem(
-        id: 'file-1',
-        name: 'Projetos CloudOS',
-        displayName: 'Projetos CloudOS',
-        path: 'C:\\Users\\User\\Documents\\Projetos',
-        canonicalPath: 'C:\\Users\\User\\Documents\\Projetos',
-        locationKind: LocationKind.windows,
-        fileKind: FileKind.folder,
-        extension: '',
-        size: 0,
-        sizeFormatted: '',
-        modifiedFormatted: 'Hoje, 14:20',
-        createdFormatted: 'Ontem',
-        isDirectory: true,
-        isHidden: false,
-        isReadOnly: false,
-        isSystem: false,
-        isSymlink: false,
-        distro: '',
-        iconKey: 'folder',
-      ),
-      CloudFileItem(
-        id: 'file-2',
-        name: 'Relatório de Arquitetura V22.docx',
-        displayName: 'Relatório de Arquitetura V22.docx',
-        path: 'C:\\Users\\User\\Documents\\Relatório.docx',
-        canonicalPath: 'C:\\Users\\User\\Documents\\Relatório.docx',
-        locationKind: LocationKind.windows,
-        fileKind: FileKind.document,
-        extension: '.docx',
-        size: 1048576,
-        sizeFormatted: '1.0 MB',
-        modifiedFormatted: 'Hoje, 11:05',
-        createdFormatted: 'Ontem',
-        isDirectory: false,
-        isHidden: false,
-        isReadOnly: false,
-        isSystem: false,
-        isSymlink: false,
-        distro: '',
-        iconKey: 'file_document',
-      ),
-      CloudFileItem(
-        id: 'file-3',
-        name: 'linux_workspace_ubuntu',
-        displayName: 'linux_workspace_ubuntu',
-        path: '\\\\wsl.localhost\\Ubuntu\\home\\user',
-        canonicalPath: '\\\\wsl.localhost\\Ubuntu\\home\\user',
-        locationKind: LocationKind.wsl,
-        fileKind: FileKind.folder,
-        extension: '',
-        size: 0,
-        sizeFormatted: '',
-        modifiedFormatted: 'Ontem, 19:42',
-        createdFormatted: '2 dias atrás',
-        isDirectory: true,
-        isHidden: false,
-        isReadOnly: false,
-        isSystem: false,
-        isSymlink: false,
-        distro: 'Ubuntu',
-        iconKey: 'folder',
-      ),
-      CloudFileItem(
-        id: 'file-4',
-        name: 'script_automacao.sh',
-        displayName: 'script_automacao.sh',
-        path: '\\\\wsl.localhost\\Ubuntu\\home\\user\\script.sh',
-        canonicalPath: '\\\\wsl.localhost\\Ubuntu\\home\\user\\script.sh',
-        locationKind: LocationKind.wsl,
-        fileKind: FileKind.code,
-        extension: '.sh',
-        size: 4096,
-        sizeFormatted: '4.0 KB',
-        modifiedFormatted: '28 de Ago',
-        createdFormatted: '28 de Ago',
-        isDirectory: false,
-        isHidden: false,
-        isReadOnly: false,
-        isSystem: false,
-        isSymlink: false,
-        distro: 'Ubuntu',
-        iconKey: 'file_code',
-      ),
-    ],
-  };
-
-  static const previewNotifications = <CloudNotification>[
-    CloudNotification(
-      id: 'notif-1',
-      title: 'CloudOS Atualizado',
-      message:
-          'A versão V22 do CloudOS com Unified Files foi carregada com sucesso.',
-      time: 'Agora',
-      icon: Icons.system_update_rounded,
-      source: 'Sistema',
-      category: 'Atualizações',
-    ),
-    CloudNotification(
-      id: 'notif-2',
-      title: 'WSL2 Conectado',
-      message:
-          'Ambiente Linux Ubuntu 24.04 LTS pronto para navegação e launch.',
-      time: 'Há 5m',
-      icon: Icons.terminal_rounded,
-      source: 'WSL Bridge',
-      category: 'Integração',
-    ),
-  ];
 }
