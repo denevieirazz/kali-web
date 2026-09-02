@@ -29,10 +29,23 @@ class TerminalTabItem {
   final FocusNode focusNode = FocusNode();
   String? sessionId;
   bool isRunning = false;
+  bool closeRequested = false;
+  bool _disposed = false;
   int cols = 80;
   int rows = 24;
 
+  bool get acceptsIo => !closeRequested && !_disposed && isRunning;
+
+  void markClosing() {
+    closeRequested = true;
+    isRunning = false;
+  }
+
   void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    closeRequested = true;
+    isRunning = false;
     focusNode.dispose();
   }
 }
@@ -56,6 +69,8 @@ class TerminalWindow extends StatefulWidget {
 }
 
 class _TerminalWindowState extends State<TerminalWindow> {
+  static const int maxTabs = 16;
+
   final List<TerminalTabItem> _tabs = <TerminalTabItem>[];
   int _activeTabIndex = 0;
   int _tabCounter = 1;
@@ -63,6 +78,7 @@ class _TerminalWindowState extends State<TerminalWindow> {
   String _defaultDistro = '';
   StreamSubscription<TerminalDataEvent>? _dataSub;
   StreamSubscription<TerminalExitEvent>? _exitSub;
+  bool _disposing = false;
 
   TerminalTabItem? get _activeTab =>
       _tabs.isNotEmpty && _activeTabIndex < _tabs.length
@@ -79,7 +95,8 @@ class _TerminalWindowState extends State<TerminalWindow> {
   Future<void> _initialize() async {
     try {
       final snapshot = await widget.bridge.loadSystemSnapshot();
-      _wslDistros = snapshot.distros;
+      if (!mounted || _disposing) return;
+      _wslDistros = List<String>.unmodifiable(snapshot.distros);
       _defaultDistro = snapshot.defaultDistro;
     } catch (error, stackTrace) {
       CloudOSLogger.error(
@@ -89,16 +106,16 @@ class _TerminalWindowState extends State<TerminalWindow> {
         stackTrace,
       );
     }
-    if (mounted) {
+    if (mounted && !_disposing && _tabs.isEmpty) {
       _createInitialTab();
     }
   }
 
   void _subscribeNativeStreams() {
     _dataSub = widget.bridge.terminalDataStream.listen((event) {
-      if (!mounted) return;
+      if (!mounted || _disposing) return;
       for (final tab in _tabs) {
-        if (tab.sessionId == event.sessionId) {
+        if (tab.sessionId == event.sessionId && tab.acceptsIo) {
           tab.terminal.write(event.data);
           break;
         }
@@ -106,13 +123,14 @@ class _TerminalWindowState extends State<TerminalWindow> {
     });
 
     _exitSub = widget.bridge.terminalExitStream.listen((event) {
-      if (!mounted) return;
+      if (!mounted || _disposing) return;
       for (final tab in _tabs) {
-        if (tab.sessionId == event.sessionId) {
+        if (tab.sessionId == event.sessionId && !tab.closeRequested) {
+          tab.isRunning = false;
           tab.terminal.write(
             '\r\n\x1b[90m[Processo finalizado com código ${event.exitCode}]\x1b[0m\r\n',
           );
-          setState(() => tab.isRunning = false);
+          if (mounted) setState(() {});
           break;
         }
       }
@@ -121,22 +139,27 @@ class _TerminalWindowState extends State<TerminalWindow> {
 
   @override
   void dispose() {
-    _dataSub?.cancel();
-    _exitSub?.cancel();
-    for (final tab in _tabs) {
+    _disposing = true;
+    unawaited(_dataSub?.cancel());
+    unawaited(_exitSub?.cancel());
+    _dataSub = null;
+    _exitSub = null;
+    for (final tab in List<TerminalTabItem>.from(_tabs)) {
       final sessionId = tab.sessionId;
-      if (sessionId != null) {
+      tab.markClosing();
+      if (sessionId != null && sessionId.isNotEmpty) {
         unawaited(widget.bridge.closeTerminal(sessionId));
       }
       tab.dispose();
     }
+    _tabs.clear();
     super.dispose();
   }
 
   void _createInitialTab() {
     final distro = widget.initialShell == TerminalShellKind.wsl
-        ? (widget.initialDistro?.isNotEmpty == true
-              ? widget.initialDistro!
+        ? (widget.initialDistro?.trim().isNotEmpty == true
+              ? widget.initialDistro!.trim()
               : _defaultDistro)
         : '';
     _addNewTab(
@@ -162,6 +185,18 @@ class _TerminalWindowState extends State<TerminalWindow> {
     String distro = '',
     String? workingDirectory,
   }) {
+    if (!mounted || _disposing) return;
+    if (_tabs.length >= maxTabs) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Limite de 16 terminais atingido. Feche uma aba antes de abrir outra.',
+          ),
+        ),
+      );
+      return;
+    }
+
     final resolvedDistro = kind == TerminalShellKind.wsl && distro.isEmpty
         ? _defaultDistro
         : distro;
@@ -181,28 +216,36 @@ class _TerminalWindowState extends State<TerminalWindow> {
     });
     unawaited(_startConPtySession(tab));
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) tab.focusNode.requestFocus();
+      if (mounted && !_disposing && _tabs.contains(tab) && !tab.closeRequested) {
+        tab.focusNode.requestFocus();
+      }
     });
   }
 
   void _configureTerminal(TerminalTabItem tab) {
     tab.terminal.onOutput = (data) {
       final sessionId = tab.sessionId;
-      if (sessionId != null && tab.isRunning) {
+      if (sessionId != null && sessionId.isNotEmpty && tab.acceptsIo) {
         unawaited(widget.bridge.writeTerminal(sessionId, data));
       }
     };
     tab.terminal.onResize = (cols, rows, pixelWidth, pixelHeight) {
-      if (cols == tab.cols && rows == tab.rows) return;
+      if (tab.closeRequested || cols == tab.cols && rows == tab.rows) return;
       tab.cols = cols;
       tab.rows = rows;
       final sessionId = tab.sessionId;
-      if (sessionId != null && tab.isRunning) {
+      if (sessionId != null && sessionId.isNotEmpty && tab.acceptsIo) {
         unawaited(widget.bridge.resizeTerminal(sessionId, cols, rows));
       }
     };
     tab.terminal.onTitleChange = (title) {
-      if (!mounted || title.trim().isEmpty || !_tabs.contains(tab)) return;
+      if (!mounted ||
+          _disposing ||
+          tab.closeRequested ||
+          title.trim().isEmpty ||
+          !_tabs.contains(tab)) {
+        return;
+      }
       setState(() => tab.title = title.trim());
     };
   }
@@ -221,8 +264,11 @@ class _TerminalWindowState extends State<TerminalWindow> {
         cols: tab.cols,
         rows: tab.rows,
       );
-      if (!mounted || !_tabs.contains(tab)) {
-        if (sessionId != null) {
+      if (!mounted ||
+          _disposing ||
+          tab.closeRequested ||
+          !_tabs.contains(tab)) {
+        if (sessionId != null && sessionId.isNotEmpty) {
           await widget.bridge.closeTerminal(sessionId);
         }
         return;
@@ -235,31 +281,66 @@ class _TerminalWindowState extends State<TerminalWindow> {
       }
       tab.sessionId = sessionId;
       tab.isRunning = true;
-      await widget.bridge.resizeTerminal(sessionId, tab.cols, tab.rows);
-      if (mounted) setState(() {});
+      final resized = await widget.bridge.resizeTerminal(
+        sessionId,
+        tab.cols,
+        tab.rows,
+      );
+      if (!mounted ||
+          _disposing ||
+          tab.closeRequested ||
+          !_tabs.contains(tab)) {
+        tab.markClosing();
+        await widget.bridge.closeTerminal(sessionId);
+        return;
+      }
+      if (!resized) {
+        CloudOSLogger.warn(
+          'TerminalWindow',
+          'initialResize',
+          'ConPTY session $sessionId started but rejected initial resize.',
+        );
+      }
+      setState(() {});
     } catch (error, stackTrace) {
+      if (tab.closeRequested || _disposing) return;
       CloudOSLogger.error(
         'TerminalWindow',
         'startConPtySession',
         error,
         stackTrace,
       );
-      tab.terminal.write('\r\n\x1b[31mErro ConPTY: $error\x1b[0m\r\n');
+      if (mounted && _tabs.contains(tab)) {
+        tab.terminal.write('\r\n\x1b[31mErro ConPTY: $error\x1b[0m\r\n');
+      }
     }
   }
 
   void _selectTab(int index) {
+    if (_disposing || index < 0 || index >= _tabs.length) return;
     setState(() => _activeTabIndex = index);
+    final tab = _tabs[index];
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _tabs[index].focusNode.requestFocus();
+      if (mounted &&
+          !_disposing &&
+          _tabs.contains(tab) &&
+          !tab.closeRequested) {
+        tab.focusNode.requestFocus();
+      }
     });
   }
 
   void _closeTab(int index) {
-    if (_tabs.length <= 1) return;
+    if (_disposing ||
+        _tabs.length <= 1 ||
+        index < 0 ||
+        index >= _tabs.length) {
+      return;
+    }
     final tab = _tabs.removeAt(index);
     final sessionId = tab.sessionId;
-    if (sessionId != null) {
+    tab.markClosing();
+    if (sessionId != null && sessionId.isNotEmpty) {
       unawaited(widget.bridge.closeTerminal(sessionId));
     }
     tab.dispose();
@@ -273,8 +354,9 @@ class _TerminalWindowState extends State<TerminalWindow> {
 
   void _sendCtrlC() {
     final tab = _activeTab;
-    final sessionId = tab?.sessionId;
-    if (sessionId != null && tab!.isRunning) {
+    if (tab == null || !tab.acceptsIo) return;
+    final sessionId = tab.sessionId;
+    if (sessionId != null && sessionId.isNotEmpty) {
       unawaited(widget.bridge.signalTerminal(sessionId, 'ctrl_c'));
     }
   }
