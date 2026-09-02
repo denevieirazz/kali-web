@@ -33,8 +33,15 @@ class SessionService {
       if (value == null || value is String || value is num || value is bool) {
         result[entry.key] = value;
       } else if (value is List) {
-        final safe = value.where((item) =>
-            item == null || item is String || item is num || item is bool).toList();
+        final safe = value
+            .where(
+              (item) =>
+                  item == null ||
+                  item is String ||
+                  item is num ||
+                  item is bool,
+            )
+            .toList();
         if (safe.length == value.length) result[entry.key] = safe;
       } else if (value is Map) {
         final mapped = <String, Object?>{};
@@ -122,39 +129,94 @@ class SessionService {
     }
   }
 
+  Future<Map<String, dynamic>?> _readAndNormalize(File file) async {
+    if (!await file.exists()) return null;
+
+    final content = await file.readAsString();
+    if (content.trim().isEmpty) return null;
+
+    final decoded = jsonDecode(content);
+    if (decoded is! Map<String, dynamic>) return null;
+
+    final storedSchema = decoded['schemaVersion'];
+    if (storedSchema is int && storedSchema > schemaVersion) {
+      CloudOSLogger.warn(
+        'SessionService',
+        'loadSession',
+        'Ignoring newer desktop session schema $storedSchema; supported=$schemaVersion',
+      );
+      return null;
+    }
+
+    final workspace = decoded['activeWorkspace'];
+    if (workspace is! int || workspace < 1 || workspace > 4) {
+      decoded['activeWorkspace'] = 1;
+    }
+
+    final rawWindows = decoded['windows'];
+    if (rawWindows is! List) {
+      decoded['windows'] = <Map<String, dynamic>>[];
+    } else {
+      decoded['windows'] = rawWindows
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .where((item) {
+            final appId = item['appId'];
+            return appId is String && appId.trim().isNotEmpty;
+          })
+          .toList(growable: false);
+    }
+
+    return decoded;
+  }
+
   Future<Map<String, dynamic>?> loadSession() async {
+    final target = _sessionFile;
+    final backup = File('${target.path}.bak');
+
     try {
-      final file = _sessionFile;
-      if (!await file.exists()) return null;
-
-      final content = await file.readAsString();
-      if (content.trim().isEmpty) return null;
-
-      final decoded = jsonDecode(content);
-      if (decoded is! Map<String, dynamic>) return null;
-
-      final workspace = decoded['activeWorkspace'];
-      if (workspace is! int || workspace < 1 || workspace > 4) {
-        decoded['activeWorkspace'] = 1;
-      }
-
-      final rawWindows = decoded['windows'];
-      if (rawWindows is! List) {
-        decoded['windows'] = <Map<String, dynamic>>[];
-      } else {
-        decoded['windows'] = rawWindows
-            .whereType<Map>()
-            .map((item) => Map<String, dynamic>.from(item))
-            .where((item) {
-              final appId = item['appId'];
-              return appId is String && appId.trim().isNotEmpty;
-            })
-            .toList(growable: false);
-      }
-
-      return decoded;
+      final primary = await _readAndNormalize(target);
+      if (primary != null) return primary;
     } catch (error, stackTrace) {
-      CloudOSLogger.error('SessionService', 'loadSession', error, stackTrace);
+      CloudOSLogger.error(
+        'SessionService',
+        'loadSession.primary',
+        error,
+        stackTrace,
+      );
+    }
+
+    try {
+      final recovered = await _readAndNormalize(backup);
+      if (recovered == null) return null;
+
+      CloudOSLogger.warn(
+        'SessionService',
+        'loadSession.recovery',
+        'Recovered desktop session from backup after missing or invalid primary file.',
+      );
+
+      try {
+        final dir = _stateDirectory;
+        if (!await dir.exists()) await dir.create(recursive: true);
+        await backup.copy(target.path);
+      } catch (error, stackTrace) {
+        CloudOSLogger.error(
+          'SessionService',
+          'loadSession.restoreBackup',
+          error,
+          stackTrace,
+        );
+      }
+
+      return recovered;
+    } catch (error, stackTrace) {
+      CloudOSLogger.error(
+        'SessionService',
+        'loadSession.backup',
+        error,
+        stackTrace,
+      );
       return null;
     }
   }

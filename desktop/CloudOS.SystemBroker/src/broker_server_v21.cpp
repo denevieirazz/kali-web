@@ -321,7 +321,11 @@ void BrokerServerV21::ClientSessionLoop(
         send_state->active = false;
     }
     EventBusV21::Instance().UnregisterClient(client_id);
-    FlushFileBuffers(pipe);
+    // The session has already ended because the client disconnected, an I/O
+    // operation failed, or the broker is stopping. Flushing a server-side
+    // named pipe here can block indefinitely waiting for a stalled client to
+    // consume buffered bytes. Normal responses are fully written inside the
+    // request loop, so teardown should disconnect immediately.
     DisconnectNamedPipe(pipe);
     {
         std::lock_guard<std::mutex> lock(client_threads_mutex_);
