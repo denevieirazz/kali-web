@@ -117,28 +117,13 @@ class WindowManager extends ChangeNotifier {
     if (def.isSingleton) {
       final existingIndex = _windows.indexWhere((w) => w.appId == appId);
       if (existingIndex != -1) {
-        final requestedFilesPath = appId == 'cloudos:files'
-            ? params?['initialPath']
-            : null;
-        final shouldReopenFilesAtRequestedPath =
-            requestedFilesPath is String && requestedFilesPath.trim().isNotEmpty;
-
-        if (shouldReopenFilesAtRequestedPath) {
-          // Files reads its requested initial path during initState. Replacing
-          // the singleton with a fresh internal window gives callers such as
-          // Projects/CloudOS Drive deterministic "open this folder" behavior
-          // instead of merely focusing an already-open Files instance at an
-          // unrelated location.
-          _windows.removeAt(existingIndex);
-        } else {
-          final existing = _windows[existingIndex];
-          if (existing.workspaceIndex != _activeWorkspace) {
-            existing.workspaceIndex = _activeWorkspace;
-          }
-          existing.minimized = false;
-          focusWindow(existing.id);
-          return;
+        final existing = _windows[existingIndex];
+        if (existing.workspaceIndex != _activeWorkspace) {
+          existing.workspaceIndex = _activeWorkspace;
         }
+        existing.minimized = false;
+        focusWindow(existing.id);
+        return;
       }
     }
 
