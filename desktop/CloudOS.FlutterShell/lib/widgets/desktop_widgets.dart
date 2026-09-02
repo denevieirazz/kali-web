@@ -1,36 +1,57 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:ui';
+
 import 'package:flutter/material.dart';
+
 import '../core/cloudos_theme.dart';
 import '../services/cloudos_bridge.dart';
+import '../services/desktop_clock_service.dart';
 import '../services/system_metrics_service.dart';
 
 class DesktopClockWidget extends StatefulWidget {
-  const DesktopClockWidget({super.key});
+  const DesktopClockWidget({super.key, this.clockService});
+
+  final DesktopClockService? clockService;
 
   @override
   State<DesktopClockWidget> createState() => _DesktopClockWidgetState();
 }
 
 class _DesktopClockWidgetState extends State<DesktopClockWidget> {
-  Timer? _timer;
+  late DesktopClockService _clock;
   late DateTime _now;
 
   @override
   void initState() {
     super.initState();
-    _now = DateTime.now();
-    if (!Platform.environment.containsKey('FLUTTER_TEST')) {
-      _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (mounted) setState(() => _now = DateTime.now());
-      });
+    _bindClock();
+  }
+
+  @override
+  void didUpdateWidget(covariant DesktopClockWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.clockService, widget.clockService)) {
+      _clock.removeListener(_onClockTick);
+      _bindClock();
     }
+  }
+
+  void _bindClock() {
+    _clock = widget.clockService ?? DesktopClockService.instance;
+    _now = _clock.now;
+    _clock.addListener(_onClockTick);
+  }
+
+  void _onClockTick() {
+    if (!mounted) return;
+    final next = _clock.now;
+    if (next == _now) return;
+    setState(() => _now = next);
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _clock.removeListener(_onClockTick);
     super.dispose();
   }
 
@@ -49,18 +70,29 @@ class _DesktopClockWidgetState extends State<DesktopClockWidget> {
 
   String _formatMonth(int month) {
     const months = <String>[
-      'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-      'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
+      'Janeiro',
+      'Fevereiro',
+      'Março',
+      'Abril',
+      'Maio',
+      'Junho',
+      'Julho',
+      'Agosto',
+      'Setembro',
+      'Outubro',
+      'Novembro',
+      'Dezembro',
     ];
     return months[(month - 1) % 12];
   }
 
   @override
   Widget build(BuildContext context) {
-    final h = _now.hour.toString().padLeft(2, '0');
-    final m = _now.minute.toString().padLeft(2, '0');
-    final s = _now.second.toString().padLeft(2, '0');
-    final dateFormatted = '${_formatWeekday(_now.weekday)}, ${_now.day} de ${_formatMonth(_now.month)}';
+    final hour = _now.hour.toString().padLeft(2, '0');
+    final minute = _now.minute.toString().padLeft(2, '0');
+    final second = _now.second.toString().padLeft(2, '0');
+    final dateFormatted =
+        '${_formatWeekday(_now.weekday)}, ${_now.day} de ${_formatMonth(_now.month)}';
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
@@ -97,7 +129,7 @@ class _DesktopClockWidgetState extends State<DesktopClockWidget> {
                   textBaseline: TextBaseline.alphabetic,
                   children: <Widget>[
                     Text(
-                      '$h:$m',
+                      '$hour:$minute',
                       style: const TextStyle(
                         fontFamily: 'Segoe UI',
                         fontSize: 32,
@@ -109,7 +141,7 @@ class _DesktopClockWidgetState extends State<DesktopClockWidget> {
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      ':$s',
+                      ':$second',
                       style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -136,7 +168,10 @@ class _DesktopClockWidgetState extends State<DesktopClockWidget> {
                 fit: BoxFit.scaleDown,
                 alignment: Alignment.centerLeft,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.05),
                     borderRadius: BorderRadius.circular(6),
@@ -144,11 +179,18 @@ class _DesktopClockWidgetState extends State<DesktopClockWidget> {
                   child: const Row(
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
-                      Icon(Icons.schedule_rounded, size: 12, color: CloudOSColors.neonCyan),
+                      Icon(
+                        Icons.schedule_rounded,
+                        size: 12,
+                        color: CloudOSColors.neonCyan,
+                      ),
                       SizedBox(width: 6),
                       Text(
                         'Hora Local do Sistema',
-                        style: TextStyle(fontSize: 10, color: Colors.white70),
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.white70,
+                        ),
                       ),
                     ],
                   ),
@@ -163,9 +205,14 @@ class _DesktopClockWidgetState extends State<DesktopClockWidget> {
 }
 
 class DesktopMetricsWidget extends StatefulWidget {
-  const DesktopMetricsWidget({super.key, required this.bridge});
+  const DesktopMetricsWidget({
+    super.key,
+    required this.bridge,
+    this.enablePeriodicPolling = true,
+  });
 
   final CloudOSBridge bridge;
+  final bool enablePeriodicPolling;
 
   @override
   State<DesktopMetricsWidget> createState() => _DesktopMetricsWidgetState();
@@ -173,21 +220,47 @@ class DesktopMetricsWidget extends StatefulWidget {
 
 class _DesktopMetricsWidgetState extends State<DesktopMetricsWidget> {
   StreamSubscription<RealSystemMetrics>? _sub;
-  RealSystemMetrics _metrics = SystemMetricsService.instance.current;
+  late SystemMetricsService _metricsService;
+  RealSystemMetrics _metrics = RealSystemMetrics.initial;
 
   @override
   void initState() {
     super.initState();
-    SystemMetricsService.instance.start();
-    _sub = SystemMetricsService.instance.metricsStream.listen((m) {
-      if (mounted) setState(() => _metrics = m);
+    _bindMetrics();
+  }
+
+  @override
+  void didUpdateWidget(covariant DesktopMetricsWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.bridge, widget.bridge) ||
+        oldWidget.enablePeriodicPolling != widget.enablePeriodicPolling) {
+      _unbindMetrics();
+      _bindMetrics();
+    }
+  }
+
+  void _bindMetrics() {
+    _metricsService = SystemMetricsService(
+      bridge: widget.bridge,
+      enablePeriodicPolling: widget.enablePeriodicPolling,
+    );
+    _metrics = _metricsService.current;
+    _metricsService.start();
+    _sub = _metricsService.metricsStream.listen((metrics) {
+      if (mounted) setState(() => _metrics = metrics);
     });
+  }
+
+  void _unbindMetrics() {
+    final sub = _sub;
+    _sub = null;
+    if (sub != null) unawaited(sub.cancel());
+    _metricsService.dispose();
   }
 
   @override
   void dispose() {
-    _sub?.cancel();
-    SystemMetricsService.instance.stop();
+    _unbindMetrics();
     super.dispose();
   }
 
@@ -226,11 +299,19 @@ class _DesktopMetricsWidgetState extends State<DesktopMetricsWidget> {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  Icon(Icons.speed_rounded, size: 13, color: _metrics.isLive ? CloudOSColors.neonEmerald : CloudOSColors.neonCyan),
+                  Icon(
+                    Icons.speed_rounded,
+                    size: 13,
+                    color: _metrics.isLive
+                        ? CloudOSColors.neonEmerald
+                        : CloudOSColors.neonCyan,
+                  ),
                   const SizedBox(width: 6),
                   Flexible(
                     child: Text(
-                      _metrics.isLive ? 'Performance Real do Windows' : 'Performance do Sistema',
+                      _metrics.isLive
+                          ? 'Performance Real do Windows'
+                          : 'Performance indisponível',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -249,19 +330,25 @@ class _DesktopMetricsWidgetState extends State<DesktopMetricsWidget> {
                   _buildGauge(
                     label: 'CPU',
                     percent: cpuFraction,
-                    display: '${_metrics.cpuPercent.toStringAsFixed(0)}%',
+                    display: _metrics.isLive
+                        ? '${_metrics.cpuPercent.toStringAsFixed(0)}%'
+                        : '--',
                     color: CloudOSColors.neonCyan,
                   ),
                   _buildGauge(
                     label: 'RAM',
                     percent: ramFraction,
-                    display: '${_metrics.ramUsagePercent.toStringAsFixed(0)}%',
+                    display: _metrics.isLive
+                        ? '${_metrics.ramUsagePercent.toStringAsFixed(0)}%'
+                        : '--',
                     color: CloudOSColors.accentPurple,
                   ),
                   _buildGauge(
                     label: 'DISCO',
                     percent: diskFraction,
-                    display: '${_metrics.diskUsagePercent.toStringAsFixed(0)}%',
+                    display: _metrics.isLive && _metrics.systemDisk != null
+                        ? '${_metrics.diskUsagePercent.toStringAsFixed(0)}%'
+                        : '--',
                     color: CloudOSColors.neonEmerald,
                   ),
                 ],
