@@ -33,12 +33,12 @@ void main() {
     test('Start panel cannot terminate the process abruptly', () {
       final source = File('lib/widgets/start_panel.dart').readAsStringSync();
       expect(source, isNot(contains("import 'dart:io'")));
-      expect(source, isNot(contains('exit(0)')));
+      expect(source, isNot(contains('exit(0)'));
       expect(source, contains('onExitRequested'));
       expect(source, contains('await requestExit()'));
     });
 
-    test('shell flushes durable session before orderly Flutter exit', () {
+    test('shell flushes durable session before its explicit orderly exit', () {
       final source = File('lib/shell/cloudos_shell.dart').readAsStringSync();
       final flush = source.indexOf('await windowManager.flushSession();');
       final orderlyExit = source.indexOf(
@@ -49,6 +49,25 @@ void main() {
       expect(orderlyExit, greaterThan(flush));
       expect(source, isNot(contains('exit(0)')));
       expect(source, contains('onExitRequested: _requestApplicationExit'));
+    });
+
+    test('app root guards native close with strict Session V3 durability', () {
+      final mainSource = File('lib/main.dart').readAsStringSync();
+      final lifecycle = File(
+        'lib/services/app_lifecycle_coordinator.dart',
+      ).readAsStringSync();
+      final session = File('lib/services/session_service.dart').readAsStringSync();
+
+      expect(mainSource, contains('AppLifecycleListener('));
+      expect(
+        mainSource,
+        contains('onExitRequested: AppLifecycleCoordinator.instance.handleExitRequest'),
+      );
+      expect(mainSource, contains('AppLifecycleCoordinator.instance.checkpoint()'));
+      expect(lifecycle, contains('flush(requireSuccessfulWrite: true)'));
+      expect(lifecycle, contains('AppExitResponse.cancel'));
+      expect(session, contains('hasWriteFailure'));
+      expect(session, contains('Error.throwWithStackTrace'));
     });
 
     test('shell owns exactly one shared live system-state service', () {
