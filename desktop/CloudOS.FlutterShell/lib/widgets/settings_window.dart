@@ -548,10 +548,13 @@ class _SettingsWindowState extends State<SettingsWindow> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         _buildCard(
-          title: 'CloudOS Desktop V23',
+          title: 'CloudOS Desktop V22.1',
           child: Column(
             children: <Widget>[
-              _buildInfoRow('Linha da aplicação', '23.x validation'),
+              _buildInfoRow(
+                'Linha da aplicação',
+                'V22.1 validation · V23 feature pass',
+              ),
               _buildInfoRow('Broker IPC', 'V21 Named Pipe restrito'),
               _buildInfoRow(
                 'Arquitetura',
