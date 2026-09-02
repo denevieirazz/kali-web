@@ -2,57 +2,19 @@ import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../core/cloudos_theme.dart';
+import '../models/search_models.dart';
 import '../models/shell_models.dart';
-import '../services/app_registry.dart';
 import '../services/cloudos_bridge.dart';
 import '../services/cloudos_logger.dart';
-import '../services/project_store.dart';
+import '../services/global_search_service.dart';
 
 typedef AppSelectionCallback = void Function(
   String appId, {
   Map<String, dynamic>? params,
 });
-
-enum SearchCategory {
-  apps,
-  settings,
-  projects,
-  wsl,
-}
-
-class SearchResultItem {
-  const SearchResultItem({
-    required this.title,
-    required this.subtitle,
-    required this.category,
-    required this.icon,
-    required this.iconColor,
-    required this.onTap,
-  });
-
-  final String title;
-  final String subtitle;
-  final SearchCategory category;
-  final IconData icon;
-  final Color iconColor;
-  final VoidCallback onTap;
-
-  String get categoryLabel => switch (category) {
-        SearchCategory.apps => 'APLICATIVOS',
-        SearchCategory.settings => 'CONFIGURAÇÕES',
-        SearchCategory.projects => 'PROJETOS',
-        SearchCategory.wsl => 'WSL',
-      };
-
-  Color get categoryColor => switch (category) {
-        SearchCategory.apps => const Color(0xFF58A6FF),
-        SearchCategory.settings => const Color(0xFFBC8CFF),
-        SearchCategory.projects => const Color(0xFF39D353),
-        SearchCategory.wsl => const Color(0xFFFFA657),
-      };
-}
 
 class GlobalSearchOverlay extends StatefulWidget {
   const GlobalSearchOverlay({
@@ -73,481 +35,600 @@ class GlobalSearchOverlay extends StatefulWidget {
 }
 
 class _GlobalSearchOverlayState extends State<GlobalSearchOverlay> {
-  final TextEditingController _ctrl = TextEditingController();
-  final FocusNode _focusNode = FocusNode();
-  String _query = '';
-  List<ProjectRecord> _projects = const <ProjectRecord>[];
+  final TextEditingController _controller = TextEditingController();
+  final FocusNode _textFocus = FocusNode(debugLabel: 'global-search-text');
+  final FocusNode _keyboardFocus = FocusNode(debugLabel: 'global-search-keys');
 
-  static const List<Map<String, String>> _settingsPages = <Map<String, String>>[
-    <String, String>{
-      'title': 'Sistema',
-      'desc': 'Nome do dispositivo, Broker e informações do sistema',
-    },
-    <String, String>{
-      'title': 'Tela',
-      'desc': 'Brilho quando suportado e recursos de exibição disponíveis',
-    },
-    <String, String>{
-      'title': 'Som',
-      'desc': 'Volume do endpoint de áudio padrão',
-    },
-    <String, String>{
-      'title': 'Rede & Internet',
-      'desc': 'Estado do adaptador de rede detectado',
-    },
-    <String, String>{
-      'title': 'Bluetooth',
-      'desc': 'Disponibilidade do backend Bluetooth',
-    },
-    <String, String>{
-      'title': 'Energia & Bateria',
-      'desc': 'Bateria quando detectada pelo sistema',
-    },
-    <String, String>{
-      'title': 'Armazenamento',
-      'desc': 'Unidades reais retornadas pelo System Broker',
-    },
-    <String, String>{
-      'title': 'Personalização',
-      'desc': 'Recursos de aparência disponíveis no CloudOS',
-    },
-    <String, String>{
-      'title': 'WSL (Linux)',
-      'desc': 'Distribuições WSL realmente detectadas',
-    },
-    <String, String>{
-      'title': 'Sobre o CloudOS',
-      'desc': 'Bridge, protocolo e estado de integração',
-    },
-  ];
+  late GlobalSearchService _service;
+  Timer? _debounce;
+  SearchBatch? _batch;
+  bool _loading = true;
+  String? _error;
+  int _selectedIndex = 0;
+  int _uiGeneration = 0;
 
   @override
   void initState() {
     super.initState();
-    unawaited(_loadProjects());
+    _service = GlobalSearchService(bridge: widget.bridge);
+    unawaited(_runSearch(immediate: true));
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _focusNode.requestFocus();
+      if (mounted) _textFocus.requestFocus();
     });
   }
 
-  Future<void> _loadProjects() async {
-    try {
-      final projects = await ProjectStore.load();
-      if (!mounted) return;
-      setState(() => _projects = projects);
-    } catch (error, stackTrace) {
-      CloudOSLogger.error('GlobalSearch', 'loadProjects', error, stackTrace);
+  @override
+  void didUpdateWidget(covariant GlobalSearchOverlay oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.bridge, widget.bridge)) {
+      _service.cancel();
+      _service = GlobalSearchService(bridge: widget.bridge);
+    }
+    if (!identical(oldWidget.apps, widget.apps)) {
+      _scheduleSearch(const Duration(milliseconds: 40));
     }
   }
 
   @override
   void dispose() {
-    _ctrl.dispose();
-    _focusNode.dispose();
+    _debounce?.cancel();
+    _service.cancel();
+    _controller.dispose();
+    _textFocus.dispose();
+    _keyboardFocus.dispose();
     super.dispose();
   }
 
-  void _onQueryChanged(String value) {
-    final next = value.trim();
-    if (next == _query) return;
-    setState(() => _query = next);
+  void _onChanged(String _) {
+    _scheduleSearch(const Duration(milliseconds: 240));
   }
 
-  bool _matches(String query, Iterable<String?> fields) {
-    if (query.isEmpty) return true;
-    for (final field in fields) {
-      if (field != null && field.toLowerCase().contains(query)) return true;
-    }
-    return false;
-  }
-
-  bool get _hasRuntimeWsl => widget.apps.any((app) {
-        final id = app.id.toLowerCase();
-        return app.platform == CloudAppPlatform.linux || id.startsWith('wsl:');
+  void _scheduleSearch(Duration delay) {
+    _debounce?.cancel();
+    _debounce = Timer(delay, () {
+      if (mounted) unawaited(_runSearch());
+    });
+    if (!_loading) {
+      setState(() {
+        _loading = true;
+        _error = null;
       });
-
-  Future<void> _launchRuntimeApp(CloudApp app) async {
-    widget.onClose();
-
-    if (app.platform == CloudAppPlatform.linux ||
-        app.id.toLowerCase().startsWith('wsl:')) {
-      final distro = app.distro?.trim() ?? '';
-      widget.onSelectApp(
-        'wsl:terminal',
-        params: distro.isEmpty
-            ? null
-            : <String, dynamic>{'initialDistro': distro},
-      );
-      return;
     }
+  }
 
-    final def = AppRegistry.findById(app.id);
-    if (def?.isInternal == true || app.platform == CloudAppPlatform.cloudos) {
-      widget.onSelectApp(def?.id ?? app.id);
-      return;
+  Future<void> _runSearch({bool immediate = false}) async {
+    _debounce?.cancel();
+    final generation = ++_uiGeneration;
+    if (mounted && !immediate) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
     }
 
     try {
-      final launched = await widget.bridge.launchApp(app.id);
-      if (!launched && mounted) {
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-          SnackBar(content: Text('Não foi possível abrir ${app.name}.')),
-        );
-      }
+      final batch = await _service.search(
+        rawQuery: _controller.text,
+        runtimeApps: widget.apps,
+      );
+      if (!mounted || generation != _uiGeneration) return;
+      setState(() {
+        _batch = batch;
+        _loading = false;
+        _error = null;
+        final count = batch.results.length;
+        if (count == 0) {
+          _selectedIndex = 0;
+        } else if (_selectedIndex >= count) {
+          _selectedIndex = count - 1;
+        }
+      });
     } catch (error, stackTrace) {
-      CloudOSLogger.error('GlobalSearch', 'launchRuntimeApp', error, stackTrace);
-      if (mounted) {
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-          SnackBar(content: Text('Falha ao abrir ${app.name}: $error')),
-        );
-      }
+      CloudOSLogger.error('GlobalSearchOverlay', 'runSearch', error, stackTrace);
+      if (!mounted || generation != _uiGeneration) return;
+      setState(() {
+        _loading = false;
+        _error = 'A busca não pôde ser concluída.';
+      });
     }
   }
 
-  List<SearchResultItem> _buildResults() {
-    final query = _query.toLowerCase();
-    final results = <SearchResultItem>[];
-    final seenAppIds = <String>{};
-    final hasRuntimeWsl = _hasRuntimeWsl;
-
-    // Internal CloudOS surfaces are defined by the presentation layer itself.
-    // WSL is only advertised when the Broker catalog proves that a Linux/WSL
-    // runtime is actually available for this session.
-    for (final app in AppRegistry.definedApps) {
-      if (!app.isInternal) continue;
-      final isWslSurface = app.id.toLowerCase().startsWith('wsl:');
-      if (isWslSurface && !hasRuntimeWsl) continue;
-      if (!_matches(query, <String?>[app.name, app.subtitle, app.id])) continue;
-
-      seenAppIds.add(app.id.toLowerCase());
-      results.add(
-        SearchResultItem(
-          title: app.name,
-          subtitle: app.subtitle,
-          category: isWslSurface ? SearchCategory.wsl : SearchCategory.apps,
-          icon: app.icon,
-          iconColor: isWslSurface
-              ? const Color(0xFFFFA657)
-              : const Color(0xFF58A6FF),
-          onTap: () {
-            widget.onClose();
-            widget.onSelectApp(app.id);
-          },
-        ),
-      );
+  KeyEventResult _handleKey(FocusNode _, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
     }
 
-    // External/availability-driven apps come exclusively from the Broker catalog.
-    for (final app in widget.apps) {
-      final normalizedId = app.id.toLowerCase();
-      if (seenAppIds.contains(normalizedId)) continue;
-      if (!_matches(
-        query,
-        <String?>[app.name, app.subtitle, app.id, app.category, app.distro],
-      )) {
-        continue;
+    final results = _batch?.results ?? const <SearchResult>[];
+    if (event.logicalKey == LogicalKeyboardKey.escape) {
+      widget.onClose();
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      if (results.isNotEmpty) {
+        setState(() => _selectedIndex = (_selectedIndex + 1) % results.length);
       }
-
-      seenAppIds.add(normalizedId);
-      final isLinux = app.platform == CloudAppPlatform.linux ||
-          normalizedId.startsWith('wsl:');
-      results.add(
-        SearchResultItem(
-          title: app.name,
-          subtitle: isLinux
-              ? (app.distro?.isNotEmpty == true
-                  ? 'Terminal integrado · ${app.distro}'
-                  : 'Aplicativo Linux detectado pelo Broker')
-              : (app.subtitle ?? 'Aplicativo disponível no sistema'),
-          category: isLinux ? SearchCategory.wsl : SearchCategory.apps,
-          icon: app.icon,
-          iconColor: isLinux
-              ? const Color(0xFFFFA657)
-              : const Color(0xFF58A6FF),
-          onTap: () => unawaited(_launchRuntimeApp(app)),
-        ),
-      );
+      return KeyEventResult.handled;
     }
-
-    if (query.isNotEmpty) {
-      for (final page in _settingsPages) {
-        final title = page['title'] ?? '';
-        final desc = page['desc'] ?? '';
-        if (!_matches(query, <String?>[title, desc])) continue;
-        if (title == 'WSL (Linux)' && !hasRuntimeWsl) continue;
-        results.add(
-          SearchResultItem(
-            title: title,
-            subtitle: desc,
-            category: SearchCategory.settings,
-            icon: Icons.settings_rounded,
-            iconColor: const Color(0xFFBC8CFF),
-            onTap: () {
-              widget.onClose();
-              widget.onSelectApp('cloudos:settings');
-            },
-          ),
-        );
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      if (results.isNotEmpty) {
+        setState(() {
+          _selectedIndex = (_selectedIndex - 1 + results.length) % results.length;
+        });
       }
+      return KeyEventResult.handled;
     }
+    if (event.logicalKey == LogicalKeyboardKey.home && results.isNotEmpty) {
+      setState(() => _selectedIndex = 0);
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.end && results.isNotEmpty) {
+      setState(() => _selectedIndex = results.length - 1);
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.enter && results.isNotEmpty) {
+      unawaited(_activate(results[_selectedIndex]));
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
 
-    for (final project in _projects) {
-      if (!_matches(query, <String?>[project.name, project.path])) continue;
-      results.add(
-        SearchResultItem(
-          title: project.name,
-          subtitle: project.path,
-          category: SearchCategory.projects,
-          icon: Icons.workspaces_rounded,
-          iconColor: const Color(0xFF39D353),
-          onTap: () {
+  Future<void> _activate(SearchResult result) async {
+    if (!result.isAvailable || !result.action.isExecutable) return;
+    var success = true;
+    try {
+      final action = result.action;
+      switch (action.kind) {
+        case SearchActionKind.openInternalApp:
+        case SearchActionKind.openFolder:
+        case SearchActionKind.openProject:
+        case SearchActionKind.openSettingsPage:
+        case SearchActionKind.openWslTerminal:
+          final appId = action.appId;
+          if (appId == null || appId.isEmpty) {
+            success = false;
+          } else {
             widget.onClose();
-            widget.onSelectApp('cloudos:projects');
-          },
-        ),
+            widget.onSelectApp(
+              appId,
+              params: action.params.isEmpty ? null : action.params,
+            );
+          }
+          break;
+        case SearchActionKind.launchRuntimeApp:
+          final id = action.runtimeAppId;
+          if (id == null || id.isEmpty) {
+            success = false;
+          } else {
+            success = await widget.bridge.launchApp(id);
+            if (success) widget.onClose();
+          }
+          break;
+        case SearchActionKind.openFile:
+          final appId = action.appId;
+          if (appId != null && appId.isNotEmpty) {
+            widget.onClose();
+            widget.onSelectApp(
+              appId,
+              params: action.params.isEmpty ? null : action.params,
+            );
+          } else {
+            final path = action.path;
+            if (path == null || path.isEmpty) {
+              success = false;
+            } else {
+              success = await widget.bridge.openDefault(path);
+              if (success) widget.onClose();
+            }
+          }
+          break;
+        case SearchActionKind.none:
+          success = false;
+          break;
+      }
+    } catch (error, stackTrace) {
+      success = false;
+      CloudOSLogger.error(
+        'GlobalSearchOverlay',
+        'activate:${result.id}',
+        error,
+        stackTrace,
       );
     }
 
-    return results.take(30).toList(growable: false);
+    if (success) {
+      unawaited(_service.recordActivation(result));
+      return;
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      SnackBar(content: Text('Não foi possível abrir ${result.title}.')),
+    );
+  }
+
+  void _clearQuery() {
+    _controller.clear();
+    _selectedIndex = 0;
+    _scheduleSearch(Duration.zero);
+    _textFocus.requestFocus();
   }
 
   @override
   Widget build(BuildContext context) {
-    final results = _buildResults();
+    final batch = _batch;
+    final results = batch?.results ?? const <SearchResult>[];
+    final diagnostics = batch?.diagnostics ?? const SearchDiagnostics.empty();
 
-    return GestureDetector(
-      onTap: widget.onClose,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        color: Colors.black.withValues(alpha: 0.5),
-        alignment: const Alignment(0, -0.4),
-        child: GestureDetector(
-          onTap: () {},
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(18),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-              child: Container(
-                width: 600,
-                decoration: BoxDecoration(
-                  color: const Color(0xF20E1322),
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(
-                    color: CloudOSColors.accent.withValues(alpha: 0.5),
-                    width: 1.5,
+    return Focus(
+      focusNode: _keyboardFocus,
+      canRequestFocus: false,
+      onKeyEvent: _handleKey,
+      child: GestureDetector(
+        onTap: widget.onClose,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          color: Colors.black.withValues(alpha: 0.52),
+          alignment: const Alignment(0, -0.34),
+          child: GestureDetector(
+            onTap: () => _textFocus.requestFocus(),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 26, sigmaY: 26),
+                child: Container(
+                  width: 720,
+                  constraints: const BoxConstraints(maxHeight: 590),
+                  decoration: BoxDecoration(
+                    color: const Color(0xF20E1322),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: CloudOSColors.accent.withValues(alpha: 0.48),
+                      width: 1.25,
+                    ),
+                    boxShadow: const <BoxShadow>[
+                      BoxShadow(
+                        color: Colors.black87,
+                        blurRadius: 44,
+                        offset: Offset(0, 18),
+                      ),
+                    ],
                   ),
-                  boxShadow: const <BoxShadow>[
-                    BoxShadow(
-                      color: Colors.black87,
-                      blurRadius: 40,
-                      offset: Offset(0, 16),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                      decoration: const BoxDecoration(
-                        border: Border(
-                          bottom: BorderSide(color: Color(0x1AFFFFFF)),
-                        ),
-                      ),
-                      child: Row(
-                        children: <Widget>[
-                          const Icon(
-                            Icons.search_rounded,
-                            size: 22,
-                            color: CloudOSColors.accent,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: TextField(
-                              controller: _ctrl,
-                              focusNode: _focusNode,
-                              style: const TextStyle(
-                                fontSize: 15,
-                                color: Colors.white,
-                              ),
-                              decoration: const InputDecoration(
-                                isDense: true,
-                                border: InputBorder.none,
-                                contentPadding: EdgeInsets.zero,
-                                fillColor: Colors.transparent,
-                                hintText:
-                                    'Buscar apps, configurações e projetos...',
-                                hintStyle: TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.white38,
-                                ),
-                              ),
-                              onChanged: _onQueryChanged,
-                            ),
-                          ),
-                          if (_query.isNotEmpty)
-                            IconButton(
-                              icon: const Icon(
-                                Icons.close_rounded,
-                                size: 18,
-                                color: Colors.white60,
-                              ),
-                              onPressed: () {
-                                _ctrl.clear();
-                                _onQueryChanged('');
-                              },
-                            ),
-                        ],
-                      ),
-                    ),
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxHeight: 380),
-                      child: results.isEmpty
-                          ? const Padding(
-                              padding: EdgeInsets.all(32),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: <Widget>[
-                                  Text(
-                                    'Nenhum resultado encontrado.',
-                                    style: TextStyle(
-                                      color: Colors.white54,
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                  SizedBox(height: 6),
-                                  Text(
-                                    'Arquivos continuam pesquisáveis dentro do app Arquivos até o Broker expor resultados globais tipados.',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      color: Colors.white30,
-                                      fontSize: 10.5,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            )
-                          : ListView.separated(
-                              shrinkWrap: true,
-                              padding: const EdgeInsets.symmetric(vertical: 6),
-                              itemCount: results.length,
-                              separatorBuilder: (context, index) => const Divider(
-                                height: 1,
-                                color: Color(0x0DFFFFFF),
-                              ),
-                              itemBuilder: (context, index) {
-                                final item = results[index];
-                                return ListTile(
-                                  dense: true,
-                                  leading: Container(
-                                    padding: const EdgeInsets.all(7),
-                                    decoration: BoxDecoration(
-                                      color: item.iconColor.withValues(alpha: 0.15),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Icon(
-                                      item.icon,
-                                      size: 18,
-                                      color: item.iconColor,
-                                    ),
-                                  ),
-                                  title: Row(
-                                    children: <Widget>[
-                                      Expanded(
-                                        child: Text(
-                                          item.title,
-                                          style: const TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w600,
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                      ),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 6,
-                                          vertical: 2,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: item.categoryColor.withValues(
-                                            alpha: 0.15,
-                                          ),
-                                          borderRadius: BorderRadius.circular(4),
-                                          border: Border.all(
-                                            color: item.categoryColor.withValues(
-                                              alpha: 0.3,
-                                            ),
-                                          ),
-                                        ),
-                                        child: Text(
-                                          item.categoryLabel,
-                                          style: TextStyle(
-                                            fontSize: 9,
-                                            fontWeight: FontWeight.bold,
-                                            color: item.categoryColor,
-                                            letterSpacing: 0.5,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  subtitle: Text(
-                                    item.subtitle,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.white54,
-                                    ),
-                                  ),
-                                  trailing: const Icon(
-                                    Icons.arrow_forward_rounded,
-                                    size: 14,
-                                    color: Colors.white24,
-                                  ),
-                                  onTap: item.onTap,
-                                );
-                              },
-                            ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
-                      ),
-                      decoration: const BoxDecoration(
-                        border: Border(
-                          top: BorderSide(color: Color(0x1AFFFFFF)),
-                        ),
-                      ),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: <Widget>[
-                          Text(
-                            'Resultados vêm de fontes reais do CloudOS',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Colors.white38,
-                            ),
-                          ),
-                          Text(
-                            'ESC para fechar',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Colors.white38,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      _buildSearchField(),
+                      if (_loading) const LinearProgressIndicator(minHeight: 2),
+                      Flexible(child: _buildBody(results)),
+                      _buildFooter(diagnostics),
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSearchField() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 14, 12, 14),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: Color(0x1AFFFFFF))),
+      ),
+      child: Row(
+        children: <Widget>[
+          const Icon(
+            Icons.search_rounded,
+            size: 23,
+            color: CloudOSColors.accent,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: TextField(
+              controller: _controller,
+              focusNode: _textFocus,
+              style: const TextStyle(fontSize: 15, color: Colors.white),
+              decoration: const InputDecoration(
+                isDense: true,
+                border: InputBorder.none,
+                contentPadding: EdgeInsets.zero,
+                fillColor: Colors.transparent,
+                hintText: 'Buscar apps, arquivos, configurações, projetos e WSL...',
+                hintStyle: TextStyle(fontSize: 14, color: Colors.white38),
+              ),
+              textInputAction: TextInputAction.search,
+              onChanged: _onChanged,
+              onSubmitted: (_) {
+                final results = _batch?.results ?? const <SearchResult>[];
+                if (results.isNotEmpty) {
+                  unawaited(_activate(results[_selectedIndex]));
+                }
+              },
+            ),
+          ),
+          if (_controller.text.isNotEmpty)
+            IconButton(
+              tooltip: 'Limpar busca',
+              icon: const Icon(Icons.close_rounded, size: 18),
+              color: Colors.white60,
+              onPressed: _clearQuery,
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBody(List<SearchResult> results) {
+    if (_error != null) {
+      return _EmptySearchState(
+        icon: Icons.error_outline_rounded,
+        title: _error!,
+        subtitle: 'O restante do CloudOS continua disponível.',
+      );
+    }
+    if (!_loading && results.isEmpty) {
+      return const _EmptySearchState(
+        icon: Icons.search_off_rounded,
+        title: 'Nenhum resultado encontrado',
+        subtitle:
+            'Tente app:, file:, settings:, project:, wsl: ou ext:pdf para filtrar.',
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      itemCount: results.length,
+      itemBuilder: (context, index) {
+        final result = results[index];
+        return _SearchResultTile(
+          result: result,
+          selected: index == _selectedIndex,
+          onHover: () {
+            if (_selectedIndex != index) {
+              setState(() => _selectedIndex = index);
+            }
+          },
+          onTap: () => unawaited(_activate(result)),
+        );
+      },
+    );
+  }
+
+  Widget _buildFooter(SearchDiagnostics diagnostics) {
+    final parts = <String>[
+      '↑↓ navegar',
+      'Enter abrir',
+      'Esc fechar',
+    ];
+    if (diagnostics.fileDirectoriesVisited > 0) {
+      parts.add('${diagnostics.fileDirectoriesVisited} pastas verificadas');
+    }
+    if (diagnostics.fileSearchTruncated) {
+      parts.add('busca de arquivos limitada');
+    }
+    if (diagnostics.sourcesFailed.isNotEmpty) {
+      parts.add('fonte indisponível: ${diagnostics.sourcesFailed.join(', ')}');
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: Color(0x12FFFFFF))),
+      ),
+      child: Text(
+        parts.join('  •  '),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          fontSize: 10.5,
+          color: Colors.white38,
+          fontFamily: 'Consolas',
+        ),
+      ),
+    );
+  }
+}
+
+class _SearchResultTile extends StatelessWidget {
+  const _SearchResultTile({
+    required this.result,
+    required this.selected,
+    required this.onHover,
+    required this.onTap,
+  });
+
+  final SearchResult result;
+  final bool selected;
+  final VoidCallback onHover;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => onHover(),
+      child: InkWell(
+        onTap: result.isAvailable ? onTap : null,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 90),
+          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: selected
+                ? CloudOSColors.accent.withValues(alpha: 0.13)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            border: selected
+                ? Border.all(
+                    color: CloudOSColors.accent.withValues(alpha: 0.28),
+                  )
+                : Border.all(color: Colors.transparent),
+          ),
+          child: Row(
+            children: <Widget>[
+              Container(
+                width: 38,
+                height: 38,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: result.iconColor.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Icon(result.icon, size: 20, color: result.iconColor),
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Text(
+                            result.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: selected
+                                  ? FontWeight.w700
+                                  : FontWeight.w600,
+                              color: result.isAvailable
+                                  ? Colors.white
+                                  : Colors.white38,
+                            ),
+                          ),
+                        ),
+                        _CategoryBadge(result: result),
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Text(
+                            result.subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Colors.white54,
+                            ),
+                          ),
+                        ),
+                        for (final badge in result.badges.take(2)) ...<Widget>[
+                          const SizedBox(width: 6),
+                          _SmallBadge(text: badge),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                Icons.arrow_forward_rounded,
+                size: 15,
+                color: selected ? CloudOSColors.accent : Colors.white24,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoryBadge extends StatelessWidget {
+  const _CategoryBadge({required this.result});
+  final SearchResult result;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(left: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: result.categoryColor.withValues(alpha: 0.13),
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(
+          color: result.categoryColor.withValues(alpha: 0.28),
+        ),
+      ),
+      child: Text(
+        result.categoryLabel,
+        style: TextStyle(
+          fontSize: 8.5,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 0.45,
+          color: result.categoryColor,
+        ),
+      ),
+    );
+  }
+}
+
+class _SmallBadge extends StatelessWidget {
+  const _SmallBadge({required this.text});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          fontSize: 8.5,
+          color: Colors.white38,
+          fontFamily: 'Consolas',
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptySearchState extends StatelessWidget {
+  const _EmptySearchState({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 42),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(icon, size: 30, color: Colors.white24),
+            const SizedBox(height: 10),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white60,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 5),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white30, fontSize: 10.5),
+            ),
+          ],
         ),
       ),
     );

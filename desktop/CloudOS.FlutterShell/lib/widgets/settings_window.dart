@@ -5,21 +5,24 @@ import '../models/file_models.dart';
 import '../models/shell_models.dart';
 import '../services/cloudos_bridge.dart';
 import '../services/cloudos_logger.dart';
+import '../services/search_settings_catalog.dart';
 
 class SettingsWindow extends StatefulWidget {
   const SettingsWindow({
     super.key,
     required this.bridge,
+    this.initialPageId,
   });
 
   final CloudOSBridge bridge;
+  final String? initialPageId;
 
   @override
   State<SettingsWindow> createState() => _SettingsWindowState();
 }
 
 class _SettingsWindowState extends State<SettingsWindow> {
-  int _selectedPageIndex = 0;
+  late int _selectedPageIndex;
   CloudSystemSnapshot _snapshot = CloudOSBridge.unavailableSnapshot;
   List<DriveInfoModel> _drives = const <DriveInfoModel>[];
   Map<String, Object?> _bridgeInfo = const <String, Object?>{};
@@ -28,26 +31,29 @@ class _SettingsWindowState extends State<SettingsWindow> {
   bool _volumeBusy = false;
   bool _brightnessBusy = false;
 
-  static const List<Map<String, dynamic>> _pages = <Map<String, dynamic>>[
-    <String, dynamic>{'title': 'Sistema', 'icon': Icons.computer_rounded},
-    <String, dynamic>{'title': 'Tela', 'icon': Icons.desktop_windows_rounded},
-    <String, dynamic>{'title': 'Som', 'icon': Icons.volume_up_rounded},
-    <String, dynamic>{'title': 'Rede & Internet', 'icon': Icons.wifi_rounded},
-    <String, dynamic>{'title': 'Bluetooth', 'icon': Icons.bluetooth_rounded},
-    <String, dynamic>{
-      'title': 'Energia & Bateria',
-      'icon': Icons.battery_charging_full_rounded,
-    },
-    <String, dynamic>{'title': 'Armazenamento', 'icon': Icons.storage_rounded},
-    <String, dynamic>{'title': 'Personalização', 'icon': Icons.palette_rounded},
-    <String, dynamic>{'title': 'WSL (Linux)', 'icon': Icons.auto_awesome_mosaic_rounded},
-    <String, dynamic>{'title': 'Sobre o CloudOS', 'icon': Icons.info_outline_rounded},
-  ];
-
   @override
   void initState() {
     super.initState();
+    _selectedPageIndex = SearchSettingsCatalog.pageIndex(
+      widget.initialPageId ?? 'system',
+    );
     _loadData();
+  }
+
+  @override
+  void didUpdateWidget(covariant SettingsWindow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialPageId != widget.initialPageId) {
+      final next = SearchSettingsCatalog.pageIndex(
+        widget.initialPageId ?? 'system',
+      );
+      if (next != _selectedPageIndex) {
+        setState(() => _selectedPageIndex = next);
+      }
+    }
+    if (!identical(oldWidget.bridge, widget.bridge)) {
+      _loadData();
+    }
   }
 
   Future<void> _loadData() async {
@@ -108,7 +114,9 @@ class _SettingsWindowState extends State<SettingsWindow> {
       _volumeBusy = false;
       if (!ok) _volume = previous;
     });
-    if (!ok) _showUnavailable('O controle de volume não confirmou a alteração.');
+    if (!ok) {
+      _showUnavailable('O controle de volume não confirmou a alteração.');
+    }
   }
 
   Future<void> _setBrightness(double value) async {
@@ -137,6 +145,7 @@ class _SettingsWindowState extends State<SettingsWindow> {
 
   @override
   Widget build(BuildContext context) {
+    final pages = SearchSettingsCatalog.pages;
     return Row(
       children: <Widget>[
         Container(
@@ -158,11 +167,12 @@ class _SettingsWindowState extends State<SettingsWindow> {
               ),
               Expanded(
                 child: ListView.builder(
-                  itemCount: _pages.length,
+                  itemCount: pages.length,
                   itemBuilder: (context, index) {
-                    final page = _pages[index];
+                    final page = pages[index];
                     final selected = index == _selectedPageIndex;
                     return InkWell(
+                      key: ValueKey<String>('settings-page-${page.id}'),
                       onTap: () => setState(() => _selectedPageIndex = index),
                       child: Container(
                         padding: const EdgeInsets.symmetric(
@@ -189,7 +199,7 @@ class _SettingsWindowState extends State<SettingsWindow> {
                         child: Row(
                           children: <Widget>[
                             Icon(
-                              page['icon'] as IconData,
+                              page.icon,
                               size: 17,
                               color: selected
                                   ? CloudOSColors.accent
@@ -198,7 +208,7 @@ class _SettingsWindowState extends State<SettingsWindow> {
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
-                                page['title'] as String,
+                                page.title,
                                 style: TextStyle(
                                   fontSize: 12.5,
                                   color: selected
@@ -224,7 +234,10 @@ class _SettingsWindowState extends State<SettingsWindow> {
           child: Container(
             color: const Color(0xFF171A26),
             padding: const EdgeInsets.all(24),
-            child: SingleChildScrollView(child: _buildPageContent()),
+            child: SingleChildScrollView(
+              key: ValueKey<int>(_selectedPageIndex),
+              child: _buildPageContent(),
+            ),
           ),
         ),
       ],
@@ -535,18 +548,18 @@ class _SettingsWindowState extends State<SettingsWindow> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         _buildCard(
-          title: 'CloudOS Desktop V22.1',
+          title: 'CloudOS Desktop V23',
           child: Column(
             children: <Widget>[
-              _buildInfoRow('Versão da aplicação', '22.1.0'),
+              _buildInfoRow('Linha da aplicação', '23.x validation'),
               _buildInfoRow('Broker IPC', 'V21 Named Pipe restrito'),
               _buildInfoRow(
                 'Arquitetura',
                 'Flutter Windows + núcleo nativo C++',
               ),
               _buildInfoRow(
-                'Flutter SDK',
-                'Registrado no artefato/evidência do build',
+                'Busca / continuidade',
+                'Search V23 + Session V3 + WindowManager V23',
               ),
             ],
           ),

@@ -63,6 +63,11 @@ TerminalLaunchContext? resolveTerminalLaunchContext(
     );
   }
 
+  // A POSIX path without a distro is ambiguous and cannot safely be passed to
+  // a Windows ConPTY process. Refuse it instead of silently opening PowerShell
+  // with a bogus working directory.
+  if (path.startsWith('/')) return null;
+
   // FilesController resolves virtual aliases such as "home" before this
   // function is called. Refuse unresolved virtual IDs instead of inventing a
   // filesystem location.

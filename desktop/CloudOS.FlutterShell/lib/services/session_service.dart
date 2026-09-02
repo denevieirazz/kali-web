@@ -1,223 +1,228 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../models/session_models.dart';
 import '../models/window_model.dart';
 import 'cloudos_logger.dart';
 
+/// Crash-tolerant, serialized desktop session persistence.
+///
+/// V2 allowed fire-and-forget writes to race. V3 snapshots mutable window
+/// state at enqueue time, serializes every disk mutation, keeps a known-good
+/// `.bak`, and can recover primary/backup independently.
 class SessionService {
   SessionService._();
   static final SessionService instance = SessionService._();
 
-  static const int schemaVersion = 2;
+  static const int schemaVersion = 3;
+
+  Future<void> _writeTail = Future<void>.value();
+  int _sequence = 0;
+  String? _lastSerializedPayload;
 
   Directory get _stateDirectory {
     final localAppData = Platform.environment['LOCALAPPDATA'];
     if (localAppData != null && localAppData.trim().isNotEmpty) {
       return Directory('$localAppData\\CloudOS');
     }
-
     final userProfile = Platform.environment['USERPROFILE'];
     if (userProfile != null && userProfile.trim().isNotEmpty) {
       return Directory('$userProfile\\AppData\\Local\\CloudOS');
     }
-
     return Directory('${Directory.current.path}\\.cloudos');
   }
 
   File get _sessionFile => File('${_stateDirectory.path}\\desktop_session.json');
-
-  Map<String, Object?> _jsonSafeParams(Map<String, dynamic> source) {
-    final result = <String, Object?>{};
-    for (final entry in source.entries) {
-      final value = entry.value;
-      if (value == null || value is String || value is num || value is bool) {
-        result[entry.key] = value;
-      } else if (value is List) {
-        final safe = value
-            .where(
-              (item) =>
-                  item == null ||
-                  item is String ||
-                  item is num ||
-                  item is bool,
-            )
-            .toList();
-        if (safe.length == value.length) result[entry.key] = safe;
-      } else if (value is Map) {
-        final mapped = <String, Object?>{};
-        var valid = true;
-        for (final nested in value.entries) {
-          if (nested.key is! String) {
-            valid = false;
-            break;
-          }
-          final nestedValue = nested.value;
-          if (nestedValue == null ||
-              nestedValue is String ||
-              nestedValue is num ||
-              nestedValue is bool) {
-            mapped[nested.key as String] = nestedValue;
-          } else {
-            valid = false;
-            break;
-          }
-        }
-        if (valid) result[entry.key] = mapped;
-      }
-    }
-    return result;
-  }
+  File get _backupFile => File('${_sessionFile.path}.bak');
+  File get _temporaryFile => File('${_sessionFile.path}.tmp');
 
   Future<void> saveSession({
     required List<CloudWindow> windows,
     required int activeWorkspace,
-  }) async {
-    try {
-      final data = <String, Object?>{
-        'schemaVersion': schemaVersion,
-        'timestamp': DateTime.now().toUtc().toIso8601String(),
-        'activeWorkspace': activeWorkspace.clamp(1, 4),
-        'windows': windows
-            .map(
-              (w) => <String, Object?>{
-                'id': w.id,
-                'appId': w.appId,
-                'title': w.title,
-                'x': w.x,
-                'y': w.y,
-                'width': w.width,
-                'height': w.height,
-                'minimized': w.minimized,
-                'maximized': w.maximized,
-                'focused': w.focused,
-                'workspaceIndex': w.workspaceIndex,
-                'previousX': w.previousX,
-                'previousY': w.previousY,
-                'previousWidth': w.previousWidth,
-                'previousHeight': w.previousHeight,
-                'customParams': _jsonSafeParams(w.customParams),
-              },
-            )
-            .toList(growable: false),
-      };
+    List<String> mruWindowIds = const <String>[],
+  }) {
+    final records = windows
+        .map(
+          (window) => SessionWindowRecord.fromWindow(
+            window,
+            sanitizeSessionParams(window.customParams),
+          ),
+        )
+        .toList(growable: false);
+    final knownIds = records.map((record) => record.id).toSet();
+    final safeMru = <String>[];
+    final seen = <String>{};
+    for (final id in mruWindowIds) {
+      if (knownIds.contains(id) && seen.add(id)) safeMru.add(id);
+    }
+    for (final record in records.reversed) {
+      if (seen.add(record.id)) safeMru.add(record.id);
+    }
 
-      final dir = _stateDirectory;
-      if (!await dir.exists()) await dir.create(recursive: true);
+    final snapshot = SessionSnapshot(
+      schemaVersion: schemaVersion,
+      savedAt: DateTime.now(),
+      activeWorkspace: activeWorkspace.clamp(1, 4).toInt(),
+      windows: List<SessionWindowRecord>.unmodifiable(records),
+      mruWindowIds: List<String>.unmodifiable(safeMru),
+      sequence: ++_sequence,
+    );
+
+    final task = _writeTail.then((_) => _saveSnapshot(snapshot));
+    final guarded = task.catchError((Object error, StackTrace stackTrace) {
+      CloudOSLogger.error('SessionService', 'saveSession', error, stackTrace);
+    });
+    _writeTail = guarded;
+    return guarded;
+  }
+
+  Future<void> _saveSnapshot(SessionSnapshot snapshot) async {
+    final payload = jsonEncode(snapshot.toJson());
+    final stableProjection = _stableProjection(snapshot);
+    if (_lastSerializedPayload == stableProjection && await _sessionFile.exists()) {
+      return;
+    }
+
+    final directory = _stateDirectory;
+    if (!await directory.exists()) await directory.create(recursive: true);
+
+    final temporary = _temporaryFile;
+    try {
+      if (await temporary.exists()) await temporary.delete();
+      await temporary.writeAsString(payload, flush: true);
 
       final target = _sessionFile;
-      final temp = File('${target.path}.tmp');
-      await temp.writeAsString(jsonEncode(data), flush: true);
-
+      final backup = _backupFile;
       if (await target.exists()) {
-        final backup = File('${target.path}.bak');
-        try {
-          if (await backup.exists()) await backup.delete();
-          await target.rename(backup.path);
-          await temp.rename(target.path);
-          if (await backup.exists()) await backup.delete();
-        } catch (_) {
-          if (!await target.exists() && await backup.exists()) {
-            await backup.rename(target.path);
-          }
-          rethrow;
-        }
-      } else {
-        await temp.rename(target.path);
+        // Keep a readable primary while the last-known-good backup is copied.
+        await target.copy(backup.path);
       }
-    } catch (error, stackTrace) {
-      CloudOSLogger.error('SessionService', 'saveSession', error, stackTrace);
-    }
-  }
 
-  Future<Map<String, dynamic>?> _readAndNormalize(File file) async {
-    if (!await file.exists()) return null;
-
-    final content = await file.readAsString();
-    if (content.trim().isEmpty) return null;
-
-    final decoded = jsonDecode(content);
-    if (decoded is! Map<String, dynamic>) return null;
-
-    final storedSchema = decoded['schemaVersion'];
-    if (storedSchema is int && storedSchema > schemaVersion) {
-      CloudOSLogger.warn(
-        'SessionService',
-        'loadSession',
-        'Ignoring newer desktop session schema $storedSchema; supported=$schemaVersion',
-      );
-      return null;
-    }
-
-    final workspace = decoded['activeWorkspace'];
-    if (workspace is! int || workspace < 1 || workspace > 4) {
-      decoded['activeWorkspace'] = 1;
-    }
-
-    final rawWindows = decoded['windows'];
-    if (rawWindows is! List) {
-      decoded['windows'] = <Map<String, dynamic>>[];
-    } else {
-      decoded['windows'] = rawWindows
-          .whereType<Map>()
-          .map((item) => Map<String, dynamic>.from(item))
-          .where((item) {
-            final appId = item['appId'];
-            return appId is String && appId.trim().isNotEmpty;
-          })
-          .toList(growable: false);
-    }
-
-    return decoded;
-  }
-
-  Future<Map<String, dynamic>?> loadSession() async {
-    final target = _sessionFile;
-    final backup = File('${target.path}.bak');
-
-    try {
-      final primary = await _readAndNormalize(target);
-      if (primary != null) return primary;
+      if (await target.exists()) await target.delete();
+      await temporary.rename(target.path);
+      _lastSerializedPayload = stableProjection;
     } catch (error, stackTrace) {
       CloudOSLogger.error(
         'SessionService',
-        'loadSession.primary',
+        'saveSnapshot',
         error,
         stackTrace,
       );
-    }
-
-    try {
-      final recovered = await _readAndNormalize(backup);
-      if (recovered == null) return null;
-
-      CloudOSLogger.warn(
-        'SessionService',
-        'loadSession.recovery',
-        'Recovered desktop session from backup after missing or invalid primary file.',
-      );
-
       try {
-        final dir = _stateDirectory;
-        if (!await dir.exists()) await dir.create(recursive: true);
-        await backup.copy(target.path);
-      } catch (error, stackTrace) {
+        if (await temporary.exists()) await temporary.delete();
+      } catch (_) {}
+      try {
+        if (!await _sessionFile.exists() && await _backupFile.exists()) {
+          await _backupFile.copy(_sessionFile.path);
+        }
+      } catch (restoreError, restoreStack) {
         CloudOSLogger.error(
           'SessionService',
-          'loadSession.restoreBackup',
-          error,
-          stackTrace,
+          'saveSnapshot.restoreBackup',
+          restoreError,
+          restoreStack,
         );
       }
+      rethrow;
+    }
+  }
 
-      return recovered;
+  Future<SessionSnapshot?> loadSnapshot() async {
+    await flush();
+
+    SessionSnapshot? primary;
+    try {
+      primary = await _readSnapshot(_sessionFile);
     } catch (error, stackTrace) {
       CloudOSLogger.error(
         'SessionService',
-        'loadSession.backup',
+        'loadSnapshot.primary',
         error,
         stackTrace,
       );
-      return null;
     }
+    if (primary != null) {
+      _sequence = _max(_sequence, primary.sequence);
+      _lastSerializedPayload = _stableProjection(primary);
+      return primary;
+    }
+
+    SessionSnapshot? backup;
+    try {
+      backup = await _readSnapshot(_backupFile);
+    } catch (error, stackTrace) {
+      CloudOSLogger.error(
+        'SessionService',
+        'loadSnapshot.backup',
+        error,
+        stackTrace,
+      );
+    }
+    if (backup == null) return null;
+
+    CloudOSLogger.warn(
+      'SessionService',
+      'loadSnapshot.recovery',
+      'Recovered desktop session from last-known-good backup.',
+    );
+    _sequence = _max(_sequence, backup.sequence);
+    _lastSerializedPayload = _stableProjection(backup);
+    try {
+      final directory = _stateDirectory;
+      if (!await directory.exists()) await directory.create(recursive: true);
+      await _backupFile.copy(_sessionFile.path);
+    } catch (error, stackTrace) {
+      CloudOSLogger.error(
+        'SessionService',
+        'loadSnapshot.restorePrimary',
+        error,
+        stackTrace,
+      );
+    }
+    return backup;
   }
+
+  /// Compatibility surface while shell callers migrate to typed snapshots.
+  Future<Map<String, dynamic>?> loadSession() async {
+    final snapshot = await loadSnapshot();
+    return snapshot?.toLegacyMap();
+  }
+
+  Future<SessionSnapshot?> _readSnapshot(File file) async {
+    if (!await file.exists()) return null;
+    final content = await file.readAsString();
+    if (content.trim().isEmpty) return null;
+    final decoded = jsonDecode(content);
+    if (decoded is Map) {
+      final rawSchema = decoded['schemaVersion'];
+      final storedSchema = rawSchema is num ? rawSchema.toInt() : 1;
+      if (storedSchema > schemaVersion) {
+        CloudOSLogger.warn(
+          'SessionService',
+          'readSnapshot',
+          'Ignoring newer desktop session schema $storedSchema; supported=$schemaVersion',
+        );
+        return null;
+      }
+    }
+    return SessionSnapshot.fromJson(decoded, supportedSchema: schemaVersion);
+  }
+
+  Future<void> flush() => _writeTail;
+
+  Future<void> resetForTests() async {
+    await flush();
+    _sequence = 0;
+    _lastSerializedPayload = null;
+  }
+
+  String _stableProjection(SessionSnapshot snapshot) {
+    return jsonEncode(<String, Object?>{
+      'activeWorkspace': snapshot.activeWorkspace,
+      'windows': snapshot.windows.map((item) => item.toJson()).toList(),
+      'mruWindowIds': snapshot.mruWindowIds,
+    });
+  }
+
+  int _max(int a, int b) => a > b ? a : b;
 }
