@@ -72,6 +72,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'V23 EventBus architecture contract failed.' }
           pwsh -NoProfile -File scripts/native/run-eventbus-v23-smoke.ps1
           if ($LASTEXITCODE -ne 0) { throw 'V23 EventBus named-pipe smoke failed.' }
+          pwsh -NoProfile -File scripts/flutter/test-cloudos-flutter-soak-v23-contract.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'V23 five-hour local soak harness contract failed.' }
           $filesEvidence = 'TestResults/v22.1-bug-bash/unified-files-v22.1-smoke.json'
           if (-not (Test-Path $filesEvidence)) { throw "V22.1 evidence missing: $filesEvidence" }
           Copy-Item $filesEvidence 'unified-files-v22.1-smoke.json' -Force
@@ -163,7 +165,7 @@ jobs:
           if (-not (Test-Path 'text-files-v23-smoke.json')) { throw 'Typed text-file evidence missing: text-files-v23-smoke.json' }
           if (-not (Test-Path 'eventbus-v23-smoke.json')) { throw 'EventBus evidence missing: eventbus-v23-smoke.json' }
           $evidence = [ordered]@{
-            schema = 233
+            schema = 234
             verdict = 'pass'
             flutter = $flutter
             git_sha = '${{ github.sha }}'
@@ -188,6 +190,8 @@ jobs:
             typed_text_files_editor_cap_bytes = 16777216
             truthful_system_tray = $true
             system_snapshot_cache_ttl_ms = 2000
+            five_hour_local_soak_harness_contract = $true
+            five_hour_local_soak_executed_in_ci = $false
             arbitrary_command_api = $false
             userchoice_modified = $false
             winlogon_modified = $false
