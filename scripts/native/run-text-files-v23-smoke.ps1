@@ -97,7 +97,7 @@ function Invoke-BrokerRpc {
         }
         $json = [Text.Encoding]::UTF8.GetString($responseBytes)
         $decoded = $json | ConvertFrom-Json -Depth 30
-        Assert-True ($decoded.id -eq $requestId) "Broker response id mismatch for $Method: $(Format-RpcResult $decoded)"
+        Assert-True ($decoded.id -eq $requestId) "Broker response id mismatch for ${Method}: $(Format-RpcResult $decoded)"
         return $decoded
     }
     finally {
