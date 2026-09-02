@@ -1,8 +1,11 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../core/cloudos_theme.dart';
 import '../models/shell_models.dart';
 import '../services/cloudos_bridge.dart';
+import '../services/system_tray_state_service.dart';
 import 'glass_surface.dart';
 
 class QuickSettingsPanel extends StatefulWidget {
@@ -11,19 +14,22 @@ class QuickSettingsPanel extends StatefulWidget {
     this.onVolumeChanged,
     this.onBrightnessChanged,
     this.bridge,
+    this.systemStateService,
     this.onClose,
     this.onOpenSettings,
     super.key,
   }) : assert(
          bridge != null ||
+             systemStateService != null ||
              (onVolumeChanged != null && onBrightnessChanged != null),
-         'QuickSettingsPanel requires either a CloudOSBridge or both control callbacks.',
+         'QuickSettingsPanel requires a bridge, a live system service, or both control callbacks.',
        );
 
   final CloudSystemSnapshot snapshot;
   final Future<bool> Function(double value)? onVolumeChanged;
   final Future<bool> Function(double value)? onBrightnessChanged;
   final CloudOSBridge? bridge;
+  final SystemTrayStateService? systemStateService;
   final VoidCallback? onClose;
   final VoidCallback? onOpenSettings;
 
@@ -32,14 +38,108 @@ class QuickSettingsPanel extends StatefulWidget {
 }
 
 class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
-  late double volume = widget.snapshot.volume;
-  late double brightness = widget.snapshot.brightness;
+  late double volume = widget.snapshot.normalized().volume;
+  late double brightness = widget.snapshot.normalized().brightness;
+  SystemTrayStateService? _systemState;
+  bool _ownsSystemState = false;
+  late final bool _nativeRuntimeEnabled;
+
+  CloudSystemSnapshot get _visibleSnapshot =>
+      (_systemState?.snapshot ?? widget.snapshot).normalized();
+
+  @override
+  void initState() {
+    super.initState();
+    _nativeRuntimeEnabled = !Platform.environment.containsKey('FLUTTER_TEST');
+    _bindSystemState();
+  }
+
+  @override
+  void didUpdateWidget(covariant QuickSettingsPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.systemStateService, widget.systemStateService) ||
+        !identical(oldWidget.bridge, widget.bridge)) {
+      _unbindSystemState();
+      _bindSystemState();
+      return;
+    }
+
+    if (oldWidget.snapshot != widget.snapshot && _systemState == null) {
+      _syncControls(widget.snapshot.normalized(), notify: true);
+    }
+  }
+
+  void _bindSystemState() {
+    final shouldBind = widget.systemStateService != null || _nativeRuntimeEnabled;
+    if (!shouldBind) {
+      _systemState = null;
+      _ownsSystemState = false;
+      _syncControls(widget.snapshot.normalized(), notify: false);
+      return;
+    }
+
+    _ownsSystemState = widget.systemStateService == null;
+    _systemState = widget.systemStateService ??
+        SystemTrayStateService(
+          bridge: widget.bridge ?? const CloudOSBridge(),
+        );
+    _systemState!.addListener(_onSystemStateChanged);
+    _systemState!.start();
+
+    final live = _systemState!.snapshot;
+    if (_systemState!.lastRefreshAt != null ||
+        live != CloudOSBridge.unavailableSnapshot) {
+      _syncControls(live.normalized(), notify: false);
+    } else {
+      _syncControls(widget.snapshot.normalized(), notify: false);
+    }
+  }
+
+  void _unbindSystemState() {
+    final service = _systemState;
+    if (service == null) return;
+    service.removeListener(_onSystemStateChanged);
+    if (_ownsSystemState) service.dispose();
+    _systemState = null;
+    _ownsSystemState = false;
+  }
+
+  void _onSystemStateChanged() {
+    if (!mounted || _systemState == null) return;
+    _syncControls(_systemState!.snapshot.normalized(), notify: true);
+  }
+
+  void _syncControls(CloudSystemSnapshot snapshot, {required bool notify}) {
+    final nextVolume = snapshot.volume;
+    final nextBrightness = snapshot.brightness;
+    if (volume == nextVolume && brightness == nextBrightness) return;
+    if (notify && mounted) {
+      setState(() {
+        volume = nextVolume;
+        brightness = nextBrightness;
+      });
+    } else {
+      volume = nextVolume;
+      brightness = nextBrightness;
+    }
+  }
+
+  @override
+  void dispose() {
+    _unbindSystemState();
+    super.dispose();
+  }
 
   Future<void> _setVolume(double value) async {
     final previous = volume;
     setState(() => volume = value);
-    final handler = widget.onVolumeChanged ?? widget.bridge?.setVolume;
-    final updated = handler != null && await handler(value);
+    final callback = widget.onVolumeChanged;
+    final service = _systemState;
+    final updated = callback != null
+        ? await callback(value)
+        : service != null
+        ? await service.setVolume(value)
+        : await widget.bridge?.setVolume(value) ?? false;
     if (!mounted) return;
     if (!updated) {
       setState(() => volume = previous);
@@ -48,15 +148,27 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
           content: Text('O controle de volume não está disponível.'),
         ),
       );
+      return;
+    }
+    if (service != null && callback != null) {
+      // The native EventBus normally patches this immediately. This refresh is
+      // a fallback for devices/drivers that do not emit the event.
+      service.replaceSnapshotForTesting(
+        service.snapshot.copyWith(volume: value, volumeAvailable: true),
+      );
     }
   }
 
   Future<void> _setBrightness(double value) async {
     final previous = brightness;
     setState(() => brightness = value);
-    final handler =
-        widget.onBrightnessChanged ?? widget.bridge?.setBrightness;
-    final updated = handler != null && await handler(value);
+    final callback = widget.onBrightnessChanged;
+    final service = _systemState;
+    final updated = callback != null
+        ? await callback(value)
+        : service != null
+        ? await service.setBrightness(value)
+        : await widget.bridge?.setBrightness(value) ?? false;
     if (!mounted) return;
     if (!updated) {
       setState(() => brightness = previous);
@@ -70,6 +182,7 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
 
   @override
   Widget build(BuildContext context) {
+    final snapshot = _visibleSnapshot;
     final volPct = (volume * 100).round();
     final briPct = (brightness * 100).round();
 
@@ -148,13 +261,15 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                   children: <Widget>[
                     _ToggleTile(
                       label: 'Rede',
-                      subtitle: widget.snapshot.networkAvailable
-                          ? (widget.snapshot.networkName.isEmpty
+                      subtitle: snapshot.networkAvailable
+                          ? (snapshot.networkName.isEmpty
                                 ? 'Conectada'
-                                : widget.snapshot.networkName)
+                                : snapshot.networkName)
                           : 'Indisponível',
-                      icon: Icons.wifi_rounded,
-                      active: widget.snapshot.networkAvailable,
+                      icon: snapshot.networkAvailable
+                          ? Icons.wifi_rounded
+                          : Icons.signal_wifi_off_rounded,
+                      active: snapshot.networkAvailable,
                     ),
                     const _ToggleTile(
                       label: 'Bluetooth',
@@ -178,22 +293,22 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                 ),
                 const SizedBox(height: 16),
                 _SliderRow(
-                  icon: volume == 0
+                  icon: !snapshot.volumeAvailable || volume == 0
                       ? Icons.volume_off_rounded
                       : volume < 0.5
                       ? Icons.volume_down_rounded
                       : Icons.volume_up_rounded,
-                  percentage: '$volPct%',
+                  percentage: snapshot.volumeAvailable ? '$volPct%' : '—',
                   value: volume,
-                  enabled: widget.snapshot.volumeAvailable,
+                  enabled: snapshot.volumeAvailable,
                   onChanged: _setVolume,
                 ),
                 const SizedBox(height: 8),
                 _SliderRow(
                   icon: Icons.brightness_6_rounded,
-                  percentage: '$briPct%',
+                  percentage: snapshot.brightnessAvailable ? '$briPct%' : '—',
                   value: brightness,
-                  enabled: widget.snapshot.brightnessAvailable,
+                  enabled: snapshot.brightnessAvailable,
                   onChanged: _setBrightness,
                 ),
                 const SizedBox(height: 12),
@@ -212,10 +327,10 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                   child: Row(
                     children: <Widget>[
                       Icon(
-                        widget.snapshot.batteryAvailable
-                            ? Icons.battery_charging_full_rounded
+                        snapshot.batteryAvailable
+                            ? Icons.battery_full_rounded
                             : Icons.power_rounded,
-                        color: widget.snapshot.batteryAvailable
+                        color: snapshot.batteryAvailable
                             ? CloudOSColors.success
                             : CloudOSColors.textSecondary,
                         size: 20,
@@ -226,8 +341,8 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: <Widget>[
                             Text(
-                              widget.snapshot.batteryAvailable
-                                  ? '${widget.snapshot.batteryPercent}%'
+                              snapshot.batteryAvailable
+                                  ? '${snapshot.batteryPercent}%'
                                   : 'Bateria não detectada',
                               style: const TextStyle(
                                 color: CloudOSColors.text,
@@ -236,10 +351,10 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                               ),
                             ),
                             Text(
-                              widget.snapshot.wslAvailable
-                                  ? (widget.snapshot.distros.isEmpty
+                              snapshot.wslAvailable
+                                  ? (snapshot.distros.isEmpty
                                         ? 'WSL disponível · sem distro configurada'
-                                        : 'WSL2: ${widget.snapshot.distros.join(', ')}')
+                                        : 'WSL2: ${snapshot.distros.join(', ')}')
                                   : 'WSL indisponível',
                               style: const TextStyle(
                                 color: CloudOSColors.caption,
@@ -249,7 +364,7 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                           ],
                         ),
                       ),
-                      if (widget.snapshot.wslAvailable)
+                      if (snapshot.wslAvailable)
                         Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 6,
