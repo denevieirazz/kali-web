@@ -161,6 +161,11 @@ class _GlobalSearchOverlayState extends State<GlobalSearchOverlay> {
     return false;
   }
 
+  bool get _hasRuntimeWsl => widget.apps.any((app) {
+        final id = app.id.toLowerCase();
+        return app.platform == CloudAppPlatform.linux || id.startsWith('wsl:');
+      });
+
   Future<void> _launchRuntimeApp(CloudApp app) async {
     widget.onClose();
 
@@ -203,10 +208,15 @@ class _GlobalSearchOverlayState extends State<GlobalSearchOverlay> {
     final query = _query.toLowerCase();
     final results = <SearchResultItem>[];
     final seenAppIds = <String>{};
+    final hasRuntimeWsl = _hasRuntimeWsl;
 
     // Internal CloudOS surfaces are defined by the presentation layer itself.
+    // WSL is only advertised when the Broker catalog proves that a Linux/WSL
+    // runtime is actually available for this session.
     for (final app in AppRegistry.definedApps) {
       if (!app.isInternal) continue;
+      final isWslSurface = app.id.toLowerCase().startsWith('wsl:');
+      if (isWslSurface && !hasRuntimeWsl) continue;
       if (!_matches(query, <String?>[app.name, app.subtitle, app.id])) continue;
 
       seenAppIds.add(app.id.toLowerCase());
@@ -214,11 +224,9 @@ class _GlobalSearchOverlayState extends State<GlobalSearchOverlay> {
         SearchResultItem(
           title: app.name,
           subtitle: app.subtitle,
-          category: app.id.startsWith('wsl:')
-              ? SearchCategory.wsl
-              : SearchCategory.apps,
+          category: isWslSurface ? SearchCategory.wsl : SearchCategory.apps,
           icon: app.icon,
-          iconColor: app.id.startsWith('wsl:')
+          iconColor: isWslSurface
               ? const Color(0xFFFFA657)
               : const Color(0xFF58A6FF),
           onTap: () {
@@ -266,6 +274,7 @@ class _GlobalSearchOverlayState extends State<GlobalSearchOverlay> {
         final title = page['title'] ?? '';
         final desc = page['desc'] ?? '';
         if (!_matches(query, <String?>[title, desc])) continue;
+        if (title == 'WSL (Linux)' && !hasRuntimeWsl) continue;
         results.add(
           SearchResultItem(
             title: title,
@@ -370,7 +379,7 @@ class _GlobalSearchOverlayState extends State<GlobalSearchOverlay> {
                                 contentPadding: EdgeInsets.zero,
                                 fillColor: Colors.transparent,
                                 hintText:
-                                    'Buscar apps, configurações, projetos e WSL...',
+                                    'Buscar apps, configurações e projetos...',
                                 hintStyle: TextStyle(
                                   fontSize: 14,
                                   color: Colors.white38,

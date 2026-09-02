@@ -11,12 +11,14 @@ class StartPanel extends StatefulWidget {
     required this.apps,
     required this.onLaunch,
     required this.onClose,
+    this.bridge = const CloudOSBridge(),
     super.key,
   });
 
   final List<CloudApp> apps;
   final ValueChanged<CloudApp> onLaunch;
   final VoidCallback onClose;
+  final CloudOSBridge bridge;
 
   @override
   State<StartPanel> createState() => _StartPanelState();
@@ -34,6 +36,13 @@ class _StartPanelState extends State<StartPanel> {
     'Sistema',
     'Utilitários',
   ];
+
+  String get _sessionUser {
+    final windowsUser = Platform.environment['USERNAME']?.trim() ?? '';
+    if (windowsUser.isNotEmpty) return windowsUser;
+    final unixUser = Platform.environment['USER']?.trim() ?? '';
+    return unixUser.isEmpty ? 'Usuário' : unixUser;
+  }
 
   @override
   void dispose() {
@@ -56,8 +65,9 @@ class _StartPanelState extends State<StartPanel> {
           if (!matchesQuery) return false;
 
           if (selectedFilter == 'Todos') return true;
-          if (selectedFilter == 'Linux / WSL')
+          if (selectedFilter == 'Linux / WSL') {
             return app.platform == CloudAppPlatform.linux;
+          }
           return app.category == selectedFilter;
         })
         .toList(growable: false);
@@ -116,7 +126,7 @@ class _StartPanelState extends State<StartPanel> {
                             ),
                           ),
                           Text(
-                            'Ambiente unificado Windows + Linux',
+                            'Aplicativos disponíveis nesta sessão',
                             style: TextStyle(
                               color: CloudOSColors.caption,
                               fontSize: 11,
@@ -155,7 +165,7 @@ class _StartPanelState extends State<StartPanel> {
                             },
                           )
                         : null,
-                    hintText: 'Pesquisar apps, arquivos, comandos e WSL...',
+                    hintText: 'Pesquisar aplicativos disponíveis...',
                     isDense: true,
                   ),
                 ),
@@ -319,19 +329,19 @@ class _StartPanelState extends State<StartPanel> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    const Column(
+                    Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
                         Text(
-                          'Douglas',
-                          style: TextStyle(
+                          _sessionUser,
+                          style: const TextStyle(
                             color: CloudOSColors.text,
                             fontSize: 12.5,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-                        Text(
-                          'Administrador • Sessão Ativa',
+                        const Text(
+                          'Sessão ativa',
                           style: TextStyle(
                             color: CloudOSColors.caption,
                             fontSize: 10,
@@ -343,8 +353,17 @@ class _StartPanelState extends State<StartPanel> {
                     _FooterAction(
                       icon: Icons.lock_outline_rounded,
                       tooltip: 'Bloquear Sessão',
-                      onPressed: () {
-                        const CloudOSBridge().lockSession();
+                      onPressed: () async {
+                        final locked = await widget.bridge.lockSession();
+                        if (!locked && context.mounted) {
+                          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'O Windows não confirmou o bloqueio da sessão.',
+                              ),
+                            ),
+                          );
+                        }
                       },
                     ),
                     const SizedBox(width: 4),
@@ -356,20 +375,40 @@ class _StartPanelState extends State<StartPanel> {
                           context: context,
                           builder: (ctx) => AlertDialog(
                             backgroundColor: const Color(0xFF101524),
-                            title: const Text('Opções de Energia CloudOS', style: TextStyle(color: Colors.white, fontSize: 15)),
-                            content: const Text('Selecione a ação desejada para o CloudOS:', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                            title: const Text(
+                              'Opções do CloudOS',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                              ),
+                            ),
+                            content: const Text(
+                              'A única ação disponível aqui é encerrar o aplicativo CloudOS. O sistema Windows não será desligado.',
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 13,
+                              ),
+                            ),
                             actions: <Widget>[
                               TextButton(
                                 onPressed: () => Navigator.pop(ctx),
-                                child: const Text('Cancelar', style: TextStyle(color: Colors.white60)),
+                                child: const Text(
+                                  'Cancelar',
+                                  style: TextStyle(color: Colors.white60),
+                                ),
                               ),
                               ElevatedButton(
-                                style: ElevatedButton.styleFrom(backgroundColor: CloudOSColors.danger),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: CloudOSColors.danger,
+                                ),
                                 onPressed: () {
                                   Navigator.pop(ctx);
                                   exit(0);
                                 },
-                                child: const Text('Sair do CloudOS', style: TextStyle(color: Colors.white)),
+                                child: const Text(
+                                  'Sair do CloudOS',
+                                  style: TextStyle(color: Colors.white),
+                                ),
                               ),
                             ],
                           ),
