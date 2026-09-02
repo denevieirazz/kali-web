@@ -42,7 +42,7 @@ class _BrokerFsBridge extends CloudOSBridge {
     String method,
     Map<String, Object?> payload,
   ) async {
-    if (method == 'files.resolve') {
+    if (method == 'files.resolvePath') {
       final raw = payload['path'] as String? ?? '';
       final path = normalize(raw);
       return <String, Object?>{
@@ -191,7 +191,10 @@ void main() {
 
       expect(result.exists, isTrue);
       expect(bridge.created.first, r'\\wsl.localhost\kali-linux\home');
-      expect(bridge.created.last, r'\\wsl.localhost\kali-linux\home\tester\repo');
+      expect(
+        bridge.created.last,
+        r'\\wsl.localhost\kali-linux\home\tester\repo',
+      );
       expect(bridge.created.join(' '), isNot(contains('Ubuntu')));
     });
   });

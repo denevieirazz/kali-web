@@ -37,7 +37,7 @@ class BrokerFilesystemService {
 
     try {
       final payload = await bridge.invokeBrokerRpc(
-        'files.resolve',
+        'files.resolvePath',
         <String, Object?>{'path': input},
       );
       final resolved = (payload['resolvedPath'] as String? ?? input).trim();
@@ -166,8 +166,9 @@ class BrokerFilesystemService {
   }
 
   _DirectoryCreationPlan? _buildCreationPlan(String rawPath) {
-    final normalized = rawPath.trim().replaceAll('/', r'\');
-    if (normalized.isEmpty || normalized.startsWith('/')) return null;
+    final trimmed = rawPath.trim();
+    if (trimmed.isEmpty || trimmed.startsWith('/')) return null;
+    final normalized = trimmed.replaceAll('/', r'\');
 
     final drive = RegExp(r'^([A-Za-z]:)\\?(.*)$').firstMatch(normalized);
     if (drive != null) {
