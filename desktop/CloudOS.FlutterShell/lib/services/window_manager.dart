@@ -28,13 +28,16 @@ class WindowManager extends ChangeNotifier {
   WindowManager({
     WindowGeometryEngine geometryEngine = const WindowGeometryEngine(),
     Duration persistenceDebounce = const Duration(milliseconds: 180),
+    SessionService? sessionService,
   })  : _geometryEngine = geometryEngine,
-        _persistenceDebounce = persistenceDebounce;
+        _persistenceDebounce = persistenceDebounce,
+        _sessionService = sessionService ?? SessionService.instance;
 
   final List<CloudWindow> _windows = <CloudWindow>[];
   final WindowMruTracker _mru = WindowMruTracker();
   final WindowGeometryEngine _geometryEngine;
   final Duration _persistenceDebounce;
+  final SessionService _sessionService;
 
   int _nextWindowSeq = 1;
   SnapRegion _activeSnapPreview = SnapRegion.none;
@@ -538,7 +541,7 @@ class WindowManager extends ChangeNotifier {
     _persistenceTimer?.cancel();
     _persistenceTimer = null;
     await _persistNow();
-    await SessionService.instance.flush();
+    await _sessionService.flush();
   }
 
   void _focusBestWindowInActiveWorkspace({required bool touchMru}) {
@@ -582,7 +585,7 @@ class WindowManager extends ChangeNotifier {
   }
 
   Future<void> _persistNow() {
-    return SessionService.instance.saveSession(
+    return _sessionService.saveSession(
       windows: _windows,
       activeWorkspace: _activeWorkspace,
       mruWindowIds: _mru.ids,
