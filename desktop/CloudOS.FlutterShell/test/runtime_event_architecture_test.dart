@@ -116,7 +116,7 @@ void main() {
       'SessionIdentityService',
       'Identidade indisponível',
       'Sessão ativa • identidade indisponível',
-      'ID ${_identity.sessionId}',
+      r'ID ${_identity.sessionId}',
     ], 'StartPanel');
 
     expectAbsent(taskbar, <String>[
