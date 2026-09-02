@@ -27,6 +27,8 @@ class SessionService {
   Future<void> _writeTail = Future<void>.value();
   int _sequence = 0;
   String? _lastSerializedPayload;
+  Object? _lastWriteError;
+  StackTrace? _lastWriteStackTrace;
 
   Directory get _stateDirectory {
     final override = _stateDirectoryOverride;
@@ -46,6 +48,8 @@ class SessionService {
   File get _sessionFile => File('${_stateDirectory.path}\\desktop_session.json');
   File get _backupFile => File('${_sessionFile.path}.bak');
   File get _temporaryFile => File('${_sessionFile.path}.tmp');
+
+  bool get hasWriteFailure => _lastWriteError != null;
 
   Future<void> saveSession({
     required List<CloudWindow> windows,
@@ -81,6 +85,8 @@ class SessionService {
 
     final task = _writeTail.then((_) => _saveSnapshot(snapshot));
     final guarded = task.catchError((Object error, StackTrace stackTrace) {
+      _lastWriteError = error;
+      _lastWriteStackTrace = stackTrace;
       CloudOSLogger.error('SessionService', 'saveSession', error, stackTrace);
     });
     _writeTail = guarded;
@@ -91,6 +97,7 @@ class SessionService {
     final payload = jsonEncode(snapshot.toJson());
     final stableProjection = _stableProjection(snapshot);
     if (_lastSerializedPayload == stableProjection && await _sessionFile.exists()) {
+      _clearWriteFailure();
       return;
     }
 
@@ -112,6 +119,7 @@ class SessionService {
       if (await target.exists()) await target.delete();
       await temporary.rename(target.path);
       _lastSerializedPayload = stableProjection;
+      _clearWriteFailure();
     } catch (error, stackTrace) {
       CloudOSLogger.error(
         'SessionService',
@@ -219,12 +227,27 @@ class SessionService {
     return SessionSnapshot.fromJson(decoded, supportedSchema: schemaVersion);
   }
 
-  Future<void> flush() => _writeTail;
+  /// Drains every queued write. When [requireSuccessfulWrite] is true, a
+  /// previously logged persistence failure becomes a hard error so orderly
+  /// shutdown can be cancelled instead of pretending the session is durable.
+  Future<void> flush({bool requireSuccessfulWrite = false}) async {
+    await _writeTail;
+    if (!requireSuccessfulWrite || _lastWriteError == null) return;
+    final error = _lastWriteError!;
+    final stackTrace = _lastWriteStackTrace ?? StackTrace.current;
+    Error.throwWithStackTrace(error, stackTrace);
+  }
 
   Future<void> resetForTests() async {
     await flush();
     _sequence = 0;
     _lastSerializedPayload = null;
+    _clearWriteFailure();
+  }
+
+  void _clearWriteFailure() {
+    _lastWriteError = null;
+    _lastWriteStackTrace = null;
   }
 
   String _stableProjection(SessionSnapshot snapshot) {
