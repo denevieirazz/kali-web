@@ -1,5 +1,5 @@
 import 'package:cloudos_flutter_shell/models/file_models.dart';
-import 'package:cloudos_flutter_shell/models/shell_models.dart';
+import 'package:cloudos_flutter_shell/models/shell_models.dart' hide CloudFileItem;
 import 'package:cloudos_flutter_shell/services/cloudos_bridge.dart';
 import 'package:cloudos_flutter_shell/services/files_controller.dart';
 import 'package:cloudos_flutter_shell/services/system_metrics_service.dart';
