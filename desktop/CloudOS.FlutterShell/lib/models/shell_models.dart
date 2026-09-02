@@ -26,29 +26,9 @@ class CloudApp {
   final bool isRecent;
 }
 
-enum CloudFileSource { cloudDrive, windows, linux, trash }
-
-class CloudFileItem {
-  const CloudFileItem({
-    required this.name,
-    required this.path,
-    required this.isFolder,
-    required this.sizeFormatted,
-    required this.modifiedFormatted,
-    required this.source,
-    this.icon,
-    this.extension,
-  });
-
-  final String name;
-  final String path;
-  final bool isFolder;
-  final String sizeFormatted;
-  final String modifiedFormatted;
-  final CloudFileSource source;
-  final IconData? icon;
-  final String? extension;
-}
+// File-system models live exclusively in file_models.dart. Keeping the old
+// pre-V22 CloudFileItem here created two incompatible types with the same name
+// and made any consumer that also used the Files V22 model ambiguous.
 
 class CloudNotification {
   const CloudNotification({

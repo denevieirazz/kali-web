@@ -24,7 +24,8 @@ class SearchHistoryStore {
   int get _boundedMaxEntries => maxEntries.clamp(8, 256).toInt();
 
   Directory get _stateDirectory {
-    if (_overrideDirectory != null) return _overrideDirectory!;
+    final overrideDirectory = _overrideDirectory;
+    if (overrideDirectory != null) return overrideDirectory;
     final local = Platform.environment['LOCALAPPDATA'];
     if (local != null && local.trim().isNotEmpty) {
       return Directory('$local\\CloudOS');
