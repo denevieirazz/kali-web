@@ -96,6 +96,13 @@ class SystemTrayStateService extends ChangeNotifier {
       final loaded = await _bridge.loadSystemSnapshot();
       if (_disposed || epoch != _refreshEpoch) return;
 
+      if (identical(loaded, CloudOSBridge.unavailableSnapshot)) {
+        _lastRefreshError = StateError(
+          'System Broker snapshot is unavailable ($reason).',
+        );
+        return;
+      }
+
       _snapshot = loaded.normalized();
       _lastRefreshAt = DateTime.now();
       _lastRefreshError = null;
