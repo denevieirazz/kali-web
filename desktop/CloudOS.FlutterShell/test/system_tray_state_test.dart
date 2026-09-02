@@ -244,6 +244,31 @@ void main() {
       runtime.dispose();
     });
 
+    test('brightness mutation is committed only when native write succeeds', () async {
+      final runtime = _runtime();
+      final bridge = _SystemBridgeFake(
+        initial: _snapshot(
+          brightnessAvailable: true,
+          brightness: 0.35,
+        ),
+        brightnessWriteResult: true,
+      );
+      final service = SystemTrayStateService(
+        bridge: bridge,
+        runtime: runtime,
+        pollInterval: null,
+      );
+      service.replaceSnapshotForTesting(
+        _snapshot(brightnessAvailable: true, brightness: 0.35),
+      );
+
+      expect(await service.setBrightness(0.66), isTrue);
+      expect(bridge.brightnessWrites, <double>[0.66]);
+      expect(service.snapshot.brightness, closeTo(0.66, 0.0001));
+      service.dispose();
+      runtime.dispose();
+    });
+
     test('reconnect refreshes snapshot through the bridge', () async {
       final events = StreamController<NativeBrokerEventFrame>.broadcast();
       final connections =
