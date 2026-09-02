@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'cloudos_bridge.dart';
 import 'cloudos_logger.dart';
@@ -90,157 +89,192 @@ class RealSystemMetrics {
     uptimeFormatted: '--:--',
     isLive: false,
   );
+
+  static RealSystemMetrics? tryParse(Map<String, Object?> raw) {
+    if (raw.isEmpty) return null;
+    final hasNativeSignal = raw.containsKey('cpuLoadPercent') ||
+        raw.containsKey('ramTotalMb') ||
+        raw.containsKey('uptimeSeconds') ||
+        raw.containsKey('disks') ||
+        raw.containsKey('processes');
+    if (!hasNativeSignal) return null;
+
+    final cpuPercent = ((raw['cpuLoadPercent'] as num?)?.toDouble() ?? 0.0)
+        .clamp(0.0, 100.0)
+        .toDouble();
+    final totalRam = ((raw['ramTotalMb'] as num?)?.toDouble() ?? 0.0)
+        .clamp(0.0, double.infinity)
+        .toDouble();
+    final usedRam = ((raw['ramUsedMb'] as num?)?.toDouble() ?? 0.0)
+        .clamp(0.0, totalRam > 0 ? totalRam : double.infinity)
+        .toDouble();
+    final freeRam = ((raw['ramFreeMb'] as num?)?.toDouble() ?? 0.0)
+        .clamp(0.0, totalRam > 0 ? totalRam : double.infinity)
+        .toDouble();
+    final uptimeSec = ((raw['uptimeSeconds'] as num?)?.toInt() ?? 0)
+        .clamp(0, 1 << 62)
+        .toInt();
+    final sysDrive = (raw['systemDrive'] as String? ?? '').trim();
+
+    final diskItems = <DiskMetricItem>[];
+    final rawDisks = raw['disks'];
+    if (rawDisks is List) {
+      for (final item in rawDisks) {
+        if (item is! Map) continue;
+        final name = (item['name'] as String? ?? '').trim();
+        final total = ((item['totalGb'] as num?)?.toDouble() ?? 0.0)
+            .clamp(0.0, double.infinity)
+            .toDouble();
+        final used = ((item['usedGb'] as num?)?.toDouble() ?? 0.0)
+            .clamp(0.0, total > 0 ? total : double.infinity)
+            .toDouble();
+        final free = ((item['freeGb'] as num?)?.toDouble() ?? 0.0)
+            .clamp(0.0, total > 0 ? total : double.infinity)
+            .toDouble();
+        final percent = ((item['percentUsed'] as num?)?.toDouble() ??
+                (total > 0 ? (used / total) * 100.0 : 0.0))
+            .clamp(0.0, 100.0)
+            .toDouble();
+        if (name.isEmpty || total <= 0) continue;
+        diskItems.add(
+          DiskMetricItem(
+            name: name,
+            totalGb: total,
+            usedGb: used,
+            freeGb: free,
+            percentUsed: percent,
+          ),
+        );
+      }
+    }
+
+    final procItems = <ProcessMetricItem>[];
+    final rawProcesses = raw['processes'];
+    if (rawProcesses is List) {
+      for (final item in rawProcesses) {
+        if (item is! Map) continue;
+        final pid = (item['pid'] as num?)?.toInt() ?? 0;
+        final name = (item['name'] as String? ?? '').trim();
+        if (pid <= 0 || name.isEmpty) continue;
+        procItems.add(
+          ProcessMetricItem(
+            pid: pid,
+            name: name,
+            ramMb: ((item['memoryMb'] as num?)?.toDouble() ?? 0.0)
+                .clamp(0.0, double.infinity)
+                .toDouble(),
+            cpuTimeSeconds:
+                ((item['cpuTimeSeconds'] as num?)?.toDouble() ?? 0.0)
+                    .clamp(0.0, double.infinity)
+                    .toDouble(),
+          ),
+        );
+      }
+    }
+
+    final hours = uptimeSec ~/ 3600;
+    final minutes = (uptimeSec % 3600) ~/ 60;
+    final formattedUptime = hours > 0 ? '${hours}h ${minutes}m' : '${minutes}m';
+
+    return RealSystemMetrics(
+      cpuPercent: cpuPercent,
+      totalRamMb: totalRam,
+      usedRamMb: usedRam,
+      freeRamMb: freeRam,
+      systemDrive: sysDrive,
+      disks: List<DiskMetricItem>.unmodifiable(diskItems),
+      activeProcesses: List<ProcessMetricItem>.unmodifiable(procItems),
+      uptimeSeconds: uptimeSec,
+      uptimeFormatted: formattedUptime,
+      isLive: true,
+    );
+  }
 }
 
+/// Polls the native Win32 metrics bridge with explicit lifecycle ownership.
+///
+/// Production and tests use the same code path. Tests disable periodic polling
+/// through [enablePeriodicPolling] instead of changing behavior through process
+/// environment variables.
 class SystemMetricsService {
-  SystemMetricsService._();
-  static final SystemMetricsService instance = SystemMetricsService._();
+  SystemMetricsService({
+    CloudOSBridge? bridge,
+    Duration pollInterval = const Duration(seconds: 2),
+    bool enablePeriodicPolling = true,
+  })  : _bridge = bridge ?? const CloudOSBridge(),
+        _pollInterval = pollInterval,
+        _enablePeriodicPolling = enablePeriodicPolling;
 
-  final CloudOSBridge _bridge = const CloudOSBridge();
-  RealSystemMetrics _current = RealSystemMetrics.initial;
-  RealSystemMetrics get current => _current;
+  static final SystemMetricsService instance = SystemMetricsService();
 
+  final CloudOSBridge _bridge;
+  final Duration _pollInterval;
+  final bool _enablePeriodicPolling;
   final StreamController<RealSystemMetrics> _controller =
-      StreamController<RealSystemMetrics>.broadcast();
-  Stream<RealSystemMetrics> get metricsStream => _controller.stream;
+      StreamController<RealSystemMetrics>.broadcast(sync: true);
 
+  RealSystemMetrics _current = RealSystemMetrics.initial;
   Timer? _poller;
   bool _isPolling = false;
+  bool _disposed = false;
   int _activeListeners = 0;
 
+  RealSystemMetrics get current => _current;
+  Stream<RealSystemMetrics> get metricsStream => _controller.stream;
+  bool get isRunning => _activeListeners > 0;
+
   void start() {
+    if (_disposed) return;
     _activeListeners++;
-    if (_poller != null && _poller!.isActive) return;
-    unawaited(_pollOnce());
-    if (!Platform.environment.containsKey('FLUTTER_TEST')) {
+    if (_activeListeners > 1) return;
+    unawaited(refresh());
+    if (_enablePeriodicPolling) {
       _poller = Timer.periodic(
-        const Duration(seconds: 2),
-        (_) => unawaited(_pollOnce()),
+        _pollInterval,
+        (_) => unawaited(refresh()),
       );
     }
   }
 
   void stop() {
     if (_activeListeners > 0) _activeListeners--;
-    if (_activeListeners <= 0) {
+    if (_activeListeners == 0) {
       _poller?.cancel();
       _poller = null;
-      _activeListeners = 0;
     }
   }
 
   void forceStop() {
+    _activeListeners = 0;
     _poller?.cancel();
     _poller = null;
-    _activeListeners = 0;
   }
 
-  Future<void> _pollOnce() async {
-    if (_isPolling) return;
+  Future<void> refresh() async {
+    if (_disposed || _isPolling) return;
     _isPolling = true;
-
     try {
-      if (Platform.environment.containsKey('FLUTTER_TEST')) return;
-
       final raw = await _bridge.getSystemMetrics();
-      if (raw.isEmpty) return;
-
-      final cpuPercent =
-          ((raw['cpuLoadPercent'] as num?)?.toDouble() ?? 0.0)
-              .clamp(0.0, 100.0)
-              .toDouble();
-      final totalRam =
-          ((raw['ramTotalMb'] as num?)?.toDouble() ?? 0.0).clamp(0.0, double.infinity).toDouble();
-      final usedRam =
-          ((raw['ramUsedMb'] as num?)?.toDouble() ?? 0.0).clamp(0.0, double.infinity).toDouble();
-      final freeRam =
-          ((raw['ramFreeMb'] as num?)?.toDouble() ?? 0.0).clamp(0.0, double.infinity).toDouble();
-      final uptimeSec = ((raw['uptimeSeconds'] as num?)?.toInt() ?? 0).clamp(0, 1 << 62);
-      final sysDrive = ((raw['systemDrive'] as String?) ?? '').trim();
-
-      final diskItems = <DiskMetricItem>[];
-      final rawDisks = raw['disks'];
-      if (rawDisks is List) {
-        for (final item in rawDisks) {
-          if (item is! Map) continue;
-          final name = (item['name'] as String? ?? '').trim();
-          final total = ((item['totalGb'] as num?)?.toDouble() ?? 0.0)
-              .clamp(0.0, double.infinity)
-              .toDouble();
-          final used = ((item['usedGb'] as num?)?.toDouble() ?? 0.0)
-              .clamp(0.0, total > 0 ? total : double.infinity)
-              .toDouble();
-          final free = ((item['freeGb'] as num?)?.toDouble() ?? 0.0)
-              .clamp(0.0, total > 0 ? total : double.infinity)
-              .toDouble();
-          final percent = ((item['percentUsed'] as num?)?.toDouble() ??
-                  (total > 0 ? (used / total) * 100.0 : 0.0))
-              .clamp(0.0, 100.0)
-              .toDouble();
-          if (name.isEmpty || total <= 0) continue;
-          diskItems.add(
-            DiskMetricItem(
-              name: name,
-              totalGb: total,
-              usedGb: used,
-              freeGb: free,
-              percentUsed: percent,
-            ),
-          );
-        }
-      }
-
-      final procItems = <ProcessMetricItem>[];
-      final rawProcs = raw['processes'];
-      if (rawProcs is List) {
-        for (final item in rawProcs) {
-          if (item is! Map) continue;
-          final pid = (item['pid'] as num?)?.toInt() ?? 0;
-          final name = (item['name'] as String? ?? '').trim();
-          if (pid <= 0 || name.isEmpty) continue;
-          procItems.add(
-            ProcessMetricItem(
-              pid: pid,
-              name: name,
-              ramMb: ((item['memoryMb'] as num?)?.toDouble() ?? 0.0)
-                  .clamp(0.0, double.infinity)
-                  .toDouble(),
-              cpuTimeSeconds:
-                  ((item['cpuTimeSeconds'] as num?)?.toDouble() ?? 0.0)
-                      .clamp(0.0, double.infinity)
-                      .toDouble(),
-            ),
-          );
-        }
-      }
-
-      final hours = uptimeSec ~/ 3600;
-      final mins = (uptimeSec % 3600) ~/ 60;
-      final formattedUptime = hours > 0 ? '${hours}h ${mins}m' : '${mins}m';
-
-      _current = RealSystemMetrics(
-        cpuPercent: cpuPercent,
-        totalRamMb: totalRam,
-        usedRamMb: usedRam,
-        freeRamMb: freeRam,
-        systemDrive: sysDrive,
-        disks: List<DiskMetricItem>.unmodifiable(diskItems),
-        activeProcesses: List<ProcessMetricItem>.unmodifiable(procItems),
-        uptimeSeconds: uptimeSec,
-        uptimeFormatted: formattedUptime,
-        isLive: true,
-      );
-
-      _controller.add(_current);
+      final parsed = RealSystemMetrics.tryParse(raw);
+      if (parsed == null || _disposed) return;
+      _current = parsed;
+      _controller.add(parsed);
     } catch (error, stackTrace) {
       CloudOSLogger.error(
         'SystemMetricsService',
-        'pollOnce',
+        'refresh',
         error,
         stackTrace,
       );
     } finally {
       _isPolling = false;
     }
+  }
+
+  void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    forceStop();
+    unawaited(_controller.close());
   }
 }
