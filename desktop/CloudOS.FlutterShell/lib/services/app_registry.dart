@@ -110,7 +110,7 @@ class AppRegistry {
     AppDefinition(
       id: 'cloudos:drive',
       name: 'CloudOS Drive',
-      subtitle: 'Armazenamento Local Sincronizado',
+      subtitle: 'Armazenamento Local do CloudOS',
       icon: Icons.cloud_queue_rounded,
       isInternal: true,
       category: AppCategory.productivity,
@@ -119,11 +119,10 @@ class AppRegistry {
       isSingleton: true,
       pinned: true,
     ),
-    // Linux WSL Apps
     AppDefinition(
       id: 'wsl:terminal',
       name: 'WSL Linux',
-      subtitle: 'Subsistema Linux Nativo (WSL2)',
+      subtitle: 'Terminal WSL integrado quando uma distro estiver disponível',
       icon: Icons.terminal_rounded,
       isInternal: true,
       category: AppCategory.development,
@@ -131,7 +130,6 @@ class AppRegistry {
       defaultHeight: 520.0,
       pinned: true,
     ),
-    // External Windows Apps (Marcados como isInternal: false)
     AppDefinition(
       id: 'cloudos:notepad',
       name: 'Bloco de Notas',
@@ -178,7 +176,6 @@ class AppRegistry {
     for (final app in definedApps) {
       if (app.id.toLowerCase() == normalized) return app;
     }
-    // Aliases
     if (normalized == 'files') return findById('cloudos:files');
     if (normalized == 'terminal') return findById('cloudos:terminal');
     if (normalized == 'browser') return findById('cloudos:browser');
@@ -188,7 +185,6 @@ class AppRegistry {
     if (normalized == 'drive') return findById('cloudos:drive');
     if (normalized == 'notepad') return findById('cloudos:notepad');
     if (normalized.startsWith('wsl:')) return findById('wsl:terminal');
-
     return null;
   }
 }
