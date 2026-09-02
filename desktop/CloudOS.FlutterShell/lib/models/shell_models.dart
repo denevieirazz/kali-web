@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+export 'file_models.dart' show CloudFileItem;
+
 enum CloudAppPlatform { windows, linux, cloudos }
 
 class CloudApp {
@@ -26,9 +28,9 @@ class CloudApp {
   final bool isRecent;
 }
 
-// File-system models live exclusively in file_models.dart. Keeping the old
-// pre-V22 CloudFileItem here created two incompatible types with the same name
-// and made any consumer that also used the Files V22 model ambiguous.
+// File-system models live exclusively in file_models.dart. CloudFileItem is
+// re-exported above only for source compatibility with older imports; there is
+// one declaration/type in the Flutter shell.
 
 class CloudNotification {
   const CloudNotification({

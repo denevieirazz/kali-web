@@ -47,12 +47,21 @@ class ProjectRecord {
     final path = raw['path'];
     final createdAtRaw = raw['createdAt'];
     final lastOpenedAtRaw = raw['lastOpenedAt'];
-    if (id is! String || id.isEmpty || name is! String || name.isEmpty || path is! String || path.isEmpty) {
+    if (id is! String ||
+        id.isEmpty ||
+        name is! String ||
+        name.isEmpty ||
+        path is! String ||
+        path.isEmpty) {
       return null;
     }
 
-    final createdAt = createdAtRaw is String ? DateTime.tryParse(createdAtRaw)?.toLocal() : null;
-    final lastOpenedAt = lastOpenedAtRaw is String ? DateTime.tryParse(lastOpenedAtRaw)?.toLocal() : null;
+    final createdAt = createdAtRaw is String
+        ? DateTime.tryParse(createdAtRaw)?.toLocal()
+        : null;
+    final lastOpenedAt = lastOpenedAtRaw is String
+        ? DateTime.tryParse(lastOpenedAtRaw)?.toLocal()
+        : null;
     return ProjectRecord(
       id: id,
       name: name,
@@ -63,6 +72,10 @@ class ProjectRecord {
   }
 }
 
+/// Persistent CloudOS-owned project metadata.
+///
+/// dart:io is intentionally limited to this private state file. User workspace
+/// inspection/mutation belongs to ProjectFilesystemService -> Files V22 Broker.
 class ProjectStore {
   ProjectStore._();
 
@@ -80,7 +93,8 @@ class ProjectStore {
     return Directory('${Directory.current.path}\\.cloudos');
   }
 
-  static File get storageFile => File('${_cloudOsStateDirectory.path}\\projects.json');
+  static File get storageFile =>
+      File('${_cloudOsStateDirectory.path}\\projects.json');
 
   static Future<List<ProjectRecord>> load() async {
     final file = storageFile;
@@ -98,7 +112,7 @@ class ProjectStore {
       for (final item in decoded) {
         final record = ProjectRecord.fromJson(item);
         if (record == null) continue;
-        final normalizedPath = record.path.toLowerCase();
+        final normalizedPath = record.path.trim().toLowerCase();
         if (!seenIds.add(record.id) || !seenPaths.add(normalizedPath)) continue;
         records.add(record);
       }
@@ -138,29 +152,10 @@ class ProjectStore {
     return 'project-${hash.toRadixString(16)}';
   }
 
-  static String detectType(String path) {
-    final dir = Directory(path);
-    if (!dir.existsSync()) return 'Pasta indisponível';
+  /// Compatibility fallback for call sites that only have persisted metadata.
+  /// Real type detection is Broker-backed in ProjectFilesystemService.
+  static String detectType(String path) => 'Workspace';
 
-    bool has(String relative) => File('$path\\$relative').existsSync();
-    if (has('pubspec.yaml')) return 'Flutter / Dart';
-    if (has('package.json')) return 'Node.js / Web';
-    if (has('Cargo.toml')) return 'Rust';
-    if (has('go.mod')) return 'Go';
-    if (has('CMakeLists.txt')) return 'CMake / C++';
-    if (has('pyproject.toml') || has('requirements.txt')) return 'Python';
-    if (Directory('$path\\.git').existsSync()) return 'Git Repository';
-    return 'Workspace';
-  }
-
-  static DateTime? lastModified(String path) {
-    try {
-      final dir = Directory(path);
-      if (!dir.existsSync()) return null;
-      return dir.statSync().modified;
-    } catch (error, stackTrace) {
-      CloudOSLogger.error('ProjectStore', 'lastModified', error, stackTrace);
-      return null;
-    }
-  }
+  /// Compatibility fallback. Real modification time is Broker-backed.
+  static DateTime? lastModified(String path) => null;
 }

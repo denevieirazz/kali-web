@@ -1,10 +1,10 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 
 import '../models/file_models.dart';
 import '../services/cloudos_bridge.dart';
+import '../services/cloudos_drive_service.dart';
 import '../services/cloudos_logger.dart';
 import '../services/window_manager.dart';
 
@@ -23,22 +23,16 @@ class CloudOSDriveWindow extends StatefulWidget {
 }
 
 class _CloudOSDriveWindowState extends State<CloudOSDriveWindow> {
-  final List<CloudFileItem> _driveFiles = <CloudFileItem>[];
-  late final Directory _driveDir;
+  late final CloudOSDriveService _service;
+  List<CloudFileItem> _driveFiles = const <CloudFileItem>[];
+  String? _drivePath;
   bool _isLoading = true;
   String? _loadError;
 
   @override
   void initState() {
     super.initState();
-    final localAppData = Platform.environment['LOCALAPPDATA'];
-    final userProfile = Platform.environment['USERPROFILE'];
-    final base = localAppData?.trim().isNotEmpty == true
-        ? localAppData!
-        : (userProfile?.trim().isNotEmpty == true
-            ? '$userProfile\\AppData\\Local'
-            : Directory.current.path);
-    _driveDir = Directory('$base\\CloudOS\\Drive');
+    _service = CloudOSDriveService(widget.bridge);
     unawaited(_loadDriveFiles());
   }
 
@@ -51,126 +45,40 @@ class _CloudOSDriveWindowState extends State<CloudOSDriveWindow> {
     }
 
     try {
-      if (!await _driveDir.exists()) {
-        await _driveDir.create(recursive: true);
-      }
-
-      final items = <CloudFileItem>[];
-      await for (final entity in _driveDir.list(followLinks: false)) {
-        final stat = await entity.stat();
-        final isDir = entity is Directory;
-        final name = entity.path.split(RegExp(r'[\\/]')).last;
-        final ext = isDir || !name.contains('.')
-            ? ''
-            : '.${name.split('.').last}';
-
-        items.add(
-          CloudFileItem(
-            id: entity.path,
-            name: name,
-            displayName: name,
-            path: entity.path,
-            canonicalPath: entity.path,
-            locationKind: LocationKind.windows,
-            fileKind: isDir ? FileKind.folder : _determineFileKind(ext),
-            extension: ext,
-            size: stat.size.toDouble(),
-            sizeFormatted: isDir
-                ? '--'
-                : '${(stat.size / 1024).toStringAsFixed(1)} KB',
-            modifiedFormatted:
-                '${stat.modified.day.toString().padLeft(2, '0')}/${stat.modified.month.toString().padLeft(2, '0')} ${stat.modified.hour.toString().padLeft(2, '0')}:${stat.modified.minute.toString().padLeft(2, '0')}',
-            createdFormatted: '',
-            isDirectory: isDir,
-            isHidden: name.startsWith('.'),
-            isReadOnly: false,
-            isSystem: false,
-            isSymlink: entity is Link,
-            distro: '',
-            iconKey: isDir ? 'folder' : 'file_document',
-          ),
-        );
-      }
-
-      items.sort((a, b) {
-        if (a.isDirectory != b.isDirectory) return a.isDirectory ? -1 : 1;
-        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-      });
-
+      final snapshot = await _service.load();
       if (!mounted) return;
+      if (snapshot == null) {
+        setState(() {
+          _driveFiles = const <CloudFileItem>[];
+          _drivePath = null;
+          _loadError =
+              'O Files V22 não conseguiu resolver o armazenamento local do CloudOS.';
+        });
+        return;
+      }
       setState(() {
-        _driveFiles
-          ..clear()
-          ..addAll(items);
+        _drivePath = snapshot.path;
+        _driveFiles = snapshot.items;
       });
     } catch (error, stackTrace) {
-      CloudOSLogger.error('CloudOSDriveWindow', 'loadDriveFiles', error, stackTrace);
+      CloudOSLogger.error(
+        'CloudOSDriveWindow',
+        'loadDriveFiles',
+        error,
+        stackTrace,
+      );
       if (mounted) {
-        setState(() => _loadError = 'Não foi possível ler o CloudOS Drive: $error');
+        setState(() {
+          _loadError = 'Não foi possível ler o CloudOS Drive pelo Files V22.';
+        });
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  FileKind _determineFileKind(String ext) {
-    final lower = ext.toLowerCase();
-    if (<String>{
-      '.txt',
-      '.md',
-      '.log',
-      '.csv',
-      '.dart',
-      '.c',
-      '.h',
-      '.cpp',
-      '.hpp',
-      '.js',
-      '.ts',
-      '.py',
-      '.json',
-      '.yaml',
-      '.yml',
-      '.xml',
-      '.html',
-      '.css',
-    }.contains(lower)) {
-      return FileKind.code;
-    }
-    if (<String>{'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'}.contains(lower)) {
-      return FileKind.image;
-    }
-    if (<String>{'.mp3', '.wav', '.flac', '.ogg'}.contains(lower)) {
-      return FileKind.audio;
-    }
-    if (<String>{'.mp4', '.mkv', '.avi', '.webm'}.contains(lower)) {
-      return FileKind.video;
-    }
-    return FileKind.document;
-  }
-
   bool _isInternalTextFile(CloudFileItem item) {
-    final ext = item.extension.toLowerCase();
-    return <String>{
-      '.txt',
-      '.md',
-      '.log',
-      '.csv',
-      '.dart',
-      '.c',
-      '.h',
-      '.cpp',
-      '.hpp',
-      '.js',
-      '.ts',
-      '.py',
-      '.json',
-      '.yaml',
-      '.yml',
-      '.xml',
-      '.html',
-      '.css',
-    }.contains(ext);
+    return item.fileKind == FileKind.text || item.fileKind == FileKind.code;
   }
 
   Future<void> _openItem(CloudFileItem item) async {
@@ -198,13 +106,27 @@ class _CloudOSDriveWindowState extends State<CloudOSDriveWindow> {
         );
       }
     } catch (error, stackTrace) {
-      CloudOSLogger.error('CloudOSDriveWindow', 'openDefault', error, stackTrace);
+      CloudOSLogger.error(
+        'CloudOSDriveWindow',
+        'openDefault',
+        error,
+        stackTrace,
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Falha ao abrir ${item.name}: $error')),
+          SnackBar(content: Text('Falha ao abrir ${item.name}.')),
         );
       }
     }
+  }
+
+  void _openInFiles() {
+    final path = _drivePath;
+    if (path == null || path.isEmpty) return;
+    widget.windowManager.openWindow(
+      'cloudos:files',
+      params: <String, dynamic>{'initialPath': path},
+    );
   }
 
   @override
@@ -242,7 +164,7 @@ class _CloudOSDriveWindowState extends State<CloudOSDriveWindow> {
                         ),
                       ),
                       Text(
-                        'Armazenamento local em %LOCALAPPDATA%\\CloudOS\\Drive — sem sincronização em nuvem.',
+                        'Armazenamento local do perfil via Files V22 — sem sincronização em nuvem.',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -263,12 +185,7 @@ class _CloudOSDriveWindowState extends State<CloudOSDriveWindow> {
                   onPressed: () => unawaited(_loadDriveFiles()),
                 ),
                 ElevatedButton.icon(
-                  onPressed: () {
-                    widget.windowManager.openWindow(
-                      'cloudos:files',
-                      params: <String, dynamic>{'initialPath': _driveDir.path},
-                    );
-                  },
+                  onPressed: _drivePath == null ? null : _openInFiles,
                   icon: const Icon(Icons.folder_open_rounded, size: 16),
                   label: const Text(
                     'Abrir no Files',
@@ -349,15 +266,15 @@ class _CloudOSDriveWindowState extends State<CloudOSDriveWindow> {
             ),
             const SizedBox(height: 6),
             const Text(
-              'Adicione arquivos ou crie documentos para armazená-los localmente no CloudOS.',
+              'Nenhum arquivo de exemplo é criado automaticamente.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 13, color: Color(0xFF8B949E)),
             ),
             const SizedBox(height: 20),
             ElevatedButton.icon(
-              onPressed: () => widget.windowManager.openWindow('cloudos:notepad'),
-              icon: const Icon(Icons.note_add_rounded, size: 16),
-              label: const Text('Novo Documento'),
+              onPressed: _drivePath == null ? null : _openInFiles,
+              icon: const Icon(Icons.folder_open_rounded, size: 16),
+              label: const Text('Gerenciar no Files'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF238636),
                 foregroundColor: Colors.white,
@@ -378,23 +295,18 @@ class _CloudOSDriveWindowState extends State<CloudOSDriveWindow> {
         ),
         itemBuilder: (context, index) {
           final item = _driveFiles[index];
+          final modified = item.modifiedFormatted.trim();
           return ListTile(
             dense: true,
-            leading: Icon(
-              item.isDirectory
-                  ? Icons.folder_rounded
-                  : Icons.insert_drive_file_rounded,
-              color: item.isDirectory
-                  ? const Color(0xFF58A6FF)
-                  : const Color(0xFF8B949E),
-              size: 20,
-            ),
+            leading: Icon(item.icon, color: item.iconColor, size: 20),
             title: Text(
               item.name,
               style: const TextStyle(fontSize: 13, color: Colors.white),
             ),
             subtitle: Text(
-              '${item.sizeFormatted} • Modificado em ${item.modifiedFormatted}',
+              modified.isEmpty
+                  ? item.sizeFormatted
+                  : '${item.sizeFormatted} • $modified',
               style: const TextStyle(
                 fontSize: 11,
                 color: Color(0xFF8B949E),
