@@ -1,5 +1,8 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
 import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../core/cloudos_theme.dart';
 import '../models/file_models.dart';
@@ -41,7 +44,21 @@ class _FilesWindowState extends State<FilesWindow> {
   @override
   void initState() {
     super.initState();
-    _controller = FilesController(bridge: widget.bridge);
+
+    String initialPath = 'home';
+    final key = widget.key;
+    if (key is ValueKey<String>) {
+      final cloudWindow = widget.windowManager?.getWindowById(key.value);
+      final requestedPath = cloudWindow?.customParams['initialPath'];
+      if (requestedPath is String && requestedPath.trim().isNotEmpty) {
+        initialPath = requestedPath.trim();
+      }
+    }
+
+    _controller = FilesController(
+      bridge: widget.bridge,
+      initialPath: initialPath,
+    );
     _controller.addListener(_onControllerUpdate);
   }
 
@@ -66,46 +83,112 @@ class _FilesWindowState extends State<FilesWindow> {
 
   void _handleOpenItem(CloudFileItem item) {
     if (item.isDirectory) {
-      _controller.navigateTo(item.path, title: item.displayName);
-    } else {
-      final ext = item.name.toLowerCase();
-      if (ext.endsWith('.txt') ||
-          ext.endsWith('.json') ||
-          ext.endsWith('.md') ||
-          ext.endsWith('.dart') ||
-          ext.endsWith('.log') ||
-          ext.endsWith('.yaml') ||
-          ext.endsWith('.yml') ||
-          ext.endsWith('.csv') ||
-          ext.endsWith('.xml') ||
-          ext.endsWith('.c') ||
-          ext.endsWith('.cpp') ||
-          ext.endsWith('.py') ||
-          ext.endsWith('.html') ||
-          ext.endsWith('.css') ||
-          ext.endsWith('.js')) {
-        if (widget.windowManager != null) {
-          widget.windowManager!.openWindow('cloudos:notepad', params: <String, dynamic>{'initialFilePath': item.path});
-          return;
-        }
-      }
-      _controller.openItem(item);
+      unawaited(_controller.navigateTo(item.path, title: item.displayName));
+      return;
     }
+
+    final ext = item.name.toLowerCase();
+    final isInternalTextFile = ext.endsWith('.txt') ||
+        ext.endsWith('.json') ||
+        ext.endsWith('.md') ||
+        ext.endsWith('.dart') ||
+        ext.endsWith('.log') ||
+        ext.endsWith('.yaml') ||
+        ext.endsWith('.yml') ||
+        ext.endsWith('.csv') ||
+        ext.endsWith('.xml') ||
+        ext.endsWith('.c') ||
+        ext.endsWith('.h') ||
+        ext.endsWith('.cpp') ||
+        ext.endsWith('.hpp') ||
+        ext.endsWith('.py') ||
+        ext.endsWith('.html') ||
+        ext.endsWith('.css') ||
+        ext.endsWith('.js') ||
+        ext.endsWith('.ts');
+
+    if (isInternalTextFile && widget.windowManager != null) {
+      widget.windowManager!.openWindow(
+        'cloudos:notepad',
+        params: <String, dynamic>{'initialFilePath': item.path},
+      );
+      return;
+    }
+
+    unawaited(_controller.openItem(item));
+  }
+
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+
+    final keyboard = HardwareKeyboard.instance;
+    final ctrl = keyboard.isControlPressed;
+    final alt = keyboard.isAltPressed;
+    final key = event.logicalKey;
+
+    if (ctrl && key == LogicalKeyboardKey.keyA) {
+      _controller.selectAll();
+      return KeyEventResult.handled;
+    }
+    if (ctrl && key == LogicalKeyboardKey.keyC) {
+      _controller.copySelected();
+      return KeyEventResult.handled;
+    }
+    if (ctrl && key == LogicalKeyboardKey.keyX) {
+      _controller.cutSelected();
+      return KeyEventResult.handled;
+    }
+    if (ctrl && key == LogicalKeyboardKey.keyV) {
+      unawaited(_controller.paste());
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.f5) {
+      unawaited(_controller.refresh());
+      return KeyEventResult.handled;
+    }
+    if (alt && key == LogicalKeyboardKey.arrowLeft) {
+      unawaited(_controller.goBack());
+      return KeyEventResult.handled;
+    }
+    if (alt && key == LogicalKeyboardKey.arrowRight) {
+      unawaited(_controller.goForward());
+      return KeyEventResult.handled;
+    }
+    if (alt && key == LogicalKeyboardKey.arrowUp) {
+      unawaited(_controller.goToParent());
+      return KeyEventResult.handled;
+    }
+
+    final item = _controller.selectedSingleItem();
+    if (key == LogicalKeyboardKey.enter && item != null) {
+      _handleOpenItem(item);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.f2 && item != null) {
+      _showRenameDialog(item);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.delete &&
+        _controller.activeTab?.selectedPaths.isNotEmpty == true) {
+      unawaited(_confirmDeleteSelected());
+      return KeyEventResult.handled;
+    }
+
+    return KeyEventResult.ignored;
   }
 
   @override
   Widget build(BuildContext context) {
     final tab = _controller.activeTab;
     final viewport = MediaQuery.sizeOf(context);
-    final windowWidth = widget.width ?? math.min(1020.0, math.max(680.0, viewport.width - 40));
-    final windowHeight = widget.height ?? math.min(640.0, math.max(480.0, viewport.height - 96));
+    final windowWidth = widget.width ??
+        math.min(1020.0, math.max(680.0, viewport.width - 40));
+    final windowHeight = widget.height ??
+        math.min(640.0, math.max(480.0, viewport.height - 96));
 
     return Focus(
       autofocus: true,
-      onKeyEvent: (node, event) {
-        // Handle keyboard shortcuts
-        return KeyEventResult.ignored;
-      },
+      onKeyEvent: _handleKeyEvent,
       child: SizedBox(
         width: windowWidth,
         height: windowHeight,
@@ -116,32 +199,22 @@ class _FilesWindowState extends State<FilesWindow> {
           borderColor: CloudOSColors.borderStrong,
           child: Column(
             children: <Widget>[
-              // Title Bar + Tabs
               _buildTitleBar(tab),
               const Divider(height: 1),
-
-              // Navigation Toolbar
               _buildToolbar(tab),
               const Divider(height: 1),
-
-              // Main Body: Sidebar + File Grid/List
               Expanded(
                 child: Row(
                   children: <Widget>[
-                    // Sidebar
                     SizedBox(
                       width: windowWidth < 840 ? 180 : 220,
                       child: _buildSidebar(tab),
                     ),
                     const VerticalDivider(width: 1),
-
-                    // File View
                     Expanded(child: _buildFileView(tab)),
                   ],
                 ),
               ),
-
-              // Status Bar
               _buildStatusBar(tab),
             ],
           ),
@@ -174,8 +247,6 @@ class _FilesWindowState extends State<FilesWindow> {
               ),
             ),
             const SizedBox(width: 16),
-
-            // Tabs Row
             Expanded(
               child: SizedBox(
                 height: 32,
@@ -195,7 +266,6 @@ class _FilesWindowState extends State<FilesWindow> {
 
                     final t = _controller.tabs[index];
                     final isActive = index == _controller.activeTabIndex;
-
                     return InkWell(
                       onTap: () => _controller.selectTab(index),
                       borderRadius: BorderRadius.circular(6),
@@ -249,8 +319,6 @@ class _FilesWindowState extends State<FilesWindow> {
                 ),
               ),
             ),
-
-            // Window Controls (opcionais quando dentro de WindowFrame)
             if (widget.onMinimize != null)
               IconButton(
                 icon: const Icon(Icons.remove_rounded, size: 16),
@@ -277,12 +345,11 @@ class _FilesWindowState extends State<FilesWindow> {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       child: Row(
         children: <Widget>[
-          // Back / Forward / Up / Refresh
           IconButton(
             icon: const Icon(Icons.arrow_back_rounded, size: 18),
             tooltip: 'Voltar (Alt+Seta Esquerda)',
             onPressed: tab?.canGoBack == true
-                ? () => _controller.goBack()
+                ? () => unawaited(_controller.goBack())
                 : null,
             color: CloudOSColors.textPrimary,
           ),
@@ -290,25 +357,23 @@ class _FilesWindowState extends State<FilesWindow> {
             icon: const Icon(Icons.arrow_forward_rounded, size: 18),
             tooltip: 'Avançar (Alt+Seta Direita)',
             onPressed: tab?.canGoForward == true
-                ? () => _controller.goForward()
+                ? () => unawaited(_controller.goForward())
                 : null,
             color: CloudOSColors.textPrimary,
           ),
           IconButton(
             icon: const Icon(Icons.arrow_upward_rounded, size: 18),
-            tooltip: 'Pasta Acima',
-            onPressed: () => _controller.goToParent(),
+            tooltip: 'Pasta Acima (Alt+Seta Cima)',
+            onPressed: () => unawaited(_controller.goToParent()),
             color: CloudOSColors.textPrimary,
           ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded, size: 18),
             tooltip: 'Atualizar (F5)',
-            onPressed: () => _controller.refresh(),
+            onPressed: () => unawaited(_controller.refresh()),
             color: CloudOSColors.textPrimary,
           ),
           const SizedBox(width: 8),
-
-          // Location Breadcrumbs / Input Bar
           Expanded(
             child: Container(
               height: 32,
@@ -338,15 +403,22 @@ class _FilesWindowState extends State<FilesWindow> {
                         contentPadding: EdgeInsets.symmetric(vertical: 6),
                         border: InputBorder.none,
                         hintText:
-                            'Digite o caminho (ex: C:\\ ou \\\\wsl.localhost\\Ubuntu)',
+                            'Digite o caminho (ex: C:\\ ou \\\\wsl.localhost\\Distro)',
                         hintStyle: TextStyle(
                           fontSize: 12,
                           color: CloudOSColors.textTertiary,
                         ),
                       ),
+                      onTap: () => _isEditingPath = true,
+                      onTapOutside: (_) {
+                        _isEditingPath = false;
+                        final current = _controller.activeTab?.currentPath;
+                        if (current != null) _pathInputController.text = current;
+                      },
                       onSubmitted: (value) {
+                        _isEditingPath = false;
                         if (value.trim().isNotEmpty) {
-                          _controller.navigateTo(value.trim());
+                          unawaited(_controller.navigateTo(value.trim()));
                         }
                       },
                     ),
@@ -356,8 +428,6 @@ class _FilesWindowState extends State<FilesWindow> {
             ),
           ),
           const SizedBox(width: 8),
-
-          // Search Box
           SizedBox(
             width: 180,
             height: 32,
@@ -390,16 +460,14 @@ class _FilesWindowState extends State<FilesWindow> {
                   color: CloudOSColors.textTertiary,
                 ),
               ),
-              onChanged: (value) => _controller.setSearchQuery(value),
+              onChanged: _controller.setSearchQuery,
             ),
           ),
           const SizedBox(width: 8),
-
-          // Actions: New Folder, Grid/List view toggle
           IconButton(
             icon: const Icon(Icons.create_new_folder_rounded, size: 18),
             tooltip: 'Nova Pasta',
-            onPressed: () => _showCreateFolderDialog(),
+            onPressed: _showCreateFolderDialog,
             color: CloudOSColors.textPrimary,
           ),
           IconButton(
@@ -412,7 +480,7 @@ class _FilesWindowState extends State<FilesWindow> {
             tooltip: tab?.isGridView == true
                 ? 'Visualizar em Lista'
                 : 'Visualizar em Grade',
-            onPressed: () => _controller.toggleViewMode(),
+            onPressed: _controller.toggleViewMode,
             color: CloudOSColors.textPrimary,
           ),
         ],
@@ -424,7 +492,6 @@ class _FilesWindowState extends State<FilesWindow> {
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
       children: <Widget>[
-        // Acesso Rápido / Known Folders
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           child: Text(
@@ -446,11 +513,11 @@ class _FilesWindowState extends State<FilesWindow> {
                 : CloudOSColors.accent,
             isSelected:
                 tab?.currentPath == kf.path || tab?.currentPath == kf.id,
-            onTap: () => _controller.navigateTo(kf.path, title: kf.name),
+            onTap: () => unawaited(
+              _controller.navigateTo(kf.path, title: kf.name),
+            ),
           ),
-
         const SizedBox(height: 12),
-        // Dispositivos e Unidades
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           child: Text(
@@ -468,7 +535,9 @@ class _FilesWindowState extends State<FilesWindow> {
             name: drive.label.isNotEmpty
                 ? '${drive.label} (${drive.letter})'
                 : drive.letter,
-            icon: drive.isRemovable ? Icons.usb_rounded : Icons.storage_rounded,
+            icon: drive.isRemovable
+                ? Icons.usb_rounded
+                : Icons.storage_rounded,
             color: CloudOSColors.windows,
             isSelected:
                 tab?.currentPath == drive.path ||
@@ -476,8 +545,9 @@ class _FilesWindowState extends State<FilesWindow> {
             badge: drive.freeFormatted.isNotEmpty
                 ? '${drive.freeFormatted} livres'
                 : null,
-            onTap: () =>
-                _controller.navigateTo(drive.path, title: drive.letter),
+            onTap: () => unawaited(
+              _controller.navigateTo(drive.path, title: drive.letter),
+            ),
           ),
       ],
     );
@@ -519,7 +589,9 @@ class _FilesWindowState extends State<FilesWindow> {
                   color: isSelected
                       ? CloudOSColors.accent
                       : CloudOSColors.textPrimary,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                  fontWeight: isSelected
+                      ? FontWeight.w600
+                      : FontWeight.normal,
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -573,7 +645,7 @@ class _FilesWindowState extends State<FilesWindow> {
             ),
             const SizedBox(height: 12),
             ElevatedButton(
-              onPressed: () => _controller.refresh(),
+              onPressed: () => unawaited(_controller.refresh()),
               child: const Text('Tentar Novamente'),
             ),
           ],
@@ -605,7 +677,7 @@ class _FilesWindowState extends State<FilesWindow> {
     }
 
     return GestureDetector(
-      onTap: () => _controller.clearSelection(),
+      onTap: _controller.clearSelection,
       child: tab.isGridView ? _buildGridView(tab) : _buildListView(tab),
     );
   }
@@ -627,8 +699,10 @@ class _FilesWindowState extends State<FilesWindow> {
         return InkWell(
           onTap: () => _controller.selectItem(item.path),
           onDoubleTap: () => _handleOpenItem(item),
-          onSecondaryTapDown: (details) =>
-              _showContextMenu(context, details.globalPosition, item),
+          onSecondaryTapDown: (details) {
+            _controller.selectItem(item.path);
+            _showContextMenu(context, details.globalPosition, item);
+          },
           borderRadius: BorderRadius.circular(8),
           child: Container(
             padding: const EdgeInsets.all(8),
@@ -682,17 +756,23 @@ class _FilesWindowState extends State<FilesWindow> {
         return InkWell(
           onTap: () => _controller.selectItem(item.path),
           onDoubleTap: () => _handleOpenItem(item),
-          onSecondaryTapDown: (details) =>
-              _showContextMenu(context, details.globalPosition, item),
+          onSecondaryTapDown: (details) {
+            _controller.selectItem(item.path);
+            _showContextMenu(context, details.globalPosition, item);
+          },
           borderRadius: BorderRadius.circular(6),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             margin: const EdgeInsets.symmetric(vertical: 1),
             decoration: BoxDecoration(
-              color: isSelected ? const Color(0x3038BDF8) : Colors.transparent,
+              color: isSelected
+                  ? const Color(0x3038BDF8)
+                  : Colors.transparent,
               borderRadius: BorderRadius.circular(6),
               border: Border.all(
-                color: isSelected ? CloudOSColors.accent : Colors.transparent,
+                color: isSelected
+                    ? CloudOSColors.accent
+                    : Colors.transparent,
               ),
             ),
             child: Row(
@@ -767,7 +847,10 @@ class _FilesWindowState extends State<FilesWindow> {
             const SizedBox(width: 12),
             Text(
               '$selectedCount selecionado(s)',
-              style: const TextStyle(fontSize: 11, color: CloudOSColors.accent),
+              style: const TextStyle(
+                fontSize: 11,
+                color: CloudOSColors.accent,
+              ),
             ),
           ],
           const Spacer(),
@@ -783,6 +866,10 @@ class _FilesWindowState extends State<FilesWindow> {
               ),
             ),
             const SizedBox(width: 12),
+            TextButton(
+              onPressed: () => unawaited(_controller.cancelActiveJob()),
+              child: const Text('Cancelar'),
+            ),
           ],
           if (tab?.locationKind == LocationKind.wsl)
             const Text(
@@ -916,10 +1003,11 @@ class _FilesWindowState extends State<FilesWindow> {
         ),
       ],
     ).then((value) {
+      if (!mounted || value == null) return;
       if (value == 'open') {
-        _controller.openItem(item);
+        _handleOpenItem(item);
       } else if (value == 'open_with') {
-        _showOpenWithDialog(item);
+        unawaited(_showOpenWithDialog(item));
       } else if (value == 'copy') {
         _controller.copySelected();
       } else if (value == 'cut') {
@@ -927,14 +1015,14 @@ class _FilesWindowState extends State<FilesWindow> {
       } else if (value == 'rename') {
         _showRenameDialog(item);
       } else if (value == 'delete') {
-        _controller.deleteSelected(permanent: false);
+        unawaited(_confirmDeleteSelected());
       } else if (value == 'properties') {
         _showPropertiesDialog(item);
       }
     });
   }
 
-  void _showOpenWithDialog(CloudFileItem item) async {
+  Future<void> _showOpenWithDialog(CloudFileItem item) async {
     List<OpenWithAppModel> apps;
     try {
       apps = await _controller.getOpenWith(item.path);
@@ -949,8 +1037,7 @@ class _FilesWindowState extends State<FilesWindow> {
     }
 
     if (!mounted) return;
-
-    showDialog(
+    await showDialog<void>(
       context: context,
       builder: (context) {
         return AlertDialog(
@@ -998,7 +1085,7 @@ class _FilesWindowState extends State<FilesWindow> {
                             : null,
                         onTap: () {
                           Navigator.of(context).pop();
-                          _controller.launchOpenWith(item.path, app);
+                          unawaited(_controller.launchOpenWith(item.path, app));
                         },
                       );
                     },
@@ -1017,7 +1104,7 @@ class _FilesWindowState extends State<FilesWindow> {
 
   void _showCreateFolderDialog() {
     final controller = TextEditingController(text: 'Nova Pasta');
-    showDialog(
+    showDialog<void>(
       context: context,
       builder: (context) {
         return AlertDialog(
@@ -1034,12 +1121,16 @@ class _FilesWindowState extends State<FilesWindow> {
               child: const Text('Cancelar'),
             ),
             ElevatedButton(
-              onPressed: () {
+              onPressed: () async {
                 final name = controller.text.trim();
-                if (name.isNotEmpty) {
-                  _controller.createFolder(name);
-                }
+                if (name.isEmpty) return;
                 Navigator.of(context).pop();
+                final ok = await _controller.createFolder(name);
+                if (!ok && mounted) {
+                  ScaffoldMessenger.of(this.context).showSnackBar(
+                    const SnackBar(content: Text('Não foi possível criar a pasta.')),
+                  );
+                }
               },
               child: const Text('Criar'),
             ),
@@ -1051,7 +1142,7 @@ class _FilesWindowState extends State<FilesWindow> {
 
   void _showRenameDialog(CloudFileItem item) {
     final controller = TextEditingController(text: item.name);
-    showDialog(
+    showDialog<void>(
       context: context,
       builder: (context) {
         return AlertDialog(
@@ -1068,12 +1159,16 @@ class _FilesWindowState extends State<FilesWindow> {
               child: const Text('Cancelar'),
             ),
             ElevatedButton(
-              onPressed: () {
+              onPressed: () async {
                 final name = controller.text.trim();
-                if (name.isNotEmpty && name != item.name) {
-                  _controller.renameItem(item.path, name);
-                }
+                if (name.isEmpty || name == item.name) return;
                 Navigator.of(context).pop();
+                final ok = await _controller.renameItem(item.path, name);
+                if (!ok && mounted) {
+                  ScaffoldMessenger.of(this.context).showSnackBar(
+                    const SnackBar(content: Text('Não foi possível renomear o item.')),
+                  );
+                }
               },
               child: const Text('Renomear'),
             ),
@@ -1083,8 +1178,45 @@ class _FilesWindowState extends State<FilesWindow> {
     ).whenComplete(controller.dispose);
   }
 
+  Future<void> _confirmDeleteSelected() async {
+    final tab = _controller.activeTab;
+    final count = tab?.selectedPaths.length ?? 0;
+    if (count == 0) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        title: const Text('Mover para a Lixeira?'),
+        content: Text(
+          count == 1
+              ? 'O item selecionado será enviado para a Lixeira.'
+              : '$count itens serão enviados para a Lixeira.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+    final ok = await _controller.deleteSelected(permanent: false);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Não foi possível excluir os itens.')),
+      );
+    }
+  }
+
   void _showPropertiesDialog(CloudFileItem item) {
-    showDialog(
+    showDialog<void>(
       context: context,
       builder: (context) {
         return AlertDialog(
@@ -1093,7 +1225,9 @@ class _FilesWindowState extends State<FilesWindow> {
             children: <Widget>[
               Icon(item.icon, size: 24, color: item.iconColor),
               const SizedBox(width: 8),
-              Expanded(child: Text(item.name, overflow: TextOverflow.ellipsis)),
+              Expanded(
+                child: Text(item.name, overflow: TextOverflow.ellipsis),
+              ),
             ],
           ),
           content: Column(
