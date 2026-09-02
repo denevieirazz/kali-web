@@ -391,6 +391,7 @@ class _BrowserWindowState extends State<BrowserWindow> {
   }
 
   Widget _buildNavigationBar(BrowserTabItem? tab) {
+    final isSecure = tab?.url.toLowerCase().startsWith('https://') ?? false;
     return Container(
       height: 44,
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -432,10 +433,19 @@ class _BrowserWindowState extends State<BrowserWindow> {
               ),
               child: Row(
                 children: <Widget>[
-                  const Icon(
-                    Icons.lock_outline_rounded,
-                    size: 14,
-                    color: Color(0xFF3FB950),
+                  Tooltip(
+                    message: isSecure
+                        ? 'Conexão HTTPS'
+                        : 'Conexão sem HTTPS verificado',
+                    child: Icon(
+                      isSecure
+                          ? Icons.lock_outline_rounded
+                          : Icons.warning_amber_rounded,
+                      size: 14,
+                      color: isSecure
+                          ? const Color(0xFF3FB950)
+                          : const Color(0xFFE3B341),
+                    ),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
