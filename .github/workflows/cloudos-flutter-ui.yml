@@ -60,9 +60,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'V22.1 Files contract failed.' }
           pwsh -NoProfile -File scripts/native/run-unified-files-v22-smoke.ps1
           if ($LASTEXITCODE -ne 0) { throw 'V22.1 Files bug-bash smoke failed.' }
+          pwsh -NoProfile -File scripts/native/test-text-files-v23-contract.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Typed text-file architecture contract failed.' }
+          pwsh -NoProfile -File scripts/native/run-text-files-v23-smoke.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Typed text-file named-pipe smoke failed.' }
           $filesEvidence = 'TestResults/v22.1-bug-bash/unified-files-v22.1-smoke.json'
           if (-not (Test-Path $filesEvidence)) { throw "V22.1 evidence missing: $filesEvidence" }
           Copy-Item $filesEvidence 'unified-files-v22.1-smoke.json' -Force
+          $textEvidence = 'TestResults/v23-text-smoke/text-files-v23-smoke.json'
+          if (-not (Test-Path $textEvidence)) { throw "Typed text-file evidence missing: $textEvidence" }
+          Copy-Item $textEvidence 'text-files-v23-smoke.json' -Force
 
       - name: Prepare tracked Windows host
         shell: pwsh
@@ -140,6 +147,7 @@ jobs:
           $probeExe = Join-Path $release 'CloudOS.BrokerProbe.exe'
           foreach ($required in @($exe,$brokerExe,$probeExe)) { if (-not (Test-Path $required)) { throw "Release binary missing: $required" } }
           if (-not (Test-Path 'conpty-v22-smoke.json')) { throw 'ConPTY evidence missing: conpty-v22-smoke.json' }
+          if (-not (Test-Path 'text-files-v23-smoke.json')) { throw 'Typed text-file evidence missing: text-files-v23-smoke.json' }
           $evidence = [ordered]@{
             schema = 221
             verdict = 'pass'
@@ -155,6 +163,10 @@ jobs:
             native_bridge_registered = $true
             restricted_flutter_rpc_surface = $true
             unified_files_v22_1 = $true
+            typed_text_files_v23 = $true
+            typed_text_files_atomic_commit = $true
+            typed_text_files_chunk_cap_bytes = 65536
+            typed_text_files_editor_cap_bytes = 16777216
             arbitrary_command_api = $false
             userchoice_modified = $false
             winlogon_modified = $false
@@ -184,6 +196,7 @@ jobs:
             flutter-v22.1-smoke.json
             system-broker-v21-smoke.json
             unified-files-v22.1-smoke.json
+            text-files-v23-smoke.json
             conpty-v22-smoke.json
           if-no-files-found: error
           retention-days: 14
