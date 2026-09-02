@@ -173,7 +173,6 @@ class _ProjectsWindowState extends State<ProjectsWindow> {
     if (result != true) return;
 
     final dir = Directory(path);
-
     try {
       if (!dir.existsSync()) {
         if (!createIfMissing) {
@@ -220,19 +219,50 @@ class _ProjectsWindowState extends State<ProjectsWindow> {
     await _persistProjects();
   }
 
-  Future<void> _openInFiles(ProjectRecord project) async {
+  Future<void> _markOpened(ProjectRecord project) async {
     final index = _projects.indexWhere((item) => item.id == project.id);
-    if (index != -1) {
-      setState(() {
-        _projects[index] = project.copyWith(lastOpenedAt: DateTime.now());
-      });
-      await _persistProjects();
-    }
+    if (index == -1) return;
+    setState(() {
+      _projects[index] = project.copyWith(lastOpenedAt: DateTime.now());
+    });
+    await _persistProjects();
+  }
 
+  Future<void> _openInFiles(ProjectRecord project) async {
+    if (!Directory(project.path).existsSync()) return;
+    await _markOpened(project);
     widget.windowManager.openWindow(
       'cloudos:files',
       params: <String, dynamic>{'initialPath': project.path},
     );
+  }
+
+  Future<void> _openInTerminal(ProjectRecord project) async {
+    if (!Directory(project.path).existsSync()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('A pasta do workspace não está disponível.')),
+      );
+      return;
+    }
+    await _markOpened(project);
+    widget.windowManager.openWindow(
+      'cloudos:terminal',
+      params: <String, dynamic>{
+        'initialWorkingDirectory': project.path,
+      },
+    );
+  }
+
+  Future<void> _openExternalVsCode() async {
+    final launched = await widget.bridge.launchApp('windows:vscode');
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Visual Studio Code não está disponível no catálogo do sistema.'),
+        ),
+      );
+    }
   }
 
   Future<void> _removeProject(ProjectRecord project) async {
@@ -316,7 +346,7 @@ class _ProjectsWindowState extends State<ProjectsWindow> {
                 ),
               ),
               IconButton(
-                tooltip: 'Abrir no Terminal',
+                tooltip: 'Abrir Terminal CloudOS',
                 onPressed: () => widget.windowManager.openWindow('cloudos:terminal'),
                 icon: const Icon(Icons.terminal_rounded, color: Colors.cyanAccent),
               ),
@@ -505,8 +535,10 @@ class _ProjectsWindowState extends State<ProjectsWindow> {
                   size: 18,
                   color: Colors.cyanAccent,
                 ),
-                tooltip: 'Abrir Terminal',
-                onPressed: () => widget.windowManager.openWindow('cloudos:terminal'),
+                tooltip: exists
+                    ? 'Abrir Terminal nesta pasta'
+                    : 'Pasta não encontrada',
+                onPressed: exists ? () => _openInTerminal(project) : null,
               ),
               IconButton(
                 icon: const Icon(
@@ -515,7 +547,7 @@ class _ProjectsWindowState extends State<ProjectsWindow> {
                   color: Colors.blueAccent,
                 ),
                 tooltip: 'Abrir VS Code (aplicativo externo)',
-                onPressed: () => widget.bridge.launchApp('windows:vscode'),
+                onPressed: _openExternalVsCode,
               ),
               IconButton(
                 icon: const Icon(

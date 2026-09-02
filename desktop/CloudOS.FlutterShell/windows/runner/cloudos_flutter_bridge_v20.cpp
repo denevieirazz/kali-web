@@ -19,6 +19,7 @@ namespace
 constexpr const char* kChannelName = "cloudos/native/v19";
 constexpr size_t kMaxFlutterRpcPayloadBytes = 1024 * 1024;
 constexpr size_t kMaxTypedAppIdBytes = 512;
+constexpr size_t kMaxTerminalWorkingDirectoryBytes = 32768;
 
 bool IsAllowedFlutterRpcMethod(const std::string& method)
 {
@@ -294,6 +295,7 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
         std::string shell_kind = "powershell";
         std::string distro;
+        std::string working_directory;
         int cols = 80;
         int rows = 24;
 
@@ -308,6 +310,11 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
             if (it_d != args->end() && std::holds_alternative<std::string>(it_d->second))
             {
                 distro = std::get<std::string>(it_d->second);
+            }
+            const auto it_wd = args->find(flutter::EncodableValue("workingDirectory"));
+            if (it_wd != args->end() && std::holds_alternative<std::string>(it_wd->second))
+            {
+                working_directory = std::get<std::string>(it_wd->second);
             }
             const auto it_c = args->find(flutter::EncodableValue("cols"));
             if (it_c != args->end() && std::holds_alternative<int>(it_c->second))
@@ -331,6 +338,12 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
             result->Error("INVALID_ARGUMENT", "Terminal dimensions are outside the supported range");
             return;
         }
+        if (working_directory.size() > kMaxTerminalWorkingDirectoryBytes ||
+            working_directory.find('\0') != std::string::npos)
+        {
+            result->Error("INVALID_ARGUMENT", "Terminal working directory is invalid or too long");
+            return;
+        }
 
         std::string err;
         const std::string session_id = CloudOSConPTYManager::Instance().CreateSession(
@@ -338,7 +351,8 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
             distro,
             cols,
             rows,
-            err);
+            err,
+            working_directory);
         if (!session_id.empty())
         {
             flutter::EncodableMap map;
@@ -461,6 +475,7 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
             s_map[flutter::EncodableValue("sessionId")] = flutter::EncodableValue(s.session_id);
             s_map[flutter::EncodableValue("shellKind")] = flutter::EncodableValue(s.shell_kind);
             s_map[flutter::EncodableValue("distro")] = flutter::EncodableValue(s.distro);
+            s_map[flutter::EncodableValue("workingDirectory")] = flutter::EncodableValue(s.working_directory);
             s_map[flutter::EncodableValue("cols")] = flutter::EncodableValue(s.cols);
             s_map[flutter::EncodableValue("rows")] = flutter::EncodableValue(s.rows);
             s_map[flutter::EncodableValue("isAlive")] = flutter::EncodableValue(s.is_alive);

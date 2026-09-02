@@ -87,12 +87,34 @@ void main() {
       manager.dispose();
     });
 
-    test('WindowManager preserves selected WSL distro parameters', () {
+    test('WindowManager preserves terminal working directory parameters', () {
+      final manager = WindowManager();
+
+      manager.openWindow(
+        'cloudos:terminal',
+        params: const <String, dynamic>{
+          'initialWorkingDirectory': r'D:\Work\CloudOS',
+        },
+      );
+
+      expect(manager.windows, hasLength(1));
+      expect(manager.windows.single.appId, 'cloudos:terminal');
+      expect(
+        manager.windows.single.customParams['initialWorkingDirectory'],
+        r'D:\Work\CloudOS',
+      );
+      manager.dispose();
+    });
+
+    test('WindowManager preserves selected WSL distro and directory parameters', () {
       final manager = WindowManager();
 
       manager.openWindow(
         'wsl:terminal',
-        params: const <String, dynamic>{'initialDistro': 'kali-linux'},
+        params: const <String, dynamic>{
+          'initialDistro': 'kali-linux',
+          'initialWorkingDirectory': '/home/cloudos/project',
+        },
       );
 
       expect(manager.windows, hasLength(1));
@@ -100,6 +122,10 @@ void main() {
       expect(
         manager.windows.single.customParams['initialDistro'],
         'kali-linux',
+      );
+      expect(
+        manager.windows.single.customParams['initialWorkingDirectory'],
+        '/home/cloudos/project',
       );
       manager.dispose();
     });

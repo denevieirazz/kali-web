@@ -68,6 +68,14 @@ std::wstring QuoteWindowsArgument(const std::wstring& argument)
     return quoted;
 }
 
+bool IsExistingDirectory(const std::wstring& path)
+{
+    if (path.empty()) return false;
+    const DWORD attributes = GetFileAttributesW(path.c_str());
+    return attributes != INVALID_FILE_ATTRIBUTES &&
+           (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+}
+
 class ScopedAttributeList final
 {
 public:
@@ -179,10 +187,27 @@ std::string CloudOSConPTYManager::CreateSession(
     const std::string& distro,
     int cols,
     int rows,
-    std::string& out_error)
+    std::string& out_error,
+    const std::string& working_directory)
 {
     cols = std::clamp(cols, 1, static_cast<int>((std::numeric_limits<SHORT>::max)()));
     rows = std::clamp(rows, 1, static_cast<int>((std::numeric_limits<SHORT>::max)()));
+
+    std::wstring wide_working_directory;
+    if (!working_directory.empty())
+    {
+        wide_working_directory = Utf8ToWide(working_directory);
+        if (wide_working_directory.empty())
+        {
+            out_error = "Terminal working directory is not valid UTF-8";
+            return {};
+        }
+        if (wide_working_directory.size() >= 32760)
+        {
+            out_error = "Terminal working directory is too long";
+            return {};
+        }
+    }
 
     HANDLE raw_pipe_in_reader = nullptr;
     HANDLE raw_pipe_in_writer = nullptr;
@@ -252,6 +277,7 @@ std::string CloudOSConPTYManager::CreateSession(
     }
 
     std::wstring command_line;
+    LPCWSTR process_current_directory = nullptr;
     if (shell_kind == "wsl")
     {
         command_line = L"wsl.exe";
@@ -265,14 +291,38 @@ std::string CloudOSConPTYManager::CreateSession(
             }
             command_line += L" -d " + QuoteWindowsArgument(wide_distro);
         }
+        if (!wide_working_directory.empty())
+        {
+            // wsl.exe performs the Windows/Linux path translation itself and
+            // starts the selected distro directly in the requested directory.
+            command_line += L" --cd " + QuoteWindowsArgument(wide_working_directory);
+        }
     }
     else if (shell_kind == "cmd")
     {
         command_line = L"cmd.exe";
+        if (!wide_working_directory.empty())
+        {
+            if (!IsExistingDirectory(wide_working_directory))
+            {
+                out_error = "Terminal working directory does not exist";
+                return {};
+            }
+            process_current_directory = wide_working_directory.c_str();
+        }
     }
     else if (shell_kind == "powershell")
     {
         command_line = L"powershell.exe -NoLogo -NoProfile";
+        if (!wide_working_directory.empty())
+        {
+            if (!IsExistingDirectory(wide_working_directory))
+            {
+                out_error = "Terminal working directory does not exist";
+                return {};
+            }
+            process_current_directory = wide_working_directory.c_str();
+        }
     }
     else
     {
@@ -297,7 +347,7 @@ std::string CloudOSConPTYManager::CreateSession(
             FALSE,
             EXTENDED_STARTUPINFO_PRESENT,
             nullptr,
-            nullptr,
+            process_current_directory,
             &startup_info.StartupInfo,
             &process_info))
     {
@@ -316,6 +366,7 @@ std::string CloudOSConPTYManager::CreateSession(
     session->session_id = session_id;
     session->shell_kind = shell_kind;
     session->distro = distro;
+    session->working_directory = working_directory;
     session->cols = cols;
     session->rows = rows;
     session->pseudo_console = std::move(pseudo_console);
@@ -663,6 +714,7 @@ std::vector<TerminalSessionInfo> CloudOSConPTYManager::ListSessions()
             session->session_id,
             session->shell_kind,
             session->distro,
+            session->working_directory,
             session->cols,
             session->rows,
             session->is_alive.load(),

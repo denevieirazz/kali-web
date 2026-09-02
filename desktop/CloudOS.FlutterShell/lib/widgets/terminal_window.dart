@@ -14,6 +14,7 @@ class TerminalTabItem {
     required this.title,
     required this.shellKind,
     this.distro = '',
+    this.workingDirectory = '',
   }) : terminal = Terminal(
          maxLines: 5000,
          platform: TerminalTargetPlatform.windows,
@@ -23,6 +24,7 @@ class TerminalTabItem {
   String title;
   final TerminalShellKind shellKind;
   final String distro;
+  final String workingDirectory;
   final Terminal terminal;
   final FocusNode focusNode = FocusNode();
   String? sessionId;
@@ -40,11 +42,13 @@ class TerminalWindow extends StatefulWidget {
     super.key,
     required this.bridge,
     this.initialDistro,
+    this.initialWorkingDirectory,
     this.initialShell = TerminalShellKind.powershell,
   });
 
   final CloudOSBridge bridge;
   final String? initialDistro;
+  final String? initialWorkingDirectory;
   final TerminalShellKind initialShell;
 
   @override
@@ -135,7 +139,11 @@ class _TerminalWindowState extends State<TerminalWindow> {
               ? widget.initialDistro!
               : _defaultDistro)
         : '';
-    _addNewTab(widget.initialShell, distro: distro);
+    _addNewTab(
+      widget.initialShell,
+      distro: distro,
+      workingDirectory: widget.initialWorkingDirectory?.trim() ?? '',
+    );
   }
 
   String _titleFor(TerminalShellKind kind, String distro) {
@@ -149,15 +157,22 @@ class _TerminalWindowState extends State<TerminalWindow> {
     }
   }
 
-  void _addNewTab(TerminalShellKind kind, {String distro = ''}) {
+  void _addNewTab(
+    TerminalShellKind kind, {
+    String distro = '',
+    String? workingDirectory,
+  }) {
     final resolvedDistro = kind == TerminalShellKind.wsl && distro.isEmpty
         ? _defaultDistro
         : distro;
+    final resolvedWorkingDirectory =
+        workingDirectory ?? _activeTab?.workingDirectory ?? '';
     final tab = TerminalTabItem(
       id: 'tab_${_tabCounter++}',
       title: _titleFor(kind, resolvedDistro),
       shellKind: kind,
       distro: resolvedDistro,
+      workingDirectory: resolvedWorkingDirectory.trim(),
     );
     _configureTerminal(tab);
     setState(() {
@@ -202,6 +217,7 @@ class _TerminalWindowState extends State<TerminalWindow> {
       final sessionId = await widget.bridge.createTerminalSession(
         shellKind: shell,
         distro: tab.distro,
+        workingDirectory: tab.workingDirectory,
         cols: tab.cols,
         rows: tab.rows,
       );
@@ -309,6 +325,9 @@ class _TerminalWindowState extends State<TerminalWindow> {
               itemBuilder: (context, index) {
                 final item = _tabs[index];
                 final active = index == _activeTabIndex;
+                final tooltip = item.workingDirectory.isEmpty
+                    ? item.title
+                    : '${item.title}\n${item.workingDirectory}';
                 return InkWell(
                   onTap: () => _selectTab(index),
                   child: Container(
@@ -332,15 +351,18 @@ class _TerminalWindowState extends State<TerminalWindow> {
                       children: <Widget>[
                         const Icon(Icons.terminal_rounded, size: 14),
                         const SizedBox(width: 8),
-                        Text(
-                          item.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: active
-                                ? Colors.white
-                                : const Color(0xFF8B949E),
+                        Tooltip(
+                          message: tooltip,
+                          child: Text(
+                            item.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: active
+                                  ? Colors.white
+                                  : const Color(0xFF8B949E),
+                            ),
                           ),
                         ),
                         if (_tabs.length > 1) ...<Widget>[

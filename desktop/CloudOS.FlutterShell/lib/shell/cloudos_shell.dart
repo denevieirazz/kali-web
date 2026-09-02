@@ -173,6 +173,13 @@ class _CloudOSShellState extends State<CloudOSShell> {
     });
   }
 
+  String? _desktopWorkingDirectory() {
+    final profile = Platform.environment['USERPROFILE']?.trim() ?? '';
+    if (profile.isEmpty) return null;
+    final desktop = Directory('$profile\\Desktop');
+    return desktop.existsSync() ? desktop.path : null;
+  }
+
   String _resolveWslDistro(CloudApp app) {
     final direct = app.distro?.trim() ?? '';
     if (direct.isNotEmpty) return direct;
@@ -238,6 +245,11 @@ class _CloudOSShellState extends State<CloudOSShell> {
     setState(_closeTransientPanels);
   }
 
+  String? _initialWorkingDirectory(CloudWindow window) {
+    final value = window.customParams['initialWorkingDirectory'];
+    return value is String && value.trim().isNotEmpty ? value.trim() : null;
+  }
+
   Widget _buildWindowContent(CloudWindow window) {
     final appId = window.appId.toLowerCase();
 
@@ -253,6 +265,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
       return TerminalWindow(
         key: ValueKey<String>(window.id),
         bridge: widget.bridge,
+        initialWorkingDirectory: _initialWorkingDirectory(window),
       );
     }
 
@@ -265,6 +278,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
         initialDistro: initialDistro is String && initialDistro.trim().isNotEmpty
             ? initialDistro.trim()
             : null,
+        initialWorkingDirectory: _initialWorkingDirectory(window),
       );
     }
 
@@ -370,7 +384,15 @@ class _CloudOSShellState extends State<CloudOSShell> {
         title: 'Abrir Terminal Aqui',
         icon: Icons.terminal_rounded,
         shortcut: 'Ctrl+Alt+T',
-        onTap: () => windowManager.openWindow('cloudos:terminal'),
+        onTap: () {
+          final desktop = _desktopWorkingDirectory();
+          windowManager.openWindow(
+            'cloudos:terminal',
+            params: desktop == null
+                ? null
+                : <String, dynamic>{'initialWorkingDirectory': desktop},
+          );
+        },
       ),
       ContextMenuItemData(
         title: 'Abrir Explorador de Arquivos',

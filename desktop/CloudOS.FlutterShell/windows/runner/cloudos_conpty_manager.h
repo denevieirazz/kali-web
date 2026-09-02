@@ -99,6 +99,7 @@ struct TerminalSessionInfo
     std::string session_id;
     std::string shell_kind;
     std::string distro;
+    std::string working_directory;
     int cols{80};
     int rows{24};
     bool is_alive{false};
@@ -126,7 +127,8 @@ public:
         const std::string& distro,
         int cols,
         int rows,
-        std::string& out_error);
+        std::string& out_error,
+        const std::string& working_directory = {});
 
     bool WriteSession(const std::string& session_id, const std::string& input_data);
     bool ResizeSession(const std::string& session_id, int cols, int rows);
@@ -144,6 +146,7 @@ private:
         std::string session_id;
         std::string shell_kind;
         std::string distro;
+        std::string working_directory;
         int cols{80};
         int rows{24};
         UniquePseudoConsole pseudo_console;

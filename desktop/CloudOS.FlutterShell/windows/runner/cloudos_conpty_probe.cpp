@@ -58,6 +58,33 @@ ProcessSnapshot CaptureProcessSnapshot()
     return result;
 }
 
+std::string WideToUtf8(const std::wstring& value)
+{
+    if (value.empty()) return {};
+    const int required = WideCharToMultiByte(
+        CP_UTF8,
+        WC_ERR_INVALID_CHARS,
+        value.data(),
+        static_cast<int>(value.size()),
+        nullptr,
+        0,
+        nullptr,
+        nullptr);
+    if (required <= 0) return {};
+    std::string result(static_cast<size_t>(required), '\0');
+    return WideCharToMultiByte(
+               CP_UTF8,
+               WC_ERR_INVALID_CHARS,
+               value.data(),
+               static_cast<int>(value.size()),
+               result.data(),
+               required,
+               nullptr,
+               nullptr) == required
+        ? result
+        : std::string{};
+}
+
 std::string EscapeJson(const std::string& value)
 {
     std::string result;
@@ -138,11 +165,12 @@ public:
         const std::string& command,
         const std::string& marker,
         std::string& output,
-        std::string& error)
+        std::string& error,
+        const std::string& working_directory = {})
     {
         auto& manager = CloudOS::CloudOSConPTYManager::Instance();
         const std::string session_id =
-            manager.CreateSession(shell, distro, 100, 30, error);
+            manager.CreateSession(shell, distro, 100, 30, error, working_directory);
         if (session_id.empty()) return false;
 
         // Match a real terminal: wait for the shell to initialize its line
@@ -300,6 +328,45 @@ int main()
         cmd_output,
         cmd_error);
 
+    std::string cwd_output;
+    std::string cwd_error;
+    bool cwd_ok = false;
+    WCHAR temp_path[MAX_PATH]{};
+    const DWORD temp_length = GetTempPathW(MAX_PATH, temp_path);
+    std::wstring cwd_test_directory;
+    if (temp_length > 0 && temp_length < MAX_PATH)
+    {
+        cwd_test_directory = std::wstring(temp_path) +
+            L"cloudos_conpty_cwd_" + std::to_wstring(GetCurrentProcessId());
+        if (CreateDirectoryW(cwd_test_directory.c_str(), nullptr) != FALSE ||
+            GetLastError() == ERROR_ALREADY_EXISTS)
+        {
+            const std::string cwd_utf8 = WideToUtf8(cwd_test_directory);
+            cwd_ok = !cwd_utf8.empty() && probe.RunCommand(
+                "powershell",
+                "",
+                "$m='__CLOUDOS_'+'CWD_DONE__'; Write-Output (Get-Location).Path; Write-Output $m; exit\r",
+                "__CLOUDOS_CWD_DONE__",
+                cwd_output,
+                cwd_error,
+                cwd_utf8);
+            if (cwd_ok && cwd_output.find(cwd_utf8) == std::string::npos)
+            {
+                cwd_ok = false;
+                cwd_error = "PowerShell did not start in the requested working directory";
+            }
+            RemoveDirectoryW(cwd_test_directory.c_str());
+        }
+        else
+        {
+            cwd_error = "Failed to create working-directory probe folder";
+        }
+    }
+    else
+    {
+        cwd_error = "GetTempPathW failed for working-directory probe";
+    }
+
     std::string wsl_output;
     std::string wsl_error;
     const bool wsl_ok = probe.RunCommand(
@@ -323,6 +390,10 @@ int main()
     std::cout << "\"ok\":" << (cmd_ok ? "true" : "false") << ",";
     std::cout << "\"error\":\"" << EscapeJson(cmd_error) << "\",";
     std::cout << "\"output\":\"" << EscapeJson(cmd_output) << "\"},";
+    std::cout << "\"workingDirectory\":{";
+    std::cout << "\"ok\":" << (cwd_ok ? "true" : "false") << ",";
+    std::cout << "\"error\":\"" << EscapeJson(cwd_error) << "\",";
+    std::cout << "\"output\":\"" << EscapeJson(cwd_output) << "\"},";
     std::cout << "\"wsl\":{";
     std::cout << "\"ok\":" << (wsl_ok ? "true" : "false") << ",";
     std::cout << "\"error\":\"" << EscapeJson(wsl_error) << "\",";
@@ -335,5 +406,5 @@ int main()
     PrintSnapshot("after", after);
     std::cout << "}" << std::endl;
 
-    return powershell_ok && cmd_ok && lifecycle_ok ? 0 : 1;
+    return powershell_ok && cmd_ok && cwd_ok && lifecycle_ok ? 0 : 1;
 }

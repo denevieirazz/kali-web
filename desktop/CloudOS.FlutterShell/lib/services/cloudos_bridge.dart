@@ -209,6 +209,7 @@ class CloudOSBridge {
   Future<String?> createTerminalSession({
     String shellKind = 'powershell',
     String distro = '',
+    String workingDirectory = '',
     int cols = 80,
     int rows = 24,
   }) async {
@@ -218,6 +219,7 @@ class CloudOSBridge {
         <String, Object?>{
           'shellKind': shellKind,
           'distro': distro,
+          'workingDirectory': workingDirectory,
           'cols': cols,
           'rows': rows,
         },
