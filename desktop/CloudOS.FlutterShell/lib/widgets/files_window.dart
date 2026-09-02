@@ -8,6 +8,7 @@ import '../core/cloudos_theme.dart';
 import '../models/file_models.dart';
 import '../services/cloudos_bridge.dart';
 import '../services/files_controller.dart';
+import '../services/terminal_location_resolver.dart';
 import '../services/window_manager.dart';
 import 'glass_surface.dart';
 
@@ -116,6 +117,30 @@ class _FilesWindowState extends State<FilesWindow> {
     }
 
     unawaited(_controller.openItem(item));
+  }
+
+  void _openTerminalAtPath(String rawPath, {String distroHint = ''}) {
+    final manager = widget.windowManager;
+    final resolvedPath = _controller.resolveFilesystemPath(rawPath);
+    final launch = resolvedPath == null
+        ? null
+        : resolveTerminalLaunchContext(
+            resolvedPath,
+            distroHint: distroHint,
+          );
+
+    if (manager == null || launch == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Não foi possível resolver um diretório de terminal para este local.'),
+          ),
+        );
+      }
+      return;
+    }
+
+    manager.openWindow(launch.appId, params: launch.params);
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
@@ -318,6 +343,14 @@ class _FilesWindowState extends State<FilesWindow> {
                   },
                 ),
               ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.terminal_rounded, size: 16),
+              tooltip: 'Abrir Terminal Aqui',
+              onPressed: tab == null
+                  ? null
+                  : () => _openTerminalAtPath(tab.currentPath),
+              color: CloudOSColors.textSecondary,
             ),
             if (widget.onMinimize != null)
               IconButton(
@@ -914,6 +947,21 @@ class _FilesWindowState extends State<FilesWindow> {
             ],
           ),
         ),
+        if (item.isDirectory)
+          const PopupMenuItem<String>(
+            value: 'terminal_here',
+            child: Row(
+              children: <Widget>[
+                Icon(
+                  Icons.terminal_rounded,
+                  size: 16,
+                  color: CloudOSColors.textPrimary,
+                ),
+                SizedBox(width: 8),
+                Text('Abrir Terminal Aqui'),
+              ],
+            ),
+          ),
         if (!item.isDirectory)
           const PopupMenuItem<String>(
             value: 'open_with',
@@ -1006,6 +1054,8 @@ class _FilesWindowState extends State<FilesWindow> {
       if (!mounted || value == null) return;
       if (value == 'open') {
         _handleOpenItem(item);
+      } else if (value == 'terminal_here') {
+        _openTerminalAtPath(item.path, distroHint: item.distro);
       } else if (value == 'open_with') {
         unawaited(_showOpenWithDialog(item));
       } else if (value == 'copy') {

@@ -6,6 +6,7 @@ import '../core/cloudos_theme.dart';
 import '../services/cloudos_bridge.dart';
 import '../services/cloudos_logger.dart';
 import '../services/project_store.dart';
+import '../services/terminal_location_resolver.dart';
 import '../services/window_manager.dart';
 
 class ProjectsWindow extends StatefulWidget {
@@ -245,13 +246,18 @@ class _ProjectsWindowState extends State<ProjectsWindow> {
       );
       return;
     }
+
+    final launch = resolveTerminalLaunchContext(project.path);
+    if (launch == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Esse workspace não possui um caminho de terminal válido.')),
+      );
+      return;
+    }
+
     await _markOpened(project);
-    widget.windowManager.openWindow(
-      'cloudos:terminal',
-      params: <String, dynamic>{
-        'initialWorkingDirectory': project.path,
-      },
-    );
+    widget.windowManager.openWindow(launch.appId, params: launch.params);
   }
 
   Future<void> _openExternalVsCode() async {

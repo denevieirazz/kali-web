@@ -46,6 +46,28 @@ if ($secContent -notmatch 'sid\.empty\(\)') {
     throw "SecurityV21 must fail closed when the current user SID cannot be resolved"
 }
 
+# Event delivery must be isolated from EventBus publishers. A subscribed client
+# that stops consuming its named pipe is disconnected after bounded per-client
+# buffering instead of blocking Publish() inside WriteFile or growing memory
+# without limit.
+$serverContent = Get-Content (Join-Path $brokerSrc "broker_server_v21.cpp") -Raw
+foreach ($required in @(
+    'kMaxQueuedEventFrames',
+    'kMaxQueuedEventBytes',
+    'std::deque<std::string> event_queue',
+    'std::condition_variable event_ready',
+    'std::mutex write_mutex',
+    'std::thread event_writer',
+    'CancelIoEx(send_state->pipe, nullptr)'
+)) {
+    if (-not $serverContent.Contains($required)) {
+        throw "SystemBroker event transport lost bounded backpressure contract: $required"
+    }
+}
+if ($serverContent -match '(?s)RegisterClient\s*\([^;]+SendFrame\s*\(send_state->pipe') {
+    throw "EventBus publisher callback must not write directly to the client pipe"
+}
+
 $docV21 = Join-Path $root "docs\native\SYSTEM_BROKER_V21.md"
 $docSec = Join-Path $root "docs\native\SYSTEM_BROKER_SECURITY_V21.md"
 if (-not (Test-Path $docV21)) { throw "Missing docs/native/SYSTEM_BROKER_V21.md" }

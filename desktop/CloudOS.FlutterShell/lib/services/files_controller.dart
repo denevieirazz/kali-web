@@ -82,6 +82,33 @@ class FilesController extends ChangeNotifier {
   String get activeJobStatus => _activeJobStatus;
   String? get initializationError => _initializationError;
 
+  String? resolveFilesystemPath(String rawPath) {
+    final path = rawPath.trim();
+    if (path.isEmpty) return null;
+    final lower = path.toLowerCase();
+
+    for (final folder in _knownFolders) {
+      if (folder.id.toLowerCase() == lower ||
+          folder.path.toLowerCase() == lower) {
+        return folder.path.trim().isEmpty ? null : folder.path;
+      }
+    }
+    for (final drive in _drives) {
+      if (drive.letter.toLowerCase() == lower ||
+          drive.path.toLowerCase() == lower) {
+        return drive.path.trim().isEmpty ? null : drive.path;
+      }
+    }
+
+    if (lower == 'home' || lower.startsWith('wsl:')) return null;
+    return path;
+  }
+
+  String? get activeResolvedPath {
+    final path = activeTab?.currentPath;
+    return path == null ? null : resolveFilesystemPath(path);
+  }
+
   @override
   void notifyListeners() {
     if (!_disposed) super.notifyListeners();

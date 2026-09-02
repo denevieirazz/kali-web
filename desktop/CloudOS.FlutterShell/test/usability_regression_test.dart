@@ -3,6 +3,7 @@ import 'package:cloudos_flutter_shell/models/shell_models.dart' hide CloudFileIt
 import 'package:cloudos_flutter_shell/services/cloudos_bridge.dart';
 import 'package:cloudos_flutter_shell/services/files_controller.dart';
 import 'package:cloudos_flutter_shell/services/system_metrics_service.dart';
+import 'package:cloudos_flutter_shell/services/terminal_location_resolver.dart';
 import 'package:cloudos_flutter_shell/services/window_manager.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -19,6 +20,12 @@ class _FilesBridge extends CloudOSBridge {
           name: 'Início',
           path: r'D:\Users\Tester',
           iconKey: 'home',
+        ),
+        KnownFolderModel(
+          id: 'wsl:kali-linux',
+          name: 'kali-linux (WSL)',
+          path: r'\\wsl.localhost\kali-linux',
+          iconKey: 'linux',
         ),
       ];
 
@@ -67,7 +74,58 @@ void main() {
 
       expect(controller.activeTab?.currentPath, r'D:\Work\CloudOS');
       expect(bridge.lastListedPath, r'D:\Work\CloudOS');
+      expect(controller.resolveFilesystemPath('home'), r'D:\Users\Tester');
+      expect(
+        controller.resolveFilesystemPath('wsl:kali-linux'),
+        r'\\wsl.localhost\kali-linux',
+      );
+      expect(controller.resolveFilesystemPath('D:'), 'D:\\');
       controller.dispose();
+    });
+
+    test('terminal resolver preserves Windows working directories', () {
+      final launch = resolveTerminalLaunchContext(r'D:\Work\CloudOS');
+      expect(launch, isNotNull);
+      expect(launch!.appId, 'cloudos:terminal');
+      expect(launch.workingDirectory, r'D:\Work\CloudOS');
+      expect(launch.distro, isNull);
+    });
+
+    test('terminal resolver converts wsl.localhost UNC path without hardcoding distro', () {
+      final launch = resolveTerminalLaunchContext(
+        r'\\wsl.localhost\kali-linux\home\cloudos\repo',
+      );
+      expect(launch, isNotNull);
+      expect(launch!.appId, 'wsl:terminal');
+      expect(launch.distro, 'kali-linux');
+      expect(launch.workingDirectory, '/home/cloudos/repo');
+      expect(launch.params['initialDistro'], 'kali-linux');
+    });
+
+    test('terminal resolver converts legacy wsl dollar root path', () {
+      final launch = resolveTerminalLaunchContext(r'\\wsl$\Ubuntu');
+      expect(launch, isNotNull);
+      expect(launch!.appId, 'wsl:terminal');
+      expect(launch.distro, 'Ubuntu');
+      expect(launch.workingDirectory, '/');
+    });
+
+    test('terminal resolver accepts POSIX path only with explicit distro hint', () {
+      expect(resolveTerminalLaunchContext('/home/cloudos/repo'), isNull);
+      final launch = resolveTerminalLaunchContext(
+        '/home/cloudos/repo',
+        distroHint: 'Debian',
+      );
+      expect(launch, isNotNull);
+      expect(launch!.appId, 'wsl:terminal');
+      expect(launch.distro, 'Debian');
+      expect(launch.workingDirectory, '/home/cloudos/repo');
+    });
+
+    test('terminal resolver refuses empty and unresolved virtual locations', () {
+      expect(resolveTerminalLaunchContext(''), isNull);
+      expect(resolveTerminalLaunchContext('home'), isNull);
+      expect(resolveTerminalLaunchContext('wsl:kali-linux'), isNull);
     });
 
     test('WindowManager never creates fake external or unknown windows', () {

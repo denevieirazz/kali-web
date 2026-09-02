@@ -11,18 +11,45 @@
 #include <iostream>
 #include <cmath>
 #include <algorithm>
+#include <condition_variable>
+#include <deque>
+#include <system_error>
 
 namespace CloudOS
 {
 
 namespace
 {
+constexpr size_t kMaxQueuedEventFrames = 128;
+constexpr size_t kMaxQueuedEventBytes = 2 * kMaxPayloadBytes;
+
 struct ClientSendState final
 {
     std::mutex mutex;
+    std::mutex write_mutex;
+    std::condition_variable event_ready;
+    std::deque<std::string> event_queue;
+    size_t queued_event_bytes{0};
     HANDLE pipe{INVALID_HANDLE_VALUE};
     bool active{true};
 };
+
+void DeactivateClientSendState(const std::shared_ptr<ClientSendState>& state)
+{
+    {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        state->active = false;
+        state->event_queue.clear();
+        state->queued_event_bytes = 0;
+    }
+    state->event_ready.notify_all();
+}
+
+bool IsClientSendStateActive(const std::shared_ptr<ClientSendState>& state)
+{
+    std::lock_guard<std::mutex> lock(state->mutex);
+    return state->active;
+}
 } // namespace
 
 BrokerServerV21& BrokerServerV21::Instance()
@@ -267,26 +294,114 @@ void BrokerServerV21::ClientSessionLoop(
     std::string client_id,
     std::shared_ptr<std::atomic_bool> finished)
 {
-    // Register client for events through this pipe
+    // Event publication must never block on a client that has stopped reading.
+    // Events are queued per client with strict frame/byte bounds and a dedicated
+    // writer. Responses still use the same framed pipe, serialized by write_mutex.
     auto send_state = std::make_shared<ClientSendState>();
     send_state->pipe = pipe;
+
+    std::thread event_writer;
+    try
+    {
+        event_writer = std::thread([this, send_state]() {
+            for (;;)
+            {
+                std::string serialized;
+                {
+                    std::unique_lock<std::mutex> lock(send_state->mutex);
+                    send_state->event_ready.wait(lock, [send_state]() {
+                        return !send_state->active || !send_state->event_queue.empty();
+                    });
+
+                    if (send_state->event_queue.empty())
+                    {
+                        if (!send_state->active) return;
+                        continue;
+                    }
+
+                    serialized = std::move(send_state->event_queue.front());
+                    send_state->event_queue.pop_front();
+                    send_state->queued_event_bytes -= serialized.size();
+                }
+
+                bool sent = false;
+                {
+                    std::lock_guard<std::mutex> write_lock(send_state->write_mutex);
+                    if (IsClientSendStateActive(send_state))
+                    {
+                        sent = SendFrame(send_state->pipe, serialized);
+                    }
+                }
+
+                if (!sent)
+                {
+                    DeactivateClientSendState(send_state);
+                    CancelIoEx(send_state->pipe, nullptr);
+                    return;
+                }
+            }
+        });
+    }
+    catch (const std::system_error&)
+    {
+        DisconnectNamedPipe(pipe);
+        {
+            std::lock_guard<std::mutex> lock(client_threads_mutex_);
+            const auto it = std::find(client_pipes_.begin(), client_pipes_.end(), pipe);
+            if (it != client_pipes_.end()) client_pipes_.erase(it);
+        }
+        CloseHandle(pipe);
+        finished->store(true);
+        return;
+    }
+
     EventBusV21::Instance().RegisterClient(
         client_id,
-        [this, send_state](const BrokerEvent& ev) {
+        [send_state](const BrokerEvent& ev) {
             std::string serialized = SerializeEvent(ev);
-            std::lock_guard<std::mutex> lock(send_state->mutex);
-            if (send_state->active)
+            bool overflow = false;
             {
-                SendFrame(send_state->pipe, serialized);
+                std::lock_guard<std::mutex> lock(send_state->mutex);
+                if (!send_state->active) return;
+
+                const bool frame_limit =
+                    send_state->event_queue.size() >= kMaxQueuedEventFrames;
+                const bool byte_limit =
+                    serialized.size() > kMaxPayloadBytes ||
+                    serialized.size() > kMaxQueuedEventBytes -
+                        std::min(send_state->queued_event_bytes, kMaxQueuedEventBytes);
+
+                if (frame_limit || byte_limit)
+                {
+                    send_state->active = false;
+                    send_state->event_queue.clear();
+                    send_state->queued_event_bytes = 0;
+                    overflow = true;
+                }
+                else
+                {
+                    send_state->queued_event_bytes += serialized.size();
+                    send_state->event_queue.push_back(std::move(serialized));
+                }
+            }
+
+            send_state->event_ready.notify_all();
+            if (overflow)
+            {
+                // Disconnect a stalled subscriber instead of blocking the
+                // publisher or allowing unbounded memory growth.
+                CancelIoEx(send_state->pipe, nullptr);
             }
         });
 
     while (running_.load())
     {
+        if (!IsClientSendStateActive(send_state)) break;
+
         std::string frame;
         if (!ReadFrame(pipe, frame))
         {
-            break; // Client disconnected or error
+            break; // Client disconnected, overflowed, broker stopped, or I/O failed.
         }
 
         BrokerRequest req;
@@ -307,25 +422,35 @@ void BrokerServerV21::ClientSessionLoop(
         }
 
         std::string resp_str = SerializeResponse(res);
+        bool sent = false;
         {
-            std::lock_guard<std::mutex> lock(send_state->mutex);
-            if (!SendFrame(pipe, resp_str))
+            std::lock_guard<std::mutex> write_lock(send_state->write_mutex);
+            if (IsClientSendStateActive(send_state))
             {
-                break;
+                sent = SendFrame(pipe, resp_str);
             }
+        }
+        if (!sent)
+        {
+            DeactivateClientSendState(send_state);
+            CancelIoEx(pipe, nullptr);
+            break;
         }
     }
 
-    {
-        std::lock_guard<std::mutex> lock(send_state->mutex);
-        send_state->active = false;
-    }
     EventBusV21::Instance().UnregisterClient(client_id);
-    // The session has already ended because the client disconnected, an I/O
-    // operation failed, or the broker is stopping. Flushing a server-side
-    // named pipe here can block indefinitely waiting for a stalled client to
-    // consume buffered bytes. Normal responses are fully written inside the
-    // request loop, so teardown should disconnect immediately.
+    DeactivateClientSendState(send_state);
+
+    // A queued writer may be blocked in WriteFile if the client stopped
+    // consuming frames. Cancel the pipe I/O before joining it so teardown is
+    // bounded and no publisher thread owns the transport write.
+    CancelIoEx(pipe, nullptr);
+    if (event_writer.joinable())
+    {
+        CancelSynchronousIo(event_writer.native_handle());
+        event_writer.join();
+    }
+
     DisconnectNamedPipe(pipe);
     {
         std::lock_guard<std::mutex> lock(client_threads_mutex_);
