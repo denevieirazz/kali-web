@@ -4,12 +4,14 @@ import 'package:flutter/material.dart';
 
 import 'core/cloudos_theme.dart';
 import 'services/app_lifecycle_coordinator.dart';
+import 'services/desktop_clock_service.dart';
 import 'services/runtime_event_service.dart';
 import 'shell/cloudos_shell.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   RuntimeEventService.instance.start();
+  DesktopClockService.instance.start();
   runApp(const CloudOSApp());
 }
 
@@ -28,10 +30,17 @@ class _CloudOSAppState extends State<CloudOSApp> {
     super.initState();
     _lifecycleListener = AppLifecycleListener(
       onExitRequested: AppLifecycleCoordinator.instance.handleExitRequest,
-      onPause: () => unawaited(AppLifecycleCoordinator.instance.checkpoint()),
-      onHide: () => unawaited(AppLifecycleCoordinator.instance.checkpoint()),
-      onDetach: () => unawaited(AppLifecycleCoordinator.instance.checkpoint()),
+      onPause: _checkpointAndPausePresentation,
+      onHide: _checkpointAndPausePresentation,
+      onDetach: _checkpointAndPausePresentation,
+      onResume: DesktopClockService.instance.start,
+      onShow: DesktopClockService.instance.start,
     );
+  }
+
+  void _checkpointAndPausePresentation() {
+    DesktopClockService.instance.stop();
+    unawaited(AppLifecycleCoordinator.instance.checkpoint());
   }
 
   @override
