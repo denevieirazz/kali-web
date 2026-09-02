@@ -472,7 +472,10 @@ class _CloudOSShellState extends State<CloudOSShell> {
                           onDrive: () => windowManager.openWindow('cloudos:drive'),
                           onProjects: () => windowManager.openWindow('cloudos:projects'),
                           onSystemMonitor: () => windowManager.openWindow('cloudos:system-monitor'),
-                          onWsl: () => windowManager.openWindow('wsl:terminal'),
+                          onWsl:
+                              snapshot.wslAvailable && snapshot.distros.isNotEmpty
+                                  ? () => windowManager.openWindow('wsl:terminal')
+                                  : null,
                           onNotepad: () => windowManager.openWindow('cloudos:notepad'),
                         ),
                       ),
@@ -584,6 +587,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
       child = StartPanel(
         key: const ValueKey<String>('start'),
         apps: apps,
+        bridge: widget.bridge,
         onLaunch: _launchApp,
         onClose: () => setState(() => startOpen = false),
       );
@@ -670,7 +674,7 @@ class _DesktopIcons extends StatelessWidget {
     required this.onDrive,
     required this.onProjects,
     required this.onSystemMonitor,
-    required this.onWsl,
+    this.onWsl,
     required this.onNotepad,
   });
 
@@ -684,7 +688,7 @@ class _DesktopIcons extends StatelessWidget {
   final VoidCallback onDrive;
   final VoidCallback onProjects;
   final VoidCallback onSystemMonitor;
-  final VoidCallback onWsl;
+  final VoidCallback? onWsl;
   final VoidCallback onNotepad;
 
   @override
@@ -769,16 +773,18 @@ class _DesktopIcons extends StatelessWidget {
               onTap: () => onSelect('monitor'),
               onDoubleTap: onSystemMonitor,
             ),
-            const SizedBox(height: 14),
-            _DesktopIcon(
-              id: 'wsl',
-              label: 'WSL Linux',
-              icon: Icons.auto_awesome_mosaic_rounded,
-              iconColor: const Color(0xFFEAB308),
-              isSelected: selectedId == 'wsl',
-              onTap: () => onSelect('wsl'),
-              onDoubleTap: onWsl,
-            ),
+            if (onWsl != null) ...<Widget>[
+              const SizedBox(height: 14),
+              _DesktopIcon(
+                id: 'wsl',
+                label: 'WSL Linux',
+                icon: Icons.auto_awesome_mosaic_rounded,
+                iconColor: const Color(0xFFEAB308),
+                isSelected: selectedId == 'wsl',
+                onTap: () => onSelect('wsl'),
+                onDoubleTap: onWsl,
+              ),
+            ],
             const SizedBox(height: 14),
             _DesktopIcon(
               id: 'settings',
