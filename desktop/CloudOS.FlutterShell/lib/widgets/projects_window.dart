@@ -370,7 +370,7 @@ class _ProjectsWindowState extends State<ProjectsWindow> {
                     ),
                     SizedBox(height: 3),
                     Text(
-                      'CloudOS Projects · Files V22',
+                      'CloudOS Core & Shell V22.1',
                       style: TextStyle(
                         fontSize: 10.5,
                         fontWeight: FontWeight.w600,
