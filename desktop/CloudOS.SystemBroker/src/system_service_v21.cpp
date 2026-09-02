@@ -3,32 +3,220 @@
 #include "security_v21.h"
 #include "wsl_service_v21.h"
 
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <Windows.h>
+#include <endpointvolume.h>
+#include <iphlpapi.h>
+#include <mmdeviceapi.h>
+#include <wrl/client.h>
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 
 namespace CloudOS
 {
 
 namespace
 {
+constexpr uint64_t kSnapshotCacheLifetimeMs = 2000;
+
 std::string WideToUtf8(const std::wstring& wstr)
 {
     if (wstr.empty()) return {};
-    int size_needed = WideCharToMultiByte(CP_UTF8, 0, wstr.data(), static_cast<int>(wstr.size()), nullptr, 0, nullptr, nullptr);
+    const int size_needed = WideCharToMultiByte(
+        CP_UTF8,
+        WC_ERR_INVALID_CHARS,
+        wstr.data(),
+        static_cast<int>(wstr.size()),
+        nullptr,
+        0,
+        nullptr,
+        nullptr);
     if (size_needed <= 0) return {};
-    std::string result(size_needed, 0);
-    WideCharToMultiByte(CP_UTF8, 0, wstr.data(), static_cast<int>(wstr.size()), result.data(), size_needed, nullptr, nullptr);
-    return result;
+
+    std::string result(static_cast<size_t>(size_needed), '\0');
+    return WideCharToMultiByte(
+               CP_UTF8,
+               WC_ERR_INVALID_CHARS,
+               wstr.data(),
+               static_cast<int>(wstr.size()),
+               result.data(),
+               size_needed,
+               nullptr,
+               nullptr) == size_needed
+        ? result
+        : std::string{};
 }
 
 uint64_t NowMs()
 {
     return static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count());
+            std::chrono::system_clock::now().time_since_epoch())
+            .count());
 }
+
+bool QueryMasterVolume(double* out_volume)
+{
+    if (!out_volume) return false;
+    const HRESULT init_hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const bool uninitialize = SUCCEEDED(init_hr);
+    if (FAILED(init_hr) && init_hr != RPC_E_CHANGED_MODE) return false;
+
+    HRESULT hr = E_FAIL;
+    float scalar = 0.0F;
+    {
+        Microsoft::WRL::ComPtr<IMMDeviceEnumerator> enumerator;
+        hr = CoCreateInstance(
+            __uuidof(MMDeviceEnumerator),
+            nullptr,
+            CLSCTX_ALL,
+            IID_PPV_ARGS(&enumerator));
+
+        Microsoft::WRL::ComPtr<IMMDevice> device;
+        if (SUCCEEDED(hr) && enumerator)
+        {
+            hr = enumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &device);
+        }
+        else if (SUCCEEDED(hr))
+        {
+            hr = E_POINTER;
+        }
+
+        Microsoft::WRL::ComPtr<IAudioEndpointVolume> endpoint;
+        if (SUCCEEDED(hr) && device)
+        {
+            hr = device->Activate(
+                __uuidof(IAudioEndpointVolume),
+                CLSCTX_ALL,
+                nullptr,
+                &endpoint);
+        }
+        else if (SUCCEEDED(hr))
+        {
+            hr = E_POINTER;
+        }
+
+        if (SUCCEEDED(hr) && endpoint)
+        {
+            hr = endpoint->GetMasterVolumeLevelScalar(&scalar);
+        }
+        else if (SUCCEEDED(hr))
+        {
+            hr = E_POINTER;
+        }
+    }
+
+    if (uninitialize) CoUninitialize();
+    if (FAILED(hr) || !std::isfinite(scalar)) return false;
+    *out_volume = std::clamp(static_cast<double>(scalar), 0.0, 1.0);
+    return true;
+}
+
+bool SetMasterVolume(double value)
+{
+    if (!std::isfinite(value) || value < 0.0 || value > 1.0) return false;
+    const HRESULT init_hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const bool uninitialize = SUCCEEDED(init_hr);
+    if (FAILED(init_hr) && init_hr != RPC_E_CHANGED_MODE) return false;
+
+    HRESULT hr = E_FAIL;
+    {
+        Microsoft::WRL::ComPtr<IMMDeviceEnumerator> enumerator;
+        hr = CoCreateInstance(
+            __uuidof(MMDeviceEnumerator),
+            nullptr,
+            CLSCTX_ALL,
+            IID_PPV_ARGS(&enumerator));
+
+        Microsoft::WRL::ComPtr<IMMDevice> device;
+        if (SUCCEEDED(hr) && enumerator)
+        {
+            hr = enumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &device);
+        }
+        else if (SUCCEEDED(hr))
+        {
+            hr = E_POINTER;
+        }
+
+        Microsoft::WRL::ComPtr<IAudioEndpointVolume> endpoint;
+        if (SUCCEEDED(hr) && device)
+        {
+            hr = device->Activate(
+                __uuidof(IAudioEndpointVolume),
+                CLSCTX_ALL,
+                nullptr,
+                &endpoint);
+        }
+        else if (SUCCEEDED(hr))
+        {
+            hr = E_POINTER;
+        }
+
+        if (SUCCEEDED(hr) && endpoint)
+        {
+            hr = endpoint->SetMasterVolumeLevelScalar(
+                static_cast<float>(value),
+                nullptr);
+        }
+        else if (SUCCEEDED(hr))
+        {
+            hr = E_POINTER;
+        }
+    }
+
+    if (uninitialize) CoUninitialize();
+    return SUCCEEDED(hr);
+}
+
+bool QueryConnectedNetwork(std::string* out_name)
+{
+    if (out_name) out_name->clear();
+
+    ULONG bytes = 16 * 1024;
+    std::vector<unsigned char> buffer(bytes);
+    auto* addresses = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buffer.data());
+    ULONG result = GetAdaptersAddresses(
+        AF_UNSPEC,
+        GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER,
+        nullptr,
+        addresses,
+        &bytes);
+
+    if (result == ERROR_BUFFER_OVERFLOW)
+    {
+        if (bytes == 0 || bytes > 16 * 1024 * 1024) return false;
+        buffer.resize(bytes);
+        addresses = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buffer.data());
+        result = GetAdaptersAddresses(
+            AF_UNSPEC,
+            GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER,
+            nullptr,
+            addresses,
+            &bytes);
+    }
+    if (result != NO_ERROR) return false;
+
+    for (auto* adapter = addresses; adapter; adapter = adapter->Next)
+    {
+        if (adapter->OperStatus != IfOperStatusUp ||
+            adapter->IfType == IF_TYPE_SOFTWARE_LOOPBACK ||
+            adapter->IfType == IF_TYPE_TUNNEL)
+        {
+            continue;
+        }
+
+        if (out_name && adapter->FriendlyName)
+        {
+            *out_name = WideToUtf8(adapter->FriendlyName);
+        }
+        return true;
+    }
+    return false;
+}
+
 } // namespace
 
 JsonObject SystemSnapshot::ToJsonObject() const
@@ -41,18 +229,19 @@ JsonObject SystemSnapshot::ToJsonObject() const
     obj["batteryPercent"] = JsonValue(battery_percent);
     obj["networkAvailable"] = JsonValue(network_available);
     obj["networkName"] = JsonValue(network_name);
+    obj["volumeAvailable"] = JsonValue(volume_available);
     obj["volume"] = JsonValue(volume);
     obj["brightnessAvailable"] = JsonValue(brightness_available);
     obj["brightness"] = JsonValue(brightness);
     obj["wslAvailable"] = JsonValue(wsl_available);
 
     JsonArray distros_arr;
-    for (const auto& d : distros)
+    for (const auto& distro : distros)
     {
-        distros_arr.push_back(JsonValue(d));
+        distros_arr.push_back(JsonValue(distro));
     }
     obj["distros"] = JsonValue(std::move(distros_arr));
-    obj["currentWorkspace"] = JsonValue(current_workspace);
+    obj["defaultDistro"] = JsonValue(default_distro);
     obj["timestamp"] = JsonValue(static_cast<int64_t>(timestamp_ms));
     return obj;
 }
@@ -66,7 +255,13 @@ SystemServiceV21& SystemServiceV21::Instance()
 SystemSnapshot SystemServiceV21::GetSnapshot()
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!initialized_.load())
+    const uint64_t now = NowMs();
+    const bool clock_moved_back = snapshot_.timestamp_ms > now;
+    const bool expired =
+        snapshot_.timestamp_ms == 0 ||
+        clock_moved_back ||
+        now - snapshot_.timestamp_ms >= kSnapshotCacheLifetimeMs;
+    if (!initialized_.load() || expired)
     {
         Refresh();
     }
@@ -75,71 +270,97 @@ SystemSnapshot SystemServiceV21::GetSnapshot()
 
 bool SystemServiceV21::SetVolume(double value)
 {
-    double clamped = std::clamp(value, 0.0, 1.0);
+    if (!std::isfinite(value) ||
+        value < 0.0 ||
+        value > 1.0 ||
+        !SetMasterVolume(value))
+    {
+        return false;
+    }
+
+    uint64_t generation = 0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        snapshot_.volume = clamped;
+        snapshot_.volume_available = true;
+        snapshot_.volume = value;
         snapshot_.timestamp_ms = NowMs();
-        generation_++;
+        generation = ++generation_;
     }
 
     JsonObject payload;
-    payload["volume"] = JsonValue(clamped);
-    payload["generation"] = JsonValue(static_cast<int64_t>(generation_.load()));
+    payload["volume"] = JsonValue(value);
+    payload["generation"] = JsonValue(static_cast<int64_t>(generation));
     EventBusV21::Instance().Publish("system.volumeChanged", payload);
     return true;
 }
 
 bool SystemServiceV21::SetBrightness(double value)
 {
-    double clamped = std::clamp(value, 0.0, 1.0);
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        snapshot_.brightness = clamped;
-        snapshot_.timestamp_ms = NowMs();
-        generation_++;
-    }
-
-    JsonObject payload;
-    payload["brightness"] = JsonValue(clamped);
-    payload["generation"] = JsonValue(static_cast<int64_t>(generation_.load()));
-    EventBusV21::Instance().Publish("system.brightnessChanged", payload);
-    return true;
+    if (!std::isfinite(value) || value < 0.0 || value > 1.0) return false;
+    // No verified physical-monitor write backend exists yet. Never report a
+    // successful brightness mutation that the hardware did not perform.
+    return false;
 }
 
 std::vector<std::string> SystemServiceV21::GetCapabilities()
 {
-    return {
+    const SystemSnapshot snapshot = GetSnapshot();
+    std::vector<std::string> capabilities = {
         "broker.protocol.v21",
         "health.ping",
         "health.status",
         "apps.list",
         "apps.launch",
         "system.snapshot",
-        "system.volume.read",
-        "system.volume.write",
-        "system.brightness.read",
-        "system.brightness.write",
         "wsl.list",
         "events.subscribe",
         "events.unsubscribe",
-        "jobs.submit",
         "jobs.status",
         "jobs.cancel",
         "diagnostics.snapshot",
+        "files.list",
+        "files.metadata",
+        "files.drives",
+        "files.knownFolders",
+        "files.resolvePath",
+        "files.createFolder",
+        "files.rename",
+        "files.delete",
+        "files.copy",
+        "files.move",
+        "files.search",
+        "files.open",
+        "files.openWith.list",
+        "files.openWith.launch",
+        "files.text.readChunk",
+        "files.text.writeChunk",
+        "files.text.abortWrite",
     };
+
+    if (snapshot.volume_available)
+    {
+        capabilities.push_back("system.volume.read");
+        capabilities.push_back("system.volume.write");
+    }
+    if (snapshot.brightness_available)
+    {
+        capabilities.push_back("system.brightness.read");
+        // brightness.write is intentionally absent until a verified backend exists.
+    }
+    return capabilities;
 }
 
 void SystemServiceV21::Invalidate()
 {
+    uint64_t generation = 0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         Refresh();
-        generation_++;
+        generation = ++generation_;
     }
 
     JsonObject payload;
-    payload["generation"] = JsonValue(static_cast<int64_t>(generation_.load()));
+    payload["generation"] = JsonValue(static_cast<int64_t>(generation));
     EventBusV21::Instance().Publish("system.snapshotChanged", payload);
 }
 
@@ -147,61 +368,48 @@ void SystemServiceV21::Refresh()
 {
     snapshot_ = {};
 
-    // Device Name
-    WCHAR computer_name[MAX_COMPUTERNAME_LENGTH + 1];
-    DWORD size = ARRAYSIZE(computer_name);
-    if (GetComputerNameW(computer_name, &size))
+    WCHAR computer_name[MAX_COMPUTERNAME_LENGTH + 1]{};
+    DWORD computer_name_size = ARRAYSIZE(computer_name);
+    if (GetComputerNameW(computer_name, &computer_name_size))
     {
         snapshot_.device_name = WideToUtf8(computer_name);
     }
-    else
-    {
-        snapshot_.device_name = "CloudOS Desktop";
-    }
 
-    // User Name
-    WCHAR user_name[256];
+    WCHAR user_name[256]{};
     DWORD user_size = ARRAYSIZE(user_name);
     if (GetUserNameW(user_name, &user_size))
     {
         snapshot_.user_name = WideToUtf8(user_name);
     }
-    else
-    {
-        snapshot_.user_name = "User";
-    }
 
-    // Session ID
     snapshot_.session_id = SecurityV21::GetCurrentSessionId();
 
-    // Power / Battery
-    SYSTEM_POWER_STATUS power;
+    SYSTEM_POWER_STATUS power{};
     if (GetSystemPowerStatus(&power) && power.BatteryLifePercent != 255)
     {
         snapshot_.battery_available = true;
-        snapshot_.battery_percent = static_cast<int>(power.BatteryLifePercent);
+        snapshot_.battery_percent =
+            std::clamp(static_cast<int>(power.BatteryLifePercent), 0, 100);
     }
     else
     {
         snapshot_.battery_available = false;
-        snapshot_.battery_percent = 100;
+        snapshot_.battery_percent = -1;
     }
 
-    // Network
-    snapshot_.network_available = true;
-    snapshot_.network_name = "CloudOS Network • Wi-Fi 6";
+    snapshot_.network_available = QueryConnectedNetwork(&snapshot_.network_name);
+    if (!snapshot_.network_available) snapshot_.network_name.clear();
 
-    // Audio & Display
-    snapshot_.volume = 0.72;
-    snapshot_.brightness_available = true;
-    snapshot_.brightness = 0.85;
+    snapshot_.volume_available = QueryMasterVolume(&snapshot_.volume);
+    if (!snapshot_.volume_available) snapshot_.volume = 0.0;
 
-    // WSL status
+    snapshot_.brightness_available = false;
+    snapshot_.brightness = 0.0;
+
     snapshot_.distros = WslServiceV21::Instance().GetDistributions();
+    snapshot_.default_distro = WslServiceV21::Instance().GetDefaultDistribution();
     snapshot_.wsl_available = WslServiceV21::Instance().IsWslAvailable();
-    snapshot_.current_workspace = 1;
     snapshot_.timestamp_ms = NowMs();
-
     initialized_.store(true);
 }
 

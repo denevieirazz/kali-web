@@ -3,7 +3,9 @@
 .pub/
 pubspec.lock
 build/
-windows/
+windows/flutter/ephemeral/
 coverage/
 .flutter-plugins
 .flutter-plugins-dependencies
+.metadata
+*.iml

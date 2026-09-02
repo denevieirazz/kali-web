@@ -36,9 +36,9 @@ struct NativeSystemSnapshot final
 {
     std::string device_name;
     std::string network_name;
-    double volume{0.72};
-    double brightness{0.85};
-    int battery_percent{100};
+    double volume{0.0};
+    double brightness{0.0};
+    int battery_percent{-1};
     bool wsl_available{false};
     std::vector<std::string> distros;
     int current_workspace{1};
@@ -65,8 +65,8 @@ public:
     std::vector<NativeAppItem> GetApps();
     NativeSystemSnapshot GetSystemSnapshot();
     bool LaunchApp(const std::string& app_id);
-    void SetVolume(double volume);
-    void SetBrightness(double brightness);
+    bool SetVolume(double volume);
+    bool SetBrightness(double brightness);
 
     [[nodiscard]] bool IsRegistered() const noexcept { return is_registered_.load(); }
 

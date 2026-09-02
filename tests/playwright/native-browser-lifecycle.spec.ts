@@ -179,16 +179,42 @@ async function startHarness(testInfo: TestInfo, extraArgs: string[]) {
     ]);
   }
 
+  function rootProcessIsAlive(): boolean {
+    if (!host.pid) return false;
+    try {
+      process.kill(host.pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async function terminateOwnedProcess() {
     if (host.exitCode !== null) return;
     if (!host.pid) throw new Error('PID criado pelo teste não está disponível.');
     try {
       await execFileAsync('taskkill', ['/PID', String(host.pid), '/T', '/F'], { windowsHide: true });
     } catch (error) {
-      if (host.exitCode === null)
+      // taskkill can return a non-zero code when a descendant disappears while
+      // the process tree is already shutting down. Only fail teardown when the
+      // root process that this test owns is still alive after that race.
+      if (rootProcessIsAlive()) {
         throw new Error(`Falha ao encerrar o PID ${host.pid}: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
-    await waitForExit(10_000);
+
+    if (!rootProcessIsAlive()) {
+      // Give Node one event-loop turn to observe the child's exit event/exitCode
+      // without turning a successfully terminated root into a teardown failure.
+      await delay(25);
+      return;
+    }
+
+    try {
+      await waitForExit(10_000);
+    } catch (error) {
+      if (rootProcessIsAlive()) throw error;
+    }
   }
 
   async function dispose() {

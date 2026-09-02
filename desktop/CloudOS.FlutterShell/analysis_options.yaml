@@ -2,6 +2,7 @@ analyzer:
   exclude:
     - build/**
     - windows/flutter/ephemeral/**
+    - windows/**
   errors:
     unused_import: error
     dead_code: error

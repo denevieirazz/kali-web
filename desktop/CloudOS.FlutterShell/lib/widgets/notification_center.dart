@@ -2,51 +2,135 @@ import 'package:flutter/material.dart';
 
 import '../core/cloudos_theme.dart';
 import '../models/shell_models.dart';
-import '../services/cloudos_bridge.dart';
+import '../services/runtime_event_service.dart';
 import 'glass_surface.dart';
 
-class NotificationCenterPanel extends StatefulWidget {
-  const NotificationCenterPanel({
+class NotificationCenter extends StatefulWidget {
+  const NotificationCenter({
     this.initialNotifications,
+    this.onClose,
+    this.runtimeService,
     super.key,
   });
 
   final List<CloudNotification>? initialNotifications;
+  final VoidCallback? onClose;
+  final RuntimeEventService? runtimeService;
 
   @override
-  State<NotificationCenterPanel> createState() => _NotificationCenterPanelState();
+  State<NotificationCenter> createState() => _NotificationCenterState();
 }
 
-class _NotificationCenterPanelState extends State<NotificationCenterPanel> {
-  late List<CloudNotification> items = List<CloudNotification>.from(
-    widget.initialNotifications ?? CloudOSBridge.previewNotifications,
-  );
+typedef NotificationCenterPanel = NotificationCenter;
+
+class _NotificationCenterState extends State<NotificationCenter> {
+  final List<CloudNotification> _compatItems = <CloudNotification>[];
+  late RuntimeEventService _runtime;
+  bool _runtimeMode = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _bindSource();
+  }
+
+  @override
+  void didUpdateWidget(covariant NotificationCenter oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.runtimeService != widget.runtimeService ||
+        oldWidget.initialNotifications != widget.initialNotifications) {
+      _unbindRuntime();
+      _bindSource();
+    }
+  }
+
+  void _bindSource() {
+    _runtimeMode = widget.initialNotifications == null;
+    _compatItems
+      ..clear()
+      ..addAll(widget.initialNotifications ?? const <CloudNotification>[]);
+    _runtime = widget.runtimeService ?? RuntimeEventService.instance;
+    if (_runtimeMode) {
+      _runtime.start();
+      _runtime.addListener(_onRuntimeChanged);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _runtime.markAllRead();
+      });
+    }
+  }
+
+  void _unbindRuntime() {
+    if (_runtimeMode) _runtime.removeListener(_onRuntimeChanged);
+  }
+
+  @override
+  void dispose() {
+    _unbindRuntime();
+    super.dispose();
+  }
+
+  void _onRuntimeChanged() {
+    if (mounted) setState(() {});
+  }
+
+  List<CloudNotification> get _items => _runtimeMode
+      ? _runtime.notifications
+      : List<CloudNotification>.unmodifiable(_compatItems);
 
   void _dismiss(String id) {
-    setState(() {
-      items.removeWhere((n) => n.id == id);
-    });
+    if (_runtimeMode) {
+      _runtime.dismissNotification(id);
+      return;
+    }
+    setState(() => _compatItems.removeWhere((item) => item.id == id));
   }
 
   void _clearAll() {
-    setState(() {
-      items.clear();
-    });
+    if (_runtimeMode) {
+      _runtime.clearNotifications();
+      return;
+    }
+    setState(_compatItems.clear);
+  }
+
+  String _dateString(DateTime now) {
+    const weekdays = <String>[
+      'Segunda-feira',
+      'Terça-feira',
+      'Quarta-feira',
+      'Quinta-feira',
+      'Sexta-feira',
+      'Sábado',
+      'Domingo',
+    ];
+    const months = <String>[
+      'Janeiro',
+      'Fevereiro',
+      'Março',
+      'Abril',
+      'Maio',
+      'Junho',
+      'Julho',
+      'Agosto',
+      'Setembro',
+      'Outubro',
+      'Novembro',
+      'Dezembro',
+    ];
+    return '${weekdays[now.weekday - 1]}, ${now.day} de ${months[now.month - 1]}';
   }
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    const weekdays = <String>['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo'];
-    const months = <String>['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
-    final dateString = '${weekdays[now.weekday - 1]}, ${now.day} de ${months[now.month - 1]}';
+    final items = _items;
+    final dateString = _dateString(DateTime.now());
 
     return Align(
       alignment: Alignment.bottomRight,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(0, 0, 16, 68),
         child: SizedBox(
-          width: 390,
+          width: 410,
           child: GlassSurface(
             borderRadius: 16,
             blur: 24,
@@ -77,7 +161,10 @@ class _NotificationCenterPanelState extends State<NotificationCenterPanel> {
                             dateString,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: CloudOSColors.caption, fontSize: 11),
+                            style: const TextStyle(
+                              color: CloudOSColors.caption,
+                              fontSize: 11,
+                            ),
                           ),
                         ],
                       ),
@@ -89,45 +176,150 @@ class _NotificationCenterPanelState extends State<NotificationCenterPanel> {
                           visualDensity: VisualDensity.compact,
                           padding: const EdgeInsets.symmetric(horizontal: 8),
                         ),
-                        child: const Text('Limpar Tudo', style: TextStyle(fontSize: 11.5, color: CloudOSColors.accent)),
+                        child: const Text(
+                          'Limpar Tudo',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: CloudOSColors.accent,
+                          ),
+                        ),
+                      ),
+                    if (widget.onClose != null)
+                      Tooltip(
+                        message: 'Fechar (Esc)',
+                        child: IconButton(
+                          onPressed: widget.onClose,
+                          visualDensity: VisualDensity.compact,
+                          icon: const Icon(Icons.close_rounded, size: 18),
+                        ),
                       ),
                   ],
                 ),
+                if (_runtimeMode) ...<Widget>[
+                  const SizedBox(height: 10),
+                  _RuntimeStatusBar(runtime: _runtime),
+                ],
                 const SizedBox(height: 12),
                 if (items.isEmpty)
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(vertical: 28),
                     alignment: Alignment.center,
-                    child: const Column(
+                    child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: <Widget>[
-                        Icon(Icons.notifications_off_outlined, size: 36, color: CloudOSColors.caption),
-                        SizedBox(height: 8),
-                        Text(
-                          'Sem novas notificações',
-                          style: TextStyle(color: CloudOSColors.secondary, fontSize: 12.5, fontWeight: FontWeight.w600),
+                        const Icon(
+                          Icons.notifications_off_outlined,
+                          size: 36,
+                          color: CloudOSColors.caption,
                         ),
-                        SizedBox(height: 2),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Sem novas notificações',
+                          style: TextStyle(
+                            color: CloudOSColors.secondary,
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
                         Text(
-                          'Tudo atualizado por aqui',
-                          style: TextStyle(color: CloudOSColors.caption, fontSize: 11),
+                          _runtimeMode
+                              ? 'O EventBus ainda não reportou eventos notificáveis.'
+                              : 'Nenhuma notificação foi fornecida.',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: CloudOSColors.caption,
+                            fontSize: 11,
+                          ),
                         ),
                       ],
                     ),
                   )
                 else
-                  for (final item in items) ...<Widget>[
-                    _NotificationCard(
-                      notification: item,
-                      onDismiss: () => _dismiss(item.id),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 430),
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: items.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (context, index) {
+                        final item = items[index];
+                        return _NotificationCard(
+                          notification: item,
+                          onDismiss: () => _dismiss(item.id),
+                        );
+                      },
                     ),
-                    const SizedBox(height: 8),
-                  ],
+                  ),
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _RuntimeStatusBar extends StatelessWidget {
+  const _RuntimeStatusBar({required this.runtime});
+
+  final RuntimeEventService runtime;
+
+  Color get _stateColor => switch (runtime.connectionState) {
+    RuntimeBrokerConnectionState.connected => Colors.greenAccent,
+    RuntimeBrokerConnectionState.connecting => Colors.amberAccent,
+    RuntimeBrokerConnectionState.disconnected => Colors.redAccent,
+    RuntimeBrokerConnectionState.unavailable => Colors.white38,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: CloudOSColors.elevated.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: CloudOSColors.border),
+      ),
+      child: Row(
+        children: <Widget>[
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(
+              color: _stateColor,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 7),
+          Text(
+            'EventBus: ${runtime.connectionStateLabel}',
+            style: const TextStyle(
+              color: CloudOSColors.secondary,
+              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const Spacer(),
+          if (runtime.nativeDroppedEventCount > 0)
+            Text(
+              '${runtime.nativeDroppedEventCount} evento(s) descartado(s)',
+              style: const TextStyle(
+                color: Colors.orangeAccent,
+                fontSize: 9.5,
+              ),
+            )
+          else
+            Text(
+              '${runtime.journal.length} evento(s) na sessão',
+              style: const TextStyle(
+                color: CloudOSColors.caption,
+                fontSize: 9.5,
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -162,7 +354,11 @@ class _NotificationCard extends StatelessWidget {
               color: CloudOSColors.accentSoft,
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(notification.icon, size: 17, color: CloudOSColors.accent),
+            child: Icon(
+              notification.icon,
+              size: 17,
+              color: CloudOSColors.accent,
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -183,7 +379,10 @@ class _NotificationCard extends StatelessWidget {
                     ),
                     Text(
                       notification.time,
-                      style: const TextStyle(color: CloudOSColors.caption, fontSize: 10.5),
+                      style: const TextStyle(
+                        color: CloudOSColors.caption,
+                        fontSize: 10.5,
+                      ),
                     ),
                     const SizedBox(width: 4),
                     InkWell(
@@ -191,7 +390,11 @@ class _NotificationCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(4),
                       child: const Padding(
                         padding: EdgeInsets.all(2),
-                        child: Icon(Icons.close_rounded, size: 14, color: CloudOSColors.caption),
+                        child: Icon(
+                          Icons.close_rounded,
+                          size: 14,
+                          color: CloudOSColors.caption,
+                        ),
                       ),
                     ),
                   ],
@@ -199,28 +402,48 @@ class _NotificationCard extends StatelessWidget {
                 const SizedBox(height: 3),
                 Text(
                   notification.message,
-                  style: const TextStyle(color: CloudOSColors.secondary, fontSize: 11.5),
+                  style: const TextStyle(
+                    color: CloudOSColors.secondary,
+                    fontSize: 11.5,
+                  ),
                 ),
                 const SizedBox(height: 4),
-                Row(
+                Wrap(
+                  spacing: 5,
                   children: <Widget>[
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                      decoration: BoxDecoration(
-                        color: CloudOSColors.border.withValues(alpha: 0.5),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        notification.source,
-                        style: const TextStyle(color: CloudOSColors.caption, fontSize: 9, fontWeight: FontWeight.w600),
-                      ),
-                    ),
+                    _Tag(text: notification.source),
+                    _Tag(text: notification.category),
                   ],
                 ),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _Tag extends StatelessWidget {
+  const _Tag({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+      decoration: BoxDecoration(
+        color: CloudOSColors.border.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: CloudOSColors.caption,
+          fontSize: 9,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }

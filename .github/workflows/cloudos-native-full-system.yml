@@ -23,6 +23,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: cloudos-native-full-system-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   native-foundation:
     runs-on: windows-latest

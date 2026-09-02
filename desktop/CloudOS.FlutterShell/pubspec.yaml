@@ -1,7 +1,7 @@
 name: cloudos_flutter_shell
-description: CloudOS V19 Flutter presentation layer. The native C++ core remains authoritative.
+description: CloudOS V22.1 Flutter presentation layer. The native C++ core remains authoritative.
 publish_to: "none"
-version: 0.1.0+19
+version: 0.22.1+221
 
 environment:
   sdk: ">=3.8.0 <4.0.0"
@@ -9,6 +9,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  webview_flutter_windows: ^1.1.1
+  xterm: ^4.0.0
 
 dev_dependencies:
   flutter_test:
@@ -16,3 +18,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/wallpapers/

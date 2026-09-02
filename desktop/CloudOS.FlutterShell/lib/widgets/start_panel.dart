@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../core/cloudos_theme.dart';
 import '../models/shell_models.dart';
+import '../services/cloudos_bridge.dart';
+import '../services/session_identity_service.dart';
 import 'glass_surface.dart';
 
 class StartPanel extends StatefulWidget {
@@ -9,12 +13,18 @@ class StartPanel extends StatefulWidget {
     required this.apps,
     required this.onLaunch,
     required this.onClose,
+    this.bridge = const CloudOSBridge(),
+    this.identityService,
+    this.onExitRequested,
     super.key,
   });
 
   final List<CloudApp> apps;
   final ValueChanged<CloudApp> onLaunch;
   final VoidCallback onClose;
+  final CloudOSBridge bridge;
+  final SessionIdentityService? identityService;
+  final Future<void> Function()? onExitRequested;
 
   @override
   State<StartPanel> createState() => _StartPanelState();
@@ -22,13 +32,76 @@ class StartPanel extends StatefulWidget {
 
 class _StartPanelState extends State<StartPanel> {
   final TextEditingController _searchController = TextEditingController();
+  late SessionIdentityService _identityService;
+  SessionIdentity _identity = const SessionIdentity.unavailable();
+  bool _identityLoading = true;
+  int _identityLoadGeneration = 0;
   String query = '';
   String selectedFilter = 'Todos';
 
-  static const filters = <String>['Todos', 'Produtividade', 'Linux / WSL', 'Sistema', 'Utilitários'];
+  static const filters = <String>[
+    'Todos',
+    'Produtividade',
+    'Linux / WSL',
+    'Sistema',
+    'Utilitários',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _bindIdentityService();
+    unawaited(_loadIdentity());
+  }
+
+  @override
+  void didUpdateWidget(covariant StartPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.bridge, widget.bridge) ||
+        oldWidget.identityService != widget.identityService) {
+      _bindIdentityService();
+      unawaited(_loadIdentity());
+    }
+  }
+
+  void _bindIdentityService() {
+    _identityService = widget.identityService ?? SessionIdentityService(widget.bridge);
+  }
+
+  Future<void> _loadIdentity() async {
+    final generation = ++_identityLoadGeneration;
+    if (mounted) {
+      setState(() => _identityLoading = true);
+    }
+
+    final identity = await _identityService.load();
+    if (!mounted || generation != _identityLoadGeneration) return;
+    setState(() {
+      _identity = identity;
+      _identityLoading = false;
+    });
+  }
+
+  String get _sessionUserLabel {
+    if (_identityLoading) return 'Carregando sessão…';
+    if (_identity.available) return _identity.userName;
+    return 'Identidade indisponível';
+  }
+
+  String get _sessionSubtitle {
+    if (_identityLoading) return 'Sessão ativa • carregando identidade';
+    if (!_identity.available) return 'Sessão ativa • identidade indisponível';
+
+    final pieces = <String>['Sessão ativa', 'ID ${_identity.sessionId}'];
+    if (_identity.deviceName.trim().isNotEmpty) {
+      pieces.add(_identity.deviceName.trim());
+    }
+    return pieces.join(' • ');
+  }
 
   @override
   void dispose() {
+    _identityLoadGeneration++;
     _searchController.dispose();
     super.dispose();
   }
@@ -36,22 +109,32 @@ class _StartPanelState extends State<StartPanel> {
   @override
   Widget build(BuildContext context) {
     final normalized = query.trim().toLowerCase();
-    final filtered = widget.apps.where((app) {
-      final matchesQuery = normalized.isEmpty ||
-          app.name.toLowerCase().contains(normalized) ||
-          (app.subtitle?.toLowerCase().contains(normalized) ?? false) ||
-          (app.distro?.toLowerCase().contains(normalized) ?? false) ||
-          app.category.toLowerCase().contains(normalized);
+    final filtered = widget.apps
+        .where((app) {
+          final matchesQuery =
+              normalized.isEmpty ||
+              app.name.toLowerCase().contains(normalized) ||
+              (app.subtitle?.toLowerCase().contains(normalized) ?? false) ||
+              (app.distro?.toLowerCase().contains(normalized) ?? false) ||
+              app.category.toLowerCase().contains(normalized);
 
-      if (!matchesQuery) return false;
+          if (!matchesQuery) return false;
 
-      if (selectedFilter == 'Todos') return true;
-      if (selectedFilter == 'Linux / WSL') return app.platform == CloudAppPlatform.linux;
-      return app.category == selectedFilter;
-    }).toList(growable: false);
+          if (selectedFilter == 'Todos') return true;
+          if (selectedFilter == 'Linux / WSL') {
+            return app.platform == CloudAppPlatform.linux;
+          }
+          return app.category == selectedFilter;
+        })
+        .toList(growable: false);
 
-    final pinnedApps = filtered.where((a) => a.isPinned).toList(growable: false);
-    final recentApps = widget.apps.where((a) => a.isRecent).take(4).toList(growable: false);
+    final pinnedApps = filtered
+        .where((a) => a.isPinned)
+        .toList(growable: false);
+    final recentApps = widget.apps
+        .where((a) => a.isRecent)
+        .take(4)
+        .toList(growable: false);
 
     return Align(
       alignment: Alignment.bottomLeft,
@@ -78,7 +161,11 @@ class _StartPanelState extends State<StartPanel> {
                         color: CloudOSColors.accentSoft,
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Icon(Icons.cloud_rounded, color: CloudOSColors.accent, size: 20),
+                      child: const Icon(
+                        Icons.cloud_rounded,
+                        color: CloudOSColors.accent,
+                        size: 20,
+                      ),
                     ),
                     const SizedBox(width: 10),
                     const Expanded(
@@ -95,8 +182,11 @@ class _StartPanelState extends State<StartPanel> {
                             ),
                           ),
                           Text(
-                            'Ambiente unificado Windows + Linux',
-                            style: TextStyle(color: CloudOSColors.caption, fontSize: 11),
+                            'Aplicativos disponíveis nesta sessão',
+                            style: TextStyle(
+                              color: CloudOSColors.caption,
+                              fontSize: 11,
+                            ),
                           ),
                         ],
                       ),
@@ -117,7 +207,11 @@ class _StartPanelState extends State<StartPanel> {
                   autofocus: true,
                   onChanged: (value) => setState(() => query = value),
                   decoration: InputDecoration(
-                    prefixIcon: const Icon(Icons.search_rounded, size: 20, color: CloudOSColors.secondary),
+                    prefixIcon: const Icon(
+                      Icons.search_rounded,
+                      size: 20,
+                      color: CloudOSColors.secondary,
+                    ),
                     suffixIcon: query.isNotEmpty
                         ? IconButton(
                             icon: const Icon(Icons.clear_rounded, size: 16),
@@ -127,7 +221,7 @@ class _StartPanelState extends State<StartPanel> {
                             },
                           )
                         : null,
-                    hintText: 'Pesquisar apps, arquivos, comandos e WSL...',
+                    hintText: 'Pesquisar aplicativos disponíveis...',
                     isDense: true,
                   ),
                 ),
@@ -146,20 +240,31 @@ class _StartPanelState extends State<StartPanel> {
                         borderRadius: BorderRadius.circular(14),
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 140),
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
                           decoration: BoxDecoration(
-                            color: isSelected ? CloudOSColors.accentSoft : CloudOSColors.elevated.withValues(alpha: 0.5),
+                            color: isSelected
+                                ? CloudOSColors.accentSoft
+                                : CloudOSColors.elevated.withValues(alpha: 0.5),
                             borderRadius: BorderRadius.circular(14),
                             border: Border.all(
-                              color: isSelected ? CloudOSColors.accent : CloudOSColors.border,
+                              color: isSelected
+                                  ? CloudOSColors.accent
+                                  : CloudOSColors.border,
                             ),
                           ),
                           child: Text(
                             f,
                             style: TextStyle(
-                              color: isSelected ? CloudOSColors.text : CloudOSColors.secondary,
+                              color: isSelected
+                                  ? CloudOSColors.text
+                                  : CloudOSColors.secondary,
                               fontSize: 11,
-                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                              fontWeight: isSelected
+                                  ? FontWeight.w600
+                                  : FontWeight.w500,
                             ),
                           ),
                         ),
@@ -191,26 +296,31 @@ class _StartPanelState extends State<StartPanel> {
                                 ],
                               ),
                             ),
-                            const SliverToBoxAdapter(child: SizedBox(height: 8)),
-                            SliverGrid(
-                              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: 3,
-                                mainAxisExtent: 68,
-                                crossAxisSpacing: 8,
-                                mainAxisSpacing: 8,
-                              ),
-                              delegate: SliverChildBuilderDelegate(
-                                (context, index) {
-                                  final app = pinnedApps[index];
-                                  return _AppCard(
-                                    app: app,
-                                    onTap: () => widget.onLaunch(app),
-                                  );
-                                },
-                                childCount: pinnedApps.length,
-                              ),
+                            const SliverToBoxAdapter(
+                              child: SizedBox(height: 8),
                             ),
-                            const SliverToBoxAdapter(child: SizedBox(height: 14)),
+                            SliverGrid(
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                    crossAxisCount: 3,
+                                    mainAxisExtent: 68,
+                                    crossAxisSpacing: 8,
+                                    mainAxisSpacing: 8,
+                                  ),
+                              delegate: SliverChildBuilderDelegate((
+                                context,
+                                index,
+                              ) {
+                                final app = pinnedApps[index];
+                                return _AppCard(
+                                  app: app,
+                                  onTap: () => widget.onLaunch(app),
+                                );
+                              }, childCount: pinnedApps.length),
+                            ),
+                            const SliverToBoxAdapter(
+                              child: SizedBox(height: 14),
+                            ),
                             SliverToBoxAdapter(
                               child: Row(
                                 children: <Widget>[
@@ -221,23 +331,28 @@ class _StartPanelState extends State<StartPanel> {
                                   const Spacer(),
                                   const Text(
                                     'Sessão ativa',
-                                    style: TextStyle(color: CloudOSColors.caption, fontSize: 11),
+                                    style: TextStyle(
+                                      color: CloudOSColors.caption,
+                                      fontSize: 11,
+                                    ),
                                   ),
                                 ],
                               ),
                             ),
-                            const SliverToBoxAdapter(child: SizedBox(height: 6)),
+                            const SliverToBoxAdapter(
+                              child: SizedBox(height: 6),
+                            ),
                             SliverList(
-                              delegate: SliverChildBuilderDelegate(
-                                (context, index) {
-                                  final app = recentApps[index];
-                                  return _RecentTile(
-                                    app: app,
-                                    onTap: () => widget.onLaunch(app),
-                                  );
-                                },
-                                childCount: recentApps.length,
-                              ),
+                              delegate: SliverChildBuilderDelegate((
+                                context,
+                                index,
+                              ) {
+                                final app = recentApps[index];
+                                return _RecentTile(
+                                  app: app,
+                                  onTap: () => widget.onLaunch(app),
+                                );
+                              }, childCount: recentApps.length),
                             ),
                           ],
                         ),
@@ -253,39 +368,126 @@ class _StartPanelState extends State<StartPanel> {
                       decoration: BoxDecoration(
                         color: CloudOSColors.accentSoft,
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: CloudOSColors.accent.withValues(alpha: 0.4)),
+                        border: Border.all(
+                          color: CloudOSColors.accent.withValues(alpha: 0.4),
+                        ),
                       ),
-                      child: const Icon(Icons.person_rounded, size: 18, color: CloudOSColors.accent),
+                      child: _identityLoading
+                          ? const Padding(
+                              padding: EdgeInsets.all(8),
+                              child: CircularProgressIndicator(strokeWidth: 1.5),
+                            )
+                          : const Icon(
+                              Icons.person_rounded,
+                              size: 18,
+                              color: CloudOSColors.accent,
+                            ),
                     ),
                     const SizedBox(width: 8),
-                    const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          'Douglas',
-                          style: TextStyle(
-                            color: CloudOSColors.text,
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w600,
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            _sessionUserLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: CloudOSColors.text,
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
-                        ),
-                        Text(
-                          'Administrador • Sessão Ativa',
-                          style: TextStyle(color: CloudOSColors.caption, fontSize: 10),
-                        ),
-                      ],
+                          Text(
+                            _sessionSubtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: CloudOSColors.caption,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    const Spacer(),
+                    const SizedBox(width: 8),
                     _FooterAction(
                       icon: Icons.lock_outline_rounded,
                       tooltip: 'Bloquear Sessão',
-                      onPressed: () {},
+                      onPressed: () async {
+                        final locked = await widget.bridge.lockSession();
+                        if (!locked && context.mounted) {
+                          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'O Windows não confirmou o bloqueio da sessão.',
+                              ),
+                            ),
+                          );
+                        }
+                      },
                     ),
                     const SizedBox(width: 4),
                     _FooterAction(
                       icon: Icons.power_settings_new_rounded,
                       tooltip: 'Opções de Energia',
-                      onPressed: () {},
+                      onPressed: () {
+                        showDialog<void>(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            backgroundColor: const Color(0xFF101524),
+                            title: const Text(
+                              'Opções do CloudOS',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                              ),
+                            ),
+                            content: const Text(
+                              'A única ação disponível aqui é encerrar o aplicativo CloudOS. O sistema Windows não será desligado.',
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 13,
+                              ),
+                            ),
+                            actions: <Widget>[
+                              TextButton(
+                                onPressed: () => Navigator.pop(ctx),
+                                child: const Text(
+                                  'Cancelar',
+                                  style: TextStyle(color: Colors.white60),
+                                ),
+                              ),
+                              ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: CloudOSColors.danger,
+                                ),
+                                onPressed: () async {
+                                  Navigator.pop(ctx);
+                                  final requestExit = widget.onExitRequested;
+                                  if (requestExit == null) {
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'O encerramento ordenado não está disponível nesta superfície.',
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                    return;
+                                  }
+                                  await requestExit();
+                                },
+                                child: const Text(
+                                  'Sair do CloudOS',
+                                  style: TextStyle(color: Colors.white),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
                     ),
                   ],
                 ),
@@ -305,16 +507,16 @@ class _AppCard extends StatelessWidget {
   final VoidCallback onTap;
 
   Color get platformColor => switch (app.platform) {
-        CloudAppPlatform.windows => CloudOSColors.windows,
-        CloudAppPlatform.linux => CloudOSColors.linux,
-        CloudAppPlatform.cloudos => CloudOSColors.accent,
-      };
+    CloudAppPlatform.windows => CloudOSColors.windows,
+    CloudAppPlatform.linux => CloudOSColors.linux,
+    CloudAppPlatform.cloudos => CloudOSColors.accent,
+  };
 
   String get platformLabel => switch (app.platform) {
-        CloudAppPlatform.windows => 'Win',
-        CloudAppPlatform.linux => 'WSL',
-        CloudAppPlatform.cloudos => 'Cloud',
-      };
+    CloudAppPlatform.windows => 'Win',
+    CloudAppPlatform.linux => 'WSL',
+    CloudAppPlatform.cloudos => 'Cloud',
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -359,7 +561,10 @@ class _AppCard extends StatelessWidget {
                   Row(
                     children: <Widget>[
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 1,
+                        ),
                         decoration: BoxDecoration(
                           color: platformColor.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(4),
@@ -379,7 +584,10 @@ class _AppCard extends StatelessWidget {
                           app.subtitle ?? app.category,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: CloudOSColors.caption, fontSize: 10),
+                          style: const TextStyle(
+                            color: CloudOSColors.caption,
+                            fontSize: 10,
+                          ),
                         ),
                       ),
                     ],
@@ -420,12 +628,18 @@ class _RecentTile extends StatelessWidget {
               Expanded(
                 child: Text(
                   app.name,
-                  style: const TextStyle(color: CloudOSColors.text, fontSize: 12),
+                  style: const TextStyle(
+                    color: CloudOSColors.text,
+                    fontSize: 12,
+                  ),
                 ),
               ),
               Text(
                 app.subtitle ?? 'Recente',
-                style: const TextStyle(color: CloudOSColors.caption, fontSize: 10.5),
+                style: const TextStyle(
+                  color: CloudOSColors.caption,
+                  fontSize: 10.5,
+                ),
               ),
             ],
           ),
@@ -448,7 +662,11 @@ class _SearchResultsList extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Icon(Icons.search_off_rounded, size: 40, color: CloudOSColors.caption),
+            Icon(
+              Icons.search_off_rounded,
+              size: 40,
+              color: CloudOSColors.caption,
+            ),
             SizedBox(height: 8),
             Text(
               'Nenhum resultado encontrado',
