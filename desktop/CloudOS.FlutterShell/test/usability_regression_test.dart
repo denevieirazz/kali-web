@@ -87,6 +87,23 @@ void main() {
       manager.dispose();
     });
 
+    test('WindowManager preserves selected WSL distro parameters', () {
+      final manager = WindowManager();
+
+      manager.openWindow(
+        'wsl:terminal',
+        params: const <String, dynamic>{'initialDistro': 'kali-linux'},
+      );
+
+      expect(manager.windows, hasLength(1));
+      expect(manager.windows.single.appId, 'wsl:terminal');
+      expect(
+        manager.windows.single.customParams['initialDistro'],
+        'kali-linux',
+      );
+      manager.dispose();
+    });
+
     test('WindowManager restores workspace context and custom parameters', () {
       final manager = WindowManager();
       manager.restoreSavedWindows(
