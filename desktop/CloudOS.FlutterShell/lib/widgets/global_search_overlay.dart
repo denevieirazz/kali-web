@@ -1,15 +1,17 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:ui';
+
 import 'package:flutter/material.dart';
+
 import '../core/cloudos_theme.dart';
 import '../models/shell_models.dart';
 import '../services/app_registry.dart';
+import '../services/cloudos_bridge.dart';
 import '../services/cloudos_logger.dart';
+import '../services/project_store.dart';
 
 enum SearchCategory {
   apps,
-  files,
   settings,
   projects,
   wsl,
@@ -32,35 +34,19 @@ class SearchResultItem {
   final Color iconColor;
   final VoidCallback onTap;
 
-  String get categoryLabel {
-    switch (category) {
-      case SearchCategory.apps:
-        return 'APLICATIVOS';
-      case SearchCategory.files:
-        return 'ARQUIVOS';
-      case SearchCategory.settings:
-        return 'CONFIGURAÇÕES';
-      case SearchCategory.projects:
-        return 'PROJETOS';
-      case SearchCategory.wsl:
-        return 'WSL';
-    }
-  }
+  String get categoryLabel => switch (category) {
+        SearchCategory.apps => 'APLICATIVOS',
+        SearchCategory.settings => 'CONFIGURAÇÕES',
+        SearchCategory.projects => 'PROJETOS',
+        SearchCategory.wsl => 'WSL',
+      };
 
-  Color get categoryColor {
-    switch (category) {
-      case SearchCategory.apps:
-        return const Color(0xFF58A6FF);
-      case SearchCategory.files:
-        return const Color(0xFFE3B341);
-      case SearchCategory.settings:
-        return const Color(0xFFBC8CFF);
-      case SearchCategory.projects:
-        return const Color(0xFF39D353);
-      case SearchCategory.wsl:
-        return const Color(0xFFFFA657);
-    }
-  }
+  Color get categoryColor => switch (category) {
+        SearchCategory.apps => const Color(0xFF58A6FF),
+        SearchCategory.settings => const Color(0xFFBC8CFF),
+        SearchCategory.projects => const Color(0xFF39D353),
+        SearchCategory.wsl => const Color(0xFFFFA657),
+      };
 }
 
 class GlobalSearchOverlay extends StatefulWidget {
@@ -69,11 +55,13 @@ class GlobalSearchOverlay extends StatefulWidget {
     required this.apps,
     required this.onSelectApp,
     required this.onClose,
+    this.bridge = const CloudOSBridge(),
   });
 
   final List<CloudApp> apps;
   final ValueChanged<String> onSelectApp;
   final VoidCallback onClose;
+  final CloudOSBridge bridge;
 
   @override
   State<GlobalSearchOverlay> createState() => _GlobalSearchOverlayState();
@@ -83,138 +71,190 @@ class _GlobalSearchOverlayState extends State<GlobalSearchOverlay> {
   final TextEditingController _ctrl = TextEditingController();
   final FocusNode _focusNode = FocusNode();
   String _query = '';
-  Timer? _debounceTimer;
-  List<SearchResultItem> _fileResults = <SearchResultItem>[];
+  List<ProjectRecord> _projects = const <ProjectRecord>[];
 
-  static const _settingsPages = <Map<String, String>>[
-    {'title': 'Sistema', 'desc': 'Informações de hardware, CPU e memória'},
-    {'title': 'Telas e Monitores', 'desc': 'Resolução, escala e múltiplos monitores'},
-    {'title': 'Som e Áudio', 'desc': 'Dispositivos de saída e volume mestre'},
-    {'title': 'Notificações', 'desc': 'Preferências e central de alertas'},
-    {'title': 'Armazenamento', 'desc': 'Uso de disco e limpeza de arquivos'},
-    {'title': 'Personalização', 'desc': 'Temas dark glass, cores de destaque e transparência'},
-    {'title': 'Rede & Internet', 'desc': 'Adaptadores Wi-Fi, Ethernet e conectividade'},
-    {'title': 'Aplicativos & ConPTY', 'desc': 'Gerenciamento de apps e terminais nativos'},
-    {'title': 'Contas & Segurança', 'desc': 'Identidade, bloqueio e permissões'},
-    {'title': 'Sobre o CloudOS', 'desc': 'Versão 22.1, arquitetura e compliance'},
+  static const List<Map<String, String>> _settingsPages = <Map<String, String>>[
+    <String, String>{
+      'title': 'Sistema',
+      'desc': 'Nome do dispositivo, Broker e informações do sistema',
+    },
+    <String, String>{
+      'title': 'Tela',
+      'desc': 'Brilho quando suportado e recursos de exibição disponíveis',
+    },
+    <String, String>{
+      'title': 'Som',
+      'desc': 'Volume do endpoint de áudio padrão',
+    },
+    <String, String>{
+      'title': 'Rede & Internet',
+      'desc': 'Estado do adaptador de rede detectado',
+    },
+    <String, String>{
+      'title': 'Bluetooth',
+      'desc': 'Disponibilidade do backend Bluetooth',
+    },
+    <String, String>{
+      'title': 'Energia & Bateria',
+      'desc': 'Bateria quando detectada pelo sistema',
+    },
+    <String, String>{
+      'title': 'Armazenamento',
+      'desc': 'Unidades reais retornadas pelo System Broker',
+    },
+    <String, String>{
+      'title': 'Personalização',
+      'desc': 'Recursos de aparência disponíveis no CloudOS',
+    },
+    <String, String>{
+      'title': 'WSL (Linux)',
+      'desc': 'Distribuições WSL realmente detectadas',
+    },
+    <String, String>{
+      'title': 'Sobre o CloudOS',
+      'desc': 'Bridge, protocolo e estado de integração',
+    },
   ];
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _focusNode.requestFocus());
+    unawaited(_loadProjects());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focusNode.requestFocus();
+    });
+  }
+
+  Future<void> _loadProjects() async {
+    try {
+      final projects = await ProjectStore.load();
+      if (!mounted) return;
+      setState(() => _projects = projects);
+    } catch (error, stackTrace) {
+      CloudOSLogger.error('GlobalSearch', 'loadProjects', error, stackTrace);
+    }
   }
 
   @override
   void dispose() {
-    _debounceTimer?.cancel();
     _ctrl.dispose();
     _focusNode.dispose();
     super.dispose();
   }
 
-  void _onQueryChanged(String val) {
-    setState(() => _query = val.trim());
-    _debounceTimer?.cancel();
-    if (_query.length >= 2) {
-      _debounceTimer = Timer(const Duration(milliseconds: 200), () => _searchFilesIncremental(_query));
-    } else {
-      setState(() => _fileResults = <SearchResultItem>[]);
-    }
+  void _onQueryChanged(String value) {
+    final next = value.trim();
+    if (next == _query) return;
+    setState(() => _query = next);
   }
 
-  void _searchFilesIncremental(String q) {
-    if (!mounted) return;
+  bool _matches(String query, Iterable<String?> fields) {
+    if (query.isEmpty) return true;
+    for (final field in fields) {
+      if (field != null && field.toLowerCase().contains(query)) return true;
+    }
+    return false;
+  }
+
+  Future<void> _launchRuntimeApp(CloudApp app) async {
+    widget.onClose();
+
+    if (app.platform == CloudAppPlatform.linux || app.id.toLowerCase().startsWith('wsl:')) {
+      widget.onSelectApp('wsl:terminal');
+      return;
+    }
+
+    final def = AppRegistry.findById(app.id);
+    if (def?.isInternal == true || app.platform == CloudAppPlatform.cloudos) {
+      widget.onSelectApp(def?.id ?? app.id);
+      return;
+    }
+
     try {
-      final results = <SearchResultItem>[];
-      final searchDirs = <Directory>[];
-
-      final userProfile = Platform.environment['USERPROFILE'];
-      if (userProfile != null) {
-        final desktop = Directory('$userProfile\\Desktop');
-        final docs = Directory('$userProfile\\Documents');
-        if (desktop.existsSync()) searchDirs.add(desktop);
-        if (docs.existsSync()) searchDirs.add(docs);
+      final launched = await widget.bridge.launchApp(app.id);
+      if (!launched && mounted) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          SnackBar(content: Text('Não foi possível abrir ${app.name}.')),
+        );
       }
-
-      final localApp = Platform.environment['LOCALAPPDATA'];
-      if (localApp != null) {
-        final drive = Directory('$localApp\\CloudOS\\Drive');
-        if (drive.existsSync()) searchDirs.add(drive);
-      }
-
-      final qLower = q.toLowerCase();
-      int count = 0;
-
-      for (final d in searchDirs) {
-        if (count >= 6) break;
-        try {
-          final list = d.listSync(followLinks: false);
-          for (final entity in list) {
-            if (count >= 6) break;
-            final name = entity.path.split(RegExp(r'[\\/]')).last;
-            if (name.toLowerCase().contains(qLower)) {
-              final isDir = entity is Directory;
-              results.add(
-                SearchResultItem(
-                  title: name,
-                  subtitle: entity.path,
-                  category: SearchCategory.files,
-                  icon: isDir ? Icons.folder_rounded : Icons.insert_drive_file_rounded,
-                  iconColor: const Color(0xFFE3B341),
-                  onTap: () {
-                    widget.onClose();
-                    if (isDir) {
-                      widget.onSelectApp('cloudos:files');
-                    } else {
-                      widget.onSelectApp('cloudos:notepad');
-                    }
-                  },
-                ),
-              );
-              count++;
-            }
-          }
-        } catch (_) {}
-      }
-
+    } catch (error, stackTrace) {
+      CloudOSLogger.error('GlobalSearch', 'launchRuntimeApp', error, stackTrace);
       if (mounted) {
-        setState(() => _fileResults = results);
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          SnackBar(content: Text('Falha ao abrir ${app.name}: $error')),
+        );
       }
-    } catch (e, st) {
-      CloudOSLogger.error('GlobalSearch', 'searchFilesIncremental', e, st);
     }
   }
 
   List<SearchResultItem> _buildResults() {
-    final list = <SearchResultItem>[];
-    final q = _query.toLowerCase();
+    final query = _query.toLowerCase();
+    final results = <SearchResultItem>[];
+    final seenAppIds = <String>{};
 
-    // 1. Apps
+    // Internal CloudOS surfaces are defined by the presentation layer itself.
     for (final app in AppRegistry.definedApps) {
-      if (q.isEmpty || app.name.toLowerCase().contains(q) || app.subtitle.toLowerCase().contains(q) || app.id.toLowerCase().contains(q)) {
-        list.add(
-          SearchResultItem(
-            title: app.name,
-            subtitle: app.subtitle,
-            category: SearchCategory.apps,
-            icon: app.icon,
-            iconColor: const Color(0xFF58A6FF),
-            onTap: () {
-              widget.onClose();
-              widget.onSelectApp(app.id);
-            },
-          ),
-        );
-      }
+      if (!app.isInternal) continue;
+      if (!_matches(query, <String?>[app.name, app.subtitle, app.id])) continue;
+
+      seenAppIds.add(app.id.toLowerCase());
+      results.add(
+        SearchResultItem(
+          title: app.name,
+          subtitle: app.subtitle,
+          category: app.id.startsWith('wsl:')
+              ? SearchCategory.wsl
+              : SearchCategory.apps,
+          icon: app.icon,
+          iconColor: app.id.startsWith('wsl:')
+              ? const Color(0xFFFFA657)
+              : const Color(0xFF58A6FF),
+          onTap: () {
+            widget.onClose();
+            widget.onSelectApp(app.id);
+          },
+        ),
+      );
     }
 
-    // 2. Settings Pages
-    for (final p in _settingsPages) {
-      final title = p['title'] ?? '';
-      final desc = p['desc'] ?? '';
-      if (q.isNotEmpty && (title.toLowerCase().contains(q) || desc.toLowerCase().contains(q))) {
-        list.add(
+    // External/availability-driven apps come exclusively from the Broker catalog.
+    for (final app in widget.apps) {
+      final normalizedId = app.id.toLowerCase();
+      if (seenAppIds.contains(normalizedId)) continue;
+      if (!_matches(
+        query,
+        <String?>[app.name, app.subtitle, app.id, app.category, app.distro],
+      )) {
+        continue;
+      }
+
+      seenAppIds.add(normalizedId);
+      final isLinux = app.platform == CloudAppPlatform.linux ||
+          normalizedId.startsWith('wsl:');
+      results.add(
+        SearchResultItem(
+          title: app.name,
+          subtitle: isLinux
+              ? (app.distro?.isNotEmpty == true
+                  ? 'Terminal integrado · ${app.distro}'
+                  : 'Aplicativo Linux detectado pelo Broker')
+              : (app.subtitle ?? 'Aplicativo disponível no sistema'),
+          category: isLinux ? SearchCategory.wsl : SearchCategory.apps,
+          icon: app.icon,
+          iconColor: isLinux
+              ? const Color(0xFFFFA657)
+              : const Color(0xFF58A6FF),
+          onTap: () => unawaited(_launchRuntimeApp(app)),
+        ),
+      );
+    }
+
+    if (query.isNotEmpty) {
+      for (final page in _settingsPages) {
+        final title = page['title'] ?? '';
+        final desc = page['desc'] ?? '';
+        if (!_matches(query, <String?>[title, desc])) continue;
+        results.add(
           SearchResultItem(
             title: title,
             subtitle: desc,
@@ -230,29 +270,12 @@ class _GlobalSearchOverlayState extends State<GlobalSearchOverlay> {
       }
     }
 
-    // 3. WSL Distros
-    if (q.isNotEmpty && ('wsl'.contains(q) || 'ubuntu'.contains(q) || 'linux'.contains(q) || 'kali'.contains(q) || 'debian'.contains(q))) {
-      list.add(
+    for (final project in _projects) {
+      if (!_matches(query, <String?>[project.name, project.path])) continue;
+      results.add(
         SearchResultItem(
-          title: 'WSL Linux Terminal',
-          subtitle: 'Ambiente integrado ConPTY no CloudOS',
-          category: SearchCategory.wsl,
-          icon: Icons.computer_rounded,
-          iconColor: const Color(0xFFFFA657),
-          onTap: () {
-            widget.onClose();
-            widget.onSelectApp('cloudos:terminal');
-          },
-        ),
-      );
-    }
-
-    // 4. Projects
-    if (q.isEmpty || 'projeto'.contains(q) || 'workspace'.contains(q) || 'cloudos'.contains(q)) {
-      list.add(
-        SearchResultItem(
-          title: 'CloudOS V22 Core Workspace',
-          subtitle: r'C:\CloudOS\desktop\CloudOS.FlutterShell',
+          title: project.name,
+          subtitle: project.path,
           category: SearchCategory.projects,
           icon: Icons.workspaces_rounded,
           iconColor: const Color(0xFF39D353),
@@ -264,10 +287,7 @@ class _GlobalSearchOverlayState extends State<GlobalSearchOverlay> {
       );
     }
 
-    // 5. Files from debounce
-    list.addAll(_fileResults);
-
-    return list;
+    return results.take(30).toList(growable: false);
   }
 
   @override
@@ -291,43 +311,69 @@ class _GlobalSearchOverlayState extends State<GlobalSearchOverlay> {
                 decoration: BoxDecoration(
                   color: const Color(0xF20E1322),
                   borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: CloudOSColors.accent.withValues(alpha: 0.5), width: 1.5),
+                  border: Border.all(
+                    color: CloudOSColors.accent.withValues(alpha: 0.5),
+                    width: 1.5,
+                  ),
                   boxShadow: const <BoxShadow>[
-                    BoxShadow(color: Colors.black87, blurRadius: 40, offset: Offset(0, 16)),
+                    BoxShadow(
+                      color: Colors.black87,
+                      blurRadius: 40,
+                      offset: Offset(0, 16),
+                    ),
                   ],
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
-                    // Campo de Busca
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
                       decoration: const BoxDecoration(
-                        border: Border(bottom: BorderSide(color: Color(0x1AFFFFFF))),
+                        border: Border(
+                          bottom: BorderSide(color: Color(0x1AFFFFFF)),
+                        ),
                       ),
                       child: Row(
                         children: <Widget>[
-                          const Icon(Icons.search_rounded, size: 22, color: CloudOSColors.accent),
+                          const Icon(
+                            Icons.search_rounded,
+                            size: 22,
+                            color: CloudOSColors.accent,
+                          ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: TextField(
                               controller: _ctrl,
                               focusNode: _focusNode,
-                              style: const TextStyle(fontSize: 15, color: Colors.white),
+                              style: const TextStyle(
+                                fontSize: 15,
+                                color: Colors.white,
+                              ),
                               decoration: const InputDecoration(
                                 isDense: true,
                                 border: InputBorder.none,
                                 contentPadding: EdgeInsets.zero,
                                 fillColor: Colors.transparent,
-                                hintText: 'Busca Global no CloudOS (Apps, Arquivos, Configurações)...',
-                                hintStyle: TextStyle(fontSize: 14, color: Colors.white38),
+                                hintText:
+                                    'Buscar apps, configurações, projetos e WSL...',
+                                hintStyle: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.white38,
+                                ),
                               ),
                               onChanged: _onQueryChanged,
                             ),
                           ),
                           if (_query.isNotEmpty)
                             IconButton(
-                              icon: const Icon(Icons.close_rounded, size: 18, color: Colors.white60),
+                              icon: const Icon(
+                                Icons.close_rounded,
+                                size: 18,
+                                color: Colors.white60,
+                              ),
                               onPressed: () {
                                 _ctrl.clear();
                                 _onQueryChanged('');
@@ -336,25 +382,43 @@ class _GlobalSearchOverlayState extends State<GlobalSearchOverlay> {
                         ],
                       ),
                     ),
-
-                    // Lista de Resultados
                     ConstrainedBox(
                       constraints: const BoxConstraints(maxHeight: 380),
                       child: results.isEmpty
                           ? const Padding(
                               padding: EdgeInsets.all(32),
-                              child: Text(
-                                'Nenhum resultado encontrado.',
-                                style: TextStyle(color: Colors.white54, fontSize: 13),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: <Widget>[
+                                  Text(
+                                    'Nenhum resultado encontrado.',
+                                    style: TextStyle(
+                                      color: Colors.white54,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                  SizedBox(height: 6),
+                                  Text(
+                                    'Arquivos continuam pesquisáveis dentro do app Arquivos até o Broker expor resultados globais tipados.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: Colors.white30,
+                                      fontSize: 10.5,
+                                    ),
+                                  ),
+                                ],
                               ),
                             )
                           : ListView.separated(
                               shrinkWrap: true,
                               padding: const EdgeInsets.symmetric(vertical: 6),
                               itemCount: results.length,
-                              separatorBuilder: (context, index) => const Divider(height: 1, color: Color(0x0DFFFFFF)),
-                              itemBuilder: (context, i) {
-                                final item = results[i];
+                              separatorBuilder: (context, index) => const Divider(
+                                height: 1,
+                                color: Color(0x0DFFFFFF),
+                              ),
+                              itemBuilder: (context, index) {
+                                final item = results[index];
                                 return ListTile(
                                   dense: true,
                                   leading: Container(
@@ -363,10 +427,14 @@ class _GlobalSearchOverlayState extends State<GlobalSearchOverlay> {
                                       color: item.iconColor.withValues(alpha: 0.15),
                                       borderRadius: BorderRadius.circular(8),
                                     ),
-                                    child: Icon(item.icon, size: 18, color: item.iconColor),
+                                    child: Icon(
+                                      item.icon,
+                                      size: 18,
+                                      color: item.iconColor,
+                                    ),
                                   ),
                                   title: Row(
-                                    children: [
+                                    children: <Widget>[
                                       Expanded(
                                         child: Text(
                                           item.title,
@@ -378,11 +446,20 @@ class _GlobalSearchOverlayState extends State<GlobalSearchOverlay> {
                                         ),
                                       ),
                                       Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 6,
+                                          vertical: 2,
+                                        ),
                                         decoration: BoxDecoration(
-                                          color: item.categoryColor.withValues(alpha: 0.15),
+                                          color: item.categoryColor.withValues(
+                                            alpha: 0.15,
+                                          ),
                                           borderRadius: BorderRadius.circular(4),
-                                          border: Border.all(color: item.categoryColor.withValues(alpha: 0.3)),
+                                          border: Border.all(
+                                            color: item.categoryColor.withValues(
+                                              alpha: 0.3,
+                                            ),
+                                          ),
                                         ),
                                         child: Text(
                                           item.categoryLabel,
@@ -400,26 +477,48 @@ class _GlobalSearchOverlayState extends State<GlobalSearchOverlay> {
                                     item.subtitle,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(fontSize: 11, color: Colors.white54),
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.white54,
+                                    ),
                                   ),
-                                  trailing: const Icon(Icons.arrow_forward_rounded, size: 14, color: Colors.white24),
+                                  trailing: const Icon(
+                                    Icons.arrow_forward_rounded,
+                                    size: 14,
+                                    color: Colors.white24,
+                                  ),
                                   onTap: item.onTap,
                                 );
                               },
                             ),
                     ),
-
-                    // Rodapé
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
                       decoration: const BoxDecoration(
-                        border: Border(top: BorderSide(color: Color(0x1AFFFFFF))),
+                        border: Border(
+                          top: BorderSide(color: Color(0x1AFFFFFF)),
+                        ),
                       ),
                       child: const Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: <Widget>[
-                          Text('Use ↑ ↓ para navegar • Enter para abrir', style: TextStyle(fontSize: 11, color: Colors.white38)),
-                          Text('ESC para fechar', style: TextStyle(fontSize: 11, color: Colors.white38)),
+                          Text(
+                            'Resultados vêm de fontes reais do CloudOS',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.white38,
+                            ),
+                          ),
+                          Text(
+                            'ESC para fechar',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.white38,
+                            ),
+                          ),
                         ],
                       ),
                     ),
