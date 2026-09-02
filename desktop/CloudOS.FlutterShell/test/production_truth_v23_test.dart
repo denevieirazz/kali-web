@@ -33,7 +33,7 @@ void main() {
     test('Start panel cannot terminate the process abruptly', () {
       final source = File('lib/widgets/start_panel.dart').readAsStringSync();
       expect(source, isNot(contains("import 'dart:io'")));
-      expect(source, isNot(contains('exit(0)'));
+      expect(source, isNot(contains('exit(0)')));
       expect(source, contains('onExitRequested'));
       expect(source, contains('await requestExit()'));
     });
