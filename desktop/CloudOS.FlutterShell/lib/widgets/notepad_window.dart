@@ -14,6 +14,7 @@ class NotepadDocTab {
     required this.title,
     String initialContent = '',
     this.filePath,
+    this.isLoading = false,
   }) : controller = TextEditingController(text: initialContent),
        focusNode = FocusNode();
 
@@ -24,6 +25,7 @@ class NotepadDocTab {
   final FocusNode focusNode;
   bool isModified = false;
   bool suppressDirty = false;
+  bool isLoading;
 }
 
 class NotepadWindow extends StatefulWidget {
@@ -70,7 +72,7 @@ class _NotepadWindowState extends State<NotepadWindow> {
     tab.controller.addListener(() {
       if (!mounted || !_tabs.contains(tab)) return;
       _updateCursorPosition(tab);
-      if (tab.suppressDirty) return;
+      if (tab.suppressDirty || tab.isLoading) return;
       if (!tab.isModified) {
         setState(() => tab.isModified = true);
       }
@@ -80,6 +82,8 @@ class _NotepadWindowState extends State<NotepadWindow> {
   void _createInitialTab() {
     final path = widget.initialFilePath;
     final content = widget.initialContent ?? '';
+    final shouldLoad =
+        path != null && path.isNotEmpty && widget.initialContent == null;
     final title = path != null && path.isNotEmpty
         ? path.split(RegExp(r'[\\/]')).last
         : 'Sem título 1.txt';
@@ -89,11 +93,12 @@ class _NotepadWindowState extends State<NotepadWindow> {
       title: title,
       initialContent: content,
       filePath: path,
+      isLoading: shouldLoad,
     );
     _tabs.add(tab);
     _attachTabListener(tab);
 
-    if (path != null && path.isNotEmpty && widget.initialContent == null) {
+    if (shouldLoad) {
       unawaited(_loadContentIntoTab(tab, path));
     }
   }
@@ -109,6 +114,7 @@ class _NotepadWindowState extends State<NotepadWindow> {
       );
       tab.suppressDirty = false;
       setState(() {
+        tab.isLoading = false;
         tab.isModified = false;
         _currentLine = 1;
         _currentCol = 1;
@@ -121,7 +127,13 @@ class _NotepadWindowState extends State<NotepadWindow> {
         error,
         stackTrace,
       );
-      if (!mounted) return;
+      if (!mounted || !_tabs.contains(tab)) return;
+      setState(() {
+        tab.isLoading = false;
+        // A failed read must never leave a blank editor attached to the
+        // original path, otherwise Ctrl+S could overwrite data not loaded.
+        tab.filePath = null;
+      });
       _showErrorSnackBar('Não foi possível abrir o arquivo: $error');
     }
   }
@@ -245,6 +257,7 @@ class _NotepadWindowState extends State<NotepadWindow> {
         tab.title = 'Sem título 1.txt';
         tab.filePath = null;
         tab.isModified = false;
+        tab.isLoading = false;
         _currentLine = 1;
         _currentCol = 1;
       });
@@ -360,6 +373,12 @@ class _NotepadWindowState extends State<NotepadWindow> {
   Future<void> _saveCurrentTab({bool saveAs = false}) async {
     final tab = _activeTab;
     if (tab == null) return;
+    if (tab.isLoading) {
+      _showErrorSnackBar(
+        'Aguarde o System Broker terminar de carregar o arquivo antes de salvar.',
+      );
+      return;
+    }
 
     String? targetPath = tab.filePath;
     if (targetPath == null || targetPath.isEmpty || saveAs) {
@@ -533,8 +552,10 @@ class _NotepadWindowState extends State<NotepadWindow> {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: <Widget>[
-                                const Icon(
-                                  Icons.description_outlined,
+                                Icon(
+                                  tab.isLoading
+                                      ? Icons.sync_rounded
+                                      : Icons.description_outlined,
                                   size: 13,
                                   color: CloudOSColors.accent,
                                 ),
@@ -650,6 +671,7 @@ class _NotepadWindowState extends State<NotepadWindow> {
                               child: TextField(
                                 controller: active.controller,
                                 focusNode: active.focusNode,
+                                readOnly: active.isLoading,
                                 maxLines: null,
                                 expands: true,
                                 keyboardType: TextInputType.multiline,
@@ -690,7 +712,7 @@ class _NotepadWindowState extends State<NotepadWindow> {
                   const SizedBox(width: 16),
                   Expanded(
                     child: Text(
-                      '${active?.filePath ?? "Documento não salvo"} • $totalChars chars • UTF-8',
+                      '${active?.isLoading == true ? "Carregando via Broker..." : active?.filePath ?? "Documento não salvo"} • $totalChars chars • UTF-8',
                       textAlign: TextAlign.right,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
