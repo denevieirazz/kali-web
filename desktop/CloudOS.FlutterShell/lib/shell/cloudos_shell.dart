@@ -173,7 +173,33 @@ class _CloudOSShellState extends State<CloudOSShell> {
     });
   }
 
+  String _resolveWslDistro(CloudApp app) {
+    final direct = app.distro?.trim() ?? '';
+    if (direct.isNotEmpty) return direct;
+
+    final parts = app.id.split(':');
+    if (parts.length >= 3 &&
+        parts.first.toLowerCase() == 'wsl' &&
+        parts.last.toLowerCase() == 'terminal') {
+      return parts.sublist(1, parts.length - 1).join(':').trim();
+    }
+    return '';
+  }
+
   Future<void> _launchApp(CloudApp app) async {
+    final norm = app.id.toLowerCase();
+    if (norm.startsWith('wsl:')) {
+      final distro = _resolveWslDistro(app);
+      windowManager.openWindow(
+        'wsl:terminal',
+        params: distro.isEmpty
+            ? null
+            : <String, dynamic>{'initialDistro': distro},
+      );
+      if (mounted) setState(_closeTransientPanels);
+      return;
+    }
+
     final def = AppRegistry.findById(app.id);
     if (def != null && def.isInternal) {
       windowManager.openWindow(app.id);
@@ -181,7 +207,6 @@ class _CloudOSShellState extends State<CloudOSShell> {
       return;
     }
 
-    final norm = app.id.toLowerCase();
     if (norm == 'files' || norm == 'cloudos:files') {
       windowManager.openWindow('cloudos:files');
       if (mounted) setState(_closeTransientPanels);
@@ -204,11 +229,6 @@ class _CloudOSShellState extends State<CloudOSShell> {
     }
     if (norm == 'notepad' || norm == 'cloudos:notepad' || norm == 'windows:notepad') {
       windowManager.openWindow('cloudos:notepad');
-      if (mounted) setState(_closeTransientPanels);
-      return;
-    }
-    if (norm.startsWith('wsl:')) {
-      windowManager.openWindow('wsl:terminal');
       if (mounted) setState(_closeTransientPanels);
       return;
     }
@@ -237,10 +257,14 @@ class _CloudOSShellState extends State<CloudOSShell> {
     }
 
     if (appId.startsWith('wsl:')) {
+      final initialDistro = window.customParams['initialDistro'];
       return TerminalWindow(
         key: ValueKey<String>(window.id),
         bridge: widget.bridge,
         initialShell: TerminalShellKind.wsl,
+        initialDistro: initialDistro is String && initialDistro.trim().isNotEmpty
+            ? initialDistro.trim()
+            : null,
       );
     }
 
@@ -419,10 +443,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: <Widget>[
-                    // Fundo Wallpaper Estilizado
                     const RepaintBoundary(child: _Wallpaper()),
-
-                    // Desktop Widgets (Canto Superior Direito)
                     Positioned(
                       right: 24,
                       top: 24,
@@ -435,8 +456,6 @@ class _CloudOSShellState extends State<CloudOSShell> {
                         ],
                       ),
                     ),
-
-                    // Ícones da Área de Trabalho (2 Colunas)
                     Positioned(
                       left: 16,
                       top: 16,
@@ -458,12 +477,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
                         ),
                       ),
                     ),
-
-                    // Snap Ghost Box Preview (Ao aproximar das bordas)
                     if (windowManager.activeSnapPreview != SnapRegion.none)
                       _buildSnapGhost(windowManager.activeSnapPreview, viewportSize),
-
-                    // Renderização das Janelas do Workspace Atual
                     for (final win in windowManager.windows)
                       Positioned.fill(
                         key: ValueKey<String>('window-holder-${win.id}'),
@@ -485,11 +500,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
                           ),
                         ),
                       ),
-
-                    // Painéis Transitórios (Start, Quick Settings, Notifications)
                     _panelSwitcher(),
-
-                    // Barra de Tarefas Contínua na Base
                     CloudTaskbar(
                       startOpen: startOpen,
                       quickSettingsOpen: quickSettingsOpen,
@@ -504,8 +515,6 @@ class _CloudOSShellState extends State<CloudOSShell> {
                       onNotifications: _toggleNotifications,
                       windowManager: windowManager,
                     ),
-
-                    // Alt+Tab Overlay Interno
                     if (isAltTabOpen)
                       AltTabOverlay(
                         windows: windowManager.currentWorkspaceWindows,
@@ -513,16 +522,14 @@ class _CloudOSShellState extends State<CloudOSShell> {
                         onSelect: _confirmAltTab,
                         onClose: () => setState(() => isAltTabOpen = false),
                       ),
-
-                    // Busca Global Overlay (Spotlight)
                     if (isGlobalSearchOpen)
                       GlobalSearchOverlay(
                         apps: apps,
-                        onSelectApp: (id) => windowManager.openWindow(id),
+                        bridge: widget.bridge,
+                        onSelectApp: (id, {params}) =>
+                            windowManager.openWindow(id, params: params),
                         onClose: () => setState(() => isGlobalSearchOpen = false),
                       ),
-
-                    // Menu de Contexto Suspenso (Botão Direito)
                     if (contextMenuPosition != null)
                       ContextMenuOverlay(
                         position: contextMenuPosition!,
@@ -685,7 +692,6 @@ class _DesktopIcons extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        // Coluna 1
         Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
@@ -731,7 +737,6 @@ class _DesktopIcons extends StatelessWidget {
           ],
         ),
         const SizedBox(width: 14),
-        // Coluna 2
         Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
