@@ -30,7 +30,7 @@ void main() {
       final source = File('lib/services/project_store.dart').readAsStringSync();
       expect(source, contains('projects.json'));
       expect(source, isNot(contains('Directory(path)')));
-      expect(source, isNot(contains("File('$path")));
+      expect(source, isNot(contains(r"File('$path")));
       expect(source, isNot(contains('existsSync')));
       expect(source, isNot(contains('statSync')));
     });
