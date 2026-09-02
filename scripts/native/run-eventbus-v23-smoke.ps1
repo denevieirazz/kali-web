@@ -66,8 +66,9 @@ function Read-ExactAsync {
     $offset = 0
     $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMs)
     while ($offset -lt $Count) {
-        $remainingMs = [Math]::Max(1, [int]($deadline - [DateTime]::UtcNow).TotalMilliseconds)
-        if ($remainingMs -le 0) { throw 'Timed out while reading Broker frame.' }
+        $remainingRaw = [int]($deadline - [DateTime]::UtcNow).TotalMilliseconds
+        if ($remainingRaw -le 0) { throw 'Timed out while reading Broker frame.' }
+        $remainingMs = [Math]::Max(1, $remainingRaw)
         $task = $Stream.ReadAsync($Buffer, $offset, $Count - $offset)
         if (-not $task.Wait($remainingMs)) { throw 'Timed out while reading Broker frame.' }
         $read = $task.Result
@@ -129,7 +130,7 @@ function Invoke-BrokerRpc {
         [Parameter(Mandatory)]$Payload
     )
     $script:requestCounter++
-    $id = "event-smoke-rpc-$script:requestCounter"
+    $id = "event-smoke-rpc-$($script:requestCounter)"
     $pipe = New-BrokerPipe
     try {
         Write-Frame -Stream $pipe -Json (New-RequestJson -Id $id -Method $Method -Payload $Payload)
@@ -187,32 +188,53 @@ try {
     Assert-True (-not [string]::IsNullOrWhiteSpace($jobId)) 'files.copy did not return a jobId.'
 
     $events = [System.Collections.Generic.List[string]]::new()
+    $observedFrames = [System.Collections.Generic.List[string]]::new()
     $sawStarted = $false
     $sawCompleted = $false
     $sawWrongJob = $false
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
-    while ([DateTime]::UtcNow -lt $deadline -and -not $sawCompleted) {
-        $remaining = [Math]::Max(1, [int]($deadline - [DateTime]::UtcNow).TotalMilliseconds)
-        $frame = Read-Frame -Stream $eventPipe -TimeoutMs $remaining
-        if ($frame.type -ne 'event') { continue }
-        $eventName = [string]$frame.event
-        $eventJobId = if ($null -ne $frame.payload.PSObject.Properties['jobId']) {
-            [string]$frame.payload.jobId
-        } else { '' }
-        if ($eventJobId -ne $jobId) {
-            if (-not [string]::IsNullOrWhiteSpace($eventJobId)) { $sawWrongJob = $true }
-            continue
-        }
-        $events.Add($eventName)
-        if ($eventName -eq 'job.started') { $sawStarted = $true }
-        if ($eventName -eq 'job.completed') { $sawCompleted = $true }
-        if ($eventName -eq 'job.failed') {
-            throw "Files job failed while validating EventBus: $($frame | ConvertTo-Json -Depth 10 -Compress)"
+    try {
+        while ([DateTime]::UtcNow -lt $deadline -and -not $sawCompleted) {
+            $remainingRaw = [int]($deadline - [DateTime]::UtcNow).TotalMilliseconds
+            if ($remainingRaw -le 0) { break }
+            $frame = Read-Frame -Stream $eventPipe -TimeoutMs ([Math]::Max(1, $remainingRaw))
+            $frameType = [string]$frame.type
+            $eventName = if ($null -ne $frame.PSObject.Properties['event']) { [string]$frame.event } else { '' }
+            $eventJobId = if (
+                $null -ne $frame.PSObject.Properties['payload'] -and
+                $null -ne $frame.payload -and
+                $null -ne $frame.payload.PSObject.Properties['jobId']
+            ) { [string]$frame.payload.jobId } else { '' }
+            $observedFrames.Add("$frameType|$eventName|$eventJobId")
+
+            if ($frameType -ne 'event') { continue }
+            if ($eventJobId -ne $jobId) {
+                if (-not [string]::IsNullOrWhiteSpace($eventJobId)) { $sawWrongJob = $true }
+                continue
+            }
+            $events.Add($eventName)
+            if ($eventName -eq 'job.started') { $sawStarted = $true }
+            if ($eventName -eq 'job.completed') { $sawCompleted = $true }
+            if ($eventName -eq 'job.failed') {
+                throw "Files job failed while validating EventBus: $($frame | ConvertTo-Json -Depth 10 -Compress)"
+            }
         }
     }
+    catch {
+        $statusText = '<unavailable>'
+        try {
+            $status = Invoke-BrokerRpc -Method 'jobs.status' -Payload @{ jobId = $jobId }
+            $statusText = $status | ConvertTo-Json -Depth 8 -Compress
+        } catch {
+            $statusText = "<status query failed: $($_.Exception.Message)>"
+        }
+        $framesText = if ($observedFrames.Count -eq 0) { '<none>' } else { $observedFrames -join ', ' }
+        throw "EventBus delivery read failed for $jobId. Observed frames: $framesText. Job status: $statusText. Cause: $($_.Exception.Message)"
+    }
 
-    Assert-True $sawStarted "EventBus did not deliver job.started for $jobId."
-    Assert-True $sawCompleted "EventBus did not deliver job.completed for $jobId."
+    $framesText = if ($observedFrames.Count -eq 0) { '<none>' } else { $observedFrames -join ', ' }
+    Assert-True $sawStarted "EventBus did not deliver job.started for $jobId. Observed: $framesText"
+    Assert-True $sawCompleted "EventBus did not deliver job.completed for $jobId. Observed: $framesText"
     $copiedFile = Join-Path $destinationDir 'event-source.bin'
     Assert-True (Test-Path -LiteralPath $copiedFile) 'Files job reported completed but destination file is missing.'
     Assert-True ((Get-Item -LiteralPath $copiedFile).Length -eq 4 * 1024 * 1024) 'Copied file size mismatch.'
@@ -229,6 +251,7 @@ try {
         trigger = 'files.copy'
         jobId = $jobId
         eventsForJob = @($events)
+        observedFrames = @($observedFrames)
         jobStarted = $sawStarted
         jobCompleted = $sawCompleted
         unrelatedJobEventObserved = $sawWrongJob
