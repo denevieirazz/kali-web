@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -76,10 +77,25 @@ class ProjectRecord {
 ///
 /// dart:io is intentionally limited to this private state file. User workspace
 /// inspection/mutation belongs to ProjectFilesystemService -> Files V22 Broker.
+/// Writes are serialized and transactional: `.tmp` is flushed first, the
+/// previous primary becomes `.bak`, and a corrupt/missing primary can recover
+/// from that last-known-good backup.
 class ProjectStore {
-  ProjectStore._();
+  ProjectStore._({Directory? stateDirectoryOverride})
+      : _stateDirectoryOverride = stateDirectoryOverride;
 
-  static Directory get _cloudOsStateDirectory {
+  ProjectStore.forTesting(Directory stateDirectory)
+      : _stateDirectoryOverride = stateDirectory;
+
+  static final ProjectStore _instance = ProjectStore._();
+
+  final Directory? _stateDirectoryOverride;
+  Future<void> _writeTail = Future<void>.value();
+
+  Directory get _cloudOsStateDirectory {
+    final override = _stateDirectoryOverride;
+    if (override != null) return override;
+
     final localAppData = Platform.environment['LOCALAPPDATA'];
     if (localAppData != null && localAppData.trim().isNotEmpty) {
       return Directory('$localAppData\\CloudOS');
@@ -93,18 +109,57 @@ class ProjectStore {
     return Directory('${Directory.current.path}\\.cloudos');
   }
 
-  static File get storageFile =>
+  File get _storageFile =>
       File('${_cloudOsStateDirectory.path}\\projects.json');
+  File get _backupFile => File('${_storageFile.path}.bak');
+  File get _temporaryFile => File('${_storageFile.path}.tmp');
 
-  static Future<List<ProjectRecord>> load() async {
-    final file = storageFile;
+  static File get storageFile => _instance._storageFile;
+
+  static Future<List<ProjectRecord>> load() => _instance.loadRecords();
+
+  static Future<void> save(List<ProjectRecord> records) =>
+      _instance.saveRecords(records);
+
+  Future<List<ProjectRecord>> loadRecords() async {
+    await _writeTail;
+    final primary = await _tryRead(_storageFile, source: 'primary');
+    if (primary != null) return primary;
+
+    final backup = await _tryRead(_backupFile, source: 'backup');
+    if (backup == null) return const <ProjectRecord>[];
+
+    CloudOSLogger.warn(
+      'ProjectStore',
+      'load.recovery',
+      'Recovered CloudOS project metadata from last-known-good backup.',
+    );
     try {
-      if (!await file.exists()) return <ProjectRecord>[];
+      final directory = _cloudOsStateDirectory;
+      if (!await directory.exists()) await directory.create(recursive: true);
+      await _backupFile.copy(_storageFile.path);
+    } catch (error, stackTrace) {
+      CloudOSLogger.error(
+        'ProjectStore',
+        'load.restorePrimary',
+        error,
+        stackTrace,
+      );
+    }
+    return backup;
+  }
+
+  Future<List<ProjectRecord>?> _tryRead(
+    File file, {
+    required String source,
+  }) async {
+    try {
+      if (!await file.exists()) return null;
       final rawText = await file.readAsString();
-      if (rawText.trim().isEmpty) return <ProjectRecord>[];
+      if (rawText.trim().isEmpty) return null;
 
       final decoded = jsonDecode(rawText);
-      if (decoded is! List) return <ProjectRecord>[];
+      if (decoded is! List) return null;
 
       final records = <ProjectRecord>[];
       final seenIds = <String>{};
@@ -115,32 +170,69 @@ class ProjectStore {
         final normalizedPath = record.path.trim().toLowerCase();
         if (!seenIds.add(record.id) || !seenPaths.add(normalizedPath)) continue;
         records.add(record);
+        if (records.length >= 512) break;
       }
-      return records;
+      return List<ProjectRecord>.unmodifiable(records);
     } catch (error, stackTrace) {
-      CloudOSLogger.error('ProjectStore', 'load', error, stackTrace);
-      return <ProjectRecord>[];
+      CloudOSLogger.error('ProjectStore', 'read.$source', error, stackTrace);
+      return null;
     }
   }
 
-  static Future<void> save(List<ProjectRecord> records) async {
-    try {
-      final dir = _cloudOsStateDirectory;
-      if (!await dir.exists()) await dir.create(recursive: true);
+  Future<void> saveRecords(List<ProjectRecord> records) {
+    final snapshot = List<ProjectRecord>.unmodifiable(records);
+    final task = _writeTail.then((_) => _saveNow(snapshot));
 
-      final target = storageFile;
-      final temp = File('${target.path}.tmp');
-      final payload = const JsonEncoder.withIndent('  ').convert(
-        records.map((record) => record.toJson()).toList(growable: false),
-      );
-      await temp.writeAsString(payload, flush: true);
+    // Keep the serialization queue alive after a failed caller-visible write.
+    _writeTail = task.catchError((Object error, StackTrace stackTrace) {
+      CloudOSLogger.error('ProjectStore', 'save.queue', error, stackTrace);
+    });
+    return task;
+  }
+
+  Future<void> _saveNow(List<ProjectRecord> records) async {
+    final dir = _cloudOsStateDirectory;
+    if (!await dir.exists()) await dir.create(recursive: true);
+
+    final payload = const JsonEncoder.withIndent('  ').convert(
+      records.map((record) => record.toJson()).toList(growable: false),
+    );
+    final target = _storageFile;
+    final backup = _backupFile;
+    final temporary = _temporaryFile;
+
+    try {
+      if (await temporary.exists()) await temporary.delete();
+      await temporary.writeAsString(payload, flush: true);
+
+      if (await target.exists()) {
+        await target.copy(backup.path);
+      }
+
       if (await target.exists()) await target.delete();
-      await temp.rename(target.path);
+      await temporary.rename(target.path);
     } catch (error, stackTrace) {
-      CloudOSLogger.error('ProjectStore', 'save', error, stackTrace);
+      CloudOSLogger.error('ProjectStore', 'save.commit', error, stackTrace);
+      try {
+        if (await temporary.exists()) await temporary.delete();
+      } catch (_) {}
+      try {
+        if (!await target.exists() && await backup.exists()) {
+          await backup.copy(target.path);
+        }
+      } catch (restoreError, restoreStack) {
+        CloudOSLogger.error(
+          'ProjectStore',
+          'save.restoreBackup',
+          restoreError,
+          restoreStack,
+        );
+      }
       rethrow;
     }
   }
+
+  Future<void> flush() => _writeTail;
 
   static String makeId(String path) {
     final normalized = path.trim().toLowerCase();
