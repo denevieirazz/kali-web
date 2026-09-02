@@ -420,27 +420,30 @@ class WindowManager extends ChangeNotifier {
   }
 
   void ensureWithinBounds(Size viewportSize) {
+    var changed = false;
     for (final window in _windows) {
-      if (window.maximized) {
-        _applyGeometry(
-          window,
-          _geometryEngine.geometryForSnap(
-            target: WindowSnapTarget.maximize,
-            viewport: viewportSize,
-          ),
-        );
-        continue;
+      final before = _geometry(window);
+      final next = window.maximized
+          ? _geometryEngine.geometryForSnap(
+              target: WindowSnapTarget.maximize,
+              viewport: viewportSize,
+            )
+          : _geometryEngine.clampToViewport(
+              geometry: before,
+              viewport: viewportSize,
+              minWidth: window.minWidth,
+              minHeight: window.minHeight,
+            );
+      if (!_sameGeometry(before, next)) {
+        _applyGeometry(window, next);
+        changed = true;
       }
-      _applyGeometry(
-        window,
-        _geometryEngine.clampToViewport(
-          geometry: _geometry(window),
-          viewport: viewportSize,
-          minWidth: window.minWidth,
-          minHeight: window.minHeight,
-        ),
-      );
     }
+
+    // Restored sessions can contain geometry from a monitor/DPI topology that
+    // no longer exists. Persist the corrected geometry exactly once instead of
+    // silently keeping the offscreen values on disk or writing every frame.
+    if (changed) _schedulePersistence(immediate: true);
   }
 
   void restoreSavedWindows(
@@ -537,11 +540,13 @@ class WindowManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> flushSession() async {
+  Future<void> flushSession({bool requireSuccessfulWrite = false}) async {
     _persistenceTimer?.cancel();
     _persistenceTimer = null;
     await _persistNow();
-    await _sessionService.flush();
+    await _sessionService.flush(
+      requireSuccessfulWrite: requireSuccessfulWrite,
+    );
   }
 
   void _focusBestWindowInActiveWorkspace({required bool touchMru}) {
@@ -598,6 +603,12 @@ class WindowManager extends ChangeNotifier {
         width: window.width,
         height: window.height,
       );
+
+  bool _sameGeometry(WindowGeometry a, WindowGeometry b) =>
+      a.x == b.x &&
+      a.y == b.y &&
+      a.width == b.width &&
+      a.height == b.height;
 
   void _applyGeometry(CloudWindow window, WindowGeometry geometry) {
     window.x = geometry.x;
