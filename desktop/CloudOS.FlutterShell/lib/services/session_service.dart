@@ -11,16 +11,27 @@ import 'cloudos_logger.dart';
 /// state at enqueue time, serializes every disk mutation, keeps a known-good
 /// `.bak`, and can recover primary/backup independently.
 class SessionService {
-  SessionService._();
+  SessionService._({Directory? stateDirectoryOverride})
+      : _stateDirectoryOverride = stateDirectoryOverride;
+
+  /// Isolated persistence authority for deterministic tests. Production uses
+  /// [instance], which resolves the per-user CloudOS directory normally.
+  SessionService.forTesting(Directory stateDirectory)
+      : _stateDirectoryOverride = stateDirectory;
+
   static final SessionService instance = SessionService._();
 
   static const int schemaVersion = 3;
 
+  final Directory? _stateDirectoryOverride;
   Future<void> _writeTail = Future<void>.value();
   int _sequence = 0;
   String? _lastSerializedPayload;
 
   Directory get _stateDirectory {
+    final override = _stateDirectoryOverride;
+    if (override != null) return override;
+
     final localAppData = Platform.environment['LOCALAPPDATA'];
     if (localAppData != null && localAppData.trim().isNotEmpty) {
       return Directory('$localAppData\\CloudOS');
