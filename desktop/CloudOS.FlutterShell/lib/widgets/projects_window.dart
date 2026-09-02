@@ -346,7 +346,7 @@ class _ProjectsWindowState extends State<ProjectsWindow> {
                 ),
               ),
               IconButton(
-                tooltip: 'Abrir Terminal CloudOS',
+                tooltip: 'Abrir no Terminal',
                 onPressed: () => widget.windowManager.openWindow('cloudos:terminal'),
                 icon: const Icon(Icons.terminal_rounded, color: Colors.cyanAccent),
               ),
