@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../models/window_model.dart';
+import 'app_lifecycle_coordinator.dart';
 import 'app_registry.dart';
 import 'session_service.dart';
 import 'window_geometry.dart';
@@ -31,7 +32,14 @@ class WindowManager extends ChangeNotifier {
     SessionService? sessionService,
   })  : _geometryEngine = geometryEngine,
         _persistenceDebounce = persistenceDebounce,
-        _sessionService = sessionService ?? SessionService.instance;
+        _sessionService = sessionService ?? SessionService.instance {
+    if (identical(_sessionService, SessionService.instance)) {
+      _durableFlushRegistration =
+          AppLifecycleCoordinator.instance.registerDurableFlush(
+        () => flushSession(requireSuccessfulWrite: true),
+      );
+    }
+  }
 
   final List<CloudWindow> _windows = <CloudWindow>[];
   final WindowMruTracker _mru = WindowMruTracker();
@@ -45,6 +53,7 @@ class WindowManager extends ChangeNotifier {
   Timer? _persistenceTimer;
   bool _disposed = false;
   bool _showDesktopActive = false;
+  Object? _durableFlushRegistration;
   final Set<String> _showDesktopMinimized = <String>{};
 
   List<CloudWindow> get windows => List<CloudWindow>.unmodifiable(_windows);
@@ -642,6 +651,11 @@ class WindowManager extends ChangeNotifier {
   @override
   void dispose() {
     if (_disposed) return;
+    final registration = _durableFlushRegistration;
+    if (registration != null) {
+      AppLifecycleCoordinator.instance.unregisterDurableFlush(registration);
+      _durableFlushRegistration = null;
+    }
     _persistenceTimer?.cancel();
     _persistenceTimer = null;
     // Snapshot final state before ChangeNotifier teardown. SessionService owns
