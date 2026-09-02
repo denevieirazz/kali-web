@@ -32,6 +32,9 @@ class BrokerEventBridgeV23 {
     MethodChannel channel = const MethodChannel('cloudos/native/events/v23'),
   }) : _channel = channel;
 
+  /// Isolated channel surface for deterministic lifecycle tests.
+  BrokerEventBridgeV23.forTesting(MethodChannel channel) : _channel = channel;
+
   static final BrokerEventBridgeV23 instance = BrokerEventBridgeV23._();
 
   final MethodChannel _channel;
@@ -41,24 +44,42 @@ class BrokerEventBridgeV23 {
       StreamController<NativeBrokerConnectionEvent>.broadcast(sync: true);
 
   bool _started = false;
+  bool _disposed = false;
   Future<bool>? _startFuture;
 
+  bool get isStarted => _started;
+
   Stream<NativeBrokerEventFrame> get events {
-    start();
+    unawaited(start());
     return _events.stream;
   }
 
   Stream<NativeBrokerConnectionEvent> get connectionEvents {
-    start();
+    unawaited(start());
     return _connectionEvents.stream;
   }
 
   Future<bool> start() {
-    if (_started && _startFuture != null) return _startFuture!;
+    if (_disposed) return Future<bool>.value(false);
+    final existing = _startFuture;
+    if (_started && existing != null) return existing;
+
     _started = true;
     _channel.setMethodCallHandler(_handleNativeCall);
-    _startFuture = _invokeStart();
-    return _startFuture!;
+
+    late Future<bool> attempt;
+    attempt = _invokeStart().then((ok) {
+      if (!ok && identical(_startFuture, attempt)) {
+        // MissingPlugin/PlatformException can be transient during host startup.
+        // Do not poison the singleton forever; the next subscriber/start call
+        // gets a fresh native attempt.
+        _started = false;
+        _startFuture = null;
+      }
+      return ok;
+    });
+    _startFuture = attempt;
+    return attempt;
   }
 
   Future<bool> _invokeStart() async {
@@ -69,6 +90,24 @@ class BrokerEventBridgeV23 {
     } on PlatformException {
       return false;
     }
+  }
+
+  Future<bool> stop() async {
+    if (_disposed) return true;
+    var stopped = false;
+    try {
+      stopped = await _channel.invokeMethod<bool>('stop') ?? false;
+    } on MissingPluginException {
+      stopped = false;
+    } on PlatformException {
+      stopped = false;
+    } finally {
+      // A subsequent start must always negotiate a fresh native worker even if
+      // the stop acknowledgement was lost while the host was tearing down.
+      _started = false;
+      _startFuture = null;
+    }
+    return stopped;
   }
 
   Future<Map<String, Object?>> status() async {
@@ -83,6 +122,7 @@ class BrokerEventBridgeV23 {
   }
 
   Future<Object?> _handleNativeCall(MethodCall call) async {
+    if (_disposed) return null;
     final args = call.arguments;
     if (args is! Map) return null;
 
@@ -112,5 +152,16 @@ class BrokerEventBridgeV23 {
       }
     }
     return null;
+  }
+
+  /// Intended for isolated test instances. The production singleton is owned
+  /// by the application/native runner for the process lifetime.
+  Future<void> dispose() async {
+    if (_disposed) return;
+    await stop();
+    _disposed = true;
+    await _channel.setMethodCallHandler(null);
+    await _events.close();
+    await _connectionEvents.close();
   }
 }
