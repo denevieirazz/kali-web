@@ -13,6 +13,10 @@ on:
       - 'Abrir CloudOS V22 Flutter com System Broker.cmd'
       - '.github/workflows/cloudos-flutter-ui.yml'
 
+concurrency:
+  group: cloudos-flutter-ui-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   flutter-windows:
     runs-on: windows-latest
@@ -47,7 +51,7 @@ jobs:
           & $msbuild "desktop/CloudOS.BrokerProbe/CloudOS.BrokerProbe.vcxproj" /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
           if ($LASTEXITCODE -ne 0) { throw 'BrokerProbe Release x64 build failed.' }
 
-      - name: Test V21/V22.1 broker contracts and smoke
+      - name: Test V21/V22.1/V23 broker contracts and smoke
         shell: pwsh
         run: |
           pwsh -NoProfile -File scripts/native/test-system-broker-v21-contract.ps1
@@ -64,12 +68,19 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Typed text-file architecture contract failed.' }
           pwsh -NoProfile -File scripts/native/run-text-files-v23-smoke.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Typed text-file named-pipe smoke failed.' }
+          pwsh -NoProfile -File scripts/native/test-eventbus-v23-contract.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'V23 EventBus architecture contract failed.' }
+          pwsh -NoProfile -File scripts/native/run-eventbus-v23-smoke.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'V23 EventBus named-pipe smoke failed.' }
           $filesEvidence = 'TestResults/v22.1-bug-bash/unified-files-v22.1-smoke.json'
           if (-not (Test-Path $filesEvidence)) { throw "V22.1 evidence missing: $filesEvidence" }
           Copy-Item $filesEvidence 'unified-files-v22.1-smoke.json' -Force
           $textEvidence = 'TestResults/v23-text-smoke/text-files-v23-smoke.json'
           if (-not (Test-Path $textEvidence)) { throw "Typed text-file evidence missing: $textEvidence" }
           Copy-Item $textEvidence 'text-files-v23-smoke.json' -Force
+          $eventEvidence = 'TestResults/v23-eventbus-smoke/eventbus-v23-smoke.json'
+          if (-not (Test-Path $eventEvidence)) { throw "EventBus evidence missing: $eventEvidence" }
+          Copy-Item $eventEvidence 'eventbus-v23-smoke.json' -Force
 
       - name: Prepare tracked Windows host
         shell: pwsh
@@ -82,6 +93,8 @@ jobs:
             'windows/runner/CMakeLists.txt',
             'windows/runner/cloudos_flutter_bridge_v20.cpp',
             'windows/runner/cloudos_broker_client_v21.cpp',
+            'windows/runner/cloudos_broker_event_client_v23.cpp',
+            'windows/runner/cloudos_broker_event_client_v23.h',
             'windows/runner/cloudos_conpty_manager.cpp',
             'windows/runner/cloudos_system_metrics_native.cpp',
             'windows/runner/cloudos_conpty_probe.cpp',
@@ -137,7 +150,7 @@ jobs:
           Copy-Item -Path (Join-Path $brokerBin 'CloudOS.SystemBroker.exe') -Destination $release -Force
           Copy-Item -Path (Join-Path $brokerBin 'CloudOS.BrokerProbe.exe') -Destination $release -Force
 
-      - name: Write V22.1 evidence
+      - name: Write V23 evidence
         shell: pwsh
         run: |
           $flutter = (flutter --version | Select-Object -First 1).Trim()
@@ -148,8 +161,9 @@ jobs:
           foreach ($required in @($exe,$brokerExe,$probeExe)) { if (-not (Test-Path $required)) { throw "Release binary missing: $required" } }
           if (-not (Test-Path 'conpty-v22-smoke.json')) { throw 'ConPTY evidence missing: conpty-v22-smoke.json' }
           if (-not (Test-Path 'text-files-v23-smoke.json')) { throw 'Typed text-file evidence missing: text-files-v23-smoke.json' }
+          if (-not (Test-Path 'eventbus-v23-smoke.json')) { throw 'EventBus evidence missing: eventbus-v23-smoke.json' }
           $evidence = [ordered]@{
-            schema = 221
+            schema = 233
             verdict = 'pass'
             flutter = $flutter
             git_sha = '${{ github.sha }}'
@@ -158,15 +172,22 @@ jobs:
             terminal_backend = 'Windows ConPTY'
             conpty_native_probe = $true
             native_bridge_channel = 'cloudos/native/v19'
+            native_event_channel = 'cloudos/native/events/v23'
             native_broker_ipc = 'NamedPipe v21'
             broker_protocol_version = 21
             native_bridge_registered = $true
             restricted_flutter_rpc_surface = $true
+            dedicated_event_transport = $true
+            eventbus_named_pipe_smoke = $true
+            eventbus_wildcard_subscription = $true
+            eventbus_bounded_native_queue = $true
             unified_files_v22_1 = $true
             typed_text_files_v23 = $true
             typed_text_files_atomic_commit = $true
             typed_text_files_chunk_cap_bytes = 65536
             typed_text_files_editor_cap_bytes = 16777216
+            truthful_system_tray = $true
+            system_snapshot_cache_ttl_ms = 2000
             arbitrary_command_api = $false
             userchoice_modified = $false
             winlogon_modified = $false
@@ -178,25 +199,26 @@ jobs:
             probe_executable = 'CloudOS.BrokerProbe.exe'
             probe_executable_sha256 = (Get-FileHash $probeExe -Algorithm SHA256).Hash.ToLowerInvariant()
           }
-          $evidence | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 'flutter-v22.1-smoke.json'
-          Get-Content 'flutter-v22.1-smoke.json'
+          $evidence | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 'flutter-v23-smoke.json'
+          Get-Content 'flutter-v23-smoke.json'
 
       - name: Package Flutter preview
         shell: pwsh
         run: |
           $release = Resolve-Path 'desktop/CloudOS.FlutterShell/build/windows/x64/runner/Release'
-          Compress-Archive -Path "$release\*" -DestinationPath 'CloudOS-Flutter-V22.1-Windows-x64.zip' -Force
+          Compress-Archive -Path "$release\*" -DestinationPath 'CloudOS-Flutter-V23-Windows-x64.zip' -Force
 
       - name: Upload Flutter preview
         uses: actions/upload-artifact@v4
         with:
-          name: CloudOS-Flutter-V22.1-${{ github.sha }}
+          name: CloudOS-Flutter-V23-${{ github.sha }}
           path: |
-            CloudOS-Flutter-V22.1-Windows-x64.zip
-            flutter-v22.1-smoke.json
+            CloudOS-Flutter-V23-Windows-x64.zip
+            flutter-v23-smoke.json
             system-broker-v21-smoke.json
             unified-files-v22.1-smoke.json
             text-files-v23-smoke.json
+            eventbus-v23-smoke.json
             conpty-v22-smoke.json
           if-no-files-found: error
           retention-days: 14
