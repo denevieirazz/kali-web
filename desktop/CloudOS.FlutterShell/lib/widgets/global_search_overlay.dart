@@ -10,6 +10,11 @@ import '../services/cloudos_bridge.dart';
 import '../services/cloudos_logger.dart';
 import '../services/project_store.dart';
 
+typedef AppSelectionCallback = void Function(
+  String appId, {
+  Map<String, dynamic>? params,
+});
+
 enum SearchCategory {
   apps,
   settings,
@@ -59,7 +64,7 @@ class GlobalSearchOverlay extends StatefulWidget {
   });
 
   final List<CloudApp> apps;
-  final ValueChanged<String> onSelectApp;
+  final AppSelectionCallback onSelectApp;
   final VoidCallback onClose;
   final CloudOSBridge bridge;
 
@@ -159,8 +164,15 @@ class _GlobalSearchOverlayState extends State<GlobalSearchOverlay> {
   Future<void> _launchRuntimeApp(CloudApp app) async {
     widget.onClose();
 
-    if (app.platform == CloudAppPlatform.linux || app.id.toLowerCase().startsWith('wsl:')) {
-      widget.onSelectApp('wsl:terminal');
+    if (app.platform == CloudAppPlatform.linux ||
+        app.id.toLowerCase().startsWith('wsl:')) {
+      final distro = app.distro?.trim() ?? '';
+      widget.onSelectApp(
+        'wsl:terminal',
+        params: distro.isEmpty
+            ? null
+            : <String, dynamic>{'initialDistro': distro},
+      );
       return;
     }
 
