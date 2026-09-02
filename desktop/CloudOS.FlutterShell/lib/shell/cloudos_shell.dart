@@ -19,7 +19,8 @@ import 'widgets/desktop_status.dart';
 import 'widgets/desktop_wallpaper.dart';
 
 class CloudOSShell extends StatefulWidget {
-  const CloudOSShell({super.key, CloudOSBridge? bridge}) : bridge = bridge ?? const _DefaultBridge();
+  const CloudOSShell({super.key, CloudOSBridge? bridge})
+      : bridge = bridge ?? const _DefaultBridge();
 
   final CloudOSBridge bridge;
 
@@ -32,8 +33,8 @@ class _DefaultBridge extends CloudOSBridge {
 }
 
 class _CloudOSShellState extends State<CloudOSShell> {
-  List<CloudApp> apps = CloudOSBridge.previewApps;
-  CloudSystemSnapshot snapshot = CloudOSBridge.previewSnapshot;
+  List<CloudApp> apps = const <CloudApp>[];
+  CloudSystemSnapshot snapshot = CloudOSBridge.degradedSnapshot;
   CloudNotificationState notificationState = CloudNotificationState.empty;
   bool startOpen = false;
   bool quickSettingsOpen = false;
@@ -62,21 +63,26 @@ class _CloudOSShellState extends State<CloudOSShell> {
   }
 
   Future<void> _loadBridgeData() async {
-    final loadedApps = await widget.bridge.loadApps();
-    final loadedSnapshot = await widget.bridge.loadSystemSnapshot();
-    final loadedNotifications = await widget.bridge.loadNotificationState();
-    final surfaceStates = await widget.bridge.loadShellSurfaceStates();
+    final loadedApps = await widget.bridge.tryLoadApps();
+    final loadedSnapshot = await widget.bridge.tryLoadSystemSnapshot();
+    final loadedNotifications = await widget.bridge.tryLoadNotificationState();
+    final surfaceStates = await widget.bridge.tryLoadShellSurfaceStates();
     final nativeWorkspace = await widget.bridge.getCurrentWorkspace();
     if (!mounted) return;
+
     setState(() {
-      apps = loadedApps;
-      snapshot = loadedSnapshot;
-      notificationState = loadedNotifications;
-      browserRunning = surfaceStates['browser'] ?? false;
-      terminalRunning = surfaceStates['terminal'] ?? false;
+      if (loadedApps != null) apps = loadedApps;
+      if (loadedSnapshot != null) snapshot = loadedSnapshot;
+      if (loadedNotifications != null) notificationState = loadedNotifications;
+      if (surfaceStates != null) {
+        browserRunning = surfaceStates['browser'] ?? browserRunning;
+        terminalRunning = surfaceStates['terminal'] ?? terminalRunning;
+      }
       currentWorkspace = nativeWorkspace ??
-          loadedSnapshot.currentWorkspace.clamp(1, 4).toInt();
+          loadedSnapshot?.currentWorkspace.clamp(1, 4).toInt() ??
+          currentWorkspace;
     });
+
     _shellStateTimer ??= Timer.periodic(
       const Duration(seconds: 2),
       (_) => unawaited(_refreshNativeShellState()),
@@ -87,26 +93,37 @@ class _CloudOSShellState extends State<CloudOSShell> {
     if (_shellStateRefreshInFlight) return;
     _shellStateRefreshInFlight = true;
     try {
-      final states = await widget.bridge.loadShellSurfaceStates();
+      final nativeSnapshot = await widget.bridge.tryLoadSystemSnapshot();
+      final states = await widget.bridge.tryLoadShellSurfaceStates();
       final nativeWorkspace = await widget.bridge.getCurrentWorkspace();
-      final nativeNotifications = await widget.bridge.loadNotificationState();
+      final nativeNotifications = await widget.bridge.tryLoadNotificationState();
       if (!mounted) return;
 
-      final nextBrowser = states['browser'] ?? false;
-      final nextTerminal = states['terminal'] ?? false;
-      final nextWorkspace = nativeWorkspace ?? currentWorkspace;
-      if (nextBrowser == browserRunning &&
+      final nextSnapshot = nativeSnapshot ?? snapshot;
+      final nextBrowser = states?['browser'] ?? browserRunning;
+      final nextTerminal = states?['terminal'] ?? terminalRunning;
+      final nextWorkspace = nativeWorkspace ??
+          nativeSnapshot?.currentWorkspace.clamp(1, 4).toInt() ??
+          currentWorkspace;
+      final nextNotifications = nativeNotifications != null &&
+              nativeNotifications.revision >= notificationState.revision
+          ? nativeNotifications
+          : notificationState;
+
+      if (_sameSystemSnapshot(nextSnapshot, snapshot) &&
+          nextBrowser == browserRunning &&
           nextTerminal == terminalRunning &&
           nextWorkspace == currentWorkspace &&
-          nativeNotifications.revision == notificationState.revision &&
-          nativeNotifications.unreadCount == notificationState.unreadCount) {
+          _sameNotificationState(nextNotifications, notificationState)) {
         return;
       }
+
       setState(() {
+        snapshot = nextSnapshot;
         browserRunning = nextBrowser;
         terminalRunning = nextTerminal;
         currentWorkspace = nextWorkspace;
-        notificationState = nativeNotifications;
+        notificationState = nextNotifications;
       });
     } finally {
       _shellStateRefreshInFlight = false;
@@ -149,7 +166,11 @@ class _CloudOSShellState extends State<CloudOSShell> {
   }
 
   Future<void> _openAuthoritativeNotifications() async {
-    final loaded = await widget.bridge.loadNotificationState();
+    final observed = await widget.bridge.tryLoadNotificationState();
+    final loaded = observed != null &&
+            observed.revision >= notificationState.revision
+        ? observed
+        : notificationState;
     final marked = await widget.bridge.markNotificationsRead();
     if (!mounted) return;
 
@@ -199,7 +220,10 @@ class _CloudOSShellState extends State<CloudOSShell> {
     });
   }
 
-  Future<void> _launchBridgeSurface(String appId, ShellAppRoute route) async {
+  Future<void> _launchBridgeSurface(
+    String appId,
+    ShellAppRoute route,
+  ) async {
     final focused = await widget.bridge.focusShellSurface(appId);
     if (!mounted) return;
     if (focused) {
@@ -294,30 +318,74 @@ class _CloudOSShellState extends State<CloudOSShell> {
   Widget build(BuildContext context) {
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
-        const SingleActivator(LogicalKeyboardKey.keyE, control: true, alt: true): _toggleFiles,
-        const SingleActivator(LogicalKeyboardKey.keyQ, control: true, alt: true): _toggleQuickSettings,
-        const SingleActivator(LogicalKeyboardKey.keyN, control: true, alt: true): _toggleNotifications,
-        const SingleActivator(LogicalKeyboardKey.keyS, control: true, alt: true): _toggleStart,
-        const SingleActivator(LogicalKeyboardKey.keyA, control: true, alt: true): _toggleStart,
-        const SingleActivator(LogicalKeyboardKey.escape): () => setState(_closeTransientPanels),
-        const SingleActivator(LogicalKeyboardKey.digit1, control: true, alt: true): () => unawaited(_switchWorkspace(1)),
-        const SingleActivator(LogicalKeyboardKey.digit2, control: true, alt: true): () => unawaited(_switchWorkspace(2)),
-        const SingleActivator(LogicalKeyboardKey.digit3, control: true, alt: true): () => unawaited(_switchWorkspace(3)),
-        const SingleActivator(LogicalKeyboardKey.digit4, control: true, alt: true): () => unawaited(_switchWorkspace(4)),
+        const SingleActivator(
+          LogicalKeyboardKey.keyE,
+          control: true,
+          alt: true,
+        ): _toggleFiles,
+        const SingleActivator(
+          LogicalKeyboardKey.keyQ,
+          control: true,
+          alt: true,
+        ): _toggleQuickSettings,
+        const SingleActivator(
+          LogicalKeyboardKey.keyN,
+          control: true,
+          alt: true,
+        ): _toggleNotifications,
+        const SingleActivator(
+          LogicalKeyboardKey.keyS,
+          control: true,
+          alt: true,
+        ): _toggleStart,
+        const SingleActivator(
+          LogicalKeyboardKey.keyA,
+          control: true,
+          alt: true,
+        ): _toggleStart,
+        const SingleActivator(LogicalKeyboardKey.escape): () =>
+            setState(_closeTransientPanels),
+        const SingleActivator(
+          LogicalKeyboardKey.digit1,
+          control: true,
+          alt: true,
+        ): () => unawaited(_switchWorkspace(1)),
+        const SingleActivator(
+          LogicalKeyboardKey.digit2,
+          control: true,
+          alt: true,
+        ): () => unawaited(_switchWorkspace(2)),
+        const SingleActivator(
+          LogicalKeyboardKey.digit3,
+          control: true,
+          alt: true,
+        ): () => unawaited(_switchWorkspace(3)),
+        const SingleActivator(
+          LogicalKeyboardKey.digit4,
+          control: true,
+          alt: true,
+        ): () => unawaited(_switchWorkspace(4)),
       },
       child: Focus(
         autofocus: true,
         child: Scaffold(
           body: LayoutBuilder(
             builder: (context, constraints) {
-              final maxLeft = constraints.maxWidth > 1000 ? constraints.maxWidth - 980 : 20.0;
-              final maxTop = constraints.maxHeight > 700 ? constraints.maxHeight - 660 : 20.0;
+              final maxLeft = constraints.maxWidth > 1000
+                  ? constraints.maxWidth - 980
+                  : 20.0;
+              final maxTop = constraints.maxHeight > 700
+                  ? constraints.maxHeight - 660
+                  : 20.0;
               final safeLeft = filesOffset.dx.clamp(20.0, maxLeft).toDouble();
               final safeTop = filesOffset.dy.clamp(20.0, maxTop).toDouble();
 
               return GestureDetector(
                 onTap: () {
-                  if (startOpen || quickSettingsOpen || notificationsOpen || selectedDesktopIcon != null) {
+                  if (startOpen ||
+                      quickSettingsOpen ||
+                      notificationsOpen ||
+                      selectedDesktopIcon != null) {
                     setState(() {
                       _closeTransientPanels();
                       selectedDesktopIcon = null;
@@ -335,7 +403,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
                       child: RepaintBoundary(
                         child: DesktopIcons(
                           selectedId: selectedDesktopIcon,
-                          onSelect: (id) => setState(() => selectedDesktopIcon = id),
+                          onSelect: (id) =>
+                              setState(() => selectedDesktopIcon = id),
                           onFiles: _toggleFiles,
                           onStart: _toggleStart,
                           onTerminal: _launchTerminal,
@@ -360,7 +429,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
                         child: FilesWindow(
                           onClose: () => setState(() => filesOpen = false),
                           onMinimize: () => setState(() => filesOpen = false),
-                          onDrag: (delta) => setState(() => filesOffset += delta),
+                          onDrag: (delta) =>
+                              setState(() => filesOffset += delta),
                         ),
                       ),
                     _panelSwitcher(),
@@ -373,7 +443,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
                       terminalRunning: terminalRunning,
                       currentWorkspace: currentWorkspace,
                       notificationCount: notificationState.unreadCount,
-                      onWorkspaceChanged: (index) => unawaited(_switchWorkspace(index)),
+                      onWorkspaceChanged: (index) =>
+                          unawaited(_switchWorkspace(index)),
                       onStart: _toggleStart,
                       onFiles: _toggleFiles,
                       onBrowser: _launchBrowser,
@@ -449,4 +520,47 @@ class _CloudOSShellState extends State<CloudOSShell> {
       child: child,
     );
   }
+}
+
+bool _sameSystemSnapshot(
+  CloudSystemSnapshot left,
+  CloudSystemSnapshot right,
+) {
+  return left.deviceName == right.deviceName &&
+      left.networkAvailable == right.networkAvailable &&
+      left.networkName == right.networkName &&
+      left.volumeAvailable == right.volumeAvailable &&
+      left.volume == right.volume &&
+      left.brightnessAvailable == right.brightnessAvailable &&
+      left.brightness == right.brightness &&
+      left.batteryAvailable == right.batteryAvailable &&
+      left.batteryPercent == right.batteryPercent &&
+      left.wslAvailable == right.wslAvailable &&
+      _sameStrings(left.distros, right.distros) &&
+      left.currentWorkspace == right.currentWorkspace;
+}
+
+bool _sameNotificationState(
+  CloudNotificationState left,
+  CloudNotificationState right,
+) {
+  if (left.revision != right.revision ||
+      left.unreadCount != right.unreadCount ||
+      left.items.length != right.items.length) {
+    return false;
+  }
+  for (var index = 0; index < left.items.length; index++) {
+    final a = left.items[index];
+    final b = right.items[index];
+    if (a.id != b.id || a.read != b.read) return false;
+  }
+  return true;
+}
+
+bool _sameStrings(List<String> left, List<String> right) {
+  if (left.length != right.length) return false;
+  for (var index = 0; index < left.length; index++) {
+    if (left[index] != right[index]) return false;
+  }
+  return true;
 }
