@@ -1,12 +1,10 @@
-import 'dart:async';
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 
 import '../core/cloudos_theme.dart';
 import '../models/shell_models.dart';
 import '../services/app_registry.dart';
 import '../services/cloudos_bridge.dart';
+import '../services/desktop_clock_service.dart';
 import '../services/runtime_event_service.dart';
 import '../services/system_tray_state_service.dart';
 import '../services/window_manager.dart';
@@ -33,6 +31,7 @@ class CloudTaskbar extends StatefulWidget {
     this.systemSnapshot,
     this.systemStateService,
     this.runtimeEventService,
+    this.clockService,
     this.bridge = const CloudOSBridge(),
     super.key,
   });
@@ -59,10 +58,11 @@ class CloudTaskbar extends StatefulWidget {
   final WindowManager? windowManager;
 
   /// Optional deterministic snapshot for tests/embedded surfaces. If null,
-  /// production uses SystemTrayStateService backed by the System Broker.
+  /// production normally injects the Shell-owned SystemTrayStateService.
   final CloudSystemSnapshot? systemSnapshot;
   final SystemTrayStateService? systemStateService;
   final RuntimeEventService? runtimeEventService;
+  final DesktopClockService? clockService;
   final CloudOSBridge bridge;
 
   @override
@@ -70,48 +70,46 @@ class CloudTaskbar extends StatefulWidget {
 }
 
 class _CloudTaskbarState extends State<CloudTaskbar> {
-  Timer? _clockTimer;
-  String _timeString = '';
-  String _dateString = '';
-
   late RuntimeEventService _runtimeEvents;
   late SystemTrayStateService _systemState;
+  late DesktopClockService _clock;
   bool _ownsSystemState = false;
-  bool _nativeRuntimeEnabled = false;
+  late DateTime _now;
 
   @override
   void initState() {
     super.initState();
-    _nativeRuntimeEnabled = !Platform.environment.containsKey('FLUTTER_TEST');
-    _updateTime();
-    if (_nativeRuntimeEnabled) {
-      _clockTimer = Timer.periodic(
-        const Duration(seconds: 1),
-        (_) => _updateTime(),
-      );
-    }
     widget.windowManager?.addListener(_onWindowManagerUpdate);
+    _bindClock();
     _bindRuntimeSources();
+  }
+
+  void _bindClock() {
+    _clock = widget.clockService ?? DesktopClockService.instance;
+    _now = _clock.now;
+    _clock.addListener(_onClockUpdate);
+  }
+
+  void _unbindClock() {
+    _clock.removeListener(_onClockUpdate);
   }
 
   void _bindRuntimeSources() {
     _runtimeEvents = widget.runtimeEventService ?? RuntimeEventService.instance;
     _runtimeEvents.addListener(_onRuntimeUpdate);
-    if (_nativeRuntimeEnabled || widget.runtimeEventService != null) {
-      _runtimeEvents.start();
-    }
 
     _ownsSystemState = widget.systemStateService == null;
     _systemState = widget.systemStateService ??
         SystemTrayStateService(
           bridge: widget.bridge,
           runtime: _runtimeEvents,
+          pollInterval: null,
         );
     _systemState.addListener(_onSystemStateUpdate);
-    if ((_nativeRuntimeEnabled || widget.systemStateService != null) &&
-        widget.systemSnapshot == null) {
-      _systemState.start();
-    }
+
+    // Runtime ownership belongs to main()/CloudOSShell. An isolated taskbar
+    // never starts native channels or background polling merely because it was
+    // mounted. This makes tests and embedded surfaces deterministic.
   }
 
   void _unbindRuntimeSources() {
@@ -128,22 +126,23 @@ class _CloudTaskbarState extends State<CloudTaskbar> {
       widget.windowManager?.addListener(_onWindowManagerUpdate);
     }
 
+    if (!identical(oldWidget.clockService, widget.clockService)) {
+      _unbindClock();
+      _bindClock();
+    }
+
     if (!identical(oldWidget.runtimeEventService, widget.runtimeEventService) ||
         !identical(oldWidget.systemStateService, widget.systemStateService) ||
         !identical(oldWidget.bridge, widget.bridge)) {
       _unbindRuntimeSources();
       _bindRuntimeSources();
-    } else if (oldWidget.systemSnapshot != widget.systemSnapshot &&
-        widget.systemSnapshot == null &&
-        (_nativeRuntimeEnabled || widget.systemStateService != null)) {
-      _systemState.start();
     }
   }
 
   @override
   void dispose() {
-    _clockTimer?.cancel();
     widget.windowManager?.removeListener(_onWindowManagerUpdate);
+    _unbindClock();
     _unbindRuntimeSources();
     super.dispose();
   }
@@ -160,20 +159,23 @@ class _CloudTaskbarState extends State<CloudTaskbar> {
     if (mounted && widget.systemSnapshot == null) setState(() {});
   }
 
-  void _updateTime() {
-    final now = DateTime.now();
-    final h = now.hour.toString().padLeft(2, '0');
-    final m = now.minute.toString().padLeft(2, '0');
-    final day = now.day.toString().padLeft(2, '0');
-    final month = now.month.toString().padLeft(2, '0');
-    final year = now.year.toString();
+  void _onClockUpdate() {
+    if (!mounted) return;
+    final next = _clock.now;
+    if (next == _now) return;
+    setState(() => _now = next);
+  }
 
-    if (mounted) {
-      setState(() {
-        _timeString = '$h:$m';
-        _dateString = '$day/$month/$year';
-      });
-    }
+  String get _timeString {
+    final hour = _now.hour.toString().padLeft(2, '0');
+    final minute = _now.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
+  }
+
+  String get _dateString {
+    final day = _now.day.toString().padLeft(2, '0');
+    final month = _now.month.toString().padLeft(2, '0');
+    return '$day/$month/${_now.year}';
   }
 
   CloudSystemSnapshot get _visibleSystemSnapshot =>
@@ -297,7 +299,7 @@ class _CloudTaskbarState extends State<CloudTaskbar> {
 
   List<Widget> _buildWindowManagerTaskItems(WindowManager wm) {
     final items = <Widget>[];
-    final pinnedApps = AppRegistry.definedApps.where((a) => a.pinned).toList();
+    final pinnedApps = AppRegistry.definedApps.where((app) => app.pinned).toList();
 
     for (final app in pinnedApps) {
       final isOpen = wm.isAppOpen(app.id);
@@ -317,22 +319,22 @@ class _CloudTaskbarState extends State<CloudTaskbar> {
     }
 
     final openExtraWindows = wm.windows
-        .where((w) => !pinnedApps.any((a) => a.id == w.appId))
+        .where((window) => !pinnedApps.any((app) => app.id == window.appId))
         .toList(growable: false);
-    for (final win in openExtraWindows) {
+    for (final window in openExtraWindows) {
       items.add(
         Padding(
           padding: const EdgeInsets.only(right: 4),
           child: _TaskButton(
-            tooltip: win.title,
-            icon: win.icon,
-            active: win.focused && !win.minimized,
+            tooltip: window.title,
+            icon: window.icon,
+            active: window.focused && !window.minimized,
             isRunning: true,
             onPressed: () {
-              if (win.focused && !win.minimized) {
-                wm.minimizeWindow(win.id);
+              if (window.focused && !window.minimized) {
+                wm.minimizeWindow(window.id);
               } else {
-                wm.focusWindow(win.id);
+                wm.focusWindow(window.id);
               }
             },
           ),
@@ -578,8 +580,8 @@ class _TrayQuickGroup extends StatelessWidget {
 class _ClockButton extends StatelessWidget {
   const _ClockButton({
     required this.onPressed,
-    this.timeString = '',
-    this.dateString = '',
+    required this.timeString,
+    required this.dateString,
   });
 
   final VoidCallback onPressed;
@@ -588,14 +590,6 @@ class _ClockButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final timeDisplay = timeString.isNotEmpty
-        ? timeString
-        : '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
-    final dateDisplay = dateString.isNotEmpty
-        ? dateString
-        : '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}';
-
     return Tooltip(
       message: 'Data e Notificações',
       child: InkWell(
@@ -609,7 +603,7 @@ class _ClockButton extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: <Widget>[
               Text(
-                timeDisplay,
+                timeString,
                 style: const TextStyle(
                   fontSize: 11.5,
                   fontWeight: FontWeight.w600,
@@ -618,7 +612,7 @@ class _ClockButton extends StatelessWidget {
                 ),
               ),
               Text(
-                dateDisplay,
+                dateString,
                 style: const TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w400,
@@ -649,7 +643,9 @@ class _NotificationTrayButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final displayCount = count > 99 ? '99+' : '$count';
     return Tooltip(
-      message: count > 0 ? '$count notificação(ões) não lida(s)' : 'Notificações',
+      message: count > 0
+          ? '$count notificação(ões) não lida(s)'
+          : 'Notificações',
       child: InkWell(
         onTap: onPressed,
         borderRadius: BorderRadius.circular(6),
