@@ -34,6 +34,12 @@ class _ProjectsWindowState extends State<ProjectsWindow> {
   }
 
   Future<void> _loadProjects() async {
+    if (mounted && !_loading) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final loaded = await ProjectStore.load();
       if (!mounted) return;
@@ -160,6 +166,8 @@ class _ProjectsWindowState extends State<ProjectsWindow> {
       ),
     );
 
+    nameCtrl.dispose();
+    pathCtrl.dispose();
     if (result != true) return;
 
     final name = nameCtrl.text.trim();
@@ -283,7 +291,7 @@ class _ProjectsWindowState extends State<ProjectsWindow> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Text(
-                      'Projetos & Workspaces',
+                      'Gerenciador de Projetos & Workspaces',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -292,11 +300,25 @@ class _ProjectsWindowState extends State<ProjectsWindow> {
                     ),
                     SizedBox(height: 3),
                     Text(
+                      'CloudOS Core & Shell V22.1',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                        color: CloudOSColors.accent,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
                       'Somente pastas realmente cadastradas por você aparecem aqui.',
                       style: TextStyle(fontSize: 11.5, color: Colors.white54),
                     ),
                   ],
                 ),
+              ),
+              IconButton(
+                tooltip: 'Abrir no Terminal',
+                onPressed: () => widget.windowManager.openWindow('cloudos:terminal'),
+                icon: const Icon(Icons.terminal_rounded, color: Colors.cyanAccent),
               ),
               IconButton(
                 tooltip: 'Recarregar',
@@ -328,7 +350,19 @@ class _ProjectsWindowState extends State<ProjectsWindow> {
 
   Widget _buildBody() {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(Icons.hourglass_top_rounded, size: 30, color: Colors.white38),
+            SizedBox(height: 8),
+            Text(
+              'Carregando projetos...',
+              style: TextStyle(color: Colors.white54, fontSize: 12),
+            ),
+          ],
+        ),
+      );
     }
     if (_error != null) {
       return Center(
