@@ -47,6 +47,8 @@ $runtime = Read-Source (Join-Path $lib 'services\runtime_event_service.dart')
 $runtimeTest = Read-Source (Join-Path $tests 'runtime_event_service_test.dart')
 $taskbar = Read-Source (Join-Path $lib 'widgets\cloud_taskbar.dart')
 $server = Read-Source (Join-Path $broker 'broker_server_v21.cpp')
+$jobHeader = Read-Source (Join-Path $broker 'job_manager_v21.h')
+$jobManager = Read-Source (Join-Path $broker 'job_manager_v21.cpp')
 
 Assert-Contains $eventHeader 'kMaxPendingUiEvents = 256' 'Native EventBus UI queue must remain bounded to 256 frames.'
 Assert-Contains $eventHeader 'kMaxPendingUiBytes = 4 * 1024 * 1024' 'Native EventBus UI queue must remain bounded by bytes.'
@@ -100,6 +102,14 @@ Assert-Contains $server 'PeekNamedPipe(' 'Broker synchronous session must probe 
 Assert-Contains $server 'event_ready.wait_for' 'Idle Broker subscribers must wait without monopolizing synchronous pipe I/O.'
 Assert-NotContains $server 'std::thread event_writer' 'Concurrent per-client EventBus writer reintroduced synchronous duplex I/O contention.'
 Assert-NotContains $server 'FlushFileBuffers(pipe)' 'Blocking teardown FlushFileBuffers returned to Broker client teardown.'
+
+# A submitted job must announce job.started before any worker can publish
+# progress/completion. This also protects against spurious condition-variable
+# wakeups racing a very short Files job.
+Assert-Contains $jobHeader 'std::atomic_bool announced{false}' 'Job execution lost its started-event publication gate.'
+Assert-Contains $jobManager 'job->announced.store(true);' 'SubmitJob no longer releases workers after job.started publication.'
+Assert-Contains $jobManager 'job->announced.load()' 'WorkerLoop no longer waits for the job.started publication gate.'
+Assert-Before $jobManager 'EventBusV21::Instance().Publish("job.started", payload);' 'job->announced.store(true);' 'job.started must be published before a worker is released.'
 
 Write-Host '[PASS] Dedicated Flutter EventBus V23 architecture contract passed.' -ForegroundColor Green
 exit 0
