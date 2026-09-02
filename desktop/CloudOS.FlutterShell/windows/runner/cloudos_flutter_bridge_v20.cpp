@@ -49,6 +49,9 @@ bool IsAllowedFlutterRpcMethod(const std::string& method)
         "files.open",
         "files.openWith.list",
         "files.openWith.launch",
+        "files.text.readChunk",
+        "files.text.writeChunk",
+        "files.text.abortWrite",
         "diagnostics.snapshot",
     };
     return allowed.find(method) != allowed.end();
