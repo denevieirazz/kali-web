@@ -93,6 +93,9 @@ class _CloudOSShellState extends State<CloudOSShell> {
     if (_shellStateRefreshInFlight) return;
     _shellStateRefreshInFlight = true;
     try {
+      final recoveredApps = apps.isEmpty
+          ? await widget.bridge.tryLoadApps()
+          : null;
       final nativeSnapshot = await widget.bridge.tryLoadSystemSnapshot();
       final states = await widget.bridge.tryLoadShellSurfaceStates();
       final nativeWorkspace = await widget.bridge.getCurrentWorkspace();
@@ -110,7 +113,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
           ? nativeNotifications
           : notificationState;
 
-      if (_sameSystemSnapshot(nextSnapshot, snapshot) &&
+      if (recoveredApps == null &&
+          _sameSystemSnapshot(nextSnapshot, snapshot) &&
           nextBrowser == browserRunning &&
           nextTerminal == terminalRunning &&
           nextWorkspace == currentWorkspace &&
@@ -119,6 +123,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
       }
 
       setState(() {
+        if (recoveredApps != null) apps = recoveredApps;
         snapshot = nextSnapshot;
         browserRunning = nextBrowser;
         terminalRunning = nextTerminal;
