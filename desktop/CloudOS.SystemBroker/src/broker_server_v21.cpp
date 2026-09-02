@@ -6,6 +6,7 @@
 #include "job_manager_v21.h"
 #include "security_v21.h"
 #include "system_service_v21.h"
+#include "text_file_service_v23.h"
 #include "wsl_service_v21.h"
 
 #include <iostream>
@@ -688,6 +689,11 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
         }
         bool cancelled = JobManagerV21::Instance().CancelJob(it->second.AsString());
         res.payload["cancelled"] = JsonValue(cancelled);
+        return res;
+    }
+
+    if (TextFileServiceV23::TryHandle(req, res))
+    {
         return res;
     }
 
