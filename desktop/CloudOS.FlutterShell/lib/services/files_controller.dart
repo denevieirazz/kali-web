@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../models/file_models.dart';
 import 'cloudos_bridge.dart';
+import 'runtime_event_service.dart';
 
 class FilesTabState {
   FilesTabState({
@@ -39,17 +42,22 @@ class FilesTabState {
 class FilesController extends ChangeNotifier {
   FilesController({
     CloudOSBridge? bridge,
+    RuntimeEventService? runtimeEventService,
     String initialPath = 'home',
     String? initialTitle,
   }) : _bridge = bridge ?? const CloudOSBridge(),
+       _runtimeEvents = runtimeEventService ?? RuntimeEventService.instance,
        _initialPath = initialPath.trim().isEmpty ? 'home' : initialPath.trim(),
        _initialTitle = initialTitle {
+    _eventSubscription = _runtimeEvents.events.listen(_onRuntimeEvent);
     _init();
   }
 
   final CloudOSBridge _bridge;
+  final RuntimeEventService _runtimeEvents;
   final String _initialPath;
   final String? _initialTitle;
+  late final StreamSubscription<BrokerRuntimeEvent> _eventSubscription;
 
   final List<FilesTabState> _tabs = <FilesTabState>[];
   int _activeTabIndex = 0;
@@ -63,8 +71,15 @@ class FilesController extends ChangeNotifier {
   String? _activeJobId;
   double _activeJobProgress = 0.0;
   String _activeJobStatus = '';
+  final Map<String, Completer<void>> _jobWaiters = <String, Completer<void>>{};
+  final Set<String> _pendingRefreshTabIds = <String>{};
+  Timer? _eventRefreshDebounce;
   bool _disposed = false;
   String? _initializationError;
+
+  static const Duration _eventRefreshDelay = Duration(milliseconds: 120);
+  static const Duration _jobFallbackInterval = Duration(seconds: 1);
+  static const int _maxFallbackPolls = 60;
 
   List<FilesTabState> get tabs => List<FilesTabState>.unmodifiable(_tabs);
   int get activeTabIndex => _activeTabIndex;
@@ -116,7 +131,13 @@ class FilesController extends ChangeNotifier {
 
   @override
   void dispose() {
+    if (_disposed) return;
     _disposed = true;
+    _eventRefreshDebounce?.cancel();
+    _eventRefreshDebounce = null;
+    _pendingRefreshTabIds.clear();
+    unawaited(_eventSubscription.cancel());
+    _jobWaiters.clear();
     for (final tab in _tabs) {
       tab.loadGeneration++;
     }
@@ -156,7 +177,10 @@ class FilesController extends ChangeNotifier {
       }
     }
     final normalized = path.replaceAll('/', r'\');
-    final parts = normalized.split(r'\').where((part) => part.isNotEmpty).toList();
+    final parts = normalized
+        .split(r'\')
+        .where((part) => part.isNotEmpty)
+        .toList();
     return parts.isNotEmpty ? parts.last : path;
   }
 
@@ -169,13 +193,14 @@ class FilesController extends ChangeNotifier {
     );
     _tabs.add(tab);
     _activeTabIndex = _tabs.length - 1;
-    loadTabFiles(tab);
+    unawaited(loadTabFiles(tab));
     notifyListeners();
   }
 
   void closeTab(int index) {
     if (index < 0 || index >= _tabs.length || _tabs.length <= 1) return;
     _tabs[index].loadGeneration++;
+    _pendingRefreshTabIds.remove(_tabs[index].id);
     _tabs.removeAt(index);
     if (_activeTabIndex > index) {
       _activeTabIndex--;
@@ -265,12 +290,12 @@ class FilesController extends ChangeNotifier {
       }
       tab.items = items;
       tab.isLoading = false;
-    } catch (e) {
+    } catch (error) {
       if (_disposed || !_tabs.contains(tab) || generation != tab.loadGeneration) {
         return;
       }
       tab.isLoading = false;
-      tab.errorMessage = 'Não foi possível carregar a pasta: $e';
+      tab.errorMessage = 'Não foi possível carregar a pasta: $error';
     }
     notifyListeners();
   }
@@ -292,14 +317,14 @@ class FilesController extends ChangeNotifier {
       tab.sortField = field;
       tab.sortAscending = true;
     }
-    loadTabFiles(tab);
+    unawaited(loadTabFiles(tab));
   }
 
   void setSearchQuery(String query) {
     final tab = activeTab;
     if (tab == null || tab.searchQuery == query) return;
     tab.searchQuery = query;
-    loadTabFiles(tab);
+    unawaited(loadTabFiles(tab));
   }
 
   void selectItem(String path, {bool isMulti = false, bool isToggle = false}) {
@@ -329,7 +354,7 @@ class FilesController extends ChangeNotifier {
   void selectAll() {
     final tab = activeTab;
     if (tab != null) {
-      tab.selectedPaths = tab.items.map((i) => i.path).toSet();
+      tab.selectedPaths = tab.items.map((item) => item.path).toSet();
       notifyListeners();
     }
   }
@@ -429,6 +454,7 @@ class FilesController extends ChangeNotifier {
       _activeJobStatus = 'failed: $error';
       notifyListeners();
     } finally {
+      _jobWaiters.remove(_activeJobId);
       _activeJobId = null;
       notifyListeners();
     }
@@ -441,36 +467,209 @@ class FilesController extends ChangeNotifier {
   }
 
   Future<void> _waitForJob(String jobId) async {
-    const maxPolls = 600;
-    for (var poll = 0; poll < maxPolls; poll++) {
-      if (_disposed || _activeJobId != jobId) return;
-      final status = await _bridge.getJobStatus(jobId);
-      if (_disposed || _activeJobId != jobId) return;
-      _activeJobProgress = ((status['progress'] as num?)?.toDouble() ?? 0)
-          .clamp(0, 100)
-          .toDouble();
-      _activeJobStatus = status['state'] as String? ?? 'unknown';
-      notifyListeners();
-      switch (_activeJobStatus) {
-        case 'completed':
+    final waiter = Completer<void>();
+    _jobWaiters[jobId] = waiter;
+    try {
+      for (var poll = 0; poll < _maxFallbackPolls; poll++) {
+        if (_disposed || _activeJobId != jobId) return;
+        try {
+          await waiter.future.timeout(_jobFallbackInterval);
           return;
-        case 'failed':
-          throw CloudOSBridgeException(
-            'job_failed',
-            status['error'] as String? ?? 'A operação de arquivo falhou.',
-          );
-        case 'cancelled':
-          throw const CloudOSBridgeException(
-            'job_cancelled',
-            'A operação foi cancelada.',
-          );
+        } on TimeoutException {
+          // EventBus is the fast path. A low-frequency status call is only a
+          // recovery path for a dropped event or disconnected event channel.
+        }
+
+        if (_disposed || _activeJobId != jobId) return;
+        final status = await _bridge.getJobStatus(jobId);
+        if (_disposed || _activeJobId != jobId) return;
+        _applyPolledJobStatus(jobId, status);
+        if (waiter.isCompleted) {
+          await waiter.future;
+          return;
+        }
       }
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+    } finally {
+      _jobWaiters.remove(jobId);
     }
     throw const CloudOSBridgeException(
       'job_timeout',
       'A operação de arquivo excedeu o tempo limite.',
     );
+  }
+
+  void _applyPolledJobStatus(String jobId, Map<String, Object?> status) {
+    if (_disposed || _activeJobId != jobId) return;
+    _activeJobProgress = ((status['progress'] as num?)?.toDouble() ?? 0)
+        .clamp(0, 100)
+        .toDouble();
+    final state = status['state'] as String? ?? 'unknown';
+    _activeJobStatus = state;
+    notifyListeners();
+    _completeJobFromState(
+      jobId,
+      state,
+      error: status['error'] as String?,
+    );
+  }
+
+  void _onRuntimeEvent(BrokerRuntimeEvent event) {
+    if (_disposed) return;
+    if (event.name.startsWith('job.')) {
+      _handleJobEvent(event);
+    }
+    if (event.name == 'files.changed') {
+      _scheduleRefreshForFileChange(event.payload);
+    }
+  }
+
+  void _handleJobEvent(BrokerRuntimeEvent event) {
+    final rawJobId = event.payload['jobId'];
+    if (rawJobId is! String || rawJobId.isEmpty || rawJobId != _activeJobId) {
+      return;
+    }
+
+    switch (event.name) {
+      case 'job.started':
+        _activeJobStatus = 'queued';
+        break;
+      case 'job.progress':
+        _activeJobStatus = 'running';
+        _activeJobProgress =
+            ((event.payload['progress'] as num?)?.toDouble() ??
+                    _activeJobProgress)
+                .clamp(0, 100)
+                .toDouble();
+        break;
+      case 'job.completed':
+        _activeJobStatus = 'completed';
+        _activeJobProgress = 100;
+        _completeJobFromState(rawJobId, 'completed');
+        break;
+      case 'job.failed':
+        _activeJobStatus = 'failed';
+        _completeJobFromState(
+          rawJobId,
+          'failed',
+          error: event.payload['error'] as String?,
+        );
+        break;
+      case 'job.cancelled':
+        _activeJobStatus = 'cancelled';
+        _completeJobFromState(rawJobId, 'cancelled');
+        break;
+    }
+    notifyListeners();
+  }
+
+  void _completeJobFromState(
+    String jobId,
+    String state, {
+    String? error,
+  }) {
+    final waiter = _jobWaiters[jobId];
+    if (waiter == null || waiter.isCompleted) return;
+    switch (state) {
+      case 'completed':
+        waiter.complete();
+        break;
+      case 'failed':
+        waiter.completeError(
+          CloudOSBridgeException(
+            'job_failed',
+            error?.trim().isNotEmpty == true
+                ? error!.trim()
+                : 'A operação de arquivo falhou.',
+          ),
+        );
+        break;
+      case 'cancelled':
+        waiter.completeError(
+          const CloudOSBridgeException(
+            'job_cancelled',
+            'A operação foi cancelada.',
+          ),
+        );
+        break;
+    }
+  }
+
+  void _scheduleRefreshForFileChange(Map<String, Object?> payload) {
+    if (_tabs.isEmpty) return;
+    final affectedDirectories = <String>{};
+    final changedPaths = <String>{};
+
+    void addDirectory(Object? value) {
+      if (value is! String) return;
+      final normalized = _normalizeFilesystemPath(value);
+      if (normalized.isNotEmpty) affectedDirectories.add(normalized);
+    }
+
+    void addChangedPath(Object? value) {
+      if (value is! String) return;
+      final normalized = _normalizeFilesystemPath(value);
+      if (normalized.isEmpty) return;
+      changedPaths.add(normalized);
+      final parent = _parentDirectory(normalized);
+      if (parent != null) affectedDirectories.add(parent);
+    }
+
+    addDirectory(payload['parentPath']);
+    addDirectory(payload['destination']);
+    addChangedPath(payload['path']);
+    addChangedPath(payload['oldPath']);
+    addChangedPath(payload['newPath']);
+    final paths = payload['paths'];
+    if (paths is List) {
+      for (final path in paths) {
+        addChangedPath(path);
+      }
+    }
+
+    if (affectedDirectories.isEmpty && changedPaths.isEmpty) return;
+    for (final tab in _tabs) {
+      final resolved = resolveFilesystemPath(tab.currentPath) ?? tab.currentPath;
+      final tabPath = _normalizeFilesystemPath(resolved);
+      if (tabPath.isEmpty) continue;
+      if (affectedDirectories.contains(tabPath) || changedPaths.contains(tabPath)) {
+        _pendingRefreshTabIds.add(tab.id);
+      }
+    }
+    if (_pendingRefreshTabIds.isEmpty) return;
+
+    _eventRefreshDebounce?.cancel();
+    _eventRefreshDebounce = Timer(_eventRefreshDelay, () {
+      _eventRefreshDebounce = null;
+      unawaited(_flushEventRefreshes());
+    });
+  }
+
+  Future<void> _flushEventRefreshes() async {
+    if (_disposed || _pendingRefreshTabIds.isEmpty) return;
+    final ids = Set<String>.from(_pendingRefreshTabIds);
+    _pendingRefreshTabIds.clear();
+    final targets = _tabs
+        .where((tab) => ids.contains(tab.id))
+        .toList(growable: false);
+    await Future.wait(targets.map(loadTabFiles));
+  }
+
+  String _normalizeFilesystemPath(String input) {
+    var path = input.trim().replaceAll('/', r'\');
+    while (path.length > 3 && path.endsWith(r'\')) {
+      path = path.substring(0, path.length - 1);
+    }
+    return path.toLowerCase();
+  }
+
+  String? _parentDirectory(String normalizedPath) {
+    if (normalizedPath.isEmpty) return null;
+    final index = normalizedPath.lastIndexOf(r'\');
+    if (index <= 0) return null;
+    if (index == 2 && normalizedPath.length >= 2 && normalizedPath[1] == ':') {
+      return normalizedPath.substring(0, 3);
+    }
+    return normalizedPath.substring(0, index);
   }
 
   Future<void> openItem(CloudFileItem item) async {
