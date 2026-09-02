@@ -37,8 +37,8 @@ foreach ($marker in @(
 )) {
     if (-not $service.Contains($marker)) { throw "TextFileServiceV23 missing hardening marker: $marker" }
 }
-foreach ($forbidden in @('system(', 'cmd.exe', 'powershell.exe', 'ShellExecute', 'CreateProcess', 'WinExec')) {
-    if ($service.Contains($forbidden)) { throw "TextFileServiceV23 contains forbidden execution surface: $forbidden" }
+foreach ($forbidden in @('system\s*\(', 'cmd\.exe', 'powershell\.exe', 'ShellExecute', 'CreateProcess', 'WinExec')) {
+    if ($service -match $forbidden) { throw "TextFileServiceV23 contains forbidden execution surface: $forbidden" }
 }
 
 $broker = Get-Content -LiteralPath $brokerServer -Raw
@@ -56,21 +56,34 @@ foreach ($bridgePath in @($runnerBridge, $legacyBridge)) {
     }
 }
 
+function Assert-NoUserFilesystemBypass {
+    param(
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][string]$Label
+    )
+    if ($Source.Contains("import 'dart:io'")) { throw "$Label imports dart:io" }
+    if ($Source.Contains('Platform.environment')) { throw "$Label reads Platform.environment" }
+    foreach ($pattern in @(
+        '(?<![A-Za-z0-9_])Directory\s*\(',
+        '(?<![A-Za-z0-9_])File\s*\(',
+        '(?<![A-Za-z0-9_])Process\.start\s*\(',
+        '(?<![A-Za-z0-9_])Process\.run\s*\('
+    )) {
+        if ($Source -match $pattern) { throw "$Label bypasses Broker boundary: $pattern" }
+    }
+}
+
 $dart = Get-Content -LiteralPath $dartClient -Raw
 foreach ($marker in @('maxFileBytes = 16 * 1024 * 1024', 'rpcChunkBytes = 64 * 1024', 'writeChunkBytes = 48 * 1024', 'files.text.readChunk', 'files.text.writeChunk', 'files.text.abortWrite', 'utf8.encode', 'utf8.decode')) {
     if (-not $dart.Contains($marker)) { throw "BrokerTextFileService missing bounded client marker: $marker" }
 }
-foreach ($forbidden in @("import 'dart:io'", 'Process.start', 'Process.run', 'Directory(', 'File(')) {
-    if ($dart.Contains($forbidden)) { throw "BrokerTextFileService bypasses Broker boundary: $forbidden" }
-}
+Assert-NoUserFilesystemBypass -Source $dart -Label 'BrokerTextFileService'
 
 $notepadContent = Get-Content -LiteralPath $notepad -Raw
 if (-not $notepadContent.Contains('BrokerTextFileService')) {
     throw 'Notepad is not wired to BrokerTextFileService.'
 }
-foreach ($forbidden in @("import 'dart:io'", 'Platform.environment', 'Directory(', 'File(', 'Process.start', 'Process.run')) {
-    if ($notepadContent.Contains($forbidden)) { throw "Notepad bypasses typed Broker filesystem boundary: $forbidden" }
-}
+Assert-NoUserFilesystemBypass -Source $notepadContent -Label 'Notepad'
 
 Write-Host '[PASS] Typed text-file V23 architecture contract passed.' -ForegroundColor Green
 exit 0
