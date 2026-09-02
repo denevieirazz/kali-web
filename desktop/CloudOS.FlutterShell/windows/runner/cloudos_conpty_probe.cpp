@@ -341,20 +341,27 @@ int main()
         if (CreateDirectoryW(cwd_test_directory.c_str(), nullptr) != FALSE ||
             GetLastError() == ERROR_ALREADY_EXISTS)
         {
+            const std::wstring cwd_marker_path =
+                cwd_test_directory + L"\\__cloudos_cwd_probe.marker";
+            DeleteFileW(cwd_marker_path.c_str());
+
             const std::string cwd_utf8 = WideToUtf8(cwd_test_directory);
             cwd_ok = !cwd_utf8.empty() && probe.RunCommand(
                 "powershell",
                 "",
-                "$m='__CLOUDOS_'+'CWD_DONE__'; Write-Output (Get-Location).Path; Write-Output $m; exit\r",
+                "$m='__CLOUDOS_'+'CWD_DONE__'; [IO.File]::WriteAllText('.\\__cloudos_cwd_probe.marker','ok'); Write-Output (Get-Location).Path; Write-Output $m; exit\r",
                 "__CLOUDOS_CWD_DONE__",
                 cwd_output,
                 cwd_error,
                 cwd_utf8);
-            if (cwd_ok && cwd_output.find(cwd_utf8) == std::string::npos)
+
+            if (cwd_ok && GetFileAttributesW(cwd_marker_path.c_str()) == INVALID_FILE_ATTRIBUTES)
             {
                 cwd_ok = false;
-                cwd_error = "PowerShell did not start in the requested working directory";
+                cwd_error = "PowerShell did not create the marker in the requested working directory";
             }
+
+            DeleteFileW(cwd_marker_path.c_str());
             RemoveDirectoryW(cwd_test_directory.c_str());
         }
         else
