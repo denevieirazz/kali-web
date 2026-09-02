@@ -50,12 +50,13 @@ class SystemTrayStateService extends ChangeNotifier {
   Object? get lastRefreshError => _lastRefreshError;
 
   bool get hasAnyLiveCapability =>
-      _snapshot.networkAvailable ||
-      _snapshot.volumeAvailable ||
-      _snapshot.batteryAvailable ||
-      _snapshot.brightnessAvailable ||
-      _snapshot.wslAvailable ||
-      _snapshot.deviceName.trim().isNotEmpty;
+      _lastRefreshAt != null &&
+      (_snapshot.networkAvailable ||
+          _snapshot.volumeAvailable ||
+          _snapshot.batteryAvailable ||
+          _snapshot.brightnessAvailable ||
+          _snapshot.wslAvailable ||
+          _snapshot.deviceName.trim().isNotEmpty);
 
   void start() {
     if (_started || _disposed) return;
@@ -124,8 +125,7 @@ class SystemTrayStateService extends ChangeNotifier {
       return false;
     }
 
-    _snapshot = _snapshot.copyWith(volume: value, volumeAvailable: true);
-    notifyListeners();
+    acceptConfirmedVolume(value);
     return true;
   }
 
@@ -147,12 +147,29 @@ class SystemTrayStateService extends ChangeNotifier {
       return false;
     }
 
+    acceptConfirmedBrightness(value);
+    return true;
+  }
+
+  /// Applies a value that another typed CloudOS control path already confirmed.
+  /// This is used when the shell supplied a callback instead of routing the
+  /// mutation through this service itself. It is not a replacement for a native
+  /// write: callers must invoke it only after the write returned success.
+  void acceptConfirmedVolume(double requested) {
+    if (_disposed) return;
+    final value = requested.clamp(0.0, 1.0).toDouble();
+    _snapshot = _snapshot.copyWith(volume: value, volumeAvailable: true);
+    notifyListeners();
+  }
+
+  void acceptConfirmedBrightness(double requested) {
+    if (_disposed) return;
+    final value = requested.clamp(0.0, 1.0).toDouble();
     _snapshot = _snapshot.copyWith(
       brightness: value,
       brightnessAvailable: true,
     );
     notifyListeners();
-    return true;
   }
 
   void _handleRuntimeStateChanged() {
@@ -182,11 +199,7 @@ class SystemTrayStateService extends ChangeNotifier {
     if (event.name == 'system.volumeChanged') {
       final raw = event.payload['volume'];
       if (raw is num && raw.isFinite) {
-        _snapshot = _snapshot.copyWith(
-          volume: raw.toDouble().clamp(0.0, 1.0).toDouble(),
-          volumeAvailable: true,
-        );
-        notifyListeners();
+        acceptConfirmedVolume(raw.toDouble());
       }
       return;
     }
