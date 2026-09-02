@@ -10,6 +10,7 @@ add_executable(${BINARY_NAME} WIN32
   "win32_window.cpp"
   "cloudos_flutter_bridge_v20.cpp"
   "cloudos_broker_client_v21.cpp"
+  "cloudos_broker_event_client_v23.cpp"
   "cloudos_conpty_manager.cpp"
   "cloudos_system_metrics_native.cpp"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"

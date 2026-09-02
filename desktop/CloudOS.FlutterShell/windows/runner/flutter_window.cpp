@@ -4,6 +4,7 @@
 
 #include "flutter/generated_plugin_registrant.h"
 #include "cloudos_flutter_bridge_v20.h"
+#include "cloudos_broker_event_client_v23.h"
 #include "cloudos_conpty_manager.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
@@ -20,15 +21,20 @@ bool FlutterWindow::OnCreate() {
 
   flutter_controller_ = std::make_unique<flutter::FlutterViewController>(
       frame.right - frame.left, frame.bottom - frame.top, project_);
-  
+
   if (!flutter_controller_->engine() || !flutter_controller_->view()) {
     return false;
   }
-  
+
   RegisterPlugins(flutter_controller_->engine());
 
-  // Register CloudOS V20 Native C++ MethodChannel Bridge
   CloudOS::CloudOSFlutterBridgeV20::RegisterWithMessenger(
+      flutter_controller_->engine()->messenger(),
+      GetHandle());
+
+  // The dedicated EventBus channel is registered now, but its named-pipe
+  // worker starts only after Dart installs its handler and invokes `start`.
+  CloudOS::CloudOSBrokerEventClientV23::Instance().Initialize(
       flutter_controller_->engine()->messenger(),
       GetHandle());
 
@@ -39,11 +45,11 @@ bool FlutterWindow::OnCreate() {
   });
 
   flutter_controller_->ForceRedraw();
-
   return true;
 }
 
 void FlutterWindow::OnDestroy() {
+  CloudOS::CloudOSBrokerEventClientV23::Instance().Shutdown();
   CloudOS::CloudOSConPTYManager::Instance().ShutdownAll();
   CloudOS::CloudOSConPTYManager::Instance().SetMethodChannel(nullptr);
   CloudOS::CloudOSConPTYManager::Instance().SetPlatformWindow(nullptr);
@@ -61,6 +67,11 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               LPARAM const lparam) noexcept {
   if (message == CloudOS::CloudOSConPTYManager::kDispatchMessage) {
     CloudOS::CloudOSConPTYManager::Instance().DrainPlatformEvents();
+    return 0;
+  }
+
+  if (message == CloudOS::CloudOSBrokerEventClientV23::kDispatchMessage) {
+    CloudOS::CloudOSBrokerEventClientV23::Instance().DrainPlatformEvents();
     return 0;
   }
 

@@ -23,12 +23,26 @@ namespace
 std::string WideToUtf8(const std::wstring& wstr)
 {
     if (wstr.empty()) return {};
-    const int size_needed = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wstr.data(),
-        static_cast<int>(wstr.size()), nullptr, 0, nullptr, nullptr);
+    const int size_needed = WideCharToMultiByte(
+        CP_UTF8,
+        WC_ERR_INVALID_CHARS,
+        wstr.data(),
+        static_cast<int>(wstr.size()),
+        nullptr,
+        0,
+        nullptr,
+        nullptr);
     if (size_needed <= 0) return {};
     std::string result(static_cast<size_t>(size_needed), '\0');
-    return WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wstr.data(),
-        static_cast<int>(wstr.size()), result.data(), size_needed, nullptr, nullptr) == size_needed
+    return WideCharToMultiByte(
+               CP_UTF8,
+               WC_ERR_INVALID_CHARS,
+               wstr.data(),
+               static_cast<int>(wstr.size()),
+               result.data(),
+               size_needed,
+               nullptr,
+               nullptr) == size_needed
         ? result
         : std::string{};
 }
@@ -50,9 +64,6 @@ bool QueryMasterVolume(double* out_volume)
     HRESULT hr = E_FAIL;
     float scalar = 0.0F;
     {
-        // Keep every COM interface alive only while COM is initialized on this
-        // thread. Releasing ComPtr instances after CoUninitialize can crash on
-        // headless/server runners where the audio endpoint is partially absent.
         Microsoft::WRL::ComPtr<IMMDeviceEnumerator> enumerator;
         hr = CoCreateInstance(
             __uuidof(MMDeviceEnumerator),
@@ -63,7 +74,10 @@ bool QueryMasterVolume(double* out_volume)
         Microsoft::WRL::ComPtr<IMMDevice> device;
         if (SUCCEEDED(hr) && enumerator)
         {
-            hr = enumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &device);
+            hr = enumerator->GetDefaultAudioEndpoint(
+                eRender,
+                eMultimedia,
+                &device);
         }
         else if (SUCCEEDED(hr))
         {
@@ -119,7 +133,10 @@ bool SetMasterVolume(double value)
         Microsoft::WRL::ComPtr<IMMDevice> device;
         if (SUCCEEDED(hr) && enumerator)
         {
-            hr = enumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &device);
+            hr = enumerator->GetDefaultAudioEndpoint(
+                eRender,
+                eMultimedia,
+                &device);
         }
         else if (SUCCEEDED(hr))
         {
@@ -142,7 +159,9 @@ bool SetMasterVolume(double value)
 
         if (SUCCEEDED(hr) && endpoint)
         {
-            hr = endpoint->SetMasterVolumeLevelScalar(static_cast<float>(value), nullptr);
+            hr = endpoint->SetMasterVolumeLevelScalar(
+                static_cast<float>(value),
+                nullptr);
         }
         else if (SUCCEEDED(hr))
         {
@@ -188,7 +207,10 @@ bool QueryConnectedNetwork(std::string* out_name)
         {
             continue;
         }
-        if (out_name && adapter->FriendlyName) *out_name = WideToUtf8(adapter->FriendlyName);
+        if (out_name && adapter->FriendlyName)
+        {
+            *out_name = WideToUtf8(adapter->FriendlyName);
+        }
         return true;
     }
     return false;
@@ -235,7 +257,13 @@ SystemSnapshot SystemServiceV21::GetSnapshot()
 
 bool SystemServiceV21::SetVolume(double value)
 {
-    if (!std::isfinite(value) || value < 0.0 || value > 1.0 || !SetMasterVolume(value)) return false;
+    if (!std::isfinite(value) ||
+        value < 0.0 ||
+        value > 1.0 ||
+        !SetMasterVolume(value))
+    {
+        return false;
+    }
     {
         std::lock_guard<std::mutex> lock(mutex_);
         snapshot_.volume_available = true;
@@ -246,7 +274,8 @@ bool SystemServiceV21::SetVolume(double value)
 
     JsonObject payload;
     payload["volume"] = JsonValue(value);
-    payload["generation"] = JsonValue(static_cast<int64_t>(generation_.load()));
+    payload["generation"] =
+        JsonValue(static_cast<int64_t>(generation_.load()));
     EventBusV21::Instance().Publish("system.volumeChanged", payload);
     return true;
 }
@@ -289,6 +318,9 @@ std::vector<std::string> SystemServiceV21::GetCapabilities()
         "files.open",
         "files.openWith.list",
         "files.openWith.launch",
+        "files.text.readChunk",
+        "files.text.writeChunk",
+        "files.text.abortWrite",
     };
     if (snapshot.volume_available)
     {
@@ -312,7 +344,8 @@ void SystemServiceV21::Invalidate()
     }
 
     JsonObject payload;
-    payload["generation"] = JsonValue(static_cast<int64_t>(generation_.load()));
+    payload["generation"] =
+        JsonValue(static_cast<int64_t>(generation_.load()));
     EventBusV21::Instance().Publish("system.snapshotChanged", payload);
 }
 
@@ -322,13 +355,19 @@ void SystemServiceV21::Refresh()
 
     WCHAR computer_name[MAX_COMPUTERNAME_LENGTH + 1]{};
     DWORD size = ARRAYSIZE(computer_name);
-    if (GetComputerNameW(computer_name, &size)) snapshot_.device_name = WideToUtf8(computer_name);
-    else snapshot_.device_name = "CloudOS Desktop";
+    if (GetComputerNameW(computer_name, &size))
+    {
+        snapshot_.device_name = WideToUtf8(computer_name);
+    }
+    // Failure is represented by an empty string. Never fabricate a device name.
 
     WCHAR user_name[256]{};
     DWORD user_size = ARRAYSIZE(user_name);
-    if (GetUserNameW(user_name, &user_size)) snapshot_.user_name = WideToUtf8(user_name);
-    else snapshot_.user_name = "User";
+    if (GetUserNameW(user_name, &user_size))
+    {
+        snapshot_.user_name = WideToUtf8(user_name);
+    }
+    // Failure is represented by an empty string. Never fabricate a user name.
 
     snapshot_.session_id = SecurityV21::GetCurrentSessionId();
 
@@ -351,7 +390,8 @@ void SystemServiceV21::Refresh()
     snapshot_.brightness = 0.0;
 
     snapshot_.distros = WslServiceV21::Instance().GetDistributions();
-    snapshot_.default_distro = WslServiceV21::Instance().GetDefaultDistribution();
+    snapshot_.default_distro =
+        WslServiceV21::Instance().GetDefaultDistribution();
     snapshot_.wsl_available = WslServiceV21::Instance().IsWslAvailable();
     snapshot_.current_workspace = 1;
     snapshot_.timestamp_ms = NowMs();

@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../core/cloudos_theme.dart';
 import '../services/app_registry.dart';
+import '../services/runtime_event_service.dart';
 import '../services/window_manager.dart';
 
 class CloudTaskbar extends StatefulWidget {
@@ -23,7 +25,8 @@ class CloudTaskbar extends StatefulWidget {
     this.terminalRunning = false,
     this.currentWorkspace = 1,
     this.onWorkspaceChanged,
-    this.notificationCount = 3,
+    this.notificationCount,
+    this.runtimeService,
     this.windowManager,
     super.key,
   });
@@ -43,7 +46,8 @@ class CloudTaskbar extends StatefulWidget {
   final bool terminalRunning;
   final int currentWorkspace;
   final ValueChanged<int>? onWorkspaceChanged;
-  final int notificationCount;
+  final int? notificationCount;
+  final RuntimeEventService? runtimeService;
   final WindowManager? windowManager;
 
   @override
@@ -52,15 +56,20 @@ class CloudTaskbar extends StatefulWidget {
 
 class _CloudTaskbarState extends State<CloudTaskbar> {
   Timer? _clockTimer;
+  late RuntimeEventService _runtime;
   String _timeString = '';
   String _dateString = '';
 
   @override
   void initState() {
     super.initState();
+    _bindRuntime();
     _updateTime();
     if (!Platform.environment.containsKey('FLUTTER_TEST')) {
-      _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) => _updateTime());
+      _clockTimer = Timer.periodic(
+        const Duration(seconds: 1),
+        (_) => _updateTime(),
+      );
     }
     widget.windowManager?.addListener(_onWindowManagerUpdate);
   }
@@ -68,17 +77,32 @@ class _CloudTaskbarState extends State<CloudTaskbar> {
   @override
   void didUpdateWidget(CloudTaskbar oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.runtimeService != widget.runtimeService) {
+      _runtime.removeListener(_onRuntimeUpdate);
+      _bindRuntime();
+    }
     if (oldWidget.windowManager != widget.windowManager) {
       oldWidget.windowManager?.removeListener(_onWindowManagerUpdate);
       widget.windowManager?.addListener(_onWindowManagerUpdate);
     }
   }
 
+  void _bindRuntime() {
+    _runtime = widget.runtimeService ?? RuntimeEventService.instance;
+    _runtime.start();
+    _runtime.addListener(_onRuntimeUpdate);
+  }
+
   @override
   void dispose() {
     _clockTimer?.cancel();
+    _runtime.removeListener(_onRuntimeUpdate);
     widget.windowManager?.removeListener(_onWindowManagerUpdate);
     super.dispose();
+  }
+
+  void _onRuntimeUpdate() {
+    if (mounted) setState(() {});
   }
 
   void _onWindowManagerUpdate() {
@@ -104,6 +128,7 @@ class _CloudTaskbarState extends State<CloudTaskbar> {
   @override
   Widget build(BuildContext context) {
     final wm = widget.windowManager;
+    final notificationCount = widget.notificationCount ?? _runtime.unreadCount;
 
     return Align(
       alignment: Alignment.bottomCenter,
@@ -131,7 +156,6 @@ class _CloudTaskbarState extends State<CloudTaskbar> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: <Widget>[
-            // Lado Esquerdo: Workspaces e Status
             Row(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
@@ -145,19 +169,14 @@ class _CloudTaskbarState extends State<CloudTaskbar> {
                 ],
               ],
             ),
-
-            // Centro: Botão Iniciar + Ícones de Aplicativos
             Row(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                // Botão Iniciar Central (4 Quadrados Estilo Windows 11 / CloudOS)
                 _StartButton(
                   active: widget.startOpen,
                   onPressed: widget.onStart,
                 ),
                 const SizedBox(width: 6),
-
-                // Lista de Apps Centralizados
                 if (wm != null)
                   ..._buildWindowManagerTaskItems(wm)
                 else ...<Widget>[
@@ -187,30 +206,23 @@ class _CloudTaskbarState extends State<CloudTaskbar> {
                 ],
               ],
             ),
-
-            // Lado Direito: Bandeja do Sistema (Tray) e Relógio
             Row(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                // Quick Settings Tray Group
                 _TrayQuickGroup(
                   onPressed: widget.onQuickSettings,
                   active: widget.quickSettingsOpen,
                 ),
                 const SizedBox(width: 8),
-
-                // Relógio em Duas Linhas (Hora e Data)
                 _ClockButton(
                   timeString: _timeString,
                   dateString: _dateString,
                   onPressed: widget.onNotifications,
                 ),
                 const SizedBox(width: 4),
-
-                // Notificações
                 _NotificationTrayButton(
                   active: widget.notificationsOpen,
-                  count: widget.notificationCount,
+                  count: notificationCount,
                   onPressed: widget.onNotifications,
                 ),
               ],
@@ -311,7 +323,9 @@ class _StartButton extends StatelessWidget {
                 4,
                 (index) => Container(
                   decoration: BoxDecoration(
-                    color: active ? CloudOSColors.neonCyan : const Color(0xFF38BDF8),
+                    color: active
+                        ? CloudOSColors.neonCyan
+                        : const Color(0xFF38BDF8),
                     borderRadius: BorderRadius.circular(1.5),
                   ),
                 ),
@@ -341,9 +355,7 @@ class _TaskButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final background = active
-        ? CloudOSColors.active
-        : Colors.transparent;
+    final background = active ? CloudOSColors.active : Colors.transparent;
 
     return Tooltip(
       message: tooltip,
@@ -367,9 +379,7 @@ class _TaskButton extends StatelessWidget {
               Icon(
                 icon,
                 size: 20,
-                color: active
-                    ? Colors.white
-                    : const Color(0xFFCBD5E1),
+                color: active ? Colors.white : const Color(0xFFCBD5E1),
               ),
               if (isRunning)
                 Positioned(
@@ -378,7 +388,9 @@ class _TaskButton extends StatelessWidget {
                     width: active ? 16 : 6,
                     height: 2.5,
                     decoration: BoxDecoration(
-                      color: active ? CloudOSColors.neonCyan : CloudOSColors.secondary,
+                      color: active
+                          ? CloudOSColors.neonCyan
+                          : CloudOSColors.secondary,
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -514,7 +526,7 @@ class _NotificationTrayButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: 'Notificações',
+      message: count > 0 ? 'Notificações ($count não lidas)' : 'Notificações',
       child: InkWell(
         onTap: onPressed,
         borderRadius: BorderRadius.circular(6),
@@ -541,7 +553,7 @@ class _NotificationTrayButton extends StatelessWidget {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
-                    '$count',
+                    count > 99 ? '99+' : '$count',
                     style: const TextStyle(
                       fontSize: 9,
                       fontWeight: FontWeight.bold,
@@ -580,7 +592,9 @@ class _WorkspacePill extends StatelessWidget {
           width: 22,
           height: 22,
           decoration: BoxDecoration(
-            color: selected ? CloudOSColors.accent : Colors.white.withValues(alpha: 0.06),
+            color: selected
+                ? CloudOSColors.accent
+                : Colors.white.withValues(alpha: 0.06),
             borderRadius: BorderRadius.circular(6),
           ),
           alignment: Alignment.center,
@@ -589,7 +603,9 @@ class _WorkspacePill extends StatelessWidget {
             style: TextStyle(
               fontSize: 10.5,
               fontWeight: FontWeight.bold,
-              color: selected ? const Color(0xFF05070B) : const Color(0xFF94A3B8),
+              color: selected
+                  ? const Color(0xFF05070B)
+                  : const Color(0xFF94A3B8),
             ),
           ),
         ),

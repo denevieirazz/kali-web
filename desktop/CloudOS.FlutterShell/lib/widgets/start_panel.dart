@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../core/cloudos_theme.dart';
 import '../models/shell_models.dart';
 import '../services/cloudos_bridge.dart';
+import '../services/session_identity_service.dart';
 import 'glass_surface.dart';
 
 class StartPanel extends StatefulWidget {
@@ -12,6 +15,7 @@ class StartPanel extends StatefulWidget {
     required this.onLaunch,
     required this.onClose,
     this.bridge = const CloudOSBridge(),
+    this.identityService,
     super.key,
   });
 
@@ -19,6 +23,7 @@ class StartPanel extends StatefulWidget {
   final ValueChanged<CloudApp> onLaunch;
   final VoidCallback onClose;
   final CloudOSBridge bridge;
+  final SessionIdentityService? identityService;
 
   @override
   State<StartPanel> createState() => _StartPanelState();
@@ -26,6 +31,10 @@ class StartPanel extends StatefulWidget {
 
 class _StartPanelState extends State<StartPanel> {
   final TextEditingController _searchController = TextEditingController();
+  late SessionIdentityService _identityService;
+  SessionIdentity _identity = const SessionIdentity.unavailable();
+  bool _identityLoading = true;
+  int _identityLoadGeneration = 0;
   String query = '';
   String selectedFilter = 'Todos';
 
@@ -37,15 +46,61 @@ class _StartPanelState extends State<StartPanel> {
     'Utilitários',
   ];
 
-  String get _sessionUser {
-    final windowsUser = Platform.environment['USERNAME']?.trim() ?? '';
-    if (windowsUser.isNotEmpty) return windowsUser;
-    final unixUser = Platform.environment['USER']?.trim() ?? '';
-    return unixUser.isEmpty ? 'Usuário' : unixUser;
+  @override
+  void initState() {
+    super.initState();
+    _bindIdentityService();
+    unawaited(_loadIdentity());
+  }
+
+  @override
+  void didUpdateWidget(covariant StartPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.bridge, widget.bridge) ||
+        oldWidget.identityService != widget.identityService) {
+      _bindIdentityService();
+      unawaited(_loadIdentity());
+    }
+  }
+
+  void _bindIdentityService() {
+    _identityService = widget.identityService ?? SessionIdentityService(widget.bridge);
+  }
+
+  Future<void> _loadIdentity() async {
+    final generation = ++_identityLoadGeneration;
+    if (mounted) {
+      setState(() => _identityLoading = true);
+    }
+
+    final identity = await _identityService.load();
+    if (!mounted || generation != _identityLoadGeneration) return;
+    setState(() {
+      _identity = identity;
+      _identityLoading = false;
+    });
+  }
+
+  String get _sessionUserLabel {
+    if (_identityLoading) return 'Carregando sessão…';
+    if (_identity.available) return _identity.userName;
+    return 'Identidade indisponível';
+  }
+
+  String get _sessionSubtitle {
+    if (_identityLoading) return 'Sessão ativa • carregando identidade';
+    if (!_identity.available) return 'Sessão ativa • identidade indisponível';
+
+    final pieces = <String>['Sessão ativa', 'ID ${_identity.sessionId}'];
+    if (_identity.deviceName.trim().isNotEmpty) {
+      pieces.add(_identity.deviceName.trim());
+    }
+    return pieces.join(' • ');
   }
 
   @override
   void dispose() {
+    _identityLoadGeneration++;
     _searchController.dispose();
     super.dispose();
   }
@@ -230,16 +285,12 @@ class _StartPanelState extends State<StartPanel> {
                                 children: <Widget>[
                                   Text(
                                     'Aplicativos Fixados',
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.titleSmall,
+                                    style: Theme.of(context).textTheme.titleSmall,
                                   ),
                                   const Spacer(),
                                   Text(
                                     '${pinnedApps.length} itens',
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.bodySmall,
+                                    style: Theme.of(context).textTheme.bodySmall,
                                   ),
                                 ],
                               ),
@@ -274,9 +325,7 @@ class _StartPanelState extends State<StartPanel> {
                                 children: <Widget>[
                                   Text(
                                     'Atividades Recentes',
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.titleSmall,
+                                    style: Theme.of(context).textTheme.titleSmall,
                                   ),
                                   const Spacer(),
                                   const Text(
@@ -322,34 +371,45 @@ class _StartPanelState extends State<StartPanel> {
                           color: CloudOSColors.accent.withValues(alpha: 0.4),
                         ),
                       ),
-                      child: const Icon(
-                        Icons.person_rounded,
-                        size: 18,
-                        color: CloudOSColors.accent,
+                      child: _identityLoading
+                          ? const Padding(
+                              padding: EdgeInsets.all(8),
+                              child: CircularProgressIndicator(strokeWidth: 1.5),
+                            )
+                          : const Icon(
+                              Icons.person_rounded,
+                              size: 18,
+                              color: CloudOSColors.accent,
+                            ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            _sessionUserLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: CloudOSColors.text,
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          Text(
+                            _sessionSubtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: CloudOSColors.caption,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          _sessionUser,
-                          style: const TextStyle(
-                            color: CloudOSColors.text,
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const Text(
-                          'Sessão ativa',
-                          style: TextStyle(
-                            color: CloudOSColors.caption,
-                            fontSize: 10,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const Spacer(),
                     _FooterAction(
                       icon: Icons.lock_outline_rounded,
                       tooltip: 'Bloquear Sessão',
@@ -403,6 +463,8 @@ class _StartPanelState extends State<StartPanel> {
                                 ),
                                 onPressed: () {
                                   Navigator.pop(ctx);
+                                  // This exits only cloudos_flutter_shell.exe.
+                                  // It intentionally does not shut down Windows.
                                   exit(0);
                                 },
                                 child: const Text(
