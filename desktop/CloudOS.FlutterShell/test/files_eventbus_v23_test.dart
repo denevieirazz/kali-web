@@ -24,6 +24,12 @@ class _FilesEventBridge extends CloudOSBridge {
         path: r'Z:\Home',
         iconKey: 'home',
       ),
+      KnownFolderModel(
+        id: 'wsl:kali-linux',
+        name: 'kali-linux (WSL)',
+        path: r'\\wsl.localhost\kali-linux',
+        iconKey: 'linux',
+      ),
     ];
   }
 
@@ -86,6 +92,10 @@ Future<void> _settleController() async {
   await Future<void>.delayed(const Duration(milliseconds: 25));
 }
 
+Future<void> _waitEventDebounce() async {
+  await Future<void>.delayed(const Duration(milliseconds: 180));
+}
+
 void main() {
   group('FilesController EventBus V23', () {
     test('files.changed refreshes only the affected tab', () async {
@@ -111,7 +121,7 @@ void main() {
           'parentPath': r'Z:\Home',
         }),
       );
-      await Future<void>.delayed(const Duration(milliseconds: 180));
+      await _waitEventDebounce();
 
       expect(bridge.listCalls[homeTab.currentPath], homeBefore + 1);
       expect(bridge.listCalls[otherTab.currentPath], otherBefore);
@@ -122,10 +132,73 @@ void main() {
           'destination': r'Z:\Unrelated',
         }),
       );
-      await Future<void>.delayed(const Duration(milliseconds: 180));
+      await _waitEventDebounce();
       expect(bridge.listCalls[homeTab.currentPath], homeBefore + 1);
       expect(bridge.listCalls[otherTab.currentPath], otherBefore);
 
+      controller.dispose();
+      runtime.dispose();
+    });
+
+    test('rename and delete payloads infer Windows parent directories', () async {
+      final runtime = RuntimeEventService();
+      final bridge = _FilesEventBridge();
+      final controller = FilesController(
+        bridge: bridge,
+        runtimeEventService: runtime,
+        initialPath: r'Z:\Home',
+      );
+      await _settleController();
+      final tab = controller.tabs.single;
+      var expectedCalls = bridge.listCalls[tab.currentPath] ?? 0;
+
+      runtime.ingestForTesting(
+        _event('files.changed', const <String, Object?>{
+          'action': 'renamed',
+          'oldPath': r'Z:\Home\old.txt',
+          'newPath': r'Z:\Home\new.txt',
+        }),
+      );
+      await _waitEventDebounce();
+      expectedCalls++;
+      expect(bridge.listCalls[tab.currentPath], expectedCalls);
+
+      runtime.ingestForTesting(
+        _event('files.changed', const <String, Object?>{
+          'action': 'recycled',
+          'paths': <String>[r'Z:\Home\new.txt'],
+        }),
+      );
+      await _waitEventDebounce();
+      expectedCalls++;
+      expect(bridge.listCalls[tab.currentPath], expectedCalls);
+
+      controller.dispose();
+      runtime.dispose();
+    });
+
+    test('WSL UNC paths normalize without assuming a distro name', () async {
+      final runtime = RuntimeEventService();
+      final bridge = _FilesEventBridge();
+      final controller = FilesController(
+        bridge: bridge,
+        runtimeEventService: runtime,
+        initialPath: r'\\wsl.localhost\kali-linux\home\cloudos',
+      );
+      await _settleController();
+      final tab = controller.tabs.single;
+      final before = bridge.listCalls[tab.currentPath] ?? 0;
+
+      runtime.ingestForTesting(
+        _event('files.changed', const <String, Object?>{
+          'action': 'renamed',
+          'oldPath': r'\\wsl.localhost\kali-linux\home\cloudos\a.txt',
+          'newPath': r'\\wsl.localhost\kali-linux\home\cloudos\b.txt',
+        }),
+      );
+      await _waitEventDebounce();
+
+      expect(bridge.listCalls[tab.currentPath], before + 1);
       controller.dispose();
       runtime.dispose();
     });
@@ -189,7 +262,10 @@ void main() {
 
       expect(bridge.jobStatusCalls, 1);
       expect(controller.activeJobStatus, 'completed');
-      expect(stopwatch.elapsed, greaterThanOrEqualTo(const Duration(milliseconds: 900)));
+      expect(
+        stopwatch.elapsed,
+        greaterThanOrEqualTo(const Duration(milliseconds: 900)),
+      );
       expect(stopwatch.elapsed, lessThan(const Duration(seconds: 3)));
 
       controller.dispose();
