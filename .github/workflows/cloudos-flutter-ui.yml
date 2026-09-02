@@ -152,6 +152,16 @@ jobs:
           Copy-Item -Path (Join-Path $brokerBin 'CloudOS.SystemBroker.exe') -Destination $release -Force
           Copy-Item -Path (Join-Path $brokerBin 'CloudOS.BrokerProbe.exe') -Destination $release -Force
 
+      - name: Real EXE Session V3 restart and WM_CLOSE smoke
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File scripts/flutter/run-cloudos-session-restart-v23-smoke.ps1 `
+            -ReleaseDirectory 'desktop/CloudOS.FlutterShell/build/windows/x64/runner/Release' `
+            -EvidencePath 'session-restart-v23-smoke.json' `
+            -ExitTimeoutSeconds 15
+          if ($LASTEXITCODE -ne 0) { throw 'Real CloudOS EXE session restart/WM_CLOSE smoke failed.' }
+          if (-not (Test-Path 'session-restart-v23-smoke.json')) { throw 'Session restart evidence missing.' }
+
       - name: Write V23 evidence
         shell: pwsh
         run: |
@@ -164,8 +174,11 @@ jobs:
           if (-not (Test-Path 'conpty-v22-smoke.json')) { throw 'ConPTY evidence missing: conpty-v22-smoke.json' }
           if (-not (Test-Path 'text-files-v23-smoke.json')) { throw 'Typed text-file evidence missing: text-files-v23-smoke.json' }
           if (-not (Test-Path 'eventbus-v23-smoke.json')) { throw 'EventBus evidence missing: eventbus-v23-smoke.json' }
+          if (-not (Test-Path 'session-restart-v23-smoke.json')) { throw 'Session restart evidence missing: session-restart-v23-smoke.json' }
+          $sessionRestart = Get-Content 'session-restart-v23-smoke.json' -Raw | ConvertFrom-Json
+          if ($sessionRestart.verdict -ne 'pass' -or $sessionRestart.launches -ne 2) { throw 'Session restart evidence verdict is not pass/two-launch.' }
           $evidence = [ordered]@{
-            schema = 234
+            schema = 235
             verdict = 'pass'
             flutter = $flutter
             git_sha = '${{ github.sha }}'
@@ -190,6 +203,11 @@ jobs:
             typed_text_files_editor_cap_bytes = 16777216
             truthful_system_tray = $true
             system_snapshot_cache_ttl_ms = 2000
+            session_v3_real_exe_restart = $true
+            session_v3_real_exe_launches = 2
+            session_v3_wm_close = $true
+            session_v3_isolated_localappdata = $true
+            session_v3_restart_evidence_sha256 = (Get-FileHash 'session-restart-v23-smoke.json' -Algorithm SHA256).Hash.ToLowerInvariant()
             five_hour_local_soak_harness_contract = $true
             five_hour_local_soak_executed_in_ci = $false
             arbitrary_command_api = $false
@@ -223,6 +241,7 @@ jobs:
             unified-files-v22.1-smoke.json
             text-files-v23-smoke.json
             eventbus-v23-smoke.json
+            session-restart-v23-smoke.json
             conpty-v22-smoke.json
           if-no-files-found: error
           retention-days: 14
