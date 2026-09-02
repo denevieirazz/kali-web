@@ -86,7 +86,7 @@ class AppRegistry {
     AppDefinition(
       id: 'cloudos:system-monitor',
       name: 'Monitor do Sistema',
-      subtitle: 'CPU, RAM, Disco, Rede e Processos',
+      subtitle: 'CPU, RAM, Disco e Processos',
       icon: Icons.monitor_heart_rounded,
       isInternal: true,
       category: AppCategory.system,
