@@ -14,7 +14,7 @@ struct SystemSnapshot final
 {
     std::string device_name;
     std::string user_name;
-    uint32_t session_id{1};
+    uint32_t session_id{0};
     bool battery_available{false};
     int battery_percent{-1};
     bool network_available{false};
@@ -26,7 +26,6 @@ struct SystemSnapshot final
     bool wsl_available{false};
     std::vector<std::string> distros;
     std::string default_distro;
-    int current_workspace{1};
     uint64_t timestamp_ms{0};
 
     [[nodiscard]] JsonObject ToJsonObject() const;

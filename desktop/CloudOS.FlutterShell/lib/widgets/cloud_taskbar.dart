@@ -4,8 +4,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../core/cloudos_theme.dart';
+import '../models/shell_models.dart';
 import '../services/app_registry.dart';
+import '../services/cloudos_bridge.dart';
 import '../services/runtime_event_service.dart';
+import '../services/system_tray_state_service.dart';
 import '../services/window_manager.dart';
 
 class CloudTaskbar extends StatefulWidget {
@@ -26,8 +29,11 @@ class CloudTaskbar extends StatefulWidget {
     this.currentWorkspace = 1,
     this.onWorkspaceChanged,
     this.notificationCount,
-    this.runtimeService,
     this.windowManager,
+    this.systemSnapshot,
+    this.systemStateService,
+    this.runtimeEventService,
+    this.bridge = const CloudOSBridge(),
     super.key,
   });
 
@@ -46,9 +52,18 @@ class CloudTaskbar extends StatefulWidget {
   final bool terminalRunning;
   final int currentWorkspace;
   final ValueChanged<int>? onWorkspaceChanged;
+
+  /// Explicit compatibility/test override. Production normally leaves this
+  /// null and displays RuntimeEventService.unreadCount.
   final int? notificationCount;
-  final RuntimeEventService? runtimeService;
   final WindowManager? windowManager;
+
+  /// Optional deterministic snapshot for tests/embedded surfaces. If null,
+  /// production uses SystemTrayStateService backed by the System Broker.
+  final CloudSystemSnapshot? systemSnapshot;
+  final SystemTrayStateService? systemStateService;
+  final RuntimeEventService? runtimeEventService;
+  final CloudOSBridge bridge;
 
   @override
   State<CloudTaskbar> createState() => _CloudTaskbarState();
@@ -56,57 +71,93 @@ class CloudTaskbar extends StatefulWidget {
 
 class _CloudTaskbarState extends State<CloudTaskbar> {
   Timer? _clockTimer;
-  late RuntimeEventService _runtime;
   String _timeString = '';
   String _dateString = '';
+
+  late RuntimeEventService _runtimeEvents;
+  late SystemTrayStateService _systemState;
+  bool _ownsSystemState = false;
+  bool _nativeRuntimeEnabled = false;
 
   @override
   void initState() {
     super.initState();
-    _bindRuntime();
+    _nativeRuntimeEnabled = !Platform.environment.containsKey('FLUTTER_TEST');
     _updateTime();
-    if (!Platform.environment.containsKey('FLUTTER_TEST')) {
+    if (_nativeRuntimeEnabled) {
       _clockTimer = Timer.periodic(
         const Duration(seconds: 1),
         (_) => _updateTime(),
       );
     }
     widget.windowManager?.addListener(_onWindowManagerUpdate);
+    _bindRuntimeSources();
+  }
+
+  void _bindRuntimeSources() {
+    _runtimeEvents = widget.runtimeEventService ?? RuntimeEventService.instance;
+    _runtimeEvents.addListener(_onRuntimeUpdate);
+    if (_nativeRuntimeEnabled || widget.runtimeEventService != null) {
+      _runtimeEvents.start();
+    }
+
+    _ownsSystemState = widget.systemStateService == null;
+    _systemState = widget.systemStateService ??
+        SystemTrayStateService(
+          bridge: widget.bridge,
+          runtime: _runtimeEvents,
+        );
+    _systemState.addListener(_onSystemStateUpdate);
+    if ((_nativeRuntimeEnabled || widget.systemStateService != null) &&
+        widget.systemSnapshot == null) {
+      _systemState.start();
+    }
+  }
+
+  void _unbindRuntimeSources() {
+    _runtimeEvents.removeListener(_onRuntimeUpdate);
+    _systemState.removeListener(_onSystemStateUpdate);
+    if (_ownsSystemState) _systemState.dispose();
   }
 
   @override
-  void didUpdateWidget(CloudTaskbar oldWidget) {
+  void didUpdateWidget(covariant CloudTaskbar oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.runtimeService != widget.runtimeService) {
-      _runtime.removeListener(_onRuntimeUpdate);
-      _bindRuntime();
-    }
     if (oldWidget.windowManager != widget.windowManager) {
       oldWidget.windowManager?.removeListener(_onWindowManagerUpdate);
       widget.windowManager?.addListener(_onWindowManagerUpdate);
     }
-  }
 
-  void _bindRuntime() {
-    _runtime = widget.runtimeService ?? RuntimeEventService.instance;
-    _runtime.start();
-    _runtime.addListener(_onRuntimeUpdate);
+    if (!identical(oldWidget.runtimeEventService, widget.runtimeEventService) ||
+        !identical(oldWidget.systemStateService, widget.systemStateService) ||
+        !identical(oldWidget.bridge, widget.bridge)) {
+      _unbindRuntimeSources();
+      _bindRuntimeSources();
+    } else if (oldWidget.systemSnapshot != widget.systemSnapshot &&
+        widget.systemSnapshot == null &&
+        (_nativeRuntimeEnabled || widget.systemStateService != null)) {
+      _systemState.start();
+    }
   }
 
   @override
   void dispose() {
     _clockTimer?.cancel();
-    _runtime.removeListener(_onRuntimeUpdate);
     widget.windowManager?.removeListener(_onWindowManagerUpdate);
+    _unbindRuntimeSources();
     super.dispose();
-  }
-
-  void _onRuntimeUpdate() {
-    if (mounted) setState(() {});
   }
 
   void _onWindowManagerUpdate() {
     if (mounted) setState(() {});
+  }
+
+  void _onRuntimeUpdate() {
+    if (mounted && widget.notificationCount == null) setState(() {});
+  }
+
+  void _onSystemStateUpdate() {
+    if (mounted && widget.systemSnapshot == null) setState(() {});
   }
 
   void _updateTime() {
@@ -125,10 +176,19 @@ class _CloudTaskbarState extends State<CloudTaskbar> {
     }
   }
 
+  CloudSystemSnapshot get _visibleSystemSnapshot =>
+      (widget.systemSnapshot ?? _systemState.snapshot).normalized();
+
+  int get _visibleNotificationCount {
+    final explicit = widget.notificationCount;
+    if (explicit != null) return explicit < 0 ? 0 : explicit;
+    return _runtimeEvents.unreadCount;
+  }
+
   @override
   Widget build(BuildContext context) {
     final wm = widget.windowManager;
-    final notificationCount = widget.notificationCount ?? _runtime.unreadCount;
+    final systemSnapshot = _visibleSystemSnapshot;
 
     return Align(
       alignment: Alignment.bottomCenter,
@@ -159,7 +219,7 @@ class _CloudTaskbarState extends State<CloudTaskbar> {
             Row(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                for (int i = 1; i <= 4; i++) ...<Widget>[
+                for (var i = 1; i <= 4; i++) ...<Widget>[
                   _WorkspacePill(
                     index: i,
                     selected: widget.currentWorkspace == i,
@@ -212,6 +272,8 @@ class _CloudTaskbarState extends State<CloudTaskbar> {
                 _TrayQuickGroup(
                   onPressed: widget.onQuickSettings,
                   active: widget.quickSettingsOpen,
+                  snapshot: systemSnapshot,
+                  brokerConnected: _systemState.brokerConnected,
                 ),
                 const SizedBox(width: 8),
                 _ClockButton(
@@ -222,7 +284,7 @@ class _CloudTaskbarState extends State<CloudTaskbar> {
                 const SizedBox(width: 4),
                 _NotificationTrayButton(
                   active: widget.notificationsOpen,
-                  count: notificationCount,
+                  count: _visibleNotificationCount,
                   onPressed: widget.onNotifications,
                 ),
               ],
@@ -240,7 +302,6 @@ class _CloudTaskbarState extends State<CloudTaskbar> {
     for (final app in pinnedApps) {
       final isOpen = wm.isAppOpen(app.id);
       final isFocused = wm.isAppFocused(app.id);
-
       items.add(
         Padding(
           padding: const EdgeInsets.only(right: 4),
@@ -249,18 +310,15 @@ class _CloudTaskbarState extends State<CloudTaskbar> {
             icon: app.icon,
             active: isFocused,
             isRunning: isOpen,
-            onPressed: () {
-              wm.toggleWindow(app.id);
-            },
+            onPressed: () => wm.toggleWindow(app.id),
           ),
         ),
       );
     }
 
-    final openExtraWindows = wm.windows.where(
-      (w) => !pinnedApps.any((a) => a.id == w.appId),
-    ).toList();
-
+    final openExtraWindows = wm.windows
+        .where((w) => !pinnedApps.any((a) => a.id == w.appId))
+        .toList(growable: false);
     for (final win in openExtraWindows) {
       items.add(
         Padding(
@@ -281,16 +339,12 @@ class _CloudTaskbarState extends State<CloudTaskbar> {
         ),
       );
     }
-
     return items;
   }
 }
 
 class _StartButton extends StatelessWidget {
-  const _StartButton({
-    required this.active,
-    required this.onPressed,
-  });
+  const _StartButton({required this.active, required this.onPressed});
 
   final bool active;
   final VoidCallback onPressed;
@@ -321,7 +375,7 @@ class _StartButton extends StatelessWidget {
               physics: const NeverScrollableScrollPhysics(),
               children: List.generate(
                 4,
-                (index) => Container(
+                (_) => Container(
                   decoration: BoxDecoration(
                     color: active
                         ? CloudOSColors.neonCyan
@@ -355,8 +409,6 @@ class _TaskButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final background = active ? CloudOSColors.active : Colors.transparent;
-
     return Tooltip(
       message: tooltip,
       child: InkWell(
@@ -367,7 +419,7 @@ class _TaskButton extends StatelessWidget {
           width: 40,
           height: 38,
           decoration: BoxDecoration(
-            color: background,
+            color: active ? CloudOSColors.active : Colors.transparent,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color: active ? CloudOSColors.borderStrong : Colors.transparent,
@@ -404,15 +456,57 @@ class _TaskButton extends StatelessWidget {
 }
 
 class _TrayQuickGroup extends StatelessWidget {
-  const _TrayQuickGroup({required this.onPressed, required this.active});
+  const _TrayQuickGroup({
+    required this.onPressed,
+    required this.active,
+    required this.snapshot,
+    required this.brokerConnected,
+  });
 
   final VoidCallback onPressed;
   final bool active;
+  final CloudSystemSnapshot snapshot;
+  final bool brokerConnected;
+
+  IconData get _networkIcon => snapshot.networkAvailable
+      ? Icons.wifi_rounded
+      : Icons.signal_wifi_off_rounded;
+
+  IconData get _volumeIcon {
+    if (!snapshot.volumeAvailable) return Icons.volume_off_outlined;
+    if (snapshot.volume <= 0.001) return Icons.volume_off_rounded;
+    if (snapshot.volume < 0.34) return Icons.volume_mute_rounded;
+    if (snapshot.volume < 0.67) return Icons.volume_down_rounded;
+    return Icons.volume_up_rounded;
+  }
+
+  IconData _batteryIcon(int percent) {
+    if (percent <= 10) return Icons.battery_0_bar_rounded;
+    if (percent <= 25) return Icons.battery_1_bar_rounded;
+    if (percent <= 40) return Icons.battery_2_bar_rounded;
+    if (percent <= 55) return Icons.battery_3_bar_rounded;
+    if (percent <= 70) return Icons.battery_4_bar_rounded;
+    if (percent <= 85) return Icons.battery_5_bar_rounded;
+    return Icons.battery_full_rounded;
+  }
+
+  String get _networkTooltip {
+    if (!snapshot.networkAvailable) return 'Rede indisponível';
+    final name = snapshot.networkName.trim();
+    return name.isEmpty ? 'Rede conectada' : 'Rede: $name';
+  }
+
+  String get _volumeTooltip {
+    if (!snapshot.volumeAvailable) return 'Volume indisponível';
+    return 'Volume: ${(snapshot.volume * 100).round()}%';
+  }
 
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: 'Configurações Rápidas (Ctrl+Alt+Q)',
+      message: brokerConnected
+          ? 'Configurações Rápidas (Ctrl+Alt+Q)'
+          : 'Configurações Rápidas · EventBus reconectando',
       child: InkWell(
         onTap: onPressed,
         borderRadius: BorderRadius.circular(6),
@@ -425,26 +519,54 @@ class _TrayQuickGroup extends StatelessWidget {
               color: active ? CloudOSColors.borderStrong : Colors.transparent,
             ),
           ),
-          child: const Row(
+          child: Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Icon(
-                Icons.wifi_rounded,
-                size: 15,
-                color: Color(0xFF94A3B8),
+              Tooltip(
+                message: _networkTooltip,
+                child: Icon(
+                  _networkIcon,
+                  size: 15,
+                  color: snapshot.networkAvailable
+                      ? const Color(0xFF94A3B8)
+                      : Colors.white38,
+                ),
               ),
-              SizedBox(width: 8),
-              Icon(
-                Icons.volume_up_rounded,
-                size: 15,
-                color: Color(0xFF94A3B8),
+              const SizedBox(width: 8),
+              Tooltip(
+                message: _volumeTooltip,
+                child: Icon(
+                  _volumeIcon,
+                  size: 15,
+                  color: snapshot.volumeAvailable
+                      ? const Color(0xFF94A3B8)
+                      : Colors.white38,
+                ),
               ),
-              SizedBox(width: 8),
-              Icon(
-                Icons.battery_5_bar_rounded,
-                size: 15,
-                color: Color(0xFF94A3B8),
-              ),
+              if (snapshot.batteryAvailable) ...<Widget>[
+                const SizedBox(width: 8),
+                Tooltip(
+                  message: 'Bateria: ${snapshot.batteryPercent}%',
+                  child: Icon(
+                    _batteryIcon(snapshot.batteryPercent),
+                    size: 15,
+                    color: snapshot.batteryPercent <= 15
+                        ? Colors.orangeAccent
+                        : const Color(0xFF94A3B8),
+                  ),
+                ),
+              ],
+              if (!brokerConnected) ...<Widget>[
+                const SizedBox(width: 7),
+                const Tooltip(
+                  message: 'Canal de eventos do System Broker desconectado',
+                  child: Icon(
+                    Icons.link_off_rounded,
+                    size: 13,
+                    color: Colors.orangeAccent,
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -525,8 +647,9 @@ class _NotificationTrayButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final displayCount = count > 99 ? '99+' : '$count';
     return Tooltip(
-      message: count > 0 ? 'Notificações ($count não lidas)' : 'Notificações',
+      message: count > 0 ? '$count notificação(ões) não lida(s)' : 'Notificações',
       child: InkWell(
         onTap: onPressed,
         borderRadius: BorderRadius.circular(6),
@@ -553,7 +676,7 @@ class _NotificationTrayButton extends StatelessWidget {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
-                    count > 99 ? '99+' : '$count',
+                    displayCount,
                     style: const TextStyle(
                       fontSize: 9,
                       fontWeight: FontWeight.bold,

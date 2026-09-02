@@ -20,6 +20,8 @@ namespace CloudOS
 
 namespace
 {
+constexpr uint64_t kSnapshotCacheLifetimeMs = 2000;
+
 std::string WideToUtf8(const std::wstring& wstr)
 {
     if (wstr.empty()) return {};
@@ -33,6 +35,7 @@ std::string WideToUtf8(const std::wstring& wstr)
         nullptr,
         nullptr);
     if (size_needed <= 0) return {};
+
     std::string result(static_cast<size_t>(size_needed), '\0');
     return WideCharToMultiByte(
                CP_UTF8,
@@ -51,7 +54,8 @@ uint64_t NowMs()
 {
     return static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count());
+            std::chrono::system_clock::now().time_since_epoch())
+            .count());
 }
 
 bool QueryMasterVolume(double* out_volume)
@@ -74,10 +78,7 @@ bool QueryMasterVolume(double* out_volume)
         Microsoft::WRL::ComPtr<IMMDevice> device;
         if (SUCCEEDED(hr) && enumerator)
         {
-            hr = enumerator->GetDefaultAudioEndpoint(
-                eRender,
-                eMultimedia,
-                &device);
+            hr = enumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &device);
         }
         else if (SUCCEEDED(hr))
         {
@@ -133,10 +134,7 @@ bool SetMasterVolume(double value)
         Microsoft::WRL::ComPtr<IMMDevice> device;
         if (SUCCEEDED(hr) && enumerator)
         {
-            hr = enumerator->GetDefaultAudioEndpoint(
-                eRender,
-                eMultimedia,
-                &device);
+            hr = enumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &device);
         }
         else if (SUCCEEDED(hr))
         {
@@ -176,6 +174,7 @@ bool SetMasterVolume(double value)
 bool QueryConnectedNetwork(std::string* out_name)
 {
     if (out_name) out_name->clear();
+
     ULONG bytes = 16 * 1024;
     std::vector<unsigned char> buffer(bytes);
     auto* addresses = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buffer.data());
@@ -185,6 +184,7 @@ bool QueryConnectedNetwork(std::string* out_name)
         nullptr,
         addresses,
         &bytes);
+
     if (result == ERROR_BUFFER_OVERFLOW)
     {
         if (bytes == 0 || bytes > 16 * 1024 * 1024) return false;
@@ -207,6 +207,7 @@ bool QueryConnectedNetwork(std::string* out_name)
         {
             continue;
         }
+
         if (out_name && adapter->FriendlyName)
         {
             *out_name = WideToUtf8(adapter->FriendlyName);
@@ -215,6 +216,7 @@ bool QueryConnectedNetwork(std::string* out_name)
     }
     return false;
 }
+
 } // namespace
 
 JsonObject SystemSnapshot::ToJsonObject() const
@@ -234,10 +236,12 @@ JsonObject SystemSnapshot::ToJsonObject() const
     obj["wslAvailable"] = JsonValue(wsl_available);
 
     JsonArray distros_arr;
-    for (const auto& d : distros) distros_arr.push_back(JsonValue(d));
+    for (const auto& distro : distros)
+    {
+        distros_arr.push_back(JsonValue(distro));
+    }
     obj["distros"] = JsonValue(std::move(distros_arr));
     obj["defaultDistro"] = JsonValue(default_distro);
-    obj["currentWorkspace"] = JsonValue(current_workspace);
     obj["timestamp"] = JsonValue(static_cast<int64_t>(timestamp_ms));
     return obj;
 }
@@ -251,7 +255,16 @@ SystemServiceV21& SystemServiceV21::Instance()
 SystemSnapshot SystemServiceV21::GetSnapshot()
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!initialized_.load()) Refresh();
+    const uint64_t now = NowMs();
+    const bool clock_moved_back = snapshot_.timestamp_ms > now;
+    const bool expired =
+        snapshot_.timestamp_ms == 0 ||
+        clock_moved_back ||
+        now - snapshot_.timestamp_ms >= kSnapshotCacheLifetimeMs;
+    if (!initialized_.load() || expired)
+    {
+        Refresh();
+    }
     return snapshot_;
 }
 
@@ -264,18 +277,19 @@ bool SystemServiceV21::SetVolume(double value)
     {
         return false;
     }
+
+    uint64_t generation = 0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         snapshot_.volume_available = true;
         snapshot_.volume = value;
         snapshot_.timestamp_ms = NowMs();
-        generation_++;
+        generation = ++generation_;
     }
 
     JsonObject payload;
     payload["volume"] = JsonValue(value);
-    payload["generation"] =
-        JsonValue(static_cast<int64_t>(generation_.load()));
+    payload["generation"] = JsonValue(static_cast<int64_t>(generation));
     EventBusV21::Instance().Publish("system.volumeChanged", payload);
     return true;
 }
@@ -322,6 +336,7 @@ std::vector<std::string> SystemServiceV21::GetCapabilities()
         "files.text.writeChunk",
         "files.text.abortWrite",
     };
+
     if (snapshot.volume_available)
     {
         capabilities.push_back("system.volume.read");
@@ -337,15 +352,15 @@ std::vector<std::string> SystemServiceV21::GetCapabilities()
 
 void SystemServiceV21::Invalidate()
 {
+    uint64_t generation = 0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         Refresh();
-        generation_++;
+        generation = ++generation_;
     }
 
     JsonObject payload;
-    payload["generation"] =
-        JsonValue(static_cast<int64_t>(generation_.load()));
+    payload["generation"] = JsonValue(static_cast<int64_t>(generation));
     EventBusV21::Instance().Publish("system.snapshotChanged", payload);
 }
 
@@ -354,12 +369,11 @@ void SystemServiceV21::Refresh()
     snapshot_ = {};
 
     WCHAR computer_name[MAX_COMPUTERNAME_LENGTH + 1]{};
-    DWORD size = ARRAYSIZE(computer_name);
-    if (GetComputerNameW(computer_name, &size))
+    DWORD computer_name_size = ARRAYSIZE(computer_name);
+    if (GetComputerNameW(computer_name, &computer_name_size))
     {
         snapshot_.device_name = WideToUtf8(computer_name);
     }
-    // Failure is represented by an empty string. Never fabricate a device name.
 
     WCHAR user_name[256]{};
     DWORD user_size = ARRAYSIZE(user_name);
@@ -367,7 +381,6 @@ void SystemServiceV21::Refresh()
     {
         snapshot_.user_name = WideToUtf8(user_name);
     }
-    // Failure is represented by an empty string. Never fabricate a user name.
 
     snapshot_.session_id = SecurityV21::GetCurrentSessionId();
 
@@ -375,7 +388,8 @@ void SystemServiceV21::Refresh()
     if (GetSystemPowerStatus(&power) && power.BatteryLifePercent != 255)
     {
         snapshot_.battery_available = true;
-        snapshot_.battery_percent = static_cast<int>(power.BatteryLifePercent);
+        snapshot_.battery_percent =
+            std::clamp(static_cast<int>(power.BatteryLifePercent), 0, 100);
     }
     else
     {
@@ -384,16 +398,17 @@ void SystemServiceV21::Refresh()
     }
 
     snapshot_.network_available = QueryConnectedNetwork(&snapshot_.network_name);
+    if (!snapshot_.network_available) snapshot_.network_name.clear();
+
     snapshot_.volume_available = QueryMasterVolume(&snapshot_.volume);
     if (!snapshot_.volume_available) snapshot_.volume = 0.0;
+
     snapshot_.brightness_available = false;
     snapshot_.brightness = 0.0;
 
     snapshot_.distros = WslServiceV21::Instance().GetDistributions();
-    snapshot_.default_distro =
-        WslServiceV21::Instance().GetDefaultDistribution();
+    snapshot_.default_distro = WslServiceV21::Instance().GetDefaultDistribution();
     snapshot_.wsl_available = WslServiceV21::Instance().IsWslAvailable();
-    snapshot_.current_workspace = 1;
     snapshot_.timestamp_ms = NowMs();
     initialized_.store(true);
 }
