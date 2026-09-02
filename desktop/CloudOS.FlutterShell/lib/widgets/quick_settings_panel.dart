@@ -44,8 +44,13 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
   bool _ownsSystemState = false;
   late final bool _nativeRuntimeEnabled;
 
-  CloudSystemSnapshot get _visibleSnapshot =>
-      (_systemState?.snapshot ?? widget.snapshot).normalized();
+  CloudSystemSnapshot get _visibleSnapshot {
+    final service = _systemState;
+    if (service == null || service.lastRefreshAt == null) {
+      return widget.snapshot.normalized();
+    }
+    return service.snapshot.normalized();
+  }
 
   @override
   void initState() {
@@ -64,7 +69,8 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
       return;
     }
 
-    if (oldWidget.snapshot != widget.snapshot && _systemState == null) {
+    if (oldWidget.snapshot != widget.snapshot &&
+        (_systemState == null || _systemState!.lastRefreshAt == null)) {
       _syncControls(widget.snapshot.normalized(), notify: true);
     }
   }
@@ -86,10 +92,8 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
     _systemState!.addListener(_onSystemStateChanged);
     _systemState!.start();
 
-    final live = _systemState!.snapshot;
-    if (_systemState!.lastRefreshAt != null ||
-        live != CloudOSBridge.unavailableSnapshot) {
-      _syncControls(live.normalized(), notify: false);
+    if (_systemState!.lastRefreshAt != null) {
+      _syncControls(_systemState!.snapshot.normalized(), notify: false);
     } else {
       _syncControls(widget.snapshot.normalized(), notify: false);
     }
@@ -106,7 +110,9 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
 
   void _onSystemStateChanged() {
     if (!mounted || _systemState == null) return;
-    _syncControls(_systemState!.snapshot.normalized(), notify: true);
+    final service = _systemState!;
+    if (service.lastRefreshAt == null) return;
+    _syncControls(service.snapshot.normalized(), notify: true);
   }
 
   void _syncControls(CloudSystemSnapshot snapshot, {required bool notify}) {
@@ -151,11 +157,9 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
       return;
     }
     if (service != null && callback != null) {
-      // The native EventBus normally patches this immediately. This refresh is
-      // a fallback for devices/drivers that do not emit the event.
-      service.replaceSnapshotForTesting(
-        service.snapshot.copyWith(volume: value, volumeAvailable: true),
-      );
+      // The callback already confirmed the native write. Keep this shared
+      // presentation state in sync even if the audio driver emits no event.
+      service.acceptConfirmedVolume(value);
     }
   }
 
@@ -177,6 +181,10 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
           content: Text('O monitor não expõe controle de brilho compatível.'),
         ),
       );
+      return;
+    }
+    if (service != null && callback != null) {
+      service.acceptConfirmedBrightness(value);
     }
   }
 
