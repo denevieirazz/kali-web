@@ -46,51 +46,60 @@ if ($secContent -notmatch 'sid\.empty\(\)') {
     throw "SecurityV21 must fail closed when the current user SID cannot be resolved"
 }
 
-# Event delivery must be isolated from EventBus publishers. The publisher
-# callback is allowed to validate and enqueue only. The connection thread owns
-# every named-pipe write for that client, which serializes event frames with RPC
-# responses without a second pipe writer. Per-client queue size is bounded by
-# both frame count and bytes; overflow cancels the stalled client I/O instead of
-# blocking Publish() or allowing unbounded memory growth.
+# Event delivery V23 backpressure contract carried by the V21 Broker:
+# - EventBus publisher callback only serializes/enqueues bounded data.
+# - A ClientSendState owns queue lifecycle and byte accounting per client.
+# - The ClientSessionLoop is the sole I/O owner for its named-pipe handle and
+#   sends both queued events and RPC responses, eliminating concurrent writers.
+# - PeekNamedPipe + a short condition-variable wait prevents a blocking ReadFile
+#   from starving unsolicited events while an idle client is connected.
+# - Overflow cancels the stalled client instead of blocking Publish() or growing
+#   memory without limit.
 $serverContent = Get-Content (Join-Path $brokerSrc "broker_server_v21.cpp") -Raw
 foreach ($required in @(
-    'kMaxQueuedEventFrames',
-    'kMaxQueuedEventBytes',
+    'constexpr size_t kMaxQueuedEventFrames',
+    'constexpr size_t kMaxQueuedEventBytes',
+    'struct ClientSendState final',
+    'std::mutex mutex',
+    'std::condition_variable event_ready',
     'std::deque<std::string> event_queue',
-    'std::mutex event_queue_mutex',
-    'std::condition_variable event_queue_cv',
-    'size_t event_queue_bytes',
-    'event_queue_overflow',
-    'CancelIoEx(pipe, nullptr)',
-    'ProtocolV21::WriteFrame(pipe, queued, &event_write_error)'
+    'size_t queued_event_bytes',
+    'bool active',
+    'TryPopQueuedEvent',
+    'PeekNamedPipe(',
+    'send_state->event_queue.size() >= kMaxQueuedEventFrames',
+    'send_state->queued_event_bytes += serialized.size()',
+    'send_state->event_queue.push_back(std::move(serialized))',
+    'CancelIoEx(send_state->pipe, nullptr)',
+    'SendFrame(pipe, outbound_event)',
+    'SendFrame(pipe, SerializeResponse(res))'
 )) {
     if (-not $serverContent.Contains($required)) {
-        throw "SystemBroker event transport lost bounded backpressure contract: $required"
+        throw "SystemBroker event transport lost bounded single-writer contract: $required"
     }
 }
 
-# The EventBus callback must never own the pipe write. Restrict this assertion
-# to the RegisterClient callback body so WriteFrame calls in the connection
-# thread continue to be required and visible to the contract.
-$registerStart = $serverContent.IndexOf('RegisterClient(')
+$registerStart = $serverContent.IndexOf('EventBusV21::Instance().RegisterClient(')
 if ($registerStart -lt 0) {
     throw "SystemBroker event transport must register EventBus clients"
 }
-$registerEnd = $serverContent.IndexOf('});', $registerStart)
+$registerEnd = $serverContent.IndexOf('        });', $registerStart)
 if ($registerEnd -lt 0) {
     throw "SystemBroker EventBus registration callback could not be bounded for contract inspection"
 }
 $registerBody = $serverContent.Substring($registerStart, $registerEnd - $registerStart)
-if ($registerBody.Contains('ProtocolV21::WriteFrame') -or $registerBody.Contains('WriteFile(')) {
+if ($registerBody.Contains('SendFrame(') -or $registerBody.Contains('WriteFile(')) {
     throw "EventBus publisher callback must enqueue only and must not write directly to the client pipe"
 }
+if (-not $registerBody.Contains('event_queue.push_back')) {
+    throw "EventBus publisher callback must enqueue events into the bounded per-client queue"
+}
 
-# Regressions to the old direct-writer model are forbidden. There must not be a
-# dedicated event writer thread racing the RPC response writer on one pipe.
+# A second writer thread/mutex would reintroduce ordering races between events
+# and RPC responses on one duplex pipe. All writes stay in ClientSessionLoop.
 foreach ($forbidden in @(
     'std::mutex write_mutex',
-    'std::thread event_writer',
-    'CancelIoEx(send_state->pipe, nullptr)'
+    'std::thread event_writer'
 )) {
     if ($serverContent.Contains($forbidden)) {
         throw "SystemBroker event transport regressed to stale multi-writer model: $forbidden"
