@@ -176,9 +176,9 @@ class FilesController extends ChangeNotifier {
         return drive.letter;
       }
     }
-    final normalized = path.replaceAll('/', r'\');
+    final normalized = path.replaceAll('\\', '/');
     final parts = normalized
-        .split(r'\')
+        .split('/')
         .where((part) => part.isNotEmpty)
         .toList();
     return parts.isNotEmpty ? parts.last : path;
@@ -260,11 +260,12 @@ class FilesController extends ChangeNotifier {
     final current = tab.currentPath;
     if (current == 'home' || current.isEmpty) return;
 
-    final lastSlash = current.lastIndexOf(RegExp(r'[\\/]'));
-    if (lastSlash > 0) {
-      final parent = current.substring(0, lastSlash);
-      await navigateTo(parent.endsWith(':') ? '$parent\\' : parent);
-    }
+    final normalized = current.replaceAll('\\', '/');
+    final lastSlash = normalized.lastIndexOf('/');
+    if (lastSlash <= 0) return;
+    var parent = normalized.substring(0, lastSlash);
+    if (parent.length == 2 && parent[1] == ':') parent = '$parent/';
+    await navigateTo(parent.replaceAll('/', '\\'));
   }
 
   Future<void> refresh() async {
@@ -655,8 +656,8 @@ class FilesController extends ChangeNotifier {
   }
 
   String _normalizeFilesystemPath(String input) {
-    var path = input.trim().replaceAll('/', r'\');
-    while (path.length > 3 && path.endsWith(r'\')) {
+    var path = input.trim().replaceAll('\\', '/');
+    while (path.length > 3 && path.endsWith('/')) {
       path = path.substring(0, path.length - 1);
     }
     return path.toLowerCase();
@@ -664,9 +665,11 @@ class FilesController extends ChangeNotifier {
 
   String? _parentDirectory(String normalizedPath) {
     if (normalizedPath.isEmpty) return null;
-    final index = normalizedPath.lastIndexOf(r'\');
+    final index = normalizedPath.lastIndexOf('/');
     if (index <= 0) return null;
-    if (index == 2 && normalizedPath.length >= 2 && normalizedPath[1] == ':') {
+    if (index == 2 &&
+        normalizedPath.length >= 2 &&
+        normalizedPath[1] == ':') {
       return normalizedPath.substring(0, 3);
     }
     return normalizedPath.substring(0, index);
