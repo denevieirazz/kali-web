@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show AppExitType;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -62,6 +63,7 @@ class _CloudOSShellState extends State<CloudOSShell>
   int currentWorkspace = 1;
   String? selectedDesktopIcon;
   Offset? contextMenuPosition;
+  bool _exitRequestInProgress = false;
 
   @override
   void initState() {
@@ -167,6 +169,36 @@ class _CloudOSShellState extends State<CloudOSShell>
       apps = loadedApps;
       snapshot = loadedSnapshot;
     });
+  }
+
+  Future<void> _requestApplicationExit() async {
+    if (_exitRequestInProgress) return;
+    _exitRequestInProgress = true;
+    try {
+      // Force any debounced window geometry/workspace changes into Session V3
+      // and wait until its atomic write queue is fully drained before asking
+      // Flutter/native Windows to terminate the application.
+      await windowManager.flushSession();
+      await ServicesBinding.instance.exitApplication(AppExitType.required);
+    } catch (error, stackTrace) {
+      CloudOSLogger.error(
+        'CloudOSShell',
+        'requestApplicationExit',
+        error,
+        stackTrace,
+      );
+      if (mounted) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Não foi possível encerrar o CloudOS de forma ordenada.',
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) _exitRequestInProgress = false;
+    }
   }
 
   void _closeTransientPanels() {
@@ -857,6 +889,7 @@ class _CloudOSShellState extends State<CloudOSShell>
         bridge: widget.bridge,
         onLaunch: _launchApp,
         onClose: () => setState(() => startOpen = false),
+        onExitRequested: _requestApplicationExit,
       );
     } else if (quickSettingsOpen) {
       child = QuickSettingsPanel(
