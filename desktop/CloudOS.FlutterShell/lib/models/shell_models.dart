@@ -81,10 +81,10 @@ class CloudSystemSnapshot {
     required this.distros,
     this.defaultDistro = '',
     this.currentWorkspace = 1,
-    this.batteryAvailable = true,
-    this.networkAvailable = true,
-    this.volumeAvailable = true,
-    this.brightnessAvailable = true,
+    this.batteryAvailable = false,
+    this.networkAvailable = false,
+    this.volumeAvailable = false,
+    this.brightnessAvailable = false,
   });
 
   final String deviceName;
