@@ -119,13 +119,17 @@ std::string JobManagerV21::SubmitJob(const std::string& type, JobFunction func)
         jobs_[job_id] = job;
         queue_.push_back(job_id);
     }
-    cv_.notify_one();
 
+    // Publish the accepted/queued job before workers are released. WorkerLoop
+    // also gates on announced, so even a spurious condition-variable wakeup
+    // cannot emit progress/completion before job.started.
     JsonObject payload;
     payload["jobId"] = JsonValue(job_id);
     payload["type"] = JsonValue(type);
     payload["state"] = JsonValue(JobStateToString(JobState::Queued));
     EventBusV21::Instance().Publish("job.started", payload);
+    job->announced.store(true);
+    cv_.notify_all();
 
     return job_id;
 }
@@ -159,6 +163,7 @@ bool JobManagerV21::CancelJob(const std::string& job_id)
     payload["jobId"] = JsonValue(job_id);
     payload["state"] = JsonValue(JobStateToString(cancelled_info.state));
     EventBusV21::Instance().Publish("job.cancelled", payload);
+    cv_.notify_all();
     return true;
 }
 
@@ -212,6 +217,7 @@ void JobManagerV21::Reset()
     }
     jobs_.clear();
     queue_.clear();
+    cv_.notify_all();
 }
 
 void JobManagerV21::WorkerLoop()
@@ -234,6 +240,18 @@ void JobManagerV21::WorkerLoop()
         }
 
         if (!job) continue;
+
+        if (!job->announced.load())
+        {
+            std::unique_lock<std::mutex> lock(mutex_);
+            cv_.wait(lock, [this, &job]() {
+                return !running_.load() ||
+                       job->announced.load() ||
+                       job->cancel_flag.load();
+            });
+            if (!running_.load()) break;
+        }
+
         if (job->cancel_flag.load()) continue;
 
         {
