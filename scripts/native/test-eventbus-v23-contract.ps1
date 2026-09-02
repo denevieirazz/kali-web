@@ -89,12 +89,16 @@ Assert-NotContains $taskbar 'notificationCount = 3' 'Fabricated taskbar notifica
 Assert-NotContains $rpcBridge '"events.subscribe",' 'Generic Flutter RPC allowlist must not expose events.subscribe.'
 Assert-NotContains $rpcBridge '"events.unsubscribe",' 'Generic Flutter RPC allowlist must not expose events.unsubscribe.'
 
-# Broker-side publication must enqueue and return; it must never write from the
-# EventBus publisher callback itself or flush synchronously during teardown.
+# Broker-side publication must enqueue and return. A single ClientSessionLoop
+# owns all ReadFile/WriteFile calls for its synchronous duplex pipe; publishers
+# never write to transport threads and idle subscribers do not park in ReadFile.
 Assert-Contains $server 'kMaxQueuedEventFrames = 128' 'Broker per-client event queue frame bound is missing.'
 Assert-Contains $server 'kMaxQueuedEventBytes = 2 * kMaxPayloadBytes' 'Broker per-client event queue byte bound is missing.'
 Assert-Contains $server 'event_queue.push_back' 'Broker EventBus callback is no longer queue-backed.'
-Assert-Contains $server 'event_writer' 'Broker lost the dedicated per-client event writer.'
+Assert-Contains $server 'TryPopQueuedEvent' 'Broker session loop no longer drains its bounded event queue.'
+Assert-Contains $server 'PeekNamedPipe(' 'Broker synchronous session must probe inbound data before entering ReadFile.'
+Assert-Contains $server 'event_ready.wait_for' 'Idle Broker subscribers must wait without monopolizing synchronous pipe I/O.'
+Assert-NotContains $server 'std::thread event_writer' 'Concurrent per-client EventBus writer reintroduced synchronous duplex I/O contention.'
 Assert-NotContains $server 'FlushFileBuffers(pipe)' 'Blocking teardown FlushFileBuffers returned to Broker client teardown.'
 
 Write-Host '[PASS] Dedicated Flutter EventBus V23 architecture contract passed.' -ForegroundColor Green
