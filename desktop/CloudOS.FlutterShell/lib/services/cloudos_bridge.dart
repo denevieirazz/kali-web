@@ -13,16 +13,20 @@ class CloudOSBridge {
 
   final MethodChannel _channel;
 
-  Future<List<CloudApp>> loadApps() async {
+  Future<List<CloudApp>?> tryLoadApps() async {
     try {
       final raw = await _channel.invokeListMethod<Map<Object?, Object?>>('getApps');
-      if (raw == null || raw.isEmpty) return previewApps;
+      if (raw == null || raw.isEmpty) return null;
       return raw.map(cloudAppFromNative).toList(growable: false);
     } on MissingPluginException {
       return previewApps;
     } on PlatformException {
-      return previewApps;
+      return null;
     }
+  }
+
+  Future<List<CloudApp>> loadApps() async {
+    return await tryLoadApps() ?? const <CloudApp>[];
   }
 
   Future<List<CloudFileItem>> loadFiles(String location) async {
@@ -71,11 +75,11 @@ class CloudOSBridge {
     }
   }
 
-  Future<CloudSystemSnapshot> loadSystemSnapshot() async {
+  Future<CloudSystemSnapshot?> tryLoadSystemSnapshot() async {
     try {
       final raw =
           await _channel.invokeMapMethod<String, Object?>('getSystemSnapshot');
-      if (raw == null) return degradedSnapshot;
+      if (raw == null) return null;
       return CloudSystemSnapshot(
         deviceName:
             raw['deviceName'] as String? ?? degradedSnapshot.deviceName,
@@ -107,21 +111,29 @@ class CloudOSBridge {
     } on MissingPluginException {
       return previewSnapshot;
     } on PlatformException {
-      return degradedSnapshot;
+      return null;
     }
   }
 
-  Future<CloudNotificationState> loadNotificationState() async {
+  Future<CloudSystemSnapshot> loadSystemSnapshot() async {
+    return await tryLoadSystemSnapshot() ?? degradedSnapshot;
+  }
+
+  Future<CloudNotificationState?> tryLoadNotificationState() async {
     try {
       final raw =
           await _channel.invokeMapMethod<Object?, Object?>('getNotificationState');
-      if (raw == null) return previewNotificationState;
+      if (raw == null) return null;
       return cloudNotificationStateFromNative(raw);
     } on MissingPluginException {
       return previewNotificationState;
     } on PlatformException {
-      return CloudNotificationState.empty;
+      return null;
     }
+  }
+
+  Future<CloudNotificationState> loadNotificationState() async {
+    return await tryLoadNotificationState() ?? CloudNotificationState.empty;
   }
 
   Future<bool> markNotificationsRead() async {
@@ -161,19 +173,25 @@ class CloudOSBridge {
     }
   }
 
-  Future<Map<String, bool>> loadShellSurfaceStates() async {
+  Future<Map<String, bool>?> tryLoadShellSurfaceStates() async {
     try {
       final raw = await _channel
           .invokeMapMethod<String, Object?>('getShellSurfaceStates');
+      if (raw == null) return null;
       return <String, bool>{
-        'browser': raw?['browser'] as bool? ?? false,
-        'terminal': raw?['terminal'] as bool? ?? false,
+        'browser': raw['browser'] as bool? ?? false,
+        'terminal': raw['terminal'] as bool? ?? false,
       };
     } on MissingPluginException {
       return const <String, bool>{'browser': false, 'terminal': false};
     } on PlatformException {
-      return const <String, bool>{'browser': false, 'terminal': false};
+      return null;
     }
+  }
+
+  Future<Map<String, bool>> loadShellSurfaceStates() async {
+    return await tryLoadShellSurfaceStates() ??
+        const <String, bool>{'browser': false, 'terminal': false};
   }
 
   Future<bool> focusShellSurface(String id) async {
