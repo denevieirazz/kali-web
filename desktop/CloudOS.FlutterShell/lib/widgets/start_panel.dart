@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 
@@ -16,6 +15,7 @@ class StartPanel extends StatefulWidget {
     required this.onClose,
     this.bridge = const CloudOSBridge(),
     this.identityService,
+    this.onExitRequested,
     super.key,
   });
 
@@ -24,6 +24,7 @@ class StartPanel extends StatefulWidget {
   final VoidCallback onClose;
   final CloudOSBridge bridge;
   final SessionIdentityService? identityService;
+  final Future<void> Function()? onExitRequested;
 
   @override
   State<StartPanel> createState() => _StartPanelState();
@@ -461,11 +462,22 @@ class _StartPanelState extends State<StartPanel> {
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: CloudOSColors.danger,
                                 ),
-                                onPressed: () {
+                                onPressed: () async {
                                   Navigator.pop(ctx);
-                                  // This exits only cloudos_flutter_shell.exe.
-                                  // It intentionally does not shut down Windows.
-                                  exit(0);
+                                  final requestExit = widget.onExitRequested;
+                                  if (requestExit == null) {
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'O encerramento ordenado não está disponível nesta superfície.',
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                    return;
+                                  }
+                                  await requestExit();
                                 },
                                 child: const Text(
                                   'Sair do CloudOS',
