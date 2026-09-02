@@ -20,20 +20,48 @@ class BrowserTabItem {
   final WebviewController controller = WebviewController();
   final List<StreamSubscription<Object?>> subscriptions =
       <StreamSubscription<Object?>>[];
+
   bool initialized = false;
   bool isLoading = true;
   bool canGoBack = false;
   bool canGoForward = false;
+  bool disposeRequested = false;
+  bool controllerDisposed = false;
+  bool _textControllerDisposed = false;
   String? errorMessage;
+  Future<void>? _disposeFuture;
 
-  Future<void> dispose() async {
-    for (final subscription in subscriptions) {
-      await subscription.cancel();
-    }
-    urlController.dispose();
-    if (initialized) {
+  Future<void> disposeControllerIfReady() async {
+    if (!initialized || controllerDisposed) return;
+    controllerDisposed = true;
+    try {
       await controller.dispose();
+    } catch (_) {
+      // Disposal is best-effort during teardown; the lifecycle flag prevents
+      // any later operation from reusing this controller.
     }
+  }
+
+  Future<void> dispose() {
+    disposeRequested = true;
+    return _disposeFuture ??= _disposeInternal();
+  }
+
+  Future<void> _disposeInternal() async {
+    final activeSubscriptions = List<StreamSubscription<Object?>>.from(
+      subscriptions,
+    );
+    subscriptions.clear();
+    for (final subscription in activeSubscriptions) {
+      try {
+        await subscription.cancel();
+      } catch (_) {}
+    }
+    if (!_textControllerDisposed) {
+      _textControllerDisposed = true;
+      urlController.dispose();
+    }
+    await disposeControllerIfReady();
   }
 }
 
@@ -56,6 +84,8 @@ class BrowserWindow extends StatefulWidget {
 }
 
 class _BrowserWindowState extends State<BrowserWindow> {
+  static const int maxTabs = 24;
+
   final List<BrowserTabItem> _tabs = <BrowserTabItem>[];
   int _activeTabIndex = 0;
   int _tabCounter = 1;
@@ -82,13 +112,26 @@ class _BrowserWindowState extends State<BrowserWindow> {
 
   @override
   void dispose() {
-    for (final tab in _tabs) {
+    for (final tab in List<BrowserTabItem>.from(_tabs)) {
+      // dispose() marks the tab synchronously before its first await, so an
+      // in-flight initialize() cannot resurrect a controller after State death.
       unawaited(tab.dispose());
     }
     super.dispose();
   }
 
   void _addNewTab([String url = 'https://www.google.com']) {
+    if (_tabs.length >= maxTabs) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Limite de 24 guias atingido. Feche uma guia antes de abrir outra.',
+          ),
+        ),
+      );
+      return;
+    }
+
     final tab = BrowserTabItem(
       id: 'tab_${_tabCounter++}',
       title: 'Nova Guia',
@@ -104,20 +147,32 @@ class _BrowserWindowState extends State<BrowserWindow> {
   Future<void> _initializeTab(BrowserTabItem tab) async {
     try {
       final runtimeVersion = await WebviewController.getWebViewVersion();
+      if (tab.disposeRequested) return;
       if (runtimeVersion == null) {
         throw StateError('Microsoft Edge WebView2 Runtime não está instalado.');
       }
 
       await tab.controller.initialize();
       tab.initialized = true;
+      if (tab.disposeRequested) {
+        await tab.disposeControllerIfReady();
+        return;
+      }
+
       await tab.controller.setPopupWindowPolicy(
         WebviewPopupWindowPolicy.sameWindow,
       );
+      if (tab.disposeRequested) {
+        await tab.disposeControllerIfReady();
+        return;
+      }
 
       tab.subscriptions
         ..add(
           tab.controller.url.listen((url) {
-            if (!mounted || !_tabs.contains(tab)) return;
+            if (!mounted || tab.disposeRequested || !_tabs.contains(tab)) {
+              return;
+            }
             setState(() {
               tab.url = url;
               tab.urlController.value = TextEditingValue(
@@ -129,19 +184,27 @@ class _BrowserWindowState extends State<BrowserWindow> {
         )
         ..add(
           tab.controller.title.listen((title) {
-            if (!mounted || !_tabs.contains(tab)) return;
-            setState(() => tab.title = title.isEmpty ? 'Navegador Web' : title);
+            if (!mounted || tab.disposeRequested || !_tabs.contains(tab)) {
+              return;
+            }
+            setState(
+              () => tab.title = title.isEmpty ? 'Navegador Web' : title,
+            );
           }),
         )
         ..add(
           tab.controller.loadingState.listen((state) {
-            if (!mounted || !_tabs.contains(tab)) return;
+            if (!mounted || tab.disposeRequested || !_tabs.contains(tab)) {
+              return;
+            }
             setState(() => tab.isLoading = state == LoadingState.loading);
           }),
         )
         ..add(
           tab.controller.historyChanged.listen((history) {
-            if (!mounted || !_tabs.contains(tab)) return;
+            if (!mounted || tab.disposeRequested || !_tabs.contains(tab)) {
+              return;
+            }
             setState(() {
               tab.canGoBack = history.canGoBack;
               tab.canGoForward = history.canGoForward;
@@ -150,7 +213,9 @@ class _BrowserWindowState extends State<BrowserWindow> {
         )
         ..add(
           tab.controller.onLoadError.listen((error) {
-            if (!mounted || !_tabs.contains(tab)) return;
+            if (!mounted || tab.disposeRequested || !_tabs.contains(tab)) {
+              return;
+            }
             setState(() {
               tab.isLoading = false;
               tab.errorMessage = 'Falha de navegação WebView2: ${error.name}';
@@ -158,15 +223,27 @@ class _BrowserWindowState extends State<BrowserWindow> {
           }),
         );
 
+      if (tab.disposeRequested) {
+        await tab.dispose();
+        return;
+      }
       await tab.controller.loadUrl(tab.url);
+      if (tab.disposeRequested) {
+        await tab.dispose();
+        return;
+      }
       await _syncControllerActivity();
-      if (mounted && _tabs.contains(tab)) {
+      if (mounted && !tab.disposeRequested && _tabs.contains(tab)) {
         setState(() {
           tab.isLoading = false;
           tab.errorMessage = null;
         });
       }
     } catch (error, stackTrace) {
+      if (tab.disposeRequested) {
+        await tab.disposeControllerIfReady();
+        return;
+      }
       CloudOSLogger.error(
         'BrowserWindow',
         'initializeWebView2',
@@ -185,7 +262,9 @@ class _BrowserWindowState extends State<BrowserWindow> {
   Future<void> _syncControllerActivity() async {
     for (var index = 0; index < _tabs.length; index++) {
       final tab = _tabs[index];
-      if (!tab.initialized) continue;
+      if (!tab.initialized || tab.disposeRequested || tab.controllerDisposed) {
+        continue;
+      }
       try {
         if (widget.isVisible && index == _activeTabIndex) {
           await tab.controller.resume();
@@ -193,6 +272,7 @@ class _BrowserWindowState extends State<BrowserWindow> {
           await tab.controller.suspend();
         }
       } catch (error, stackTrace) {
+        if (tab.disposeRequested) continue;
         CloudOSLogger.error(
           'BrowserWindow',
           'syncWebView2Activity',
@@ -204,13 +284,13 @@ class _BrowserWindowState extends State<BrowserWindow> {
   }
 
   void _selectTab(int index) {
-    if (index == _activeTabIndex) return;
+    if (index == _activeTabIndex || index < 0 || index >= _tabs.length) return;
     setState(() => _activeTabIndex = index);
     unawaited(_syncControllerActivity());
   }
 
   void _closeTab(int index) {
-    if (_tabs.length <= 1) return;
+    if (_tabs.length <= 1 || index < 0 || index >= _tabs.length) return;
     final tab = _tabs.removeAt(index);
     if (_activeTabIndex >= _tabs.length) {
       _activeTabIndex = _tabs.length - 1;
@@ -235,7 +315,13 @@ class _BrowserWindowState extends State<BrowserWindow> {
 
   Future<void> _navigateToUrl(String input) async {
     final tab = _activeTab;
-    if (tab == null || input.trim().isEmpty || !tab.initialized) return;
+    if (tab == null ||
+        input.trim().isEmpty ||
+        !tab.initialized ||
+        tab.disposeRequested ||
+        tab.controllerDisposed) {
+      return;
+    }
     final target = _normalizeTarget(input);
     setState(() {
       tab.url = target;
@@ -246,8 +332,9 @@ class _BrowserWindowState extends State<BrowserWindow> {
     try {
       await tab.controller.loadUrl(target);
     } catch (error, stackTrace) {
+      if (tab.disposeRequested) return;
       CloudOSLogger.error('BrowserWindow', 'navigate', error, stackTrace);
-      if (mounted) {
+      if (mounted && _tabs.contains(tab)) {
         setState(() {
           tab.isLoading = false;
           tab.errorMessage = error.toString();
@@ -258,21 +345,31 @@ class _BrowserWindowState extends State<BrowserWindow> {
 
   Future<void> _goBack() async {
     final tab = _activeTab;
-    if (tab?.initialized == true && tab!.canGoBack) {
+    if (tab?.initialized == true &&
+        tab?.disposeRequested == false &&
+        tab?.controllerDisposed == false &&
+        tab!.canGoBack) {
       await tab.controller.goBack();
     }
   }
 
   Future<void> _goForward() async {
     final tab = _activeTab;
-    if (tab?.initialized == true && tab!.canGoForward) {
+    if (tab?.initialized == true &&
+        tab?.disposeRequested == false &&
+        tab?.controllerDisposed == false &&
+        tab!.canGoForward) {
       await tab.controller.goForward();
     }
   }
 
   Future<void> _reloadOrStop() async {
     final tab = _activeTab;
-    if (tab?.initialized != true) return;
+    if (tab?.initialized != true ||
+        tab?.disposeRequested == true ||
+        tab?.controllerDisposed == true) {
+      return;
+    }
     if (tab!.isLoading) {
       await tab.controller.stop();
     } else {
@@ -282,7 +379,11 @@ class _BrowserWindowState extends State<BrowserWindow> {
 
   Future<void> _toggleDevTools() async {
     final tab = _activeTab;
-    if (tab?.initialized != true) return;
+    if (tab?.initialized != true ||
+        tab?.disposeRequested == true ||
+        tab?.controllerDisposed == true) {
+      return;
+    }
     await tab!.controller.openDevTools();
     if (mounted) setState(() => _isDevToolsOpen = true);
   }
@@ -507,7 +608,7 @@ class _BrowserWindowState extends State<BrowserWindow> {
         ),
       );
     }
-    if (!tab.initialized) {
+    if (!tab.initialized || tab.disposeRequested || tab.controllerDisposed) {
       return const Center(child: CircularProgressIndicator());
     }
     return Webview(tab.controller);
