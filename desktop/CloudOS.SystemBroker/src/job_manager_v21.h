@@ -74,6 +74,9 @@ private:
         JobInfo info;
         JobFunction func;
         std::atomic_bool cancel_flag{false};
+        // Workers cannot execute until job.started has been published. This
+        // makes event ordering deterministic even under spurious CV wakeups.
+        std::atomic_bool announced{false};
     };
 
     mutable std::mutex mutex_;
