@@ -12,6 +12,7 @@ import '../services/cloudos_bridge.dart';
 import '../services/cloudos_logger.dart';
 import '../services/desktop_broker_service.dart';
 import '../services/session_service.dart';
+import '../services/system_tray_state_service.dart';
 import '../services/window_manager.dart';
 import '../widgets/alt_tab_overlay.dart';
 import '../widgets/browser_window.dart';
@@ -50,6 +51,7 @@ class _CloudOSShellState extends State<CloudOSShell>
     with WidgetsBindingObserver {
   final WindowManager windowManager = WindowManager();
   late DesktopBrokerService _desktopService;
+  late SystemTrayStateService _systemState;
 
   List<CloudApp> apps = const <CloudApp>[];
   CloudSystemSnapshot snapshot = CloudOSBridge.unavailableSnapshot;
@@ -69,6 +71,7 @@ class _CloudOSShellState extends State<CloudOSShell>
   void initState() {
     super.initState();
     _desktopService = DesktopBrokerService(widget.bridge);
+    _bindSystemState();
     WidgetsBinding.instance.addObserver(this);
     windowManager.addListener(_onWindowManagerUpdate);
     unawaited(_loadBridgeData());
@@ -80,8 +83,28 @@ class _CloudOSShellState extends State<CloudOSShell>
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.bridge, widget.bridge)) {
       _desktopService = DesktopBrokerService(widget.bridge);
+      _unbindSystemState();
+      _bindSystemState();
       unawaited(_loadBridgeData());
     }
+  }
+
+  void _bindSystemState() {
+    _systemState = SystemTrayStateService(bridge: widget.bridge);
+    _systemState.addListener(_onSystemStateUpdate);
+    _systemState.start();
+  }
+
+  void _unbindSystemState() {
+    _systemState.removeListener(_onSystemStateUpdate);
+    _systemState.dispose();
+  }
+
+  void _onSystemStateUpdate() {
+    if (!mounted || _systemState.lastRefreshAt == null) return;
+    final next = _systemState.snapshot.normalized();
+    if (snapshot == next) return;
+    setState(() => snapshot = next);
   }
 
   @override
@@ -98,6 +121,7 @@ class _CloudOSShellState extends State<CloudOSShell>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     windowManager.removeListener(_onWindowManagerUpdate);
+    _unbindSystemState();
     unawaited(windowManager.flushSession());
     windowManager.dispose();
     super.dispose();
@@ -163,12 +187,9 @@ class _CloudOSShellState extends State<CloudOSShell>
 
   Future<void> _loadBridgeData() async {
     final loadedApps = await widget.bridge.loadApps();
-    final loadedSnapshot = await widget.bridge.loadSystemSnapshot();
     if (!mounted) return;
-    setState(() {
-      apps = loadedApps;
-      snapshot = loadedSnapshot;
-    });
+    setState(() => apps = loadedApps);
+    await _systemState.refresh(reason: 'shell-refresh', force: true);
   }
 
   Future<void> _requestApplicationExit() async {
@@ -782,6 +803,8 @@ class _CloudOSShellState extends State<CloudOSShell>
                       onQuickSettings: _toggleQuickSettings,
                       onNotifications: _toggleNotifications,
                       windowManager: windowManager,
+                      systemStateService: _systemState,
+                      bridge: widget.bridge,
                     ),
                     if (isAltTabOpen)
                       AltTabOverlay(
@@ -895,8 +918,7 @@ class _CloudOSShellState extends State<CloudOSShell>
       child = QuickSettingsPanel(
         key: const ValueKey<String>('quick-settings'),
         snapshot: snapshot,
-        onVolumeChanged: widget.bridge.setVolume,
-        onBrightnessChanged: widget.bridge.setBrightness,
+        systemStateService: _systemState,
         onOpenSettings: () {
           setState(() => quickSettingsOpen = false);
           windowManager.openWindow('cloudos:settings');
