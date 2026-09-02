@@ -166,12 +166,12 @@ class _ProjectsWindowState extends State<ProjectsWindow> {
       ),
     );
 
+    final name = nameCtrl.text.trim();
+    final path = pathCtrl.text.trim();
     nameCtrl.dispose();
     pathCtrl.dispose();
     if (result != true) return;
 
-    final name = nameCtrl.text.trim();
-    final path = pathCtrl.text.trim();
     final dir = Directory(path);
 
     try {
