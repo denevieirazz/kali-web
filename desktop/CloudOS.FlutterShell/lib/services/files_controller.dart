@@ -37,12 +37,19 @@ class FilesTabState {
 }
 
 class FilesController extends ChangeNotifier {
-  FilesController({CloudOSBridge? bridge})
-    : _bridge = bridge ?? const CloudOSBridge() {
+  FilesController({
+    CloudOSBridge? bridge,
+    String initialPath = 'home',
+    String? initialTitle,
+  }) : _bridge = bridge ?? const CloudOSBridge(),
+       _initialPath = initialPath.trim().isEmpty ? 'home' : initialPath.trim(),
+       _initialTitle = initialTitle {
     _init();
   }
 
   final CloudOSBridge _bridge;
+  final String _initialPath;
+  final String? _initialTitle;
 
   final List<FilesTabState> _tabs = <FilesTabState>[];
   int _activeTabIndex = 0;
@@ -100,8 +107,30 @@ class FilesController extends ChangeNotifier {
     }
 
     if (_disposed) return;
-    addTab(title: 'Início', initialPath: 'home');
+    addTab(
+      title: _initialTitle ?? _titleForInitialPath(_initialPath),
+      initialPath: _initialPath,
+    );
     notifyListeners();
+  }
+
+  String _titleForInitialPath(String path) {
+    if (path == 'home') return 'Início';
+    for (final folder in _knownFolders) {
+      if (folder.path.toLowerCase() == path.toLowerCase() ||
+          folder.id.toLowerCase() == path.toLowerCase()) {
+        return folder.name;
+      }
+    }
+    for (final drive in _drives) {
+      if (drive.path.toLowerCase() == path.toLowerCase() ||
+          drive.letter.toLowerCase() == path.toLowerCase()) {
+        return drive.letter;
+      }
+    }
+    final normalized = path.replaceAll('/', r'\');
+    final parts = normalized.split(r'\').where((part) => part.isNotEmpty).toList();
+    return parts.isNotEmpty ? parts.last : path;
   }
 
   void addTab({String title = 'Início', String initialPath = 'home'}) {
@@ -138,15 +167,16 @@ class FilesController extends ChangeNotifier {
 
   Future<void> navigateTo(String path, {String? title}) async {
     final tab = activeTab;
-    if (tab == null || path.trim().isEmpty) return;
+    final target = path.trim();
+    if (tab == null || target.isEmpty) return;
 
     if (tab.historyIndex < tab.history.length - 1) {
       tab.history = tab.history.sublist(0, tab.historyIndex + 1);
     }
-    tab.history.add(path);
+    tab.history.add(target);
     tab.historyIndex = tab.history.length - 1;
-    tab.currentPath = path;
-    if (title != null) tab.title = title;
+    tab.currentPath = target;
+    tab.title = title ?? _titleForInitialPath(target);
     tab.selectedPaths.clear();
 
     await loadTabFiles(tab);
@@ -157,6 +187,7 @@ class FilesController extends ChangeNotifier {
     if (tab == null || !tab.canGoBack) return;
     tab.historyIndex--;
     tab.currentPath = tab.history[tab.historyIndex];
+    tab.title = _titleForInitialPath(tab.currentPath);
     tab.selectedPaths.clear();
     await loadTabFiles(tab);
   }
@@ -166,6 +197,7 @@ class FilesController extends ChangeNotifier {
     if (tab == null || !tab.canGoForward) return;
     tab.historyIndex++;
     tab.currentPath = tab.history[tab.historyIndex];
+    tab.title = _titleForInitialPath(tab.currentPath);
     tab.selectedPaths.clear();
     await loadTabFiles(tab);
   }
@@ -273,6 +305,16 @@ class FilesController extends ChangeNotifier {
       tab.selectedPaths = tab.items.map((i) => i.path).toSet();
       notifyListeners();
     }
+  }
+
+  CloudFileItem? selectedSingleItem() {
+    final tab = activeTab;
+    if (tab == null || tab.selectedPaths.length != 1) return null;
+    final path = tab.selectedPaths.first;
+    for (final item in tab.items) {
+      if (item.path == path) return item;
+    }
+    return null;
   }
 
   Future<bool> createFolder(String name) async {
