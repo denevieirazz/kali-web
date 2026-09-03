@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/cloudos_theme.dart';
 import '../../../models/cloud_system_snapshot.dart';
 import '../../../services/cloudos_bridge.dart';
+import '../../terminal/domain/wsl_runtime_policy.dart';
 
 class SettingsWindow extends StatefulWidget {
   const SettingsWindow({
@@ -46,9 +47,7 @@ class _SettingsWindowState extends State<SettingsWindow> {
         children: <Widget>[
           _buildSidebar(),
           const VerticalDivider(width: 1, color: CloudOSColors.border),
-          Expanded(
-            child: _buildCategoryContent(),
-          ),
+          Expanded(child: _buildCategoryContent()),
         ],
       ),
     );
@@ -86,9 +85,14 @@ class _SettingsWindowState extends State<SettingsWindow> {
                     borderRadius: BorderRadius.circular(8),
                     onTap: () => setState(() => _selectedCategory = index),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
                       decoration: BoxDecoration(
-                        color: isSelected ? CloudOSColors.accentSoft : Colors.transparent,
+                        color: isSelected
+                            ? CloudOSColors.accentSoft
+                            : Colors.transparent,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
@@ -96,7 +100,9 @@ class _SettingsWindowState extends State<SettingsWindow> {
                           Icon(
                             cat.icon,
                             size: 18,
-                            color: isSelected ? CloudOSColors.accent : CloudOSColors.caption,
+                            color: isSelected
+                                ? CloudOSColors.accent
+                                : CloudOSColors.caption,
                           ),
                           const SizedBox(width: 10),
                           Expanded(
@@ -104,8 +110,12 @@ class _SettingsWindowState extends State<SettingsWindow> {
                               cat.title,
                               style: TextStyle(
                                 fontSize: 12.5,
-                                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                                color: isSelected ? Colors.white : CloudOSColors.secondary,
+                                fontWeight: isSelected
+                                    ? FontWeight.w600
+                                    : FontWeight.w400,
+                                color: isSelected
+                                    ? Colors.white
+                                    : CloudOSColors.secondary,
                               ),
                             ),
                           ),
@@ -144,13 +154,28 @@ class _SettingsWindowState extends State<SettingsWindow> {
       children: <Widget>[
         const Text(
           'Informações do Sistema',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
         ),
         const SizedBox(height: 16),
         _buildInfoCard('Nome do Dispositivo', widget.snapshot.deviceName),
-        _buildInfoCard('Workspace Ativo', 'Área de Trabalho ${widget.snapshot.currentWorkspace}'),
-        _buildInfoCard('Bateria', widget.snapshot.batteryAvailable ? '${widget.snapshot.batteryPercent}%' : 'Alimentação CA (Conectado)'),
-        _buildInfoCard('Autoridade Nativa', 'CloudOS Core C++/Win32 (Supervised)'),
+        _buildInfoCard(
+          'Workspace Ativo',
+          'Área de Trabalho ${widget.snapshot.currentWorkspace}',
+        ),
+        _buildInfoCard(
+          'Bateria',
+          widget.snapshot.batteryAvailable
+              ? '${widget.snapshot.batteryPercent}%'
+              : 'Alimentação CA (Conectado)',
+        ),
+        _buildInfoCard(
+          'Autoridade Nativa',
+          'CloudOS Core C++/Win32 (Supervised)',
+        ),
         _buildInfoCard('Apresentação', 'CloudOS V21 Flutter Engine Desktop'),
       ],
     );
@@ -162,14 +187,29 @@ class _SettingsWindowState extends State<SettingsWindow> {
       children: <Widget>[
         const Text(
           'Áudio e Vídeo',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
         ),
         const SizedBox(height: 20),
-        const Text('Volume do Sistema', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+        const Text(
+          'Volume do Sistema',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         const SizedBox(height: 8),
         Row(
           children: <Widget>[
-            const Icon(Icons.volume_down_rounded, color: CloudOSColors.secondary, size: 20),
+            const Icon(
+              Icons.volume_down_rounded,
+              color: CloudOSColors.secondary,
+              size: 20,
+            ),
             Expanded(
               child: Slider(
                 value: _volume,
@@ -182,15 +222,29 @@ class _SettingsWindowState extends State<SettingsWindow> {
                 },
               ),
             ),
-            Text('${(_volume * 100).round()}%', style: const TextStyle(color: Colors.white, fontSize: 12)),
+            Text(
+              '${(_volume * 100).round()}%',
+              style: const TextStyle(color: Colors.white, fontSize: 12),
+            ),
           ],
         ),
         const SizedBox(height: 24),
-        const Text('Brilho do Display', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+        const Text(
+          'Brilho do Display',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         const SizedBox(height: 8),
         Row(
           children: <Widget>[
-            const Icon(Icons.brightness_low_rounded, color: CloudOSColors.secondary, size: 20),
+            const Icon(
+              Icons.brightness_low_rounded,
+              color: CloudOSColors.secondary,
+              size: 20,
+            ),
             Expanded(
               child: Slider(
                 value: _brightness,
@@ -203,7 +257,10 @@ class _SettingsWindowState extends State<SettingsWindow> {
                 },
               ),
             ),
-            Text('${(_brightness * 100).round()}%', style: const TextStyle(color: Colors.white, fontSize: 12)),
+            Text(
+              '${(_brightness * 100).round()}%',
+              style: const TextStyle(color: Colors.white, fontSize: 12),
+            ),
           ],
         ),
       ],
@@ -216,10 +273,19 @@ class _SettingsWindowState extends State<SettingsWindow> {
       children: <Widget>[
         const Text(
           'Rede e Internet',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
         ),
         const SizedBox(height: 16),
-        _buildInfoCard('Status da Conexão', widget.snapshot.networkAvailable ? 'Conectado à Internet' : 'Desconectado'),
+        _buildInfoCard(
+          'Status da Conexão',
+          widget.snapshot.networkAvailable
+              ? 'Conectado à Internet'
+              : 'Desconectado',
+        ),
         _buildInfoCard('Adaptador / Rede', widget.snapshot.networkName),
         _buildInfoCard('Tipo de Interface', 'Wi-Fi / Ethernet Dual Protocol'),
       ],
@@ -227,54 +293,136 @@ class _SettingsWindowState extends State<SettingsWindow> {
   }
 
   Widget _buildWslSection() {
+    final policy = WslRuntimePolicy(
+      wslAvailable: widget.snapshot.wslAvailable,
+      installedDistros: widget.snapshot.distros,
+      defaultDistro: widget.snapshot.defaultDistro,
+    );
+
+    final engineStatus = !policy.wslAvailable
+        ? 'Indisponível'
+        : policy.hasInstalledDistros
+        ? 'Detectado • ${policy.installedDistros.length} distro(s) registrada(s)'
+        : 'Detectado • nenhuma distro registrada';
+
     return ListView(
       padding: const EdgeInsets.all(24),
       children: <Widget>[
         const Text(
-          'Subsistema Windows para Linux (WSL2)',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+          'Linux Runtime / WSL',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'O CloudOS só marca uma distribuição como disponível quando ela é realmente reportada pelo System Broker.',
+          style: TextStyle(color: CloudOSColors.caption, fontSize: 12),
         ),
         const SizedBox(height: 16),
-        _buildInfoCard('Suporte WSL', widget.snapshot.wslAvailable ? 'Ativo e Operacional' : 'Indisponível'),
+        _buildInfoCard('Engine WSL', engineStatus),
+        _buildInfoCard(
+          'Distro padrão',
+          policy.defaultDistro.isEmpty
+              ? 'Não configurada'
+              : policy.defaultDistro,
+        ),
+        _buildInfoCard(
+          'Runtime de segurança',
+          policy.kaliInstalled
+              ? policy.preferredSecurityDistro
+              : 'Kali Linux não instalada',
+        ),
         const SizedBox(height: 12),
-        const Text('Distribuições Registradas:', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+        const Text(
+          'Distribuições detectadas:',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         const SizedBox(height: 8),
-        if (widget.snapshot.distros.isEmpty)
-          const Text('Nenhuma distribuição WSL encontrada.', style: TextStyle(color: CloudOSColors.caption, fontSize: 12))
+        if (!policy.wslAvailable)
+          const _RuntimeNotice(
+            icon: Icons.error_outline_rounded,
+            title: 'WSL indisponível',
+            message:
+                'O Windows não reportou um runtime WSL disponível. Sessões Linux permanecem desativadas.',
+          )
+        else if (!policy.hasInstalledDistros)
+          const _RuntimeNotice(
+            icon: Icons.info_outline_rounded,
+            title: 'Nenhuma distro detectada',
+            message:
+                'O WSL existe, mas o Broker não reportou nenhuma distribuição registrada. O CloudOS não abrirá uma sessão Linux falsa.',
+          )
         else
-          for (final distro in widget.snapshot.distros)
-            Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFF18202E),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: CloudOSColors.border),
-              ),
-              child: Row(
-                children: <Widget>[
-                  const Icon(Icons.terminal_rounded, color: CloudOSColors.linux, size: 22),
-                  const SizedBox(width: 12),
-                  Text(
-                    distro,
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
-                  ),
-                  const Spacer(),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: CloudOSColors.success.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: const Text(
-                      'WSL 2',
-                      style: TextStyle(color: CloudOSColors.success, fontSize: 11, fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+          for (final distro in policy.installedDistros)
+            _buildDistroCard(distro, policy),
+        if (policy.wslAvailable && !policy.kaliInstalled) ...<Widget>[
+          const SizedBox(height: 8),
+          const _RuntimeNotice(
+            icon: Icons.security_rounded,
+            title: 'Kali não instalada',
+            message:
+                'O backend de segurança continua indisponível até uma distribuição Kali real ser instalada e detectada. Ubuntu ou outra distro não será renomeada para Kali.',
+          ),
+        ],
       ],
+    );
+  }
+
+  Widget _buildDistroCard(String distro, WslRuntimePolicy policy) {
+    final isDefault = distro == policy.defaultDistro;
+    final isSecurity = WslRuntimePolicy.isKali(distro);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF18202E),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: CloudOSColors.border),
+      ),
+      child: Row(
+        children: <Widget>[
+          const Icon(
+            Icons.terminal_rounded,
+            color: CloudOSColors.linux,
+            size: 22,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  distro,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                const Text(
+                  'Registrada no WSL',
+                  style: TextStyle(
+                    color: CloudOSColors.caption,
+                    fontSize: 10.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (isDefault) const _RuntimeBadge(label: 'Padrão'),
+          if (isDefault && isSecurity) const SizedBox(width: 6),
+          if (isSecurity) const _RuntimeBadge(label: 'Segurança'),
+        ],
+      ),
     );
   }
 
@@ -292,23 +440,52 @@ class _SettingsWindowState extends State<SettingsWindow> {
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: CloudOSColors.accent),
               ),
-              child: const Icon(Icons.cloud_done_rounded, color: CloudOSColors.accent, size: 28),
+              child: const Icon(
+                Icons.cloud_done_rounded,
+                color: CloudOSColors.accent,
+                size: 28,
+              ),
             ),
             const SizedBox(width: 16),
             const Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Text('CloudOS', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
-                Text('Versão 21.0.0 (Build Modular AI)', style: TextStyle(fontSize: 12, color: CloudOSColors.caption)),
+                Text(
+                  'CloudOS',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                Text(
+                  'Versão 21.0.0 (Build Modular AI)',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: CloudOSColors.caption,
+                  ),
+                ),
               ],
             ),
           ],
         ),
         const SizedBox(height: 24),
-        _buildInfoCard('Arquitetura', 'Shell Visual Única com Window Manager Interno'),
-        _buildInfoCard('Engine Gráfica', 'Flutter Windows Embedder (Seamless Canvas)'),
-        _buildInfoCard('System Broker', 'CloudOS.SystemBroker.exe V21 (Named Pipe IPC)'),
-        _buildInfoCard('Supervisor', 'CloudOS.Supervisor.exe V11 (Headless Watchdog)'),
+        _buildInfoCard(
+          'Arquitetura',
+          'Shell Visual Única com Window Manager Interno',
+        ),
+        _buildInfoCard(
+          'Engine Gráfica',
+          'Flutter Windows Embedder (Seamless Canvas)',
+        ),
+        _buildInfoCard(
+          'System Broker',
+          'CloudOS.SystemBroker.exe V21 (Named Pipe IPC)',
+        ),
+        _buildInfoCard(
+          'Supervisor',
+          'CloudOS.Supervisor.exe V11 (Headless Watchdog)',
+        ),
         _buildInfoCard('Licença', 'Proprietário • Douglas (Administrador)'),
       ],
     );
@@ -328,7 +505,10 @@ class _SettingsWindowState extends State<SettingsWindow> {
           Expanded(
             child: Text(
               label,
-              style: const TextStyle(color: CloudOSColors.secondary, fontSize: 12),
+              style: const TextStyle(
+                color: CloudOSColors.secondary,
+                fontSize: 12,
+              ),
             ),
           ),
           const SizedBox(width: 8),
@@ -350,8 +530,90 @@ class _SettingsWindowState extends State<SettingsWindow> {
   }
 }
 
+class _RuntimeNotice extends StatelessWidget {
+  const _RuntimeNotice({
+    required this.icon,
+    required this.title,
+    required this.message,
+  });
+
+  final IconData icon;
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF171D28),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: CloudOSColors.border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Icon(icon, size: 18, color: CloudOSColors.caption),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  message,
+                  style: const TextStyle(
+                    color: CloudOSColors.caption,
+                    fontSize: 11,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RuntimeBadge extends StatelessWidget {
+  const _RuntimeBadge({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: CloudOSColors.accentSoft,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: CloudOSColors.accent,
+          fontSize: 10.5,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
 class _SettingsCategory {
   const _SettingsCategory(this.title, this.icon);
+
   final String title;
   final IconData icon;
 }
