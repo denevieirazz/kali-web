@@ -6,6 +6,7 @@ import {
   normalizeNetworkAssessmentHistory,
   type NetworkAssessmentHistoryRecord,
 } from '../../core/networkAssessmentHistory.js';
+import { buildNetworkAssessmentMarkdown } from '../../core/networkAssessmentReport.js';
 import { apiClient } from '../../services/apiClient';
 import { getUserStorageKey } from '../../services/userScope.js';
 import './NetworkAssessmentPanel.css';
@@ -44,11 +45,12 @@ function formatDuration(value: number | null | undefined) {
   if (!Number.isFinite(value)) return '—';
   return (value || 0) < 1000 ? `${Math.round(value || 0)} ms` : `${((value || 0) / 1000).toFixed(1)} s`;
 }
-function downloadJson(filename: string, payload: unknown) {
-  const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+function downloadBlob(filename: string, body: string, type: string) {
+  const url = URL.createObjectURL(new Blob([body], { type }));
   const anchor = document.createElement('a'); anchor.href = url; anchor.download = filename; anchor.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
+function downloadJson(filename: string, payload: unknown) { downloadBlob(filename, JSON.stringify(payload, null, 2), 'application/json'); }
 
 export default function NetworkAssessmentPanel({ distribution, activeScope, onNotice, onError }: Props) {
   const [overview, setOverview] = useState<NetworkOverview | null>(null);
@@ -177,6 +179,12 @@ export default function NetworkAssessmentPanel({ distribution, activeScope, onNo
     downloadJson(`cloudos-network-${result.target.replace(/[^a-z0-9.-]+/gi, '_')}-${Date.now()}.json`, buildAiPayload());
     onNotice?.('Evidência JSON exportada localmente.');
   };
+  const exportReport = () => {
+    if (!result) return;
+    const safeTarget = result.target.replace(/[^a-z0-9.-]+/gi, '_');
+    downloadBlob(`cloudos-network-report-${safeTarget}-${Date.now()}.md`, buildNetworkAssessmentMarkdown(buildAiPayload()), 'text/markdown;charset=utf-8');
+    onNotice?.('Relatório defensivo em Markdown exportado localmente.');
+  };
 
   return <section className="ktc-network" aria-label="Rede e Wi-Fi">
     <div className="ktc-network-head"><div><small>Assessment guiado · V2</small><h2>Rede & Wi‑Fi</h2><p>Mapeie a rede local, entenda cada dispositivo, acompanhe mudanças e entregue contexto limpo para a IA.</p></div><div className="ktc-network-policy"><span>✓ rede privada/local</span><span>✓ presets fechados</span><span>✓ até /24</span><span>✓ evidência estruturada</span></div></div>
@@ -190,7 +198,7 @@ export default function NetworkAssessmentPanel({ distribution, activeScope, onNo
       <div className="ktc-network-runner"><label><span>O que você quer fazer?</span><select value={preset} onChange={event => setPreset(event.target.value as typeof preset)}><option value="discover">Descobrir dispositivos conectados</option><option value="commonPorts">Checar portas comuns de um dispositivo</option><option value="services">Criar perfil de serviços do dispositivo</option></select></label><label><span>Alvo privado/local</span><input value={target} onChange={event => setTarget(event.target.value)} placeholder={preset === 'discover' ? '192.168.1.0/24' : '192.168.1.10'} /></label><button className="ktc-network-primary" type="button" onClick={() => void runAssessment()} disabled={scanning || !distribution}>{scanning ? 'Analisando…' : '▶ Executar avaliação'}</button></div>
       <div className="ktc-network-explain"><strong>O que este modo faz</strong><p>{preset === 'discover' ? 'Encontra quais dispositivos respondem na rede local; não tenta autenticação.' : preset === 'commonPorts' ? 'Verifica um conjunto pequeno de portas TCP comuns em um único IP local.' : 'Identifica de forma leve os serviços aparentes e transforma a superfície observada em recomendações defensivas.'}</p></div>
 
-      {result && <div className="ktc-network-results"><div className="ktc-network-results-head"><div><small>{result.label} · {formatDuration(result.durationMs)}</small><strong>{upHosts.length} dispositivo(s) ativo(s)</strong><span>{result.target}</span></div><div className="ktc-network-result-actions"><span className={`ktc-risk ktc-risk--${result.insights?.highestSeverity || 'info'}`}>atenção {SEVERITY_LABEL[result.insights?.highestSeverity || 'info']}</span><button type="button" onClick={() => void copyAiContext()}>Copiar para IA</button><button type="button" onClick={exportEvidence}>Exportar JSON</button></div></div>
+      {result && <div className="ktc-network-results"><div className="ktc-network-results-head"><div><small>{result.label} · {formatDuration(result.durationMs)}</small><strong>{upHosts.length} dispositivo(s) ativo(s)</strong><span>{result.target}</span></div><div className="ktc-network-result-actions"><span className={`ktc-risk ktc-risk--${result.insights?.highestSeverity || 'info'}`}>atenção {SEVERITY_LABEL[result.insights?.highestSeverity || 'info']}</span><button type="button" onClick={() => void copyAiContext()}>Copiar para IA</button><button type="button" onClick={exportEvidence}>JSON</button><button type="button" onClick={exportReport}>Relatório .md</button></div></div>
         {result.hosts.length === 0 ? <p className="ktc-network-empty">Nenhum dispositivo foi retornado por esse preset.</p> : <div className="ktc-network-hosts">{result.hosts.map(host => { const insight = result.insights?.hosts.find(item => item.address === host.address); const neighbor = diagnostics?.neighbors.find(item => item.address === host.address); return <article className={selectedHostAddress === host.address ? 'is-selected' : ''} key={host.address}><button type="button" className="ktc-host-select" onClick={() => setSelectedHostAddress(host.address)}><header><strong>{host.address}</strong><span className={`ktc-risk ktc-risk--${insight?.highestSeverity || 'info'}`}>{SEVERITY_LABEL[insight?.highestSeverity || 'info']}</span></header><p>{host.hostname || 'Dispositivo local'}{neighbor?.mac ? ` · ${neighbor.mac}` : ''}</p>{insight?.role && <small className="ktc-host-role">{insight.role.label} · hipótese {insight.role.confidence === 'medium' ? 'moderada' : 'baixa'}</small>}{host.ports.length > 0 ? <div className="ktc-network-ports">{host.ports.map(port => <span key={`${host.address}-${port.port}`}>{port.port}/{port.protocol} · {port.service || port.state}</span>)}</div> : <p>Detectado; este preset não enumerou serviços.</p>}</button><button type="button" className="ktc-host-profile" onClick={() => void profileHost(host.address)} disabled={scanning}>Aprofundar neste host →</button></article>; })}</div>}
       </div>}
 
