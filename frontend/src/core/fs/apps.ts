@@ -14,6 +14,7 @@ export const appExes: [string, string, string, string, string, string, string][]
   ['C:\\Program Files\\ObsidianOS Apps\\taskmgr.obx', 'taskmgr.obx', 'C:\\Program Files\\ObsidianOS Apps', 'task-manager', '📊', 'system', 'Gerenciador de Tarefas'],
   ['C:\\Program Files\\ObsidianOS Apps\\msedge.obx', 'msedge.obx', 'C:\\Program Files\\ObsidianOS Apps', 'browser', '🌐', 'productivity', 'Navegador Web'],
   ['C:\\Program Files\\ObsidianOS Apps\\windows-installer.obx', 'windows-installer.obx', 'C:\\Program Files\\ObsidianOS Apps', 'windows-installer', '🛡️', 'system', 'Instaladores Windows'],
+  ['C:\\Program Files\\ObsidianOS Apps\\security-center.obx', 'security-center.obx', 'C:\\Program Files\\ObsidianOS Apps', 'security-center', '🎯', 'utilities', 'Security Center'],
   ['C:\\Program Files\\ObsidianOS Apps\\kali-tool-center.obx', 'kali-tool-center.obx', 'C:\\Program Files\\ObsidianOS Apps', 'kali-tool-center', '🐉', 'utilities', 'Kali Tool Center'],
   ['C:\\Program Files\\ObsidianOS Apps\\network-inspector.obx', 'network-inspector.obx', 'C:\\Program Files\\ObsidianOS Apps', 'network-inspector', '⌁', 'utilities', 'Network Inspector'],
   ['C:\\Program Files\\ObsidianOS Apps\\wifi-inspector.obx', 'wifi-inspector.obx', 'C:\\Program Files\\ObsidianOS Apps', 'wifi-inspector', '◉', 'utilities', 'Wi‑Fi Inspector'],
