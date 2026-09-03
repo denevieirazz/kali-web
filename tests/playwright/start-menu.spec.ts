@@ -15,7 +15,7 @@ const auditedWindowsViewportNames = [
 ];
 
 const deterministicWindowsCount = 218;
-const cloudOSBuiltinCount = 29;
+const cloudOSBuiltinCount = 30;
 const deterministicAllAppsCount = deterministicWindowsCount + cloudOSBuiltinCount;
 
 function windowsFixture(name: string, index: number) {
@@ -89,6 +89,7 @@ test.describe('PW-02 — Menu Iniciar', () => {
       'Configurações',
       'Explorador de Arquivos',
       'Gerenciador de Tarefas',
+      'Security Center',
       'Kali Tool Center',
       'Network Inspector',
       'Wi‑Fi Inspector',
