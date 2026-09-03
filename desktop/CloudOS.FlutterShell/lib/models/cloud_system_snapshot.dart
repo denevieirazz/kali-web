@@ -1,3 +1,22 @@
+class CloudWslDistributionSnapshot {
+  const CloudWslDistributionSnapshot({
+    required this.name,
+    this.version,
+    this.isDefault = false,
+  });
+
+  final String name;
+
+  /// Broker-authoritative WSL generation. Null means the passive Windows
+  /// registration metadata did not prove whether this distro is WSL1 or WSL2.
+  final int? version;
+  final bool isDefault;
+
+  bool get versionKnown => version == 1 || version == 2;
+  bool get isWsl1 => version == 1;
+  bool get isWsl2 => version == 2;
+}
+
 class CloudSystemSnapshot {
   const CloudSystemSnapshot({
     required this.deviceName,
@@ -8,9 +27,8 @@ class CloudSystemSnapshot {
     required this.wslAvailable,
     required this.distros,
     this.defaultDistro = '',
-    this.wslInstalled = false,
-    this.wslVersion2Available = false,
-    this.distroVersions = const <String, int>{},
+    this.wslEngineAvailable = false,
+    this.wslDistros = const <CloudWslDistributionSnapshot>[],
     this.networkAvailable = true,
     this.volumeAvailable = true,
     this.brightnessAvailable = true,
@@ -28,32 +46,41 @@ class CloudSystemSnapshot {
   final bool batteryAvailable;
   final int batteryPercent;
 
-  /// Backward-compatible V21 field. True only when CloudOS has at least one
-  /// registered WSL distribution that is usable by the broker.
+  /// Backward-compatible V21 field. True only when CloudOS has a detected WSL
+  /// engine and at least one registered distribution usable by legacy callers.
   final bool wslAvailable;
 
-  /// True when the Windows WSL executable/runtime is present, even if there
-  /// are currently no registered distributions.
-  final bool wslInstalled;
+  /// Passive evidence that the Windows WSL engine exists. This is independent
+  /// from whether any Linux distribution is currently registered.
+  final bool wslEngineAvailable;
 
-  /// True when at least one registered distribution is explicitly WSL2.
-  final bool wslVersion2Available;
-
+  /// Legacy name-only inventory kept for compatibility with existing widgets.
   final List<String> distros;
   final String defaultDistro;
 
-  /// Broker-authoritative WSL version per registered distribution. Missing or
-  /// zero means unknown; callers must not infer WSL2 from the distro name.
-  final Map<String, int> distroVersions;
+  /// Typed broker inventory. Version is null unless Windows registration
+  /// metadata proves WSL1 or WSL2; the UI must not infer WSL2 from a name.
+  final List<CloudWslDistributionSnapshot> wslDistros;
 
   final int currentWorkspace;
+
+  // Compatibility/readability aliases for newer Linux-runtime code.
+  bool get wslInstalled => wslEngineAvailable;
+  bool get wslVersion2Available => wslDistros.any((item) => item.isWsl2);
+  bool get hasUnknownWslVersions =>
+      wslDistros.any((item) => !item.versionKnown);
 
   int distroVersion(String distro) {
     final wanted = distro.trim().toLowerCase();
     if (wanted.isEmpty) return 0;
-    for (final entry in distroVersions.entries) {
-      if (entry.key.toLowerCase() == wanted) return entry.value;
+    for (final item in wslDistros) {
+      if (item.name.toLowerCase() == wanted) return item.version ?? 0;
     }
     return 0;
   }
+
+  Map<String, int> get distroVersions => <String, int>{
+        for (final item in wslDistros)
+          if (item.versionKnown) item.name: item.version!,
+      };
 }
