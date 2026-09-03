@@ -26,14 +26,29 @@ foreach ($required in @(
     'COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE',
     'COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED',
     'ScheduleWebViewRecovery',
+    'kRecoveryWindowMs',
     'kMaximumRecoveryAttempts',
+    'RecoverWebView',
+    'ResetWebView',
     'add_PermissionRequested',
     'get_IsUserInitiated',
+    'COREWEBVIEW2_PERMISSION_KIND_MICROPHONE',
+    'COREWEBVIEW2_PERMISSION_KIND_CAMERA',
+    'COREWEBVIEW2_PERMISSION_KIND_GEOLOCATION',
     'COREWEBVIEW2_PERMISSION_STATE_DENY',
     'COREWEBVIEW2_PERMISSION_STATE_ALLOW',
     'add_NewWindowRequested',
     'put_Handled(TRUE)',
     'Popup com protocolo externo bloqueado',
+    'ICoreWebView2_4',
+    'add_DownloadStarting',
+    'remove_DownloadStarting',
+    'get_ResultFilePath',
+    'put_ResultFilePath',
+    'put_Cancel(TRUE)',
+    'UniqueDownloadPath',
+    'CloudOSNativeFolderPickerV16::Pick',
+    'NativeIntegrationV16::DownloadsFolder',
     'WM_DPICHANGED',
     'COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC'
 )) {
@@ -43,10 +58,14 @@ foreach ($required in @(
 }
 
 foreach ($required in @(
+    'webview_v4_',
     'process_failed_registered_',
     'permission_requested_registered_',
     'new_window_requested_registered_',
+    'download_starting_registered_',
+    'download_starting_token_',
     'recovery_attempts_',
+    'recovery_window_start_',
     'ResetWebView() noexcept'
 )) {
     if (-not $header.Contains($required)) {
@@ -68,4 +87,4 @@ foreach ($forbidden in @(
     }
 }
 
-Write-Host '[PASS] Browser Resilience V22: ProcessFailed recovery, bounded retry, explicit web permission policy, internal popup routing and PerMonitorV2 resize are protected.'
+Write-Host '[PASS] Browser Resilience V22: bounded ProcessFailed recovery, explicit camera/microphone/geolocation policy, internal popup routing, guarded download destination/cancel flow and PerMonitorV2 resize are protected.'
