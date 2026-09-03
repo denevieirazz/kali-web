@@ -10,6 +10,8 @@
 #include <shellapi.h>
 #include <shlwapi.h>
 
+#include <algorithm>
+
 namespace CloudOS
 {
 
@@ -89,10 +91,26 @@ bool BoolField(const JsonObject& object, const char* key, bool fallback = false)
     return value != nullptr && value->IsBool() ? value->AsBool() : fallback;
 }
 
+bool TryBoolField(const JsonObject& object, const char* key, bool& out)
+{
+    const JsonValue* value = FindValue(object, key);
+    if (value == nullptr || !value->IsBool()) return false;
+    out = value->AsBool();
+    return true;
+}
+
 int64_t IntField(const JsonObject& object, const char* key, int64_t fallback = 0)
 {
     const JsonValue* value = FindValue(object, key);
     return value != nullptr && value->IsInt() ? value->AsInt() : fallback;
+}
+
+bool TryIntField(const JsonObject& object, const char* key, int64_t& out)
+{
+    const JsonValue* value = FindValue(object, key);
+    if (value == nullptr || !value->IsInt()) return false;
+    out = value->AsInt();
+    return true;
 }
 
 double DoubleField(const JsonObject& object, const char* key, double fallback = 0.0)
@@ -118,6 +136,30 @@ BrokerRequest MakeRequest(
     request.method = method;
     request.payload = std::move(payload);
     return request;
+}
+
+bool SameName(const std::string& left, const std::string& right)
+{
+    if (left.size() != right.size()) return false;
+    return std::equal(
+        left.begin(),
+        left.end(),
+        right.begin(),
+        [](unsigned char a, unsigned char b) {
+            return std::tolower(a) == std::tolower(b);
+        });
+}
+
+bool ContainsDistroName(
+    const std::vector<BrokerClientWslDistributionSnapshot>& distros,
+    const std::string& name)
+{
+    return std::any_of(
+        distros.begin(),
+        distros.end(),
+        [&name](const BrokerClientWslDistributionSnapshot& item) {
+            return SameName(item.name, name);
+        });
 }
 } // namespace
 
@@ -457,8 +499,24 @@ bool CloudOSBrokerClientV21::GetSystemSnapshot(BrokerClientSnapshot& out_snapsho
     snapshot.volume = DoubleField(response.payload, "volume", 0.0);
     snapshot.brightness_available = BoolField(response.payload, "brightnessAvailable");
     snapshot.brightness = DoubleField(response.payload, "brightness", 0.0);
+
     snapshot.wsl_available = BoolField(response.payload, "wslAvailable");
+    snapshot.wsl_engine_available = BoolField(
+        response.payload,
+        "wslEngineAvailable",
+        snapshot.wsl_available);
     snapshot.default_distro = StringField(response.payload, "defaultDistro");
+    snapshot.preferred_security_distro = StringField(
+        response.payload,
+        "preferredSecurityDistro");
+
+    bool passive_ready = false;
+    if (TryBoolField(response.payload, "wslPassiveReady", passive_ready))
+    {
+        snapshot.wsl_passive_ready = passive_ready;
+        snapshot.wsl_passive_ready_known = true;
+    }
+
     snapshot.current_workspace = static_cast<int>(IntField(response.payload, "currentWorkspace", 1));
     snapshot.timestamp_ms = static_cast<uint64_t>(IntField(response.payload, "timestamp", 0));
 
@@ -467,8 +525,129 @@ bool CloudOSBrokerClientV21::GetSystemSnapshot(BrokerClientSnapshot& out_snapsho
     {
         for (const JsonValue& distro : distros->AsArray())
         {
-            if (distro.IsString()) snapshot.distros.push_back(distro.AsString());
+            if (!distro.IsString()) continue;
+            const std::string name = distro.AsString();
+            if (name.empty()) continue;
+            if (std::none_of(
+                    snapshot.distros.begin(),
+                    snapshot.distros.end(),
+                    [&name](const std::string& existing) { return SameName(existing, name); }))
+            {
+                snapshot.distros.push_back(name);
+            }
         }
+    }
+
+    const JsonValue* typed_distros = FindValue(response.payload, "wslDistros");
+    if (typed_distros != nullptr && typed_distros->IsArray())
+    {
+        for (const JsonValue& value : typed_distros->AsArray())
+        {
+            if (!value.IsObject()) continue;
+            const JsonObject& object = value.AsObject();
+            BrokerClientWslDistributionSnapshot item;
+            item.name = StringField(object, "name");
+            if (item.name.empty() || ContainsDistroName(snapshot.wsl_distros, item.name)) continue;
+
+            const int64_t version = IntField(object, "version", 0);
+            item.version = version == 1 || version == 2
+                ? static_cast<int>(version)
+                : 0;
+            item.is_default = BoolField(
+                object,
+                "isDefault",
+                !snapshot.default_distro.empty() && SameName(item.name, snapshot.default_distro));
+
+            bool base_path_present = false;
+            if (TryBoolField(object, "basePathPresent", base_path_present))
+            {
+                item.base_path_evidence_known = true;
+                item.base_path_present = base_path_present;
+            }
+
+            bool security_candidate = false;
+            if (TryBoolField(object, "securityCandidate", security_candidate))
+            {
+                item.security_candidate_evidence_known = true;
+                item.is_security_candidate = security_candidate;
+            }
+
+            snapshot.wsl_distros.push_back(std::move(item));
+        }
+    }
+
+    // Older V21 brokers publish only a name list. Preserve that inventory but
+    // keep version/storage/security evidence explicitly unknown.
+    if (snapshot.wsl_distros.empty())
+    {
+        snapshot.wsl_distros.reserve(snapshot.distros.size());
+        for (const std::string& name : snapshot.distros)
+        {
+            BrokerClientWslDistributionSnapshot item;
+            item.name = name;
+            item.is_default = !snapshot.default_distro.empty() &&
+                SameName(name, snapshot.default_distro);
+            snapshot.wsl_distros.push_back(std::move(item));
+        }
+    }
+
+    if (!snapshot.default_distro.empty() &&
+        !ContainsDistroName(snapshot.wsl_distros, snapshot.default_distro))
+    {
+        snapshot.default_distro.clear();
+    }
+    if (!snapshot.preferred_security_distro.empty() &&
+        !ContainsDistroName(snapshot.wsl_distros, snapshot.preferred_security_distro))
+    {
+        snapshot.preferred_security_distro.clear();
+    }
+
+    int64_t count = 0;
+    if (TryIntField(response.payload, "wslRegisteredCount", count) && count >= 0)
+    {
+        snapshot.wsl_registered_count = static_cast<uint32_t>(count);
+    }
+    else
+    {
+        snapshot.wsl_registered_count = static_cast<uint32_t>(snapshot.wsl_distros.size());
+    }
+
+    if (TryIntField(response.payload, "wslLaunchCandidateCount", count) && count >= 0)
+    {
+        snapshot.wsl_launch_candidate_count = static_cast<uint32_t>(count);
+    }
+    else
+    {
+        snapshot.wsl_launch_candidate_count = static_cast<uint32_t>(std::count_if(
+            snapshot.wsl_distros.begin(),
+            snapshot.wsl_distros.end(),
+            [](const BrokerClientWslDistributionSnapshot& item) {
+                return item.base_path_evidence_known && item.base_path_present;
+            }));
+    }
+
+    if (TryIntField(response.payload, "wsl1Count", count) && count >= 0)
+    {
+        snapshot.wsl1_count = static_cast<uint32_t>(count);
+    }
+    else
+    {
+        snapshot.wsl1_count = static_cast<uint32_t>(std::count_if(
+            snapshot.wsl_distros.begin(),
+            snapshot.wsl_distros.end(),
+            [](const BrokerClientWslDistributionSnapshot& item) { return item.version == 1; }));
+    }
+
+    if (TryIntField(response.payload, "wsl2Count", count) && count >= 0)
+    {
+        snapshot.wsl2_count = static_cast<uint32_t>(count);
+    }
+    else
+    {
+        snapshot.wsl2_count = static_cast<uint32_t>(std::count_if(
+            snapshot.wsl_distros.begin(),
+            snapshot.wsl_distros.end(),
+            [](const BrokerClientWslDistributionSnapshot& item) { return item.version == 2; }));
     }
 
     out_snapshot = std::move(snapshot);
