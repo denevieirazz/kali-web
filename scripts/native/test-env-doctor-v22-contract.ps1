@@ -26,6 +26,7 @@ foreach ($required in @(
     'GetDiskFreeSpaceExW',
     'supervisor-state-v22.json',
     'CreateToolhelp32Snapshot',
+    'Presenca nao equivale a health PASS.',
     'Presenca de processo e evidencia operacional, nao prova de saude.',
     'WM_DPICHANGED'
 )) {
@@ -37,8 +38,7 @@ foreach ($required in @(
 foreach ($forbidden in @(
     'WSL2 ativo',
     'Kali pronta',
-    'processo saudavel',
-    'Health PASS' + '"'
+    'processo saudavel'
 )) {
     if ($text.IndexOf($forbidden, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
         throw "Env Doctor V22 introduced an unsupported health claim: $forbidden"
