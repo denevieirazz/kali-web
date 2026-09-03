@@ -11,7 +11,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <chrono>
 #include <deque>
 #include <mutex>
 #include <string>
@@ -37,10 +36,15 @@ public:
     {
         if (client_id.empty() || client_id.size() > 256) return false;
         Stop();
+
+        HANDLE stop_event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (stop_event == nullptr) return false;
         {
             std::lock_guard<std::mutex> lock(state_mutex_);
             client_id_ = client_id;
+            stop_event_ = stop_event;
         }
+
         running_.store(true);
         dropped_events_.store(0);
         try
@@ -50,6 +54,10 @@ public:
         catch (...)
         {
             running_.store(false);
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            CloseHandle(stop_event_);
+            stop_event_ = nullptr;
+            client_id_.clear();
             return false;
         }
         return true;
@@ -58,21 +66,39 @@ public:
     void Stop()
     {
         running_.store(false);
+
         HANDLE pipe = INVALID_HANDLE_VALUE;
+        HANDLE stop_event = nullptr;
         {
             std::lock_guard<std::mutex> lock(state_mutex_);
             pipe = pipe_;
-            pipe_ = INVALID_HANDLE_VALUE;
+            stop_event = stop_event_;
         }
-        if (pipe != INVALID_HANDLE_VALUE) CloseHandle(pipe);
+
+        if (stop_event != nullptr) SetEvent(stop_event);
+        if (pipe != INVALID_HANDLE_VALUE) (void)CancelIoEx(pipe, nullptr);
         if (worker_.joinable())
         {
-            CancelSynchronousIo(reinterpret_cast<HANDLE>(worker_.native_handle()));
+            (void)CancelSynchronousIo(
+                reinterpret_cast<HANDLE>(worker_.native_handle()));
             worker_.join();
         }
+
         connected_.store(false);
         {
             std::lock_guard<std::mutex> lock(state_mutex_);
+            // WorkerLoop owns/closed every connected pipe. Only close a
+            // residual handle here if startup failed before the worker owned it.
+            if (pipe_ != INVALID_HANDLE_VALUE)
+            {
+                CloseHandle(pipe_);
+                pipe_ = INVALID_HANDLE_VALUE;
+            }
+            if (stop_event_ != nullptr)
+            {
+                CloseHandle(stop_event_);
+                stop_event_ = nullptr;
+            }
             client_id_.clear();
         }
         {
@@ -147,6 +173,7 @@ private:
         const auto* user = reinterpret_cast<const TOKEN_USER*>(buffer.data());
         LPWSTR raw_sid = nullptr;
         if (user == nullptr || user->User.Sid == nullptr ||
+            !IsValidSid(user->User.Sid) ||
             !ConvertSidToStringSidW(user->User.Sid, &raw_sid) || raw_sid == nullptr)
         {
             return {};
@@ -218,7 +245,7 @@ private:
     {
         out_pipe = INVALID_HANDLE_VALUE;
         const std::wstring name = EventsPipeName();
-        if (name.empty()) return false;
+        if (name.empty() || !running_.load()) return false;
 
         HANDLE pipe = CreateFileW(
             name.c_str(),
@@ -281,6 +308,18 @@ private:
         if (dropped > 0) dropped_events_.fetch_add(dropped);
     }
 
+    bool WaitReconnect(uint32_t milliseconds)
+    {
+        HANDLE stop_event = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            stop_event = stop_event_;
+        }
+        if (stop_event == nullptr) return running_.load();
+        return WaitForSingleObject(stop_event, milliseconds) == WAIT_TIMEOUT &&
+            running_.load();
+    }
+
     void WorkerLoop()
     {
         uint32_t reconnect_ms = kInitialReconnectMs;
@@ -290,7 +329,7 @@ private:
             if (!ConnectOnce(pipe))
             {
                 connected_.store(false);
-                Sleep(reconnect_ms);
+                if (!WaitReconnect(reconnect_ms)) break;
                 reconnect_ms = (std::min)(reconnect_ms * 2u, kMaxReconnectMs);
                 continue;
             }
@@ -327,7 +366,7 @@ private:
             CloseHandle(pipe);
             if (running_.load())
             {
-                Sleep(reconnect_ms);
+                if (!WaitReconnect(reconnect_ms)) break;
                 reconnect_ms = (std::min)(reconnect_ms * 2u, kMaxReconnectMs);
             }
         }
@@ -340,6 +379,7 @@ private:
 
     mutable std::mutex state_mutex_;
     HANDLE pipe_{INVALID_HANDLE_VALUE};
+    HANDLE stop_event_{nullptr};
     std::string client_id_;
 
     std::mutex queue_mutex_;
