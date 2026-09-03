@@ -18,6 +18,7 @@ export const appExes: [string, string, string, string, string, string, string][]
   ['C:\\Program Files\\ObsidianOS Apps\\network-inspector.obx', 'network-inspector.obx', 'C:\\Program Files\\ObsidianOS Apps', 'network-inspector', '⌁', 'utilities', 'Network Inspector'],
   ['C:\\Program Files\\ObsidianOS Apps\\wifi-inspector.obx', 'wifi-inspector.obx', 'C:\\Program Files\\ObsidianOS Apps', 'wifi-inspector', '◉', 'utilities', 'Wi‑Fi Inspector'],
   ['C:\\Program Files\\ObsidianOS Apps\\network-shield.obx', 'network-shield.obx', 'C:\\Program Files\\ObsidianOS Apps', 'network-shield', '🛡', 'utilities', 'Network Shield'],
+  ['C:\\Program Files\\ObsidianOS Apps\\dns-inspector.obx', 'dns-inspector.obx', 'C:\\Program Files\\ObsidianOS Apps', 'dns-inspector', '🌐', 'utilities', 'DNS Inspector'],
   ['C:\\Program Files\\ObsidianOS Apps\\regedit.obx', 'regedit.obx', 'C:\\Program Files\\ObsidianOS Apps', 'regedit', '🧊', 'system', 'Editor do Registro'],
   ['C:\\Program Files\\ObsidianOS Apps\\ocode.obx', 'ocode.obx', 'C:\\Program Files\\ObsidianOS Apps', 'obsidian-code', '⚡', 'productivity', 'Obsidian Code'],
   ['C:\\Program Files\\ObsidianOS Apps\\obsrecord.obx', 'obsrecord.obx', 'C:\\Program Files\\ObsidianOS Apps', 'obs-record', '🎥', 'multimedia', 'ObS Record'],
