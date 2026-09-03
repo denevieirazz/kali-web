@@ -7,6 +7,7 @@ $ErrorActionPreference = 'Stop'
 $root = (Get-Item "$PSScriptRoot\..\..").FullName
 $brokerRoot = Join-Path $root 'desktop\CloudOS.SystemBroker'
 $src = Join-Path $brokerRoot 'src'
+$flutterBridgeRoot = Join-Path $root 'desktop\CloudOS.FlutterShell\native_bridge'
 
 $probeHeaderPath = Join-Path $src 'wsl_probe_service_v22.h'
 $probeSourcePath = Join-Path $src 'wsl_probe_service_v22.cpp'
@@ -14,6 +15,7 @@ $wslHeaderPath = Join-Path $src 'wsl_service_v21.h'
 $brokerSourcePath = Join-Path $src 'broker_server_v21.cpp'
 $systemSourcePath = Join-Path $src 'system_service_v21.cpp'
 $projectPath = Join-Path $brokerRoot 'CloudOS.SystemBroker.vcxproj'
+$brokerClientHeaderPath = Join-Path $flutterBridgeRoot 'cloudos_broker_client_v21.h'
 
 foreach ($path in @(
     $probeHeaderPath,
@@ -21,7 +23,8 @@ foreach ($path in @(
     $wslHeaderPath,
     $brokerSourcePath,
     $systemSourcePath,
-    $projectPath
+    $projectPath,
+    $brokerClientHeaderPath
 )) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Required WSL probe contract source is missing: $path"
@@ -34,6 +37,7 @@ $wslHeader = Get-Content -LiteralPath $wslHeaderPath -Raw
 $brokerSource = Get-Content -LiteralPath $brokerSourcePath -Raw
 $systemSource = Get-Content -LiteralPath $systemSourcePath -Raw
 $project = Get-Content -LiteralPath $projectPath -Raw
+$brokerClientHeader = Get-Content -LiteralPath $brokerClientHeaderPath -Raw
 
 if ($probeHeader -notmatch 'struct\s+WslProbeResultV22' -or
     $probeHeader -notmatch 'bool\s+attempted' -or
@@ -81,6 +85,10 @@ if ($probeSource -notmatch 'FindDistribution\(snapshot' -or
     $probeSource -notmatch 'base_path_present') {
     throw 'The probe must validate the requested distro against passive registration/storage evidence.'
 }
+if ($probeSource -notmatch 'SetHandleInformation\(read_pipe,\s*HANDLE_FLAG_INHERIT,\s*0\)' -or
+    $probeSource -notmatch 'probe_pipe_security_failed') {
+    throw 'The child must not inherit the Broker-side read end of the probe pipe.'
+}
 if ($probeSource -notmatch 'const\s+DWORD\s+create_error\s*=\s*created\s*\?\s*ERROR_SUCCESS\s*:\s*GetLastError\(\)') {
     throw 'CreateProcess failure evidence must be captured before cleanup can overwrite GetLastError.'
 }
@@ -110,8 +118,8 @@ if ($brokerSource -notmatch 'WriteWslProbePayload' -or
     $brokerSource -notmatch '"durationMs"') {
     throw 'The Broker must return structured active health evidence.'
 }
-if ($brokerSource -notmatch 'wsl\.healthProbed') {
-    throw 'Active WSL health results must be observable on the Broker event bus.'
+if ($brokerSource -notmatch 'event interleaving here could make it consume an event as the reply') {
+    throw 'The synchronous V21 probe RPC must document why it does not publish before its response frame.'
 }
 
 if ($systemSource -notmatch '"wsl\.health\.probe"') {
@@ -124,6 +132,17 @@ if ($wslHeader -notmatch 'base_path_present') {
 if ($project -notmatch 'src\\wsl_probe_service_v22\.h' -or
     $project -notmatch 'src\\wsl_probe_service_v22\.cpp') {
     throw 'WslProbeServiceV22 must be compiled into CloudOS.SystemBroker.'
+}
+
+if ($brokerClientHeader -notmatch 'struct\s+BrokerClientWslProbeResult' -or
+    $brokerClientHeader -notmatch 'ProbeWslHealth\s*\(' -or
+    $brokerClientHeader -notmatch 'request\.method\s*=\s*"wsl\.health\.probe"') {
+    throw 'The native Flutter-side Broker client must expose the typed health probe.'
+}
+if ($brokerClientHeader -notmatch 'parsed\.healthy[\s\S]{0,250}!parsed\.attempted' -or
+    $brokerClientHeader -notmatch '!parsed\.marker_seen' -or
+    $brokerClientHeader -notmatch 'parsed\.exit_code\s*!=\s*0') {
+    throw 'The native Broker client must reject internally inconsistent healthy probe responses.'
 }
 
 Write-Host '[PASS] CloudOS bounded active WSL health probe contract.'
