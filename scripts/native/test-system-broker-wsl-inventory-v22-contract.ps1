@@ -64,7 +64,7 @@ if ($wslSource -match 'CreateProcessW' -or
 }
 if ($wslSource -notmatch 'registered_version\s*==\s*1' -or
     $wslSource -notmatch 'registered_version\s*==\s*2' -or
-    $wslSource -notmatch 'version\s*=.*0') {
+    $wslSource -notmatch 'out\.version\s*=[\s\S]{0,300}\?\s*static_cast<int>\(registered_version\)[\s\S]{0,100}:\s*0\s*;') {
     throw 'Unknown WSL versions must remain unknown instead of being guessed as WSL2.'
 }
 
