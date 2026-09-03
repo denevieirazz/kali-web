@@ -38,6 +38,17 @@ test('quick local checks expose reviewed one-click profiles and full profile', (
   assert.match(quick, /Copiar explicado para IA/);
 });
 
+test('single-host checks combine surface scan with identity and connectivity diagnostics', () => {
+  assert.match(quick, /\/api\/security\/tools\/network\/host\/diagnostics/);
+  assert.match(quick, /Promise\.all\(\[scanPromise, diagnosticsPromise\]\)/);
+  assert.match(quick, /Latência média/);
+  assert.match(quick, /MAC/);
+  assert.match(quick, /Nome PTR/);
+  assert.match(quick, /Rota/);
+  assert.match(quick, /Próximos passos deste host/);
+  assert.match(quick, /hostDiagnostics/);
+});
+
 test('quick checks remain fixed-endpoint and do not expose arbitrary command execution', () => {
   assert.match(quick, /\/api\/security\/tools\/network\/scan/);
   assert.doesNotMatch(quick, /\/api\/security\/(?:execute|run|command|shell)/i);
