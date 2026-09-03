@@ -21,6 +21,7 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <ForcedIncludeFiles>supervisor_bootstrap_v22.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <PreprocessorDefinitions>UNICODE;_UNICODE;WIN32_LEAN_AND_MEAN;NOMINMAX;_WIN32_WINNT=0x0A00;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
@@ -38,6 +39,7 @@
       <DisableSpecificWarnings>4127;%(DisableSpecificWarnings)</DisableSpecificWarnings>
     </ClCompile>
     <ClInclude Include="main.cpp" />
+    <ClInclude Include="supervisor_bootstrap_v22.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
