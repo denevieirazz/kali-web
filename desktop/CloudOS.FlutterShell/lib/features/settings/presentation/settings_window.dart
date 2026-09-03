@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../../../core/cloudos_theme.dart';
 import '../../../models/cloud_system_snapshot.dart';
+import '../../../models/cloud_wsl_health_probe.dart';
 import '../../../services/cloudos_bridge.dart';
+import '../../terminal/domain/wsl_runtime_diagnostics.dart';
 import '../../terminal/domain/wsl_runtime_policy.dart';
 
 class SettingsWindow extends StatefulWidget {
@@ -31,12 +33,53 @@ class _SettingsWindowState extends State<SettingsWindow> {
 
   late double _volume;
   late double _brightness;
+  bool _wslProbeRunning = false;
+  CloudWslHealthProbeResult? _lastWslProbe;
+  String _wslProbeTarget = '';
 
   @override
   void initState() {
     super.initState();
     _volume = widget.snapshot.volume;
     _brightness = widget.snapshot.brightness;
+  }
+
+  WslRuntimePolicy _createWslPolicy() {
+    return WslRuntimePolicy(
+      wslAvailable: widget.snapshot.wslAvailable,
+      engineAvailable: widget.snapshot.wslEngineAvailable,
+      installedDistros: widget.snapshot.distros,
+      defaultDistro: widget.snapshot.defaultDistro,
+      distroVersions: widget.snapshot.distroVersions,
+      distroStorageEvidence: widget.snapshot.distroStorageEvidence,
+      preferredSecurityDistro: widget.snapshot.preferredSecurityDistro,
+    );
+  }
+
+  Future<void> _runWslProbe(String distro) async {
+    final target = distro.trim();
+    if (_wslProbeRunning || target.isEmpty) return;
+
+    final policy = _createWslPolicy();
+    final plan = policy.planSession(requestedDistro: target);
+    if (!plan.allowed) return;
+
+    setState(() {
+      _wslProbeRunning = true;
+      _wslProbeTarget = plan.distro;
+      _lastWslProbe = null;
+    });
+
+    final result = await widget.bridge.probeWslHealth(
+      distro: plan.distro,
+      timeoutMs: 8000,
+    );
+    if (!mounted) return;
+
+    setState(() {
+      _wslProbeRunning = false;
+      _lastWslProbe = result;
+    });
   }
 
   @override
@@ -304,23 +347,16 @@ class _SettingsWindowState extends State<SettingsWindow> {
               ? 'Não identificado'
               : widget.snapshot.networkName,
         ),
-        _buildInfoCard(
-          'Origem do estado',
-          'System Broker / Windows',
-        ),
+        _buildInfoCard('Origem do estado', 'System Broker / Windows'),
       ],
     );
   }
 
   Widget _buildWslSection() {
-    final policy = WslRuntimePolicy(
-      wslAvailable: widget.snapshot.wslAvailable,
-      engineAvailable: widget.snapshot.wslEngineAvailable,
-      installedDistros: widget.snapshot.distros,
-      defaultDistro: widget.snapshot.defaultDistro,
-      distroVersions: widget.snapshot.distroVersions,
-      distroStorageEvidence: widget.snapshot.distroStorageEvidence,
-      preferredSecurityDistro: widget.snapshot.preferredSecurityDistro,
+    final policy = _createWslPolicy();
+    final diagnostics = WslRuntimeDiagnostics.evaluate(
+      policy,
+      activeProbe: _lastWslProbe,
     );
 
     final engineStatus = !policy.engineAvailable
@@ -343,6 +379,17 @@ class _SettingsWindowState extends State<SettingsWindow> {
     };
 
     final launchCandidates = widget.snapshot.effectiveLaunchCandidateCount;
+    final genericTarget = policy.launchFallbackDistro;
+    final genericPlan = policy.planSession(
+      requestedDistro: genericTarget.isEmpty ? null : genericTarget,
+    );
+    final securityTarget = policy.preferredSecurityDistro;
+    final securityPlan = securityTarget.isEmpty
+        ? const WslSessionPlan.deny('KALI_NOT_INSTALLED')
+        : policy.planSession(
+            requestedDistro: securityTarget,
+            requirement: WslSessionRequirement.security,
+          );
 
     return ListView(
       padding: const EdgeInsets.all(24),
@@ -357,12 +404,13 @@ class _SettingsWindowState extends State<SettingsWindow> {
         ),
         const SizedBox(height: 8),
         const Text(
-          'Esta tela mostra evidência passiva do Windows/System Broker. Ela não transforma registro de distro em prova de boot, login ou execução de comandos.',
+          'Inventário é passivo. O probe ativo abaixo executa somente um comando de health fixo controlado pelo CloudOS; ele não aceita comando arbitrário da interface.',
           style: TextStyle(color: CloudOSColors.caption, fontSize: 12),
         ),
         const SizedBox(height: 16),
         _buildInfoCard('Engine WSL', engineStatus),
         _buildInfoCard('Prontidão passiva', readiness),
+        _buildInfoCard('Diagnóstico atual', diagnostics.summary),
         _buildInfoCard(
           'Distro padrão',
           policy.defaultDistro.isEmpty
@@ -383,11 +431,23 @@ class _SettingsWindowState extends State<SettingsWindow> {
           'Runtime de segurança',
           !policy.kaliInstalled
               ? 'Kali Linux não instalada'
+              : diagnostics.activeProbe?.healthy == true &&
+                    WslRuntimePolicy.isKali(diagnostics.activeProbe!.distro)
+              ? '${diagnostics.activeProbe!.distro} • health ativo comprovado'
               : policy.kaliPassiveReady
               ? '${policy.preferredSecurityPassiveReadyDistro} • candidata passiva'
               : '${policy.preferredSecurityDistro} • ainda não pronta',
         ),
         const SizedBox(height: 12),
+        _buildActiveProbePanel(
+          policy: policy,
+          genericTarget: genericTarget,
+          genericPlan: genericPlan,
+          securityTarget: securityTarget,
+          securityPlan: securityPlan,
+          diagnostics: diagnostics,
+        ),
+        const SizedBox(height: 16),
         const Text(
           'Distribuições detectadas:',
           style: TextStyle(
@@ -429,10 +489,134 @@ class _SettingsWindowState extends State<SettingsWindow> {
             icon: Icons.security_rounded,
             title: 'Kali ainda não comprovada como backend',
             message:
-                'A identidade Kali existe, mas o CloudOS ainda exige WSL2 e armazenamento registrado presente antes de tratá-la como candidata passiva. Boot e comandos reais continuam sendo uma etapa posterior.',
+                'A identidade Kali existe, mas o CloudOS ainda exige WSL2 e armazenamento registrado presente antes de tratá-la como candidata passiva.',
           ),
         ],
       ],
+    );
+  }
+
+  Widget _buildActiveProbePanel({
+    required WslRuntimePolicy policy,
+    required String genericTarget,
+    required WslSessionPlan genericPlan,
+    required String securityTarget,
+    required WslSessionPlan securityPlan,
+    required WslRuntimeDiagnostics diagnostics,
+  }) {
+    final probe = _lastWslProbe;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF151C28),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: CloudOSColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Row(
+            children: <Widget>[
+              Icon(Icons.monitor_heart_outlined, size: 18, color: CloudOSColors.accent),
+              SizedBox(width: 8),
+              Text(
+                'Verificação ativa do Linux',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Comprova que a distro inicia e executa o probe fixo até receber marcador + exit code 0. Timeout máximo: 8 segundos.',
+            style: TextStyle(color: CloudOSColors.caption, fontSize: 11.5),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              OutlinedButton.icon(
+                onPressed: !_wslProbeRunning && genericPlan.allowed
+                    ? () => _runWslProbe(genericPlan.distro)
+                    : null,
+                icon: const Icon(Icons.play_arrow_rounded, size: 16),
+                label: Text(
+                  genericTarget.isEmpty
+                      ? 'Testar Linux'
+                      : 'Testar ${genericPlan.allowed ? genericPlan.distro : genericTarget}',
+                ),
+              ),
+              if (policy.kaliInstalled)
+                OutlinedButton.icon(
+                  onPressed: !_wslProbeRunning && securityPlan.allowed
+                      ? () => _runWslProbe(securityPlan.distro)
+                      : null,
+                  icon: const Icon(Icons.security_rounded, size: 16),
+                  label: Text(
+                    securityTarget.isEmpty
+                        ? 'Testar Kali'
+                        : 'Testar Kali ($securityTarget)',
+                  ),
+                ),
+            ],
+          ),
+          if (_wslProbeRunning) ...<Widget>[
+            const SizedBox(height: 12),
+            Row(
+              children: <Widget>[
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Executando probe fixo em $_wslProbeTarget…',
+                  style: const TextStyle(
+                    color: CloudOSColors.secondary,
+                    fontSize: 11.5,
+                  ),
+                ),
+              ],
+            ),
+          ] else if (probe != null) ...<Widget>[
+            const SizedBox(height: 12),
+            _buildProbeResult(probe, diagnostics),
+          ] else if (_wslProbeTarget.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 12),
+            const _RuntimeNotice(
+              icon: Icons.warning_amber_rounded,
+              title: 'Probe sem resposta válida',
+              message:
+                  'O bridge não retornou evidência válida. O CloudOS manteve o runtime como não comprovado.',
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProbeResult(
+    CloudWslHealthProbeResult probe,
+    WslRuntimeDiagnostics diagnostics,
+  ) {
+    final success = probe.healthy && diagnostics.hasHealthyActiveProbe;
+    final detail = success
+        ? 'Marcador confirmado • exit ${probe.exitCode} • ${probe.durationMs} ms'
+        : probe.errorMessage.isNotEmpty
+        ? probe.errorMessage
+        : probe.timedOut
+        ? 'O runtime não respondeu antes do timeout.'
+        : 'A execução ativa não comprovou saúde do runtime.';
+
+    return _RuntimeNotice(
+      icon: success ? Icons.check_circle_outline_rounded : Icons.error_outline_rounded,
+      title: '${probe.distro} • ${probe.statusLabel}',
+      message: detail,
     );
   }
 
@@ -562,10 +746,7 @@ class _SettingsWindowState extends State<SettingsWindow> {
           'Arquitetura',
           'Shell Visual Única com Window Manager Interno',
         ),
-        _buildInfoCard(
-          'Engine Gráfica',
-          'Flutter Windows Embedder',
-        ),
+        _buildInfoCard('Engine Gráfica', 'Flutter Windows Embedder'),
         _buildInfoCard(
           'System Broker',
           'CloudOS.SystemBroker.exe V21 (Named Pipe IPC)',
@@ -574,7 +755,10 @@ class _SettingsWindowState extends State<SettingsWindow> {
           'Supervisor',
           'CloudOS.Supervisor.exe (Headless Watchdog)',
         ),
-        _buildInfoCard('Linux Runtime', 'WSL inventory tipado + ConPTY'),
+        _buildInfoCard(
+          'Linux Runtime',
+          'WSL inventory tipado + probe ativo fixo + ConPTY',
+        ),
       ],
     );
   }
