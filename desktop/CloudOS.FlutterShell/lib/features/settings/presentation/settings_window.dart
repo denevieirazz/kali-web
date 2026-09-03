@@ -170,13 +170,13 @@ class _SettingsWindowState extends State<SettingsWindow> {
           'Bateria',
           widget.snapshot.batteryAvailable
               ? '${widget.snapshot.batteryPercent}%'
-              : 'Alimentação CA (Conectado)',
+              : 'Não detectada neste dispositivo',
         ),
         _buildInfoCard(
           'Autoridade Nativa',
           'CloudOS Core C++/Win32 (Supervised)',
         ),
-        _buildInfoCard('Apresentação', 'CloudOS V21 Flutter Engine Desktop'),
+        _buildInfoCard('Apresentação', 'CloudOS Flutter Desktop'),
       ],
     );
   }
@@ -194,9 +194,11 @@ class _SettingsWindowState extends State<SettingsWindow> {
           ),
         ),
         const SizedBox(height: 20),
-        const Text(
-          'Volume do Sistema',
-          style: TextStyle(
+        Text(
+          widget.snapshot.volumeAvailable
+              ? 'Volume do Sistema'
+              : 'Volume do Sistema • indisponível',
+          style: const TextStyle(
             color: Colors.white,
             fontSize: 13,
             fontWeight: FontWeight.w600,
@@ -212,26 +214,32 @@ class _SettingsWindowState extends State<SettingsWindow> {
             ),
             Expanded(
               child: Slider(
-                value: _volume,
+                value: _volume.clamp(0.0, 1.0),
                 min: 0.0,
                 max: 1.0,
                 activeColor: CloudOSColors.accent,
-                onChanged: (v) {
-                  setState(() => _volume = v);
-                  widget.bridge.setVolume(v);
-                },
+                onChanged: widget.snapshot.volumeAvailable
+                    ? (v) {
+                        setState(() => _volume = v);
+                        widget.bridge.setVolume(v);
+                      }
+                    : null,
               ),
             ),
             Text(
-              '${(_volume * 100).round()}%',
+              widget.snapshot.volumeAvailable
+                  ? '${(_volume * 100).round()}%'
+                  : 'N/A',
               style: const TextStyle(color: Colors.white, fontSize: 12),
             ),
           ],
         ),
         const SizedBox(height: 24),
-        const Text(
-          'Brilho do Display',
-          style: TextStyle(
+        Text(
+          widget.snapshot.brightnessAvailable
+              ? 'Brilho do Display'
+              : 'Brilho do Display • indisponível',
+          style: const TextStyle(
             color: Colors.white,
             fontSize: 13,
             fontWeight: FontWeight.w600,
@@ -247,18 +255,22 @@ class _SettingsWindowState extends State<SettingsWindow> {
             ),
             Expanded(
               child: Slider(
-                value: _brightness,
+                value: _brightness.clamp(0.0, 1.0),
                 min: 0.0,
                 max: 1.0,
                 activeColor: CloudOSColors.accent,
-                onChanged: (b) {
-                  setState(() => _brightness = b);
-                  widget.bridge.setBrightness(b);
-                },
+                onChanged: widget.snapshot.brightnessAvailable
+                    ? (b) {
+                        setState(() => _brightness = b);
+                        widget.bridge.setBrightness(b);
+                      }
+                    : null,
               ),
             ),
             Text(
-              '${(_brightness * 100).round()}%',
+              widget.snapshot.brightnessAvailable
+                  ? '${(_brightness * 100).round()}%'
+                  : 'N/A',
               style: const TextStyle(color: Colors.white, fontSize: 12),
             ),
           ],
@@ -283,11 +295,19 @@ class _SettingsWindowState extends State<SettingsWindow> {
         _buildInfoCard(
           'Status da Conexão',
           widget.snapshot.networkAvailable
-              ? 'Conectado à Internet'
-              : 'Desconectado',
+              ? 'Interface de rede disponível'
+              : 'Desconectado / indisponível',
         ),
-        _buildInfoCard('Adaptador / Rede', widget.snapshot.networkName),
-        _buildInfoCard('Tipo de Interface', 'Wi-Fi / Ethernet Dual Protocol'),
+        _buildInfoCard(
+          'Adaptador / Rede',
+          widget.snapshot.networkName.isEmpty
+              ? 'Não identificado'
+              : widget.snapshot.networkName,
+        ),
+        _buildInfoCard(
+          'Origem do estado',
+          'System Broker / Windows',
+        ),
       ],
     );
   }
@@ -298,6 +318,9 @@ class _SettingsWindowState extends State<SettingsWindow> {
       engineAvailable: widget.snapshot.wslEngineAvailable,
       installedDistros: widget.snapshot.distros,
       defaultDistro: widget.snapshot.defaultDistro,
+      distroVersions: widget.snapshot.distroVersions,
+      distroStorageEvidence: widget.snapshot.distroStorageEvidence,
+      preferredSecurityDistro: widget.snapshot.preferredSecurityDistro,
     );
 
     final engineStatus = !policy.engineAvailable
@@ -305,6 +328,21 @@ class _SettingsWindowState extends State<SettingsWindow> {
         : policy.hasInstalledDistros
         ? 'Detectado • ${policy.installedDistros.length} distro(s) registrada(s)'
         : 'Detectado • nenhuma distro registrada';
+
+    final readiness = switch (policy.readiness) {
+      WslRuntimeReadiness.unavailable => 'WSL indisponível',
+      WslRuntimeReadiness.engineOnly => 'Engine presente • sem distro',
+      WslRuntimeReadiness.registeredUnknown =>
+        'Distro registrada • prontidão não comprovada',
+      WslRuntimeReadiness.passiveReady =>
+        'Armazenamento registrado presente • boot não testado',
+      WslRuntimeReadiness.wsl2Ready =>
+        'WSL2 + armazenamento presentes • boot não testado',
+      WslRuntimeReadiness.securityReady =>
+        'Kali/WSL2 candidata • execução ainda não testada',
+    };
+
+    final launchCandidates = widget.snapshot.effectiveLaunchCandidateCount;
 
     return ListView(
       padding: const EdgeInsets.all(24),
@@ -319,11 +357,12 @@ class _SettingsWindowState extends State<SettingsWindow> {
         ),
         const SizedBox(height: 8),
         const Text(
-          'O CloudOS só mostra capacidades Linux que o System Broker conseguiu comprovar passivamente; abrir esta tela não inicia uma distro.',
+          'Esta tela mostra evidência passiva do Windows/System Broker. Ela não transforma registro de distro em prova de boot, login ou execução de comandos.',
           style: TextStyle(color: CloudOSColors.caption, fontSize: 12),
         ),
         const SizedBox(height: 16),
         _buildInfoCard('Engine WSL', engineStatus),
+        _buildInfoCard('Prontidão passiva', readiness),
         _buildInfoCard(
           'Distro padrão',
           policy.defaultDistro.isEmpty
@@ -331,10 +370,22 @@ class _SettingsWindowState extends State<SettingsWindow> {
               : policy.defaultDistro,
         ),
         _buildInfoCard(
+          'Distros registradas',
+          '${widget.snapshot.effectiveRegisteredCount}',
+        ),
+        _buildInfoCard(
+          'Candidatas de inicialização',
+          launchCandidates == null ? 'Evidência indisponível' : '$launchCandidates',
+        ),
+        _buildInfoCard('WSL1 comprovadas', '${widget.snapshot.effectiveWsl1Count}'),
+        _buildInfoCard('WSL2 comprovadas', '${widget.snapshot.effectiveWsl2Count}'),
+        _buildInfoCard(
           'Runtime de segurança',
-          policy.kaliInstalled
-              ? policy.preferredSecurityDistro
-              : 'Kali Linux não instalada',
+          !policy.kaliInstalled
+              ? 'Kali Linux não instalada'
+              : policy.kaliPassiveReady
+              ? '${policy.preferredSecurityPassiveReadyDistro} • candidata passiva'
+              : '${policy.preferredSecurityDistro} • ainda não pronta',
         ),
         const SizedBox(height: 12),
         const Text(
@@ -360,9 +411,10 @@ class _SettingsWindowState extends State<SettingsWindow> {
             message:
                 'O mecanismo WSL existe, mas o Broker não reportou nenhuma distribuição registrada. O CloudOS não abrirá uma sessão Linux falsa.',
           )
-        else
+        else ...<Widget>[
           for (final distro in policy.installedDistros)
             _buildDistroCard(distro, policy),
+        ],
         if (policy.engineAvailable && !policy.kaliInstalled) ...<Widget>[
           const SizedBox(height: 8),
           const _RuntimeNotice(
@@ -370,6 +422,14 @@ class _SettingsWindowState extends State<SettingsWindow> {
             title: 'Kali não instalada',
             message:
                 'O backend de segurança continua indisponível até uma distribuição Kali real ser instalada e detectada. Ubuntu ou outra distro não será renomeada para Kali.',
+          ),
+        ] else if (policy.kaliInstalled && !policy.kaliPassiveReady) ...<Widget>[
+          const SizedBox(height: 8),
+          const _RuntimeNotice(
+            icon: Icons.security_rounded,
+            title: 'Kali ainda não comprovada como backend',
+            message:
+                'A identidade Kali existe, mas o CloudOS ainda exige WSL2 e armazenamento registrado presente antes de tratá-la como candidata passiva. Boot e comandos reais continuam sendo uma etapa posterior.',
           ),
         ],
       ],
@@ -386,13 +446,22 @@ class _SettingsWindowState extends State<SettingsWindow> {
 
   Widget _buildDistroCard(String distro, WslRuntimePolicy policy) {
     final info = _typedDistro(distro);
-    final isDefault = info?.isDefault == true || distro == policy.defaultDistro;
+    final isDefault =
+        info?.isDefault == true ||
+        distro.toLowerCase() == policy.defaultDistro.toLowerCase();
     final isSecurity = WslRuntimePolicy.isKali(distro);
-    final evidence = switch (info?.version) {
-      1 => 'Registrada • WSL 1',
-      2 => 'Registrada • WSL 2',
-      _ => 'Registrada • versão não comprovada',
+
+    final versionEvidence = switch (info?.version) {
+      1 => 'WSL 1',
+      2 => 'WSL 2',
+      _ => 'versão não comprovada',
     };
+    final storageEvidence = switch (info?.basePathPresent) {
+      true => 'armazenamento registrado presente',
+      false => 'armazenamento registrado AUSENTE',
+      null => 'armazenamento não comprovado',
+    };
+    final evidence = 'Registrada • $versionEvidence • $storageEvidence';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -404,9 +473,13 @@ class _SettingsWindowState extends State<SettingsWindow> {
       ),
       child: Row(
         children: <Widget>[
-          const Icon(
-            Icons.terminal_rounded,
-            color: CloudOSColors.linux,
+          Icon(
+            info?.basePathPresent == false
+                ? Icons.warning_amber_rounded
+                : Icons.terminal_rounded,
+            color: info?.basePathPresent == false
+                ? CloudOSColors.caption
+                : CloudOSColors.linux,
             size: 22,
           ),
           const SizedBox(width: 12),
@@ -474,7 +547,7 @@ class _SettingsWindowState extends State<SettingsWindow> {
                   ),
                 ),
                 Text(
-                  'Versão 21.0.0 (Build Modular AI)',
+                  'Core V21 • Linux Runtime hardening V22',
                   style: TextStyle(
                     fontSize: 12,
                     color: CloudOSColors.caption,
@@ -491,7 +564,7 @@ class _SettingsWindowState extends State<SettingsWindow> {
         ),
         _buildInfoCard(
           'Engine Gráfica',
-          'Flutter Windows Embedder (Seamless Canvas)',
+          'Flutter Windows Embedder',
         ),
         _buildInfoCard(
           'System Broker',
@@ -499,9 +572,9 @@ class _SettingsWindowState extends State<SettingsWindow> {
         ),
         _buildInfoCard(
           'Supervisor',
-          'CloudOS.Supervisor.exe V11 (Headless Watchdog)',
+          'CloudOS.Supervisor.exe (Headless Watchdog)',
         ),
-        _buildInfoCard('Licença', 'Proprietário • Douglas (Administrador)'),
+        _buildInfoCard('Linux Runtime', 'WSL inventory tipado + ConPTY'),
       ],
     );
   }
