@@ -9,6 +9,7 @@ import {
 } from './networkAssessment.js';
 import { getNetworkDiagnostics } from './networkDiagnostics.js';
 import { getHostDiagnostics } from './hostDiagnostics.js';
+import { getLocalNetworkPosture } from './localNetworkPosture.js';
 import { enrichNetworkAssessment } from './networkInsights.js';
 import { enrichWifiDiagnostics } from './wifiInsights.js';
 
@@ -48,6 +49,17 @@ securityToolsRouter.get('/network/diagnostics', async (_req, res) => {
     res.status(503).json({
       error: 'Não foi possível coletar o mapa local de DNS, gateway e vizinhos.',
       errorCode: 'NETWORK_DIAGNOSTICS_FAILED',
+    });
+  }
+});
+
+securityToolsRouter.get('/network/local-posture', async (_req, res) => {
+  try {
+    res.json(await getLocalNetworkPosture());
+  } catch {
+    res.status(503).json({
+      error: 'Não foi possível coletar a postura de rede local do Windows.',
+      errorCode: 'LOCAL_NETWORK_POSTURE_FAILED',
     });
   }
 });
