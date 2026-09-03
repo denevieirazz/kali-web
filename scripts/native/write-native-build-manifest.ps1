@@ -65,7 +65,14 @@ $manifest = [ordered]@{
     schema = 1
     product = 'CloudOS Native Shell'
     shell_authority = 'C++/Win32'
+    # V11 remains the compatibility/packaging authority string consumed by the
+    # established deployment contract. The compiled supervisor runtime is V22.
     recovery_authority = 'CloudOS.Supervisor.exe V11'
+    supervisor_runtime_schema = 22
+    supervisor_compatibility_contract = 11
+    supervisor_states = @('STARTING', 'HEALTHY', 'DEGRADED', 'RESTARTING', 'CRASH_LOOP', 'SAFE_MODE', 'STOPPING')
+    supervisor_job_kill_on_close = $true
+    supervisor_state_journal = '%LOCALAPPDATA%\CloudOS\Recovery\supervisor-state-v22.json'
     broker_authority = 'CloudOS.SystemBroker.exe V21'
     configuration = $Configuration
     platform = 'x64'
@@ -89,6 +96,7 @@ elseif (Test-Path -LiteralPath $headStamp) {
 Write-Host "[CloudOS] MANIFEST=$manifestPath"
 Write-Host "[CloudOS] SOURCE_FINGERPRINT=$fingerprint"
 Write-Host "[CloudOS] VERIFIED_RUNTIME_COMPONENTS=$($runtimeNames.Count)"
+Write-Host '[CloudOS] SUPERVISOR_RUNTIME_SCHEMA=22'
 if ($head) {
     Write-Host "[CloudOS] BUILD_HEAD=$head"
 }
