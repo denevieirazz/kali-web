@@ -51,6 +51,7 @@ foreach ($name in @(
     'run-native-performance-smoke-v12.ps1',
     'CloudOS.Deployment.V13.psm1',
     'install-cloudos-native-v13.ps1',
+    'install-cloudos-native-v22.ps1',
     'update-cloudos-native-v13.ps1',
     'rollback-cloudos-native-v13.ps1',
     'repair-cloudos-native-v13.ps1',
@@ -184,7 +185,7 @@ $installLauncher = @'
 @echo off
 setlocal EnableExtensions
 set "ROOT=%~dp0"
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%install-cloudos-native-v13.ps1" -PackageRoot "%ROOT%"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%install-cloudos-native-v22.ps1" -PackageRoot "%ROOT%"
 exit /b %ERRORLEVEL%
 '@
 Set-Content -LiteralPath (Join-Path $stage 'Instalar CloudOS.cmd') -Value $installLauncher -Encoding ascii
@@ -287,12 +288,15 @@ Arquivos principais:
 Stability/Readiness V9:
 - heartbeat/readiness por memoria compartilhada e soak automatizado.
 
-Lifecycle V10:
+Lifecycle V10 + Windows Shutdown V22:
 - resume, WTS/RDP, display revalidation e single-instance.
+- WM_QUERYENDSESSION faz somente checkpoint local/atomico e continua a cadeia de mensagens sem vetar logout.
+- CloudOS.exe usa faixa de shutdown de aplicativo antecipada; Supervisor usa faixa tardia para permanecer como autoridade de recuperacao enquanto o shell fecha.
 
 Supervisor/Recovery V22:
 - preserva o protocolo V11 de readiness/heartbeat/fallback e adiciona estados STARTING/HEALTHY/DEGRADED/RESTARTING/CRASH_LOOP/SAFE_MODE/STOPPING.
-- usa Job Object kill-on-close para reduzir processos orfaos quando a autoridade de supervisao encerra.
+- CloudOS.exe nasce suspenso, entra no Job Object e so depois e retomado, evitando janela de corrida na arvore supervisionada.
+- Job Object usa kill-on-close + breakaway explicito: apps internos seguem o ciclo de vida do CloudOS; apps Windows classificados como externos podem escapar explicitamente.
 - persiste estado local atomico em %LOCALAPPDATA%\CloudOS\Recovery\supervisor-state-v22.json.
 - registra o Supervisor no Windows Application Restart apenas para cenarios de manutencao/reboot; crash/hang continuam autoridade do Supervisor, evitando dois watchdogs concorrentes.
 - Status Recuperacao V22.cmd mostra somente metadados operacionais locais.
@@ -314,8 +318,10 @@ System Broker V21:
 Performance/Visual V12:
 - shell event-driven e smoke de idle/performance preservado no pipeline.
 
-Transactional Deployment V13 + Update V22:
-- Instalar CloudOS.cmd faz deploy por usuario em %LOCALAPPDATA%\CloudOS\NativeShell.
+Transactional Deployment V13 + Install/Update V22:
+- Instalar CloudOS.cmd usa o entrypoint V22 e exige health gate real na primeira ativacao.
+- se a primeira ativacao falhar, a instalacao gerenciada conhecida como ruim e removida quando possivel; ela nao fica marcada como pronta.
+- uma instalacao existente nao pode passar pelo fluxo de primeira instalacao; deve usar Atualizar CloudOS.cmd para preservar last-known-good.
 - cada versao e imutavel em versions\; a nova versao so fica ativa depois de SHA256 + Supervisor --self-test.
 - o estado ativo e gravado separadamente e a versao anterior fica como last-known-good.
 - Atualizar CloudOS.cmd faz preflight, coleta evidencia Authenticode, exige runtime gerenciado parado e executa health gate real pos-ativacao.
