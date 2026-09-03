@@ -1,4 +1,5 @@
 #include "cloudos_broker_client_v21.h"
+#include "cloudos_event_client_v23.h"
 
 #if __has_include("../../CloudOS.SystemBroker/src/protocol_v21.h")
 #include "../../CloudOS.SystemBroker/src/protocol_v21.h"
@@ -242,6 +243,7 @@ bool CloudOSBrokerClientV21::EnsureConnected()
 
 void CloudOSBrokerClientV21::Disconnect()
 {
+    CloudOSEventClientV23::Instance().Stop();
     std::lock_guard<std::mutex> lock(mutex_);
     if (pipe_ != INVALID_HANDLE_VALUE)
     {
@@ -377,6 +379,8 @@ bool CloudOSBrokerClientV21::PerformHandshake()
 
     client_id_ = StringField(response.payload, "clientId");
     server_instance_id_ = StringField(response.payload, "serverInstanceId");
+    if (client_id_.empty() || server_instance_id_.empty()) return false;
+
     capabilities_.clear();
     const JsonValue* capabilities = FindValue(response.payload, "capabilities");
     if (capabilities != nullptr && capabilities->IsArray())
@@ -385,6 +389,33 @@ bool CloudOSBrokerClientV21::PerformHandshake()
         {
             if (item.IsString()) capabilities_.push_back(item.AsString());
         }
+    }
+
+    if (!CloudOSEventClientV23::Instance().Start(client_id_)) return false;
+
+    JsonObject subscription_payload;
+    subscription_payload["pattern"] = JsonValue("*");
+    const BrokerRequest subscription = MakeRequest(
+        "init-events-v23",
+        "events.subscribe",
+        std::move(subscription_payload));
+    if (!SendFrame(SerializeRequest(subscription)))
+    {
+        CloudOSEventClientV23::Instance().Stop();
+        return false;
+    }
+    raw_response.clear();
+    if (!ReadFrame(raw_response))
+    {
+        CloudOSEventClientV23::Instance().Stop();
+        return false;
+    }
+    BrokerResponse subscription_response;
+    if (!ParseSuccessfulResponse(raw_response, subscription_response) ||
+        !BoolField(subscription_response.payload, "subscribed"))
+    {
+        CloudOSEventClientV23::Instance().Stop();
+        return false;
     }
     return true;
 }
