@@ -132,6 +132,44 @@ class CloudOSBridge {
     }
   }
 
+  static List<CloudWslDistributionSnapshot> _parseWslDistros(
+    Object? rawTyped,
+    List<String> legacyDistros,
+    String defaultDistro,
+  ) {
+    final parsed = <CloudWslDistributionSnapshot>[];
+    if (rawTyped is List) {
+      for (final entry in rawTyped) {
+        if (entry is! Map) continue;
+        final name = entry['name'] as String? ?? '';
+        if (name.trim().isEmpty) continue;
+        final rawVersion = (entry['version'] as num?)?.toInt();
+        final version = rawVersion == 1 || rawVersion == 2 ? rawVersion : null;
+        final isDefault = entry['isDefault'] as bool? ?? name == defaultDistro;
+        if (parsed.any((item) => item.name == name)) continue;
+        parsed.add(
+          CloudWslDistributionSnapshot(
+            name: name,
+            version: version,
+            isDefault: isDefault,
+          ),
+        );
+      }
+    }
+
+    if (parsed.isNotEmpty) return parsed;
+
+    // Backwards compatibility with a V21 broker that only reports names. Keep
+    // version unknown rather than turning every legacy distro into "WSL 2".
+    return legacyDistros
+        .map(
+          (name) => CloudWslDistributionSnapshot(
+            name: name,
+            isDefault: name == defaultDistro,
+          ),
+        )
+        .toList(growable: false);
+  }
 
   Future<List<CloudApp>?> tryLoadApps() async {
     try {
@@ -200,6 +238,20 @@ class CloudOSBridge {
       final raw =
           await _channel.invokeMapMethod<String, Object?>('getSystemSnapshot');
       if (raw == null) return null;
+
+      final legacyDistros = (raw['distros'] as List<Object?>?)
+              ?.whereType<String>()
+              .toList(growable: false) ??
+          degradedSnapshot.distros;
+      final defaultDistro = raw['defaultDistro'] as String? ?? '';
+      final wslDistros = _parseWslDistros(
+        raw['wslDistros'],
+        legacyDistros,
+        defaultDistro,
+      );
+      final legacyWslAvailable =
+          raw['wslAvailable'] as bool? ?? degradedSnapshot.wslAvailable;
+
       return CloudSystemSnapshot(
         deviceName:
             raw['deviceName'] as String? ?? degradedSnapshot.deviceName,
@@ -219,13 +271,12 @@ class CloudOSBridge {
             degradedSnapshot.batteryAvailable,
         batteryPercent: (raw['batteryPercent'] as num?)?.toInt() ??
             degradedSnapshot.batteryPercent,
-        wslAvailable:
-            raw['wslAvailable'] as bool? ?? degradedSnapshot.wslAvailable,
-        distros: (raw['distros'] as List<Object?>?)
-                ?.whereType<String>()
-                .toList() ??
-            degradedSnapshot.distros,
-        defaultDistro: raw['defaultDistro'] as String? ?? '',
+        wslAvailable: legacyWslAvailable,
+        wslEngineAvailable:
+            raw['wslEngineAvailable'] as bool? ?? legacyWslAvailable,
+        distros: legacyDistros,
+        defaultDistro: defaultDistro,
+        wslDistros: wslDistros,
         currentWorkspace: (raw['currentWorkspace'] as num?)?.toInt() ??
             degradedSnapshot.currentWorkspace,
       );
@@ -439,7 +490,9 @@ class CloudOSBridge {
     batteryAvailable: false,
     batteryPercent: 0,
     wslAvailable: false,
+    wslEngineAvailable: false,
     distros: <String>[],
+    wslDistros: <CloudWslDistributionSnapshot>[],
     currentWorkspace: 1,
   );
 
