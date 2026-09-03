@@ -458,6 +458,7 @@ bool CloudOSBrokerClientV21::GetSystemSnapshot(BrokerClientSnapshot& out_snapsho
     snapshot.brightness_available = BoolField(response.payload, "brightnessAvailable");
     snapshot.brightness = DoubleField(response.payload, "brightness", 0.0);
     snapshot.wsl_available = BoolField(response.payload, "wslAvailable");
+    snapshot.default_distro = StringField(response.payload, "defaultDistro");
     snapshot.current_workspace = static_cast<int>(IntField(response.payload, "currentWorkspace", 1));
     snapshot.timestamp_ms = static_cast<uint64_t>(IntField(response.payload, "timestamp", 0));
 

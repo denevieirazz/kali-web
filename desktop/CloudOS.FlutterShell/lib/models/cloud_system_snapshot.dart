@@ -7,6 +7,7 @@ class CloudSystemSnapshot {
     required this.batteryPercent,
     required this.wslAvailable,
     required this.distros,
+    this.defaultDistro = '',
     this.networkAvailable = true,
     this.volumeAvailable = true,
     this.brightnessAvailable = true,
@@ -25,5 +26,6 @@ class CloudSystemSnapshot {
   final int batteryPercent;
   final bool wslAvailable;
   final List<String> distros;
+  final String defaultDistro;
   final int currentWorkspace;
 }

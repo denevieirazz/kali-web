@@ -1,5 +1,6 @@
 #include "cloudos_flutter_bridge_v20.h"
 #include "cloudos_broker_client_v21.h"
+#include "cloudos_conpty_manager.h"
 #include "../../CloudOS.NativeCommon/native_shell_activation_client_v21.h"
 #include "../../CloudOS.NativeCommon/native_shell_notification_client_v21.h"
 
@@ -50,6 +51,27 @@ bool ReadStringArgument(
     if (it == args->end() || !std::holds_alternative<std::string>(it->second)) return false;
     *value = std::get<std::string>(it->second);
     return !value->empty();
+}
+
+bool ReadIntArgument(
+    const flutter::EncodableMap& args,
+    const char* key,
+    int* value)
+{
+    if (value == nullptr) return false;
+    const auto it = args.find(flutter::EncodableValue(key));
+    if (it == args.end()) return false;
+    if (const auto* number = std::get_if<int32_t>(&it->second))
+    {
+        *value = static_cast<int>(*number);
+        return true;
+    }
+    if (const auto* number = std::get_if<int64_t>(&it->second))
+    {
+        *value = static_cast<int>(*number);
+        return true;
+    }
+    return false;
 }
 
 bool ReadSurfaceArgument(
@@ -230,12 +252,15 @@ void CloudOSFlutterBridgeV20::RegisterWithMessenger(
     auto& bridge = Instance();
     bridge.Initialize(window_handle);
 
-    auto channel = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+    bridge.channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
         messenger,
         kChannelName,
         &flutter::StandardMethodCodec::GetInstance());
 
-    channel->SetMethodCallHandler(
+    CloudOSConPTYManager::Instance().SetMethodChannel(bridge.channel_.get());
+    CloudOSConPTYManager::Instance().SetPlatformWindow(window_handle);
+
+    bridge.channel_->SetMethodCallHandler(
         [](const flutter::MethodCall<flutter::EncodableValue>& call,
            std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
             CloudOSFlutterBridgeV20::Instance().HandleMethodCall(call, std::move(result));
@@ -263,6 +288,101 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result)
 {
     const std::string& method = method_call.method_name();
+
+    if (method == "terminal.createSession")
+    {
+        const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
+        if (args == nullptr)
+        {
+            result->Error("INVALID_ARGUMENT", "terminal.createSession requires a map");
+            return;
+        }
+        std::string shell_kind = "powershell";
+        std::string distro;
+        int cols = 80;
+        int rows = 24;
+        const auto shell_it = args->find(flutter::EncodableValue("shellKind"));
+        if (shell_it != args->end() && std::holds_alternative<std::string>(shell_it->second))
+            shell_kind = std::get<std::string>(shell_it->second);
+        const auto distro_it = args->find(flutter::EncodableValue("distro"));
+        if (distro_it != args->end() && std::holds_alternative<std::string>(distro_it->second))
+            distro = std::get<std::string>(distro_it->second);
+        ReadIntArgument(*args, "cols", &cols);
+        ReadIntArgument(*args, "rows", &rows);
+
+        std::string error;
+        const std::string session_id = CloudOSConPTYManager::Instance().CreateSession(
+            shell_kind, distro, cols, rows, error);
+        if (session_id.empty())
+        {
+            result->Error("CONPTY_CREATE_FAILED", error);
+            return;
+        }
+        flutter::EncodableMap response;
+        response[flutter::EncodableValue("sessionId")] = flutter::EncodableValue(session_id);
+        result->Success(flutter::EncodableValue(std::move(response)));
+        return;
+    }
+
+    if (method == "terminal.write")
+    {
+        std::string session_id;
+        std::string data;
+        if (!ReadStringArgument(method_call, "sessionId", &session_id) ||
+            !ReadStringArgument(method_call, "data", &data))
+        {
+            result->Error("INVALID_ARGUMENT", "terminal.write requires sessionId and data");
+            return;
+        }
+        result->Success(flutter::EncodableValue(
+            CloudOSConPTYManager::Instance().WriteSession(session_id, data)));
+        return;
+    }
+
+    if (method == "terminal.resize")
+    {
+        std::string session_id;
+        const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
+        int cols = 0;
+        int rows = 0;
+        if (!ReadStringArgument(method_call, "sessionId", &session_id) || args == nullptr ||
+            !ReadIntArgument(*args, "cols", &cols) || !ReadIntArgument(*args, "rows", &rows))
+        {
+            result->Error("INVALID_ARGUMENT", "terminal.resize requires sessionId, cols and rows");
+            return;
+        }
+        result->Success(flutter::EncodableValue(
+            CloudOSConPTYManager::Instance().ResizeSession(session_id, cols, rows)));
+        return;
+    }
+
+    if (method == "terminal.signal")
+    {
+        std::string session_id;
+        std::string signal;
+        if (!ReadStringArgument(method_call, "sessionId", &session_id) ||
+            !ReadStringArgument(method_call, "signal", &signal))
+        {
+            result->Error("INVALID_ARGUMENT", "terminal.signal requires sessionId and signal");
+            return;
+        }
+        result->Success(flutter::EncodableValue(
+            CloudOSConPTYManager::Instance().SignalSession(session_id, signal)));
+        return;
+    }
+
+    if (method == "terminal.close")
+    {
+        std::string session_id;
+        if (!ReadStringArgument(method_call, "sessionId", &session_id))
+        {
+            result->Error("INVALID_ARGUMENT", "terminal.close requires sessionId");
+            return;
+        }
+        result->Success(flutter::EncodableValue(
+            CloudOSConPTYManager::Instance().CloseSession(session_id)));
+        return;
+    }
 
     if (method == "getApps")
     {
@@ -355,6 +475,7 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         map[flutter::EncodableValue("batteryAvailable")] = flutter::EncodableValue(snapshot.battery_available);
         map[flutter::EncodableValue("batteryPercent")] = flutter::EncodableValue(snapshot.battery_percent);
         map[flutter::EncodableValue("wslAvailable")] = flutter::EncodableValue(snapshot.wsl_available);
+        map[flutter::EncodableValue("defaultDistro")] = flutter::EncodableValue(snapshot.default_distro);
         map[flutter::EncodableValue("currentWorkspace")] = flutter::EncodableValue(snapshot.current_workspace);
         flutter::EncodableList distros_list;
         for (const auto& d : snapshot.distros) distros_list.push_back(flutter::EncodableValue(d));
@@ -562,6 +683,7 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         map[flutter::EncodableValue("channel")] = flutter::EncodableValue(kChannelName);
         map[flutter::EncodableValue("brokerConnected")] = flutter::EncodableValue(CloudOSBrokerClientV21::Instance().IsConnected());
         map[flutter::EncodableValue("brokerState")] = flutter::EncodableValue(ConnectionStateToString(CloudOSBrokerClientV21::Instance().GetConnectionState()));
+        map[flutter::EncodableValue("conptyAvailable")] = flutter::EncodableValue(true);
         map[flutter::EncodableValue("arbitrary_command_api")] = flutter::EncodableValue(false);
         map[flutter::EncodableValue("winlogon_modified")] = flutter::EncodableValue(false);
         map[flutter::EncodableValue("shell_activation_executed")] = flutter::EncodableValue(false);
@@ -635,6 +757,7 @@ NativeSystemSnapshot CloudOSFlutterBridgeV20::GetSystemSnapshot()
         snapshot.battery_percent = broker_snap.battery_percent;
         snapshot.wsl_available = broker_snap.wsl_available;
         snapshot.distros = broker_snap.distros;
+        snapshot.default_distro = broker_snap.default_distro;
         snapshot.current_workspace = broker_snap.current_workspace;
     }
     else

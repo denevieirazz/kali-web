@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 
 import '../models/shell_models.dart';
@@ -6,12 +8,130 @@ import 'bridge/cloud_file_mapper.dart';
 import 'bridge/cloud_notification_mapper.dart';
 import 'bridge/cloudos_preview_data.dart';
 
+class TerminalDataEvent {
+  const TerminalDataEvent({required this.sessionId, required this.data});
+
+  final String sessionId;
+  final String data;
+}
+
+class TerminalExitEvent {
+  const TerminalExitEvent({required this.sessionId, required this.exitCode});
+
+  final String sessionId;
+  final int exitCode;
+}
+
 class CloudOSBridge {
   const CloudOSBridge({
     MethodChannel channel = const MethodChannel('cloudos/native/v19'),
   }) : _channel = channel;
 
   final MethodChannel _channel;
+  static bool _handlerInitialized = false;
+  static final StreamController<TerminalDataEvent> _terminalDataController =
+      StreamController<TerminalDataEvent>.broadcast();
+  static final StreamController<TerminalExitEvent> _terminalExitController =
+      StreamController<TerminalExitEvent>.broadcast();
+
+  Stream<TerminalDataEvent> get terminalDataStream {
+    _ensureChannelHandler();
+    return _terminalDataController.stream;
+  }
+
+  Stream<TerminalExitEvent> get terminalExitStream {
+    _ensureChannelHandler();
+    return _terminalExitController.stream;
+  }
+
+  void _ensureChannelHandler() {
+    if (_handlerInitialized) return;
+    _handlerInitialized = true;
+    _channel.setMethodCallHandler((call) async {
+      final args = call.arguments;
+      if (call.method == 'terminal.onData' && args is Map) {
+        _terminalDataController.add(
+          TerminalDataEvent(
+            sessionId: args['sessionId'] as String? ?? '',
+            data: args['data'] as String? ?? '',
+          ),
+        );
+      } else if (call.method == 'terminal.onExit' && args is Map) {
+        _terminalExitController.add(
+          TerminalExitEvent(
+            sessionId: args['sessionId'] as String? ?? '',
+            exitCode: (args['exitCode'] as num?)?.toInt() ?? 0,
+          ),
+        );
+      }
+    });
+  }
+
+  Future<String?> createTerminalSession({
+    String shellKind = 'powershell',
+    String distro = '',
+    int cols = 80,
+    int rows = 24,
+  }) async {
+    try {
+      final response = await _channel.invokeMapMethod<String, Object?>(
+        'terminal.createSession',
+        <String, Object?>{
+          'shellKind': shellKind,
+          'distro': distro,
+          'cols': cols,
+          'rows': rows,
+        },
+      );
+      return response?['sessionId'] as String?;
+    } on PlatformException {
+      return null;
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
+  Future<bool> writeTerminal(String sessionId, String data) async {
+    return await _terminalBool('terminal.write', <String, Object?>{
+      'sessionId': sessionId,
+      'data': data,
+    });
+  }
+
+  Future<bool> resizeTerminal(String sessionId, int cols, int rows) async {
+    return await _terminalBool('terminal.resize', <String, Object?>{
+      'sessionId': sessionId,
+      'cols': cols,
+      'rows': rows,
+    });
+  }
+
+  Future<bool> signalTerminal(String sessionId, String signal) async {
+    return await _terminalBool('terminal.signal', <String, Object?>{
+      'sessionId': sessionId,
+      'signal': signal,
+    });
+  }
+
+  Future<bool> closeTerminal(String sessionId) async {
+    return await _terminalBool('terminal.close', <String, Object?>{
+      'sessionId': sessionId,
+    });
+  }
+
+  Future<bool> _terminalBool(
+    String method,
+    Map<String, Object?> arguments,
+  ) async {
+    try {
+      return await _channel.invokeMethod<bool>(method, arguments) ?? false;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
 
   Future<List<CloudApp>?> tryLoadApps() async {
     try {
@@ -105,6 +225,7 @@ class CloudOSBridge {
                 ?.whereType<String>()
                 .toList() ??
             degradedSnapshot.distros,
+        defaultDistro: raw['defaultDistro'] as String? ?? '',
         currentWorkspace: (raw['currentWorkspace'] as num?)?.toInt() ??
             degradedSnapshot.currentWorkspace,
       );

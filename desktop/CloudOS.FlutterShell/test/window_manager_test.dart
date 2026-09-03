@@ -34,7 +34,9 @@ void main() {
       expect(maximized.preMaximizedSize, const Size(600, 400));
     });
 
-    testWidgets('CloudWindowFrame renders header controls and content', (tester) async {
+    testWidgets('CloudWindowFrame renders header controls and content', (
+      tester,
+    ) async {
       bool closed = false;
       bool minimized = false;
       bool toggledMax = false;
@@ -86,48 +88,41 @@ void main() {
       expect(focused, true);
     });
 
-    testWidgets('Internal Terminal window renders tabs and responds to help', (tester) async {
+    testWidgets('Internal Terminal window renders a real xterm surface', (
+      tester,
+    ) async {
       await tester.pumpWidget(
-        const MaterialApp(
-          home: Scaffold(
-            body: TerminalWindow(),
-          ),
-        ),
+        const MaterialApp(home: Scaffold(body: TerminalWindow())),
       );
 
-      expect(find.text('PowerShell 7'), findsOneWidget);
-      expect(find.text('Prompt de Comando'), findsOneWidget);
-      expect(find.text('Ubuntu WSL2'), findsOneWidget);
-      expect(find.textContaining('CloudOS Terminal'), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 100));
 
-      await tester.enterText(find.byType(TextField), 'help');
-      await tester.testTextInput.receiveAction(TextInputAction.done);
-      await tester.pumpAndSettle();
-
-      expect(find.textContaining('Comandos suportados'), findsOneWidget);
+      expect(find.text('PowerShell (ConPTY)'), findsWidgets);
+      expect(find.byTooltip('Nova aba'), findsOneWidget);
+      expect(find.byType(TextField), findsNothing);
     });
 
-    testWidgets('Internal Browser window renders navigation bar and quick links', (tester) async {
+    testWidgets('Internal Browser window renders real WebView2 controls', (
+      tester,
+    ) async {
       await tester.pumpWidget(
-        const MaterialApp(
-          home: Scaffold(
-            body: BrowserWindow(),
-          ),
-        ),
+        const MaterialApp(home: Scaffold(body: BrowserWindow())),
       );
 
-      expect(find.text('CloudOS Web Navigation'), findsOneWidget);
-      expect(find.text('Google'), findsOneWidget);
-      expect(find.text('GitHub'), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.byTooltip('Voltar'), findsOneWidget);
+      expect(find.byTooltip('Avançar'), findsOneWidget);
+      expect(find.byTooltip('Página Inicial'), findsOneWidget);
+      expect(find.byTooltip('Ferramentas do Desenvolvedor'), findsOneWidget);
+      expect(find.text('CloudOS Web Navigation'), findsNothing);
     });
 
-    testWidgets('Internal Settings window renders category navigation', (tester) async {
+    testWidgets('Internal Settings window renders category navigation', (
+      tester,
+    ) async {
       await tester.pumpWidget(
-        const MaterialApp(
-          home: Scaffold(
-            body: SettingsWindow(),
-          ),
-        ),
+        const MaterialApp(home: Scaffold(body: SettingsWindow())),
       );
 
       expect(find.text('Configurações'), findsOneWidget);

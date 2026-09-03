@@ -47,21 +47,18 @@ void main() {
     calls.clear();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
-      calls.add(call);
-      switch (call.method) {
-        case 'getShellSurfaceStates':
-          return <String, Object?>{
-            'browser': true,
-            'terminal': false,
-          };
-        case 'focusShellSurface':
-          return true;
-        case 'closeShellSurface':
-          return true;
-        default:
-          return null;
-      }
-    });
+          calls.add(call);
+          switch (call.method) {
+            case 'getShellSurfaceStates':
+              return <String, Object?>{'browser': true, 'terminal': false};
+            case 'focusShellSurface':
+              return true;
+            case 'closeShellSurface':
+              return true;
+            default:
+              return null;
+          }
+        });
   });
 
   tearDown(() {
@@ -69,15 +66,18 @@ void main() {
         .setMockMethodCallHandler(channel, null);
   });
 
-  test('surface state query returns native Browser and Terminal state', () async {
-    const bridge = CloudOSBridge(channel: channel);
+  test(
+    'surface state query returns native Browser and Terminal state',
+    () async {
+      const bridge = CloudOSBridge(channel: channel);
 
-    final states = await bridge.loadShellSurfaceStates();
+      final states = await bridge.loadShellSurfaceStates();
 
-    expect(states['browser'], true);
-    expect(states['terminal'], false);
-    expect(calls.single.method, 'getShellSurfaceStates');
-  });
+      expect(states['browser'], true);
+      expect(states['terminal'], false);
+      expect(calls.single.method, 'getShellSurfaceStates');
+    },
+  );
 
   test('focus uses a typed allowlisted surface id', () async {
     const bridge = CloudOSBridge(channel: channel);
@@ -86,10 +86,7 @@ void main() {
 
     expect(focused, true);
     expect(calls.single.method, 'focusShellSurface');
-    expect(
-      calls.single.arguments,
-      <String, Object?>{'id': 'cloudos:browser'},
-    );
+    expect(calls.single.arguments, <String, Object?>{'id': 'cloudos:browser'});
   });
 
   test('close uses a typed allowlisted surface id', () async {
@@ -99,52 +96,55 @@ void main() {
 
     expect(closed, true);
     expect(calls.single.method, 'closeShellSurface');
-    expect(
-      calls.single.arguments,
-      <String, Object?>{'id': 'cloudos:terminal'},
-    );
+    expect(calls.single.arguments, <String, Object?>{'id': 'cloudos:terminal'});
   });
 
-  testWidgets('running Browser is focused instead of launched again', (tester) async {
+  testWidgets('running Browser is focused instead of launched again', (
+    tester,
+  ) async {
     final bridge = _RecordingBridge(focusResult: true);
     await tester.binding.setSurfaceSize(const Size(1366, 768));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.pumpWidget(MaterialApp(home: CloudOSShell(bridge: bridge)));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 100));
 
     await tester.tap(find.byTooltip('Navegador Web'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 100));
 
     expect(bridge.focusedIds, <String>['cloudos:browser']);
     expect(bridge.launchedIds, isEmpty);
   });
 
-  testWidgets('missing Browser surface falls back to typed launch', (tester) async {
+  testWidgets('missing Browser surface falls back to typed launch', (
+    tester,
+  ) async {
     final bridge = _RecordingBridge(focusResult: false);
     await tester.binding.setSurfaceSize(const Size(1366, 768));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.pumpWidget(MaterialApp(home: CloudOSShell(bridge: bridge)));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 100));
 
     await tester.tap(find.byTooltip('Navegador Web'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 100));
 
     expect(bridge.focusedIds, <String>['cloudos:browser']);
     expect(bridge.launchedIds, <String>['cloudos:browser']);
   });
 
-  testWidgets('Terminal uses the same focus-or-launch lifecycle', (tester) async {
+  testWidgets('Terminal uses the same focus-or-launch lifecycle', (
+    tester,
+  ) async {
     final bridge = _RecordingBridge(focusResult: true);
     await tester.binding.setSurfaceSize(const Size(1366, 768));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.pumpWidget(MaterialApp(home: CloudOSShell(bridge: bridge)));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 100));
 
     await tester.tap(find.byTooltip('Terminal ConPTY (Ctrl+Alt+Enter)'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 100));
 
     expect(bridge.focusedIds, <String>['cloudos:terminal']);
     expect(bridge.launchedIds, isEmpty);

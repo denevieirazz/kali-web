@@ -4,6 +4,7 @@
 
 #include "flutter/generated_plugin_registrant.h"
 #include "cloudos_flutter_bridge_v20.h"
+#include "cloudos_conpty_manager.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -41,8 +42,10 @@ bool FlutterWindow::OnCreate() {
 
   return true;
 }
-
 void FlutterWindow::OnDestroy() {
+  CloudOS::CloudOSConPTYManager::Instance().ShutdownAll();
+  CloudOS::CloudOSConPTYManager::Instance().SetMethodChannel(nullptr);
+  CloudOS::CloudOSConPTYManager::Instance().SetPlatformWindow(nullptr);
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -64,8 +67,11 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
 
   switch (message) {
+    case CloudOS::CloudOSConPTYManager::kDispatchMessage:
+      CloudOS::CloudOSConPTYManager::Instance().DrainPlatformEvents();
+      return 0;
     case WM_FONTCHANGE:
-      flutter_controller_->engine()->ReloadSystemFonts();
+      if (flutter_controller_) flutter_controller_->engine()->ReloadSystemFonts();
       break;
   }
 

@@ -79,7 +79,7 @@ jobs:
             if (Test-Path $cmakePath) {
               $cmake = Get-Content -Path $cmakePath -Raw
               if ($cmake -notmatch "cloudos_flutter_bridge_v20.cpp") {
-                $cmake = $cmake -replace '(\s*"flutter_window\.cpp")', "`$1`n  `"cloudos_flutter_bridge_v20.cpp`"`n  `"cloudos_broker_client_v21.cpp`"`n  `"protocol_v21.cpp`""
+                $cmake = $cmake -replace '(\s*"flutter_window\.cpp")', "`$1`n  `"cloudos_flutter_bridge_v20.cpp`"`n  `"cloudos_broker_client_v21.cpp`"`n  `"cloudos_conpty_manager.cpp`"`n  `"protocol_v21.cpp`""
                 $cmake = $cmake -replace 'target_link_libraries\(\$\{BINARY_NAME\} PRIVATE flutter flutter_wrapper_app\)', 'target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app dwmapi.lib shlwapi.lib shell32.lib ole32.lib uuid.lib advapi32.lib)'
                 Set-Content -Path $cmakePath -Value $cmake -Encoding UTF8
               }

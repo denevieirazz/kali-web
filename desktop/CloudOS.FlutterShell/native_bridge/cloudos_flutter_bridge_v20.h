@@ -57,6 +57,7 @@ struct NativeSystemSnapshot final
     int battery_percent{};
     bool wsl_available{false};
     std::vector<std::string> distros;
+    std::string default_distro;
     int current_workspace{1};
 };
 
@@ -98,6 +99,7 @@ private:
 
     HWND window_handle_{nullptr};
     std::atomic_bool is_registered_{false};
+    std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel_;
     mutable std::mutex mutex_;
     std::vector<NativeAppItem> cached_apps_;
     NativeSystemSnapshot cached_snapshot_;

@@ -209,4 +209,27 @@ void main() {
       reason: 'charging state is not part of the V21 snapshot contract',
     );
   });
+
+  test('Browser and Terminal cannot regress to simulated surfaces', () {
+    final browser = File(
+      'lib/features/browser/presentation/browser_window.dart',
+    ).readAsStringSync();
+    final terminal = File(
+      'lib/features/terminal/presentation/terminal_window.dart',
+    ).readAsStringSync();
+    final bridge = File(
+      'native_bridge/cloudos_flutter_bridge_v20.cpp',
+    ).readAsStringSync();
+
+    expect(browser, contains('WebviewController'));
+    expect(browser, contains('return Webview(_webview)'));
+    expect(browser, isNot(contains('CloudOS Web Navigation')));
+    expect(browser, isNot(contains('Future<void>.delayed')));
+
+    expect(terminal, contains('TerminalView('));
+    expect(terminal, contains('createTerminalSession('));
+    expect(terminal, isNot(contains('Comando executado via ConPTY host')));
+    expect(bridge, contains('terminal.createSession'));
+    expect(bridge, contains('CloudOSConPTYManager::Instance()'));
+  });
 }

@@ -48,6 +48,7 @@ JsonObject SystemSnapshot::ToJsonObject() const
     obj["brightnessAvailable"] = JsonValue(brightness_available);
     obj["brightness"] = JsonValue(brightness);
     obj["wslAvailable"] = JsonValue(wsl_available);
+    obj["defaultDistro"] = JsonValue(default_distro);
 
     JsonArray distros_arr;
     for (const auto& d : distros)
@@ -215,6 +216,7 @@ void SystemServiceV21::Refresh()
     snapshot_.brightness = brightness.available ? brightness.brightness : 0.0;
 
     snapshot_.distros = WslServiceV21::Instance().GetDistributions();
+    snapshot_.default_distro = WslServiceV21::Instance().GetDefaultDistribution();
     snapshot_.wsl_available = WslServiceV21::Instance().IsWslAvailable();
     snapshot_.current_workspace = 1;
     snapshot_.timestamp_ms = NowMs();

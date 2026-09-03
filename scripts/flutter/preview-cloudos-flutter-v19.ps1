@@ -40,6 +40,37 @@ try {
         Remove-Item $templateTest -Force
     }
 
+    # Keep the generated runner synchronized with the tracked native bridge.
+    # The host is intentionally generated locally and is not committed.
+    Copy-Item -Path (Join-Path $uiRoot 'native_bridge\*') `
+        -Destination (Join-Path $uiRoot 'windows\runner') -Force
+    Copy-Item -LiteralPath (Join-Path $uiRoot '..\CloudOS.SystemBroker\src\protocol_v21.h') `
+        -Destination (Join-Path $uiRoot 'windows\runner\protocol_v21.h') -Force
+    Copy-Item -LiteralPath (Join-Path $uiRoot '..\CloudOS.SystemBroker\src\protocol_v21.cpp') `
+        -Destination (Join-Path $uiRoot 'windows\runner\protocol_v21.cpp') -Force
+    $stagedCommon = Join-Path $uiRoot 'CloudOS.NativeCommon'
+    New-Item -ItemType Directory -Force -Path $stagedCommon | Out-Null
+    foreach ($header in @(
+        'native_shell_activation_v21.h',
+        'native_shell_activation_client_v21.h',
+        'native_shell_notification_v21.h',
+        'native_shell_notification_client_v21.h'
+    )) {
+        Copy-Item -LiteralPath (Join-Path $uiRoot "..\CloudOS.NativeCommon\$header") `
+            -Destination (Join-Path $stagedCommon $header) -Force
+    }
+    $runnerCmake = Join-Path $uiRoot 'windows\runner\CMakeLists.txt'
+    $cmake = Get-Content -LiteralPath $runnerCmake -Raw
+    if ($cmake -notmatch 'cloudos_flutter_bridge_v20\.cpp') {
+        $cmake = $cmake -replace '(\s*"flutter_window\.cpp")', "`$1`n  `"cloudos_flutter_bridge_v20.cpp`"`n  `"cloudos_broker_client_v21.cpp`"`n  `"cloudos_conpty_manager.cpp`"`n  `"protocol_v21.cpp`""
+        $cmake = $cmake -replace 'target_link_libraries\(\$\{BINARY_NAME\} PRIVATE flutter flutter_wrapper_app\)', 'target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app dwmapi.lib shlwapi.lib shell32.lib ole32.lib uuid.lib advapi32.lib)'
+        Set-Content -LiteralPath $runnerCmake -Value $cmake -Encoding UTF8
+    }
+    elseif ($cmake -notmatch 'cloudos_conpty_manager\.cpp') {
+        $cmake = $cmake -replace '(\s*"cloudos_broker_client_v21\.cpp")', "`$1`n  `"cloudos_conpty_manager.cpp`""
+        Set-Content -LiteralPath $runnerCmake -Value $cmake -Encoding UTF8
+    }
+
     Write-Host '[CloudOS Flutter V19] Resolvendo dependencias...' -ForegroundColor Cyan
     & flutter pub get | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'flutter pub get falhou.' }

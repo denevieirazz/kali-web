@@ -58,7 +58,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
   Size? filesPreMaxSize;
   int filesZIndex = 1;
 
-  bool terminalOpen = false;
+  bool terminalOpen = const bool.fromEnvironment('CLOUDOS_E2E_TERMINAL');
   bool terminalMinimized = false;
   bool terminalMaximized = false;
   Offset terminalOffset = const Offset(180, 80);
@@ -67,7 +67,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
   Size? terminalPreMaxSize;
   int terminalZIndex = 2;
 
-  bool browserOpen = false;
+  bool browserOpen = const bool.fromEnvironment('CLOUDOS_E2E_BROWSER');
   bool browserMinimized = false;
   bool browserMaximized = false;
   Offset browserOffset = const Offset(150, 70);
@@ -874,7 +874,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
       );
     }
 
-    if (terminalOpen && !terminalMinimized) {
+    if (terminalOpen) {
       entries.add(
         _WindowRenderEntry(
           zIndex: terminalZIndex,
@@ -883,7 +883,9 @@ class _CloudOSShellState extends State<CloudOSShell> {
             top: terminalMaximized ? 0 : terminalOffset.dy,
             width: terminalMaximized ? constraints.maxWidth : terminalSize.width,
             height: terminalMaximized ? constraints.maxHeight - 56.0 : terminalSize.height,
-            child: CloudWindowFrame(
+            child: Offstage(
+              offstage: terminalMinimized,
+              child: CloudWindowFrame(
               window: CloudWindow(
                 id: 'terminal',
                 title: 'Terminal CloudOS (ConPTY)',
@@ -908,9 +910,9 @@ class _CloudOSShellState extends State<CloudOSShell> {
                 bottom,
                 constraints,
               ),
-              child: TerminalWindow(
-                snapshot: snapshot,
-                bridge: widget.bridge,
+                child: TerminalWindow(
+                  bridge: widget.bridge,
+                ),
               ),
             ),
           ),
@@ -918,7 +920,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
       );
     }
 
-    if (browserOpen && !browserMinimized) {
+    if (browserOpen) {
       entries.add(
         _WindowRenderEntry(
           zIndex: browserZIndex,
@@ -927,7 +929,9 @@ class _CloudOSShellState extends State<CloudOSShell> {
             top: browserMaximized ? 0 : browserOffset.dy,
             width: browserMaximized ? constraints.maxWidth : browserSize.width,
             height: browserMaximized ? constraints.maxHeight - 56.0 : browserSize.height,
-            child: CloudWindowFrame(
+            child: Offstage(
+              offstage: browserMinimized,
+              child: CloudWindowFrame(
               window: CloudWindow(
                 id: 'browser',
                 title: 'Navegador Web (WebView2)',
@@ -952,7 +956,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
                 bottom,
                 constraints,
               ),
-              child: const BrowserWindow(),
+                child: const BrowserWindow(),
+              ),
             ),
           ),
         ),
