@@ -532,13 +532,9 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
             WslProbeServiceV22::Instance().Probe(distro, timeout_ms);
         WriteWslProbePayload(res, probe);
 
-        JsonObject event_payload;
-        event_payload["distro"] = JsonValue(probe.distro);
-        event_payload["healthy"] = JsonValue(probe.success);
-        event_payload["attempted"] = JsonValue(probe.attempted);
-        event_payload["durationMs"] = JsonValue(static_cast<int64_t>(probe.duration_ms));
-        event_payload["errorCode"] = JsonValue(probe.error_code);
-        EventBusV21::Instance().Publish("wsl.healthProbed", event_payload);
+        // Do not synchronously publish an event on this same client pipe before
+        // the RPC response is framed. The V21 client is request/response based;
+        // event interleaving here could make it consume an event as the reply.
         return res;
     }
 
