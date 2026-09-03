@@ -44,16 +44,8 @@ function Get-CloudOSAuthenticodeEvidence {
         $records.Add([pscustomobject]@{
             file = $name
             status = [string]$signature.Status
-            signer = if ($null -ne $signature.SignerCertificate) {
-                [string]$signature.SignerCertificate.Subject
-            } else {
-                $null
-            }
-            thumbprint = if ($null -ne $signature.SignerCertificate) {
-                [string]$signature.SignerCertificate.Thumbprint
-            } else {
-                $null
-            }
+            signer = if ($null -ne $signature.SignerCertificate) { [string]$signature.SignerCertificate.Subject } else { $null }
+            thumbprint = if ($null -ne $signature.SignerCertificate) { [string]$signature.SignerCertificate.Thumbprint } else { $null }
         })
     }
     return @($records)
@@ -95,38 +87,22 @@ function Invoke-CloudOSPostActivationHealthGate {
 
     $supervisor = Join-Path $ActiveRoot 'CloudOS.Supervisor.exe'
     if (-not (Test-Path -LiteralPath $supervisor -PathType Leaf)) {
-        return [pscustomobject]@{
-            healthy = $false
-            exit_code = -1
-            timed_out = $false
-            reason = 'supervisor_missing'
-        }
+        return [pscustomobject]@{ healthy = $false; exit_code = -1; timed_out = $false; reason = 'supervisor_missing' }
     }
 
     $arguments = @(
-        '--probe-ready-once',
-        '--probe-no-explorer',
+        '--probe-ready-once', '--probe-no-explorer',
         '--max-failures', '1',
         '--ready-timeout-ms', '30000',
         '--heartbeat-timeout-ms', '5000'
     )
-    $process = Start-Process \
-        -FilePath $supervisor \
-        -ArgumentList $arguments \
-        -WorkingDirectory $ActiveRoot \
-        -PassThru \
-        -WindowStyle Hidden
+    $process = Start-Process -FilePath $supervisor -ArgumentList $arguments -WorkingDirectory $ActiveRoot -PassThru -WindowStyle Hidden
 
     try {
         if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
             try { $process.Kill($true) } catch { try { $process.Kill() } catch {} }
             try { [void]$process.WaitForExit(5000) } catch {}
-            return [pscustomobject]@{
-                healthy = $false
-                exit_code = -1
-                timed_out = $true
-                reason = 'supervisor_health_timeout'
-            }
+            return [pscustomobject]@{ healthy = $false; exit_code = -1; timed_out = $true; reason = 'supervisor_health_timeout' }
         }
 
         return [pscustomobject]@{
@@ -141,14 +117,14 @@ function Invoke-CloudOSPostActivationHealthGate {
     }
 }
 
-# Hash/manifest validation is always enforced by the V13 identity contract.
-# Authenticode is additive evidence until CloudOS has a configured production
-# signing certificate. It can be made mandatory with -RequireAuthenticodeSignature.
+# Manifest/SHA256 validation remains mandatory in Deployment V13. Authenticode
+# is additive evidence until a production signing certificate is configured.
 $sourceIdentity = Get-CloudOSPayloadIdentity -PackageRoot $PackageRoot
 $signatureEvidence = @(Get-CloudOSAuthenticodeEvidence -Root $sourceIdentity.Root)
 $unsignedOrInvalid = @($signatureEvidence | Where-Object { $_.status -ne 'Valid' })
 if ($RequireAuthenticodeSignature -and $unsignedOrInvalid.Count -gt 0) {
-    throw "Authenticode enforcement rejected update payload: $((@($unsignedOrInvalid | ForEach-Object { "$($_.file)=$($_.status)" })) -join ', ')"
+    $invalidSummary = (@($unsignedOrInvalid | ForEach-Object { "$($_.file)=$($_.status)" })) -join ', '
+    throw "Authenticode enforcement rejected update payload: $invalidSummary"
 }
 
 $before = Get-CloudOSDeploymentStatus -InstallRoot $InstallRoot
@@ -161,25 +137,15 @@ $deploymentSucceeded = $false
 $health = $null
 $status = $null
 try {
-    $status = Invoke-CloudOSDeployment \
-        -SourcePackageRoot $sourceIdentity.Root \
-        -InstallRoot $InstallRoot \
-        -RetainVersions $RetainVersions
+    $status = Invoke-CloudOSDeployment -SourcePackageRoot $sourceIdentity.Root -InstallRoot $InstallRoot -RetainVersions $RetainVersions
     $deploymentSucceeded = $true
 
     if ($SkipPostActivationHealthCheck) {
-        $health = [pscustomobject]@{
-            healthy = $null
-            exit_code = $null
-            timed_out = $false
-            reason = 'explicitly_skipped'
-        }
+        $health = [pscustomobject]@{ healthy = $null; exit_code = $null; timed_out = $false; reason = 'explicitly_skipped' }
     }
     else {
         $activeRoot = Join-Path (Join-Path $status.install_root 'versions') $status.active_version
-        $health = Invoke-CloudOSPostActivationHealthGate \
-            -ActiveRoot $activeRoot \
-            -TimeoutSeconds $HealthTimeoutSeconds
+        $health = Invoke-CloudOSPostActivationHealthGate -ActiveRoot $activeRoot -TimeoutSeconds $HealthTimeoutSeconds
 
         if (-not $health.healthy) {
             if (-not [string]::IsNullOrWhiteSpace($previousActive)) {
@@ -187,8 +153,8 @@ try {
                 throw "CloudOS V22 update health gate failed ($($health.reason), exit=$($health.exit_code)); rollback restored $($rollback.active_version)."
             }
 
-            # Failed first-time use of the update entrypoint has no LKG. Remove
-            # the managed deployment rather than leaving a known-bad active version.
+            # A failed first update has no LKG. Do not leave a known-bad active
+            # version behind merely because this entrypoint was used for install.
             try { [void](Invoke-CloudOSUninstall -InstallRoot $InstallRoot) } catch {}
             throw "CloudOS V22 update health gate failed with no last-known-good version ($($health.reason)). Managed activation was removed when possible."
         }
