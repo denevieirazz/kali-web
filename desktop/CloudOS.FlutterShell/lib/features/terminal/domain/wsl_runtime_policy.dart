@@ -293,8 +293,15 @@ class WslRuntimePolicy {
     String distro;
     if (requirement == WslSessionRequirement.security && requested.isEmpty) {
       distro = preferredSecurityDistro;
+    } else if (requested.isNotEmpty) {
+      // Preserve an explicitly requested registered distro long enough to
+      // report its exact storage/version failure. Generic fallback selection
+      // intentionally skips a distro whose registered storage is missing.
+      distro = installedDistros.firstWhere(
+        (item) => item.toLowerCase() == requested.toLowerCase(),
+      );
     } else {
-      distro = resolveRequestedDistro(requestedDistro);
+      distro = launchFallbackDistro;
     }
 
     if (distro.isEmpty) {
