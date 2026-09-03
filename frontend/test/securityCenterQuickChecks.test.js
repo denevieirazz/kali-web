@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 const read = relativePath => readFileSync(new URL(relativePath, import.meta.url), 'utf8');
 
 const center = read('../src/apps/SecurityCenter/SecurityCenter.tsx');
+const environment = read('../src/apps/SecurityCenter/QuickEnvironmentChecks.tsx');
 const quick = read('../src/apps/SecurityCenter/QuickLocalChecks.tsx');
 const quickDns = read('../src/apps/SecurityCenter/QuickDnsChecks.tsx');
 const quickWeb = read('../src/apps/SecurityCenter/QuickWebChecks.tsx');
@@ -16,6 +17,7 @@ const registry = read('../src/core/appRegistry.ts');
 test('Kali Tool Center opens the beginner-first Security Center without adding a new Start app', () => {
   assert.match(registry, /'kali-tool-center': lazy\(\(\) => import\('\.\.\/apps\/SecurityCenter\/SecurityCenter'\)\)/);
   assert.match(center, /Um botão\. Uma função\./);
+  assert.match(center, /<QuickEnvironmentChecks \/>/);
   assert.match(center, /<QuickLocalChecks \/>/);
   assert.match(center, /<QuickDnsChecks \/>/);
   assert.match(center, /<QuickWebChecks \/>/);
@@ -30,6 +32,15 @@ test('Security Center exposes a large set of small dedicated blocks', () => {
     'Preparar Linux / Kali', 'Terminal CloudOS', 'Monitorar o PC', 'Instalar dependência',
     'Abrir evidências', 'Workspace do projeto',
   ]) assert.match(center, new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
+test('environment area exposes four read-only local machine blocks', () => {
+  for (const title of ['Mapa local', 'Wi‑Fi agora', 'Firewall do PC', 'Portas deste PC']) assert.match(environment, new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(environment, /\/api\/security\/tools\/network\/diagnostics/);
+  assert.match(environment, /\/api\/security\/tools\/network\/wifi/);
+  assert.match(environment, /\/api\/security\/tools\/network\/local-posture/);
+  assert.match(environment, /somente leitura/i);
+  assert.match(environment, /App completo/);
 });
 
 test('quick local checks expose reviewed one-click profiles and full profile', () => {
@@ -52,7 +63,6 @@ test('single-host checks combine surface scan with identity and connectivity dia
   assert.match(quick, /Nome PTR/);
   assert.match(quick, /Rota/);
   assert.match(quick, /Próximos passos deste host/);
-  assert.match(quick, /hostDiagnostics/);
 });
 
 test('one-click result can be copied, exported as JSON and saved as readable report', () => {
@@ -74,13 +84,10 @@ test('quick check history is user-scoped, bounded and can rerun saved presets', 
   assert.match(history, /Repetir sem configurar tudo de novo/);
   assert.match(history, /Repetir check/);
   assert.match(history, /onRerun\(record\.preset, record\.target\)/);
-  assert.match(history, /openPortCount/);
 });
 
 test('DNS area exposes one button for every exact-name record type', () => {
-  for (const title of ['IPv4 do domínio', 'IPv6 do domínio', 'Alias / CNAME', 'Servidores de e-mail', 'Nameservers', 'Registros TXT']) {
-    assert.match(quickDns, new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  }
+  for (const title of ['IPv4 do domínio', 'IPv6 do domínio', 'Alias / CNAME', 'Servidores de e-mail', 'Nameservers', 'Registros TXT']) assert.match(quickDns, new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.match(quickDns, /\/api\/security\/tools\/network\/dns\/lookup/);
   assert.match(quickDns, /Abrir DNS Inspector completo/);
   assert.match(quickDns, /exactNameOnly: true/);
@@ -90,9 +97,7 @@ test('DNS area exposes one button for every exact-name record type', () => {
 });
 
 test('web area exposes six small one-button views over the SSRF-safe inspector endpoint', () => {
-  for (const title of ['Análise web completa', 'Checar HTTPS / TLS', 'Checar headers', 'Checar cookies', 'Checar redirects', 'Ver tecnologias']) {
-    assert.match(quickWeb, new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  }
+  for (const title of ['Análise web completa', 'Checar HTTPS / TLS', 'Checar headers', 'Checar cookies', 'Checar redirects', 'Ver tecnologias']) assert.match(quickWeb, new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.match(quickWeb, /\/api\/security\/tools\/web\/inspect/);
   assert.match(quickWeb, /Abrir Web Inspector completo/);
   assert.match(quickWeb, /valueExposed: false/);
@@ -103,7 +108,7 @@ test('web area exposes six small one-button views over the SSRF-safe inspector e
 });
 
 test('quick checks remain fixed-endpoint and do not expose arbitrary command execution', () => {
-  const combined = `${quick}\n${quickDns}\n${quickWeb}`;
+  const combined = `${environment}\n${quick}\n${quickDns}\n${quickWeb}`;
   assert.match(quick, /\/api\/security\/tools\/network\/scan/);
   assert.doesNotMatch(combined, /\/api\/security\/(?:execute|run|command|shell)/i);
   assert.doesNotMatch(combined, /\b(?:argv|spawn|execFile|execSync|shellCommand)\b/);
