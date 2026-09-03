@@ -18,9 +18,18 @@ class CloudTaskbar extends StatelessWidget {
     this.onBrowser,
     this.onTerminal,
     this.onSettings,
+    this.onCloseFiles,
+    this.onCloseBrowser,
+    this.onCloseTerminal,
+    this.onCloseSettings,
     this.filesRunning = true,
     this.browserRunning = false,
     this.terminalRunning = false,
+    this.settingsRunning = false,
+    this.filesActive = false,
+    this.browserActive = false,
+    this.terminalActive = false,
+    this.settingsActive = false,
     this.currentWorkspace = 1,
     this.onWorkspaceChanged,
     this.notificationCount = 0,
@@ -34,12 +43,21 @@ class CloudTaskbar extends StatelessWidget {
   final VoidCallback? onBrowser;
   final VoidCallback? onTerminal;
   final VoidCallback? onSettings;
+  final VoidCallback? onCloseFiles;
+  final VoidCallback? onCloseBrowser;
+  final VoidCallback? onCloseTerminal;
+  final VoidCallback? onCloseSettings;
   final bool startOpen;
   final bool quickSettingsOpen;
   final bool notificationsOpen;
   final bool filesRunning;
   final bool browserRunning;
   final bool terminalRunning;
+  final bool settingsRunning;
+  final bool filesActive;
+  final bool browserActive;
+  final bool terminalActive;
+  final bool settingsActive;
   final int currentWorkspace;
   final ValueChanged<int>? onWorkspaceChanged;
   final int notificationCount;
@@ -78,23 +96,44 @@ class CloudTaskbar extends StatelessWidget {
                 TaskbarTaskButton(
                   tooltip: 'Arquivos (Ctrl+Alt+E)',
                   icon: Icons.folder_rounded,
+                  label: 'Arquivos',
+                  active: filesActive,
                   isRunning: filesRunning,
                   onPressed: onFiles,
+                  onClose: onCloseFiles,
                 ),
                 const SizedBox(width: 4),
                 TaskbarTaskButton(
                   tooltip: 'Navegador Web',
                   icon: Icons.language_rounded,
+                  label: 'Navegador',
+                  active: browserActive,
                   isRunning: browserRunning,
                   onPressed: onBrowser,
+                  onClose: onCloseBrowser,
                 ),
                 const SizedBox(width: 4),
                 TaskbarTaskButton(
                   tooltip: 'Terminal ConPTY (Ctrl+Alt+Enter)',
                   icon: Icons.terminal_rounded,
+                  label: 'Terminal',
+                  active: terminalActive,
                   isRunning: terminalRunning,
                   onPressed: onTerminal,
+                  onClose: onCloseTerminal,
                 ),
+                if (settingsRunning) ...<Widget>[
+                  const SizedBox(width: 4),
+                  TaskbarTaskButton(
+                    tooltip: 'Configurações',
+                    icon: Icons.settings_rounded,
+                    label: 'Configurações',
+                    active: settingsActive,
+                    isRunning: true,
+                    onPressed: onSettings,
+                    onClose: onCloseSettings,
+                  ),
+                ],
                 const SizedBox(width: 10),
                 Container(width: 1, height: 22, color: CloudOSColors.border),
                 const SizedBox(width: 10),

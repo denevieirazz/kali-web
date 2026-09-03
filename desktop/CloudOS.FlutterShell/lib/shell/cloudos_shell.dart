@@ -859,12 +859,18 @@ class _CloudOSShellState extends State<CloudOSShell> {
                       filesRunning: filesOpen,
                       browserRunning: browserOpen,
                       terminalRunning: terminalOpen,
+                      settingsRunning: settingsOpen,
+                      filesActive: activeInternalWindowId == 'files',
+                      browserActive: activeInternalWindowId == 'browser',
+                      terminalActive: activeInternalWindowId == 'terminal',
+                      settingsActive: activeInternalWindowId == 'settings',
                       currentWorkspace: currentWorkspace,
                       notificationCount: notificationState.unreadCount,
                       onWorkspaceChanged: (index) =>
                           unawaited(_switchWorkspace(index)),
                       onStart: _toggleStart,
                       onFiles: () => _toggleOrFocusWindow('files'),
+                      onCloseFiles: () => _closeWindow('files'),
                       onBrowser: () {
                         if (browserOpen && !browserMinimized && activeInternalWindowId == 'browser') {
                           setState(() {
@@ -875,6 +881,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
                           unawaited(_launchBrowser());
                         }
                       },
+                      onCloseBrowser: () => _closeWindow('browser'),
                       onTerminal: () {
                         if (terminalOpen && !terminalMinimized && activeInternalWindowId == 'terminal') {
                           setState(() {
@@ -885,6 +892,9 @@ class _CloudOSShellState extends State<CloudOSShell> {
                           unawaited(_launchTerminal());
                         }
                       },
+                      onCloseTerminal: () => _closeWindow('terminal'),
+                      onSettings: () => _toggleOrFocusWindow('settings'),
+                      onCloseSettings: () => _closeWindow('settings'),
                       onQuickSettings: _toggleQuickSettings,
                       onNotifications: _toggleNotifications,
                     ),
