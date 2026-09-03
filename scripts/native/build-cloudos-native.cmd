@@ -48,7 +48,7 @@ echo [CloudOS] Compilando shell C++/Win32 %CONFIG% x64...
 "%MSBUILD%" "%ROOT%\desktop\CloudOS.NativeShell\CloudOS.NativeShell.vcxproj" /m /nologo /v:minimal /p:Configuration=%CONFIG% /p:Platform=%PLATFORM%
 if errorlevel 1 exit /b %ERRORLEVEL%
 
-echo [CloudOS] Compilando Shell Supervisor V11 independente %CONFIG% x64...
+echo [CloudOS] Compilando Supervisor/Recovery V22 (protocolo V11 compativel) %CONFIG% x64...
 "%MSBUILD%" "%ROOT%\desktop\CloudOS.NativeRecovery\CloudOS.NativeRecovery.vcxproj" /m /nologo /v:minimal /p:Configuration=%CONFIG% /p:Platform=%PLATFORM%
 if errorlevel 1 exit /b %ERRORLEVEL%
 
@@ -148,7 +148,8 @@ echo [CloudOS] PERFORMANCE_VISUAL_V12=eventos, paint em cache, widgets opcionais
 echo [CloudOS] VISUAL_PLATFORM_V7=GSMTC, mixer por app, Bluetooth e Windows Search preservados
 echo [CloudOS] STABILITY_READINESS_V9=health ABI 96 bytes, heartbeat UI, readiness e soak automatizado
 echo [CloudOS] LIFECYCLE_V10=resume, WTS/RDP, display revalidation, WTS retry e single-instance smoke
-echo [CloudOS] SHELL_SUPERVISOR_V11=processo externo, readiness 30s, heartbeat, restart limitado e fallback seguro Explorer
+echo [CloudOS] SUPERVISOR_RECOVERY_V22=estado explicito, crash-loop, safe mode, Job Object e recovery journal
+echo [CloudOS] SHELL_SUPERVISOR_V11_COMPAT=readiness, heartbeat, graceful-exit e fallback Explorer preservados
 echo [CloudOS] UNIFIED_INTEGRATION_V16=downloads first-party, catalogo Windows+Linux, WinGet, WSLg e integracao event-driven Desktop/Start
 echo [CloudOS] WEBVIEW2=usado somente pelo Navegador CloudOS
 echo [CloudOS] FRONTEND_REACT=referencia visual; nao participa deste build
