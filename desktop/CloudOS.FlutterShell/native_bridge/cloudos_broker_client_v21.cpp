@@ -19,57 +19,72 @@ namespace CloudOS
 
 namespace
 {
+constexpr DWORD kInvalidSessionId = 0xFFFFFFFFu;
+
 std::wstring GetCurrentUserSidString()
 {
     HANDLE token = nullptr;
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
     {
-        return L"CURRENT_USER";
+        return {};
     }
 
     DWORD len = 0;
-    GetTokenInformation(token, TokenUser, nullptr, 0, &len);
+    (void)GetTokenInformation(token, TokenUser, nullptr, 0, &len);
     if (len == 0)
     {
         CloseHandle(token);
-        return L"CURRENT_USER";
+        return {};
     }
 
     std::vector<BYTE> buffer(len);
     if (!GetTokenInformation(token, TokenUser, buffer.data(), len, &len))
     {
         CloseHandle(token);
-        return L"CURRENT_USER";
+        return {};
     }
 
     CloseHandle(token);
 
     auto* token_user = reinterpret_cast<TOKEN_USER*>(buffer.data());
-    LPWSTR string_sid = nullptr;
-    if (ConvertSidToStringSidW(token_user->User.Sid, &string_sid) && string_sid != nullptr)
+    if (token_user == nullptr || token_user->User.Sid == nullptr ||
+        !IsValidSid(token_user->User.Sid))
     {
-        std::wstring result(string_sid);
-        LocalFree(string_sid);
-        return result;
+        return {};
     }
 
-    return L"CURRENT_USER";
+    LPWSTR string_sid = nullptr;
+    if (!ConvertSidToStringSidW(token_user->User.Sid, &string_sid) ||
+        string_sid == nullptr)
+    {
+        return {};
+    }
+
+    std::wstring result(string_sid);
+    LocalFree(string_sid);
+    return result;
 }
 
 DWORD GetCurrentSessionId()
 {
-    DWORD session_id = 0;
+    DWORD session_id = kInvalidSessionId;
     if (!ProcessIdToSessionId(GetCurrentProcessId(), &session_id))
     {
-        return 1;
+        return kInvalidSessionId;
     }
     return session_id;
 }
 
 std::wstring GetCommandPipeName()
 {
+    const std::wstring sid = GetCurrentUserSidString();
+    const DWORD session_id = GetCurrentSessionId();
+    if (sid.empty() || session_id == kInvalidSessionId)
+    {
+        return {};
+    }
     return L"\\\\.\\pipe\\CloudOS.SystemBroker.v21." +
-        GetCurrentUserSidString() + L"." + std::to_wstring(GetCurrentSessionId());
+        sid + L"." + std::to_wstring(session_id);
 }
 
 const JsonValue* FindValue(const JsonObject& object, const char* key)
@@ -265,6 +280,8 @@ bool CloudOSBrokerClientV21::TryConnectPipe()
     }
 
     const std::wstring pipe_name = GetCommandPipeName();
+    if (pipe_name.empty()) return false;
+
     pipe_ = CreateFileW(
         pipe_name.c_str(),
         GENERIC_READ | GENERIC_WRITE,
