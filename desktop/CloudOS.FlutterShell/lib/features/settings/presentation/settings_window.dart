@@ -295,11 +295,12 @@ class _SettingsWindowState extends State<SettingsWindow> {
   Widget _buildWslSection() {
     final policy = WslRuntimePolicy(
       wslAvailable: widget.snapshot.wslAvailable,
+      engineAvailable: widget.snapshot.wslEngineAvailable,
       installedDistros: widget.snapshot.distros,
       defaultDistro: widget.snapshot.defaultDistro,
     );
 
-    final engineStatus = !policy.wslAvailable
+    final engineStatus = !policy.engineAvailable
         ? 'Indisponível'
         : policy.hasInstalledDistros
         ? 'Detectado • ${policy.installedDistros.length} distro(s) registrada(s)'
@@ -318,7 +319,7 @@ class _SettingsWindowState extends State<SettingsWindow> {
         ),
         const SizedBox(height: 8),
         const Text(
-          'O CloudOS só marca uma distribuição como disponível quando ela é realmente reportada pelo System Broker.',
+          'O CloudOS só mostra capacidades Linux que o System Broker conseguiu comprovar passivamente; abrir esta tela não inicia uma distro.',
           style: TextStyle(color: CloudOSColors.caption, fontSize: 12),
         ),
         const SizedBox(height: 16),
@@ -326,7 +327,7 @@ class _SettingsWindowState extends State<SettingsWindow> {
         _buildInfoCard(
           'Distro padrão',
           policy.defaultDistro.isEmpty
-              ? 'Não configurada'
+              ? 'Não comprovada/configurada'
               : policy.defaultDistro,
         ),
         _buildInfoCard(
@@ -345,24 +346,24 @@ class _SettingsWindowState extends State<SettingsWindow> {
           ),
         ),
         const SizedBox(height: 8),
-        if (!policy.wslAvailable)
+        if (!policy.engineAvailable)
           const _RuntimeNotice(
             icon: Icons.error_outline_rounded,
             title: 'WSL indisponível',
             message:
-                'O Windows não reportou um runtime WSL disponível. Sessões Linux permanecem desativadas.',
+                'O mecanismo WSL não foi detectado neste Windows. Sessões Linux permanecem desativadas.',
           )
         else if (!policy.hasInstalledDistros)
           const _RuntimeNotice(
             icon: Icons.info_outline_rounded,
             title: 'Nenhuma distro detectada',
             message:
-                'O WSL existe, mas o Broker não reportou nenhuma distribuição registrada. O CloudOS não abrirá uma sessão Linux falsa.',
+                'O mecanismo WSL existe, mas o Broker não reportou nenhuma distribuição registrada. O CloudOS não abrirá uma sessão Linux falsa.',
           )
         else
           for (final distro in policy.installedDistros)
             _buildDistroCard(distro, policy),
-        if (policy.wslAvailable && !policy.kaliInstalled) ...<Widget>[
+        if (policy.engineAvailable && !policy.kaliInstalled) ...<Widget>[
           const SizedBox(height: 8),
           const _RuntimeNotice(
             icon: Icons.security_rounded,
@@ -375,9 +376,23 @@ class _SettingsWindowState extends State<SettingsWindow> {
     );
   }
 
+  CloudWslDistributionSnapshot? _typedDistro(String distro) {
+    final wanted = distro.toLowerCase();
+    for (final info in widget.snapshot.wslDistros) {
+      if (info.name.toLowerCase() == wanted) return info;
+    }
+    return null;
+  }
+
   Widget _buildDistroCard(String distro, WslRuntimePolicy policy) {
-    final isDefault = distro == policy.defaultDistro;
+    final info = _typedDistro(distro);
+    final isDefault = info?.isDefault == true || distro == policy.defaultDistro;
     final isSecurity = WslRuntimePolicy.isKali(distro);
+    final evidence = switch (info?.version) {
+      1 => 'Registrada • WSL 1',
+      2 => 'Registrada • WSL 2',
+      _ => 'Registrada • versão não comprovada',
+    };
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -408,9 +423,9 @@ class _SettingsWindowState extends State<SettingsWindow> {
                   ),
                 ),
                 const SizedBox(height: 2),
-                const Text(
-                  'Registrada no WSL',
-                  style: TextStyle(
+                Text(
+                  evidence,
+                  style: const TextStyle(
                     color: CloudOSColors.caption,
                     fontSize: 10.5,
                   ),
