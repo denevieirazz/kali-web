@@ -87,6 +87,7 @@ class _TerminalWindowState extends State<TerminalWindow> {
         engineAvailable: snapshot.wslEngineAvailable,
         installedDistros: snapshot.distros,
         defaultDistro: snapshot.defaultDistro,
+        distroVersions: snapshot.distroVersions,
       );
     } catch (error, stackTrace) {
       CloudOSLogger.error(
