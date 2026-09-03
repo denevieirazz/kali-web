@@ -70,6 +70,19 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  Future<void> scrollWslTo(
+    WidgetTester tester,
+    Finder target, {
+    double delta = 260,
+  }) async {
+    await tester.scrollUntilVisible(
+      target,
+      delta,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.pumpAndSettle();
+  }
+
   testWidgets('healthy Kali probe upgrades only the active security evidence', (
     tester,
   ) async {
@@ -96,18 +109,21 @@ void main() {
     await pumpWslSettings(tester, healthyCandidates());
 
     final kaliButton = find.text('Testar Kali (kali-linux)');
+    await scrollWslTo(tester, kaliButton);
     expect(kaliButton, findsOneWidget);
-    await tester.ensureVisible(kaliButton);
     await tester.tap(kaliButton);
     await tester.pumpAndSettle();
 
+    expect(find.text('kali-linux • Saudável'), findsOneWidget);
+    expect(find.textContaining('Marcador confirmado • exit 0'), findsOneWidget);
+
+    final activeSecurity = find.text('kali-linux • health ativo comprovado');
+    await scrollWslTo(tester, activeSecurity, delta: -260);
+    expect(activeSecurity, findsOneWidget);
     expect(
       find.text('kali-linux • backend de segurança saudável'),
       findsOneWidget,
     );
-    expect(find.text('kali-linux • health ativo comprovado'), findsOneWidget);
-    expect(find.text('kali-linux • Saudável'), findsOneWidget);
-    expect(find.textContaining('Marcador confirmado • exit 0'), findsOneWidget);
   });
 
   testWidgets('failed active probe never becomes healthy presentation state', (
@@ -132,7 +148,8 @@ void main() {
     await pumpWslSettings(tester, healthyCandidates());
 
     final ubuntuButton = find.text('Testar Ubuntu');
-    await tester.ensureVisible(ubuntuButton);
+    await scrollWslTo(tester, ubuntuButton);
+    expect(ubuntuButton, findsOneWidget);
     await tester.tap(ubuntuButton);
     await tester.pumpAndSettle();
 
@@ -170,11 +187,15 @@ void main() {
     await pumpWslSettings(tester, broken);
 
     final buttonText = find.text('Testar Ubuntu');
+    await scrollWslTo(tester, buttonText);
     expect(buttonText, findsOneWidget);
     final button = tester.widget<OutlinedButton>(
       find.ancestor(of: buttonText, matching: find.byType(OutlinedButton)),
     );
     expect(button.onPressed, isNull);
-    expect(find.textContaining('armazenamento registrado AUSENTE'), findsOneWidget);
+
+    final missingStorage = find.textContaining('armazenamento registrado AUSENTE');
+    await scrollWslTo(tester, missingStorage);
+    expect(missingStorage, findsOneWidget);
   });
 }
