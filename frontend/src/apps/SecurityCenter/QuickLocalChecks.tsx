@@ -20,6 +20,30 @@ type NetworkDiagnostics = {
   defaultRoutes: Array<{ gateway: string }>;
 };
 
+type HostDiagnostics = {
+  target: string;
+  identity: {
+    reverseDns: string[];
+    mac: string | null;
+    neighborState: string | null;
+    interfaceAddress: string | null;
+    isDefaultGateway: boolean;
+  };
+  reachability: {
+    reachable: boolean;
+    attempts: number;
+    replies: number;
+    lossPercent: number | null;
+    averageMs: number | null;
+    minMs: number | null;
+    maxMs: number | null;
+    ttl: number | null;
+  };
+  route: { hopCount: number; hops: Array<{ hop: number; address: string | null; averageMs: number | null; timedOut: boolean }> };
+  localNetwork: { defaultGateway: string | null; dnsServers: string[] };
+  nextSteps: string[];
+};
+
 type ScanPort = { port: number; state: string; protocol: string; service: string; version: string };
 type ScanHost = { address: string; hostname: string; up: boolean; ports: ScanPort[] };
 type ScanResult = {
@@ -70,6 +94,7 @@ export default function QuickLocalChecks() {
   const [gateway, setGateway] = useState('');
   const [target, setTarget] = useState('');
   const [result, setResult] = useState<ScanResult | null>(null);
+  const [hostDiagnostics, setHostDiagnostics] = useState<HostDiagnostics | null>(null);
   const [loading, setLoading] = useState('');
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
@@ -112,14 +137,25 @@ export default function QuickLocalChecks() {
     setLoading(preset);
     setError('');
     setNotice('');
+    setHostDiagnostics(null);
     try {
-      const data = await apiClient<ScanResult>('/api/security/tools/network/scan', {
+      const scanPromise = apiClient<ScanResult>('/api/security/tools/network/scan', {
         method: 'POST',
         timeoutMs: 65_000,
         body: JSON.stringify({ preset, target: cleanTarget, distribution }),
       });
+      const diagnosticsPromise = preset === 'discover'
+        ? Promise.resolve<HostDiagnostics | null>(null)
+        : apiClient<HostDiagnostics>('/api/security/tools/network/host/diagnostics', {
+          method: 'POST',
+          timeoutMs: 20_000,
+          body: JSON.stringify({ target: cleanTarget }),
+        }).catch(() => null);
+
+      const [data, diagnosticData] = await Promise.all([scanPromise, diagnosticsPromise]);
       setResult(data);
-      setNotice(`${data.label} concluído. O CloudOS organizou o resultado abaixo.`);
+      setHostDiagnostics(diagnosticData);
+      setNotice(`${data.label} concluído. O CloudOS juntou superfície, identidade e conectividade abaixo.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'O check não foi concluído.');
     } finally {
@@ -143,10 +179,11 @@ export default function QuickLocalChecks() {
       ports: host.ports.map(port => ({ ...port, explanation: explainPort(port.port, port.service) })),
     }));
     const payload = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       kind: 'cloudos-guided-local-check',
       purpose: 'authorized-defensive-local-network-assessment',
       result: { ...result, hosts: explainedHosts },
+      hostDiagnostics,
       constraints: {
         privateLocalOnly: true,
         arbitraryArguments: false,
@@ -157,7 +194,7 @@ export default function QuickLocalChecks() {
     };
     try {
       await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
-      setNotice('Resultado explicado e estruturado copiado para a IA.');
+      setNotice('Resultado explicado, identidade e conectividade copiados para a IA.');
     } catch {
       setError('Não foi possível copiar para a área de transferência.');
     }
@@ -202,7 +239,7 @@ export default function QuickLocalChecks() {
 
     <article className="qlc-full">
       <div className="qlc-full-icon">⚡</div>
-      <div><small>Mais automático</small><strong>Perfil completo local</strong><p>Uma única checagem bounded reúne as superfícies mais comuns de web, acesso remoto, Windows, arquivos, bancos, infraestrutura, IoT e desenvolvimento.</p><span>Não tenta senha, não roda script NSE de exploração e aceita somente um IPv4 privado/local.</span></div>
+      <div><small>Mais automático</small><strong>Perfil completo local</strong><p>Uma única checagem bounded reúne as superfícies mais comuns e, em paralelo, coleta ping, PTR, MAC e rota do host.</p><span>Não tenta senha, não roda script NSE de exploração e aceita somente um IPv4 privado/local.</span></div>
       <button type="button" disabled={Boolean(loading) || !fullProfileAvailable} onClick={() => void runCheck('fullProfile')}>{loading === 'fullProfile' ? 'Montando perfil…' : '▶ Fazer perfil completo'}</button>
     </article>
 
@@ -220,6 +257,15 @@ export default function QuickLocalChecks() {
 
     {result && <section className="qlc-result">
       <header><div><small>Último resultado</small><strong>{result.label}</strong><span>{result.target}</span></div><div><button type="button" onClick={() => void copyForAi()}>Copiar explicado para IA</button><em>{result.insights?.highestSeverity || 'info'}</em></div></header>
+
+      {hostDiagnostics && <div className="qlc-identity">
+        <article><small>Responde?</small><strong>{hostDiagnostics.reachability.reachable ? 'sim' : 'não via ICMP'}</strong><span>{hostDiagnostics.reachability.lossPercent ?? '—'}% perda</span></article>
+        <article><small>Latência média</small><strong>{hostDiagnostics.reachability.averageMs ?? '—'} ms</strong><span>3 tentativas bounded</span></article>
+        <article><small>MAC</small><strong>{hostDiagnostics.identity.mac || 'não observado'}</strong><span>{hostDiagnostics.identity.neighborState || 'ARP sem evidência'}</span></article>
+        <article><small>Nome PTR</small><strong>{hostDiagnostics.identity.reverseDns[0] || 'não observado'}</strong><span>{hostDiagnostics.identity.reverseDns.length} nome(s)</span></article>
+        <article><small>Rota</small><strong>{hostDiagnostics.route.hopCount} salto(s)</strong><span>{hostDiagnostics.identity.isDefaultGateway ? 'é o gateway padrão' : 'host da rede'}</span></article>
+      </div>}
+
       <div className="qlc-hosts">
         {result.hosts.length ? result.hosts.map(host => <article key={host.address}>
           <div><strong>{host.address}</strong><span>{host.hostname || 'sem hostname'}</span></div>
@@ -230,6 +276,8 @@ export default function QuickLocalChecks() {
       </div>
 
       {openPorts.length > 0 && <div className="qlc-explain"><strong>O que essas portas significam</strong><div>{openPorts.map(port => <article key={`${port.host}-${port.port}`}><b>{port.port}</b><div><strong>{port.knowledge.title}</strong><span>{port.knowledge.category} · {port.host}</span><p>{port.knowledge.explanation}</p><small>Revise: {port.knowledge.review}</small></div></article>)}</div></div>}
+
+      {hostDiagnostics?.nextSteps.length ? <div className="qlc-next"><strong>Próximos passos deste host</strong><ol>{hostDiagnostics.nextSteps.map((step, index) => <li key={`${index}-${step}`}>{step}</li>)}</ol></div> : null}
 
       {findings.length > 0 && <div className="qlc-findings"><strong>O que merece revisão</strong>{findings.map(finding => <article key={finding.id}><span>{finding.severity}</span><div><b>{finding.title}</b><p>{finding.evidence}</p><small>{finding.recommendation}</small></div></article>)}</div>}
       <p className="qlc-note">Porta aberta ou serviço identificado é evidência de superfície, não confirmação automática de vulnerabilidade.</p>
