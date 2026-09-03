@@ -6,6 +6,7 @@ const read = relativePath => readFileSync(new URL(relativePath, import.meta.url)
 
 const center = read('../src/apps/SecurityCenter/SecurityCenter.tsx');
 const quick = read('../src/apps/SecurityCenter/QuickLocalChecks.tsx');
+const quickDns = read('../src/apps/SecurityCenter/QuickDnsChecks.tsx');
 const quickWeb = read('../src/apps/SecurityCenter/QuickWebChecks.tsx');
 const history = read('../src/apps/SecurityCenter/QuickCheckHistory.tsx');
 const knowledge = read('../src/apps/SecurityCenter/portKnowledge.ts');
@@ -16,6 +17,7 @@ test('Kali Tool Center opens the beginner-first Security Center without adding a
   assert.match(registry, /'kali-tool-center': lazy\(\(\) => import\('\.\.\/apps\/SecurityCenter\/SecurityCenter'\)\)/);
   assert.match(center, /Um botão\. Uma função\./);
   assert.match(center, /<QuickLocalChecks \/>/);
+  assert.match(center, /<QuickDnsChecks \/>/);
   assert.match(center, /<QuickWebChecks \/>/);
   assert.match(center, /Voltar para os blocos/);
   assert.match(center, /<KaliToolCenter \/>/);
@@ -75,6 +77,18 @@ test('quick check history is user-scoped, bounded and can rerun saved presets', 
   assert.match(history, /openPortCount/);
 });
 
+test('DNS area exposes one button for every exact-name record type', () => {
+  for (const title of ['IPv4 do domínio', 'IPv6 do domínio', 'Alias / CNAME', 'Servidores de e-mail', 'Nameservers', 'Registros TXT']) {
+    assert.match(quickDns, new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  assert.match(quickDns, /\/api\/security\/tools\/network\/dns\/lookup/);
+  assert.match(quickDns, /Abrir DNS Inspector completo/);
+  assert.match(quickDns, /exactNameOnly: true/);
+  assert.match(quickDns, /noEnumeration: true/);
+  assert.match(quickDns, /noWordlists: true/);
+  assert.match(quickDns, /arbitraryArguments: false/);
+});
+
 test('web area exposes six small one-button views over the SSRF-safe inspector endpoint', () => {
   for (const title of ['Análise web completa', 'Checar HTTPS / TLS', 'Checar headers', 'Checar cookies', 'Checar redirects', 'Ver tecnologias']) {
     assert.match(quickWeb, new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
@@ -89,7 +103,7 @@ test('web area exposes six small one-button views over the SSRF-safe inspector e
 });
 
 test('quick checks remain fixed-endpoint and do not expose arbitrary command execution', () => {
-  const combined = `${quick}\n${quickWeb}`;
+  const combined = `${quick}\n${quickDns}\n${quickWeb}`;
   assert.match(quick, /\/api\/security\/tools\/network\/scan/);
   assert.doesNotMatch(combined, /\/api\/security\/(?:execute|run|command|shell)/i);
   assert.doesNotMatch(combined, /\b(?:argv|spawn|execFile|execSync|shellCommand)\b/);
@@ -100,9 +114,7 @@ test('quick checks remain fixed-endpoint and do not expose arbitrary command exe
 });
 
 test('port explanation layer covers common web, Windows, remote, database and IoT services', () => {
-  for (const needle of ['445:', '3389:', '22:', '443:', '6379:', '3306:', '5432:', '1883:', '9100:', '27017:']) {
-    assert.match(knowledge, new RegExp(needle));
-  }
+  for (const needle of ['445:', '3389:', '22:', '443:', '6379:', '3306:', '5432:', '1883:', '9100:', '27017:']) assert.match(knowledge, new RegExp(needle));
   assert.match(knowledge, /explainPort/);
   assert.match(knowledge, /Confirme/);
 });
