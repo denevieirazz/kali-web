@@ -101,18 +101,32 @@ jobs:
           if ($result.verdict -ne 'pass') { throw 'Lifecycle V10 smoke verdict was not pass.' }
           if (@($result.events).Count -lt 6) { throw 'Lifecycle V10 did not exercise all expected transition checks.' }
 
-      - name: Smoke Shell Supervisor V11
+      - name: Smoke Shell Supervisor V11 compatibility
         shell: pwsh
         run: |
           $artifactDir = 'desktop/CloudOS.NativeShell/artifacts'
           New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
           $report = Join-Path $artifactDir 'supervisor-v11-smoke.json'
           ./scripts/native/run-native-supervisor-smoke-v11.ps1 -OutputPath $report
-          if (-not (Test-Path -LiteralPath $report)) { throw 'Supervisor V11 smoke report missing.' }
+          if (-not (Test-Path -LiteralPath $report)) { throw 'Supervisor V11 compatibility smoke report missing.' }
           $result = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
-          if ($result.verdict -ne 'pass') { throw 'Supervisor V11 smoke verdict was not pass.' }
-          if ($result.evidence.ready_probe_exit_code -ne 0) { throw 'Supervisor V11 real readiness probe failed.' }
-          if ($result.evidence.remaining_installation_shell_processes -ne 0) { throw 'Supervisor V11 leaked CloudOS processes.' }
+          if ($result.verdict -ne 'pass') { throw 'Supervisor V11 compatibility smoke verdict was not pass.' }
+          if ($result.evidence.ready_probe_exit_code -ne 0) { throw 'Supervisor V11 compatibility readiness probe failed.' }
+          if ($result.evidence.remaining_installation_shell_processes -ne 0) { throw 'Supervisor V11 compatibility smoke leaked CloudOS processes.' }
+
+      - name: Smoke Supervisor/Recovery V22
+        shell: pwsh
+        run: |
+          $artifactDir = 'desktop/CloudOS.NativeShell/artifacts'
+          New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+          $report = Join-Path $artifactDir 'supervisor-v22-smoke.json'
+          ./scripts/native/run-native-supervisor-smoke-v22.ps1 -OutputPath $report
+          if (-not (Test-Path -LiteralPath $report)) { throw 'Supervisor V22 smoke report missing.' }
+          $result = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
+          if ($result.verdict -ne 'pass') { throw 'Supervisor V22 smoke verdict was not pass.' }
+          if ($result.evidence.ready_probe_exit_code -ne 0) { throw 'Supervisor V22 readiness/graceful-exit probe failed.' }
+          if ($result.evidence.failure_final_state -ne 'SAFE_MODE') { throw 'Supervisor V22 crash-loop did not reach SAFE_MODE.' }
+          if ($result.evidence.remaining_installation_shell_processes -ne 0) { throw 'Supervisor V22 leaked CloudOS processes.' }
 
       - name: Native surface regression tests V12
         shell: pwsh
@@ -146,8 +160,9 @@ jobs:
           }
 
           $supervisorProject = Get-Content -LiteralPath 'desktop/CloudOS.NativeRecovery/CloudOS.NativeRecovery.vcxproj' -Raw
-          if (-not $supervisorProject.Contains('<TargetName>CloudOS.Supervisor</TargetName>')) {
-            throw 'External Shell Supervisor V11 is not the compiled recovery target.'
+          if (-not $supervisorProject.Contains('<TargetName>CloudOS.Supervisor</TargetName>') -or
+              -not $supervisorProject.Contains('<ClCompile Include="main_v22.cpp">')) {
+            throw 'Supervisor/Recovery V22 is not the compiled recovery target.'
           }
 
           $build = Get-Content -LiteralPath 'scripts/native/build-cloudos-native.cmd' -Raw
@@ -231,6 +246,7 @@ jobs:
             desktop/CloudOS.NativeShell/artifacts/stability-v9-smoke.json
             desktop/CloudOS.NativeShell/artifacts/lifecycle-v10-smoke.json
             desktop/CloudOS.NativeShell/artifacts/supervisor-v11-smoke.json
+            desktop/CloudOS.NativeShell/artifacts/supervisor-v22-smoke.json
             desktop/CloudOS.NativeShell/artifacts/performance-v12-smoke.json
             desktop/CloudOS.NativeShell/artifacts/deployment-v13-smoke.json
             desktop/CloudOS.NativeShell/artifacts/shell-activation-v14-smoke.json
