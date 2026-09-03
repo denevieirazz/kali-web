@@ -23,13 +23,14 @@ public:
     EventBusV21(const EventBusV21&) = delete;
     EventBusV21& operator=(const EventBusV21&) = delete;
 
-    // Legacy registration remains for V21 self-tests and compatibility. When
-    // dedicated transport is required, Publish never dispatches to these
-    // senders, so RPC responses and event frames cannot share one byte stream.
+    // The RPC connection owns client lifetime and subscriptions. The dedicated
+    // V23 event transport attaches/detaches independently so an event-pipe
+    // reconnect cannot erase a still-live RPC subscription.
     void RegisterClient(const std::string& client_id, EventSenderCallback sender);
-    void RegisterDedicatedClientV23(
+    bool RegisterDedicatedClientV23(
         const std::string& client_id,
         EventSenderCallback sender);
+    void UnregisterDedicatedClientV23(const std::string& client_id);
     void UnregisterClient(const std::string& client_id);
 
     bool Subscribe(const std::string& client_id, const std::string& pattern);
@@ -57,8 +58,8 @@ private:
 
     struct SenderRecord final
     {
-        EventSenderCallback sender;
-        bool dedicated_v23{false};
+        EventSenderCallback legacy_rpc_sender;
+        EventSenderCallback dedicated_v23_sender;
     };
 
     bool MatchesPattern(const std::string& pattern, const std::string& event_name) const;
