@@ -7,6 +7,9 @@ CloudSystemSnapshot snapshotWith({
   required bool wslAvailable,
   required List<String> distros,
   String defaultDistro = '',
+  bool? wslEngineAvailable,
+  List<CloudWslDistributionSnapshot> wslDistros =
+      const <CloudWslDistributionSnapshot>[],
 }) {
   return CloudSystemSnapshot(
     deviceName: 'CloudOS-Test',
@@ -15,8 +18,10 @@ CloudSystemSnapshot snapshotWith({
     brightness: 0.5,
     batteryPercent: 100,
     wslAvailable: wslAvailable,
+    wslEngineAvailable: wslEngineAvailable ?? wslAvailable,
     distros: distros,
     defaultDistro: defaultDistro,
+    wslDistros: wslDistros,
   );
 }
 
@@ -42,7 +47,7 @@ Future<void> openWslSettings(
 
 void main() {
   group('WSL settings honesty', () {
-    testWidgets('reports Ubuntu without pretending Kali is installed', (
+    testWidgets('reports legacy Ubuntu without inventing WSL2 or Kali', (
       tester,
     ) async {
       await openWslSettings(
@@ -63,10 +68,33 @@ void main() {
       expect(find.text('Padrão'), findsOneWidget);
       expect(find.text('Kali Linux não instalada'), findsOneWidget);
       expect(find.text('Kali não instalada'), findsOneWidget);
+      expect(find.text('Registrada • versão não comprovada'), findsOneWidget);
 
-      // These claims require runtime evidence the current snapshot does not carry.
       expect(find.text('Ativo e Operacional'), findsNothing);
-      expect(find.text('WSL 2'), findsNothing);
+      expect(find.text('Registrada • WSL 2'), findsNothing);
+    });
+
+    testWidgets('renders WSL2 only when typed broker evidence proves it', (
+      tester,
+    ) async {
+      await openWslSettings(
+        tester,
+        snapshotWith(
+          wslAvailable: true,
+          distros: const <String>['Ubuntu'],
+          defaultDistro: 'Ubuntu',
+          wslDistros: const <CloudWslDistributionSnapshot>[
+            CloudWslDistributionSnapshot(
+              name: 'Ubuntu',
+              version: 2,
+              isDefault: true,
+            ),
+          ],
+        ),
+      );
+
+      expect(find.text('Registrada • WSL 2'), findsOneWidget);
+      expect(find.text('Registrada • versão não comprovada'), findsNothing);
     });
 
     testWidgets('marks a detected Kali distro as security runtime', (
@@ -78,6 +106,14 @@ void main() {
           wslAvailable: true,
           distros: const <String>['Ubuntu', 'kali-linux'],
           defaultDistro: 'Ubuntu',
+          wslDistros: const <CloudWslDistributionSnapshot>[
+            CloudWslDistributionSnapshot(
+              name: 'Ubuntu',
+              version: 2,
+              isDefault: true,
+            ),
+            CloudWslDistributionSnapshot(name: 'kali-linux', version: 2),
+          ],
         ),
       );
 
@@ -87,12 +123,33 @@ void main() {
       expect(find.text('Kali não instalada'), findsNothing);
     });
 
-    testWidgets('does not claim a Linux session when WSL is unavailable', (
+    testWidgets('distinguishes WSL engine from missing distro inventory', (
       tester,
     ) async {
       await openWslSettings(
         tester,
-        snapshotWith(wslAvailable: false, distros: const <String>[]),
+        snapshotWith(
+          wslAvailable: false,
+          wslEngineAvailable: true,
+          distros: const <String>[],
+        ),
+      );
+
+      expect(find.text('Detectado • nenhuma distro registrada'), findsOneWidget);
+      expect(find.text('Nenhuma distro detectada'), findsOneWidget);
+      expect(find.text('WSL indisponível'), findsNothing);
+    });
+
+    testWidgets('does not claim a Linux session when WSL engine is unavailable', (
+      tester,
+    ) async {
+      await openWslSettings(
+        tester,
+        snapshotWith(
+          wslAvailable: false,
+          wslEngineAvailable: false,
+          distros: const <String>[],
+        ),
       );
 
       expect(find.text('Indisponível'), findsOneWidget);
