@@ -40,7 +40,6 @@ foreach ($required in @(
     'add_NewWindowRequested',
     'put_Handled(TRUE)',
     'Popup com protocolo externo bloqueado',
-    'ICoreWebView2_4',
     'add_DownloadStarting',
     'remove_DownloadStarting',
     'get_ResultFilePath',
@@ -58,6 +57,7 @@ foreach ($required in @(
 }
 
 foreach ($required in @(
+    'ICoreWebView2_4',
     'webview_v4_',
     'process_failed_registered_',
     'permission_requested_registered_',
