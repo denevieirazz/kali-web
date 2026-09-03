@@ -2,28 +2,13 @@ import { useMemo, useState } from 'react';
 import { launchWorkflowApp } from '../../services/workflowLaunch';
 import KaliToolCenter from '../KaliToolCenter/KaliToolCenter';
 import QuickLocalChecks from './QuickLocalChecks';
+import QuickWebChecks from './QuickWebChecks';
 import './SecurityCenter.css';
 
 type Group = 'começar' | 'rede' | 'web' | 'sistema' | 'evidência';
-type Block = {
-  id: string;
-  appId?: string;
-  icon: string;
-  title: string;
-  description: string;
-  group: Group;
-  badge?: string;
-  localView?: 'advanced';
-};
+type Block = { id: string; appId?: string; icon: string; title: string; description: string; group: Group; badge?: string; localView?: 'advanced' };
 
-const GROUP_LABEL: Record<Group, string> = {
-  começar: 'Comece por aqui',
-  rede: 'Rede & Wi‑Fi',
-  web: 'Web & DNS',
-  sistema: 'Ambiente',
-  evidência: 'Evidência & apoio',
-};
-
+const GROUP_LABEL: Record<Group, string> = { começar: 'Comece por aqui', rede: 'Rede & Wi‑Fi', web: 'Web & DNS', sistema: 'Ambiente', evidência: 'Evidência & apoio' };
 const BLOCKS: Block[] = [
   { id: 'tool-center', icon: '🐉', title: 'Assessment de rede', description: 'Descobrir dispositivos, portas, serviços, histórico e findings em presets guiados.', group: 'começar', badge: 'recomendado', localView: 'advanced' },
   { id: 'network-inspector', appId: 'network-inspector', icon: '⌁', title: 'Diagnosticar um IP', description: 'Ping, latência, rota, PTR, ARP/MAC e gateway em uma tela.', group: 'rede' },
@@ -49,75 +34,28 @@ export default function SecurityCenter() {
   const visible = useMemo(() => filter === 'todos' ? BLOCKS : BLOCKS.filter(block => block.group === filter), [filter]);
 
   const openBlock = (block: Block) => {
-    setNotice('');
-    setError('');
+    setNotice(''); setError('');
     try {
-      if (block.localView === 'advanced') {
-        setView('advanced');
-        return;
-      }
+      if (block.localView === 'advanced') { setView('advanced'); return; }
       if (!block.appId) throw new Error('Este bloco não possui uma ferramenta vinculada.');
       launchWorkflowApp(block.appId);
       setNotice(`${block.title} aberto. Quando terminar, volte aqui e escolha o próximo bloco.`);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : `Não foi possível abrir ${block.title}.`);
-    }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : `Não foi possível abrir ${block.title}.`); }
   };
 
-  if (view === 'advanced') {
-    return <div className="sec-advanced">
-      <div className="sec-advanced-bar">
-        <button type="button" onClick={() => setView('blocks')}>← Voltar para os blocos</button>
-        <div><strong>Assessment de rede</strong><span>Modo técnico completo do Kali Tool Center.</span></div>
-      </div>
-      <KaliToolCenter />
-    </div>;
-  }
+  if (view === 'advanced') return <div className="sec-advanced"><div className="sec-advanced-bar"><button type="button" onClick={() => setView('blocks')}>← Voltar para os blocos</button><div><strong>Assessment de rede</strong><span>Modo técnico completo do Kali Tool Center.</span></div></div><KaliToolCenter /></div>;
 
   return <div className="sec-root">
-    <header className="sec-hero">
-      <div>
-        <small>CloudOS · Security Center</small>
-        <h1>Um botão. Uma função.</h1>
-        <p>Escolha o que você quer descobrir. Cada bloco abre uma ferramenta pequena e específica; não precisa decorar comandos.</p>
-      </div>
-      <div className="sec-flow"><span>1. escolha</span><b>→</b><span>2. execute</span><b>→</b><span>3. leia</span><b>→</b><span>4. próximo bloco</span></div>
-    </header>
-
-    {(notice || error) && <div className={`sec-banner ${error ? 'is-error' : ''}`} role={error ? 'alert' : 'status'}>
-      <span>{error || notice}</span><button type="button" onClick={() => { setNotice(''); setError(''); }}>×</button>
-    </div>}
-
-    <section className="sec-start">
-      <div><strong>Não sabe por onde começar?</strong><span>Use “Descobrir dispositivos” abaixo. Depois escolha um IP e vá apertando os checks específicos.</span></div>
-      <button type="button" onClick={() => openBlock(BLOCKS[0])}>🐉 Abrir assessment completo</button>
-    </section>
+    <header className="sec-hero"><div><small>CloudOS · Security Center</small><h1>Um botão. Uma função.</h1><p>Escolha o que você quer descobrir. Cada bloco faz uma tarefa pequena e específica; não precisa decorar comandos.</p></div><div className="sec-flow"><span>1. escolha</span><b>→</b><span>2. execute</span><b>→</b><span>3. leia</span><b>→</b><span>4. próximo bloco</span></div></header>
+    {(notice || error) && <div className={`sec-banner ${error ? 'is-error' : ''}`} role={error ? 'alert' : 'status'}><span>{error || notice}</span><button type="button" onClick={() => { setNotice(''); setError(''); }}>×</button></div>}
+    <section className="sec-start"><div><strong>Não sabe por onde começar?</strong><span>Descubra os dispositivos da sua rede, escolha um IP e vá apertando os checks. Para site público, cole a URL na área Web.</span></div><button type="button" onClick={() => openBlock(BLOCKS[0])}>🐉 Abrir assessment completo</button></section>
 
     <QuickLocalChecks />
+    <QuickWebChecks />
 
-    <section className="sec-toolbox-title">
-      <div><small>Ferramentas completas</small><strong>Abrir um app específico</strong><span>Quando quiser aprofundar, cada bloco abaixo abre uma superfície dedicada.</span></div>
-    </section>
-
-    <nav className="sec-filters" aria-label="Categorias do Security Center">
-      <button type="button" className={filter === 'todos' ? 'is-active' : ''} onClick={() => setFilter('todos')}>Todos · {BLOCKS.length}</button>
-      {(Object.keys(GROUP_LABEL) as Group[]).map(group => <button type="button" key={group} className={filter === group ? 'is-active' : ''} onClick={() => setFilter(group)}>{GROUP_LABEL[group]}</button>)}
-    </nav>
-
-    <main className="sec-grid">
-      {visible.map(block => <article className={`sec-card sec-card--${block.group}`} key={block.id}>
-        <header><span className="sec-icon">{block.icon}</span>{block.badge && <em>{block.badge}</em>}</header>
-        <small>{GROUP_LABEL[block.group]}</small>
-        <strong>{block.title}</strong>
-        <p>{block.description}</p>
-        <button type="button" onClick={() => openBlock(block)}>Abrir função →</button>
-      </article>)}
-    </main>
-
-    <footer className="sec-footer">
-      <strong>Fluxo simples sugerido</strong>
-      <span>Descobrir dispositivos → escolher IP → checks rápidos → Diagnosticar IP → Wi‑Fi → Proteção deste PC → DNS → Web → Evidências.</span>
-      <small>Os checks continuam limitados a alvos privados/locais e presets fixos; não executam exploit, brute force ou bypass automático.</small>
-    </footer>
+    <section className="sec-toolbox-title"><div><small>Ferramentas completas</small><strong>Abrir um app específico</strong><span>Quando quiser aprofundar, cada bloco abaixo abre uma superfície dedicada.</span></div></section>
+    <nav className="sec-filters" aria-label="Categorias do Security Center"><button type="button" className={filter === 'todos' ? 'is-active' : ''} onClick={() => setFilter('todos')}>Todos · {BLOCKS.length}</button>{(Object.keys(GROUP_LABEL) as Group[]).map(group => <button type="button" key={group} className={filter === group ? 'is-active' : ''} onClick={() => setFilter(group)}>{GROUP_LABEL[group]}</button>)}</nav>
+    <main className="sec-grid">{visible.map(block => <article className={`sec-card sec-card--${block.group}`} key={block.id}><header><span className="sec-icon">{block.icon}</span>{block.badge && <em>{block.badge}</em>}</header><small>{GROUP_LABEL[block.group]}</small><strong>{block.title}</strong><p>{block.description}</p><button type="button" onClick={() => openBlock(block)}>Abrir função →</button></article>)}</main>
+    <footer className="sec-footer"><strong>Fluxo simples sugerido</strong><span>Rede: descobrir → escolher IP → perfil/checks → evidência. Web: colar URL → escolher TLS/headers/cookies/redirects → IA/relatório.</span><small>Os checks mantêm escopo e argumentos fixos; não executam exploração automática nem ataques de credencial.</small></footer>
   </div>;
 }
