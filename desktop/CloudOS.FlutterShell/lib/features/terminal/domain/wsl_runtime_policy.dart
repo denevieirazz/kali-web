@@ -28,9 +28,9 @@ class WslRuntimePolicy {
   bool get hasInstalledDistros => installedDistros.isNotEmpty;
   bool get canStartWslSession => engineAvailable && hasInstalledDistros;
 
-  /// Distro used for a user-requested generic WSL session. When Windows has no
-  /// reported default we may launch the first registered distro, but we do not
-  /// label that fallback as the system default.
+  /// Distro used for a generic WSL session when the caller did not request a
+  /// specific distro. A first-item fallback may be launched, but it is never
+  /// labelled as the Windows default.
   String get launchFallbackDistro {
     if (defaultDistro.isNotEmpty) return defaultDistro;
     return installedDistros.isEmpty ? '' : installedDistros.first;
@@ -53,7 +53,8 @@ class WslRuntimePolicy {
 
   String resolveRequestedDistro(String? requested) {
     final candidate = requested?.trim() ?? '';
-    if (candidate.isNotEmpty && containsDistro(candidate)) {
+    if (candidate.isNotEmpty) {
+      if (!containsDistro(candidate)) return '';
       return installedDistros.firstWhere(
         (item) => item.toLowerCase() == candidate.toLowerCase(),
       );
