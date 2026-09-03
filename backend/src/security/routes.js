@@ -8,6 +8,7 @@ import {
   runNetworkAssessment,
 } from './networkAssessment.js';
 import { getNetworkDiagnostics } from './networkDiagnostics.js';
+import { getHostDiagnostics } from './hostDiagnostics.js';
 import { enrichNetworkAssessment } from './networkInsights.js';
 import { enrichWifiDiagnostics } from './wifiInsights.js';
 
@@ -47,6 +48,22 @@ securityToolsRouter.get('/network/diagnostics', async (_req, res) => {
     res.status(503).json({
       error: 'Não foi possível coletar o mapa local de DNS, gateway e vizinhos.',
       errorCode: 'NETWORK_DIAGNOSTICS_FAILED',
+    });
+  }
+});
+
+securityToolsRouter.post('/network/host/diagnostics', async (req, res) => {
+  try {
+    res.json(await getHostDiagnostics(req.body?.target));
+  } catch (error) {
+    const clientErrors = new Set([
+      'INVALID_ASSESSMENT_TARGET', 'TARGET_OUTSIDE_LOCAL_SCOPE', 'CIDR_NOT_ALLOWED',
+      'INVALID_CIDR', 'CIDR_TOO_LARGE',
+    ]);
+    const status = clientErrors.has(error.code) ? 400 : 503;
+    res.status(status).json({
+      error: error.message || 'Falha no diagnóstico do dispositivo local.',
+      errorCode: error.code || 'HOST_DIAGNOSTICS_FAILED',
     });
   }
 });
