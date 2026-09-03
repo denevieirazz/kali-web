@@ -33,12 +33,16 @@ if ($HealthTimeoutSeconds -lt 15 -or $HealthTimeoutSeconds -gt 120) {
     throw 'HealthTimeoutSeconds must be between 15 and 120.'
 }
 
-# Manifest/SHA256 validation remains mandatory in Deployment V13. Authenticode
-# is additive evidence until a production signing certificate is configured.
+# Manifest/SHA256 validation remains mandatory in Deployment V13. A package
+# finalized by the production signing step marks itself explicitly; that marker
+# makes Authenticode fail-closed automatically even when a human uses the .cmd
+# launcher without passing -RequireAuthenticodeSignature.
 $sourceIdentity = Get-CloudOSPayloadIdentity -PackageRoot $PackageRoot
+$packageRequiresSignature = Test-CloudOSFinalizedSignedPackageV22 -Root $sourceIdentity.Root
+$effectiveRequireSignature = [bool]$RequireAuthenticodeSignature -or [bool]$packageRequiresSignature
 $signatureEvidence = @(Get-CloudOSAuthenticodeEvidenceV22 -Root $sourceIdentity.Root)
 $unsignedOrInvalid = @($signatureEvidence | Where-Object { $_.status -ne 'Valid' })
-if ($RequireAuthenticodeSignature -and $unsignedOrInvalid.Count -gt 0) {
+if ($effectiveRequireSignature -and $unsignedOrInvalid.Count -gt 0) {
     $invalidSummary = (@($unsignedOrInvalid | ForEach-Object { "$($_.file)=$($_.status)" })) -join ', '
     throw "Authenticode enforcement rejected update payload: $invalidSummary"
 }
@@ -113,7 +117,8 @@ $report = [pscustomobject]@{
     last_known_good = $status.last_known_good
     active_valid = $status.active_valid
     health = $health
-    signature_enforced = [bool]$RequireAuthenticodeSignature
+    package_marked_signed = [bool]$packageRequiresSignature
+    signature_enforced = [bool]$effectiveRequireSignature
     signature_all_valid = ($unsignedOrInvalid.Count -eq 0)
     signature_evidence = $signatureEvidence
     rollback_capacity = (-not [string]::IsNullOrWhiteSpace([string]$status.last_known_good))
@@ -121,4 +126,4 @@ $report = [pscustomobject]@{
 }
 
 $report | Format-List
-Write-Host "[CloudOS V22] UPDATE_OK active=$($status.active_version) lkg=$($status.last_known_good) health=$($health.reason) toolsSynced=$($report.managed_tools_synced) signatureEnforced=$([bool]$RequireAuthenticodeSignature)"
+Write-Host "[CloudOS V22] UPDATE_OK active=$($status.active_version) lkg=$($status.last_known_good) health=$($health.reason) toolsSynced=$($report.managed_tools_synced) signatureEnforced=$([bool]$effectiveRequireSignature) packageMarkedSigned=$([bool]$packageRequiresSignature)"
