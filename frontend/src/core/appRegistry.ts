@@ -33,6 +33,7 @@ const components: Record<string, ReturnType<typeof lazy>> = {
   'kali-tool-center': lazy(() => import('../apps/KaliToolCenter/KaliToolCenter')),
   'network-inspector': lazy(() => import('../apps/NetworkInspector/NetworkInspector')),
   'wifi-inspector': lazy(() => import('../apps/WifiInspector/WifiInspector')),
+  'network-shield': lazy(() => import('../apps/NetworkShield/NetworkShield')),
   'office-viewer': lazy(() => import('../apps/OfficeViewer/OfficeViewer')),
   'taskbar': lazy(() => import('../components/Taskbar/Taskbar')),
   'desktop': lazy(() => import('../components/Desktop/Desktop')),
