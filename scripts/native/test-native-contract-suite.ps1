@@ -52,6 +52,7 @@ $contracts = @(
     'test-system-broker-wsl-probe-v22-contract.ps1',
     'test-flutter-wsl-runtime-bridge-v22-contract.ps1',
     'test-flutter-conpty-lifecycle-v22-contract.ps1',
+    'test-event-transport-v23-contract.ps1',
     'test-terminal-wsl-physical-v22-contract.ps1',
     'test-v21-integrated-runtime-contract.ps1',
     'test-shell-notification-bridge-v21-contract.ps1'
