@@ -88,6 +88,8 @@ class _TerminalWindowState extends State<TerminalWindow> {
         installedDistros: snapshot.distros,
         defaultDistro: snapshot.defaultDistro,
         distroVersions: snapshot.distroVersions,
+        distroStorageEvidence: snapshot.distroStorageEvidence,
+        preferredSecurityDistro: snapshot.preferredSecurityDistro,
       );
     } catch (error, stackTrace) {
       CloudOSLogger.error(
@@ -144,24 +146,19 @@ class _TerminalWindowState extends State<TerminalWindow> {
 
   void _createInitialTab() {
     if (widget.initialShell == TerminalShellKind.wsl) {
-      final requested = widget.initialDistro?.trim() ?? '';
-      if (requested.isNotEmpty && !_wslPolicy.containsDistro(requested)) {
+      final plan = _wslPolicy.planSession(
+        requestedDistro: widget.initialDistro,
+      );
+      if (!plan.allowed) {
         _addUnavailableWslTab(
-          title: 'WSL: $requested',
-          message:
-              'A distribuição "$requested" não está instalada ou não foi detectada pelo System Broker.',
+          title: (widget.initialDistro?.trim().isNotEmpty ?? false)
+              ? 'WSL: ${widget.initialDistro!.trim()}'
+              : 'WSL indisponível',
+          message: _messageForPlan(plan),
         );
         return;
       }
-      final distro = _wslPolicy.resolveRequestedDistro(widget.initialDistro);
-      if (!_wslPolicy.canStartWslSession || distro.isEmpty) {
-        _addUnavailableWslTab(
-          title: 'WSL indisponível',
-          message: _wslUnavailableMessage(),
-        );
-        return;
-      }
-      _addNewTab(TerminalShellKind.wsl, distro: distro);
+      _addNewTab(TerminalShellKind.wsl, distro: plan.distro);
       return;
     }
     _addNewTab(widget.initialShell);
@@ -183,9 +180,43 @@ class _TerminalWindowState extends State<TerminalWindow> {
       return 'O mecanismo WSL não foi detectado neste Windows. O CloudOS não iniciará uma sessão Linux falsa.';
     }
     if (!_wslPolicy.hasInstalledDistros) {
-      return 'O mecanismo WSL foi detectado, mas nenhuma distribuição Linux registrada foi encontrada. Instale ou provisione uma distribuição antes de abrir esta sessão.';
+      return 'O mecanismo WSL foi detectado, mas nenhuma distribuição Linux registrada foi encontrada.';
     }
-    return 'Há uma distribuição registrada, mas o runtime ainda não foi confirmado como utilizável. Ela pode exigir provisionamento inicial.';
+    if (!_wslPolicy.canStartWslSession) {
+      return 'Há distribuição registrada, mas o Broker comprovou que nenhum armazenamento registrado está disponível para tentativa de inicialização.';
+    }
+    return 'O runtime Linux ainda não possui evidência suficiente para esta sessão.';
+  }
+
+  String _messageForPlan(WslSessionPlan plan) {
+    switch (plan.reason) {
+      case 'WSL_ENGINE_UNAVAILABLE':
+        return 'O mecanismo WSL não foi detectado neste Windows.';
+      case 'WSL_NO_REGISTERED_DISTRO':
+        return 'WSL está instalado, mas nenhuma distribuição registrada foi encontrada.';
+      case 'WSL_DISTRO_NOT_INSTALLED':
+        return 'A distribuição "${plan.distro}" não está instalada ou não foi detectada pelo System Broker.';
+      case 'WSL_DISTRO_STORAGE_MISSING':
+        return 'A distribuição "${plan.distro}" está registrada, mas o diretório BasePath não existe mais. O CloudOS bloqueou a inicialização para não abrir um runtime quebrado.';
+      case 'WSL_NO_LAUNCH_CANDIDATE':
+        return 'Nenhuma distribuição registrada possui evidência suficiente para uma tentativa segura de inicialização.';
+      case 'WSL2_REQUIRED':
+        return 'A distribuição "${plan.distro}" está registrada como WSL1, mas esta operação exige WSL2.';
+      case 'WSL_VERSION_UNKNOWN':
+        return 'A versão WSL da distribuição "${plan.distro}" não foi comprovada pelo Broker.';
+      case 'KALI_NOT_INSTALLED':
+        return 'Kali Linux não está instalada; o CloudOS não substituirá silenciosamente por Ubuntu.';
+      case 'KALI_WSL2_REQUIRED':
+        return 'Kali Linux está registrada como WSL1; o backend de segurança exige WSL2.';
+      case 'KALI_VERSION_UNKNOWN':
+        return 'Kali Linux foi encontrada, mas sua geração WSL ainda não foi comprovada.';
+      case 'KALI_STORAGE_NOT_PROVEN':
+        return 'Kali Linux foi encontrada, mas o armazenamento registrado ainda não foi comprovado.';
+      case 'SECURITY_DISTRO_NOT_KALI':
+        return 'A distribuição selecionada não é uma distribuição Kali e não pode ser tratada como backend de segurança.';
+      default:
+        return _wslUnavailableMessage();
+    }
   }
 
   void _addUnavailableWslTab({required String title, required String message}) {
@@ -197,7 +228,10 @@ class _TerminalWindowState extends State<TerminalWindow> {
     tab.terminal.write('\x1b[33mCloudOS Linux Runtime\x1b[0m\r\n\r\n');
     tab.terminal.write('$message\r\n');
     tab.terminal.write(
-      '\r\nStatus: WSL_ENGINE=${_wslPolicy.engineAvailable} | WSL_USABLE=${_wslPolicy.wslAvailable} | DISTROS=${_wslPolicy.installedDistros.length}\r\n',
+      '\r\nStatus: WSL_ENGINE=${_wslPolicy.engineAvailable} | '
+      'WSL_LEGACY_USABLE=${_wslPolicy.wslAvailable} | '
+      'DISTROS=${_wslPolicy.installedDistros.length} | '
+      'PASSIVE_READY=${_wslPolicy.passiveReady}\r\n',
     );
     setState(() {
       _tabs.add(tab);
@@ -207,22 +241,17 @@ class _TerminalWindowState extends State<TerminalWindow> {
 
   void _addNewTab(TerminalShellKind kind, {String distro = ''}) {
     if (kind == TerminalShellKind.wsl) {
-      if (!_wslPolicy.canStartWslSession) {
+      final plan = _wslPolicy.planSession(
+        requestedDistro: distro.isEmpty ? null : distro,
+      );
+      if (!plan.allowed) {
         _addUnavailableWslTab(
-          title: 'WSL indisponível',
-          message: _wslUnavailableMessage(),
+          title: distro.isEmpty ? 'WSL indisponível' : 'WSL: $distro',
+          message: _messageForPlan(plan),
         );
         return;
       }
-      final resolved = _wslPolicy.resolveRequestedDistro(distro);
-      if (resolved.isEmpty) {
-        _addUnavailableWslTab(
-          title: 'WSL indisponível',
-          message: _wslUnavailableMessage(),
-        );
-        return;
-      }
-      distro = resolved;
+      distro = plan.distro;
     }
 
     final tab = TerminalTabItem(
@@ -289,7 +318,7 @@ class _TerminalWindowState extends State<TerminalWindow> {
         );
         if (tab.shellKind == TerminalShellKind.wsl) {
           tab.terminal.write(
-            '\x1b[33mA distro ${tab.distro.isEmpty ? "WSL padrão" : tab.distro} pode exigir provisionamento inicial ou estar indisponível.\x1b[0m\r\n',
+            '\x1b[33mA distro ${tab.distro.isEmpty ? "WSL padrão" : tab.distro} pode exigir provisionamento inicial ou ter falhado ao iniciar.\x1b[0m\r\n',
           );
         }
         return;
@@ -481,25 +510,37 @@ class _TerminalWindowState extends State<TerminalWindow> {
                         ? 'WSL não instalado/detectado'
                         : !_wslPolicy.hasInstalledDistros
                         ? 'WSL sem distribuições detectadas'
-                        : 'WSL ainda não utilizável',
+                        : 'WSL com registros sem armazenamento válido',
                   ),
                 )
               else ...<PopupMenuEntry<String>>[
                 if (_wslPolicy.defaultDistro.isNotEmpty)
                   PopupMenuItem(
                     value: 'wsl_default',
-                    child: Text('WSL padrão: ${_wslPolicy.defaultDistro}'),
+                    enabled:
+                        _wslPolicy.storageFor(_wslPolicy.defaultDistro) != false,
+                    child: Text(
+                      'WSL padrão: ${_wslPolicy.statusLabelFor(_wslPolicy.defaultDistro)}',
+                    ),
                   ),
                 for (final distro in _wslPolicy.installedDistros)
                   if (distro != _wslPolicy.defaultDistro)
                     PopupMenuItem(
                       value: 'wsl:$distro',
+                      enabled: _wslPolicy.storageFor(distro) != false,
                       child: Text(_wslPolicy.statusLabelFor(distro)),
                     ),
                 if (securityDistro.isEmpty)
                   const PopupMenuItem<String>(
                     enabled: false,
                     child: Text('Kali Linux: não instalada'),
+                  )
+                else if (!_wslPolicy.kaliPassiveReady)
+                  PopupMenuItem<String>(
+                    enabled: false,
+                    child: Text(
+                      'Kali: ${_wslPolicy.statusLabelFor(securityDistro)} • backend ainda não pronto',
+                    ),
                   ),
               ],
             ],
