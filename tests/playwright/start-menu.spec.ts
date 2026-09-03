@@ -14,6 +14,10 @@ const auditedWindowsViewportNames = [
   'Azure Cosmos DB Emulator'
 ];
 
+const deterministicWindowsCount = 218;
+const cloudOSBuiltinCount = 28;
+const deterministicAllAppsCount = deterministicWindowsCount + cloudOSBuiltinCount;
+
 function windowsFixture(name: string, index: number) {
   return {
     id: `native-${(index + 1).toString(16).padStart(24, '0')}`,
@@ -32,14 +36,15 @@ function windowsFixture(name: string, index: number) {
   };
 }
 
-// Keep the reviewed 242-app visual contract (24 CloudOS + 218 Windows)
-// while removing the GitHub runner's mutable Start Menu from the test input.
+// Keep the reviewed large-catalog visual contract deterministic: CloudOS built-ins
+// plus a fixed 218-entry Windows fixture. The built-in count is intentional product
+// surface and must be updated when a reviewed bundled app is added or removed.
 // Only the first Windows entries are visible at scrollTop=0; the canonical tail
 // keeps the large-catalog/scroll geometry deterministic without representing
 // software actually installed on the test host.
 const deterministicWindowsCatalog = [
   ...auditedWindowsViewportNames,
-  ...Array.from({ length: 218 - auditedWindowsViewportNames.length }, (_, index) =>
+  ...Array.from({ length: deterministicWindowsCount - auditedWindowsViewportNames.length }, (_, index) =>
     `ZZ Windows Fixture ${String(index + 1).padStart(3, '0')}`)
 ].map(windowsFixture);
 
@@ -78,12 +83,25 @@ test.describe('PW-02 — Menu Iniciar', () => {
     await expect(page).toHaveScreenshot('start-menu-home.png');
 
     await openAllApps(page);
-    for (const name of ['Calculadora', 'Bloco de Notas', 'Configurações', 'Explorador de Arquivos', 'Gerenciador de Tarefas', 'Kali Tool Center', '7-Zip File Manager', 'Azure Cosmos DB Emulator']) {
+    for (const name of [
+      'Calculadora',
+      'Bloco de Notas',
+      'Configurações',
+      'Explorador de Arquivos',
+      'Gerenciador de Tarefas',
+      'Kali Tool Center',
+      'Network Inspector',
+      'Wi‑Fi Inspector',
+      'Network Shield',
+      'DNS Inspector',
+      '7-Zip File Manager',
+      'Azure Cosmos DB Emulator'
+    ]) {
       await expect(page.locator('.start-app-btn', { hasText: name })).toBeVisible({ timeout: 5_000 });
     }
-    await expect(tabs.locator('button', { hasText: 'Windows' })).toContainText('218');
-    await expect(allTab).toContainText('242');
-    expect(await page.locator('.start-app-btn').count()).toBe(242);
+    await expect(tabs.locator('button', { hasText: 'Windows' })).toContainText(String(deterministicWindowsCount));
+    await expect(allTab).toContainText(String(deterministicAllAppsCount));
+    expect(await page.locator('.start-app-btn').count()).toBe(deterministicAllAppsCount);
 
     // The deterministic large-catalog image is a strict visual contract. Intentional UI changes must refresh the baseline.
     await expect(page).toHaveScreenshot('start-menu-all.png');
