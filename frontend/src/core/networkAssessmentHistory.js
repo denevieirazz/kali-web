@@ -69,3 +69,40 @@ export function appendNetworkAssessmentHistory(history, assessment) {
   if (!clean) return normalizeNetworkAssessmentHistory(history);
   return normalizeNetworkAssessmentHistory([clean, ...normalizeNetworkAssessmentHistory(history)]);
 }
+
+function hostMap(record) {
+  return new Map((record?.hosts || []).map(host => [host.address, host]));
+}
+
+function openPortSet(host) {
+  return new Set((host?.ports || []).filter(port => port.state === 'open').map(port => `${port.port}/${port.protocol || 'tcp'}`));
+}
+
+export function diffNetworkAssessmentRecords(previousValue, currentValue) {
+  const previous = sanitizeNetworkAssessmentRecord(previousValue);
+  const current = sanitizeNetworkAssessmentRecord(currentValue);
+  if (!previous || !current) return { comparable: false, addedHosts: [], removedHosts: [], changedHosts: [] };
+  if (previous.target !== current.target || previous.preset !== current.preset) {
+    return { comparable: false, addedHosts: [], removedHosts: [], changedHosts: [] };
+  }
+
+  const before = hostMap(previous);
+  const after = hostMap(current);
+  const addedHosts = [...after.keys()].filter(address => !before.has(address));
+  const removedHosts = [...before.keys()].filter(address => !after.has(address));
+  const changedHosts = [];
+
+  for (const [address, host] of after) {
+    const oldHost = before.get(address);
+    if (!oldHost) continue;
+    const oldPorts = openPortSet(oldHost);
+    const newPorts = openPortSet(host);
+    const openedPorts = [...newPorts].filter(port => !oldPorts.has(port)).sort();
+    const closedPorts = [...oldPorts].filter(port => !newPorts.has(port)).sort();
+    if (openedPorts.length || closedPorts.length || Boolean(oldHost.up) !== Boolean(host.up)) {
+      changedHosts.push({ address, openedPorts, closedPorts, onlineChanged: Boolean(oldHost.up) !== Boolean(host.up), online: Boolean(host.up) });
+    }
+  }
+
+  return { comparable: true, addedHosts, removedHosts, changedHosts };
+}
