@@ -15,16 +15,37 @@ void EventBusV21::RegisterClient(
     const std::string& client_id,
     EventSenderCallback sender)
 {
+    if (client_id.empty() || !sender) return;
     std::lock_guard<std::mutex> lock(mutex_);
-    client_senders_[client_id] = SenderRecord{std::move(sender), false};
+    SenderRecord& record = client_senders_[client_id];
+    record.legacy_rpc_sender = std::move(sender);
 }
 
-void EventBusV21::RegisterDedicatedClientV23(
+bool EventBusV21::RegisterDedicatedClientV23(
     const std::string& client_id,
     EventSenderCallback sender)
 {
+    if (client_id.empty() || !sender) return false;
     std::lock_guard<std::mutex> lock(mutex_);
-    client_senders_[client_id] = SenderRecord{std::move(sender), true};
+    const auto it = client_senders_.find(client_id);
+    if (it == client_senders_.end() || !it->second.legacy_rpc_sender)
+    {
+        // A V23 event connection is valid only while the exact RPC client id is
+        // still registered. This rejects stale client ids from the same PID.
+        return false;
+    }
+    it->second.dedicated_v23_sender = std::move(sender);
+    return true;
+}
+
+void EventBusV21::UnregisterDedicatedClientV23(const std::string& client_id)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto it = client_senders_.find(client_id);
+    if (it != client_senders_.end())
+    {
+        it->second.dedicated_v23_sender = {};
+    }
 }
 
 void EventBusV21::UnregisterClient(const std::string& client_id)
@@ -38,9 +59,11 @@ bool EventBusV21::Subscribe(const std::string& client_id, const std::string& pat
 {
     if (client_id.empty() || pattern.empty() || pattern.size() > 256) return false;
     std::lock_guard<std::mutex> lock(mutex_);
-    // Subscriptions may be established immediately after the RPC hello while
-    // the dedicated event-pipe handshake is still completing. No event can be
-    // delivered until a sender is registered for this exact client id.
+    const auto client = client_senders_.find(client_id);
+    if (client == client_senders_.end() || !client->second.legacy_rpc_sender)
+    {
+        return false;
+    }
     client_subscriptions_[client_id].insert(pattern);
     return true;
 }
@@ -79,11 +102,12 @@ void EventBusV21::Publish(const std::string& event_name, const JsonObject& paylo
                 if (!MatchesPattern(pattern, event_name)) continue;
 
                 const auto sender_it = client_senders_.find(client_id);
-                if (sender_it != client_senders_.end() &&
-                    sender_it->second.sender &&
-                    (!require_dedicated || sender_it->second.dedicated_v23))
+                if (sender_it != client_senders_.end())
                 {
-                    matched_senders.push_back(sender_it->second.sender);
+                    const EventSenderCallback& sender = require_dedicated
+                        ? sender_it->second.dedicated_v23_sender
+                        : sender_it->second.legacy_rpc_sender;
+                    if (sender) matched_senders.push_back(sender);
                 }
                 break;
             }
