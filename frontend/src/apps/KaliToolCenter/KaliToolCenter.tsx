@@ -12,6 +12,7 @@ import { launchWorkflowApp } from '../../services/workflowLaunch';
 import { useProcessManager } from '../../stores/processManager';
 import { useWindowManager } from '../../stores/windowManager';
 import { getUserStorageKey } from '../../services/userScope.js';
+import NetworkAssessmentPanel from './NetworkAssessmentPanel';
 import './KaliToolCenter.css';
 
 type SecurityTool = {
@@ -262,6 +263,13 @@ export default function KaliToolCenter() {
         <article><small>Ausentes</small><strong>{stats.missing}</strong><span>sem execução implícita</span></article>
         <article><small>GUI contida</small><strong>{stats.gui}</strong><span>detectadas no catálogo automático</span></article>
       </section>
+
+      <NetworkAssessmentPanel
+        distribution={distribution}
+        activeScope={workspace.activeScope}
+        onNotice={message => { setError(''); setNotice(message); }}
+        onError={message => { setNotice(''); setError(message); }}
+      />
 
       <div className="ktc-layout">
         <aside className="ktc-scope">
