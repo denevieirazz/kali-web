@@ -1,16 +1,18 @@
 import { useMemo, useState } from 'react';
 import { launchWorkflowApp } from '../../services/workflowLaunch';
+import KaliToolCenter from '../KaliToolCenter/KaliToolCenter';
 import './SecurityCenter.css';
 
 type Group = 'começar' | 'rede' | 'web' | 'sistema' | 'evidência';
 type Block = {
   id: string;
-  appId: string;
+  appId?: string;
   icon: string;
   title: string;
   description: string;
   group: Group;
   badge?: string;
+  localView?: 'advanced';
 };
 
 const GROUP_LABEL: Record<Group, string> = {
@@ -22,7 +24,7 @@ const GROUP_LABEL: Record<Group, string> = {
 };
 
 const BLOCKS: Block[] = [
-  { id: 'tool-center', appId: 'kali-tool-center', icon: '🐉', title: 'Assessment de rede', description: 'Descobrir dispositivos, portas, serviços, histórico e findings em presets guiados.', group: 'começar', badge: 'recomendado' },
+  { id: 'tool-center', icon: '🐉', title: 'Assessment de rede', description: 'Descobrir dispositivos, portas, serviços, histórico e findings em presets guiados.', group: 'começar', badge: 'recomendado', localView: 'advanced' },
   { id: 'network-inspector', appId: 'network-inspector', icon: '⌁', title: 'Diagnosticar um IP', description: 'Ping, latência, rota, PTR, ARP/MAC e gateway em uma tela.', group: 'rede' },
   { id: 'wifi-inspector', appId: 'wifi-inspector', icon: '📶', title: 'Saúde do Wi‑Fi', description: 'Sinal, canal, segurança, redes visíveis e recomendações.', group: 'rede' },
   { id: 'network-shield', appId: 'network-shield', icon: '🛡️', title: 'Proteção deste PC', description: 'Firewall, perfil de rede e portas TCP locais em escuta.', group: 'rede' },
@@ -40,6 +42,7 @@ const BLOCKS: Block[] = [
 
 export default function SecurityCenter() {
   const [filter, setFilter] = useState<Group | 'todos'>('todos');
+  const [view, setView] = useState<'blocks' | 'advanced'>('blocks');
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const visible = useMemo(() => filter === 'todos' ? BLOCKS : BLOCKS.filter(block => block.group === filter), [filter]);
@@ -48,12 +51,27 @@ export default function SecurityCenter() {
     setNotice('');
     setError('');
     try {
+      if (block.localView === 'advanced') {
+        setView('advanced');
+        return;
+      }
+      if (!block.appId) throw new Error('Este bloco não possui uma ferramenta vinculada.');
       launchWorkflowApp(block.appId);
       setNotice(`${block.title} aberto. Quando terminar, volte aqui e escolha o próximo bloco.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : `Não foi possível abrir ${block.title}.`);
     }
   };
+
+  if (view === 'advanced') {
+    return <div className="sec-advanced">
+      <div className="sec-advanced-bar">
+        <button type="button" onClick={() => setView('blocks')}>← Voltar para os blocos</button>
+        <div><strong>Assessment de rede</strong><span>Modo técnico completo do Kali Tool Center.</span></div>
+      </div>
+      <KaliToolCenter />
+    </div>;
+  }
 
   return <div className="sec-root">
     <header className="sec-hero">
