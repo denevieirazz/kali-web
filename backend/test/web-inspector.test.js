@@ -25,6 +25,7 @@ test('Web Inspector normalizes one exact HTTP/HTTPS URL and strips fragments', (
   assert.equal(normalizePublicWebUrl('https://example.com/path?q=1#frag'), 'https://example.com/path?q=1');
   assert.equal(normalizePublicWebUrl('http://example.com:8080/health'), 'http://example.com:8080/health');
   assert.equal(normalizePublicWebUrl('https://EXAMPLE.com./'), 'https://example.com/');
+  assert.equal(normalizePublicWebUrl('https://[2606:4700:4700::1111]/'), 'https://[2606:4700:4700::1111]/');
 });
 
 test('Web Inspector blocks non-web schemes, embedded credentials and unsafe ports', () => {
@@ -43,6 +44,8 @@ test('Web Inspector blocks obvious localhost/private/metadata targets before any
     'http://169.254.169.254/latest/meta-data/',
     'http://192.168.1.1/',
     'http://[::1]/',
+    'http://[fe80::1]/',
+    'http://[fd00::1]/',
   ]) {
     assert.throws(() => normalizePublicWebUrl(url), error => error.code === 'WEB_TARGET_NOT_PUBLIC');
   }
