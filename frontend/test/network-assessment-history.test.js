@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   MAX_NETWORK_ASSESSMENT_HISTORY,
   appendNetworkAssessmentHistory,
+  diffNetworkAssessmentRecords,
   normalizeNetworkAssessmentHistory,
   sanitizeNetworkAssessmentRecord,
 } from '../src/core/networkAssessmentHistory.js';
@@ -33,4 +34,33 @@ test('assessment history remains bounded to the newest records', () => {
 test('normalization rejects malformed records', () => {
   const history = normalizeNetworkAssessmentHistory([null, {}, { target: '192.168.1.1', preset: 'discover' }]);
   assert.equal(history.length, 1);
+});
+
+test('comparison reports new hosts and port changes without interpreting them as attacks', () => {
+  const previous = {
+    target: '192.168.1.10', preset: 'services',
+    hosts: [
+      { address: '192.168.1.10', up: true, ports: [{ port: 80, protocol: 'tcp', state: 'open', service: 'http' }, { port: 22, protocol: 'tcp', state: 'open', service: 'ssh' }] },
+    ],
+  };
+  const current = {
+    target: '192.168.1.10', preset: 'services',
+    hosts: [
+      { address: '192.168.1.10', up: true, ports: [{ port: 80, protocol: 'tcp', state: 'open', service: 'http' }, { port: 443, protocol: 'tcp', state: 'open', service: 'https' }] },
+      { address: '192.168.1.11', up: true, ports: [] },
+    ],
+  };
+  const diff = diffNetworkAssessmentRecords(previous, current);
+  assert.equal(diff.comparable, true);
+  assert.deepEqual(diff.addedHosts, ['192.168.1.11']);
+  assert.deepEqual(diff.changedHosts[0].openedPorts, ['443/tcp']);
+  assert.deepEqual(diff.changedHosts[0].closedPorts, ['22/tcp']);
+});
+
+test('comparison refuses unrelated targets or presets', () => {
+  const diff = diffNetworkAssessmentRecords(
+    { target: '192.168.1.10', preset: 'services', hosts: [] },
+    { target: '192.168.1.0/24', preset: 'discover', hosts: [] },
+  );
+  assert.equal(diff.comparable, false);
 });
