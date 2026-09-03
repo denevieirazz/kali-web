@@ -214,7 +214,7 @@ class _SettingsWindowState extends State<SettingsWindow> {
             ),
             Expanded(
               child: Slider(
-                value: _volume.clamp(0.0, 1.0),
+                value: _volume.clamp(0.0, 1.0).toDouble(),
                 min: 0.0,
                 max: 1.0,
                 activeColor: CloudOSColors.accent,
@@ -255,7 +255,7 @@ class _SettingsWindowState extends State<SettingsWindow> {
             ),
             Expanded(
               child: Slider(
-                value: _brightness.clamp(0.0, 1.0),
+                value: _brightness.clamp(0.0, 1.0).toDouble(),
                 min: 0.0,
                 max: 1.0,
                 activeColor: CloudOSColors.accent,
