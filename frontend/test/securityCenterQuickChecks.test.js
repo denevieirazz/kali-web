@@ -7,6 +7,7 @@ const read = relativePath => readFileSync(new URL(relativePath, import.meta.url)
 const center = read('../src/apps/SecurityCenter/SecurityCenter.tsx');
 const quick = read('../src/apps/SecurityCenter/QuickLocalChecks.tsx');
 const knowledge = read('../src/apps/SecurityCenter/portKnowledge.ts');
+const evidence = read('../src/apps/SecurityCenter/quickCheckEvidence.ts');
 const registry = read('../src/core/appRegistry.ts');
 
 test('Kali Tool Center opens the beginner-first Security Center without adding a new Start app', () => {
@@ -35,7 +36,7 @@ test('quick local checks expose reviewed one-click profiles and full profile', (
   assert.match(quick, /Descobrir dispositivos da minha rede/);
   assert.match(quick, /Usar gateway/);
   assert.match(quick, /Usar este IP nos checks/);
-  assert.match(quick, /Copiar explicado para IA/);
+  assert.match(quick, /Copiar para IA/);
 });
 
 test('single-host checks combine surface scan with identity and connectivity diagnostics', () => {
@@ -49,14 +50,26 @@ test('single-host checks combine surface scan with identity and connectivity dia
   assert.match(quick, /hostDiagnostics/);
 });
 
+test('one-click result can be copied, exported as JSON and saved as readable report', () => {
+  assert.match(quick, /buildQuickCheckEvidence/);
+  assert.match(quick, /buildQuickCheckMarkdown/);
+  assert.match(quick, /Exportar JSON/);
+  assert.match(quick, /Salvar relatório/);
+  assert.match(evidence, /cloudos-guided-local-check/);
+  assert.match(evidence, /Relatório rápido de rede/);
+  assert.match(evidence, /Portas abertas/);
+  assert.match(evidence, /Próximos passos/);
+  assert.match(evidence, /Porta aberta não equivale a vulnerabilidade confirmada/);
+});
+
 test('quick checks remain fixed-endpoint and do not expose arbitrary command execution', () => {
   assert.match(quick, /\/api\/security\/tools\/network\/scan/);
   assert.doesNotMatch(quick, /\/api\/security\/(?:execute|run|command|shell)/i);
   assert.doesNotMatch(quick, /\b(?:argv|spawn|execFile|execSync|shellCommand)\b/);
-  assert.match(quick, /privateLocalOnly: true/);
-  assert.match(quick, /arbitraryArguments: false/);
-  assert.match(quick, /credentialAttacks: false/);
-  assert.match(quick, /exploitAutomation: false/);
+  assert.match(evidence, /privateLocalOnly: true/);
+  assert.match(evidence, /arbitraryArguments: false/);
+  assert.match(evidence, /credentialAttacks: false/);
+  assert.match(evidence, /exploitAutomation: false/);
 });
 
 test('port explanation layer covers common web, Windows, remote, database and IoT services', () => {
