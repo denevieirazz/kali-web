@@ -1,3 +1,4 @@
+import '../../../models/cloud_wsl_health_probe.dart';
 import 'wsl_runtime_policy.dart';
 
 enum WslDiagnosticSeverity { info, warning, error }
@@ -15,6 +16,10 @@ enum WslDiagnosticCode {
   kaliStorageMissing,
   kaliStorageUnknown,
   activeProbeRequired,
+  activeProbeHealthy,
+  activeProbeFailed,
+  activeProbeTimedOut,
+  activeProbeTargetInvalid,
 }
 
 class WslDiagnosticIssue {
@@ -36,9 +41,13 @@ class WslRuntimeDiagnostics {
     required this.policy,
     required this.issues,
     required this.summary,
+    this.activeProbe,
   });
 
-  factory WslRuntimeDiagnostics.evaluate(WslRuntimePolicy policy) {
+  factory WslRuntimeDiagnostics.evaluate(
+    WslRuntimePolicy policy, {
+    CloudWslHealthProbeResult? activeProbe,
+  }) {
     final issues = <WslDiagnosticIssue>[];
 
     if (!policy.engineAvailable) {
@@ -53,6 +62,7 @@ class WslRuntimeDiagnostics {
         policy: policy,
         issues: List<WslDiagnosticIssue>.unmodifiable(issues),
         summary: 'WSL indisponível',
+        activeProbe: activeProbe,
       );
     }
 
@@ -75,6 +85,7 @@ class WslRuntimeDiagnostics {
         policy: policy,
         issues: List<WslDiagnosticIssue>.unmodifiable(issues),
         summary: 'WSL sem distribuição',
+        activeProbe: activeProbe,
       );
     }
 
@@ -120,7 +131,8 @@ class WslRuntimeDiagnostics {
       }
     }
 
-    if (knownWsl1Count > 0 && knownWsl2Count == 0 &&
+    if (knownWsl1Count > 0 &&
+        knownWsl2Count == 0 &&
         policy.installedDistros.every((distro) => policy.versionFor(distro) != 0)) {
       issues.add(
         const WslDiagnosticIssue(
@@ -184,42 +196,121 @@ class WslRuntimeDiagnostics {
       }
     }
 
-    // Passive readiness is deliberately not the same thing as an active Linux
-    // health check. A real probe must still prove boot + command + stdout.
-    if (policy.passiveReady || policy.canStartWslSession) {
+    final probeTarget = activeProbe?.distro.trim() ?? '';
+    final probeTargetInstalled =
+        probeTarget.isNotEmpty && policy.containsDistro(probeTarget);
+    final probeTargetsKali = probeTargetInstalled && WslRuntimePolicy.isKali(probeTarget);
+    final probeCoversSecurityRuntime =
+        probeTargetsKali &&
+        policy.preferredSecurityDistro.isNotEmpty &&
+        probeTarget.toLowerCase() == policy.preferredSecurityDistro.toLowerCase();
+
+    if (activeProbe != null && !probeTargetInstalled) {
       issues.add(
-        const WslDiagnosticIssue(
-          code: WslDiagnosticCode.activeProbeRequired,
+        WslDiagnosticIssue(
+          code: WslDiagnosticCode.activeProbeTargetInvalid,
+          severity: WslDiagnosticSeverity.warning,
+          distro: probeTarget,
+          message: 'O resultado do probe ativo não corresponde a uma distro atualmente registrada.',
+        ),
+      );
+    } else if (activeProbe != null && activeProbe.healthy) {
+      issues.add(
+        WslDiagnosticIssue(
+          code: WslDiagnosticCode.activeProbeHealthy,
           severity: WslDiagnosticSeverity.info,
-          message: 'A evidência passiva não substitui um probe ativo de boot/comando/saída.',
+          distro: probeTarget,
+          message:
+              'Probe ativo de $probeTarget comprovou boot, comando fixo, marcador e exit code 0 em ${activeProbe.durationMs} ms.',
+        ),
+      );
+    } else if (activeProbe != null && activeProbe.timedOut) {
+      issues.add(
+        WslDiagnosticIssue(
+          code: WslDiagnosticCode.activeProbeTimedOut,
+          severity: WslDiagnosticSeverity.error,
+          distro: probeTarget,
+          message: 'O probe ativo de $probeTarget excedeu o tempo limite.',
+        ),
+      );
+    } else if (activeProbe != null && activeProbe.attempted) {
+      issues.add(
+        WslDiagnosticIssue(
+          code: WslDiagnosticCode.activeProbeFailed,
+          severity: WslDiagnosticSeverity.error,
+          distro: probeTarget,
+          message: activeProbe.errorMessage.isNotEmpty
+              ? 'O probe ativo de $probeTarget falhou: ${activeProbe.errorMessage}'
+              : 'O probe ativo de $probeTarget falhou.',
         ),
       );
     }
 
-    final summary = switch (policy.readiness) {
-      WslRuntimeReadiness.unavailable => 'WSL indisponível',
-      WslRuntimeReadiness.engineOnly => 'WSL sem distribuição',
-      WslRuntimeReadiness.registeredUnknown => 'Linux registrado • health não comprovado',
-      WslRuntimeReadiness.passiveReady => 'Linux passivamente disponível',
-      WslRuntimeReadiness.wsl2Ready => 'WSL2 passivamente disponível',
-      WslRuntimeReadiness.securityReady => 'Kali/WSL2 candidata • probe ativo pendente',
-    };
+    final needsGenericProbe = activeProbe == null ||
+        !probeTargetInstalled ||
+        !activeProbe.healthy;
+    final needsSecurityProbe =
+        policy.kaliPassiveReady &&
+        !(activeProbe?.healthy == true && probeCoversSecurityRuntime);
+
+    if ((policy.passiveReady || policy.canStartWslSession) &&
+        (needsGenericProbe || needsSecurityProbe)) {
+      issues.add(
+        WslDiagnosticIssue(
+          code: WslDiagnosticCode.activeProbeRequired,
+          severity: WslDiagnosticSeverity.info,
+          distro: needsSecurityProbe ? policy.preferredSecurityDistro : '',
+          message: needsSecurityProbe
+              ? 'Kali possui evidência passiva, mas ainda precisa de probe ativo próprio antes de ser tratada como backend saudável.'
+              : 'A evidência passiva não substitui um probe ativo de boot/comando/saída.',
+        ),
+      );
+    }
+
+    String summary;
+    if (activeProbe?.timedOut == true && probeTargetInstalled) {
+      summary = '$probeTarget • probe ativo em timeout';
+    } else if (activeProbe?.attempted == true &&
+        activeProbe?.healthy != true &&
+        probeTargetInstalled) {
+      summary = '$probeTarget • probe ativo falhou';
+    } else if (activeProbe?.healthy == true && probeTargetInstalled) {
+      if (probeCoversSecurityRuntime && policy.kaliPassiveReady) {
+        summary = '$probeTarget • backend de segurança saudável';
+      } else if (needsSecurityProbe) {
+        summary = '$probeTarget saudável • Kali ainda requer probe';
+      } else {
+        summary = '$probeTarget • runtime Linux saudável';
+      }
+    } else {
+      summary = switch (policy.readiness) {
+        WslRuntimeReadiness.unavailable => 'WSL indisponível',
+        WslRuntimeReadiness.engineOnly => 'WSL sem distribuição',
+        WslRuntimeReadiness.registeredUnknown => 'Linux registrado • health não comprovado',
+        WslRuntimeReadiness.passiveReady => 'Linux passivamente disponível',
+        WslRuntimeReadiness.wsl2Ready => 'WSL2 passivamente disponível',
+        WslRuntimeReadiness.securityReady => 'Kali/WSL2 candidata • probe ativo pendente',
+      };
+    }
 
     return WslRuntimeDiagnostics._(
       policy: policy,
       issues: List<WslDiagnosticIssue>.unmodifiable(issues),
       summary: summary,
+      activeProbe: activeProbe,
     );
   }
 
   final WslRuntimePolicy policy;
   final List<WslDiagnosticIssue> issues;
   final String summary;
+  final CloudWslHealthProbeResult? activeProbe;
 
   bool get hasErrors =>
       issues.any((issue) => issue.severity == WslDiagnosticSeverity.error);
   bool get hasWarnings =>
       issues.any((issue) => issue.severity == WslDiagnosticSeverity.warning);
+  bool get hasHealthyActiveProbe => activeProbe?.healthy == true;
 
   Iterable<WslDiagnosticIssue> issuesFor(String distro) {
     final wanted = distro.trim().toLowerCase();
