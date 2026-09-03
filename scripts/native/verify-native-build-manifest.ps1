@@ -27,7 +27,7 @@ if ($manifest.product -ne 'CloudOS Native Shell' -or $manifest.shell_authority -
     throw 'Native build manifest does not describe the authoritative C++/Win32 CloudOS shell.'
 }
 if ($manifest.recovery_authority -ne 'CloudOS.Supervisor.exe V11') {
-    throw 'Native build manifest does not identify Shell Supervisor V11 as recovery authority.'
+    throw 'Native build manifest does not identify the compatible Supervisor V11 authority contract.'
 }
 if ($manifest.broker_authority -ne 'CloudOS.SystemBroker.exe V21') {
     throw 'Native build manifest does not identify System Broker V21 as broker authority.'
@@ -93,4 +93,7 @@ if ($CheckSourceFingerprint) {
     }
 }
 
-Write-Host "PASS: native V21 runtime integrity verified ($Configuration x64, $($expectedNames.Count) signed components, fingerprint=$stamp)."
+# SHA256/provenance and Authenticode are different guarantees. This verifier
+# intentionally proves manifest integrity only; update V22 reports signature
+# evidence separately and can enforce it when production signing is configured.
+Write-Host "PASS: native V21/V22 runtime integrity verified ($Configuration x64, $($expectedNames.Count) SHA256-verified components, fingerprint=$stamp; Authenticode is a separate policy)."
