@@ -7,6 +7,8 @@ import {
   publicNetworkAssessmentPresets,
   runNetworkAssessment,
 } from './networkAssessment.js';
+import { getNetworkDiagnostics } from './networkDiagnostics.js';
+import { enrichNetworkAssessment } from './networkInsights.js';
 
 export const securityToolsRouter = express.Router();
 securityToolsRouter.use(authenticateToken);
@@ -37,6 +39,17 @@ securityToolsRouter.get('/network/overview', (_req, res) => {
   });
 });
 
+securityToolsRouter.get('/network/diagnostics', async (_req, res) => {
+  try {
+    res.json(await getNetworkDiagnostics());
+  } catch {
+    res.status(503).json({
+      error: 'Não foi possível coletar o mapa local de DNS, gateway e vizinhos.',
+      errorCode: 'NETWORK_DIAGNOSTICS_FAILED',
+    });
+  }
+});
+
 securityToolsRouter.get('/network/wifi', async (_req, res) => {
   try {
     res.json(await getWifiDiagnostics());
@@ -46,13 +59,25 @@ securityToolsRouter.get('/network/wifi', async (_req, res) => {
 });
 
 securityToolsRouter.post('/network/scan', async (req, res) => {
+  const startedAt = new Date().toISOString();
+  const started = Date.now();
   try {
     const result = await runNetworkAssessment({
       preset: req.body?.preset,
       target: req.body?.target,
       distribution: req.body?.distribution,
     });
-    res.json(result);
+    res.json(enrichNetworkAssessment({
+      ...result,
+      startedAt,
+      durationMs: Date.now() - started,
+      policy: {
+        scope: 'private-local-only',
+        arbitraryArguments: false,
+        credentialAttacks: false,
+        activeWirelessAttacks: false,
+      },
+    }));
   } catch (error) {
     const clientErrors = new Set([
       'INVALID_ASSESSMENT_TARGET', 'TARGET_OUTSIDE_LOCAL_SCOPE', 'CIDR_NOT_ALLOWED',
