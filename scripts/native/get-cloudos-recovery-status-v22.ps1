@@ -7,6 +7,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $statePath = Join-Path $env:LOCALAPPDATA 'CloudOS\Recovery\supervisor-state-v22.json'
+$allowedStates = @('STARTING', 'HEALTHY', 'DEGRADED', 'RESTARTING', 'CRASH_LOOP', 'SAFE_MODE', 'STOPPING')
 $state = $null
 $stateError = $null
 if (Test-Path -LiteralPath $statePath -PathType Leaf) {
@@ -14,6 +15,9 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
         $candidate = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
         if ([int]$candidate.schema -ne 22 -or [string]$candidate.component -ne 'CloudOS.Supervisor') {
             throw 'schema/component mismatch'
+        }
+        if ($allowedStates -notcontains [string]$candidate.state) {
+            throw 'unknown state'
         }
         $state = $candidate
     }
@@ -98,10 +102,14 @@ $report = [ordered]@{
         [ordered]@{
             state = [string]$state.state
             reason = [string]$state.reason
+            transition_sequence = if ($null -ne $state.transition_sequence) { [Int64]$state.transition_sequence } else { $null }
+            supervisor_pid = if ($null -ne $state.supervisor_pid) { [int]$state.supervisor_pid } else { $null }
+            supervisor_uptime_ms = if ($null -ne $state.supervisor_uptime_ms) { [UInt64]$state.supervisor_uptime_ms } else { $null }
             shell_pid = [int]$state.shell_pid
             failure_count = [int]$state.failure_count
             last_exit_code = [uint32]$state.last_exit_code
             job_kill_on_close_assigned = [bool]$state.job_kill_on_close_assigned
+            job_breakaway_enabled = if ($state.job_breakaway_enabled -is [bool]) { [bool]$state.job_breakaway_enabled } else { $null }
             updated_utc = [string]$state.updated_utc
         }
     } else { $null }
