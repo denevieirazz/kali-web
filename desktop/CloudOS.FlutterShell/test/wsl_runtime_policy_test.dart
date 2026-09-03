@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('WslRuntimePolicy', () {
-    test('normalizes duplicate distro names and preserves canonical spelling', () {
+    test('normalizes duplicate distro names without inventing a default', () {
       final policy = WslRuntimePolicy(
         wslAvailable: true,
         installedDistros: const <String>[
@@ -15,12 +15,13 @@ void main() {
       );
 
       expect(policy.installedDistros, const <String>['Ubuntu', 'kali-linux']);
-      expect(policy.defaultDistro, 'Ubuntu');
+      expect(policy.defaultDistro, isEmpty);
+      expect(policy.launchFallbackDistro, 'Ubuntu');
       expect(policy.preferredSecurityDistro, 'kali-linux');
       expect(policy.kaliInstalled, isTrue);
     });
 
-    test('uses broker default distro when it is installed', () {
+    test('uses broker default distro when it is actually installed', () {
       final policy = WslRuntimePolicy(
         wslAvailable: true,
         installedDistros: const <String>['Ubuntu', 'Debian'],
@@ -43,15 +44,30 @@ void main() {
       expect(policy.kaliInstalled, isFalse);
     });
 
-    test('reports no usable distro when WSL has none registered', () {
+    test('tracks engine availability independently from registered distros', () {
       final policy = WslRuntimePolicy(
-        wslAvailable: true,
+        wslAvailable: false,
+        engineAvailable: true,
         installedDistros: const <String>[],
       );
 
+      expect(policy.engineAvailable, isTrue);
+      expect(policy.wslAvailable, isFalse);
       expect(policy.hasInstalledDistros, isFalse);
+      expect(policy.canStartWslSession, isFalse);
       expect(policy.defaultDistro, isEmpty);
       expect(policy.resolveRequestedDistro(null), isEmpty);
+    });
+
+    test('rejects a stale broker default that is not in the inventory', () {
+      final policy = WslRuntimePolicy(
+        wslAvailable: true,
+        installedDistros: const <String>['Ubuntu'],
+        defaultDistro: 'Debian',
+      );
+
+      expect(policy.defaultDistro, isEmpty);
+      expect(policy.launchFallbackDistro, 'Ubuntu');
     });
   });
 }
