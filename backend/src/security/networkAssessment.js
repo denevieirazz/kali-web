@@ -48,7 +48,6 @@ export function normalizeAssessmentTarget(value, { allowCidr = true } = {}) {
     throw error;
   }
   const prefix = Number(prefixRaw);
-  // At most 256 addresses. This keeps one-click discovery bounded and local.
   if (prefix < 24 || prefix > 32) {
     const error = new Error('A descoberta guiada limita a faixa a /24 ou menor (até 256 endereços).');
     error.code = 'CIDR_TOO_LARGE';
@@ -180,6 +179,13 @@ function fixedServicePreset(label, description, ports, timeout = 35_000) {
   };
 }
 
+const FULL_PROFILE_PORTS = [
+  21, 22, 23, 25, 53, 80, 88, 110, 123, 135, 137, 138, 139, 143, 161, 389, 443, 445,
+  465, 554, 587, 631, 636, 993, 995, 1433, 1521, 1883, 2049, 3000, 3306, 3389, 4200,
+  5000, 5173, 5432, 5900, 5901, 5985, 5986, 6379, 8000, 8080, 8081, 8443, 8888, 9000,
+  9100, 9200, 27017,
+];
+
 const PRESETS = Object.freeze({
   discover: {
     label: 'Descobrir dispositivos',
@@ -189,6 +195,12 @@ const PRESETS = Object.freeze({
     timeout: 45_000,
     args: target => ['-sn', '-n', '--max-retries', '1', '--host-timeout', '5s', '-oG', '-', target],
   },
+  fullProfile: fixedServicePreset(
+    'Perfil completo local',
+    'Faz uma única checagem bounded das superfícies mais comuns para o técnico começar por uma visão geral.',
+    FULL_PROFILE_PORTS,
+    55_000
+  ),
   services: {
     label: 'Inventariar serviços',
     description: 'Identifica os principais serviços de um único dispositivo privado/local.',
@@ -205,51 +217,15 @@ const PRESETS = Object.freeze({
     timeout: 35_000,
     args: target => ['-sT', '-n', '--top-ports', '25', '--max-retries', '1', '--host-timeout', '20s', '-oG', '-', target],
   },
-  webSurface: fixedServicePreset(
-    'Ver serviços web',
-    'Checa portas web e painéis comuns sem crawling, fuzzing ou login.',
-    [80, 443, 8000, 8080, 8081, 8443, 8888]
-  ),
-  remoteAccess: fixedServicePreset(
-    'Ver acesso remoto',
-    'Checa superfícies comuns de administração remota em um host autorizado.',
-    [22, 23, 3389, 5900, 5901, 5985, 5986]
-  ),
-  windowsServices: fixedServicePreset(
-    'Ver serviços Windows',
-    'Checa RPC, NetBIOS, SMB e WinRM sem autenticação ou tentativa de credenciais.',
-    [135, 137, 138, 139, 445, 5985, 5986]
-  ),
-  fileSharing: fixedServicePreset(
-    'Ver compartilhamento de arquivos',
-    'Checa FTP, SSH/SFTP, SMB, NFS e impressão IPP em um único host.',
-    [21, 22, 139, 445, 631, 2049]
-  ),
-  databases: fixedServicePreset(
-    'Ver bancos e caches',
-    'Checa portas comuns de bancos e caches sem autenticar ou executar consultas.',
-    [1433, 1521, 3306, 5432, 6379, 9200, 27017]
-  ),
-  infrastructure: fixedServicePreset(
-    'Ver infraestrutura',
-    'Checa serviços comuns de DNS, NTP, diretório e gerenciamento.',
-    [53, 88, 123, 161, 389, 636]
-  ),
-  printersIot: fixedServicePreset(
-    'Ver impressoras e IoT',
-    'Checa superfícies frequentes em impressoras, câmeras e dispositivos embarcados.',
-    [80, 443, 554, 631, 1883, 8000, 8080, 9100]
-  ),
-  development: fixedServicePreset(
-    'Ver serviços de desenvolvimento',
-    'Checa portas comuns de servidores de desenvolvimento e painéis locais.',
-    [3000, 4200, 5000, 5173, 8000, 8080, 8081, 9000]
-  ),
-  mailServices: fixedServicePreset(
-    'Ver serviços de e-mail',
-    'Checa SMTP, POP e IMAP comuns sem autenticação ou enumeração de contas.',
-    [25, 110, 143, 465, 587, 993, 995]
-  ),
+  webSurface: fixedServicePreset('Ver serviços web', 'Checa portas web e painéis comuns sem crawling, fuzzing ou login.', [80, 443, 8000, 8080, 8081, 8443, 8888]),
+  remoteAccess: fixedServicePreset('Ver acesso remoto', 'Checa superfícies comuns de administração remota em um host autorizado.', [22, 23, 3389, 5900, 5901, 5985, 5986]),
+  windowsServices: fixedServicePreset('Ver serviços Windows', 'Checa RPC, NetBIOS, SMB e WinRM sem autenticação ou tentativa de credenciais.', [135, 137, 138, 139, 445, 5985, 5986]),
+  fileSharing: fixedServicePreset('Ver compartilhamento de arquivos', 'Checa FTP, SSH/SFTP, SMB, NFS e impressão IPP em um único host.', [21, 22, 139, 445, 631, 2049]),
+  databases: fixedServicePreset('Ver bancos e caches', 'Checa portas comuns de bancos e caches sem autenticar ou executar consultas.', [1433, 1521, 3306, 5432, 6379, 9200, 27017]),
+  infrastructure: fixedServicePreset('Ver infraestrutura', 'Checa serviços comuns de DNS, NTP, diretório e gerenciamento.', [53, 88, 123, 161, 389, 636]),
+  printersIot: fixedServicePreset('Ver impressoras e IoT', 'Checa superfícies frequentes em impressoras, câmeras e dispositivos embarcados.', [80, 443, 554, 631, 1883, 8000, 8080, 9100]),
+  development: fixedServicePreset('Ver serviços de desenvolvimento', 'Checa portas comuns de servidores de desenvolvimento e painéis locais.', [3000, 4200, 5000, 5173, 8000, 8080, 8081, 9000]),
+  mailServices: fixedServicePreset('Ver serviços de e-mail', 'Checa SMTP, POP e IMAP comuns sem autenticação ou enumeração de contas.', [25, 110, 143, 465, 587, 993, 995]),
 });
 
 export function publicNetworkAssessmentPresets() {
