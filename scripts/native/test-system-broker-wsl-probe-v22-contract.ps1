@@ -16,6 +16,8 @@ $brokerSourcePath = Join-Path $src 'broker_server_v21.cpp'
 $systemSourcePath = Join-Path $src 'system_service_v21.cpp'
 $projectPath = Join-Path $brokerRoot 'CloudOS.SystemBroker.vcxproj'
 $brokerClientHeaderPath = Join-Path $flutterBridgeRoot 'cloudos_broker_client_v21.h'
+$brokerClientSourcePath = Join-Path $flutterBridgeRoot 'cloudos_broker_client_v21.cpp'
+$flutterBridgeSourcePath = Join-Path $flutterBridgeRoot 'cloudos_flutter_bridge_v20.cpp'
 
 foreach ($path in @(
     $probeHeaderPath,
@@ -24,7 +26,9 @@ foreach ($path in @(
     $brokerSourcePath,
     $systemSourcePath,
     $projectPath,
-    $brokerClientHeaderPath
+    $brokerClientHeaderPath,
+    $brokerClientSourcePath,
+    $flutterBridgeSourcePath
 )) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Required WSL probe contract source is missing: $path"
@@ -38,6 +42,8 @@ $brokerSource = Get-Content -LiteralPath $brokerSourcePath -Raw
 $systemSource = Get-Content -LiteralPath $systemSourcePath -Raw
 $project = Get-Content -LiteralPath $projectPath -Raw
 $brokerClientHeader = Get-Content -LiteralPath $brokerClientHeaderPath -Raw
+$brokerClientSource = Get-Content -LiteralPath $brokerClientSourcePath -Raw
+$flutterBridgeSource = Get-Content -LiteralPath $flutterBridgeSourcePath -Raw
 
 if ($probeHeader -notmatch 'struct\s+WslProbeResultV22' -or
     $probeHeader -notmatch 'bool\s+attempted' -or
@@ -134,15 +140,35 @@ if ($project -notmatch 'src\\wsl_probe_service_v22\.h' -or
     throw 'WslProbeServiceV22 must be compiled into CloudOS.SystemBroker.'
 }
 
+# The declaration lives in the native client header, while request framing and
+# response validation intentionally live in the .cpp implementation.
 if ($brokerClientHeader -notmatch 'struct\s+BrokerClientWslProbeResult' -or
-    $brokerClientHeader -notmatch 'ProbeWslHealth\s*\(' -or
-    $brokerClientHeader -notmatch 'request\.method\s*=\s*"wsl\.health\.probe"') {
-    throw 'The native Flutter-side Broker client must expose the typed health probe.'
+    $brokerClientHeader -notmatch 'ProbeWslHealth\s*\(') {
+    throw 'The native Flutter-side Broker client must declare the typed health probe.'
 }
-if ($brokerClientHeader -notmatch 'parsed\.healthy[\s\S]{0,250}!parsed\.attempted' -or
-    $brokerClientHeader -notmatch '!parsed\.marker_seen' -or
-    $brokerClientHeader -notmatch 'parsed\.exit_code\s*!=\s*0') {
+if ($brokerClientSource -notmatch 'CloudOSBrokerClientV21::ProbeWslHealth\s*\(' -or
+    $brokerClientSource -notmatch '"wsl\.health\.probe"' -or
+    $brokerClientSource -notmatch 'ProbePayloadLooksConsistent\(probe\)') {
+    throw 'The native Broker client must implement and validate the active WSL probe RPC.'
+}
+if ($brokerClientSource -notmatch 'probe\.healthy[\s\S]{0,300}probe\.attempted' -or
+    $brokerClientSource -notmatch 'probe\.marker_seen' -or
+    $brokerClientSource -notmatch 'probe\.exit_code\s*==\s*0') {
     throw 'The native Broker client must reject internally inconsistent healthy probe responses.'
+}
+if ($brokerClientSource -notmatch 'probe\.output\.size\(\)\s*>\s*16\s*\*\s*1024') {
+    throw 'The native client must keep probe response text bounded even if the Broker regresses.'
+}
+
+if ($flutterBridgeSource -notmatch 'method\s*==\s*"probeWslHealth"' -or
+    $flutterBridgeSource -notmatch 'ProbeWslHealth\(' -or
+    $flutterBridgeSource -notmatch '"healthy"' -or
+    $flutterBridgeSource -notmatch '"errorCode"') {
+    throw 'The Flutter MethodChannel bridge must expose the typed active WSL probe result.'
+}
+if ($flutterBridgeSource -match 'commandLine' -or
+    $flutterBridgeSource -match 'shellCommand') {
+    throw 'The Flutter active health bridge must not expose arbitrary Linux command fields.'
 }
 
 Write-Host '[PASS] CloudOS bounded active WSL health probe contract.'
