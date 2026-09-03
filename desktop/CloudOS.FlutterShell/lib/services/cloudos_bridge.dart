@@ -160,7 +160,9 @@ class CloudOSBridge {
       }
     }
 
-    if (parsed.isNotEmpty) return List<CloudWslDistributionSnapshot>.unmodifiable(parsed);
+    if (parsed.isNotEmpty) {
+      return List<CloudWslDistributionSnapshot>.unmodifiable(parsed);
+    }
 
     // V21 compatibility: names remain usable inventory, while generation,
     // storage and security evidence stay unknown instead of being fabricated.
@@ -304,6 +306,32 @@ class CloudOSBridge {
 
   Future<CloudSystemSnapshot> loadSystemSnapshot() async {
     return await tryLoadSystemSnapshot() ?? degradedSnapshot;
+  }
+
+  Future<CloudWslHealthProbeResult?> probeWslHealth({
+    String distro = '',
+    int timeoutMs = 8000,
+  }) async {
+    final normalizedDistro = distro.trim();
+    if (normalizedDistro.length > 128 || timeoutMs < 1000 || timeoutMs > 15000) {
+      return null;
+    }
+
+    try {
+      final raw = await _channel.invokeMapMethod<Object?, Object?>(
+        'probeWslHealth',
+        <String, Object?>{
+          'distro': normalizedDistro,
+          'timeoutMs': timeoutMs,
+        },
+      );
+      if (raw == null) return null;
+      return CloudWslHealthProbeResult.fromNativeMap(raw);
+    } on MissingPluginException {
+      return null;
+    } on PlatformException {
+      return null;
+    }
   }
 
   Future<CloudNotificationState?> tryLoadNotificationState() async {
@@ -512,12 +540,15 @@ class CloudOSBridge {
   );
 
   static const previewBridgeInfo = <String, Object?>{
-    'schema': 21,
-    'version': 'v21-preview',
+    'schema': 22,
+    'version': 'v22-preview',
     'bridge_type': 'PreviewFallback',
     'brokerConnected': false,
     'brokerState': 'preview',
     'channel': 'cloudos/native/v19',
+    'typedWslInventory': false,
+    'passiveWslHealthEvidence': false,
+    'activeWslHealthProbe': false,
     'arbitrary_command_api': false,
     'shell_surface_lifecycle': false,
     'shell_workspace_control': false,
@@ -526,12 +557,15 @@ class CloudOSBridge {
   };
 
   static const degradedBridgeInfo = <String, Object?>{
-    'schema': 21,
-    'version': 'v21-degraded',
+    'schema': 22,
+    'version': 'v22-degraded',
     'bridge_type': 'NativeBridgeUnavailable',
     'brokerConnected': false,
     'brokerState': 'degraded',
     'channel': 'cloudos/native/v19',
+    'typedWslInventory': false,
+    'passiveWslHealthEvidence': false,
+    'activeWslHealthProbe': false,
     'arbitrary_command_api': false,
     'shell_surface_lifecycle': false,
     'shell_workspace_control': false,
