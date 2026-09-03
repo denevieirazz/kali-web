@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiClient } from '../../services/apiClient';
+import { explainPort } from './portKnowledge';
 import './QuickLocalChecks.css';
 
 type WslInfo = {
@@ -137,11 +138,15 @@ export default function QuickLocalChecks() {
 
   const copyForAi = async () => {
     if (!result) return;
+    const explainedHosts = result.hosts.map(host => ({
+      ...host,
+      ports: host.ports.map(port => ({ ...port, explanation: explainPort(port.port, port.service) })),
+    }));
     const payload = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       kind: 'cloudos-guided-local-check',
       purpose: 'authorized-defensive-local-network-assessment',
-      result,
+      result: { ...result, hosts: explainedHosts },
       constraints: {
         privateLocalOnly: true,
         arbitraryArguments: false,
@@ -152,7 +157,7 @@ export default function QuickLocalChecks() {
     };
     try {
       await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
-      setNotice('Resultado estruturado copiado para a IA.');
+      setNotice('Resultado explicado e estruturado copiado para a IA.');
     } catch {
       setError('Não foi possível copiar para a área de transferência.');
     }
@@ -162,6 +167,16 @@ export default function QuickLocalChecks() {
     if (!result?.insights?.hosts) return [];
     return result.insights.hosts.flatMap(host => host.findings || []).slice(0, 8);
   }, [result]);
+
+  const openPorts = useMemo(() => {
+    if (!result) return [];
+    return result.hosts.flatMap(host => host.ports
+      .filter(port => port.state === 'open')
+      .map(port => ({ host: host.address, ...port, knowledge: explainPort(port.port, port.service) })))
+      .slice(0, 20);
+  }, [result]);
+
+  const fullProfileAvailable = overview === null || serverPresets.has('fullProfile');
 
   return <section className="qlc-root" aria-label="Checks locais de um clique">
     <header className="qlc-head">
@@ -185,6 +200,12 @@ export default function QuickLocalChecks() {
       <label><span>Linux/WSL</span><select value={distribution} onChange={event => setDistribution(event.target.value)}><option value="">Selecione</option>{wsl?.distributions.map(item => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label>
     </div>
 
+    <article className="qlc-full">
+      <div className="qlc-full-icon">⚡</div>
+      <div><small>Mais automático</small><strong>Perfil completo local</strong><p>Uma única checagem bounded reúne as superfícies mais comuns de web, acesso remoto, Windows, arquivos, bancos, infraestrutura, IoT e desenvolvimento.</p><span>Não tenta senha, não roda script NSE de exploração e aceita somente um IPv4 privado/local.</span></div>
+      <button type="button" disabled={Boolean(loading) || !fullProfileAvailable} onClick={() => void runCheck('fullProfile')}>{loading === 'fullProfile' ? 'Montando perfil…' : '▶ Fazer perfil completo'}</button>
+    </article>
+
     <div className="qlc-grid">
       {CHECKS.map(check => {
         const metadata = serverPresets.get(check.id);
@@ -198,7 +219,7 @@ export default function QuickLocalChecks() {
     </div>
 
     {result && <section className="qlc-result">
-      <header><div><small>Último resultado</small><strong>{result.label}</strong><span>{result.target}</span></div><div><button type="button" onClick={() => void copyForAi()}>Copiar para IA</button><em>{result.insights?.highestSeverity || 'info'}</em></div></header>
+      <header><div><small>Último resultado</small><strong>{result.label}</strong><span>{result.target}</span></div><div><button type="button" onClick={() => void copyForAi()}>Copiar explicado para IA</button><em>{result.insights?.highestSeverity || 'info'}</em></div></header>
       <div className="qlc-hosts">
         {result.hosts.length ? result.hosts.map(host => <article key={host.address}>
           <div><strong>{host.address}</strong><span>{host.hostname || 'sem hostname'}</span></div>
@@ -207,6 +228,9 @@ export default function QuickLocalChecks() {
           {safePrivateHost(host.address) && <button type="button" onClick={() => setTarget(host.address)}>Usar este IP nos checks</button>}
         </article>) : <p>Nenhum host/serviço foi retornado neste check.</p>}
       </div>
+
+      {openPorts.length > 0 && <div className="qlc-explain"><strong>O que essas portas significam</strong><div>{openPorts.map(port => <article key={`${port.host}-${port.port}`}><b>{port.port}</b><div><strong>{port.knowledge.title}</strong><span>{port.knowledge.category} · {port.host}</span><p>{port.knowledge.explanation}</p><small>Revise: {port.knowledge.review}</small></div></article>)}</div></div>}
+
       {findings.length > 0 && <div className="qlc-findings"><strong>O que merece revisão</strong>{findings.map(finding => <article key={finding.id}><span>{finding.severity}</span><div><b>{finding.title}</b><p>{finding.evidence}</p><small>{finding.recommendation}</small></div></article>)}</div>}
       <p className="qlc-note">Porta aberta ou serviço identificado é evidência de superfície, não confirmação automática de vulnerabilidade.</p>
     </section>}
