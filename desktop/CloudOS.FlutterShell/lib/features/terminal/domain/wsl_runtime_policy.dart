@@ -3,18 +3,38 @@ class WslRuntimePolicy {
     required bool wslAvailable,
     required Iterable<String> installedDistros,
     String defaultDistro = '',
+    bool? engineAvailable,
   })  : wslAvailable = wslAvailable,
+        engineAvailable = engineAvailable ?? wslAvailable,
         installedDistros = _normalizeDistros(installedDistros),
-        defaultDistro = _resolveDefault(
+        defaultDistro = _resolveReportedDefault(
           _normalizeDistros(installedDistros),
           defaultDistro,
         );
 
+  /// Legacy V21 "usable WSL" signal.
   final bool wslAvailable;
+
+  /// Passive evidence that the Windows WSL engine exists. This can be true
+  /// even before any distribution is registered.
+  final bool engineAvailable;
+
   final List<String> installedDistros;
+
+  /// Default distro only when the broker/Windows explicitly reports one that
+  /// is also present in the inventory. No first-item guess is stored here.
   final String defaultDistro;
 
   bool get hasInstalledDistros => installedDistros.isNotEmpty;
+  bool get canStartWslSession => engineAvailable && hasInstalledDistros;
+
+  /// Distro used for a user-requested generic WSL session. When Windows has no
+  /// reported default we may launch the first registered distro, but we do not
+  /// label that fallback as the system default.
+  String get launchFallbackDistro {
+    if (defaultDistro.isNotEmpty) return defaultDistro;
+    return installedDistros.isEmpty ? '' : installedDistros.first;
+  }
 
   String get preferredSecurityDistro {
     for (final distro in installedDistros) {
@@ -38,13 +58,14 @@ class WslRuntimePolicy {
         (item) => item.toLowerCase() == candidate.toLowerCase(),
       );
     }
-    if (defaultDistro.isNotEmpty) return defaultDistro;
-    return installedDistros.isEmpty ? '' : installedDistros.first;
+    return launchFallbackDistro;
   }
 
   String statusLabelFor(String distro) {
     if (isKali(distro)) return '$distro • Security';
-    if (distro == defaultDistro) return '$distro • Default';
+    if (defaultDistro.isNotEmpty && distro == defaultDistro) {
+      return '$distro • Default';
+    }
     return distro;
   }
 
@@ -64,13 +85,15 @@ class WslRuntimePolicy {
     return List<String>.unmodifiable(result);
   }
 
-  static String _resolveDefault(List<String> distros, String requestedDefault) {
+  static String _resolveReportedDefault(
+    List<String> distros,
+    String requestedDefault,
+  ) {
     final wanted = requestedDefault.trim().toLowerCase();
-    if (wanted.isNotEmpty) {
-      for (final distro in distros) {
-        if (distro.toLowerCase() == wanted) return distro;
-      }
+    if (wanted.isEmpty) return '';
+    for (final distro in distros) {
+      if (distro.toLowerCase() == wanted) return distro;
     }
-    return distros.isEmpty ? '' : distros.first;
+    return '';
   }
 }
