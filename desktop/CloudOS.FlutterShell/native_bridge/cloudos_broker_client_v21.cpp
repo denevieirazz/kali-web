@@ -11,6 +11,7 @@
 #include <shlwapi.h>
 
 #include <algorithm>
+#include <cctype>
 
 namespace CloudOS
 {
