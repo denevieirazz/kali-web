@@ -9,6 +9,7 @@ import {
 } from './networkAssessment.js';
 import { getNetworkDiagnostics } from './networkDiagnostics.js';
 import { enrichNetworkAssessment } from './networkInsights.js';
+import { enrichWifiDiagnostics } from './wifiInsights.js';
 
 export const securityToolsRouter = express.Router();
 securityToolsRouter.use(authenticateToken);
@@ -52,7 +53,7 @@ securityToolsRouter.get('/network/diagnostics', async (_req, res) => {
 
 securityToolsRouter.get('/network/wifi', async (_req, res) => {
   try {
-    res.json(await getWifiDiagnostics());
+    res.json(enrichWifiDiagnostics(await getWifiDiagnostics()));
   } catch {
     res.status(503).json({ error: 'Não foi possível coletar o diagnóstico Wi‑Fi local.', errorCode: 'WIFI_DIAGNOSTICS_FAILED' });
   }
