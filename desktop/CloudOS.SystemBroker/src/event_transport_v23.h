@@ -4,7 +4,6 @@
 
 #include <atomic>
 #include <cstdint>
-#include <functional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -16,14 +15,12 @@ namespace CloudOS
 class EventTransportV23 final
 {
 public:
-    using ClientBindingValidator = std::function<bool(const std::string&, DWORD)>;
-
     static EventTransportV23& Instance();
 
     EventTransportV23(const EventTransportV23&) = delete;
     EventTransportV23& operator=(const EventTransportV23&) = delete;
 
-    bool Start(ClientBindingValidator validator);
+    bool Start();
     void Stop();
 
     [[nodiscard]] bool IsRunning() const noexcept { return running_.load(); }
@@ -41,12 +38,12 @@ private:
 
     static bool SendFrame(HANDLE pipe, const std::string& payload);
     static bool ReadFrame(HANDLE pipe, std::string& payload);
+    static bool ClientIdMatchesProcess(
+        const std::string& client_id,
+        DWORD process_id) noexcept;
 
     std::atomic_bool running_{false};
     std::atomic_uint64_t dropped_events_{0};
-    ClientBindingValidator validator_;
-    mutable std::mutex validator_mutex_;
-
     std::thread listener_thread_;
     std::vector<std::thread> client_threads_;
     std::mutex client_threads_mutex_;
