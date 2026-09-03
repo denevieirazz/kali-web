@@ -19,6 +19,17 @@ class WslSessionPlan {
     required this.storageEvidence,
   });
 
+  /// Small const compatibility constructor for presentation-only denied plans.
+  /// Runtime policy code should prefer [WslSessionPlan.denied] so it can carry
+  /// the exact distro/version/storage evidence that caused the rejection.
+  const WslSessionPlan.deny(String reason)
+    : allowed = false,
+      distro = '',
+      requirement = WslSessionRequirement.security,
+      reason = reason,
+      version = 0,
+      storageEvidence = null;
+
   factory WslSessionPlan.allowed({
     required String distro,
     required WslSessionRequirement requirement,
