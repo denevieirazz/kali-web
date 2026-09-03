@@ -45,6 +45,7 @@ $contracts = @(
     'test-unified-integration-v16-contract.ps1',
     'test-unified-start-search-v17-contract.ps1',
     'test-system-broker-v21-contract.ps1',
+    'test-system-broker-security-v22-contract.ps1',
     'test-system-broker-wsl-inventory-v22-contract.ps1',
     'test-system-broker-wsl-probe-v22-contract.ps1',
     'test-flutter-wsl-runtime-bridge-v22-contract.ps1',
