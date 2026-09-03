@@ -28,6 +28,7 @@ $contracts = @(
     'test-workspace-studio-contract.ps1',
     'test-session-continuity-contract.ps1',
     'test-shell-control-plane-contract.ps1',
+    'test-quick-settings-system-v22-contract.ps1',
     'test-window-rehome-v22-contract.ps1',
     'test-files-storage-v5-contract.ps1',
     'test-files-shell-operations-v22-contract.ps1',
