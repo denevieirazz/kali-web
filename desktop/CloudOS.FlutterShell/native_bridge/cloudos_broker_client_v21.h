@@ -57,6 +57,17 @@ struct BrokerClientFileItem final
     std::string entry_id;
 };
 
+struct BrokerClientWslDistributionSnapshot final
+{
+    std::string name;
+    int version{0};
+    bool is_default{false};
+    bool base_path_present{false};
+    bool base_path_evidence_known{false};
+    bool is_security_candidate{false};
+    bool security_candidate_evidence_known{false};
+};
+
 struct BrokerClientSnapshot final
 {
     std::string device_name;
@@ -70,9 +81,24 @@ struct BrokerClientSnapshot final
     double volume{};
     bool brightness_available{false};
     double brightness{};
+
+    // Legacy V21 compatibility signal.
     bool wsl_available{false};
     std::vector<std::string> distros;
     std::string default_distro;
+
+    // Additive V22 passive evidence. None of these fields imply that a distro
+    // successfully completed first-run or executed a command.
+    bool wsl_engine_available{false};
+    bool wsl_passive_ready{false};
+    bool wsl_passive_ready_known{false};
+    std::vector<BrokerClientWslDistributionSnapshot> wsl_distros;
+    std::string preferred_security_distro;
+    uint32_t wsl_registered_count{0};
+    uint32_t wsl_launch_candidate_count{0};
+    uint32_t wsl1_count{0};
+    uint32_t wsl2_count{0};
+
     int current_workspace{1};
     uint64_t timestamp_ms{0};
 };
