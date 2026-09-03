@@ -6,6 +6,7 @@ const read = relativePath => readFileSync(new URL(relativePath, import.meta.url)
 
 const center = read('../src/apps/SecurityCenter/SecurityCenter.tsx');
 const quick = read('../src/apps/SecurityCenter/QuickLocalChecks.tsx');
+const quickWeb = read('../src/apps/SecurityCenter/QuickWebChecks.tsx');
 const history = read('../src/apps/SecurityCenter/QuickCheckHistory.tsx');
 const knowledge = read('../src/apps/SecurityCenter/portKnowledge.ts');
 const evidence = read('../src/apps/SecurityCenter/quickCheckEvidence.ts');
@@ -15,6 +16,7 @@ test('Kali Tool Center opens the beginner-first Security Center without adding a
   assert.match(registry, /'kali-tool-center': lazy\(\(\) => import\('\.\.\/apps\/SecurityCenter\/SecurityCenter'\)\)/);
   assert.match(center, /Um botão\. Uma função\./);
   assert.match(center, /<QuickLocalChecks \/>/);
+  assert.match(center, /<QuickWebChecks \/>/);
   assert.match(center, /Voltar para os blocos/);
   assert.match(center, /<KaliToolCenter \/>/);
 });
@@ -73,10 +75,24 @@ test('quick check history is user-scoped, bounded and can rerun saved presets', 
   assert.match(history, /openPortCount/);
 });
 
+test('web area exposes six small one-button views over the SSRF-safe inspector endpoint', () => {
+  for (const title of ['Análise web completa', 'Checar HTTPS / TLS', 'Checar headers', 'Checar cookies', 'Checar redirects', 'Ver tecnologias']) {
+    assert.match(quickWeb, new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  assert.match(quickWeb, /\/api\/security\/tools\/web\/inspect/);
+  assert.match(quickWeb, /Abrir Web Inspector completo/);
+  assert.match(quickWeb, /valueExposed: false/);
+  assert.match(quickWeb, /noCrawler: true/);
+  assert.match(quickWeb, /noFuzzing: true/);
+  assert.match(quickWeb, /noCredentialAttacks: true/);
+  assert.match(quickWeb, /noExploitAutomation: true/);
+});
+
 test('quick checks remain fixed-endpoint and do not expose arbitrary command execution', () => {
+  const combined = `${quick}\n${quickWeb}`;
   assert.match(quick, /\/api\/security\/tools\/network\/scan/);
-  assert.doesNotMatch(quick, /\/api\/security\/(?:execute|run|command|shell)/i);
-  assert.doesNotMatch(quick, /\b(?:argv|spawn|execFile|execSync|shellCommand)\b/);
+  assert.doesNotMatch(combined, /\/api\/security\/(?:execute|run|command|shell)/i);
+  assert.doesNotMatch(combined, /\b(?:argv|spawn|execFile|execSync|shellCommand)\b/);
   assert.match(evidence, /privateLocalOnly: true/);
   assert.match(evidence, /arbitraryArguments: false/);
   assert.match(evidence, /credentialAttacks: false/);
