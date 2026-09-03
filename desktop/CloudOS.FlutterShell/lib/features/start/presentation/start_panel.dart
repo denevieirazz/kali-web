@@ -4,6 +4,7 @@ import '../../../core/cloudos_theme.dart';
 import '../../../models/shell_models.dart';
 import '../../../widgets/glass_surface.dart';
 import '../domain/start_app_filter.dart';
+import '../domain/start_running_app.dart';
 import 'widgets/start_app_views.dart';
 import 'widgets/start_filter_bar.dart';
 import 'widgets/start_footer.dart';
@@ -15,12 +16,18 @@ class StartPanel extends StatefulWidget {
   const StartPanel({
     required this.apps,
     required this.onLaunch,
+    required this.runningApps,
+    required this.onActivateWindow,
+    required this.onCloseWindow,
     required this.onClose,
     super.key,
   });
 
   final List<CloudApp> apps;
   final ValueChanged<CloudApp> onLaunch;
+  final List<StartRunningApp> runningApps;
+  final ValueChanged<String> onActivateWindow;
+  final ValueChanged<String> onCloseWindow;
   final VoidCallback onClose;
 
   @override
@@ -58,6 +65,16 @@ class _StartPanelState extends State<StartPanel> {
         .take(4)
         .toList(growable: false);
     final isSearching = query.trim().isNotEmpty;
+    final isRunningView = selectedFilter == 'Abertos';
+    final runningApps = query.trim().isEmpty
+        ? widget.runningApps
+        : widget.runningApps
+              .where(
+                (app) => app.title.toLowerCase().contains(
+                  query.trim().toLowerCase(),
+                ),
+              )
+              .toList(growable: false);
 
     return Align(
       alignment: Alignment.bottomLeft,
@@ -86,13 +103,20 @@ class _StartPanelState extends State<StartPanel> {
                 const SizedBox(height: 10),
                 StartFilterBar(
                   selectedFilter: selectedFilter,
+                  runningCount: widget.runningApps.length,
                   onSelected: (filter) {
                     setState(() => selectedFilter = filter);
                   },
                 ),
                 const SizedBox(height: 14),
                 Expanded(
-                  child: isSearching
+                  child: isRunningView
+                      ? StartRunningAppsList(
+                          apps: runningApps,
+                          onActivate: widget.onActivateWindow,
+                          onClose: widget.onCloseWindow,
+                        )
+                      : isSearching
                       ? StartSearchResultsList(
                           results: filtered,
                           onLaunch: widget.onLaunch,
@@ -100,7 +124,10 @@ class _StartPanelState extends State<StartPanel> {
                       : StartOverview(
                           pinnedApps: pinnedApps,
                           recentApps: recentApps,
+                          runningApps: widget.runningApps,
                           onLaunch: widget.onLaunch,
+                          onActivateWindow: widget.onActivateWindow,
+                          onCloseWindow: widget.onCloseWindow,
                         ),
                 ),
                 const SizedBox(height: 10),

@@ -9,6 +9,7 @@ import '../features/notifications/presentation/notification_center_panel.dart';
 import '../features/quick_settings/domain/quick_settings_route.dart';
 import '../features/quick_settings/presentation/quick_settings_panel.dart';
 import '../features/settings/presentation/settings_window.dart';
+import '../features/start/domain/start_running_app.dart';
 import '../features/start/presentation/start_panel.dart';
 import '../features/taskbar/presentation/cloud_taskbar.dart';
 import '../features/terminal/presentation/terminal_window.dart';
@@ -353,6 +354,11 @@ class _CloudOSShellState extends State<CloudOSShell> {
   }
 
   void _closeWindow(String id) {
+    if (id == 'browser') {
+      unawaited(widget.bridge.closeShellSurface('cloudos:browser'));
+    } else if (id == 'terminal') {
+      unawaited(widget.bridge.closeShellSurface('cloudos:terminal'));
+    }
     setState(() {
       if (id == 'files') filesOpen = false;
       if (id == 'terminal') terminalOpen = false;
@@ -363,6 +369,50 @@ class _CloudOSShellState extends State<CloudOSShell> {
       }
     });
   }
+
+  List<StartRunningApp> get _startRunningApps => <StartRunningApp>[
+        if (filesOpen)
+          StartRunningApp(
+            id: 'files',
+            title: 'Explorador de Arquivos',
+            icon: Icons.folder_rounded,
+            appIds: const <String>{'files', 'cloudos:files'},
+            isMinimized: filesMinimized,
+            isActive: activeInternalWindowId == 'files',
+          ),
+        if (browserOpen)
+          StartRunningApp(
+            id: 'browser',
+            title: 'Navegador Web',
+            icon: Icons.public_rounded,
+            appIds: const <String>{'browser', 'cloudos:browser'},
+            isMinimized: browserMinimized,
+            isActive: activeInternalWindowId == 'browser',
+          ),
+        if (terminalOpen)
+          StartRunningApp(
+            id: 'terminal',
+            title: 'CloudOS Terminal',
+            icon: Icons.terminal_rounded,
+            appIds: const <String>{
+              'terminal',
+              'cloudos:terminal',
+              'wsl',
+              'wsl:terminal',
+            },
+            isMinimized: terminalMinimized,
+            isActive: activeInternalWindowId == 'terminal',
+          ),
+        if (settingsOpen)
+          StartRunningApp(
+            id: 'settings',
+            title: 'Configurações',
+            icon: Icons.settings_rounded,
+            appIds: const <String>{'settings', 'cloudos:settings'},
+            isMinimized: settingsMinimized,
+            isActive: activeInternalWindowId == 'settings',
+          ),
+      ];
 
   void _toggleMaximizeWindow(String id, BoxConstraints constraints) {
     setState(() {
@@ -806,9 +856,9 @@ class _CloudOSShellState extends State<CloudOSShell> {
                       startOpen: startOpen,
                       quickSettingsOpen: quickSettingsOpen,
                       notificationsOpen: notificationsOpen,
-                      filesRunning: filesOpen && !filesMinimized,
-                      browserRunning: browserOpen && !browserMinimized,
-                      terminalRunning: terminalOpen && !terminalMinimized,
+                      filesRunning: filesOpen,
+                      browserRunning: browserOpen,
+                      terminalRunning: terminalOpen,
                       currentWorkspace: currentWorkspace,
                       notificationCount: notificationState.unreadCount,
                       onWorkspaceChanged: (index) =>
@@ -1082,6 +1132,9 @@ class _CloudOSShellState extends State<CloudOSShell> {
         key: const ValueKey<String>('start'),
         apps: apps,
         onLaunch: _launchApp,
+        runningApps: _startRunningApps,
+        onActivateWindow: _focusWindow,
+        onCloseWindow: _closeWindow,
         onClose: () => setState(() => startOpen = false),
       );
     } else if (quickSettingsOpen) {
