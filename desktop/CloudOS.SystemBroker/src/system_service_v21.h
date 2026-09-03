@@ -3,6 +3,7 @@
 #include "protocol_v21.h"
 
 #include <atomic>
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -15,6 +16,8 @@ struct SystemWslDistributionSnapshot final
     std::string name;
     int version{0}; // 0 means not proven by passive registration metadata.
     bool is_default{false};
+    bool base_path_present{false};
+    bool is_security_candidate{false};
 };
 
 struct SystemSnapshot final
@@ -41,7 +44,13 @@ struct SystemSnapshot final
     // any distro is installed, and distro version is only populated when the
     // Windows registration metadata proves it.
     bool wsl_engine_available{false};
+    bool wsl_passive_ready{false};
     std::vector<SystemWslDistributionSnapshot> wsl_distros;
+    std::string preferred_security_distro;
+    uint32_t wsl_registered_count{0};
+    uint32_t wsl_launch_candidate_count{0};
+    uint32_t wsl1_count{0};
+    uint32_t wsl2_count{0};
 
     int current_workspace{1};
     uint64_t timestamp_ms{0};
