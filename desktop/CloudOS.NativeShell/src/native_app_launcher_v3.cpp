@@ -22,6 +22,7 @@
 #include <shellapi.h>
 
 #include <array>
+#include <cwctype>
 #include <string>
 #include <string_view>
 
@@ -34,14 +35,8 @@ std::wstring QuoteArgument(const std::wstring& value)
     std::wstring result = L"\"";
     for (const wchar_t character : value)
     {
-        if (character == L'\"')
-        {
-            result += L"\\\"";
-        }
-        else
-        {
-            result += character;
-        }
+        if (character == L'\"') result += L"\\\"";
+        else result += character;
     }
     result += L"\"";
     return result;
@@ -50,15 +45,74 @@ std::wstring QuoteArgument(const std::wstring& value)
 void ShowLaunchError(HWND owner, const std::wstring& target)
 {
     std::wstring message = L"Nao foi possivel abrir ";
-    message += target.empty()
-        ? L"o aplicativo solicitado"
-        : target;
+    message += target.empty() ? L"o aplicativo solicitado" : target;
     message += L".";
-    MessageBoxW(
-        owner,
-        message.c_str(),
-        L"CloudOS",
-        MB_OK | MB_ICONERROR);
+    MessageBoxW(owner, message.c_str(), L"CloudOS", MB_OK | MB_ICONERROR);
+}
+
+bool HasProtocolScheme(std::wstring_view target) noexcept
+{
+    const std::size_t colon = target.find(L':');
+    if (colon == std::wstring_view::npos) return false;
+    if (colon == 1u && std::iswalpha(target.front())) return false; // drive path
+    return colon > 0u;
+}
+
+bool EndsWithInsensitive(std::wstring_view value, std::wstring_view suffix) noexcept
+{
+    if (value.size() < suffix.size()) return false;
+    const std::size_t offset = value.size() - suffix.size();
+    return _wcsnicmp(value.data() + offset, suffix.data(), suffix.size()) == 0;
+}
+
+bool LaunchExternalBreakawayProcess(
+    const std::wstring& file,
+    const std::wstring& parameters,
+    const std::wstring& working_directory)
+{
+    if (file.empty() || HasProtocolScheme(file)) return false;
+
+    std::wstring command;
+    if (EndsWithInsensitive(file, L".cmd") || EndsWithInsensitive(file, L".bat"))
+    {
+        command = L"cmd.exe /d /s /c \"";
+        command += QuoteArgument(file);
+        if (!parameters.empty()) command += L" " + parameters;
+        command += L"\"";
+    }
+    else if (EndsWithInsensitive(file, L".msc"))
+    {
+        command = L"mmc.exe ";
+        command += QuoteArgument(file);
+        if (!parameters.empty()) command += L" " + parameters;
+    }
+    else
+    {
+        command = QuoteArgument(file);
+        if (!parameters.empty()) command += L" " + parameters;
+    }
+
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    if (!CreateProcessW(
+            nullptr,
+            command.data(),
+            nullptr,
+            nullptr,
+            FALSE,
+            CREATE_BREAKAWAY_FROM_JOB | CREATE_DEFAULT_ERROR_MODE,
+            nullptr,
+            working_directory.empty() ? nullptr : working_directory.c_str(),
+            &startup,
+            &process))
+    {
+        return false;
+    }
+
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    return true;
 }
 
 bool LaunchWindowsTarget(
@@ -68,12 +122,14 @@ bool LaunchWindowsTarget(
     const std::wstring& working_directory = {},
     bool report_error = true)
 {
+    // External Win32 executables are explicitly detached from the Supervisor's
+    // Job Object. Internal CloudOS apps never pass through this function.
+    // Protocol activation/UAC-sensitive targets fall back to ShellExecuteExW.
+    if (LaunchExternalBreakawayProcess(file, parameters, working_directory)) return true;
+
     SHELLEXECUTEINFOW execution{};
     execution.cbSize = sizeof(execution);
-    execution.fMask =
-        SEE_MASK_NOCLOSEPROCESS |
-        SEE_MASK_FLAG_NO_UI |
-        SEE_MASK_ASYNCOK;
+    execution.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI | SEE_MASK_ASYNCOK;
     execution.hwnd = owner;
     execution.lpVerb = L"open";
     execution.lpFile = file.c_str();
@@ -101,8 +157,7 @@ std::wstring ResolveWslDistribution()
 {
     const CloudOSNativeSettings settings = CloudOSNativeSettingsWindow::Load();
     if (IsRegisteredDistribution(settings.default_wsl_distribution)) return settings.default_wsl_distribution;
-    if (_wcsicmp(settings.default_wsl_distribution.c_str(), L"kali-linux") != 0 &&
-        IsRegisteredDistribution(L"kali-linux"))
+    if (_wcsicmp(settings.default_wsl_distribution.c_str(), L"kali-linux") != 0 && IsRegisteredDistribution(L"kali-linux"))
         return L"kali-linux";
     return {};
 }
@@ -165,33 +220,15 @@ void NativeAppLauncher::LaunchById(
         launched = NativeShellBridge::OpenWorkspaceOverview();
         if (!launched) ShowLaunchError(parent_hwnd, L"a Visao de Trabalho");
     }
-    else if (id == L"control")
-    {
-        CloudOSNativeCommandCenterWindow::Open(instance, parent_hwnd);
-    }
-    else if (id == L"terminal")
-    {
-        CloudOSNativeTerminalWindow::Open(instance, L"cmd.exe", L"Terminal - CloudOS");
-    }
-    else if (id == L"projects")
-    {
-        CloudOSNativeProjectsWindow::Open(instance);
-    }
-    else if (id == L"wsl")
-    {
-        OpenWslTerminal(instance);
-    }
+    else if (id == L"control") CloudOSNativeCommandCenterWindow::Open(instance, parent_hwnd);
+    else if (id == L"terminal") CloudOSNativeTerminalWindow::Open(instance, L"cmd.exe", L"Terminal - CloudOS");
+    else if (id == L"projects") CloudOSNativeProjectsWindow::Open(instance);
+    else if (id == L"wsl") OpenWslTerminal(instance);
     else if (id == L"powershell")
     {
-        CloudOSNativeTerminalWindow::Open(
-            instance,
-            L"powershell.exe -NoLogo -NoProfile",
-            L"PowerShell - CloudOS");
+        CloudOSNativeTerminalWindow::Open(instance, L"powershell.exe -NoLogo -NoProfile", L"PowerShell - CloudOS");
     }
-    else if (id == L"files")
-    {
-        CloudOSNativeFilesWindow::Open(instance);
-    }
+    else if (id == L"files") CloudOSNativeFilesWindow::Open(instance);
     else if (id == L"drive")
     {
         std::wstring error;
@@ -210,10 +247,7 @@ void NativeAppLauncher::LaunchById(
                 ShowLaunchError(parent_hwnd, L"o CloudOS Drive");
                 launched = false;
             }
-            else
-            {
-                CloudOSNativeFilesWindow::Open(instance, root);
-            }
+            else CloudOSNativeFilesWindow::Open(instance, root);
         }
     }
     else if (id == L"systemdrive")
@@ -224,15 +258,9 @@ void NativeAppLauncher::LaunchById(
             ShowLaunchError(parent_hwnd, L"o volume do sistema");
             launched = false;
         }
-        else
-        {
-            CloudOSNativeFilesWindow::Open(instance, system_volume);
-        }
+        else CloudOSNativeFilesWindow::Open(instance, system_volume);
     }
-    else if (id == L"notepad")
-    {
-        CloudOSNativeNotepadWindow::Open(instance);
-    }
+    else if (id == L"notepad") CloudOSNativeNotepadWindow::Open(instance);
     else if (id == L"code")
     {
         launched = LaunchWindowsTarget(parent_hwnd, L"code.cmd", L".", {}, false);
@@ -242,64 +270,28 @@ void NativeAppLauncher::LaunchById(
             launched = true;
         }
     }
-    else if (id == L"calc")
-    {
-        CloudOSNativeCalculatorWindow::Open(instance);
-    }
-    else if (id == L"sysmon")
-    {
-        CloudOSNativeSystemMonitorWindow::Open(instance);
-    }
-    else if (id == L"settings")
-    {
-        CloudOSNativeSettingsWindow::Open(instance);
-    }
-    else if (id == L"apps")
-    {
-        CloudOSNativeAppsWindow::Open(instance);
-    }
-    else if (id == L"run")
-    {
-        CloudOSNativeRunWindow::Open(instance);
-    }
+    else if (id == L"calc") CloudOSNativeCalculatorWindow::Open(instance);
+    else if (id == L"sysmon") CloudOSNativeSystemMonitorWindow::Open(instance);
+    else if (id == L"settings") CloudOSNativeSettingsWindow::Open(instance);
+    else if (id == L"apps") CloudOSNativeAppsWindow::Open(instance);
+    else if (id == L"run") CloudOSNativeRunWindow::Open(instance);
     else if (id == L"health")
     {
         launched = CloudOSNativeEnvDoctorWindow::Open(instance) != nullptr;
         if (!launched) ShowLaunchError(parent_hwnd, L"Saude do Sistema");
     }
-    else if (id == L"browser")
-    {
-        CloudOSNativeBrowserWindow::Open(instance, L"https://www.google.com/");
-    }
-    else if (id == L"paint")
-    {
-        launched = LaunchWindowsTarget(parent_hwnd, L"mspaint.exe");
-    }
+    else if (id == L"browser") CloudOSNativeBrowserWindow::Open(instance, L"https://www.google.com/");
+    else if (id == L"paint") launched = LaunchWindowsTarget(parent_hwnd, L"mspaint.exe");
     else if (id == L"media")
     {
         launched = LaunchWindowsTarget(parent_hwnd, L"mswindowsmusic:", {}, {}, false);
         if (!launched) launched = LaunchWindowsTarget(parent_hwnd, L"wmplayer.exe");
     }
-    else if (id == L"regedit")
-    {
-        launched = LaunchWindowsTarget(parent_hwnd, L"regedit.exe");
-    }
-    else if (id == L"snip")
-    {
-        launched = LaunchWindowsTarget(parent_hwnd, L"SnippingTool.exe");
-    }
-    else if (id == L"weather")
-    {
-        CloudOSNativeBrowserWindow::Open(instance, L"https://www.msn.com/weather");
-    }
-    else if (id == L"datetime")
-    {
-        launched = LaunchWindowsTarget(parent_hwnd, L"ms-settings:dateandtime");
-    }
-    else
-    {
-        launched = false;
-    }
+    else if (id == L"regedit") launched = LaunchWindowsTarget(parent_hwnd, L"regedit.exe");
+    else if (id == L"snip") launched = LaunchWindowsTarget(parent_hwnd, L"SnippingTool.exe");
+    else if (id == L"weather") CloudOSNativeBrowserWindow::Open(instance, L"https://www.msn.com/weather");
+    else if (id == L"datetime") launched = LaunchWindowsTarget(parent_hwnd, L"ms-settings:dateandtime");
+    else launched = false;
 
     if (launched && IsCatalogAppId(id)) StartMenuMRUTracker::Instance().RecordLaunch(id.c_str());
 }
