@@ -10,6 +10,13 @@
 namespace CloudOS
 {
 
+struct SystemWslDistributionSnapshot final
+{
+    std::string name;
+    int version{0}; // 0 means not proven by passive registration metadata.
+    bool is_default{false};
+};
+
 struct SystemSnapshot final
 {
     std::string device_name;
@@ -23,9 +30,19 @@ struct SystemSnapshot final
     double volume{0.0};
     bool brightness_available{false};
     double brightness{0.0};
+
+    // Legacy V21 field: true only when WSL has a registered distro usable by
+    // existing callers. Keep this behavior for backwards compatibility.
     bool wsl_available{false};
     std::vector<std::string> distros;
     std::string default_distro;
+
+    // Additive runtime evidence. The engine field is independent from whether
+    // any distro is installed, and distro version is only populated when the
+    // Windows registration metadata proves it.
+    bool wsl_engine_available{false};
+    std::vector<SystemWslDistributionSnapshot> wsl_distros;
+
     int current_workspace{1};
     uint64_t timestamp_ms{0};
 
