@@ -4,6 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter_windows/webview_flutter_windows.dart';
 
 import '../../../core/cloudos_theme.dart';
+import '../domain/browser_navigation_policy.dart';
+
+const _initialBrowserUrl = String.fromEnvironment(
+  'CLOUDOS_BROWSER_URL',
+  defaultValue: 'https://www.google.com',
+);
 
 /// Real in-process WebView2 content with Flutter window chrome.
 class BrowserWindow extends StatefulWidget {
@@ -16,7 +22,7 @@ class BrowserWindow extends StatefulWidget {
 class _BrowserWindowState extends State<BrowserWindow> {
   final WebviewController _webview = WebviewController();
   final TextEditingController _urlController = TextEditingController(
-    text: 'https://www.google.com',
+    text: _initialBrowserUrl,
   );
   final List<StreamSubscription<Object?>> _subscriptions =
       <StreamSubscription<Object?>>[];
@@ -72,6 +78,7 @@ class _BrowserWindowState extends State<BrowserWindow> {
         ..add(
           _webview.onLoadError.listen((error) {
             if (!mounted) return;
+            if (isTransientNavigationError(error)) return;
             setState(() {
               _isLoading = false;
               _error = 'Falha de navegação WebView2: ${error.name}';
@@ -89,18 +96,9 @@ class _BrowserWindowState extends State<BrowserWindow> {
     }
   }
 
-  String _normalizeTarget(String input) {
-    final value = input.trim();
-    if (value.startsWith('http://') || value.startsWith('https://')) {
-      return value;
-    }
-    if (value.contains('.') && !value.contains(' ')) return 'https://$value';
-    return 'https://www.google.com/search?q=${Uri.encodeComponent(value)}';
-  }
-
   Future<void> _navigate(String input) async {
     if (!_initialized || input.trim().isEmpty) return;
-    final target = _normalizeTarget(input);
+    final target = normalizeBrowserTarget(input);
     setState(() {
       _error = null;
       _isLoading = true;
@@ -227,22 +225,46 @@ class _BrowserWindowState extends State<BrowserWindow> {
   }
 
   Widget _buildViewport() {
-    if (_error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: SelectableText(
-            _error!,
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: Color(0xFFF85149)),
-          ),
-        ),
-      );
-    }
     if (!_initialized) {
       return const Center(child: CircularProgressIndicator());
     }
-    return Webview(_webview);
+    return Stack(
+      fit: StackFit.expand,
+      children: <Widget>[
+        Webview(_webview),
+        if (_error != null)
+          ColoredBox(
+            color: const Color(0xF510141D),
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    const Icon(
+                      Icons.cloud_off_rounded,
+                      color: Color(0xFFF85149),
+                      size: 38,
+                    ),
+                    const SizedBox(height: 10),
+                    SelectableText(
+                      _error!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Color(0xFFF85149)),
+                    ),
+                    const SizedBox(height: 14),
+                    FilledButton.icon(
+                      onPressed: () => _navigate(_urlController.text),
+                      icon: const Icon(Icons.refresh_rounded, size: 18),
+                      label: const Text('Tentar novamente'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
   }
 
   Widget _buildStatusBar() {
@@ -263,7 +285,11 @@ class _BrowserWindowState extends State<BrowserWindow> {
           Expanded(
             child: Text(
               _initialized
-                  ? (_isLoading ? 'Navegando…' : 'WebView2 conectado')
+                  ? (_error != null
+                        ? _error!
+                        : _isLoading
+                        ? 'Navegando…'
+                        : 'WebView2 conectado')
                   : 'Inicializando WebView2…',
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(

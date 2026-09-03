@@ -222,7 +222,7 @@ void main() {
     ).readAsStringSync();
 
     expect(browser, contains('WebviewController'));
-    expect(browser, contains('return Webview(_webview)'));
+    expect(browser, contains('Webview(_webview)'));
     expect(browser, isNot(contains('CloudOS Web Navigation')));
     expect(browser, isNot(contains('Future<void>.delayed')));
 
