@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { launchWorkflowApp } from '../../services/workflowLaunch';
 import KaliToolCenter from '../KaliToolCenter/KaliToolCenter';
+import QuickLocalChecks from './QuickLocalChecks';
 import './SecurityCenter.css';
 
 type Group = 'começar' | 'rede' | 'web' | 'sistema' | 'evidência';
@@ -88,8 +89,14 @@ export default function SecurityCenter() {
     </div>}
 
     <section className="sec-start">
-      <div><strong>Não sabe por onde começar?</strong><span>Use “Assessment de rede”, depois vá abrindo os blocos conforme o CloudOS mostrar o que merece revisão.</span></div>
-      <button type="button" onClick={() => openBlock(BLOCKS[0])}>🎯 Começar assessment</button>
+      <div><strong>Não sabe por onde começar?</strong><span>Use “Descobrir dispositivos” abaixo. Depois escolha um IP e vá apertando os checks específicos.</span></div>
+      <button type="button" onClick={() => openBlock(BLOCKS[0])}>🐉 Abrir assessment completo</button>
+    </section>
+
+    <QuickLocalChecks />
+
+    <section className="sec-toolbox-title">
+      <div><small>Ferramentas completas</small><strong>Abrir um app específico</strong><span>Quando quiser aprofundar, cada bloco abaixo abre uma superfície dedicada.</span></div>
     </section>
 
     <nav className="sec-filters" aria-label="Categorias do Security Center">
@@ -109,8 +116,8 @@ export default function SecurityCenter() {
 
     <footer className="sec-footer">
       <strong>Fluxo simples sugerido</strong>
-      <span>Assessment de rede → Diagnosticar IP → Saúde Wi‑Fi → Proteção deste PC → DNS → Web → Evidências.</span>
-      <small>Os blocos de assessment continuam limitados às políticas de escopo e não executam exploit, brute force ou bypass automático.</small>
+      <span>Descobrir dispositivos → escolher IP → checks rápidos → Diagnosticar IP → Wi‑Fi → Proteção deste PC → DNS → Web → Evidências.</span>
+      <small>Os checks continuam limitados a alvos privados/locais e presets fixos; não executam exploit, brute force ou bypass automático.</small>
     </footer>
   </div>;
 }
