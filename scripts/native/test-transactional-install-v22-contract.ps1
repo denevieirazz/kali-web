@@ -7,10 +7,11 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $installPath = Join-Path $root 'scripts\native\install-cloudos-native-v22.ps1'
 $updatePath = Join-Path $root 'scripts\native\update-cloudos-native-v13.ps1'
+$healthPath = Join-Path $root 'scripts\native\CloudOS.HealthGate.V22.psm1'
 $packagePath = Join-Path $root 'scripts\native\package-cloudos-native.ps1'
 $suitePath = Join-Path $root 'scripts\native\test-native-contract-suite.ps1'
 
-foreach ($path in @($installPath, $updatePath, $packagePath, $suitePath)) {
+foreach ($path in @($installPath, $updatePath, $healthPath, $packagePath, $suitePath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Transactional Install V22 contract input missing: $path"
     }
@@ -18,6 +19,7 @@ foreach ($path in @($installPath, $updatePath, $packagePath, $suitePath)) {
 
 $install = Get-Content -LiteralPath $installPath -Raw
 $update = Get-Content -LiteralPath $updatePath -Raw
+$health = Get-Content -LiteralPath $healthPath -Raw
 $package = Get-Content -LiteralPath $packagePath -Raw
 $suite = Get-Content -LiteralPath $suitePath -Raw
 
@@ -38,19 +40,28 @@ foreach ($required in @(
 }
 
 foreach ($required in @(
-    'Invoke-CloudOSPostActivationHealthGate',
+    'CloudOS.HealthGate.V22.psm1',
+    'Invoke-CloudOSSupervisorHealthGateV22',
     'Invoke-CloudOSUninstall',
-    'with no last-known-good version',
-    "'--probe-ready-once'",
-    'Get-AuthenticodeSignature'
+    'with no last-known-good version'
 )) {
     if (-not $update.Contains($required)) {
-        throw "Shared V22 activation health primitive missing: $required"
+        throw "Shared V22 activation path missing: $required"
+    }
+}
+foreach ($required in @(
+    "'--probe-ready-once'",
+    "'--probe-no-explorer'",
+    'Get-AuthenticodeSignature'
+)) {
+    if (-not $health.Contains($required)) {
+        throw "Shared Health Gate V22 primitive missing: $required"
     }
 }
 
 foreach ($required in @(
     "'install-cloudos-native-v22.ps1'",
+    "'CloudOS.HealthGate.V22.psm1'",
     'install-cloudos-native-v22.ps1" -PackageRoot'
 )) {
     if (-not $package.Contains($required)) {
@@ -68,14 +79,16 @@ foreach ($forbidden in @('SkipPostActivationHealthCheck', 'Invoke-Expression', '
     }
 }
 
-$tokens = $null
-$errors = $null
-[void][System.Management.Automation.Language.Parser]::ParseFile(
-    $installPath,
-    [ref]$tokens,
-    [ref]$errors)
-if ($errors.Count -ne 0) {
-    throw "Transactional Install V22 has PowerShell parse errors: $($errors.Message -join '; ')"
+foreach ($path in @($installPath, $updatePath, $healthPath)) {
+    $tokens = $null
+    $errors = $null
+    [void][System.Management.Automation.Language.Parser]::ParseFile(
+        $path,
+        [ref]$tokens,
+        [ref]$errors)
+    if ($errors.Count -ne 0) {
+        throw "Transactional Install V22 dependency has PowerShell parse errors [$path]: $($errors.Message -join '; ')"
+    }
 }
 
-Write-Host '[PASS] Transactional Install V22: first install shares hardened activation health, cannot silently upgrade an existing deployment, and removes a known-bad first activation.'
+Write-Host '[PASS] Transactional Install V22: first install shares the central V22 health gate, cannot silently upgrade an existing deployment, and removes a known-bad first activation.'
