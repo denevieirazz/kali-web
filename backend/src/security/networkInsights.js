@@ -14,6 +14,16 @@ const ATTENTION_RULES = Object.freeze([
   { ports: [5432], services: ['postgresql', 'postgres'], severity: 'medium', title: 'PostgreSQL acessível na rede', why: 'Banco de dados diretamente acessível deve ficar limitado aos clientes autorizados.', recommendation: 'Revise pg_hba.conf, TLS, roles e segmentação de rede.' },
 ]);
 
+const DEVICE_ROLE_RULES = Object.freeze([
+  { id: 'printer', label: 'Possível impressora / print server', ports: [515, 631, 9100], minMatches: 1 },
+  { id: 'container-platform', label: 'Possível host de containers / plataforma DevOps', ports: [2375, 2376, 6443, 10250], minMatches: 1 },
+  { id: 'database-server', label: 'Possível servidor de banco de dados', ports: [1433, 1521, 3306, 5432, 6379, 9200, 27017], minMatches: 1 },
+  { id: 'file-server', label: 'Possível servidor de arquivos / NAS', ports: [139, 445, 2049], minMatches: 1 },
+  { id: 'remote-admin', label: 'Possível estação ou servidor administrável remotamente', ports: [22, 3389, 5900, 5901, 5985, 5986], minMatches: 1 },
+  { id: 'network-infrastructure', label: 'Possível equipamento de infraestrutura de rede', ports: [53, 67, 68, 161, 162], minMatches: 1 },
+  { id: 'web-service', label: 'Possível servidor ou appliance com interface web', ports: [80, 443, 8000, 8080, 8081, 8443], minMatches: 1 },
+]);
+
 const SEVERITY_WEIGHT = Object.freeze({ info: 0, low: 1, medium: 2, high: 3, critical: 4 });
 
 function normalizedService(value) {
@@ -22,6 +32,67 @@ function normalizedService(value) {
 
 function severityRank(value) {
   return SEVERITY_WEIGHT[value] ?? 0;
+}
+
+function openPorts(host) {
+  return (Array.isArray(host?.ports) ? host.ports : []).filter(port => String(port?.state || '').toLowerCase() === 'open');
+}
+
+export function inferHostRole(host) {
+  const ports = new Set(openPorts(host).map(item => Number(item.port)).filter(Number.isInteger));
+  const candidates = DEVICE_ROLE_RULES.map(rule => {
+    const matchedPorts = rule.ports.filter(port => ports.has(port));
+    return { ...rule, matchedPorts, score: matchedPorts.length };
+  }).filter(candidate => candidate.score >= candidate.minMatches);
+
+  candidates.sort((a, b) => b.score - a.score || DEVICE_ROLE_RULES.findIndex(rule => rule.id === a.id) - DEVICE_ROLE_RULES.findIndex(rule => rule.id === b.id));
+  const best = candidates[0];
+  if (!best) {
+    return {
+      id: ports.size ? 'generic-network-host' : 'unknown',
+      label: ports.size ? 'Dispositivo de rede não classificado' : 'Dispositivo detectado',
+      confidence: 'low',
+      matchedPorts: [],
+      basis: 'heuristic-from-observed-services',
+    };
+  }
+  return {
+    id: best.id,
+    label: best.label,
+    confidence: best.score >= 2 ? 'medium' : 'low',
+    matchedPorts: best.matchedPorts,
+    basis: 'heuristic-from-observed-services',
+  };
+}
+
+export function buildDefensiveChecklist(host, findings = []) {
+  const ports = openPorts(host);
+  const portNumbers = new Set(ports.map(item => Number(item.port)));
+  const checklist = [
+    { id: 'owner-purpose', title: 'Confirmar proprietário e finalidade', detail: 'Valide quem administra o dispositivo e quais serviços realmente precisam ficar acessíveis.', priority: 'baseline' },
+  ];
+
+  if (ports.length) {
+    checklist.push({ id: 'firewall-segmentation', title: 'Revisar firewall e segmentação', detail: `Há ${ports.length} porta(s) observada(s) como aberta(s). Confirme se cada uma deve ser alcançável a partir desta rede.`, priority: 'baseline' });
+  }
+  if ([80, 443, 8000, 8080, 8081, 8443].some(port => portNumbers.has(port))) {
+    checklist.push({ id: 'web-hardening', title: 'Revisar interface web', detail: 'Confirme autenticação, TLS quando aplicável, atualizações e exposição da interface administrativa.', priority: 'review' });
+  }
+  if ([22, 3389, 5900, 5901, 5985, 5986].some(port => portNumbers.has(port))) {
+    checklist.push({ id: 'remote-admin-hardening', title: 'Revisar administração remota', detail: 'Restrinja origens administrativas, use autenticação forte e mantenha logs de acesso.', priority: 'review' });
+  }
+  if ([139, 445, 2049].some(port => portNumbers.has(port))) {
+    checklist.push({ id: 'share-permissions', title: 'Revisar compartilhamentos e permissões', detail: 'Confirme princípio do menor privilégio, protocolos legados e acesso apenas pelas redes necessárias.', priority: 'review' });
+  }
+
+  for (const finding of findings) {
+    if (!finding?.recommendation) continue;
+    const id = `finding-${String(finding.id || '').slice(0, 80)}`;
+    if (checklist.some(item => item.id === id)) continue;
+    checklist.push({ id, title: `Ação: ${finding.title}`, detail: finding.recommendation, priority: severityRank(finding.severity) >= 3 ? 'priority' : 'review' });
+  }
+  checklist.push({ id: 'patch-owner-confirmation', title: 'Confirmar patching e versão com o responsável', detail: 'A identificação de versão por rede é aproximada; valide inventário e atualização no próprio ativo antes de concluir risco.', priority: 'baseline' });
+  return checklist.slice(0, 12);
 }
 
 export function classifyHostObservations(host) {
@@ -54,11 +125,18 @@ export function classifyHostObservations(host) {
 
   findings.sort((a, b) => severityRank(b.severity) - severityRank(a.severity) || a.port - b.port);
   const highestSeverity = findings.reduce((current, finding) => severityRank(finding.severity) > severityRank(current) ? finding.severity : current, 'info');
+  const role = inferHostRole(host);
   return {
     address: host?.address || null,
     highestSeverity,
+    role,
+    exposure: {
+      openTcpPorts: openPorts(host).filter(item => !item.protocol || item.protocol === 'tcp').length,
+      observedServices: [...new Set(openPorts(host).map(item => normalizedService(item.service)).filter(Boolean))],
+    },
     findings,
-    note: 'Indicadores de atenção baseados apenas em superfície observada. Não confirmam vulnerabilidade nem exploração.',
+    checklist: buildDefensiveChecklist(host, findings),
+    note: 'Indicadores e função provável baseados apenas na superfície observada. Não confirmam vulnerabilidade, sistema operacional, fabricante ou finalidade real.',
   };
 }
 
@@ -76,7 +154,7 @@ export function enrichNetworkAssessment(result) {
       highestSeverity,
       counts,
       hosts: hostInsights,
-      interpretation: 'Priorize revisão defensiva dos serviços destacados; um serviço aberto não significa, por si só, que exista vulnerabilidade.',
+      interpretation: 'Priorize revisão defensiva dos serviços destacados; um serviço aberto ou uma função inferida não significa, por si só, que exista vulnerabilidade.',
     },
   };
 }
@@ -139,7 +217,9 @@ export function buildNetworkAiContext({ project, authorizedScope, overview, diag
       address: selectedHost.address,
       hostname: selectedHost.hostname || null,
       ports: Array.isArray(selectedHost.ports) ? selectedHost.ports.map(port => ({ port: port.port, protocol: port.protocol, state: port.state, service: port.service, version: port.version })) : [],
+      role: selectedInsight?.role || null,
       findings: selectedInsight?.findings || [],
+      defensiveChecklist: selectedInsight?.checklist || [],
     } : null,
     constraints: {
       doNotInferVulnerabilityFromOpenPort: true,
