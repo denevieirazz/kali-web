@@ -162,6 +162,27 @@ bool ContainsDistroName(
             return SameName(item.name, name);
         });
 }
+
+bool ProbePayloadLooksConsistent(const BrokerClientWslProbeResult& probe)
+{
+    if (probe.distro.size() > 128 ||
+        probe.output.size() > 16 * 1024 ||
+        probe.error_code.size() > 256 ||
+        probe.error_message.size() > 4096)
+    {
+        return false;
+    }
+
+    if (probe.healthy)
+    {
+        return probe.attempted &&
+            !probe.timed_out &&
+            probe.marker_seen &&
+            probe.exit_code == 0 &&
+            !probe.distro.empty();
+    }
+    return true;
+}
 } // namespace
 
 std::string ConnectionStateToString(BrokerConnectionState s)
@@ -652,6 +673,68 @@ bool CloudOSBrokerClientV21::GetSystemSnapshot(BrokerClientSnapshot& out_snapsho
     }
 
     out_snapshot = std::move(snapshot);
+    return true;
+}
+
+bool CloudOSBrokerClientV21::ProbeWslHealth(
+    const std::string& distro,
+    uint32_t timeout_ms,
+    BrokerClientWslProbeResult& out_probe)
+{
+    if (distro.size() > 128 || timeout_ms < 1000 || timeout_ms > 15000)
+    {
+        return false;
+    }
+    if (!EnsureConnected()) return false;
+
+    JsonObject payload;
+    payload["distro"] = JsonValue(distro);
+    payload["timeoutMs"] = JsonValue(static_cast<int64_t>(timeout_ms));
+    const BrokerRequest request = MakeRequest(
+        "wsl-probe-" + std::to_string(next_req_id_.fetch_add(1)),
+        "wsl.health.probe",
+        std::move(payload));
+
+    std::string raw_response;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!SendFrame(SerializeRequest(request)) || !ReadFrame(raw_response))
+        {
+            state_.store(BrokerConnectionState::Degraded);
+            return false;
+        }
+    }
+
+    BrokerResponse response;
+    if (!ParseSuccessfulResponse(raw_response, response)) return false;
+
+    BrokerClientWslProbeResult probe;
+    probe.distro = StringField(response.payload, "distro");
+    probe.attempted = BoolField(response.payload, "attempted");
+    probe.healthy = BoolField(response.payload, "healthy");
+    probe.timed_out = BoolField(response.payload, "timedOut");
+    probe.marker_seen = BoolField(response.payload, "markerSeen");
+
+    int64_t exit_code = -1;
+    if (!TryIntField(response.payload, "exitCode", exit_code) ||
+        exit_code < -1 || exit_code > static_cast<int64_t>(UINT32_MAX))
+    {
+        return false;
+    }
+    probe.exit_code = static_cast<int>(exit_code);
+
+    int64_t duration_ms = 0;
+    if (!TryIntField(response.payload, "durationMs", duration_ms) || duration_ms < 0)
+    {
+        return false;
+    }
+    probe.duration_ms = static_cast<uint64_t>(duration_ms);
+    probe.output = StringField(response.payload, "output");
+    probe.error_code = StringField(response.payload, "errorCode");
+    probe.error_message = StringField(response.payload, "errorMessage");
+
+    if (!ProbePayloadLooksConsistent(probe)) return false;
+    out_probe = std::move(probe);
     return true;
 }
 
