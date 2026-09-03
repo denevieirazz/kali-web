@@ -147,6 +147,7 @@ private:
         int cols{80};
         int rows{24};
         UniquePseudoConsole pseudo_console;
+        UniqueWinHandle job;
         UniqueWinHandle process;
         UniqueWinHandle primary_thread;
         UniqueWinHandle pipe_in_writer;
