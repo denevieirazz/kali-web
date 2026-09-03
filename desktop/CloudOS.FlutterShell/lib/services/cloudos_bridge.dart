@@ -138,34 +138,39 @@ class CloudOSBridge {
     String defaultDistro,
   ) {
     final parsed = <CloudWslDistributionSnapshot>[];
+    final seen = <String>{};
     if (rawTyped is List) {
       for (final entry in rawTyped) {
         if (entry is! Map) continue;
-        final name = entry['name'] as String? ?? '';
-        if (name.trim().isEmpty) continue;
+        final name = (entry['name'] as String? ?? '').trim();
+        if (name.isEmpty || !seen.add(name.toLowerCase())) continue;
         final rawVersion = (entry['version'] as num?)?.toInt();
         final version = rawVersion == 1 || rawVersion == 2 ? rawVersion : null;
-        final isDefault = entry['isDefault'] as bool? ?? name == defaultDistro;
-        if (parsed.any((item) => item.name == name)) continue;
+        final isDefault = entry['isDefault'] as bool? ??
+            name.toLowerCase() == defaultDistro.trim().toLowerCase();
         parsed.add(
           CloudWslDistributionSnapshot(
             name: name,
             version: version,
             isDefault: isDefault,
+            basePathPresent: entry['basePathPresent'] as bool?,
+            securityCandidate: entry['securityCandidate'] as bool?,
           ),
         );
       }
     }
 
-    if (parsed.isNotEmpty) return parsed;
+    if (parsed.isNotEmpty) return List<CloudWslDistributionSnapshot>.unmodifiable(parsed);
 
-    // Backwards compatibility with a V21 broker that only reports names. Keep
-    // version unknown rather than turning every legacy distro into "WSL 2".
+    // V21 compatibility: names remain usable inventory, while generation,
+    // storage and security evidence stay unknown instead of being fabricated.
     return legacyDistros
+        .where((name) => name.trim().isNotEmpty)
         .map(
           (name) => CloudWslDistributionSnapshot(
-            name: name,
-            isDefault: name == defaultDistro,
+            name: name.trim(),
+            isDefault:
+                name.trim().toLowerCase() == defaultDistro.trim().toLowerCase(),
           ),
         )
         .toList(growable: false);
@@ -241,6 +246,8 @@ class CloudOSBridge {
 
       final legacyDistros = (raw['distros'] as List<Object?>?)
               ?.whereType<String>()
+              .where((name) => name.trim().isNotEmpty)
+              .map((name) => name.trim())
               .toList(growable: false) ??
           degradedSnapshot.distros;
       final defaultDistro = raw['defaultDistro'] as String? ?? '';
@@ -277,6 +284,14 @@ class CloudOSBridge {
         distros: legacyDistros,
         defaultDistro: defaultDistro,
         wslDistros: wslDistros,
+        wslPassiveReady: raw['wslPassiveReady'] as bool?,
+        preferredSecurityDistro:
+            raw['preferredSecurityDistro'] as String? ?? '',
+        wslRegisteredCount: (raw['wslRegisteredCount'] as num?)?.toInt(),
+        wslLaunchCandidateCount:
+            (raw['wslLaunchCandidateCount'] as num?)?.toInt(),
+        wsl1Count: (raw['wsl1Count'] as num?)?.toInt(),
+        wsl2Count: (raw['wsl2Count'] as num?)?.toInt(),
         currentWorkspace: (raw['currentWorkspace'] as num?)?.toInt() ??
             degradedSnapshot.currentWorkspace,
       );
