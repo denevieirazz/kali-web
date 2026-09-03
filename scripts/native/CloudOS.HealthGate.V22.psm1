@@ -13,7 +13,15 @@ $script:SignedPayloadNames = @(
     'CloudOS.NativeRuntime.dll',
     'CloudOS.Supervisor.exe',
     'CloudOS.SystemBroker.exe',
-    'CloudOS.BrokerProbe.exe'
+    'CloudOS.BrokerProbe.exe',
+    'install-cloudos-native-v22.ps1',
+    'update-cloudos-native-v13.ps1',
+    'repair-cloudos-native-v22.ps1',
+    'rollback-cloudos-native-v13.ps1',
+    'uninstall-cloudos-native-v13.ps1',
+    'CloudOS.Deployment.V13.psm1',
+    'CloudOS.HealthGate.V22.psm1',
+    'CloudOS.ManagedTools.V22.psm1'
 )
 
 function Get-CloudOSAuthenticodeEvidenceV22 {
