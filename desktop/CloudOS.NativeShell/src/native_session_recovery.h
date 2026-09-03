@@ -75,6 +75,8 @@ private:
     // Lifecycle V10 observes the same authoritative desktop HWND as session
     // recovery. It supplements the V7 WTS path with power/display revalidation,
     // WTS registration retry and an opt-in deterministic probe used by CI.
+    // V22 also checkpoints the bounded local session ledger during
+    // WM_QUERYENDSESSION and marks a clean close only after WM_ENDSESSION=TRUE.
     class LifecycleCoordinatorV10 final
     {
     public:
@@ -204,6 +206,17 @@ private:
             owner_->Save(*owner_->session_window_manager_);
         }
 
+        void MarkEndSessionClean() noexcept
+        {
+            HealthBootstrapV9::bootstrap.Pulse();
+            if (owner_ == nullptr || owner_->session_window_manager_ == nullptr)
+            {
+                return;
+            }
+            owner_->session_window_manager_->Reconcile();
+            owner_->MarkCleanExit(*owner_->session_window_manager_);
+        }
+
         void QueueRevalidation(NativeLifecycleV10::RevalidateReason reason) noexcept
         {
             if (desktop_ != nullptr && IsWindow(desktop_))
@@ -283,6 +296,21 @@ private:
             {
                 self->Tick();
                 return 0;
+            }
+
+            // Windows gives GUI apps only a short bounded interval to answer
+            // end-session messages. This path performs only the existing local,
+            // atomic recovery checkpoint and then continues the subclass chain.
+            // It does not wait, call WSL/network, display modal UI or veto logout.
+            if (message == WM_QUERYENDSESSION)
+            {
+                self->Checkpoint();
+                return DefSubclassProc(window, message, w_param, l_param);
+            }
+            if (message == WM_ENDSESSION && w_param != FALSE)
+            {
+                self->MarkEndSessionClean();
+                return DefSubclassProc(window, message, w_param, l_param);
             }
 
             if (message == WM_POWERBROADCAST)
