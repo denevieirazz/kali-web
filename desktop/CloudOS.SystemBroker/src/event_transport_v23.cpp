@@ -4,6 +4,8 @@
 #include "protocol_v21.h"
 #include "security_v21.h"
 
+#include <charconv>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <iostream>
@@ -150,15 +152,9 @@ EventTransportV23::~EventTransportV23()
     Stop();
 }
 
-bool EventTransportV23::Start(ClientBindingValidator validator)
+bool EventTransportV23::Start()
 {
-    if (!validator) return false;
     if (running_.exchange(true)) return true;
-
-    {
-        std::lock_guard<std::mutex> lock(validator_mutex_);
-        validator_ = std::move(validator);
-    }
     dropped_events_.store(0);
 
     try
@@ -168,8 +164,6 @@ bool EventTransportV23::Start(ClientBindingValidator validator)
     catch (...)
     {
         running_.store(false);
-        std::lock_guard<std::mutex> lock(validator_mutex_);
-        validator_ = {};
         return false;
     }
     return true;
@@ -203,9 +197,6 @@ void EventTransportV23::Stop()
         }
         client_threads_.clear();
     }
-
-    std::lock_guard<std::mutex> lock(validator_mutex_);
-    validator_ = {};
 }
 
 bool EventTransportV23::SendFrame(HANDLE pipe, const std::string& payload)
@@ -216,6 +207,26 @@ bool EventTransportV23::SendFrame(HANDLE pipe, const std::string& payload)
 bool EventTransportV23::ReadFrame(HANDLE pipe, std::string& payload)
 {
     return ReadFramedPayload(pipe, payload);
+}
+
+bool EventTransportV23::ClientIdMatchesProcess(
+    const std::string& client_id,
+    DWORD process_id) noexcept
+{
+    constexpr char marker[] = "-pid-";
+    if (client_id.rfind("client-", 0) != 0) return false;
+    const size_t marker_pos = client_id.rfind(marker);
+    if (marker_pos == std::string::npos) return false;
+
+    const char* first = client_id.data() + marker_pos + sizeof(marker) - 1;
+    const char* last = client_id.data() + client_id.size();
+    if (first == last) return false;
+
+    uint64_t parsed = 0;
+    const auto result = std::from_chars(first, last, parsed);
+    return result.ec == std::errc{} &&
+        result.ptr == last &&
+        parsed == static_cast<uint64_t>(process_id);
 }
 
 void EventTransportV23::ListenerLoop()
@@ -294,19 +305,9 @@ void EventTransportV23::ClientLoop(HANDLE pipe, DWORD process_id)
 {
     std::string handshake;
     std::string client_id;
-    if (!ReadFrame(pipe, handshake) || !ParseHandshake(handshake, client_id))
-    {
-        DisconnectNamedPipe(pipe);
-        CloseHandle(pipe);
-        return;
-    }
-
-    ClientBindingValidator validator;
-    {
-        std::lock_guard<std::mutex> lock(validator_mutex_);
-        validator = validator_;
-    }
-    if (!validator || !validator(client_id, process_id))
+    if (!ReadFrame(pipe, handshake) ||
+        !ParseHandshake(handshake, client_id) ||
+        !ClientIdMatchesProcess(client_id, process_id))
     {
         DisconnectNamedPipe(pipe);
         CloseHandle(pipe);
@@ -326,46 +327,49 @@ void EventTransportV23::ClientLoop(HANDLE pipe, DWORD process_id)
             if (dropped > 0) dropped_events_.fetch_add(dropped);
         });
 
-    session->sender_thread = std::thread([session]() {
-        while (!session->closing.load())
-        {
-            std::string frame;
+    try
+    {
+        session->sender_thread = std::thread([session]() {
+            while (!session->closing.load())
             {
-                std::unique_lock<std::mutex> lock(session->queue_mutex);
-                session->queue_changed.wait_for(
-                    lock,
-                    std::chrono::milliseconds(250),
-                    [session]() {
-                        return session->closing.load() || !session->queue.empty();
-                    });
-                if (session->closing.load() && session->queue.empty()) break;
-                if (session->queue.empty()) continue;
+                std::string frame;
+                {
+                    std::unique_lock<std::mutex> lock(session->queue_mutex);
+                    session->queue_changed.wait_for(
+                        lock,
+                        std::chrono::milliseconds(250),
+                        [session]() {
+                            return session->closing.load() || !session->queue.empty();
+                        });
+                    if (session->closing.load() && session->queue.empty()) break;
+                    if (session->queue.empty()) continue;
 
-                frame = std::move(session->queue.front());
-                session->queued_bytes -= frame.size();
-                session->queue.pop_front();
-            }
+                    frame = std::move(session->queue.front());
+                    session->queued_bytes -= frame.size();
+                    session->queue.pop_front();
+                }
 
-            if (!SendFramedPayload(session->pipe, frame))
-            {
-                session->closing.store(true);
-                break;
+                if (!SendFramedPayload(session->pipe, frame))
+                {
+                    session->closing.store(true);
+                    break;
+                }
             }
-        }
-    });
+        });
+    }
+    catch (...)
+    {
+        EventBusV21::Instance().UnregisterClient(client_id);
+        DisconnectNamedPipe(pipe);
+        CloseHandle(pipe);
+        return;
+    }
 
     // The event pipe is server->client after the handshake. PeekNamedPipe is
     // used only as a bounded disconnect probe, so command RPC and event frames
     // can never interleave on the same byte stream.
     while (running_.load() && !session->closing.load())
     {
-        ClientBindingValidator current_validator;
-        {
-            std::lock_guard<std::mutex> lock(validator_mutex_);
-            current_validator = validator_;
-        }
-        if (!current_validator || !current_validator(client_id, process_id)) break;
-
         DWORD available = 0;
         if (!PeekNamedPipe(pipe, nullptr, 0, nullptr, &available, nullptr)) break;
         Sleep(250);
