@@ -165,19 +165,27 @@ void BrokerServerV21::ListenerLoop()
     {
         SECURITY_ATTRIBUTES sa{};
         PSECURITY_DESCRIPTOR sd = nullptr;
-        bool sa_ok = SecurityV21::CreatePerUserSecurityAttributes(&sa, &sd);
+        const bool sa_ok = SecurityV21::CreatePerUserSecurityAttributes(&sa, &sd);
+        if (!sa_ok)
+        {
+            // Never fall back to a default/null DACL. Broker availability is
+            // preferable to be degraded rather than cross-user reachable.
+            std::cerr << "[SystemBroker] Failed to construct fail-closed pipe security." << std::endl;
+            Sleep(100);
+            continue;
+        }
 
         HANDLE pipe = CreateNamedPipeW(
             pipe_name.c_str(),
             PIPE_ACCESS_DUPLEX,
-            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
             PIPE_UNLIMITED_INSTANCES,
             65536,
             65536,
             0,
-            sa_ok ? &sa : nullptr);
+            &sa);
 
-        if (sa_ok) SecurityV21::FreeSecurityDescriptor(sd);
+        SecurityV21::FreeSecurityDescriptor(sd);
         if (pipe == INVALID_HANDLE_VALUE)
         {
             Sleep(100);
@@ -193,7 +201,17 @@ void BrokerServerV21::ListenerLoop()
 
         if (connected)
         {
-            std::string client_id = "client-" + std::to_string(next_client_id_++);
+            DWORD client_process_id = 0;
+            if (!SecurityV21::ValidateNamedPipeClient(pipe, &client_process_id))
+            {
+                std::cerr << "[SystemBroker] Rejected unvalidated named-pipe client." << std::endl;
+                DisconnectNamedPipe(pipe);
+                CloseHandle(pipe);
+                continue;
+            }
+
+            std::string client_id = "client-" + std::to_string(next_client_id_++) +
+                "-pid-" + std::to_string(client_process_id);
             std::lock_guard<std::mutex> lock(client_threads_mutex_);
             client_threads_.emplace_back(&BrokerServerV21::ClientSessionLoop, this, pipe, client_id);
         }
