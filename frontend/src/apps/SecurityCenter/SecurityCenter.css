@@ -14,6 +14,11 @@
 .sec-start strong,.sec-start span { display:block; }
 .sec-start span { color:#91a7c1; margin-top:4px; font-size:12px; }
 .sec-start button { padding:11px 15px; border:1px solid #679df0; border-radius:9px; background:linear-gradient(135deg,#2c68c7,#4489ef); color:white; font-weight:800; cursor:pointer; }
+.sec-toolbox-title { display:flex; justify-content:space-between; align-items:end; gap:12px; margin:20px 0 4px; padding-top:4px; }
+.sec-toolbox-title small,.sec-toolbox-title strong,.sec-toolbox-title span { display:block; }
+.sec-toolbox-title small { color:#78a9ff; text-transform:uppercase; letter-spacing:.08em; font-size:10px; }
+.sec-toolbox-title strong { margin-top:3px; font-size:18px; }
+.sec-toolbox-title span { margin-top:4px; color:#8096af; font-size:11px; }
 .sec-filters { display:flex; flex-wrap:wrap; gap:6px; margin:12px 0; }
 .sec-filters button { padding:7px 10px; border:1px solid rgba(113,151,201,.22); border-radius:999px; background:rgba(17,36,58,.78); color:#a9bed7; cursor:pointer; font-size:11px; }
 .sec-filters button.is-active { background:#285fae; border-color:#5a93e9; color:white; }
@@ -37,6 +42,11 @@
 .sec-footer strong,.sec-footer span,.sec-footer small { display:block; }
 .sec-footer span { margin:5px 0; color:#9db0c7; }
 .sec-footer small { color:#657b94; }
+.sec-advanced { min-height:100%; background:#07101a; color:#eef5ff; overflow:auto; }
+.sec-advanced-bar { position:sticky; top:0; z-index:20; display:flex; align-items:center; gap:12px; padding:10px 14px; border-bottom:1px solid rgba(108,149,201,.18); background:rgba(6,16,28,.95); backdrop-filter:blur(12px); }
+.sec-advanced-bar button { padding:8px 11px; border:1px solid rgba(108,151,210,.24); border-radius:8px; background:rgba(23,53,89,.86); color:#dce9fb; cursor:pointer; }
+.sec-advanced-bar strong,.sec-advanced-bar span { display:block; }
+.sec-advanced-bar span { color:#7389a3; font-size:10px; margin-top:2px; }
 @media (max-width:1200px){.sec-grid{grid-template-columns:repeat(3,minmax(0,1fr));}}
 @media (max-width:900px){.sec-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.sec-hero,.sec-start{flex-direction:column}.sec-flow{justify-content:flex-start}}
 @media (max-width:620px){.sec-root{padding:12px}.sec-grid{grid-template-columns:1fr}}
