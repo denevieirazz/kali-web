@@ -32,7 +32,7 @@ void main() {
       expect(policy.resolveRequestedDistro(null), 'Debian');
     });
 
-    test('does not accept a requested distro that is not installed', () {
+    test('never substitutes an explicitly requested missing distro', () {
       final policy = WslRuntimePolicy(
         wslAvailable: true,
         installedDistros: const <String>['Ubuntu'],
@@ -40,7 +40,8 @@ void main() {
       );
 
       expect(policy.containsDistro('kali-linux'), isFalse);
-      expect(policy.resolveRequestedDistro('kali-linux'), 'Ubuntu');
+      expect(policy.resolveRequestedDistro('kali-linux'), isEmpty);
+      expect(policy.resolveRequestedDistro(null), 'Ubuntu');
       expect(policy.kaliInstalled, isFalse);
     });
 
