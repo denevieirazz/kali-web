@@ -19,6 +19,7 @@ $contracts = @(
     'test-lifecycle-v10-contract.ps1',
     'test-shell-supervisor-v11-contract.ps1',
     'test-supervisor-recovery-v22-contract.ps1',
+    'test-external-app-breakaway-v22-contract.ps1',
     'test-crash-diagnostics-v22-contract.ps1',
     'test-taskbar-productivity-contract.ps1',
     'test-workspace-overview-contract.ps1',
