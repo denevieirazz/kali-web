@@ -104,10 +104,13 @@ class WslRuntimePolicy {
     switch (versionFor(distro)) {
       case 1:
         parts.add('WSL1');
+        break;
       case 2:
         parts.add('WSL2');
+        break;
       default:
         parts.add('WSL ?');
+        break;
     }
     return parts.join(' • ');
   }
