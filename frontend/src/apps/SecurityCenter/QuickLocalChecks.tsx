@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiClient } from '../../services/apiClient';
 import { explainPort } from './portKnowledge';
+import { buildQuickCheckEvidence, buildQuickCheckMarkdown } from './quickCheckEvidence';
 import './QuickLocalChecks.css';
 
 type WslInfo = {
@@ -88,6 +89,19 @@ function safePrivateHost(value: string) {
   return /^(?:10\.|127\.|169\.254\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)\d{1,3}\.\d{1,3}$/.test(value.trim());
 }
 
+function downloadText(filename: string, body: string, type: string) {
+  const href = URL.createObjectURL(new Blob([body], { type }));
+  const anchor = document.createElement('a');
+  anchor.href = href;
+  anchor.download = filename;
+  anchor.click();
+  window.setTimeout(() => URL.revokeObjectURL(href), 0);
+}
+
+function safeFilenameTarget(value: string) {
+  return value.replace(/[^a-z0-9.-]+/gi, '_').slice(0, 80) || 'target';
+}
+
 export default function QuickLocalChecks() {
   const [distribution, setDistribution] = useState('');
   const [overview, setOverview] = useState<NetworkOverview | null>(null);
@@ -172,32 +186,36 @@ export default function QuickLocalChecks() {
     await runCheck('discover', discoveryTarget);
   };
 
+  const evidence = useMemo(() => result ? buildQuickCheckEvidence(result, hostDiagnostics) : null, [hostDiagnostics, result]);
+
   const copyForAi = async () => {
-    if (!result) return;
-    const explainedHosts = result.hosts.map(host => ({
-      ...host,
-      ports: host.ports.map(port => ({ ...port, explanation: explainPort(port.port, port.service) })),
-    }));
-    const payload = {
-      schemaVersion: 3,
-      kind: 'cloudos-guided-local-check',
-      purpose: 'authorized-defensive-local-network-assessment',
-      result: { ...result, hosts: explainedHosts },
-      hostDiagnostics,
-      constraints: {
-        privateLocalOnly: true,
-        arbitraryArguments: false,
-        credentialAttacks: false,
-        exploitAutomation: false,
-        doNotInferVulnerabilityFromOpenPort: true,
-      },
-    };
+    if (!evidence) return;
     try {
-      await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+      await navigator.clipboard.writeText(JSON.stringify(evidence, null, 2));
       setNotice('Resultado explicado, identidade e conectividade copiados para a IA.');
     } catch {
       setError('Não foi possível copiar para a área de transferência.');
     }
+  };
+
+  const exportJson = () => {
+    if (!result || !evidence) return;
+    downloadText(
+      `cloudos-network-${safeFilenameTarget(result.target)}-${Date.now()}.json`,
+      JSON.stringify(evidence, null, 2),
+      'application/json'
+    );
+    setNotice('Evidência JSON salva.');
+  };
+
+  const exportMarkdown = () => {
+    if (!result) return;
+    downloadText(
+      `cloudos-network-report-${safeFilenameTarget(result.target)}-${Date.now()}.md`,
+      buildQuickCheckMarkdown(result, hostDiagnostics),
+      'text/markdown;charset=utf-8'
+    );
+    setNotice('Relatório Markdown salvo.');
   };
 
   const findings = useMemo(() => {
@@ -256,7 +274,15 @@ export default function QuickLocalChecks() {
     </div>
 
     {result && <section className="qlc-result">
-      <header><div><small>Último resultado</small><strong>{result.label}</strong><span>{result.target}</span></div><div><button type="button" onClick={() => void copyForAi()}>Copiar explicado para IA</button><em>{result.insights?.highestSeverity || 'info'}</em></div></header>
+      <header>
+        <div><small>Último resultado</small><strong>{result.label}</strong><span>{result.target}</span></div>
+        <div className="qlc-result-actions">
+          <button type="button" onClick={() => void copyForAi()}>Copiar para IA</button>
+          <button type="button" onClick={exportJson}>Exportar JSON</button>
+          <button type="button" onClick={exportMarkdown}>Salvar relatório</button>
+          <em>{result.insights?.highestSeverity || 'info'}</em>
+        </div>
+      </header>
 
       {hostDiagnostics && <div className="qlc-identity">
         <article><small>Responde?</small><strong>{hostDiagnostics.reachability.reachable ? 'sim' : 'não via ICMP'}</strong><span>{hostDiagnostics.reachability.lossPercent ?? '—'}% perda</span></article>
