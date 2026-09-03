@@ -67,6 +67,17 @@ foreach ($requiredPayload in @(
     }
 }
 
+foreach ($required in @(
+    'Test-CloudOSFinalizedSignedPackageV22',
+    'signed-package marker/evidence mismatch',
+    'CloudOS.Release.Authenticode',
+    'private_key_material_in_package'
+)) {
+    if (-not $healthGate.Contains($required)) {
+        throw "Health Gate V22 signed-package auto-enforcement missing: $required"
+    }
+}
+
 foreach ($entry in @(
     @{ Name = 'install'; Content = $install },
     @{ Name = 'update'; Content = $update },
@@ -76,15 +87,27 @@ foreach ($entry in @(
         throw "CloudOS $($entry.Name) path must expose Authenticode enforcement."
     }
 }
+if ($update -notmatch 'Test-CloudOSFinalizedSignedPackageV22' -or
+    $update -notmatch 'effectiveRequireSignature') {
+    throw 'Update/install authority must automatically enforce Authenticode when the package was finalized as signed.'
+}
+if ($repair -notmatch 'Test-CloudOSFinalizedSignedPackageV22' -or
+    $repair -notmatch 'effectiveRequireSignature') {
+    throw 'Repair authority must automatically enforce Authenticode for finalized signed active/LKG payloads.'
+}
 
 $tokens = $null
 $errors = $null
-[void][System.Management.Automation.Language.Parser]::ParseFile(
-    $finalizerPath,
-    [ref]$tokens,
-    [ref]$errors)
-if ($errors.Count -ne 0) {
-    throw "Signed Release V22 finalizer has PowerShell parse errors: $($errors.Message -join '; ')"
+foreach ($path in @($finalizerPath, $healthGatePath, $updatePath, $repairPath)) {
+    $tokens = $null
+    $errors = $null
+    [void][System.Management.Automation.Language.Parser]::ParseFile(
+        $path,
+        [ref]$tokens,
+        [ref]$errors)
+    if ($errors.Count -ne 0) {
+        throw "Signed Release V22 script has PowerShell parse errors in $path: $($errors.Message -join '; ')"
+    }
 }
 
-Write-Host '[PASS] Signed Release V22 contract: real Code Signing certificate + timestamp are mandatory, critical runtime/deployment files are covered, private-key material is rejected, signed bytes drive final manifest/SHA256 and no self-signed fallback exists.'
+Write-Host '[PASS] Signed Release V22 contract: real Code Signing certificate + timestamp are mandatory, critical runtime/deployment files are covered, private-key material is rejected, finalized signed packages auto-enforce Authenticode, signed bytes drive final manifest/SHA256 and no self-signed fallback exists.'
