@@ -17,12 +17,47 @@ $script:SignedPayloadNames = @(
     'install-cloudos-native-v22.ps1',
     'update-cloudos-native-v13.ps1',
     'repair-cloudos-native-v22.ps1',
-    'rollback-cloudos-native-v13.ps1',
-    'uninstall-cloudos-native-v13.ps1',
     'CloudOS.Deployment.V13.psm1',
     'CloudOS.HealthGate.V22.psm1',
     'CloudOS.ManagedTools.V22.psm1'
 )
+
+function Test-CloudOSFinalizedSignedPackageV22 {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Root)
+
+    $fullRoot = (Resolve-Path -LiteralPath $Root).Path
+    $manifestPath = Join-Path $fullRoot 'cloudos-native-manifest.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw 'CloudOS Authenticode policy cannot resolve the package manifest.'
+    }
+
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    $markedSigned = $false
+    if ($null -ne $manifest.PSObject.Properties['package_authenticode_v22']) {
+        $markedSigned = [bool]$manifest.package_authenticode_v22
+    }
+    $evidencePath = Join-Path $fullRoot 'cloudos-authenticode-v22.json'
+    $hasEvidence = Test-Path -LiteralPath $evidencePath -PathType Leaf
+
+    if ($markedSigned -ne $hasEvidence) {
+        throw 'CloudOS signed-package marker/evidence mismatch; refusing ambiguous Authenticode policy.'
+    }
+    if (-not $markedSigned) { return $false }
+
+    $evidence = Get-Content -LiteralPath $evidencePath -Raw | ConvertFrom-Json
+    if ([int]$evidence.schema -ne 22 -or
+        [string]$evidence.component -ne 'CloudOS.Release.Authenticode' -or
+        -not [bool]$evidence.all_valid -or
+        [bool]$evidence.private_key_material_in_package) {
+        throw 'CloudOS Authenticode evidence is invalid or unsafe.'
+    }
+    $thumbprint = ([string]$evidence.signer_thumbprint).Replace(' ', '').ToUpperInvariant()
+    if ($thumbprint -notmatch '^[0-9A-F]{40}$') {
+        throw 'CloudOS Authenticode evidence signer thumbprint is invalid.'
+    }
+    return $true
+}
 
 function Get-CloudOSAuthenticodeEvidenceV22 {
     [CmdletBinding()]
@@ -152,6 +187,7 @@ function Invoke-CloudOSSupervisorHealthGateV22 {
 }
 
 Export-ModuleMember -Function @(
+    'Test-CloudOSFinalizedSignedPackageV22',
     'Get-CloudOSAuthenticodeEvidenceV22',
     'Get-CloudOSManagedRuntimeProcessesV22',
     'Assert-CloudOSRuntimeStoppedV22',
