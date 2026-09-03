@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$InstallRoot,
-    [ValidateRange(15, 120)][int]$HealthTimeoutSeconds = 45
+    [ValidateRange(15, 120)][int]$HealthTimeoutSeconds = 45,
+    [switch]$RequireAuthenticodeSignature
 )
 
 Set-StrictMode -Version 2.0
@@ -21,6 +22,21 @@ if ([string]::IsNullOrWhiteSpace($InstallRoot)) {
     $InstallRoot = Get-CloudOSDefaultInstallRoot
 }
 
+function Assert-CloudOSRepairSignatureV22 {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$Role
+    )
+
+    $evidence = @(Get-CloudOSAuthenticodeEvidenceV22 -Root $Root)
+    $invalid = @($evidence | Where-Object { $_.status -ne 'Valid' })
+    if ($RequireAuthenticodeSignature -and $invalid.Count -gt 0) {
+        $summary = (@($invalid | ForEach-Object { "$($_.file)=$($_.status)" })) -join ', '
+        throw "Authenticode enforcement rejected $Role repair payload: $summary"
+    }
+    return $evidence
+}
+
 $before = Get-CloudOSDeploymentStatus -InstallRoot $InstallRoot
 if (-not $before.installed) {
     throw 'CloudOS Repair V22 requires an existing managed installation.'
@@ -35,6 +51,7 @@ if (-not $status.active_valid) {
 
 $versionsRoot = Join-Path $status.install_root 'versions'
 $activeRoot = Join-Path $versionsRoot $status.active_version
+$primarySignature = @(Assert-CloudOSRepairSignatureV22 -Root $activeRoot -Role 'active')
 $primaryHealth = Invoke-CloudOSSupervisorHealthGateV22 `
     -ActiveRoot $activeRoot `
     -TimeoutSeconds $HealthTimeoutSeconds
@@ -42,6 +59,7 @@ $primaryHealth = Invoke-CloudOSSupervisorHealthGateV22 `
 $fallbackAttempted = $false
 $fallbackHealth = $null
 $fallbackVersion = $null
+$fallbackSignature = @()
 if (-not $primaryHealth.healthy) {
     $candidate = [string]$status.last_known_good
     if (-not [string]::IsNullOrWhiteSpace($candidate) -and
@@ -49,6 +67,7 @@ if (-not $primaryHealth.healthy) {
         $candidateRoot = Join-Path $versionsRoot $candidate
         try {
             [void](Test-CloudOSPayload -PackageRoot $candidateRoot)
+            $fallbackSignature = @(Assert-CloudOSRepairSignatureV22 -Root $candidateRoot -Role 'last-known-good')
             $fallbackAttempted = $true
             $rolledBack = Invoke-CloudOSRollback -InstallRoot $InstallRoot
             $fallbackVersion = [string]$rolledBack.active_version
@@ -86,9 +105,12 @@ $report = [pscustomobject]@{
     repair_action = [string]$repair.action
     active_version = [string]$finalStatus.active_version
     active_valid = [bool]$finalStatus.active_valid
+    authenticode_required = [bool]$RequireAuthenticodeSignature
+    primary_signature = $primarySignature
     primary_health = $primaryHealth
     fallback_attempted = $fallbackAttempted
     fallback_version = $fallbackVersion
+    fallback_signature = $fallbackSignature
     fallback_health = $fallbackHealth
     last_known_good = [string]$finalStatus.last_known_good
 }
@@ -98,4 +120,4 @@ if (-not $healthy) {
     throw "CloudOS Repair V22 could not prove a healthy runtime. active=$($finalStatus.active_version) primary=$($primaryHealth.reason) fallback=$(if ($null -ne $fallbackHealth) { $fallbackHealth.reason } else { 'unavailable' }). Use CloudOS Recovery/Explorer and inspect local diagnostics before activating the shell again."
 }
 
-Write-Host "[CloudOS V22] REPAIR_OK active=$($finalStatus.active_version) fallbackAttempted=$fallbackAttempted health=$(if ($primaryHealth.healthy) { $primaryHealth.reason } else { $fallbackHealth.reason })"
+Write-Host "[CloudOS V22] REPAIR_OK active=$($finalStatus.active_version) fallbackAttempted=$fallbackAttempted health=$(if ($primaryHealth.healthy) { $primaryHealth.reason } else { $fallbackHealth.reason }) authenticodeRequired=$([bool]$RequireAuthenticodeSignature)"
