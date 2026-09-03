@@ -28,7 +28,7 @@ class DesktopStatus extends StatelessWidget {
           const Icon(Icons.cloud_done_rounded, size: 15, color: CloudOSColors.success),
           const SizedBox(width: 6),
           const Text(
-            'CloudOS V19',
+            'CloudOS V21',
             style: TextStyle(color: CloudOSColors.text, fontSize: 11, fontWeight: FontWeight.w600),
           ),
           const SizedBox(width: 8),

@@ -7,3 +7,5 @@ windows/
 coverage/
 .flutter-plugins
 .flutter-plugins-dependencies
+.metadata
+*.iml

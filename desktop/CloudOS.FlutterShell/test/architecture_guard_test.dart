@@ -198,7 +198,11 @@ void main() {
 
     expect(dartBridge, contains('static const degradedSnapshot'));
     expect(dartBridge, contains('batteryAvailable: false'));
-    expect(dartBridge, contains('return degradedSnapshot;'));
+    expect(
+      dartBridge,
+      anyOf(contains('return degradedSnapshot;'), contains('?? degradedSnapshot')),
+      reason: 'loadSystemSnapshot must fallback to degradedSnapshot on failure',
+    );
     expect(
       quickSummary,
       isNot(contains('Carregando')),

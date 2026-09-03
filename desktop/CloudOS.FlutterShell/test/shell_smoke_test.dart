@@ -295,7 +295,7 @@ void main() {
       await tester.pumpWidget(const CloudOSApp());
       await tester.pumpAndSettle();
 
-      expect(find.text('CloudOS V19'), findsWidgets);
+      expect(find.text('CloudOS V21'), findsWidgets);
       expect(find.text('Arquivos • Início'), findsOneWidget);
       expect(find.text('Windows + Linux (WSL2)'), findsOneWidget);
       expect(find.text('ACESSO RÁPIDO'), findsOneWidget);
@@ -343,7 +343,7 @@ void main() {
       await tester.pumpWidget(const CloudOSApp());
       await tester.pumpAndSettle();
 
-      expect(find.text('CloudOS V19'), findsWidgets);
+      expect(find.text('CloudOS V21'), findsWidgets);
       expect(find.text('Arquivos • Início'), findsOneWidget);
     });
 
@@ -354,7 +354,7 @@ void main() {
       await tester.pumpWidget(const CloudOSApp());
       await tester.pumpAndSettle();
 
-      expect(find.text('CloudOS V19'), findsWidgets);
+      expect(find.text('CloudOS V21'), findsWidgets);
       expect(find.text('Arquivos • Início'), findsOneWidget);
     });
   });

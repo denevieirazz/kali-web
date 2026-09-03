@@ -44,6 +44,10 @@ public static class CloudOSV21NativeWindowProbe {
     public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr childAfter, string className, string windowName);
     [DllImport("user32.dll", SetLastError = true)]
     public static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
 }
 '@
 }
@@ -122,6 +126,17 @@ if ($null -eq $endpoint) {
 }
 Write-Host "[CloudOS V21] NativeShell authority pronta (PID $($endpoint.ProcessId))." -ForegroundColor Green
 
+# Preserva NativeShell C++ como autoridade headless ocultando suas superficies visuais legadas
+# para que a apresentacao Flutter V21 seja a única casca visual no desktop.
+$nativeTaskbar = [CloudOSV21NativeWindowProbe]::FindWindowEx([IntPtr]::Zero, [IntPtr]::Zero, 'CloudOS.NativeShell.Taskbar.v3', $null)
+if ($nativeTaskbar -ne [IntPtr]::Zero) {
+    [void][CloudOSV21NativeWindowProbe]::ShowWindow($nativeTaskbar, 0)
+}
+$nativeDesktop = [CloudOSV21NativeWindowProbe]::FindWindowEx([IntPtr]::Zero, [IntPtr]::Zero, 'CloudOS.NativeShell.Desktop', $null)
+if ($nativeDesktop -ne [IntPtr]::Zero) {
+    [void][CloudOSV21NativeWindowProbe]::ShowWindow($nativeDesktop, 0)
+}
+
 $brokerProcesses = @(Get-Process -Name 'CloudOS.SystemBroker' -ErrorAction SilentlyContinue)
 foreach ($process in $brokerProcesses) {
     if ($process.Path -and -not (Test-SamePath $process.Path $broker)) {
@@ -156,5 +171,18 @@ if ($existingFlutter.Count -gt 0) {
 }
 
 Write-Host '[CloudOS V21] Iniciando Flutter presentation...' -ForegroundColor Cyan
-Start-Process -FilePath $flutter -WorkingDirectory $presentationRoot | Out-Null
+$flutterProc = Start-Process -FilePath $flutter -WorkingDirectory $presentationRoot -PassThru
+Start-Sleep -Milliseconds 750
+if ($flutterProc -and -not $flutterProc.HasExited) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        Start-Sleep -Milliseconds 200
+        $flutterProc.Refresh()
+        if ($flutterProc.MainWindowHandle -ne [IntPtr]::Zero) {
+            [void][CloudOSV21NativeWindowProbe]::ShowWindow($flutterProc.MainWindowHandle, 3) # SW_MAXIMIZE
+            [void][CloudOSV21NativeWindowProbe]::SetForegroundWindow($flutterProc.MainWindowHandle)
+            break
+        }
+    } while ([DateTime]::UtcNow -lt $deadline)
+}
 Write-Host '[CloudOS V21] Runtime integrado iniciado.' -ForegroundColor Green
