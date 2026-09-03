@@ -173,19 +173,19 @@ void EventTransportV23::Stop()
 {
     if (!running_.exchange(false)) return;
 
-    // Wake a blocking ConnectNamedPipe without introducing a second control
-    // protocol. Security still restricts this local self-connect to the same
-    // user/session.
     const std::wstring pipe_name = SecurityV21::GetEventsPipeName();
-    HANDLE wake = CreateFileW(
-        pipe_name.c_str(),
-        GENERIC_READ | GENERIC_WRITE,
-        0,
-        nullptr,
-        OPEN_EXISTING,
-        0,
-        nullptr);
-    if (wake != INVALID_HANDLE_VALUE) CloseHandle(wake);
+    if (!pipe_name.empty())
+    {
+        HANDLE wake = CreateFileW(
+            pipe_name.c_str(),
+            GENERIC_READ | GENERIC_WRITE,
+            0,
+            nullptr,
+            OPEN_EXISTING,
+            0,
+            nullptr);
+        if (wake != INVALID_HANDLE_VALUE) CloseHandle(wake);
+    }
 
     if (listener_thread_.joinable()) listener_thread_.join();
 
@@ -232,6 +232,12 @@ bool EventTransportV23::ClientIdMatchesProcess(
 void EventTransportV23::ListenerLoop()
 {
     const std::wstring pipe_name = SecurityV21::GetEventsPipeName();
+    if (pipe_name.empty())
+    {
+        running_.store(false);
+        return;
+    }
+
     while (running_.load())
     {
         SECURITY_ATTRIBUTES attributes{};
@@ -317,15 +323,20 @@ void EventTransportV23::ClientLoop(HANDLE pipe, DWORD process_id)
     auto session = std::make_shared<EventSessionV23>();
     session->pipe = pipe;
 
-    EventBusV21::Instance().RegisterDedicatedClientV23(
-        client_id,
-        [this, weak = std::weak_ptr<EventSessionV23>(session)](
-            const BrokerEvent& event) {
-            const auto alive = weak.lock();
-            if (!alive) return;
-            const uint64_t dropped = alive->Enqueue(SerializeEvent(event));
-            if (dropped > 0) dropped_events_.fetch_add(dropped);
-        });
+    if (!EventBusV21::Instance().RegisterDedicatedClientV23(
+            client_id,
+            [this, weak = std::weak_ptr<EventSessionV23>(session)](
+                const BrokerEvent& event) {
+                const auto alive = weak.lock();
+                if (!alive) return;
+                const uint64_t dropped = alive->Enqueue(SerializeEvent(event));
+                if (dropped > 0) dropped_events_.fetch_add(dropped);
+            }))
+    {
+        DisconnectNamedPipe(pipe);
+        CloseHandle(pipe);
+        return;
+    }
 
     try
     {
@@ -359,15 +370,12 @@ void EventTransportV23::ClientLoop(HANDLE pipe, DWORD process_id)
     }
     catch (...)
     {
-        EventBusV21::Instance().UnregisterClient(client_id);
+        EventBusV21::Instance().UnregisterDedicatedClientV23(client_id);
         DisconnectNamedPipe(pipe);
         CloseHandle(pipe);
         return;
     }
 
-    // The event pipe is server->client after the handshake. PeekNamedPipe is
-    // used only as a bounded disconnect probe, so command RPC and event frames
-    // can never interleave on the same byte stream.
     while (running_.load() && !session->closing.load())
     {
         DWORD available = 0;
@@ -375,11 +383,10 @@ void EventTransportV23::ClientLoop(HANDLE pipe, DWORD process_id)
         Sleep(250);
     }
 
-    EventBusV21::Instance().UnregisterClient(client_id);
+    EventBusV21::Instance().UnregisterDedicatedClientV23(client_id);
     session->closing.store(true);
     session->queue_changed.notify_all();
 
-    // Break a blocked writer deterministically before joining the sender.
     DisconnectNamedPipe(pipe);
     if (session->sender_thread.joinable())
     {
