@@ -33,9 +33,11 @@ foreach ($required in @(
     }
 }
 
+# PowerShell uses backtick, not backslash, as its escape character. Keep the
+# contract equal to the canonical registry provider path written by the tool.
 foreach ($required in @(
-    "HKLM:\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\LocalDumps",
-    "'%LOCALAPPDATA%\\CloudOS\\CrashDumps'",
+    'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps',
+    '%LOCALAPPDATA%\CloudOS\CrashDumps',
     "'CloudOS.exe'",
     "'CloudOS.Supervisor.exe'",
     "'CloudOS.SystemBroker.exe'",
