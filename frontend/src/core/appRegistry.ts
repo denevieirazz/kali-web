@@ -35,6 +35,7 @@ const components: Record<string, ReturnType<typeof lazy>> = {
   'wifi-inspector': lazy(() => import('../apps/WifiInspector/WifiInspector')),
   'network-shield': lazy(() => import('../apps/NetworkShield/NetworkShield')),
   'dns-inspector': lazy(() => import('../apps/DnsInspector/DnsInspector')),
+  'web-inspector': lazy(() => import('../apps/WebInspector/WebInspector')),
   'office-viewer': lazy(() => import('../apps/OfficeViewer/OfficeViewer')),
   'taskbar': lazy(() => import('../components/Taskbar/Taskbar')),
   'desktop': lazy(() => import('../components/Desktop/Desktop')),
