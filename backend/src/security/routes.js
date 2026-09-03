@@ -10,6 +10,7 @@ import {
 import { getNetworkDiagnostics } from './networkDiagnostics.js';
 import { getHostDiagnostics } from './hostDiagnostics.js';
 import { getLocalNetworkPosture } from './localNetworkPosture.js';
+import { inspectDnsName } from './dnsInspector.js';
 import { enrichNetworkAssessment } from './networkInsights.js';
 import { enrichWifiDiagnostics } from './wifiInsights.js';
 
@@ -60,6 +61,18 @@ securityToolsRouter.get('/network/local-posture', async (_req, res) => {
     res.status(503).json({
       error: 'Não foi possível coletar a postura de rede local do Windows.',
       errorCode: 'LOCAL_NETWORK_POSTURE_FAILED',
+    });
+  }
+});
+
+securityToolsRouter.post('/network/dns/lookup', async (req, res) => {
+  try {
+    res.json(await inspectDnsName(req.body?.name));
+  } catch (error) {
+    const status = error.code === 'INVALID_DNS_NAME' ? 400 : 503;
+    res.status(status).json({
+      error: error.message || 'Falha na consulta DNS.',
+      errorCode: error.code || 'DNS_INSPECTION_FAILED',
     });
   }
 });
