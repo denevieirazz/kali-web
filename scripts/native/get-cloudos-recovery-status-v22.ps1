@@ -27,7 +27,7 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
 }
 
 $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
-$runtime = New-Object System.Collections.Generic.List[object]
+$runtime = [System.Collections.Generic.List[object]]::new()
 foreach ($name in @(
     'CloudOS',
     'CloudOS.Supervisor',
@@ -54,7 +54,7 @@ foreach ($name in @(
 }
 
 $werRoot = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps'
-$wer = New-Object System.Collections.Generic.List[object]
+$wer = [System.Collections.Generic.List[object]]::new()
 foreach ($exe in @(
     'CloudOS.exe',
     'CloudOS.Supervisor.exe',
@@ -113,8 +113,10 @@ $report = [ordered]@{
             updated_utc = [string]$state.updated_utc
         }
     } else { $null }
-    current_session_runtime = @($runtime)
-    wer_local_dumps = @($wer)
+    # PowerShell 7.6 has a binder regression where @($list) can throw
+    # "Argument types do not match" for List[object]. Materialize explicitly.
+    current_session_runtime = $runtime.ToArray()
+    wer_local_dumps = $wer.ToArray()
 }
 
 if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
