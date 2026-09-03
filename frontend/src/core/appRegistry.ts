@@ -30,6 +30,7 @@ const components: Record<string, ReturnType<typeof lazy>> = {
   'linux-runtime-poc': lazy(() => import('../apps/LinuxRuntimePoc/LinuxRuntimePoc')),
   'linux-app-runner': lazy(() => import('../apps/LinuxAppWindow/LinuxAppWindow')),
   'env-doctor': lazy(() => import('../apps/EnvDoctor/EnvDoctor')),
+  'security-center': lazy(() => import('../apps/SecurityCenter/SecurityCenter')),
   'kali-tool-center': lazy(() => import('../apps/KaliToolCenter/KaliToolCenter')),
   'network-inspector': lazy(() => import('../apps/NetworkInspector/NetworkInspector')),
   'wifi-inspector': lazy(() => import('../apps/WifiInspector/WifiInspector')),
