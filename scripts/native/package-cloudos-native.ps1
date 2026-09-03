@@ -47,14 +47,17 @@ foreach ($name in @(
     'run-native-lifecycle-smoke-v10.ps1',
     'run-native-supervisor-smoke-v11.ps1',
     'run-native-supervisor-smoke-v22.ps1',
+    'run-native-install-v22-smoke.ps1',
     'native-performance-v12.ps1',
     'run-native-performance-smoke-v12.ps1',
     'CloudOS.Deployment.V13.psm1',
+    'CloudOS.HealthGate.V22.psm1',
     'install-cloudos-native-v13.ps1',
     'install-cloudos-native-v22.ps1',
     'update-cloudos-native-v13.ps1',
     'rollback-cloudos-native-v13.ps1',
     'repair-cloudos-native-v13.ps1',
+    'repair-cloudos-native-v22.ps1',
     'uninstall-cloudos-native-v13.ps1',
     'get-cloudos-deployment-status-v13.ps1',
     'start-cloudos-installed-v13.ps1',
@@ -212,7 +215,7 @@ $repairLauncher = @'
 @echo off
 setlocal EnableExtensions
 set "ROOT=%~dp0"
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%repair-cloudos-native-v13.ps1"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%repair-cloudos-native-v22.ps1"
 exit /b %ERRORLEVEL%
 '@
 Set-Content -LiteralPath (Join-Path $stage 'Reparar CloudOS.cmd') -Value $repairLauncher -Encoding ascii
@@ -318,15 +321,15 @@ System Broker V21:
 Performance/Visual V12:
 - shell event-driven e smoke de idle/performance preservado no pipeline.
 
-Transactional Deployment V13 + Install/Update V22:
+Health Gate / Transactional Deployment V22:
+- CloudOS.HealthGate.V22.psm1 e a unica autoridade compartilhada para runtime-stop, evidencia Authenticode e probe Supervisor readiness/heartbeat usado por install/update/repair.
 - Instalar CloudOS.cmd usa o entrypoint V22 e exige health gate real na primeira ativacao.
 - se a primeira ativacao falhar, a instalacao gerenciada conhecida como ruim e removida quando possivel; ela nao fica marcada como pronta.
 - uma instalacao existente nao pode passar pelo fluxo de primeira instalacao; deve usar Atualizar CloudOS.cmd para preservar last-known-good.
 - cada versao e imutavel em versions\; a nova versao so fica ativa depois de SHA256 + Supervisor --self-test.
-- o estado ativo e gravado separadamente e a versao anterior fica como last-known-good.
 - Atualizar CloudOS.cmd faz preflight, coleta evidencia Authenticode, exige runtime gerenciado parado e executa health gate real pos-ativacao.
 - se o health gate da versao nova falhar e houver last-known-good, o updater executa rollback automatico.
-- Reparar CloudOS.cmd limpa transacoes interrompidas e recupera last-known-good quando necessario.
+- Reparar CloudOS.cmd executa o repair de integridade V13 e depois prova runtime real; se o ativo falhar e houver last-known-good valido, faz rollback e testa novamente antes de declarar recuperacao.
 - Desinstalar CloudOS.cmd remove somente uma raiz que contenha estado gerenciado V13 valido.
 
 Shell Activation V14 (OPT-IN):
@@ -348,6 +351,9 @@ Smoke Lifecycle V10:
 
 Smoke Supervisor/Recovery V22:
   pwsh -File .\run-native-supervisor-smoke-v22.ps1 -Root .
+
+Smoke First Install V22:
+  pwsh -File .\run-native-install-v22-smoke.ps1 -PackageRoot .
 
 Os smokes nao substituem validacao de shell de logon, suspend/RDP fisico ou hotplug em VM/hardware.
 O frontend React antigo nao faz parte deste pacote. WebView2 e usado somente pelo Navegador CloudOS.
