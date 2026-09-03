@@ -317,7 +317,7 @@ void EventTransportV23::ClientLoop(HANDLE pipe, DWORD process_id)
     auto session = std::make_shared<EventSessionV23>();
     session->pipe = pipe;
 
-    EventBusV21::Instance().RegisterClient(
+    EventBusV21::Instance().RegisterDedicatedClientV23(
         client_id,
         [this, weak = std::weak_ptr<EventSessionV23>(session)](
             const BrokerEvent& event) {
