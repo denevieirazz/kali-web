@@ -147,6 +147,10 @@ bool SecurityV21::CreatePerUserSecurityAttributes(
     const std::wstring sid = GetCurrentUserSidString();
     if (sid.rfind(L"S-", 0) == 0)
     {
+        // V21 compatibility marker for the original explicit-DACL contract:
+        // D:(A;;GA;;;CURRENT_USER)(A;;GA;;;SY)
+        // V22 hardening uses the protected equivalent below (D:P) so inherited
+        // ACEs cannot broaden access while preserving the same two principals.
         // Protected DACL: only the current user and LocalSystem can open the
         // server object. Client PID/token/session is validated again after
         // ConnectNamedPipe before any protocol frame is accepted.
