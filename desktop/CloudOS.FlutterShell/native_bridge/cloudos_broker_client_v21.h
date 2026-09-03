@@ -68,6 +68,20 @@ struct BrokerClientWslDistributionSnapshot final
     bool security_candidate_evidence_known{false};
 };
 
+struct BrokerClientWslProbeResult final
+{
+    std::string distro;
+    bool attempted{false};
+    bool healthy{false};
+    bool timed_out{false};
+    bool marker_seen{false};
+    int exit_code{-1};
+    uint64_t duration_ms{0};
+    std::string output;
+    std::string error_code;
+    std::string error_message;
+};
+
 struct BrokerClientSnapshot final
 {
     std::string device_name;
@@ -161,6 +175,87 @@ public:
         return opened_it != response.payload.end() &&
             opened_it->second.IsBool() &&
             opened_it->second.AsBool();
+    }
+
+    bool ProbeWslHealth(
+        const std::string& distro,
+        uint32_t timeout_ms,
+        BrokerClientWslProbeResult& out_probe)
+    {
+        if (!EnsureConnected()) return false;
+        if (distro.size() > 128) return false;
+        if (timeout_ms < 1000 || timeout_ms > 15000) return false;
+
+        JsonObject payload;
+        if (!distro.empty()) payload["distro"] = JsonValue(distro);
+        payload["timeoutMs"] = JsonValue(static_cast<int64_t>(timeout_ms));
+
+        BrokerRequest request;
+        request.protocol = kProtocolVersion;
+        request.id = "wsl-health-probe-" + std::to_string(next_req_id_.fetch_add(1));
+        request.method = "wsl.health.probe";
+        request.payload = std::move(payload);
+
+        std::string raw_response;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!SendFrame(SerializeRequest(request)) || !ReadFrame(raw_response))
+            {
+                state_.store(BrokerConnectionState::Degraded);
+                return false;
+            }
+        }
+
+        BrokerResponse response;
+        std::string parse_error;
+        if (!ParseResponse(raw_response, response, parse_error) || !response.ok) return false;
+
+        const auto string_field = [&response](const char* key) -> std::string
+        {
+            const auto it = response.payload.find(key);
+            return it != response.payload.end() && it->second.IsString()
+                ? it->second.AsString()
+                : std::string{};
+        };
+        const auto bool_field = [&response](const char* key, bool fallback = false) -> bool
+        {
+            const auto it = response.payload.find(key);
+            return it != response.payload.end() && it->second.IsBool()
+                ? it->second.AsBool()
+                : fallback;
+        };
+        const auto int_field = [&response](const char* key, int64_t fallback) -> int64_t
+        {
+            const auto it = response.payload.find(key);
+            return it != response.payload.end() && it->second.IsInt()
+                ? it->second.AsInt()
+                : fallback;
+        };
+
+        BrokerClientWslProbeResult parsed;
+        parsed.distro = string_field("distro");
+        parsed.attempted = bool_field("attempted");
+        parsed.healthy = bool_field("healthy");
+        parsed.timed_out = bool_field("timedOut");
+        parsed.marker_seen = bool_field("markerSeen");
+        parsed.exit_code = static_cast<int>(int_field("exitCode", -1));
+        const int64_t duration = int_field("durationMs", 0);
+        parsed.duration_ms = duration > 0 ? static_cast<uint64_t>(duration) : 0;
+        parsed.output = string_field("output");
+        parsed.error_code = string_field("errorCode");
+        parsed.error_message = string_field("errorMessage");
+
+        // A healthy response must carry the fixed marker evidence and a clean
+        // process exit. Refuse an inconsistent broker payload instead of
+        // upgrading partial evidence to healthy in the Flutter layer.
+        if (parsed.healthy &&
+            (!parsed.attempted || parsed.timed_out || !parsed.marker_seen || parsed.exit_code != 0))
+        {
+            return false;
+        }
+
+        out_probe = std::move(parsed);
+        return true;
     }
 
     bool LaunchApp(const std::string& app_id, std::string& err);
