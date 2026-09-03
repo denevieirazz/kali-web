@@ -25,12 +25,13 @@ if ([string]::IsNullOrWhiteSpace($InstallRoot)) {
 function Assert-CloudOSRepairSignatureV22 {
     param(
         [Parameter(Mandatory = $true)][string]$Root,
-        [Parameter(Mandatory = $true)][string]$Role
+        [Parameter(Mandatory = $true)][string]$Role,
+        [Parameter(Mandatory = $true)][bool]$Required
     )
 
     $evidence = @(Get-CloudOSAuthenticodeEvidenceV22 -Root $Root)
     $invalid = @($evidence | Where-Object { $_.status -ne 'Valid' })
-    if ($RequireAuthenticodeSignature -and $invalid.Count -gt 0) {
+    if ($Required -and $invalid.Count -gt 0) {
         $summary = (@($invalid | ForEach-Object { "$($_.file)=$($_.status)" })) -join ', '
         throw "Authenticode enforcement rejected $Role repair payload: $summary"
     }
@@ -51,7 +52,9 @@ if (-not $status.active_valid) {
 
 $versionsRoot = Join-Path $status.install_root 'versions'
 $activeRoot = Join-Path $versionsRoot $status.active_version
-$primarySignature = @(Assert-CloudOSRepairSignatureV22 -Root $activeRoot -Role 'active')
+$activeMarkedSigned = Test-CloudOSFinalizedSignedPackageV22 -Root $activeRoot
+$effectiveRequireSignature = [bool]$RequireAuthenticodeSignature -or [bool]$activeMarkedSigned
+$primarySignature = @(Assert-CloudOSRepairSignatureV22 -Root $activeRoot -Role 'active' -Required $effectiveRequireSignature)
 $primaryHealth = Invoke-CloudOSSupervisorHealthGateV22 `
     -ActiveRoot $activeRoot `
     -TimeoutSeconds $HealthTimeoutSeconds
@@ -60,6 +63,7 @@ $fallbackAttempted = $false
 $fallbackHealth = $null
 $fallbackVersion = $null
 $fallbackSignature = @()
+$fallbackMarkedSigned = $false
 if (-not $primaryHealth.healthy) {
     $candidate = [string]$status.last_known_good
     if (-not [string]::IsNullOrWhiteSpace($candidate) -and
@@ -67,7 +71,9 @@ if (-not $primaryHealth.healthy) {
         $candidateRoot = Join-Path $versionsRoot $candidate
         try {
             [void](Test-CloudOSPayload -PackageRoot $candidateRoot)
-            $fallbackSignature = @(Assert-CloudOSRepairSignatureV22 -Root $candidateRoot -Role 'last-known-good')
+            $fallbackMarkedSigned = Test-CloudOSFinalizedSignedPackageV22 -Root $candidateRoot
+            $fallbackRequiresSignature = $effectiveRequireSignature -or [bool]$fallbackMarkedSigned
+            $fallbackSignature = @(Assert-CloudOSRepairSignatureV22 -Root $candidateRoot -Role 'last-known-good' -Required $fallbackRequiresSignature)
             $fallbackAttempted = $true
             $rolledBack = Invoke-CloudOSRollback -InstallRoot $InstallRoot
             $fallbackVersion = [string]$rolledBack.active_version
@@ -105,11 +111,13 @@ $report = [pscustomobject]@{
     repair_action = [string]$repair.action
     active_version = [string]$finalStatus.active_version
     active_valid = [bool]$finalStatus.active_valid
-    authenticode_required = [bool]$RequireAuthenticodeSignature
+    active_marked_signed = [bool]$activeMarkedSigned
+    authenticode_required = [bool]$effectiveRequireSignature
     primary_signature = $primarySignature
     primary_health = $primaryHealth
     fallback_attempted = $fallbackAttempted
     fallback_version = $fallbackVersion
+    fallback_marked_signed = [bool]$fallbackMarkedSigned
     fallback_signature = $fallbackSignature
     fallback_health = $fallbackHealth
     last_known_good = [string]$finalStatus.last_known_good
@@ -120,4 +128,4 @@ if (-not $healthy) {
     throw "CloudOS Repair V22 could not prove a healthy runtime. active=$($finalStatus.active_version) primary=$($primaryHealth.reason) fallback=$(if ($null -ne $fallbackHealth) { $fallbackHealth.reason } else { 'unavailable' }). Use CloudOS Recovery/Explorer and inspect local diagnostics before activating the shell again."
 }
 
-Write-Host "[CloudOS V22] REPAIR_OK active=$($finalStatus.active_version) fallbackAttempted=$fallbackAttempted health=$(if ($primaryHealth.healthy) { $primaryHealth.reason } else { $fallbackHealth.reason }) authenticodeRequired=$([bool]$RequireAuthenticodeSignature)"
+Write-Host "[CloudOS V22] REPAIR_OK active=$($finalStatus.active_version) fallbackAttempted=$fallbackAttempted health=$(if ($primaryHealth.healthy) { $primaryHealth.reason } else { $fallbackHealth.reason }) authenticodeRequired=$([bool]$effectiveRequireSignature) activeMarkedSigned=$([bool]$activeMarkedSigned)"
