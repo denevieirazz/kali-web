@@ -531,6 +531,80 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         return;
     }
 
+    if (method == "probeWslHealth")
+    {
+        std::string distro;
+        int timeout_ms = 8000;
+        const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
+        if (args != nullptr)
+        {
+            const auto distro_it = args->find(flutter::EncodableValue("distro"));
+            if (distro_it != args->end())
+            {
+                if (!std::holds_alternative<std::string>(distro_it->second))
+                {
+                    result->Error("INVALID_ARGUMENT", "probeWslHealth distro must be a string");
+                    return;
+                }
+                distro = std::get<std::string>(distro_it->second);
+            }
+
+            const auto timeout_it = args->find(flutter::EncodableValue("timeoutMs"));
+            if (timeout_it != args->end())
+            {
+                if (const auto* value = std::get_if<int32_t>(&timeout_it->second))
+                {
+                    timeout_ms = static_cast<int>(*value);
+                }
+                else if (const auto* value = std::get_if<int64_t>(&timeout_it->second))
+                {
+                    if (*value < 1000 || *value > 15000)
+                    {
+                        result->Error("INVALID_ARGUMENT", "probeWslHealth timeoutMs must be 1000..15000");
+                        return;
+                    }
+                    timeout_ms = static_cast<int>(*value);
+                }
+                else
+                {
+                    result->Error("INVALID_ARGUMENT", "probeWslHealth timeoutMs must be an integer");
+                    return;
+                }
+            }
+        }
+
+        if (distro.size() > 128 || timeout_ms < 1000 || timeout_ms > 15000)
+        {
+            result->Error("INVALID_ARGUMENT", "probeWslHealth arguments are outside the bounded contract");
+            return;
+        }
+
+        BrokerClientWslProbeResult probe;
+        if (!CloudOSBrokerClientV21::Instance().ProbeWslHealth(
+                distro,
+                static_cast<uint32_t>(timeout_ms),
+                probe))
+        {
+            result->Error("WSL_PROBE_UNAVAILABLE", "System Broker did not return a valid WSL health probe result");
+            return;
+        }
+
+        flutter::EncodableMap response;
+        response[flutter::EncodableValue("distro")] = flutter::EncodableValue(probe.distro);
+        response[flutter::EncodableValue("attempted")] = flutter::EncodableValue(probe.attempted);
+        response[flutter::EncodableValue("healthy")] = flutter::EncodableValue(probe.healthy);
+        response[flutter::EncodableValue("timedOut")] = flutter::EncodableValue(probe.timed_out);
+        response[flutter::EncodableValue("markerSeen")] = flutter::EncodableValue(probe.marker_seen);
+        response[flutter::EncodableValue("exitCode")] = flutter::EncodableValue(probe.exit_code);
+        response[flutter::EncodableValue("durationMs")] =
+            flutter::EncodableValue(static_cast<int64_t>(probe.duration_ms));
+        response[flutter::EncodableValue("output")] = flutter::EncodableValue(probe.output);
+        response[flutter::EncodableValue("errorCode")] = flutter::EncodableValue(probe.error_code);
+        response[flutter::EncodableValue("errorMessage")] = flutter::EncodableValue(probe.error_message);
+        result->Success(flutter::EncodableValue(std::move(response)));
+        return;
+    }
+
     if (method == "getNotificationState")
     {
         auto snapshot = std::make_unique<ShellNotificationV21::Snapshot>();
@@ -723,6 +797,15 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
 
     if (method == "getBridgeInfo")
     {
+        std::vector<std::string> broker_capabilities;
+        const bool capabilities_loaded =
+            CloudOSBrokerClientV21::Instance().GetCapabilities(broker_capabilities);
+        const bool active_wsl_probe = capabilities_loaded &&
+            std::find(
+                broker_capabilities.begin(),
+                broker_capabilities.end(),
+                "wsl.health.probe") != broker_capabilities.end();
+
         flutter::EncodableMap map;
         map[flutter::EncodableValue("schema")] = flutter::EncodableValue(22);
         map[flutter::EncodableValue("verdict")] = flutter::EncodableValue("pass");
@@ -733,6 +816,7 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         map[flutter::EncodableValue("conptyAvailable")] = flutter::EncodableValue(true);
         map[flutter::EncodableValue("typedWslInventory")] = flutter::EncodableValue(true);
         map[flutter::EncodableValue("passiveWslHealthEvidence")] = flutter::EncodableValue(true);
+        map[flutter::EncodableValue("activeWslHealthProbe")] = flutter::EncodableValue(active_wsl_probe);
         map[flutter::EncodableValue("arbitrary_command_api")] = flutter::EncodableValue(false);
         map[flutter::EncodableValue("winlogon_modified")] = flutter::EncodableValue(false);
         map[flutter::EncodableValue("shell_activation_executed")] = flutter::EncodableValue(false);
