@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
-#include <limits>
 #include <vector>
 
 namespace CloudOS
@@ -170,6 +169,14 @@ uint64_t ElapsedMs(std::chrono::steady_clock::time_point started)
             std::chrono::steady_clock::now() - started)
             .count());
 }
+
+void CloseIfValid(HANDLE handle)
+{
+    if (handle != nullptr && handle != INVALID_HANDLE_VALUE)
+    {
+        CloseHandle(handle);
+    }
+}
 } // namespace
 
 WslProbeServiceV22& WslProbeServiceV22::Instance()
@@ -256,7 +263,16 @@ WslProbeResultV22 WslProbeServiceV22::Probe(
         result.duration_ms = ElapsedMs(started);
         return result;
     }
-    SetHandleInformation(read_pipe, HANDLE_FLAG_INHERIT, 0);
+    if (!SetHandleInformation(read_pipe, HANDLE_FLAG_INHERIT, 0))
+    {
+        const DWORD error = GetLastError();
+        CloseIfValid(write_pipe);
+        CloseIfValid(read_pipe);
+        result.error_code = "probe_pipe_security_failed";
+        result.error_message = "SetHandleInformation failed with error " + std::to_string(error);
+        result.duration_ms = ElapsedMs(started);
+        return result;
+    }
 
     HANDLE nul_input = CreateFileW(
         L"NUL",
@@ -266,6 +282,16 @@ WslProbeResultV22 WslProbeServiceV22::Probe(
         OPEN_EXISTING,
         FILE_ATTRIBUTE_NORMAL,
         nullptr);
+    if (nul_input == INVALID_HANDLE_VALUE)
+    {
+        const DWORD error = GetLastError();
+        CloseIfValid(write_pipe);
+        CloseIfValid(read_pipe);
+        result.error_code = "probe_stdin_failed";
+        result.error_message = "Unable to open NUL for probe stdin: " + std::to_string(error);
+        result.duration_ms = ElapsedMs(started);
+        return result;
+    }
 
     // The command body is fixed by CloudOS. RPC callers can only choose a
     // distro already present in WslServiceV21's registration inventory.
@@ -286,7 +312,7 @@ WslProbeResultV22 WslProbeServiceV22::Probe(
     startup.cb = sizeof(startup);
     startup.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
     startup.wShowWindow = SW_HIDE;
-    startup.hStdInput = nul_input != INVALID_HANDLE_VALUE ? nul_input : GetStdHandle(STD_INPUT_HANDLE);
+    startup.hStdInput = nul_input;
     startup.hStdOutput = write_pipe;
     startup.hStdError = write_pipe;
 
@@ -303,36 +329,47 @@ WslProbeResultV22 WslProbeServiceV22::Probe(
         nullptr,
         &startup,
         &process);
+    const DWORD create_error = created ? ERROR_SUCCESS : GetLastError();
 
-    CloseHandle(write_pipe);
-    if (nul_input != INVALID_HANDLE_VALUE) CloseHandle(nul_input);
+    CloseIfValid(write_pipe);
+    CloseIfValid(nul_input);
 
     if (!created)
     {
         result.error_code = "wsl_probe_start_failed";
-        result.error_message = "CreateProcessW failed with error " + std::to_string(GetLastError());
+        result.error_message = "CreateProcessW failed with error " + std::to_string(create_error);
         DrainAvailablePipe(read_pipe, result.output);
-        CloseHandle(read_pipe);
+        CloseIfValid(read_pipe);
         result.output = SanitizeOutput(std::move(result.output));
         result.duration_ms = ElapsedMs(started);
         return result;
     }
 
-    CloseHandle(process.hThread);
+    CloseIfValid(process.hThread);
 
     const DWORD wait_result = WaitForSingleObject(process.hProcess, timeout_ms);
     if (wait_result == WAIT_TIMEOUT)
     {
         result.timed_out = true;
-        TerminateProcess(process.hProcess, ERROR_TIMEOUT);
-        WaitForSingleObject(process.hProcess, 2000);
-        result.error_code = "wsl_probe_timeout";
-        result.error_message = "The fixed WSL health probe exceeded its deadline";
+        if (!TerminateProcess(process.hProcess, ERROR_TIMEOUT))
+        {
+            result.error_code = "wsl_probe_timeout_termination_failed";
+            result.error_message = "The probe timed out and its Windows launcher could not be terminated";
+        }
+        else
+        {
+            WaitForSingleObject(process.hProcess, 2000);
+            result.error_code = "wsl_probe_timeout";
+            result.error_message = "The fixed WSL health probe exceeded its deadline";
+        }
     }
     else if (wait_result != WAIT_OBJECT_0)
     {
+        const DWORD wait_error = GetLastError();
+        TerminateProcess(process.hProcess, wait_error == ERROR_SUCCESS ? ERROR_GEN_FAILURE : wait_error);
+        WaitForSingleObject(process.hProcess, 2000);
         result.error_code = "wsl_probe_wait_failed";
-        result.error_message = "WaitForSingleObject failed with error " + std::to_string(GetLastError());
+        result.error_message = "WaitForSingleObject failed with error " + std::to_string(wait_error);
     }
 
     DWORD exit_code = static_cast<DWORD>(-1);
@@ -342,10 +379,10 @@ WslProbeResultV22 WslProbeServiceV22::Probe(
     }
 
     // Process has exited (or was terminated), so collect the bounded output
-    // that is already waiting in the pipe without risking a blocking read.
+    // already waiting in the pipe without risking a blocking read.
     DrainAvailablePipe(read_pipe, result.output);
-    CloseHandle(read_pipe);
-    CloseHandle(process.hProcess);
+    CloseIfValid(read_pipe);
+    CloseIfValid(process.hProcess);
 
     result.output = SanitizeOutput(std::move(result.output));
     result.marker_seen = result.output.find(kHealthMarker) != std::string::npos;
