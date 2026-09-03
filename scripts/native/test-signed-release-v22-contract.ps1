@@ -106,7 +106,7 @@ foreach ($path in @($finalizerPath, $healthGatePath, $updatePath, $repairPath)) 
         [ref]$tokens,
         [ref]$errors)
     if ($errors.Count -ne 0) {
-        throw "Signed Release V22 script has PowerShell parse errors in $path: $($errors.Message -join '; ')"
+        throw "Signed Release V22 script has PowerShell parse errors in ${path}: $($errors.Message -join '; ')"
     }
 }
 
