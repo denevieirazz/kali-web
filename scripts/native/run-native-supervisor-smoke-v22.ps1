@@ -39,6 +39,7 @@ if (Test-Path -LiteralPath $statePath) {
 
 $failures = [Collections.Generic.List[string]]::new()
 $evidence = [ordered]@{}
+$stage = 'bootstrap'
 
 function Invoke-SupervisorProbe {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
@@ -63,10 +64,12 @@ function Read-V22State {
 }
 
 try {
+    $stage = 'self-test'
     $selfTest = Invoke-SupervisorProbe -Arguments @('--self-test')
     $evidence.self_test_exit_code = $selfTest
     if ($selfTest -ne 0) { $failures.Add("SelfTestExit:$selfTest") }
 
+    $stage = 'ready-probe'
     $readyExit = Invoke-SupervisorProbe -Arguments @(
         '--probe-ready-once',
         '--probe-no-explorer',
@@ -76,6 +79,7 @@ try {
     $evidence.ready_probe_exit_code = $readyExit
     if ($readyExit -ne 0) { $failures.Add("ReadyProbeExit:$readyExit") }
 
+    $stage = 'ready-state'
     $readyState = Read-V22State
     $evidence.ready_state_written = ($null -ne $readyState)
     if ($null -eq $readyState) {
@@ -89,6 +93,7 @@ try {
         }
     }
 
+    $stage = 'failure-loop'
     $failureExit = Invoke-SupervisorProbe -Arguments @(
         '--probe-failure-loop',
         '--probe-no-explorer',
@@ -101,6 +106,7 @@ try {
         $failures.Add("FailureLoopExit:$failureExit")
     }
 
+    $stage = 'safe-mode-state'
     $safeState = Read-V22State
     $evidence.safe_mode_state_written = ($null -ne $safeState)
     if ($null -eq $safeState) {
@@ -118,26 +124,46 @@ try {
         }
     }
 
+    $stage = 'process-cleanup'
     Start-Sleep -Milliseconds 500
-    $remaining = @(Get-Process -Name 'CloudOS' -ErrorAction SilentlyContinue | Where-Object {
+    $remainingCount = 0
+    foreach ($process in (Get-Process -Name 'CloudOS' -ErrorAction SilentlyContinue)) {
         try {
-            $_.Path -and ([IO.Path]::GetFullPath($_.Path) -eq [IO.Path]::GetFullPath($shell))
+            if ($process.Path -and
+                ([IO.Path]::GetFullPath($process.Path) -eq [IO.Path]::GetFullPath($shell))) {
+                $remainingCount++
+            }
         }
-        catch { $false }
-    })
-    $evidence.remaining_installation_shell_processes = $remaining.Count
-    if ($remaining.Count -ne 0) { $failures.Add('CloudOSProcessLeaked') }
+        catch {
+            # A process can exit between enumeration and Path inspection.
+        }
+    }
+    $evidence.remaining_installation_shell_processes = $remainingCount
+    if ($remainingCount -ne 0) { $failures.Add('CloudOSProcessLeaked') }
 
+    $stage = 'recovery-status'
     $statusScript = Join-Path $PSScriptRoot 'get-cloudos-recovery-status-v22.ps1'
-    $status = & $statusScript
+    $statusOutput = Join-Path ([IO.Path]::GetDirectoryName($OutputPath)) 'recovery-status-v22-smoke.json'
+    if (Test-Path -LiteralPath $statusOutput) {
+        Remove-Item -LiteralPath $statusOutput -Force
+    }
+    & $statusScript -OutputPath $statusOutput | Out-Null
+    if (-not (Test-Path -LiteralPath $statusOutput -PathType Leaf)) {
+        throw 'Recovery Status V22 did not write its JSON output.'
+    }
+    $status = Get-Content -LiteralPath $statusOutput -Raw | ConvertFrom-Json
     $evidence.recovery_status_schema = [int]$status.schema
     $evidence.recovery_status_state_present = [bool]$status.supervisor_state_present
-    if ([int]$status.schema -ne 22 -or -not $status.supervisor_state_present) {
+    if ([int]$status.schema -ne 22 -or -not [bool]$status.supervisor_state_present) {
         $failures.Add('RecoveryStatusDidNotObserveSupervisorState')
     }
 }
 catch {
-    $failures.Add(('HarnessException:' + $_.Exception.GetType().Name + ':' + $_.Exception.Message))
+    $evidence.harness_failure_stage = $stage
+    $evidence.harness_exception_type = $_.Exception.GetType().FullName
+    $evidence.harness_exception_message = $_.Exception.Message
+    $evidence.harness_script_stack = $_.ScriptStackTrace
+    $failures.Add(('HarnessException:' + $stage + ':' + $_.Exception.GetType().Name + ':' + $_.Exception.Message))
 }
 
 $report = [ordered]@{
