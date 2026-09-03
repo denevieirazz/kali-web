@@ -9,6 +9,8 @@ namespace
 {
 constexpr ULONGLONG kV22CrashWindowMs = 60000ull;
 constexpr wchar_t kV22StateFileName[] = L"supervisor-state-v22.json";
+const ULONGLONG g_supervisor_start_tick_v22 = GetTickCount64();
+volatile LONG64 g_transition_sequence_v22 = 0;
 
 enum class SupervisorStateV22
 {
@@ -48,6 +50,12 @@ struct V22Handle final
     V22Handle& operator=(const V22Handle&) = delete;
 };
 
+struct V22LaunchResult final
+{
+    PROCESS_INFORMATION process{};
+    bool job_assigned{};
+};
+
 std::wstring JsonEscapeV22(std::wstring_view value)
 {
     std::wstring output;
@@ -79,13 +87,13 @@ std::wstring SupervisorStateDirectoryV22()
     if (required == 0 || required >= buffer.size()) return {};
 
     std::wstring cloudos = std::wstring(buffer.data(), required) + L"\\CloudOS";
-    (void)CreateDirectoryW(cloudos.c_str(), nullptr);
-    std::wstring recovery = cloudos + L"\\Recovery";
-    if (!CreateDirectoryW(recovery.c_str(), nullptr) &&
-        GetLastError() != ERROR_ALREADY_EXISTS)
-    {
+    if (!CreateDirectoryW(cloudos.c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS)
         return {};
-    }
+
+    std::wstring recovery = cloudos + L"\\Recovery";
+    if (!CreateDirectoryW(recovery.c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS)
+        return {};
+
     return recovery;
 }
 
@@ -116,6 +124,7 @@ bool WriteUtf8FileV22(const std::wstring& path, const std::wstring& text)
     {
         return false;
     }
+    if (utf8.size() > static_cast<std::size_t>(MAXDWORD)) return false;
 
     V22Handle file(CreateFileW(
         path.c_str(),
@@ -128,14 +137,9 @@ bool WriteUtf8FileV22(const std::wstring& path, const std::wstring& text)
     if (file.value == INVALID_HANDLE_VALUE) return false;
 
     DWORD written = 0;
-    return WriteFile(
-               file.value,
-               utf8.data(),
-               static_cast<DWORD>(utf8.size()),
-               &written,
-               nullptr) != FALSE &&
-        written == utf8.size() &&
-        FlushFileBuffers(file.value) != FALSE;
+    const DWORD requested = static_cast<DWORD>(utf8.size());
+    return WriteFile(file.value, utf8.data(), requested, &written, nullptr) != FALSE &&
+        written == requested && FlushFileBuffers(file.value) != FALSE;
 }
 
 void PersistSupervisorStateV22(
@@ -163,22 +167,34 @@ void PersistSupervisorStateV22(
         utc.wSecond,
         utc.wMilliseconds);
 
+    const LONG64 sequence = InterlockedIncrement64(&g_transition_sequence_v22);
+    const ULONGLONG now = GetTickCount64();
+    const ULONGLONG uptime = now >= g_supervisor_start_tick_v22
+        ? now - g_supervisor_start_tick_v22
+        : 0ull;
+
     std::wostringstream json;
     json << L"{\n"
          << L"  \"schema\": 22,\n"
          << L"  \"component\": \"CloudOS.Supervisor\",\n"
          << L"  \"state\": \"" << SupervisorStateNameV22(state) << L"\",\n"
          << L"  \"reason\": \"" << JsonEscapeV22(reason) << L"\",\n"
+         << L"  \"transition_sequence\": " << sequence << L",\n"
+         << L"  \"supervisor_pid\": " << GetCurrentProcessId() << L",\n"
+         << L"  \"supervisor_uptime_ms\": " << uptime << L",\n"
          << L"  \"shell_pid\": " << shell_pid << L",\n"
          << L"  \"failure_count\": " << failures << L",\n"
          << L"  \"last_exit_code\": " << exit_code << L",\n"
          << L"  \"job_kill_on_close_assigned\": " << (job_assigned ? L"true" : L"false") << L",\n"
+         << L"  \"job_breakaway_enabled\": true,\n"
          << L"  \"updated_utc\": \"" << timestamp << L"\"\n"
          << L"}\n";
 
     const std::wstring target = directory + L"\\" + kV22StateFileName;
-    const std::wstring temporary = target + L".tmp." + std::to_wstring(GetCurrentProcessId());
+    const std::wstring temporary =
+        target + L".tmp." + std::to_wstring(GetCurrentProcessId()) + L"." + std::to_wstring(sequence);
     if (!WriteUtf8FileV22(temporary, json.str())) return;
+
     if (!MoveFileExW(
             temporary.c_str(),
             target.c_str(),
@@ -194,7 +210,9 @@ HANDLE CreateKillOnCloseJobV22() noexcept
     if (job == nullptr) return nullptr;
 
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
-    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    limits.BasicLimitInformation.LimitFlags =
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE |
+        JOB_OBJECT_LIMIT_BREAKAWAY_OK;
     if (!SetInformationJobObject(
             job,
             JobObjectExtendedLimitInformation,
@@ -209,17 +227,81 @@ HANDLE CreateKillOnCloseJobV22() noexcept
 
 bool AssignShellToJobV22(HANDLE job, HANDLE process) noexcept
 {
-    return job != nullptr &&
-        process != nullptr &&
-        AssignProcessToJobObject(job, process) != FALSE;
+    return job != nullptr && process != nullptr && AssignProcessToJobObject(job, process) != FALSE;
+}
+
+bool LaunchCloudOSSuspendedV22(
+    bool probe_failure,
+    HANDLE job,
+    V22LaunchResult* result)
+{
+    if (result == nullptr) return false;
+    *result = V22LaunchResult{};
+
+    const std::wstring executable = ShellPath();
+    if (executable.empty())
+    {
+        SetLastError(ERROR_FILE_NOT_FOUND);
+        return false;
+    }
+
+    std::wstring command = L"\"" + executable + L"\" ";
+    command += CloudOS::SupervisorProtocolV11::SupervisedArgument;
+    if (probe_failure)
+    {
+        command += L" ";
+        command += CloudOS::SupervisorProtocolV11::ProbeFailureArgument;
+    }
+
+    const std::size_t slash = executable.find_last_of(L"\\/");
+    const std::wstring working_directory = slash == std::wstring::npos
+        ? std::wstring{}
+        : executable.substr(0, slash);
+
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    if (!CreateProcessW(
+            executable.c_str(),
+            command.data(),
+            nullptr,
+            nullptr,
+            FALSE,
+            CREATE_SUSPENDED | CREATE_DEFAULT_ERROR_MODE,
+            nullptr,
+            working_directory.empty() ? nullptr : working_directory.c_str(),
+            &startup,
+            &process))
+    {
+        return false;
+    }
+
+    bool job_assigned = false;
+    if (job != nullptr)
+    {
+        job_assigned = AssignShellToJobV22(job, process.hProcess);
+    }
+
+    if (ResumeThread(process.hThread) == static_cast<DWORD>(-1))
+    {
+        const DWORD resume_error = GetLastError();
+        (void)TerminateProcess(process.hProcess, kSupervisorHangExit);
+        (void)WaitForSingleObject(process.hProcess, 3000);
+        CloseHandle(process.hThread);
+        CloseHandle(process.hProcess);
+        SetLastError(resume_error);
+        return false;
+    }
+
+    result->process = process;
+    result->job_assigned = job_assigned;
+    return true;
 }
 
 void PurgeOldFailuresV22(std::deque<ULONGLONG>& failures, ULONGLONG now)
 {
     while (!failures.empty() && now - failures.front() > kV22CrashWindowMs)
-    {
         failures.pop_front();
-    }
 }
 
 bool RecordFailureV22(std::deque<ULONGLONG>& failures, unsigned maximum_failures)
@@ -274,50 +356,52 @@ int RunSupervisorV22(const SupervisorOptions& options)
 
     for (;;)
     {
-        PROCESS_INFORMATION raw_process{};
-        if (!LaunchCloudOS(options.probe_failure_loop, &raw_process))
+        V22Handle job(CreateKillOnCloseJobV22());
+        V22LaunchResult launch{};
+        if (!LaunchCloudOSSuspendedV22(options.probe_failure_loop, job.value, &launch))
         {
+            const DWORD launch_error = GetLastError();
             ++failure_count;
             const bool crash_loop = RecordFailureV22(recent_failures, options.maximum_failures);
             PersistSupervisorStateV22(
                 SupervisorStateV22::Degraded,
-                L"CloudOS.exe launch failed",
+                L"CloudOS.exe suspended launch/resume failed",
                 0,
                 failure_count,
-                GetLastError(),
+                launch_error,
                 false);
             if (crash_loop || failure_count >= options.maximum_failures)
             {
                 return EnterSafeModeV22(
                     options,
                     failure_count,
-                    GetLastError(),
+                    launch_error,
                     L"repeated CloudOS.exe launch failures");
             }
+
             PersistSupervisorStateV22(
                 SupervisorStateV22::Restarting,
                 L"bounded restart after launch failure",
                 0,
                 failure_count,
-                GetLastError(),
+                launch_error,
                 false);
             Sleep(RestartBackoff(failure_count));
             continue;
         }
 
-        CloseHandle(raw_process.hThread);
-        Handle process(raw_process.hProcess);
-        const DWORD process_id = raw_process.dwProcessId;
-        V22Handle job(CreateKillOnCloseJobV22());
-        const bool job_assigned = AssignShellToJobV22(job.value, process.value);
+        CloseHandle(launch.process.hThread);
+        Handle process(launch.process.hProcess);
+        const DWORD process_id = launch.process.dwProcessId;
+        const bool job_assigned = launch.job_assigned;
         const ULONGLONG launch_tick = GetTickCount64();
         DWORD exit_code = 1;
 
         PersistSupervisorStateV22(
             SupervisorStateV22::Starting,
             job_assigned
-                ? L"CloudOS.exe launched under kill-on-close job"
-                : L"CloudOS.exe launched; Job Object ownership unavailable",
+                ? L"CloudOS.exe created suspended, assigned to kill-on-close/breakaway Job Object, then resumed"
+                : L"CloudOS.exe created suspended and resumed; Job Object ownership unavailable",
             process_id,
             failure_count,
             0,
@@ -347,8 +431,8 @@ int RunSupervisorV22(const SupervisorOptions& options)
             PersistSupervisorStateV22(
                 job_assigned ? SupervisorStateV22::Healthy : SupervisorStateV22::Degraded,
                 job_assigned
-                    ? L"readiness and heartbeat healthy"
-                    : L"readiness healthy but kill-on-close ownership unavailable",
+                    ? L"readiness and heartbeat healthy; process tree supervised"
+                    : L"readiness healthy but Job Object ownership unavailable",
                 process_id,
                 failure_count,
                 0,
@@ -470,6 +554,20 @@ int SelfTestV22()
 
     V22Handle job(CreateKillOnCloseJobV22());
     if (job.value == nullptr) return 68;
+
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+    if (!QueryInformationJobObject(
+            job.value,
+            JobObjectExtendedLimitInformation,
+            &limits,
+            static_cast<DWORD>(sizeof(limits)),
+            nullptr))
+    {
+        return 69;
+    }
+    const DWORD required = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+    if ((limits.BasicLimitInformation.LimitFlags & required) != required) return 70;
+
     return 0;
 }
 } // namespace
