@@ -244,7 +244,7 @@ void main() {
       final missingStorage = find.textContaining('armazenamento registrado AUSENTE');
       await scrollWslTo(tester, missingStorage);
       expect(missingStorage, findsOneWidget);
-      expect(find.textContaining('candidata passiva'), findsNothing);
+      expect(find.text('kali-linux • candidata passiva'), findsNothing);
 
       final notice = find.text('Kali ainda não comprovada como backend');
       await scrollWslTo(tester, notice);
