@@ -33,8 +33,6 @@ foreach ($required in @(
     }
 }
 
-# PowerShell uses backtick, not backslash, as its escape character. Keep the
-# contract equal to the canonical registry provider path written by the tool.
 foreach ($required in @(
     'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps',
     '%LOCALAPPDATA%\CloudOS\CrashDumps',
@@ -53,13 +51,37 @@ foreach ($required in @(
     }
 }
 
-# Crash dump collection must remain explicit and must never be enabled by a
-# normal build/install/start operation.
-foreach ($forbiddenSource in @($package, $suite)) {
-    if ($forbiddenSource -match '(?im)^\s*&?\s*[^\r\n]*configure-cloudos-wer-v22\.ps1\s+-Enable') {
-        throw 'WER LocalDumps must never be enabled automatically by packaging or contract execution.'
+function Assert-NoAutomaticWerEnablement {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $tokens = $null
+    $errors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+        $Path,
+        [ref]$tokens,
+        [ref]$errors)
+    if ($errors.Count -ne 0) {
+        throw "Cannot safely inspect WER invocation policy because $Path has parse errors: $($errors.Message -join '; ')"
+    }
+
+    $commands = @($ast.FindAll({
+        param($node)
+        $node -is [System.Management.Automation.Language.CommandAst]
+    }, $true))
+
+    foreach ($command in $commands) {
+        $text = $command.Extent.Text
+        if ($text -match '(?i)configure-cloudos-wer-v22\.ps1' -and
+            $text -match '(?i)(?:^|\s)-Enable(?:\s|$)') {
+            throw "WER LocalDumps must never be enabled automatically by executable PowerShell code: $text"
+        }
     }
 }
+
+# Documentation may show the explicit opt-in command. Only executable AST nodes
+# are forbidden from enabling WER automatically.
+Assert-NoAutomaticWerEnablement -Path $packagePath
+Assert-NoAutomaticWerEnablement -Path $suitePath
 
 if (-not $package.Contains("'configure-cloudos-wer-v22.ps1'") -or
     -not $package.Contains("'get-cloudos-recovery-status-v22.ps1'")) {
