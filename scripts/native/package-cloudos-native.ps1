@@ -52,6 +52,7 @@ foreach ($name in @(
     'run-native-performance-smoke-v12.ps1',
     'CloudOS.Deployment.V13.psm1',
     'CloudOS.HealthGate.V22.psm1',
+    'CloudOS.ManagedTools.V22.psm1',
     'install-cloudos-native-v13.ps1',
     'install-cloudos-native-v22.ps1',
     'update-cloudos-native-v13.ps1',
@@ -323,6 +324,7 @@ Performance/Visual V12:
 
 Health Gate / Transactional Deployment V22:
 - CloudOS.HealthGate.V22.psm1 e a unica autoridade compartilhada para runtime-stop, evidencia Authenticode e probe Supervisor readiness/heartbeat usado por install/update/repair.
+- CloudOS.ManagedTools.V22.psm1 publica somente ferramentas V22 depois de uma ativacao saudavel.
 - Instalar CloudOS.cmd usa o entrypoint V22 e exige health gate real na primeira ativacao.
 - se a primeira ativacao falhar, a instalacao gerenciada conhecida como ruim e removida quando possivel; ela nao fica marcada como pronta.
 - uma instalacao existente nao pode passar pelo fluxo de primeira instalacao; deve usar Atualizar CloudOS.cmd para preservar last-known-good.
