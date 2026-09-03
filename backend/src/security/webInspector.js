@@ -31,6 +31,11 @@ function inIpv4Range(value, base, prefix) {
   return (candidate & mask) === (network & mask);
 }
 
+function unbracketHostname(hostname) {
+  const value = String(hostname || '');
+  return value.startsWith('[') && value.endsWith(']') ? value.slice(1, -1) : value;
+}
+
 export function isPublicWebAddress(address) {
   const family = net.isIP(address);
   if (family === 4) {
@@ -76,6 +81,7 @@ export function normalizePublicWebUrl(value) {
     throw makeError('Credenciais embutidas na URL não são aceitas.', 'WEB_CREDENTIALS_NOT_ALLOWED');
   }
   const hostname = url.hostname.toLowerCase().replace(/\.$/, '');
+  const addressLiteral = unbracketHostname(hostname);
   if (!hostname || hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local')) {
     throw makeError('O Web Inspector não acessa localhost nem nomes de rede local.', 'WEB_TARGET_NOT_PUBLIC');
   }
@@ -83,7 +89,7 @@ export function normalizePublicWebUrl(value) {
   if (!ALLOWED_PORTS.has(explicitPort)) {
     throw makeError('Use uma porta web suportada: 80, 443, 8080 ou 8443.', 'WEB_PORT_NOT_ALLOWED');
   }
-  if (net.isIP(hostname) && !isPublicWebAddress(hostname)) {
+  if (net.isIP(addressLiteral) && !isPublicWebAddress(addressLiteral)) {
     throw makeError('Endereços privados, locais, reservados ou de metadata não são acessados pelo Web Inspector.', 'WEB_TARGET_NOT_PUBLIC');
   }
 
@@ -94,8 +100,13 @@ export function normalizePublicWebUrl(value) {
 
 async function resolvePublicTarget(urlString) {
   const url = new URL(normalizePublicWebUrl(urlString));
-  if (net.isIP(url.hostname)) {
-    return { url, address: url.hostname, family: net.isIP(url.hostname) };
+  const addressLiteral = unbracketHostname(url.hostname);
+  const literalFamily = net.isIP(addressLiteral);
+  if (literalFamily) {
+    if (!isPublicWebAddress(addressLiteral)) {
+      throw makeError('Endereços privados, locais, reservados ou de metadata não são acessados pelo Web Inspector.', 'WEB_TARGET_NOT_PUBLIC');
+    }
+    return { url, address: addressLiteral, family: literalFamily };
   }
 
   let addresses;
@@ -201,6 +212,8 @@ function tlsSummary(socket) {
 function requestOnce(target) {
   return resolvePublicTarget(target).then(({ url, address, family }) => new Promise((resolve, reject) => {
     const transport = url.protocol === 'https:' ? https : http;
+    const literalHostname = unbracketHostname(url.hostname);
+    const isLiteral = net.isIP(literalHostname) !== 0;
     const headers = {
       'user-agent': 'CloudOS-Web-Inspector/1.0',
       accept: 'text/html,application/xhtml+xml,application/json;q=0.8,*/*;q=0.2',
@@ -210,14 +223,17 @@ function requestOnce(target) {
     };
     const options = {
       protocol: url.protocol,
-      hostname: url.hostname,
+      hostname: isLiteral ? literalHostname : url.hostname,
       port: url.port || undefined,
       path: `${url.pathname}${url.search}`,
       method: 'GET',
       headers,
       timeout: REQUEST_TIMEOUT_MS,
       lookup: (_hostname, _options, callback) => callback(null, address, family),
-      ...(url.protocol === 'https:' ? { servername: url.hostname, rejectUnauthorized: true } : {}),
+      ...(url.protocol === 'https:' ? {
+        ...(isLiteral ? {} : { servername: url.hostname }),
+        rejectUnauthorized: true,
+      } : {}),
     };
 
     let settled = false;
