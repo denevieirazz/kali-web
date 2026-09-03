@@ -77,7 +77,7 @@ foreach ($required in @(
 foreach ($required in @(
     'CreatePseudoConsole',
     'ResizePseudoConsole',
-    'WriteSession(session_id, "\\x03")',
+    'WriteSession(session_id, "\x03")',
     'CancelSynchronousIo',
     'reader_thread.join()',
     'ShutdownAll()'
