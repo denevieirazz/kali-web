@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { launchWorkflowApp } from '../../services/workflowLaunch';
 import KaliToolCenter from '../KaliToolCenter/KaliToolCenter';
 import QuickDnsChecks from './QuickDnsChecks';
+import QuickEnvironmentChecks from './QuickEnvironmentChecks';
 import QuickLocalChecks from './QuickLocalChecks';
 import QuickWebChecks from './QuickWebChecks';
 import './SecurityCenter.css';
@@ -45,8 +46,9 @@ export default function SecurityCenter() {
   return <div className="sec-root">
     <header className="sec-hero"><div><small>CloudOS · Security Center</small><h1>Um botão. Uma função.</h1><p>Escolha o que você quer descobrir. Cada bloco faz uma tarefa pequena e específica; não precisa decorar comandos.</p></div><div className="sec-flow"><span>1. escolha</span><b>→</b><span>2. execute</span><b>→</b><span>3. leia</span><b>→</b><span>4. próximo bloco</span></div></header>
     {(notice || error) && <div className={`sec-banner ${error ? 'is-error' : ''}`} role={error ? 'alert' : 'status'}><span>{error || notice}</span><button type="button" onClick={() => { setNotice(''); setError(''); }}>×</button></div>}
-    <section className="sec-start"><div><strong>Não sabe por onde começar?</strong><span>Rede: descubra dispositivos e escolha um IP. Internet: consulte o DNS e depois analise a URL pública.</span></div><button type="button" onClick={() => openBlock(BLOCKS[0])}>🐉 Abrir assessment completo</button></section>
+    <section className="sec-start"><div><strong>Não sabe por onde começar?</strong><span>Primeiro entenda este PC, depois descubra a rede. Para internet: DNS primeiro, URL depois.</span></div><button type="button" onClick={() => openBlock(BLOCKS[0])}>🐉 Abrir assessment completo</button></section>
 
+    <QuickEnvironmentChecks />
     <QuickLocalChecks />
     <QuickDnsChecks />
     <QuickWebChecks />
@@ -54,6 +56,6 @@ export default function SecurityCenter() {
     <section className="sec-toolbox-title"><div><small>Ferramentas completas</small><strong>Abrir um app específico</strong><span>Quando quiser aprofundar, cada bloco abaixo abre uma superfície dedicada.</span></div></section>
     <nav className="sec-filters" aria-label="Categorias do Security Center"><button type="button" className={filter === 'todos' ? 'is-active' : ''} onClick={() => setFilter('todos')}>Todos · {BLOCKS.length}</button>{(Object.keys(GROUP_LABEL) as Group[]).map(group => <button type="button" key={group} className={filter === group ? 'is-active' : ''} onClick={() => setFilter(group)}>{GROUP_LABEL[group]}</button>)}</nav>
     <main className="sec-grid">{visible.map(block => <article className={`sec-card sec-card--${block.group}`} key={block.id}><header><span className="sec-icon">{block.icon}</span>{block.badge && <em>{block.badge}</em>}</header><small>{GROUP_LABEL[block.group]}</small><strong>{block.title}</strong><p>{block.description}</p><button type="button" onClick={() => openBlock(block)}>Abrir função →</button></article>)}</main>
-    <footer className="sec-footer"><strong>Fluxo simples sugerido</strong><span>Rede: descobrir → IP → perfil/checks → evidência. DNS: nome → tipo de registro. Web: URL → TLS/headers/cookies/redirects → IA.</span><small>Os checks mantêm escopo e argumentos fixos; não executam exploração automática nem ataques de credencial.</small></footer>
+    <footer className="sec-footer"><strong>Fluxo simples sugerido</strong><span>Este PC → rede local → IP → perfil/checks → DNS → Web → evidência. O modo avançado continua disponível quando necessário.</span><small>As coletas rápidas são somente leitura ou usam presets fechados; não executam exploração automática nem ataques de credencial.</small></footer>
   </div>;
 }
