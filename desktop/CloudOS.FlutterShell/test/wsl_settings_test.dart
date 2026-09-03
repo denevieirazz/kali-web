@@ -65,6 +65,19 @@ Future<void> openWslSettings(
   await tester.pumpAndSettle();
 }
 
+Future<void> scrollWslTo(
+  WidgetTester tester,
+  Finder target, {
+  double delta = 260,
+}) async {
+  await tester.scrollUntilVisible(
+    target,
+    delta,
+    scrollable: find.byType(Scrollable).last,
+  );
+  await tester.pumpAndSettle();
+}
+
 void main() {
   group('WSL settings honesty', () {
     testWidgets('reports legacy Ubuntu without inventing WSL2 or Kali', (
@@ -84,21 +97,32 @@ void main() {
         find.text('Detectado • 1 distro(s) registrada(s)'),
         findsOneWidget,
       );
-      expect(find.text('Ubuntu'), findsWidgets);
-      expect(find.text('Padrão'), findsOneWidget);
-      expect(find.text('Kali Linux não instalada'), findsOneWidget);
-      expect(find.text('Kali não instalada'), findsOneWidget);
-      expect(
-        find.text('Registrada • versão não comprovada • armazenamento não comprovado'),
-        findsOneWidget,
-      );
       expect(
         find.text('Distro registrada • prontidão não comprovada'),
         findsOneWidget,
       );
-
       expect(find.textContaining('Ativo e Operacional'), findsNothing);
-      expect(find.textContaining('WSL 2 • armazenamento registrado presente'), findsNothing);
+      expect(
+        find.textContaining('WSL 2 • armazenamento registrado presente'),
+        findsNothing,
+      );
+
+      final missingKaliValue = find.text('Kali Linux não instalada');
+      await scrollWslTo(tester, missingKaliValue);
+      expect(missingKaliValue, findsOneWidget);
+
+      final defaultBadge = find.text('Padrão');
+      await scrollWslTo(tester, defaultBadge);
+      expect(find.text('Ubuntu'), findsWidgets);
+      expect(defaultBadge, findsOneWidget);
+      expect(
+        find.text('Registrada • versão não comprovada • armazenamento não comprovado'),
+        findsOneWidget,
+      );
+
+      final missingKaliNotice = find.text('Kali não instalada');
+      await scrollWslTo(tester, missingKaliNotice);
+      expect(missingKaliNotice, findsOneWidget);
     });
 
     testWidgets('renders WSL2 only when typed broker evidence proves it', (
@@ -128,14 +152,16 @@ void main() {
       );
 
       expect(
-        find.text('Registrada • WSL 2 • armazenamento registrado presente'),
-        findsOneWidget,
-      );
-      expect(
         find.text('WSL2 + armazenamento presentes • boot não testado'),
         findsOneWidget,
       );
       expect(find.text('1'), findsWidgets);
+
+      final typedEvidence = find.text(
+        'Registrada • WSL 2 • armazenamento registrado presente',
+      );
+      await scrollWslTo(tester, typedEvidence);
+      expect(typedEvidence, findsOneWidget);
     });
 
     testWidgets('marks only passively proven Kali as security candidate', (
@@ -170,18 +196,21 @@ void main() {
         ),
       );
 
-      expect(find.text('kali-linux'), findsWidgets);
-      expect(find.text('Segurança'), findsOneWidget);
-      expect(find.text('Kali Linux não instalada'), findsNothing);
-      expect(find.text('Kali não instalada'), findsNothing);
-      expect(
-        find.text('kali-linux • candidata passiva'),
-        findsOneWidget,
-      );
       expect(
         find.text('Kali/WSL2 candidata • execução ainda não testada'),
         findsOneWidget,
       );
+
+      final passiveCandidate = find.text('kali-linux • candidata passiva');
+      await scrollWslTo(tester, passiveCandidate);
+      expect(passiveCandidate, findsOneWidget);
+
+      final securityBadge = find.text('Segurança');
+      await scrollWslTo(tester, securityBadge);
+      expect(find.text('kali-linux'), findsWidgets);
+      expect(securityBadge, findsOneWidget);
+      expect(find.text('Kali Linux não instalada'), findsNothing);
+      expect(find.text('Kali não instalada'), findsNothing);
     });
 
     testWidgets('does not call Kali ready when storage is explicitly missing', (
@@ -208,13 +237,18 @@ void main() {
         ),
       );
 
-      expect(
-        find.textContaining('armazenamento registrado AUSENTE'),
-        findsOneWidget,
-      );
-      expect(find.textContaining('ainda não pronta'), findsOneWidget);
-      expect(find.text('Kali ainda não comprovada como backend'), findsOneWidget);
+      final notReady = find.textContaining('ainda não pronta');
+      await scrollWslTo(tester, notReady);
+      expect(notReady, findsOneWidget);
+
+      final missingStorage = find.textContaining('armazenamento registrado AUSENTE');
+      await scrollWslTo(tester, missingStorage);
+      expect(missingStorage, findsOneWidget);
       expect(find.textContaining('candidata passiva'), findsNothing);
+
+      final notice = find.text('Kali ainda não comprovada como backend');
+      await scrollWslTo(tester, notice);
+      expect(notice, findsOneWidget);
     });
 
     testWidgets('distinguishes WSL engine from missing distro inventory', (
@@ -233,9 +267,12 @@ void main() {
       );
 
       expect(find.text('Detectado • nenhuma distro registrada'), findsOneWidget);
-      expect(find.text('Nenhuma distro detectada'), findsOneWidget);
       expect(find.text('Engine presente • sem distro'), findsOneWidget);
       expect(find.text('WSL indisponível'), findsNothing);
+
+      final noDistro = find.text('Nenhuma distro detectada');
+      await scrollWslTo(tester, noDistro);
+      expect(noDistro, findsOneWidget);
     });
 
     testWidgets('does not claim Linux when WSL engine is unavailable', (
@@ -252,10 +289,10 @@ void main() {
 
       expect(find.text('Indisponível'), findsOneWidget);
       expect(find.text('WSL indisponível'), findsWidgets);
-      expect(
-        find.textContaining('Sessões Linux permanecem desativadas'),
-        findsOneWidget,
-      );
+
+      final disabled = find.textContaining('Sessões Linux permanecem desativadas');
+      await scrollWslTo(tester, disabled);
+      expect(disabled, findsOneWidget);
     });
   });
 
