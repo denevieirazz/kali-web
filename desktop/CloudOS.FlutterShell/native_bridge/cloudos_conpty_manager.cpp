@@ -104,6 +104,18 @@ private:
     LPPROC_THREAD_ATTRIBUTE_LIST list_{nullptr};
 };
 
+bool ConfigureKillOnCloseJob(HANDLE job)
+{
+    if (job == nullptr || job == INVALID_HANDLE_VALUE) return false;
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    return SetInformationJobObject(
+               job,
+               JobObjectExtendedLimitInformation,
+               &limits,
+               static_cast<DWORD>(sizeof(limits))) == TRUE;
+}
+
 size_t CompleteUtf8PrefixLength(const std::string& data)
 {
     if (data.empty()) return 0;
@@ -288,6 +300,19 @@ std::string CloudOSConPTYManager::CreateSession(
     startup_info.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
     startup_info.lpAttributeList = attribute_list.get();
 
+    UniqueWinHandle job(CreateJobObjectW(nullptr, nullptr));
+    if (!job.valid())
+    {
+        out_error = "CreateJobObjectW failed: " + std::to_string(GetLastError());
+        return {};
+    }
+    if (!ConfigureKillOnCloseJob(job.get()))
+    {
+        out_error = "SetInformationJobObject(KILL_ON_JOB_CLOSE) failed: " +
+                    std::to_string(GetLastError());
+        return {};
+    }
+
     PROCESS_INFORMATION process_info{};
     if (!CreateProcessW(
             nullptr,
@@ -295,7 +320,7 @@ std::string CloudOSConPTYManager::CreateSession(
             nullptr,
             nullptr,
             FALSE,
-            EXTENDED_STARTUPINFO_PRESENT,
+            EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED,
             nullptr,
             nullptr,
             &startup_info.StartupInfo,
@@ -308,6 +333,21 @@ std::string CloudOSConPTYManager::CreateSession(
     UniqueWinHandle process(process_info.hProcess);
     UniqueWinHandle primary_thread(process_info.hThread);
 
+    if (!AssignProcessToJobObject(job.get(), process.get()))
+    {
+        const DWORD error = GetLastError();
+        TerminateProcess(process.get(), 1);
+        out_error = "AssignProcessToJobObject failed: " + std::to_string(error);
+        return {};
+    }
+    if (ResumeThread(primary_thread.get()) == static_cast<DWORD>(-1))
+    {
+        const DWORD error = GetLastError();
+        TerminateJobObject(job.get(), 1);
+        out_error = "ResumeThread failed: " + std::to_string(error);
+        return {};
+    }
+
     const uint64_t id_number = ++session_counter_;
     const std::string session_id =
         "pty_" + std::to_string(id_number) + "_" + shell_kind;
@@ -319,6 +359,7 @@ std::string CloudOSConPTYManager::CreateSession(
     session->cols = cols;
     session->rows = rows;
     session->pseudo_console = std::move(pseudo_console);
+    session->job = std::move(job);
     session->process = std::move(process);
     session->primary_thread = std::move(primary_thread);
     session->pipe_in_writer = std::move(pipe_in_writer);
@@ -594,7 +635,9 @@ bool CloudOSConPTYManager::CloseSession(const std::string& session_id)
     if (session->closing.exchange(true)) return true;
     session->is_alive.store(false);
 
-    // Closing input requests normal EOF before a forced termination fallback.
+    // Closing input requests normal EOF first. The process was assigned to a
+    // per-session KILL_ON_JOB_CLOSE job before ResumeThread, so there is no
+    // child-spawn window outside the cleanup authority.
     {
         std::lock_guard<std::mutex> lock(session->io_mutex);
         session->pipe_in_writer.reset();
@@ -603,10 +646,18 @@ bool CloudOSConPTYManager::CloseSession(const std::string& session_id)
     const HANDLE process = session->process.get();
     if (process && process != INVALID_HANDLE_VALUE)
     {
-        if (WaitForSingleObject(process, 250) == WAIT_TIMEOUT)
-        {
-            TerminateProcess(process, 0);
-        }
+        (void)WaitForSingleObject(process, 250);
+    }
+
+    // Terminate the whole session job, not only the root wsl.exe/cmd.exe.
+    // This also removes descendants that survived a graceful root exit.
+    if (session->job.valid())
+    {
+        (void)TerminateJobObject(session->job.get(), 0);
+    }
+    if (process && process != INVALID_HANDLE_VALUE)
+    {
+        (void)WaitForSingleObject(process, 5000);
     }
 
     // Closing HPCON closes ConPTY's pipe ends. The reader remains alive to
@@ -629,6 +680,7 @@ bool CloudOSConPTYManager::CloseSession(const std::string& session_id)
         session->pipe_out_reader.reset();
         session->process.reset();
         session->primary_thread.reset();
+        session->job.reset();
     }
 
     {
@@ -689,4 +741,3 @@ void CloudOSConPTYManager::ShutdownAll()
 }
 
 } // namespace CloudOS
-
