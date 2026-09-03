@@ -58,6 +58,7 @@ class _TerminalWindowState extends State<TerminalWindow> {
   int _tabCounter = 1;
   WslRuntimePolicy _wslPolicy = WslRuntimePolicy(
     wslAvailable: false,
+    engineAvailable: false,
     installedDistros: const <String>[],
   );
   StreamSubscription<TerminalDataEvent>? _dataSub;
@@ -83,6 +84,7 @@ class _TerminalWindowState extends State<TerminalWindow> {
       final snapshot = await widget.bridge.loadSystemSnapshot();
       _wslPolicy = WslRuntimePolicy(
         wslAvailable: snapshot.wslAvailable,
+        engineAvailable: snapshot.wslEngineAvailable,
         installedDistros: snapshot.distros,
         defaultDistro: snapshot.defaultDistro,
       );
@@ -151,7 +153,7 @@ class _TerminalWindowState extends State<TerminalWindow> {
         return;
       }
       final distro = _wslPolicy.resolveRequestedDistro(widget.initialDistro);
-      if (distro.isEmpty) {
+      if (!_wslPolicy.canStartWslSession || distro.isEmpty) {
         _addUnavailableWslTab(
           title: 'WSL indisponível',
           message: _wslUnavailableMessage(),
@@ -176,10 +178,13 @@ class _TerminalWindowState extends State<TerminalWindow> {
   }
 
   String _wslUnavailableMessage() {
-    if (!_wslPolicy.wslAvailable) {
-      return 'WSL não está disponível neste Windows. O CloudOS não iniciará uma sessão Linux falsa.';
+    if (!_wslPolicy.engineAvailable) {
+      return 'O mecanismo WSL não foi detectado neste Windows. O CloudOS não iniciará uma sessão Linux falsa.';
     }
-    return 'WSL está disponível, mas nenhuma distribuição Linux foi detectada. Provisione uma distribuição antes de abrir esta sessão.';
+    if (!_wslPolicy.hasInstalledDistros) {
+      return 'O mecanismo WSL foi detectado, mas nenhuma distribuição Linux registrada foi encontrada. Instale ou provisione uma distribuição antes de abrir esta sessão.';
+    }
+    return 'Há uma distribuição registrada, mas o runtime ainda não foi confirmado como utilizável. Ela pode exigir provisionamento inicial.';
   }
 
   void _addUnavailableWslTab({required String title, required String message}) {
@@ -191,7 +196,7 @@ class _TerminalWindowState extends State<TerminalWindow> {
     tab.terminal.write('\x1b[33mCloudOS Linux Runtime\x1b[0m\r\n\r\n');
     tab.terminal.write('$message\r\n');
     tab.terminal.write(
-      '\r\nStatus: WSL_AVAILABLE=${_wslPolicy.wslAvailable} | DISTROS=${_wslPolicy.installedDistros.length}\r\n',
+      '\r\nStatus: WSL_ENGINE=${_wslPolicy.engineAvailable} | WSL_USABLE=${_wslPolicy.wslAvailable} | DISTROS=${_wslPolicy.installedDistros.length}\r\n',
     );
     setState(() {
       _tabs.add(tab);
@@ -201,6 +206,13 @@ class _TerminalWindowState extends State<TerminalWindow> {
 
   void _addNewTab(TerminalShellKind kind, {String distro = ''}) {
     if (kind == TerminalShellKind.wsl) {
+      if (!_wslPolicy.canStartWslSession) {
+        _addUnavailableWslTab(
+          title: 'WSL indisponível',
+          message: _wslUnavailableMessage(),
+        );
+        return;
+      }
       final resolved = _wslPolicy.resolveRequestedDistro(distro);
       if (resolved.isEmpty) {
         _addUnavailableWslTab(
@@ -460,13 +472,15 @@ class _TerminalWindowState extends State<TerminalWindow> {
                 child: Text('Prompt de Comando (ConPTY)'),
               ),
               const PopupMenuDivider(),
-              if (!_wslPolicy.wslAvailable || !_wslPolicy.hasInstalledDistros)
+              if (!_wslPolicy.canStartWslSession)
                 PopupMenuItem(
                   value: 'wsl_unavailable',
                   child: Text(
-                    !_wslPolicy.wslAvailable
-                        ? 'WSL indisponível neste sistema'
-                        : 'WSL sem distribuições detectadas',
+                    !_wslPolicy.engineAvailable
+                        ? 'WSL não instalado/detectado'
+                        : !_wslPolicy.hasInstalledDistros
+                        ? 'WSL sem distribuições detectadas'
+                        : 'WSL ainda não utilizável',
                   ),
                 )
               else ...<PopupMenuEntry<String>>[
