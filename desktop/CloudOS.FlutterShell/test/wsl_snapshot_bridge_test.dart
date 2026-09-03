@@ -13,7 +13,7 @@ void main() {
         .setMockMethodCallHandler(channel, null);
   });
 
-  test('maps typed WSL engine and distro version evidence', () async {
+  test('maps complete typed WSL passive runtime evidence', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
           expect(call.method, 'getSystemSnapshot');
@@ -29,20 +29,28 @@ void main() {
             'batteryPercent': 0,
             'wslAvailable': true,
             'wslEngineAvailable': true,
+            'wslPassiveReady': true,
             'distros': <String>['Ubuntu', 'kali-linux'],
             'defaultDistro': 'Ubuntu',
+            'preferredSecurityDistro': 'kali-linux',
+            'wslRegisteredCount': 2,
+            'wslLaunchCandidateCount': 2,
+            'wsl1Count': 0,
+            'wsl2Count': 2,
             'wslDistros': <Object?>[
               <String, Object?>{
                 'name': 'Ubuntu',
-                'versionKnown': true,
                 'version': 2,
                 'isDefault': true,
+                'basePathPresent': true,
+                'securityCandidate': false,
               },
               <String, Object?>{
                 'name': 'kali-linux',
-                'versionKnown': true,
                 'version': 2,
                 'isDefault': false,
+                'basePathPresent': true,
+                'securityCandidate': true,
               },
             ],
             'currentWorkspace': 1,
@@ -53,13 +61,28 @@ void main() {
 
     expect(snapshot.wslEngineAvailable, isTrue);
     expect(snapshot.wslAvailable, isTrue);
+    expect(snapshot.wslPassiveReady, isTrue);
+    expect(snapshot.passiveReady, isTrue);
     expect(snapshot.defaultDistro, 'Ubuntu');
+    expect(snapshot.preferredSecurityDistro, 'kali-linux');
+    expect(snapshot.effectiveRegisteredCount, 2);
+    expect(snapshot.effectiveLaunchCandidateCount, 2);
+    expect(snapshot.effectiveWsl1Count, 0);
+    expect(snapshot.effectiveWsl2Count, 2);
     expect(snapshot.wslDistros, hasLength(2));
-    expect(snapshot.wslDistros.first.name, 'Ubuntu');
-    expect(snapshot.wslDistros.first.version, 2);
-    expect(snapshot.wslDistros.first.isDefault, isTrue);
-    expect(snapshot.wslDistros.last.name, 'kali-linux');
-    expect(snapshot.wslDistros.last.version, 2);
+
+    final ubuntu = snapshot.distroInfo('ubuntu')!;
+    expect(ubuntu.version, 2);
+    expect(ubuntu.isDefault, isTrue);
+    expect(ubuntu.basePathPresent, isTrue);
+    expect(ubuntu.securityCandidate, isFalse);
+
+    final kali = snapshot.distroInfo('KALI-LINUX')!;
+    expect(kali.version, 2);
+    expect(kali.storagePresent, isTrue);
+    expect(kali.isSecurityCandidate, isTrue);
+    expect(snapshot.distroVersions['kali-linux'], 2);
+    expect(snapshot.distroStorageEvidence['kali-linux'], isTrue);
   });
 
   test('keeps engine available when no distro is registered', () async {
@@ -73,8 +96,13 @@ void main() {
             'batteryPercent': 0,
             'wslAvailable': false,
             'wslEngineAvailable': true,
+            'wslPassiveReady': false,
             'distros': <String>[],
             'wslDistros': <Object?>[],
+            'wslRegisteredCount': 0,
+            'wslLaunchCandidateCount': 0,
+            'wsl1Count': 0,
+            'wsl2Count': 0,
           };
         });
 
@@ -82,11 +110,13 @@ void main() {
 
     expect(snapshot.wslEngineAvailable, isTrue);
     expect(snapshot.wslAvailable, isFalse);
+    expect(snapshot.passiveReady, isFalse);
     expect(snapshot.distros, isEmpty);
     expect(snapshot.wslDistros, isEmpty);
+    expect(snapshot.effectiveRegisteredCount, 0);
   });
 
-  test('legacy V21 distro list does not become synthetic WSL2 evidence', () async {
+  test('legacy V21 inventory remains unknown instead of synthetic WSL2', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
           return <String, Object?>{
@@ -103,16 +133,54 @@ void main() {
 
     final snapshot = await bridge.loadSystemSnapshot();
 
-    // Old brokers have no separate engine field, so compatibility falls back
-    // to the old usable signal. Version remains unknown.
     expect(snapshot.wslEngineAvailable, isTrue);
+    expect(snapshot.wslPassiveReady, isNull);
+    expect(snapshot.effectiveLaunchCandidateCount, isNull);
     expect(snapshot.wslDistros, hasLength(1));
     expect(snapshot.wslDistros.single.name, 'Ubuntu');
     expect(snapshot.wslDistros.single.version, isNull);
+    expect(snapshot.wslDistros.single.basePathPresent, isNull);
+    expect(snapshot.wslDistros.single.securityCandidate, isNull);
     expect(snapshot.wslDistros.single.isDefault, isTrue);
   });
 
-  test('ignores invalid version values instead of guessing', () async {
+  test('does not coerce explicit missing BasePath into readiness', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          return <String, Object?>{
+            'deviceName': 'CloudOS-Test',
+            'networkName': 'Ethernet',
+            'volume': 0.0,
+            'brightness': 0.0,
+            'batteryPercent': 0,
+            'wslAvailable': true,
+            'wslEngineAvailable': true,
+            'wslPassiveReady': false,
+            'distros': <String>['Ubuntu'],
+            'defaultDistro': 'Ubuntu',
+            'wslRegisteredCount': 1,
+            'wslLaunchCandidateCount': 0,
+            'wslDistros': <Object?>[
+              <String, Object?>{
+                'name': 'Ubuntu',
+                'version': 2,
+                'isDefault': true,
+                'basePathPresent': false,
+                'securityCandidate': false,
+              },
+            ],
+          };
+        });
+
+    final snapshot = await bridge.loadSystemSnapshot();
+
+    expect(snapshot.passiveReady, isFalse);
+    expect(snapshot.effectiveLaunchCandidateCount, 0);
+    expect(snapshot.distroStorageEvidence['Ubuntu'], isFalse);
+    expect(snapshot.distroInfo('Ubuntu')!.storagePresent, isFalse);
+  });
+
+  test('ignores impossible version values instead of guessing', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
           return <String, Object?>{
@@ -127,9 +195,9 @@ void main() {
             'wslDistros': <Object?>[
               <String, Object?>{
                 'name': 'OddLinux',
-                'versionKnown': false,
                 'version': 99,
                 'isDefault': false,
+                'basePathPresent': true,
               },
             ],
           };
@@ -138,5 +206,41 @@ void main() {
     final snapshot = await bridge.loadSystemSnapshot();
 
     expect(snapshot.wslDistros.single.version, isNull);
+    expect(snapshot.wslDistros.single.basePathPresent, isTrue);
+    expect(snapshot.wslVersion2Available, isFalse);
+  });
+
+  test('deduplicates typed distro names case-insensitively', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          return <String, Object?>{
+            'deviceName': 'CloudOS-Test',
+            'networkName': 'Ethernet',
+            'volume': 0.0,
+            'brightness': 0.0,
+            'batteryPercent': 0,
+            'wslAvailable': true,
+            'wslEngineAvailable': true,
+            'distros': <String>['Ubuntu'],
+            'wslDistros': <Object?>[
+              <String, Object?>{
+                'name': 'Ubuntu',
+                'version': 2,
+                'basePathPresent': true,
+              },
+              <String, Object?>{
+                'name': 'ubuntu',
+                'version': 1,
+                'basePathPresent': false,
+              },
+            ],
+          };
+        });
+
+    final snapshot = await bridge.loadSystemSnapshot();
+
+    expect(snapshot.wslDistros, hasLength(1));
+    expect(snapshot.wslDistros.single.name, 'Ubuntu');
+    expect(snapshot.wslDistros.single.version, 2);
   });
 }
