@@ -13,13 +13,15 @@ $ErrorActionPreference = 'Stop'
 
 $deploymentModule = Join-Path $PSScriptRoot 'CloudOS.Deployment.V13.psm1'
 $healthModule = Join-Path $PSScriptRoot 'CloudOS.HealthGate.V22.psm1'
-foreach ($path in @($deploymentModule, $healthModule)) {
+$managedToolsModule = Join-Path $PSScriptRoot 'CloudOS.ManagedTools.V22.psm1'
+foreach ($path in @($deploymentModule, $healthModule, $managedToolsModule)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "CloudOS V22 update dependency missing: $path"
     }
 }
 Import-Module -Name $deploymentModule -Force
 Import-Module -Name $healthModule -Force
+Import-Module -Name $managedToolsModule -Force
 
 if ([string]::IsNullOrWhiteSpace($InstallRoot)) {
     $InstallRoot = Get-CloudOSDefaultInstallRoot
@@ -50,6 +52,7 @@ $previousActive = [string]$before.active_version
 $deploymentSucceeded = $false
 $health = $null
 $status = $null
+$managedTools = $null
 try {
     $status = Invoke-CloudOSDeployment `
         -SourcePackageRoot $sourceIdentity.Root `
@@ -84,6 +87,15 @@ try {
             throw "CloudOS V22 update health gate failed with no last-known-good version ($($health.reason)). Managed activation was removed when possible."
         }
     }
+
+    # V13 keeps immutable version/state ownership. Only after a healthy V22
+    # activation do we publish V22 maintenance entrypoints into the managed root.
+    # A deliberately skipped health gate does not get to refresh recovery tools.
+    if (-not $SkipPostActivationHealthCheck) {
+        $managedTools = Install-CloudOSManagedToolsV22 `
+            -SourceRoot $PSScriptRoot `
+            -InstallRoot $status.install_root
+    }
 }
 catch {
     if (-not $deploymentSucceeded) {
@@ -105,7 +117,8 @@ $report = [pscustomobject]@{
     signature_all_valid = ($unsignedOrInvalid.Count -eq 0)
     signature_evidence = $signatureEvidence
     rollback_capacity = (-not [string]::IsNullOrWhiteSpace([string]$status.last_known_good))
+    managed_tools_synced = ($null -ne $managedTools -and [bool]$managedTools.installed)
 }
 
 $report | Format-List
-Write-Host "[CloudOS V22] UPDATE_OK active=$($status.active_version) lkg=$($status.last_known_good) health=$($health.reason) signatureEnforced=$([bool]$RequireAuthenticodeSignature)"
+Write-Host "[CloudOS V22] UPDATE_OK active=$($status.active_version) lkg=$($status.last_known_good) health=$($health.reason) toolsSynced=$($report.managed_tools_synced) signatureEnforced=$([bool]$RequireAuthenticodeSignature)"
