@@ -48,10 +48,24 @@ foreach ($forbidden in @(
     }
 }
 
-# The ExtractZip worker must route through validation rather than calling tar -xf directly.
-$extractStart = $text.IndexOf('else if (kind == OperationKind::ExtractZip)', [StringComparison]::Ordinal)
+# The ExtractZip execution path inside WorkerMain must route through validation
+# rather than calling tar -xf directly. StartOperation also contains an
+# ExtractZip branch for UI preparation, so anchor the inspection to WorkerMain
+# before locating the execution branch.
+$workerStart = $text.IndexOf(
+    'void CloudOSNativeFileOperationsWindow::WorkerMain(',
+    [StringComparison]::Ordinal)
+if ($workerStart -lt 0) { throw 'WorkerMain implementation missing.' }
+
+$extractStart = $text.IndexOf(
+    'else if (kind == OperationKind::ExtractZip)',
+    $workerStart,
+    [StringComparison]::Ordinal)
 if ($extractStart -lt 0) { throw 'ExtractZip worker branch missing.' }
-$extractRegion = $text.Substring($extractStart, [Math]::Min(1800, $text.Length - $extractStart))
+
+$extractRegion = $text.Substring(
+    $extractStart,
+    [Math]::Min(1800, $text.Length - $extractStart))
 if (-not $extractRegion.Contains('ValidateAndExtractZip')) {
     throw 'ExtractZip worker bypasses ValidateAndExtractZip.'
 }
