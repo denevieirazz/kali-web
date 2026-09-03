@@ -11,6 +11,7 @@ import { getNetworkDiagnostics } from './networkDiagnostics.js';
 import { getHostDiagnostics } from './hostDiagnostics.js';
 import { getLocalNetworkPosture } from './localNetworkPosture.js';
 import { inspectDnsName } from './dnsInspector.js';
+import { inspectPublicWebUrl } from './webInspector.js';
 import { enrichNetworkAssessment } from './networkInsights.js';
 import { enrichWifiDiagnostics } from './wifiInsights.js';
 
@@ -128,5 +129,21 @@ securityToolsRouter.post('/network/scan', async (req, res) => {
     ]);
     const status = clientErrors.has(error.code) ? 400 : error.code === 'DISTRO_NOT_INSTALLED' ? 404 : 503;
     res.status(status).json({ error: error.message || 'Falha na avaliação de rede.', errorCode: error.code || 'NETWORK_ASSESSMENT_FAILED' });
+  }
+});
+
+securityToolsRouter.post('/web/inspect', async (req, res) => {
+  try {
+    res.json(await inspectPublicWebUrl(req.body?.url));
+  } catch (error) {
+    const clientErrors = new Set([
+      'INVALID_WEB_URL', 'WEB_SCHEME_NOT_ALLOWED', 'WEB_CREDENTIALS_NOT_ALLOWED',
+      'WEB_PORT_NOT_ALLOWED', 'WEB_TARGET_NOT_PUBLIC', 'WEB_REDIRECT_INVALID',
+    ]);
+    const status = clientErrors.has(error.code) ? 400 : 503;
+    res.status(status).json({
+      error: error.message || 'Falha na inspeção web.',
+      errorCode: error.code || 'WEB_INSPECTION_FAILED',
+    });
   }
 });

@@ -15,7 +15,7 @@ const auditedWindowsViewportNames = [
 ];
 
 const deterministicWindowsCount = 218;
-const cloudOSBuiltinCount = 28;
+const cloudOSBuiltinCount = 29;
 const deterministicAllAppsCount = deterministicWindowsCount + cloudOSBuiltinCount;
 
 function windowsFixture(name: string, index: number) {
@@ -94,6 +94,7 @@ test.describe('PW-02 — Menu Iniciar', () => {
       'Wi‑Fi Inspector',
       'Network Shield',
       'DNS Inspector',
+      'Web Inspector',
       '7-Zip File Manager',
       'Azure Cosmos DB Emulator'
     ]) {

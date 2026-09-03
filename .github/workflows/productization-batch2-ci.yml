@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - productization/cloudos-distribution-batch-2
+      - feat/web-assessment-ui
   workflow_dispatch:
 
 permissions:
