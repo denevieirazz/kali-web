@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { apiClient } from '../../services/apiClient';
 import { getUserStorageKey } from '../../services/userScope.js';
+import WebOperatorCoach from './WebOperatorCoach';
 import './WebInspector.css';
 
 type Severity = 'info' | 'low' | 'medium' | 'high' | 'critical';
@@ -174,7 +175,7 @@ export default function WebInspector() {
       }, ...history.filter(item => item.url !== data.requestedUrl)].slice(0, 12);
       setHistory(next);
       saveHistory(next);
-      setNotice(`Inspeção concluída: HTTP ${data.status}, ${data.summary.findingCount} observação(ões).`);
+      setNotice(`Análise guiada concluída: HTTP ${data.status}, ${data.summary.findingCount} ponto(s) priorizado(s).`);
     } catch (cause) {
       setResult(null);
       setError(cause instanceof Error ? cause.message : 'Não foi possível analisar a URL.');
@@ -216,7 +217,7 @@ export default function WebInspector() {
     if (!aiPayload) return;
     try {
       await navigator.clipboard.writeText(JSON.stringify(aiPayload, null, 2));
-      setNotice('Contexto web estruturado copiado para a IA do CloudOS.');
+      setNotice('Contexto estruturado copiado. A IA já recebe evidência, prioridade e limites da coleta.');
     } catch {
       setError('Não foi possível acessar a área de transferência.');
     }
@@ -237,12 +238,12 @@ export default function WebInspector() {
   return <div className="wi-root">
     <header className="wi-hero">
       <div>
-        <small>CloudOS · Web Inspector</small>
-        <h1>Assessment web guiado</h1>
-        <p>Cole uma URL pública e transforme HTTP, TLS, headers e cookies em evidência legível.</p>
+        <small>CloudOS · Web Inspector · Modo Assistido</small>
+        <h1>Colou a URL. O CloudOS organiza o resto.</h1>
+        <p>Feito para técnico de TI que não vive de pentest: coleta segura, prioridade automática, explicação simples, evidência e próximo passo.</p>
       </div>
       <div className="wi-policy">
-        <span>1 URL</span><span>HTTP/HTTPS</span><span>SSRF bloqueado</span><span>sem exploit automático</span>
+        <span>1 clique</span><span>prioridade automática</span><span>explica o jargão</span><span>SSRF bloqueado</span><span>sem exploit automático</span>
       </div>
     </header>
 
@@ -253,27 +254,27 @@ export default function WebInspector() {
 
     <section className="wi-runner">
       <label>
-        <span>URL pública autorizada</span>
-        <input value={url} onChange={event => setUrl(event.target.value)} placeholder="https://example.com" onKeyDown={event => { if (event.key === 'Enter') void runInspection(); }} />
+        <span>1. Cole a URL pública que você tem autorização para verificar</span>
+        <input value={url} onChange={event => setUrl(event.target.value)} placeholder="https://site-da-empresa.com" onKeyDown={event => { if (event.key === 'Enter') void runInspection(); }} />
       </label>
-      <button type="button" className="wi-primary" onClick={() => void runInspection()} disabled={loading}>{loading ? 'Analisando…' : '▶ Analisar URL'}</button>
-      <p>Sem crawler, wordlist, fuzzing, login automático ou execução de payloads.</p>
+      <button type="button" className="wi-primary" onClick={() => void runInspection()} disabled={loading}>{loading ? 'Coletando e priorizando…' : '▶ Fazer análise guiada'}</button>
+      <p>O CloudOS consulta uma URL, valida DNS/TLS, lê metadata HTTP e organiza a revisão. Não faz crawler, wordlist, fuzzing, login automático ou payload de exploração.</p>
     </section>
 
     <div className="wi-layout">
       <aside className="wi-history">
-        <header><div><small>Recentes</small><strong>Últimas URLs</strong></div><button type="button" onClick={clearHistory} disabled={!history.length}>Limpar</button></header>
+        <header><div><small>Recentes</small><strong>Repetir análise</strong></div><button type="button" onClick={clearHistory} disabled={!history.length}>Limpar</button></header>
         <div className="wi-history-list">
           {history.length ? history.map(item => <button type="button" key={`${item.url}-${item.completedAt}`} onClick={() => { setUrl(item.url); void runInspection(item.url); }}>
             <div><strong>{new URL(item.finalUrl).hostname}</strong><span>HTTP {item.status}</span></div>
             <small>{item.title || item.url}</small>
-            <em>{item.findings} observação(ões) · {item.mediumOrHigher} média+</em>
-          </button>) : <p>Nenhuma inspeção ainda.</p>}
+            <em>{item.findings} ponto(s) · {item.mediumOrHigher} média+</em>
+          </button>) : <p>Nenhuma análise ainda.</p>}
         </div>
       </aside>
 
       <main className="wi-content">
-        {!result ? <div className="wi-empty"><span>🌐</span><strong>Cole a primeira URL.</strong><p>O CloudOS vai explicar a resposta sem despejar terminal bruto.</p></div> : <>
+        {!result ? <div className="wi-empty"><span>🎯</span><strong>Você só precisa saber qual URL quer revisar.</strong><p>Cole o endereço acima. Depois o CloudOS mostra o que olhar primeiro, por que importa e onde está a evidência.</p></div> : <>
           <section className="wi-summary">
             <div className="wi-summary-title">
               <div><small>{result.title || 'Página sem título'}</small><h2>{new URL(result.finalUrl).hostname}</h2><span>{result.finalUrl}</span></div>
@@ -283,13 +284,22 @@ export default function WebInspector() {
               <article><small>Tempo</small><strong>{result.durationMs} ms</strong><span>coleta limitada</span></article>
               <article><small>Redirects</small><strong>{result.redirects.length}</strong><span>{result.redirectLimitReached ? 'limite atingido' : 'cadeia concluída'}</span></article>
               <article><small>Cookies</small><strong>{result.cookies.length}</strong><span>valores nunca expostos</span></article>
-              <article><small>Atenção</small><strong>{SEVERITY_LABEL[highestSeverity]}</strong><span>{result.summary.mediumOrHigher} finding(s) médio+</span></article>
+              <article><small>Maior atenção</small><strong>{SEVERITY_LABEL[highestSeverity]}</strong><span>{result.summary.mediumOrHigher} ponto(s) médio+</span></article>
               <article><small>Corpo amostrado</small><strong>{formatBytes(result.bodySampledBytes)}</strong><span>{result.bodyTruncated ? 'limitado' : 'completo no limite'}</span></article>
             </div>
           </section>
 
+          <WebOperatorCoach
+            findings={result.findings}
+            status={result.status}
+            hasTls={Boolean(result.tls)}
+            onOpenTab={setTab}
+            onCopyForAi={() => void copyForAi()}
+            onExportEvidence={exportEvidence}
+          />
+
           <nav className="wi-tabs" aria-label="Áreas do Web Inspector">
-            {(['overview', 'headers', 'cookies', 'redirects', 'evidence'] as Tab[]).map(value => <button type="button" key={value} className={tab === value ? 'is-active' : ''} onClick={() => setTab(value)}>{value === 'overview' ? 'Resumo' : value === 'headers' ? 'Headers' : value === 'cookies' ? `Cookies ${result.cookies.length}` : value === 'redirects' ? `Redirects ${result.redirects.length}` : 'Evidências'}</button>)}
+            {(['overview', 'headers', 'cookies', 'redirects', 'evidence'] as Tab[]).map(value => <button type="button" key={value} className={tab === value ? 'is-active' : ''} onClick={() => setTab(value)}>{value === 'overview' ? 'Visão técnica' : value === 'headers' ? 'Headers' : value === 'cookies' ? `Cookies ${result.cookies.length}` : value === 'redirects' ? `Redirects ${result.redirects.length}` : 'Evidências'}</button>)}
           </nav>
 
           {tab === 'overview' && <div className="wi-grid">
@@ -313,7 +323,7 @@ export default function WebInspector() {
             </section>
 
             <section className="wi-card wi-card--wide">
-              <header><strong>O que merece revisão</strong><span>{result.findings.length} observação(ões)</span></header>
+              <header><strong>Todos os pontos encontrados</strong><span>{result.findings.length} observação(ões)</span></header>
               {result.findings.length ? <div className="wi-findings">{result.findings.map(finding => <article key={finding.id}>
                 <span className={`wi-risk wi-risk--${finding.severity}`}>{SEVERITY_LABEL[finding.severity]}</span>
                 <div><strong>{finding.title}</strong><p>{finding.evidence}</p><small>{finding.recommendation}</small></div>
@@ -321,7 +331,7 @@ export default function WebInspector() {
             </section>
 
             <section className="wi-card wi-card--wide">
-              <header><strong>Próximos passos</strong><span>defensivos</span></header>
+              <header><strong>Checklist depois da triagem</strong><span>defensivo</span></header>
               <ol className="wi-next">{result.nextSteps.map((step, index) => <li key={`${index}-${step}`}>{step}</li>)}</ol>
             </section>
           </div>}
@@ -348,7 +358,7 @@ export default function WebInspector() {
 
           {tab === 'evidence' && <section className="wi-evidence">
             <div><small>Para IA / relatório</small><strong>Evidência estruturada</strong><p>Inclui somente metadata coletada e findings; não inclui corpo HTML nem valor de cookie.</p></div>
-            <div><button type="button" className="wi-primary" onClick={() => void copyForAi()}>Copiar contexto para IA</button><button type="button" onClick={exportEvidence}>Exportar JSON</button></div>
+            <div><button type="button" className="wi-primary" onClick={() => void copyForAi()}>Explicar com IA</button><button type="button" onClick={exportEvidence}>Exportar JSON</button></div>
             <pre>{JSON.stringify(aiPayload, null, 2)}</pre>
           </section>}
         </>}
