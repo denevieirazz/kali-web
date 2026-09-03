@@ -7,6 +7,7 @@ import {
   type GuidedFinding,
   type GuidedTab,
 } from './webGuidance';
+import './WebOperatorCoach.css';
 
 type Props = {
   findings: GuidedFinding[];
