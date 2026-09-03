@@ -6,6 +6,7 @@ const read = relativePath => readFileSync(new URL(relativePath, import.meta.url)
 
 const center = read('../src/apps/SecurityCenter/SecurityCenter.tsx');
 const quick = read('../src/apps/SecurityCenter/QuickLocalChecks.tsx');
+const history = read('../src/apps/SecurityCenter/QuickCheckHistory.tsx');
 const knowledge = read('../src/apps/SecurityCenter/portKnowledge.ts');
 const evidence = read('../src/apps/SecurityCenter/quickCheckEvidence.ts');
 const registry = read('../src/core/appRegistry.ts');
@@ -60,6 +61,16 @@ test('one-click result can be copied, exported as JSON and saved as readable rep
   assert.match(evidence, /Portas abertas/);
   assert.match(evidence, /Próximos passos/);
   assert.match(evidence, /Porta aberta não equivale a vulnerabilidade confirmada/);
+});
+
+test('quick check history is user-scoped, bounded and can rerun saved presets', () => {
+  assert.match(quick, /<QuickCheckHistory/);
+  assert.match(history, /getUserStorageKey/);
+  assert.match(history, /MAX_RECORDS = 12/);
+  assert.match(history, /Repetir sem configurar tudo de novo/);
+  assert.match(history, /Repetir check/);
+  assert.match(history, /onRerun\(record\.preset, record\.target\)/);
+  assert.match(history, /openPortCount/);
 });
 
 test('quick checks remain fixed-endpoint and do not expose arbitrary command execution', () => {
