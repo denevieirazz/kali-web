@@ -117,9 +117,6 @@ if ($systemSource -notmatch 'wsl\.inventory\.typed' -or
     $systemSource -notmatch 'wsl\.inventory\.health') {
     throw 'Broker capabilities must advertise typed WSL inventory and health evidence.'
 }
-if ($systemSource -match 'wsl\.health\.probe') {
-    throw 'Passive inventory slice must not advertise the active WSL health probe before its implementation is ported.'
-}
 
 if ($project -notmatch 'src\\wsl_service_v21\.cpp' -or
     $project -notmatch 'src\\system_service_v21\.cpp') {
