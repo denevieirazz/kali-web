@@ -5,6 +5,9 @@ enum CloudWindowType {
   terminal,
   browser,
   settings,
+  notes,
+  calculator,
+  taskManager,
 }
 
 class CloudWindow {
@@ -18,6 +21,8 @@ class CloudWindow {
     this.minSize = const Size(420, 300),
     this.isMinimized = false,
     this.isMaximized = false,
+    this.isSnappedLeft = false,
+    this.isSnappedRight = false,
     this.preMaximizedPosition,
     this.preMaximizedSize,
     this.zIndex = 0,
@@ -32,6 +37,8 @@ class CloudWindow {
   final Size minSize;
   bool isMinimized;
   bool isMaximized;
+  bool isSnappedLeft;
+  bool isSnappedRight;
   Offset? preMaximizedPosition;
   Size? preMaximizedSize;
   int zIndex;
@@ -46,6 +53,8 @@ class CloudWindow {
     Size? minSize,
     bool? isMinimized,
     bool? isMaximized,
+    bool? isSnappedLeft,
+    bool? isSnappedRight,
     Offset? preMaximizedPosition,
     Size? preMaximizedSize,
     int? zIndex,
@@ -60,6 +69,8 @@ class CloudWindow {
       minSize: minSize ?? this.minSize,
       isMinimized: isMinimized ?? this.isMinimized,
       isMaximized: isMaximized ?? this.isMaximized,
+      isSnappedLeft: isSnappedLeft ?? this.isSnappedLeft,
+      isSnappedRight: isSnappedRight ?? this.isSnappedRight,
       preMaximizedPosition: preMaximizedPosition ?? this.preMaximizedPosition,
       preMaximizedSize: preMaximizedSize ?? this.preMaximizedSize,
       zIndex: zIndex ?? this.zIndex,

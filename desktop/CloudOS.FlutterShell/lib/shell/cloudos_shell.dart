@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../core/cloudos_theme.dart';
 import '../features/browser/presentation/browser_window.dart';
 import '../features/files/presentation/files_window.dart';
 import '../features/notifications/presentation/notification_center_panel.dart';
@@ -13,6 +14,11 @@ import '../features/start/domain/start_running_app.dart';
 import '../features/start/presentation/start_panel.dart';
 import '../features/taskbar/presentation/cloud_taskbar.dart';
 import '../features/terminal/presentation/terminal_window.dart';
+import '../features/calculator/presentation/calculator_window.dart';
+import '../features/notes/presentation/notes_window.dart';
+import '../features/spotlight/domain/spotlight_item.dart';
+import '../features/spotlight/presentation/spotlight_palette.dart';
+import '../features/task_manager/presentation/task_manager_window.dart';
 import '../models/cloud_app.dart';
 import '../models/cloud_notification.dart';
 import '../models/cloud_system_snapshot.dart';
@@ -46,6 +52,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
   bool startOpen = false;
   bool quickSettingsOpen = false;
   bool notificationsOpen = false;
+  bool spotlightOpen = false;
   int currentWorkspace = 1;
   String? selectedDesktopIcon;
 
@@ -86,7 +93,34 @@ class _CloudOSShellState extends State<CloudOSShell> {
   Size? settingsPreMaxSize;
   int settingsZIndex = 4;
 
-  int topZIndex = 5;
+  bool notesOpen = false;
+  bool notesMinimized = false;
+  bool notesMaximized = false;
+  Offset notesOffset = const Offset(240, 110);
+  Size notesSize = const Size(780, 520);
+  Offset? notesPreMaxOffset;
+  Size? notesPreMaxSize;
+  int notesZIndex = 5;
+
+  bool calculatorOpen = false;
+  bool calculatorMinimized = false;
+  bool calculatorMaximized = false;
+  Offset calculatorOffset = const Offset(280, 130);
+  Size calculatorSize = const Size(540, 480);
+  Offset? calculatorPreMaxOffset;
+  Size? calculatorPreMaxSize;
+  int calculatorZIndex = 6;
+
+  bool taskManagerOpen = false;
+  bool taskManagerMinimized = false;
+  bool taskManagerMaximized = false;
+  Offset taskManagerOffset = const Offset(200, 100);
+  Size taskManagerSize = const Size(720, 480);
+  Offset? taskManagerPreMaxOffset;
+  Size? taskManagerPreMaxSize;
+  int taskManagerZIndex = 7;
+
+  int topZIndex = 8;
   String? activeInternalWindowId = 'files';
 
   bool altTabOpen = false;
@@ -177,6 +211,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
     quickSettingsOpen = false;
     notificationsOpen = false;
     altTabOpen = false;
+    spotlightOpen = false;
   }
 
   void _toggleStart() {
@@ -184,6 +219,14 @@ class _CloudOSShellState extends State<CloudOSShell> {
       final next = !startOpen;
       _closeTransientPanels();
       startOpen = next;
+    });
+  }
+
+  void _toggleSpotlight() {
+    setState(() {
+      final next = !spotlightOpen;
+      _closeTransientPanels();
+      spotlightOpen = next;
     });
   }
 
@@ -273,6 +316,15 @@ class _CloudOSShellState extends State<CloudOSShell> {
       } else if (id == 'settings') {
         settingsZIndex = topZIndex;
         settingsMinimized = false;
+      } else if (id == 'notes') {
+        notesZIndex = topZIndex;
+        notesMinimized = false;
+      } else if (id == 'calculator') {
+        calculatorZIndex = topZIndex;
+        calculatorMinimized = false;
+      } else if (id == 'task_manager') {
+        taskManagerZIndex = topZIndex;
+        taskManagerMinimized = false;
       }
       _closeTransientPanels();
     });
@@ -348,6 +400,57 @@ class _CloudOSShellState extends State<CloudOSShell> {
           settingsZIndex = ++topZIndex;
           activeInternalWindowId = 'settings';
         }
+      } else if (id == 'notes') {
+        if (!notesOpen) {
+          notesOpen = true;
+          notesMinimized = false;
+          notesZIndex = ++topZIndex;
+          activeInternalWindowId = 'notes';
+        } else if (notesMinimized) {
+          notesMinimized = false;
+          notesZIndex = ++topZIndex;
+          activeInternalWindowId = 'notes';
+        } else if (activeInternalWindowId == 'notes') {
+          notesMinimized = true;
+          activeInternalWindowId = null;
+        } else {
+          notesZIndex = ++topZIndex;
+          activeInternalWindowId = 'notes';
+        }
+      } else if (id == 'calculator') {
+        if (!calculatorOpen) {
+          calculatorOpen = true;
+          calculatorMinimized = false;
+          calculatorZIndex = ++topZIndex;
+          activeInternalWindowId = 'calculator';
+        } else if (calculatorMinimized) {
+          calculatorMinimized = false;
+          calculatorZIndex = ++topZIndex;
+          activeInternalWindowId = 'calculator';
+        } else if (activeInternalWindowId == 'calculator') {
+          calculatorMinimized = true;
+          activeInternalWindowId = null;
+        } else {
+          calculatorZIndex = ++topZIndex;
+          activeInternalWindowId = 'calculator';
+        }
+      } else if (id == 'task_manager') {
+        if (!taskManagerOpen) {
+          taskManagerOpen = true;
+          taskManagerMinimized = false;
+          taskManagerZIndex = ++topZIndex;
+          activeInternalWindowId = 'task_manager';
+        } else if (taskManagerMinimized) {
+          taskManagerMinimized = false;
+          taskManagerZIndex = ++topZIndex;
+          activeInternalWindowId = 'task_manager';
+        } else if (activeInternalWindowId == 'task_manager') {
+          taskManagerMinimized = true;
+          activeInternalWindowId = null;
+        } else {
+          taskManagerZIndex = ++topZIndex;
+          activeInternalWindowId = 'task_manager';
+        }
       }
       _closeTransientPanels();
     });
@@ -364,6 +467,9 @@ class _CloudOSShellState extends State<CloudOSShell> {
       if (id == 'terminal') terminalOpen = false;
       if (id == 'browser') browserOpen = false;
       if (id == 'settings') settingsOpen = false;
+      if (id == 'notes') notesOpen = false;
+      if (id == 'calculator') calculatorOpen = false;
+      if (id == 'task_manager') taskManagerOpen = false;
       if (activeInternalWindowId == id) {
         activeInternalWindowId = null;
       }
@@ -411,6 +517,33 @@ class _CloudOSShellState extends State<CloudOSShell> {
             appIds: const <String>{'settings', 'cloudos:settings'},
             isMinimized: settingsMinimized,
             isActive: activeInternalWindowId == 'settings',
+          ),
+        if (notesOpen)
+          StartRunningApp(
+            id: 'notes',
+            title: 'CloudOS Notes',
+            icon: Icons.description_rounded,
+            appIds: const <String>{'notes', 'cloudos:notes'},
+            isMinimized: notesMinimized,
+            isActive: activeInternalWindowId == 'notes',
+          ),
+        if (calculatorOpen)
+          StartRunningApp(
+            id: 'calculator',
+            title: 'Calculadora',
+            icon: Icons.calculate_rounded,
+            appIds: const <String>{'calculator', 'cloudos:calculator'},
+            isMinimized: calculatorMinimized,
+            isActive: activeInternalWindowId == 'calculator',
+          ),
+        if (taskManagerOpen)
+          StartRunningApp(
+            id: 'task_manager',
+            title: 'Monitor de Sistema',
+            icon: Icons.monitor_heart_rounded,
+            appIds: const <String>{'task_manager', 'cloudos:task_manager'},
+            isMinimized: taskManagerMinimized,
+            isActive: activeInternalWindowId == 'task_manager',
           ),
       ];
 
@@ -467,6 +600,118 @@ class _CloudOSShellState extends State<CloudOSShell> {
           settingsSize = Size(maxAvailableWidth, maxAvailableHeight);
           settingsMaximized = true;
         }
+      } else if (id == 'notes') {
+        if (notesMaximized) {
+          notesOffset = notesPreMaxOffset ?? const Offset(240, 110);
+          notesSize = notesPreMaxSize ?? const Size(780, 520);
+          notesMaximized = false;
+        } else {
+          notesPreMaxOffset = notesOffset;
+          notesPreMaxSize = notesSize;
+          notesOffset = Offset.zero;
+          notesSize = Size(maxAvailableWidth, maxAvailableHeight);
+          notesMaximized = true;
+        }
+      } else if (id == 'calculator') {
+        if (calculatorMaximized) {
+          calculatorOffset = calculatorPreMaxOffset ?? const Offset(280, 130);
+          calculatorSize = calculatorPreMaxSize ?? const Size(540, 480);
+          calculatorMaximized = false;
+        } else {
+          calculatorPreMaxOffset = calculatorOffset;
+          calculatorPreMaxSize = calculatorSize;
+          calculatorOffset = Offset.zero;
+          calculatorSize = Size(maxAvailableWidth, maxAvailableHeight);
+          calculatorMaximized = true;
+        }
+      } else if (id == 'task_manager') {
+        if (taskManagerMaximized) {
+          taskManagerOffset = taskManagerPreMaxOffset ?? const Offset(200, 100);
+          taskManagerSize = taskManagerPreMaxSize ?? const Size(720, 480);
+          taskManagerMaximized = false;
+        } else {
+          taskManagerPreMaxOffset = taskManagerOffset;
+          taskManagerPreMaxSize = taskManagerSize;
+          taskManagerOffset = Offset.zero;
+          taskManagerSize = Size(maxAvailableWidth, maxAvailableHeight);
+          taskManagerMaximized = true;
+        }
+      }
+      _focusWindow(id);
+    });
+  }
+
+  void _snapWindowLeft(String id, BoxConstraints constraints) {
+    setState(() {
+      final availableHeight = constraints.maxHeight - 56.0;
+      final halfWidth = constraints.maxWidth / 2.0;
+
+      if (id == 'files') {
+        filesMaximized = false;
+        filesOffset = Offset.zero;
+        filesSize = Size(halfWidth, availableHeight);
+      } else if (id == 'terminal') {
+        terminalMaximized = false;
+        terminalOffset = Offset.zero;
+        terminalSize = Size(halfWidth, availableHeight);
+      } else if (id == 'browser') {
+        browserMaximized = false;
+        browserOffset = Offset.zero;
+        browserSize = Size(halfWidth, availableHeight);
+      } else if (id == 'settings') {
+        settingsMaximized = false;
+        settingsOffset = Offset.zero;
+        settingsSize = Size(halfWidth, availableHeight);
+      } else if (id == 'notes') {
+        notesMaximized = false;
+        notesOffset = Offset.zero;
+        notesSize = Size(halfWidth, availableHeight);
+      } else if (id == 'calculator') {
+        calculatorMaximized = false;
+        calculatorOffset = Offset.zero;
+        calculatorSize = Size(halfWidth, availableHeight);
+      } else if (id == 'task_manager') {
+        taskManagerMaximized = false;
+        taskManagerOffset = Offset.zero;
+        taskManagerSize = Size(halfWidth, availableHeight);
+      }
+      _focusWindow(id);
+    });
+  }
+
+  void _snapWindowRight(String id, BoxConstraints constraints) {
+    setState(() {
+      final availableHeight = constraints.maxHeight - 56.0;
+      final halfWidth = constraints.maxWidth / 2.0;
+
+      if (id == 'files') {
+        filesMaximized = false;
+        filesOffset = Offset(halfWidth, 0);
+        filesSize = Size(halfWidth, availableHeight);
+      } else if (id == 'terminal') {
+        terminalMaximized = false;
+        terminalOffset = Offset(halfWidth, 0);
+        terminalSize = Size(halfWidth, availableHeight);
+      } else if (id == 'browser') {
+        browserMaximized = false;
+        browserOffset = Offset(halfWidth, 0);
+        browserSize = Size(halfWidth, availableHeight);
+      } else if (id == 'settings') {
+        settingsMaximized = false;
+        settingsOffset = Offset(halfWidth, 0);
+        settingsSize = Size(halfWidth, availableHeight);
+      } else if (id == 'notes') {
+        notesMaximized = false;
+        notesOffset = Offset(halfWidth, 0);
+        notesSize = Size(halfWidth, availableHeight);
+      } else if (id == 'calculator') {
+        calculatorMaximized = false;
+        calculatorOffset = Offset(halfWidth, 0);
+        calculatorSize = Size(halfWidth, availableHeight);
+      } else if (id == 'task_manager') {
+        taskManagerMaximized = false;
+        taskManagerOffset = Offset(halfWidth, 0);
+        taskManagerSize = Size(halfWidth, availableHeight);
       }
       _focusWindow(id);
     });
@@ -497,6 +742,21 @@ class _CloudOSShellState extends State<CloudOSShell> {
           (settingsOffset.dx + delta.dx).clamp(0.0, maxLeft),
           (settingsOffset.dy + delta.dy).clamp(0.0, maxTop),
         );
+      } else if (id == 'notes') {
+        notesOffset = Offset(
+          (notesOffset.dx + delta.dx).clamp(0.0, maxLeft),
+          (notesOffset.dy + delta.dy).clamp(0.0, maxTop),
+        );
+      } else if (id == 'calculator') {
+        calculatorOffset = Offset(
+          (calculatorOffset.dx + delta.dx).clamp(0.0, maxLeft),
+          (calculatorOffset.dy + delta.dy).clamp(0.0, maxTop),
+        );
+      } else if (id == 'task_manager') {
+        taskManagerOffset = Offset(
+          (taskManagerOffset.dx + delta.dx).clamp(0.0, maxLeft),
+          (taskManagerOffset.dy + delta.dy).clamp(0.0, maxTop),
+        );
       }
     });
   }
@@ -526,6 +786,15 @@ class _CloudOSShellState extends State<CloudOSShell> {
       } else if (id == 'settings') {
         currentSize = settingsSize;
         currentPos = settingsOffset;
+      } else if (id == 'notes') {
+        currentSize = notesSize;
+        currentPos = notesOffset;
+      } else if (id == 'calculator') {
+        currentSize = calculatorSize;
+        currentPos = calculatorOffset;
+      } else if (id == 'task_manager') {
+        currentSize = taskManagerSize;
+        currentPos = taskManagerOffset;
       }
 
       double newW = currentSize.width;
@@ -565,6 +834,15 @@ class _CloudOSShellState extends State<CloudOSShell> {
       } else if (id == 'settings') {
         settingsSize = updatedSize;
         settingsOffset = updatedPos;
+      } else if (id == 'notes') {
+        notesSize = updatedSize;
+        notesOffset = updatedPos;
+      } else if (id == 'calculator') {
+        calculatorSize = updatedSize;
+        calculatorOffset = updatedPos;
+      } else if (id == 'task_manager') {
+        taskManagerSize = updatedSize;
+        taskManagerOffset = updatedPos;
       }
     });
   }
@@ -575,6 +853,9 @@ class _CloudOSShellState extends State<CloudOSShell> {
     if (terminalOpen) openList.add('terminal');
     if (browserOpen) openList.add('browser');
     if (settingsOpen) openList.add('settings');
+    if (notesOpen) openList.add('notes');
+    if (calculatorOpen) openList.add('calculator');
+    if (taskManagerOpen) openList.add('task_manager');
 
     if (openList.isEmpty) return;
 
@@ -590,6 +871,9 @@ class _CloudOSShellState extends State<CloudOSShell> {
     if (terminalOpen) openList.add('terminal');
     if (browserOpen) openList.add('browser');
     if (settingsOpen) openList.add('settings');
+    if (notesOpen) openList.add('notes');
+    if (calculatorOpen) openList.add('calculator');
+    if (taskManagerOpen) openList.add('task_manager');
 
     if (openList.isNotEmpty && altTabSelectedIndex < openList.length) {
       _focusWindow(openList[altTabSelectedIndex]);
@@ -716,10 +1000,135 @@ class _CloudOSShellState extends State<CloudOSShell> {
       return;
     }
 
+    if (app.id == 'notes' || app.id == 'cloudos:notes') {
+      _toggleOrFocusWindow('notes');
+      return;
+    }
+
+    if (app.id == 'calculator' || app.id == 'cloudos:calculator') {
+      _toggleOrFocusWindow('calculator');
+      return;
+    }
+
+    if (app.id == 'task_manager' || app.id == 'cloudos:task_manager') {
+      _toggleOrFocusWindow('task_manager');
+      return;
+    }
+
     // External Windows Application (VS Code, Notepad, etc.)
     await widget.bridge.launchApp(app.id);
     if (!mounted) return;
     setState(_closeTransientPanels);
+  }
+
+  List<SpotlightItem> get _spotlightItems {
+    final list = <SpotlightItem>[
+      SpotlightItem(
+        id: 'files',
+        title: 'Explorador de Arquivos',
+        subtitle: 'Gerencie pastas e documentos do Windows e Linux',
+        icon: Icons.folder_rounded,
+        kind: SpotlightItemKind.app,
+        badge: 'Sistema',
+        onSelect: () {
+          _closeTransientPanels();
+          _toggleOrFocusWindow('files');
+        },
+      ),
+      SpotlightItem(
+        id: 'terminal',
+        title: 'CloudOS Terminal',
+        subtitle: 'Terminal nativo WSL Kali Linux e PowerShell',
+        icon: Icons.terminal_rounded,
+        kind: SpotlightItemKind.app,
+        badge: 'Dev',
+        onSelect: () {
+          _closeTransientPanels();
+          _toggleOrFocusWindow('terminal');
+        },
+      ),
+      SpotlightItem(
+        id: 'browser',
+        title: 'Navegador Web',
+        subtitle: 'Navegação rápida na Web com isolamento CloudOS',
+        icon: Icons.public_rounded,
+        kind: SpotlightItemKind.app,
+        badge: 'Internet',
+        onSelect: () {
+          _closeTransientPanels();
+          _toggleOrFocusWindow('browser');
+        },
+      ),
+      SpotlightItem(
+        id: 'notes',
+        title: 'CloudOS Notes',
+        subtitle: 'Bloco de anotações e rascunhos rápidos com auto-save',
+        icon: Icons.description_rounded,
+        kind: SpotlightItemKind.app,
+        badge: 'Produtividade',
+        onSelect: () {
+          _closeTransientPanels();
+          _toggleOrFocusWindow('notes');
+        },
+      ),
+      SpotlightItem(
+        id: 'calculator',
+        title: 'Calculadora',
+        subtitle: 'Cálculos aritméticos, científicos e histórico',
+        icon: Icons.calculate_rounded,
+        kind: SpotlightItemKind.app,
+        badge: 'Utilitário',
+        onSelect: () {
+          _closeTransientPanels();
+          _toggleOrFocusWindow('calculator');
+        },
+      ),
+      SpotlightItem(
+        id: 'task_manager',
+        title: 'Monitor de Sistema',
+        subtitle: 'CPU, RAM, tarefas e processos em execução',
+        icon: Icons.monitor_heart_rounded,
+        kind: SpotlightItemKind.app,
+        badge: 'Sistema',
+        onSelect: () {
+          _closeTransientPanels();
+          _toggleOrFocusWindow('task_manager');
+        },
+      ),
+      SpotlightItem(
+        id: 'settings',
+        title: 'Configurações do CloudOS',
+        subtitle: 'Aparência, workspaces, áudio, rede e preferências',
+        icon: Icons.settings_rounded,
+        kind: SpotlightItemKind.app,
+        badge: 'Sistema',
+        onSelect: () {
+          _closeTransientPanels();
+          _toggleOrFocusWindow('settings');
+        },
+      ),
+    ];
+
+    for (final app in apps) {
+      if (!list.any((item) => item.id == app.id)) {
+        list.add(
+          SpotlightItem(
+            id: app.id,
+            title: app.name,
+            subtitle: app.subtitle ?? app.category,
+            icon: app.icon,
+            kind: SpotlightItemKind.app,
+            badge: app.platform.name.toUpperCase(),
+            onSelect: () {
+              _closeTransientPanels();
+              unawaited(_launchApp(app));
+            },
+          ),
+        );
+      }
+    }
+
+    return list;
   }
 
   @override
@@ -800,6 +1209,29 @@ class _CloudOSShellState extends State<CloudOSShell> {
           control: true,
           alt: true,
         ): () => unawaited(_switchWorkspace(4)),
+        const SingleActivator(
+          LogicalKeyboardKey.space,
+          alt: true,
+        ): _toggleSpotlight,
+        const SingleActivator(
+          LogicalKeyboardKey.keyP,
+          control: true,
+        ): _toggleSpotlight,
+        const SingleActivator(
+          LogicalKeyboardKey.keyN,
+          control: true,
+          shift: true,
+        ): () => _toggleOrFocusWindow('notes'),
+        const SingleActivator(
+          LogicalKeyboardKey.keyC,
+          control: true,
+          alt: true,
+        ): () => _toggleOrFocusWindow('calculator'),
+        const SingleActivator(
+          LogicalKeyboardKey.escape,
+          control: true,
+          shift: true,
+        ): () => _toggleOrFocusWindow('task_manager'),
       },
       child: Focus(
         autofocus: true,
@@ -812,6 +1244,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
                       quickSettingsOpen ||
                       notificationsOpen ||
                       altTabOpen ||
+                      spotlightOpen ||
                       selectedDesktopIcon != null) {
                     setState(() {
                       _closeTransientPanels();
@@ -819,6 +1252,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
                     });
                   }
                 },
+                onSecondaryTapUp: (details) =>
+                    _showDesktopContextMenu(context, details.globalPosition),
                 behavior: HitTestBehavior.opaque,
                 child: Stack(
                   fit: StackFit.expand,
@@ -852,18 +1287,31 @@ class _CloudOSShellState extends State<CloudOSShell> {
                     ..._buildInternalWindows(constraints),
                     _panelSwitcher(),
                     if (altTabOpen) _buildAltTabOverlay(),
+                    if (spotlightOpen)
+                      SpotlightPalette(
+                        items: _spotlightItems,
+                        onClose: () => setState(() => spotlightOpen = false),
+                      ),
                     CloudTaskbar(
                       startOpen: startOpen,
                       quickSettingsOpen: quickSettingsOpen,
                       notificationsOpen: notificationsOpen,
+                      spotlightOpen: spotlightOpen,
+                      onSpotlight: _toggleSpotlight,
                       filesRunning: filesOpen,
                       browserRunning: browserOpen,
                       terminalRunning: terminalOpen,
                       settingsRunning: settingsOpen,
+                      notesRunning: notesOpen,
+                      calculatorRunning: calculatorOpen,
+                      taskManagerRunning: taskManagerOpen,
                       filesActive: activeInternalWindowId == 'files',
                       browserActive: activeInternalWindowId == 'browser',
                       terminalActive: activeInternalWindowId == 'terminal',
                       settingsActive: activeInternalWindowId == 'settings',
+                      notesActive: activeInternalWindowId == 'notes',
+                      calculatorActive: activeInternalWindowId == 'calculator',
+                      taskManagerActive: activeInternalWindowId == 'task_manager',
                       currentWorkspace: currentWorkspace,
                       notificationCount: notificationState.unreadCount,
                       onWorkspaceChanged: (index) =>
@@ -895,6 +1343,12 @@ class _CloudOSShellState extends State<CloudOSShell> {
                       onCloseTerminal: () => _closeWindow('terminal'),
                       onSettings: () => _toggleOrFocusWindow('settings'),
                       onCloseSettings: () => _closeWindow('settings'),
+                      onNotes: () => _toggleOrFocusWindow('notes'),
+                      onCloseNotes: () => _closeWindow('notes'),
+                      onCalculator: () => _toggleOrFocusWindow('calculator'),
+                      onCloseCalculator: () => _closeWindow('calculator'),
+                      onTaskManager: () => _toggleOrFocusWindow('task_manager'),
+                      onCloseTaskManager: () => _closeWindow('task_manager'),
                       onQuickSettings: _toggleQuickSettings,
                       onNotifications: _toggleNotifications,
                     ),
@@ -906,6 +1360,94 @@ class _CloudOSShellState extends State<CloudOSShell> {
         ),
       ),
     );
+  }
+
+  void _showDesktopContextMenu(BuildContext context, Offset position) {
+    _closeTransientPanels();
+    final RenderBox? overlay = Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (overlay == null) return;
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        position & const Size(40, 40),
+        Offset.zero & overlay.size,
+      ),
+      color: const Color(0xFF141C2B),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: const BorderSide(color: CloudOSColors.border),
+      ),
+      items: const <PopupMenuEntry<String>>[
+        PopupMenuItem<String>(
+          value: 'terminal',
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.terminal_rounded, size: 16, color: CloudOSColors.accent),
+              SizedBox(width: 10),
+              Text('Abrir Terminal', style: TextStyle(color: CloudOSColors.text, fontSize: 13)),
+            ],
+          ),
+        ),
+        PopupMenuItem<String>(
+          value: 'notes',
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.description_rounded, size: 16, color: CloudOSColors.accent),
+              SizedBox(width: 10),
+              Text('Nova Anotação', style: TextStyle(color: CloudOSColors.text, fontSize: 13)),
+            ],
+          ),
+        ),
+        PopupMenuItem<String>(
+          value: 'calculator',
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.calculate_rounded, size: 16, color: CloudOSColors.accent),
+              SizedBox(width: 10),
+              Text('Calculadora', style: TextStyle(color: CloudOSColors.text, fontSize: 13)),
+            ],
+          ),
+        ),
+        PopupMenuItem<String>(
+          value: 'task_manager',
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.monitor_heart_rounded, size: 16, color: CloudOSColors.accent),
+              SizedBox(width: 10),
+              Text('Monitor de Sistema', style: TextStyle(color: CloudOSColors.text, fontSize: 13)),
+            ],
+          ),
+        ),
+        PopupMenuDivider(height: 1),
+        PopupMenuItem<String>(
+          value: 'spotlight',
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.search_rounded, size: 16, color: CloudOSColors.accent),
+              SizedBox(width: 10),
+              Text('Central de Comando (Alt+Espaço)', style: TextStyle(color: CloudOSColors.text, fontSize: 13)),
+            ],
+          ),
+        ),
+        PopupMenuItem<String>(
+          value: 'settings',
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.settings_rounded, size: 16, color: CloudOSColors.text),
+              SizedBox(width: 10),
+              Text('Configurações', style: TextStyle(color: CloudOSColors.text, fontSize: 13)),
+            ],
+          ),
+        ),
+      ],
+    ).then((choice) {
+      if (choice == 'terminal') _toggleOrFocusWindow('terminal');
+      if (choice == 'notes') _toggleOrFocusWindow('notes');
+      if (choice == 'calculator') _toggleOrFocusWindow('calculator');
+      if (choice == 'task_manager') _toggleOrFocusWindow('task_manager');
+      if (choice == 'spotlight') _toggleSpotlight();
+      if (choice == 'settings') _toggleOrFocusWindow('settings');
+    });
   }
 
   List<Widget> _buildInternalWindows(BoxConstraints constraints) {
@@ -1048,6 +1590,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
               onMinimize: () => setState(() => settingsMinimized = true),
               onToggleMaximize: () =>
                   _toggleMaximizeWindow('settings', constraints),
+              onSnapLeft: () => _snapWindowLeft('settings', constraints),
+              onSnapRight: () => _snapWindowRight('settings', constraints),
               onMove: (delta) => _moveWindow('settings', delta, constraints),
               onResize: (delta, left, top, right, bottom) => _resizeWindow(
                 'settings',
@@ -1061,6 +1605,140 @@ class _CloudOSShellState extends State<CloudOSShell> {
               child: SettingsWindow(
                 snapshot: snapshot,
                 bridge: widget.bridge,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (notesOpen && !notesMinimized) {
+      entries.add(
+        _WindowRenderEntry(
+          zIndex: notesZIndex,
+          widget: Positioned(
+            left: notesMaximized ? 0 : notesOffset.dx,
+            top: notesMaximized ? 0 : notesOffset.dy,
+            width: notesMaximized ? constraints.maxWidth : notesSize.width,
+            height: notesMaximized ? constraints.maxHeight - 56.0 : notesSize.height,
+            child: CloudWindowFrame(
+              window: CloudWindow(
+                id: 'notes',
+                title: 'CloudOS Notes',
+                icon: Icons.description_rounded,
+                type: CloudWindowType.notes,
+                position: notesOffset,
+                size: notesSize,
+                isMaximized: notesMaximized,
+              ),
+              onFocus: () => _focusWindow('notes'),
+              onClose: () => _closeWindow('notes'),
+              onMinimize: () => setState(() => notesMinimized = true),
+              onToggleMaximize: () =>
+                  _toggleMaximizeWindow('notes', constraints),
+              onSnapLeft: () => _snapWindowLeft('notes', constraints),
+              onSnapRight: () => _snapWindowRight('notes', constraints),
+              onMove: (delta) => _moveWindow('notes', delta, constraints),
+              onResize: (delta, left, top, right, bottom) => _resizeWindow(
+                'notes',
+                delta,
+                left,
+                top,
+                right,
+                bottom,
+                constraints,
+              ),
+              child: const NotesWindow(),
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (calculatorOpen && !calculatorMinimized) {
+      entries.add(
+        _WindowRenderEntry(
+          zIndex: calculatorZIndex,
+          widget: Positioned(
+            left: calculatorMaximized ? 0 : calculatorOffset.dx,
+            top: calculatorMaximized ? 0 : calculatorOffset.dy,
+            width: calculatorMaximized ? constraints.maxWidth : calculatorSize.width,
+            height: calculatorMaximized ? constraints.maxHeight - 56.0 : calculatorSize.height,
+            child: CloudWindowFrame(
+              window: CloudWindow(
+                id: 'calculator',
+                title: 'Calculadora',
+                icon: Icons.calculate_rounded,
+                type: CloudWindowType.calculator,
+                position: calculatorOffset,
+                size: calculatorSize,
+                isMaximized: calculatorMaximized,
+              ),
+              onFocus: () => _focusWindow('calculator'),
+              onClose: () => _closeWindow('calculator'),
+              onMinimize: () => setState(() => calculatorMinimized = true),
+              onToggleMaximize: () =>
+                  _toggleMaximizeWindow('calculator', constraints),
+              onSnapLeft: () => _snapWindowLeft('calculator', constraints),
+              onSnapRight: () => _snapWindowRight('calculator', constraints),
+              onMove: (delta) => _moveWindow('calculator', delta, constraints),
+              onResize: (delta, left, top, right, bottom) => _resizeWindow(
+                'calculator',
+                delta,
+                left,
+                top,
+                right,
+                bottom,
+                constraints,
+              ),
+              child: const CalculatorWindow(),
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (taskManagerOpen && !taskManagerMinimized) {
+      entries.add(
+        _WindowRenderEntry(
+          zIndex: taskManagerZIndex,
+          widget: Positioned(
+            left: taskManagerMaximized ? 0 : taskManagerOffset.dx,
+            top: taskManagerMaximized ? 0 : taskManagerOffset.dy,
+            width: taskManagerMaximized ? constraints.maxWidth : taskManagerSize.width,
+            height: taskManagerMaximized ? constraints.maxHeight - 56.0 : taskManagerSize.height,
+            child: CloudWindowFrame(
+              window: CloudWindow(
+                id: 'task_manager',
+                title: 'Monitor de Sistema',
+                icon: Icons.monitor_heart_rounded,
+                type: CloudWindowType.taskManager,
+                position: taskManagerOffset,
+                size: taskManagerSize,
+                isMaximized: taskManagerMaximized,
+              ),
+              onFocus: () => _focusWindow('task_manager'),
+              onClose: () => _closeWindow('task_manager'),
+              onMinimize: () => setState(() => taskManagerMinimized = true),
+              onToggleMaximize: () =>
+                  _toggleMaximizeWindow('task_manager', constraints),
+              onSnapLeft: () => _snapWindowLeft('task_manager', constraints),
+              onSnapRight: () => _snapWindowRight('task_manager', constraints),
+              onMove: (delta) => _moveWindow('task_manager', delta, constraints),
+              onResize: (delta, left, top, right, bottom) => _resizeWindow(
+                'task_manager',
+                delta,
+                left,
+                top,
+                right,
+                bottom,
+                constraints,
+              ),
+              child: TaskManagerWindow(
+                snapshot: snapshot,
+                runningApps: _startRunningApps,
+                onSwitchToApp: (id) => _toggleOrFocusWindow(id),
+                onCloseApp: (id) => _closeWindow(id),
               ),
             ),
           ),
@@ -1119,6 +1797,42 @@ class _CloudOSShellState extends State<CloudOSShell> {
           type: CloudWindowType.settings,
           position: settingsOffset,
           size: settingsSize,
+        ),
+      );
+    }
+    if (notesOpen) {
+      list.add(
+        CloudWindow(
+          id: 'notes',
+          title: 'CloudOS Notes',
+          icon: Icons.description_rounded,
+          type: CloudWindowType.notes,
+          position: notesOffset,
+          size: notesSize,
+        ),
+      );
+    }
+    if (calculatorOpen) {
+      list.add(
+        CloudWindow(
+          id: 'calculator',
+          title: 'Calculadora',
+          icon: Icons.calculate_rounded,
+          type: CloudWindowType.calculator,
+          position: calculatorOffset,
+          size: calculatorSize,
+        ),
+      );
+    }
+    if (taskManagerOpen) {
+      list.add(
+        CloudWindow(
+          id: 'task_manager',
+          title: 'Monitor de Sistema',
+          icon: Icons.monitor_heart_rounded,
+          type: CloudWindowType.taskManager,
+          position: taskManagerOffset,
+          size: taskManagerSize,
         ),
       );
     }

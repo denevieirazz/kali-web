@@ -14,6 +14,8 @@ class CloudWindowFrame extends StatelessWidget {
     required this.onToggleMaximize,
     required this.onMove,
     required this.onResize,
+    this.onSnapLeft,
+    this.onSnapRight,
     super.key,
   });
 
@@ -25,6 +27,8 @@ class CloudWindowFrame extends StatelessWidget {
   final VoidCallback onToggleMaximize;
   final ValueChanged<Offset> onMove;
   final void Function(Offset delta, bool left, bool top, bool right, bool bottom) onResize;
+  final VoidCallback? onSnapLeft;
+  final VoidCallback? onSnapRight;
 
   static const double _handleSize = 8.0;
 
@@ -41,7 +45,7 @@ class CloudWindowFrame extends StatelessWidget {
             Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                _buildHeader(),
+                _buildHeader(context),
                 Expanded(
                   child: ClipRect(child: child),
                 ),
@@ -54,7 +58,7 @@ class CloudWindowFrame extends StatelessWidget {
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader(BuildContext context) {
     return Container(
       height: 38,
       padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -90,6 +94,44 @@ class CloudWindowFrame extends StatelessWidget {
               ),
             ),
           ),
+          if (onSnapLeft != null || onSnapRight != null) ...<Widget>[
+            PopupMenuButton<String>(
+              tooltip: 'Organizar tela (Snap)',
+              icon: const Icon(Icons.vertical_split_rounded, size: 16, color: CloudOSColors.caption),
+              padding: EdgeInsets.zero,
+              color: const Color(0xFF161E2E),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              itemBuilder: (context) => <PopupMenuEntry<String>>[
+                if (onSnapLeft != null)
+                  const PopupMenuItem<String>(
+                    value: 'left',
+                    child: Row(
+                      children: <Widget>[
+                        Icon(Icons.align_horizontal_left_rounded, size: 16, color: CloudOSColors.accent),
+                        SizedBox(width: 10),
+                        Text('Dividir à Esquerda (50%)', style: TextStyle(color: CloudOSColors.text, fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                if (onSnapRight != null)
+                  const PopupMenuItem<String>(
+                    value: 'right',
+                    child: Row(
+                      children: <Widget>[
+                        Icon(Icons.align_horizontal_right_rounded, size: 16, color: CloudOSColors.accent),
+                        SizedBox(width: 10),
+                        Text('Dividir à Direita (50%)', style: TextStyle(color: CloudOSColors.text, fontSize: 12)),
+                      ],
+                    ),
+                  ),
+              ],
+              onSelected: (val) {
+                if (val == 'left') onSnapLeft?.call();
+                if (val == 'right') onSnapRight?.call();
+              },
+            ),
+            const SizedBox(width: 2),
+          ],
           _WindowButton(
             icon: Icons.remove_rounded,
             tooltip: 'Minimizar',

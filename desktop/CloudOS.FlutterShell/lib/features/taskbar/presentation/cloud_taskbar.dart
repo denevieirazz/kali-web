@@ -15,21 +15,35 @@ class CloudTaskbar extends StatelessWidget {
     required this.startOpen,
     required this.quickSettingsOpen,
     required this.notificationsOpen,
+    this.spotlightOpen = false,
+    this.onSpotlight,
     this.onBrowser,
     this.onTerminal,
     this.onSettings,
+    this.onNotes,
+    this.onCalculator,
+    this.onTaskManager,
     this.onCloseFiles,
     this.onCloseBrowser,
     this.onCloseTerminal,
     this.onCloseSettings,
+    this.onCloseNotes,
+    this.onCloseCalculator,
+    this.onCloseTaskManager,
     this.filesRunning = true,
     this.browserRunning = false,
     this.terminalRunning = false,
     this.settingsRunning = false,
+    this.notesRunning = false,
+    this.calculatorRunning = false,
+    this.taskManagerRunning = false,
     this.filesActive = false,
     this.browserActive = false,
     this.terminalActive = false,
     this.settingsActive = false,
+    this.notesActive = false,
+    this.calculatorActive = false,
+    this.taskManagerActive = false,
     this.currentWorkspace = 1,
     this.onWorkspaceChanged,
     this.notificationCount = 0,
@@ -40,24 +54,38 @@ class CloudTaskbar extends StatelessWidget {
   final VoidCallback onFiles;
   final VoidCallback onQuickSettings;
   final VoidCallback onNotifications;
+  final VoidCallback? onSpotlight;
   final VoidCallback? onBrowser;
   final VoidCallback? onTerminal;
   final VoidCallback? onSettings;
+  final VoidCallback? onNotes;
+  final VoidCallback? onCalculator;
+  final VoidCallback? onTaskManager;
   final VoidCallback? onCloseFiles;
   final VoidCallback? onCloseBrowser;
   final VoidCallback? onCloseTerminal;
   final VoidCallback? onCloseSettings;
+  final VoidCallback? onCloseNotes;
+  final VoidCallback? onCloseCalculator;
+  final VoidCallback? onCloseTaskManager;
   final bool startOpen;
   final bool quickSettingsOpen;
   final bool notificationsOpen;
+  final bool spotlightOpen;
   final bool filesRunning;
   final bool browserRunning;
   final bool terminalRunning;
   final bool settingsRunning;
+  final bool notesRunning;
+  final bool calculatorRunning;
+  final bool taskManagerRunning;
   final bool filesActive;
   final bool browserActive;
   final bool terminalActive;
   final bool settingsActive;
+  final bool notesActive;
+  final bool calculatorActive;
+  final bool taskManagerActive;
   final int currentWorkspace;
   final ValueChanged<int>? onWorkspaceChanged;
   final int notificationCount;
@@ -87,10 +115,12 @@ class CloudTaskbar extends StatelessWidget {
                 ),
                 const SizedBox(width: 4),
                 TaskbarTaskButton(
-                  tooltip: 'Pesquisa Global (Ctrl+Alt+S)',
+                  tooltip: onSpotlight != null
+                      ? 'Central de Comando / Busca (Alt+Espaço)'
+                      : 'Pesquisa Global (Ctrl+Alt+S)',
                   icon: Icons.search_rounded,
-                  active: startOpen,
-                  onPressed: onStart,
+                  active: onSpotlight != null ? spotlightOpen : startOpen,
+                  onPressed: onSpotlight ?? onStart,
                 ),
                 const SizedBox(width: 4),
                 TaskbarTaskButton(
@@ -132,6 +162,42 @@ class CloudTaskbar extends StatelessWidget {
                     isRunning: true,
                     onPressed: onSettings,
                     onClose: onCloseSettings,
+                  ),
+                ],
+                if (notesRunning) ...<Widget>[
+                  const SizedBox(width: 4),
+                  TaskbarTaskButton(
+                    tooltip: 'CloudOS Notes',
+                    icon: Icons.description_rounded,
+                    label: 'Notas',
+                    active: notesActive,
+                    isRunning: true,
+                    onPressed: onNotes,
+                    onClose: onCloseNotes,
+                  ),
+                ],
+                if (calculatorRunning) ...<Widget>[
+                  const SizedBox(width: 4),
+                  TaskbarTaskButton(
+                    tooltip: 'Calculadora',
+                    icon: Icons.calculate_rounded,
+                    label: 'Calculadora',
+                    active: calculatorActive,
+                    isRunning: true,
+                    onPressed: onCalculator,
+                    onClose: onCloseCalculator,
+                  ),
+                ],
+                if (taskManagerRunning) ...<Widget>[
+                  const SizedBox(width: 4),
+                  TaskbarTaskButton(
+                    tooltip: 'Monitor de Sistema',
+                    icon: Icons.monitor_heart_rounded,
+                    label: 'Monitor',
+                    active: taskManagerActive,
+                    isRunning: true,
+                    onPressed: onTaskManager,
+                    onClose: onCloseTaskManager,
                   ),
                 ],
                 const SizedBox(width: 10),
