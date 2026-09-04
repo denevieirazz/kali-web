@@ -72,6 +72,10 @@ jobs:
           pwsh -NoProfile -File scripts/native/run-system-broker-smoke-v21.ps1
           pwsh -NoProfile -File scripts/native/test-system-broker-v21-soak.ps1 -DurationSeconds 5
 
+      - name: Test managed Win32 containment V22 contract
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/flutter/test-managed-win32-containment-v22-contract.ps1
+
       - name: Generate local Windows host
         shell: pwsh
         working-directory: desktop/CloudOS.FlutterShell

@@ -13,6 +13,7 @@ class CloudApp {
     this.category = 'Produtividade',
     this.isPinned = true,
     this.isRecent = false,
+    this.canLaunch = true,
   });
 
   final String id;
@@ -24,4 +25,5 @@ class CloudApp {
   final String category;
   final bool isPinned;
   final bool isRecent;
+  final bool canLaunch;
 }
