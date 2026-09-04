@@ -1,6 +1,16 @@
 #pragma once
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <Windows.h>
+
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -436,14 +446,24 @@ private:
         return registered.load();
     }
 
+    static int RectWidth(const RECT& rect) noexcept
+    {
+        return static_cast<int>(rect.right - rect.left);
+    }
+
+    static int RectHeight(const RECT& rect) noexcept
+    {
+        return static_cast<int>(rect.bottom - rect.top);
+    }
+
     static RECT InitialHostRect(HWND parent)
     {
         RECT client{};
         GetClientRect(parent, &client);
-        const int available_width = std::max(320, client.right - client.left);
+        const int available_width = std::max(320, RectWidth(client));
         const int available_height = std::max(
             240,
-            client.bottom - client.top - kTaskbarReservePx);
+            RectHeight(client) - kTaskbarReservePx);
         const int width = std::min(
             920,
             std::max(320, available_width - (kDesktopMarginPx * 2)));
@@ -501,8 +521,8 @@ private:
             HWND_TOP,
             0,
             0,
-            std::max(1, client.right - client.left),
-            std::max(1, client.bottom - client.top),
+            std::max(1, RectWidth(client)),
+            std::max(1, RectHeight(client)),
             SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
     }
 
@@ -581,8 +601,8 @@ private:
             HWND_TOP,
             0,
             0,
-            std::max(1, client.right - client.left),
-            std::max(1, client.bottom - client.top - kTaskbarReservePx),
+            std::max(1, RectWidth(client)),
+            std::max(1, RectHeight(client) - kTaskbarReservePx),
             SWP_SHOWWINDOW);
         session.maximized = true;
     }
@@ -594,10 +614,10 @@ private:
         SetWindowPos(
             session.host_window,
             HWND_TOP,
-            rect.left,
-            rect.top,
-            std::max(1, rect.right - rect.left),
-            std::max(1, rect.bottom - rect.top),
+            static_cast<int>(rect.left),
+            static_cast<int>(rect.top),
+            std::max(1, RectWidth(rect)),
+            std::max(1, RectHeight(rect)),
             SWP_SHOWWINDOW);
         session.maximized = false;
     }
@@ -609,10 +629,10 @@ private:
 
         RECT client{};
         GetClientRect(parent, &client);
-        const int available_width = std::max(1, client.right - client.left);
+        const int available_width = std::max(1, RectWidth(client));
         const int available_height = std::max(
             1,
-            client.bottom - client.top - kTaskbarReservePx);
+            RectHeight(client) - kTaskbarReservePx);
 
         if ((position.flags & SWP_NOSIZE) == 0)
         {
