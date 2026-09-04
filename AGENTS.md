@@ -10,6 +10,20 @@ Este arquivo é a porta de entrada para qualquer agente que vá analisar ou alte
 6. `docs/native/UNIFIED_INTEGRATION_V16.md` — boundary Windows+Linux, downloads, package management e WSLg.
 7. `docs/native/UNIFIED_START_SEARCH_V17.md` — Start/Search consumindo o catálogo V16 sem criar inventário Linux paralelo.
 
+## Modo de operação com o mantenedor
+
+Estas regras definem como interpretar pedidos curtos do mantenedor. Elas não dispensam segurança, revisão de diff, testes ou os gates técnicos descritos neste arquivo.
+
+- O mantenedor pode estar longe do PC. Quando houver acesso ao GitHub/CI, prefira executar o trabalho remotamente de ponta a ponta em vez de apenas explicar como ele faria no computador local.
+- Em uma tarefa já contextualizada, mensagens como **“cria aí”**, **“faz”**, **“continua”**, **“pode fazer”**, **“ok”** ou equivalentes significam: prossiga e execute o máximo possível da tarefa completa, sem pedir confirmação repetitiva para cada etapa rotineira.
+- Se o mantenedor enviar um bloco grande de código, log, relatório ou instruções durante uma tarefa, trate o bloco como material de trabalho e aja sobre ele. Não responda apenas com um resumo quando houver uma ação clara a executar.
+- Não repita perguntas cuja resposta já esteja no histórico, no repositório ou nos resultados das ferramentas. Resolva ambiguidades pequenas pelo contexto e siga em frente.
+- Para mudanças no repositório, prefira o fluxo completo: inspecionar estado atual → criar branch quando necessário → implementar → revisar diff → executar/observar testes e CI → corrigir falhas → abrir/atualizar PR → mergear somente quando os gates obrigatórios estiverem verdes. Não pare em “código pronto” se ainda houver validação acessível.
+- **“manda pra minha IA testar aqui”** significa: produza instruções completas para a IA local do mantenedor executar testes reais na máquina dele. O pacote de instruções deve dizer o que executar, em qual diretório, quais resultados coletar, como relatar falhas e, quando apropriado, corrigir e repetir os testes. Considere esses testes locais como validação física complementar ao CI hospedado.
+- **“manda pra eu testar”**, **“quero testar”** ou equivalente significa: mude para modo guiado para o próprio mantenedor. Forneça comandos de PowerShell passo a passo, explique brevemente o objetivo e o resultado esperado de cada comando e use a saída retornada para decidir o próximo passo. Não despeje uma sequência enorme sem necessidade quando o diagnóstico depende do resultado intermediário.
+- Quando o mantenedor disser apenas **“ok”** depois de um plano/diagnóstico que já contém uma ação pendente clara, interprete como autorização para continuar a execução daquela ação, não como pedido de mero acknowledgement.
+- Se uma operação real não puder ser executada com as ferramentas disponíveis, faça o máximo verificável possível e deixe explícito exatamente o que resta. Não invente execução local, teste físico ou resultado de CI que não ocorreu.
+
 ## Fonte de verdade atual
 
 O desktop atual do CloudOS é o **CloudOS Native Shell C++/Win32**.
