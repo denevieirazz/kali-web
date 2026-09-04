@@ -41,10 +41,11 @@ if ($RequireAuthenticodeSignature) {
     $arguments.RequireAuthenticodeSignature = $true
 }
 
+# update-cloudos-native-v13.ps1 is a PowerShell script and signals failure by
+# terminating error/exception. A successful script invocation does not promise
+# to initialize $LASTEXITCODE, so reading that automatic variable under
+# Set-StrictMode can turn a healthy first install into a false failure.
 & $hardenedUpdate @arguments
-if ($LASTEXITCODE -ne 0) {
-    exit $LASTEXITCODE
-}
 
 $after = Get-CloudOSDeploymentStatus -InstallRoot $InstallRoot
 if (-not $after.installed -or -not $after.active_valid) {
