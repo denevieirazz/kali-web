@@ -43,7 +43,10 @@ try {
                 $evidence.supervisor_last_exit_code = [uint32]$supervisorState.last_exit_code
                 $evidence.supervisor_shell_pid = [uint32]$supervisorState.shell_pid
                 $evidence.supervisor_job_assigned = [bool]$supervisorState.job_kill_on_close_assigned
-                Write-Host "[CloudOS Install V22 smoke] Supervisor state after failed health: state=$($evidence.supervisor_state) reason=$($evidence.supervisor_reason) failures=$($evidence.supervisor_failure_count) lastExit=$($evidence.supervisor_last_exit_code) shellPid=$($evidence.supervisor_shell_pid) jobAssigned=$($evidence.supervisor_job_assigned)"
+                $evidence.supervisor_uptime_ms = [uint64]$supervisorState.supervisor_uptime_ms
+                $evidence.supervisor_transition_sequence = [int64]$supervisorState.transition_sequence
+                $evidence.supervisor_updated_utc = [string]$supervisorState.updated_utc
+                Write-Host "[CloudOS Install V22 smoke] Supervisor state after failed health: state=$($evidence.supervisor_state) reason=$($evidence.supervisor_reason) failures=$($evidence.supervisor_failure_count) lastExit=$($evidence.supervisor_last_exit_code) shellPid=$($evidence.supervisor_shell_pid) jobAssigned=$($evidence.supervisor_job_assigned) uptimeMs=$($evidence.supervisor_uptime_ms) transition=$($evidence.supervisor_transition_sequence)"
             }
             catch {
                 $evidence.supervisor_state_capture_error = $_.Exception.Message
