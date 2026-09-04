@@ -41,6 +41,8 @@ foreach ($name in $payload) {
 foreach ($name in @(
     'native-health-v9.ps1',
     'collect-native-diagnostics.ps1',
+    'get-cloudos-recovery-status-v22.ps1',
+    'configure-cloudos-wer-v22.ps1',
     'run-native-soak-v9.ps1',
     'run-native-lifecycle-smoke-v10.ps1',
     'run-native-supervisor-smoke-v11.ps1',
