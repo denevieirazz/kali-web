@@ -296,7 +296,7 @@ void AppServiceV21::Refresh()
     // catalog profiles, but the CloudOS Flutter shell owns their ConPTY launch.
     apps_.push_back({"windows:vscode", "Visual Studio Code", "windows", "Code Editor & IDE", "", "Produtividade", "Windows", true, true, false, "vscode", true, true});
     apps_.push_back({"windows:notepad", "Bloco de Notas", "windows", "Editor de Texto", "", "Produtividade", "Windows", true, false, false, "notepad", true, false});
-    apps_.push_back({"windows:powershell", "PowerShell 7", "windows", "CloudOS Terminal / ConPTY", "", "Utilitários", "Windows", true, true, false, "powershell", true, true});
+    apps_.push_back({"windows:powershell", "PowerShell", "windows", "CloudOS Terminal / ConPTY", "", "Utilitários", "Windows", true, true, false, "powershell", true, true});
     apps_.push_back({"windows:taskmgr", "Gerenciador de Tarefas", "windows", "Monitor de Recursos do Sistema", "", "Sistema", "Windows", true, false, false, "taskmgr", false, false});
     apps_.push_back({"windows:cmd", "Prompt de Comando", "windows", "CloudOS Terminal / ConPTY", "", "Utilitários", "Windows", true, false, false, "cmd", false, false});
     apps_.push_back({"windows:explorer", "Windows Explorer", "windows", "Explorador de Arquivos do Windows", "", "Sistema", "Windows", true, false, false, "explorer", false, false});
