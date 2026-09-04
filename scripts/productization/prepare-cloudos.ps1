@@ -4,10 +4,12 @@ Assert-CloudOSProductizationBranch -AllowDetached:$AllowDetached
 $config = Get-CloudOSProductConfig
 $paths = Get-CloudOSArtifactPaths
 $sha = Get-CloudOSGitSha
+$root = Get-CloudOSRepoRoot
 
 $npm = Get-CloudOSCommandName 'npm'
 $dotnet = Get-CloudOSCommandName 'dotnet'
 $go = Get-CloudOSCommandName 'go'
+$git = Get-CloudOSCommandName 'git'
 
 Write-Host "[CloudOS] Preparando dependências a partir do lockfile raiz..."
 Invoke-CloudOSExternal $npm @('ci','--include=dev')
@@ -30,12 +32,14 @@ $vpkVersion = [string]$config.velopackVersion
 
 $nodeRuntime = Ensure-CloudOSNodeRuntime
 $nodeHash = (Get-FileHash -LiteralPath (Join-Path $nodeRuntime 'node.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+$branchResult = Invoke-CloudOSExternal $git @('branch','--show-current') $root -Capture
+$currentBranch = if ([string]::IsNullOrWhiteSpace($branchResult.Output)) { '(detached)' } else { $branchResult.Output.Trim() }
 
 $tooling = [ordered]@{
     schemaVersion = 1
     preparedAt = [DateTimeOffset]::UtcNow.ToString('O')
     head = $sha
-    branch = 'productization/cloudos-distribution-batch-2'
+    branch = $currentBranch
     nodeBuild = (Invoke-CloudOSExternal (Get-CloudOSCommandName 'node') @('--version') -Capture).Output
     nodeRuntime = "v$($config.nodeVersion)"
     nodeRuntimeSha256 = $nodeHash
@@ -46,4 +50,4 @@ $tooling = [ordered]@{
     signing = $config.signing
 }
 Write-CloudOSJson $tooling (Join-Path $paths.Artifacts 'tooling.json')
-Write-Host "CLOUDOS_PRODUCT_PREPARED head=$sha velopack=$($config.velopackVersion) node=$($config.nodeVersion)"
+Write-Host "CLOUDOS_PRODUCT_PREPARED head=$sha branch=$currentBranch velopack=$($config.velopackVersion) node=$($config.nodeVersion)"
