@@ -12,6 +12,13 @@
 
 #include <Windows.h>
 
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
+
 #include <atomic>
 #include <functional>
 #include <map>
