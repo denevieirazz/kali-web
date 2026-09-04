@@ -1,0 +1,145 @@
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)][string]$PackageRoot,
+    [string]$OutputPath
+)
+
+Set-StrictMode -Version 2.0
+$ErrorActionPreference = 'Stop'
+
+$package = (Resolve-Path -LiteralPath $PackageRoot).Path
+$installScript = Join-Path $package 'install-cloudos-native-v22.ps1'
+$module = Join-Path $package 'CloudOS.Deployment.V13.psm1'
+foreach ($path in @($installScript, $module)) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "Install V22 smoke dependency missing: $path"
+    }
+}
+
+if (-not $OutputPath) {
+    $OutputPath = Join-Path $env:TEMP ('cloudos-install-v22-smoke-' + [Guid]::NewGuid().ToString('N') + '.json')
+}
+$OutputPath = [IO.Path]::GetFullPath($OutputPath)
+$installRoot = Join-Path $env:TEMP ('CloudOS-Install-V22-' + [Guid]::NewGuid().ToString('N'))
+$supervisorStatePath = Join-Path $env:LOCALAPPDATA 'CloudOS\Recovery\supervisor-state-v22.json'
+
+Import-Module -Name $module -Force
+$failures = [Collections.Generic.List[string]]::new()
+$evidence = [ordered]@{}
+
+try {
+    try {
+        & $installScript -PackageRoot $package -InstallRoot $installRoot -RetainVersions 2 -HealthTimeoutSeconds 60
+    }
+    catch {
+        $evidence.first_install_exception_type = $_.Exception.GetType().FullName
+        $evidence.first_install_exception_message = $_.Exception.Message
+        if (Test-Path -LiteralPath $supervisorStatePath -PathType Leaf) {
+            try {
+                $supervisorState = Get-Content -LiteralPath $supervisorStatePath -Raw | ConvertFrom-Json
+                $evidence.supervisor_state = [string]$supervisorState.state
+                $evidence.supervisor_reason = [string]$supervisorState.reason
+                $evidence.supervisor_failure_count = [int]$supervisorState.failure_count
+                $evidence.supervisor_last_exit_code = [uint32]$supervisorState.last_exit_code
+                $evidence.supervisor_shell_pid = [uint32]$supervisorState.shell_pid
+                $evidence.supervisor_job_assigned = [bool]$supervisorState.job_kill_on_close_assigned
+                $evidence.supervisor_uptime_ms = [uint64]$supervisorState.supervisor_uptime_ms
+                $evidence.supervisor_transition_sequence = [int64]$supervisorState.transition_sequence
+                $evidence.supervisor_updated_utc = [string]$supervisorState.updated_utc
+                Write-Host "[CloudOS Install V22 smoke] Supervisor state after failed health: state=$($evidence.supervisor_state) reason=$($evidence.supervisor_reason) failures=$($evidence.supervisor_failure_count) lastExit=$($evidence.supervisor_last_exit_code) shellPid=$($evidence.supervisor_shell_pid) jobAssigned=$($evidence.supervisor_job_assigned) uptimeMs=$($evidence.supervisor_uptime_ms) transition=$($evidence.supervisor_transition_sequence)"
+            }
+            catch {
+                $evidence.supervisor_state_capture_error = $_.Exception.Message
+            }
+        }
+        $failures.Add('FirstInstallFailed:' + $_.Exception.GetType().Name + ':' + $_.Exception.Message)
+    }
+
+    if ($failures.Count -eq 0) {
+        $status = Get-CloudOSDeploymentStatus -InstallRoot $installRoot
+        $evidence.installed = [bool]$status.installed
+        $evidence.active_valid = [bool]$status.active_valid
+        $evidence.active_version = [string]$status.active_version
+        $evidence.last_known_good_empty = [string]::IsNullOrWhiteSpace([string]$status.last_known_good)
+        $evidence.journal_absent = -not [bool]$status.journal_present
+
+        if (-not $status.installed) { $failures.Add('ManagedInstallMissing') }
+        if (-not $status.active_valid) { $failures.Add('ActivePayloadInvalidAfterHealthGate') }
+        if ($status.journal_present) { $failures.Add('DeploymentJournalLeakedAfterInstall') }
+
+        $secondRejected = $false
+        try {
+            & $installScript -PackageRoot $package -InstallRoot $installRoot -RetainVersions 2 -HealthTimeoutSeconds 60
+        }
+        catch {
+            $secondRejected = $_.Exception.Message -match 'already installed|Atualizar CloudOS'
+        }
+        $evidence.second_install_rejected = $secondRejected
+        if (-not $secondRejected) { $failures.Add('SecondInstallWasNotRejected') }
+
+        $statusAfterRejection = Get-CloudOSDeploymentStatus -InstallRoot $installRoot
+        $evidence.active_unchanged_after_rejection =
+            [string]$statusAfterRejection.active_version -eq [string]$status.active_version
+        if (-not $evidence.active_unchanged_after_rejection) {
+            $failures.Add('SecondInstallChangedActiveVersion')
+        }
+    }
+}
+finally {
+    try {
+        if (Test-Path -LiteralPath $installRoot) {
+            $statusBeforeUninstall = Get-CloudOSDeploymentStatus -InstallRoot $installRoot
+            if ($statusBeforeUninstall.installed) {
+                [void](Invoke-CloudOSUninstall -InstallRoot $installRoot)
+            }
+        }
+    }
+    catch {
+        $failures.Add('CleanupFailed:' + $_.Exception.GetType().Name + ':' + $_.Exception.Message)
+    }
+
+    $evidence.install_root_removed = -not (Test-Path -LiteralPath $installRoot)
+    if (-not $evidence.install_root_removed) {
+        $failures.Add('InstallRootLeaked')
+    }
+
+    $remaining = New-Object System.Collections.Generic.List[string]
+    foreach ($name in @('CloudOS', 'CloudOS.Supervisor', 'CloudOS.SystemBroker', 'CloudOS.BrokerProbe')) {
+        foreach ($process in @(Get-Process -Name $name -ErrorAction SilentlyContinue)) {
+            try {
+                $path = [string]$process.Path
+                if (-not [string]::IsNullOrWhiteSpace($path) -and
+                    [IO.Path]::GetFullPath($path).StartsWith(
+                        [IO.Path]::GetFullPath($installRoot).TrimEnd('\') + '\',
+                        [StringComparison]::OrdinalIgnoreCase)) {
+                    $remaining.Add("$($process.ProcessName):$($process.Id)")
+                }
+            }
+            catch {}
+        }
+    }
+    $evidence.remaining_managed_processes = @($remaining)
+    if ($remaining.Count -ne 0) {
+        $failures.Add('ManagedProcessLeaked:' + ($remaining -join ','))
+    }
+}
+
+$report = [ordered]@{
+    schema = 22
+    test = 'CloudOS Transactional Install V22'
+    collected_utc = [DateTime]::UtcNow.ToString('o')
+    verdict = if ($failures.Count -eq 0) { 'pass' } else { 'fail' }
+    scope = 'First install through V22 Supervisor health gate, duplicate-install rejection, active-state preservation and managed cleanup.'
+    evidence = $evidence
+    failures = $failures.ToArray()
+}
+
+$parent = Split-Path -Parent $OutputPath
+if ($parent) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+$report | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $OutputPath -Encoding utf8
+
+if ($failures.Count -gt 0) {
+    Write-Error "FAIL: Transactional Install V22 smoke failed: $($failures -join ', '). Report: $OutputPath"
+    exit 1
+}
+Write-Host "PASS: Transactional Install V22 smoke passed. Report: $OutputPath"

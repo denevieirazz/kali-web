@@ -8,6 +8,11 @@
 namespace
 {
 constexpr ULONGLONG kV22CrashWindowMs = 60000ull;
+constexpr DWORD kV22ReadyHeartbeatObservationMs = 12000u;
+constexpr DWORD kV22GracefulPrimaryWaitMs = 5000u;
+constexpr DWORD kV22GracefulAcknowledgedExtensionMs = 5000u;
+constexpr DWORD kV22GracefulPollMs = 100u;
+constexpr std::uint32_t kV22HealthShuttingDownState = 3u;
 constexpr wchar_t kV22StateFileName[] = L"supervisor-state-v22.json";
 const ULONGLONG g_supervisor_start_tick_v22 = GetTickCount64();
 volatile LONG64 g_transition_sequence_v22 = 0;
@@ -230,6 +235,70 @@ bool AssignShellToJobV22(HANDLE job, HANDLE process) noexcept
     return job != nullptr && process != nullptr && AssignProcessToJobObject(job, process) != FALSE;
 }
 
+bool ProbeReadyHeartbeatV22(HANDLE process, DWORD process_id, DWORD heartbeat_timeout_ms)
+{
+    NativeHealthSnapshotV9 initial{};
+    if (!ReadHealthSnapshot(&initial) || initial.process_id != process_id) return false;
+
+    const std::uint64_t target = initial.heartbeat_count + 3ull;
+    const ULONGLONG deadline = GetTickCount64() + kV22ReadyHeartbeatObservationMs;
+    while (GetTickCount64() < deadline)
+    {
+        if (WaitForSingleObject(process, 0) == WAIT_OBJECT_0) return false;
+
+        NativeHealthSnapshotV9 snapshot{};
+        if (ReadHealthSnapshot(&snapshot) &&
+            snapshot.process_id == process_id &&
+            snapshot.heartbeat_count >= target &&
+            HeartbeatFresh(snapshot, heartbeat_timeout_ms))
+        {
+            return true;
+        }
+        Sleep(250);
+    }
+    return false;
+}
+
+bool RequestGracefulExitV22(HANDLE process, DWORD process_id)
+{
+    const HWND desktop = FindWindowW(CloudOS::SupervisorProtocolV11::DesktopClass, nullptr);
+    if (desktop == nullptr)
+    {
+        return WaitForSingleObject(process, kV22GracefulPrimaryWaitMs) == WAIT_OBJECT_0;
+    }
+
+    DWORD window_process_id = 0;
+    GetWindowThreadProcessId(desktop, &window_process_id);
+    if (window_process_id != process_id ||
+        PostMessageW(
+            desktop,
+            CloudOS::SupervisorProtocolV11::RequestGracefulExitMessage,
+            0,
+            0) == FALSE)
+    {
+        return WaitForSingleObject(process, kV22GracefulPrimaryWaitMs) == WAIT_OBJECT_0;
+    }
+
+    bool shutdown_acknowledged = false;
+    const ULONGLONG primary_deadline = GetTickCount64() + kV22GracefulPrimaryWaitMs;
+    while (GetTickCount64() < primary_deadline)
+    {
+        if (WaitForSingleObject(process, kV22GracefulPollMs) == WAIT_OBJECT_0)
+            return true;
+
+        NativeHealthSnapshotV9 snapshot{};
+        if (ReadHealthSnapshot(&snapshot) &&
+            snapshot.process_id == process_id &&
+            snapshot.state == kV22HealthShuttingDownState)
+        {
+            shutdown_acknowledged = true;
+        }
+    }
+
+    if (!shutdown_acknowledged) return false;
+    return WaitForSingleObject(process, kV22GracefulAcknowledgedExtensionMs) == WAIT_OBJECT_0;
+}
+
 bool LaunchCloudOSSuspendedV22(
     bool probe_failure,
     HANDLE job,
@@ -440,7 +509,7 @@ int RunSupervisorV22(const SupervisorOptions& options)
 
             if (options.probe_ready_once)
             {
-                const bool heartbeat_ok = ProbeReadyHeartbeat(
+                const bool heartbeat_ok = ProbeReadyHeartbeatV22(
                     process.value,
                     process_id,
                     options.heartbeat_timeout_ms);
@@ -451,7 +520,7 @@ int RunSupervisorV22(const SupervisorOptions& options)
                     failure_count,
                     0,
                     job_assigned);
-                const bool graceful = RequestGracefulExit(process.value, process_id);
+                const bool graceful = RequestGracefulExitV22(process.value, process_id);
                 if (!graceful)
                 {
                     (void)TerminateProcess(process.value, kSupervisorHangExit);

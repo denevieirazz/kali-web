@@ -181,6 +181,20 @@ jobs:
           if ((Get-Item -LiteralPath $zip).Length -le 0) { throw "Portable native package is empty: $zip" }
           Write-Host "PACKAGE_SHA256=$((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant())"
 
+      - name: Smoke Transactional Install V22
+        shell: pwsh
+        run: |
+          $packageRoot = 'desktop/CloudOS.NativeShell/artifacts/CloudOS-Native-Release-x64'
+          $report = 'desktop/CloudOS.NativeShell/artifacts/install-v22-smoke.json'
+          ./scripts/native/run-native-install-v22-smoke.ps1 -PackageRoot $packageRoot -OutputPath $report
+          if (-not (Test-Path -LiteralPath $report)) { throw 'Transactional Install V22 smoke report missing.' }
+          $result = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
+          if ($result.verdict -ne 'pass') { throw 'Transactional Install V22 smoke verdict was not pass.' }
+          foreach ($name in @('installed', 'active_valid', 'journal_absent', 'second_install_rejected', 'active_unchanged_after_rejection', 'install_root_removed')) {
+            if ($result.evidence.$name -ne $true) { throw "Transactional Install V22 evidence failed: $name" }
+          }
+          if (@($result.evidence.remaining_managed_processes).Count -ne 0) { throw 'Transactional Install V22 leaked managed processes.' }
+
       - name: Smoke Transactional Deployment V13
         shell: pwsh
         run: |
@@ -247,6 +261,7 @@ jobs:
             desktop/CloudOS.NativeShell/artifacts/lifecycle-v10-smoke.json
             desktop/CloudOS.NativeShell/artifacts/supervisor-v11-smoke.json
             desktop/CloudOS.NativeShell/artifacts/supervisor-v22-smoke.json
+            desktop/CloudOS.NativeShell/artifacts/install-v22-smoke.json
             desktop/CloudOS.NativeShell/artifacts/performance-v12-smoke.json
             desktop/CloudOS.NativeShell/artifacts/deployment-v13-smoke.json
             desktop/CloudOS.NativeShell/artifacts/shell-activation-v14-smoke.json
