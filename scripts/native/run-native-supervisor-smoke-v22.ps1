@@ -70,13 +70,16 @@ try {
     if ($selfTest -ne 0) { $failures.Add("SelfTestExit:$selfTest") }
 
     $stage = 'ready-probe'
+    $readyTimer = [Diagnostics.Stopwatch]::StartNew()
     $readyExit = Invoke-SupervisorProbe -Arguments @(
         '--probe-ready-once',
         '--probe-no-explorer',
         '--ready-timeout-ms', '30000',
         '--heartbeat-timeout-ms', '5000'
     )
+    $readyTimer.Stop()
     $evidence.ready_probe_exit_code = $readyExit
+    $evidence.ready_probe_elapsed_ms = [int64]$readyTimer.ElapsedMilliseconds
     if ($readyExit -ne 0) { $failures.Add("ReadyProbeExit:$readyExit") }
 
     $stage = 'ready-state'
@@ -87,7 +90,16 @@ try {
     }
     else {
         $evidence.ready_final_state = [string]$readyState.state
+        $evidence.ready_reason = [string]$readyState.reason
         $evidence.ready_job_assignment_observed = [bool]$readyState.job_kill_on_close_assigned
+        $evidence.ready_supervisor_uptime_ms = [uint64]$readyState.supervisor_uptime_ms
+        $evidence.ready_transition_sequence = [int64]$readyState.transition_sequence
+        $evidence.ready_last_exit_code = [uint32]$readyState.last_exit_code
+        if ($readyExit -ne 0) {
+            $postStateMs = [int64]$readyTimer.ElapsedMilliseconds - [int64]$evidence.ready_supervisor_uptime_ms
+            $evidence.ready_post_state_elapsed_ms = $postStateMs
+            Write-Host "[CloudOS Supervisor V22 smoke] Failed ready probe: exit=$readyExit elapsedMs=$($evidence.ready_probe_elapsed_ms) state=$($evidence.ready_final_state) reason=$($evidence.ready_reason) supervisorUptimeMs=$($evidence.ready_supervisor_uptime_ms) postStateMs=$postStateMs transition=$($evidence.ready_transition_sequence) lastExit=$($evidence.ready_last_exit_code)"
+        }
         if ([string]$readyState.state -ne 'STOPPING') {
             $failures.Add("UnexpectedReadyFinalState:$($readyState.state)")
         }
