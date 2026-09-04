@@ -3,7 +3,8 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $paths = @{
     Protocol = Join-Path $root 'desktop\CloudOS.NativeCommon\native_supervisor_protocol_v11.h'
-    Supervisor = Join-Path $root 'desktop\CloudOS.NativeRecovery\main.cpp'
+    SupervisorV11 = Join-Path $root 'desktop\CloudOS.NativeRecovery\main.cpp'
+    SupervisorV22 = Join-Path $root 'desktop\CloudOS.NativeRecovery\main_v22.cpp'
     Project = Join-Path $root 'desktop\CloudOS.NativeRecovery\CloudOS.NativeRecovery.vcxproj'
     Watchdog = Join-Path $root 'desktop\CloudOS.NativeShell\src\native_watchdog.cpp'
     Health = Join-Path $root 'desktop\CloudOS.NativeShell\src\native_health_bootstrap_v9.h'
@@ -20,7 +21,7 @@ $paths = @{
 
 foreach ($entry in $paths.GetEnumerator()) {
     if (-not (Test-Path -LiteralPath $entry.Value -PathType Leaf)) {
-        throw "Supervisor V11 file missing [$($entry.Key)]: $($entry.Value)"
+        throw "Supervisor compatibility file missing [$($entry.Key)]: $($entry.Value)"
     }
 }
 $content = @{}
@@ -32,7 +33,9 @@ function Require([string]$Name, [string]$Text, [string[]]$Tokens) {
     }
 }
 
-Require 'Shared Supervisor V11 protocol' $content.Protocol @(
+# V11 is now the stable protocol/ABI that V22 extends. Do not confuse the
+# compatibility level with the compiled runtime generation.
+Require 'Shared Supervisor V11 protocol ABI' $content.Protocol @(
     'SupervisedArgument[] = L"--supervised"',
     'ProbeFailureArgument[] = L"--supervisor-probe-fail"',
     'Local\\CloudOS.NativeShell.Supervisor.v11',
@@ -43,7 +46,7 @@ Require 'Shared Supervisor V11 protocol' $content.Protocol @(
     'static_assert(sizeof(NativeHealthSnapshotV9) == HealthStructureSize)'
 )
 
-Require 'External Supervisor V11 runtime' $content.Supervisor @(
+Require 'Preserved Supervisor V11 primitives' $content.SupervisorV11 @(
     'kDefaultReadyTimeoutMs = 30000u',
     'kDefaultHeartbeatTimeoutMs = 5000u',
     'kDefaultMaximumFailures = 3u',
@@ -67,10 +70,21 @@ Require 'External Supervisor V11 runtime' $content.Supervisor @(
     '--recovery-ui'
 )
 
-Require 'Supervisor V11 build identity' $content.Project @(
+Require 'Supervisor V22 wraps reviewed V11 implementation' $content.SupervisorV22 @(
+    '#define wWinMain CloudOSLegacySupervisorMainV11',
+    '#include "main.cpp"',
+    'RunSupervisorV22',
+    'STARTING',
+    'HEALTHY',
+    'CRASH_LOOP',
+    'SAFE_MODE'
+)
+
+Require 'Supervisor binary identity' $content.Project @(
     '<TargetName>CloudOS.Supervisor</TargetName>',
     '<TreatWarningAsError>true</TreatWarningAsError>',
-    '..\CloudOS.NativeShell\bin\$(Configuration)\'
+    '..\CloudOS.NativeShell\bin\$(Configuration)\',
+    '<ClCompile Include="main_v22.cpp">'
 )
 
 Require 'Supervised shell recovery ownership' $content.Watchdog @(
@@ -86,26 +100,26 @@ Require 'Graceful supervisor shutdown protocol' $content.Health @(
     'PostQuitMessage(0);'
 )
 
-Require 'Native build integrates Supervisor V11' $content.Build @(
+Require 'Native build integrates Supervisor compatibility' $content.Build @(
     'test-native-contract-suite.ps1',
     'CloudOS.NativeRecovery\CloudOS.NativeRecovery.vcxproj',
-    'CloudOS.Supervisor.exe',
-    'SHELL_SUPERVISOR_V11='
+    'CloudOS.Supervisor.exe'
 )
-Require 'Central contract suite contains V11' $content.ContractSuite @('test-shell-supervisor-v11-contract.ps1')
+Require 'Central contract suite contains V11 compatibility' $content.ContractSuite @('test-shell-supervisor-v11-contract.ps1')
 Require 'Fingerprint covers shared protocol' $content.Fingerprint @(
     'desktop\CloudOS.NativeCommon',
     'desktop\CloudOS.NativeRecovery'
 )
-Require 'Manifest covers Supervisor V11' $content.Manifest @('CloudOS.Supervisor.exe')
-Require 'Integrity verifier covers Supervisor V11' $content.Verify @('CloudOS.Supervisor.exe')
-Require 'Portable package launches Supervisor V11' $content.Package @(
+Require 'Manifest covers Supervisor binary' $content.Manifest @('CloudOS.Supervisor.exe')
+Require 'Integrity verifier covers Supervisor binary' $content.Verify @('CloudOS.Supervisor.exe')
+Require 'Portable package launches current Supervisor with V11 ABI compatibility' $content.Package @(
     "'CloudOS.Supervisor.exe'",
     'CloudOS.Supervisor.exe"',
     '--recovery-ui',
-    'Shell Supervisor V11'
+    'Supervisor V22',
+    'V11 compat'
 )
-Require 'Supervisor V11 smoke' $content.Smoke @(
+Require 'Supervisor V11 compatibility smoke' $content.Smoke @(
     '--self-test',
     '--probe-ready-once',
     '--probe-failure-loop',
@@ -113,12 +127,11 @@ Require 'Supervisor V11 smoke' $content.Smoke @(
     'health_mapping_released_after_ready_probe',
     'remaining_installation_shell_processes'
 )
-Require 'Native CI runs Supervisor V11 smoke' $content.Workflow @(
-    'Smoke Shell Supervisor V11',
+Require 'Native CI retains V11 compatibility smoke' $content.Workflow @(
     'run-native-supervisor-smoke-v11.ps1',
     'supervisor-v11-smoke.json'
 )
-Require 'Supervisor V11 documentation' $content.Document @(
+Require 'Supervisor V11 protocol documentation' $content.Document @(
     '30 segundos',
     'heartbeat',
     'crash-loop',
@@ -127,4 +140,4 @@ Require 'Supervisor V11 documentation' $content.Document @(
     'CloudOS.Supervisor.exe'
 )
 
-Write-Host 'PASS: Shell Supervisor V11 contracts passed - external readiness/heartbeat authority, bounded restart policy, graceful exit, safe Explorer fallback, portable packaging and runtime CI smoke are protected.'
+Write-Host 'PASS: Supervisor compatibility contract passed - V22 is the compiled recovery runtime while the reviewed V11 readiness/heartbeat/graceful-exit ABI remains protected.'
