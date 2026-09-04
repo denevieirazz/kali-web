@@ -5,6 +5,7 @@ import 'package:xterm/xterm.dart';
 
 import '../../../services/cloudos_bridge.dart';
 import '../../../services/cloudos_logger.dart';
+import '../domain/terminal_launch_coordinator.dart';
 
 enum TerminalShellKind { powershell, cmd, wsl }
 
@@ -41,11 +42,15 @@ class TerminalWindow extends StatefulWidget {
     this.bridge = const CloudOSBridge(),
     this.initialDistro,
     this.initialShell = TerminalShellKind.powershell,
+    this.requestedShell,
+    this.launchRevision = 0,
   });
 
   final CloudOSBridge bridge;
   final String? initialDistro;
   final TerminalShellKind initialShell;
+  final TerminalShellKind? requestedShell;
+  final int launchRevision;
 
   @override
   State<TerminalWindow> createState() => _TerminalWindowState();
@@ -59,6 +64,8 @@ class _TerminalWindowState extends State<TerminalWindow> {
   String _defaultDistro = '';
   StreamSubscription<TerminalDataEvent>? _dataSub;
   StreamSubscription<TerminalExitEvent>? _exitSub;
+  StreamSubscription<TerminalLaunchRequest>? _launchRequestSub;
+  bool _initialTabCreated = false;
 
   TerminalTabItem? get _activeTab =>
       _tabs.isNotEmpty && _activeTabIndex < _tabs.length
@@ -69,10 +76,27 @@ class _TerminalWindowState extends State<TerminalWindow> {
   void initState() {
     super.initState();
     _subscribeNativeStreams();
-    if (widget.initialShell != TerminalShellKind.wsl) {
-      _createInitialTab();
+    _subscribeLaunchRequests();
+
+    final pending = TerminalLaunchCoordinator.takePending();
+    final pendingShell = pending == null
+        ? null
+        : _shellKindForProfile(pending.profile);
+    final initialShell = widget.requestedShell ?? pendingShell ?? widget.initialShell;
+    if (initialShell != TerminalShellKind.wsl) {
+      _createInitialTab(shellKind: initialShell);
     }
     unawaited(_initialize());
+  }
+
+  @override
+  void didUpdateWidget(covariant TerminalWindow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.launchRevision == widget.launchRevision ||
+        widget.requestedShell == null) {
+      return;
+    }
+    _activateShell(widget.requestedShell!);
   }
 
   Future<void> _initialize() async {
@@ -88,7 +112,7 @@ class _TerminalWindowState extends State<TerminalWindow> {
         stackTrace,
       );
     }
-    if (mounted && widget.initialShell == TerminalShellKind.wsl) {
+    if (mounted && !_initialTabCreated) {
       _createInitialTab();
     }
   }
@@ -118,10 +142,26 @@ class _TerminalWindowState extends State<TerminalWindow> {
     });
   }
 
+  void _subscribeLaunchRequests() {
+    _launchRequestSub = TerminalLaunchCoordinator.requests.listen((request) {
+      if (!mounted) return;
+      TerminalLaunchCoordinator.acknowledge(request);
+      _activateShell(_shellKindForProfile(request.profile));
+    });
+  }
+
+  TerminalShellKind _shellKindForProfile(TerminalLaunchProfile profile) {
+    return switch (profile) {
+      TerminalLaunchProfile.cmd => TerminalShellKind.cmd,
+      TerminalLaunchProfile.powershell => TerminalShellKind.powershell,
+    };
+  }
+
   @override
   void dispose() {
     _dataSub?.cancel();
     _exitSub?.cancel();
+    _launchRequestSub?.cancel();
     for (final tab in _tabs) {
       final sessionId = tab.sessionId;
       if (sessionId != null) {
@@ -132,13 +172,15 @@ class _TerminalWindowState extends State<TerminalWindow> {
     super.dispose();
   }
 
-  void _createInitialTab() {
-    final distro = widget.initialShell == TerminalShellKind.wsl
+  void _createInitialTab({TerminalShellKind? shellKind}) {
+    final kind = shellKind ?? widget.initialShell;
+    final distro = kind == TerminalShellKind.wsl
         ? (widget.initialDistro?.isNotEmpty == true
               ? widget.initialDistro!
               : _defaultDistro)
         : '';
-    _addNewTab(widget.initialShell, distro: distro);
+    _initialTabCreated = true;
+    _addNewTab(kind, distro: distro);
   }
 
   String _titleFor(TerminalShellKind kind, String distro) {
@@ -150,6 +192,25 @@ class _TerminalWindowState extends State<TerminalWindow> {
       case TerminalShellKind.powershell:
         return 'PowerShell (ConPTY)';
     }
+  }
+
+  void _activateShell(TerminalShellKind kind, {String distro = ''}) {
+    final resolvedDistro = kind == TerminalShellKind.wsl && distro.isEmpty
+        ? _defaultDistro
+        : distro;
+    final existingIndex = _tabs.indexWhere((tab) {
+      if (tab.shellKind != kind) return false;
+      if (kind == TerminalShellKind.wsl && tab.distro != resolvedDistro) {
+        return false;
+      }
+      return tab.isRunning || tab.sessionId == null;
+    });
+
+    if (existingIndex >= 0) {
+      _selectTab(existingIndex);
+      return;
+    }
+    _addNewTab(kind, distro: resolvedDistro);
   }
 
   void _addNewTab(TerminalShellKind kind, {String distro = ''}) {

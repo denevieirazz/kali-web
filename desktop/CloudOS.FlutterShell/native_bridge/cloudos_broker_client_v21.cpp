@@ -383,6 +383,12 @@ bool CloudOSBrokerClientV21::GetApps(std::vector<BrokerClientAppItem>& out_apps)
 
 bool CloudOSBrokerClientV21::LaunchApp(const std::string& app_id, std::string& err)
 {
+    if (app_id == "windows:cmd" || app_id == "windows:powershell")
+    {
+        err = "Windows console profiles must be routed to CloudOS Terminal / ConPTY";
+        return false;
+    }
+
     if (ManagedWin32HostV22::IsWindowsCatalogId(app_id))
     {
         return ManagedWin32HostV22::Launch(app_id, err);

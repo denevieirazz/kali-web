@@ -292,12 +292,13 @@ void AppServiceV21::Refresh()
     apps_.push_back({"cloudos:drive", "CloudOS Drive", "cloudos", "Workspace & Projetos", "", "Produtividade", "CloudOS", true, false, false, "drive", false, false});
     apps_.push_back({"cloudos:trash", "Lixeira", "cloudos", "Indisponível até a superfície first-party de lixeira", "", "Sistema", "CloudOS", false, false, false, "trash", false, false});
 
-    // 2. Windows Native Applications
+    // 2. Windows Native Applications. CMD and PowerShell remain discoverable
+    // catalog profiles, but the CloudOS Flutter shell owns their ConPTY launch.
     apps_.push_back({"windows:vscode", "Visual Studio Code", "windows", "Code Editor & IDE", "", "Produtividade", "Windows", true, true, false, "vscode", true, true});
     apps_.push_back({"windows:notepad", "Bloco de Notas", "windows", "Editor de Texto", "", "Produtividade", "Windows", true, false, false, "notepad", true, false});
-    apps_.push_back({"windows:powershell", "PowerShell 7", "windows", "Windows Terminal & Shell", "", "Utilitários", "Windows", true, true, false, "powershell", true, true});
+    apps_.push_back({"windows:powershell", "PowerShell", "windows", "CloudOS Terminal / ConPTY", "", "Utilitários", "Windows", true, true, false, "powershell", true, true});
     apps_.push_back({"windows:taskmgr", "Gerenciador de Tarefas", "windows", "Monitor de Recursos do Sistema", "", "Sistema", "Windows", true, false, false, "taskmgr", false, false});
-    apps_.push_back({"windows:cmd", "Prompt de Comando", "windows", "cmd.exe", "", "Utilitários", "Windows", true, false, false, "cmd", false, false});
+    apps_.push_back({"windows:cmd", "Prompt de Comando", "windows", "CloudOS Terminal / ConPTY", "", "Utilitários", "Windows", true, false, false, "cmd", false, false});
     apps_.push_back({"windows:explorer", "Windows Explorer", "windows", "Explorador de Arquivos do Windows", "", "Sistema", "Windows", true, false, false, "explorer", false, false});
 
     // 3. Linux / WSL. Catalog discovery stays passive: it never starts a distro.
@@ -348,6 +349,15 @@ bool AppServiceV21::LaunchApp(const std::string& app_id, std::string& err)
             err);
     }
 
+    // CMD/PowerShell are terminal profiles, not external Windows applications.
+    // Reject broker-level execution so a caller cannot bypass the Flutter ConPTY
+    // surface and make a console escape onto the Windows desktop.
+    if (app_id == "windows:cmd" || app_id == "windows:powershell")
+    {
+        err = "Windows console profiles must be opened through CloudOS Terminal / ConPTY";
+        return false;
+    }
+
     // Defensive whitelist resolution: reject arbitrary command injection.
     if (app_id == "files" || app_id == "cloudos:files")
     {
@@ -381,17 +391,9 @@ bool AppServiceV21::LaunchApp(const std::string& app_id, std::string& err)
     {
         return LaunchSucceeded(ShellExecuteW(nullptr, L"open", L"code.cmd", nullptr, nullptr, SW_SHOWNORMAL));
     }
-    if (app_id == "windows:powershell")
-    {
-        return LaunchSucceeded(ShellExecuteW(nullptr, L"open", L"powershell.exe", nullptr, nullptr, SW_SHOWNORMAL));
-    }
     if (app_id == "windows:taskmgr")
     {
         return LaunchSucceeded(ShellExecuteW(nullptr, L"open", L"taskmgr.exe", nullptr, nullptr, SW_SHOWNORMAL));
-    }
-    if (app_id == "windows:cmd")
-    {
-        return LaunchSucceeded(ShellExecuteW(nullptr, L"open", L"cmd.exe", nullptr, nullptr, SW_SHOWNORMAL));
     }
     if (app_id == "windows:explorer")
     {
