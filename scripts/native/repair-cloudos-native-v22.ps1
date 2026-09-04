@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$InstallRoot,
-    [ValidateRange(15, 120)][int]$HealthTimeoutSeconds = 45,
+    [ValidateRange(15, 120)][int]$HealthTimeoutSeconds = 60,
     [switch]$RequireAuthenticodeSignature
 )
 
