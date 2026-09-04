@@ -552,18 +552,18 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
             const auto timeout_it = args->find(flutter::EncodableValue("timeoutMs"));
             if (timeout_it != args->end())
             {
-                if (const auto* value = std::get_if<int32_t>(&timeout_it->second))
+                if (const auto* timeout32 = std::get_if<int32_t>(&timeout_it->second))
                 {
-                    timeout_ms = static_cast<int>(*value);
+                    timeout_ms = static_cast<int>(*timeout32);
                 }
-                else if (const auto* value = std::get_if<int64_t>(&timeout_it->second))
+                else if (const auto* timeout64 = std::get_if<int64_t>(&timeout_it->second))
                 {
-                    if (*value < 1000 || *value > 15000)
+                    if (*timeout64 < 1000 || *timeout64 > 15000)
                     {
                         result->Error("INVALID_ARGUMENT", "probeWslHealth timeoutMs must be 1000..15000");
                         return;
                     }
-                    timeout_ms = static_cast<int>(*value);
+                    timeout_ms = static_cast<int>(*timeout64);
                 }
                 else
                 {
