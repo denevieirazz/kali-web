@@ -125,7 +125,7 @@ function Invoke-CloudOSSupervisorHealthGateV22 {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][string]$ActiveRoot,
-        [ValidateRange(15, 120)][int]$TimeoutSeconds = 45
+        [ValidateRange(15, 120)][int]$TimeoutSeconds = 60
     )
 
     $root = (Resolve-Path -LiteralPath $ActiveRoot).Path
