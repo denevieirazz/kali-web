@@ -1,7 +1,9 @@
 import 'dart:async';
 
+import 'package:cloudos_flutter_shell/features/terminal/domain/terminal_launch_coordinator.dart';
 import 'package:cloudos_flutter_shell/features/terminal/presentation/terminal_window.dart';
 import 'package:cloudos_flutter_shell/services/cloudos_bridge.dart';
+import 'package:cloudos_flutter_shell/shell/shell_app_route.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -62,6 +64,38 @@ Widget _harness({
 }
 
 void main() {
+  setUp(TerminalLaunchCoordinator.resetForTest);
+  tearDown(TerminalLaunchCoordinator.resetForTest);
+
+  test('CMD and PowerShell catalog IDs resolve to the internal Terminal route', () {
+    expect(resolveShellAppRoute('windows:cmd'), ShellAppRoute.terminal);
+    final cmd = TerminalLaunchCoordinator.takePending();
+    expect(cmd?.profile, TerminalLaunchProfile.cmd);
+
+    expect(resolveShellAppRoute('windows:powershell'), ShellAppRoute.terminal);
+    final powershell = TerminalLaunchCoordinator.takePending();
+    expect(powershell?.profile, TerminalLaunchProfile.powershell);
+  });
+
+  testWidgets('pending CMD intent replaces the default PowerShell initial tab', (
+    tester,
+  ) async {
+    final bridge = _RecordingTerminalBridge();
+    TerminalLaunchCoordinator.request(TerminalLaunchProfile.cmd);
+
+    await tester.pumpWidget(
+      _harness(
+        bridge: bridge,
+        initialShell: TerminalShellKind.powershell,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(bridge.createdShells, <String>['cmd']);
+    expect(find.text('CMD (ConPTY)'), findsOneWidget);
+    expect(find.text('PowerShell (ConPTY)'), findsNothing);
+  });
+
   testWidgets('initial CMD launch creates one ConPTY CMD session', (tester) async {
     final bridge = _RecordingTerminalBridge();
     await tester.pumpWidget(
@@ -101,7 +135,7 @@ void main() {
     expect(bridge.createdShells, <String>['cmd']);
   });
 
-  testWidgets('PowerShell request appends session without destroying CMD', (
+  testWidgets('global repeated CMD intent reuses the live CMD session', (
     tester,
   ) async {
     final bridge = _RecordingTerminalBridge();
@@ -109,19 +143,30 @@ void main() {
       _harness(
         bridge: bridge,
         initialShell: TerminalShellKind.cmd,
-        requestedShell: TerminalShellKind.cmd,
       ),
     );
     await tester.pumpAndSettle();
 
+    TerminalLaunchCoordinator.request(TerminalLaunchProfile.cmd);
+    await tester.pumpAndSettle();
+
+    expect(bridge.createdShells, <String>['cmd']);
+    expect(bridge.closedSessions, isEmpty);
+  });
+
+  testWidgets('PowerShell intent appends session without destroying CMD', (
+    tester,
+  ) async {
+    final bridge = _RecordingTerminalBridge();
     await tester.pumpWidget(
       _harness(
         bridge: bridge,
         initialShell: TerminalShellKind.cmd,
-        requestedShell: TerminalShellKind.powershell,
-        revision: 1,
       ),
     );
+    await tester.pumpAndSettle();
+
+    TerminalLaunchCoordinator.request(TerminalLaunchProfile.powershell);
     await tester.pumpAndSettle();
 
     expect(bridge.createdShells, <String>['cmd', 'powershell']);
