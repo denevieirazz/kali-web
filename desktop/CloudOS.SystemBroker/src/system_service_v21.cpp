@@ -47,15 +47,45 @@ JsonObject SystemSnapshot::ToJsonObject() const
     obj["volume"] = JsonValue(volume);
     obj["brightnessAvailable"] = JsonValue(brightness_available);
     obj["brightness"] = JsonValue(brightness);
+
+    // Preserve the V21 scalar/list fields for older clients.
     obj["wslAvailable"] = JsonValue(wsl_available);
     obj["defaultDistro"] = JsonValue(default_distro);
-
     JsonArray distros_arr;
     for (const auto& d : distros)
     {
         distros_arr.push_back(JsonValue(d));
     }
     obj["distros"] = JsonValue(std::move(distros_arr));
+
+    // Additive evidence for clients that need to distinguish an installed WSL
+    // engine from a usable registered distribution. No distro is launched to
+    // produce this snapshot.
+    obj["wslEngineAvailable"] = JsonValue(wsl_engine_available);
+    obj["wslPassiveReady"] = JsonValue(wsl_passive_ready);
+    obj["wslRegisteredCount"] = JsonValue(static_cast<int64_t>(wsl_registered_count));
+    obj["wslLaunchCandidateCount"] = JsonValue(static_cast<int64_t>(wsl_launch_candidate_count));
+    obj["wsl1Count"] = JsonValue(static_cast<int64_t>(wsl1_count));
+    obj["wsl2Count"] = JsonValue(static_cast<int64_t>(wsl2_count));
+    obj["preferredSecurityDistro"] = JsonValue(preferred_security_distro);
+
+    JsonArray typed_distros;
+    for (const auto& distro : wsl_distros)
+    {
+        JsonObject item;
+        item["name"] = JsonValue(distro.name);
+        item["isDefault"] = JsonValue(distro.is_default);
+        item["basePathPresent"] = JsonValue(distro.base_path_present);
+        item["securityCandidate"] = JsonValue(distro.is_security_candidate);
+        item["versionKnown"] = JsonValue(distro.version == 1 || distro.version == 2);
+        if (distro.version == 1 || distro.version == 2)
+        {
+            item["version"] = JsonValue(distro.version);
+        }
+        typed_distros.push_back(JsonValue(std::move(item)));
+    }
+    obj["wslDistros"] = JsonValue(std::move(typed_distros));
+
     obj["currentWorkspace"] = JsonValue(current_workspace);
     obj["timestamp"] = JsonValue(static_cast<int64_t>(timestamp_ms));
     return obj;
@@ -139,6 +169,8 @@ std::vector<std::string> SystemServiceV21::GetCapabilities()
         "system.brightness.read",
         "system.brightness.write",
         "wsl.list",
+        "wsl.inventory.typed",
+        "wsl.inventory.health",
         "events.subscribe",
         "events.unsubscribe",
         "jobs.submit",
@@ -215,9 +247,29 @@ void SystemServiceV21::Refresh()
     snapshot_.brightness_available = brightness.available;
     snapshot_.brightness = brightness.available ? brightness.brightness : 0.0;
 
-    snapshot_.distros = WslServiceV21::Instance().GetDistributions();
-    snapshot_.default_distro = WslServiceV21::Instance().GetDefaultDistribution();
-    snapshot_.wsl_available = WslServiceV21::Instance().IsWslAvailable();
+    const WslRuntimeSnapshotV21 wsl = WslServiceV21::Instance().GetRuntimeSnapshot();
+    snapshot_.wsl_engine_available = wsl.engine_available;
+    snapshot_.wsl_available = wsl.usable;
+    snapshot_.wsl_passive_ready = wsl.passive_ready;
+    snapshot_.default_distro = wsl.default_distribution;
+    snapshot_.preferred_security_distro = wsl.preferred_security_distribution;
+    snapshot_.wsl_registered_count = wsl.registered_count;
+    snapshot_.wsl_launch_candidate_count = wsl.launch_candidate_count;
+    snapshot_.wsl1_count = wsl.wsl1_count;
+    snapshot_.wsl2_count = wsl.wsl2_count;
+    snapshot_.distros.reserve(wsl.distributions.size());
+    snapshot_.wsl_distros.reserve(wsl.distributions.size());
+    for (const auto& distro : wsl.distributions)
+    {
+        snapshot_.distros.push_back(distro.name);
+        snapshot_.wsl_distros.push_back(SystemWslDistributionSnapshot{
+            distro.name,
+            distro.version,
+            distro.is_default,
+            distro.base_path_present,
+            distro.is_security_candidate});
+    }
+
     snapshot_.current_workspace = 1;
     snapshot_.timestamp_ms = NowMs();
 
