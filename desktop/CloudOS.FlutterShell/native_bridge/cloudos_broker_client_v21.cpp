@@ -11,6 +11,8 @@
 #include <shellapi.h>
 #include <shlwapi.h>
 
+#include <cmath>
+
 namespace CloudOS
 {
 
@@ -21,7 +23,7 @@ std::wstring GetCurrentUserSidString()
     HANDLE token = nullptr;
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
     {
-        return L"CURRENT_USER";
+        return {};
     }
 
     DWORD len = 0;
@@ -29,44 +31,49 @@ std::wstring GetCurrentUserSidString()
     if (len == 0)
     {
         CloseHandle(token);
-        return L"CURRENT_USER";
+        return {};
     }
 
     std::vector<BYTE> buffer(len);
     if (!GetTokenInformation(token, TokenUser, buffer.data(), len, &len))
     {
         CloseHandle(token);
-        return L"CURRENT_USER";
+        return {};
     }
 
     CloseHandle(token);
 
-    auto* token_user = reinterpret_cast<TOKEN_USER*>(buffer.data());
-    LPWSTR string_sid = nullptr;
-    if (ConvertSidToStringSidW(token_user->User.Sid, &string_sid) && string_sid != nullptr)
+    const auto* token_user = reinterpret_cast<const TOKEN_USER*>(buffer.data());
+    if (token_user->User.Sid == nullptr || !IsValidSid(token_user->User.Sid))
     {
-        std::wstring result(string_sid);
-        LocalFree(string_sid);
-        return result;
+        return {};
     }
 
-    return L"CURRENT_USER";
+    LPWSTR string_sid = nullptr;
+    if (!ConvertSidToStringSidW(token_user->User.Sid, &string_sid) || string_sid == nullptr)
+    {
+        return {};
+    }
+
+    std::wstring result(string_sid);
+    LocalFree(string_sid);
+    return result;
 }
 
-DWORD GetCurrentSessionId()
+bool TryGetCurrentSessionId(DWORD& session_id)
 {
-    DWORD session_id = 0;
-    if (!ProcessIdToSessionId(GetCurrentProcessId(), &session_id))
-    {
-        return 1;
-    }
-    return session_id;
+    session_id = 0;
+    return ProcessIdToSessionId(GetCurrentProcessId(), &session_id) != FALSE;
 }
 
 std::wstring GetCommandPipeName()
 {
+    const std::wstring sid = GetCurrentUserSidString();
+    DWORD session_id = 0;
+    if (sid.empty() || !TryGetCurrentSessionId(session_id)) return {};
+
     return L"\\\\.\\pipe\\CloudOS.SystemBroker.v21." +
-        GetCurrentUserSidString() + L"." + std::to_wstring(GetCurrentSessionId());
+        sid + L"." + std::to_wstring(session_id);
 }
 
 const JsonValue* FindValue(const JsonObject& object, const char* key)
@@ -155,6 +162,15 @@ bool CloudOSBrokerClientV21::EnsureConnected()
 
     state_.store(BrokerConnectionState::Connecting);
 
+    // SID + session are part of the pipe security boundary. Never invent a
+    // fallback identity such as CURRENT_USER/session 1 when Windows identity
+    // APIs fail; an unresolved identity must fail closed.
+    if (GetCommandPipeName().empty())
+    {
+        state_.store(BrokerConnectionState::Degraded);
+        return false;
+    }
+
     if (TryConnectPipe() && PerformHandshake())
     {
         state_.store(BrokerConnectionState::Connected);
@@ -173,6 +189,11 @@ bool CloudOSBrokerClientV21::EnsureConnected()
         }
     }
 
+    if (pipe_ != INVALID_HANDLE_VALUE)
+    {
+        CloseHandle(pipe_);
+        pipe_ = INVALID_HANDLE_VALUE;
+    }
     state_.store(BrokerConnectionState::Degraded);
     return false;
 }
@@ -200,6 +221,8 @@ bool CloudOSBrokerClientV21::TryConnectPipe()
     }
 
     const std::wstring pipe_name = GetCommandPipeName();
+    if (pipe_name.empty()) return false;
+
     pipe_ = CreateFileW(
         pipe_name.c_str(),
         GENERIC_READ | GENERIC_WRITE,
@@ -214,44 +237,53 @@ bool CloudOSBrokerClientV21::TryConnectPipe()
 
 void CloudOSBrokerClientV21::SpawnBrokerIfNeeded()
 {
-    WCHAR exe_path[MAX_PATH];
-    if (GetModuleFileNameW(nullptr, exe_path, MAX_PATH) == 0) return;
+    if (GetCommandPipeName().empty()) return;
 
-    WCHAR dir[MAX_PATH];
+    const uint64_t now = GetTickCount64();
+    const uint64_t previous = last_spawn_attempt_ms_.load();
+    if (previous != 0 && now - previous < 5000) return;
+    last_spawn_attempt_ms_.store(now);
+
+    WCHAR exe_path[MAX_PATH]{};
+    const DWORD exe_length = GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
+    if (exe_length == 0 || exe_length >= MAX_PATH) return;
+
+    WCHAR dir[MAX_PATH]{};
     wcscpy_s(dir, exe_path);
-    PathRemoveFileSpecW(dir);
+    if (!PathRemoveFileSpecW(dir)) return;
 
-    const std::wstring candidate1 = std::wstring(dir) + L"\\CloudOS.SystemBroker.exe";
-    const std::wstring candidate2 = std::wstring(dir) + L"\\..\\CloudOS.NativeShell\\bin\\Release\\CloudOS.SystemBroker.exe";
-    const std::wstring candidate3 = L"C:\\CloudOS\\desktop\\CloudOS.NativeShell\\bin\\Release\\CloudOS.SystemBroker.exe";
+    const std::wstring packaged = std::wstring(dir) + L"\\CloudOS.SystemBroker.exe";
+    const std::wstring development =
+        std::wstring(dir) + L"\\..\\CloudOS.NativeShell\\bin\\Release\\CloudOS.SystemBroker.exe";
 
     std::wstring target;
-    if (PathFileExistsW(candidate1.c_str())) target = candidate1;
-    else if (PathFileExistsW(candidate2.c_str())) target = candidate2;
-    else if (PathFileExistsW(candidate3.c_str())) target = candidate3;
-
+    if (PathFileExistsW(packaged.c_str())) target = packaged;
+    else if (PathFileExistsW(development.c_str())) target = development;
     if (target.empty()) return;
 
-    STARTUPINFOW si{};
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESHOWWINDOW;
-    si.wShowWindow = SW_HIDE;
-    PROCESS_INFORMATION pi{};
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESHOWWINDOW;
+    startup.wShowWindow = SW_HIDE;
+    PROCESS_INFORMATION process{};
 
-    CreateProcessW(
-        target.c_str(),
-        nullptr,
-        nullptr,
-        nullptr,
-        FALSE,
-        CREATE_NO_WINDOW,
-        nullptr,
-        nullptr,
-        &si,
-        &pi);
+    if (!CreateProcessW(
+            target.c_str(),
+            nullptr,
+            nullptr,
+            nullptr,
+            FALSE,
+            CREATE_NO_WINDOW,
+            nullptr,
+            nullptr,
+            &startup,
+            &process))
+    {
+        return;
+    }
 
-    if (pi.hProcess) CloseHandle(pi.hProcess);
-    if (pi.hThread) CloseHandle(pi.hThread);
+    if (process.hProcess) CloseHandle(process.hProcess);
+    if (process.hThread) CloseHandle(process.hThread);
 }
 
 bool CloudOSBrokerClientV21::SendFrame(const std::string& payload)
@@ -260,14 +292,35 @@ bool CloudOSBrokerClientV21::SendFrame(const std::string& payload)
 
     const uint32_t len = static_cast<uint32_t>(payload.size());
     DWORD written = 0;
-    if (!WriteFile(pipe_, &len, sizeof(len), &written, nullptr) || written != sizeof(len))
+    DWORD header_written = 0;
+    const auto* header = reinterpret_cast<const unsigned char*>(&len);
+    while (header_written < sizeof(len))
     {
-        return false;
+        if (!WriteFile(
+                pipe_,
+                header + header_written,
+                static_cast<DWORD>(sizeof(len)) - header_written,
+                &written,
+                nullptr) || written == 0)
+        {
+            return false;
+        }
+        header_written += written;
     }
-    if (len > 0 &&
-        (!WriteFile(pipe_, payload.data(), len, &written, nullptr) || written != len))
+
+    DWORD total_written = 0;
+    while (total_written < len)
     {
-        return false;
+        if (!WriteFile(
+                pipe_,
+                payload.data() + total_written,
+                len - total_written,
+                &written,
+                nullptr) || written == 0)
+        {
+            return false;
+        }
+        total_written += written;
     }
     return true;
 }
@@ -278,9 +331,20 @@ bool CloudOSBrokerClientV21::ReadFrame(std::string& payload)
 
     uint32_t len = 0;
     DWORD read_bytes = 0;
-    if (!ReadFile(pipe_, &len, sizeof(len), &read_bytes, nullptr) || read_bytes != sizeof(len))
+    DWORD header_bytes = 0;
+    auto* header = reinterpret_cast<unsigned char*>(&len);
+    while (header_bytes < sizeof(len))
     {
-        return false;
+        if (!ReadFile(
+                pipe_,
+                header + header_bytes,
+                static_cast<DWORD>(sizeof(len)) - header_bytes,
+                &read_bytes,
+                nullptr) || read_bytes == 0)
+        {
+            return false;
+        }
+        header_bytes += read_bytes;
     }
     if (len > kMaxPayloadBytes) return false;
 
@@ -288,7 +352,12 @@ bool CloudOSBrokerClientV21::ReadFrame(std::string& payload)
     DWORD total_read = 0;
     while (total_read < len)
     {
-        if (!ReadFile(pipe_, &payload[total_read], len - total_read, &read_bytes, nullptr) || read_bytes == 0)
+        if (!ReadFile(
+                pipe_,
+                payload.data() + total_read,
+                len - total_read,
+                &read_bytes,
+                nullptr) || read_bytes == 0)
         {
             return false;
         }
@@ -314,6 +383,8 @@ bool CloudOSBrokerClientV21::PerformHandshake()
 
     client_id_ = StringField(response.payload, "clientId");
     server_instance_id_ = StringField(response.payload, "serverInstanceId");
+    if (client_id_.empty() || server_instance_id_.empty()) return false;
+
     capabilities_.clear();
     const JsonValue* capabilities = FindValue(response.payload, "capabilities");
     if (capabilities != nullptr && capabilities->IsArray())
@@ -456,11 +527,13 @@ bool CloudOSBrokerClientV21::GetSystemSnapshot(BrokerClientSnapshot& out_snapsho
     const std::string device_name = StringField(response.payload, "deviceName");
     if (device_name.empty()) return false;
 
+    const int64_t session_id = IntField(response.payload, "sessionId", 0);
+    if (session_id < 0 || session_id > UINT32_MAX) return false;
+
     BrokerClientSnapshot snapshot;
     snapshot.device_name = device_name;
-    snapshot.user_name = StringField(response.payload, "userName", "User");
-    snapshot.session_id = static_cast<uint32_t>(
-        IntField(response.payload, "sessionId", GetCurrentSessionId()));
+    snapshot.user_name = StringField(response.payload, "userName");
+    snapshot.session_id = static_cast<uint32_t>(session_id);
     snapshot.battery_available = BoolField(response.payload, "batteryAvailable");
     snapshot.battery_percent = static_cast<int>(IntField(response.payload, "batteryPercent", 0));
     snapshot.network_available = BoolField(response.payload, "networkAvailable");
@@ -489,6 +562,7 @@ bool CloudOSBrokerClientV21::GetSystemSnapshot(BrokerClientSnapshot& out_snapsho
 
 bool CloudOSBrokerClientV21::SetVolume(double value)
 {
+    if (!std::isfinite(value) || value < 0.0 || value > 1.0) return false;
     if (!EnsureConnected()) return false;
 
     JsonObject payload;
@@ -515,6 +589,7 @@ bool CloudOSBrokerClientV21::SetVolume(double value)
 
 bool CloudOSBrokerClientV21::SetBrightness(double value)
 {
+    if (!std::isfinite(value) || value < 0.0 || value > 1.0) return false;
     if (!EnsureConnected()) return false;
 
     JsonObject payload;

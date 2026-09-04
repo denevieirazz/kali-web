@@ -22,6 +22,12 @@ function Assert-Contains([string]$Text, [string]$Needle, [string]$Message) {
     }
 }
 
+function Assert-NotContains([string]$Text, [string]$Needle, [string]$Message) {
+    if ($Text.Contains($Needle, [System.StringComparison]::Ordinal)) {
+        throw $Message
+    }
+}
+
 Assert-Contains $clientSource '#include "cloudos_managed_win32_host_v22.h"' 'Broker client must include the managed Win32 host boundary.'
 Assert-Contains $clientSource 'ManagedWin32HostV22::IsWindowsCatalogId(app_id)' 'Windows catalog launches must be intercepted before broker dispatch.'
 Assert-Contains $clientSource 'return ManagedWin32HostV22::Launch(app_id, err);' 'Windows catalog launches must route through managed containment.'
@@ -55,22 +61,44 @@ foreach ($forbidden in @(
     }
 }
 
+# The generic cross-process containment host is deliberately limited to the
+# physical compatibility target currently under validation: Notepad. Console
+# profiles belong to Terminal/ConPTY and must never quietly become HWND-hosted.
+Assert-Contains $hostSource 'return app_id == "windows:notepad";' 'Generic Win32 containment must remain limited to Notepad until physical compatibility expands.'
+Assert-NotContains $hostSource 'app_id == "windows:cmd"' 'CMD must not be allowlisted by the generic Win32 containment host.'
+Assert-NotContains $hostSource 'app_id == "windows:powershell"' 'PowerShell must not be allowlisted by the generic Win32 containment host.'
+
 foreach ($needle in @(
-    'windows:notepad',
-    'windows:cmd',
-    'windows:powershell',
     'CreateJobObjectW',
     'JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE',
     'AssignProcessToJobObject',
     'IsProcessInJob',
+    'QueryInformationJobObject',
+    'JobObjectBasicProcessIdList',
+    'JobObjectBasicAccountingInformation',
     'SetParent',
+    'GetWindowDpiAwarenessContext',
+    'AreDpiAwarenessContextsEqual',
+    'TryGetWindowLongPtr',
+    'TrySetWindowLongPtr',
+    'GetParent(session.app_window) != session.host_window',
+    'SetWindowPos',
     'WS_CHILD',
     'TerminateJobObject',
     'BlockLaunch(app_id, error)',
     'The application was not allowed to escape into the Windows desktop.',
-    'No attributable top-level window appeared; launch was blocked to prevent escape'
+    'No attributable top-level window appeared; launch was blocked to prevent escape',
+    'Ambiguous top-level windows appeared in the containment job; launch failed closed',
+    'kStableWindowObservations',
+    'stable_candidate',
+    'ValidateContainedSession',
+    'escaped.count != 0',
+    'FailClosedHost',
+    'SetTimer(host, kHealthTimerId',
+    'Managed application DPI awareness is incompatible with safe cross-process containment',
+    'Managed application did not enter the required child-window containment state'
 )) {
-    Assert-Contains $hostSource $needle "Managed Win32 containment contract missing: $needle"
+    Assert-Contains $hostSource $needle "Managed Win32 containment hardening contract missing: $needle"
 }
 
 foreach ($forbiddenCall in @('ShellExecuteW(', 'ShellExecuteExW(')) {

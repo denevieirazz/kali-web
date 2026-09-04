@@ -6,6 +6,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -50,6 +51,8 @@ public:
     void Initialize(size_t worker_count = 2);
     void Shutdown();
 
+    // Returns an empty string if the manager is stopped or the bounded queue
+    // cannot accept another job.
     std::string SubmitJob(const std::string& type, JobFunction func);
     bool CancelJob(const std::string& job_id);
 
@@ -67,6 +70,7 @@ private:
 
     struct InternalJob final
     {
+        mutable std::mutex info_mutex;
         JobInfo info;
         JobFunction func;
         std::atomic_bool cancel_flag{false};
@@ -79,6 +83,9 @@ private:
     std::vector<std::thread> workers_;
     std::atomic_bool running_{false};
     std::atomic_uint64_t next_job_id_{1};
+
+    static constexpr size_t kMaxRetainedJobs = 512;
+    static constexpr size_t kMaxQueuedJobs = 256;
 };
 
 } // namespace CloudOS

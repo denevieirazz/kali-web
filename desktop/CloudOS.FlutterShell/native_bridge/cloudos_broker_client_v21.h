@@ -72,7 +72,7 @@ struct BrokerClientSnapshot final
 {
     std::string device_name;
     std::string user_name;
-    uint32_t session_id{1};
+    uint32_t session_id{0};
     bool battery_available{false};
     int battery_percent{};
     bool network_available{false};
@@ -248,6 +248,7 @@ private:
     HANDLE pipe_{INVALID_HANDLE_VALUE};
     std::atomic<BrokerConnectionState> state_{BrokerConnectionState::Disconnected};
     std::atomic_uint64_t next_req_id_{1};
+    std::atomic_uint64_t last_spawn_attempt_ms_{0};
     std::string client_id_;
     std::string server_instance_id_;
     std::vector<std::string> capabilities_;

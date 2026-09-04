@@ -5,6 +5,8 @@
 #include <flutter/method_channel.h>
 
 #include <atomic>
+#include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -168,10 +170,17 @@ private:
         int exit_code{0};
     };
 
+    static constexpr std::size_t kMaxSessions = 32;
+    static constexpr std::size_t kMaxPendingEventFrames = 256;
+    static constexpr std::size_t kMaxPendingEventBytes = 2 * 1024 * 1024;
+    static constexpr std::size_t kMaxWriteBytes = 1024 * 1024;
+    static constexpr std::size_t kMaxDistroNameBytes = 256;
+    static constexpr DWORD kProcessExitWaitMs = 1000;
+
     void ReaderLoop(const std::shared_ptr<ConPTYSession>& session);
-    void NotifyData(const std::string& session_id, std::string data);
-    void NotifyExit(const std::string& session_id, int exit_code);
-    void QueuePlatformEvent(PlatformEvent event);
+    bool NotifyData(const std::string& session_id, std::string data);
+    bool NotifyExit(const std::string& session_id, int exit_code);
+    bool QueuePlatformEvent(PlatformEvent event);
 
     std::mutex mutex_;
     std::unordered_map<std::string, std::shared_ptr<ConPTYSession>> sessions_;
@@ -182,6 +191,7 @@ private:
 
     std::mutex event_mutex_;
     std::deque<PlatformEvent> pending_events_;
+    std::size_t pending_event_bytes_{0};
     std::atomic<uint64_t> session_counter_{0};
 };
 

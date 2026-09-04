@@ -50,7 +50,7 @@ int RunSelfTest()
         assertions++;
     };
 
-    // 1. Test Protocol Serialization & Parsing
+    // 1. Test Protocol Serialization, strict parsing and malformed-input fail-closed behavior.
     {
         BrokerRequest req;
         req.protocol = kProtocolVersion;
@@ -70,6 +70,26 @@ int RunSelfTest()
         std::string huge_str(kMaxPayloadBytes + 10, 'A');
         JsonValue val;
         Assert(!ParseJson(huge_str, val), "Reject oversized JSON string");
+        Assert(!ParseJson("{\"x\":\"\\q\"}", val), "Reject invalid JSON escape");
+        Assert(!ParseJson("{\"x\":\"\\u12xz\"}", val), "Reject invalid Unicode hex escape");
+        Assert(!ParseJson("{\"x\":\"\\uD800\"}", val), "Reject lone high surrogate");
+        Assert(!ParseJson("{\"x\":\"\\uDC00\"}", val), "Reject lone low surrogate");
+        Assert(!ParseJson("{\"x\":01}", val), "Reject leading-zero number");
+        Assert(!ParseJson("{\"x\":1.}", val), "Reject fraction without digits");
+        Assert(!ParseJson("{\"x\":1e}", val), "Reject exponent without digits");
+        Assert(!ParseJson("{\"x\":9223372036854775808}", val), "Reject int64 overflow");
+        Assert(!ParseJson("{\"x\":1e9999}", val), "Reject non-finite float overflow");
+        Assert(!ParseJson("{\"x\":1,\"x\":2}", val), "Reject duplicate object keys");
+
+        std::string deep = "0";
+        for (int i = 0; i < 70; ++i) deep = "[" + deep + "]";
+        Assert(!ParseJson(deep, val), "Reject excessive JSON nesting");
+
+        const std::string bad_payload =
+            "{\"protocol\":21,\"type\":\"request\",\"id\":\"x\",\"method\":\"apps.list\",\"payload\":[]}";
+        BrokerRequest bad_req;
+        err.clear();
+        Assert(!ParseRequest(bad_payload, bad_req, err), "Reject non-object request payload");
 
         BrokerResponse res;
         res.protocol = kProtocolVersion;
@@ -81,6 +101,18 @@ int RunSelfTest()
         Assert(ParseResponse(ser_res, parsed_res, err), "ParseResponse valid");
         Assert(parsed_res.ok, "ParseResponse ok");
         Assert(parsed_res.payload["result"].AsString() == "ok", "ParseResponse payload");
+
+        BrokerResponse bad_res;
+        err.clear();
+        Assert(
+            !ParseResponse("{\"protocol\":21,\"type\":\"response\",\"id\":\"x\",\"ok\":false,\"payload\":{}}", bad_res, err),
+            "Reject failed response without typed error object");
+
+        BrokerEvent bad_event;
+        err.clear();
+        Assert(
+            !ParseEvent("{\"protocol\":21,\"type\":\"event\",\"event\":\"x\",\"payload\":{},\"timestamp\":-1}", bad_event, err),
+            "Reject negative event timestamp");
     }
 
     // 2. Test Security & Named Pipe ACLs
