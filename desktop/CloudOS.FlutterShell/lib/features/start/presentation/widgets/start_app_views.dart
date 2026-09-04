@@ -32,135 +32,147 @@ class StartPinnedAppCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        decoration: BoxDecoration(
-          color: CloudOSColors.elevated.withValues(alpha: 0.45),
+    final enabled = app.canLaunch || runningApp != null;
+    return Tooltip(
+      message: enabled
+          ? app.name
+          : '${app.name}: aguardando containment seguro no CloudOS',
+      child: Opacity(
+        opacity: enabled ? 1 : 0.5,
+        child: InkWell(
+          key: ValueKey<String>('start-app-${app.id}'),
+          onTap: enabled ? onTap : null,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: runningApp != null
-                ? CloudOSColors.accent.withValues(alpha: 0.75)
-                : CloudOSColors.border,
-          ),
-        ),
-        child: Row(
-          children: <Widget>[
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: platformColor.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(app.icon, color: platformColor, size: 20),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: <Widget>[
-                  Text(
-                    app.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: CloudOSColors.text,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Row(
-                    children: runningApp != null
-                        ? <Widget>[
-                            const SizedBox(
-                              width: 6,
-                              height: 6,
-                              child: DecoratedBox(
-                                decoration: BoxDecoration(
-                                  color: CloudOSColors.success,
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            Flexible(
-                              child: Text(
-                                runningApp!.isActive
-                                    ? 'Ativo'
-                                    : runningApp!.isMinimized
-                                    ? 'Minimizado'
-                                    : 'Aberto',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: CloudOSColors.success,
-                                  fontSize: 9.5,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                          ]
-                        : <Widget>[
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                                vertical: 1,
-                              ),
-                              decoration: BoxDecoration(
-                                color: platformColor.withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                platformLabel,
-                                style: TextStyle(
-                                  color: platformColor,
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            Expanded(
-                              child: Text(
-                                app.subtitle ?? app.category,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: CloudOSColors.caption,
-                                  fontSize: 10,
-                                ),
-                              ),
-                            ),
-                          ],
-                  ),
-                ],
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: CloudOSColors.elevated.withValues(alpha: 0.45),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: runningApp != null
+                    ? CloudOSColors.accent.withValues(alpha: 0.75)
+                    : CloudOSColors.border,
               ),
             ),
-            if (runningApp != null) ...<Widget>[
-              const SizedBox(width: 5),
-              Tooltip(
-                message: 'Fechar ${app.name}',
-                child: InkWell(
-                  key: ValueKey<String>('close-running-${runningApp!.id}'),
-                  onTap: onClose,
-                  borderRadius: BorderRadius.circular(6),
-                  child: const Padding(
-                    padding: EdgeInsets.all(5),
-                    child: Icon(
-                      Icons.close_rounded,
-                      color: CloudOSColors.secondary,
-                      size: 16,
-                    ),
+            child: Row(
+              children: <Widget>[
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: platformColor.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(app.icon, color: platformColor, size: 20),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: <Widget>[
+                      Text(
+                        app.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: CloudOSColors.text,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: runningApp != null
+                            ? <Widget>[
+                                const SizedBox(
+                                  width: 6,
+                                  height: 6,
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      color: CloudOSColors.success,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                Flexible(
+                                  child: Text(
+                                    runningApp!.isActive
+                                        ? 'Ativo'
+                                        : runningApp!.isMinimized
+                                        ? 'Minimizado'
+                                        : 'Aberto',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: CloudOSColors.success,
+                                      fontSize: 9.5,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ]
+                            : <Widget>[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                    vertical: 1,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: platformColor.withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    platformLabel,
+                                    style: TextStyle(
+                                      color: platformColor,
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    app.canLaunch
+                                        ? app.subtitle ?? app.category
+                                        : 'Containment ainda não validado',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: CloudOSColors.caption,
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                      ),
+                    ],
                   ),
                 ),
-              ),
-            ],
-          ],
+                if (runningApp != null) ...<Widget>[
+                  const SizedBox(width: 5),
+                  Tooltip(
+                    message: 'Fechar ${app.name}',
+                    child: InkWell(
+                      key: ValueKey<String>('close-running-${runningApp!.id}'),
+                      onTap: onClose,
+                      borderRadius: BorderRadius.circular(6),
+                      child: const Padding(
+                        padding: EdgeInsets.all(5),
+                        child: Icon(
+                          Icons.close_rounded,
+                          color: CloudOSColors.secondary,
+                          size: 16,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -353,38 +365,44 @@ class StartRecentTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
-            children: <Widget>[
-              Icon(app.icon, size: 17, color: CloudOSColors.secondary),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  app.name,
-                  style: const TextStyle(
-                    color: CloudOSColors.text,
-                    fontSize: 12,
+    return Opacity(
+      opacity: app.canLaunch ? 1 : 0.5,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: InkWell(
+          key: ValueKey<String>('recent-app-${app.id}'),
+          onTap: app.canLaunch ? onTap : null,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: <Widget>[
+                Icon(app.icon, size: 17, color: CloudOSColors.secondary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    app.name,
+                    style: const TextStyle(
+                      color: CloudOSColors.text,
+                      fontSize: 12,
+                    ),
                   ),
                 ),
-              ),
-              Text(
-                app.subtitle ?? 'Recente',
-                style: const TextStyle(
-                  color: CloudOSColors.caption,
-                  fontSize: 10.5,
+                Text(
+                  app.canLaunch
+                      ? app.subtitle ?? 'Recente'
+                      : 'Containment pendente',
+                  style: const TextStyle(
+                    color: CloudOSColors.caption,
+                    fontSize: 10.5,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
