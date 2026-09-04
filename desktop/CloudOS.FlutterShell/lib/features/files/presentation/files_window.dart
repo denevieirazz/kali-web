@@ -17,6 +17,7 @@ class FilesWindow extends StatefulWidget {
     required this.onClose,
     required this.onMinimize,
     required this.onDrag,
+    this.initialRootId = 'home',
     CloudOSBridge? bridge,
     super.key,
   }) : bridge = bridge ?? const CloudOSBridge();
@@ -24,6 +25,7 @@ class FilesWindow extends StatefulWidget {
   final VoidCallback onClose;
   final VoidCallback onMinimize;
   final ValueChanged<Offset> onDrag;
+  final String initialRootId;
   final CloudOSBridge bridge;
 
   @override
@@ -31,7 +33,7 @@ class FilesWindow extends StatefulWidget {
 }
 
 class _FilesWindowState extends State<FilesWindow> {
-  _FilesLocation _current = const _FilesLocation.root('home', 'Início');
+  late _FilesLocation _current;
   String query = '';
   bool isGridView = true;
   String? selectedItemPath;
@@ -44,7 +46,31 @@ class _FilesWindowState extends State<FilesWindow> {
   @override
   void initState() {
     super.initState();
+    _current = _allowlistedRoot(widget.initialRootId);
     unawaited(_loadLocation(_current));
+  }
+
+  @override
+  void didUpdateWidget(covariant FilesWindow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialRootId == widget.initialRootId) return;
+
+    final next = _allowlistedRoot(widget.initialRootId);
+    _backStack.clear();
+    _forwardStack.clear();
+    _applyLocation(next);
+  }
+
+  static _FilesLocation _allowlistedRoot(String id) {
+    return switch (id) {
+      'desktop' => const _FilesLocation.root('desktop', 'Área de Trabalho'),
+      'documents' => const _FilesLocation.root('documents', 'Documentos'),
+      'downloads' => const _FilesLocation.root('downloads', 'Downloads'),
+      'cloud-drive' => const _FilesLocation.root('cloud-drive', 'CloudOS Drive'),
+      'windows-c' => const _FilesLocation.root('windows-c', 'Disco Local (C:)'),
+      'ubuntu-wsl' => const _FilesLocation.root('ubuntu-wsl', 'Linux / WSL'),
+      _ => const _FilesLocation.root('home', 'Início'),
+    };
   }
 
   List<CloudFileItem> get _currentFiles {
@@ -81,6 +107,17 @@ class _FilesWindowState extends State<FilesWindow> {
   }
 
   void _navigateTo(String id, String label) {
+    if (id == 'trash') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'A Lixeira CloudOS ainda não está disponível. O Explorer do Windows não será aberto como fallback.',
+          ),
+        ),
+      );
+      return;
+    }
+
     if (_current.rootId == id && _current.entryId == null) {
       unawaited(_loadLocation(_current));
       return;

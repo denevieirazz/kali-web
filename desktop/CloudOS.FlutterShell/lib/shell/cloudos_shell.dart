@@ -65,6 +65,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
   Offset? filesPreMaxOffset;
   Size? filesPreMaxSize;
   int filesZIndex = 1;
+  String filesRootId = 'home';
+  int filesLaunchRevision = 0;
 
   bool terminalOpen = const bool.fromEnvironment('CLOUDOS_E2E_TERMINAL');
   bool terminalMinimized = false;
@@ -330,6 +332,18 @@ class _CloudOSShellState extends State<CloudOSShell> {
     });
   }
 
+  void _openFilesRoot(String rootId) {
+    setState(() {
+      filesRootId = rootId;
+      filesLaunchRevision++;
+      filesOpen = true;
+      filesMinimized = false;
+      filesZIndex = ++topZIndex;
+      activeInternalWindowId = 'files';
+      _closeTransientPanels();
+    });
+  }
+
   void _toggleOrFocusWindow(String id) {
     setState(() {
       if (id == 'files') {
@@ -482,7 +496,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
             id: 'files',
             title: 'Explorador de Arquivos',
             icon: Icons.folder_rounded,
-            appIds: const <String>{'files', 'cloudos:files'},
+            appIds: const <String>{'files', 'cloudos:files', 'cloudos:drive'},
             isMinimized: filesMinimized,
             isActive: activeInternalWindowId == 'files',
           ),
@@ -970,6 +984,23 @@ class _CloudOSShellState extends State<CloudOSShell> {
   }
 
   Future<void> _launchApp(CloudApp app) async {
+    if (app.id == 'cloudos:drive' || app.id == 'drive') {
+      _openFilesRoot('cloud-drive');
+      return;
+    }
+
+    if (app.id == 'cloudos:trash' || app.id == 'trash') {
+      setState(_closeTransientPanels);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'A Lixeira CloudOS ainda não está disponível. O Explorer do Windows não será aberto como fallback.',
+          ),
+        ),
+      );
+      return;
+    }
+
     final route = resolveShellAppRoute(app.id);
 
     if (route == ShellAppRoute.files ||
@@ -1465,7 +1496,9 @@ class _CloudOSShellState extends State<CloudOSShell> {
             child: Listener(
               onPointerDown: (_) => _focusWindow('files'),
               child: FilesWindow(
+                key: ValueKey<String>('files:$filesRootId:$filesLaunchRevision'),
                 bridge: widget.bridge,
+                initialRootId: filesRootId,
                 onClose: () => _closeWindow('files'),
                 onMinimize: () => setState(() => filesMinimized = true),
                 onDrag: (delta) => _moveWindow('files', delta, constraints),
