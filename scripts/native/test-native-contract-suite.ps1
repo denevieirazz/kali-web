@@ -14,6 +14,7 @@ $contracts = @(
     'test-cloudos-native-shell-contracts.ps1',
     'test-shell-lifecycle-contract.ps1',
     'test-native-web-ui-contract.ps1',
+    'test-browser-resilience-v22-contract.ps1',
     'test-visual-platform-v7-contract.ps1',
     'test-stability-readiness-v9-contract.ps1',
     'test-lifecycle-v10-contract.ps1',
