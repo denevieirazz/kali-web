@@ -1,3 +1,5 @@
+import '../features/terminal/domain/terminal_launch_coordinator.dart';
+
 enum ShellAppRoute {
   files,
   browser,
@@ -5,15 +7,25 @@ enum ShellAppRoute {
   external,
 }
 
-ShellAppRoute resolveShellAppRoute(String appId) {
+ShellAppRoute classifyShellAppRoute(String appId) {
   return switch (appId) {
     'files' || 'cloudos:files' => ShellAppRoute.files,
     'browser' || 'cloudos:browser' => ShellAppRoute.browser,
     'terminal' || 'cloudos:terminal' ||
+    'windows:cmd' || 'windows:powershell' ||
     'ubuntu-terminal' || 'wsl:ubuntu-terminal' || 'linux:ubuntu-terminal' =>
       ShellAppRoute.terminal,
     _ => ShellAppRoute.external,
   };
+}
+
+ShellAppRoute resolveShellAppRoute(String appId) {
+  if (appId == 'windows:cmd') {
+    TerminalLaunchCoordinator.request(TerminalLaunchProfile.cmd);
+  } else if (appId == 'windows:powershell') {
+    TerminalLaunchCoordinator.request(TerminalLaunchProfile.powershell);
+  }
+  return classifyShellAppRoute(appId);
 }
 
 String canonicalLaunchId(ShellAppRoute route) {
