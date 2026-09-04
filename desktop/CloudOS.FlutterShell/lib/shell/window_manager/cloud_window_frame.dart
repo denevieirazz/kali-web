@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/cloudos_theme.dart';
 import '../../../widgets/glass_surface.dart';
 import 'cloud_window.dart';
+import 'window_resize_guard.dart';
 
 class CloudWindowFrame extends StatelessWidget {
   const CloudWindowFrame({
@@ -26,7 +27,8 @@ class CloudWindowFrame extends StatelessWidget {
   final VoidCallback onMinimize;
   final VoidCallback onToggleMaximize;
   final ValueChanged<Offset> onMove;
-  final void Function(Offset delta, bool left, bool top, bool right, bool bottom) onResize;
+  final void Function(Offset delta, bool left, bool top, bool right, bool bottom)
+      onResize;
   final VoidCallback? onSnapLeft;
   final VoidCallback? onSnapRight;
 
@@ -51,7 +53,7 @@ class CloudWindowFrame extends StatelessWidget {
                 ),
               ],
             ),
-            if (!window.isMaximized) ..._buildResizeHandles(),
+            if (!window.isMaximized) ..._buildResizeHandles(context),
           ],
         ),
       ),
@@ -97,19 +99,35 @@ class CloudWindowFrame extends StatelessWidget {
           if (onSnapLeft != null || onSnapRight != null) ...<Widget>[
             PopupMenuButton<String>(
               tooltip: 'Organizar tela (Snap)',
-              icon: const Icon(Icons.vertical_split_rounded, size: 16, color: CloudOSColors.caption),
+              icon: const Icon(
+                Icons.vertical_split_rounded,
+                size: 16,
+                color: CloudOSColors.caption,
+              ),
               padding: EdgeInsets.zero,
               color: const Color(0xFF161E2E),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
               itemBuilder: (context) => <PopupMenuEntry<String>>[
                 if (onSnapLeft != null)
                   const PopupMenuItem<String>(
                     value: 'left',
                     child: Row(
                       children: <Widget>[
-                        Icon(Icons.align_horizontal_left_rounded, size: 16, color: CloudOSColors.accent),
+                        Icon(
+                          Icons.align_horizontal_left_rounded,
+                          size: 16,
+                          color: CloudOSColors.accent,
+                        ),
                         SizedBox(width: 10),
-                        Text('Dividir à Esquerda (50%)', style: TextStyle(color: CloudOSColors.text, fontSize: 12)),
+                        Text(
+                          'Dividir à Esquerda (50%)',
+                          style: TextStyle(
+                            color: CloudOSColors.text,
+                            fontSize: 12,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -118,9 +136,19 @@ class CloudWindowFrame extends StatelessWidget {
                     value: 'right',
                     child: Row(
                       children: <Widget>[
-                        Icon(Icons.align_horizontal_right_rounded, size: 16, color: CloudOSColors.accent),
+                        Icon(
+                          Icons.align_horizontal_right_rounded,
+                          size: 16,
+                          color: CloudOSColors.accent,
+                        ),
                         SizedBox(width: 10),
-                        Text('Dividir à Direita (50%)', style: TextStyle(color: CloudOSColors.text, fontSize: 12)),
+                        Text(
+                          'Dividir à Direita (50%)',
+                          style: TextStyle(
+                            color: CloudOSColors.text,
+                            fontSize: 12,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -157,9 +185,28 @@ class CloudWindowFrame extends StatelessWidget {
     );
   }
 
-  List<Widget> _buildResizeHandles() {
+  void _emitResize(
+    BuildContext context,
+    Offset delta,
+    bool left,
+    bool top,
+    bool right,
+    bool bottom,
+  ) {
+    if (!canResizeTowardViewportEdge(
+      viewportSize: MediaQuery.sizeOf(context),
+      windowPosition: window.position,
+      right: right,
+      bottom: bottom,
+    )) {
+      return;
+    }
+
+    onResize(delta, left, top, right, bottom);
+  }
+
+  List<Widget> _buildResizeHandles(BuildContext context) {
     return <Widget>[
-      // Left handle
       Positioned(
         left: 0,
         top: _handleSize,
@@ -169,12 +216,17 @@ class CloudWindowFrame extends StatelessWidget {
           cursor: SystemMouseCursors.resizeLeftRight,
           child: GestureDetector(
             behavior: HitTestBehavior.translucent,
-            onPanUpdate: (details) =>
-                onResize(details.delta, true, false, false, false),
+            onPanUpdate: (details) => _emitResize(
+              context,
+              details.delta,
+              true,
+              false,
+              false,
+              false,
+            ),
           ),
         ),
       ),
-      // Right handle
       Positioned(
         right: 0,
         top: _handleSize,
@@ -184,12 +236,17 @@ class CloudWindowFrame extends StatelessWidget {
           cursor: SystemMouseCursors.resizeLeftRight,
           child: GestureDetector(
             behavior: HitTestBehavior.translucent,
-            onPanUpdate: (details) =>
-                onResize(details.delta, false, false, true, false),
+            onPanUpdate: (details) => _emitResize(
+              context,
+              details.delta,
+              false,
+              false,
+              true,
+              false,
+            ),
           ),
         ),
       ),
-      // Top handle
       Positioned(
         left: _handleSize,
         right: _handleSize,
@@ -199,12 +256,17 @@ class CloudWindowFrame extends StatelessWidget {
           cursor: SystemMouseCursors.resizeUpDown,
           child: GestureDetector(
             behavior: HitTestBehavior.translucent,
-            onPanUpdate: (details) =>
-                onResize(details.delta, false, true, false, false),
+            onPanUpdate: (details) => _emitResize(
+              context,
+              details.delta,
+              false,
+              true,
+              false,
+              false,
+            ),
           ),
         ),
       ),
-      // Bottom handle
       Positioned(
         left: _handleSize,
         right: _handleSize,
@@ -214,12 +276,17 @@ class CloudWindowFrame extends StatelessWidget {
           cursor: SystemMouseCursors.resizeUpDown,
           child: GestureDetector(
             behavior: HitTestBehavior.translucent,
-            onPanUpdate: (details) =>
-                onResize(details.delta, false, false, false, true),
+            onPanUpdate: (details) => _emitResize(
+              context,
+              details.delta,
+              false,
+              false,
+              false,
+              true,
+            ),
           ),
         ),
       ),
-      // Top-Left corner
       Positioned(
         left: 0,
         top: 0,
@@ -229,12 +296,17 @@ class CloudWindowFrame extends StatelessWidget {
           cursor: SystemMouseCursors.resizeUpLeftDownRight,
           child: GestureDetector(
             behavior: HitTestBehavior.translucent,
-            onPanUpdate: (details) =>
-                onResize(details.delta, true, true, false, false),
+            onPanUpdate: (details) => _emitResize(
+              context,
+              details.delta,
+              true,
+              true,
+              false,
+              false,
+            ),
           ),
         ),
       ),
-      // Top-Right corner
       Positioned(
         right: 0,
         top: 0,
@@ -244,12 +316,17 @@ class CloudWindowFrame extends StatelessWidget {
           cursor: SystemMouseCursors.resizeUpRightDownLeft,
           child: GestureDetector(
             behavior: HitTestBehavior.translucent,
-            onPanUpdate: (details) =>
-                onResize(details.delta, false, true, true, false),
+            onPanUpdate: (details) => _emitResize(
+              context,
+              details.delta,
+              false,
+              true,
+              true,
+              false,
+            ),
           ),
         ),
       ),
-      // Bottom-Left corner
       Positioned(
         left: 0,
         bottom: 0,
@@ -259,12 +336,17 @@ class CloudWindowFrame extends StatelessWidget {
           cursor: SystemMouseCursors.resizeUpRightDownLeft,
           child: GestureDetector(
             behavior: HitTestBehavior.translucent,
-            onPanUpdate: (details) =>
-                onResize(details.delta, true, false, false, true),
+            onPanUpdate: (details) => _emitResize(
+              context,
+              details.delta,
+              true,
+              false,
+              false,
+              true,
+            ),
           ),
         ),
       ),
-      // Bottom-Right corner
       Positioned(
         right: 0,
         bottom: 0,
@@ -274,8 +356,14 @@ class CloudWindowFrame extends StatelessWidget {
           cursor: SystemMouseCursors.resizeUpLeftDownRight,
           child: GestureDetector(
             behavior: HitTestBehavior.translucent,
-            onPanUpdate: (details) =>
-                onResize(details.delta, false, false, true, true),
+            onPanUpdate: (details) => _emitResize(
+              context,
+              details.delta,
+              false,
+              false,
+              true,
+              true,
+            ),
           ),
         ),
       ),
