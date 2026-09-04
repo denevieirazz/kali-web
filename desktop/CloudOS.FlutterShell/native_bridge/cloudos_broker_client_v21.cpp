@@ -1,4 +1,5 @@
 #include "cloudos_broker_client_v21.h"
+#include "cloudos_managed_win32_host_v22.h"
 
 #if __has_include("../../CloudOS.SystemBroker/src/protocol_v21.h")
 #include "../../CloudOS.SystemBroker/src/protocol_v21.h"
@@ -382,6 +383,11 @@ bool CloudOSBrokerClientV21::GetApps(std::vector<BrokerClientAppItem>& out_apps)
 
 bool CloudOSBrokerClientV21::LaunchApp(const std::string& app_id, std::string& err)
 {
+    if (ManagedWin32HostV22::IsWindowsCatalogId(app_id))
+    {
+        return ManagedWin32HostV22::Launch(app_id, err);
+    }
+
     if (!EnsureConnected())
     {
         err = "System broker is not connected";
