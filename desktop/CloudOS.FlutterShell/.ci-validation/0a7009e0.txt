@@ -1,0 +1,5 @@
+Temporary CI trigger for validating the exact Flutter shell snapshot currently on main.
+
+Target commit: 0a7009e091c5a27354809f6386eaa022f66ce242
+Purpose: run the pull_request-only CloudOS Flutter UI workflow against the current main snapshot.
+Do not merge this file into main; close the validation PR after CI completes.
