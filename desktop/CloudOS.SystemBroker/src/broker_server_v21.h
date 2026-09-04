@@ -4,6 +4,7 @@
 
 #include <Windows.h>
 
+#include <algorithm>
 #include <atomic>
 #include <memory>
 #include <mutex>
