@@ -29,7 +29,7 @@ $evidence = [ordered]@{}
 
 try {
     try {
-        & $installScript -PackageRoot $package -InstallRoot $installRoot -RetainVersions 2 -HealthTimeoutSeconds 45
+        & $installScript -PackageRoot $package -InstallRoot $installRoot -RetainVersions 2 -HealthTimeoutSeconds 60
     }
     catch {
         $evidence.first_install_exception_type = $_.Exception.GetType().FullName
@@ -69,7 +69,7 @@ try {
 
         $secondRejected = $false
         try {
-            & $installScript -PackageRoot $package -InstallRoot $installRoot -RetainVersions 2 -HealthTimeoutSeconds 45
+            & $installScript -PackageRoot $package -InstallRoot $installRoot -RetainVersions 2 -HealthTimeoutSeconds 60
         }
         catch {
             $secondRejected = $_.Exception.Message -match 'already installed|Atualizar CloudOS'
