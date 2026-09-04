@@ -29,6 +29,7 @@ $contracts = @(
     'test-archive-extraction-v22-contract.ps1',
     'test-window-rehome-v22-contract.ps1',
     'test-env-doctor-v22-contract.ps1',
+    'test-quick-settings-system-v22-contract.ps1',
     'test-native-release-pipeline-contract.ps1',
     'test-transactional-deployment-v13-contract.ps1',
     'test-shell-activation-v14-contract.ps1',

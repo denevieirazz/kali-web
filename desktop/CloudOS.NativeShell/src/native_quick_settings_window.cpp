@@ -2,13 +2,11 @@
 
 #include "native_monitor_manager.h"
 #include "native_notification_center.h"
+#include "native_system_control_backend.h"
 #include "native_theme.h"
 
 #include <commctrl.h>
-#include <endpointvolume.h>
-#include <mmdeviceapi.h>
 #include <shellapi.h>
-#include <wrl/client.h>
 
 #include <algorithm>
 #include <string>
@@ -17,8 +15,6 @@ namespace CloudOS
 {
 namespace
 {
-using Microsoft::WRL::ComPtr;
-
 constexpr wchar_t kQuickSettingsClass[] = L"CloudOS.NativeShell.QuickSettings.v2";
 constexpr int kVolumeSliderId = 8801;
 constexpr int kMuteId = 8802;
@@ -30,43 +26,63 @@ constexpr int kSoundId = 8807;
 constexpr int kPowerId = 8808;
 constexpr UINT_PTR kRefreshTimer = 8809;
 
-ComPtr<IAudioEndpointVolume> DefaultEndpointVolume()
-{
-    ComPtr<IMMDeviceEnumerator> enumerator;
-    if (FAILED(CoCreateInstance(
-            __uuidof(MMDeviceEnumerator), nullptr, CLSCTX_INPROC_SERVER,
-            IID_PPV_ARGS(&enumerator))))
-    {
-        return {};
-    }
-
-    ComPtr<IMMDevice> device;
-    if (FAILED(enumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &device)))
-    {
-        return {};
-    }
-
-    ComPtr<IAudioEndpointVolume> volume;
-    if (FAILED(device->Activate(
-            __uuidof(IAudioEndpointVolume), CLSCTX_INPROC_SERVER, nullptr,
-            reinterpret_cast<void**>(volume.GetAddressOf()))))
-    {
-        return {};
-    }
-    return volume;
-}
-
 void SetControlFont(HWND control, HFONT font)
 {
     if (control != nullptr && font != nullptr)
-    {
         SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-    }
 }
 
-void OpenSettings(HWND owner, const wchar_t* uri)
+bool OpenSettings(HWND owner, const wchar_t* uri)
 {
-    (void)ShellExecuteW(owner, L"open", uri, nullptr, nullptr, SW_SHOWNORMAL);
+    const HINSTANCE result = ShellExecuteW(owner, L"open", uri, nullptr, nullptr, SW_SHOWNORMAL);
+    if (reinterpret_cast<INT_PTR>(result) > 32) return true;
+
+    CloudOSNativeNotificationCenter::Post(
+        L"Configuracao do Windows indisponivel",
+        L"O Windows nao aceitou abrir esta pagina de configuracao.");
+    return false;
+}
+
+std::wstring PowerStatusText()
+{
+    SYSTEM_POWER_STATUS power{};
+    if (!GetSystemPowerStatus(&power)) return L"Energia  ·  indisponivel";
+
+    std::wstring text = L"Energia  ·  ";
+    const bool ac_known = power.ACLineStatus == 0 || power.ACLineStatus == 1;
+    const bool battery_flag_known = power.BatteryFlag != 255;
+    const bool battery_absent = power.BatteryFlag == 128;
+    const bool percentage_known = power.BatteryLifePercent != 255;
+
+    if (!ac_known && !battery_flag_known && !percentage_known)
+    {
+        text += L"estado desconhecido";
+        return text;
+    }
+    if (battery_absent)
+    {
+        text += ac_known && power.ACLineStatus == 1
+            ? L"desktop / alimentacao conectada"
+            : L"desktop / sem bateria";
+        return text;
+    }
+
+    if (percentage_known)
+    {
+        text += std::to_wstring(power.BatteryLifePercent);
+        text += L"%";
+        if (ac_known)
+            text += power.ACLineStatus == 1 ? L" · conectado" : L" · bateria";
+        else
+            text += L" · fonte desconhecida";
+        return text;
+    }
+
+    if (ac_known)
+        text += power.ACLineStatus == 1 ? L"alimentacao conectada" : L"bateria (percentual indisponivel)";
+    else
+        text += L"bateria/energia sem telemetria";
+    return text;
 }
 }
 
@@ -88,9 +104,7 @@ bool CloudOSNativeQuickSettingsWindow::Create(HINSTANCE instance)
     window_class.hbrBackground = nullptr;
     window_class.lpszClassName = kQuickSettingsClass;
     if (RegisterClassExW(&window_class) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
-    {
         return false;
-    }
 
     window_ = CreateWindowExW(
         WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
@@ -99,18 +113,16 @@ bool CloudOSNativeQuickSettingsWindow::Create(HINSTANCE instance)
         WS_POPUP | WS_CLIPCHILDREN,
         0, 0, 438, 382,
         nullptr, nullptr, instance_, this);
-    if (window_ == nullptr)
-    {
-        return false;
-    }
+    if (window_ == nullptr) return false;
 
     background_ = WebSkin::CreateBackgroundBrush();
+    const UINT dpi = GetDpiForWindow(window_);
     font_ = CreateFontW(
-        -15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        -Scale(15, dpi), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Text");
     title_font_ = CreateFontW(
-        -22, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+        -Scale(22, dpi), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Display");
 
@@ -153,17 +165,13 @@ bool CloudOSNativeQuickSettingsWindow::Create(HINSTANCE instance)
     SetControlFont(title_, title_font_);
     for (HWND child : {volume_label_, volume_slider_, mute_button_, power_label_, monitor_label_,
                        wifi_button_, bluetooth_button_, network_button_, display_button_, sound_button_, power_button_})
-    {
         SetControlFont(child, font_);
-    }
 
     SendMessageW(volume_slider_, TBM_SETRANGE, TRUE, MAKELPARAM(0, 100));
     SendMessageW(volume_slider_, TBM_SETPAGESIZE, 0, 5);
 
     for (HWND button : {mute_button_, wifi_button_, bluetooth_button_, network_button_, display_button_, sound_button_, power_button_})
-    {
         WebSkin::PrepareButton(button);
-    }
     WebSkin::ApplyUxTheme(volume_slider_);
     ApplyWebFlyoutMaterial(window_);
     Layout();
@@ -210,7 +218,7 @@ void CloudOSNativeQuickSettingsWindow::Layout()
     const int button_height = Scale(48, dpi);
 
     MoveWindow(title_, margin, Scale(18, dpi), width - margin * 2, Scale(34, dpi), TRUE);
-    MoveWindow(volume_label_, margin, Scale(66, dpi), Scale(150, dpi), Scale(24, dpi), TRUE);
+    MoveWindow(volume_label_, margin, Scale(66, dpi), Scale(180, dpi), Scale(24, dpi), TRUE);
     MoveWindow(volume_slider_, margin, Scale(92, dpi), width - margin * 2 - Scale(94, dpi), Scale(32, dpi), TRUE);
     MoveWindow(mute_button_, width - margin - Scale(82, dpi), Scale(89, dpi), Scale(82, dpi), Scale(36, dpi), TRUE);
     MoveWindow(power_label_, margin, Scale(140, dpi), width - margin * 2, Scale(24, dpi), TRUE);
@@ -228,44 +236,30 @@ void CloudOSNativeQuickSettingsWindow::Layout()
 
 void CloudOSNativeQuickSettingsWindow::UpdateState()
 {
-    const auto volume = DefaultEndpointVolume();
-    float level = 0.0f;
-    BOOL muted = FALSE;
-    if (volume != nullptr)
+    const NativeAudioState audio = NativeSystemControlBackend::QueryAudio();
+    updating_slider_ = true;
+    if (audio.available)
     {
-        (void)volume->GetMasterVolumeLevelScalar(&level);
-        (void)volume->GetMute(&muted);
-        updating_slider_ = true;
-        SendMessageW(volume_slider_, TBM_SETPOS, TRUE,
-            static_cast<LPARAM>(std::clamp(static_cast<int>(level * 100.0f + 0.5f), 0, 100)));
-        updating_slider_ = false;
+        SendMessageW(volume_slider_, TBM_SETPOS, TRUE, static_cast<LPARAM>(audio.volume_percent));
     }
-    EnableWindow(volume_slider_, volume != nullptr);
-    EnableWindow(mute_button_, volume != nullptr);
+    updating_slider_ = false;
+    EnableWindow(volume_slider_, audio.available ? TRUE : FALSE);
+    EnableWindow(mute_button_, audio.available ? TRUE : FALSE);
 
-    std::wstring volume_text = L"Volume  ";
-    volume_text += volume != nullptr
-        ? std::to_wstring(std::clamp(static_cast<int>(level * 100.0f + 0.5f), 0, 100)) + L"%"
-        : L"indisponivel";
+    std::wstring volume_text = L"Volume  ·  ";
+    if (audio.available)
+    {
+        volume_text += std::to_wstring(audio.volume_percent) + L"%";
+        if (!audio.endpoint_name.empty()) volume_text += L" · " + audio.endpoint_name;
+    }
+    else
+    {
+        volume_text += L"indisponivel";
+    }
     SetWindowTextW(volume_label_, volume_text.c_str());
-    SetWindowTextW(mute_button_, muted ? L"Ativar som" : L"Mudo");
+    SetWindowTextW(mute_button_, audio.available && audio.muted ? L"Ativar som" : L"Mudo");
 
-    SYSTEM_POWER_STATUS power{};
-    std::wstring power_text = L"Energia  ·  ";
-    if (GetSystemPowerStatus(&power))
-    {
-        if (power.BatteryFlag == 128)
-            power_text += L"desktop / sem bateria";
-        else if (power.BatteryLifePercent == 255)
-            power_text += power.ACLineStatus == 1 ? L"conectado" : L"bateria";
-        else
-        {
-            power_text += std::to_wstring(power.BatteryLifePercent);
-            power_text += L"%";
-            power_text += power.ACLineStatus == 1 ? L" · carregando" : L" · bateria";
-        }
-    }
-    else power_text += L"indisponivel";
+    const std::wstring power_text = PowerStatusText();
     SetWindowTextW(power_label_, power_text.c_str());
 
     const std::size_t monitor_count = NativeMonitorManager::Enumerate().size();
@@ -279,23 +273,36 @@ void CloudOSNativeQuickSettingsWindow::ApplyVolumeFromSlider()
 {
     if (updating_slider_ || volume_slider_ == nullptr) return;
     const int position = static_cast<int>(SendMessageW(volume_slider_, TBM_GETPOS, 0, 0));
-    const auto volume = DefaultEndpointVolume();
-    if (volume != nullptr)
+    std::wstring error;
+    if (!NativeSystemControlBackend::SetMasterVolume(
+            static_cast<unsigned>(std::clamp(position, 0, 100)),
+            &error))
     {
-        (void)volume->SetMasterVolumeLevelScalar(static_cast<float>(std::clamp(position, 0, 100)) / 100.0f, nullptr);
-        BOOL muted = FALSE;
-        (void)volume->GetMute(&muted);
-        if (muted && position > 0) (void)volume->SetMute(FALSE, nullptr);
+        CloudOSNativeNotificationCenter::Post(
+            L"Volume indisponivel",
+            error.empty() ? L"O Windows recusou a alteracao do volume." : error);
+    }
+    else if (position > 0)
+    {
+        const NativeAudioState audio = NativeSystemControlBackend::QueryAudio();
+        if (audio.available && audio.muted)
+            (void)NativeSystemControlBackend::SetMasterMute(false, nullptr);
     }
     UpdateState();
 }
 
 void CloudOSNativeQuickSettingsWindow::ToggleMute()
 {
-    const auto volume = DefaultEndpointVolume();
-    if (volume == nullptr) return;
-    BOOL muted = FALSE;
-    if (SUCCEEDED(volume->GetMute(&muted))) (void)volume->SetMute(!muted, nullptr);
+    const NativeAudioState audio = NativeSystemControlBackend::QueryAudio();
+    if (!audio.available) return;
+
+    std::wstring error;
+    if (!NativeSystemControlBackend::SetMasterMute(!audio.muted, &error))
+    {
+        CloudOSNativeNotificationCenter::Post(
+            L"Audio indisponivel",
+            error.empty() ? L"O Windows recusou a alteracao de mute." : error);
+    }
     UpdateState();
 }
 
@@ -306,7 +313,12 @@ void CloudOSNativeQuickSettingsWindow::ShowNear(const RECT& anchor)
     HMONITOR monitor = MonitorFromRect(&anchor, MONITOR_DEFAULTTONEAREST);
     MONITORINFO info{};
     info.cbSize = sizeof(info);
-    GetMonitorInfoW(monitor, &info);
+    if (monitor == nullptr || !GetMonitorInfoW(monitor, &info))
+    {
+        monitor = MonitorFromWindow(window_, MONITOR_DEFAULTTOPRIMARY);
+        info.cbSize = sizeof(info);
+        if (!GetMonitorInfoW(monitor, &info)) return;
+    }
 
     const UINT dpi = GetDpiForWindow(window_);
     const int width = Scale(438, dpi);
@@ -350,6 +362,39 @@ LRESULT CloudOSNativeQuickSettingsWindow::HandleMessage(HWND window, UINT messag
     case WM_SIZE:
         Layout();
         return 0;
+    case WM_DPICHANGED:
+    {
+        const auto* suggested = reinterpret_cast<const RECT*>(l_param);
+        if (suggested != nullptr)
+        {
+            SetWindowPos(
+                window_,
+                HWND_TOPMOST,
+                suggested->left,
+                suggested->top,
+                suggested->right - suggested->left,
+                suggested->bottom - suggested->top,
+                SWP_NOACTIVATE);
+        }
+
+        if (font_ != nullptr) { DeleteObject(font_); font_ = nullptr; }
+        if (title_font_ != nullptr) { DeleteObject(title_font_); title_font_ = nullptr; }
+        const UINT dpi = GetDpiForWindow(window_);
+        font_ = CreateFontW(
+            -Scale(15, dpi), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Text");
+        title_font_ = CreateFontW(
+            -Scale(22, dpi), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Display");
+        SetControlFont(title_, title_font_);
+        for (HWND child : {volume_label_, volume_slider_, mute_button_, power_label_, monitor_label_,
+                           wifi_button_, bluetooth_button_, network_button_, display_button_, sound_button_, power_button_})
+            SetControlFont(child, font_);
+        Layout();
+        return 0;
+    }
     case WM_ACTIVATE:
         if (LOWORD(w_param) == WA_INACTIVE) Hide();
         return 0;
@@ -364,12 +409,12 @@ LRESULT CloudOSNativeQuickSettingsWindow::HandleMessage(HWND window, UINT messag
         switch (LOWORD(w_param))
         {
         case kMuteId: ToggleMute(); return 0;
-        case kWifiId: OpenSettings(window_, L"ms-settings:network-wifi"); return 0;
-        case kBluetoothId: OpenSettings(window_, L"ms-settings:bluetooth"); return 0;
-        case kNetworkId: OpenSettings(window_, L"ms-settings:network-status"); return 0;
-        case kDisplayId: OpenSettings(window_, L"ms-settings:display"); return 0;
-        case kSoundId: OpenSettings(window_, L"ms-settings:sound"); return 0;
-        case kPowerId: OpenSettings(window_, L"ms-settings:powersleep"); return 0;
+        case kWifiId: (void)OpenSettings(window_, L"ms-settings:network-wifi"); return 0;
+        case kBluetoothId: (void)OpenSettings(window_, L"ms-settings:bluetooth"); return 0;
+        case kNetworkId: (void)OpenSettings(window_, L"ms-settings:network-status"); return 0;
+        case kDisplayId: (void)OpenSettings(window_, L"ms-settings:display"); return 0;
+        case kSoundId: (void)OpenSettings(window_, L"ms-settings:sound"); return 0;
+        case kPowerId: (void)OpenSettings(window_, L"ms-settings:powersleep"); return 0;
         default: break;
         }
         break;
