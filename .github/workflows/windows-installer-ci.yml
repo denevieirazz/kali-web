@@ -10,11 +10,10 @@ on:
       - 'desktop/CloudOS.Host/Bridge/WebMessageBridge.cs'
       - 'desktop/CloudOS.Host/Installer/**'
       - 'desktop/CloudOS.Host/Native/NativeContainedProcessLauncher.cs'
-      - 'frontend/src/apps/WindowsInstaller/**'
-      - 'frontend/src/core/appRegistry.ts'
-      - 'frontend/src/core/fs/apps.ts'
-      - 'frontend/src/services/nativeHostBridge.ts'
       - '.github/workflows/windows-installer-ci.yml'
+
+permissions:
+  contents: read
 
 jobs:
   validate-installer-core:
@@ -28,6 +27,21 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+
+      - name: Verify retired React installer UI did not return
+        shell: pwsh
+        run: |
+          foreach ($path in @(
+            'frontend/src/apps/WindowsInstaller',
+            'frontend/src/services/nativeHostBridge.ts',
+            'frontend/src/core/appRegistry.ts',
+            'frontend/src/core/fs/apps.ts'
+          )) {
+            if (Test-Path -LiteralPath $path) {
+              throw "Retired React installer surface returned: $path"
+            }
+          }
+          Write-Host 'PASS: retired React installer UI is absent.'
 
       - name: Build installer capability core
         run: dotnet build desktop/CloudOS.Installer/CloudOS.Installer.csproj -c Release --nologo
@@ -81,46 +95,3 @@ jobs:
           }
 
           Write-Host 'Installer Host-only contained execution transaction: PASS'
-
-      - name: Enforce preparation-only WebView boundary
-        shell: pwsh
-        run: |
-          $hostBridge = Get-Content 'desktop/CloudOS.Host/Bridge/WebMessageBridge.cs' -Raw
-          $client = Get-Content 'frontend/src/services/nativeHostBridge.ts' -Raw
-          $panel = Get-Content 'frontend/src/apps/WindowsInstaller/WindowsInstaller.tsx' -Raw
-          $registry = Get-Content 'frontend/src/core/appRegistry.ts' -Raw
-          $apps = Get-Content 'frontend/src/core/fs/apps.ts' -Raw
-
-          foreach ($required in @('installer.artifacts.list', 'installer.prepare')) {
-            if (-not $hostBridge.Contains($required, [System.StringComparison]::Ordinal) -or
-                -not $client.Contains($required, [System.StringComparison]::Ordinal)) {
-              throw "Installer preparation bridge is missing required method '$required'."
-            }
-          }
-
-          $executionSurface = "$hostBridge`n$client`n$panel"
-          foreach ($forbidden in @(
-            'installer.start',
-            'installer.execute',
-            'installer.consume',
-            'ExecutablePath',
-            'executablePath',
-            'WorkingDirectory',
-            'workingDirectory',
-            'LogPath',
-            'logPath'
-          )) {
-            if ($executionSurface.Contains($forbidden, [System.StringComparison]::Ordinal)) {
-              throw "Installer WebView surface exposed forbidden execution detail '$forbidden'."
-            }
-          }
-
-          foreach ($requiredRegistration in @('windows-installer', 'WindowsInstaller/WindowsInstaller', 'windows-installer.obx')) {
-            $found = $registry.Contains($requiredRegistration, [System.StringComparison]::Ordinal) -or
-                     $apps.Contains($requiredRegistration, [System.StringComparison]::Ordinal)
-            if (-not $found) {
-              throw "Installer bundled-app registration is missing '$requiredRegistration'."
-            }
-          }
-
-          Write-Host 'Installer preparation-only WebView boundary: PASS'
