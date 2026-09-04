@@ -78,7 +78,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(bridge.locations, <String>['home']);
 
-    await tester.tap(find.text('Lixeira'));
+    await tester.scrollUntilVisible(
+      find.text('Lixeira CloudOS'),
+      120,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Lixeira CloudOS'));
     await tester.pump();
 
     expect(bridge.locations, <String>['home']);
