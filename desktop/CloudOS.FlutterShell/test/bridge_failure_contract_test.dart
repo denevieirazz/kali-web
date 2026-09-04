@@ -99,9 +99,11 @@ void main() {
     );
 
     final info = await bridge.getBridgeInfo();
-    expect(info['version'], 'v21-degraded');
+    expect(info['schema'], 22);
+    expect(info['version'], 'v22-degraded');
     expect(info['bridge_type'], 'NativeBridgeUnavailable');
     expect(info['brokerState'], 'degraded');
+    expect(info['activeWslHealthProbe'], isFalse);
   });
 
   test('missing plugin remains explicit preview mode for observation probes', () async {
@@ -120,8 +122,10 @@ void main() {
     );
 
     final info = await bridge.getBridgeInfo();
-    expect(info['version'], 'v21-preview');
+    expect(info['schema'], 22);
+    expect(info['version'], 'v22-preview');
     expect(info['bridge_type'], 'PreviewFallback');
     expect(info['brokerState'], 'preview');
+    expect(info['activeWslHealthProbe'], isFalse);
   });
 }

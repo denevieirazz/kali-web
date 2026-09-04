@@ -21,6 +21,7 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <ForcedIncludeFiles>supervisor_bootstrap_v22.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <PreprocessorDefinitions>UNICODE;_UNICODE;WIN32_LEAN_AND_MEAN;NOMINMAX;_WIN32_WINNT=0x0A00;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
@@ -31,11 +32,14 @@
     <Manifest><EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness><UACExecutionLevel>AsInvoker</UACExecutionLevel></Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="main.cpp">
-      <!-- The shared V11 header already static_asserts the 96-byte ABI. SelfTest
-           repeats that invariant for diagnostics, which MSVC reports as C4127. -->
+    <ClCompile Include="main_v22.cpp">
+      <!-- V22 deliberately includes the preserved V11 implementation in one translation
+           unit, then replaces only the supervisor entrypoint. This keeps V11 recovery,
+           heartbeat and allowlist behavior byte-local while adding crash-loop state. -->
       <DisableSpecificWarnings>4127;%(DisableSpecificWarnings)</DisableSpecificWarnings>
     </ClCompile>
+    <ClInclude Include="main.cpp" />
+    <ClInclude Include="supervisor_bootstrap_v22.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

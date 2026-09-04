@@ -2,6 +2,7 @@
 #include "broker_server_v21.h"
 #include "diagnostics_v21.h"
 #include "event_bus_v21.h"
+#include "event_transport_v23.h"
 #include "job_manager_v21.h"
 #include "protocol_v21.h"
 #include "security_v21.h"
@@ -29,6 +30,8 @@ BOOL WINAPI ConsoleCtrlHandler(DWORD ctrl_type)
     case CTRL_SHUTDOWN_EVENT:
         g_shutdown_requested.store(true);
         BrokerServerV21::Instance().Stop();
+        EventTransportV23::Instance().Stop();
+        EventBusV21::Instance().SetDedicatedTransportRequired(false);
         return TRUE;
     default:
         return FALSE;
@@ -92,6 +95,8 @@ int RunSelfTest()
 
         std::wstring cmd_pipe = SecurityV21::GetCommandPipeName();
         Assert(cmd_pipe.find(L"\\\\.\\pipe\\CloudOS.SystemBroker.v21.") == 0, "Command pipe prefix valid");
+        std::wstring event_pipe = SecurityV21::GetEventsPipeName();
+        Assert(event_pipe.find(L"\\\\.\\pipe\\CloudOS.SystemBroker.Events.v21.") == 0, "Event pipe prefix valid");
 
         SECURITY_ATTRIBUTES sa{};
         PSECURITY_DESCRIPTOR sd = nullptr;
@@ -121,8 +126,24 @@ int RunSelfTest()
         Assert(received_volume, "Event dispatched to subscriber");
         Assert(received_wildcard, "Wildcard subscription matched");
 
+        // Runtime V23 must suppress a legacy/RPC sender and dispatch only to a
+        // sender explicitly registered as the dedicated event transport.
+        EventBusV21::Instance().SetDedicatedTransportRequired(true);
+        received_volume = false;
+        EventBusV21::Instance().Publish("system.volumeChanged", payload);
+        Assert(!received_volume, "Dedicated mode suppresses legacy RPC event sender");
+
+        EventBusV21::Instance().RegisterDedicatedClientV23(
+            "client-a",
+            [&](const BrokerEvent& ev) {
+                if (ev.event == "system.volumeChanged") received_volume = true;
+            });
+        EventBusV21::Instance().Publish("system.volumeChanged", payload);
+        Assert(received_volume, "Dedicated V23 sender receives subscribed event");
+
         EventBusV21::Instance().UnregisterClient("client-a");
         Assert(EventBusV21::Instance().GetActiveClientCount() == 0, "Client count 0 after unregister");
+        EventBusV21::Instance().Reset();
     }
 
     // 4. Test Job Manager
@@ -242,15 +263,24 @@ int main(int argc, char* argv[])
         }
     }
 
-    std::cout << "[SystemBroker] Starting CloudOS System Broker V21 (Protocol " << CloudOS::kProtocolVersion << ")..." << std::endl;
+    std::cout << "[SystemBroker] Starting CloudOS System Broker V21 (Protocol " << CloudOS::kProtocolVersion << ") + Event Transport V23..." << std::endl;
+
+    if (!CloudOS::EventTransportV23::Instance().Start())
+    {
+        std::cerr << "[SystemBroker] Failed to start dedicated Event Transport V23." << std::endl;
+        return 1;
+    }
+    CloudOS::EventBusV21::Instance().SetDedicatedTransportRequired(true);
 
     if (!CloudOS::BrokerServerV21::Instance().Start())
     {
+        CloudOS::EventTransportV23::Instance().Stop();
+        CloudOS::EventBusV21::Instance().SetDedicatedTransportRequired(false);
         std::cerr << "[SystemBroker] Failed to start broker server." << std::endl;
         return 1;
     }
 
-    std::cout << "[SystemBroker] Broker ready and listening on user named pipe." << std::endl;
+    std::cout << "[SystemBroker] RPC V21 and dedicated Event Transport V23 are ready on per-user/session named pipes." << std::endl;
 
     while (!CloudOS::g_shutdown_requested.load())
     {
@@ -259,6 +289,8 @@ int main(int argc, char* argv[])
 
     std::cout << "[SystemBroker] Shutting down cleanly..." << std::endl;
     CloudOS::BrokerServerV21::Instance().Stop();
+    CloudOS::EventTransportV23::Instance().Stop();
+    CloudOS::EventBusV21::Instance().SetDedicatedTransportRequired(false);
     std::cout << "[SystemBroker] Shutdown complete." << std::endl;
     return 0;
 }

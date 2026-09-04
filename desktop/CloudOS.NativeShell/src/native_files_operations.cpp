@@ -7,7 +7,7 @@
 #include "native_theme.h"
 
 #include <ShlObj.h>
-#include <Shellapi.h>
+#include <ShObjIdl.h>
 
 #include <algorithm>
 #include <array>
@@ -17,7 +17,104 @@
 #include <utility>
 
 #pragma comment(lib, "comctl32.lib")
+#pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "shell32.lib")
+
+namespace
+{
+HRESULT CreateShellItem(const std::wstring& path, IShellItem** output)
+{
+    if (output == nullptr) return E_POINTER;
+    *output = nullptr;
+    if (path.empty()) return E_INVALIDARG;
+    return SHCreateItemFromParsingName(path.c_str(), nullptr, IID_PPV_ARGS(output));
+}
+
+HRESULT CreateFileOperation(HWND owner, DWORD flags, IFileOperation** output)
+{
+    if (output == nullptr) return E_POINTER;
+    *output = nullptr;
+
+    IFileOperation* operation = nullptr;
+    HRESULT result = CoCreateInstance(
+        CLSID_FileOperation,
+        nullptr,
+        CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(&operation));
+    if (FAILED(result) || operation == nullptr)
+        return FAILED(result) ? result : E_FAIL;
+
+    result = operation->SetOwnerWindow(owner);
+    if (SUCCEEDED(result)) result = operation->SetOperationFlags(flags);
+    if (FAILED(result))
+    {
+        operation->Release();
+        return result;
+    }
+
+    *output = operation;
+    return S_OK;
+}
+
+HRESULT FinishShellOperation(IFileOperation* operation)
+{
+    if (operation == nullptr) return E_POINTER;
+    HRESULT result = operation->PerformOperations();
+    if (FAILED(result)) return result;
+
+    BOOL aborted = FALSE;
+    if (SUCCEEDED(operation->GetAnyOperationsAborted(&aborted)) && aborted)
+        return HRESULT_FROM_WIN32(ERROR_CANCELLED);
+    return S_OK;
+}
+
+HRESULT RenameShellItem(HWND owner, const std::wstring& source, const std::wstring& new_name)
+{
+    IFileOperation* operation = nullptr;
+    HRESULT result = CreateFileOperation(
+        owner,
+        FOF_NOCONFIRMMKDIR | FOFX_ADDUNDORECORD | FOFX_EARLYFAILURE | FOFX_SHOWELEVATIONPROMPT,
+        &operation);
+    if (FAILED(result)) return result;
+
+    IShellItem* item = nullptr;
+    result = CreateShellItem(source, &item);
+    if (SUCCEEDED(result) && item != nullptr)
+    {
+        result = operation->RenameItem(item, new_name.c_str(), nullptr);
+        if (SUCCEEDED(result)) result = FinishShellOperation(operation);
+    }
+    if (item != nullptr) item->Release();
+    operation->Release();
+    return result;
+}
+
+HRESULT RecycleShellItem(HWND owner, const std::wstring& source)
+{
+    IFileOperation* operation = nullptr;
+    HRESULT result = CreateFileOperation(
+        owner,
+        FOF_ALLOWUNDO |
+            FOF_NOCONFIRMMKDIR |
+            FOFX_ADDUNDORECORD |
+            FOFX_EARLYFAILURE |
+            FOFX_RECYCLEONDELETE |
+            FOFX_SHOWELEVATIONPROMPT,
+        &operation);
+    if (FAILED(result)) return result;
+
+    IShellItem* item = nullptr;
+    result = CreateShellItem(source, &item);
+    if (SUCCEEDED(result) && item != nullptr)
+    {
+        result = operation->DeleteItem(item, nullptr);
+        if (SUCCEEDED(result)) result = FinishShellOperation(operation);
+    }
+    if (item != nullptr) item->Release();
+    operation->Release();
+    return result;
+}
+}
 
 void CloudOSNativeFilesWindow::PopulateCustomList()
 {
@@ -215,8 +312,13 @@ bool CloudOSNativeFilesWindow::CommitRename(int row, const wchar_t* new_name)
     }
     else
     {
-        const std::wstring destination = JoinPath(current_path_, new_name);
-        if (!MoveFileW(entry.full_path.c_str(), destination.c_str())) return false;
+        const HRESULT result = RenameShellItem(window_, entry.full_path, new_name);
+        if (result == HRESULT_FROM_WIN32(ERROR_CANCELLED)) return false;
+        if (FAILED(result))
+        {
+            ShowError(window_, L"Nao foi possivel renomear o item pelo Windows Shell.");
+            return false;
+        }
     }
     entry.name = new_name;
     entry.full_path = JoinPath(current_path_, new_name);
@@ -265,17 +367,12 @@ void CloudOSNativeFilesWindow::DeleteSelection()
         return;
     }
 
-    std::wstring double_null = entry.full_path;
-    double_null.push_back(L'\0');
-    double_null.push_back(L'\0');
-    SHFILEOPSTRUCTW operation{};
-    operation.hwnd = window_;
-    operation.wFunc = FO_DELETE;
-    operation.pFrom = double_null.c_str();
-    operation.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMMKDIR | FOF_NOERRORUI;
-    if (SHFileOperationW(&operation) != 0 || operation.fAnyOperationsAborted)
+    const HRESULT result = RecycleShellItem(window_, entry.full_path);
+    if (result == HRESULT_FROM_WIN32(ERROR_CANCELLED)) return;
+    if (FAILED(result))
     {
-        ShowError(window_, L"Nao foi possivel excluir o item.");
+        ShowError(window_, L"Nao foi possivel mover o item para a Lixeira do Windows.");
+        return;
     }
     PopulateCustomList();
 }

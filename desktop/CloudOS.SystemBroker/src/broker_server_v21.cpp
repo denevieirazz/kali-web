@@ -6,6 +6,7 @@
 #include "job_manager_v21.h"
 #include "security_v21.h"
 #include "system_service_v21.h"
+#include "wsl_probe_service_v22.h"
 #include "wsl_service_v21.h"
 
 #include <iostream>
@@ -25,6 +26,22 @@ void WriteFilesPayload(
         files.push_back(JsonValue(item.ToJsonObject()));
     }
     response.payload["files"] = JsonValue(std::move(files));
+}
+
+void WriteWslProbePayload(
+    BrokerResponse& response,
+    const WslProbeResultV22& probe)
+{
+    response.payload["distro"] = JsonValue(probe.distro);
+    response.payload["attempted"] = JsonValue(probe.attempted);
+    response.payload["healthy"] = JsonValue(probe.success);
+    response.payload["timedOut"] = JsonValue(probe.timed_out);
+    response.payload["markerSeen"] = JsonValue(probe.marker_seen);
+    response.payload["exitCode"] = JsonValue(probe.exit_code);
+    response.payload["durationMs"] = JsonValue(static_cast<int64_t>(probe.duration_ms));
+    response.payload["output"] = JsonValue(probe.output);
+    response.payload["errorCode"] = JsonValue(probe.error_code);
+    response.payload["errorMessage"] = JsonValue(probe.error_message);
 }
 }
 
@@ -148,19 +165,27 @@ void BrokerServerV21::ListenerLoop()
     {
         SECURITY_ATTRIBUTES sa{};
         PSECURITY_DESCRIPTOR sd = nullptr;
-        bool sa_ok = SecurityV21::CreatePerUserSecurityAttributes(&sa, &sd);
+        const bool sa_ok = SecurityV21::CreatePerUserSecurityAttributes(&sa, &sd);
+        if (!sa_ok)
+        {
+            // Never fall back to a default/null DACL. Broker availability is
+            // preferable to be degraded rather than cross-user reachable.
+            std::cerr << "[SystemBroker] Failed to construct fail-closed pipe security." << std::endl;
+            Sleep(100);
+            continue;
+        }
 
         HANDLE pipe = CreateNamedPipeW(
             pipe_name.c_str(),
             PIPE_ACCESS_DUPLEX,
-            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
             PIPE_UNLIMITED_INSTANCES,
             65536,
             65536,
             0,
-            sa_ok ? &sa : nullptr);
+            &sa);
 
-        if (sa_ok) SecurityV21::FreeSecurityDescriptor(sd);
+        SecurityV21::FreeSecurityDescriptor(sd);
         if (pipe == INVALID_HANDLE_VALUE)
         {
             Sleep(100);
@@ -176,7 +201,17 @@ void BrokerServerV21::ListenerLoop()
 
         if (connected)
         {
-            std::string client_id = "client-" + std::to_string(next_client_id_++);
+            DWORD client_process_id = 0;
+            if (!SecurityV21::ValidateNamedPipeClient(pipe, &client_process_id))
+            {
+                std::cerr << "[SystemBroker] Rejected unvalidated named-pipe client." << std::endl;
+                DisconnectNamedPipe(pipe);
+                CloseHandle(pipe);
+                continue;
+            }
+
+            std::string client_id = "client-" + std::to_string(next_client_id_++) +
+                "-pid-" + std::to_string(client_process_id);
             std::lock_guard<std::mutex> lock(client_threads_mutex_);
             client_threads_.emplace_back(&BrokerServerV21::ClientSessionLoop, this, pipe, client_id);
         }
@@ -449,6 +484,75 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
         for (const auto& d : WslServiceV21::Instance().GetDistributions()) distros.push_back(JsonValue(d));
         res.payload["distros"] = JsonValue(std::move(distros));
         res.payload["generation"] = JsonValue(static_cast<int64_t>(WslServiceV21::Instance().GetGeneration()));
+        return res;
+    }
+
+    if (method == "wsl.health.probe")
+    {
+        // This API is deliberately strict. It never accepts a Linux command,
+        // argv, shell fragment or environment from the client. The service
+        // executes one fixed CloudOS health probe only.
+        for (const auto& field : req.payload)
+        {
+            if (field.first != "distro" && field.first != "timeoutMs")
+            {
+                res.ok = false;
+                res.error_code = "invalid_argument";
+                res.error_message = "wsl.health.probe accepts only 'distro' and 'timeoutMs'";
+                return res;
+            }
+        }
+
+        std::string distro;
+        const auto distro_it = req.payload.find("distro");
+        if (distro_it != req.payload.end())
+        {
+            if (!distro_it->second.IsString())
+            {
+                res.ok = false;
+                res.error_code = "invalid_argument";
+                res.error_message = "'distro' must be a string";
+                return res;
+            }
+            distro = distro_it->second.AsString();
+            if (distro.size() > 128)
+            {
+                res.ok = false;
+                res.error_code = "invalid_argument";
+                res.error_message = "'distro' exceeds the maximum accepted length";
+                return res;
+            }
+        }
+
+        uint32_t timeout_ms = 8000;
+        const auto timeout_it = req.payload.find("timeoutMs");
+        if (timeout_it != req.payload.end())
+        {
+            if (!timeout_it->second.IsInt())
+            {
+                res.ok = false;
+                res.error_code = "invalid_argument";
+                res.error_message = "'timeoutMs' must be an integer between 1000 and 15000";
+                return res;
+            }
+            const int64_t requested_timeout = timeout_it->second.AsInt();
+            if (requested_timeout < 1000 || requested_timeout > 15000)
+            {
+                res.ok = false;
+                res.error_code = "invalid_argument";
+                res.error_message = "'timeoutMs' must be between 1000 and 15000";
+                return res;
+            }
+            timeout_ms = static_cast<uint32_t>(requested_timeout);
+        }
+
+        const WslProbeResultV22 probe =
+            WslProbeServiceV22::Instance().Probe(distro, timeout_ms);
+        WriteWslProbePayload(res, probe);
+
+        // Do not synchronously publish an event on this same client pipe before
+        // the RPC response is framed. The V21 client is request/response based;
+        // event interleaving here could make it consume an event as the reply.
         return res;
     }
 

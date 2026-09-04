@@ -24,6 +24,7 @@ $paths = @{
     Browser = Join-Path $src 'native_browser_window.cpp'
     Actions = Join-Path $src 'native_shell_actions.cpp'
     Quick = Join-Path $src 'native_quick_settings_window.cpp'
+    SystemControl = Join-Path $src 'native_system_control_backend.cpp'
     Monitor = Join-Path $src 'native_monitor_manager.cpp'
     Drop = Join-Path $src 'native_desktop_drop_target.cpp'
 }
@@ -41,6 +42,9 @@ foreach ($entry in $paths.GetEnumerator()) {
 $content.Pins = $content.PinsHeader + "`n" + $content.Pins
 $content.Recovery = $content.RecoveryHeader + "`n" + $content.Recovery
 $content.Taskbar = $content.TaskbarHeader + "`n" + $content.Taskbar
+# Quick Settings V22 intentionally delegates Windows controls to the shared backend.
+# Keep the legacy contract semantic by validating the UI orchestration and backend together.
+$content.Quick = $content.Quick + "`n" + $content.SystemControl
 
 function Require([string]$Name, [string]$Text, [string[]]$Tokens) {
     foreach ($token in $Tokens) {

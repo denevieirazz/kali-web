@@ -474,13 +474,134 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         map[flutter::EncodableValue("brightness")] = flutter::EncodableValue(snapshot.brightness);
         map[flutter::EncodableValue("batteryAvailable")] = flutter::EncodableValue(snapshot.battery_available);
         map[flutter::EncodableValue("batteryPercent")] = flutter::EncodableValue(snapshot.battery_percent);
+
         map[flutter::EncodableValue("wslAvailable")] = flutter::EncodableValue(snapshot.wsl_available);
+        map[flutter::EncodableValue("wslEngineAvailable")] = flutter::EncodableValue(snapshot.wsl_engine_available);
+        if (snapshot.wsl_passive_ready_known)
+        {
+            map[flutter::EncodableValue("wslPassiveReady")] =
+                flutter::EncodableValue(snapshot.wsl_passive_ready);
+        }
         map[flutter::EncodableValue("defaultDistro")] = flutter::EncodableValue(snapshot.default_distro);
-        map[flutter::EncodableValue("currentWorkspace")] = flutter::EncodableValue(snapshot.current_workspace);
+        map[flutter::EncodableValue("preferredSecurityDistro")] =
+            flutter::EncodableValue(snapshot.preferred_security_distro);
+        map[flutter::EncodableValue("wslRegisteredCount")] =
+            flutter::EncodableValue(static_cast<int64_t>(snapshot.wsl_registered_count));
+        map[flutter::EncodableValue("wslLaunchCandidateCount")] =
+            flutter::EncodableValue(static_cast<int64_t>(snapshot.wsl_launch_candidate_count));
+        map[flutter::EncodableValue("wsl1Count")] =
+            flutter::EncodableValue(static_cast<int64_t>(snapshot.wsl1_count));
+        map[flutter::EncodableValue("wsl2Count")] =
+            flutter::EncodableValue(static_cast<int64_t>(snapshot.wsl2_count));
+
         flutter::EncodableList distros_list;
-        for (const auto& d : snapshot.distros) distros_list.push_back(flutter::EncodableValue(d));
+        for (const auto& d : snapshot.distros)
+        {
+            distros_list.push_back(flutter::EncodableValue(d));
+        }
         map[flutter::EncodableValue("distros")] = flutter::EncodableValue(std::move(distros_list));
+
+        flutter::EncodableList typed_distros;
+        typed_distros.reserve(snapshot.wsl_distros.size());
+        for (const auto& distro : snapshot.wsl_distros)
+        {
+            flutter::EncodableMap item;
+            item[flutter::EncodableValue("name")] = flutter::EncodableValue(distro.name);
+            item[flutter::EncodableValue("isDefault")] = flutter::EncodableValue(distro.is_default);
+            if (distro.version == 1 || distro.version == 2)
+            {
+                item[flutter::EncodableValue("version")] = flutter::EncodableValue(distro.version);
+            }
+            if (distro.base_path_evidence_known)
+            {
+                item[flutter::EncodableValue("basePathPresent")] =
+                    flutter::EncodableValue(distro.base_path_present);
+            }
+            if (distro.security_candidate_evidence_known)
+            {
+                item[flutter::EncodableValue("securityCandidate")] =
+                    flutter::EncodableValue(distro.is_security_candidate);
+            }
+            typed_distros.push_back(flutter::EncodableValue(std::move(item)));
+        }
+        map[flutter::EncodableValue("wslDistros")] = flutter::EncodableValue(std::move(typed_distros));
+
+        map[flutter::EncodableValue("currentWorkspace")] = flutter::EncodableValue(snapshot.current_workspace);
         result->Success(flutter::EncodableValue(std::move(map)));
+        return;
+    }
+
+    if (method == "probeWslHealth")
+    {
+        std::string distro;
+        int timeout_ms = 8000;
+        const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
+        if (args != nullptr)
+        {
+            const auto distro_it = args->find(flutter::EncodableValue("distro"));
+            if (distro_it != args->end())
+            {
+                if (!std::holds_alternative<std::string>(distro_it->second))
+                {
+                    result->Error("INVALID_ARGUMENT", "probeWslHealth distro must be a string");
+                    return;
+                }
+                distro = std::get<std::string>(distro_it->second);
+            }
+
+            const auto timeout_it = args->find(flutter::EncodableValue("timeoutMs"));
+            if (timeout_it != args->end())
+            {
+                if (const auto* timeout32 = std::get_if<int32_t>(&timeout_it->second))
+                {
+                    timeout_ms = static_cast<int>(*timeout32);
+                }
+                else if (const auto* timeout64 = std::get_if<int64_t>(&timeout_it->second))
+                {
+                    if (*timeout64 < 1000 || *timeout64 > 15000)
+                    {
+                        result->Error("INVALID_ARGUMENT", "probeWslHealth timeoutMs must be 1000..15000");
+                        return;
+                    }
+                    timeout_ms = static_cast<int>(*timeout64);
+                }
+                else
+                {
+                    result->Error("INVALID_ARGUMENT", "probeWslHealth timeoutMs must be an integer");
+                    return;
+                }
+            }
+        }
+
+        if (distro.size() > 128 || timeout_ms < 1000 || timeout_ms > 15000)
+        {
+            result->Error("INVALID_ARGUMENT", "probeWslHealth arguments are outside the bounded contract");
+            return;
+        }
+
+        BrokerClientWslProbeResult probe;
+        if (!CloudOSBrokerClientV21::Instance().ProbeWslHealth(
+                distro,
+                static_cast<uint32_t>(timeout_ms),
+                probe))
+        {
+            result->Error("WSL_PROBE_UNAVAILABLE", "System Broker did not return a valid WSL health probe result");
+            return;
+        }
+
+        flutter::EncodableMap response;
+        response[flutter::EncodableValue("distro")] = flutter::EncodableValue(probe.distro);
+        response[flutter::EncodableValue("attempted")] = flutter::EncodableValue(probe.attempted);
+        response[flutter::EncodableValue("healthy")] = flutter::EncodableValue(probe.healthy);
+        response[flutter::EncodableValue("timedOut")] = flutter::EncodableValue(probe.timed_out);
+        response[flutter::EncodableValue("markerSeen")] = flutter::EncodableValue(probe.marker_seen);
+        response[flutter::EncodableValue("exitCode")] = flutter::EncodableValue(probe.exit_code);
+        response[flutter::EncodableValue("durationMs")] =
+            flutter::EncodableValue(static_cast<int64_t>(probe.duration_ms));
+        response[flutter::EncodableValue("output")] = flutter::EncodableValue(probe.output);
+        response[flutter::EncodableValue("errorCode")] = flutter::EncodableValue(probe.error_code);
+        response[flutter::EncodableValue("errorMessage")] = flutter::EncodableValue(probe.error_message);
+        result->Success(flutter::EncodableValue(std::move(response)));
         return;
     }
 
@@ -676,14 +797,26 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
 
     if (method == "getBridgeInfo")
     {
+        std::vector<std::string> broker_capabilities;
+        const bool capabilities_loaded =
+            CloudOSBrokerClientV21::Instance().GetCapabilities(broker_capabilities);
+        const bool active_wsl_probe = capabilities_loaded &&
+            std::find(
+                broker_capabilities.begin(),
+                broker_capabilities.end(),
+                "wsl.health.probe") != broker_capabilities.end();
+
         flutter::EncodableMap map;
-        map[flutter::EncodableValue("schema")] = flutter::EncodableValue(21);
+        map[flutter::EncodableValue("schema")] = flutter::EncodableValue(22);
         map[flutter::EncodableValue("verdict")] = flutter::EncodableValue("pass");
         map[flutter::EncodableValue("bridge_type")] = flutter::EncodableValue("CloudOSFlutterBridgeV20");
         map[flutter::EncodableValue("channel")] = flutter::EncodableValue(kChannelName);
         map[flutter::EncodableValue("brokerConnected")] = flutter::EncodableValue(CloudOSBrokerClientV21::Instance().IsConnected());
         map[flutter::EncodableValue("brokerState")] = flutter::EncodableValue(ConnectionStateToString(CloudOSBrokerClientV21::Instance().GetConnectionState()));
         map[flutter::EncodableValue("conptyAvailable")] = flutter::EncodableValue(true);
+        map[flutter::EncodableValue("typedWslInventory")] = flutter::EncodableValue(true);
+        map[flutter::EncodableValue("passiveWslHealthEvidence")] = flutter::EncodableValue(true);
+        map[flutter::EncodableValue("activeWslHealthProbe")] = flutter::EncodableValue(active_wsl_probe);
         map[flutter::EncodableValue("arbitrary_command_api")] = flutter::EncodableValue(false);
         map[flutter::EncodableValue("winlogon_modified")] = flutter::EncodableValue(false);
         map[flutter::EncodableValue("shell_activation_executed")] = flutter::EncodableValue(false);
@@ -755,9 +888,31 @@ NativeSystemSnapshot CloudOSFlutterBridgeV20::GetSystemSnapshot()
         snapshot.brightness = broker_snap.brightness;
         snapshot.battery_available = broker_snap.battery_available;
         snapshot.battery_percent = broker_snap.battery_percent;
+
         snapshot.wsl_available = broker_snap.wsl_available;
+        snapshot.wsl_engine_available = broker_snap.wsl_engine_available;
+        snapshot.wsl_passive_ready = broker_snap.wsl_passive_ready;
+        snapshot.wsl_passive_ready_known = broker_snap.wsl_passive_ready_known;
         snapshot.distros = broker_snap.distros;
         snapshot.default_distro = broker_snap.default_distro;
+        snapshot.preferred_security_distro = broker_snap.preferred_security_distro;
+        snapshot.wsl_registered_count = broker_snap.wsl_registered_count;
+        snapshot.wsl_launch_candidate_count = broker_snap.wsl_launch_candidate_count;
+        snapshot.wsl1_count = broker_snap.wsl1_count;
+        snapshot.wsl2_count = broker_snap.wsl2_count;
+        snapshot.wsl_distros.reserve(broker_snap.wsl_distros.size());
+        for (const auto& distro : broker_snap.wsl_distros)
+        {
+            snapshot.wsl_distros.push_back(NativeWslDistributionSnapshot{
+                distro.name,
+                distro.version,
+                distro.is_default,
+                distro.base_path_present,
+                distro.base_path_evidence_known,
+                distro.is_security_candidate,
+                distro.security_candidate_evidence_known});
+        }
+
         snapshot.current_workspace = broker_snap.current_workspace;
     }
     else
@@ -831,6 +986,7 @@ void CloudOSFlutterBridgeV20::RefreshAppCatalog()
 void CloudOSFlutterBridgeV20::RefreshSystemSnapshot()
 {
     std::lock_guard<std::mutex> lock(mutex_);
+    cached_snapshot_ = {};
     cached_snapshot_.device_name = "CloudOS Desktop";
     cached_snapshot_.network_available = false;
     cached_snapshot_.network_name = "Indisponível";
@@ -841,7 +997,12 @@ void CloudOSFlutterBridgeV20::RefreshSystemSnapshot()
     cached_snapshot_.battery_available = false;
     cached_snapshot_.battery_percent = 0;
     cached_snapshot_.wsl_available = false;
-    cached_snapshot_.distros = {};
+    cached_snapshot_.wsl_engine_available = false;
+    cached_snapshot_.wsl_passive_ready_known = false;
+    cached_snapshot_.distros.clear();
+    cached_snapshot_.wsl_distros.clear();
+    cached_snapshot_.default_distro.clear();
+    cached_snapshot_.preferred_security_distro.clear();
     cached_snapshot_.current_workspace = 1;
 }
 

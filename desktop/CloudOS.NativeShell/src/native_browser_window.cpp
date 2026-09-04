@@ -28,6 +28,9 @@ constexpr int kAddressId = 7105;
 constexpr int kGoId = 7106;
 constexpr int kToolbarHeight = 52;
 constexpr wchar_t kHomeUrl[] = L"https://www.google.com/";
+constexpr UINT kWebViewRecoverMessage = WM_APP + 0x713;
+constexpr ULONGLONG kRecoveryWindowMs = 30000ull;
+constexpr unsigned kMaximumRecoveryAttempts = 3u;
 
 bool IsHttpUrl(const std::wstring& value)
 {
@@ -79,22 +82,7 @@ CloudOSNativeBrowserWindow::CloudOSNativeBrowserWindow(
 CloudOSNativeBrowserWindow::~CloudOSNativeBrowserWindow()
 {
     if (alive_) alive_->store(false);
-
-    if (webview_ != nullptr)
-    {
-        if (navigation_completed_registered_)
-            (void)webview_->remove_NavigationCompleted(navigation_completed_token_);
-        if (history_changed_registered_)
-            (void)webview_->remove_HistoryChanged(history_changed_token_);
-    }
-    if (webview_v4_ != nullptr && download_starting_registered_)
-        (void)webview_v4_->remove_DownloadStarting(download_starting_token_);
-
-    if (controller_ != nullptr) (void)controller_->Close();
-    webview_v4_.Reset();
-    webview_.Reset();
-    controller_.Reset();
-    environment_.Reset();
+    ResetWebView();
 
     if (ui_font_ != nullptr)
     {
@@ -116,8 +104,11 @@ void CloudOSNativeBrowserWindow::Open(
     if (browser == nullptr || !browser->Create())
     {
         delete browser;
-        MessageBoxW(nullptr, L"Nao foi possivel abrir o Navegador do CloudOS.",
-            L"CloudOS", MB_OK | MB_ICONERROR);
+        MessageBoxW(
+            nullptr,
+            L"Nao foi possivel abrir o Navegador do CloudOS.",
+            L"CloudOS",
+            MB_OK | MB_ICONERROR);
     }
 }
 
@@ -139,30 +130,39 @@ bool CloudOSNativeBrowserWindow::Create()
         kBrowserClass,
         L"Navegador - CloudOS",
         WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
-        CW_USEDEFAULT, CW_USEDEFAULT, 1180, 760,
-        nullptr, nullptr, instance_, this);
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        1180,
+        760,
+        nullptr,
+        nullptr,
+        instance_,
+        this);
     if (window_ == nullptr) return false;
 
     toolbar_brush_ = CreateSolidBrush(WebSkin::BgPrimary);
-    ui_font_ = CreateFontW(
-        -15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Text");
 
-    back_button_ = CreateWindowW(L"BUTTON", L"<", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+    back_button_ = CreateWindowW(
+        L"BUTTON", L"<", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(kBackId), instance_, nullptr);
-    forward_button_ = CreateWindowW(L"BUTTON", L">", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+    forward_button_ = CreateWindowW(
+        L"BUTTON", L">", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(kForwardId), instance_, nullptr);
-    reload_button_ = CreateWindowW(L"BUTTON", L"Recarregar", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+    reload_button_ = CreateWindowW(
+        L"BUTTON", L"Recarregar", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(kReloadId), instance_, nullptr);
-    home_button_ = CreateWindowW(L"BUTTON", L"Inicio", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+    home_button_ = CreateWindowW(
+        L"BUTTON", L"Inicio", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(kHomeId), instance_, nullptr);
-    address_edit_ = CreateWindowExW(0, L"EDIT", initial_url_.c_str(),
+    address_edit_ = CreateWindowExW(
+        0, L"EDIT", initial_url_.c_str(),
         WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(kAddressId), instance_, nullptr);
-    go_button_ = CreateWindowW(L"BUTTON", L"Ir", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+    go_button_ = CreateWindowW(
+        L"BUTTON", L"Ir", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(kGoId), instance_, nullptr);
-    status_label_ = CreateWindowW(L"STATIC", L"Inicializando WebView2...",
+    status_label_ = CreateWindowW(
+        L"STATIC", L"Inicializando WebView2...",
         WS_CHILD | WS_VISIBLE | SS_LEFT,
         0, 0, 0, 0, window_, nullptr, instance_, nullptr);
 
@@ -175,13 +175,7 @@ bool CloudOSNativeBrowserWindow::Create()
         return false;
     }
 
-    if (ui_font_ != nullptr)
-    {
-        for (HWND child : {back_button_, forward_button_, reload_button_, home_button_,
-                 address_edit_, go_button_, status_label_})
-            SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(ui_font_), TRUE);
-    }
-
+    RefreshDpiResources();
     ApplyWebWindowMaterial(window_);
     WebSkin::PrepareEdit(address_edit_);
     for (HWND button : {back_button_, forward_button_, reload_button_, home_button_, go_button_})
@@ -196,9 +190,14 @@ bool CloudOSNativeBrowserWindow::Create()
 
 void CloudOSNativeBrowserWindow::InitializeWebView()
 {
+    if (webview_initializing_ || webview_ != nullptr || window_ == nullptr || !IsWindow(window_))
+        return;
+
+    webview_initializing_ = true;
     const std::wstring user_data = UserDataDirectory();
     if (user_data.empty())
     {
+        webview_initializing_ = false;
         ShowWebViewFailure(L"Nao foi possivel preparar o perfil do navegador.");
         return;
     }
@@ -208,11 +207,13 @@ void CloudOSNativeBrowserWindow::InitializeWebView()
     if (FAILED(version_result) || version == nullptr)
     {
         if (version != nullptr) CoTaskMemFree(version);
+        webview_initializing_ = false;
         ShowWebViewFailure(L"WebView2 Runtime nao esta instalado ou nao foi encontrado.");
         return;
     }
     CoTaskMemFree(version);
 
+    SetWindowTextW(status_label_, L"Inicializando WebView2...");
     const auto lifetime = alive_;
     const HRESULT result = CreateCoreWebView2EnvironmentWithOptions(
         nullptr,
@@ -224,9 +225,11 @@ void CloudOSNativeBrowserWindow::InitializeWebView()
                 if (!lifetime->load()) return S_OK;
                 if (FAILED(hr) || environment == nullptr)
                 {
+                    webview_initializing_ = false;
                     ShowWebViewFailure(L"Falha ao criar o ambiente WebView2.");
                     return S_OK;
                 }
+
                 environment_ = environment;
                 const HRESULT controller_hr = environment->CreateCoreWebView2Controller(
                     window_,
@@ -234,6 +237,7 @@ void CloudOSNativeBrowserWindow::InitializeWebView()
                         [this, lifetime](HRESULT create_hr, ICoreWebView2Controller* controller) -> HRESULT
                         {
                             if (!lifetime->load()) return S_OK;
+                            webview_initializing_ = false;
                             if (FAILED(create_hr) || controller == nullptr)
                             {
                                 ShowWebViewFailure(L"Falha ao criar a superficie WebView2.");
@@ -243,11 +247,18 @@ void CloudOSNativeBrowserWindow::InitializeWebView()
                             return S_OK;
                         }).Get());
                 if (FAILED(controller_hr))
+                {
+                    webview_initializing_ = false;
                     ShowWebViewFailure(L"WebView2 recusou a criacao do controlador.");
+                }
                 return S_OK;
             }).Get());
 
-    if (FAILED(result)) ShowWebViewFailure(L"Nao foi possivel inicializar o WebView2.");
+    if (FAILED(result))
+    {
+        webview_initializing_ = false;
+        ShowWebViewFailure(L"Nao foi possivel inicializar o WebView2.");
+    }
 }
 
 void CloudOSNativeBrowserWindow::ConfigureController(ICoreWebView2Controller* controller)
@@ -258,8 +269,7 @@ void CloudOSNativeBrowserWindow::ConfigureController(ICoreWebView2Controller* co
         ShowWebViewFailure(L"WebView2 nao retornou o motor de navegacao.");
         return;
     }
-    // DownloadStarting is an ICoreWebView2_4 capability. Query it explicitly
-    // instead of assuming the base interface exposes versioned members.
+
     (void)webview_.As(&webview_v4_);
 
     Microsoft::WRL::ComPtr<ICoreWebView2Settings> settings;
@@ -298,6 +308,33 @@ void CloudOSNativeBrowserWindow::ConfigureController(ICoreWebView2Controller* co
                 }).Get(),
             &history_changed_token_)))
         history_changed_registered_ = true;
+
+    if (SUCCEEDED(webview_->add_ProcessFailed(
+            Microsoft::WRL::Callback<ICoreWebView2ProcessFailedEventHandler>(
+                [this, lifetime](ICoreWebView2*, ICoreWebView2ProcessFailedEventArgs* args) -> HRESULT
+                {
+                    return lifetime->load() ? HandleProcessFailed(args) : S_OK;
+                }).Get(),
+            &process_failed_token_)))
+        process_failed_registered_ = true;
+
+    if (SUCCEEDED(webview_->add_PermissionRequested(
+            Microsoft::WRL::Callback<ICoreWebView2PermissionRequestedEventHandler>(
+                [this, lifetime](ICoreWebView2*, ICoreWebView2PermissionRequestedEventArgs* args) -> HRESULT
+                {
+                    return lifetime->load() ? HandlePermissionRequested(args) : S_OK;
+                }).Get(),
+            &permission_requested_token_)))
+        permission_requested_registered_ = true;
+
+    if (SUCCEEDED(webview_->add_NewWindowRequested(
+            Microsoft::WRL::Callback<ICoreWebView2NewWindowRequestedEventHandler>(
+                [this, lifetime](ICoreWebView2*, ICoreWebView2NewWindowRequestedEventArgs* args) -> HRESULT
+                {
+                    return lifetime->load() ? HandleNewWindowRequested(args) : S_OK;
+                }).Get(),
+            &new_window_requested_token_)))
+        new_window_requested_registered_ = true;
 
     if (webview_v4_ != nullptr && SUCCEEDED(webview_v4_->add_DownloadStarting(
             Microsoft::WRL::Callback<ICoreWebView2DownloadStartingEventHandler>(
@@ -353,9 +390,229 @@ void CloudOSNativeBrowserWindow::ConfigureController(ICoreWebView2Controller* co
             &download_starting_token_)))
         download_starting_registered_ = true;
 
+    recovery_pending_ = false;
     Layout();
     (void)controller_->put_IsVisible(TRUE);
     Navigate(initial_url_);
+}
+
+void CloudOSNativeBrowserWindow::ResetWebView() noexcept
+{
+    if (webview_ != nullptr)
+    {
+        if (navigation_completed_registered_)
+            (void)webview_->remove_NavigationCompleted(navigation_completed_token_);
+        if (history_changed_registered_)
+            (void)webview_->remove_HistoryChanged(history_changed_token_);
+        if (process_failed_registered_)
+            (void)webview_->remove_ProcessFailed(process_failed_token_);
+        if (permission_requested_registered_)
+            (void)webview_->remove_PermissionRequested(permission_requested_token_);
+        if (new_window_requested_registered_)
+            (void)webview_->remove_NewWindowRequested(new_window_requested_token_);
+    }
+    if (webview_v4_ != nullptr && download_starting_registered_)
+        (void)webview_v4_->remove_DownloadStarting(download_starting_token_);
+
+    navigation_completed_registered_ = false;
+    history_changed_registered_ = false;
+    process_failed_registered_ = false;
+    permission_requested_registered_ = false;
+    new_window_requested_registered_ = false;
+    download_starting_registered_ = false;
+
+    if (controller_ != nullptr) (void)controller_->Close();
+    webview_v4_.Reset();
+    webview_.Reset();
+    controller_.Reset();
+    environment_.Reset();
+    webview_initializing_ = false;
+}
+
+void CloudOSNativeBrowserWindow::ScheduleWebViewRecovery(COREWEBVIEW2_PROCESS_FAILED_KIND kind)
+{
+    if (window_ == nullptr || !IsWindow(window_) || recovery_pending_) return;
+
+    const ULONGLONG now = GetTickCount64();
+    if (recovery_window_start_ == 0 || now - recovery_window_start_ > kRecoveryWindowMs)
+    {
+        recovery_window_start_ = now;
+        recovery_attempts_ = 0;
+    }
+    ++recovery_attempts_;
+    if (recovery_attempts_ > kMaximumRecoveryAttempts)
+    {
+        SetWindowTextW(status_label_, L"WebView2 entrou em falha repetida; recuperacao automatica pausada");
+        return;
+    }
+
+    recovery_pending_ = true;
+    (void)PostMessageW(
+        window_,
+        kWebViewRecoverMessage,
+        static_cast<WPARAM>(kind),
+        0);
+}
+
+void CloudOSNativeBrowserWindow::RecoverWebView()
+{
+    recovery_pending_ = false;
+    if (window_ == nullptr || !IsWindow(window_)) return;
+
+    const std::wstring source = CurrentUrl();
+    if (!source.empty()) initial_url_ = source;
+    SetWindowTextW(status_label_, L"Recuperando mecanismo WebView2...");
+    ResetWebView();
+    InitializeWebView();
+}
+
+HRESULT CloudOSNativeBrowserWindow::HandleProcessFailed(ICoreWebView2ProcessFailedEventArgs* args)
+{
+    if (args == nullptr) return S_OK;
+
+    COREWEBVIEW2_PROCESS_FAILED_KIND kind = COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED;
+    if (FAILED(args->get_ProcessFailedKind(&kind))) return S_OK;
+
+    switch (kind)
+    {
+    case COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED:
+        SetWindowTextW(status_label_, L"Processo principal WebView2 encerrou; recuperando...");
+        ScheduleWebViewRecovery(kind);
+        break;
+    case COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE:
+        SetWindowTextW(status_label_, L"Renderizador WebView2 nao respondeu; recriando superficie...");
+        ScheduleWebViewRecovery(kind);
+        break;
+    case COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED:
+    case COREWEBVIEW2_PROCESS_FAILED_KIND_FRAME_RENDER_PROCESS_EXITED:
+        SetWindowTextW(status_label_, L"Renderizador WebView2 reiniciou; recarregando pagina...");
+        if (webview_ != nullptr) (void)webview_->Reload();
+        break;
+    default:
+        SetWindowTextW(status_label_, L"Um processo auxiliar WebView2 falhou; o navegador continua monitorado");
+        break;
+    }
+    return S_OK;
+}
+
+const wchar_t* CloudOSNativeBrowserWindow::PermissionKindLabel(
+    COREWEBVIEW2_PERMISSION_KIND kind) noexcept
+{
+    switch (kind)
+    {
+    case COREWEBVIEW2_PERMISSION_KIND_MICROPHONE: return L"microfone";
+    case COREWEBVIEW2_PERMISSION_KIND_CAMERA: return L"camera";
+    case COREWEBVIEW2_PERMISSION_KIND_GEOLOCATION: return L"localizacao";
+    case COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS: return L"notificacoes";
+    case COREWEBVIEW2_PERMISSION_KIND_OTHER_SENSORS: return L"sensores";
+    case COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ: return L"leitura da area de transferencia";
+    default: return L"recurso protegido";
+    }
+}
+
+HRESULT CloudOSNativeBrowserWindow::HandlePermissionRequested(
+    ICoreWebView2PermissionRequestedEventArgs* args)
+{
+    if (args == nullptr) return S_OK;
+
+    COREWEBVIEW2_PERMISSION_KIND kind = COREWEBVIEW2_PERMISSION_KIND_UNKNOWN_PERMISSION;
+    BOOL user_initiated = FALSE;
+    (void)args->get_PermissionKind(&kind);
+    (void)args->get_IsUserInitiated(&user_initiated);
+
+    // Background requests never receive sensitive capability access. A user
+    // gesture is required before CloudOS even presents an allow/deny decision.
+    if (!user_initiated || kind == COREWEBVIEW2_PERMISSION_KIND_UNKNOWN_PERMISSION)
+    {
+        (void)args->put_State(COREWEBVIEW2_PERMISSION_STATE_DENY);
+        SetWindowTextW(status_label_, L"Permissao web bloqueada por politica do CloudOS");
+        return S_OK;
+    }
+
+    LPWSTR uri_raw = nullptr;
+    std::wstring uri;
+    if (SUCCEEDED(args->get_Uri(&uri_raw)) && uri_raw != nullptr)
+    {
+        uri = uri_raw;
+        CoTaskMemFree(uri_raw);
+    }
+
+    std::wstring prompt = L"O site solicita acesso a ";
+    prompt += PermissionKindLabel(kind);
+    prompt += L".\n\n";
+    if (!uri.empty())
+    {
+        prompt += uri;
+        prompt += L"\n\n";
+    }
+    prompt += L"Permitir somente para esta solicitacao?";
+
+    const int decision = MessageBoxW(
+        window_,
+        prompt.c_str(),
+        L"Permissao do Navegador - CloudOS",
+        MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
+    (void)args->put_State(
+        decision == IDYES
+            ? COREWEBVIEW2_PERMISSION_STATE_ALLOW
+            : COREWEBVIEW2_PERMISSION_STATE_DENY);
+    SetWindowTextW(
+        status_label_,
+        decision == IDYES ? L"Permissao concedida para esta solicitacao" : L"Permissao negada");
+    return S_OK;
+}
+
+HRESULT CloudOSNativeBrowserWindow::HandleNewWindowRequested(
+    ICoreWebView2NewWindowRequestedEventArgs* args)
+{
+    if (args == nullptr) return S_OK;
+
+    LPWSTR uri_raw = nullptr;
+    std::wstring uri;
+    if (SUCCEEDED(args->get_Uri(&uri_raw)) && uri_raw != nullptr)
+    {
+        uri = uri_raw;
+        CoTaskMemFree(uri_raw);
+    }
+
+    // Keep ordinary web popups inside the CloudOS browser authority. Non-web
+    // schemes are not forwarded blindly to the Windows shell.
+    if (IsHttpUrl(uri))
+    {
+        (void)args->put_Handled(TRUE);
+        CloudOSNativeBrowserWindow::Open(instance_, uri);
+        SetWindowTextW(status_label_, L"Nova pagina aberta em uma janela CloudOS");
+    }
+    else
+    {
+        (void)args->put_Handled(TRUE);
+        SetWindowTextW(status_label_, L"Popup com protocolo externo bloqueado");
+    }
+    return S_OK;
+}
+
+void CloudOSNativeBrowserWindow::RefreshDpiResources()
+{
+    if (ui_font_ != nullptr)
+    {
+        DeleteObject(ui_font_);
+        ui_font_ = nullptr;
+    }
+
+    const UINT dpi = window_ != nullptr ? GetDpiForWindow(window_) : 96u;
+    ui_font_ = CreateFontW(
+        -MulDiv(15, static_cast<int>(dpi), 96),
+        0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+        L"Segoe UI Variable Text");
+    if (ui_font_ == nullptr) return;
+
+    for (HWND child : {back_button_, forward_button_, reload_button_, home_button_,
+             address_edit_, go_button_, status_label_})
+    {
+        if (child != nullptr) SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(ui_font_), TRUE);
+    }
 }
 
 void CloudOSNativeBrowserWindow::Layout()
@@ -414,10 +671,21 @@ void CloudOSNativeBrowserWindow::Navigate(const std::wstring& raw_url)
         return;
     }
     const std::wstring url = NormalizeUrl(raw_url);
+    initial_url_ = url;
     SetWindowTextW(address_edit_, url.c_str());
     SetWindowTextW(status_label_, L"Carregando...");
     if (FAILED(webview_->Navigate(url.c_str())))
         SetWindowTextW(status_label_, L"Endereco invalido ou navegacao recusada");
+}
+
+std::wstring CloudOSNativeBrowserWindow::CurrentUrl() const
+{
+    if (webview_ == nullptr) return initial_url_;
+    LPWSTR source = nullptr;
+    if (FAILED(webview_->get_Source(&source)) || source == nullptr) return initial_url_;
+    std::wstring result(source);
+    CoTaskMemFree(source);
+    return result;
 }
 
 void CloudOSNativeBrowserWindow::UpdateNavigationState()
@@ -433,6 +701,7 @@ void CloudOSNativeBrowserWindow::UpdateNavigationState()
     LPWSTR source = nullptr;
     if (SUCCEEDED(webview_->get_Source(&source)) && source != nullptr)
     {
+        initial_url_ = source;
         SetWindowTextW(address_edit_, source);
         CoTaskMemFree(source);
     }
@@ -448,8 +717,11 @@ void CloudOSNativeBrowserWindow::UpdateNavigationState()
 
 void CloudOSNativeBrowserWindow::ShowWebViewFailure(const std::wstring& detail)
 {
-    SetWindowTextW(status_label_, detail.c_str());
-    MessageBoxW(window_, detail.c_str(), L"Navegador - CloudOS", MB_OK | MB_ICONERROR);
+    if (status_label_ != nullptr) SetWindowTextW(status_label_, detail.c_str());
+    if (window_ != nullptr && IsWindow(window_))
+    {
+        MessageBoxW(window_, detail.c_str(), L"Navegador - CloudOS", MB_OK | MB_ICONERROR);
+    }
 }
 
 std::wstring CloudOSNativeBrowserWindow::NormalizeUrl(std::wstring value)
@@ -469,7 +741,11 @@ std::wstring CloudOSNativeBrowserWindow::NormalizeUrl(std::wstring value)
 std::wstring CloudOSNativeBrowserWindow::UserDataDirectory()
 {
     PWSTR local_app_data = nullptr;
-    if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_CREATE, nullptr, &local_app_data)) ||
+    if (FAILED(SHGetKnownFolderPath(
+            FOLDERID_LocalAppData,
+            KF_FLAG_CREATE,
+            nullptr,
+            &local_app_data)) ||
         local_app_data == nullptr)
         return {};
 
@@ -489,7 +765,32 @@ LRESULT CloudOSNativeBrowserWindow::HandleMessage(
     switch (message)
     {
     case WM_SIZE:
+        if (controller_ != nullptr)
+            (void)controller_->put_IsVisible(w_param == SIZE_MINIMIZED ? FALSE : TRUE);
         Layout();
+        return 0;
+    case WM_DPICHANGED:
+    {
+        const auto* suggested = reinterpret_cast<const RECT*>(l_param);
+        if (suggested != nullptr)
+        {
+            (void)SetWindowPos(
+                window_, nullptr,
+                suggested->left, suggested->top,
+                suggested->right - suggested->left,
+                suggested->bottom - suggested->top,
+                SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        RefreshDpiResources();
+        Layout();
+        return 0;
+    }
+    case WM_SETFOCUS:
+        if (controller_ != nullptr)
+            (void)controller_->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+        break;
+    case kWebViewRecoverMessage:
+        RecoverWebView();
         return 0;
     case WM_COMMAND:
         if (HIWORD(w_param) == BN_CLICKED)
@@ -498,7 +799,10 @@ LRESULT CloudOSNativeBrowserWindow::HandleMessage(
             {
             case kBackId: if (webview_ != nullptr) (void)webview_->GoBack(); return 0;
             case kForwardId: if (webview_ != nullptr) (void)webview_->GoForward(); return 0;
-            case kReloadId: if (webview_ != nullptr) (void)webview_->Reload(); return 0;
+            case kReloadId:
+                if (webview_ != nullptr) (void)webview_->Reload();
+                else InitializeWebView();
+                return 0;
             case kHomeId: Navigate(kHomeUrl); return 0;
             case kGoId: NavigateFromAddress(); return 0;
             default: break;
@@ -559,7 +863,8 @@ LRESULT CALLBACK CloudOSNativeBrowserWindow::WindowProcedure(
     }
     else
     {
-        self = reinterpret_cast<CloudOSNativeBrowserWindow*>(GetWindowLongPtrW(window, GWLP_USERDATA));
+        self = reinterpret_cast<CloudOSNativeBrowserWindow*>(
+            GetWindowLongPtrW(window, GWLP_USERDATA));
     }
     return self != nullptr
         ? self->HandleMessage(message, w_param, l_param)

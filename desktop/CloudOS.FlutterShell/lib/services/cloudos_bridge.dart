@@ -132,6 +132,51 @@ class CloudOSBridge {
     }
   }
 
+  static List<CloudWslDistributionSnapshot> _parseWslDistros(
+    Object? rawTyped,
+    List<String> legacyDistros,
+    String defaultDistro,
+  ) {
+    final parsed = <CloudWslDistributionSnapshot>[];
+    final seen = <String>{};
+    if (rawTyped is List) {
+      for (final entry in rawTyped) {
+        if (entry is! Map) continue;
+        final name = (entry['name'] as String? ?? '').trim();
+        if (name.isEmpty || !seen.add(name.toLowerCase())) continue;
+        final rawVersion = (entry['version'] as num?)?.toInt();
+        final version = rawVersion == 1 || rawVersion == 2 ? rawVersion : null;
+        final isDefault = entry['isDefault'] as bool? ??
+            name.toLowerCase() == defaultDistro.trim().toLowerCase();
+        parsed.add(
+          CloudWslDistributionSnapshot(
+            name: name,
+            version: version,
+            isDefault: isDefault,
+            basePathPresent: entry['basePathPresent'] as bool?,
+            securityCandidate: entry['securityCandidate'] as bool?,
+          ),
+        );
+      }
+    }
+
+    if (parsed.isNotEmpty) {
+      return List<CloudWslDistributionSnapshot>.unmodifiable(parsed);
+    }
+
+    // V21 compatibility: names remain usable inventory, while generation,
+    // storage and security evidence stay unknown instead of being fabricated.
+    return legacyDistros
+        .where((name) => name.trim().isNotEmpty)
+        .map(
+          (name) => CloudWslDistributionSnapshot(
+            name: name.trim(),
+            isDefault:
+                name.trim().toLowerCase() == defaultDistro.trim().toLowerCase(),
+          ),
+        )
+        .toList(growable: false);
+  }
 
   Future<List<CloudApp>?> tryLoadApps() async {
     try {
@@ -200,6 +245,22 @@ class CloudOSBridge {
       final raw =
           await _channel.invokeMapMethod<String, Object?>('getSystemSnapshot');
       if (raw == null) return null;
+
+      final legacyDistros = (raw['distros'] as List<Object?>?)
+              ?.whereType<String>()
+              .where((name) => name.trim().isNotEmpty)
+              .map((name) => name.trim())
+              .toList(growable: false) ??
+          degradedSnapshot.distros;
+      final defaultDistro = raw['defaultDistro'] as String? ?? '';
+      final wslDistros = _parseWslDistros(
+        raw['wslDistros'],
+        legacyDistros,
+        defaultDistro,
+      );
+      final legacyWslAvailable =
+          raw['wslAvailable'] as bool? ?? degradedSnapshot.wslAvailable;
+
       return CloudSystemSnapshot(
         deviceName:
             raw['deviceName'] as String? ?? degradedSnapshot.deviceName,
@@ -219,13 +280,20 @@ class CloudOSBridge {
             degradedSnapshot.batteryAvailable,
         batteryPercent: (raw['batteryPercent'] as num?)?.toInt() ??
             degradedSnapshot.batteryPercent,
-        wslAvailable:
-            raw['wslAvailable'] as bool? ?? degradedSnapshot.wslAvailable,
-        distros: (raw['distros'] as List<Object?>?)
-                ?.whereType<String>()
-                .toList() ??
-            degradedSnapshot.distros,
-        defaultDistro: raw['defaultDistro'] as String? ?? '',
+        wslAvailable: legacyWslAvailable,
+        wslEngineAvailable:
+            raw['wslEngineAvailable'] as bool? ?? legacyWslAvailable,
+        distros: legacyDistros,
+        defaultDistro: defaultDistro,
+        wslDistros: wslDistros,
+        wslPassiveReady: raw['wslPassiveReady'] as bool?,
+        preferredSecurityDistro:
+            raw['preferredSecurityDistro'] as String? ?? '',
+        wslRegisteredCount: (raw['wslRegisteredCount'] as num?)?.toInt(),
+        wslLaunchCandidateCount:
+            (raw['wslLaunchCandidateCount'] as num?)?.toInt(),
+        wsl1Count: (raw['wsl1Count'] as num?)?.toInt(),
+        wsl2Count: (raw['wsl2Count'] as num?)?.toInt(),
         currentWorkspace: (raw['currentWorkspace'] as num?)?.toInt() ??
             degradedSnapshot.currentWorkspace,
       );
@@ -238,6 +306,32 @@ class CloudOSBridge {
 
   Future<CloudSystemSnapshot> loadSystemSnapshot() async {
     return await tryLoadSystemSnapshot() ?? degradedSnapshot;
+  }
+
+  Future<CloudWslHealthProbeResult?> probeWslHealth({
+    String distro = '',
+    int timeoutMs = 8000,
+  }) async {
+    final normalizedDistro = distro.trim();
+    if (normalizedDistro.length > 128 || timeoutMs < 1000 || timeoutMs > 15000) {
+      return null;
+    }
+
+    try {
+      final raw = await _channel.invokeMapMethod<Object?, Object?>(
+        'probeWslHealth',
+        <String, Object?>{
+          'distro': normalizedDistro,
+          'timeoutMs': timeoutMs,
+        },
+      );
+      if (raw == null) return null;
+      return CloudWslHealthProbeResult.fromNativeMap(raw);
+    } on MissingPluginException {
+      return null;
+    } on PlatformException {
+      return null;
+    }
   }
 
   Future<CloudNotificationState?> tryLoadNotificationState() async {
@@ -439,17 +533,22 @@ class CloudOSBridge {
     batteryAvailable: false,
     batteryPercent: 0,
     wslAvailable: false,
+    wslEngineAvailable: false,
     distros: <String>[],
+    wslDistros: <CloudWslDistributionSnapshot>[],
     currentWorkspace: 1,
   );
 
   static const previewBridgeInfo = <String, Object?>{
-    'schema': 21,
-    'version': 'v21-preview',
+    'schema': 22,
+    'version': 'v22-preview',
     'bridge_type': 'PreviewFallback',
     'brokerConnected': false,
     'brokerState': 'preview',
     'channel': 'cloudos/native/v19',
+    'typedWslInventory': false,
+    'passiveWslHealthEvidence': false,
+    'activeWslHealthProbe': false,
     'arbitrary_command_api': false,
     'shell_surface_lifecycle': false,
     'shell_workspace_control': false,
@@ -458,12 +557,15 @@ class CloudOSBridge {
   };
 
   static const degradedBridgeInfo = <String, Object?>{
-    'schema': 21,
-    'version': 'v21-degraded',
+    'schema': 22,
+    'version': 'v22-degraded',
     'bridge_type': 'NativeBridgeUnavailable',
     'brokerConnected': false,
     'brokerState': 'degraded',
     'channel': 'cloudos/native/v19',
+    'typedWslInventory': false,
+    'passiveWslHealthEvidence': false,
+    'activeWslHealthProbe': false,
     'arbitrary_command_api': false,
     'shell_surface_lifecycle': false,
     'shell_workspace_control': false,

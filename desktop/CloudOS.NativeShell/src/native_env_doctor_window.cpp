@@ -3,17 +3,22 @@
 #include "cloudos_native_runtime.h"
 #include "native_settings_window.h"
 
+#include <WebView2.h>
 #include <commctrl.h>
 #include <dwmapi.h>
+#include <ShlObj.h>
+#include <TlHelp32.h>
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <new>
 #include <string>
 #include <vector>
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "shell32.lib")
 
 namespace
 {
@@ -21,10 +26,17 @@ constexpr wchar_t kClassName[] = L"CloudOS.Native.EnvDoctor.v1";
 constexpr int kRunButtonId = 4101;
 constexpr int kListId = 4102;
 
+enum class CheckSeverity
+{
+    Ok,
+    Warning,
+    Info,
+};
+
 struct CheckItem final
 {
     std::wstring name;
-    bool ok{};
+    CheckSeverity severity{CheckSeverity::Info};
     std::wstring detail;
 };
 
@@ -32,7 +44,19 @@ struct DoctorState final
 {
     HWND button{};
     HWND list{};
+    HFONT font{};
 };
+
+const wchar_t* SeverityLabel(CheckSeverity severity) noexcept
+{
+    switch (severity)
+    {
+    case CheckSeverity::Ok: return L"OK";
+    case CheckSeverity::Warning: return L"ATENCAO";
+    case CheckSeverity::Info:
+    default: return L"INFO";
+    }
+}
 
 bool ExistsOnPath(const wchar_t* executable)
 {
@@ -47,12 +71,67 @@ bool ExistsOnPath(const wchar_t* executable)
     return length > 0 && length < path.size();
 }
 
+std::wstring LocalAppDataPath()
+{
+    PWSTR raw = nullptr;
+    if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_DEFAULT, nullptr, &raw)) ||
+        raw == nullptr)
+    {
+        if (raw != nullptr) CoTaskMemFree(raw);
+        return {};
+    }
+    std::wstring value(raw);
+    CoTaskMemFree(raw);
+    return value;
+}
+
+std::vector<std::wstring> CurrentSessionCloudOSProcesses()
+{
+    std::vector<std::wstring> result;
+    const DWORD current_session = []
+    {
+        DWORD session = 0;
+        (void)ProcessIdToSessionId(GetCurrentProcessId(), &session);
+        return session;
+    }();
+
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return result;
+
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    if (Process32FirstW(snapshot, &entry))
+    {
+        do
+        {
+            DWORD session = 0;
+            if (!ProcessIdToSessionId(entry.th32ProcessID, &session) || session != current_session)
+                continue;
+
+            const wchar_t* name = entry.szExeFile;
+            if (_wcsicmp(name, L"CloudOS.exe") == 0 ||
+                _wcsicmp(name, L"CloudOS.Supervisor.exe") == 0 ||
+                _wcsicmp(name, L"CloudOS.SystemBroker.exe") == 0 ||
+                _wcsicmp(name, L"CloudOS.BrokerProbe.exe") == 0 ||
+                _wcsicmp(name, L"cloudos_flutter_shell.exe") == 0)
+            {
+                result.emplace_back(name);
+            }
+        } while (Process32NextW(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+
+    std::sort(result.begin(), result.end());
+    result.erase(std::unique(result.begin(), result.end()), result.end());
+    return result;
+}
+
 CheckItem CheckRuntimeAbi()
 {
     const std::uint32_t abi = cloudos_native_runtime_abi();
     return {
         L"Runtime nativo",
-        abi == CLOUDOS_NATIVE_RUNTIME_ABI,
+        abi == CLOUDOS_NATIVE_RUNTIME_ABI ? CheckSeverity::Ok : CheckSeverity::Warning,
         L"ABI carregada: " + std::to_wstring(abi) + L" / esperada: " +
             std::to_wstring(CLOUDOS_NATIVE_RUNTIME_ABI),
     };
@@ -66,19 +145,48 @@ CheckItem CheckConPty()
         GetProcAddress(kernel, "ResizePseudoConsole") != nullptr;
     return {
         L"ConPTY",
-        available,
+        available ? CheckSeverity::Ok : CheckSeverity::Warning,
         available ? L"Pseudo console nativa disponivel" : L"CreatePseudoConsole nao foi encontrado",
     };
+}
+
+CheckItem CheckWebView2()
+{
+    LPWSTR version = nullptr;
+    const HRESULT result = GetAvailableCoreWebView2BrowserVersionString(nullptr, &version);
+    if (FAILED(result) || version == nullptr)
+    {
+        if (version != nullptr) CoTaskMemFree(version);
+        return {
+            L"WebView2 Runtime",
+            CheckSeverity::Warning,
+            L"Evergreen WebView2 Runtime nao foi detectado",
+        };
+    }
+
+    std::wstring detail = L"Runtime detectado: ";
+    detail += version;
+    CoTaskMemFree(version);
+    return {L"WebView2 Runtime", CheckSeverity::Ok, std::move(detail)};
 }
 
 CheckItem CheckWsl()
 {
     if (!ExistsOnPath(L"wsl.exe"))
     {
-        return {L"WSL", false, L"wsl.exe nao encontrado no Windows"};
+        return {L"WSL", CheckSeverity::Warning, L"wsl.exe nao encontrado no Windows"};
     }
 
     const CloudOSNativeSettings settings = CloudOSNativeSettingsWindow::Load();
+    if (settings.default_wsl_distribution.empty())
+    {
+        return {
+            L"WSL",
+            CheckSeverity::Info,
+            L"Mecanismo WSL existe, mas nenhuma distro padrao foi configurada no CloudOS",
+        };
+    }
+
     BOOL registered = FALSE;
     const BOOL queried = cloudos_native_wsl_is_registered(
         settings.default_wsl_distribution.c_str(),
@@ -87,17 +195,38 @@ CheckItem CheckWsl()
     {
         return {
             L"WSL",
-            false,
-            L"API nativa do WSL indisponivel para consultar " + settings.default_wsl_distribution,
+            CheckSeverity::Warning,
+            L"API nativa do WSL nao conseguiu consultar " + settings.default_wsl_distribution,
         };
     }
 
+    if (!registered)
+    {
+        return {
+            L"WSL",
+            CheckSeverity::Warning,
+            settings.default_wsl_distribution + L" esta configurada no CloudOS, mas nao registrada no Windows",
+        };
+    }
+
+    cloudos_native_wsl_configuration configuration{};
+    const bool configuration_available = cloudos_native_wsl_get_configuration(
+        settings.default_wsl_distribution.c_str(),
+        &configuration) != FALSE;
+    std::wstring detail = settings.default_wsl_distribution + L" registrada";
+    if (configuration_available)
+    {
+        detail += L"; configuracao WSL acessivel; UID padrao=" +
+            std::to_wstring(configuration.default_uid);
+    }
+    else
+    {
+        detail += L"; registro existe, mas a configuracao detalhada nao foi lida";
+    }
     return {
         L"WSL",
-        registered != FALSE,
-        registered
-            ? settings.default_wsl_distribution + L" registrada"
-            : settings.default_wsl_distribution + L" nao registrada",
+        configuration_available ? CheckSeverity::Ok : CheckSeverity::Info,
+        std::move(detail),
     };
 }
 
@@ -107,25 +236,8 @@ CheckItem CheckDwm()
     const HRESULT result = DwmIsCompositionEnabled(&enabled);
     return {
         L"DWM",
-        SUCCEEDED(result) && enabled,
+        SUCCEEDED(result) && enabled ? CheckSeverity::Ok : CheckSeverity::Warning,
         SUCCEEDED(result) && enabled ? L"Composicao do Desktop ativa" : L"Composicao DWM indisponivel",
-    };
-}
-
-CheckItem CheckShell()
-{
-    HWND shell = GetShellWindow();
-    DWORD process_id = 0;
-    if (shell != nullptr)
-    {
-        GetWindowThreadProcessId(shell, &process_id);
-    }
-    return {
-        L"Shell do Windows",
-        shell != nullptr && process_id != 0,
-        shell != nullptr
-            ? L"Shell HWND ativo, PID " + std::to_wstring(process_id)
-            : L"Nenhum shell de sistema detectado",
     };
 }
 
@@ -136,36 +248,61 @@ CheckItem CheckGraphics()
     const bool ok = user32 != nullptr && gdi32 != nullptr;
     return {
         L"Subsistema grafico Win32",
-        ok,
+        ok ? CheckSeverity::Ok : CheckSeverity::Warning,
         ok ? L"user32.dll e gdi32.dll carregadas" : L"Componente grafico critico ausente",
+    };
+}
+
+CheckItem CheckDisplaysAndDpi()
+{
+    const int monitors = GetSystemMetrics(SM_CMONITORS);
+    const int width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    const int height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    const UINT dpi = GetDpiForSystem();
+    const DPI_AWARENESS awareness = GetAwarenessFromDpiAwarenessContext(GetThreadDpiAwarenessContext());
+
+    std::wstring detail = std::to_wstring(std::max(0, monitors)) + L" monitor(es), desktop virtual " +
+        std::to_wstring(std::max(0, width)) + L"x" + std::to_wstring(std::max(0, height)) +
+        L", DPI sistema=" + std::to_wstring(dpi) + L", contexto=";
+    switch (awareness)
+    {
+    case DPI_AWARENESS_PER_MONITOR_AWARE: detail += L"per-monitor"; break;
+    case DPI_AWARENESS_SYSTEM_AWARE: detail += L"system-aware"; break;
+    case DPI_AWARENESS_UNAWARE: detail += L"unaware"; break;
+    default: detail += L"desconhecido"; break;
+    }
+
+    return {
+        L"Monitores e DPI",
+        monitors > 0 && awareness == DPI_AWARENESS_PER_MONITOR_AWARE
+            ? CheckSeverity::Ok
+            : CheckSeverity::Warning,
+        std::move(detail),
     };
 }
 
 CheckItem CheckStorage()
 {
-    std::array<wchar_t, MAX_PATH + 1> temp{};
-    const DWORD temp_length = GetTempPathW(static_cast<DWORD>(temp.size()), temp.data());
-    if (temp_length == 0 || temp_length >= temp.size())
+    const std::wstring local = LocalAppDataPath();
+    if (local.empty())
     {
-        return {L"Armazenamento temporario", false, L"GetTempPathW falhou"};
+        return {L"Armazenamento local", CheckSeverity::Warning, L"LocalAppData nao foi resolvido"};
     }
 
-    std::wstring path = temp.data();
-    path += L"cloudos-native-health.tmp";
-    HANDLE file = CreateFileW(
-        path.c_str(),
-        GENERIC_WRITE,
-        0,
-        nullptr,
-        CREATE_ALWAYS,
-        FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
-        nullptr);
-    if (file == INVALID_HANDLE_VALUE)
+    ULARGE_INTEGER available{};
+    ULARGE_INTEGER total{};
+    if (!GetDiskFreeSpaceExW(local.c_str(), &available, &total, nullptr))
     {
-        return {L"Armazenamento temporario", false, L"Diretorio temporario nao e gravavel"};
+        return {L"Armazenamento local", CheckSeverity::Warning, L"GetDiskFreeSpaceExW falhou"};
     }
-    CloseHandle(file);
-    return {L"Armazenamento temporario", true, L"Leitura/escrita local disponivel"};
+
+    const ULONGLONG free_mb = available.QuadPart / (1024ULL * 1024ULL);
+    const ULONGLONG total_mb = total.QuadPart / (1024ULL * 1024ULL);
+    return {
+        L"Armazenamento local",
+        free_mb >= 1024 ? CheckSeverity::Ok : CheckSeverity::Warning,
+        std::to_wstring(free_mb) + L" MB livres de " + std::to_wstring(total_mb) + L" MB em LocalAppData",
+    };
 }
 
 CheckItem CheckMemory()
@@ -175,15 +312,74 @@ CheckItem CheckMemory()
     const bool ok = GlobalMemoryStatusEx(&memory) != FALSE && memory.ullTotalPhys > 0;
     if (!ok)
     {
-        return {L"Memoria", false, L"GlobalMemoryStatusEx falhou"};
+        return {L"Memoria", CheckSeverity::Warning, L"GlobalMemoryStatusEx falhou"};
     }
     const ULONGLONG total_mb = memory.ullTotalPhys / (1024ULL * 1024ULL);
     const ULONGLONG available_mb = memory.ullAvailPhys / (1024ULL * 1024ULL);
     return {
         L"Memoria",
-        true,
+        available_mb >= 512 ? CheckSeverity::Ok : CheckSeverity::Warning,
         std::to_wstring(available_mb) + L" MB livres de " + std::to_wstring(total_mb) + L" MB",
     };
+}
+
+CheckItem CheckSupervisorJournal()
+{
+    const std::wstring local = LocalAppDataPath();
+    if (local.empty())
+        return {L"Recovery V22", CheckSeverity::Info, L"LocalAppData indisponivel para consultar journal"};
+
+    const std::wstring path = local + L"\\CloudOS\\Recovery\\supervisor-state-v22.json";
+    WIN32_FILE_ATTRIBUTE_DATA data{};
+    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data))
+    {
+        return {
+            L"Recovery V22",
+            CheckSeverity::Info,
+            L"Journal V22 ainda nao foi criado nesta sessao/instalacao",
+        };
+    }
+
+    ULARGE_INTEGER stamp{};
+    stamp.HighPart = data.ftLastWriteTime.dwHighDateTime;
+    stamp.LowPart = data.ftLastWriteTime.dwLowDateTime;
+    FILETIME now_file{};
+    GetSystemTimeAsFileTime(&now_file);
+    ULARGE_INTEGER now{};
+    now.HighPart = now_file.dwHighDateTime;
+    now.LowPart = now_file.dwLowDateTime;
+    const ULONGLONG age_seconds = now.QuadPart >= stamp.QuadPart
+        ? (now.QuadPart - stamp.QuadPart) / 10000000ULL
+        : 0ULL;
+
+    return {
+        L"Recovery V22",
+        CheckSeverity::Info,
+        L"Journal local presente; ultima atualizacao ha aproximadamente " +
+            std::to_wstring(age_seconds) + L" s. Presenca nao equivale a health PASS.",
+    };
+}
+
+CheckItem CheckRuntimeProcesses()
+{
+    const auto processes = CurrentSessionCloudOSProcesses();
+    if (processes.empty())
+    {
+        return {
+            L"Processos CloudOS",
+            CheckSeverity::Info,
+            L"Nenhum outro processo CloudOS conhecido foi enumerado nesta sessao",
+        };
+    }
+
+    std::wstring detail = L"Presentes: ";
+    for (std::size_t index = 0; index < processes.size(); ++index)
+    {
+        if (index != 0) detail += L", ";
+        detail += processes[index];
+    }
+    detail += L". Presenca de processo e evidencia operacional, nao prova de saude.";
+    return {L"Processos CloudOS", CheckSeverity::Info, std::move(detail)};
 }
 
 std::vector<CheckItem> RunChecks()
@@ -191,12 +387,15 @@ std::vector<CheckItem> RunChecks()
     return {
         CheckRuntimeAbi(),
         CheckConPty(),
+        CheckWebView2(),
         CheckWsl(),
         CheckDwm(),
-        CheckShell(),
         CheckGraphics(),
+        CheckDisplaysAndDpi(),
         CheckStorage(),
         CheckMemory(),
+        CheckSupervisorJournal(),
+        CheckRuntimeProcesses(),
     };
 }
 
@@ -212,7 +411,7 @@ void Populate(HWND list)
         item.pszText = const_cast<wchar_t*>(checks[index].name.c_str());
         ListView_InsertItem(list, &item);
 
-        std::wstring status = checks[index].ok ? L"OK" : L"ATENCAO";
+        std::wstring status = SeverityLabel(checks[index].severity);
         ListView_SetItemText(list, static_cast<int>(index), 1, status.data());
         ListView_SetItemText(
             list,
@@ -222,21 +421,45 @@ void Populate(HWND list)
     }
 }
 
+void RefreshFont(HWND window, DoctorState& state)
+{
+    if (state.font != nullptr)
+    {
+        DeleteObject(state.font);
+        state.font = nullptr;
+    }
+    const UINT dpi = GetDpiForWindow(window);
+    state.font = CreateFontW(
+        -MulDiv(15, static_cast<int>(dpi == 0 ? 96 : dpi), 96),
+        0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+        L"Segoe UI Variable Text");
+    if (state.font != nullptr)
+    {
+        if (state.button != nullptr) SendMessageW(state.button, WM_SETFONT, reinterpret_cast<WPARAM>(state.font), TRUE);
+        if (state.list != nullptr) SendMessageW(state.list, WM_SETFONT, reinterpret_cast<WPARAM>(state.font), TRUE);
+    }
+}
+
 void Layout(HWND window, DoctorState& state)
 {
     RECT client{};
     GetClientRect(window, &client);
-    const int margin = 12;
-    const int button_height = 34;
+    const UINT dpi = GetDpiForWindow(window);
+    const int margin = MulDiv(12, static_cast<int>(dpi == 0 ? 96 : dpi), 96);
+    const int button_height = MulDiv(34, static_cast<int>(dpi == 0 ? 96 : dpi), 96);
+    const int button_width = MulDiv(190, static_cast<int>(dpi == 0 ? 96 : dpi), 96);
+    const int gap = MulDiv(10, static_cast<int>(dpi == 0 ? 96 : dpi), 96);
     const int client_width = static_cast<int>(client.right - client.left);
     const int client_height = static_cast<int>(client.bottom - client.top);
-    MoveWindow(state.button, margin, margin, 180, button_height, TRUE);
+    MoveWindow(state.button, margin, margin, button_width, button_height, TRUE);
     MoveWindow(
         state.list,
         margin,
-        margin + button_height + 10,
+        margin + button_height + gap,
         std::max(120, client_width - margin * 2),
-        std::max(100, client_height - (margin * 2 + button_height + 10)),
+        std::max(100, client_height - (margin * 2 + button_height + gap)),
         TRUE);
 }
 
@@ -246,10 +469,7 @@ LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM w_param, LPAR
     if (message == WM_NCCREATE)
     {
         state = new (std::nothrow) DoctorState();
-        if (state == nullptr)
-        {
-            return FALSE;
-        }
+        if (state == nullptr) return FALSE;
         SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
     }
 
@@ -278,37 +498,55 @@ LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM w_param, LPAR
             reinterpret_cast<HMENU>(static_cast<INT_PTR>(kListId)),
             create->hInstance,
             nullptr);
-        if (state->button == nullptr || state->list == nullptr)
-        {
-            return -1;
-        }
+        if (state->button == nullptr || state->list == nullptr) return -1;
 
         ListView_SetExtendedListViewStyle(
             state->list,
             LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP);
         LVCOLUMNW column{};
         column.mask = LVCF_TEXT | LVCF_WIDTH;
-        column.cx = 210;
+        column.cx = 220;
         column.pszText = const_cast<wchar_t*>(L"Verificacao");
         ListView_InsertColumn(state->list, 0, &column);
-        column.cx = 100;
+        column.cx = 110;
         column.pszText = const_cast<wchar_t*>(L"Status");
         ListView_InsertColumn(state->list, 1, &column);
-        column.cx = 500;
+        column.cx = 650;
         column.pszText = const_cast<wchar_t*>(L"Detalhe");
         ListView_InsertColumn(state->list, 2, &column);
 
+        RefreshFont(window, *state);
         Layout(window, *state);
         Populate(state->list);
         return 0;
     }
 
     case WM_SIZE:
-        Layout(window, *state);
+        if (state != nullptr) Layout(window, *state);
+        return 0;
+
+    case WM_DPICHANGED:
+        if (state != nullptr)
+        {
+            const auto* suggested = reinterpret_cast<const RECT*>(l_param);
+            if (suggested != nullptr)
+            {
+                SetWindowPos(
+                    window,
+                    nullptr,
+                    suggested->left,
+                    suggested->top,
+                    suggested->right - suggested->left,
+                    suggested->bottom - suggested->top,
+                    SWP_NOZORDER | SWP_NOACTIVATE);
+            }
+            RefreshFont(window, *state);
+            Layout(window, *state);
+        }
         return 0;
 
     case WM_COMMAND:
-        if (LOWORD(w_param) == kRunButtonId && HIWORD(w_param) == BN_CLICKED)
+        if (state != nullptr && LOWORD(w_param) == kRunButtonId && HIWORD(w_param) == BN_CLICKED)
         {
             Populate(state->list);
             return 0;
@@ -321,8 +559,12 @@ LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM w_param, LPAR
 
     case WM_NCDESTROY:
         SetWindowLongPtrW(window, GWLP_USERDATA, 0);
-        delete state;
-        return 0;
+        if (state != nullptr)
+        {
+            if (state->font != nullptr) DeleteObject(state->font);
+            delete state;
+        }
+        return DefWindowProcW(window, message, w_param, l_param);
 
     default:
         break;
@@ -347,10 +589,7 @@ bool EnsureClass(HINSTANCE instance)
 
 HWND CloudOSNativeEnvDoctorWindow::Open(HINSTANCE instance)
 {
-    if (!EnsureClass(instance))
-    {
-        return nullptr;
-    }
+    if (!EnsureClass(instance)) return nullptr;
 
     HWND window = CreateWindowExW(
         WS_EX_APPWINDOW,
@@ -359,8 +598,8 @@ HWND CloudOSNativeEnvDoctorWindow::Open(HINSTANCE instance)
         WS_OVERLAPPEDWINDOW | WS_VISIBLE,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
-        900,
-        560,
+        1050,
+        620,
         nullptr,
         nullptr,
         instance,

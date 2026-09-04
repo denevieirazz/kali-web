@@ -5,6 +5,7 @@ import 'package:xterm/xterm.dart';
 
 import '../../../services/cloudos_bridge.dart';
 import '../../../services/cloudos_logger.dart';
+import '../domain/wsl_runtime_policy.dart';
 
 enum TerminalShellKind { powershell, cmd, wsl }
 
@@ -55,8 +56,11 @@ class _TerminalWindowState extends State<TerminalWindow> {
   final List<TerminalTabItem> _tabs = <TerminalTabItem>[];
   int _activeTabIndex = 0;
   int _tabCounter = 1;
-  List<String> _wslDistros = <String>[];
-  String _defaultDistro = '';
+  WslRuntimePolicy _wslPolicy = WslRuntimePolicy(
+    wslAvailable: false,
+    engineAvailable: false,
+    installedDistros: const <String>[],
+  );
   StreamSubscription<TerminalDataEvent>? _dataSub;
   StreamSubscription<TerminalExitEvent>? _exitSub;
 
@@ -78,8 +82,15 @@ class _TerminalWindowState extends State<TerminalWindow> {
   Future<void> _initialize() async {
     try {
       final snapshot = await widget.bridge.loadSystemSnapshot();
-      _wslDistros = snapshot.distros;
-      _defaultDistro = snapshot.defaultDistro;
+      _wslPolicy = WslRuntimePolicy(
+        wslAvailable: snapshot.wslAvailable,
+        engineAvailable: snapshot.wslEngineAvailable,
+        installedDistros: snapshot.distros,
+        defaultDistro: snapshot.defaultDistro,
+        distroVersions: snapshot.distroVersions,
+        distroStorageEvidence: snapshot.distroStorageEvidence,
+        preferredSecurityDistro: snapshot.preferredSecurityDistro,
+      );
     } catch (error, stackTrace) {
       CloudOSLogger.error(
         'TerminalWindow',
@@ -91,6 +102,7 @@ class _TerminalWindowState extends State<TerminalWindow> {
     if (mounted && widget.initialShell == TerminalShellKind.wsl) {
       _createInitialTab();
     }
+    if (mounted) setState(() {});
   }
 
   void _subscribeNativeStreams() {
@@ -133,12 +145,23 @@ class _TerminalWindowState extends State<TerminalWindow> {
   }
 
   void _createInitialTab() {
-    final distro = widget.initialShell == TerminalShellKind.wsl
-        ? (widget.initialDistro?.isNotEmpty == true
-              ? widget.initialDistro!
-              : _defaultDistro)
-        : '';
-    _addNewTab(widget.initialShell, distro: distro);
+    if (widget.initialShell == TerminalShellKind.wsl) {
+      final plan = _wslPolicy.planSession(
+        requestedDistro: widget.initialDistro,
+      );
+      if (!plan.allowed) {
+        _addUnavailableWslTab(
+          title: (widget.initialDistro?.trim().isNotEmpty ?? false)
+              ? 'WSL: ${widget.initialDistro!.trim()}'
+              : 'WSL indisponível',
+          message: _messageForPlan(plan),
+        );
+        return;
+      }
+      _addNewTab(TerminalShellKind.wsl, distro: plan.distro);
+      return;
+    }
+    _addNewTab(widget.initialShell);
   }
 
   String _titleFor(TerminalShellKind kind, String distro) {
@@ -146,21 +169,96 @@ class _TerminalWindowState extends State<TerminalWindow> {
       case TerminalShellKind.cmd:
         return 'CMD (ConPTY)';
       case TerminalShellKind.wsl:
-        return distro.isEmpty ? 'WSL padrão (ConPTY)' : 'WSL: $distro';
+        return distro.isEmpty ? 'WSL (ConPTY)' : 'WSL: $distro';
       case TerminalShellKind.powershell:
         return 'PowerShell (ConPTY)';
     }
   }
 
-  void _addNewTab(TerminalShellKind kind, {String distro = ''}) {
-    final resolvedDistro = kind == TerminalShellKind.wsl && distro.isEmpty
-        ? _defaultDistro
-        : distro;
+  String _wslUnavailableMessage() {
+    if (!_wslPolicy.engineAvailable) {
+      return 'O mecanismo WSL não foi detectado neste Windows. O CloudOS não iniciará uma sessão Linux falsa.';
+    }
+    if (!_wslPolicy.hasInstalledDistros) {
+      return 'O mecanismo WSL foi detectado, mas nenhuma distribuição Linux registrada foi encontrada.';
+    }
+    if (!_wslPolicy.canStartWslSession) {
+      return 'Há distribuição registrada, mas o Broker comprovou que nenhum armazenamento registrado está disponível para tentativa de inicialização.';
+    }
+    return 'O runtime Linux ainda não possui evidência suficiente para esta sessão.';
+  }
+
+  String _messageForPlan(WslSessionPlan plan) {
+    switch (plan.reason) {
+      case 'WSL_ENGINE_UNAVAILABLE':
+        return 'O mecanismo WSL não foi detectado neste Windows.';
+      case 'WSL_NO_REGISTERED_DISTRO':
+        return 'WSL está instalado, mas nenhuma distribuição registrada foi encontrada.';
+      case 'WSL_DISTRO_NOT_INSTALLED':
+        return 'A distribuição "${plan.distro}" não está instalada ou não foi detectada pelo System Broker.';
+      case 'WSL_DISTRO_STORAGE_MISSING':
+        return 'A distribuição "${plan.distro}" está registrada, mas o diretório BasePath não existe mais. O CloudOS bloqueou a inicialização para não abrir um runtime quebrado.';
+      case 'WSL_NO_LAUNCH_CANDIDATE':
+        return 'Nenhuma distribuição registrada possui evidência suficiente para uma tentativa segura de inicialização.';
+      case 'WSL2_REQUIRED':
+        return 'A distribuição "${plan.distro}" está registrada como WSL1, mas esta operação exige WSL2.';
+      case 'WSL_VERSION_UNKNOWN':
+        return 'A versão WSL da distribuição "${plan.distro}" não foi comprovada pelo Broker.';
+      case 'KALI_NOT_INSTALLED':
+        return 'Kali Linux não está instalada; o CloudOS não substituirá silenciosamente por Ubuntu.';
+      case 'KALI_WSL2_REQUIRED':
+        return 'Kali Linux está registrada como WSL1; o backend de segurança exige WSL2.';
+      case 'KALI_VERSION_UNKNOWN':
+        return 'Kali Linux foi encontrada, mas sua geração WSL ainda não foi comprovada.';
+      case 'KALI_STORAGE_NOT_PROVEN':
+        return 'Kali Linux foi encontrada, mas o armazenamento registrado ainda não foi comprovado.';
+      case 'SECURITY_DISTRO_NOT_KALI':
+        return 'A distribuição selecionada não é uma distribuição Kali e não pode ser tratada como backend de segurança.';
+      default:
+        return _wslUnavailableMessage();
+    }
+  }
+
+  void _addUnavailableWslTab({required String title, required String message}) {
     final tab = TerminalTabItem(
       id: 'tab_${_tabCounter++}',
-      title: _titleFor(kind, resolvedDistro),
+      title: title,
+      shellKind: TerminalShellKind.wsl,
+    );
+    tab.terminal.write('\x1b[33mCloudOS Linux Runtime\x1b[0m\r\n\r\n');
+    tab.terminal.write('$message\r\n');
+    tab.terminal.write(
+      '\r\nStatus: WSL_ENGINE=${_wslPolicy.engineAvailable} | '
+      'WSL_LEGACY_USABLE=${_wslPolicy.wslAvailable} | '
+      'DISTROS=${_wslPolicy.installedDistros.length} | '
+      'PASSIVE_READY=${_wslPolicy.passiveReady}\r\n',
+    );
+    setState(() {
+      _tabs.add(tab);
+      _activeTabIndex = _tabs.length - 1;
+    });
+  }
+
+  void _addNewTab(TerminalShellKind kind, {String distro = ''}) {
+    if (kind == TerminalShellKind.wsl) {
+      final plan = _wslPolicy.planSession(
+        requestedDistro: distro.isEmpty ? null : distro,
+      );
+      if (!plan.allowed) {
+        _addUnavailableWslTab(
+          title: distro.isEmpty ? 'WSL indisponível' : 'WSL: $distro',
+          message: _messageForPlan(plan),
+        );
+        return;
+      }
+      distro = plan.distro;
+    }
+
+    final tab = TerminalTabItem(
+      id: 'tab_${_tabCounter++}',
+      title: _titleFor(kind, distro),
       shellKind: kind,
-      distro: resolvedDistro,
+      distro: distro,
     );
     _configureTerminal(tab);
     setState(() {
@@ -218,6 +316,11 @@ class _TerminalWindowState extends State<TerminalWindow> {
         tab.terminal.write(
           '\r\n\x1b[31mFalha ao criar a sessão ConPTY nativa.\x1b[0m\r\n',
         );
+        if (tab.shellKind == TerminalShellKind.wsl) {
+          tab.terminal.write(
+            '\x1b[33mA distro ${tab.distro.isEmpty ? "WSL padrão" : tab.distro} pode exigir provisionamento inicial ou ter falhado ao iniciar.\x1b[0m\r\n',
+          );
+        }
         return;
       }
       tab.sessionId = sessionId;
@@ -297,6 +400,7 @@ class _TerminalWindowState extends State<TerminalWindow> {
   }
 
   Widget _buildTabBar() {
+    final securityDistro = _wslPolicy.preferredSecurityDistro;
     return Container(
       height: 38,
       decoration: const BoxDecoration(
@@ -333,7 +437,12 @@ class _TerminalWindowState extends State<TerminalWindow> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: <Widget>[
-                        const Icon(Icons.terminal_rounded, size: 14),
+                        Icon(
+                          item.shellKind == TerminalShellKind.wsl
+                              ? Icons.developer_board_rounded
+                              : Icons.terminal_rounded,
+                          size: 14,
+                        ),
                         const SizedBox(width: 8),
                         Text(
                           item.title,
@@ -369,8 +478,16 @@ class _TerminalWindowState extends State<TerminalWindow> {
                 _addNewTab(TerminalShellKind.powershell);
               } else if (value == 'cmd') {
                 _addNewTab(TerminalShellKind.cmd);
+              } else if (value == 'wsl_unavailable') {
+                _addUnavailableWslTab(
+                  title: 'WSL indisponível',
+                  message: _wslUnavailableMessage(),
+                );
               } else if (value == 'wsl_default') {
-                _addNewTab(TerminalShellKind.wsl, distro: _defaultDistro);
+                _addNewTab(
+                  TerminalShellKind.wsl,
+                  distro: _wslPolicy.defaultDistro,
+                );
               } else if (value.startsWith('wsl:')) {
                 _addNewTab(TerminalShellKind.wsl, distro: value.substring(4));
               }
@@ -384,16 +501,48 @@ class _TerminalWindowState extends State<TerminalWindow> {
                 value: 'cmd',
                 child: Text('Prompt de Comando (ConPTY)'),
               ),
-              if (_defaultDistro.isNotEmpty)
+              const PopupMenuDivider(),
+              if (!_wslPolicy.canStartWslSession)
                 PopupMenuItem(
-                  value: 'wsl_default',
-                  child: Text('WSL padrão: $_defaultDistro'),
-                ),
-              for (final distro in _wslDistros)
-                PopupMenuItem(
-                  value: 'wsl:$distro',
-                  child: Text('WSL: $distro'),
-                ),
+                  value: 'wsl_unavailable',
+                  child: Text(
+                    !_wslPolicy.engineAvailable
+                        ? 'WSL não instalado/detectado'
+                        : !_wslPolicy.hasInstalledDistros
+                        ? 'WSL sem distribuições detectadas'
+                        : 'WSL com registros sem armazenamento válido',
+                  ),
+                )
+              else ...<PopupMenuEntry<String>>[
+                if (_wslPolicy.defaultDistro.isNotEmpty)
+                  PopupMenuItem(
+                    value: 'wsl_default',
+                    enabled:
+                        _wslPolicy.storageFor(_wslPolicy.defaultDistro) != false,
+                    child: Text(
+                      'WSL padrão: ${_wslPolicy.statusLabelFor(_wslPolicy.defaultDistro)}',
+                    ),
+                  ),
+                for (final distro in _wslPolicy.installedDistros)
+                  if (distro != _wslPolicy.defaultDistro)
+                    PopupMenuItem(
+                      value: 'wsl:$distro',
+                      enabled: _wslPolicy.storageFor(distro) != false,
+                      child: Text(_wslPolicy.statusLabelFor(distro)),
+                    ),
+                if (securityDistro.isEmpty)
+                  const PopupMenuItem<String>(
+                    enabled: false,
+                    child: Text('Kali Linux: não instalada'),
+                  )
+                else if (!_wslPolicy.kaliPassiveReady)
+                  PopupMenuItem<String>(
+                    enabled: false,
+                    child: Text(
+                      'Kali: ${_wslPolicy.statusLabelFor(securityDistro)} • backend ainda não pronto',
+                    ),
+                  ),
+              ],
             ],
           ),
           IconButton(

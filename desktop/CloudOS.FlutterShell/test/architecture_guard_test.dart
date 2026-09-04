@@ -68,6 +68,7 @@ void main() {
       "export 'cloud_file_item.dart';",
       "export 'cloud_notification.dart';",
       "export 'cloud_system_snapshot.dart';",
+      "export 'cloud_wsl_health_probe.dart';",
     };
 
     final executableLines = source
