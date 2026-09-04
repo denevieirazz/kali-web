@@ -43,6 +43,45 @@ void main() {
       expect(loaded.notes.last.content, 'Conteúdo 2');
     });
 
+    test('serializes overlapping saves and keeps the latest snapshot', () async {
+      final directory = await Directory.systemTemp.createTemp('cloudos-notes-race-');
+      addTearDown(() async {
+        if (await directory.exists()) {
+          await directory.delete(recursive: true);
+        }
+      });
+
+      final path = '${directory.path}${Platform.pathSeparator}notes.json';
+      final store = FileNotesStore(pathOverride: path);
+      final writes = <Future<void>>[];
+
+      for (var index = 0; index < 20; index++) {
+        writes.add(
+          store.save(
+            NotesSnapshot(
+              notes: <StoredNote>[
+                StoredNote(
+                  id: 'note',
+                  title: 'Versão $index',
+                  content: 'conteúdo-$index',
+                  updatedAt: DateTime.utc(2026, 9, 4, 7, 0, index),
+                ),
+              ],
+              selectedNoteId: 'note',
+            ),
+          ),
+        );
+      }
+
+      await Future.wait(writes);
+      final loaded = await store.load();
+
+      expect(loaded, isNotNull);
+      expect(loaded!.notes.single.title, 'Versão 19');
+      expect(loaded.notes.single.content, 'conteúdo-19');
+      expect(await File('$path.tmp').exists(), isFalse);
+    });
+
     test('falls back to backup when primary storage is malformed', () async {
       final directory = await Directory.systemTemp.createTemp('cloudos-notes-backup-');
       addTearDown(() async {

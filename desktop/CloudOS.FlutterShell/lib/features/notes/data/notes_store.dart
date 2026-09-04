@@ -115,6 +115,12 @@ class FileNotesStore implements NotesStore {
 
   final String? pathOverride;
 
+  // FileNotesStore is intentionally const so it can remain the default widget
+  // dependency. Writes are therefore serialized per resolved path in a shared
+  // queue. This prevents overlapping debounce/dispose saves from racing over
+  // the same .tmp/.bak files while keeping independent test/user paths isolated.
+  static final Map<String, Future<void>> _pendingWrites = <String, Future<void>>{};
+
   File _primaryFile() {
     final explicit = pathOverride?.trim();
     if (explicit != null && explicit.isNotEmpty) {
@@ -131,8 +137,16 @@ class FileNotesStore implements NotesStore {
   @override
   Future<NotesSnapshot?> load() async {
     final primary = _primaryFile();
-    final backup = File('${primary.path}.bak');
+    final pending = _pendingWrites[primary.path];
+    if (pending != null) {
+      try {
+        await pending;
+      } on Object {
+        // Loading still attempts primary/backup recovery after a failed write.
+      }
+    }
 
+    final backup = File('${primary.path}.bak');
     for (final candidate in <File>[primary, backup]) {
       try {
         if (!await candidate.exists()) continue;
@@ -148,8 +162,27 @@ class FileNotesStore implements NotesStore {
   }
 
   @override
-  Future<void> save(NotesSnapshot snapshot) async {
+  Future<void> save(NotesSnapshot snapshot) {
     final primary = _primaryFile();
+    final frozenSnapshot = snapshot.copy();
+    final previous = _pendingWrites[primary.path] ?? Future<void>.value();
+
+    late final Future<void> queued;
+    queued = previous
+        .catchError((Object _) {
+          // A previous failed save must not permanently poison the per-path queue.
+        })
+        .then((_) => _writeSnapshot(primary, frozenSnapshot));
+    _pendingWrites[primary.path] = queued;
+
+    return queued.whenComplete(() {
+      if (identical(_pendingWrites[primary.path], queued)) {
+        _pendingWrites.remove(primary.path);
+      }
+    });
+  }
+
+  Future<void> _writeSnapshot(File primary, NotesSnapshot snapshot) async {
     final backup = File('${primary.path}.bak');
     final temporary = File('${primary.path}.tmp');
     await primary.parent.create(recursive: true);
