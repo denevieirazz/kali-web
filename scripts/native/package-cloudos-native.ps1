@@ -46,6 +46,7 @@ foreach ($name in @(
     'run-native-soak-v9.ps1',
     'run-native-lifecycle-smoke-v10.ps1',
     'run-native-supervisor-smoke-v11.ps1',
+    'run-native-supervisor-smoke-v22.ps1',
     'native-performance-v12.ps1',
     'run-native-performance-smoke-v12.ps1',
     'CloudOS.Deployment.V13.psm1',
@@ -98,6 +99,8 @@ if ($manifest.schema -ne 1 -or
     $manifest.product -ne 'CloudOS Native Shell' -or
     $manifest.shell_authority -ne 'C++/Win32' -or
     $manifest.recovery_authority -ne 'CloudOS.Supervisor.exe V11' -or
+    [int]$manifest.supervisor_runtime_schema -ne 22 -or
+    [int]$manifest.supervisor_compatibility_contract -ne 11 -or
     $manifest.broker_authority -ne 'CloudOS.SystemBroker.exe V21' -or
     $manifest.legacy_react_desktop -ne $false) {
     throw 'Manifesto do pacote CloudOS Native invalido.'
@@ -119,7 +122,7 @@ foreach ($name in @(
     if ($hash -ne ([string]$records[0].sha256).ToLowerInvariant()) { throw "SHA256 invalido: $name" }
 }
 if (Test-Path -LiteralPath (Join-Path $rootPath 'ui')) { throw 'Desktop web legado nao e permitido no pacote nativo.' }
-Write-Host '[CloudOS] INTEGRITY_OK: Shell, Runtime, Supervisor V11, System Broker V21 e BrokerProbe conferem.'
+Write-Host '[CloudOS] INTEGRITY_OK: Shell, Runtime, Supervisor V22 (ABI V11 compat), System Broker V21 e BrokerProbe conferem.'
 '@
 Set-Content -LiteralPath (Join-Path $stage 'Verificar Integridade.ps1') -Value $packageVerifier -Encoding utf8
 
@@ -144,7 +147,7 @@ if errorlevel 1 (
 )
 if not exist "%ROOT%CloudOS.Supervisor.exe" exit /b 7
 pushd "%ROOT%" >nul
-start "CloudOS Supervisor V11" /D "%ROOT%" "%ROOT%CloudOS.Supervisor.exe"
+start "CloudOS Supervisor V22" /D "%ROOT%" "%ROOT%CloudOS.Supervisor.exe"
 set "RC=%ERRORLEVEL%"
 popd >nul
 exit /b %RC%
@@ -156,10 +159,19 @@ $recoveryLauncher = @'
 setlocal EnableExtensions
 set "ROOT=%~dp0"
 if not exist "%ROOT%CloudOS.Supervisor.exe" exit /b 7
-start "CloudOS Recovery" /D "%ROOT%" "%ROOT%CloudOS.Supervisor.exe" --recovery-ui
+start "CloudOS Recovery V22" /D "%ROOT%" "%ROOT%CloudOS.Supervisor.exe" --recovery-ui
 exit /b %ERRORLEVEL%
 '@
 Set-Content -LiteralPath (Join-Path $stage 'Recuperacao CloudOS.cmd') -Value $recoveryLauncher -Encoding ascii
+
+$recoveryStatusLauncher = @'
+@echo off
+setlocal EnableExtensions
+set "ROOT=%~dp0"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%get-cloudos-recovery-status-v22.ps1" | more
+exit /b %ERRORLEVEL%
+'@
+Set-Content -LiteralPath (Join-Path $stage 'Status Recuperacao V22.cmd') -Value $recoveryStatusLauncher -Encoding ascii
 
 $diagnosticsLauncher = @'
 @echo off
@@ -255,7 +267,7 @@ $readme = @"
 CloudOS Native Shell - $Configuration x64
 
 Shell authority: C++/Win32
-Recovery authority: CloudOS.Supervisor.exe V11
+Recovery authority: CloudOS.Supervisor.exe V11 compatibility / runtime V22
 Broker authority: CloudOS.SystemBroker.exe V21
 Git head: $($manifest.git_head)
 Source fingerprint SHA256: $($manifest.source_fingerprint_sha256)
@@ -271,6 +283,7 @@ Arquivos principais:
 - SHA256SUMS.txt
 - Iniciar CloudOS.cmd
 - Recuperacao CloudOS.cmd
+- Status Recuperacao V22.cmd
 - Verificar Integridade.cmd
 
 Stability/Readiness V9:
@@ -279,13 +292,12 @@ Stability/Readiness V9:
 Lifecycle V10:
 - resume, WTS/RDP, display revalidation e single-instance.
 
-Shell Supervisor V11:
-- Iniciar CloudOS.cmd abre CloudOS.Supervisor.exe, que inicia CloudOS.exe --supervised.
-- readiness timeout padrao: 30 segundos.
-- heartbeat stale padrao: 5 segundos.
-- restart com backoff limitado e maximo padrao de 3 falhas consecutivas.
-- depois do crash-loop, inicia Explorer apenas quando Shell_TrayWnd nao existe.
+Supervisor/Recovery V22:
+- CloudOS.Supervisor.exe continua preservando o protocolo/ABI V11 de readiness, heartbeat, graceful exit e fallback Explorer.
+- o runtime V22 adiciona estados explicitos, crash-loop em janela limitada, SAFE_MODE, journal atomico e Job Object kill-on-close.
+- Iniciar CloudOS.cmd abre o Supervisor V22, que inicia CloudOS.exe --supervised.
 - Recuperacao CloudOS.cmd abre a interface manual independente com --recovery-ui.
+- Status Recuperacao V22.cmd mostra o estado local de recovery sem upload nem mutacao de politica.
 
 System Broker V21:
 - CloudOS.SystemBroker.exe e CloudOS.BrokerProbe.exe fazem parte do runtime assinado.
@@ -320,8 +332,11 @@ Exemplo de soak de 30 minutos:
 Smoke Lifecycle V10:
   pwsh -File .\run-native-lifecycle-smoke-v10.ps1 -Root .
 
-Smoke Shell Supervisor V11:
+Smoke Shell Supervisor V11 compatibility:
   pwsh -File .\run-native-supervisor-smoke-v11.ps1 -Root .
+
+Smoke Supervisor/Recovery V22:
+  pwsh -File .\run-native-supervisor-smoke-v22.ps1 -Root .
 
 Os smokes nao substituem validacao de shell de logon, suspend/RDP fisico ou hotplug em VM/hardware.
 O frontend React antigo nao faz parte deste pacote. WebView2 e usado somente pelo Navegador CloudOS.
