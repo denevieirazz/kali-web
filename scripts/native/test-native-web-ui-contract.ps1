@@ -15,15 +15,28 @@ $paths = @{
     Packages = Join-Path $root 'desktop\CloudOS.NativeShell\packages.config'
     NativeBuild = Join-Path $root 'scripts\native\build-cloudos-native.cmd'
     ContractSuite = Join-Path $root 'scripts\native\test-native-contract-suite.ps1'
-    FrontendCss = Join-Path $root 'frontend\src\index.css'
-    StartCss = Join-Path $root 'frontend\src\components\StartMenu\StartMenu.css'
-    TaskbarCss = Join-Path $root 'frontend\src\components\Taskbar\Taskbar.css'
+    RetirementDoc = Join-Path $root 'frontend\README.md'
     WebSkinDoc = Join-Path $root 'docs\native\UNIFIED_WEBSKIN_NATIVE.md'
 }
 
 foreach ($entry in $paths.GetEnumerator()) {
     if (-not (Test-Path -LiteralPath $entry.Value)) {
-        throw "Native WebSkin contract file missing: $($entry.Value)"
+        throw "Native UI boundary contract file missing: $($entry.Value)"
+    }
+}
+
+foreach ($retired in @(
+    'frontend\src',
+    'frontend\public',
+    'frontend\scripts',
+    'frontend\test',
+    'frontend\index.html',
+    'frontend\server.js',
+    'frontend\vite.config.ts'
+)) {
+    $candidate = Join-Path $root $retired
+    if (Test-Path -LiteralPath $candidate) {
+        throw "Retired React desktop surface returned: $retired"
     }
 }
 
@@ -99,7 +112,7 @@ Require-Tokens 'Native developer build' $content.NativeBuild @(
     'CloudOS.NativeShell\CloudOS.NativeShell.vcxproj',
     'SHELL_UI=C++/Win32 nativo',
     'WEBVIEW2=usado somente pelo Navegador CloudOS',
-    'FRONTEND_REACT=referencia visual; nao participa deste build'
+    'FRONTEND_REACT=aposentado; codigo do desktop web removido'
 )
 Forbid-Tokens 'Native developer build' $content.NativeBuild @(
     'node.exe',
@@ -125,8 +138,12 @@ if (-not $content.Packages.Contains('Microsoft.Web.WebView2') -or
     throw 'Pinned Microsoft.Web.WebView2 package for the native Browser is missing.'
 }
 
-# The frontend remains a historical design reference, but the native token
-# system is explicitly allowed to evolve beyond those original CSS hex values.
+Require-Tokens 'Retired React desktop tombstone' $content.RetirementDoc @(
+    'Legacy React desktop — retired',
+    'desktop/CloudOS.FlutterShell/',
+    'old React source tree, Vite entrypoint, web server, public assets and frontend tests are removed'
+)
+
 Require-Tokens 'Unified native WebSkin' $content.Theme @(
     'namespace WebSkin',
     'BgSolid = DesignV12::Canvas',
@@ -182,26 +199,11 @@ Require-Tokens 'Native Desktop skin' $content.Desktop @(
     'NativeWallpaperManager::Draw',
     'NativeDesktopDropTarget::Register'
 )
-
-Require-Tokens 'Legacy CSS design reference' $content.FrontendCss @(
-    '--accent: #6366f1',
-    '--bg-solid: #0a0a0f',
-    '--bg-primary: #111118',
-    '--bg-secondary: #1a1a24',
-    '--radius-xl: 16px',
-    '--shadow-flyout'
-)
-Require-Tokens 'Legacy Start design reference' $content.StartCss @(
-    '.start-menu', '.start-search', '.start-pinned-grid', '.start-bottom'
-)
-Require-Tokens 'Legacy Taskbar design reference' $content.TaskbarCss @(
-    '.taskbar', '.taskbar-app-btn', '.system-tray', '.taskbar-clock'
-)
 Require-Tokens 'Unified WebSkin documentation' $content.WebSkinDoc @(
-    'Funcionalidade e lifecycle ficam nativos',
-    'frontend antigo funciona apenas como especificação visual',
+    'React/CSS foi aposentada',
+    'tokens visuais nativos',
     'WindowSkinSubclass',
     'não volta a controlar Desktop, Taskbar, Start'
 )
 
-Write-Host 'PASS: old web UI remains design-reference-only; native Visual Experience V6 is free to evolve beyond frozen CSS colors; Start V4/Taskbar V4 stay native; WebView2 stays scoped to Browser.'
+Write-Host 'PASS: React desktop is retired; native shell remains authoritative, Flutter is the presentation client, and WebView2 stays scoped to Browser.'

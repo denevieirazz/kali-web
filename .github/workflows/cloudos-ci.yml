@@ -4,176 +4,75 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - feature/cloudos-native-browser
-      - feature/native-browser-visual-refresh
-      - fix/native-browser-windows-validation
-      - fix/native-browser-powershell7-validation
-      - refactor/cloudos-core-hardening
-      - integration/cloudos-foundation
-      - integration/cloudos-validated-features
-      - integration/cloudos-unified-runtime
-      - ci/cloudos-baseline
-      - sync/cloudos-current-state
       - main
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  validate:
-    # Pixel-strict Chromium snapshots are coupled to the Windows font/rasterization
-    # stack. Pin the runner instead of weakening screenshot tolerances when
-    # windows-latest advances to a new Server image.
-    runs-on: windows-2022
-    timeout-minutes: 45
-
+  validate-current-product-boundary:
+    runs-on: windows-latest
+    timeout-minutes: 15
     steps:
-      - name: 1. Checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: 1b. Validate PowerShell 7 runtime requirement
+      - name: Verify legacy React desktop is retired
+        shell: pwsh
+        run: |
+          $forbidden = @(
+            'frontend/src',
+            'frontend/public',
+            'frontend/scripts',
+            'frontend/test',
+            'frontend/index.html',
+            'frontend/server.js',
+            'frontend/vite.config.ts',
+            'frontend/eslint.config.js',
+            'frontend/tsconfig.json',
+            'frontend/tsconfig.app.json',
+            'frontend/tsconfig.node.json'
+          )
+          foreach ($path in $forbidden) {
+            if (Test-Path -LiteralPath $path) {
+              throw "Retired React desktop surface returned: $path"
+            }
+          }
+
+          foreach ($path in @(
+            'frontend/README.md',
+            'desktop/CloudOS.FlutterShell/pubspec.yaml',
+            'desktop/CloudOS.FlutterShell/lib',
+            'desktop/CloudOS.NativeShell',
+            'desktop/CloudOS.NativeRuntime',
+            'desktop/CloudOS.NativeRecovery',
+            'desktop/CloudOS.SystemBroker'
+          )) {
+            if (-not (Test-Path -LiteralPath $path)) {
+              throw "Current CloudOS source boundary missing: $path"
+            }
+          }
+
+          $retired = Get-Content -LiteralPath 'frontend/README.md' -Raw
+          if (-not $retired.Contains('Legacy React desktop — retired')) {
+            throw 'frontend/README.md must remain an explicit retirement tombstone.'
+          }
+
+          Write-Host 'PASS: legacy React desktop is retired; Flutter presentation + native authorities remain.'
+
+      - name: Validate PowerShell 7 runtime requirement
         shell: pwsh
         run: ./scripts/test-powershell7-requirement.ps1
 
-      - name: 2. Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22.x
-
-      - name: 3. Install dependencies
-        run: npm ci
-
-      - name: 4. Install Playwright Chromium
-        run: npx playwright install chromium
-
-      - name: 5. Run lint
-        run: npm.cmd run lint
-
-      - name: 6. Build frontend
-        run: npm.cmd run build
-
-      - name: 7. Run backend and integration tests
-        run: npm.cmd test
-
-      - name: 8. Run E2E tests
-        run: npm.cmd run test:e2e
-
-      - name: 9. Run frontend unit tests
-        run: node scripts/run-node-tests.js frontend/test
-
-      - name: 10. Setup .NET SDK
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-
-      - name: 11. Build CloudOS.Host
-        run: dotnet build desktop/CloudOS.Host/CloudOS.Host.csproj -c Release
-
-      - name: 12. Run Host Tests
-        run: dotnet run --project desktop/CloudOS.Host.Tests/CloudOS.Host.Tests.csproj -c Release
-
-      - name: 12b. Validate native Browser visual isolation boundary
-        if: github.ref == 'refs/heads/feature/native-browser-visual-refresh' || github.head_ref == 'feature/native-browser-visual-refresh'
+      - name: Repository clarity contract
         shell: pwsh
-        run: ./scripts/test-native-browser-visual-boundary.ps1
+        run: ./scripts/native/test-repository-clarity-v15-contract.ps1
 
-      - name: 13. Run Browser response contract tests
-        run: dotnet run --project desktop/CloudOS.Browser.Contracts.Tests/CloudOS.Browser.Contracts.Tests.csproj -c Release
-
-      - name: 14. Test source and published-host freshness policy
+      - name: Flutter managed Win32 containment contract
         shell: pwsh
-        run: ./scripts/test-native-host-freshness.ps1
+        run: ./scripts/flutter/test-managed-win32-containment-v22-contract.ps1
 
-      - name: 15. Build Bootstrap
-        run: dotnet build desktop/CloudOS.Bootstrap/CloudOS.Bootstrap.csproj -c Release
-
-      - name: 16. Run Bootstrap Tests
-        run: dotnet run --project desktop/CloudOS.Bootstrap.Tests/CloudOS.Bootstrap.Tests.csproj -c Release
-
-      - name: 17. Build Browser TestHost
-        run: dotnet build desktop/CloudOS.Browser.TestHost/CloudOS.Browser.TestHost.csproj -c Release
-
-      - name: 17b. Capture native Browser WPF before-after comparison
-        if: github.ref == 'refs/heads/feature/native-browser-visual-refresh' || github.head_ref == 'feature/native-browser-visual-refresh'
+      - name: Flutter ConPTY stability contract
         shell: pwsh
-        run: ./scripts/test-native-browser-visual.ps1
-
-      - name: 18. Run baseline Playwright characterization
-        # Workflow Drone and Batch 4 human/hardening suites have dedicated configs and
-        # workflows. Keeping them out of the generic Windows characterization prevents
-        # duplicate ownership, conflicting runtime assumptions, and CI timeout noise.
-        run: npx playwright test tests/playwright/boot-oobe.spec.ts tests/playwright/onboarding-responsive.spec.ts tests/playwright/settings-personalization.spec.ts tests/playwright/start-menu.spec.ts tests/playwright/window-lifecycle.spec.ts --reporter=list
-
-      - name: 19. Run Browser opening lifecycle tests
-        run: npx playwright test tests/playwright/native-browser-lifecycle.spec.ts --output=test-results/native-browser-lifecycle --reporter=list
-
-      - name: 20. Run native Browser WebView2 tests
-        run: npx playwright test tests/playwright/native-browser.spec.ts --output=test-results/native-browser --reporter=list
-
-      - name: 21. Smoke native Host Browser lifecycle
-        if: github.ref == 'refs/heads/feature/cloudos-native-browser' || github.ref == 'refs/heads/feature/native-browser-visual-refresh' || github.ref == 'refs/heads/fix/native-browser-windows-validation' || github.ref == 'refs/heads/fix/native-browser-powershell7-validation' || github.ref == 'refs/heads/refactor/cloudos-core-hardening' || github.ref == 'refs/heads/integration/cloudos-validated-features' || github.head_ref == 'feature/cloudos-native-browser' || github.head_ref == 'feature/native-browser-visual-refresh' || github.head_ref == 'fix/native-browser-windows-validation' || github.head_ref == 'fix/native-browser-powershell7-validation' || github.head_ref == 'refactor/cloudos-core-hardening' || github.head_ref == 'integration/cloudos-validated-features'
-        shell: pwsh
-        run: ./scripts/test-native-browser-host-smoke.ps1
-
-      - name: 22. Check Browser feature diff whitespace
-        if: github.ref == 'refs/heads/feature/cloudos-native-browser' || github.ref == 'refs/heads/fix/native-browser-windows-validation' || github.ref == 'refs/heads/fix/native-browser-powershell7-validation' || github.head_ref == 'feature/cloudos-native-browser' || github.head_ref == 'fix/native-browser-windows-validation' || github.head_ref == 'fix/native-browser-powershell7-validation'
-        shell: pwsh
-        run: |
-          git fetch origin integration/cloudos-foundation --no-tags
-          git diff --check origin/integration/cloudos-foundation...HEAD
-
-      - name: 22b. Check core hardening diff against validated base
-        if: github.ref == 'refs/heads/refactor/cloudos-core-hardening' || github.head_ref == 'refactor/cloudos-core-hardening'
-        shell: pwsh
-        run: |
-          # kernelLegacy.ts is a byte-for-byte preservation copy of the former kernel.ts.
-          # Whitespace policy applies to the newly authored hardening diff, not moved legacy bytes.
-          git diff --check 1a81a0abdcc3816dcc295743fb3b4bcd745c7a64...HEAD -- . ':(exclude)frontend/src/core/kernelLegacy.ts'
-
-      - name: 22c. Check validated integration diff
-        if: github.ref == 'refs/heads/integration/cloudos-validated-features' || github.head_ref == 'integration/cloudos-validated-features'
-        shell: pwsh
-        run: git diff --check cb2033292d9bff691b6477a4872ca699ab0cbd13...HEAD
-
-      - name: 22d. Check native Browser visual diff
-        if: github.ref == 'refs/heads/feature/native-browser-visual-refresh' || github.head_ref == 'feature/native-browser-visual-refresh'
-        shell: pwsh
-        run: git diff --check f83a765061eb69df2f88a162c44ef0ec7dc60b90...HEAD
-
-      - name: 23. Upload sanitized Browser lifecycle diagnostics on failure
-        if: failure() && hashFiles('test-results/native-browser-lifecycle/**') != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: cloudos-native-browser-lifecycle-failure-${{ github.run_id }}
-          path: test-results/native-browser-lifecycle/
-          if-no-files-found: ignore
-          retention-days: 7
-
-      - name: 24. Upload sanitized native Browser diagnostics on failure
-        if: failure() && hashFiles('test-results/native-browser/**') != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: cloudos-native-browser-failure-${{ github.run_id }}
-          path: test-results/native-browser/
-          if-no-files-found: ignore
-          retention-days: 7
-
-      - name: 25. Upload reviewed visual diffs on characterization failure
-        if: failure() && (hashFiles('test-results/**/*-actual.png') != '' || hashFiles('test-results/**/*-diff.png') != '')
-        uses: actions/upload-artifact@v4
-        with:
-          name: cloudos-visual-diff-${{ github.run_id }}
-          path: |
-            test-results/**/*-actual.png
-            test-results/**/*-diff.png
-          if-no-files-found: ignore
-          retention-days: 7
-
-      - name: 26. Upload native Browser WPF visual comparison
-        if: always() && (github.ref == 'refs/heads/feature/native-browser-visual-refresh' || github.head_ref == 'feature/native-browser-visual-refresh') && hashFiles('test-results/native-browser-visual/*.png') != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: cloudos-native-browser-visual-${{ github.run_id }}
-          path: test-results/native-browser-visual/
-          if-no-files-found: error
-          retention-days: 14
+        run: ./scripts/flutter/test-conpty-stability-v22-contract.ps1

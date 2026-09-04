@@ -1,67 +1,44 @@
-name: CloudOS Visible Terminal WSL Core
+name: CloudOS Terminal Core CI
 
 on:
   workflow_dispatch:
-  push:
-    branches: [feature/cloudos-visible-terminal-wsl-core]
-    paths:
-      - 'frontend/src/apps/CloudOSTerminal/**'
-      - 'frontend/test/*Terminal*'
-      - 'frontend/test/terminalSessionTransport.test.js'
-      - 'frontend/scripts/dev-server.js'
-      - 'frontend/vite.config.ts'
-      - 'backend/test/visible-terminal-websocket-contract.test.js'
-      - 'scripts/*visible-terminal*wsl-core*'
-      - 'docs/VISIBLE_TERMINAL_WSL_CORE.md'
-      - '.github/workflows/visible-terminal-wsl-core.yml'
   pull_request:
     paths:
-      - 'frontend/src/apps/CloudOSTerminal/**'
-      - 'frontend/test/*Terminal*'
-      - 'frontend/test/terminalSessionTransport.test.js'
-      - 'frontend/scripts/dev-server.js'
-      - 'frontend/vite.config.ts'
-      - 'backend/test/visible-terminal-websocket-contract.test.js'
-      - 'scripts/*visible-terminal*wsl-core*'
-      - 'docs/VISIBLE_TERMINAL_WSL_CORE.md'
+      - 'desktop/CloudOS.FlutterShell/native_bridge/cloudos_conpty_manager.*'
+      - 'desktop/CloudOS.FlutterShell/native_bridge/cloudos_flutter_bridge_v20.*'
+      - 'scripts/flutter/test-conpty-stability-v22-contract.ps1'
+      - 'scripts/native/test-flutter-broker-client-hardening-v22-contract.ps1'
       - '.github/workflows/visible-terminal-wsl-core.yml'
 
+permissions:
+  contents: read
+
 jobs:
-  visible-terminal:
+  terminal-core:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22.x'
-          cache: npm
-      - name: Install workspace dependencies
-        run: npm ci
-      - name: Frontend lifecycle tests
-        run: npm --prefix frontend test
-      - name: Frontend TypeScript contract
-        run: npm --prefix frontend run lint
-      - name: Frontend production build
-        run: npm --prefix frontend run build
-      - name: Existing secure adapter regression
-        run: node --test backend/test/wsl-core-terminal.test.js
-      - name: Visible Terminal backend WebSocket contract
-        run: node --test backend/test/visible-terminal-websocket-contract.test.js
-      - name: Parse visible physical probe
-        run: node --check scripts/probe-visible-terminal-wsl-core.mjs
-      - name: Parse PowerShell launchers
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify retired web terminal did not return
         shell: pwsh
         run: |
-          foreach ($file in @('./scripts/visible-terminal-wsl-core-common.ps1','./scripts/start-cloudos-visible-terminal-v2.ps1','./scripts/validate-visible-terminal-wsl-core.ps1','./scripts/test-visible-terminal-wsl-core-contract.ps1')) {
-            $tokens=$null; $errors=$null
-            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
-            if($errors.Count){$errors|ForEach-Object{Write-Error "$file : $($_.Message)"};exit 1}
+          foreach ($path in @(
+            'frontend/src/apps/CloudOSTerminal',
+            'frontend/test/terminalSessionTransport.test.js',
+            'frontend/scripts/dev-server.js'
+          )) {
+            if (Test-Path -LiteralPath $path) {
+              throw "Retired web terminal surface returned: $path"
+            }
           }
-      - name: Safety and integration contract
+          Write-Host 'PASS: retired web terminal surface is absent.'
+
+      - name: ConPTY bounded-session stability contract
         shell: pwsh
-        run: ./scripts/test-visible-terminal-wsl-core-contract.ps1
-      - name: Diff whitespace
+        run: ./scripts/flutter/test-conpty-stability-v22-contract.ps1
+
+      - name: Flutter Broker client hardening contract
         shell: pwsh
-        run: git diff --check 7424eb7c8775bb534f05ff0c7efedbc55a50e551...HEAD
+        run: ./scripts/native/test-flutter-broker-client-hardening-v22-contract.ps1

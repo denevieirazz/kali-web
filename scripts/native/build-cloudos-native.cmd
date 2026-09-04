@@ -152,5 +152,6 @@ echo [CloudOS] SUPERVISOR_RECOVERY_V22=estado explicito, crash-loop, safe mode, 
 echo [CloudOS] SHELL_SUPERVISOR_V11_COMPAT=readiness, heartbeat, graceful-exit e fallback Explorer preservados
 echo [CloudOS] UNIFIED_INTEGRATION_V16=downloads first-party, catalogo Windows+Linux, WinGet, WSLg e integracao event-driven Desktop/Start
 echo [CloudOS] WEBVIEW2=usado somente pelo Navegador CloudOS
-echo [CloudOS] FRONTEND_REACT=referencia visual; nao participa deste build
+echo [CloudOS] FRONTEND_REACT=aposentado; codigo do desktop web removido
+echo [CloudOS] FLUTTER_PRESENTATION=desktop\CloudOS.FlutterShell
 exit /b 0

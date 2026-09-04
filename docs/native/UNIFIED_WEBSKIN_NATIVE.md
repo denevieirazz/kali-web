@@ -2,28 +2,17 @@
 
 ## Objetivo
 
-O CloudOS Shell V3 continua sendo um desktop environment Win32/C++ nativo. A antiga interface React/CSS não volta a controlar Desktop, Taskbar, Start, Files ou aplicativos do sistema. O que foi reutilizado é a **linguagem visual** do frontend antigo: paleta, materiais, espaçamento, tipografia, cantos, estados e hierarquia.
+O CloudOS Shell continua sendo um desktop environment Win32/C++ nativo, com Flutter como cliente de apresentação integrado. A antiga interface React/CSS foi aposentada e seu código de desktop não faz mais parte da árvore ativa. React não volta a controlar Desktop, Taskbar, Start, Files ou aplicativos do sistema.
+
+A linguagem visual que já havia sido absorvida pelo shell foi congelada em **tokens visuais nativos** em `native_theme.h`. A partir daqui, esses tokens são a fonte de verdade; eles não dependem mais de arquivos CSS do frontend removido.
 
 A regra de arquitetura é simples:
 
-> **Funcionalidade e lifecycle ficam nativos. O frontend antigo funciona apenas como especificação visual.**
+> **Funcionalidade e lifecycle ficam nativos. Flutter apresenta o produto; React/CSS não é mais uma implementação do desktop.**
 
 ## Tokens oficiais
 
-A fonte de verdade nativa fica em `native_theme.h`, namespace `CloudOS::WebSkin`, espelhando `frontend/src/index.css`:
-
-- Background sólido: `#0a0a0f`
-- Background primário: `#111118`
-- Background secundário: `#1a1a24`
-- Background terciário: `#22222e`
-- Surface elevada: `#2a2a38`
-- Accent: `#6366f1`
-- Accent hover: `#818cf8`
-- Accent active: `#4f46e5`
-- Texto primário: `#f0f0f5`
-- Texto secundário: `#a0a0b8`
-- Texto terciário: `#6b6b82`
-- Radius: 4 / 8 / 12 / 16 DIP
+A fonte de verdade fica em `desktop/CloudOS.NativeShell/src/native_theme.h`, namespace `CloudOS::WebSkin`, combinada com `DesignV12`. Os valores podem evoluir dentro do contrato visual nativo sem precisar espelhar CSS legado.
 
 ## Infraestrutura visual compartilhada
 
@@ -41,24 +30,19 @@ O WebSkin fornece primitivas reutilizáveis para não repetir RGBs e estilos em 
 
 Essas primitivas são uma camada de **apresentação Win32**. Elas não alteram o WindowManager, AppBars, DWM thumbnails, COM file operations, recovery, watchdog ou launch policy.
 
-## Superfícies cobertas neste passe
+## Superfícies cobertas
 
 ### Desktop
 
-- Fallback wallpaper refeito com gradiente do WebSkin.
-- Removido o grande círculo opaco que dominava o canto superior direito.
-- Glows ambientes mais discretos.
-- Ícones/labels com escala e espaçamento levemente maiores.
-- Métricas e identificação de workspace seguem o mesmo sistema tipográfico.
+- Fallback wallpaper usa o sistema de tokens nativos.
+- Glows ambientes discretos.
+- Ícones/labels e métricas seguem o sistema tipográfico nativo.
+- Workspace continua sob autoridade do Window Manager nativo.
 
 ### Taskbar / AppBar
 
 - Continua uma AppBar real via `SHAppBarMessage`.
-- Altura aumentada para 64 DIP.
-- Start e pins maiores.
-- Workspaces viraram pills visuais em vez de botões de debug.
-- Tarefas recebem cards escuros e estado accent quando ativas.
-- Área rápida usa `Som · Rede` e tipografia mais legível.
+- Start, pins, workspaces, tarefas e área rápida permanecem nativos.
 
 ### Start
 
@@ -67,76 +51,37 @@ Essas primitivas são uma camada de **apresentação Win32**. Elas não alteram 
 - Usa cards, accent, owner/custom draw e material transient.
 - Não usa WebView para renderizar o Start.
 
-### Quick Settings
+### Quick Settings / Notification Center
 
-- Mantém `IAudioEndpointVolume` e `GetSystemPowerStatus` reais.
-- Flyout sem borda Win32 pesada.
-- Botões owner-draw e grade inspirada no frontend antigo.
-- Volume, mute, energia e atalhos Windows continuam operacionais.
+- Mantêm backends e estado nativos.
+- Flyouts e controles usam o tema compartilhado.
 
-### Notification Center
+### Settings / Calculator / Notepad / System Monitor
 
-- Histórico nativo preservado.
-- ListView escura/custom-draw.
-- Botão danger para limpar histórico.
-- Flyout acrylic/transient.
-
-### Settings
-
-- Mantém persistência no Registry e regra de tiling manual.
-- Edit sem `WS_EX_CLIENTEDGE` clássico.
-- Botões nativos owner-draw.
-- Mica/main backdrop.
-
-### Calculator
-
-- Toda a lógica matemática continua nativa.
-- Display escuro.
-- Teclas em cards.
-- Operadores/equal em accent.
-- Clear em danger.
-
-### Notepad
-
-- Toda a leitura/escrita UTF-8 continua nativa.
-- Editor escuro em Cascadia Mono.
-- Toolbar owner-draw.
-- Salvar em accent e limpar em danger.
-
-### System Monitor
-
-- Telemetria continua baseada em APIs reais (`GetSystemTimes`, `GlobalMemoryStatusEx`, Toolhelp).
-- Cards e progress bars passam a usar os tokens do WebSkin.
+- Lógica funcional continua nativa.
+- A camada visual consome os tokens do WebSkin.
 
 ### Files
 
-- Chrome do CloudOS agora usa paleta escura e Mica.
-- Sidebar/toolbar/address/fallback list usam os mesmos tokens do shell.
+- Chrome do CloudOS usa a paleta nativa.
 - `IExplorerBrowser` continua sendo o provider de namespace Windows/WSL; o CloudOS não substitui APIs Shell por HTML.
 
-### File Operations / ZIP e Command Center
+### Browser
 
-Essas janelas continuam com a implementação funcional atual, mas recebem o `WindowSkinSubclass` compartilhado por meio de `DarkWindow(window_)`, removendo o fundo branco e client edges legados onde aplicável, sem alterar os contratos de `IFileOperation`, progress sink, ZIP/tar ou ações do sistema.
+- WebView2 permanece permitido exclusivamente no Navegador CloudOS.
+- WebView2 não é renderer do Desktop, Start, Taskbar ou Files.
 
 ## Não-regressões
 
 O WebSkin não pode:
 
 1. Reintroduzir WebView/React como Desktop ou Start principal.
-2. Reintroduzir `SetParent` para sequestrar janelas externas.
-3. Ligar tiling automaticamente.
-4. Remover AppBar real da taskbar.
-5. Remover DWM thumbnails.
-6. Alterar copy/move/ZIP/recovery/watchdog apenas para facilitar o visual.
-7. Voltar a `WS_EX_CLIENTEDGE` como identidade visual das superfícies principais.
+2. Recriar `frontend/src`, Vite ou servidor React como segunda UI do CloudOS.
+3. Reintroduzir `SetParent` genérico para sequestrar janelas externas fora do contrato de contenção revisado.
+4. Ligar tiling automaticamente.
+5. Remover AppBar real da taskbar.
+6. Remover DWM thumbnails.
+7. Alterar copy/move/ZIP/recovery/watchdog apenas para facilitar o visual.
+8. Voltar a `WS_EX_CLIENTEDGE` como identidade visual das superfícies principais.
 
-## Próximas fronteiras visuais/UX
-
-Depois deste passe, os próximos ganhos deixam de ser apenas skin e passam a ser comportamento:
-
-- agrupamento/context menu/pins reordenáveis da taskbar;
-- Snap Layout flyout nas titlebars CloudOS;
-- tabs/thumbnails/properties no Files;
-- Wi-Fi/Bluetooth/media/brilho realmente inline no Quick Settings;
-- seleção rubber-band e posições persistentes no Desktop;
-- animações de abertura/fechamento coordenadas com DWM.
+A interface React/CSS antiga **não volta a controlar Desktop, Taskbar, Start**. Seu histórico permanece no Git, não como código ativo no produto.
