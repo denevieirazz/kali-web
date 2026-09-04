@@ -88,7 +88,7 @@ try {
             # A failed first activation has no LKG. Do not leave a known-bad
             # version behind merely because this entrypoint can service install.
             try { [void](Invoke-CloudOSUninstall -InstallRoot $InstallRoot) } catch {}
-            throw "CloudOS V22 update health gate failed with no last-known-good version ($($health.reason)). Managed activation was removed when possible."
+            throw "CloudOS V22 update health gate failed with no last-known-good version ($($health.reason), exit=$($health.exit_code), timedOut=$($health.timed_out), elapsedMs=$($health.elapsed_ms)). Managed activation was removed when possible."
         }
     }
 
