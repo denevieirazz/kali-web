@@ -23,9 +23,10 @@ Assert-Contains $client '#include "cloudos_managed_win32_host_v22.h"' 'Broker cl
 Assert-Contains $client 'ManagedWin32HostV22::IsWindowsCatalogId(app_id)' 'Windows catalog launches must be intercepted before broker dispatch.'
 Assert-Contains $client 'return ManagedWin32HostV22::Launch(app_id, err);' 'Windows catalog launches must route through managed containment.'
 
-$containmentIndex = $client.IndexOf('ManagedWin32HostV22::IsWindowsCatalogId(app_id)', [System.StringComparison]::Ordinal)
-$brokerIndex = $client.IndexOf('if (!EnsureConnected())', $client.IndexOf('CloudOSBrokerClientV21::LaunchApp', [System.StringComparison]::Ordinal), [System.StringComparison]::Ordinal)
-if ($containmentIndex -lt 0 -or $brokerIndex -lt 0 -or $containmentIndex -gt $brokerIndex) {
+$launchIndex = $client.IndexOf('CloudOSBrokerClientV21::LaunchApp', [System.StringComparison]::Ordinal)
+$containmentIndex = $client.IndexOf('ManagedWin32HostV22::IsWindowsCatalogId(app_id)', $launchIndex, [System.StringComparison]::Ordinal)
+$brokerIndex = $client.IndexOf('if (!EnsureConnected())', $launchIndex, [System.StringComparison]::Ordinal)
+if ($launchIndex -lt 0 -or $containmentIndex -lt 0 -or $brokerIndex -lt 0 -or $containmentIndex -gt $brokerIndex) {
     throw 'Containment interception must occur before System Broker connectivity/launch fallback.'
 }
 
@@ -45,8 +46,10 @@ foreach ($needle in @(
     Assert-Contains $host $needle "Managed Win32 containment contract missing: $needle"
 }
 
-if ($host.Contains('ShellExecute', [System.StringComparison]::OrdinalIgnoreCase)) {
-    throw 'Managed Win32 containment boundary must not use ShellExecute fallback.'
+foreach ($forbiddenCall in @('ShellExecuteW(', 'ShellExecuteExW(')) {
+    if ($host.Contains($forbiddenCall, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Managed Win32 containment boundary must not use external launch fallback: $forbiddenCall"
+    }
 }
 
 foreach ($unsupported in @('windows:vscode', 'windows:explorer', 'windows:taskmgr')) {
