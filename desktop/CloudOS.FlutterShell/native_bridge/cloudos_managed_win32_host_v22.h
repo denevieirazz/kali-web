@@ -39,9 +39,10 @@ public:
 
     static bool IsContainmentSupported(std::string_view app_id) noexcept
     {
-        return app_id == "windows:notepad" ||
-            app_id == "windows:cmd" ||
-            app_id == "windows:powershell";
+        // CMD and PowerShell are CloudOS Terminal / ConPTY profiles. Keep the
+        // generic cross-process HWND host deliberately narrow until physical
+        // compatibility is proven for another classic Win32 application.
+        return app_id == "windows:notepad";
     }
 
     // The bool means the Windows request was safely handled, not necessarily
@@ -121,11 +122,21 @@ public:
 
         session->process = process.hProcess;
         session->thread = process.hThread;
+        session->primary_process_id = process.dwProcessId;
 
         if (!AssignProcessToJobObject(session->job, session->process))
         {
             TerminateProcess(session->process, ERROR_ACCESS_DENIED);
             error = "Windows application could not be assigned to the CloudOS containment job";
+            CleanupSessionHandles(*session);
+            return BlockLaunch(app_id, error);
+        }
+
+        BOOL primary_in_job = FALSE;
+        if (!IsProcessInJob(session->process, session->job, &primary_in_job) || !primary_in_job)
+        {
+            TerminateJobObject(session->job, ERROR_ACCESS_DENIED);
+            error = "CloudOS could not prove the launched process belongs to its containment job";
             CleanupSessionHandles(*session);
             return BlockLaunch(app_id, error);
         }
@@ -140,15 +151,30 @@ public:
         CloseHandle(session->thread);
         session->thread = nullptr;
 
-        // Console-hosted apps may reject WaitForInputIdle. The Job-based HWND
-        // attribution loop is the authority and never accepts an unrelated HWND.
-        WaitForInputIdle(session->process, 1500);
+        // WaitForInputIdle is advisory. Job membership + stable unique HWND
+        // attribution below is the authority and works when a child process
+        // becomes the UI owner.
+        (void)WaitForInputIdle(session->process, 1500);
 
-        session->app_window = WaitForAttributedWindow(session->job, 5000);
-        if (session->app_window == nullptr)
+        const WindowWaitResult wait_result = WaitForAttributedWindow(
+            session->job,
+            kWindowDiscoveryTimeoutMs,
+            session->app_window);
+        if (wait_result != WindowWaitResult::Found)
         {
             TerminateJobObject(session->job, ERROR_TIMEOUT);
-            error = "No attributable top-level window appeared; launch was blocked to prevent escape";
+            if (wait_result == WindowWaitResult::Ambiguous)
+            {
+                error = "Ambiguous top-level windows appeared in the containment job; launch failed closed";
+            }
+            else if (wait_result == WindowWaitResult::QueryFailure)
+            {
+                error = "CloudOS could not safely enumerate the containment job windows";
+            }
+            else
+            {
+                error = "No attributable top-level window appeared; launch was blocked to prevent escape";
+            }
             CleanupSessionHandles(*session);
             return BlockLaunch(app_id, error);
         }
@@ -161,7 +187,15 @@ public:
             return BlockLaunch(app_id, error);
         }
 
-        const RECT initial = InitialHostRect(cloudos_window);
+        RECT initial{};
+        if (!InitialHostRect(cloudos_window, initial))
+        {
+            TerminateJobObject(session->job, ERROR_INVALID_WINDOW_HANDLE);
+            error = "CloudOS could not determine a safe managed-window rectangle";
+            CleanupSessionHandles(*session);
+            return BlockLaunch(app_id, error);
+        }
+
         HWND host = CreateWindowExW(
             WS_EX_CONTROLPARENT,
             HostClassName(),
@@ -196,24 +230,55 @@ public:
 
         {
             std::lock_guard<std::mutex> lock(SessionsMutex());
-            Sessions().emplace(host, std::move(session));
+            const auto [it, inserted] = Sessions().emplace(host, std::move(session));
+            (void)it;
+            if (!inserted)
+            {
+                error = "CloudOS managed-window session identity collided";
+                DestroyWindow(host);
+                return BlockLaunch(app_id, error);
+            }
         }
 
-        SetTimer(host, kHealthTimerId, 500, nullptr);
+        if (SetTimer(host, kHealthTimerId, kHealthTimerIntervalMs, nullptr) == 0)
+        {
+            error = "CloudOS could not start containment health monitoring";
+            DestroyWindow(host);
+            return BlockLaunch(app_id, error);
+        }
+
         ShowWindow(host, SW_SHOW);
-        SetWindowPos(
-            host,
-            HWND_TOP,
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
-        SetFocus(FindEmbeddedWindow(host));
+        if (!SetWindowPos(
+                host,
+                HWND_TOP,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW))
+        {
+            error = "CloudOS could not activate the managed application frame";
+            DestroyWindow(host);
+            return BlockLaunch(app_id, error);
+        }
+
+        HWND embedded = FindEmbeddedWindow(host);
+        if (embedded != nullptr && IsWindow(embedded))
+        {
+            SetFocus(embedded);
+        }
         return true;
     }
 
 private:
+    enum class WindowWaitResult
+    {
+        Found,
+        NoWindow,
+        Ambiguous,
+        QueryFailure,
+    };
+
     struct LaunchSpec final
     {
         std::wstring executable;
@@ -227,16 +292,29 @@ private:
         HANDLE job{nullptr};
         HANDLE process{nullptr};
         HANDLE thread{nullptr};
+        DWORD primary_process_id{0};
         HWND host_window{nullptr};
         HWND app_window{nullptr};
         RECT restore_rect{};
         bool maximized{false};
+        bool closing{false};
+    };
+
+    static constexpr DWORD kMaxTrackedJobProcesses = 64;
+
+    struct JobProcessSnapshot final
+    {
+        DWORD assigned_processes{0};
+        DWORD process_id_count{0};
+        ULONG_PTR process_ids[kMaxTrackedJobProcesses]{};
     };
 
     struct WindowSearch final
     {
-        HANDLE job{nullptr};
-        HWND match{nullptr};
+        const JobProcessSnapshot* processes{nullptr};
+        HWND first{nullptr};
+        DWORD count{0};
+        bool query_failed{false};
     };
 
     struct ParentSearch final
@@ -248,6 +326,10 @@ private:
     static constexpr int kTaskbarReservePx = 56;
     static constexpr int kDesktopMarginPx = 24;
     static constexpr UINT_PTR kHealthTimerId = 0xC105;
+    static constexpr UINT kHealthTimerIntervalMs = 250;
+    static constexpr DWORD kWindowDiscoveryTimeoutMs = 5000;
+    static constexpr DWORD kStableWindowObservations = 4;
+    static constexpr DWORD kWindowPollIntervalMs = 75;
 
     static const wchar_t* HostClassName() noexcept
     {
@@ -323,31 +405,10 @@ private:
             return false;
         }
 
-        const std::wstring system32(system_directory, system_length);
         if (app_id == "windows:notepad")
         {
-            spec.executable = system32 + L"\\notepad.exe";
+            spec.executable = std::wstring(system_directory, system_length) + L"\\notepad.exe";
             spec.title = L"Notepad - CloudOS";
-            return true;
-        }
-        if (app_id == "windows:cmd")
-        {
-            spec.executable = system32 + L"\\cmd.exe";
-            spec.title = L"Command Prompt - CloudOS";
-            return true;
-        }
-        if (app_id == "windows:powershell")
-        {
-            wchar_t windows_directory[MAX_PATH]{};
-            const UINT windows_length = GetWindowsDirectoryW(windows_directory, MAX_PATH);
-            if (windows_length == 0 || windows_length >= MAX_PATH)
-            {
-                error = "Windows directory is unavailable";
-                return false;
-            }
-            spec.executable = std::wstring(windows_directory, windows_length) +
-                L"\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
-            spec.title = L"PowerShell - CloudOS";
             return true;
         }
 
@@ -387,44 +448,155 @@ private:
         return search.match;
     }
 
-    static HWND WaitForAttributedWindow(HANDLE job, DWORD timeout_ms)
+    static bool TryGetWindowLongPtr(HWND window, int index, LONG_PTR& value) noexcept
     {
+        SetLastError(ERROR_SUCCESS);
+        const LONG_PTR result = GetWindowLongPtrW(window, index);
+        const DWORD error = GetLastError();
+        if (result == 0 && error != ERROR_SUCCESS) return false;
+        value = result;
+        return true;
+    }
+
+    static bool TrySetWindowLongPtr(HWND window, int index, LONG_PTR value) noexcept
+    {
+        SetLastError(ERROR_SUCCESS);
+        const LONG_PTR result = SetWindowLongPtrW(window, index, value);
+        const DWORD error = GetLastError();
+        return result != 0 || error == ERROR_SUCCESS;
+    }
+
+    static bool QueryJobProcessSnapshot(HANDLE job, JobProcessSnapshot& snapshot) noexcept
+    {
+        snapshot = JobProcessSnapshot{};
+        if (!QueryInformationJobObject(
+                job,
+                JobObjectBasicProcessIdList,
+                &snapshot,
+                static_cast<DWORD>(sizeof(snapshot)),
+                nullptr))
+        {
+            return false;
+        }
+
+        if (snapshot.assigned_processes != snapshot.process_id_count) return false;
+        if (snapshot.process_id_count > kMaxTrackedJobProcesses) return false;
+        return true;
+    }
+
+    static bool SnapshotContainsProcess(
+        const JobProcessSnapshot& snapshot,
+        DWORD process_id) noexcept
+    {
+        const ULONG_PTR expected = static_cast<ULONG_PTR>(process_id);
+        for (DWORD index = 0; index < snapshot.process_id_count; ++index)
+        {
+            if (snapshot.process_ids[index] == expected) return true;
+        }
+        return false;
+    }
+
+    static bool EnumerateJobTopLevelWindows(
+        const JobProcessSnapshot& processes,
+        WindowSearch& search) noexcept
+    {
+        search = WindowSearch{&processes, nullptr, 0, false};
+        const BOOL enumerated = EnumWindows(
+            [](HWND window, LPARAM value) -> BOOL
+            {
+                auto* state = reinterpret_cast<WindowSearch*>(value);
+                if (state == nullptr || state->processes == nullptr) return FALSE;
+                if (!IsWindowVisible(window)) return TRUE;
+                if (GetWindow(window, GW_OWNER) != nullptr) return TRUE;
+
+                DWORD process_id = 0;
+                GetWindowThreadProcessId(window, &process_id);
+                if (process_id == 0 ||
+                    !SnapshotContainsProcess(*state->processes, process_id))
+                {
+                    return TRUE;
+                }
+
+                LONG_PTR style = 0;
+                if (!TryGetWindowLongPtr(window, GWL_STYLE, style))
+                {
+                    state->query_failed = true;
+                    return FALSE;
+                }
+                if ((style & WS_CHILD) != 0) return TRUE;
+
+                if (state->first == nullptr) state->first = window;
+                ++state->count;
+                return state->count < 2 ? TRUE : FALSE;
+            },
+            reinterpret_cast<LPARAM>(&search));
+
+        if (!enumerated && !search.query_failed)
+        {
+            // EnumWindows returning FALSE is expected when the callback stopped
+            // after finding a second candidate. Otherwise it is an enumeration
+            // failure and attribution cannot be proven.
+            if (search.count < 2) return false;
+        }
+        return !search.query_failed;
+    }
+
+    static WindowWaitResult WaitForAttributedWindow(
+        HANDLE job,
+        DWORD timeout_ms,
+        HWND& attributed_window)
+    {
+        attributed_window = nullptr;
+        HWND stable_candidate = nullptr;
+        DWORD stable_observations = 0;
         const ULONGLONG deadline = GetTickCount64() + timeout_ms;
+
         do
         {
-            WindowSearch search{job, nullptr};
-            EnumWindows(
-                [](HWND window, LPARAM value) -> BOOL
+            JobProcessSnapshot processes{};
+            if (!QueryJobProcessSnapshot(job, processes))
+            {
+                return WindowWaitResult::QueryFailure;
+            }
+
+            WindowSearch search{};
+            if (!EnumerateJobTopLevelWindows(processes, search))
+            {
+                return WindowWaitResult::QueryFailure;
+            }
+            if (search.count > 1)
+            {
+                return WindowWaitResult::Ambiguous;
+            }
+
+            if (search.count == 1 && search.first != nullptr)
+            {
+                if (search.first == stable_candidate)
                 {
-                    auto* state = reinterpret_cast<WindowSearch*>(value);
-                    if (!IsWindowVisible(window)) return TRUE;
-                    if (GetWindow(window, GW_OWNER) != nullptr) return TRUE;
+                    ++stable_observations;
+                }
+                else
+                {
+                    stable_candidate = search.first;
+                    stable_observations = 1;
+                }
 
-                    DWORD process_id = 0;
-                    GetWindowThreadProcessId(window, &process_id);
-                    if (process_id == 0) return TRUE;
+                if (stable_observations >= kStableWindowObservations)
+                {
+                    attributed_window = stable_candidate;
+                    return WindowWaitResult::Found;
+                }
+            }
+            else
+            {
+                stable_candidate = nullptr;
+                stable_observations = 0;
+            }
 
-                    HANDLE process = OpenProcess(
-                        PROCESS_QUERY_LIMITED_INFORMATION,
-                        FALSE,
-                        process_id);
-                    if (process == nullptr) return TRUE;
-
-                    BOOL in_job = FALSE;
-                    const BOOL queried = IsProcessInJob(process, state->job, &in_job);
-                    CloseHandle(process);
-                    if (!queried || !in_job) return TRUE;
-
-                    const LONG_PTR style = GetWindowLongPtrW(window, GWL_STYLE);
-                    if ((style & WS_CHILD) != 0) return TRUE;
-                    state->match = window;
-                    return FALSE;
-                },
-                reinterpret_cast<LPARAM>(&search));
-            if (search.match != nullptr) return search.match;
-            Sleep(50);
+            Sleep(kWindowPollIntervalMs);
         } while (GetTickCount64() < deadline);
-        return nullptr;
+
+        return WindowWaitResult::NoWindow;
     }
 
     static bool EnsureHostClass()
@@ -440,8 +612,10 @@ private:
             wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
             wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
             wc.lpszClassName = HostClassName();
+            SetLastError(ERROR_SUCCESS);
             const ATOM atom = RegisterClassExW(&wc);
-            registered.store(atom != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS);
+            const DWORD error = GetLastError();
+            registered.store(atom != 0 || error == ERROR_CLASS_ALREADY_EXISTS);
         });
         return registered.load();
     }
@@ -456,10 +630,10 @@ private:
         return static_cast<int>(rect.bottom - rect.top);
     }
 
-    static RECT InitialHostRect(HWND parent)
+    static bool InitialHostRect(HWND parent, RECT& result)
     {
         RECT client{};
-        GetClientRect(parent, &client);
+        if (!GetClientRect(parent, &client)) return false;
         const int available_width = std::max(320, RectWidth(client));
         const int available_height = std::max(
             240,
@@ -477,7 +651,38 @@ private:
         const int max_y = std::max(0, available_height - height);
         const int x = std::min(kDesktopMarginPx + step, max_x);
         const int y = std::min(kDesktopMarginPx + step, max_y);
-        return RECT{x, y, x + width, y + height};
+        result = RECT{x, y, x + width, y + height};
+        return true;
+    }
+
+    static bool DpiAwarenessMatches(HWND host, HWND app) noexcept
+    {
+        const DPI_AWARENESS_CONTEXT host_context = GetWindowDpiAwarenessContext(host);
+        const DPI_AWARENESS_CONTEXT app_context = GetWindowDpiAwarenessContext(app);
+        if (host_context == nullptr || app_context == nullptr) return false;
+        return AreDpiAwarenessContextsEqual(host_context, app_context) != FALSE;
+    }
+
+    static bool LayoutEmbeddedWindow(Session& session)
+    {
+        if (!IsWindow(session.host_window) || !IsWindow(session.app_window)) return false;
+        if (GetParent(session.app_window) != session.host_window) return false;
+
+        RECT client{};
+        if (!GetClientRect(session.host_window, &client)) return false;
+        if (!SetWindowPos(
+                session.app_window,
+                HWND_TOP,
+                0,
+                0,
+                std::max(1, RectWidth(client)),
+                std::max(1, RectHeight(client)),
+                SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW))
+        {
+            return false;
+        }
+
+        return GetParent(session.app_window) == session.host_window;
     }
 
     static bool EmbedApplicationWindow(Session& session, std::string& error)
@@ -488,42 +693,126 @@ private:
             return false;
         }
 
-        SetLastError(0);
-        HWND previous_parent = SetParent(session.app_window, session.host_window);
-        if (previous_parent == nullptr && GetLastError() != 0)
+        if (!DpiAwarenessMatches(session.host_window, session.app_window))
+        {
+            error = "Managed application DPI awareness is incompatible with safe cross-process containment";
+            return false;
+        }
+
+        SetLastError(ERROR_SUCCESS);
+        const HWND previous_parent = SetParent(session.app_window, session.host_window);
+        const DWORD set_parent_error = GetLastError();
+        if (previous_parent == nullptr && set_parent_error != ERROR_SUCCESS)
         {
             error = "Windows rejected cross-process window containment";
             return false;
         }
+        if (GetParent(session.app_window) != session.host_window)
+        {
+            error = "CloudOS could not verify the managed window parent after SetParent";
+            return false;
+        }
 
-        LONG_PTR style = GetWindowLongPtrW(session.app_window, GWL_STYLE);
+        LONG_PTR style = 0;
+        if (!TryGetWindowLongPtr(session.app_window, GWL_STYLE, style))
+        {
+            error = "CloudOS could not read the managed application window style";
+            return false;
+        }
         style &= ~(WS_POPUP | WS_CAPTION | WS_THICKFRAME |
             WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU);
         style |= WS_CHILD | WS_VISIBLE;
-        SetWindowLongPtrW(session.app_window, GWL_STYLE, style);
+        if (!TrySetWindowLongPtr(session.app_window, GWL_STYLE, style))
+        {
+            error = "CloudOS could not convert the managed application to a child window";
+            return false;
+        }
 
-        LONG_PTR ex_style = GetWindowLongPtrW(session.app_window, GWL_EXSTYLE);
+        LONG_PTR ex_style = 0;
+        if (!TryGetWindowLongPtr(session.app_window, GWL_EXSTYLE, ex_style))
+        {
+            error = "CloudOS could not read the managed application extended style";
+            return false;
+        }
         ex_style &= ~(WS_EX_APPWINDOW | WS_EX_TOOLWINDOW);
         ex_style |= WS_EX_NOPARENTNOTIFY;
-        SetWindowLongPtrW(session.app_window, GWL_EXSTYLE, ex_style);
+        if (!TrySetWindowLongPtr(session.app_window, GWL_EXSTYLE, ex_style))
+        {
+            error = "CloudOS could not apply contained extended window styles";
+            return false;
+        }
 
-        LayoutEmbeddedWindow(session);
+        LONG_PTR verified_style = 0;
+        LONG_PTR verified_ex_style = 0;
+        if (!TryGetWindowLongPtr(session.app_window, GWL_STYLE, verified_style) ||
+            !TryGetWindowLongPtr(session.app_window, GWL_EXSTYLE, verified_ex_style))
+        {
+            error = "CloudOS could not verify managed application styles";
+            return false;
+        }
+        if ((verified_style & WS_CHILD) == 0 ||
+            (verified_style & (WS_POPUP | WS_CAPTION | WS_THICKFRAME | WS_SYSMENU)) != 0 ||
+            (verified_ex_style & WS_EX_APPWINDOW) != 0 ||
+            GetParent(session.app_window) != session.host_window)
+        {
+            error = "Managed application did not enter the required child-window containment state";
+            return false;
+        }
+
+        if (!LayoutEmbeddedWindow(session))
+        {
+            error = "CloudOS could not size the embedded application window safely";
+            return false;
+        }
         return true;
     }
 
-    static void LayoutEmbeddedWindow(Session& session)
+    static bool JobHasActiveProcesses(HANDLE job, bool& active) noexcept
     {
-        if (!IsWindow(session.host_window) || !IsWindow(session.app_window)) return;
-        RECT client{};
-        GetClientRect(session.host_window, &client);
-        SetWindowPos(
-            session.app_window,
-            HWND_TOP,
-            0,
-            0,
-            std::max(1, RectWidth(client)),
-            std::max(1, RectHeight(client)),
-            SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+        active = false;
+        JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting{};
+        if (!QueryInformationJobObject(
+                job,
+                JobObjectBasicAccountingInformation,
+                &accounting,
+                sizeof(accounting),
+                nullptr))
+        {
+            return false;
+        }
+        active = accounting.ActiveProcesses != 0;
+        return true;
+    }
+
+    static bool ValidateContainedSession(Session& session) noexcept
+    {
+        if (!IsWindow(session.host_window) || !IsWindow(session.app_window)) return false;
+        if (GetParent(session.app_window) != session.host_window) return false;
+
+        LONG_PTR style = 0;
+        if (!TryGetWindowLongPtr(session.app_window, GWL_STYLE, style) ||
+            (style & WS_CHILD) == 0)
+        {
+            return false;
+        }
+
+        bool has_active_processes = false;
+        if (!JobHasActiveProcesses(session.job, has_active_processes) || !has_active_processes)
+        {
+            return false;
+        }
+
+        JobProcessSnapshot processes{};
+        if (!QueryJobProcessSnapshot(session.job, processes)) return false;
+
+        WindowSearch escaped{};
+        if (!EnumerateJobTopLevelWindows(processes, escaped)) return false;
+
+        // Once the attributed app HWND is a child, any visible unowned top-level
+        // HWND from the same Job is an escape (secondary UI, relaunch, helper,
+        // or stale containment). Fail closed instead of claiming containment.
+        if (escaped.count != 0) return false;
+        return true;
     }
 
     static HWND FindEmbeddedWindow(HWND host)
@@ -564,10 +853,7 @@ private:
         }
 
         KillTimer(host, kHealthTimerId);
-        if (removed->app_window != nullptr && IsWindow(removed->app_window))
-        {
-            PostMessageW(removed->app_window, WM_CLOSE, 0, 0);
-        }
+        removed->closing = true;
         if (removed->job != nullptr)
         {
             TerminateJobObject(removed->job, ERROR_PROCESS_ABORTED);
@@ -575,17 +861,34 @@ private:
         CleanupSessionHandles(*removed);
     }
 
-    static void MaximizeWithinCloudOS(Session& session)
+    static void FailClosedHost(HWND host, Session& session) noexcept
+    {
+        if (session.closing) return;
+        session.closing = true;
+        if (session.job != nullptr)
+        {
+            TerminateJobObject(session.job, ERROR_INVALID_STATE);
+        }
+        if (IsWindow(host))
+        {
+            DestroyWindow(host);
+        }
+    }
+
+    static bool MaximizeWithinCloudOS(Session& session)
     {
         HWND parent = GetParent(session.host_window);
-        if (parent == nullptr) return;
+        if (parent == nullptr) return false;
         if (!session.maximized)
         {
-            GetWindowRect(session.host_window, &session.restore_rect);
-            POINT top_left{session.restore_rect.left, session.restore_rect.top};
-            POINT bottom_right{session.restore_rect.right, session.restore_rect.bottom};
-            ScreenToClient(parent, &top_left);
-            ScreenToClient(parent, &bottom_right);
+            RECT restore{};
+            if (!GetWindowRect(session.host_window, &restore)) return false;
+            POINT top_left{restore.left, restore.top};
+            POINT bottom_right{restore.right, restore.bottom};
+            if (!ScreenToClient(parent, &top_left) || !ScreenToClient(parent, &bottom_right))
+            {
+                return false;
+            }
             session.restore_rect = RECT{
                 top_left.x,
                 top_left.y,
@@ -595,31 +898,39 @@ private:
         }
 
         RECT client{};
-        GetClientRect(parent, &client);
-        SetWindowPos(
-            session.host_window,
-            HWND_TOP,
-            0,
-            0,
-            std::max(1, RectWidth(client)),
-            std::max(1, RectHeight(client) - kTaskbarReservePx),
-            SWP_SHOWWINDOW);
+        if (!GetClientRect(parent, &client)) return false;
+        if (!SetWindowPos(
+                session.host_window,
+                HWND_TOP,
+                0,
+                0,
+                std::max(1, RectWidth(client)),
+                std::max(1, RectHeight(client) - kTaskbarReservePx),
+                SWP_SHOWWINDOW))
+        {
+            return false;
+        }
         session.maximized = true;
+        return LayoutEmbeddedWindow(session);
     }
 
-    static void RestoreWithinCloudOS(Session& session)
+    static bool RestoreWithinCloudOS(Session& session)
     {
-        if (!session.maximized) return;
+        if (!session.maximized) return true;
         const RECT rect = session.restore_rect;
-        SetWindowPos(
-            session.host_window,
-            HWND_TOP,
-            static_cast<int>(rect.left),
-            static_cast<int>(rect.top),
-            std::max(1, RectWidth(rect)),
-            std::max(1, RectHeight(rect)),
-            SWP_SHOWWINDOW);
+        if (!SetWindowPos(
+                session.host_window,
+                HWND_TOP,
+                static_cast<int>(rect.left),
+                static_cast<int>(rect.top),
+                std::max(1, RectWidth(rect)),
+                std::max(1, RectHeight(rect)),
+                SWP_SHOWWINDOW))
+        {
+            return false;
+        }
         session.maximized = false;
+        return LayoutEmbeddedWindow(session);
     }
 
     static void ClampWindowPosition(HWND host, WINDOWPOS& position)
@@ -628,7 +939,7 @@ private:
         if (parent == nullptr) return;
 
         RECT client{};
-        GetClientRect(parent, &client);
+        if (!GetClientRect(parent, &client)) return;
         const int available_width = std::max(1, RectWidth(client));
         const int available_height = std::max(
             1,
@@ -674,11 +985,22 @@ private:
         switch (message)
         {
         case WM_SIZE:
-            if (session != nullptr) LayoutEmbeddedWindow(*session);
+            if (session != nullptr && session->host_window == window &&
+                !LayoutEmbeddedWindow(*session))
+            {
+                FailClosedHost(window, *session);
+            }
             return 0;
         case WM_SETFOCUS:
-            if (session != nullptr && IsWindow(session->app_window))
+            if (session != nullptr)
+            {
+                if (!IsWindow(session->app_window))
+                {
+                    FailClosedHost(window, *session);
+                    return 0;
+                }
                 SetFocus(session->app_window);
+            }
             return 0;
         case WM_WINDOWPOSCHANGING:
             if (session != nullptr && !session->maximized)
@@ -688,10 +1010,10 @@ private:
             }
             break;
         case WM_TIMER:
-            if (wparam == kHealthTimerId &&
-                (session == nullptr || !IsWindow(session->app_window)))
+            if (wparam == kHealthTimerId && session != nullptr &&
+                !ValidateContainedSession(*session))
             {
-                DestroyWindow(window);
+                FailClosedHost(window, *session);
                 return 0;
             }
             break;
@@ -701,10 +1023,10 @@ private:
                 switch (wparam & 0xFFF0)
                 {
                 case SC_MAXIMIZE:
-                    MaximizeWithinCloudOS(*session);
+                    if (!MaximizeWithinCloudOS(*session)) FailClosedHost(window, *session);
                     return 0;
                 case SC_RESTORE:
-                    RestoreWithinCloudOS(*session);
+                    if (!RestoreWithinCloudOS(*session)) FailClosedHost(window, *session);
                     return 0;
                 case SC_MINIMIZE:
                     ShowWindow(window, SW_MINIMIZE);
