@@ -283,7 +283,8 @@ try {
             $failures.Add('ctrl_c_write_failed')
         } else {
             Start-Sleep -Milliseconds 150
-            [void]$terminal.Write("printf '__CTRL_C__:%s\\n' \"`$?\"`n")
+            $ctrlCProbe = 'printf ''__CTRL_C__:%s\n'' "$?"' + "`n"
+            [void]$terminal.Write($ctrlCProbe)
             if ($terminal.WaitContains('__CTRL_C__:130', $TimeoutSeconds * 1000)) {
                 $evidence.ctrl_c = $true
             } else {
