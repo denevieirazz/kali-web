@@ -63,8 +63,18 @@ foreach ($required in @(
     }
 }
 
+# Reject executable fail-open identity fallbacks. Historical comments may
+# describe the V21 CURRENT_USER SDDL marker and must not trip this contract.
+foreach ($pattern in @(
+    '(?m)\breturn\s+L"CURRENT_USER"\s*;',
+    '(?m)\breturn\s+"CURRENT_USER"\s*;'
+)) {
+    if ($security -match $pattern -or $broker -match $pattern) {
+        throw "System Broker Security V22 fail-open identity fallback found: $pattern"
+    }
+}
+
 foreach ($forbidden in @(
-    'CURRENT_USER',
     'sa_ok ? &sa : nullptr',
     'sa_ok ? &sa : NULL'
 )) {
