@@ -21,6 +21,7 @@ if (-not $OutputPath) {
 }
 $OutputPath = [IO.Path]::GetFullPath($OutputPath)
 $installRoot = Join-Path $env:TEMP ('CloudOS-Install-V22-' + [Guid]::NewGuid().ToString('N'))
+$supervisorStatePath = Join-Path $env:LOCALAPPDATA 'CloudOS\Recovery\supervisor-state-v22.json'
 
 Import-Module -Name $module -Force
 $failures = [Collections.Generic.List[string]]::new()
@@ -31,6 +32,23 @@ try {
         & $installScript -PackageRoot $package -InstallRoot $installRoot -RetainVersions 2 -HealthTimeoutSeconds 45
     }
     catch {
+        $evidence.first_install_exception_type = $_.Exception.GetType().FullName
+        $evidence.first_install_exception_message = $_.Exception.Message
+        if (Test-Path -LiteralPath $supervisorStatePath -PathType Leaf) {
+            try {
+                $supervisorState = Get-Content -LiteralPath $supervisorStatePath -Raw | ConvertFrom-Json
+                $evidence.supervisor_state = [string]$supervisorState.state
+                $evidence.supervisor_reason = [string]$supervisorState.reason
+                $evidence.supervisor_failure_count = [int]$supervisorState.failure_count
+                $evidence.supervisor_last_exit_code = [uint32]$supervisorState.last_exit_code
+                $evidence.supervisor_shell_pid = [uint32]$supervisorState.shell_pid
+                $evidence.supervisor_job_assigned = [bool]$supervisorState.job_kill_on_close_assigned
+                Write-Host "[CloudOS Install V22 smoke] Supervisor state after failed health: state=$($evidence.supervisor_state) reason=$($evidence.supervisor_reason) failures=$($evidence.supervisor_failure_count) lastExit=$($evidence.supervisor_last_exit_code) shellPid=$($evidence.supervisor_shell_pid) jobAssigned=$($evidence.supervisor_job_assigned)"
+            }
+            catch {
+                $evidence.supervisor_state_capture_error = $_.Exception.Message
+            }
+        }
         $failures.Add('FirstInstallFailed:' + $_.Exception.GetType().Name + ':' + $_.Exception.Message)
     }
 
