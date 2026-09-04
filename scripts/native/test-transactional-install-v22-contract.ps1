@@ -73,9 +73,9 @@ if (-not $suite.Contains('test-transactional-install-v22-contract.ps1')) {
     throw 'Central native suite must protect Transactional Install V22.'
 }
 
-foreach ($forbidden in @('SkipPostActivationHealthCheck', 'Invoke-Expression', 'iex ')) {
+foreach ($forbidden in @('SkipPostActivationHealthCheck', 'Invoke-Expression', 'iex ', '$LASTEXITCODE')) {
     if ($install.IndexOf($forbidden, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-        throw "First-install entrypoint must not bypass activation health: $forbidden"
+        throw "First-install entrypoint contains an unsafe or unreliable activation shortcut: $forbidden"
     }
 }
 
@@ -91,4 +91,4 @@ foreach ($path in @($installPath, $updatePath, $healthPath)) {
     }
 }
 
-Write-Host '[PASS] Transactional Install V22: first install shares the central V22 health gate, cannot silently upgrade an existing deployment, and removes a known-bad first activation.'
+Write-Host '[PASS] Transactional Install V22: first install shares the central V22 health gate, cannot silently upgrade an existing deployment, avoids unset native-exit state, and removes a known-bad first activation.'
