@@ -1,5 +1,9 @@
 #pragma once
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #if __has_include("../../CloudOS.SystemBroker/src/protocol_v21.h")
 #include "../../CloudOS.SystemBroker/src/protocol_v21.h"
 #else
