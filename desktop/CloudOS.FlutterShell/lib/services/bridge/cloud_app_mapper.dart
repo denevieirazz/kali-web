@@ -17,6 +17,7 @@ CloudApp cloudAppFromNative(Map<Object?, Object?> raw) {
     icon: _resolveIcon(id, platformName),
     isPinned: raw['pinned'] as bool? ?? false,
     isRecent: raw['recent'] as bool? ?? false,
+    canLaunch: raw['canLaunch'] as bool? ?? true,
   );
 }
 
