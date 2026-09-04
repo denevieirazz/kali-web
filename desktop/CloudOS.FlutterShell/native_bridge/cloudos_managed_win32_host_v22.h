@@ -10,7 +10,6 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
-#include <utility>
 
 namespace CloudOS
 {
@@ -33,8 +32,8 @@ public:
             app_id == "windows:powershell";
     }
 
-    // Returns false instead of falling through to ShellExecute when containment
-    // cannot be proven. This is deliberate fail-closed behavior.
+    // Windows catalog entries must never fall through to the Broker's
+    // ShellExecute path. If containment cannot be proven, fail closed.
     static bool Launch(std::string_view app_id, std::string& error)
     {
         if (!IsContainmentSupported(app_id))
@@ -72,17 +71,15 @@ public:
                 sizeof(limits)))
         {
             error = "Could not configure containment Job Object";
-            CloseHandle(session->job);
-            session->job = nullptr;
+            CleanupSessionHandles(*session);
             return false;
         }
 
         STARTUPINFOW startup{};
         startup.cb = sizeof(startup);
         PROCESS_INFORMATION process{};
-        std::wstring executable = spec.executable;
         if (!CreateProcessW(
-                executable.c_str(),
+                spec.executable.c_str(),
                 nullptr,
                 nullptr,
                 nullptr,
@@ -100,7 +97,6 @@ public:
 
         session->process = process.hProcess;
         session->thread = process.hThread;
-        session->root_process_id = process.dwProcessId;
 
         if (!AssignProcessToJobObject(session->job, session->process))
         {
@@ -120,19 +116,18 @@ public:
         CloseHandle(session->thread);
         session->thread = nullptr;
 
-        // GUI apps may use WaitForInputIdle. Console-hosted apps return failure
-        // here, so the bounded attribution loop below remains the authority.
+        // Console-hosted apps may reject WaitForInputIdle, so the Job-based
+        // attribution loop below remains the actual authority.
         WaitForInputIdle(session->process, 1500);
 
-        HWND app_window = WaitForAttributedWindow(session->job, 5000);
-        if (app_window == nullptr)
+        session->app_window = WaitForAttributedWindow(session->job, 5000);
+        if (session->app_window == nullptr)
         {
             TerminateJobObject(session->job, ERROR_TIMEOUT);
             error = "No attributable top-level window appeared; launch was blocked to prevent escape";
             CleanupSessionHandles(*session);
             return false;
         }
-        session->app_window = app_window;
 
         if (!EnsureHostClass())
         {
@@ -169,7 +164,9 @@ public:
         session->host_window = host;
         if (!EmbedApplicationWindow(*session, error))
         {
+            TerminateJobObject(session->job, ERROR_INVALID_STATE);
             DestroyWindow(host);
+            CleanupSessionHandles(*session);
             return false;
         }
 
@@ -178,10 +175,17 @@ public:
             Sessions().emplace(host, std::move(session));
         }
 
+        SetTimer(host, kHealthTimerId, 500, nullptr);
         ShowWindow(host, SW_SHOW);
-        SetWindowPos(host, HWND_TOP, 0, 0, 0, 0,
+        SetWindowPos(
+            host,
+            HWND_TOP,
+            0,
+            0,
+            0,
+            0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
-        SetFocus(app_window);
+        SetFocus(FindEmbeddedWindow(host));
         return true;
     }
 
@@ -199,7 +203,6 @@ private:
         HANDLE job{nullptr};
         HANDLE process{nullptr};
         HANDLE thread{nullptr};
-        DWORD root_process_id{0};
         HWND host_window{nullptr};
         HWND app_window{nullptr};
         RECT restore_rect{};
@@ -220,6 +223,7 @@ private:
 
     static constexpr int kTaskbarReservePx = 56;
     static constexpr int kDesktopMarginPx = 24;
+    static constexpr UINT_PTR kHealthTimerId = 0xC105;
 
     static const wchar_t* HostClassName() noexcept
     {
@@ -255,13 +259,13 @@ private:
         if (app_id == "windows:notepad")
         {
             spec.executable = system32 + L"\\notepad.exe";
-            spec.title = L"Bloco de Notas — CloudOS";
+            spec.title = L"Notepad - CloudOS";
             return true;
         }
         if (app_id == "windows:cmd")
         {
             spec.executable = system32 + L"\\cmd.exe";
-            spec.title = L"Prompt de Comando — CloudOS";
+            spec.title = L"Command Prompt - CloudOS";
             return true;
         }
         if (app_id == "windows:powershell")
@@ -275,7 +279,7 @@ private:
             }
             spec.executable = std::wstring(windows_directory, windows_length) +
                 L"\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
-            spec.title = L"PowerShell — CloudOS";
+            spec.title = L"PowerShell - CloudOS";
             return true;
         }
 
@@ -379,9 +383,15 @@ private:
         RECT client{};
         GetClientRect(parent, &client);
         const int available_width = std::max(320, client.right - client.left);
-        const int available_height = std::max(240, client.bottom - client.top - kTaskbarReservePx);
-        const int width = std::min(920, std::max(320, available_width - (kDesktopMarginPx * 2)));
-        const int height = std::min(620, std::max(240, available_height - (kDesktopMarginPx * 2)));
+        const int available_height = std::max(
+            240,
+            client.bottom - client.top - kTaskbarReservePx);
+        const int width = std::min(
+            920,
+            std::max(320, available_width - (kDesktopMarginPx * 2)));
+        const int height = std::min(
+            620,
+            std::max(240, available_height - (kDesktopMarginPx * 2)));
 
         static std::atomic_uint32_t cascade{0};
         const int step = static_cast<int>((cascade.fetch_add(1) % 8) * 24);
@@ -404,7 +414,6 @@ private:
         HWND previous_parent = SetParent(session.app_window, session.host_window);
         if (previous_parent == nullptr && GetLastError() != 0)
         {
-            TerminateJobObject(session.job, ERROR_INVALID_STATE);
             error = "Windows rejected cross-process window containment";
             return false;
         }
@@ -439,6 +448,13 @@ private:
             SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
     }
 
+    static HWND FindEmbeddedWindow(HWND host)
+    {
+        std::lock_guard<std::mutex> lock(SessionsMutex());
+        const auto it = Sessions().find(host);
+        return it == Sessions().end() ? nullptr : it->second->app_window;
+    }
+
     static void CleanupSessionHandles(Session& session)
     {
         if (session.thread != nullptr)
@@ -469,6 +485,7 @@ private:
             Sessions().erase(it);
         }
 
+        KillTimer(host, kHealthTimerId);
         if (removed->app_window != nullptr && IsWindow(removed->app_window))
         {
             PostMessageW(removed->app_window, WM_CLOSE, 0, 0);
@@ -527,11 +544,28 @@ private:
         session.maximized = false;
     }
 
-    static Session* SessionForWindow(HWND host)
+    static void ClampWindowPosition(HWND host, WINDOWPOS& position)
     {
-        std::lock_guard<std::mutex> lock(SessionsMutex());
-        const auto it = Sessions().find(host);
-        return it == Sessions().end() ? nullptr : it->second.get();
+        HWND parent = GetParent(host);
+        if (parent == nullptr) return;
+
+        RECT client{};
+        GetClientRect(parent, &client);
+        const int available_width = std::max(1, client.right - client.left);
+        const int available_height = std::max(
+            1,
+            client.bottom - client.top - kTaskbarReservePx);
+
+        if ((position.flags & SWP_NOSIZE) == 0)
+        {
+            position.cx = std::clamp(position.cx, 260, available_width);
+            position.cy = std::clamp(position.cy, 180, available_height);
+        }
+        if ((position.flags & SWP_NOMOVE) == 0)
+        {
+            position.x = std::clamp(position.x, 0, std::max(0, available_width - position.cx));
+            position.y = std::clamp(position.y, 0, std::max(0, available_height - position.cy));
+        }
     }
 
     static LRESULT CALLBACK HostWindowProc(
@@ -562,6 +596,21 @@ private:
             if (session != nullptr && IsWindow(session->app_window))
                 SetFocus(session->app_window);
             return 0;
+        case WM_WINDOWPOSCHANGING:
+            if (session != nullptr && !session->maximized)
+            {
+                auto* position = reinterpret_cast<WINDOWPOS*>(lparam);
+                if (position != nullptr) ClampWindowPosition(window, *position);
+            }
+            break;
+        case WM_TIMER:
+            if (wparam == kHealthTimerId &&
+                (session == nullptr || !IsWindow(session->app_window)))
+            {
+                DestroyWindow(window);
+                return 0;
+            }
+            break;
         case WM_SYSCOMMAND:
             if (session != nullptr)
             {
