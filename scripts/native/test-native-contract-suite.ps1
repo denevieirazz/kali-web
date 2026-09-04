@@ -36,6 +36,7 @@ $contracts = @(
     'test-unified-integration-v16-contract.ps1',
     'test-unified-start-search-v17-contract.ps1',
     'test-system-broker-v21-contract.ps1',
+    'test-system-broker-security-v22-contract.ps1',
     'test-v21-integrated-runtime-contract.ps1',
     'test-shell-notification-bridge-v21-contract.ps1'
 )
