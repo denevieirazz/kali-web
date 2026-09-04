@@ -41,11 +41,15 @@ class TerminalWindow extends StatefulWidget {
     this.bridge = const CloudOSBridge(),
     this.initialDistro,
     this.initialShell = TerminalShellKind.powershell,
+    this.requestedShell,
+    this.launchRevision = 0,
   });
 
   final CloudOSBridge bridge;
   final String? initialDistro;
   final TerminalShellKind initialShell;
+  final TerminalShellKind? requestedShell;
+  final int launchRevision;
 
   @override
   State<TerminalWindow> createState() => _TerminalWindowState();
@@ -73,6 +77,16 @@ class _TerminalWindowState extends State<TerminalWindow> {
       _createInitialTab();
     }
     unawaited(_initialize());
+  }
+
+  @override
+  void didUpdateWidget(covariant TerminalWindow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.launchRevision == widget.launchRevision ||
+        widget.requestedShell == null) {
+      return;
+    }
+    _activateShell(widget.requestedShell!);
   }
 
   Future<void> _initialize() async {
@@ -150,6 +164,25 @@ class _TerminalWindowState extends State<TerminalWindow> {
       case TerminalShellKind.powershell:
         return 'PowerShell (ConPTY)';
     }
+  }
+
+  void _activateShell(TerminalShellKind kind, {String distro = ''}) {
+    final resolvedDistro = kind == TerminalShellKind.wsl && distro.isEmpty
+        ? _defaultDistro
+        : distro;
+    final existingIndex = _tabs.indexWhere((tab) {
+      if (tab.shellKind != kind) return false;
+      if (kind == TerminalShellKind.wsl && tab.distro != resolvedDistro) {
+        return false;
+      }
+      return tab.isRunning || tab.sessionId == null;
+    });
+
+    if (existingIndex >= 0) {
+      _selectTab(existingIndex);
+      return;
+    }
+    _addNewTab(kind, distro: resolvedDistro);
   }
 
   void _addNewTab(TerminalShellKind kind, {String distro = ''}) {
