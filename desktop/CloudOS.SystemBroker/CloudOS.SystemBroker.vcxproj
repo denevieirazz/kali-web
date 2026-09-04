@@ -53,6 +53,7 @@
     <ClInclude Include="src\system_control_v21.h" />
     <ClInclude Include="src\system_service_v21.h" />
     <ClInclude Include="src\wsl_service_v21.h" />
+    <ClInclude Include="src\wsl_probe_service_v22.h" />
     <ClInclude Include="src\diagnostics_v21.h" />
     <ClInclude Include="src\broker_server_v21.h" />
   </ItemGroup>
@@ -67,6 +68,7 @@
     <ClCompile Include="src\system_control_v21.cpp" />
     <ClCompile Include="src\system_service_v21.cpp" />
     <ClCompile Include="src\wsl_service_v21.cpp" />
+    <ClCompile Include="src\wsl_probe_service_v22.cpp" />
     <ClCompile Include="src\diagnostics_v21.cpp" />
     <ClCompile Include="src\broker_server_v21.cpp" />
     <ClCompile Include="src\broker_main.cpp" />

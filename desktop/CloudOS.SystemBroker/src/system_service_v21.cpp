@@ -171,6 +171,7 @@ std::vector<std::string> SystemServiceV21::GetCapabilities()
         "wsl.list",
         "wsl.inventory.typed",
         "wsl.inventory.health",
+        "wsl.health.probe",
         "events.subscribe",
         "events.unsubscribe",
         "jobs.submit",
