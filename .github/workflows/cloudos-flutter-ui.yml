@@ -2,6 +2,22 @@ name: CloudOS Flutter UI
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'desktop/CloudOS.FlutterShell/**'
+      - 'desktop/CloudOS.SystemBroker/**'
+      - 'desktop/CloudOS.BrokerProbe/**'
+      - 'desktop/CloudOS.NativeCommon/**'
+      - 'desktop/CloudOS.NativeRecovery/**'
+      - 'desktop/CloudOS.NativeRuntime/**'
+      - 'desktop/CloudOS.NativeShell/**'
+      - 'scripts/native/**'
+      - 'scripts/flutter/**'
+      - 'Abrir CloudOS Flutter Preview.cmd'
+      - 'Abrir CloudOS V21 Flutter com System Broker.cmd'
+      - '.github/workflows/cloudos-flutter-ui.yml'
   pull_request:
     paths:
       - 'desktop/CloudOS.FlutterShell/**'
