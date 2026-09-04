@@ -290,7 +290,7 @@ void AppServiceV21::Refresh()
     apps_.push_back({"cloudos:calculator", "Calculadora", "cloudos", "Calculadora de Sistema", "", "Utilitários", "CloudOS", true, false, false, "calculator", false, false});
     apps_.push_back({"cloudos:settings", "Configurações", "cloudos", "Painel de Controle e Ajustes", "", "Sistema", "CloudOS", true, false, false, "settings", false, false});
     apps_.push_back({"cloudos:drive", "CloudOS Drive", "cloudos", "Workspace & Projetos", "", "Produtividade", "CloudOS", true, false, false, "drive", false, false});
-    apps_.push_back({"cloudos:trash", "Lixeira", "cloudos", "Itens e Pastas Deletados", "", "Sistema", "CloudOS", true, false, false, "trash", false, false});
+    apps_.push_back({"cloudos:trash", "Lixeira", "cloudos", "Indisponível até a superfície first-party de lixeira", "", "Sistema", "CloudOS", false, false, false, "trash", false, false});
 
     // 2. Windows Native Applications
     apps_.push_back({"windows:vscode", "Visual Studio Code", "windows", "Code Editor & IDE", "", "Produtividade", "Windows", true, true, false, "vscode", true, true});
@@ -363,17 +363,13 @@ bool AppServiceV21::LaunchApp(const std::string& app_id, std::string& err)
     }
     if (app_id == "drive" || app_id == "cloudos:drive")
     {
-        WCHAR user_profile[MAX_PATH]{};
-        if (GetEnvironmentVariableW(L"USERPROFILE", user_profile, MAX_PATH) > 0)
-        {
-            return LaunchSucceeded(ShellExecuteW(nullptr, L"open", user_profile, nullptr, nullptr, SW_SHOWNORMAL));
-        }
-        err = "USERPROFILE is unavailable";
+        err = "CloudOS Drive is a first-party Files location and must be opened by the CloudOS shell";
         return false;
     }
     if (app_id == "trash" || app_id == "cloudos:trash")
     {
-        return LaunchSucceeded(ShellExecuteW(nullptr, L"open", L"shell:RecycleBinFolder", nullptr, nullptr, SW_SHOWNORMAL));
+        err = "CloudOS Trash has no approved first-party surface yet";
+        return false;
     }
 
     // Windows Native Apps
