@@ -16,7 +16,9 @@ namespace CloudOS
 
 // V22 containment boundary for classic Win32 applications launched from the
 // Flutter shell. Dart never receives HWNDs, executable paths, or command lines.
-// Only fixed catalog IDs reach this code path.
+// Every windows:* request is consumed here. If containment cannot be proven,
+// the external launch is blocked and an owned CloudOS warning is shown so the
+// legacy V20 caller cannot fall through to ShellExecute.
 class ManagedWin32HostV22 final
 {
 public:
@@ -32,25 +34,37 @@ public:
             app_id == "windows:powershell";
     }
 
-    // Windows catalog entries must never fall through to the Broker's
-    // ShellExecute path. If containment cannot be proven, fail closed.
+    // The bool means the Windows request was safely handled, not necessarily
+    // that an application reached the running state. Returning true after an
+    // explicit fail-closed warning is intentional: CloudOSFlutterBridgeV20 has
+    // a historical fallback path and must never retry a windows:* request with
+    // ShellExecute after V22 has rejected containment.
     static bool Launch(std::string_view app_id, std::string& error)
     {
+        if (!IsWindowsCatalogId(app_id))
+        {
+            error = "ManagedWin32HostV22 only accepts windows catalog IDs";
+            return false;
+        }
+
         if (!IsContainmentSupported(app_id))
         {
-            error = "Windows application is not yet approved for CloudOS containment";
-            return false;
+            error = "This Windows application is not yet approved for CloudOS containment";
+            return BlockLaunch(app_id, error);
         }
 
         HWND cloudos_window = FindCloudOSWindow();
         if (cloudos_window == nullptr)
         {
             error = "CloudOS host window was not found";
-            return false;
+            return BlockLaunch(app_id, error);
         }
 
         LaunchSpec spec{};
-        if (!ResolveLaunchSpec(app_id, spec, error)) return false;
+        if (!ResolveLaunchSpec(app_id, spec, error))
+        {
+            return BlockLaunch(app_id, error);
+        }
 
         auto session = std::make_unique<Session>();
         session->app_id = std::string(app_id);
@@ -59,7 +73,7 @@ public:
         if (session->job == nullptr)
         {
             error = "Could not create containment Job Object";
-            return false;
+            return BlockLaunch(app_id, error);
         }
 
         JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
@@ -72,7 +86,7 @@ public:
         {
             error = "Could not configure containment Job Object";
             CleanupSessionHandles(*session);
-            return false;
+            return BlockLaunch(app_id, error);
         }
 
         STARTUPINFOW startup{};
@@ -92,7 +106,7 @@ public:
         {
             error = "Could not start the allowlisted Windows application";
             CleanupSessionHandles(*session);
-            return false;
+            return BlockLaunch(app_id, error);
         }
 
         session->process = process.hProcess;
@@ -103,7 +117,7 @@ public:
             TerminateProcess(session->process, ERROR_ACCESS_DENIED);
             error = "Windows application could not be assigned to the CloudOS containment job";
             CleanupSessionHandles(*session);
-            return false;
+            return BlockLaunch(app_id, error);
         }
 
         if (ResumeThread(session->thread) == static_cast<DWORD>(-1))
@@ -111,13 +125,13 @@ public:
             TerminateJobObject(session->job, ERROR_PROCESS_ABORTED);
             error = "Windows application could not be resumed inside containment";
             CleanupSessionHandles(*session);
-            return false;
+            return BlockLaunch(app_id, error);
         }
         CloseHandle(session->thread);
         session->thread = nullptr;
 
-        // Console-hosted apps may reject WaitForInputIdle, so the Job-based
-        // attribution loop below remains the actual authority.
+        // Console-hosted apps may reject WaitForInputIdle. The Job-based HWND
+        // attribution loop is the authority and never accepts an unrelated HWND.
         WaitForInputIdle(session->process, 1500);
 
         session->app_window = WaitForAttributedWindow(session->job, 5000);
@@ -126,7 +140,7 @@ public:
             TerminateJobObject(session->job, ERROR_TIMEOUT);
             error = "No attributable top-level window appeared; launch was blocked to prevent escape";
             CleanupSessionHandles(*session);
-            return false;
+            return BlockLaunch(app_id, error);
         }
 
         if (!EnsureHostClass())
@@ -134,7 +148,7 @@ public:
             TerminateJobObject(session->job, ERROR_INVALID_FUNCTION);
             error = "CloudOS managed-window host class is unavailable";
             CleanupSessionHandles(*session);
-            return false;
+            return BlockLaunch(app_id, error);
         }
 
         const RECT initial = InitialHostRect(cloudos_window);
@@ -158,7 +172,7 @@ public:
             TerminateJobObject(session->job, ERROR_NOT_ENOUGH_MEMORY);
             error = "CloudOS could not create the managed application frame";
             CleanupSessionHandles(*session);
-            return false;
+            return BlockLaunch(app_id, error);
         }
 
         session->host_window = host;
@@ -167,7 +181,7 @@ public:
             TerminateJobObject(session->job, ERROR_INVALID_STATE);
             DestroyWindow(host);
             CleanupSessionHandles(*session);
-            return false;
+            return BlockLaunch(app_id, error);
         }
 
         {
@@ -240,6 +254,50 @@ private:
     {
         static std::mutex mutex;
         return mutex;
+    }
+
+    static std::wstring Utf8ToWide(std::string_view value)
+    {
+        if (value.empty()) return {};
+        const int required = MultiByteToWideChar(
+            CP_UTF8,
+            0,
+            value.data(),
+            static_cast<int>(value.size()),
+            nullptr,
+            0);
+        if (required <= 0) return L"Unknown containment failure";
+
+        std::wstring result(static_cast<std::size_t>(required), L'\0');
+        if (MultiByteToWideChar(
+                CP_UTF8,
+                0,
+                value.data(),
+                static_cast<int>(value.size()),
+                result.data(),
+                required) != required)
+        {
+            return L"Unknown containment failure";
+        }
+        return result;
+    }
+
+    static bool BlockLaunch(std::string_view app_id, const std::string& error)
+    {
+        std::wstring message =
+            L"CloudOS blocked this Windows application from opening outside its managed desktop.\n\n";
+        message += L"Application: ";
+        message += Utf8ToWide(app_id);
+        message += L"\nReason: ";
+        message += Utf8ToWide(error);
+        message += L"\n\nThe application was not allowed to escape into the Windows desktop.";
+
+        MessageBoxW(
+            FindCloudOSWindow(),
+            message.c_str(),
+            L"CloudOS - Windows application blocked",
+            MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
+        return true;
     }
 
     static bool ResolveLaunchSpec(
@@ -563,8 +621,14 @@ private:
         }
         if ((position.flags & SWP_NOMOVE) == 0)
         {
-            position.x = std::clamp(position.x, 0, std::max(0, available_width - position.cx));
-            position.y = std::clamp(position.y, 0, std::max(0, available_height - position.cy));
+            position.x = std::clamp(
+                position.x,
+                0,
+                std::max(0, available_width - position.cx));
+            position.y = std::clamp(
+                position.y,
+                0,
+                std::max(0, available_height - position.cy));
         }
     }
 
