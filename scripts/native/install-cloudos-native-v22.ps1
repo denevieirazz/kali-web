@@ -3,7 +3,7 @@ param(
     [string]$PackageRoot = $PSScriptRoot,
     [string]$InstallRoot,
     [int]$RetainVersions = 2,
-    [int]$HealthTimeoutSeconds = 45,
+    [int]$HealthTimeoutSeconds = 60,
     [switch]$RequireAuthenticodeSignature
 )
 
