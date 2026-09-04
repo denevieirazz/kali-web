@@ -14,7 +14,11 @@ namespace
 
 std::wstring Utf8ToWide(const std::string& str)
 {
-    if (str.empty()) return {};
+    if (str.empty() || str.size() > static_cast<std::size_t>((std::numeric_limits<int>::max)()))
+    {
+        return {};
+    }
+
     const int size = MultiByteToWideChar(
         CP_UTF8,
         MB_ERR_INVALID_CHARS,
@@ -23,14 +27,18 @@ std::wstring Utf8ToWide(const std::string& str)
         nullptr,
         0);
     if (size <= 0) return {};
-    std::wstring result(size, 0);
-    MultiByteToWideChar(
-        CP_UTF8,
-        MB_ERR_INVALID_CHARS,
-        str.data(),
-        static_cast<int>(str.size()),
-        result.data(),
-        size);
+
+    std::wstring result(static_cast<std::size_t>(size), L'\0');
+    if (MultiByteToWideChar(
+            CP_UTF8,
+            MB_ERR_INVALID_CHARS,
+            str.data(),
+            static_cast<int>(str.size()),
+            result.data(),
+            size) != size)
+    {
+        return {};
+    }
     return result;
 }
 
@@ -86,6 +94,8 @@ public:
     {
         SIZE_T size = 0;
         InitializeProcThreadAttributeList(nullptr, 1, 0, &size);
+        if (size == 0) return false;
+
         storage_ = std::malloc(size);
         if (!storage_) return false;
         list_ = static_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(storage_);
@@ -141,6 +151,13 @@ size_t CompleteUtf8PrefixLength(const std::string& data)
     return continuation_count + 1 < expected ? lead_index : data.size();
 }
 
+std::size_t PlatformEventBytes(
+    const std::string& session_id,
+    const std::string& data) noexcept
+{
+    return session_id.size() + data.size() + sizeof(int) + sizeof(std::uint8_t);
+}
+
 } // namespace
 
 CloudOSConPTYManager& CloudOSConPTYManager::Instance()
@@ -163,8 +180,17 @@ void CloudOSConPTYManager::SetMethodChannel(
 
 void CloudOSConPTYManager::SetPlatformWindow(HWND window)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    platform_window_ = window;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        platform_window_ = window;
+    }
+
+    if (window == nullptr)
+    {
+        std::lock_guard<std::mutex> lock(event_mutex_);
+        pending_events_.clear();
+        pending_event_bytes_ = 0;
+    }
 }
 
 void CloudOSConPTYManager::SetEventSinkForTesting(
@@ -181,6 +207,28 @@ std::string CloudOSConPTYManager::CreateSession(
     int rows,
     std::string& out_error)
 {
+    out_error.clear();
+
+    if (shell_kind != "wsl" && shell_kind != "cmd" && shell_kind != "powershell")
+    {
+        out_error = "Unsupported shell kind";
+        return {};
+    }
+    if (distro.size() > kMaxDistroNameBytes)
+    {
+        out_error = "WSL distribution name is too long";
+        return {};
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (sessions_.size() >= kMaxSessions)
+        {
+            out_error = "CloudOS terminal session limit reached";
+            return {};
+        }
+    }
+
     cols = std::clamp(cols, 1, static_cast<int>((std::numeric_limits<SHORT>::max)()));
     rows = std::clamp(rows, 1, static_cast<int>((std::numeric_limits<SHORT>::max)()));
 
@@ -270,14 +318,9 @@ std::string CloudOSConPTYManager::CreateSession(
     {
         command_line = L"cmd.exe";
     }
-    else if (shell_kind == "powershell")
-    {
-        command_line = L"powershell.exe -NoLogo -NoProfile";
-    }
     else
     {
-        out_error = "Unsupported shell kind: " + shell_kind;
-        return {};
+        command_line = L"powershell.exe -NoLogo -NoProfile";
     }
 
     std::vector<wchar_t> command_buffer(command_line.begin(), command_line.end());
@@ -309,6 +352,12 @@ std::string CloudOSConPTYManager::CreateSession(
     UniqueWinHandle primary_thread(process_info.hThread);
 
     const uint64_t id_number = ++session_counter_;
+    if (id_number == 0)
+    {
+        TerminateProcess(process.get(), ERROR_ARITHMETIC_OVERFLOW);
+        out_error = "CloudOS terminal session id space exhausted";
+        return {};
+    }
     const std::string session_id =
         "pty_" + std::to_string(id_number) + "_" + shell_kind;
 
@@ -328,7 +377,22 @@ std::string CloudOSConPTYManager::CreateSession(
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        sessions_.emplace(session_id, session);
+        if (sessions_.size() >= kMaxSessions)
+        {
+            session->closing.store(true);
+            TerminateProcess(session->process.get(), ERROR_TOO_MANY_OPEN_FILES);
+            out_error = "CloudOS terminal session limit reached";
+            return {};
+        }
+        const auto [it, inserted] = sessions_.emplace(session_id, session);
+        (void)it;
+        if (!inserted)
+        {
+            session->closing.store(true);
+            TerminateProcess(session->process.get(), ERROR_ALREADY_EXISTS);
+            out_error = "CloudOS terminal session identity collision";
+            return {};
+        }
     }
 
     try
@@ -354,6 +418,7 @@ void CloudOSConPTYManager::ReaderLoop(
     constexpr DWORD kBufferSize = 8192;
     char buffer[kBufferSize];
     std::string utf8_pending;
+    bool output_delivery_failed = false;
 
     while (!session->closing.load())
     {
@@ -370,53 +435,79 @@ void CloudOSConPTYManager::ReaderLoop(
         const size_t complete_length = CompleteUtf8PrefixLength(utf8_pending);
         if (complete_length > 0)
         {
-            NotifyData(session->session_id, utf8_pending.substr(0, complete_length));
+            if (!NotifyData(session->session_id, utf8_pending.substr(0, complete_length)))
+            {
+                output_delivery_failed = true;
+                break;
+            }
             utf8_pending.erase(0, complete_length);
         }
     }
 
-    if (!utf8_pending.empty() && !session->closing.load())
+    if (!output_delivery_failed &&
+        !utf8_pending.empty() &&
+        !session->closing.load() &&
+        !NotifyData(session->session_id, std::move(utf8_pending)))
     {
-        NotifyData(session->session_id, std::move(utf8_pending));
+        output_delivery_failed = true;
     }
 
-    DWORD exit_code = 0;
-    const HANDLE process = session->process.get();
+    HANDLE process = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(session->io_mutex);
+        process = session->process.get();
+    }
+
+    DWORD exit_code = ERROR_PROCESS_ABORTED;
     if (process && process != INVALID_HANDLE_VALUE)
     {
-        WaitForSingleObject(process, INFINITE);
-        GetExitCodeProcess(process, &exit_code);
+        if (output_delivery_failed)
+        {
+            TerminateProcess(process, ERROR_NOT_ENOUGH_MEMORY);
+        }
+
+        DWORD wait_result = WaitForSingleObject(process, kProcessExitWaitMs);
+        if (wait_result == WAIT_TIMEOUT && !session->closing.load())
+        {
+            TerminateProcess(process, ERROR_PROCESS_ABORTED);
+            wait_result = WaitForSingleObject(process, kProcessExitWaitMs);
+        }
+        if (wait_result == WAIT_OBJECT_0)
+        {
+            GetExitCodeProcess(process, &exit_code);
+        }
     }
+
     session->is_alive.store(false);
     if (!session->closing.load())
     {
-        NotifyExit(session->session_id, static_cast<int>(exit_code));
+        (void)NotifyExit(session->session_id, static_cast<int>(exit_code));
     }
 }
 
-void CloudOSConPTYManager::NotifyData(
+bool CloudOSConPTYManager::NotifyData(
     const std::string& session_id,
     std::string data)
 {
-    QueuePlatformEvent({
+    return QueuePlatformEvent({
         PlatformEventKind::data,
         session_id,
         std::move(data),
         0});
 }
 
-void CloudOSConPTYManager::NotifyExit(
+bool CloudOSConPTYManager::NotifyExit(
     const std::string& session_id,
     int exit_code)
 {
-    QueuePlatformEvent({
+    return QueuePlatformEvent({
         PlatformEventKind::exit,
         session_id,
         {},
         exit_code});
 }
 
-void CloudOSConPTYManager::QueuePlatformEvent(PlatformEvent event)
+bool CloudOSConPTYManager::QueuePlatformEvent(PlatformEvent event)
 {
     HWND window = nullptr;
     std::function<void(const std::string&, const std::string&, int, bool)> test_sink;
@@ -425,6 +516,8 @@ void CloudOSConPTYManager::QueuePlatformEvent(PlatformEvent event)
         window = platform_window_;
         test_sink = test_event_sink_;
     }
+
+    bool delivered_to_test_sink = false;
     if (test_sink)
     {
         test_sink(
@@ -432,14 +525,49 @@ void CloudOSConPTYManager::QueuePlatformEvent(PlatformEvent event)
             event.data,
             event.exit_code,
             event.kind == PlatformEventKind::exit);
+        delivered_to_test_sink = true;
     }
-    if (!window) return;
 
+    if (window == nullptr || !IsWindow(window)) return delivered_to_test_sink;
+
+    const std::size_t event_bytes = PlatformEventBytes(event.session_id, event.data);
+    if (event_bytes > kMaxPendingEventBytes) return false;
+
+    std::lock_guard<std::mutex> lock(event_mutex_);
+
+    if (event.kind == PlatformEventKind::exit)
     {
-        std::lock_guard<std::mutex> lock(event_mutex_);
-        pending_events_.push_back(std::move(event));
+        // Exit must remain observable. If a terminal flooded the UI queue,
+        // discard older queued frames until the terminal's bounded exit state
+        // can be delivered. This is preferable to retaining an unbounded queue.
+        while (!pending_events_.empty() &&
+               (pending_events_.size() >= kMaxPendingEventFrames ||
+                pending_event_bytes_ > kMaxPendingEventBytes - event_bytes))
+        {
+            pending_event_bytes_ -= PlatformEventBytes(
+                pending_events_.front().session_id,
+                pending_events_.front().data);
+            pending_events_.pop_front();
+        }
     }
-    PostMessageW(window, kDispatchMessage, 0, 0);
+    else if (pending_events_.size() >= kMaxPendingEventFrames ||
+             pending_event_bytes_ > kMaxPendingEventBytes - event_bytes)
+    {
+        return false;
+    }
+
+    pending_event_bytes_ += event_bytes;
+    pending_events_.push_back(std::move(event));
+
+    if (!PostMessageW(window, kDispatchMessage, 0, 0))
+    {
+        pending_event_bytes_ -= PlatformEventBytes(
+            pending_events_.back().session_id,
+            pending_events_.back().data);
+        pending_events_.pop_back();
+        return false;
+    }
+    return true;
 }
 
 void CloudOSConPTYManager::DrainPlatformEvents()
@@ -448,6 +576,7 @@ void CloudOSConPTYManager::DrainPlatformEvents()
     {
         std::lock_guard<std::mutex> lock(event_mutex_);
         events.swap(pending_events_);
+        pending_event_bytes_ = 0;
     }
 
     flutter::MethodChannel<flutter::EncodableValue>* channel = nullptr;
@@ -485,6 +614,8 @@ bool CloudOSConPTYManager::WriteSession(
     const std::string& session_id,
     const std::string& input_data)
 {
+    if (input_data.size() > kMaxWriteBytes) return false;
+
     std::shared_ptr<ConPTYSession> session;
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -517,14 +648,23 @@ bool CloudOSConPTYManager::WriteSession(
         write_handle.reset(duplicate);
     }
 
-    DWORD bytes_written = 0;
-    const BOOL success = WriteFile(
-        write_handle.get(),
-        input_data.data(),
-        static_cast<DWORD>(input_data.size()),
-        &bytes_written,
-        nullptr);
-    return success == TRUE && bytes_written == input_data.size();
+    std::size_t total_written = 0;
+    while (total_written < input_data.size())
+    {
+        DWORD bytes_written = 0;
+        const DWORD remaining = static_cast<DWORD>(input_data.size() - total_written);
+        if (!WriteFile(
+                write_handle.get(),
+                input_data.data() + total_written,
+                remaining,
+                &bytes_written,
+                nullptr) || bytes_written == 0)
+        {
+            return false;
+        }
+        total_written += bytes_written;
+    }
+    return true;
 }
 
 bool CloudOSConPTYManager::ResizeSession(
@@ -603,9 +743,11 @@ bool CloudOSConPTYManager::CloseSession(const std::string& session_id)
     const HANDLE process = session->process.get();
     if (process && process != INVALID_HANDLE_VALUE)
     {
-        if (WaitForSingleObject(process, 250) == WAIT_TIMEOUT)
+        DWORD wait_result = WaitForSingleObject(process, 250);
+        if (wait_result == WAIT_TIMEOUT)
         {
-            TerminateProcess(process, 0);
+            TerminateProcess(process, ERROR_PROCESS_ABORTED);
+            (void)WaitForSingleObject(process, kProcessExitWaitMs);
         }
     }
 
@@ -686,7 +828,9 @@ void CloudOSConPTYManager::ShutdownAll()
     {
         CloseSession(session_id);
     }
+
+    SetPlatformWindow(nullptr);
+    SetMethodChannel(nullptr);
 }
 
 } // namespace CloudOS
-
