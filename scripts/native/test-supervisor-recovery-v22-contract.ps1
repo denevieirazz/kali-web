@@ -41,6 +41,15 @@ foreach ($required in @(
     'SAFE_MODE',
     'STOPPING',
     'kV22CrashWindowMs = 60000ull',
+    'kV22ReadyHeartbeatObservationMs = 12000u',
+    'kV22GracefulPrimaryWaitMs = 5000u',
+    'kV22GracefulAcknowledgedExtensionMs = 5000u',
+    'kV22HealthShuttingDownState = 3u',
+    'ProbeReadyHeartbeatV22',
+    'RequestGracefulExitV22',
+    'snapshot.heartbeat_count >= target',
+    'snapshot.state == kV22HealthShuttingDownState',
+    'if (!shutdown_acknowledged) return false',
     'supervisor-state-v22.json',
     'MoveFileExW',
     'MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH',
@@ -109,6 +118,9 @@ if ($project -match '<ClCompile Include="main\.cpp">') {
 foreach ($required in @(
     '--probe-ready-once',
     '--probe-failure-loop',
+    'ready_probe_repeat_exit_code',
+    'ReadyProbeRepeatExit',
+    'ready_probe_repeat_final_state',
     "'SAFE_MODE'",
     'CrashBudgetNotExhausted',
     'remaining_installation_shell_processes',
@@ -154,4 +166,4 @@ foreach ($forbidden in @(
     }
 }
 
-Write-Host '[PASS] Supervisor/Recovery V22 contract: explicit states, rolling crash budget, atomic journal, kill-on-close Job Object, Windows servicing restart registration, runtime smoke and Explorer safe mode.'
+Write-Host '[PASS] Supervisor/Recovery V22 contract: explicit states, bounded repeated ready probe, acknowledged graceful extension, rolling crash budget, atomic journal, kill-on-close Job Object, Windows servicing restart registration and Explorer safe mode.'
