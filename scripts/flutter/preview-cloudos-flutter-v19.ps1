@@ -10,8 +10,27 @@ Set-StrictMode -Version Latest
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $uiRoot = Join-Path $repoRoot 'desktop\CloudOS.FlutterShell'
 
+function Test-CloudOSSymlinkSupport {
+    $probeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("cloudos-symlink-probe-" + [Guid]::NewGuid().ToString('N'))
+    $target = Join-Path $probeRoot 'target.txt'
+    $link = Join-Path $probeRoot 'link.txt'
+
+    try {
+        New-Item -ItemType Directory -Path $probeRoot -Force | Out-Null
+        Set-Content -LiteralPath $target -Value 'cloudos' -Encoding ascii
+        New-Item -ItemType SymbolicLink -Path $link -Target $target -ErrorAction Stop | Out-Null
+        return $true
+    }
+    catch {
+        return $false
+    }
+    finally {
+        Remove-Item -LiteralPath $probeRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 if (-not (Get-Command flutter -ErrorAction SilentlyContinue)) {
-    throw 'Flutter nao foi encontrado no PATH. Instale Flutter 3.44.7 e habilite Windows desktop.'
+    throw 'Flutter nao foi encontrado no PATH. Instale Flutter stable com suporte a Windows desktop.'
 }
 
 $versionOutput = (& flutter --version 2>&1 | Out-String)
@@ -27,8 +46,25 @@ try {
     & flutter config --enable-windows-desktop | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'flutter config falhou.' }
 
+    # Flutter desktop plugins use symbolic links under the Windows build tree.
+    # Detect this before flutter create/pub get so the failure is explicit and
+    # cannot be confused with the retired React/web desktop.
+    if (-not (Test-CloudOSSymlinkSupport)) {
+        Write-Host ''
+        Write-Host '[CloudOS Flutter] O Windows ainda nao permite os symlinks exigidos pelos plugins Flutter.' -ForegroundColor Yellow
+        Write-Host '[CloudOS Flutter] Isso NAO e conflito com o antigo desktop React; o frontend web foi aposentado.' -ForegroundColor Yellow
+        Write-Host '[CloudOS Flutter] Abrindo Configuracoes > Para desenvolvedores. Ative o Modo de Desenvolvedor e rode novamente.' -ForegroundColor Yellow
+        try {
+            Start-Process 'ms-settings:developers'
+        }
+        catch {
+            Write-Host 'Abra manualmente: Configuracoes > Sistema > Para desenvolvedores > Modo de Desenvolvedor.' -ForegroundColor Yellow
+        }
+        throw 'Symlink indisponivel. Ative o Modo de Desenvolvedor do Windows e execute o launcher novamente.'
+    }
+
     if (-not (Test-Path (Join-Path $uiRoot 'windows\CMakeLists.txt'))) {
-        Write-Host '[CloudOS Flutter V19] Gerando host Windows padrao local...' -ForegroundColor Cyan
+        Write-Host '[CloudOS Flutter V19] Gerando apenas o runner Windows do Flutter (nao e o antigo CloudOS web)...' -ForegroundColor Cyan
         & flutter create --platforms=windows --project-name cloudos_flutter_shell . | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'flutter create falhou.' }
     }
