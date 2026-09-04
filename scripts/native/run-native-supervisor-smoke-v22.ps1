@@ -105,6 +105,32 @@ try {
         }
     }
 
+    $stage = 'ready-probe-repeat'
+    $repeatTimer = [Diagnostics.Stopwatch]::StartNew()
+    $repeatExit = Invoke-SupervisorProbe -Arguments @(
+        '--probe-ready-once',
+        '--probe-no-explorer',
+        '--ready-timeout-ms', '30000',
+        '--heartbeat-timeout-ms', '5000'
+    )
+    $repeatTimer.Stop()
+    $evidence.ready_probe_repeat_exit_code = $repeatExit
+    $evidence.ready_probe_repeat_elapsed_ms = [int64]$repeatTimer.ElapsedMilliseconds
+    if ($repeatExit -ne 0) { $failures.Add("ReadyProbeRepeatExit:$repeatExit") }
+
+    $repeatState = Read-V22State
+    $evidence.ready_probe_repeat_state_written = ($null -ne $repeatState)
+    if ($null -eq $repeatState) {
+        $failures.Add('ReadyProbeRepeatStateMissing')
+    }
+    else {
+        $evidence.ready_probe_repeat_final_state = [string]$repeatState.state
+        $evidence.ready_probe_repeat_supervisor_uptime_ms = [uint64]$repeatState.supervisor_uptime_ms
+        if ([string]$repeatState.state -ne 'STOPPING') {
+            $failures.Add("UnexpectedReadyRepeatFinalState:$($repeatState.state)")
+        }
+    }
+
     $stage = 'failure-loop'
     $failureExit = Invoke-SupervisorProbe -Arguments @(
         '--probe-failure-loop',
@@ -183,7 +209,7 @@ $report = [ordered]@{
     test = 'CloudOS Supervisor/Recovery V22'
     collected_utc = [DateTime]::UtcNow.ToString('o')
     verdict = if ($failures.Count -eq 0) { 'pass' } else { 'fail' }
-    scope = 'V22 self-test, real readiness/graceful-exit, persistent recovery state, rolling crash budget, safe-mode transition, process cleanup and recovery status diagnostics.'
+    scope = 'V22 self-test, repeated real readiness/graceful-exit, persistent recovery state, rolling crash budget, safe-mode transition, process cleanup and recovery status diagnostics.'
     evidence = $evidence
     failures = $failures.ToArray()
 }
