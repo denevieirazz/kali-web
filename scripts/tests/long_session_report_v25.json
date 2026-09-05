@@ -1,0 +1,476 @@
+﻿{
+    "Timestamp":  "2026-09-05T04:03:19-03:00",
+    "Baseline":  [
+                     {
+                         "Id":  14768,
+                         "ProcessName":  "CloudOS",
+                         "WS_MB":  104.31,
+                         "PM_MB":  56,
+                         "Paged_MB":  56,
+                         "VM_MB":  57799.8,
+                         "CPU_S":  1299.84,
+                         "Handles":  869,
+                         "Threads":  13,
+                         "GDI":  433,
+                         "USER":  386
+                     },
+                     {
+                         "Id":  19296,
+                         "ProcessName":  "CloudOS.Supervisor",
+                         "WS_MB":  7.12,
+                         "PM_MB":  1.31,
+                         "Paged_MB":  1.31,
+                         "VM_MB":  4187.85,
+                         "CPU_S":  1.62,
+                         "Handles":  83,
+                         "Threads":  1,
+                         "GDI":  0,
+                         "USER":  1
+                     },
+                     {
+                         "Id":  26392,
+                         "ProcessName":  "CloudOS.SystemBroker",
+                         "WS_MB":  8.52,
+                         "PM_MB":  1.61,
+                         "Paged_MB":  1.61,
+                         "VM_MB":  4198.04,
+                         "CPU_S":  0.05,
+                         "Handles":  141,
+                         "Threads":  7,
+                         "GDI":  0,
+                         "USER":  2
+                     },
+                     {
+                         "Id":  24392,
+                         "ProcessName":  "cloudos_flutter_shell",
+                         "WS_MB":  185.64,
+                         "PM_MB":  1506.36,
+                         "Paged_MB":  1506.36,
+                         "VM_MB":  60197.64,
+                         "CPU_S":  84.91,
+                         "Handles":  602,
+                         "Threads":  53,
+                         "GDI":  20,
+                         "USER":  56
+                     }
+                 ],
+    "Cycles":  [
+                   {
+                       "Cycle":  1,
+                       "Snapshot":  [
+                                        {
+                                            "Id":  14768,
+                                            "ProcessName":  "CloudOS",
+                                            "WS_MB":  104.22,
+                                            "PM_MB":  55.84,
+                                            "Paged_MB":  55.84,
+                                            "VM_MB":  57800.8,
+                                            "CPU_S":  1300.52,
+                                            "Handles":  874,
+                                            "Threads":  14,
+                                            "GDI":  433,
+                                            "USER":  386
+                                        },
+                                        {
+                                            "Id":  19296,
+                                            "ProcessName":  "CloudOS.Supervisor",
+                                            "WS_MB":  7.12,
+                                            "PM_MB":  1.31,
+                                            "Paged_MB":  1.31,
+                                            "VM_MB":  4187.85,
+                                            "CPU_S":  1.62,
+                                            "Handles":  83,
+                                            "Threads":  1,
+                                            "GDI":  0,
+                                            "USER":  1
+                                        },
+                                        {
+                                            "Id":  26392,
+                                            "ProcessName":  "CloudOS.SystemBroker",
+                                            "WS_MB":  10.48,
+                                            "PM_MB":  1.85,
+                                            "Paged_MB":  1.85,
+                                            "VM_MB":  4212.2,
+                                            "CPU_S":  0.3,
+                                            "Handles":  174,
+                                            "Threads":  7,
+                                            "GDI":  0,
+                                            "USER":  2
+                                        },
+                                        {
+                                            "Id":  24392,
+                                            "ProcessName":  "cloudos_flutter_shell",
+                                            "WS_MB":  186.02,
+                                            "PM_MB":  1506.86,
+                                            "Paged_MB":  1506.86,
+                                            "VM_MB":  60198.14,
+                                            "CPU_S":  85.19,
+                                            "Handles":  602,
+                                            "Threads":  53,
+                                            "GDI":  20,
+                                            "USER":  56
+                                        }
+                                    ]
+                   },
+                   {
+                       "Cycle":  2,
+                       "Snapshot":  [
+                                        {
+                                            "Id":  14768,
+                                            "ProcessName":  "CloudOS",
+                                            "WS_MB":  104.18,
+                                            "PM_MB":  55.76,
+                                            "Paged_MB":  55.76,
+                                            "VM_MB":  57801.8,
+                                            "CPU_S":  1301.23,
+                                            "Handles":  874,
+                                            "Threads":  15,
+                                            "GDI":  433,
+                                            "USER":  386
+                                        },
+                                        {
+                                            "Id":  19296,
+                                            "ProcessName":  "CloudOS.Supervisor",
+                                            "WS_MB":  7.12,
+                                            "PM_MB":  1.31,
+                                            "Paged_MB":  1.31,
+                                            "VM_MB":  4187.85,
+                                            "CPU_S":  1.62,
+                                            "Handles":  83,
+                                            "Threads":  1,
+                                            "GDI":  0,
+                                            "USER":  1
+                                        },
+                                        {
+                                            "Id":  26392,
+                                            "ProcessName":  "CloudOS.SystemBroker",
+                                            "WS_MB":  10.51,
+                                            "PM_MB":  1.84,
+                                            "Paged_MB":  1.84,
+                                            "VM_MB":  4210.2,
+                                            "CPU_S":  0.39,
+                                            "Handles":  172,
+                                            "Threads":  5,
+                                            "GDI":  0,
+                                            "USER":  2
+                                        },
+                                        {
+                                            "Id":  24392,
+                                            "ProcessName":  "cloudos_flutter_shell",
+                                            "WS_MB":  186.2,
+                                            "PM_MB":  1506.86,
+                                            "Paged_MB":  1506.86,
+                                            "VM_MB":  60198.14,
+                                            "CPU_S":  85.41,
+                                            "Handles":  602,
+                                            "Threads":  53,
+                                            "GDI":  20,
+                                            "USER":  56
+                                        }
+                                    ]
+                   },
+                   {
+                       "Cycle":  3,
+                       "Snapshot":  [
+                                        {
+                                            "Id":  14768,
+                                            "ProcessName":  "CloudOS",
+                                            "WS_MB":  104.38,
+                                            "PM_MB":  56.02,
+                                            "Paged_MB":  56.02,
+                                            "VM_MB":  57801.82,
+                                            "CPU_S":  1301.55,
+                                            "Handles":  879,
+                                            "Threads":  15,
+                                            "GDI":  433,
+                                            "USER":  387
+                                        },
+                                        {
+                                            "Id":  19296,
+                                            "ProcessName":  "CloudOS.Supervisor",
+                                            "WS_MB":  7.12,
+                                            "PM_MB":  1.31,
+                                            "Paged_MB":  1.31,
+                                            "VM_MB":  4187.85,
+                                            "CPU_S":  1.62,
+                                            "Handles":  83,
+                                            "Threads":  1,
+                                            "GDI":  0,
+                                            "USER":  1
+                                        },
+                                        {
+                                            "Id":  26392,
+                                            "ProcessName":  "CloudOS.SystemBroker",
+                                            "WS_MB":  10.77,
+                                            "PM_MB":  2.11,
+                                            "Paged_MB":  2.11,
+                                            "VM_MB":  4210.2,
+                                            "CPU_S":  0.42,
+                                            "Handles":  172,
+                                            "Threads":  5,
+                                            "GDI":  0,
+                                            "USER":  2
+                                        },
+                                        {
+                                            "Id":  24392,
+                                            "ProcessName":  "cloudos_flutter_shell",
+                                            "WS_MB":  185.96,
+                                            "PM_MB":  1480.82,
+                                            "Paged_MB":  1480.82,
+                                            "VM_MB":  60085.75,
+                                            "CPU_S":  87.92,
+                                            "Handles":  605,
+                                            "Threads":  53,
+                                            "GDI":  20,
+                                            "USER":  57
+                                        }
+                                    ]
+                   },
+                   {
+                       "Cycle":  4,
+                       "Snapshot":  [
+                                        {
+                                            "Id":  14768,
+                                            "ProcessName":  "CloudOS",
+                                            "WS_MB":  104.38,
+                                            "PM_MB":  56.02,
+                                            "Paged_MB":  56.02,
+                                            "VM_MB":  57801.82,
+                                            "CPU_S":  1301.55,
+                                            "Handles":  879,
+                                            "Threads":  15,
+                                            "GDI":  433,
+                                            "USER":  387
+                                        },
+                                        {
+                                            "Id":  19296,
+                                            "ProcessName":  "CloudOS.Supervisor",
+                                            "WS_MB":  7.12,
+                                            "PM_MB":  1.31,
+                                            "Paged_MB":  1.31,
+                                            "VM_MB":  4187.85,
+                                            "CPU_S":  1.62,
+                                            "Handles":  83,
+                                            "Threads":  1,
+                                            "GDI":  0,
+                                            "USER":  1
+                                        },
+                                        {
+                                            "Id":  26392,
+                                            "ProcessName":  "CloudOS.SystemBroker",
+                                            "WS_MB":  15.77,
+                                            "PM_MB":  2.77,
+                                            "Paged_MB":  2.77,
+                                            "VM_MB":  4223.26,
+                                            "CPU_S":  0.5,
+                                            "Handles":  250,
+                                            "Threads":  11,
+                                            "GDI":  0,
+                                            "USER":  2
+                                        },
+                                        {
+                                            "Id":  24392,
+                                            "ProcessName":  "cloudos_flutter_shell",
+                                            "WS_MB":  196.21,
+                                            "PM_MB":  1555.37,
+                                            "Paged_MB":  1555.37,
+                                            "VM_MB":  60050.13,
+                                            "CPU_S":  88.73,
+                                            "Handles":  602,
+                                            "Threads":  52,
+                                            "GDI":  20,
+                                            "USER":  56
+                                        }
+                                    ]
+                   },
+                   {
+                       "Cycle":  5,
+                       "Snapshot":  [
+                                        {
+                                            "Id":  14768,
+                                            "ProcessName":  "CloudOS",
+                                            "WS_MB":  104.41,
+                                            "PM_MB":  56.11,
+                                            "Paged_MB":  56.11,
+                                            "VM_MB":  57802.8,
+                                            "CPU_S":  1301.58,
+                                            "Handles":  879,
+                                            "Threads":  16,
+                                            "GDI":  433,
+                                            "USER":  387
+                                        },
+                                        {
+                                            "Id":  19296,
+                                            "ProcessName":  "CloudOS.Supervisor",
+                                            "WS_MB":  7.12,
+                                            "PM_MB":  1.31,
+                                            "Paged_MB":  1.31,
+                                            "VM_MB":  4187.85,
+                                            "CPU_S":  1.62,
+                                            "Handles":  83,
+                                            "Threads":  1,
+                                            "GDI":  0,
+                                            "USER":  1
+                                        },
+                                        {
+                                            "Id":  26392,
+                                            "ProcessName":  "CloudOS.SystemBroker",
+                                            "WS_MB":  15.82,
+                                            "PM_MB":  2.82,
+                                            "Paged_MB":  2.82,
+                                            "VM_MB":  4224.26,
+                                            "CPU_S":  0.61,
+                                            "Handles":  251,
+                                            "Threads":  12,
+                                            "GDI":  0,
+                                            "USER":  2
+                                        },
+                                        {
+                                            "Id":  24392,
+                                            "ProcessName":  "cloudos_flutter_shell",
+                                            "WS_MB":  196.28,
+                                            "PM_MB":  1555.4,
+                                            "Paged_MB":  1555.4,
+                                            "VM_MB":  60051.13,
+                                            "CPU_S":  88.81,
+                                            "Handles":  602,
+                                            "Threads":  53,
+                                            "GDI":  20,
+                                            "USER":  56
+                                        }
+                                    ]
+                   }
+               ],
+    "Cooldown":  [
+                     {
+                         "Id":  14768,
+                         "ProcessName":  "CloudOS",
+                         "WS_MB":  104.39,
+                         "PM_MB":  56.08,
+                         "Paged_MB":  56.08,
+                         "VM_MB":  57801.8,
+                         "CPU_S":  1301.59,
+                         "Handles":  872,
+                         "Threads":  15,
+                         "GDI":  433,
+                         "USER":  386
+                     },
+                     {
+                         "Id":  19296,
+                         "ProcessName":  "CloudOS.Supervisor",
+                         "WS_MB":  7.12,
+                         "PM_MB":  1.31,
+                         "Paged_MB":  1.31,
+                         "VM_MB":  4187.85,
+                         "CPU_S":  1.62,
+                         "Handles":  83,
+                         "Threads":  1,
+                         "GDI":  0,
+                         "USER":  1
+                     },
+                     {
+                         "Id":  26392,
+                         "ProcessName":  "CloudOS.SystemBroker",
+                         "WS_MB":  15.8,
+                         "PM_MB":  2.79,
+                         "Paged_MB":  2.79,
+                         "VM_MB":  4223.26,
+                         "CPU_S":  0.62,
+                         "Handles":  250,
+                         "Threads":  11,
+                         "GDI":  0,
+                         "USER":  2
+                     },
+                     {
+                         "Id":  24392,
+                         "ProcessName":  "cloudos_flutter_shell",
+                         "WS_MB":  196.3,
+                         "PM_MB":  1555.4,
+                         "Paged_MB":  1555.4,
+                         "VM_MB":  60051.13,
+                         "CPU_S":  88.88,
+                         "Handles":  602,
+                         "Threads":  53,
+                         "GDI":  20,
+                         "USER":  56
+                     }
+                 ],
+    "Comparison":  [
+                       {
+                           "Process":  "CloudOS",
+                           "PID":  14768,
+                           "Base_WS":  104.31,
+                           "Cycle5_WS":  104.41,
+                           "Cool_WS":  104.39,
+                           "WS_Delta":  0.08,
+                           "Base_PM":  56,
+                           "Cool_PM":  56.08,
+                           "PM_Delta":  0.08,
+                           "Base_Handles":  869,
+                           "Cool_Handles":  872,
+                           "Handle_Delta":  3,
+                           "Base_Threads":  13,
+                           "Cool_Threads":  15,
+                           "Thread_Delta":  2,
+                           "GDI_Delta":  0,
+                           "USER_Delta":  0
+                       },
+                       {
+                           "Process":  "CloudOS.Supervisor",
+                           "PID":  19296,
+                           "Base_WS":  7.12,
+                           "Cycle5_WS":  7.12,
+                           "Cool_WS":  7.12,
+                           "WS_Delta":  0,
+                           "Base_PM":  1.31,
+                           "Cool_PM":  1.31,
+                           "PM_Delta":  0,
+                           "Base_Handles":  83,
+                           "Cool_Handles":  83,
+                           "Handle_Delta":  0,
+                           "Base_Threads":  1,
+                           "Cool_Threads":  1,
+                           "Thread_Delta":  0,
+                           "GDI_Delta":  0,
+                           "USER_Delta":  0
+                       },
+                       {
+                           "Process":  "CloudOS.SystemBroker",
+                           "PID":  26392,
+                           "Base_WS":  8.52,
+                           "Cycle5_WS":  15.82,
+                           "Cool_WS":  15.8,
+                           "WS_Delta":  7.28,
+                           "Base_PM":  1.61,
+                           "Cool_PM":  2.79,
+                           "PM_Delta":  1.18,
+                           "Base_Handles":  141,
+                           "Cool_Handles":  250,
+                           "Handle_Delta":  109,
+                           "Base_Threads":  7,
+                           "Cool_Threads":  11,
+                           "Thread_Delta":  4,
+                           "GDI_Delta":  0,
+                           "USER_Delta":  0
+                       },
+                       {
+                           "Process":  "cloudos_flutter_shell",
+                           "PID":  24392,
+                           "Base_WS":  185.64,
+                           "Cycle5_WS":  196.28,
+                           "Cool_WS":  196.3,
+                           "WS_Delta":  10.66,
+                           "Base_PM":  1506.36,
+                           "Cool_PM":  1555.4,
+                           "PM_Delta":  49.04,
+                           "Base_Handles":  602,
+                           "Cool_Handles":  602,
+                           "Handle_Delta":  0,
+                           "Base_Threads":  53,
+                           "Cool_Threads":  53,
+                           "Thread_Delta":  0,
+                           "GDI_Delta":  0,
+                           "USER_Delta":  0
+                       }
+                   ]
+}

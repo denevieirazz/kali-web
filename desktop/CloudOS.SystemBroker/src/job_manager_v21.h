@@ -84,8 +84,8 @@ private:
     std::atomic_bool running_{false};
     std::atomic_uint64_t next_job_id_{1};
 
-    static constexpr size_t kMaxRetainedJobs = 512;
-    static constexpr size_t kMaxQueuedJobs = 256;
+    static constexpr size_t kMaxRetainedJobs = 64;
+    static constexpr size_t kMaxQueuedJobs = 64;
 };
 
 } // namespace CloudOS

@@ -300,6 +300,9 @@ void JobManagerV21::WorkerLoop()
             final_info = job->info;
         }
 
+        // Release job lambda and any captured resources immediately
+        job->func = nullptr;
+
         JsonObject payload;
         payload["jobId"] = JsonValue(final_info.id);
         payload["operationId"] = JsonValue(final_info.id);
@@ -314,6 +317,11 @@ void JobManagerV21::WorkerLoop()
             payload["error"] = JsonValue(final_info.error_message);
             EventBusV21::Instance().Publish("job.failed", payload);
             EventBusV21::Instance().Publish("operation.failed", payload);
+        }
+        else if (final_info.state == JobState::Cancelled)
+        {
+            EventBusV21::Instance().Publish("job.cancelled", payload);
+            EventBusV21::Instance().Publish("operation.cancelled", payload);
         }
     }
 }
