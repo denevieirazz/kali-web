@@ -13,6 +13,9 @@
 #include "display_service_v25.h"
 #include "audio_service_v25.h"
 #include "system_settings_service_v25.h"
+#include "clipboard_service_v26.h"
+#include "open_with_service_v26.h"
+#include "notification_service_v26.h"
 
 #include <chrono>
 #include <cmath>
@@ -1566,6 +1569,201 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
         res.payload["bluetooth"] = JsonValue(bt.ToJsonObject());
         res.payload["personalization"] = JsonValue(pers.ToJsonObject());
         res.payload["performanceProfile"] = JsonValue(PerformanceProfileToString(metrics.current_profile));
+        return res;
+    }
+
+    // --- CLIPBOARD SERVICE (ETAPA 6) ---
+    if (method == "clipboard.getHistory")
+    {
+        size_t limit = 20;
+        if (req.payload.count("limit") && req.payload.at("limit").IsInt())
+        {
+            limit = static_cast<size_t>(std::max<int64_t>(1, req.payload.at("limit").AsInt()));
+        }
+        const auto items = ClipboardServiceV26::Instance().GetHistory(limit);
+        JsonArray arr;
+        arr.reserve(items.size());
+        for (const auto& itm : items)
+        {
+            arr.push_back(JsonValue(itm.ToJsonObject(false)));
+        }
+        res.payload["items"] = JsonValue(std::move(arr));
+        return res;
+    }
+
+    if (method == "clipboard.getText")
+    {
+        res.payload["text"] = JsonValue(ClipboardServiceV26::Instance().GetCurrentText());
+        return res;
+    }
+
+    if (method == "clipboard.setText")
+    {
+        std::string text;
+        if (req.payload.count("text") && req.payload.at("text").IsString())
+        {
+            text = req.payload.at("text").AsString();
+        }
+        std::string err;
+        if (!ClipboardServiceV26::Instance().SetText(text, &err))
+        {
+            res.ok = false;
+            res.error_code = "clipboard_set_failed";
+            res.error_message = err;
+            return res;
+        }
+        res.payload["success"] = JsonValue(true);
+        return res;
+    }
+
+    if (method == "clipboard.clear")
+    {
+        std::string err;
+        if (!ClipboardServiceV26::Instance().Clear(&err))
+        {
+            res.ok = false;
+            res.error_code = "clipboard_clear_failed";
+            res.error_message = err;
+            return res;
+        }
+        res.payload["success"] = JsonValue(true);
+        return res;
+    }
+
+    // --- OPEN WITH SERVICE (ETAPA 6) ---
+    if (method == "files.openWith")
+    {
+        std::string path;
+        if (req.payload.count("path") && req.payload.at("path").IsString())
+        {
+            path = req.payload.at("path").AsString();
+        }
+        if (path.empty())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing or empty 'path'";
+            return res;
+        }
+        std::string app_id;
+        if (req.payload.count("app_id") && req.payload.at("app_id").IsString())
+        {
+            app_id = req.payload.at("app_id").AsString();
+        }
+        std::string err;
+        if (!OpenWithServiceV26::Instance().OpenFile(path, app_id, &err))
+        {
+            res.ok = false;
+            res.error_code = "open_with_failed";
+            res.error_message = err;
+            return res;
+        }
+        res.payload["success"] = JsonValue(true);
+        return res;
+    }
+
+    if (method == "files.getAssociations")
+    {
+        const auto assocs = OpenWithServiceV26::Instance().GetAssociations();
+        JsonArray arr;
+        arr.reserve(assocs.size());
+        for (const auto& a : assocs)
+        {
+            arr.push_back(JsonValue(a.ToJsonObject()));
+        }
+        res.payload["associations"] = JsonValue(std::move(arr));
+        return res;
+    }
+
+    if (method == "files.showOpenWithDialog")
+    {
+        std::string path;
+        if (req.payload.count("path") && req.payload.at("path").IsString())
+        {
+            path = req.payload.at("path").AsString();
+        }
+        if (path.empty())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing or empty 'path'";
+            return res;
+        }
+        std::string err;
+        if (!OpenWithServiceV26::Instance().ShowOpenWithDialog(path, &err))
+        {
+            res.ok = false;
+            res.error_code = "open_with_dialog_failed";
+            res.error_message = err;
+            return res;
+        }
+        res.payload["success"] = JsonValue(true);
+        return res;
+    }
+
+    // --- NOTIFICATION SERVICE (ETAPA 6) ---
+    if (method == "notifications.post")
+    {
+        std::string title = req.payload.count("title") && req.payload.at("title").IsString() ? req.payload.at("title").AsString() : "";
+        std::string message = req.payload.count("message") && req.payload.at("message").IsString() ? req.payload.at("message").AsString() : "";
+        std::string severity = req.payload.count("severity") && req.payload.at("severity").IsString() ? req.payload.at("severity").AsString() : "info";
+        std::string app_id = req.payload.count("app_id") && req.payload.at("app_id").IsString() ? req.payload.at("app_id").AsString() : "";
+
+        uint64_t id = NotificationServiceV26::Instance().Post(title, message, severity, app_id);
+        res.payload["id"] = JsonValue(static_cast<int64_t>(id));
+        res.payload["success"] = JsonValue(true);
+        return res;
+    }
+
+    if (method == "notifications.list")
+    {
+        const auto items = NotificationServiceV26::Instance().GetNotifications();
+        JsonArray arr;
+        arr.reserve(items.size());
+        for (const auto& itm : items)
+        {
+            arr.push_back(JsonValue(itm.ToJsonObject()));
+        }
+        res.payload["notifications"] = JsonValue(std::move(arr));
+        res.payload["unread_count"] = JsonValue(static_cast<int64_t>(NotificationServiceV26::Instance().GetUnreadCount()));
+        return res;
+    }
+
+    if (method == "notifications.dismiss")
+    {
+        uint64_t id = req.payload.count("id") && req.payload.at("id").IsInt() ? static_cast<uint64_t>(req.payload.at("id").AsInt()) : 0;
+        bool ok = NotificationServiceV26::Instance().Dismiss(id);
+        res.payload["success"] = JsonValue(ok);
+        return res;
+    }
+
+    if (method == "notifications.clear")
+    {
+        NotificationServiceV26::Instance().Clear();
+        res.payload["success"] = JsonValue(true);
+        return res;
+    }
+
+    if (method == "notifications.markRead")
+    {
+        uint64_t id = req.payload.count("id") && req.payload.at("id").IsInt() ? static_cast<uint64_t>(req.payload.at("id").AsInt()) : 0;
+        bool ok = NotificationServiceV26::Instance().MarkRead(id);
+        res.payload["success"] = JsonValue(ok);
+        return res;
+    }
+
+    if (method == "notifications.markAllRead")
+    {
+        NotificationServiceV26::Instance().MarkAllRead();
+        res.payload["success"] = JsonValue(true);
+        return res;
+    }
+
+    // --- DESKTOP ACTIONS & SHORTCUTS (ETAPA 6) ---
+    if (method == "system.lock")
+    {
+        LockWorkStation();
+        res.payload["success"] = JsonValue(true);
         return res;
     }
 

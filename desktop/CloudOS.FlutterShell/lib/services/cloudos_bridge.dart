@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../models/shell_models.dart';
 import '../models/system_settings_models.dart';
+import '../models/desktop_services_models.dart';
 import '../models/wsl_distro.dart';
 import '../shell/window_manager/cloud_window.dart';
 import 'bridge/cloud_app_mapper.dart';
@@ -13,6 +14,7 @@ import 'bridge/cloud_notification_mapper.dart';
 import 'bridge/cloudos_preview_data.dart';
 
 export '../models/system_settings_models.dart';
+export '../models/desktop_services_models.dart';
 export '../models/wsl_distro.dart';
 export '../shell/window_manager/cloud_window.dart';
 
@@ -1097,6 +1099,110 @@ class CloudOSBridge {
       );
     }
     return CloudQuickSettingsState.fromMap(res);
+  }
+
+  // --- CLIPBOARD (ETAPA 6) ---
+  Future<List<CloudClipboardItem>> getClipboardHistory([int limit = 20]) async {
+    final res = await invokeBrokerRpc('clipboard.getHistory', {'limit': limit});
+    if (res == null || res['items'] is! List) return const [];
+    return (res['items'] as List)
+        .whereType<Map>()
+        .map((m) => CloudClipboardItem.fromMap(Map<String, dynamic>.from(m)))
+        .toList();
+  }
+
+  Future<String> getClipboardText() async {
+    final res = await invokeBrokerRpc('clipboard.getText');
+    return res != null && res['text'] is String ? res['text'] as String : '';
+  }
+
+  Future<bool> setClipboardText(String text) async {
+    final res = await invokeBrokerRpc('clipboard.setText', {'text': text});
+    return res != null && (res['success'] as bool? ?? false);
+  }
+
+  Future<bool> clearClipboard() async {
+    final res = await invokeBrokerRpc('clipboard.clear');
+    return res != null && (res['success'] as bool? ?? false);
+  }
+
+  // --- OPEN WITH / FILE ASSOCIATIONS (ETAPA 6) ---
+  Future<bool> openFileWith({
+    required String path,
+    String? appId,
+  }) async {
+    final res = await invokeBrokerRpc('files.openWith', {
+      'path': path,
+      if (appId != null && appId.isNotEmpty) 'app_id': appId,
+    });
+    return res != null && (res['success'] as bool? ?? false);
+  }
+
+  Future<List<CloudFileAssociation>> getFileAssociations() async {
+    final res = await invokeBrokerRpc('files.getAssociations');
+    if (res == null || res['associations'] is! List) return const [];
+    return (res['associations'] as List)
+        .whereType<Map>()
+        .map((m) => CloudFileAssociation.fromMap(Map<String, dynamic>.from(m)))
+        .toList();
+  }
+
+  Future<bool> showOpenWithDialog(String path) async {
+    final res = await invokeBrokerRpc('files.showOpenWithDialog', {
+      'path': path,
+    });
+    return res != null && (res['success'] as bool? ?? false);
+  }
+
+  // --- DESKTOP NOTIFICATIONS (ETAPA 6) ---
+  Future<int> postDesktopNotification({
+    required String title,
+    required String message,
+    String severity = 'info',
+    String appId = '',
+  }) async {
+    final res = await invokeBrokerRpc('notifications.post', {
+      'title': title,
+      'message': message,
+      'severity': severity,
+      'app_id': appId,
+    });
+    return (res != null && res['id'] is num) ? (res['id'] as num).toInt() : 0;
+  }
+
+  Future<List<CloudDesktopNotification>> listDesktopNotifications() async {
+    final res = await invokeBrokerRpc('notifications.list');
+    if (res == null || res['notifications'] is! List) return const [];
+    return (res['notifications'] as List)
+        .whereType<Map>()
+        .map((m) => CloudDesktopNotification.fromMap(Map<String, dynamic>.from(m)))
+        .toList();
+  }
+
+  Future<bool> dismissDesktopNotification(int id) async {
+    final res = await invokeBrokerRpc('notifications.dismiss', {'id': id});
+    return res != null && (res['success'] as bool? ?? false);
+  }
+
+  Future<bool> clearDesktopNotifications() async {
+    final res = await invokeBrokerRpc('notifications.clear');
+    return res != null && (res['success'] as bool? ?? false);
+  }
+
+  Future<bool> markDesktopNotificationRead(int id) async {
+    final res = await invokeBrokerRpc('notifications.markRead', {'id': id});
+    return res != null && (res['success'] as bool? ?? false);
+  }
+
+  Future<bool> markAllDesktopNotificationsRead() async {
+    final res = await invokeBrokerRpc('notifications.markAllRead');
+    return res != null && (res['success'] as bool? ?? false);
+  }
+
+  // --- SYSTEM ACTIONS (ETAPA 6) ---
+  Future<bool> lockSystem() async {
+    final res = await invokeBrokerRpc('system.lock');
+    return res != null && (res['success'] as bool? ?? false);
   }
 
   Future<Map<String, Object?>> getBridgeInfo() async {

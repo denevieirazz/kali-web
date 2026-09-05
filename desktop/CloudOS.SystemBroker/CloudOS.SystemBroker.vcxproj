@@ -61,6 +61,9 @@
     <ClInclude Include="src\display_service_v25.h" />
     <ClInclude Include="src\audio_service_v25.h" />
     <ClInclude Include="src\system_settings_service_v25.h" />
+    <ClInclude Include="src\clipboard_service_v26.h" />
+    <ClInclude Include="src\open_with_service_v26.h" />
+    <ClInclude Include="src\notification_service_v26.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\protocol_v21.cpp" />
@@ -82,6 +85,9 @@
     <ClCompile Include="src\display_service_v25.cpp" />
     <ClCompile Include="src\audio_service_v25.cpp" />
     <ClCompile Include="src\system_settings_service_v25.cpp" />
+    <ClCompile Include="src\clipboard_service_v26.cpp" />
+    <ClCompile Include="src\open_with_service_v26.cpp" />
+    <ClCompile Include="src\notification_service_v26.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
