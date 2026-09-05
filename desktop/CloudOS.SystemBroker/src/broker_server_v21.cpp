@@ -21,7 +21,10 @@
 #include <cmath>
 #include <condition_variable>
 #include <deque>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <shlobj.h>
 
 namespace CloudOS
 {
@@ -1763,6 +1766,117 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
     if (method == "system.lock")
     {
         LockWorkStation();
+        res.payload["success"] = JsonValue(true);
+        return res;
+    }
+
+    // --- RECOVERY & LIFECYCLE (ETAPA 7) ---
+    if (method == "recovery.getStatus")
+    {
+        res.payload["schema"] = JsonValue(22);
+        res.payload["broker_pid"] = JsonValue(static_cast<int64_t>(GetCurrentProcessId()));
+        res.payload["session_id"] = JsonValue(static_cast<int64_t>(SecurityV21::GetCurrentSessionId()));
+        res.payload["is_remote_session"] = JsonValue(GetSystemMetrics(SM_REMOTESESSION) != 0);
+
+        std::string supervisor_state = "UNKNOWN";
+        std::string supervisor_reason = "";
+        int64_t transition_seq = 0;
+        int64_t supervisor_pid = 0;
+        int64_t shell_pid = 0;
+        int64_t failure_count = 0;
+        bool job_assigned = false;
+        bool previous_unclean = false;
+
+        PWSTR local = nullptr;
+        if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_DEFAULT, nullptr, &local)) && local != nullptr)
+        {
+            std::filesystem::path cloudos_dir = local;
+            CoTaskMemFree(local);
+            cloudos_dir /= L"CloudOS";
+
+            std::filesystem::path marker = cloudos_dir / L"session_v3.unclean";
+            previous_unclean = std::filesystem::exists(marker);
+
+            std::filesystem::path sup_file = cloudos_dir / L"Recovery" / L"supervisor-state-v22.json";
+            if (std::filesystem::exists(sup_file))
+            {
+                std::ifstream f(sup_file);
+                if (f.is_open())
+                {
+                    std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+                    JsonValue json_val;
+                    if (ParseJson(content, json_val) && json_val.IsObject())
+                    {
+                        const auto& obj = json_val.AsObject();
+                        if (obj.count("state") && obj.at("state").IsString()) supervisor_state = obj.at("state").AsString();
+                        if (obj.count("reason") && obj.at("reason").IsString()) supervisor_reason = obj.at("reason").AsString();
+                        if (obj.count("transition_sequence") && obj.at("transition_sequence").IsInt()) transition_seq = obj.at("transition_sequence").AsInt();
+                        if (obj.count("supervisor_pid") && obj.at("supervisor_pid").IsInt()) supervisor_pid = obj.at("supervisor_pid").AsInt();
+                        if (obj.count("shell_pid") && obj.at("shell_pid").IsInt()) shell_pid = obj.at("shell_pid").AsInt();
+                        if (obj.count("failure_count") && obj.at("failure_count").IsInt()) failure_count = obj.at("failure_count").AsInt();
+                        if (obj.count("job_kill_on_close_assigned") && obj.at("job_kill_on_close_assigned").IsBool()) job_assigned = obj.at("job_kill_on_close_assigned").AsBool();
+                    }
+                }
+            }
+        }
+
+        res.payload["state"] = JsonValue(supervisor_state);
+        res.payload["reason"] = JsonValue(supervisor_reason);
+        res.payload["transition_sequence"] = JsonValue(transition_seq);
+        res.payload["supervisor_pid"] = JsonValue(supervisor_pid);
+        res.payload["shell_pid"] = JsonValue(shell_pid);
+        res.payload["failure_count"] = JsonValue(failure_count);
+        res.payload["job_kill_on_close_assigned"] = JsonValue(job_assigned);
+        res.payload["previous_unclean"] = JsonValue(previous_unclean);
+        res.payload["success"] = JsonValue(true);
+        return res;
+    }
+
+    if (method == "recovery.enterSafeMode")
+    {
+        JsonObject payload;
+        payload["timestamp_ms"] = JsonValue(static_cast<int64_t>(GetTickCount64()));
+        payload["reason"] = JsonValue("User or recovery controller initiated safe mode");
+        EventBusV21::Instance().Publish("system.safeModeRequested", payload);
+        res.payload["success"] = JsonValue(true);
+        return res;
+    }
+
+    if (method == "system.requestShutdown")
+    {
+        JsonObject payload;
+        payload["timestamp_ms"] = JsonValue(static_cast<int64_t>(GetTickCount64()));
+        EventBusV21::Instance().Publish("system.shuttingDown", payload);
+        res.payload["success"] = JsonValue(true);
+        return res;
+    }
+
+    // --- HARDENING & CAPABILITIES (ETAPA 8) ---
+    if (method == "system.getCapabilities")
+    {
+        const auto caps = SystemServiceV21::Instance().GetCapabilities();
+        JsonArray arr;
+        arr.reserve(caps.size());
+        for (const auto& c : caps)
+        {
+            arr.push_back(JsonValue(c));
+        }
+        res.payload["capabilities"] = JsonValue(std::move(arr));
+
+        JsonObject map;
+        const auto snap = SystemServiceV21::Instance().GetSnapshot();
+        const auto metrics = PerformanceManagerV21::Instance().GetMetrics();
+        map["audio_control"] = JsonValue(snap.volume_available);
+        map["brightness_control"] = JsonValue(snap.brightness_available);
+        map["wsl_runtime"] = JsonValue(snap.wsl_available);
+        map["economy_mode"] = JsonValue(metrics.current_profile == PerformanceProfile::Economy);
+        map["rdp_session"] = JsonValue(GetSystemMetrics(SM_REMOTESESSION) != 0);
+        map["multi_monitor"] = JsonValue(DisplayServiceV25::Instance().ListMonitors().size() > 1);
+        map["battery_present"] = JsonValue(snap.battery_available);
+        map["bluetooth_available"] = JsonValue(SystemSettingsServiceV25::Instance().GetBluetoothStatus().available);
+        map["wifi_available"] = JsonValue(!SystemSettingsServiceV25::Instance().GetWifiNetworks().empty());
+
+        res.payload["capability_map"] = JsonValue(std::move(map));
         res.payload["success"] = JsonValue(true);
         return res;
     }

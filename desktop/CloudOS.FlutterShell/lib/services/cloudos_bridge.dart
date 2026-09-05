@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../models/shell_models.dart';
 import '../models/system_settings_models.dart';
 import '../models/desktop_services_models.dart';
+import '../models/recovery_models.dart';
 import '../models/wsl_distro.dart';
 import '../shell/window_manager/cloud_window.dart';
 import 'bridge/cloud_app_mapper.dart';
@@ -15,6 +16,7 @@ import 'bridge/cloudos_preview_data.dart';
 
 export '../models/system_settings_models.dart';
 export '../models/desktop_services_models.dart';
+export '../models/recovery_models.dart';
 export '../models/wsl_distro.dart';
 export '../shell/window_manager/cloud_window.dart';
 
@@ -1203,6 +1205,30 @@ class CloudOSBridge {
   Future<bool> lockSystem() async {
     final res = await invokeBrokerRpc('system.lock');
     return res != null && (res['success'] as bool? ?? false);
+  }
+
+  // --- RECOVERY & LIFECYCLE (ETAPA 7) ---
+  Future<CloudOSRecoveryStatus?> getRecoveryStatus() async {
+    final res = await invokeBrokerRpc('recovery.getStatus');
+    if (res == null) return null;
+    return CloudOSRecoveryStatus.fromMap(res);
+  }
+
+  Future<bool> enterSafeMode() async {
+    final res = await invokeBrokerRpc('recovery.enterSafeMode');
+    return res != null && (res['success'] as bool? ?? false);
+  }
+
+  Future<bool> requestShutdown() async {
+    final res = await invokeBrokerRpc('system.requestShutdown');
+    return res != null && (res['success'] as bool? ?? false);
+  }
+
+  // --- HARDENING & CAPABILITIES (ETAPA 8) ---
+  Future<CloudOSSystemCapabilities?> getSystemCapabilities() async {
+    final res = await invokeBrokerRpc('system.getCapabilities');
+    if (res == null) return null;
+    return CloudOSSystemCapabilities.fromMap(res);
   }
 
   Future<Map<String, Object?>> getBridgeInfo() async {

@@ -543,6 +543,9 @@ bool NativeSessionRecovery::Load()
         header.magic != kMagic || header.version != kVersion || header.count > kMaximumRecords)
     {
         CloseHandle(file);
+        // Quarantine corrupted session state file so it does not poison future runs
+        const std::wstring corrupt_path = state_path_ + L".corrupt";
+        (void)MoveFileExW(state_path_.c_str(), corrupt_path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
         return false;
     }
 
@@ -579,6 +582,8 @@ bool NativeSessionRecovery::Load()
     if (!success)
     {
         loaded_records_.clear();
+        const std::wstring corrupt_path = state_path_ + L".corrupt";
+        (void)MoveFileExW(state_path_.c_str(), corrupt_path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
     }
     return success;
 }

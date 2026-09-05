@@ -472,17 +472,31 @@ std::vector<StorageDriveV25> SystemSettingsServiceV25::GetStorageDrives()
 PersonalizationSettingsV25 SystemSettingsServiceV25::GetPersonalization()
 {
     const std::wstring filePath = GetConfigFilePath();
-    std::ifstream file(filePath);
-    if (!file.is_open())
     {
-        return PersonalizationSettingsV25{}; // defaults
-    }
+        std::ifstream file(filePath);
+        if (!file.is_open())
+        {
+            return PersonalizationSettingsV25{}; // defaults
+        }
 
-    std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-    JsonValue root;
-    if (ParseJson(content, root) && root.IsObject())
-    {
-        return PersonalizationSettingsV25::FromJsonObject(root.AsObject());
+        std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        file.close();
+
+        if (!content.empty())
+        {
+            JsonValue root;
+            if (ParseJson(content, root) && root.IsObject())
+            {
+                return PersonalizationSettingsV25::FromJsonObject(root.AsObject());
+            }
+
+            // Corruption detected: quarantine file to .corrupt.bak and recreate defaults
+            const std::wstring corruptPath = filePath + L".corrupt.bak";
+            (void)MoveFileExW(filePath.c_str(), corruptPath.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+            PersonalizationSettingsV25 defaults{};
+            (void)SetPersonalization(defaults, nullptr);
+            return defaults;
+        }
     }
     return PersonalizationSettingsV25{};
 }
