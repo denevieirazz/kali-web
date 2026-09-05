@@ -6,6 +6,7 @@ param(
 
     [string]$PackageDir,
     [string]$InstallDir,
+    [Alias('NewPackageSource')]
     [string]$UpdatePackageDir,
     [switch]$PerUser = $true,
     [switch]$CreateDesktopShortcut,
@@ -578,7 +579,10 @@ switch ($Action) {
         Invoke-Uninstall -TargetLocation $InstallDir -PurgeData $PurgeUserData
     }
     'update' {
-        if (-not $UpdatePackageDir) { throw "Parametro -UpdatePackageDir e obrigatorio para update." }
+        if (-not $UpdatePackageDir) {
+            if ($PackageDir) { $UpdatePackageDir = $PackageDir }
+            else { throw "Parametro -UpdatePackageDir e obrigatorio para update." }
+        }
         Invoke-Update -TargetLocation $InstallDir -NewPackageSource $UpdatePackageDir -HealthTimeout $HealthCheckTimeoutSeconds
     }
     'rollback' {

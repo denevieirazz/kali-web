@@ -116,7 +116,7 @@ $versionData = if (Test-Path -LiteralPath (Join-Path $OutputDir 'version.json'))
     [pscustomobject]@{ productVersion = '21.0.0'; build = 29; gitSha = 'c0836754'; protocolVersion = 21; architecture = 'x64' }
 }
 
-$allFiles = Get-ChildItem -Path $OutputDir -Recurse -File | Sort-Object FullName
+$allFiles = Get-ChildItem -Path $OutputDir -Recurse -File | Where-Object { $_.Name -ne 'cloudos-package-manifest.json' } | Sort-Object FullName
 $manifestItems = [System.Collections.Generic.List[object]]::new()
 $totalBytes = 0
 
