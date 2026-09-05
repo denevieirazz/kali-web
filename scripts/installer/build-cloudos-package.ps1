@@ -98,7 +98,7 @@ if (Test-Path -LiteralPath $integratedManifest) {
 }
 
 # 7. Copiar scripts auxiliares de inicializacao e verificacao
-foreach ($s in @('verify-cloudos-v21-runtime.ps1', 'start-cloudos-v21-integrated.ps1')) {
+foreach ($s in @('verify-cloudos-v21-runtime.ps1', 'start-cloudos-v21-integrated.ps1', 'Iniciar CloudOS.cmd')) {
     $src = Join-Path $sourcePath $s
     if (Test-Path -LiteralPath $src) {
         Copy-Item -LiteralPath $src -Destination (Join-Path $OutputDir "scripts\$s") -Force

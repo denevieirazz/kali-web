@@ -250,12 +250,16 @@ function Invoke-Install {
     $mainExe = Join-Path $TargetLocation 'CloudOS.exe'
     $wsh = New-Object -ComObject WScript.Shell
 
+    $startScript = Join-Path $TargetLocation 'start-cloudos-v21-integrated.ps1'
+
     if ($StartShortcut) {
         $startMenuDir = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
         $startLnk = Join-Path $startMenuDir 'CloudOS.lnk'
         $shortcut = $wsh.CreateShortcut($startLnk)
-        $shortcut.TargetPath = $mainExe
+        $shortcut.TargetPath = 'powershell.exe'
+        $shortcut.Arguments = "-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `"$startScript`""
         $shortcut.WorkingDirectory = $TargetLocation
+        $shortcut.IconLocation = "$mainExe,0"
         $shortcut.Description = 'CloudOS Desktop'
         $shortcut.Save()
         Log-Message "Atalho criado no Menu Iniciar: $startLnk" "Green"
@@ -265,8 +269,10 @@ function Invoke-Install {
         $desktopDir = [Environment]::GetFolderPath('Desktop')
         $deskLnk = Join-Path $desktopDir 'CloudOS.lnk'
         $shortcut = $wsh.CreateShortcut($deskLnk)
-        $shortcut.TargetPath = $mainExe
+        $shortcut.TargetPath = 'powershell.exe'
+        $shortcut.Arguments = "-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `"$startScript`""
         $shortcut.WorkingDirectory = $TargetLocation
+        $shortcut.IconLocation = "$mainExe,0"
         $shortcut.Description = 'CloudOS Desktop'
         $shortcut.Save()
         Log-Message "Atalho criado na Area de Trabalho: $deskLnk" "Green"

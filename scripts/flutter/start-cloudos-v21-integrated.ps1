@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $false)]
     [string]$Root,
     [string]$NativeRoot,
     [ValidateRange(5, 120)]
@@ -10,6 +10,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+if (-not $Root) {
+    $Root = $PSScriptRoot
+}
 
 $presentationRoot = (Resolve-Path -LiteralPath $Root).Path
 $nativeRootPath = if ($NativeRoot) {
