@@ -34,7 +34,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>advapi32.lib;shell32.lib;userenv.lib;user32.lib;gdi32.lib;ole32.lib;oleaut32.lib;uuid.lib;dxva2.lib;wbemuuid.lib;wlanapi.lib;iphlpapi.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>advapi32.lib;shell32.lib;userenv.lib;user32.lib;gdi32.lib;ole32.lib;oleaut32.lib;uuid.lib;dxva2.lib;wbemuuid.lib;wlanapi.lib;iphlpapi.lib;ws2_32.lib;bthprops.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest>
       <EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness>
@@ -58,6 +58,9 @@
     <ClInclude Include="src\path_translation_v21.h" />
     <ClInclude Include="src\broker_server_v21.h" />
     <ClInclude Include="src\window_service_v23.h" />
+    <ClInclude Include="src\display_service_v25.h" />
+    <ClInclude Include="src\audio_service_v25.h" />
+    <ClInclude Include="src\system_settings_service_v25.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\protocol_v21.cpp" />
@@ -76,6 +79,9 @@
     <ClCompile Include="src\broker_server_v21.cpp" />
     <ClCompile Include="src\broker_main.cpp" />
     <ClCompile Include="src\window_service_v23.cpp" />
+    <ClCompile Include="src\display_service_v25.cpp" />
+    <ClCompile Include="src\audio_service_v25.cpp" />
+    <ClCompile Include="src\system_settings_service_v25.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

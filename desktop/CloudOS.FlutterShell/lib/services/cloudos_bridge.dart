@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/services.dart';
 
 import '../models/shell_models.dart';
+import '../models/system_settings_models.dart';
 import '../models/wsl_distro.dart';
 import '../shell/window_manager/cloud_window.dart';
 import 'bridge/cloud_app_mapper.dart';
@@ -10,6 +12,7 @@ import 'bridge/cloud_file_mapper.dart';
 import 'bridge/cloud_notification_mapper.dart';
 import 'bridge/cloudos_preview_data.dart';
 
+export '../models/system_settings_models.dart';
 export '../models/wsl_distro.dart';
 export '../shell/window_manager/cloud_window.dart';
 
@@ -930,6 +933,170 @@ class CloudOSBridge {
     } on PlatformException {
       return const <CloudMonitorRecord>[];
     }
+  }
+
+  Future<Map<String, dynamic>?> invokeBrokerRpc(
+    String method, [
+    Map<String, dynamic>? payload,
+  ]) async {
+    try {
+      final jsonStr = await _channel.invokeMethod<String>(
+        'broker.invokeRpc',
+        <String, Object?>{
+          'method': method,
+          'payload': payload != null ? jsonEncode(payload) : '',
+        },
+      );
+      if (jsonStr == null || jsonStr.isEmpty) return null;
+      final decoded = jsonDecode(jsonStr);
+      if (decoded is Map) {
+        return Map<String, dynamic>.from(decoded);
+      }
+      return null;
+    } on MissingPluginException {
+      return null;
+    } on PlatformException {
+      return null;
+    }
+  }
+
+  Future<List<CloudDisplayMonitor>> getDisplayMonitors() async {
+    final res = await invokeBrokerRpc('display.listMonitors');
+    if (res == null || res['monitors'] is! List) return const [];
+    return (res['monitors'] as List)
+        .whereType<Map>()
+        .map((m) => CloudDisplayMonitor.fromMap(Map<String, dynamic>.from(m)))
+        .toList();
+  }
+
+  Future<List<CloudDisplayMode>> getDisplayModes([
+    String deviceName = r'\\.\DISPLAY1',
+  ]) async {
+    final res = await invokeBrokerRpc('display.listSupportedModes', {
+      'deviceName': deviceName,
+    });
+    if (res == null || res['modes'] is! List) return const [];
+    return (res['modes'] as List)
+        .whereType<Map>()
+        .map((m) => CloudDisplayMode.fromMap(Map<String, dynamic>.from(m)))
+        .toList();
+  }
+
+  Future<bool> setDisplayMode({
+    required String deviceName,
+    required int width,
+    required int height,
+    int frequency = 60,
+    int orientation = 0,
+  }) async {
+    final res = await invokeBrokerRpc('display.setMode', {
+      'deviceName': deviceName,
+      'width': width,
+      'height': height,
+      'frequency': frequency,
+      'orientation': orientation,
+    });
+    return res != null && (res['success'] as bool? ?? false);
+  }
+
+  Future<bool> restoreDisplayMode() async {
+    final res = await invokeBrokerRpc('display.restore');
+    return res != null && (res['success'] as bool? ?? false);
+  }
+
+  Future<CloudAudioState> getAudioState() async {
+    final res = await invokeBrokerRpc('audio.getState');
+    if (res == null || res['audio'] is! Map) return const CloudAudioState();
+    return CloudAudioState.fromMap(Map<String, dynamic>.from(res['audio'] as Map));
+  }
+
+  Future<bool> setMasterVolume(double volume) async {
+    final res = await invokeBrokerRpc('audio.setVolume', {'volume': volume});
+    return res != null && (res['success'] as bool? ?? false);
+  }
+
+  Future<bool> setMasterMute(bool muted) async {
+    final res = await invokeBrokerRpc('audio.setMute', {'muted': muted});
+    return res != null && (res['success'] as bool? ?? false);
+  }
+
+  Future<CloudPowerStatus> getPowerStatus() async {
+    final res = await invokeBrokerRpc('power.getStatus');
+    if (res == null || res['power'] is! Map) return const CloudPowerStatus();
+    return CloudPowerStatus.fromMap(Map<String, dynamic>.from(res['power'] as Map));
+  }
+
+  Future<List<CloudNetworkInterface>> getNetworkInterfaces() async {
+    final res = await invokeBrokerRpc('network.getInterfaces');
+    if (res == null || res['interfaces'] is! List) return const [];
+    return (res['interfaces'] as List)
+        .whereType<Map>()
+        .map((m) => CloudNetworkInterface.fromMap(Map<String, dynamic>.from(m)))
+        .toList();
+  }
+
+  Future<List<CloudWifiNetwork>> getWifiNetworks() async {
+    final res = await invokeBrokerRpc('network.getWifi');
+    if (res == null || res['networks'] is! List) return const [];
+    return (res['networks'] as List)
+        .whereType<Map>()
+        .map((m) => CloudWifiNetwork.fromMap(Map<String, dynamic>.from(m)))
+        .toList();
+  }
+
+  Future<CloudBluetoothStatus> getBluetoothStatus() async {
+    final res = await invokeBrokerRpc('bluetooth.getStatus');
+    if (res == null || res['bluetooth'] is! Map) return const CloudBluetoothStatus();
+    return CloudBluetoothStatus.fromMap(Map<String, dynamic>.from(res['bluetooth'] as Map));
+  }
+
+  Future<List<CloudStorageDrive>> getStorageDrives() async {
+    final res = await invokeBrokerRpc('storage.getDrives');
+    if (res == null || res['drives'] is! List) return const [];
+    return (res['drives'] as List)
+        .whereType<Map>()
+        .map((m) => CloudStorageDrive.fromMap(Map<String, dynamic>.from(m)))
+        .toList();
+  }
+
+  Future<CloudPersonalizationSettings> getPersonalizationSettings() async {
+    final res = await invokeBrokerRpc('personalization.get');
+    if (res == null || res['personalization'] is! Map) return const CloudPersonalizationSettings();
+    return CloudPersonalizationSettings.fromMap(Map<String, dynamic>.from(res['personalization'] as Map));
+  }
+
+  Future<bool> setPersonalizationSettings(CloudPersonalizationSettings settings) async {
+    final res = await invokeBrokerRpc('personalization.set', {
+      'personalization': settings.toMap(),
+    });
+    return res != null && (res['success'] as bool? ?? false);
+  }
+
+  Future<CloudDateTimeLocale> getDateTimeLocale() async {
+    final res = await invokeBrokerRpc('datetime.get');
+    if (res == null || res['datetime'] is! Map) {
+      return CloudDateTimeLocale(
+        localTime: DateTime.now().toIso8601String(),
+        timezoneName: 'Local',
+        biasMinutes: 0,
+        localeName: 'pt-BR',
+      );
+    }
+    return CloudDateTimeLocale.fromMap(Map<String, dynamic>.from(res['datetime'] as Map));
+  }
+
+  Future<CloudQuickSettingsState> getQuickSettingsState() async {
+    final res = await invokeBrokerRpc('quicksettings.getState');
+    if (res == null) {
+      return const CloudQuickSettingsState(
+        audio: CloudAudioState(),
+        power: CloudPowerStatus(),
+        bluetooth: CloudBluetoothStatus(),
+        personalization: CloudPersonalizationSettings(),
+        performanceProfile: 'balanced',
+      );
+    }
+    return CloudQuickSettingsState.fromMap(res);
   }
 
   Future<Map<String, Object?>> getBridgeInfo() async {

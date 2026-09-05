@@ -1249,6 +1249,53 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         return;
     }
 
+    if (method == "broker.invokeRpc")
+    {
+        const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
+        if (!args)
+        {
+            result->Error("INVALID_ARGUMENT", "broker.invokeRpc requires arguments map");
+            return;
+        }
+
+        std::string rpc_method;
+        const auto it_m = args->find(flutter::EncodableValue("method"));
+        if (it_m != args->end() && std::holds_alternative<std::string>(it_m->second))
+        {
+            rpc_method = std::get<std::string>(it_m->second);
+        }
+
+        if (rpc_method.empty())
+        {
+            result->Error("INVALID_ARGUMENT", "broker.invokeRpc requires a valid 'method'");
+            return;
+        }
+
+        JsonObject payload;
+        const auto it_p = args->find(flutter::EncodableValue("payload"));
+        if (it_p != args->end() && std::holds_alternative<std::string>(it_p->second))
+        {
+            const std::string& p_str = std::get<std::string>(it_p->second);
+            JsonValue root;
+            if (ParseJson(p_str, root) && root.IsObject())
+            {
+                payload = root.AsObject();
+            }
+        }
+
+        BrokerResponse res;
+        std::string err;
+        if (!CloudOSBrokerClientV21::Instance().InvokeRpc(rpc_method, payload, res, err))
+        {
+            result->Error("RPC_FAILED", err.empty() ? "Broker RPC execution failed" : err);
+            return;
+        }
+
+        std::string serialized_payload = SerializeJson(JsonValue(res.payload));
+        result->Success(flutter::EncodableValue(std::move(serialized_payload)));
+        return;
+    }
+
     result->NotImplemented();
 }
 

@@ -10,6 +10,9 @@
 #include "system_service_v21.h"
 #include "window_service_v23.h"
 #include "wsl_service_v21.h"
+#include "display_service_v25.h"
+#include "audio_service_v25.h"
+#include "system_settings_service_v25.h"
 
 #include <chrono>
 #include <cmath>
@@ -1276,6 +1279,293 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
             return res;
         }
         res.payload["snapshot"] = JsonValue(snapshot_json);
+        return res;
+    }
+
+    // --- DISPLAY & MONITOR (ETAPA 5) ---
+    if (method == "display.listMonitors")
+    {
+        const auto monitors = DisplayServiceV25::Instance().ListMonitors();
+        JsonArray arr;
+        arr.reserve(monitors.size());
+        for (const auto& m : monitors)
+        {
+            arr.push_back(JsonValue(m.ToJsonObject()));
+        }
+        res.payload["monitors"] = JsonValue(std::move(arr));
+        return res;
+    }
+
+    if (method == "display.listSupportedModes")
+    {
+        std::wstring dev = L"\\\\.\\DISPLAY1";
+        if (req.payload.count("deviceName") && req.payload.at("deviceName").IsString())
+        {
+            dev = Utf8ToWide(req.payload.at("deviceName").AsString());
+        }
+        const auto modes = DisplayServiceV25::Instance().ListSupportedModes(dev);
+        JsonArray arr;
+        arr.reserve(modes.size());
+        for (const auto& m : modes)
+        {
+            arr.push_back(JsonValue(m.ToJsonObject()));
+        }
+        res.payload["modes"] = JsonValue(std::move(arr));
+        return res;
+    }
+
+    if (method == "display.setMode")
+    {
+        std::wstring dev = L"\\\\.\\DISPLAY1";
+        if (req.payload.count("deviceName") && req.payload.at("deviceName").IsString())
+        {
+            dev = Utf8ToWide(req.payload.at("deviceName").AsString());
+        }
+        int width = req.payload.count("width") && req.payload.at("width").IsInt() ? static_cast<int>(req.payload.at("width").AsInt()) : 0;
+        int height = req.payload.count("height") && req.payload.at("height").IsInt() ? static_cast<int>(req.payload.at("height").AsInt()) : 0;
+        int freq = req.payload.count("frequency") && req.payload.at("frequency").IsInt() ? static_cast<int>(req.payload.at("frequency").AsInt()) : 0;
+        int orient = req.payload.count("orientation") && req.payload.at("orientation").IsInt() ? static_cast<int>(req.payload.at("orientation").AsInt()) : 0;
+
+        std::string err;
+        if (!DisplayServiceV25::Instance().SetDisplayMode(dev, width, height, freq, orient, &err))
+        {
+            res.ok = false;
+            res.error_code = "display_mode_failed";
+            res.error_message = err;
+            return res;
+        }
+        res.payload["success"] = JsonValue(true);
+        return res;
+    }
+
+    if (method == "display.restore")
+    {
+        std::string err;
+        if (!DisplayServiceV25::Instance().RestoreBaseline(&err))
+        {
+            res.ok = false;
+            res.error_code = "display_restore_failed";
+            res.error_message = err;
+            return res;
+        }
+        res.payload["success"] = JsonValue(true);
+        return res;
+    }
+
+    // --- AUDIO (ETAPA 5) ---
+    if (method == "audio.getState")
+    {
+        const auto state = AudioServiceV25::Instance().GetAudioState();
+        res.payload["audio"] = JsonValue(state.ToJsonObject());
+        return res;
+    }
+
+    if (method == "audio.setVolume")
+    {
+        double vol = 0.5;
+        if (req.payload.count("volume") && req.payload.at("volume").IsDouble())
+        {
+            vol = req.payload.at("volume").AsDouble();
+        }
+        if (!AudioServiceV25::Instance().SetVolume(vol))
+        {
+            res.ok = false;
+            res.error_code = "audio_set_volume_failed";
+            res.error_message = "Failed to set master volume via Core Audio";
+            return res;
+        }
+        res.payload["success"] = JsonValue(true);
+        res.payload["volume"] = JsonValue(vol);
+        return res;
+    }
+
+    if (method == "audio.setMute")
+    {
+        bool mute = false;
+        if (req.payload.count("muted") && req.payload.at("muted").IsBool())
+        {
+            mute = req.payload.at("muted").AsBool();
+        }
+        if (!AudioServiceV25::Instance().SetMute(mute))
+        {
+            res.ok = false;
+            res.error_code = "audio_set_mute_failed";
+            res.error_message = "Failed to toggle mute via Core Audio";
+            return res;
+        }
+        res.payload["success"] = JsonValue(true);
+        res.payload["muted"] = JsonValue(mute);
+        return res;
+    }
+
+    // --- POWER & BATTERY (ETAPA 5) ---
+    if (method == "power.getStatus")
+    {
+        const auto pwr = SystemSettingsServiceV25::Instance().GetPowerStatus();
+        res.payload["power"] = JsonValue(pwr.ToJsonObject());
+        return res;
+    }
+
+    // --- NETWORK & WI-FI (ETAPA 5) ---
+    if (method == "network.getInterfaces")
+    {
+        const auto ifaces = SystemSettingsServiceV25::Instance().GetNetworkInterfaces();
+        JsonArray arr;
+        arr.reserve(ifaces.size());
+        for (const auto& iface : ifaces)
+        {
+            arr.push_back(JsonValue(iface.ToJsonObject()));
+        }
+        res.payload["interfaces"] = JsonValue(std::move(arr));
+        return res;
+    }
+
+    if (method == "network.getWifi")
+    {
+        const auto nets = SystemSettingsServiceV25::Instance().GetWifiNetworks();
+        JsonArray arr;
+        arr.reserve(nets.size());
+        for (const auto& net : nets)
+        {
+            arr.push_back(JsonValue(net.ToJsonObject()));
+        }
+        res.payload["networks"] = JsonValue(std::move(arr));
+        return res;
+    }
+
+    // --- BLUETOOTH (ETAPA 5) ---
+    if (method == "bluetooth.getStatus")
+    {
+        const auto bt = SystemSettingsServiceV25::Instance().GetBluetoothStatus();
+        res.payload["bluetooth"] = JsonValue(bt.ToJsonObject());
+        return res;
+    }
+
+    // --- STORAGE (ETAPA 5) ---
+    if (method == "storage.getDrives")
+    {
+        const auto drives = SystemSettingsServiceV25::Instance().GetStorageDrives();
+        JsonArray arr;
+        arr.reserve(drives.size());
+        for (const auto& d : drives)
+        {
+            arr.push_back(JsonValue(d.ToJsonObject()));
+        }
+        res.payload["drives"] = JsonValue(std::move(arr));
+        return res;
+    }
+
+    // --- PERSONALIZATION (ETAPA 5) ---
+    if (method == "personalization.get")
+    {
+        const auto pers = SystemSettingsServiceV25::Instance().GetPersonalization();
+        res.payload["personalization"] = JsonValue(pers.ToJsonObject());
+        return res;
+    }
+
+    if (method == "personalization.set")
+    {
+        auto it = req.payload.find("personalization");
+        if (it == req.payload.end() || !it->second.IsObject())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing or invalid 'personalization' object";
+            return res;
+        }
+        PersonalizationSettingsV25 s = PersonalizationSettingsV25::FromJsonObject(it->second.AsObject());
+        std::string err;
+        if (!SystemSettingsServiceV25::Instance().SetPersonalization(s, &err))
+        {
+            res.ok = false;
+            res.error_code = "personalization_save_failed";
+            res.error_message = err;
+            return res;
+        }
+        res.payload["success"] = JsonValue(true);
+        res.payload["personalization"] = JsonValue(s.ToJsonObject());
+        return res;
+    }
+
+    // --- DATE / TIME / LOCALE (ETAPA 5) ---
+    if (method == "datetime.get")
+    {
+        const auto dt = SystemSettingsServiceV25::Instance().GetDateTimeLocale();
+        res.payload["datetime"] = JsonValue(dt.ToJsonObject());
+        return res;
+    }
+
+    if (method == "datetime.setTime")
+    {
+        // Safe boundary: changing system time requires admin elevation which CloudOS never forces.
+        res.ok = false;
+        res.error_code = "elevation_required";
+        res.error_message = "Changing system clock requires Windows administrative privileges. System time can be configured via Windows Date & Time settings.";
+        return res;
+    }
+
+    // --- PERFORMANCE PROFILES (ETAPA 5) ---
+    if (method == "performance.getProfile")
+    {
+        const auto metrics = PerformanceManagerV21::Instance().GetMetrics();
+        res.payload["profile"] = JsonValue(PerformanceProfileToString(metrics.current_profile));
+        res.payload["metrics"] = JsonValue(metrics.ToJsonObject());
+        return res;
+    }
+
+    if (method == "performance.setProfile")
+    {
+        auto it = req.payload.find("profile");
+        if (it == req.payload.end() || !it->second.IsString())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing or invalid 'profile' parameter ('economy', 'balanced', 'performance')";
+            return res;
+        }
+        const std::string prof_str = it->second.AsString();
+        if (!PerformanceManagerV21::Instance().SetProfileByName(prof_str))
+        {
+            res.ok = false;
+            res.error_code = "invalid_profile";
+            res.error_message = "Unknown performance profile: " + prof_str;
+            return res;
+        }
+        res.payload["success"] = JsonValue(true);
+        res.payload["profile"] = JsonValue(prof_str);
+        return res;
+    }
+
+    // --- WSL DISTRO SETTINGS (ETAPA 5) ---
+    if (method == "wsl.getDistros")
+    {
+        const auto details = WslServiceV21::Instance().GetDistroDetails();
+        JsonArray arr;
+        arr.reserve(details.size());
+        for (const auto& d : details)
+        {
+            arr.push_back(JsonValue(d.ToJsonObject()));
+        }
+        res.payload["distros"] = JsonValue(std::move(arr));
+        res.payload["defaultDistro"] = JsonValue(WslServiceV21::Instance().GetDefaultDistribution());
+        res.payload["wslAvailable"] = JsonValue(WslServiceV21::Instance().IsWslAvailable());
+        return res;
+    }
+
+    // --- QUICK SETTINGS UNIFIED STATE (ETAPA 5) ---
+    if (method == "quicksettings.getState")
+    {
+        const auto audio = AudioServiceV25::Instance().GetAudioState();
+        const auto pwr = SystemSettingsServiceV25::Instance().GetPowerStatus();
+        const auto bt = SystemSettingsServiceV25::Instance().GetBluetoothStatus();
+        const auto pers = SystemSettingsServiceV25::Instance().GetPersonalization();
+        const auto metrics = PerformanceManagerV21::Instance().GetMetrics();
+
+        res.payload["audio"] = JsonValue(audio.ToJsonObject());
+        res.payload["power"] = JsonValue(pwr.ToJsonObject());
+        res.payload["bluetooth"] = JsonValue(bt.ToJsonObject());
+        res.payload["personalization"] = JsonValue(pers.ToJsonObject());
+        res.payload["performanceProfile"] = JsonValue(PerformanceProfileToString(metrics.current_profile));
         return res;
     }
 

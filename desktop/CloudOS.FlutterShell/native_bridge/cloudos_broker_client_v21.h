@@ -271,6 +271,51 @@ public:
         const std::string& snap = "",
         bool fullscreen = false);
 
+    bool InvokeRpc(
+        const std::string& method,
+        const JsonObject& payload,
+        BrokerResponse& out_response,
+        std::string& err)
+    {
+        if (!EnsureConnected())
+        {
+            err = "Broker not connected";
+            return false;
+        }
+
+        BrokerRequest request;
+        request.protocol = kProtocolVersion;
+        request.id = "rpc-" + std::to_string(next_req_id_.fetch_add(1));
+        request.method = method;
+        request.payload = payload;
+
+        std::string raw_response;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!SendFrame(SerializeRequest(request)) || !ReadFrame(raw_response))
+            {
+                state_.store(BrokerConnectionState::Degraded);
+                err = "Broker pipe communication failure";
+                return false;
+            }
+        }
+
+        std::string parse_error;
+        if (!ParseResponse(raw_response, out_response, parse_error))
+        {
+            err = parse_error.empty() ? "Broker response parse failed" : parse_error;
+            return false;
+        }
+
+        if (!out_response.ok)
+        {
+            err = out_response.error_message.empty() ? out_response.error_code : out_response.error_message;
+            return false;
+        }
+
+        return true;
+    }
+
 private:
     CloudOSBrokerClientV21() = default;
     ~CloudOSBrokerClientV21();
