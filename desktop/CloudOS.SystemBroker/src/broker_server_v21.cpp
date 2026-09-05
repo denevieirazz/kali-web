@@ -1511,7 +1511,23 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
     }
 
     // --- PERFORMANCE PROFILES (ETAPA 5 & 8) ---
-    if (method == "performance.getProfile" || method == "performance.getMetrics")
+    if (method == "performance.getProfile")
+    {
+        const auto metrics = PerformanceManagerV21::Instance().GetMetrics();
+        res.payload["profile"] = JsonValue(PerformanceProfileToString(metrics.current_profile));
+        res.payload["metrics"] = JsonValue(metrics.ToJsonObject());
+        res.payload["total_ram_mb"] = JsonValue(static_cast<int64_t>(metrics.total_ram_mb));
+        res.payload["free_ram_mb"] = JsonValue(static_cast<int64_t>(metrics.free_ram_mb));
+        res.payload["cpu_cores"] = JsonValue(static_cast<int64_t>(metrics.cpu_cores));
+        res.payload["memory_load_percent"] = JsonValue(static_cast<int64_t>(metrics.memory_load_percent));
+        res.payload["is_low_end_hardware"] = JsonValue(metrics.is_low_end_hardware);
+        res.payload["on_battery"] = JsonValue(metrics.on_battery);
+        res.payload["battery_percent"] = JsonValue(static_cast<int64_t>(metrics.battery_percent));
+        res.payload["success"] = JsonValue(true);
+        return res;
+    }
+
+    if (method == "performance.getMetrics")
     {
         const auto metrics = PerformanceManagerV21::Instance().GetMetrics();
         res.payload["profile"] = JsonValue(PerformanceProfileToString(metrics.current_profile));

@@ -42,8 +42,8 @@ foreach ($token in @(
     'is_low_end_hardware_ = (total_ram_mb_ <= 8192 || cpu_cores_ <= 4);',
     'PerformanceProfile::Economy',
     'system.performanceProfileChanged',
-    'kMaxRetainedJobs = 64',
-    'kMaxQueuedJobs = 64'
+    'kMaxRetainedJobs = 512',
+    'kMaxQueuedJobs = 256'
 )) {
     if (-not $perfContent.Contains($token) -and -not $jobContent.Contains($token)) {
         throw "Economy profile or low-end hardware protection missing: $token"

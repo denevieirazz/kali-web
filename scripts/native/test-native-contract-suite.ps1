@@ -53,7 +53,11 @@ $contracts = @(
     'test-v21-integrated-runtime-contract.ps1',
     'test-shell-notification-bridge-v21-contract.ps1',
     'test-crash-diagnostics-v22-contract.ps1',
-    'test-window-registry-v23-contract.ps1'
+    'test-window-registry-v23-contract.ps1',
+    'test-settings-system-v25-contract.ps1',
+    'test-desktop-services-v26-contract.ps1',
+    'test-recovery-lifecycle-v26-contract.ps1',
+    'test-hardening-compatibility-v26-contract.ps1'
 )
 
 $duplicates = @($contracts | Group-Object | Where-Object Count -gt 1)
