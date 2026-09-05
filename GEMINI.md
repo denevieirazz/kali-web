@@ -20,6 +20,8 @@ Para otimizar o consumo de contexto, precisão das respostas e evitar conflitos 
   → `Context7`
 * **CloudOS physical desktop / Janelas / Controles / Acessibilidade:**
   → `cua-driver` (UI Automation semântica: `get_window_state`, `list_windows`, `click` por element_index)
+* **Automação direta de mouse/teclado / Drag-and-drop / Telas:**
+  → `Windows Computer Use MCP` (`mouse_move`, `left_click`, `left_click_drag`, `key`, `list_displays`, `zoom`)
 * **CloudOS Browser / navegação / páginas web / downloads web:**
   → `Playwright MCP` (estritamente restrito a páginas web; NUNCA usado no Shell desktop)
 * **Git local (commits, diffs, status, branching):**

@@ -43,6 +43,15 @@
         "@wonderwhy-er/desktop-commander@latest",
         "--no-onboarding"
       ]
+    },
+    "windows-computer-use": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "windows-computer-use-mcp"
+      ]
     }
   }
 }

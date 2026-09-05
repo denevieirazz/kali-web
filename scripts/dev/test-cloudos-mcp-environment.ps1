@@ -165,7 +165,52 @@ try {
     $results["DesktopCommander"] = "FAIL"
 }
 
-# 7. Configurações MCP (.agents/mcp_config.json e global)
+# 7. Windows Computer Use MCP (windows-computer-use-mcp)
+Write-Host "[-] Verificando Windows Computer Use MCP (windows-computer-use-mcp)..." -NoNewline
+try {
+    $initJson = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"health-check","version":"1.0.0"}}}'
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = if (Get-Command npx.cmd -ErrorAction SilentlyContinue) { (Get-Command npx.cmd).Source } else { "npx" }
+    $psi.Arguments = "-y windows-computer-use-mcp"
+    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+
+    $p = [System.Diagnostics.Process]::Start($psi)
+    $p.StandardInput.WriteLine($initJson)
+    $p.StandardInput.Flush()
+
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $wcuReady = $false
+    while ($sw.ElapsedMilliseconds -lt 6000 -and -not $wcuReady) {
+        if (-not $p.StandardOutput.EndOfStream) {
+            $line = $p.StandardOutput.ReadLine()
+            if ($line -match '"name":"windows-computer-use"') {
+                $wcuReady = $true
+                break
+            }
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    try { $p.Kill() } catch {}
+
+    if ($wcuReady) {
+        Write-Host " OK (MCP JSON-RPC handshake verificado)" -ForegroundColor Green
+        $results["WindowsComputerUse"] = "OK"
+    } else {
+        Write-Host " WARNING (não respondeu ao handshake no tempo limite)" -ForegroundColor Yellow
+        $warnings.Add("Windows Computer Use MCP demorou para inicializar ou não respondeu ao handshake.")
+        $results["WindowsComputerUse"] = "TIMEOUT"
+    }
+} catch {
+    Write-Host " WARNING (erro ao invocar: $($_.Exception.Message))" -ForegroundColor Yellow
+    $warnings.Add("Windows Computer Use MCP falhou na invocação: $($_.Exception.Message)")
+    $results["WindowsComputerUse"] = "FAIL"
+}
+
+# 8. Configurações MCP (.agents/mcp_config.json e global)
 Write-Host "[-] Verificando .agents/mcp_config.json local..." -NoNewline
 $localMcp = Join-Path $Root ".agents\mcp_config.json"
 if (Test-Path -LiteralPath $localMcp) {

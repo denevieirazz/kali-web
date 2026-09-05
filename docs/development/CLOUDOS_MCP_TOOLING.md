@@ -20,6 +20,7 @@ Este documento descreve o ecossistema de **Model Context Protocol (MCP)** config
 | **Context7** | **Third-party Service** | Upstash (`https://mcp.context7.com/mcp`) | Documentação atualizada de pacotes externos e bibliotecas (pub.dev, C++ libs) | Documentação de terceiros |
 | **cua-driver** | **Existing Local Tooling** | Antigravity Native Tooling (`.cua-driver.exe`) | Inspeção física do desktop Windows, árvore UI Automation (UIA), cliques semânticos e screenshots | Desktop Windows real, janelas e controles nativos |
 | **Desktop Commander MCP** | **Community / Open Source** | Eduards Ruzga (`@wonderwhy-er/desktop-commander`) | Controle interativo de processos de terminal, busca de código ripgrep e edição cirúrgica por blocos | Operações avançadas de terminal, processos interativos, busca e diffs |
+| **Windows Computer Use MCP** | **Community / Open Source** | `windows-computer-use-mcp` | Automação desktop direta (mouse pixel-level, teclado, drag-and-drop, displays, screenshots por região) | Simulação de mouse/teclado físico, atalhos de SO e geometria de telas |
 
 ---
 
@@ -69,6 +70,15 @@ Este documento descreve o ecossistema de **Model Context Protocol (MCP)** config
 * **Como testar:** Handshake JSON-RPC `initialize` (automatizado em `scripts/dev/test-cloudos-mcp-environment.ps1`).
 * **Regras de Segurança:** Todo comando disparado pelo Desktop Commander respeita rigorosamente as regras do CloudOS: nunca alterar chaves do Winlogon, não substituir o shell do Windows, não elevar privilégios sem necessidade e manter monitoramento contínuo de tarefas.
 
+### 2.9 Windows Computer Use MCP (Community)
+* **Comando:** `npx -y windows-computer-use-mcp`
+* **Por que usamos:** Provê automação de baixo nível para controle físico de mouse e teclado no Windows (`mouse_move`, `left_click`, `right_click`, `double_click`, `left_click_drag`, `scroll`, `type`, `key`, `hold_key`, `cursor_position`, `list_running_applications`, `get_frontmost_application`, `open_application`, `list_displays`, `read_clipboard`, `write_clipboard`, `screenshot`, `zoom`).
+* **Complementaridade com cua-driver:**
+  - `cua-driver` é a autoridade para **inspeção e validação semântica UIA** (por `AutomationId`, acessibilidade e árvore COM);
+  - `windows-computer-use` é a ferramenta para **ações físicas diretas de input** (arrastar janelas com drag-and-drop, atalhos combinados de teclas, medição de geometria de displays).
+* **Como testar:** Handshake JSON-RPC `initialize` (automatizado em `scripts/dev/test-cloudos-mcp-environment.ps1`).
+* **Regras de Segurança:** Ações de teclado e mouse devem ser restritas aos testes em andamento. Proibido acionar sequências que alterem configurações do sistema operacional hospedeiro ou acionem o shell padrão do Windows.
+
 ---
 
 ## 3. Matriz de Roteamento de Ferramentas (Tool Routing)
@@ -81,6 +91,8 @@ CI remota / PRs / Actions       → GitHub MCP
 Arquivos do projeto             → Filesystem MCP / ferramentas de workspace
 Busca ripgrep e diff por blocos → Desktop Commander MCP (start_search, edit_block)
 Processos de terminal interativo→ Desktop Commander MCP (start_process, interact_with_process)
+Input físico direto / Drag-drop → Windows Computer Use MCP (mouse_move, key, left_click_drag)
+Displays / Zoom de tela         → Windows Computer Use MCP (list_displays, zoom, screenshot)
 Bibliotecas de terceiros        → Context7
 Desktop e Janelas do CloudOS    → cua-driver (UI Automation semântica)
 Navegador CloudOS / Web pages   → Playwright MCP
@@ -137,4 +149,5 @@ O script valida:
 * Node.js e NPX
 * `cua-driver` e árvore UI Automation
 * Desktop Commander MCP (handshake JSON-RPC via npx)
+* Windows Computer Use MCP (handshake JSON-RPC via npx)
 * Integridade dos arquivos de configuração `.agents/mcp_config.json` e `~/.gemini/config/mcp_config.json`
