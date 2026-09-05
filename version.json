@@ -1,0 +1,11 @@
+{
+  "productName": "CloudOS",
+  "productVersion": "21.0.0",
+  "build": 29,
+  "gitSha": "c0836754834595cc51721ec345e92dc1c216a51c",
+  "protocolVersion": 21,
+  "architecture": "x64",
+  "channel": "stable",
+  "minWindowsBuild": 19041,
+  "releaseDate": "2026-09-05T18:15:00Z"
+}
