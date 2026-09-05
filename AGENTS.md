@@ -181,3 +181,12 @@ PR draft: work/<marco> -> validation/<marco>-base
 ```
 
 Corrija o `work/*` até CI verde. Não faça merge na `main` como efeito colateral da validação.
+
+## Tool Routing & MCPs de Desenvolvimento
+
+Consulte `GEMINI.md` e `docs/development/CLOUDOS_MCP_TOOLING.md` para a matriz canônica de roteamento de ferramentas MCP:
+- **Flutter/Dart:** Dart/Flutter MCP oficial (`analyze_files`, LSP, Widget Inspector, DTD);
+- **Windows APIs:** Microsoft Learn MCP antes de assumir APIs Win32;
+- **GitHub Remoto / CI:** GitHub MCP;
+- **Inspeção física do Desktop:** `cua-driver` (UI Automation semântica via `get_window_state` e `AutomationId`);
+- **Páginas Web do Navegador:** Playwright MCP (estritamente restrito a páginas web; nunca no shell desktop).
