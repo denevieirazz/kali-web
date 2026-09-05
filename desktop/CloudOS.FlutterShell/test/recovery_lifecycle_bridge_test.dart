@@ -66,9 +66,28 @@ void main() {
                 'success': true,
               });
 
+            case 'performance.getMetrics':
+              return jsonEncode({
+                'profile': 'economy',
+                'total_ram_mb': 16384,
+                'free_ram_mb': 8192,
+                'cpu_cores': 8,
+                'memory_load_percent': 50,
+                'is_low_end_hardware': false,
+                'on_battery': true,
+                'battery_percent': 75,
+                'success': true,
+              });
+
+            case 'performance.setProfile':
+              return jsonEncode({'success': true, 'profile': args['params']?['profile'] ?? 'economy'});
+
             default:
               return jsonEncode({'error': 'unsupported_method'});
           }
+        }
+        if (call.method == 'setPerformanceProfile') {
+          return true;
         }
         return null;
       });
@@ -116,6 +135,23 @@ void main() {
       expect(caps.economyMode, isFalse);
       expect(caps.rdpSession, isFalse);
       expect(caps.bluetoothAvailable, isTrue);
+    });
+
+    test('getHardwareMetrics parses RAM, CPU and economy profile metrics', () async {
+      final metrics = await bridge.getHardwareMetrics();
+      expect(metrics, isNotNull);
+      expect(metrics!.currentProfile, equals('economy'));
+      expect(metrics.isEconomyProfile, isTrue);
+      expect(metrics.totalRamMb, equals(16384));
+      expect(metrics.freeRamMb, equals(8192));
+      expect(metrics.cpuCores, equals(8));
+      expect(metrics.onBattery, isTrue);
+      expect(metrics.batteryPercent, equals(75));
+    });
+
+    test('setPerformanceProfile updates active profile successfully', () async {
+      final ok = await bridge.setPerformanceProfile('economy');
+      expect(ok, isTrue);
     });
   });
 }

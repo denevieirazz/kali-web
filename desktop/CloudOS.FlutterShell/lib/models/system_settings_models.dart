@@ -380,3 +380,40 @@ class CloudQuickSettingsState {
     );
   }
 }
+
+class CloudHardwareMetrics {
+  const CloudHardwareMetrics({
+    required this.totalRamMb,
+    required this.freeRamMb,
+    required this.cpuCores,
+    required this.memoryLoadPercent,
+    required this.currentProfile,
+    required this.isLowEndHardware,
+    required this.onBattery,
+    required this.batteryPercent,
+  });
+
+  final int totalRamMb;
+  final int freeRamMb;
+  final int cpuCores;
+  final int memoryLoadPercent;
+  final String currentProfile; // "economy", "balanced", "performance"
+  final bool isLowEndHardware;
+  final bool onBattery;
+  final int batteryPercent;
+
+  bool get isEconomyProfile => currentProfile.toLowerCase() == 'economy';
+
+  factory CloudHardwareMetrics.fromMap(Map<String, dynamic> map) {
+    return CloudHardwareMetrics(
+      totalRamMb: (map['total_ram_mb'] as num?)?.toInt() ?? 0,
+      freeRamMb: (map['free_ram_mb'] as num?)?.toInt() ?? 0,
+      cpuCores: (map['cpu_cores'] as num?)?.toInt() ?? 1,
+      memoryLoadPercent: (map['memory_load_percent'] as num?)?.toInt() ?? 0,
+      currentProfile: map['profile'] as String? ?? 'balanced',
+      isLowEndHardware: map['is_low_end_hardware'] as bool? ?? false,
+      onBattery: map['on_battery'] as bool? ?? false,
+      batteryPercent: (map['battery_percent'] as num?)?.toInt() ?? -1,
+    );
+  }
+}

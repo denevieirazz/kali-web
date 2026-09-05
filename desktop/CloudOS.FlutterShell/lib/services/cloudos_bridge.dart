@@ -1231,6 +1231,12 @@ class CloudOSBridge {
     return CloudOSSystemCapabilities.fromMap(res);
   }
 
+  Future<CloudHardwareMetrics?> getHardwareMetrics() async {
+    final res = await invokeBrokerRpc('performance.getMetrics');
+    if (res == null) return null;
+    return CloudHardwareMetrics.fromMap(res);
+  }
+
   Future<Map<String, Object?>> getBridgeInfo() async {
     try {
       final raw =
