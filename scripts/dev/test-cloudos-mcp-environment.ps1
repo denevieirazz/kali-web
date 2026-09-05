@@ -120,7 +120,52 @@ try {
     $results["Python"] = "NOT_INSTALLED"
 }
 
-# 6. Configurações MCP (.agents/mcp_config.json e global)
+# 6. Desktop Commander MCP (wonderwhy-er/DesktopCommanderMCP)
+Write-Host "[-] Verificando Desktop Commander MCP (@wonderwhy-er/desktop-commander)..." -NoNewline
+try {
+    $initJson = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"health-check","version":"1.0.0"}}}'
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = if (Get-Command npx.cmd -ErrorAction SilentlyContinue) { (Get-Command npx.cmd).Source } else { "npx" }
+    $psi.Arguments = "-y @wonderwhy-er/desktop-commander@latest --no-onboarding"
+    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+
+    $p = [System.Diagnostics.Process]::Start($psi)
+    $p.StandardInput.WriteLine($initJson)
+    $p.StandardInput.Flush()
+
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $dcReady = $false
+    while ($sw.ElapsedMilliseconds -lt 7000 -and -not $dcReady) {
+        if (-not $p.StandardOutput.EndOfStream) {
+            $line = $p.StandardOutput.ReadLine()
+            if ($line -match '"name":"desktop-commander"') {
+                $dcReady = $true
+                break
+            }
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    try { $p.Kill() } catch {}
+
+    if ($dcReady) {
+        Write-Host " OK (MCP JSON-RPC handshake verificado)" -ForegroundColor Green
+        $results["DesktopCommander"] = "OK"
+    } else {
+        Write-Host " WARNING (não respondeu ao handshake no tempo limite)" -ForegroundColor Yellow
+        $warnings.Add("Desktop Commander MCP demorou para inicializar ou não respondeu ao handshake.")
+        $results["DesktopCommander"] = "TIMEOUT"
+    }
+} catch {
+    Write-Host " WARNING (erro ao invocar: $($_.Exception.Message))" -ForegroundColor Yellow
+    $warnings.Add("Desktop Commander MCP falhou na invocação: $($_.Exception.Message)")
+    $results["DesktopCommander"] = "FAIL"
+}
+
+# 7. Configurações MCP (.agents/mcp_config.json e global)
 Write-Host "[-] Verificando .agents/mcp_config.json local..." -NoNewline
 $localMcp = Join-Path $Root ".agents\mcp_config.json"
 if (Test-Path -LiteralPath $localMcp) {

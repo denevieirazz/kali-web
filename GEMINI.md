@@ -14,6 +14,8 @@ Para otimizar o consumo de contexto, precisão das respostas e evitar conflitos 
   → `GitHub MCP`
 * **Arquivos do workspace / operações locais de arquivo:**
   → `Filesystem MCP` / ferramentas nativas de workspace
+* **Busca avançada com ripgrep / Diff cirúrgico por blocos / Processos interativos:**
+  → `Desktop Commander MCP` (`start_search`, `edit_block`, `start_process`, `interact_with_process`)
 * **Bibliotecas externas e pacotes de terceiros (pub.dev, C++ libs):**
   → `Context7`
 * **CloudOS physical desktop / Janelas / Controles / Acessibilidade:**

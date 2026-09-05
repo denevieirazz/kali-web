@@ -19,6 +19,7 @@ Este documento descreve o ecossistema de **Model Context Protocol (MCP)** config
 | **Playwright MCP** | **Microsoft Official** | Microsoft (`@playwright/mcp@latest`) | Testes e automação de páginas web no CloudOS Browser | Restrito a páginas web e WebView2 browser (NÃO usado no desktop shell) |
 | **Context7** | **Third-party Service** | Upstash (`https://mcp.context7.com/mcp`) | Documentação atualizada de pacotes externos e bibliotecas (pub.dev, C++ libs) | Documentação de terceiros |
 | **cua-driver** | **Existing Local Tooling** | Antigravity Native Tooling (`.cua-driver.exe`) | Inspeção física do desktop Windows, árvore UI Automation (UIA), cliques semânticos e screenshots | Desktop Windows real, janelas e controles nativos |
+| **Desktop Commander MCP** | **Community / Open Source** | Eduards Ruzga (`@wonderwhy-er/desktop-commander`) | Controle interativo de processos de terminal, busca de código ripgrep e edição cirúrgica por blocos | Operações avançadas de terminal, processos interativos, busca e diffs |
 
 ---
 
@@ -62,6 +63,12 @@ Este documento descreve o ecossistema de **Model Context Protocol (MCP)** config
 * **Por que usamos:** O CloudOS é um desktop real sobre o Windows. O `cua-driver` se integra diretamente à API COM `IUIAutomationCacheRequest`, inspecionando controles por `AutomationId`, nome acessível, tipo de controle, padrões de ação (`InvokePattern`, `ValuePattern`, `ScrollPattern`) e gerando screenshots de validação física.
 * **Auditoria:** Possui árvore semântica UIA completa via `get_window_state`, tornando desnecessário instalar ferramentas adicionais redundantes como `win32-mcp-server`.
 
+### 2.8 Desktop Commander MCP (Community / wonderwhy-er)
+* **Comando:** `npx -y @wonderwhy-er/desktop-commander@latest --no-onboarding`
+* **Por que usamos:** Oferece controle robusto de processos de terminal interativos (`start_process`, `read_process_output`, `interact_with_process`, `force_terminate`), paginação de saída de processos longos, busca rápida de código com ripgrep (`start_search`, `get_more_search_results`), edição cirúrgica por blocos (`edit_block`) e leitura de arquivos com offset negativo (tail de logs).
+* **Como testar:** Handshake JSON-RPC `initialize` (automatizado em `scripts/dev/test-cloudos-mcp-environment.ps1`).
+* **Regras de Segurança:** Todo comando disparado pelo Desktop Commander respeita rigorosamente as regras do CloudOS: nunca alterar chaves do Winlogon, não substituir o shell do Windows, não elevar privilégios sem necessidade e manter monitoramento contínuo de tarefas.
+
 ---
 
 ## 3. Matriz de Roteamento de Ferramentas (Tool Routing)
@@ -72,6 +79,8 @@ Widgets / Erros de layout       → Dart MCP + cua-driver (UIA físico)
 Assinaturas e APIs Windows      → Microsoft Learn MCP (Win32, COM, Shell, DPI)
 CI remota / PRs / Actions       → GitHub MCP
 Arquivos do projeto             → Filesystem MCP / ferramentas de workspace
+Busca ripgrep e diff por blocos → Desktop Commander MCP (start_search, edit_block)
+Processos de terminal interativo→ Desktop Commander MCP (start_process, interact_with_process)
 Bibliotecas de terceiros        → Context7
 Desktop e Janelas do CloudOS    → cua-driver (UI Automation semântica)
 Navegador CloudOS / Web pages   → Playwright MCP
@@ -127,4 +136,5 @@ O script valida:
 * Flutter SDK
 * Node.js e NPX
 * `cua-driver` e árvore UI Automation
+* Desktop Commander MCP (handshake JSON-RPC via npx)
 * Integridade dos arquivos de configuração `.agents/mcp_config.json` e `~/.gemini/config/mcp_config.json`

@@ -189,4 +189,5 @@ Consulte `GEMINI.md` e `docs/development/CLOUDOS_MCP_TOOLING.md` para a matriz c
 - **Windows APIs:** Microsoft Learn MCP antes de assumir APIs Win32;
 - **GitHub Remoto / CI:** GitHub MCP;
 - **Inspeção física do Desktop:** `cua-driver` (UI Automation semântica via `get_window_state` e `AutomationId`);
-- **Páginas Web do Navegador:** Playwright MCP (estritamente restrito a páginas web; nunca no shell desktop).
+- **Páginas Web do Navegador:** Playwright MCP (estritamente restrito a páginas web; nunca no shell desktop);
+- **Terminal interativo & Busca ripgrep & Diff:** Desktop Commander MCP (`start_search`, `edit_block`, `start_process`).

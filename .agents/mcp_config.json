@@ -33,6 +33,16 @@
         "-y",
         "@playwright/mcp@latest"
       ]
+    },
+    "desktop-commander": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "@wonderwhy-er/desktop-commander@latest",
+        "--no-onboarding"
+      ]
     }
   }
 }
