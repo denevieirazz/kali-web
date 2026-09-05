@@ -59,8 +59,6 @@ Thumbs.db
 *.sqlite
 *.sqlite3
 data/
-backend/data/*.json
-!backend/data/.gitkeep
 
 # Backups, Archives & Temp Zips
 backup-*/
