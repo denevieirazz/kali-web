@@ -18,6 +18,14 @@ CloudApp cloudAppFromNative(Map<Object?, Object?> raw) {
     isPinned: raw['pinned'] as bool? ?? false,
     isRecent: raw['recent'] as bool? ?? false,
     canLaunch: raw['canLaunch'] as bool? ?? true,
+    displayName: raw['displayName'] as String? ?? raw['display_name'] as String?,
+    launchTarget: raw['launchTarget'] as String? ?? raw['launch_target'] as String?,
+    source: raw['source'] as String?,
+    availability: raw['availability'] as String? ?? 'ready',
+    capabilities: (raw['capabilities'] as List<Object?>?)
+            ?.map((e) => e.toString())
+            .toList(growable: false) ??
+        const <String>[],
   );
 }
 

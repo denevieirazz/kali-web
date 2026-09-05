@@ -25,6 +25,22 @@ struct AppItem final
     std::string icon_key;
     bool pinned{false};
     bool recent{false};
+    std::string display_name;
+    std::string launch_target;
+    std::string availability{"ready"}; // "ready", "available", "unavailable"
+    std::vector<std::string> capabilities; // ["gui"], ["terminal"]
+
+    [[nodiscard]] JsonObject ToJsonObject() const;
+};
+
+struct LaunchStatus final
+{
+    std::string id;
+    std::string status{"failed"}; // "launching", "running", "failed", "exited"
+    bool launched{false};
+    std::string platform{"windows"};
+    std::string target;
+    std::string message;
 
     [[nodiscard]] JsonObject ToJsonObject() const;
 };
@@ -39,6 +55,7 @@ public:
 
     std::vector<AppItem> GetApps();
     bool LaunchApp(const std::string& app_id, std::string& err);
+    bool LaunchAppStructured(const std::string& app_id, LaunchStatus& status, std::string& err);
     [[nodiscard]] uint64_t GetGeneration() const noexcept { return generation_.load(); }
 
     void Invalidate();

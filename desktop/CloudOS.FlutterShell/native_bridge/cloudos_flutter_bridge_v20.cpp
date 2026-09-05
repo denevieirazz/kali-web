@@ -111,6 +111,73 @@ bool ReadWorkspaceArgument(
     return false;
 }
 
+bool ReadHwndArgument(
+    const flutter::MethodCall<flutter::EncodableValue>& method_call,
+    uint64_t* hwnd)
+{
+    if (hwnd == nullptr) return false;
+    *hwnd = 0;
+    const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
+    if (args == nullptr) return false;
+
+    const auto it = args->find(flutter::EncodableValue("hwnd"));
+    if (it == args->end()) return false;
+
+    if (const auto* val = std::get_if<int64_t>(&it->second))
+    {
+        *hwnd = static_cast<uint64_t>(*val);
+        return true;
+    }
+    if (const auto* val = std::get_if<int32_t>(&it->second))
+    {
+        *hwnd = static_cast<uint64_t>(*val);
+        return true;
+    }
+    if (const auto* val = std::get_if<std::string>(&it->second))
+    {
+        std::string s = *val;
+        if (s.rfind("win_", 0) == 0) s = s.substr(4);
+        try {
+            *hwnd = std::stoull(s);
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+    return false;
+}
+
+int ReadIntField(const flutter::EncodableMap& map, const char* key, int default_val)
+{
+    const auto it = map.find(flutter::EncodableValue(key));
+    if (it != map.end())
+    {
+        if (const auto* v = std::get_if<int32_t>(&it->second)) return static_cast<int>(*v);
+        if (const auto* v = std::get_if<int64_t>(&it->second)) return static_cast<int>(*v);
+    }
+    return default_val;
+}
+
+std::string ReadStringField(const flutter::EncodableMap& map, const char* key)
+{
+    const auto it = map.find(flutter::EncodableValue(key));
+    if (it != map.end())
+    {
+        if (const auto* s = std::get_if<std::string>(&it->second)) return *s;
+    }
+    return {};
+}
+
+bool ReadBoolField(const flutter::EncodableMap& map, const char* key, bool default_val)
+{
+    const auto it = map.find(flutter::EncodableValue(key));
+    if (it != map.end())
+    {
+        if (const auto* b = std::get_if<bool>(&it->second)) return *b;
+    }
+    return default_val;
+}
+
 std::string WideToUtf8(const wchar_t* value, std::size_t max_chars)
 {
     if (value == nullptr || max_chars == 0) return {};
@@ -399,6 +466,15 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
             map[flutter::EncodableValue("distro")] = flutter::EncodableValue(app.distro);
             map[flutter::EncodableValue("category")] = flutter::EncodableValue(app.category);
             map[flutter::EncodableValue("source")] = flutter::EncodableValue(app.source);
+            map[flutter::EncodableValue("displayName")] = flutter::EncodableValue(app.display_name.empty() ? app.name : app.display_name);
+            map[flutter::EncodableValue("launchTarget")] = flutter::EncodableValue(app.launch_target.empty() ? app.id : app.launch_target);
+            map[flutter::EncodableValue("availability")] = flutter::EncodableValue(app.availability.empty() ? (app.can_launch ? "ready" : "unavailable") : app.availability);
+            flutter::EncodableList caps_list;
+            for (const auto& cap : app.capabilities)
+            {
+                caps_list.push_back(flutter::EncodableValue(cap));
+            }
+            map[flutter::EncodableValue("capabilities")] = flutter::EncodableValue(std::move(caps_list));
             map[flutter::EncodableValue("canLaunch")] = flutter::EncodableValue(app.can_launch);
             map[flutter::EncodableValue("pinned")] = flutter::EncodableValue(app.pinned);
             map[flutter::EncodableValue("recent")] = flutter::EncodableValue(app.recent);
@@ -458,6 +534,181 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
             return;
         }
         result->Success(flutter::EncodableValue(true));
+        return;
+    }
+
+    if (method == "createFolder")
+    {
+        std::string parent_id, name;
+        if (!ReadStringArgument(method_call, "parentEntryId", &parent_id) ||
+            !ReadStringArgument(method_call, "name", &name))
+        {
+            result->Error("INVALID_ARGUMENT", "createFolder requires parentEntryId and name");
+            return;
+        }
+        BrokerClientFileItem created;
+        std::string err;
+        if (!CloudOSBrokerClientV21::Instance().CreateFolder(parent_id, name, created, err))
+        {
+            result->Error("CREATE_FOLDER_FAILED", err.empty() ? "Falha ao criar pasta" : err);
+            return;
+        }
+        flutter::EncodableMap map;
+        map[flutter::EncodableValue("name")] = flutter::EncodableValue(created.name);
+        map[flutter::EncodableValue("path")] = flutter::EncodableValue(created.path);
+        map[flutter::EncodableValue("isFolder")] = flutter::EncodableValue(created.is_folder);
+        map[flutter::EncodableValue("sizeFormatted")] = flutter::EncodableValue(created.size_formatted);
+        map[flutter::EncodableValue("modifiedFormatted")] = flutter::EncodableValue(created.modified_formatted);
+        map[flutter::EncodableValue("source")] = flutter::EncodableValue(created.source);
+        map[flutter::EncodableValue("extension")] = flutter::EncodableValue(created.extension);
+        map[flutter::EncodableValue("entryId")] = flutter::EncodableValue(created.entry_id);
+        result->Success(flutter::EncodableValue(std::move(map)));
+        return;
+    }
+
+    if (method == "renameFile")
+    {
+        std::string entry_id, new_name;
+        if (!ReadStringArgument(method_call, "entryId", &entry_id) ||
+            !ReadStringArgument(method_call, "newName", &new_name))
+        {
+            result->Error("INVALID_ARGUMENT", "renameFile requires entryId and newName");
+            return;
+        }
+        BrokerClientFileItem renamed;
+        std::string err;
+        if (!CloudOSBrokerClientV21::Instance().RenameFile(entry_id, new_name, renamed, err))
+        {
+            result->Error("RENAME_FAILED", err.empty() ? "Falha ao renomear" : err);
+            return;
+        }
+        flutter::EncodableMap map;
+        map[flutter::EncodableValue("name")] = flutter::EncodableValue(renamed.name);
+        map[flutter::EncodableValue("path")] = flutter::EncodableValue(renamed.path);
+        map[flutter::EncodableValue("isFolder")] = flutter::EncodableValue(renamed.is_folder);
+        map[flutter::EncodableValue("sizeFormatted")] = flutter::EncodableValue(renamed.size_formatted);
+        map[flutter::EncodableValue("modifiedFormatted")] = flutter::EncodableValue(renamed.modified_formatted);
+        map[flutter::EncodableValue("source")] = flutter::EncodableValue(renamed.source);
+        map[flutter::EncodableValue("extension")] = flutter::EncodableValue(renamed.extension);
+        map[flutter::EncodableValue("entryId")] = flutter::EncodableValue(renamed.entry_id);
+        result->Success(flutter::EncodableValue(std::move(map)));
+        return;
+    }
+
+    if (method == "deleteFiles")
+    {
+        const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
+        if (args == nullptr)
+        {
+            result->Error("INVALID_ARGUMENT", "deleteFiles requires arguments map");
+            return;
+        }
+        std::vector<std::string> entry_ids;
+        const auto it_ids = args->find(flutter::EncodableValue("entryIds"));
+        if (it_ids != args->end() && std::holds_alternative<flutter::EncodableList>(it_ids->second))
+        {
+            for (const auto& item : std::get<flutter::EncodableList>(it_ids->second))
+            {
+                if (std::holds_alternative<std::string>(item))
+                    entry_ids.push_back(std::get<std::string>(item));
+            }
+        }
+        bool permanent = false;
+        const auto it_perm = args->find(flutter::EncodableValue("permanent"));
+        if (it_perm != args->end() && std::holds_alternative<bool>(it_perm->second))
+        {
+            permanent = std::get<bool>(it_perm->second);
+        }
+
+        std::vector<std::string> deleted;
+        std::string err;
+        if (!CloudOSBrokerClientV21::Instance().DeleteFiles(entry_ids, permanent, deleted, err))
+        {
+            result->Error("DELETE_FAILED", err.empty() ? "Falha ao excluir itens" : err);
+            return;
+        }
+        flutter::EncodableList out_list;
+        out_list.reserve(deleted.size());
+        for (const auto& d : deleted) out_list.push_back(flutter::EncodableValue(d));
+        result->Success(flutter::EncodableValue(std::move(out_list)));
+        return;
+    }
+
+    if (method == "copyFiles" || method == "moveFiles")
+    {
+        const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
+        if (args == nullptr)
+        {
+            result->Error("INVALID_ARGUMENT", "copy/move requires arguments map");
+            return;
+        }
+        std::vector<std::string> source_ids;
+        const auto it_src = args->find(flutter::EncodableValue("sourceEntryIds"));
+        if (it_src != args->end() && std::holds_alternative<flutter::EncodableList>(it_src->second))
+        {
+            for (const auto& item : std::get<flutter::EncodableList>(it_src->second))
+            {
+                if (std::holds_alternative<std::string>(item))
+                    source_ids.push_back(std::get<std::string>(item));
+            }
+        }
+        std::string dest_id;
+        const auto it_dest = args->find(flutter::EncodableValue("destinationEntryId"));
+        if (it_dest != args->end() && std::holds_alternative<std::string>(it_dest->second))
+        {
+            dest_id = std::get<std::string>(it_dest->second);
+        }
+
+        std::string job_id;
+        std::string err;
+        const std::string op_type = (method == "moveFiles") ? "move" : "copy";
+        if (!CloudOSBrokerClientV21::Instance().CopyOrMoveFiles(op_type, source_ids, dest_id, job_id, err))
+        {
+            result->Error("OPERATION_FAILED", err.empty() ? "Falha ao iniciar operação" : err);
+            return;
+        }
+        result->Success(flutter::EncodableValue(job_id));
+        return;
+    }
+
+    if (method == "cancelFileOperation")
+    {
+        std::string job_id;
+        if (!ReadStringArgument(method_call, "jobId", &job_id))
+        {
+            result->Error("INVALID_ARGUMENT", "cancelFileOperation requires jobId");
+            return;
+        }
+        const bool cancelled = CloudOSBrokerClientV21::Instance().CancelFileOperation(job_id);
+        result->Success(flutter::EncodableValue(cancelled));
+        return;
+    }
+
+    if (method == "listDrives")
+    {
+        std::vector<BrokerClientDriveItem> drives;
+        std::string err;
+        if (!CloudOSBrokerClientV21::Instance().ListDrives(drives, err))
+        {
+            result->Error("LIST_DRIVES_FAILED", err.empty() ? "Falha ao listar unidades" : err);
+            return;
+        }
+        flutter::EncodableList list;
+        list.reserve(drives.size());
+        for (const auto& d : drives)
+        {
+            flutter::EncodableMap map;
+            map[flutter::EncodableValue("mountPath")] = flutter::EncodableValue(d.mount_path);
+            map[flutter::EncodableValue("label")] = flutter::EncodableValue(d.label);
+            map[flutter::EncodableValue("driveType")] = flutter::EncodableValue(d.drive_type);
+            map[flutter::EncodableValue("totalBytes")] = flutter::EncodableValue(static_cast<int64_t>(d.total_bytes));
+            map[flutter::EncodableValue("freeBytes")] = flutter::EncodableValue(static_cast<int64_t>(d.free_bytes));
+            map[flutter::EncodableValue("totalFormatted")] = flutter::EncodableValue(d.total_formatted);
+            map[flutter::EncodableValue("freeFormatted")] = flutter::EncodableValue(d.free_formatted);
+            map[flutter::EncodableValue("entryId")] = flutter::EncodableValue(d.entry_id);
+            list.push_back(flutter::EncodableValue(std::move(map)));
+        }
+        result->Success(flutter::EncodableValue(std::move(list)));
         return;
     }
 
@@ -638,6 +889,120 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         return;
     }
 
+    if (method == "launchAppStructured")
+    {
+        std::string app_id;
+        if (!ReadStringArgument(method_call, "id", &app_id))
+        {
+            result->Error("INVALID_ARGUMENT", "launchAppStructured requires a map with an 'id' property");
+            return;
+        }
+        BrokerClientLaunchResult launch_res;
+        std::string err;
+        const bool ok = CloudOSBrokerClientV21::Instance().LaunchAppStructured(app_id, launch_res, err);
+        flutter::EncodableMap map;
+        map[flutter::EncodableValue("id")] = flutter::EncodableValue(launch_res.id);
+        map[flutter::EncodableValue("status")] = flutter::EncodableValue(launch_res.status);
+        map[flutter::EncodableValue("launched")] = flutter::EncodableValue(launch_res.launched);
+        map[flutter::EncodableValue("platform")] = flutter::EncodableValue(launch_res.platform);
+        map[flutter::EncodableValue("target")] = flutter::EncodableValue(launch_res.target);
+        map[flutter::EncodableValue("message")] = flutter::EncodableValue(launch_res.message);
+        if (ok)
+        {
+            result->Success(flutter::EncodableValue(std::move(map)));
+        }
+        else
+        {
+            result->Error("LAUNCH_FAILED", err.empty() ? "Failed to launch application" : err, flutter::EncodableValue(std::move(map)));
+        }
+        return;
+    }
+
+    if (method == "wsl.listDistros")
+    {
+        std::vector<BrokerClientDistroInfo> distros;
+        std::string default_distro;
+        bool available = false;
+        if (!CloudOSBrokerClientV21::Instance().ListWslDistros(distros, default_distro, available))
+        {
+            result->Error("WSL_UNAVAILABLE", "Failed to retrieve WSL distributions from system broker");
+            return;
+        }
+        flutter::EncodableList list;
+        for (const auto& d : distros)
+        {
+            flutter::EncodableMap map;
+            map[flutter::EncodableValue("id")] = flutter::EncodableValue(d.id);
+            map[flutter::EncodableValue("name")] = flutter::EncodableValue(d.name);
+            map[flutter::EncodableValue("guid")] = flutter::EncodableValue(d.guid);
+            map[flutter::EncodableValue("version")] = flutter::EncodableValue(static_cast<int64_t>(d.version));
+            map[flutter::EncodableValue("state")] = flutter::EncodableValue(d.state);
+            map[flutter::EncodableValue("basePath")] = flutter::EncodableValue(d.base_path);
+            map[flutter::EncodableValue("defaultUid")] = flutter::EncodableValue(static_cast<int64_t>(d.default_uid));
+            map[flutter::EncodableValue("flags")] = flutter::EncodableValue(static_cast<int64_t>(d.flags));
+            map[flutter::EncodableValue("isDefault")] = flutter::EncodableValue(d.is_default);
+            list.push_back(flutter::EncodableValue(std::move(map)));
+        }
+        flutter::EncodableMap res_map;
+        res_map[flutter::EncodableValue("distros")] = flutter::EncodableValue(std::move(list));
+        res_map[flutter::EncodableValue("defaultDistro")] = flutter::EncodableValue(default_distro);
+        res_map[flutter::EncodableValue("wslAvailable")] = flutter::EncodableValue(available);
+        result->Success(flutter::EncodableValue(std::move(res_map)));
+        return;
+    }
+
+    if (method == "path.translate")
+    {
+        std::string path;
+        if (!ReadStringArgument(method_call, "path", &path))
+        {
+            result->Error("INVALID_ARGUMENT", "path.translate requires 'path'");
+            return;
+        }
+        std::string target = "linux";
+        ReadStringArgument(method_call, "target", &target);
+        std::string distro;
+        ReadStringArgument(method_call, "distro", &distro);
+
+        BrokerClientPathTranslation translation;
+        if (!CloudOSBrokerClientV21::Instance().TranslatePath(path, target, distro, translation))
+        {
+            result->Error("TRANSLATION_FAILED", "Failed to translate path");
+            return;
+        }
+        flutter::EncodableMap res_map;
+        res_map[flutter::EncodableValue("originalPath")] = flutter::EncodableValue(translation.original_path);
+        res_map[flutter::EncodableValue("translatedPath")] = flutter::EncodableValue(translation.translated_path);
+        res_map[flutter::EncodableValue("target")] = flutter::EncodableValue(translation.target);
+        res_map[flutter::EncodableValue("distro")] = flutter::EncodableValue(translation.distro);
+        res_map[flutter::EncodableValue("exists")] = flutter::EncodableValue(translation.exists);
+        result->Success(flutter::EncodableValue(std::move(res_map)));
+        return;
+    }
+
+    if (method == "system.getMountPoints")
+    {
+        std::vector<BrokerClientMountPoint> mounts;
+        if (!CloudOSBrokerClientV21::Instance().GetMountPoints(mounts))
+        {
+            result->Error("MOUNTS_UNAVAILABLE", "Failed to retrieve mount points");
+            return;
+        }
+        flutter::EncodableList list;
+        for (const auto& m : mounts)
+        {
+            flutter::EncodableMap map;
+            map[flutter::EncodableValue("id")] = flutter::EncodableValue(m.id);
+            map[flutter::EncodableValue("label")] = flutter::EncodableValue(m.label);
+            map[flutter::EncodableValue("path")] = flutter::EncodableValue(m.path);
+            map[flutter::EncodableValue("platform")] = flutter::EncodableValue(m.platform);
+            map[flutter::EncodableValue("isOnline")] = flutter::EncodableValue(m.is_online);
+            list.push_back(flutter::EncodableValue(std::move(map)));
+        }
+        result->Success(flutter::EncodableValue(std::move(list)));
+        return;
+    }
+
     if (method == "setVolume")
     {
         const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
@@ -695,6 +1060,195 @@ void CloudOSFlutterBridgeV20::HandleMethodCall(
         return;
     }
 
+    if (method == "getPerformanceProfile")
+    {
+        BrokerClientPerformanceProfile profile;
+        if (!CloudOSBrokerClientV21::Instance().GetPerformanceProfile(profile))
+        {
+            result->Error("BROKER_READ_FAILED", "Could not query performance profile from System Broker");
+            return;
+        }
+        flutter::EncodableMap map;
+        map[flutter::EncodableValue("profile")] = flutter::EncodableValue(profile.profile);
+        map[flutter::EncodableValue("totalRamMb")] = flutter::EncodableValue(profile.total_ram_mb);
+        map[flutter::EncodableValue("freeRamMb")] = flutter::EncodableValue(profile.free_ram_mb);
+        map[flutter::EncodableValue("memoryLoadPercent")] = flutter::EncodableValue(profile.memory_load_percent);
+        map[flutter::EncodableValue("cpuCores")] = flutter::EncodableValue(profile.cpu_cores);
+        map[flutter::EncodableValue("onBattery")] = flutter::EncodableValue(profile.on_battery);
+        map[flutter::EncodableValue("batteryPercent")] = flutter::EncodableValue(profile.battery_percent);
+        map[flutter::EncodableValue("isLowEndHardware")] = flutter::EncodableValue(profile.is_low_end_hardware);
+        result->Success(flutter::EncodableValue(std::move(map)));
+        return;
+    }
+
+    if (method == "setPerformanceProfile")
+    {
+        std::string profile_str;
+        if (!ReadStringArgument(method_call, "profile", &profile_str))
+        {
+            result->Error("INVALID_ARGUMENT", "setPerformanceProfile requires a 'profile' string");
+            return;
+        }
+        if (!CloudOSBrokerClientV21::Instance().SetPerformanceProfile(profile_str))
+        {
+            result->Error("BROKER_WRITE_FAILED", "System broker rejected or failed performance profile update");
+            return;
+        }
+        result->Success(flutter::EncodableValue(true));
+        return;
+    }
+
+    if (method == "window.getSnapshot" || method == "window.list")
+    {
+        std::string snapshot_json;
+        if (!CloudOSBrokerClientV21::Instance().GetWindowSnapshot(snapshot_json) || snapshot_json.empty())
+        {
+            snapshot_json = "{\"windows\":[],\"monitors\":[],\"currentWorkspace\":1,\"sequence\":1,\"timestamp\":0}";
+        }
+        result->Success(flutter::EncodableValue(snapshot_json));
+        return;
+    }
+
+    if (method == "window.focus")
+    {
+        uint64_t hwnd = 0;
+        if (!ReadHwndArgument(method_call, &hwnd) || hwnd == 0)
+        {
+            result->Error("INVALID_ARGUMENT", "window.focus requires a valid 'hwnd'");
+            return;
+        }
+        const bool ok = CloudOSBrokerClientV21::Instance().ExecuteWindowCommand("focus", hwnd);
+        result->Success(flutter::EncodableValue(ok));
+        return;
+    }
+
+    if (method == "window.minimize")
+    {
+        uint64_t hwnd = 0;
+        if (!ReadHwndArgument(method_call, &hwnd) || hwnd == 0)
+        {
+            result->Error("INVALID_ARGUMENT", "window.minimize requires a valid 'hwnd'");
+            return;
+        }
+        const bool ok = CloudOSBrokerClientV21::Instance().ExecuteWindowCommand("minimize", hwnd);
+        result->Success(flutter::EncodableValue(ok));
+        return;
+    }
+
+    if (method == "window.maximize")
+    {
+        uint64_t hwnd = 0;
+        if (!ReadHwndArgument(method_call, &hwnd) || hwnd == 0)
+        {
+            result->Error("INVALID_ARGUMENT", "window.maximize requires a valid 'hwnd'");
+            return;
+        }
+        const bool ok = CloudOSBrokerClientV21::Instance().ExecuteWindowCommand("maximize", hwnd);
+        result->Success(flutter::EncodableValue(ok));
+        return;
+    }
+
+    if (method == "window.restore")
+    {
+        uint64_t hwnd = 0;
+        if (!ReadHwndArgument(method_call, &hwnd) || hwnd == 0)
+        {
+            result->Error("INVALID_ARGUMENT", "window.restore requires a valid 'hwnd'");
+            return;
+        }
+        const bool ok = CloudOSBrokerClientV21::Instance().ExecuteWindowCommand("restore", hwnd);
+        result->Success(flutter::EncodableValue(ok));
+        return;
+    }
+
+    if (method == "window.close")
+    {
+        uint64_t hwnd = 0;
+        if (!ReadHwndArgument(method_call, &hwnd) || hwnd == 0)
+        {
+            result->Error("INVALID_ARGUMENT", "window.close requires a valid 'hwnd'");
+            return;
+        }
+        const bool ok = CloudOSBrokerClientV21::Instance().ExecuteWindowCommand("close", hwnd);
+        result->Success(flutter::EncodableValue(ok));
+        return;
+    }
+
+    if (method == "window.setBounds")
+    {
+        uint64_t hwnd = 0;
+        if (!ReadHwndArgument(method_call, &hwnd) || hwnd == 0)
+        {
+            result->Error("INVALID_ARGUMENT", "window.setBounds requires a valid 'hwnd'");
+            return;
+        }
+        const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
+        int x = args ? ReadIntField(*args, "x", 0) : 0;
+        int y = args ? ReadIntField(*args, "y", 0) : 0;
+        int w = args ? ReadIntField(*args, "width", 800) : 800;
+        int h = args ? ReadIntField(*args, "height", 600) : 600;
+        const bool ok = CloudOSBrokerClientV21::Instance().ExecuteWindowCommand("setBounds", hwnd, x, y, w, h);
+        result->Success(flutter::EncodableValue(ok));
+        return;
+    }
+
+    if (method == "window.snap")
+    {
+        uint64_t hwnd = 0;
+        if (!ReadHwndArgument(method_call, &hwnd) || hwnd == 0)
+        {
+            result->Error("INVALID_ARGUMENT", "window.snap requires a valid 'hwnd'");
+            return;
+        }
+        const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
+        std::string snap = args ? ReadStringField(*args, "snap") : "";
+        if (snap.empty() && args) snap = ReadStringField(*args, "target");
+        const bool ok = CloudOSBrokerClientV21::Instance().ExecuteWindowCommand("snap", hwnd, 0, 0, 0, 0, 1, snap);
+        result->Success(flutter::EncodableValue(ok));
+        return;
+    }
+
+    if (method == "window.moveToWorkspace")
+    {
+        uint64_t hwnd = 0;
+        if (!ReadHwndArgument(method_call, &hwnd) || hwnd == 0)
+        {
+            result->Error("INVALID_ARGUMENT", "window.moveToWorkspace requires a valid 'hwnd'");
+            return;
+        }
+        const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
+        int ws = args ? ReadIntField(*args, "workspace", 1) : 1;
+        const bool ok = CloudOSBrokerClientV21::Instance().ExecuteWindowCommand("moveToWorkspace", hwnd, 0, 0, 0, 0, ws);
+        result->Success(flutter::EncodableValue(ok));
+        return;
+    }
+
+    if (method == "window.setFullscreen")
+    {
+        uint64_t hwnd = 0;
+        if (!ReadHwndArgument(method_call, &hwnd) || hwnd == 0)
+        {
+            result->Error("INVALID_ARGUMENT", "window.setFullscreen requires a valid 'hwnd'");
+            return;
+        }
+        const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
+        bool fs = args ? ReadBoolField(*args, "fullscreen", true) : true;
+        const bool ok = CloudOSBrokerClientV21::Instance().ExecuteWindowCommand("setFullscreen", hwnd, 0, 0, 0, 0, 1, "", fs);
+        result->Success(flutter::EncodableValue(ok));
+        return;
+    }
+
+    if (method == "monitor.list")
+    {
+        std::string snapshot_json;
+        if (!CloudOSBrokerClientV21::Instance().GetWindowSnapshot(snapshot_json) || snapshot_json.empty())
+        {
+            snapshot_json = "{\"windows\":[],\"monitors\":[],\"currentWorkspace\":1,\"sequence\":1,\"timestamp\":0}";
+        }
+        result->Success(flutter::EncodableValue(snapshot_json));
+        return;
+    }
+
     result->NotImplemented();
 }
 
@@ -707,7 +1261,22 @@ std::vector<NativeAppItem> CloudOSFlutterBridgeV20::GetApps()
         result.reserve(broker_apps.size());
         for (const auto& a : broker_apps)
         {
-            result.push_back({a.id, a.name, a.platform, a.subtitle, a.distro, a.category, a.source, a.can_launch, a.pinned, a.recent});
+            NativeAppItem item;
+            item.id = a.id;
+            item.name = a.name;
+            item.platform = a.platform;
+            item.subtitle = a.subtitle;
+            item.distro = a.distro;
+            item.category = a.category;
+            item.source = a.source;
+            item.can_launch = a.can_launch;
+            item.pinned = a.pinned;
+            item.recent = a.recent;
+            item.display_name = a.display_name.empty() ? a.name : a.display_name;
+            item.launch_target = a.launch_target.empty() ? a.id : a.launch_target;
+            item.availability = a.availability.empty() ? (a.can_launch ? "ready" : "unavailable") : a.availability;
+            item.capabilities = a.capabilities;
+            result.push_back(std::move(item));
         }
         return result;
     }

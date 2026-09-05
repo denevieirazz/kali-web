@@ -2,12 +2,14 @@
 
 #include <Windows.h>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
 
 #include "cloudos_native_runtime.h"
+#include "../../CloudOS.NativeCommon/native_window_registry_v23.h"
 
 constexpr UINT CLOUDOS_WM_MODEL_CHANGED_V12 = WM_APP + 0x615;
 constexpr UINT CLOUDOS_WM_NATIVE_WINDOW_EVENT = WM_APP + 0x220;
@@ -23,6 +25,12 @@ struct CloudOSManagedWindow final
     HMONITOR monitor{};
     bool minimized{};
     RECT bounds{};
+    bool maximized{false};
+    bool fullscreen{false};
+    std::string platform{"windows"};
+    std::string app_id;
+    HWND owner{nullptr};
+    std::vector<std::string> capabilities;
 };
 
 enum class CloudOSSnapDirection
@@ -48,6 +56,7 @@ public:
 
     void HandleRuntimeEvent(cloudos_native_window_event_kind kind, HWND window);
     void Reconcile();
+    void HandleDisplayTopologyChanged();
     std::uint64_t RevisionV12() const noexcept {return revision_v12_;}
 
     [[nodiscard]] std::vector<CloudOSManagedWindow> CurrentWorkspaceWindows() const;
@@ -81,6 +90,22 @@ public:
         const RECT& bounds,
         UINT show_command);
 
+    // Operations V23
+    void MinimizeWindow(HWND window);
+    void MaximizeWindow(HWND window);
+    void RestoreWindow(HWND window);
+    void CloseWindow(HWND window);
+    bool SetWindowBounds(HWND window, int x, int y, int width, int height);
+    bool SnapWindow(HWND window, CloudOS::WindowRegistryV23::SnapTarget snap);
+    void SetWindowFullscreen(HWND window, bool fullscreen);
+    bool ExecuteWindowCommand(const CloudOS::WindowRegistryV23::WindowCommandPayload& command);
+
+    // Registry Snapshot V23
+    [[nodiscard]] CloudOS::WindowRegistryV23::CloudWindowSnapshotV23 GetRegistrySnapshot() const;
+    [[nodiscard]] std::string GetRegistrySnapshotJson() const;
+    bool WriteRegistrySnapshotToMapping(const wchar_t* mapping_name) const;
+    [[nodiscard]] std::uint64_t SequenceV23() const noexcept { return sequence_.load(); }
+
 private:
     static void CALLBACK RuntimeWindowEvent(
         cloudos_native_window_event_kind kind,
@@ -105,7 +130,7 @@ private:
     const CloudOSManagedWindow* Find(HWND window) const noexcept;
     void UpdateForeground(HWND window);
     void UpdateBorders();
-    void NotifyChanged() { ++revision_v12_; if (event_sink_) PostMessageW(event_sink_, CLOUDOS_WM_MODEL_CHANGED_V12, 0, 0); }
+    void NotifyChanged() { ++revision_v12_; ++sequence_; if (event_sink_) PostMessageW(event_sink_, CLOUDOS_WM_MODEL_CHANGED_V12, 0, 0); }
     void RecoverTaggedWindow(HWND window);
     void MarkWorkspaceHidden(HWND window, bool hidden) noexcept;
     RECT WorkAreaFor(HWND reference) const noexcept;
@@ -113,6 +138,7 @@ private:
     static bool IsExcludedClass(HWND window);
 
     std::uint64_t revision_v12_{};
+    std::atomic_uint64_t sequence_{1};
     HWND event_sink_{};
     void* watcher_{};
     HWND active_window_{};

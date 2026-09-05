@@ -17,6 +17,7 @@
 #include "native_notification_center.h"
 #include "native_quick_settings_window.h"
 #include "native_session_recovery.h"
+#include "native_shell_activation_server_v21.h"
 #include "native_shell_bridge.h"
 #include "native_snap_assist.h"
 #include "native_start_menu_window.h"
@@ -116,6 +117,7 @@ public:
         }
         window_manager_initialized_ = true;
         OutputDebugStringW(L"[CloudOS Init] window_manager_.Initialize OK\n");
+        NativeShellActivationServerV21::RegisterWindowManager(&window_manager_);
 
         if (!start_menu_.Create(instance_))
         {
@@ -238,7 +240,12 @@ private:
             if (message == WM_DISPLAYCHANGE || message == WM_DPICHANGED || message == WM_SETTINGCHANGE)
                 PostMessageW(window, WM_APP + 0x616, 0, 0);
             if (message == WM_APP + 0x616)
-            { self->RebuildForDisplayChangeIfNeeded(); self->LayoutDesktop(); return 0; }
+            {
+                self->RebuildForDisplayChangeIfNeeded();
+                self->window_manager_.HandleDisplayTopologyChanged();
+                self->LayoutDesktop();
+                return 0;
+            }
             if (message == WM_QUERYENDSESSION)
             {
                 self->window_manager_.Reconcile();

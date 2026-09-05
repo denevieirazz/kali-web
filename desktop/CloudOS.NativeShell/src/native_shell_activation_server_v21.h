@@ -3,7 +3,9 @@
 #include "native_app_launcher.h"
 #include "native_browser_window.h"
 #include "native_desktop_window.h"
+#include "native_window_manager.h"
 #include "../../CloudOS.NativeCommon/native_shell_activation_v21.h"
+#include "../../CloudOS.NativeCommon/native_window_registry_v23.h"
 
 #include <windows.h>
 
@@ -12,6 +14,13 @@ namespace CloudOS
 class NativeShellActivationServerV21 final
 {
 public:
+    inline static CloudOSNativeWindowManager* window_manager_ref_{nullptr};
+
+    static void RegisterWindowManager(CloudOSNativeWindowManager* wm) noexcept
+    {
+        window_manager_ref_ = wm;
+    }
+
     static bool Start(HINSTANCE instance) noexcept
     {
         if (window_ != nullptr && IsWindow(window_))
@@ -304,6 +313,42 @@ private:
         {
             return HandleWorkspaceRequest(
                 *static_cast<const ShellActivationV21::WorkspaceRequest*>(copy_data->lpData));
+        }
+
+        if (copy_data->dwData ==
+                static_cast<ULONG_PTR>(WindowRegistryV23::kWindowCommandCopyDataTag) &&
+            copy_data->cbData == sizeof(WindowRegistryV23::WindowCommandPayload))
+        {
+            CloudOSNativeWindowManager* wm = window_manager_ref_;
+            if (wm == nullptr)
+            {
+                CloudOSNativeDesktopWindow* desktop = DesktopObject();
+                if (desktop != nullptr) wm = desktop->WindowManager();
+            }
+            if (wm == nullptr)
+            {
+                return FALSE;
+            }
+            const auto* cmd = static_cast<const WindowRegistryV23::WindowCommandPayload*>(copy_data->lpData);
+            return wm->ExecuteWindowCommand(*cmd) ? TRUE : FALSE;
+        }
+
+        if (copy_data->dwData ==
+                static_cast<ULONG_PTR>(WindowRegistryV23::kWindowSnapshotCopyDataTag))
+        {
+            CloudOSNativeWindowManager* wm = window_manager_ref_;
+            if (wm == nullptr)
+            {
+                CloudOSNativeDesktopWindow* desktop = DesktopObject();
+                if (desktop != nullptr) wm = desktop->WindowManager();
+            }
+            if (wm == nullptr)
+            {
+                return FALSE;
+            }
+            wm->Reconcile();
+            const auto* mapping_name = static_cast<const wchar_t*>(copy_data->lpData);
+            return wm->WriteRegistrySnapshotToMapping(mapping_name) ? TRUE : FALSE;
         }
 
         return FALSE;

@@ -16,6 +16,9 @@ class GlassSurface extends StatelessWidget {
     this.shadow = true,
   });
 
+  /// Permite desativar o shader de blur em computadores fracos ou no perfil econômico.
+  static bool disableBlur = false;
+
   final Widget child;
   final EdgeInsetsGeometry padding;
   final double borderRadius;
@@ -27,6 +30,7 @@ class GlassSurface extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final radius = BorderRadius.circular(borderRadius);
+    final effectiveBlur = disableBlur ? 0.0 : blur;
 
     Widget content = DecoratedBox(
       decoration: BoxDecoration(
@@ -46,11 +50,11 @@ class GlassSurface extends StatelessWidget {
       child: Padding(padding: padding, child: child),
     );
 
-    if (blur > 0) {
+    if (effectiveBlur > 0) {
       content = ClipRRect(
         borderRadius: radius,
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+          filter: ImageFilter.blur(sigmaX: effectiveBlur, sigmaY: effectiveBlur),
           child: content,
         ),
       );

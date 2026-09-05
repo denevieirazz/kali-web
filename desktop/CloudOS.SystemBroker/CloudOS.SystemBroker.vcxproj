@@ -54,7 +54,10 @@
     <ClInclude Include="src\system_service_v21.h" />
     <ClInclude Include="src\wsl_service_v21.h" />
     <ClInclude Include="src\diagnostics_v21.h" />
+    <ClInclude Include="src\performance_manager_v21.h" />
+    <ClInclude Include="src\path_translation_v21.h" />
     <ClInclude Include="src\broker_server_v21.h" />
+    <ClInclude Include="src\window_service_v23.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\protocol_v21.cpp" />
@@ -68,8 +71,11 @@
     <ClCompile Include="src\system_service_v21.cpp" />
     <ClCompile Include="src\wsl_service_v21.cpp" />
     <ClCompile Include="src\diagnostics_v21.cpp" />
+    <ClCompile Include="src\performance_manager_v21.cpp" />
+    <ClCompile Include="src\path_translation_v21.cpp" />
     <ClCompile Include="src\broker_server_v21.cpp" />
     <ClCompile Include="src\broker_main.cpp" />
+    <ClCompile Include="src\window_service_v23.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

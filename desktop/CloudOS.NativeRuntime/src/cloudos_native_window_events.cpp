@@ -198,7 +198,21 @@ __declspec(dllexport) BOOL WINAPI cloudos_native_window_enumerate(
     if (callback == nullptr) return window_event_fail(ERROR_INVALID_PARAMETER);
     WindowEnumerationRequest request{callback, context};
     SetLastError(ERROR_SUCCESS);
-    const BOOL result = EnumWindows(&enumerate_window_callback, reinterpret_cast<LPARAM>(&request));
+
+    static HDESK s_default_desktop = nullptr;
+    if (s_default_desktop == nullptr) {
+        HWINSTA hwinsta = OpenWindowStationW(L"WinSta0", FALSE, MAXIMUM_ALLOWED);
+        if (hwinsta != nullptr) SetProcessWindowStation(hwinsta);
+        s_default_desktop = OpenDesktopW(L"Default", 0, FALSE, MAXIMUM_ALLOWED);
+    }
+
+    BOOL result = FALSE;
+    if (s_default_desktop != nullptr) {
+        result = EnumDesktopWindows(s_default_desktop, &enumerate_window_callback, reinterpret_cast<LPARAM>(&request));
+    } else {
+        result = EnumWindows(&enumerate_window_callback, reinterpret_cast<LPARAM>(&request));
+    }
+
     if (!result && GetLastError() == ERROR_SUCCESS) {
         // The callback is allowed to stop enumeration intentionally.
         return TRUE;

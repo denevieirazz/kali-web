@@ -123,9 +123,11 @@ std::string JobManagerV21::SubmitJob(const std::string& type, JobFunction func)
 
     JsonObject payload;
     payload["jobId"] = JsonValue(job_id);
+    payload["operationId"] = JsonValue(job_id);
     payload["type"] = JsonValue(type);
     payload["state"] = JsonValue(JobStateToString(JobState::Queued));
     EventBusV21::Instance().Publish("job.started", payload);
+    EventBusV21::Instance().Publish("operation.started", payload);
 
     return job_id;
 }
@@ -157,8 +159,10 @@ bool JobManagerV21::CancelJob(const std::string& job_id)
 
     JsonObject payload;
     payload["jobId"] = JsonValue(job_id);
+    payload["operationId"] = JsonValue(job_id);
     payload["state"] = JsonValue(JobStateToString(cancelled_info.state));
     EventBusV21::Instance().Publish("job.cancelled", payload);
+    EventBusV21::Instance().Publish("operation.cancelled", payload);
     return true;
 }
 
@@ -255,9 +259,11 @@ void JobManagerV21::WorkerLoop()
             }
             JsonObject payload;
             payload["jobId"] = JsonValue(current.id);
+            payload["operationId"] = JsonValue(current.id);
             payload["progress"] = JsonValue(current.progress);
             payload["state"] = JsonValue(JobStateToString(JobState::Running));
             EventBusV21::Instance().Publish("job.progress", payload);
+            EventBusV21::Instance().Publish("operation.progress", payload);
         };
 
         std::string err;
@@ -296,15 +302,18 @@ void JobManagerV21::WorkerLoop()
 
         JsonObject payload;
         payload["jobId"] = JsonValue(final_info.id);
+        payload["operationId"] = JsonValue(final_info.id);
         payload["state"] = JsonValue(JobStateToString(final_info.state));
         if (final_info.state == JobState::Completed)
         {
             EventBusV21::Instance().Publish("job.completed", payload);
+            EventBusV21::Instance().Publish("operation.completed", payload);
         }
         else if (final_info.state == JobState::Failed)
         {
             payload["error"] = JsonValue(final_info.error_message);
             EventBusV21::Instance().Publish("job.failed", payload);
+            EventBusV21::Instance().Publish("operation.failed", payload);
         }
     }
 }

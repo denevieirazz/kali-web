@@ -3,10 +3,15 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 
 import '../models/shell_models.dart';
+import '../models/wsl_distro.dart';
+import '../shell/window_manager/cloud_window.dart';
 import 'bridge/cloud_app_mapper.dart';
 import 'bridge/cloud_file_mapper.dart';
 import 'bridge/cloud_notification_mapper.dart';
 import 'bridge/cloudos_preview_data.dart';
+
+export '../models/wsl_distro.dart';
+export '../shell/window_manager/cloud_window.dart';
 
 class TerminalDataEvent {
   const TerminalDataEvent({required this.sessionId, required this.data});
@@ -22,6 +27,109 @@ class TerminalExitEvent {
   final int exitCode;
 }
 
+class DisplayChangeEvent {
+  const DisplayChangeEvent({this.width, this.height, this.dpi});
+  final double? width;
+  final double? height;
+  final int? dpi;
+}
+
+class FileOperationProgressEvent {
+  const FileOperationProgressEvent({
+    required this.jobId,
+    required this.status,
+    required this.filesCompleted,
+    required this.filesTotal,
+    required this.bytesCompleted,
+    required this.bytesTotal,
+    required this.currentItem,
+    this.errorMessage,
+  });
+
+  final String jobId;
+  final String status;
+  final int filesCompleted;
+  final int filesTotal;
+  final int bytesCompleted;
+  final int bytesTotal;
+  final String currentItem;
+  final String? errorMessage;
+}
+
+class CloudDriveInfo {
+  const CloudDriveInfo({
+    required this.mountPath,
+    required this.label,
+    required this.driveType,
+    required this.totalBytes,
+    required this.freeBytes,
+    required this.totalFormatted,
+    required this.freeFormatted,
+    required this.entryId,
+  });
+
+  final String mountPath;
+  final String label;
+  final String driveType;
+  final int totalBytes;
+  final int freeBytes;
+  final String totalFormatted;
+  final String freeFormatted;
+  final String entryId;
+
+  factory CloudDriveInfo.fromMap(Map<Object?, Object?> map) {
+    return CloudDriveInfo(
+      mountPath: map['mountPath'] as String? ?? '',
+      label: map['label'] as String? ?? '',
+      driveType: map['driveType'] as String? ?? 'fixed',
+      totalBytes: (map['totalBytes'] as num?)?.toInt() ?? 0,
+      freeBytes: (map['freeBytes'] as num?)?.toInt() ?? 0,
+      totalFormatted: map['totalFormatted'] as String? ?? '',
+      freeFormatted: map['freeFormatted'] as String? ?? '',
+      entryId: map['entryId'] as String? ?? '',
+    );
+  }
+}
+
+class PerformanceProfileInfo {
+  const PerformanceProfileInfo({
+    this.profile = 'balanced',
+    this.totalRamMb = 0,
+    this.freeRamMb = 0,
+    this.memoryLoadPercent = 0,
+    this.cpuCores = 0,
+    this.onBattery = false,
+    this.batteryPercent = -1,
+    this.isLowEndHardware = false,
+  });
+
+  final String profile;
+  final int totalRamMb;
+  final int freeRamMb;
+  final int memoryLoadPercent;
+  final int cpuCores;
+  final bool onBattery;
+  final int batteryPercent;
+  final bool isLowEndHardware;
+
+  bool get isEconomy => profile == 'economy';
+
+  static const defaultBalanced = PerformanceProfileInfo();
+
+  factory PerformanceProfileInfo.fromMap(Map<Object?, Object?> map) {
+    return PerformanceProfileInfo(
+      profile: map['profile'] as String? ?? 'balanced',
+      totalRamMb: (map['totalRamMb'] as num?)?.toInt() ?? 0,
+      freeRamMb: (map['freeRamMb'] as num?)?.toInt() ?? 0,
+      memoryLoadPercent: (map['memoryLoadPercent'] as num?)?.toInt() ?? 0,
+      cpuCores: (map['cpuCores'] as num?)?.toInt() ?? 0,
+      onBattery: map['onBattery'] as bool? ?? false,
+      batteryPercent: (map['batteryPercent'] as num?)?.toInt() ?? -1,
+      isLowEndHardware: map['isLowEndHardware'] as bool? ?? false,
+    );
+  }
+}
+
 class CloudOSBridge {
   const CloudOSBridge({
     MethodChannel channel = const MethodChannel('cloudos/native/v19'),
@@ -33,6 +141,11 @@ class CloudOSBridge {
       StreamController<TerminalDataEvent>.broadcast();
   static final StreamController<TerminalExitEvent> _terminalExitController =
       StreamController<TerminalExitEvent>.broadcast();
+  static final StreamController<DisplayChangeEvent> _displayChangeController =
+      StreamController<DisplayChangeEvent>.broadcast();
+  static final StreamController<FileOperationProgressEvent>
+      _fileOperationProgressController =
+      StreamController<FileOperationProgressEvent>.broadcast();
 
   Stream<TerminalDataEvent> get terminalDataStream {
     _ensureChannelHandler();
@@ -42,6 +155,16 @@ class CloudOSBridge {
   Stream<TerminalExitEvent> get terminalExitStream {
     _ensureChannelHandler();
     return _terminalExitController.stream;
+  }
+
+  Stream<DisplayChangeEvent> get onDisplayChanged {
+    _ensureChannelHandler();
+    return _displayChangeController.stream;
+  }
+
+  Stream<FileOperationProgressEvent> get onFileOperationProgress {
+    _ensureChannelHandler();
+    return _fileOperationProgressController.stream;
   }
 
   void _ensureChannelHandler() {
@@ -61,6 +184,28 @@ class CloudOSBridge {
           TerminalExitEvent(
             sessionId: args['sessionId'] as String? ?? '',
             exitCode: (args['exitCode'] as num?)?.toInt() ?? 0,
+          ),
+        );
+      } else if (call.method == 'display.changed' || call.method == 'dpi.changed') {
+        final m = args is Map ? args : const <Object?, Object?>{};
+        _displayChangeController.add(
+          DisplayChangeEvent(
+            width: (m['width'] as num?)?.toDouble(),
+            height: (m['height'] as num?)?.toDouble(),
+            dpi: (m['dpi'] as num?)?.toInt() ?? (m['dpi_x'] as num?)?.toInt(),
+          ),
+        );
+      } else if (call.method == 'files.onProgress' && args is Map) {
+        _fileOperationProgressController.add(
+          FileOperationProgressEvent(
+            jobId: args['jobId'] as String? ?? '',
+            status: args['status'] as String? ?? '',
+            filesCompleted: (args['filesCompleted'] as num?)?.toInt() ?? 0,
+            filesTotal: (args['filesTotal'] as num?)?.toInt() ?? 0,
+            bytesCompleted: (args['bytesCompleted'] as num?)?.toInt() ?? 0,
+            bytesTotal: (args['bytesTotal'] as num?)?.toInt() ?? 0,
+            currentItem: args['currentItem'] as String? ?? '',
+            errorMessage: args['errorMessage'] as String?,
           ),
         );
       }
@@ -195,6 +340,109 @@ class CloudOSBridge {
     }
   }
 
+  Future<CloudFileItem?> createFolder(String parentEntryId, String name) async {
+    if (parentEntryId.isEmpty || name.isEmpty) return null;
+    try {
+      final res = await _channel.invokeMapMethod<Object?, Object?>(
+        'createFolder',
+        <String, Object?>{
+          'parentEntryId': parentEntryId,
+          'name': name,
+        },
+      );
+      if (res == null) return null;
+      return cloudFileFromNative(res);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<CloudFileItem?> renameFile(String entryId, String newName) async {
+    if (entryId.isEmpty || newName.isEmpty) return null;
+    try {
+      final res = await _channel.invokeMapMethod<Object?, Object?>(
+        'renameFile',
+        <String, Object?>{
+          'entryId': entryId,
+          'newName': newName,
+        },
+      );
+      if (res == null) return null;
+      return cloudFileFromNative(res);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<List<String>> deleteFiles(List<String> entryIds, {bool permanent = false}) async {
+    if (entryIds.isEmpty) return const <String>[];
+    try {
+      final res = await _channel.invokeListMethod<String>(
+        'deleteFiles',
+        <String, Object?>{
+          'entryIds': entryIds,
+          'permanent': permanent,
+        },
+      );
+      return res ?? const <String>[];
+    } catch (_) {
+      return const <String>[];
+    }
+  }
+
+  Future<String?> copyFiles(List<String> sourceEntryIds, String destinationEntryId) async {
+    if (sourceEntryIds.isEmpty || destinationEntryId.isEmpty) return null;
+    try {
+      return await _channel.invokeMethod<String>(
+        'copyFiles',
+        <String, Object?>{
+          'sourceEntryIds': sourceEntryIds,
+          'destinationEntryId': destinationEntryId,
+        },
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<String?> moveFiles(List<String> sourceEntryIds, String destinationEntryId) async {
+    if (sourceEntryIds.isEmpty || destinationEntryId.isEmpty) return null;
+    try {
+      return await _channel.invokeMethod<String>(
+        'moveFiles',
+        <String, Object?>{
+          'sourceEntryIds': sourceEntryIds,
+          'destinationEntryId': destinationEntryId,
+        },
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> cancelFileOperation(String jobId) async {
+    if (jobId.isEmpty) return false;
+    try {
+      final res = await _channel.invokeMethod<bool>(
+        'cancelFileOperation',
+        <String, Object?>{'jobId': jobId},
+      );
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<List<CloudDriveInfo>> listDrives() async {
+    try {
+      final res = await _channel.invokeListMethod<Map<Object?, Object?>>('listDrives');
+      if (res == null) return const <CloudDriveInfo>[];
+      return res.map((m) => CloudDriveInfo.fromMap(m)).toList(growable: false);
+    } catch (_) {
+      return const <CloudDriveInfo>[];
+    }
+  }
+
   Future<CloudSystemSnapshot?> tryLoadSystemSnapshot() async {
     try {
       final raw =
@@ -238,6 +486,37 @@ class CloudOSBridge {
 
   Future<CloudSystemSnapshot> loadSystemSnapshot() async {
     return await tryLoadSystemSnapshot() ?? degradedSnapshot;
+  }
+
+  Future<PerformanceProfileInfo?> tryLoadPerformanceProfile() async {
+    try {
+      final raw =
+          await _channel.invokeMapMethod<Object?, Object?>('getPerformanceProfile');
+      if (raw == null) return null;
+      return PerformanceProfileInfo.fromMap(raw);
+    } on MissingPluginException {
+      return PerformanceProfileInfo.defaultBalanced;
+    } on PlatformException {
+      return null;
+    }
+  }
+
+  Future<PerformanceProfileInfo> loadPerformanceProfile() async {
+    return await tryLoadPerformanceProfile() ?? PerformanceProfileInfo.defaultBalanced;
+  }
+
+  Future<bool> setPerformanceProfile(String profile) async {
+    try {
+      return await _channel.invokeMethod<bool>(
+            'setPerformanceProfile',
+            <String, Object?>{'profile': profile},
+          ) ??
+          false;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
   }
 
   Future<CloudNotificationState?> tryLoadNotificationState() async {
@@ -386,6 +665,95 @@ class CloudOSBridge {
     }
   }
 
+  Future<AppLaunchStatus> launchAppStructured(String id) async {
+    try {
+      final raw = await _channel.invokeMapMethod<Object?, Object?>(
+        'launchAppStructured',
+        <String, Object?>{'id': id},
+      );
+      if (raw == null) {
+        return AppLaunchStatus(
+          id: id,
+          status: 'failed',
+          launched: false,
+          platform: 'unknown',
+          target: id,
+          message: 'Sem resposta do broker',
+        );
+      }
+      return AppLaunchStatus.fromMap(raw);
+    } on MissingPluginException {
+      return AppLaunchStatus(
+        id: id,
+        status: 'running',
+        launched: true,
+        platform: 'preview',
+        target: id,
+        message: 'Modo preview',
+      );
+    } on PlatformException catch (e) {
+      return AppLaunchStatus(
+        id: id,
+        status: 'failed',
+        launched: false,
+        platform: 'unknown',
+        target: id,
+        message: e.message ?? 'Falha na inicialização',
+      );
+    }
+  }
+
+  Future<List<WslDistroInfo>> listWslDistros() async {
+    try {
+      final raw = await _channel.invokeMapMethod<Object?, Object?>('wsl.listDistros');
+      if (raw == null) return const <WslDistroInfo>[];
+      final distrosRaw = raw['distros'] as List<Object?>? ?? const [];
+      return distrosRaw
+          .whereType<Map<Object?, Object?>>()
+          .map(WslDistroInfo.fromMap)
+          .toList(growable: false);
+    } on MissingPluginException {
+      return const <WslDistroInfo>[];
+    } on PlatformException {
+      return const <WslDistroInfo>[];
+    }
+  }
+
+  Future<PathTranslation?> translatePath(
+    String path, {
+    String target = 'linux',
+    String distro = '',
+  }) async {
+    try {
+      final raw = await _channel.invokeMapMethod<Object?, Object?>(
+        'path.translate',
+        <String, Object?>{
+          'path': path,
+          'target': target,
+          'distro': distro,
+        },
+      );
+      if (raw == null) return null;
+      return PathTranslation.fromMap(raw);
+    } on MissingPluginException {
+      return null;
+    } on PlatformException {
+      return null;
+    }
+  }
+
+  Future<List<MountPoint>> getMountPoints() async {
+    try {
+      final raw = await _channel.invokeListMethod<Map<Object?, Object?>>('system.getMountPoints');
+      if (raw == null) return const <MountPoint>[];
+      return raw.map(MountPoint.fromMap).toList(growable: false);
+    } on MissingPluginException {
+      return const <MountPoint>[];
+    } on PlatformException {
+      return const <MountPoint>[];
+    }
+  }
+
   Future<bool> setVolume(double value) async {
     try {
       final result = await _channel.invokeMethod<bool>(
@@ -411,6 +779,156 @@ class CloudOSBridge {
       return true;
     } on PlatformException {
       return false;
+    }
+  }
+
+  Future<CloudWindowSnapshot?> tryLoadWindowSnapshot() async {
+    try {
+      final jsonStr = await _channel.invokeMethod<String>('window.getSnapshot');
+      if (jsonStr == null || jsonStr.isEmpty) return null;
+      return CloudWindowSnapshot.fromJsonString(jsonStr);
+    } on MissingPluginException {
+      return null;
+    } on PlatformException {
+      return null;
+    }
+  }
+
+  Future<bool> focusWindow(int hwnd) async {
+    try {
+      final res = await _channel.invokeMethod<bool>('window.focus', <String, Object?>{
+        'hwnd': hwnd,
+      });
+      return res ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  Future<bool> minimizeWindow(int hwnd) async {
+    try {
+      final res = await _channel.invokeMethod<bool>('window.minimize', <String, Object?>{
+        'hwnd': hwnd,
+      });
+      return res ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  Future<bool> maximizeWindow(int hwnd) async {
+    try {
+      final res = await _channel.invokeMethod<bool>('window.maximize', <String, Object?>{
+        'hwnd': hwnd,
+      });
+      return res ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  Future<bool> restoreWindow(int hwnd) async {
+    try {
+      final res = await _channel.invokeMethod<bool>('window.restore', <String, Object?>{
+        'hwnd': hwnd,
+      });
+      return res ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  Future<bool> closeWindow(int hwnd) async {
+    try {
+      final res = await _channel.invokeMethod<bool>('window.close', <String, Object?>{
+        'hwnd': hwnd,
+      });
+      return res ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  Future<bool> setWindowBounds(int hwnd, int x, int y, int width, int height) async {
+    try {
+      final res = await _channel.invokeMethod<bool>('window.setBounds', <String, Object?>{
+        'hwnd': hwnd,
+        'x': x,
+        'y': y,
+        'width': width,
+        'height': height,
+      });
+      return res ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  Future<bool> snapWindow(int hwnd, String target) async {
+    try {
+      final res = await _channel.invokeMethod<bool>('window.snap', <String, Object?>{
+        'hwnd': hwnd,
+        'snap': target,
+        'target': target,
+      });
+      return res ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  Future<bool> moveWindowToWorkspace(int hwnd, int workspace) async {
+    try {
+      final res = await _channel.invokeMethod<bool>('window.moveToWorkspace', <String, Object?>{
+        'hwnd': hwnd,
+        'workspace': workspace,
+      });
+      return res ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  Future<bool> setWindowFullscreen(int hwnd, bool fullscreen) async {
+    try {
+      final res = await _channel.invokeMethod<bool>('window.setFullscreen', <String, Object?>{
+        'hwnd': hwnd,
+        'fullscreen': fullscreen,
+      });
+      return res ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  Future<List<CloudMonitorRecord>> listMonitors() async {
+    try {
+      final jsonStr = await _channel.invokeMethod<String>('monitor.list');
+      if (jsonStr == null || jsonStr.isEmpty) return const <CloudMonitorRecord>[];
+      final snapshot = CloudWindowSnapshot.fromJsonString(jsonStr);
+      return snapshot.monitors;
+    } on MissingPluginException {
+      return const <CloudMonitorRecord>[];
+    } on PlatformException {
+      return const <CloudMonitorRecord>[];
     }
   }
 

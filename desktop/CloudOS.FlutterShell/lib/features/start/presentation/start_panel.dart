@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/cloudos_theme.dart';
+import '../../../core/responsive/cloud_responsive_layout.dart';
 import '../../../models/shell_models.dart';
 import '../../../widgets/glass_surface.dart';
 import '../domain/start_app_filter.dart';
@@ -76,13 +77,18 @@ class _StartPanelState extends State<StartPanel> {
               )
               .toList(growable: false);
 
+    final metrics = context.cloudMetrics;
+    final panelWidth = metrics.startPanelWidth;
+    final panelHeight = metrics.startPanelHeight;
+    final bottomPadding = metrics.taskbarHeight + 12.0;
+
     return Align(
       alignment: Alignment.bottomLeft,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 0, 68),
+        padding: EdgeInsets.fromLTRB(16, 0, 0, bottomPadding),
         child: SizedBox(
-          width: 660,
-          height: 580,
+          width: panelWidth,
+          height: panelHeight,
           child: GlassSurface(
             borderRadius: 16,
             blur: 24,

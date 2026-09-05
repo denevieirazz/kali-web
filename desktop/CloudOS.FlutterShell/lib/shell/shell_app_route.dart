@@ -8,6 +8,9 @@ enum ShellAppRoute {
 }
 
 ShellAppRoute classifyShellAppRoute(String appId) {
+  if (appId.startsWith('wsl:') && appId.endsWith(':terminal')) {
+    return ShellAppRoute.terminal;
+  }
   return switch (appId) {
     'files' || 'cloudos:files' => ShellAppRoute.files,
     'browser' || 'cloudos:browser' => ShellAppRoute.browser,
@@ -24,6 +27,14 @@ ShellAppRoute resolveShellAppRoute(String appId) {
     TerminalLaunchCoordinator.request(TerminalLaunchProfile.cmd);
   } else if (appId == 'windows:powershell') {
     TerminalLaunchCoordinator.request(TerminalLaunchProfile.powershell);
+  } else if (appId.startsWith('wsl:') && appId.endsWith(':terminal')) {
+    final parts = appId.split(':');
+    final distro = parts.length >= 3 ? parts[1] : '';
+    TerminalLaunchCoordinator.request(TerminalLaunchProfile.wsl, distro: distro);
+  } else if (appId == 'ubuntu-terminal' ||
+      appId == 'wsl:ubuntu-terminal' ||
+      appId == 'linux:ubuntu-terminal') {
+    TerminalLaunchCoordinator.request(TerminalLaunchProfile.wsl, distro: 'Ubuntu');
   }
   return classifyShellAppRoute(appId);
 }

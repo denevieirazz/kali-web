@@ -14,6 +14,11 @@ class CloudApp {
     this.isPinned = true,
     this.isRecent = false,
     this.canLaunch = true,
+    this.displayName,
+    this.launchTarget,
+    this.source,
+    this.availability = 'ready',
+    this.capabilities = const <String>[],
   });
 
   final String id;
@@ -26,4 +31,9 @@ class CloudApp {
   final bool isPinned;
   final bool isRecent;
   final bool canLaunch;
+  final String? displayName;
+  final String? launchTarget;
+  final String? source;
+  final String availability;
+  final List<String> capabilities;
 }

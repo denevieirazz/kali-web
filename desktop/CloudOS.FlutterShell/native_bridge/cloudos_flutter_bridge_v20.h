@@ -30,6 +30,10 @@ struct NativeAppItem final
     bool can_launch{true};
     bool pinned{false};
     bool recent{false};
+    std::string display_name;
+    std::string launch_target;
+    std::string availability{"ready"};
+    std::vector<std::string> capabilities;
 };
 
 struct NativeFileItem final

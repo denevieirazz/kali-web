@@ -1,4 +1,5 @@
 #include "file_service_v21.h"
+#include "job_manager_v21.h"
 #include "wsl_service_v21.h"
 
 #include <Windows.h>
@@ -9,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <sstream>
 
@@ -17,7 +19,7 @@ namespace CloudOS
 namespace
 {
 namespace fs = std::filesystem;
-constexpr std::size_t kMaxItems = 500;
+constexpr std::size_t kMaxItems = 25000;
 
 std::string WideToUtf8(const std::wstring& value)
 {
@@ -291,6 +293,20 @@ JsonObject FileItemV21::ToJsonObject() const
     return object;
 }
 
+JsonObject DriveItemV21::ToJsonObject() const
+{
+    JsonObject object;
+    object["mountPath"] = JsonValue(mount_path);
+    object["label"] = JsonValue(label);
+    object["driveType"] = JsonValue(drive_type);
+    object["totalBytes"] = JsonValue(static_cast<int64_t>(total_bytes));
+    object["freeBytes"] = JsonValue(static_cast<int64_t>(free_bytes));
+    object["totalFormatted"] = JsonValue(total_formatted);
+    object["freeFormatted"] = JsonValue(free_formatted);
+    object["entryId"] = JsonValue(entry_id);
+    return object;
+}
+
 FileServiceV21& FileServiceV21::Instance()
 {
     static FileServiceV21 service;
@@ -305,7 +321,70 @@ bool FileServiceV21::IsAllowedLocation(const std::string& location) noexcept
         location == "downloads" ||
         location == "cloud-drive" ||
         location == "windows-c" ||
-        location == "ubuntu-wsl";
+        location == "ubuntu-wsl" ||
+        location.rfind("drive:", 0) == 0 ||
+        location.rfind("wsl:", 0) == 0;
+}
+
+bool FileServiceV21::IsProtectedSystemPath(const std::wstring& path)
+{
+    if (path.empty()) return true;
+
+    fs::path p = fs::path(path).lexically_normal();
+    std::wstring normal = p.wstring();
+
+    if (p.parent_path() == p || p.relative_path().empty() || normal.length() <= 3)
+    {
+        return true;
+    }
+
+    std::wstring winDir = KnownFolder(FOLDERID_Windows);
+    if (!winDir.empty())
+    {
+        std::wstring normalWin = fs::path(winDir).lexically_normal().wstring();
+        if (_wcsicmp(normal.c_str(), normalWin.c_str()) == 0 ||
+            (_wcsnicmp(normal.c_str(), normalWin.c_str(), normalWin.length()) == 0 &&
+             (normal[normalWin.length()] == L'\\' || normal[normalWin.length()] == L'/')))
+        {
+            return true;
+        }
+    }
+
+    std::wstring progFiles = KnownFolder(FOLDERID_ProgramFiles);
+    if (!progFiles.empty())
+    {
+        std::wstring normalProg = fs::path(progFiles).lexically_normal().wstring();
+        if (_wcsicmp(normal.c_str(), normalProg.c_str()) == 0 ||
+            (_wcsnicmp(normal.c_str(), normalProg.c_str(), normalProg.length()) == 0 &&
+             (normal[normalProg.length()] == L'\\' || normal[normalProg.length()] == L'/')))
+        {
+            return true;
+        }
+    }
+
+    std::wstring progFilesX86 = KnownFolder(FOLDERID_ProgramFilesX86);
+    if (!progFilesX86.empty())
+    {
+        std::wstring normalProg = fs::path(progFilesX86).lexically_normal().wstring();
+        if (_wcsicmp(normal.c_str(), normalProg.c_str()) == 0 ||
+            (_wcsnicmp(normal.c_str(), normalProg.c_str(), normalProg.length()) == 0 &&
+             (normal[normalProg.length()] == L'\\' || normal[normalProg.length()] == L'/')))
+        {
+            return true;
+        }
+    }
+
+    std::wstring userProfiles = KnownFolder(FOLDERID_UserProfiles);
+    if (!userProfiles.empty())
+    {
+        std::wstring normalUsers = fs::path(userProfiles).lexically_normal().wstring();
+        if (_wcsicmp(normal.c_str(), normalUsers.c_str()) == 0)
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 void FileServiceV21::CleanupExpiredLocked(Clock::time_point now)
@@ -350,23 +429,14 @@ std::string FileServiceV21::IssueCapability(
     return entry_id;
 }
 
-void FileServiceV21::AttachCapabilities(std::vector<FileItemV21>& items)
-{
-    for (FileItemV21& item : items)
-    {
-        const std::wstring path = Utf8ToWide(item.path);
-        item.entry_id = IssueCapability(path, item.is_folder);
-    }
-}
-
 bool FileServiceV21::ResolveCapability(
     const std::string& entry_id,
     EntryCapability& capability,
     std::string& error)
 {
-    if (entry_id.empty() || entry_id.size() > 96 || entry_id.rfind("f21:", 0) != 0)
+    if (entry_id.empty())
     {
-        error = "Invalid Files entry capability";
+        error = "Empty capability token";
         return false;
     }
 
@@ -376,13 +446,20 @@ bool FileServiceV21::ResolveCapability(
     const auto it = capabilities_.find(entry_id);
     if (it == capabilities_.end())
     {
-        error = "Files entry capability is unknown or expired";
+        error = "Capability token expired or invalid";
         return false;
     }
 
-    it->second.expires_at = now + kCapabilityLifetime;
     capability = it->second;
     return true;
+}
+
+void FileServiceV21::AttachCapabilities(std::vector<FileItemV21>& items)
+{
+    for (auto& item : items)
+    {
+        item.entry_id = IssueCapability(Utf8ToWide(item.path), item.is_folder);
+    }
 }
 
 bool FileServiceV21::ListLocation(
@@ -392,11 +469,6 @@ bool FileServiceV21::ListLocation(
 {
     items.clear();
     error.clear();
-    if (!IsAllowedLocation(location))
-    {
-        error = "Location id is not allowlisted by FileServiceV21";
-        return false;
-    }
 
     if (location == "home")
     {
@@ -429,6 +501,24 @@ bool FileServiceV21::ListLocation(
         listed = EnumerateDirectory(SystemVolumeRoot(), "windows", items, error);
     else if (location == "ubuntu-wsl")
         listed = EnumerateDirectory(WslRoot(), "linux", items, error);
+    else if (location.rfind("drive:", 0) == 0)
+    {
+        std::string drive_spec = location.substr(6);
+        std::wstring drive_path = Utf8ToWide(drive_spec);
+        if (drive_path.length() >= 1)
+        {
+            if (drive_path.length() == 1) drive_path += L":\\";
+            else if (drive_path.length() == 2 && drive_path[1] == L':') drive_path += L"\\";
+            else if (drive_path.back() != L'\\' && drive_path.back() != L'/') drive_path += L"\\";
+            listed = EnumerateDirectory(drive_path, "windows", items, error);
+        }
+    }
+    else if (location.rfind("wsl:", 0) == 0)
+    {
+        std::string distro = location.substr(4);
+        std::wstring wsl_path = L"\\\\wsl.localhost\\" + Utf8ToWide(distro) + L"\\";
+        listed = EnumerateDirectory(wsl_path, "linux", items, error);
+    }
 
     if (!listed)
     {
@@ -503,6 +593,445 @@ bool FileServiceV21::OpenEntry(
         error = "Windows Shell could not open the capability target";
         return false;
     }
+    return true;
+}
+
+bool FileServiceV21::CreateFolder(
+    const std::string& parent_entry_id,
+    const std::string& name,
+    FileItemV21& out_created_item,
+    std::string& error)
+{
+    EntryCapability parent_cap;
+    if (!ResolveCapability(parent_entry_id, parent_cap, error))
+    {
+        return false;
+    }
+    if (!parent_cap.is_folder)
+    {
+        error = "O destino especificado não é uma pasta";
+        return false;
+    }
+
+    if (name.empty() || name.find('\\') != std::string::npos || name.find('/') != std::string::npos ||
+        name == "." || name == ".." || name.find_first_of("<>:\"|?*") != std::string::npos)
+    {
+        error = "Nome de pasta inválido";
+        return false;
+    }
+
+    fs::path target_path = fs::path(parent_cap.path) / Utf8ToWide(name);
+    std::error_code ec;
+    if (fs::exists(target_path, ec))
+    {
+        error = "Uma pasta ou arquivo com este nome já existe";
+        return false;
+    }
+
+    if (!fs::create_directory(target_path, ec) || ec)
+    {
+        error = "Falha ao criar pasta: " + ec.message();
+        return false;
+    }
+
+    out_created_item.name = name;
+    out_created_item.path = WideToUtf8(target_path.lexically_normal().wstring());
+    out_created_item.is_folder = true;
+    out_created_item.size_formatted = "Pasta";
+    out_created_item.modified_formatted = "Agora";
+    out_created_item.source = parent_cap.path.rfind(L"\\\\wsl", 0) == 0 ? "linux" : "windows";
+    out_created_item.extension = "";
+    out_created_item.entry_id = IssueCapability(target_path.wstring(), true);
+    return true;
+}
+
+bool FileServiceV21::RenameItem(
+    const std::string& entry_id,
+    const std::string& new_name,
+    FileItemV21& out_renamed_item,
+    std::string& error)
+{
+    EntryCapability cap;
+    if (!ResolveCapability(entry_id, cap, error))
+    {
+        return false;
+    }
+
+    if (IsProtectedSystemPath(cap.path))
+    {
+        error = "Operação bloqueada: não é permitido renomear itens de sistema protegidos";
+        return false;
+    }
+
+    if (new_name.empty() || new_name.find('\\') != std::string::npos || new_name.find('/') != std::string::npos ||
+        new_name == "." || new_name == ".." || new_name.find_first_of("<>:\"|?*") != std::string::npos)
+    {
+        error = "Novo nome inválido";
+        return false;
+    }
+
+    fs::path old_path(cap.path);
+    fs::path parent_path = old_path.parent_path();
+    if (parent_path.empty())
+    {
+        error = "Não é permitido renomear a raiz do volume";
+        return false;
+    }
+
+    fs::path target_path = parent_path / Utf8ToWide(new_name);
+    std::error_code ec;
+    if (fs::exists(target_path, ec))
+    {
+        error = "Já existe um item com este nome";
+        return false;
+    }
+
+    fs::rename(old_path, target_path, ec);
+    if (ec)
+    {
+        error = "Falha ao renomear: " + ec.message();
+        return false;
+    }
+
+    out_renamed_item.name = new_name;
+    out_renamed_item.path = WideToUtf8(target_path.lexically_normal().wstring());
+    out_renamed_item.is_folder = cap.is_folder;
+    out_renamed_item.size_formatted = cap.is_folder ? "Pasta" : "Arquivo";
+    out_renamed_item.modified_formatted = "Agora";
+    out_renamed_item.source = target_path.wstring().rfind(L"\\\\wsl", 0) == 0 ? "linux" : "windows";
+    out_renamed_item.extension = cap.is_folder ? "" : ExtensionOf(target_path.filename().wstring());
+    out_renamed_item.entry_id = IssueCapability(target_path.wstring(), cap.is_folder);
+    return true;
+}
+
+bool FileServiceV21::DeleteItems(
+    const std::vector<std::string>& entry_ids,
+    bool permanent,
+    std::vector<std::string>& deleted_entry_ids,
+    std::string& error)
+{
+    if (entry_ids.empty())
+    {
+        error = "Nenhum item informado para exclusão";
+        return false;
+    }
+
+    for (const auto& entry_id : entry_ids)
+    {
+        EntryCapability cap;
+        if (!ResolveCapability(entry_id, cap, error))
+        {
+            continue;
+        }
+
+        if (IsProtectedSystemPath(cap.path))
+        {
+            error = "Operação bloqueada: não é permitido excluir caminhos de sistema protegidos";
+            return false;
+        }
+
+        if (!permanent)
+        {
+            std::wstring double_null = cap.path;
+            double_null.push_back(L'\0');
+
+            SHFILEOPSTRUCTW file_op{};
+            file_op.wFunc = FO_DELETE;
+            file_op.pFrom = double_null.c_str();
+            file_op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
+
+            int res = SHFileOperationW(&file_op);
+            if (res == 0 && !file_op.fAnyOperationsAborted)
+            {
+                deleted_entry_ids.push_back(entry_id);
+            }
+            else
+            {
+                std::error_code ec;
+                fs::remove_all(cap.path, ec);
+                if (!ec)
+                {
+                    deleted_entry_ids.push_back(entry_id);
+                }
+            }
+        }
+        else
+        {
+            std::error_code ec;
+            fs::remove_all(cap.path, ec);
+            if (!ec)
+            {
+                deleted_entry_ids.push_back(entry_id);
+            }
+        }
+    }
+
+    return !deleted_entry_ids.empty();
+}
+
+bool FileServiceV21::CopyOrMoveItemsAsync(
+    const std::string& type,
+    const std::vector<std::string>& source_entry_ids,
+    const std::string& destination_entry_id,
+    const std::string& conflict_strategy,
+    std::string& out_job_id,
+    std::string& error)
+{
+    EntryCapability dest_cap;
+    if (!ResolveCapability(destination_entry_id, dest_cap, error))
+    {
+        return false;
+    }
+    if (!dest_cap.is_folder)
+    {
+        error = "O destino selecionado não é uma pasta";
+        return false;
+    }
+
+    std::vector<std::wstring> source_paths;
+    for (const auto& sid : source_entry_ids)
+    {
+        EntryCapability src_cap;
+        if (ResolveCapability(sid, src_cap, error))
+        {
+            source_paths.push_back(src_cap.path);
+        }
+    }
+
+    if (source_paths.empty())
+    {
+        error = "Nenhum arquivo de origem válido encontrado";
+        return false;
+    }
+
+    const bool is_move = (type == "move");
+    const std::wstring dest_path = dest_cap.path;
+    const std::string strategy = conflict_strategy.empty() ? "replace" : conflict_strategy;
+
+    out_job_id = JobManagerV21::Instance().SubmitJob(
+        is_move ? "file_move" : "file_copy",
+        [source_paths, dest_path, is_move, strategy](
+            std::atomic_bool& cancel_flag,
+            std::function<void(double)> progress_cb,
+            std::string& err) -> bool
+        {
+            uint64_t total_bytes = 0;
+            for (const auto& src : source_paths)
+            {
+                std::error_code ec;
+                if (fs::is_regular_file(src, ec))
+                {
+                    total_bytes += fs::file_size(src, ec);
+                }
+            }
+
+            uint64_t bytes_copied = 0;
+            const size_t total_items = source_paths.size();
+            size_t items_processed = 0;
+
+            for (const auto& src : source_paths)
+            {
+                if (cancel_flag.load())
+                {
+                    err = "Operação cancelada pelo usuário";
+                    return false;
+                }
+
+                fs::path sp(src);
+                fs::path dp = fs::path(dest_path) / sp.filename();
+
+                std::error_code exists_ec;
+                if (fs::exists(dp, exists_ec))
+                {
+                    if (strategy == "skip")
+                    {
+                        items_processed++;
+                        continue;
+                    }
+                    else if (strategy == "keep_both" || strategy == "keepBoth")
+                    {
+                        auto stem = sp.stem().wstring();
+                        auto ext = sp.extension().wstring();
+                        int counter = 1;
+                        while (fs::exists(dp, exists_ec))
+                        {
+                            std::wstring candidate = stem + L" (" + std::to_wstring(counter++) + L")" + ext;
+                            dp = fs::path(dest_path) / candidate;
+                        }
+                    }
+                }
+
+                if (fs::is_regular_file(sp, exists_ec))
+                {
+                    std::ifstream in_file(sp, std::ios::binary);
+                    if (!in_file)
+                    {
+                        err = "Erro ao abrir origem: " + WideToUtf8(sp.filename().wstring());
+                        return false;
+                    }
+
+                    std::ofstream out_file(dp, std::ios::binary | std::ios::trunc);
+                    if (!out_file)
+                    {
+                        err = "Erro ao criar destino: " + WideToUtf8(dp.filename().wstring());
+                        return false;
+                    }
+
+                    constexpr size_t kChunkSize = 1024 * 1024; // 1 MB
+                    std::vector<char> buffer(kChunkSize);
+                    bool was_cancelled = false;
+
+                    while (in_file)
+                    {
+                        if (cancel_flag.load())
+                        {
+                            was_cancelled = true;
+                            break;
+                        }
+
+                        in_file.read(buffer.data(), buffer.size());
+                        const std::streamsize bytes_read = in_file.gcount();
+                        if (bytes_read > 0)
+                        {
+                            out_file.write(buffer.data(), bytes_read);
+                            bytes_copied += bytes_read;
+                            if (total_bytes > 0 && progress_cb)
+                            {
+                                double p = (static_cast<double>(bytes_copied) / static_cast<double>(total_bytes)) * 100.0;
+                                progress_cb(p);
+                            }
+                        }
+                    }
+
+                    in_file.close();
+                    out_file.close();
+
+                    if (was_cancelled)
+                    {
+                        std::error_code rm_ec;
+                        fs::remove(dp, rm_ec);
+                        err = "Operação cancelada pelo usuário";
+                        return false;
+                    }
+
+                    if (is_move)
+                    {
+                        std::error_code rm_ec;
+                        fs::remove(sp, rm_ec);
+                    }
+                }
+                else
+                {
+                    std::error_code ec;
+                    if (is_move)
+                    {
+                        fs::rename(sp, dp, ec);
+                        if (ec)
+                        {
+                            fs::copy(sp, dp, fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
+                            if (!ec) fs::remove_all(sp, ec);
+                        }
+                    }
+                    else
+                    {
+                        fs::copy(sp, dp, fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
+                    }
+
+                    if (ec)
+                    {
+                        err = "Erro ao processar " + WideToUtf8(sp.filename().wstring()) + ": " + ec.message();
+                        return false;
+                    }
+                }
+
+                items_processed++;
+                if (total_bytes == 0 && progress_cb)
+                {
+                    progress_cb((static_cast<double>(items_processed) / static_cast<double>(total_items)) * 100.0);
+                }
+            }
+
+            return true;
+        });
+
+    return !out_job_id.empty();
+}
+
+bool FileServiceV21::ListDrives(std::vector<DriveItemV21>& out_drives, std::string& error)
+{
+    out_drives.clear();
+    error.clear();
+
+    std::array<wchar_t, 512> buffer{};
+    DWORD len = GetLogicalDriveStringsW(static_cast<DWORD>(buffer.size()), buffer.data());
+    if (len == 0 || len > buffer.size())
+    {
+        error = "Falha ao obter lista de unidades";
+        return false;
+    }
+
+    const wchar_t* p = buffer.data();
+    while (*p != L'\0')
+    {
+        std::wstring drive = p;
+        p += drive.length() + 1;
+
+        UINT type = GetDriveTypeW(drive.c_str());
+        if (type == DRIVE_NO_ROOT_DIR || type == DRIVE_UNKNOWN)
+        {
+            continue;
+        }
+
+        std::string drive_type = "fixed";
+        if (type == DRIVE_REMOVABLE) drive_type = "removable";
+        else if (type == DRIVE_CDROM) drive_type = "cdrom";
+        else if (type == DRIVE_REMOTE) drive_type = "network";
+
+        wchar_t vol_name[MAX_PATH + 1]{};
+        GetVolumeInformationW(drive.c_str(), vol_name, ARRAYSIZE(vol_name), nullptr, nullptr, nullptr, nullptr, 0);
+
+        std::string label = WideToUtf8(vol_name);
+        if (label.empty())
+        {
+            label = (type == DRIVE_REMOVABLE) ? "Unidade USB" : "Disco Local";
+        }
+        label += " (" + WideToUtf8(drive.substr(0, 2)) + ")";
+
+        ULARGE_INTEGER free_avail{}, total_bytes{}, total_free{};
+        GetDiskFreeSpaceExW(drive.c_str(), &free_avail, &total_bytes, &total_free);
+
+        DriveItemV21 item;
+        item.mount_path = WideToUtf8(drive);
+        item.label = label;
+        item.drive_type = drive_type;
+        item.total_bytes = total_bytes.QuadPart;
+        item.free_bytes = free_avail.QuadPart;
+        item.total_formatted = FormatSize(total_bytes.QuadPart);
+        item.free_formatted = FormatSize(free_avail.QuadPart);
+        item.entry_id = IssueCapability(drive, true);
+
+        out_drives.push_back(std::move(item));
+    }
+
+    const auto distros = WslServiceV21::Instance().GetDistroDetails();
+    for (const auto& distro : distros)
+    {
+        std::wstring wslPath = L"\\\\wsl.localhost\\" + Utf8ToWide(distro.name);
+        if (GetFileAttributesW(wslPath.c_str()) != INVALID_FILE_ATTRIBUTES)
+        {
+            DriveItemV21 item;
+            item.mount_path = WideToUtf8(wslPath);
+            item.label = distro.name + " (WSL Linux)";
+            item.drive_type = "wsl";
+            item.total_bytes = 0;
+            item.free_bytes = 0;
+            item.total_formatted = "WSL2 VHDX";
+            item.free_formatted = distro.state;
+            item.entry_id = IssueCapability(wslPath, true);
+            out_drives.push_back(std::move(item));
+        }
+    }
+
     return true;
 }
 

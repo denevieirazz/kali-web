@@ -4,8 +4,11 @@
 #include "event_bus_v21.h"
 #include "file_service_v21.h"
 #include "job_manager_v21.h"
+#include "performance_manager_v21.h"
+#include "path_translation_v21.h"
 #include "security_v21.h"
 #include "system_service_v21.h"
+#include "window_service_v23.h"
 #include "wsl_service_v21.h"
 
 #include <chrono>
@@ -21,6 +24,31 @@ namespace
 constexpr size_t kMaxQueuedEventFrames = 128;
 constexpr size_t kMaxQueuedEventBytes = 2 * kMaxPayloadBytes;
 constexpr auto kClientIdleWait = std::chrono::milliseconds(5);
+
+std::wstring Utf8ToWide(std::string_view value)
+{
+    if (value.empty()) return {};
+    const int required = MultiByteToWideChar(
+        CP_UTF8,
+        MB_ERR_INVALID_CHARS,
+        value.data(),
+        static_cast<int>(value.size()),
+        nullptr,
+        0);
+    if (required <= 0) return {};
+    std::wstring output(static_cast<std::size_t>(required), L'\0');
+    if (MultiByteToWideChar(
+            CP_UTF8,
+            MB_ERR_INVALID_CHARS,
+            value.data(),
+            static_cast<int>(value.size()),
+            output.data(),
+            required) <= 0)
+    {
+        return {};
+    }
+    return output;
+}
 
 struct ClientSendState final
 {
@@ -580,16 +608,17 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
             return res;
         }
         const std::string app_id = it->second.AsString();
+        LaunchStatus status;
         std::string err;
-        if (!AppServiceV21::Instance().LaunchApp(app_id, err))
+        if (!AppServiceV21::Instance().LaunchAppStructured(app_id, status, err))
         {
             res.ok = false;
             res.error_code = "launch_failed";
             res.error_message = err;
+            res.payload = status.ToJsonObject();
             return res;
         }
-        res.payload["launched"] = JsonValue(true);
-        res.payload["id"] = JsonValue(app_id);
+        res.payload = status.ToJsonObject();
         return res;
     }
 
@@ -654,6 +683,35 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
         return res;
     }
 
+    if (method == "files.resolvePath")
+    {
+        auto it = req.payload.find("path");
+        if (it == req.payload.end() || !it->second.IsString())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing or invalid 'path'";
+            return res;
+        }
+
+        std::wstring wpath = Utf8ToWide(it->second.AsString());
+        DWORD attrs = GetFileAttributesW(wpath.c_str());
+        if (attrs == INVALID_FILE_ATTRIBUTES)
+        {
+            res.ok = false;
+            res.error_code = "not_found";
+            res.error_message = "Path not found on filesystem";
+            return res;
+        }
+
+        bool is_dir = (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        std::string entry_id = FileServiceV21::Instance().IssueCapability(wpath, is_dir);
+        res.payload["entryId"] = JsonValue(entry_id);
+        res.payload["path"] = JsonValue(it->second.AsString());
+        res.payload["isFolder"] = JsonValue(is_dir);
+        return res;
+    }
+
     if (method == "files.openEntry")
     {
         auto it = req.payload.find("entryId");
@@ -674,6 +732,174 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
             return res;
         }
         res.payload["opened"] = JsonValue(true);
+        return res;
+    }
+
+    if (method == "files.createFolder")
+    {
+        auto it_parent = req.payload.find("parentEntryId");
+        auto it_name = req.payload.find("name");
+        if (it_parent == req.payload.end() || !it_parent->second.IsString() ||
+            it_name == req.payload.end() || !it_name->second.IsString())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing or invalid 'parentEntryId' or 'name'";
+            return res;
+        }
+
+        FileItemV21 created_item;
+        std::string error;
+        if (!FileServiceV21::Instance().CreateFolder(
+                it_parent->second.AsString(),
+                it_name->second.AsString(),
+                created_item,
+                error))
+        {
+            res.ok = false;
+            res.error_code = "create_folder_failed";
+            res.error_message = error;
+            return res;
+        }
+        res.payload = created_item.ToJsonObject();
+        return res;
+    }
+
+    if (method == "files.rename")
+    {
+        auto it_entry = req.payload.find("entryId");
+        auto it_name = req.payload.find("newName");
+        if (it_entry == req.payload.end() || !it_entry->second.IsString() ||
+            it_name == req.payload.end() || !it_name->second.IsString())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing or invalid 'entryId' or 'newName'";
+            return res;
+        }
+
+        FileItemV21 renamed_item;
+        std::string error;
+        if (!FileServiceV21::Instance().RenameItem(
+                it_entry->second.AsString(),
+                it_name->second.AsString(),
+                renamed_item,
+                error))
+        {
+            res.ok = false;
+            res.error_code = "rename_failed";
+            res.error_message = error;
+            return res;
+        }
+        res.payload = renamed_item.ToJsonObject();
+        return res;
+    }
+
+    if (method == "files.delete")
+    {
+        auto it_entries = req.payload.find("entryIds");
+        if (it_entries == req.payload.end() || !it_entries->second.IsArray())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing or invalid array 'entryIds'";
+            return res;
+        }
+
+        std::vector<std::string> entry_ids;
+        for (const auto& item : it_entries->second.AsArray())
+        {
+            if (item.IsString()) entry_ids.push_back(item.AsString());
+        }
+
+        bool permanent = false;
+        auto it_perm = req.payload.find("permanent");
+        if (it_perm != req.payload.end() && it_perm->second.IsBool())
+        {
+            permanent = it_perm->second.AsBool();
+        }
+
+        std::vector<std::string> deleted_ids;
+        std::string error;
+        if (!FileServiceV21::Instance().DeleteItems(entry_ids, permanent, deleted_ids, error))
+        {
+            res.ok = false;
+            res.error_code = "delete_failed";
+            res.error_message = error;
+            return res;
+        }
+
+        std::vector<JsonValue> deleted_json;
+        deleted_json.reserve(deleted_ids.size());
+        for (const auto& id : deleted_ids) deleted_json.push_back(JsonValue(id));
+        res.payload["deletedEntryIds"] = JsonValue(std::move(deleted_json));
+        return res;
+    }
+
+    if (method == "files.copy" || method == "files.move")
+    {
+        auto it_sources = req.payload.find("sourceEntryIds");
+        auto it_dest = req.payload.find("destinationEntryId");
+        if (it_sources == req.payload.end() || !it_sources->second.IsArray() ||
+            it_dest == req.payload.end() || !it_dest->second.IsString())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing or invalid 'sourceEntryIds' or 'destinationEntryId'";
+            return res;
+        }
+
+        std::vector<std::string> source_ids;
+        for (const auto& item : it_sources->second.AsArray())
+        {
+            if (item.IsString()) source_ids.push_back(item.AsString());
+        }
+
+        std::string conflict_strategy = "replace";
+        auto it_conflict = req.payload.find("conflictStrategy");
+        if (it_conflict == req.payload.end()) it_conflict = req.payload.find("conflictResolution");
+        if (it_conflict != req.payload.end() && it_conflict->second.IsString())
+        {
+            conflict_strategy = it_conflict->second.AsString();
+        }
+
+        std::string job_id;
+        std::string error;
+        const std::string op_type = (method == "files.move") ? "move" : "copy";
+        if (!FileServiceV21::Instance().CopyOrMoveItemsAsync(
+                op_type,
+                source_ids,
+                it_dest->second.AsString(),
+                conflict_strategy,
+                job_id,
+                error))
+        {
+            res.ok = false;
+            res.error_code = "file_operation_failed";
+            res.error_message = error;
+            return res;
+        }
+        res.payload["jobId"] = JsonValue(job_id);
+        res.payload["operationId"] = JsonValue(job_id);
+        return res;
+    }
+
+    if (method == "files.listDrives")
+    {
+        std::vector<DriveItemV21> drives;
+        std::string error;
+        if (!FileServiceV21::Instance().ListDrives(drives, error))
+        {
+            res.ok = false;
+            res.error_code = "list_drives_failed";
+            res.error_message = error;
+            return res;
+        }
+
+        std::vector<JsonValue> drive_json;
+        drive_json.reserve(drives.size());
+        for (const auto& d : drives) drive_json.push_back(JsonValue(d.ToJsonObject()));
+        res.payload["drives"] = JsonValue(std::move(drive_json));
         return res;
     }
 
@@ -749,14 +975,111 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
     if (method == "wsl.list")
     {
         res.payload["wslAvailable"] = JsonValue(WslServiceV21::Instance().IsWslAvailable());
+        res.payload["defaultDistro"] = JsonValue(WslServiceV21::Instance().GetDefaultDistribution());
         JsonArray distros;
         for (const auto& distro : WslServiceV21::Instance().GetDistributions())
         {
             distros.push_back(JsonValue(distro));
         }
         res.payload["distros"] = JsonValue(std::move(distros));
+
+        JsonArray distro_details;
+        for (const auto& detail : WslServiceV21::Instance().GetDistroDetails())
+        {
+            distro_details.push_back(JsonValue(detail.ToJsonObject()));
+        }
+        res.payload["distroDetails"] = JsonValue(std::move(distro_details));
+
         res.payload["generation"] = JsonValue(
             static_cast<int64_t>(WslServiceV21::Instance().GetGeneration()));
+        return res;
+    }
+
+    if (method == "path.translate")
+    {
+        auto it_path = req.payload.find("path");
+        if (it_path == req.payload.end() || !it_path->second.IsString())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing or invalid 'path' parameter in payload";
+            return res;
+        }
+        const std::string path = it_path->second.AsString();
+
+        std::string target = "linux";
+        auto it_target = req.payload.find("target");
+        if (it_target != req.payload.end() && it_target->second.IsString())
+        {
+            target = it_target->second.AsString();
+        }
+
+        std::string distro;
+        auto it_distro = req.payload.find("distro");
+        if (it_distro != req.payload.end() && it_distro->second.IsString())
+        {
+            distro = it_distro->second.AsString();
+        }
+
+        std::string translated;
+        if (target == "linux")
+        {
+            translated = PathTranslationV21::WindowsToLinux(path, distro);
+        }
+        else
+        {
+            translated = PathTranslationV21::LinuxToWindows(path, distro);
+        }
+
+        const bool exists = PathTranslationV21::PathExists(
+            target == "windows" ? translated : path, distro);
+
+        res.payload["originalPath"] = JsonValue(path);
+        res.payload["translatedPath"] = JsonValue(translated);
+        res.payload["target"] = JsonValue(target);
+        res.payload["distro"] = JsonValue(distro);
+        res.payload["exists"] = JsonValue(exists);
+        return res;
+    }
+
+    if (method == "system.mounts.list")
+    {
+        const auto mounts = PathTranslationV21::GetMountPoints();
+        JsonArray arr;
+        for (const auto& mount : mounts)
+        {
+            arr.push_back(JsonValue(mount.ToJsonObject()));
+        }
+        res.payload["mounts"] = JsonValue(std::move(arr));
+        return res;
+    }
+
+    if (method == "system.performance.get")
+    {
+        res.payload = PerformanceManagerV21::Instance().GetMetrics().ToJsonObject();
+        return res;
+    }
+
+    if (method == "system.performance.set")
+    {
+        auto it = req.payload.find("profile");
+        if (it == req.payload.end() || !it->second.IsString())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing or invalid 'profile' string in payload";
+            return res;
+        }
+        const std::string profile_str = it->second.AsString();
+        if (!PerformanceManagerV21::Instance().SetProfileByName(profile_str))
+        {
+            res.ok = false;
+            res.error_code = "invalid_profile";
+            res.error_message = "Valid profiles are 'economy', 'balanced', or 'performance'";
+            return res;
+        }
+        res.payload["updated"] = JsonValue(true);
+        res.payload["profile"] = JsonValue(profile_str);
         return res;
     }
 
@@ -830,6 +1153,129 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
     if (method == "diagnostics.snapshot")
     {
         res.payload = DiagnosticsV21::GetDiagnosticsSnapshot();
+        return res;
+    }
+
+    if (method == "window.snapshot" || method == "window.list")
+    {
+        std::string snapshot_json;
+        std::string error;
+        if (!WindowServiceV23::Instance().GetSnapshot(snapshot_json, &error))
+        {
+            res.ok = false;
+            res.error_code = "snapshot_failed";
+            res.error_message = error;
+            return res;
+        }
+        res.payload["snapshot"] = JsonValue(snapshot_json);
+        return res;
+    }
+
+    if (method == "window.focus" ||
+        method == "window.minimize" ||
+        method == "window.maximize" ||
+        method == "window.restore" ||
+        method == "window.close" ||
+        method == "window.setBounds" ||
+        method == "window.snap" ||
+        method == "window.moveToWorkspace" ||
+        method == "window.setFullscreen")
+    {
+        auto it_hwnd = req.payload.find("hwnd");
+        if (it_hwnd == req.payload.end())
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Missing 'hwnd' in payload";
+            return res;
+        }
+        uint64_t hwnd = 0;
+        if (it_hwnd->second.IsInt()) hwnd = static_cast<uint64_t>(it_hwnd->second.AsInt());
+        else if (it_hwnd->second.IsDouble()) hwnd = static_cast<uint64_t>(it_hwnd->second.AsDouble());
+        else if (it_hwnd->second.IsString())
+        {
+            std::string s = it_hwnd->second.AsString();
+            if (s.rfind("win_", 0) == 0) s = s.substr(4);
+            try { hwnd = std::stoull(s); } catch (...) {}
+        }
+
+        if (hwnd == 0)
+        {
+            res.ok = false;
+            res.error_code = "invalid_argument";
+            res.error_message = "Invalid or zero 'hwnd'";
+            return res;
+        }
+
+        std::string error;
+        bool ok = false;
+        if (method == "window.focus") ok = WindowServiceV23::Instance().FocusWindow(hwnd, &error);
+        else if (method == "window.minimize") ok = WindowServiceV23::Instance().MinimizeWindow(hwnd, &error);
+        else if (method == "window.maximize") ok = WindowServiceV23::Instance().MaximizeWindow(hwnd, &error);
+        else if (method == "window.restore") ok = WindowServiceV23::Instance().RestoreWindow(hwnd, &error);
+        else if (method == "window.close") ok = WindowServiceV23::Instance().CloseWindow(hwnd, &error);
+        else if (method == "window.setBounds")
+        {
+            int x = req.payload.count("x") && req.payload.at("x").IsInt() ? static_cast<int>(req.payload.at("x").AsInt()) : 0;
+            int y = req.payload.count("y") && req.payload.at("y").IsInt() ? static_cast<int>(req.payload.at("y").AsInt()) : 0;
+            int width = req.payload.count("width") && req.payload.at("width").IsInt() ? static_cast<int>(req.payload.at("width").AsInt()) : 800;
+            int height = req.payload.count("height") && req.payload.at("height").IsInt() ? static_cast<int>(req.payload.at("height").AsInt()) : 600;
+            ok = WindowServiceV23::Instance().SetBounds(hwnd, x, y, width, height, &error);
+        }
+        else if (method == "window.snap")
+        {
+            using CloudOS::WindowRegistryV23::SnapTarget;
+            SnapTarget target = SnapTarget::None;
+            std::string snap_str = req.payload.count("target") && req.payload.at("target").IsString() ?
+                req.payload.at("target").AsString() :
+                (req.payload.count("snap") && req.payload.at("snap").IsString() ? req.payload.at("snap").AsString() : "");
+            if (snap_str == "left") target = SnapTarget::Left;
+            else if (snap_str == "right") target = SnapTarget::Right;
+            else if (snap_str == "top") target = SnapTarget::Top;
+            else if (snap_str == "maximize") target = SnapTarget::Maximize;
+            else if (snap_str == "restore") target = SnapTarget::Restore;
+            else if (snap_str == "topLeft") target = SnapTarget::TopLeft;
+            else if (snap_str == "topRight") target = SnapTarget::TopRight;
+            else if (snap_str == "bottomLeft") target = SnapTarget::BottomLeft;
+            else if (snap_str == "bottomRight") target = SnapTarget::BottomRight;
+            ok = WindowServiceV23::Instance().SnapWindow(hwnd, target, &error);
+        }
+        else if (method == "window.moveToWorkspace")
+        {
+            int ws = req.payload.count("workspace") && req.payload.at("workspace").IsInt() ?
+                static_cast<int>(req.payload.at("workspace").AsInt()) : 1;
+            ok = WindowServiceV23::Instance().MoveToWorkspace(hwnd, ws, &error);
+        }
+        else if (method == "window.setFullscreen")
+        {
+            bool fullscreen = req.payload.count("fullscreen") && req.payload.at("fullscreen").IsBool() ?
+                req.payload.at("fullscreen").AsBool() : true;
+            ok = WindowServiceV23::Instance().SetFullscreen(hwnd, fullscreen, &error);
+        }
+
+        if (!ok)
+        {
+            res.ok = false;
+            res.error_code = "window_action_failed";
+            res.error_message = error.empty() ? "Window command failed or window not found" : error;
+            return res;
+        }
+        res.payload["success"] = JsonValue(true);
+        return res;
+    }
+
+    if (method == "monitor.list")
+    {
+        std::string snapshot_json;
+        std::string error;
+        if (!WindowServiceV23::Instance().GetSnapshot(snapshot_json, &error))
+        {
+            res.ok = false;
+            res.error_code = "monitor_list_failed";
+            res.error_message = error;
+            return res;
+        }
+        res.payload["snapshot"] = JsonValue(snapshot_json);
         return res;
     }
 

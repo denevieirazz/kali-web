@@ -10,9 +10,11 @@ class FilesContent extends StatelessWidget {
     required this.files,
     required this.query,
     required this.isGridView,
-    required this.selectedPath,
     required this.onSelect,
     required this.onOpen,
+    this.selectedPath,
+    this.selectedPaths = const <String>{},
+    this.cutPaths = const <String>{},
     super.key,
   });
 
@@ -20,8 +22,18 @@ class FilesContent extends StatelessWidget {
   final String query;
   final bool isGridView;
   final String? selectedPath;
-  final ValueChanged<String> onSelect;
+  final Set<String> selectedPaths;
+  final Set<String> cutPaths;
+  final void Function(CloudFileItem item, {bool isCtrl, bool isShift}) onSelect;
   final ValueChanged<CloudFileItem> onOpen;
+
+  Set<String> get _effectiveSelectedPaths {
+    if (selectedPaths.isNotEmpty) return selectedPaths;
+    if (selectedPath != null && selectedPath!.isNotEmpty) {
+      return <String>{selectedPath!};
+    }
+    return const <String>{};
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -31,14 +43,16 @@ class FilesContent extends StatelessWidget {
     if (isGridView) {
       return FilesGrid(
         files: files,
-        selectedPath: selectedPath,
+        selectedPaths: _effectiveSelectedPaths,
+        cutPaths: cutPaths,
         onSelect: onSelect,
         onOpen: onOpen,
       );
     }
     return FilesList(
       files: files,
-      selectedPath: selectedPath,
+      selectedPaths: _effectiveSelectedPaths,
+      cutPaths: cutPaths,
       onSelect: onSelect,
       onOpen: onOpen,
     );

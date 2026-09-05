@@ -40,14 +40,94 @@ if (-not ('CloudOSV21NativeWindowProbe' -as [type])) {
 using System;
 using System.Runtime.InteropServices;
 public static class CloudOSV21NativeWindowProbe {
+    public delegate bool EnumDesktopWindowsProc(IntPtr hWnd, IntPtr lParam);
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr childAfter, string className, string windowName);
+
     [DllImport("user32.dll", SetLastError = true)]
     public static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+
     [DllImport("user32.dll")]
     public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
     [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool BringWindowToTop(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr OpenDesktop(string lpszDesktop, uint dwFlags, bool fInherit, uint dwDesiredAccess);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool EnumDesktopWindows(IntPtr hDesktop, EnumDesktopWindowsProc lpfn, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool CloseDesktop(IntPtr hDesktop);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct STARTUPINFO {
+        public int cb;
+        public string lpReserved;
+        public string lpDesktop;
+        public string lpTitle;
+        public int dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags;
+        public short wShowWindow, cbReserved2;
+        public IntPtr lpReserved2, hStdInput, hStdOutput, hStdError;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct PROCESS_INFORMATION {
+        public IntPtr hProcess, hThread;
+        public int dwProcessId, dwThreadId;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    public static extern bool CreateProcess(
+        string lpApplicationName, string lpCommandLine,
+        IntPtr lpProcessAttributes, IntPtr lpThreadAttributes,
+        bool bInheritHandles, uint dwCreationFlags,
+        IntPtr lpEnvironment, string lpCurrentDirectory,
+        ref STARTUPINFO lpStartupInfo, out PROCESS_INFORMATION lpProcessInformation);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool CloseHandle(IntPtr hObject);
+
+    public static IntPtr FindWindowForPidOnDefault(uint targetPid) {
+        IntPtr hDesk = OpenDesktop("Default", 0, false, 0x01FF);
+        if (hDesk == IntPtr.Zero) return IntPtr.Zero;
+        IntPtr found = IntPtr.Zero;
+        EnumDesktopWindows(hDesk, (hWnd, lParam) => {
+            uint pid;
+            GetWindowThreadProcessId(hWnd, out pid);
+            if (pid == targetPid && IsWindowVisible(hWnd)) {
+                found = hWnd;
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+        CloseDesktop(hDesk);
+        return found;
+    }
+
+    public static int LaunchProcess(string exePath, string workingDir, string desktop = @"winsta0\default") {
+        STARTUPINFO si = new STARTUPINFO();
+        si.cb = Marshal.SizeOf(si);
+        si.lpDesktop = desktop;
+        si.dwFlags = 1; // STARTF_USESHOWWINDOW
+        si.wShowWindow = 1; // SW_SHOWNORMAL
+        PROCESS_INFORMATION pi;
+        if (!CreateProcess(exePath, null, IntPtr.Zero, IntPtr.Zero, false, 0, IntPtr.Zero, workingDir, ref si, out pi)) {
+            return 0;
+        }
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return pi.dwProcessId;
+    }
 }
 '@
 }
@@ -94,8 +174,13 @@ function Assert-AuthorityPath($Endpoint, [string]$ExpectedPath) {
 
 function Test-Broker {
     param([string]$Probe)
-    & $Probe ping *> $null
-    return $LASTEXITCODE -eq 0
+    try {
+        $p = Start-Process -FilePath $Probe -ArgumentList 'ping' -NoNewWindow -Wait -PassThru
+        return $p.ExitCode -eq 0
+    }
+    catch {
+        return $false
+    }
 }
 
 $nativeShell = Join-Path $nativeRootPath 'CloudOS.exe'
@@ -165,24 +250,45 @@ Write-Host '[CloudOS V21] System Broker V21 pronto.' -ForegroundColor Green
 $existingFlutter = @(Get-Process -Name 'cloudos_flutter_shell' -ErrorAction SilentlyContinue | Where-Object {
     $_.Path -and (Test-SamePath $_.Path $flutter)
 })
+
+$flutterHwnd = [IntPtr]::Zero
 if ($existingFlutter.Count -gt 0) {
-    Write-Host "[CloudOS V21] Flutter presentation ja esta ativa (PID $($existingFlutter[0].Id))." -ForegroundColor Green
-    exit 0
+    foreach ($proc in $existingFlutter) {
+        $hwnd = [CloudOSV21NativeWindowProbe]::FindWindowForPidOnDefault($proc.Id)
+        if ($hwnd -ne [IntPtr]::Zero) {
+            $flutterHwnd = $hwnd
+            break
+        }
+    }
+    if ($flutterHwnd -ne [IntPtr]::Zero) {
+        Write-Host "[CloudOS V21] Flutter presentation ativa (PID $($existingFlutter[0].Id)). Focando janela..." -ForegroundColor Green
+        [void][CloudOSV21NativeWindowProbe]::ShowWindow($flutterHwnd, 3) # SW_MAXIMIZE
+        [void][CloudOSV21NativeWindowProbe]::BringWindowToTop($flutterHwnd)
+        [void][CloudOSV21NativeWindowProbe]::SetForegroundWindow($flutterHwnd)
+        exit 0
+    }
+    else {
+        Write-Host "[CloudOS V21] Instancia Flutter sem janela interativa detectada. Reiniciando..." -ForegroundColor Yellow
+        $existingFlutter | Stop-Process -Force -ErrorAction SilentlyContinue
+    }
 }
 
 Write-Host '[CloudOS V21] Iniciando Flutter presentation...' -ForegroundColor Cyan
-$flutterProc = Start-Process -FilePath $flutter -WorkingDirectory $presentationRoot -PassThru
-Start-Sleep -Milliseconds 750
-if ($flutterProc -and -not $flutterProc.HasExited) {
-    $deadline = [DateTime]::UtcNow.AddSeconds(5)
-    do {
-        Start-Sleep -Milliseconds 200
-        $flutterProc.Refresh()
-        if ($flutterProc.MainWindowHandle -ne [IntPtr]::Zero) {
-            [void][CloudOSV21NativeWindowProbe]::ShowWindow($flutterProc.MainWindowHandle, 3) # SW_MAXIMIZE
-            [void][CloudOSV21NativeWindowProbe]::SetForegroundWindow($flutterProc.MainWindowHandle)
-            break
-        }
-    } while ([DateTime]::UtcNow -lt $deadline)
+$flutterPid = [CloudOSV21NativeWindowProbe]::LaunchProcess($flutter, $presentationRoot)
+if ($flutterPid -eq 0) {
+    $flutterProc = Start-Process -FilePath $flutter -WorkingDirectory $presentationRoot -PassThru
+    $flutterPid = $flutterProc.Id
 }
+
+$deadline = [DateTime]::UtcNow.AddSeconds(10)
+do {
+    Start-Sleep -Milliseconds 250
+    $flutterHwnd = [CloudOSV21NativeWindowProbe]::FindWindowForPidOnDefault($flutterPid)
+    if ($flutterHwnd -ne [IntPtr]::Zero) {
+        [void][CloudOSV21NativeWindowProbe]::ShowWindow($flutterHwnd, 3) # SW_MAXIMIZE
+        [void][CloudOSV21NativeWindowProbe]::BringWindowToTop($flutterHwnd)
+        [void][CloudOSV21NativeWindowProbe]::SetForegroundWindow($flutterHwnd)
+        break
+    }
+} while ([DateTime]::UtcNow -lt $deadline)
 Write-Host '[CloudOS V21] Runtime integrado iniciado.' -ForegroundColor Green

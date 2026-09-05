@@ -1,6 +1,7 @@
 #include "wsl_service_v21.h"
 
 #include <Windows.h>
+#include <tlhelp32.h>
 
 #include <algorithm>
 
@@ -66,6 +67,20 @@ bool ReadStringValue(HKEY key, const wchar_t* value_name, std::wstring& out)
     return !out.empty();
 }
 
+bool ReadDwordValue(HKEY key, const wchar_t* value_name, DWORD& out)
+{
+    DWORD type = 0;
+    DWORD size = sizeof(DWORD);
+    return RegQueryValueExW(
+               key,
+               value_name,
+               nullptr,
+               &type,
+               reinterpret_cast<LPBYTE>(&out),
+               &size) == ERROR_SUCCESS &&
+           type == REG_DWORD;
+}
+
 std::string ReadDistributionName(HKEY root, const std::wstring& subkey_name)
 {
     HKEY distro_key = nullptr;
@@ -84,7 +99,48 @@ bool Contains(const std::vector<std::string>& values, const std::string& value)
 {
     return std::find(values.begin(), values.end(), value) != values.end();
 }
+
+bool IsWslVmRunning()
+{
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return false;
+
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+
+    bool running = false;
+    if (Process32FirstW(snapshot, &entry))
+    {
+        do
+        {
+            if (_wcsicmp(entry.szExeFile, L"vmmemWSL.exe") == 0 ||
+                _wcsicmp(entry.szExeFile, L"vmmem.exe") == 0 ||
+                _wcsicmp(entry.szExeFile, L"wslhost.exe") == 0)
+            {
+                running = true;
+                break;
+            }
+        } while (Process32NextW(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+    return running;
+}
 } // namespace
+
+JsonObject WslDistroInfo::ToJsonObject() const
+{
+    JsonObject obj;
+    obj["id"] = JsonValue(id);
+    obj["name"] = JsonValue(name);
+    obj["guid"] = JsonValue(guid);
+    obj["version"] = JsonValue(static_cast<int64_t>(version));
+    obj["state"] = JsonValue(state);
+    obj["basePath"] = JsonValue(base_path);
+    obj["defaultUid"] = JsonValue(static_cast<int64_t>(default_uid));
+    obj["flags"] = JsonValue(static_cast<int64_t>(flags));
+    obj["isDefault"] = JsonValue(is_default);
+    return obj;
+}
 
 WslServiceV21& WslServiceV21::Instance()
 {
@@ -113,6 +169,25 @@ std::string WslServiceV21::GetDefaultDistribution()
     return default_distro_;
 }
 
+std::vector<WslDistroInfo> WslServiceV21::GetDistroDetails()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!initialized_.load()) Refresh();
+    const bool is_running = IsWslVmRunning();
+    auto result = distro_details_;
+    for (auto& item : result)
+    {
+        item.state = is_running ? "Running" : "Stopped";
+    }
+    return result;
+}
+
+bool WslServiceV21::IsDistroRunning(const std::string& distro_name)
+{
+    (void)distro_name;
+    return IsWslVmRunning();
+}
+
 void WslServiceV21::Invalidate()
 {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -123,9 +198,11 @@ void WslServiceV21::Invalidate()
 void WslServiceV21::Refresh()
 {
     distros_.clear();
+    distro_details_.clear();
     default_distro_.clear();
     wsl_available_ = false;
 
+    std::wstring default_guid;
     HKEY root = nullptr;
     if (RegOpenKeyExW(
             HKEY_CURRENT_USER,
@@ -137,6 +214,7 @@ void WslServiceV21::Refresh()
         std::wstring default_subkey;
         if (ReadStringValue(root, L"DefaultDistribution", default_subkey))
         {
+            default_guid = default_subkey;
             default_distro_ = ReadDistributionName(root, default_subkey);
             if (!default_distro_.empty()) distros_.push_back(default_distro_);
         }
@@ -158,8 +236,50 @@ void WslServiceV21::Refresh()
             if (result == ERROR_NO_MORE_ITEMS) break;
             if (result != ERROR_SUCCESS) continue;
 
-            const std::string distro = ReadDistributionName(root, std::wstring(subkey_name, name_len));
-            if (!distro.empty() && !Contains(distros_, distro)) distros_.push_back(distro);
+            const std::wstring subkey_str(subkey_name, name_len);
+            HKEY distro_key = nullptr;
+            if (RegOpenKeyExW(root, subkey_str.c_str(), 0, KEY_READ, &distro_key) == ERROR_SUCCESS)
+            {
+                std::wstring name_wide;
+                if (ReadStringValue(distro_key, L"DistributionName", name_wide))
+                {
+                    const std::string distro = WideToUtf8(name_wide);
+                    if (!distro.empty())
+                    {
+                        if (!Contains(distros_, distro)) distros_.push_back(distro);
+
+                        WslDistroInfo info;
+                        info.id = distro;
+                        info.name = distro;
+                        info.guid = WideToUtf8(subkey_str);
+                        info.is_default = (_wcsicmp(subkey_str.c_str(), default_guid.c_str()) == 0);
+
+                        DWORD version = 2;
+                        if (ReadDwordValue(distro_key, L"Version", version))
+                        {
+                            info.version = static_cast<uint32_t>(version);
+                        }
+                        std::wstring base_path;
+                        if (ReadStringValue(distro_key, L"BasePath", base_path))
+                        {
+                            info.base_path = WideToUtf8(base_path);
+                        }
+                        DWORD default_uid = 0;
+                        if (ReadDwordValue(distro_key, L"DefaultUid", default_uid))
+                        {
+                            info.default_uid = static_cast<uint32_t>(default_uid);
+                        }
+                        DWORD flags = 15;
+                        if (ReadDwordValue(distro_key, L"Flags", flags))
+                        {
+                            info.flags = static_cast<uint32_t>(flags);
+                        }
+                        info.state = "Stopped";
+                        distro_details_.push_back(std::move(info));
+                    }
+                }
+                RegCloseKey(distro_key);
+            }
         }
         RegCloseKey(root);
     }
@@ -167,6 +287,10 @@ void WslServiceV21::Refresh()
     if (default_distro_.empty() && !distros_.empty())
     {
         default_distro_ = distros_.front();
+        if (!distro_details_.empty())
+        {
+            distro_details_.front().is_default = true;
+        }
     }
 
     bool wsl_executable_available = false;
@@ -186,3 +310,4 @@ void WslServiceV21::Refresh()
 }
 
 } // namespace CloudOS
+

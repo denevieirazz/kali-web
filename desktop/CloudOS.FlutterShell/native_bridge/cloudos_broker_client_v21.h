@@ -43,17 +43,62 @@ struct BrokerClientAppItem final
 {
     std::string id;
     std::string name;
+    std::string display_name;
     std::string platform;
     std::string subtitle;
     std::string distro;
     std::string category;
     std::string source;
+    std::string launch_target;
+    std::string availability{"ready"};
+    std::vector<std::string> capabilities;
     bool can_launch{true};
     bool can_uninstall{false};
     bool can_update{false};
     std::string icon_key;
     bool pinned{false};
     bool recent{false};
+};
+
+struct BrokerClientDistroInfo final
+{
+    std::string id;
+    std::string name;
+    std::string guid;
+    uint32_t version{2};
+    std::string state{"Stopped"};
+    std::string base_path;
+    uint32_t default_uid{0};
+    uint32_t flags{15};
+    bool is_default{false};
+};
+
+struct BrokerClientMountPoint final
+{
+    std::string id;
+    std::string label;
+    std::string path;
+    std::string platform;
+    bool is_online{true};
+};
+
+struct BrokerClientPathTranslation final
+{
+    std::string original_path;
+    std::string translated_path;
+    std::string target;
+    std::string distro;
+    bool exists{false};
+};
+
+struct BrokerClientLaunchResult final
+{
+    std::string id;
+    std::string status{"failed"};
+    bool launched{false};
+    std::string platform{"windows"};
+    std::string target;
+    std::string message;
 };
 
 struct BrokerClientFileItem final
@@ -65,6 +110,18 @@ struct BrokerClientFileItem final
     std::string modified_formatted;
     std::string source;
     std::string extension;
+    std::string entry_id;
+};
+
+struct BrokerClientDriveItem final
+{
+    std::string mount_path;
+    std::string label;
+    std::string drive_type;
+    uint64_t total_bytes{0};
+    uint64_t free_bytes{0};
+    std::string total_formatted;
+    std::string free_formatted;
     std::string entry_id;
 };
 
@@ -86,6 +143,18 @@ struct BrokerClientSnapshot final
     std::string default_distro;
     int current_workspace{1};
     uint64_t timestamp_ms{0};
+};
+
+struct BrokerClientPerformanceProfile final
+{
+    std::string profile{"balanced"};
+    int64_t total_ram_mb{0};
+    int64_t free_ram_mb{0};
+    int64_t memory_load_percent{0};
+    int64_t cpu_cores{0};
+    bool on_battery{false};
+    int64_t battery_percent{-1};
+    bool is_low_end_hardware{false};
 };
 
 class CloudOSBrokerClientV21 final
@@ -148,11 +217,59 @@ public:
             opened_it->second.AsBool();
     }
 
+    bool CreateFolder(
+        const std::string& parent_entry_id,
+        const std::string& name,
+        BrokerClientFileItem& out_item,
+        std::string& err);
+
+    bool RenameFile(
+        const std::string& entry_id,
+        const std::string& new_name,
+        BrokerClientFileItem& out_item,
+        std::string& err);
+
+    bool DeleteFiles(
+        const std::vector<std::string>& entry_ids,
+        bool permanent,
+        std::vector<std::string>& out_deleted_ids,
+        std::string& err);
+
+    bool CopyOrMoveFiles(
+        const std::string& type,
+        const std::vector<std::string>& source_ids,
+        const std::string& destination_id,
+        std::string& out_job_id,
+        std::string& err);
+
+    bool CancelFileOperation(const std::string& job_id);
+
+    bool ListDrives(
+        std::vector<BrokerClientDriveItem>& out_drives,
+        std::string& err);
+
     bool LaunchApp(const std::string& app_id, std::string& err);
+    bool LaunchAppStructured(const std::string& app_id, BrokerClientLaunchResult& out_result, std::string& err);
+    bool ListWslDistros(std::vector<BrokerClientDistroInfo>& out_distros, std::string& out_default_distro, bool& out_available);
+    bool TranslatePath(const std::string& path, const std::string& target, const std::string& distro, BrokerClientPathTranslation& out_result);
+    bool GetMountPoints(std::vector<BrokerClientMountPoint>& out_mounts);
     bool GetSystemSnapshot(BrokerClientSnapshot& out_snapshot);
     bool SetVolume(double value);
     bool SetBrightness(double value);
+    bool GetPerformanceProfile(BrokerClientPerformanceProfile& out_profile);
+    bool SetPerformanceProfile(const std::string& profile);
     bool GetCapabilities(std::vector<std::string>& out_caps);
+    bool GetWindowSnapshot(std::string& out_snapshot_json);
+    bool ExecuteWindowCommand(
+        const std::string& action,
+        uint64_t hwnd,
+        int x = 0,
+        int y = 0,
+        int width = 0,
+        int height = 0,
+        int workspace = 1,
+        const std::string& snap = "",
+        bool fullscreen = false);
 
 private:
     CloudOSBrokerClientV21() = default;

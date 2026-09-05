@@ -22,13 +22,15 @@ import '../features/task_manager/presentation/task_manager_window.dart';
 import '../models/cloud_app.dart';
 import '../models/cloud_notification.dart';
 import '../models/cloud_system_snapshot.dart';
+import '../core/responsive/cloud_layout_metrics.dart';
+import '../core/responsive/cloud_responsive_layout.dart';
 import '../services/cloudos_bridge.dart';
+import '../widgets/glass_surface.dart';
 import 'shell_app_route.dart';
 import 'widgets/desktop_icons.dart';
 import 'widgets/desktop_status.dart';
 import 'widgets/desktop_wallpaper.dart';
 import 'window_manager/alt_tab_switcher.dart';
-import 'window_manager/cloud_window.dart';
 import 'window_manager/cloud_window_frame.dart';
 
 class CloudOSShell extends StatefulWidget {
@@ -45,16 +47,24 @@ class _DefaultBridge extends CloudOSBridge {
   const _DefaultBridge();
 }
 
+enum WindowSnapMode { none, maximized, left, right }
+
 class _CloudOSShellState extends State<CloudOSShell> {
   List<CloudApp> apps = const <CloudApp>[];
   CloudSystemSnapshot snapshot = CloudOSBridge.degradedSnapshot;
   CloudNotificationState notificationState = CloudNotificationState.empty;
+  PerformanceProfileInfo performanceProfile = PerformanceProfileInfo.defaultBalanced;
   bool startOpen = false;
   bool quickSettingsOpen = false;
   bool notificationsOpen = false;
   bool spotlightOpen = false;
   int currentWorkspace = 1;
   String? selectedDesktopIcon;
+
+  // Responsive & Window Snap Tracking
+  final Map<String, WindowSnapMode> _windowSnapModes = <String, WindowSnapMode>{};
+  StreamSubscription<DisplayChangeEvent>? _displaySub;
+  Size? _lastLayoutSize;
 
   // Window Manager States
   bool filesOpen = true;
@@ -128,20 +138,52 @@ class _CloudOSShellState extends State<CloudOSShell> {
   bool altTabOpen = false;
   int altTabSelectedIndex = 0;
 
-  Timer? _shellStateTimer;
   bool _shellStateRefreshInFlight = false;
+  CloudWindowSnapshot windowSnapshot = CloudWindowSnapshot.empty;
+  Timer? _windowSnapshotTimer;
 
   @override
   void initState() {
     super.initState();
     unawaited(_loadBridgeData());
+    _windowSnapshotTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
+      if (mounted) unawaited(_refreshWindowSnapshot());
+    });
+    _displaySub = widget.bridge.onDisplayChanged.listen((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
   void dispose() {
-    _shellStateTimer?.cancel();
-    _shellStateTimer = null;
+    _windowSnapshotTimer?.cancel();
+    _displaySub?.cancel();
     super.dispose();
+  }
+
+  Future<void> _refreshWindowSnapshot() async {
+    try {
+      final snap = await widget.bridge.tryLoadWindowSnapshot();
+      if (snap != null && mounted) {
+        final changed = snap.sequence != windowSnapshot.sequence ||
+            snap.windows.length != windowSnapshot.windows.length ||
+            snap.windows.any((w) {
+              final prev = windowSnapshot.windows.firstWhere(
+                (p) => p.hwnd == w.hwnd,
+                orElse: () => w,
+              );
+              return prev.isFocused != w.isFocused ||
+                  prev.isMinimized != w.isMinimized ||
+                  prev.isMaximized != w.isMaximized ||
+                  prev.title != w.title;
+            });
+        if (changed) {
+          setState(() {
+            windowSnapshot = snap;
+          });
+        }
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadBridgeData() async {
@@ -150,12 +192,20 @@ class _CloudOSShellState extends State<CloudOSShell> {
     final loadedNotifications = await widget.bridge.tryLoadNotificationState();
     final surfaceStates = await widget.bridge.tryLoadShellSurfaceStates();
     final nativeWorkspace = await widget.bridge.getCurrentWorkspace();
+    final loadedPerf = await widget.bridge.tryLoadPerformanceProfile();
+    final loadedWindowSnapshot = await widget.bridge.tryLoadWindowSnapshot();
     if (!mounted) return;
+
+    if (loadedPerf != null) {
+      GlassSurface.disableBlur = loadedPerf.isEconomy;
+    }
 
     setState(() {
       if (loadedApps != null) apps = loadedApps;
       if (loadedSnapshot != null) snapshot = loadedSnapshot;
       if (loadedNotifications != null) notificationState = loadedNotifications;
+      if (loadedPerf != null) performanceProfile = loadedPerf;
+      if (loadedWindowSnapshot != null) windowSnapshot = loadedWindowSnapshot;
       if (surfaceStates != null) {
         if (surfaceStates['browser'] == true) browserOpen = true;
         if (surfaceStates['terminal'] == true) terminalOpen = true;
@@ -164,11 +214,6 @@ class _CloudOSShellState extends State<CloudOSShell> {
           loadedSnapshot?.currentWorkspace.clamp(1, 4).toInt() ??
           currentWorkspace;
     });
-
-    _shellStateTimer ??= Timer.periodic(
-      const Duration(seconds: 2),
-      (_) => unawaited(_refreshNativeShellState()),
-    );
   }
 
   Future<void> _refreshNativeShellState() async {
@@ -179,6 +224,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
       final nativeSnapshot = await widget.bridge.tryLoadSystemSnapshot();
       final nativeWorkspace = await widget.bridge.getCurrentWorkspace();
       final nativeNotifications = await widget.bridge.tryLoadNotificationState();
+      final nativePerf = await widget.bridge.tryLoadPerformanceProfile();
+      final nativeWindowSnapshot = await widget.bridge.tryLoadWindowSnapshot();
       if (!mounted) return;
 
       final nextSnapshot = nativeSnapshot ?? snapshot;
@@ -189,11 +236,19 @@ class _CloudOSShellState extends State<CloudOSShell> {
               nativeNotifications.revision >= notificationState.revision
           ? nativeNotifications
           : notificationState;
+      final nextPerf = nativePerf ?? performanceProfile;
+      final nextWindowSnapshot = nativeWindowSnapshot ?? windowSnapshot;
+
+      if (nativePerf != null) {
+        GlassSurface.disableBlur = nativePerf.isEconomy;
+      }
 
       if (recoveredApps == null &&
           _sameSystemSnapshot(nextSnapshot, snapshot) &&
           nextWorkspace == currentWorkspace &&
-          _sameNotificationState(nextNotifications, notificationState)) {
+          _sameNotificationState(nextNotifications, notificationState) &&
+          nextPerf.profile == performanceProfile.profile &&
+          nextWindowSnapshot.sequence == windowSnapshot.sequence) {
         return;
       }
 
@@ -202,9 +257,25 @@ class _CloudOSShellState extends State<CloudOSShell> {
         snapshot = nextSnapshot;
         currentWorkspace = nextWorkspace;
         notificationState = nextNotifications;
+        performanceProfile = nextPerf;
+        windowSnapshot = nextWindowSnapshot;
       });
     } finally {
       _shellStateRefreshInFlight = false;
+    }
+  }
+
+  Future<void> _setPerformanceProfile(String profile) async {
+    final ok = await widget.bridge.setPerformanceProfile(profile);
+    if (ok) {
+      final updated = await widget.bridge.tryLoadPerformanceProfile();
+      if (!mounted) return;
+      setState(() {
+        if (updated != null) {
+          performanceProfile = updated;
+          GlassSurface.disableBlur = updated.isEconomy;
+        }
+      });
     }
   }
 
@@ -217,11 +288,17 @@ class _CloudOSShellState extends State<CloudOSShell> {
   }
 
   void _toggleStart() {
+    if (startOpen) {
+      setState(_closeTransientPanels);
+      return;
+    }
     setState(() {
-      final next = !startOpen;
       _closeTransientPanels();
-      startOpen = next;
+      startOpen = true;
     });
+    if (apps.isEmpty) {
+      unawaited(_refreshNativeShellState());
+    }
   }
 
   void _toggleSpotlight() {
@@ -233,11 +310,15 @@ class _CloudOSShellState extends State<CloudOSShell> {
   }
 
   void _toggleQuickSettings() {
+    if (quickSettingsOpen) {
+      setState(_closeTransientPanels);
+      return;
+    }
     setState(() {
-      final next = !quickSettingsOpen;
       _closeTransientPanels();
-      quickSettingsOpen = next;
+      quickSettingsOpen = true;
     });
+    unawaited(_refreshNativeShellState());
   }
 
   void _toggleNotifications() {
@@ -559,7 +640,287 @@ class _CloudOSShellState extends State<CloudOSShell> {
             isMinimized: taskManagerMinimized,
             isActive: activeInternalWindowId == 'task_manager',
           ),
+        for (final win in windowSnapshot.windows.where((w) => w.platform != 'cloudos' && w.hwnd != 0))
+          StartRunningApp(
+            id: 'hwnd-${win.hwnd}',
+            title: win.title,
+            icon: win.icon,
+            appIds: <String>{win.appId, 'hwnd-${win.hwnd}'},
+            isMinimized: win.isMinimized,
+            isActive: win.isFocused,
+          ),
       ];
+
+  void _activateWindowFromStart(String id) {
+    if (id.startsWith('hwnd-')) {
+      final hwnd = int.tryParse(id.substring(5)) ?? 0;
+      if (hwnd != 0) {
+        unawaited(widget.bridge.focusWindow(hwnd));
+        setState(() => startOpen = false);
+        return;
+      }
+    }
+    _focusWindow(id);
+  }
+
+  void _closeWindowFromStart(String id) {
+    if (id.startsWith('hwnd-')) {
+      final hwnd = int.tryParse(id.substring(5)) ?? 0;
+      if (hwnd != 0) {
+        unawaited(widget.bridge.closeWindow(hwnd));
+        return;
+      }
+    }
+    _closeWindow(id);
+  }
+
+  List<CloudWindow> _getUnifiedWindows() {
+    final list = <CloudWindow>[];
+    if (filesOpen) {
+      list.add(
+        CloudWindow(
+          id: 'files',
+          title: 'Arquivos',
+          icon: Icons.folder_rounded,
+          type: CloudWindowType.files,
+          position: filesOffset,
+          size: filesSize,
+          isMinimized: filesMinimized,
+          isMaximized: filesMaximized,
+          zIndex: filesZIndex,
+          platform: 'cloudos',
+          isFocused: activeInternalWindowId == 'files',
+        ),
+      );
+    }
+    if (terminalOpen) {
+      list.add(
+        CloudWindow(
+          id: 'terminal',
+          title: 'Terminal',
+          icon: Icons.terminal_rounded,
+          type: CloudWindowType.terminal,
+          position: terminalOffset,
+          size: terminalSize,
+          isMinimized: terminalMinimized,
+          isMaximized: terminalMaximized,
+          zIndex: terminalZIndex,
+          platform: 'cloudos',
+          isFocused: activeInternalWindowId == 'terminal',
+        ),
+      );
+    }
+    if (browserOpen) {
+      list.add(
+        CloudWindow(
+          id: 'browser',
+          title: 'Navegador Web',
+          icon: Icons.public_rounded,
+          type: CloudWindowType.browser,
+          position: browserOffset,
+          size: browserSize,
+          isMinimized: browserMinimized,
+          isMaximized: browserMaximized,
+          zIndex: browserZIndex,
+          platform: 'cloudos',
+          isFocused: activeInternalWindowId == 'browser',
+        ),
+      );
+    }
+    if (settingsOpen) {
+      list.add(
+        CloudWindow(
+          id: 'settings',
+          title: 'Configurações',
+          icon: Icons.settings_rounded,
+          type: CloudWindowType.settings,
+          position: settingsOffset,
+          size: settingsSize,
+          isMinimized: settingsMinimized,
+          isMaximized: settingsMaximized,
+          zIndex: settingsZIndex,
+          platform: 'cloudos',
+          isFocused: activeInternalWindowId == 'settings',
+        ),
+      );
+    }
+    if (notesOpen) {
+      list.add(
+        CloudWindow(
+          id: 'notes',
+          title: 'Notas',
+          icon: Icons.description_rounded,
+          type: CloudWindowType.notes,
+          position: notesOffset,
+          size: notesSize,
+          isMinimized: notesMinimized,
+          isMaximized: notesMaximized,
+          zIndex: notesZIndex,
+          platform: 'cloudos',
+          isFocused: activeInternalWindowId == 'notes',
+        ),
+      );
+    }
+    if (calculatorOpen) {
+      list.add(
+        CloudWindow(
+          id: 'calculator',
+          title: 'Calculadora',
+          icon: Icons.calculate_rounded,
+          type: CloudWindowType.calculator,
+          position: calculatorOffset,
+          size: calculatorSize,
+          isMinimized: calculatorMinimized,
+          isMaximized: calculatorMaximized,
+          zIndex: calculatorZIndex,
+          platform: 'cloudos',
+          isFocused: activeInternalWindowId == 'calculator',
+        ),
+      );
+    }
+    if (taskManagerOpen) {
+      list.add(
+        CloudWindow(
+          id: 'task_manager',
+          title: 'Monitor do Sistema',
+          icon: Icons.monitor_heart_rounded,
+          type: CloudWindowType.taskManager,
+          position: taskManagerOffset,
+          size: taskManagerSize,
+          isMinimized: taskManagerMinimized,
+          isMaximized: taskManagerMaximized,
+          zIndex: taskManagerZIndex,
+          platform: 'cloudos',
+          isFocused: activeInternalWindowId == 'task_manager',
+        ),
+      );
+    }
+    for (final win in windowSnapshot.windows) {
+      if (win.platform != 'cloudos' && win.hwnd != 0) {
+        list.add(win);
+      }
+    }
+    return list;
+  }
+
+  void _reconcileWindowBounds(CloudLayoutMetrics metrics) {
+    final double workW = metrics.workAreaWidth;
+    final double workH = metrics.workAreaHeight;
+    final double halfW = (workW / 2.0).clamp(200.0, workW).toDouble();
+
+    void reconcileOne({
+      required String id,
+      required bool isOpen,
+      required bool isMaximized,
+      required Offset offset,
+      required Size size,
+      required void Function(Offset newOffset, Size newSize, bool isMaximized) update,
+    }) {
+      if (!isOpen) return;
+      final snap = _windowSnapModes[id] ??
+          (isMaximized ? WindowSnapMode.maximized : WindowSnapMode.none);
+      if (snap == WindowSnapMode.maximized) {
+        update(Offset.zero, Size(workW, workH), true);
+      } else if (snap == WindowSnapMode.left) {
+        update(Offset.zero, Size(halfW, workH), false);
+      } else if (snap == WindowSnapMode.right) {
+        update(Offset(workW - halfW, 0), Size(halfW, workH), false);
+      } else {
+        final double clampedW = size.width.clamp(320.0, workW).toDouble();
+        final double clampedH = size.height.clamp(240.0, workH).toDouble();
+        final double maxLeft = (workW - clampedW).clamp(0.0, double.infinity).toDouble();
+        final double maxTop = (workH - clampedH).clamp(0.0, double.infinity).toDouble();
+        final double clampedX = offset.dx.clamp(0.0, maxLeft).toDouble();
+        final double clampedY = offset.dy.clamp(0.0, maxTop).toDouble();
+        update(Offset(clampedX, clampedY), Size(clampedW, clampedH), false);
+      }
+    }
+
+    reconcileOne(
+      id: 'files',
+      isOpen: filesOpen,
+      isMaximized: filesMaximized,
+      offset: filesOffset,
+      size: filesSize,
+      update: (o, s, m) {
+        filesOffset = o;
+        filesSize = s;
+        filesMaximized = m;
+      },
+    );
+    reconcileOne(
+      id: 'terminal',
+      isOpen: terminalOpen,
+      isMaximized: terminalMaximized,
+      offset: terminalOffset,
+      size: terminalSize,
+      update: (o, s, m) {
+        terminalOffset = o;
+        terminalSize = s;
+        terminalMaximized = m;
+      },
+    );
+    reconcileOne(
+      id: 'browser',
+      isOpen: browserOpen,
+      isMaximized: browserMaximized,
+      offset: browserOffset,
+      size: browserSize,
+      update: (o, s, m) {
+        browserOffset = o;
+        browserSize = s;
+        browserMaximized = m;
+      },
+    );
+    reconcileOne(
+      id: 'settings',
+      isOpen: settingsOpen,
+      isMaximized: settingsMaximized,
+      offset: settingsOffset,
+      size: settingsSize,
+      update: (o, s, m) {
+        settingsOffset = o;
+        settingsSize = s;
+        settingsMaximized = m;
+      },
+    );
+    reconcileOne(
+      id: 'notes',
+      isOpen: notesOpen,
+      isMaximized: notesMaximized,
+      offset: notesOffset,
+      size: notesSize,
+      update: (o, s, m) {
+        notesOffset = o;
+        notesSize = s;
+        notesMaximized = m;
+      },
+    );
+    reconcileOne(
+      id: 'calculator',
+      isOpen: calculatorOpen,
+      isMaximized: calculatorMaximized,
+      offset: calculatorOffset,
+      size: calculatorSize,
+      update: (o, s, m) {
+        calculatorOffset = o;
+        calculatorSize = s;
+        calculatorMaximized = m;
+      },
+    );
+    reconcileOne(
+      id: 'task_manager',
+      isOpen: taskManagerOpen,
+      isMaximized: taskManagerMaximized,
+      offset: taskManagerOffset,
+      size: taskManagerSize,
+      update: (o, s, m) {
+        taskManagerOffset = o;
+        taskManagerSize = s;
+        taskManagerMaximized = m;
+      },
+    );
+  }
 
   void _toggleMaximizeWindow(String id, BoxConstraints constraints) {
     setState(() {
@@ -571,84 +932,98 @@ class _CloudOSShellState extends State<CloudOSShell> {
           filesOffset = filesPreMaxOffset ?? const Offset(120, 50);
           filesSize = filesPreMaxSize ?? const Size(960, 600);
           filesMaximized = false;
+          _windowSnapModes[id] = WindowSnapMode.none;
         } else {
           filesPreMaxOffset = filesOffset;
           filesPreMaxSize = filesSize;
           filesOffset = Offset.zero;
           filesSize = Size(maxAvailableWidth, maxAvailableHeight);
           filesMaximized = true;
+          _windowSnapModes[id] = WindowSnapMode.maximized;
         }
       } else if (id == 'terminal') {
         if (terminalMaximized) {
           terminalOffset = terminalPreMaxOffset ?? const Offset(180, 80);
           terminalSize = terminalPreMaxSize ?? const Size(780, 480);
           terminalMaximized = false;
+          _windowSnapModes[id] = WindowSnapMode.none;
         } else {
           terminalPreMaxOffset = terminalOffset;
           terminalPreMaxSize = terminalSize;
           terminalOffset = Offset.zero;
           terminalSize = Size(maxAvailableWidth, maxAvailableHeight);
           terminalMaximized = true;
+          _windowSnapModes[id] = WindowSnapMode.maximized;
         }
       } else if (id == 'browser') {
         if (browserMaximized) {
           browserOffset = browserPreMaxOffset ?? const Offset(150, 70);
           browserSize = browserPreMaxSize ?? const Size(880, 540);
           browserMaximized = false;
+          _windowSnapModes[id] = WindowSnapMode.none;
         } else {
           browserPreMaxOffset = browserOffset;
           browserPreMaxSize = browserSize;
           browserOffset = Offset.zero;
           browserSize = Size(maxAvailableWidth, maxAvailableHeight);
           browserMaximized = true;
+          _windowSnapModes[id] = WindowSnapMode.maximized;
         }
       } else if (id == 'settings') {
         if (settingsMaximized) {
           settingsOffset = settingsPreMaxOffset ?? const Offset(210, 90);
           settingsSize = settingsPreMaxSize ?? const Size(760, 500);
           settingsMaximized = false;
+          _windowSnapModes[id] = WindowSnapMode.none;
         } else {
           settingsPreMaxOffset = settingsOffset;
           settingsPreMaxSize = settingsSize;
           settingsOffset = Offset.zero;
           settingsSize = Size(maxAvailableWidth, maxAvailableHeight);
           settingsMaximized = true;
+          _windowSnapModes[id] = WindowSnapMode.maximized;
         }
       } else if (id == 'notes') {
         if (notesMaximized) {
           notesOffset = notesPreMaxOffset ?? const Offset(240, 110);
           notesSize = notesPreMaxSize ?? const Size(780, 520);
           notesMaximized = false;
+          _windowSnapModes[id] = WindowSnapMode.none;
         } else {
           notesPreMaxOffset = notesOffset;
           notesPreMaxSize = notesSize;
           notesOffset = Offset.zero;
           notesSize = Size(maxAvailableWidth, maxAvailableHeight);
           notesMaximized = true;
+          _windowSnapModes[id] = WindowSnapMode.maximized;
         }
       } else if (id == 'calculator') {
         if (calculatorMaximized) {
           calculatorOffset = calculatorPreMaxOffset ?? const Offset(280, 130);
           calculatorSize = calculatorPreMaxSize ?? const Size(540, 480);
           calculatorMaximized = false;
+          _windowSnapModes[id] = WindowSnapMode.none;
         } else {
           calculatorPreMaxOffset = calculatorOffset;
           calculatorPreMaxSize = calculatorSize;
           calculatorOffset = Offset.zero;
           calculatorSize = Size(maxAvailableWidth, maxAvailableHeight);
           calculatorMaximized = true;
+          _windowSnapModes[id] = WindowSnapMode.maximized;
         }
       } else if (id == 'task_manager') {
         if (taskManagerMaximized) {
           taskManagerOffset = taskManagerPreMaxOffset ?? const Offset(200, 100);
           taskManagerSize = taskManagerPreMaxSize ?? const Size(720, 480);
           taskManagerMaximized = false;
+          _windowSnapModes[id] = WindowSnapMode.none;
         } else {
           taskManagerPreMaxOffset = taskManagerOffset;
           taskManagerPreMaxSize = taskManagerSize;
           taskManagerOffset = Offset.zero;
           taskManagerSize = Size(maxAvailableWidth, maxAvailableHeight);
           taskManagerMaximized = true;
+          _windowSnapModes[id] = WindowSnapMode.maximized;
         }
       }
       _focusWindow(id);
@@ -660,6 +1035,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
       final availableHeight = constraints.maxHeight - 56.0;
       final halfWidth = constraints.maxWidth / 2.0;
 
+      _windowSnapModes[id] = WindowSnapMode.left;
       if (id == 'files') {
         filesMaximized = false;
         filesOffset = Offset.zero;
@@ -698,6 +1074,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
       final availableHeight = constraints.maxHeight - 56.0;
       final halfWidth = constraints.maxWidth / 2.0;
 
+      _windowSnapModes[id] = WindowSnapMode.right;
       if (id == 'files') {
         filesMaximized = false;
         filesOffset = Offset(halfWidth, 0);
@@ -733,6 +1110,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
 
   void _moveWindow(String id, Offset delta, BoxConstraints constraints) {
     setState(() {
+      _windowSnapModes[id] = WindowSnapMode.none;
       final maxLeft = constraints.maxWidth - 120.0;
       final maxTop = constraints.maxHeight - 80.0;
 
@@ -785,6 +1163,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
     BoxConstraints constraints,
   ) {
     setState(() {
+      _windowSnapModes[id] = WindowSnapMode.none;
       const minW = 420.0;
       const minH = 300.0;
 
@@ -862,15 +1241,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
   }
 
   void _cycleAltTab() {
-    final openList = <String>[];
-    if (filesOpen) openList.add('files');
-    if (terminalOpen) openList.add('terminal');
-    if (browserOpen) openList.add('browser');
-    if (settingsOpen) openList.add('settings');
-    if (notesOpen) openList.add('notes');
-    if (calculatorOpen) openList.add('calculator');
-    if (taskManagerOpen) openList.add('task_manager');
-
+    final openList = _getUnifiedWindows();
     if (openList.isEmpty) return;
 
     setState(() {
@@ -880,17 +1251,14 @@ class _CloudOSShellState extends State<CloudOSShell> {
   }
 
   void _confirmAltTab() {
-    final openList = <String>[];
-    if (filesOpen) openList.add('files');
-    if (terminalOpen) openList.add('terminal');
-    if (browserOpen) openList.add('browser');
-    if (settingsOpen) openList.add('settings');
-    if (notesOpen) openList.add('notes');
-    if (calculatorOpen) openList.add('calculator');
-    if (taskManagerOpen) openList.add('task_manager');
-
+    final openList = _getUnifiedWindows();
     if (openList.isNotEmpty && altTabSelectedIndex < openList.length) {
-      _focusWindow(openList[altTabSelectedIndex]);
+      final target = openList[altTabSelectedIndex];
+      if (target.platform != 'cloudos' && target.hwnd != 0) {
+        unawaited(widget.bridge.focusWindow(target.hwnd));
+      } else {
+        _focusWindow(target.id);
+      }
     }
     setState(() => altTabOpen = false);
   }
@@ -1046,10 +1414,35 @@ class _CloudOSShellState extends State<CloudOSShell> {
       return;
     }
 
-    // External Windows Application (VS Code, Notepad, etc.)
-    await widget.bridge.launchApp(app.id);
-    if (!mounted) return;
+    // External Windows or WSL Linux Application
     setState(_closeTransientPanels);
+    try {
+      final res = await widget.bridge.launchAppStructured(app.id);
+      if (!mounted) return;
+      if (!res.isSuccess) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              res.message.isNotEmpty
+                  ? res.message
+                  : 'Não foi possível iniciar ${app.name}.',
+            ),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (_) {
+      final launched = await widget.bridge.launchApp(app.id);
+      if (!mounted) return;
+      if (!launched) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Falha ao iniciar ${app.name}.'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
   }
 
   List<SpotlightItem> get _spotlightItems {
@@ -1269,121 +1662,150 @@ class _CloudOSShellState extends State<CloudOSShell> {
         child: Scaffold(
           body: LayoutBuilder(
             builder: (context, constraints) {
-              return GestureDetector(
-                onTap: () {
-                  if (startOpen ||
-                      quickSettingsOpen ||
-                      notificationsOpen ||
-                      altTabOpen ||
-                      spotlightOpen ||
-                      selectedDesktopIcon != null) {
-                    setState(() {
-                      _closeTransientPanels();
-                      selectedDesktopIcon = null;
-                    });
-                  }
-                },
-                onSecondaryTapUp: (details) =>
-                    _showDesktopContextMenu(context, details.globalPosition),
-                behavior: HitTestBehavior.opaque,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: <Widget>[
-                    const RepaintBoundary(child: DesktopWallpaper()),
-                    Positioned(
-                      left: 20,
-                      top: 20,
-                      child: RepaintBoundary(
-                        child: DesktopIcons(
-                          selectedId: selectedDesktopIcon,
-                          onSelect: (id) =>
-                              setState(() => selectedDesktopIcon = id),
-                          onFiles: () => _toggleOrFocusWindow('files'),
-                          onStart: _toggleStart,
-                          onTerminal: () => _toggleOrFocusWindow('terminal'),
-                          onOpenSettings: () => _toggleOrFocusWindow('settings'),
+              final metrics = CloudLayoutMetrics.fromConstraints(constraints);
+              final currentSize = Size(constraints.maxWidth, constraints.maxHeight);
+              if (_lastLayoutSize == null || _lastLayoutSize != currentSize) {
+                _lastLayoutSize = currentSize;
+                _reconcileWindowBounds(metrics);
+              }
+
+              return CloudResponsiveScope(
+                metrics: metrics,
+                child: GestureDetector(
+                  onTap: () {
+                    if (startOpen ||
+                        quickSettingsOpen ||
+                        notificationsOpen ||
+                        altTabOpen ||
+                        spotlightOpen ||
+                        selectedDesktopIcon != null) {
+                      setState(() {
+                        _closeTransientPanels();
+                        selectedDesktopIcon = null;
+                      });
+                    }
+                  },
+                  onSecondaryTapUp: (details) =>
+                      _showDesktopContextMenu(context, details.globalPosition),
+                  behavior: HitTestBehavior.opaque,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: <Widget>[
+                      const RepaintBoundary(child: DesktopWallpaper()),
+                      Positioned(
+                        left: 20,
+                        top: 20,
+                        child: RepaintBoundary(
+                          child: DesktopIcons(
+                            selectedId: selectedDesktopIcon,
+                            onSelect: (id) =>
+                                setState(() => selectedDesktopIcon = id),
+                            onFiles: () => _toggleOrFocusWindow('files'),
+                            onStart: _toggleStart,
+                            onTerminal: () => _toggleOrFocusWindow('terminal'),
+                            onOpenSettings: () => _toggleOrFocusWindow('settings'),
+                          ),
                         ),
                       ),
-                    ),
-                    Positioned(
-                      top: 18,
-                      right: 18,
-                      child: RepaintBoundary(
-                        child: DesktopStatus(
-                          snapshot: snapshot,
-                          currentWorkspace: currentWorkspace,
+                      Positioned(
+                        top: 18,
+                        right: 18,
+                        child: RepaintBoundary(
+                          child: DesktopStatus(
+                            snapshot: snapshot,
+                            currentWorkspace: currentWorkspace,
+                          ),
                         ),
                       ),
-                    ),
-                    ..._buildInternalWindows(constraints),
-                    _panelSwitcher(),
-                    if (altTabOpen) _buildAltTabOverlay(),
-                    if (spotlightOpen)
-                      SpotlightPalette(
-                        items: _spotlightItems,
-                        onClose: () => setState(() => spotlightOpen = false),
+                      ..._buildInternalWindows(constraints, metrics),
+                      _panelSwitcher(),
+                      if (altTabOpen) _buildAltTabOverlay(),
+                      if (spotlightOpen)
+                        SpotlightPalette(
+                          items: _spotlightItems,
+                          onClose: () => setState(() => spotlightOpen = false),
+                        ),
+                      CloudTaskbar(
+                        startOpen: startOpen,
+                        quickSettingsOpen: quickSettingsOpen,
+                        notificationsOpen: notificationsOpen,
+                        spotlightOpen: spotlightOpen,
+                        onSpotlight: _toggleSpotlight,
+                        filesRunning: filesOpen,
+                        browserRunning: browserOpen,
+                        terminalRunning: terminalOpen,
+                        settingsRunning: settingsOpen,
+                        notesRunning: notesOpen,
+                        calculatorRunning: calculatorOpen,
+                        taskManagerRunning: taskManagerOpen,
+                        filesActive: activeInternalWindowId == 'files',
+                        browserActive: activeInternalWindowId == 'browser',
+                        terminalActive: activeInternalWindowId == 'terminal',
+                        settingsActive: activeInternalWindowId == 'settings',
+                        notesActive: activeInternalWindowId == 'notes',
+                        calculatorActive: activeInternalWindowId == 'calculator',
+                        taskManagerActive: activeInternalWindowId == 'task_manager',
+                        currentWorkspace: currentWorkspace,
+                        notificationCount: notificationState.unreadCount,
+                        onWorkspaceChanged: (index) =>
+                            unawaited(_switchWorkspace(index)),
+                        onStart: _toggleStart,
+                        onFiles: () => _toggleOrFocusWindow('files'),
+                        onCloseFiles: () => _closeWindow('files'),
+                        onBrowser: () {
+                          if (browserOpen && !browserMinimized && activeInternalWindowId == 'browser') {
+                            setState(() {
+                              browserMinimized = true;
+                              activeInternalWindowId = null;
+                            });
+                          } else {
+                            unawaited(_launchBrowser());
+                          }
+                        },
+                        onCloseBrowser: () => _closeWindow('browser'),
+                        onTerminal: () {
+                          if (terminalOpen && !terminalMinimized && activeInternalWindowId == 'terminal') {
+                            setState(() {
+                              terminalMinimized = true;
+                              activeInternalWindowId = null;
+                            });
+                          } else {
+                            unawaited(_launchTerminal());
+                          }
+                        },
+                        onCloseTerminal: () => _closeWindow('terminal'),
+                        onSettings: () => _toggleOrFocusWindow('settings'),
+                        onCloseSettings: () => _closeWindow('settings'),
+                        onNotes: () => _toggleOrFocusWindow('notes'),
+                        onCloseNotes: () => _closeWindow('notes'),
+                        onCalculator: () => _toggleOrFocusWindow('calculator'),
+                        onCloseCalculator: () => _closeWindow('calculator'),
+                        onTaskManager: () => _toggleOrFocusWindow('task_manager'),
+                        onCloseTaskManager: () => _closeWindow('task_manager'),
+                        managedWindows: _getUnifiedWindows(),
+                        onWindowTap: (win) {
+                          if (win.platform != 'cloudos' && win.hwnd != 0) {
+                            if (win.isFocused && !win.isMinimized) {
+                              unawaited(widget.bridge.minimizeWindow(win.hwnd));
+                            } else {
+                              unawaited(widget.bridge.focusWindow(win.hwnd));
+                            }
+                          } else {
+                            _toggleOrFocusWindow(win.id);
+                          }
+                        },
+                        onCloseWindow: (win) {
+                          if (win.platform != 'cloudos' && win.hwnd != 0) {
+                            unawaited(widget.bridge.closeWindow(win.hwnd));
+                          } else {
+                            _closeWindow(win.id);
+                          }
+                        },
+                        onQuickSettings: _toggleQuickSettings,
+                        onNotifications: _toggleNotifications,
                       ),
-                    CloudTaskbar(
-                      startOpen: startOpen,
-                      quickSettingsOpen: quickSettingsOpen,
-                      notificationsOpen: notificationsOpen,
-                      spotlightOpen: spotlightOpen,
-                      onSpotlight: _toggleSpotlight,
-                      filesRunning: filesOpen,
-                      browserRunning: browserOpen,
-                      terminalRunning: terminalOpen,
-                      settingsRunning: settingsOpen,
-                      notesRunning: notesOpen,
-                      calculatorRunning: calculatorOpen,
-                      taskManagerRunning: taskManagerOpen,
-                      filesActive: activeInternalWindowId == 'files',
-                      browserActive: activeInternalWindowId == 'browser',
-                      terminalActive: activeInternalWindowId == 'terminal',
-                      settingsActive: activeInternalWindowId == 'settings',
-                      notesActive: activeInternalWindowId == 'notes',
-                      calculatorActive: activeInternalWindowId == 'calculator',
-                      taskManagerActive: activeInternalWindowId == 'task_manager',
-                      currentWorkspace: currentWorkspace,
-                      notificationCount: notificationState.unreadCount,
-                      onWorkspaceChanged: (index) =>
-                          unawaited(_switchWorkspace(index)),
-                      onStart: _toggleStart,
-                      onFiles: () => _toggleOrFocusWindow('files'),
-                      onCloseFiles: () => _closeWindow('files'),
-                      onBrowser: () {
-                        if (browserOpen && !browserMinimized && activeInternalWindowId == 'browser') {
-                          setState(() {
-                            browserMinimized = true;
-                            activeInternalWindowId = null;
-                          });
-                        } else {
-                          unawaited(_launchBrowser());
-                        }
-                      },
-                      onCloseBrowser: () => _closeWindow('browser'),
-                      onTerminal: () {
-                        if (terminalOpen && !terminalMinimized && activeInternalWindowId == 'terminal') {
-                          setState(() {
-                            terminalMinimized = true;
-                            activeInternalWindowId = null;
-                          });
-                        } else {
-                          unawaited(_launchTerminal());
-                        }
-                      },
-                      onCloseTerminal: () => _closeWindow('terminal'),
-                      onSettings: () => _toggleOrFocusWindow('settings'),
-                      onCloseSettings: () => _closeWindow('settings'),
-                      onNotes: () => _toggleOrFocusWindow('notes'),
-                      onCloseNotes: () => _closeWindow('notes'),
-                      onCalculator: () => _toggleOrFocusWindow('calculator'),
-                      onCloseCalculator: () => _closeWindow('calculator'),
-                      onTaskManager: () => _toggleOrFocusWindow('task_manager'),
-                      onCloseTaskManager: () => _closeWindow('task_manager'),
-                      onQuickSettings: _toggleQuickSettings,
-                      onNotifications: _toggleNotifications,
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               );
             },
@@ -1481,7 +1903,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
     });
   }
 
-  List<Widget> _buildInternalWindows(BoxConstraints constraints) {
+  List<Widget> _buildInternalWindows(BoxConstraints constraints, CloudLayoutMetrics metrics) {
     final entries = <_WindowRenderEntry>[];
 
     if (filesOpen && !filesMinimized) {
@@ -1491,17 +1913,41 @@ class _CloudOSShellState extends State<CloudOSShell> {
           widget: Positioned(
             left: filesMaximized ? 0 : filesOffset.dx,
             top: filesMaximized ? 0 : filesOffset.dy,
-            width: filesMaximized ? constraints.maxWidth : filesSize.width,
-            height: filesMaximized ? constraints.maxHeight - 56.0 : filesSize.height,
-            child: Listener(
-              onPointerDown: (_) => _focusWindow('files'),
+            width: filesMaximized ? metrics.workAreaWidth : filesSize.width,
+            height: filesMaximized ? metrics.workAreaHeight : filesSize.height,
+            child: CloudWindowFrame(
+              window: CloudWindow(
+                id: 'files',
+                title: filesRootId == 'home' ? 'Arquivos • Início' : 'Arquivos',
+                icon: Icons.folder_rounded,
+                type: CloudWindowType.files,
+                position: filesOffset,
+                size: filesSize,
+                isMaximized: filesMaximized,
+              ),
+              onFocus: () => _focusWindow('files'),
+              onClose: () => _closeWindow('files'),
+              onMinimize: () => setState(() => filesMinimized = true),
+              onToggleMaximize: () =>
+                  _toggleMaximizeWindow('files', constraints),
+              onSnapLeft: () => _snapWindowLeft('files', constraints),
+              onSnapRight: () => _snapWindowRight('files', constraints),
+              onMove: (delta) => _moveWindow('files', delta, constraints),
+              onResize: (delta, left, top, right, bottom) => _resizeWindow(
+                'files',
+                delta,
+                left,
+                top,
+                right,
+                bottom,
+                constraints,
+              ),
               child: FilesWindow(
                 key: ValueKey<String>('files:$filesRootId:$filesLaunchRevision'),
                 bridge: widget.bridge,
                 initialRootId: filesRootId,
                 onClose: () => _closeWindow('files'),
                 onMinimize: () => setState(() => filesMinimized = true),
-                onDrag: (delta) => _moveWindow('files', delta, constraints),
               ),
             ),
           ),
@@ -1516,8 +1962,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
           widget: Positioned(
             left: terminalMaximized ? 0 : terminalOffset.dx,
             top: terminalMaximized ? 0 : terminalOffset.dy,
-            width: terminalMaximized ? constraints.maxWidth : terminalSize.width,
-            height: terminalMaximized ? constraints.maxHeight - 56.0 : terminalSize.height,
+            width: terminalMaximized ? metrics.workAreaWidth : terminalSize.width,
+            height: terminalMaximized ? metrics.workAreaHeight : terminalSize.height,
             child: Offstage(
               offstage: terminalMinimized,
               child: CloudWindowFrame(
@@ -1535,6 +1981,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
               onMinimize: () => setState(() => terminalMinimized = true),
               onToggleMaximize: () =>
                   _toggleMaximizeWindow('terminal', constraints),
+              onSnapLeft: () => _snapWindowLeft('terminal', constraints),
+              onSnapRight: () => _snapWindowRight('terminal', constraints),
               onMove: (delta) => _moveWindow('terminal', delta, constraints),
               onResize: (delta, left, top, right, bottom) => _resizeWindow(
                 'terminal',
@@ -1562,8 +2010,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
           widget: Positioned(
             left: browserMaximized ? 0 : browserOffset.dx,
             top: browserMaximized ? 0 : browserOffset.dy,
-            width: browserMaximized ? constraints.maxWidth : browserSize.width,
-            height: browserMaximized ? constraints.maxHeight - 56.0 : browserSize.height,
+            width: browserMaximized ? metrics.workAreaWidth : browserSize.width,
+            height: browserMaximized ? metrics.workAreaHeight : browserSize.height,
             child: Offstage(
               offstage: browserMinimized,
               child: CloudWindowFrame(
@@ -1581,6 +2029,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
               onMinimize: () => setState(() => browserMinimized = true),
               onToggleMaximize: () =>
                   _toggleMaximizeWindow('browser', constraints),
+              onSnapLeft: () => _snapWindowLeft('browser', constraints),
+              onSnapRight: () => _snapWindowRight('browser', constraints),
               onMove: (delta) => _moveWindow('browser', delta, constraints),
               onResize: (delta, left, top, right, bottom) => _resizeWindow(
                 'browser',
@@ -1606,8 +2056,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
           widget: Positioned(
             left: settingsMaximized ? 0 : settingsOffset.dx,
             top: settingsMaximized ? 0 : settingsOffset.dy,
-            width: settingsMaximized ? constraints.maxWidth : settingsSize.width,
-            height: settingsMaximized ? constraints.maxHeight - 56.0 : settingsSize.height,
+            width: settingsMaximized ? metrics.workAreaWidth : settingsSize.width,
+            height: settingsMaximized ? metrics.workAreaHeight : settingsSize.height,
             child: CloudWindowFrame(
               window: CloudWindow(
                 id: 'settings',
@@ -1652,8 +2102,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
           widget: Positioned(
             left: notesMaximized ? 0 : notesOffset.dx,
             top: notesMaximized ? 0 : notesOffset.dy,
-            width: notesMaximized ? constraints.maxWidth : notesSize.width,
-            height: notesMaximized ? constraints.maxHeight - 56.0 : notesSize.height,
+            width: notesMaximized ? metrics.workAreaWidth : notesSize.width,
+            height: notesMaximized ? metrics.workAreaHeight : notesSize.height,
             child: CloudWindowFrame(
               window: CloudWindow(
                 id: 'notes',
@@ -1695,8 +2145,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
           widget: Positioned(
             left: calculatorMaximized ? 0 : calculatorOffset.dx,
             top: calculatorMaximized ? 0 : calculatorOffset.dy,
-            width: calculatorMaximized ? constraints.maxWidth : calculatorSize.width,
-            height: calculatorMaximized ? constraints.maxHeight - 56.0 : calculatorSize.height,
+            width: calculatorMaximized ? metrics.workAreaWidth : calculatorSize.width,
+            height: calculatorMaximized ? metrics.workAreaHeight : calculatorSize.height,
             child: CloudWindowFrame(
               window: CloudWindow(
                 id: 'calculator',
@@ -1738,8 +2188,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
           widget: Positioned(
             left: taskManagerMaximized ? 0 : taskManagerOffset.dx,
             top: taskManagerMaximized ? 0 : taskManagerOffset.dy,
-            width: taskManagerMaximized ? constraints.maxWidth : taskManagerSize.width,
-            height: taskManagerMaximized ? constraints.maxHeight - 56.0 : taskManagerSize.height,
+            width: taskManagerMaximized ? metrics.workAreaWidth : taskManagerSize.width,
+            height: taskManagerMaximized ? metrics.workAreaHeight : taskManagerSize.height,
             child: CloudWindowFrame(
               window: CloudWindow(
                 id: 'task_manager',
@@ -1784,98 +2234,20 @@ class _CloudOSShellState extends State<CloudOSShell> {
   }
 
   Widget _buildAltTabOverlay() {
-    final list = <CloudWindow>[];
-    if (filesOpen) {
-      list.add(
-        CloudWindow(
-          id: 'files',
-          title: 'Arquivos',
-          icon: Icons.folder_rounded,
-          type: CloudWindowType.files,
-          position: filesOffset,
-          size: filesSize,
-        ),
-      );
-    }
-    if (terminalOpen) {
-      list.add(
-        CloudWindow(
-          id: 'terminal',
-          title: 'Terminal',
-          icon: Icons.terminal_rounded,
-          type: CloudWindowType.terminal,
-          position: terminalOffset,
-          size: terminalSize,
-        ),
-      );
-    }
-    if (browserOpen) {
-      list.add(
-        CloudWindow(
-          id: 'browser',
-          title: 'Navegador Web',
-          icon: Icons.public_rounded,
-          type: CloudWindowType.browser,
-          position: browserOffset,
-          size: browserSize,
-        ),
-      );
-    }
-    if (settingsOpen) {
-      list.add(
-        CloudWindow(
-          id: 'settings',
-          title: 'Configurações',
-          icon: Icons.settings_rounded,
-          type: CloudWindowType.settings,
-          position: settingsOffset,
-          size: settingsSize,
-        ),
-      );
-    }
-    if (notesOpen) {
-      list.add(
-        CloudWindow(
-          id: 'notes',
-          title: 'CloudOS Notes',
-          icon: Icons.description_rounded,
-          type: CloudWindowType.notes,
-          position: notesOffset,
-          size: notesSize,
-        ),
-      );
-    }
-    if (calculatorOpen) {
-      list.add(
-        CloudWindow(
-          id: 'calculator',
-          title: 'Calculadora',
-          icon: Icons.calculate_rounded,
-          type: CloudWindowType.calculator,
-          position: calculatorOffset,
-          size: calculatorSize,
-        ),
-      );
-    }
-    if (taskManagerOpen) {
-      list.add(
-        CloudWindow(
-          id: 'task_manager',
-          title: 'Monitor de Sistema',
-          icon: Icons.monitor_heart_rounded,
-          type: CloudWindowType.taskManager,
-          position: taskManagerOffset,
-          size: taskManagerSize,
-        ),
-      );
-    }
+    final list = _getUnifiedWindows();
+    if (list.isEmpty) return const SizedBox.shrink();
 
     return AltTabSwitcher(
       windows: list,
-      selectedIndex: altTabSelectedIndex.clamp(0, list.isEmpty ? 0 : list.length - 1),
+      selectedIndex: altTabSelectedIndex.clamp(0, list.length - 1),
       onSelect: (index) {
         if (index < list.length) {
-          _focusWindow(list[index].id);
+          final target = list[index];
+          if (target.platform != 'cloudos' && target.hwnd != 0) {
+            unawaited(widget.bridge.focusWindow(target.hwnd));
+          } else {
+            _focusWindow(target.id);
+          }
         }
         setState(() => altTabOpen = false);
       },
@@ -1890,14 +2262,16 @@ class _CloudOSShellState extends State<CloudOSShell> {
         apps: apps,
         onLaunch: _launchApp,
         runningApps: _startRunningApps,
-        onActivateWindow: _focusWindow,
-        onCloseWindow: _closeWindow,
+        onActivateWindow: _activateWindowFromStart,
+        onCloseWindow: _closeWindowFromStart,
         onClose: () => setState(() => startOpen = false),
       );
     } else if (quickSettingsOpen) {
       child = QuickSettingsPanel(
         key: const ValueKey<String>('quick-settings'),
         snapshot: snapshot,
+        performanceProfile: performanceProfile,
+        onSetPerformanceProfile: _setPerformanceProfile,
         onSetVolume: widget.bridge.setVolume,
         onSetBrightness: widget.bridge.setBrightness,
         onOpenSettings: () => _toggleOrFocusWindow('settings'),

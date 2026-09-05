@@ -26,7 +26,7 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "[Smoke-V21] 2. Starting isolated System Broker..."
 $brokerProc = Start-Process -FilePath $brokerExe -PassThru
-Start-Sleep -Milliseconds 500
+Start-Sleep -Milliseconds 1500
 
 try {
     Write-Host "[Smoke-V21] 3. Probing health.ping..."

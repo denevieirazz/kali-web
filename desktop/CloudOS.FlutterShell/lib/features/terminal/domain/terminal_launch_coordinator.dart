@@ -1,15 +1,17 @@
 import 'dart:async';
 
-enum TerminalLaunchProfile { powershell, cmd }
+enum TerminalLaunchProfile { powershell, cmd, wsl }
 
 class TerminalLaunchRequest {
   const TerminalLaunchRequest({
     required this.revision,
     required this.profile,
+    this.distro,
   });
 
   final int revision;
   final TerminalLaunchProfile profile;
+  final String? distro;
 }
 
 class TerminalLaunchCoordinator {
@@ -28,10 +30,11 @@ class TerminalLaunchCoordinator {
     return request;
   }
 
-  static void request(TerminalLaunchProfile profile) {
+  static void request(TerminalLaunchProfile profile, {String? distro}) {
     final request = TerminalLaunchRequest(
       revision: ++_revision,
       profile: profile,
+      distro: distro,
     );
     _pending = request;
     _controller.add(request);

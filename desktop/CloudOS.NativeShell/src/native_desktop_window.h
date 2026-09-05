@@ -43,6 +43,11 @@ public:
     // V21 cross-process workspace control terminates at this authoritative
     // NativeShell object. Only a bounded workspace index crosses the boundary;
     // the window-manager pointer and HWND state remain process-local.
+    [[nodiscard]] CloudOSNativeWindowManager* WindowManager() const noexcept
+    {
+        return window_manager_;
+    }
+
     [[nodiscard]] int CurrentWorkspace() const noexcept
     {
         return window_manager_ != nullptr ? window_manager_->CurrentWorkspace() : -1;

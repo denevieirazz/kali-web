@@ -83,8 +83,8 @@ class _TerminalWindowState extends State<TerminalWindow> {
         ? null
         : _shellKindForProfile(pending.profile);
     final initialShell = widget.requestedShell ?? pendingShell ?? widget.initialShell;
-    if (initialShell != TerminalShellKind.wsl) {
-      _createInitialTab(shellKind: initialShell);
+    if (initialShell != TerminalShellKind.wsl || pending?.distro != null) {
+      _createInitialTab(shellKind: initialShell, distro: pending?.distro);
     }
     unawaited(_initialize());
   }
@@ -146,7 +146,10 @@ class _TerminalWindowState extends State<TerminalWindow> {
     _launchRequestSub = TerminalLaunchCoordinator.requests.listen((request) {
       if (!mounted) return;
       TerminalLaunchCoordinator.acknowledge(request);
-      _activateShell(_shellKindForProfile(request.profile));
+      _activateShell(
+        _shellKindForProfile(request.profile),
+        distro: request.distro ?? '',
+      );
     });
   }
 
@@ -154,6 +157,7 @@ class _TerminalWindowState extends State<TerminalWindow> {
     return switch (profile) {
       TerminalLaunchProfile.cmd => TerminalShellKind.cmd,
       TerminalLaunchProfile.powershell => TerminalShellKind.powershell,
+      TerminalLaunchProfile.wsl => TerminalShellKind.wsl,
     };
   }
 
@@ -172,15 +176,17 @@ class _TerminalWindowState extends State<TerminalWindow> {
     super.dispose();
   }
 
-  void _createInitialTab({TerminalShellKind? shellKind}) {
+  void _createInitialTab({TerminalShellKind? shellKind, String? distro}) {
     final kind = shellKind ?? widget.initialShell;
-    final distro = kind == TerminalShellKind.wsl
-        ? (widget.initialDistro?.isNotEmpty == true
-              ? widget.initialDistro!
-              : _defaultDistro)
-        : '';
+    final resolvedDistro = (distro != null && distro.isNotEmpty)
+        ? distro
+        : (kind == TerminalShellKind.wsl
+            ? (widget.initialDistro?.isNotEmpty == true
+                  ? widget.initialDistro!
+                  : _defaultDistro)
+            : '');
     _initialTabCreated = true;
-    _addNewTab(kind, distro: distro);
+    _addNewTab(kind, distro: resolvedDistro);
   }
 
   String _titleFor(TerminalShellKind kind, String distro) {

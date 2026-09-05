@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/cloudos_theme.dart';
+import '../../../core/responsive/cloud_responsive_layout.dart';
 import '../../../models/cloud_system_snapshot.dart';
+import '../../../services/cloudos_bridge.dart';
 import '../../../widgets/glass_surface.dart';
 import 'widgets/quick_slider_row.dart';
 import 'widgets/quick_system_summary.dart';
@@ -10,6 +12,8 @@ import 'widgets/quick_toggle_tile.dart';
 class QuickSettingsPanel extends StatefulWidget {
   const QuickSettingsPanel({
     required this.snapshot,
+    this.performanceProfile,
+    this.onSetPerformanceProfile,
     this.onOpenSettings,
     this.onOpenNetworkSettings,
     this.onOpenBluetoothSettings,
@@ -21,6 +25,8 @@ class QuickSettingsPanel extends StatefulWidget {
   });
 
   final CloudSystemSnapshot snapshot;
+  final PerformanceProfileInfo? performanceProfile;
+  final Future<void> Function(String profile)? onSetPerformanceProfile;
   final VoidCallback? onOpenSettings;
   final VoidCallback? onOpenNetworkSettings;
   final VoidCallback? onOpenBluetoothSettings;
@@ -68,13 +74,16 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
   Widget build(BuildContext context) {
     final volPct = (volume * 100).round();
     final briPct = (brightness * 100).round();
+    final metrics = context.cloudMetrics;
+    final panelWidth = metrics.quickSettingsWidth;
+    final bottomPadding = metrics.taskbarHeight + 12.0;
 
     return Align(
       alignment: Alignment.bottomRight,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(0, 0, 16, 68),
+        padding: EdgeInsets.fromLTRB(0, 0, 16, bottomPadding),
         child: SizedBox(
-          width: 380,
+          width: panelWidth,
           child: GlassSurface(
             borderRadius: 16,
             blur: 24,
@@ -152,6 +161,13 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                   onChangeEnd: (value) async => _commitBrightness(value),
                 ),
                 const SizedBox(height: 12),
+                if (widget.performanceProfile != null) ...[
+                  _PerformanceProfileRow(
+                    profile: widget.performanceProfile!,
+                    onSelect: widget.onSetPerformanceProfile,
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 const Divider(height: 1),
                 const SizedBox(height: 12),
                 QuickSystemSummary(snapshot: widget.snapshot),
@@ -199,6 +215,99 @@ class _QuickSettingsHeader extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _PerformanceProfileRow extends StatelessWidget {
+  const _PerformanceProfileRow({
+    required this.profile,
+    this.onSelect,
+  });
+
+  final PerformanceProfileInfo profile;
+  final Future<void> Function(String profile)? onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final isEco = profile.profile == 'economy';
+    final isPerf = profile.profile == 'performance';
+    final label = isEco
+        ? 'Econômico (Sem Blur)'
+        : isPerf
+            ? 'Desempenho Máximo'
+            : 'Balanceado';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: CloudOSColors.elevated.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: CloudOSColors.border),
+      ),
+      child: Row(
+        children: <Widget>[
+          Icon(
+            isEco ? Icons.eco_rounded : Icons.bolt_rounded,
+            size: 18,
+            color: isEco ? CloudOSColors.success : CloudOSColors.accent,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: CloudOSColors.text,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Text(
+                  profile.isLowEndHardware
+                      ? 'Hardware modesto detectado'
+                      : 'Otimização de energia e recursos',
+                  style: const TextStyle(
+                    color: CloudOSColors.caption,
+                    fontSize: 9.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          InkWell(
+            onTap: () {
+              final next = isEco
+                  ? 'balanced'
+                  : isPerf
+                      ? 'economy'
+                      : 'performance';
+              onSelect?.call(next);
+            },
+            borderRadius: BorderRadius.circular(6),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: CloudOSColors.accent.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: CloudOSColors.accent.withValues(alpha: 0.3),
+                ),
+              ),
+              child: const Text(
+                'Alternar',
+                style: TextStyle(
+                  color: CloudOSColors.accent,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

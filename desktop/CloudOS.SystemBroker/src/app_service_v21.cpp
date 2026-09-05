@@ -96,11 +96,12 @@ std::wstring QuoteArgument(std::wstring_view value)
 
 bool IsAllowedLinuxCommand(std::string_view command)
 {
-    static constexpr std::array<std::string_view, 4> kAllowedCommands = {
+    static constexpr std::array<std::string_view, 5> kAllowedCommands = {
         "gimp",
         "wireshark",
         "zenmap",
         "xterm",
+        "l3afpad",
     };
     return std::find(kAllowedCommands.begin(), kAllowedCommands.end(), command) !=
         kAllowedCommands.end();
@@ -122,7 +123,7 @@ bool ResolveWslLaunch(
             out_command.clear();
             return true;
         }
-        for (const std::string_view command : {std::string_view("gimp"), std::string_view("wireshark"), std::string_view("zenmap"), std::string_view("xterm")})
+        for (const std::string_view command : {std::string_view("gimp"), std::string_view("wireshark"), std::string_view("zenmap"), std::string_view("xterm"), std::string_view("l3afpad")})
         {
             if (app_id == prefix + std::string(command))
             {
@@ -139,6 +140,12 @@ bool ResolveWslLaunch(
     {
         out_distro = default_distro;
         out_command.clear();
+        return true;
+    }
+    if (app_id == "wsl:l3afpad" || app_id == "linux:l3afpad" || app_id == "l3afpad")
+    {
+        out_distro = default_distro;
+        out_command = "l3afpad";
         return true;
     }
     if (app_id == "wsl:gimp" || app_id == "linux:gimp" || app_id == "gimp")
@@ -234,19 +241,44 @@ bool ActivateNativeCloudOSApp(
 JsonObject AppItem::ToJsonObject() const
 {
     JsonObject obj;
+    // Standardized AppEntry fields
     obj["id"] = JsonValue(id);
     obj["name"] = JsonValue(name);
+    obj["displayName"] = JsonValue(display_name.empty() ? name : display_name);
+    obj["icon"] = JsonValue(icon_key.empty() ? id : icon_key);
     obj["platform"] = JsonValue(platform);
+    obj["launchTarget"] = JsonValue(launch_target.empty() ? id : launch_target);
+    obj["source"] = JsonValue(source);
+    obj["availability"] = JsonValue(availability.empty() ? (can_launch ? "ready" : "unavailable") : availability);
+    JsonArray caps_array;
+    for (const auto& cap : capabilities)
+    {
+        caps_array.push_back(JsonValue(cap));
+    }
+    obj["capabilities"] = JsonValue(std::move(caps_array));
+
+    // Legacy fields for contract tests
     obj["subtitle"] = JsonValue(subtitle);
     obj["distro"] = JsonValue(distro);
     obj["category"] = JsonValue(category);
-    obj["source"] = JsonValue(source);
     obj["canLaunch"] = JsonValue(can_launch);
     obj["canUninstall"] = JsonValue(can_uninstall);
     obj["canUpdate"] = JsonValue(can_update);
     obj["iconKey"] = JsonValue(icon_key.empty() ? id : icon_key);
     obj["pinned"] = JsonValue(pinned);
     obj["recent"] = JsonValue(recent);
+    return obj;
+}
+
+JsonObject LaunchStatus::ToJsonObject() const
+{
+    JsonObject obj;
+    obj["id"] = JsonValue(id);
+    obj["status"] = JsonValue(status);
+    obj["launched"] = JsonValue(launched);
+    obj["platform"] = JsonValue(platform);
+    obj["target"] = JsonValue(target);
+    obj["message"] = JsonValue(message);
     return obj;
 }
 
@@ -284,22 +316,22 @@ void AppServiceV21::Refresh()
     apps_.clear();
 
     // 1. CloudOS First-Party Applications
-    apps_.push_back({"cloudos:files", "Arquivos", "cloudos", "Windows + Linux (WSL2)", "", "Sistema", "CloudOS", true, false, false, "files", true, false});
-    apps_.push_back({"cloudos:browser", "Navegador Web", "cloudos", "WebView2 nativo do CloudOS", "", "Produtividade", "CloudOS", true, false, false, "browser", true, true});
-    apps_.push_back({"cloudos:terminal", "Terminal", "cloudos", "Terminal nativo / ConPTY", "", "Utilitários", "CloudOS", true, false, false, "terminal", true, true});
-    apps_.push_back({"cloudos:calculator", "Calculadora", "cloudos", "Calculadora de Sistema", "", "Utilitários", "CloudOS", true, false, false, "calculator", false, false});
-    apps_.push_back({"cloudos:settings", "Configurações", "cloudos", "Painel de Controle e Ajustes", "", "Sistema", "CloudOS", true, false, false, "settings", false, false});
-    apps_.push_back({"cloudos:drive", "CloudOS Drive", "cloudos", "Workspace & Projetos", "", "Produtividade", "CloudOS", true, false, false, "drive", false, false});
-    apps_.push_back({"cloudos:trash", "Lixeira", "cloudos", "Indisponível até a superfície first-party de lixeira", "", "Sistema", "CloudOS", false, false, false, "trash", false, false});
+    apps_.push_back({"cloudos:files", "Arquivos", "cloudos", "Windows + Linux (WSL2)", "", "Sistema", "CloudOS", true, false, false, "files", true, false, "Arquivos", "cloudos:files", "ready", {"gui"}});
+    apps_.push_back({"cloudos:browser", "Navegador Web", "cloudos", "WebView2 nativo do CloudOS", "", "Produtividade", "CloudOS", true, false, false, "browser", true, true, "Navegador Web", "cloudos:browser", "ready", {"gui"}});
+    apps_.push_back({"cloudos:terminal", "Terminal", "cloudos", "Terminal nativo / ConPTY", "", "Utilitários", "CloudOS", true, false, false, "terminal", true, true, "Terminal", "cloudos:terminal", "ready", {"terminal"}});
+    apps_.push_back({"cloudos:calculator", "Calculadora", "cloudos", "Calculadora de Sistema", "", "Utilitários", "CloudOS", true, false, false, "calculator", false, false, "Calculadora", "cloudos:calculator", "ready", {"gui"}});
+    apps_.push_back({"cloudos:settings", "Configurações", "cloudos", "Painel de Controle e Ajustes", "", "Sistema", "CloudOS", true, false, false, "settings", false, false, "Configurações", "cloudos:settings", "ready", {"gui"}});
+    apps_.push_back({"cloudos:drive", "CloudOS Drive", "cloudos", "Workspace & Projetos", "", "Produtividade", "CloudOS", true, false, false, "drive", false, false, "CloudOS Drive", "cloudos:drive", "ready", {"gui"}});
+    apps_.push_back({"cloudos:trash", "Lixeira", "cloudos", "Indisponível até a superfície first-party de lixeira", "", "Sistema", "CloudOS", false, false, false, "trash", false, false, "Lixeira", "cloudos:trash", "unavailable", {}});
 
     // 2. Windows Native Applications. CMD and PowerShell remain discoverable
     // catalog profiles, but the CloudOS Flutter shell owns their ConPTY launch.
-    apps_.push_back({"windows:vscode", "Visual Studio Code", "windows", "Code Editor & IDE", "", "Produtividade", "Windows", true, true, false, "vscode", true, true});
-    apps_.push_back({"windows:notepad", "Bloco de Notas", "windows", "Editor de Texto", "", "Produtividade", "Windows", true, false, false, "notepad", true, false});
-    apps_.push_back({"windows:powershell", "PowerShell", "windows", "CloudOS Terminal / ConPTY", "", "Utilitários", "Windows", true, true, false, "powershell", true, true});
-    apps_.push_back({"windows:taskmgr", "Gerenciador de Tarefas", "windows", "Monitor de Recursos do Sistema", "", "Sistema", "Windows", true, false, false, "taskmgr", false, false});
-    apps_.push_back({"windows:cmd", "Prompt de Comando", "windows", "CloudOS Terminal / ConPTY", "", "Utilitários", "Windows", true, false, false, "cmd", false, false});
-    apps_.push_back({"windows:explorer", "Windows Explorer", "windows", "Explorador de Arquivos do Windows", "", "Sistema", "Windows", true, false, false, "explorer", false, false});
+    apps_.push_back({"windows:vscode", "Visual Studio Code", "windows", "Code Editor & IDE", "", "Produtividade", "Windows", true, true, false, "vscode", true, true, "Visual Studio Code", "code.cmd", "ready", {"gui"}});
+    apps_.push_back({"windows:notepad", "Bloco de Notas", "windows", "Editor de Texto", "", "Produtividade", "Windows", true, false, false, "notepad", true, false, "Bloco de Notas", "notepad.exe", "ready", {"gui"}});
+    apps_.push_back({"windows:powershell", "PowerShell", "windows", "CloudOS Terminal / ConPTY", "", "Utilitários", "Windows", true, true, false, "powershell", true, true, "PowerShell", "powershell.exe", "ready", {"terminal"}});
+    apps_.push_back({"windows:taskmgr", "Gerenciador de Tarefas", "windows", "Monitor de Recursos do Sistema", "", "Sistema", "Windows", true, false, false, "taskmgr", false, false, "Gerenciador de Tarefas", "taskmgr.exe", "ready", {"gui"}});
+    apps_.push_back({"windows:cmd", "Prompt de Comando", "windows", "CloudOS Terminal / ConPTY", "", "Utilitários", "Windows", true, false, false, "cmd", false, false, "Prompt de Comando", "cmd.exe", "ready", {"terminal"}});
+    apps_.push_back({"windows:explorer", "Windows Explorer", "windows", "Explorador de Arquivos do Windows", "", "Sistema", "Windows", true, false, false, "explorer", false, false, "Windows Explorer", "explorer.exe", "ready", {"gui"}});
 
     // 3. Linux / WSL. Catalog discovery stays passive: it never starts a distro.
     // Only registered distros are advertised, and only the terminal is guaranteed
@@ -323,6 +355,29 @@ void AppServiceV21::Refresh()
             "terminal",
             true,
             true,
+            distro + " Terminal",
+            "wsl.exe -d " + distro,
+            "ready",
+            {"terminal"},
+        });
+        apps_.push_back({
+            "wsl:" + distro + ":l3afpad",
+            "L3afpad (" + distro + ")",
+            "linux",
+            "Editor de Texto Gráfico (WSLg)",
+            distro,
+            "Linux / WSL",
+            source,
+            true,
+            false,
+            false,
+            "notepad",
+            false,
+            false,
+            "L3afpad (" + distro + ")",
+            "l3afpad",
+            "ready",
+            {"gui"},
         });
     }
 
@@ -420,6 +475,45 @@ bool AppServiceV21::LaunchApp(const std::string& app_id, std::string& err)
 
     err = "Invalid or unavailable application identifier: " + app_id;
     return false;
+}
+
+bool AppServiceV21::LaunchAppStructured(
+    const std::string& app_id,
+    LaunchStatus& status,
+    std::string& err)
+{
+    status.id = app_id;
+    status.status = "failed";
+    status.launched = false;
+    status.target = app_id;
+    status.message.clear();
+
+    if (app_id.rfind("cloudos:", 0) == 0 || app_id == "browser" || app_id == "terminal" || app_id == "files" || app_id == "settings" || app_id == "calculator")
+    {
+        status.platform = "cloudos";
+    }
+    else if (app_id.rfind("wsl:", 0) == 0 || app_id.rfind("linux:", 0) == 0)
+    {
+        status.platform = "linux";
+    }
+    else
+    {
+        status.platform = "windows";
+    }
+
+    const bool ok = LaunchApp(app_id, err);
+    if (ok)
+    {
+        status.launched = true;
+        status.status = "running";
+        status.message = "Application launched successfully";
+    }
+    else
+    {
+        status.status = "failed";
+        status.message = err;
+    }
+    return ok;
 }
 
 } // namespace CloudOS

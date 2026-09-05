@@ -1,20 +1,34 @@
 #include "native_performance_v12.h"
 #include "native_icon_cache_v12.h"
 #include "native_window_manager.h"
+#include "native_monitor_manager.h"
 
 #include <dwmapi.h>
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <fstream>
 
 #pragma comment(lib, "dwmapi.lib")
 
 namespace
 {
+std::string Utf8Encode(const std::wstring& wstr)
+{
+    if (wstr.empty()) return {};
+    int size = WideCharToMultiByte(CP_UTF8, 0, wstr.data(), static_cast<int>(wstr.size()), nullptr, 0, nullptr, nullptr);
+    if (size <= 0) return {};
+    std::string result(size, 0);
+    WideCharToMultiByte(CP_UTF8, 0, wstr.data(), static_cast<int>(wstr.size()), result.data(), size, nullptr, nullptr);
+    return result;
+}
+
 constexpr int kWorkspaceCount = 4;
 constexpr COLORREF kActiveBorder = RGB(91, 140, 255);
 constexpr COLORREF kInactiveBorder = 0xFFFFFFFFu;
@@ -195,6 +209,8 @@ BOOL CALLBACK CloudOSNativeWindowManager::RuntimeWindowEnumeration(
         return FALSE;
     }
 
+    std::ofstream dbg("C:\\Users\\dougl\\Downloads\\testes\\CloudOS\\wm_debug.log", std::ios::app);
+    dbg << "RuntimeWindowEnumeration: hwnd=" << window << " pid=" << process_id << " vis=" << visible << std::endl;
     if (!visible && GetPropW(window, kWorkspaceHiddenProperty) != nullptr)
     {
         self->RecoverTaggedWindow(window);
@@ -271,13 +287,24 @@ void CloudOSNativeWindowManager::HandleRuntimeEvent(
 void CloudOSNativeWindowManager::Reconcile()
 {
     CloudOS::PerformanceV12::Add(CloudOS::PerformanceV12::Reconcile);
+    {
+        std::ofstream dbg("C:\\Users\\dougl\\Downloads\\testes\\CloudOS\\wm_debug.log", std::ios::app);
+        dbg << "Reconcile START, windows_ was " << windows_.size() << std::endl;
+    }
     windows_.erase(
         std::remove_if(
             windows_.begin(),
             windows_.end(),
             [](const CloudOSManagedWindow& item)
             {
-                return item.hwnd == nullptr || !IsWindow(item.hwnd);
+                if (item.hwnd == nullptr) return true;
+                if (IsWindow(item.hwnd)) return false;
+                HANDLE hp = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, item.process_id);
+                if (hp == nullptr) return true;
+                DWORD code = 0;
+                GetExitCodeProcess(hp, &code);
+                CloseHandle(hp);
+                return code != STILL_ACTIVE;
             }),
         windows_.end());
 
@@ -285,6 +312,10 @@ void CloudOSNativeWindowManager::Reconcile()
     (void)EnumWindows(
         &LocalWindowEnumeration,
         reinterpret_cast<LPARAM>(this));
+    {
+        std::ofstream dbg("C:\\Users\\dougl\\Downloads\\testes\\CloudOS\\wm_debug.log", std::ios::app);
+        dbg << "Reconcile END, windows_ is now " << windows_.size() << std::endl;
+    }
 
     if (active_window_ != nullptr && !IsWindow(active_window_))
     {
@@ -300,6 +331,60 @@ void CloudOSNativeWindowManager::Reconcile()
     {
         UpdateBorders();
     }
+}
+
+void CloudOSNativeWindowManager::HandleDisplayTopologyChanged()
+{
+    Reconcile();
+
+    for (auto& item : windows_)
+    {
+        if (item.hwnd == nullptr || !IsWindow(item.hwnd))
+        {
+            continue;
+        }
+
+        if (IsIconic(item.hwnd) || !IsWindowVisible(item.hwnd))
+        {
+            continue;
+        }
+
+        const RECT area = WorkAreaFor(item.hwnd);
+        const int areaWidth = Width(area);
+        const int areaHeight = Height(area);
+        if (areaWidth <= 0 || areaHeight <= 0)
+        {
+            continue;
+        }
+
+        if (IsZoomed(item.hwnd))
+        {
+            continue;
+        }
+
+        RECT rc{};
+        if (GetWindowRect(item.hwnd, &rc))
+        {
+            int w = Width(rc);
+            int h = Height(rc);
+
+            if (w > areaWidth) w = areaWidth;
+            if (h > areaHeight) h = areaHeight;
+
+            int x = rc.left;
+            int y = rc.top;
+
+            if (x < area.left) x = area.left;
+            if (y < area.top) y = area.top;
+            if (x + w > area.right) x = std::max<int>(area.left, area.right - w);
+            if (y + h > area.bottom) y = std::max<int>(area.top, area.bottom - h);
+
+            SetWindowPos(item.hwnd, nullptr, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+    }
+
+    UpdateBorders();
+    NotifyChanged();
 }
 
 bool CloudOSNativeWindowManager::IsManageable(
@@ -333,7 +418,22 @@ bool CloudOSNativeWindowManager::IsManageable(
     const HWND owner = GetWindow(window, GW_OWNER);
     if (owner != nullptr && (extended_style & WS_EX_APPWINDOW) == 0)
     {
-        return false;
+        bool owner_managed = (Find(owner) != nullptr);
+        if (!owner_managed)
+        {
+            for (const auto& it : windows_)
+            {
+                if (it.process_id == process_id)
+                {
+                    owner_managed = true;
+                    break;
+                }
+            }
+        }
+        if (!owner_managed)
+        {
+            return false;
+        }
     }
 
     if (IsExcludedClass(window))
@@ -371,12 +471,23 @@ void CloudOSNativeWindowManager::AddOrRefresh(HWND window, DWORD process_id)
         if (existing->title != title) CloudOS::NativeIconCacheV12::Instance().InvalidateReady(CloudOS::NativeIconCacheV12::WindowKey(window));
         const HMONITOR monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
         const bool minimized = IsIconic(window) != FALSE;
-        if (existing->title != title || existing->monitor != monitor || existing->minimized != minimized || !EqualRect(&existing->bounds,&bounds))
-        { existing->title = title; existing->monitor = monitor; existing->minimized = minimized; existing->bounds=bounds; NotifyChanged(); }
+        const bool maximized = IsZoomed(window) != FALSE;
+        if (existing->title != title || existing->monitor != monitor || existing->minimized != minimized || existing->maximized != maximized || !EqualRect(&existing->bounds,&bounds))
+        {
+            existing->title = title;
+            existing->monitor = monitor;
+            existing->minimized = minimized;
+            existing->maximized = maximized;
+            existing->bounds = bounds;
+            NotifyChanged();
+        }
         return;
     }
 
-    if (!IsManageable(window, process_id, true))
+    const bool manageable = IsManageable(window, process_id, true);
+    std::ofstream dbg("C:\\Users\\dougl\\Downloads\\testes\\CloudOS\\wm_debug.log", std::ios::app);
+    dbg << "AddOrRefresh: hwnd=" << window << " pid=" << process_id << " manageable=" << manageable << std::endl;
+    if (!manageable)
     {
         return;
     }
@@ -390,7 +501,62 @@ void CloudOSNativeWindowManager::AddOrRefresh(HWND window, DWORD process_id)
     item.hidden_by_workspace = false;
     GetWindowRect(window,&item.bounds);
     item.title = ReadWindowTitle(window);
-    item.monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST); item.minimized = IsIconic(window) != FALSE;
+    item.monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+    item.minimized = IsIconic(window) != FALSE;
+    item.maximized = IsZoomed(window) != FALSE;
+    item.owner = GetWindow(window, GW_OWNER);
+
+    // Platform and capability classification
+    std::array<wchar_t, 256> class_buffer{};
+    GetClassNameW(window, class_buffer.data(), static_cast<int>(class_buffer.size()));
+    const std::wstring class_name = class_buffer.data();
+
+    std::wstring process_name;
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, process_id);
+    if (process != nullptr)
+    {
+        wchar_t path[MAX_PATH]{};
+        DWORD size = MAX_PATH;
+        if (QueryFullProcessImageNameW(process, 0, path, &size))
+        {
+            const wchar_t* filename = wcsrchr(path, L'\\');
+            process_name = filename ? filename + 1 : path;
+        }
+        CloseHandle(process);
+    }
+
+    std::wstring lower_proc = process_name;
+    std::transform(lower_proc.begin(), lower_proc.end(), lower_proc.begin(), ::towlower);
+
+    if (class_name == L"RAIL_WINDOW" ||
+        class_name.find(L"RAIL_WINDOW") != std::wstring::npos ||
+        lower_proc == L"wslhost.exe" ||
+        lower_proc == L"msrdc.exe")
+    {
+        item.platform = "linux";
+        item.app_id = "linux:wslg";
+        item.capabilities = {"externalWindow", "canMinimize", "canMaximize", "canClose", "canMove", "canResize"};
+    }
+    else if (class_name == L"FLUTTER_RUNNER_WIN32_WINDOW" ||
+             lower_proc == L"cloudos.fluttershell.exe" ||
+             lower_proc == L"cloudos_flutter_shell.exe")
+    {
+        item.platform = "cloudos";
+        item.app_id = "cloudos:shell";
+        item.capabilities = {"flutterSurface", "canMinimize", "canMaximize", "canClose", "canMove", "canResize"};
+    }
+    else
+    {
+        item.platform = "windows";
+        if (lower_proc == L"notepad.exe") item.app_id = "windows:notepad";
+        else if (lower_proc == L"calc.exe" || lower_proc == L"calculatorapp.exe") item.app_id = "windows:calculator";
+        else if (lower_proc == L"code.exe") item.app_id = "windows:vscode";
+        else if (lower_proc == L"explorer.exe") item.app_id = "windows:explorer";
+        else item.app_id = "windows:" + Utf8Encode(lower_proc);
+
+        item.capabilities = {"nativeManaged", "canMinimize", "canMaximize", "canClose", "canMove", "canResize"};
+    }
+
     windows_.push_back(std::move(item));
     NotifyChanged();
 }
@@ -541,8 +707,24 @@ HWND CloudOSNativeWindowManager::ActiveManagedWindow() const noexcept
 
 void CloudOSNativeWindowManager::FocusWindow(HWND window)
 {
+    if (window == nullptr || !IsWindow(window))
+    {
+        return;
+    }
+
     auto* item = Find(window);
-    if (item == nullptr || item->workspace != current_workspace_ || !IsWindow(window))
+    if (item == nullptr)
+    {
+        DWORD pid = 0;
+        GetWindowThreadProcessId(window, &pid);
+        if (pid != 0)
+        {
+            AddOrRefresh(window, pid);
+            item = Find(window);
+        }
+    }
+
+    if (item != nullptr && item->workspace != current_workspace_)
     {
         return;
     }
@@ -990,3 +1172,362 @@ bool CloudOSNativeWindowManager::IsExcludedClass(HWND window)
 
     return std::find(excluded.begin(), excluded.end(), class_name) != excluded.end();
 }
+
+void CloudOSNativeWindowManager::MinimizeWindow(HWND window)
+{
+    if (window == nullptr || !IsWindow(window)) return;
+    ShowWindow(window, SW_MINIMIZE);
+    auto* item = Find(window);
+    if (item)
+    {
+        item->minimized = true;
+        item->maximized = false;
+        item->fullscreen = false;
+    }
+    NotifyChanged();
+}
+
+void CloudOSNativeWindowManager::MaximizeWindow(HWND window)
+{
+    if (window == nullptr || !IsWindow(window)) return;
+    ShowWindow(window, SW_MAXIMIZE);
+    auto* item = Find(window);
+    if (item)
+    {
+        item->maximized = true;
+        item->minimized = false;
+        item->fullscreen = false;
+    }
+    NotifyChanged();
+}
+
+void CloudOSNativeWindowManager::RestoreWindow(HWND window)
+{
+    if (window == nullptr || !IsWindow(window)) return;
+    ShowWindow(window, SW_RESTORE);
+    auto* item = Find(window);
+    if (item)
+    {
+        item->minimized = false;
+        item->maximized = false;
+        item->fullscreen = false;
+    }
+    NotifyChanged();
+}
+
+void CloudOSNativeWindowManager::CloseWindow(HWND window)
+{
+    if (window == nullptr || !IsWindow(window)) return;
+    PostMessageW(window, WM_CLOSE, 0, 0);
+}
+
+bool CloudOSNativeWindowManager::SetWindowBounds(HWND window, int x, int y, int width, int height)
+{
+    if (window == nullptr || !IsWindow(window)) return false;
+    if (IsIconic(window) || IsZoomed(window))
+    {
+        ShowWindow(window, SW_RESTORE);
+    }
+    SetWindowPos(window, nullptr, x, y, width, height, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    auto* item = Find(window);
+    if (item)
+    {
+        GetWindowRect(window, &item->bounds);
+        item->minimized = false;
+        item->maximized = false;
+        item->fullscreen = false;
+    }
+    NotifyChanged();
+    return true;
+}
+
+bool CloudOSNativeWindowManager::SnapWindow(HWND window, CloudOS::WindowRegistryV23::SnapTarget snap)
+{
+    if (window == nullptr || !IsWindow(window)) return false;
+    const RECT work_area = WorkAreaFor(window);
+    const int work_w = Width(work_area);
+    const int work_h = Height(work_area);
+    if (work_w <= 0 || work_h <= 0) return false;
+
+    int nx = work_area.left;
+    int ny = work_area.top;
+    int nw = work_w;
+    int nh = work_h;
+
+    using CloudOS::WindowRegistryV23::SnapTarget;
+    switch (snap)
+    {
+    case SnapTarget::Left:
+        nw = work_w / 2;
+        break;
+    case SnapTarget::Right:
+        nx = work_area.left + (work_w / 2);
+        nw = work_w - (work_w / 2);
+        break;
+    case SnapTarget::Top:
+    case SnapTarget::Maximize:
+        MaximizeWindow(window);
+        return true;
+    case SnapTarget::Restore:
+        RestoreWindow(window);
+        return true;
+    case SnapTarget::TopLeft:
+        nw = work_w / 2;
+        nh = work_h / 2;
+        break;
+    case SnapTarget::TopRight:
+        nx = work_area.left + (work_w / 2);
+        nw = work_w - (work_w / 2);
+        nh = work_h / 2;
+        break;
+    case SnapTarget::BottomLeft:
+        ny = work_area.top + (work_h / 2);
+        nw = work_w / 2;
+        nh = work_h - (work_h / 2);
+        break;
+    case SnapTarget::BottomRight:
+        nx = work_area.left + (work_w / 2);
+        ny = work_area.top + (work_h / 2);
+        nw = work_w - (work_w / 2);
+        nh = work_h - (work_h / 2);
+        break;
+    default:
+        return false;
+    }
+
+    return SetWindowBounds(window, nx, ny, nw, nh);
+}
+
+void CloudOSNativeWindowManager::SetWindowFullscreen(HWND window, bool fullscreen)
+{
+    if (window == nullptr || !IsWindow(window)) return;
+    auto* item = Find(window);
+    if (item) item->fullscreen = fullscreen;
+    if (fullscreen)
+    {
+        HMONITOR monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO mi{sizeof(mi)};
+        if (GetMonitorInfoW(monitor, &mi))
+        {
+            SetWindowPos(window, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
+                mi.rcMonitor.right - mi.rcMonitor.left,
+                mi.rcMonitor.bottom - mi.rcMonitor.top,
+                SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+        }
+    }
+    else
+    {
+        RestoreWindow(window);
+    }
+    NotifyChanged();
+}
+
+bool CloudOSNativeWindowManager::ExecuteWindowCommand(
+    const CloudOS::WindowRegistryV23::WindowCommandPayload& command)
+{
+    using namespace CloudOS::WindowRegistryV23;
+    HWND window = reinterpret_cast<HWND>(command.hwnd);
+    if (window == nullptr || !IsWindow(window))
+    {
+        return false;
+    }
+
+    switch (command.action)
+    {
+    case WindowCommandAction::Focus:
+        FocusWindow(window);
+        return true;
+    case WindowCommandAction::Minimize:
+        MinimizeWindow(window);
+        return true;
+    case WindowCommandAction::Maximize:
+        MaximizeWindow(window);
+        return true;
+    case WindowCommandAction::Restore:
+        RestoreWindow(window);
+        return true;
+    case WindowCommandAction::Close:
+        CloseWindow(window);
+        return true;
+    case WindowCommandAction::Move:
+    case WindowCommandAction::Resize:
+    case WindowCommandAction::SetBounds:
+        return SetWindowBounds(window, command.x, command.y, command.width, command.height);
+    case WindowCommandAction::Snap:
+        return SnapWindow(window, command.snap);
+    case WindowCommandAction::MoveToWorkspace:
+        MoveWindowToWorkspace(window, command.workspace > 0 ? command.workspace - 1 : 0);
+        return true;
+    case WindowCommandAction::SetFullscreen:
+        SetWindowFullscreen(window, true);
+        return true;
+    default:
+        return false;
+    }
+}
+
+CloudOS::WindowRegistryV23::CloudWindowSnapshotV23 CloudOSNativeWindowManager::GetRegistrySnapshot() const
+{
+    using namespace CloudOS::WindowRegistryV23;
+    CloudWindowSnapshotV23 snapshot;
+    snapshot.sequence = sequence_.load();
+    snapshot.timestamp_ms = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+    snapshot.current_workspace = current_workspace_ + 1;
+
+    if (active_window_ != nullptr && IsWindow(active_window_))
+    {
+        snapshot.focused_window_id = "win_" + std::to_string(reinterpret_cast<std::uintptr_t>(active_window_));
+    }
+
+    const auto native_monitors = CloudOS::NativeMonitorManager::Enumerate();
+    for (const auto& mon : native_monitors)
+    {
+        CloudMonitorRecordV23 mon_rec;
+        mon_rec.id = Utf8Encode(mon.device);
+        mon_rec.device_name = Utf8Encode(mon.device);
+        mon_rec.bounds = {mon.monitor.left, mon.monitor.top, mon.monitor.right - mon.monitor.left, mon.monitor.bottom - mon.monitor.top};
+        mon_rec.work_area = {mon.work.left, mon.work.top, mon.work.right - mon.work.left, mon.work.bottom - mon.work.top};
+        mon_rec.dpi = 96;
+        mon_rec.scale = 1.0;
+        mon_rec.primary = mon.primary;
+        snapshot.monitors.push_back(std::move(mon_rec));
+    }
+    {
+        std::ofstream dbg("C:\\Users\\dougl\\Downloads\\testes\\CloudOS\\wm_debug.log", std::ios::app);
+        dbg << "GetRegistrySnapshot: windows_.size()=" << windows_.size() << std::endl;
+        for (const auto& item : windows_)
+        {
+            const bool is_win = (item.hwnd != nullptr && IsWindow(item.hwnd));
+            dbg << "  check item: hwnd=" << item.hwnd << " isWin=" << is_win
+                << " pid=" << item.process_id << " title='" << Utf8Encode(item.title) << "'" << std::endl;
+        }
+    }
+    static HDESK s_wm_desktop = nullptr;
+    if (s_wm_desktop == nullptr)
+    {
+        HWINSTA hwinsta = OpenWindowStationW(L"WinSta0", FALSE, MAXIMUM_ALLOWED);
+        if (hwinsta != nullptr) SetProcessWindowStation(hwinsta);
+        s_wm_desktop = OpenDesktopW(L"Default", 0, FALSE, MAXIMUM_ALLOWED);
+    }
+
+    for (const auto& item : windows_)
+    {
+        if (item.hwnd == nullptr) continue;
+        const bool is_win = (IsWindow(item.hwnd) != FALSE);
+        if (!is_win)
+        {
+            HANDLE hp = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, item.process_id);
+            if (hp == nullptr) continue;
+            DWORD code = 0;
+            GetExitCodeProcess(hp, &code);
+            CloseHandle(hp);
+            if (code != STILL_ACTIVE) continue;
+        }
+
+        CloudWindowRecordV23 rec;
+        rec.id = "win_" + std::to_string(reinterpret_cast<std::uintptr_t>(item.hwnd));
+        rec.platform = item.platform;
+        rec.pid = item.process_id;
+        rec.hwnd = reinterpret_cast<std::uint64_t>(item.hwnd);
+        rec.title = Utf8Encode(item.title);
+        rec.app_id = item.app_id;
+
+        RECT current_rect = item.bounds;
+        if (is_win)
+        {
+            RECT r{};
+            if (GetWindowRect(item.hwnd, &r) && (r.right > r.left) && (r.bottom > r.top))
+            {
+                current_rect = r;
+            }
+        }
+        rec.bounds = {
+            current_rect.left,
+            current_rect.top,
+            current_rect.right - current_rect.left,
+            current_rect.bottom - current_rect.top
+        };
+
+        rec.minimized = is_win ? (IsIconic(item.hwnd) != FALSE || item.minimized) : item.minimized;
+        rec.maximized = is_win ? (IsZoomed(item.hwnd) != FALSE || item.maximized) : item.maximized;
+        rec.fullscreen = item.fullscreen;
+        if (rec.fullscreen) rec.state = "fullscreen";
+        else if (rec.minimized) rec.state = "minimized";
+        else if (rec.maximized) rec.state = "maximized";
+        else rec.state = "normal";
+
+        rec.visible = (!item.hidden_by_workspace) && (is_win ? (IsWindowVisible(item.hwnd) != FALSE) : true);
+        rec.focused = (item.hwnd == active_window_);
+        rec.workspace_id = item.workspace + 1;
+
+        if (item.monitor != nullptr)
+        {
+            MONITORINFOEXW minfo{};
+            minfo.cbSize = sizeof(minfo);
+            if (GetMonitorInfoW(item.monitor, &minfo))
+            {
+                rec.monitor_id = Utf8Encode(minfo.szDevice);
+            }
+        }
+
+        HWND parent = is_win ? GetParent(item.hwnd) : nullptr;
+        if (parent != nullptr)
+        {
+            rec.parent_window_id = "win_" + std::to_string(reinterpret_cast<std::uintptr_t>(parent));
+        }
+
+        HWND owner = item.owner != nullptr ? item.owner : (is_win ? GetWindow(item.hwnd, GW_OWNER) : nullptr);
+        if (owner != nullptr)
+        {
+            rec.owner_window_id = "win_" + std::to_string(reinterpret_cast<std::uintptr_t>(owner));
+        }
+
+        rec.capabilities = item.capabilities;
+        snapshot.windows.push_back(std::move(rec));
+    }
+
+    {
+        std::ofstream dbg("C:\\Users\\dougl\\Downloads\\testes\\CloudOS\\wm_debug.log", std::ios::app);
+        dbg << "GetRegistrySnapshot END: snapshot.windows.size()=" << snapshot.windows.size() << std::endl;
+    }
+
+    return snapshot;
+}
+
+std::string CloudOSNativeWindowManager::GetRegistrySnapshotJson() const
+{
+    const std::string json = GetRegistrySnapshot().ToJson();
+    {
+        std::ofstream dbg("C:\\Users\\dougl\\Downloads\\testes\\CloudOS\\wm_debug.log", std::ios::app);
+        dbg << "GetRegistrySnapshotJson: length=" << json.size() << " json=" << json << std::endl;
+    }
+    return json;
+}
+
+bool CloudOSNativeWindowManager::WriteRegistrySnapshotToMapping(const wchar_t* mapping_name) const
+{
+    if (mapping_name == nullptr || mapping_name[0] == L'\0') return false;
+
+    HANDLE mapping = OpenFileMappingW(FILE_MAP_WRITE, FALSE, mapping_name);
+    if (mapping == nullptr) return false;
+
+    void* view = MapViewOfFile(mapping, FILE_MAP_WRITE, 0, 0, 0);
+    if (view == nullptr)
+    {
+        CloseHandle(mapping);
+        return false;
+    }
+
+    const std::string json = GetRegistrySnapshotJson();
+    auto* ptr = static_cast<char*>(view);
+    std::uint32_t length = static_cast<std::uint32_t>(json.size());
+    std::memcpy(ptr, &length, sizeof(length));
+    std::memcpy(ptr + sizeof(length), json.data(), length);
+
+    UnmapViewOfFile(view);
+    CloseHandle(mapping);
+    return true;
+}
+

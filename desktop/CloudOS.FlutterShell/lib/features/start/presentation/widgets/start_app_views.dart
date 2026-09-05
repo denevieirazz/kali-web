@@ -24,11 +24,19 @@ class StartPinnedAppCard extends StatelessWidget {
     CloudAppPlatform.cloudos => CloudOSColors.accent,
   };
 
-  String get platformLabel => switch (app.platform) {
-    CloudAppPlatform.windows => 'Win',
-    CloudAppPlatform.linux => 'WSL',
-    CloudAppPlatform.cloudos => 'Cloud',
-  };
+  String get platformLabel {
+    if (app.platform == CloudAppPlatform.linux) {
+      if (app.distro != null && app.distro!.isNotEmpty) {
+        return app.distro!;
+      }
+      return 'WSL';
+    }
+    return switch (app.platform) {
+      CloudAppPlatform.windows => 'Win',
+      CloudAppPlatform.cloudos => 'Cloud',
+      _ => 'Win',
+    };
+  }
 
   @override
   Widget build(BuildContext context) {

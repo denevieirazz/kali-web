@@ -438,6 +438,17 @@ bool CloudOSBrokerClientV21::GetApps(std::vector<BrokerClientAppItem>& out_apps)
         app.distro = StringField(item, "distro");
         app.category = StringField(item, "category");
         app.source = StringField(item, "source");
+        app.display_name = StringField(item, "displayName", name);
+        app.launch_target = StringField(item, "launchTarget", id);
+        app.availability = StringField(item, "availability", BoolField(item, "canLaunch", true) ? "ready" : "unavailable");
+        const JsonValue* caps_val = FindValue(item, "capabilities");
+        if (caps_val != nullptr && caps_val->IsArray())
+        {
+            for (const JsonValue& c : caps_val->AsArray())
+            {
+                if (c.IsString()) app.capabilities.push_back(c.AsString());
+            }
+        }
         app.can_launch = BoolField(item, "canLaunch", true);
         app.can_uninstall = BoolField(item, "canUninstall");
         app.can_update = BoolField(item, "canUpdate");
@@ -449,6 +460,90 @@ bool CloudOSBrokerClientV21::GetApps(std::vector<BrokerClientAppItem>& out_apps)
 
     if (parsed_apps.empty()) return false;
     out_apps = std::move(parsed_apps);
+    return true;
+}
+
+bool CloudOSBrokerClientV21::LaunchAppStructured(
+    const std::string& app_id,
+    BrokerClientLaunchResult& out_result,
+    std::string& err)
+{
+    out_result.id = app_id;
+    out_result.status = "failed";
+    out_result.launched = false;
+    out_result.platform = "windows";
+    out_result.target = app_id;
+
+    if (app_id == "windows:cmd" || app_id == "windows:powershell")
+    {
+        err = "Windows console profiles must be routed to CloudOS Terminal / ConPTY";
+        out_result.message = err;
+        return false;
+    }
+
+    if (ManagedWin32HostV22::IsWindowsCatalogId(app_id))
+    {
+        const bool ok = ManagedWin32HostV22::Launch(app_id, err);
+        if (ok)
+        {
+            out_result.launched = true;
+            out_result.status = "running";
+            out_result.platform = "windows";
+            out_result.message = "Launched successfully via ManagedWin32Host";
+        }
+        else
+        {
+            out_result.message = err;
+        }
+        return ok;
+    }
+
+    if (!EnsureConnected())
+    {
+        err = "System broker is not connected";
+        out_result.message = err;
+        return false;
+    }
+
+    JsonObject payload;
+    payload["id"] = JsonValue(app_id);
+    const BrokerRequest request = MakeRequest(
+        "launch-app-" + std::to_string(next_req_id_.fetch_add(1)),
+        "apps.launch",
+        std::move(payload));
+
+    std::string raw_response;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!SendFrame(SerializeRequest(request)) || !ReadFrame(raw_response))
+        {
+            state_.store(BrokerConnectionState::Degraded);
+            err = "IPC communication failed during launch";
+            out_result.message = err;
+            return false;
+        }
+    }
+
+    BrokerResponse response;
+    std::string parse_error;
+    if (!ParseResponse(raw_response, response, parse_error))
+    {
+        err = parse_error.empty() ? "Invalid broker launch response" : parse_error;
+        out_result.message = err;
+        return false;
+    }
+    if (!response.ok)
+    {
+        err = response.error_message.empty() ? response.error_code : response.error_message;
+        out_result.message = err;
+        return false;
+    }
+
+    out_result.launched = BoolField(response.payload, "launched", true);
+    out_result.status = StringField(response.payload, "status", "running");
+    out_result.platform = StringField(response.payload, "platform", "linux");
+    out_result.target = StringField(response.payload, "target", app_id);
+    out_result.message = StringField(response.payload, "message", "Application launched successfully");
     return true;
 }
 
@@ -471,35 +566,163 @@ bool CloudOSBrokerClientV21::LaunchApp(const std::string& app_id, std::string& e
         return false;
     }
 
-    JsonObject payload;
-    payload["id"] = JsonValue(app_id);
-    const BrokerRequest request = MakeRequest(
-        "launch-app-" + std::to_string(next_req_id_.fetch_add(1)),
-        "apps.launch",
-        std::move(payload));
+    BrokerClientLaunchResult res;
+    return LaunchAppStructured(app_id, res, err);
+}
 
+bool CloudOSBrokerClientV21::ListWslDistros(
+    std::vector<BrokerClientDistroInfo>& out_distros,
+    std::string& out_default_distro,
+    bool& out_available)
+{
+    out_distros.clear();
+    out_default_distro.clear();
+    out_available = false;
+
+    if (!EnsureConnected()) return false;
+
+    const BrokerRequest request = MakeRequest(
+        "wsl-list-" + std::to_string(next_req_id_.fetch_add(1)),
+        "wsl.list");
     std::string raw_response;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!SendFrame(SerializeRequest(request)) || !ReadFrame(raw_response))
         {
             state_.store(BrokerConnectionState::Degraded);
-            err = "IPC communication failed during launch";
             return false;
         }
     }
 
     BrokerResponse response;
-    std::string parse_error;
-    if (!ParseResponse(raw_response, response, parse_error))
+    if (!ParseSuccessfulResponse(raw_response, response)) return false;
+
+    out_available = BoolField(response.payload, "wslAvailable");
+    out_default_distro = StringField(response.payload, "defaultDistro");
+
+    const JsonValue* details = FindValue(response.payload, "distroDetails");
+    if (details != nullptr && details->IsArray())
     {
-        err = parse_error.empty() ? "Invalid broker launch response" : parse_error;
-        return false;
+        for (const JsonValue& val : details->AsArray())
+        {
+            if (!val.IsObject()) continue;
+            const JsonObject& obj = val.AsObject();
+            BrokerClientDistroInfo info;
+            info.id = StringField(obj, "id");
+            info.name = StringField(obj, "name");
+            info.guid = StringField(obj, "guid");
+            info.version = static_cast<uint32_t>(IntField(obj, "version", 2));
+            info.state = StringField(obj, "state", "Stopped");
+            info.base_path = StringField(obj, "basePath");
+            info.default_uid = static_cast<uint32_t>(IntField(obj, "defaultUid", 0));
+            info.flags = static_cast<uint32_t>(IntField(obj, "flags", 15));
+            info.is_default = BoolField(obj, "isDefault");
+            out_distros.push_back(std::move(info));
+        }
     }
-    if (!response.ok)
+    else
     {
-        err = response.error_message.empty() ? response.error_code : response.error_message;
-        return false;
+        const JsonValue* distros = FindValue(response.payload, "distros");
+        if (distros != nullptr && distros->IsArray())
+        {
+            for (const JsonValue& val : distros->AsArray())
+            {
+                if (val.IsString())
+                {
+                    BrokerClientDistroInfo info;
+                    info.id = val.AsString();
+                    info.name = val.AsString();
+                    info.version = 2;
+                    info.state = "Stopped";
+                    info.is_default = (info.name == out_default_distro);
+                    out_distros.push_back(std::move(info));
+                }
+            }
+        }
+    }
+    return true;
+}
+
+bool CloudOSBrokerClientV21::TranslatePath(
+    const std::string& path,
+    const std::string& target,
+    const std::string& distro,
+    BrokerClientPathTranslation& out_result)
+{
+    out_result.original_path = path;
+    out_result.target = target;
+    out_result.distro = distro;
+    out_result.translated_path = path;
+    out_result.exists = false;
+
+    if (!EnsureConnected() || path.empty()) return false;
+
+    JsonObject payload;
+    payload["path"] = JsonValue(path);
+    payload["target"] = JsonValue(target);
+    if (!distro.empty())
+    {
+        payload["distro"] = JsonValue(distro);
+    }
+
+    const BrokerRequest request = MakeRequest(
+        "path-trans-" + std::to_string(next_req_id_.fetch_add(1)),
+        "path.translate",
+        std::move(payload));
+    std::string raw_response;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!SendFrame(SerializeRequest(request)) || !ReadFrame(raw_response))
+        {
+            state_.store(BrokerConnectionState::Degraded);
+            return false;
+        }
+    }
+
+    BrokerResponse response;
+    if (!ParseSuccessfulResponse(raw_response, response)) return false;
+
+    out_result.translated_path = StringField(response.payload, "translatedPath", path);
+    out_result.exists = BoolField(response.payload, "exists");
+    return true;
+}
+
+bool CloudOSBrokerClientV21::GetMountPoints(std::vector<BrokerClientMountPoint>& out_mounts)
+{
+    out_mounts.clear();
+    if (!EnsureConnected()) return false;
+
+    const BrokerRequest request = MakeRequest(
+        "mounts-" + std::to_string(next_req_id_.fetch_add(1)),
+        "system.mounts.list");
+    std::string raw_response;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!SendFrame(SerializeRequest(request)) || !ReadFrame(raw_response))
+        {
+            state_.store(BrokerConnectionState::Degraded);
+            return false;
+        }
+    }
+
+    BrokerResponse response;
+    if (!ParseSuccessfulResponse(raw_response, response)) return false;
+
+    const JsonValue* mounts = FindValue(response.payload, "mounts");
+    if (mounts != nullptr && mounts->IsArray())
+    {
+        for (const JsonValue& val : mounts->AsArray())
+        {
+            if (!val.IsObject()) continue;
+            const JsonObject& obj = val.AsObject();
+            BrokerClientMountPoint mp;
+            mp.id = StringField(obj, "id");
+            mp.label = StringField(obj, "label");
+            mp.path = StringField(obj, "path");
+            mp.platform = StringField(obj, "platform");
+            mp.is_online = BoolField(obj, "isOnline", true);
+            out_mounts.push_back(std::move(mp));
+        }
     }
     return true;
 }
@@ -614,6 +837,68 @@ bool CloudOSBrokerClientV21::SetBrightness(double value)
         BoolField(response.payload, "updated");
 }
 
+bool CloudOSBrokerClientV21::GetPerformanceProfile(BrokerClientPerformanceProfile& out_profile)
+{
+    if (!EnsureConnected()) return false;
+
+    const BrokerRequest request = MakeRequest(
+        "get-perf-" + std::to_string(next_req_id_.fetch_add(1)),
+        "system.performance.get",
+        JsonObject{});
+
+    std::string raw_response;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!SendFrame(SerializeRequest(request)) || !ReadFrame(raw_response))
+        {
+            state_.store(BrokerConnectionState::Degraded);
+            return false;
+        }
+    }
+
+    BrokerResponse response;
+    if (!ParseSuccessfulResponse(raw_response, response)) return false;
+
+    BrokerClientPerformanceProfile profile;
+    profile.profile = StringField(response.payload, "profile", "balanced");
+    profile.total_ram_mb = IntField(response.payload, "totalRamMb", 0);
+    profile.free_ram_mb = IntField(response.payload, "freeRamMb", 0);
+    profile.memory_load_percent = IntField(response.payload, "memoryLoadPercent", 0);
+    profile.cpu_cores = IntField(response.payload, "cpuCores", 0);
+    profile.on_battery = BoolField(response.payload, "onBattery", false);
+    profile.battery_percent = IntField(response.payload, "batteryPercent", -1);
+    profile.is_low_end_hardware = BoolField(response.payload, "isLowEndHardware", false);
+
+    out_profile = std::move(profile);
+    return true;
+}
+
+bool CloudOSBrokerClientV21::SetPerformanceProfile(const std::string& profile)
+{
+    if (!EnsureConnected() || profile.empty()) return false;
+
+    JsonObject payload;
+    payload["profile"] = JsonValue(profile);
+    const BrokerRequest request = MakeRequest(
+        "set-perf-" + std::to_string(next_req_id_.fetch_add(1)),
+        "system.performance.set",
+        std::move(payload));
+
+    std::string raw_response;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!SendFrame(SerializeRequest(request)) || !ReadFrame(raw_response))
+        {
+            state_.store(BrokerConnectionState::Degraded);
+            return false;
+        }
+    }
+
+    BrokerResponse response;
+    return ParseSuccessfulResponse(raw_response, response) &&
+        BoolField(response.payload, "updated");
+}
+
 bool CloudOSBrokerClientV21::GetCapabilities(std::vector<std::string>& out_caps)
 {
     if (EnsureConnected() && !capabilities_.empty())
@@ -622,6 +907,370 @@ bool CloudOSBrokerClientV21::GetCapabilities(std::vector<std::string>& out_caps)
         return true;
     }
     return false;
+}
+
+bool CloudOSBrokerClientV21::GetWindowSnapshot(std::string& out_snapshot_json)
+{
+    if (!EnsureConnected()) return false;
+
+    const BrokerRequest request = MakeRequest(
+        "get-window-snapshot-" + std::to_string(next_req_id_.fetch_add(1)),
+        "window.snapshot");
+
+    std::string raw_response;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!SendFrame(SerializeRequest(request)) || !ReadFrame(raw_response))
+        {
+            state_.store(BrokerConnectionState::Degraded);
+            return false;
+        }
+    }
+
+    BrokerResponse response;
+    if (!ParseSuccessfulResponse(raw_response, response)) return false;
+    out_snapshot_json = StringField(response.payload, "snapshot");
+    return !out_snapshot_json.empty();
+}
+
+bool CloudOSBrokerClientV21::ExecuteWindowCommand(
+    const std::string& action,
+    uint64_t hwnd,
+    int x,
+    int y,
+    int width,
+    int height,
+    int workspace,
+    const std::string& snap,
+    bool fullscreen)
+{
+    if (!EnsureConnected()) return false;
+
+    JsonObject payload;
+    payload["hwnd"] = JsonValue(static_cast<int64_t>(hwnd));
+    if (action == "setBounds")
+    {
+        payload["x"] = JsonValue(static_cast<int64_t>(x));
+        payload["y"] = JsonValue(static_cast<int64_t>(y));
+        payload["width"] = JsonValue(static_cast<int64_t>(width));
+        payload["height"] = JsonValue(static_cast<int64_t>(height));
+    }
+    else if (action == "snap")
+    {
+        payload["snap"] = JsonValue(snap);
+    }
+    else if (action == "moveToWorkspace")
+    {
+        payload["workspace"] = JsonValue(static_cast<int64_t>(workspace));
+    }
+    else if (action == "setFullscreen")
+    {
+        payload["fullscreen"] = JsonValue(fullscreen);
+    }
+
+    const BrokerRequest request = MakeRequest(
+        "window-cmd-" + std::to_string(next_req_id_.fetch_add(1)),
+        "window." + action,
+        std::move(payload));
+
+    std::string raw_response;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!SendFrame(SerializeRequest(request)) || !ReadFrame(raw_response))
+        {
+            state_.store(BrokerConnectionState::Degraded);
+            return false;
+        }
+    }
+
+    BrokerResponse response;
+    return ParseSuccessfulResponse(raw_response, response);
+}
+
+bool CloudOSBrokerClientV21::CreateFolder(
+    const std::string& parent_entry_id,
+    const std::string& name,
+    BrokerClientFileItem& out_item,
+    std::string& err)
+{
+    if (!EnsureConnected())
+    {
+        err = "SystemBroker unavailable";
+        return false;
+    }
+
+    JsonObject payload;
+    payload["parentEntryId"] = JsonValue(parent_entry_id);
+    payload["name"] = JsonValue(name);
+
+    const BrokerRequest request = MakeRequest(
+        "create-folder-" + std::to_string(next_req_id_.fetch_add(1)),
+        "files.createFolder",
+        std::move(payload));
+
+    std::string raw_response;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!SendFrame(SerializeRequest(request)) || !ReadFrame(raw_response))
+        {
+            state_.store(BrokerConnectionState::Degraded);
+            err = "IPC connection lost";
+            return false;
+        }
+    }
+
+    BrokerResponse response;
+    if (!ParseSuccessfulResponse(raw_response, response))
+    {
+        err = response.error_message.empty() ? "Falha ao criar pasta" : response.error_message;
+        return false;
+    }
+
+    out_item.name = StringField(response.payload, "name");
+    out_item.path = StringField(response.payload, "path");
+    out_item.is_folder = true;
+    out_item.size_formatted = StringField(response.payload, "sizeFormatted");
+    out_item.modified_formatted = StringField(response.payload, "modifiedFormatted");
+    out_item.source = StringField(response.payload, "source");
+    out_item.extension = "";
+    out_item.entry_id = StringField(response.payload, "entryId");
+    return true;
+}
+
+bool CloudOSBrokerClientV21::RenameFile(
+    const std::string& entry_id,
+    const std::string& new_name,
+    BrokerClientFileItem& out_item,
+    std::string& err)
+{
+    if (!EnsureConnected())
+    {
+        err = "SystemBroker unavailable";
+        return false;
+    }
+
+    JsonObject payload;
+    payload["entryId"] = JsonValue(entry_id);
+    payload["newName"] = JsonValue(new_name);
+
+    const BrokerRequest request = MakeRequest(
+        "rename-file-" + std::to_string(next_req_id_.fetch_add(1)),
+        "files.rename",
+        std::move(payload));
+
+    std::string raw_response;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!SendFrame(SerializeRequest(request)) || !ReadFrame(raw_response))
+        {
+            state_.store(BrokerConnectionState::Degraded);
+            err = "IPC connection lost";
+            return false;
+        }
+    }
+
+    BrokerResponse response;
+    if (!ParseSuccessfulResponse(raw_response, response))
+    {
+        err = response.error_message.empty() ? "Falha ao renomear" : response.error_message;
+        return false;
+    }
+
+    out_item.name = StringField(response.payload, "name");
+    out_item.path = StringField(response.payload, "path");
+    const auto it_folder = response.payload.find("isFolder");
+    out_item.is_folder = it_folder != response.payload.end() && it_folder->second.IsBool() && it_folder->second.AsBool();
+    out_item.size_formatted = StringField(response.payload, "sizeFormatted");
+    out_item.modified_formatted = StringField(response.payload, "modifiedFormatted");
+    out_item.source = StringField(response.payload, "source");
+    out_item.extension = StringField(response.payload, "extension");
+    out_item.entry_id = StringField(response.payload, "entryId");
+    return true;
+}
+
+bool CloudOSBrokerClientV21::DeleteFiles(
+    const std::vector<std::string>& entry_ids,
+    bool permanent,
+    std::vector<std::string>& out_deleted_ids,
+    std::string& err)
+{
+    if (!EnsureConnected())
+    {
+        err = "SystemBroker unavailable";
+        return false;
+    }
+
+    std::vector<JsonValue> arr;
+    arr.reserve(entry_ids.size());
+    for (const auto& id : entry_ids) arr.push_back(JsonValue(id));
+
+    JsonObject payload;
+    payload["entryIds"] = JsonValue(std::move(arr));
+    payload["permanent"] = JsonValue(permanent);
+
+    const BrokerRequest request = MakeRequest(
+        "delete-files-" + std::to_string(next_req_id_.fetch_add(1)),
+        "files.delete",
+        std::move(payload));
+
+    std::string raw_response;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!SendFrame(SerializeRequest(request)) || !ReadFrame(raw_response))
+        {
+            state_.store(BrokerConnectionState::Degraded);
+            err = "IPC connection lost";
+            return false;
+        }
+    }
+
+    BrokerResponse response;
+    if (!ParseSuccessfulResponse(raw_response, response))
+    {
+        err = response.error_message.empty() ? "Falha ao excluir itens" : response.error_message;
+        return false;
+    }
+
+    const JsonValue* deleted_val = FindValue(response.payload, "deletedEntryIds");
+    if (deleted_val != nullptr && deleted_val->IsArray())
+    {
+        for (const auto& item : deleted_val->AsArray())
+        {
+            if (item.IsString()) out_deleted_ids.push_back(item.AsString());
+        }
+    }
+    return true;
+}
+
+bool CloudOSBrokerClientV21::CopyOrMoveFiles(
+    const std::string& type,
+    const std::vector<std::string>& source_ids,
+    const std::string& destination_id,
+    std::string& out_job_id,
+    std::string& err)
+{
+    if (!EnsureConnected())
+    {
+        err = "SystemBroker unavailable";
+        return false;
+    }
+
+    std::vector<JsonValue> arr;
+    arr.reserve(source_ids.size());
+    for (const auto& id : source_ids) arr.push_back(JsonValue(id));
+
+    JsonObject payload;
+    payload["sourceEntryIds"] = JsonValue(std::move(arr));
+    payload["destinationEntryId"] = JsonValue(destination_id);
+
+    const std::string method = (type == "move") ? "files.move" : "files.copy";
+    const BrokerRequest request = MakeRequest(
+        "file-op-" + std::to_string(next_req_id_.fetch_add(1)),
+        method,
+        std::move(payload));
+
+    std::string raw_response;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!SendFrame(SerializeRequest(request)) || !ReadFrame(raw_response))
+        {
+            state_.store(BrokerConnectionState::Degraded);
+            err = "IPC connection lost";
+            return false;
+        }
+    }
+
+    BrokerResponse response;
+    if (!ParseSuccessfulResponse(raw_response, response))
+    {
+        err = response.error_message.empty() ? "Falha na operação de arquivos" : response.error_message;
+        return false;
+    }
+
+    out_job_id = StringField(response.payload, "jobId");
+    return true;
+}
+
+bool CloudOSBrokerClientV21::CancelFileOperation(const std::string& job_id)
+{
+    if (!EnsureConnected() || job_id.empty()) return false;
+
+    JsonObject payload;
+    payload["jobId"] = JsonValue(job_id);
+
+    const BrokerRequest request = MakeRequest(
+        "cancel-job-" + std::to_string(next_req_id_.fetch_add(1)),
+        "jobs.cancel",
+        std::move(payload));
+
+    std::string raw_response;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!SendFrame(SerializeRequest(request)) || !ReadFrame(raw_response))
+        {
+            state_.store(BrokerConnectionState::Degraded);
+            return false;
+        }
+    }
+
+    BrokerResponse response;
+    return ParseSuccessfulResponse(raw_response, response);
+}
+
+bool CloudOSBrokerClientV21::ListDrives(
+    std::vector<BrokerClientDriveItem>& out_drives,
+    std::string& err)
+{
+    if (!EnsureConnected())
+    {
+        err = "SystemBroker unavailable";
+        return false;
+    }
+
+    const BrokerRequest request = MakeRequest(
+        "list-drives-" + std::to_string(next_req_id_.fetch_add(1)),
+        "files.listDrives");
+
+    std::string raw_response;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!SendFrame(SerializeRequest(request)) || !ReadFrame(raw_response))
+        {
+            state_.store(BrokerConnectionState::Degraded);
+            err = "IPC connection lost";
+            return false;
+        }
+    }
+
+    BrokerResponse response;
+    if (!ParseSuccessfulResponse(raw_response, response))
+    {
+        err = response.error_message.empty() ? "Falha ao listar unidades" : response.error_message;
+        return false;
+    }
+
+    const JsonValue* drives_val = FindValue(response.payload, "drives");
+    if (drives_val == nullptr || !drives_val->IsArray()) return false;
+
+    for (const auto& item_val : drives_val->AsArray())
+    {
+        if (!item_val.IsObject()) continue;
+        const auto& obj = item_val.AsObject();
+
+        BrokerClientDriveItem d;
+        d.mount_path = StringField(obj, "mountPath");
+        d.label = StringField(obj, "label");
+        d.drive_type = StringField(obj, "driveType");
+        const auto it_total = obj.find("totalBytes");
+        if (it_total != obj.end() && it_total->second.IsInt()) d.total_bytes = static_cast<uint64_t>(it_total->second.AsInt());
+        const auto it_free = obj.find("freeBytes");
+        if (it_free != obj.end() && it_free->second.IsInt()) d.free_bytes = static_cast<uint64_t>(it_free->second.AsInt());
+        d.total_formatted = StringField(obj, "totalFormatted");
+        d.free_formatted = StringField(obj, "freeFormatted");
+        d.entry_id = StringField(obj, "entryId");
+        out_drives.push_back(std::move(d));
+    }
+    return true;
 }
 
 } // namespace CloudOS

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/cloudos_theme.dart';
+import '../../../core/responsive/cloud_responsive_layout.dart';
+import '../../../shell/window_manager/cloud_window.dart';
 import '../../../widgets/glass_surface.dart';
 import 'widgets/taskbar_system_tray.dart';
 import 'widgets/taskbar_task_button.dart';
@@ -47,6 +49,9 @@ class CloudTaskbar extends StatelessWidget {
     this.currentWorkspace = 1,
     this.onWorkspaceChanged,
     this.notificationCount = 0,
+    this.managedWindows = const <CloudWindow>[],
+    this.onWindowTap,
+    this.onCloseWindow,
     super.key,
   });
 
@@ -89,21 +94,29 @@ class CloudTaskbar extends StatelessWidget {
   final int currentWorkspace;
   final ValueChanged<int>? onWorkspaceChanged;
   final int notificationCount;
+  final List<CloudWindow> managedWindows;
+  final ValueChanged<CloudWindow>? onWindowTap;
+  final ValueChanged<CloudWindow>? onCloseWindow;
 
   @override
   Widget build(BuildContext context) {
+    final metrics = context.cloudMetrics;
+    final bool showLabels = metrics.isLarge || metrics.isWide;
+    final double taskbarHeight = metrics.taskbarHeight;
+    final double innerHeight = taskbarHeight - 8.0;
+
     return Align(
       alignment: Alignment.bottomCenter,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        padding: EdgeInsets.fromLTRB(16, 0, 16, metrics.isCompact ? 6 : 10),
         child: GlassSurface(
           borderRadius: 14,
           blur: 24,
           color: const Color(0xF2131C27),
           borderColor: CloudOSColors.border,
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           child: SizedBox(
-            height: 44,
+            height: innerHeight,
             child: Row(
               children: <Widget>[
                 TaskbarTaskButton(
@@ -123,91 +136,114 @@ class CloudTaskbar extends StatelessWidget {
                   onPressed: onSpotlight ?? onStart,
                 ),
                 const SizedBox(width: 4),
-                TaskbarTaskButton(
-                  tooltip: 'Arquivos (Ctrl+Alt+E)',
-                  icon: Icons.folder_rounded,
-                  label: 'Arquivos',
-                  active: filesActive,
-                  isRunning: filesRunning,
-                  onPressed: onFiles,
-                  onClose: onCloseFiles,
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    physics: const BouncingScrollPhysics(),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        TaskbarTaskButton(
+                          tooltip: 'Arquivos (Ctrl+Alt+E)',
+                          icon: Icons.folder_rounded,
+                          label: showLabels ? 'Arquivos' : null,
+                          active: filesActive,
+                          isRunning: filesRunning,
+                          onPressed: onFiles,
+                          onClose: onCloseFiles,
+                        ),
+                        const SizedBox(width: 4),
+                        TaskbarTaskButton(
+                          tooltip: 'Navegador Web',
+                          icon: Icons.language_rounded,
+                          label: showLabels ? 'Navegador' : null,
+                          active: browserActive,
+                          isRunning: browserRunning,
+                          onPressed: onBrowser,
+                          onClose: onCloseBrowser,
+                        ),
+                        const SizedBox(width: 4),
+                        TaskbarTaskButton(
+                          tooltip: 'Terminal ConPTY (Ctrl+Alt+Enter)',
+                          icon: Icons.terminal_rounded,
+                          label: showLabels ? 'Terminal' : null,
+                          active: terminalActive,
+                          isRunning: terminalRunning,
+                          onPressed: onTerminal,
+                          onClose: onCloseTerminal,
+                        ),
+                        if (settingsRunning) ...<Widget>[
+                          const SizedBox(width: 4),
+                          TaskbarTaskButton(
+                            tooltip: 'Configurações',
+                            icon: Icons.settings_rounded,
+                            label: showLabels ? 'Configurações' : null,
+                            active: settingsActive,
+                            isRunning: true,
+                            onPressed: onSettings,
+                            onClose: onCloseSettings,
+                          ),
+                        ],
+                        if (notesRunning) ...<Widget>[
+                          const SizedBox(width: 4),
+                          TaskbarTaskButton(
+                            tooltip: 'CloudOS Notes',
+                            icon: Icons.description_rounded,
+                            label: showLabels ? 'Notas' : null,
+                            active: notesActive,
+                            isRunning: true,
+                            onPressed: onNotes,
+                            onClose: onCloseNotes,
+                          ),
+                        ],
+                        if (calculatorRunning) ...<Widget>[
+                          const SizedBox(width: 4),
+                          TaskbarTaskButton(
+                            tooltip: 'Calculadora',
+                            icon: Icons.calculate_rounded,
+                            label: showLabels ? 'Calculadora' : null,
+                            active: calculatorActive,
+                            isRunning: true,
+                            onPressed: onCalculator,
+                            onClose: onCloseCalculator,
+                          ),
+                        ],
+                        if (taskManagerRunning) ...<Widget>[
+                          const SizedBox(width: 4),
+                          TaskbarTaskButton(
+                            tooltip: 'Monitor de Sistema',
+                            icon: Icons.monitor_heart_rounded,
+                            label: showLabels ? 'Monitor' : null,
+                            active: taskManagerActive,
+                            isRunning: true,
+                            onPressed: onTaskManager,
+                            onClose: onCloseTaskManager,
+                          ),
+                        ],
+                        for (final win in managedWindows.where((w) => w.platform != 'cloudos' && w.hwnd != 0)) ...<Widget>[
+                          const SizedBox(width: 4),
+                          TaskbarTaskButton(
+                            tooltip: '${win.title} (${win.platform.toUpperCase()})',
+                            icon: win.icon,
+                            label: showLabels ? win.title : null,
+                            active: win.isFocused,
+                            isRunning: true,
+                            onPressed: () => onWindowTap?.call(win),
+                            onClose: onCloseWindow != null ? () => onCloseWindow!(win) : null,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
                 ),
-                const SizedBox(width: 4),
-                TaskbarTaskButton(
-                  tooltip: 'Navegador Web',
-                  icon: Icons.language_rounded,
-                  label: 'Navegador',
-                  active: browserActive,
-                  isRunning: browserRunning,
-                  onPressed: onBrowser,
-                  onClose: onCloseBrowser,
-                ),
-                const SizedBox(width: 4),
-                TaskbarTaskButton(
-                  tooltip: 'Terminal ConPTY (Ctrl+Alt+Enter)',
-                  icon: Icons.terminal_rounded,
-                  label: 'Terminal',
-                  active: terminalActive,
-                  isRunning: terminalRunning,
-                  onPressed: onTerminal,
-                  onClose: onCloseTerminal,
-                ),
-                if (settingsRunning) ...<Widget>[
-                  const SizedBox(width: 4),
-                  TaskbarTaskButton(
-                    tooltip: 'Configurações',
-                    icon: Icons.settings_rounded,
-                    label: 'Configurações',
-                    active: settingsActive,
-                    isRunning: true,
-                    onPressed: onSettings,
-                    onClose: onCloseSettings,
-                  ),
-                ],
-                if (notesRunning) ...<Widget>[
-                  const SizedBox(width: 4),
-                  TaskbarTaskButton(
-                    tooltip: 'CloudOS Notes',
-                    icon: Icons.description_rounded,
-                    label: 'Notas',
-                    active: notesActive,
-                    isRunning: true,
-                    onPressed: onNotes,
-                    onClose: onCloseNotes,
-                  ),
-                ],
-                if (calculatorRunning) ...<Widget>[
-                  const SizedBox(width: 4),
-                  TaskbarTaskButton(
-                    tooltip: 'Calculadora',
-                    icon: Icons.calculate_rounded,
-                    label: 'Calculadora',
-                    active: calculatorActive,
-                    isRunning: true,
-                    onPressed: onCalculator,
-                    onClose: onCloseCalculator,
-                  ),
-                ],
-                if (taskManagerRunning) ...<Widget>[
-                  const SizedBox(width: 4),
-                  TaskbarTaskButton(
-                    tooltip: 'Monitor de Sistema',
-                    icon: Icons.monitor_heart_rounded,
-                    label: 'Monitor',
-                    active: taskManagerActive,
-                    isRunning: true,
-                    onPressed: onTaskManager,
-                    onClose: onCloseTaskManager,
-                  ),
-                ],
-                const SizedBox(width: 10),
-                Container(width: 1, height: 22, color: CloudOSColors.border),
-                const SizedBox(width: 10),
+                const SizedBox(width: 6),
+                Container(width: 1, height: 20, color: CloudOSColors.border),
+                const SizedBox(width: 6),
                 TaskbarWorkspaceSwitcher(
                   currentWorkspace: currentWorkspace,
                   onWorkspaceChanged: onWorkspaceChanged,
                 ),
-                const Spacer(),
+                const SizedBox(width: 6),
                 TaskbarSystemTray(
                   quickSettingsOpen: quickSettingsOpen,
                   notificationsOpen: notificationsOpen,
