@@ -26,21 +26,25 @@ struct SettingsRoute final
     const wchar_t* uri;
 };
 
-const wchar_t* ResolveSettingsUri(std::string_view app_id) noexcept
+// Registered Windows settings targets for contract compliance.
+// In Stage 8.5, first-party Flutter Shell owns the Settings UI and handles all
+// configuration directly in Flutter without leaking to external Windows UI.
+static constexpr std::array<SettingsRoute, 6> kSettingsRoutes = {{
+    {"settings", L"ms-settings:"},
+    {"cloudos:settings", L"ms-settings:"},
+    {"cloudos:settings:wifi", L"ms-settings:network-wifi"},
+    {"cloudos:settings:bluetooth", L"ms-settings:bluetooth"},
+    {"cloudos:settings:nightlight", L"ms-settings:nightlight"},
+    {"cloudos:settings:focus", L"ms-settings:quiethours"},
+}};
+
+bool IsSettingsRoute(std::string_view app_id) noexcept
 {
-    static constexpr std::array<SettingsRoute, 6> kRoutes = {{
-        {"settings", L"ms-settings:"},
-        {"cloudos:settings", L"ms-settings:"},
-        {"cloudos:settings:wifi", L"ms-settings:network-wifi"},
-        {"cloudos:settings:bluetooth", L"ms-settings:bluetooth"},
-        {"cloudos:settings:nightlight", L"ms-settings:nightlight"},
-        {"cloudos:settings:focus", L"ms-settings:quiethours"},
-    }};
-    for (const SettingsRoute& route : kRoutes)
+    for (const auto& route : kSettingsRoutes)
     {
-        if (app_id == route.app_id) return route.uri;
+        if (app_id == route.app_id) return true;
     }
-    return nullptr;
+    return false;
 }
 
 std::wstring Utf8ToWide(std::string_view value)
@@ -416,15 +420,18 @@ bool AppServiceV21::LaunchApp(const std::string& app_id, std::string& err)
     // Defensive whitelist resolution: reject arbitrary command injection.
     if (app_id == "files" || app_id == "cloudos:files")
     {
-        return LaunchSucceeded(ShellExecuteW(nullptr, L"open", L"explorer.exe", nullptr, nullptr, SW_SHOWNORMAL));
+        err = "CloudOS Files is a first-party Flutter surface and must be opened by the CloudOS shell";
+        return false;
     }
     if (app_id == "calculator" || app_id == "cloudos:calculator")
     {
-        return LaunchSucceeded(ShellExecuteW(nullptr, L"open", L"calc.exe", nullptr, nullptr, SW_SHOWNORMAL));
+        err = "CloudOS Calculator is a first-party Flutter surface and must be opened by the CloudOS shell";
+        return false;
     }
-    if (const wchar_t* settings_uri = ResolveSettingsUri(app_id); settings_uri != nullptr)
+    if (app_id == "settings" || app_id == "cloudos:settings" || IsSettingsRoute(app_id))
     {
-        return LaunchSucceeded(ShellExecuteW(nullptr, L"open", settings_uri, nullptr, nullptr, SW_SHOWNORMAL));
+        err = "CloudOS Settings is a first-party Flutter surface and must be opened by the CloudOS shell";
+        return false;
     }
     if (app_id == "drive" || app_id == "cloudos:drive")
     {

@@ -244,17 +244,34 @@ bool DisplayServiceV25::SetDisplayMode(
 
     // Test first
     LONG test_res = ChangeDisplaySettingsExW(device_name.c_str(), &target, nullptr, CDS_TEST, nullptr);
-    if (test_res != DISP_CHANGE_SUCCESSFUL)
+    LONG apply_res = DISP_CHANGE_FAILED;
+
+    if (test_res == DISP_CHANGE_SUCCESSFUL)
     {
-        if (error) *error = "Hardware rejected test display change (code: " + std::to_string(test_res) + ")";
-        return false;
+        apply_res = ChangeDisplaySettingsExW(device_name.c_str(), &target, nullptr, 0, nullptr);
+    }
+    else
+    {
+        // Try staging for multi-monitor setups
+        LONG stage_res = ChangeDisplaySettingsExW(
+            device_name.c_str(),
+            &target,
+            nullptr,
+            CDS_UPDATEREGISTRY | CDS_NORESET,
+            nullptr);
+        if (stage_res == DISP_CHANGE_SUCCESSFUL)
+        {
+            apply_res = ChangeDisplaySettingsExW(nullptr, nullptr, nullptr, 0, nullptr);
+        }
+        else
+        {
+            apply_res = test_res;
+        }
     }
 
-    // Apply
-    LONG apply_res = ChangeDisplaySettingsExW(device_name.c_str(), &target, nullptr, 0, nullptr);
     if (apply_res != DISP_CHANGE_SUCCESSFUL)
     {
-        if (error) *error = "Failed to apply display settings (code: " + std::to_string(apply_res) + ")";
+        if (error) *error = "Hardware or driver rejected display change (code: " + std::to_string(apply_res) + ")";
         return false;
     }
 

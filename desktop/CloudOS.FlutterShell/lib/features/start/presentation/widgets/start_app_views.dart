@@ -40,28 +40,23 @@ class StartPinnedAppCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final enabled = app.canLaunch || runningApp != null;
     return Tooltip(
-      message: enabled
-          ? app.name
-          : '${app.name}: aguardando containment seguro no CloudOS',
-      child: Opacity(
-        opacity: enabled ? 1 : 0.5,
-        child: InkWell(
-          key: ValueKey<String>('start-app-${app.id}'),
-          onTap: enabled ? onTap : null,
-          borderRadius: BorderRadius.circular(10),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              color: CloudOSColors.elevated.withValues(alpha: 0.45),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: runningApp != null
-                    ? CloudOSColors.accent.withValues(alpha: 0.75)
-                    : CloudOSColors.border,
-              ),
+      message: app.name,
+      child: InkWell(
+        key: ValueKey<String>('start-app-${app.id}'),
+        onTap: app.canLaunch ? onTap : null,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: CloudOSColors.elevated.withValues(alpha: 0.45),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: runningApp != null
+                  ? CloudOSColors.accent.withValues(alpha: 0.75)
+                  : CloudOSColors.border,
             ),
+          ),
             child: Row(
               children: <Widget>[
                 Container(
@@ -179,7 +174,6 @@ class StartPinnedAppCard extends StatelessWidget {
                   ),
                 ],
               ],
-            ),
           ),
         ),
       ),
@@ -373,44 +367,39 @@ class StartRecentTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Opacity(
-      opacity: app.canLaunch ? 1 : 0.5,
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 4),
-        child: InkWell(
-          key: ValueKey<String>('recent-app-${app.id}'),
-          onTap: app.canLaunch ? onTap : null,
-          borderRadius: BorderRadius.circular(8),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              children: <Widget>[
-                Icon(app.icon, size: 17, color: CloudOSColors.secondary),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    app.name,
-                    style: const TextStyle(
-                      color: CloudOSColors.text,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-                Text(
-                  app.canLaunch
-                      ? app.subtitle ?? 'Recente'
-                      : 'Containment pendente',
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: InkWell(
+        key: ValueKey<String>('recent-app-${app.id}'),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            children: <Widget>[
+              Icon(app.icon, size: 17, color: CloudOSColors.secondary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  app.name,
                   style: const TextStyle(
-                    color: CloudOSColors.caption,
-                    fontSize: 10.5,
+                    color: CloudOSColors.text,
+                    fontSize: 12,
                   ),
                 ),
-              ],
-            ),
+              ),
+              Text(
+                app.subtitle ?? 'Recente',
+                style: const TextStyle(
+                  color: CloudOSColors.caption,
+                  fontSize: 10.5,
+                ),
+              ),
+            ],
           ),
         ),
       ),

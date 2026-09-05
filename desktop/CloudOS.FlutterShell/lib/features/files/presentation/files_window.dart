@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../../../core/cloudos_theme.dart';
 import '../../../models/shell_models.dart';
 import '../../../services/cloudos_bridge.dart';
+import 'widgets/cloudos_open_with_dialog.dart';
 import 'widgets/files_content.dart';
 import 'widgets/files_loading_state.dart';
 import 'widgets/files_sidebar.dart';
@@ -591,6 +592,18 @@ class _FilesWindowState extends State<FilesWindow> {
     }
   }
 
+  Future<void> _openWithSelected() async {
+    final selected = _selectedFiles;
+    if (selected.length != 1) return;
+    final item = selected.first;
+    if (item.isFolder) return;
+    await CloudOSOpenWithDialog.show(
+      context: context,
+      filePath: item.path,
+      bridge: widget.bridge,
+    );
+  }
+
   Future<void> _deleteSelected() async {
     final selected = _selectedFiles;
     if (selected.isEmpty) return;
@@ -905,6 +918,12 @@ class _FilesWindowState extends State<FilesWindow> {
             tooltip: 'Renomear (F2)',
             enabled: hasSingleSelection,
             onPressed: _renameSelected,
+          ),
+          _ActionButton(
+            icon: Icons.open_in_new_rounded,
+            tooltip: 'Abrir com o CloudOS...',
+            enabled: hasSingleSelection && !_selectedFiles.first.isFolder,
+            onPressed: _openWithSelected,
           ),
           _ActionButton(
             icon: Icons.delete_outline_rounded,

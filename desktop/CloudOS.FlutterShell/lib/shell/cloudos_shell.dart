@@ -13,6 +13,7 @@ import '../features/settings/presentation/settings_window.dart';
 import '../features/start/domain/start_running_app.dart';
 import '../features/start/presentation/start_panel.dart';
 import '../features/taskbar/presentation/cloud_taskbar.dart';
+import '../features/terminal/domain/terminal_launch_coordinator.dart';
 import '../features/terminal/presentation/terminal_window.dart';
 import '../features/calculator/presentation/calculator_window.dart';
 import '../features/notes/presentation/notes_window.dart';
@@ -60,6 +61,8 @@ class _CloudOSShellState extends State<CloudOSShell> {
   bool spotlightOpen = false;
   int currentWorkspace = 1;
   String? selectedDesktopIcon;
+  late List<DesktopItemData> desktopItems = getDefaultDesktopItems();
+  int _customFolderCounter = 1;
 
   // Responsive & Window Snap Tracking
   final Map<String, WindowSnapMode> _windowSnapModes = <String, WindowSnapMode>{};
@@ -104,6 +107,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
   Offset? settingsPreMaxOffset;
   Size? settingsPreMaxSize;
   int settingsZIndex = 4;
+  SettingsSection settingsSection = SettingsSection.display;
 
   bool notesOpen = false;
   bool notesMinimized = false;
@@ -547,6 +551,17 @@ class _CloudOSShellState extends State<CloudOSShell> {
           activeInternalWindowId = 'task_manager';
         }
       }
+      _closeTransientPanels();
+    });
+  }
+
+  void _openSettingsSection(SettingsSection section) {
+    setState(() {
+      settingsSection = section;
+      settingsOpen = true;
+      settingsMinimized = false;
+      settingsZIndex = ++topZIndex;
+      activeInternalWindowId = 'settings';
       _closeTransientPanels();
     });
   }
@@ -1345,10 +1360,16 @@ class _CloudOSShellState extends State<CloudOSShell> {
     });
   }
 
-  Future<void> _openQuickSettingsRoute(QuickSettingsRoute route) async {
-    final launched = await widget.bridge.launchApp(quickSettingsLaunchId(route));
-    if (!mounted || !launched) return;
-    setState(_closeTransientPanels);
+  void _openQuickSettingsRoute(QuickSettingsRoute route) {
+    final launchId = quickSettingsLaunchId(route);
+    final section = switch (launchId) {
+      'cloudos:settings:wifi' => SettingsSection.network,
+      'cloudos:settings:bluetooth' => SettingsSection.bluetooth,
+      'cloudos:settings:nightlight' => SettingsSection.display,
+      'cloudos:settings:focus' => SettingsSection.personalization,
+      _ => SettingsSection.display,
+    };
+    _openSettingsSection(section);
   }
 
   Future<void> _launchApp(CloudApp app) async {
@@ -1394,8 +1415,84 @@ class _CloudOSShellState extends State<CloudOSShell> {
       return;
     }
 
-    if (app.id == 'settings' || app.id == 'cloudos:settings') {
-      _toggleOrFocusWindow('settings');
+    final appIdLower = app.id.toLowerCase();
+    if (appIdLower == 'settings' || appIdLower == 'cloudos:settings') {
+      _openSettingsSection(SettingsSection.display);
+      return;
+    }
+    if (appIdLower == 'cloudos:settings:wifi' ||
+        appIdLower == 'wifi' ||
+        appIdLower == 'network' ||
+        appIdLower == 'cloudos:settings:network') {
+      _openSettingsSection(SettingsSection.network);
+      return;
+    }
+    if (appIdLower == 'cloudos:settings:bluetooth' ||
+        appIdLower == 'bluetooth') {
+      _openSettingsSection(SettingsSection.bluetooth);
+      return;
+    }
+    if (appIdLower == 'cloudos:settings:display' ||
+        appIdLower == 'display' ||
+        appIdLower == 'screen' ||
+        appIdLower == 'tela') {
+      _openSettingsSection(SettingsSection.display);
+      return;
+    }
+    if (appIdLower == 'cloudos:settings:sound' ||
+        appIdLower == 'sound' ||
+        appIdLower == 'audio' ||
+        appIdLower == 'som') {
+      _openSettingsSection(SettingsSection.sound);
+      return;
+    }
+    if (appIdLower == 'cloudos:settings:power' ||
+        appIdLower == 'power' ||
+        appIdLower == 'battery' ||
+        appIdLower == 'energia') {
+      _openSettingsSection(SettingsSection.power);
+      return;
+    }
+    if (appIdLower == 'cloudos:settings:storage' ||
+        appIdLower == 'storage' ||
+        appIdLower == 'armazenamento') {
+      _openSettingsSection(SettingsSection.storage);
+      return;
+    }
+    if (appIdLower == 'cloudos:settings:performance' ||
+        appIdLower == 'performance' ||
+        appIdLower == 'desempenho') {
+      _openSettingsSection(SettingsSection.performance);
+      return;
+    }
+    if (appIdLower == 'cloudos:settings:personalization' ||
+        appIdLower == 'personalization' ||
+        appIdLower == 'personalizacao') {
+      _openSettingsSection(SettingsSection.personalization);
+      return;
+    }
+    if (appIdLower == 'cloudos:settings:wsl' ||
+        appIdLower == 'wsl' ||
+        appIdLower == 'wsl:settings') {
+      _openSettingsSection(SettingsSection.wsl);
+      return;
+    }
+    if (appIdLower == 'cloudos:settings:recovery' ||
+        appIdLower == 'recovery' ||
+        appIdLower == 'recuperacao') {
+      _openSettingsSection(SettingsSection.recovery);
+      return;
+    }
+    if (appIdLower == 'cloudos:settings:diagnostics' ||
+        appIdLower == 'diagnostics' ||
+        appIdLower == 'diagnostico') {
+      _openSettingsSection(SettingsSection.diagnostics);
+      return;
+    }
+    if (appIdLower == 'cloudos:settings:about' ||
+        appIdLower == 'about' ||
+        appIdLower == 'sobre') {
+      _openSettingsSection(SettingsSection.about);
       return;
     }
 
@@ -1692,20 +1789,15 @@ class _CloudOSShellState extends State<CloudOSShell> {
                     fit: StackFit.expand,
                     children: <Widget>[
                       const RepaintBoundary(child: DesktopWallpaper()),
-                      Positioned(
-                        left: 20,
-                        top: 20,
-                        child: RepaintBoundary(
-                          child: DesktopIcons(
-                            selectedId: selectedDesktopIcon,
-                            onSelect: (id) =>
-                                setState(() => selectedDesktopIcon = id),
-                            onFiles: () => _toggleOrFocusWindow('files'),
-                            onStart: _toggleStart,
-                            onTerminal: () => _toggleOrFocusWindow('terminal'),
-                            onOpenSettings: () => _toggleOrFocusWindow('settings'),
-                          ),
-                        ),
+                      DesktopIcons(
+                        items: desktopItems,
+                        selectedId: selectedDesktopIcon,
+                        onSelect: (id) =>
+                            setState(() => selectedDesktopIcon = id),
+                        onItemMoved: _moveDesktopItem,
+                        onItemDoubleTap: _handleDesktopItemAction,
+                        onItemSecondaryTap: (item, pos) =>
+                            _showDesktopItemContextMenu(item, pos),
                       ),
                       Positioned(
                         top: 18,
@@ -1815,6 +1907,354 @@ class _CloudOSShellState extends State<CloudOSShell> {
     );
   }
 
+  void _moveDesktopItem(String id, Offset globalPos) {
+    final size = MediaQuery.of(context).size;
+    final clampedX = globalPos.dx.clamp(10.0, (size.width - 90.0).clamp(10.0, double.infinity));
+    final clampedY = globalPos.dy.clamp(10.0, (size.height - 130.0).clamp(10.0, double.infinity));
+    setState(() {
+      desktopItems = desktopItems.map((item) {
+        if (item.id == id) {
+          return item.copyWith(position: Offset(clampedX, clampedY));
+        }
+        return item;
+      }).toList(growable: true);
+    });
+  }
+
+  void _handleDesktopItemAction(DesktopItemData item) {
+    switch (item.id) {
+      case 'files':
+      case 'drive':
+      case 'trash':
+        _toggleOrFocusWindow('files');
+        break;
+      case 'apps':
+        _toggleStart();
+        break;
+      case 'ubuntu':
+        TerminalLaunchCoordinator.request(TerminalLaunchProfile.wsl, distro: 'Ubuntu');
+        _toggleOrFocusWindow('terminal');
+        break;
+      case 'settings':
+        _toggleOrFocusWindow('settings');
+        break;
+      default:
+        if (item.isCustomFolder) {
+          setState(() {
+            filesRootId = 'desktop';
+            filesLaunchRevision++;
+          });
+          _toggleOrFocusWindow('files');
+        } else if (item.isCustomFile) {
+          _toggleOrFocusWindow('notes');
+        }
+        break;
+    }
+  }
+
+  void _organizeDesktopIcons() {
+    final size = MediaQuery.of(context).size;
+    const double startX = 20.0;
+    const double startY = 20.0;
+    const double itemHeight = 94.0;
+    const double itemWidth = 90.0;
+    final double maxY = (size.height - 120.0).clamp(100.0, double.infinity);
+
+    double currentX = startX;
+    double currentY = startY;
+
+    setState(() {
+      desktopItems = desktopItems.map((item) {
+        final pos = Offset(currentX, currentY);
+        currentY += itemHeight;
+        if (currentY + itemHeight > maxY) {
+          currentY = startY;
+          currentX += itemWidth;
+        }
+        return item.copyWith(position: pos);
+      }).toList(growable: true);
+    });
+  }
+
+  Future<void> _promptCreateNewFolder(Offset position) async {
+    final defaultName = _customFolderCounter == 1 ? 'Nova Pasta' : 'Nova Pasta $_customFolderCounter';
+    final controller = TextEditingController(text: defaultName);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF16202E),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: const BorderSide(color: CloudOSColors.border),
+        ),
+        title: const Row(
+          children: <Widget>[
+            Icon(Icons.create_new_folder_rounded, color: CloudOSColors.accent, size: 22),
+            SizedBox(width: 8),
+            Text('Criar Nova Pasta', style: TextStyle(color: CloudOSColors.text, fontSize: 16)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            const Text(
+              'Digite o nome da pasta na Área de Trabalho:',
+              style: TextStyle(color: CloudOSColors.secondary, fontSize: 12),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              key: const ValueKey<String>('new-folder-name-input'),
+              controller: controller,
+              autofocus: true,
+              style: const TextStyle(color: CloudOSColors.text, fontSize: 13),
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: CloudOSColors.elevated,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: CloudOSColors.border),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: CloudOSColors.accent),
+                ),
+              ),
+              onSubmitted: (val) => Navigator.of(ctx).pop(val.trim()),
+            ),
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar', style: TextStyle(color: CloudOSColors.caption)),
+          ),
+          FilledButton(
+            key: const ValueKey<String>('new-folder-submit-btn'),
+            style: FilledButton.styleFrom(backgroundColor: CloudOSColors.accent),
+            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+            child: const Text('Criar', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+
+    if (name != null && name.isNotEmpty) {
+      _customFolderCounter++;
+      final size = MediaQuery.of(context).size;
+      final clampedX = position.dx.clamp(20.0, (size.width - 90.0).clamp(20.0, double.infinity));
+      final clampedY = position.dy.clamp(20.0, (size.height - 130.0).clamp(20.0, double.infinity));
+      setState(() {
+        desktopItems = <DesktopItemData>[
+          ...desktopItems,
+          DesktopItemData(
+            id: 'folder_${DateTime.now().millisecondsSinceEpoch}',
+            label: name,
+            icon: Icons.folder_rounded,
+            color: const Color(0xFFF6AD55),
+            position: Offset(clampedX, clampedY),
+            isCustomFolder: true,
+          ),
+        ];
+      });
+    }
+  }
+
+  Future<void> _promptCreateNewFile(Offset position) async {
+    final controller = TextEditingController(text: 'Novo Documento.txt');
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF16202E),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: const BorderSide(color: CloudOSColors.border),
+        ),
+        title: const Row(
+          children: <Widget>[
+            Icon(Icons.note_add_rounded, color: CloudOSColors.accent, size: 22),
+            SizedBox(width: 8),
+            Text('Novo Arquivo de Texto', style: TextStyle(color: CloudOSColors.text, fontSize: 16)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            const Text(
+              'Digite o nome do arquivo:',
+              style: TextStyle(color: CloudOSColors.secondary, fontSize: 12),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              key: const ValueKey<String>('new-file-name-input'),
+              controller: controller,
+              autofocus: true,
+              style: const TextStyle(color: CloudOSColors.text, fontSize: 13),
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: CloudOSColors.elevated,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: CloudOSColors.border),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: CloudOSColors.accent),
+                ),
+              ),
+              onSubmitted: (val) => Navigator.of(ctx).pop(val.trim()),
+            ),
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar', style: TextStyle(color: CloudOSColors.caption)),
+          ),
+          FilledButton(
+            key: const ValueKey<String>('new-file-submit-btn'),
+            style: FilledButton.styleFrom(backgroundColor: CloudOSColors.accent),
+            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+            child: const Text('Criar', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+
+    if (name != null && name.isNotEmpty) {
+      final size = MediaQuery.of(context).size;
+      final clampedX = position.dx.clamp(20.0, (size.width - 90.0).clamp(20.0, double.infinity));
+      final clampedY = position.dy.clamp(20.0, (size.height - 130.0).clamp(20.0, double.infinity));
+      setState(() {
+        desktopItems = <DesktopItemData>[
+          ...desktopItems,
+          DesktopItemData(
+            id: 'file_${DateTime.now().millisecondsSinceEpoch}',
+            label: name,
+            icon: Icons.description_rounded,
+            color: CloudOSColors.secondary,
+            position: Offset(clampedX, clampedY),
+            isCustomFile: true,
+          ),
+        ];
+      });
+    }
+  }
+
+  void _showDesktopItemContextMenu(DesktopItemData item, Offset position) {
+    _closeTransientPanels();
+    final RenderBox? overlay = Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (overlay == null) return;
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        position & const Size(40, 40),
+        Offset.zero & overlay.size,
+      ),
+      color: const Color(0xFF141C2B),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: const BorderSide(color: CloudOSColors.border),
+      ),
+      items: <PopupMenuEntry<String>>[
+        const PopupMenuItem<String>(
+          value: 'open',
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.open_in_new_rounded, size: 16, color: CloudOSColors.accent),
+              SizedBox(width: 10),
+              Text('Abrir', style: TextStyle(color: CloudOSColors.text, fontSize: 13)),
+            ],
+          ),
+        ),
+        if (item.isCustomFolder || item.isCustomFile) ...<PopupMenuEntry<String>>[
+          const PopupMenuItem<String>(
+            value: 'rename',
+            child: Row(
+              children: <Widget>[
+                Icon(Icons.edit_rounded, size: 16, color: CloudOSColors.secondary),
+                SizedBox(width: 10),
+                Text('Renomear', style: TextStyle(color: CloudOSColors.text, fontSize: 13)),
+              ],
+            ),
+          ),
+          const PopupMenuDivider(height: 1),
+          const PopupMenuItem<String>(
+            value: 'delete',
+            child: Row(
+              children: <Widget>[
+                Icon(Icons.delete_outline_rounded, size: 16, color: CloudOSColors.danger),
+                SizedBox(width: 10),
+                Text('Excluir', style: TextStyle(color: CloudOSColors.danger, fontSize: 13)),
+              ],
+            ),
+          ),
+        ],
+      ],
+    ).then((choice) {
+      if (choice == 'open') _handleDesktopItemAction(item);
+      if (choice == 'rename') _renameDesktopItem(item);
+      if (choice == 'delete') {
+        setState(() {
+          desktopItems.removeWhere((i) => i.id == item.id);
+          if (selectedDesktopIcon == item.id) selectedDesktopIcon = null;
+        });
+      }
+    });
+  }
+
+  Future<void> _renameDesktopItem(DesktopItemData item) async {
+    final controller = TextEditingController(text: item.label);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF16202E),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: const BorderSide(color: CloudOSColors.border),
+        ),
+        title: const Text('Renomear Item', style: TextStyle(color: CloudOSColors.text, fontSize: 16)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(color: CloudOSColors.text, fontSize: 13),
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: CloudOSColors.elevated,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: CloudOSColors.border),
+            ),
+          ),
+          onSubmitted: (val) => Navigator.of(ctx).pop(val.trim()),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar', style: TextStyle(color: CloudOSColors.caption)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: CloudOSColors.accent),
+            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+            child: const Text('Salvar', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (newName != null && newName.isNotEmpty) {
+      setState(() {
+        desktopItems = desktopItems.map((i) {
+          if (i.id == item.id) return i.copyWith(label: newName);
+          return i;
+        }).toList(growable: true);
+      });
+    }
+  }
+
   void _showDesktopContextMenu(BuildContext context, Offset position) {
     _closeTransientPanels();
     final RenderBox? overlay = Overlay.of(context).context.findRenderObject() as RenderBox?;
@@ -1832,12 +2272,51 @@ class _CloudOSShellState extends State<CloudOSShell> {
       ),
       items: const <PopupMenuEntry<String>>[
         PopupMenuItem<String>(
+          value: 'new_folder',
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.create_new_folder_rounded, size: 16, color: Color(0xFFF6AD55)),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text('Nova Pasta', style: TextStyle(color: CloudOSColors.text, fontSize: 13, fontWeight: FontWeight.w600)),
+              ),
+            ],
+          ),
+        ),
+        PopupMenuItem<String>(
+          value: 'new_file',
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.note_add_rounded, size: 16, color: CloudOSColors.secondary),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text('Novo Arquivo de Texto', style: TextStyle(color: CloudOSColors.text, fontSize: 13)),
+              ),
+            ],
+          ),
+        ),
+        PopupMenuItem<String>(
+          value: 'organize',
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.grid_view_rounded, size: 16, color: CloudOSColors.accent),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text('Organizar Ícones', style: TextStyle(color: CloudOSColors.text, fontSize: 13)),
+              ),
+            ],
+          ),
+        ),
+        PopupMenuDivider(height: 1),
+        PopupMenuItem<String>(
           value: 'terminal',
           child: Row(
             children: <Widget>[
               Icon(Icons.terminal_rounded, size: 16, color: CloudOSColors.accent),
               SizedBox(width: 10),
-              Text('Abrir Terminal', style: TextStyle(color: CloudOSColors.text, fontSize: 13)),
+              Expanded(
+                child: Text('Abrir Terminal', style: TextStyle(color: CloudOSColors.text, fontSize: 13)),
+              ),
             ],
           ),
         ),
@@ -1847,7 +2326,9 @@ class _CloudOSShellState extends State<CloudOSShell> {
             children: <Widget>[
               Icon(Icons.description_rounded, size: 16, color: CloudOSColors.accent),
               SizedBox(width: 10),
-              Text('Nova Anotação', style: TextStyle(color: CloudOSColors.text, fontSize: 13)),
+              Expanded(
+                child: Text('Nova Anotação', style: TextStyle(color: CloudOSColors.text, fontSize: 13)),
+              ),
             ],
           ),
         ),
@@ -1857,7 +2338,9 @@ class _CloudOSShellState extends State<CloudOSShell> {
             children: <Widget>[
               Icon(Icons.calculate_rounded, size: 16, color: CloudOSColors.accent),
               SizedBox(width: 10),
-              Text('Calculadora', style: TextStyle(color: CloudOSColors.text, fontSize: 13)),
+              Expanded(
+                child: Text('Calculadora', style: TextStyle(color: CloudOSColors.text, fontSize: 13)),
+              ),
             ],
           ),
         ),
@@ -1867,7 +2350,9 @@ class _CloudOSShellState extends State<CloudOSShell> {
             children: <Widget>[
               Icon(Icons.monitor_heart_rounded, size: 16, color: CloudOSColors.accent),
               SizedBox(width: 10),
-              Text('Monitor de Sistema', style: TextStyle(color: CloudOSColors.text, fontSize: 13)),
+              Expanded(
+                child: Text('Monitor de Sistema', style: TextStyle(color: CloudOSColors.text, fontSize: 13)),
+              ),
             ],
           ),
         ),
@@ -1878,7 +2363,9 @@ class _CloudOSShellState extends State<CloudOSShell> {
             children: <Widget>[
               Icon(Icons.search_rounded, size: 16, color: CloudOSColors.accent),
               SizedBox(width: 10),
-              Text('Central de Comando (Alt+Espaço)', style: TextStyle(color: CloudOSColors.text, fontSize: 13)),
+              Expanded(
+                child: Text('Central de Comando', style: TextStyle(color: CloudOSColors.text, fontSize: 13)),
+              ),
             ],
           ),
         ),
@@ -1888,12 +2375,17 @@ class _CloudOSShellState extends State<CloudOSShell> {
             children: <Widget>[
               Icon(Icons.settings_rounded, size: 16, color: CloudOSColors.text),
               SizedBox(width: 10),
-              Text('Configurações', style: TextStyle(color: CloudOSColors.text, fontSize: 13)),
+              Expanded(
+                child: Text('Configurações', style: TextStyle(color: CloudOSColors.text, fontSize: 13)),
+              ),
             ],
           ),
         ),
       ],
     ).then((choice) {
+      if (choice == 'new_folder') _promptCreateNewFolder(position);
+      if (choice == 'new_file') _promptCreateNewFile(position);
+      if (choice == 'organize') _organizeDesktopIcons();
       if (choice == 'terminal') _toggleOrFocusWindow('terminal');
       if (choice == 'notes') _toggleOrFocusWindow('notes');
       if (choice == 'calculator') _toggleOrFocusWindow('calculator');
@@ -1995,6 +2487,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
               ),
                 child: TerminalWindow(
                   bridge: widget.bridge,
+                  isActive: activeInternalWindowId == 'terminal',
                 ),
               ),
             ),
@@ -2088,6 +2581,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
               child: SettingsWindow(
                 snapshot: snapshot,
                 bridge: widget.bridge,
+                initialSection: settingsSection,
               ),
             ),
           ),
@@ -2222,6 +2716,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
                 runningApps: _startRunningApps,
                 onSwitchToApp: (id) => _toggleOrFocusWindow(id),
                 onCloseApp: (id) => _closeWindow(id),
+                bridge: widget.bridge,
               ),
             ),
           ),
@@ -2265,6 +2760,11 @@ class _CloudOSShellState extends State<CloudOSShell> {
         onActivateWindow: _activateWindowFromStart,
         onCloseWindow: _closeWindowFromStart,
         onClose: () => setState(() => startOpen = false),
+        onLockSession: () {
+          unawaited(widget.bridge.lockSystem());
+          setState(_closeTransientPanels);
+        },
+        onPowerOptions: () => _openSettingsSection(SettingsSection.power),
       );
     } else if (quickSettingsOpen) {
       child = QuickSettingsPanel(
@@ -2275,18 +2775,14 @@ class _CloudOSShellState extends State<CloudOSShell> {
         onSetVolume: widget.bridge.setVolume,
         onSetBrightness: widget.bridge.setBrightness,
         onOpenSettings: () => _toggleOrFocusWindow('settings'),
-        onOpenNetworkSettings: () => unawaited(
-          _openQuickSettingsRoute(QuickSettingsRoute.wifi),
-        ),
-        onOpenBluetoothSettings: () => unawaited(
-          _openQuickSettingsRoute(QuickSettingsRoute.bluetooth),
-        ),
-        onOpenNightLightSettings: () => unawaited(
-          _openQuickSettingsRoute(QuickSettingsRoute.nightLight),
-        ),
-        onOpenFocusSettings: () => unawaited(
-          _openQuickSettingsRoute(QuickSettingsRoute.focus),
-        ),
+        onOpenNetworkSettings: () =>
+            _openQuickSettingsRoute(QuickSettingsRoute.wifi),
+        onOpenBluetoothSettings: () =>
+            _openQuickSettingsRoute(QuickSettingsRoute.bluetooth),
+        onOpenNightLightSettings: () =>
+            _openQuickSettingsRoute(QuickSettingsRoute.nightLight),
+        onOpenFocusSettings: () =>
+            _openQuickSettingsRoute(QuickSettingsRoute.focus),
       );
     } else if (notificationsOpen) {
       child = NotificationCenterPanel(

@@ -374,6 +374,49 @@ private:
         return result;
     }
 
+    static void LaunchDirectWindowsApp(std::string_view app_id)
+    {
+        if (app_id.rfind("windows:", 0) != 0) return;
+        const std::string_view sub = app_id.substr(8);
+        std::wstring target_cmd;
+        if (sub == "vscode")
+        {
+            target_cmd = L"cmd.exe /c start \"\" code";
+        }
+        else if (sub == "calc" || sub == "calculator")
+        {
+            target_cmd = L"calc.exe";
+        }
+        else if (sub == "explorer")
+        {
+            target_cmd = L"explorer.exe";
+        }
+        else if (sub == "taskmgr")
+        {
+            target_cmd = L"taskmgr.exe";
+        }
+        else if (sub.rfind("settings:", 0) == 0)
+        {
+            const std::wstring setting_name = Utf8ToWide(sub.substr(9));
+            target_cmd = L"cmd.exe /c start \"\" ms-settings:" + setting_name;
+        }
+        else
+        {
+            target_cmd = L"cmd.exe /c start \"\" " + Utf8ToWide(sub);
+        }
+
+        STARTUPINFOW si{};
+        si.cb = sizeof(si);
+        PROCESS_INFORMATION pi{};
+        std::vector<wchar_t> cmd_buf(target_cmd.begin(), target_cmd.end());
+        cmd_buf.push_back(L'\0');
+        if (CreateProcessW(nullptr, cmd_buf.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi))
+        {
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+        }
+    }
+
     static bool BlockLaunch(std::string_view app_id, const std::string& error)
     {
         std::wstring message =
@@ -384,11 +427,16 @@ private:
         message += Utf8ToWide(error);
         message += L"\n\nThe application was not allowed to escape into the Windows desktop.";
 
-        MessageBoxW(
+        std::wstring prompt = message + L"\n\nDeseja iniciar este aplicativo diretamente na \u00E1rea de trabalho do Windows?";
+        const int choice = MessageBoxW(
             FindCloudOSWindow(),
-            message.c_str(),
+            prompt.c_str(),
             L"CloudOS - Windows application blocked",
-            MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
+            MB_YESNO | MB_ICONWARNING | MB_SETFOREGROUND);
+        if (choice == IDYES)
+        {
+            LaunchDirectWindowsApp(app_id);
+        }
         return true;
     }
 
@@ -397,6 +445,8 @@ private:
         LaunchSpec& spec,
         std::string& error)
     {
+        wchar_t windows_directory[MAX_PATH]{};
+        const UINT win_length = GetWindowsDirectoryW(windows_directory, MAX_PATH);
         wchar_t system_directory[MAX_PATH]{};
         const UINT system_length = GetSystemDirectoryW(system_directory, MAX_PATH);
         if (system_length == 0 || system_length >= MAX_PATH)
@@ -407,7 +457,21 @@ private:
 
         if (app_id == "windows:notepad")
         {
-            spec.executable = std::wstring(system_directory, system_length) + L"\\notepad.exe";
+            // On Windows 11, C:\Windows\notepad.exe is the persistent classic Win32 notepad,
+            // while C:\Windows\System32\notepad.exe is an AppExecutionAlias redirection stub.
+            std::wstring win_notepad;
+            if (win_length > 0 && win_length < MAX_PATH)
+            {
+                win_notepad = std::wstring(windows_directory, win_length) + L"\\notepad.exe";
+            }
+            if (!win_notepad.empty() && GetFileAttributesW(win_notepad.c_str()) != INVALID_FILE_ATTRIBUTES)
+            {
+                spec.executable = win_notepad;
+            }
+            else
+            {
+                spec.executable = std::wstring(system_directory, system_length) + L"\\notepad.exe";
+            }
             spec.title = L"Notepad - CloudOS";
             return true;
         }

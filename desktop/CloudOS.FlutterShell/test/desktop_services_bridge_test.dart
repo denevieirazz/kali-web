@@ -10,7 +10,7 @@ void main() {
 
   group('CloudOSBridge Desktop Services V26 (Etapa 6)', () {
     const channel = MethodChannel('cloudos/native/v19.desktop-services-test');
-    final bridge = CloudOSBridge(channel: channel);
+    const bridge = CloudOSBridge(channel: channel);
 
     setUp(() {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

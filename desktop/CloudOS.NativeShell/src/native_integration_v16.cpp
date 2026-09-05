@@ -226,10 +226,19 @@ bool RunAndCapture(std::wstring command_line, std::vector<std::uint8_t>* bytes)
     if (!CreatePipe(&read_pipe, &write_pipe, &security, 0)) return false;
     (void)SetHandleInformation(read_pipe, HANDLE_FLAG_INHERIT, 0);
 
+    HANDLE nul_in = CreateFileW(
+        L"NUL",
+        GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        &security,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
     startup.dwFlags = STARTF_USESTDHANDLES;
-    startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    startup.hStdInput = (nul_in != INVALID_HANDLE_VALUE) ? nul_in : nullptr;
     startup.hStdOutput = write_pipe;
     startup.hStdError = write_pipe;
     PROCESS_INFORMATION process{};
@@ -247,6 +256,7 @@ bool RunAndCapture(std::wstring command_line, std::vector<std::uint8_t>* bytes)
         nullptr,
         &startup,
         &process);
+    if (nul_in != INVALID_HANDLE_VALUE) CloseHandle(nul_in);
     CloseHandle(write_pipe);
     if (!created)
     {
@@ -264,7 +274,12 @@ bool RunAndCapture(std::wstring command_line, std::vector<std::uint8_t>* bytes)
         if (bytes->size() > 4u * 1024u * 1024u) break;
     }
 
-    (void)WaitForSingleObject(process.hProcess, 10000);
+    const DWORD wait_result = WaitForSingleObject(process.hProcess, 3000);
+    if (wait_result == WAIT_TIMEOUT)
+    {
+        TerminateProcess(process.hProcess, 1);
+        WaitForSingleObject(process.hProcess, 500);
+    }
     DWORD exit_code = 1;
     (void)GetExitCodeProcess(process.hProcess, &exit_code);
     CloseHandle(process.hThread);
@@ -445,13 +460,68 @@ std::vector<UnifiedAppV16> NativeIntegrationV16::EnumerateWindowsInstalledApps()
 
 std::vector<std::wstring> NativeIntegrationV16::EnumerateWslDistributions()
 {
+    std::vector<std::wstring> distros;
+    HKEY root = nullptr;
+    if (RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Lxss",
+            0,
+            KEY_READ,
+            &root) == ERROR_SUCCESS)
+    {
+        DWORD index = 0;
+        for (;;)
+        {
+            wchar_t subkey_name[256]{};
+            DWORD name_len = ARRAYSIZE(subkey_name);
+            const LONG result = RegEnumKeyExW(
+                root,
+                index++,
+                subkey_name,
+                &name_len,
+                nullptr,
+                nullptr,
+                nullptr,
+                nullptr);
+            if (result == ERROR_NO_MORE_ITEMS) break;
+            if (result != ERROR_SUCCESS) continue;
+
+            const std::wstring subkey_str(subkey_name, name_len);
+            HKEY distro_key = nullptr;
+            if (RegOpenKeyExW(root, subkey_str.c_str(), 0, KEY_READ, &distro_key) == ERROR_SUCCESS)
+            {
+                wchar_t val_buf[256]{};
+                DWORD val_len = sizeof(val_buf);
+                DWORD val_type = 0;
+                if (RegQueryValueExW(
+                        distro_key,
+                        L"DistributionName",
+                        nullptr,
+                        &val_type,
+                        reinterpret_cast<LPBYTE>(val_buf),
+                        &val_len) == ERROR_SUCCESS && val_type == REG_SZ)
+                {
+                    const std::wstring distro = Trim(val_buf);
+                    if (!distro.empty() && std::find_if(distros.begin(), distros.end(), [&](const std::wstring& existing)
+                        { return _wcsicmp(existing.c_str(), distro.c_str()) == 0; }) == distros.end())
+                    {
+                        distros.push_back(distro);
+                    }
+                }
+                RegCloseKey(distro_key);
+            }
+        }
+        RegCloseKey(root);
+    }
+    if (!distros.empty()) return distros;
+
     const std::wstring wsl = WslExecutable();
     if (wsl.empty()) return {};
     std::vector<std::uint8_t> bytes;
     if (!RunAndCapture(QuoteWindowsArgument(wsl) + L" --list --quiet", &bytes)) return {};
 
     const std::wstring output = DecodeCapturedText(bytes);
-    std::vector<std::wstring> distros;
+    distros.clear();
     std::size_t begin = 0;
     while (begin <= output.size())
     {

@@ -10,7 +10,7 @@ void main() {
 
   group('CloudOSBridge Recovery & Lifecycle V26 (Etapa 7 & 8)', () {
     const channel = MethodChannel('cloudos/native/v19.recovery-lifecycle-test');
-    final bridge = CloudOSBridge(channel: channel);
+    const bridge = CloudOSBridge(channel: channel);
 
     setUp(() {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

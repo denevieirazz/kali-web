@@ -112,8 +112,8 @@ class CloudTaskbar extends StatelessWidget {
         child: GlassSurface(
           borderRadius: 14,
           blur: 24,
-          color: const Color(0xF2131C27),
-          borderColor: CloudOSColors.border,
+          color: cloudThemeNotifier.value.isDark ? const Color(0xF2131C27) : const Color(0xF2FFFFFF),
+          borderColor: cloudThemeNotifier.value.isDark ? CloudOSColors.border : const Color(0xFFCBD5E1),
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           child: SizedBox(
             height: innerHeight,
@@ -146,7 +146,7 @@ class CloudTaskbar extends StatelessWidget {
                         TaskbarTaskButton(
                           tooltip: 'Arquivos (Ctrl+Alt+E)',
                           icon: Icons.folder_rounded,
-                          label: showLabels ? 'Arquivos' : null,
+                          label: filesRunning ? 'Arquivos' : (showLabels ? 'Arquivos' : null),
                           active: filesActive,
                           isRunning: filesRunning,
                           onPressed: onFiles,
@@ -156,7 +156,7 @@ class CloudTaskbar extends StatelessWidget {
                         TaskbarTaskButton(
                           tooltip: 'Navegador Web',
                           icon: Icons.language_rounded,
-                          label: showLabels ? 'Navegador' : null,
+                          label: browserRunning ? 'Navegador' : (showLabels ? 'Navegador' : null),
                           active: browserActive,
                           isRunning: browserRunning,
                           onPressed: onBrowser,
@@ -166,7 +166,7 @@ class CloudTaskbar extends StatelessWidget {
                         TaskbarTaskButton(
                           tooltip: 'Terminal ConPTY (Ctrl+Alt+Enter)',
                           icon: Icons.terminal_rounded,
-                          label: showLabels ? 'Terminal' : null,
+                          label: terminalRunning ? 'Terminal' : (showLabels ? 'Terminal' : null),
                           active: terminalActive,
                           isRunning: terminalRunning,
                           onPressed: onTerminal,
@@ -177,7 +177,7 @@ class CloudTaskbar extends StatelessWidget {
                           TaskbarTaskButton(
                             tooltip: 'Configurações',
                             icon: Icons.settings_rounded,
-                            label: showLabels ? 'Configurações' : null,
+                            label: 'Configurações',
                             active: settingsActive,
                             isRunning: true,
                             onPressed: onSettings,
@@ -189,7 +189,7 @@ class CloudTaskbar extends StatelessWidget {
                           TaskbarTaskButton(
                             tooltip: 'CloudOS Notes',
                             icon: Icons.description_rounded,
-                            label: showLabels ? 'Notas' : null,
+                            label: 'Notas',
                             active: notesActive,
                             isRunning: true,
                             onPressed: onNotes,
@@ -201,7 +201,7 @@ class CloudTaskbar extends StatelessWidget {
                           TaskbarTaskButton(
                             tooltip: 'Calculadora',
                             icon: Icons.calculate_rounded,
-                            label: showLabels ? 'Calculadora' : null,
+                            label: 'Calculadora',
                             active: calculatorActive,
                             isRunning: true,
                             onPressed: onCalculator,
@@ -213,7 +213,7 @@ class CloudTaskbar extends StatelessWidget {
                           TaskbarTaskButton(
                             tooltip: 'Monitor de Sistema',
                             icon: Icons.monitor_heart_rounded,
-                            label: showLabels ? 'Monitor' : null,
+                            label: 'Monitor',
                             active: taskManagerActive,
                             isRunning: true,
                             onPressed: onTaskManager,
@@ -225,7 +225,7 @@ class CloudTaskbar extends StatelessWidget {
                           TaskbarTaskButton(
                             tooltip: '${win.title} (${win.platform.toUpperCase()})',
                             icon: win.icon,
-                            label: showLabels ? win.title : null,
+                            label: win.title,
                             active: win.isFocused,
                             isRunning: true,
                             onPressed: () => onWindowTap?.call(win),

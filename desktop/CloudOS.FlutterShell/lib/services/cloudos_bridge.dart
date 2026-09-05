@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/services.dart';
 
@@ -658,7 +659,52 @@ class CloudOSBridge {
     }
   }
 
+  Future<bool> openWindowsSettings([String uri = 'ms-settings:']) async {
+    try {
+      await Process.run('cmd.exe', ['/c', 'start', '', uri]);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> restartWsl() async {
+    try {
+      await Process.run('cmd.exe', ['/c', 'wsl --shutdown']);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> openWindowsApp(String id) async {
+    try {
+      final target = id.startsWith('windows:') ? id.substring('windows:'.length) : id;
+      if (target == 'vscode' || target == 'code') {
+        await Process.run('cmd.exe', ['/c', 'start', '', 'code']);
+      } else if (target == 'explorer') {
+        await Process.run('cmd.exe', ['/c', 'start', '', 'explorer.exe']);
+      } else if (target == 'calc') {
+        await Process.run('cmd.exe', ['/c', 'start', '', 'calc.exe']);
+      } else if (target == 'taskmgr') {
+        await Process.run('cmd.exe', ['/c', 'start', '', 'taskmgr.exe']);
+      } else {
+        await Process.run('cmd.exe', ['/c', 'start', '', target]);
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<bool> launchApp(String id) async {
+    if (id.startsWith('windows:settings:')) {
+      final res = await launchAppStructured(id);
+      return res.launched;
+    }
+    if (id.startsWith('windows:') && id != 'windows:notepad') {
+      return await openWindowsApp(id);
+    }
     try {
       final result = await _channel.invokeMethod<bool>(
         'launchApp',
@@ -673,6 +719,38 @@ class CloudOSBridge {
   }
 
   Future<AppLaunchStatus> launchAppStructured(String id) async {
+    if (id.startsWith('windows:settings:')) {
+      final sub = id.substring('windows:settings:'.length);
+      final msUri = switch (sub) {
+        'wifi' || 'network' => 'ms-settings:network-wifi',
+        'display' => 'ms-settings:display',
+        'sound' => 'ms-settings:sound',
+        'bluetooth' => 'ms-settings:bluetooth',
+        'power' => 'ms-settings:powersleep',
+        'storage' => 'ms-settings:storagesense',
+        _ => 'ms-settings:$sub',
+      };
+      await openWindowsSettings(msUri);
+      return AppLaunchStatus(
+        id: id,
+        status: 'running',
+        launched: true,
+        platform: 'windows',
+        target: msUri,
+        message: 'Configurações do Windows abertas com sucesso',
+      );
+    }
+    if (id.startsWith('windows:') && id != 'windows:notepad') {
+      final ok = await openWindowsApp(id);
+      return AppLaunchStatus(
+        id: id,
+        status: ok ? 'running' : 'failed',
+        launched: ok,
+        platform: 'windows',
+        target: id,
+        message: ok ? 'Aplicativo iniciado no Windows' : 'Falha ao iniciar aplicativo',
+      );
+    }
     try {
       final raw = await _channel.invokeMapMethod<Object?, Object?>(
         'launchAppStructured',
@@ -1016,6 +1094,7 @@ class CloudOSBridge {
 
   Future<bool> setMasterVolume(double volume) async {
     final res = await invokeBrokerRpc('audio.setVolume', {'volume': volume});
+    unawaited(setVolume(volume));
     return res != null && (res['success'] as bool? ?? false);
   }
 

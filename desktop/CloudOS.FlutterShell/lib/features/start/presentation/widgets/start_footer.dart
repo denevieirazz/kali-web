@@ -3,7 +3,14 @@ import 'package:flutter/material.dart';
 import '../../../../core/cloudos_theme.dart';
 
 class StartFooter extends StatelessWidget {
-  const StartFooter({super.key});
+  const StartFooter({
+    this.onLockSession,
+    this.onPowerOptions,
+    super.key,
+  });
+
+  final VoidCallback? onLockSession;
+  final VoidCallback? onPowerOptions;
 
   @override
   Widget build(BuildContext context) {
@@ -45,15 +52,17 @@ class StartFooter extends StatelessWidget {
         ),
         const Spacer(),
         _FooterAction(
+          key: const ValueKey<String>('start-footer-lock'),
           icon: Icons.lock_outline_rounded,
           tooltip: 'Bloquear Sessão',
-          onPressed: () {},
+          onPressed: onLockSession ?? () {},
         ),
         const SizedBox(width: 4),
         _FooterAction(
+          key: const ValueKey<String>('start-footer-power'),
           icon: Icons.power_settings_new_rounded,
           tooltip: 'Opções de Energia',
-          onPressed: () {},
+          onPressed: onPowerOptions ?? () {},
         ),
       ],
     );
@@ -62,6 +71,7 @@ class StartFooter extends StatelessWidget {
 
 class _FooterAction extends StatelessWidget {
   const _FooterAction({
+    super.key,
     required this.icon,
     required this.tooltip,
     required this.onPressed,

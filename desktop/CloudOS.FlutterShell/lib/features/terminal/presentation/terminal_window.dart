@@ -28,10 +28,13 @@ class TerminalTabItem {
   final FocusNode focusNode = FocusNode();
   String? sessionId;
   bool isRunning = false;
+  bool hasReceivedData = false;
+  Timer? wslWatchdogTimer;
   int cols = 80;
   int rows = 24;
 
   void dispose() {
+    wslWatchdogTimer?.cancel();
     focusNode.dispose();
   }
 }
@@ -44,6 +47,7 @@ class TerminalWindow extends StatefulWidget {
     this.initialShell = TerminalShellKind.powershell,
     this.requestedShell,
     this.launchRevision = 0,
+    this.isActive = true,
   });
 
   final CloudOSBridge bridge;
@@ -51,6 +55,7 @@ class TerminalWindow extends StatefulWidget {
   final TerminalShellKind initialShell;
   final TerminalShellKind? requestedShell;
   final int launchRevision;
+  final bool isActive;
 
   @override
   State<TerminalWindow> createState() => _TerminalWindowState();
@@ -92,6 +97,9 @@ class _TerminalWindowState extends State<TerminalWindow> {
   @override
   void didUpdateWidget(covariant TerminalWindow oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.isActive && !oldWidget.isActive) {
+      _activeTab?.focusNode.requestFocus();
+    }
     if (oldWidget.launchRevision == widget.launchRevision ||
         widget.requestedShell == null) {
       return;
@@ -122,6 +130,8 @@ class _TerminalWindowState extends State<TerminalWindow> {
       if (!mounted) return;
       for (final tab in _tabs) {
         if (tab.sessionId == event.sessionId) {
+          tab.hasReceivedData = true;
+          tab.wslWatchdogTimer?.cancel();
           tab.terminal.write(event.data);
           break;
         }
@@ -258,8 +268,32 @@ class _TerminalWindowState extends State<TerminalWindow> {
     };
     tab.terminal.onTitleChange = (title) {
       if (!mounted || title.trim().isEmpty || !_tabs.contains(tab)) return;
-      setState(() => tab.title = title.trim());
+      final clean = _sanitizeTerminalTitle(title, tab.shellKind, tab.distro);
+      setState(() => tab.title = clean);
     };
+  }
+
+  String _sanitizeTerminalTitle(String raw, TerminalShellKind kind, String distro) {
+    final trimmed = raw.trim();
+    final lower = trimmed.toLowerCase();
+    if (lower.contains('powershell.exe') || lower.endsWith('powershell')) {
+      return 'PowerShell (ConPTY)';
+    }
+    if (lower.contains('cmd.exe') || lower.endsWith('cmd')) {
+      return 'Prompt de Comando (ConPTY)';
+    }
+    if (lower.contains('wsl.exe') || lower.contains('bash') || lower.contains('login')) {
+      return distro.isEmpty ? 'WSL padrão (ConPTY)' : 'WSL: $distro';
+    }
+    if (trimmed.contains(r'\') || trimmed.contains('/')) {
+      final parts = trimmed.split(RegExp(r'[\\/]'));
+      final last = parts.lastWhere((p) => p.trim().isNotEmpty, orElse: () => trimmed);
+      if (last.toLowerCase().endsWith('.exe')) {
+        return last.substring(0, last.length - 4);
+      }
+      return last;
+    }
+    return trimmed;
   }
 
   Future<void> _startConPtySession(TerminalTabItem tab) async {
@@ -291,6 +325,30 @@ class _TerminalWindowState extends State<TerminalWindow> {
       tab.isRunning = true;
       await widget.bridge.resizeTerminal(sessionId, tab.cols, tab.rows);
       if (mounted) setState(() {});
+
+      if (tab.shellKind == TerminalShellKind.powershell) {
+        unawaited(Future.delayed(const Duration(milliseconds: 150), () {
+          if (!mounted || !_tabs.contains(tab) || !tab.isRunning) return;
+          if (!tab.hasReceivedData) {
+            widget.bridge.writeTerminal(sessionId, '\r\n');
+          }
+        }));
+      }
+
+      if (tab.shellKind == TerminalShellKind.wsl) {
+        tab.wslWatchdogTimer = Timer(const Duration(milliseconds: 3000), () {
+          if (!mounted || !_tabs.contains(tab) || tab.hasReceivedData) return;
+          tab.terminal.write(
+            '\r\n\x1b[33m[Aviso CloudOS: O Subsistema WSL do Windows não está respondendo]\x1b[0m\r\n'
+            '\x1b[90mO processo da máquina virtual do Windows (vmmemWSL) parece estar travado no host.\r\n'
+            'Para destravar o WSL no Windows:\r\n'
+            '  1. Abra o PowerShell do Windows como Administrador\r\n'
+            '  2. Execute: wsl --shutdown\r\n'
+            'Após destravar o WSL, feche e reabra esta aba.\x1b[0m\r\n\r\n'
+            '\x1b[36mDica: As abas de PowerShell e Prompt de Comando (CMD) funcionam normalmente (clique no "+" acima).\x1b[0m\r\n',
+          );
+        });
+      }
     } catch (error, stackTrace) {
       CloudOSLogger.error(
         'TerminalWindow',
@@ -344,18 +402,25 @@ class _TerminalWindowState extends State<TerminalWindow> {
           Expanded(
             child: tab == null
                 ? const Center(child: CircularProgressIndicator())
-                : TerminalView(
-                    tab.terminal,
-                    focusNode: tab.focusNode,
-                    autofocus: true,
-                    autoResize: true,
-                    padding: const EdgeInsets.all(10),
-                    textStyle: const TerminalStyle(
-                      fontFamily: 'Consolas',
-                      fontSize: 13,
-                      height: 1.2,
+                : GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTapDown: (_) {
+                      tab.focusNode.requestFocus();
+                    },
+                    child: TerminalView(
+                      tab.terminal,
+                      focusNode: tab.focusNode,
+                      autofocus: true,
+                      autoResize: true,
+                      hardwareKeyboardOnly: true,
+                      padding: const EdgeInsets.all(10),
+                      textStyle: const TerminalStyle(
+                        fontFamily: 'Consolas',
+                        fontSize: 13,
+                        height: 1.2,
+                      ),
+                      theme: TerminalThemes.defaultTheme,
                     ),
-                    theme: TerminalThemes.defaultTheme,
                   ),
           ),
         ],
@@ -445,21 +510,33 @@ class _TerminalWindowState extends State<TerminalWindow> {
             itemBuilder: (context) => <PopupMenuEntry<String>>[
               const PopupMenuItem(
                 value: 'powershell',
-                child: Text('PowerShell (ConPTY)'),
+                child: Text(
+                  'PowerShell (ConPTY)',
+                  style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+                ),
               ),
               const PopupMenuItem(
                 value: 'cmd',
-                child: Text('Prompt de Comando (ConPTY)'),
+                child: Text(
+                  'Prompt de Comando (ConPTY)',
+                  style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+                ),
               ),
               if (_defaultDistro.isNotEmpty)
                 PopupMenuItem(
                   value: 'wsl_default',
-                  child: Text('WSL padrão: $_defaultDistro'),
+                  child: Text(
+                    'WSL padrão: $_defaultDistro',
+                    style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+                  ),
                 ),
               for (final distro in _wslDistros)
                 PopupMenuItem(
                   value: 'wsl:$distro',
-                  child: Text('WSL: $distro'),
+                  child: Text(
+                    'WSL: $distro',
+                    style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+                  ),
                 ),
             ],
           ),

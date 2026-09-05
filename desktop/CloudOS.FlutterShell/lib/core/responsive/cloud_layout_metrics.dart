@@ -45,13 +45,13 @@ class CloudLayoutMetrics {
 
   // Start Panel dimensions
   double get startPanelWidth {
-    if (screenWidth < 600) return math.max(300.0, screenWidth - 32.0);
-    if (screenWidth < 900) return 520.0;
+    if (screenWidth < 600) return math.max(320.0, screenWidth - 32.0);
+    if (screenWidth < 900) return math.min(540.0, screenWidth - 32.0);
     return 620.0;
   }
 
   double get startPanelHeight {
-    return math.min(560.0, math.max(340.0, workAreaHeight - 48.0));
+    return math.min(680.0, math.max(400.0, workAreaHeight * 0.72));
   }
 
   // Quick Settings dimensions

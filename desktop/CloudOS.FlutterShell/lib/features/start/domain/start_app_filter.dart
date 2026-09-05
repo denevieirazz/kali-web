@@ -3,8 +3,10 @@ import '../../../models/shell_models.dart';
 const startFilters = <String>[
   'Todos',
   'Abertos',
-  'Produtividade',
+  'CloudOS',
+  'Windows',
   'Linux / WSL',
+  'Produtividade',
   'Sistema',
   'Utilitários',
 ];
@@ -27,7 +29,13 @@ List<CloudApp> filterStartApps({
         if (!matchesQuery) return false;
         if (selectedFilter == 'Todos') return true;
         if (selectedFilter == 'Abertos') return false;
-        if (selectedFilter == 'Linux / WSL') {
+        if (selectedFilter == 'CloudOS') {
+          return app.platform == CloudAppPlatform.cloudos;
+        }
+        if (selectedFilter == 'Windows') {
+          return app.platform == CloudAppPlatform.windows;
+        }
+        if (selectedFilter == 'Linux / WSL' || selectedFilter == 'Linux') {
           return app.platform == CloudAppPlatform.linux;
         }
         return app.category == selectedFilter;

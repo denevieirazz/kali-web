@@ -10,6 +10,7 @@ class StartOverview extends StatelessWidget {
     required this.pinnedApps,
     required this.recentApps,
     required this.runningApps,
+    this.allApps = const <CloudApp>[],
     required this.onLaunch,
     required this.onActivateWindow,
     required this.onCloseWindow,
@@ -19,6 +20,7 @@ class StartOverview extends StatelessWidget {
   final List<CloudApp> pinnedApps;
   final List<CloudApp> recentApps;
   final List<StartRunningApp> runningApps;
+  final List<CloudApp> allApps;
   final ValueChanged<CloudApp> onLaunch;
   final ValueChanged<String> onActivateWindow;
   final ValueChanged<String> onCloseWindow;
@@ -32,6 +34,10 @@ class StartOverview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final otherApps = allApps
+        .where((app) => !pinnedApps.any((p) => p.id == app.id))
+        .toList(growable: false);
+
     return CustomScrollView(
       slivers: <Widget>[
         SliverToBoxAdapter(
@@ -51,8 +57,8 @@ class StartOverview extends StatelessWidget {
         ),
         const SliverToBoxAdapter(child: SizedBox(height: 8)),
         SliverGrid(
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 3,
+          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: 220,
             mainAxisExtent: 68,
             crossAxisSpacing: 8,
             mainAxisSpacing: 8,
@@ -95,6 +101,47 @@ class StartOverview extends StatelessWidget {
             return StartRecentTile(app: app, onTap: () => onLaunch(app));
           }, childCount: recentApps.length),
         ),
+        if (otherApps.isNotEmpty) ...<Widget>[
+          const SliverToBoxAdapter(child: SizedBox(height: 14)),
+          SliverToBoxAdapter(
+            child: Row(
+              children: <Widget>[
+                Text(
+                  'Mais Aplicativos',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                const Spacer(),
+                Text(
+                  '${otherApps.length} adicionais',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 8)),
+          SliverGrid(
+            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+              maxCrossAxisExtent: 220,
+              mainAxisExtent: 68,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+            ),
+            delegate: SliverChildBuilderDelegate((context, index) {
+              final app = otherApps[index];
+              final runningApp = _runningAppFor(app);
+              return StartPinnedAppCard(
+                app: app,
+                onTap: runningApp == null
+                    ? () => onLaunch(app)
+                    : () => onActivateWindow(runningApp.id),
+                runningApp: runningApp,
+                onClose: runningApp == null
+                    ? null
+                    : () => onCloseWindow(runningApp.id),
+              );
+            }, childCount: otherApps.length),
+          ),
+        ],
       ],
     );
   }

@@ -302,7 +302,12 @@ std::string CloudOSConPTYManager::CreateSession(
     std::wstring command_line;
     if (shell_kind == "wsl")
     {
-        command_line = L"wsl.exe";
+        std::wstring wsl_exe = L"wsl.exe";
+        if (GetFileAttributesW(L"C:\\Program Files\\WSL\\wsl.exe") != INVALID_FILE_ATTRIBUTES)
+        {
+            wsl_exe = L"\"C:\\Program Files\\WSL\\wsl.exe\"";
+        }
+        command_line = wsl_exe + L" --cd ~";
         if (!distro.empty())
         {
             const std::wstring wide_distro = Utf8ToWide(distro);
@@ -328,7 +333,7 @@ std::string CloudOSConPTYManager::CreateSession(
 
     STARTUPINFOEXW startup_info{};
     startup_info.StartupInfo.cb = sizeof(startup_info);
-    startup_info.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startup_info.StartupInfo.dwFlags = 0;
     startup_info.lpAttributeList = attribute_list.get();
 
     PROCESS_INFORMATION process_info{};

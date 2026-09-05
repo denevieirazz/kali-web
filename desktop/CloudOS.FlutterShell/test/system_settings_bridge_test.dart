@@ -10,7 +10,7 @@ void main() {
 
   group('CloudOSBridge System Settings & Controls V25', () {
     const channel = MethodChannel('cloudos/native/v19.settings-test');
-    final bridge = CloudOSBridge(channel: channel);
+    const bridge = CloudOSBridge(channel: channel);
 
     setUp(() {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -357,8 +357,8 @@ void main() {
     });
 
     test('degraded fallback when channel throws or is missing', () async {
-      final missingBridge = CloudOSBridge(
-        channel: const MethodChannel('cloudos/native/v19.missing'),
+      const missingBridge = CloudOSBridge(
+        channel: MethodChannel('cloudos/native/v19.missing'),
       );
       final monitors = await missingBridge.getDisplayMonitors();
       expect(monitors, isEmpty);

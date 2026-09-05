@@ -17,80 +17,89 @@ class StartFilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final primaryAccent = Theme.of(context).colorScheme.primary;
+    final primaryAccentSoft = primaryAccent.withValues(alpha: 0.22);
+
     return SizedBox(
-      height: 28,
-      child: ListView.separated(
+      height: 36,
+      child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        itemCount: startFilters.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 6),
-        itemBuilder: (context, index) {
-          final filter = startFilters[index];
-          final isSelected = filter == selectedFilter;
-          return InkWell(
-            onTap: () => onSelected(filter),
-            borderRadius: BorderRadius.circular(14),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 140),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? CloudOSColors.accentSoft
-                    : CloudOSColors.elevated.withValues(alpha: 0.5),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: isSelected
-                      ? CloudOSColors.accent
-                      : CloudOSColors.border,
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Text(
-                    filter,
-                    style: TextStyle(
+        child: Row(
+          children: <Widget>[
+            for (int index = 0; index < startFilters.length; index++) ...<Widget>[
+              if (index > 0) const SizedBox(width: 6),
+              () {
+                final filter = startFilters[index];
+                final isSelected = filter == selectedFilter;
+                return InkWell(
+                  key: ValueKey<String>('start-filter-$filter'),
+                  onTap: () => onSelected(filter),
+                  borderRadius: BorderRadius.circular(16),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 140),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
                       color: isSelected
-                          ? CloudOSColors.text
-                          : CloudOSColors.secondary,
-                      fontSize: 11,
-                      fontWeight: isSelected
-                          ? FontWeight.w600
-                          : FontWeight.w500,
+                          ? primaryAccentSoft
+                          : CloudOSColors.elevated.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: isSelected
+                            ? primaryAccent
+                            : CloudOSColors.border,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        Text(
+                          filter,
+                          style: TextStyle(
+                            color: isSelected
+                                ? CloudOSColors.text
+                                : CloudOSColors.secondary,
+                            fontSize: 11.5,
+                            fontWeight: isSelected
+                                ? FontWeight.w600
+                                : FontWeight.w500,
+                          ),
+                        ),
+                        if (filter == 'Abertos') ...<Widget>[
+                          const SizedBox(width: 6),
+                          Container(
+                            key: const ValueKey<String>('start-running-count'),
+                            constraints: const BoxConstraints(minWidth: 18),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: runningCount > 0
+                                  ? primaryAccent.withValues(alpha: 0.28)
+                                  : CloudOSColors.border,
+                              borderRadius: BorderRadius.circular(9),
+                            ),
+                            child: Text(
+                              '$runningCount',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: runningCount > 0
+                                    ? primaryAccent
+                                    : CloudOSColors.caption,
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                  if (filter == 'Abertos') ...<Widget>[
-                    const SizedBox(width: 5),
-                    Container(
-                      key: const ValueKey<String>('start-running-count'),
-                      constraints: const BoxConstraints(minWidth: 18),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 5,
-                        vertical: 1,
-                      ),
-                      decoration: BoxDecoration(
-                        color: runningCount > 0
-                            ? CloudOSColors.accent.withValues(alpha: 0.22)
-                            : CloudOSColors.border,
-                        borderRadius: BorderRadius.circular(9),
-                      ),
-                      child: Text(
-                        '$runningCount',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: runningCount > 0
-                              ? CloudOSColors.accent
-                              : CloudOSColors.caption,
-                          fontSize: 9,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          );
-        },
+                );
+              }(),
+            ],
+          ],
+        ),
       ),
     );
   }

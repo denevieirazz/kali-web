@@ -1,7 +1,8 @@
 $ErrorActionPreference = 'Stop'
 $root = 'C:\Users\dougl\Downloads\testes\CloudOS'
 $release = Join-Path $root 'desktop\CloudOS.FlutterShell\build\windows\x64\runner\Release'
-$nativeStage = Join-Path $root 'desktop\CloudOS.NativeShell\artifacts\CloudOS-Native-Release-x64'
+$nativeStage = Join-Path $root 'desktop\CloudOS.NativeShell\bin\Release'
+$artifactsDir = Join-Path $root 'desktop\CloudOS.NativeShell\artifacts\CloudOS-Native-Release-x64'
 
 foreach ($name in @(
     'CloudOS.exe',
@@ -16,6 +17,9 @@ foreach ($name in @(
     $source = Join-Path $nativeStage $name
     if (-not (Test-Path -LiteralPath $source)) { throw "Integrated V21 payload missing: $source" }
     Copy-Item -LiteralPath $source -Destination $release -Force
+    if (Test-Path -LiteralPath $artifactsDir) {
+        Copy-Item -LiteralPath $source -Destination $artifactsDir -Force
+    }
 }
 
 Copy-Item -LiteralPath (Join-Path $root 'scripts\flutter\verify-cloudos-v21-runtime.ps1') -Destination $release -Force

@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:xterm/xterm.dart';
 
@@ -39,4 +41,75 @@ void main() {
     expect(output, contains('\x1b[A'));
     expect(output, contains('\x03'));
   });
+
+  testWidgets('TerminalView requires hardwareKeyboardOnly for physical keystrokes', (tester) async {
+    final output = <String>[];
+    final terminal = Terminal(
+      platform: TerminalTargetPlatform.windows,
+      onOutput: output.add,
+    );
+    final focusNode = FocusNode();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: TerminalView(
+            terminal,
+            focusNode: focusNode,
+            autofocus: true,
+            hardwareKeyboardOnly: true,
+          ),
+        ),
+      ),
+    );
+
+    expect(focusNode.hasFocus, isTrue);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyO);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyU);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyG);
+    await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+
+    expect(output.join(), 'doug\x7f\r\x03');
+  });
+
+
+
+  testWidgets('TerminalView without hardwareKeyboardOnly drops alphabetic keystrokes on desktop', (tester) async {
+    final output = <String>[];
+    final terminal = Terminal(
+      platform: TerminalTargetPlatform.windows,
+      onOutput: output.add,
+    );
+    final focusNode = FocusNode();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: TerminalView(
+            terminal,
+            focusNode: focusNode,
+            autofocus: true,
+            hardwareKeyboardOnly: false, // default in TerminalView!
+          ),
+        ),
+      ),
+    );
+
+    expect(focusNode.hasFocus, isTrue);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyO);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+
+    // Only Enter worked (\r), 'd' and 'o' were dropped!
+    expect(output.join(), '\r');
+  });
 }
+
+

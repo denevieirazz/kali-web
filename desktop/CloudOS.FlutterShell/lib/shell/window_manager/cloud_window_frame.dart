@@ -42,6 +42,8 @@ class CloudWindowFrame extends StatelessWidget {
       onTapDown: (_) => onFocus(),
       child: GlassSurface(
         borderRadius: window.isMaximized ? 0 : 12,
+        color: CloudOSColors.liveSurface,
+        borderColor: CloudOSColors.liveBorder,
         child: Stack(
           children: <Widget>[
             Column(
@@ -65,9 +67,9 @@ class CloudWindowFrame extends StatelessWidget {
       height: 38,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
-        color: CloudOSColors.surface.withValues(alpha: 0.8),
-        border: const Border(
-          bottom: BorderSide(color: CloudOSColors.border),
+        color: CloudOSColors.liveSurfaceStrong.withValues(alpha: 0.9),
+        border: Border(
+          bottom: BorderSide(color: CloudOSColors.liveBorder),
         ),
       ),
       child: Row(
@@ -79,13 +81,13 @@ class CloudWindowFrame extends StatelessWidget {
               onDoubleTap: onToggleMaximize,
               child: Row(
                 children: <Widget>[
-                  Icon(window.icon, size: 16, color: CloudOSColors.accent),
+                  Icon(window.icon, size: 16, color: CloudOSColors.liveAccent),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       window.title,
-                      style: const TextStyle(
-                        color: CloudOSColors.text,
+                      style: TextStyle(
+                        color: CloudOSColors.liveText,
                         fontSize: 12.5,
                         fontWeight: FontWeight.w600,
                         overflow: TextOverflow.ellipsis,

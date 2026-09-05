@@ -8,11 +8,16 @@ class CloudOSApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'CloudOS Flutter Preview',
-      debugShowCheckedModeBanner: false,
-      theme: buildCloudOSTheme(),
-      home: const CloudOSShell(),
+    return ValueListenableBuilder<CloudThemeConfig>(
+      valueListenable: cloudThemeNotifier,
+      builder: (context, config, _) {
+        return MaterialApp(
+          title: 'CloudOS Flutter Preview',
+          debugShowCheckedModeBanner: false,
+          theme: buildCloudOSTheme(config),
+          home: const CloudOSShell(),
+        );
+      },
     );
   }
 }

@@ -21,6 +21,8 @@ class StartPanel extends StatefulWidget {
     required this.onActivateWindow,
     required this.onCloseWindow,
     required this.onClose,
+    this.onLockSession,
+    this.onPowerOptions,
     super.key,
   });
 
@@ -30,6 +32,8 @@ class StartPanel extends StatefulWidget {
   final ValueChanged<String> onActivateWindow;
   final ValueChanged<String> onCloseWindow;
   final VoidCallback onClose;
+  final VoidCallback? onLockSession;
+  final VoidCallback? onPowerOptions;
 
   @override
   State<StartPanel> createState() => _StartPanelState();
@@ -62,7 +66,7 @@ class _StartPanelState extends State<StartPanel> {
         .where((app) => app.isPinned)
         .toList(growable: false);
     final recentApps = widget.apps
-        .where((app) => app.isRecent)
+        .where((app) => app.isRecent && !pinnedApps.any((p) => p.id == app.id))
         .take(4)
         .toList(growable: false);
     final isSearching = query.trim().isNotEmpty;
@@ -79,8 +83,10 @@ class _StartPanelState extends State<StartPanel> {
 
     final metrics = context.cloudMetrics;
     final panelWidth = metrics.startPanelWidth;
-    final panelHeight = metrics.startPanelHeight;
     final bottomPadding = metrics.taskbarHeight + 12.0;
+    final maxAvailableHeight = (metrics.screenHeight - bottomPadding - 16.0).clamp(280.0, 720.0);
+    final panelHeight = metrics.startPanelHeight.clamp(280.0, maxAvailableHeight);
+    final isDark = cloudThemeNotifier.value.isDark;
 
     return Align(
       alignment: Alignment.bottomLeft,
@@ -92,8 +98,8 @@ class _StartPanelState extends State<StartPanel> {
           child: GlassSurface(
             borderRadius: 16,
             blur: 24,
-            color: const Color(0xF4121A25),
-            borderColor: CloudOSColors.borderStrong,
+            color: isDark ? const Color(0xF4121A25) : const Color(0xF4FFFFFF),
+            borderColor: isDark ? CloudOSColors.borderStrong : const Color(0xFFCBD5E1),
             padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -122,7 +128,7 @@ class _StartPanelState extends State<StartPanel> {
                           onActivate: widget.onActivateWindow,
                           onClose: widget.onCloseWindow,
                         )
-                      : isSearching
+                      : (isSearching || selectedFilter != 'Todos')
                       ? StartSearchResultsList(
                           results: filtered,
                           onLaunch: widget.onLaunch,
@@ -131,6 +137,7 @@ class _StartPanelState extends State<StartPanel> {
                           pinnedApps: pinnedApps,
                           recentApps: recentApps,
                           runningApps: widget.runningApps,
+                          allApps: widget.apps,
                           onLaunch: widget.onLaunch,
                           onActivateWindow: widget.onActivateWindow,
                           onCloseWindow: widget.onCloseWindow,
@@ -139,7 +146,10 @@ class _StartPanelState extends State<StartPanel> {
                 const SizedBox(height: 10),
                 const Divider(height: 1),
                 const SizedBox(height: 10),
-                const StartFooter(),
+                StartFooter(
+                  onLockSession: widget.onLockSession,
+                  onPowerOptions: widget.onPowerOptions,
+                ),
               ],
             ),
           ),

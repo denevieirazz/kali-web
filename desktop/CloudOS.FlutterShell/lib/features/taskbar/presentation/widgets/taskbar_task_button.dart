@@ -27,10 +27,14 @@ class TaskbarTaskButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final showRunningTask = isRunning && label != null;
+    final primaryAccent = Theme.of(context).colorScheme.primary;
+    final primaryAccentSoft = primaryAccent.withValues(alpha: 0.22);
     final background = active
-        ? CloudOSColors.active
+        ? primaryAccent.withValues(alpha: 0.28)
         : accent
-        ? CloudOSColors.accentSoft
+        ? primaryAccentSoft
+        : showRunningTask
+        ? CloudOSColors.elevated.withValues(alpha: 0.45)
         : Colors.transparent;
 
     return Tooltip(
@@ -39,13 +43,20 @@ class TaskbarTaskButton extends StatelessWidget {
         onTap: onPressed,
         borderRadius: BorderRadius.circular(10),
         child: Container(
-          width: showRunningTask ? 126 : 40,
+          constraints: BoxConstraints(
+            minWidth: showRunningTask ? 116 : 40,
+            maxWidth: showRunningTask ? 144 : 40,
+          ),
           height: 38,
           decoration: BoxDecoration(
             color: background,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: active ? CloudOSColors.borderStrong : Colors.transparent,
+              color: active
+                  ? primaryAccent.withValues(alpha: 0.6)
+                  : showRunningTask
+                  ? CloudOSColors.border
+                  : Colors.transparent,
             ),
           ),
           child: showRunningTask
@@ -105,7 +116,9 @@ class TaskbarTaskButton extends StatelessWidget {
                       child: Container(
                         height: 2,
                         decoration: BoxDecoration(
-                          color: CloudOSColors.accent,
+                          color: active
+                              ? primaryAccent
+                              : CloudOSColors.caption.withValues(alpha: 0.4),
                           borderRadius: BorderRadius.circular(2),
                         ),
                       ),
@@ -116,7 +129,7 @@ class TaskbarTaskButton extends StatelessWidget {
                   icon,
                   size: 20,
                   color: accent
-                      ? CloudOSColors.accent
+                      ? primaryAccent
                       : active
                       ? CloudOSColors.text
                       : CloudOSColors.secondary,

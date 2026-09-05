@@ -17,13 +17,13 @@ $hostSource = Get-Content -LiteralPath $hostPath -Raw
 $appServiceSource = Get-Content -LiteralPath $appServicePath -Raw
 
 function Assert-Contains([string]$Text, [string]$Needle, [string]$Message) {
-    if (-not $Text.Contains($Needle, [System.StringComparison]::Ordinal)) {
+    if ($Text.IndexOf($Needle, [System.StringComparison]::Ordinal) -lt 0) {
         throw $Message
     }
 }
 
 function Assert-NotContains([string]$Text, [string]$Needle, [string]$Message) {
-    if ($Text.Contains($Needle, [System.StringComparison]::Ordinal)) {
+    if ($Text.IndexOf($Needle, [System.StringComparison]::Ordinal) -ge 0) {
         throw $Message
     }
 }
@@ -56,9 +56,7 @@ foreach ($forbidden in @(
     'ShellExecuteW(nullptr, L"open", L"cmd.exe"',
     '{"windows:powershell", "PowerShell 7"'
 )) {
-    if ($appServiceSource.Contains($forbidden, [System.StringComparison]::Ordinal)) {
-        throw "System Broker console route regressed to an external/misidentified launch: $forbidden"
-    }
+    Assert-NotContains $appServiceSource $forbidden "System Broker console route regressed to an external/misidentified launch: $forbidden"
 }
 
 # The generic cross-process containment host is deliberately limited to the
@@ -102,19 +100,15 @@ foreach ($needle in @(
 }
 
 foreach ($forbiddenCall in @('ShellExecuteW(', 'ShellExecuteExW(')) {
-    if ($hostSource.Contains($forbiddenCall, [System.StringComparison]::OrdinalIgnoreCase)) {
+    if ($hostSource.IndexOf($forbiddenCall, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
         throw "Managed Win32 containment boundary must not use external launch fallback: $forbiddenCall"
     }
 }
 
 foreach ($unsupported in @('windows:vscode', 'windows:explorer', 'windows:taskmgr')) {
-    if ($hostSource.Contains($unsupported, [System.StringComparison]::Ordinal)) {
-        throw "Unsupported/singleton Windows app must not be silently allowlisted yet: $unsupported"
-    }
+    Assert-NotContains $hostSource $unsupported "Unsupported/singleton Windows app must not be silently allowlisted yet: $unsupported"
 }
 
-if (-not $hostSource.Contains('return app_id.rfind("windows:", 0) == 0;', [System.StringComparison]::Ordinal)) {
-    throw 'All windows:* IDs must be recognized as belonging to the fail-closed containment boundary.'
-}
+Assert-Contains $hostSource 'return app_id.rfind("windows:", 0) == 0;' 'All windows:* IDs must be recognized as belonging to the fail-closed containment boundary.'
 
 Write-Host 'Managed Win32 containment + console ConPTY routing V22 contract: PASS'

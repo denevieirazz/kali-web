@@ -1403,13 +1403,13 @@ bool CloudOSFlutterBridgeV20::LaunchApp(const std::string& app_id)
 
     if (app_id == "files" || app_id == "cloudos:files")
     {
-        return reinterpret_cast<intptr_t>(
-            ShellExecuteW(nullptr, L"open", L"explorer.exe", nullptr, nullptr, SW_SHOWNORMAL)) > 32;
+        // First-party Flutter surface: handled directly by CloudOS Shell. Fail closed.
+        return false;
     }
     if (app_id == "windows:notepad")
     {
-        return reinterpret_cast<intptr_t>(
-            ShellExecuteW(nullptr, L"open", L"notepad.exe", nullptr, nullptr, SW_SHOWNORMAL)) > 32;
+        // Uncontained fallback is blocked to prevent desktop escape (Issue #52).
+        return false;
     }
     return false;
 }
