@@ -282,8 +282,6 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
               children: <Widget>[
                 _QuickSettingsHeader(
                   onOpenSettings: widget.onOpenSettings,
-                  refreshing: _refreshing,
-                  onRefresh: _refreshAuthoritativeState,
                 ),
                 const SizedBox(height: 12),
                 GridView.count(
@@ -400,52 +398,28 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
 }
 
 class _QuickSettingsHeader extends StatelessWidget {
-  const _QuickSettingsHeader({
-    this.onOpenSettings,
-    required this.refreshing,
-    required this.onRefresh,
-  });
+  const _QuickSettingsHeader({this.onOpenSettings});
 
   final VoidCallback? onOpenSettings;
-  final bool refreshing;
-  final Future<void> Function() onRefresh;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: <Widget>[
-        const Text(
-          'Configurações Rápidas',
-          style: TextStyle(
-            color: CloudOSColors.text,
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-            letterSpacing: -0.2,
-          ),
-        ),
-        const Spacer(),
-        Tooltip(
-          message: 'Atualizar estado',
-          child: InkWell(
-            onTap: refreshing ? null : () => unawaited(onRefresh()),
-            borderRadius: BorderRadius.circular(6),
-            child: Padding(
-              padding: const EdgeInsets.all(4),
-              child: refreshing
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(
-                      Icons.refresh_rounded,
-                      size: 18,
-                      color: CloudOSColors.secondary,
-                    ),
+        const Expanded(
+          child: Text(
+            'Configurações Rápidas',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: CloudOSColors.text,
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.2,
             ),
           ),
         ),
-        const SizedBox(width: 4),
+        const SizedBox(width: 8),
         Tooltip(
           message: 'Abrir Painel Completo',
           child: InkWell(
