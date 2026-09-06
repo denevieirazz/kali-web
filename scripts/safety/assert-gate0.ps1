@@ -59,28 +59,40 @@ if (Test-Path -LiteralPath $recoveryExe) {
 } else {
     Write-Host "  [INFO] CloudOS.Recovery.exe ainda nao compilado (ambiente pre-build CI). Validando chaves de registro diretamente..." -ForegroundColor Yellow
     
+    function Get-SafeRegistryValue([string]$Path, [string]$Name) {
+        try {
+            if (Test-Path -LiteralPath $Path) {
+                $key = Get-Item -LiteralPath $Path -ErrorAction SilentlyContinue
+                if ($key) {
+                    return $key.GetValue($Name, $null)
+                }
+            }
+        } catch { }
+        return $null
+    }
+
     # 1. HKLM Winlogon
-    $hklmShell = Get-ItemPropertyValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name 'Shell' -ErrorAction SilentlyContinue
+    $hklmShell = Get-SafeRegistryValue 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' 'Shell'
     if (-not $hklmShell) { $hklmShell = 'explorer.exe' }
     if ($hklmShell -ne 'explorer.exe') {
         throw "GATE 0 VIOLATION: HKLM Winlogon Shell e '$hklmShell', esperava 'explorer.exe'."
     }
 
     # 2. HKLM Userinit
-    $hklmUserinit = Get-ItemPropertyValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name 'Userinit' -ErrorAction SilentlyContinue
+    $hklmUserinit = Get-SafeRegistryValue 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' 'Userinit'
     if ($hklmUserinit -and $hklmUserinit -notmatch 'userinit\.exe') {
         throw "GATE 0 VIOLATION: HKLM Userinit corrompido: '$hklmUserinit'."
     }
 
     # 3. HKCU Winlogon
-    $hkcuShell = Get-ItemPropertyValue -Path 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name 'Shell' -ErrorAction SilentlyContinue
-    if ($hkcuShell -and -not [string]::IsNullOrEmpty($hkcuShell)) {
+    $hkcuShell = Get-SafeRegistryValue 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Winlogon' 'Shell'
+    if ($hkcuShell -and -not [string]::IsNullOrEmpty([string]$hkcuShell)) {
         throw "GATE 0 VIOLATION: HKCU Winlogon Shell configurado: '$hkcuShell'."
     }
 
     # 4. HKCU Policies
-    $hkcuPolicyShell = Get-ItemPropertyValue -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'Shell' -ErrorAction SilentlyContinue
-    if ($hkcuPolicyShell -and -not [string]::IsNullOrEmpty($hkcuPolicyShell)) {
+    $hkcuPolicyShell = Get-SafeRegistryValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System' 'Shell'
+    if ($hkcuPolicyShell -and -not [string]::IsNullOrEmpty([string]$hkcuPolicyShell)) {
         throw "GATE 0 VIOLATION: HKCU Policy Shell configurado: '$hkcuPolicyShell'."
     }
 
