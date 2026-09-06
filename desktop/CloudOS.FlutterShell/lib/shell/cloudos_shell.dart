@@ -2106,7 +2106,6 @@ class _CloudOSShellState extends State<CloudOSShell> {
         ],
       ),
     );
-    controller.dispose();
 
     if (name != null && name.isNotEmpty) {
       _customFolderCounter++;
@@ -2191,7 +2190,6 @@ class _CloudOSShellState extends State<CloudOSShell> {
         ],
       ),
     );
-    controller.dispose();
 
     if (name != null && name.isNotEmpty) {
       final size = MediaQuery.of(context).size;
@@ -2313,7 +2311,6 @@ class _CloudOSShellState extends State<CloudOSShell> {
         ],
       ),
     );
-    controller.dispose();
 
     if (newName != null && newName.isNotEmpty) {
       setState(() {

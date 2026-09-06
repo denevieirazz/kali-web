@@ -491,7 +491,6 @@ class _FilesWindowState extends State<FilesWindow> {
         ],
       ),
     );
-    controller.dispose();
 
     if (name != null && name.isNotEmpty) {
       final valErr = _validateFileName(name);
@@ -616,7 +615,6 @@ class _FilesWindowState extends State<FilesWindow> {
         ],
       ),
     );
-    controller.dispose();
 
     if (newName != null && newName.isNotEmpty && newName != item.name) {
       final valErr = _validateFileName(newName);

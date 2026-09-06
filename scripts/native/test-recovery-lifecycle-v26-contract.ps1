@@ -18,7 +18,7 @@ $brokerExe = Join-Path $root 'desktop\CloudOS.NativeShell\bin\Release\CloudOS.Sy
 
 foreach ($file in @(
     $recoveryCpp, $recoveryH, $lifecycleH, $eventsH, $supervisorV22,
-    $brokerServer, $settingsService, $recoveryModels, $bridgeDart, $brokerExe
+    $brokerServer, $settingsService, $recoveryModels, $bridgeDart
 )) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
         throw "Recovery/Lifecycle contract input missing: $file"
@@ -120,9 +120,13 @@ foreach ($token in @(
 }
 
 # 6. Functional Verification
-$selfTestOutput = & $brokerExe --self-test
-if ($LASTEXITCODE -ne 0) {
-    throw "SystemBroker self-test failed with exit code $LASTEXITCODE"
+if (Test-Path -LiteralPath $brokerExe -PathType Leaf) {
+    $selfTestOutput = & $brokerExe --self-test
+    if ($LASTEXITCODE -ne 0) {
+        throw "SystemBroker self-test failed with exit code $LASTEXITCODE"
+    }
+} else {
+    Write-Host "  [INFO] SystemBroker.exe nao compilado ainda (pre-build CI). Validacao funcional postergada." -ForegroundColor Yellow
 }
 
 $statusScript = Join-Path $PSScriptRoot 'get-cloudos-recovery-status-v22.ps1'

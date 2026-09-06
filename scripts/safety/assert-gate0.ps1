@@ -1,11 +1,14 @@
 [CmdletBinding()]
-param()
+param(
+    [switch]$CI
+)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 $recoveryExe = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\bin\Release\CloudOS.Recovery.exe'
+$isCiEnvironment = $CI -or $env:GITHUB_ACTIONS -or $env:CI
 
 Write-Host "[SAFETY ASSERTION] Validando condicao estrita do GATE 0..." -ForegroundColor Cyan
 
@@ -40,8 +43,8 @@ if (Test-Path -LiteralPath $recoveryExe) {
         throw "GATE 0 VIOLATION: hkcu_winlogon_shell configurado: '$($status.hkcu_winlogon_shell)'."
     }
 
-    # 5. Explorer deve estar em execucao (em ambiente interativo)
-    if (-not $env:GITHUB_ACTIONS -and -not $env:CI) {
+    # 5. Explorer deve estar em execucao (em ambiente interativo / local)
+    if (-not $isCiEnvironment) {
         if (-not $status.explorer_running) {
             throw "GATE 0 VIOLATION: explorer.exe nao esta em execucao no sistema."
         }
@@ -55,23 +58,43 @@ if (Test-Path -LiteralPath $recoveryExe) {
     Write-Host "  [OK] explorer_running:   $($status.explorer_running)" -ForegroundColor Green
 } else {
     Write-Host "  [INFO] CloudOS.Recovery.exe ainda nao compilado (ambiente pre-build CI). Validando chaves de registro diretamente..." -ForegroundColor Yellow
-    $hklmWinlogon = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -ErrorAction SilentlyContinue
-    $hklmShell = if ($hklmWinlogon -and $hklmWinlogon.Shell) { $hklmWinlogon.Shell } else { 'explorer.exe' }
+    
+    # 1. HKLM Winlogon
+    $hklmShell = Get-ItemPropertyValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name 'Shell' -ErrorAction SilentlyContinue
+    if (-not $hklmShell) { $hklmShell = 'explorer.exe' }
     if ($hklmShell -ne 'explorer.exe') {
         throw "GATE 0 VIOLATION: HKLM Winlogon Shell e '$hklmShell', esperava 'explorer.exe'."
     }
 
-    $hkcuWinlogon = Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Winlogon' -ErrorAction SilentlyContinue
-    if ($hkcuWinlogon -and -not [string]::IsNullOrEmpty($hkcuWinlogon.Shell)) {
-        throw "GATE 0 VIOLATION: HKCU Winlogon Shell configurado: '$($hkcuWinlogon.Shell)'."
+    # 2. HKLM Userinit
+    $hklmUserinit = Get-ItemPropertyValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name 'Userinit' -ErrorAction SilentlyContinue
+    if ($hklmUserinit -and $hklmUserinit -notmatch 'userinit\.exe') {
+        throw "GATE 0 VIOLATION: HKLM Userinit corrompido: '$hklmUserinit'."
     }
 
-    $hkcuPolicy = Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System' -ErrorAction SilentlyContinue
-    if ($hkcuPolicy -and -not [string]::IsNullOrEmpty($hkcuPolicy.Shell)) {
-        throw "GATE 0 VIOLATION: HKCU Policy Shell configurado: '$($hkcuPolicy.Shell)'."
+    # 3. HKCU Winlogon
+    $hkcuShell = Get-ItemPropertyValue -Path 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name 'Shell' -ErrorAction SilentlyContinue
+    if ($hkcuShell -and -not [string]::IsNullOrEmpty($hkcuShell)) {
+        throw "GATE 0 VIOLATION: HKCU Winlogon Shell configurado: '$hkcuShell'."
+    }
+
+    # 4. HKCU Policies
+    $hkcuPolicyShell = Get-ItemPropertyValue -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'Shell' -ErrorAction SilentlyContinue
+    if ($hkcuPolicyShell -and -not [string]::IsNullOrEmpty($hkcuPolicyShell)) {
+        throw "GATE 0 VIOLATION: HKCU Policy Shell configurado: '$hkcuPolicyShell'."
+    }
+
+    # 5. Explorer ativo se ambiente local
+    if (-not $isCiEnvironment) {
+        $explorer = Get-Process -Name 'explorer' -ErrorAction SilentlyContinue
+        if (-not $explorer) {
+            throw "GATE 0 VIOLATION: explorer.exe nao esta em execucao no ambiente local."
+        }
     }
 
     Write-Host "  [OK] HKLM Winlogon Shell: $hklmShell" -ForegroundColor Green
+    $displayUserinit = if ($hklmUserinit) { $hklmUserinit } else { 'userinit.exe,' }
+    Write-Host "  [OK] HKLM Userinit:       $displayUserinit" -ForegroundColor Green
     Write-Host "  [OK] HKCU Winlogon Shell: (Vazio)" -ForegroundColor Green
     Write-Host "  [OK] HKCU Policy Shell:   (Vazio)" -ForegroundColor Green
 }

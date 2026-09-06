@@ -59,7 +59,7 @@ Write-Host "[Soak Monitor RC1.4] Iniciando coleta continua em $csvPath (interval
 
 while ($true) {
     $iteration++
-    $now = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ")
+    $now = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
     
     $hwndMap = [CloudOSSoakProbe]::GetProcessHwndCounts()
     $targetProcesses = [System.Collections.Generic.List[object]]::new()
