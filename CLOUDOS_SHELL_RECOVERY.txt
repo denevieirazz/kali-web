@@ -1,0 +1,66 @@
+================================================================================
+           CLOUDOS — GUIA DE RECUPERACAO DE EMERGENCIA DO WINDOWS EXPLORER
+================================================================================
+
+Se por qualquer razao o CloudOS apresentar tela preta, falhar na inicializacao
+ou voce desejar retornar imediatamente para a Area de Trabalho padrao do Windows,
+utilize um dos metodos de recuperacao abaixo. Nenhum depende de internet.
+
+--------------------------------------------------------------------------------
+METODO 1 — Gerenciador de Tarefas (Atalho Global de Emergencia)
+--------------------------------------------------------------------------------
+1. Pressione as teclas:
+      Ctrl + Shift + Esc
+   (Se nao abrir, pressione Ctrl + Alt + Del e selecione 'Gerenciador de Tarefas').
+
+2. No Gerenciador de Tarefas, clique em:
+      'Executar nova tarefa' (ou Arquivo -> Executar nova tarefa).
+
+3. Digite:
+      explorer.exe
+   e pressione Enter.
+
+4. A barra de tarefas e a Area de Trabalho do Windows reaparecerao imediatamente.
+
+--------------------------------------------------------------------------------
+METODO 2 — Executavel Nativo de Recuperacao do CloudOS (Recomendado)
+--------------------------------------------------------------------------------
+1. Abra o Gerenciador de Tarefas (Ctrl + Shift + Esc) -> 'Executar nova tarefa'.
+
+2. Cole e execute o comando:
+      cmd /c "%LOCALAPPDATA%\Programs\CloudOS\CloudOS.Recovery.exe restore-explorer-shell"
+
+3. Esse comando:
+   - Remove as politicas de Shell personalizado do usuario (HKCU).
+   - Garante que a chave padrao do Windows (explorer.exe) seja a oficial.
+   - Inicia o Windows Explorer caso nao esteja ativo.
+
+--------------------------------------------------------------------------------
+METODO 3 — Interface Grafica de Recuperacao (UI com 1 Clique)
+--------------------------------------------------------------------------------
+1. Abra o Gerenciador de Tarefas (Ctrl + Shift + Esc) -> 'Executar nova tarefa'.
+
+2. Digite:
+      "%LOCALAPPDATA%\Programs\CloudOS\CloudOS.Recovery.exe"
+   e pressione Enter.
+
+3. Uma janela nativa de recuperacao aparecera na tela.
+   Clique em 'Sim' para restaurar imediatamente o Windows Explorer Shell.
+
+--------------------------------------------------------------------------------
+METODO 4 — Linha de Comando PowerShell / CMD Manual
+--------------------------------------------------------------------------------
+Se preferir restaurar via terminal:
+1. Abra o PowerShell ou CMD (via Gerenciador de Tarefas ou Terminal).
+2. Execute o comando PowerShell:
+   Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'Shell' -ErrorAction SilentlyContinue
+   Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name 'Shell' -ErrorAction SilentlyContinue
+   Start-Process explorer.exe
+
+--------------------------------------------------------------------------------
+ESTADO DE SEGURANCA
+--------------------------------------------------------------------------------
+- O arquivo Userinit original NUNCA e modificado (C:\WINDOWS\system32\userinit.exe).
+- O arquivo explorer.exe permanece intacto na pasta do Windows (C:\WINDOWS\explorer.exe).
+- O Winlogon do sistema em HKLM permanece configurado para explorer.exe.
+================================================================================
