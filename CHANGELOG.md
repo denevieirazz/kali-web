@@ -2,6 +2,22 @@
 
 Todas as alterações notáveis deste projeto são documentadas neste arquivo.
 
+## [21.0.0-rc.1.1] - 2026-09-05
+
+### Adicionado e Aprimorado
+- **Compilação Real do Instalador Inno Setup**: Pipeline automatizado via `scripts/release/build-rc.ps1`, compilando `CloudOS-Setup-21.0.0-rc.1.1-x64.exe` com Inno Setup 6, salvaguardas contra diretórios críticos do Windows em `[Code]` e geração de hashes `SHA256SUMS.txt`.
+- **Centralização Canônica de Versão**: Metadados sincronizados entre `version.json`, `cloudos_version.dart` e todas as superfícies de interface (Diagnósticos, Sobre e Relatórios).
+- **Resiliência e Migração de Preferências (`schemaVersion: 2`)**: Migração automática do schema v1 -> v2, quarentena de JSON corrompido (`.corrupt.<timestamp>`) e rotação delimitada de até 5 backups de segurança.
+- **Atualizador Endurecido (Downgrade Protection)**: Rejeição de atualizações para builds inferiores sem o parâmetro `-Force` e suporte a feed estruturado `update-feed.json`.
+- **Proteção Estendida no Gerenciador de Tarefas**: Inclusão de `CloudOS.Supervisor.exe`, `CloudOS.SystemBroker.exe` e `CloudOS.Recovery.exe` na lista de proteção contra encerramento de processos.
+- **Validação de Nomes de Arquivo**: Bloqueio de nomes de dispositivos reservados (`CON`, `PRN`, `AUX`, etc.) e caracteres proibidos no Gerenciador de Arquivos com mensagens em português do Brasil.
+- **Pacote de Diagnóstico Sanitizado**: Automação `scripts/diagnostics/export-diagnostics-bundle.ps1` que gera arquivo ZIP de suporte sem caminhos absolutos de usuário e sem dados confidenciais.
+- **Validação Estrita do GATE 0**: Script dedicado `scripts/safety/assert-gate0.ps1` para garantia da inviolabilidade do Windows Explorer e do Userinit.
+
+### Documentação
+- Novos documentos completos: `docs/INSTALL.md`, `docs/SECURITY_MODEL.md`, `docs/PRIVACY.md`, `docs/RC1_1_RELEASE_CHECKLIST.md`, `docs/RC1_1_USER_QA.md` e `docs/RC1_1_BUGS.md`.
+- Atualização aprofundada de `docs/RECOVERY.md` e `docs/UPDATES.md`.
+
 ## [1.0.0-rc1] - 2026-09-05
 
 ### Adicionado

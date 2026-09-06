@@ -1,8 +1,8 @@
 # CloudOS — Project Status Master
 
 Data de atualização: 2026-09-05  
-Branch: `main`  
-Status geral: **ESTÁVEL / RELEASE CANDIDATE 1 (RC1) CONCLUÍDO COM SUCESSO / GATE 0 ATIVO**
+Branch: `release/rc1.1-release-engineering` (após validação, merge em `main`)  
+Status geral: **ESTÁVEL / RELEASE CANDIDATE 1.1 (RC1.1) PRONTO PARA VALIDAÇÃO DO USUÁRIO / GATE 0 ATIVO**
 
 ---
 
@@ -50,6 +50,7 @@ O CloudOS opera em arquitetura híbrida de alta performance e confinamento rigor
 | **Etapa 10** | Inicialização Automática Segura (HKCU\Run) | **PASS** | 5/5 contratos de startup, single-instance e resiliência aprovados. |
 | **Etapa 11** | Shell Replacement Seguro e Fallback de Emergência | **IMPLEMENTADO / AUTOMATED PASS** | 10/10 contratos de shell, bootstrap, crash loop e recovery aprovados. |
 | **Release Candidate 1 (RC1)** | Product Completion, UX Polish & Release Readiness | **PASS** | 28+ superfícies auditadas, Lixeira nativa Win32, CloudOSPreferences, Inno Setup pronto, 151/151 Flutter tests, 49/49 native contracts. |
+| **Release Candidate 1.1 (RC1.1)** | Distribution Hardening, Real Inno Setup Installer, Update/Rollback Hardening, Schema v2 Preferences, Diagnostics Exporter | **PASS** | Inno Setup 6.7.3 compilou CloudOS-Setup-21.0.0-rc.1.1-x64.exe, 156/156 Flutter tests, 49/49 native contracts, assert-gate0 PASS, export-diagnostics-bundle PASS. |
 
 ---
 

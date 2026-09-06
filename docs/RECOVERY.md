@@ -1,52 +1,58 @@
-# CloudOS — Recuperação
+# CloudOS — Arquitetura de Recuperação e Segurança (RC1.1)
 
-A recuperação de dados do Productization Batch 2.5 usa `scripts/productization/restore-cloudos.ps1`. Ela não instala WSL, não altera banco real e não substitui o rollback de versão do Velopack.
+O CloudOS adota uma arquitetura de recuperação e resiliência multicamadas fundamentada no princípio **GATE 0**:
+o Windows Explorer (`explorer.exe`) permanece ininterruptamente como o shell oficial do sistema operacional, e o CloudOS nunca assume persistência destrutiva no Winlogon.
 
-## Contrato de restore
+---
 
-O restore exige confirmação explícita e recusa execução quando encontra sessão backend ativa no diretório de runtime.
+## 1. Princípios Fundamentais de Recuperação
 
-Antes de alterar o destino, o script:
+1. **Gate 0 Inviolável:**
+   - `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\Shell` permanece rigorosamente configurado como `explorer.exe`.
+   - `Userinit` permanece o binário oficial: `C:\WINDOWS\system32\userinit.exe,`.
+   - A inicialização automática é feita exclusivamente via `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` em modo de usuário.
+2. **Supervisor Watchdog (V11/V22):**
+   - O processo nativo `CloudOS.Supervisor.exe` monitora o ciclo de vida do Flutter Shell e do System Broker via Job Objects e Named Pipe heartbeat.
+   - Em caso de crash súbito do processo de apresentação, o Supervisor registra a falha no journal de recuperação.
+3. **Detecção de Crash Loop:**
+   - Se 3 falhas ocorrerem em uma janela inferior a 60 segundos, o Supervisor entra em **Modo de Segurança (Safe Mode)**.
+   - No Safe Mode, o shell apresenta a interface simplificada de recuperação e desativa restaurações automáticas de janelas que possam ter causado o crash.
+4. **Fallback Transparente ao Explorer:**
+   - Se o usuário encerrar a sessão do CloudOS ou acionar a restauração de emergência, o Windows Explorer assume a visibilidade completa da área de trabalho sem necessidade de logoff ou reinicialização.
 
-1. abre e valida a estrutura do ZIP;
-2. rejeita excesso de entradas, tamanho total excessivo, paths absolutos, `..` e entradas duplicadas;
-3. exige `manifest.json` e `checksums.sha256`;
-4. extrai para diretório temporário novo;
-5. valida JSON, schema, produto e compatibilidade de versão major;
-6. exige cobertura exata entre manifesto, checksums e payload;
-7. valida tamanho e SHA-256 de cada arquivo;
-8. verifica espaço livre e capacidade de escrita no destino.
+---
 
-Somente depois começa o commit de arquivos.
+## 2. Ferramenta Nativa de Recuperação (`CloudOS.Recovery.exe`)
 
-## Fail closed e rollback
+O utilitário autônomo C++/Win32 `CloudOS.Recovery.exe` não possui dependência de runtime externo (Flutter, .NET ou Electron) e pode ser acionado diretamente pelo terminal ou pelo Gerenciador de Tarefas do Windows:
 
-Durante o commit, arquivos existentes são movidos para uma área temporária de rollback antes de serem substituídos. Se qualquer cópia falhar ou o restore for interrompido, arquivos novos são removidos e os anteriores voltam em ordem reversa.
+### Comandos Suportados:
 
-O marker `restore-session-invalidated.marker` só é criado depois que todo o payload foi aplicado.
+- `CloudOS.Recovery.exe status`
+  Retorna o diagnóstico completo em JSON:
+  - `status`: Estado atual do shell (`EXPLORER` ou `CANARY`).
+  - `effective_shell`: Executável ativo responsável pelo shell.
+  - `userinit_intact`: Confirmação booleana da integridade do Userinit.
+  - `hklm_winlogon_shell`: Confirmação do shell oficial da máquina.
+  - `explorer_running`: Verificação do processo `explorer.exe`.
 
-Falhas em archive, manifest, checksum, espaço, permissão ou extração ocorrem antes do commit e não modificam os dados anteriores.
+- `CloudOS.Recovery.exe restore-explorer`
+  Força a limpeza imediata de qualquer política per-user e garante que o Windows Explorer seja trazido para o primeiro plano.
 
-## Testes negativos automatizados
+- `CloudOS.Recovery.exe safe-mode`
+  Ativa a bandeira de inicialização em modo de segurança para diagnosticar falhas de extensões, configurações ou plugins.
 
-`test-recovery-hardening.ps1` cobre:
+- `CloudOS.Recovery.exe reset`
+  Restaura as configurações de fábrica do CloudOS, preservando os arquivos pessoais do usuário.
 
-- payload corrompido;
-- ZIP truncado;
-- checksum inválido;
-- manifesto inválido;
-- versão major incompatível;
-- JSON inválido;
-- ZIP inválido;
-- extração interrompida/parcial;
-- restore interrompido durante o commit;
-- espaço insuficiente;
-- escrita negada.
+---
 
-Os fault hooks de espaço, permissão e interrupção só são considerados quando `NODE_ENV=test`; eles existem para tornar a falha determinística na CI e não fazem parte do fluxo normal do produto.
+## 3. Validação Automatizada de Segurança
 
-O sucesso do conjunto é marcado por `PRODUCTIZATION_RECOVERY_HARDENING_OK`.
+O script `scripts/safety/assert-gate0.ps1` é executado antes e depois de qualquer pipeline de build, empacotamento ou teste:
 
-## Limites
+```powershell
+pwsh.exe -NoProfile -File scripts\safety\assert-gate0.ps1
+```
 
-Este lote não declara recuperação física validada. Falhas reais causadas por antivírus, mídia defeituosa, desligamento abrupto do computador ou ACLs específicas do equipamento ainda pertencem ao gate físico.
+Se qualquer valor do Registro do Windows desviar do padrão seguro (`effective_shell: explorer.exe`), o script aborta a execução e notifica o operador imediatamente.

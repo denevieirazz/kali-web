@@ -1,60 +1,66 @@
-# CloudOS — Atualizações
+# CloudOS — Pipeline de Atualizações Atômicas e Rollback (RC1.1)
 
-Este documento descreve somente o updater existente no Productization Batch 2.5.
+O CloudOS adota um mecanismo de atualização atômico com validação prévia (*fail-closed*), proteção contra *downgrade* não intencional e capacidade de reversão imediata (*rollback*) sem corromper a instalação em execução.
 
-## Motor
+---
 
-O CloudOS usa Velopack 1.2.0 para descobrir, baixar, validar e aplicar pacotes gerenciados. O modo portátil não usa atualização automática: sua substituição continua manual.
+## 1. Fluxo de Atualização Atômica
 
-O fluxo normal é:
+1. **Validação do Pacote (Staging Pré-Commit):**
+   - O pacote de atualização contém o manifesto canônico `cloudos-package-manifest.json` com tamanho e hash SHA256 de todos os arquivos.
+   - O updater valida **100%** dos arquivos antes de modificar qualquer arquivo da instalação ativa.
+   - Se qualquer arquivo estiver corrompido, faltante ou com hash divergente, o update é abortado (`UPDATE_REJECTED`) com zero impacto.
 
-1. carregar `meta/product.json` e `meta/channels.json`;
-2. validar canal, transição e origem;
-3. consultar o feed com downgrade desabilitado;
-4. exigir metadados de pacote com nome, tamanho e SHA-256 válidos;
-5. baixar pelo Velopack, que valida a integridade do pacote;
-6. registrar `PreviousVersion`, `PendingVersion`, source e canal em `distribution-state.json`;
-7. aplicar e reiniciar;
-8. somente após o Host atingir o período de estabilidade, marcar a versão/canal como saudáveis.
+2. **Compatibilidade de Versão e Protocolo:**
+   - O updater compara `protocolVersion` entre a versão atual e a nova versão. Alterações de versão maior no protocolo IPC exigem migração explícita.
+   - **Downgrade Protection:** O updater recusa downgrades de build inferiores à build atualmente instalada, a menos que o parâmetro `-Force` seja especificado.
 
-Enquanto existe versão pendente, o estado anterior permanece identificado para recuperação explícita.
+3. **Backup Atômico (`.previous/`):**
+   - Antes da substituição de arquivos, a instalação corrente é movida para a pasta `.previous/`.
+   - Os novos arquivos são movidos da área temporária de `.staging/` para o diretório raiz do programa.
 
-## Canais
+4. **Health-Check Obrigatório:**
+   - Imediatamente após a substituição de arquivos, o updater inicia o `CloudOS.SystemBroker.exe` em modo de teste e executa o `CloudOS.BrokerProbe.exe ping` via Named Pipe.
+   - Se o Broker responder `"pong": true` dentro do tempo limite (padrão 15 segundos), o health-check é aprovado.
+   - **Rollback Automático:** Se o health-check falhar, o updater restaura imediatamente os arquivos de `.previous/`, retornando a instalação ao estado estável anterior.
 
-A matriz canônica está em `productization/channels.json` e é empacotada como `meta/channels.json`.
+---
 
-Transições permitidas neste lote:
+## 2. Formato do Feed de Atualizações (`update-feed.json`)
 
-- `development -> development`
-- `development -> preview`
-- `preview -> preview`
-- `preview -> stable`
-- `stable -> stable`
+O CloudOS suporta distribuição de metadados de novas releases através de um feed JSON estruturado:
 
-Mudança de canal é rejeitada quando não foi pedida explicitamente. Transições reversas ou saltos não declarados são rejeitados.
+```json
+{
+  "schema": 1,
+  "product": "CloudOS",
+  "channel": "rc",
+  "updatedAt": "2026-09-05T22:00:00Z",
+  "releases": [
+    {
+      "version": "21.0.0-rc.1.1",
+      "build": 32,
+      "releaseDate": "2026-09-05T22:00:00Z",
+      "channel": "rc",
+      "minWindowsBuild": 19041,
+      "installerFileName": "CloudOS-Setup-21.0.0-rc.1.1-x64.exe",
+      "installerUrl": "https://github.com/doug-cloud/CloudOS/releases/download/v21.0.0-rc.1.1/CloudOS-Setup-21.0.0-rc.1.1-x64.exe",
+      "sha256": "...",
+      "mandatory": false,
+      "releaseNotes": "CloudOS Release Candidate 1.1..."
+    }
+  ]
+}
+```
 
-### development
+---
 
-Aceita o fluxo experimental atual. Fonte local é permitida. HTTP só é aceito para fixture loopback quando `CLOUDOS_ALLOW_LOCAL_UPDATE_FIXTURE=1`; feed remoto normal continua exigindo HTTPS.
+## 3. Reversão Manual (Rollback)
 
-### preview e stable
+Se for necessário desfazer uma atualização após a conclusão do health-check:
 
-Exigem assinatura de distribuição. O Batch 2.5 continua `unsigned-development`, portanto esses canais permanecem fail-closed. Nenhuma origem oficial foi inventada: `approvedOrigins` está vazio até existir uma origem real e aprovada.
+```powershell
+pwsh.exe -NoProfile -File scripts\installer\CloudOS.Maintenance.ps1 -Action rollback -InstallDir "$env:LOCALAPPDATA\Programs\CloudOS"
+```
 
-`stable` também continua sujeito a `stableUpdatesEnabled=false` no metadata atual.
-
-## Downgrade e rollback
-
-O check normal usa `AllowVersionDowngrade=false` e também possui uma verificação explícita de direção de versão.
-
-Downgrade só é aceito pelo caminho de recuperação que solicita uma versão específica conhecida. Esse caminho é separado do update normal e não torna downgrade silencioso possível.
-
-## Integridade e falhas
-
-Os testes do lote cobrem pacote adulterado, hash divergente, pacote truncado/parcial, cancelamento de download e fixtures sequenciais. A atualização não é preparada quando a validação falha.
-
-O teste Windows também cobre aplicação sem reinício seguida de rollback, falha deliberada de health do runtime empacotado seguida de rollback, e atualização sequencial para uma terceira versão, preservando dados em diretório separado.
-
-## Assinatura
-
-Authenticode ainda não está provisionado. Isso é uma limitação deliberada e impede preview/stable. Este documento não declara assinatura nem publicação de release.
+O comando restaura o conteúdo preservado em `.previous/` e revalida a integridade do manifesto.
