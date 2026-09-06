@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../../../../core/cloudos_theme.dart';
@@ -14,6 +15,8 @@ class StartFooter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final userName = Platform.environment['USERNAME'] ?? 'Usuário';
+
     return Row(
       children: <Widget>[
         Container(
@@ -33,18 +36,18 @@ class StartFooter extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        const Column(
+        Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
-              'Douglas',
-              style: TextStyle(
+              userName,
+              style: const TextStyle(
                 color: CloudOSColors.text,
                 fontSize: 12.5,
                 fontWeight: FontWeight.w600,
               ),
             ),
-            Text(
+            const Text(
               'Administrador • Sessão Ativa',
               style: TextStyle(color: CloudOSColors.caption, fontSize: 10),
             ),

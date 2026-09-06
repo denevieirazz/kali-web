@@ -91,13 +91,13 @@ cd desktop\CloudOS.FlutterShell
 flutter build windows --release
 ```
 
-### Pipeline Unificado de Release (RC1.1)
+### Pipeline Unificado de Release (RC1.2)
 Para compilar nativo, Flutter, empacotar e gerar o instalador oficial Inno Setup:
 ```powershell
 pwsh -NoProfile -File scripts/release/build-rc.ps1
 ```
 
-O instalador oficial será gerado em `dist\releases\21.0.0-rc.1.1\CloudOS-Setup-21.0.0-rc.1.1-x64.exe` com seu respectivo `SHA256SUMS.txt`.
+O instalador oficial será gerado em `dist\releases\21.0.0-rc.1.2\CloudOS-Setup-21.0.0-rc.1.2-x64.exe` com seu respectivo `SHA256SUMS.txt`.
 
 Consulte a documentação completa:
 - [Guia de Instalação](docs/INSTALL.md)

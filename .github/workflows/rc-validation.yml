@@ -1,0 +1,65 @@
+name: CloudOS RC Validation CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rc-validation-suite:
+    name: RC Validation & Integrity
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Assert Gate 0 Safety
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File scripts/safety/assert-gate0.ps1
+
+      - name: Run Native Contract Suite (49 contracts)
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File scripts/native/test-native-contract-suite.ps1
+
+      - name: Run Installer Contracts Suite (5 contracts)
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File scripts/installer/test-all-installer-contracts.ps1
+
+      - name: Run Startup Contracts Suite (5 contracts)
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File scripts/installer/test-all-startup-contracts.ps1
+
+      - name: Run Shell & Recovery Contracts Suite (10 contracts)
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File scripts/installer/test-all-shell-contracts.ps1
+
+      - name: Run Flutter Analyze and Test
+        shell: pwsh
+        working-directory: desktop/CloudOS.FlutterShell
+        run: |
+          flutter analyze
+          flutter test

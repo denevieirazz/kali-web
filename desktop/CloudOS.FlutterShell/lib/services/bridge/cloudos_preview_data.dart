@@ -160,7 +160,7 @@ abstract final class CloudOSPreviewData {
       ),
       CloudFileItem(
         name: 'Ubuntu Home',
-        path: '\\\\wsl.localhost\\Ubuntu\\home\\dougl',
+        path: '\\\\wsl.localhost\\Ubuntu\\home\\user',
         isFolder: true,
         sizeFormatted: '12 pastas',
         modifiedFormatted: 'Ontem',

@@ -51,6 +51,7 @@ O CloudOS opera em arquitetura híbrida de alta performance e confinamento rigor
 | **Etapa 11** | Shell Replacement Seguro e Fallback de Emergência | **IMPLEMENTADO / AUTOMATED PASS** | 10/10 contratos de shell, bootstrap, crash loop e recovery aprovados. |
 | **Release Candidate 1 (RC1)** | Product Completion, UX Polish & Release Readiness | **PASS** | 28+ superfícies auditadas, Lixeira nativa Win32, CloudOSPreferences, Inno Setup pronto, 151/151 Flutter tests, 49/49 native contracts. |
 | **Release Candidate 1.1 (RC1.1)** | Distribution Hardening, Real Inno Setup Installer, Update/Rollback Hardening, Schema v2 Preferences, Diagnostics Exporter | **PASS** | Inno Setup 6.7.3 compilou CloudOS-Setup-21.0.0-rc.1.1-x64.exe, 156/156 Flutter tests, 49/49 native contracts, assert-gate0 PASS, export-diagnostics-bundle PASS. |
+| **Release Candidate 1.2 (RC1.2)** | Real Product Lifecycle, Stress & Compatibility Mega Pass, IPC Benchmarking, SemVer 2.0.0, GitHub CI | **PASS** | Inno Setup 6.7.3 compilou CloudOS-Setup-21.0.0-rc.1.2-x64.exe, 156/156 Flutter tests, 49/49 native contracts, 5/5 installer, 5/5 startup, 10/10 shell, 500-ping stress PASS, Gate 0 PASS. |
 
 ---
 

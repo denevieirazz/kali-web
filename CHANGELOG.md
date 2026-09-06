@@ -2,6 +2,16 @@
 
 Todas as alterações notáveis deste projeto são documentadas neste arquivo.
 
+## [21.0.0-rc.1.2] - 2026-09-06
+
+### Adicionado e Aprimorado
+- **Validação de Ciclo de Vida Real do Instalador**: Teste físico completo do executável oficial Inno Setup `CloudOS-Setup-21.0.0-rc.1.2-x64.exe` (11.79 MB, SHA256 `45a86456b432aa50d909806a0f7d793f0b4cc246e439db5946baf2509b6a2111`) em caminhos com espaços, independência de repositório e desinstalação idempotente.
+- **Comparador SemVer 2.0.0 (`Compare-CloudOSSemVer`)**: Implementação de comparação de versão semântica completa com suporte a pré-releases e precedências no mecanismo de atualização e manutenção.
+- **Benchmark e Teste de Estresse do IPC**: 500 chamadas sequenciais com média de 28.92 ms de latência e 34.5 req/s; rejeição imediata de frames > 1 MiB e payloads malformados sem instabilidade do broker.
+- **Sanitização de Identidade de Desenvolvimento**: Substituição de nomes e caminhos estáticos por consultas dinâmicas de ambiente (`Platform.environment['USERNAME']`) no Menu Iniciar, Configurações e caminhos mock.
+- **Delimitação de Preferências**: Listas de aplicativos fixados e recentes delimitadas em memória (50 e 20 itens) com suíte de testes unitários dedicada.
+- **Automação de CI para Release Candidate**: Novo fluxo `.github/workflows/rc-validation.yml` para validação contínua de integridade de release e todos os 49 contratos nativos e 20 contratos de shell/instalador.
+
 ## [21.0.0-rc.1.1] - 2026-09-05
 
 ### Adicionado e Aprimorado

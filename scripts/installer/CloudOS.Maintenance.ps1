@@ -117,6 +117,59 @@ function Stop-CloudOSProcesses {
     } while ([DateTime]::UtcNow -lt $deadline)
 }
 
+function Compare-CloudOSSemVer {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$VersionA,
+        [Parameter(Mandatory = $true)]
+        [string]$VersionB
+    )
+    $parse = {
+        param([string]$v)
+        if ($v -match '^v?(\d+)\.(\d+)\.(\d+)(?:-(.+))?$') {
+            return [pscustomobject]@{
+                Major = [int]$Matches[1]
+                Minor = [int]$Matches[2]
+                Patch = [int]$Matches[3]
+                Prerelease = if ($Matches[4]) { $Matches[4] } else { $null }
+            }
+        }
+        return [pscustomobject]@{ Major = 0; Minor = 0; Patch = 0; Prerelease = $v }
+    }
+    $a = & $parse $VersionA
+    $b = & $parse $VersionB
+    if ($a.Major -ne $b.Major) { return [Math]::Sign($a.Major - $b.Major) }
+    if ($a.Minor -ne $b.Minor) { return [Math]::Sign($a.Minor - $b.Minor) }
+    if ($a.Patch -ne $b.Patch) { return [Math]::Sign($a.Patch - $b.Patch) }
+    if ($a.Prerelease -eq $null -and $b.Prerelease -ne $null) { return 1 }
+    if ($a.Prerelease -ne $null -and $b.Prerelease -eq $null) { return -1 }
+    if ($a.Prerelease -eq $null -and $b.Prerelease -eq $null) { return 0 }
+    $partsA = $a.Prerelease -split '\.'
+    $partsB = $b.Prerelease -split '\.'
+    $maxLen = [Math]::Max($partsA.Length, $partsB.Length)
+    for ($i = 0; $i -lt $maxLen; $i++) {
+        if ($i -ge $partsA.Length) { return -1 }
+        if ($i -ge $partsB.Length) { return 1 }
+        $partA = $partsA[$i]
+        $partB = $partsB[$i]
+        $isNumA = $partA -match '^\d+$'
+        $isNumB = $partB -match '^\d+$'
+        if ($isNumA -and $isNumB) {
+            $numA = [int]$partA
+            $numB = [int]$partB
+            if ($numA -ne $numB) { return [Math]::Sign($numA - $numB) }
+        } elseif ($isNumA -and -not $isNumB) {
+            return -1
+        } elseif (-not $isNumA -and $isNumB) {
+            return 1
+        } else {
+            $cmp = [string]::CompareOrdinal($partA, $partB)
+            if ($cmp -ne 0) { return [Math]::Sign($cmp) }
+        }
+    }
+    return 0
+}
+
 function Verify-FileManifest {
     param(
         [Parameter(Mandatory = $true)]
@@ -534,6 +587,15 @@ function Invoke-Update {
         $newBuild = if ($newVersion.PSObject.Properties['build']) { [int]$newVersion.build } elseif ($newVersion.PSObject.Properties['buildNumber']) { [int]$newVersion.buildNumber } else { 0 }
         if ($curBuild -gt 0 -and $newBuild -gt 0 -and $newBuild -lt $curBuild) {
             throw "UPDATE_REJECTED: Tentativa de downgrade da build $curBuild para $newBuild. Use -Force se intencional."
+        }
+
+        $curSemVer = if ($currentVersion.PSObject.Properties['semanticVersion']) { [string]$currentVersion.semanticVersion } elseif ($currentVersion.PSObject.Properties['productVersion']) { [string]$currentVersion.productVersion } else { $null }
+        $newSemVer = if ($newVersion.PSObject.Properties['semanticVersion']) { [string]$newVersion.semanticVersion } elseif ($newVersion.PSObject.Properties['version']) { [string]$newVersion.version } else { $null }
+        if ($curSemVer -and $newSemVer) {
+            $semCmp = Compare-CloudOSSemVer $newSemVer $curSemVer
+            if ($semCmp -lt 0) {
+                throw "UPDATE_REJECTED: Tentativa de downgrade SemVer da versao $curSemVer para $newSemVer. Use -Force se intencional."
+            }
         }
     }
 
