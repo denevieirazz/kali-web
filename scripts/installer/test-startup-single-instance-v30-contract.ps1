@@ -12,6 +12,21 @@ $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 $startScript = Join-Path $repoRoot 'desktop\CloudOS.FlutterShell\build\windows\x64\runner\Release\start-cloudos-v21-integrated.ps1'
 $probeExe = Join-Path $repoRoot 'desktop\CloudOS.FlutterShell\build\windows\x64\runner\Release\CloudOS.BrokerProbe.exe'
 
+$isRealBinary = $false
+if (Test-Path -LiteralPath $probeExe) {
+    try {
+        $bytes = [System.IO.File]::ReadAllBytes($probeExe)
+        if ($bytes.Length -ge 2 -and $bytes[0] -eq 0x4D -and $bytes[1] -eq 0x5A) {
+            $isRealBinary = $true
+        }
+    } catch { }
+}
+
+if (-not $isRealBinary -or -not (Test-Path -LiteralPath $startScript)) {
+    Write-Host "  [INFO] Ambiente de execucao real nao compilado (pre-build CI). Validacao postergada." -ForegroundColor Yellow
+    return $true
+}
+
 Write-Host "=========================================================" -ForegroundColor Cyan
 Write-Host " [CONTRATO 2/5] Validacao de Single-Instance no Startup" -ForegroundColor Cyan
 Write-Host "=========================================================" -ForegroundColor Cyan

@@ -19,7 +19,17 @@ if (-not (Test-Path -LiteralPath $brokerExe)) {
     $brokerExe = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\bin\Release\CloudOS.SystemBroker.exe'
 }
 
-if (-not (Test-Path -LiteralPath $probeExe) -or -not (Test-Path -LiteralPath $brokerExe)) {
+$isRealBinary = $false
+if ((Test-Path -LiteralPath $probeExe) -and (Test-Path -LiteralPath $brokerExe)) {
+    try {
+        $bytes = [System.IO.File]::ReadAllBytes($brokerExe)
+        if ($bytes.Length -ge 2 -and $bytes[0] -eq 0x4D -and $bytes[1] -eq 0x5A) {
+            $isRealBinary = $true
+        }
+    } catch { }
+}
+
+if (-not $isRealBinary) {
     Write-Host "  [INFO] Broker e Probe nao compilados ainda (pre-build CI). Validacao postergada." -ForegroundColor Yellow
     return $true
 }
@@ -29,6 +39,7 @@ Write-Host "=========================================================" -Foregrou
 
 # 1. Backup do estado atual do HKCU Run se existir
 $originalStartup = (Get-ItemProperty -Path $runKey -ErrorAction SilentlyContinue) | Select-Object -ExpandProperty 'CloudOS' -ErrorAction SilentlyContinue
+$brokerProc = $null
 
 try {
     # 2. Iniciar Broker para testar RPCs
