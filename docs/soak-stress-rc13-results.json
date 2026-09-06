@@ -1,0 +1,89 @@
+{
+  "timestamp": "2026-09-06T01:56:58.0833969Z",
+  "sandboxDir": "C:\\Users\\dougl\\AppData\\Local\\Programs\\CloudOS RC13 Soak",
+  "suites": {
+    "SandboxBinaries": {
+      "Passed": true,
+      "Details": [
+        {
+          "Binary": "CloudOS.exe",
+          "Present": true,
+          "Version": null,
+          "SHA256": "AF54FBE33A07A983..."
+        },
+        {
+          "Binary": "CloudOS.Supervisor.exe",
+          "Present": true,
+          "Version": null,
+          "SHA256": "8696EEEE5CA8F449..."
+        },
+        {
+          "Binary": "CloudOS.SystemBroker.exe",
+          "Present": true,
+          "Version": null,
+          "SHA256": "99AD5DC3BF1FFED9..."
+        },
+        {
+          "Binary": "CloudOS.BrokerProbe.exe",
+          "Present": true,
+          "Version": null,
+          "SHA256": "437C266E0474F123..."
+        },
+        {
+          "Binary": "CloudOS.Recovery.exe",
+          "Present": true,
+          "Version": null,
+          "SHA256": "276E072E4C35B4DF..."
+        },
+        {
+          "Binary": "cloudos_flutter_shell.exe",
+          "Present": true,
+          "Version": "21.0.0+34",
+          "SHA256": "F7F8885E439025F7..."
+        }
+      ]
+    },
+    "BrokerIPCStress": {
+      "PingCount": 2000,
+      "ConcurrentRequests": 400,
+      "OversizedRejected": true,
+      "PingsPerSecond": 63.67,
+      "Passed": true,
+      "MalformedRejected": true,
+      "Int64BoundaryHandled": true,
+      "ConcurrentErrors": 0.0
+    },
+    "FilesStress": {
+      "ReservedNamesValidated": 8,
+      "Passed": true,
+      "SmallFileCrudCycles": 100,
+      "CopiesValidated": 5,
+      "AllCopiesHashMatch": true
+    },
+    "PreferencesStress": {
+      "Passed": true,
+      "TotalWrites": 100,
+      "MaxPinsEnforced": 50,
+      "MaxRecentsEnforced": 20,
+      "CorruptionsDetected": 0
+    },
+    "SupervisorRecovery": {
+      "Passed": true,
+      "CloudOSRunning": false,
+      "EffectiveShell": "explorer.exe",
+      "ExplorerRunning": true
+    },
+    "SoakStability": {
+      "Passed": true,
+      "TFinal_Handles": 217,
+      "TFinal_PrivateMB": 2.32,
+      "DeltaHandles": -12,
+      "DeltaPrivateMB": -0.22999999999999998,
+      "T0_Handles": 229,
+      "T0_PrivateMB": 2.55,
+      "DurationSeconds": 180.4,
+      "LeakDetected": false,
+      "SampleCount": 12
+    }
+  }
+}

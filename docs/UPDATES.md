@@ -38,16 +38,16 @@ O CloudOS suporta distribuição de metadados de novas releases através de um f
   "updatedAt": "2026-09-05T22:00:00Z",
   "releases": [
     {
-      "version": "21.0.0-rc.1.2",
-      "build": 33,
-      "releaseDate": "2026-09-06T01:00:00Z",
+      "version": "21.0.0-rc.1.3",
+      "build": 34,
+      "releaseDate": "2026-09-06T01:50:14Z",
       "channel": "rc",
       "minWindowsBuild": 19041,
-      "installerFileName": "CloudOS-Setup-21.0.0-rc.1.2-x64.exe",
-      "installerUrl": "https://github.com/doug-cloud/CloudOS/releases/download/v21.0.0-rc.1.2/CloudOS-Setup-21.0.0-rc.1.2-x64.exe",
-      "sha256": "45a86456b432aa50d909806a0f7d793f0b4cc246e439db5946baf2509b6a2111",
+      "installerFileName": "CloudOS-Setup-21.0.0-rc.1.3-x64.exe",
+      "installerUrl": "https://github.com/doug-cloud/CloudOS/releases/download/v21.0.0-rc.1.3/CloudOS-Setup-21.0.0-rc.1.3-x64.exe",
+      "sha256": "20baaa1c693c889dac980d00073bbfec13462a77cb0e76ed980634e4555f684f",
       "mandatory": false,
-      "releaseNotes": "CloudOS Release Candidate 1.2: Final validation & compatibility pass, stress-tested lifecycles, and distribution hardening."
+      "releaseNotes": "CloudOS Release Candidate 1.3: Freeze, soak, repeat and resource leak hardening pass."
     }
   ]
 }

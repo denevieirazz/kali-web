@@ -881,21 +881,29 @@ class _SettingsWindowState extends State<SettingsWindow> {
     _revertCountdown = 15;
     _revertTimer?.cancel();
 
+    void Function(void Function())? updateDialog;
+
+    _revertTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_revertCountdown <= 1) {
+        timer.cancel();
+        _revertTimer = null;
+        widget.bridge.restoreDisplayMode();
+        if (mounted && Navigator.canPop(context)) {
+          Navigator.pop(context, false);
+        }
+      } else {
+        _revertCountdown--;
+        updateDialog?.call(() {});
+      }
+    });
+
     showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            _revertTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-              if (_revertCountdown <= 1) {
-                timer.cancel();
-                widget.bridge.restoreDisplayMode();
-                if (Navigator.canPop(ctx)) Navigator.pop(ctx, false);
-              } else {
-                setDialogState(() => _revertCountdown--);
-              }
-            });
+            updateDialog = setDialogState;
 
             return AlertDialog(
               backgroundColor: const Color(0xFF131A27),
@@ -918,6 +926,7 @@ class _SettingsWindowState extends State<SettingsWindow> {
                 TextButton(
                   onPressed: () {
                     _revertTimer?.cancel();
+                    _revertTimer = null;
                     widget.bridge.restoreDisplayMode();
                     Navigator.pop(ctx, false);
                   },
@@ -930,6 +939,7 @@ class _SettingsWindowState extends State<SettingsWindow> {
                   ),
                   onPressed: () {
                     _revertTimer?.cancel();
+                    _revertTimer = null;
                     Navigator.pop(ctx, true);
                   },
                   child: const Text('Manter Alterações'),
@@ -939,7 +949,10 @@ class _SettingsWindowState extends State<SettingsWindow> {
           },
         );
       },
-    );
+    ).whenComplete(() {
+      _revertTimer?.cancel();
+      _revertTimer = null;
+    });
   }
 
   Widget _buildSoundSection() {

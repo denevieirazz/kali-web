@@ -2,7 +2,7 @@
 ; Suporta instalacao per-user (sem UAC) ou per-machine, verificacao de dependencias, atalhos e desinstalacao limpa.
 
 #define MyAppName "CloudOS"
-#define MyAppVersion "21.0.0-rc.1.2"
+#define MyAppVersion "21.0.0-rc.1.3"
 #define MyAppPublisher "CloudOS"
 #define MyAppExeName "CloudOS.exe"
 #define MyAppSourcePath "..\..\dist\CloudOS"
@@ -17,8 +17,8 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
-OutputDir=..\..\dist\releases\21.0.0-rc.1.2
-OutputBaseFilename=CloudOS-Setup-21.0.0-rc.1.2-x64
+OutputDir=..\..\dist\releases\21.0.0-rc.1.3
+OutputBaseFilename=CloudOS-Setup-21.0.0-rc.1.3-x64
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern

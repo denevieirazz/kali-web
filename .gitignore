@@ -73,5 +73,4 @@ packages/
 TestResults/
 test-evidence-windows-apps/
 desktop/CloudOS.NativeShell/artifacts/
-
-
+*-smoke.json

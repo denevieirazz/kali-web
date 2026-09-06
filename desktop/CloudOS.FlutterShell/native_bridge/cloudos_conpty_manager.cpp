@@ -222,6 +222,17 @@ std::string CloudOSConPTYManager::CreateSession(
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        for (auto it = sessions_.begin(); it != sessions_.end();)
+        {
+            if (!it->second->is_alive.load() && it->second->closing.load())
+            {
+                it = sessions_.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
         if (sessions_.size() >= kMaxSessions)
         {
             out_error = "CloudOS terminal session limit reached";
