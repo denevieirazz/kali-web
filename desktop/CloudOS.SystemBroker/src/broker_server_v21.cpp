@@ -706,6 +706,62 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
             caps.push_back(JsonValue(cap));
         }
         res.payload["capabilities"] = JsonValue(std::move(caps));
+
+        // Typed subsystem capabilities registry for Flutter Autonomy V1
+        const auto audio = AudioServiceV25::Instance().GetAudioState();
+        const auto pwr = SystemSettingsServiceV25::Instance().GetPowerStatus();
+        const auto bt = SystemSettingsServiceV25::Instance().GetBluetoothStatus();
+        const bool wsl_ok = WslServiceV21::Instance().IsWslAvailable();
+
+        JsonObject registry;
+
+        JsonObject cap_display;
+        cap_display["id"] = JsonValue("display");
+        cap_display["supported"] = JsonValue(true);
+        cap_display["available"] = JsonValue(true);
+        cap_display["enabled"] = JsonValue(true);
+        cap_display["writable"] = JsonValue(true);
+        JsonArray display_feat;
+        display_feat.push_back(JsonValue("listModes"));
+        display_feat.push_back(JsonValue("applyMode"));
+        display_feat.push_back(JsonValue("restore"));
+        cap_display["features"] = JsonValue(std::move(display_feat));
+        registry["display"] = JsonValue(std::move(cap_display));
+
+        JsonObject cap_audio;
+        cap_audio["id"] = JsonValue("audio");
+        cap_audio["supported"] = JsonValue(true);
+        cap_audio["available"] = JsonValue(audio.available);
+        cap_audio["enabled"] = JsonValue(!audio.is_muted);
+        cap_audio["writable"] = JsonValue(audio.available);
+        registry["audio"] = JsonValue(std::move(cap_audio));
+
+        JsonObject cap_bt;
+        cap_bt["id"] = JsonValue("bluetooth");
+        cap_bt["supported"] = JsonValue(true);
+        cap_bt["available"] = JsonValue(bt.available);
+        cap_bt["enabled"] = JsonValue(bt.enabled);
+        cap_bt["writable"] = JsonValue(false);
+        cap_bt["reason"] = JsonValue(bt.available ? "Adaptador Bluetooth em modo somente leitura" : "Adaptador Bluetooth indisponível");
+        registry["bluetooth"] = JsonValue(std::move(cap_bt));
+
+        JsonObject cap_net;
+        cap_net["id"] = JsonValue("network");
+        cap_net["supported"] = JsonValue(true);
+        cap_net["available"] = JsonValue(true);
+        cap_net["enabled"] = JsonValue(true);
+        cap_net["writable"] = JsonValue(true);
+        registry["network"] = JsonValue(std::move(cap_net));
+
+        JsonObject cap_wsl;
+        cap_wsl["id"] = JsonValue("wsl");
+        cap_wsl["supported"] = JsonValue(true);
+        cap_wsl["available"] = JsonValue(wsl_ok);
+        cap_wsl["enabled"] = JsonValue(wsl_ok);
+        cap_wsl["writable"] = JsonValue(wsl_ok);
+        registry["wsl"] = JsonValue(std::move(cap_wsl));
+
+        res.payload["registry"] = JsonValue(std::move(registry));
         return res;
     }
 
@@ -1530,6 +1586,41 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
         return res;
     }
 
+    if (method == "display.applyMode")
+    {
+        std::wstring dev = L"\\\\.\\DISPLAY1";
+        if (req.payload.count("deviceName") && req.payload.at("deviceName").IsString())
+        {
+            dev = Utf8ToWide(req.payload.at("deviceName").AsString());
+        }
+
+        std::string err;
+        bool ok = false;
+        if (req.payload.count("modeId") && req.payload.at("modeId").IsString())
+        {
+            const std::string mode_id = req.payload.at("modeId").AsString();
+            ok = DisplayServiceV25::Instance().ApplyDisplayModeId(dev, mode_id, &err);
+        }
+        else
+        {
+            int width = req.payload.count("width") && req.payload.at("width").IsInt() ? static_cast<int>(req.payload.at("width").AsInt()) : 0;
+            int height = req.payload.count("height") && req.payload.at("height").IsInt() ? static_cast<int>(req.payload.at("height").AsInt()) : 0;
+            int freq = req.payload.count("frequency") && req.payload.at("frequency").IsInt() ? static_cast<int>(req.payload.at("frequency").AsInt()) : 0;
+            int orient = req.payload.count("orientation") && req.payload.at("orientation").IsInt() ? static_cast<int>(req.payload.at("orientation").AsInt()) : 0;
+            ok = DisplayServiceV25::Instance().SetDisplayMode(dev, width, height, freq, orient, &err);
+        }
+
+        if (!ok)
+        {
+            res.ok = false;
+            res.error_code = "display_mode_failed";
+            res.error_message = err;
+            return res;
+        }
+        res.payload["success"] = JsonValue(true);
+        return res;
+    }
+
     if (method == "display.setMode")
     {
         std::wstring dev = L"\\\\.\\DISPLAY1";
@@ -1551,6 +1642,23 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
             return res;
         }
         res.payload["success"] = JsonValue(true);
+        return res;
+    }
+
+    if (method == "display.capabilities")
+    {
+        JsonObject cap_display;
+        cap_display["id"] = JsonValue("display");
+        cap_display["supported"] = JsonValue(true);
+        cap_display["available"] = JsonValue(true);
+        cap_display["enabled"] = JsonValue(true);
+        cap_display["writable"] = JsonValue(true);
+        JsonArray display_feat;
+        display_feat.push_back(JsonValue("listModes"));
+        display_feat.push_back(JsonValue("applyMode"));
+        display_feat.push_back(JsonValue("restore"));
+        cap_display["features"] = JsonValue(std::move(display_feat));
+        res.payload["capabilities"] = JsonValue(std::move(cap_display));
         return res;
     }
 
@@ -1808,6 +1916,7 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
         res.payload["performanceProfile"] = JsonValue(PerformanceProfileToString(metrics.current_profile));
         return res;
     }
+
 
     // --- CLIPBOARD SERVICE (ETAPA 6) ---
     if (method == "clipboard.getHistory")

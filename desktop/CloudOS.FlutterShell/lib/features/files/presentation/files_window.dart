@@ -22,6 +22,7 @@ class FilesWindow extends StatefulWidget {
     this.onClose,
     this.onMinimize,
     this.onDrag,
+    this.onOpenFile,
     this.showTitleBar = false,
     this.initialRootId = 'home',
     CloudOSBridge? bridge,
@@ -31,6 +32,7 @@ class FilesWindow extends StatefulWidget {
   final VoidCallback? onClose;
   final VoidCallback? onMinimize;
   final ValueChanged<Offset>? onDrag;
+  final ValueChanged<CloudFileItem>? onOpenFile;
   final bool showTitleBar;
   final String initialRootId;
   final CloudOSBridge bridge;
@@ -269,6 +271,11 @@ class _FilesWindowState extends State<FilesWindow> {
           parent: _current,
         ),
       );
+      return;
+    }
+
+    if (widget.onOpenFile != null) {
+      widget.onOpenFile!(item);
       return;
     }
 

@@ -5,6 +5,9 @@ class CloudDisplayMode {
     required this.frequency,
     required this.orientation,
     required this.bitsPerPel,
+    this.modeId,
+    this.isCurrent = false,
+    this.isRecommended = false,
   });
 
   final int width;
@@ -12,6 +15,15 @@ class CloudDisplayMode {
   final int frequency;
   final int orientation;
   final int bitsPerPel;
+  final String? modeId;
+  final bool isCurrent;
+  final bool isRecommended;
+
+  String get canonicalId =>
+      modeId ??
+      '${width}x${height}@${frequency}_o${orientation}_b${bitsPerPel}';
+
+  int get refreshRate => frequency;
 
   factory CloudDisplayMode.fromMap(Map<String, dynamic> map) {
     return CloudDisplayMode(
@@ -20,6 +32,9 @@ class CloudDisplayMode {
       frequency: (map['frequency'] as num?)?.toInt() ?? 60,
       orientation: (map['orientation'] as num?)?.toInt() ?? 0,
       bitsPerPel: (map['bitsPerPel'] as num?)?.toInt() ?? 32,
+      modeId: map['modeId'] as String?,
+      isCurrent: map['current'] as bool? ?? false,
+      isRecommended: map['recommended'] as bool? ?? false,
     );
   }
 
@@ -29,7 +44,24 @@ class CloudDisplayMode {
     'frequency': frequency,
     'orientation': orientation,
     'bitsPerPel': bitsPerPel,
+    if (modeId != null) 'modeId': modeId,
+    'current': isCurrent,
+    'recommended': isRecommended,
   };
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CloudDisplayMode &&
+          runtimeType == other.runtimeType &&
+          width == other.width &&
+          height == other.height &&
+          frequency == other.frequency &&
+          orientation == other.orientation &&
+          bitsPerPel == other.bitsPerPel;
+
+  @override
+  int get hashCode => Object.hash(width, height, frequency, orientation, bitsPerPel);
 }
 
 class CloudDisplayMonitor {

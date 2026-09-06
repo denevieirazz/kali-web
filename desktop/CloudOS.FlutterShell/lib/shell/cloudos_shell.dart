@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -23,6 +24,7 @@ import '../features/task_manager/presentation/task_manager_window.dart';
 import '../models/cloud_app.dart';
 import '../models/cloud_notification.dart';
 import '../models/cloud_system_snapshot.dart';
+import '../models/cloud_file_item.dart';
 import '../core/responsive/cloud_layout_metrics.dart';
 import '../core/responsive/cloud_responsive_layout.dart';
 import '../services/cloudos_bridge.dart';
@@ -460,6 +462,43 @@ class _CloudOSShellState extends State<CloudOSShell> {
       filesMinimized = false;
       filesZIndex = ++topZIndex;
       activeInternalWindowId = 'files';
+      _closeTransientPanels();
+    });
+  }
+
+  void _openOrFocusWindow(String id) {
+    setState(() {
+      topZIndex++;
+      activeInternalWindowId = id;
+      if (id == 'files') {
+        filesOpen = true;
+        filesMinimized = false;
+        filesZIndex = topZIndex;
+      } else if (id == 'terminal') {
+        terminalOpen = true;
+        terminalMinimized = false;
+        terminalZIndex = topZIndex;
+      } else if (id == 'browser') {
+        browserOpen = true;
+        browserMinimized = false;
+        browserZIndex = topZIndex;
+      } else if (id == 'settings') {
+        settingsOpen = true;
+        settingsMinimized = false;
+        settingsZIndex = topZIndex;
+      } else if (id == 'notes') {
+        notesOpen = true;
+        notesMinimized = false;
+        notesZIndex = topZIndex;
+      } else if (id == 'calculator') {
+        calculatorOpen = true;
+        calculatorMinimized = false;
+        calculatorZIndex = topZIndex;
+      } else if (id == 'task_manager') {
+        taskManagerOpen = true;
+        taskManagerMinimized = false;
+        taskManagerZIndex = topZIndex;
+      }
       _closeTransientPanels();
     });
   }
@@ -1552,6 +1591,10 @@ class _CloudOSShellState extends State<CloudOSShell> {
     try {
       final res = await widget.bridge.launchAppStructured(app.id);
       if (!mounted) return;
+      if (res.isBlocked) {
+        await _showManagedAppBlockedDialog(app, res.message);
+        return;
+      }
       if (!res.isSuccess) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1576,6 +1619,317 @@ class _CloudOSShellState extends State<CloudOSShell> {
         );
       }
     }
+  }
+
+  Future<void> _showManagedAppBlockedDialog(CloudApp app, String reason) async {
+    const title = 'Aplicativo Não Contido';
+    final explanation =
+        '${app.name} é um aplicativo tradicional do Windows e não pode ser embutido como uma janela interna do CloudOS '
+        'devido a políticas de contenção do sistema.';
+    final cleanReason = reason.isNotEmpty
+        ? reason
+        : 'Janelas Win32 não contidas não podem ser capturadas na camada Flutter.';
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF16202E),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: CloudOSColors.border),
+        ),
+        title: Row(
+          children: <Widget>[
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.amber.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(
+                Icons.shield_outlined,
+                color: Colors.amber,
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                title,
+                style: TextStyle(
+                  color: CloudOSColors.text,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              explanation,
+              style: const TextStyle(
+                color: CloudOSColors.secondary,
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: CloudOSColors.elevated.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: CloudOSColors.border.withValues(alpha: 0.5)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  const Icon(Icons.info_outline_rounded, size: 16, color: CloudOSColors.caption),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      cleanReason,
+                      style: const TextStyle(
+                        color: CloudOSColors.caption,
+                        fontSize: 11.5,
+                        height: 1.3,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'Deseja abrir o aplicativo na Área de Trabalho do Windows?',
+              style: TextStyle(
+                color: CloudOSColors.text,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar', style: TextStyle(color: CloudOSColors.caption)),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: CloudOSColors.accent,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            icon: const Icon(Icons.open_in_new_rounded, size: 16),
+            label: const Text('Abrir no Windows'),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              unawaited(widget.bridge.openWindowsApp(app.id));
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Iniciando ${app.name} no Windows...'),
+                  duration: const Duration(seconds: 3),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handleOpenFileFromFiles(CloudFileItem item) async {
+    final nameLower = item.name.toLowerCase();
+    final dotIndex = nameLower.lastIndexOf('.');
+    final ext = dotIndex != -1 ? nameLower.substring(dotIndex) : '';
+
+    // Text & Code files -> Notes
+    const textExts = <String>{
+      '.txt', '.md', '.json', '.log', '.yaml', '.yml', '.ini', '.cfg', '.conf',
+    };
+    if (textExts.contains(ext)) {
+      _openOrFocusWindow('notes');
+      return;
+    }
+
+    // Web & Document files -> Browser
+    const webExts = <String>{'.html', '.htm', '.pdf', '.svg'};
+    if (webExts.contains(ext)) {
+      _openOrFocusWindow('browser');
+      unawaited(_launchBrowser());
+      return;
+    }
+
+    // Image files -> Lightbox Modal
+    const imageExts = <String>{
+      '.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp', '.ico',
+    };
+    if (imageExts.contains(ext)) {
+      await _showImageViewerDialog(item);
+      return;
+    }
+
+    // Fallback: Open with host system default handler
+    final entryId = item.entryId ?? item.path;
+    final opened = await widget.bridge.openFileEntry(entryId);
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Não foi possível abrir ${item.name}.')),
+      );
+    }
+  }
+
+  Future<void> _showImageViewerDialog(CloudFileItem item) async {
+    final file = File(item.path);
+    final exists = file.existsSync();
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: const Color(0xFF141C2B),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: CloudOSColors.border),
+        ),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 32),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(
+            maxWidth: 800,
+            maxHeight: 650,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              // Title bar
+              Container(
+                height: 48,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                decoration: const BoxDecoration(
+                  border: Border(bottom: BorderSide(color: CloudOSColors.border)),
+                ),
+                child: Row(
+                  children: <Widget>[
+                    const Icon(Icons.image_rounded, size: 20, color: CloudOSColors.accent),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            item.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: CloudOSColors.text,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (item.sizeFormatted.isNotEmpty)
+                            Text(
+                              item.sizeFormatted,
+                              style: const TextStyle(
+                                color: CloudOSColors.caption,
+                                fontSize: 11,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 18, color: CloudOSColors.caption),
+                      tooltip: 'Fechar',
+                      onPressed: () => Navigator.of(ctx).pop(),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Image content
+              Flexible(
+                child: Container(
+                  color: Colors.black38,
+                  padding: const EdgeInsets.all(16),
+                  alignment: Alignment.center,
+                  child: exists
+                      ? InteractiveViewer(
+                          maxScale: 4.0,
+                          minScale: 0.5,
+                          child: Image.file(
+                            file,
+                            fit: BoxFit.contain,
+                            errorBuilder: (_, __, ___) => const Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: <Widget>[
+                                  Icon(Icons.broken_image_rounded, size: 48, color: CloudOSColors.caption),
+                                  SizedBox(height: 8),
+                                  Text(
+                                    'Não foi possível decodificar a imagem.',
+                                    style: TextStyle(color: CloudOSColors.caption, fontSize: 12),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        )
+                      : const Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: <Widget>[
+                              Icon(Icons.image_not_supported_rounded, size: 48, color: CloudOSColors.caption),
+                              SizedBox(height: 8),
+                              Text(
+                                'Arquivo não acessível no sistema local.',
+                                style: TextStyle(color: CloudOSColors.caption, fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                ),
+              ),
+
+              // Action Footer
+              Container(
+                height: 48,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                decoration: const BoxDecoration(
+                  border: Border(top: BorderSide(color: CloudOSColors.border)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: <Widget>[
+                    TextButton.icon(
+                      icon: const Icon(Icons.open_in_new_rounded, size: 15),
+                      label: const Text('Abrir no aplicativo padrão'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: CloudOSColors.secondary,
+                        textStyle: const TextStyle(fontSize: 12),
+                      ),
+                      onPressed: () {
+                        Navigator.of(ctx).pop();
+                        final entryId = item.entryId ?? item.path;
+                        unawaited(widget.bridge.openFileEntry(entryId));
+                      },
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      child: const Text('Fechar', style: TextStyle(color: CloudOSColors.caption)),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   List<SpotlightItem> get _spotlightItems {
@@ -2505,6 +2859,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
                 key: ValueKey<String>('files:$filesRootId:$filesLaunchRevision'),
                 bridge: widget.bridge,
                 initialRootId: filesRootId,
+                onOpenFile: _handleOpenFileFromFiles,
                 onClose: () => _closeWindow('files'),
                 onMinimize: () => setState(() => filesMinimized = true),
               ),

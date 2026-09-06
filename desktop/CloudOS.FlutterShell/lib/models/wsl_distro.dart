@@ -122,4 +122,5 @@ class AppLaunchStatus {
   final String message;
 
   bool get isSuccess => launched || status == 'running';
+  bool get isBlocked => status == 'blocked';
 }

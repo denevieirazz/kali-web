@@ -52,6 +52,7 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
 
   CloudQuickSettingsState? _authoritativeState;
   List<CloudNetworkInterface> _networkInterfaces = const <CloudNetworkInterface>[];
+  CapabilityRegistry _capabilities = CapabilityRegistry();
   bool _refreshing = false;
   bool _volumeBusy = false;
   bool _muteBusy = false;
@@ -93,6 +94,18 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
         }
         _lastError = null;
       });
+
+      try {
+        final caps = await _bridge.getCapabilities().timeout(
+          const Duration(milliseconds: 300),
+          onTimeout: () => CapabilityRegistry.fallback(),
+        );
+        if (mounted) {
+          setState(() {
+            _capabilities = caps;
+          });
+        }
+      } catch (_) {}
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -237,6 +250,18 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
     return 'Sem conexão';
   }
 
+  String get _bluetoothSubtitle {
+    if (!_bluetooth.available) {
+      return 'Indisponível';
+    }
+    if (_capabilities.isSupported('bluetooth') && !_capabilities.isWritable('bluetooth')) {
+      return _bluetooth.enabled
+          ? 'Somente leitura • Conectado'
+          : 'Somente leitura';
+    }
+    return _bluetooth.enabled ? 'Ligado • Dispositivos' : 'Desligado • Dispositivos';
+  }
+
   CloudBluetoothStatus get _bluetooth =>
       _authoritativeState?.bluetooth ?? const CloudBluetoothStatus();
 
@@ -304,11 +329,7 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel> {
                     ),
                     QuickToggleTile(
                       label: 'Bluetooth',
-                      subtitle: !_bluetooth.available
-                          ? 'Indisponível'
-                          : _bluetooth.enabled
-                              ? 'Ligado • Dispositivos'
-                              : 'Desligado • Dispositivos',
+                      subtitle: _bluetoothSubtitle,
                       icon: Icons.bluetooth_rounded,
                       active: _bluetooth.available && _bluetooth.enabled,
                       enabled: _bluetooth.available ||

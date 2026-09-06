@@ -483,6 +483,7 @@ bool CloudOSBrokerClientV21::LaunchAppStructured(
 
     if (ManagedWin32HostV22::IsWindowsCatalogId(app_id))
     {
+        out_result.id = app_id;
         const bool ok = ManagedWin32HostV22::Launch(app_id, err);
         if (ok)
         {
@@ -493,6 +494,9 @@ bool CloudOSBrokerClientV21::LaunchAppStructured(
         }
         else
         {
+            out_result.launched = false;
+            out_result.status = "blocked";
+            out_result.platform = "windows";
             out_result.message = err;
         }
         return ok;
