@@ -11,8 +11,10 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
+$versionData = Get-Content -LiteralPath (Join-Path $repoRoot 'version.json') -Raw | ConvertFrom-Json
+$relName = if ($versionData.PSObject.Properties['releaseName']) { [string]$versionData.releaseName } else { "Release Candidate" }
 Write-Host "======================================================" -ForegroundColor Cyan
-Write-Host "  CloudOS Release Pipeline: Release Candidate 1.1     " -ForegroundColor Cyan
+Write-Host "  CloudOS Release Pipeline: $relName                  " -ForegroundColor Cyan
 Write-Host "======================================================" -ForegroundColor Cyan
 
 # 1. Carregar e validar version.json
@@ -178,7 +180,7 @@ if (-not $SkipInstaller) {
                 installerUrl     = "https://github.com/doug-cloud/CloudOS/releases/download/v$productVersion/$($setupItem.Name)"
                 sha256           = $setupHash
                 mandatory        = $false
-                releaseNotes     = "CloudOS Release Candidate 1.1: Release Engineering pass with real Inno Setup installer, hardened atomic updater, schema v2 preferences, and crash protection."
+                releaseNotes     = "CloudOS $relName ($productVersion, build $buildNumber): Final validation & compatibility pass, stress-tested lifecycles, and distribution hardening."
             }
         )
     }
@@ -188,4 +190,4 @@ if (-not $SkipInstaller) {
     Write-Host "[7/7] Compilacao de instalador ignorada (-SkipInstaller)." -ForegroundColor DarkGray
 }
 
-Write-Host "`n[SUCESSO] Pipeline de Release RC1.1 finalizado com exito!" -ForegroundColor Green
+Write-Host "`n[SUCESSO] Pipeline de Release $productVersion finalizado com exito!" -ForegroundColor Green

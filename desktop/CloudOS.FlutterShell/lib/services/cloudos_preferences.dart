@@ -138,7 +138,9 @@ class CloudOSPreferences {
     if (map['pinnedAppIds'] is List) {
       for (final item in map['pinnedAppIds'] as List) {
         if (item is String && item.isNotEmpty && !pinned.contains(item)) {
-          pinned.add(item);
+          if (pinned.length < 50) {
+            pinned.add(item);
+          }
         }
       }
     }
@@ -147,7 +149,9 @@ class CloudOSPreferences {
     if (map['recentAppIds'] is List) {
       for (final item in map['recentAppIds'] as List) {
         if (item is String && item.isNotEmpty && !recent.contains(item)) {
-          recent.add(item);
+          if (recent.length < 20) {
+            recent.add(item);
+          }
         }
       }
     }

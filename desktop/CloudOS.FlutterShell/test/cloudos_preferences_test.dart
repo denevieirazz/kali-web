@@ -119,5 +119,18 @@ void main() {
       expect(imported.getIconPosition('my_file')!.dy, equals(300.0));
       expect(imported.recentAppIds, contains('terminal'));
     });
+
+    test('pinned and recent apps lists are strictly bounded', () {
+      final oversizedMap = {
+        'schemaVersion': 2,
+        'pinnedAppIds': List.generate(100, (i) => 'pinned_app_$i'),
+        'recentAppIds': List.generate(100, (i) => 'recent_app_$i'),
+      };
+      final prefs = CloudOSPreferences.fromJson(oversizedMap);
+      expect(prefs.pinnedAppIds.length, equals(50));
+      expect(prefs.recentAppIds.length, equals(20));
+      expect(prefs.pinnedAppIds.first, equals('pinned_app_0'));
+      expect(prefs.recentAppIds.first, equals('recent_app_0'));
+    });
   });
 }

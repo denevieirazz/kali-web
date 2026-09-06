@@ -1952,7 +1952,7 @@ Safe Mode: ${_recoveryStatus?.isSafeMode ?? false}
           child: const Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Text('Desenvolvido para Douglas • CloudOS Provedor de Shell.', style: TextStyle(color: Colors.white, fontSize: 12)),
+              Text('CloudOS Provedor de Shell Autônomo para Windows.', style: TextStyle(color: Colors.white, fontSize: 12)),
               SizedBox(height: 4),
               Text('Explorer.exe e Winlogon preservados como fallbacks invioláveis de segurança.', style: TextStyle(color: CloudOSColors.caption, fontSize: 11.5)),
             ],
