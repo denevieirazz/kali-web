@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -477,8 +477,19 @@ private:
         }
     }
 
+    static inline bool s_flutter_ui_active = false;
+
+    static void SetFlutterUiActive(bool active) noexcept
+    {
+        s_flutter_ui_active = active;
+    }
+
     static bool BlockLaunch(std::string_view app_id, const std::string& error)
     {
+        if (s_flutter_ui_active)
+        {
+            return false;
+        }
         std::wstring message =
             L"CloudOS blocked this Windows application from opening outside its managed desktop.\n\n";
         message += L"Application: ";

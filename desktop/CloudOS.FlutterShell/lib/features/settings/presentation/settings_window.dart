@@ -679,6 +679,46 @@ class _SettingsWindowState extends State<SettingsWindow> {
     );
   }
 
+  Widget _buildHostSettingsSecondaryFooter({
+    required String label,
+    required String msSettingsUri,
+    String? subtitle,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Divider(color: CloudOSColors.border),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  subtitle ?? 'Para configurações avançadas do driver do Windows:',
+                  style: const TextStyle(color: CloudOSColors.caption, fontSize: 11),
+                ),
+              ),
+              TextButton.icon(
+                icon: const Icon(Icons.open_in_new_rounded, size: 13),
+                label: Text(label),
+                style: TextButton.styleFrom(
+                  foregroundColor: CloudOSColors.secondary,
+                  textStyle: const TextStyle(fontSize: 11),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                onPressed: () => widget.bridge.openWindowsSettings(msSettingsUri),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDisplaySection() {
     final monitor = _monitors.isNotEmpty && _selectedMonitorIndex < _monitors.length
         ? _monitors[_selectedMonitorIndex]
@@ -807,24 +847,10 @@ class _SettingsWindowState extends State<SettingsWindow> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 14),
-                  const Divider(color: CloudOSColors.border),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          icon: const Icon(Icons.settings_display_rounded, size: 16),
-                          label: const Text('Abrir Configurações de Vídeo do Windows'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: cloudThemeNotifier.value.accentColor,
-                            side: BorderSide(color: cloudThemeNotifier.value.accentColor),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          ),
-                          onPressed: () => widget.bridge.openWindowsSettings('ms-settings:display'),
-                        ),
-                      ),
-                    ],
+                  _buildHostSettingsSecondaryFooter(
+                    label: 'Vídeo do Windows',
+                    msSettingsUri: 'ms-settings:display',
+                    subtitle: 'Configurações de calibração avançada e HDR do host:',
                   ),
                 ] else
                   const Text('Nenhum modo de vídeo enumerado.', style: TextStyle(color: CloudOSColors.caption)),
@@ -844,12 +870,9 @@ class _SettingsWindowState extends State<SettingsWindow> {
         : _monitors.first;
     setState(() => _displayLoading = true);
 
-    final success = await widget.bridge.setDisplayMode(
+    final success = await widget.bridge.applyDisplayMode(
       deviceName: curMon.deviceName,
-      width: _selectedMode!.width,
-      height: _selectedMode!.height,
-      frequency: _selectedMode!.frequency,
-      orientation: _selectedMode!.orientation,
+      mode: _selectedMode!,
     );
 
     setState(() => _displayLoading = false);
@@ -997,24 +1020,10 @@ class _SettingsWindowState extends State<SettingsWindow> {
                   Text('${(_volume * 100).round()}%', style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
                 ],
               ),
-              const SizedBox(height: 14),
-              const Divider(color: CloudOSColors.border),
-              const SizedBox(height: 10),
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.settings_voice_rounded, size: 16),
-                      label: const Text('Abrir Configurações de Som do Windows'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: CloudOSColors.accent,
-                        side: const BorderSide(color: CloudOSColors.accent),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                      onPressed: () => widget.bridge.openWindowsSettings('ms-settings:sound'),
-                    ),
-                  ),
-                ],
+              _buildHostSettingsSecondaryFooter(
+                label: 'Som do Windows',
+                msSettingsUri: 'ms-settings:sound',
+                subtitle: 'Painel de controle de som e formatos exclusivos do host:',
               ),
             ],
           ),
@@ -1082,24 +1091,10 @@ class _SettingsWindowState extends State<SettingsWindow> {
                   ),
                 ),
               ],
-              const SizedBox(height: 14),
-              const Divider(color: CloudOSColors.border),
-              const SizedBox(height: 10),
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.battery_saver_rounded, size: 16),
-                      label: const Text('Abrir Opções de Energia do Windows'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: CloudOSColors.accent,
-                        side: const BorderSide(color: CloudOSColors.accent),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                      onPressed: () => widget.bridge.openWindowsSettings('ms-settings:powersleep'),
-                    ),
-                  ),
-                ],
+              _buildHostSettingsSecondaryFooter(
+                label: 'Energia do Windows',
+                msSettingsUri: 'ms-settings:powersleep',
+                subtitle: 'Planos de energia legados e suspensão do Windows:',
               ),
             ],
           ),
@@ -1125,31 +1120,6 @@ class _SettingsWindowState extends State<SettingsWindow> {
       padding: const EdgeInsets.all(24),
       children: <Widget>[
         _buildSectionHeader('Armazenamento', 'Discos locais, volumes montados e partições do subsistema WSL.'),
-        const SizedBox(height: 16),
-        _buildCard(
-          title: 'Configurações de Armazenamento do Windows',
-          icon: Icons.cleaning_services_rounded,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              const Text(
-                'Gerencie o Sensor de Armazenamento, arquivos temporários e recomendações de limpeza do sistema host.',
-                style: TextStyle(color: CloudOSColors.caption, fontSize: 12.5),
-              ),
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                icon: const Icon(Icons.open_in_new_rounded, size: 15),
-                label: const Text('Abrir Sensor de Armazenamento do Windows'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: CloudOSColors.accent,
-                  side: const BorderSide(color: CloudOSColors.accent),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                ),
-                onPressed: () => widget.bridge.openWindowsSettings('ms-settings:storagesense'),
-              ),
-            ],
-          ),
-        ),
         const SizedBox(height: 16),
         if (_storageDrives.isNotEmpty)
           for (final drive in _storageDrives)
@@ -1185,6 +1155,25 @@ class _SettingsWindowState extends State<SettingsWindow> {
             icon: Icons.storage_rounded,
             child: const Text('Consultando armazenamento local do host Windows...', style: TextStyle(color: CloudOSColors.secondary)),
           ),
+        const SizedBox(height: 16),
+        _buildCard(
+          title: 'Manutenção de Disco do Host',
+          icon: Icons.cleaning_services_rounded,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              const Text(
+                'Sensor de Armazenamento e recomendações de limpeza do sistema host Windows.',
+                style: TextStyle(color: CloudOSColors.caption, fontSize: 12),
+              ),
+              _buildHostSettingsSecondaryFooter(
+                label: 'Sensor de Armazenamento',
+                msSettingsUri: 'ms-settings:storagesense',
+                subtitle: 'Configurações de limpeza automática do Windows:',
+              ),
+            ],
+          ),
+        ),
       ],
     );
   }
@@ -1349,16 +1338,10 @@ class _SettingsWindowState extends State<SettingsWindow> {
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
-              OutlinedButton.icon(
-                icon: const Icon(Icons.settings_ethernet_rounded, size: 16),
-                label: const Text('Abrir Configurações de Rede do Windows'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: CloudOSColors.accent,
-                  side: const BorderSide(color: CloudOSColors.accent),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                ),
-                onPressed: () => widget.bridge.openWindowsSettings('ms-settings:network'),
+              _buildHostSettingsSecondaryFooter(
+                label: 'Rede do Windows',
+                msSettingsUri: 'ms-settings:network',
+                subtitle: 'Adaptadores avançados e propriedades de firewall do host:',
               ),
             ],
           ),
@@ -1396,24 +1379,10 @@ class _SettingsWindowState extends State<SettingsWindow> {
                   ),
                 ],
               ),
-              const SizedBox(height: 14),
-              const Divider(color: CloudOSColors.border),
-              const SizedBox(height: 10),
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.bluetooth_searching_rounded, size: 16),
-                      label: const Text('Abrir Configurações de Bluetooth do Windows'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: CloudOSColors.accent,
-                        side: const BorderSide(color: CloudOSColors.accent),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                      onPressed: () => widget.bridge.openWindowsSettings('ms-settings:bluetooth'),
-                    ),
-                  ),
-                ],
+              _buildHostSettingsSecondaryFooter(
+                label: 'Bluetooth do Windows',
+                msSettingsUri: 'ms-settings:bluetooth',
+                subtitle: 'Pareamento avançado e assistente de conexão do host:',
               ),
             ],
           ),

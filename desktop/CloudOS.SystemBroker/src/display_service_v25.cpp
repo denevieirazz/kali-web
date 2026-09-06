@@ -13,6 +13,9 @@ namespace CloudOS
 JsonObject DisplayModeInfoV25::ToJsonObject() const
 {
     JsonObject obj;
+    const std::string mode_id = std::to_string(width) + "x" + std::to_string(height) + "@" +
+        std::to_string(frequency) + "_o" + std::to_string(orientation) + "_b" + std::to_string(bits_per_pel);
+    obj["modeId"] = JsonValue(mode_id);
     obj["width"] = JsonValue(static_cast<double>(width));
     obj["height"] = JsonValue(static_cast<double>(height));
     obj["frequency"] = JsonValue(static_cast<double>(frequency));
@@ -305,6 +308,30 @@ bool DisplayServiceV25::SetDisplayMode(
     EventBusV21::Instance().Publish("display.changed", payload);
 
     return true;
+}
+
+bool DisplayServiceV25::ApplyDisplayModeId(
+    const std::wstring& device_name,
+    const std::string& mode_id,
+    std::string* error)
+{
+    const auto modes = ListSupportedModes(device_name);
+    for (const auto& m : modes)
+    {
+        const std::string candidate_id = std::to_string(m.width) + "x" + std::to_string(m.height) + "@" +
+            std::to_string(m.frequency) + "_o" + std::to_string(m.orientation) + "_b" + std::to_string(m.bits_per_pel);
+        const std::string short_id = std::to_string(m.width) + "x" + std::to_string(m.height) + "@" +
+            std::to_string(m.frequency);
+        if (candidate_id == mode_id || short_id == mode_id)
+        {
+            return SetDisplayMode(device_name, m.width, m.height, m.frequency, m.orientation, error);
+        }
+    }
+    if (error)
+    {
+        *error = "Mode ID '" + mode_id + "' is not advertised by the monitor driver for " + WStringToString(device_name);
+    }
+    return false;
 }
 
 bool DisplayServiceV25::RestoreBaseline(std::string* error)

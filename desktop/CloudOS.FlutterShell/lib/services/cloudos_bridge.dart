@@ -12,9 +12,11 @@ import '../models/wsl_distro.dart';
 import '../shell/window_manager/cloud_window.dart';
 import 'bridge/cloud_app_mapper.dart';
 import 'bridge/cloud_file_mapper.dart';
+import '../models/cloud_capability.dart';
 import 'bridge/cloud_notification_mapper.dart';
 import 'bridge/cloudos_preview_data.dart';
 
+export '../models/cloud_capability.dart';
 export '../models/system_settings_models.dart';
 export '../models/desktop_services_models.dart';
 export '../models/recovery_models.dart';
@@ -789,6 +791,9 @@ class CloudOSBridge {
         message: 'Modo preview',
       );
     } on PlatformException catch (e) {
+      if (e.details is Map) {
+        return AppLaunchStatus.fromMap(e.details as Map);
+      }
       return AppLaunchStatus(
         id: id,
         status: 'failed',
@@ -1093,6 +1098,21 @@ class CloudOSBridge {
     return res != null && (res['success'] as bool? ?? false);
   }
 
+  Future<bool> applyDisplayMode({
+    required String deviceName,
+    required CloudDisplayMode mode,
+  }) async {
+    final res = await invokeBrokerRpc('display.applyMode', {
+      'deviceName': deviceName,
+      'modeId': mode.modeId,
+      'width': mode.width,
+      'height': mode.height,
+      'frequency': mode.refreshRate,
+      'orientation': mode.orientation,
+    });
+    return res != null && (res['success'] as bool? ?? false);
+  }
+
   Future<bool> restoreDisplayMode() async {
     final res = await invokeBrokerRpc('display.restore');
     return res != null && (res['success'] as bool? ?? false);
@@ -1315,7 +1335,22 @@ class CloudOSBridge {
     return res != null && (res['success'] as bool? ?? false);
   }
 
-  // --- HARDENING & CAPABILITIES (ETAPA 8) ---
+  // --- HARDENING & CAPABILITIES (ETAPA 8 & FLUTTER AUTONOMY) ---
+  Future<CapabilityRegistry> getCapabilities() async {
+    try {
+      final res = await invokeBrokerRpc('system.capabilities')
+          .timeout(const Duration(milliseconds: 300), onTimeout: () => null);
+      if (res == null || res['registry'] is! Map) {
+        return CapabilityRegistry.fallback();
+      }
+      return CapabilityRegistry.fromMap(
+        Map<String, dynamic>.from(res['registry'] as Map),
+      );
+    } catch (_) {
+      return CapabilityRegistry.fallback();
+    }
+  }
+
   Future<CloudOSSystemCapabilities?> getSystemCapabilities() async {
     final res = await invokeBrokerRpc('system.getCapabilities');
     if (res == null) return null;

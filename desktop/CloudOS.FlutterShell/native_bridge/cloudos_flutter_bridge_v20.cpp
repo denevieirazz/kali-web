@@ -1,6 +1,7 @@
 #include "cloudos_flutter_bridge_v20.h"
 #include "cloudos_broker_client_v21.h"
 #include "cloudos_conpty_manager.h"
+#include "cloudos_managed_win32_host_v22.h"
 #include "../../CloudOS.NativeCommon/native_shell_activation_client_v21.h"
 #include "../../CloudOS.NativeCommon/native_shell_notification_client_v21.h"
 
@@ -357,6 +358,7 @@ CloudOSFlutterBridgeV20& CloudOSFlutterBridgeV20::Instance()
 void CloudOSFlutterBridgeV20::Initialize(HWND window_handle)
 {
     window_handle_ = window_handle;
+    ManagedWin32HostV22::SetFlutterUiActive(true);
     CloudOSBrokerClientV21::Instance().EnsureConnected();
     RefreshAppCatalog();
     RefreshSystemSnapshot();

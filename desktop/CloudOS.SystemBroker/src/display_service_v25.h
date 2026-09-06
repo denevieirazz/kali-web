@@ -58,6 +58,11 @@ public:
         int orientation,
         std::string* error = nullptr);
 
+    bool ApplyDisplayModeId(
+        const std::wstring& device_name,
+        const std::string& mode_id,
+        std::string* error = nullptr);
+
     bool RestoreBaseline(std::string* error = nullptr);
 
 private:
