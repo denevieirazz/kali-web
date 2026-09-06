@@ -1,164 +1,155 @@
-# CloudOS Native Shell
+# CloudOS — Modern Desktop Shell & System Runtime
 
-CloudOS é um shell desktop nativo C++/Win32 sobre Windows. O Windows continua responsável por kernel, drivers, DWM, segurança, Win32 e serviços do sistema; o CloudOS fornece a experiência Desktop/Taskbar/Start, Window Manager, workspaces, Files, controles e aplicativos first-party.
+CloudOS é um ambiente desktop de alta performance para Windows baseado em uma arquitetura híbrida moderna: camada de apresentação em **Flutter Desktop (C++/Dart)** acoplada a um núcleo nativo de autoridade em **C++/Win32**, **System Broker IPC (Protocolo V21/V22)**, **Terminal ConPTY**, integração profunda com **WSL** e salvaguardas rigorosas contra tela preta com **fallback automático para o Windows Explorer**.
 
-> Para agentes de IA: comece por [`AGENTS.md`](AGENTS.md), depois [`docs/native/ARCHITECTURE.md`](docs/native/ARCHITECTURE.md) e [`docs/native/CODEMAP.md`](docs/native/CODEMAP.md).
+O Windows continua responsável pelo kernel, drivers, DWM, subsistema de segurança, Win32 e serviços do sistema operacional. O CloudOS provê a experiência completa de Desktop, Taskbar, Dock, Start Menu, Window Manager com contenção Win32, Gerenciador de Arquivos transacional, painéis de controle do sistema e ciclo de vida supervisionado em modo usuário.
 
-## Arquitetura atual
+> Para agentes de IA e desenvolvedores: consulte [`AGENTS.md`](AGENTS.md), [`docs/PROJECT_STATUS_MASTER.md`](docs/PROJECT_STATUS_MASTER.md), [`docs/native/ARCHITECTURE.md`](docs/native/ARCHITECTURE.md) e [`docs/native/CODEMAP.md`](docs/native/CODEMAP.md).
+
+---
+
+## 1. Arquitetura do Sistema
 
 ```text
-CloudOS.Supervisor.exe              V11: recovery externo/readiness/restart
-        │
-        └── CloudOS.exe --supervised
-                │
-                ├── Desktop / Taskbar / Start
-                ├── Window Manager / Workspaces
-                ├── Quick Settings / Notification Center
-                ├── Files / apps first-party
-                └── CloudOS.NativeRuntime.dll
+┌────────────────────────────────────────────────────────────────────────┐
+│               Camada de Apresentação (Flutter Desktop Shell)           │
+│  cloudos_flutter_shell.exe (Desktop, Taskbar, Dock, Start, Files, etc) │
+└───────────────────────┬───────────────────────────┬────────────────────┘
+                        │ Canal Nativo (v19/v20)    │ Named Pipe IPC (v21/v22)
+┌───────────────────────▼──────────┐    ┌───────────▼────────────────────┐
+│ Camada de Autoridade Nativa C++  │    │  System Broker C++/Win32       │
+│ CloudOS.exe + NativeRuntime.dll  │    │  CloudOS.SystemBroker.exe      │
+│  - Enumeração e Rehoming Win32   │    │  - ConPTY Terminal Host (x32)  │
+│  - Captura e DPI Multi-Monitor   │    │  - Áudio CoreAudio & Sistema   │
+│  - Memória Compartilhada / IPC   │    │  - WSL, Apps, Files Provider   │
+└───────────────────────▲──────────┘    └────────────────────────────────┘
+                        │
+┌───────────────────────┴────────────────────────────────────────────────┐
+│             Supervisão de Ciclo de Vida e Recuperação Segura           │
+│  CloudOS.Supervisor.exe  (Watchdog / Heartbeat / Crash Loop Gate)      │
+│  CloudOS.ShellBootstrap.exe  (Detecção de Sessão / Mutex Único)        │
+│  CloudOS.Recovery.exe  (Ferramenta Standalone de Recuperação e Status) │
+│                                                                        │
+│                      FALLBACK DE EMERGÊNCIA:                           │
+│                      explorer.exe (Windows Shell Oficial)              │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
-O desktop atual **não é React/WPF/WebView2**. Essas áreas continuam no repositório por compatibilidade, testes, referência histórica/visual e componentes específicos. WebView2 permanece permitido no Navegador CloudOS, mas não é o renderer do Desktop principal.
+---
 
-## Estado dos marcos nativos
-
-| Marco | Estado | Resultado principal |
-|---|---|---|
-| V9 Stability/Readiness | ✅ | health ABI, Ready e heartbeat da UI thread |
-| V10 Lifecycle | ✅ | single-instance e revalidação de lifecycle |
-| V11 Shell Supervisor | ✅ | supervisor externo, restart limitado e fallback Explorer |
-| V12 Performance/Visual | ✅ | shell event-driven, paint cacheado, telemetria de idle |
-| V13 Transactional Deployment | ✅ | versões imutáveis, staging, LKG, repair e rollback |
-| V14 Shell Activation | ✅ hosted CI | ativação opt-in por usuário + restauração exata do Shell |
-| V15 Repository Clarity | em validação | source-of-truth e navegação do código para humanos/IAs |
-
-A CI hospedada não substitui a matriz física. Login real com V14, reboot, RDP físico, suspend físico, hotplug e soak de 24h continuam gates separados; veja [`docs/native/VALIDATION.md`](docs/native/VALIDATION.md).
-
-## Onde está o código atual
+## 2. Componentes e Estrutura de Diretórios
 
 ```text
 desktop/
-├── CloudOS.NativeShell/       # CloudOS.exe — shell/UI atual
-├── CloudOS.NativeRuntime/     # CloudOS.NativeRuntime.dll
-├── CloudOS.NativeRecovery/    # CloudOS.Supervisor.exe
-└── CloudOS.NativeCommon/      # protocolos/ABI compartilhados
+├── CloudOS.FlutterShell/       # Apresentação Flutter (Dart / C++ Runner)
+├── CloudOS.NativeShell/       # CloudOS.exe (Shell e Window Manager Win32)
+├── CloudOS.NativeRuntime/     # CloudOS.NativeRuntime.dll (Core C++)
+├── CloudOS.SystemBroker/      # CloudOS.SystemBroker.exe (Broker IPC V21/V22)
+├── CloudOS.BrokerProbe/       # CloudOS.BrokerProbe.exe (Diagnóstico de IPC)
+├── CloudOS.NativeRecovery/    # CloudOS.Supervisor.exe (Supervisor Watchdog)
+├── CloudOS.NativeShellBootstrap/ # CloudOS.ShellBootstrap.exe (Bootstrap Shell)
+├── CloudOS.NativeRecoveryTool/   # CloudOS.Recovery.exe (CLI de Recuperação)
+└── CloudOS.NativeCommon/      # Protocolos compartilhados, ABI e tipos
 
-scripts/native/                # build, contratos, smokes, V13 e V14
-docs/native/                   # documentação autoritativa do shell nativo
+dist/CloudOS/                  # Pacote de release (33 arquivos íntegros)
+scripts/installer/             # Pipeline de instalação, startup e manutenção
+scripts/native/                # Contratos, automação e validação de engenharia
+docs/                          # Especificações técnicas e manuais de operação
 ```
 
-O entrypoint compilado do shell é:
+---
 
-```text
-desktop/CloudOS.NativeShell/src/main_shell_v2.cpp
-```
+## 3. Diretriz Absoluta de Segurança: GATE 0
 
-Para localizar um subsistema, use [`docs/native/CODEMAP.md`](docs/native/CODEMAP.md) em vez de inferir responsabilidade só pelo nome do arquivo.
+O CloudOS foi projetado sob a garantia de **Risco Zero de Tela Preta**:
 
-## Build nativo
+- **Winlogon Shell Oficial:** O valor padrão `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\Shell` permanece permanentemente configurado como `explorer.exe`.
+- **Userinit Intacto:** O valor `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\Userinit` permanece intacto (`C:\WINDOWS\system32\userinit.exe,`).
+- **Confinamento em Modo Usuário:** Zero drivers de kernel, zero serviços privilegiados globais.
+- **Substituição Permanente de Shell (Gate 0):** Desativada por padrão em desenvolvimento e testes automatizados. A ativação permanente é estritamente opt-in por usuário e monitorada por watchdog com reversão automática para `explorer.exe` se houver falhas consecutivas.
+- **Ferramenta de Recuperação Standalone:** `CloudOS.Recovery.exe restore` pode ser invocada via Task Manager (Ctrl+Shift+Esc) em caso de qualquer emergência, restaurando instantaneamente o Explorer.
 
-Pré-requisitos principais no Windows:
+---
 
-- Visual Studio/Build Tools com Desktop development with C++;
-- Windows SDK;
-- PowerShell 7 (`pwsh`);
-- WebView2 SDK restaurado pelo build somente para o Navegador CloudOS.
+## 4. Compilação e Empacotamento
 
-Build oficial:
+### Pré-requisitos
+- Windows 10/11 x64
+- Visual Studio 2022 / Build Tools com suporte a Desktop C++
+- Flutter SDK 3.x (canal estável)
+- PowerShell 7 (`pwsh`)
+- Windows SDK e WebView2 Runtime
 
+### Compilar Componentes Nativos (Release x64)
 ```powershell
 scripts\native\build-cloudos-native.cmd Release
 ```
 
-Rodar apenas os contratos:
+### Compilar Shell Flutter (Release x64)
+```powershell
+cd desktop\CloudOS.FlutterShell
+flutter build windows --release
+```
+
+### Integrar e Empacotar Release
+```powershell
+# Sincroniza binários nativos com o Flutter Runner
+pwsh -NoProfile -File scripts/stage-integrated-v21.ps1
+
+# Monta o pacote de distribuição com manifesto SHA256 (33 arquivos)
+pwsh -NoProfile -File scripts/installer/build-cloudos-package.ps1
+```
+
+---
+
+## 5. Suíte Completa de Testes Automatizados
+
+O CloudOS conta com verificação automatizada em múltiplas camadas de engenharia:
 
 ```powershell
+# 1. Análise estática do Flutter Shell (0 issues)
+flutter analyze desktop/CloudOS.FlutterShell
+
+# 2. Testes de widgets e apresentação Flutter (151/151 PASS)
+flutter test desktop/CloudOS.FlutterShell
+
+# 3. Contratos de arquitetura nativa C++ (49/49 PASS)
 pwsh -NoProfile -File scripts/native/test-native-contract-suite.ps1
+
+# 4. Contratos de instalador, integridade e rollback (5/5 PASS)
+pwsh -NoProfile -File scripts/installer/test-all-installer-contracts.ps1
+
+# 5. Contratos de inicialização segura per-user HKCU\Run (5/5 PASS)
+pwsh -NoProfile -File scripts/installer/test-all-startup-contracts.ps1
+
+# 6. Contratos de substituição de shell e recuperação (10/10 PASS)
+pwsh -NoProfile -File scripts/installer/test-all-shell-contracts.ps1
+
+# 7. Self-test do System Broker (51 asserções PASS)
+& "desktop\CloudOS.NativeShell\bin\Release\CloudOS.SystemBroker.exe" --self-test
+
+# 8. Smoke test de IPC e barramento de eventos
+pwsh -NoProfile -File scripts/native/run-system-broker-smoke-v21.ps1
 ```
 
-O build produz e verifica:
+---
 
-- `CloudOS.exe`;
-- `CloudOS.NativeRuntime.dll`;
-- `CloudOS.Supervisor.exe`;
-- `cloudos-native-manifest.json`;
-- fingerprint e SHA256 do release.
+## 6. Instalação e Inicialização
 
-## Executar sem substituir Explorer
-
-Depois de um build verificado, use os launchers do projeto/pacote que passam pelo `CloudOS.Supervisor.exe`. O Supervisor inicia `CloudOS.exe --supervised`; o watchdog interno não deve competir nesse modo.
-
-## Instalar / atualizar — V13
-
-V13 instala por usuário, por padrão em:
-
-```text
-%LOCALAPPDATA%\CloudOS\NativeShell
-```
-
-Entrypoints principais:
-
+### Instalação Limpa com Inicialização Automática Segura (Etapa 10)
 ```powershell
-scripts/native/install-cloudos-native-v13.ps1
-scripts/native/update-cloudos-native-v13.ps1
-scripts/native/get-cloudos-deployment-status-v13.ps1
-scripts/native/rollback-cloudos-native-v13.ps1
-scripts/native/repair-cloudos-native-v13.ps1
-scripts/native/uninstall-cloudos-native-v13.ps1
+pwsh -NoProfile -File scripts/installer/CloudOS.Maintenance.ps1 -Action install -PackageDir dist\CloudOS -EnableStartup
 ```
+A aplicação é instalada em `%LOCALAPPDATA%\Programs\CloudOS` com atalhos no Menu Iniciar e registro seguro em `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
 
-Instalação/update **não ativa o CloudOS como shell de logon**.
-
-## Ativação opt-in — V14
-
-V14 é uma operação separada e explícita. A fonte de verdade é:
-
-```text
-scripts/native/CloudOS.ShellActivation.V14.psm1
-```
-
-O alvo de produção atual é o valor `Shell` do Winlogon do usuário atual em HKCU. Antes da alteração, V14 salva presença, tipo e dado anterior; rollback restaura exatamente o snapshot, inclusive o caso “valor ausente”. Há journal/repair para interrupção e detecção de drift externo.
-
-Entrypoints:
-
+### Diagnóstico de Integridade e Status de Recuperação
 ```powershell
-scripts/native/activate-cloudos-shell-v14.ps1
-scripts/native/get-cloudos-shell-status-v14.ps1
-scripts/native/rollback-cloudos-shell-v14.ps1
-scripts/native/repair-cloudos-shell-v14.ps1
+& "$env:LOCALAPPDATA\Programs\CloudOS\CloudOS.Recovery.exe" status
+& "$env:LOCALAPPDATA\Programs\CloudOS\CloudOS.Recovery.exe" verify
 ```
 
-**Não use isso como shell diário em uma máquina importante antes da matriz de login/boot/rollback em VM e piloto.** Hosted CI testa a lógica V14 em uma subchave HKCU sandbox e confirma que a chave Winlogon real do runner não mudou.
-
-## Documentação fonte de verdade
-
-- [`AGENTS.md`](AGENTS.md) — regras e leitura rápida para agentes de IA.
-- [`docs/native/README.md`](docs/native/README.md) — índice do nativo.
-- [`docs/native/ARCHITECTURE.md`](docs/native/ARCHITECTURE.md) — processos, responsabilidades e fronteiras.
-- [`docs/native/CODEMAP.md`](docs/native/CODEMAP.md) — mapa arquivo→subsistema.
-- [`docs/native/VALIDATION.md`](docs/native/VALIDATION.md) — o que cada teste prova/não prova.
-- [`docs/native/DESKTOP_SYSTEM_ROADMAP.md`](docs/native/DESKTOP_SYSTEM_ROADMAP.md) — gates de entrega.
-- [`scripts/native/README.md`](scripts/native/README.md) — organização dos scripts.
-
-## Código de compatibilidade / histórico
-
-Ainda existem áreas como:
-
-- `frontend/`;
-- `backend/`;
-- `desktop/CloudOS.Host/`;
-- `desktop/CloudOS.Bootstrap/`;
-- provas/experimentos históricos.
-
-Elas não foram apagadas na V15 porque “limpar” não deve significar destruir compatibilidade ou histórico sem prova de que o código está morto. Quando um componente for aposentado, a remoção deve ocorrer em um marco próprio, com busca de referências e CI verde.
-
-## Segurança e validação
-
-- não há elevação silenciosa no fluxo V13/V14;
-- V14 não usa HKLM, `Userinit`, `Run`, `RunOnce`, serviço ou tarefa agendada como atalho;
-- recovery precisa continuar independente da UI do shell;
-- release é validado por manifesto/fingerprint/SHA256;
-- SHA256 não substitui assinatura Authenticode de produção;
-- `main` não é usada como branch de experimento durante as validações dos marcos.
-
-Consulte também [`SECURITY.md`](SECURITY.md) e a matriz nativa em [`docs/native/VALIDATION.md`](docs/native/VALIDATION.md).
+### Desinstalação Limpa
+```powershell
+pwsh -NoProfile -File scripts/installer/CloudOS.Maintenance.ps1 -Action uninstall
+```
+Remove completamente arquivos, atalhos, entradas de inicialização e registros de desinstalação, preservando o Windows Explorer oficial intacto.

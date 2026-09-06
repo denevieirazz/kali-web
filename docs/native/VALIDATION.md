@@ -308,6 +308,31 @@ SHA256 garante integridade em relação ao manifesto. Sem assinatura Authenticod
 
 ## Baseline CI
 
+### Flutter Win32 containment V22 — Notepad multi-window regression
+
+`scripts/flutter/test-managed-win32-containment-v22-runtime.cmd` compiles a C++
+runtime test against the production host header with `/W4 /WX`. A dedicated,
+non-input desktop and job-owned synthetic processes verify four document frames,
+zero-area non-activating input helpers, closing one document without terminating
+its siblings, rejection of unknown drawable windows, and fail-closed monitoring
+when a previously zero-area helper becomes drawable. The Flutter Windows CI runs
+this test in addition to the source contract.
+
+Optional local compatibility probe:
+
+```powershell
+scripts\flutter\test-managed-win32-containment-v22-runtime.cmd --real-notepad
+```
+
+This also launches the installed Notepad in the test desktop, embeds all approved
+initial windows, verifies parent/style/job health, and terminates that test job.
+It does not switch the input desktop or edit documents. Notepad can load its
+existing restore state, so this is an explicit local probe, not a CI default.
+This is native runtime evidence, not a substitute for visual/keyboard testing
+of the complete Flutter application. Unrecognized windows, more than 16 initial
+frames, incompatible DPI, or additional drawable top-level windows after startup
+still fail closed. No arbitrary application is added to the allowlist.
+
 A `CloudOS CI Baseline` preserva o restante do repositório: lint/build/testes do frontend/backend/Host/Bootstrap/Browser e caracterizações aplicáveis.
 
 V15 não transforma essas áreas em autoridade do desktop; elas continuam sendo código suportado/compatibilidade e precisam permanecer verdes enquanto existirem no repositório.
