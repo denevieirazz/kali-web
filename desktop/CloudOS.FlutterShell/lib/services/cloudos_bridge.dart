@@ -1316,6 +1316,48 @@ class CloudOSBridge {
     return CloudHardwareMetrics.fromMap(res);
   }
 
+  // --- STARTUP & LIFECYCLE (ETAPA 10) ---
+  Future<CloudStartupStatus> getStartupStatus() async {
+    final res = await invokeBrokerRpc('startup.getStatus');
+    if (res == null) return const CloudStartupStatus();
+    return CloudStartupStatus.fromMap(res);
+  }
+
+  Future<bool> setStartupEnabled(bool enabled) async {
+    final res = await invokeBrokerRpc('startup.setEnabled', {'enabled': enabled});
+    return res != null && (res['success'] as bool? ?? false);
+  }
+
+  Future<bool> closeCloudOS() async {
+    final res = await invokeBrokerRpc('system.closeCloudOS');
+    return res != null && (res['success'] as bool? ?? false);
+  }
+
+  // --- SHELL REPLACEMENT & RECOVERY (ETAPA 11) ---
+  Future<CloudShellStatus> getShellStatus() async {
+    final res = await invokeBrokerRpc('shell.getStatus');
+    if (res == null) return const CloudShellStatus();
+    return CloudShellStatus.fromMap(res);
+  }
+
+  Future<bool> restoreExplorerShell() async {
+    final res = await invokeBrokerRpc('shell.restoreExplorer');
+    return res != null && (res['success'] as bool? ?? false);
+  }
+
+  Future<bool> setShellMode(String mode, {bool gate0Override = false}) async {
+    final res = await invokeBrokerRpc('shell.setShellMode', {
+      'mode': mode,
+      'gate0_override': gate0Override,
+    });
+    return res != null && (res['success'] as bool? ?? false);
+  }
+
+  Future<bool> createShellBackup() async {
+    final res = await invokeBrokerRpc('shell.createBackup');
+    return res != null && (res['success'] as bool? ?? false);
+  }
+
   Future<Map<String, Object?>> getBridgeInfo() async {
     try {
       final raw =

@@ -133,7 +133,7 @@ abstract final class CloudOSPreviewData {
     'home': <CloudFileItem>[
       CloudFileItem(
         name: 'Documentos',
-        path: 'C:\\Users\\dougl\\Documents',
+        path: 'C:\\Users\\User\\Documents',
         isFolder: true,
         sizeFormatted: '24 pastas',
         modifiedFormatted: 'Hoje, 14:20',
@@ -142,7 +142,7 @@ abstract final class CloudOSPreviewData {
       ),
       CloudFileItem(
         name: 'Downloads',
-        path: 'C:\\Users\\dougl\\Downloads',
+        path: 'C:\\Users\\User\\Downloads',
         isFolder: true,
         sizeFormatted: '18 itens',
         modifiedFormatted: 'Hoje, 11:05',

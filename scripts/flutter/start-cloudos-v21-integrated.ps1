@@ -5,11 +5,23 @@ param(
     [string]$NativeRoot,
     [ValidateRange(5, 120)]
     [int]$StartupTimeoutSeconds = 30,
-    [switch]$AllowDevelopmentLayout
+    [switch]$AllowDevelopmentLayout,
+    [switch]$Startup
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+$t0 = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+
+$currentSession = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
+$startupMutexName = "Local\CloudOS_Startup_Session_$currentSession"
+$createdNew = $false
+$startupMutex = New-Object System.Threading.Mutex($true, $startupMutexName, [ref]$createdNew)
+if (-not $createdNew) {
+    Write-Host "[CloudOS] Outra inicializacao ja esta em andamento nesta sessao. Encerrando duplicata." -ForegroundColor Yellow
+    exit 0
+}
 
 if (-not $Root) {
     $Root = $PSScriptRoot
@@ -214,6 +226,7 @@ if ($null -eq $endpoint) {
     }
 }
 Write-Host "[CloudOS V21] NativeShell authority pronta (PID $($endpoint.ProcessId))." -ForegroundColor Green
+$t1 = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 
 # Preserva NativeShell C++ como autoridade headless ocultando suas superficies visuais legadas
 # para que a apresentacao Flutter V21 seja a única casca visual no desktop.
@@ -250,6 +263,7 @@ if (-not (Test-Broker -Probe $probe)) {
     }
 }
 Write-Host '[CloudOS V21] System Broker V21 pronto.' -ForegroundColor Green
+$t2 = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 
 $existingFlutter = @(Get-Process -Name 'cloudos_flutter_shell' -ErrorAction SilentlyContinue | Where-Object {
     $_.Path -and (Test-SamePath $_.Path $flutter)
@@ -269,6 +283,11 @@ if ($existingFlutter.Count -gt 0) {
         [void][CloudOSV21NativeWindowProbe]::ShowWindow($flutterHwnd, 3) # SW_MAXIMIZE
         [void][CloudOSV21NativeWindowProbe]::BringWindowToTop($flutterHwnd)
         [void][CloudOSV21NativeWindowProbe]::SetForegroundWindow($flutterHwnd)
+        if ($startupMutex) {
+            $startupMutex.ReleaseMutex()
+            $startupMutex.Dispose()
+            $startupMutex = $null
+        }
         exit 0
     }
     else {
@@ -295,4 +314,41 @@ do {
         break
     }
 } while ([DateTime]::UtcNow -lt $deadline)
+
+$t3 = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+$t4 = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+
+$cloudosDataDir = Join-Path $env:LOCALAPPDATA 'CloudOS'
+if (-not (Test-Path -LiteralPath $cloudosDataDir)) {
+    New-Item -ItemType Directory -Path $cloudosDataDir -Force | Out-Null
+}
+
+$metrics = [ordered]@{
+    timestamp           = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    is_startup          = [bool]$Startup
+    session_id          = $currentSession
+    supervisor_ready_ms = [int]($t1 - $t0)
+    broker_ready_ms     = [int]($t2 - $t1)
+    flutter_window_ms   = [int]($t3 - $t2)
+    total_startup_ms    = [int]($t4 - $t0)
+    explorer_running    = ((Get-Process -Name 'explorer' -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0)
+}
+$metrics | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath (Join-Path $cloudosDataDir 'startup-metrics.json') -Encoding UTF8
+
+if ($Startup) {
+    $status = [ordered]@{
+        last_startup = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        last_result  = 'SUCCESS'
+        mechanism    = 'HKCU Run Key (CloudOS)'
+        total_ms     = [int]($t4 - $t0)
+    }
+    $status | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath (Join-Path $cloudosDataDir 'startup-status.json') -Encoding UTF8
+}
+
+if ($startupMutex) {
+    $startupMutex.ReleaseMutex()
+    $startupMutex.Dispose()
+    $startupMutex = $null
+}
+
 Write-Host '[CloudOS V21] Runtime integrado iniciado.' -ForegroundColor Green

@@ -417,3 +417,152 @@ class CloudHardwareMetrics {
     );
   }
 }
+
+class CloudStartupStatus {
+  const CloudStartupStatus({
+    this.enabled = false,
+    this.mechanism = 'HKCU Run Key (CloudOS)',
+    this.command = '',
+    this.lastStartup = 'N/A',
+    this.lastResult = 'N/A',
+    this.perUser = true,
+    this.requiresAdmin = false,
+  });
+
+  final bool enabled;
+  final String mechanism;
+  final String command;
+  final String lastStartup;
+  final String lastResult;
+  final bool perUser;
+  final bool requiresAdmin;
+
+  factory CloudStartupStatus.fromMap(Map<String, dynamic> map) {
+    return CloudStartupStatus(
+      enabled: map['enabled'] as bool? ?? false,
+      mechanism: map['mechanism'] as String? ?? 'HKCU Run Key (CloudOS)',
+      command: map['command'] as String? ?? '',
+      lastStartup: map['last_startup'] as String? ?? 'N/A',
+      lastResult: map['last_result'] as String? ?? 'N/A',
+      perUser: map['per_user'] as bool? ?? true,
+      requiresAdmin: map['requires_admin'] as bool? ?? false,
+    );
+  }
+}
+
+enum ShellModeEnum {
+  explorer,
+  cloudosCanary,
+  cloudosActive,
+  fallback,
+  safeMode,
+  recoveryRequired,
+  unsupported;
+
+  static ShellModeEnum fromString(String value) {
+    switch (value.toUpperCase()) {
+      case 'CLOUDOS_CANARY':
+        return ShellModeEnum.cloudosCanary;
+      case 'CLOUDOS_ACTIVE':
+        return ShellModeEnum.cloudosActive;
+      case 'FALLBACK':
+        return ShellModeEnum.fallback;
+      case 'SAFE_MODE':
+        return ShellModeEnum.safeMode;
+      case 'RECOVERY_REQUIRED':
+        return ShellModeEnum.recoveryRequired;
+      case 'UNSUPPORTED':
+        return ShellModeEnum.unsupported;
+      default:
+        return ShellModeEnum.explorer;
+    }
+  }
+
+  String get displayName {
+    switch (this) {
+      case ShellModeEnum.cloudosCanary:
+        return 'CloudOS Canary (Teste)';
+      case ShellModeEnum.cloudosActive:
+        return 'CloudOS Shell Ativo';
+      case ShellModeEnum.fallback:
+        return 'Fallback (Explorer Ativo)';
+      case ShellModeEnum.safeMode:
+        return 'Modo de Segurança (Safe Mode)';
+      case ShellModeEnum.recoveryRequired:
+        return 'Recuperação Necessária';
+      case ShellModeEnum.unsupported:
+        return 'Não Suportado nesta Edição';
+      case ShellModeEnum.explorer:
+        return 'Windows Explorer (Oficial)';
+    }
+  }
+}
+
+class CloudShellStatus {
+  const CloudShellStatus({
+    this.status = ShellModeEnum.explorer,
+    this.effectiveShell = 'explorer.exe',
+    this.configuredShell = '',
+    this.shellMechanism = 'CustomShellPolicy',
+    this.mechanismSupported = true,
+    this.windowsEdition = 'Windows 11 Pro',
+    this.windowsBuild = 28020,
+    this.shellBootstrapPid = 0,
+    this.supervisorPid = 0,
+    this.brokerPid = 0,
+    this.flutterPid = 0,
+    this.shellHealth = 'HEALTHY',
+    this.fallbackCount = 0,
+    this.crashBudget = 3,
+    this.userinitIntact = true,
+    this.winlogonIntact = true,
+    this.backupExists = true,
+    this.gate0Verified = false,
+    this.explorerRunning = true,
+  });
+
+  final ShellModeEnum status;
+  final String effectiveShell;
+  final String configuredShell;
+  final String shellMechanism;
+  final bool mechanismSupported;
+  final String windowsEdition;
+  final int windowsBuild;
+  final int shellBootstrapPid;
+  final int supervisorPid;
+  final int brokerPid;
+  final int flutterPid;
+  final String shellHealth;
+  final int fallbackCount;
+  final int crashBudget;
+  final bool userinitIntact;
+  final bool winlogonIntact;
+  final bool backupExists;
+  final bool gate0Verified;
+  final bool explorerRunning;
+
+  factory CloudShellStatus.fromMap(Map<String, dynamic> map) {
+    return CloudShellStatus(
+      status: ShellModeEnum.fromString(map['status'] as String? ?? 'EXPLORER'),
+      effectiveShell: map['effective_shell'] as String? ?? 'explorer.exe',
+      configuredShell: map['configured_shell'] as String? ?? '',
+      shellMechanism: map['shell_mechanism'] as String? ?? 'CustomShellPolicy',
+      mechanismSupported: map['mechanism_supported'] as bool? ?? true,
+      windowsEdition: map['windows_edition'] as String? ?? 'Windows 11 Pro',
+      windowsBuild: (map['windows_build'] as num?)?.toInt() ?? 28020,
+      shellBootstrapPid: (map['shell_bootstrap_pid'] as num?)?.toInt() ?? 0,
+      supervisorPid: (map['supervisor_pid'] as num?)?.toInt() ?? 0,
+      brokerPid: (map['broker_pid'] as num?)?.toInt() ?? 0,
+      flutterPid: (map['flutter_pid'] as num?)?.toInt() ?? 0,
+      shellHealth: map['shell_health'] as String? ?? 'HEALTHY',
+      fallbackCount: (map['fallback_count'] as num?)?.toInt() ?? 0,
+      crashBudget: (map['crash_budget'] as num?)?.toInt() ?? 3,
+      userinitIntact: map['userinit_intact'] as bool? ?? true,
+      winlogonIntact: map['winlogon_intact'] as bool? ?? true,
+      backupExists: map['backup_exists'] as bool? ?? true,
+      gate0Verified: map['gate0_verified'] as bool? ?? false,
+      explorerRunning: map['explorer_running'] as bool? ?? true,
+    );
+  }
+}
+

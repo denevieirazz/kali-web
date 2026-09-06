@@ -209,8 +209,6 @@ BOOL CALLBACK CloudOSNativeWindowManager::RuntimeWindowEnumeration(
         return FALSE;
     }
 
-    std::ofstream dbg("C:\\Users\\dougl\\Downloads\\testes\\CloudOS\\wm_debug.log", std::ios::app);
-    dbg << "RuntimeWindowEnumeration: hwnd=" << window << " pid=" << process_id << " vis=" << visible << std::endl;
     if (!visible && GetPropW(window, kWorkspaceHiddenProperty) != nullptr)
     {
         self->RecoverTaggedWindow(window);
@@ -287,10 +285,6 @@ void CloudOSNativeWindowManager::HandleRuntimeEvent(
 void CloudOSNativeWindowManager::Reconcile()
 {
     CloudOS::PerformanceV12::Add(CloudOS::PerformanceV12::Reconcile);
-    {
-        std::ofstream dbg("C:\\Users\\dougl\\Downloads\\testes\\CloudOS\\wm_debug.log", std::ios::app);
-        dbg << "Reconcile START, windows_ was " << windows_.size() << std::endl;
-    }
     windows_.erase(
         std::remove_if(
             windows_.begin(),
@@ -312,10 +306,6 @@ void CloudOSNativeWindowManager::Reconcile()
     (void)EnumWindows(
         &LocalWindowEnumeration,
         reinterpret_cast<LPARAM>(this));
-    {
-        std::ofstream dbg("C:\\Users\\dougl\\Downloads\\testes\\CloudOS\\wm_debug.log", std::ios::app);
-        dbg << "Reconcile END, windows_ is now " << windows_.size() << std::endl;
-    }
 
     if (active_window_ != nullptr && !IsWindow(active_window_))
     {
@@ -485,8 +475,6 @@ void CloudOSNativeWindowManager::AddOrRefresh(HWND window, DWORD process_id)
     }
 
     const bool manageable = IsManageable(window, process_id, true);
-    std::ofstream dbg("C:\\Users\\dougl\\Downloads\\testes\\CloudOS\\wm_debug.log", std::ios::app);
-    dbg << "AddOrRefresh: hwnd=" << window << " pid=" << process_id << " manageable=" << manageable << std::endl;
     if (!manageable)
     {
         return;
@@ -1394,16 +1382,6 @@ CloudOS::WindowRegistryV23::CloudWindowSnapshotV23 CloudOSNativeWindowManager::G
         mon_rec.primary = mon.primary;
         snapshot.monitors.push_back(std::move(mon_rec));
     }
-    {
-        std::ofstream dbg("C:\\Users\\dougl\\Downloads\\testes\\CloudOS\\wm_debug.log", std::ios::app);
-        dbg << "GetRegistrySnapshot: windows_.size()=" << windows_.size() << std::endl;
-        for (const auto& item : windows_)
-        {
-            const bool is_win = (item.hwnd != nullptr && IsWindow(item.hwnd));
-            dbg << "  check item: hwnd=" << item.hwnd << " isWin=" << is_win
-                << " pid=" << item.process_id << " title='" << Utf8Encode(item.title) << "'" << std::endl;
-        }
-    }
     static HDESK s_wm_desktop = nullptr;
     if (s_wm_desktop == nullptr)
     {
@@ -1488,22 +1466,12 @@ CloudOS::WindowRegistryV23::CloudWindowSnapshotV23 CloudOSNativeWindowManager::G
         snapshot.windows.push_back(std::move(rec));
     }
 
-    {
-        std::ofstream dbg("C:\\Users\\dougl\\Downloads\\testes\\CloudOS\\wm_debug.log", std::ios::app);
-        dbg << "GetRegistrySnapshot END: snapshot.windows.size()=" << snapshot.windows.size() << std::endl;
-    }
-
     return snapshot;
 }
 
 std::string CloudOSNativeWindowManager::GetRegistrySnapshotJson() const
 {
-    const std::string json = GetRegistrySnapshot().ToJson();
-    {
-        std::ofstream dbg("C:\\Users\\dougl\\Downloads\\testes\\CloudOS\\wm_debug.log", std::ios::app);
-        dbg << "GetRegistrySnapshotJson: length=" << json.size() << " json=" << json << std::endl;
-    }
-    return json;
+    return GetRegistrySnapshot().ToJson();
 }
 
 bool CloudOSNativeWindowManager::WriteRegistrySnapshotToMapping(const wchar_t* mapping_name) const

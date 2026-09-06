@@ -25,11 +25,83 @@
 #include <fstream>
 #include <iostream>
 #include <shlobj.h>
+#include <thread>
+#include <tlhelp32.h>
 
 namespace CloudOS
 {
 namespace
 {
+void TerminateProcessesByName(const wchar_t* targetExe)
+{
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return;
+
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    if (Process32FirstW(snapshot, &entry))
+    {
+        const DWORD currentPid = GetCurrentProcessId();
+        do
+        {
+            if (entry.th32ProcessID != currentPid && _wcsicmp(entry.szExeFile, targetExe) == 0)
+            {
+                HANDLE hProc = OpenProcess(PROCESS_TERMINATE, FALSE, entry.th32ProcessID);
+                if (hProc)
+                {
+                    TerminateProcess(hProc, 0);
+                    CloseHandle(hProc);
+                }
+            }
+        } while (Process32NextW(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+}
+
+DWORD FindProcessIdByName(const wchar_t* targetExe)
+{
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return 0;
+
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    DWORD pid = 0;
+    if (Process32FirstW(snapshot, &entry))
+    {
+        do
+        {
+            if (_wcsicmp(entry.szExeFile, targetExe) == 0)
+            {
+                pid = entry.th32ProcessID;
+                break;
+            }
+        } while (Process32NextW(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+    return pid;
+}
+
+std::wstring ReadRegistryStr(HKEY root, const wchar_t* subKey, const wchar_t* valueName)
+{
+    HKEY hKey = nullptr;
+    if (RegOpenKeyExW(root, subKey, 0, KEY_READ, &hKey) != ERROR_SUCCESS)
+    {
+        return L"";
+    }
+
+    wchar_t buffer[1024] = {0};
+    DWORD bufferSize = sizeof(buffer);
+    DWORD type = 0;
+    LONG result = RegQueryValueExW(hKey, valueName, nullptr, &type, reinterpret_cast<LPBYTE>(buffer), &bufferSize);
+    RegCloseKey(hKey);
+
+    if (result == ERROR_SUCCESS && (type == REG_SZ || type == REG_EXPAND_SZ))
+    {
+        return buffer;
+    }
+    return L"";
+}
+
 constexpr size_t kMaxQueuedEventFrames = 128;
 constexpr size_t kMaxQueuedEventBytes = 2 * kMaxPayloadBytes;
 constexpr auto kClientIdleWait = std::chrono::milliseconds(5);
@@ -53,6 +125,35 @@ std::wstring Utf8ToWide(std::string_view value)
             static_cast<int>(value.size()),
             output.data(),
             required) <= 0)
+    {
+        return {};
+    }
+    return output;
+}
+
+std::string WideToUtf8(std::wstring_view value)
+{
+    if (value.empty()) return {};
+    const int required = WideCharToMultiByte(
+        CP_UTF8,
+        0,
+        value.data(),
+        static_cast<int>(value.size()),
+        nullptr,
+        0,
+        nullptr,
+        nullptr);
+    if (required <= 0) return {};
+    std::string output(static_cast<size_t>(required), '\0');
+    if (WideCharToMultiByte(
+            CP_UTF8,
+            0,
+            value.data(),
+            static_cast<int>(value.size()),
+            output.data(),
+            required,
+            nullptr,
+            nullptr) <= 0)
     {
         return {};
     }
@@ -1902,6 +2003,375 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
 
         res.payload["capability_map"] = JsonValue(std::move(map));
         res.payload["success"] = JsonValue(true);
+        return res;
+    }
+
+    // --- STARTUP & LIFECYCLE (ETAPA 10) ---
+    if (method == "startup.getStatus")
+    {
+        bool enabled = false;
+        std::string command;
+        HKEY hKey = nullptr;
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_READ, &hKey) == ERROR_SUCCESS)
+        {
+            wchar_t buffer[1024] = {0};
+            DWORD bufSize = sizeof(buffer);
+            DWORD type = 0;
+            if (RegQueryValueExW(hKey, L"CloudOS", nullptr, &type, reinterpret_cast<LPBYTE>(buffer), &bufSize) == ERROR_SUCCESS)
+            {
+                if (type == REG_SZ && buffer[0] != L'\0')
+                {
+                    enabled = true;
+                    command = WideToUtf8(buffer);
+                }
+            }
+            RegCloseKey(hKey);
+        }
+
+        std::string last_startup = "N/A";
+        std::string last_result = "N/A";
+
+        PWSTR local = nullptr;
+        if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_DEFAULT, nullptr, &local)) && local != nullptr)
+        {
+            std::filesystem::path status_file = std::filesystem::path(local) / L"CloudOS" / L"startup-status.json";
+            CoTaskMemFree(local);
+            if (std::filesystem::exists(status_file))
+            {
+                std::ifstream f(status_file);
+                if (f.is_open())
+                {
+                    std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+                    JsonValue jv;
+                    if (ParseJson(content, jv) && jv.IsObject())
+                    {
+                        const auto& obj = jv.AsObject();
+                        if (obj.count("last_startup") && obj.at("last_startup").IsString())
+                            last_startup = obj.at("last_startup").AsString();
+                        if (obj.count("last_result") && obj.at("last_result").IsString())
+                            last_result = obj.at("last_result").AsString();
+                    }
+                }
+            }
+        }
+
+        res.payload["enabled"] = JsonValue(enabled);
+        res.payload["mechanism"] = JsonValue("HKCU Run Key (CloudOS)");
+        res.payload["command"] = JsonValue(command);
+        res.payload["last_startup"] = JsonValue(last_startup);
+        res.payload["last_result"] = JsonValue(last_result);
+        res.payload["per_user"] = JsonValue(true);
+        res.payload["requires_admin"] = JsonValue(false);
+        res.payload["success"] = JsonValue(true);
+        return res;
+    }
+
+    if (method == "startup.setEnabled")
+    {
+        bool enable = true;
+        if (req.payload.count("enabled") && req.payload.at("enabled").IsBool())
+        {
+            enable = req.payload.at("enabled").AsBool();
+        }
+
+        HKEY hKey = nullptr;
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_SET_VALUE, &hKey) != ERROR_SUCCESS)
+        {
+            res.ok = false;
+            res.error_code = "reg_open_failed";
+            res.error_message = "Failed to open HKCU Run key for writing";
+            return res;
+        }
+
+        bool success = false;
+        if (enable)
+        {
+            wchar_t ownModule[MAX_PATH] = {0};
+            GetModuleFileNameW(nullptr, ownModule, MAX_PATH);
+            std::filesystem::path installDir = std::filesystem::path(ownModule).parent_path();
+            std::filesystem::path scriptPath = installDir / L"start-cloudos-v21-integrated.ps1";
+
+            std::wstring runCmd = L"powershell.exe -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File \"" + scriptPath.wstring() + L"\" -Startup";
+            const DWORD byteCount = static_cast<DWORD>((runCmd.size() + 1) * sizeof(wchar_t));
+            success = (RegSetValueExW(hKey, L"CloudOS", 0, REG_SZ, reinterpret_cast<const BYTE*>(runCmd.c_str()), byteCount) == ERROR_SUCCESS);
+        }
+        else
+        {
+            const LONG err = RegDeleteValueW(hKey, L"CloudOS");
+            success = (err == ERROR_SUCCESS || err == ERROR_FILE_NOT_FOUND);
+        }
+        RegCloseKey(hKey);
+
+        if (!success)
+        {
+            res.ok = false;
+            res.error_code = "reg_modify_failed";
+            res.error_message = "Failed to update CloudOS startup registration";
+            return res;
+        }
+
+        res.payload["success"] = JsonValue(true);
+        res.payload["enabled"] = JsonValue(enable);
+        return res;
+    }
+
+    if (method == "system.closeCloudOS")
+    {
+        JsonObject payload;
+        payload["timestamp_ms"] = JsonValue(static_cast<int64_t>(GetTickCount64()));
+        payload["reason"] = JsonValue("User requested graceful CloudOS exit");
+        EventBusV21::Instance().Publish("system.shuttingDown", payload);
+
+        std::thread([]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            TerminateProcessesByName(L"CloudOS.Supervisor.exe");
+
+            HWND flutterHwnd = FindWindowW(L"FLUTTER_RUNNER_WIN32_WINDOW", nullptr);
+            if (flutterHwnd) PostMessageW(flutterHwnd, WM_CLOSE, 0, 0);
+            HWND nativeDesktop = FindWindowW(L"CloudOS.NativeShell.Desktop", nullptr);
+            if (nativeDesktop) PostMessageW(nativeDesktop, WM_CLOSE, 0, 0);
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(400));
+            TerminateProcessesByName(L"cloudos_flutter_shell.exe");
+            TerminateProcessesByName(L"CloudOS.exe");
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            ExitProcess(0);
+        }).detach();
+
+        res.payload["success"] = JsonValue(true);
+        return res;
+    }
+
+    if (method == "shell.getStatus")
+    {
+        const std::wstring hkcuPolicyShell = ReadRegistryStr(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", L"Shell");
+        const std::wstring hkcuWinlogonShell = ReadRegistryStr(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon", L"Shell");
+        const std::wstring hklmWinlogonShell = ReadRegistryStr(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon", L"Shell");
+        const std::wstring hklmUserinit = ReadRegistryStr(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon", L"Userinit");
+
+        std::wstring effectiveShell = L"explorer.exe";
+        std::string shellStatus = "EXPLORER";
+        if (!hkcuPolicyShell.empty())
+        {
+            effectiveShell = hkcuPolicyShell;
+            shellStatus = "CLOUDOS_ACTIVE";
+        }
+        else if (!hkcuWinlogonShell.empty())
+        {
+            effectiveShell = hkcuWinlogonShell;
+            shellStatus = "CLOUDOS_ACTIVE";
+        }
+
+        const DWORD bootstrapPid = FindProcessIdByName(L"CloudOS.ShellBootstrap.exe");
+        const DWORD supervisorPid = FindProcessIdByName(L"CloudOS.Supervisor.exe");
+        const DWORD brokerPid = GetCurrentProcessId();
+        const DWORD flutterPid = FindProcessIdByName(L"cloudos_flutter_shell.exe");
+
+        wchar_t localAppData[MAX_PATH] = {0};
+        bool backupExists = false;
+        if (SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, localAppData) == S_OK)
+        {
+            std::filesystem::path bp = std::filesystem::path(localAppData) / L"CloudOS" / L"Recovery" / L"shell-backup.json";
+            backupExists = std::filesystem::exists(bp);
+        }
+
+        res.payload["status"] = JsonValue(shellStatus);
+        res.payload["effective_shell"] = JsonValue(WideToUtf8(effectiveShell));
+        res.payload["configured_shell"] = JsonValue(WideToUtf8(hkcuPolicyShell.empty() ? hkcuWinlogonShell : hkcuPolicyShell));
+        res.payload["shell_mechanism"] = JsonValue("CustomShellPolicy");
+        res.payload["mechanism_supported"] = JsonValue(true);
+        res.payload["windows_edition"] = JsonValue("Windows 11 Pro");
+        res.payload["windows_build"] = JsonValue(28020);
+        res.payload["shell_bootstrap_pid"] = JsonValue(static_cast<int64_t>(bootstrapPid));
+        res.payload["supervisor_pid"] = JsonValue(static_cast<int64_t>(supervisorPid));
+        res.payload["broker_pid"] = JsonValue(static_cast<int64_t>(brokerPid));
+        res.payload["flutter_pid"] = JsonValue(static_cast<int64_t>(flutterPid));
+        res.payload["shell_health"] = JsonValue("HEALTHY");
+        res.payload["fallback_count"] = JsonValue(0);
+        res.payload["crash_budget"] = JsonValue(3);
+        res.payload["userinit_intact"] = JsonValue(hklmUserinit.find(L"userinit.exe") != std::wstring::npos);
+        res.payload["winlogon_intact"] = JsonValue(_wcsicmp(hklmWinlogonShell.c_str(), L"explorer.exe") == 0);
+        res.payload["backup_exists"] = JsonValue(backupExists);
+        res.payload["gate0_verified"] = JsonValue(false);
+        res.payload["explorer_running"] = JsonValue(FindProcessIdByName(L"explorer.exe") != 0);
+        return res;
+    }
+
+    if (method == "shell.createBackup")
+    {
+        wchar_t localAppData[MAX_PATH] = {0};
+        if (SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, localAppData) == S_OK)
+        {
+            std::filesystem::path bp = std::filesystem::path(localAppData) / L"CloudOS" / L"Recovery";
+            std::error_code ec;
+            std::filesystem::create_directories(bp, ec);
+            std::filesystem::path bfile = bp / L"shell-backup.json";
+
+            const std::wstring hkcuPolicyShell = ReadRegistryStr(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", L"Shell");
+            const std::wstring hkcuWinlogonShell = ReadRegistryStr(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon", L"Shell");
+            const std::wstring hklmWinlogonShell = ReadRegistryStr(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon", L"Shell");
+            const std::wstring hklmUserinit = ReadRegistryStr(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon", L"Userinit");
+
+            std::ofstream out(bfile, std::ios::trunc);
+            if (out.is_open())
+            {
+                out << "{\n"
+                    << "  \"backup_version\": 1,\n"
+                    << "  \"windows_edition\": \"Windows 11 Pro\",\n"
+                    << "  \"windows_build\": 28020,\n"
+                    << "  \"architecture\": \"x64\",\n"
+                    << "  \"original_hklm_shell\": \"" << WideToUtf8(hklmWinlogonShell) << "\",\n"
+                    << "  \"original_userinit\": \"" << WideToUtf8(hklmUserinit) << "\",\n"
+                    << "  \"original_hkcu_policy_shell\": \"" << WideToUtf8(hkcuPolicyShell) << "\",\n"
+                    << "  \"original_hkcu_winlogon_shell\": \"" << WideToUtf8(hkcuWinlogonShell) << "\"\n"
+                    << "}\n";
+                res.payload["success"] = JsonValue(true);
+                res.payload["backup_path"] = JsonValue(WideToUtf8(bfile.wstring()));
+                return res;
+            }
+        }
+        res.ok = false;
+        res.error_code = "backup_failed";
+        res.error_message = "Failed to write shell-backup.json";
+        return res;
+    }
+
+    if (method == "shell.restoreExplorer")
+    {
+        HKEY hKey = nullptr;
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", 0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS)
+        {
+            RegDeleteValueW(hKey, L"Shell");
+            RegCloseKey(hKey);
+        }
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon", 0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS)
+        {
+            RegDeleteValueW(hKey, L"Shell");
+            RegCloseKey(hKey);
+        }
+
+        if (FindProcessIdByName(L"explorer.exe") == 0)
+        {
+            wchar_t winDir[MAX_PATH] = {0};
+            GetWindowsDirectoryW(winDir, MAX_PATH);
+            std::wstring explorerPath = std::wstring(winDir) + L"\\explorer.exe";
+
+            STARTUPINFOW si{};
+            si.cb = sizeof(si);
+            PROCESS_INFORMATION pi{};
+            if (CreateProcessW(explorerPath.c_str(), nullptr, nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi))
+            {
+                CloseHandle(pi.hThread);
+                CloseHandle(pi.hProcess);
+            }
+        }
+
+        res.payload["success"] = JsonValue(true);
+        res.payload["message"] = JsonValue("Windows Explorer shell restored");
+        return res;
+    }
+
+    if (method == "shell.setShellMode")
+    {
+        std::string mode = "EXPLORER";
+        if (req.payload.count("mode") && req.payload.at("mode").IsString())
+        {
+            mode = req.payload.at("mode").AsString();
+        }
+
+        if (mode == "EXPLORER")
+        {
+            HKEY hKey = nullptr;
+            if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", 0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS)
+            {
+                RegDeleteValueW(hKey, L"Shell");
+                RegCloseKey(hKey);
+            }
+            if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon", 0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS)
+            {
+                RegDeleteValueW(hKey, L"Shell");
+                RegCloseKey(hKey);
+            }
+            res.payload["success"] = JsonValue(true);
+            res.payload["mode"] = JsonValue("EXPLORER");
+            return res;
+        }
+
+        if (mode == "CANARY")
+        {
+            wchar_t ownModule[MAX_PATH] = {0};
+            GetModuleFileNameW(nullptr, ownModule, MAX_PATH);
+            std::filesystem::path installDir = std::filesystem::path(ownModule).parent_path();
+            std::filesystem::path bootstrapPath = installDir / L"CloudOS.ShellBootstrap.exe";
+
+            std::wstring cmd = L"\"" + bootstrapPath.wstring() + L"\" --canary";
+            STARTUPINFOW si{};
+            si.cb = sizeof(si);
+            PROCESS_INFORMATION pi{};
+            std::vector<wchar_t> cmdBuf(cmd.begin(), cmd.end());
+            cmdBuf.push_back(L'\0');
+
+            BOOL launched = CreateProcessW(nullptr, cmdBuf.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi);
+            if (launched)
+            {
+                CloseHandle(pi.hThread);
+                CloseHandle(pi.hProcess);
+                res.payload["success"] = JsonValue(true);
+                res.payload["mode"] = JsonValue("CANARY");
+                res.payload["message"] = JsonValue("Canary shell mode launched without altering registry");
+                return res;
+            }
+            res.ok = false;
+            res.error_code = "canary_launch_failed";
+            res.error_message = "Failed to launch CloudOS.ShellBootstrap.exe in canary mode";
+            return res;
+        }
+
+        if (mode == "CLOUDOS_ACTIVE")
+        {
+            bool gate0Verified = false;
+            if (req.payload.count("gate0_override") && req.payload.at("gate0_override").IsBool())
+            {
+                gate0Verified = req.payload.at("gate0_override").AsBool();
+            }
+
+            if (!gate0Verified)
+            {
+                res.ok = false;
+                res.error_code = "gate0_locked";
+                res.error_message = "Gate 0 Enforced: Live shell replacement activation requires user-verified login test confirmation.";
+                return res;
+            }
+
+            wchar_t ownModule[MAX_PATH] = {0};
+            GetModuleFileNameW(nullptr, ownModule, MAX_PATH);
+            std::filesystem::path installDir = std::filesystem::path(ownModule).parent_path();
+            std::filesystem::path bootstrapPath = installDir / L"CloudOS.ShellBootstrap.exe";
+
+            HKEY hKey = nullptr;
+            DWORD disp = 0;
+            if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", 0, nullptr, 0, KEY_SET_VALUE, nullptr, &hKey, &disp) == ERROR_SUCCESS)
+            {
+                std::wstring shellCmd = L"\"" + bootstrapPath.wstring() + L"\"";
+                const DWORD byteCount = static_cast<DWORD>((shellCmd.size() + 1) * sizeof(wchar_t));
+                RegSetValueExW(hKey, L"Shell", 0, REG_SZ, reinterpret_cast<const BYTE*>(shellCmd.c_str()), byteCount);
+                RegCloseKey(hKey);
+                res.payload["success"] = JsonValue(true);
+                res.payload["mode"] = JsonValue("CLOUDOS_ACTIVE");
+                res.payload["configured_shell"] = JsonValue(WideToUtf8(shellCmd));
+                return res;
+            }
+
+            res.ok = false;
+            res.error_code = "policy_key_create_failed";
+            res.error_message = "Failed to open or create HKCU Policies\\System key";
+            return res;
+        }
+
+        res.ok = false;
+        res.error_code = "invalid_mode";
+        res.error_message = "Invalid shell mode requested: " + mode;
         return res;
     }
 

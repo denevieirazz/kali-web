@@ -79,10 +79,17 @@ HRESULT RenameShellItem(HWND owner, const std::wstring& source, const std::wstri
 
     IShellItem* item = nullptr;
     result = CreateShellItem(source, &item);
-    if (SUCCEEDED(result) && item != nullptr)
+    if (SUCCEEDED(result))
     {
-        result = operation->RenameItem(item, new_name.c_str(), nullptr);
-        if (SUCCEEDED(result)) result = FinishShellOperation(operation);
+        if (item == nullptr)
+        {
+            result = E_FAIL;
+        }
+        else
+        {
+            result = operation->RenameItem(item, new_name.c_str(), nullptr);
+            if (SUCCEEDED(result)) result = FinishShellOperation(operation);
+        }
     }
     if (item != nullptr) item->Release();
     operation->Release();
@@ -105,10 +112,17 @@ HRESULT RecycleShellItem(HWND owner, const std::wstring& source)
 
     IShellItem* item = nullptr;
     result = CreateShellItem(source, &item);
-    if (SUCCEEDED(result) && item != nullptr)
+    if (SUCCEEDED(result))
     {
-        result = operation->DeleteItem(item, nullptr);
-        if (SUCCEEDED(result)) result = FinishShellOperation(operation);
+        if (item == nullptr)
+        {
+            result = E_FAIL;
+        }
+        else
+        {
+            result = operation->DeleteItem(item, nullptr);
+            if (SUCCEEDED(result)) result = FinishShellOperation(operation);
+        }
     }
     if (item != nullptr) item->Release();
     operation->Release();

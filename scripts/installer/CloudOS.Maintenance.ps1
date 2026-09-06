@@ -11,6 +11,7 @@ param(
     [switch]$PerUser = $true,
     [switch]$CreateDesktopShortcut,
     [switch]$CreateStartShortcut = $true,
+    [switch]$EnableStartup,
     [switch]$PurgeUserData,
     [switch]$Force,
     [int]$HealthCheckTimeoutSeconds = 15
@@ -194,7 +195,8 @@ function Invoke-Install {
         [string]$PackageSource,
         [string]$TargetLocation,
         [bool]$StartShortcut,
-        [bool]$DeskShortcut
+        [bool]$DeskShortcut,
+        [bool]$ConfigureStartup = $false
     )
     Log-Message "Iniciando Instalacao Limpa do CloudOS..." "Cyan"
     Log-Message "  Pacote de Origem: $PackageSource"
@@ -278,6 +280,14 @@ function Invoke-Install {
         Log-Message "Atalho criado na Area de Trabalho: $deskLnk" "Green"
     }
 
+    # Registro de Inicializacao Automatica (HKCU\Run - Per-User Seguro)
+    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    if ($ConfigureStartup) {
+        $startupCmd = "powershell.exe -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `"$startScript`" -Startup"
+        Set-ItemProperty -Path $runKey -Name 'CloudOS' -Value $startupCmd
+        Log-Message "Inicializacao automatica registrada em HKCU\Run: $startupCmd" "Green"
+    }
+
     # Registro de Desinstalacao no Windows (Add/Remove Programs)
     $versionData = if (Test-Path -LiteralPath (Join-Path $TargetLocation 'version.json')) {
         Get-Content -LiteralPath (Join-Path $TargetLocation 'version.json') -Raw | ConvertFrom-Json
@@ -329,9 +339,35 @@ function Invoke-Repair {
     $verifyResult = Verify-FileManifest -TargetDir $TargetLocation -ManifestPath $manifestPath
     Log-Message "Diagnostico de integridade: $($verifyResult.ValidCount) validos, $($verifyResult.MissingCount) ausentes, $($verifyResult.CorruptCount) adulterados/corrompidos."
 
+    # Reparar entrada de startup se ela ja existir (preservando a escolha do usuario sem forcar ativacao)
+    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    $existingStartup = (Get-ItemProperty -Path $runKey -ErrorAction SilentlyContinue) | Select-Object -ExpandProperty 'CloudOS' -ErrorAction SilentlyContinue
+    $registryRepaired = $false
+    if ($existingStartup) {
+        $startScript = Join-Path $TargetLocation 'start-cloudos-v21-integrated.ps1'
+        $expectedCmd = "powershell.exe -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `"$startScript`" -Startup"
+        if ($existingStartup -ne $expectedCmd) {
+            Set-ItemProperty -Path $runKey -Name 'CloudOS' -Value $expectedCmd
+            Log-Message "Entrada de startup em HKCU\Run reparada para apontar para o script valido." "Green"
+            $registryRepaired = $true
+        }
+    }
+
+    # Reparar entrada de shell se ela ja existir
+    $policyPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System'
+    $configuredPolicyShell = (Get-ItemProperty -Path $policyPath -ErrorAction SilentlyContinue) | Select-Object -ExpandProperty 'Shell' -ErrorAction SilentlyContinue
+    if ($configuredPolicyShell) {
+        $expectedShell = "`"" + (Join-Path $TargetLocation 'CloudOS.ShellBootstrap.exe') + "`""
+        if ($configuredPolicyShell -ne $expectedShell) {
+            Set-ItemProperty -Path $policyPath -Name 'Shell' -Value $expectedShell
+            Log-Message "Entrada de Shell em HKCU\Policies\System reparada para apontar para o bootstrap valido." "Green"
+            $registryRepaired = $true
+        }
+    }
+
     if ($verifyResult.IsValid) {
         Log-Message "Nenhum arquivo corrompido ou ausente detectado. O produto esta 100% integro." "Green"
-        return [pscustomobject]@{ Repaired = $false; RepairedFiles = @(); Message = "Produto ja esta 100% integro." }
+        return [pscustomobject]@{ Repaired = $registryRepaired; RepairedFiles = @(); Message = if ($registryRepaired) { "Registro de startup reparado com sucesso." } else { "Produto ja esta 100% integro." } }
     }
 
     if (-not $PackageSource -or -not (Test-Path -LiteralPath $PackageSource)) {
@@ -379,6 +415,20 @@ function Invoke-Uninstall {
 
     Stop-CloudOSProcesses
 
+    # 0. RESTAURAR EXPLORER SHELL OBRIGATORIAMENTE (ETAPA 11)
+    # Remove qualquer CustomShell policy ou Winlogon Shell per-user antes de remover arquivos
+    $policyPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System'
+    if (Test-Path -LiteralPath $policyPath) {
+        Remove-ItemProperty -Path $policyPath -Name 'Shell' -Force -ErrorAction SilentlyContinue
+        Log-Message "CustomShell policy removida de HKCU\Policies\System." "DarkGray"
+    }
+    $winlogonUser = 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Winlogon'
+    if (Test-Path -LiteralPath $winlogonUser) {
+        Remove-ItemProperty -Path $winlogonUser -Name 'Shell' -Force -ErrorAction SilentlyContinue
+        Log-Message "Shell personalizado removido de HKCU\Winlogon." "DarkGray"
+    }
+    Log-Message "Shell oficial do Windows (explorer.exe) estritamente preservado." "Green"
+
     # 1. Remover atalhos
     $startLnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\CloudOS.lnk'
     if (Test-Path -LiteralPath $startLnk) {
@@ -390,6 +440,20 @@ function Invoke-Uninstall {
     if (Test-Path -LiteralPath $desktopLnk) {
         Remove-Item -LiteralPath $desktopLnk -Force -ErrorAction SilentlyContinue
         Log-Message "Atalho da Area de Trabalho removido." "DarkGray"
+    }
+
+    # 1.1 Remover inicializacao automatica
+    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    $hasStartup = (Get-ItemProperty -Path $runKey -ErrorAction SilentlyContinue) | Select-Object -ExpandProperty 'CloudOS' -ErrorAction SilentlyContinue
+    if ($hasStartup) {
+        Remove-ItemProperty -Path $runKey -Name 'CloudOS' -Force -ErrorAction SilentlyContinue
+        Log-Message "Entrada de inicializacao automatica removida de HKCU\Run." "DarkGray"
+    }
+    $startupFolder = [Environment]::GetFolderPath('Startup')
+    $startupLnk = Join-Path $startupFolder 'CloudOS.lnk'
+    if (Test-Path -LiteralPath $startupLnk) {
+        Remove-Item -LiteralPath $startupLnk -Force -ErrorAction SilentlyContinue
+        Log-Message "Atalho de inicializacao automatica removido da pasta Startup." "DarkGray"
     }
 
     # 2. Remover chave de Uninstall
@@ -531,6 +595,16 @@ function Invoke-Update {
         throw "HEALTH_CHECK_FAILED: Atualizacao revertida automaticamente para a versao anterior estavel."
     }
 
+    # Preservar e atualizar caminho do HKCU\Run se estiver ativado
+    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    $existingStartup = (Get-ItemProperty -Path $runKey -ErrorAction SilentlyContinue) | Select-Object -ExpandProperty 'CloudOS' -ErrorAction SilentlyContinue
+    if ($existingStartup) {
+        $startScript = Join-Path $TargetLocation 'start-cloudos-v21-integrated.ps1'
+        $expectedCmd = "powershell.exe -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `"$startScript`" -Startup"
+        Set-ItemProperty -Path $runKey -Name 'CloudOS' -Value $expectedCmd
+        Log-Message "Entrada de inicializacao preservada e atualizada em HKCU\Run." "Green"
+    }
+
     Log-Message "Atualizacao concluida com sucesso e verificada! Versao $($newVersion.version) ativa." "Green"
     return [pscustomobject]@{
         Updated = $true
@@ -576,7 +650,7 @@ switch ($Action) {
     }
     'install' {
         if (-not $PackageDir) { throw "Parametro -PackageDir e obrigatorio para install." }
-        Invoke-Install -PackageSource $PackageDir -TargetLocation $InstallDir -StartShortcut $CreateStartShortcut -DeskShortcut $CreateDesktopShortcut
+        Invoke-Install -PackageSource $PackageDir -TargetLocation $InstallDir -StartShortcut $CreateStartShortcut -DeskShortcut $CreateDesktopShortcut -ConfigureStartup $EnableStartup
     }
     'repair' {
         Invoke-Repair -TargetLocation $InstallDir -PackageSource $PackageDir

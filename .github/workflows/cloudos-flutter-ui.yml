@@ -76,6 +76,10 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File scripts/flutter/test-managed-win32-containment-v22-contract.ps1
 
+      - name: Test managed Win32 multi-window containment runtime
+        shell: cmd
+        run: scripts\flutter\test-managed-win32-containment-v22-runtime.cmd
+
       - name: Generate local Windows host
         shell: pwsh
         working-directory: desktop/CloudOS.FlutterShell

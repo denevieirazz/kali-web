@@ -1,6 +1,5 @@
-$ErrorActionPreference = 'SilentlyContinue'
-
-$releaseDir = 'C:\Users\dougl\Downloads\testes\CloudOS\desktop\CloudOS.FlutterShell\build\windows\x64\runner\Release'
+$root = if ($PSScriptRoot) { (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path } else { (Get-Location).Path }
+$releaseDir = Join-Path $root 'desktop\CloudOS.FlutterShell\build\windows\x64\runner\Release'
 $exePath = Join-Path $releaseDir 'cloudos_flutter_shell.exe'
 
 $proc = Start-Process -FilePath $exePath -WorkingDirectory $releaseDir -PassThru

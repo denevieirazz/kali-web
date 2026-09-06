@@ -72,6 +72,20 @@ foreach ($dll in $requiredDlls) {
     Copy-Item -LiteralPath (Join-Path $sourcePath $dll) -Destination (Join-Path $OutputDir $dll) -Force
 }
 
+$shellComponents = @('CloudOS.ShellBootstrap.exe', 'CloudOS.Recovery.exe', 'CLOUDOS_SHELL_RECOVERY.txt')
+foreach ($sc in $shellComponents) {
+    $scSrc = Join-Path $sourcePath $sc
+    if (-not (Test-Path -LiteralPath $scSrc)) {
+        $scSrc = Join-Path $repoRoot "desktop\CloudOS.NativeShell\bin\Release\$sc"
+    }
+    if (-not (Test-Path -LiteralPath $scSrc)) {
+        $scSrc = Join-Path $repoRoot $sc
+    }
+    if (Test-Path -LiteralPath $scSrc) {
+        Copy-Item -LiteralPath $scSrc -Destination (Join-Path $OutputDir $sc) -Force
+    }
+}
+
 if (Test-Path -LiteralPath (Join-Path $sourcePath 'native_assets.json')) {
     Copy-Item -LiteralPath (Join-Path $sourcePath 'native_assets.json') -Destination (Join-Path $OutputDir 'native_assets.json') -Force
 }

@@ -397,7 +397,11 @@ HRESULT RunShellOperation(
             source_path.c_str(),
             nullptr,
             IID_PPV_ARGS(&source_item));
-        if (FAILED(result) || source_item == nullptr) break;
+        if (FAILED(result) || source_item == nullptr)
+        {
+            if (SUCCEEDED(result)) result = E_FAIL;
+            break;
+        }
 
         result = move
             ? operation->MoveItem(source_item, destination_item, nullptr, nullptr)

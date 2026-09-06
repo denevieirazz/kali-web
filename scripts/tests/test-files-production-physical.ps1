@@ -4,7 +4,7 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$root = 'C:\Users\dougl\Downloads\testes\CloudOS'
+$root = if ($PSScriptRoot) { (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path } else { (Get-Location).Path }
 $release = Join-Path $root 'desktop\CloudOS.FlutterShell\build\windows\x64\runner\Release'
 $brokerExe = Join-Path $release 'CloudOS.SystemBroker.exe'
 $probeExe = Join-Path $release 'CloudOS.BrokerProbe.exe'

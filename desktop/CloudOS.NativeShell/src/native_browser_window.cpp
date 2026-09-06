@@ -447,11 +447,14 @@ void CloudOSNativeBrowserWindow::ScheduleWebViewRecovery(COREWEBVIEW2_PROCESS_FA
     }
 
     recovery_pending_ = true;
-    (void)PostMessageW(
-        window_,
-        kWebViewRecoverMessage,
-        static_cast<WPARAM>(kind),
-        0);
+    if (!PostMessageW(
+            window_,
+            kWebViewRecoverMessage,
+            static_cast<WPARAM>(kind),
+            0))
+    {
+        recovery_pending_ = false;
+    }
 }
 
 void CloudOSNativeBrowserWindow::RecoverWebView()

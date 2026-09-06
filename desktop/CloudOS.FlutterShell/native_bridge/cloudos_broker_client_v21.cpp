@@ -901,7 +901,9 @@ bool CloudOSBrokerClientV21::SetPerformanceProfile(const std::string& profile)
 
 bool CloudOSBrokerClientV21::GetCapabilities(std::vector<std::string>& out_caps)
 {
-    if (EnsureConnected() && !capabilities_.empty())
+    if (!EnsureConnected()) return false;
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!capabilities_.empty())
     {
         out_caps = capabilities_;
         return true;

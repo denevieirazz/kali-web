@@ -20,6 +20,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 namespace CloudOS
 {
@@ -151,15 +152,16 @@ public:
         CloseHandle(session->thread);
         session->thread = nullptr;
 
-        // WaitForInputIdle is advisory. Job membership + stable unique HWND
+        // WaitForInputIdle is advisory. Job membership + stable HWND set
         // attribution below is the authority and works when a child process
         // becomes the UI owner.
         (void)WaitForInputIdle(session->process, 1500);
 
-        const WindowWaitResult wait_result = WaitForAttributedWindow(
+        std::vector<HWND> app_windows;
+        const WindowWaitResult wait_result = WaitForAttributedWindows(
             session->job,
             kWindowDiscoveryTimeoutMs,
-            session->app_window);
+            app_windows);
         if (wait_result != WindowWaitResult::Found)
         {
             TerminateJobObject(session->job, ERROR_TIMEOUT);
@@ -187,90 +189,43 @@ public:
             return BlockLaunch(app_id, error);
         }
 
-        RECT initial{};
-        if (!InitialHostRect(cloudos_window, initial))
+        // Modern Notepad may restore several document windows. Contain every
+        // attributed frame; never pick one and leave its siblings outside.
+        std::vector<HWND> hosts;
+        for (HWND app_window : app_windows)
         {
-            TerminateJobObject(session->job, ERROR_INVALID_WINDOW_HANDLE);
-            error = "CloudOS could not determine a safe managed-window rectangle";
-            CleanupSessionHandles(*session);
-            return BlockLaunch(app_id, error);
-        }
-
-        HWND host = CreateWindowExW(
-            WS_EX_CONTROLPARENT,
-            HostClassName(),
-            session->title.c_str(),
-            WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS |
-                WS_CAPTION | WS_THICKFRAME | WS_SYSMENU |
-                WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
-            initial.left,
-            initial.top,
-            initial.right - initial.left,
-            initial.bottom - initial.top,
-            cloudos_window,
-            nullptr,
-            GetModuleHandleW(nullptr),
-            session.get());
-        if (host == nullptr)
-        {
-            TerminateJobObject(session->job, ERROR_NOT_ENOUGH_MEMORY);
-            error = "CloudOS could not create the managed application frame";
-            CleanupSessionHandles(*session);
-            return BlockLaunch(app_id, error);
-        }
-
-        session->host_window = host;
-        if (!EmbedApplicationWindow(*session, error))
-        {
-            TerminateJobObject(session->job, ERROR_INVALID_STATE);
-            DestroyWindow(host);
-            CleanupSessionHandles(*session);
-            return BlockLaunch(app_id, error);
-        }
-
-        {
-            std::lock_guard<std::mutex> lock(SessionsMutex());
-            const auto [it, inserted] = Sessions().emplace(host, std::move(session));
-            (void)it;
-            if (!inserted)
+            auto frame = std::make_unique<Session>();
+            frame->app_id = session->app_id;
+            frame->title = session->title;
+            frame->app_window = app_window;
+            HWND host = nullptr;
+            if (!DuplicateHandle(GetCurrentProcess(), session->job,
+                    GetCurrentProcess(), &frame->job, 0, FALSE, DUPLICATE_SAME_ACCESS) ||
+                !CreateManagedFrame(cloudos_window, frame, host, error))
             {
-                error = "CloudOS managed-window session identity collided";
-                DestroyWindow(host);
+                if (error.empty()) error = "Could not retain the managed application job";
+                TerminateJobObject(session->job, ERROR_INVALID_STATE);
+                if (frame) CleanupSessionHandles(*frame);
+                for (HWND created : hosts) DestroyWindow(created);
+                CleanupSessionHandles(*session);
                 return BlockLaunch(app_id, error);
             }
+            hosts.push_back(host);
         }
-
-        if (SetTimer(host, kHealthTimerId, kHealthTimerIntervalMs, nullptr) == 0)
+        if (!ArmManagedFrames(hosts, error))
         {
-            error = "CloudOS could not start containment health monitoring";
-            DestroyWindow(host);
+            TerminateJobObject(session->job, ERROR_INVALID_STATE);
+            for (HWND host : hosts) DestroyWindow(host);
+            CleanupSessionHandles(*session);
             return BlockLaunch(app_id, error);
         }
-
-        ShowWindow(host, SW_SHOW);
-        if (!SetWindowPos(
-                host,
-                HWND_TOP,
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW))
-        {
-            error = "CloudOS could not activate the managed application frame";
-            DestroyWindow(host);
-            return BlockLaunch(app_id, error);
-        }
-
-        HWND embedded = FindEmbeddedWindow(host);
-        if (embedded != nullptr && IsWindow(embedded))
-        {
-            SetFocus(embedded);
-        }
+        CleanupSessionHandles(*session);
         return true;
     }
 
 private:
+    friend struct ManagedWin32HostV22Tests;
+
     enum class WindowWaitResult
     {
         Found,
@@ -298,9 +253,112 @@ private:
         RECT restore_rect{};
         bool maximized{false};
         bool closing{false};
+        bool embedding{true};
     };
 
+    static bool CreateManagedFrame(
+        HWND cloudos_window, std::unique_ptr<Session>& session,
+        HWND& created_host, std::string& error)
+    {
+        created_host = nullptr;
+        RECT initial{};
+        if (!InitialHostRect(cloudos_window, initial))
+        {
+            TerminateJobObject(session->job, ERROR_INVALID_WINDOW_HANDLE);
+            error = "CloudOS could not determine a safe managed-window rectangle";
+            CleanupSessionHandles(*session);
+            return false;
+        }
+
+        HWND host = CreateWindowExW(
+            WS_EX_CONTROLPARENT,
+            HostClassName(),
+            session->title.c_str(),
+            WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS |
+                WS_CAPTION | WS_THICKFRAME | WS_SYSMENU |
+                WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
+            initial.left,
+            initial.top,
+            initial.right - initial.left,
+            initial.bottom - initial.top,
+            cloudos_window,
+            nullptr,
+            GetModuleHandleW(nullptr),
+            session.get());
+        if (host == nullptr)
+        {
+            TerminateJobObject(session->job, ERROR_NOT_ENOUGH_MEMORY);
+            error = "CloudOS could not create the managed application frame";
+            CleanupSessionHandles(*session);
+            return false;
+        }
+
+        session->host_window = host;
+        if (!EmbedApplicationWindow(*session, error))
+        {
+            TerminateJobObject(session->job, ERROR_INVALID_STATE);
+            DestroyWindow(host);
+            CleanupSessionHandles(*session);
+            return false;
+        }
+
+        session->embedding = false;
+        {
+            std::lock_guard<std::mutex> lock(SessionsMutex());
+            Sessions().emplace(host, std::move(session));
+        }
+
+        ShowWindow(host, SW_SHOW);
+        if (!SetWindowPos(
+                host,
+                HWND_TOP,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW))
+        {
+            error = "CloudOS could not activate the managed application frame";
+            DestroyWindow(host);
+            return false;
+        }
+
+        HWND embedded = FindEmbeddedWindow(host);
+        if (embedded != nullptr && IsWindow(embedded))
+        {
+            SetFocus(embedded);
+        }
+        created_host = host;
+        return true;
+    }
+
+    static bool ArmManagedFrames(const std::vector<HWND>& hosts, std::string& error)
+    {
+        // Cross-process window calls may pump messages. A timer armed on the
+        // first frame would see its not-yet-embedded siblings as escapes.
+        // Validate the complete group before enabling ongoing monitoring.
+        for (HWND host : hosts)
+        {
+            const auto it = Sessions().find(host);
+            if (it == Sessions().end() || !ValidateContainedSession(*it->second))
+            {
+                error = "CloudOS could not verify the complete managed window group";
+                return false;
+            }
+        }
+        for (HWND host : hosts)
+        {
+            if (SetTimer(host, kHealthTimerId, kHealthTimerIntervalMs, nullptr) == 0)
+            {
+                error = "CloudOS could not start containment health monitoring";
+                return false;
+            }
+        }
+        return true;
+    }
+
     static constexpr DWORD kMaxTrackedJobProcesses = 64;
+    static constexpr DWORD kMaxManagedWindows = 16;
 
     struct JobProcessSnapshot final
     {
@@ -315,6 +373,8 @@ private:
         HWND first{nullptr};
         DWORD count{0};
         bool query_failed{false};
+        bool unapproved_window{false};
+        HWND windows[kMaxManagedWindows]{};
     };
 
     struct ParentSearch final
@@ -457,8 +517,8 @@ private:
 
         if (app_id == "windows:notepad")
         {
-            // On Windows 11, C:\Windows\notepad.exe is the persistent classic Win32 notepad,
-            // while C:\Windows\System32\notepad.exe is an AppExecutionAlias redirection stub.
+            // Both OS entrypoints can redirect to packaged Notepad. Neither
+            // path guarantees the classic single-window implementation.
             std::wstring win_notepad;
             if (win_length > 0 && win_length < MAX_PATH)
             {
@@ -564,7 +624,9 @@ private:
         const JobProcessSnapshot& processes,
         WindowSearch& search) noexcept
     {
-        search = WindowSearch{&processes, nullptr, 0, false};
+        search = WindowSearch{};
+        search.processes = &processes;
+        SetLastError(ERROR_SUCCESS);
         const BOOL enumerated = EnumWindows(
             [](HWND window, LPARAM value) -> BOOL
             {
@@ -589,29 +651,56 @@ private:
                 }
                 if ((style & WS_CHILD) != 0) return TRUE;
 
+                LONG_PTR ex_style = 0;
+                RECT bounds{};
+                if (!TryGetWindowLongPtr(window, GWL_EXSTYLE, ex_style) ||
+                    !GetWindowRect(window, &bounds))
+                {
+                    state->query_failed = true;
+                    return FALSE;
+                }
+                // Windows input indicators can have WS_VISIBLE despite having
+                // no drawable area. Do not broadly exclude tool windows: one
+                // with actual area still needs containment (including later).
+                if ((ex_style & WS_EX_NOACTIVATE) != 0 &&
+                    (bounds.right <= bounds.left || bounds.bottom <= bounds.top))
+                {
+                    return TRUE;
+                }
+                wchar_t class_name[256]{};
+                if (GetClassNameW(window, class_name, 256) == 0)
+                {
+                    state->query_failed = true;
+                    return FALSE;
+                }
+                if (std::wstring_view(class_name) != L"Notepad")
+                    state->unapproved_window = true;
                 if (state->first == nullptr) state->first = window;
+                if (state->count < kMaxManagedWindows)
+                    state->windows[state->count] = window;
                 ++state->count;
-                return state->count < 2 ? TRUE : FALSE;
+                return state->count <= kMaxManagedWindows ? TRUE : FALSE;
             },
             reinterpret_cast<LPARAM>(&search));
 
         if (!enumerated && !search.query_failed)
         {
             // EnumWindows returning FALSE is expected when the callback stopped
-            // after finding a second candidate. Otherwise it is an enumeration
+            // after exceeding the bounded window set. Otherwise it is an enumeration
             // failure and attribution cannot be proven.
-            if (search.count < 2) return false;
+            if (search.count <= kMaxManagedWindows &&
+                !(search.count == 0 && GetLastError() == ERROR_SUCCESS)) return false;
         }
         return !search.query_failed;
     }
 
-    static WindowWaitResult WaitForAttributedWindow(
+    static WindowWaitResult WaitForAttributedWindows(
         HANDLE job,
         DWORD timeout_ms,
-        HWND& attributed_window)
+        std::vector<HWND>& attributed_windows)
     {
-        attributed_window = nullptr;
-        HWND stable_candidate = nullptr;
+        attributed_windows.clear();
+        std::vector<HWND> stable_candidate;
         DWORD stable_observations = 0;
         const ULONGLONG deadline = GetTickCount64() + timeout_ms;
 
@@ -628,32 +717,34 @@ private:
             {
                 return WindowWaitResult::QueryFailure;
             }
-            if (search.count > 1)
+            if (search.count > kMaxManagedWindows || search.unapproved_window)
             {
                 return WindowWaitResult::Ambiguous;
             }
 
-            if (search.count == 1 && search.first != nullptr)
+            if (search.count != 0)
             {
-                if (search.first == stable_candidate)
+                std::vector<HWND> candidates(search.windows, search.windows + search.count);
+                std::sort(candidates.begin(), candidates.end(), std::less<HWND>{});
+                if (candidates == stable_candidate)
                 {
                     ++stable_observations;
                 }
                 else
                 {
-                    stable_candidate = search.first;
+                    stable_candidate = std::move(candidates);
                     stable_observations = 1;
                 }
 
                 if (stable_observations >= kStableWindowObservations)
                 {
-                    attributed_window = stable_candidate;
+                    attributed_windows = std::move(stable_candidate);
                     return WindowWaitResult::Found;
                 }
             }
             else
             {
-                stable_candidate = nullptr;
+                stable_candidate.clear();
                 stable_observations = 0;
             }
 
@@ -763,20 +854,6 @@ private:
             return false;
         }
 
-        SetLastError(ERROR_SUCCESS);
-        const HWND previous_parent = SetParent(session.app_window, session.host_window);
-        const DWORD set_parent_error = GetLastError();
-        if (previous_parent == nullptr && set_parent_error != ERROR_SUCCESS)
-        {
-            error = "Windows rejected cross-process window containment";
-            return false;
-        }
-        if (GetParent(session.app_window) != session.host_window)
-        {
-            error = "CloudOS could not verify the managed window parent after SetParent";
-            return false;
-        }
-
         LONG_PTR style = 0;
         if (!TryGetWindowLongPtr(session.app_window, GWL_STYLE, style))
         {
@@ -789,6 +866,22 @@ private:
         if (!TrySetWindowLongPtr(session.app_window, GWL_STYLE, style))
         {
             error = "CloudOS could not convert the managed application to a child window";
+            return false;
+        }
+
+        // SetParent does not change WS_CHILD/WS_POPUP. Convert the style first,
+        // as required by Win32, so GetParent reports the child relationship.
+        SetLastError(ERROR_SUCCESS);
+        const HWND previous_parent = SetParent(session.app_window, session.host_window);
+        const DWORD set_parent_error = GetLastError();
+        if (previous_parent == nullptr && set_parent_error != ERROR_SUCCESS)
+        {
+            error = "Windows rejected cross-process window containment";
+            return false;
+        }
+        if (GetParent(session.app_window) != session.host_window)
+        {
+            error = "CloudOS could not verify the managed window parent after SetParent";
             return false;
         }
 
@@ -918,10 +1011,8 @@ private:
 
         KillTimer(host, kHealthTimerId);
         removed->closing = true;
-        if (removed->job != nullptr)
-        {
-            TerminateJobObject(removed->job, ERROR_PROCESS_ABORTED);
-        }
+        // Each frame retains a handle to the same kill-on-close job. Closing
+        // one document must not terminate its restored sibling documents.
         CleanupSessionHandles(*removed);
     }
 
@@ -1049,14 +1140,16 @@ private:
         switch (message)
         {
         case WM_SIZE:
-            if (session != nullptr && session->host_window == window &&
+            // Style/parent changes can synchronously re-enter this procedure
+            // from Flutter/Win32 before the child relationship is established.
+            if (session != nullptr && !session->embedding && session->host_window == window &&
                 !LayoutEmbeddedWindow(*session))
             {
                 FailClosedHost(window, *session);
             }
             return 0;
         case WM_SETFOCUS:
-            if (session != nullptr)
+            if (session != nullptr && !session->embedding)
             {
                 if (!IsWindow(session->app_window))
                 {
@@ -1074,6 +1167,12 @@ private:
             }
             break;
         case WM_TIMER:
+            if (wparam == kHealthTimerId && session != nullptr &&
+                !IsWindow(session->app_window))
+            {
+                DestroyWindow(window);
+                return 0;
+            }
             if (wparam == kHealthTimerId && session != nullptr &&
                 !ValidateContainedSession(*session))
             {
@@ -1101,7 +1200,12 @@ private:
             }
             break;
         case WM_CLOSE:
-            DestroyWindow(window);
+            // Let Notepad handle unsaved changes; retire this frame only after
+            // its document HWND disappears. Never kill sibling documents.
+            if (session != nullptr && IsWindow(session->app_window))
+                PostMessageW(session->app_window, WM_CLOSE, 0, 0);
+            else
+                DestroyWindow(window);
             return 0;
         case WM_NCDESTROY:
             SetWindowLongPtrW(window, GWLP_USERDATA, 0);

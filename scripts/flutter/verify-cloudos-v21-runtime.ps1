@@ -9,6 +9,25 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+if (-not (Get-Command Get-FileHash -ErrorAction SilentlyContinue)) {
+    Import-Module Microsoft.PowerShell.Utility -ErrorAction SilentlyContinue
+}
+
+function Get-FileSha256Safe([string]$filePath) {
+    if (Get-Command Get-FileHash -ErrorAction SilentlyContinue) {
+        return (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $stream = [System.IO.File]::OpenRead($filePath)
+    try {
+        $bytes = $sha.ComputeHash($stream)
+        return ([System.BitConverter]::ToString($bytes)).Replace("-", "").ToLowerInvariant()
+    } finally {
+        $stream.Close()
+        $sha.Dispose()
+    }
+}
+
 $presentationRoot = (Resolve-Path -LiteralPath $Root).Path
 $nativeRootPath = if ($NativeRoot) {
     (Resolve-Path -LiteralPath $NativeRoot).Path
@@ -52,7 +71,7 @@ foreach ($name in $nativeNames) {
     if ($item.Length -le 0 -or [Int64]$records[0].size -ne [Int64]$item.Length) {
         throw "Tamanho invalido para $name"
     }
-    $actualHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+    $actualHash = Get-FileSha256Safe -filePath $path
     if ($actualHash -ne ([string]$records[0].sha256).ToLowerInvariant()) {
         throw "SHA256 invalido para $name"
     }
@@ -75,12 +94,12 @@ if (Test-Path -LiteralPath $integratedManifestPath -PathType Leaf) {
         throw 'Manifesto integrado V21 invalido.'
     }
 
-    $nativeManifestHash = (Get-FileHash -LiteralPath $nativeManifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $nativeManifestHash = Get-FileSha256Safe -filePath $nativeManifestPath
     if ($nativeManifestHash -ne ([string]$integrated.native_manifest_sha256).ToLowerInvariant()) {
         throw 'O manifesto nativo nao corresponde ao manifesto integrado V21.'
     }
 
-    $flutterHash = (Get-FileHash -LiteralPath $flutterExe -Algorithm SHA256).Hash.ToLowerInvariant()
+    $flutterHash = Get-FileSha256Safe -filePath $flutterExe
     if ($flutterHash -ne ([string]$integrated.flutter_sha256).ToLowerInvariant()) {
         throw 'SHA256 do executavel Flutter nao corresponde ao manifesto integrado V21.'
     }

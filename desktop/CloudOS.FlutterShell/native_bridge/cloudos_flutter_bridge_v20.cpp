@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cwchar>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <system_error>
 
@@ -68,6 +69,10 @@ bool ReadIntArgument(
     }
     if (const auto* number = std::get_if<int64_t>(&it->second))
     {
+        if (*number < (std::numeric_limits<int>::min)() || *number > (std::numeric_limits<int>::max)())
+        {
+            return false;
+        }
         *value = static_cast<int>(*number);
         return true;
     }
@@ -153,7 +158,14 @@ int ReadIntField(const flutter::EncodableMap& map, const char* key, int default_
     if (it != map.end())
     {
         if (const auto* v = std::get_if<int32_t>(&it->second)) return static_cast<int>(*v);
-        if (const auto* v = std::get_if<int64_t>(&it->second)) return static_cast<int>(*v);
+        if (const auto* v = std::get_if<int64_t>(&it->second))
+        {
+            if (*v < (std::numeric_limits<int>::min)() || *v > (std::numeric_limits<int>::max)())
+            {
+                return default_val;
+            }
+            return static_cast<int>(*v);
+        }
     }
     return default_val;
 }

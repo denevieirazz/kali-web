@@ -19,6 +19,7 @@ enum SettingsSection {
   power('Energia & Bateria', Icons.battery_charging_full_rounded, SettingsCategoryGroup.system),
   storage('Armazenamento', Icons.storage_rounded, SettingsCategoryGroup.system),
   performance('Desempenho', Icons.speed_rounded, SettingsCategoryGroup.system),
+  startup('Shell & Startup', Icons.terminal_sharp, SettingsCategoryGroup.system),
 
   // Connectivity
   network('Rede e Internet', Icons.wifi_rounded, SettingsCategoryGroup.connectivity),
@@ -91,6 +92,12 @@ class _SettingsWindowState extends State<SettingsWindow> {
 
   // Recovery & Diagnostics
   CloudOSRecoveryStatus? _recoveryStatus;
+
+  // Startup & Shell
+  CloudStartupStatus _startupStatus = const CloudStartupStatus();
+  bool _startupUpdating = false;
+  CloudShellStatus _shellStatus = const CloudShellStatus();
+  bool _shellUpdating = false;
 
   @override
   void initState() {
@@ -239,6 +246,18 @@ class _SettingsWindowState extends State<SettingsWindow> {
         });
       }
     } catch (_) {}
+
+    // Shell & Startup
+    try {
+      final st = await widget.bridge.getStartupStatus();
+      final sh = await widget.bridge.getShellStatus();
+      if (mounted) {
+        setState(() {
+          _startupStatus = st;
+          _shellStatus = sh;
+        });
+      }
+    } catch (_) {}
   }
 
   @override
@@ -323,6 +342,7 @@ class _SettingsWindowState extends State<SettingsWindow> {
                   _buildNavItem(SettingsSection.power, isDark, currentAccent),
                   _buildNavItem(SettingsSection.storage, isDark, currentAccent),
                   _buildNavItem(SettingsSection.performance, isDark, currentAccent),
+                  _buildNavItem(SettingsSection.startup, isDark, currentAccent),
 
                   const SizedBox(height: 8),
                   _buildGroupHeader('CONECTIVIDADE', isDark),
@@ -417,6 +437,7 @@ class _SettingsWindowState extends State<SettingsWindow> {
       SettingsSection.power => _buildPowerSection(),
       SettingsSection.storage => _buildStorageSection(),
       SettingsSection.performance => _buildPerformanceSection(),
+      SettingsSection.startup => _buildStartupSection(),
       SettingsSection.network => _buildNetworkSection(),
       SettingsSection.bluetooth => _buildBluetoothSection(),
       SettingsSection.personalization => _buildPersonalizationSection(),
@@ -1653,6 +1674,363 @@ Safe Mode: ${_recoveryStatus?.isSafeMode ?? false}
               Text('Desenvolvido para Douglas • CloudOS Provedor de Shell.', style: TextStyle(color: Colors.white, fontSize: 12)),
               SizedBox(height: 4),
               Text('Explorer.exe e Winlogon preservados como fallbacks invioláveis de segurança.', style: TextStyle(color: CloudOSColors.caption, fontSize: 11.5)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStartupSection() {
+    final isDark = cloudThemeNotifier.value.isDark;
+    final accent = cloudThemeNotifier.value.accentColor;
+
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: <Widget>[
+        _buildSectionHeader(
+          'Shell do Sistema & Inicialização',
+          'Controle de Shell Replacement, modo Canary de validação, recuperação rápida do Explorer e inicialização automática.',
+        ),
+        const SizedBox(height: 20),
+
+        // CARD 1: MODO DE SHELL DO WINDOWS
+        _buildCard(
+          title: 'Modo de Shell do Windows',
+          icon: Icons.dashboard_customize_rounded,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: <Widget>[
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        'Status Atual do Shell:',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isDark ? CloudOSColors.caption : const Color(0xFF64748B),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: _shellStatus.status == ShellModeEnum.cloudosActive
+                              ? const Color(0xFF16A34A).withValues(alpha: 0.15)
+                              : (_shellStatus.status == ShellModeEnum.cloudosCanary
+                                  ? const Color(0xFFEAB308).withValues(alpha: 0.15)
+                                  : const Color(0xFF3B82F6).withValues(alpha: 0.15)),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: _shellStatus.status == ShellModeEnum.cloudosActive
+                                ? const Color(0xFF16A34A)
+                                : (_shellStatus.status == ShellModeEnum.cloudosCanary
+                                    ? const Color(0xFFEAB308)
+                                    : const Color(0xFF3B82F6)),
+                          ),
+                        ),
+                        child: Text(
+                          _shellStatus.status.displayName,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: _shellStatus.status == ShellModeEnum.cloudosActive
+                                ? const Color(0xFF22C55E)
+                                : (_shellStatus.status == ShellModeEnum.cloudosCanary
+                                    ? const Color(0xFFFACC15)
+                                    : const Color(0xFF60A5FA)),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    children: <Widget>[
+                      if (_shellUpdating)
+                        const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      else
+                        IconButton(
+                          tooltip: 'Atualizar Diagnóstico de Shell',
+                          icon: const Icon(Icons.refresh_rounded, size: 18),
+                          onPressed: () async {
+                            final sh = await widget.bridge.getShellStatus();
+                            if (mounted) setState(() => _shellStatus = sh);
+                          },
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Mecanismo Oficial: Custom User Interface Policy (WinLogon.admx)\n'
+                'Edição do Sistema: ${_shellStatus.windowsEdition} (Build ${_shellStatus.windowsBuild})',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isDark ? CloudOSColors.caption : const Color(0xFF64748B),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: <Widget>[
+                  // CANARY MODE BUTTON
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFD97706),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    icon: const Icon(Icons.science_rounded, size: 16),
+                    label: const Text('Executar Modo Canary (Sem Alterar Registro)'),
+                    onPressed: () async {
+                      setState(() => _shellUpdating = true);
+                      try {
+                        await widget.bridge.setShellMode('CANARY');
+                        final sh = await widget.bridge.getShellStatus();
+                        if (mounted) setState(() => _shellStatus = sh);
+                      } finally {
+                        if (mounted) setState(() => _shellUpdating = false);
+                      }
+                    },
+                  ),
+
+                  // RESTORE EXPLORER BUTTON
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF3B82F6),
+                      side: const BorderSide(color: Color(0xFF3B82F6)),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    icon: const Icon(Icons.restore_rounded, size: 16),
+                    label: const Text('Restaurar Windows Explorer Shell'),
+                    onPressed: () async {
+                      setState(() => _shellUpdating = true);
+                      try {
+                        await widget.bridge.restoreExplorerShell();
+                        final sh = await widget.bridge.getShellStatus();
+                        if (mounted) {
+                          setState(() => _shellStatus = sh);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Windows Explorer Shell restaurado com sucesso!')),
+                          );
+                        }
+                      } finally {
+                        if (mounted) setState(() => _shellUpdating = false);
+                      }
+                    },
+                  ),
+
+                  // PERSISTENT ACTIVATION (LOCKED BY GATE 0)
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF334155),
+                      foregroundColor: const Color(0xFF94A3B8),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    icon: const Icon(Icons.lock_rounded, size: 16),
+                    label: const Text('Ativar CloudOS como Shell (Gate 0 Bloqueado)'),
+                    onPressed: () {
+                      showDialog<void>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          backgroundColor: const Color(0xFF1E293B),
+                          title: const Row(
+                            children: <Widget>[
+                              Icon(Icons.shield_rounded, color: Colors.orangeAccent),
+                              SizedBox(width: 8),
+                              Text('Trava de Segurança: Gate 0', style: TextStyle(color: Colors.white, fontSize: 16)),
+                            ],
+                          ),
+                          content: const Text(
+                            'A ativação permanente do Shell Replacement está travada até a confirmação do teste de login/reboot real da Etapa 10.\n\n'
+                            'Para testar o comportamento de shell de forma segura sem risco de tela preta, utilize o botão "Executar Modo Canary".',
+                            style: TextStyle(color: Color(0xFFCBD5E1), fontSize: 13),
+                          ),
+                          actions: <Widget>[
+                            TextButton(
+                              child: const Text('Entendido'),
+                              onPressed: () => Navigator.of(ctx).pop(),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        // CARD 2: DIAGNÓSTICO DO SHELL E RECOVERY
+        _buildCard(
+          title: 'Diagnósticos e Integridade do Shell',
+          icon: Icons.analytics_rounded,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              _buildDetailRow('Shell Configurado', _shellStatus.configuredShell.isEmpty ? 'explorer.exe (Padrão Oficial)' : _shellStatus.configuredShell),
+              _buildDetailRow('Shell Efetivo', _shellStatus.effectiveShell),
+              _buildDetailRow('Mecanismo de Shell', 'CustomShellPolicy (WinLogon.admx)'),
+              _buildDetailRow('Userinit do Sistema', _shellStatus.userinitIntact ? 'C:\\WINDOWS\\system32\\userinit.exe (Intocado)' : 'Alerta'),
+              _buildDetailRow('Winlogon do Sistema (HKLM)', _shellStatus.winlogonIntact ? 'explorer.exe (Preservado)' : 'Alerta'),
+              _buildDetailRow('Processos Ativos', 'Bootstrap: ${_shellStatus.shellBootstrapPid} | Supervisor: ${_shellStatus.supervisorPid} | Broker: ${_shellStatus.brokerPid} | Flutter: ${_shellStatus.flutterPid}'),
+              _buildDetailRow('Crash Budget (Tolerância)', '${_shellStatus.crashBudget} falhas em 60s antes de fallback automático'),
+              _buildDetailRow('Backup de Recuperação', _shellStatus.backupExists ? '%LOCALAPPDATA%\\CloudOS\\Recovery\\shell-backup.json (Válido)' : 'Não localizado'),
+              _buildDetailRow('Windows Explorer em Execução', _shellStatus.explorerRunning ? 'Sim (Ativo e responsivo)' : 'Não detectado'),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        // CARD 3: INICIALIZAÇÃO AUTOMÁTICA (ETAPA 10)
+        _buildCard(
+          title: 'Inicialização Automática no Login',
+          icon: Icons.rocket_launch_rounded,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: <Widget>[
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          'Iniciar CloudOS ao fazer login no Windows',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? Colors.white : const Color(0xFF0F172A),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Inicia o CloudOS em segundo plano após o login interativo do usuário.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isDark ? CloudOSColors.caption : const Color(0xFF64748B),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  if (_startupUpdating)
+                    const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  else
+                    Switch(
+                      value: _startupStatus.enabled,
+                      activeThumbColor: accent,
+                      onChanged: (bool enabled) async {
+                        setState(() => _startupUpdating = true);
+                        try {
+                          final ok = await widget.bridge.setStartupEnabled(enabled);
+                          if (ok) {
+                            final updated = await widget.bridge.getStartupStatus();
+                            if (mounted) setState(() => _startupStatus = updated);
+                          }
+                        } finally {
+                          if (mounted) setState(() => _startupUpdating = false);
+                        }
+                      },
+                    ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              _buildDetailRow(
+                'Status do Startup',
+                _startupStatus.enabled ? 'Ativado (HKCU\\Run)' : 'Desativado',
+              ),
+              _buildDetailRow(
+                'Escopo de Permissões',
+                'Padrão de Usuário (AsInvoker / Sem elevação UAC)',
+              ),
+              if (_startupStatus.command.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 8),
+                Text(
+                  'Comando de inicialização registrado:',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isDark ? CloudOSColors.caption : const Color(0xFF64748B),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF0B0F17) : const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: SelectableText(
+                    _startupStatus.command,
+                    style: const TextStyle(fontSize: 11, fontFamily: 'Consolas'),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        // CARD 4: CONTROLE DE SESSÃO E DESLIGAMENTO
+        _buildCard(
+          title: 'Controle de Sessão e Desligamento',
+          icon: Icons.exit_to_app_rounded,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'Deseja fechar o CloudOS e voltar à interface tradicional do Windows?',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Ao sair, o CloudOS, Supervisor e Broker serão finalizados de forma limpa. O Windows Explorer continuará ativo sem nenhuma perda de dados.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isDark ? CloudOSColors.caption : const Color(0xFF64748B),
+                ),
+              ),
+              const SizedBox(height: 14),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFDC2626),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                icon: const Icon(Icons.power_settings_new_rounded, size: 18),
+                label: const Text('Sair do CloudOS (Manter Windows Explorer)'),
+                onPressed: () async {
+                  await widget.bridge.closeCloudOS();
+                },
+              ),
             ],
           ),
         ),
