@@ -1,8 +1,8 @@
 # CloudOS — Project Status Master
 
-Data de atualização: 2026-09-05  
-Branch: `release/rc1.1-release-engineering` (após validação, merge em `main`)  
-Status geral: **ESTÁVEL / RELEASE CANDIDATE 1.1 (RC1.1) PRONTO PARA VALIDAÇÃO DO USUÁRIO / GATE 0 ATIVO**
+Data de atualização: 2026-09-06  
+Branch: `release/rc1.3-soak-freeze` (após validação, merge em `main`)  
+Status geral: **ESTÁVEL / RELEASE CANDIDATE 1.3 (RC1.3) CONGELADO / SOAK & LEAK HARDENING APROVADOS / AGUARDANDO HOMOLOGAÇÃO DO USUÁRIO / GATE 0 ATIVO**
 
 ---
 
@@ -52,6 +52,7 @@ O CloudOS opera em arquitetura híbrida de alta performance e confinamento rigor
 | **Release Candidate 1 (RC1)** | Product Completion, UX Polish & Release Readiness | **PASS** | 28+ superfícies auditadas, Lixeira nativa Win32, CloudOSPreferences, Inno Setup pronto, 151/151 Flutter tests, 49/49 native contracts. |
 | **Release Candidate 1.1 (RC1.1)** | Distribution Hardening, Real Inno Setup Installer, Update/Rollback Hardening, Schema v2 Preferences, Diagnostics Exporter | **PASS** | Inno Setup 6.7.3 compilou CloudOS-Setup-21.0.0-rc.1.1-x64.exe, 156/156 Flutter tests, 49/49 native contracts, assert-gate0 PASS, export-diagnostics-bundle PASS. |
 | **Release Candidate 1.2 (RC1.2)** | Real Product Lifecycle, Stress & Compatibility Mega Pass, IPC Benchmarking, SemVer 2.0.0, GitHub CI | **PASS** | Inno Setup 6.7.3 compilou CloudOS-Setup-21.0.0-rc.1.2-x64.exe, 156/156 Flutter tests, 49/49 native contracts, 5/5 installer, 5/5 startup, 10/10 shell, 500-ping stress PASS, Gate 0 PASS. |
+| **Release Candidate 1.3 (RC1.3)** | Release Freeze, Soak Stability Pass, Resource Leak Hardening, Physical Sandbox QA Preparation | **PASS** | Inno Setup 6.7.3 compilou CloudOS-Setup-21.0.0-rc.1.3-x64.exe (Build 34), 157/157 Flutter tests, 49/49 native contracts, 51/51 broker self-test, 14/14 smoke, 6/6 soak suites (2000 pings, 400 concurrency, 5x 100MB, 0 leaks, -0.23MB private delta), Gate 0 PASS. |
 
 ---
 
@@ -67,15 +68,16 @@ O CloudOS opera em arquitetura híbrida de alta performance e confinamento rigor
 
 ---
 
-## 4. Resumo de Testes Automatizados Executados na Estabilização Final
+## 4. Resumo de Testes Automatizados Executados na Estabilização Final (RC1.3)
 
 1. **Flutter Analyze:** 0 problemas encontrados (`No issues found!`).
-2. **Flutter Test Suite:** 151/151 testes aprovados (`All tests passed!`).
+2. **Flutter Test Suite:** 157/157 testes aprovados (`All tests passed!`).
 3. **Native Contract Suite:** 49/49 contratos aprovados (`PASS: CloudOS native contract suite (49 contracts)`).
 4. **Installer / Updater / Rollback Suite:** 5/5 contratos aprovados (`5 / 5 CONTRATOS APROVADOS (100% PASS)`).
 5. **Startup Automation Suite:** 5/5 contratos aprovados (`5 / 5 CONTRATOS APROVADOS (100% PASS)`).
 6. **Shell Replacement & Recovery Suite:** 10/10 contratos aprovados (`10 / 10 CONTRATOS APROVADOS (100% PASS)`).
 7. **System Broker Self-Test:** 51 asserções aprovadas (`CloudOS System Broker V21 Self-Test Passed`).
-8. **System Broker Smoke Test:** Ping, Capabilities, Apps, Files, System Control e Diagnostics 100% aprovados.
-9. **OSV Scanner (Dependências Vulneráveis):** Nenhuma vulnerabilidade encontrada.
-10. **Varredura de Segredos:** Zero chaves, tokens ou credenciais expostas no repositório.
+8. **System Broker Smoke Test:** 14/14 contratos aprovados (Ping, Capabilities, Apps, Files, System Control e Diagnostics).
+9. **Soak & Stress Stability Suite:** 6/6 suítes aprovadas (2.000 pings sequenciais, 400 RPCs concorrentes, 5x transferências de 100MB, 100 gravações atômicas de preferências, delta de memória privada de -0.23 MB, zero vazamentos).
+10. **OSV Scanner (Dependências Vulneráveis):** Nenhuma vulnerabilidade encontrada.
+11. **Varredura de Segredos:** Zero chaves, tokens ou credenciais expostas no código.

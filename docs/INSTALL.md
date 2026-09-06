@@ -19,7 +19,7 @@ O instalador oficial do CloudOS é gerado via Inno Setup 6 e foi projetado para 
 
 ## 2. Instalação Padrão (Interface Gráfica)
 
-1. Baixe o pacote oficial: `CloudOS-Setup-21.0.0-rc.1.2-x64.exe`.
+1. Baixe o pacote oficial: `CloudOS-Setup-21.0.0-rc.1.3-x64.exe`.
 2. Verifique o checksum SHA256 com o arquivo `SHA256SUMS.txt`.
 3. Dê duplo clique no executável.
 4. Escolha o idioma (Português Brasileiro ou Inglês).
@@ -34,7 +34,7 @@ O instalador oficial do CloudOS é gerado via Inno Setup 6 e foi projetado para 
 Para ambientes de automação ou instalação automatizada, use os parâmetros padrão do Inno Setup:
 
 ```cmd
-CloudOS-Setup-21.0.0-rc.1.2-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+CloudOS-Setup-21.0.0-rc.1.3-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ```
 
 Parâmetros adicionais suportados:
@@ -51,7 +51,7 @@ Se algum arquivo executável ou biblioteca for corrompido ou excluído acidental
    ```powershell
    pwsh.exe -NoProfile -File scripts\installer\CloudOS.Maintenance.ps1 -Action repair
    ```
-2. Ou execute novamente o instalador `CloudOS-Setup-21.0.0-rc.1.2-x64.exe`, que substituirá os arquivos defeituosos preservando as preferências e dados do usuário.
+2. Ou execute novamente o instalador `CloudOS-Setup-21.0.0-rc.1.3-x64.exe`, que substituirá os arquivos defeituosos preservando as preferências e dados do usuário.
 
 ---
 

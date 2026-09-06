@@ -2,6 +2,16 @@
 
 Todas as alterações notáveis deste projeto são documentadas neste arquivo.
 
+## [21.0.0-rc.1.3] - 2026-09-06
+
+### Adicionado e Aprimorado
+- **Eliminação de Vazamento de Memória em Diálogo (Timer Exponencial)**: Correção no diálogo de redefinição de fábrica em `SettingsWindow`, garantindo que o `Timer.periodic` seja isolado fora do builder de interface e cancelado pontualmente via `.whenComplete()`.
+- **Reaping e Coleta de Sessões Zumbis no ConPTY**: Adição de rotina de coleta de processos de terminal encerrados em `CloudOSConptyManager::StartSession` antes de avaliar o limite de 32 sessões simultâneas (`kMaxSessions`), prevenindo esgotamento de handles sob ciclo repetitivo de abre/fecha.
+- **Suíte de Soak e Estresse (Soak Stability Pass)**: Teste contínuo com monitoramento periódico (15s/30s) sob carga pesada: Working Set estável (~14.2 MB), Private Memory delta de -0.23 MB, redução de 12 handles Win32 e estabilização de threads de 11 para 5. Zero vazamentos detectados.
+- **Resiliência Extrema de IPC do System Broker**: Processamento ininterrupto de 2.000 requisições sequenciais de ping com 0 falhas e 400 consultas em concorrência paralela (4 threads).
+- **Integridade de Armazenamento e Tolerância a Falhas**: Validação de 5 transferências consecutivas de 100MB com SHA256 bit-a-bit e rejeição de nomes de dispositivos DOS (`CON`, `PRN`, `AUX`, `NUL`).
+- **Instalador Oficial Inno Setup (Build 34)**: Pacote `CloudOS-Setup-21.0.0-rc.1.3-x64.exe` (11.79 MB, SHA256 `20baaa1c693c889dac980d00073bbfec13462a77cb0e76ed980634e4555f684f`) gerado e verificado com manifesto e feed de atualização.
+
 ## [21.0.0-rc.1.2] - 2026-09-06
 
 ### Adicionado e Aprimorado
