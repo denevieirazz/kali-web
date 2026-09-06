@@ -182,26 +182,48 @@ std::vector<MonitorInfoV25> DisplayServiceV25::ListMonitors()
 std::vector<DisplayModeInfoV25> DisplayServiceV25::ListSupportedModes(const std::wstring& device_name)
 {
     std::vector<DisplayModeInfoV25> modes;
-    std::set<std::tuple<int, int, int>> seen;
 
-    DEVMODEW dm;
+    DEVMODEW current{};
+    current.dmSize = sizeof(DEVMODEW);
+    const bool have_current =
+        EnumDisplaySettingsW(device_name.c_str(), ENUM_CURRENT_SETTINGS, &current) != FALSE;
+    const int current_orientation = have_current
+        ? static_cast<int>(current.dmDisplayOrientation)
+        : static_cast<int>(DMDO_DEFAULT);
+
+    DEVMODEW dm{};
     dm.dmSize = sizeof(DEVMODEW);
     for (DWORD i = 0; EnumDisplaySettingsW(device_name.c_str(), i, &dm); ++i)
     {
-        auto key = std::make_tuple(
-            static_cast<int>(dm.dmPelsWidth),
-            static_cast<int>(dm.dmPelsHeight),
-            static_cast<int>(dm.dmDisplayFrequency));
-        if (seen.find(key) == seen.end())
+        DisplayModeInfoV25 mode;
+        mode.width = dm.dmPelsWidth;
+        mode.height = dm.dmPelsHeight;
+        mode.frequency = dm.dmDisplayFrequency;
+        mode.orientation = dm.dmDisplayOrientation;
+        mode.bits_per_pel = dm.dmBitsPerPel;
+
+        // The driver may advertise the same width/height/frequency for more than
+        // one rotation. Keep a single UI entry, but prefer the variant matching
+        // the monitor's current orientation so selecting a resolution does not
+        // silently manufacture a DEVMODE that the driver never advertised.
+        auto existing = std::find_if(
+            modes.begin(),
+            modes.end(),
+            [&mode](const DisplayModeInfoV25& candidate)
+            {
+                return candidate.width == mode.width &&
+                    candidate.height == mode.height &&
+                    candidate.frequency == mode.frequency;
+            });
+
+        if (existing == modes.end())
         {
-            seen.insert(key);
-            DisplayModeInfoV25 mode;
-            mode.width = dm.dmPelsWidth;
-            mode.height = dm.dmPelsHeight;
-            mode.frequency = dm.dmDisplayFrequency;
-            mode.orientation = dm.dmDisplayOrientation;
-            mode.bits_per_pel = dm.dmBitsPerPel;
             modes.push_back(mode);
+        }
+        else if (existing->orientation != current_orientation &&
+                 mode.orientation == current_orientation)
+        {
+            *existing = mode;
         }
     }
     return modes;
@@ -215,18 +237,23 @@ bool DisplayServiceV25::SetDisplayMode(
     int orientation,
     std::string* error)
 {
-    DEVMODEW target = {0};
+    DEVMODEW target{};
     target.dmSize = sizeof(DEVMODEW);
     bool found = false;
 
-    DEVMODEW dm;
+    DEVMODEW dm{};
     dm.dmSize = sizeof(DEVMODEW);
     for (DWORD i = 0; EnumDisplaySettingsW(device_name.c_str(), i, &dm); ++i)
     {
         if (static_cast<int>(dm.dmPelsWidth) == width &&
             static_cast<int>(dm.dmPelsHeight) == height &&
-            (frequency == 0 || static_cast<int>(dm.dmDisplayFrequency) == frequency))
+            (frequency == 0 || static_cast<int>(dm.dmDisplayFrequency) == frequency) &&
+            static_cast<int>(dm.dmDisplayOrientation) == orientation)
         {
+            // Preserve the exact DEVMODE advertised by the display driver.
+            // Do not rewrite dmDisplayOrientation/dmFields after enumeration:
+            // doing so can create a width/height/orientation combination the
+            // driver never exposed and ChangeDisplaySettingsExW will reject it.
             target = dm;
             found = true;
             break;
@@ -235,52 +262,46 @@ bool DisplayServiceV25::SetDisplayMode(
 
     if (!found)
     {
-        if (error) *error = "Requested display mode is not supported by monitor hardware";
+        if (error)
+        {
+            *error = "Requested display mode/orientation combination is not advertised by the monitor driver";
+        }
         return false;
     }
 
-    target.dmDisplayOrientation = orientation;
-    target.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY | DM_DISPLAYORIENTATION;
-
-    // Test first
-    LONG test_res = ChangeDisplaySettingsExW(device_name.c_str(), &target, nullptr, CDS_TEST, nullptr);
-    LONG apply_res = DISP_CHANGE_FAILED;
-
-    if (test_res == DISP_CHANGE_SUCCESSFUL)
+    // Validate the exact driver-advertised mode before applying it. A failed
+    // CDS_TEST is authoritative: do not stage the same rejected mode through
+    // the registry as a fallback.
+    const LONG test_res =
+        ChangeDisplaySettingsExW(device_name.c_str(), &target, nullptr, CDS_TEST, nullptr);
+    if (test_res != DISP_CHANGE_SUCCESSFUL)
     {
-        apply_res = ChangeDisplaySettingsExW(device_name.c_str(), &target, nullptr, 0, nullptr);
-    }
-    else
-    {
-        // Try staging for multi-monitor setups
-        LONG stage_res = ChangeDisplaySettingsExW(
-            device_name.c_str(),
-            &target,
-            nullptr,
-            CDS_UPDATEREGISTRY | CDS_NORESET,
-            nullptr);
-        if (stage_res == DISP_CHANGE_SUCCESSFUL)
+        if (error)
         {
-            apply_res = ChangeDisplaySettingsExW(nullptr, nullptr, nullptr, 0, nullptr);
+            *error = "Display driver rejected advertised mode during validation (code: " +
+                std::to_string(test_res) + ")";
         }
-        else
-        {
-            apply_res = test_res;
-        }
+        return false;
     }
 
+    const LONG apply_res =
+        ChangeDisplaySettingsExW(device_name.c_str(), &target, nullptr, 0, nullptr);
     if (apply_res != DISP_CHANGE_SUCCESSFUL)
     {
-        if (error) *error = "Hardware or driver rejected display change (code: " + std::to_string(apply_res) + ")";
+        if (error)
+        {
+            *error = "Display driver rejected mode while applying it (code: " +
+                std::to_string(apply_res) + ")";
+        }
         return false;
     }
 
-    // Notify listeners
     JsonObject payload;
     payload["device"] = JsonValue(WStringToString(device_name));
-    payload["width"] = JsonValue(static_cast<double>(width));
-    payload["height"] = JsonValue(static_cast<double>(height));
+    payload["width"] = JsonValue(static_cast<double>(target.dmPelsWidth));
+    payload["height"] = JsonValue(static_cast<double>(target.dmPelsHeight));
     payload["frequency"] = JsonValue(static_cast<double>(target.dmDisplayFrequency));
+    payload["orientation"] = JsonValue(static_cast<double>(target.dmDisplayOrientation));
     EventBusV21::Instance().Publish("display.changed", payload);
 
     return true;
