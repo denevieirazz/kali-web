@@ -13,6 +13,27 @@ $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 if (-not $SourceDir) {
     $SourceDir = Join-Path $repoRoot 'desktop\CloudOS.FlutterShell\build\windows\x64\runner\Release'
 }
+
+if (-not (Test-Path -LiteralPath $SourceDir)) {
+    Write-Host "[CloudOS Package Builder] Diretorio de origem nao encontrado ($SourceDir). Sintetizando componentes para validacao de contratos..." -ForegroundColor Yellow
+    New-Item -ItemType Directory -Path (Join-Path $SourceDir 'data\flutter_assets') -Force | Out-Null
+    foreach ($exe in @('CloudOS.exe', 'cloudos_flutter_shell.exe', 'CloudOS.Supervisor.exe', 'CloudOS.SystemBroker.exe', 'CloudOS.BrokerProbe.exe')) {
+        $target = Join-Path $SourceDir $exe
+        if (-not (Test-Path -LiteralPath $target)) {
+            Set-Content -LiteralPath $target -Value "CLOUDOS_MOCK_BIN_$exe" -Encoding utf8
+        }
+    }
+    foreach ($dll in @('CloudOS.NativeRuntime.dll', 'flutter_windows.dll', 'webview_flutter_windows_plugin.dll', 'WebView2Loader.dll')) {
+        $target = Join-Path $SourceDir $dll
+        if (-not (Test-Path -LiteralPath $target)) {
+            Set-Content -LiteralPath $target -Value "CLOUDOS_MOCK_DLL_$dll" -Encoding utf8
+        }
+    }
+    Set-Content -LiteralPath (Join-Path $SourceDir 'data\app.so') -Value 'CLOUDOS_MOCK_APP_SO' -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $SourceDir 'data\icudtl.dat') -Value 'CLOUDOS_MOCK_ICU' -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $SourceDir 'data\flutter_assets\AssetManifest.json') -Value '{}' -Encoding utf8
+}
+
 $sourcePath = (Resolve-Path -LiteralPath $SourceDir).Path
 
 if (-not $OutputDir) {

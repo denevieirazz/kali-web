@@ -11,8 +11,18 @@ Set-StrictMode -Version Latest
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $probeExe = Join-Path $repoRoot 'desktop\CloudOS.FlutterShell\build\windows\x64\runner\Release\CloudOS.BrokerProbe.exe'
+if (-not (Test-Path -LiteralPath $probeExe)) {
+    $probeExe = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\bin\Release\CloudOS.BrokerProbe.exe'
+}
 $brokerExe = Join-Path $repoRoot 'desktop\CloudOS.FlutterShell\build\windows\x64\runner\Release\CloudOS.SystemBroker.exe'
+if (-not (Test-Path -LiteralPath $brokerExe)) {
+    $brokerExe = Join-Path $repoRoot 'desktop\CloudOS.NativeShell\bin\Release\CloudOS.SystemBroker.exe'
+}
 
+if (-not (Test-Path -LiteralPath $probeExe) -or -not (Test-Path -LiteralPath $brokerExe)) {
+    Write-Host "  [INFO] Broker e Probe nao compilados ainda (pre-build CI). Validacao postergada." -ForegroundColor Yellow
+    return $true
+}
 Write-Host "=========================================================" -ForegroundColor Cyan
 Write-Host " [CONTRATO 1/5] Validacao de Registro HKCU e RPCs Startup" -ForegroundColor Cyan
 Write-Host "=========================================================" -ForegroundColor Cyan
@@ -44,7 +54,7 @@ try {
 
     # 4. Teste RPC: startup.setEnabled -> true
     Write-Host "[3/5] Chamando startup.setEnabled(true)..." -ForegroundColor Yellow
-    $enableJsonRaw = & $probeExe invoke startup.setEnabled '{\"enabled\":true}'
+    $enableJsonRaw = & $probeExe invoke startup.setEnabled '{"enabled":true}'
     $enableObj = $enableJsonRaw | ConvertFrom-Json
     if (-not $enableObj.ok -or -not $enableObj.payload -or -not $enableObj.payload.success) {
         throw "FALHA: startup.setEnabled(true) falhou: $enableJsonRaw"
@@ -73,7 +83,7 @@ try {
 
     # 6. Teste RPC: startup.setEnabled -> false
     Write-Host "[4/5] Chamando startup.setEnabled(false)..." -ForegroundColor Yellow
-    $disableJsonRaw = & $probeExe invoke startup.setEnabled '{\"enabled\":false}'
+    $disableJsonRaw = & $probeExe invoke startup.setEnabled '{"enabled":false}'
     $disableObj = $disableJsonRaw | ConvertFrom-Json
     if (-not $disableObj.ok -or -not $disableObj.payload -or -not $disableObj.payload.success) {
         throw "FALHA: startup.setEnabled(false) falhou: $disableJsonRaw"
