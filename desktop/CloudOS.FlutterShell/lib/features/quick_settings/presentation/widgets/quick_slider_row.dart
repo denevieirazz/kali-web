@@ -9,6 +9,8 @@ class QuickSliderRow extends StatelessWidget {
     required this.value,
     required this.onChanged,
     this.onChangeEnd,
+    this.onIconTap,
+    this.iconTooltip,
     this.enabled = true,
     super.key,
   });
@@ -18,17 +20,35 @@ class QuickSliderRow extends StatelessWidget {
   final double value;
   final ValueChanged<double> onChanged;
   final ValueChanged<double>? onChangeEnd;
+  final VoidCallback? onIconTap;
+  final String? iconTooltip;
   final bool enabled;
 
   @override
   Widget build(BuildContext context) {
-    final contentColor =
-        enabled ? CloudOSColors.secondary : CloudOSColors.secondary.withValues(alpha: 0.45);
+    final contentColor = enabled
+        ? CloudOSColors.secondary
+        : CloudOSColors.secondary.withValues(alpha: 0.45);
+
+    Widget iconWidget = Icon(icon, size: 18, color: contentColor);
+    if (onIconTap != null) {
+      iconWidget = InkWell(
+        onTap: onIconTap,
+        borderRadius: BorderRadius.circular(6),
+        child: Padding(
+          padding: const EdgeInsets.all(3),
+          child: iconWidget,
+        ),
+      );
+      if (iconTooltip != null && iconTooltip!.isNotEmpty) {
+        iconWidget = Tooltip(message: iconTooltip!, child: iconWidget);
+      }
+    }
 
     return Row(
       children: <Widget>[
-        Icon(icon, size: 18, color: contentColor),
-        const SizedBox(width: 6),
+        SizedBox(width: 24, child: Center(child: iconWidget)),
+        const SizedBox(width: 4),
         Expanded(
           child: SliderTheme(
             data: SliderTheme.of(context).copyWith(
