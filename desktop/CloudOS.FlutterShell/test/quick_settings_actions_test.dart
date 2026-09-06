@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('Quick Settings routes are closed allowlisted app IDs', () {
+  test('Quick Settings routes are closed allowlisted CloudOS app IDs', () {
     expect(
       quickSettingsLaunchId(QuickSettingsRoute.root),
       'cloudos:settings',
@@ -28,7 +28,7 @@ void main() {
     );
   });
 
-  testWidgets('system tiles invoke real settings routes instead of fake toggles',
+  testWidgets('system tiles stay inside CloudOS and do not pretend false state',
       (tester) async {
     var root = 0;
     var wifi = 0;
@@ -53,9 +53,10 @@ void main() {
         ),
       ),
     );
+    await tester.pumpAndSettle();
 
     await tester.tap(find.byTooltip('Abrir Painel Completo'));
-    await tester.tap(find.text('Rede'));
+    await tester.tap(find.textContaining('Rede').first);
     await tester.tap(find.text('Bluetooth'));
     await tester.tap(find.text('Luz Noturna'));
     await tester.tap(find.text('Modo Foco'));
@@ -67,9 +68,8 @@ void main() {
     expect(nightLight, 1);
     expect(focus, 1);
 
-    // These tiles no longer pretend to own mutable Bluetooth/night-light/focus
-    // state; they are explicit navigation actions into the real Windows pages.
-    expect(find.text('Abrir dispositivos'), findsOneWidget);
-    expect(find.text('Abrir configuração'), findsNWidgets(2));
+    expect(find.text('Configurar no CloudOS'), findsNWidgets(2));
+    expect(find.textContaining('Abrir configuração'), findsNothing);
+    expect(find.textContaining('Abrir dispositivos'), findsNothing);
   });
 }
