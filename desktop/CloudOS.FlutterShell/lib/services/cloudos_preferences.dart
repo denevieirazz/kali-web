@@ -6,10 +6,11 @@ import 'package:flutter/material.dart';
 
 /// Central versioned user preferences for CloudOS.
 /// Handles desktop layout, pinning, recent apps, first run state,
-/// appearance and performance profile with atomic save and corruption recovery.
+/// appearance and performance profile with atomic save, schema migration,
+/// bounded backup rotation, and corrupt file quarantine.
 class CloudOSPreferences {
   CloudOSPreferences({
-    this.schemaVersion = 1,
+    this.schemaVersion = currentSchemaVersion,
     this.firstRunCompleted = false,
     this.appearanceTheme = 'auto',
     this.accentColorValue = 0xFF0078D4,
@@ -32,8 +33,9 @@ class CloudOSPreferences {
         recentAppIds = recentAppIds ?? <String>[],
         favoriteFolderPaths = favoriteFolderPaths ?? <String>[];
 
-  static const int currentSchemaVersion = 1;
+  static const int currentSchemaVersion = 2;
   static const int maxRecentApps = 10;
+  static const int maxBackups = 5;
 
   final int schemaVersion;
   bool firstRunCompleted;
@@ -81,7 +83,10 @@ class CloudOSPreferences {
   }
 
   void setIconPosition(String id, double x, double y) {
-    desktopIconPositions[id] = <double>[x, y];
+    desktopIconPositions[id] = <double>[
+      x.clamp(0.0, 10000.0),
+      y.clamp(0.0, 10000.0),
+    ];
   }
 
   void toggleFavoriteFolder(String path) {
@@ -112,6 +117,7 @@ class CloudOSPreferences {
   }
 
   static CloudOSPreferences fromJson(Map<String, dynamic> map) {
+    final rawSchema = (map['schemaVersion'] as num?)?.toInt() ?? 1;
     final positions = <String, List<double>>{};
     final rawPositions = map['desktopIconPositions'];
     if (rawPositions is Map) {
@@ -119,7 +125,7 @@ class CloudOSPreferences {
         if (entry.value is List) {
           final list = (entry.value as List)
               .whereType<num>()
-              .map((n) => n.toDouble())
+              .map((n) => n.toDouble().clamp(0.0, 10000.0))
               .toList(growable: false);
           if (list.length >= 2) {
             positions[entry.key.toString()] = list;
@@ -155,18 +161,33 @@ class CloudOSPreferences {
       }
     }
 
+    var theme = map['appearanceTheme'] as String? ?? 'auto';
+    if (!const <String>{'dark', 'light', 'auto'}.contains(theme)) {
+      theme = 'auto';
+    }
+
+    var profile = map['performanceProfile'] as String? ?? 'auto';
+    if (!const <String>{'auto', 'economy', 'balanced', 'performance'}.contains(profile)) {
+      profile = 'auto';
+    }
+
+    var viewMode = map['filesViewMode'] as String? ?? 'details';
+    if (!const <String>{'details', 'grid', 'list'}.contains(viewMode)) {
+      viewMode = 'details';
+    }
+
     return CloudOSPreferences(
-      schemaVersion: (map['schemaVersion'] as num?)?.toInt() ?? 1,
+      schemaVersion: rawSchema < currentSchemaVersion ? currentSchemaVersion : rawSchema,
       firstRunCompleted: map['firstRunCompleted'] as bool? ?? false,
-      appearanceTheme: map['appearanceTheme'] as String? ?? 'auto',
+      appearanceTheme: theme,
       accentColorValue: (map['accentColorValue'] as num?)?.toInt() ?? 0xFF0078D4,
-      performanceProfile: map['performanceProfile'] as String? ?? 'auto',
+      performanceProfile: profile,
       hardwareSummary: map['hardwareSummary'] as String? ?? '',
       desktopIconPositions: positions,
       pinnedAppIds: pinned.isEmpty ? null : pinned,
       recentAppIds: recent,
       favoriteFolderPaths: favorites,
-      filesViewMode: map['filesViewMode'] as String? ?? 'details',
+      filesViewMode: viewMode,
       startupEnabled: map['startupEnabled'] as bool? ?? true,
     );
   }
@@ -179,7 +200,7 @@ class CloudOSPreferences {
     return CloudOSPreferences.fromJson(Map<String, dynamic>.from(decoded));
   }
 
-  // --- File Storage with Atomic Write and Backup Recovery ---
+  // --- File Storage with Atomic Write, Quarantine, and Backup Rotation ---
   static File _getFile([String? explicitPath]) {
     if (explicitPath != null && explicitPath.isNotEmpty) {
       return File(explicitPath);
@@ -193,19 +214,35 @@ class CloudOSPreferences {
 
   static Future<CloudOSPreferences> load([String? explicitPath]) async {
     final file = _getFile(explicitPath);
-    final backup = File('${file.path}.bak');
+    final candidates = <File>[file, File('${file.path}.bak')];
+    for (var i = 1; i <= maxBackups; i++) {
+      candidates.add(File('${file.path}.backup.$i.json'));
+    }
 
-    for (final candidate in <File>[file, backup]) {
+    for (final candidate in candidates) {
       try {
         if (await candidate.exists()) {
           final content = await candidate.readAsString();
           final decoded = jsonDecode(content);
           if (decoded is Map) {
-            return CloudOSPreferences.fromJson(Map<String, dynamic>.from(decoded));
+            final rawMap = Map<String, dynamic>.from(decoded);
+            final oldSchema = (rawMap['schemaVersion'] as num?)?.toInt() ?? 1;
+            final prefs = CloudOSPreferences.fromJson(rawMap);
+            // If migrated from older schema, auto-save to current schema
+            if (oldSchema < currentSchemaVersion && candidate == file) {
+              unawaited(prefs.save(explicitPath));
+            }
+            return prefs;
           }
         }
       } on Object {
-        // Quarantine or skip corrupt file safely
+        // Quarantine corrupt candidate safely
+        try {
+          if (await candidate.exists() && candidate == file) {
+            final quarantinePath = '${file.path}.corrupt.${DateTime.now().millisecondsSinceEpoch}';
+            await candidate.rename(quarantinePath);
+          }
+        } on Object {}
       }
     }
     return CloudOSPreferences();
@@ -222,11 +259,24 @@ class CloudOSPreferences {
       final tmpFile = File('${file.path}.tmp');
       await tmpFile.writeAsString(jsonText, flush: true);
 
-      // Create backup of current valid file before overwrite
+      // Rotate bounded backups: backup.4 -> backup.5, ..., backup.1 -> backup.2
       if (await file.exists()) {
-        final backupFile = File('${file.path}.bak');
-        await file.copy(backupFile.path);
+        for (var i = maxBackups - 1; i >= 1; i--) {
+          final src = File('${file.path}.backup.$i.json');
+          final dst = File('${file.path}.backup.${i + 1}.json');
+          if (await src.exists()) {
+            try {
+              await src.copy(dst.path);
+            } on Object {}
+          }
+        }
+        // Copy current valid file to backup.1 and .bak
+        try {
+          await file.copy('${file.path}.backup.1.json');
+          await file.copy('${file.path}.bak');
+        } on Object {}
       }
+
       await tmpFile.rename(file.path);
     } on Object {
       // Writing preferences must never crash caller
