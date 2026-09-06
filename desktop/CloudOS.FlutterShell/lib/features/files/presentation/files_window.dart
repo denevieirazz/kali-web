@@ -434,6 +434,28 @@ class _FilesWindowState extends State<FilesWindow> {
     );
   }
 
+  static const _reservedNames = <String>{
+    'CON', 'PRN', 'AUX', 'NUL',
+    'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
+    'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9',
+  };
+
+  static String? _validateFileName(String name) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return 'O nome não pode ser vazio.';
+    if (trimmed.endsWith('.') || trimmed.endsWith(' ')) {
+      return 'Nomes de arquivo no Windows não podem terminar com ponto ou espaço.';
+    }
+    final baseName = trimmed.split('.').first.toUpperCase();
+    if (_reservedNames.contains(baseName)) {
+      return 'O nome "$baseName" é uma palavra reservada do sistema Windows.';
+    }
+    if (RegExp(r'[<>:"/\\|?*]').hasMatch(trimmed)) {
+      return 'Caracteres não permitidos: < > : " / \\ | ? *';
+    }
+    return null;
+  }
+
   // --- Actions ---
 
   Future<void> _createFolderDialog() async {
@@ -471,6 +493,18 @@ class _FilesWindowState extends State<FilesWindow> {
     );
 
     if (name != null && name.isNotEmpty) {
+      final valErr = _validateFileName(name);
+      if (valErr != null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: CloudOSColors.danger,
+              content: Text(valErr),
+            ),
+          );
+        }
+        return;
+      }
       final currentEntryId = _current.entryId ?? _current.rootId ?? 'home';
       final created = await widget.bridge.createFolder(currentEntryId, name);
       if (created != null) {
@@ -583,6 +617,18 @@ class _FilesWindowState extends State<FilesWindow> {
     );
 
     if (newName != null && newName.isNotEmpty && newName != item.name) {
+      final valErr = _validateFileName(newName);
+      if (valErr != null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: CloudOSColors.danger,
+              content: Text(valErr),
+            ),
+          );
+        }
+        return;
+      }
       final renamed = await widget.bridge.renameFile(item.entryId ?? item.path, newName);
       if (renamed != null) {
         _refresh();

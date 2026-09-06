@@ -49,6 +49,12 @@ class _TaskManagerWindowState extends State<TaskManagerWindow> {
     'explorer.exe',
     'dwm',
     'dwm.exe',
+    'cloudos.supervisor',
+    'cloudos.supervisor.exe',
+    'cloudos.systembroker',
+    'cloudos.systembroker.exe',
+    'cloudos.recovery',
+    'cloudos.recovery.exe',
   };
 
   bool _isCriticalProcess(StartRunningApp app) {
