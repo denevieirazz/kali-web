@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../core/cloudos_theme.dart';
+import '../../../core/cloudos_version.dart';
 import '../../../models/cloud_system_snapshot.dart';
 import '../../../services/cloudos_bridge.dart';
 import '../../../services/cloudos_preferences.dart';
@@ -554,23 +555,23 @@ class _SettingsWindowState extends State<SettingsWindow> {
               InkWell(
                 onTap: () => setState(() => _activeSection = SettingsSection.personalization),
                 borderRadius: BorderRadius.circular(8),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8, horizontal: 4),
                   child: Row(
                     children: <Widget>[
-                      const Icon(Icons.palette_rounded, color: CloudOSColors.accent, size: 22),
-                      const SizedBox(width: 14),
+                      Icon(Icons.palette_rounded, color: CloudOSColors.accent, size: 22),
+                      SizedBox(width: 14),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
-                          children: const <Widget>[
+                          children: <Widget>[
                             Text('Personalizar Tema e Cores', style: TextStyle(color: CloudOSColors.text, fontSize: 13, fontWeight: FontWeight.w600)),
                             SizedBox(height: 2),
                             Text('Alternar modo escuro/claro e cores de destaque', style: TextStyle(color: CloudOSColors.caption, fontSize: 11)),
                           ],
                         ),
                       ),
-                      const Icon(Icons.chevron_right_rounded, color: CloudOSColors.caption, size: 18),
+                      Icon(Icons.chevron_right_rounded, color: CloudOSColors.caption, size: 18),
                     ],
                   ),
                 ),
@@ -579,23 +580,23 @@ class _SettingsWindowState extends State<SettingsWindow> {
               InkWell(
                 onTap: () => setState(() => _activeSection = SettingsSection.about),
                 borderRadius: BorderRadius.circular(8),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8, horizontal: 4),
                   child: Row(
                     children: <Widget>[
-                      const Icon(Icons.info_outline_rounded, color: CloudOSColors.secondary, size: 22),
-                      const SizedBox(width: 14),
+                      Icon(Icons.info_outline_rounded, color: CloudOSColors.secondary, size: 22),
+                      SizedBox(width: 14),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
-                          children: const <Widget>[
+                          children: <Widget>[
                             Text('Sobre o CloudOS & Exportar Configurações', style: TextStyle(color: CloudOSColors.text, fontSize: 13, fontWeight: FontWeight.w600)),
                             SizedBox(height: 2),
                             Text('Informações de versão, arquitetura e backup de preferências', style: TextStyle(color: CloudOSColors.caption, fontSize: 11)),
                           ],
                         ),
                       ),
-                      const Icon(Icons.chevron_right_rounded, color: CloudOSColors.caption, size: 18),
+                      Icon(Icons.chevron_right_rounded, color: CloudOSColors.caption, size: 18),
                     ],
                   ),
                 ),
@@ -1787,13 +1788,13 @@ class _SettingsWindowState extends State<SettingsWindow> {
           child: const Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              _DetailRow(label: 'CloudOS Versão', value: '21.0.0 (Stage 8.5)'),
-              _DetailRow(label: 'Git Commit SHA', value: '1d6cfd03 (System UI Ownership Verified)'),
-              _DetailRow(label: 'Protocolo IPC Broker', value: 'Named Pipe v21 (Fail-Closed DACL)'),
-              _DetailRow(label: 'Supervisor Protocol', value: 'V11 Watchdog Active'),
-              _DetailRow(label: 'Flutter Embedder', value: 'Flutter 3.x Windows Runner'),
-              _DetailRow(label: 'ConPTY Engine', value: 'Windows Pseudoconsole API'),
-              _DetailRow(label: 'WebView2 Integration', value: 'Microsoft Edge Evergreen Runtime'),
+              const _DetailRow(label: 'CloudOS Versão', value: '${CloudOSVersion.productVersion} (${CloudOSVersion.releaseName})'),
+              const _DetailRow(label: 'Git Commit SHA', value: '${CloudOSVersion.gitSha} (RC1.1 Release Engineering)'),
+              const _DetailRow(label: 'Protocolo IPC Broker', value: 'Named Pipe v21 (Fail-Closed DACL)'),
+              const _DetailRow(label: 'Supervisor Protocol', value: 'V11 Watchdog Active'),
+              const _DetailRow(label: 'Flutter Embedder', value: 'Flutter 3.x Windows Runner'),
+              const _DetailRow(label: 'ConPTY Engine', value: 'Windows Pseudoconsole API'),
+              const _DetailRow(label: 'WebView2 Integration', value: 'Microsoft Edge Evergreen Runtime'),
             ],
           ),
         ),
@@ -1829,8 +1830,8 @@ class _SettingsWindowState extends State<SettingsWindow> {
 CloudOS Diagnostics Report (Sanitized)
 --------------------------------------
 Timestamp: ${DateTime.now().toIso8601String()}
-Version: 21.0.0 Stage 8.5
-Git SHA: 1d6cfd03
+Version: ${CloudOSVersion.productVersion} (${CloudOSVersion.releaseName})
+Git SHA: ${CloudOSVersion.gitSha}
 Broker IPC: NamedPipe v21 (DACL protected)
 Supervisor: V11 Active
 Performance Profile: ${_performanceProfile.profile}
@@ -1870,7 +1871,7 @@ Safe Mode: ${_recoveryStatus?.isSafeMode ?? false}
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text('CloudOS Desktop', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white)),
-                Text('Versão 1.0.0-rc1 • Release Candidate 1 (Build RC1)', style: TextStyle(fontSize: 12.5, color: CloudOSColors.caption)),
+                Text('Versão ${CloudOSVersion.productVersion} • ${CloudOSVersion.releaseName} (Build ${CloudOSVersion.buildNumber})', style: TextStyle(fontSize: 12.5, color: CloudOSColors.caption)),
               ],
             ),
           ],

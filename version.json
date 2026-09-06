@@ -1,11 +1,14 @@
 {
   "productName": "CloudOS",
-  "productVersion": "21.0.0",
-  "build": 29,
-  "gitSha": "c0836754834595cc51721ec345e92dc1c216a51c",
+  "productVersion": "21.0.0-rc.1.1",
+  "semanticVersion": "21.0.0-rc.1.1",
+  "buildNumber": 32,
+  "build": 32,
+  "gitSha": "9d5d2af84be9a46274ee22bec0f68d10e0a3904c",
   "protocolVersion": 21,
   "architecture": "x64",
-  "channel": "stable",
-  "minWindowsBuild": 19041,
-  "releaseDate": "2026-09-05T18:15:00Z"
+  "buildDate": "2026-09-05T22:00:00Z",
+  "releaseChannel": "rc",
+  "releaseName": "Release Candidate 1.1",
+  "minWindowsBuild": 19041
 }
