@@ -1,0 +1,20 @@
+{
+  "$schema": "https://cloudos.local/schemas/update-feed-v1.json",
+  "product": "CloudOS",
+  "channel": "rc",
+  "updatedAt": "2026-09-05T22:00:00Z",
+  "releases": [
+    {
+      "version": "21.0.0-rc.1.1",
+      "build": 32,
+      "releaseDate": "2026-09-05T22:00:00Z",
+      "channel": "rc",
+      "minWindowsBuild": 19041,
+      "installerFileName": "CloudOS-Setup-21.0.0-rc.1.1-x64.exe",
+      "installerUrl": "https://github.com/doug-cloud/CloudOS/releases/download/v21.0.0-rc.1.1/CloudOS-Setup-21.0.0-rc.1.1-x64.exe",
+      "sha256": "TBD_AT_BUILD",
+      "mandatory": false,
+      "releaseNotes": "CloudOS Release Candidate 1.1: Release Engineering pass with real Inno Setup installer, hardened atomic updater, schema v2 preferences, and crash protection."
+    }
+  ]
+}

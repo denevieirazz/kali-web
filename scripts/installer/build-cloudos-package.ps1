@@ -146,11 +146,13 @@ foreach ($file in $allFiles) {
     $totalBytes += $file.Length
 }
 
+$resolvedBuild = if ($versionData.PSObject.Properties['build']) { [int]$versionData.build } elseif ($versionData.PSObject.Properties['buildNumber']) { [int]$versionData.buildNumber } else { 32 }
+
 $packageManifest = [ordered]@{
     schema           = 1
     product          = 'CloudOS Canonical Distribution Package'
     version          = [string]$versionData.productVersion
-    build            = [int]$versionData.build
+    build            = $resolvedBuild
     gitSha           = [string]$versionData.gitSha
     protocolVersion  = [int]$versionData.protocolVersion
     architecture     = [string]$versionData.architecture

@@ -2,7 +2,7 @@
 ; Suporta instalacao per-user (sem UAC) ou per-machine, verificacao de dependencias, atalhos e desinstalacao limpa.
 
 #define MyAppName "CloudOS"
-#define MyAppVersion "21.0.0"
+#define MyAppVersion "21.0.0-rc.1.1"
 #define MyAppPublisher "CloudOS"
 #define MyAppExeName "CloudOS.exe"
 #define MyAppSourcePath "..\..\dist\CloudOS"
@@ -17,8 +17,8 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
-OutputDir=..\..\dist
-OutputBaseFilename=CloudOS-Setup-v{#MyAppVersion}
+OutputDir=..\..\dist\releases\21.0.0-rc.1.1
+OutputBaseFilename=CloudOS-Setup-21.0.0-rc.1.1-x64
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -93,5 +93,46 @@ begin
   begin
     MsgBox('Avisos de compatibilidade do CloudOS:' + #13#10#13#10 + WarnMsg + #13#10 +
            'A instalacao continuara normalmente.', mbInformation, MB_OK);
+  end;
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  SelectedDir: String;
+  WinDir: String;
+  SysDir: String;
+  TempDir: String;
+begin
+  Result := True;
+  if CurPageID = wpSelectDir then
+  begin
+    SelectedDir := Uppercase(RemoveBackslashUnlessRoot(WizardDirValue));
+    WinDir := Uppercase(RemoveBackslashUnlessRoot(ExpandConstant('{win}')));
+    SysDir := Uppercase(RemoveBackslashUnlessRoot(ExpandConstant('{sys}')));
+    TempDir := Uppercase(RemoveBackslashUnlessRoot(ExpandConstant('{tmp}')));
+
+    // Bloquear raiz de volume (ex: C:, C:\)
+    if (Length(SelectedDir) <= 3) and (Pos(':', SelectedDir) = 2) then
+    begin
+      MsgBox('O CloudOS nao pode ser instalado diretamente na raiz do disco. Escolha uma subpasta valida.', mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
+
+    // Bloquear pasta do Windows e System32
+    if (Pos(WinDir, SelectedDir) = 1) or (Pos(SysDir, SelectedDir) = 1) then
+    begin
+      MsgBox('O CloudOS nao pode ser instalado dentro do diretorio do Windows. Escolha outro diretorio.', mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
+
+    // Bloquear diretorio temporario
+    if Pos(TempDir, SelectedDir) = 1 then
+    begin
+      MsgBox('O CloudOS nao pode ser instalado em uma pasta temporaria. Escolha um diretorio definitivo.', mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
   end;
 end;
