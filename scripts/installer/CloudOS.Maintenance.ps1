@@ -529,6 +529,14 @@ function Invoke-Update {
         throw "UPDATE_REJECTED: Incompatibilidade de protocolo: atual=$($currentVersion.protocolVersion), novo=$($newVersion.protocolVersion)."
     }
 
+    if ($currentVersion -and (-not $Force)) {
+        $curBuild = if ($currentVersion.PSObject.Properties['buildNumber']) { [int]$currentVersion.buildNumber } elseif ($currentVersion.PSObject.Properties['build']) { [int]$currentVersion.build } else { 0 }
+        $newBuild = if ($newVersion.PSObject.Properties['build']) { [int]$newVersion.build } elseif ($newVersion.PSObject.Properties['buildNumber']) { [int]$newVersion.buildNumber } else { 0 }
+        if ($curBuild -gt 0 -and $newBuild -gt 0 -and $newBuild -lt $curBuild) {
+            throw "UPDATE_REJECTED: Tentativa de downgrade da build $curBuild para $newBuild. Use -Force se intencional."
+        }
+    }
+
     Log-Message "Validacao do pacote de atualizacao APROVADA: Versao $($newVersion.version) (Build $($newVersion.build))." "Green"
 
     # 2. Criar pastas de Staging e Backup
