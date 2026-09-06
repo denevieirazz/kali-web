@@ -44,10 +44,16 @@ if (-not $weslAvailable) {
 }
 
 # 3. Validar aplicabilidade da politica CustomShell (WinLogon.admx)
-Write-Host "[3/4] Validando mecanismo CustomShell policy para Windows 11 Pro..." -ForegroundColor Yellow
+Write-Host "[3/4] Validando mecanismo CustomShell policy para edicoes compativel..." -ForegroundColor Yellow
+$supportedEditions = @(
+    'Professional', 'Enterprise', 'Education', 'IoTEnterprise',
+    'ServerDatacenter', 'ServerStandard', 'ServerAzureStackHCIDatacenter'
+)
+$isSupported = ($editionId -in $supportedEditions) -or ($editionId -like 'Server*')
+
 $mechanism = if ($weslAvailable) {
     'ShellLauncher'
-} elseif ($editionId -in @('Professional', 'Enterprise', 'Education', 'IoTEnterprise')) {
+} elseif ($isSupported) {
     'CustomShellPolicy'
 } else {
     'Unsupported'
@@ -55,7 +61,7 @@ $mechanism = if ($weslAvailable) {
 
 Write-Host "  Mecanismo Selecionado: $mechanism"
 if ($mechanism -ne 'CustomShellPolicy') {
-    throw "Mecanismo inesperado para Windows 11 Pro: $mechanism"
+    throw "Mecanismo inesperado para edicao detectada ($editionId): $mechanism"
 }
 Write-Host "  [OK] CustomShellPolicy mapeado em conformidade com WinLogon.admx (Policy CSP - ADMX_WinLogon)." -ForegroundColor Green
 

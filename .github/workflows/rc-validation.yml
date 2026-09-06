@@ -37,6 +37,10 @@ jobs:
         run: |
           pwsh -NoProfile -File scripts/safety/assert-gate0.ps1
 
+      - name: Build integrated NativeShell binaries
+        shell: cmd
+        run: scripts\native\build-cloudos-native.cmd Release
+
       - name: Run Native Contract Suite (49 contracts)
         shell: pwsh
         run: |
@@ -61,5 +65,6 @@ jobs:
         shell: pwsh
         working-directory: desktop/CloudOS.FlutterShell
         run: |
+          flutter pub get
           flutter analyze
           flutter test
