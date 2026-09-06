@@ -60,6 +60,14 @@ echo [CloudOS] Compilando CloudOS.BrokerProbe V21 %CONFIG% x64...
 "%MSBUILD%" "%ROOT%\desktop\CloudOS.BrokerProbe\CloudOS.BrokerProbe.vcxproj" /m /nologo /v:minimal /p:Configuration=%CONFIG% /p:Platform=%PLATFORM%
 if errorlevel 1 exit /b %ERRORLEVEL%
 
+echo [CloudOS] Compilando CloudOS.ShellBootstrap %CONFIG% x64...
+"%MSBUILD%" "%ROOT%\desktop\CloudOS.NativeShellBootstrap\CloudOS.ShellBootstrap.vcxproj" /m /nologo /v:minimal /p:Configuration=%CONFIG% /p:Platform=%PLATFORM%
+if errorlevel 1 exit /b %ERRORLEVEL%
+
+echo [CloudOS] Compilando CloudOS.Recovery %CONFIG% x64...
+"%MSBUILD%" "%ROOT%\desktop\CloudOS.NativeRecoveryTool\CloudOS.RecoveryTool.vcxproj" /m /nologo /v:minimal /p:Configuration=%CONFIG% /p:Platform=%PLATFORM%
+if errorlevel 1 exit /b %ERRORLEVEL%
+
 set "OUT=%ROOT%\desktop\CloudOS.NativeShell\bin\%CONFIG%"
 set "MANIFEST=%OUT%\cloudos-native-manifest.json"
 set "FINGERPRINT_STAMP=%OUT%\.cloudos-build-fingerprint"

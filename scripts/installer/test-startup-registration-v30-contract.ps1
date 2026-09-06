@@ -44,7 +44,7 @@ try {
 
     # 4. Teste RPC: startup.setEnabled -> true
     Write-Host "[3/5] Chamando startup.setEnabled(true)..." -ForegroundColor Yellow
-    $enableJsonRaw = & $probeExe invoke startup.setEnabled '{"enabled":true}'
+    $enableJsonRaw = & $probeExe invoke startup.setEnabled '{\"enabled\":true}'
     $enableObj = $enableJsonRaw | ConvertFrom-Json
     if (-not $enableObj.ok -or -not $enableObj.payload -or -not $enableObj.payload.success) {
         throw "FALHA: startup.setEnabled(true) falhou: $enableJsonRaw"
@@ -58,10 +58,10 @@ try {
     if ($regVal -notmatch '-Startup') {
         throw "FALHA: Comando de startup nao contem o parametro '-Startup': $regVal"
     }
-    if ($regVal -notmatch 'powershell\.exe' -or $regVal -notmatch '-WindowStyle Hidden') {
-        throw "FALHA: Comando de startup nao possui a sintaxe oculta esperada: $regVal"
+    if ($regVal -notmatch 'CloudOS\.exe') {
+        throw "FALHA: Comando de startup nao aponta para o CloudOS.exe nativo: $regVal"
     }
-    Write-Host "  [OK] Registro HKCU\Run\CloudOS verificado: $regVal" -ForegroundColor Green
+    Write-Host "  [OK] Registro HKCU\Run\CloudOS verificado com launcher nativo: $regVal" -ForegroundColor Green
 
     # 5. Teste RPC: startup.getStatus confirmando ativado
     $statusJsonRaw2 = & $probeExe invoke startup.getStatus '{}'
@@ -73,7 +73,7 @@ try {
 
     # 6. Teste RPC: startup.setEnabled -> false
     Write-Host "[4/5] Chamando startup.setEnabled(false)..." -ForegroundColor Yellow
-    $disableJsonRaw = & $probeExe invoke startup.setEnabled '{"enabled":false}'
+    $disableJsonRaw = & $probeExe invoke startup.setEnabled '{\"enabled\":false}'
     $disableObj = $disableJsonRaw | ConvertFrom-Json
     if (-not $disableObj.ok -or -not $disableObj.payload -or -not $disableObj.payload.success) {
         throw "FALHA: startup.setEnabled(false) falhou: $disableJsonRaw"

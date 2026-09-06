@@ -311,8 +311,8 @@ function Invoke-Install {
         $startMenuDir = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
         $startLnk = Join-Path $startMenuDir 'CloudOS.lnk'
         $shortcut = $wsh.CreateShortcut($startLnk)
-        $shortcut.TargetPath = 'powershell.exe'
-        $shortcut.Arguments = "-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `"$startScript`""
+        $shortcut.TargetPath = $mainExe
+        $shortcut.Arguments = ""
         $shortcut.WorkingDirectory = $TargetLocation
         $shortcut.IconLocation = "$mainExe,0"
         $shortcut.Description = 'CloudOS Desktop'
@@ -324,8 +324,8 @@ function Invoke-Install {
         $desktopDir = [Environment]::GetFolderPath('Desktop')
         $deskLnk = Join-Path $desktopDir 'CloudOS.lnk'
         $shortcut = $wsh.CreateShortcut($deskLnk)
-        $shortcut.TargetPath = 'powershell.exe'
-        $shortcut.Arguments = "-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `"$startScript`""
+        $shortcut.TargetPath = $mainExe
+        $shortcut.Arguments = ""
         $shortcut.WorkingDirectory = $TargetLocation
         $shortcut.IconLocation = "$mainExe,0"
         $shortcut.Description = 'CloudOS Desktop'
@@ -336,7 +336,7 @@ function Invoke-Install {
     # Registro de Inicializacao Automatica (HKCU\Run - Per-User Seguro)
     $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
     if ($ConfigureStartup) {
-        $startupCmd = "powershell.exe -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `"$startScript`" -Startup"
+        $startupCmd = "`"$mainExe`" --startup"
         Set-ItemProperty -Path $runKey -Name 'CloudOS' -Value $startupCmd
         Log-Message "Inicializacao automatica registrada em HKCU\Run: $startupCmd" "Green"
     }
@@ -397,11 +397,11 @@ function Invoke-Repair {
     $existingStartup = (Get-ItemProperty -Path $runKey -ErrorAction SilentlyContinue) | Select-Object -ExpandProperty 'CloudOS' -ErrorAction SilentlyContinue
     $registryRepaired = $false
     if ($existingStartup) {
-        $startScript = Join-Path $TargetLocation 'start-cloudos-v21-integrated.ps1'
-        $expectedCmd = "powershell.exe -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `"$startScript`" -Startup"
+        $mainExe = Join-Path $TargetLocation 'CloudOS.exe'
+        $expectedCmd = "`"$mainExe`" --startup"
         if ($existingStartup -ne $expectedCmd) {
             Set-ItemProperty -Path $runKey -Name 'CloudOS' -Value $expectedCmd
-            Log-Message "Entrada de startup em HKCU\Run reparada para apontar para o script valido." "Green"
+            Log-Message "Entrada de startup em HKCU\Run reparada para apontar para o CloudOS.exe nativo." "Green"
             $registryRepaired = $true
         }
     }

@@ -264,10 +264,22 @@ int main(int argc, char* argv[])
         req.method = argv[2];
         if (argc > 3)
         {
+            std::string arg_str = argv[3];
             CloudOS::JsonValue parsed;
-            if (CloudOS::ParseJson(argv[3], parsed) && parsed.IsObject())
+            if (CloudOS::ParseJson(arg_str, parsed) && parsed.IsObject())
             {
                 req.payload = parsed.AsObject();
+            }
+            else
+            {
+                if (arg_str.find("enabled:false") != std::string::npos)
+                {
+                    req.payload["enabled"] = CloudOS::JsonValue(false);
+                }
+                else if (arg_str.find("enabled:true") != std::string::npos)
+                {
+                    req.payload["enabled"] = CloudOS::JsonValue(true);
+                }
             }
         }
     }

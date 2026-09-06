@@ -310,18 +310,27 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR lpCmdLine, int)
         return 0;
     }
 
+    const bool isStartup = (cmdLine.find(L"--startup") != std::wstring::npos);
+
     const DWORD sessionId = GetCurrentSessionId();
     const std::wstring mutexName = L"Local\\CloudOS_ShellBootstrap_Session_" + std::to_wstring(sessionId);
     HANDLE hMutex = CreateMutexW(nullptr, TRUE, mutexName.c_str());
     if (GetLastError() == ERROR_ALREADY_EXISTS)
     {
+        HWND hwndFlutter = FindWindowW(L"FLUTTER_RUNNER_WIN32_WINDOW", nullptr);
+        if (hwndFlutter)
+        {
+            ShowWindow(hwndFlutter, SW_MAXIMIZE);
+            BringWindowToTop(hwndFlutter);
+            SetForegroundWindow(hwndFlutter);
+        }
         if (hMutex) CloseHandle(hMutex);
         LogEvent(L"Another instance of CloudOS.ShellBootstrap is already running in this session. Exiting.");
         return 0;
     }
 
     LogEvent(L"CloudOS.ShellBootstrap started. Session: " + std::to_wstring(sessionId) +
-             (isCanary ? L" (CANARY MODE)" : L" (PRODUCTION SHELL MODE)"));
+             (isCanary ? L" (CANARY MODE)" : (isStartup ? L" (STARTUP MODE)" : L" (PRODUCTION SHELL MODE)")));
 
     // 1. Crash Budget Check
     if (!isCanary && CheckCrashBudgetExceeded())
@@ -430,6 +439,13 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR lpCmdLine, int)
 
     LogEvent(L"All CloudOS Shell components are HEALTHY and ACTIVE!");
     ClearCrashHistory();
+
+    // Preserve NativeShell as background/typed authority while hiding legacy C++ surfaces
+    // so Flutter presentation shell remains the sole visual desktop interface
+    HWND hwndTaskbar = FindWindowW(L"CloudOS.NativeShell.Taskbar.v3", nullptr);
+    if (hwndTaskbar) ShowWindow(hwndTaskbar, SW_HIDE);
+    HWND hwndDesktop = FindWindowW(L"CloudOS.NativeShell.Desktop", nullptr);
+    if (hwndDesktop) ShowWindow(hwndDesktop, SW_HIDE);
 
     PersistBootstrapState(
         isCanary ? "CLOUDOS_CANARY" : "CLOUDOS_ACTIVE",

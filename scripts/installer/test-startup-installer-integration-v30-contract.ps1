@@ -48,8 +48,8 @@ try {
     & $maintScript -Action repair -InstallDir $testInstallDir -PackageDir $distDir
 
     $repairedRun = (Get-ItemProperty -Path $runKey -ErrorAction SilentlyContinue) | Select-Object -ExpandProperty 'CloudOS' -ErrorAction SilentlyContinue
-    $expectedScript = Join-Path $testInstallDir 'start-cloudos-v21-integrated.ps1'
-    if ($repairedRun -notmatch [regex]::Escape($expectedScript)) {
+    $expectedExe = Join-Path $testInstallDir 'CloudOS.exe'
+    if ($repairedRun -notmatch [regex]::Escape($expectedExe)) {
         throw "FALHA: Repair nao corrigiu o caminho adulterado de startup: $repairedRun"
     }
     Write-Host "  [OK] Repair detectou e corrigiu o registro de startup com sucesso." -ForegroundColor Green

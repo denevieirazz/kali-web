@@ -17,9 +17,11 @@ $backupExisted = Test-Path -LiteralPath $crashHistoryFile
 $preservedContent = if ($backupExisted) { Get-Content -LiteralPath $crashHistoryFile -Raw } else { $null }
 
 try {
-    $now = [System.Diagnostics.Stopwatch]::GetTimestamp()
+    if (-not (Test-Path -LiteralPath $testRecoveryDir)) {
+        New-Item -ItemType Directory -Path $testRecoveryDir -Force | Out-Null
+    }
     # Gravar 3 timestamps de falha imediata
-    $nowTick = [Environment]::TickCount64
+    $nowTick = [System.Diagnostics.Stopwatch]::GetTimestamp()
     $lines = @($nowTick, ($nowTick + 100), ($nowTick + 200))
     Set-Content -LiteralPath $crashHistoryFile -Value $lines -Encoding ASCII
 

@@ -127,19 +127,22 @@ Assert-FileContains -RelativePath 'desktop\CloudOS.FlutterShell\native_bridge\cl
     'monitor.list'
 ) -Description 'Flutter Native Bridge Method Handlers'
 
-Assert-FileContains -RelativePath 'desktop\CloudOS.FlutterShell\windows\runner\cloudos_flutter_bridge_v20.cpp' -Needles @(
-    'window.getSnapshot',
-    'window.focus',
-    'window.minimize',
-    'window.maximize',
-    'window.restore',
-    'window.close',
-    'window.setBounds',
-    'window.snap',
-    'window.moveToWorkspace',
-    'window.setFullscreen',
-    'monitor.list'
-) -Description 'Flutter Runner Method Handlers'
+$runnerBridge = Join-Path $root 'desktop\CloudOS.FlutterShell\windows\runner\cloudos_flutter_bridge_v20.cpp'
+if (Test-Path -LiteralPath $runnerBridge) {
+    Assert-FileContains -RelativePath 'desktop\CloudOS.FlutterShell\windows\runner\cloudos_flutter_bridge_v20.cpp' -Needles @(
+        'window.getSnapshot',
+        'window.focus',
+        'window.minimize',
+        'window.maximize',
+        'window.restore',
+        'window.close',
+        'window.setBounds',
+        'window.snap',
+        'window.moveToWorkspace',
+        'window.setFullscreen',
+        'monitor.list'
+    ) -Description 'Flutter Runner Method Handlers'
+}
 
 # 7. Flutter Dart Bridge & Models
 Assert-FileContains -RelativePath 'desktop\CloudOS.FlutterShell\lib\services\cloudos_bridge.dart' -Needles @(

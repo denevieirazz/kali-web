@@ -21,6 +21,38 @@ namespace
 namespace fs = std::filesystem;
 constexpr std::size_t kMaxItems = 25000;
 
+bool IsReservedDeviceName(const std::string& name)
+{
+    std::string base = name;
+    size_t dot = base.find('.');
+    if (dot != std::string::npos)
+    {
+        base = base.substr(0, dot);
+    }
+    while (!base.empty() && (base.back() == ' ' || base.back() == '.'))
+    {
+        base.pop_back();
+    }
+    if (base.empty()) return false;
+
+    std::string upper = base;
+    for (char& c : upper) c = static_cast<char>(::toupper(static_cast<unsigned char>(c)));
+
+    if (upper == "CON" || upper == "PRN" || upper == "AUX" || upper == "NUL")
+    {
+        return true;
+    }
+    if (upper.size() == 4)
+    {
+        if ((upper.rfind("COM", 0) == 0 || upper.rfind("LPT", 0) == 0) &&
+            upper[3] >= '1' && upper[3] <= '9')
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 std::string WideToUtf8(const std::wstring& value)
 {
     if (value.empty()) return {};
@@ -614,9 +646,10 @@ bool FileServiceV21::CreateFolder(
     }
 
     if (name.empty() || name.find('\\') != std::string::npos || name.find('/') != std::string::npos ||
-        name == "." || name == ".." || name.find_first_of("<>:\"|?*") != std::string::npos)
+        name == "." || name == ".." || name.find_first_of("<>:\"|?*") != std::string::npos ||
+        IsReservedDeviceName(name))
     {
-        error = "Nome de pasta inválido";
+        error = "Nome de pasta inválido ou reservado pelo sistema";
         return false;
     }
 
@@ -664,9 +697,10 @@ bool FileServiceV21::RenameItem(
     }
 
     if (new_name.empty() || new_name.find('\\') != std::string::npos || new_name.find('/') != std::string::npos ||
-        new_name == "." || new_name == ".." || new_name.find_first_of("<>:\"|?*") != std::string::npos)
+        new_name == "." || new_name == ".." || new_name.find_first_of("<>:\"|?*") != std::string::npos ||
+        IsReservedDeviceName(new_name))
     {
-        error = "Novo nome inválido";
+        error = "Novo nome inválido ou reservado pelo sistema";
         return false;
     }
 

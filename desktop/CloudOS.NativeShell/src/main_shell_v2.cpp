@@ -9,6 +9,8 @@
 
 #include <memory>
 #include <vector>
+#include <string>
+#include <filesystem>
 
 #include "native_app_launcher.h"
 #include "native_desktop_surface.h"
@@ -832,12 +834,67 @@ private:
 int WINAPI wWinMain(
     HINSTANCE instance,
     HINSTANCE,
-    PWSTR,
+    PWSTR cmd_line,
     int)
 {
     if (CloudOS::NativeWatchdog::IsWatchdogInvocation())
     {
         return CloudOS::NativeWatchdog::RunWatchdogInvocation();
+    }
+
+    const std::wstring cmd(cmd_line ? cmd_line : L"");
+    const bool is_supervised = (cmd.find(L"--supervised") != std::wstring::npos);
+    const bool is_probe = (cmd.find(L"--stability-probe") != std::wstring::npos);
+    const bool is_native_only = (cmd.find(L"--native-only") != std::wstring::npos);
+
+    // If invoked directly by user/shortcuts without supervisor/probe/native-only, act as production launcher:
+    // 1. Focus existing Flutter window if already running (sub-millisecond instant activate)
+    // 2. Or silently dispatch to CloudOS.ShellBootstrap.exe (Windows GUI subsystem)
+    if (!is_supervised && !is_probe && !is_native_only)
+    {
+        HWND existingFlutter = FindWindowW(L"FLUTTER_RUNNER_WIN32_WINDOW", nullptr);
+        if (existingFlutter && IsWindowVisible(existingFlutter))
+        {
+            ShowWindow(existingFlutter, SW_MAXIMIZE);
+            BringWindowToTop(existingFlutter);
+            SetForegroundWindow(existingFlutter);
+            return 0;
+        }
+
+        wchar_t ownPath[MAX_PATH] = {0};
+        GetModuleFileNameW(nullptr, ownPath, MAX_PATH);
+        std::filesystem::path dir = std::filesystem::path(ownPath).parent_path();
+        std::wstring bootstrapExe = (dir / L"CloudOS.ShellBootstrap.exe").wstring();
+        if (std::filesystem::exists(bootstrapExe))
+        {
+            STARTUPINFOW si{};
+            si.cb = sizeof(si);
+            PROCESS_INFORMATION pi{};
+            std::wstring bCmd = L"\"" + bootstrapExe + L"\"";
+            if (cmd.find(L"--startup") != std::wstring::npos)
+            {
+                bCmd += L" --startup";
+            }
+            std::vector<wchar_t> cmdBuf(bCmd.begin(), bCmd.end());
+            cmdBuf.push_back(L'\0');
+
+            if (CreateProcessW(
+                    nullptr,
+                    cmdBuf.data(),
+                    nullptr,
+                    nullptr,
+                    FALSE,
+                    0,
+                    nullptr,
+                    dir.wstring().c_str(),
+                    &si,
+                    &pi))
+            {
+                CloseHandle(pi.hThread);
+                CloseHandle(pi.hProcess);
+                return 0;
+            }
+        }
     }
 
     HANDLE session_mutex = CloudOS::NativeWatchdog::AcquireSessionMutex();

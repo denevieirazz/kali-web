@@ -4,12 +4,16 @@
 #include <commctrl.h>
 #include <string>
 #include <vector>
+#include <map>
+#include <iomanip>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <wincrypt.h>
 
 #pragma comment(lib, "comctl32.lib")
+#pragma comment(lib, "advapi32.lib")
 
 namespace
 {
@@ -246,6 +250,108 @@ int ActionDisableCloudOSShell()
     return ActionRestoreExplorerShell();
 }
 
+std::string ComputeSha256Hex(const std::filesystem::path& filePath)
+{
+    HCRYPTPROV hProv = 0;
+    if (!CryptAcquireContextW(&hProv, nullptr, nullptr, PROV_RSA_AES, CRYPT_VERIFYCONTEXT))
+    {
+        return "";
+    }
+
+    HCRYPTHASH hHash = 0;
+    if (!CryptCreateHash(hProv, CALG_SHA_256, 0, 0, &hHash))
+    {
+        CryptReleaseContext(hProv, 0);
+        return "";
+    }
+
+    std::ifstream file(filePath, std::ios::binary);
+    if (!file.is_open())
+    {
+        CryptDestroyHash(hHash);
+        CryptReleaseContext(hProv, 0);
+        return "";
+    }
+
+    std::vector<char> buffer(65536);
+    while (file.read(buffer.data(), buffer.size()) || file.gcount() > 0)
+    {
+        if (!CryptHashData(hHash, reinterpret_cast<const BYTE*>(buffer.data()), static_cast<DWORD>(file.gcount()), 0))
+        {
+            CryptDestroyHash(hHash);
+            CryptReleaseContext(hProv, 0);
+            return "";
+        }
+    }
+
+    BYTE hash[32] = {0};
+    DWORD hashLen = sizeof(hash);
+    std::string hex;
+    if (CryptGetHashParam(hHash, HP_HASHVAL, hash, &hashLen, 0))
+    {
+        char hexBuf[3] = {0};
+        for (DWORD i = 0; i < hashLen; ++i)
+        {
+            sprintf_s(hexBuf, "%02x", hash[i]);
+            hex += hexBuf;
+        }
+    }
+
+    CryptDestroyHash(hHash);
+    CryptReleaseContext(hProv, 0);
+    return hex;
+}
+
+std::map<std::wstring, std::string> LoadManifestHashes(const std::filesystem::path& manifestPath)
+{
+    std::map<std::wstring, std::string> hashes;
+    std::ifstream in(manifestPath);
+    if (!in.is_open()) return hashes;
+
+    std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    size_t pos = 0;
+    while (pos < content.size())
+    {
+        size_t pPath = content.find("\"path\":", pos);
+        size_t pName = content.find("\"name\":", pos);
+        size_t matchPos = std::string::npos;
+        size_t keyLen = 0;
+
+        if (pPath != std::string::npos && pName != std::string::npos)
+        {
+            if (pPath < pName) { matchPos = pPath; keyLen = 7; }
+            else { matchPos = pName; keyLen = 7; }
+        }
+        else if (pPath != std::string::npos) { matchPos = pPath; keyLen = 7; }
+        else if (pName != std::string::npos) { matchPos = pName; keyLen = 7; }
+        else break;
+
+        size_t pStart = content.find('"', matchPos + keyLen);
+        if (pStart == std::string::npos) break;
+        size_t pEnd = content.find('"', pStart + 1);
+        if (pEnd == std::string::npos) break;
+        std::string relPath = content.substr(pStart + 1, pEnd - pStart - 1);
+
+        size_t sPos = content.find("\"sha256\":", pEnd);
+        if (sPos == std::string::npos || sPos - pEnd > 500)
+        {
+            pos = pEnd + 1;
+            continue;
+        }
+        size_t sStart = content.find('"', sPos + 9);
+        if (sStart == std::string::npos) break;
+        size_t sEnd = content.find('"', sStart + 1);
+        if (sEnd == std::string::npos) break;
+        std::string hashVal = content.substr(sStart + 1, sEnd - sStart - 1);
+
+        std::wstring wRelPath(relPath.begin(), relPath.end());
+        for (auto& ch : wRelPath) { if (ch == L'/') ch = L'\\'; }
+        hashes[wRelPath] = hashVal;
+        pos = sEnd + 1;
+    }
+    return hashes;
+}
+
 int ActionVerify()
 {
     wchar_t ownModule[MAX_PATH] = {0};
@@ -261,22 +367,107 @@ int ActionVerify()
         L"cloudos_flutter_shell.exe"
     };
 
+    std::filesystem::path packageManifest = binDir / L"cloudos-package-manifest.json";
+    if (!std::filesystem::exists(packageManifest))
+    {
+        packageManifest = binDir / L"manifests" / L"cloudos-package-manifest.json";
+    }
+
+    std::map<std::wstring, std::string> manifestHashes;
+    bool manifestFound = false;
+
+    if (std::filesystem::exists(packageManifest))
+    {
+        manifestFound = true;
+        manifestHashes = LoadManifestHashes(packageManifest);
+    }
+    else
+    {
+        std::filesystem::path nativeManifest = binDir / L"cloudos-native-manifest.json";
+        if (!std::filesystem::exists(nativeManifest))
+        {
+            nativeManifest = binDir / L"manifests" / L"cloudos-native-manifest.json";
+        }
+        if (std::filesystem::exists(nativeManifest))
+        {
+            manifestFound = true;
+            auto nativeHashes = LoadManifestHashes(nativeManifest);
+            manifestHashes.insert(nativeHashes.begin(), nativeHashes.end());
+        }
+
+        std::filesystem::path integratedManifest = binDir / L"cloudos-v21-integrated-manifest.json";
+        if (!std::filesystem::exists(integratedManifest))
+        {
+            integratedManifest = binDir / L"manifests" / L"cloudos-v21-integrated-manifest.json";
+        }
+        if (std::filesystem::exists(integratedManifest))
+        {
+            manifestFound = true;
+            std::ifstream in(integratedManifest);
+            if (in.is_open())
+            {
+                std::string s((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+                size_t hPos = s.find("\"flutter_sha256\":");
+                if (hPos != std::string::npos)
+                {
+                    size_t s1 = s.find('"', hPos + 17);
+                    size_t s2 = s.find('"', s1 + 1);
+                    if (s1 != std::string::npos && s2 != std::string::npos)
+                    {
+                        manifestHashes[L"cloudos_flutter_shell.exe"] = s.substr(s1 + 1, s2 - s1 - 1);
+                    }
+                }
+            }
+        }
+    }
+
     int missing = 0;
+    int corrupt = 0;
+    int verifiedHashes = 0;
+
     for (const auto& name : required)
     {
         std::filesystem::path p = binDir / name;
         if (!std::filesystem::exists(p) || std::filesystem::file_size(p) == 0)
         {
             missing++;
+            continue;
+        }
+
+        if (manifestFound)
+        {
+            auto it = manifestHashes.find(name);
+            if (it != manifestHashes.end())
+            {
+                std::string actualHash = ComputeSha256Hex(p);
+                if (_stricmp(actualHash.c_str(), it->second.c_str()) == 0)
+                {
+                    verifiedHashes++;
+                }
+                else
+                {
+                    corrupt++;
+                    LogRecoveryEvent(L"SHA256 MISMATCH for: " + name + L" expected: " +
+                                     std::wstring(it->second.begin(), it->second.end()) +
+                                     L" actual: " + std::wstring(actualHash.begin(), actualHash.end()));
+                }
+            }
         }
     }
 
+    const bool isVerified = (missing == 0 && corrupt == 0);
+    const bool shaVerified = manifestFound && (corrupt == 0 && verifiedHashes > 0);
+
     std::cout << "{\n"
-              << "  \"verified\": " << (missing == 0 ? "true" : "false") << ",\n"
+              << "  \"verified\": " << (isVerified ? "true" : "false") << ",\n"
               << "  \"missing_components\": " << missing << ",\n"
+              << "  \"corrupt_components\": " << corrupt << ",\n"
+              << "  \"sha256_verified\": " << (shaVerified ? "true" : "false") << ",\n"
+              << "  \"manifest_found\": " << (manifestFound ? "true" : "false") << ",\n"
+              << "  \"verified_components\": " << verifiedHashes << ",\n"
               << "  \"install_dir\": \"" << EscapeJson(WideToUtf8(binDir.wstring())) << "\"\n"
               << "}\n";
-    return (missing == 0) ? 0 : 1;
+    return isVerified ? 0 : 1;
 }
 
 int ActionUI()

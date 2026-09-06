@@ -181,15 +181,29 @@ enum class InboundFrameProbe
 
 void WriteFilesPayload(
     BrokerResponse& response,
-    const std::vector<FileItemV21>& items)
+    const std::vector<FileItemV21>& items,
+    size_t offset = 0,
+    size_t limit = 1500)
 {
-    JsonArray files;
-    files.reserve(items.size());
-    for (const FileItemV21& item : items)
+    const size_t total_count = items.size();
+    if (limit == 0 || limit > 2000)
     {
-        files.push_back(JsonValue(item.ToJsonObject()));
+        limit = 1500;
+    }
+    const size_t start_idx = std::min(offset, total_count);
+    const size_t end_idx = std::min(start_idx + limit, total_count);
+
+    JsonArray files;
+    files.reserve(end_idx - start_idx);
+    for (size_t i = start_idx; i < end_idx; ++i)
+    {
+        files.push_back(JsonValue(items[i].ToJsonObject()));
     }
     response.payload["files"] = JsonValue(std::move(files));
+    response.payload["totalCount"] = JsonValue(static_cast<double>(total_count));
+    response.payload["offset"] = JsonValue(static_cast<double>(start_idx));
+    response.payload["limit"] = JsonValue(static_cast<double>(limit));
+    response.payload["hasMore"] = JsonValue(end_idx < total_count);
 }
 
 void DeactivateClientSendState(const std::shared_ptr<ClientSendState>& state)
@@ -765,8 +779,39 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
                 error;
             return res;
         }
+        size_t offset = 0;
+        size_t limit = 1500;
+        auto it_offset = req.payload.find("offset");
+        if (it_offset != req.payload.end() && (it_offset->second.IsInt() || it_offset->second.IsDouble()))
+        {
+            offset = static_cast<size_t>(std::max<int64_t>(0, it_offset->second.AsInt()));
+        }
+        auto it_limit = req.payload.find("limit");
+        if (it_limit != req.payload.end() && (it_limit->second.IsInt() || it_limit->second.IsDouble()))
+        {
+            limit = static_cast<size_t>(std::max<int64_t>(1, it_limit->second.AsInt()));
+        }
+
+        auto it_query = req.payload.find("query");
+        if (it_query != req.payload.end() && it_query->second.IsString() && !it_query->second.AsString().empty())
+        {
+            std::string q = it_query->second.AsString();
+            std::transform(q.begin(), q.end(), q.begin(), [](unsigned char c) { return static_cast<char>(::tolower(c)); });
+            std::vector<FileItemV21> filtered;
+            for (const auto& itm : items)
+            {
+                std::string name_lower = itm.name;
+                std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), [](unsigned char c) { return static_cast<char>(::tolower(c)); });
+                if (name_lower.find(q) != std::string::npos)
+                {
+                    filtered.push_back(itm);
+                }
+            }
+            items = std::move(filtered);
+        }
+
         res.payload["location"] = JsonValue(location);
-        WriteFilesPayload(res, items);
+        WriteFilesPayload(res, items, offset, limit);
         return res;
     }
 
@@ -790,8 +835,40 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
             res.error_message = error;
             return res;
         }
+
+        size_t offset = 0;
+        size_t limit = 1500;
+        auto it_offset = req.payload.find("offset");
+        if (it_offset != req.payload.end() && (it_offset->second.IsInt() || it_offset->second.IsDouble()))
+        {
+            offset = static_cast<size_t>(std::max<int64_t>(0, it_offset->second.AsInt()));
+        }
+        auto it_limit = req.payload.find("limit");
+        if (it_limit != req.payload.end() && (it_limit->second.IsInt() || it_limit->second.IsDouble()))
+        {
+            limit = static_cast<size_t>(std::max<int64_t>(1, it_limit->second.AsInt()));
+        }
+
+        auto it_query = req.payload.find("query");
+        if (it_query != req.payload.end() && it_query->second.IsString() && !it_query->second.AsString().empty())
+        {
+            std::string q = it_query->second.AsString();
+            std::transform(q.begin(), q.end(), q.begin(), [](unsigned char c) { return static_cast<char>(::tolower(c)); });
+            std::vector<FileItemV21> filtered;
+            for (const auto& itm : items)
+            {
+                std::string name_lower = itm.name;
+                std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), [](unsigned char c) { return static_cast<char>(::tolower(c)); });
+                if (name_lower.find(q) != std::string::npos)
+                {
+                    filtered.push_back(itm);
+                }
+            }
+            items = std::move(filtered);
+        }
+
         res.payload["entryId"] = JsonValue(it->second.AsString());
-        WriteFilesPayload(res, items);
+        WriteFilesPayload(res, items, offset, limit);
         return res;
     }
 
@@ -2100,10 +2177,18 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
 
     if (method == "startup.setEnabled")
     {
-        bool enable = true;
-        if (req.payload.count("enabled") && req.payload.at("enabled").IsBool())
+        bool enable = false;
+        auto it_en = req.payload.find("enabled");
+        if (it_en != req.payload.end())
         {
-            enable = req.payload.at("enabled").AsBool();
+            if (it_en->second.IsBool())
+            {
+                enable = it_en->second.AsBool();
+            }
+            else if (it_en->second.IsString())
+            {
+                enable = (it_en->second.AsString() == "true" || it_en->second.AsString() == "1");
+            }
         }
 
         HKEY hKey = nullptr;
@@ -2121,9 +2206,9 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
             wchar_t ownModule[MAX_PATH] = {0};
             GetModuleFileNameW(nullptr, ownModule, MAX_PATH);
             std::filesystem::path installDir = std::filesystem::path(ownModule).parent_path();
-            std::filesystem::path scriptPath = installDir / L"start-cloudos-v21-integrated.ps1";
+            std::filesystem::path exePath = installDir / L"CloudOS.exe";
 
-            std::wstring runCmd = L"powershell.exe -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File \"" + scriptPath.wstring() + L"\" -Startup";
+            std::wstring runCmd = L"\"" + exePath.wstring() + L"\" --startup";
             const DWORD byteCount = static_cast<DWORD>((runCmd.size() + 1) * sizeof(wchar_t));
             success = (RegSetValueExW(hKey, L"CloudOS", 0, REG_SZ, reinterpret_cast<const BYTE*>(runCmd.c_str()), byteCount) == ERROR_SUCCESS);
         }
