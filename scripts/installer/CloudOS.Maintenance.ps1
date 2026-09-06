@@ -336,6 +336,9 @@ function Invoke-Install {
     # Registro de Inicializacao Automatica (HKCU\Run - Per-User Seguro)
     $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
     if ($ConfigureStartup) {
+        if (-not (Test-Path -LiteralPath $runKey)) {
+            New-Item -Path $runKey -Force | Out-Null
+        }
         $startupCmd = "`"$mainExe`" --startup"
         Set-ItemProperty -Path $runKey -Name 'CloudOS' -Value $startupCmd
         Log-Message "Inicializacao automatica registrada em HKCU\Run: $startupCmd" "Green"
@@ -400,6 +403,9 @@ function Invoke-Repair {
         $mainExe = Join-Path $TargetLocation 'CloudOS.exe'
         $expectedCmd = "`"$mainExe`" --startup"
         if ($existingStartup -ne $expectedCmd) {
+            if (-not (Test-Path -LiteralPath $runKey)) {
+                New-Item -Path $runKey -Force | Out-Null
+            }
             Set-ItemProperty -Path $runKey -Name 'CloudOS' -Value $expectedCmd
             Log-Message "Entrada de startup em HKCU\Run reparada para apontar para o CloudOS.exe nativo." "Green"
             $registryRepaired = $true

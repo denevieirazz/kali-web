@@ -30,6 +30,11 @@ try {
         New-Item -ItemType Directory -Path $testInstallDir -Force | Out-Null
     }
 
+    # Garantir que HKCU\Run exista no ambiente
+    if (-not (Test-Path -LiteralPath $runKey)) {
+        New-Item -Path $runKey -Force | Out-Null
+    }
+
     # Criar chave de Run
     $dummyCmd = 'powershell.exe -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File "C:\dummy\start-cloudos-v21-integrated.ps1" -Startup'
     Set-ItemProperty -Path $runKey -Name 'CloudOS' -Value $dummyCmd

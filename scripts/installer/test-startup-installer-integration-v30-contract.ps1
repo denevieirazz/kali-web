@@ -42,6 +42,9 @@ try {
 
     # 2. Testar Repair restaurando registro de startup adulterado
     Write-Host "[2/4] Adulterando comando de startup e testando reparo..." -ForegroundColor Yellow
+    if (-not (Test-Path -LiteralPath $runKey)) {
+        New-Item -Path $runKey -Force | Out-Null
+    }
     $tamperedCmd = 'powershell.exe -File "C:\corrompido\script.ps1"'
     Set-ItemProperty -Path $runKey -Name 'CloudOS' -Value $tamperedCmd
 
