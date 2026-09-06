@@ -1,6 +1,6 @@
-# CloudOS — Modern Desktop Shell & System Runtime
+# CloudOS Native Shell — Modern Desktop Shell & System Runtime
 
-CloudOS é um ambiente desktop de alta performance para Windows baseado em uma arquitetura híbrida moderna: camada de apresentação em **Flutter Desktop (C++/Dart)** acoplada a um núcleo nativo de autoridade em **C++/Win32**, **System Broker IPC (Protocolo V21/V22)**, **Terminal ConPTY**, integração profunda com **WSL** e salvaguardas rigorosas contra tela preta com **fallback automático para o Windows Explorer**.
+CloudOS Native Shell é um ambiente desktop de alta performance para Windows baseado em uma arquitetura híbrida moderna: camada de apresentação em **Flutter Desktop (C++/Dart)** acoplada a um núcleo nativo de autoridade em **C++/Win32**, **System Broker IPC (Protocolo V21/V22)**, **Terminal ConPTY**, integração profunda com **WSL** e salvaguardas rigorosas contra tela preta com **fallback automático para o Windows Explorer**.
 
 O Windows continua responsável pelo kernel, drivers, DWM, subsistema de segurança, Win32 e serviços do sistema operacional. O CloudOS provê a experiência completa de Desktop, Taskbar, Dock, Start Menu, Window Manager com contenção Win32, Gerenciador de Arquivos transacional, painéis de controle do sistema e ciclo de vida supervisionado em modo usuário.
 

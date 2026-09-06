@@ -122,6 +122,18 @@ class PerformanceProfileInfo {
 
   bool get isEconomy => profile == 'economy';
 
+  String get label {
+    switch (profile) {
+      case 'economy':
+        return 'Econômico';
+      case 'performance':
+        return 'Desempenho';
+      case 'balanced':
+      default:
+        return 'Balanceado';
+    }
+  }
+
   static const defaultBalanced = PerformanceProfileInfo();
 
   factory PerformanceProfileInfo.fromMap(Map<Object?, Object?> map) {
@@ -1330,6 +1342,18 @@ class CloudOSBridge {
 
   Future<bool> closeCloudOS() async {
     final res = await invokeBrokerRpc('system.closeCloudOS');
+    return res != null && (res['success'] as bool? ?? false);
+  }
+
+  // --- RECYCLE BIN (RC1) ---
+  Future<Map<String, dynamic>?> queryRecycleBin() async {
+    final res = await invokeBrokerRpc('files.queryRecycleBin');
+    if (res == null) return null;
+    return Map<String, dynamic>.from(res);
+  }
+
+  Future<bool> emptyRecycleBin() async {
+    final res = await invokeBrokerRpc('files.emptyRecycleBin');
     return res != null && (res['success'] as bool? ?? false);
   }
 

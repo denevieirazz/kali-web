@@ -36,4 +36,40 @@ class CloudApp {
   final String? source;
   final String availability;
   final List<String> capabilities;
+
+  CloudApp copyWith({
+    String? id,
+    String? name,
+    IconData? icon,
+    CloudAppPlatform? platform,
+    String? subtitle,
+    String? distro,
+    String? category,
+    bool? isPinned,
+    bool? isRecent,
+    bool? canLaunch,
+    String? displayName,
+    String? launchTarget,
+    String? source,
+    String? availability,
+    List<String>? capabilities,
+  }) {
+    return CloudApp(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      icon: icon ?? this.icon,
+      platform: platform ?? this.platform,
+      subtitle: subtitle ?? this.subtitle,
+      distro: distro ?? this.distro,
+      category: category ?? this.category,
+      isPinned: isPinned ?? this.isPinned,
+      isRecent: isRecent ?? this.isRecent,
+      canLaunch: canLaunch ?? this.canLaunch,
+      displayName: displayName ?? this.displayName,
+      launchTarget: launchTarget ?? this.launchTarget,
+      source: source ?? this.source,
+      availability: availability ?? this.availability,
+      capabilities: capabilities ?? this.capabilities,
+    );
+  }
 }

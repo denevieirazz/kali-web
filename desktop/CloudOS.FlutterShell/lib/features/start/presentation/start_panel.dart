@@ -23,6 +23,7 @@ class StartPanel extends StatefulWidget {
     required this.onClose,
     this.onLockSession,
     this.onPowerOptions,
+    this.onPinToggle,
     super.key,
   });
 
@@ -34,6 +35,7 @@ class StartPanel extends StatefulWidget {
   final VoidCallback onClose;
   final VoidCallback? onLockSession;
   final VoidCallback? onPowerOptions;
+  final ValueChanged<CloudApp>? onPinToggle;
 
   @override
   State<StartPanel> createState() => _StartPanelState();
@@ -61,6 +63,7 @@ class _StartPanelState extends State<StartPanel> {
       apps: widget.apps,
       query: query,
       selectedFilter: selectedFilter,
+      includeDeepLocations: true,
     );
     final pinnedApps = filtered
         .where((app) => app.isPinned)
@@ -132,6 +135,7 @@ class _StartPanelState extends State<StartPanel> {
                       ? StartSearchResultsList(
                           results: filtered,
                           onLaunch: widget.onLaunch,
+                          onPinToggle: widget.onPinToggle,
                         )
                       : StartOverview(
                           pinnedApps: pinnedApps,
@@ -141,6 +145,7 @@ class _StartPanelState extends State<StartPanel> {
                           onLaunch: widget.onLaunch,
                           onActivateWindow: widget.onActivateWindow,
                           onCloseWindow: widget.onCloseWindow,
+                          onPinToggle: widget.onPinToggle,
                         ),
                 ),
                 const SizedBox(height: 10),

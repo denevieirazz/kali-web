@@ -11,12 +11,14 @@ class StartPinnedAppCard extends StatelessWidget {
     required this.onTap,
     this.runningApp,
     this.onClose,
+    this.onPinToggle,
   });
 
   final CloudApp app;
   final VoidCallback onTap;
   final StartRunningApp? runningApp;
   final VoidCallback? onClose;
+  final VoidCallback? onPinToggle;
 
   Color get platformColor => switch (app.platform) {
     CloudAppPlatform.windows => CloudOSColors.windows,
@@ -45,6 +47,64 @@ class StartPinnedAppCard extends StatelessWidget {
       child: InkWell(
         key: ValueKey<String>('start-app-${app.id}'),
         onTap: app.canLaunch ? onTap : null,
+        onSecondaryTapUp: (details) {
+          final RenderBox? overlay =
+              Overlay.of(context).context.findRenderObject() as RenderBox?;
+          if (overlay == null) return;
+          showMenu<String>(
+            context: context,
+            position: RelativeRect.fromRect(
+              details.globalPosition & const Size(40, 40),
+              Offset.zero & overlay.size,
+            ),
+            color: const Color(0xFF141C2B),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+              side: const BorderSide(color: CloudOSColors.border),
+            ),
+            items: <PopupMenuEntry<String>>[
+              const PopupMenuItem<String>(
+                value: 'open',
+                child: Row(
+                  children: <Widget>[
+                    Icon(Icons.open_in_new_rounded,
+                        size: 16, color: CloudOSColors.accent),
+                    SizedBox(width: 8),
+                    Text('Abrir',
+                        style: TextStyle(
+                            color: CloudOSColors.text, fontSize: 13)),
+                  ],
+                ),
+              ),
+              if (onPinToggle != null)
+                PopupMenuItem<String>(
+                  value: 'pin',
+                  child: Row(
+                    children: <Widget>[
+                      Icon(
+                        app.isPinned
+                            ? Icons.push_pin_outlined
+                            : Icons.push_pin_rounded,
+                        size: 16,
+                        color: CloudOSColors.secondary,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        app.isPinned
+                            ? 'Desafixar do Início'
+                            : 'Fixar no Início',
+                        style: const TextStyle(
+                            color: CloudOSColors.text, fontSize: 13),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ).then((choice) {
+            if (choice == 'open') onTap();
+            if (choice == 'pin') onPinToggle?.call();
+          });
+        },
         borderRadius: BorderRadius.circular(10),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -412,10 +472,12 @@ class StartSearchResultsList extends StatelessWidget {
     super.key,
     required this.results,
     required this.onLaunch,
+    this.onPinToggle,
   });
 
   final List<CloudApp> results;
   final ValueChanged<CloudApp> onLaunch;
+  final ValueChanged<CloudApp>? onPinToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -450,7 +512,11 @@ class StartSearchResultsList extends StatelessWidget {
       separatorBuilder: (_, __) => const SizedBox(height: 6),
       itemBuilder: (context, index) {
         final app = results[index];
-        return StartPinnedAppCard(app: app, onTap: () => onLaunch(app));
+        return StartPinnedAppCard(
+          app: app,
+          onTap: () => onLaunch(app),
+          onPinToggle: onPinToggle != null ? () => onPinToggle!(app) : null,
+        );
       },
     );
   }

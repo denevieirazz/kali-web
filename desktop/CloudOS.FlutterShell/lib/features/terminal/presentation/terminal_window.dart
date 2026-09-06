@@ -383,6 +383,19 @@ class _TerminalWindowState extends State<TerminalWindow> {
     setState(() {});
   }
 
+  void _restartTab(TerminalTabItem tab) {
+    if (tab.isRunning) return;
+    final oldSessionId = tab.sessionId;
+    if (oldSessionId != null) {
+      unawaited(widget.bridge.closeTerminal(oldSessionId));
+    }
+    tab.sessionId = null;
+    tab.hasReceivedData = false;
+    tab.wslWatchdogTimer?.cancel();
+    tab.terminal.write('\r\n\x1b[36m[Reiniciando sessão...]\x1b[0m\r\n');
+    unawaited(_startConPtySession(tab));
+  }
+
   void _sendCtrlC() {
     final tab = _activeTab;
     final sessionId = tab?.sessionId;
@@ -402,25 +415,74 @@ class _TerminalWindowState extends State<TerminalWindow> {
           Expanded(
             child: tab == null
                 ? const Center(child: CircularProgressIndicator())
-                : GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTapDown: (_) {
-                      tab.focusNode.requestFocus();
-                    },
-                    child: TerminalView(
-                      tab.terminal,
-                      focusNode: tab.focusNode,
-                      autofocus: true,
-                      autoResize: true,
-                      hardwareKeyboardOnly: true,
-                      padding: const EdgeInsets.all(10),
-                      textStyle: const TerminalStyle(
-                        fontFamily: 'Consolas',
-                        fontSize: 13,
-                        height: 1.2,
+                : Column(
+                    children: <Widget>[
+                      Expanded(
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTapDown: (_) {
+                            tab.focusNode.requestFocus();
+                          },
+                          child: TerminalView(
+                            tab.terminal,
+                            focusNode: tab.focusNode,
+                            autofocus: true,
+                            autoResize: true,
+                            hardwareKeyboardOnly: true,
+                            padding: const EdgeInsets.all(10),
+                            textStyle: const TerminalStyle(
+                              fontFamily: 'Consolas',
+                              fontSize: 13,
+                              height: 1.2,
+                            ),
+                            theme: TerminalThemes.defaultTheme,
+                          ),
+                        ),
                       ),
-                      theme: TerminalThemes.defaultTheme,
-                    ),
+                      if (!tab.isRunning && tab.sessionId != null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 6,
+                          ),
+                          color: const Color(0xFF161B22),
+                          child: Row(
+                            children: <Widget>[
+                              const Icon(
+                                Icons.info_outline_rounded,
+                                size: 15,
+                                color: Color(0xFF8B949E),
+                              ),
+                              const SizedBox(width: 8),
+                              const Text(
+                                'Processo finalizado.',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Color(0xFF8B949E),
+                                ),
+                              ),
+                              const Spacer(),
+                              TextButton.icon(
+                                onPressed: () => _restartTab(tab),
+                                icon: const Icon(Icons.refresh_rounded, size: 14),
+                                label: const Text(
+                                  'Reiniciar Sessão',
+                                  style: TextStyle(fontSize: 12),
+                                ),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: const Color(0xFF58A6FF),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  minimumSize: Size.zero,
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
                   ),
           ),
         ],
@@ -540,6 +602,16 @@ class _TerminalWindowState extends State<TerminalWindow> {
                 ),
             ],
           ),
+          if (_activeTab != null && !_activeTab!.isRunning && _activeTab!.sessionId != null)
+            IconButton(
+              tooltip: 'Reiniciar sessão',
+              onPressed: () => _restartTab(_activeTab!),
+              icon: const Icon(
+                Icons.refresh_rounded,
+                size: 17,
+                color: Color(0xFF58A6FF),
+              ),
+            ),
           IconButton(
             tooltip: 'Interromper (Ctrl+C)',
             onPressed: _sendCtrlC,

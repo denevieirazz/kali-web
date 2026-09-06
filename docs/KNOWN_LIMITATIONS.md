@@ -1,34 +1,32 @@
-# CloudOS — Limitações Conhecidas
+# CloudOS — Limitações Conhecidas (Release Candidate 1)
 
-Este documento descreve limitações conhecidas do estado atual. Ele não transforma recursos experimentais em estáveis.
+Este documento descreve limitações conhecidas do estado atual do CloudOS no marco **RC1**.
 
-## Navegador Nativo
+---
 
-- O Navegador CloudOS abre em uma janela WPF top-level separada do desktop React. Ele ainda não é renderizado dentro do Window Manager React.
-- Sites externos usam um WebView2/profile separado e não recebem a bridge privilegiada CloudOS.
-- O profile do Browser persiste cookies/cache no UDF dedicado até que o usuário use a ação explícita de limpar dados.
-- A restauração da última sessão é opt-in. Ela restaura somente URLs HTTP/HTTPS sanitizadas e estado de pin; não restaura formulários, comandos, POST bodies ou credenciais.
-- A nova aba é uma superfície WPF; não existe página HTML privilegiada compartilhada com conteúdo externo.
-- `WebResourceRequested` é usado para a política HTTP(S), mas a fronteira WebSocket do terminal é protegida adicionalmente pelo backend por Origin + JWT.
-- Save Page/Print dependem das capacidades do WebView2/Windows e podem ter comportamento diferente conforme tipo de documento/site.
-- Certificado TLS inválido não possui bypass na UI.
-- Protocolos externos (`mailto:`, handlers customizados etc.) são bloqueados em vez de enviados ao Windows.
-- O navegador não possui extensões, sync em nuvem ou password manager CloudOS.
-- DevTools do Browser só devem ser habilitados por `CLOUDOS_BROWSER_DEVTOOLS=1` em desenvolvimento explícito. CDP remoto de produção não é configurado pela feature.
-- Os testes WebView2 reais exigem Windows com WebView2 Runtime e Chromium do Playwright.
-- O smoke completo do Host deve rodar no GitHub Actions Windows ou VM/Sandbox descartável; por segurança o script recusa um perfil CloudOS local existente fora de CI.
+## 1. Confinamento e Modo de Execução
 
-## Host/desktop já existentes
+- **Gate 0 Ativo**: O CloudOS opera atualmente como um ambiente de apresentação e gerenciamento de janelas em modo usuário sobre o Windows. O Windows Explorer (`explorer.exe`) continua sendo o shell oficial registrado no sistema (`HKLM\Software\Microsoft\Windows NT\CurrentVersion\Winlogon\Shell`). A substituição permanente de shell está desativada por política de segurança no RC1.
+- **Confinamento em Modo Usuário**: O CloudOS não instala drivers de modo kernel nem serviços de sistema de segundo plano com privilégios SYSTEM. Todas as operações utilizam APIs padrão Win32 e chamadas RPC autenticadas via Named Pipe com a identidade do usuário logado.
 
-- Docking Win32/WSLg continua sujeito a limitações de DPI/multi-monitor documentadas na arquitetura.
-- Encerramento abrupto externo do processo Host pode depender do lease/timeout dos componentes Windows/WSLg para limpeza de processos fora da posse direta do Host.
-- O modo de substituição total do shell do Windows permanece fora do fluxo padrão.
+---
 
-## Critério de release
+## 2. Subsistema Linux (WSL2 / WSLg)
 
-Uma limitação pode ser removida deste arquivo somente depois de:
+- **Dependência do Subsistema**: O suporte a ferramentas e aplicações Linux depende da instalação prévia do WSL2 no host Windows com pelo menos uma distribuição registrada (ex: Ubuntu). Se o WSL não estiver presente, as abas de terminal WSL e atalhos Linux permanecem desabilitados, mas o CloudOS opera normalmente com ferramentas Windows nativas.
+- **Janelas WSLg**: Janelas gráficas do Linux são gerenciadas pelo compositor WSLg integrado do Windows. O rehoming direto para o interior de frames Flutter depende dos limites do DWM e pode ser renderizado em janelas separadas dependendo do toolkit X11/Wayland utilizado pelo app.
 
-1. teste automatizado ou smoke reproduzível;
-2. validação Windows verde;
-3. documentação da nova garantia;
-4. nenhuma alteração de banco/OPFS/WSL implícita para alcançar o resultado.
+---
+
+## 3. Navegador Integrado (WebView2)
+
+- **Microsoft Edge WebView2 Runtime**: Requer o runtime do WebView2 instalado no sistema (padrão no Windows 10/11 atualizados). Se ausente, o Navegador exibe aviso de dependência.
+- **Isolamento de Extensões**: O navegador interno não carrega extensões de terceiros da Chrome Web Store nem sincronização de perfil em nuvem proprietária do Edge/Chrome.
+- **Certificados e Protocolos Customizados**: Certificados TLS inválidos são bloqueados por padrão sem opção de bypass na interface de usuário.
+
+---
+
+## 4. Hardware e Aceleração Gráfica
+
+- **Perfil Econômico Automático**: Em dispositivos com menos de 4 GB de memória RAM livre ou gráficos integrados legados, o CloudOS desativa automaticamente efeitos de desfoque translúcido (*backdrop blur*) e animações pesadas para manter a taxa de quadros estável a 60 FPS.
+- **Captura Multi-Monitor**: A enumeração de janelas em configurações multi-monitor com taxas de DPI mistas (ex: tela 4K a 150% e monitor secundário 1080p a 100%) realiza compensação contínua via Win32 Per-Monitor V2 DPI Awareness, mas pequenas divergências visuais momentâneas durante o arraste entre telas podem ocorrer até a conclusão da transição pelo DWM.

@@ -31,6 +31,37 @@ class _TaskManagerWindowState extends State<TaskManagerWindow> {
   CloudHardwareMetrics? _metrics;
   Timer? _metricsTimer;
 
+  static const _criticalProcesses = <String>{
+    'winlogon',
+    'winlogon.exe',
+    'csrss',
+    'csrss.exe',
+    'lsass',
+    'lsass.exe',
+    'services',
+    'services.exe',
+    'smss',
+    'smss.exe',
+    'system',
+    'svchost',
+    'svchost.exe',
+    'explorer',
+    'explorer.exe',
+    'dwm',
+    'dwm.exe',
+  };
+
+  bool _isCriticalProcess(StartRunningApp app) {
+    final lowerTitle = app.title.toLowerCase();
+    final lowerId = app.id.toLowerCase();
+    for (final p in _criticalProcesses) {
+      if (lowerTitle.contains(p) || lowerId.contains(p)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -250,16 +281,49 @@ class _TaskManagerWindowState extends State<TaskManagerWindow> {
                                   onPressed: () => widget.onSwitchToApp(app.id),
                                 ),
                                 const SizedBox(width: 6),
-                                OutlinedButton.icon(
-                                  icon: const Icon(Icons.close_rounded, size: 14),
-                                  label: const Text('Finalizar'),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: Colors.redAccent,
-                                    side: const BorderSide(color: Colors.redAccent, width: 0.8),
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                                  ),
-                                  onPressed: () => widget.onCloseApp(app.id),
-                                ),
+                                 OutlinedButton.icon(
+                                   icon: const Icon(Icons.close_rounded, size: 14),
+                                   label: const Text('Finalizar'),
+                                   style: OutlinedButton.styleFrom(
+                                     foregroundColor: Colors.redAccent,
+                                     side: const BorderSide(color: Colors.redAccent, width: 0.8),
+                                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                   ),
+                                   onPressed: () {
+                                     if (_isCriticalProcess(app)) {
+                                       showDialog<void>(
+                                         context: context,
+                                         builder: (ctx) => AlertDialog(
+                                           backgroundColor: const Color(0xFF16202E),
+                                           shape: RoundedRectangleBorder(
+                                             borderRadius: BorderRadius.circular(12),
+                                             side: const BorderSide(color: CloudOSColors.danger),
+                                           ),
+                                           title: const Row(
+                                             children: <Widget>[
+                                               Icon(Icons.shield_outlined, color: CloudOSColors.danger, size: 22),
+                                               SizedBox(width: 8),
+                                               Text('Processo Protegido', style: TextStyle(color: CloudOSColors.text, fontSize: 16)),
+                                             ],
+                                           ),
+                                           content: Text(
+                                             'O processo "${app.title}" é essencial para o funcionamento do Windows e da sessão ativa. Por segurança, o CloudOS impede sua finalização forçada para evitar travamentos do sistema.',
+                                             style: const TextStyle(color: CloudOSColors.secondary, fontSize: 13),
+                                           ),
+                                           actions: <Widget>[
+                                             FilledButton(
+                                               style: FilledButton.styleFrom(backgroundColor: CloudOSColors.accent),
+                                               onPressed: () => Navigator.of(ctx).pop(),
+                                               child: const Text('Entendido', style: TextStyle(color: Colors.white)),
+                                             ),
+                                           ],
+                                         ),
+                                       );
+                                       return;
+                                     }
+                                     widget.onCloseApp(app.id);
+                                   },
+                                 ),
                               ],
                             ),
                           ],

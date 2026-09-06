@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:cloudos_flutter_shell/features/files/presentation/files_window.dart';
+import 'package:cloudos_flutter_shell/features/files/presentation/widgets/recycle_bin_view.dart';
 import 'package:cloudos_flutter_shell/models/cloud_file_item.dart';
 import 'package:cloudos_flutter_shell/services/cloudos_bridge.dart';
 import 'package:flutter/material.dart';
@@ -67,7 +68,7 @@ void main() {
     expect(bridge.locations, <String>['home', 'cloud-drive']);
   });
 
-  testWidgets('Trash fails closed instead of requesting a broker Files location', (
+  testWidgets('Trash routes to RecycleBinView instead of requesting a broker Files location', (
     tester,
   ) async {
     final bridge = _RootRecordingBridge();
@@ -85,12 +86,10 @@ void main() {
     );
     await tester.tap(find.text('Lixeira CloudOS'));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
 
     expect(bridge.locations, <String>['home']);
-    expect(
-      find.textContaining('Explorer do Windows não será aberto'),
-      findsOneWidget,
-    );
+    expect(find.byType(RecycleBinView), findsOneWidget);
   });
 
   test('Broker cannot dispatch first-party Drive or Trash to Windows Shell', () {

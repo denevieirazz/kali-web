@@ -31,6 +31,8 @@ import 'shell_app_route.dart';
 import 'widgets/desktop_icons.dart';
 import 'widgets/desktop_status.dart';
 import 'widgets/desktop_wallpaper.dart';
+import '../features/first_run/presentation/first_run_dialog.dart';
+import '../services/cloudos_preferences.dart';
 import 'window_manager/alt_tab_switcher.dart';
 import 'window_manager/cloud_window_frame.dart';
 
@@ -63,6 +65,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
   String? selectedDesktopIcon;
   late List<DesktopItemData> desktopItems = getDefaultDesktopItems();
   int _customFolderCounter = 1;
+  CloudOSPreferences? _preferences;
 
   // Responsive & Window Snap Tracking
   final Map<String, WindowSnapMode> _windowSnapModes = <String, WindowSnapMode>{};
@@ -107,7 +110,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
   Offset? settingsPreMaxOffset;
   Size? settingsPreMaxSize;
   int settingsZIndex = 4;
-  SettingsSection settingsSection = SettingsSection.display;
+  SettingsSection settingsSection = SettingsSection.overview;
 
   bool notesOpen = false;
   bool notesMinimized = false;
@@ -198,13 +201,29 @@ class _CloudOSShellState extends State<CloudOSShell> {
     final nativeWorkspace = await widget.bridge.getCurrentWorkspace();
     final loadedPerf = await widget.bridge.tryLoadPerformanceProfile();
     final loadedWindowSnapshot = await widget.bridge.tryLoadWindowSnapshot();
+    final prefs = await CloudOSPreferences.load();
     if (!mounted) return;
+
+    _preferences = prefs;
+
+    // Apply saved icon positions if present
+    var initialDesktopItems = getDefaultDesktopItems();
+    if (prefs.desktopIconPositions.isNotEmpty) {
+      initialDesktopItems = initialDesktopItems.map((item) {
+        final savedPos = prefs.getIconPosition(item.id);
+        if (savedPos != null) {
+          return item.copyWith(position: savedPos);
+        }
+        return item;
+      }).toList();
+    }
 
     if (loadedPerf != null) {
       GlassSurface.disableBlur = loadedPerf.isEconomy;
     }
 
     setState(() {
+      desktopItems = initialDesktopItems;
       if (loadedApps != null) apps = loadedApps;
       if (loadedSnapshot != null) snapshot = loadedSnapshot;
       if (loadedNotifications != null) notificationState = loadedNotifications;
@@ -218,6 +237,22 @@ class _CloudOSShellState extends State<CloudOSShell> {
           loadedSnapshot?.currentWorkspace.clamp(1, 4).toInt() ??
           currentWorkspace;
     });
+
+    if (!prefs.firstRunCompleted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          FirstRunDialog.showIfNeeded(
+            context: context,
+            bridge: widget.bridge,
+            preferences: prefs,
+            snapshot: snapshot,
+            onComplete: () {
+              if (mounted) setState(() {});
+            },
+          );
+        }
+      });
+    }
   }
 
   Future<void> _refreshNativeShellState() async {
@@ -1373,20 +1408,21 @@ class _CloudOSShellState extends State<CloudOSShell> {
   }
 
   Future<void> _launchApp(CloudApp app) async {
+    _preferences?.recordAppLaunch(app.id);
+
     if (app.id == 'cloudos:drive' || app.id == 'drive') {
       _openFilesRoot('cloud-drive');
       return;
     }
 
     if (app.id == 'cloudos:trash' || app.id == 'trash') {
-      setState(_closeTransientPanels);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'A Lixeira CloudOS ainda não está disponível. O Explorer do Windows não será aberto como fallback.',
-          ),
-        ),
-      );
+      _openFilesRoot('trash');
+      return;
+    }
+
+    if (app.id.startsWith('files:')) {
+      final root = app.id.substring('files:'.length);
+      _openFilesRoot(root);
       return;
     }
 
@@ -1764,6 +1800,7 @@ class _CloudOSShellState extends State<CloudOSShell> {
               if (_lastLayoutSize == null || _lastLayoutSize != currentSize) {
                 _lastLayoutSize = currentSize;
                 _reconcileWindowBounds(metrics);
+                _reconcileDesktopIcons(currentSize);
               }
 
               return CloudResponsiveScope(
@@ -1919,14 +1956,19 @@ class _CloudOSShellState extends State<CloudOSShell> {
         return item;
       }).toList(growable: true);
     });
+    _preferences?.setIconPosition(id, clampedX, clampedY);
   }
 
   void _handleDesktopItemAction(DesktopItemData item) {
     switch (item.id) {
       case 'files':
-      case 'drive':
-      case 'trash':
         _toggleOrFocusWindow('files');
+        break;
+      case 'drive':
+        _openFilesRoot('cloud-drive');
+        break;
+      case 'trash':
+        _openFilesRoot('trash');
         break;
       case 'apps':
         _toggleStart();
@@ -1971,9 +2013,34 @@ class _CloudOSShellState extends State<CloudOSShell> {
           currentY = startY;
           currentX += itemWidth;
         }
+        _preferences?.setIconPosition(item.id, pos.dx, pos.dy);
         return item.copyWith(position: pos);
       }).toList(growable: true);
     });
+  }
+
+  void _reconcileDesktopIcons(Size currentSize) {
+    if (currentSize.width <= 0 || currentSize.height <= 0) return;
+    final maxX = (currentSize.width - 90.0).clamp(10.0, double.infinity);
+    final maxY = (currentSize.height - 130.0).clamp(10.0, double.infinity);
+    bool changed = false;
+    final updated = desktopItems.map((item) {
+      if (item.position.dx > maxX || item.position.dy > maxY) {
+        changed = true;
+        final clamped = Offset(
+          item.position.dx.clamp(10.0, maxX),
+          item.position.dy.clamp(10.0, maxY),
+        );
+        _preferences?.setIconPosition(item.id, clamped.dx, clamped.dy);
+        return item.copyWith(position: clamped);
+      }
+      return item;
+    }).toList();
+    if (changed) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => desktopItems = updated);
+      });
+    }
   }
 
   Future<void> _promptCreateNewFolder(Offset position) async {
@@ -2752,9 +2819,15 @@ class _CloudOSShellState extends State<CloudOSShell> {
   Widget _panelSwitcher() {
     Widget child = const SizedBox.shrink(key: ValueKey<String>('none'));
     if (startOpen) {
+      final displayApps = apps.map((app) {
+        final isPinned = _preferences?.isAppPinned(app.id) ?? app.isPinned;
+        final isRecent = _preferences?.isAppRecent(app.id) ?? app.isRecent;
+        return app.copyWith(isPinned: isPinned, isRecent: isRecent);
+      }).toList();
+
       child = StartPanel(
         key: const ValueKey<String>('start'),
-        apps: apps,
+        apps: displayApps,
         onLaunch: _launchApp,
         runningApps: _startRunningApps,
         onActivateWindow: _activateWindowFromStart,
@@ -2765,6 +2838,10 @@ class _CloudOSShellState extends State<CloudOSShell> {
           setState(_closeTransientPanels);
         },
         onPowerOptions: () => _openSettingsSection(SettingsSection.power),
+        onPinToggle: (app) {
+          _preferences?.togglePin(app.id);
+          setState(() {});
+        },
       );
     } else if (quickSettingsOpen) {
       child = QuickSettingsPanel(

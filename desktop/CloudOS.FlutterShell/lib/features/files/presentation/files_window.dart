@@ -13,6 +13,7 @@ import 'widgets/files_loading_state.dart';
 import 'widgets/files_sidebar.dart';
 import 'widgets/files_status_bar.dart';
 import 'widgets/files_title_bar.dart';
+import 'widgets/recycle_bin_view.dart';
 
 enum FileSortField { name, size, type, date }
 
@@ -141,6 +142,7 @@ class _FilesWindowState extends State<FilesWindow> {
       'cloud-drive' => const _FilesLocation.root('cloud-drive', 'CloudOS Drive', r'CloudOS:\Drive'),
       'windows-c' => const _FilesLocation.root('windows-c', 'Disco Local (C:)', r'C:\'),
       'ubuntu-wsl' => const _FilesLocation.root('ubuntu-wsl', 'Ubuntu (WSL2)', r'\\wsl.localhost\Ubuntu'),
+      'trash' => const _FilesLocation.root('trash', 'Lixeira', 'Lixeira'),
       _ => const _FilesLocation.root('home', 'Início', 'Início'),
     };
   }
@@ -186,6 +188,17 @@ class _FilesWindowState extends State<FilesWindow> {
 
   Future<void> _loadLocation(_FilesLocation location) async {
     final generation = ++_loadGeneration;
+    if (location.rootId == 'trash' || location.sidebarId == 'trash') {
+      if (mounted) {
+        setState(() {
+          _files = const <CloudFileItem>[];
+          _isLoading = false;
+          _selectedPaths.clear();
+          _anchorIndex = null;
+        });
+      }
+      return;
+    }
     if (mounted) setState(() => _isLoading = true);
 
     final files = location.entryId != null
@@ -214,17 +227,6 @@ class _FilesWindowState extends State<FilesWindow> {
   }
 
   void _navigateTo(String id, String label, {String? entryId}) {
-    if (id == 'trash') {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'A Lixeira CloudOS ainda não está disponível. O Explorer do Windows não será aberto como fallback.',
-          ),
-        ),
-      );
-      return;
-    }
-
     if (entryId != null && entryId.isNotEmpty) {
       _pushHistory(_current);
       _applyLocation(
@@ -724,35 +726,41 @@ class _FilesWindowState extends State<FilesWindow> {
                       child: Column(
                         children: <Widget>[
                           Expanded(
-                            child: _isLoading
-                                ? const FilesLoadingState()
-                                : FilesContent(
-                                    files: files,
-                                    query: query,
-                                    isGridView: isGridView,
-                                    selectedPaths: _selectedPaths,
-                                    cutPaths: cutPaths,
-                                    onSelect: (item, {bool isCtrl = false, bool isShift = false}) {
-                                      final keys = HardwareKeyboard.instance;
-                                      final ctrlPressed = isCtrl || keys.isControlPressed;
-                                      final shiftPressed = isShift || keys.isShiftPressed;
-                                      _handleItemSelect(item, isCtrl: ctrlPressed, isShift: shiftPressed);
-                                    },
-                                    onOpen: (item) => unawaited(_openItem(item)),
-                                  ),
+                            child: _current.sidebarId == 'trash'
+                                ? RecycleBinView(
+                                    bridge: widget.bridge,
+                                    onBack: _backStack.isNotEmpty ? _goBack : null,
+                                  )
+                                : _isLoading
+                                    ? const FilesLoadingState()
+                                    : FilesContent(
+                                        files: files,
+                                        query: query,
+                                        isGridView: isGridView,
+                                        selectedPaths: _selectedPaths,
+                                        cutPaths: cutPaths,
+                                        onSelect: (item, {bool isCtrl = false, bool isShift = false}) {
+                                          final keys = HardwareKeyboard.instance;
+                                          final ctrlPressed = isCtrl || keys.isControlPressed;
+                                          final shiftPressed = isShift || keys.isShiftPressed;
+                                          _handleItemSelect(item, isCtrl: ctrlPressed, isShift: shiftPressed);
+                                        },
+                                        onOpen: (item) => unawaited(_openItem(item)),
+                                      ),
                           ),
-                          FilesStatusBar(
-                            itemCount: _isLoading ? 0 : files.length,
-                            selectedCount: selectedFiles.length,
-                            selectedSizeFormatted: selectedFiles.length == 1
-                                ? selectedFiles.first.sizeFormatted
-                                : null,
-                            activeOperationTitle: _activeOperationTitle,
-                            operationProgress: _activeOperationProgress,
-                            onCancelOperation: _activeJobId != null
-                                ? () => widget.bridge.cancelFileOperation(_activeJobId!)
-                                : null,
-                          ),
+                          if (_current.sidebarId != 'trash')
+                            FilesStatusBar(
+                              itemCount: _isLoading ? 0 : files.length,
+                              selectedCount: selectedFiles.length,
+                              selectedSizeFormatted: selectedFiles.length == 1
+                                  ? selectedFiles.first.sizeFormatted
+                                  : null,
+                              activeOperationTitle: _activeOperationTitle,
+                              operationProgress: _activeOperationProgress,
+                              onCancelOperation: _activeJobId != null
+                                  ? () => widget.bridge.cancelFileOperation(_activeJobId!)
+                                  : null,
+                            ),
                         ],
                       ),
                     ),

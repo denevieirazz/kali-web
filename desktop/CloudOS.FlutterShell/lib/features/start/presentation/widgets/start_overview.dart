@@ -14,6 +14,7 @@ class StartOverview extends StatelessWidget {
     required this.onLaunch,
     required this.onActivateWindow,
     required this.onCloseWindow,
+    this.onPinToggle,
     super.key,
   });
 
@@ -24,6 +25,7 @@ class StartOverview extends StatelessWidget {
   final ValueChanged<CloudApp> onLaunch;
   final ValueChanged<String> onActivateWindow;
   final ValueChanged<String> onCloseWindow;
+  final ValueChanged<CloudApp>? onPinToggle;
 
   StartRunningApp? _runningAppFor(CloudApp app) {
     for (final runningApp in runningApps) {
@@ -75,6 +77,7 @@ class StartOverview extends StatelessWidget {
               onClose: runningApp == null
                   ? null
                   : () => onCloseWindow(runningApp.id),
+              onPinToggle: onPinToggle != null ? () => onPinToggle!(app) : null,
             );
           }, childCount: pinnedApps.length),
         ),
@@ -138,6 +141,7 @@ class StartOverview extends StatelessWidget {
                 onClose: runningApp == null
                     ? null
                     : () => onCloseWindow(runningApp.id),
+                onPinToggle: onPinToggle != null ? () => onPinToggle!(app) : null,
               );
             }, childCount: otherApps.length),
           ),

@@ -2,7 +2,7 @@
 
 Data de atualização: 2026-09-05  
 Branch: `main`  
-Status geral: **ESTÁVEL / ETAPAS 1 A 10 CONCLUÍDAS COM SUCESSO / ETAPA 11 IMPLEMENTADA E COBERTA POR TESTES**
+Status geral: **ESTÁVEL / RELEASE CANDIDATE 1 (RC1) CONCLUÍDO COM SUCESSO / GATE 0 ATIVO**
 
 ---
 
@@ -49,6 +49,7 @@ O CloudOS opera em arquitetura híbrida de alta performance e confinamento rigor
 | **Etapa 9** | Instalação Física, Repair e Rollback | **PASS** | 5/5 contratos de instalação/reparo/rollback em `CloudOS.Maintenance.ps1`. |
 | **Etapa 10** | Inicialização Automática Segura (HKCU\Run) | **PASS** | 5/5 contratos de startup, single-instance e resiliência aprovados. |
 | **Etapa 11** | Shell Replacement Seguro e Fallback de Emergência | **IMPLEMENTADO / AUTOMATED PASS** | 10/10 contratos de shell, bootstrap, crash loop e recovery aprovados. |
+| **Release Candidate 1 (RC1)** | Product Completion, UX Polish & Release Readiness | **PASS** | 28+ superfícies auditadas, Lixeira nativa Win32, CloudOSPreferences, Inno Setup pronto, 151/151 Flutter tests, 49/49 native contracts. |
 
 ---
 

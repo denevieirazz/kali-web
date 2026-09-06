@@ -25,6 +25,8 @@
 #include <fstream>
 #include <iostream>
 #include <shlobj.h>
+#include <shellapi.h>
+#pragma comment(lib, "shell32.lib")
 #include <thread>
 #include <tlhelp32.h>
 
@@ -943,6 +945,36 @@ BrokerResponse BrokerServerV21::HandleRequest(const std::string& client_id, cons
         deleted_json.reserve(deleted_ids.size());
         for (const auto& id : deleted_ids) deleted_json.push_back(JsonValue(id));
         res.payload["deletedEntryIds"] = JsonValue(std::move(deleted_json));
+        return res;
+    }
+
+    if (method == "files.queryRecycleBin")
+    {
+        SHQUERYRBINFO info{};
+        info.cbSize = sizeof(info);
+        const HRESULT hr = SHQueryRecycleBinW(nullptr, &info);
+        if (SUCCEEDED(hr))
+        {
+            res.payload["itemCount"] = JsonValue(static_cast<double>(info.i64NumItems));
+            res.payload["totalSizeBytes"] = JsonValue(static_cast<double>(info.i64Size));
+        }
+        else
+        {
+            res.payload["itemCount"] = JsonValue(0.0);
+            res.payload["totalSizeBytes"] = JsonValue(0.0);
+        }
+        return res;
+    }
+
+    if (method == "files.emptyRecycleBin")
+    {
+        const HRESULT hr = SHEmptyRecycleBinW(nullptr, nullptr, SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND);
+        res.ok = SUCCEEDED(hr);
+        if (!res.ok)
+        {
+            res.error_code = "empty_failed";
+            res.error_message = "Falha ao esvaziar lixeira";
+        }
         return res;
     }
 

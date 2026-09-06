@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../core/cloudos_theme.dart';
 import '../../../models/cloud_system_snapshot.dart';
 import '../../../services/cloudos_bridge.dart';
+import '../../../services/cloudos_preferences.dart';
 
 enum SettingsCategoryGroup {
   system,
@@ -14,6 +15,7 @@ enum SettingsCategoryGroup {
 
 enum SettingsSection {
   // System
+  overview('Visão Geral', Icons.space_dashboard_rounded, SettingsCategoryGroup.system),
   display('Tela & Display', Icons.monitor_rounded, SettingsCategoryGroup.system),
   sound('Áudio e Vídeo', Icons.volume_up_rounded, SettingsCategoryGroup.system),
   power('Energia & Bateria', Icons.battery_charging_full_rounded, SettingsCategoryGroup.system),
@@ -42,7 +44,7 @@ class SettingsWindow extends StatefulWidget {
   const SettingsWindow({
     this.snapshot = CloudOSBridge.degradedSnapshot,
     this.bridge = const CloudOSBridge(),
-    this.initialSection = SettingsSection.display,
+    this.initialSection = SettingsSection.overview,
     super.key,
   });
 
@@ -432,6 +434,7 @@ class _SettingsWindowState extends State<SettingsWindow> {
 
   Widget _buildMainContent() {
     return switch (_activeSection) {
+      SettingsSection.overview => _buildOverviewSection(),
       SettingsSection.display => _buildDisplaySection(),
       SettingsSection.sound => _buildSoundSection(),
       SettingsSection.power => _buildPowerSection(),
@@ -449,6 +452,231 @@ class _SettingsWindowState extends State<SettingsWindow> {
   }
 
   // --- SECTIONS ---
+
+  Widget _buildOverviewSection() {
+    final resolutionText = _monitors.isNotEmpty && _selectedMonitorIndex < _monitors.length
+        ? '${_monitors[_selectedMonitorIndex].width}x${_monitors[_selectedMonitorIndex].height} @ ${_monitors[_selectedMonitorIndex].frequency}Hz'
+        : 'Display Principal Ativo';
+
+    final soundText = _muted
+        ? 'Silenciado'
+        : 'Volume ${(_volume * 100).toInt()}%';
+
+    final netText = widget.snapshot.networkAvailable
+        ? (widget.snapshot.networkName.isNotEmpty ? widget.snapshot.networkName : 'Rede Conectada')
+        : 'Conexão Indisponível';
+
+    final powerText = widget.snapshot.batteryAvailable
+        ? '${widget.snapshot.batteryPercent}% • ${_performanceProfile.label}'
+        : 'Rede Elétrica • ${_performanceProfile.label}';
+
+    final wslText = widget.snapshot.wslAvailable
+        ? '${widget.snapshot.distros.length} distribuição(ões) ativa(s)'
+        : 'WSL Desativado';
+
+    final shellText = _shellStatus.status == ShellModeEnum.cloudosActive
+        ? 'CloudOS Ativo'
+        : 'Explorer Ativo (Gate 0 Seguro)';
+
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: <Widget>[
+        _buildSectionHeader(
+          'Central de Configurações CloudOS',
+          'Painel de controle unificado para vídeo, áudio, rede, subsistema Linux e preferências do sistema.',
+        ),
+        const SizedBox(height: 20),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final isWide = constraints.maxWidth > 580;
+            return Wrap(
+              spacing: 14,
+              runSpacing: 14,
+              children: <Widget>[
+                _buildOverviewCard(
+                  title: 'Tela & Resolução',
+                  status: resolutionText,
+                  icon: Icons.monitor_rounded,
+                  color: const Color(0xFF38BDF8),
+                  width: isWide ? (constraints.maxWidth - 14) / 2 : constraints.maxWidth,
+                  onTap: () => setState(() => _activeSection = SettingsSection.display),
+                ),
+                _buildOverviewCard(
+                  title: 'Áudio & Volume',
+                  status: soundText,
+                  icon: Icons.volume_up_rounded,
+                  color: const Color(0xFF10B981),
+                  width: isWide ? (constraints.maxWidth - 14) / 2 : constraints.maxWidth,
+                  onTap: () => setState(() => _activeSection = SettingsSection.sound),
+                ),
+                _buildOverviewCard(
+                  title: 'Rede & Internet',
+                  status: netText,
+                  icon: Icons.wifi_rounded,
+                  color: const Color(0xFF6366F1),
+                  width: isWide ? (constraints.maxWidth - 14) / 2 : constraints.maxWidth,
+                  onTap: () => setState(() => _activeSection = SettingsSection.network),
+                ),
+                _buildOverviewCard(
+                  title: 'Energia & Desempenho',
+                  status: powerText,
+                  icon: Icons.battery_charging_full_rounded,
+                  color: const Color(0xFFF59E0B),
+                  width: isWide ? (constraints.maxWidth - 14) / 2 : constraints.maxWidth,
+                  onTap: () => setState(() => _activeSection = SettingsSection.power),
+                ),
+                _buildOverviewCard(
+                  title: 'Linux (WSL2)',
+                  status: wslText,
+                  icon: Icons.terminal_rounded,
+                  color: const Color(0xFFEC4899),
+                  width: isWide ? (constraints.maxWidth - 14) / 2 : constraints.maxWidth,
+                  onTap: () => setState(() => _activeSection = SettingsSection.wsl),
+                ),
+                _buildOverviewCard(
+                  title: 'Shell & Segurança',
+                  status: shellText,
+                  icon: Icons.shield_rounded,
+                  color: const Color(0xFF14B8A6),
+                  width: isWide ? (constraints.maxWidth - 14) / 2 : constraints.maxWidth,
+                  onTap: () => setState(() => _activeSection = SettingsSection.startup),
+                ),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 24),
+        _buildCard(
+          title: 'Ações Rápidas de Sistema',
+          icon: Icons.tune_rounded,
+          child: Column(
+            children: <Widget>[
+              InkWell(
+                onTap: () => setState(() => _activeSection = SettingsSection.personalization),
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                  child: Row(
+                    children: <Widget>[
+                      const Icon(Icons.palette_rounded, color: CloudOSColors.accent, size: 22),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: const <Widget>[
+                            Text('Personalizar Tema e Cores', style: TextStyle(color: CloudOSColors.text, fontSize: 13, fontWeight: FontWeight.w600)),
+                            SizedBox(height: 2),
+                            Text('Alternar modo escuro/claro e cores de destaque', style: TextStyle(color: CloudOSColors.caption, fontSize: 11)),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.chevron_right_rounded, color: CloudOSColors.caption, size: 18),
+                    ],
+                  ),
+                ),
+              ),
+              const Divider(height: 1),
+              InkWell(
+                onTap: () => setState(() => _activeSection = SettingsSection.about),
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                  child: Row(
+                    children: <Widget>[
+                      const Icon(Icons.info_outline_rounded, color: CloudOSColors.secondary, size: 22),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: const <Widget>[
+                            Text('Sobre o CloudOS & Exportar Configurações', style: TextStyle(color: CloudOSColors.text, fontSize: 13, fontWeight: FontWeight.w600)),
+                            SizedBox(height: 2),
+                            Text('Informações de versão, arquitetura e backup de preferências', style: TextStyle(color: CloudOSColors.caption, fontSize: 11)),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.chevron_right_rounded, color: CloudOSColors.caption, size: 18),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOverviewCard({
+    required String title,
+    required String status,
+    required IconData icon,
+    required Color color,
+    required double width,
+    required VoidCallback onTap,
+  }) {
+    final isDark = cloudThemeNotifier.value.isDark;
+    return SizedBox(
+      width: width,
+      child: Material(
+        color: isDark ? const Color(0xFF16202E) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isDark ? CloudOSColors.border : const Color(0xFFE2E8F0),
+              ),
+            ),
+            child: Row(
+              children: <Widget>[
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(icon, color: color, size: 24),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        title,
+                        style: TextStyle(
+                          color: isDark ? Colors.white : const Color(0xFF0F172A),
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13.5,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        status,
+                        style: TextStyle(
+                          color: isDark ? CloudOSColors.secondary : const Color(0xFF64748B),
+                          fontSize: 12,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right_rounded, size: 20, color: CloudOSColors.caption),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _buildDisplaySection() {
     final monitor = _monitors.isNotEmpty && _selectedMonitorIndex < _monitors.length
@@ -1642,12 +1870,64 @@ Safe Mode: ${_recoveryStatus?.isSafeMode ?? false}
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text('CloudOS Desktop', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white)),
-                Text('Versão 21.0.0 • Etapa 8.5 System UI Ownership', style: TextStyle(fontSize: 12.5, color: CloudOSColors.caption)),
+                Text('Versão 1.0.0-rc1 • Release Candidate 1 (Build RC1)', style: TextStyle(fontSize: 12.5, color: CloudOSColors.caption)),
               ],
             ),
           ],
         ),
         const SizedBox(height: 24),
+        _buildCard(
+          title: 'Preferências e Backup do Usuário',
+          icon: Icons.settings_backup_restore_rounded,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              const Text(
+                'O CloudOS armazena suas configurações personalizadas (posições de ícones, tema, apps fixados e histórico) de forma isolada, sem alterar o Registro global do Windows.',
+                style: TextStyle(color: CloudOSColors.secondary, fontSize: 12.5),
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 12,
+                runSpacing: 10,
+                children: <Widget>[
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.file_download_outlined, size: 16),
+                    label: const Text('Exportar Configurações (JSON)'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: CloudOSColors.accent,
+                      side: const BorderSide(color: CloudOSColors.accent),
+                    ),
+                    onPressed: () async {
+                      final prefs = await CloudOSPreferences.load();
+                      final jsonString = prefs.exportJson();
+                      await widget.bridge.setClipboardText(jsonString);
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Configurações exportadas e copiadas para a Área de Transferência com sucesso!',
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.restart_alt_rounded, size: 16),
+                    label: const Text('Redefinir Configurações'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: CloudOSColors.danger,
+                      side: const BorderSide(color: CloudOSColors.danger),
+                    ),
+                    onPressed: _confirmResetPreferences,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
         _buildCard(
           title: 'Arquitetura e Princípios de Design',
           icon: Icons.architecture_rounded,
@@ -1679,6 +1959,56 @@ Safe Mode: ${_recoveryStatus?.isSafeMode ?? false}
         ),
       ],
     );
+  }
+
+  Future<void> _confirmResetPreferences() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF16202E),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: const BorderSide(color: CloudOSColors.danger),
+        ),
+        title: const Row(
+          children: <Widget>[
+            Icon(Icons.warning_amber_rounded, color: CloudOSColors.danger, size: 24),
+            SizedBox(width: 8),
+            Text('Redefinir Configurações', style: TextStyle(color: CloudOSColors.text, fontSize: 16)),
+          ],
+        ),
+        content: const Text(
+          'Deseja redefinir todas as preferências do CloudOS para os padrões de fábrica?\n\nIsso restaurará os ícones da Área de Trabalho, tema visual e aplicativos fixados ao padrão inicial.\n\nSeus arquivos pessoais e o sistema Windows NÃO serão afetados.',
+          style: TextStyle(color: CloudOSColors.secondary, fontSize: 13),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar', style: TextStyle(color: CloudOSColors.caption)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: CloudOSColors.danger),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Confirmar Redefinição', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      final prefs = await CloudOSPreferences.load();
+      await prefs.resetToDefaults();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Preferências do CloudOS restauradas para os padrões de fábrica!',
+            ),
+          ),
+        );
+        setState(() {});
+      }
+    }
   }
 
   Widget _buildStartupSection() {
