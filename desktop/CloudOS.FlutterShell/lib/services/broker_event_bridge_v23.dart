@@ -165,7 +165,7 @@ class BrokerEventBridgeV23 {
     if (_disposed) return;
     await stop();
     _disposed = true;
-    await _channel.setMethodCallHandler(null);
+    _channel.setMethodCallHandler(null);
     await _events.close();
     await _connectionEvents.close();
   }
