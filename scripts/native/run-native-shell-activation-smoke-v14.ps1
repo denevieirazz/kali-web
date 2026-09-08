@@ -67,6 +67,7 @@ $evidence = [ordered]@{
     expand_string_prior_type_restored = $false
     idempotent_activation = $false
     stable_shell_entry_ready_probe = $false
+    stable_shell_entry_ready_probe_exit_code = $null
     interrupted_activation_repaired = $false
     invalid_active_payload_rejected = $false
     uninstall_blocked_while_active = $false
@@ -91,10 +92,14 @@ try {
 
     $entry = Join-Path $installRoot 'shell-v14\CloudOS.ShellEntry.V14.ps1'
     Assert-True -Condition (Test-Path -LiteralPath $entry -PathType Leaf) -Message 'Stable V14 shell entry script was not installed.'
-    $probe = Start-Process -FilePath 'pwsh.exe' -ArgumentList @(
-        '-NoLogo', '-NoProfile', '-File', $entry, '-InstallRoot', $installRoot, '-ProbeReadyOnce'
-    ) -PassThru -Wait -WindowStyle Hidden
-    Assert-True -Condition ($probe.ExitCode -eq 0) -Message "Stable V14 shell entry readiness probe failed with exit code $($probe.ExitCode)."
+
+    # Execute the stable entry in this console host rather than wrapping pwsh in
+    # another hidden Start-Process. The entry itself still launches the real
+    # packaged Supervisor and returns its exact probe exit code.
+    & pwsh.exe -NoLogo -NoProfile -File $entry -InstallRoot $installRoot -ProbeReadyOnce
+    $probeExitCode = [int]$LASTEXITCODE
+    $evidence.stable_shell_entry_ready_probe_exit_code = $probeExitCode
+    Assert-True -Condition ($probeExitCode -eq 0) -Message "Stable V14 shell entry readiness probe failed with exit code $probeExitCode."
     $evidence.stable_shell_entry_ready_probe = $true
 
     $activation2 = Invoke-CloudOSShellActivation -InstallRoot $installRoot -RegistrySubKey $testSubKey -AllowTestRegistryOverride

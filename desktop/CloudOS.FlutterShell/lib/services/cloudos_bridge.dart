@@ -1,9 +1,32 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/file_models.dart';
-import '../models/shell_models.dart';
+import '../models/shell_models.dart' hide CloudFileItem;
+
+class TerminalDataEvent {
+  const TerminalDataEvent({required this.sessionId, required this.data});
+  final String sessionId;
+  final String data;
+}
+
+class TerminalExitEvent {
+  const TerminalExitEvent({required this.sessionId, required this.exitCode});
+  final String sessionId;
+  final int exitCode;
+}
+
+class CloudOSBridgeException implements Exception {
+  const CloudOSBridgeException(this.code, this.message);
+
+  final String code;
+  final String message;
+
+  @override
+  String toString() => message.isEmpty ? code : '$code: $message';
+}
 
 class CloudOSBridge {
   const CloudOSBridge({
@@ -11,47 +34,104 @@ class CloudOSBridge {
   }) : _channel = channel;
 
   final MethodChannel _channel;
+  static bool _handlerInitialized = false;
+  static final StreamController<TerminalDataEvent> _terminalDataController =
+      StreamController<TerminalDataEvent>.broadcast();
+  static final StreamController<TerminalExitEvent> _terminalExitController =
+      StreamController<TerminalExitEvent>.broadcast();
+
+  Stream<TerminalDataEvent> get terminalDataStream {
+    _ensureChannelHandler();
+    return _terminalDataController.stream;
+  }
+
+  Stream<TerminalExitEvent> get terminalExitStream {
+    _ensureChannelHandler();
+    return _terminalExitController.stream;
+  }
+
+  void _ensureChannelHandler() {
+    if (_handlerInitialized) return;
+    _handlerInitialized = true;
+    _channel.setMethodCallHandler((call) async {
+      final method = call.method;
+      final args = call.arguments;
+
+      if (method == 'terminal.onData' && args is Map) {
+        final sid = args['sessionId'] as String? ?? '';
+        final data = args['data'] as String? ?? '';
+        _terminalDataController.add(TerminalDataEvent(sessionId: sid, data: data));
+      } else if (method == 'terminal.onExit' && args is Map) {
+        final sid = args['sessionId'] as String? ?? '';
+        final code = (args['exitCode'] as num?)?.toInt() ?? 0;
+        _terminalExitController.add(TerminalExitEvent(sessionId: sid, exitCode: code));
+      }
+    });
+  }
 
   Future<List<CloudApp>> loadApps() async {
     try {
-      final raw = await _channel.invokeListMethod<Map<Object?, Object?>>('getApps');
-      if (raw == null || raw.isEmpty) return previewApps;
-      return raw.map(_appFromNative).toList(growable: false);
-    } on MissingPluginException {
-      return previewApps;
-    } on PlatformException {
-      return previewApps;
+      final payload = await invokeBrokerRpc(
+        'apps.list',
+        const <String, Object?>{},
+      );
+      final raw = payload['apps'];
+      if (raw is! List<Object?>) return const <CloudApp>[];
+      return raw
+          .whereType<Map<String, Object?>>()
+          .map((entry) => _appFromNative(entry))
+          .toList(growable: false);
+    } on CloudOSBridgeException {
+      return const <CloudApp>[];
     }
   }
 
   Future<CloudSystemSnapshot> loadSystemSnapshot() async {
     try {
-      final raw = await _channel.invokeMapMethod<String, Object?>('getSystemSnapshot');
-      if (raw == null) return previewSnapshot;
-      return CloudSystemSnapshot(
-        deviceName: raw['deviceName'] as String? ?? previewSnapshot.deviceName,
-        networkName: raw['networkName'] as String? ?? previewSnapshot.networkName,
-        volume: (raw['volume'] as num?)?.toDouble() ?? previewSnapshot.volume,
-        brightness: (raw['brightness'] as num?)?.toDouble() ?? previewSnapshot.brightness,
-        batteryPercent: (raw['batteryPercent'] as num?)?.toInt() ?? previewSnapshot.batteryPercent,
-        wslAvailable: raw['wslAvailable'] as bool? ?? previewSnapshot.wslAvailable,
-        distros: (raw['distros'] as List<Object?>?)?.whereType<String>().toList() ??
-            previewSnapshot.distros,
-        currentWorkspace: (raw['currentWorkspace'] as num?)?.toInt() ?? previewSnapshot.currentWorkspace,
+      final raw = await invokeBrokerRpc(
+        'system.snapshot',
+        const <String, Object?>{},
       );
-    } on MissingPluginException {
-      return previewSnapshot;
-    } on PlatformException {
-      return previewSnapshot;
+      return CloudSystemSnapshot(
+        deviceName:
+            raw['deviceName'] as String? ?? unavailableSnapshot.deviceName,
+        networkName:
+            raw['networkName'] as String? ?? unavailableSnapshot.networkName,
+        volume:
+            (raw['volume'] as num?)?.toDouble() ?? unavailableSnapshot.volume,
+        brightness:
+            (raw['brightness'] as num?)?.toDouble() ??
+            unavailableSnapshot.brightness,
+        batteryPercent:
+            (raw['batteryPercent'] as num?)?.toInt() ??
+            unavailableSnapshot.batteryPercent,
+        wslAvailable: raw['wslAvailable'] as bool? ?? false,
+        distros:
+            (raw['distros'] as List<Object?>?)?.whereType<String>().toList() ??
+            const <String>[],
+        defaultDistro: raw['defaultDistro'] as String? ?? '',
+        // Workspace belongs to WindowManager + Session V3. Older Brokers may
+        // still send this field, but the shell does not use it as authority.
+        currentWorkspace: (raw['currentWorkspace'] as num?)?.toInt() ?? 0,
+        batteryAvailable: raw['batteryAvailable'] as bool? ?? false,
+        networkAvailable: raw['networkAvailable'] as bool? ?? false,
+        volumeAvailable: raw['volumeAvailable'] as bool? ?? false,
+        brightnessAvailable: raw['brightnessAvailable'] as bool? ?? false,
+      );
+    } on CloudOSBridgeException {
+      return unavailableSnapshot;
     }
   }
 
   Future<bool> launchApp(String id) async {
     try {
-      final result = await _channel.invokeMethod<bool>('launchApp', <String, Object?>{'id': id});
-      return result ?? true;
+      final result = await _channel.invokeMethod<bool>(
+        'launchApp',
+        <String, Object?>{'id': id},
+      );
+      return result ?? false;
     } on MissingPluginException {
-      return true;
+      return false;
     } on PlatformException {
       return false;
     }
@@ -59,10 +139,13 @@ class CloudOSBridge {
 
   Future<bool> setVolume(double value) async {
     try {
-      final result = await _channel.invokeMethod<bool>('setVolume', <String, Object?>{'value': value});
-      return result ?? true;
+      final result = await _channel.invokeMethod<bool>(
+        'setVolume',
+        <String, Object?>{'value': value},
+      );
+      return result ?? false;
     } on MissingPluginException {
-      return true;
+      return false;
     } on PlatformException {
       return false;
     }
@@ -70,10 +153,13 @@ class CloudOSBridge {
 
   Future<bool> setBrightness(double value) async {
     try {
-      final result = await _channel.invokeMethod<bool>('setBrightness', <String, Object?>{'value': value});
-      return result ?? true;
+      final result = await _channel.invokeMethod<bool>(
+        'setBrightness',
+        <String, Object?>{'value': value},
+      );
+      return result ?? false;
     } on MissingPluginException {
-      return true;
+      return false;
     } on PlatformException {
       return false;
     }
@@ -81,73 +167,229 @@ class CloudOSBridge {
 
   Future<Map<String, Object?>> getBridgeInfo() async {
     try {
-      final raw = await _channel.invokeMapMethod<String, Object?>('getBridgeInfo');
+      final raw = await _channel.invokeMapMethod<String, Object?>(
+        'getBridgeInfo',
+      );
       if (raw != null) return raw;
     } on MissingPluginException {
-      // Fallback
+      // The native runner is not registered in this process.
     } on PlatformException {
-      // Fallback
+      // The native runner rejected or could not service the request.
     }
     return const <String, Object?>{
-      'schema': 22,
-      'version': 'v22-preview',
-      'bridge_type': 'PreviewFallback',
+      'schema': 23,
+      'version': 'unavailable',
+      'bridge_type': 'Unavailable',
+      'nativeBridgeAvailable': false,
       'brokerConnected': false,
-      'brokerState': 'degraded',
+      'brokerState': 'unavailable',
       'channel': 'cloudos/native/v19',
+      'eventChannel': 'cloudos/native/events/v23',
+      'dedicatedEventTransportAvailable': false,
+      'generic_broker_rpc_restricted': true,
       'arbitrary_command_api': false,
     };
+  }
+
+  Future<bool> lockSession() async {
+    try {
+      final res = await _channel.invokeMethod<bool>('lockSession');
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<Map<String, Object?>> getSystemMetrics() async {
+    try {
+      final raw = await _channel.invokeMapMethod<String, Object?>('getSystemMetrics');
+      if (raw != null) return raw;
+    } catch (_) {}
+    return const <String, Object?>{};
+  }
+
+  // ==========================================
+  // ConPTY Native Terminal Methods
+  // ==========================================
+
+  Future<String?> createTerminalSession({
+    String shellKind = 'powershell',
+    String distro = '',
+    String workingDirectory = '',
+    int cols = 80,
+    int rows = 24,
+  }) async {
+    try {
+      final res = await _channel.invokeMapMethod<String, Object?>(
+        'terminal.createSession',
+        <String, Object?>{
+          'shellKind': shellKind,
+          'distro': distro,
+          'workingDirectory': workingDirectory,
+          'cols': cols,
+          'rows': rows,
+        },
+      );
+      return res?['sessionId'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> writeTerminal(String sessionId, String data) async {
+    try {
+      final res = await _channel.invokeMethod<bool>(
+        'terminal.write',
+        <String, Object?>{
+          'sessionId': sessionId,
+          'data': data,
+        },
+      );
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> resizeTerminal(String sessionId, int cols, int rows) async {
+    try {
+      final res = await _channel.invokeMethod<bool>(
+        'terminal.resize',
+        <String, Object?>{
+          'sessionId': sessionId,
+          'cols': cols,
+          'rows': rows,
+        },
+      );
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> signalTerminal(String sessionId, String signal) async {
+    try {
+      final res = await _channel.invokeMethod<bool>(
+        'terminal.signal',
+        <String, Object?>{
+          'sessionId': sessionId,
+          'signal': signal,
+        },
+      );
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> closeTerminal(String sessionId) async {
+    try {
+      final res = await _channel.invokeMethod<bool>(
+        'terminal.close',
+        <String, Object?>{
+          'sessionId': sessionId,
+        },
+      );
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<List<Map<String, Object?>>> listTerminalSessions() async {
+    try {
+      final res = await _channel.invokeListMethod<Map<String, Object?>>(
+        'terminal.listSessions',
+      );
+      return res ?? const <Map<String, Object?>>[];
+    } catch (_) {
+      return const <Map<String, Object?>>[];
+    }
   }
 
   // ==========================================
   // V22 FileService RPC Methods
   // ==========================================
 
-  Future<Map<String, Object?>?> invokeBrokerRpc(String method, Map<String, Object?> payload) async {
+  Future<Map<String, Object?>> invokeBrokerRpc(
+    String method,
+    Map<String, Object?> payload,
+  ) async {
     try {
-      final jsonStr = await _channel.invokeMethod<String>('invokeBrokerRpc', <String, Object?>{
-        'method': method,
-        'payload': jsonEncode(payload),
-      });
-      if (jsonStr == null || jsonStr.isEmpty) return null;
+      final jsonStr = await _channel.invokeMethod<String>(
+        'invokeBrokerRpc',
+        <String, Object?>{'method': method, 'payload': jsonEncode(payload)},
+      );
+      if (jsonStr == null || jsonStr.isEmpty) {
+        throw const CloudOSBridgeException(
+          'empty_response',
+          'O broker retornou uma resposta vazia.',
+        );
+      }
       final decoded = jsonDecode(jsonStr);
       if (decoded is Map<String, Object?>) {
-        if (decoded['ok'] == true && decoded['payload'] is Map<String, Object?>) {
+        if (decoded['ok'] == true &&
+            decoded['payload'] is Map<String, Object?>) {
           return decoded['payload'] as Map<String, Object?>;
         }
+        final error = decoded['error'];
+        if (error is Map<String, Object?>) {
+          throw CloudOSBridgeException(
+            error['code'] as String? ?? 'broker_error',
+            error['message'] as String? ?? 'O broker rejeitou a operação.',
+          );
+        }
       }
+      throw const CloudOSBridgeException(
+        'invalid_response',
+        'O broker retornou JSON inválido.',
+      );
     } on MissingPluginException {
-      return null;
-    } on PlatformException {
-      return null;
-    } catch (_) {
-      return null;
+      throw const CloudOSBridgeException(
+        'bridge_unavailable',
+        'A ponte nativa do CloudOS não está disponível.',
+      );
+    } on PlatformException catch (error) {
+      throw CloudOSBridgeException(
+        error.code,
+        error.message ?? 'Falha na ponte nativa do CloudOS.',
+      );
+    } on FormatException {
+      throw const CloudOSBridgeException(
+        'invalid_json',
+        'O broker retornou JSON malformado.',
+      );
     }
-    return null;
   }
 
   Future<List<KnownFolderModel>> getKnownFolders() async {
-    final res = await invokeBrokerRpc('files.knownFolders', const <String, Object?>{});
-    if (res != null && res['folders'] is List<Object?>) {
+    final res = await invokeBrokerRpc(
+      'files.knownFolders',
+      const <String, Object?>{},
+    );
+    if (res['folders'] is List<Object?>) {
       final list = res['folders'] as List<Object?>;
       return list
           .whereType<Map<String, Object?>>()
           .map((m) => KnownFolderModel.fromJson(m))
           .toList(growable: false);
     }
-    return previewKnownFolders;
+    return const <KnownFolderModel>[];
   }
 
   Future<List<DriveInfoModel>> getDrives() async {
-    final res = await invokeBrokerRpc('files.drives', const <String, Object?>{});
-    if (res != null && res['drives'] is List<Object?>) {
+    final res = await invokeBrokerRpc(
+      'files.drives',
+      const <String, Object?>{},
+    );
+    if (res['drives'] is List<Object?>) {
       final list = res['drives'] as List<Object?>;
       return list
           .whereType<Map<String, Object?>>()
           .map((m) => DriveInfoModel.fromJson(m))
           .toList(growable: false);
     }
-    return previewDrives;
+    return const <DriveInfoModel>[];
   }
 
   Future<List<CloudFileItem>> listFiles(
@@ -160,9 +402,12 @@ class CloudOSBridge {
     String searchText = '',
   }) async {
     String sf = 'name';
-    if (sortField == FileSortField.size) sf = 'size';
-    else if (sortField == FileSortField.modified) sf = 'modified';
-    else if (sortField == FileSortField.type) sf = 'type';
+    if (sortField == FileSortField.size)
+      sf = 'size';
+    else if (sortField == FileSortField.modified)
+      sf = 'modified';
+    else if (sortField == FileSortField.type)
+      sf = 'type';
 
     final res = await invokeBrokerRpc('files.list', <String, Object?>{
       'path': path,
@@ -175,7 +420,7 @@ class CloudOSBridge {
       'searchText': searchText,
     });
 
-    if (res != null && res['items'] is List<Object?>) {
+    if (res['items'] is List<Object?>) {
       final list = res['items'] as List<Object?>;
       return list
           .whereType<Map<String, Object?>>()
@@ -183,15 +428,14 @@ class CloudOSBridge {
           .toList(growable: false);
     }
 
-    return previewFiles[path] ?? previewFiles['home'] ?? <CloudFileItem>[];
+    return const <CloudFileItem>[];
   }
 
   Future<CloudFileItem?> getFileMetadata(String path) async {
-    final res = await invokeBrokerRpc('files.metadata', <String, Object?>{'path': path});
-    if (res != null) {
-      return CloudFileItem.fromJson(res);
-    }
-    return null;
+    final res = await invokeBrokerRpc('files.metadata', <String, Object?>{
+      'path': path,
+    });
+    return CloudFileItem.fromJson(res);
   }
 
   Future<bool> createFolder(String parentPath, String name) async {
@@ -199,7 +443,7 @@ class CloudOSBridge {
       'parentPath': parentPath,
       'name': name,
     });
-    return res?['ok'] == true;
+    return res['ok'] == true;
   }
 
   Future<bool> renameItem(String path, String newName) async {
@@ -207,7 +451,7 @@ class CloudOSBridge {
       'path': path,
       'newName': newName,
     });
-    return res?['ok'] == true;
+    return res['ok'] == true;
   }
 
   Future<bool> deleteItems(List<String> paths, {bool permanent = false}) async {
@@ -215,61 +459,96 @@ class CloudOSBridge {
       'paths': paths,
       'permanent': permanent,
     });
-    return res?['ok'] == true;
+    return res['ok'] == true;
   }
 
-  Future<String?> copyItems(List<String> sources, String destination, {String overwritePolicy = 'ask'}) async {
+  Future<String?> copyItems(
+    List<String> sources,
+    String destination, {
+    String overwritePolicy = 'ask',
+  }) async {
     final res = await invokeBrokerRpc('files.copy', <String, Object?>{
       'sources': sources,
       'destination': destination,
       'overwritePolicy': overwritePolicy,
     });
-    return res?['jobId'] as String?;
+    return res['jobId'] as String?;
   }
 
-  Future<String?> moveItems(List<String> sources, String destination, {String overwritePolicy = 'ask'}) async {
+  Future<String?> moveItems(
+    List<String> sources,
+    String destination, {
+    String overwritePolicy = 'ask',
+  }) async {
     final res = await invokeBrokerRpc('files.move', <String, Object?>{
       'sources': sources,
       'destination': destination,
       'overwritePolicy': overwritePolicy,
     });
-    return res?['jobId'] as String?;
+    return res['jobId'] as String?;
   }
 
-  Future<String?> searchFiles(String rootPath, String query, {bool recursive = true}) async {
+  Future<String?> searchFiles(
+    String rootPath,
+    String query, {
+    bool recursive = true,
+  }) async {
     final res = await invokeBrokerRpc('files.search', <String, Object?>{
       'rootPath': rootPath,
       'query': query,
       'recursive': recursive,
     });
-    return res?['jobId'] as String?;
+    return res['jobId'] as String?;
+  }
+
+  Future<Map<String, Object?>> getJobStatus(String jobId) {
+    return invokeBrokerRpc('jobs.status', <String, Object?>{'jobId': jobId});
+  }
+
+  Future<bool> cancelJob(String jobId) async {
+    final res = await invokeBrokerRpc('jobs.cancel', <String, Object?>{
+      'jobId': jobId,
+    });
+    return res['cancelled'] == true;
   }
 
   Future<bool> openDefault(String path) async {
-    final res = await invokeBrokerRpc('files.open', <String, Object?>{'path': path});
-    return res?['ok'] == true;
+    final res = await invokeBrokerRpc('files.open', <String, Object?>{
+      'path': path,
+    });
+    return res['ok'] == true;
   }
 
   Future<List<OpenWithAppModel>> getOpenWithList(String path) async {
-    final res = await invokeBrokerRpc('files.openWith.list', <String, Object?>{'path': path});
-    if (res != null && res['apps'] is List<Object?>) {
+    final res = await invokeBrokerRpc('files.openWith.list', <String, Object?>{
+      'path': path,
+    });
+    if (res['apps'] is List<Object?>) {
       final list = res['apps'] as List<Object?>;
       return list
           .whereType<Map<String, Object?>>()
           .map((m) => OpenWithAppModel.fromJson(m))
           .toList(growable: false);
     }
-    return previewOpenWith;
+    return const <OpenWithAppModel>[];
   }
 
-  Future<bool> launchOpenWith(String path, String appId, String platform, {String distro = ''}) async {
-    final res = await invokeBrokerRpc('files.openWith.launch', <String, Object?>{
-      'path': path,
-      'appId': appId,
-      'platform': platform,
-      'distro': distro,
-    });
-    return res?['ok'] == true;
+  Future<bool> launchOpenWith(
+    String path,
+    String appId,
+    String platform, {
+    String distro = '',
+  }) async {
+    final res = await invokeBrokerRpc(
+      'files.openWith.launch',
+      <String, Object?>{
+        'path': path,
+        'appId': appId,
+        'platform': platform,
+        'distro': distro,
+      },
+    );
+    return res['ok'] == true;
   }
 
   CloudApp _appFromNative(Map<Object?, Object?> raw) {
@@ -307,10 +586,15 @@ class CloudOSBridge {
     if (normalized.contains('files') || normalized.contains('explorer')) {
       return Icons.folder_rounded;
     }
-    if (normalized.contains('browser') || normalized.contains('chrome') || normalized.contains('edge')) {
+    if (normalized.contains('browser') ||
+        normalized.contains('chrome') ||
+        normalized.contains('edge')) {
       return Icons.public_rounded;
     }
-    if (normalized.contains('terminal') || normalized.contains('powershell') || normalized.contains('cmd') || normalized.contains('xterm')) {
+    if (normalized.contains('terminal') ||
+        normalized.contains('powershell') ||
+        normalized.contains('cmd') ||
+        normalized.contains('xterm')) {
       return Icons.terminal_rounded;
     }
     if (normalized.contains('calc')) {
@@ -346,254 +630,18 @@ class CloudOSBridge {
     return Icons.apps_rounded;
   }
 
-  static const previewSnapshot = CloudSystemSnapshot(
-    deviceName: 'CloudOS Desktop',
-    networkName: 'CloudOS Network • Wi-Fi 6',
-    volume: 0.72,
-    brightness: 0.85,
-    batteryPercent: 92,
-    wslAvailable: true,
-    distros: <String>['Ubuntu 24.04 LTS'],
-    currentWorkspace: 1,
+  static const unavailableSnapshot = CloudSystemSnapshot(
+    deviceName: 'CloudOS indisponível',
+    networkName: 'Rede indisponível',
+    volume: 0,
+    brightness: 0,
+    batteryPercent: -1,
+    wslAvailable: false,
+    distros: <String>[],
+    currentWorkspace: 0,
+    batteryAvailable: false,
+    networkAvailable: false,
+    volumeAvailable: false,
+    brightnessAvailable: false,
   );
-
-  static const previewApps = <CloudApp>[
-    CloudApp(
-      id: 'files',
-      name: 'Arquivos',
-      icon: Icons.folder_rounded,
-      platform: CloudAppPlatform.cloudos,
-      subtitle: 'Windows + Linux',
-      category: 'Sistema',
-      isPinned: true,
-      isRecent: true,
-    ),
-    CloudApp(
-      id: 'browser',
-      name: 'Navegador Web',
-      icon: Icons.language_rounded,
-      platform: CloudAppPlatform.cloudos,
-      subtitle: 'Chromium / WebView2',
-      category: 'Produtividade',
-      isPinned: true,
-      isRecent: true,
-    ),
-    CloudApp(
-      id: 'terminal',
-      name: 'Terminal CloudOS',
-      icon: Icons.terminal_rounded,
-      platform: CloudAppPlatform.cloudos,
-      subtitle: 'PowerShell 7 / WSL',
-      category: 'Utilitários',
-      isPinned: true,
-      isRecent: true,
-    ),
-    CloudApp(
-      id: 'vscode',
-      name: 'Visual Studio Code',
-      icon: Icons.code_rounded,
-      platform: CloudAppPlatform.windows,
-      subtitle: 'Code Editor',
-      category: 'Produtividade',
-      isPinned: true,
-      isRecent: true,
-    ),
-    CloudApp(
-      id: 'notepad',
-      name: 'Bloco de Notas',
-      icon: Icons.edit_note_rounded,
-      platform: CloudAppPlatform.windows,
-      subtitle: 'Editor de Texto',
-      category: 'Produtividade',
-      isPinned: true,
-      isRecent: false,
-    ),
-    CloudApp(
-      id: 'gimp',
-      name: 'GIMP Image Editor',
-      icon: Icons.brush_rounded,
-      platform: CloudAppPlatform.linux,
-      subtitle: 'Ubuntu (WSLg)',
-      distro: 'Ubuntu',
-      category: 'Produtividade',
-      isPinned: true,
-      isRecent: false,
-    ),
-  ];
-
-  static const previewKnownFolders = <KnownFolderModel>[
-    KnownFolderModel(id: 'home', name: 'Início', path: 'C:\\Users\\User', iconKey: 'home'),
-    KnownFolderModel(id: 'desktop', name: 'Área de Trabalho', path: 'C:\\Users\\User\\Desktop', iconKey: 'desktop'),
-    KnownFolderModel(id: 'documents', name: 'Documentos', path: 'C:\\Users\\User\\Documents', iconKey: 'documents'),
-    KnownFolderModel(id: 'downloads', name: 'Downloads', path: 'C:\\Users\\User\\Downloads', iconKey: 'downloads'),
-    KnownFolderModel(id: 'pictures', name: 'Imagens', path: 'C:\\Users\\User\\Pictures', iconKey: 'pictures'),
-    KnownFolderModel(id: 'videos', name: 'Vídeos', path: 'C:\\Users\\User\\Videos', iconKey: 'videos'),
-    KnownFolderModel(id: 'music', name: 'Músicas', path: 'C:\\Users\\User\\Music', iconKey: 'music'),
-    KnownFolderModel(id: 'wsl:Ubuntu', name: 'Ubuntu (WSL)', path: '\\\\wsl.localhost\\Ubuntu', iconKey: 'linux'),
-  ];
-
-  static const previewDrives = <DriveInfoModel>[
-    DriveInfoModel(
-      letter: 'C:',
-      path: 'C:\\',
-      label: 'Disco Local (C:)',
-      filesystem: 'NTFS',
-      totalBytes: 512000000000,
-      freeBytes: 256000000000,
-      totalFormatted: '512.0 GB',
-      freeFormatted: '256.0 GB',
-      isRemovable: false,
-      isReady: true,
-      driveType: 'fixed',
-    ),
-  ];
-
-  static const previewOpenWith = <OpenWithAppModel>[
-    OpenWithAppModel(
-      appId: 'windows:default',
-      name: 'Aplicativo Padrão do Windows',
-      platform: 'windows',
-      distro: '',
-      iconKey: 'window',
-      isRecommended: true,
-      isDefault: true,
-    ),
-    OpenWithAppModel(
-      appId: 'windows:notepad',
-      name: 'Bloco de Notas (Windows)',
-      platform: 'windows',
-      distro: '',
-      iconKey: 'file_text',
-      isRecommended: true,
-      isDefault: false,
-    ),
-    OpenWithAppModel(
-      appId: 'windows:vscode',
-      name: 'Visual Studio Code',
-      platform: 'windows',
-      distro: '',
-      iconKey: 'code',
-      isRecommended: true,
-      isDefault: false,
-    ),
-    OpenWithAppModel(
-      appId: 'wsl:Ubuntu:gimp',
-      name: 'GIMP Image Editor (Ubuntu)',
-      platform: 'linux',
-      distro: 'Ubuntu',
-      iconKey: 'brush',
-      isRecommended: false,
-      isDefault: false,
-    ),
-  ];
-
-  static const previewFiles = <String, List<CloudFileItem>>{
-    'home': <CloudFileItem>[
-      CloudFileItem(
-        id: 'file-1',
-        name: 'Projetos CloudOS',
-        displayName: 'Projetos CloudOS',
-        path: 'C:\\Users\\User\\Documents\\Projetos',
-        canonicalPath: 'C:\\Users\\User\\Documents\\Projetos',
-        locationKind: LocationKind.windows,
-        fileKind: FileKind.folder,
-        extension: '',
-        size: 0,
-        sizeFormatted: '',
-        modifiedFormatted: 'Hoje, 14:20',
-        createdFormatted: 'Ontem',
-        isDirectory: true,
-        isHidden: false,
-        isReadOnly: false,
-        isSystem: false,
-        isSymlink: false,
-        distro: '',
-        iconKey: 'folder',
-      ),
-      CloudFileItem(
-        id: 'file-2',
-        name: 'Relatório de Arquitetura V22.docx',
-        displayName: 'Relatório de Arquitetura V22.docx',
-        path: 'C:\\Users\\User\\Documents\\Relatório.docx',
-        canonicalPath: 'C:\\Users\\User\\Documents\\Relatório.docx',
-        locationKind: LocationKind.windows,
-        fileKind: FileKind.document,
-        extension: '.docx',
-        size: 1048576,
-        sizeFormatted: '1.0 MB',
-        modifiedFormatted: 'Hoje, 11:05',
-        createdFormatted: 'Ontem',
-        isDirectory: false,
-        isHidden: false,
-        isReadOnly: false,
-        isSystem: false,
-        isSymlink: false,
-        distro: '',
-        iconKey: 'file_document',
-      ),
-      CloudFileItem(
-        id: 'file-3',
-        name: 'linux_workspace_ubuntu',
-        displayName: 'linux_workspace_ubuntu',
-        path: '\\\\wsl.localhost\\Ubuntu\\home\\user',
-        canonicalPath: '\\\\wsl.localhost\\Ubuntu\\home\\user',
-        locationKind: LocationKind.wsl,
-        fileKind: FileKind.folder,
-        extension: '',
-        size: 0,
-        sizeFormatted: '',
-        modifiedFormatted: 'Ontem, 19:42',
-        createdFormatted: '2 dias atrás',
-        isDirectory: true,
-        isHidden: false,
-        isReadOnly: false,
-        isSystem: false,
-        isSymlink: false,
-        distro: 'Ubuntu',
-        iconKey: 'folder',
-      ),
-      CloudFileItem(
-        id: 'file-4',
-        name: 'script_automacao.sh',
-        displayName: 'script_automacao.sh',
-        path: '\\\\wsl.localhost\\Ubuntu\\home\\user\\script.sh',
-        canonicalPath: '\\\\wsl.localhost\\Ubuntu\\home\\user\\script.sh',
-        locationKind: LocationKind.wsl,
-        fileKind: FileKind.code,
-        extension: '.sh',
-        size: 4096,
-        sizeFormatted: '4.0 KB',
-        modifiedFormatted: '28 de Ago',
-        createdFormatted: '28 de Ago',
-        isDirectory: false,
-        isHidden: false,
-        isReadOnly: false,
-        isSystem: false,
-        isSymlink: false,
-        distro: 'Ubuntu',
-        iconKey: 'file_code',
-      ),
-    ],
-  };
-
-  static const previewNotifications = <CloudNotification>[
-    CloudNotification(
-      id: 'notif-1',
-      title: 'CloudOS Atualizado',
-      message: 'A versão V22 do CloudOS com Unified Files foi carregada com sucesso.',
-      time: 'Agora',
-      icon: Icons.system_update_rounded,
-      source: 'Sistema',
-      category: 'Atualizações',
-    ),
-    CloudNotification(
-      id: 'notif-2',
-      title: 'WSL2 Conectado',
-      message: 'Ambiente Linux Ubuntu 24.04 LTS pronto para navegação e launch.',
-      time: 'Há 5m',
-      icon: Icons.terminal_rounded,
-      source: 'WSL Bridge',
-      category: 'Integração',
-    ),
-  ];
 }

@@ -12,7 +12,7 @@ enum FileKind {
   archive,
   executable,
   code,
-  unknown
+  unknown,
 }
 
 enum FileSortField { name, size, modified, type }
@@ -126,28 +126,36 @@ class CloudFileItem {
 
   factory CloudFileItem.fromJson(Map<String, Object?> json) {
     final lkStr = json['locationKind'] as String? ?? 'windows';
-    final lk = lkStr == 'wsl'
-        ? LocationKind.wsl
-        : (lkStr == 'network' ? LocationKind.network : LocationKind.windows);
+    final lk = switch (lkStr) {
+      'wsl' => LocationKind.wsl,
+      'network' => LocationKind.network,
+      'cloudos' => LocationKind.cloudos,
+      'virtual' => LocationKind.virtual,
+      _ => LocationKind.windows,
+    };
 
     final fkStr = json['fileKind'] as String? ?? 'unknown';
-    FileKind fk = FileKind.unknown;
-    if (fkStr == 'folder') fk = FileKind.folder;
-    else if (fkStr == 'text') fk = FileKind.text;
-    else if (fkStr == 'image') fk = FileKind.image;
-    else if (fkStr == 'audio') fk = FileKind.audio;
-    else if (fkStr == 'video') fk = FileKind.video;
-    else if (fkStr == 'document') fk = FileKind.document;
-    else if (fkStr == 'archive') fk = FileKind.archive;
-    else if (fkStr == 'executable') fk = FileKind.executable;
-    else if (fkStr == 'code') fk = FileKind.code;
+    final fk = switch (fkStr) {
+      'folder' => FileKind.folder,
+      'text' => FileKind.text,
+      'image' => FileKind.image,
+      'audio' => FileKind.audio,
+      'video' => FileKind.video,
+      'document' => FileKind.document,
+      'archive' => FileKind.archive,
+      'executable' => FileKind.executable,
+      'code' => FileKind.code,
+      _ => FileKind.unknown,
+    };
 
     return CloudFileItem(
       id: json['id'] as String? ?? '',
       name: json['name'] as String? ?? '',
-      displayName: json['displayName'] as String? ?? json['name'] as String? ?? '',
+      displayName:
+          json['displayName'] as String? ?? json['name'] as String? ?? '',
       path: json['path'] as String? ?? '',
-      canonicalPath: json['canonicalPath'] as String? ?? json['path'] as String? ?? '',
+      canonicalPath:
+          json['canonicalPath'] as String? ?? json['path'] as String? ?? '',
       locationKind: lk,
       fileKind: fk,
       extension: json['extension'] as String? ?? '',
@@ -162,12 +170,12 @@ class CloudFileItem {
       isSymlink: json['isSymlink'] as bool? ?? false,
       distro: json['distro'] as String? ?? '',
       iconKey: json['iconKey'] as String? ?? '',
-      canRename: json['canRename'] as bool? ?? true,
-      canDelete: json['canDelete'] as bool? ?? true,
-      canOpen: json['canOpen'] as bool? ?? true,
-      canOpenWith: json['canOpenWith'] as bool? ?? true,
-      canCopy: json['canCopy'] as bool? ?? true,
-      canMove: json['canMove'] as bool? ?? true,
+      canRename: json['canRename'] as bool? ?? false,
+      canDelete: json['canDelete'] as bool? ?? false,
+      canOpen: json['canOpen'] as bool? ?? false,
+      canOpenWith: json['canOpenWith'] as bool? ?? false,
+      canCopy: json['canCopy'] as bool? ?? false,
+      canMove: json['canMove'] as bool? ?? false,
     );
   }
 }
@@ -201,17 +209,17 @@ class DriveInfoModel {
 
   factory DriveInfoModel.fromJson(Map<String, Object?> json) {
     return DriveInfoModel(
-      letter: json['letter'] as String? ?? 'C:',
-      path: json['path'] as String? ?? 'C:\\',
-      label: json['label'] as String? ?? 'Disco Local',
-      filesystem: json['filesystem'] as String? ?? 'NTFS',
+      letter: json['letter'] as String? ?? '',
+      path: json['path'] as String? ?? '',
+      label: json['label'] as String? ?? '',
+      filesystem: json['filesystem'] as String? ?? '',
       totalBytes: (json['totalBytes'] as num?)?.toDouble() ?? 0.0,
       freeBytes: (json['freeBytes'] as num?)?.toDouble() ?? 0.0,
       totalFormatted: json['totalFormatted'] as String? ?? '',
       freeFormatted: json['freeFormatted'] as String? ?? '',
       isRemovable: json['isRemovable'] as bool? ?? false,
-      isReady: json['isReady'] as bool? ?? true,
-      driveType: json['driveType'] as String? ?? 'fixed',
+      isReady: json['isReady'] as bool? ?? false,
+      driveType: json['driveType'] as String? ?? 'unknown',
     );
   }
 }
@@ -231,15 +239,24 @@ class KnownFolderModel {
 
   IconData get icon {
     switch (iconKey) {
-      case 'home': return Icons.home_rounded;
-      case 'desktop': return Icons.desktop_windows_rounded;
-      case 'documents': return Icons.description_rounded;
-      case 'downloads': return Icons.download_rounded;
-      case 'pictures': return Icons.image_rounded;
-      case 'videos': return Icons.movie_rounded;
-      case 'music': return Icons.audiotrack_rounded;
-      case 'linux': return Icons.terminal_rounded;
-      default: return Icons.folder_rounded;
+      case 'home':
+        return Icons.home_rounded;
+      case 'desktop':
+        return Icons.desktop_windows_rounded;
+      case 'documents':
+        return Icons.description_rounded;
+      case 'downloads':
+        return Icons.download_rounded;
+      case 'pictures':
+        return Icons.image_rounded;
+      case 'videos':
+        return Icons.movie_rounded;
+      case 'music':
+        return Icons.audiotrack_rounded;
+      case 'linux':
+        return Icons.terminal_rounded;
+      default:
+        return Icons.folder_rounded;
     }
   }
 
@@ -284,9 +301,9 @@ class OpenWithAppModel {
     return OpenWithAppModel(
       appId: json['appId'] as String? ?? '',
       name: json['name'] as String? ?? '',
-      platform: json['platform'] as String? ?? 'windows',
+      platform: json['platform'] as String? ?? '',
       distro: json['distro'] as String? ?? '',
-      iconKey: json['iconKey'] as String? ?? 'window',
+      iconKey: json['iconKey'] as String? ?? '',
       isRecommended: json['isRecommended'] as bool? ?? false,
       isDefault: json['isDefault'] as bool? ?? false,
     );

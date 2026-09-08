@@ -1,12 +1,13 @@
 #include "cloudos_broker_client_v21.h"
 
 #include <sddl.h>
-#include <shellapi.h>
 #include <shlwapi.h>
 
-#include <chrono>
-#include <iostream>
+#include <cctype>
+#include <cmath>
+#include <iomanip>
 #include <sstream>
+#include <string_view>
 
 namespace CloudOS
 {
@@ -15,60 +16,165 @@ namespace
 {
 constexpr int kProtocolVersion = 21;
 constexpr uint32_t kMaxPayloadBytes = 1048576;
+constexpr size_t kMaxRpcMethodBytes = 128;
+constexpr size_t kMaxAppIdBytes = 512;
 
 std::wstring GetCurrentUserSidString()
 {
     HANDLE token = nullptr;
-    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
-    {
-        return L"CURRENT_USER";
-    }
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return {};
 
     DWORD len = 0;
     GetTokenInformation(token, TokenUser, nullptr, 0, &len);
     if (len == 0)
     {
         CloseHandle(token);
-        return L"CURRENT_USER";
+        return {};
     }
 
     std::vector<BYTE> buffer(len);
     if (!GetTokenInformation(token, TokenUser, buffer.data(), len, &len))
     {
         CloseHandle(token);
-        return L"CURRENT_USER";
+        return {};
     }
-
     CloseHandle(token);
 
-    auto* token_user = reinterpret_cast<TOKEN_USER*>(buffer.data());
-    LPWSTR string_sid = nullptr;
-    if (ConvertSidToStringSidW(token_user->User.Sid, &string_sid) && string_sid != nullptr)
-    {
-        std::wstring result(string_sid);
-        LocalFree(string_sid);
-        return result;
-    }
+    const auto* token_user = reinterpret_cast<const TOKEN_USER*>(buffer.data());
+    if (!token_user->User.Sid || !IsValidSid(token_user->User.Sid)) return {};
 
-    return L"CURRENT_USER";
+    LPWSTR string_sid = nullptr;
+    if (!ConvertSidToStringSidW(token_user->User.Sid, &string_sid) || string_sid == nullptr) return {};
+    std::wstring result(string_sid);
+    LocalFree(string_sid);
+    return result;
 }
 
-DWORD GetCurrentSessionId()
+bool TryGetCurrentSessionId(DWORD* out_session_id)
 {
+    if (!out_session_id) return false;
     DWORD session_id = 0;
-    if (!ProcessIdToSessionId(GetCurrentProcessId(), &session_id))
-    {
-        return 1;
-    }
-    return session_id;
+    if (!ProcessIdToSessionId(GetCurrentProcessId(), &session_id)) return false;
+    *out_session_id = session_id;
+    return true;
 }
 
 std::wstring GetCommandPipeName()
 {
-    std::wstring sid = GetCurrentUserSidString();
-    DWORD session_id = GetCurrentSessionId();
+    const std::wstring sid = GetCurrentUserSidString();
+    DWORD session_id = 0;
+    if (sid.empty() || !TryGetCurrentSessionId(&session_id)) return {};
     return L"\\\\.\\pipe\\CloudOS.SystemBroker.v21." + sid + L"." + std::to_wstring(session_id);
 }
+
+void AppendJsonString(std::string_view value, std::string& output)
+{
+    static constexpr char hex[] = "0123456789abcdef";
+    output.push_back('"');
+    for (const unsigned char ch : value)
+    {
+        switch (ch)
+        {
+        case '"': output.append("\\\""); break;
+        case '\\': output.append("\\\\"); break;
+        case '\b': output.append("\\b"); break;
+        case '\f': output.append("\\f"); break;
+        case '\n': output.append("\\n"); break;
+        case '\r': output.append("\\r"); break;
+        case '\t': output.append("\\t"); break;
+        default:
+            if (ch < 0x20)
+            {
+                output.append("\\u00");
+                output.push_back(hex[(ch >> 4) & 0x0f]);
+                output.push_back(hex[ch & 0x0f]);
+            }
+            else
+            {
+                output.push_back(static_cast<char>(ch));
+            }
+            break;
+        }
+    }
+    output.push_back('"');
+}
+
+bool IsSafeRpcMethod(std::string_view method)
+{
+    if (method.empty() || method.size() > kMaxRpcMethodBytes) return false;
+    for (const unsigned char ch : method)
+    {
+        if (std::isalnum(ch) != 0 || ch == '.' || ch == '_' || ch == '-') continue;
+        return false;
+    }
+    return true;
+}
+
+bool LooksLikeJsonObjectPayload(std::string_view payload)
+{
+    if (payload.empty()) return true;
+    if (payload.size() > kMaxPayloadBytes) return false;
+
+    size_t first = 0;
+    while (first < payload.size() && std::isspace(static_cast<unsigned char>(payload[first])) != 0) ++first;
+    if (first == payload.size()) return false;
+
+    size_t last = payload.size();
+    while (last > first && std::isspace(static_cast<unsigned char>(payload[last - 1])) != 0) --last;
+    return last > first && payload[first] == '{' && payload[last - 1] == '}';
+}
+
+std::string BuildRequest(
+    std::string_view request_id,
+    std::string_view method,
+    std::string_view payload_json)
+{
+    std::string request;
+    request.reserve(request_id.size() + method.size() + payload_json.size() + 96);
+    request.append("{\"protocol\":21,\"type\":\"request\",\"id\":");
+    AppendJsonString(request_id, request);
+    request.append(",\"method\":");
+    AppendJsonString(method, request);
+    request.append(",\"payload\":");
+    request.append(payload_json.empty() ? "{}" : payload_json);
+    request.push_back('}');
+    return request;
+}
+
+std::string BuildStringPayload(std::string_view key, std::string_view value)
+{
+    std::string payload;
+    payload.reserve(key.size() + value.size() + 16);
+    payload.push_back('{');
+    AppendJsonString(key, payload);
+    payload.push_back(':');
+    AppendJsonString(value, payload);
+    payload.push_back('}');
+    return payload;
+}
+
+std::string BuildDoublePayload(std::string_view key, double value)
+{
+    std::ostringstream stream;
+    stream.imbue(std::locale::classic());
+    stream << std::setprecision(17) << value;
+    std::string payload;
+    payload.reserve(key.size() + 48);
+    payload.push_back('{');
+    AppendJsonString(key, payload);
+    payload.push_back(':');
+    payload.append(stream.str());
+    payload.push_back('}');
+    return payload;
+}
+
+bool ResponseReportsOk(const std::string& response)
+{
+    return response.size() <= kMaxPayloadBytes &&
+           response.find("\"type\":\"response\"") != std::string::npos &&
+           response.find("\"ok\":true") != std::string::npos;
+}
+
 } // namespace
 
 std::string ConnectionStateToString(BrokerConnectionState s)
@@ -104,28 +210,30 @@ bool CloudOSBrokerClientV21::EnsureConnected()
 
     state_.store(BrokerConnectionState::Connecting);
 
-    if (TryConnectPipe())
+    if (TryConnectPipe() && PerformHandshake())
     {
-        if (PerformHandshake())
-        {
-            state_.store(BrokerConnectionState::Connected);
-            return true;
-        }
+        state_.store(BrokerConnectionState::Connected);
+        return true;
     }
 
-    // Try to spawn broker and retry connection
+    // Identity resolution is part of the pipe security boundary. If it cannot
+    // be resolved, fail closed instead of inventing a pipe name or spawning a
+    // broker that this client cannot securely address.
+    if (GetCommandPipeName().empty())
+    {
+        state_.store(BrokerConnectionState::Degraded);
+        return false;
+    }
+
     SpawnBrokerIfNeeded();
 
     for (int attempt = 0; attempt < 10; ++attempt)
     {
         Sleep(100);
-        if (TryConnectPipe())
+        if (TryConnectPipe() && PerformHandshake())
         {
-            if (PerformHandshake())
-            {
-                state_.store(BrokerConnectionState::Connected);
-                return true;
-            }
+            state_.store(BrokerConnectionState::Connected);
+            return true;
         }
     }
 
@@ -152,7 +260,9 @@ bool CloudOSBrokerClientV21::TryConnectPipe()
         pipe_ = INVALID_HANDLE_VALUE;
     }
 
-    std::wstring pipe_name = GetCommandPipeName();
+    const std::wstring pipe_name = GetCommandPipeName();
+    if (pipe_name.empty()) return false;
+
     pipe_ = CreateFileW(
         pipe_name.c_str(),
         GENERIC_READ | GENERIC_WRITE,
@@ -167,32 +277,37 @@ bool CloudOSBrokerClientV21::TryConnectPipe()
 
 void CloudOSBrokerClientV21::SpawnBrokerIfNeeded()
 {
-    WCHAR exe_path[MAX_PATH];
+    if (GetCommandPipeName().empty()) return;
+
+    const uint64_t now = GetTickCount64();
+    const uint64_t previous = last_spawn_attempt_ms_.load();
+    if (previous != 0 && now - previous < 5000) return;
+    last_spawn_attempt_ms_.store(now);
+
+    WCHAR exe_path[MAX_PATH]{};
     if (GetModuleFileNameW(nullptr, exe_path, MAX_PATH) == 0) return;
 
-    WCHAR dir[MAX_PATH];
+    WCHAR dir[MAX_PATH]{};
     wcscpy_s(dir, exe_path);
     PathRemoveFileSpecW(dir);
 
-    // Look for CloudOS.SystemBroker.exe in same dir, or adjacent Release build
-    std::wstring candidate1 = std::wstring(dir) + L"\\CloudOS.SystemBroker.exe";
-    std::wstring candidate2 = std::wstring(dir) + L"\\..\\CloudOS.NativeShell\\bin\\Release\\CloudOS.SystemBroker.exe";
-    std::wstring candidate3 = L"C:\\CloudOS\\desktop\\CloudOS.NativeShell\\bin\\Release\\CloudOS.SystemBroker.exe";
+    const std::wstring candidate1 = std::wstring(dir) + L"\\CloudOS.SystemBroker.exe";
+    const std::wstring candidate2 = std::wstring(dir) + L"\\..\\CloudOS.NativeShell\\bin\\Release\\CloudOS.SystemBroker.exe";
+    const std::wstring candidate3 = L"C:\\CloudOS\\desktop\\CloudOS.NativeShell\\bin\\Release\\CloudOS.SystemBroker.exe";
 
     std::wstring target;
     if (PathFileExistsW(candidate1.c_str())) target = candidate1;
     else if (PathFileExistsW(candidate2.c_str())) target = candidate2;
     else if (PathFileExistsW(candidate3.c_str())) target = candidate3;
+    if (target.empty()) return;
 
-    if (!target.empty())
-    {
-        STARTUPINFOW si{};
-        si.cb = sizeof(si);
-        si.dwFlags = STARTF_USESHOWWINDOW;
-        si.wShowWindow = SW_HIDE; // Run background
-        PROCESS_INFORMATION pi{};
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESHOWWINDOW;
+    startup.wShowWindow = SW_HIDE;
+    PROCESS_INFORMATION process{};
 
-        CreateProcessW(
+    if (CreateProcessW(
             target.c_str(),
             nullptr,
             nullptr,
@@ -201,29 +316,38 @@ void CloudOSBrokerClientV21::SpawnBrokerIfNeeded()
             CREATE_NO_WINDOW,
             nullptr,
             nullptr,
-            &si,
-            &pi);
-
-        if (pi.hProcess) CloseHandle(pi.hProcess);
-        if (pi.hThread) CloseHandle(pi.hThread);
+            &startup,
+            &process))
+    {
+        if (process.hProcess) CloseHandle(process.hProcess);
+        if (process.hThread) CloseHandle(process.hThread);
     }
 }
 
 bool CloudOSBrokerClientV21::SendFrame(const std::string& payload)
 {
-    if (pipe_ == INVALID_HANDLE_VALUE) return false;
-    uint32_t len = static_cast<uint32_t>(payload.size());
+    if (pipe_ == INVALID_HANDLE_VALUE || payload.size() > kMaxPayloadBytes) return false;
+    const uint32_t len = static_cast<uint32_t>(payload.size());
     DWORD written = 0;
-    if (!WriteFile(pipe_, &len, sizeof(len), &written, nullptr) || written != sizeof(len))
+    DWORD header_written = 0;
+    const auto* header = reinterpret_cast<const unsigned char*>(&len);
+    while (header_written < sizeof(len))
     {
-        return false;
-    }
-    if (len > 0)
-    {
-        if (!WriteFile(pipe_, payload.data(), len, &written, nullptr) || written != len)
+        if (!WriteFile(pipe_, header + header_written, sizeof(len) - header_written, &written, nullptr) || written == 0)
         {
             return false;
         }
+        header_written += written;
+    }
+
+    DWORD total_written = 0;
+    while (total_written < len)
+    {
+        if (!WriteFile(pipe_, payload.data() + total_written, len - total_written, &written, nullptr) || written == 0)
+        {
+            return false;
+        }
+        total_written += written;
     }
     return true;
 }
@@ -233,96 +357,69 @@ bool CloudOSBrokerClientV21::ReadFrame(std::string& payload)
     if (pipe_ == INVALID_HANDLE_VALUE) return false;
     uint32_t len = 0;
     DWORD read_bytes = 0;
-    if (!ReadFile(pipe_, &len, sizeof(len), &read_bytes, nullptr) || read_bytes != sizeof(len))
+    DWORD header_bytes = 0;
+    auto* header = reinterpret_cast<unsigned char*>(&len);
+    while (header_bytes < sizeof(len))
     {
-        return false;
+        if (!ReadFile(pipe_, header + header_bytes, sizeof(len) - header_bytes, &read_bytes, nullptr) || read_bytes == 0)
+        {
+            return false;
+        }
+        header_bytes += read_bytes;
     }
     if (len > kMaxPayloadBytes) return false;
+
     payload.resize(len);
-    if (len > 0)
+    DWORD total_read = 0;
+    while (total_read < len)
     {
-        DWORD total_read = 0;
-        while (total_read < len)
+        if (!ReadFile(pipe_, payload.data() + total_read, len - total_read, &read_bytes, nullptr) || read_bytes == 0)
         {
-            if (!ReadFile(pipe_, &payload[total_read], len - total_read, &read_bytes, nullptr) || read_bytes == 0)
-            {
-                return false;
-            }
-            total_read += read_bytes;
+            return false;
         }
+        total_read += read_bytes;
     }
     return true;
 }
 
 bool CloudOSBrokerClientV21::PerformHandshake()
 {
-    std::string req = "{\"protocol\":21,\"type\":\"request\",\"id\":\"init-hello\",\"method\":\"hello\",\"payload\":{\"clientName\":\"CloudOS.FlutterShell\",\"clientVersion\":\"21.0.0\"}}";
-    if (!SendFrame(req)) return false;
+    const std::string payload = "{\"clientName\":\"CloudOS.FlutterShell\",\"clientVersion\":\"22.1\"}";
+    const std::string request = BuildRequest("init-hello", "hello", payload);
+    if (!SendFrame(request)) return false;
 
-    std::string resp;
-    if (!ReadFrame(resp)) return false;
-
-    // Verify response contains ok:true
-    if (resp.find("\"ok\":true") == std::string::npos) return false;
-    return true;
+    std::string response;
+    return ReadFrame(response) && ResponseReportsOk(response);
 }
 
 bool CloudOSBrokerClientV21::GetApps(std::vector<BrokerClientAppItem>& out_apps)
 {
-    if (!EnsureConnected()) return false;
-
-    std::string req = "{\"protocol\":21,\"type\":\"request\",\"id\":\"get-apps\",\"method\":\"apps.list\",\"payload\":{}}";
-    std::string resp;
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (!SendFrame(req) || !ReadFrame(resp))
-        {
-            state_.store(BrokerConnectionState::Degraded);
-            return false;
-        }
-    }
-
-    if (resp.find("\"ok\":true") == std::string::npos) return false;
-
-    // Fill standard apps
     out_apps.clear();
-    out_apps.push_back({"cloudos:files", "Arquivos", "cloudos", "Windows + Linux (WSL2)", "", "Sistema", "CloudOS", true, false, false, "files", true, false});
-    out_apps.push_back({"cloudos:browser", "Navegador Web", "cloudos", "Chromium / Web Browser", "", "Produtividade", "CloudOS", true, false, false, "browser", true, true});
-    out_apps.push_back({"cloudos:terminal", "Terminal", "cloudos", "Prompt de Comando / Shell", "", "Utilitários", "CloudOS", true, false, false, "terminal", true, true});
-    out_apps.push_back({"cloudos:calculator", "Calculadora", "cloudos", "Calculadora de Sistema", "", "Utilitários", "CloudOS", true, false, false, "calculator", false, false});
-    out_apps.push_back({"cloudos:settings", "Configurações", "cloudos", "Painel de Controle e Ajustes", "", "Sistema", "CloudOS", true, false, false, "settings", false, false});
-    out_apps.push_back({"cloudos:drive", "CloudOS Drive", "cloudos", "Workspace & Projetos", "", "Produtividade", "CloudOS", true, false, false, "drive", false, false});
-    out_apps.push_back({"cloudos:trash", "Lixeira", "cloudos", "Itens e Pastas Deletados", "", "Sistema", "CloudOS", true, false, false, "trash", false, false});
-
-    out_apps.push_back({"windows:vscode", "Visual Studio Code", "windows", "Code Editor & IDE", "", "Produtividade", "Windows", true, true, false, "vscode", true, true});
-    out_apps.push_back({"windows:notepad", "Bloco de Notas", "windows", "Editor de Texto", "", "Produtividade", "Windows", true, false, false, "notepad", true, false});
-    out_apps.push_back({"windows:powershell", "PowerShell 7", "windows", "Windows Terminal & Shell", "", "Utilitários", "Windows", true, true, false, "powershell", true, true});
-    out_apps.push_back({"windows:taskmgr", "Gerenciador de Tarefas", "windows", "Monitor de Recursos do Sistema", "", "Sistema", "Windows", true, false, false, "taskmgr", false, false});
-    out_apps.push_back({"windows:cmd", "Prompt de Comando", "windows", "cmd.exe", "", "Utilitários", "Windows", true, false, false, "cmd", false, false});
-    out_apps.push_back({"windows:explorer", "Windows Explorer", "windows", "Explorador de Arquivos do Windows", "", "Sistema", "Windows", true, false, false, "explorer", false, false});
-
-    out_apps.push_back({"wsl:ubuntu-terminal", "Ubuntu Terminal", "linux", "Linux Bash Shell (Ubuntu)", "Ubuntu", "Linux / WSL", "Ubuntu (WSL)", true, false, false, "terminal", true, true});
-    out_apps.push_back({"wsl:gimp", "GIMP Image Editor", "linux", "GNU Image Manipulation Program (WSLg)", "Ubuntu", "Produtividade", "Ubuntu (WSL)", true, true, false, "gimp", true, false});
-    out_apps.push_back({"wsl:wireshark", "Wireshark", "linux", "Network Protocol Analyzer (WSLg)", "Ubuntu", "Utilitários", "Ubuntu (WSL)", true, true, false, "wireshark", false, false});
-    out_apps.push_back({"wsl:zenmap", "Zenmap", "linux", "Security Scanner GUI (WSLg)", "Ubuntu", "Utilitários", "Ubuntu (WSL)", true, true, false, "zenmap", false, false});
-    out_apps.push_back({"wsl:xterm", "XTerm", "linux", "X11 Terminal Emulator (WSLg)", "Ubuntu", "Linux / WSL", "Ubuntu (WSL)", true, true, false, "terminal", false, false});
-
-    return true;
+    // The Dart presentation path consumes apps.list through InvokeBrokerRpc.
+    // Keep this legacy typed adapter non-authoritative instead of fabricating a
+    // second parser/catalog inside the Flutter runner.
+    return false;
 }
 
 bool CloudOSBrokerClientV21::LaunchApp(const std::string& app_id, std::string& err)
 {
+    if (app_id.empty() || app_id.size() > kMaxAppIdBytes)
+    {
+        err = "Application id is empty or too long";
+        return false;
+    }
     if (!EnsureConnected())
     {
         err = "System broker is not connected";
         return false;
     }
 
-    std::string req = "{\"protocol\":21,\"type\":\"request\",\"id\":\"launch-app\",\"method\":\"apps.launch\",\"payload\":{\"id\":\"" + app_id + "\"}}";
-    std::string resp;
+    const std::string payload = BuildStringPayload("id", app_id);
+    const std::string request = BuildRequest("launch-app", "apps.launch", payload);
+    std::string response;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (!SendFrame(req) || !ReadFrame(resp))
+        if (!SendFrame(request) || !ReadFrame(response))
         {
             state_.store(BrokerConnectionState::Degraded);
             err = "IPC communication failed during launch";
@@ -330,7 +427,7 @@ bool CloudOSBrokerClientV21::LaunchApp(const std::string& app_id, std::string& e
         }
     }
 
-    if (resp.find("\"ok\":true") == std::string::npos)
+    if (!ResponseReportsOk(response))
     {
         err = "Broker rejected application launch";
         return false;
@@ -340,93 +437,55 @@ bool CloudOSBrokerClientV21::LaunchApp(const std::string& app_id, std::string& e
 
 bool CloudOSBrokerClientV21::GetSystemSnapshot(BrokerClientSnapshot& out_snapshot)
 {
-    if (!EnsureConnected()) return false;
-
-    std::string req = "{\"protocol\":21,\"type\":\"request\",\"id\":\"get-snap\",\"method\":\"system.snapshot\",\"payload\":{}}";
-    std::string resp;
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (!SendFrame(req) || !ReadFrame(resp))
-        {
-            state_.store(BrokerConnectionState::Degraded);
-            return false;
-        }
-    }
-
-    if (resp.find("\"ok\":true") == std::string::npos) return false;
-
-    out_snapshot.device_name = "CloudOS Desktop";
-    WCHAR computer_name[MAX_COMPUTERNAME_LENGTH + 1];
-    DWORD size = ARRAYSIZE(computer_name);
-    if (GetComputerNameW(computer_name, &size))
-    {
-        int needed = WideCharToMultiByte(CP_UTF8, 0, computer_name, -1, nullptr, 0, nullptr, nullptr);
-        if (needed > 0)
-        {
-            std::string s(needed - 1, 0);
-            WideCharToMultiByte(CP_UTF8, 0, computer_name, -1, s.data(), needed, nullptr, nullptr);
-            out_snapshot.device_name = s;
-        }
-    }
-
-    out_snapshot.user_name = "User";
-    out_snapshot.session_id = GetCurrentSessionId();
-    out_snapshot.battery_available = true;
-    out_snapshot.battery_percent = 100;
-    out_snapshot.network_available = true;
-    out_snapshot.network_name = "CloudOS Network • Wi-Fi 6";
-    out_snapshot.volume = 0.72;
-    out_snapshot.brightness_available = true;
-    out_snapshot.brightness = 0.85;
-    out_snapshot.wsl_available = true;
-    out_snapshot.distros = {"Ubuntu"};
-    out_snapshot.current_workspace = 1;
-    out_snapshot.timestamp_ms = static_cast<uint64_t>(
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count());
-
-    return true;
+    out_snapshot = {};
+    // The Dart presentation path consumes system.snapshot through
+    // InvokeBrokerRpc. This legacy adapter intentionally remains empty.
+    return false;
 }
 
 bool CloudOSBrokerClientV21::SetVolume(double value)
 {
-    if (!EnsureConnected()) return false;
-    std::string req = "{\"protocol\":21,\"type\":\"request\",\"id\":\"set-vol\",\"method\":\"system.volume.set\",\"payload\":{\"value\":" + std::to_string(value) + "}}";
+    if (!std::isfinite(value) || value < 0.0 || value > 1.0 || !EnsureConnected()) return false;
+    const std::string request = BuildRequest("set-vol", "system.volume.set", BuildDoublePayload("value", value));
+    std::string response;
     std::lock_guard<std::mutex> lock(mutex_);
-    SendFrame(req);
-    std::string resp;
-    ReadFrame(resp);
-    return true;
+    if (!SendFrame(request) || !ReadFrame(response))
+    {
+        state_.store(BrokerConnectionState::Degraded);
+        return false;
+    }
+    return ResponseReportsOk(response);
 }
 
 bool CloudOSBrokerClientV21::SetBrightness(double value)
 {
-    if (!EnsureConnected()) return false;
-    std::string req = "{\"protocol\":21,\"type\":\"request\",\"id\":\"set-bri\",\"method\":\"system.brightness.set\",\"payload\":{\"value\":" + std::to_string(value) + "}}";
+    if (!std::isfinite(value) || value < 0.0 || value > 1.0 || !EnsureConnected()) return false;
+    const std::string request = BuildRequest("set-bri", "system.brightness.set", BuildDoublePayload("value", value));
+    std::string response;
     std::lock_guard<std::mutex> lock(mutex_);
-    SendFrame(req);
-    std::string resp;
-    ReadFrame(resp);
-    return true;
+    if (!SendFrame(request) || !ReadFrame(response))
+    {
+        state_.store(BrokerConnectionState::Degraded);
+        return false;
+    }
+    return ResponseReportsOk(response);
 }
 
 bool CloudOSBrokerClientV21::GetCapabilities(std::vector<std::string>& out_caps)
 {
+    // Only advertise methods the synchronous Flutter client can safely expose
+    // independent of hardware. Dynamic hardware capabilities belong to the
+    // broker's system.capabilities response. Event subscriptions are excluded
+    // until this client owns a real event demultiplexer.
     out_caps = {
         "broker.protocol.v21",
         "health.ping",
         "health.status",
+        "system.capabilities",
         "apps.list",
         "apps.launch",
         "system.snapshot",
-        "system.volume.read",
-        "system.volume.write",
-        "system.brightness.read",
-        "system.brightness.write",
         "wsl.list",
-        "events.subscribe",
-        "events.unsubscribe",
-        "jobs.submit",
         "jobs.status",
         "jobs.cancel",
         "diagnostics.snapshot",
@@ -448,17 +507,25 @@ bool CloudOSBrokerClientV21::GetCapabilities(std::vector<std::string>& out_caps)
     return true;
 }
 
-bool CloudOSBrokerClientV21::InvokeBrokerRpc(const std::string& method, const std::string& payload_json, std::string& out_resp_json)
+bool CloudOSBrokerClientV21::InvokeBrokerRpc(
+    const std::string& method,
+    const std::string& payload_json,
+    std::string& out_resp_json)
 {
+    out_resp_json.clear();
+    if (!IsSafeRpcMethod(method) || !LooksLikeJsonObjectPayload(payload_json)) return false;
     if (!EnsureConnected()) return false;
 
-    uint64_t req_id = next_req_id_++;
-    std::string req = "{\"protocol\":21,\"type\":\"request\",\"id\":\"req-" + std::to_string(req_id) + "\",\"method\":\"" + method + "\",\"payload\":" + (payload_json.empty() ? "{}" : payload_json) + "}";
+    const uint64_t req_id = next_req_id_++;
+    const std::string request_id = "req-" + std::to_string(req_id);
+    const std::string request = BuildRequest(request_id, method, payload_json);
+    if (request.size() > kMaxPayloadBytes) return false;
 
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!SendFrame(req) || !ReadFrame(out_resp_json))
+    if (!SendFrame(request) || !ReadFrame(out_resp_json))
     {
         state_.store(BrokerConnectionState::Degraded);
+        out_resp_json.clear();
         return false;
     }
     return true;

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+export 'file_models.dart' show CloudFileItem;
+
 enum CloudAppPlatform { windows, linux, cloudos }
 
 class CloudApp {
@@ -26,29 +28,9 @@ class CloudApp {
   final bool isRecent;
 }
 
-enum CloudFileSource { cloudDrive, windows, linux, trash }
-
-class CloudFileItem {
-  const CloudFileItem({
-    required this.name,
-    required this.path,
-    required this.isFolder,
-    required this.sizeFormatted,
-    required this.modifiedFormatted,
-    required this.source,
-    this.icon,
-    this.extension,
-  });
-
-  final String name;
-  final String path;
-  final bool isFolder;
-  final String sizeFormatted;
-  final String modifiedFormatted;
-  final CloudFileSource source;
-  final IconData? icon;
-  final String? extension;
-}
+// File-system models live exclusively in file_models.dart. CloudFileItem is
+// re-exported above only for source compatibility with older imports; there is
+// one declaration/type in the Flutter shell.
 
 class CloudNotification {
   const CloudNotification({
@@ -79,7 +61,14 @@ class CloudSystemSnapshot {
     required this.batteryPercent,
     required this.wslAvailable,
     required this.distros,
-    this.currentWorkspace = 1,
+    this.defaultDistro = '',
+    // Deprecated compatibility field. Workspace authority lives in
+    // WindowManager + Session V3. A value of 0 means "not provided by Broker".
+    this.currentWorkspace = 0,
+    this.batteryAvailable = false,
+    this.networkAvailable = false,
+    this.volumeAvailable = false,
+    this.brightnessAvailable = false,
   });
 
   final String deviceName;
@@ -89,5 +78,77 @@ class CloudSystemSnapshot {
   final int batteryPercent;
   final bool wslAvailable;
   final List<String> distros;
+  final String defaultDistro;
   final int currentWorkspace;
+  final bool batteryAvailable;
+  final bool networkAvailable;
+  final bool volumeAvailable;
+  final bool brightnessAvailable;
+
+  CloudSystemSnapshot copyWith({
+    String? deviceName,
+    String? networkName,
+    double? volume,
+    double? brightness,
+    int? batteryPercent,
+    bool? wslAvailable,
+    List<String>? distros,
+    String? defaultDistro,
+    int? currentWorkspace,
+    bool? batteryAvailable,
+    bool? networkAvailable,
+    bool? volumeAvailable,
+    bool? brightnessAvailable,
+  }) {
+    return CloudSystemSnapshot(
+      deviceName: deviceName ?? this.deviceName,
+      networkName: networkName ?? this.networkName,
+      volume: volume ?? this.volume,
+      brightness: brightness ?? this.brightness,
+      batteryPercent: batteryPercent ?? this.batteryPercent,
+      wslAvailable: wslAvailable ?? this.wslAvailable,
+      distros: List<String>.unmodifiable(distros ?? this.distros),
+      defaultDistro: defaultDistro ?? this.defaultDistro,
+      currentWorkspace: currentWorkspace ?? this.currentWorkspace,
+      batteryAvailable: batteryAvailable ?? this.batteryAvailable,
+      networkAvailable: networkAvailable ?? this.networkAvailable,
+      volumeAvailable: volumeAvailable ?? this.volumeAvailable,
+      brightnessAvailable: brightnessAvailable ?? this.brightnessAvailable,
+    );
+  }
+
+  /// Normalizes untrusted/native values before they reach desktop chrome.
+  CloudSystemSnapshot normalized() {
+    final cleanDistros = <String>[];
+    final seen = <String>{};
+    for (final raw in distros) {
+      final distro = raw.trim();
+      if (distro.isEmpty || distro.length > 256) continue;
+      final key = distro.toLowerCase();
+      if (seen.add(key)) cleanDistros.add(distro);
+    }
+
+    final cleanDefault = defaultDistro.trim();
+    final cleanBattery = batteryAvailable
+        ? batteryPercent.clamp(0, 100).toInt()
+        : -1;
+
+    return CloudSystemSnapshot(
+      deviceName: deviceName.trim(),
+      networkName: networkAvailable ? networkName.trim() : '',
+      volume: volume.isFinite ? volume.clamp(0.0, 1.0).toDouble() : 0.0,
+      brightness:
+          brightness.isFinite ? brightness.clamp(0.0, 1.0).toDouble() : 0.0,
+      batteryPercent: cleanBattery,
+      wslAvailable: wslAvailable,
+      distros: List<String>.unmodifiable(cleanDistros),
+      defaultDistro: cleanDefault,
+      currentWorkspace:
+          currentWorkspace >= 1 && currentWorkspace <= 4 ? currentWorkspace : 0,
+      batteryAvailable: batteryAvailable,
+      networkAvailable: networkAvailable,
+      volumeAvailable: volumeAvailable,
+      brightnessAvailable: brightnessAvailable,
+    );
+  }
 }

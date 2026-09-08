@@ -14,17 +14,18 @@ struct SystemSnapshot final
 {
     std::string device_name;
     std::string user_name;
-    uint32_t session_id{1};
-    bool battery_available{true};
-    int battery_percent{100};
-    bool network_available{true};
+    uint32_t session_id{0};
+    bool battery_available{false};
+    int battery_percent{-1};
+    bool network_available{false};
     std::string network_name;
-    double volume{0.72};
-    bool brightness_available{true};
-    double brightness{0.85};
+    bool volume_available{false};
+    double volume{0.0};
+    bool brightness_available{false};
+    double brightness{0.0};
     bool wsl_available{false};
     std::vector<std::string> distros;
-    int current_workspace{1};
+    std::string default_distro;
     uint64_t timestamp_ms{0};
 
     [[nodiscard]] JsonObject ToJsonObject() const;

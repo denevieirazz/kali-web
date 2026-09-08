@@ -10,6 +10,7 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <unordered_set>
 
 namespace CloudOS
 {
@@ -102,17 +103,287 @@ bool StartsWithInsensitive(std::wstring_view str, std::wstring_view prefix)
     return _wcsnicmp(str.data(), prefix.data(), prefix.size()) == 0;
 }
 
-std::string QuoteWindowsArgument(const std::wstring& arg)
+std::wstring QuoteWindowsArgument(std::wstring_view arg)
 {
-    std::string utf8 = Utf16ToUtf8(arg);
-    std::string result = "\"";
-    for (char c : utf8)
+    std::wstring result = L"\"";
+    size_t backslashes = 0;
+    for (wchar_t ch : arg)
     {
-        if (c == '"') result += "\\\"";
-        else result += c;
+        if (ch == L'\\')
+        {
+            ++backslashes;
+            continue;
+        }
+        if (ch == L'"')
+        {
+            result.append(backslashes * 2 + 1, L'\\');
+            result.push_back(L'"');
+            backslashes = 0;
+            continue;
+        }
+        result.append(backslashes, L'\\');
+        backslashes = 0;
+        result.push_back(ch);
     }
-    result += "\"";
+    result.append(backslashes * 2, L'\\');
+    result.push_back(L'"');
     return result;
+}
+
+bool RunProcessCapture(
+    const std::wstring& executable,
+    const std::vector<std::wstring>& arguments,
+    DWORD timeout_ms,
+    std::string* out_text)
+{
+    if (out_text) out_text->clear();
+
+    HANDLE read_pipe = nullptr;
+    HANDLE write_pipe = nullptr;
+    SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
+    if (!CreatePipe(&read_pipe, &write_pipe, &sa, 0)) return false;
+    if (!SetHandleInformation(read_pipe, HANDLE_FLAG_INHERIT, 0))
+    {
+        CloseHandle(read_pipe);
+        CloseHandle(write_pipe);
+        return false;
+    }
+
+    std::wstring command_line = QuoteWindowsArgument(executable);
+    for (const auto& argument : arguments)
+    {
+        command_line.push_back(L' ');
+        command_line += QuoteWindowsArgument(argument);
+    }
+    std::vector<wchar_t> mutable_command(command_line.begin(), command_line.end());
+    mutable_command.push_back(L'\0');
+
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    startup.hStdOutput = write_pipe;
+    startup.hStdError = write_pipe;
+    startup.wShowWindow = SW_HIDE;
+
+    PROCESS_INFORMATION process{};
+    const BOOL created = CreateProcessW(
+        executable.c_str(),
+        mutable_command.data(),
+        nullptr,
+        nullptr,
+        TRUE,
+        CREATE_NO_WINDOW,
+        nullptr,
+        nullptr,
+        &startup,
+        &process);
+    CloseHandle(write_pipe);
+    if (!created)
+    {
+        CloseHandle(read_pipe);
+        return false;
+    }
+
+    const DWORD wait_result = WaitForSingleObject(process.hProcess, timeout_ms);
+    if (wait_result == WAIT_TIMEOUT)
+    {
+        TerminateProcess(process.hProcess, ERROR_TIMEOUT);
+        WaitForSingleObject(process.hProcess, 1000);
+    }
+
+    std::string output;
+    std::array<char, 512> buffer{};
+    DWORD bytes_read = 0;
+    while (output.size() < 4096 &&
+           ReadFile(read_pipe, buffer.data(), static_cast<DWORD>(buffer.size()), &bytes_read, nullptr) &&
+           bytes_read > 0)
+    {
+        output.append(buffer.data(), bytes_read);
+    }
+
+    DWORD exit_code = ERROR_GEN_FAILURE;
+    GetExitCodeProcess(process.hProcess, &exit_code);
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    CloseHandle(read_pipe);
+
+    if (out_text) *out_text = std::move(output);
+    return wait_result == WAIT_OBJECT_0 && exit_code == 0;
+}
+
+bool IsSameOrDescendantPath(const std::wstring& candidate, const std::wstring& ancestor)
+{
+    if (_wcsicmp(candidate.c_str(), ancestor.c_str()) == 0) return true;
+    if (candidate.size() <= ancestor.size()) return false;
+    if (_wcsnicmp(candidate.c_str(), ancestor.c_str(), ancestor.size()) != 0) return false;
+    return ancestor.back() == L'\\' || candidate[ancestor.size()] == L'\\';
+}
+
+DWORD CALLBACK CopyProgressCallback(
+    LARGE_INTEGER,
+    LARGE_INTEGER,
+    LARGE_INTEGER,
+    LARGE_INTEGER,
+    DWORD,
+    DWORD,
+    HANDLE,
+    HANDLE,
+    LPVOID context)
+{
+    const auto* cancelled = static_cast<const std::atomic_bool*>(context);
+    return cancelled && cancelled->load() ? PROGRESS_CANCEL : PROGRESS_CONTINUE;
+}
+
+bool CopyPathRecursive(
+    const std::wstring& source,
+    const std::wstring& destination,
+    const std::string& overwrite_policy,
+    std::atomic_bool& cancel_flag,
+    std::string* out_error)
+{
+    if (cancel_flag.load())
+    {
+        if (out_error) *out_error = "cancelled";
+        return false;
+    }
+
+    const DWORD source_attributes = GetFileAttributesW(source.c_str());
+    if (source_attributes == INVALID_FILE_ATTRIBUTES)
+    {
+        if (out_error) *out_error = "source_not_found";
+        return false;
+    }
+
+    if ((source_attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+    {
+        if ((source_attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+        {
+            if (out_error) *out_error = "directory_reparse_point_not_followed";
+            return false;
+        }
+
+        const DWORD destination_attributes = GetFileAttributesW(destination.c_str());
+        if (destination_attributes == INVALID_FILE_ATTRIBUTES)
+        {
+            if (!CreateDirectoryW(destination.c_str(), nullptr))
+            {
+                if (out_error) *out_error = "create_destination_directory_failed:" + std::to_string(GetLastError());
+                return false;
+            }
+        }
+        else if ((destination_attributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+        {
+            if (out_error) *out_error = "destination_type_conflict";
+            return false;
+        }
+        else if (overwrite_policy == "ask")
+        {
+            if (out_error) *out_error = "destination_exists";
+            return false;
+        }
+
+        std::wstring pattern = source;
+        if (pattern.back() != L'\\') pattern.push_back(L'\\');
+        pattern.push_back(L'*');
+        WIN32_FIND_DATAW find_data{};
+        HANDLE find = FindFirstFileExW(
+            pattern.c_str(), FindExInfoBasic, &find_data, FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH);
+        if (find == INVALID_HANDLE_VALUE)
+        {
+            const DWORD error = GetLastError();
+            if (error == ERROR_FILE_NOT_FOUND) return true;
+            if (out_error) *out_error = "enumerate_source_failed:" + std::to_string(error);
+            return false;
+        }
+
+        bool ok = true;
+        do
+        {
+            if (wcscmp(find_data.cFileName, L".") == 0 || wcscmp(find_data.cFileName, L"..") == 0) continue;
+            std::wstring child_source = source + (source.back() == L'\\' ? L"" : L"\\") + find_data.cFileName;
+            std::wstring child_destination = destination + (destination.back() == L'\\' ? L"" : L"\\") + find_data.cFileName;
+            if (!CopyPathRecursive(child_source, child_destination, overwrite_policy, cancel_flag, out_error))
+            {
+                ok = false;
+                break;
+            }
+        } while (FindNextFileW(find, &find_data));
+        FindClose(find);
+        return ok;
+    }
+
+    const DWORD destination_attributes = GetFileAttributesW(destination.c_str());
+    if (destination_attributes != INVALID_FILE_ATTRIBUTES)
+    {
+        if (overwrite_policy == "skip") return true;
+        if (overwrite_policy == "ask")
+        {
+            if (out_error) *out_error = "destination_exists";
+            return false;
+        }
+        if ((destination_attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+        {
+            if (out_error) *out_error = "destination_type_conflict";
+            return false;
+        }
+    }
+
+    std::wstring temporary = destination + L".cloudos-copy-" + std::to_wstring(GetCurrentProcessId()) + L"-" +
+        std::to_wstring(GetTickCount64());
+    BOOL cancel = FALSE;
+    if (!CopyFileExW(
+            source.c_str(),
+            temporary.c_str(),
+            CopyProgressCallback,
+            &cancel_flag,
+            &cancel,
+            COPY_FILE_FAIL_IF_EXISTS))
+    {
+        const DWORD error = GetLastError();
+        DeleteFileW(temporary.c_str());
+        if (out_error) *out_error = cancel_flag.load() ? "cancelled" : "copy_failed:" + std::to_string(error);
+        return false;
+    }
+
+    DWORD move_flags = MOVEFILE_WRITE_THROUGH;
+    if (overwrite_policy == "replace") move_flags |= MOVEFILE_REPLACE_EXISTING;
+    if (!MoveFileExW(temporary.c_str(), destination.c_str(), move_flags))
+    {
+        const DWORD error = GetLastError();
+        DeleteFileW(temporary.c_str());
+        if (out_error) *out_error = "commit_copy_failed:" + std::to_string(error);
+        return false;
+    }
+    return true;
+}
+
+bool FindExecutable(const wchar_t* name, std::wstring* out_path)
+{
+    if (!out_path) return false;
+    std::array<wchar_t, 32768> path{};
+    const DWORD length = SearchPathW(nullptr, name, nullptr, static_cast<DWORD>(path.size()), path.data(), nullptr);
+    if (length == 0 || length >= path.size()) return false;
+    out_path->assign(path.data(), length);
+    return true;
+}
+
+bool IsAllowedWslOpenWithCommand(const std::string& command)
+{
+    static const std::unordered_set<std::string> allowed = {
+        "code", "gedit", "gimp", "kate", "mousepad", "vim", "xed"
+    };
+    return allowed.find(command) != allowed.end();
+}
+
+bool IsWslCommandAvailable(const std::string& distro, const std::string& command)
+{
+    if (!IsAllowedWslOpenWithCommand(command)) return false;
+    std::string output;
+    return RunProcessCapture(
+        L"wsl.exe",
+        {L"-d", Utf8ToUtf16(distro), L"--", L"which", Utf8ToUtf16(command)},
+        4000,
+        &output) && !output.empty();
 }
 
 } // namespace
@@ -995,36 +1266,77 @@ bool FileServiceV22::ExecuteIFileOperation(
     DWORD flags = FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
     if (allow_undo) flags |= FOF_ALLOWUNDO;
 
-    file_op->SetOperationFlags(flags);
+    hr = file_op->SetOperationFlags(flags);
+    if (FAILED(hr))
+    {
+        file_op->Release();
+        if (need_uninit) CoUninitialize();
+        if (out_error) *out_error = "SetOperationFlags failed";
+        return false;
+    }
 
     IShellItem* dest_item = nullptr;
     if (!destination.empty() && (operation_type == 1 || operation_type == 2))
     {
-        SHCreateItemFromParsingName(destination.c_str(), nullptr, IID_PPV_ARGS(&dest_item));
-    }
-
-    for (const auto& src : sources)
-    {
-        IShellItem* src_item = nullptr;
-        if (SUCCEEDED(SHCreateItemFromParsingName(src.c_str(), nullptr, IID_PPV_ARGS(&src_item))) && src_item)
+        hr = SHCreateItemFromParsingName(destination.c_str(), nullptr, IID_PPV_ARGS(&dest_item));
+        if (FAILED(hr) || !dest_item)
         {
-            if (operation_type == 1 && dest_item) // Copy
-            {
-                file_op->CopyItem(src_item, dest_item, nullptr, nullptr);
-            }
-            else if (operation_type == 2 && dest_item) // Move
-            {
-                file_op->MoveItem(src_item, dest_item, nullptr, nullptr);
-            }
-            else if (operation_type == 3) // Delete
-            {
-                file_op->DeleteItem(src_item, nullptr);
-            }
-            src_item->Release();
+            file_op->Release();
+            if (need_uninit) CoUninitialize();
+            if (out_error) *out_error = "Destination is unavailable";
+            return false;
         }
     }
 
+    size_t queued_operations = 0;
+    for (const auto& src : sources)
+    {
+        IShellItem* src_item = nullptr;
+        hr = SHCreateItemFromParsingName(src.c_str(), nullptr, IID_PPV_ARGS(&src_item));
+        if (FAILED(hr) || !src_item)
+        {
+            if (dest_item) dest_item->Release();
+            file_op->Release();
+            if (need_uninit) CoUninitialize();
+            if (out_error) *out_error = "Source is unavailable";
+            return false;
+        }
+
+        HRESULT queue_hr = E_INVALIDARG;
+        if (operation_type == 1 && dest_item) // Copy
+        {
+            queue_hr = file_op->CopyItem(src_item, dest_item, nullptr, nullptr);
+        }
+        else if (operation_type == 2 && dest_item) // Move
+        {
+            queue_hr = file_op->MoveItem(src_item, dest_item, nullptr, nullptr);
+        }
+        else if (operation_type == 3) // Delete
+        {
+            queue_hr = file_op->DeleteItem(src_item, nullptr);
+        }
+        src_item->Release();
+
+        if (FAILED(queue_hr))
+        {
+            if (dest_item) dest_item->Release();
+            file_op->Release();
+            if (need_uninit) CoUninitialize();
+            if (out_error) *out_error = "Unable to queue file operation";
+            return false;
+        }
+        ++queued_operations;
+    }
+
     if (dest_item) dest_item->Release();
+
+    if (queued_operations != sources.size() || queued_operations == 0)
+    {
+        file_op->Release();
+        if (need_uninit) CoUninitialize();
+        if (out_error) *out_error = "No file operations were queued";
+        return false;
+    }
 
     hr = file_op->PerformOperations();
     BOOL aborted = FALSE;
@@ -1073,8 +1385,10 @@ JsonObject FileServiceV22::DeleteItems(const std::vector<std::string>& paths, bo
     std::string err_msg;
     bool ok = ExecuteIFileOperation(3, ws_paths, L"", !permanent, &err_msg);
 
-    // Fallback if COM IFileOperation is unavailable in non-interactive environment
-    if (!ok)
+    // A recycle request must never silently degrade into permanent deletion.
+    // The direct Win32 fallback is allowed only when permanent deletion was
+    // explicitly requested by the caller.
+    if (!ok && permanent)
     {
         bool all_deleted = true;
         for (const auto& p : ws_paths)
@@ -1091,6 +1405,17 @@ JsonObject FileServiceV22::DeleteItems(const std::vector<std::string>& paths, bo
             }
         }
         ok = all_deleted;
+    }
+
+    if (!ok)
+    {
+        JsonObject err;
+        err["ok"] = JsonValue(false);
+        err["error"] = JsonValue(permanent ? "delete_failed" : "recycle_failed");
+        err["message"] = JsonValue(err_msg.empty() ? "The requested delete operation failed" : err_msg);
+        err["permanent"] = JsonValue(permanent);
+        err["deletedCount"] = JsonValue(0);
+        return err;
     }
 
     operations_generation_++;
@@ -1124,7 +1449,24 @@ std::string FileServiceV22::StartCopyJob(
     std::string job_id = JobManagerV21::Instance().SubmitJob(
         "files.copy",
         [this, src_resolved, dest_resolved, overwrite_policy](std::atomic_bool& cancel_flag, std::function<void(double)> progress_cb, std::string& err) -> bool {
-            (void)err;
+            if (src_resolved.empty())
+            {
+                err = "empty_sources";
+                return false;
+            }
+            if (overwrite_policy != "ask" && overwrite_policy != "skip" && overwrite_policy != "replace")
+            {
+                err = "invalid_overwrite_policy";
+                return false;
+            }
+            const DWORD destination_attributes = GetFileAttributesW(dest_resolved.c_str());
+            if (destination_attributes == INVALID_FILE_ATTRIBUTES ||
+                (destination_attributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+            {
+                err = "destination_not_directory";
+                return false;
+            }
+
             size_t total_files = src_resolved.size();
 
             for (size_t i = 0; i < src_resolved.size(); ++i)
@@ -1140,22 +1482,40 @@ std::string FileServiceV22::StartCopyJob(
                 if (dest_file.back() != L'\\') dest_file += L'\\';
                 dest_file += (filename ? filename + 1 : L"file");
 
+                if (_wcsicmp(src.c_str(), dest_file.c_str()) == 0)
+                {
+                    err = "source_equals_destination";
+                    return false;
+                }
+                const DWORD source_attributes = GetFileAttributesW(src.c_str());
+                if (source_attributes == INVALID_FILE_ATTRIBUTES)
+                {
+                    err = "source_not_found";
+                    return false;
+                }
+                if ((source_attributes & FILE_ATTRIBUTE_DIRECTORY) != 0 && IsSameOrDescendantPath(dest_file, src))
+                {
+                    err = "destination_inside_source";
+                    return false;
+                }
+
                 if (progress_cb)
                 {
                     progress_cb((static_cast<double>(i) / total_files) * 100.0);
                 }
 
-                BOOL fail_if_exists = (overwrite_policy == "skip" || overwrite_policy == "ask") ? TRUE : FALSE;
-                DWORD attr = GetFileAttributesW(src.c_str());
-                if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY))
+                if (!CopyPathRecursive(src, dest_file, overwrite_policy, cancel_flag, &err))
                 {
-                    CreateDirectoryW(dest_file.c_str(), nullptr);
-                }
-                else
-                {
-                    CopyFileExW(src.c_str(), dest_file.c_str(), nullptr, nullptr, nullptr, fail_if_exists ? COPY_FILE_FAIL_IF_EXISTS : 0);
+                    return false;
                 }
             }
+
+            if (cancel_flag.load())
+            {
+                err = "cancelled";
+                return false;
+            }
+            if (progress_cb) progress_cb(100.0);
 
             operations_generation_++;
 
@@ -1184,7 +1544,24 @@ std::string FileServiceV22::StartMoveJob(
     std::string job_id = JobManagerV21::Instance().SubmitJob(
         "files.move",
         [this, src_resolved, dest_resolved, overwrite_policy](std::atomic_bool& cancel_flag, std::function<void(double)> progress_cb, std::string& err) -> bool {
-            (void)err;
+            if (src_resolved.empty())
+            {
+                err = "empty_sources";
+                return false;
+            }
+            if (overwrite_policy != "ask" && overwrite_policy != "skip" && overwrite_policy != "replace")
+            {
+                err = "invalid_overwrite_policy";
+                return false;
+            }
+            const DWORD destination_attributes = GetFileAttributesW(dest_resolved.c_str());
+            if (destination_attributes == INVALID_FILE_ATTRIBUTES ||
+                (destination_attributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+            {
+                err = "destination_not_directory";
+                return false;
+            }
+
             size_t total_files = src_resolved.size();
 
             for (size_t i = 0; i < src_resolved.size(); ++i)
@@ -1197,6 +1574,34 @@ std::string FileServiceV22::StartMoveJob(
                 if (dest_file.back() != L'\\') dest_file += L'\\';
                 dest_file += (filename ? filename + 1 : L"file");
 
+                if (_wcsicmp(src.c_str(), dest_file.c_str()) == 0)
+                {
+                    err = "source_equals_destination";
+                    return false;
+                }
+                const DWORD source_attributes = GetFileAttributesW(src.c_str());
+                if (source_attributes == INVALID_FILE_ATTRIBUTES)
+                {
+                    err = "source_not_found";
+                    return false;
+                }
+                if ((source_attributes & FILE_ATTRIBUTE_DIRECTORY) != 0 && IsSameOrDescendantPath(dest_file, src))
+                {
+                    err = "destination_inside_source";
+                    return false;
+                }
+
+                const DWORD existing_attributes = GetFileAttributesW(dest_file.c_str());
+                if (existing_attributes != INVALID_FILE_ATTRIBUTES)
+                {
+                    if (overwrite_policy == "skip") continue;
+                    if (overwrite_policy == "ask")
+                    {
+                        err = "destination_exists";
+                        return false;
+                    }
+                }
+
                 if (progress_cb)
                 {
                     progress_cb((static_cast<double>(i) / total_files) * 100.0);
@@ -1204,8 +1609,25 @@ std::string FileServiceV22::StartMoveJob(
 
                 DWORD flags = MOVEFILE_COPY_ALLOWED;
                 if (overwrite_policy == "replace") flags |= MOVEFILE_REPLACE_EXISTING;
-                MoveFileExW(src.c_str(), dest_file.c_str(), flags);
+                if (!MoveFileExW(src.c_str(), dest_file.c_str(), flags))
+                {
+                    std::string operation_error;
+                    if (!ExecuteIFileOperation(2, {src}, dest_resolved, false, &operation_error))
+                    {
+                        err = operation_error.empty()
+                            ? "move_failed:" + std::to_string(GetLastError())
+                            : operation_error;
+                        return false;
+                    }
+                }
             }
+
+            if (cancel_flag.load())
+            {
+                err = "cancelled";
+                return false;
+            }
+            if (progress_cb) progress_cb(100.0);
 
             operations_generation_++;
 
@@ -1229,9 +1651,26 @@ std::string FileServiceV22::StartSearchJob(
     std::wstring search_query = Utf8ToUtf16(query);
     std::transform(search_query.begin(), search_query.end(), search_query.begin(), ::towlower);
 
+    LocationKind root_location = LocationKind::Windows;
+    std::string root_distro;
+    if (StartsWithInsensitive(resolved_root, L"\\\\wsl.localhost\\") ||
+        StartsWithInsensitive(resolved_root, L"\\\\wsl$\\"))
+    {
+        root_location = LocationKind::Wsl;
+        const size_t prefix_length = StartsWithInsensitive(resolved_root, L"\\\\wsl.localhost\\") ? 16 : 7;
+        const size_t slash = resolved_root.find(L'\\', prefix_length);
+        root_distro = Utf16ToUtf8(resolved_root.substr(
+            prefix_length,
+            slash == std::wstring::npos ? std::wstring::npos : slash - prefix_length));
+    }
+    else if (StartsWithInsensitive(resolved_root, L"\\\\"))
+    {
+        root_location = LocationKind::Network;
+    }
+
     std::string job_id = JobManagerV21::Instance().SubmitJob(
         "files.search",
-        [this, resolved_root, search_query, recursive, max_results](std::atomic_bool& cancel_flag, std::function<void(double)> progress_cb, std::string& err) -> bool {
+        [this, resolved_root, search_query, recursive, max_results, root_location, root_distro](std::atomic_bool& cancel_flag, std::function<void(double)> progress_cb, std::string& err) -> bool {
             (void)err;
             std::vector<std::wstring> dirs_to_search = {resolved_root};
             std::vector<CloudFileItemMetadata> matches;
@@ -1267,7 +1706,7 @@ std::string FileServiceV22::StartSearchJob(
 
                     if (name_lower.find(search_query) != std::wstring::npos)
                     {
-                        matches.push_back(BuildMetadataFromFindData(current_dir, fd, LocationKind::Windows, ""));
+                        matches.push_back(BuildMetadataFromFindData(current_dir, fd, root_location, root_distro));
                         if (matches.size() >= max_results) break;
                     }
 
@@ -1344,50 +1783,17 @@ bool FileServiceV22::TryMapWindowsPathToLinux(
         return true;
     }
 
-    // Windows path (e.g. C:\Users\...) -> execute wslpath inside the distro
-    std::wstring wsl_exe = L"wsl.exe";
-    std::wstring wdistro = Utf8ToUtf16(distro);
-    std::wstring cmd_args = L"-d " + wdistro + L" -- wslpath -a -u " + Utf8ToUtf16(QuoteWindowsArgument(windows_path));
-
-    HANDLE read_pipe = nullptr, write_pipe = nullptr;
-    SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
-    if (!CreatePipe(&read_pipe, &write_pipe, &sa, 0)) return false;
-    SetHandleInformation(read_pipe, HANDLE_FLAG_INHERIT, 0);
-
-    STARTUPINFOW si{};
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
-    si.hStdOutput = write_pipe;
-    si.hStdError = write_pipe;
-    si.wShowWindow = SW_HIDE;
-
-    PROCESS_INFORMATION pi{};
-    std::wstring cmdline = wsl_exe + L" " + cmd_args;
-    std::vector<wchar_t> cmd_mutable(cmdline.begin(), cmdline.end());
-    cmd_mutable.push_back(L'\0');
-
-    if (!CreateProcessW(nullptr, cmd_mutable.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi))
+    // Windows path (e.g. C:\Users\...) -> execute wslpath with an argv-safe
+    // command line. No shell parses the user-controlled path.
+    std::string out_str;
+    if (!RunProcessCapture(
+            L"wsl.exe",
+            {L"-d", Utf8ToUtf16(distro), L"--", L"wslpath", L"-a", L"-u", windows_path},
+            5000,
+            &out_str))
     {
-        CloseHandle(read_pipe);
-        CloseHandle(write_pipe);
         return false;
     }
-
-    CloseHandle(write_pipe);
-    std::string out_str;
-    char buffer[512];
-    DWORD read_bytes = 0;
-    while (ReadFile(read_pipe, buffer, sizeof(buffer) - 1, &read_bytes, nullptr) && read_bytes > 0)
-    {
-        buffer[read_bytes] = '\0';
-        out_str += buffer;
-        if (out_str.size() > 4096) break;
-    }
-
-    WaitForSingleObject(pi.hProcess, 5000);
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
-    CloseHandle(read_pipe);
 
     // Clean output
     while (!out_str.empty() && (out_str.back() == '\r' || out_str.back() == '\n' || out_str.back() == ' '))
@@ -1434,6 +1840,16 @@ JsonObject FileServiceV22::OpenDefault(const std::string& path_or_id)
 JsonObject FileServiceV22::GetOpenWithList(const std::string& path_or_id)
 {
     std::wstring resolved = CanonicalizePath(ResolveVirtualTarget(path_or_id));
+    const DWORD attributes = GetFileAttributesW(resolved.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+    {
+        JsonObject err;
+        err["path"] = JsonValue(Utf16ToUtf8(resolved));
+        err["apps"] = JsonValue(JsonArray{});
+        err["error"] = JsonValue(attributes == INVALID_FILE_ATTRIBUTES ? "not_found" : "not_a_file");
+        return err;
+    }
+
     const wchar_t* dot = wcsrchr(resolved.c_str(), L'.');
     std::wstring ext = dot ? dot : L"";
 
@@ -1461,59 +1877,81 @@ JsonObject FileServiceV22::GetOpenWithList(const std::string& path_or_id)
             apps_arr.push_back(JsonValue(app));
         }
 
-        // Add standard Windows apps if compatible
+        // Add installed Windows apps only. SearchPathW also covers Windows app
+        // execution aliases exposed to the current user.
         std::wstring ext_lower = ext;
         std::transform(ext_lower.begin(), ext_lower.end(), ext_lower.begin(), ::towlower);
 
         if (ext_lower == L".txt" || ext_lower == L".log" || ext_lower == L".ini" || ext_lower == L".md" || ext_lower == L".json" || ext_lower == L".dart")
         {
-            JsonObject notepad;
-            notepad["appId"] = JsonValue("windows:notepad");
-            notepad["name"] = JsonValue("Bloco de Notas (Windows)");
-            notepad["platform"] = JsonValue("windows");
-            notepad["distro"] = JsonValue("");
-            notepad["iconKey"] = JsonValue("file_text");
-            notepad["isDefault"] = JsonValue(false);
-            notepad["isRecommended"] = JsonValue(true);
-            apps_arr.push_back(JsonValue(notepad));
+            std::wstring executable;
+            if (FindExecutable(L"notepad.exe", &executable))
+            {
+                JsonObject notepad;
+                notepad["appId"] = JsonValue("windows:notepad");
+                notepad["name"] = JsonValue("Bloco de Notas (Windows)");
+                notepad["platform"] = JsonValue("windows");
+                notepad["distro"] = JsonValue("");
+                notepad["iconKey"] = JsonValue("file_text");
+                notepad["isDefault"] = JsonValue(false);
+                notepad["isRecommended"] = JsonValue(true);
+                apps_arr.push_back(JsonValue(notepad));
+            }
 
-            JsonObject vscode;
-            vscode["appId"] = JsonValue("windows:vscode");
-            vscode["name"] = JsonValue("Visual Studio Code");
-            vscode["platform"] = JsonValue("windows");
-            vscode["distro"] = JsonValue("");
-            vscode["iconKey"] = JsonValue("code");
-            vscode["isDefault"] = JsonValue(false);
-            vscode["isRecommended"] = JsonValue(true);
-            apps_arr.push_back(JsonValue(vscode));
+            if (FindExecutable(L"code.exe", &executable))
+            {
+                JsonObject vscode;
+                vscode["appId"] = JsonValue("windows:vscode");
+                vscode["name"] = JsonValue("Visual Studio Code");
+                vscode["platform"] = JsonValue("windows");
+                vscode["distro"] = JsonValue("");
+                vscode["iconKey"] = JsonValue("code");
+                vscode["isDefault"] = JsonValue(false);
+                vscode["isRecommended"] = JsonValue(true);
+                apps_arr.push_back(JsonValue(vscode));
+            }
         }
     }
 
-    // 2. Query Linux / WSLg apps from AppService
-    std::vector<std::string> distros = WslServiceV21::Instance().GetDistributions();
-    if (!distros.empty())
-    {
-        for (const auto& d : distros)
-        {
-            JsonObject gimp;
-            gimp["appId"] = JsonValue("wsl:" + d + ":gimp");
-            gimp["name"] = JsonValue("GIMP Image Editor (" + d + ")");
-            gimp["platform"] = JsonValue("linux");
-            gimp["distro"] = JsonValue(d);
-            gimp["iconKey"] = JsonValue("brush");
-            gimp["isDefault"] = JsonValue(false);
-            gimp["isRecommended"] = JsonValue(ext == L".png" || ext == L".jpg" || ext == L".jpeg" || ext == L".webp");
-            apps_arr.push_back(JsonValue(gimp));
+    JsonObject chooser;
+    chooser["appId"] = JsonValue("windows:choose");
+    chooser["name"] = JsonValue("Escolher outro aplicativo...");
+    chooser["platform"] = JsonValue("windows");
+    chooser["distro"] = JsonValue("");
+    chooser["iconKey"] = JsonValue("window");
+    chooser["isDefault"] = JsonValue(false);
+    chooser["isRecommended"] = JsonValue(false);
+    apps_arr.push_back(JsonValue(chooser));
 
-            JsonObject kate;
-            kate["appId"] = JsonValue("wsl:" + d + ":text-editor");
-            kate["name"] = JsonValue("Editor de Texto Linux (" + d + ")");
-            kate["platform"] = JsonValue("linux");
-            kate["distro"] = JsonValue(d);
-            kate["iconKey"] = JsonValue("file_text");
-            kate["isDefault"] = JsonValue(false);
-            kate["isRecommended"] = JsonValue(ext == L".txt" || ext == L".md" || ext == L".sh");
-            apps_arr.push_back(JsonValue(kate));
+    // 2. Query real Linux / WSLg executables. Absence is represented by
+    // absence from the result; CloudOS never advertises guessed packages.
+    std::vector<std::string> distros = WslServiceV21::Instance().GetDistributions();
+    static const std::array<std::pair<const char*, const char*>, 7> linux_candidates = {{
+        {"gedit", "Editor de Texto (gedit)"},
+        {"kate", "Editor de Texto (Kate)"},
+        {"xed", "Editor de Texto (Xed)"},
+        {"mousepad", "Editor de Texto (Mousepad)"},
+        {"vim", "Vim"},
+        {"code", "Visual Studio Code"},
+        {"gimp", "GIMP Image Editor"},
+    }};
+    for (const auto& d : distros)
+    {
+        for (const auto& [command, display_name] : linux_candidates)
+        {
+            if (!IsWslCommandAvailable(d, command)) continue;
+            const bool image_editor = std::string(command) == "gimp";
+            JsonObject app;
+            app["appId"] = JsonValue("wsl:" + d + ":" + command);
+            app["name"] = JsonValue(std::string(display_name) + " (" + d + ")");
+            app["platform"] = JsonValue("linux");
+            app["distro"] = JsonValue(d);
+            app["iconKey"] = JsonValue(image_editor ? "brush" : "file_text");
+            app["isDefault"] = JsonValue(false);
+            app["isRecommended"] = JsonValue(image_editor
+                ? (ext == L".png" || ext == L".jpg" || ext == L".jpeg" || ext == L".webp")
+                : (ext == L".txt" || ext == L".md" || ext == L".sh" || ext == L".json"));
+            apps_arr.push_back(JsonValue(app));
         }
     }
 
@@ -1530,6 +1968,14 @@ JsonObject FileServiceV22::LaunchOpenWith(
     const std::string& distro)
 {
     std::wstring resolved = CanonicalizePath(ResolveVirtualTarget(path_or_id));
+    const DWORD attributes = GetFileAttributesW(resolved.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+    {
+        JsonObject err;
+        err["ok"] = JsonValue(false);
+        err["error"] = JsonValue(attributes == INVALID_FILE_ATTRIBUTES ? "not_found" : "not_a_file");
+        return err;
+    }
 
     if (platform == "linux" || app_id.rfind("wsl:", 0) == 0)
     {
@@ -1542,10 +1988,33 @@ JsonObject FileServiceV22::LaunchOpenWith(
             {
                 target_distro = app_id.substr(first_colon + 1, second_colon - first_colon - 1);
             }
-            else
-            {
-                target_distro = "Ubuntu";
-            }
+        }
+
+        const size_t final_colon = app_id.rfind(':');
+        if (target_distro.empty() || final_colon == std::string::npos || final_colon + 1 >= app_id.size())
+        {
+            JsonObject err;
+            err["ok"] = JsonValue(false);
+            err["error"] = JsonValue("invalid_app_id");
+            return err;
+        }
+        const size_t first_colon = app_id.find(':');
+        const std::string app_distro = app_id.substr(first_colon + 1, final_colon - first_colon - 1);
+        if (app_distro != target_distro)
+        {
+            JsonObject err;
+            err["ok"] = JsonValue(false);
+            err["error"] = JsonValue("distro_mismatch");
+            return err;
+        }
+        const std::string command = app_id.substr(final_colon + 1);
+        if (!IsAllowedWslOpenWithCommand(command) || !IsWslCommandAvailable(target_distro, command))
+        {
+            JsonObject err;
+            err["ok"] = JsonValue(false);
+            err["error"] = JsonValue("app_not_found");
+            err["message"] = JsonValue("The selected Linux application is not installed in distro " + target_distro);
+            return err;
         }
 
         std::wstring linux_path;
@@ -1558,8 +2027,9 @@ JsonObject FileServiceV22::LaunchOpenWith(
             return err;
         }
 
-        std::wstring wsl_exe = L"wsl.exe";
-        std::wstring params = L"-d " + Utf8ToUtf16(target_distro) + L" -- xdg-open " + Utf8ToUtf16(QuoteWindowsArgument(linux_path));
+        const std::wstring wsl_exe = L"wsl.exe";
+        std::wstring params = L"-d " + QuoteWindowsArgument(Utf8ToUtf16(target_distro)) +
+            L" -- " + QuoteWindowsArgument(Utf8ToUtf16(command)) + L" " + QuoteWindowsArgument(linux_path);
 
         HINSTANCE hInst = ShellExecuteW(nullptr, L"open", wsl_exe.c_str(), params.c_str(), nullptr, SW_HIDE);
         bool ok = reinterpret_cast<intptr_t>(hInst) > 32;
@@ -1575,12 +2045,56 @@ JsonObject FileServiceV22::LaunchOpenWith(
     // Windows launch
     if (app_id == "windows:notepad")
     {
-        std::wstring quote_w = Utf8ToUtf16(QuoteWindowsArgument(resolved));
-        HINSTANCE hInst = ShellExecuteW(nullptr, L"open", L"notepad.exe", quote_w.c_str(), nullptr, SW_SHOWNORMAL);
+        std::wstring executable;
+        if (!FindExecutable(L"notepad.exe", &executable))
+        {
+            JsonObject err;
+            err["ok"] = JsonValue(false);
+            err["error"] = JsonValue("app_not_found");
+            return err;
+        }
+        const std::wstring quoted_path = QuoteWindowsArgument(resolved);
+        HINSTANCE hInst = ShellExecuteW(nullptr, L"open", executable.c_str(), quoted_path.c_str(), nullptr, SW_SHOWNORMAL);
         JsonObject res;
         res["ok"] = JsonValue(reinterpret_cast<intptr_t>(hInst) > 32);
         res["platform"] = JsonValue("windows");
         return res;
+    }
+
+    if (app_id == "windows:vscode")
+    {
+        std::wstring executable;
+        if (!FindExecutable(L"code.exe", &executable))
+        {
+            JsonObject err;
+            err["ok"] = JsonValue(false);
+            err["error"] = JsonValue("app_not_found");
+            return err;
+        }
+        const std::wstring quoted_path = QuoteWindowsArgument(resolved);
+        HINSTANCE hInst = ShellExecuteW(nullptr, L"open", executable.c_str(), quoted_path.c_str(), nullptr, SW_SHOWNORMAL);
+        JsonObject res;
+        res["ok"] = JsonValue(reinterpret_cast<intptr_t>(hInst) > 32);
+        res["platform"] = JsonValue("windows");
+        return res;
+    }
+
+    if (app_id == "windows:choose")
+    {
+        const std::wstring parameters = L"shell32.dll,OpenAs_RunDLL " + QuoteWindowsArgument(resolved);
+        HINSTANCE hInst = ShellExecuteW(nullptr, L"open", L"rundll32.exe", parameters.c_str(), nullptr, SW_SHOWNORMAL);
+        JsonObject res;
+        res["ok"] = JsonValue(reinterpret_cast<intptr_t>(hInst) > 32);
+        res["platform"] = JsonValue("windows");
+        return res;
+    }
+
+    if (app_id != "windows:default")
+    {
+        JsonObject err;
+        err["ok"] = JsonValue(false);
+        err["error"] = JsonValue("invalid_app_id");
+        return err;
     }
 
     HINSTANCE hInst = ShellExecuteW(nullptr, L"open", resolved.c_str(), nullptr, nullptr, SW_SHOWNORMAL);

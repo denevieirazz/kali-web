@@ -2,24 +2,46 @@
 #include "../CloudOS.SystemBroker/src/security_v21.h"
 
 #include <iostream>
+#include <string_view>
 
 namespace CloudOS
 {
 
+std::string WideToUtf8(std::wstring_view value)
+{
+    if (value.empty()) return {};
+    const int size = WideCharToMultiByte(
+        CP_UTF8, WC_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
+    if (size <= 0) return {};
+    std::string result(static_cast<size_t>(size), '\0');
+    WideCharToMultiByte(
+        CP_UTF8, WC_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), result.data(), size, nullptr, nullptr);
+    return result;
+}
+
 bool SendFrame(HANDLE pipe, const std::string& payload)
 {
+    if (payload.size() > kMaxPayloadBytes) return false;
     uint32_t len = static_cast<uint32_t>(payload.size());
     DWORD written = 0;
-    if (!WriteFile(pipe, &len, sizeof(len), &written, nullptr) || written != sizeof(len))
+    DWORD header_written = 0;
+    const auto* header = reinterpret_cast<const unsigned char*>(&len);
+    while (header_written < sizeof(len))
     {
-        return false;
-    }
-    if (len > 0)
-    {
-        if (!WriteFile(pipe, payload.data(), len, &written, nullptr) || written != len)
+        if (!WriteFile(pipe, header + header_written, sizeof(len) - header_written, &written, nullptr) || written == 0)
         {
             return false;
         }
+        header_written += written;
+    }
+    DWORD total_written = 0;
+    while (total_written < len)
+    {
+        if (!WriteFile(pipe, payload.data() + total_written, len - total_written, &written, nullptr) || written == 0)
+        {
+            return false;
+        }
+        total_written += written;
     }
     return true;
 }
@@ -28,9 +50,15 @@ bool ReadFrame(HANDLE pipe, std::string& payload)
 {
     uint32_t len = 0;
     DWORD read_bytes = 0;
-    if (!ReadFile(pipe, &len, sizeof(len), &read_bytes, nullptr) || read_bytes != sizeof(len))
+    DWORD header_bytes = 0;
+    auto* header = reinterpret_cast<unsigned char*>(&len);
+    while (header_bytes < sizeof(len))
     {
-        return false;
+        if (!ReadFile(pipe, header + header_bytes, sizeof(len) - header_bytes, &read_bytes, nullptr) || read_bytes == 0)
+        {
+            return false;
+        }
+        header_bytes += read_bytes;
     }
     if (len > kMaxPayloadBytes) return false;
     payload.resize(len);
@@ -51,12 +79,17 @@ bool ReadFrame(HANDLE pipe, std::string& payload)
 
 } // namespace CloudOS
 
-int main(int argc, char* argv[])
+int wmain(int argc, wchar_t* argv[])
 {
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+    const auto argument = [argc, argv](int index, const char* fallback = "") {
+        return index < argc ? CloudOS::WideToUtf8(argv[index]) : std::string(fallback);
+    };
     std::string cmd = "ping";
     if (argc > 1)
     {
-        cmd = argv[1];
+        cmd = argument(1);
     }
 
     if (cmd == "--help" || cmd == "-h")
@@ -75,7 +108,14 @@ int main(int argc, char* argv[])
                   << "  list [path]          List directory items (files.list)\n"
                   << "  metadata <path>      Query item metadata (files.metadata)\n"
                   << "  search <path> <q>    Search items (files.search)\n"
-                  << "  open-with <path>     Query Open With apps (files.openWith.list)\n";
+                  << "  open-with <path>     Query Open With apps (files.openWith.list)\n"
+                  << "  create-folder <parent> <name>  Create a sandbox folder\n"
+                  << "  rename <path> <name>            Rename a sandbox item\n"
+                  << "  delete <path>                   Permanently delete a sandbox item\n"
+                  << "  copy <source> <destination> [policy]  Start a copy job\n"
+                  << "  move <source> <destination> [policy]  Start a move job\n"
+                  << "  job-status <id>                 Query job state\n"
+                  << "  job-cancel <id>                 Cancel a job\n";
         return 0;
     }
 
@@ -127,29 +167,64 @@ int main(int argc, char* argv[])
     else if (cmd == "capabilities") method = "system.capabilities";
     else if (cmd == "apps") method = "apps.list";
     else if (cmd == "snapshot") method = "system.snapshot";
+    else if (cmd == "wsl") method = "wsl.list";
     else if (cmd == "diagnostics") method = "diagnostics.snapshot";
     else if (cmd == "drives") method = "files.drives";
     else if (cmd == "known-folders") method = "files.knownFolders";
     else if (cmd == "list")
     {
         method = "files.list";
-        payload["path"] = CloudOS::JsonValue(argc > 2 ? argv[2] : "home");
+        payload["path"] = CloudOS::JsonValue(argument(2, "home"));
     }
     else if (cmd == "metadata")
     {
         method = "files.metadata";
-        payload["path"] = CloudOS::JsonValue(argc > 2 ? argv[2] : "home");
+        payload["path"] = CloudOS::JsonValue(argument(2, "home"));
     }
     else if (cmd == "search")
     {
         method = "files.search";
-        payload["rootPath"] = CloudOS::JsonValue(argc > 2 ? argv[2] : "home");
-        payload["query"] = CloudOS::JsonValue(argc > 3 ? argv[3] : "");
+        payload["rootPath"] = CloudOS::JsonValue(argument(2, "home"));
+        payload["query"] = CloudOS::JsonValue(argument(3));
     }
     else if (cmd == "open-with")
     {
         method = "files.openWith.list";
-        payload["path"] = CloudOS::JsonValue(argc > 2 ? argv[2] : "");
+        payload["path"] = CloudOS::JsonValue(argument(2));
+    }
+    else if (cmd == "create-folder")
+    {
+        method = "files.createFolder";
+        payload["parentPath"] = CloudOS::JsonValue(argument(2));
+        payload["name"] = CloudOS::JsonValue(argument(3));
+    }
+    else if (cmd == "rename")
+    {
+        method = "files.rename";
+        payload["path"] = CloudOS::JsonValue(argument(2));
+        payload["newName"] = CloudOS::JsonValue(argument(3));
+    }
+    else if (cmd == "delete")
+    {
+        method = "files.delete";
+        CloudOS::JsonArray paths;
+        if (argc > 2) paths.push_back(CloudOS::JsonValue(argument(2)));
+        payload["paths"] = CloudOS::JsonValue(std::move(paths));
+        payload["permanent"] = CloudOS::JsonValue(true);
+    }
+    else if (cmd == "copy" || cmd == "move")
+    {
+        method = cmd == "copy" ? "files.copy" : "files.move";
+        CloudOS::JsonArray sources;
+        if (argc > 2) sources.push_back(CloudOS::JsonValue(argument(2)));
+        payload["sources"] = CloudOS::JsonValue(std::move(sources));
+        payload["destination"] = CloudOS::JsonValue(argument(3));
+        payload["overwritePolicy"] = CloudOS::JsonValue(argument(4, "ask"));
+    }
+    else if (cmd == "job-status" || cmd == "job-cancel")
+    {
+        method = cmd == "job-status" ? "jobs.status" : "jobs.cancel";
+        payload["jobId"] = CloudOS::JsonValue(argument(2));
     }
     else method = cmd;
 

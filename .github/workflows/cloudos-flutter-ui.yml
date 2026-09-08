@@ -10,12 +10,17 @@ on:
       - 'scripts/native/**'
       - 'scripts/flutter/**'
       - 'Abrir CloudOS Flutter Preview.cmd'
+      - 'Abrir CloudOS V22 Flutter com System Broker.cmd'
       - '.github/workflows/cloudos-flutter-ui.yml'
+
+concurrency:
+  group: cloudos-flutter-ui-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   flutter-windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,44 +39,73 @@ jobs:
           flutter config --enable-windows-desktop
           flutter devices
 
-      - name: Build System Broker V21
+      - name: Build System Broker V22.1
         shell: pwsh
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $vsroot = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vsroot) { throw 'Visual Studio C++ toolchain not found.' }
           $msbuild = Join-Path $vsroot "MSBuild\Current\Bin\MSBuild.exe"
           & $msbuild "desktop/CloudOS.SystemBroker/CloudOS.SystemBroker.vcxproj" /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
+          if ($LASTEXITCODE -ne 0) { throw 'SystemBroker Release x64 build failed.' }
           & $msbuild "desktop/CloudOS.BrokerProbe/CloudOS.BrokerProbe.vcxproj" /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
+          if ($LASTEXITCODE -ne 0) { throw 'BrokerProbe Release x64 build failed.' }
 
-      - name: Test System Broker Self-Test & Contract
+      - name: Test V21/V22.1/V23 broker contracts and smoke
         shell: pwsh
         run: |
           pwsh -NoProfile -File scripts/native/test-system-broker-v21-contract.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'V21 broker contract failed.' }
           pwsh -NoProfile -File scripts/native/run-system-broker-smoke-v21.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'V21 broker smoke failed.' }
           pwsh -NoProfile -File scripts/native/test-system-broker-v21-soak.ps1 -DurationSeconds 5
+          if ($LASTEXITCODE -ne 0) { throw 'Short broker regression soak failed.' }
           pwsh -NoProfile -File scripts/native/test-unified-files-v22-contract.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'V22.1 Files contract failed.' }
           pwsh -NoProfile -File scripts/native/run-unified-files-v22-smoke.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'V22.1 Files bug-bash smoke failed.' }
+          pwsh -NoProfile -File scripts/native/test-text-files-v23-contract.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Typed text-file architecture contract failed.' }
+          pwsh -NoProfile -File scripts/native/run-text-files-v23-smoke.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Typed text-file named-pipe smoke failed.' }
+          pwsh -NoProfile -File scripts/native/test-eventbus-v23-contract.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'V23 EventBus architecture contract failed.' }
+          pwsh -NoProfile -File scripts/native/run-eventbus-v23-smoke.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'V23 EventBus named-pipe smoke failed.' }
+          pwsh -NoProfile -File scripts/flutter/test-cloudos-flutter-soak-v23-contract.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'V23 five-hour local soak harness contract failed.' }
+          $filesEvidence = 'TestResults/v22.1-bug-bash/unified-files-v22.1-smoke.json'
+          if (-not (Test-Path $filesEvidence)) { throw "V22.1 evidence missing: $filesEvidence" }
+          Copy-Item $filesEvidence 'unified-files-v22.1-smoke.json' -Force
+          $textEvidence = 'TestResults/v23-text-smoke/text-files-v23-smoke.json'
+          if (-not (Test-Path $textEvidence)) { throw "Typed text-file evidence missing: $textEvidence" }
+          Copy-Item $textEvidence 'text-files-v23-smoke.json' -Force
+          $eventEvidence = 'TestResults/v23-eventbus-smoke/eventbus-v23-smoke.json'
+          if (-not (Test-Path $eventEvidence)) { throw "EventBus evidence missing: $eventEvidence" }
+          Copy-Item $eventEvidence 'eventbus-v23-smoke.json' -Force
 
-      - name: Generate local Windows host
+      - name: Prepare tracked Windows host
         shell: pwsh
         working-directory: desktop/CloudOS.FlutterShell
         run: |
-          flutter create --platforms=windows --project-name cloudos_flutter_shell .
-          if (Test-Path 'native_bridge') {
-            Copy-Item -Path "native_bridge/*" -Destination "windows/runner/" -Force
-            $cmakePath = "windows/runner/CMakeLists.txt"
-            if (Test-Path $cmakePath) {
-              $cmake = Get-Content -Path $cmakePath -Raw
-              if ($cmake -notmatch "cloudos_flutter_bridge_v20.cpp") {
-                $cmake = $cmake -replace '(\s*"flutter_window\.cpp")', "`$1`n  `"cloudos_flutter_bridge_v20.cpp`"`n  `"cloudos_broker_client_v21.cpp`""
-                $cmake = $cmake -replace 'target_link_libraries\(\$\{BINARY_NAME\} PRIVATE flutter flutter_wrapper_app\)', 'target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app dwmapi.lib shlwapi.lib shell32.lib ole32.lib uuid.lib advapi32.lib)'
-                Set-Content -Path $cmakePath -Value $cmake -Encoding UTF8
-              }
-            }
+          if (-not (Test-Path 'windows/CMakeLists.txt')) {
+            throw 'Tracked Windows host is missing. Do not regenerate it in CI because CloudOS V22 owns native runner sources.'
           }
-          if (Test-Path 'test/widget_test.dart') {
-            Remove-Item 'test/widget_test.dart' -Force
+          $requiredRunnerFiles = @(
+            'windows/runner/CMakeLists.txt',
+            'windows/runner/cloudos_flutter_bridge_v20.cpp',
+            'windows/runner/cloudos_broker_client_v21.cpp',
+            'windows/runner/cloudos_broker_event_client_v23.cpp',
+            'windows/runner/cloudos_broker_event_client_v23.h',
+            'windows/runner/cloudos_conpty_manager.cpp',
+            'windows/runner/cloudos_system_metrics_native.cpp',
+            'windows/runner/cloudos_conpty_probe.cpp',
+            'windows/runner/flutter_window.cpp'
+          )
+          foreach ($required in $requiredRunnerFiles) {
+            if (-not (Test-Path $required)) { throw "Tracked native runner source missing: $required" }
           }
+          if (Test-Path 'test/widget_test.dart') { Remove-Item 'test/widget_test.dart' -Force }
 
       - name: Resolve dependencies
         shell: pwsh
@@ -93,6 +127,23 @@ jobs:
         working-directory: desktop/CloudOS.FlutterShell
         run: flutter build windows --release
 
+      - name: Native ConPTY integration smoke
+        shell: pwsh
+        working-directory: desktop/CloudOS.FlutterShell
+        run: |
+          cmake --build build/windows/x64 --config Release --target cloudos_conpty_probe
+          if ($LASTEXITCODE -ne 0) { throw 'cloudos_conpty_probe build failed.' }
+          $probe = Resolve-Path 'build/windows/x64/runner/Release/cloudos_conpty_probe.exe'
+          $output = & $probe
+          $exitCode = $LASTEXITCODE
+          $output | Set-Content -Encoding UTF8 '../../conpty-v22-smoke.json'
+          $output
+          if ($exitCode -ne 0) { throw "ConPTY integration probe failed with exit code $exitCode." }
+          $result = $output | ConvertFrom-Json
+          if ($result.powershell.ok -ne $true) { throw 'ConPTY PowerShell command test failed.' }
+          if ($result.cmd.ok -ne $true) { throw 'ConPTY CMD command test failed.' }
+          if ($result.lifecycle20.ok -ne $true) { throw 'ConPTY 20-session lifecycle test failed.' }
+
       - name: Stage System Broker binaries in Release
         shell: pwsh
         run: |
@@ -101,54 +152,96 @@ jobs:
           Copy-Item -Path (Join-Path $brokerBin 'CloudOS.SystemBroker.exe') -Destination $release -Force
           Copy-Item -Path (Join-Path $brokerBin 'CloudOS.BrokerProbe.exe') -Destination $release -Force
 
-      - name: Write V21 evidence
+      - name: Real EXE Session V3 restart and WM_CLOSE smoke
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File scripts/flutter/run-cloudos-session-restart-v23-smoke.ps1 `
+            -ReleaseDirectory 'desktop/CloudOS.FlutterShell/build/windows/x64/runner/Release' `
+            -EvidencePath 'session-restart-v23-smoke.json' `
+            -ExitTimeoutSeconds 15
+          if ($LASTEXITCODE -ne 0) { throw 'Real CloudOS EXE session restart/WM_CLOSE smoke failed.' }
+          if (-not (Test-Path 'session-restart-v23-smoke.json')) { throw 'Session restart evidence missing.' }
+
+      - name: Write V23 evidence
         shell: pwsh
         run: |
           $flutter = (flutter --version | Select-Object -First 1).Trim()
           $release = Resolve-Path 'desktop/CloudOS.FlutterShell/build/windows/x64/runner/Release'
           $exe = Join-Path $release 'cloudos_flutter_shell.exe'
           $brokerExe = Join-Path $release 'CloudOS.SystemBroker.exe'
-          if (-not (Test-Path $exe)) { throw "Flutter executable missing: $exe" }
-          if (-not (Test-Path $brokerExe)) { throw "SystemBroker executable missing: $brokerExe" }
-          $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          $brokerSha = (Get-FileHash $brokerExe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $probeExe = Join-Path $release 'CloudOS.BrokerProbe.exe'
+          foreach ($required in @($exe,$brokerExe,$probeExe)) { if (-not (Test-Path $required)) { throw "Release binary missing: $required" } }
+          if (-not (Test-Path 'conpty-v22-smoke.json')) { throw 'ConPTY evidence missing: conpty-v22-smoke.json' }
+          if (-not (Test-Path 'text-files-v23-smoke.json')) { throw 'Typed text-file evidence missing: text-files-v23-smoke.json' }
+          if (-not (Test-Path 'eventbus-v23-smoke.json')) { throw 'EventBus evidence missing: eventbus-v23-smoke.json' }
+          if (-not (Test-Path 'session-restart-v23-smoke.json')) { throw 'Session restart evidence missing: session-restart-v23-smoke.json' }
+          $sessionRestart = Get-Content 'session-restart-v23-smoke.json' -Raw | ConvertFrom-Json
+          if ($sessionRestart.verdict -ne 'pass' -or $sessionRestart.launches -ne 2) { throw 'Session restart evidence verdict is not pass/two-launch.' }
           $evidence = [ordered]@{
-            schema = 21
+            schema = 235
             verdict = 'pass'
             flutter = $flutter
             git_sha = '${{ github.sha }}'
             presentation_layer = 'Flutter 3.44.7'
+            embedded_browser = 'webview_flutter_windows/WebView2'
+            terminal_backend = 'Windows ConPTY'
+            conpty_native_probe = $true
             native_bridge_channel = 'cloudos/native/v19'
+            native_event_channel = 'cloudos/native/events/v23'
             native_broker_ipc = 'NamedPipe v21'
             broker_protocol_version = 21
             native_bridge_registered = $true
-            get_apps_contract = $true
-            system_snapshot_contract = $true
-            launch_app_contract = $true
+            restricted_flutter_rpc_surface = $true
+            dedicated_event_transport = $true
+            eventbus_named_pipe_smoke = $true
+            eventbus_wildcard_subscription = $true
+            eventbus_bounded_native_queue = $true
+            unified_files_v22_1 = $true
+            typed_text_files_v23 = $true
+            typed_text_files_atomic_commit = $true
+            typed_text_files_chunk_cap_bytes = 65536
+            typed_text_files_editor_cap_bytes = 16777216
+            truthful_system_tray = $true
+            system_snapshot_cache_ttl_ms = 2000
+            session_v3_real_exe_restart = $true
+            session_v3_real_exe_launches = 2
+            session_v3_wm_close = $true
+            session_v3_isolated_localappdata = $true
+            session_v3_restart_evidence_sha256 = (Get-FileHash 'session-restart-v23-smoke.json' -Algorithm SHA256).Hash.ToLowerInvariant()
+            five_hour_local_soak_harness_contract = $true
+            five_hour_local_soak_executed_in_ci = $false
             arbitrary_command_api = $false
+            userchoice_modified = $false
             winlogon_modified = $false
             shell_activation_executed = $false
             executable = 'cloudos_flutter_shell.exe'
-            executable_sha256 = $sha
+            executable_sha256 = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
             broker_executable = 'CloudOS.SystemBroker.exe'
-            broker_executable_sha256 = $brokerSha
+            broker_executable_sha256 = (Get-FileHash $brokerExe -Algorithm SHA256).Hash.ToLowerInvariant()
+            probe_executable = 'CloudOS.BrokerProbe.exe'
+            probe_executable_sha256 = (Get-FileHash $probeExe -Algorithm SHA256).Hash.ToLowerInvariant()
           }
-          $evidence | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 'flutter-v21-smoke.json'
-          Get-Content 'flutter-v21-smoke.json'
+          $evidence | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 'flutter-v23-smoke.json'
+          Get-Content 'flutter-v23-smoke.json'
 
       - name: Package Flutter preview
         shell: pwsh
         run: |
           $release = Resolve-Path 'desktop/CloudOS.FlutterShell/build/windows/x64/runner/Release'
-          Compress-Archive -Path "$release\*" -DestinationPath 'CloudOS-Flutter-V21-Windows-x64.zip' -Force
+          Compress-Archive -Path "$release\*" -DestinationPath 'CloudOS-Flutter-V23-Windows-x64.zip' -Force
 
       - name: Upload Flutter preview
         uses: actions/upload-artifact@v4
         with:
-          name: CloudOS-Flutter-V21-${{ github.sha }}
+          name: CloudOS-Flutter-V23-${{ github.sha }}
           path: |
-            CloudOS-Flutter-V21-Windows-x64.zip
-            flutter-v21-smoke.json
+            CloudOS-Flutter-V23-Windows-x64.zip
+            flutter-v23-smoke.json
             system-broker-v21-smoke.json
+            unified-files-v22.1-smoke.json
+            text-files-v23-smoke.json
+            eventbus-v23-smoke.json
+            session-restart-v23-smoke.json
+            conpty-v22-smoke.json
           if-no-files-found: error
           retention-days: 14

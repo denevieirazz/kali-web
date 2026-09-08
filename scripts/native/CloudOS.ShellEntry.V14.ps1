@@ -36,9 +36,19 @@ try {
     }
 
     if ($ProbeReadyOnce) {
+        # Keep the hosted readiness path behaviorally equivalent to the V11
+        # direct runtime smoke. Hiding the nested process can perturb desktop
+        # readiness/graceful-exit behavior on hosted Windows runners even after
+        # the shell has reached Ready. This switch is test-only; production
+        # activation never passes -ProbeReadyOnce.
         $process = Start-Process -FilePath $supervisor `
-            -ArgumentList @('--probe-ready-once', '--probe-no-explorer') `
-            -WorkingDirectory $activeRoot -PassThru -Wait -WindowStyle Hidden
+            -ArgumentList @(
+                '--probe-ready-once',
+                '--probe-no-explorer',
+                '--ready-timeout-ms', '30000',
+                '--heartbeat-timeout-ms', '5000'
+            ) `
+            -WorkingDirectory $activeRoot -PassThru -Wait
         exit $process.ExitCode
     }
 

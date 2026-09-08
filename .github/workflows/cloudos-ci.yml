@@ -17,6 +17,10 @@ on:
       - main
   pull_request:
 
+concurrency:
+  group: cloudos-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     # Pixel-strict Chromium snapshots are coupled to the Windows font/rasterization
