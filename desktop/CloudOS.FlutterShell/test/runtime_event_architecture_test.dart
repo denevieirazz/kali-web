@@ -125,7 +125,9 @@ void main() {
     ], 'Taskbar');
     expectMarkers(taskbar, <String>[
       'RuntimeEventService',
-      'widget.notificationCount ?? _runtime.unreadCount',
+      'final explicit = widget.notificationCount;',
+      'if (explicit != null) return explicit < 0 ? 0 : explicit;',
+      'return _runtimeEvents.unreadCount;',
       "'99+'",
     ], 'Taskbar');
 
