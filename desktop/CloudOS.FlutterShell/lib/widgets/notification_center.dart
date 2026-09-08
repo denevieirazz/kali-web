@@ -294,31 +294,37 @@ class _RuntimeStatusBar extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 7),
-          Text(
-            'EventBus: ${runtime.connectionStateLabel}',
-            style: const TextStyle(
-              color: CloudOSColors.secondary,
-              fontSize: 10.5,
-              fontWeight: FontWeight.w600,
+          Expanded(
+            flex: 3,
+            child: Text(
+              'EventBus: ${runtime.connectionStateLabel}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: CloudOSColors.secondary,
+                fontSize: 10.5,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
-          const Spacer(),
-          if (runtime.nativeDroppedEventCount > 0)
-            Text(
-              '${runtime.nativeDroppedEventCount} evento(s) descartado(s)',
-              style: const TextStyle(
-                color: Colors.orangeAccent,
-                fontSize: 9.5,
-              ),
-            )
-          else
-            Text(
-              '${runtime.journal.length} evento(s) na sessão',
-              style: const TextStyle(
-                color: CloudOSColors.caption,
+          const SizedBox(width: 8),
+          Flexible(
+            flex: 2,
+            child: Text(
+              runtime.nativeDroppedEventCount > 0
+                  ? '${runtime.nativeDroppedEventCount} evento(s) descartado(s)'
+                  : '${runtime.journal.length} evento(s) na sessão',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.end,
+              style: TextStyle(
+                color: runtime.nativeDroppedEventCount > 0
+                    ? Colors.orangeAccent
+                    : CloudOSColors.caption,
                 fontSize: 9.5,
               ),
             ),
+          ),
         ],
       ),
     );
