@@ -254,9 +254,11 @@ void main() {
         expect(find.text('Navegador'), findsWidgets);
         expect(find.text('Configurações'), findsWidgets);
 
-        // Open Start Panel
+        // Open Start Panel. Its autofocus search field owns a live blinking
+        // caret, so pumpAndSettle would wait forever for a frame-free state.
         await tester.tap(find.byTooltip('Iniciar (Ctrl+Alt+A)'));
-        await tester.pumpAndSettle();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 200));
 
         expect(find.text('CloudOS Start'), findsOneWidget);
         expect(find.text('Aplicativos Fixados'), findsOneWidget);
