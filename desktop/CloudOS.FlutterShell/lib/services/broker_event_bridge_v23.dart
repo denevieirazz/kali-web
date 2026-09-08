@@ -67,9 +67,14 @@ class BrokerEventBridgeV23 {
     _started = true;
     _channel.setMethodCallHandler(_handleNativeCall);
 
-    late Future<bool> attempt;
-    attempt = _invokeStart().then((ok) {
-      if (!ok && identical(_startFuture, attempt)) {
+    // Keep the handler installed before native transport startup. The explicit
+    // assignment is part of the V23 architecture contract and prevents a
+    // native event from racing ahead of Dart's inbound-call handler.
+    _startFuture = _invokeStart();
+    final nativeAttempt = _startFuture!;
+    late Future<bool> trackedAttempt;
+    trackedAttempt = nativeAttempt.then((ok) {
+      if (!ok && identical(_startFuture, trackedAttempt)) {
         // MissingPlugin/PlatformException can be transient during host startup.
         // Do not poison the singleton forever; the next subscriber/start call
         // gets a fresh native attempt.
@@ -78,8 +83,8 @@ class BrokerEventBridgeV23 {
       }
       return ok;
     });
-    _startFuture = attempt;
-    return attempt;
+    _startFuture = trackedAttempt;
+    return trackedAttempt;
   }
 
   Future<bool> _invokeStart() async {
