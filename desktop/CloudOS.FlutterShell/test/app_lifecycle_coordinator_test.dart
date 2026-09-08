@@ -37,7 +37,7 @@ void main() {
 
         final coordinator = AppLifecycleCoordinator(
           sessionService: session,
-          exitQuiescence: Duration.zero,
+          fallbackExitQuiescence: Duration.zero,
         );
         final response = await coordinator.handleExitRequest();
 
@@ -65,7 +65,7 @@ void main() {
 
         final coordinator = AppLifecycleCoordinator(
           sessionService: session,
-          exitQuiescence: Duration.zero,
+          fallbackExitQuiescence: Duration.zero,
         );
         final response = await coordinator.handleExitRequest();
 
@@ -86,7 +86,7 @@ void main() {
         );
         final coordinator = AppLifecycleCoordinator(
           sessionService: session,
-          exitQuiescence: const Duration(milliseconds: 20),
+          fallbackExitQuiescence: const Duration(milliseconds: 20),
         );
 
         final first = coordinator.handleExitRequest();
