@@ -2,6 +2,14 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
+bool _containsDirectConstructor(String source, String typeName) {
+  final pattern = RegExp(
+    '(^|[^A-Za-z0-9_])${RegExp.escape(typeName)}\\s*\\(',
+    multiLine: true,
+  );
+  return pattern.hasMatch(source);
+}
+
 void main() {
   group('V23 user-filesystem architecture boundary', () {
     final brokerBackedSources = <String>[
@@ -19,8 +27,8 @@ void main() {
         final source = File(path).readAsStringSync();
         expect(source, isNot(contains("import 'dart:io'")));
         expect(source, isNot(contains('Platform.environment')));
-        expect(source, isNot(contains('Directory(')));
-        expect(source, isNot(contains('File(')));
+        expect(_containsDirectConstructor(source, 'Directory'), isFalse);
+        expect(_containsDirectConstructor(source, 'File'), isFalse);
         expect(source, isNot(contains('Process.start')));
         expect(source, isNot(contains('Process.run')));
       });
